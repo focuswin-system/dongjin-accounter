@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react'
+import logoSymbol from './assets/logo/logo_symbol_64.png'
 import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider } from './lib/ui'
 import { LoginScreen } from './screens/Login'
 import { HomeScreen } from './screens/Home'
@@ -287,7 +288,7 @@ function AppInner({ onLogout, user }) {
       {/* Sidebar */}
       <aside className={`sidebar${sidebarOpen ? " open" : ""}`}>
         <div className="brand">
-          <img src="/src/assets/logo/logo_symbol_64.png" alt="로고" style={{ width: 36, height: 36, objectFit: "contain", flexShrink: 0 }}/>
+          <img src={logoSymbol} alt="로고" style={{ width: 36, height: 36, objectFit: "contain", flexShrink: 0 }}/>
           <div className="name">동진테크 - 회계관리</div>
         </div>
 

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Icon } from '../lib/ui'
+import logoSymbol from '../assets/logo/logo_symbol_64.png'
 
 export const LoginScreen = ({ onLogin }) => {
   const [id, setId] = useState('');
@@ -64,7 +65,7 @@ export const LoginScreen = ({ onLogin }) => {
 
         {/* 로고 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 'auto' }}>
-          <img src="/src/assets/logo/logo_symbol_64.png" alt="로고"
+          <img src={logoSymbol} alt="로고"
             style={{ width: 36, height: 36, objectFit: 'contain', filter: 'brightness(0) invert(1)', opacity: 0.9 }}/>
           <span style={{ color: 'rgba(255,255,255,0.9)', fontWeight: 700, fontSize: 15, letterSpacing: '-0.02em' }}>
             동진테크
