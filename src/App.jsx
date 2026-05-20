@@ -163,7 +163,7 @@ function AppInner({ onLogout, user }) {
   const [notifRead, setNotifRead] = useState(false);
   const [faqOpen, setFaqOpen] = useState(false);
   const [idlePhase, setIdlePhase] = useState("hidden"); // "hidden" | "showing" | "dismissing"
-  const [nudgeMode, setNudgeMode] = useState(() => localStorage.getItem("nudgeMode") || "auto");
+  const [nudgeMode, setNudgeMode] = useState(() => localStorage.getItem("nudgeMode") || "always");
   const idleRef = useRef(null);
   const toast = useToast();
   const { confirm } = useConfirm();
@@ -404,7 +404,7 @@ function AppInner({ onLogout, user }) {
             </div>
           </Popover>
           <Popover align="right" width={300}
-            trigger={<button className="icon-btn" title="도움말"><Icon.Sparkle size={16}/></button>}>
+            trigger={<button className="icon-btn" title="도움말"><Icon.Help size={16}/></button>}>
             <div>
               <div className="row gap-8" style={{ padding: "12px 14px", borderBottom: "1px solid var(--line)" }}>
                 <div style={{ width: 22, height: 22, borderRadius: 6, background: "var(--brand-soft)", color: "var(--brand)", display: "grid", placeItems: "center", flexShrink: 0 }}>
@@ -469,7 +469,7 @@ function AppInner({ onLogout, user }) {
             <div className="text-xs text-muted" style={{ lineHeight:1.55 }}>자주 묻는 질문을 확인해 보세요.</div>
           </div>
 
-          {/* ? 버튼 */}
+          {/* 로봇 버튼 */}
           <button onClick={() => setFaqOpen(true)} title="자주 묻는 질문"
             style={{
               width:50, height:50, borderRadius:"50%",
@@ -478,9 +478,12 @@ function AppInner({ onLogout, user }) {
               boxShadow:"0 4px 18px rgba(37,99,235,0.35)", flexShrink:0,
               ...(idlePhase === "showing" ? { animation:"nudgePop .4s cubic-bezier(.34,1.56,.64,1) both" } : {}),
             }}>
-            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="9"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-              <circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none"/>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="11" width="18" height="10" rx="2"/>
+              <path d="M9 11V7a3 3 0 0 1 6 0v4"/>
+              <circle cx="9" cy="16" r="1" fill="currentColor" stroke="none"/>
+              <circle cx="15" cy="16" r="1" fill="currentColor" stroke="none"/>
+              <path d="M12 3v1M8 3h8"/>
             </svg>
           </button>
         </div>
