@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Icon, fmtNum, useToast, useConfirm, Popover, PopItem, Spacer } from '../lib/ui'
 import { api } from '../lib/api'
+
+const localDateStr = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 
 // 오늘 날짜 기준 D-day 계산 (due: "YYYY-MM-DD")
 const calcDDay = (due) => {
@@ -44,12 +48,13 @@ const todayLabel = () => {
   return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 ${WEEK_KO[d.getDay()]}요일`
 }
 
-const ALERT_ROUTE = { ar: "ledger_ar", ap: "ledger_ap", doc: "doc", evidence: "evidence" }
+const ALERT_ROUTE = { ar: "billing_issued", ap: "billing_received", doc: "doc", evidence: "evidence" }
 
 export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [doneIds, setDoneIds] = useState(new Set())
+  const [paymentModal, setPaymentModal] = useState(null) // { todo, date, kind: 'ar'|'ap' }
 
   const [todos, setTodos] = useState([])
   const [stats, setStats] = useState([])
@@ -78,42 +83,71 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
 
   const handleTodoAction = async (t) => {
     if (t.kind === "ar") {
-      const ok = await confirm({
-        tone: "pos", icon: <Icon.In size={22}/>,
-        title: t.title,
-        body: `${t.sub}을(를) 입금 완료로 처리합니다. 통장 입금이 확인된 경우에만 처리해주세요.`,
-        confirmLabel: "입금 처리",
-      })
-      if (ok) {
-        await api.completeTodo(t.id)
-        setDoneIds(s => new Set([...s, t.id]))
-        toast.push("입금이 처리되었어요")
-      }
+      setPaymentModal({ todo: t, date: localDateStr(), kind: 'ar' })
     } else if (t.kind === "ap") {
-      const ok = await confirm({
-        tone: "neg", icon: <Icon.Bank size={22}/>,
-        title: t.title,
-        body: `${t.sub}을(를) 기업은행 *123에서 이체합니다. 되돌릴 수 없어요.`,
-        confirmLabel: "이체 실행",
-      })
-      if (ok) {
-        await api.completeTodo(t.id)
-        setDoneIds(s => new Set([...s, t.id]))
-        toast.push("이체가 실행되었어요")
-      }
+      setPaymentModal({ todo: t, date: localDateStr(), kind: 'ap' })
     } else if (t.kind === "doc") {
       await api.completeTodo(t.id)
       setDoneIds(s => new Set([...s, t.id]))
       toast.push("결의서를 승인했어요")
     } else if (t.kind === "evidence") {
-      go("ledger_expense")
+      go("evidence")
     }
+  }
+
+  const handlePaymentConfirm = async () => {
+    const { todo, kind } = paymentModal
+    await api.completeTodo(todo.id)
+    setDoneIds(s => new Set([...s, todo.id]))
+    toast.push(kind === 'ar' ? "입금이 처리되었어요" : "이체가 실행되었어요")
+    setPaymentModal(null)
   }
 
   const enrichedTodos = todos.map(t => ({ ...t, ...TODO_KIND_META[t.kind] }))
   const pendingTodos = enrichedTodos.filter(t => !doneIds.has(t.id))
 
+  const paymentModalEl = paymentModal && createPortal(
+    <div onClick={() => setPaymentModal(null)}
+      style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(11,18,32,0.35)", display: "grid", placeItems: "center", backdropFilter: "blur(2px)" }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: "#fff", borderRadius: 16, width: "min(420px, calc(100vw - 32px))", padding: 28, boxShadow: "0 30px 60px -20px rgba(15,23,42,0.3)", animation: "fadeUp .18s ease" }}>
+        <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 14 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, flexShrink: 0, display: "grid", placeItems: "center",
+            background: paymentModal.kind === 'ar' ? "var(--pos-bg)" : "var(--neg-bg)",
+            color: paymentModal.kind === 'ar' ? "var(--pos)" : "var(--neg)" }}>
+            {paymentModal.kind === 'ar' ? <Icon.In size={22}/> : <Icon.Bank size={22}/>}
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1.35 }}>{paymentModal.todo.title}</div>
+        </div>
+        <div style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.65, marginBottom: 20 }}>
+          {paymentModal.kind === 'ar'
+            ? `${paymentModal.todo.sub}을(를) 입금 완료로 처리합니다.`
+            : `${paymentModal.todo.sub}을(를) 등록된 계좌에서 이체합니다.`}
+        </div>
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>
+            {paymentModal.kind === 'ar' ? '입금일' : '지급일'} <span style={{ color: "var(--neg-ink)" }}>*</span>
+          </label>
+          <input type="date" className="input" value={paymentModal.date}
+            max={localDateStr()}
+            onChange={e => setPaymentModal(m => ({ ...m, date: e.target.value }))}
+            style={{ width: "100%" }}/>
+          <div style={{ fontSize: 11.5, color: "var(--muted2)", marginTop: 5 }}>기본값: 오늘. 실제 입금·이체된 날짜를 선택하세요.</div>
+        </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button className="btn" onClick={() => setPaymentModal(null)}>취소</button>
+          <button className="btn" onClick={handlePaymentConfirm}
+            style={{ background: paymentModal.kind === 'ar' ? "var(--pos)" : "var(--neg-ink)", color: "#fff", borderColor: "transparent" }}>
+            {paymentModal.kind === 'ar' ? '입금 처리' : '이체 실행'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  )
+
   return (
+    <>
     <div className="fade-up">
       <div className="row page-header-row" style={{ alignItems: "flex-end", marginBottom: 22 }}>
         <div>
@@ -317,5 +351,7 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
         </div>
       )}
     </div>
+    {paymentModalEl}
+    </>
   )
 }

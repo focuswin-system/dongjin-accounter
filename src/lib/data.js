@@ -1,3 +1,63 @@
+// F1: 계좌별 잔액 관리
+export const ACCOUNTS_BALANCE = [
+  {
+    id: "acc-001",
+    name: "기업은행 *123",
+    type: "보통예금",
+    bankName: "기업은행",
+    initialBalance: 50000000,
+    adjustments: [
+      { id: "adj-001", date: "2026-05-01", amount: -500000, reason: "은행 수수료 수동 반영", by: "한경리" },
+      { id: "adj-002", date: "2026-04-15", amount: 200000,  reason: "오입력 수정 (3월 이체 차액)", by: "한경리" },
+    ],
+  },
+  {
+    id: "acc-002",
+    name: "신한은행 *456",
+    type: "보통예금",
+    bankName: "신한은행",
+    initialBalance: 30000000,
+    adjustments: [],
+  },
+  {
+    id: "acc-003",
+    name: "국민은행 *789",
+    type: "보통예금",
+    bankName: "국민은행",
+    initialBalance: 12800000,
+    adjustments: [],
+  },
+]
+
+// F2: 청구서 (발행=미수금, 수취=미지급금)
+export const INVOICES = [
+  // 발행 청구서 (미수금)
+  { id: "INV-2026-001", kind: "issued",   vendor: "한화에어로스페이스", contractId: "CT-2026-101", contract: "KF-21 동체 부품",       supplyAmount: 25818182, vatAmount: 2581818, totalAmount: 28400000, issuedAt: "2026-05-15", dueAt: "2026-05-20", status: "입금 예정", accountId: "acc-001", matches: [], memo: "KF-21 기성고 3차" },
+  { id: "INV-2026-002", kind: "issued",   vendor: "LIG넥스원",          contractId: "CT-2026-088", contract: "유도무기 정밀가공 부품", supplyAmount: 16909091, vatAmount: 1690909, totalAmount: 18600000, issuedAt: "2026-05-10", dueAt: "2026-05-18", status: "일부 입금", accountId: "acc-002", matches: [{ txnId: "IN-0510", amount: 2200000, matchedAt: "2026-05-10" }], memo: "5월 납품분" },
+  { id: "INV-2026-003", kind: "issued",   vendor: "현대로템",            contractId: "CT-2026-072", contract: "K2 변속기 케이스 가공",  supplyAmount:  8363636, vatAmount:  836364, totalAmount:  9200000, issuedAt: "2026-05-08", dueAt: "2026-05-27", status: "입금 완료", accountId: "acc-001", matches: [{ txnId: "IN-0509", amount: 9200000, matchedAt: "2026-05-09" }], memo: "검수 후 결제" },
+  { id: "INV-2026-004", kind: "issued",   vendor: "KAI",                 contractId: "CT-2026-065", contract: "헬기 외장 패널 가공",    supplyAmount:  4090909, vatAmount:  409091, totalAmount:  4500000, issuedAt: "2026-05-12", dueAt: "2026-05-30", status: "입금 예정", accountId: "acc-002", matches: [], memo: "잔금" },
+  { id: "INV-2026-005", kind: "issued",   vendor: "한화시스템",          contractId: "CT-2026-058", contract: "레이더 하우징 가공",     supplyAmount:  3454545, vatAmount:  345455, totalAmount:  3800000, issuedAt: "2026-05-01", dueAt: "2026-06-02", status: "입금 예정", accountId: "acc-001", matches: [], memo: "잔금" },
+  { id: "INV-2026-006", kind: "issued",   vendor: "(주)동방산업",         contractId: null,          contract: "전차 궤도 부품 시제",    supplyAmount: 10727273, vatAmount: 1072727, totalAmount: 11800000, issuedAt: "2026-02-10", dueAt: "2026-02-18", status: "장기 미수", accountId: "acc-001", matches: [], memo: "재청구 필요" },
+  { id: "INV-2026-007", kind: "issued",   vendor: "(주)대선기공",         contractId: "CT-2025-194", contract: "함정 추진계 정밀가공",   supplyAmount: 16545455, vatAmount: 1654545, totalAmount: 18200000, issuedAt: "2026-04-01", dueAt: "2026-04-25", status: "기한 지남", accountId: "acc-002", matches: [], memo: "" },
+  { id: "INV-2026-008", kind: "issued",   vendor: "(주)서울항공",         contractId: "CT-2025-176", contract: "기체 패스너 가공",       supplyAmount:  7818182, vatAmount:  781818, totalAmount:  8600000, issuedAt: "2026-04-05", dueAt: "2026-04-30", status: "기한 지남", accountId: "acc-001", matches: [], memo: "" },
+  // 수취 청구서 (미지급금)
+  { id: "INV-2026-101", kind: "received", vendor: "(주)한울정밀",         contractId: "CT-2026-088", contract: "유도무기 정밀가공",      supplyAmount:  3818182, vatAmount:  381818, totalAmount:  4200000, issuedAt: "2026-05-10", dueAt: "2026-05-15", status: "지급 대기", accountId: "acc-001", matches: [], memo: "CNC 외주가공 5월분" },
+  { id: "INV-2026-102", kind: "received", vendor: "한국기계연구원",        contractId: "CT-2026-072", contract: "K2 변속기 케이스",       supplyAmount:  1681818, vatAmount:  168182, totalAmount:  1850000, issuedAt: "2026-05-09", dueAt: "2026-05-18", status: "지급 예정", accountId: "acc-001", matches: [], memo: "" },
+  { id: "INV-2026-103", kind: "received", vendor: "(주)대원특수강",        contractId: null,          contract: "공통(원자재)",           supplyAmount:  3454545, vatAmount:  345455, totalAmount:  3800000, issuedAt: "2026-05-08", dueAt: "2026-05-20", status: "지급 예정", accountId: "acc-001", matches: [], memo: "" },
+  { id: "INV-2026-104", kind: "received", vendor: "임대인 박OO",           contractId: null,          contract: "공통",                   supplyAmount:  2909091, vatAmount:  290909, totalAmount:  3200000, issuedAt: "2026-05-01", dueAt: "2026-05-12", status: "기한 지남", accountId: "acc-001", matches: [], memo: "5월 공장 임차" },
+  { id: "INV-2026-105", kind: "received", vendor: "다이아공구",            contractId: null,          contract: "공통(생산소모)",         supplyAmount:   563636, vatAmount:   56364, totalAmount:   620000, issuedAt: "2026-05-07", dueAt: "2026-05-22", status: "지급 대기", accountId: "acc-001", matches: [], memo: "" },
+  { id: "INV-2026-106", kind: "received", vendor: "(주)동아표면처리",       contractId: "CT-2026-065", contract: "헬기 외장 패널",         supplyAmount:  3545455, vatAmount:  354545, totalAmount:  3900000, issuedAt: "2026-05-02", dueAt: "2026-05-02", status: "기한 지남", accountId: "acc-001", matches: [], memo: "" },
+]
+
+// F4: 정기 지출
+export const RECURRING_EXPENSES = [
+  { id: "rec-001", vendor: "임대인 박OO",   contract: "공통",          category: "임차료",   amount: 3200000, period: "monthly",   dayOfMonth: 1,  startDate: "2026-01-01", endDate: null, accountId: "acc-001", active: true,  lastGenerated: "2026-05-01" },
+  { id: "rec-002", vendor: "KT",            contract: "공통",          category: "통신비",   amount: 185000,  period: "monthly",   dayOfMonth: 25, startDate: "2026-01-01", endDate: null, accountId: "acc-001", active: true,  lastGenerated: "2026-04-25" },
+  { id: "rec-003", vendor: "한전",          contract: "공통",          category: "전력비",   amount: 420000,  period: "monthly",   dayOfMonth: 15, startDate: "2026-01-01", endDate: null, accountId: "acc-001", active: true,  lastGenerated: "2026-05-15" },
+  { id: "rec-004", vendor: "국민건강보험공단외", contract: "공통(인건비)", category: "4대보험", amount: 3120000, period: "monthly",   dayOfMonth: 10, startDate: "2026-01-01", endDate: null, accountId: "acc-001", active: true,  lastGenerated: "2026-05-10" },
+  { id: "rec-005", vendor: "한국산업안전공단", contract: "공통",        category: "안전관리비", amount: 450000, period: "quarterly", dayOfMonth: 5,  startDate: "2026-01-01", endDate: null, accountId: "acc-001", active: false, lastGenerated: "2026-04-05" },
+]
+
 // Raw todo data — icons/colors are client-side concerns, not DB fields.
 // Real DB: SELECT * FROM todos WHERE status='pending' AND assignee=:userId AND date=TODAY()
 export const TODOS_RAW = [

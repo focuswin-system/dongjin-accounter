@@ -1,5 +1,5 @@
 import { useState, useEffect, Fragment } from 'react'
-import { Icon, fmtNum, useToast, Spacer, StatusBadge } from '../lib/ui'
+import { Icon, fmtNum, useToast, Spacer, StatusBadge, Drawer } from '../lib/ui'
 import { SAMPLE } from '../lib/data'
 import { HR_EMPLOYEES, calcPayslip, MONTHLY_EXTRA } from './HR'
 
@@ -20,14 +20,12 @@ export const ExpenseDrawer = ({ open, onClose }) => {
     method: "계좌이체", employee: "", date: new Date().toISOString().slice(0, 10), memo: "", evid: true, makeDoc: true,
   });
   const totalSteps = 7;
-  const stepLabels = ["거래처", "계약/공통비", "비목", "금액", "결제수단", "증빙", "결의서"];
+  const stepLabels = ["거래처", "계약/공통", "계정과목/비목", "금액", "결제수단", "증빙", "결의서"];
 
   useEffect(() => { if (open) setStep(1); }, [open]);
 
   return (
-    <>
-      <div className={`drawer-backdrop ${open ? "open" : ""}`} onClick={onClose}/>
-      <aside className={`drawer ${open ? "open" : ""}`} role="dialog" aria-label="지출 등록">
+    <Drawer open={open} onClose={onClose} label="지출 등록">
         <div className="drawer-head">
           <div>
             <div className="fw-700" style={{ fontSize: 16 }}>지출 등록</div>
@@ -81,7 +79,7 @@ export const ExpenseDrawer = ({ open, onClose }) => {
           {step === 3 && (
             <FormBlock title="무슨 비용인가요?" hint="자주 쓰는 비목부터 보여줘요.">
               <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-                {["외주비","재료비","소모품비","식대","교통비","출장비","서버비","통신비","임차료","세금과공과","수수료","기타"].map(v => (
+                {["외주가공비","재료비","소모품비","식대","교통비","출장비","통신비","임차료","보험료","세금과공과","수수료","기타"].map(v => (
                   <button key={v} className={`chip ${form.category === v ? "active" : ""}`} onClick={() => setForm({...form, category: v})}
                     style={{ justifyContent: "center" }}>{v}</button>
                 ))}
@@ -235,8 +233,7 @@ export const ExpenseDrawer = ({ open, onClose }) => {
               : <button className="btn primary" onClick={onClose}><Icon.Check size={14}/> 등록 완료</button>}
           </div>
         </div>
-      </aside>
-    </>
+    </Drawer>
   );
 };
 
@@ -517,9 +514,7 @@ export const EvidenceAttachDrawer = ({ item, onClose }) => {
   const toast = useToast();
   if (!item) return null;
   return (
-    <>
-      <div className="drawer-backdrop open" onClick={onClose}/>
-      <aside className="drawer open" role="dialog" aria-label="증빙 첨부" style={{ width: "min(480px, 100vw)" }}>
+    <Drawer open={true} onClose={onClose} width="min(480px, 100vw)" label="증빙 첨부">
         <div className="drawer-head">
           <div>
             <div className="fw-700" style={{ fontSize: 16 }}>증빙 첨부</div>
@@ -578,8 +573,7 @@ export const EvidenceAttachDrawer = ({ item, onClose }) => {
             <button className="btn primary" onClick={() => { onClose(); toast.push("증빙이 첨부되었어요"); }}><Icon.Check size={14}/> 첨부 완료</button>
           </div>
         </div>
-      </aside>
-    </>
+    </Drawer>
   );
 };
 
@@ -1395,24 +1389,34 @@ const ReportTaxOffice = ({ toast }) => {
 
 // ── 10. 부가세 신고 자료 ─────────────────────────────────────
 const ReportVAT = ({ toast }) => {
-  // 세금계산서 발행/수취 건만 집계 (evid: true)
-  const salesWithEvid    = SAMPLE.incomes.filter(r => r.evid)
-  const salesNoEvid      = SAMPLE.incomes.filter(r => !r.evid)
-  const purchaseWithEvid = SAMPLE.expenses.filter(r => r.evid)
-  const purchaseNoEvid   = SAMPLE.expenses.filter(r => !r.evid)
+  const [quarter, setQuarter] = useState("Q2")
+  const [vatData, setVatData] = useState(null)
 
-  // 방산 납품 특성상 실제 세율은 세무사 확인 필요 — 여기서는 10% 단순 산출 (참고용)
-  const salesItems    = salesWithEvid.map(r    => ({ ...r, vat: Math.round(r.amount * 0.1) }))
-  const purchaseItems = purchaseWithEvid.map(r => ({ ...r, vat: Math.round(r.amount * 0.1) }))
+  useEffect(() => {
+    import('../lib/api').then(({ api }) => {
+      api.getVatSummary(quarter).then(setVatData)
+    })
+  }, [quarter])
 
-  const salesVAT      = salesItems.reduce((a, r) => a + r.vat, 0)
-  const purchaseVAT   = purchaseItems.reduce((a, r) => a + r.vat, 0)
-  const payable       = salesVAT - purchaseVAT
-  const salesTotal    = salesItems.reduce((a, r) => a + r.amount, 0)
-  const purchaseTotal = purchaseItems.reduce((a, r) => a + r.amount, 0)
+  if (!vatData) return <div className="text-muted text-sm" style={{ padding: 24 }}>불러오는 중...</div>
+
+  const { salesVat, purchaseVat, netVat, salesInvoices, purchaseInvoices } = vatData
+  const QUARTER_LABEL = { Q1: "1분기 (1~3월)", Q2: "2분기 (4~6월)", Q3: "3분기 (7~9월)", Q4: "4분기 (10~12월)" }
+  const salesTotal = salesInvoices.reduce((a, r) => a + r.supplyAmount, 0)
+  const purchaseTotal = purchaseInvoices.reduce((a, r) => a + r.supplyAmount, 0)
 
   return (
     <div>
+      {/* 분기 선택 */}
+      <div className="row gap-8" style={{ marginBottom: 16 }}>
+        <span className="text-sm text-muted fw-600" style={{ lineHeight: "28px" }}>신고 분기</span>
+        {["Q1", "Q2", "Q3", "Q4"].map(q => (
+          <button key={q} className={`chip${quarter === q ? " active" : ""}`} onClick={() => setQuarter(q)}>
+            {QUARTER_LABEL[q]}
+          </button>
+        ))}
+      </div>
+
       {/* 신고 기간 */}
       <div className="card card-pad" style={{ background: "var(--brand-soft)", borderColor: "transparent", marginBottom: 12 }}>
         <div className="row gap-8">
@@ -1442,9 +1446,9 @@ const ReportVAT = ({ toast }) => {
 
       {/* 요약 카드 */}
       <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 24 }}>
-        <StatCard label="매출세액 (참고)" value={salesVAT}    tone="pos"/>
-        <StatCard label="매입세액 (참고)" value={purchaseVAT} tone="neg"/>
-        <StatCard label="납부세액 (참고)" value={payable}     tone={payable > 0 ? "neg" : "pos"}/>
+        <StatCard label="매출세액 (참고)" value={salesVat}                            tone="pos"/>
+        <StatCard label="매입세액 (참고)" value={purchaseVat}                         tone="neg"/>
+        <StatCard label="납부세액 (참고)" value={netVat} tone={netVat > 0 ? "neg" : "pos"}/>
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 16 }}>
@@ -1457,20 +1461,18 @@ const ReportVAT = ({ toast }) => {
           <table className="table">
             <thead><tr><th>거래처</th><th className="num-right">공급가액</th><th className="num-right">산출세액*</th></tr></thead>
             <tbody>
-              {salesItems.map((r, i) => (
+              {salesInvoices.map((r, i) => (
                 <tr key={i}>
                   <td className="fw-600 text-sm">{r.vendor}</td>
-                  <td className="num-cell num-right text-sm">{fmtNum(r.amount)}</td>
-                  <td className="num-cell num-right text-sm" style={{ color: "var(--pos)" }}>{fmtNum(r.vat)}</td>
+                  <td className="num-cell num-right text-sm">{fmtNum(r.supplyAmount)}</td>
+                  <td className="num-cell num-right text-sm" style={{ color: "var(--pos)" }}>{fmtNum(r.vatAmount)}</td>
                 </tr>
               ))}
+              {salesInvoices.length === 0 && (
+                <tr><td colSpan={3} className="text-muted text-sm" style={{ textAlign: "center", padding: 16 }}>해당 분기 매출 세금계산서 없음</td></tr>
+              )}
             </tbody>
           </table>
-          {salesNoEvid.length > 0 && (
-            <div className="text-xs text-muted" style={{ padding: "10px 18px", borderTop: "1px solid var(--line)" }}>
-              세금계산서 미발행 {salesNoEvid.length}건 ({fmtNum(salesNoEvid.reduce((a, r) => a + r.amount, 0))}원) — 집계 제외
-            </div>
-          )}
         </div>
 
         {/* 매입 */}
@@ -1482,20 +1484,18 @@ const ReportVAT = ({ toast }) => {
           <table className="table">
             <thead><tr><th>거래처</th><th className="num-right">공급가액</th><th className="num-right">산출세액*</th></tr></thead>
             <tbody>
-              {purchaseItems.map((r, i) => (
+              {purchaseInvoices.map((r, i) => (
                 <tr key={i}>
                   <td className="fw-600 text-sm">{r.vendor}</td>
-                  <td className="num-cell num-right text-sm">{fmtNum(r.amount)}</td>
-                  <td className="num-cell num-right text-sm" style={{ color: "var(--neg)" }}>{fmtNum(r.vat)}</td>
+                  <td className="num-cell num-right text-sm">{fmtNum(r.supplyAmount)}</td>
+                  <td className="num-cell num-right text-sm" style={{ color: "var(--neg)" }}>{fmtNum(r.vatAmount)}</td>
                 </tr>
               ))}
+              {purchaseInvoices.length === 0 && (
+                <tr><td colSpan={3} className="text-muted text-sm" style={{ textAlign: "center", padding: 16 }}>해당 분기 매입 세금계산서 없음</td></tr>
+              )}
             </tbody>
           </table>
-          {purchaseNoEvid.length > 0 && (
-            <div className="text-xs text-muted" style={{ padding: "10px 18px", borderTop: "1px solid var(--line)" }}>
-              증빙 미첨부 {purchaseNoEvid.length}건 ({fmtNum(purchaseNoEvid.reduce((a, r) => a + r.amount, 0))}원) — 집계 제외 (매입세액 공제 불가)
-            </div>
-          )}
         </div>
       </div>
 

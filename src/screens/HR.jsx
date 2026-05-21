@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer } from '../lib/ui'
 import { MiniStat } from './Home'
 
 export const PAYROLL_CONFIG = {
@@ -107,7 +107,7 @@ export const HRScreen = () => {
   const [payslipEmp, setPayslipEmp] = useState(null);
   const [closeDrawer, setCloseDrawer] = useState(false);
   const [monthExtras, setMonthExtras] = useState(MONTHLY_EXTRA);
-  const [closed, setClosed] = useState(false);
+  const [closed, setClosed] = useState(() => sessionStorage.getItem('payroll_closed_2026_05') === '1');
 
   const active = HR_EMPLOYEES.filter(e => e.status === "재직" || e.status === "수습");
   const payslips = active.map(e => ({ emp: e, slip: calcPayslip(e, monthExtras[e.code] || {}), extra: monthExtras[e.code] || {} }));
@@ -285,7 +285,7 @@ export const HRScreen = () => {
         extras={monthExtras}
         employees={active}
         onClose={() => setCloseDrawer(false)}
-        onSave={(next) => { setMonthExtras(next); setCloseDrawer(false); setClosed(true); toast.push("2026년 5월 급여가 마감되었어요"); }}
+        onSave={(next) => { setMonthExtras(next); setCloseDrawer(false); sessionStorage.setItem('payroll_closed_2026_05', '1'); setClosed(true); toast.push("2026년 5월 급여가 마감되었어요"); }}
       />
     </>
   );
@@ -302,9 +302,7 @@ const EmployeeDrawer = ({ info, onClose }) => {
   };
 
   return (
-    <>
-      <div className="drawer-backdrop open" onClick={onClose}/>
-      <aside className="drawer open" role="dialog" style={{ width: "min(560px, 100vw)" }}>
+    <Drawer open={true} onClose={onClose} width="min(560px, 100vw)">
         <div className="drawer-head">
           <div>
             <div className="fw-700" style={{ fontSize: 16 }}>{isNew ? "새 직원 등록" : `${e.name} 직원 정보`}</div>
@@ -373,8 +371,7 @@ const EmployeeDrawer = ({ info, onClose }) => {
             </button>
           </div>
         </div>
-      </aside>
-    </>
+    </Drawer>
   );
 };
 
@@ -463,9 +460,7 @@ const PayslipDrawer = ({ pack, onClose, onChanged }) => {
   const slip = editing ? calcPayslip(emp, { bonus, overtime, extraDeduction: extraDed }) : pack.slip;
 
   return (
-    <>
-      <div className="drawer-backdrop open" onClick={onClose}/>
-      <aside className="drawer open" role="dialog" style={{ width: "min(540px, 100vw)" }}>
+    <Drawer open={true} onClose={onClose} width="min(540px, 100vw)">
         <div className="drawer-head">
           <div>
             <div className="fw-700" style={{ fontSize: 16 }}>{emp.name} 급여 명세 — 2026년 5월</div>
@@ -549,8 +544,7 @@ const PayslipDrawer = ({ pack, onClose, onChanged }) => {
             <button className="btn primary" onClick={() => toast.push(`${emp.name}에게 이메일로 발송했어요`)}>이메일 발송</button>
           </div>
         </div>
-      </aside>
-    </>
+    </Drawer>
   );
 };
 
@@ -570,9 +564,7 @@ const MonthlyCloseDrawer = ({ open, extras, employees, onClose, onSave }) => {
   const totalGross = employees.reduce((a, e) => a + calcPayslip(e, local[e.code] || {}).gross, 0);
 
   return (
-    <>
-      <div className="drawer-backdrop open" onClick={onClose}/>
-      <aside className="drawer open" role="dialog" style={{ width: "min(720px, 100vw)" }}>
+    <Drawer open={open} onClose={onClose} width="min(720px, 100vw)">
         <div className="drawer-head">
           <div>
             <div className="fw-700" style={{ fontSize: 16 }}>2026년 5월 급여 마감</div>
@@ -636,7 +628,6 @@ const MonthlyCloseDrawer = ({ open, extras, employees, onClose, onSave }) => {
             <button className="btn primary" onClick={() => onSave(local)}><Icon.Check size={14}/> 5월 마감 확정</button>
           </div>
         </div>
-      </aside>
-    </>
+    </Drawer>
   );
 };

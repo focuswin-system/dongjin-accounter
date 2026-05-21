@@ -1,6 +1,7 @@
-import { useState } from 'react'
-import { Icon, fmtNum, useToast, Spacer, StatusBadge } from '../lib/ui'
+import { useState, useEffect } from 'react'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer } from '../lib/ui'
 import { PAYROLL_CONFIG } from './HR'
+import { api } from '../lib/api'
 
 const MASTER_DATA = {
   vendor: {
@@ -24,73 +25,74 @@ const MASTER_DATA = {
     ],
   },
   category: {
-    label: "비목",
+    label: "계정과목 / 비목",
     columns: ["비목명", "코드", "부가세", "기본 결제수단"],
     grouped: true,
-    twoLevel: true,
+    twoLevel: false,
     groups: [
-      { top: "비용", name: "인건비",      desc: "급여·상여·복리후생 등 사람과 관련된 비용", items: [
+      { name: "인건비",      desc: "급여·상여·복리후생 등 사람과 관련된 비용", items: [
         ["급여",         "EXP-101", "면세", "계좌이체"],
         ["상여금",       "EXP-102", "면세", "계좌이체"],
         ["복리후생비",   "EXP-103", "면세", "법인카드"],
         ["퇴직급여",     "EXP-104", "면세", "계좌이체"],
       ]},
-      { top: "비용", name: "재료비",      desc: "철강·알루미늄·황동 등 원자재 비용", items: [
+      { name: "재료비",      desc: "철강·알루미늄·황동 등 원자재 비용", items: [
         ["철강 원자재",   "EXP-201", "10%",  "계좌이체"],
         ["비철금속 (알루미늄·황동)", "EXP-202", "10%", "계좌이체"],
         ["특수강",        "EXP-203", "10%",  "계좌이체"],
         ["부자재 (볼트·너트 등)", "EXP-204", "10%", "법인카드"],
       ]},
-      { top: "비용", name: "외주가공비",  desc: "절삭·도금·표면처리·열처리 외주 비용", items: [
+      { name: "외주가공비",  desc: "절삭·도금·표면처리·열처리 외주 비용", items: [
         ["정밀가공 외주", "EXP-301", "10%",  "계좌이체"],
         ["표면처리 외주", "EXP-302", "10%",  "계좌이체"],
         ["도금 외주",     "EXP-303", "10%",  "계좌이체"],
         ["열처리 외주",   "EXP-304", "10%",  "계좌이체"],
         ["용접 외주",     "EXP-305", "10%",  "계좌이체"],
       ]},
-      { top: "비용", name: "공구·소모품", desc: "절삭공구·측정구·생산소모품", items: [
+      { name: "공구·소모품", desc: "절삭공구·측정구·생산소모품", items: [
         ["공구비",        "EXP-401", "10%",  "법인카드"],
         ["측정공구비",    "EXP-402", "10%",  "법인카드"],
         ["소모품비",      "EXP-403", "10%",  "법인카드"],
         ["윤활유·절삭유", "EXP-404", "10%",  "법인카드"],
       ]},
-      { top: "비용", name: "시험·인증비", desc: "검사성적서·시험성적서·KS·방산인증", items: [
+      { name: "시험·인증비", desc: "검사성적서·시험성적서·KS·방산인증", items: [
         ["시험검사비",     "EXP-501", "10%",  "계좌이체"],
         ["검사성적서 발급", "EXP-502", "10%", "계좌이체"],
         ["방산인증 수수료", "EXP-503", "면세", "계좌이체"],
         ["KS 인증 수수료",  "EXP-504", "면세", "계좌이체"],
       ]},
-      { top: "비용", name: "운영비",      desc: "공장 임차·전력·통신·운반 등 고정 비용", items: [
+      { name: "운영비",      desc: "공장 임차·전력·통신·운반 등 고정 비용", items: [
         ["임차료",       "EXP-601", "10%",  "계좌이체"],
         ["관리비",       "EXP-602", "10%",  "계좌이체"],
         ["통신비",       "EXP-603", "10%",  "계좌이체"],
         ["전력비",       "EXP-604", "10%",  "계좌이체"],
         ["수도광열비",   "EXP-605", "10%",  "계좌이체"],
         ["운반비",       "EXP-606", "10%",  "계좌이체"],
+        ["보험료",       "EXP-607", "면세", "계좌이체"],
       ]},
-      { top: "비용", name: "여비·교통비", desc: "출장·교통·식대 등", items: [
+      { name: "여비·교통비", desc: "출장·교통·식대 등", items: [
         ["식대",         "EXP-701", "면세", "법인카드"],
         ["교통비",       "EXP-702", "면세", "법인카드"],
         ["출장비",       "EXP-703", "면세", "법인카드"],
       ]},
-      { top: "비용", name: "안전·환경",   desc: "산업안전·환경 관련 비용", items: [
+      { name: "안전·환경",   desc: "산업안전·환경 관련 비용", items: [
         ["안전관리비",   "EXP-801", "10%",  "계좌이체"],
         ["보호구·안전용품", "EXP-802", "10%", "법인카드"],
         ["환경규제 수수료", "EXP-803", "면세", "계좌이체"],
       ]},
-      { top: "비용", name: "세금과공과",  desc: "세금·공과금·수수료 등", items: [
+      { name: "세금과공과",  desc: "세금·공과금·수수료 등", items: [
         ["세금과공과",   "EXP-901", "면세", "계좌이체"],
         ["수수료",       "EXP-902", "10%",  "계좌이체"],
         ["지급수수료",   "EXP-903", "10%",  "계좌이체"],
       ]},
-      { top: "수익", name: "납품수익",    desc: "발주처 납품 대금 (선급금·기성고·잔금 등)", items: [
+      { name: "납품수익",    desc: "발주처 납품 대금 (선급금·기성고·잔금 등)", items: [
         ["선급금",       "INC-101", "10%",  "—"],
         ["기성고",       "INC-102", "10%",  "—"],
         ["검수 후 결제", "INC-103", "10%",  "—"],
         ["납품대금",     "INC-104", "10%",  "—"],
         ["잔금",         "INC-105", "10%",  "—"],
       ]},
-      { top: "수익", name: "기타수익",    desc: "용역수익·환급금·잡수익·이자수익 등", items: [
+      { name: "기타수익",    desc: "용역수익·환급금·잡수익·이자수익 등", items: [
         ["용역수익",     "INC-201", "10%",  "—"],
         ["환급금",       "INC-202", "—",    "—"],
         ["잡수익",       "INC-203", "—",    "—"],
@@ -103,13 +105,13 @@ const MASTER_DATA = {
   },
   account: {
     label: "계좌 / 카드",
-    columns: ["유형", "은행/카드사", "계좌·카드번호", "별칭", "잔액"],
+    columns: ["유형", "은행/카드사", "계좌·카드번호", "별칭", "용도"],
     rows: [
-      ["계좌", "기업은행",   "***-****-123-01", "주거래 (납품대금 수금)", "184,500,000"],
-      ["계좌", "신한은행",   "***-***-456-02",  "발주처 별 수금 전용",    "76,200,000"],
-      ["계좌", "국민은행",   "***-**-***-789",  "예비 (정부지원금)",      "12,800,000"],
-      ["카드", "BC 법인카드","*1234-****-7821", "법인카드 #1 (영업)",     "—"],
-      ["카드", "현대 법인카드","*5678-****-3456","법인카드 #2 (생산)",    "—"],
+      ["계좌", "기업은행",      "***-****-123-01",  "주거래",         "납품대금 수금"],
+      ["계좌", "신한은행",      "***-***-456-02",   "수금 전용",      "발주처별 수금"],
+      ["계좌", "국민은행",      "***-**-***-789",   "예비",           "정부지원금"],
+      ["카드", "BC 법인카드",   "*1234-****-7821",  "법인카드 #1",    "영업·접대"],
+      ["카드", "현대 법인카드", "*5678-****-3456",  "법인카드 #2",    "생산·소모품"],
     ],
   },
   evidenceType: {
@@ -125,6 +127,7 @@ const MASTER_DATA = {
       ["영수증",       "현금/카드 영수증",             "금액",               "이미지/PDF"],
       ["카드영수증",   "법인카드 결제 영수증",         "금액",               "이미지/PDF"],
       ["통장내역",     "이체 확인용 통장 스크린샷",     "금액/일자",          "이미지/PDF"],
+      ["계약서",       "계약 체결 시 교환하는 계약서",  "계약 상대방/금액",    "PDF"],
       ["기타",         "그 외 증빙",                  "—",                   "파일"],
     ],
   },
@@ -192,11 +195,11 @@ const MASTER_DATA = {
         ["E2018-001", "정대표", "대표이사", "2018-03-15", "재직", "—",         "기업은행 *1234"],
       ]},
       { name: "재무팀", desc: "회계·결의 담당",      items: [
-        ["E2020-007", "정수민", "팀장",     "2020-04-02", "재직", "—",         "신한은행 *5021"],
+        ["E2018-007", "정수민", "팀장",     "2018-04-02", "재직", "—",         "신한은행 *5021"],
         ["E2024-014", "한경리", "사원",     "2024-01-08", "재직", "—",         "기업은행 *7732"],
       ]},
       { name: "기획팀", desc: "PM·기획",             items: [
-        ["E2022-003", "이지원", "과장",     "2022-06-20", "재직", "—",         "국민은행 *3344"],
+        ["E2020-003", "이지원", "과장",     "2020-06-20", "재직", "—",         "국민은행 *3344"],
         ["E2025-002", "윤서연", "사원",     "2025-02-03", "수습", "—",         "—"],
       ]},
       { name: "개발팀", desc: "개발·기술",           items: [
@@ -243,17 +246,270 @@ const MASTER_DATA = {
 };
 
 const MASTER_TABS = [
-  { id: "vendor",       label: "거래처" },
-  { id: "category",     label: "비목" },
-  { id: "account",      label: "계좌/카드" },
-  { id: "evidenceType", label: "증빙유형" },
-  { id: "department",   label: "부서" },
-  { id: "position",     label: "직위" },
-  { id: "user",         label: "사용자/결재선" },
-  { id: "payroll",      label: "급여 기준" },
-  { id: "company",      label: "회사 정보" },
-  { id: "template",     label: "문서 양식" },
+  // 거래 기준
+  { id: "vendor",          label: "거래처" },
+  { id: "category",        label: "계정과목" },
+  { id: "evidenceType",    label: "증빙유형" },
+  // 재무 운영
+  { id: "account",         label: "계좌/카드" },
+  { id: "accountBalance",  label: "계좌 잔액", custom: true },
+  { id: "recurringExpense",label: "정기 지출", custom: true },
+  // 조직
+  { id: "department",      label: "부서" },
+  { id: "position",        label: "직위" },
+  { id: "employee",        label: "직원" },
+  { id: "user",            label: "사용자/결재선" },
+  // 기준 설정
+  { id: "payroll",         label: "급여 기준" },
+  { id: "company",         label: "회사 정보" },
+  { id: "template",        label: "문서 양식" },
 ];
+
+// ── F1: 계좌별 잔액 패널 ─────────────────────────────────────────
+const AdjustDrawer = ({ account, onClose, onSave }) => {
+  const [amount, setAmount] = useState("")
+  const [reason, setReason] = useState("")
+  const [type, setType] = useState("minus")
+  if (!account) return null
+  const handleSave = () => {
+    if (!reason) return
+    const n = parseInt(amount.replace(/[^0-9]/g, "")) || 0
+    onSave(account.id, { amount: type === "minus" ? -n : n, reason })
+    onClose()
+  }
+  return (
+    <Drawer open={!!account} onClose={onClose}>
+      <div className="drawer-head">
+        <div>
+          <div className="fw-700" style={{ fontSize: 16 }}>잔액 조정</div>
+          <div className="text-xs text-muted">{account.name}</div>
+        </div>
+        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
+      </div>
+      <div className="drawer-body col gap-14">
+        <div className="row gap-8">
+          <button className={`chip ${type === "minus" ? "active" : ""}`} onClick={() => setType("minus")}>- 차감</button>
+          <button className={`chip ${type === "plus" ? "active" : ""}`} onClick={() => setType("plus")}>+ 추가</button>
+        </div>
+        <div>
+          <label className="label">조정 금액</label>
+          <input className="input num" placeholder="0" value={amount} onChange={e => setAmount(e.target.value)}/>
+        </div>
+        <div>
+          <label className="label">조정 사유</label>
+          <input className="input" placeholder="은행 수수료, 오입력 수정 등" value={reason} onChange={e => setReason(e.target.value)}/>
+        </div>
+      </div>
+      <div className="drawer-foot">
+        <button className="btn" onClick={onClose}>취소</button>
+        <button className="btn primary ml-auto" onClick={handleSave}><Icon.Check size={14}/> 조정 등록</button>
+      </div>
+    </Drawer>
+  )
+}
+
+const AccountBalancePanel = () => {
+  const toast = useToast()
+  const [accounts, setAccounts] = useState([])
+  const [adjustTarget, setAdjustTarget] = useState(null)
+  const [histTarget, setHistTarget] = useState(null)
+
+  const load = async () => setAccounts(await api.getAccounts())
+  useEffect(() => { load() }, [])
+
+  const handleAdjust = async (accountId, data) => {
+    await api.addAdjustment(accountId, data)
+    toast.push("잔액 조정이 등록됐어요")
+    load()
+  }
+
+  return (
+    <div style={{ padding: 20 }}>
+      <div className="row" style={{ marginBottom: 16 }}>
+        <div className="section-title">계좌별 잔액</div>
+        <div className="text-sm text-muted ml-auto">거래내역 기반 자동 집계 + 수동 조정</div>
+      </div>
+      <div className="col gap-12">
+        {accounts.map(acc => (
+          <div key={acc.id} className="card" style={{ padding: 18, border: "1px solid var(--line)" }}>
+            <div className="row" style={{ marginBottom: 10 }}>
+              <div>
+                <div className="fw-700" style={{ fontSize: 15 }}>{acc.name}</div>
+                <div className="text-xs text-muted">{acc.bankName} · {acc.type}</div>
+              </div>
+              <div className="num fw-700 ml-auto" style={{ fontSize: 22, letterSpacing: "-0.02em" }}>
+                {fmtNum(acc.currentBalance)}
+              </div>
+            </div>
+            <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: "4px 12px", fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
+              <span>초기잔액</span><span>거래 집계</span><span>수동 조정</span>
+              <span className="num fw-600" style={{ color: "var(--ink)" }}>{fmtNum(acc.initialBalance)}</span>
+              <span className="num fw-600" style={{ color: "var(--ink)" }}>계산됨</span>
+              <span className="num fw-600" style={{ color: acc.adjustments.length > 0 ? "var(--warn-ink)" : "var(--muted)" }}>
+                {acc.adjustments.length > 0 ? `${acc.adjustments.length}건` : "없음"}
+              </span>
+            </div>
+            <div className="row gap-8">
+              <button className="btn" style={{ fontSize: 12 }} onClick={() => setHistTarget(acc)}>
+                <Icon.Clock size={12}/> 조정 이력
+              </button>
+              <button className="btn primary" style={{ fontSize: 12 }} onClick={() => setAdjustTarget(acc)}>
+                <Icon.Plus size={12}/> 잔액 조정
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 조정 이력 */}
+      <Drawer open={!!histTarget} onClose={() => setHistTarget(null)}>
+        <div className="drawer-head">
+          <div className="fw-700" style={{ fontSize: 16 }}>조정 이력 — {histTarget?.name}</div>
+          <button className="icon-btn ml-auto" onClick={() => setHistTarget(null)}><Icon.Close size={16}/></button>
+        </div>
+        <div className="drawer-body">
+          {histTarget?.adjustments?.length === 0 ? (
+            <div className="text-muted text-sm" style={{ padding: "20px 0" }}>조정 이력이 없습니다</div>
+          ) : histTarget?.adjustments?.map((a, i) => (
+            <div key={i} style={{ padding: "12px 0", borderBottom: "1px solid var(--line)" }}>
+              <div className="row">
+                <span className="text-sm text-muted">{a.date}</span>
+                <span className="num fw-700 ml-auto" style={{ color: a.amount < 0 ? "var(--neg-ink)" : "var(--pos)" }}>
+                  {a.amount > 0 ? "+" : ""}{fmtNum(a.amount)}
+                </span>
+              </div>
+              <div className="text-sm" style={{ marginTop: 4 }}>{a.reason}</div>
+              <div className="text-xs text-muted">작성: {a.by}</div>
+            </div>
+          ))}
+        </div>
+        <div className="drawer-foot">
+          <button className="btn ml-auto" onClick={() => setHistTarget(null)}>닫기</button>
+        </div>
+      </Drawer>
+
+      <AdjustDrawer account={adjustTarget} onClose={() => setAdjustTarget(null)} onSave={handleAdjust}/>
+    </div>
+  )
+}
+
+// ── F4: 정기 지출 패널 ───────────────────────────────────────────
+const RecurringFormDrawer = ({ open, onClose, onSave }) => {
+  const [form, setForm] = useState({ vendor: "", category: "임차료", amount: "", period: "monthly", dayOfMonth: "1" })
+  useEffect(() => {
+    if (open) setForm({ vendor: "", category: "임차료", amount: "", period: "monthly", dayOfMonth: "1" })
+  }, [open])
+  const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
+  const handleSave = () => {
+    if (!form.vendor || !form.amount) return
+    onSave({ ...form, amount: parseInt(form.amount.replace(/[^0-9]/g, "")), dayOfMonth: parseInt(form.dayOfMonth) || 1 })
+    onClose()
+  }
+  return (
+    <Drawer open={open} onClose={onClose}>
+      <div className="drawer-head">
+        <div className="fw-700" style={{ fontSize: 16 }}>정기 지출 등록</div>
+        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
+      </div>
+      <div className="drawer-body col gap-14">
+        <div><label className="label">거래처</label><input className="input" value={form.vendor} onChange={e => f("vendor", e.target.value)} placeholder="임대인 박OO"/></div>
+        <div><label className="label">비목</label>
+          <select className="input" value={form.category} onChange={e => f("category", e.target.value)}>
+            {["임차료","통신비","전력비","안전관리비","보험료","기타"].map(c => <option key={c}>{c}</option>)}
+          </select>
+        </div>
+        <div><label className="label">금액</label><input className="input num" value={form.amount} onChange={e => f("amount", e.target.value)} placeholder="0"/></div>
+        <div className="row gap-12">
+          <div style={{ flex: 1 }}>
+            <label className="label">반복 주기</label>
+            <select className="input" value={form.period} onChange={e => f("period", e.target.value)}>
+              <option value="monthly">매월</option>
+              <option value="quarterly">매분기</option>
+              <option value="yearly">매년</option>
+            </select>
+          </div>
+          <div style={{ flex: 1 }}>
+            <label className="label">생성 일 (매월 N일)</label>
+            <input className="input" type="number" min="1" max="31" value={form.dayOfMonth} onChange={e => f("dayOfMonth", e.target.value)}/>
+          </div>
+        </div>
+      </div>
+      <div className="drawer-foot">
+        <button className="btn" onClick={onClose}>취소</button>
+        <button className="btn primary ml-auto" onClick={handleSave}><Icon.Check size={14}/> 등록</button>
+      </div>
+    </Drawer>
+  )
+}
+
+const PERIOD_LABEL = { monthly: "매월", quarterly: "매분기", yearly: "매년" }
+
+const RecurringExpensePanel = () => {
+  const toast = useToast()
+  const [rows, setRows] = useState([])
+  const [formOpen, setFormOpen] = useState(false)
+
+  const load = async () => setRows(await api.getRecurringExpenses())
+  useEffect(() => { load() }, [])
+
+  const handleToggle = async (id) => {
+    const res = await api.toggleRecurringExpense(id)
+    toast.push(res.active ? "정기 지출이 활성화됐어요" : "정기 지출이 비활성화됐어요")
+    load()
+  }
+
+  const nextDate = (rec) => {
+    const d = new Date()
+    const next = new Date(d.getFullYear(), d.getMonth(), rec.dayOfMonth)
+    if (next <= d) next.setMonth(next.getMonth() + 1)
+    const y = next.getFullYear()
+    const m = String(next.getMonth() + 1).padStart(2, '0')
+    const day = String(next.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+
+  return (
+    <div style={{ padding: 20 }}>
+      <div className="row" style={{ marginBottom: 16 }}>
+        <div className="section-title">정기 지출</div>
+        <button className="btn primary ml-auto" onClick={() => setFormOpen(true)}>
+          <Icon.Plus size={14}/> 등록
+        </button>
+      </div>
+      <div className="card" style={{ overflow: "hidden" }}>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>거래처</th><th>비목</th><th className="num-right">금액</th>
+              <th>주기</th><th>다음 생성</th><th style={{ width: 60 }}>상태</th><th style={{ width: 60 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.id} style={{ opacity: r.active ? 1 : 0.45 }}>
+                <td className="fw-700">{r.vendor}</td>
+                <td className="text-sm text-muted">{r.category}</td>
+                <td className="num-cell num-right">{fmtNum(r.amount)}</td>
+                <td className="text-sm">{PERIOD_LABEL[r.period]} {r.dayOfMonth}일</td>
+                <td className="text-sm">{r.active ? nextDate(r) : "—"}</td>
+                <td>
+                  <span className={`badge ${r.active ? "pos" : "outline"}`}>{r.active ? "활성" : "비활성"}</span>
+                </td>
+                <td>
+                  <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => handleToggle(r.id)}>
+                    {r.active ? "중지" : "재개"}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <RecurringFormDrawer open={formOpen} onClose={() => setFormOpen(false)}
+        onSave={async (data) => { await api.addRecurringExpense(data); toast.push("정기 지출이 등록됐어요"); load() }}/>
+    </div>
+  )
+}
 
 export const MasterScreen = () => {
   const toast = useToast();
@@ -261,10 +517,19 @@ export const MasterScreen = () => {
   const [q, setQ] = useState("");
   const [drawer, setDrawer] = useState(null);
   const [collapsed, setCollapsed] = useState({});
-  const data = MASTER_DATA[tab];
-  const rows = data.rows ? data.rows.filter(r => !q || r.some(c => String(c).toLowerCase().includes(q.toLowerCase()))) : [];
+
+  const isCustomTab = ["accountBalance", "recurringExpense", "payroll"].includes(tab)
+  const data = !isCustomTab ? MASTER_DATA[tab] : null
+  const rows = data?.rows ? data.rows.filter(r => !q || r.some(c => String(c).toLowerCase().includes(q.toLowerCase()))) : [];
 
   const toggleGroup = (name) => setCollapsed(c => ({ ...c, [name]: !c[name] }));
+
+  const renderCustomPanel = () => {
+    if (tab === "accountBalance")   return <AccountBalancePanel/>
+    if (tab === "recurringExpense") return <RecurringExpensePanel/>
+    if (tab === "payroll")          return <PayrollConfigPanel/>
+    return null
+  }
 
   return (
     <div className="fade-up">
@@ -274,7 +539,7 @@ export const MasterScreen = () => {
           <div className="page-sub">거래처·계약·비목·계좌·결재선 등 회사의 기본 정보를 등록하고 관리하세요.</div>
         </div>
         <div className="ml-auto row gap-8">
-          {!data.custom && (
+          {!isCustomTab && data && (
             <>
               <button className="btn" onClick={() => toast.push(`${data.label} 양식을 내려받았어요`)}><Icon.Download/> <span className="btn-label-hide">양식 다운로드</span></button>
               <button className="btn" onClick={() => toast.push(`${data.label} 일괄 업로드 창을 열었어요`)}><Icon.Excel/> <span className="btn-label-hide">일괄 업로드</span></button>
@@ -293,11 +558,11 @@ export const MasterScreen = () => {
             const active = tab === t.id;
             const md = MASTER_DATA[t.id];
             let count = "";
-            if (md.custom) {
+            if (t.custom || t.id === "payroll") {
               count = "";
-            } else if (md.grouped) {
+            } else if (md?.grouped) {
               count = md.groups.reduce((a, g) => a + g.items.length, 0);
-            } else {
+            } else if (md?.rows) {
               count = md.rows.length;
             }
             return (
@@ -314,8 +579,8 @@ export const MasterScreen = () => {
 
         {/* Right panel */}
         <div className="card" style={{ overflow: "hidden" }}>
-          {data.custom ? (
-            <PayrollConfigPanel/>
+          {isCustomTab ? (
+            renderCustomPanel()
           ) : (
             <>
               <div className="row" style={{ padding: "16px 18px", borderBottom: "1px solid var(--line)", flexWrap: "wrap", gap: 10 }}>
@@ -323,7 +588,7 @@ export const MasterScreen = () => {
                   <div className="section-title">{data.label}</div>
                   <div className="section-sub">
                     {data.grouped
-                      ? `${data.groups.length}개 대분류 · 총 ${data.rows.length}건`
+                      ? `${data.groups.length}개 계정과목 · 총 ${data.rows.length}건`
                       : `총 ${data.rows.length}건 등록됨`}
                   </div>
                 </div>
@@ -360,7 +625,7 @@ export const MasterScreen = () => {
         </div>
       </div>
 
-      {!data.custom && (
+      {!isCustomTab && data && (
         <MasterDrawer
           open={drawer !== null}
           mode={drawer === "new" ? "new" : "edit"}
@@ -446,8 +711,8 @@ const GroupedTable = ({ data, q, collapsed, toggleGroup, onEdit, onDelete }) => 
                   <Icon.Right size={14}/>
                 </span>
                 <span className={`badge ${top === "수익" ? "pos" : "warn"}`} style={{ padding: "2px 10px" }}>{top}</span>
-                <span className="fw-700" style={{ fontSize: 14 }}>큰 분류 · {top === "수익" ? "회사로 들어오는 돈" : "회사에서 나가는 돈"}</span>
-                <span className="ml-auto text-xs text-muted2">{subGroups.length}개 중분류 · {totalItems}개 비목</span>
+                <span className="fw-700" style={{ fontSize: 14 }}>{top === "수익" ? "수익 계정" : "비용 계정"}</span>
+                <span className="ml-auto text-xs text-muted2">{subGroups.length}개 계정과목 · {totalItems}개 비목</span>
               </button>
               {isTopOpen && subGroups.map((g) => {
                 const groupKey = `mid:${g.name}`;
@@ -555,6 +820,7 @@ const GroupedTable = ({ data, q, collapsed, toggleGroup, onEdit, onDelete }) => 
                         {r.map((cell, j) => {
                           const colName = data.columns[j];
                           if (j === 0) return <td key={j} className="fw-600" style={{ paddingLeft: 44 }}>{cell}</td>;
+                          if (colName === "부가세") { const tone = cell === "면세" || cell === "—" ? "outline" : "brand"; return <td key={j}><span className={`badge ${tone}`}>{cell}</span></td>; }
                           if (colName === "권한") return <td key={j}><span className={`badge ${cell === "관리자" ? "ink" : "outline"}`}>{cell}</span></td>;
                           if (colName === "결재 순번" && cell !== "—") return <td key={j}><span className="badge brand">{cell}</span></td>;
                           if (colName === "재직상태") return <td key={j}><StatusBadge status={cell}/></td>;
@@ -596,9 +862,7 @@ const MasterDrawer = ({ open, mode, category, rowIndex, groupedSel, onClose, onS
   const title = mode === "new" ? `새 ${category.label} 등록` : `${category.label} 정보 편집`;
 
   return (
-    <>
-      <div className="drawer-backdrop open" onClick={onClose}/>
-      <aside className="drawer open" role="dialog" aria-label={title} style={{ width: "min(520px, 100vw)" }}>
+    <Drawer open={true} onClose={onClose} width="min(520px, 100vw)" label={title}>
         <div className="drawer-head">
           <div>
             <div className="fw-700" style={{ fontSize: 16 }}>{title}</div>
@@ -615,16 +879,16 @@ const MasterDrawer = ({ open, mode, category, rowIndex, groupedSel, onClose, onS
           <div className="col gap-16">
             {category.grouped && (
               <div>
-                <label className="label">대분류 <span style={{ color: "var(--neg-ink)" }}>*</span></label>
+                <label className="label">계정과목 <span style={{ color: "var(--neg-ink)" }}>*</span></label>
                 <div className="row gap-6" style={{ flexWrap: "wrap" }}>
                   {category.groups.map(g => (
                     <button key={g.name} className={`chip ${initialGroup === g.name ? "active" : ""}`}>
                       {g.name}
                     </button>
                   ))}
-                  <button className="chip"><Icon.Plus size={12}/> 새 대분류</button>
+                  <button className="chip"><Icon.Plus size={12}/> 새 계정과목</button>
                 </div>
-                <div className="text-xs text-muted2" style={{ marginTop: 6 }}>대분류는 결의서·세무사 자료에서 그룹 헤더로 사용돼요.</div>
+                <div className="text-xs text-muted2" style={{ marginTop: 6 }}>계정과목은 결의서·원가계산서에서 그룹 헤더로 사용돼요.</div>
               </div>
             )}
 
@@ -684,11 +948,11 @@ const MasterDrawer = ({ open, mode, category, rowIndex, groupedSel, onClose, onS
               </div>
             )}
 
-            {category.label === "비목" && (
+            {category.label === "계정과목 / 비목" && (
               <div className="alert-row" style={{ background: "var(--brand-soft)", borderColor: "transparent" }}>
                 <Icon.Sparkle/>
                 <div>
-                  <div className="lead">비목은 결의서·세무 자료에 그대로 표기돼요.</div>
+                  <div className="lead">계정과목·비목은 결의서·세무 자료에 그대로 표기돼요.</div>
                   <div className="body">사용 중인 비목은 삭제 대신 '비활성화'를 권장합니다.</div>
                 </div>
               </div>
@@ -707,8 +971,7 @@ const MasterDrawer = ({ open, mode, category, rowIndex, groupedSel, onClose, onS
             <button className="btn primary" onClick={onSave}><Icon.Check size={14}/> {mode === "new" ? "등록하기" : "저장하기"}</button>
           </div>
         </div>
-      </aside>
-    </>
+    </Drawer>
   );
 };
 

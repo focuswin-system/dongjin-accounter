@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, createContext, useContext, cloneElement } from 'react'
+import { createPortal } from 'react-dom'
 
 /* ── Formatters ── */
 export const fmtKRW = (n, opts = {}) => {
@@ -273,6 +274,19 @@ export const Sparkline = ({ data, w = 160, h = 40, color = "var(--brand)" }) => 
 
 /* ── Spacer ── */
 export const Spacer = ({ h = 16 }) => <div style={{ height: h }} />;
+
+export const Drawer = ({ open, onClose, width = "min(480px, 100vw)", label, children }) => {
+  if (!open) return null;
+  return createPortal(
+    <>
+      <div className="drawer-backdrop open" onClick={onClose}/>
+      <aside className="drawer open" role="dialog" aria-label={label} style={{ width }}>
+        {children}
+      </aside>
+    </>,
+    document.body
+  );
+};
 
 /* ── Popover ── */
 export const Popover = ({ trigger, children, align = "right", width = 240, direction = "down" }) => {

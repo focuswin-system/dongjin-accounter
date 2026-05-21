@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect, Drawer } from '../lib/ui'
 import { SAMPLE } from '../lib/data'
 import { MiniStat } from './Home'
 
@@ -25,14 +25,12 @@ export const IncomeDrawer = ({ open, onClose }) => {
     memo: "5월분",
   });
   const totalSteps = 6;
-  const stepLabels = ["거래처", "계약", "입금 구분", "금액", "입금일/계좌", "증빙"];
+  const stepLabels = ["거래처", "계약", "수금 유형", "금액", "입금일/계좌", "증빙"];
 
   useEffect(() => { if (open) setStep(1); }, [open]);
 
   return (
-    <>
-      <div className={`drawer-backdrop ${open ? "open" : ""}`} onClick={onClose}/>
-      <aside className={`drawer ${open ? "open" : ""}`} role="dialog" aria-label="입금 등록">
+    <Drawer open={open} onClose={onClose} label="입금 등록">
         <div className="drawer-head">
           <div>
             <div className="fw-700" style={{ fontSize: 16 }}>입금 등록</div>
@@ -149,7 +147,7 @@ export const IncomeDrawer = ({ open, onClose }) => {
                 <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "6px 16px", fontSize: 12.5 }}>
                   <span className="text-muted">거래처</span><span className="fw-600">{form.vendor}</span>
                   <span className="text-muted">계약</span><span className="fw-600">{form.contract}</span>
-                  <span className="text-muted">입금 구분</span><span className="fw-600">{form.type}</span>
+                  <span className="text-muted">수금 유형</span><span className="fw-600">{form.type}</span>
                   <span className="text-muted">입금 계좌</span><span className="fw-600">{form.account}</span>
                   <span className="text-muted">입금일</span><span className="fw-600">{form.date}</span>
                   <span className="text-muted">금액</span><span className="fw-700 num">{fmtNum(form.amount)}원</span>
@@ -170,21 +168,76 @@ export const IncomeDrawer = ({ open, onClose }) => {
               : <button className="btn primary" onClick={() => { onClose(); toast.push("입금 내역이 등록되었어요"); }}><Icon.Check size={14}/> 등록 완료</button>}
           </div>
         </div>
-      </aside>
-    </>
+    </Drawer>
   );
 };
 
 /* ============ 계약 목록 데이터 ============ */
 export const CONTRACT_LIST = [
-  { id: "CT-2026-101", name: "KF-21 동체 부품 가공",       vendor: "한화에어로스페이스", amount: 142000000, inDone: 113600000, remain:  28400000, out: 38500000, profit: 75100000, status: "진행중", period: "2026-01-15 ~ 2026-08-31", pm: "정수민" },
-  { id: "CT-2026-088", name: "유도무기 정밀가공 부품",      vendor: "LIG넥스원",          amount:  96000000, inDone:  77400000, remain:  18600000, out: 28200000, profit: 49200000, status: "진행중", period: "2026-02-01 ~ 2026-07-31", pm: "정수민" },
-  { id: "CT-2026-072", name: "K2 변속기 케이스 가공",       vendor: "현대로템",            amount:  48000000, inDone:  38800000, remain:   9200000, out: 12100000, profit: 26700000, status: "진행중", period: "2026-01-20 ~ 2026-06-30", pm: "이지원" },
-  { id: "CT-2026-065", name: "헬기 외장 패널 가공",          vendor: "KAI",                amount:  22500000, inDone:  18000000, remain:   4500000, out:  6400000, profit: 11600000, status: "진행중", period: "2026-03-01 ~ 2026-06-30", pm: "이지원" },
-  { id: "CT-2026-058", name: "레이더 하우징 가공",           vendor: "한화시스템",         amount:  18200000, inDone:  14400000, remain:   3800000, out:  4900000, profit:  9500000, status: "진행중", period: "2026-02-10 ~ 2026-07-15", pm: "정수민" },
-  { id: "CT-2026-044", name: "탄피 황동 가공 시제품",        vendor: "풍산",                amount:   4000000, inDone:   2200000, remain:   1800000, out:   400000, profit:  1400000, status: "진행중", period: "2026-04-01 ~ 2026-06-30", pm: "이지원" },
-  { id: "CT-2025-194", name: "함정 추진계 정밀가공",         vendor: "(주)대선기공",        amount:  62000000, inDone:  43800000, remain:  18200000, out: 21400000, profit: 18600000, status: "보류",   period: "2025-09-01 ~ 2026-04-30", pm: "정수민" },
-  { id: "CT-2025-176", name: "기체 패스너 가공",             vendor: "(주)서울항공",        amount:  18600000, inDone:  10000000, remain:   8600000, out:  4200000, profit:  5800000, status: "완료",   period: "2025-08-01 ~ 2026-03-15", pm: "이지원" },
+  { id: "CT-2026-101", name: "KF-21 동체 부품 가공",       vendor: "한화에어로스페이스", amount: 142000000, inDone: 113600000, remain:  28400000, out: 38500000, profit: 75100000, status: "진행중", period: "2026-01-15 ~ 2026-08-31", pm: "정수민",
+    costBudget: { material: 20000000, outsource: 15000000, labor: 8000000, overhead: 3500000 },
+    milestones: [
+      { id: "ms-101-1", type: "선급금", ratio: 20, amount: 28400000, dueDate: "2026-01-30", status: "입금 완료", invoiceId: "INV-2026-050" },
+      { id: "ms-101-2", type: "기성고", ratio: 30, amount: 42600000, dueDate: "2026-03-15", status: "입금 완료", invoiceId: "INV-2026-051" },
+      { id: "ms-101-3", type: "기성고", ratio: 30, amount: 42600000, dueDate: "2026-04-20", status: "입금 완료", invoiceId: "INV-2026-052" },
+      { id: "ms-101-4", type: "잔금",   ratio: 20, amount: 28400000, dueDate: "2026-05-20", status: "입금 예정", invoiceId: "INV-2026-001" },
+    ],
+  },
+  { id: "CT-2026-088", name: "유도무기 정밀가공 부품",      vendor: "LIG넥스원",          amount:  96000000, inDone:  77400000, remain:  18600000, out: 28200000, profit: 49200000, status: "진행중", period: "2026-02-01 ~ 2026-07-31", pm: "정수민",
+    costBudget: { material: 10000000, outsource: 14000000, labor: 6000000, overhead: 2000000 },
+    milestones: [
+      { id: "ms-088-1", type: "선급금", ratio: 20, amount: 19200000, dueDate: "2026-02-10", status: "입금 완료", invoiceId: null },
+      { id: "ms-088-2", type: "기성고", ratio: 40, amount: 38400000, dueDate: "2026-04-15", status: "입금 완료", invoiceId: null },
+      { id: "ms-088-3", type: "기성고", ratio: 20, amount: 19200000, dueDate: "2026-05-18", status: "일부 입금", invoiceId: "INV-2026-002" },
+      { id: "ms-088-4", type: "잔금",   ratio: 20, amount: 19200000, dueDate: "2026-07-20", status: "예정",     invoiceId: null },
+    ],
+  },
+  { id: "CT-2026-072", name: "K2 변속기 케이스 가공",       vendor: "현대로템",            amount:  48000000, inDone:  38800000, remain:   9200000, out: 12100000, profit: 26700000, status: "진행중", period: "2026-01-20 ~ 2026-06-30", pm: "이지원",
+    costBudget: { material: 5000000, outsource: 4500000, labor: 2000000, overhead: 1000000 },
+    milestones: [
+      { id: "ms-072-1", type: "선급금", ratio: 30, amount: 14400000, dueDate: "2026-01-25", status: "입금 완료", invoiceId: null },
+      { id: "ms-072-2", type: "기성고", ratio: 50, amount: 24000000, dueDate: "2026-04-10", status: "입금 완료", invoiceId: null },
+      { id: "ms-072-3", type: "잔금",   ratio: 20, amount:  9200000, dueDate: "2026-05-27", status: "입금 완료", invoiceId: "INV-2026-003" },
+    ],
+  },
+  { id: "CT-2026-065", name: "헬기 외장 패널 가공",          vendor: "KAI",                amount:  22500000, inDone:  18000000, remain:   4500000, out:  6400000, profit: 11600000, status: "진행중", period: "2026-03-01 ~ 2026-06-30", pm: "이지원",
+    costBudget: { material: 2500000, outsource: 2500000, labor: 1000000, overhead: 500000 },
+    milestones: [
+      { id: "ms-065-1", type: "선급금", ratio: 40, amount:  9000000, dueDate: "2026-03-05", status: "입금 완료", invoiceId: null },
+      { id: "ms-065-2", type: "중도금", ratio: 40, amount:  9000000, dueDate: "2026-05-01", status: "입금 완료", invoiceId: null },
+      { id: "ms-065-3", type: "잔금",   ratio: 20, amount:  4500000, dueDate: "2026-05-30", status: "입금 예정", invoiceId: "INV-2026-004" },
+    ],
+  },
+  { id: "CT-2026-058", name: "레이더 하우징 가공",           vendor: "한화시스템",         amount:  18200000, inDone:  14400000, remain:   3800000, out:  4900000, profit:  9500000, status: "진행중", period: "2026-02-10 ~ 2026-07-15", pm: "정수민",
+    costBudget: { material: 1800000, outsource: 2000000, labor: 800000, overhead: 400000 },
+    milestones: [
+      { id: "ms-058-1", type: "선급금", ratio: 40, amount:  7280000, dueDate: "2026-02-15", status: "입금 완료", invoiceId: null },
+      { id: "ms-058-2", type: "기성고", ratio: 40, amount:  7280000, dueDate: "2026-04-20", status: "입금 완료", invoiceId: null },
+      { id: "ms-058-3", type: "잔금",   ratio: 20, amount:  3800000, dueDate: "2026-06-02", status: "입금 예정", invoiceId: "INV-2026-005" },
+    ],
+  },
+  { id: "CT-2026-044", name: "탄피 황동 가공 시제품",        vendor: "풍산",                amount:   4000000, inDone:   2200000, remain:   1800000, out:   400000, profit:  1400000, status: "진행중", period: "2026-04-01 ~ 2026-06-30", pm: "이지원",
+    costBudget: { material: 200000, outsource: 100000, labor: 80000, overhead: 20000 },
+    milestones: [
+      { id: "ms-044-1", type: "계약금", ratio: 50, amount: 2000000, dueDate: "2026-04-05", status: "일부 입금", invoiceId: null },
+      { id: "ms-044-2", type: "잔금",   ratio: 50, amount: 2000000, dueDate: "2026-06-20", status: "예정",     invoiceId: null },
+    ],
+  },
+  { id: "CT-2025-194", name: "함정 추진계 정밀가공",         vendor: "(주)대선기공",        amount:  62000000, inDone:  43800000, remain:  18200000, out: 21400000, profit: 18600000, status: "보류",   period: "2025-09-01 ~ 2026-04-30", pm: "정수민",
+    costBudget: { material: 8000000, outsource: 9000000, labor: 3000000, overhead: 1500000 },
+    milestones: [
+      { id: "ms-194-1", type: "계약금", ratio: 30, amount: 18600000, dueDate: "2025-09-10", status: "입금 완료", invoiceId: null },
+      { id: "ms-194-2", type: "기성고", ratio: 40, amount: 24800000, dueDate: "2026-01-15", status: "입금 완료", invoiceId: null },
+      { id: "ms-194-3", type: "잔금",   ratio: 30, amount: 18600000, dueDate: "2026-04-30", status: "기한 지남", invoiceId: "INV-2026-007" },
+    ],
+  },
+  { id: "CT-2025-176", name: "기체 패스너 가공",             vendor: "(주)서울항공",        amount:  18600000, inDone:  10000000, remain:   8600000, out:  4200000, profit:  5800000, status: "완료",   period: "2025-08-01 ~ 2026-03-15", pm: "이지원",
+    costBudget: { material: 1500000, outsource: 1800000, labor: 700000, overhead: 300000 },
+    milestones: [
+      { id: "ms-176-1", type: "계약금", ratio: 50, amount:  9300000, dueDate: "2025-08-10", status: "입금 완료", invoiceId: null },
+      { id: "ms-176-2", type: "잔금",   ratio: 50, amount:  9300000, dueDate: "2026-03-15", status: "기한 지남", invoiceId: "INV-2026-008" },
+    ],
+  },
 ];
 
 function synthesizeDetail(row) {
@@ -199,9 +252,9 @@ function synthesizeDetail(row) {
   }
 
   const expenses = [
-    { date: "2026-03-12", vendor: "외주 OO",      category: "외주비", amount: Math.round(row.out * 0.4), doc: "승인 완료", pay: "지급 완료" },
-    { date: "2026-04-22", vendor: "재료 공급사",  category: "재료비", amount: Math.round(row.out * 0.3), doc: "승인 완료", pay: "지급 완료" },
-    { date: "2026-05-10", vendor: "프리랜서 박OO", category: "외주비", amount: Math.round(row.out * 0.3), doc: "승인 완료", pay: "지급 예정" },
+    { date: "2026-03-12", vendor: "외주 OO",      category: "외주가공비", amount: Math.round(row.out * 0.4), doc: "승인 완료", pay: "지급 완료" },
+    { date: "2026-04-22", vendor: "재료 공급사",  category: "재료비",    amount: Math.round(row.out * 0.3), doc: "승인 완료", pay: "지급 완료" },
+    { date: "2026-05-10", vendor: "프리랜서 박OO", category: "외주가공비", amount: Math.round(row.out * 0.3), doc: "승인 완료", pay: "지급 예정" },
   ].filter(e => e.amount > 0);
 
   return {
@@ -526,9 +579,10 @@ export const SummaryTile = ({ label, amount, pct, tone, big = false }) => (
 /* ============ 계약 상세 ============ */
 export const ContractScreen = ({ goList, contractId, openIncome, openExpense }) => {
   const toast = useToast();
-  const [tab, setTab] = useState("입금 내역");
+  const [tab, setTab] = useState("마일스톤");
   const [memo, setMemo] = useState("");
   const c = useMemo(() => getContractDetail(contractId), [contractId]);
+  const contractRow = useMemo(() => CONTRACT_LIST.find(r => r.id === contractId) || CONTRACT_LIST[0], [contractId]);
   const inPct = c.amount > 0 ? Math.round((c.inDone / c.amount) * 100) : 0;
 
   return (
@@ -548,8 +602,8 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense }) 
         </div>
         <div className="ml-auto row gap-8">
           <button className="btn" onClick={() => toast.push("계약서 PDF를 열었어요")}><Icon.File/> 계약서 보기</button>
-          <button className="btn" onClick={openIncome}><Icon.Plus/> 입금 등록</button>
-          <button className="btn primary" onClick={openExpense}><Icon.Plus/> 지출 등록</button>
+          <button className="btn" onClick={() => openIncome(c.name)}><Icon.Plus/> 입금 등록</button>
+          <button className="btn primary" onClick={() => openExpense(c.name)}><Icon.Plus/> 지출 등록</button>
         </div>
       </div>
 
@@ -580,10 +634,116 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense }) 
 
       <div className="card">
         <div className="tab-bar" style={{ padding: "0 12px" }}>
-          {["입금 내역", "지출 내역", "증빙", "결의서", "메모/히스토리"].map(t => (
+          {["마일스톤", "원가 예산", "입금 내역", "지출 내역", "증빙", "결의서", "메모/히스토리"].map(t => (
             <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t}</button>
           ))}
         </div>
+
+        {tab === "마일스톤" && (() => {
+          const milestones = contractRow.milestones || []
+          const TONE = { "입금 완료": "pos", "일부 입금": "warn", "기한 지남": "neg", "예정": "outline", "입금 예정": "brand" }
+          return (
+            <div style={{ padding: 20 }}>
+              <div className="row" style={{ marginBottom: 14 }}>
+                <div className="text-sm text-muted">계약 마일스톤 기반 수금 예정을 관리하세요.</div>
+                <button className="btn ml-auto" onClick={() => toast.push("마일스톤 편집은 준비 중입니다")}><Icon.Pencil size={13}/> 편집</button>
+              </div>
+              <div className="card" style={{ overflow: "hidden" }}>
+                <table className="table">
+                  <thead><tr><th>유형</th><th className="num-right">비율</th><th className="num-right">금액</th><th>예정일</th><th>상태</th><th></th></tr></thead>
+                  <tbody>
+                    {milestones.map((ms, i) => (
+                      <tr key={i}>
+                        <td><span className="badge outline">{ms.type}</span></td>
+                        <td className="num-right text-muted">{ms.ratio}%</td>
+                        <td className="num-cell num-right fw-700">{fmtNum(ms.amount)}</td>
+                        <td className="text-sm">{ms.dueDate}</td>
+                        <td><StatusBadge status={ms.status}/></td>
+                        <td>
+                          {(ms.status === "예정" || ms.status === "입금 예정") && (
+                            <button className="btn" style={{ fontSize: 11, padding: "3px 10px" }}
+                              onClick={() => toast.push("청구서 발행 화면으로 이동합니다")}>
+                              <Icon.Plus size={11}/> 청구서 발행
+                            </button>
+                          )}
+                          {ms.status === "입금 완료" && <span className="text-muted text-xs">완료</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="row" style={{ marginTop: 14, padding: "10px 14px", background: "var(--surface-2)", borderRadius: 10, fontSize: 13 }}>
+                <span className="text-muted">수금 완료</span>
+                <span className="num fw-700 ml-auto">{fmtNum(milestones.filter(m => m.status === "입금 완료").reduce((s, m) => s + m.amount, 0))}</span>
+                <span className="text-muted" style={{ marginLeft: 16 }}>남은 수금 예정</span>
+                <span className="num fw-700 ml-auto" style={{ color: "var(--warn-ink)" }}>
+                  {fmtNum(milestones.filter(m => m.status !== "입금 완료").reduce((s, m) => s + m.amount, 0))}
+                </span>
+              </div>
+            </div>
+          )
+        })()}
+
+        {tab === "원가 예산" && (() => {
+          const budget = contractRow.costBudget || {}
+          const expensesByCategory = (c.expenses || []).reduce((acc, e) => {
+            const cat = ["재료비"].includes(e.category) ? "material"
+                      : ["외주가공비","외주비"].includes(e.category) ? "outsource"
+                      : e.category === "인건비" ? "labor" : "overhead"
+            acc[cat] = (acc[cat] || 0) + e.amount
+            return acc
+          }, {})
+          const LABELS = { material: "재료비", outsource: "외주가공비", labor: "인건비", overhead: "경비" }
+          const totalBudget = Object.values(budget).reduce((s, v) => s + v, 0)
+          const totalActual = Object.values(expensesByCategory).reduce((s, v) => s + v, 0)
+          const targetRate  = c.amount > 0 ? ((totalBudget / c.amount) * 100).toFixed(1) : 0
+          const actualRate  = c.amount > 0 ? ((totalActual / c.amount) * 100).toFixed(1) : 0
+
+          return (
+            <div style={{ padding: 20 }}>
+              <div className="row" style={{ marginBottom: 14 }}>
+                <div className="text-sm text-muted">항목별 원가 예산과 실적을 비교합니다.</div>
+                <button className="btn ml-auto" onClick={() => toast.push("예산 수정 기능은 준비 중입니다")}><Icon.Pencil size={13}/> 예산 수정</button>
+              </div>
+              <div className="card" style={{ overflow: "hidden", marginBottom: 14 }}>
+                <table className="table">
+                  <thead><tr><th>항목</th><th className="num-right">예산</th><th className="num-right">실적</th><th className="num-right" style={{ width: 70 }}>달성율</th><th style={{ width: 80 }}>상태</th></tr></thead>
+                  <tbody>
+                    {Object.entries(LABELS).map(([key, label]) => {
+                      const b = budget[key] || 0
+                      const a = expensesByCategory[key] || 0
+                      const pct = b > 0 ? Math.round((a / b) * 100) : 0
+                      const tone = pct >= 100 ? "neg" : pct >= 80 ? "warn" : "pos"
+                      return (
+                        <tr key={key}>
+                          <td className="fw-600">{label}</td>
+                          <td className="num-cell num-right">{fmtNum(b)}</td>
+                          <td className="num-cell num-right">{fmtNum(a)}</td>
+                          <td className="num-right"><span className={`badge ${tone}`}>{pct}%</span></td>
+                          <td className="text-sm text-muted">{pct >= 100 ? "🔴 초과" : pct >= 80 ? "⚠️ 임박" : "정상"}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+                {[
+                  { label: "예산 합계",   value: fmtNum(totalBudget), sub: `목표 원가율 ${targetRate}%` },
+                  { label: "실적 합계",   value: fmtNum(totalActual), sub: `실제 원가율 ${actualRate}%`, tone: totalActual > totalBudget ? "neg" : "pos" },
+                  { label: "예상 이익",   value: fmtNum(c.amount - totalActual), sub: `계약금액 ${fmtNum(c.amount)}원 기준` },
+                ].map(s => (
+                  <div key={s.label} className="card" style={{ padding: "14px 16px" }}>
+                    <div className="text-sm text-muted" style={{ marginBottom: 6 }}>{s.label}</div>
+                    <div className="num fw-700" style={{ fontSize: 18, color: s.tone === "neg" ? "var(--neg-ink)" : s.tone === "pos" ? "var(--pos)" : undefined }}>{s.value}</div>
+                    <div className="text-xs text-muted" style={{ marginTop: 4 }}>{s.sub}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
 
         {tab === "입금 내역" && (
           <table className="table">

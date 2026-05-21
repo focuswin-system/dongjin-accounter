@@ -1,0 +1,10 @@
+{
+  "sessionCount": 18,
+  "lastSession": {
+    "startedAt": "2026-05-21T07:09:54.517Z",
+    "platform": "claude",
+    "level": "Dynamic"
+  },
+  "currentFeature": "focus-accounter-v2",
+  "currentPhase": "design"
+}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Popover, PopItem, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Popover, PopItem, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect, Drawer } from '../lib/ui'
 import { SAMPLE } from '../lib/data'
 
 export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, openExcel }) => {
@@ -83,8 +83,8 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
             <Popover align="right" width={220}
               trigger={<button className="btn primary"><Icon.Plus/> 거래 등록 <Icon.Down size={12} style={{ marginLeft: 2 }}/></button>}>
               <div style={{ padding: 6 }}>
-                <PopItem icon={<Icon.In size={16}/>}  label="입금 등록" sub="회사로 들어온 돈" onClick={openIncome}/>
-                <PopItem icon={<Icon.Out size={16}/>} label="지출 등록" sub="회사에서 나간 돈" onClick={openExpense}/>
+                <PopItem icon={<Icon.In size={16}/>}  label="입금 등록" sub="수금 내역을 등록합니다" onClick={openIncome}/>
+                <PopItem icon={<Icon.Out size={16}/>} label="지출 등록" sub="지출 내역을 등록합니다" onClick={openExpense}/>
               </div>
             </Popover>
           </div>
@@ -218,11 +218,6 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
 
           <div className="row" style={{ padding: "14px 18px", borderTop: "1px solid var(--line)", color: "var(--muted)", fontSize: 12.5 }}>
             전체 {filtered.length}건
-            <div className="ml-auto row gap-6 text-muted2">
-              <button className="btn sm"><Icon.Left size={12}/></button>
-              <span className="num">1 / 1</span>
-              <button className="btn sm"><Icon.Right size={12}/></button>
-            </div>
           </div>
         </div>
       </div>
@@ -264,13 +259,22 @@ const TxnActions = ({ txn, toast, confirm }) => {
     );
   }
   if (txn.kind === "income" && txn.status === "장기 미수") {
-    return <button className="btn sm" onClick={(e) => { e.stopPropagation(); toast.push("독촉 메일을 발송했어요"); }}>독촉</button>;
+    return (
+      <div className="row gap-4">
+        <button className="btn sm" onClick={(e) => { e.stopPropagation(); toast.push("독촉 메일을 발송했어요"); }}>독촉</button>
+        <button className="btn primary sm" onClick={async (e) => {
+          e.stopPropagation();
+          const ok = await confirm({ tone: "pos", icon: <Icon.In size={22}/>, title: `${txn.vendor} 입금 처리`, body: `${txn.scope}의 ${fmtNum(txn.amount)}원을 입금 완료로 처리합니다.`, confirmLabel: "입금 처리" });
+          if (ok) toast.push("입금이 처리되었어요");
+        }}>입금 처리</button>
+      </div>
+    );
   }
   if (txn.kind === "expense" && ["지급 예정", "지급 대기", "기한 지남"].includes(txn.status)) {
     return (
       <button className="btn primary sm" onClick={async (e) => {
         e.stopPropagation();
-        const ok = await confirm({ tone: "neg", icon: <Icon.Bank size={22}/>, title: `${txn.vendor} 이체 실행`, body: `${txn.category} ${fmtNum(txn.amount)}원이 기업은행 *123에서 출금됩니다.`, confirmLabel: "이체 실행" });
+        const ok = await confirm({ tone: "neg", icon: <Icon.Bank size={22}/>, title: `${txn.vendor} 이체 실행`, body: `${txn.category} ${fmtNum(txn.amount)}원이 등록된 계좌에서 출금됩니다.`, confirmLabel: "이체 실행" });
         if (ok) toast.push("이체가 실행되었어요");
       }}>이체 실행</button>
     );
@@ -289,11 +293,8 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, openIncome, openExpense 
   const [tab, setTab] = useState("개요");
   useEffect(() => { if (txn) setTab("개요"); }, [txn]);
   if (!txn) return null;
-
   return (
-    <>
-      <div className="drawer-backdrop open" onClick={onClose}/>
-      <aside className="drawer open" role="dialog" style={{ width: "min(560px, 100vw)" }}>
+    <Drawer open={true} onClose={onClose} width="min(560px, 100vw)">
         <div className="drawer-head">
           <div>
             <div className="row gap-8">
@@ -337,7 +338,7 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, openIncome, openExpense 
                 <Icon.Sign/>
                 <div><div className="lead">이 지출에 연결된 결의서</div><div className="body">결의서는 지출과 함께 자동 생성되어 결재선을 따라갑니다.</div></div>
               </div>
-              <DetailRow label="문서번호" value={<span className="num">EXP-2026-0231</span>}/>
+              <DetailRow label="문서번호" value={<span className="num">{`EXP-${txn.date.slice(0, 4)}-${String(([...(txn.vendor + txn.date)].reduce((a, c) => a + c.charCodeAt(0), 0) % 9000) + 1000).padStart(4, '0')}`}</span>}/>
               <DetailRow label="상태"     value={<StatusBadge status={txn.doc || "승인 완료"}/>}/>
               <DetailRow label="작성자"   value="한경리"/>
               <DetailRow label="결재선"   value="한경리 → 정대표 (단독 결재)"/>
@@ -381,7 +382,7 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, openIncome, openExpense 
           <button className="btn" onClick={onClose}>닫기</button>
           <div className="ml-auto row gap-8">
             <button className="btn" onClick={() => { onClose(); txn.kind === "income" ? openIncome?.() : openExpense?.(); }}><Icon.Pencil size={14}/> 편집</button>
-            {txn.kind === "income" && ["입금 예정", "일부 입금"].includes(txn.status) && (
+            {txn.kind === "income" && ["입금 예정", "일부 입금", "장기 미수"].includes(txn.status) && (
               <button className="btn primary" onClick={() => { onClose(); toast.push("입금이 처리되었어요"); }}><Icon.Check size={14}/> 입금 처리</button>
             )}
             {txn.kind === "expense" && ["지급 예정", "지급 대기", "기한 지남"].includes(txn.status) && (
@@ -389,7 +390,6 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, openIncome, openExpense 
             )}
           </div>
         </div>
-      </aside>
-    </>
+    </Drawer>
   );
 };

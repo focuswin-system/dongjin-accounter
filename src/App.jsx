@@ -9,10 +9,12 @@ import { ContractListScreen, ContractScreen, CONTRACT_LIST } from './screens/Con
 import { DocsScreen, EvidenceScreen, EvidenceAttachDrawer, ExcelScreen, ReportsScreen } from './screens/Docs'
 import { HRScreen } from './screens/HR'
 import { MasterScreen } from './screens/Master'
+import { BillingScreen } from './screens/Billing'
 
 const NAV = [
   { id: "home",     label: "홈",       icon: Icon.Home,      group: "main" },
   { id: "ledger",   label: "거래내역", icon: Icon.Wallet,    group: "main" },
+  { id: "billing",  label: "청구 관리", icon: Icon.Receipt,   group: "main" },
   { id: "contract", label: "계약",     icon: Icon.Briefcase, group: "main" },
   { id: "hr",       label: "인사관리", icon: Icon.Building,  group: "main" },
   { id: "report",   label: "보고서",   icon: Icon.Chart,     group: "main" },
@@ -29,11 +31,22 @@ const CRUMB_MAP = {
   ledger_expense:  ["거래내역", "지출"],
   ledger_ar:       ["거래내역", "미수금"],
   ledger_ap:       ["거래내역", "미지급금"],
+  income:          ["거래내역", "입금"],
+  expense:         ["거래내역", "지출"],
+  ar:              ["거래내역", "미수금"],
+  ap:              ["거래내역", "미지급금"],
+  billing:         ["청구 관리"],
+  billing_issued:  ["청구 관리", "발행 청구서"],
+  billing_received:["청구 관리", "수취 청구서"],
   contract:        ["계약"],
   contract_detail: ["계약", null],
   hr:              ["인사관리"],
   report:          ["보고서"],
   master:          ["설정"],
+  doc:             ["결의서"],
+  evidence:        ["증빙 관리"],
+  excel:           ["엑셀 업로드"],
+  excel_modal:     ["엑셀 업로드"],
 };
 
 // 알림 상대 시간 계산
@@ -125,6 +138,15 @@ const HELP_MAP = {
       "기준 월은 화면 상단에 표시된 날짜를 기준으로 집계돼요",
     ]
   },
+  billing: {
+    title: "청구 관리",
+    items: [
+      "발행 청구서 탭에서 미수금을, 수취 청구서 탭에서 미지급금을 관리하세요",
+      "청구서와 실제 거래내역을 매칭하면 미수금이 자동으로 차감돼요",
+      "기한 지남 항목을 클릭해 독촉 또는 재청구 처리를 할 수 있어요",
+      "청구서 발행 버튼으로 계약 마일스톤과 연동된 청구를 빠르게 등록해요",
+    ]
+  },
   master: {
     title: "설정",
     items: [
@@ -157,7 +179,7 @@ const HELP_MAP = {
 function AppInner({ onLogout, user }) {
   const [route, setRoute] = useState("home");
   const [contractId, setContractId] = useState("CT-2026-101");
-  const [txnForm, setTxnForm] = useState(null);
+  const [txnForm, setTxnForm] = useState(null); // null | { kind, contract? }
   const [evidenceAttach, setEvidenceAttach] = useState(null);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -246,29 +268,33 @@ function AppInner({ onLogout, user }) {
                    : route === "ledger_ar" ? "ar"
                    : route === "ledger_ap" ? "ap"
                    : "all";
-      return <LedgerScreen initialFilter={filter} openIncome={() => setTxnForm("income")} openExpense={() => setTxnForm("expense")} openExcel={() => go("excel_modal")}/>;
+      return <LedgerScreen initialFilter={filter} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openExcel={() => go("excel_modal")}/>;
     }
     switch (route) {
-      case "home":            return <HomeScreen go={go} user={user} openIncome={() => setTxnForm("income")} openExpense={() => setTxnForm("expense")}/>;
+      case "home":            return <HomeScreen go={go} user={user} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
+      case "billing":         return <BillingScreen/>;
+      case "billing_issued":  return <BillingScreen initialTab="issued"/>;
+      case "billing_received":return <BillingScreen initialTab="received"/>;
       case "contract":        return <ContractListScreen goDetail={(id) => go("contract_detail", { contractId: id })}/>;
-      case "contract_detail": return <ContractScreen goList={() => go("contract")} contractId={contractId} openIncome={() => setTxnForm("income")} openExpense={() => setTxnForm("expense")}/>;
+      case "contract_detail": return <ContractScreen goList={() => go("contract")} contractId={contractId} openIncome={(contract) => setTxnForm({ kind: "income", contract })} openExpense={(contract) => setTxnForm({ kind: "expense", contract })}/>;
       case "hr":              return <HRScreen/>;
       case "report":          return <ReportsScreen/>;
       case "master":          return <MasterScreen/>;
       case "excel_modal":     return <ExcelScreen/>;
-      case "income":          return <LedgerScreen initialFilter="income" openIncome={() => setTxnForm("income")} openExpense={() => setTxnForm("expense")} openExcel={() => go("excel_modal")}/>;
-      case "expense":         return <LedgerScreen initialFilter="expense" openIncome={() => setTxnForm("income")} openExpense={() => setTxnForm("expense")} openExcel={() => go("excel_modal")}/>;
-      case "ar":              return <LedgerScreen initialFilter="ar" openIncome={() => setTxnForm("income")} openExpense={() => setTxnForm("expense")} openExcel={() => go("excel_modal")}/>;
-      case "ap":              return <LedgerScreen initialFilter="ap" openIncome={() => setTxnForm("income")} openExpense={() => setTxnForm("expense")} openExcel={() => go("excel_modal")}/>;
-      case "doc":             return <DocsScreen openExpense={() => setTxnForm("expense")}/>;
+      case "income":          return <LedgerScreen initialFilter="income" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openExcel={() => go("excel_modal")}/>;
+      case "expense":         return <LedgerScreen initialFilter="expense" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openExcel={() => go("excel_modal")}/>;
+      case "ar":              return <LedgerScreen initialFilter="ar" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openExcel={() => go("excel_modal")}/>;
+      case "ap":              return <LedgerScreen initialFilter="ap" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openExcel={() => go("excel_modal")}/>;
+      case "doc":             return <DocsScreen openExpense={() => setTxnForm({ kind: "expense" })}/>;
       case "evidence":        return <EvidenceScreen onAttach={(item) => setEvidenceAttach(item)}/>;
       case "excel":           return <ExcelScreen/>;
-      default:                return <HomeScreen go={go} openIncome={() => setTxnForm("income")} openExpense={() => setTxnForm("expense")}/>;
+      default:                return <HomeScreen go={go} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
     }
   }, [route, contractId]);
 
   let activeId = route;
   if (route === "contract_detail") activeId = "contract";
+  if (route.startsWith("billing")) activeId = "billing";
   if (route.startsWith("ledger") || ["income", "expense", "ar", "ap", "doc", "evidence", "excel_modal"].includes(route)) activeId = "ledger";
 
   const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger" : route;
@@ -446,7 +472,7 @@ function AppInner({ onLogout, user }) {
         </div>
       </main>
 
-      <TransactionForm open={txnForm !== null} kind={txnForm || "expense"} onClose={() => setTxnForm(null)}/>
+      <TransactionForm open={txnForm !== null} kind={txnForm?.kind || "expense"} initialContract={txnForm?.contract} onClose={() => setTxnForm(null)}/>
       <EvidenceAttachDrawer item={evidenceAttach} onClose={() => setEvidenceAttach(null)}/>
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onPick={(c) => { setCmdOpen(false); go(c.route); }}/>
 
