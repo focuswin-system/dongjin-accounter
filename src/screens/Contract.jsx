@@ -807,14 +807,15 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   const openEdit = () => {
     if (!c) return;
     setEditForm({
-      vendor:     c.vendor_name || '',
-      name:       c.name || '',
-      amount:     String(c.amount || ''),
-      start_date: c.start_date || '',
-      end_date:   c.end_date   || '',
-      status:     c.status     || '진행중',
-      file_url:   c.file_url   || '',
-      file_name:  c.file_name  || '',
+      vendor:      c.vendor_name || '',
+      contract_no: c.contract_no || '',
+      name:        c.name || '',
+      amount:      String(c.amount || ''),
+      start_date:  c.start_date || '',
+      end_date:    c.end_date   || '',
+      status:      c.status     || '진행중',
+      file_url:    c.file_url   || '',
+      file_name:   c.file_name  || '',
     });
     setEditOpen(true);
   };
@@ -823,14 +824,15 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     const vendorObj = vendors.find(v => v.name === editForm.vendor);
     const amount = parseInt(String(editForm.amount).replace(/[^0-9]/g, ''), 10) || 0;
     const res = await api.updateContract(contractId, {
-      vendor_id:  vendorObj?.id || c.vendor_id || null,
-      name:       editForm.name,
+      vendor_id:   vendorObj?.id || c.vendor_id || null,
+      contract_no: editForm.contract_no?.trim() || null,
+      name:        editForm.name,
       amount,
-      start_date: editForm.start_date || null,
-      end_date:   editForm.end_date   || null,
-      status:     editForm.status,
-      file_url:   editForm.file_url  || null,
-      file_name:  editForm.file_name || null,
+      start_date:  editForm.start_date || null,
+      end_date:    editForm.end_date   || null,
+      status:      editForm.status,
+      file_url:    editForm.file_url  || null,
+      file_name:   editForm.file_name || null,
     });
     if (res.ok) { toast.push("수정됐어요"); setEditOpen(false); reload(); }
     else toast.push("저장 실패");
@@ -859,7 +861,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
             <div className="page-title">{c.name}</div>
             <StatusBadge status={c.status}/>
           </div>
-          <div className="page-sub">{vendor} · 계약기간 {period}</div>
+          <div className="page-sub">{vendor} · 계약기간 {period}{c.contract_no ? ` · 계약번호 ${c.contract_no}` : ''}</div>
         </div>
         <div className="ml-auto row gap-8">
           {c.file_url
@@ -1162,6 +1164,10 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
               <input className="input" value={editForm.name || ''} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}/>
             </div>
             <div>
+              <label className="label" style={{ marginBottom: 8 }}>계약번호 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+              <input className="input" value={editForm.contract_no || ''} onChange={e => setEditForm(f => ({ ...f, contract_no: e.target.value }))} placeholder="예: CT-2026-001"/>
+            </div>
+            <div>
               <label className="label" style={{ marginBottom: 8 }}>계약금액 (공급가액)</label>
               <div style={{ position: 'relative' }}>
                 <input className="input num fw-700" style={{ fontSize: 20, paddingRight: 36 }}
@@ -1226,7 +1232,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
 };
 
 /* ============ 계약 목록 ============ */
-const NEW_CONTRACT_FORM = { vendor: "", name: "", amount: "", start_date: "", end_date: "", status: "진행중", file_url: "", file_name: "" };
+const NEW_CONTRACT_FORM = { vendor: "", contract_no: "", name: "", amount: "", start_date: "", end_date: "", status: "진행중", file_url: "", file_name: "" };
 
 const CONTRACT_KIND_META = {
   all:      { title: "계약 관리", sub: "계약별 입금·지출·미수금을 한눈에 확인하세요.", addGubu: "B" },
@@ -1260,14 +1266,15 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
     const vendorObj = vendors.find(v => v.name === newForm.vendor);
     const amount = parseInt(String(newForm.amount).replace(/[^0-9]/g, ""), 10);
     const res = await api.addContract({
-      vendor_id:  vendorObj?.id || null,
-      name:       newForm.name,
+      vendor_id:   vendorObj?.id || null,
+      contract_no: newForm.contract_no?.trim() || null,
+      name:        newForm.name,
       amount,
-      start_date: newForm.start_date || null,
-      end_date:   newForm.end_date   || null,
-      status:     newForm.status,
-      file_url:   newForm.file_url  || null,
-      file_name:  newForm.file_name || null,
+      start_date:  newForm.start_date || null,
+      end_date:    newForm.end_date   || null,
+      status:      newForm.status,
+      file_url:    newForm.file_url  || null,
+      file_name:   newForm.file_name || null,
     });
     if (res.ok) {
       toast.push("계약이 등록됐어요");
@@ -1370,7 +1377,10 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
                 return (
                   <tr key={i} style={{ cursor: "pointer" }} onClick={() => goDetail(r.id, r.name)}>
                     <td>
-                      <div className="fw-600">{r.name}</div>
+                      <div className="fw-600">
+                        {r.name}
+                        {r.contract_no && <span className="badge outline" style={{ marginLeft: 8, fontSize: 10 }}>{r.contract_no}</span>}
+                      </div>
                       <div className="row gap-8" style={{ marginTop: 8 }}>
                         <div className="bar-track" style={{ width: 140 }}>
                           <div className="bar-fill" style={{ width: `${pct}%` }}/>
@@ -1419,6 +1429,11 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
             <div>
               <label className="label" style={{ marginBottom: 8 }}>계약명 <span style={{ color: "var(--neg-ink)" }}>*</span></label>
               <input className="input" value={newForm.name} onChange={e => setNewForm(f => ({ ...f, name: e.target.value }))} placeholder="계약명을 입력하세요"/>
+            </div>
+            <div>
+              <label className="label" style={{ marginBottom: 8 }}>계약번호 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+              <input className="input" value={newForm.contract_no} onChange={e => setNewForm(f => ({ ...f, contract_no: e.target.value }))} placeholder="예: CT-2026-001 (계약서 번호)"/>
+              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>계약을 번호로 구분하는 경우 입력하세요. 목록·상세에 표시됩니다.</div>
             </div>
             <div>
               <label className="label" style={{ marginBottom: 8 }}>계약금액 (공급가액) <span style={{ color: "var(--neg-ink)" }}>*</span></label>
