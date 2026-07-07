@@ -1,0 +1,250 @@
+const { Router } = require('express')
+const { randomUUID } = require('crypto')
+const multer = require('multer')
+const xlsx = require('xlsx')
+const { pool } = require('../db')
+
+const router = Router()
+const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
+
+// 거래 목록/상세에 첨부 서류(다중) 붙이기
+async function attachDocs(rows) {
+  if (!rows.length) return
+  const ids = rows.map(r => r.id)
+  const ph = ids.map(() => '?').join(',')
+  const [docs] = await pool.execute(
+    `SELECT id, txn_id, url, name, doc_type, size, created_at FROM transaction_docs WHERE txn_id IN (${ph}) ORDER BY created_at`, ids)
+  const byTxn = {}
+  for (const d of docs) { if (!byTxn[d.txn_id]) byTxn[d.txn_id] = []; byTxn[d.txn_id].push(d) }
+  for (const r of rows) r.docs = byTxn[r.id] || []
+}
+
+router.get('/', async (req, res, next) => {
+  try {
+    const { kind, contractId, buyerType, vesselNo, category, from, to, accountId } = req.query
+    let sql = `SELECT t.*, v.name AS vendor_name, c.name AS contract_name, a.name AS account_name
+              FROM transactions t
+              LEFT JOIN vendors v ON t.vendor_id = v.id
+              LEFT JOIN contracts c ON t.contract_id = c.id
+              LEFT JOIN accounts a ON t.account_id = a.id
+              WHERE 1=1`
+    const params = []
+    if (kind)       { sql += ' AND t.kind = ?';        params.push(kind) }
+    if (contractId) { sql += ' AND t.contract_id = ?'; params.push(contractId) }
+    if (buyerType)  { sql += ' AND t.buyer_type = ?';  params.push(buyerType) }
+    if (vesselNo)   { sql += ' AND t.vessel_no = ?';   params.push(vesselNo) }
+    if (category)   { sql += ' AND t.category = ?';    params.push(category) }
+    if (accountId)  { sql += ' AND t.account_id = ?';  params.push(accountId) }
+    if (from)       { sql += ' AND t.date >= ?';       params.push(from) }
+    if (to)         { sql += ' AND t.date <= ?';       params.push(to) }
+    sql += ' ORDER BY t.date DESC'
+    const [rows] = await pool.execute(sql, params)
+    await attachDocs(rows)
+    res.json(rows)
+  } catch (e) { next(e) }
+})
+
+router.get('/summary', async (req, res, next) => {
+  try {
+    const { buyerType, year, month } = req.query
+    let sql = "SELECT category, SUM(amount) AS total, COUNT(*) AS cnt FROM transactions WHERE kind='expense'"
+    const params = []
+    if (buyerType) { sql += ' AND buyer_type = ?'; params.push(buyerType) }
+    if (year && month) { sql += ' AND date LIKE ?'; params.push(`${year}-${month}%`) }
+    sql += ' GROUP BY category ORDER BY total DESC'
+    const [rows] = await pool.execute(sql, params)
+    res.json(rows)
+  } catch (e) { next(e) }
+})
+
+router.get('/:id', async (req, res, next) => {
+  try {
+    const [rows] = await pool.execute('SELECT * FROM transactions WHERE id = ?', [req.params.id])
+    if (!rows[0]) return res.status(404).json({ error: 'Not found' })
+    await attachDocs(rows)
+    res.json(rows[0])
+  } catch (e) { next(e) }
+})
+
+router.post('/', async (req, res, next) => {
+  try {
+    const {
+      kind, vendor_id, contract_id, account_id, category, sub_category,
+      amount, date, method, status, buyer_type, vessel_no, usage_place,
+      invoice_id, recurring_id, doc_no, employee_id, evid_type, evid_url, memo
+    } = req.body
+    const id = randomUUID()
+    await pool.execute(`
+      INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, sub_category,
+        amount, date, method, status, buyer_type, vessel_no, usage_place,
+        invoice_id, recurring_id, doc_no, employee_id, evid_type, evid_url, memo)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `, [id, kind, vendor_id||null, contract_id||null, account_id||null, category||'', sub_category||'',
+        amount, date, method||'', status||'지급완료', buyer_type||'공통', vessel_no||'', usage_place||'',
+        invoice_id||null, recurring_id||null, doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||''])
+    res.json({ id })
+  } catch (e) { next(e) }
+})
+
+router.put('/:id', async (req, res, next) => {
+  try {
+    const {
+      vendor_id, contract_id, account_id, category, sub_category,
+      amount, date, method, status, buyer_type, vessel_no, usage_place,
+      doc_no, employee_id, evid_type, evid_url, memo
+    } = req.body
+    const [result] = await pool.execute(`
+      UPDATE transactions SET vendor_id=?, contract_id=?, account_id=?, category=?, sub_category=?,
+        amount=?, date=?, method=?, status=?, buyer_type=?, vessel_no=?, usage_place=?,
+        doc_no=?, employee_id=?, evid_type=?, evid_url=?, memo=?
+      WHERE id=?
+    `, [vendor_id||null, contract_id||null, account_id||null, category||'', sub_category||'',
+        amount, date, method||'', status||'지급완료', buyer_type||'공통', vessel_no||'', usage_place||'',
+        doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'', req.params.id])
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
+router.patch('/:id/status', async (req, res, next) => {
+  try {
+    const { status } = req.body
+    if (!status) return res.status(400).json({ error: 'status 필수' })
+    const [result] = await pool.execute('UPDATE transactions SET status=? WHERE id=?', [status, req.params.id])
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
+// 증빙(레거시 단일)만 갱신 — 다른 필드 보존
+router.patch('/:id/evidence', async (req, res, next) => {
+  try {
+    const { evid_url, evid_type } = req.body
+    const [result] = await pool.execute(
+      'UPDATE transactions SET evid_url=?, evid_type=? WHERE id=?',
+      [evid_url||'', evid_type||'', req.params.id]
+    )
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
+// 거래 첨부 서류(다중)
+router.post('/:id/docs', async (req, res, next) => {
+  try {
+    const { url, name, doc_type, size } = req.body
+    if (!url) return res.status(400).json({ error: 'url 필수' })
+    const id = randomUUID()
+    await pool.execute(
+      'INSERT INTO transaction_docs (id, txn_id, url, name, doc_type, size) VALUES (?,?,?,?,?,?)',
+      [id, req.params.id, url, name || '', doc_type || '', size || 0]
+    )
+    res.json({ ok: true, id })
+  } catch (e) { next(e) }
+})
+
+router.delete('/docs/:docId', async (req, res, next) => {
+  try {
+    await pool.execute('DELETE FROM transaction_docs WHERE id = ?', [req.params.docId])
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
+router.delete('/:id', async (req, res, next) => {
+  try {
+    await pool.execute('DELETE FROM transactions WHERE id = ?', [req.params.id])
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
+// ── 엑셀 임포트: 파싱(헤더 + 행 미리보기) ──
+router.post('/import/parse', uploadMem.single('file'), (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: '파일이 없습니다' })
+    const wb = xlsx.read(req.file.buffer, { type: 'buffer', cellDates: true })
+    const sheet = wb.Sheets[wb.SheetNames[0]]
+    if (!sheet) return res.json({ headers: [], rows: [] })
+    const json = xlsx.utils.sheet_to_json(sheet, { defval: '', raw: false })
+    const headers = json.length ? Object.keys(json[0]) : []
+    res.json({ headers, rows: json.slice(0, 500) })
+  } catch (e) { next(e) }
+})
+
+// ── 엑셀 임포트: 일괄 등록(미등록 거래처는 자동 생성) ──
+router.post('/import/commit', async (req, res, next) => {
+  const conn = await pool.getConnection()
+  try {
+    const items = Array.isArray(req.body.items) ? req.body.items : []
+    const [vs] = await conn.execute('SELECT id, name FROM vendors')
+    const vendorMap = {}; for (const v of vs) vendorMap[v.name] = v.id
+    const [cs] = await conn.execute('SELECT id, name FROM contracts')
+    const contractMap = {}; for (const c of cs) contractMap[c.name] = c.id
+
+    await conn.beginTransaction()
+    let inserted = 0; const createdVendors = []
+    for (const it of items) {
+      let vendorId = null
+      const vname = String(it.vendor || '').trim()
+      if (vname) {
+        if (vendorMap[vname]) vendorId = vendorMap[vname]
+        else {
+          vendorId = randomUUID()
+          await conn.execute('INSERT INTO vendors (id, name, gubu) VALUES (?,?,?)',
+            [vendorId, vname, it.kind === 'income' ? 'B' : 'A'])
+          vendorMap[vname] = vendorId; createdVendors.push(vname)
+        }
+      }
+      const cname = String(it.contract || '').trim()
+      const contractId = (cname && contractMap[cname]) ? contractMap[cname] : null
+      await conn.execute(`
+        INSERT INTO transactions (id, kind, vendor_id, contract_id, category, amount, date, method, status, buyer_type, doc_no, memo)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      `, [randomUUID(), it.kind, vendorId, contractId, it.category || '', it.amount, it.date,
+          '계좌이체', it.kind === 'income' ? '입금완료' : '지급완료', '공통',
+          (cname && !contractId) ? cname : '', it.memo || ''])
+      inserted++
+    }
+    await conn.commit()
+    res.json({ inserted, createdVendors })
+  } catch (e) { await conn.rollback(); next(e) }
+  finally { conn.release() }
+})
+
+// ── 엑셀 임포트: 양식 다운로드(.xlsx) ──
+router.get('/import/template', (req, res, next) => {
+  try {
+    const rows = [
+      ["거래일자", "거래처", "계약명", "구분", "비목", "금액", "메모"],
+      ["2026-06-01", "(주)한빛문구", "", "지출", "소모품", 80000, "사무용품"],
+      ["2026-06-03", "정밀가공(주)", "홈페이지 유지보수", "지출", "외주가공비", 1500000, "6월 외주분"],
+      ["2026-06-10", "(재)부산영재교육진흥원", "홈페이지 개선", "입금", "납품대금", 3500000, "선급금"],
+    ]
+    const ws = xlsx.utils.aoa_to_sheet(rows)
+    ws['!cols'] = [{ wch: 12 }, { wch: 22 }, { wch: 24 }, { wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 20 }]
+
+    const guide = [
+      ["거래내역 일괄 업로드 — 작성 안내"],
+      [""],
+      ["• 거래일자: YYYY-MM-DD 권장 (예: 2026-06-01). 2026.6.1 / 6/1/26 형식도 인식됩니다."],
+      ["• 거래처: 비워도 됩니다. 목록에 없는 거래처는 업로드 시 자동 등록돼요 (입금=발주처 / 지출=매입처)."],
+      ["• 계약명: 연결할 계약이 있으면 정확히 입력, 없으면 비워두세요."],
+      ["• 구분: '입금' 또는 '지출' (수입·매출=입금 / 매입·출금=지출 도 인식)."],
+      ["• 비목: 외주가공비·소모품·납품대금 등 자유롭게 입력하세요."],
+      ["• 금액: 숫자만 입력(쉼표 가능). 부호 없이 양수로."],
+      ["• 첫 행(머리글)은 그대로 두고, 둘째 행부터 데이터를 입력하세요."],
+    ]
+    const wsGuide = xlsx.utils.aoa_to_sheet(guide)
+    wsGuide['!cols'] = [{ wch: 72 }]
+
+    const wb = xlsx.utils.book_new()
+    xlsx.utils.book_append_sheet(wb, ws, "거래내역")
+    xlsx.utils.book_append_sheet(wb, wsGuide, "작성안내")
+    const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' })
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader('Content-Disposition', `attachment; filename="transaction_import_template.xlsx"; filename*=UTF-8''${encodeURIComponent('거래내역_업로드_양식.xlsx')}`)
+    res.send(buf)
+  } catch (e) { next(e) }
+})
+
+module.exports = router

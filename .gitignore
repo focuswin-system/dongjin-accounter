@@ -3,3 +3,22 @@ dist
 .env
 .env.local
 .env.*.local
+
+# Server env
+server/.env
+
+# Server data / artifacts (소스만 추적, 실데이터·업로드·로그는 제외)
+server/*.db
+server/*.db-shm
+server/*.db-wal
+server/*.log
+server/uploads/
+
+# 접속 정보 / 크리덴셜 (절대 커밋 금지)
+접속정보.md
+*.secret
+deploy/*.key
+
+# Playwright screenshots
+screenshots/
+.playwright-mcp/
