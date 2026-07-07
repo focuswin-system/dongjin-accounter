@@ -20,15 +20,17 @@ const NAV_TREE = [
     type: "domain", id: "acct", label: "일반회계", icon: Icon.Book,
     sections: [
       { label: "판매·매출", items: [
+        { id: "contract_sales", label: "매출 계약",   icon: Icon.Briefcase },
         { id: "income",         label: "입금",        icon: Icon.In },
         { id: "ar",             label: "미수금",      icon: Icon.Recv },
         { id: "billing_issued", label: "발행 청구서", icon: Icon.Receipt },
       ]},
       { label: "구매·매입", items: [
-        { id: "expense",          label: "지출",        icon: Icon.Out },
-        { id: "ap",               label: "미지급금",    icon: Icon.Pay },
-        { id: "billing_received", label: "수취 청구서", icon: Icon.Receipt },
-        { id: "doc",              label: "지급결의서",  icon: Icon.Sign },
+        { id: "contract_purchase", label: "매입 계약",   icon: Icon.Briefcase },
+        { id: "expense",           label: "지출",        icon: Icon.Out },
+        { id: "ap",                label: "미지급금",    icon: Icon.Pay },
+        { id: "billing_received",  label: "수취 청구서", icon: Icon.Receipt },
+        { id: "doc",               label: "지급결의서",  icon: Icon.Sign },
       ]},
       { label: "경비·잡손익", items: [
         { id: "misc_pl", label: "경비·잡손익", icon: Icon.Doc, disabled: true },
@@ -105,6 +107,8 @@ const CRUMB_MAP = {
   billing_issued:  ["판매·매출", "발행 청구서"],
   billing_received:["구매·매입", "수취 청구서"],
   contract:        ["계약"],
+  contract_sales:  ["판매·매출", "매출 계약"],
+  contract_purchase:["구매·매입", "매입 계약"],
   contract_detail: ["계약", null],
   hr:              ["인사관리"],
   report:          ["보고서"],
@@ -380,7 +384,9 @@ function AppInner({ onLogout, user }) {
       case "billing":         return <BillingScreen/>;
       case "billing_issued":  return <BillingScreen initialTab="issued"/>;
       case "billing_received":return <BillingScreen initialTab="received"/>;
-      case "contract":        return <ContractListScreen goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
+      case "contract":        return <ContractListScreen kind="all" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
+      case "contract_sales":  return <ContractListScreen kind="sales" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
+      case "contract_purchase": return <ContractListScreen kind="purchase" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
       case "contract_detail": return <ContractScreen goList={() => go("contract")} contractId={contractId} refreshTrigger={txnVersion} openIncome={(contract, vendor) => setTxnForm({ kind: "income", contract, vendor })} openExpense={(contract, vendor) => setTxnForm({ kind: "expense", contract, vendor })}/>;
       case "hr":              return <HRScreen/>;
       case "report":          return <ReportsScreen/>;
@@ -401,6 +407,7 @@ function AppInner({ onLogout, user }) {
 
   const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger"
                 : route.startsWith("billing") ? "billing"
+                : (route === "contract_sales" || route === "contract_purchase") ? "contract"
                 : (route === "settings" || route === "hr_base") ? "master" : route;
   const help = HELP_MAP[helpKey] || HELP_MAP.home;
 
