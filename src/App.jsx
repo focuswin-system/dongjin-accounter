@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo, useRef, Fragment } from 'react'
-import logoSymbol from './assets/logo/logo_symbol_64.png'
+import { useState, useEffect, useMemo, useRef, Fragment, Component } from 'react'
+import logoSymbol from './assets/company/favicon.svg'
 import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider } from './lib/ui'
+import { api } from './lib/api'
 import { LoginScreen } from './screens/Login'
 import { HomeScreen } from './screens/Home'
 import { LedgerScreen } from './screens/Ledger'
@@ -11,18 +12,83 @@ import { HRScreen } from './screens/HR'
 import { MasterScreen } from './screens/Master'
 import { BillingScreen } from './screens/Billing'
 
-const NAV = [
-  { id: "home",     label: "홈",       icon: Icon.Home,      group: "main" },
-  { id: "ledger",   label: "거래내역", icon: Icon.Wallet,    group: "main" },
-  { id: "billing",  label: "청구 관리", icon: Icon.Receipt,   group: "main" },
-  { id: "contract", label: "계약",     icon: Icon.Briefcase, group: "main" },
-  { id: "hr",       label: "인사관리", icon: Icon.Building,  group: "main" },
-  { id: "report",   label: "보고서",   icon: Icon.Chart,     group: "main" },
+// 포털형 2뎁스 네비게이션 트리 (도메인 → 업무 섹션 → 잎 메뉴)
+// 기존 라우트를 잎으로 그대로 매핑. 미구현 잎은 disabled: true 로 "준비중" 표시.
+const NAV_TREE = [
+  { type: "leaf", id: "home", label: "홈", icon: Icon.Home },
+  {
+    type: "domain", id: "acct", label: "일반회계", icon: Icon.Book,
+    sections: [
+      { label: "판매·매출", items: [
+        { id: "income",         label: "입금",        icon: Icon.In },
+        { id: "ar",             label: "미수금",      icon: Icon.Recv },
+        { id: "billing_issued", label: "발행 청구서", icon: Icon.Receipt },
+      ]},
+      { label: "구매·매입", items: [
+        { id: "expense",          label: "지출",        icon: Icon.Out },
+        { id: "ap",               label: "미지급금",    icon: Icon.Pay },
+        { id: "billing_received", label: "수취 청구서", icon: Icon.Receipt },
+        { id: "doc",              label: "지급결의서",  icon: Icon.Sign },
+      ]},
+      { label: "경비·잡손익", items: [
+        { id: "misc_pl", label: "경비·잡손익", icon: Icon.Doc, disabled: true },
+      ]},
+      { label: "거래·계약", items: [
+        { id: "ledger",   label: "전체 거래내역", icon: Icon.Wallet },
+        { id: "contract", label: "계약",          icon: Icon.Briefcase },
+        { id: "evidence", label: "증빙 관리",     icon: Icon.Folder },
+      ]},
+      { label: "세무관리", items: [
+        { id: "tax_vat", label: "부가세",   icon: Icon.Doc, disabled: true },
+        { id: "tax_etc", label: "기타세액", icon: Icon.Doc, disabled: true },
+      ]},
+      { label: "기준정보", items: [
+        { id: "master", label: "기준정보 관리", icon: Icon.Folder },
+      ]},
+    ],
+  },
+  {
+    type: "domain", id: "hr_dom", label: "인사급여", icon: Icon.Building,
+    sections: [
+      { label: "인사·급여", items: [
+        { id: "hr", label: "인사관리", icon: Icon.Building },
+      ]},
+      { label: "기준정보", items: [
+        { id: "hr_base", label: "부서·직위·급여", icon: Icon.Folder },
+      ]},
+    ],
+  },
+  {
+    type: "domain", id: "mgmt", label: "경영관리", icon: Icon.Trend,
+    sections: [
+      { label: "장부관리", items: [
+        { id: "report", label: "보고서", icon: Icon.Chart },
+      ]},
+      { label: "경영관리", items: [
+        { id: "mgmt_dash", label: "경영 대시보드", icon: Icon.Trend, disabled: true },
+      ]},
+    ],
+  },
 ];
 
-const SETTINGS_NAV = [
-  { id: "master", label: "설정", icon: Icon.Cog },
-];
+// 잎 id → 소속 도메인 id (활성 도메인 자동 펼침용)
+const DOMAIN_OF = {};
+for (const node of NAV_TREE) {
+  if (node.type === "domain") for (const s of node.sections) for (const it of s.items) DOMAIN_OF[it.id] = node.id;
+}
+
+// 라우트(하위 라우트 포함) → 사이드바에서 활성 표시할 잎 id
+function leafIdOf(route) {
+  if (route === "contract_detail") return "contract";
+  if (route === "ledger_income") return "income";
+  if (route === "ledger_expense") return "expense";
+  if (route === "ledger_ar") return "ar";
+  if (route === "ledger_ap") return "ap";
+  if (route === "excel_modal" || route === "excel") return "ledger";
+  if (route === "billing") return "billing_issued";
+  if (route === "settings") return "settings";
+  return route; // income·expense·ar·ap·ledger·billing_issued·billing_received·contract·doc·evidence 등은 그대로
+}
 
 const CRUMB_MAP = {
   home:            ["홈"],
@@ -31,55 +97,34 @@ const CRUMB_MAP = {
   ledger_expense:  ["거래내역", "지출"],
   ledger_ar:       ["거래내역", "미수금"],
   ledger_ap:       ["거래내역", "미지급금"],
-  income:          ["거래내역", "입금"],
-  expense:         ["거래내역", "지출"],
-  ar:              ["거래내역", "미수금"],
-  ap:              ["거래내역", "미지급금"],
-  billing:         ["청구 관리"],
-  billing_issued:  ["청구 관리", "발행 청구서"],
-  billing_received:["청구 관리", "수취 청구서"],
+  income:          ["판매·매출", "입금"],
+  expense:         ["구매·매입", "지출"],
+  ar:              ["판매·매출", "미수금"],
+  ap:              ["구매·매입", "미지급금"],
+  billing:         ["판매·매출", "발행 청구서"],
+  billing_issued:  ["판매·매출", "발행 청구서"],
+  billing_received:["구매·매입", "수취 청구서"],
   contract:        ["계약"],
   contract_detail: ["계약", null],
   hr:              ["인사관리"],
   report:          ["보고서"],
-  master:          ["설정"],
-  doc:             ["결의서"],
+  master:          ["일반회계", "기준정보"],
+  settings:        ["환경설정"],
+  hr_base:         ["인사급여", "기준정보"],
+  doc:             ["구매·매입", "지급결의서"],
   evidence:        ["증빙 관리"],
   excel:           ["엑셀 업로드"],
   excel_modal:     ["엑셀 업로드"],
 };
 
-// 알림 상대 시간 계산
-const relTime = (ts) => {
-  const diff = Date.now() - new Date(ts).getTime()
-  const h = Math.floor(diff / 3600000)
-  const d = Math.floor(diff / 86400000)
-  if (h < 1)  return "방금 전"
-  if (h < 24) return `${h}시간 전`
-  if (d === 1) return "어제"
-  const dt = new Date(ts)
-  return `${dt.getMonth() + 1}월 ${dt.getDate()}일`
-}
-
-const _now = Date.now()
-const SAMPLE_NOTIFS = [
-  { tone: "neg",     icon: <Icon.Warn size={14}/>,    title: "(주)동방산업 미수금이 62일 연체되었습니다",  sub: "전차 궤도 부품 시제 · 11,800,000원",      ts: new Date(_now - 2 * 3600000).toISOString() },
-  { tone: "warn",    icon: <Icon.Bell size={14}/>,    title: "결의서 EXP-2026-0229 승인 요청",            sub: "외주가공비 — (주)한울정밀 · 4,200,000원", ts: new Date(_now - 6 * 3600000).toISOString() },
-  { tone: "warn",    icon: <Icon.Receipt size={14}/>, title: "검사성적서 누락 3건",                        sub: "초도검사 · 시험성적서 등록 필요",          ts: new Date(_now - 26 * 3600000).toISOString() },
-  { tone: "brand",   icon: <Icon.Check size={14}/>,   title: "한화에어로스페이스 기성고 24,800,000원 입금", sub: "기업은행 *123 · KF-21 동체 부품",         ts: new Date(_now - 30 * 3600000).toISOString() },
-  { tone: "outline", icon: <Icon.Clock size={14}/>,   title: "포스코강판 자재 발주 결제 예정",             sub: "12,400,000원 · D-4",                       ts: new Date(_now - 8 * 86400000).toISOString() },
-];
-
-const SAMPLE_COMMANDS = [
-  { kind: "거래처", label: "한화에어로스페이스",  sub: "KF-21 동체 부품 진행중",            route: "contract" },
-  { kind: "거래처", label: "LIG넥스원",            sub: "유도무기 정밀가공 진행중",          route: "contract" },
-  { kind: "계약",   label: "KF-21 동체 부품 가공", sub: "한화에어로스페이스 · 142,000,000원", route: "contract_detail" },
-  { kind: "결의서", label: "EXP-2026-0231",        sub: "외주가공비 — 정밀도금 (주)",        route: "doc" },
-  { kind: "증빙",   label: "발주서_한화에어로스페이스_KF-21_1차.pdf", sub: "2026-01-15",    route: "evidence" },
-  { kind: "메뉴",   label: "미수금 관리",          sub: "6건",                               route: "ar" },
-  { kind: "메뉴",   label: "미지급금 관리",        sub: "9건",                               route: "ap" },
-  { kind: "메뉴",   label: "엑셀 업로드",          sub: "",                                  route: "excel" },
-];
+// 알림 아이콘(tone/icon 이름 → 컴포넌트)
+const NOTIF_ICON = {
+  Warn:    <Icon.Warn size={14}/>,
+  Bell:    <Icon.Bell size={14}/>,
+  Clock:   <Icon.Clock size={14}/>,
+  Receipt: <Icon.Receipt size={14}/>,
+  Check:   <Icon.Check size={14}/>,
+};
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
@@ -176,21 +221,71 @@ const HELP_MAP = {
   },
 };
 
+// 화면 렌더 중 예외가 나도 앱 전체가 백지가 되지 않도록 방어.
+// 라우트가 바뀌면 에러 상태를 자동 해제해 다른 화면으로 빠져나갈 수 있게 함.
+class ErrorBoundary extends Component {
+  state = { error: null }
+  static getDerivedStateFromError(error) { return { error } }
+  componentDidUpdate(prev) {
+    if (prev.routeKey !== this.props.routeKey && this.state.error) this.setState({ error: null })
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="card card-pad fade-up" style={{ textAlign: "center", padding: "48px 24px", maxWidth: 460, margin: "40px auto" }}>
+          <div style={{ width: 48, height: 48, borderRadius: 14, background: "var(--neg-soft)", color: "var(--neg-ink)", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
+            <Icon.Warn size={24}/>
+          </div>
+          <div className="fw-700" style={{ fontSize: 16, marginBottom: 8 }}>이 화면을 표시하는 중 문제가 발생했어요</div>
+          <div className="text-sm text-muted" style={{ lineHeight: 1.6, marginBottom: 20 }}>
+            다른 메뉴로 이동하거나 다시 시도해 주세요. 문제가 계속되면 데이터를 확인해 주세요.
+          </div>
+          <button className="btn primary" onClick={() => this.setState({ error: null })}>다시 시도</button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+// 비활성화된 메뉴용 플레이스홀더 (라우트로 직접 접근해도 기능 노출 안 함)
+function ComingSoon({ title }) {
+  return (
+    <div className="card card-pad fade-up" style={{ textAlign: "center", padding: "56px 24px", maxWidth: 460, margin: "40px auto" }}>
+      <div style={{ width: 48, height: 48, borderRadius: 14, background: "var(--surface-3)", color: "var(--muted-2)", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
+        <Icon.Clock size={24}/>
+      </div>
+      <div className="fw-700" style={{ fontSize: 16, marginBottom: 8 }}>{title}는 준비 중이에요</div>
+      <div className="text-sm text-muted" style={{ lineHeight: 1.6 }}>이 메뉴는 현재 비활성화되어 있어요. 곧 제공될 예정입니다.</div>
+    </div>
+  );
+}
+
 function AppInner({ onLogout, user }) {
   const [route, setRoute] = useState("home");
   const [contractId, setContractId] = useState("CT-2026-101");
+  const [contractName, setContractName] = useState("");
   const [txnForm, setTxnForm] = useState(null); // null | { kind, contract? }
+  const [txnVersion, setTxnVersion] = useState(0);
   const [evidenceAttach, setEvidenceAttach] = useState(null);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notifRead, setNotifRead] = useState(false);
+  const [notifs, setNotifs] = useState([]);
   const [faqOpen, setFaqOpen] = useState(false);
   const [idlePhase, setIdlePhase] = useState("hidden"); // "hidden" | "showing" | "dismissing"
   const [nudgeMode, setNudgeMode] = useState(() => localStorage.getItem("nudgeMode") || "always");
   const idleRef = useRef(null);
   const toast = useToast();
   const { confirm } = useConfirm();
-  const unreadCount = notifRead ? 0 : SAMPLE_NOTIFS.length;
+  const unreadCount = notifRead ? 0 : notifs.length;
+
+  // 실데이터 알림 로드 (거래/청구서 변동 시 갱신)
+  useEffect(() => {
+    let alive = true
+    api.getNotifications().then(list => { if (alive) { setNotifs(list); setNotifRead(false); } }).catch(() => {})
+    return () => { alive = false }
+  }, [txnVersion]);
 
   useEffect(() => {
     const apply = () => {
@@ -253,8 +348,18 @@ function AppInner({ onLogout, user }) {
     }
   }, [idlePhase, nudgeMode]);
 
+  // 사이드바 도메인 펼침 상태 (일반회계 기본 펼침) + 활성 라우트의 도메인 자동 펼침
+  const activeId = leafIdOf(route);
+  const [openDomains, setOpenDomains] = useState(["acct"]);
+  useEffect(() => {
+    const d = DOMAIN_OF[activeId];
+    setOpenDomains(prev => (d && !prev.includes(d)) ? [...prev, d] : prev);
+  }, [activeId]);
+  const toggleDomain = (id) => setOpenDomains(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
   const go = (id, opts = {}) => {
     if (opts.contractId) setContractId(opts.contractId);
+    if (opts.contractName != null) setContractName(opts.contractName);
     setRoute(id);
     window.location.hash = id;
     window.scrollTo({ top: 0 });
@@ -268,42 +373,40 @@ function AppInner({ onLogout, user }) {
                    : route === "ledger_ar" ? "ar"
                    : route === "ledger_ap" ? "ap"
                    : "all";
-      return <LedgerScreen initialFilter={filter} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openExcel={() => go("excel_modal")}/>;
+      return <LedgerScreen initialFilter={filter} refreshTrigger={txnVersion} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
     }
     switch (route) {
       case "home":            return <HomeScreen go={go} user={user} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
       case "billing":         return <BillingScreen/>;
       case "billing_issued":  return <BillingScreen initialTab="issued"/>;
       case "billing_received":return <BillingScreen initialTab="received"/>;
-      case "contract":        return <ContractListScreen goDetail={(id) => go("contract_detail", { contractId: id })}/>;
-      case "contract_detail": return <ContractScreen goList={() => go("contract")} contractId={contractId} openIncome={(contract) => setTxnForm({ kind: "income", contract })} openExpense={(contract) => setTxnForm({ kind: "expense", contract })}/>;
+      case "contract":        return <ContractListScreen goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
+      case "contract_detail": return <ContractScreen goList={() => go("contract")} contractId={contractId} refreshTrigger={txnVersion} openIncome={(contract, vendor) => setTxnForm({ kind: "income", contract, vendor })} openExpense={(contract, vendor) => setTxnForm({ kind: "expense", contract, vendor })}/>;
       case "hr":              return <HRScreen/>;
       case "report":          return <ReportsScreen/>;
-      case "master":          return <MasterScreen/>;
+      case "master":          return <MasterScreen user={user} section="base"/>;
+      case "settings":        return <MasterScreen user={user} section="settings"/>;
+      case "hr_base":         return <MasterScreen user={user} section="hr"/>;
       case "excel_modal":     return <ExcelScreen/>;
-      case "income":          return <LedgerScreen initialFilter="income" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openExcel={() => go("excel_modal")}/>;
-      case "expense":         return <LedgerScreen initialFilter="expense" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openExcel={() => go("excel_modal")}/>;
-      case "ar":              return <LedgerScreen initialFilter="ar" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openExcel={() => go("excel_modal")}/>;
-      case "ap":              return <LedgerScreen initialFilter="ap" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openExcel={() => go("excel_modal")}/>;
+      case "income":          return <LedgerScreen initialFilter="income" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
+      case "expense":         return <LedgerScreen initialFilter="expense" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
+      case "ar":              return <LedgerScreen initialFilter="ar" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
+      case "ap":              return <LedgerScreen initialFilter="ap" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
       case "doc":             return <DocsScreen openExpense={() => setTxnForm({ kind: "expense" })}/>;
       case "evidence":        return <EvidenceScreen onAttach={(item) => setEvidenceAttach(item)}/>;
       case "excel":           return <ExcelScreen/>;
       default:                return <HomeScreen go={go} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
     }
-  }, [route, contractId]);
+  }, [route, contractId, txnVersion]);
 
-  let activeId = route;
-  if (route === "contract_detail") activeId = "contract";
-  if (route.startsWith("billing")) activeId = "billing";
-  if (route.startsWith("ledger") || ["income", "expense", "ar", "ap", "doc", "evidence", "excel_modal"].includes(route)) activeId = "ledger";
-
-  const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger" : route;
+  const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger"
+                : route.startsWith("billing") ? "billing"
+                : (route === "settings" || route === "hr_base") ? "master" : route;
   const help = HELP_MAP[helpKey] || HELP_MAP.home;
 
   let crumbs = CRUMB_MAP[route] || ["홈"];
   if (route === "contract_detail") {
-    const c = CONTRACT_LIST.find(x => x.id === contractId);
-    crumbs = ["계약", c?.name || "계약 상세"];
+    crumbs = ["계약", contractName || "계약 상세"];
   }
 
   return (
@@ -315,34 +418,64 @@ function AppInner({ onLogout, user }) {
       <aside className={`sidebar${sidebarOpen ? " open" : ""}`}>
         <div className="brand">
           <img src={logoSymbol} alt="로고" style={{ width: 36, height: 36, objectFit: "contain", flexShrink: 0 }}/>
-          <div className="name">동진테크 - 회계관리</div>
+          <div className="name">도니도라 - 회계관리</div>
         </div>
 
-        <div>
-          {NAV.filter(n => n.group === "main").map(n => {
-            const active = activeId === n.id;
-            const Ic = n.icon;
+        <div className="nav-scroll" style={{ flex: 1, overflowY: "auto", minHeight: 0, marginRight: -4, paddingRight: 4 }}>
+          {NAV_TREE.map(node => {
+            if (node.type === "leaf") {
+              const Ic = node.icon;
+              return (
+                <div key={node.id} className={`nav-item${activeId === node.id ? " active" : ""}`} onClick={() => go(node.id)}>
+                  <Ic className="nav-ico"/>
+                  <span>{node.label}</span>
+                </div>
+              );
+            }
+            const Dic = node.icon;
+            const open = openDomains.includes(node.id);
+            const inDomain = DOMAIN_OF[activeId] === node.id;
             return (
-              <div key={n.id} className={`nav-item${active ? " active" : ""}`} onClick={() => go(n.id)}>
-                <Ic className="nav-ico"/>
-                <span>{n.label}</span>
-                {n.badge != null && <span className="nav-count">{n.badge}</span>}
+              <div key={node.id} style={{ marginTop: 4 }}>
+                <button className={`nav-domain${inDomain ? " has-active" : ""}`} onClick={() => toggleDomain(node.id)}>
+                  <Dic className="nav-ico"/>
+                  <span>{node.label}</span>
+                  <Icon.Down className="nav-chev" style={{ transform: open ? "none" : "rotate(-90deg)" }}/>
+                </button>
+                {open && node.sections.map(section => (
+                  <div key={section.label} className="nav-section">
+                    <div className="nav-group-label nav-sub-label">{section.label}</div>
+                    {section.items.map(it => {
+                      const Lic = it.icon;
+                      if (it.disabled) {
+                        return (
+                          <div key={it.id} className="nav-item nav-sub disabled" title="준비 중인 메뉴예요"
+                            onClick={() => toast.push(`${it.label}은(는) 준비 중이에요`)}>
+                            <Lic className="nav-ico"/>
+                            <span>{it.label}</span>
+                            <span className="nav-count" style={{ background: "var(--surface-3)", color: "var(--muted-2)" }}>준비중</span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div key={it.id} className={`nav-item nav-sub${activeId === it.id ? " active" : ""}`} onClick={() => go(it.id)}>
+                          <Lic className="nav-ico"/>
+                          <span>{it.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
             );
           })}
         </div>
 
-        <div style={{ marginTop: "auto", paddingTop: 8 }}>
-          {SETTINGS_NAV.map(n => {
-            const active = activeId === n.id;
-            const Ic = n.icon;
-            return (
-              <div key={n.id} className={`nav-item${active ? " active" : ""}`} style={{ fontSize: 12.5, color: active ? undefined : "var(--muted-2)" }} onClick={() => go(n.id)}>
-                <Ic className="nav-ico" size={16}/>
-                <span>{n.label}</span>
-              </div>
-            );
-          })}
+        <div style={{ paddingTop: 8, marginTop: 8, borderTop: "1px solid var(--line)" }}>
+          <div className={`nav-item${activeId === "settings" ? " active" : ""}`} onClick={() => go("settings")}>
+            <Icon.Cog className="nav-ico" size={18}/>
+            <span>환경설정</span>
+          </div>
         </div>
 
         <Popover align="left" width={200} direction="up"
@@ -410,24 +543,38 @@ function AppInner({ onLogout, user }) {
                 {unreadCount > 0 && <span className="badge neg ml-auto">{unreadCount}건</span>}
               </div>
               <div style={{ maxHeight: 360, overflowY: "auto" }}>
-                {SAMPLE_NOTIFS.map((n, i) => (
-                  <div key={i} className="row gap-10" style={{ padding: "12px 14px", borderTop: i ? "1px solid var(--line)" : 0, alignItems: "flex-start", opacity: notifRead ? 0.5 : 1 }}>
-                    <div style={{
+                {notifs.length === 0 && (
+                  <div style={{ padding: "28px 14px", textAlign: "center", color: "var(--muted-2)", fontSize: 13 }}>
+                    처리할 알림이 없어요.
+                  </div>
+                )}
+                {notifs.map((n, i) => (
+                  <button key={i} data-pop-item onClick={() => go(n.to)}
+                    className="row gap-10"
+                    style={{ width: "100%", padding: "12px 14px", borderTop: i ? "1px solid var(--line)" : 0,
+                      border: i ? undefined : 0, borderLeft: 0, borderRight: 0, borderBottom: 0,
+                      alignItems: "flex-start", textAlign: "left", background: "transparent",
+                      fontFamily: "inherit", cursor: "pointer", opacity: notifRead ? 0.5 : 1 }}
+                    onMouseEnter={e => e.currentTarget.style.background = "var(--surface-2)"}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <span style={{
                       width: 28, height: 28, borderRadius: 8, flexShrink: 0,
                       background: `var(--${n.tone === "neg" ? "neg" : n.tone === "warn" ? "warn" : n.tone === "brand" ? "brand" : "surface-3"}-soft)`,
                       color: `var(--${n.tone === "neg" ? "neg" : n.tone === "warn" ? "warn" : n.tone === "brand" ? "brand" : "muted"})`,
                       display: "grid", placeItems: "center",
-                    }}>{n.icon}</div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="text-sm fw-600" style={{ marginBottom: 2 }}>{n.title}</div>
-                      <div className="text-xs text-muted2">{n.sub} · {relTime(n.ts)}</div>
-                    </div>
-                  </div>
+                    }}>{NOTIF_ICON[n.icon] || NOTIF_ICON.Bell}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span className="text-sm fw-600" style={{ display: "block", marginBottom: 2 }}>{n.title}</span>
+                      <span className="text-xs text-muted2" style={{ display: "block" }}>{n.sub}{n.when ? ` · ${n.when}` : ""}</span>
+                    </span>
+                  </button>
                 ))}
               </div>
-              <div style={{ padding: 8, borderTop: "1px solid var(--line)" }}>
-                <button className="btn ghost sm" style={{ width: "100%" }} onClick={() => setNotifRead(true)}>모두 읽음 처리</button>
-              </div>
+              {notifs.length > 0 && (
+                <div style={{ padding: 8, borderTop: "1px solid var(--line)" }}>
+                  <button className="btn ghost sm" style={{ width: "100%" }} onClick={() => setNotifRead(true)}>모두 읽음 처리</button>
+                </div>
+              )}
             </div>
           </Popover>
           <Popover align="right" width={300}
@@ -468,13 +615,15 @@ function AppInner({ onLogout, user }) {
         </div>
 
         <div className="content">
-          {Screen}
+          <ErrorBoundary routeKey={route}>
+            {Screen}
+          </ErrorBoundary>
         </div>
       </main>
 
-      <TransactionForm open={txnForm !== null} kind={txnForm?.kind || "expense"} initialContract={txnForm?.contract} onClose={() => setTxnForm(null)}/>
+      <TransactionForm open={txnForm !== null} kind={txnForm?.kind || "expense"} initialContract={txnForm?.contract} initialVendor={txnForm?.vendor || null} editTxn={txnForm?.txn || null} onClose={() => setTxnForm(null)} onSave={() => setTxnVersion(v => v + 1)}/>
       <EvidenceAttachDrawer item={evidenceAttach} onClose={() => setEvidenceAttach(null)}/>
-      <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onPick={(c) => { setCmdOpen(false); go(c.route); }}/>
+      <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onPick={(c) => { setCmdOpen(false); go(c.route, c.contractId ? { contractId: c.contractId, contractName: c.contractName } : {}); }}/>
 
       {/* FAQ 유휴 nudge + 플로팅 버튼 */}
       {idlePhase !== "hidden" && !faqOpen && (
@@ -688,10 +837,25 @@ function FaqPanel({ open, onClose, route, go }) {
 const CommandPalette = ({ open, onClose, onPick }) => {
   const [q, setQ] = useState("");
   const [idx, setIdx] = useState(0);
+  const [index, setIndex] = useState([]);
+  const [loading, setLoading] = useState(false);
   const inputRef = useRef(null);
   const listRef = useRef(null);
 
-  const results = SAMPLE_COMMANDS.filter(c => !q || c.label.toLowerCase().includes(q.toLowerCase()) || c.sub.toLowerCase().includes(q.toLowerCase()) || c.kind.includes(q));
+  const ql = q.trim().toLowerCase();
+  const results = (ql
+    ? index.filter(c => c.label.toLowerCase().includes(ql) || (c.sub || "").toLowerCase().includes(ql) || c.kind.includes(q.trim()))
+    : index
+  ).slice(0, 50);
+
+  // 열릴 때 실데이터 인덱스 로드(거래처·계약·청구서 + 메뉴)
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    setLoading(true)
+    api.getCommandIndex().then(list => { if (alive) { setIndex(list); setLoading(false); } }).catch(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [open]);
 
   useEffect(() => { if (open) { setQ(""); setIdx(0); setTimeout(() => inputRef.current?.focus(), 50); } }, [open]);
   useEffect(() => { setIdx(0); }, [results.length]);
@@ -722,7 +886,9 @@ const CommandPalette = ({ open, onClose, onPick }) => {
         </div>
         <div ref={listRef} style={{ maxHeight: 380, overflowY: "auto", padding: 6 }}>
           {results.length === 0 && (
-            <div style={{ padding: 32, textAlign: "center", color: "var(--muted-2)", fontSize: 13 }}>검색 결과가 없어요.</div>
+            <div style={{ padding: 32, textAlign: "center", color: "var(--muted-2)", fontSize: 13 }}>
+              {loading ? "불러오는 중…" : "검색 결과가 없어요."}
+            </div>
           )}
           {results.map((c, i) => (
             <button key={i} onClick={() => onPick(c)} onMouseEnter={() => setIdx(i)}
@@ -762,6 +928,7 @@ export default function App() {
   const handleLogout = () => {
     localStorage.removeItem('loggedIn');
     localStorage.removeItem('user');
+    localStorage.removeItem('token');
     setUser(null); setLoggedIn(false);
   };
 

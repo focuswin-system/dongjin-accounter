@@ -135,6 +135,43 @@ a { color: inherit; text-decoration: none; }
 }
 .nav-item.active .nav-count { background: rgba(255,255,255,0.18); color: #fff; }
 
+/* ── 포털형 2뎁스 네비 ── */
+.nav-domain {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  font-family: inherit;
+  text-align: left;
+  white-space: nowrap;
+  transition: background .12s ease;
+}
+.nav-domain:hover { background: var(--surface-3); }
+.nav-domain.has-active { color: var(--brand-ink); }
+.nav-domain.has-active .nav-ico { opacity: 1; }
+.nav-domain .nav-chev {
+  margin-left: auto;
+  width: 15px; height: 15px;
+  opacity: 0.45;
+  flex-shrink: 0;
+  transition: transform .16s ease;
+}
+.nav-section { padding-bottom: 2px; }
+.nav-sub-label { padding: 8px 10px 4px 14px; }
+.nav-item.nav-sub { padding-left: 34px; font-size: 13px; }
+.nav-item.nav-sub .nav-ico { width: 16px; height: 16px; }
+.nav-item.disabled { opacity: 0.45; cursor: not-allowed; }
+.nav-item.disabled:hover { background: transparent; color: var(--muted); }
+
 .sidebar-footer {
   margin-top: 4px;
   padding: 12px 8px 0;
@@ -500,7 +537,7 @@ body:has([data-modal-open]) {
 
 /* ───── Toast ───── */
 .toast-stack {
-  position: fixed; bottom: 24px; right: 24px; z-index: 90;
+  position: fixed; bottom: 24px; right: 24px; z-index: 400;
   display: flex; flex-direction: column; gap: 8px;
   pointer-events: none;
 }
