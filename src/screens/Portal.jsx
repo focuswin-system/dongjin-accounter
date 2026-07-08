@@ -68,7 +68,7 @@ export const PortalScreen = ({ node, go, openIncome, openExpense }) => {
               const Ic = leaf.icon
               return (
                 <button key={id} className="leaf-tile" onClick={() => go(id)}>
-                  <div className="l-ico"><Ic size={18}/></div>
+                  <div className="l-ico"><Ic size={20}/></div>
                   <div className="l-label">{leaf.label}</div>
                 </button>
               )
