@@ -632,8 +632,8 @@ const downloadCsv = (filename, headers, rows) => {
   URL.revokeObjectURL(url)
 }
 
-/* ============ 마일스톤 편집 Drawer ============ */
-const MS_TYPES = ["선급금", "기성고", "중도금", "잔금", "검수 후"]
+/* ============ 청구 일정 편집 Drawer ============ */
+const MS_TYPES = ["정기", "일시", "계약금", "중도금", "잔금"]
 const MS_STATUSES = ["예정", "입금 예정", "일부 입금", "입금 완료", "기한 지남"]
 
 function MilestoneEditDrawer({ open, onClose, contractId, initial, onSaved }) {
@@ -660,18 +660,18 @@ function MilestoneEditDrawer({ open, onClose, contractId, initial, onSaved }) {
     }))
     const res = await api.addMilestones(contractId, payload)
     if (!res.ok) return toast.push('저장 실패')
-    toast.push('마일스톤이 저장됐어요')
+    toast.push('청구 일정이 저장됐어요')
     onSaved(); onClose()
   }
 
   return (
-    <Drawer open={open} onClose={onClose} width="min(620px,100vw)" label="마일스톤 편집">
+    <Drawer open={open} onClose={onClose} width="min(620px,100vw)" label="청구 일정 편집">
       <div className="drawer-head">
-        <div className="fw-700" style={{ fontSize: 16 }}>마일스톤 편집</div>
+        <div className="fw-700" style={{ fontSize: 16 }}>청구 일정 편집</div>
         <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
       </div>
       <div className="drawer-body col" style={{ gap: 12 }}>
-        {rows.length === 0 && <div className="text-sm text-muted2" style={{ padding: '8px 0' }}>아직 마일스톤이 없어요. 아래에서 추가하세요.</div>}
+        {rows.length === 0 && <div className="text-sm text-muted2" style={{ padding: '8px 0' }}>아직 청구 일정이 없어요. 아래에서 추가하세요.</div>}
         {rows.map((m, i) => (
           <div key={i} className="card" style={{ padding: 12, border: '1px solid var(--line)' }}>
             <div className="row gap-8" style={{ marginBottom: 8, alignItems: 'flex-start' }}>
@@ -692,7 +692,7 @@ function MilestoneEditDrawer({ open, onClose, contractId, initial, onSaved }) {
             </div>
           </div>
         ))}
-        <button className="btn" onClick={addRow}><Icon.Plus size={13}/> 마일스톤 추가</button>
+        <button className="btn" onClick={addRow}><Icon.Plus size={13}/> 청구 일정 추가</button>
       </div>
       <div className="drawer-foot">
         <button className="btn" onClick={onClose}>취소</button>
@@ -752,7 +752,7 @@ function BudgetEditDrawer({ open, onClose, contractId, initial, onSaved }) {
 export const ContractScreen = ({ goList, contractId, openIncome, openExpense, refreshTrigger }) => {
   const toast = useToast();
   const { confirm } = useConfirm();
-  const [tab, setTab] = useState("마일스톤");
+  const [tab, setTab] = useState("청구 일정");
   const [memo, setMemo] = useState("");
   const [c, setC] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
@@ -772,7 +772,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   // 계약 상세에서 입금/지출 등록 시 자동 갱신
   useEffect(() => { if (refreshTrigger > 0 && contractId) reload(); }, [refreshTrigger]);
 
-  // 마일스톤 → 발행 청구서(미수금) 발행
+  // 청구 일정 → 발행 청구서(미수금) 발행
   const issueInvoiceForMilestone = async (ms) => {
     if (!c) return;
     const supply = ms.amount || 0;
@@ -797,7 +797,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       memo: `${c.name} · ${ms.type}`,
     });
     if (!res.ok) { toast.push(res.error || "청구서 발행에 실패했어요"); return; }
-    // 발행한 마일스톤은 '입금 예정'(청구됨)으로 갱신
+    // 발행한 청구 일정은 '입금 예정'(청구됨)으로 갱신
     const updated = (c.milestones || []).map(m => m.id === ms.id ? { ...m, status: "입금 예정" } : m);
     await api.addMilestones(c.id, updated);
     toast.push(`${ms.type} 청구서를 발행했어요`);
@@ -900,18 +900,18 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
 
       <div className="card">
         <div className="tab-bar" style={{ padding: "0 12px" }}>
-          {["마일스톤", "원가 예산", "입금 내역", "지출 내역", "증빙", "결의서", "메모/히스토리"].map(t => (
+          {["청구 일정", "원가 예산", "입금 내역", "지출 내역", "증빙", "결의서", "메모/히스토리"].map(t => (
             <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t}</button>
           ))}
         </div>
 
-        {tab === "마일스톤" && (() => {
+        {tab === "청구 일정" && (() => {
           const milestones = c.milestones || []
           const TONE = { "입금 완료": "pos", "일부 입금": "warn", "기한 지남": "neg", "예정": "outline", "입금 예정": "brand" }
           return (
             <div style={{ padding: 20 }}>
               <div className="row" style={{ marginBottom: 14 }}>
-                <div className="text-sm text-muted">계약 마일스톤 기반 수금 예정을 관리하세요.</div>
+                <div className="text-sm text-muted">이 계약에서 청구할 금액·시점을 미리 등록하세요. '청구서 발행'을 누르면 대금 청구로 넘어가요.</div>
                 <button className="btn ml-auto" onClick={() => setMsOpen(true)}><Icon.Pencil size={13}/> 편집</button>
               </div>
               <div className="card" style={{ overflow: "hidden" }}>
@@ -964,7 +964,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           return (
             <div style={{ padding: 20 }}>
               <div className="row" style={{ marginBottom: 14 }}>
-                <div className="text-sm text-muted">항목별 원가 예산과 실적을 비교합니다.</div>
+                <div className="text-sm text-muted">참고용 예상 원가예요. 인건비·자재비는 인사급여·매입계약에서 별도 관리돼요.</div>
                 <button className="btn ml-auto" onClick={() => setBudgetOpen(true)}><Icon.Pencil size={13}/> 예산 수정</button>
               </div>
               <div className="card" style={{ overflow: "hidden", marginBottom: 14 }}>
