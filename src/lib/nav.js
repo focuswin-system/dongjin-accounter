@@ -82,6 +82,52 @@ for (const node of NAV_TREE) {
 }
 export const LEAF_BY_ID = Object.fromEntries(ALL_LEAVES.map(l => [l.id, l]))
 
+// ── 홈택스식 다단계 포털 구조 (도메인 → 카테고리 → 그룹 → 화면) ──
+// 카테고리: route(바로 화면) 또는 groups(하위 라인 → 화면 버튼들, 포털 페이지)
+export const PORTAL = [
+  {
+    id: 'acct', label: '일반회계', icon: Icon.Book,
+    categories: [
+      { id: 'acct_process', label: '회계처리', icon: Icon.Wallet, desc: '판매·구매·경비 거래 처리', todos: true, groups: [
+        { label: '판매·매출', items: ['contract_sales', 'billing_issued', 'income', 'ar'] },
+        { label: '구매·매입', items: ['contract_purchase', 'doc', 'billing_received', 'expense', 'ap'] },
+        { label: '경비·잡손익', items: ['misc_pl'] },
+        { label: '거래·증빙', items: ['ledger', 'contract', 'evidence'] },
+      ]},
+      { id: 'acct_tax', label: '세무관리', icon: Icon.Doc, desc: '부가세·기타세액 신고', groups: [
+        { label: '', items: ['tax_vat', 'tax_etc'] },
+      ]},
+      { id: 'master', label: '기준정보', icon: Icon.Folder, desc: '거래처·계정·품목·자산·계좌 등', route: 'master' },
+    ],
+  },
+  {
+    id: 'hr_dom', label: '인사급여', icon: Icon.Building,
+    categories: [
+      { id: 'hr', label: '인사관리', icon: Icon.Building, desc: '급여대장·직원 관리', route: 'hr' },
+      { id: 'hr_labor', label: '근로·용역', icon: Icon.Sign, desc: '근로계약·용역·일용', groups: [
+        { label: '', items: ['hr_labor_contract', 'hr_outsourcing'] },
+      ]},
+      { id: 'hr_base', label: '기준정보', icon: Icon.Folder, desc: '부서·직위·급여항목', route: 'hr_base' },
+    ],
+  },
+  {
+    id: 'mgmt', label: '경영관리', icon: Icon.Trend,
+    categories: [
+      { id: 'report', label: '장부관리', icon: Icon.Chart, desc: '보고서·집계 자료', route: 'report' },
+      { id: 'mgmt_dash', label: '경영관리', icon: Icon.Trend, desc: '경영 대시보드', route: 'mgmt_dash' },
+    ],
+  },
+]
+
+// 포털 페이지(그룹 보유) 카테고리만 id로 조회 — App 라우팅에서 PortalScreen 렌더
+export const PORTAL_CAT_BY_ID = {}
+for (const d of PORTAL) for (const c of d.categories) if (c.groups) PORTAL_CAT_BY_ID[c.id] = { ...c, domainLabel: d.label }
+
+// 포털 카테고리 라우트도 소속 도메인으로 매핑(사이드바 도메인 자동 펼침)
+DOMAIN_OF['acct_process'] = 'acct'
+DOMAIN_OF['acct_tax'] = 'acct'
+DOMAIN_OF['hr_labor'] = 'hr_dom'
+
 // 라우트(하위 라우트 포함) → 사이드바에서 활성 표시할 잎 id
 export function leafIdOf(route) {
   if (route === "contract_detail") return "contract"

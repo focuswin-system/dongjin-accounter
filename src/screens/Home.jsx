@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon, fmtNum, useToast, Popover, PopItem } from '../lib/ui'
 import { api } from '../lib/api'
-import { NAV_TREE, SETTINGS_LEAF, ALL_LEAVES, LEAF_BY_ID } from '../lib/nav'
+import { PORTAL, ALL_LEAVES, LEAF_BY_ID } from '../lib/nav'
 
 const localDateStr = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
@@ -187,44 +187,46 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
         </div>
       </div>
 
-      {/* 포털 그리드 */}
-      <div className="portal-grid">
-        {NAV_TREE.filter(n => n.type === "domain").map(domain => {
-          const Dic = domain.icon
-          return (
-            <div key={domain.id} className="card portal-panel">
-              <div className="portal-phead">
-                <div className="p-ico"><Dic size={16}/></div>
-                <div className="fw-700" style={{ fontSize: 15 }}>{domain.label}</div>
-              </div>
-              {domain.sections.map(sec => (
-                <div key={sec.label} className="portal-sec">
-                  <div className="portal-sec-label">{sec.label}</div>
-                  <div className="portal-links">
-                    {sec.items.map(it => {
-                      const Ic = it.icon
-                      return (
-                        <button key={it.id} className="portal-link" onClick={() => go(it.id)}>
-                          <Ic className="nav-ico"/> {it.label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))}
+      {/* 도메인 라인 (세로 스택) → 큰 카테고리 타일 */}
+      {PORTAL.map(domain => {
+        const Dic = domain.icon
+        return (
+          <div key={domain.id} className="domain-line">
+            <div className="domain-line-head">
+              <div className="d-ico"><Dic size={15}/></div>
+              <div className="d-label">{domain.label}</div>
             </div>
-          )
-        })}
-
-        {/* 환경설정 (별도) */}
-        <button className="card portal-panel" onClick={() => go(SETTINGS_LEAF.id)}
-          style={{ textAlign: "left", cursor: "pointer", fontFamily: "inherit", display: "flex", flexDirection: "column", gap: 6, border: "1px solid var(--line)" }}>
-          <div className="portal-phead" style={{ borderBottom: 0, marginBottom: 0, paddingBottom: 0 }}>
-            <div className="p-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Cog size={16}/></div>
-            <div className="fw-700" style={{ fontSize: 15 }}>환경설정</div>
+            <div className="tile-row">
+              {domain.categories.map(cat => {
+                const Cic = cat.icon
+                return (
+                  <button key={cat.id} className="cat-tile" onClick={() => go(cat.route || cat.id)}>
+                    <div className="c-ico"><Cic size={20}/></div>
+                    <div className="c-label">{cat.label}</div>
+                    {cat.desc && <div className="c-desc">{cat.desc}</div>}
+                    <div className="c-go">바로가기 <Icon.Right size={11}/></div>
+                  </button>
+                )
+              })}
+            </div>
           </div>
-          <div className="text-sm text-muted" style={{ paddingLeft: 2 }}>회사 정보 · 사용자 · 문서 양식</div>
-        </button>
+        )
+      })}
+
+      {/* 환경설정 (라인과 별도) */}
+      <div className="domain-line" style={{ marginBottom: 0 }}>
+        <div className="domain-line-head">
+          <div className="d-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Cog size={15}/></div>
+          <div className="d-label">환경설정</div>
+        </div>
+        <div className="tile-row">
+          <button className="cat-tile" onClick={() => go("settings")}>
+            <div className="c-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Cog size={20}/></div>
+            <div className="c-label">환경설정</div>
+            <div className="c-desc">회사 정보 · 사용자 · 문서 양식</div>
+            <div className="c-go">바로가기 <Icon.Right size={11}/></div>
+          </button>
+        </div>
       </div>
     </div>
     {paymentModalEl}

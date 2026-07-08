@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, Fragment, Component } from 'react
 import logoSymbol from './assets/company/favicon.svg'
 import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider } from './lib/ui'
 import { api } from './lib/api'
-import { NAV_TREE, DOMAIN_OF, leafIdOf } from './lib/nav'
+import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID } from './lib/nav'
 import { LoginScreen } from './screens/Login'
 import { HomeScreen } from './screens/Home'
 import { LedgerScreen } from './screens/Ledger'
@@ -15,6 +15,7 @@ import { BillingScreen } from './screens/Billing'
 import { TaxVatScreen, OtherTaxScreen } from './screens/Tax'
 import { MiscPLScreen } from './screens/MiscPL'
 import { MgmtDashScreen } from './screens/Mgmt'
+import { PortalScreen } from './screens/Portal'
 
 const CRUMB_MAP = {
   home:            ["홈"],
@@ -40,6 +41,9 @@ const CRUMB_MAP = {
   misc_pl:         ["구매·매입", "경비·잡손익"],
   mgmt_dash:       ["경영관리", "경영 대시보드"],
   report:          ["보고서"],
+  acct_process:    ["일반회계", "회계처리"],
+  acct_tax:        ["일반회계", "세무관리"],
+  hr_labor:        ["인사급여", "근로·용역"],
   tax_vat:         ["세무관리", "부가세"],
   tax_etc:         ["세무관리", "기타세액"],
   master:          ["일반회계", "기준정보"],
@@ -309,6 +313,7 @@ function AppInner({ onLogout, user }) {
                    : "all";
       return <LedgerScreen initialFilter={filter} refreshTrigger={txnVersion} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
     }
+    if (PORTAL_CAT_BY_ID[route]) return <PortalScreen node={PORTAL_CAT_BY_ID[route]} go={go}/>;
     switch (route) {
       case "home":            return <HomeScreen go={go} user={user} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
       case "billing":         return <BillingScreen/>;

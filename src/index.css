@@ -216,6 +216,43 @@ a { color: inherit; text-decoration: none; }
 .fav-chip .fav-x { opacity: 0; transition: opacity .12s; display: inline-flex; color: var(--muted-2); }
 .fav-chip:hover .fav-x { opacity: 1; }
 
+/* ── 도메인 라인(세로 스택) + 큰 카테고리/화면 타일 ── */
+.domain-line { margin-bottom: 24px; }
+.domain-line-head { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+.domain-line-head .d-ico { width: 26px; height: 26px; border-radius: 8px; background: var(--ink); color: #fff; display: grid; place-items: center; flex-shrink: 0; }
+.domain-line-head .d-label { font-size: 16px; font-weight: 800; letter-spacing: -0.01em; }
+
+.tile-row { display: flex; flex-wrap: wrap; gap: 14px; }
+/* 큰 카테고리 타일 (정사각형에 가까운 큼지막한 버튼) */
+.cat-tile {
+  width: 176px; min-height: 132px;
+  border: 1px solid var(--line); border-radius: 16px; background: #fff;
+  padding: 18px; cursor: pointer; font-family: inherit; text-align: left;
+  display: flex; flex-direction: column; gap: 10px;
+  transition: border-color .13s, box-shadow .13s, transform .13s;
+}
+.cat-tile:hover { border-color: var(--brand); box-shadow: 0 8px 24px -12px rgba(37,99,235,0.45); transform: translateY(-2px); }
+.cat-tile .c-ico { width: 42px; height: 42px; border-radius: 12px; background: var(--brand-soft); color: var(--brand); display: grid; place-items: center; }
+.cat-tile .c-label { font-size: 15.5px; font-weight: 700; }
+.cat-tile .c-desc { font-size: 12px; color: var(--muted-2); line-height: 1.45; margin-top: -2px; }
+.cat-tile .c-go { margin-top: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; color: var(--brand-ink); }
+
+/* 화면 타일 (카테고리 포털 안, 조금 작게) */
+.leaf-tile {
+  width: 148px; min-height: 104px;
+  border: 1px solid var(--line); border-radius: 14px; background: #fff;
+  padding: 15px; cursor: pointer; font-family: inherit; text-align: left;
+  display: flex; flex-direction: column; gap: 10px;
+  transition: border-color .13s, box-shadow .13s, transform .13s;
+}
+.leaf-tile:hover { border-color: var(--brand); box-shadow: 0 6px 18px -10px rgba(37,99,235,0.4); transform: translateY(-1px); }
+.leaf-tile .l-ico { width: 36px; height: 36px; border-radius: 10px; background: var(--surface-2); color: var(--ink); display: grid; place-items: center; }
+.leaf-tile .l-label { font-size: 13.5px; font-weight: 600; }
+
+.portal-group { margin-bottom: 20px; }
+.portal-group-label { font-size: 13px; font-weight: 700; color: var(--ink); margin-bottom: 10px; padding-left: 2px; }
+.portal-group-label::before { content: ""; display: inline-block; width: 3px; height: 13px; background: var(--brand); border-radius: 2px; margin-right: 8px; vertical-align: -2px; }
+
 .sidebar-footer {
   margin-top: 4px;
   padding: 12px 8px 0;
