@@ -575,6 +575,20 @@ export const api = {
     try { await req(`/hr-codes/${id}`, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }
   },
 
+  // 기준정보 범용(적요·품목·보험·고정자산·무형자산)
+  async getRefItems(type) {
+    try { return await req(`/ref-items${type ? `?type=${type}` : ''}`) } catch { return [] }
+  },
+  async addRefItem(data) {
+    try { const r = await req('/ref-items', { method: 'POST', body: data }); return { ok: true, id: r.id } } catch (e) { return { ok: false, error: e.message } }
+  },
+  async updateRefItem(id, data) {
+    try { await req(`/ref-items/${id}`, { method: 'PUT', body: data }); return { ok: true } } catch (e) { return { ok: false, error: e.message } }
+  },
+  async deleteRefItem(id) {
+    try { await req(`/ref-items/${id}`, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }
+  },
+
   // ─── 임직원 ───────────────────────────────────────────────────
   async getEmployees() {
     try { return (await req('/employees')).map(adaptEmployee) } catch { return [] }

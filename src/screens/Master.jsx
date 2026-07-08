@@ -53,7 +53,12 @@ const MASTER_TABS = [
   // 거래 기준
   { id: "vendor",          label: "거래처" },
   { id: "category",        label: "계정과목" },
+  { id: "jeokyo",          label: "적요", custom: true },
   { id: "evidenceType",    label: "증빙유형" },
+  { id: "item",            label: "품목", custom: true },
+  { id: "insurance",       label: "보험", custom: true },
+  { id: "fixed_asset",     label: "고정자산", custom: true },
+  { id: "intangible_asset",label: "무형자산", custom: true },
   // 재무 운영
   { id: "account",         label: "계좌/카드", custom: true },
   { id: "accountBalance",  label: "계좌 잔액", custom: true },
@@ -77,8 +82,9 @@ const MASTER_SECTIONS = {
     title: "기준정보",
     sub: "거래처·계정과목·계좌·정기 거래 등 회계 처리의 기준이 되는 정보를 관리합니다.",
     groups: [
-      { label: "거래 기준", tabs: ["vendor", "category", "evidenceType"] },
-      { label: "자금·결제", tabs: ["account", "accountBalance"] },
+      { label: "거래 기준", tabs: ["vendor", "category", "jeokyo", "evidenceType"] },
+      { label: "품목·자산", tabs: ["item", "fixed_asset", "intangible_asset"] },
+      { label: "자금·결제", tabs: ["account", "accountBalance", "insurance"] },
       { label: "정기 거래", tabs: ["recurringInvoice", "recurringExpense"] },
     ],
   },
@@ -170,6 +176,176 @@ const HrCodePanel = ({ type, label }) => {
           </tbody>
         </table>
       </div>
+    </div>
+  )
+}
+
+// ── 기준정보 범용 패널 (적요·품목·보험·고정자산·무형자산) ──────────────
+const REF_CONFIGS = {
+  jeokyo: {
+    type: 'jeokyo', label: '적요',
+    sub: '거래 입력 시 자주 쓰는 적요(내용) 문구를 등록해두면 빠르게 선택할 수 있어요.',
+    fields: [
+      { key: 'name', label: '적요', kind: 'text', req: true },
+      { key: 'memo', label: '비고', kind: 'text' },
+    ],
+  },
+  item: {
+    type: 'item', label: '품목',
+    sub: '거래·청구에 쓰는 품목(품명·규격·단위·단가)을 관리합니다.',
+    fields: [
+      { key: 'code', label: '품목코드', kind: 'text', w: 120 },
+      { key: 'name', label: '품명', kind: 'text', req: true },
+      { key: 'spec', label: '규격', kind: 'text' },
+      { key: 'unit', label: '단위', kind: 'text', w: 80 },
+      { key: 'amount', label: '단가', kind: 'num', w: 120 },
+    ],
+  },
+  insurance: {
+    type: 'insurance', label: '보험',
+    sub: '가입 보험(보험사·증권번호·보험료·기간)을 관리합니다.',
+    fields: [
+      { key: 'name', label: '보험명', kind: 'text', req: true },
+      { key: 'party', label: '보험사', kind: 'text' },
+      { key: 'code', label: '증권번호', kind: 'text', w: 140 },
+      { key: 'amount', label: '보험료', kind: 'num', w: 120 },
+      { key: 'start_date', label: '시작일', kind: 'date', w: 130 },
+      { key: 'end_date', label: '종료일', kind: 'date', w: 130 },
+    ],
+  },
+  fixed_asset: {
+    type: 'fixed_asset', label: '고정자산',
+    sub: '유형 고정자산(자산번호·취득가액·취득일)을 관리합니다.',
+    fields: [
+      { key: 'code', label: '자산번호', kind: 'text', w: 120 },
+      { key: 'name', label: '자산명', kind: 'text', req: true },
+      { key: 'amount', label: '취득가액', kind: 'num', w: 130 },
+      { key: 'start_date', label: '취득일', kind: 'date', w: 130 },
+      { key: 'memo', label: '비고', kind: 'text' },
+    ],
+  },
+  intangible_asset: {
+    type: 'intangible_asset', label: '무형자산',
+    sub: '무형자산(소프트웨어·특허 등)을 관리합니다.',
+    fields: [
+      { key: 'code', label: '자산번호', kind: 'text', w: 120 },
+      { key: 'name', label: '자산명', kind: 'text', req: true },
+      { key: 'amount', label: '취득가액', kind: 'num', w: 130 },
+      { key: 'start_date', label: '취득일', kind: 'date', w: 130 },
+      { key: 'memo', label: '비고', kind: 'text' },
+    ],
+  },
+}
+
+const emptyRefForm = (fields) => Object.fromEntries(fields.map(fd => [fd.key, '']))
+
+const RefMasterPanel = ({ cfg }) => {
+  const toast = useToast()
+  const { confirm } = useConfirm()
+  const [rows, setRows] = useState([])
+  const [q, setQ] = useState('')
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [form, setForm] = useState(emptyRefForm(cfg.fields))
+
+  const load = () => api.getRefItems(cfg.type).then(setRows)
+  useEffect(() => { load() }, [cfg.type])
+
+  const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
+  const filtered = rows.filter(r => !q || cfg.fields.some(fd => String(r[fd.key] ?? '').includes(q)))
+
+  const openNew = () => { setEditing(null); setForm(emptyRefForm(cfg.fields)); setDrawerOpen(true) }
+  const openEdit = (r) => {
+    setEditing(r)
+    setForm(Object.fromEntries(cfg.fields.map(fd => [fd.key, r[fd.key] ?? ''])))
+    setDrawerOpen(true)
+  }
+  const handleSave = async () => {
+    const reqField = cfg.fields.find(fd => fd.req)
+    if (reqField && !String(form[reqField.key] ?? '').trim()) return toast.push(`${reqField.label}을(를) 입력하세요`)
+    const res = editing ? await api.updateRefItem(editing.id, form) : await api.addRefItem({ type: cfg.type, ...form })
+    if (!res.ok) return toast.push(res.error || '저장 실패')
+    toast.push(editing ? '수정됐어요' : '등록됐어요')
+    setDrawerOpen(false); load()
+  }
+  const handleDelete = async (r) => {
+    const ok = await confirm({ tone: 'warn', icon: <Icon.Warn size={22}/>, title: `${r.name} 삭제`, body: '이 항목을 삭제할까요?', confirmLabel: '삭제' })
+    if (!ok) return
+    await api.deleteRefItem(r.id); toast.push('삭제됐어요'); load()
+  }
+
+  const cell = (fd, val) => (val == null || val === '') ? '—' : (fd.kind === 'num' ? fmtNum(val) : val)
+
+  return (
+    <div style={{ padding: 20 }}>
+      <div className="row" style={{ marginBottom: 16, gap: 10, flexWrap: 'wrap' }}>
+        <div>
+          <div className="section-title">{cfg.label}</div>
+          <div className="section-sub">{cfg.sub} · 총 {rows.length}건</div>
+        </div>
+        <div className="search" style={{ margin: 0, marginLeft: 'auto', width: 200, padding: '6px 10px' }}>
+          <Icon.Search size={14}/>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder={`${cfg.label} 검색`}/>
+        </div>
+        <button className="btn primary" onClick={openNew}><Icon.Plus size={14}/> {cfg.label} 등록</button>
+      </div>
+
+      <div className="card" style={{ overflow: 'hidden' }}>
+        <table className="table">
+          <thead>
+            <tr>
+              {cfg.fields.map(fd => <th key={fd.key} className={fd.kind === 'num' ? 'num-right' : undefined} style={fd.w ? { width: fd.w } : undefined}>{fd.label}</th>)}
+              <th style={{ width: 90 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
+              <tr><td colSpan={cfg.fields.length + 1} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)' }}>등록된 {cfg.label}이(가) 없어요. 위에서 추가하세요.</td></tr>
+            )}
+            {filtered.map(r => (
+              <tr key={r.id}>
+                {cfg.fields.map((fd, i) => (
+                  <td key={fd.key}
+                    className={fd.kind === 'num' ? 'num-cell num-right' : (i === 0 ? 'fw-600' : 'text-sm')}
+                    style={{ color: (r[fd.key] == null || r[fd.key] === '') ? 'var(--muted-2)' : undefined }}>
+                    {cell(fd, r[fd.key])}
+                  </td>
+                ))}
+                <td>
+                  <div className="row gap-6">
+                    <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => openEdit(r)}>수정</button>
+                    <button className="btn" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--neg)' }} onClick={() => handleDelete(r)}>삭제</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
+        <div className="drawer-head">
+          <div className="fw-700" style={{ fontSize: 16 }}>{editing ? `${cfg.label} 수정` : `${cfg.label} 등록`}</div>
+          <button className="icon-btn ml-auto" onClick={() => setDrawerOpen(false)}><Icon.Close size={16}/></button>
+        </div>
+        <div className="drawer-body col gap-14">
+          {cfg.fields.map(fd => (
+            <div key={fd.key}>
+              <label className="label" style={{ marginBottom: 8 }}>{fd.label} {fd.req && <span style={{ color: 'var(--neg-ink)' }}>*</span>}</label>
+              <input
+                className={`input ${fd.kind === 'num' ? 'num' : ''}`}
+                type={fd.kind === 'date' ? 'date' : 'text'}
+                value={fd.kind === 'num' ? (form[fd.key] === '' || form[fd.key] == null ? '' : fmtNum(form[fd.key])) : (form[fd.key] ?? '')}
+                onChange={e => f(fd.key, fd.kind === 'num' ? (parseInt(e.target.value.replace(/[^0-9-]/g, ''), 10) || 0) : e.target.value)}
+                placeholder={fd.label}/>
+            </div>
+          ))}
+        </div>
+        <div className="drawer-foot">
+          <button className="btn" onClick={() => setDrawerOpen(false)}>취소</button>
+          <button className="btn primary ml-auto" onClick={handleSave}><Icon.Check size={14}/> 저장</button>
+        </div>
+      </Drawer>
     </div>
   )
 }
@@ -1460,7 +1636,7 @@ export const MasterScreen = ({ user, section = "base" }) => {
     )
   }, []);
 
-  const isCustomTab = ["account", "accountBalance", "recurringExpense", "recurringInvoice", "payroll", "payrollItems", "category", "vendor", "department", "position", "company", "user"].includes(activeTab)
+  const isCustomTab = ["account", "accountBalance", "recurringExpense", "recurringInvoice", "payroll", "payrollItems", "category", "vendor", "department", "position", "company", "user", "jeokyo", "item", "insurance", "fixed_asset", "intangible_asset"].includes(activeTab)
   const data = !isCustomTab ? MASTER_DATA[activeTab] : null
   const rawRows = activeTab === "user" ? userRows : (data?.rows || [])
   const rows = rawRows.filter(r => !q || r.some(c => String(c).toLowerCase().includes(q.toLowerCase())));
@@ -1468,6 +1644,7 @@ export const MasterScreen = ({ user, section = "base" }) => {
   const toggleGroup = (name) => setCollapsed(c => ({ ...c, [name]: !c[name] }));
 
   const renderCustomPanel = () => {
+    if (REF_CONFIGS[activeTab])           return <RefMasterPanel key={activeTab} cfg={REF_CONFIGS[activeTab]}/>
     if (activeTab === "vendor")           return <VendorPanel/>
     if (activeTab === "account")          return <AccountPanel/>
     if (activeTab === "company")          return <CompanyPanel/>

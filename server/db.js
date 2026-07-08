@@ -336,6 +336,25 @@ async function initDb() {
       )
     `)
 
+    // 기준정보 범용 테이블 (적요·품목·보험·고정자산·무형자산) — type으로 구분
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS ref_items (
+        id          VARCHAR(36) PRIMARY KEY,
+        type        VARCHAR(30) NOT NULL,
+        name        VARCHAR(255) NOT NULL,
+        code        VARCHAR(50),
+        spec        VARCHAR(255),
+        unit        VARCHAR(30),
+        party       VARCHAR(255),
+        amount      BIGINT DEFAULT 0,
+        start_date  VARCHAR(20),
+        end_date    VARCHAR(20),
+        memo        VARCHAR(500),
+        sort_order  INT DEFAULT 0,
+        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `)
+
     // ── 마이그레이션: 기존 DB에 신규 컬럼 추가 (MySQL은 ADD COLUMN IF NOT EXISTS 미지원) ──
     const ensureColumn = async (table, col, ddl) => {
       const [[{ cnt }]] = await c.execute(
