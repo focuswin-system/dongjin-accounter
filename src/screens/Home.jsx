@@ -223,7 +223,7 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
           <button className="cat-tile" onClick={() => go("settings")}>
             <div className="c-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Cog size={20}/></div>
             <div className="c-label">환경설정</div>
-            <div className="c-desc">회사 정보 · 사용자 · 문서 양식</div>
+            <div className="c-desc">회사정보·사용자·문서양식</div>
             <div className="c-go">바로가기 <Icon.Right size={11}/></div>
           </button>
         </div>

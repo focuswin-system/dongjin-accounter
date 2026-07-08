@@ -97,7 +97,7 @@ export const PORTAL = [
       { id: 'acct_tax', label: '세무관리', icon: Icon.Doc, desc: '부가세·기타세액 신고', groups: [
         { label: '', items: ['tax_vat', 'tax_etc'] },
       ]},
-      { id: 'master', label: '기준정보', icon: Icon.Folder, desc: '거래처·계정·품목·자산·계좌 등', route: 'master' },
+      { id: 'master', label: '기준정보', icon: Icon.Folder, desc: '거래처·계정·품목·자산 등', route: 'master' },
     ],
   },
   {
