@@ -29,6 +29,34 @@ router.get('/', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+// 발행 예정(대기) 청구 일정 — 계약 청구 일정 중 status='예정' (gubu로 매출/매입 구분)
+router.get('/schedule/pending', async (req, res, next) => {
+  try {
+    const { gubu } = req.query
+    let sql = `SELECT m.id AS milestone_id, m.type, m.amount, m.due_date,
+                      c.id AS contract_id, c.name AS contract_name, c.contract_no, c.vendor_id,
+                      v.name AS vendor_name, v.gubu
+               FROM milestones m
+               JOIN contracts c ON m.contract_id = c.id
+               LEFT JOIN vendors v ON c.vendor_id = v.id
+               WHERE m.status = '예정'`
+    const params = []
+    if (gubu) { sql += ' AND v.gubu = ?'; params.push(gubu) }
+    sql += ' ORDER BY m.due_date'
+    const [rows] = await pool.execute(sql, params)
+    res.json(rows.map(r => ({ ...r, amount: Number(r.amount) })))
+  } catch (e) { next(e) }
+})
+
+// 청구 일정 단건 상태 변경(발행/기입금 처리 후 목록에서 제외)
+router.patch('/milestones/:id/status', async (req, res, next) => {
+  try {
+    const [result] = await pool.execute('UPDATE milestones SET status=? WHERE id=?', [req.body.status || '예정', req.params.id])
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
 router.get('/:id', async (req, res, next) => {
   try {
     const [cRows] = await pool.execute(

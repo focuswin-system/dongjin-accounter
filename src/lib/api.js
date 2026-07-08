@@ -521,6 +521,14 @@ export const api = {
     } catch (e) { return { ok: false, error: e.message } }
   },
 
+  // 발행 예정(대기) 청구 일정 + 단건 상태 변경
+  async getPendingSchedules(gubu) {
+    try { return await req(`/contracts/schedule/pending${gubu ? `?gubu=${gubu}` : ''}`) } catch { return [] }
+  },
+  async updateMilestoneStatus(id, status) {
+    try { await req(`/contracts/milestones/${id}/status`, { method: 'PATCH', body: { status } }); return { ok: true } } catch (e) { return { ok: false, error: e.message } }
+  },
+
   async addMilestones(id, milestones) {
     try {
       await req(`/contracts/${id}/milestones`, { method: 'POST', body: { milestones } })
