@@ -63,4 +63,49 @@ router.put('/vat', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+// ── 기타세액 (원천세·지방소득세 등) ──
+const OT_FIELDS = ['name', 'period', 'tax_amount', 'paid_amount', 'paid_date', 'status', 'memo']
+const otPick = (b) => OT_FIELDS.map(f => (
+  (f === 'tax_amount' || f === 'paid_amount') ? (parseInt(String(b[f]).replace(/[^0-9-]/g, ''), 10) || 0)
+  : (f === 'status') ? (b[f] || '납부 대기')
+  : (b[f] ?? null)
+))
+
+router.get('/others', async (req, res, next) => {
+  try {
+    const [rows] = await pool.execute('SELECT * FROM other_taxes ORDER BY created_at DESC')
+    res.json(rows)
+  } catch (e) { next(e) }
+})
+
+router.post('/others', async (req, res, next) => {
+  try {
+    if (!req.body.name) return res.status(400).json({ error: '세목명 필수' })
+    const id = randomUUID()
+    await pool.execute(
+      'INSERT INTO other_taxes (id, name, period, tax_amount, paid_amount, paid_date, status, memo) VALUES (?,?,?,?,?,?,?,?)',
+      [id, ...otPick(req.body)]
+    )
+    res.json({ ok: true, id })
+  } catch (e) { next(e) }
+})
+
+router.put('/others/:id', async (req, res, next) => {
+  try {
+    const [result] = await pool.execute(
+      'UPDATE other_taxes SET name=?, period=?, tax_amount=?, paid_amount=?, paid_date=?, status=?, memo=? WHERE id=?',
+      [...otPick(req.body), req.params.id]
+    )
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
+router.delete('/others/:id', async (req, res, next) => {
+  try {
+    await pool.execute('DELETE FROM other_taxes WHERE id=?', [req.params.id])
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
 module.exports = router

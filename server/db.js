@@ -370,6 +370,21 @@ async function initDb() {
       )
     `)
 
+    // 기타세액(원천세·지방소득세 등) — 부가세 외 세금 수동 관리 레지스터
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS other_taxes (
+        id          VARCHAR(36) PRIMARY KEY,
+        name        VARCHAR(100) NOT NULL,
+        period      VARCHAR(50),
+        tax_amount  BIGINT DEFAULT 0,
+        paid_amount BIGINT DEFAULT 0,
+        paid_date   VARCHAR(20),
+        status      VARCHAR(30) DEFAULT '납부 대기',
+        memo        VARCHAR(500),
+        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `)
+
     // ── 마이그레이션: 기존 DB에 신규 컬럼 추가 (MySQL은 ADD COLUMN IF NOT EXISTS 미지원) ──
     const ensureColumn = async (table, col, ddl) => {
       const [[{ cnt }]] = await c.execute(

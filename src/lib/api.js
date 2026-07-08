@@ -596,6 +596,18 @@ export const api = {
   async saveVatFiling(data) {
     try { await req('/tax/vat', { method: 'PUT', body: data }); return { ok: true } } catch (e) { return { ok: false, error: e.message } }
   },
+  async getOtherTaxes() {
+    try { return await req('/tax/others') } catch { return [] }
+  },
+  async addOtherTax(data) {
+    try { const r = await req('/tax/others', { method: 'POST', body: data }); return { ok: true, id: r.id } } catch (e) { return { ok: false, error: e.message } }
+  },
+  async updateOtherTax(id, data) {
+    try { await req(`/tax/others/${id}`, { method: 'PUT', body: data }); return { ok: true } } catch (e) { return { ok: false, error: e.message } }
+  },
+  async deleteOtherTax(id) {
+    try { await req(`/tax/others/${id}`, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }
+  },
 
   // ─── 임직원 ───────────────────────────────────────────────────
   async getEmployees() {
