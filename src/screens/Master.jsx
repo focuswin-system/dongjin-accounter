@@ -180,8 +180,8 @@ const HrCodePanel = ({ type, label }) => {
   )
 }
 
-// ── 기준정보 범용 패널 (적요·품목·보험·고정자산·무형자산) ──────────────
-const REF_CONFIGS = {
+// ── 기준정보 범용 패널 (적요·품목·보험·고정자산·무형자산·근로계약·기타용역) ──
+export const REF_CONFIGS = {
   jeokyo: {
     type: 'jeokyo', label: '적요',
     sub: '거래 입력 시 자주 쓰는 적요(내용) 문구를 등록해두면 빠르게 선택할 수 있어요.',
@@ -235,11 +235,35 @@ const REF_CONFIGS = {
       { key: 'memo', label: '비고', kind: 'text' },
     ],
   },
+  labor_contract: {
+    type: 'labor_contract', label: '근로계약',
+    sub: '직원 근로계약(고용형태·급여·계약기간)을 관리합니다.',
+    fields: [
+      { key: 'name', label: '직원명', kind: 'text', req: true },
+      { key: 'code', label: '사번', kind: 'text', w: 100 },
+      { key: 'party', label: '고용형태', kind: 'text', w: 110 },
+      { key: 'amount', label: '연봉/급여', kind: 'num', w: 130 },
+      { key: 'start_date', label: '계약시작', kind: 'date', w: 130 },
+      { key: 'end_date', label: '계약종료', kind: 'date', w: 130 },
+    ],
+  },
+  outsourcing: {
+    type: 'outsourcing', label: '기타 용역·일용',
+    sub: '용역·일용직 등 비정규 인력의 지급 내역을 관리합니다.',
+    fields: [
+      { key: 'name', label: '성명', kind: 'text', req: true },
+      { key: 'party', label: '구분', kind: 'text', w: 100 },
+      { key: 'spec', label: '업무내용', kind: 'text' },
+      { key: 'amount', label: '지급액', kind: 'num', w: 120 },
+      { key: 'start_date', label: '지급일', kind: 'date', w: 130 },
+    ],
+  },
 }
 
 const emptyRefForm = (fields) => Object.fromEntries(fields.map(fd => [fd.key, '']))
 
-const RefMasterPanel = ({ cfg }) => {
+// page=true 면 도메인 독립 화면(페이지 타이틀), 아니면 기준정보 서브패널
+export const RefMasterPanel = ({ cfg, page = false }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [rows, setRows] = useState([])
@@ -277,11 +301,11 @@ const RefMasterPanel = ({ cfg }) => {
   const cell = (fd, val) => (val == null || val === '') ? '—' : (fd.kind === 'num' ? fmtNum(val) : val)
 
   return (
-    <div style={{ padding: 20 }}>
+    <div className={page ? 'fade-up' : undefined} style={page ? undefined : { padding: 20 }}>
       <div className="row" style={{ marginBottom: 16, gap: 10, flexWrap: 'wrap' }}>
         <div>
-          <div className="section-title">{cfg.label}</div>
-          <div className="section-sub">{cfg.sub} · 총 {rows.length}건</div>
+          <div className={page ? 'page-title' : 'section-title'}>{cfg.label}</div>
+          <div className={page ? 'page-sub' : 'section-sub'}>{cfg.sub} · 총 {rows.length}건</div>
         </div>
         <div className="search" style={{ margin: 0, marginLeft: 'auto', width: 200, padding: '6px 10px' }}>
           <Icon.Search size={14}/>

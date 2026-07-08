@@ -9,9 +9,11 @@ import { TransactionForm } from './screens/Form'
 import { ContractListScreen, ContractScreen, CONTRACT_LIST } from './screens/Contract'
 import { DocsScreen, EvidenceScreen, EvidenceAttachDrawer, ExcelScreen, ReportsScreen } from './screens/Docs'
 import { HRScreen } from './screens/HR'
-import { MasterScreen } from './screens/Master'
+import { MasterScreen, RefMasterPanel, REF_CONFIGS } from './screens/Master'
 import { BillingScreen } from './screens/Billing'
 import { TaxVatScreen, OtherTaxScreen } from './screens/Tax'
+import { MiscPLScreen } from './screens/MiscPL'
+import { MgmtDashScreen } from './screens/Mgmt'
 
 // 포털형 2뎁스 네비게이션 트리 (도메인 → 업무 섹션 → 잎 메뉴)
 // 기존 라우트를 잎으로 그대로 매핑. 미구현 잎은 disabled: true 로 "준비중" 표시.
@@ -34,7 +36,7 @@ const NAV_TREE = [
         { id: "doc",               label: "지급결의서",  icon: Icon.Sign },
       ]},
       { label: "경비·잡손익", items: [
-        { id: "misc_pl", label: "경비·잡손익", icon: Icon.Doc, disabled: true },
+        { id: "misc_pl", label: "경비·잡손익", icon: Icon.Doc },
       ]},
       { label: "거래·계약", items: [
         { id: "ledger",   label: "전체 거래내역", icon: Icon.Wallet },
@@ -56,6 +58,10 @@ const NAV_TREE = [
       { label: "인사·급여", items: [
         { id: "hr", label: "인사관리", icon: Icon.Building },
       ]},
+      { label: "근로·용역", items: [
+        { id: "hr_labor_contract", label: "근로계약",      icon: Icon.Sign },
+        { id: "hr_outsourcing",    label: "기타 용역·일용", icon: Icon.Briefcase },
+      ]},
       { label: "기준정보", items: [
         { id: "hr_base", label: "부서·직위·급여", icon: Icon.Folder },
       ]},
@@ -68,7 +74,7 @@ const NAV_TREE = [
         { id: "report", label: "보고서", icon: Icon.Chart },
       ]},
       { label: "경영관리", items: [
-        { id: "mgmt_dash", label: "경영 대시보드", icon: Icon.Trend, disabled: true },
+        { id: "mgmt_dash", label: "경영 대시보드", icon: Icon.Trend },
       ]},
     ],
   },
@@ -112,6 +118,10 @@ const CRUMB_MAP = {
   contract_purchase:["구매·매입", "매입 계약"],
   contract_detail: ["계약", null],
   hr:              ["인사관리"],
+  hr_labor_contract:["인사급여", "근로계약"],
+  hr_outsourcing:  ["인사급여", "기타 용역·일용"],
+  misc_pl:         ["구매·매입", "경비·잡손익"],
+  mgmt_dash:       ["경영관리", "경영 대시보드"],
   report:          ["보고서"],
   tax_vat:         ["세무관리", "부가세"],
   tax_etc:         ["세무관리", "기타세액"],
@@ -398,6 +408,10 @@ function AppInner({ onLogout, user }) {
       case "master":          return <MasterScreen user={user} section="base"/>;
       case "settings":        return <MasterScreen user={user} section="settings"/>;
       case "hr_base":         return <MasterScreen user={user} section="hr"/>;
+      case "hr_labor_contract": return <RefMasterPanel cfg={REF_CONFIGS.labor_contract} page/>;
+      case "hr_outsourcing":  return <RefMasterPanel cfg={REF_CONFIGS.outsourcing} page/>;
+      case "misc_pl":         return <MiscPLScreen/>;
+      case "mgmt_dash":       return <MgmtDashScreen/>;
       case "excel_modal":     return <ExcelScreen/>;
       case "income":          return <LedgerScreen initialFilter="income" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
       case "expense":         return <LedgerScreen initialFilter="expense" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
@@ -413,7 +427,8 @@ function AppInner({ onLogout, user }) {
   const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger"
                 : route.startsWith("billing") ? "billing"
                 : (route === "contract_sales" || route === "contract_purchase") ? "contract"
-                : (route === "settings" || route === "hr_base") ? "master" : route;
+                : (route === "settings" || route === "hr_base" || route === "hr_labor_contract" || route === "hr_outsourcing") ? "master"
+                : route === "mgmt_dash" ? "report" : route;
   const help = HELP_MAP[helpKey] || HELP_MAP.home;
 
   let crumbs = CRUMB_MAP[route] || ["홈"];
