@@ -763,7 +763,29 @@ export const api = {
     } catch { return null }
   },
 
-  async getHomeTodos() { return [] },
+  async getHomeTodos() {
+    try {
+      const [rec, pay] = await Promise.all([this.getReceivables(), this.getPayables()])
+      const won = (n) => (n || 0).toLocaleString() + '원'
+      const todos = []
+      ;(rec.rows || [])
+        .filter(r => ['입금 예정', '일부 입금', '기한 지남', '장기 미수'].includes(r.status))
+        .slice(0, 4)
+        .forEach(r => todos.push({
+          id: 'ar-' + r.id, kind: 'ar',
+          tag: r.delay > 0 ? `${r.delay}일 초과` : '입금 예정',
+          title: `${r.vendor} 입금 확인`, sub: `${r.contract || ''} ${won(r.remain)}`.trim(), action: '입금 처리',
+        }))
+      ;(pay.rows || [])
+        .filter(r => ['지급 예정', '지급 대기', '기한 지남'].includes(r.pay))
+        .slice(0, 4)
+        .forEach(r => todos.push({
+          id: 'ap-' + r.id, kind: 'ap', tag: '지급 예정',
+          title: `${r.vendor} 이체`, sub: `${r.category || ''} ${won(r.amount)}`.trim(), action: '이체',
+        }))
+      return todos
+    } catch { return [] }
+  },
 
   async completeTodo() { return { ok: true } },
 

@@ -172,6 +172,50 @@ a { color: inherit; text-decoration: none; }
 .nav-item.disabled { opacity: 0.45; cursor: not-allowed; }
 .nav-item.disabled:hover { background: transparent; color: var(--muted); }
 
+/* ── 홈 포털 허브 ── */
+.portal-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1100px) { .portal-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px)  { .portal-grid { grid-template-columns: 1fr; } }
+.portal-panel { padding: 18px 20px; }
+.portal-phead {
+  display: flex; align-items: center; gap: 10px;
+  padding-bottom: 14px; margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.portal-phead .p-ico {
+  width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0;
+  background: var(--brand-soft); color: var(--brand);
+  display: grid; place-items: center;
+}
+.portal-sec { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.portal-sec:last-child { border-bottom: 0; padding-bottom: 2px; }
+.portal-sec-label { font-size: 11.5px; font-weight: 700; color: var(--muted-2); margin-bottom: 8px; letter-spacing: 0.02em; }
+.portal-links { display: flex; flex-wrap: wrap; gap: 6px; }
+.portal-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 8px;
+  background: var(--surface-2); color: var(--ink);
+  font-size: 12.5px; font-weight: 500; border: 0; cursor: pointer;
+  font-family: inherit; transition: background .12s, color .12s;
+}
+.portal-link:hover { background: var(--brand-soft); color: var(--brand-ink); }
+.portal-link .nav-ico { width: 14px; height: 14px; opacity: 0.7; }
+.fav-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 12px; border-radius: 10px;
+  background: #fff; border: 1px solid var(--line);
+  font-size: 13px; font-weight: 600; color: var(--ink);
+  cursor: pointer; font-family: inherit; transition: border-color .12s;
+}
+.fav-chip:hover { border-color: var(--line-strong); }
+.fav-chip .fav-x { opacity: 0; transition: opacity .12s; display: inline-flex; color: var(--muted-2); }
+.fav-chip:hover .fav-x { opacity: 1; }
+
 .sidebar-footer {
   margin-top: 4px;
   padding: 12px 8px 0;
