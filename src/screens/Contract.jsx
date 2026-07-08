@@ -835,7 +835,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       file_name:   editForm.file_name || null,
     });
     if (res.ok) { toast.push("수정됐어요"); setEditOpen(false); reload(); }
-    else toast.push("저장 실패");
+    else toast.push(res.error || "저장 실패");
   };
 
   if (!c) return <div style={{ padding: 40, textAlign: "center", color: "var(--muted-2)" }}>불러오는 중...</div>;
@@ -1282,7 +1282,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
       setNewForm(NEW_CONTRACT_FORM);
       reload();
     } else {
-      toast.push("저장에 실패했어요");
+      toast.push(res.error || "저장에 실패했어요");
     }
   };
 
@@ -1305,8 +1305,8 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
   const exportCsv = () => {
     if (rows.length === 0) return toast.push("내보낼 계약이 없어요");
     downloadCsv(`계약목록_${new Date().toISOString().slice(0, 10)}.csv`,
-      ["계약명", "거래처", "계약금액", "입금완료", "남은미수금", "지출", "상태"],
-      rows.map(r => [r.name, r.vendor_name || r.vendor || "", r.amount || 0, r.in_done || 0, r.remain || 0, r.out || 0, r.status]));
+      ["계약명", "계약번호", "거래처", "계약금액", "입금완료", "남은미수금", "지출", "상태"],
+      rows.map(r => [r.name, r.contract_no || "", r.vendor_name || r.vendor || "", r.amount || 0, r.in_done || 0, r.remain || 0, r.out || 0, r.status]));
   };
 
   return (
@@ -1365,7 +1365,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
           <table className="table">
             <thead>
               <tr>
-                <th style={{ width: "30%" }}>계약</th><th>거래처</th>
+                <th style={{ width: "26%" }}>계약</th><th style={{ width: 120 }}>계약번호</th><th>거래처</th>
                 <th className="num-right">계약금액</th><th className="num-right">입금 완료</th>
                 <th className="num-right">남은 미수금</th><th className="num-right">지출액</th>
                 <th className="num-right">예상 손익</th><th>상태</th>
@@ -1377,10 +1377,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
                 return (
                   <tr key={i} style={{ cursor: "pointer" }} onClick={() => goDetail(r.id, r.name)}>
                     <td>
-                      <div className="fw-600">
-                        {r.name}
-                        {r.contract_no && <span className="badge outline" style={{ marginLeft: 8, fontSize: 10 }}>{r.contract_no}</span>}
-                      </div>
+                      <div className="fw-600">{r.name}</div>
                       <div className="row gap-8" style={{ marginTop: 8 }}>
                         <div className="bar-track" style={{ width: 140 }}>
                           <div className="bar-fill" style={{ width: `${pct}%` }}/>
@@ -1389,6 +1386,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
                         <span className="text-xs text-muted2">· {r.start_date || r.startDate || '—'}</span>
                       </div>
                     </td>
+                    <td className="text-sm num" style={{ color: r.contract_no ? undefined : "var(--muted-2)" }}>{r.contract_no || '—'}</td>
                     <td className="fw-600">{r.vendor_name || r.vendor || '—'}</td>
                     <td className="num-cell num-right">{fmtNum(r.amount || 0)}</td>
                     <td className="num-cell num-right">{fmtNum(r.in_done || r.inDone || 0)}</td>

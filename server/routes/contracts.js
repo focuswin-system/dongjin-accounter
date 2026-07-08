@@ -121,7 +121,10 @@ router.post('/', async (req, res, next) => {
       [id, vendor_id||null, name, amount, start_date||null, end_date||null, status||'진행중', buyer_code||null, pu_no||null, order_no||null, vessel_code||null, cost_budget ? JSON.stringify(cost_budget) : null, file_url||null, file_name||null, contract_no||null]
     )
     res.json({ id })
-  } catch (e) { next(e) }
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '이미 사용 중인 계약번호예요' })
+    next(e)
+  }
 })
 
 router.put('/:id', async (req, res, next) => {
@@ -133,7 +136,10 @@ router.put('/:id', async (req, res, next) => {
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
-  } catch (e) { next(e) }
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '이미 사용 중인 계약번호예요' })
+    next(e)
+  }
 })
 
 router.post('/:id/milestones', async (req, res, next) => {

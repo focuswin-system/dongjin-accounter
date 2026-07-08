@@ -368,6 +368,20 @@ async function initDb() {
     await ensureColumn('contracts', 'file_name', "file_name VARCHAR(300)")
     // 계약번호(계약서 번호) — 회사에 따라 계약을 번호로 식별
     await ensureColumn('contracts', 'contract_no', "contract_no VARCHAR(50)")
+    // 계약번호 중복 방지(UNIQUE). MySQL은 NULL을 다중 허용 → 번호 미사용 계약은 공존.
+    // 기존 중복 데이터가 있으면 인덱스 생성이 실패하므로 무시(수동 정리 후 재기동 시 적용).
+    const ensureUniqueIndex = async (table, index, col) => {
+      const [[{ cnt }]] = await c.execute(
+        `SELECT COUNT(*) AS cnt FROM information_schema.statistics
+         WHERE table_schema = ? AND table_name = ? AND index_name = ?`,
+        [DB_NAME, table, index]
+      )
+      if (cnt === 0) {
+        try { await c.execute(`ALTER TABLE \`${table}\` ADD UNIQUE INDEX \`${index}\` (${col})`) }
+        catch (e) { console.warn(`[migration] ${index} 생성 실패(중복 데이터 가능): ${e.message}`) }
+      }
+    }
+    await ensureUniqueIndex('contracts', 'uq_contracts_contract_no', 'contract_no')
 
     // 표준 공제 항목 4대보험 요율: 2025년 시드값 → 2026년 확정값으로 1회 보정
     // (사용자가 직접 바꾼 값은 건드리지 않도록, 구(舊)값과 정확히 일치할 때만 갱신)
