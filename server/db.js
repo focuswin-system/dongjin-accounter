@@ -355,6 +355,21 @@ async function initDb() {
       )
     `)
 
+    // 부가세 신고 상태(분기별 납부/환급) — 집계는 invoices에서, 상태만 저장
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS vat_filings (
+        id          VARCHAR(36) PRIMARY KEY,
+        year        INT NOT NULL,
+        quarter     INT NOT NULL,
+        status      VARCHAR(30) DEFAULT '납부 대기',
+        paid_amount BIGINT DEFAULT 0,
+        paid_date   VARCHAR(20),
+        memo        VARCHAR(500),
+        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_vat_filing (year, quarter)
+      )
+    `)
+
     // ── 마이그레이션: 기존 DB에 신규 컬럼 추가 (MySQL은 ADD COLUMN IF NOT EXISTS 미지원) ──
     const ensureColumn = async (table, col, ddl) => {
       const [[{ cnt }]] = await c.execute(

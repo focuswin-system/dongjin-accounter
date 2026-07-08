@@ -589,6 +589,14 @@ export const api = {
     try { await req(`/ref-items/${id}`, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }
   },
 
+  // 부가세(세무관리)
+  async getVatSummary(year) {
+    try { return await req(`/tax/vat?year=${year}`) } catch { return { year, quarters: [] } }
+  },
+  async saveVatFiling(data) {
+    try { await req('/tax/vat', { method: 'PUT', body: data }); return { ok: true } } catch (e) { return { ok: false, error: e.message } }
+  },
+
   // ─── 임직원 ───────────────────────────────────────────────────
   async getEmployees() {
     try { return (await req('/employees')).map(adaptEmployee) } catch { return [] }

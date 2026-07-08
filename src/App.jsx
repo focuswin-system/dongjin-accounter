@@ -11,6 +11,7 @@ import { DocsScreen, EvidenceScreen, EvidenceAttachDrawer, ExcelScreen, ReportsS
 import { HRScreen } from './screens/HR'
 import { MasterScreen } from './screens/Master'
 import { BillingScreen } from './screens/Billing'
+import { TaxVatScreen } from './screens/Tax'
 
 // 포털형 2뎁스 네비게이션 트리 (도메인 → 업무 섹션 → 잎 메뉴)
 // 기존 라우트를 잎으로 그대로 매핑. 미구현 잎은 disabled: true 로 "준비중" 표시.
@@ -41,7 +42,7 @@ const NAV_TREE = [
         { id: "evidence", label: "증빙 관리",     icon: Icon.Folder },
       ]},
       { label: "세무관리", items: [
-        { id: "tax_vat", label: "부가세",   icon: Icon.Doc, disabled: true },
+        { id: "tax_vat", label: "부가세",   icon: Icon.Doc },
         { id: "tax_etc", label: "기타세액", icon: Icon.Doc, disabled: true },
       ]},
       { label: "기준정보", items: [
@@ -112,6 +113,7 @@ const CRUMB_MAP = {
   contract_detail: ["계약", null],
   hr:              ["인사관리"],
   report:          ["보고서"],
+  tax_vat:         ["세무관리", "부가세"],
   master:          ["일반회계", "기준정보"],
   settings:        ["환경설정"],
   hr_base:         ["인사급여", "기준정보"],
@@ -390,6 +392,7 @@ function AppInner({ onLogout, user }) {
       case "contract_detail": return <ContractScreen goList={() => go("contract")} contractId={contractId} refreshTrigger={txnVersion} openIncome={(contract, vendor) => setTxnForm({ kind: "income", contract, vendor })} openExpense={(contract, vendor) => setTxnForm({ kind: "expense", contract, vendor })}/>;
       case "hr":              return <HRScreen/>;
       case "report":          return <ReportsScreen/>;
+      case "tax_vat":         return <TaxVatScreen/>;
       case "master":          return <MasterScreen user={user} section="base"/>;
       case "settings":        return <MasterScreen user={user} section="settings"/>;
       case "hr_base":         return <MasterScreen user={user} section="hr"/>;
