@@ -20,7 +20,7 @@ export const MgmtDashScreen = () => {
     let alive = true
     ;(async () => {
       const [ar, ap, contracts, vat] = await Promise.all([
-        api.getReceivables(), api.getPayables(), api.getContracts(), api.getVatSummary(year),
+        api.getReceivables(), api.getPayables(), api.getContracts(), api.getVatFilings(year),
       ])
       if (alive) setD({ ar, ap, contracts, vat })
     })()

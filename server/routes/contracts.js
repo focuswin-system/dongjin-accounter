@@ -92,19 +92,22 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
       [kind, `${prefix}-${year}-%`]
     )
     const invoice_no = `${prefix}-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
+    // 기입금 시 반영할 기본 계좌(주거래 계좌). 없으면 null
+    const [[defAcc]] = await conn.execute("SELECT id FROM accounts WHERE kind='bank' ORDER BY created_at LIMIT 1")
+    const accountId = defAcc ? defAcc.id : null
     const invId = randomUUID()
     const status = paid ? (isPurchase ? '지급 완료' : '입금 완료') : (isPurchase ? '지급 대기' : '입금 예정')
     await conn.execute(
-      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-      [invId, invoice_no, kind, ms.vendor_id || null, ms.contract_id, supply, vat, total, today, ms.due_date || null, status, `${ms.contract_name} · ${ms.type}`]
+      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [invId, invoice_no, kind, ms.vendor_id || null, ms.contract_id, supply, vat, total, today, ms.due_date || null, status, paid ? accountId : null, `${ms.contract_name} · ${ms.type}`]
     )
     // 기입금: 실제 입/출금 거래 + 매칭 생성(장부·계좌·계약 수금에 반영)
     if (paid) {
       const txnId = randomUUID()
       await conn.execute(
-        `INSERT INTO transactions (id, kind, vendor_id, contract_id, category, amount, date, method, status, buyer_type, doc_no, invoice_id, memo)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [txnId, isPurchase ? 'expense' : 'income', ms.vendor_id || null, ms.contract_id,
+        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, doc_no, invoice_id, memo)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [txnId, isPurchase ? 'expense' : 'income', ms.vendor_id || null, ms.contract_id, accountId,
          isPurchase ? '대금 지급' : '수금', total, date || today, '계좌이체',
          isPurchase ? '지급완료' : '입금완료', '공통', '', invId, `청구서 ${invoice_no} 정산`]
       )

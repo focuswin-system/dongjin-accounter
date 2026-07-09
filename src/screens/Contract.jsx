@@ -634,7 +634,7 @@ const downloadCsv = (filename, headers, rows) => {
 
 /* ============ 청구 일정 편집 Drawer ============ */
 const MS_TYPES = ["정기", "일시", "계약금", "중도금", "잔금"]
-const MS_STATUSES = ["예정", "입금 예정", "일부 입금", "입금 완료", "기한 지남"]
+const MS_STATUSES = ["예정", "입금 예정", "일부 입금", "입금 완료", "지급 예정", "지급 완료", "기한 지남"]
 
 function MilestoneEditDrawer({ open, onClose, contractId, initial, onSaved }) {
   const toast = useToast()
@@ -673,7 +673,21 @@ function MilestoneEditDrawer({ open, onClose, contractId, initial, onSaved }) {
       </div>
       <div className="drawer-body col" style={{ gap: 12 }}>
         {rows.length === 0 && <div className="text-sm text-muted2" style={{ padding: '8px 0' }}>아직 청구 일정이 없어요. 아래에서 추가하세요.</div>}
-        {rows.map((m, i) => (
+        {rows.map((m, i) => {
+          // 이미 청구서로 발행된 회차는 수정 불가(청구서와 금액이 어긋나지 않도록)
+          const locked = !!m.invoice_id
+          if (locked) return (
+            <div key={i} className="card" style={{ padding: 12, border: '1px solid var(--brand-soft)', background: 'var(--surface-2)' }}>
+              <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                <span className="badge outline">{m.type}</span>
+                <span className="num fw-700">{fmtNum(m.amount)}</span>
+                <span className="text-sm text-muted">{m.due_date || '—'}</span>
+                <StatusBadge status={m.status}/>
+                <span className="badge brand ml-auto" style={{ fontSize: 10 }}>발행됨 · 수정 불가</span>
+              </div>
+            </div>
+          )
+          return (
           <div key={i} className="card" style={{ padding: 12, border: '1px solid var(--line)' }}>
             <div className="row gap-8" style={{ marginBottom: 8, alignItems: 'flex-start' }}>
               <div style={{ flex: 1 }}>
@@ -692,7 +706,8 @@ function MilestoneEditDrawer({ open, onClose, contractId, initial, onSaved }) {
               <input className="input" type="date" style={{ flex: 2 }} value={m.due_date} onChange={e => upd(i, 'due_date', e.target.value)}/>
             </div>
           </div>
-        ))}
+          )
+        })}
         <button className="btn" onClick={addRow}><Icon.Plus size={13}/> 청구 일정 추가</button>
       </div>
       <div className="drawer-foot">
@@ -1295,6 +1310,12 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
   // 거래처 gubu로 매출(B)·매입(A/E) 분류. gubu 미상은 매출로 간주(기존 데이터 호환).
   const vendorGubu = useMemo(() => Object.fromEntries(vendors.map(v => [v.id, v.gubu])), [vendors]);
   const isPurchase = (r) => { const g = vendorGubu[r.vendor_id]; return g === "A" || g === "E"; };
+  // 남은 잔액: 매출=총액−수금, 매입=총액−지급 (총액=공급가×1.1)
+  const rowRemain = (r) => {
+    const total = Math.round((r.amount || 0) * 1.1);
+    const done = isPurchase(r) ? (r.out || 0) : (r.in_done ?? r.inDone ?? 0);
+    return Math.max(0, total - done);
+  };
   const scoped = allContracts.filter(r => kind === "all" ? true : kind === "purchase" ? isPurchase(r) : !isPurchase(r));
 
   const pms = useMemo(() => [...new Set(scoped.map(c => c.pm).filter(Boolean))].sort(), [scoped]);
@@ -1305,7 +1326,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
 
   const totals = scoped.reduce((a, c) => ({
     amount: a.amount + (c.amount || 0), inDone: a.inDone + (c.in_done || c.inDone || 0),
-    remain: a.remain + (c.remain || 0), out: a.out + (c.out || 0),
+    remain: a.remain + rowRemain(c), out: a.out + (c.out || 0),
   }), { amount: 0, inDone: 0, remain: 0, out: 0 });
 
   const exportCsv = () => {
@@ -1332,7 +1353,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
       <div className="grid grid-4-to-2" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
         <MiniStat label="진행중 계약"   value={`${scoped.filter(c => c.status === "진행중").length}건`} sub={`총 ${scoped.length}건`} tone="ink"/>
         <MiniStat label="계약금액 합계" value={fmtNum(totals.amount) + "원"}  sub="진행 + 완료"                                                tone="brand"/>
-        <MiniStat label={kind === "purchase" ? "미지급 잔액" : "남은 미수금"} value={fmtNum(totals.remain) + "원"} sub={`${scoped.filter(c => (c.remain || 0) > 0).length}건 잔존`} tone="warn"/>
+        <MiniStat label={kind === "purchase" ? "미지급 잔액" : "남은 미수금"} value={fmtNum(totals.remain) + "원"} sub={`${scoped.filter(c => rowRemain(c) > 0).length}건 잔존`} tone="warn"/>
         <MiniStat label="누적 지출"     value={fmtNum(totals.out) + "원"}     sub="모든 계약"                                                  tone="neg"/>
       </div>
       <Spacer h={20}/>
@@ -1373,7 +1394,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
               <tr>
                 <th style={{ width: "26%" }}>계약</th><th style={{ width: 120 }}>계약번호</th><th>거래처</th>
                 <th className="num-right">계약금액</th><th className="num-right">입금 완료</th>
-                <th className="num-right">남은 미수금</th><th className="num-right">지출액</th>
+                <th className="num-right">남은 잔액</th><th className="num-right">지출액</th>
                 <th className="num-right">예상 손익</th><th>상태</th>
               </tr>
             </thead>
@@ -1396,7 +1417,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
                     <td className="fw-600">{r.vendor_name || r.vendor || '—'}</td>
                     <td className="num-cell num-right">{fmtNum(r.amount || 0)}</td>
                     <td className="num-cell num-right">{fmtNum(r.in_done || r.inDone || 0)}</td>
-                    <td className="num-cell num-right fw-700" style={{ color: (r.remain || 0) > 0 ? "var(--warn-ink)" : "var(--muted-2)" }}>{(r.remain || 0) > 0 ? fmtNum(r.remain) : "—"}</td>
+                    <td className="num-cell num-right fw-700" style={{ color: rowRemain(r) > 0 ? "var(--warn-ink)" : "var(--muted-2)" }}>{rowRemain(r) > 0 ? fmtNum(rowRemain(r)) : "—"}</td>
                     <td className="num-cell num-right text-muted">{fmtNum(r.out || 0)}</td>
                     <td className="num-cell num-right fw-700" style={{ color: (r.profit || 0) < 0 ? "var(--neg-ink)" : "var(--pos)" }}>{(r.profit || 0) >= 0 ? "+" : ""}{fmtNum(r.profit || 0)}</td>
                     <td><StatusBadge status={r.status}/></td>

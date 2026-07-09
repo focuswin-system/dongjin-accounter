@@ -267,7 +267,7 @@ export const api = {
     try {
       await req(`/invoices/${id}`, { method: 'DELETE' })
       return { ok: true }
-    } catch { return { ok: false } }
+    } catch (e) { return { ok: false, error: e.message } }
   },
 
   async getMatchable(invoiceId) {
@@ -915,9 +915,9 @@ export const api = {
         const due = i.dueAt ? new Date(i.dueAt) : null
         if (due) due.setHours(0, 0, 0, 0)
         const delay = due ? Math.max(0, Math.round((today - due) / 86400000)) : 0
-        // 마감일 경과 시 상태 자동 전이(저장 상태에 의존하지 않도록): 90일↑ 장기미수, 그 외 기한지남
-        const eff = (i.remainAmount > 0 && delay > 90) ? '장기 미수'
-                  : (i.remainAmount > 0 && delay > 0)  ? '기한 지남'
+        // 마감일 경과 시 자동 전이(미납분만; '일부 입금'은 해당 탭 유지): 90일↑ 장기미수, 그 외 기한지남
+        const eff = (i.status === '입금 예정' && delay > 90) ? '장기 미수'
+                  : (i.status === '입금 예정' && delay > 0)  ? '기한 지남'
                   : i.status
         return { id: i.id, vendor: i.vendor, contract: i.contract,
                  billed: i.totalAmount, paid: i.paidAmount, remain: i.remainAmount,
@@ -950,7 +950,7 @@ export const api = {
         const due = i.dueAt ? new Date(i.dueAt) : null
         if (due) due.setHours(0, 0, 0, 0)
         const delay = due ? Math.max(0, Math.round((today - due) / 86400000)) : 0
-        const eff = (i.remainAmount > 0 && delay > 0) ? '기한 지남' : i.status
+        const eff = ((i.status === '지급 예정' || i.status === '지급 대기') && delay > 0) ? '기한 지남' : i.status
         return { id: i.id, vendor: i.vendor, scope: i.contract || i.memo || '—',
                  category: i.category || '—', amount: i.remainAmount,
                  due: i.dueAt || '', delay, doc: i.doc || '승인 완료', pay: eff }

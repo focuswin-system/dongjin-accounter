@@ -131,6 +131,9 @@ router.delete('/:id', async (req, res, next) => {
   try {
     await conn.beginTransaction()
     const id = req.params.id
+    // 입금/지급(매칭) 내역이 있으면 삭제 금지 — 이미 장부에 반영된 돈이므로
+    const [[{ mcnt }]] = await conn.execute('SELECT COUNT(*) AS mcnt FROM invoice_matches WHERE invoice_id = ?', [id])
+    if (mcnt > 0) { await conn.rollback(); return res.status(409).json({ error: '입금·지급 내역이 있는 청구서는 삭제할 수 없어요. 먼저 입금 매칭을 취소하세요.' }) }
     await conn.execute('DELETE FROM invoice_matches WHERE invoice_id = ?', [id])
     await conn.execute('DELETE FROM invoice_docs WHERE invoice_id = ?', [id])
     await conn.execute('UPDATE transactions SET invoice_id = NULL WHERE invoice_id = ?', [id])

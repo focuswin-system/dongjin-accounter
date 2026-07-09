@@ -67,11 +67,12 @@ router.post('/generate', async (_, res, next) => {
 
       for (const dueStr of dues) {
         const year = dueStr.slice(0, 4)
-        const [[{ cnt }]] = await conn.execute(
-          "SELECT COUNT(*) AS cnt FROM invoices WHERE kind='issued' AND issued_at LIKE ?",
-          [`${year}%`]
+        // 채번: 최대 일련번호+1 (issue/수동 발행과 동일 방식 — 삭제 후 번호 재사용/중복 방지)
+        const [[{ maxno }]] = await conn.execute(
+          "SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(invoice_no, '-', -1) AS UNSIGNED)), 0) AS maxno FROM invoices WHERE kind='issued' AND invoice_no LIKE ?",
+          [`청구-${year}-%`]
         )
-        const invoice_no = `청구-${year}-${String(Number(cnt) + 1).padStart(4, '0')}`
+        const invoice_no = `청구-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
         const supply = Number(r.supply_amount)
         const vat    = r.vat_mode === 'none' ? 0 : Math.round(supply * 0.1)
         const total  = supply + vat

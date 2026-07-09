@@ -132,7 +132,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
               onClick={async () => {
                 const ok = await confirm({ tone: "neg", icon: <Icon.Warn size={22}/>,
                   title: "청구서 삭제", body: "이 청구서를 삭제합니다. 되돌릴 수 없어요.", confirmLabel: "삭제" })
-                if (ok) { toast.push("청구서가 삭제됐어요"); onClose(); if (onDelete) onDelete(invoice.id); }
+                if (ok) { onClose(); if (onDelete) onDelete(invoice.id); }
               }}>
               삭제
             </button>
@@ -798,7 +798,7 @@ export const BillingScreen = ({ initialTab = "issued" }) => {
         invoice={selected}
         onClose={() => setSelected(null)}
         onMatch={handleMatch}
-        onDelete={async (id) => { const r = await api.deleteInvoice(id); if (r.ok === false) toast.push("삭제에 실패했어요"); load() }}
+        onDelete={async (id) => { const r = await api.deleteInvoice(id); toast.push(r.ok ? "청구서가 삭제됐어요" : (r.error || "삭제에 실패했어요")); load() }}
         onEdit={(inv) => { setEditInvoice(inv); setSelected(null); setFormOpen(true) }}
         toast={toast}
       />
