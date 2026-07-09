@@ -29,32 +29,91 @@ router.get('/', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// 발행 예정(대기) 청구 일정 — 계약 청구 일정 중 status='예정' (gubu로 매출/매입 구분)
+// 발행 예정(대기) 청구 일정 — status='예정' & 아직 미발행(invoice_id NULL)
+// for=sales → 발주처(gubu B)+미지정(NULL) / for=purchase → 매입(A·E)
 router.get('/schedule/pending', async (req, res, next) => {
   try {
-    const { gubu } = req.query
+    const forKind = req.query.for
     let sql = `SELECT m.id AS milestone_id, m.type, m.amount, m.due_date,
                       c.id AS contract_id, c.name AS contract_name, c.contract_no, c.vendor_id,
                       v.name AS vendor_name, v.gubu
                FROM milestones m
                JOIN contracts c ON m.contract_id = c.id
                LEFT JOIN vendors v ON c.vendor_id = v.id
-               WHERE m.status = '예정'`
-    const params = []
-    if (gubu) { sql += ' AND v.gubu = ?'; params.push(gubu) }
+               WHERE m.status = '예정' AND (m.invoice_id IS NULL OR m.invoice_id = '')`
+    if (forKind === 'purchase')  sql += " AND v.gubu IN ('A','E')"
+    else if (forKind === 'sales') sql += " AND (v.gubu IS NULL OR v.gubu = 'B')"
     sql += ' ORDER BY m.due_date'
-    const [rows] = await pool.execute(sql, params)
+    const [rows] = await pool.execute(sql)
     res.json(rows.map(r => ({ ...r, amount: Number(r.amount) })))
   } catch (e) { next(e) }
 })
 
-// 청구 일정 단건 상태 변경(발행/기입금 처리 후 목록에서 제외)
+// 청구 일정 단건 상태 변경(레거시 — 필요 시)
 router.patch('/milestones/:id/status', async (req, res, next) => {
   try {
     const [result] = await pool.execute('UPDATE milestones SET status=? WHERE id=?', [req.body.status || '예정', req.params.id])
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
   } catch (e) { next(e) }
+})
+
+// 청구 일정 → 청구서 발행 (+선택적 기입금). 원자적: 청구서·(기입금 시)거래·매칭·일정 상태를 한 트랜잭션에서 처리.
+// 거래처 gubu로 매출(issued)/매입(received) 자동 판별. 이미 발행된 일정은 409로 거부(중복 방지).
+router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
+  const { paid, date } = req.body
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [[ms]] = await conn.execute(
+      `SELECT m.*, c.name AS contract_name, c.vendor_id, v.gubu
+       FROM milestones m JOIN contracts c ON m.contract_id = c.id
+       LEFT JOIN vendors v ON c.vendor_id = v.id WHERE m.id = ?`,
+      [req.params.milestoneId]
+    )
+    if (!ms) { await conn.rollback(); return res.status(404).json({ error: '청구 일정을 찾을 수 없어요' }) }
+    if (ms.status !== '예정' || (ms.invoice_id && ms.invoice_id !== '')) {
+      await conn.rollback(); return res.status(409).json({ error: '이미 발행된 청구 일정이에요' })
+    }
+    const isPurchase = ms.gubu === 'A' || ms.gubu === 'E'
+    const kind = isPurchase ? 'received' : 'issued'
+    const supply = Number(ms.amount) || 0
+    const vat = Math.round(supply * 0.1)
+    const total = supply + vat
+    const today = new Date().toISOString().slice(0, 10)
+    const year = today.slice(0, 4)
+    const prefix = isPurchase ? '매입' : '청구'
+    // 채번: 최대 일련번호+1 (삭제해도 재사용 안 됨)
+    const [[{ maxno }]] = await conn.execute(
+      `SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(invoice_no, '-', -1) AS UNSIGNED)), 0) AS maxno
+       FROM invoices WHERE kind = ? AND invoice_no LIKE ?`,
+      [kind, `${prefix}-${year}-%`]
+    )
+    const invoice_no = `${prefix}-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
+    const invId = randomUUID()
+    const status = paid ? (isPurchase ? '지급 완료' : '입금 완료') : (isPurchase ? '지급 대기' : '입금 예정')
+    await conn.execute(
+      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      [invId, invoice_no, kind, ms.vendor_id || null, ms.contract_id, supply, vat, total, today, ms.due_date || null, status, `${ms.contract_name} · ${ms.type}`]
+    )
+    // 기입금: 실제 입/출금 거래 + 매칭 생성(장부·계좌·계약 수금에 반영)
+    if (paid) {
+      const txnId = randomUUID()
+      await conn.execute(
+        `INSERT INTO transactions (id, kind, vendor_id, contract_id, category, amount, date, method, status, buyer_type, doc_no, invoice_id, memo)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [txnId, isPurchase ? 'expense' : 'income', ms.vendor_id || null, ms.contract_id,
+         isPurchase ? '대금 지급' : '수금', total, date || today, '계좌이체',
+         isPurchase ? '지급완료' : '입금완료', '공통', '', invId, `청구서 ${invoice_no} 정산`]
+      )
+      await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount) VALUES (?,?,?,?)', [randomUUID(), invId, txnId, total])
+    }
+    await conn.execute('UPDATE milestones SET status = ?, invoice_id = ? WHERE id = ?',
+      [paid ? (isPurchase ? '지급 완료' : '입금 완료') : (isPurchase ? '지급 예정' : '입금 예정'), invId, req.params.milestoneId])
+    await conn.commit()
+    res.json({ ok: true, id: invId, invoice_no, kind })
+  } catch (e) { await conn.rollback(); next(e) }
+  finally { conn.release() }
 })
 
 router.get('/:id', async (req, res, next) => {

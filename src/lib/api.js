@@ -214,8 +214,7 @@ export const api = {
       const params = new URLSearchParams()
       if (kind)   params.set('kind', kind)
       if (status) params.set('status', status)
-      const thisYear = new Date().getFullYear()
-      params.set('from', from || `${thisYear}-01-01`)
+      if (from) params.set('from', from)   // 기본 전체 기간(연말 넘긴 미수금이 사라지지 않도록)
       if (to) params.set('to', to)
       return (await req(`/invoices?${params}`)).map(adaptInvoice)
     } catch { return [] }
@@ -521,9 +520,14 @@ export const api = {
     } catch (e) { return { ok: false, error: e.message } }
   },
 
-  // 발행 예정(대기) 청구 일정 + 단건 상태 변경
-  async getPendingSchedules(gubu) {
-    try { return await req(`/contracts/schedule/pending${gubu ? `?gubu=${gubu}` : ''}`) } catch { return [] }
+  // 발행 예정(대기) 청구 일정 (for: 'sales'|'purchase')
+  async getPendingSchedules(forKind) {
+    try { return await req(`/contracts/schedule/pending${forKind ? `?for=${forKind}` : ''}`) } catch { return [] }
+  },
+  // 청구 일정 → 청구서 발행(원자적). paid=true면 기입금(거래+매칭까지 생성)
+  async issueSchedule(milestoneId, { paid = false, date } = {}) {
+    try { const r = await req(`/contracts/schedule/${milestoneId}/issue`, { method: 'POST', body: { paid, date } }); return { ok: true, id: r.id, invoice_no: r.invoice_no } }
+    catch (e) { return { ok: false, error: e.message } }
   },
   async updateMilestoneStatus(id, status) {
     try { await req(`/contracts/milestones/${id}/status`, { method: 'PATCH', body: { status } }); return { ok: true } } catch (e) { return { ok: false, error: e.message } }

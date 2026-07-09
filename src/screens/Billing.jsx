@@ -682,7 +682,7 @@ export const BillingScreen = ({ initialTab = "issued" }) => {
       api.getInvoices(),
       api.getReceivablesSummary(),
       api.getPayablesSummary(),
-      isIssued ? api.getPendingSchedules("B") : Promise.resolve([]),
+      isIssued ? api.getPendingSchedules("sales") : Promise.resolve([]),
     ])
     setInvoices(rows); setRecSummary(rec); setPaySum(pay); setPending(pend)
   }
@@ -707,15 +707,9 @@ export const BillingScreen = ({ initialTab = "issued" }) => {
       confirmLabel: paid ? "기입금 처리" : "청구서 발행",
     })
     if (!ok) return
-    const res = await api.addInvoice({
-      kind: "issued", vendor_id: p.vendor_id || null, contract_id: p.contract_id,
-      supply_amount: supply, vat_amount: vat, total_amount: supply + vat,
-      issued_at: new Date().toISOString().slice(0, 10), due_at: p.due_date || null,
-      status: paid ? "입금 완료" : "입금 예정",
-      memo: `${p.contract_name} · ${p.type}`,
-    })
-    if (res.ok === false) { toast.push(res.error || "발행에 실패했어요"); return }
-    await api.updateMilestoneStatus(p.milestone_id, paid ? "입금 완료" : "입금 예정")
+    // 원자적: 청구서 + (기입금 시)입금거래·매칭 + 청구 일정 상태·연결을 서버 한 트랜잭션에서 처리
+    const res = await api.issueSchedule(p.milestone_id, { paid })
+    if (!res.ok) { toast.push(res.error || "발행에 실패했어요"); return }
     toast.push(paid ? "기입금 처리했어요" : "청구서를 발행했어요")
     load()
   }

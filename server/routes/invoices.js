@@ -94,14 +94,14 @@ router.post('/', async (req, res, next) => {
   try {
     const { kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo } = req.body
     const id = randomUUID()
-    // 친화적 청구번호 생성: 청구-2026-0001 / 매입-2026-0001
+    // 친화적 청구번호 생성: 청구-2026-0001 / 매입-2026-0001 (최대 일련번호+1 — 삭제해도 재사용 안 됨)
     const year = String(issued_at || '').slice(0, 4) || String(new Date().getFullYear())
-    const [[{ cnt }]] = await pool.execute(
-      'SELECT COUNT(*) AS cnt FROM invoices WHERE kind = ? AND issued_at LIKE ?',
-      [kind, `${year}%`]
-    )
     const prefix = kind === 'issued' ? '청구' : '매입'
-    const invoice_no = `${prefix}-${year}-${String(Number(cnt) + 1).padStart(4, '0')}`
+    const [[{ maxno }]] = await pool.execute(
+      "SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(invoice_no, '-', -1) AS UNSIGNED)), 0) AS maxno FROM invoices WHERE kind = ? AND invoice_no LIKE ?",
+      [kind, `${prefix}-${year}-%`]
+    )
+    const invoice_no = `${prefix}-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
     await pool.execute(
       'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, invoice_no, kind, vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, status||(kind==='issued' ? '입금 예정' : '지급 대기'), account_id||null, memo||'']

@@ -641,12 +641,12 @@ function MilestoneEditDrawer({ open, onClose, contractId, initial, onSaved }) {
   const [rows, setRows] = useState([])
   useEffect(() => {
     if (open) setRows((initial || []).map(m => ({
-      type: m.type || '기성고', ratio: m.ratio ?? '', amount: m.amount ?? '',
-      due_date: m.due_date || '', status: m.status || '예정',
+      type: m.type || '정기', ratio: m.ratio ?? '', amount: m.amount ?? '',
+      due_date: m.due_date || '', status: m.status || '예정', invoice_id: m.invoice_id || null,
     })))
   }, [open, initial])
 
-  const addRow = () => setRows(r => [...r, { type: '기성고', ratio: '', amount: '', due_date: '', status: '예정' }])
+  const addRow = () => setRows(r => [...r, { type: '정기', ratio: '', amount: '', due_date: '', status: '예정', invoice_id: null }])
   const upd = (i, k, v) => setRows(r => r.map((row, idx) => idx === i ? { ...row, [k]: v } : row))
   const del = (i) => setRows(r => r.filter((_, idx) => idx !== i))
 
@@ -657,6 +657,7 @@ function MilestoneEditDrawer({ open, onClose, contractId, initial, onSaved }) {
       amount: parseInt(String(m.amount).replace(/[^0-9]/g, '')) || 0,
       due_date: m.due_date || null,
       status: m.status,
+      invoice_id: m.invoice_id || null,   // 발행된 청구서 연결 보존(재저장 시 유실 방지)
     }))
     const res = await api.addMilestones(contractId, payload)
     if (!res.ok) return toast.push('저장 실패')
@@ -784,22 +785,9 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       confirmLabel: "청구서 발행",
     });
     if (!ok) return;
-    const res = await api.addInvoice({
-      kind: "issued",
-      vendor_id: c.vendor_id || null,
-      contract_id: c.id,
-      supply_amount: supply,
-      vat_amount: vat,
-      total_amount: supply + vat,
-      issued_at: new Date().toISOString().slice(0, 10),
-      due_at: ms.due_date || null,
-      status: "입금 예정",
-      memo: `${c.name} · ${ms.type}`,
-    });
+    // 원자적 발행(청구서+일정 상태·연결). 거래처 gubu로 매출/매입 자동 판별.
+    const res = await api.issueSchedule(ms.id, { paid: false });
     if (!res.ok) { toast.push(res.error || "청구서 발행에 실패했어요"); return; }
-    // 발행한 청구 일정은 '입금 예정'(청구됨)으로 갱신
-    const updated = (c.milestones || []).map(m => m.id === ms.id ? { ...m, status: "입금 예정" } : m);
-    await api.addMilestones(c.id, updated);
     toast.push(`${ms.type} 청구서를 발행했어요`);
     reload();
   };
@@ -1392,7 +1380,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
                     <td className="num-cell num-right">{fmtNum(r.in_done || r.inDone || 0)}</td>
                     <td className="num-cell num-right fw-700" style={{ color: (r.remain || 0) > 0 ? "var(--warn-ink)" : "var(--muted-2)" }}>{(r.remain || 0) > 0 ? fmtNum(r.remain) : "—"}</td>
                     <td className="num-cell num-right text-muted">{fmtNum(r.out || 0)}</td>
-                    <td className="num-cell num-right fw-700 text-pos">+{fmtNum(r.profit || 0)}</td>
+                    <td className="num-cell num-right fw-700" style={{ color: (r.profit || 0) < 0 ? "var(--neg-ink)" : "var(--pos)" }}>{(r.profit || 0) >= 0 ? "+" : ""}{fmtNum(r.profit || 0)}</td>
                     <td><StatusBadge status={r.status}/></td>
                   </tr>
                 );
