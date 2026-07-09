@@ -832,9 +832,15 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   const remain  = c.remain   || 0;
   const out     = c.out      || 0;
   const profit  = c.profit   || 0;
-  // 입금(inDone)은 VAT 포함 총액 → 진행률도 총액(공급가×1.1) 기준. 100% 초과 방지
+  // 매입 계약(gubu A/E)이면 '지급' 관점, 매출이면 '수금' 관점
+  const isPurchase = c.vendor_gubu === 'A' || c.vendor_gubu === 'E';
+  // 입/출금은 VAT 포함 총액 → 진행률도 총액(공급가×1.1) 기준. 100% 초과 방지
   const contractTotal = Math.round((c.amount || 0) * 1.1);
-  const inPct   = contractTotal > 0 ? Math.min(100, Math.round((inDone / contractTotal) * 100)) : 0;
+  const done      = isPurchase ? out : inDone;              // 매출=수금 완료, 매입=지급 완료
+  const remainAmt = Math.max(0, contractTotal - done);
+  const donePct   = contractTotal > 0 ? Math.min(100, Math.round((done / contractTotal) * 100)) : 0;
+  const doneLabel = isPurchase ? '지급' : '입금';
+  const remainLabel = isPurchase ? '남은 미지급' : '남은 미수금';
   const vendor  = c.vendor_name || c.vendor || '—';
   const period  = [c.start_date, c.end_date].filter(Boolean).join(' ~ ') || '—';
 
@@ -864,26 +870,26 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
-        <SummaryTile label="계약금액"    amount={c.amount}/>
-        <SummaryTile label="입금 완료"   amount={inDone}  pct={inPct} tone="pos"/>
-        <SummaryTile label="남은 미수금" amount={remain}              tone="warn"/>
-        <SummaryTile label="지출 합계"   amount={out}                 tone="neg"/>
-        <SummaryTile label="예상 손익"   amount={profit}              tone="pos" big/>
+        <SummaryTile label="계약금액"        amount={c.amount}/>
+        <SummaryTile label={`${doneLabel} 완료`} amount={done}   pct={donePct} tone="pos"/>
+        <SummaryTile label={remainLabel}      amount={remainAmt}            tone="warn"/>
+        <SummaryTile label={isPurchase ? "입금 합계" : "지출 합계"} amount={isPurchase ? inDone : out} tone="neg"/>
+        <SummaryTile label="예상 손익"        amount={profit}               tone="pos" big/>
       </div>
       <Spacer h={20}/>
 
       <div className="card card-pad">
         <div className="row" style={{ marginBottom: 10 }}>
           <div className="section-title">계약 진행률</div>
-          <div className="ml-auto text-sm text-muted">계약금액의 {inPct}% 입금됨 · 남은 미수금 <span className="num fw-700 text-ink" style={{ color: "var(--ink)" }}>{fmtNum(remain)}원</span></div>
+          <div className="ml-auto text-sm text-muted">계약금액의 {donePct}% {doneLabel}됨 · {remainLabel} <span className="num fw-700 text-ink" style={{ color: "var(--ink)" }}>{fmtNum(remainAmt)}원</span></div>
         </div>
         <div style={{ display: "flex", height: 14, borderRadius: 999, overflow: "hidden", background: "var(--surface-3)" }}>
-          <div style={{ width: `${inPct}%`, background: "var(--ink)" }}/>
-          <div style={{ width: `${100-inPct}%`, background: "transparent", borderLeft: "1px dashed rgba(0,0,0,0.1)" }}/>
+          <div style={{ width: `${donePct}%`, background: "var(--ink)" }}/>
+          <div style={{ width: `${100-donePct}%`, background: "transparent", borderLeft: "1px dashed rgba(0,0,0,0.1)" }}/>
         </div>
         <div className="row" style={{ marginTop: 10, fontSize: 11.5, color: "var(--muted-2)" }}>
-          <div><span style={{ display: "inline-block", width: 8, height: 8, background: "var(--ink)", borderRadius: 2, marginRight: 6 }}/>입금 완료 {fmtNum(inDone)}원</div>
-          <div className="ml-auto"><span style={{ display: "inline-block", width: 8, height: 8, background: "var(--surface-3)", border: "1px solid var(--line-strong)", borderRadius: 2, marginRight: 6 }}/>잔여 {fmtNum(remain)}원</div>
+          <div><span style={{ display: "inline-block", width: 8, height: 8, background: "var(--ink)", borderRadius: 2, marginRight: 6 }}/>{doneLabel} 완료 {fmtNum(done)}원</div>
+          <div className="ml-auto"><span style={{ display: "inline-block", width: 8, height: 8, background: "var(--surface-3)", border: "1px solid var(--line-strong)", borderRadius: 2, marginRight: 6 }}/>잔여 {fmtNum(remainAmt)}원</div>
         </div>
       </div>
       <Spacer h={20}/>
@@ -897,13 +903,27 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
 
         {tab === "청구 일정" && (() => {
           const milestones = c.milestones || []
-          const TONE = { "입금 완료": "pos", "일부 입금": "warn", "기한 지남": "neg", "예정": "outline", "입금 예정": "brand" }
+          const DONE = isPurchase ? "지급 완료" : "입금 완료"
+          const collectLabel = isPurchase ? "지급" : "수금"
+          const msSum = milestones.reduce((s, m) => s + (Number(m.amount) || 0), 0)
+          const diff = msSum - (Number(c.amount) || 0)
+          const doneSum = milestones.filter(m => m.status === DONE).reduce((s, m) => s + Number(m.amount || 0), 0)
+          const remainSum = milestones.filter(m => m.status !== DONE).reduce((s, m) => s + Number(m.amount || 0), 0)
           return (
             <div style={{ padding: 20 }}>
               <div className="row" style={{ marginBottom: 14 }}>
                 <div className="text-sm text-muted">이 계약에서 청구할 금액·시점을 미리 등록하세요. '청구서 발행'을 누르면 대금 청구로 넘어가요.</div>
                 <button className="btn ml-auto" onClick={() => setMsOpen(true)}><Icon.Pencil size={13}/> 편집</button>
               </div>
+              {milestones.length > 0 && Math.abs(diff) > 1 && (
+                <div className="alert-row" style={{ marginBottom: 12, background: "var(--warn-soft)", borderColor: "transparent" }}>
+                  <Icon.Warn/>
+                  <div>
+                    <div className="lead">청구 일정 합계가 계약금액(공급가)보다 {diff > 0 ? "많아요" : "적어요"}.</div>
+                    <div className="body">일정 합계 {fmtNum(msSum)}원 · 계약금액 {fmtNum(c.amount)}원 (차이 {fmtNum(Math.abs(diff))}원)</div>
+                  </div>
+                </div>
+              )}
               <div className="card" style={{ overflow: "hidden" }}>
                 <table className="table">
                   <thead><tr><th>유형</th><th className="num-right">비율</th><th className="num-right">금액</th><th>예정일</th><th>상태</th><th></th></tr></thead>
@@ -911,19 +931,16 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                     {milestones.map((ms, i) => (
                       <tr key={i}>
                         <td><span className="badge outline">{ms.type}</span></td>
-                        <td className="num-right text-muted">{ms.ratio}%</td>
+                        <td className="num-right text-muted">{ms.ratio ? `${ms.ratio}%` : "—"}</td>
                         <td className="num-cell num-right fw-700">{fmtNum(ms.amount)}</td>
                         <td className="text-sm">{ms.due_date}</td>
                         <td><StatusBadge status={ms.status}/></td>
                         <td>
-                          {ms.status === "예정" && (
-                            <button className="btn" style={{ fontSize: 11, padding: "3px 10px" }}
-                              onClick={() => issueInvoiceForMilestone(ms)}>
-                              <Icon.Plus size={11}/> 청구서 발행
-                            </button>
-                          )}
-                          {ms.status === "입금 예정" && <span className="text-muted text-xs">청구됨</span>}
-                          {ms.status === "입금 완료" && <span className="text-muted text-xs">완료</span>}
+                          {ms.status === "예정"
+                            ? <button className="btn" style={{ fontSize: 11, padding: "3px 10px" }} onClick={() => issueInvoiceForMilestone(ms)}><Icon.Plus size={11}/> 청구서 발행</button>
+                            : (ms.status === "입금 완료" || ms.status === "지급 완료")
+                              ? <span className="text-muted text-xs">완료</span>
+                              : <span className="text-muted text-xs">청구됨</span>}
                         </td>
                       </tr>
                     ))}
@@ -931,12 +948,10 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                 </table>
               </div>
               <div className="row" style={{ marginTop: 14, padding: "10px 14px", background: "var(--surface-2)", borderRadius: 10, fontSize: 13 }}>
-                <span className="text-muted">수금 완료</span>
-                <span className="num fw-700 ml-auto">{fmtNum(milestones.filter(m => m.status === "입금 완료").reduce((s, m) => s + m.amount, 0))}</span>
-                <span className="text-muted" style={{ marginLeft: 16 }}>남은 수금 예정</span>
-                <span className="num fw-700 ml-auto" style={{ color: "var(--warn-ink)" }}>
-                  {fmtNum(milestones.filter(m => m.status !== "입금 완료").reduce((s, m) => s + m.amount, 0))}
-                </span>
+                <span className="text-muted">{collectLabel} 완료</span>
+                <span className="num fw-700 ml-auto">{fmtNum(doneSum)}</span>
+                <span className="text-muted" style={{ marginLeft: 16 }}>남은 {collectLabel} 예정</span>
+                <span className="num fw-700 ml-auto" style={{ color: "var(--warn-ink)" }}>{fmtNum(remainSum)}</span>
               </div>
             </div>
           )
@@ -965,14 +980,15 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                       const b = budget[key] || 0
                       const a = actual[key] || 0
                       const pct = b > 0 ? Math.round((a / b) * 100) : 0
-                      const tone = pct >= 100 ? "neg" : pct >= 80 ? "warn" : "pos"
+                      const noActual = b > 0 && a === 0   // 실적 미집계(인건비·자재비는 별도 관리)
+                      const tone = noActual ? "outline" : pct >= 100 ? "neg" : pct >= 80 ? "warn" : "pos"
                       return (
                         <tr key={key}>
                           <td className="fw-600">{label}</td>
                           <td className="num-cell num-right">{fmtNum(b)}</td>
-                          <td className="num-cell num-right">{fmtNum(a)}</td>
-                          <td className="num-right"><span className={`badge ${tone}`}>{pct}%</span></td>
-                          <td className="text-sm text-muted">{pct >= 100 ? "🔴 초과" : pct >= 80 ? "⚠️ 임박" : "정상"}</td>
+                          <td className="num-cell num-right">{noActual ? "—" : fmtNum(a)}</td>
+                          <td className="num-right"><span className={`badge ${tone}`}>{noActual ? "미집계" : `${pct}%`}</span></td>
+                          <td className="text-sm text-muted">{noActual ? "실적 미집계" : pct >= 100 ? "🔴 초과" : pct >= 80 ? "⚠️ 임박" : "정상"}</td>
                         </tr>
                       )
                     })}

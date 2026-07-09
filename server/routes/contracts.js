@@ -121,7 +121,7 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   try {
     const [cRows] = await pool.execute(
-      'SELECT c.*, v.name AS vendor_name FROM contracts c LEFT JOIN vendors v ON c.vendor_id = v.id WHERE c.id = ?',
+      'SELECT c.*, v.name AS vendor_name, v.gubu AS vendor_gubu FROM contracts c LEFT JOIN vendors v ON c.vendor_id = v.id WHERE c.id = ?',
       [req.params.id]
     )
     if (!cRows[0]) return res.status(404).json({ error: 'Not found' })
