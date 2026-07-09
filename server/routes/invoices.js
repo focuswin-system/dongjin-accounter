@@ -36,11 +36,13 @@ router.get('/summary/receivables', async (_, res, next) => {
     const active = rows.filter(r => RECEIVABLE_STATUSES.has(r.status))
     const withMatches = await Promise.all(active.map(attachMatches))
     const today = new Date().toISOString().slice(0, 10)
+    const overdueRows = withMatches.filter(r => r.remainAmount > 0 && r.due_at && r.due_at < today)
     const summary = {
-      total:       withMatches.reduce((s, r) => s + r.remainAmount, 0),
-      count:       withMatches.length,
-      overdue:     withMatches.filter(r => r.due_at < today && r.status !== '장기 미수').reduce((s, r) => s + r.remainAmount, 0),
-      longOverdue: withMatches.filter(r => r.status === '장기 미수').reduce((s, r) => s + r.remainAmount, 0),
+      total:        withMatches.reduce((s, r) => s + r.remainAmount, 0),
+      count:        withMatches.length,
+      overdue:      overdueRows.reduce((s, r) => s + r.remainAmount, 0),
+      overdueCount: overdueRows.length,
+      longOverdue:  withMatches.filter(r => r.status === '장기 미수').reduce((s, r) => s + r.remainAmount, 0),
     }
     res.json({ summary, rows: withMatches })
   } catch (e) { next(e) }
@@ -52,10 +54,12 @@ router.get('/summary/payables', async (_, res, next) => {
     const withMatches = await Promise.all(rows.map(attachMatches))
     const pending = withMatches.filter(r => PAYABLE_STATUSES.has(r.status))
     const today = new Date().toISOString().slice(0, 10)
+    const overdueRows = pending.filter(r => r.remainAmount > 0 && r.due_at && r.due_at < today)
     const summary = {
-      total:          pending.reduce((s, r) => s + r.remainAmount, 0),
-      count:          pending.length,
-      overdue:        pending.filter(r => r.due_at < today).reduce((s, r) => s + r.remainAmount, 0),
+      total:           pending.reduce((s, r) => s + r.remainAmount, 0),
+      count:           pending.length,
+      overdue:         overdueRows.reduce((s, r) => s + r.remainAmount, 0),
+      overdueCount:    overdueRows.length,
       pendingApproval: pending.filter(r => r.status === '지급 대기').reduce((s, r) => s + r.remainAmount, 0),
     }
     res.json({ summary, rows: withMatches })
@@ -123,10 +127,19 @@ router.put('/:id', async (req, res, next) => {
 })
 
 router.delete('/:id', async (req, res, next) => {
+  const conn = await pool.getConnection()
   try {
-    await pool.execute('DELETE FROM invoices WHERE id = ?', [req.params.id])
+    await conn.beginTransaction()
+    const id = req.params.id
+    await conn.execute('DELETE FROM invoice_matches WHERE invoice_id = ?', [id])
+    await conn.execute('DELETE FROM invoice_docs WHERE invoice_id = ?', [id])
+    await conn.execute('UPDATE transactions SET invoice_id = NULL WHERE invoice_id = ?', [id])
+    // 연결된 청구 일정은 '예정'으로 되돌려 발행 예정에 다시 노출(고아 방지)
+    await conn.execute("UPDATE milestones SET status = '예정', invoice_id = NULL WHERE invoice_id = ?", [id])
+    await conn.execute('DELETE FROM invoices WHERE id = ?', [id])
+    await conn.commit()
     res.json({ ok: true })
-  } catch (e) { next(e) }
+  } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
 })
 
 router.post('/:id/matches', async (req, res, next) => {
@@ -137,6 +150,13 @@ router.post('/:id/matches', async (req, res, next) => {
     const inv = invRows[0]
     if (!inv) return res.status(404).json({ error: 'Not found' })
     const isIssued = inv.kind === 'issued'
+
+    // 과입금 방지: 잔여를 초과하지 않도록 매칭 금액 제한
+    const [[{ paid: prevPaid }]] = await pool.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [invoiceId])
+    const remainBefore = Number(inv.total_amount) - Number(prevPaid)
+    if (remainBefore <= 0) return res.status(400).json({ error: '이미 정산이 완료된 청구서예요' })
+    const matchAmount = Math.min(Number(amount) || 0, remainBefore)
+    if (matchAmount <= 0) return res.status(400).json({ error: '매칭 금액이 올바르지 않아요' })
 
     // 매칭 대상 거래: 기존 거래가 있으면 그대로, 없으면 실제 거래를 새로 만들어 거래내역에 반영
     let realTxnId = null
@@ -154,7 +174,7 @@ router.post('/:id/matches', async (req, res, next) => {
         INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, doc_no, invoice_id, memo)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `, [realTxnId, isIssued ? 'income' : 'expense', inv.vendor_id || null, inv.contract_id || null,
-          inv.account_id || null, isIssued ? '수금' : '대금 지급', amount,
+          inv.account_id || null, isIssued ? '수금' : '대금 지급', matchAmount,
           date || new Date().toISOString().slice(0, 10), '계좌이체',
           isIssued ? '입금완료' : '지급완료', '공통', inv.contract_id ? '' : '공통', invoiceId, `청구서 ${inv.invoice_no || ''} 정산`.trim()])
     }
@@ -162,7 +182,7 @@ router.post('/:id/matches', async (req, res, next) => {
     const id = randomUUID()
     await pool.execute(
       'INSERT INTO invoice_matches (id, invoice_id, txn_id, amount) VALUES (?,?,?,?)',
-      [id, invoiceId, realTxnId, amount]
+      [id, invoiceId, realTxnId, matchAmount]
     )
 
     // 매칭 누계로 청구서 상태 자동 갱신
@@ -173,7 +193,11 @@ router.post('/:id/matches', async (req, res, next) => {
     let status = null
     if (Number(paid) >= total)     status = isIssued ? '입금 완료' : '지급 완료'
     else if (Number(paid) > 0)     status = isIssued ? '일부 입금' : '일부 지급'
-    if (status) await pool.execute('UPDATE invoices SET status = ? WHERE id = ?', [status, invoiceId])
+    if (status) {
+      await pool.execute('UPDATE invoices SET status = ? WHERE id = ?', [status, invoiceId])
+      // 연결된 청구 일정도 동기화(계약 청구일정 탭·수금 집계가 어긋나지 않도록)
+      await pool.execute('UPDATE milestones SET status = ? WHERE invoice_id = ?', [status, invoiceId])
+    }
 
     res.json({ id, txn_id: realTxnId })
   } catch (e) { next(e) }

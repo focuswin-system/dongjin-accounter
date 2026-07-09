@@ -91,7 +91,7 @@ export const TaxVatScreen = () => {
   const [data, setData] = useState({ year, quarters: [] })
   const [target, setTarget] = useState(null)
 
-  const load = () => api.getVatSummary(year).then(setData)
+  const load = () => api.getVatFilings(year).then(setData)
   useEffect(() => { load() }, [year])
 
   const quarters = data.quarters || []

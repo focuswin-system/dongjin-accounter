@@ -223,14 +223,14 @@ export const api = {
   async getReceivablesSummary() {
     try {
       const data = await req('/invoices/summary/receivables')
-      return { total: data.summary.total, count: data.summary.count, overdueAmount: data.summary.overdue, overdueCount: 0 }
+      return { total: data.summary.total, count: data.summary.count, overdueAmount: data.summary.overdue, overdueCount: data.summary.overdueCount ?? 0 }
     } catch { return { total: 0, count: 0, overdueAmount: 0, overdueCount: 0 } }
   },
 
   async getPayablesSummary() {
     try {
       const data = await req('/invoices/summary/payables')
-      return { total: data.summary.total, count: data.summary.count, overdueAmount: data.summary.overdue, overdueCount: 0 }
+      return { total: data.summary.total, count: data.summary.count, overdueAmount: data.summary.overdue, overdueCount: data.summary.overdueCount ?? 0 }
     } catch { return { total: 0, count: 0, overdueAmount: 0, overdueCount: 0 } }
   },
 
@@ -601,8 +601,8 @@ export const api = {
     try { await req(`/ref-items/${id}`, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }
   },
 
-  // 부가세(세무관리)
-  async getVatSummary(year) {
+  // 부가세(세무관리) — 분기별 신고 집계+상태 (Docs의 getVatSummary(quarter)와 별개)
+  async getVatFilings(year) {
     try { return await req(`/tax/vat?year=${year}`) } catch { return { year, quarters: [] } }
   },
   async saveVatFiling(data) {
@@ -915,9 +915,13 @@ export const api = {
         const due = i.dueAt ? new Date(i.dueAt) : null
         if (due) due.setHours(0, 0, 0, 0)
         const delay = due ? Math.max(0, Math.round((today - due) / 86400000)) : 0
+        // 마감일 경과 시 상태 자동 전이(저장 상태에 의존하지 않도록): 90일↑ 장기미수, 그 외 기한지남
+        const eff = (i.remainAmount > 0 && delay > 90) ? '장기 미수'
+                  : (i.remainAmount > 0 && delay > 0)  ? '기한 지남'
+                  : i.status
         return { id: i.id, vendor: i.vendor, contract: i.contract,
                  billed: i.totalAmount, paid: i.paidAmount, remain: i.remainAmount,
-                 due: i.dueAt || '', delay, status: i.status }
+                 due: i.dueAt || '', delay, status: eff }
       })
       .sort((a, b) => { if (!a.due) return 1; if (!b.due) return -1; return a.due.localeCompare(b.due) })
     const total       = rows.reduce((s, r) => s + r.remain, 0)
@@ -946,9 +950,10 @@ export const api = {
         const due = i.dueAt ? new Date(i.dueAt) : null
         if (due) due.setHours(0, 0, 0, 0)
         const delay = due ? Math.max(0, Math.round((today - due) / 86400000)) : 0
+        const eff = (i.remainAmount > 0 && delay > 0) ? '기한 지남' : i.status
         return { id: i.id, vendor: i.vendor, scope: i.contract || i.memo || '—',
                  category: i.category || '—', amount: i.remainAmount,
-                 due: i.dueAt || '', delay, doc: i.doc || '승인 완료', pay: i.status }
+                 due: i.dueAt || '', delay, doc: i.doc || '승인 완료', pay: eff }
       })
       .sort((a, b) => { if (!a.due) return 1; if (!b.due) return -1; return a.due.localeCompare(b.due) })
     const pendingRows = rows.filter(r => PENDING.includes(r.pay))

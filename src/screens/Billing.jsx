@@ -425,7 +425,9 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   }
 
   const supply = parseInt(form.supplyAmount.replace(/[^0-9]/g, "")) || 0
-  const vat    = parseInt(form.vatAmount) || Math.round(supply * 0.1)
+  // 면세(0) 명시 입력 존중: 빈칸이면 자동 10%, 값이 있으면(0 포함) 그대로
+  const vatRaw = String(form.vatAmount).replace(/[^0-9]/g, "")
+  const vat    = vatRaw === "" ? Math.round(supply * 0.1) : parseInt(vatRaw)
   const total  = supply + vat
 
   const vendorOptions = (form.kind === "issued"
@@ -796,6 +798,7 @@ export const BillingScreen = ({ initialTab = "issued" }) => {
         invoice={selected}
         onClose={() => setSelected(null)}
         onMatch={handleMatch}
+        onDelete={async (id) => { const r = await api.deleteInvoice(id); if (r.ok === false) toast.push("삭제에 실패했어요"); load() }}
         onEdit={(inv) => { setEditInvoice(inv); setSelected(null); setFormOpen(true) }}
         toast={toast}
       />

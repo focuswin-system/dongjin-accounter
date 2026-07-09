@@ -20,7 +20,9 @@ router.get('/', async (req, res, next) => {
     res.json(rows.map(r => {
       const in_done = Number(r.in_done || 0)
       const out = Number(r.out_total || 0)
-      const remain = (r.amount || 0) - in_done
+      // 입금은 VAT 포함 총액 → 계약금액(공급가)도 총액 기준으로 비교
+      const contractTotal = Math.round((Number(r.amount) || 0) * 1.1)
+      const remain = contractTotal - in_done
       return {
         ...r, in_done, out, remain: remain > 0 ? remain : 0, profit: in_done - out,
         cost_budget: r.cost_budget ? JSON.parse(r.cost_budget) : null,
@@ -68,7 +70,7 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
     const [[ms]] = await conn.execute(
       `SELECT m.*, c.name AS contract_name, c.vendor_id, v.gubu
        FROM milestones m JOIN contracts c ON m.contract_id = c.id
-       LEFT JOIN vendors v ON c.vendor_id = v.id WHERE m.id = ?`,
+       LEFT JOIN vendors v ON c.vendor_id = v.id WHERE m.id = ? FOR UPDATE`,
       [req.params.milestoneId]
     )
     if (!ms) { await conn.rollback(); return res.status(404).json({ error: '청구 일정을 찾을 수 없어요' }) }
@@ -172,7 +174,8 @@ router.get('/:id', async (req, res, next) => {
       else                                                          cost_actual.overhead  += amt
     }
 
-    const remain = (c.amount || 0) - in_done
+    const contractTotal = Math.round((Number(c.amount) || 0) * 1.1)
+    const remain = contractTotal - in_done
 
     // 계약 첨부 서류(다중) + 레거시 단일 계약서(file_url) 병합
     const [attRows] = await pool.execute(

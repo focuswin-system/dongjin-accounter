@@ -781,7 +781,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     const ok = await confirm({
       tone: "brand", icon: <Icon.Receipt size={22}/>,
       title: `${ms.type} 청구서 발행`,
-      body: `${c.vendor_name || c.vendor || "거래처"}에 ${ms.type} ${fmtNum(supply + vat)}원(VAT 포함) 청구서를 발행해요. 청구 관리에 미수금으로 등록됩니다.`,
+      body: `${c.vendor_name || c.vendor || "거래처"} · ${ms.type} ${fmtNum(supply + vat)}원(VAT 포함) 청구서를 발행해요. 대금 청구에 등록됩니다.`,
       confirmLabel: "청구서 발행",
     });
     if (!ok) return;
@@ -832,7 +832,9 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   const remain  = c.remain   || 0;
   const out     = c.out      || 0;
   const profit  = c.profit   || 0;
-  const inPct   = c.amount > 0 ? Math.round((inDone / c.amount) * 100) : 0;
+  // 입금(inDone)은 VAT 포함 총액 → 진행률도 총액(공급가×1.1) 기준. 100% 초과 방지
+  const contractTotal = Math.round((c.amount || 0) * 1.1);
+  const inPct   = contractTotal > 0 ? Math.min(100, Math.round((inDone / contractTotal) * 100)) : 0;
   const vendor  = c.vendor_name || c.vendor || '—';
   const period  = [c.start_date, c.end_date].filter(Boolean).join(' ~ ') || '—';
 
