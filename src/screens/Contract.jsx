@@ -1332,8 +1332,8 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
   const exportCsv = () => {
     if (rows.length === 0) return toast.push("내보낼 계약이 없어요");
     downloadCsv(`계약목록_${new Date().toISOString().slice(0, 10)}.csv`,
-      ["계약명", "계약번호", "거래처", "계약금액", "입금완료", "남은미수금", "지출", "상태"],
-      rows.map(r => [r.name, r.contract_no || "", r.vendor_name || r.vendor || "", r.amount || 0, r.in_done || 0, r.remain || 0, r.out || 0, r.status]));
+      ["계약명", "계약번호", "거래처", "계약금액", "입금완료", "남은잔액", "지출", "상태"],
+      rows.map(r => [r.name, r.contract_no || "", r.vendor_name || r.vendor || "", r.amount || 0, r.in_done || 0, rowRemain(r), r.out || 0, r.status]));
   };
 
   return (
