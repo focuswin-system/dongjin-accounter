@@ -13,6 +13,7 @@
 export const BILLING_MODES = [
   { value: 'onetime',   label: '총액형', hint: '계약 총액을 마일스톤으로 나눠 청구 (구축·납품)' },
   { value: 'recurring', label: '정기형', hint: '주기마다 같은 금액을 청구 (유지보수·호스팅)' },
+  { value: 'progress',  label: '기성형', hint: '품목 단가×수량으로 그때그때 기성 청구 (소사장·정밀가공)' },
 ];
 
 export const TERM_MODES = [
@@ -32,14 +33,17 @@ export const termLabel    = (c) => TERM_MODES.find(x => x.value === c?.term_mode
 export const periodLabel  = (p) => BILLING_PERIODS.find(x => x.value === p)?.label || '월';
 export const periodMonths = (p) => BILLING_PERIODS.find(x => x.value === p)?.months || 1;
 
-/** 정기형인가 / 무기한인가 — 화면 분기용 */
+/** 정기형인가 / 기성형인가 / 무기한인가 — 화면 분기용 */
 export const isRecurring = (c) => c?.billing_mode === 'recurring';
+export const isProgress  = (c) => c?.billing_mode === 'progress';
 export const isOpenEnded = (c) => c?.term_mode === 'open';
-/** 총액·진행률·남은 계약분 개념이 성립하는 계약인가 (무기한 정기계약은 성립하지 않음) */
-export const hasTotal = (c) => !(isRecurring(c) && isOpenEnded(c));
+/** 총액·진행률·남은 계약분 개념이 성립하는 계약인가.
+ *  무기한 정기계약과 기성형(총액 없이 품목 기성)은 성립하지 않는다. */
+export const hasTotal = (c) => !(isRecurring(c) && isOpenEnded(c)) && !isProgress(c);
 
 /** "초기 500만원 + 월 100만원" 같은 한 줄 요약 */
 export const amountLabel = (c, fmt) => {
+  if (isProgress(c)) return '품목 단가 기성';
   if (!isRecurring(c)) return `${fmt(c.amount || 0)}원`;
   const monthly = `${periodLabel(c.billing_period)} ${fmt(c.unit_amount || 0)}원`;
   return c.initial_amount > 0 ? `초기 ${fmt(c.initial_amount)}원 + ${monthly}` : monthly;

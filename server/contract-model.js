@@ -35,8 +35,10 @@ function isFirstTerm(c) {
 }
 
 /** 이번 텀(current_term_start ~ end_date)의 계약 총액.
- *  recurring = 초기 일시금(첫 기간에만) + 주기금액 × 회차수 */
+ *  recurring = 초기 일시금(첫 기간에만) + 주기금액 × 회차수
+ *  progress  = 총액 개념 없음(품목 단가×수량으로 그때그때 청구) → 0 */
 function termTotal(c) {
+  if (c.billing_mode === 'progress') return 0
   if (c.billing_mode !== 'recurring') return Number(c.amount) || 0
   // 초기 구축비는 계약 시작 때 한 번만 받는 돈 → 갱신된 기간에는 더하지 않는다
   const initial = isFirstTerm(c) ? (Number(c.initial_amount) || 0) : 0
@@ -48,7 +50,8 @@ function termTotal(c) {
 
 /** 요청 body → 계약 컬럼값. 유형에 안 맞는 필드는 비워서 모순된 상태가 저장되지 않게 한다. */
 function normalize(body) {
-  const billing = body.billing_mode === 'recurring' ? 'recurring' : 'onetime'
+  // 청구 방식 3종: onetime(총액) / recurring(주기 정액) / progress(품목 단가×수량 기성)
+  const billing = ['recurring', 'progress'].includes(body.billing_mode) ? body.billing_mode : 'onetime'
   const term = ['fixed', 'auto_renew', 'open'].includes(body.term_mode) ? body.term_mode : 'fixed'
   const isOpen = term === 'open'
 
@@ -75,9 +78,10 @@ function normalize(body) {
     out.billing_day = Number(body.billing_day) >= 1 && Number(body.billing_day) <= 31 ? Number(body.billing_day) : 1
     out.initial_amount = Number(String(body.initial_amount ?? '').replace(/[^0-9]/g, '')) || 0
     out.amount = termTotal({ ...out, current_term_start: body.current_term_start, start_date: body.start_date })
-  } else {
+  } else if (billing === 'onetime') {
     out.amount = Number(String(body.amount ?? '').replace(/[^0-9]/g, '')) || 0
   }
+  // progress는 총액이 없다 → out.amount = 0(기본값 유지), 정기 필드도 전부 null(기본값 유지)
   return out
 }
 

@@ -1,19 +1,90 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect, Drawer, Combobox, MoneyInput } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect, Drawer, Combobox, MoneyInput, localToday } from '../lib/ui'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { MiniStat } from './Home'
 import { BILLING_MODES, TERM_MODES, BILLING_PERIODS, billingLabel, termLabel, periodLabel, periodMonths,
-         isRecurring, isOpenEnded, hasTotal, amountLabel, renewalInfo, nextEndDate, recurringMismatch } from '../lib/renewal'
+         isRecurring, isProgress, isOpenEnded, hasTotal, amountLabel, renewalInfo, nextEndDate, recurringMismatch } from '../lib/renewal'
 
 const numOnly = (v) => String(v ?? '').replace(/[^0-9]/g, '');
 const asNum   = (v) => parseInt(numOnly(v), 10) || 0;
 
+/* 기성형 계약의 품목 단가표 편집기. 품목은 기준정보(ref_items type='item')에서 고르거나 인라인 추가.
+   단가는 기준정보 단가가 기본값이고 계약별로 수정 가능하다. 수량은 여기 없다(청구할 때 입력). */
+const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster }) => {
+  const rows = form.items || [];
+  const setRows = (fn) => set(f => ({ ...f, items: fn(f.items || []) }));
+  const add = () => setRows(rs => [...rs, { item_id: '', name: '', spec: '', unit: '', unit_price: '' }]);
+  const upd = (i, patch) => setRows(rs => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r));
+  const del = (i) => setRows(rs => rs.filter((_, idx) => idx !== i));
+  // 기준정보에서 품목을 고르면 규격·단위·단가를 자동으로 채운다(계약별로 다시 수정 가능).
+  const pick = (i, name) => {
+    const it = itemMaster.find(x => x.name === name);
+    upd(i, it
+      ? { item_id: it.id, name: it.name, spec: it.spec || '', unit: it.unit || '', unit_price: String(it.amount || '') }
+      : { item_id: '', name });
+  };
+  // 목록에 없는 품목을 입력하면 기준정보에 새로 등록하고 이 행에 연결(거래처 인라인 추가와 같은 방식).
+  const addNew = async (i, name) => {
+    const nm = (name || '').trim(); if (!nm) return;
+    const res = await api.addRefItem({ type: 'item', name: nm });
+    await reloadMaster();
+    upd(i, { item_id: res.id || '', name: nm });
+  };
+
+  return (
+    <div>
+      <label className="label" style={{ marginBottom: 8 }}>품목 단가표 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+      <div className="text-xs text-muted2" style={{ marginBottom: 10 }}>
+        기성 청구할 품목과 단가를 등록하세요. 청구는 계약 상세의 <b>기성 청구</b>에서 품목별 수량을 넣어 발행합니다.
+      </div>
+      <div className="col gap-8">
+        {rows.map((r, i) => (
+          <div key={i} className="col gap-6" style={{ padding: 10, border: '1px solid var(--line)', borderRadius: 10, background: 'var(--surface-2)' }}>
+            {/* 품목은 한 줄 전체 폭 — 좁은 드로어에서 검색 input이 눌리지 않게 */}
+            <div className="row gap-6" style={{ alignItems: 'center' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <Combobox value={r.name}
+                  onChange={v => pick(i, v)}
+                  onAddNew={q => addNew(i, q)}
+                  options={itemMaster.map(it => ({ value: it.name, label: it.name,
+                    sub: [it.code, it.spec, it.unit, it.amount ? fmtNum(it.amount) + '원' : ''].filter(Boolean).join(' · ') }))}
+                  addNewLabel="새 품목 등록"
+                  placeholder="품목 선택·검색"/>
+              </div>
+              <button type="button" className="icon-btn" onClick={() => del(i)}><Icon.Close size={14}/></button>
+            </div>
+            <div className="row gap-6">
+              <input className="input" style={{ flex: 1, minWidth: 0 }} value={r.spec || ''} placeholder="규격"
+                onChange={e => upd(i, { spec: e.target.value })}/>
+              <input className="input" style={{ width: 72 }} value={r.unit || ''} placeholder="단위"
+                onChange={e => upd(i, { unit: e.target.value })}/>
+              <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+                <MoneyInput className="input num" style={{ paddingRight: 26 }} value={r.unit_price} placeholder="단가"
+                  onChange={raw => upd(i, { unit_price: raw })}/>
+                <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 12 }}>원</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <button type="button" className="btn ghost sm" style={{ marginTop: 10 }} onClick={add}>
+        <Icon.Plus size={13}/> 품목 추가
+      </button>
+    </div>
+  );
+};
+
 /* 계약 조건 입력 — 새 계약/편집 Drawer 공용.
-   청구 방식(총액형·정기형)과 종료 방식(만료·자동갱신·무기한)이 독립이라, 금액·기간 칸도 그에 따라 바뀐다. */
+   청구 방식(총액형·정기형·기성형)과 종료 방식(만료·자동갱신·무기한)이 독립이라, 금액·기간 칸도 그에 따라 바뀐다. */
 const ContractTermFields = ({ form, set }) => {
   const recurring = form.billing_mode === 'recurring';
+  const progress  = form.billing_mode === 'progress';
   const openEnded = form.term_mode === 'open';
+  // 기성형은 품목 단가표에서 쓸 품목 기준정보를 불러온다(인라인 추가 시 갱신).
+  const [itemMaster, setItemMaster] = useState([]);
+  const reloadMaster = () => api.getRefItems('item').then(r => setItemMaster(r || []));
+  useEffect(() => { reloadMaster(); }, []);
   // 갱신 개념이 있는 계약만 연장기간·통보기한이 의미 있다.
   // (총액형+기간만료 = 구축 프로젝트는 끝나면 끝 → 갱신 임박 알림 대상도 아님. 무기한은 애초에 없음)
   const hasRenewal = !openEnded && (form.term_mode === 'auto_renew' || recurring);
@@ -73,8 +144,10 @@ const ContractTermFields = ({ form, set }) => {
         </div>
       </div>
 
-      {/* 금액 — 총액형은 계약 총액, 정기형은 주기당 금액 */}
-      {recurring ? (
+      {/* 금액 — 총액형은 계약 총액, 정기형은 주기당 금액, 기성형은 품목 단가표 */}
+      {progress ? (
+        <ContractItemsEditor form={form} set={set} itemMaster={itemMaster} reloadMaster={reloadMaster}/>
+      ) : recurring ? (
         <>
           <div className="row gap-12">
             <div style={{ flex: 1 }}>
@@ -808,6 +881,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   const [msOpen, setMsOpen] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [renewOpen, setRenewOpen] = useState(false);
+  const [progressOpen, setProgressOpen] = useState(false);
 
   const reload = () => api.getContract(contractId).then(data => { if (data) setC(data); });
 
@@ -849,6 +923,11 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       file_url:    c.file_url   || '',
       file_name:   c.file_name  || '',
       docs:        [],   // 편집 폼에서 새로 올리는 첨부만. 기존 첨부는 상세 '증빙' 탭에서 관리.
+      // 기성형 품목 단가표(있으면). 편집 시 그대로 불러와 수정 → 저장 시 통째 교체된다.
+      items:       (c.contract_items || []).map(it => ({
+        item_id: it.item_id || '', name: it.name || '', spec: it.spec || '', unit: it.unit || '',
+        unit_price: String(it.unit_price || ''),
+      })),
       billing_mode:   c.billing_mode || 'onetime',
       term_mode:      c.term_mode    || 'fixed',
       vat_mode:       c.vat_mode     || 'taxable',
@@ -889,6 +968,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   // 무기한 정기계약은 '총액'이 없으므로 term_total/remain이 null → 진행률 대신 누적으로 본다.
   const openEnded  = !hasTotal(c);
   const recurring  = isRecurring(c);
+  const progress   = isProgress(c);
   const termTotal  = c.term_total ?? 0;          // 이번 텀 총액(VAT 포함)
   const done       = c.term_collected ?? 0;      // 이번 텀에 받은(지급한) 돈
   const doneAll    = c.collected ?? (isPurchase ? out : inDone);
@@ -925,6 +1005,10 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
             ? <a className="btn" href={c.file_url || c.attachments[0].url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}><Icon.File size={14}/> 계약서 보기</a>
             : null}
           <button className="btn" onClick={openEdit}><Icon.Pencil size={14}/> 편집</button>
+          {/* 기성형 = 품목 단가×수량으로 그때그때 청구. 매출이면 발행(받을 돈), 매입이면 매입 기성(나갈 돈). */}
+          {progress && (
+            <button className="btn primary" onClick={() => setProgressOpen(true)}><Icon.Plus/> 기성 청구</button>
+          )}
           {/* 매출 계약 = 수금 + 그 일에 들어간 원가(외주비 등) → 둘 다 등록.
               매입 계약 = 나가는 돈만 → 입금은 붙을 자리가 없다. */}
           {isPurchase ? (
@@ -942,6 +1026,14 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           매출 계약 = 받을 돈 + 그 일에 들어간 원가 + 손익.
           매입 계약 = 나갈 돈만. 원가·손익 개념이 없다(붙이면 "나간 돈 = 손해"라는 거짓 숫자가 된다).
           무기한 정기계약 = 채울 총액이 없으므로 진행률 대신 누적·미수 중심. */}
+      {progress ? (
+        // 기성형은 총액·월 정액·진행률 개념이 없다 → 실제로 의미 있는 세 숫자만: 누적 기성 청구 / 누적 수금(지급) / 미수(미지급).
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+          <SummaryTile label={isPurchase ? "누적 기성(청구)" : "누적 청구(기성)"} amount={c.billed || 0}/>
+          <SummaryTile label={`누적 ${doneLabel}`} amount={doneAll}/>
+          <SummaryTile label={isPurchase ? "미지급금" : "미수금"} amount={arRemain} big/>
+        </div>
+      ) : (
       <div className="grid" style={{ gridTemplateColumns: `repeat(${isPurchase ? 4 : 5}, 1fr)`, gap: 12 }}>
         <SummaryTile
           label={openEnded ? `${periodLabel(c.billing_period)} ${isPurchase ? '지급' : '청구'}금액` : recurring ? "이번 계약기간 총액" : "계약금액"}
@@ -963,6 +1055,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           </>
         )}
       </div>
+      )}
       <Spacer h={20}/>
 
       {/* 정기청구 연결 — 정기형 계약은 정기청구가 실제 청구를 돌리는 장치다.
@@ -1031,6 +1124,54 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                 </div>
               )}
             </div>
+          </div>
+          <Spacer h={20}/>
+        </>
+      )}
+
+      {/* 기성형 계약 — 품목 단가표 + 품목별 누적 기성. 청구는 '기성 청구' 버튼으로 그때그때 발행. */}
+      {progress && (
+        <>
+          <div className="card card-pad">
+            <div className="row gap-12" style={{ alignItems: 'center' }}>
+              <div className="section-title">품목 단가표</div>
+              <button className="btn primary sm ml-auto" onClick={() => setProgressOpen(true)}>
+                <Icon.Plus/> 기성 청구
+              </button>
+            </div>
+            {(c.contract_items || []).length === 0 ? (
+              <div className="text-sm text-muted" style={{ marginTop: 10 }}>
+                등록된 품목이 없어요. <b>편집</b>에서 품목과 단가를 등록하면 기성 청구할 수 있어요.
+              </div>
+            ) : (
+              <table className="table" style={{ marginTop: 12 }}>
+                <thead>
+                  <tr>
+                    <th>품목</th><th>규격</th><th>단위</th>
+                    <th style={{ textAlign: 'right' }}>단가</th>
+                    <th style={{ textAlign: 'right' }}>누적 수량</th>
+                    <th style={{ textAlign: 'right' }}>누적 기성액</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(c.contract_items || []).map(it => {
+                    // 품목별 누적은 청구서 line 합계에서 온다(item_id 우선, 없으면 이름으로 대조).
+                    const prog = (c.item_progress || []).find(p =>
+                      (it.item_id && p.item_id === it.item_id) || (!it.item_id && p.name === it.name));
+                    return (
+                      <tr key={it.id}>
+                        <td className="fw-600">{it.name}</td>
+                        <td className="text-muted">{it.spec || '—'}</td>
+                        <td className="text-muted">{it.unit || '—'}</td>
+                        <td className="num" style={{ textAlign: 'right' }}>{fmtNum(it.unit_price)}원</td>
+                        <td className="num" style={{ textAlign: 'right' }}>{prog ? fmtNum(prog.qty_sum) : '—'}</td>
+                        <td className="num fw-600" style={{ textAlign: 'right' }}>{prog ? fmtNum(prog.amount_sum) + '원' : '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
           </div>
           <Spacer h={20}/>
         </>
@@ -1118,15 +1259,53 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           내부 키는 그대로 두고 라벨만 매입 관점으로 바꾼다(아래 분기들이 키를 쓰므로). */}
       <div className="card">
         <div className="tab-bar" style={{ padding: "0 12px" }}>
-          {(isPurchase
+          {(progress
+            // 기성형은 마일스톤(청구/지급 일정)이 없다 → 그 자리에 '기성 청구 내역'. 원가 예산도 제외.
+            ? (isPurchase
+                ? [["기성 청구 내역", "기성 청구 내역"], ["지출 내역", "지급 내역"], ["증빙", "증빙"], ["결의서", "결의서"], ["메모/히스토리", "메모/히스토리"]]
+                : [["기성 청구 내역", "기성 청구 내역"], ["입금 내역", "입금 내역"], ["지출 내역", "원가 지출"], ["증빙", "증빙"], ["결의서", "결의서"], ["메모/히스토리", "메모/히스토리"]])
+            : isPurchase
             ? [["청구 일정", "지급 일정"], ["지출 내역", "지급 내역"], ["증빙", "증빙"], ["결의서", "결의서"], ["메모/히스토리", "메모/히스토리"]]
             : [["청구 일정", "청구 일정"], ["원가 예산", "원가 예산"], ["입금 내역", "입금 내역"], ["지출 내역", "원가 지출"], ["증빙", "증빙"], ["결의서", "결의서"], ["메모/히스토리", "메모/히스토리"]]
-          ).map(([key, label]) => (
-            <button key={key} className={`tab ${tab === key ? "active" : ""}`} onClick={() => setTab(key)}>{label}</button>
-          ))}
+          ).map(([key, label]) => {
+            // 기성형 기본 탭: 초기 tab 상태가 "청구 일정"이라 기성형에선 '기성 청구 내역'을 기본 활성으로 취급
+            const active = tab === key || (progress && key === "기성 청구 내역" && tab === "청구 일정")
+            return <button key={key} className={`tab ${active ? "active" : ""}`} onClick={() => setTab(key)}>{label}</button>
+          })}
         </div>
 
-        {tab === "청구 일정" && (() => {
+        {/* 기성 청구 내역 — 기성형 계약이 발행한 기성 청구서 목록(마일스톤 탭 대체) */}
+        {progress && (tab === "기성 청구 내역" || tab === "청구 일정") && (
+          <div style={{ padding: 20 }}>
+            <div className="row" style={{ marginBottom: 14 }}>
+              <div className="text-sm text-muted">이 계약으로 발행한 기성 청구 목록이에요. 새 기성은 위 <b>기성 청구</b> 버튼으로 발행하세요.</div>
+              <button className="btn primary ml-auto" onClick={() => setProgressOpen(true)}><Icon.Plus size={13}/> 기성 청구</button>
+            </div>
+            {(c.progress_invoices || []).length === 0 ? (
+              <div className="text-sm text-muted" style={{ padding: "24px 0", textAlign: "center" }}>아직 발행한 기성 청구가 없어요.</div>
+            ) : (
+              <div className="card" style={{ overflow: "hidden" }}>
+                <table className="table">
+                  <thead><tr><th>청구번호</th><th>청구일</th><th className="num-right">금액</th><th className="num-right">품목</th><th>{isPurchase ? '지급 예정일' : '입금 예정일'}</th><th>상태</th></tr></thead>
+                  <tbody>
+                    {(c.progress_invoices || []).map(inv => (
+                      <tr key={inv.id}>
+                        <td className="fw-600">{inv.invoice_no}</td>
+                        <td className="text-sm">{inv.issued_at}</td>
+                        <td className="num-cell num-right fw-700">{fmtNum(inv.total_amount)}</td>
+                        <td className="num-right text-muted">{inv.line_count}품목</td>
+                        <td className="text-sm text-muted">{inv.due_at || '—'}</td>
+                        <td><StatusBadge status={inv.status}/></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "청구 일정" && !progress && (() => {
           const milestones = c.milestones || []
           const DONE = isPurchase ? "지급 완료" : "입금 완료"
           const collectLabel = isPurchase ? "지급" : "수금"
@@ -1462,14 +1641,152 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       <BudgetEditDrawer open={budgetOpen} onClose={() => setBudgetOpen(false)} contractId={contractId}
         initial={c.cost_budget} onSaved={reload}/>
       <RenewDrawer open={renewOpen} onClose={() => setRenewOpen(false)} contract={c} onSaved={reload}/>
+      <ProgressInvoiceDrawer open={progressOpen} onClose={() => setProgressOpen(false)} contract={c} onSaved={reload}/>
     </div>
+  );
+};
+
+/* ============ 기성 청구 발행 Drawer (기성형 계약) ============
+   계약 품목 단가표를 불러와 품목별 수량을 입력 → 금액=수량×단가 자동 → 청구서 발행.
+   총액형의 청구 일정과 달리 마일스톤 없이 품목 line으로 청구한다. */
+const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
+  const toast = useToast();
+  const [rows, setRows] = useState([]);
+  const [issuedAt, setIssuedAt] = useState('');
+  const [dueAt, setDueAt] = useState('');
+  const [paid, setPaid] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const isPurchase = contract?.vendor_gubu === 'A' || contract?.vendor_gubu === 'E';
+  const exempt = contract?.vat_mode === 'exempt';
+
+  // 열릴 때 계약 품목표를 수량 0으로 깔아준다(단가는 계약 단가 스냅샷).
+  useEffect(() => {
+    if (!open) return;
+    setRows((contract?.contract_items || []).map(it => ({
+      item_id: it.item_id || '', name: it.name, spec: it.spec || '', unit: it.unit || '',
+      unit_price: Number(it.unit_price) || 0, qty: '', amount: '',
+    })));
+    setIssuedAt(localToday());
+    setDueAt(''); setPaid(false);
+  }, [open, contract]);
+
+  // 수량 입력 시 금액 자동(수동 수정 전까지). 금액을 직접 고치면 그 값을 유지.
+  const setQty = (i, v) => setRows(rs => rs.map((r, idx) => {
+    if (idx !== i) return r;
+    const qty = Number(String(v).replace(/[^0-9.]/g, '')) || 0;
+    return { ...r, qty: v, amount: Math.round(qty * r.unit_price) };
+  }));
+  const setAmount = (i, raw) => setRows(rs => rs.map((r, idx) =>
+    idx === i ? { ...r, amount: Number(String(raw).replace(/[^0-9]/g, '')) || 0 } : r));
+
+  const lines = rows.filter(r => (Number(r.amount) || 0) > 0);
+  const supply = lines.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const vat = exempt ? 0 : Math.round(supply * 0.1);
+  const total = supply + vat;
+
+  const submit = async () => {
+    if (lines.length === 0) return toast.push('수량 또는 금액이 있는 품목을 입력해주세요');
+    setSaving(true);
+    const res = await api.issueProgressInvoice(contract.id, {
+      issued_at: issuedAt, due_at: dueAt || null, paid,
+      lines: lines.map(r => ({
+        item_id: r.item_id || null, name: r.name, spec: r.spec, unit: r.unit,
+        qty: Number(String(r.qty).replace(/[^0-9.]/g, '')) || 0,
+        unit_price: r.unit_price, amount: Number(r.amount) || 0,
+      })),
+    });
+    setSaving(false);
+    if (!res.ok) return toast.push(res.error || '발행에 실패했어요');
+    toast.push(`${res.invoice_no} 발행됐어요${paid ? ' · 정산까지 반영' : ''}`);
+    onClose(); onSaved?.();
+  };
+
+  return (
+    <Drawer open={open} onClose={onClose} label="기성 청구">
+      <div className="drawer-head">
+        <div>
+          <div className="fw-700" style={{ fontSize: 16 }}>기성 청구 발행</div>
+          <div className="text-xs text-muted">{contract?.name} · 품목별 수량을 넣으면 금액이 자동 계산돼요.</div>
+        </div>
+        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
+      </div>
+      <div className="drawer-body">
+        {(contract?.contract_items || []).length === 0 ? (
+          <div className="text-sm text-muted">
+            계약에 등록된 품목이 없어요. <b>편집</b>에서 품목 단가표를 먼저 등록해주세요.
+          </div>
+        ) : (
+          <>
+            <div className="row gap-12">
+              <div style={{ flex: 1 }}>
+                <label className="label" style={{ marginBottom: 8 }}>{isPurchase ? '청구일(매입)' : '청구일'}</label>
+                <input className="input" type="date" value={issuedAt} onChange={e => setIssuedAt(e.target.value)}/>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label className="label" style={{ marginBottom: 8 }}>{isPurchase ? '지급 예정일' : '입금 예정일'} <span className="text-muted2">· 선택</span></label>
+                <input className="input" type="date" value={dueAt} onChange={e => setDueAt(e.target.value)}/>
+              </div>
+            </div>
+            <Spacer h={16}/>
+            <label className="label" style={{ marginBottom: 8 }}>품목별 기성 수량</label>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>품목</th>
+                  <th style={{ textAlign: 'right' }}>단가</th>
+                  <th style={{ width: 80, textAlign: 'right' }}>수량</th>
+                  <th style={{ width: 130, textAlign: 'right' }}>금액</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={i}>
+                    <td className="fw-600">{r.name}{r.spec ? <span className="text-muted2 text-xs"> · {r.spec}</span> : ''}</td>
+                    <td className="num text-muted" style={{ textAlign: 'right' }}>{fmtNum(r.unit_price)}{r.unit ? `/${r.unit}` : ''}</td>
+                    <td>
+                      <input className="input num" style={{ textAlign: 'right' }} value={r.qty}
+                        onChange={e => setQty(i, e.target.value)} placeholder="0"/>
+                    </td>
+                    <td>
+                      <MoneyInput className="input num" style={{ textAlign: 'right' }} value={r.amount}
+                        onChange={raw => setAmount(i, raw)}/>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <Spacer h={16}/>
+            <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
+              <div className="row"><span className="text-muted">공급가액</span><span className="num fw-600 ml-auto">{fmtNum(supply)}원</span></div>
+              <div className="row" style={{ marginTop: 6 }}><span className="text-muted">부가세{exempt ? ' (면세)' : ''}</span><span className="num ml-auto">{fmtNum(vat)}원</span></div>
+              <div className="row" style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)' }}>
+                <span className="fw-700">합계</span><span className="num fw-700 ml-auto" style={{ fontSize: 18 }}>{fmtNum(total)}원</span>
+              </div>
+            </div>
+            <Spacer h={14}/>
+            <label className="row gap-8" style={{ cursor: 'pointer', alignItems: 'center' }}>
+              <input type="checkbox" checked={paid} onChange={e => setPaid(e.target.checked)}/>
+              <span className="text-sm">발행과 동시에 {isPurchase ? '지급' : '입금'} 완료로 처리 (실제 거래·정산까지 반영)</span>
+            </label>
+          </>
+        )}
+      </div>
+      <div className="drawer-foot">
+        <button className="btn ghost" onClick={onClose}>취소</button>
+        <button className="btn primary ml-auto" onClick={submit}
+          disabled={saving || lines.length === 0}>
+          {saving ? '발행 중…' : `${isPurchase ? '매입 기성' : '기성 청구'} 발행`}
+        </button>
+      </div>
+    </Drawer>
   );
 };
 
 /* ============ 계약 목록 ============ */
 const NEW_CONTRACT_FORM = {
   vendor: "", contract_no: "", name: "", status: "진행중", file_url: "", file_name: "",
-  billing_mode: "onetime", term_mode: "fixed", vat_mode: "taxable", docs: [],
+  billing_mode: "onetime", term_mode: "fixed", vat_mode: "taxable", docs: [], items: [],
   amount: "", unit_amount: "", billing_period: "monthly", billing_day: "1", initial_amount: "",
   start_date: "", end_date: "", term_months: "12", notice_days: "60",
 };
@@ -1485,6 +1802,11 @@ const contractPayload = (form, vendorId) => ({
   billing_mode:   form.billing_mode,
   term_mode:      form.term_mode,
   vat_mode:       form.vat_mode === 'exempt' ? 'exempt' : 'taxable',
+  // 기성형 품목 단가표 — 서버가 전체 교체 저장(이름 있는 행만). 다른 유형이면 무시됨.
+  items:          (form.items || []).map(it => ({
+    item_id: it.item_id || null, name: it.name, spec: it.spec || '', unit: it.unit || '',
+    unit_price: asNum(it.unit_price),
+  })),
   amount:         asNum(form.amount),
   unit_amount:    asNum(form.unit_amount),
   billing_period: form.billing_period,
@@ -1525,8 +1847,11 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
     if (!newForm.vendor) return toast.push("거래처를 선택해주세요");
     if (!newForm.name)   return toast.push("계약명을 입력해주세요");
     const recurring = newForm.billing_mode === 'recurring';
+    const progress  = newForm.billing_mode === 'progress';
+    if (progress && !(newForm.items || []).some(it => (it.name || '').trim() && asNum(it.unit_price) > 0))
+      return toast.push("품목과 단가를 하나 이상 입력해주세요");
     if (recurring && !asNum(newForm.unit_amount)) return toast.push(`${periodLabel(newForm.billing_period)} 청구금액을 입력해주세요`);
-    if (!recurring && !asNum(newForm.amount))     return toast.push("계약금액을 입력해주세요");
+    if (!recurring && !progress && !asNum(newForm.amount)) return toast.push("계약금액을 입력해주세요");
     if (newForm.term_mode !== 'open' && !newForm.end_date) return toast.push("계약 종료일을 입력해주세요 (무기한이면 종료 방식을 '무기한'으로)");
     const vendorObj = vendors.find(v => v.name === newForm.vendor);
     const res = await api.addContract(contractPayload(newForm, vendorObj?.id));

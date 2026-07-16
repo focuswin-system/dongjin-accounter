@@ -32,9 +32,11 @@ const metrics = (r) => {
   const term_billed = Number(r.term_billed || 0)
 
   const openEnded = r.billing_mode === 'recurring' && r.term_mode === 'open'
+  // 총액 개념이 없는 계약: 무기한 정기 + 기성형(품목 단가×수량으로 그때그때 청구).
+  const noTotal = openEnded || r.billing_mode === 'progress'
   // amount는 정기형이면 '이번 텀 총액'(저장 시 서버가 산출), 총액형이면 계약 총액. 면세면 부가세 없음.
   const vatMul = r.vat_mode === 'exempt' ? 1 : 1.1
-  const termTotal = openEnded ? null : Math.round((Number(r.amount) || 0) * vatMul)
+  const termTotal = noTotal ? null : Math.round((Number(r.amount) || 0) * vatMul)
   const remain = termTotal == null ? null : Math.max(0, termTotal - term_collected)
   const ar_remain = Math.max(0, billed - collected)
 
@@ -310,6 +312,90 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
   finally { conn.release() }
 })
 
+// 기성 청구 발행 — 기성형(progress) 계약에서 품목별 수량을 받아 청구서 1건 + 품목 내역(invoice_lines)을 만든다.
+// 총액형의 schedule/issue와 달리 마일스톤이 없고, 품목 line 합계가 곧 공급가액이다.
+// body: { issued_at, due_at?, paid?, lines:[{ item_id, name, spec, unit, qty, unit_price, amount }] }
+router.post('/:id/progress-invoice', async (req, res, next) => {
+  const { issued_at, due_at, paid, lines } = req.body
+  if (!Array.isArray(lines) || lines.length === 0) {
+    return res.status(400).json({ error: '청구할 품목을 하나 이상 입력해주세요' })
+  }
+  // 기입금(paid)이면 실제 입/출금 거래가 생기므로 미래 일자 금지
+  if (paid) { const de = futureDateError(issued_at); if (de) return res.status(400).json({ error: de }) }
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [[c]] = await conn.execute(
+      'SELECT c.*, v.gubu FROM contracts c LEFT JOIN vendors v ON c.vendor_id = v.id WHERE c.id = ? FOR UPDATE',
+      [req.params.id]
+    )
+    if (!c) { await conn.rollback(); return res.status(404).json({ error: '계약을 찾을 수 없어요' }) }
+    if (c.billing_mode !== 'progress') { await conn.rollback(); return res.status(400).json({ error: '기성형 계약이 아니에요' }) }
+
+    // 품목 정규화: 수량·단가·금액 계산(금액이 오면 그대로, 없으면 수량×단가). 이름 없거나 금액 0 이하 행은 제외.
+    const clean = []
+    for (const l of lines) {
+      const nm = (l && l.name != null) ? String(l.name).trim() : ''
+      if (!nm) continue
+      const qty = Number(String(l.qty ?? '').replace(/[^0-9.]/g, '')) || 0
+      const price = Number(String(l.unit_price ?? '').replace(/[^0-9]/g, '')) || 0
+      const amount = (l.amount != null && l.amount !== '')
+        ? (Number(String(l.amount).replace(/[^0-9]/g, '')) || 0)
+        : Math.round(qty * price)
+      if (amount <= 0) continue
+      clean.push({ item_id: l.item_id || null, name: nm, spec: l.spec || null, unit: l.unit || null, qty, unit_price: price, amount })
+    }
+    if (clean.length === 0) { await conn.rollback(); return res.status(400).json({ error: '청구 금액이 있는 품목이 없어요' }) }
+
+    const supply = clean.reduce((s, l) => s + l.amount, 0)
+    const vat = c.vat_mode === 'exempt' ? 0 : Math.round(supply * 0.1)
+    const total = supply + vat
+
+    const isPurchase = c.gubu === 'A' || c.gubu === 'E'
+    const kind = isPurchase ? 'received' : 'issued'
+    const today = new Date().toISOString().slice(0, 10)
+    const issuedAt = issued_at || today
+    const year = String(issuedAt).slice(0, 4)
+    const prefix = isPurchase ? '매입' : '청구'
+    const [[{ maxno }]] = await conn.execute(
+      `SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(invoice_no, '-', -1) AS UNSIGNED)), 0) AS maxno
+       FROM invoices WHERE kind = ? AND invoice_no LIKE ?`,
+      [kind, `${prefix}-${year}-%`]
+    )
+    const invoice_no = `${prefix}-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
+    const [[defAcc]] = await conn.execute("SELECT id FROM accounts WHERE kind='bank' ORDER BY created_at LIMIT 1")
+    const accountId = defAcc ? defAcc.id : null
+    const invId = randomUUID()
+    const status = paid ? (isPurchase ? '지급 완료' : '입금 완료') : (isPurchase ? '지급 대기' : '입금 예정')
+    await conn.execute(
+      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [invId, invoice_no, kind, c.vendor_id || null, c.id, supply, vat, total, issuedAt, due_at || null, status, paid ? accountId : null, `${c.name} · 기성 ${clean.length}개 품목`]
+    )
+    let ord = 0
+    for (const l of clean) {
+      await conn.execute(
+        'INSERT INTO invoice_lines (id, invoice_id, item_id, name, spec, unit, qty, unit_price, amount, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)',
+        [randomUUID(), invId, l.item_id, l.name, l.spec, l.unit, l.qty, l.unit_price, l.amount, ++ord]
+      )
+    }
+    // 기입금: 실제 입/출금 거래 + 매칭 생성(장부·계좌·계약 수금에 반영)
+    if (paid) {
+      const txnId = randomUUID()
+      await conn.execute(
+        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, doc_no, invoice_id, memo)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [txnId, isPurchase ? 'expense' : 'income', c.vendor_id || null, c.id, accountId,
+         isPurchase ? '대금 지급' : '수금', total, issuedAt, '계좌이체',
+         isPurchase ? '지급완료' : '입금완료', '공통', '', invId, `청구서 ${invoice_no} 정산`]
+      )
+      await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount) VALUES (?,?,?,?)', [randomUUID(), invId, txnId, total])
+    }
+    await conn.commit()
+    res.json({ ok: true, id: invId, invoice_no, kind, supply, vat, total })
+  } catch (e) { await conn.rollback(); next(e) }
+  finally { conn.release() }
+})
+
 router.get('/:id', async (req, res, next) => {
   try {
     const [cRows] = await pool.execute(
@@ -400,8 +486,37 @@ router.get('/:id', async (req, res, next) => {
           [req.params.id])
     const recurrings = recRows.map(r => ({ ...r, supply_amount: Number(r.supply_amount), active: !!r.active }))
 
+    // 기성형 계약: 품목 단가표 + 품목별 누적 기성(이 계약의 청구서 line 합계)
+    const [itemRows] = await pool.execute(
+      'SELECT id, item_id, name, spec, unit, unit_price, sort_order FROM contract_items WHERE contract_id = ? ORDER BY sort_order, name',
+      [req.params.id]
+    )
+    const contract_items = itemRows.map(r => ({ ...r, unit_price: Number(r.unit_price) }))
+    const [progRows] = await pool.execute(
+      `SELECT il.item_id, il.name, il.spec, il.unit,
+              SUM(il.qty) AS qty_sum, SUM(il.amount) AS amount_sum
+       FROM invoice_lines il JOIN invoices i ON il.invoice_id = i.id
+       WHERE i.contract_id = ?
+       GROUP BY il.item_id, il.name, il.spec, il.unit
+       ORDER BY il.name`,
+      [req.params.id]
+    )
+    const item_progress = progRows.map(r => ({
+      item_id: r.item_id, name: r.name, spec: r.spec, unit: r.unit,
+      qty_sum: Number(r.qty_sum), amount_sum: Number(r.amount_sum),
+    }))
+    // 기성형: 이 계약으로 발행한 기성 청구서 목록(품목수 포함) — 상세 '기성 청구 내역' 탭용
+    const [progInvRows] = await pool.execute(
+      `SELECT i.id, i.invoice_no, i.kind, i.issued_at, i.due_at, i.total_amount, i.status,
+              (SELECT COUNT(*) FROM invoice_lines il WHERE il.invoice_id = i.id) AS line_count
+       FROM invoices i WHERE i.contract_id = ? ORDER BY i.issued_at DESC, i.created_at DESC`,
+      [req.params.id]
+    )
+    const progress_invoices = progInvRows.map(r => ({ ...r, total_amount: Number(r.total_amount), line_count: Number(r.line_count) }))
+
     res.json({
       ...m,
+      contract_items, item_progress, progress_invoices,
       renewals: renewals.map(r => ({
         ...r,
         prev_amount: num(r.prev_amount), new_amount: num(r.new_amount),
@@ -416,6 +531,23 @@ router.get('/:id', async (req, res, next) => {
     })
   } catch (e) { next(e) }
 })
+
+// 기성형 계약의 품목 단가표를 통째로 교체 저장한다(마일스톤 편집기와 같은 전체 교체 방식).
+// items: [{ item_id?, name, spec, unit, unit_price }]. 이름 없는 행은 건너뛴다.
+async function replaceContractItems(conn, contractId, items) {
+  await conn.execute('DELETE FROM contract_items WHERE contract_id = ?', [contractId])
+  if (!Array.isArray(items)) return
+  let ord = 0
+  for (const it of items) {
+    const nm = (it && it.name != null) ? String(it.name).trim() : ''
+    if (!nm) continue
+    const price = Number(String(it.unit_price ?? '').replace(/[^0-9]/g, '')) || 0
+    await conn.execute(
+      'INSERT INTO contract_items (id, contract_id, item_id, name, spec, unit, unit_price, sort_order) VALUES (?,?,?,?,?,?,?,?)',
+      [randomUUID(), contractId, it.item_id || null, nm, it.spec || null, it.unit || null, price, ++ord]
+    )
+  }
+}
 
 router.post('/', async (req, res, next) => {
   const { vendor_id, name, start_date, status, buyer_code, pu_no, order_no, vessel_code, cost_budget, file_url, file_name, contract_no } = req.body
@@ -470,6 +602,9 @@ router.post('/', async (req, res, next) => {
           )
         }
       }
+    } else if (f.billing_mode === 'progress') {
+      // 기성형: 총액·마일스톤 없음. 품목 단가표만 깔고, 청구는 계약 상세의 '기성 청구'에서 그때그때 발행한다.
+      await replaceContractItems(conn, id, req.body.items)
     } else if (Number(f.amount) > 0) {
       // 단건 계약: 계약금액 전체를 '예정' 청구 일정 1건으로 자동 생성 → 발행예정에 바로 뜬다.
       // 선급/기성/잔금으로 쪼갤 거면 청구 일정 탭에서 편집하면 이 1건이 대체된다(편집기는 전체 교체 방식).
@@ -492,14 +627,16 @@ router.post('/', async (req, res, next) => {
 })
 
 router.put('/:id', async (req, res, next) => {
+  const { vendor_id, name, start_date, status, buyer_code, pu_no, order_no, vessel_code, file_url, file_name, contract_no } = req.body
+  const conn = await pool.getConnection()
   try {
-    const { vendor_id, name, start_date, status, buyer_code, pu_no, order_no, vessel_code, file_url, file_name, contract_no } = req.body
+    await conn.beginTransaction()
     // 이번 텀 총액은 현재 텀 시작일 기준으로 다시 산출 (편집으로 단가·종료일이 바뀔 수 있음)
-    const [[cur]] = await pool.execute('SELECT current_term_start, start_date FROM contracts WHERE id = ?', [req.params.id])
-    if (!cur) return res.status(404).json({ error: 'Not found' })
+    const [[cur]] = await conn.execute('SELECT current_term_start, start_date FROM contracts WHERE id = ? FOR UPDATE', [req.params.id])
+    if (!cur) { await conn.rollback(); return res.status(404).json({ error: 'Not found' }) }
     const termStart = cur.current_term_start || start_date || cur.start_date || null
     const f = model.normalize({ ...req.body, current_term_start: termStart })
-    const [result] = await pool.execute(
+    const [result] = await conn.execute(
       `UPDATE contracts SET vendor_id=?, name=?, amount=?, start_date=?, end_date=?, status=?, buyer_code=?, pu_no=?, order_no=?, vessel_code=?,
                             file_url=?, file_name=?, contract_no=?,
                             billing_mode=?, term_mode=?, unit_amount=?, billing_period=?, billing_day=?, initial_amount=?, term_months=?, notice_days=?, current_term_start=?, vat_mode=?
@@ -508,11 +645,22 @@ router.put('/:id', async (req, res, next) => {
        file_url||null, file_name||null, contract_no||null,
        f.billing_mode, f.term_mode, f.unit_amount, f.billing_period, f.billing_day, f.initial_amount, f.term_months, f.notice_days, termStart, f.vat_mode, req.params.id]
     )
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
+    if (result.affectedRows === 0) { await conn.rollback(); return res.status(404).json({ error: 'Not found' }) }
+    // 품목 단가표: 기성형이면 폼에서 넘어온 대로 통째 교체. 기성형이 아니면(총액형·정기형으로 전환 등)
+    // 남아 있을 수 있는 품목표를 비워 고아 데이터를 남기지 않는다.
+    if (f.billing_mode === 'progress') {
+      if (req.body.items !== undefined) await replaceContractItems(conn, req.params.id, req.body.items)
+    } else {
+      await conn.execute('DELETE FROM contract_items WHERE contract_id = ?', [req.params.id])
+    }
+    await conn.commit()
     res.json({ ok: true })
   } catch (e) {
+    await conn.rollback()
     if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '이미 사용 중인 계약번호예요' })
     next(e)
+  } finally {
+    conn.release()
   }
 })
 

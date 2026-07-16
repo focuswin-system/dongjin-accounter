@@ -513,6 +513,13 @@ export const api = {
     try { return await req(`/contracts/${id}`) } catch { return null }
   },
 
+  // 기성 청구 발행 — 기성형(progress) 계약에서 품목별 수량으로 청구서 1건 + 품목 내역 생성.
+  // body: { issued_at, due_at?, paid?, lines:[{ item_id, name, spec, unit, qty, unit_price, amount }] }
+  async issueProgressInvoice(contractId, body) {
+    try { const r = await req(`/contracts/${contractId}/progress-invoice`, { method: 'POST', body }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
   // ── 지급결의서 ──
   async getResolutions() {
     try { return await req('/resolutions') } catch { return [] }

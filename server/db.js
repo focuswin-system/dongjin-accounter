@@ -453,6 +453,42 @@ async function initDb() {
       )
     `)
 
+    // 기성형(progress) 계약의 품목 단가표. 계약별 품목·규격·단위·단가(계약별로 수정 가능).
+    // item_id는 품목 기준정보(ref_items type='item') 참조 — 인라인 추가 시 ref_items에도 등록해 연결한다.
+    // name·spec·unit은 스냅샷(기준정보가 바뀌어도 계약 조건은 유지).
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS contract_items (
+        id          VARCHAR(36) PRIMARY KEY,
+        contract_id VARCHAR(36) NOT NULL,
+        item_id     VARCHAR(36),
+        name        VARCHAR(255) NOT NULL,
+        spec        VARCHAR(255),
+        unit        VARCHAR(30),
+        unit_price  BIGINT DEFAULT 0,
+        sort_order  INT DEFAULT 0,
+        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE CASCADE
+      )
+    `)
+    // 기성 청구서의 품목 내역(정식 line). 거래명세서 출력 + 품목별 누적 기성 집계의 단일 소스.
+    // amount는 qty×unit_price가 기본값이지만 사람이 수정할 수 있어 별도 저장한다.
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS invoice_lines (
+        id          VARCHAR(36) PRIMARY KEY,
+        invoice_id  VARCHAR(36) NOT NULL,
+        item_id     VARCHAR(36),
+        name        VARCHAR(255) NOT NULL,
+        spec        VARCHAR(255),
+        unit        VARCHAR(30),
+        qty         DECIMAL(14,2) DEFAULT 0,
+        unit_price  BIGINT DEFAULT 0,
+        amount      BIGINT DEFAULT 0,
+        sort_order  INT DEFAULT 0,
+        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+      )
+    `)
+
     // ── 마이그레이션: 기존 DB에 신규 컬럼 추가 (MySQL은 ADD COLUMN IF NOT EXISTS 미지원) ──
     const ensureColumn = async (table, col, ddl) => {
       const [[{ cnt }]] = await c.execute(

@@ -96,11 +96,25 @@ router.post('/from-invoice/:invoiceId', async (req, res, next) => {
 
     const doc_no = await nextDocNo((sql, p) => conn.execute(sql, p), inv.issued_at)
 
-    // 지급결의서는 '지급액'(gross, VAT 포함)을 결재받는 문서 → 헤더·품목라인 모두 total_amount로 통일.
-    // (품목을 공급가(supply)로 두면 라인합≠지급액이 되고, 면세인데 supply가 비면 /1.1 폴백이 과소 계상된다.)
+    // 지급결의서는 '지급액'(gross, VAT 포함)을 결재받는 문서 → 라인 합계가 지급액과 같아야 한다.
     const gross = Number(inv.total_amount) || 0
     const title = inv.contract_name || inv.memo || '매입 대금 지급'
-    const items = [{ name: title, unit: '식', qty: 1, price: gross, amount: gross, note: inv.invoice_no || '' }]
+    // 기성 청구(invoice_lines 있음)면 품목별로 풀어서 결의서에 싣는다. 각 품목은 공급가(수량×단가),
+    // 부가세는 별도 라인으로 더해 라인합 = 공급가합 + 부가세 = 지급액(total)이 되게 한다.
+    // 품목 내역이 없는 일반 청구서는 기존대로 지급액 한 줄로 뭉친다.
+    const [lines] = await conn.execute('SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY sort_order, name', [inv.id])
+    let items
+    if (lines.length) {
+      items = lines.map(l => ({
+        name: [l.name, l.spec].filter(Boolean).join(' · '),
+        unit: l.unit || '', qty: Number(l.qty) || 0, price: Number(l.unit_price) || 0,
+        amount: Number(l.amount) || 0, note: '',
+      }))
+      const vat = Number(inv.vat_amount) || 0
+      if (vat > 0) items.push({ name: '부가세', unit: '', qty: 1, price: vat, amount: vat, note: inv.invoice_no || '' })
+    } else {
+      items = [{ name: title, unit: '식', qty: 1, price: gross, amount: gross, note: inv.invoice_no || '' }]
+    }
 
     const [[user]] = await conn.execute('SELECT name FROM users ORDER BY created_at LIMIT 1')
     const approval = await defaultApproval((sql, p) => conn.execute(sql, p))
