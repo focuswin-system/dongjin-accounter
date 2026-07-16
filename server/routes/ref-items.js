@@ -4,8 +4,11 @@ const { pool } = require('../db')
 
 const router = Router()
 
-const FIELDS = ['name', 'code', 'spec', 'unit', 'party', 'amount', 'start_date', 'end_date', 'memo']
-const pick = (body) => FIELDS.map(f => (f === 'amount' ? (parseInt(String(body[f]).replace(/[^0-9-]/g, ''), 10) || 0) : (body[f] ?? null)))
+const FIELDS = ['name', 'code', 'spec', 'unit', 'party', 'amount', 'start_date', 'end_date', 'memo',
+  'period', 'pay_day', 'account_id', 'file_url', 'file_name']
+const NUM_FIELDS = new Set(['amount', 'pay_day'])
+const pick = (body) => FIELDS.map(f =>
+  NUM_FIELDS.has(f) ? (parseInt(String(body[f] ?? '').replace(/[^0-9-]/g, ''), 10) || 0) : (body[f] ?? null))
 
 // 목록 (type별)
 router.get('/', async (req, res, next) => {
@@ -26,7 +29,7 @@ router.post('/', async (req, res, next) => {
     const [[{ maxOrder }]] = await pool.execute('SELECT COALESCE(MAX(sort_order),0) AS maxOrder FROM ref_items WHERE type=?', [type])
     const id = randomUUID()
     await pool.execute(
-      'INSERT INTO ref_items (id, type, name, code, spec, unit, party, amount, start_date, end_date, memo, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO ref_items (id, type, name, code, spec, unit, party, amount, start_date, end_date, memo, period, pay_day, account_id, file_url, file_name, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, type, ...pick(req.body), maxOrder + 1]
     )
     res.json({ ok: true, id })
@@ -37,7 +40,7 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const [result] = await pool.execute(
-      'UPDATE ref_items SET name=?, code=?, spec=?, unit=?, party=?, amount=?, start_date=?, end_date=?, memo=? WHERE id=?',
+      'UPDATE ref_items SET name=?, code=?, spec=?, unit=?, party=?, amount=?, start_date=?, end_date=?, memo=?, period=?, pay_day=?, account_id=?, file_url=?, file_name=? WHERE id=?',
       [...pick(req.body), req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })

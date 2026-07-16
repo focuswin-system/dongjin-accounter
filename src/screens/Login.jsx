@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Icon } from '../lib/ui'
-import logoSymbol from '../assets/logo/logo_symbol_64.png'
 
 export const LoginScreen = ({ onLogin }) => {
   const [id, setId] = useState('');
@@ -17,12 +16,23 @@ export const LoginScreen = ({ onLogin }) => {
       return;
     }
     setLoading(true);
-    await new Promise(r => setTimeout(r, 700));
-    setLoading(false);
-    if (id === 'admin' && pw === '1234') {
-      onLogin({ displayName: "정대표", role: "대표이사" });
-    } else {
-      setError('아이디 또는 비밀번호가 올바르지 않습니다.');
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: id.trim(), password: pw }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || '로그인에 실패했습니다.');
+        return;
+      }
+      localStorage.setItem('token', data.token);
+      onLogin({ displayName: data.user.name || data.user.username, role: data.user.role, id: data.user.id });
+    } catch {
+      setError('서버에 연결할 수 없습니다. 서버가 실행 중인지 확인해주세요.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -65,10 +75,8 @@ export const LoginScreen = ({ onLogin }) => {
 
         {/* 로고 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 'auto' }}>
-          <img src={logoSymbol} alt="로고"
-            style={{ width: 36, height: 36, objectFit: 'contain', filter: 'brightness(0) invert(1)', opacity: 0.9 }}/>
           <span style={{ color: 'rgba(255,255,255,0.9)', fontWeight: 700, fontSize: 15, letterSpacing: '-0.02em' }}>
-            동진테크
+            도니도라
           </span>
         </div>
 
@@ -78,7 +86,7 @@ export const LoginScreen = ({ onLogin }) => {
             fontSize: 46, fontWeight: 800, color: '#fff',
             letterSpacing: '-0.04em', lineHeight: 1.1, marginBottom: 4,
           }}>
-            동진테크
+            도니도라
           </div>
           <div style={{
             fontSize: 46, fontWeight: 800, color: '#fff',
@@ -97,7 +105,7 @@ export const LoginScreen = ({ onLogin }) => {
 
         {/* 하단 */}
         <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.25)', letterSpacing: '-0.01em' }}>
-          © 2026 동진테크. All rights reserved.
+          © 2026 도니도라. All rights reserved.
         </div>
       </div>
 

@@ -11,6 +11,49 @@ export const fmtKRW = (n, opts = {}) => {
 export const fmtNum = (n) => (n ?? 0).toLocaleString("ko-KR");
 export const fmtDate = (s) => s;
 
+// 오늘(브라우저 로컬 달력, YYYY-MM-DD). 지출·입금의 미래 일자 방지(max·기본값) 기준.
+// toISOString(UTC)이 아니라 로컬 달력을 써야 새벽에 '오늘'이 하루 밀리지 않는다.
+export const localToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+/* ── 금액 입력 공통 컴포넌트 ──
+   입력 중 천단위 콤마(1,000)를 보여주고 값은 숫자만 남겨 부모에 전달한다.
+   onChange(rawDigits, num) — 원시 숫자문자열과 파싱된 숫자를 함께 넘겨, 부모가 편한 쪽을 쓰게 한다.
+   allowNegative: 신고세액처럼 음수가 필요한 필드만 true (기본 false).
+   className 기본값은 기존 금액 입력 관례(input num). style·min 등 추가 속성은 그대로 통과. */
+export const MoneyInput = ({ value, onChange, allowNegative = false, className = "input num", placeholder = "0", onFocus, onBlur, ...rest }) => {
+  const strip = allowNegative ? /[^0-9-]/g : /[^0-9]/g;
+  const fmt = (v) => {
+    if (v === "" || v == null) return "";
+    const n = Number(String(v).replace(strip, ""));
+    return Number.isNaN(n) ? String(v) : n.toLocaleString("ko-KR");
+  };
+  // 표시 텍스트를 내부 state로 둔다. 부모가 파싱숫자(0)를 저장하는 콜러여도 사용자가 필드를 '비운' 상태를
+  // 보존하기 위함(예전엔 value가 0으로 되돌아와 "0"이 박히고 placeholder가 안 나왔다).
+  const [text, setText] = useState(() => fmt(value));
+  const editing = useRef(false);
+  // 외부 value 변경은 편집 중이 아닐 때만 동기화(자동계산·초기화·리셋 반영). 편집 중엔 내부 텍스트가 우선.
+  useEffect(() => { if (!editing.current) setText(fmt(value)); }, [value]);
+  return (
+    <input
+      {...rest}
+      className={className}
+      inputMode="numeric"
+      value={text}
+      placeholder={placeholder}
+      onFocus={e => { editing.current = true; onFocus && onFocus(e); }}
+      onBlur={e => { editing.current = false; onBlur && onBlur(e); }}
+      onChange={e => {
+        const raw = e.target.value.replace(strip, "");
+        setText(raw === "" ? "" : fmt(raw));
+        onChange(raw, parseInt(raw, 10) || 0);
+      }}
+    />
+  );
+};
+
 /* ── 기간 프리셋 ── */
 export const PERIOD_PRESETS = [
   { id: "all",     label: "전체" },
@@ -234,6 +277,7 @@ export const Icon = {
   Bank:    (p) => <I {...p} d={<><path d="M3 9l9-5 9 5"/><path d="M5 9v10M19 9v10M9 9v10M15 9v10M3 20h18"/></>} />,
   Card:    (p) => <I {...p} d={<><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/><path d="M7 15h3"/></>} />,
   Pencil:  (p) => <I {...p} d={<><path d="M14.5 4.5l5 5L8 21H3v-5z"/><path d="M12.5 6.5l5 5"/></>} />,
+  Trash:   (p) => <I {...p} d={<><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></>} />,
   Trend:   (p) => <I {...p} d={<><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></>} />,
   TrendDn: (p) => <I {...p} d={<><path d="M3 7l6 6 4-4 8 8"/><path d="M14 17h7v-7"/></>} />,
   Menu:    (p) => <I {...p} d={<><path d="M3 6h18M3 12h18M3 18h18"/></>} />,
@@ -365,7 +409,7 @@ export const ConfirmProvider = ({ children }) => {
       {children}
       {dlg && (
         <div data-modal-open onClick={() => close(false)}
-          style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(11,18,32,0.35)", display: "grid", placeItems: "center", backdropFilter: "blur(2px)" }}>
+          style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(11,18,32,0.35)", display: "grid", placeItems: "center", backdropFilter: "blur(2px)" }}>
           <div onClick={e => e.stopPropagation()}
             style={{ background: "#fff", borderRadius: 16, width: "min(440px, calc(100vw - 32px))", padding: 28, boxShadow: "0 30px 60px -20px rgba(15,23,42,0.3)", animation: "fadeUp .18s ease" }}>
 
@@ -452,31 +496,48 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
   const filtered = useMemo(() => {
     if (!q) return options;
     const lc = q.toLowerCase();
-    return options.filter(o => o.label.toLowerCase().includes(lc) || (o.sub || "").toLowerCase().includes(lc));
+    // keywords: 화면엔 안 보이지만 검색에는 걸리는 텍스트(예: 계정과목 설명)
+    return options.filter(o =>
+      o.label.toLowerCase().includes(lc)
+      || (o.sub || "").toLowerCase().includes(lc)
+      || (o.keywords || "").toLowerCase().includes(lc));
   }, [q, options]);
 
   const selected = options.find(o => o.value === value);
-  const display = selected?.label || "";
+  // 목록에 없는 자유입력 값(적요·직접 입력 계약 등)은 원문 그대로 표시.
+  // 단 옵션이 아직 안 실린(async 로딩) 동안은 코드/ID가 잠깐 노출되지 않게 폴백을 미룬다
+  // (options가 실린 뒤 매칭 실패 = 진짜 자유입력/삭제된 값 → 그때만 원문 표시).
+  const display = selected?.label || (options.length ? value : "") || "";
 
   const pick = (opt) => { onChange(opt.value); setOpen(false); setQ(""); };
 
   const onKeyDown = (e) => {
-    if (e.key === "ArrowDown") { e.preventDefault(); setHi(h => Math.min(filtered.length - 1, h + 1)); }
+    if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setHi(h => Math.min(filtered.length - 1, h + 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setHi(h => Math.max(0, h - 1)); }
     else if (e.key === "Enter") {
       e.preventDefault();
       if (filtered[hi]) pick(filtered[hi]);
       else if (q && allowAdd) { onAddNew?.(q); setOpen(false); setQ(""); }
     } else if (e.key === "Escape") { setOpen(false); setQ(""); }
+    else if (e.key === "Tab") { setOpen(false); setQ(""); }
   };
 
   const freqOptions = frequent.map(v => options.find(o => o.value === v)).filter(Boolean);
 
   return (
     <div ref={rootRef} style={{ position: "relative" }}>
-      <div onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 10); }}
+      <div
+        tabIndex={0}
+        onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 10); }}
+        onFocus={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 10); }}
+        onKeyDown={!open ? (e) => {
+          if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+            e.preventDefault(); setOpen(true); setTimeout(() => inputRef.current?.focus(), 10);
+          }
+        } : undefined}
         className="input"
         style={{ cursor: "text", display: "flex", alignItems: "center", gap: 8, paddingRight: 36,
+          outline: "none",
           borderColor: open ? "var(--brand)" : undefined,
           boxShadow: open ? "0 0 0 3px var(--brand-soft)" : undefined }}>
         {open ? (

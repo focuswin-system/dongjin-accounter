@@ -2,7 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const multer = require('multer')
 const xlsx = require('xlsx')
-const { pool } = require('../db')
+const { pool, futureDateError } = require('../db')
 
 const router = Router()
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
@@ -22,15 +22,21 @@ async function attachDocs(rows) {
 router.get('/', async (req, res, next) => {
   try {
     const { kind, contractId, buyerType, vesselNo, category, from, to, accountId } = req.query
-    let sql = `SELECT t.*, v.name AS vendor_name, c.name AS contract_name, a.name AS account_name
+    let sql = `SELECT t.*, v.name AS vendor_name, c.name AS contract_name, a.name AS account_name,
+                      e.name AS employee_name, ri.name AS item_name,
+                      cc.name AS cost_contract_name
               FROM transactions t
               LEFT JOIN vendors v ON t.vendor_id = v.id
               LEFT JOIN contracts c ON t.contract_id = c.id
+              LEFT JOIN contracts cc ON t.cost_contract_id = cc.id
               LEFT JOIN accounts a ON t.account_id = a.id
+              LEFT JOIN employees e ON t.employee_id = e.id
+              LEFT JOIN ref_items ri ON t.item_id = ri.id
               WHERE 1=1`
     const params = []
     if (kind)       { sql += ' AND t.kind = ?';        params.push(kind) }
-    if (contractId) { sql += ' AND t.contract_id = ?'; params.push(contractId) }
+    // 계약으로 거를 땐 두 축을 모두 본다 (그 계약의 근거 거래 + 그 계약에 귀속된 원가)
+    if (contractId) { sql += ' AND (t.contract_id = ? OR t.cost_contract_id = ?)'; params.push(contractId, contractId) }
     if (buyerType)  { sql += ' AND t.buyer_type = ?';  params.push(buyerType) }
     if (vesselNo)   { sql += ' AND t.vessel_no = ?';   params.push(vesselNo) }
     if (category)   { sql += ' AND t.category = ?';    params.push(category) }
@@ -59,7 +65,17 @@ router.get('/summary', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const [rows] = await pool.execute('SELECT * FROM transactions WHERE id = ?', [req.params.id])
+    const [rows] = await pool.execute(`
+      SELECT t.*, v.name AS vendor_name, c.name AS contract_name, a.name AS account_name,
+             e.name AS employee_name, ri.name AS item_name, cc.name AS cost_contract_name
+      FROM transactions t
+      LEFT JOIN vendors v ON t.vendor_id = v.id
+      LEFT JOIN contracts c ON t.contract_id = c.id
+      LEFT JOIN contracts cc ON t.cost_contract_id = cc.id
+      LEFT JOIN accounts a ON t.account_id = a.id
+      LEFT JOIN employees e ON t.employee_id = e.id
+      LEFT JOIN ref_items ri ON t.item_id = ri.id
+      WHERE t.id = ?`, [req.params.id])
     if (!rows[0]) return res.status(404).json({ error: 'Not found' })
     await attachDocs(rows)
     res.json(rows[0])
@@ -69,19 +85,25 @@ router.get('/:id', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const {
-      kind, vendor_id, contract_id, account_id, category, sub_category,
+      kind, vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
       amount, date, method, status, buyer_type, vessel_no, usage_place,
-      invoice_id, recurring_id, doc_no, employee_id, evid_type, evid_url, memo
+      invoice_id, recurring_id, doc_no, employee_id, evid_type, evid_url, memo,
+      item_id, account_code
     } = req.body
+    const dateErr = futureDateError(date)
+    if (dateErr) return res.status(400).json({ error: dateErr })
     const id = randomUUID()
+    // 원가 귀속(cost_contract_id)은 지출에만 의미가 있다 — 수금에 붙으면 매출계약 원가가 부풀어 오른다
+    const costId = kind === 'expense' ? (cost_contract_id || null) : null
     await pool.execute(`
-      INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, sub_category,
+      INSERT INTO transactions (id, kind, vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
         amount, date, method, status, buyer_type, vessel_no, usage_place,
-        invoice_id, recurring_id, doc_no, employee_id, evid_type, evid_url, memo)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    `, [id, kind, vendor_id||null, contract_id||null, account_id||null, category||'', sub_category||'',
+        invoice_id, recurring_id, doc_no, employee_id, evid_type, evid_url, memo, item_id, account_code)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `, [id, kind, vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
         amount, date, method||'', status||'지급완료', buyer_type||'공통', vessel_no||'', usage_place||'',
-        invoice_id||null, recurring_id||null, doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||''])
+        invoice_id||null, recurring_id||null, doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'',
+        item_id||null, account_code||null])
     res.json({ id })
   } catch (e) { next(e) }
 })
@@ -89,18 +111,24 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const {
-      vendor_id, contract_id, account_id, category, sub_category,
+      vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
       amount, date, method, status, buyer_type, vessel_no, usage_place,
-      doc_no, employee_id, evid_type, evid_url, memo
+      doc_no, employee_id, evid_type, evid_url, memo, item_id, account_code
     } = req.body
+    const dateErr = futureDateError(date)
+    if (dateErr) return res.status(400).json({ error: dateErr })
+    // 편집으로 수입 거래가 되면 원가 귀속은 떨어진다
+    const [[cur]] = await pool.execute('SELECT kind FROM transactions WHERE id = ?', [req.params.id])
+    if (!cur) return res.status(404).json({ error: 'Not found' })
+    const costId = cur.kind === 'expense' ? (cost_contract_id || null) : null
     const [result] = await pool.execute(`
-      UPDATE transactions SET vendor_id=?, contract_id=?, account_id=?, category=?, sub_category=?,
+      UPDATE transactions SET vendor_id=?, contract_id=?, cost_contract_id=?, account_id=?, category=?, sub_category=?,
         amount=?, date=?, method=?, status=?, buyer_type=?, vessel_no=?, usage_place=?,
-        doc_no=?, employee_id=?, evid_type=?, evid_url=?, memo=?
+        doc_no=?, employee_id=?, evid_type=?, evid_url=?, memo=?, item_id=?, account_code=?
       WHERE id=?
-    `, [vendor_id||null, contract_id||null, account_id||null, category||'', sub_category||'',
+    `, [vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
         amount, date, method||'', status||'지급완료', buyer_type||'공통', vessel_no||'', usage_place||'',
-        doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'', req.params.id])
+        doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'', item_id||null, account_code||null, req.params.id])
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
   } catch (e) { next(e) }

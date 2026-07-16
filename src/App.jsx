@@ -26,11 +26,11 @@ const CRUMB_MAP = {
   ledger_ap:       ["거래내역", "미지급금"],
   income:          ["판매·매출", "입금"],
   expense:         ["구매·매입", "지출"],
-  ar:              ["판매·매출", "미수금"],
-  ap:              ["구매·매입", "미지급금"],
-  billing:         ["판매·매출", "발행 청구서"],
-  billing_issued:  ["판매·매출", "발행 청구서"],
-  billing_received:["구매·매입", "수취 청구서"],
+  ar:              ["판매·매출", "입금·환불"],
+  ap:              ["구매·매입", "지급·환입"],
+  billing:         ["판매·매출", "대금 청구서"],
+  billing_issued:  ["판매·매출", "대금 청구서"],
+  billing_received:["구매·매입", "대금 청구서"],
   contract:        ["계약"],
   contract_sales:  ["판매·매출", "매출 계약"],
   contract_purchase:["구매·매입", "매입 계약"],
@@ -124,7 +124,7 @@ const HELP_MAP = {
   billing: {
     title: "청구 관리",
     items: [
-      "발행 청구서 탭에서 미수금을, 수취 청구서 탭에서 미지급금을 관리하세요",
+      "판매·매출의 대금 청구서에서 미수금을, 구매·매입의 대금 청구서에서 미지급금을 관리하세요",
       "청구서와 실제 거래내역을 매칭하면 미수금이 자동으로 차감돼요",
       "기한 지남 항목을 클릭해 독촉 또는 재청구 처리를 할 수 있어요",
       "청구서 발행 버튼으로 계약 청구 일정과 연동된 청구를 빠르게 등록해요",
@@ -305,11 +305,12 @@ function AppInner({ onLogout, user }) {
   };
 
   const Screen = useMemo(() => {
+    // 미수금/미지급금(구 ledger_ar/ledger_ap)은 청구서 기준 회수 화면으로 이관됨
+    if (route === "ledger_ar") return <BillingScreen initialTab="issued"  role="collect" openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
+    if (route === "ledger_ap") return <BillingScreen initialTab="received" role="collect" openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
     if (route.startsWith("ledger")) {
       const filter = route === "ledger_income" ? "income"
                    : route === "ledger_expense" ? "expense"
-                   : route === "ledger_ar" ? "ar"
-                   : route === "ledger_ap" ? "ap"
                    : "all";
       return <LedgerScreen initialFilter={filter} refreshTrigger={txnVersion} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
     }
@@ -322,7 +323,7 @@ function AppInner({ onLogout, user }) {
       case "contract":        return <ContractListScreen kind="all" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
       case "contract_sales":  return <ContractListScreen kind="sales" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
       case "contract_purchase": return <ContractListScreen kind="purchase" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
-      case "contract_detail": return <ContractScreen goList={() => go("contract")} contractId={contractId} refreshTrigger={txnVersion} openIncome={(contract, vendor) => setTxnForm({ kind: "income", contract, vendor })} openExpense={(contract, vendor) => setTxnForm({ kind: "expense", contract, vendor })}/>;
+      case "contract_detail": return <ContractScreen goList={() => go("contract")} contractId={contractId} refreshTrigger={txnVersion} openIncome={(contract, vendor) => setTxnForm({ kind: "income", contract, vendor })} openExpense={(contract, vendor, opts) => setTxnForm(opts?.asCost ? { kind: "expense", costContract: contract, vendor } : { kind: "expense", contract, vendor })}/>;
       case "hr":              return <HRScreen/>;
       case "report":          return <ReportsScreen/>;
       case "tax_vat":         return <TaxVatScreen/>;
@@ -337,9 +338,10 @@ function AppInner({ onLogout, user }) {
       case "excel_modal":     return <ExcelScreen/>;
       case "income":          return <LedgerScreen initialFilter="income" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
       case "expense":         return <LedgerScreen initialFilter="expense" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
-      case "ar":              return <LedgerScreen initialFilter="ar" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
-      case "ap":              return <LedgerScreen initialFilter="ap" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
-      case "doc":             return <DocsScreen openExpense={() => setTxnForm({ kind: "expense" })}/>;
+      // 미수금/미지급금은 청구서 기준 → 발행 청구서와 같은 BillingScreen을 '회수 모드'로 재사용
+      case "ar":              return <BillingScreen initialTab="issued"  role="collect" openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
+      case "ap":              return <BillingScreen initialTab="received" role="collect" openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
+      case "doc":             return <DocsScreen/>;
       case "evidence":        return <EvidenceScreen onAttach={(item) => setEvidenceAttach(item)}/>;
       case "excel":           return <ExcelScreen/>;
       default:                return <HomeScreen go={go} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
@@ -570,7 +572,7 @@ function AppInner({ onLogout, user }) {
         </div>
       </main>
 
-      <TransactionForm open={txnForm !== null} kind={txnForm?.kind || "expense"} initialContract={txnForm?.contract} initialVendor={txnForm?.vendor || null} editTxn={txnForm?.txn || null} onClose={() => setTxnForm(null)} onSave={() => setTxnVersion(v => v + 1)}/>
+      <TransactionForm open={txnForm !== null} kind={txnForm?.kind || "expense"} initialContract={txnForm?.contract} initialCostContract={txnForm?.costContract || null} initialVendor={txnForm?.vendor || null} initialCategory={txnForm?.category || null} initialMemo={txnForm?.memo || null} editTxn={txnForm?.txn || null} onClose={() => setTxnForm(null)} onSave={() => setTxnVersion(v => v + 1)}/>
       <EvidenceAttachDrawer item={evidenceAttach} onClose={() => setEvidenceAttach(null)}/>
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onPick={(c) => { setCmdOpen(false); go(c.route, c.contractId ? { contractId: c.contractId, contractName: c.contractName } : {}); }}/>
 
@@ -643,8 +645,8 @@ const FAQ_DATA = [
   { id:"f13", cat:"계약 관리",       routes:["contract_detail"],            q:"발주서나 계약서 파일을 첨부하고 싶어요",      a:"계약 상세 화면의 '증빙' 탭에서 파일을 드래그하거나 선택해 첨부할 수 있어요. PDF·이미지·엑셀 형식을 지원해요.", action:null },
   { id:"f14", cat:"계약 관리",       routes:["contract"],                   q:"진행률 바는 어떻게 계산되나요?",              a:"계약금액 대비 현재까지 입금 처리된 금액의 비율이에요. 입금을 등록하고 계약과 연결하면 자동으로 반영돼요.", action:null },
   // 증빙·결의서
-  { id:"f15", cat:"증빙·결의서",     routes:["evidence","ledger"],          q:"세금계산서를 어떻게 등록하나요?",              a:"증빙 관리 화면에서 '+ 증빙 등록'을 눌러 파일을 업로드하세요. 등록 후 해당 거래와 연결하면 자동 매칭이 돼요.", action:{ label:"증빙 관리로", route:"evidence" } },
-  { id:"f16", cat:"증빙·결의서",     routes:["ledger","evidence"],          q:"거래내역에 ⚠️ 표시는 무엇인가요?",            a:"세금계산서나 영수증이 연결되지 않은 거래에 표시돼요. 증빙 관리 화면에서 파일을 업로드하거나, 거래 상세에서 직접 첨부하면 사라져요.", action:{ label:"증빙 관리로", route:"evidence" } },
+  { id:"f15", cat:"증빙·결의서",     routes:["ledger"],                     q:"세금계산서를 어떻게 등록하나요?",              a:"거래를 등록할 때 증빙 첨부 단계에서 세금계산서 파일을 올리거나, 거래내역에서 해당 거래를 열어 증빙을 첨부하세요.", action:null },
+  { id:"f16", cat:"증빙·결의서",     routes:["ledger"],                     q:"거래내역에 ⚠️ 표시는 무엇인가요?",            a:"세금계산서나 영수증이 연결되지 않은 거래에 표시돼요. 거래 상세를 열어 증빙을 첨부하면 사라져요.", action:null },
   { id:"f17", cat:"증빙·결의서",     routes:["doc","contract"],             q:"결의서 승인이 안 돼요",                        a:"결의서는 결재선 순서대로 승인이 이루어져요. 현재 결재자가 누구인지 결의서 상세에서 확인하고, 해당 담당자에게 승인을 요청하세요.", action:{ label:"결의서로", route:"doc" } },
   { id:"f18", cat:"증빙·결의서",     routes:["doc"],                        q:"외주가공비 결의서를 새로 만들고 싶어요",      a:"지출 등록 마지막 단계에서 '결의서 자동 생성'을 켜두면 지출 등록과 동시에 결의서가 생성돼요. 또는 결의서 화면에서 '+ 결의서 작성'을 눌러도 돼요.", action:{ label:"결의서로", route:"doc" } },
   { id:"f19", cat:"증빙·결의서",     routes:["doc","contract"],             q:"결의서와 미지급금은 어떻게 연결되나요?",      a:"지출 등록 시 결의서가 생성되고, 결의서가 승인되면 해당 금액이 미지급금 목록에 자동으로 올라와요. 이체 실행 시 미지급금이 차감돼요.", action:null },

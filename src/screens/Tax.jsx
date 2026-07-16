@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, Drawer } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, Drawer, Combobox, MoneyInput, localToday } from '../lib/ui'
 import { api } from '../lib/api'
 
 const QUARTER_PERIOD = { 1: '1~3월', 2: '4~6월', 3: '7~9월', 4: '10~12월' }
@@ -18,31 +18,54 @@ const StatCard = ({ label, amount, tone = 'ink', hint }) => (
 
 const FilingDrawer = ({ target, year, onClose, onSaved }) => {
   const toast = useToast()
-  const [form, setForm] = useState({ status: '납부 대기', paid_amount: '', paid_date: '', memo: '' })
+  const [form, setForm] = useState({ status: '납부 대기', filed_amount: '', paid_amount: '', paid_date: '', memo: '', account_id: '', category: '', account_code: '' })
+  const [accounts, setAccounts] = useState([])
+  const [categories, setCategories] = useState([])
+  const [acctSubjects, setAcctSubjects] = useState([])
+  const [jeokyos, setJeokyos] = useState([])
+  useEffect(() => {
+    api.getAccounts().then(list => setAccounts(list.filter(a => a.kind === 'bank')))
+    api.getCategories().then(setCategories)
+    api.getAccountSubjects().then(setAcctSubjects)
+    api.getRefItems('jeokyo').then(setJeokyos)
+  }, [])
 
   useEffect(() => {
     if (target) setForm({
       status: target.status || '납부 대기',
-      paid_amount: target.paid_amount ? String(target.paid_amount) : String(Math.abs(target.payable) || ''),
+      // 신고세액: 이미 입력됐으면 그 값, 아니면 자동집계 예상값을 기본으로 채움
+      filed_amount: target.filed_amount != null ? String(target.filed_amount) : String(target.estimate ?? target.payable ?? ''),
+      paid_amount: target.paid_amount ? String(target.paid_amount) : '',
       paid_date: target.paid_date || '',
-      memo: target.memo || '',
+      // 적요: 저장된 값 없으면 자동 문구로 채움 (사용자 수정 가능)
+      memo: target.memo || `${year}년 ${target.quarter}분기 부가세 ${(target.filed_amount ?? target.estimate ?? 0) < 0 ? '환급' : '납부'}`,
+      account_id: target.account_id || '',
+      category: target.category || '',
+      account_code: target.account_code || '',
     })
   }, [target])
 
   if (!target) return null
-  const isRefund = target.payable < 0
+  const filedNum = parseInt(String(form.filed_amount).replace(/[^0-9-]/g, ''), 10) || 0
+  const isRefund = filedNum < 0        // 신고세액이 음수면 환급
+  const isDone = form.status === '납부 완료' || form.status === '환급 완료'
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
   const save = async () => {
+    if (isDone && !form.account_id) return toast.push(`${isRefund ? '환급' : '납부'} 계좌를 선택해주세요`)
     const res = await api.saveVatFiling({
       year, quarter: target.quarter,
       status: form.status,
+      filed_amount: form.filed_amount === '' ? null : filedNum,
       paid_amount: parseInt(String(form.paid_amount).replace(/[^0-9]/g, ''), 10) || 0,
       paid_date: form.paid_date || null,
       memo: form.memo || null,
+      account_id: form.account_id || null,
+      category: form.category || null,
+      account_code: form.account_code || null,
     })
     if (!res.ok) return toast.push(res.error || '저장 실패')
-    toast.push('신고 상태가 저장됐어요')
+    toast.push(isDone ? `${isRefund ? '환급' : '납부'} 처리하고 거래내역에 반영했어요` : '신고 내용이 저장됐어요')
     onSaved(); onClose()
   }
 
@@ -51,11 +74,18 @@ const FilingDrawer = ({ target, year, onClose, onSaved }) => {
       <div className="drawer-head">
         <div>
           <div className="fw-700" style={{ fontSize: 16 }}>{year}년 {target.quarter}분기 부가세</div>
-          <div className="text-xs text-muted">{isRefund ? '환급' : '납부'}세액 {fmtNum(Math.abs(target.payable))}원</div>
+          <div className="text-xs text-muted">자동집계 예상 {target.estimate < 0 ? '환급 ' : ''}{fmtNum(Math.abs(target.estimate ?? 0))}원 (매출세액 − 매입세액)</div>
         </div>
         <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
       </div>
-      <div className="drawer-body col gap-14">
+      <div className="drawer-body col gap-form">
+        <div>
+          <label className="label" style={{ marginBottom: 8 }}>신고세액 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 실제 신고한 금액 (환급이면 음수)</span></label>
+          <MoneyInput value={form.filed_amount} allowNegative onChange={raw => f('filed_amount', raw)}/>
+          <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+            자동집계 예상값으로 채웠어요. 실제 신고서 금액과 다르면 고치세요. {isRefund ? '음수 = 환급받을 세액.' : ''}
+          </div>
+        </div>
         <div>
           <label className="label" style={{ marginBottom: 8 }}>신고 상태</label>
           <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
@@ -65,17 +95,51 @@ const FilingDrawer = ({ target, year, onClose, onSaved }) => {
           </div>
         </div>
         <div>
-          <label className="label" style={{ marginBottom: 8 }}>{isRefund ? '환급액' : '납부액'}</label>
-          <input className="input num" value={form.paid_amount ? Number(String(form.paid_amount).replace(/[^0-9]/g, '')).toLocaleString() : ''}
-            onChange={e => f('paid_amount', e.target.value.replace(/[^0-9]/g, ''))} placeholder="0"/>
+          <label className="label" style={{ marginBottom: 8 }}>{isRefund ? '환급받은 금액' : '납부한 금액'}</label>
+          <MoneyInput value={form.paid_amount} onChange={raw => f('paid_amount', raw)}/>
         </div>
+        {/* 납부/환급 완료면 실제 자금이 오간 계좌 → 거래내역·계좌잔고에 반영 */}
+        {isDone && (
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>{isRefund ? '환급 입금' : '납부 출금'} 계좌 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+            <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+              {accounts.map(a => (
+                <button key={a.id} type="button" className={`chip ${form.account_id === a.id ? 'active' : ''}`} onClick={() => f('account_id', a.id)}>
+                  {a.name}{a.number ? ` ${String(a.number).slice(-4)}` : ''}
+                </button>
+              ))}
+            </div>
+            <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+              {isRefund ? '이 계좌로 환급 입금 거래가 생성돼요.' : '이 계좌에서 지출 거래가 생성돼요.'} 완료를 취소하면 그 거래도 함께 사라집니다.
+            </div>
+          </div>
+        )}
+        {/* 생성될 거래의 분류 — 사용자가 직접 고른다(비목 필수, 계정과목 선택) */}
+        {isDone && (
+          <>
+            <div>
+              <label className="label" style={{ marginBottom: 8 }}>비목</label>
+              <Combobox value={form.category} onChange={v => f('category', v)}
+                options={categories.filter(c => c.id?.startsWith(isRefund ? 'INC-' : 'EXP-')).map(c => ({ value: c.name, label: c.name, sub: c.group_name || '' }))}
+                placeholder="비목 선택" onAddNew={v => f('category', v)} addNewLabel="이 비목으로 입력"/>
+            </div>
+            <div>
+              <label className="label" style={{ marginBottom: 8 }}>계정과목 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+              <Combobox value={form.account_code} onChange={v => f('account_code', v)}
+                options={acctSubjects.map(a => ({ value: a.code, label: a.name, sub: `${a.code} · ${a.category}`, keywords: a.note || '' }))}
+                placeholder="계정과목 선택 (선택)" allowAdd={false}/>
+            </div>
+          </>
+        )}
         <div>
           <label className="label" style={{ marginBottom: 8 }}>{isRefund ? '환급일' : '납부일'}</label>
-          <input className="input" type="date" value={form.paid_date} onChange={e => f('paid_date', e.target.value)}/>
+          <input className="input" type="date" max={localToday()} value={form.paid_date} onChange={e => f('paid_date', e.target.value)}/>
         </div>
         <div>
-          <label className="label" style={{ marginBottom: 8 }}>메모</label>
-          <input className="input" value={form.memo} onChange={e => f('memo', e.target.value)} placeholder="신고/납부 관련 메모"/>
+          <label className="label" style={{ marginBottom: 8 }}>적요 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 거래 내용</span></label>
+          <Combobox value={form.memo} onChange={v => f('memo', v)}
+            options={jeokyos.map(j => ({ value: j.name, label: j.name, sub: j.memo || '' }))}
+            placeholder="적요 입력" onAddNew={v => f('memo', v)} addNewLabel="이 적요로 입력"/>
         </div>
       </div>
       <div className="drawer-foot">
@@ -95,17 +159,21 @@ export const TaxVatScreen = () => {
   useEffect(() => { load() }, [year])
 
   const quarters = data.quarters || []
+  // 연간 합계는 신고세액이 있으면 그걸, 없으면 예상값을 쓴다(payable이 이미 그 규칙)
   const totals = quarters.reduce((a, q) => ({
     sales: a.sales + q.sales_vat, purchase: a.purchase + q.purchase_vat, payable: a.payable + q.payable,
   }), { sales: 0, purchase: 0, payable: 0 })
-  const unpaid = quarters.filter(q => q.payable > 0 && q.status !== '납부 완료').reduce((s, q) => s + q.payable, 0)
+  // 미납: 신고 완료(신고세액 입력)됐고 납부(+세액)인데 아직 납부 안 한 분기
+  const unpaid = quarters.filter(q => q.filed_amount != null && q.payable > 0 && q.status !== '납부 완료').reduce((s, q) => s + q.payable, 0)
+  // 환급 예정: 신고했고 환급(−세액)인데 아직 환급 처리 안 됨
+  const refundDue = quarters.filter(q => q.filed_amount != null && q.payable < 0 && q.status !== '환급 완료').reduce((s, q) => s + Math.abs(q.payable), 0)
 
   return (
     <div className="fade-up">
       <div className="row" style={{ marginBottom: 8 }}>
         <div>
           <div className="page-title">부가세</div>
-          <div className="page-sub">발행·수취 세금계산서에서 분기별 매출·매입세액을 자동 집계합니다. 신고 후 납부·환급을 기록하세요.</div>
+          <div className="page-sub">청구서에서 분기별 세액을 예상으로 집계해요. 실제 신고세액을 입력하고 납부·환급을 기록하면, 그 신고세액 기준으로 관리됩니다.</div>
         </div>
         <div className="ml-auto row gap-6" style={{ alignItems: 'center' }}>
           <button className="icon-btn" onClick={() => setYear(y => y - 1)} title="이전 연도"><Icon.Left size={16}/></button>
@@ -116,10 +184,10 @@ export const TaxVatScreen = () => {
       <Spacer h={20}/>
 
       <div className="grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
-        <StatCard label="연간 매출세액" amount={totals.sales} tone="ink" hint="발행 세금계산서 기준"/>
-        <StatCard label="연간 매입세액" amount={totals.purchase} tone="muted" hint="수취 세금계산서 기준"/>
-        <StatCard label={totals.payable >= 0 ? '연간 납부세액' : '연간 환급세액'} amount={totals.payable} tone={totals.payable >= 0 ? 'neg-ink' : 'brand'} hint="매출세액 − 매입세액"/>
-        <StatCard label="미납 부가세" amount={unpaid} tone="warn-ink" hint="납부 미완료 분기 합계"/>
+        <StatCard label={totals.payable >= 0 ? '연간 납부세액' : '연간 환급세액'} amount={totals.payable} tone={totals.payable >= 0 ? 'neg-ink' : 'brand'} hint="신고세액(없으면 예상) 합계"/>
+        <StatCard label="미납 부가세" amount={unpaid} tone="warn-ink" hint="신고했으나 미납한 분기"/>
+        <StatCard label="환급 예정" amount={refundDue} tone="brand" hint="신고했으나 미수령 환급"/>
+        <StatCard label="연간 매출세액" amount={totals.sales} tone="muted" hint={`매입세액 ${fmtNum(totals.purchase)}원`}/>
       </div>
       <Spacer h={24}/>
 
@@ -130,26 +198,32 @@ export const TaxVatScreen = () => {
               <tr>
                 <th>분기</th><th>과세기간</th>
                 <th className="num-right">매출세액</th><th className="num-right">매입세액</th>
-                <th className="num-right">납부(환급)세액</th><th>신고 상태</th>
-                <th className="num-right">납부·환급액</th><th></th>
+                <th className="num-right">예상세액</th><th className="num-right">신고세액</th>
+                <th>신고 상태</th><th className="num-right">납부·환급액</th><th></th>
               </tr>
             </thead>
             <tbody>
               {quarters.map(q => {
                 const refund = q.payable < 0
+                const filedYet = q.filed_amount != null
                 return (
                   <tr key={q.quarter}>
                     <td className="fw-700">{q.quarter}분기</td>
                     <td className="text-sm text-muted num">{year}.{QUARTER_PERIOD[q.quarter]}</td>
                     <td className="num-cell num-right">{fmtNum(q.sales_vat)}</td>
                     <td className="num-cell num-right text-muted">{fmtNum(q.purchase_vat)}</td>
-                    <td className="num-cell num-right fw-700" style={{ color: refund ? 'var(--brand)' : 'var(--neg-ink)' }}>
-                      {refund ? '환급 ' : ''}{fmtNum(Math.abs(q.payable))}
+                    {/* 예상(자동집계) — 참고 */}
+                    <td className="num-cell num-right text-muted2">
+                      {q.estimate < 0 ? '환급 ' : ''}{fmtNum(Math.abs(q.estimate))}
+                    </td>
+                    {/* 신고세액 — 관리 기준. 미입력이면 '미신고' */}
+                    <td className="num-cell num-right fw-700" style={{ color: filedYet ? (refund ? 'var(--brand)' : 'var(--neg-ink)') : 'var(--muted-2)' }}>
+                      {filedYet ? `${refund ? '환급 ' : ''}${fmtNum(Math.abs(q.payable))}` : '미신고'}
                     </td>
                     <td><span className={`badge ${STATUS_TONE[q.status] || 'outline'}`}>{q.status}</span></td>
                     <td className="num-cell num-right">{q.paid_amount ? fmtNum(q.paid_amount) : '—'}</td>
                     <td>
-                      <button className="btn sm" onClick={() => setTarget(q)}>{q.status === '납부 대기' ? (refund ? '환급 처리' : '납부 처리') : '수정'}</button>
+                      <button className="btn sm" onClick={() => setTarget(q)}>{q.status === '납부 대기' ? (filedYet ? (refund ? '환급 처리' : '납부 처리') : '신고 등록') : '수정'}</button>
                     </td>
                   </tr>
                 )
@@ -170,29 +244,42 @@ const otUnpaid = (r) => (r.status === '납부 완료' || r.status === '환급 �
 
 const OtherTaxDrawer = ({ open, editing, onClose, onSaved }) => {
   const toast = useToast()
-  const [form, setForm] = useState(OT_EMPTY)
+  const [form, setForm] = useState({ ...OT_EMPTY, account_id: '', category: '', account_code: '' })
+  const [accounts, setAccounts] = useState([])
+  const [categories, setCategories] = useState([])
+  const [acctSubjects, setAcctSubjects] = useState([])
+  const [jeokyos, setJeokyos] = useState([])
+  useEffect(() => {
+    api.getAccounts().then(list => setAccounts(list.filter(a => a.kind === 'bank')))
+    api.getCategories().then(setCategories)
+    api.getAccountSubjects().then(setAcctSubjects)
+    api.getRefItems('jeokyo').then(setJeokyos)
+  }, [])
   useEffect(() => {
     if (open) setForm(editing ? {
       name: editing.name || '', period: editing.period || '', status: editing.status || '납부 대기',
       tax_amount: editing.tax_amount ? String(editing.tax_amount) : '',
       paid_amount: editing.paid_amount ? String(editing.paid_amount) : '',
-      paid_date: editing.paid_date || '', memo: editing.memo || '',
-    } : OT_EMPTY)
+      paid_date: editing.paid_date || '', memo: editing.memo || '', account_id: editing.account_id || '',
+      category: editing.category || '', account_code: editing.account_code || '',
+    } : { ...OT_EMPTY, account_id: '', category: '', account_code: '' })
   }, [open, editing])
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
-  const numv = (v) => v ? Number(String(v).replace(/[^0-9]/g, '')).toLocaleString() : ''
+  const isDone = form.status === '납부 완료' || form.status === '환급 완료'
+  const isRefund = form.status === '환급 완료'
 
   const save = async () => {
     if (!form.name.trim()) return toast.push('세목을 입력하세요')
+    if (isDone && !form.account_id) return toast.push(`${isRefund ? '환급' : '납부'} 계좌를 선택해주세요`)
     const payload = {
       ...form,
       tax_amount: parseInt(String(form.tax_amount).replace(/[^0-9]/g, ''), 10) || 0,
       paid_amount: parseInt(String(form.paid_amount).replace(/[^0-9]/g, ''), 10) || 0,
-      paid_date: form.paid_date || null, memo: form.memo || null,
+      paid_date: form.paid_date || null, memo: form.memo || null, account_id: form.account_id || null,
     }
     const res = editing ? await api.updateOtherTax(editing.id, payload) : await api.addOtherTax(payload)
     if (!res.ok) return toast.push(res.error || '저장 실패')
-    toast.push(editing ? '수정됐어요' : '등록됐어요')
+    toast.push(isDone ? `${isRefund ? '환급' : '납부'} 처리하고 거래내역에 반영했어요` : (editing ? '수정됐어요' : '등록됐어요'))
     onSaved(); onClose()
   }
 
@@ -202,7 +289,7 @@ const OtherTaxDrawer = ({ open, editing, onClose, onSaved }) => {
         <div className="fw-700" style={{ fontSize: 16 }}>{editing ? '기타세액 수정' : '기타세액 등록'}</div>
         <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
       </div>
-      <div className="drawer-body col gap-14">
+      <div className="drawer-body col gap-form">
         <div>
           <label className="label" style={{ marginBottom: 8 }}>세목 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
           <input className="input" value={form.name} onChange={e => f('name', e.target.value)} placeholder="예: 원천세(근로소득), 지방소득세"/>
@@ -214,11 +301,11 @@ const OtherTaxDrawer = ({ open, editing, onClose, onSaved }) => {
         <div className="row gap-12">
           <div style={{ flex: 1 }}>
             <label className="label" style={{ marginBottom: 8 }}>신고(납부)세액</label>
-            <input className="input num" value={numv(form.tax_amount)} onChange={e => f('tax_amount', e.target.value.replace(/[^0-9]/g, ''))} placeholder="0"/>
+            <MoneyInput value={form.tax_amount} onChange={raw => f('tax_amount', raw)}/>
           </div>
           <div style={{ flex: 1 }}>
             <label className="label" style={{ marginBottom: 8 }}>납부액</label>
-            <input className="input num" value={numv(form.paid_amount)} onChange={e => f('paid_amount', e.target.value.replace(/[^0-9]/g, ''))} placeholder="0"/>
+            <MoneyInput value={form.paid_amount} onChange={raw => f('paid_amount', raw)}/>
           </div>
         </div>
         <div>
@@ -230,12 +317,45 @@ const OtherTaxDrawer = ({ open, editing, onClose, onSaved }) => {
           </div>
         </div>
         <div>
-          <label className="label" style={{ marginBottom: 8 }}>납부일</label>
-          <input className="input" type="date" value={form.paid_date} onChange={e => f('paid_date', e.target.value)}/>
+          <label className="label" style={{ marginBottom: 8 }}>{isRefund ? '환급일' : '납부일'}</label>
+          <input className="input" type="date" max={localToday()} value={form.paid_date} onChange={e => f('paid_date', e.target.value)}/>
         </div>
+        {isDone && (
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>{isRefund ? '환급 입금' : '납부 출금'} 계좌 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+            <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+              {accounts.map(a => (
+                <button key={a.id} type="button" className={`chip ${form.account_id === a.id ? 'active' : ''}`} onClick={() => f('account_id', a.id)}>
+                  {a.name}{a.number ? ` ${String(a.number).slice(-4)}` : ''}
+                </button>
+              ))}
+            </div>
+            <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+              {isRefund ? '이 계좌로 환급 입금 거래가 생성돼요.' : '이 계좌에서 지출 거래가 생성돼요.'}
+            </div>
+          </div>
+        )}
+        {isDone && (
+          <>
+            <div>
+              <label className="label" style={{ marginBottom: 8 }}>비목</label>
+              <Combobox value={form.category} onChange={v => f('category', v)}
+                options={categories.filter(c => c.id?.startsWith(isRefund ? 'INC-' : 'EXP-')).map(c => ({ value: c.name, label: c.name, sub: c.group_name || '' }))}
+                placeholder="비목 선택" onAddNew={v => f('category', v)} addNewLabel="이 비목으로 입력"/>
+            </div>
+            <div>
+              <label className="label" style={{ marginBottom: 8 }}>계정과목 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+              <Combobox value={form.account_code} onChange={v => f('account_code', v)}
+                options={acctSubjects.map(a => ({ value: a.code, label: a.name, sub: `${a.code} · ${a.category}`, keywords: a.note || '' }))}
+                placeholder="계정과목 선택 (선택)" allowAdd={false}/>
+            </div>
+          </>
+        )}
         <div>
-          <label className="label" style={{ marginBottom: 8 }}>메모</label>
-          <input className="input" value={form.memo} onChange={e => f('memo', e.target.value)} placeholder="비고"/>
+          <label className="label" style={{ marginBottom: 8 }}>적요 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 거래 내용</span></label>
+          <Combobox value={form.memo} onChange={v => f('memo', v)}
+            options={jeokyos.map(j => ({ value: j.name, label: j.name, sub: j.memo || '' }))}
+            placeholder="적요 입력" onAddNew={v => f('memo', v)} addNewLabel="이 적요로 입력"/>
         </div>
       </div>
       <div className="drawer-foot">

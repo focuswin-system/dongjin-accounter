@@ -1,7 +1,215 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect, Drawer, Combobox } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect, Drawer, Combobox, MoneyInput } from '../lib/ui'
+import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { MiniStat } from './Home'
+import { BILLING_MODES, TERM_MODES, BILLING_PERIODS, billingLabel, termLabel, periodLabel, periodMonths,
+         isRecurring, isOpenEnded, hasTotal, amountLabel, renewalInfo, nextEndDate, recurringMismatch } from '../lib/renewal'
+
+const numOnly = (v) => String(v ?? '').replace(/[^0-9]/g, '');
+const asNum   = (v) => parseInt(numOnly(v), 10) || 0;
+
+/* 계약 조건 입력 — 새 계약/편집 Drawer 공용.
+   청구 방식(총액형·정기형)과 종료 방식(만료·자동갱신·무기한)이 독립이라, 금액·기간 칸도 그에 따라 바뀐다. */
+const ContractTermFields = ({ form, set }) => {
+  const recurring = form.billing_mode === 'recurring';
+  const openEnded = form.term_mode === 'open';
+  // 갱신 개념이 있는 계약만 연장기간·통보기한이 의미 있다.
+  // (총액형+기간만료 = 구축 프로젝트는 끝나면 끝 → 갱신 임박 알림 대상도 아님. 무기한은 애초에 없음)
+  const hasRenewal = !openEnded && (form.term_mode === 'auto_renew' || recurring);
+  // 정기형 계약 총액 미리보기 = 주기당 금액 × 기간 안 회차수
+  const preview = (() => {
+    if (!recurring || openEnded || !form.start_date || !form.end_date) return null;
+    const unit = asNum(form.unit_amount);
+    if (!unit) return null;
+    const s = new Date(form.start_date), e = new Date(form.end_date);
+    if (isNaN(s) || isNaN(e) || e < s) return null;
+    const months = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth());
+    const full = e.getDate() >= s.getDate() ? months + 1 : months;
+    const cycles = Math.max(1, Math.floor(full / periodMonths(form.billing_period)));
+    return { cycles, total: unit * cycles };
+  })();
+
+  return (
+    <>
+      <div>
+        <label className="label" style={{ marginBottom: 8 }}>청구 방식</label>
+        <div className="row gap-6">
+          {BILLING_MODES.map(t => (
+            <button key={t.value} type="button" className={`chip ${form.billing_mode === t.value ? 'active' : ''}`}
+              onClick={() => set(f => ({ ...f, billing_mode: t.value }))}>{t.label}</button>
+          ))}
+        </div>
+        <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+          {BILLING_MODES.find(t => t.value === form.billing_mode)?.hint}
+        </div>
+      </div>
+
+      <div>
+        <label className="label" style={{ marginBottom: 8 }}>종료 방식</label>
+        <div className="row gap-6">
+          {TERM_MODES.map(t => (
+            <button key={t.value} type="button" className={`chip ${form.term_mode === t.value ? 'active' : ''}`}
+              onClick={() => set(f => ({ ...f, term_mode: t.value }))}>{t.label}</button>
+          ))}
+        </div>
+        <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+          {TERM_MODES.find(t => t.value === form.term_mode)?.hint}
+        </div>
+      </div>
+
+      <div>
+        <label className="label" style={{ marginBottom: 8 }}>부가세</label>
+        <div className="row gap-6">
+          {[{ value: 'taxable', label: '과세' }, { value: 'exempt', label: '면세' }].map(t => (
+            <button key={t.value} type="button" className={`chip ${(form.vat_mode || 'taxable') === t.value ? 'active' : ''}`}
+              onClick={() => set(f => ({ ...f, vat_mode: t.value }))}>{t.label}</button>
+          ))}
+        </div>
+        <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+          {(form.vat_mode || 'taxable') === 'exempt'
+            ? '부가세 없는 계약(면세). 청구서 발행 시 부가세 0으로 처리돼요.'
+            : '공급가액에 부가세 10%가 붙어 청구돼요.'}
+        </div>
+      </div>
+
+      {/* 금액 — 총액형은 계약 총액, 정기형은 주기당 금액 */}
+      {recurring ? (
+        <>
+          <div className="row gap-12">
+            <div style={{ flex: 1 }}>
+              <label className="label" style={{ marginBottom: 8 }}>청구 주기</label>
+              <div className="row gap-6">
+                {BILLING_PERIODS.map(p => (
+                  <button key={p.value} type="button" className={`chip ${form.billing_period === p.value ? 'active' : ''}`}
+                    onClick={() => set(f => ({ ...f, billing_period: p.value }))}>{p.label}</button>
+                ))}
+              </div>
+            </div>
+            <div style={{ width: 110 }}>
+              <label className="label" style={{ marginBottom: 8 }}>청구일</label>
+              <div style={{ position: 'relative' }}>
+                <input className="input num" style={{ paddingRight: 28 }} value={form.billing_day ?? ''}
+                  onChange={e => set(f => ({ ...f, billing_day: numOnly(e.target.value).slice(0, 2) }))} placeholder="1"/>
+                <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>일</span>
+              </div>
+            </div>
+          </div>
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>
+              {periodLabel(form.billing_period)} 청구금액 (공급가액) <span style={{ color: 'var(--neg-ink)' }}>*</span>
+            </label>
+            <div style={{ position: 'relative' }}>
+              <MoneyInput className="input num fw-700" style={{ fontSize: 20, paddingRight: 36 }}
+                value={form.unit_amount}
+                onChange={raw => set(f => ({ ...f, unit_amount: raw }))}/>
+              <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>원</span>
+            </div>
+            <div className="text-xs text-muted" style={{ marginTop: 6 }}>
+              {openEnded
+                ? '무기한 계약이라 계약 총액은 없어요. 이 금액이 매 회차 청구됩니다.'
+                : preview
+                  ? <>계약 총액 <b className="num text-ink">{(preview.total + asNum(form.initial_amount)).toLocaleString()}원</b>
+                      {asNum(form.initial_amount) > 0 && <> = 초기 {asNum(form.initial_amount).toLocaleString()}원 + </>}
+                      {asNum(form.initial_amount) > 0 ? '' : ' = '}
+                      {periodLabel(form.billing_period)} {asNum(form.unit_amount).toLocaleString()}원 × {preview.cycles}회 <span className="text-muted2">(자동 계산)</span></>
+                  : '계약 기간을 넣으면 계약 총액을 자동으로 계산해요.'}
+            </div>
+          </div>
+          {/* 초기 구축비 + 월 정액처럼 두 갈래로 청구되는 계약 — 계약은 하나로 두고 청구만 나눈다 */}
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>
+              초기 일시금 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택 (구축비·설치비)</span>
+            </label>
+            <div style={{ position: 'relative' }}>
+              <MoneyInput className="input num" style={{ paddingRight: 36 }}
+                value={form.initial_amount}
+                onChange={raw => set(f => ({ ...f, initial_amount: raw }))}/>
+              <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>원</span>
+            </div>
+            <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+              계약 초기에 한 번만 받는 돈이 있으면 넣으세요. <b>청구 일정</b>에 1회성 항목으로 깔려서 대금청구에서 발행할 수 있고,
+              매달 나가는 {periodLabel(form.billing_period)} 청구는 정기청구가 따로 돕니다. 갱신 후 기간에는 붙지 않아요.
+            </div>
+          </div>
+        </>
+      ) : (
+        <div>
+          <label className="label" style={{ marginBottom: 8 }}>계약금액 (공급가액) <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+          <div style={{ position: 'relative' }}>
+            <MoneyInput className="input num fw-700" style={{ fontSize: 20, paddingRight: 36 }}
+              value={form.amount}
+              onChange={raw => set(f => ({ ...f, amount: raw }))}/>
+            <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>원</span>
+          </div>
+          {asNum(form.amount) > 0 && (
+            <div className="text-xs text-muted" style={{ marginTop: 6 }}>
+              {form.vat_mode === 'exempt'
+                ? <>면세 계약 — 부가세 없이 <span className="num fw-600" style={{ color: 'var(--ink)' }}>{asNum(form.amount).toLocaleString()}원</span> 청구</>
+                : <>부가세 포함 총액: <span className="num fw-600" style={{ color: 'var(--ink)' }}>{Math.round(asNum(form.amount) * 1.1).toLocaleString()}원</span></>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 기간 — 무기한이면 종료일이 없다 */}
+      <div className="row gap-12">
+        <div style={{ flex: 1 }}>
+          <label className="label" style={{ marginBottom: 8 }}>계약 시작일</label>
+          <input className="input" type="date" value={form.start_date || ''}
+            onChange={e => set(f => ({ ...f, start_date: e.target.value }))}/>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className="label" style={{ marginBottom: 8 }}>계약 종료일</label>
+          {openEnded
+            ? <div className="input" style={{ display: 'flex', alignItems: 'center', color: 'var(--muted-2)' }}>해지할 때까지</div>
+            : <input className="input" type="date" value={form.end_date || ''}
+                onChange={e => set(f => ({ ...f, end_date: e.target.value }))}/>}
+        </div>
+      </div>
+
+      {/* 갱신 조건 — 갱신 개념이 있는 계약(자동갱신 또는 정기형)만. 총액형+만료·무기한은 숨김 */}
+      {hasRenewal && (
+        <>
+          <div className="row gap-12">
+            <div style={{ flex: 1 }}>
+              <label className="label" style={{ marginBottom: 8 }}>갱신 시 연장 기간</label>
+              <div style={{ position: 'relative' }}>
+                <input className="input num" style={{ paddingRight: 44 }} value={form.term_months ?? ''}
+                  onChange={e => set(f => ({ ...f, term_months: numOnly(e.target.value) }))} placeholder="12"/>
+                <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>개월</span>
+              </div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="label" style={{ marginBottom: 8 }}>갱신 통보 기한</label>
+              <div style={{ position: 'relative' }}>
+                <input className="input num" style={{ paddingRight: 60 }} value={form.notice_days ?? ''}
+                  onChange={e => set(f => ({ ...f, notice_days: numOnly(e.target.value) }))} placeholder="60"/>
+                <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>일 전</span>
+              </div>
+            </div>
+          </div>
+          <div className="text-xs text-muted2" style={{ marginTop: -6 }}>
+            종료일 {form.notice_days || 60}일 전부터 목록·알림에 뜹니다
+            {form.term_mode === 'auto_renew'
+              ? ' — 자동갱신이라도 해지하려면 이 기한 안에 통보해야 하니까요.'
+              : ' — 계약서상 재계약 통보 기한에 맞추세요.'}
+          </div>
+        </>
+      )}
+    </>
+  );
+};
+
+/* 목록·상세 공용 갱신 표시.
+   아직 여유 있는 계약(stage 'ok')까지 배지로 칠하면 목록이 배지밭이 된다 → 흐린 글씨로만.
+   배지는 실제로 챙겨야 할 때(통보기한 임박·만료)만 켠다. */
+const RenewalBadge = ({ contract }) => {
+  const r = renewalInfo(contract);
+  if (!r.managed || !r.badge) return null;
+  if (r.stage === 'ok') return <span className="text-xs text-muted2">갱신 {r.badge}</span>;
+  return <span className={`badge ${r.tone}`}><span className="dot"/>{r.badge}</span>;
+};
 
 const FormBlock = ({ title, hint, children }) => (
   <div>
@@ -94,11 +302,8 @@ export const IncomeDrawer = ({ open, onClose }) => {
           {step === 4 && (
             <FormBlock title="얼마가 들어왔나요?">
               <label className="label">금액</label>
-              <input className="input num fw-700" style={{ fontSize: 22 }} value={fmtNum(form.amount) + " 원"}
-                onChange={e => {
-                  const v = parseInt(e.target.value.replace(/[^0-9]/g, "")) || 0;
-                  setForm({...form, amount: v});
-                }}/>
+              <MoneyInput className="input num fw-700" style={{ fontSize: 22 }} value={form.amount}
+                onChange={(raw, v) => setForm({...form, amount: v})}/>
               <div className="row gap-6" style={{ marginTop: 10, flexWrap: "wrap" }}>
                 {[500000, 1000000, 1100000, 3300000].map(a => (
                   <button key={a} className="chip" onClick={() => setForm({...form, amount: a})}>{fmtNum(a)}원</button>
@@ -283,321 +488,6 @@ export function getContractDetail(id) {
   return synthesizeDetail(row);
 }
 
-/* ============ 미수금 관리 ============ */
-export const ReceivablesScreen = () => {
-  const toast = useToast();
-  const { confirm } = useConfirm();
-  const [tab, setTab] = useState("전체");
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [period, setPeriod] = useState("all");
-  const [customFrom, setCustomFrom] = useState("");
-  const [customTo, setCustomTo] = useState("");
-  const tabs = ["전체", "청구 예정", "입금 예정", "일부 입금", "기한 지남", "장기 미수"];
-  const [summary, setSummary] = useState({ total: 0, thisMonth: 0, overdue: 0, longOverdue: 0, count: 0, thisMonthCount: 0, overdueCount: 0, longOverdueCount: 0 });
-  const [rows, setRows] = useState([]);
-
-  const load = async () => {
-    const { summary: s, rows: r } = await api.getReceivables();
-    setSummary(s); setRows(r);
-  };
-  useEffect(() => { load(); }, []);
-
-  const filtered = rows.filter(r =>
-    (tab === "전체" || r.status === tab) &&
-    inPeriod(r.due, period, { from: customFrom, to: customTo })
-  );
-
-  const exportCsv = () => {
-    if (filtered.length === 0) return toast.push("내보낼 내역이 없어요")
-    downloadCsv(`미수금_${new Date().toISOString().slice(0, 10)}.csv`,
-      ["거래처", "계약명", "청구금액", "입금완료", "남은금액", "예정일", "지연일수", "상태"],
-      filtered.map(r => [r.vendor, r.contract, r.billed, r.paid, r.remain, r.due, r.delay > 0 ? `D+${r.delay}` : "", r.status]))
-  }
-
-  const onProcessIncome = async (r) => {
-    const ok = await confirm({
-      tone: "brand", icon: <Icon.In size={22}/>,
-      title: `${r.vendor} 입금을 처리할까요?`,
-      body: `${r.contract}의 ${fmtNum(r.remain)}원을 입금 완료로 처리합니다.`,
-      detail: "통장 입금이 확인된 경우에만 처리해주세요.",
-      confirmLabel: "입금 처리",
-    });
-    if (ok) {
-      await api.matchInvoice(r.id, { txnId: `TXN-${Date.now()}`, amount: r.remain });
-      toast.push(`${r.vendor} 입금이 처리되었어요`);
-      load();
-    }
-  };
-
-  return (
-    <div className="fade-up">
-      <div className="row" style={{ marginBottom: 6 }}>
-        <div>
-          <div className="page-title">미수금 관리</div>
-          <div className="page-sub">계약·청구 데이터에서 자동 집계된 미수금입니다. 행을 클릭해 입금 처리하세요.</div>
-        </div>
-        <div className="ml-auto row gap-8">
-          <button className="btn" onClick={() => toast.push("청구서 자동 발송은 메일 연동 후 제공돼요 (준비 중)")}><Icon.Download/> 청구서 일괄 발행</button>
-          <button className="btn" onClick={exportCsv}><Icon.Excel/> 내보내기</button>
-        </div>
-      </div>
-      <Spacer h={20}/>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
-        <BigSummaryCard label="전체 미수금"    amount={summary.total}       sub={`총 ${summary.count}건`}                    accent="blue"/>
-        <BigSummaryCard label="이번 달 미수금" amount={summary.thisMonth}   sub={`${summary.thisMonthCount}건`}               accent="pos"/>
-        <BigSummaryCard label="연체 미수금"    amount={summary.overdue}     sub={`${summary.overdueCount}건`}                 accent="warn" warn/>
-        <BigSummaryCard label="장기 미수"      amount={summary.longOverdue} sub={`${summary.longOverdueCount}건`}             accent="neg"  warn/>
-      </div>
-      <Spacer h={24}/>
-      <div className="card">
-        <div className="row gap-8" style={{ padding: "16px 16px", borderBottom: "1px solid var(--line)" }}>
-          {tabs.map(t => (
-            <button key={t} className={`chip ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t}</button>
-          ))}
-          <div className="ml-auto row gap-8">
-            <button className="btn" onClick={() => setFilterOpen(s => !s)} style={{ position: "relative" }}>
-              <Icon.Filter/> 필터
-              {period !== "all" && <span style={{ position: "absolute", top: 6, right: 6, width: 6, height: 6, borderRadius: "50%", background: "var(--brand)" }}/>}
-            </button>
-          </div>
-        </div>
-        {filterOpen && (
-          <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", background: "var(--surface-2)", display: "flex", flexDirection: "column", gap: 10 }}>
-            <div className="row gap-8" style={{ flexWrap: "wrap", alignItems: "center" }}>
-              <span className="text-xs fw-600 text-muted" style={{ width: 36, flexShrink: 0 }}>기간</span>
-              {PERIOD_PRESETS.map(p => (
-                <button key={p.id} className={`chip ${period === p.id ? "active" : ""}`} onClick={() => setPeriod(p.id)}>{p.label}</button>
-              ))}
-            </div>
-            {period === "custom" && (
-              <div className="row gap-8" style={{ alignItems: "center", paddingLeft: 44 }}>
-                <input type="date" className="input num" style={{ height: 34, width: 148, fontSize: 13 }}
-                  value={customFrom} onChange={e => setCustomFrom(e.target.value)}/>
-                <span className="text-muted fw-600">~</span>
-                <input type="date" className="input num" style={{ height: 34, width: 148, fontSize: 13 }}
-                  value={customTo} onChange={e => setCustomTo(e.target.value)}/>
-              </div>
-            )}
-            {period !== "all" && (() => {
-              const label = periodRangeLabel(period, { from: customFrom, to: customTo });
-              return (
-                <div className="row gap-10" style={{ alignItems: "center" }}>
-                  <span style={{ fontSize: 12, color: "var(--muted)" }}>
-                    <span className="fw-600" style={{ color: "var(--brand-ink)" }}>
-                      {PERIOD_PRESETS.find(p => p.id === period)?.label}
-                    </span>
-                    {label && <span className="num" style={{ marginLeft: 6 }}>({label})</span>}
-                  </span>
-                  <button className="btn ghost sm" onClick={() => { setPeriod("all"); setCustomFrom(""); setCustomTo(""); }}>
-                    <Icon.Close size={12}/> 초기화
-                  </button>
-                </div>
-              );
-            })()}
-          </div>
-        )}
-        <div className="table-scroll">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>거래처</th><th>계약명</th><th className="num-right">청구금액</th>
-                <th className="num-right">입금 완료</th><th className="num-right">남은 금액</th>
-                <th>예정일</th><th>지연일수</th><th>상태</th><th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r, i) => {
-                const pct = Math.round((r.paid / r.billed) * 100);
-                return (
-                  <tr key={i}>
-                    <td className="fw-600">{r.vendor}</td>
-                    <td className="text-muted">{r.contract}</td>
-                    <td className="num-cell num-right">{fmtNum(r.billed)}</td>
-                    <td className="num-cell num-right text-muted">{fmtNum(r.paid)}</td>
-                    <td className="num-cell num-right fw-700">{fmtNum(r.remain)}</td>
-                    <td className="num-cell text-sm">{r.due}</td>
-                    <td>
-                      {r.delay > 0
-                        ? <span className={`badge ${r.delay > 60 ? "neg" : "warn"}`}>D+{r.delay}</span>
-                        : <span className="text-muted2 text-xs">—</span>}
-                    </td>
-                    <td><StatusBadge status={r.status}/></td>
-                    <td>
-                      <div className="row gap-4">
-                        <button className="btn primary sm" onClick={(e) => { e.stopPropagation(); onProcessIncome(r); }}>입금 처리</button>
-                        <button className="btn sm" onClick={(e) => { e.stopPropagation(); toast.push("독촉 메일 발송은 준비 중이에요 (메일 연동 예정)"); }}>독촉</button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/* ============ 미지급금 관리 ============ */
-export const PayablesScreen = () => {
-  const toast = useToast();
-  const { confirm } = useConfirm();
-  const [tab, setTab] = useState("전체");
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [filterCat, setFilterCat] = useState(null);
-  const tabs = ["전체", "지급 예정", "지급 대기", "기한 지남", "지급 완료"];
-  const [summary, setSummary] = useState({ total: 0, thisMonth: 0, overdue: 0, pendingApproval: 0, count: 0, overdueCount: 0, pendingCount: 0 });
-  const [rows, setRows] = useState([]);
-  const [selected, setSelected] = useState(new Set());
-
-  const load = async () => {
-    const { summary: s, rows: r } = await api.getPayables();
-    setSummary(s); setRows(r); setSelected(new Set());
-  };
-  useEffect(() => { load(); }, []);
-
-  const categories = useMemo(() => [...new Set(rows.map(r => r.category))].sort(), [rows]);
-  const filtered = rows.filter(r =>
-    (tab === "전체" || r.pay === tab) &&
-    (!filterCat || r.category === filterCat)
-  );
-
-  const toggleOne = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const allSelected = filtered.length > 0 && filtered.every(r => selected.has(r.id));
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(filtered.map(r => r.id)));
-  const exportCsv = () => {
-    if (filtered.length === 0) return toast.push("내보낼 내역이 없어요");
-    downloadCsv(`미지급금_${new Date().toISOString().slice(0, 10)}.csv`,
-      ["거래처", "계약/공통비", "비목", "지급예정금액", "지급예정일", "결의서", "지급상태"],
-      filtered.map(r => [r.vendor, r.scope, r.category, r.amount, r.due, r.doc, r.pay]));
-  };
-
-  const onBulkTransfer = async () => {
-    const targets = filtered.filter(r => selected.has(r.id));
-    if (targets.length === 0) return toast.push("이체할 항목을 선택하세요");
-    const total = targets.reduce((s, r) => s + r.amount, 0);
-    const ok = await confirm({
-      tone: "neg", icon: <Icon.Bank size={22}/>,
-      title: `선택한 ${targets.length}건을 일괄 이체할까요?`,
-      body: "이체 실행 후에는 즉시 계좌에서 출금됩니다. 이 작업은 되돌릴 수 없어요.",
-      detail: `합계 ${fmtNum(total)}원`,
-      confirmLabel: "이체 실행",
-    });
-    if (!ok) return;
-    for (const r of targets) {
-      await api.matchInvoice(r.id, { txnId: `TXN-${Date.now()}`, amount: r.amount });
-    }
-    toast.push(`${targets.length}건 이체를 실행했어요`);
-    load();
-  };
-
-  const onTransferOne = async (r) => {
-    const ok = await confirm({
-      tone: "neg", icon: <Icon.Bank size={22}/>,
-      title: `${r.vendor}로 이체할까요?`,
-      body: `${r.category} ${fmtNum(r.amount)}원이 기업은행(주거래) *4010에서 출금됩니다.`,
-      confirmLabel: "이체 실행",
-    });
-    if (ok) {
-      await api.matchInvoice(r.id, { txnId: `TXN-${Date.now()}`, amount: r.amount });
-      toast.push(`${r.vendor} 이체를 실행했어요`);
-      load();
-    }
-  };
-
-  return (
-    <div className="fade-up">
-      <div className="row" style={{ marginBottom: 6 }}>
-        <div>
-          <div className="page-title">미지급금 관리</div>
-          <div className="page-sub">지출·결의서 데이터에서 자동 집계된 미지급금입니다. 행을 클릭해 이체 처리하세요.</div>
-        </div>
-        <div className="ml-auto row gap-8">
-          <button className="btn" onClick={exportCsv}><Icon.Download/> 이체 명세서</button>
-          <button className="btn" onClick={exportCsv}><Icon.Excel/> 내보내기</button>
-        </div>
-      </div>
-      <Spacer h={20}/>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
-        <BigSummaryCard label="전체 미지급금"     amount={summary.total}           sub={`총 ${summary.count}건`}         accent="warn"/>
-        <BigSummaryCard label="이번 달 지급 예정" amount={summary.thisMonth}       sub={`${summary.thisMonthCount}건`}    accent="blue"/>
-        <BigSummaryCard label="지급 지연"         amount={summary.overdue}         sub={`${summary.overdueCount}건`}     accent="neg"  warn/>
-        <BigSummaryCard label="승인 대기 지급"    amount={summary.pendingApproval} sub={`${summary.pendingCount}건`}     accent="warn" warn/>
-      </div>
-      <Spacer h={24}/>
-      <div className="card">
-        <div className="row gap-8" style={{ padding: "16px 16px", borderBottom: "1px solid var(--line)" }}>
-          {tabs.map(t => (
-            <button key={t} className={`chip ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t}</button>
-          ))}
-          <div className="ml-auto row gap-8">
-            <button className="btn" onClick={() => setFilterOpen(s => !s)} style={{ position: "relative" }}>
-              <Icon.Filter/> 필터
-              {filterCat && <span style={{ position: "absolute", top: 6, right: 6, width: 6, height: 6, borderRadius: "50%", background: "var(--brand)" }}/>}
-            </button>
-          </div>
-        </div>
-        {filterOpen && (
-          <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", background: "var(--surface-2)", display: "flex", flexDirection: "column", gap: 10 }}>
-            <div className="row gap-8" style={{ alignItems: "center" }}>
-              <span className="text-xs fw-600 text-muted" style={{ width: 36, flexShrink: 0 }}>비목</span>
-              <FilterSelect value={filterCat} onChange={setFilterCat} options={categories} placeholder="전체"/>
-            </div>
-            {filterCat && (
-              <div className="row gap-10" style={{ alignItems: "center" }}>
-                <span style={{ fontSize: 12 }}>
-                  <span className="fw-600" style={{ color: "var(--brand-ink)" }}>비목</span>
-                  <span className="num" style={{ marginLeft: 6, color: "var(--muted)" }}>({filterCat})</span>
-                </span>
-                <button className="btn ghost sm" onClick={() => setFilterCat(null)}><Icon.Close size={12}/> 초기화</button>
-              </div>
-            )}
-          </div>
-        )}
-        <div className="table-scroll">
-          <table className="table">
-            <thead>
-              <tr>
-                <th style={{ width: 36 }}><input type="checkbox" checked={allSelected} onChange={toggleAll}/></th>
-                <th>거래처</th><th>계약/공통비</th><th>비목</th>
-                <th className="num-right">지급 예정 금액</th><th>지급 예정일</th>
-                <th>결의서</th><th>지급 상태</th><th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r, i) => (
-                <tr key={i}>
-                  <td><input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleOne(r.id)}/></td>
-                  <td className="fw-600">{r.vendor}</td>
-                  <td className="text-muted">{r.scope}</td>
-                  <td><span className="badge outline">{r.category}</span></td>
-                  <td className="num-cell num-right fw-700">{fmtNum(r.amount)}</td>
-                  <td className="num-cell text-sm">{r.due}</td>
-                  <td><StatusBadge status={r.doc}/></td>
-                  <td><StatusBadge status={r.pay}/></td>
-                  <td>
-                    <div className="row gap-4">
-                      <button className="btn sm" onClick={(e) => { e.stopPropagation(); onTransferOne(r); }}>이체 실행</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="row" style={{ padding: "14px 18px", borderTop: "1px solid var(--line)" }}>
-          <span className="text-sm text-muted">선택한 건을 한 번에 이체할 수 있어요.</span>
-          <div className="ml-auto row gap-8">
-            <button className="btn" onClick={() => toast.push("선택 항목 결의서 생성은 준비 중이에요")}>선택 항목 결의서 만들기</button>
-            <button className="btn primary" onClick={onBulkTransfer}>선택 항목 일괄 이체</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 /* ============ 공통 카드 컴포넌트 ============ */
 export const BigSummaryCard = ({ label, amount, sub, accent = "blue", warn = false }) => (
   <div className={`stat accent-${accent}`}>
@@ -633,12 +523,13 @@ const downloadCsv = (filename, headers, rows) => {
 }
 
 /* ============ 청구 일정 편집 Drawer ============ */
-const MS_TYPES = ["정기", "일시", "계약금", "중도금", "잔금"]
+const MS_TYPES = ["정기", "일시", "계약금(선급금)", "중도금", "기성", "잔금"]
 const MS_STATUSES = ["예정", "입금 예정", "일부 입금", "입금 완료", "지급 예정", "지급 완료", "기한 지남"]
 
-function MilestoneEditDrawer({ open, onClose, contractId, initial, onSaved }) {
+function MilestoneEditDrawer({ open, onClose, contractId, contractAmount, initial, onSaved }) {
   const toast = useToast()
   const [rows, setRows] = useState([])
+  const total = asNum(contractAmount)
   useEffect(() => {
     if (open) setRows((initial || []).map(m => ({
       type: m.type || '정기', ratio: m.ratio ?? '', amount: m.amount ?? '',
@@ -647,7 +538,16 @@ function MilestoneEditDrawer({ open, onClose, contractId, initial, onSaved }) {
   }, [open, initial])
 
   const addRow = () => setRows(r => [...r, { type: '정기', ratio: '', amount: '', due_date: '', status: '예정', invoice_id: null }])
-  const upd = (i, k, v) => setRows(r => r.map((row, idx) => idx === i ? { ...row, [k]: v } : row))
+  const upd = (i, k, v) => setRows(r => r.map((row, idx) => {
+    if (idx !== i) return row
+    const next = { ...row, [k]: v }
+    // 비율(%) 입력 시 계약 총액 기준으로 금액 자동 계산(수동 수정 가능). 총액이 있을 때만.
+    if (k === 'ratio' && total > 0) {
+      const pct = parseInt(String(v).replace(/[^0-9]/g, ''), 10) || 0
+      next.amount = pct > 0 ? String(Math.round(total * pct / 100)) : ''
+    }
+    return next
+  }))
   const del = (i) => setRows(r => r.filter((_, idx) => idx !== i))
 
   const save = async () => {
@@ -671,7 +571,12 @@ function MilestoneEditDrawer({ open, onClose, contractId, initial, onSaved }) {
         <div className="fw-700" style={{ fontSize: 16 }}>청구 일정 편집</div>
         <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
       </div>
-      <div className="drawer-body col" style={{ gap: 12 }}>
+      <div className="drawer-body col gap-form">
+        {total > 0 && (
+          <div className="text-xs text-muted2" style={{ padding: '2px 0' }}>
+            계약 총액 <b className="text-ink">{fmtNum(total)}원</b> · 비율(%)을 넣으면 금액이 자동 계산돼요(직접 수정 가능).
+          </div>
+        )}
         {rows.length === 0 && <div className="text-sm text-muted2" style={{ padding: '8px 0' }}>아직 청구 일정이 없어요. 아래에서 추가하세요.</div>}
         {rows.map((m, i) => {
           // 이미 청구서로 발행된 회차는 수정 불가(청구서와 금액이 어긋나지 않도록)
@@ -702,7 +607,7 @@ function MilestoneEditDrawer({ open, onClose, contractId, initial, onSaved }) {
             </div>
             <div className="row gap-8">
               <input className="input num" style={{ flex: 1 }} placeholder="비율 %" value={m.ratio} onChange={e => upd(i, 'ratio', e.target.value)}/>
-              <input className="input num" style={{ flex: 2 }} placeholder="금액" value={m.amount} onChange={e => upd(i, 'amount', e.target.value)}/>
+              <MoneyInput className="input num" style={{ flex: 2 }} placeholder="금액" value={m.amount} onChange={raw => upd(i, 'amount', raw)}/>
               <input className="input" type="date" style={{ flex: 2 }} value={m.due_date} onChange={e => upd(i, 'due_date', e.target.value)}/>
             </div>
           </div>
@@ -747,11 +652,11 @@ function BudgetEditDrawer({ open, onClose, contractId, initial, onSaved }) {
         <div className="fw-700" style={{ fontSize: 16 }}>원가 예산 수정</div>
         <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
       </div>
-      <div className="drawer-body col" style={{ gap: 16 }}>
+      <div className="drawer-body col gap-form">
         {FIELDS.map(([k, label]) => (
           <div key={k}>
             <label className="label" style={{ marginBottom: 8 }}>{label}</label>
-            <input className="input num" value={b[k]} onChange={e => setB(p => ({ ...p, [k]: e.target.value }))} placeholder="0"/>
+            <MoneyInput className="input num" value={b[k]} onChange={raw => setB(p => ({ ...p, [k]: raw }))}/>
           </div>
         ))}
         <div className="text-xs text-muted2">실적은 거래내역(지급 완료)에서 자동 집계돼요.</div>
@@ -759,6 +664,132 @@ function BudgetEditDrawer({ open, onClose, contractId, initial, onSaved }) {
       <div className="drawer-foot">
         <button className="btn" onClick={onClose}>취소</button>
         <button className="btn primary ml-auto" onClick={save}><Icon.Check size={14}/> 저장</button>
+      </div>
+    </Drawer>
+  )
+}
+
+/* 갱신 처리 Drawer — 종료일 연장(+금액 변경) 또는 미갱신 종료 */
+function RenewDrawer({ open, onClose, contract, onSaved }) {
+  const toast = useToast()
+  const [form, setForm] = useState({ renew: true, new_end_date: '', new_amount: '', new_unit_amount: '', memo: '' })
+
+  useEffect(() => {
+    if (open && contract) setForm({
+      renew: true,
+      new_end_date: nextEndDate(contract),
+      new_amount: String(contract.amount || ''),
+      new_unit_amount: String(contract.unit_amount || ''),
+      memo: '',
+    })
+  }, [open, contract])
+
+  if (!contract) return null
+  const recurring = isRecurring(contract)
+  const isRenew = form.renew
+  // 정기형은 '주기당 금액'이 바뀌는 게 본질 — 총액은 서버가 새 기간으로 다시 계산한다
+  const unitNum = asNum(form.new_unit_amount)
+  const amountNum = asNum(form.new_amount)
+  const prevUnit = Number(contract.unit_amount) || 0
+  const prevAmount = Number(contract.amount) || 0
+  const diff = recurring ? unitNum - prevUnit : amountNum - prevAmount
+
+  const save = async () => {
+    if (isRenew && !form.new_end_date) return toast.push('새 종료일을 입력해주세요')
+    const res = await api.renewContract(contract.id, {
+      result: isRenew ? 'renew' : 'close',
+      new_end_date:    isRenew ? form.new_end_date : null,
+      new_amount:      isRenew && !recurring ? amountNum : null,
+      new_unit_amount: isRenew && recurring  ? unitNum   : null,
+      memo: form.memo || null,
+    })
+    if (!res.ok) return toast.push(res.error || '갱신 처리에 실패했어요')
+    if (isRenew) {
+      toast.push(res.recurringExtended > 0
+        ? `${form.new_end_date}까지 갱신하고 정기청구도 함께 연장했어요`
+        : `${form.new_end_date}까지 갱신됐어요`)
+    } else {
+      toast.push('미갱신으로 종료 처리했어요')
+    }
+    onSaved(); onClose()
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} width="min(460px,100vw)" label="계약 갱신 처리">
+      <div className="drawer-head">
+        <div className="fw-700" style={{ fontSize: 16 }}>계약 갱신 처리</div>
+        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
+      </div>
+      <div className="drawer-body col gap-form">
+        <div className="text-sm text-muted">
+          현재 종료일 <b className="text-ink num">{contract.end_date || '—'}</b>
+          {' · '}{recurring
+            ? <>{periodLabel(contract.billing_period)} 청구금액 <b className="num">{fmtNum(prevUnit)}원</b></>
+            : <>계약금액 <b className="num">{fmtNum(prevAmount)}원</b></>}
+        </div>
+        <div>
+          <label className="label" style={{ marginBottom: 8 }}>처리 결과</label>
+          <div className="row gap-6">
+            <button type="button" className={`chip ${isRenew ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, renew: true }))}>갱신</button>
+            <button type="button" className={`chip ${!isRenew ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, renew: false }))}>미갱신</button>
+          </div>
+          <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+            {isRenew
+              ? '계약기간을 다음 기간으로 넘기고 이력을 남깁니다. 계약은 진행중으로 유지돼요.'
+              : '계약을 완료로 닫고 미갱신 이력을 남깁니다.'}
+          </div>
+        </div>
+        {isRenew && (
+          <>
+            <div>
+              <label className="label" style={{ marginBottom: 8 }}>새 종료일 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+              <input className="input" type="date" value={form.new_end_date}
+                onChange={e => setForm(f => ({ ...f, new_end_date: e.target.value }))}/>
+              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+                {contract.term_months || 12}개월 연장 기준으로 미리 채웠어요. 실제 계약서에 맞게 고치세요.
+              </div>
+            </div>
+            <div>
+              <label className="label" style={{ marginBottom: 8 }}>
+                갱신 후 {recurring ? `${periodLabel(contract.billing_period)} 청구금액` : '계약금액'} (공급가액)
+              </label>
+              <div style={{ position: 'relative' }}>
+                <MoneyInput className="input num fw-700" style={{ fontSize: 18, paddingRight: 36 }}
+                  value={recurring ? form.new_unit_amount : form.new_amount}
+                  onChange={raw => setForm(f => recurring
+                    ? ({ ...f, new_unit_amount: raw })
+                    : ({ ...f, new_amount: raw }))}/>
+                <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>원</span>
+              </div>
+              {diff !== 0 && (
+                <div className="text-xs" style={{ marginTop: 6, color: diff > 0 ? 'var(--pos)' : 'var(--neg-ink)' }}>
+                  기존 대비 {diff > 0 ? '+' : ''}{fmtNum(diff)}원
+                </div>
+              )}
+              {recurring && (
+                <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+                  새 기간의 계약 총액은 이 금액 × 회차수로 자동 계산돼요.
+                  {contract.recurring_active > 0 && ' 연결된 정기청구 금액·종료일도 같이 맞춰집니다.'}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+        <div>
+          <label className="label" style={{ marginBottom: 8 }}>메모 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+          <input className="input" value={form.memo} onChange={e => setForm(f => ({ ...f, memo: e.target.value }))}
+            placeholder={isRenew ? '예: 단가 5% 인상 합의' : '예: 내부 개발로 전환'}/>
+        </div>
+        {contract.recurring_active > 0 && !isRenew && (
+          <div className="alert-row" style={{ background: 'var(--warn-soft)', borderColor: 'transparent' }}>
+            <Icon.Warn/>
+            <div className="text-sm">이 계약에 걸린 <b>정기청구 {contract.recurring_active}건</b>이 아직 활성입니다. 미갱신 종료 후 기준정보 → 정기청구에서 중지하세요.</div>
+          </div>
+        )}
+      </div>
+      <div className="drawer-foot">
+        <button className="btn" onClick={onClose}>취소</button>
+        <button className="btn primary ml-auto" onClick={save}><Icon.Check size={14}/> {isRenew ? '갱신 처리' : '미갱신 종료'}</button>
       </div>
     </Drawer>
   )
@@ -776,6 +807,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   const [vendors, setVendors] = useState([]);
   const [msOpen, setMsOpen] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
+  const [renewOpen, setRenewOpen] = useState(false);
 
   const reload = () => api.getContract(contractId).then(data => { if (data) setC(data); });
 
@@ -813,51 +845,61 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       vendor:      c.vendor_name || '',
       contract_no: c.contract_no || '',
       name:        c.name || '',
-      amount:      String(c.amount || ''),
-      start_date:  c.start_date || '',
-      end_date:    c.end_date   || '',
       status:      c.status     || '진행중',
       file_url:    c.file_url   || '',
       file_name:   c.file_name  || '',
+      docs:        [],   // 편집 폼에서 새로 올리는 첨부만. 기존 첨부는 상세 '증빙' 탭에서 관리.
+      billing_mode:   c.billing_mode || 'onetime',
+      term_mode:      c.term_mode    || 'fixed',
+      vat_mode:       c.vat_mode     || 'taxable',
+      amount:         String(c.amount || ''),
+      unit_amount:    String(c.unit_amount || ''),
+      billing_period: c.billing_period || 'monthly',
+      billing_day:    String(c.billing_day ?? 1),
+      initial_amount: String(c.initial_amount || ''),
+      start_date:     c.start_date || '',
+      end_date:       c.end_date   || '',
+      term_months:    String(c.term_months ?? 12),
+      notice_days:    String(c.notice_days ?? 60),
     });
     setEditOpen(true);
   };
 
   const handleEditSave = async () => {
     const vendorObj = vendors.find(v => v.name === editForm.vendor);
-    const amount = parseInt(String(editForm.amount).replace(/[^0-9]/g, ''), 10) || 0;
-    const res = await api.updateContract(contractId, {
-      vendor_id:   vendorObj?.id || c.vendor_id || null,
-      contract_no: editForm.contract_no?.trim() || null,
-      name:        editForm.name,
-      amount,
-      start_date:  editForm.start_date || null,
-      end_date:    editForm.end_date   || null,
-      status:      editForm.status,
-      file_url:    editForm.file_url  || null,
-      file_name:   editForm.file_name || null,
-    });
-    if (res.ok) { toast.push("수정됐어요"); setEditOpen(false); reload(); }
+    const res = await api.updateContract(contractId, contractPayload(editForm, vendorObj?.id || c.vendor_id));
+    if (res.ok) {
+      // 편집 폼에서 새로 올린 계약서 파일들을 계약 첨부(contract_docs)로 연결
+      for (const d of (editForm.docs || [])) await api.addContractDoc(contractId, { url: d.url, name: d.name, doc_type: '계약서', size: d.size || 0 });
+      toast.push("수정됐어요"); setEditOpen(false); reload();
+    }
     else toast.push(res.error || "저장 실패");
   };
 
   if (!c) return <div style={{ padding: 40, textAlign: "center", color: "var(--muted-2)" }}>불러오는 중...</div>;
 
   const inDone  = c.in_done  || 0;
-  const remain  = c.remain   || 0;
   const out     = c.out      || 0;
   const profit  = c.profit   || 0;
   // 매입 계약(gubu A/E)이면 '지급' 관점, 매출이면 '수금' 관점
   const isPurchase = c.vendor_gubu === 'A' || c.vendor_gubu === 'E';
-  // 입/출금은 VAT 포함 총액 → 진행률도 총액(공급가×1.1) 기준. 100% 초과 방지
-  const contractTotal = Math.round((c.amount || 0) * 1.1);
-  const done      = isPurchase ? out : inDone;              // 매출=수금 완료, 매입=지급 완료
-  const remainAmt = Math.max(0, contractTotal - done);
-  const donePct   = contractTotal > 0 ? Math.min(100, Math.round((done / contractTotal) * 100)) : 0;
-  const doneLabel = isPurchase ? '지급' : '입금';
+  const doneLabel   = isPurchase ? '지급' : '입금';
   const remainLabel = isPurchase ? '남은 미지급' : '남은 미수금';
+  // 지표는 서버(metrics)가 계산한 값을 그대로 쓴다 — 화면마다 다시 계산하면 어긋난다.
+  // 무기한 정기계약은 '총액'이 없으므로 term_total/remain이 null → 진행률 대신 누적으로 본다.
+  const openEnded  = !hasTotal(c);
+  const recurring  = isRecurring(c);
+  const termTotal  = c.term_total ?? 0;          // 이번 텀 총액(VAT 포함)
+  const done       = c.term_collected ?? 0;      // 이번 텀에 받은(지급한) 돈
+  const doneAll    = c.collected ?? (isPurchase ? out : inDone);
+  const remainAmt  = c.remain ?? 0;              // 남은 계약분
+  const arRemain   = c.ar_remain ?? 0;           // 미수금(청구했는데 안 들어온 돈)
+  const donePct    = termTotal > 0 ? Math.min(100, Math.round((done / termTotal) * 100)) : 0;
   const vendor  = c.vendor_name || c.vendor || '—';
-  const period  = [c.start_date, c.end_date].filter(Boolean).join(' ~ ') || '—';
+  const period  = openEnded
+    ? `${c.start_date || '—'} ~ 해지할 때까지`
+    : [c.start_date, c.end_date].filter(Boolean).join(' ~ ') || '—';
+  const rn = renewalInfo(c);
 
   return (
     <div className="fade-up">
@@ -871,48 +913,216 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           <div className="row gap-10">
             <div className="page-title">{c.name}</div>
             <StatusBadge status={c.status}/>
+            <RenewalBadge contract={c}/>
           </div>
-          <div className="page-sub">{vendor} · 계약기간 {period}{c.contract_no ? ` · 계약번호 ${c.contract_no}` : ''}</div>
+          <div className="page-sub">
+            {vendor} · {billingLabel(c)}/{termLabel(c)} · {amountLabel(c, fmtNum)} · 계약기간 {period}
+            {c.contract_no ? ` · 계약번호 ${c.contract_no}` : ''}
+          </div>
         </div>
         <div className="ml-auto row gap-8">
-          {c.file_url
-            ? <a className="btn" href={c.file_url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}><Icon.File size={14}/> 계약서 보기</a>
+          {(c.file_url || c.attachments?.[0]?.url)
+            ? <a className="btn" href={c.file_url || c.attachments[0].url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}><Icon.File size={14}/> 계약서 보기</a>
             : null}
           <button className="btn" onClick={openEdit}><Icon.Pencil size={14}/> 편집</button>
-          <button className="btn" onClick={() => openIncome(c.name, vendor)}><Icon.Plus/> 입금 등록</button>
-          <button className="btn primary" onClick={() => openExpense(c.name, vendor)}><Icon.Plus/> 지출 등록</button>
+          {/* 매출 계약 = 수금 + 그 일에 들어간 원가(외주비 등) → 둘 다 등록.
+              매입 계약 = 나가는 돈만 → 입금은 붙을 자리가 없다. */}
+          {isPurchase ? (
+            <button className="btn primary" onClick={() => openExpense(c.name, vendor)}><Icon.Plus/> 지급 등록</button>
+          ) : (
+            <>
+              <button className="btn" onClick={() => openExpense(c.name, vendor, { asCost: true })}><Icon.Plus/> 원가 등록</button>
+              <button className="btn primary" onClick={() => openIncome(c.name, vendor)}><Icon.Plus/> 입금 등록</button>
+            </>
+          )}
         </div>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
-        <SummaryTile label="계약금액"        amount={c.amount}/>
-        <SummaryTile label={`${doneLabel} 완료`} amount={done}   pct={donePct} tone="pos"/>
-        <SummaryTile label={remainLabel}      amount={remainAmt}            tone="warn"/>
-        <SummaryTile label={isPurchase ? "입금 합계" : "지출 합계"} amount={isPurchase ? inDone : out} tone="neg"/>
-        <SummaryTile label="예상 손익"        amount={profit}               tone="pos" big/>
+      {/* 지표는 계약 성격에 따라 다르게 읽어야 한다.
+          매출 계약 = 받을 돈 + 그 일에 들어간 원가 + 손익.
+          매입 계약 = 나갈 돈만. 원가·손익 개념이 없다(붙이면 "나간 돈 = 손해"라는 거짓 숫자가 된다).
+          무기한 정기계약 = 채울 총액이 없으므로 진행률 대신 누적·미수 중심. */}
+      <div className="grid" style={{ gridTemplateColumns: `repeat(${isPurchase ? 4 : 5}, 1fr)`, gap: 12 }}>
+        <SummaryTile
+          label={openEnded ? `${periodLabel(c.billing_period)} ${isPurchase ? '지급' : '청구'}금액` : recurring ? "이번 계약기간 총액" : "계약금액"}
+          amount={openEnded ? (c.unit_amount || 0) : c.amount}/>
+        <SummaryTile
+          label={openEnded ? `누적 ${doneLabel}` : `${doneLabel} 완료`}
+          amount={openEnded ? doneAll : done}
+          pct={openEnded ? undefined : donePct}/>
+        <SummaryTile
+          label={openEnded ? (isPurchase ? "미지급금" : "미수금") : remainLabel}
+          amount={openEnded ? arRemain : remainAmt}/>
+        {isPurchase ? (
+          // 매입: 청구받은 것 중 아직 안 나간 돈
+          <SummaryTile label="미지급금" amount={arRemain} big/>
+        ) : (
+          <>
+            <SummaryTile label="이 계약 원가" amount={out}/>
+            <SummaryTile label={openEnded ? "누적 손익" : "예상 손익"} amount={profit ?? 0} big/>
+          </>
+        )}
       </div>
       <Spacer h={20}/>
 
-      <div className="card card-pad">
-        <div className="row" style={{ marginBottom: 10 }}>
-          <div className="section-title">계약 진행률</div>
-          <div className="ml-auto text-sm text-muted">계약금액의 {donePct}% {doneLabel}됨 · {remainLabel} <span className="num fw-700 text-ink" style={{ color: "var(--ink)" }}>{fmtNum(remainAmt)}원</span></div>
-        </div>
-        <div style={{ display: "flex", height: 14, borderRadius: 999, overflow: "hidden", background: "var(--surface-3)" }}>
-          <div style={{ width: `${donePct}%`, background: "var(--ink)" }}/>
-          <div style={{ width: `${100-donePct}%`, background: "transparent", borderLeft: "1px dashed rgba(0,0,0,0.1)" }}/>
-        </div>
-        <div className="row" style={{ marginTop: 10, fontSize: 11.5, color: "var(--muted-2)" }}>
-          <div><span style={{ display: "inline-block", width: 8, height: 8, background: "var(--ink)", borderRadius: 2, marginRight: 6 }}/>{doneLabel} 완료 {fmtNum(done)}원</div>
-          <div className="ml-auto"><span style={{ display: "inline-block", width: 8, height: 8, background: "var(--surface-3)", border: "1px solid var(--line-strong)", borderRadius: 2, marginRight: 6 }}/>잔여 {fmtNum(remainAmt)}원</div>
-        </div>
-      </div>
-      <Spacer h={20}/>
+      {/* 정기청구 연결 — 정기형 계약은 정기청구가 실제 청구를 돌리는 장치다.
+          계약이 원본이고 정기청구가 실행 → 어긋나면(금액·주기·종료일) 여기서 잡는다. */}
+      {recurring && (
+        <>
+          <div className="card card-pad">
+            <div className="row gap-12" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+              <div>
+                {/* 매출 계약이면 정기청구(받을 돈), 매입 계약이면 정기지출(나갈 돈).
+                    이걸 안 나누면 매입 계약의 반복이 미수금으로 둔갑한다. */}
+                <div className="section-title">{isPurchase ? '정기지출' : '정기청구'}</div>
+                <div className="text-sm text-muted" style={{ marginTop: 4 }}>
+                  {(c.recurrings || []).length === 0
+                    ? `이 계약은 ${periodLabel(c.billing_period)}마다 ${fmtNum(c.unit_amount || 0)}원이 ${isPurchase ? '나가는' : '청구되는'} 계약인데, 아직 ${isPurchase ? '정기지출' : '정기청구'}이 걸려 있지 않아요. 지금은 ${isPurchase ? '지출이' : '청구서가'} 자동 생성되지 않습니다.`
+                    : `${periodLabel(c.billing_period)} ${fmtNum(c.unit_amount || 0)}원 · 매월 ${c.billing_day || 1}일${c.end_date ? ` · ${c.end_date}까지` : ' · 해지할 때까지'}`}
+                </div>
+                {/* 정기청구는 계약에서 관리한다(기준정보에 두면 워크플로우가 끊긴다).
+                    계약이 원본, 정기청구는 실행 장치 → 어긋나면 '계약 조건으로 맞추기'로 되돌린다. */}
+                {(c.recurrings || []).map(r => {
+                  const gaps = recurringMismatch(c, r);
+                  return (
+                    <div key={r.id} style={{ marginTop: 8 }}>
+                      <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span className={`badge ${r.active ? 'pos' : 'outline'}`}><span className="dot"/>{r.active ? '활성' : '중지됨'}</span>
+                        <span className="text-xs text-muted2">
+                          {periodLabel(r.period)} {fmtNum(r.supply_amount)}원 · 매월 {r.day_of_month || 1}일 · {r.start_date} ~ {r.end_date || '무기한'}
+                          {r.last_generated ? ` · 최근 발행 ${r.last_generated}` : ' · 아직 발행 이력 없음'}
+                        </span>
+                        <button className="btn ghost sm" onClick={async () => {
+                          const res = await api.toggleContractRecurring(contractId, r.id);
+                          if (!res.ok) return toast.push(res.error || '처리에 실패했어요');
+                          const what = isPurchase ? '정기지출' : '정기청구';
+                          toast.push(res.active ? `${what}을 재개했어요` : `${what}을 중지했어요. 다음 회차부터 생성되지 않아요`);
+                          reload();
+                        }}>{r.active ? '중지' : '재개'}</button>
+                      </div>
+                      {gaps.length > 0 && (
+                        <div className="alert-row" style={{ marginTop: 8, background: 'var(--warn-soft)', borderColor: 'transparent' }}>
+                          <Icon.Warn/>
+                          <div className="text-sm" style={{ flex: 1 }}>
+                            계약과 정기청구가 달라요 — {gaps.join(' / ')}
+                          </div>
+                          <button className="btn sm" onClick={async () => {
+                            const res = await api.syncContractRecurring(contractId);
+                            if (!res.ok) return toast.push(res.error || '맞추기에 실패했어요');
+                            toast.push('계약 조건으로 맞췄어요');
+                            reload();
+                          }}>계약 조건으로 맞추기</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {(c.recurrings || []).length === 0 && (
+                <div className="ml-auto">
+                  <button className="btn primary" onClick={async () => {
+                    const res = await api.addContractRecurring(contractId);
+                    if (!res.ok) return toast.push(res.error || '생성에 실패했어요');
+                    toast.push(isPurchase
+                      ? '정기지출을 걸었어요. 회차가 되면 지출이 자동 생성됩니다'
+                      : '정기청구를 걸었어요. 대금 청구서의 "발행 예정"에서 회차를 발행하세요');
+                    reload();
+                  }}><Icon.Plus/> {isPurchase ? '정기지출 걸기' : '정기청구 걸기'}</button>
+                </div>
+              )}
+            </div>
+          </div>
+          <Spacer h={20}/>
+        </>
+      )}
 
+      {/* 갱신 관리 — 만료가 있는 계약만 (무기한은 갱신 개념이 없다) */}
+      {!openEnded && (
+        <>
+          <div className="card card-pad" style={{
+            borderColor: rn.stage === 'expired' ? 'var(--neg-ink)' : rn.stage === 'due' ? 'var(--warn-ink)' : undefined,
+          }}>
+            <div className="row gap-12" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+              <div>
+                <div className="row gap-8" style={{ alignItems: 'center' }}>
+                  <div className="section-title">계약 갱신</div>
+                  <RenewalBadge contract={c}/>
+                </div>
+                <div className="text-sm text-muted" style={{ marginTop: 4 }}>
+                  종료일 <b className="num text-ink">{c.end_date || '—'}</b>
+                  {' · '}{termLabel(c)}
+                  {' · '}갱신 시 {c.term_months || 12}개월 연장
+                  {' · '}통보 기한 {c.notice_days ?? 60}일 전
+                  {rn.stage === 'expired' && <span style={{ color: 'var(--neg-ink)' }}> · 종료일이 {-rn.days}일 지났습니다</span>}
+                  {rn.stage === 'ok' && rn.days != null && <span> · 갱신 검토까지 {rn.days - (Number(c.notice_days ?? 60))}일 남음</span>}
+                </div>
+                {c.term_mode === 'auto_renew' && (
+                  <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+                    자동갱신 계약이에요. 통보기한까지 해지 통보가 없으면 실제로는 연장되니, 종료일이 지나기 전에 <b>갱신 처리</b>로 새 기간을 기록해두세요.
+                  </div>
+                )}
+                {(c.renewals?.length > 0) && (
+                  <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+                    갱신 {c.renewals.filter(r => r.result === '갱신').length}회 · 최근 {c.renewals[0].renewed_at}
+                    {c.current_term_start ? ` · 이번 계약기간 시작 ${c.current_term_start}` : ''}
+                  </div>
+                )}
+              </div>
+              <div className="ml-auto row gap-8">
+                <button className={`btn ${rn.stage === 'ok' ? '' : 'primary'}`} onClick={() => setRenewOpen(true)}>
+                  <Icon.Check size={14}/> 갱신 처리
+                </button>
+              </div>
+            </div>
+            {c.recurring_active > 0 && rn.stage === 'expired' && (
+              <div className="alert-row" style={{ marginTop: 14, background: 'var(--warn-soft)', borderColor: 'transparent' }}>
+                <Icon.Warn/>
+                <div className="text-sm">계약이 만료됐는데 <b>정기청구 {c.recurring_active}건</b>이 아직 돌고 있어요. 갱신하거나 정기청구를 중지하세요.</div>
+              </div>
+            )}
+          </div>
+          <Spacer h={20}/>
+        </>
+      )}
+
+      {/* 진행률은 '끝이 있는 계약'에만 의미가 있다. 무기한 계약엔 채워야 할 총액이 없다. */}
+      {!openEnded && (
+        <>
+          <div className="card card-pad">
+            <div className="row" style={{ marginBottom: 10 }}>
+              <div className="section-title">{recurring ? '이번 계약기간 진행률' : '계약 진행률'}</div>
+              <div className="ml-auto text-sm text-muted">
+                {recurring ? '이번 기간 총액' : '계약금액'}의 {donePct}% {doneLabel}됨 · {remainLabel}{' '}
+                <span className="num fw-700 text-ink" style={{ color: "var(--ink)" }}>{fmtNum(remainAmt)}원</span>
+              </div>
+            </div>
+            <div style={{ display: "flex", height: 14, borderRadius: 999, overflow: "hidden", background: "var(--surface-3)" }}>
+              <div style={{ width: `${donePct}%`, background: "var(--ink)" }}/>
+              <div style={{ width: `${100-donePct}%`, background: "transparent", borderLeft: "1px dashed rgba(0,0,0,0.1)" }}/>
+            </div>
+            <div className="row" style={{ marginTop: 10, fontSize: 11.5, color: "var(--muted-2)" }}>
+              <div><span style={{ display: "inline-block", width: 8, height: 8, background: "var(--ink)", borderRadius: 2, marginRight: 6 }}/>{doneLabel} 완료 {fmtNum(done)}원</div>
+              <div className="ml-auto"><span style={{ display: "inline-block", width: 8, height: 8, background: "var(--surface-3)", border: "1px solid var(--line-strong)", borderRadius: 2, marginRight: 6 }}/>잔여 {fmtNum(remainAmt)}원</div>
+            </div>
+            {recurring && c.renewals?.length > 0 && (
+              <div className="text-xs text-muted2" style={{ marginTop: 10 }}>
+                갱신된 계약이라 <b>이번 기간({c.current_term_start} ~ {c.end_date})</b>에 받은 돈만 셉니다. 누적 {doneLabel} {fmtNum(doneAll)}원.
+              </div>
+            )}
+          </div>
+          <Spacer h={20}/>
+        </>
+      )}
+
+      {/* 탭도 관점에 따라 다르다. 매입 계약엔 '원가 예산'도 '입금 내역'도 없다.
+          내부 키는 그대로 두고 라벨만 매입 관점으로 바꾼다(아래 분기들이 키를 쓰므로). */}
       <div className="card">
         <div className="tab-bar" style={{ padding: "0 12px" }}>
-          {["청구 일정", "원가 예산", "입금 내역", "지출 내역", "증빙", "결의서", "메모/히스토리"].map(t => (
-            <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t}</button>
+          {(isPurchase
+            ? [["청구 일정", "지급 일정"], ["지출 내역", "지급 내역"], ["증빙", "증빙"], ["결의서", "결의서"], ["메모/히스토리", "메모/히스토리"]]
+            : [["청구 일정", "청구 일정"], ["원가 예산", "원가 예산"], ["입금 내역", "입금 내역"], ["지출 내역", "원가 지출"], ["증빙", "증빙"], ["결의서", "결의서"], ["메모/히스토리", "메모/히스토리"]]
+          ).map(([key, label]) => (
+            <button key={key} className={`tab ${tab === key ? "active" : ""}`} onClick={() => setTab(key)}>{label}</button>
           ))}
         </div>
 
@@ -1047,18 +1257,33 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           </table>
         )}
 
+        {/* 매출 계약 → 이 계약에 귀속된 '원가'. 그 돈이 어느 매입계약으로 나갔는지도 함께 보여준다.
+            매입 계약 → 이 계약이 근거인 '지급'. */}
         {tab === "지출 내역" && (
           <table className="table">
-            <thead><tr><th>지출일</th><th>거래처</th><th>비목</th><th className="num-right">금액</th><th>결의서</th><th>지급</th></tr></thead>
+            <thead>
+              <tr>
+                <th>{isPurchase ? '지급일' : '지출일'}</th><th>거래처</th><th>비목</th>
+                {!isPurchase && <th>지급 근거(매입계약)</th>}
+                <th className="num-right">금액</th><th>결의서</th><th>{isPurchase ? '지급' : '정산'}</th>
+              </tr>
+            </thead>
             <tbody>
               {(c.expenses || []).length === 0 && (
-                <tr><td colSpan={6} style={{ textAlign: "center", padding: 40, color: "var(--muted-2)", fontSize: 13 }}>등록된 지출 내역이 없어요.</td></tr>
+                <tr><td colSpan={isPurchase ? 6 : 7} style={{ textAlign: "center", padding: 40, color: "var(--muted-2)", fontSize: 13 }}>
+                  {isPurchase
+                    ? '등록된 지급 내역이 없어요.'
+                    : '이 계약에 귀속된 원가가 없어요. 거래 등록 시 "원가 귀속"에서 이 계약을 고르면 여기에 잡힙니다.'}
+                </td></tr>
               )}
               {(c.expenses || []).map((r, i) => (
                 <tr key={i}>
                   <td className="num-cell text-muted">{r.date}</td>
                   <td className="fw-600">{r.vendor}</td>
                   <td><span className="badge outline">{r.category}</span></td>
+                  {!isPurchase && (
+                    <td className="text-sm text-muted">{r.paidContract || <span className="text-muted2">공통 (계약 없음)</span>}</td>
+                  )}
                   <td className="num-cell num-right fw-700">{fmtNum(r.amount)}</td>
                   <td><StatusBadge status={r.doc}/></td>
                   <td><StatusBadge status={r.pay}/></td>
@@ -1068,52 +1293,22 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           </table>
         )}
 
-        {tab === "증빙" && (() => {
-          const ACCEPT = ".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.hwp";
-          const attachments = c.attachments || [];
-          const attach = async (file, docType) => {
-            if (!file) return;
-            const up = await api.uploadFile(file);
-            if (!up?.url) { toast.push("업로드에 실패했어요"); return; }
-            const res = await api.addContractDoc(c.id, { url: up.url, name: up.originalName || file.name, doc_type: docType || '기타', size: up.size || 0 });
-            if (res.ok) { toast.push("첨부됐어요"); reload(); }
-            else toast.push("첨부에 실패했어요");
-          };
-          const remove = async (d) => {
-            const res = d.id ? await api.deleteContractDoc(d.id) : await api.clearContractFile(c.id);
-            if (res.ok) { toast.push("삭제됐어요"); reload(); }
-            else toast.push("삭제에 실패했어요");
-          };
-          return (
-          <div style={{ padding: 22 }} className="col gap-10">
-            {attachments.length === 0 && (
-              <div style={{ textAlign: "center", padding: 24, color: "var(--muted-2)", fontSize: 13 }}>등록된 계약 첨부가 없어요. 아래에서 추가하세요.</div>
-            )}
-            {attachments.map((d, i) => (
-              <div key={d.id || i} className="row gap-12" style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 14, background: "#fff" }}>
-                <div style={{ width: 40, height: 48, background: "var(--surface-3)", border: "1px solid var(--line)", borderRadius: 6, display: "grid", placeItems: "center" }}>
-                  {(d.name || '').toLowerCase().endsWith(".pdf") ? <Icon.File size={20}/> : <Icon.Image size={20}/>}
-                </div>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div className="fw-600" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
-                  <div className="text-xs text-muted2">{d.type || '기타'}{d.size ? ` · ${Math.round(d.size / 1024)}KB` : ''}</div>
-                </div>
-                <button className="btn ghost sm" onClick={() => window.open(d.url, '_blank')}><Icon.Eye/></button>
-                <a className="btn ghost sm" href={d.url} download={d.name} style={{ textDecoration: "none" }}><Icon.Download size={14}/></a>
-                <button className="btn ghost sm" style={{ color: "var(--neg)" }} onClick={() => remove(d)}><Icon.Close size={14}/></button>
-              </div>
-            ))}
-            <label className="drop" style={{ display: "block", cursor: "pointer" }}
-              onDragOver={e => e.preventDefault()}
-              onDrop={e => { e.preventDefault(); attach(e.dataTransfer.files[0]); }}>
-              <Icon.Upload size={22}/>
-              <div className="fw-600" style={{ marginTop: 8 }}>계약서·증빙을 끌어다 놓거나 클릭해서 추가</div>
-              <div className="text-xs text-muted2" style={{ marginTop: 4 }}>여러 개 첨부 가능 · PDF, JPG, PNG · 최대 20MB</div>
-              <input type="file" style={{ display: "none" }} accept={ACCEPT} onChange={e => attach(e.target.files[0])}/>
-            </label>
+        {tab === "증빙" && (
+          <div style={{ padding: 22 }}>
+            <FileAttach
+              docs={c.attachments || []}
+              onAdd={async (d) => {
+                const res = await api.addContractDoc(c.id, { url: d.url, name: d.name, doc_type: '기타', size: d.size || 0 });
+                if (res.ok) { toast.push("첨부됐어요"); reload(); } else toast.push("첨부에 실패했어요");
+              }}
+              onRemove={async (d) => {
+                // 레거시 단일 파일(file_url, id 없음)은 clear-file로, 나머지는 contract_docs 삭제
+                const res = d.id ? await api.deleteContractDoc(d.id) : await api.clearContractFile(c.id);
+                if (res.ok) { toast.push("삭제됐어요"); reload(); } else toast.push("삭제에 실패했어요");
+              }}
+              label="계약서·증빙을 끌어다 놓거나 클릭해서 추가"/>
           </div>
-          );
-        })()}
+        )}
 
         {tab === "결의서" && (
           <table className="table">
@@ -1152,6 +1347,46 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                 </button>
               </div>
             </div>
+            {(c.renewals || []).length > 0 && (
+              <>
+                <div className="text-xs text-muted2 fw-600" style={{ marginBottom: 12, letterSpacing: "0.02em" }}>갱신 이력</div>
+                <div className="table-scroll" style={{ marginBottom: 20 }}>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: 60 }}>회차</th><th>처리일</th><th>결과</th>
+                        <th>계약기간 변경</th><th className="num-right">계약금액 변경</th><th>메모</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {c.renewals.map(r => (
+                        <tr key={r.id}>
+                          <td className="num">{r.seq}차</td>
+                          <td className="num text-sm">{r.renewed_at || '—'}</td>
+                          <td><span className={`badge ${r.result === '갱신' ? 'pos' : 'outline'}`}><span className="dot"/>{r.result}</span></td>
+                          <td className="num text-sm">
+                            {r.result === '갱신' ? `${r.prev_end_date || '—'} → ${r.new_end_date}` : `${r.prev_end_date || '—'}에 종료`}
+                          </td>
+                          <td className="num-cell num-right text-sm">
+                            {(() => {
+                              // 정기형은 '주기당 금액'이 실제로 협상되는 값 — 총액이 아니라 그걸 보여준다
+                              const [prev, next] = recurring
+                                ? [r.prev_unit_amount, r.new_unit_amount]
+                                : [r.prev_amount, r.new_amount];
+                              if (r.result !== '갱신' || next == null || next === prev) {
+                                return <span className="text-muted2">변동 없음</span>;
+                              }
+                              return <span>{fmtNum(prev || 0)} → <b>{fmtNum(next)}</b>{recurring ? ` / ${periodLabel(c.billing_period)}` : ''}</span>;
+                            })()}
+                          </td>
+                          <td className="text-sm text-muted">{r.memo || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
             <div className="text-xs text-muted2 fw-600" style={{ marginBottom: 12, letterSpacing: "0.02em" }}>변경 이력</div>
             <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
               {(c.history || []).map((h, i) => (
@@ -1174,7 +1409,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       {/* 편집 Drawer */}
       <Drawer open={editOpen} onClose={() => setEditOpen(false)} width="min(480px,100vw)" label="계약 편집">
         <div className="drawer-body">
-          <div className="col gap-16">
+          <div className="col gap-form">
             <div>
               <label className="label" style={{ marginBottom: 8 }}>거래처</label>
               <Combobox value={editForm.vendor} onChange={v => setEditForm(f => ({ ...f, vendor: v }))}
@@ -1188,25 +1423,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
               <label className="label" style={{ marginBottom: 8 }}>계약번호 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
               <input className="input" value={editForm.contract_no || ''} onChange={e => setEditForm(f => ({ ...f, contract_no: e.target.value }))} placeholder="예: CT-2026-001"/>
             </div>
-            <div>
-              <label className="label" style={{ marginBottom: 8 }}>계약금액 (공급가액)</label>
-              <div style={{ position: 'relative' }}>
-                <input className="input num fw-700" style={{ fontSize: 20, paddingRight: 36 }}
-                  value={editForm.amount ? Number(String(editForm.amount).replace(/[^0-9]/g, '')).toLocaleString() : ''}
-                  onChange={e => setEditForm(f => ({ ...f, amount: e.target.value.replace(/[^0-9]/g, '') }))}/>
-                <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>원</span>
-              </div>
-            </div>
-            <div className="row gap-12">
-              <div style={{ flex: 1 }}>
-                <label className="label" style={{ marginBottom: 8 }}>시작일</label>
-                <input className="input" type="date" value={editForm.start_date || ''} onChange={e => setEditForm(f => ({ ...f, start_date: e.target.value }))}/>
-              </div>
-              <div style={{ flex: 1 }}>
-                <label className="label" style={{ marginBottom: 8 }}>종료일</label>
-                <input className="input" type="date" value={editForm.end_date || ''} onChange={e => setEditForm(f => ({ ...f, end_date: e.target.value }))}/>
-              </div>
-            </div>
+            <ContractTermFields form={editForm} set={setEditForm}/>
             <div>
               <label className="label" style={{ marginBottom: 8 }}>상태</label>
               <div className="row gap-6">
@@ -1216,25 +1433,21 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
               </div>
             </div>
             <div>
-              <label className="label" style={{ marginBottom: 8 }}>계약서 파일</label>
-              {editForm.file_url ? (
-                <div className="row gap-10" style={{ padding: '10px 14px', border: '1px solid var(--line)', borderRadius: 10, background: 'var(--surface-2)' }}>
+              <label className="label" style={{ marginBottom: 8 }}>계약서 추가 첨부 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 여러 개 가능</span></label>
+              {editForm.file_url && (
+                <div className="row gap-10" style={{ padding: '10px 14px', border: '1px solid var(--line)', borderRadius: 10, background: 'var(--surface-2)', marginBottom: 8 }}>
                   <Icon.File size={15} style={{ color: 'var(--brand)', flexShrink: 0 }}/>
-                  <span className="text-sm fw-600" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{editForm.file_name}</span>
+                  <span className="text-sm fw-600" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{editForm.file_name || '기존 계약서'}</span>
                   <a className="btn ghost sm" href={editForm.file_url} target="_blank" rel="noreferrer"><Icon.Eye size={13}/></a>
                   <button type="button" className="icon-btn" onClick={() => setEditForm(f => ({ ...f, file_url: '', file_name: '' }))}><Icon.Close size={14}/></button>
                 </div>
-              ) : (
-                <div className="drop" style={{ padding: 14, cursor: 'pointer' }}
-                  onClick={() => document.getElementById('edit-contract-file').click()}
-                  onDrop={async (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (!f) return; const r = await api.uploadFile(f); if (r.url) setEditForm(p => ({ ...p, file_url: r.url, file_name: r.originalName || f.name })); }}
-                  onDragOver={e => e.preventDefault()}>
-                  <input id="edit-contract-file" type="file" style={{ display: 'none' }} accept=".pdf,.jpg,.jpeg,.png,.docx,.hwp"
-                    onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const r = await api.uploadFile(f); if (r.url) setEditForm(p => ({ ...p, file_url: r.url, file_name: r.originalName || f.name })); }}/>
-                  <Icon.Upload size={16}/>
-                  <div className="text-sm fw-600" style={{ marginTop: 6 }}>계약서 파일 첨부</div>
-                </div>
               )}
+              <FileAttach
+                docs={editForm.docs || []}
+                onAdd={(d) => setEditForm(f => ({ ...f, docs: [...(f.docs || []), d] }))}
+                onRemove={(d) => setEditForm(f => ({ ...f, docs: (f.docs || []).filter(x => x !== d) }))}
+                label="계약서 파일을 끌어다 놓거나 클릭"/>
+              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>기존에 첨부한 파일은 계약 상세의 '증빙' 탭에서 확인·삭제할 수 있어요.</div>
             </div>
           </div>
         </div>
@@ -1245,15 +1458,43 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       </Drawer>
 
       <MilestoneEditDrawer open={msOpen} onClose={() => setMsOpen(false)} contractId={contractId}
-        initial={c.milestones} onSaved={reload}/>
+        contractAmount={c.amount} initial={c.milestones} onSaved={reload}/>
       <BudgetEditDrawer open={budgetOpen} onClose={() => setBudgetOpen(false)} contractId={contractId}
         initial={c.cost_budget} onSaved={reload}/>
+      <RenewDrawer open={renewOpen} onClose={() => setRenewOpen(false)} contract={c} onSaved={reload}/>
     </div>
   );
 };
 
 /* ============ 계약 목록 ============ */
-const NEW_CONTRACT_FORM = { vendor: "", contract_no: "", name: "", amount: "", start_date: "", end_date: "", status: "진행중", file_url: "", file_name: "" };
+const NEW_CONTRACT_FORM = {
+  vendor: "", contract_no: "", name: "", status: "진행중", file_url: "", file_name: "",
+  billing_mode: "onetime", term_mode: "fixed", vat_mode: "taxable", docs: [],
+  amount: "", unit_amount: "", billing_period: "monthly", billing_day: "1", initial_amount: "",
+  start_date: "", end_date: "", term_months: "12", notice_days: "60",
+};
+
+// 폼 → 서버 payload. 금액·기간의 해석은 서버(contract-model)가 하고, 화면은 입력값만 넘긴다.
+const contractPayload = (form, vendorId) => ({
+  vendor_id:   vendorId || null,
+  contract_no: form.contract_no?.trim() || null,
+  name:        form.name,
+  status:      form.status,
+  file_url:    form.file_url  || null,
+  file_name:   form.file_name || null,
+  billing_mode:   form.billing_mode,
+  term_mode:      form.term_mode,
+  vat_mode:       form.vat_mode === 'exempt' ? 'exempt' : 'taxable',
+  amount:         asNum(form.amount),
+  unit_amount:    asNum(form.unit_amount),
+  billing_period: form.billing_period,
+  billing_day:    asNum(form.billing_day) || 1,
+  initial_amount: asNum(form.initial_amount),
+  start_date:     form.start_date || null,
+  end_date:       form.end_date   || null,
+  term_months:    asNum(form.term_months) || 12,
+  notice_days:    form.notice_days === '' ? 60 : asNum(form.notice_days),
+});
 
 const CONTRACT_KIND_META = {
   all:      { title: "계약 관리", sub: "계약별 입금·지출·미수금을 한눈에 확인하세요.", addGubu: "B" },
@@ -1271,7 +1512,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
   const [newOpen, setNewOpen] = useState(false);
   const [newForm, setNewForm] = useState(NEW_CONTRACT_FORM);
   const [vendors, setVendors] = useState([]);
-  const tabs = ["전체", "진행중", "보류", "완료"];
+  const tabs = ["전체", "진행중", "갱신 필요", "만료", "보류", "완료"];
   const meta = CONTRACT_KIND_META[kind] || CONTRACT_KIND_META.all;
 
   const reload = () => api.getContracts().then(list => setAllContracts(list || []));
@@ -1283,21 +1524,15 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
   const handleNewSave = async () => {
     if (!newForm.vendor) return toast.push("거래처를 선택해주세요");
     if (!newForm.name)   return toast.push("계약명을 입력해주세요");
-    if (!newForm.amount) return toast.push("계약금액을 입력해주세요");
+    const recurring = newForm.billing_mode === 'recurring';
+    if (recurring && !asNum(newForm.unit_amount)) return toast.push(`${periodLabel(newForm.billing_period)} 청구금액을 입력해주세요`);
+    if (!recurring && !asNum(newForm.amount))     return toast.push("계약금액을 입력해주세요");
+    if (newForm.term_mode !== 'open' && !newForm.end_date) return toast.push("계약 종료일을 입력해주세요 (무기한이면 종료 방식을 '무기한'으로)");
     const vendorObj = vendors.find(v => v.name === newForm.vendor);
-    const amount = parseInt(String(newForm.amount).replace(/[^0-9]/g, ""), 10);
-    const res = await api.addContract({
-      vendor_id:   vendorObj?.id || null,
-      contract_no: newForm.contract_no?.trim() || null,
-      name:        newForm.name,
-      amount,
-      start_date:  newForm.start_date || null,
-      end_date:    newForm.end_date   || null,
-      status:      newForm.status,
-      file_url:    newForm.file_url  || null,
-      file_name:   newForm.file_name || null,
-    });
+    const res = await api.addContract(contractPayload(newForm, vendorObj?.id));
     if (res.ok) {
+      // 폼에서 올린 계약서 파일들을 계약 첨부(contract_docs)로 연결
+      for (const d of (newForm.docs || [])) await api.addContractDoc(res.id, { url: d.url, name: d.name, doc_type: '계약서', size: d.size || 0 });
       toast.push("계약이 등록됐어요");
       setNewOpen(false);
       setNewForm(NEW_CONTRACT_FORM);
@@ -1310,30 +1545,46 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
   // 거래처 gubu로 매출(B)·매입(A/E) 분류. gubu 미상은 매출로 간주(기존 데이터 호환).
   const vendorGubu = useMemo(() => Object.fromEntries(vendors.map(v => [v.id, v.gubu])), [vendors]);
   const isPurchase = (r) => { const g = vendorGubu[r.vendor_id]; return g === "A" || g === "E"; };
-  // 남은 잔액: 매출=총액−수금, 매입=총액−지급 (총액=공급가×1.1)
-  const rowRemain = (r) => {
-    const total = Math.round((r.amount || 0) * 1.1);
-    const done = isPurchase(r) ? (r.out || 0) : (r.in_done ?? r.inDone ?? 0);
-    return Math.max(0, total - done);
-  };
+  // 남은 잔액은 서버(metrics)가 계약 성격에 맞게 계산해 준다.
+  // 무기한 정기계약은 '남은 계약분'이 없으므로(null) 미수금을 대신 보여준다.
+  const rowRemain = (r) => (r.remain != null ? r.remain : (r.ar_remain || 0));
   const scoped = allContracts.filter(r => kind === "all" ? true : kind === "purchase" ? isPurchase(r) : !isPurchase(r));
 
   const pms = useMemo(() => [...new Set(scoped.map(c => c.pm).filter(Boolean))].sort(), [scoped]);
+  // 갱신 탭은 상태값이 아니라 종료일·통보기한으로 판정(renewalInfo)
+  const matchTab = (r) => {
+    if (tab === "전체") return true;
+    if (tab === "갱신 필요") return renewalInfo(r).stage === "due";
+    if (tab === "만료")     return renewalInfo(r).stage === "expired";
+    return r.status === tab;
+  };
   const rows = scoped
-    .filter(r => tab === "전체" || r.status === tab)
+    .filter(matchTab)
     .filter(r => !q || (r.name || "").includes(q) || (r.vendor_name || r.vendor || "").includes(q))
     .filter(r => !filterPM || r.pm === filterPM);
 
-  const totals = scoped.reduce((a, c) => ({
-    amount: a.amount + (c.amount || 0), inDone: a.inDone + (c.in_done || c.inDone || 0),
-    remain: a.remain + rowRemain(c), out: a.out + (c.out || 0),
-  }), { amount: 0, inDone: 0, remain: 0, out: 0 });
+  const renewDue     = scoped.filter(r => renewalInfo(r).stage === "due").length;
+  const renewExpired = scoped.filter(r => renewalInfo(r).stage === "expired").length;
 
-  const exportCsv = () => {
-    if (rows.length === 0) return toast.push("내보낼 계약이 없어요");
-    downloadCsv(`계약목록_${new Date().toISOString().slice(0, 10)}.csv`,
-      ["계약명", "계약번호", "거래처", "계약금액", "입금완료", "남은잔액", "지출", "상태"],
-      rows.map(r => [r.name, r.contract_no || "", r.vendor_name || r.vendor || "", r.amount || 0, r.in_done || 0, rowRemain(r), r.out || 0, r.status]));
+  // 무기한 정기계약은 총액이 없으므로 '계약금액 합계'에서 빠진다(넣으면 합계가 거짓말이 됨).
+  // 대신 월정액 합계(MRR)를 따로 센다 — 정기형 계약의 실질 규모는 이쪽이다.
+  const totals = scoped.reduce((a, c) => ({
+    amount: a.amount + (hasTotal(c) ? (c.amount || 0) : 0),
+    remain: a.remain + rowRemain(c),
+    out:    a.out + (c.out || 0),
+    monthly: a.monthly + (isRecurring(c) && c.status === '진행중'
+      ? Math.round((c.unit_amount || 0) / periodMonths(c.billing_period)) : 0),
+  }), { amount: 0, remain: 0, out: 0, monthly: 0 });
+
+  // 엑셀 내보내기 — 서버가 서식·요약까지 갖춘 .xlsx를 만든다
+  // (계약 목록 / 갱신 관리 / 정기 계약 3개 시트)
+  const [exporting, setExporting] = useState(false);
+  const exportXlsx = async () => {
+    if (scoped.length === 0) return toast.push("내보낼 계약이 없어요");
+    setExporting(true);
+    const res = await api.exportContractsXlsx(kind);
+    setExporting(false);
+    toast.push(res.ok ? "엑셀 파일을 내려받았어요" : (res.error || "내보내기에 실패했어요"));
   };
 
   return (
@@ -1344,17 +1595,26 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
           <div className="page-sub">{meta.sub}</div>
         </div>
         <div className="ml-auto row gap-8">
-          <button className="btn" onClick={exportCsv}><Icon.Download/> 내보내기</button>
+          <button className="btn" onClick={exportXlsx} disabled={exporting}>
+            <Icon.Download/> {exporting ? "만드는 중..." : "엑셀 내보내기"}
+          </button>
           <button className="btn primary" onClick={() => { setNewForm(NEW_CONTRACT_FORM); setNewOpen(true); }}><Icon.Plus/> 새 계약</button>
         </div>
       </div>
       <Spacer h={20}/>
 
-      <div className="grid grid-4-to-2" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+      {/* 색은 '지금 챙길 게 있다'는 신호일 때만 켠다. 평상시엔 무채색(ink) — 다 칠하면 색이 의미를 잃는다. */}
+      <div className="grid grid-4-to-2" style={{ gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
         <MiniStat label="진행중 계약"   value={`${scoped.filter(c => c.status === "진행중").length}건`} sub={`총 ${scoped.length}건`} tone="ink"/>
-        <MiniStat label="계약금액 합계" value={fmtNum(totals.amount) + "원"}  sub="진행 + 완료"                                                tone="brand"/>
-        <MiniStat label={kind === "purchase" ? "미지급 잔액" : "남은 미수금"} value={fmtNum(totals.remain) + "원"} sub={`${scoped.filter(c => rowRemain(c) > 0).length}건 잔존`} tone="warn"/>
-        <MiniStat label="누적 지출"     value={fmtNum(totals.out) + "원"}     sub="모든 계약"                                                  tone="neg"/>
+        <MiniStat label="계약금액 합계" value={fmtNum(totals.amount) + "원"}  sub="무기한 계약 제외"  tone="ink"/>
+        <MiniStat label={kind === "purchase" ? "월 고정지출" : "월 고정수입"} value={fmtNum(totals.monthly) + "원"}
+          sub={`정기계약 ${scoped.filter(c => isRecurring(c) && c.status === '진행중').length}건 · 월 환산`} tone="ink"/>
+        <MiniStat label={kind === "purchase" ? "미지급 잔액" : "남은 미수금"} value={fmtNum(totals.remain) + "원"}
+          sub={`${scoped.filter(c => rowRemain(c) > 0).length}건 잔존`}
+          tone={totals.remain > 0 ? "warn" : "ink"}/>
+        <MiniStat label="갱신 챙길 계약" value={`${renewDue + renewExpired}건`}
+          sub={renewExpired > 0 ? `만료 방치 ${renewExpired}건` : renewDue > 0 ? "통보 기한 임박" : "임박 없음"}
+          tone={renewExpired > 0 ? "neg" : renewDue > 0 ? "warn" : "ink"}/>
       </div>
       <Spacer h={20}/>
 
@@ -1392,34 +1652,85 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
           <table className="table">
             <thead>
               <tr>
-                <th style={{ width: "26%" }}>계약</th><th style={{ width: 120 }}>계약번호</th><th>거래처</th>
-                <th className="num-right">계약금액</th><th className="num-right">입금 완료</th>
-                <th className="num-right">남은 잔액</th><th className="num-right">지출액</th>
-                <th className="num-right">예상 손익</th><th>상태</th>
+                <th style={{ width: "24%" }}>계약</th><th style={{ width: 110 }}>계약번호</th><th>거래처</th>
+                <th style={{ width: 175 }}>계약기간 · 갱신</th>
+                <th className="num-right">금액</th>
+                <th className="num-right">{kind === "purchase" ? "지급액" : "수금"}</th>
+                <th className="num-right">남은 잔액</th>
+                {/* 매입 계약엔 원가·손익이 없다 → 미지급금으로 대체 */}
+                <th className="num-right">{kind === "purchase" ? "미지급금" : "원가"}</th>
+                {kind !== "purchase" && <th className="num-right">예상 손익</th>}
+                <th>상태</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r, i) => {
-                const pct = r.amount > 0 ? Math.round(((r.in_done || r.inDone || 0) / r.amount) * 100) : 0;
+                const recurring = isRecurring(r);
+                const openEnded = !hasTotal(r);
+                // 진행률은 '이번 계약기간' 기준. 무기한 계약은 채울 총액이 없으므로 막대를 안 그린다.
+                // 총액은 서버 metrics의 term_total 사용(vat_mode 반영 — 면세는 ×1.0). 화면에서 ×1.1 재계산 금지.
+                const total = r.term_total ?? 0;
+                const pct = openEnded || total <= 0 ? null
+                  : Math.min(100, Math.round(((r.term_collected ?? 0) / total) * 100));
                 return (
                   <tr key={i} style={{ cursor: "pointer" }} onClick={() => goDetail(r.id, r.name)}>
                     <td>
                       <div className="fw-600">{r.name}</div>
                       <div className="row gap-8" style={{ marginTop: 8 }}>
-                        <div className="bar-track" style={{ width: 140 }}>
-                          <div className="bar-fill" style={{ width: `${pct}%` }}/>
-                        </div>
-                        <span className="text-xs text-muted2 num">{pct}%</span>
-                        <span className="text-xs text-muted2">· {r.start_date || r.startDate || '—'}</span>
+                        {pct == null ? (
+                          <span className="text-xs text-muted2">청구 {r.billed ? fmtNum(r.billed) : 0}원 · 수금 {fmtNum(r.collected ?? 0)}원</span>
+                        ) : (
+                          <>
+                            <div className="bar-track" style={{ width: 120 }}>
+                              <div className="bar-fill" style={{ width: `${pct}%` }}/>
+                            </div>
+                            <span className="text-xs text-muted2 num">{pct}%</span>
+                          </>
+                        )}
+                        <span className="text-xs text-muted2">· {billingLabel(r)}/{termLabel(r)}</span>
                       </div>
                     </td>
                     <td className="text-sm num" style={{ color: r.contract_no ? undefined : "var(--muted-2)" }}>{r.contract_no || '—'}</td>
                     <td className="fw-600">{r.vendor_name || r.vendor || '—'}</td>
-                    <td className="num-cell num-right">{fmtNum(r.amount || 0)}</td>
-                    <td className="num-cell num-right">{fmtNum(r.in_done || r.inDone || 0)}</td>
-                    <td className="num-cell num-right fw-700" style={{ color: rowRemain(r) > 0 ? "var(--warn-ink)" : "var(--muted-2)" }}>{rowRemain(r) > 0 ? fmtNum(rowRemain(r)) : "—"}</td>
-                    <td className="num-cell num-right text-muted">{fmtNum(r.out || 0)}</td>
-                    <td className="num-cell num-right fw-700" style={{ color: (r.profit || 0) < 0 ? "var(--neg-ink)" : "var(--pos)" }}>{(r.profit || 0) >= 0 ? "+" : ""}{fmtNum(r.profit || 0)}</td>
+                    <td>
+                      <div className="text-sm num">
+                        {openEnded || !r.end_date
+                          ? `${r.start_date || '—'} ~ 해지 시까지`
+                          : [r.start_date, r.end_date].filter(Boolean).join(' ~ ')}
+                      </div>
+                      {renewalInfo(r).managed && (
+                        <div style={{ marginTop: 6 }}><RenewalBadge contract={r}/></div>
+                      )}
+                    </td>
+                    <td className="num-cell num-right">
+                      {recurring
+                        ? <div>
+                            <div className="fw-600">{fmtNum(r.unit_amount || 0)}<span className="text-xs text-muted2">/{periodLabel(r.billing_period)}</span></div>
+                            {!openEnded && <div className="text-xs text-muted2">기간 총 {fmtNum(r.amount || 0)}</div>}
+                          </div>
+                        : fmtNum(r.amount || 0)}
+                    </td>
+                    <td className="num-cell num-right">{fmtNum(r.collected ?? 0)}</td>
+                    <td className="num-cell num-right fw-700" style={{ color: rowRemain(r) > 0 ? "var(--warn-ink)" : "var(--muted-2)" }}>
+                      {rowRemain(r) > 0 ? fmtNum(rowRemain(r)) : "—"}
+                      {openEnded && rowRemain(r) > 0 && <div className="text-xs fw-400 text-muted2">{isPurchase(r) ? '미지급금' : '미수금'}</div>}
+                    </td>
+                    {isPurchase(r) ? (
+                      <td className="num-cell num-right fw-700" style={{ color: (r.ar_remain || 0) > 0 ? "var(--warn-ink)" : "var(--muted-2)" }}>
+                        {(r.ar_remain || 0) > 0 ? fmtNum(r.ar_remain) : "—"}
+                      </td>
+                    ) : (
+                      <td className="num-cell num-right text-muted">{fmtNum(r.out || 0)}</td>
+                    )}
+                    {/* 매입 계약은 손익 칸 자체가 없다. '전체' 목록에선 칸을 비워 정렬을 맞춘다. */}
+                    {/* 손익은 '마이너스'일 때만 색으로 경고. 정상 이익까지 초록으로 칠하면 눈에 안 들어온다. */}
+                    {kind !== "purchase" && (
+                      isPurchase(r)
+                        ? <td className="num-cell num-right text-muted2">—</td>
+                        : <td className="num-cell num-right fw-700" style={{ color: (r.profit || 0) < 0 ? "var(--neg-ink)" : undefined }}>
+                            {(r.profit || 0) >= 0 ? "+" : ""}{fmtNum(r.profit || 0)}
+                          </td>
+                    )}
                     <td><StatusBadge status={r.status}/></td>
                   </tr>
                 );
@@ -1431,7 +1742,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
 
       <Drawer open={newOpen} onClose={() => setNewOpen(false)} width="min(480px,100vw)" label="새 계약 등록">
         <div className="drawer-body">
-          <div className="col gap-16">
+          <div className="col gap-form">
             <div>
               <label className="label" style={{ marginBottom: 8 }}>거래처 <span style={{ color: "var(--neg-ink)" }}>*</span></label>
               <Combobox
@@ -1460,31 +1771,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
               <input className="input" value={newForm.contract_no} onChange={e => setNewForm(f => ({ ...f, contract_no: e.target.value }))} placeholder="예: CT-2026-001 (계약서 번호)"/>
               <div className="text-xs text-muted2" style={{ marginTop: 6 }}>계약을 번호로 구분하는 경우 입력하세요. 목록·상세에 표시됩니다.</div>
             </div>
-            <div>
-              <label className="label" style={{ marginBottom: 8 }}>계약금액 (공급가액) <span style={{ color: "var(--neg-ink)" }}>*</span></label>
-              <div style={{ position: "relative" }}>
-                <input className="input num fw-700" style={{ fontSize: 20, paddingRight: 36 }}
-                  value={newForm.amount ? Number(String(newForm.amount).replace(/[^0-9]/g, "")).toLocaleString() : ""}
-                  onChange={e => setNewForm(f => ({ ...f, amount: e.target.value.replace(/[^0-9]/g, "") }))}
-                  placeholder="0"/>
-                <span style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", color: "var(--muted-2)", fontSize: 13 }}>원</span>
-              </div>
-              {newForm.amount && (
-                <div className="text-xs text-muted" style={{ marginTop: 6 }}>
-                  부가세 포함 총액: <span className="num fw-600" style={{ color: "var(--ink)" }}>{Math.round(parseInt(newForm.amount) * 1.1).toLocaleString()}원</span>
-                </div>
-              )}
-            </div>
-            <div className="row gap-12">
-              <div style={{ flex: 1 }}>
-                <label className="label" style={{ marginBottom: 8 }}>계약 시작일</label>
-                <input className="input" type="date" value={newForm.start_date} onChange={e => setNewForm(f => ({ ...f, start_date: e.target.value }))}/>
-              </div>
-              <div style={{ flex: 1 }}>
-                <label className="label" style={{ marginBottom: 8 }}>계약 종료일</label>
-                <input className="input" type="date" value={newForm.end_date} onChange={e => setNewForm(f => ({ ...f, end_date: e.target.value }))}/>
-              </div>
-            </div>
+            <ContractTermFields form={newForm} set={setNewForm}/>
             <div>
               <label className="label" style={{ marginBottom: 8 }}>계약 상태</label>
               <div className="row gap-6">
@@ -1494,25 +1781,12 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
               </div>
             </div>
             <div>
-              <label className="label" style={{ marginBottom: 8 }}>계약서 첨부 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
-              {newForm.file_url ? (
-                <div className="row gap-10" style={{ padding: '10px 14px', border: '1px solid var(--line)', borderRadius: 10, background: 'var(--surface-2)' }}>
-                  <Icon.File size={15} style={{ color: 'var(--brand)', flexShrink: 0 }}/>
-                  <span className="text-sm fw-600" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{newForm.file_name}</span>
-                  <button type="button" className="icon-btn" onClick={() => setNewForm(f => ({ ...f, file_url: '', file_name: '' }))}><Icon.Close size={14}/></button>
-                </div>
-              ) : (
-                <div className="drop" style={{ padding: 14, cursor: 'pointer' }}
-                  onClick={() => document.getElementById('contract-file-input').click()}
-                  onDrop={async (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (!f) return; const r = await api.uploadFile(f); if (r.url) setNewForm(p => ({ ...p, file_url: r.url, file_name: r.originalName || f.name })); }}
-                  onDragOver={e => e.preventDefault()}>
-                  <input id="contract-file-input" type="file" style={{ display: 'none' }} accept=".pdf,.jpg,.jpeg,.png,.docx,.hwp"
-                    onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const r = await api.uploadFile(f); if (r.url) setNewForm(p => ({ ...p, file_url: r.url, file_name: r.originalName || f.name })); }}/>
-                  <Icon.Upload size={16}/>
-                  <div className="text-sm fw-600" style={{ marginTop: 6 }}>계약서 파일을 끌어다 놓거나 클릭</div>
-                  <div className="text-xs text-muted2" style={{ marginTop: 2 }}>PDF, JPG, PNG, Word, HWP</div>
-                </div>
-              )}
+              <label className="label" style={{ marginBottom: 8 }}>계약서 첨부 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택 · 여러 개 가능</span></label>
+              <FileAttach
+                docs={newForm.docs || []}
+                onAdd={(d) => setNewForm(f => ({ ...f, docs: [...(f.docs || []), d] }))}
+                onRemove={(d) => setNewForm(f => ({ ...f, docs: (f.docs || []).filter(x => x !== d) }))}
+                label="계약서 파일을 끌어다 놓거나 클릭"/>
             </div>
           </div>
         </div>

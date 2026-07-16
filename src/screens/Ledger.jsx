@@ -1,8 +1,19 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Popover, PopItem, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect, Drawer } from '../lib/ui'
-import { SAMPLE } from '../lib/data'
+import { api } from '../lib/api'
+import { ResolutionDocument } from './Docs'
 
-export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, openExcel }) => {
+const downloadCsv = (filename, headers, rows) => {
+  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`
+  const csv = [headers, ...rows].map(r => r.map(esc).join(',')).join('\r\n')
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
+}
+
+export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, openEdit, openExcel, refreshTrigger }) => {
   const toast = useToast();
   const { confirm } = useConfirm();
   const [filter, setFilter] = useState(initialFilter);
@@ -13,22 +24,20 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [filterCat, setFilterCat] = useState(null);
+  const [txns, setTxns] = useState([]);
+  // 미수금/미지급금은 청구서 기준(회수는 입금·환불/지급·환입 화면에서). 여기선 요약만 청구서 기준으로 표시.
+  const [recSummary, setRecSummary] = useState(null);
+  const [paySummary, setPaySummary] = useState(null);
 
   useEffect(() => { setFilter(initialFilter); }, [initialFilter]);
 
-  const txns = useMemo(() => {
-    const ins = SAMPLE.incomes.map(r => ({
-      kind: "income", sign: +1,
-      date: r.date, vendor: r.vendor, scope: r.contract, category: r.type,
-      amount: r.amount, account: r.account, status: r.status, evid: r.evid, memo: r.memo,
-    }));
-    const outs = SAMPLE.expenses.map(r => ({
-      kind: "expense", sign: -1,
-      date: r.date, vendor: r.vendor, scope: r.scope, category: r.category,
-      amount: r.amount, method: r.method, status: r.pay, doc: r.doc, evid: r.evid,
-    }));
-    return [...ins, ...outs].sort((a, b) => b.date.localeCompare(a.date));
-  }, []);
+  const reload = () => {
+    api.getTransactions().then(setTxns);
+    api.getReceivablesSummary().then(setRecSummary);
+    api.getPayablesSummary().then(setPaySummary);
+  };
+  useEffect(() => { reload(); }, []);
+  useEffect(() => { if (refreshTrigger > 0) reload(); }, [refreshTrigger]);
 
   const categories = useMemo(() => [...new Set(txns.map(t => t.category).filter(Boolean))].sort(), [txns]);
 
@@ -36,8 +45,6 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
     let rows = txns;
     if (filter === "income")  rows = rows.filter(t => t.kind === "income");
     else if (filter === "expense") rows = rows.filter(t => t.kind === "expense");
-    else if (filter === "ar") rows = rows.filter(t => t.kind === "income" && ["입금 예정", "일부 입금", "장기 미수"].includes(t.status));
-    else if (filter === "ap") rows = rows.filter(t => t.kind === "expense" && ["지급 예정", "지급 대기", "기한 지남"].includes(t.status));
     if (period !== "all") rows = rows.filter(t => inPeriod(t.date, period, { from: customFrom, to: customTo }));
     if (filterCat)        rows = rows.filter(t => t.category === filterCat);
     if (q) {
@@ -47,26 +54,27 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
     return rows;
   }, [txns, filter, q, period, customFrom, customTo, filterCat]);
 
-  const inSum  = txns.filter(t => t.kind === "income"  && t.status === "입금 완료").reduce((a, t) => a + t.amount, 0);
-  const outSum = txns.filter(t => t.kind === "expense" && t.status === "지급 완료").reduce((a, t) => a + t.amount, 0);
-  const arSum  = txns.filter(t => t.kind === "income"  && ["입금 예정", "일부 입금", "장기 미수"].includes(t.status)).reduce((a, t) => a + t.amount, 0);
-  const apSum  = txns.filter(t => t.kind === "expense" && ["지급 예정", "지급 대기", "기한 지남"].includes(t.status)).reduce((a, t) => a + t.amount, 0);
+  const exportCsv = () => {
+    if (filtered.length === 0) return toast.push("내보낼 거래가 없어요");
+    downloadCsv(`거래내역_${new Date().toISOString().slice(0, 10)}.csv`,
+      ["날짜", "구분", "거래처", "계약/공통", "비목", "금액", "상태"],
+      filtered.map(t => [t.date, t.kind === "income" ? "입금" : "지출", t.vendor, t.scope, t.category, t.sign * t.amount, t.status]));
+  };
+
+  const inSum  = txns.filter(t => t.kind === "income"  && t.status === "입금완료").reduce((a, t) => a + t.amount, 0);
+  const outSum = txns.filter(t => t.kind === "expense" && t.status === "지급완료").reduce((a, t) => a + t.amount, 0);
 
   const tabs = [
     { id: "all",     label: "전체 거래",  count: txns.length },
     { id: "income",  label: "입금",       count: txns.filter(t => t.kind === "income").length },
     { id: "expense", label: "지출",       count: txns.filter(t => t.kind === "expense").length },
-    { id: "ar",      label: "미수금",     count: txns.filter(t => t.kind === "income" && ["입금 예정", "일부 입금", "장기 미수"].includes(t.status)).length },
-    { id: "ap",      label: "미지급금",   count: txns.filter(t => t.kind === "expense" && ["지급 예정", "지급 대기", "기한 지남"].includes(t.status)).length },
   ];
 
-  const titleMap = { all: "거래내역", income: "거래내역 · 입금", expense: "거래내역 · 지출", ar: "거래내역 · 미수금", ap: "거래내역 · 미지급금" };
+  const titleMap = { all: "거래내역", income: "거래내역 · 입금", expense: "거래내역 · 지출" };
   const subMap = {
-    all:     "한 곳에서 입금·지출·미수금·미지급금을 모두 확인하세요.",
+    all:     "실제로 오간 모든 입금·지출 기록이에요. 미수금·미지급금은 '입금·환불'·'지급·환입'에서 관리해요.",
     income:  "발주처에서 들어온 돈을 등록하고 처리하세요.",
     expense: "외주가공·자재·운영비를 등록하고 결의·이체로 처리하세요.",
-    ar:      "납품 후 입금되지 않은 금액입니다. 행을 클릭해 입금을 처리하세요.",
-    ap:      "지급해야 할 비용입니다. 행을 클릭해 이체를 실행하세요.",
   };
 
   return (
@@ -79,12 +87,12 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
           </div>
           <div className="ml-auto row gap-8">
             <button className="btn excel" onClick={openExcel}><Icon.Excel/> <span className="btn-label-hide">엑셀 업로드</span></button>
-            <button className="btn" onClick={() => toast.push("거래내역을 엑셀로 내려받았어요")}><Icon.Download/> <span className="btn-label-hide">내보내기</span></button>
+            <button className="btn" onClick={exportCsv}><Icon.Download/> <span className="btn-label-hide">내보내기</span></button>
             <Popover align="right" width={220}
-              trigger={<button className="btn primary"><Icon.Plus/> 거래 등록 <Icon.Down size={12} style={{ marginLeft: 2 }}/></button>}>
+              trigger={<button className="btn primary"><Icon.Plus/> {filter === "ar" ? "입금·환불" : filter === "ap" ? "지급·환입" : "거래 등록"} <Icon.Down size={12} style={{ marginLeft: 2 }}/></button>}>
               <div style={{ padding: 6 }}>
-                <PopItem icon={<Icon.In size={16}/>}  label="입금 등록" sub="수금 내역을 등록합니다" onClick={openIncome}/>
-                <PopItem icon={<Icon.Out size={16}/>} label="지출 등록" sub="지출 내역을 등록합니다" onClick={openExpense}/>
+                <PopItem icon={<Icon.In size={16}/>}  label="입금 등록" onClick={openIncome}/>
+                <PopItem icon={<Icon.Out size={16}/>} label="지출 등록" onClick={openExpense}/>
               </div>
             </Popover>
           </div>
@@ -92,11 +100,12 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
 
         <Spacer h={20}/>
 
+        {/* 미수금/미지급금은 청구서 기준(요약만 표시). 카드 클릭 시 회수 화면으로 이동. */}
         <div className="grid grid-4-to-2" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 }}>
-          <LedgerCard label="이번 달 입금"  amount={inSum}  tone="pos"   active={filter === "income"} onClick={() => setFilter("income")}/>
-          <LedgerCard label="이번 달 지출"  amount={outSum} tone="neg"   active={filter === "expense"} onClick={() => setFilter("expense")}/>
-          <LedgerCard label="미수금"        amount={arSum}  tone="brand" active={filter === "ar"} onClick={() => setFilter("ar")} note="입금 대기"/>
-          <LedgerCard label="미지급금"      amount={apSum}  tone="warn"  active={filter === "ap"} onClick={() => setFilter("ap")} note="지급 대기"/>
+          <LedgerCard label="입금 합계"  amount={inSum}  tone="pos"   active={filter === "income"} onClick={() => setFilter("income")}/>
+          <LedgerCard label="지출 합계"  amount={outSum} tone="neg"   active={filter === "expense"} onClick={() => setFilter("expense")}/>
+          <LedgerCard label="미수금"        amount={recSummary?.total ?? 0}  tone="brand" note="입금·환불로 이동" onClick={() => { window.location.hash = "ar"; }}/>
+          <LedgerCard label="미지급금"      amount={paySummary?.total ?? 0}  tone="warn"  note="지급·환입으로 이동" onClick={() => { window.location.hash = "ap"; }}/>
         </div>
 
         <div className="card" style={{ overflow: "hidden" }}>
@@ -209,7 +218,7 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
                         ? <span className="badge pos" style={{ padding: "2px 8px" }}><Icon.Check size={11}/></span>
                         : <span className="badge neg" style={{ padding: "2px 8px" }}><Icon.Warn size={11}/></span>}
                     </td>
-                    <td><TxnActions txn={t} toast={toast} confirm={confirm}/></td>
+                    <td><TxnActions txn={t} toast={toast} confirm={confirm} onAction={reload}/></td>
                   </tr>
                 ))}
               </tbody>
@@ -222,7 +231,7 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
         </div>
       </div>
 
-      <TransactionDetailDrawer txn={sel} onClose={() => setSel(null)} toast={toast} openIncome={openIncome} openExpense={openExpense}/>
+      <TransactionDetailDrawer txn={sel} onClose={() => setSel(null)} toast={toast} confirm={confirm} openEdit={openEdit} onAction={reload}/>
     </>
   );
 };
@@ -248,37 +257,40 @@ const LedgerCard = ({ label, amount, tone, active, onClick, note }) => {
   );
 };
 
-const TxnActions = ({ txn, toast, confirm }) => {
-  if (txn.kind === "income" && ["입금 예정", "일부 입금"].includes(txn.status)) {
-    return (
-      <button className="btn primary sm" onClick={async (e) => {
-        e.stopPropagation();
-        const ok = await confirm({ tone: "brand", icon: <Icon.In size={22}/>, title: `${txn.vendor} 입금 처리`, body: `${txn.scope}의 ${fmtNum(txn.amount)}원을 입금 완료로 처리합니다.`, confirmLabel: "입금 처리" });
-        if (ok) toast.push("입금이 처리되었어요");
-      }}>입금 처리</button>
-    );
-  }
-  if (txn.kind === "income" && txn.status === "장기 미수") {
+const TxnActions = ({ txn, toast, confirm, onAction }) => {
+  const doIncome = async (e) => {
+    e.stopPropagation();
+    const ok = await confirm({ tone: "brand", icon: <Icon.In size={22}/>, title: `${txn.vendor} 입금 처리`, body: `${fmtNum(txn.amount)}원을 입금 완료로 처리합니다.`, confirmLabel: "입금 처리" });
+    if (ok) {
+      const res = await api.updateTransactionStatus(txn.id, "입금완료");
+      if (res.ok) { toast.push("입금이 처리됐어요"); onAction?.(); }
+      else toast.push("처리에 실패했어요");
+    }
+  };
+  const doExpense = async (e) => {
+    e.stopPropagation();
+    const ok = await confirm({ tone: "neg", icon: <Icon.Bank size={22}/>, title: `${txn.vendor} 이체 실행`, body: `${txn.category} ${fmtNum(txn.amount)}원을 지급완료로 처리합니다.`, confirmLabel: "이체 실행" });
+    if (ok) {
+      const res = await api.updateTransactionStatus(txn.id, "지급완료");
+      if (res.ok) { toast.push("이체가 완료됐어요"); onAction?.(); }
+      else toast.push("처리에 실패했어요");
+    }
+  };
+
+  if (txn.kind === "income" && ["입금 예정", "일부 입금"].includes(txn.status))
+    return <button className="btn primary sm" onClick={doIncome}>입금 처리</button>;
+
+  if (txn.kind === "income" && txn.status === "장기 미수")
     return (
       <div className="row gap-4">
-        <button className="btn sm" onClick={(e) => { e.stopPropagation(); toast.push("독촉 메일을 발송했어요"); }}>독촉</button>
-        <button className="btn primary sm" onClick={async (e) => {
-          e.stopPropagation();
-          const ok = await confirm({ tone: "pos", icon: <Icon.In size={22}/>, title: `${txn.vendor} 입금 처리`, body: `${txn.scope}의 ${fmtNum(txn.amount)}원을 입금 완료로 처리합니다.`, confirmLabel: "입금 처리" });
-          if (ok) toast.push("입금이 처리되었어요");
-        }}>입금 처리</button>
+        <button className="btn sm" onClick={(e) => { e.stopPropagation(); toast.push("독촉 메일 기능은 준비 중이에요"); }}>독촉</button>
+        <button className="btn primary sm" onClick={doIncome}>입금 처리</button>
       </div>
     );
-  }
-  if (txn.kind === "expense" && ["지급 예정", "지급 대기", "기한 지남"].includes(txn.status)) {
-    return (
-      <button className="btn primary sm" onClick={async (e) => {
-        e.stopPropagation();
-        const ok = await confirm({ tone: "neg", icon: <Icon.Bank size={22}/>, title: `${txn.vendor} 이체 실행`, body: `${txn.category} ${fmtNum(txn.amount)}원이 등록된 계좌에서 출금됩니다.`, confirmLabel: "이체 실행" });
-        if (ok) toast.push("이체가 실행되었어요");
-      }}>이체 실행</button>
-    );
-  }
+
+  if (txn.kind === "expense" && ["지급 예정", "지급 대기", "기한 지남"].includes(txn.status))
+    return <button className="btn primary sm" onClick={doExpense}>이체 실행</button>;
+
   return <span className="text-xs text-muted2">—</span>;
 };
 
@@ -289,9 +301,20 @@ const DetailRow = ({ label, value }) => (
   </div>
 );
 
-const TransactionDetailDrawer = ({ txn, onClose, toast, openIncome, openExpense }) => {
+const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAction }) => {
   const [tab, setTab] = useState("개요");
-  useEffect(() => { if (txn) setTab("개요"); }, [txn]);
+  const [docs, setDocs] = useState([]);
+  const [resolution, setResolution] = useState(null);   // 이 지출에 연결된 지급결의서
+  const [company, setCompany] = useState(null);
+  const [resView, setResView] = useState(false);        // 결의서 열람 모달
+  useEffect(() => {
+    if (!txn) return;
+    setTab("개요"); setDocs(txn.docs || []); setResolution(null); setResView(false);
+    if (txn.kind === "expense") {
+      api.getResolutionByTxn(txn.id).then(setResolution);
+      api.getCompany().then(setCompany);
+    }
+  }, [txn]);
   if (!txn) return null;
   return (
     <Drawer open={true} onClose={onClose} width="min(560px, 100vw)">
@@ -308,7 +331,7 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, openIncome, openExpense 
         </div>
 
         <div style={{ borderBottom: "1px solid var(--line)", padding: "0 22px" }}>
-          {["개요", txn.kind === "expense" ? "결의서" : null, "증빙"].filter(Boolean).map(t => (
+          {["개요", "증빙"].map(t => (
             <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t}</button>
           ))}
         </div>
@@ -332,64 +355,109 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, openIncome, openExpense 
               {txn.doc     && <DetailRow label="결의서"    value={<StatusBadge status={txn.doc}/>}/>}
             </div>
           )}
-          {tab === "결의서" && (
-            <div>
-              <div className="alert-row" style={{ background: "var(--brand-soft)", borderColor: "transparent", marginBottom: 16 }}>
-                <Icon.Sign/>
-                <div><div className="lead">이 지출에 연결된 결의서</div><div className="body">결의서는 지출과 함께 자동 생성되어 결재선을 따라갑니다.</div></div>
-              </div>
-              <DetailRow label="문서번호" value={<span className="num">{`EXP-${txn.date.slice(0, 4)}-${String(([...(txn.vendor + txn.date)].reduce((a, c) => a + c.charCodeAt(0), 0) % 9000) + 1000).padStart(4, '0')}`}</span>}/>
-              <DetailRow label="상태"     value={<StatusBadge status={txn.doc || "승인 완료"}/>}/>
-              <DetailRow label="작성자"   value="한경리"/>
-              <DetailRow label="결재선"   value="한경리 → 정대표 (단독 결재)"/>
-              <div className="row gap-8" style={{ marginTop: 18 }}>
-                <button className="btn"><Icon.Eye size={14}/> 미리보기</button>
-                <button className="btn"><Icon.Download size={14}/> PDF</button>
-              </div>
-            </div>
-          )}
-          {tab === "증빙" && (
-            <div>
-              {txn.evid ? (
-                <div className="col gap-10">
-                  <div className="row gap-12" style={{ padding: 14, border: "1px solid var(--line)", borderRadius: 12, background: "#fff" }}>
-                    <div style={{ width: 40, height: 48, background: "var(--surface-3)", border: "1px solid var(--line)", borderRadius: 6, display: "grid", placeItems: "center" }}><Icon.File size={20}/></div>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div className="fw-600">세금계산서_{txn.vendor}.pdf</div>
-                      <div className="text-xs text-muted2">세금계산서 · 82KB · {txn.date}</div>
-                    </div>
-                    <button className="btn ghost sm"><Icon.Eye/></button>
+          {tab === "증빙" && (() => {
+            const ACCEPT = ".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.hwp";
+            const attach = async (file, docType) => {
+              if (!file) return;
+              const up = await api.uploadFile(file);
+              if (!up?.url) { toast.push("업로드에 실패했어요"); return; }
+              const res = await api.addTransactionDoc(txn.id, { url: up.url, name: up.originalName || file.name, doc_type: docType || '기타', size: up.size || 0 });
+              if (res.ok) { setDocs(prev => [...prev, { id: res.id, url: up.url, name: up.originalName || file.name, type: docType || '기타', size: up.size || 0 }]); toast.push("증빙이 첨부됐어요"); onAction?.(); }
+              else toast.push("첨부에 실패했어요");
+            };
+            const remove = async (d) => {
+              const res = d.id ? await api.deleteTransactionDoc(d.id) : await api.updateTransactionEvidence(txn.id, { evid_url: '', evid_type: '' });
+              if (res.ok) { setDocs(prev => prev.filter(x => x !== d)); toast.push("삭제됐어요"); onAction?.(); }
+              else toast.push("삭제에 실패했어요");
+            };
+            return (
+            <div className="col gap-10">
+              {/* 이 지출에 연결된 지급결의서 — 별도 파일 없이 여기서 열람·인쇄 */}
+              {resolution && (
+                <div className="row gap-12" style={{ padding: 14, border: "1px solid var(--brand)", borderRadius: 12, background: "var(--brand-soft)" }}>
+                  <div style={{ width: 40, height: 48, background: "#fff", border: "1px solid var(--line)", borderRadius: 6, display: "grid", placeItems: "center" }}><Icon.Sign size={20}/></div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="fw-600">지급결의서 {resolution.doc_no}</div>
+                    <div className="text-xs text-muted2">{resolution.title} · {fmtNum(resolution.amount)}원</div>
                   </div>
-                </div>
-              ) : (
-                <div>
-                  <div className="alert-row" style={{ background: "var(--neg-soft)", borderColor: "transparent", marginBottom: 14 }}>
-                    <Icon.Warn/>
-                    <div><div className="lead">증빙이 없어요</div><div className="body">영수증 또는 세금계산서가 첨부되지 않았습니다.</div></div>
-                  </div>
-                  <div className="drop">
-                    <Icon.Upload size={22}/>
-                    <div className="fw-600" style={{ marginTop: 8 }}>증빙 파일을 끌어다 놓거나 클릭해서 업로드</div>
-                    <div className="text-xs text-muted2" style={{ marginTop: 4 }}>PDF, JPG, PNG · 최대 20MB</div>
-                  </div>
+                  <button className="btn sm" onClick={() => setResView(true)}><Icon.Eye size={13}/> 보기</button>
                 </div>
               )}
+              {docs.length === 0 && !resolution && (
+                <div className="alert-row" style={{ background: "var(--neg-soft)", borderColor: "transparent" }}>
+                  <Icon.Warn/>
+                  <div><div className="lead">증빙이 없어요</div><div className="body">영수증·세금계산서 등을 첨부해주세요. 여러 개도 됩니다.</div></div>
+                </div>
+              )}
+              {docs.map((d, i) => (
+                <div key={d.id || i} className="row gap-12" style={{ padding: 14, border: "1px solid var(--line)", borderRadius: 12, background: "#fff" }}>
+                  <div style={{ width: 40, height: 48, background: "var(--surface-3)", border: "1px solid var(--line)", borderRadius: 6, display: "grid", placeItems: "center" }}><Icon.File size={20}/></div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="fw-600" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name || '첨부 파일'}</div>
+                    <div className="text-xs text-muted2">{d.type || '기타'}{d.size ? ` · ${Math.round(d.size / 1024)}KB` : ''}</div>
+                  </div>
+                  <button className="btn ghost sm" onClick={() => window.open(d.url, '_blank')}><Icon.Eye/></button>
+                  <a className="btn ghost sm" href={d.url} download={d.name} style={{ textDecoration: "none" }}><Icon.Download size={14}/></a>
+                  <button className="btn ghost sm" style={{ color: "var(--neg)" }} onClick={() => remove(d)}><Icon.Close size={14}/></button>
+                </div>
+              ))}
+              <label className="drop" style={{ display: "block", cursor: "pointer" }}
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => { e.preventDefault(); attach(e.dataTransfer.files[0]); }}>
+                <Icon.Upload size={22}/>
+                <div className="fw-600" style={{ marginTop: 8 }}>증빙 파일을 끌어다 놓거나 클릭해서 추가</div>
+                <div className="text-xs text-muted2" style={{ marginTop: 4 }}>여러 개 첨부 가능 · PDF, JPG, PNG · 최대 20MB</div>
+                <input type="file" style={{ display: "none" }} accept={ACCEPT} onChange={e => attach(e.target.files[0])}/>
+              </label>
             </div>
-          )}
+            );
+          })()}
         </div>
 
         <div className="drawer-foot">
           <button className="btn" onClick={onClose}>닫기</button>
+          <button className="btn" style={{ color: "var(--neg-ink)", borderColor: "var(--neg)", background: "var(--neg-soft)" }} onClick={async () => {
+            const ok = await confirm({ tone: "neg", icon: <Icon.Warn size={22}/>, title: "거래 삭제", body: `${txn.vendor} · ${fmtNum(txn.amount)}원 거래를 삭제합니다. 복구할 수 없어요.`, confirmLabel: "삭제" });
+            if (ok) {
+              const res = await api.deleteTransaction(txn.id);
+              if (res.ok) { toast.push("삭제됐어요"); onClose(); onAction?.(); }
+              else toast.push("삭제에 실패했어요");
+            }
+          }}><Icon.Trash size={14}/> 삭제</button>
           <div className="ml-auto row gap-8">
-            <button className="btn" onClick={() => { onClose(); txn.kind === "income" ? openIncome?.() : openExpense?.(); }}><Icon.Pencil size={14}/> 편집</button>
+            <button className="btn" onClick={() => { onClose(); openEdit?.(txn); }}><Icon.Pencil size={14}/> 편집</button>
             {txn.kind === "income" && ["입금 예정", "일부 입금", "장기 미수"].includes(txn.status) && (
-              <button className="btn primary" onClick={() => { onClose(); toast.push("입금이 처리되었어요"); }}><Icon.Check size={14}/> 입금 처리</button>
+              <button className="btn primary" onClick={async () => {
+                const ok = await confirm({ tone: "brand", icon: <Icon.In size={22}/>, title: "입금 처리", body: `${fmtNum(txn.amount)}원을 입금 완료로 처리합니다.`, confirmLabel: "입금 처리" });
+                if (ok) { const res = await api.updateTransactionStatus(txn.id, "입금완료"); if (res.ok) { toast.push("입금이 처리됐어요"); onClose(); onAction?.(); } }
+              }}><Icon.Check size={14}/> 입금 처리</button>
             )}
             {txn.kind === "expense" && ["지급 예정", "지급 대기", "기한 지남"].includes(txn.status) && (
-              <button className="btn primary" onClick={() => { onClose(); toast.push("이체가 실행되었어요"); }}><Icon.Bank size={14}/> 이체 실행</button>
+              <button className="btn primary" onClick={async () => {
+                const ok = await confirm({ tone: "neg", icon: <Icon.Bank size={22}/>, title: "이체 실행", body: `${fmtNum(txn.amount)}원을 지급완료로 처리합니다.`, confirmLabel: "이체 실행" });
+                if (ok) { const res = await api.updateTransactionStatus(txn.id, "지급완료"); if (res.ok) { toast.push("이체가 완료됐어요"); onClose(); onAction?.(); } }
+              }}><Icon.Bank size={14}/> 이체 실행</button>
             )}
           </div>
         </div>
+
+        {/* 지급결의서 열람·인쇄 모달 — 별도 파일 없이 증빙 영역에서 바로 */}
+        {resView && resolution && (
+          <div className="res-viewer-overlay" onClick={() => setResView(false)}>
+            <div className="res-viewer" onClick={e => e.stopPropagation()}>
+              <div className="row gap-8 no-print" style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)" }}>
+                <span className="fw-700">지급결의서 {resolution.doc_no}</span>
+                <div className="ml-auto row gap-6">
+                  <button className="btn" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
+                  <button className="icon-btn" onClick={() => setResView(false)}><Icon.Close size={16}/></button>
+                </div>
+              </div>
+              <div style={{ padding: 20, overflow: "auto" }}>
+                <ResolutionDocument doc={resolution} company={company} printClass="resolution-print"/>
+              </div>
+            </div>
+          </div>
+        )}
     </Drawer>
   );
 };

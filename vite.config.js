@@ -1,18 +1,28 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import Inspector from 'vite-plugin-react-inspector'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+      '/uploads': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+    },
+  },
   plugins: [
     react(),
-    Inspector(),
     VitePWA({
       registerType: 'autoUpdate',
       devOptions: { enabled: true },
       manifest: {
-        name: '동진테크 - 재무·회계관리',
-        short_name: '동진테크',
+        name: '도니도라 - 재무·회계관리',
+        short_name: '도니도라',
         theme_color: '#0f172a',
         background_color: '#ffffff',
         display: 'standalone',
@@ -26,6 +36,10 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // 첨부 파일(/uploads)·API(/api)로의 이동은 SPA fallback(index.html)으로 가로채지 말고
+        // 실제 서버로 넘긴다. 안 그러면 첨부 파일 새 탭 열기가 메인페이지로 빠진다.
+        navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/^\/uploads\//, /^\/api\//],
       },
     }),
   ],

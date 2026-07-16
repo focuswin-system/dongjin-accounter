@@ -7,26 +7,25 @@ export const NAV_TREE = [
   {
     type: "domain", id: "acct", label: "일반회계", icon: Icon.Book,
     sections: [
+      // 메뉴 순서 = 실제 일하는 순서. 계약 → 청구 → 회수(미수금).
+      // '입금'·'지출'은 거래내역 화면에 필터만 건 같은 뷰라 메뉴에서 뺐다(거래내역에서 본다).
       { label: "판매·매출", items: [
         { id: "contract_sales", label: "매출 계약",   icon: Icon.Briefcase },
-        { id: "income",         label: "입금",        icon: Icon.In },
-        { id: "ar",             label: "미수금",      icon: Icon.Recv },
-        { id: "billing_issued", label: "발행 청구서", icon: Icon.Receipt },
+        { id: "billing_issued", label: "대금 청구서", icon: Icon.Receipt },
+        { id: "ar",             label: "입금·환불",   icon: Icon.Recv },
       ]},
       { label: "구매·매입", items: [
         { id: "contract_purchase", label: "매입 계약",   icon: Icon.Briefcase },
-        { id: "expense",           label: "지출",        icon: Icon.Out },
-        { id: "ap",                label: "미지급금",    icon: Icon.Pay },
-        { id: "billing_received",  label: "수취 청구서", icon: Icon.Receipt },
+        { id: "billing_received",  label: "대금 청구서", icon: Icon.Receipt },
         { id: "doc",               label: "지급결의서",  icon: Icon.Sign },
+        { id: "ap",                label: "지급·환입",   icon: Icon.Pay },
       ]},
-      { label: "경비·잡손익", items: [
-        { id: "misc_pl", label: "경비·잡손익", icon: Icon.Doc },
-      ]},
+      // 경비·잡손익은 조회 전용 뷰라 제거 — 거래내역에서 계정과목·비목·계약선택으로 표현.
       { label: "거래·계약", items: [
         { id: "ledger",   label: "전체 거래내역", icon: Icon.Wallet },
         { id: "contract", label: "계약",          icon: Icon.Briefcase },
-        { id: "evidence", label: "증빙 관리",     icon: Icon.Folder },
+        // '증빙 관리'는 아직 목업(SAMPLE 데이터·실동작 없음)이라 메뉴에서 숨김.
+        // 추후 여유 있을 때 거래 evid_url 집계 + 증빙 누락 관리로 실구현 예정.
       ]},
       { label: "세무관리", items: [
         { id: "tax_vat", label: "부가세",   icon: Icon.Doc },
@@ -89,10 +88,9 @@ export const PORTAL = [
     id: 'acct', label: '일반회계', icon: Icon.Book,
     categories: [
       { id: 'acct_process', label: '회계처리', icon: Icon.Wallet, desc: '판매·구매·경비 거래 처리', todos: true, groups: [
-        { label: '판매·매출', items: ['contract_sales', 'billing_issued', 'income', 'ar'] },
-        { label: '구매·매입', items: ['contract_purchase', 'doc', 'billing_received', 'expense', 'ap'] },
-        { label: '경비·잡손익', items: ['misc_pl'] },
-        { label: '거래·증빙', items: ['ledger', 'contract', 'evidence'] },
+        { label: '판매·매출', items: ['contract_sales', 'billing_issued', 'ar'] },
+        { label: '구매·매입', items: ['contract_purchase', 'doc', 'billing_received', 'ap'] },
+        { label: '거래·계약', items: ['ledger', 'contract'] },   // '증빙 관리'는 목업이라 숨김(추후 실구현 예정)
       ]},
       { id: 'acct_tax', label: '세무관리', icon: Icon.Doc, desc: '부가세·기타세액 신고', groups: [
         { label: '', items: ['tax_vat', 'tax_etc'] },

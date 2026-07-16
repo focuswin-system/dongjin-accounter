@@ -22,3 +22,8 @@ deploy/*.key
 # Playwright screenshots
 screenshots/
 .playwright-mcp/
+
+# Build/dev artifacts & tooling state (소스 아님)
+dev-dist/
+.bkit/
+/payslip-*.png

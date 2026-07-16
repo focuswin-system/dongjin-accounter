@@ -106,6 +106,9 @@ function adaptTransaction(row) {
     vendorId: row.vendor_id,
     contract: row.contract_name || row.doc_no || '',
     contractId: row.contract_id || '',
+    // 원가 귀속(지출만) — 이 지출이 어느 매출계약의 원가인지. 근거 계약과 별개 축.
+    cost_contract_id: row.cost_contract_id || '',
+    cost_contract_name: row.cost_contract_name || '',
     account: row.account_name || '',
     scope: row.contract_name || row.memo || row.doc_no || '—',
     category: row.category || '—',
@@ -124,6 +127,10 @@ function adaptTransaction(row) {
     docs: buildTxnDocs(row),
     evid: (row.docs && row.docs.length > 0) || !!(row.evid_url || row.evid_type),
     memo: row.memo || '',
+    item_id: row.item_id || '',
+    item_name: row.item_name || '',
+    account_code: row.account_code || '',
+    employee: row.employee_name || '',
   }
 }
 
@@ -137,7 +144,7 @@ function adaptEmployee(row) {
     pos: row.role || '—',
     join: row.join_date || '—',
     birth: row.birth_date || '',
-    status: row.active ? '재직' : '퇴직',
+    status: row.status || (row.active ? '재직' : '퇴사'),
     baseSalary: row.base_salary || 0,
     account: '—',
     pay: {
@@ -274,9 +281,9 @@ export const api = {
     try { return await req(`/invoices/${invoiceId}/matchable`) } catch { return [] }
   },
 
-  async matchInvoice(invoiceId, { txnId, amount, date }) {
+  async matchInvoice(invoiceId, { txnId, amount, date, category, memo, account_code }) {
     try {
-      await req(`/invoices/${invoiceId}/matches`, { method: 'POST', body: { txn_id: txnId, amount, date } })
+      await req(`/invoices/${invoiceId}/matches`, { method: 'POST', body: { txn_id: txnId, amount, date, category, memo, account_code } })
       return { ok: true }
     } catch { return { ok: false } }
   },
@@ -506,6 +513,66 @@ export const api = {
     try { return await req(`/contracts/${id}`) } catch { return null }
   },
 
+  // ── 지급결의서 ──
+  async getResolutions() {
+    try { return await req('/resolutions') } catch { return [] }
+  },
+  async getResolution(id) {
+    try { return await req(`/resolutions/${id}`) } catch { return null }
+  },
+  // 지출 거래에 연결된 결의서(증빙 영역에서 열람). 없으면 null.
+  async getResolutionByTxn(txnId) {
+    try { return await req(`/resolutions/by-txn/${txnId}`) } catch { return null }
+  },
+
+  // ── 결재선 프리셋 ──
+  async getApprovalPresets() {
+    try { return await req('/approval-presets') } catch { return [] }
+  },
+  async addApprovalPreset(data) {
+    try { const r = await req('/approval-presets', { method: 'POST', body: data }); return { ok: true, id: r.id } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async updateApprovalPreset(id, data) {
+    try { await req(`/approval-presets/${id}`, { method: 'PUT', body: data }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async setDefaultApprovalPreset(id) {
+    try { await req(`/approval-presets/${id}/default`, { method: 'PATCH' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async deleteApprovalPreset(id) {
+    try { await req(`/approval-presets/${id}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  // 결의서 직접 등록 (청구서 없는 소액 경비 — 비누·간식 등)
+  async createResolution(data) {
+    try { const r = await req('/resolutions', { method: 'POST', body: data }); return { ok: true, resolution: r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  // 매입 청구서 1건 → 결의서 생성(지급 전 결재용, 이미 있으면 그 결의서 반환)
+  async createResolutionFromInvoice(invoiceId) {
+    try { const r = await req(`/resolutions/from-invoice/${invoiceId}`, { method: 'POST' }); return { ok: true, resolution: r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async updateResolution(id, data) {
+    try { await req(`/resolutions/${id}`, { method: 'PUT', body: data }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  // 처리 시 연결할 만한 미연결 지출 거래 후보
+  async getResolutionMatchable(id) {
+    try { return await req(`/resolutions/${id}/matchable`) } catch { return [] }
+  },
+  // 결의서 처리 — mode:'link'(기존 거래 연결) | 'create'(새 지출 생성)
+  async processResolution(id, body) {
+    try { const r = await req(`/resolutions/${id}/process`, { method: 'POST', body }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async deleteResolution(id) {
+    try { await req(`/resolutions/${id}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
   async addContract(data) {
     try {
       const result = await req('/contracts', { method: 'POST', body: data })
@@ -518,6 +585,65 @@ export const api = {
       await req(`/contracts/${id}`, { method: 'PUT', body: data })
       return { ok: true }
     } catch (e) { return { ok: false, error: e.message } }
+  },
+
+  // 계약 목록 엑셀 내려받기 (kind: 'sales'|'purchase'|'all').
+  // 인증 헤더가 필요해서 <a href>로는 안 되고, blob으로 받아 저장한다.
+  async exportContractsXlsx(kind = 'all') {
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch(`${BASE}/contracts/export.xlsx?kind=${kind}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) throw new Error('내보내기에 실패했어요')
+      const blob = await res.blob()
+      const label = kind === 'purchase' ? '매입계약' : kind === 'sales' ? '매출계약' : '계약'
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${label}_${new Date().toISOString().slice(0, 10)}.xlsx`
+      // Firefox는 anchor가 DOM에 있어야 다운로드되고, 같은 tick에 revoke하면 진행 중 다운로드가 취소된다.
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => { a.remove(); URL.revokeObjectURL(url) }, 0)
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
+
+  // 갱신 관리: 통보기한에 들어왔거나 만료된 기간 계약 (for: 'sales'|'purchase')
+  async getUpcomingRenewals(forKind) {
+    try { return await req(`/contracts/renewals/upcoming${forKind ? `?for=${forKind}` : ''}`) } catch { return [] }
+  },
+  // 갱신 처리: result='renew'면 다음 기간으로 연장(+금액 변경), 'close'면 미갱신 종료
+  async renewContract(id, data) {
+    try { const r = await req(`/contracts/${id}/renew`, { method: 'POST', body: data }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  // 정기형 계약 → 계약의 주기·금액·기간으로 정기청구 걸기
+  async addContractRecurring(id, accountId) {
+    try { const r = await req(`/contracts/${id}/recurring`, { method: 'POST', body: { account_id: accountId || null } }); return { ok: true, id: r.id } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  // 계약에 걸린 정기 반복(매출=정기청구 / 매입=정기지출)을 계약 조건에 다시 맞춘다.
+  // 계약이 원본이므로, 어긋나면 계약 쪽으로 되돌리는 게 맞다.
+  async syncContractRecurring(id) {
+    try { const r = await req(`/contracts/${id}/recurring/sync`, { method: 'PATCH' }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  // 계약에 걸린 정기 반복 중지/재개 (매출·매입 모두 계약 화면에서)
+  async toggleContractRecurring(contractId, recId) {
+    try { const r = await req(`/contracts/${contractId}/recurring/${recId}/toggle`, { method: 'PATCH' }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
+  // 청구 예정인 정기청구 회차(아직 청구서 미생성) — 발행 예정 목록에 계약 청구일정과 함께 뜬다
+  async getPendingRecurring() {
+    try { return await req('/recurring-invoices/pending') } catch { return [] }
+  },
+  // 정기청구 회차 1건 발행 (paid=true면 기입금 처리까지)
+  async issueRecurring(recurringId, { due, paid = false } = {}) {
+    try { const r = await req(`/recurring-invoices/${recurringId}/issue`, { method: 'POST', body: { due, paid } }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
   },
 
   // 발행 예정(대기) 청구 일정 (for: 'sales'|'purchase')
@@ -643,6 +769,13 @@ export const api = {
     try {
       const params = type ? `?type=${type}` : ''
       return await req(`/categories${params}`)
+    } catch { return [] }
+  },
+
+  // 표준 계정과목(읽기 전용). postableOnly=true 면 거래 입력용(집계 제외).
+  async getAccountSubjects({ postableOnly = false } = {}) {
+    try {
+      return await req(`/account-subjects${postableOnly ? '?postable=1' : ''}`)
     } catch { return [] }
   },
 
@@ -849,6 +982,23 @@ export const api = {
       } else if (d !== null && d <= 7) {
         items.push({ tone: 'warn', icon: 'Bell', to: 'ap', sortKey: 2,
           title: `${r.vendor} 지급 예정`, sub: `${won(r.amount)} · ${r.scope}`, when: d === 0 ? '오늘' : `D-${d}` })
+      }
+    })
+    // 계약 갱신: 통보기한에 들어온 기간 계약 + 종료일이 지났는데 처리 안 된 계약
+    let renewals = []
+    try { renewals = await this.getUpcomingRenewals() } catch { /* noop */ }
+    renewals.forEach(r => {
+      const auto = r.term_mode === 'auto_renew'
+      const d = Number(r.days_left)
+      const to = (r.gubu === 'A' || r.gubu === 'E') ? 'contract_purchase' : 'contract_sales'
+      if (d < 0) {
+        items.push({ tone: 'neg', icon: 'Warn', to, sortKey: 0,
+          title: `${r.vendor_name || '거래처'} 계약이 만료됐는데 ${auto ? '연장 입력이 안 됐습니다' : '갱신되지 않았습니다'}`,
+          sub: `${r.name} · 종료일 ${r.end_date}`, when: `${-d}일 경과` })
+      } else {
+        items.push({ tone: d <= 14 ? 'neg' : 'warn', icon: 'Clock', to, sortKey: d <= 14 ? 1 : 2,
+          title: `${r.vendor_name || '거래처'} 계약 ${auto ? '자동갱신 예정' : '갱신 필요'}`,
+          sub: `${r.name} · 종료일 ${r.end_date}`, when: d === 0 ? '오늘 만료' : `D-${d}` })
       }
     })
     items.sort((a, b) => a.sortKey - b.sortKey)

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput } from '../lib/ui'
+import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 
 const STATUS_TONE = {
@@ -25,6 +26,14 @@ const ddayTone = (due) => {
   if (diff <= 3) return "warn"
   return "outline"
 }
+
+// 표시용 상태: 잔여가 남고 기한이 지났으면 '기한 지남'으로 본다(서버 미수/미지급 요약의 연체 기준과 일치).
+// 저장된 status는 매칭 시 '일부 입금/지급'까지만 바뀌므로, 화면에서 연체를 덧씌워 요약 카드와 어긋나지 않게 한다.
+// '장기 미수'는 이미 연체보다 무거운 상태라 유지한다.
+const effStatus = (inv) =>
+  (inv.remainAmount > 0 && inv.dueAt && inv.dueAt < localDate() && inv.status !== "장기 미수")
+    ? "기한 지남"
+    : inv.status
 
 // ── 청구서 상세 Drawer ────────────────────────────────────────────
 const MOCK_DOCS = {
@@ -63,12 +72,32 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
   const [candidates, setCandidates] = useState([])
   const [showAll, setShowAll] = useState(false)
   const [docs, setDocs] = useState([])
+  // 새 거래로 입금/지급 처리할 때 채울 분류값(자동으로 채우되 수정 가능)
+  const [matchCategory, setMatchCategory] = useState("")
+  const [matchMemo, setMatchMemo] = useState("")
+  const [matchAcct, setMatchAcct] = useState("")
+  const [categories, setCategories] = useState([])
+  const [acctSubjects, setAcctSubjects] = useState([])
+  const [jeokyos, setJeokyos] = useState([])
   useEffect(() => {
     if (invoice?.id && invoice.remainAmount > 0) api.getMatchable(invoice.id).then(setCandidates)
     else setCandidates([])
     setShowAll(false)
   }, [invoice?.id, invoice?.remainAmount])
   useEffect(() => { setDocs(invoice?.docs || []) }, [invoice?.id])
+  useEffect(() => {
+    api.getCategories().then(setCategories)
+    api.getAccountSubjects().then(setAcctSubjects)
+    api.getRefItems('jeokyo').then(setJeokyos)
+  }, [])
+  // 청구서 열릴 때 분류 기본값 채움: 비목=수금/대금 지급, 적요=청구서 정산
+  useEffect(() => {
+    if (!invoice) return
+    const isInc = invoice.kind === "issued"
+    setMatchCategory(isInc ? "수금" : "대금 지급")
+    setMatchMemo(`청구서 ${invoice.invoiceNo || ""} 정산`.trim())
+    setMatchAcct("")
+  }, [invoice?.id])
 
   if (!invoice) return null
 
@@ -79,19 +108,6 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
   const isIssued  = invoice.kind === "issued"
   const labelPaid = isIssued ? "입금 완료" : "지급 완료"
 
-  const uploadDoc = async (file, docType) => {
-    if (!file) return
-    const up = await api.uploadFile(file)
-    if (!up?.url) { toast.push("업로드에 실패했어요"); return }
-    const res = await api.addInvoiceDoc(invoice.id, { url: up.url, name: up.originalName || file.name, doc_type: docType || '기타', size: up.size || 0 })
-    if (res.ok) { setDocs(prev => [...prev, { id: res.id, url: up.url, name: up.originalName || file.name, type: docType || '기타', size: up.size || 0 }]); toast.push("서류를 첨부했어요") }
-    else toast.push("첨부에 실패했어요")
-  }
-  const removeDoc = async (id) => {
-    const res = await api.deleteInvoiceDoc(id)
-    if (res.ok) { setDocs(prev => prev.filter(d => d.id !== id)); toast.push("삭제됐어요") }
-    else toast.push("삭제에 실패했어요")
-  }
 
   const handleMatch = async () => {
     const amount = parseInt(matchAmt.replace(/[^0-9]/g, ""))
@@ -103,7 +119,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
       body: `${fmtNum(amount)}원을 매칭 처리합니다.`,
       confirmLabel: "매칭 처리",
     })
-    if (ok) { onMatch(invoice.id, amount, matchDate, null); onClose() }
+    if (ok) { onMatch(invoice.id, amount, matchDate, null, { category: matchCategory, memo: matchMemo, account_code: matchAcct }); onClose() }
   }
 
   const linkMatch = async (txn) => {
@@ -159,11 +175,11 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
             </button>
           ))}
           <div className="ml-auto row gap-6" style={{ alignItems: "center", paddingBottom: 8 }}>
-            <StatusBadge status={invoice.status}/>
+            <StatusBadge status={effStatus(invoice)}/>
           </div>
         </div>
 
-        <div className="drawer-body col gap-16">
+        <div className="drawer-body col gap-form">
           {/* 탭: 입금/지급 매칭 */}
           {innerTab === "match" && (
             <>
@@ -192,7 +208,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
                       </div>
                     ))}
                     <div className="row" style={{ paddingTop: 8, borderTop: "1px solid var(--line)", fontSize: 13 }}>
-                      <span className="text-muted">잔여</span>
+                      <span className="text-muted">{isIssued ? "미수금" : "미지급금"}</span>
                       <span className="num fw-700 ml-auto"
                         style={{ color: invoice.remainAmount > 0 ? "var(--warn-ink)" : "var(--pos)" }}>
                         {fmtNum(invoice.remainAmount)}
@@ -258,8 +274,8 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
                     ) : (
                       <>
                         <label className="label">{isIssued ? "입금" : "지급"} 금액</label>
-                        <input className="input num" placeholder={fmtNum(invoice.remainAmount)} value={matchAmt}
-                          onChange={e => setMatchAmt(e.target.value)}/>
+                        <MoneyInput placeholder={fmtNum(invoice.remainAmount)} value={matchAmt}
+                          onChange={raw => setMatchAmt(raw)}/>
                         <div className="row gap-6" style={{ flexWrap: "wrap" }}>
                           {[invoice.remainAmount, Math.round(invoice.remainAmount / 2)].filter(Boolean).map(a => (
                             <button key={a} className="chip" onClick={() => setMatchAmt(String(a))}>{fmtNum(a)}원</button>
@@ -272,7 +288,22 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
                         <input type="date" className="input" value={matchDate}
                           max={localDate()}
                           onChange={e => setMatchDate(e.target.value)}/>
-                        <button className="btn primary" style={{ marginTop: 4 }} onClick={handleMatch}>
+
+                        {/* 분류 — 청구서 정보로 미리 채워두고, 필요하면 사용자가 바꾼다 */}
+                        <label className="label" style={{ marginTop: 4 }}>비목</label>
+                        <Combobox value={matchCategory} onChange={setMatchCategory}
+                          options={categories.filter(c => c.id?.startsWith(isIssued ? "INC-" : "EXP-")).map(c => ({ value: c.name, label: c.name, sub: c.group_name || "" }))}
+                          placeholder="비목 선택" onAddNew={setMatchCategory} addNewLabel="이 비목으로 입력"/>
+                        <label className="label" style={{ marginTop: 4 }}>적요</label>
+                        <Combobox value={matchMemo} onChange={setMatchMemo}
+                          options={jeokyos.map(j => ({ value: j.name, label: j.name, sub: j.memo || "" }))}
+                          placeholder="적요 입력" onAddNew={setMatchMemo} addNewLabel="이 적요로 입력"/>
+                        <label className="label" style={{ marginTop: 4 }}>계정과목 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+                        <Combobox value={matchAcct} onChange={setMatchAcct}
+                          options={acctSubjects.map(a => ({ value: a.code, label: a.name, sub: `${a.code} · ${a.category}`, keywords: a.note || "" }))}
+                          placeholder="계정과목 선택 (선택)" allowAdd={false}/>
+
+                        <button className="btn primary" style={{ marginTop: 8 }} onClick={handleMatch}>
                           <Icon.Check size={14}/> {labelPaid} 처리 (새 거래 생성)
                         </button>
                       </>
@@ -304,73 +335,47 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
             </div>
           )}
 
-          {/* 탭: 첨부 서류 */}
+          {/* 탭: 첨부 서류 — 여러 파일 한 번에 첨부 가능(공용 컴포넌트) */}
           {innerTab === "docs" && (
-            <div>
-              <label className="drop" style={{ display: "block", marginBottom: 16, padding: "20px 16px", cursor: "pointer" }}
-                onDragOver={e => e.preventDefault()}
-                onDrop={e => { e.preventDefault(); uploadDoc(e.dataTransfer.files[0]) }}>
-                <Icon.Upload size={20}/>
-                <div className="text-sm fw-600" style={{ marginTop: 6 }}>파일을 끌어다 놓거나 클릭</div>
-                <div className="text-xs text-muted2" style={{ marginTop: 2 }}>
-                  세금계산서 · 납품확인서 · 검사성적서 · PDF, JPG, PNG
-                </div>
-                <input type="file" style={{ display: "none" }} accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.hwp" onChange={e => uploadDoc(e.target.files[0])}/>
-              </label>
-
-              {docs.length === 0 ? (
-                <div className="text-sm text-muted" style={{ textAlign: "center", padding: "20px 0" }}>
-                  첨부된 서류가 없습니다
-                </div>
-              ) : (
-                <div className="col gap-8">
-                  {docs.map((d, i) => (
-                    <div key={d.id || i} className="row gap-12"
-                      style={{ padding: "12px 14px", border: "1px solid var(--line)", borderRadius: 10, background: "#fff" }}>
-                      <div style={{
-                        width: 36, height: 36, borderRadius: 8, background: "var(--surface-3)",
-                        display: "grid", placeItems: "center", flexShrink: 0, color: "var(--muted)",
-                      }}>
-                        {DOC_TYPE_ICON[d.type] || <Icon.File size={16}/>}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div className="fw-600 text-sm"
-                          style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {d.name}
-                        </div>
-                        <div className="text-xs text-muted2">{d.type}{d.size ? ` · ${Math.round(d.size / 1024)}KB` : ''}</div>
-                      </div>
-                      <a className="btn ghost sm" href={d.url} target="_blank" rel="noreferrer" download={d.name} style={{ textDecoration: "none" }}>
-                        <Icon.Download size={13}/>
-                      </a>
-                      {d.id && <button className="btn ghost sm" style={{ color: "var(--neg)" }} onClick={() => removeDoc(d.id)}>
-                        <Icon.Close size={13}/>
-                      </button>}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="row gap-6" style={{ marginTop: 16, flexWrap: "wrap" }}>
-                {["세금계산서", "납품확인서", "검사성적서", "거래명세서", "계약서"].map(t => (
-                  <label key={t} className="chip" style={{ cursor: "pointer" }}>
-                    <Icon.Plus size={11}/> {t}
-                    <input type="file" style={{ display: "none" }} accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.hwp" onChange={e => uploadDoc(e.target.files[0], t)}/>
-                  </label>
-                ))}
-              </div>
-            </div>
+            <FileAttach
+              docs={docs}
+              onAdd={async (d) => {
+                const res = await api.addInvoiceDoc(invoice.id, { url: d.url, name: d.name, doc_type: '기타', size: d.size || 0 })
+                if (res.ok) setDocs(prev => [...prev, { id: res.id, url: d.url, name: d.name, type: '기타', size: d.size || 0 }])
+                else toast.push("첨부에 실패했어요")
+              }}
+              onRemove={async (d) => {
+                if (!d.id) { setDocs(prev => prev.filter(x => x !== d)); return }
+                const res = await api.deleteInvoiceDoc(d.id)
+                if (res.ok) setDocs(prev => prev.filter(x => x.id !== d.id))
+                else toast.push("삭제에 실패했어요")
+              }}
+              label="세금계산서·납품확인서 등을 끌어다 놓거나 클릭 (여러 개 가능)"/>
           )}
         </div>
 
         <div className="drawer-foot">
           <button className="btn" onClick={onClose}>닫기</button>
-          {invoice.remainAmount > 0 && innerTab === "match" && (
-            <button className="btn" style={{ marginLeft: "auto" }}
-              onClick={() => toast.push("독촉 메일을 발송했어요")}>
-              <Icon.Bell size={14}/> 독촉 발송
-            </button>
-          )}
+          {/* 매출 미수금: 발주처에 독촉. 매입 미지급금: 우리가 낼 돈이라 독촉 대상이 아님 → 지급결의서 발행. */}
+          {isIssued
+            ? (invoice.remainAmount > 0 && innerTab === "match" && (
+                <button className="btn" style={{ marginLeft: "auto" }}
+                  onClick={() => toast.push("독촉 메일을 발송했어요")}>
+                  <Icon.Bell size={14}/> 독촉 발송
+                </button>
+              ))
+            : (
+                <button className="btn primary" style={{ marginLeft: "auto" }}
+                  onClick={async () => {
+                    const res = await api.createResolutionFromInvoice(invoice.id);
+                    if (!res.ok) return toast.push(res.error || "결의서 생성에 실패했어요");
+                    toast.push(res.resolution.reused ? "이미 만든 결의서를 엽니다" : `지급결의서 ${res.resolution.doc_no}를 만들었어요`);
+                    onClose();
+                    window.location.hash = "doc";
+                  }}>
+                  <Icon.Sign size={14}/> 지급결의서 발행
+                </button>
+              )}
         </div>
     </Drawer>
   )
@@ -385,6 +390,8 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   const [vendors, setVendors] = useState([])
   const [accounts, setAccounts] = useState([])
   const [contracts, setContracts] = useState([])
+  // 첨부 파일 — 발행 전이라 청구서 id가 없으므로 먼저 업로드해 두고, 저장 후 청구서에 연결(지연 첨부)
+  const [docs, setDocs] = useState([])
 
   useEffect(() => {
     api.getVendors().then(setVendors)
@@ -397,6 +404,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
 
   useEffect(() => {
     if (!open) return
+    setDocs([])   // 폼에서의 첨부는 이번에 새로 올리는 것만. 기존 첨부는 청구서 상세에서 관리.
     if (editInvoice) {
       setForm({
         kind: editInvoice.kind,
@@ -457,6 +465,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
       due_at: form.dueAt || null,
       status: editInvoice ? editInvoice.status : (form.kind === "issued" ? "입금 예정" : "지급 예정"),
       account_id: form.accountId || null, memo: form.memo || "",
+      _docs: docs,   // 저장 후 청구서에 연결할 첨부(부모 handleSave가 처리)
     })
     onClose()
   }
@@ -474,7 +483,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
           </div>
           <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
         </div>
-        <div className="drawer-body col gap-16">
+        <div className="drawer-body col gap-form">
           {!editInvoice && (
             <div className="row gap-8">
               {["issued", "received"].map(k => (
@@ -507,14 +516,12 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
           </div>
           <div>
             <label className="label">공급가액</label>
-            <input className="input num" placeholder="0" value={form.supplyAmount}
-              onChange={e => f("supplyAmount", e.target.value)}/>
+            <MoneyInput value={form.supplyAmount} onChange={raw => f("supplyAmount", raw)}/>
           </div>
           <div className="row gap-12">
             <div style={{ flex: 1 }}>
               <label className="label">부가세</label>
-              <input className="input num" placeholder="자동 계산" value={form.vatAmount}
-                onChange={e => f("vatAmount", e.target.value)}/>
+              <MoneyInput placeholder="자동 계산" value={form.vatAmount} onChange={raw => f("vatAmount", raw)}/>
             </div>
             <div style={{ flex: 1 }}>
               <label className="label">합계</label>
@@ -546,12 +553,11 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
 
           <div>
             <label className="label">첨부 서류 (선택)</label>
-            <div className="drop" style={{ padding: "16px 12px" }}
-              onClick={() => toast.push("파일 선택 창을 열었어요")}>
-              <Icon.Upload size={18}/>
-              <div className="text-sm fw-600" style={{ marginTop: 4 }}>세금계산서·납품확인서 첨부</div>
-              <div className="text-xs text-muted2" style={{ marginTop: 2 }}>PDF, JPG, PNG</div>
-            </div>
+            <FileAttach
+              docs={docs}
+              onAdd={(d) => setDocs(prev => [...prev, d])}
+              onRemove={(d) => setDocs(prev => prev.filter(x => x !== d))}
+              label="세금계산서·납품확인서 등 첨부"/>
           </div>
         </div>
         <div className="drawer-foot">
@@ -576,7 +582,7 @@ const SummaryCard = ({ label, amount, count, accent = "blue", warn }) => (
 )
 
 // ── 청구서 테이블 ────────────────────────────────────────────────
-const InvoiceTable = ({ rows, onSelect }) => (
+const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여" }) => (
   <div className="card" style={{ overflow: "hidden" }}>
     <table className="table">
       <thead>
@@ -585,14 +591,15 @@ const InvoiceTable = ({ rows, onSelect }) => (
           <th>거래처</th>
           <th>계약</th>
           <th className="num-right">청구금액</th>
-          <th className="num-right">잔여</th>
+          <th className="num-right">{remainLabel}</th>
           <th>기한</th>
           <th>상태</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
         {rows.length === 0 && (
-          <tr><td colSpan={7} className="text-center text-muted" style={{ padding: 32 }}>해당 청구서가 없습니다</td></tr>
+          <tr><td colSpan={8} className="text-center text-muted" style={{ padding: 32 }}>해당 청구서가 없습니다</td></tr>
         )}
         {rows.map(inv => (
           <tr key={inv.id} style={{ cursor: "pointer" }} onClick={() => onSelect(inv)}>
@@ -613,7 +620,15 @@ const InvoiceTable = ({ rows, onSelect }) => (
                 </span>
               )}
             </td>
-            <td><StatusBadge status={inv.status}/></td>
+            <td><StatusBadge status={effStatus(inv)}/></td>
+            {/* 아직 안 받은/안 낸 청구서는 목록에서 바로 처리 버튼. 누르면 상세의 매칭 탭이 열린다. */}
+            <td className="num-right">
+              {inv.remainAmount > 0 && (
+                <button className="btn primary sm" onClick={(e) => { e.stopPropagation(); onSelect(inv); }}>
+                  {inv.kind === "issued" ? "입금 처리" : "지급 처리"}
+                </button>
+              )}
+            </td>
           </tr>
         ))}
       </tbody>
@@ -622,25 +637,28 @@ const InvoiceTable = ({ rows, onSelect }) => (
 )
 
 // ── 발행 예정(대기) 청구 일정 테이블 ─────────────────────────────
-const PendingScheduleTable = ({ rows, onIssue, onPaid }) => (
+// 계약에 깔아둔 청구/지급 일정 → 아직 청구서가 안 만들어진 건. 매출은 '발행', 매입은 '등록' 관점.
+const PendingScheduleTable = ({ rows, onIssue, onPaid, isIssued = true }) => (
   <div className="card" style={{ overflow: "hidden" }}>
     <table className="table">
       <thead>
         <tr>
           <th>예정일</th><th>거래처</th><th>계약</th><th>유형</th>
-          <th className="num-right">청구금액(VAT 포함)</th><th style={{ width: 210 }}></th>
+          <th className="num-right">{isIssued ? "청구금액" : "지급금액"}(VAT 포함)</th><th style={{ width: 210 }}></th>
         </tr>
       </thead>
       <tbody>
         {rows.length === 0 && (
           <tr><td colSpan={6} className="text-center text-muted" style={{ padding: 32 }}>
-            발행 예정인 청구 일정이 없어요. 계약 상세의 '청구 일정'에서 청구할 금액·시점을 등록하세요.
+            {isIssued
+              ? "발행 예정인 청구 일정이 없어요. 계약 상세의 '청구 일정'에서 청구할 금액·시점을 등록하세요."
+              : "예정된 지급 일정이 없어요. 매입 계약 상세의 '청구 일정'에서 지급할 금액·시점을 등록하세요."}
           </td></tr>
         )}
         {rows.map(p => {
-          const total = p.amount + Math.round(p.amount * 0.1)
+          const total = p.amount + (p.vat != null ? p.vat : Math.round(p.amount * 0.1))
           return (
-            <tr key={p.milestone_id}>
+            <tr key={p.source === 'recurring' ? `r-${p.recurring_id}-${p.due_date}` : `m-${p.milestone_id}`}>
               <td className="num text-sm">
                 {p.due_date || "—"}
                 {p.due_date && <span className={`badge ${ddayTone(p.due_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(p.due_date)}</span>}
@@ -651,8 +669,10 @@ const PendingScheduleTable = ({ rows, onIssue, onPaid }) => (
               <td className="num-cell num-right fw-700">{fmtNum(total)}</td>
               <td>
                 <div className="row gap-6">
-                  <button className="btn primary sm" onClick={() => onIssue(p)}><Icon.Receipt size={12}/> 발행 처리</button>
-                  <button className="btn sm" onClick={() => onPaid(p)}>기입금 처리</button>
+                  <button className="btn primary sm" onClick={() => onIssue(p)}>
+                    <Icon.Receipt size={12}/> {isIssued ? "발행 처리" : "청구서 등록"}
+                  </button>
+                  <button className="btn sm" onClick={() => onPaid(p)}>{isIssued ? "기입금 처리" : "기지급 처리"}</button>
                 </div>
               </td>
             </tr>
@@ -664,12 +684,14 @@ const PendingScheduleTable = ({ rows, onIssue, onPaid }) => (
 )
 
 // ── 메인 BillingScreen ───────────────────────────────────────────
-export const BillingScreen = ({ initialTab = "issued" }) => {
+// role='issue'(발행 청구서: 발행 중심) | 'collect'(입금·환불/지급·환입: 청구서 기준 회수 중심)
+export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefund, openReturn }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const kind = initialTab              // 'issued'(대금청구) | 'received'(수취)
   const isIssued = kind === "issued"
-  const [view, setView] = useState("pending")   // issued: pending|list
+  const collect = role === "collect"   // 회수 모드: 미정산 청구서 + 입금/지급 처리 + 환불/환입
+  const [view, setView] = useState(collect ? "list" : "pending")   // issued: pending|list
   const [invoices, setInvoices] = useState([])
   const [pending, setPending]   = useState([])
   const [recSummary, setRecSummary] = useState(null)
@@ -677,58 +699,96 @@ export const BillingScreen = ({ initialTab = "issued" }) => {
   const [selected, setSelected] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
   const [editInvoice, setEditInvoice] = useState(null)
-  const [statusFilter, setStatusFilter] = useState("전체")
+  const [statusFilter, setStatusFilter] = useState(collect ? "미정산" : "전체")
 
+  // 청구할 것은 두 갈래로 생긴다: 계약의 청구 일정(마일스톤)과 정기청구 회차(유지보수 등).
+  // 경리가 청구서 메뉴 한 곳만 열면 이번 달 청구할 게 다 보이도록 '발행 예정'에서 합친다.
+  // (정기청구는 매출 전용 — 매입의 정기지출은 별도 흐름)
   const load = async () => {
-    const [rows, rec, pay, pend] = await Promise.all([
+    const [rows, rec, pay, sched, recurring] = await Promise.all([
       api.getInvoices(),
       api.getReceivablesSummary(),
       api.getPayablesSummary(),
-      isIssued ? api.getPendingSchedules("sales") : Promise.resolve([]),
+      api.getPendingSchedules(isIssued ? "sales" : "purchase"),
+      isIssued ? api.getPendingRecurring() : Promise.resolve([]),
     ])
-    setInvoices(rows); setRecSummary(rec); setPaySum(pay); setPending(pend)
+    const merged = [
+      ...sched.map(s => ({ ...s, source: 'milestone' })),
+      ...recurring,
+    ].sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')))
+    setInvoices(rows); setRecSummary(rec); setPaySum(pay); setPending(merged)
   }
   useEffect(() => { load() }, [])
 
   const kindRows = invoices.filter(inv => inv.kind === kind)
+  // 미정산(아직 안 받은/안 낸) 청구서 상태 그룹 — 미수금/미지급금의 정의
+  const PENDING_STATUS = isIssued
+    ? ["입금 예정", "일부 입금", "기한 지남", "장기 미수"]
+    : ["지급 대기", "지급 예정", "일부 지급", "기한 지남"]
   const STATUS_OPTIONS = isIssued
-    ? ["전체", "입금 예정", "일부 입금", "기한 지남", "장기 미수", "입금 완료"]
-    : ["전체", "지급 대기", "지급 예정", "일부 지급", "기한 지남", "지급 완료"]
-  const filtered = kindRows.filter(inv => statusFilter === "전체" || inv.status === statusFilter)
-  const pendingTotal = pending.reduce((s, p) => s + (p.amount + Math.round(p.amount * 0.1)), 0)
+    ? [...(collect ? ["미정산"] : []), "전체", "입금 예정", "일부 입금", "기한 지남", "장기 미수", "입금 완료"]
+    : [...(collect ? ["미정산"] : []), "전체", "지급 대기", "지급 예정", "일부 지급", "기한 지남", "지급 완료"]
+  // 필터도 표시 상태(effStatus) 기준 — 뱃지에 '기한 지남'으로 뜨는 건이 '기한 지남' 필터에도 잡히게.
+  const filtered = statusFilter === "미정산"
+    ? kindRows.filter(inv => PENDING_STATUS.includes(effStatus(inv)))
+    : kindRows.filter(inv => statusFilter === "전체" || effStatus(inv) === statusFilter)
+  const pendingTotal = pending.reduce((s, p) => s + p.amount + (p.vat != null ? p.vat : Math.round(p.amount * 0.1)), 0)
 
   const issueSchedule = async (p, paid) => {
     const supply = p.amount || 0
-    const vat = Math.round(supply * 0.1)
+    const vat = p.vat != null ? p.vat : Math.round(supply * 0.1)
+    const isRecurring = p.source === 'recurring'
     const ok = await confirm({
       tone: "brand", icon: paid ? <Icon.Check size={22}/> : <Icon.Receipt size={22}/>,
-      title: paid ? "기입금 처리" : "청구서 발행",
-      body: paid
-        ? `${p.vendor_name} · ${p.type} ${fmtNum(supply + vat)}원을 이미 입금된 건으로 처리해요. (청구서가 입금 완료로 생성됩니다)`
-        : `${p.vendor_name} · ${p.type} ${fmtNum(supply + vat)}원(VAT 포함) 청구서를 발행해요. 미수금으로 등록됩니다.`,
-      confirmLabel: paid ? "기입금 처리" : "청구서 발행",
+      title: isIssued ? (paid ? "기입금 처리" : "청구서 발행") : (paid ? "기지급 처리" : "매입 청구서 등록"),
+      body: isIssued
+        ? (paid
+            ? `${p.vendor_name} · ${p.type} ${fmtNum(supply + vat)}원을 이미 입금된 건으로 처리해요. (청구서가 입금 완료로 생성됩니다)`
+            : `${p.vendor_name} · ${p.type}${isRecurring ? ` (${p.due_date} 회차)` : ''} ${fmtNum(supply + vat)}원(VAT 포함) 청구서를 발행해요. 미수금으로 등록됩니다.`)
+        : (paid
+            ? `${p.vendor_name} · ${p.type} ${fmtNum(supply + vat)}원을 이미 지급한 건으로 처리해요. (지급 완료로 생성됩니다)`
+            : `${p.vendor_name} · ${p.type} ${fmtNum(supply + vat)}원(VAT 포함) 매입 청구서를 등록해요. 미지급금으로 잡힙니다.`),
+      confirmLabel: isIssued ? (paid ? "기입금 처리" : "청구서 발행") : (paid ? "기지급 처리" : "청구서 등록"),
     })
     if (!ok) return
-    // 원자적: 청구서 + (기입금 시)입금거래·매칭 + 청구 일정 상태·연결을 서버 한 트랜잭션에서 처리
-    const res = await api.issueSchedule(p.milestone_id, { paid })
-    if (!res.ok) { toast.push(res.error || "발행에 실패했어요"); return }
-    toast.push(paid ? "기입금 처리했어요" : "청구서를 발행했어요")
+    // 두 갈래를 각자의 API로 보낸다. 둘 다 원자적(청구서 + 기입금 시 거래·매칭까지 한 트랜잭션).
+    const res = isRecurring
+      ? await api.issueRecurring(p.recurring_id, { due: p.due_date, paid })
+      : await api.issueSchedule(p.milestone_id, { paid })
+    if (!res.ok) { toast.push(res.error || "처리에 실패했어요"); return }
+    toast.push(isIssued
+      ? (paid ? "기입금 처리했어요" : "청구서를 발행했어요")
+      : (paid ? "기지급 처리했어요" : "매입 청구서를 등록했어요"))
     load()
   }
 
-  const handleMatch = async (invoiceId, amount, date, txnId) => {
-    await api.matchInvoice(invoiceId, { txnId: txnId || null, amount, date })
+  const handleMatch = async (invoiceId, amount, date, txnId, extra) => {
+    await api.matchInvoice(invoiceId, { txnId: txnId || null, amount, date, ...extra })
     toast.push("매칭 처리가 완료됐어요")
     load()
   }
 
   const handleSave = async (data) => {
-    if (data.id) {
-      const res = await api.updateInvoice(data.id, data)
-      toast.push(res.ok === false ? "수정 실패" : "청구서가 수정됐어요")
+    const { _docs, ...payload } = data
+    let invoiceId = payload.id
+    if (payload.id) {
+      const res = await api.updateInvoice(payload.id, payload)
+      if (!res.ok) { toast.push("수정 실패"); return }
+      toast.push("청구서가 수정됐어요")
     } else {
-      await api.addInvoice(data)
+      const res = await api.addInvoice(payload)
+      if (!res.ok) { toast.push(res.error || "청구서 등록에 실패했어요"); return }
+      invoiceId = res.id
       toast.push("청구서가 등록됐어요")
+    }
+    // 폼에서 올린 첨부를 청구서에 연결 (실패 건수는 안내)
+    if (invoiceId && Array.isArray(_docs) && _docs.length) {
+      let failed = 0
+      for (const d of _docs) {
+        const r = await api.addInvoiceDoc(invoiceId, { url: d.url, name: d.name, doc_type: '기타', size: d.size || 0 })
+        if (!r.ok) failed++
+      }
+      if (failed) toast.push(`첨부 ${failed}건 연결 실패`, { tone: "warn" })
     }
     load()
   }
@@ -737,52 +797,60 @@ export const BillingScreen = ({ initialTab = "issued" }) => {
     <div className="fade-up">
       <div className="row" style={{ marginBottom: 6 }}>
         <div>
-          <div className="page-title">{isIssued ? "대금 청구" : "수취 청구서"}</div>
-          <div className="page-sub">
-            {isIssued
-              ? "계약 청구 일정을 청구서로 발행하고, 입금을 확인하세요."
-              : "협력사·기관에서 받은 청구서(미지급금)를 관리하세요."}
+          <div className="page-title">
+            {collect ? (isIssued ? "입금·환불" : "지급·환입") : "대금 청구서"}
           </div>
+          {collect && (
+            <div className="page-sub">
+              {isIssued
+                ? "발행한 청구서 중 아직 안 받은 미수금이에요. 청구서를 열어 입금 처리하고, 받은 돈을 돌려줄 땐 '환불 등록'을 쓰세요."
+                : "받은 청구서 중 아직 안 낸 미지급금이에요. 청구서를 열어 지급 처리하고, 준 돈을 돌려받을 땐 '환입 등록'을 쓰세요."}
+            </div>
+          )}
         </div>
         <div className="ml-auto row gap-8">
-          <button className="btn primary" onClick={() => { setEditInvoice(null); setFormOpen(true) }}>
-            <Icon.Plus size={14}/> 청구서 {isIssued ? "발행" : "등록"}
-          </button>
+          {collect
+            ? <button className="btn" onClick={isIssued ? openRefund : openReturn}>
+                <Icon.Plus size={14}/> {isIssued ? "환불 등록" : "환입 등록"}
+              </button>
+            : <button className="btn primary" onClick={() => { setEditInvoice(null); setFormOpen(true) }}>
+                <Icon.Plus size={14}/> 청구서 {isIssued ? "발행" : "등록"}
+              </button>}
         </div>
       </div>
       <Spacer h={16}/>
 
-      {/* 요약 카드 */}
-      <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
+      {/* 요약 카드 — 회수 모드는 미수/미지급 2칸(발행 예정 없음), 발행 모드는 3칸 */}
+      <div className="grid" style={{ gridTemplateColumns: `repeat(${collect ? 2 : 3}, 1fr)`, gap: 16, marginBottom: 24 }}>
         {isIssued ? (
           <>
-            <SummaryCard label="발행 예정(대기)" amount={pendingTotal}                count={pending.length}                  accent="brand"/>
-            <SummaryCard label="미수금 합계"      amount={recSummary?.total ?? 0}       count={recSummary?.count ?? 0}          accent="blue"/>
-            <SummaryCard label="연체 미수금"      amount={recSummary?.overdueAmount ?? 0} count={recSummary?.overdueCount ?? 0} accent="neg" warn/>
+            {!collect && <SummaryCard label="발행 예정(대기)" amount={pendingTotal} count={pending.length} accent="brand"/>}
+            <SummaryCard label={collect ? "받을 미수금" : "미수금 합계"} amount={recSummary?.total ?? 0} count={recSummary?.count ?? 0} accent="blue"/>
+            <SummaryCard label="연체 미수금" amount={recSummary?.overdueAmount ?? 0} count={recSummary?.overdueCount ?? 0} accent="neg" warn/>
           </>
         ) : (
           <>
-            <SummaryCard label="미지급금 합계"   amount={paySum?.total ?? 0}         count={paySum?.count ?? 0}         accent="warn"/>
-            <SummaryCard label="연체 미지급금"   amount={paySum?.overdueAmount ?? 0} count={paySum?.overdueCount ?? 0}  accent="neg" warn/>
-            <div/>
+            {!collect && <SummaryCard label="지급 예정(대기)" amount={pendingTotal} count={pending.length} accent="brand"/>}
+            <SummaryCard label={collect ? "줄 미지급금" : "미지급금 합계"} amount={paySum?.total ?? 0} count={paySum?.count ?? 0} accent="warn"/>
+            <SummaryCard label="연체 미지급금" amount={paySum?.overdueAmount ?? 0} count={paySum?.overdueCount ?? 0} accent="neg" warn/>
           </>
         )}
       </div>
 
-      {/* 탭: 발행 예정 | 발행됨 (issued) / 상태 필터 */}
+      {/* 탭: 발행 모드는 발행 예정|발행됨. 회수 모드는 상태 필터만(발행 예정 없음). */}
       <div className="row gap-8" style={{ marginBottom: 16, flexWrap: "wrap" }}>
-        {isIssued && (
+        {!collect && (
           <>
             <button className={`chip ${view === "pending" ? "active" : ""}`} onClick={() => setView("pending")}>
-              발행 예정 {pending.length > 0 && <span className="badge brand" style={{ marginLeft: 6 }}>{pending.length}</span>}
+              {isIssued ? "발행 예정" : "지급 예정"}{pending.length > 0 && <span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{pending.length}</span>}
             </button>
             <button className={`chip ${view === "list" ? "active" : ""}`} onClick={() => setView("list")}>
-              발행됨 <span className="badge outline" style={{ marginLeft: 6 }}>{kindRows.length}</span>
+              {isIssued ? "발행됨" : "등록됨"}<span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{kindRows.length}</span>
             </button>
           </>
         )}
-        {(!isIssued || view === "list") && (
-          <div className="ml-auto row gap-6" style={{ flexWrap: "wrap" }}>
+        {(collect || view === "list") && (
+          <div className={`row gap-6 ${collect ? "" : "ml-auto"}`} style={{ flexWrap: "wrap" }}>
             {STATUS_OPTIONS.map(s => (
               <button key={s} className={`chip ${statusFilter === s ? "active" : ""}`} onClick={() => setStatusFilter(s)} style={{ fontSize: 12 }}>{s}</button>
             ))}
@@ -790,9 +858,10 @@ export const BillingScreen = ({ initialTab = "issued" }) => {
         )}
       </div>
 
-      {isIssued && view === "pending"
-        ? <PendingScheduleTable rows={pending} onIssue={(p) => issueSchedule(p, false)} onPaid={(p) => issueSchedule(p, true)}/>
-        : <InvoiceTable rows={filtered} onSelect={setSelected}/>}
+      {!collect && view === "pending"
+        ? <PendingScheduleTable rows={pending} isIssued={isIssued}
+            onIssue={(p) => issueSchedule(p, false)} onPaid={(p) => issueSchedule(p, true)}/>
+        : <InvoiceTable rows={filtered} onSelect={setSelected} remainLabel={isIssued ? "미수금" : "미지급금"}/>}
 
       <InvoiceDetailDrawer
         invoice={selected}

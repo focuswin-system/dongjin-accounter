@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { pool } = require('../db')
+const { pool, futureDateError, kstToday } = require('../db')
 
 const router = Router()
 
@@ -35,7 +35,7 @@ router.get('/summary/receivables', async (_, res, next) => {
     const [rows] = await pool.execute("SELECT * FROM invoices WHERE kind='issued'")
     const active = rows.filter(r => RECEIVABLE_STATUSES.has(r.status))
     const withMatches = await Promise.all(active.map(attachMatches))
-    const today = new Date().toISOString().slice(0, 10)
+    const today = kstToday()
     const overdueRows = withMatches.filter(r => r.remainAmount > 0 && r.due_at && r.due_at < today)
     const summary = {
       total:        withMatches.reduce((s, r) => s + r.remainAmount, 0),
@@ -53,7 +53,7 @@ router.get('/summary/payables', async (_, res, next) => {
     const [rows] = await pool.execute("SELECT * FROM invoices WHERE kind='received'")
     const withMatches = await Promise.all(rows.map(attachMatches))
     const pending = withMatches.filter(r => PAYABLE_STATUSES.has(r.status))
-    const today = new Date().toISOString().slice(0, 10)
+    const today = kstToday()
     const overdueRows = pending.filter(r => r.remainAmount > 0 && r.due_at && r.due_at < today)
     const summary = {
       total:           pending.reduce((s, r) => s + r.remainAmount, 0),
@@ -146,64 +146,62 @@ router.delete('/:id', async (req, res, next) => {
 })
 
 router.post('/:id/matches', async (req, res, next) => {
+  const { txn_id, amount, date, category, memo, account_code } = req.body
+  const invoiceId = req.params.id
+  const dateErr = futureDateError(date)
+  if (dateErr) return res.status(400).json({ error: dateErr })
+  const conn = await pool.getConnection()
   try {
-    const { txn_id, amount, date } = req.body
-    const invoiceId = req.params.id
-    const [invRows] = await pool.execute('SELECT * FROM invoices WHERE id = ?', [invoiceId])
-    const inv = invRows[0]
-    if (!inv) return res.status(404).json({ error: 'Not found' })
+    await conn.beginTransaction()
+    const [[inv]] = await conn.execute('SELECT * FROM invoices WHERE id = ? FOR UPDATE', [invoiceId])
+    if (!inv) { await conn.rollback(); return res.status(404).json({ error: 'Not found' }) }
     const isIssued = inv.kind === 'issued'
 
     // 과입금 방지: 잔여를 초과하지 않도록 매칭 금액 제한
-    const [[{ paid: prevPaid }]] = await pool.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [invoiceId])
+    const [[{ paid: prevPaid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [invoiceId])
     const remainBefore = Number(inv.total_amount) - Number(prevPaid)
-    if (remainBefore <= 0) return res.status(400).json({ error: '이미 정산이 완료된 청구서예요' })
+    if (remainBefore <= 0) { await conn.rollback(); return res.status(400).json({ error: '이미 정산이 완료된 청구서예요' }) }
     const matchAmount = Math.min(Number(amount) || 0, remainBefore)
-    if (matchAmount <= 0) return res.status(400).json({ error: '매칭 금액이 올바르지 않아요' })
+    if (matchAmount <= 0) { await conn.rollback(); return res.status(400).json({ error: '매칭 금액이 올바르지 않아요' }) }
 
     // 매칭 대상 거래: 기존 거래가 있으면 그대로, 없으면 실제 거래를 새로 만들어 거래내역에 반영
     let realTxnId = null
     if (txn_id) {
-      const [ex] = await pool.execute('SELECT id FROM transactions WHERE id = ?', [txn_id])
-      if (ex[0]) realTxnId = ex[0].id
+      // 다른 청구서에 이미 매칭된 거래는 재사용 금지(이중 매칭 방지)
+      const [[dup]] = await conn.execute('SELECT invoice_id FROM invoice_matches WHERE txn_id = ? LIMIT 1', [txn_id])
+      if (dup) { await conn.rollback(); return res.status(409).json({ error: '이미 다른 청구서에 매칭된 거래예요' }) }
+      const [[ex]] = await conn.execute('SELECT id FROM transactions WHERE id = ?', [txn_id])
+      if (ex) realTxnId = ex.id
     }
     if (realTxnId) {
-      // 기존 거래에 연결 시 거래 쪽에도 청구서 연결 표시(양방향)
-      await pool.execute('UPDATE transactions SET invoice_id = ? WHERE id = ?', [invoiceId, realTxnId])
-    }
-    if (!realTxnId) {
+      await conn.execute('UPDATE transactions SET invoice_id = ? WHERE id = ?', [invoiceId, realTxnId])
+    } else {
       realTxnId = randomUUID()
-      await pool.execute(`
-        INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, doc_no, invoice_id, memo)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      const cat   = (category && category.trim()) || (isIssued ? '수금' : '대금 지급')
+      const memoV = (memo && memo.trim()) || `청구서 ${inv.invoice_no || ''} 정산`.trim()
+      await conn.execute(`
+        INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, doc_no, invoice_id, memo, account_code)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `, [realTxnId, isIssued ? 'income' : 'expense', inv.vendor_id || null, inv.contract_id || null,
-          inv.account_id || null, isIssued ? '수금' : '대금 지급', matchAmount,
+          inv.account_id || null, cat, matchAmount,
           date || new Date().toISOString().slice(0, 10), '계좌이체',
-          isIssued ? '입금완료' : '지급완료', '공통', inv.contract_id ? '' : '공통', invoiceId, `청구서 ${inv.invoice_no || ''} 정산`.trim()])
+          isIssued ? '입금완료' : '지급완료', '공통', inv.contract_id ? '' : '공통', invoiceId, memoV, account_code || null])
     }
 
     const id = randomUUID()
-    await pool.execute(
-      'INSERT INTO invoice_matches (id, invoice_id, txn_id, amount) VALUES (?,?,?,?)',
-      [id, invoiceId, realTxnId, matchAmount]
-    )
+    await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount) VALUES (?,?,?,?)', [id, invoiceId, realTxnId, matchAmount])
 
     // 매칭 누계로 청구서 상태 자동 갱신
-    const [[{ paid }]] = await pool.execute(
-      'SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [invoiceId]
-    )
+    const [[{ paid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [invoiceId])
     const total = Number(inv.total_amount)
-    let status = null
-    if (Number(paid) >= total)     status = isIssued ? '입금 완료' : '지급 완료'
-    else if (Number(paid) > 0)     status = isIssued ? '일부 입금' : '일부 지급'
-    if (status) {
-      await pool.execute('UPDATE invoices SET status = ? WHERE id = ?', [status, invoiceId])
-      // 연결된 청구 일정도 동기화(계약 청구일정 탭·수금 집계가 어긋나지 않도록)
-      await pool.execute('UPDATE milestones SET status = ? WHERE invoice_id = ?', [status, invoiceId])
-    }
+    const status = Number(paid) >= total ? (isIssued ? '입금 완료' : '지급 완료') : (isIssued ? '일부 입금' : '일부 지급')
+    await conn.execute('UPDATE invoices SET status = ? WHERE id = ?', [status, invoiceId])
+    await conn.execute('UPDATE milestones SET status = ? WHERE invoice_id = ?', [status, invoiceId])
 
+    await conn.commit()
     res.json({ id, txn_id: realTxnId })
-  } catch (e) { next(e) }
+  } catch (e) { await conn.rollback(); next(e) }
+  finally { conn.release() }
 })
 
 // ── 매칭 후보: 거래내역에 이미 있는(미매칭) 같은 종류 거래 ──

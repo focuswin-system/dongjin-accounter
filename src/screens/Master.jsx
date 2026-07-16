@@ -1,5 +1,5 @@
-import { useState, useEffect, Fragment } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox } from '../lib/ui'
+import { useState, useEffect, useRef, Fragment } from 'react'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput } from '../lib/ui'
 import { api } from '../lib/api'
 
 const fmtDateLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -16,6 +16,9 @@ const MASTER_DATA = {
     columns: ["유형", "은행/카드사", "계좌·카드번호", "별칭", "용도"],
     rows: [],
   },
+  // ⚠️ 목업(mock) — 저장/백엔드 없음. 기준정보 nav에서 숨김 처리됨(MASTER_SECTIONS.base).
+  // 추후 적격증빙 분류(세금계산서·카드전표·현금영수증·간이영수증·거래명세서 + 부가세 공제가능 여부)로
+  // 구현 예정. 구현 시: ref_items type='evidence_type' CRUD + 거래 증빙첨부 드롭다운 + 부가세 매입 집계 연동.
   evidenceType: {
     label: "증빙유형",
     columns: ["유형명", "설명", "필수 입력", "기본 첨부"],
@@ -52,7 +55,8 @@ const MASTER_DATA = {
 const MASTER_TABS = [
   // 거래 기준
   { id: "vendor",          label: "거래처" },
-  { id: "category",        label: "계정과목" },
+  { id: "accountSubject",  label: "계정과목", custom: true },
+  { id: "category",        label: "비목" },
   { id: "jeokyo",          label: "적요", custom: true },
   { id: "evidenceType",    label: "증빙유형" },
   { id: "item",            label: "품목", custom: true },
@@ -67,7 +71,8 @@ const MASTER_TABS = [
   // 조직
   { id: "department",      label: "부서", custom: true },
   { id: "position",        label: "직위", custom: true },
-  { id: "user",            label: "사용자/결재선" },
+  { id: "user",            label: "사용자" },
+  { id: "approval",        label: "결재선", custom: true },
   // 기준 설정
   { id: "payrollItems",    label: "급여 항목", custom: true },
   { id: "company",         label: "회사 정보", custom: true },
@@ -80,12 +85,14 @@ const TAB_BY_ID = Object.fromEntries(MASTER_TABS.map(t => [t.id, t]));
 const MASTER_SECTIONS = {
   base: {
     title: "기준정보",
-    sub: "거래처·계정과목·계좌·정기 거래 등 회계 처리의 기준이 되는 정보를 관리합니다.",
+    sub: "거래처·계정과목·계좌·품목·자산 등 회계 처리의 기준이 되는 정보를 관리합니다.",
     groups: [
-      { label: "거래 기준", tabs: ["vendor", "category", "jeokyo", "evidenceType"] },
+      // 증빙유형(evidenceType)은 목업 상태라 기준정보에서 숨김 — 추후 적격증빙 분류로 구현 시 tabs에 "evidenceType" 다시 추가
+      { label: "거래 기준", tabs: ["vendor", "accountSubject", "category", "jeokyo"] },
       { label: "품목·자산", tabs: ["item", "fixed_asset", "intangible_asset"] },
       { label: "자금·결제", tabs: ["account", "accountBalance", "insurance"] },
-      { label: "정기 거래", tabs: ["recurringInvoice", "recurringExpense"] },
+      // 정기청구/정기지출은 기준정보(정적 참조)가 아니라 계약에서 파생되는 흐름이라 여기서 제거.
+      // 패널(RecurringInvoicePanel/RecurringExpensePanel)·데이터(recurring_*)는 코드에 보존, 추후 계약/판매·매입에서 재배치.
     ],
   },
   settings: {
@@ -93,7 +100,7 @@ const MASTER_SECTIONS = {
     sub: "회사 정보와 시스템 사용자·문서 양식을 관리합니다.",
     groups: [
       { label: "회사", tabs: ["company"] },
-      { label: "시스템", tabs: ["user", "template"] },
+      { label: "시스템", tabs: ["user", "approval", "template"] },
     ],
   },
   hr: {
@@ -203,14 +210,18 @@ export const REF_CONFIGS = {
   },
   insurance: {
     type: 'insurance', label: '보험',
-    sub: '가입 보험(보험사·증권번호·보험료·기간)을 관리합니다.',
+    sub: '가입 보험(보험사·증권번호·보험료·납입·기간)과 증권을 관리합니다.',
     fields: [
       { key: 'name', label: '보험명', kind: 'text', req: true },
-      { key: 'party', label: '보험사', kind: 'text' },
-      { key: 'code', label: '증권번호', kind: 'text', w: 140 },
-      { key: 'amount', label: '보험료', kind: 'num', w: 120 },
-      { key: 'start_date', label: '시작일', kind: 'date', w: 130 },
-      { key: 'end_date', label: '종료일', kind: 'date', w: 130 },
+      { key: 'party', label: '보험사', kind: 'text', w: 110 },
+      { key: 'code', label: '증권번호', kind: 'text', w: 130 },
+      { key: 'amount', label: '보험료', kind: 'num', w: 110 },
+      { key: 'period', label: '납입주기', kind: 'select', options: ['일시납', '월납', '분기납', '연납'], w: 84 },
+      { key: 'pay_day', label: '납입일', kind: 'num', w: 70, hint: '매월/납기 일자 (1~31)' },
+      { key: 'start_date', label: '시작일', kind: 'date', w: 130, hideCol: true },
+      { key: 'end_date', label: '만기일', kind: 'date', w: 120 },
+      { key: 'account_id', label: '자동이체 계좌', kind: 'account', hideCol: true },
+      { key: 'file', label: '증권 첨부', kind: 'file', hideCol: true },
     ],
   },
   fixed_asset: {
@@ -260,7 +271,42 @@ export const REF_CONFIGS = {
   },
 }
 
-const emptyRefForm = (fields) => Object.fromEntries(fields.map(fd => [fd.key, '']))
+const emptyRefForm = (fields) => {
+  const o = {}
+  for (const fd of fields) {
+    if (fd.kind === 'file') { o.file_url = ''; o.file_name = '' }
+    else o[fd.key] = ''
+  }
+  return o
+}
+const rowToForm = (fields, r) => {
+  const o = {}
+  for (const fd of fields) {
+    if (fd.kind === 'file') { o.file_url = r.file_url ?? ''; o.file_name = r.file_name ?? '' }
+    else o[fd.key] = r[fd.key] ?? ''
+  }
+  return o
+}
+
+// 증권 등 단일 파일 첨부 위젯
+const RefFileField = ({ url, name, uploading, onUpload, onRemove }) => {
+  const inputRef = useRef(null)
+  if (url) return (
+    <div className="row gap-10" style={{ padding: '10px 14px', border: '1px solid var(--line)', borderRadius: 10, background: 'var(--surface-2)' }}>
+      <Icon.Receipt size={16} style={{ color: 'var(--brand)', flexShrink: 0 }}/>
+      <span className="text-sm fw-600" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name || url}</span>
+      <button type="button" className="icon-btn" onClick={onRemove}><Icon.Close size={14}/></button>
+    </div>
+  )
+  return (
+    <div className="drop" style={{ padding: 14, cursor: 'pointer', opacity: uploading ? 0.6 : 1 }} onClick={() => inputRef.current?.click()}>
+      <input ref={inputRef} type="file" style={{ display: 'none' }} accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.hwp" onChange={e => onUpload(e.target.files[0])}/>
+      <Icon.Upload size={16}/>
+      <div className="text-sm fw-600" style={{ marginTop: 4 }}>{uploading ? '업로드 중...' : '파일 첨부 (클릭)'}</div>
+      <div className="text-xs text-muted2" style={{ marginTop: 2 }}>PDF, 이미지 등 · 최대 20MB</div>
+    </div>
+  )
+}
 
 // page=true 면 도메인 독립 화면(페이지 타이틀), 아니면 기준정보 서브패널
 export const RefMasterPanel = ({ cfg, page = false }) => {
@@ -271,22 +317,40 @@ export const RefMasterPanel = ({ cfg, page = false }) => {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState(emptyRefForm(cfg.fields))
+  const [accounts, setAccounts] = useState([])
+  const [uploading, setUploading] = useState(false)
 
   const load = () => api.getRefItems(cfg.type).then(setRows)
   useEffect(() => { load() }, [cfg.type])
+  useEffect(() => {
+    if (cfg.fields.some(fd => fd.kind === 'account')) api.getAccounts().then(list => setAccounts(list.filter(a => a.kind !== 'card')))
+  }, [cfg.type])
 
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
   const filtered = rows.filter(r => !q || cfg.fields.some(fd => String(r[fd.key] ?? '').includes(q)))
+  const visibleFields = cfg.fields.filter(fd => !fd.hideCol)
 
   const openNew = () => { setEditing(null); setForm(emptyRefForm(cfg.fields)); setDrawerOpen(true) }
-  const openEdit = (r) => {
-    setEditing(r)
-    setForm(Object.fromEntries(cfg.fields.map(fd => [fd.key, r[fd.key] ?? ''])))
-    setDrawerOpen(true)
+  const openEdit = (r) => { setEditing(r); setForm(rowToForm(cfg.fields, r)); setDrawerOpen(true) }
+
+  const handleUpload = async (file) => {
+    if (!file) return
+    setUploading(true)
+    const res = await api.uploadFile(file)
+    setUploading(false)
+    if (res.url) setForm(p => ({ ...p, file_url: res.url, file_name: res.originalName || file.name }))
+    else toast.push('파일 업로드에 실패했어요')
   }
   const handleSave = async () => {
     const reqField = cfg.fields.find(fd => fd.req)
     if (reqField && !String(form[reqField.key] ?? '').trim()) return toast.push(`${reqField.label}을(를) 입력하세요`)
+    // 코드(품번·자산번호 등) 중복 방지 — 같은 종류 안에서 같은 코드 재사용 금지
+    const codeField = cfg.fields.find(fd => fd.key === 'code')
+    if (codeField) {
+      const code = String(form.code ?? '').trim()
+      if (code && rows.some(r => r.id !== editing?.id && String(r.code ?? '').trim() === code))
+        return toast.push(`이미 쓰고 있는 ${codeField.label}예요: ${code}`)
+    }
     const res = editing ? await api.updateRefItem(editing.id, form) : await api.addRefItem({ type: cfg.type, ...form })
     if (!res.ok) return toast.push(res.error || '저장 실패')
     toast.push(editing ? '수정됐어요' : '등록됐어요')
@@ -298,7 +362,13 @@ export const RefMasterPanel = ({ cfg, page = false }) => {
     await api.deleteRefItem(r.id); toast.push('삭제됐어요'); load()
   }
 
-  const cell = (fd, val) => (val == null || val === '') ? '—' : (fd.kind === 'num' ? fmtNum(val) : val)
+  const cell = (fd, r) => {
+    const val = r[fd.key]
+    if (val == null || val === '') return '—'
+    if (fd.kind === 'num') return fmtNum(val)
+    if (fd.kind === 'account') return accounts.find(a => a.id === val)?.name || '—'
+    return val
+  }
 
   return (
     <div className={page ? 'fade-up' : undefined} style={page ? undefined : { padding: 20 }}>
@@ -318,21 +388,22 @@ export const RefMasterPanel = ({ cfg, page = false }) => {
         <table className="table">
           <thead>
             <tr>
-              {cfg.fields.map(fd => <th key={fd.key} className={fd.kind === 'num' ? 'num-right' : undefined} style={fd.w ? { width: fd.w } : undefined}>{fd.label}</th>)}
+              {visibleFields.map(fd => <th key={fd.key} className={fd.kind === 'num' ? 'num-right' : undefined} style={fd.w ? { width: fd.w } : undefined}>{fd.label}</th>)}
               <th style={{ width: 90 }}></th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={cfg.fields.length + 1} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)' }}>등록된 {cfg.label}이(가) 없어요. 위에서 추가하세요.</td></tr>
+              <tr><td colSpan={visibleFields.length + 1} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)' }}>등록된 {cfg.label}이(가) 없어요. 위에서 추가하세요.</td></tr>
             )}
             {filtered.map(r => (
               <tr key={r.id}>
-                {cfg.fields.map((fd, i) => (
+                {visibleFields.map((fd, i) => (
                   <td key={fd.key}
                     className={fd.kind === 'num' ? 'num-cell num-right' : (i === 0 ? 'fw-600' : 'text-sm')}
                     style={{ color: (r[fd.key] == null || r[fd.key] === '') ? 'var(--muted-2)' : undefined }}>
-                    {cell(fd, r[fd.key])}
+                    {i === 0 && r.file_url && <Icon.Receipt size={12} style={{ marginRight: 4, color: 'var(--brand)', verticalAlign: -1 }}/>}
+                    {cell(fd, r)}
                   </td>
                 ))}
                 <td>
@@ -352,16 +423,34 @@ export const RefMasterPanel = ({ cfg, page = false }) => {
           <div className="fw-700" style={{ fontSize: 16 }}>{editing ? `${cfg.label} 수정` : `${cfg.label} 등록`}</div>
           <button className="icon-btn ml-auto" onClick={() => setDrawerOpen(false)}><Icon.Close size={16}/></button>
         </div>
-        <div className="drawer-body col gap-14">
+        <div className="drawer-body col gap-form">
           {cfg.fields.map(fd => (
             <div key={fd.key}>
-              <label className="label" style={{ marginBottom: 8 }}>{fd.label} {fd.req && <span style={{ color: 'var(--neg-ink)' }}>*</span>}</label>
-              <input
-                className={`input ${fd.kind === 'num' ? 'num' : ''}`}
-                type={fd.kind === 'date' ? 'date' : 'text'}
-                value={fd.kind === 'num' ? (form[fd.key] === '' || form[fd.key] == null ? '' : fmtNum(form[fd.key])) : (form[fd.key] ?? '')}
-                onChange={e => f(fd.key, fd.kind === 'num' ? (parseInt(e.target.value.replace(/[^0-9-]/g, ''), 10) || 0) : e.target.value)}
-                placeholder={fd.label}/>
+              <label className="label" style={{ marginBottom: 8 }}>
+                {fd.label} {fd.req && <span style={{ color: 'var(--neg-ink)' }}>*</span>}
+                {fd.hint && <span className="text-muted2" style={{ fontWeight: 400, marginLeft: 6, fontSize: 12 }}>· {fd.hint}</span>}
+              </label>
+              {fd.kind === 'select' ? (
+                <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+                  {fd.options.map(o => (
+                    <button key={o} type="button" className={`chip ${form[fd.key] === o ? 'active' : ''}`} onClick={() => f(fd.key, o)}>{o}</button>
+                  ))}
+                </div>
+              ) : fd.kind === 'account' ? (
+                <Combobox value={form[fd.key]} onChange={v => f(fd.key, v)} allowAdd={false}
+                  options={[{ value: '', label: '선택 안 함' }, ...accounts.map(a => ({ value: a.id, label: a.name }))]}
+                  placeholder="자동이체 계좌 선택"/>
+              ) : fd.kind === 'file' ? (
+                <RefFileField url={form.file_url} name={form.file_name} uploading={uploading}
+                  onUpload={handleUpload} onRemove={() => setForm(p => ({ ...p, file_url: '', file_name: '' }))}/>
+              ) : (
+                <input
+                  className={`input ${fd.kind === 'num' ? 'num' : ''}`}
+                  type={fd.kind === 'date' ? 'date' : 'text'}
+                  value={fd.kind === 'num' ? (form[fd.key] === '' || form[fd.key] == null ? '' : fmtNum(form[fd.key])) : (form[fd.key] ?? '')}
+                  onChange={e => f(fd.key, fd.kind === 'num' ? (parseInt(e.target.value.replace(/[^0-9-]/g, ''), 10) || 0) : e.target.value)}
+                  placeholder={fd.label}/>
+              )}
             </div>
           ))}
         </div>
@@ -487,7 +576,7 @@ const VendorPanel = () => {
           <div className="fw-700" style={{ fontSize: 16 }}>{editing ? '거래처 수정' : '거래처 등록'}</div>
           <button className="icon-btn ml-auto" onClick={() => setDrawerOpen(false)}><Icon.Close size={16}/></button>
         </div>
-        <div className="drawer-body col" style={{ gap: 24 }}>
+        <div className="drawer-body col gap-form">
           <div>
             <label className="label" style={{ marginBottom: 8 }}>상호명 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
             <input className="input" value={form.name} onChange={e => f('name', e.target.value)} placeholder="(주)한화오션"/>
@@ -561,51 +650,131 @@ const VendorPanel = () => {
   )
 }
 
-// ── F0: 계정과목 / 비목 패널 ────────────────────────────────────────
+// ── 표준 계정과목 패널 (읽기 전용 K-GAAP 마스터) ──────────────────
+const ACCT_TYPES = ["자산", "부채", "자본", "수익", "비용"]
+const ACCT_TYPE_BADGE = { 자산: "brand", 부채: "warn", 자본: "outline", 수익: "pos", 비용: "neg" }
+
+const AccountSubjectPanel = () => {
+  const [rows, setRows] = useState([])
+  const [q, setQ] = useState("")
+  const [type, setType] = useState("")
+
+  useEffect(() => { api.getAccountSubjects().then(setRows) }, [])
+
+  const filtered = rows.filter(r =>
+    (!type || r.acct_type === type) &&
+    (!q || [r.name, r.code, r.category, r.note].some(s => String(s ?? "").includes(q)))
+  )
+  // 유형 → 분류 순서로 그룹핑 (원본 정렬 유지)
+  const groups = []
+  for (const r of filtered) {
+    const key = `${r.acct_type} · ${r.category}`
+    let g = groups.find(x => x.key === key)
+    if (!g) { g = { key, acct_type: r.acct_type, category: r.category, items: [] }; groups.push(g) }
+    g.items.push(r)
+  }
+
+  return (
+    <div style={{ padding: 20 }}>
+      <div className="row" style={{ marginBottom: 16, gap: 10, flexWrap: "wrap" }}>
+        <div>
+          <div className="section-title">계정과목</div>
+          <div className="section-sub">한국채택 회계기준(K-GAAP) 표준 계정과목이에요. 거래 입력 시 선택용으로 쓰이며, 이 목록은 수정할 수 없어요. · 총 {rows.length}개</div>
+        </div>
+        <div className="search" style={{ margin: 0, marginLeft: "auto", width: 200, padding: "6px 10px" }}>
+          <Icon.Search size={14}/>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="계정과목·코드·내용"/>
+        </div>
+      </div>
+
+      <div className="row gap-6" style={{ marginBottom: 14, flexWrap: "wrap" }}>
+        {["", ...ACCT_TYPES].map(t => (
+          <button key={t} className={`chip ${type === t ? "active" : ""}`} onClick={() => setType(t)}>
+            {t === "" ? "전체" : t}
+          </button>
+        ))}
+      </div>
+
+      <div className="card" style={{ overflow: "hidden" }}>
+        <table className="table">
+          <thead>
+            <tr>
+              <th style={{ width: 130 }}>분류</th>
+              <th>계정과목</th>
+              <th style={{ width: 80 }}>코드</th>
+              <th>내용</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groups.length === 0 && (
+              <tr><td colSpan={4} style={{ textAlign: "center", padding: 32, color: "var(--muted-2)" }}>검색 결과가 없어요</td></tr>
+            )}
+            {groups.map(g => (
+              <Fragment key={g.key}>
+                <tr style={{ background: "var(--surface-2)" }}>
+                  <td colSpan={4} style={{ padding: "8px 16px" }}>
+                    <span className={`badge ${ACCT_TYPE_BADGE[g.acct_type] || "outline"}`} style={{ marginRight: 8 }}>{g.acct_type}</span>
+                    <span className="fw-700 text-sm">{g.category}</span>
+                  </td>
+                </tr>
+                {g.items.map(r => (
+                  <tr key={r.id}>
+                    <td className="text-sm text-muted">{r.category}</td>
+                    <td className="fw-600">
+                      {r.name}
+                      {!r.postable && <span className="badge outline" style={{ marginLeft: 8, fontSize: 10 }}>집계</span>}
+                    </td>
+                    <td className="num text-sm text-muted">{r.code || "—"}</td>
+                    <td className="text-xs text-muted" style={{ lineHeight: 1.5 }}>{r.note || "—"}</td>
+                  </tr>
+                ))}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ── F0: 비목 패널 (회사 자유 CRUD) ───────────────────────────────
 const VAT_OPTS = ["10%", "면세", "—"]
 const PAY_OPTS = ["계좌이체", "법인카드", "현금", "—"]
+
+const kindOf = (c) => (c.id?.startsWith('INC-') ? 'inc' : 'exp')
 
 const CategoryPanel = () => {
   const toast = useToast()
   const [cats, setCats] = useState([])
   const [q, setQ] = useState("")
+  const [filterKind, setFilterKind] = useState("") // '' | 'exp' | 'inc'
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editing, setEditing] = useState(null) // null = new
-  const [form, setForm] = useState({ id: "", name: "", group_name: "", vat: "10%", pay_method: "계좌이체" })
+  const [form, setForm] = useState({ kind: "exp", name: "", vat: "10%", pay_method: "계좌이체" })
 
   const load = () => api.getCategories().then(setCats)
   useEffect(() => { load() }, [])
 
-  const groups = cats.reduce((acc, c) => {
-    const g = c.group_name || '미분류'
-    if (!acc[g]) acc[g] = []
-    acc[g].push(c)
-    return acc
-  }, {})
-
-  const filtered = q
-    ? cats.filter(c => c.name?.includes(q) || c.group_name?.includes(q) || c.id?.includes(q))
-    : null
+  const filtered = cats.filter(c =>
+    (!filterKind || kindOf(c) === filterKind) &&
+    (!q || c.name?.includes(q))
+  )
 
   const openNew = () => {
     setEditing(null)
-    setForm({ id: "", name: "", group_name: "", vat: "10%", pay_method: "계좌이체" })
+    setForm({ kind: filterKind === "inc" ? "inc" : "exp", name: "", vat: "10%", pay_method: "계좌이체" })
     setDrawerOpen(true)
   }
   const openEdit = (c) => {
     setEditing(c)
-    setForm({ id: c.id, name: c.name, group_name: c.group_name, vat: c.vat, pay_method: c.pay_method })
+    setForm({ kind: kindOf(c), name: c.name, vat: c.vat, pay_method: c.pay_method })
     setDrawerOpen(true)
   }
   const handleSave = async () => {
-    if (!form.name) return toast.push("비목명을 입력하세요")
-    let res
-    if (editing) {
-      res = await api.updateCategory(editing.id, { name: form.name, group_name: form.group_name, vat: form.vat, pay_method: form.pay_method })
-    } else {
-      if (!form.id) return toast.push("코드를 입력하세요 (예: EXP-999)")
-      res = await api.addCategory(form)
-    }
+    if (!form.name.trim()) return toast.push("비목명을 입력하세요")
+    const res = editing
+      ? await api.updateCategory(editing.id, { name: form.name, group_name: editing.group_name || '', vat: form.vat, pay_method: form.pay_method })
+      : await api.addCategory({ kind: form.kind, name: form.name, vat: form.vat, pay_method: form.pay_method })
     if (!res.ok) return toast.push(res.error || "저장 실패")
     toast.push(editing ? "수정됐어요" : "등록됐어요")
     setDrawerOpen(false)
@@ -613,34 +782,23 @@ const CategoryPanel = () => {
   }
   const handleDelete = async (c) => {
     await api.deleteCategory(c.id)
-    toast.push(`${c.name} 비활성화됐어요`)
+    toast.push(`${c.name} 삭제됐어요`)
     load()
   }
 
-  const Row = ({ c }) => (
-    <tr>
-      <td className="text-xs text-muted">{c.id}</td>
-      <td className="fw-600">{c.name}</td>
-      <td className="text-sm text-muted">{c.group_name}</td>
-      <td className="text-sm">{c.vat}</td>
-      <td className="text-sm">{c.pay_method}</td>
-      <td>
-        <div className="row gap-6">
-          <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => openEdit(c)}>수정</button>
-          <button className="btn" style={{ fontSize: 11, padding: "2px 8px", color: "var(--neg)" }} onClick={() => handleDelete(c)}>삭제</button>
-        </div>
-      </td>
-    </tr>
-  )
-
   return (
     <div style={{ padding: 20 }}>
-      <div className="row" style={{ marginBottom: 16, gap: 10 }}>
+      <div className="row" style={{ marginBottom: 16, gap: 10, flexWrap: "wrap" }}>
         <div>
-          <div className="section-title">계정과목 / 비목</div>
-          <div className="section-sub">총 {cats.length}개 · DB 기준</div>
+          <div className="section-title">비목</div>
+          <div className="section-sub">회사가 자유롭게 쓰는 지출·수입 항목이에요. 거래 입력 시 필수로 선택합니다. · 총 {cats.length}개</div>
         </div>
-        <div className="search ml-auto" style={{ margin: 0, width: 200, padding: "6px 10px" }}>
+        <div className="row gap-6" style={{ marginLeft: "auto" }}>
+          {[["", "전체"], ["exp", "지출"], ["inc", "수입"]].map(([k, label]) => (
+            <button key={k} className={`chip ${filterKind === k ? "active" : ""}`} onClick={() => setFilterKind(k)}>{label}</button>
+          ))}
+        </div>
+        <div className="search" style={{ margin: 0, width: 200, padding: "6px 10px" }}>
           <Icon.Search size={14}/>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="비목 검색"/>
         </div>
@@ -651,26 +809,31 @@ const CategoryPanel = () => {
         <table className="table">
           <thead>
             <tr>
-              <th style={{ width: 90 }}>코드</th>
+              <th style={{ width: 70 }}>구분</th>
               <th>비목명</th>
-              <th>계정과목 그룹</th>
-              <th style={{ width: 60 }}>부가세</th>
-              <th style={{ width: 90 }}>결제수단</th>
+              <th style={{ width: 70 }}>부가세</th>
+              <th style={{ width: 100 }}>결제수단</th>
               <th style={{ width: 100 }}></th>
             </tr>
           </thead>
           <tbody>
-            {filtered
-              ? filtered.map(c => <Row key={c.id} c={c}/>)
-              : Object.entries(groups).map(([group, items]) => (
-                  <Fragment key={group}>
-                    <tr style={{ background: "var(--surface-2)" }}>
-                      <td colSpan={6} className="fw-700 text-sm" style={{ padding: "8px 16px" }}>{group}</td>
-                    </tr>
-                    {items.map(c => <Row key={c.id} c={c}/>)}
-                  </Fragment>
-                ))
-            }
+            {filtered.length === 0 && (
+              <tr><td colSpan={5} style={{ textAlign: "center", padding: 32, color: "var(--muted-2)" }}>비목이 없어요. 위에서 추가하세요.</td></tr>
+            )}
+            {filtered.map(c => (
+              <tr key={c.id}>
+                <td><span className={`badge ${kindOf(c) === "inc" ? "pos" : "warn"}`}>{kindOf(c) === "inc" ? "수입" : "지출"}</span></td>
+                <td className="fw-600">{c.name}</td>
+                <td className="text-sm">{c.vat}</td>
+                <td className="text-sm">{c.pay_method}</td>
+                <td>
+                  <div className="row gap-6">
+                    <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => openEdit(c)}>수정</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "2px 8px", color: "var(--neg)" }} onClick={() => handleDelete(c)}>삭제</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -680,24 +843,23 @@ const CategoryPanel = () => {
           <div className="fw-700" style={{ fontSize: 16 }}>{editing ? "비목 수정" : "비목 추가"}</div>
           <button className="icon-btn ml-auto" onClick={() => setDrawerOpen(false)}><Icon.Close size={16}/></button>
         </div>
-        <div className="drawer-body col gap-14">
-          {!editing && (
-            <div>
-              <label className="label">코드 <span style={{ color: "var(--neg-ink)" }}>*</span></label>
-              <input className="input" placeholder="EXP-999 또는 INC-999"
-                value={form.id} onChange={e => setForm(p => ({ ...p, id: e.target.value.toUpperCase() }))}/>
-              <div className="text-xs text-muted" style={{ marginTop: 4 }}>EXP = 지출, INC = 수익</div>
+        <div className="drawer-body col gap-form">
+          <div>
+            <label className="label">구분 <span style={{ color: "var(--neg-ink)" }}>*</span></label>
+            <div className="row gap-6">
+              {[["exp", "지출"], ["inc", "수입"]].map(([k, label]) => (
+                <button key={k} type="button" disabled={!!editing}
+                  className={`chip ${form.kind === k ? "active" : ""}`}
+                  style={editing ? { opacity: 0.6, cursor: "default" } : undefined}
+                  onClick={() => !editing && setForm(p => ({ ...p, kind: k }))}>{label}</button>
+              ))}
             </div>
-          )}
+            {editing && <div className="text-xs text-muted" style={{ marginTop: 4 }}>구분은 수정할 수 없어요.</div>}
+          </div>
           <div>
             <label className="label">비목명 <span style={{ color: "var(--neg-ink)" }}>*</span></label>
             <input className="input" placeholder="예: 도금 외주"
               value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}/>
-          </div>
-          <div>
-            <label className="label">계정과목 그룹</label>
-            <input className="input" placeholder="예: 외주가공비"
-              value={form.group_name} onChange={e => setForm(p => ({ ...p, group_name: e.target.value }))}/>
           </div>
           <div>
             <label className="label">부가세</label>
@@ -746,14 +908,14 @@ const AdjustDrawer = ({ account, onClose, onSave }) => {
         </div>
         <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
       </div>
-      <div className="drawer-body col gap-14">
+      <div className="drawer-body col gap-form">
         <div className="row gap-8">
           <button className={`chip ${type === "minus" ? "active" : ""}`} onClick={() => setType("minus")}>- 차감</button>
           <button className={`chip ${type === "plus" ? "active" : ""}`} onClick={() => setType("plus")}>+ 추가</button>
         </div>
         <div>
           <label className="label">조정 금액</label>
-          <input className="input num" placeholder="0" value={amount} onChange={e => setAmount(e.target.value)}/>
+          <MoneyInput value={amount} onChange={raw => setAmount(raw)}/>
         </div>
         <div>
           <label className="label">조정 사유</label>
@@ -993,7 +1155,7 @@ const AccountPanel = () => {
           <div className="fw-700" style={{ fontSize: 16 }}>{editing ? '계좌/카드 수정' : '계좌/카드 등록'}</div>
           <button className="icon-btn ml-auto" onClick={() => setDrawerOpen(false)}><Icon.Close size={16}/></button>
         </div>
-        <div className="drawer-body col" style={{ gap: 22 }}>
+        <div className="drawer-body col gap-form">
           <div>
             <label className="label" style={{ marginBottom: 8 }}>종류 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
             <div className="row gap-6">
@@ -1041,7 +1203,7 @@ const AccountPanel = () => {
             {!isCard && (
               <div style={{ flex: 1 }}>
                 <label className="label" style={{ marginBottom: 8 }}>초기 잔액</label>
-                <input className="input num" value={form.initial_balance} onChange={e => f('initial_balance', e.target.value)} placeholder="0"/>
+                <MoneyInput allowNegative value={form.initial_balance} onChange={raw => f('initial_balance', raw)}/>
                 <div className="text-xs text-muted2" style={{ marginTop: 6 }}>등록 시점 통장 잔액. 이후 거래로 자동 증감돼요.</div>
               </div>
             )}
@@ -1165,13 +1327,13 @@ const RecurringFormDrawer = ({ open, onClose, onSave }) => {
         <div className="fw-700" style={{ fontSize: 16 }}>정기 지출 등록</div>
         <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
       </div>
-      <div className="drawer-body col gap-14">
+      <div className="drawer-body col gap-form">
         <div><label className="label">거래처</label><input className="input" value={form.vendor} onChange={e => f("vendor", e.target.value)} placeholder="임대인 박OO"/></div>
         <div><label className="label">비목</label>
           <Combobox value={form.category} onChange={v => f("category", v)} allowAdd={false}
             options={["임차료","통신비","전력비","안전관리비","보험료","기타"].map(c => ({ value: c, label: c }))}/>
         </div>
-        <div><label className="label">금액</label><input className="input num" value={form.amount} onChange={e => f("amount", e.target.value)} placeholder="0"/></div>
+        <div><label className="label">금액</label><MoneyInput value={form.amount} onChange={raw => f("amount", raw)}/></div>
         <div className="row gap-12">
           <div style={{ flex: 1 }}>
             <label className="label">반복 주기</label>
@@ -1306,7 +1468,7 @@ const RecurringInvoiceFormDrawer = ({ open, onClose, onSave, vendors, contracts,
         <div className="fw-700" style={{ fontSize: 16 }}>정기 청구 등록</div>
         <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
       </div>
-      <div className="drawer-body col gap-14">
+      <div className="drawer-body col gap-form">
         <div><label className="label">계약 연결 <span className="text-muted">(선택)</span></label>
           <Combobox value={form.contractId} onChange={pickContract} allowAdd={false}
             options={contracts.map(c => ({ value: c.id, label: c.name, sub: c.vendor_name }))}
@@ -1322,7 +1484,7 @@ const RecurringInvoiceFormDrawer = ({ open, onClose, onSave, vendors, contracts,
         </div>
         <div className="row gap-12">
           <div style={{ flex: 1 }}><label className="label">공급가액</label>
-            <input className="input num" value={form.supply} onChange={e => f("supply", e.target.value)} placeholder="0"/>
+            <MoneyInput value={form.supply} onChange={raw => f("supply", raw)}/>
           </div>
           <div style={{ flex: 1 }}><label className="label">부가세</label>
             <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
@@ -1415,16 +1577,22 @@ const RecurringInvoicePanel = () => {
 
   return (
     <div style={{ padding: 20 }}>
-      <div className="row" style={{ marginBottom: 16 }}>
+      {/* 여기는 '무엇을 언제 얼마씩 청구할지' 설정하는 곳.
+          실제 청구(발행)는 판매·매출 → 대금 청구서의 '발행 예정'에서 한다(계약 청구일정과 한 화면에서 본다).
+          밀린 회차를 한 번에 밀어넣어야 할 때만 아래 일괄 생성을 쓴다. */}
+      <div className="row" style={{ marginBottom: 6 }}>
         <div className="section-title">정기 청구</div>
         <div className="ml-auto row gap-8">
           <button className="btn" onClick={handleGenerate} disabled={busy}>
-            <Icon.Calendar size={14}/> 이번 회차 청구서 생성
+            <Icon.Calendar size={14}/> 밀린 회차 일괄 생성
           </button>
           <button className="btn primary" onClick={() => setFormOpen(true)}>
             <Icon.Plus size={14}/> 등록
           </button>
         </div>
+      </div>
+      <div className="text-sm text-muted" style={{ marginBottom: 16 }}>
+        청구 조건을 설정하는 곳이에요. 실제 청구서 발행은 <b>판매·매출 → 대금 청구서</b>의 '발행 예정'에서 계약 청구일정과 함께 처리합니다.
       </div>
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
@@ -1469,6 +1637,123 @@ const RecurringInvoicePanel = () => {
 }
 
 // ── 사용자 / 계정 관리 패널 ────────────────────────────────────────
+// 결재선 프리셋 — 자주 쓰는 결재 단계(담당→결재→대표)를 저장해두고 결의서에서 골라 쓴다.
+// 단계의 직위는 인사 기준정보 직위(hr pos)에서 고르거나 직접 입력.
+const ApprovalPanel = () => {
+  const toast = useToast();
+  const { confirm } = useConfirm();
+  const [presets, setPresets] = useState([]);
+  const [positions, setPositions] = useState([]);
+  const [editing, setEditing] = useState(null);   // { id?, name, steps, is_default }
+
+  const load = () => api.getApprovalPresets().then(setPresets);
+  useEffect(() => {
+    load();
+    api.getHrCodes('pos').then(list => setPositions(list.map(p => p.name)));
+  }, []);
+
+  const startNew = () => setEditing({ name: '', steps: [{ label: '담당', position: '' }], is_default: false });
+  const startEdit = (p) => setEditing({ id: p.id, name: p.name, steps: p.steps.length ? p.steps : [{ label: '', position: '' }], is_default: p.is_default });
+
+  const setStep = (i, key, val) => setEditing(e => ({ ...e, steps: e.steps.map((s, j) => j === i ? { ...s, [key]: val } : s) }));
+  const addStep = () => setEditing(e => ({ ...e, steps: [...e.steps, { label: '', position: '' }] }));
+  const removeStep = (i) => setEditing(e => ({ ...e, steps: e.steps.filter((_, j) => j !== i) }));
+
+  const save = async () => {
+    if (!editing.name.trim()) return toast.push('프리셋 이름을 입력해주세요');
+    const steps = editing.steps.filter(s => s.label.trim());
+    if (steps.length === 0) return toast.push('결재 단계를 하나 이상 넣어주세요');
+    const body = { name: editing.name.trim(), steps, is_default: editing.is_default };
+    const res = editing.id ? await api.updateApprovalPreset(editing.id, body) : await api.addApprovalPreset(body);
+    if (!res.ok) return toast.push(res.error || '저장에 실패했어요');
+    toast.push('저장했어요'); setEditing(null); load();
+  };
+  const remove = async (p) => {
+    const ok = await confirm({ tone: 'neg', title: '프리셋 삭제', body: `"${p.name}" 결재선을 삭제할까요?`, confirmLabel: '삭제' });
+    if (!ok) return;
+    await api.deleteApprovalPreset(p.id); toast.push('삭제됐어요'); load();
+  };
+  const makeDefault = async (p) => { await api.setDefaultApprovalPreset(p.id); toast.push(`"${p.name}"을 기본으로 지정했어요`); load(); };
+
+  return (
+    <div style={{ padding: 20 }}>
+      <div className="row" style={{ marginBottom: 6 }}>
+        <div className="section-title">결재선</div>
+        <button className="btn primary ml-auto" onClick={startNew}><Icon.Plus size={14}/> 새 결재선</button>
+      </div>
+      <div className="text-sm text-muted" style={{ marginBottom: 16 }}>
+        지급결의서에 쓰는 결재 단계를 저장해두는 곳이에요. 결의서 만들 때 <b>기본</b> 결재선이 자동으로 붙고, 골라 바꿀 수 있어요. 직위는 인사 기준정보의 직위에서 고르거나 직접 입력하세요.
+      </div>
+
+      <div className="col gap-10">
+        {presets.length === 0 && <div className="text-sm text-muted2" style={{ padding: 20, textAlign: 'center' }}>등록된 결재선이 없어요.</div>}
+        {presets.map(p => (
+          <div key={p.id} className="card card-pad">
+            <div className="row gap-8" style={{ alignItems: 'center' }}>
+              <span className="fw-700">{p.name}</span>
+              {p.is_default && <span className="badge pos"><span className="dot"/>기본</span>}
+              <div className="ml-auto row gap-6">
+                {!p.is_default && <button className="btn ghost sm" onClick={() => makeDefault(p)}>기본으로</button>}
+                <button className="btn ghost sm" onClick={() => startEdit(p)}><Icon.Pencil size={13}/></button>
+                <button className="btn ghost sm" style={{ color: 'var(--neg)' }} onClick={() => remove(p)}><Icon.Trash size={13}/></button>
+              </div>
+            </div>
+            <div className="row gap-6" style={{ marginTop: 10, flexWrap: 'wrap' }}>
+              {p.steps.map((s, i) => (
+                <span key={i} className="badge outline">
+                  {s.label}{s.position ? ` · ${s.position}` : ''}
+                  {i < p.steps.length - 1 && <span style={{ margin: '0 2px', opacity: 0.5 }}>→</span>}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {editing && (
+        <Drawer open={true} onClose={() => setEditing(null)} width="min(460px,100vw)" label="결재선 편집">
+          <div className="drawer-head">
+            <div className="fw-700" style={{ fontSize: 16 }}>{editing.id ? '결재선 수정' : '새 결재선'}</div>
+            <button className="icon-btn ml-auto" onClick={() => setEditing(null)}><Icon.Close size={16}/></button>
+          </div>
+          <div className="drawer-body col gap-form">
+            <div>
+              <label className="label" style={{ marginBottom: 8 }}>이름 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+              <input className="input" value={editing.name} onChange={e => setEditing(v => ({ ...v, name: e.target.value }))} placeholder="예: 일반 지출 결재선"/>
+            </div>
+            <div>
+              <label className="label" style={{ marginBottom: 8 }}>결재 단계 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 왼쪽부터 순서대로</span></label>
+              <div className="col gap-8">
+                {editing.steps.map((s, i) => (
+                  <div key={i} className="row gap-6" style={{ alignItems: 'center' }}>
+                    <input className="input" style={{ width: 100 }} value={s.label} onChange={e => setStep(i, 'label', e.target.value)} placeholder="단계(담당)"/>
+                    <div style={{ flex: 1 }}>
+                      <Combobox value={s.position} onChange={v => setStep(i, 'position', v)}
+                        options={positions.map(p => ({ value: p, label: p }))}
+                        placeholder="직위 (선택/직접입력)"
+                        onAddNew={(q) => setStep(i, 'position', q)} addNewLabel="이 직위로 입력"/>
+                    </div>
+                    <button className="icon-btn" onClick={() => removeStep(i)}><Icon.Close size={13}/></button>
+                  </div>
+                ))}
+              </div>
+              <button className="btn sm" style={{ marginTop: 8 }} onClick={addStep}><Icon.Plus size={12}/> 단계 추가</button>
+            </div>
+            <label className="row gap-8" style={{ alignItems: 'center', cursor: 'pointer' }}>
+              <input type="checkbox" checked={editing.is_default} onChange={e => setEditing(v => ({ ...v, is_default: e.target.checked }))}/>
+              <span className="text-sm">이 결재선을 기본으로 (새 결의서에 자동 적용)</span>
+            </label>
+          </div>
+          <div className="drawer-foot">
+            <button className="btn" onClick={() => setEditing(null)}>취소</button>
+            <button className="btn primary ml-auto" onClick={save}><Icon.Check size={14}/> 저장</button>
+          </div>
+        </Drawer>
+      )}
+    </div>
+  );
+};
+
 const UserPanel = ({ currentUser }) => {
   const toast = useToast();
   const { confirm } = useConfirm();
@@ -1538,7 +1823,7 @@ const UserPanel = ({ currentUser }) => {
         </div>
         <button className="icon-btn ml-auto" onClick={() => setPwTarget(null)}><Icon.Close size={16}/></button>
       </div>
-      <div className="drawer-body col gap-14">
+      <div className="drawer-body col gap-form">
         <div>
           <label className="label">새 비밀번호</label>
           <input className="input" type="text" value={newPw} autoFocus
@@ -1582,7 +1867,7 @@ const UserPanel = ({ currentUser }) => {
     <div>
       <div className="row" style={{ padding: "16px 18px", borderBottom: "1px solid var(--line)", flexWrap: "wrap", gap: 10 }}>
         <div>
-          <div className="section-title">사용자 / 결재선</div>
+          <div className="section-title">사용자</div>
           <div className="section-sub">로그인 계정을 만들고 권한·비밀번호를 관리하세요. (관리자 전용)</div>
         </div>
       </div>
@@ -1660,7 +1945,7 @@ export const MasterScreen = ({ user, section = "base" }) => {
     )
   }, []);
 
-  const isCustomTab = ["account", "accountBalance", "recurringExpense", "recurringInvoice", "payroll", "payrollItems", "category", "vendor", "department", "position", "company", "user", "jeokyo", "item", "insurance", "fixed_asset", "intangible_asset"].includes(activeTab)
+  const isCustomTab = ["account", "accountBalance", "recurringExpense", "recurringInvoice", "payroll", "payrollItems", "accountSubject", "category", "vendor", "department", "position", "company", "user", "approval", "jeokyo", "item", "insurance", "fixed_asset", "intangible_asset"].includes(activeTab)
   const data = !isCustomTab ? MASTER_DATA[activeTab] : null
   const rawRows = activeTab === "user" ? userRows : (data?.rows || [])
   const rows = rawRows.filter(r => !q || r.some(c => String(c).toLowerCase().includes(q.toLowerCase())));
@@ -1672,12 +1957,14 @@ export const MasterScreen = ({ user, section = "base" }) => {
     if (activeTab === "vendor")           return <VendorPanel/>
     if (activeTab === "account")          return <AccountPanel/>
     if (activeTab === "company")          return <CompanyPanel/>
+    if (activeTab === "accountSubject")   return <AccountSubjectPanel/>
     if (activeTab === "category")         return <CategoryPanel/>
     if (activeTab === "accountBalance")   return <AccountBalancePanel/>
     if (activeTab === "recurringExpense") return <RecurringExpensePanel/>
     if (activeTab === "recurringInvoice") return <RecurringInvoicePanel/>
     if (activeTab === "payrollItems")     return <PayrollItemPanel/>
     if (activeTab === "user")             return <UserPanel currentUser={user}/>
+    if (activeTab === "approval")         return <ApprovalPanel/>
     if (activeTab === "department")       return <HrCodePanel type="dept" label="부서"/>
     if (activeTab === "position")         return <HrCodePanel type="pos"  label="직위"/>
     return null
@@ -2037,7 +2324,7 @@ const MasterDrawer = ({ open, mode, category, rowIndex, groupedSel, onClose, onS
         </div>
 
         <div className="drawer-body">
-          <div className="col gap-16">
+          <div className="col gap-form">
             {category.grouped && (
               <div>
                 <label className="label">계정과목 <span style={{ color: "var(--neg-ink)" }}>*</span></label>

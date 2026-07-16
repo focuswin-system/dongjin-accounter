@@ -5,8 +5,9 @@
 > **Project**: 동진테크 회계관리 ERP (focus-accounter)
 > **Author**: Chajuick
 > **Date**: 2026-05-20
-> **Status**: Draft
+> **Status**: In Progress (v0.3 — 구현 현황 반영)
 > **Plan Doc**: [focus-accounter-v2.plan.md](../01-plan/features/focus-accounter-v2.plan.md)
+> **Reference**: [한빛이엔지 DB 참고](../reference/hanvit-db.md)
 
 ---
 
@@ -55,49 +56,48 @@
 ### 3.1 F1 — 계좌 잔액 (`ACCOUNTS_BALANCE`)
 
 ```js
-// src/lib/data.js에 추가
+// src/lib/data.js — 실제 구현 데이터 (2026-05-22 기준)
 export const ACCOUNTS_BALANCE = [
   {
     id: "acc-001",
-    name: "기업은행 *123",
+    name: "기업은행 주거래 *4010",
     type: "보통예금",
-    initialBalance: 50000000,   // 수동 설정 초기잔액
+    initialBalance: 48720000,
     adjustments: [
-      {
-        id: "adj-001",
-        date: "2026-05-01",
-        amount: -500000,          // 음수 = 차감, 양수 = 추가
-        reason: "은행 수수료 수동 반영",
-        by: "한경리"
-      }
+      { id: "adj-001", date: "2026-05-01", amount: -500000, reason: "은행 수수료 수동 반영", by: "한경리" }
     ]
     // 현재잔액 = initialBalance + Σ(입금 거래) - Σ(출금 거래) + Σ(조정)
-    // → api.js에서 계산
+    // → api._calcBalance()에서 계산
   },
   {
     id: "acc-002",
-    name: "신한은행 *456",
+    name: "하나은행 급여이체 *7231",
     type: "보통예금",
-    initialBalance: 30000000,
+    initialBalance: 22450000,
+    adjustments: []
+  },
+  {
+    id: "acc-003",
+    name: "기업은행 시제통장 *077",
+    type: "보통예금",
+    initialBalance: 5890000,
     adjustments: []
   }
 ]
 ```
 
-**잔액 계산 로직 (api.js)**:
+**잔액 계산 로직 (api.js — 실제 구현)**:
 ```js
-api.getAccountBalance(accountId) {
-  const account = ACCOUNTS_BALANCE.find(a => a.id === accountId)
-  const incomeTotal = INVOICES
-    .filter(inv => inv.kind === "issued" && inv.accountId === accountId)
-    .flatMap(inv => inv.matches)
-    .reduce((sum, m) => sum + m.amount, 0)
-  const expenseTotal = SAMPLE.expenses
-    .filter(e => e.accountId === accountId && e.pay === "지급 완료")
-    .reduce((sum, e) => sum + e.amount, 0)
-  const adjustTotal = account.adjustments
-    .reduce((sum, a) => sum + a.amount, 0)
-  return account.initialBalance + incomeTotal - expenseTotal + adjustTotal
+_calcBalance(acc) {
+  // ⚠️ 주의: inv.status 조건 없이 모든 matches 합산 (일부 입금도 포함해야 함)
+  const txIn = INVOICES
+    .filter(inv => inv.kind === "issued" && inv.accountId === acc.id)
+    .reduce((s, inv) => s + inv.matches.reduce((ms, m) => ms + m.amount, 0), 0)
+  const txOut = SAMPLE.expenses
+    .filter(e => e.accountId === acc.id && e.pay === "지급 완료")
+    .reduce((s, e) => s + e.amount, 0)
+  const adjTotal = acc.adjustments.reduce((s, a) => s + a.amount, 0)
+  return acc.initialBalance + txIn - txOut + adjTotal
 }
 ```
 
@@ -113,53 +113,71 @@ export const INVOICES = [
     vendor: "한화에어로스페이스",
     contractId: "CT-2026-101",
     contract: "KF-21 동체 부품",
-    supplyAmount: 25818182,       // 공급가액
-    vatAmount: 2581818,           // 부가세
-    totalAmount: 28400000,        // 합계
+    supplyAmount: 25818182,
+    vatAmount: 2581818,
+    totalAmount: 28400000,
     issuedAt: "2026-05-15",
     dueAt: "2026-05-20",
-    status: "입금 예정",           // "입금 예정" | "일부 입금" | "입금 완료" | "기한 지남" | "장기 미수"
-    accountId: "acc-001",         // 입금받을 계좌
-    matches: [                    // 실제 입금 거래 연결
-      // { txnId: "IN-0512", amount: 28400000, matchedAt: "2026-05-12" }
-    ],
+    status: "입금 예정",           // issued: "입금 예정"|"일부 입금"|"입금 완료"|"기한 지남"|"장기 미수"
+    accountId: "acc-001",
+    matches: [],
     memo: "KF-21 기성고 3차"
   },
   {
-    id: "INV-2026-010",
+    id: "INV-2026-101",
     kind: "received",             // 수취 = 협력사로부터 받은 청구서 (미지급금)
     vendor: "(주)한울정밀",
-    contractId: null,
     contract: "유도무기 정밀가공",
     supplyAmount: 3818182,
     vatAmount: 381818,
     totalAmount: 4200000,
     issuedAt: "2026-05-10",
     dueAt: "2026-05-15",
-    status: "지급 대기",           // "지급 대기" | "일부 지급" | "지급 완료" | "기한 지남"
+    status: "지급 대기",           // received: "지급 대기"|"지급 예정"|"일부 지급"|"지급 완료"|"기한 지남"
     accountId: "acc-001",
     matches: [],
+    category: "정밀가공 외주",    // ← received 인보이스 추가 필드 (계정과목 연결)
+    doc: "승인 요청",             // ← 결의서 상태: "작성중"|"승인 요청"|"승인 완료"
     memo: "CNC 외주가공 5월분"
   }
 ]
 ```
 
-**미수금/미지급금 산출 (api.js)**:
+> **VENDORS gubu 필드**: VENDORS에 `gubu` 필드 추가. 한빛이엔지 COERP_COM_CLIENTELE.clie_gubu 코드 체계 참조.
+> - `"B"` = 매출처 (발주처, 9개) — 청구서 issued 시 vendor 필터링 기준
+> - `"A"` = 매입처 (외주/원자재/기타, 19개) — 청구서 received 시
+> - `"E"` = 기관 (금융/관공서, 2개) — received 시 A와 함께 표시
+
+**미수금/미지급금 산출 (api.js — 실제 구현)**:
 ```js
-api.getReceivables() {
-  return INVOICES
-    .filter(inv => inv.kind === "issued" && inv.status !== "입금 완료")
-    .map(inv => ({
-      ...inv,
-      paidAmount: inv.matches.reduce((s, m) => s + m.amount, 0),
-      remainAmount: inv.totalAmount - inv.matches.reduce((s, m) => s + m.amount, 0)
-    }))
+// ✅ getReceivables() — 미입금 건만 반환, summary 포함
+async getReceivables() {
+  const PENDING = new Set(["입금 예정","일부 입금","기한 지남","장기 미수"])
+  const rows = invs.filter(inv => PENDING.has(inv.status)).map(inv => ({
+    id, vendor, contract, billed: inv.totalAmount, paid: inv.paidAmount,
+    remain: inv.remainAmount, due: inv.dueAt, delay, status: inv.status
+  }))
+  return {
+    summary: { total, thisMonth, overdue, longOverdue,
+               count, thisMonthCount, overdueCount, longOverdueCount },
+    rows
+  }
 }
 
-api.getPayables() {
-  return INVOICES
-    .filter(inv => inv.kind === "received" && inv.status !== "지급 완료")
-    .map(inv => ({ ...inv, remainAmount: inv.totalAmount - ... }))
+// ✅ getPayables() — 전체 반환 (지급 완료 포함), summary는 미지급만 집계
+// 이유: UI에서 "지급 완료" 탭 필터링이 필요하기 때문
+async getPayables() {
+  const rows = invs.map(inv => ({
+    id, vendor, scope: inv.contract, category: inv.category || "—",
+    amount: inv.remainAmount, due: inv.dueAt, delay,
+    doc: inv.doc || "승인 완료", pay: inv.status
+  }))
+  // summary는 PENDING = ["지급 대기","지급 예정","일부 지급","기한 지남"] 기준 집계
+  return {
+    summary: { total, thisMonth, thisMonthCount, overdue, pendingApproval,
+               count, overdueCount, pendingCount },
+    rows  // ← 전체 (지급 완료 포함)
+  }
 }
 ```
 
@@ -648,27 +666,32 @@ Home.jsx 변경사항
 
 ---
 
-## 7. 구현 순서 및 예상 작업량
+## 7. 구현 순서 및 진행 현황 (2026-05-22 기준)
 
-| 순서 | 파일 | 주요 작업 | 예상 규모 |
-|------|------|---------|---------|
-| 1 | `data.js` | ACCOUNTS_BALANCE, INVOICES, RECURRING_EXPENSES, 계약 필드 추가 | 중 |
-| 2 | `api.js` | 잔액 계산, 미수금/미지급금 집계, VAT 집계 함수 추가 | 중 |
-| 3 | `Master.jsx` | 계좌 탭 → 잔액+조정, 정기지출 탭 신규 | 중 |
-| 4 | `Billing.jsx` | 청구 관리 화면 전체 신규 | 대 |
-| 5 | `App.jsx` | 청구 관리 네비게이션 + 라우팅 추가 | 소 |
-| 6 | `Contract.jsx` | 마일스톤 탭, 원가예산 탭 추가 | 중 |
-| 7 | `Docs.jsx` | 보고서에 부가세 탭 추가 | 중 |
-| 8 | `Home.jsx` | 대시보드 데이터 연동 | 소 |
+| 순서 | 파일 | 주요 작업 | 상태 |
+|------|------|---------|------|
+| 1 | `data.js` | ACCOUNTS_BALANCE(3개), INVOICES, RECURRING_EXPENSES, VENDORS(gubu), CATEGORIES | ✅ 완료 |
+| 2 | `api.js` | `_calcBalance`, `getReceivables()`, `getPayables()`, `getVatSummary()`, `matchInvoice()` | ✅ 완료 |
+| 3 | `Master.jsx` | 계좌 탭 잔액+조정, 업체/계정과목 data.js 동적 연결, 정기지출 탭 | ✅ 완료 |
+| 4 | `Billing.jsx` | 청구 관리 화면, InvoiceFormDrawer (업체/계약/계좌 드롭다운 연동) | ✅ 완료 |
+| 5 | `App.jsx` | 청구 관리 네비게이션 + 라우팅 추가 | ✅ 완료 |
+| 6 | `Contract.jsx` | ReceivablesScreen/PayablesScreen api 연동, matchInvoice 처리 | ✅ 완료 |
+| 6-b | `Contract.jsx` | 마일스톤 탭, 원가예산 탭 추가 | ⬜ 미구현 |
+| 7 | `Docs.jsx` | 보고서에 부가세 탭 추가 | ⬜ 미구현 |
+| 8 | `Form.jsx` | 업체/계약/계정과목/계좌 드롭다운 data.js 동적 연결 | ✅ 완료 |
+| 9 | `Home.jsx` | 대시보드 데이터 연동 | ⬜ 미구현 (현재 api 호출 중이나 일부 하드코딩) |
+| 10 | `Docs.jsx`/`Ledger.jsx` | SAMPLE.receivables → INVOICES 기반 api 전환 | ⬜ 미구현 |
 
 ---
 
 ## 8. 구현 시 주의사항
 
 1. **청구서 발행 → 마일스톤 연결**: 마일스톤의 "청구서 발행" 버튼은 `Billing.jsx`의 `InvoiceFormDrawer`를 호출하되, 계약·금액·거래처를 props로 넘겨 사전 입력
-2. **미수금 집계 일관성**: 기존 `SAMPLE.receivables`는 제거하고 `INVOICES` 기반으로 통일. 홈·거래내역·청구 메뉴 모두 동일 소스 사용
+2. **단일 데이터 소스 원칙**: `INVOICES`가 미수금·미지급금의 유일한 소스. `SAMPLE.receivables`/`SAMPLE.payables`는 사용 금지. 홈·청구관리·미수금·미지급금 모두 `api.getReceivables()` / `api.getPayables()` 경유
 3. **StatusBadge 확장**: 청구서 상태("입금 예정", "일부 입금", "장기 미수" 등)는 기존 `StatusBadge` 컴포넌트 tone 매핑 추가
-4. **계좌 잔액 실시간성**: 거래내역 입력 시 해당 계좌의 잔액이 즉시 반영되도록 `api.getAccountBalance()`를 항상 계산형으로 유지
+4. **계좌 잔액 실시간성**: 거래내역 입력 시 해당 계좌의 잔액이 즉시 반영되도록 `_calcBalance()`를 항상 계산형으로 유지 (잔액 필드를 별도 저장하지 않음)
+5. **업체 드롭다운 필터**: 청구서 발행(issued) 시 `gubu==="B"` 업체만, 청구서 수취(received) 시 `gubu==="A"|"E"` 업체만 표시
+6. **_calcBalance 버그 주의**: 잔액 계산 시 `inv.status === "입금 완료"` 조건으로 필터링하면 일부 입금 건의 matches가 누락됨. status 조건 없이 모든 matches를 합산해야 함
 
 ---
 
@@ -677,3 +700,5 @@ Home.jsx 변경사항
 | 버전 | 날짜 | 변경 내용 | 작성자 |
 |------|------|---------|--------|
 | 0.1 | 2026-05-20 | 초안 작성 | Chajuick |
+| 0.2 | 2026-05-21 | system-flow 설계서 추가, DB 스키마 초안 | Chajuick |
+| 0.3 | 2026-05-22 | 실제 구현 반영: 계좌 데이터 3개 확정, INVOICES received category/doc 필드, VENDORS gubu 코드, _calcBalance 버그 픽스 내용, getReceivables/getPayables summary 구조, 구현 현황 업데이트 | Claude |

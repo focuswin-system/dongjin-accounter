@@ -18,8 +18,17 @@ router.get('/', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { id, name, group_name, vat, pay_method } = req.body
-    if (!id || !name) return res.status(400).json({ error: 'id, name 필수' })
+    let { id, kind, name, group_name, vat, pay_method } = req.body
+    if (!name) return res.status(400).json({ error: 'name 필수' })
+    // 코드 미지정 시 구분(지출=EXP / 수입=INC)에 따라 자동 채번
+    if (!id) {
+      const prefix = kind === 'inc' ? 'INC' : 'EXP'
+      const [[{ maxno }]] = await pool.execute(
+        "SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(id,'-',-1) AS UNSIGNED)),0) AS maxno FROM categories WHERE id LIKE ?",
+        [`${prefix}-%`]
+      )
+      id = `${prefix}-${Number(maxno) + 1}`
+    }
     const [[{ maxOrd }]] = await pool.execute('SELECT COALESCE(MAX(sort_order),0)+1 AS maxOrd FROM categories')
     await pool.execute(
       'INSERT INTO categories (id, name, group_name, vat, pay_method, sort_order) VALUES (?,?,?,?,?,?)',

@@ -1,7 +1,15 @@
-import { useState, useEffect, Fragment } from 'react'
-import { Icon, fmtNum, useToast, Spacer, StatusBadge, Drawer } from '../lib/ui'
-import { SAMPLE } from '../lib/data'
-import { HR_EMPLOYEES, calcPayslip, MONTHLY_EXTRA } from './HR'
+import { useState, useEffect, useRef, Fragment } from 'react'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday } from '../lib/ui'
+// SAMPLE placeholder — Docs 화면은 실 API 연동 전까지 빈 데이터로 동작
+const SAMPLE = {
+  docs: [], evidences: [], evidenceMissing: [], excelPreview: [],
+  incomes: [], expenses: [], contractSummary: [],
+  receivables: { summary: { total: 0, thisMonth: 0, overdue: 0, longOverdue: 0 }, rows: [] },
+}
+import { computeItems, shiftMonth, monthLabel } from './HR'
+import { api } from '../lib/api'
+
+const todayStr = () => new Date().toISOString().slice(0, 10)
 
 const FormBlock = ({ title, hint, children }) => (
   <div>
@@ -97,16 +105,14 @@ export const ExpenseDrawer = ({ open, onClose }) => {
                 <div className="col gap-10">
                   <div>
                     <label className="label">공급가액</label>
-                    <input className="input num" value={fmtNum(form.supply)} onChange={e => {
-                      const v = parseInt(e.target.value.replace(/[^0-9]/g, "")) || 0;
+                    <MoneyInput value={form.supply} onChange={(raw, v) => {
                       const vat = Math.round(v * 0.1);
                       setForm({...form, supply: v, vat, total: v + vat});
                     }}/>
                   </div>
                   <div>
                     <label className="label">부가세</label>
-                    <input className="input num" value={fmtNum(form.vat)} onChange={e => {
-                      const vv = parseInt(e.target.value.replace(/[^0-9]/g, "")) || 0;
+                    <MoneyInput value={form.vat} onChange={(raw, vv) => {
                       setForm({...form, vat: vv, total: form.supply + vv});
                     }}/>
                   </div>
@@ -118,9 +124,8 @@ export const ExpenseDrawer = ({ open, onClose }) => {
               ) : (
                 <div>
                   <label className="label">합계 금액</label>
-                  <input className="input num fw-700" style={{ fontSize: 22 }} value={fmtNum(form.total) + " 원"}
-                    onChange={e => {
-                      const v = parseInt(e.target.value.replace(/[^0-9]/g, "")) || 0;
+                  <MoneyInput className="input num fw-700" style={{ fontSize: 22 }} value={form.total}
+                    onChange={(raw, v) => {
                       const supply = Math.round(v / 1.1);
                       setForm({...form, total: v, supply, vat: v - supply});
                     }}/>
@@ -238,154 +243,562 @@ export const ExpenseDrawer = ({ open, onClose }) => {
 };
 
 /* ============ 결의서 관리 ============ */
-export const DocsScreen = ({ openExpense }) => {
+export const DocsScreen = () => {
   const toast = useToast();
-  const [sel, setSel] = useState(SAMPLE.docs[0]);
-  const [tab, setTab] = useState("전체");
-  const tabs = ["전체", "작성중", "승인 요청", "승인 완료", "반려"];
-  const list = SAMPLE.docs.filter(d => tab === "전체" || d.status === tab);
+  const [docs, setDocs] = useState([]);
+  const [company, setCompany] = useState(null);
+  const [selId, setSelId] = useState(null);
+  const [q, setQ] = useState("");
+  const [newOpen, setNewOpen] = useState(false);
+  const [showDone, setShowDone] = useState(false);   // 처리된 결의서까지 볼지
+
+  const load = async () => {
+    const [list, comp] = await Promise.all([api.getResolutions(), api.getCompany()]);
+    setDocs(list); setCompany(comp);
+    setSelId(prev => prev && list.some(d => d.id === prev) ? prev : (list[0]?.id || null));
+  };
+  useEffect(() => { load(); }, []);
+
+  // 기본은 '처리 안 된 것'만 = 할 일 큐. 완료(처리됨)는 전체 보기에서만.
+  const pendingCount = docs.filter(d => d.status !== '완료').length;
+  const list = docs
+    .filter(d => showDone || d.status !== '완료')
+    .filter(d => !q || (d.title || "").includes(q) || (d.vendor_name || "").includes(q) || (d.doc_no || "").includes(q));
+  const sel = docs.find(d => d.id === selId) || null;
 
   return (
     <div className="fade-up">
       <div className="row" style={{ marginBottom: 20 }}>
         <div>
-          <div className="page-title">결의서 관리</div>
-          <div className="page-sub">지출결의서를 한 곳에서 작성·승인·인쇄하세요.</div>
+          <div className="page-title">지급결의서</div>
+          <div className="page-sub">청구서 없는 지출(비품·간식 등)은 여기서 바로 만드세요. 세금계산서가 있는 매입 대금은 구매·매입의 '대금 청구서'에서 발행할 수 있어요.</div>
         </div>
         <div className="ml-auto row gap-8">
-          <button className="btn" onClick={() => toast.push("양식 설정 화면을 열었어요")}><Icon.Cog/> 양식 설정</button>
-          <button className="btn primary" onClick={openExpense}><Icon.Plus/> 새 결의서</button>
+          <button className="btn primary" onClick={() => setNewOpen(true)}><Icon.Plus/> 새 결의서</button>
         </div>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: "clamp(280px, 360px, 400px) 1fr", gap: 16, alignItems: "start" }}>
+      <NewResolutionDrawer open={newOpen} onClose={() => setNewOpen(false)} onCreated={(id) => { setNewOpen(false); load().then(() => setSelId(id)); }}/>
+
+      <div className="grid" style={{ gridTemplateColumns: "clamp(280px, 340px, 380px) 1fr", gap: 16, alignItems: "start" }}>
         <div className="card" style={{ overflow: "hidden" }}>
-          <div className="row gap-6" style={{ padding: 12, borderBottom: "1px solid var(--line)", flexWrap: "wrap" }}>
-            {tabs.map(t => (
-              <button key={t} className={`chip ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t}</button>
+          <div style={{ padding: 12, borderBottom: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 10 }}>
+            <div className="row gap-6">
+              <button className={`chip ${!showDone ? "active" : ""}`} onClick={() => setShowDone(false)}>
+                처리 대기 {pendingCount > 0 && <span className="badge brand" style={{ marginLeft: 6 }}>{pendingCount}</span>}
+              </button>
+              <button className={`chip ${showDone ? "active" : ""}`} onClick={() => setShowDone(true)}>전체</button>
+            </div>
+            <div className="search" style={{ margin: 0, padding: "6px 10px" }}>
+              <Icon.Search size={14}/>
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder="문서번호·거래처·목적 검색"/>
+            </div>
+          </div>
+          <div style={{ maxHeight: 680, overflowY: "auto" }}>
+            {list.length === 0 && (
+              <div style={{ padding: 40, textAlign: "center", color: "var(--muted-2)", fontSize: 13 }}>
+                {showDone ? "결의서가 없어요." : "처리 대기 중인 결의서가 없어요."}<br/>'새 결의서'로 만들거나 구매·매입의 대금 청구서에서 발행하세요.
+              </div>
+            )}
+            {list.map((d, i) => (
+              <div key={d.id} onClick={() => setSelId(d.id)}
+                style={{ padding: "16px 18px", background: d.id === selId ? "var(--surface-3)" : "transparent", borderTop: i === 0 ? 0 : "1px solid var(--line)", cursor: "pointer", transition: "background .12s ease" }}>
+                <div className="row gap-8" style={{ marginBottom: 8 }}>
+                  <span className="num text-xs text-muted2 fw-600">{d.doc_no}</span>
+                  <span style={{ marginLeft: "auto" }}><StatusBadge status={d.status}/></span>
+                </div>
+                <div className="fw-600" style={{ marginBottom: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "var(--ink)" }}>{d.title}</div>
+                <div className="row gap-8" style={{ alignItems: "baseline" }}>
+                  <span className="text-xs text-muted">{d.pay_date || "—"}</span>
+                  <span className="text-xs text-muted2">· {d.vendor_name || "—"}</span>
+                  <span style={{ marginLeft: "auto" }} className="num fw-700 text-sm">{fmtNum(d.amount)}<span className="text-muted2" style={{ fontWeight: 400, marginLeft: 2 }}>원</span></span>
+                </div>
+              </div>
             ))}
           </div>
-          <div style={{ maxHeight: 720, overflowY: "auto" }}>
-            {list.map((d, i) => {
-              const active = sel.id === d.id;
-              return (
-                <div key={d.id} onClick={() => setSel(d)}
-                  style={{ padding: "16px 18px", background: active ? "var(--surface-3)" : "transparent", borderTop: i === 0 ? 0 : "1px solid var(--line)", cursor: "pointer", transition: "background .12s ease" }}>
-                  <div className="row gap-8" style={{ marginBottom: 8 }}>
-                    <span className="num text-xs text-muted2 fw-600">{d.id}</span>
-                    <span style={{ marginLeft: "auto" }}><StatusBadge status={d.status}/></span>
-                  </div>
-                  <div className="fw-600" style={{ marginBottom: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "var(--ink)" }}>{d.title}</div>
-                  <div className="row gap-8" style={{ alignItems: "baseline" }}>
-                    <span className="text-xs text-muted">{d.date}</span>
-                    <span className="text-xs text-muted2">· {d.writer}</span>
-                    <span style={{ marginLeft: "auto" }} className="num fw-700 text-sm">{fmtNum(d.amount)}<span className="text-muted2" style={{ fontWeight: 400, marginLeft: 2 }}>원</span></span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
         </div>
-        <DocPreview doc={sel}/>
+        {sel
+          ? <ResolutionPreview doc={sel} company={company} onSaved={load} onDeleted={() => { setSelId(null); load(); }}/>
+          : <div className="card card-pad" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 300, color: "var(--muted-2)", gap: 12 }}>
+              <Icon.Receipt size={32} style={{ opacity: 0.3 }}/>
+              <div className="text-sm">결의서를 선택하면 내용이 표시됩니다</div>
+            </div>
+        }
       </div>
     </div>
   );
 };
 
-export const DocPreview = ({ doc }) => {
+// 새 결의서 직접 등록 — 청구서 없는 소액 경비(비누·간식 등). 지급 전에 결의서부터 작성해 결재받는 흐름.
+const NewResolutionDrawer = ({ open, onClose, onCreated }) => {
   const toast = useToast();
-  const taxFree = /식대|교통비|세금과공과|복리후생/.test(doc.title);
-  const supply  = taxFree ? doc.amount : Math.round(doc.amount / 1.1);
-  const vat     = taxFree ? 0 : doc.amount - supply;
+  const empty = { vendor: '', title: '', amount: '', pay_method: '계좌이체', pay_date: todayStr(), note: '' };
+  const [form, setForm] = useState(empty);
+  const [vendors, setVendors] = useState([]);
+  const [presets, setPresets] = useState([]);
+  const [presetId, setPresetId] = useState('');   // 선택한 결재선 프리셋
+  useEffect(() => {
+    if (!open) return;
+    setForm(empty);
+    api.getVendors().then(setVendors);
+    api.getApprovalPresets().then(list => {
+      setPresets(list);
+      setPresetId((list.find(p => p.is_default) || list[0])?.id || '');   // 기본 프리셋 선택
+    });
+  }, [open]);
+
+  const amountNum = parseInt(String(form.amount).replace(/[^0-9]/g, ''), 10) || 0;
+  const chosen = presets.find(p => p.id === presetId);
+  const save = async () => {
+    if (!form.title.trim()) return toast.push('지출 목적을 입력해주세요');
+    if (!amountNum) return toast.push('금액을 입력해주세요');
+    const res = await api.createResolution({
+      vendor_name: form.vendor.trim(),
+      title: form.title.trim(),
+      amount: amountNum,
+      pay_method: form.pay_method,
+      pay_date: form.pay_date || null,
+      note: form.note.trim(),
+      approval: chosen ? chosen.steps.map(s => ({ label: s.label, position: s.position || '', name: '' })) : undefined,
+    });
+    if (!res.ok) return toast.push(res.error || '생성에 실패했어요');
+    toast.push(`결의서 ${res.resolution.doc_no}를 만들었어요`);
+    onCreated(res.resolution.id);
+  };
+
+  return (
+    <Drawer open={open} onClose={onClose} width="min(460px,100vw)" label="새 결의서">
+      <div className="drawer-head">
+        <div className="fw-700" style={{ fontSize: 16 }}>새 지급결의서</div>
+        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
+      </div>
+      <div className="drawer-body col gap-form">
+        <div className="text-sm text-muted">청구서(세금계산서) 없는 지출을 결의서로 만들어요. 품목을 여러 줄로 나누려면 만든 뒤 상세에서 편집하세요.</div>
+        <div>
+          <label className="label" style={{ marginBottom: 8 }}>지출처 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+          <Combobox value={form.vendor} onChange={v => setForm(f => ({ ...f, vendor: v }))}
+            options={vendors.map(v => ({ value: v.name, label: v.name }))}
+            placeholder="거래처 선택 또는 직접 입력"
+            onAddNew={(q) => setForm(f => ({ ...f, vendor: q }))} addNewLabel="이 이름으로 입력"/>
+        </div>
+        <div>
+          <label className="label" style={{ marginBottom: 8 }}>지출 목적 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+          <input className="input" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="예: 사무실 간식 구입"/>
+        </div>
+        <div>
+          <label className="label" style={{ marginBottom: 8 }}>금액 (VAT 포함) <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+          <div style={{ position: 'relative' }}>
+            <MoneyInput className="input num fw-700" style={{ fontSize: 20, paddingRight: 36 }}
+              value={form.amount}
+              onChange={raw => setForm(f => ({ ...f, amount: raw }))}/>
+            <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>원</span>
+          </div>
+        </div>
+        <div className="row gap-12">
+          <div style={{ flex: 1 }}>
+            <label className="label" style={{ marginBottom: 8 }}>지급 방법</label>
+            <div className="row gap-6">
+              {['계좌이체', '현금', '카드'].map(m => (
+                <button key={m} type="button" className={`chip ${form.pay_method === m ? 'active' : ''}`}
+                  onClick={() => setForm(f => ({ ...f, pay_method: m }))}>{m}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{ flex: 1 }}>
+            <label className="label" style={{ marginBottom: 8 }}>지급일</label>
+            <input className="input" type="date" value={form.pay_date} onChange={e => setForm(f => ({ ...f, pay_date: e.target.value }))}/>
+          </div>
+        </div>
+        <div>
+          <label className="label" style={{ marginBottom: 8 }}>특기사항 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+          <input className="input" value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} placeholder="예: 팀 공용"/>
+        </div>
+        {/* 결재선 — 프리셋에서 선택. 기본 프리셋이 미리 골라져 있음. 만든 뒤 상세에서 바꿀 수도 있음. */}
+        {presets.length > 0 && (
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>결재선</label>
+            <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+              {presets.map(p => (
+                <button key={p.id} type="button" className={`chip ${presetId === p.id ? 'active' : ''}`}
+                  onClick={() => setPresetId(p.id)}>{p.name}</button>
+              ))}
+            </div>
+            {chosen && (
+              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+                {chosen.steps.map((s, i) => `${s.label}${s.position ? `(${s.position})` : ''}`).join(' → ')}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="drawer-foot">
+        <button className="btn" onClick={onClose}>취소</button>
+        <button className="btn primary ml-auto" onClick={save}><Icon.Check size={14}/> 결의서 만들기</button>
+      </div>
+    </Drawer>
+  );
+};
+
+// 결의서 처리 — 이 결의서대로 지출을 집행한다.
+//   기존 지출 연결: 이미 카드·이체로 나간 지출을 이 결의서에 붙임
+//   새 지출 등록: 결의서 내용으로 지출 거래를 생성(금액 자동, 수정 가능)
+// 어느 쪽이든 그 지출의 증빙(doc_no)에 결의서번호가 붙어 추적된다.
+const ProcessDrawer = ({ open, onClose, doc, onDone }) => {
+  const toast = useToast();
+  const [mode, setMode] = useState('create');   // 'create' | 'link'
+  const [amount, setAmount] = useState('');
+  const [date, setDate] = useState(todayStr());
+  const [candidates, setCandidates] = useState([]);
+  const [pickedTxn, setPickedTxn] = useState(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setMode('create'); setAmount(String(doc.amount || '')); setDate(doc.pay_date || todayStr()); setPickedTxn(null);
+    api.getResolutionMatchable(doc.id).then(setCandidates);
+  }, [open, doc.id]);
+
+  const amountNum = parseInt(String(amount).replace(/[^0-9]/g, ''), 10) || 0;
+
+  const submit = async () => {
+    const body = mode === 'link'
+      ? { mode: 'link', txn_id: pickedTxn }
+      : { mode: 'create', amount: amountNum, date };
+    if (mode === 'link' && !pickedTxn) return toast.push('연결할 지출을 선택해주세요');
+    const res = await api.processResolution(doc.id, body);
+    if (!res.ok) return toast.push(res.error || '처리에 실패했어요');
+    const base = mode === 'link' ? '기존 지출에 연결했어요' : '지출을 등록하고 처리했어요';
+    toast.push(res.invoicePaid ? `${base}. 청구서도 지급 처리됐어요` : base);
+    onDone();
+  };
+
+  return (
+    <Drawer open={open} onClose={onClose} width="min(480px,100vw)" label="결의서 처리">
+      <div className="drawer-head">
+        <div>
+          <div className="fw-700" style={{ fontSize: 16 }}>결의서 처리</div>
+          <div className="text-xs text-muted">{doc.doc_no} · {doc.title} · {fmtNum(doc.amount)}원</div>
+        </div>
+        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
+      </div>
+      <div className="drawer-body col gap-form">
+        <div className="text-sm text-muted">이 결의서대로 지출을 집행합니다. 처리하면 목록의 '처리 대기'에서 빠져요.</div>
+        <div className="row gap-6">
+          <button type="button" className={`chip ${mode === 'create' ? 'active' : ''}`} onClick={() => setMode('create')}>지출 새로 등록</button>
+          <button type="button" className={`chip ${mode === 'link' ? 'active' : ''}`} onClick={() => setMode('link')}>기존 지출에 연결</button>
+        </div>
+
+        {mode === 'create' ? (
+          <>
+            <div>
+              <label className="label" style={{ marginBottom: 8 }}>지출 금액</label>
+              <div style={{ position: 'relative' }}>
+                <MoneyInput className="input num fw-700" style={{ fontSize: 20, paddingRight: 36 }}
+                  value={amount}
+                  onChange={raw => setAmount(raw)}/>
+                <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>원</span>
+              </div>
+              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>결의서 금액으로 채웠어요. 실제 지출액이 다르면 고치세요.</div>
+            </div>
+            <div>
+              <label className="label" style={{ marginBottom: 8 }}>지출일</label>
+              <input className="input" type="date" max={localToday()} value={date} onChange={e => setDate(e.target.value)}/>
+            </div>
+            <div className="text-xs text-muted2">{doc.vendor_name || '거래처 미지정'} · {doc.pay_method || '계좌이체'}로 지출 거래가 생성됩니다.</div>
+          </>
+        ) : (
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>연결할 지출 거래</label>
+            {candidates.length === 0 ? (
+              <div className="text-sm text-muted2" style={{ padding: 16, textAlign: 'center', border: '1px dashed var(--line)', borderRadius: 8 }}>
+                연결할 미연결 지출이 없어요. '지출 새로 등록'을 쓰세요.
+              </div>
+            ) : (
+              <div style={{ maxHeight: 300, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {candidates.map(t => (
+                  <button key={t.id} type="button" onClick={() => setPickedTxn(t.id)}
+                    style={{ textAlign: 'left', padding: '10px 12px', border: `1px solid ${pickedTxn === t.id ? 'var(--brand)' : 'var(--line)'}`,
+                             borderRadius: 8, background: pickedTxn === t.id ? 'var(--brand-soft)' : '#fff', cursor: 'pointer' }}>
+                    <div className="row gap-8">
+                      <span className="fw-600 text-sm">{t.vendor_name || '거래처 미상'}</span>
+                      {t.related && <span className="badge outline" style={{ fontSize: 10 }}>같은 거래처</span>}
+                      <span className="ml-auto num fw-700">{fmtNum(t.amount)}원</span>
+                    </div>
+                    <div className="text-xs text-muted2" style={{ marginTop: 3 }}>{t.date} · {t.category || '—'} · {t.status}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="drawer-foot">
+        <button className="btn" onClick={onClose}>취소</button>
+        <button className="btn primary ml-auto" onClick={submit}><Icon.Check size={14}/> 처리 완료</button>
+      </div>
+    </Drawer>
+  );
+};
+
+// 읽기전용 결의서 문서 — 결의서 화면과 지출 증빙 영역 양쪽에서 재사용.
+// printClass가 있으면 그 요소가 인쇄 대상이 된다(증빙 모달에서 이것만 뽑아 인쇄).
+export const ResolutionDocument = ({ doc, company, printClass }) => {
+  const items = doc.items && doc.items.length ? doc.items
+    : [{ name: doc.title, unit: '식', qty: 1, price: doc.amount, amount: doc.amount, note: '' }];
+  const total = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+  const ceo = company?.ceo || '대표이사';
+  // 결재선: 결의서에 저장된 approval, 없으면 담당/결재/대표 기본
+  const approval = (doc.approval && doc.approval.length)
+    ? doc.approval
+    : [{ label: '담당' }, { label: '결재' }, { label: '대표이사', position: ceo }];
+  return (
+    <div className={`doc-paper resolution-paper ${printClass || ''}`}>
+      <div className="res-title-ko">지출결의서</div>
+      <div className="res-title">支 出 決 議 書</div>
+      <div className="res-date num">{doc.pay_date || ''}</div>
+
+      <table className="res-table res-head">
+        <tbody>
+          <tr><th>지출처</th><td>{doc.vendor_name}</td><th>지출총액</th><td className="num fw-700">₩ {fmtNum(total || doc.amount)}</td></tr>
+          <tr><th>구매품의NO</th><td className="num">{doc.doc_no}</td><th>신청자</th><td>{doc.applicant}</td></tr>
+          <tr><th>지출방법</th><td>{doc.pay_method}</td><th>지급일</th><td className="num">{doc.pay_date || '—'}</td></tr>
+        </tbody>
+      </table>
+
+      <div className="res-note-line">아래 내역과 같이 支出코저 하오니 承認하여 주시기 바랍니다.</div>
+
+      <table className="res-table res-items">
+        <thead>
+          <tr>
+            <th style={{ width: 34 }}>NO</th><th>품명 및 규격</th><th style={{ width: 50 }}>단위</th>
+            <th style={{ width: 56 }}>수량</th><th style={{ width: 96 }}>단가</th><th style={{ width: 110 }}>금액</th><th style={{ width: 90 }}>비고</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((it, i) => (
+            <tr key={i}>
+              <td className="num" style={{ textAlign: 'center' }}>{i + 1}</td>
+              <td>{it.name}</td>
+              <td style={{ textAlign: 'center' }}>{it.unit}</td>
+              <td className="num" style={{ textAlign: 'right' }}>{fmtNum(it.qty || 0)}</td>
+              <td className="num" style={{ textAlign: 'right' }}>{fmtNum(it.price || 0)}</td>
+              <td className="num fw-600" style={{ textAlign: 'right' }}>{fmtNum(it.amount || 0)}</td>
+              <td>{it.note}</td>
+            </tr>
+          ))}
+          {Array.from({ length: Math.max(0, 4 - items.length) }).map((_, i) => (
+            <tr key={`e${i}`}><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+          ))}
+          <tr className="res-total">
+            <th colSpan={5} style={{ textAlign: 'center' }}>합　계</th>
+            <td className="num fw-700" style={{ textAlign: 'right' }}>{fmtNum(total)}</td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div className="res-foot">
+        <div className="res-note">
+          <div className="res-note-head">특기사항</div>
+          <div className="res-note-body">{doc.note || ''}</div>
+        </div>
+        <table className="res-approve">
+          <tbody>
+            <tr>{approval.map((s, i) => <th key={i}>{s.label}{s.position ? <div style={{ fontWeight: 400, fontSize: 10, color: '#888' }}>{s.position}</div> : null}</th>)}</tr>
+            <tr>{approval.map((_, i) => <td key={i}></td>)}</tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="res-company">
+        {company?.name || ''}{company?.biz_no ? ` · 사업자 ${company.biz_no}` : ''}
+      </div>
+    </div>
+  );
+};
+
+// 실제 동진테크 지출결의서 양식(지출처·지출총액·구매품의NO·신청자·지출방법 + 품목 명세 + 결재란) 기반.
+// 화면에서 품목·특기사항을 보완하고 인쇄하면 대표가 서명하는 방식(전자결재 아님).
+export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
+  const toast = useToast();
+  const { confirm } = useConfirm();
+  const [edit, setEdit] = useState(false);
+  const [form, setForm] = useState(doc);
+  const [processOpen, setProcessOpen] = useState(false);
+  const [presets, setPresets] = useState([]);
+  useEffect(() => { setForm(doc); setEdit(false); }, [doc.id]);
+  useEffect(() => { api.getApprovalPresets().then(setPresets); }, []);
+  const done = doc.status === '완료';
+  // 결재선: 편집 중이면 form, 아니면 doc. 없으면 담당/결재/대표 기본
+  const approval = (form.approval && form.approval.length)
+    ? form.approval
+    : [{ label: '담당' }, { label: '결재' }, { label: '대표이사', position: company?.ceo || '대표이사' }];
+  const applyPreset = (p) => setForm(f => ({ ...f, approval: p.steps.map(s => ({ label: s.label, position: s.position || '', name: '' })) }));
+
+  const items = form.items || [];
+  const itemsTotal = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+  const setItem = (i, key, val) => setForm(f => ({ ...f, items: (f.items || []).map((it, j) => j === i ? { ...it, [key]: val } : it) }));
+  const setItemNum = (i, key, val) => {
+    const n = parseInt(String(val).replace(/[^0-9]/g, ''), 10) || 0;
+    setForm(f => ({ ...f, items: (f.items || []).map((it, j) => {
+      if (j !== i) return it;
+      const next = { ...it, [key]: n };
+      if (key === 'qty' || key === 'price') next.amount = (Number(next.qty) || 0) * (Number(next.price) || 0);
+      return next;
+    }) }));
+  };
+  const addItem = () => setForm(f => ({ ...f, items: [...(f.items || []), { name: '', unit: '식', qty: 1, price: 0, amount: 0, note: '' }] }));
+  const removeItem = (i) => setForm(f => ({ ...f, items: (f.items || []).filter((_, j) => j !== i) }));
+
+  const save = async () => {
+    const res = await api.updateResolution(doc.id, { ...form, amount: itemsTotal || form.amount });
+    if (!res.ok) return toast.push(res.error || '저장에 실패했어요');
+    toast.push('결의서를 저장했어요'); setEdit(false); onSaved();
+  };
+  const remove = async () => {
+    const ok = await confirm({ tone: 'neg', title: '결의서 삭제', body: `${doc.doc_no} 결의서를 삭제할까요? 거래는 그대로 남아요.`, confirmLabel: '삭제' });
+    if (!ok) return;
+    const res = await api.deleteResolution(doc.id);
+    if (!res.ok) return toast.push('삭제에 실패했어요');
+    toast.push('삭제됐어요'); onDeleted();
+  };
+  const doPrint = () => window.print();
+
+  const ceo = company?.ceo || '대표이사';
+  const displayItems = edit ? items : (items.length ? items : [{ name: form.title, unit: '식', qty: 1, price: form.amount, amount: form.amount, note: '' }]);
 
   return (
     <div>
-      <div className="card" style={{ padding: "14px 16px", marginBottom: 16, display: "flex", gap: 10, alignItems: "center" }}>
-        <span className="num text-sm text-muted">{doc.id}</span>
+      {/* 화면 전용 액션 바 (인쇄 시 숨김) */}
+      <div className="card no-print" style={{ padding: "14px 16px", marginBottom: 16, display: "flex", gap: 10, alignItems: "center" }}>
+        <span className="num text-sm text-muted">{doc.doc_no}</span>
         <StatusBadge status={doc.status}/>
         <div className="ml-auto row gap-6">
-          <button className="btn" onClick={() => toast.push("PDF로 내려받았어요")}><Icon.Download/> PDF</button>
-          <button className="btn" onClick={() => toast.push("인쇄 창을 열었어요")}><Icon.Print/> 인쇄</button>
-          {doc.status === "작성중" && <button className="btn primary" onClick={() => toast.push("승인 요청을 보냈어요")}>승인 요청</button>}
-          {doc.status === "승인 요청" && <button className="btn primary" onClick={() => toast.push("결의서를 승인했어요")}>승인</button>}
-        </div>
-      </div>
-
-      <div className="doc-paper">
-        <div className="doc-title">지 출 결 의 서</div>
-        <div className="row" style={{ marginBottom: 18, fontSize: 12 }}>
-          <div>
-            <div><span className="text-muted">문서번호</span> <span className="num fw-700" style={{ marginLeft: 6 }}>{doc.id}</span></div>
-            <div style={{ marginTop: 4 }}><span className="text-muted">작성일</span> <span className="num" style={{ marginLeft: 6 }}>{doc.date}</span></div>
-          </div>
-          <div className="ml-auto">
-            <table style={{ borderCollapse: "collapse", fontSize: 11 }}>
-              <thead>
-                <tr>
-                  {["담당", "승인"].map((h, i) => (
-                    <th key={i} style={{ border: "1px solid #232733", padding: "4px 16px", background: "#F5F6F8", width: 72, fontWeight: 600 }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td style={{ border: "1px solid #232733", width: 72, height: 72, padding: 0, textAlign: "center", verticalAlign: "middle" }}>
-                    <Stamp name="한경리"/>
-                  </td>
-                  <td style={{ border: "1px solid #232733", width: 72, height: 72, padding: 0, textAlign: "center", verticalAlign: "middle" }}>
-                    {doc.status === "승인 완료" ? <Stamp name="정대표"/>
-                      : doc.status === "반려" ? <Stamp name="반려" tone="neg"/>
-                      : <span style={{ color: "#aaa", fontSize: 10 }}>대기</span>}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <div className="text-xs text-muted2" style={{ marginTop: 4, textAlign: "right" }}>작성자 → 대표 (단독 결재)</div>
-          </div>
-        </div>
-
-        <table className="doc-table">
-          <tbody>
-            <tr><th>거래처</th><td colSpan={3}>{doc.vendor}</td></tr>
-            <tr><th>계약/부서</th><td>{doc.contract}</td><th>작성자</th><td>{doc.writer} (재무팀)</td></tr>
-            <tr><th>지출 목적</th><td colSpan={3}>{doc.title}</td></tr>
-            <tr><th>비목</th><td>{doc.title.split(" — ")[0]}</td><th>결제수단</th><td>계좌이체</td></tr>
-            <tr>
-              <th>금액 (원)</th>
-              <td colSpan={3}>
-                <div className="row" style={{ alignItems: "center" }}>
-                  <span className="num fw-700" style={{ fontSize: 18 }}>₩ {fmtNum(doc.amount)}</span>
-                  <span className="ml-auto text-muted" style={{ fontSize: 11 }}>
-                    {taxFree ? "(면세 비목 · 부가세 없음)" : `(공급가액 ${fmtNum(supply)} + 부가세 ${fmtNum(vat)})`}
-                  </span>
-                </div>
-              </td>
-            </tr>
-            <tr><th>증빙 종류</th><td>{taxFree ? "영수증 1건" : "세금계산서 1건 · 카드영수증 1건"}</td><th>지급예정일</th><td className="num">{doc.date}</td></tr>
-            <tr>
-              <th>비고</th>
-              <td colSpan={3} style={{ height: 70, verticalAlign: "top", paddingTop: 10, color: "#444", fontSize: 12 }}>
-                해당 비용은 {doc.contract} 관련 비용으로, 첨부 증빙에 따라 집행함.
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        <div style={{ marginTop: 18, fontSize: 11, color: "#555" }}>첨부 증빙</div>
-        <div className="row gap-6" style={{ marginTop: 6, flexWrap: "wrap" }}>
-          {taxFree ? (
-            <span className="file-pill" style={{ background: "#F2F4F7" }}><Icon.Image size={12}/> 영수증_원본.jpg</span>
+          {edit ? (
+            <>
+              <button className="btn" onClick={() => { setForm(doc); setEdit(false); }}>취소</button>
+              <button className="btn primary" onClick={save}><Icon.Check size={14}/> 저장</button>
+            </>
           ) : (
             <>
-              <span className="file-pill" style={{ background: "#F2F4F7" }}><Icon.File size={12}/> 세금계산서_원본.pdf</span>
-              <span className="file-pill" style={{ background: "#F2F4F7" }}><Icon.Image size={12}/> 거래명세서.jpg</span>
+              {!done && <button className="btn ghost" onClick={remove}><Icon.Trash size={14}/></button>}
+              {!done && <button className="btn" onClick={() => setEdit(true)}><Icon.Pencil size={14}/> 편집</button>}
+              <button className="btn" onClick={doPrint}><Icon.Print/> 인쇄</button>
+              {/* 처리 = 이 결의서대로 지출 집행. 처리되면 목록에서 빠진다. */}
+              {done
+                ? <span className="badge pos" style={{ alignSelf: 'center' }}><span className="dot"/>처리 완료</span>
+                : <button className="btn primary" onClick={() => setProcessOpen(true)}><Icon.Check size={14}/> 처리</button>}
             </>
           )}
         </div>
       </div>
+
+      <ProcessDrawer open={processOpen} onClose={() => setProcessOpen(false)} doc={doc}
+        onDone={() => { setProcessOpen(false); onSaved(); }}/>
+
+      {/* 인쇄 대상 — 실제 결의서 양식 */}
+      <div className="doc-paper resolution-paper" id="resolution-print">
+        <div className="res-title-ko">지출결의서</div>
+        <div className="res-title">支 出 決 議 書</div>
+        <div className="res-date num">{form.pay_date || ''}</div>
+
+        {/* 헤더 표: 지출처 / 지출총액 / 구매품의NO / 신청자 / 지출방법 */}
+        <table className="res-table res-head">
+          <tbody>
+            <tr>
+              <th>지출처</th>
+              <td>{edit ? <input className="cell-input" value={form.vendor_name || ''} onChange={e => setForm(f => ({ ...f, vendor_name: e.target.value }))}/> : form.vendor_name}</td>
+              <th>지출총액</th>
+              <td className="num fw-700">₩ {fmtNum(itemsTotal || form.amount)}</td>
+            </tr>
+            <tr>
+              <th>구매품의NO</th>
+              <td className="num">{form.doc_no}</td>
+              <th>신청자</th>
+              <td>{edit ? <input className="cell-input" value={form.applicant || ''} onChange={e => setForm(f => ({ ...f, applicant: e.target.value }))}/> : form.applicant}</td>
+            </tr>
+            <tr>
+              <th>지출방법</th>
+              <td>{edit ? <input className="cell-input" value={form.pay_method || ''} onChange={e => setForm(f => ({ ...f, pay_method: e.target.value }))}/> : form.pay_method}</td>
+              <th>지급일</th>
+              <td className="num">{edit ? <input className="cell-input" type="date" value={form.pay_date || ''} onChange={e => setForm(f => ({ ...f, pay_date: e.target.value }))}/> : (form.pay_date || '—')}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div className="res-note-line">아래 내역과 같이 支出코저 하오니 承認하여 주시기 바랍니다.</div>
+
+        {/* 품목 명세 */}
+        <table className="res-table res-items">
+          <thead>
+            <tr>
+              <th style={{ width: 34 }}>NO</th><th>품명 및 규격</th><th style={{ width: 50 }}>단위</th>
+              <th style={{ width: 56 }}>수량</th><th style={{ width: 96 }}>단가</th><th style={{ width: 110 }}>금액</th><th style={{ width: 90 }}>비고</th>
+              {edit && <th className="no-print" style={{ width: 32 }}></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {displayItems.map((it, i) => (
+              <tr key={i}>
+                <td className="num" style={{ textAlign: 'center' }}>{i + 1}</td>
+                <td>{edit ? <input className="cell-input" value={it.name || ''} onChange={e => setItem(i, 'name', e.target.value)}/> : it.name}</td>
+                <td style={{ textAlign: 'center' }}>{edit ? <input className="cell-input" value={it.unit || ''} onChange={e => setItem(i, 'unit', e.target.value)}/> : it.unit}</td>
+                <td className="num" style={{ textAlign: 'right' }}>{edit ? <input className="cell-input num" style={{ textAlign: 'right' }} value={it.qty ?? ''} onChange={e => setItemNum(i, 'qty', e.target.value)}/> : fmtNum(it.qty || 0)}</td>
+                <td className="num" style={{ textAlign: 'right' }}>{edit ? <MoneyInput className="cell-input num" style={{ textAlign: 'right' }} placeholder="" value={it.price || ''} onChange={raw => setItemNum(i, 'price', raw)}/> : fmtNum(it.price || 0)}</td>
+                <td className="num fw-600" style={{ textAlign: 'right' }}>{fmtNum(it.amount || 0)}</td>
+                <td>{edit ? <input className="cell-input" value={it.note || ''} onChange={e => setItem(i, 'note', e.target.value)}/> : it.note}</td>
+                {edit && <td className="no-print" style={{ textAlign: 'center' }}><button className="icon-btn" onClick={() => removeItem(i)}><Icon.Close size={13}/></button></td>}
+              </tr>
+            ))}
+            {/* 빈 줄 채우기(양식 느낌) — 화면 편집 중엔 생략 */}
+            {!edit && Array.from({ length: Math.max(0, 4 - displayItems.length) }).map((_, i) => (
+              <tr key={`e${i}`}><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+            ))}
+            <tr className="res-total">
+              <th colSpan={5} style={{ textAlign: 'center' }}>합　계</th>
+              <td className="num fw-700" style={{ textAlign: 'right' }}>{fmtNum(edit ? itemsTotal : (displayItems.reduce((s, it) => s + (Number(it.amount) || 0), 0)))}</td>
+              <td></td>{edit && <td className="no-print"></td>}
+            </tr>
+          </tbody>
+        </table>
+        {edit && <button className="btn sm no-print" style={{ marginTop: 8 }} onClick={addItem}><Icon.Plus size={12}/> 품목 추가</button>}
+
+        {/* 특기사항 + 결재란 */}
+        <div className="res-foot">
+          <div className="res-note">
+            <div className="res-note-head">특기사항</div>
+            {edit
+              ? <textarea className="cell-input" style={{ width: '100%', minHeight: 60, resize: 'vertical' }} value={form.note || ''} onChange={e => setForm(f => ({ ...f, note: e.target.value }))}/>
+              : <div className="res-note-body">{form.note || ''}</div>}
+          </div>
+          <div>
+            {/* 편집 중이면 프리셋으로 결재선 교체. 결재란은 approval 단계대로 렌더. */}
+            {edit && presets.length > 0 && (
+              <div className="row gap-6 no-print" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
+                <span className="text-xs text-muted2" style={{ alignSelf: 'center' }}>결재선</span>
+                {presets.map(p => (
+                  <button key={p.id} className="btn ghost sm" onClick={() => applyPreset(p)}>{p.name}</button>
+                ))}
+              </div>
+            )}
+            <table className="res-approve">
+              <tbody>
+                <tr>{approval.map((s, i) => <th key={i}>{s.label}{s.position ? <div style={{ fontWeight: 400, fontSize: 10, color: '#888' }}>{s.position}</div> : null}</th>)}</tr>
+                <tr>{approval.map((_, i) => <td key={i}></td>)}</tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="res-company">
+          {company?.name || ''}{company?.biz_no ? ` · 사업자 ${company.biz_no}` : ''}
+        </div>
+      </div>
     </div>
   );
 };
+
+// 이전 DocPreview 이름 호환(다른 곳에서 참조 시)
+export const DocPreview = ResolutionPreview;
 
 export const Stamp = ({ name, tone = "neg" }) => {
   const color = tone === "neg" ? "var(--neg)" : "var(--ink)";
@@ -577,33 +990,143 @@ export const EvidenceAttachDrawer = ({ item, onClose }) => {
   );
 };
 
-/* ============ 엑셀 업로드 ============ */
+/* ============ 엑셀 업로드 (실 기능) ============ */
+const IMPORT_TARGETS = ["사용 안함", "날짜", "거래처", "계약명", "입금/지출 구분", "비목", "금액", "메모"]
+const guessTarget = (h) => {
+  const s = String(h).replace(/\s/g, '')
+  if (/날짜|일자|date/i.test(s)) return "날짜"
+  if (/거래처|상호|업체|공급|vendor/i.test(s)) return "거래처"
+  if (/계약|프로젝트|현장|contract/i.test(s)) return "계약명"
+  if (/구분|입출|유형|type/i.test(s)) return "입금/지출 구분"
+  if (/비목|계정|항목|category/i.test(s)) return "비목"
+  if (/금액|amount|가액|합계|공급가/i.test(s)) return "금액"
+  if (/메모|비고|적요|note/i.test(s)) return "메모"
+  return "사용 안함"
+}
+const normDate = (v) => {
+  if (v == null || v === '') return ''
+  const s = String(v).trim()
+  const m = s.match(/(\d{4})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})/)
+  if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`
+  const d = new Date(s)
+  if (!isNaN(d.getTime())) return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return ''
+}
+const normAmount = (v) => {
+  if (v == null || v === '') return null
+  const n = parseInt(String(v).replace(/[^0-9.-]/g, ''), 10)
+  return isNaN(n) ? null : Math.abs(n)
+}
+const normKind = (v) => {
+  const s = String(v || '').trim()
+  if (/입금|수입|매출|수금|income/i.test(s)) return 'income'
+  if (/지출|매입|출금|expense/i.test(s)) return 'expense'
+  return null
+}
+
 export const ExcelScreen = () => {
-  const toast = useToast();
-  const [stage] = useState(3);
-  const okCount = SAMPLE.excelPreview.filter(r => r.ok).length;
-  const errCount = SAMPLE.excelPreview.length - okCount;
-  const errBuckets = [
-    { key: "날짜 없음",  n: 1, fix: "엑셀의 날짜 형식을 YYYY-MM-DD로 통일해주세요." },
-    { key: "비목 미등록", n: 1, fix: "'유류비' 비목이 없어요. 새 비목으로 추가하거나 '교통비'로 연결할 수 있어요." },
-    { key: "금액 없음",  n: 1, fix: "'오피스디포' 행의 금액이 비어 있어요." },
-  ];
+  const toast = useToast()
+  const fileRef = useRef(null)
+  const [file, setFile] = useState(null)
+  const [rawRows, setRawRows] = useState([])
+  const [mapping, setMapping] = useState([])
+  const [defaultKind, setDefaultKind] = useState('expense')
+  const [excluded, setExcluded] = useState(() => new Set())
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState(null)
+
+  const onFile = async (f) => {
+    if (!f) return
+    setBusy(true); setResult(null)
+    try {
+      const { headers, rows } = await api.parseExcel(f)
+      if (!headers.length) { toast.push("열을 인식하지 못했어요. 첫 행이 머리글인지 확인하세요."); setBusy(false); return }
+      setFile({ name: f.name, size: f.size })
+      setRawRows(rows)
+      setMapping(headers.map(h => ({ excelCol: h, target: guessTarget(h) })))
+      setExcluded(new Set())
+    } catch (e) { toast.push(e.message || "파싱 실패") }
+    setBusy(false)
+  }
+
+  const reset = () => { setFile(null); setRawRows([]); setMapping([]); setExcluded(new Set()); setResult(null) }
+  const colFor = (t) => mapping.find(m => m.target === t)?.excelCol
+  const setMap = (i, k, v) => setMapping(ms => ms.map((m, idx) => idx === i ? { ...m, [k]: v } : m))
+
+  const preview = rawRows.map((row, idx) => {
+    const g = (t) => { const c = colFor(t); return c != null ? row[c] : '' }
+    const date = normDate(g("날짜"))
+    const kCol = colFor("입금/지출 구분")
+    const kind = kCol != null ? normKind(row[kCol]) : defaultKind
+    const amount = normAmount(g("금액"))
+    const errs = []
+    if (!colFor("날짜") || !date) errs.push("날짜")
+    if (!colFor("금액") || amount == null) errs.push("금액")
+    if (!kind) errs.push("구분")
+    return {
+      idx, date, kind, amount,
+      vendor: String(g("거래처") || '').trim(),
+      contract: String(g("계약명") || '').trim(),
+      category: String(g("비목") || '').trim(),
+      memo: String(g("메모") || '').trim(), errs,
+    }
+  })
+
+  const active = preview.filter(r => !excluded.has(r.idx))
+  const okRows = active.filter(r => r.errs.length === 0)
+  const errRows = active.filter(r => r.errs.length > 0)
+  const stage = result ? 4 : (file ? 3 : 1)
+
+  const buckets = [
+    { key: "날짜", label: "날짜 오류", fix: "날짜가 비었거나 형식을 인식 못했어요. 매핑을 다시 보거나 해당 행을 제외하세요." },
+    { key: "금액", label: "금액 오류", fix: "금액이 비었거나 숫자가 아니에요. 매핑을 다시 보거나 해당 행을 제외하세요." },
+    { key: "구분", label: "입금/지출 구분 오류", fix: "구분을 인식 못했어요. '구분' 매핑을 해제하면 위의 기본 유형이 적용돼요." },
+  ].map(b => ({ ...b, n: errRows.filter(r => r.errs.includes(b.key)).length })).filter(b => b.n > 0)
+
+  const excludeErr = (key) => setExcluded(s => {
+    const n = new Set(s)
+    errRows.filter(r => r.errs.includes(key)).forEach(r => n.add(r.idx))
+    return n
+  })
+  const unmapKind = () => setMapping(ms => ms.map(m => m.target === "입금/지출 구분" ? { ...m, target: "사용 안함" } : m))
+
+  const onCommit = async () => {
+    if (!okRows.length) return toast.push("등록할 정상 행이 없어요")
+    setBusy(true)
+    const items = okRows.map(r => ({ date: r.date, vendor: r.vendor, contract: r.contract, kind: r.kind, category: r.category, amount: r.amount, memo: r.memo }))
+    const res = await api.commitImport(items)
+    setBusy(false)
+    if (!res.ok) return toast.push(res.error || "등록 실패")
+    setResult(res)
+    toast.push(`${res.inserted}건이 등록됐어요`)
+  }
+
+  const downloadTemplate = async () => {
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch('/api/transactions/import/template', { headers: token ? { Authorization: 'Bearer ' + token } : {} })
+      if (!res.ok) throw new Error()
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob); const a = document.createElement('a')
+      a.href = url; a.download = '거래내역_업로드_양식.xlsx'; a.click(); URL.revokeObjectURL(url)
+    } catch { toast.push('양식 다운로드에 실패했어요') }
+  }
 
   return (
     <div className="fade-up">
       <div className="row" style={{ marginBottom: 6 }}>
         <div>
           <div className="page-title">엑셀 업로드</div>
-          <div className="page-sub">기존 입출금 자료를 엑셀로 한 번에 등록하세요.</div>
+          <div className="page-sub">기존 입출금 자료를 엑셀(.xlsx)·CSV로 한 번에 등록하세요.</div>
         </div>
         <div className="ml-auto row gap-8">
-          <button className="btn"><Icon.Download/> 양식 다운로드</button>
+          <button className="btn" onClick={downloadTemplate}><Icon.Download/> 양식 다운로드</button>
         </div>
       </div>
       <Spacer h={20}/>
 
       <div className="row gap-12" style={{ marginBottom: 20 }}>
-        {[{ n: 1, t: "파일 업로드" },{ n: 2, t: "데이터 유형" },{ n: 3, t: "컬럼 매핑 · 미리보기" },{ n: 4, t: "일괄 등록" }].map((s, i, arr) => (
+        {[{ n: 1, t: "파일 업로드" }, { n: 2, t: "데이터 유형" }, { n: 3, t: "컬럼 매핑 · 미리보기" }, { n: 4, t: "일괄 등록" }].map((s, i, arr) => (
           <Fragment key={s.n}>
             <div className="row gap-8" style={{ opacity: stage >= s.n ? 1 : 0.4 }}>
               <div style={{ width: 28, height: 28, borderRadius: "50%", background: stage >= s.n ? "var(--ink)" : "#fff", color: stage >= s.n ? "#fff" : "var(--muted)", border: "1px solid var(--line-strong)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: 12 }}>
@@ -616,141 +1139,164 @@ export const ExcelScreen = () => {
         ))}
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: "1fr clamp(240px, 280px, 320px)", gap: 16, alignItems: "start" }}>
-        <div className="col gap-16">
-          <div className="card card-pad">
-            <div className="row gap-12">
-              <div style={{ width: 44, height: 44, borderRadius: 10, background: "#E7F4ED", color: "var(--pos)", display: "grid", placeItems: "center" }}>
-                <Icon.Excel size={22}/>
-              </div>
-              <div>
-                <div className="fw-700">2026년_5월_지출입금.xlsx</div>
-                <div className="text-xs text-muted2">312KB · {SAMPLE.excelPreview.length}행 · 방금 업로드됨</div>
-              </div>
-              <div className="ml-auto row gap-6">
-                <button className="btn sm">다시 업로드</button>
-                <button className="btn ghost sm"><Icon.Close size={14}/></button>
-              </div>
-            </div>
-          </div>
+      <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={e => onFile(e.target.files[0])}/>
 
-          <div className="card card-pad">
-            <div className="section-title" style={{ marginBottom: 4 }}>컬럼 매핑</div>
-            <div className="section-sub" style={{ marginBottom: 14 }}>엑셀의 컬럼이 우리 항목과 어떻게 연결될지 확인하세요.</div>
-            <div className="table-scroll">
-              <table className="table" style={{ marginTop: 6 }}>
-                <thead>
-                  <tr><th>엑셀 컬럼</th><th>샘플 값</th><th style={{ width: 220 }}>매핑 항목</th></tr>
-                </thead>
-                <tbody>
-                  {[
-                    { col: "거래일자", sample: "2026-05-12",     mapped: "날짜" },
-                    { col: "상호",     sample: "디자인스튜디오 R", mapped: "거래처" },
-                    { col: "프로젝트", sample: "도면관리 구축",    mapped: "계약명" },
-                    { col: "구분",     sample: "지출",            mapped: "입금/지출 구분" },
-                    { col: "계정",     sample: "외주비",          mapped: "비목" },
-                    { col: "금액",     sample: "1,500,000",       mapped: "금액" },
-                    { col: "비고",     sample: "5월분",           mapped: "메모" },
-                  ].map((r, i) => (
-                    <tr key={i}>
-                      <td className="fw-600">{r.col}</td>
-                      <td className="text-muted num text-sm">{r.sample}</td>
-                      <td>
-                        <div className="row gap-6" style={{ alignItems: "center" }}>
-                          <Icon.Right size={12} className="text-muted2"/>
-                          <select defaultValue={r.mapped} style={{ flex: 1, fontSize: 13, fontFamily: "inherit", fontWeight: 600, padding: "7px 28px 7px 12px", borderRadius: 8, border: "1px solid var(--line-strong)", background: "#fff", appearance: "none", cursor: "pointer" }}>
-                            {["날짜","거래처","계약명","입금/지출 구분","비목","금액","메모","결제수단","증빙 번호","사용 안함"].map(o => (
-                              <option key={o} value={o}>{o}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="row" style={{ padding: "16px 16px", borderBottom: "1px solid var(--line)" }}>
-              <div className="section-title">미리보기</div>
-              <div className="ml-auto row gap-8">
-                <span className="badge pos"><Icon.Check size={11}/> 정상 {okCount}</span>
-                <span className="badge neg"><Icon.Warn size={11}/> 오류 {errCount}</span>
-              </div>
-            </div>
-            <div className="table-scroll">
-              <table className="table">
-                <thead>
-                  <tr><th style={{ width: 40 }}>행</th><th>날짜</th><th>거래처</th><th>계약</th><th>구분</th><th>비목</th><th className="num-right">금액</th><th>상태</th></tr>
-                </thead>
-                <tbody>
-                  {SAMPLE.excelPreview.map((r, i) => (
-                    <tr key={i} style={{ background: r.ok ? undefined : "rgba(255, 80, 80, 0.04)" }}>
-                      <td className="num text-muted2">{r.row}</td>
-                      <td className="num text-sm">{r.date || <span className="text-neg">—</span>}</td>
-                      <td className="fw-600">{r.vendor}</td>
-                      <td className="text-muted text-sm">{r.contract}</td>
-                      <td><span className="badge outline">{r.type}</span></td>
-                      <td className="text-sm">{r.category}</td>
-                      <td className="num-cell num-right">{r.amount ? fmtNum(r.amount) : <span className="text-neg">—</span>}</td>
-                      <td>
-                        {r.ok
-                          ? <span className="badge pos"><Icon.Check size={11}/> 정상</span>
-                          : <span className="badge neg"><Icon.Warn size={11}/> {r.err}</span>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="row" style={{ padding: 16, borderTop: "1px solid var(--line)" }}>
-              <span className="text-sm text-muted">오류 {errCount}건을 먼저 수정한 다음 등록하면, 정상 {okCount}건이 한 번에 등록돼요.</span>
-              <div className="ml-auto row gap-8">
-                <button className="btn" onClick={() => toast.push("업로드를 취소했어요")}>취소</button>
-                <button className="btn primary" disabled={errCount > 0} style={{ opacity: errCount > 0 ? 0.5 : 1 }} onClick={() => errCount === 0 && toast.push(`${okCount}건이 등록되었어요`)}>
-                  <Icon.Check size={14}/> {okCount}건 일괄 등록
-                </button>
-              </div>
-            </div>
+      {result ? (
+        <div className="card card-pad fade-up" style={{ textAlign: "center", padding: "48px 24px", maxWidth: 520, margin: "0 auto" }}>
+          <div style={{ width: 48, height: 48, borderRadius: 14, background: "var(--pos-soft)", color: "var(--pos)", display: "grid", placeItems: "center", margin: "0 auto 16px" }}><Icon.Check size={24}/></div>
+          <div className="fw-700" style={{ fontSize: 16, marginBottom: 8 }}>{result.inserted}건이 등록됐어요</div>
+          {result.createdVendors?.length > 0 && (
+            <div className="text-sm text-muted" style={{ marginBottom: 16 }}>신규 거래처 {result.createdVendors.length}곳 자동 등록: {result.createdVendors.slice(0, 5).join(', ')}{result.createdVendors.length > 5 ? ' 외' : ''}</div>
+          )}
+          <button className="btn primary" onClick={reset}>새 파일 업로드</button>
+        </div>
+      ) : !file ? (
+        <div className="card card-pad">
+          <div className="drop" style={{ padding: 48, cursor: "pointer", textAlign: "center" }}
+            onClick={() => fileRef.current?.click()}
+            onDragOver={e => e.preventDefault()}
+            onDrop={e => { e.preventDefault(); onFile(e.dataTransfer.files[0]) }}>
+            <Icon.Excel size={36} style={{ color: "var(--pos)" }}/>
+            <div className="fw-600" style={{ marginTop: 8 }}>{busy ? "분석 중..." : "엑셀·CSV 파일을 끌어다 놓거나 클릭해서 업로드"}</div>
+            <div className="text-xs text-muted2" style={{ marginTop: 4 }}>.xlsx · .xls · .csv · 최대 20MB · 첫 행은 머리글</div>
           </div>
         </div>
-
-        <div className="col gap-16" style={{ position: "sticky", top: 88 }}>
-          <div className="card card-pad">
-            <div className="row" style={{ marginBottom: 10 }}>
-              <div className="section-title">오류 수정 도우미</div>
-              <span className="badge neg ml-auto">{errCount}건</span>
-            </div>
-            <div className="section-sub" style={{ marginBottom: 14 }}>한 번에 고치고 다시 미리보기로 돌아갈 수 있어요.</div>
-            <div className="col gap-10">
-              {errBuckets.map((e, i) => (
-                <div key={i} style={{ padding: 12, border: "1px solid var(--line)", borderRadius: 12, background: "var(--surface-2)" }}>
-                  <div className="row" style={{ marginBottom: 4 }}>
-                    <span className="fw-700 text-sm">{e.key}</span>
-                    <span className="badge neg ml-auto">{e.n}건</span>
-                  </div>
-                  <div className="text-xs text-muted">{e.fix}</div>
-                  <button className="btn sm" style={{ marginTop: 10 }} onClick={() => toast.push(`${e.key} 오류를 일괄 수정했어요`)}>고치기</button>
+      ) : (
+        <div className="grid" style={{ gridTemplateColumns: "1fr clamp(240px, 280px, 320px)", gap: 16, alignItems: "start" }}>
+          <div className="col gap-16">
+            <div className="card card-pad">
+              <div className="row gap-12">
+                <div style={{ width: 44, height: 44, borderRadius: 10, background: "#E7F4ED", color: "var(--pos)", display: "grid", placeItems: "center" }}><Icon.Excel size={22}/></div>
+                <div style={{ minWidth: 0 }}>
+                  <div className="fw-700" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</div>
+                  <div className="text-xs text-muted2">{Math.round(file.size / 1024)}KB · {rawRows.length}행 인식됨</div>
                 </div>
-              ))}
+                <div className="ml-auto row gap-6">
+                  <button className="btn sm" onClick={() => fileRef.current?.click()}>다시 업로드</button>
+                  <button className="btn ghost sm" onClick={reset}><Icon.Close size={14}/></button>
+                </div>
+              </div>
+              <div style={{ height: 1, background: "var(--line)", margin: "14px 0" }}/>
+              <div className="row gap-10" style={{ alignItems: "center", flexWrap: "wrap" }}>
+                <span className="text-sm fw-600">기본 데이터 유형</span>
+                <span className="text-xs text-muted2">구분 컬럼을 매핑하면 그 값이 우선해요</span>
+                <div className="row gap-6 ml-auto">
+                  {[["expense", "지출"], ["income", "입금"]].map(([v, l]) => (
+                    <button key={v} className={`chip ${defaultKind === v ? "active" : ""}`} onClick={() => setDefaultKind(v)}>{l}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="card card-pad">
+              <div className="section-title" style={{ marginBottom: 4 }}>컬럼 매핑</div>
+              <div className="section-sub" style={{ marginBottom: 14 }}>왼쪽은 엑셀 컬럼명(수정 가능), 오른쪽은 우리 항목으로 연결하세요.</div>
+              <div className="table-scroll">
+                <table className="table" style={{ marginTop: 6 }}>
+                  <thead><tr><th style={{ width: 200 }}>엑셀 컬럼</th><th>샘플 값</th><th style={{ width: 220 }}>매핑 항목</th></tr></thead>
+                  <tbody>
+                    {mapping.map((m, i) => (
+                      <tr key={i}>
+                        <td><input className="input" value={m.excelCol} onChange={e => setMap(i, "excelCol", e.target.value)}/></td>
+                        <td className="text-muted num text-sm" style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(rawRows[0]?.[m.excelCol] ?? '—') || '—'}</td>
+                        <td>
+                          <div className="row gap-6" style={{ alignItems: "center" }}>
+                            <Icon.Right size={12} className="text-muted2"/>
+                            <div style={{ flex: 1 }}>
+                              <Combobox value={m.target} onChange={v => setMap(i, "target", v)} allowAdd={false}
+                                options={IMPORT_TARGETS.map(o => ({ value: o, label: o }))}/>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="row" style={{ padding: "16px 16px", borderBottom: "1px solid var(--line)" }}>
+                <div className="section-title">미리보기</div>
+                <div className="ml-auto row gap-8">
+                  <span className="badge pos"><Icon.Check size={11}/> 정상 {okRows.length}</span>
+                  <span className="badge neg"><Icon.Warn size={11}/> 오류 {errRows.length}</span>
+                  {excluded.size > 0 && <span className="badge outline">제외 {excluded.size}</span>}
+                </div>
+              </div>
+              <div className="table-scroll" style={{ maxHeight: 360 }}>
+                <table className="table">
+                  <thead><tr><th style={{ width: 40 }}>행</th><th>날짜</th><th>거래처</th><th>계약</th><th>구분</th><th>비목</th><th className="num-right">금액</th><th>상태</th></tr></thead>
+                  <tbody>
+                    {preview.slice(0, 100).map((r) => {
+                      const ex = excluded.has(r.idx)
+                      return (
+                        <tr key={r.idx} style={{ background: ex ? "var(--surface-2)" : r.errs.length ? "rgba(255,80,80,0.04)" : undefined, opacity: ex ? 0.5 : 1 }}>
+                          <td className="num text-muted2">{r.idx + 2}</td>
+                          <td className="num text-sm">{r.date || <span className="text-neg">—</span>}</td>
+                          <td className="fw-600">{r.vendor || "—"}</td>
+                          <td className="text-muted text-sm">{r.contract || "—"}</td>
+                          <td>{r.kind ? <span className="badge outline">{r.kind === "income" ? "입금" : "지출"}</span> : <span className="text-neg text-xs">?</span>}</td>
+                          <td className="text-sm">{r.category || "—"}</td>
+                          <td className="num-cell num-right">{r.amount != null ? fmtNum(r.amount) : <span className="text-neg">—</span>}</td>
+                          <td>
+                            {ex ? <span className="badge outline">제외</span>
+                              : r.errs.length === 0 ? <span className="badge pos"><Icon.Check size={11}/> 정상</span>
+                              : <span className="badge neg"><Icon.Warn size={11}/> {r.errs.join('·')} 오류</span>}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="row" style={{ padding: 16, borderTop: "1px solid var(--line)" }}>
+                <span className="text-sm text-muted">{preview.length > 100 ? `상위 100행 표시 · 전체 ${preview.length}행` : `전체 ${preview.length}행`}</span>
+                <div className="ml-auto row gap-8">
+                  <button className="btn" onClick={reset}>취소</button>
+                  <button className="btn primary" disabled={busy || !okRows.length} style={{ opacity: (busy || !okRows.length) ? 0.5 : 1 }} onClick={onCommit}>
+                    <Icon.Check size={14}/> {busy ? "등록 중..." : `정상 ${okRows.length}건 일괄 등록`}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-          <div className="card card-pad" style={{ background: "var(--brand-soft)", borderColor: "transparent" }}>
-            <div className="row gap-8" style={{ marginBottom: 6 }}>
-              <Icon.Sparkle/>
-              <div className="fw-700">엑셀 한 번에 정리하기</div>
+
+          <div className="col gap-16" style={{ position: "sticky", top: 88 }}>
+            <div className="card card-pad">
+              <div className="row" style={{ marginBottom: 10 }}>
+                <div className="section-title">오류 수정 도우미</div>
+                <span className="badge neg ml-auto">{errRows.length}건</span>
+              </div>
+              <div className="section-sub" style={{ marginBottom: 14 }}>오류 행을 제외하거나 매핑을 바꾸면 바로 다시 검증돼요.</div>
+              {buckets.length === 0 ? (
+                <div className="text-sm text-muted" style={{ padding: "8px 0" }}>{errRows.length === 0 ? "오류가 없어요. 바로 등록할 수 있어요." : "—"}</div>
+              ) : (
+                <div className="col gap-10">
+                  {buckets.map((b, i) => (
+                    <div key={i} style={{ padding: 12, border: "1px solid var(--line)", borderRadius: 12, background: "var(--surface-2)" }}>
+                      <div className="row" style={{ marginBottom: 4 }}><span className="fw-700 text-sm">{b.label}</span><span className="badge neg ml-auto">{b.n}건</span></div>
+                      <div className="text-xs text-muted">{b.fix}</div>
+                      <div className="row gap-6" style={{ marginTop: 10 }}>
+                        <button className="btn sm" onClick={() => excludeErr(b.key)}>오류 행 제외</button>
+                        {b.key === "구분" && <button className="btn sm" onClick={unmapKind}>기본값 적용</button>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {excluded.size > 0 && <button className="btn ghost sm" style={{ marginTop: 12 }} onClick={() => setExcluded(new Set())}>제외 해제 ({excluded.size})</button>}
             </div>
-            <div className="text-sm" style={{ color: "var(--brand-ink)" }}>
-              은행 거래내역(CSV)도 같은 방식으로 업로드하면 거래처별로 자동 분류돼요.
+            <div className="card card-pad" style={{ background: "var(--brand-soft)", borderColor: "transparent" }}>
+              <div className="row gap-8" style={{ marginBottom: 6 }}><Icon.Sparkle/><div className="fw-700">미등록 거래처는 자동 등록</div></div>
+              <div className="text-sm" style={{ color: "var(--brand-ink)" }}>엑셀에만 있는 거래처는 등록 시 자동으로 거래처 목록에 추가돼요 (입금=발주처, 지출=매입처).</div>
             </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
-  );
-};
+  )
+}
 
 /* ============ 보고서 ============ */
 
@@ -775,8 +1321,8 @@ const StatCard = ({ label, value, unit = "원", tone }) => {
 
 // 데이터에서 사용 가능한 월 목록 자동 추출
 const ALL_MONTHS = [...new Set([
-  ...SAMPLE.incomes.map(r => r.date.slice(0, 7)),
-  ...SAMPLE.expenses.map(r => r.date.slice(0, 7)),
+  ...SAMPLE.incomes.map(r => (r.date || '').slice(0, 7)),
+  ...SAMPLE.expenses.map(r => (r.date || '').slice(0, 7)),
 ])].sort((a, b) => b.localeCompare(a))
 
 const PeriodFilter = ({ value, onChange }) => (
@@ -814,12 +1360,12 @@ const ReportMonthly = ({ toast }) => {
 
   const bucket = {}
   incomes.forEach(r => {
-    const m = r.date.slice(0, 7)
+    const m = (r.date || '').slice(0, 7)
     if (!bucket[m]) bucket[m] = { income: 0, expense: 0 }
     bucket[m].income += r.amount
   })
   expenses.forEach(r => {
-    const m = r.date.slice(0, 7)
+    const m = (r.date || '').slice(0, 7)
     if (!bucket[m]) bucket[m] = { income: 0, expense: 0 }
     bucket[m].expense += r.amount
   })
@@ -881,109 +1427,85 @@ const ReportMonthly = ({ toast }) => {
 
 // ── 2. 4대보험·원천세 신고 자료 ─────────────────────────────
 const ReportTax4 = ({ toast }) => {
-  const active = HR_EMPLOYEES.filter(e => e.status === "재직" || e.status === "수습")
-  const payslips = active.map(e => ({ emp: e, slip: calcPayslip(e, MONTHLY_EXTRA[e.code] || {}) }))
-  const sum = (key) => payslips.reduce((a, p) => a + (p.slip[key] || 0), 0)
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7))
+  const [rows, setRows] = useState([])
+  useEffect(() => { api.getPayroll(month).then(r => setRows(Array.isArray(r) ? r : [])) }, [month])
+
+  const data = rows.map(r => ({ row: r, ...computeItems(r.items) }))
+  const dedLabels = []
+  data.forEach(d => d.calc.forEach(i => { if (i.kind === 'deduct' && !dedLabels.includes(i.label)) dedLabels.push(i.label) }))
+  const amountOf = (d, label) => d.calc.filter(i => i.kind === 'deduct' && i.label === label).reduce((a, i) => a + i.amount, 0)
+  const sumGross = data.reduce((a, d) => a + d.gross, 0)
+  const sumDed = data.reduce((a, d) => a + d.deduction, 0)
+  const sumNet = data.reduce((a, d) => a + d.net, 0)
+  const sumLabel = (label) => data.reduce((a, d) => a + amountOf(d, label), 0)
 
   return (
     <div>
+      <div className="row gap-8" style={{ marginBottom: 16 }}>
+        <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, -1))}><Icon.Left size={14}/></button>
+        <div className="fw-700" style={{ fontSize: 15, minWidth: 100, textAlign: "center" }}>{monthLabel(month)}</div>
+        <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, 1))}><Icon.Right size={14}/></button>
+        <button className="btn ml-auto" onClick={() => toast.push("신고 자료를 출력했어요")}><Icon.Print size={14}/> 자료 출력</button>
+      </div>
+
       <div className="card card-pad" style={{ background: "var(--brand-soft)", borderColor: "transparent", marginBottom: 16 }}>
         <div className="row gap-8">
           <Icon.Bell size={14}/>
-          <span className="text-sm fw-600">다음 납부 기한: 2026년 6월 10일 (수)</span>
-          <span className="text-xs text-muted" style={{ marginLeft: 4 }}>원천세 신고·납부 / 4대보험료 고지 납부</span>
+          <span className="text-sm fw-600">급여대장에 입력된 실제 지급·공제액을 집계했어요</span>
+          <span className="text-xs text-muted" style={{ marginLeft: 4 }}>세무서·공단 고지 금액을 급여대장 명세서에 입력하면 이 표에 그대로 반영됩니다</span>
         </div>
-      </div>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
-        <StatCard label="급여 총액"     value={sum("gross")}/>
-        <StatCard label="원천징수 합계" value={sum("incomeTax") + sum("localTax")} tone="neg"/>
-        <StatCard label="4대보험(개인)" value={sum("pension") + sum("health") + sum("jobless")} tone="warn"/>
-        <StatCard label="4대보험(회사)" value={sum("employerTotal")}/>
-      </div>
-      <div className="card" style={{ overflow: "hidden" }}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>성명</th><th>직위</th>
-              <th className="num-right">급여총액</th>
-              <th className="num-right">근로소득세</th>
-              <th className="num-right">지방소득세</th>
-              <th className="num-right">국민연금</th>
-              <th className="num-right">건강보험</th>
-              <th className="num-right">고용보험</th>
-              <th className="num-right">실지급액</th>
-            </tr>
-          </thead>
-          <tbody>
-            {payslips.map(({ emp, slip }, i) => (
-              <tr key={i}>
-                <td className="fw-700">{emp.name}</td>
-                <td className="text-sm text-muted">{emp.pos}</td>
-                <td className="num-cell num-right">{fmtNum(slip.gross)}</td>
-                <td className="num-cell num-right" style={{ color: "var(--neg)" }}>{fmtNum(slip.incomeTax)}</td>
-                <td className="num-cell num-right" style={{ color: "var(--neg)" }}>{fmtNum(slip.localTax)}</td>
-                <td className="num-cell num-right" style={{ color: "var(--warn-ink)" }}>{fmtNum(slip.pension)}</td>
-                <td className="num-cell num-right" style={{ color: "var(--warn-ink)" }}>{fmtNum(slip.health)}</td>
-                <td className="num-cell num-right" style={{ color: "var(--warn-ink)" }}>{fmtNum(slip.jobless)}</td>
-                <td className="num-cell num-right fw-700">{fmtNum(slip.net)}</td>
-              </tr>
-            ))}
-            <tr style={{ background: "var(--surface-2)" }}>
-              <td colSpan={2} className="fw-700">합계</td>
-              <td className="num-cell num-right fw-700">{fmtNum(sum("gross"))}</td>
-              <td className="num-cell num-right" style={{ color: "var(--neg)" }}>{fmtNum(sum("incomeTax"))}</td>
-              <td className="num-cell num-right" style={{ color: "var(--neg)" }}>{fmtNum(sum("localTax"))}</td>
-              <td className="num-cell num-right" style={{ color: "var(--warn-ink)" }}>{fmtNum(sum("pension"))}</td>
-              <td className="num-cell num-right" style={{ color: "var(--warn-ink)" }}>{fmtNum(sum("health"))}</td>
-              <td className="num-cell num-right" style={{ color: "var(--warn-ink)" }}>{fmtNum(sum("jobless"))}</td>
-              <td className="num-cell num-right fw-700">{fmtNum(sum("net"))}</td>
-            </tr>
-          </tbody>
-        </table>
       </div>
 
-      {/* 회사 부담 4대보험 항목별 */}
-      <div className="card" style={{ overflow: "hidden", marginTop: 16 }}>
-        <div className="row" style={{ padding: "14px 18px", borderBottom: "1px solid var(--line)" }}>
-          <div className="section-title" style={{ fontSize: 14 }}>회사 부담 4대보험 납부 명세</div>
-          <span className="badge outline ml-auto">합계 {fmtNum(sum("pensionEmp") + sum("healthEmp") + sum("careEmp") + sum("joblessEmp") + sum("accidentEmp"))}원</span>
+      {rows.length === 0 ? (
+        <div className="card card-pad" style={{ textAlign: "center", color: "var(--muted-2)", padding: "44px 18px" }}>
+          {monthLabel(month)} 급여대장이 없어요. 인사관리 → 급여대장에서 먼저 작성하세요.
         </div>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>항목</th>
-              <th>납부처</th>
-              <th className="num-right">금액</th>
-            </tr>
-          </thead>
-          <tbody>
-            {[
-              { label: "국민연금 (회사분)",    agency: "국민연금공단",       key: "pensionEmp" },
-              { label: "건강보험 (회사분)",    agency: "국민건강보험공단",   key: "healthEmp" },
-              { label: "장기요양보험 (회사분)", agency: "국민건강보험공단",  key: "careEmp" },
-              { label: "고용보험 (회사분)",    agency: "근로복지공단",       key: "joblessEmp" },
-              { label: "산재보험 (회사분)",    agency: "근로복지공단",       key: "accidentEmp" },
-            ].map((item, i) => (
-              <tr key={i}>
-                <td className="fw-600 text-sm">{item.label}</td>
-                <td className="text-sm text-muted">{item.agency}</td>
-                <td className="num-cell num-right">{fmtNum(sum(item.key))}</td>
-              </tr>
-            ))}
-            <tr style={{ background: "var(--surface-2)" }}>
-              <td colSpan={2} className="fw-700">합계</td>
-              <td className="num-cell num-right fw-700">{fmtNum(sum("employerTotal"))}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      ) : (
+        <>
+          <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 24 }}>
+            <StatCard label="급여 총액" value={sumGross}/>
+            <StatCard label="공제 합계" value={sumDed} tone="warn"/>
+            <StatCard label="실지급액" value={sumNet}/>
+          </div>
+          <div className="card" style={{ overflow: "hidden" }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>성명</th><th>직위</th>
+                  <th className="num-right">급여총액</th>
+                  {dedLabels.map(l => <th key={l} className="num-right">{l}</th>)}
+                  <th className="num-right">실지급액</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((d, i) => (
+                  <tr key={i}>
+                    <td className="fw-700">{d.row.name}</td>
+                    <td className="text-sm text-muted">{d.row.role || "—"}</td>
+                    <td className="num-cell num-right">{fmtNum(d.gross)}</td>
+                    {dedLabels.map(l => <td key={l} className="num-cell num-right" style={{ color: "var(--warn-ink)" }}>{fmtNum(amountOf(d, l))}</td>)}
+                    <td className="num-cell num-right fw-700">{fmtNum(d.net)}</td>
+                  </tr>
+                ))}
+                <tr style={{ background: "var(--surface-2)" }}>
+                  <td colSpan={2} className="fw-700">합계 {data.length}명</td>
+                  <td className="num-cell num-right fw-700">{fmtNum(sumGross)}</td>
+                  {dedLabels.map(l => <td key={l} className="num-cell num-right fw-700" style={{ color: "var(--warn-ink)" }}>{fmtNum(sumLabel(l))}</td>)}
+                  <td className="num-cell num-right fw-700">{fmtNum(sumNet)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   )
 }
 
 // ── 3. 계약별 손익 현황 ──────────────────────────────────────
 const ReportContract = ({ toast }) => {
-  const rows = SAMPLE.contractSummary.map(c => ({ ...c, margin: c.profit / c.amount * 100 }))
+  const rows = SAMPLE.contractSummary.map(c => ({ ...c, margin: c.amount ? (c.profit || 0) / c.amount * 100 : 0 }))
   const totalAmount = rows.reduce((a, r) => a + r.amount, 0)
   const totalProfit = rows.reduce((a, r) => a + r.profit, 0)
 
@@ -992,7 +1514,7 @@ const ReportContract = ({ toast }) => {
       <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 24 }}>
         <StatCard label="총 수주금액" value={totalAmount}/>
         <StatCard label="총 손익"     value={totalProfit} tone="pos"/>
-        <StatCard label="평균 이익률" value={parseFloat((totalProfit / totalAmount * 100).toFixed(1))} unit="%" tone="pos"/>
+        <StatCard label="평균 이익률" value={totalAmount > 0 ? parseFloat((totalProfit / totalAmount * 100).toFixed(1)) : 0} unit="%" tone="pos"/>
       </div>
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
@@ -1144,7 +1666,7 @@ const ReportVendor = ({ toast }) => {
 
 // ── 6. 미수금 현황 ───────────────────────────────────────────
 const ReportAR = ({ toast }) => {
-  const { summary, rows } = SAMPLE.receivables
+  const { summary = {}, rows = [] } = SAMPLE.receivables || {}
   return (
     <div>
       <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
@@ -1216,7 +1738,7 @@ const ReportSubcontract = ({ toast }) => {
         <StatCard label="협력사 수"      value={`${rows.length}개사`} unit=""/>
         <StatCard label="외주가공비 합계" value={total}/>
         <StatCard label="미지급 잔액"    value={totalPending} tone="warn"/>
-        <StatCard label="총 지출 대비"   value={parseFloat((total / totalExp * 100).toFixed(1))} unit="%"/>
+        <StatCard label="총 지출 대비"   value={totalExp > 0 ? parseFloat((total / totalExp * 100).toFixed(1)) : 0} unit="%"/>
       </div>
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
@@ -1239,8 +1761,8 @@ const ReportSubcontract = ({ toast }) => {
                   {r.pending ? fmtNum(r.pending) : "—"}
                 </td>
                 <td className="num-right text-muted">{r.count}건</td>
-                <td className="num-right text-muted">{(r.total / total * 100).toFixed(1)}%</td>
-                <td><RBar pct={(r.total / total) * 100} tone="warn"/></td>
+                <td className="num-right text-muted">{total > 0 ? (r.total / total * 100).toFixed(1) : 0}%</td>
+                <td><RBar pct={total > 0 ? (r.total / total) * 100 : 0} tone="warn"/></td>
               </tr>
             ))}
           </tbody>
@@ -1284,7 +1806,7 @@ const ReportDefense = ({ toast }) => {
               >
                 <div style={{ textAlign: "left", flex: 1 }}>
                   <div className="fw-700 text-sm">{r.contractNo}</div>
-                  <div className="text-sm text-muted" style={{ marginTop: 2 }}>{r.buyer} · {r.name.split("(")[0].trim()}</div>
+                  <div className="text-sm text-muted" style={{ marginTop: 2 }}>{r.buyer} · {(r.name || '').split("(")[0].trim()}</div>
                 </div>
                 <div style={{ textAlign: "right", minWidth: 100 }}>
                   <div className="num fw-700" style={{ fontSize: 15 }}>{fmtNum(r.amount)}원</div>
@@ -1308,7 +1830,7 @@ const ReportDefense = ({ toast }) => {
                     </tr>
                   </thead>
                   <tbody>
-                    {r.items.map((it, j) => (
+                    {(r.items || []).map((it, j) => (
                       <tr key={j}>
                         <td className="text-sm text-muted">{it.no}</td>
                         <td className="fw-600 text-sm">{it.name}</td>
@@ -1320,7 +1842,7 @@ const ReportDefense = ({ toast }) => {
                     ))}
                     <tr style={{ background: "var(--surface-2)" }}>
                       <td colSpan={5} className="fw-700 text-sm">합계</td>
-                      <td className="num-cell num-right fw-700">{fmtNum(r.items.reduce((a, it) => a + it.total, 0))}</td>
+                      <td className="num-cell num-right fw-700">{fmtNum((r.items || []).reduce((a, it) => a + it.total, 0))}</td>
                     </tr>
                   </tbody>
                 </table>
