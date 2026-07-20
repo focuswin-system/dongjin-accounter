@@ -1076,6 +1076,12 @@ async function initDb() {
         )
       }
     })
+
+    // 급여·용역 지급 거래가 '지급 완료'(공백)로 쌓여 계좌 잔액 계산(status='지급완료')에서 누락되던 것 보정.
+    // 거래(transactions)만 대상 — 청구서(invoices)의 '지급 완료'는 별개 의미라 안 건드린다.
+    await runOnce('fix_txn_paid_status_space_v1', async () => {
+      await c.execute("UPDATE transactions SET status='지급완료' WHERE kind='expense' AND status='지급 완료'")
+    })
   } finally {
     c.release()
   }

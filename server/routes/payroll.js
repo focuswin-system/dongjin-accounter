@@ -239,7 +239,8 @@ router.post('/:id/pay', async (req, res, next) => {
       INSERT INTO transactions (id, kind, account_id, category, amount, date, method, status, buyer_type, employee_id, payroll_id, memo)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
     `, [txnId, 'expense', account_id || null, '급여', amt, date || new Date().toISOString().slice(0, 10),
-        method || '계좌이체', '지급 완료', '공통', p.employee_id, p.id, memo || `${p.month} ${p.name} 급여 지급`])
+        method || '계좌이체', '지급완료', '공통', p.employee_id, p.id, memo || `${p.month} ${p.name} 급여 지급`])
+    // ↑ 거래 status는 '지급완료'(공백 없음) — 계좌 잔액 계산(accounts.js)이 이 값만 지출로 센다.
 
     // 누적 지급액으로 상태 갱신
     const [[{ paid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM transactions WHERE payroll_id = ?', [p.id])

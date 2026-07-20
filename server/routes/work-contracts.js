@@ -391,8 +391,9 @@ router.post('/:id/pay', async (req, res, next) => {
         `INSERT INTO transactions (id, kind, account_id, category, amount, date, method, status, buyer_type, employee_id, payroll_id, memo)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
         [txnId, 'expense', acc, category, net, date || pay_date || new Date().toISOString().slice(0, 10),
-         '계좌이체', '지급 완료', '공통', c.employee_id, payrollId, memo || `${m} ${c.employee_name} ${category}`]
+         '계좌이체', '지급완료', '공통', c.employee_id, payrollId, memo || `${m} ${c.employee_name} ${category}`]
       )
+      // ↑ status '지급완료'(공백 없음) — 계좌 잔액 계산(accounts.js)이 이 값만 지출로 센다.
       await conn.execute('UPDATE payroll SET status = ? WHERE id = ?', ['지급완료', payrollId])
     }
     await conn.commit()
