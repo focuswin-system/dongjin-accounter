@@ -273,12 +273,16 @@ router.delete('/:id/pay/:txnId', async (req, res, next) => {
 })
 
 router.delete('/:id', async (req, res, next) => {
+  const conn = await pool.getConnection()
   try {
-    // 연결된 급여 지출의 연결만 해제(거래 자체는 보존)
-    await pool.execute('UPDATE transactions SET payroll_id = NULL WHERE payroll_id = ?', [req.params.id])
-    await pool.execute('DELETE FROM payroll WHERE id = ?', [req.params.id])
+    await conn.beginTransaction()
+    // 연결된 급여 지출의 연결만 해제(거래 자체는 보존). 두 문을 한 트랜잭션으로 묶어
+    // unlink만 되고 급여대장이 남는 어긋난 상태를 막는다.
+    await conn.execute('UPDATE transactions SET payroll_id = NULL WHERE payroll_id = ?', [req.params.id])
+    await conn.execute('DELETE FROM payroll WHERE id = ?', [req.params.id])
+    await conn.commit()
     res.json({ ok: true })
-  } catch (e) { next(e) }
+  } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
 })
 
 module.exports = router
