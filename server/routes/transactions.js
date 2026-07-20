@@ -183,10 +183,35 @@ router.delete('/docs/:docId', async (req, res, next) => {
 })
 
 router.delete('/:id', async (req, res, next) => {
+  const conn = await pool.getConnection()
   try {
-    await pool.execute('DELETE FROM transactions WHERE id = ?', [req.params.id])
+    await conn.beginTransaction()
+    // 이 거래에 걸린 청구서 매칭을 정리하고 청구서 상태를 재계산한다.
+    // 안 하면 매칭이 고아로 남아 청구서가 '완료'인 채 미수/미지급이 누락된다.
+    const [matches] = await conn.execute('SELECT invoice_id FROM invoice_matches WHERE txn_id = ?', [req.params.id])
+    await conn.execute('DELETE FROM invoice_matches WHERE txn_id = ?', [req.params.id])
+    for (const m of matches) {
+      const [[inv]] = await conn.execute('SELECT kind, total_amount FROM invoices WHERE id = ?', [m.invoice_id])
+      if (!inv) continue
+      const [[{ paid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [m.invoice_id])
+      const isIssued = inv.kind === 'issued'
+      const total = Number(inv.total_amount)
+      const status = Number(paid) <= 0 ? (isIssued ? '입금 예정' : '지급 대기')
+        : Number(paid) >= total ? (isIssued ? '입금 완료' : '지급 완료')
+        : (isIssued ? '일부 입금' : '일부 지급')
+      await conn.execute('UPDATE invoices SET status = ? WHERE id = ?', [status, m.invoice_id])
+      await conn.execute('UPDATE milestones SET status = ? WHERE invoice_id = ?', [status, m.invoice_id])
+    }
+    await conn.execute('DELETE FROM transactions WHERE id = ?', [req.params.id])
+    await conn.commit()
     res.json({ ok: true })
-  } catch (e) { next(e) }
+  } catch (e) {
+    await conn.rollback()
+    if (e.code === 'ER_ROW_IS_REFERENCED_2' || e.errno === 1451) {
+      return res.status(409).json({ error: '지급결의서·급여에 연결된 거래라 삭제할 수 없어요' })
+    }
+    next(e)
+  } finally { conn.release() }
 })
 
 // ── 엑셀 임포트: 파싱(헤더 + 행 미리보기) ──
@@ -213,8 +238,10 @@ router.post('/import/commit', async (req, res, next) => {
     const contractMap = {}; for (const c of cs) contractMap[c.name] = c.id
 
     await conn.beginTransaction()
-    let inserted = 0; const createdVendors = []
+    let inserted = 0, skippedFuture = 0; const createdVendors = []
     for (const it of items) {
+      // 미래 일자 거래는 건너뛴다 — 완료 상태로 들어가 계좌 잔액에 즉시 반영되므로 개별 등록과 같은 규칙 적용.
+      if (futureDateError(it.date)) { skippedFuture++; continue }
       let vendorId = null
       const vname = String(it.vendor || '').trim()
       if (vname) {
@@ -237,7 +264,7 @@ router.post('/import/commit', async (req, res, next) => {
       inserted++
     }
     await conn.commit()
-    res.json({ inserted, createdVendors })
+    res.json({ inserted, createdVendors, skippedFuture })
   } catch (e) { await conn.rollback(); next(e) }
   finally { conn.release() }
 })

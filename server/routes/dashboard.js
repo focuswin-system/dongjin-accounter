@@ -1,12 +1,13 @@
 const { Router } = require('express')
-const { pool } = require('../db')
+const { pool, kstDate } = require('../db')
 
 const router = Router()
 
 router.get('/', async (_, res, next) => {
   try {
-    const today = new Date().toISOString().slice(0, 10)
-    const sevenDays = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
+    // KST 기준 — 다른 화면(청구·미수/미지급)이 전부 KST라 UTC를 쓰면 자정 근처에 연체/도래 판정이 어긋난다.
+    const today = kstDate(Date.now())
+    const sevenDays = kstDate(Date.now() + 7 * 86400000)
 
     // 계좌 잔액
     const [accountRows] = await pool.execute('SELECT * FROM accounts')

@@ -60,21 +60,28 @@ router.put('/:id', async (req, res, next) => {
 
 router.delete('/:id', async (req, res, next) => {
   try {
-    // 거래·청구·정기지출에 연결돼 있으면 삭제 차단 (FK 보호)
+    // 거래·청구·정기지출·정기청구에 연결돼 있으면 삭제 차단 (FK 보호).
+    // recurring_invoices도 RESTRICT라 빼먹으면 가드를 통과한 뒤 FK로 500이 난다.
     const [[{ refCnt }]] = await pool.execute(
       `SELECT
          (SELECT COUNT(*) FROM transactions       WHERE account_id = ?) +
          (SELECT COUNT(*) FROM invoices           WHERE account_id = ?) +
-         (SELECT COUNT(*) FROM recurring_expenses WHERE account_id = ?) AS refCnt`,
-      [req.params.id, req.params.id, req.params.id]
+         (SELECT COUNT(*) FROM recurring_expenses WHERE account_id = ?) +
+         (SELECT COUNT(*) FROM recurring_invoices WHERE account_id = ?) AS refCnt`,
+      [req.params.id, req.params.id, req.params.id, req.params.id]
     )
     if (refCnt > 0) {
-      return res.status(409).json({ error: '이 계좌/카드에 연결된 거래·청구·정기지출이 있어 삭제할 수 없습니다' })
+      return res.status(409).json({ error: '이 계좌/카드에 연결된 거래·청구·정기 항목이 있어 삭제할 수 없습니다' })
     }
     const [result] = await pool.execute('DELETE FROM accounts WHERE id = ?', [req.params.id])
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
-  } catch (e) { next(e) }
+  } catch (e) {
+    if (e.code === 'ER_ROW_IS_REFERENCED_2' || e.errno === 1451) {
+      return res.status(409).json({ error: '이 계좌/카드에 연결된 항목이 있어 삭제할 수 없습니다' })
+    }
+    next(e)
+  }
 })
 
 router.get('/:id/adjustments', async (req, res, next) => {

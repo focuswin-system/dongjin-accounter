@@ -66,7 +66,13 @@ router.delete('/:id', async (req, res, next) => {
   try {
     await pool.execute('DELETE FROM employees WHERE id = ?', [req.params.id])
     res.json({ ok: true })
-  } catch (e) { next(e) }
+  } catch (e) {
+    // 근로계약·급여·거래에 연결된 직원은 FK로 막힌다 → 500 대신 친절한 안내(삭제 말고 퇴사 처리 유도).
+    if (e.code === 'ER_ROW_IS_REFERENCED_2' || e.errno === 1451) {
+      return res.status(409).json({ error: '급여·계약·거래 이력이 있는 직원은 삭제할 수 없어요. 퇴사 처리를 이용하세요.' })
+    }
+    next(e)
+  }
 })
 
 module.exports = router
