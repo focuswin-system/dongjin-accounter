@@ -44,7 +44,9 @@ export const monthLabel = (m) => { const [y, mo] = (m || '').split('-'); return 
 function printPayslip(row, company = "") {
   const { calc, gross, deduction, net } = computeItems(row.items);
   const won = (n) => (Number(n) || 0).toLocaleString('ko-KR');
-  const line = (l, a, neg) => `<tr><td>${l}</td><td style="text-align:right">${neg ? '-' : ''}${won(a)}</td></tr>`;
+  // 이름·항목명·회사명에 <, &, " 등이 있어도 인쇄 레이아웃이 깨지지 않게 이스케이프.
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const line = (l, a, neg) => `<tr><td>${esc(l)}</td><td style="text-align:right">${neg ? '-' : ''}${won(a)}</td></tr>`;
   const earns = calc.filter(i => i.kind === 'earn').map(i => line(i.label + (i.mode === 'percent' ? ` (${i.value}%)` : ''), i.amount)).join('');
   const deds  = calc.filter(i => i.kind === 'deduct').map(i => line(i.label + (i.mode === 'percent' ? ` (${i.value}%)` : ''), i.amount)).join('');
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>임금명세서 ${row.name} ${row.month}</title>
@@ -67,19 +69,19 @@ function printPayslip(row, company = "") {
     .foot{margin-top:16px;color:#999;font-size:12px;text-align:right}
   </style></head><body>
   <h1>임금명세서</h1>
-  <div class="co">${company ? company + ' · ' : ''}${monthLabel(row.month)}분</div>
+  <div class="co">${company ? esc(company) + ' · ' : ''}${monthLabel(row.month)}분</div>
   <table class="info">
-    <tr><th>성명</th><td>${row.name || ''}</td><th>사번</th><td>${row.emp_no || '—'}</td></tr>
-    <tr><th>부서</th><td>${row.department || '—'}</td><th>직위</th><td>${row.role || '—'}</td></tr>
-    <tr><th>생년월일</th><td>${row.birth_date || '—'}</td><th>입사일</th><td>${row.join_date || '—'}</td></tr>
-    <tr><th>지급일</th><td colspan="3">${row.pay_date || '—'}</td></tr>
+    <tr><th>성명</th><td>${esc(row.name)}</td><th>사번</th><td>${esc(row.emp_no) || '—'}</td></tr>
+    <tr><th>부서</th><td>${esc(row.department) || '—'}</td><th>직위</th><td>${esc(row.role) || '—'}</td></tr>
+    <tr><th>생년월일</th><td>${esc(row.birth_date) || '—'}</td><th>입사일</th><td>${esc(row.join_date) || '—'}</td></tr>
+    <tr><th>지급일</th><td colspan="3">${esc(row.pay_date) || '—'}</td></tr>
   </table>
   <div class="cols">
     <div><table class="pay"><tr><th>지급 항목</th><th class="num">금액</th></tr>${earns}<tr class="tot"><td>지급 합계</td><td class="num">${won(gross)}</td></tr></table></div>
     <div><table class="pay"><tr><th>공제 항목</th><th class="num">금액</th></tr>${deds}<tr class="tot"><td>공제 합계</td><td class="num">${won(deduction)}</td></tr></table></div>
   </div>
   <div class="net"><span>차인지급액 (실수령액)</span><span>${won(net)}원</span></div>
-  <div class="foot">${company ? company + ' · ' : ''}발행일 ${row.pay_date || ''}</div>
+  <div class="foot">${company ? esc(company) + ' · ' : ''}발행일 ${esc(row.pay_date)}</div>
   </body></html>`;
 
   const iframe = document.createElement('iframe');

@@ -889,6 +889,9 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     if (!contractId) return;
     reload();
     api.getVendors().then(setVendors);
+    // 계약이 바뀌면 탭을 기본으로 리셋 — 이전 계약의 탭 키가 남으면(예: 총액형에서 '원가 예산' 보다가
+    // 기성형 계약으로 이동) 그 계약에 없는 탭이라 본문이 비거나 엉뚱하게 뜬다. '청구 일정'은 두 유형 모두 안전.
+    setTab("청구 일정");
   }, [contractId]);
 
   // 계약 상세에서 입금/지출 등록 시 자동 갱신
@@ -898,11 +901,13 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   const issueInvoiceForMilestone = async (ms) => {
     if (!c) return;
     const supply = ms.amount || 0;
-    const vat = Math.round(supply * 0.1);
+    // 면세 계약이면 부가세 0 — 확인창 금액이 서버 계산과 어긋나지 않게(면세인데 VAT 포함으로 오표시 방지).
+    const exempt = c.vat_mode === 'exempt';
+    const vat = exempt ? 0 : Math.round(supply * 0.1);
     const ok = await confirm({
       tone: "brand", icon: <Icon.Receipt size={22}/>,
       title: `${ms.type} 청구서 발행`,
-      body: `${c.vendor_name || c.vendor || "거래처"} · ${ms.type} ${fmtNum(supply + vat)}원(VAT 포함) 청구서를 발행해요. 대금 청구에 등록됩니다.`,
+      body: `${c.vendor_name || c.vendor || "거래처"} · ${ms.type} ${fmtNum(supply + vat)}원${exempt ? "(면세)" : "(VAT 포함)"} 청구서를 발행해요. 대금 청구에 등록됩니다.`,
       confirmLabel: "청구서 발행",
     });
     if (!ok) return;

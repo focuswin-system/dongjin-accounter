@@ -521,11 +521,8 @@ const LaborPayItemsTab = ({ contract, onSaved }) => {
   const [masters, setMasters] = useState([])
   useEffect(() => { api.getPayrollItemTypes().then(setMasters) }, [])
   const save = async () => {
-    const res = await api.saveWorkContract({ id: contract.id, employee_id: contract.employee_id, kind: 'labor', income_type: '근로',
-      title: contract.title, employ_type_id: contract.employ_type_id, employ_type: contract.employ_type,
-      start_date: contract.start_date, end_date: contract.end_date, term_mode: contract.term_mode,
-      pay_form: contract.pay_form, pay_day: contract.pay_day, pay_items: items, status: contract.status,
-      insure_np: contract.insure_np, insure_hi: contract.insure_hi, insure_ei: contract.insure_ei, insure_ai: contract.insure_ai })
+    // 계약 전체를 펼치고 pay_items만 덮어쓴다 — 필드를 일부만 재구성하면 work_hours·conv_alert_months·memo가 유실된다.
+    const res = await api.saveWorkContract({ ...contract, id: contract.id, employee_id: contract.employee_id, pay_items: items })
     if (res.ok) { toast.push('급여 기준을 저장했어요'); onSaved?.() } else toast.push('저장에 실패했어요')
   }
   return (
