@@ -709,6 +709,27 @@ export const api = {
     } catch(e) { return { ok: false } }
   },
 
+  // ─── 거래처 엑셀 임포트 ────────────────────────────────────────
+  async parseVendorExcel(file) {
+    const fd = new FormData()
+    fd.append('file', file)
+    const token = localStorage.getItem('token')
+    const res = await fetch(`${BASE}/vendors/import/parse`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: fd,
+    })
+    if (!res.ok) throw new Error('엑셀 파싱에 실패했어요')
+    return res.json() // { headers, rows }
+  },
+
+  async commitVendorImport(items) {
+    try {
+      const r = await req('/vendors/import/commit', { method: 'POST', body: { items } })
+      return { ok: true, ...r }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
+
   // ─── HR 코드 (부서/직급) ──────────────────────────────────────
   async getHrCodes(type) {
     try { return await req(`/hr-codes${type ? `?type=${type}` : ''}`) } catch { return [] }

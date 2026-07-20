@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, Fragment } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, Popover } from '../lib/ui'
 // SAMPLE placeholder — Docs 화면은 실 API 연동 전까지 빈 데이터로 동작
 const SAMPLE = {
   docs: [], evidences: [], evidenceMissing: [], excelPreview: [],
@@ -1113,7 +1113,7 @@ export const ExcelScreen = () => {
   }
 
   return (
-    <div className="fade-up">
+    <div className="fade-up import-wrap">
       <div className="row" style={{ marginBottom: 6 }}>
         <div>
           <div className="page-title">엑셀 업로드</div>
@@ -1162,8 +1162,7 @@ export const ExcelScreen = () => {
           </div>
         </div>
       ) : (
-        <div className="grid" style={{ gridTemplateColumns: "1fr clamp(240px, 280px, 320px)", gap: 16, alignItems: "start" }}>
-          <div className="col gap-16">
+        <div className="col gap-16">
             <div className="card card-pad">
               <div className="row gap-12">
                 <div style={{ width: 44, height: 44, borderRadius: 10, background: "#E7F4ED", color: "var(--pos)", display: "grid", placeItems: "center" }}><Icon.Excel size={22}/></div>
@@ -1216,15 +1215,36 @@ export const ExcelScreen = () => {
             </div>
 
             <div className="card">
-              <div className="row" style={{ padding: "16px 16px", borderBottom: "1px solid var(--line)" }}>
+              <div className="row" style={{ padding: "14px 16px", borderBottom: "1px solid var(--line)", flexWrap: "wrap", gap: 8 }}>
                 <div className="section-title">미리보기</div>
-                <div className="ml-auto row gap-8">
+                <div className="ml-auto row gap-8" style={{ flexWrap: "wrap", alignItems: "center" }}>
                   <span className="badge pos"><Icon.Check size={11}/> 정상 {okRows.length}</span>
                   <span className="badge neg"><Icon.Warn size={11}/> 오류 {errRows.length}</span>
                   {excluded.size > 0 && <span className="badge outline">제외 {excluded.size}</span>}
+                  <Popover align="right" width={280}
+                    trigger={<button className="icon-btn" title="안내"><Icon.Help size={16}/></button>}>
+                    <div style={{ padding: 14 }}>
+                      <div className="fw-700" style={{ marginBottom: 6 }}>미등록 거래처는 자동 등록</div>
+                      <div className="text-sm text-muted" style={{ lineHeight: 1.6 }}>엑셀에만 있는 거래처는 등록 시 자동으로 거래처 목록에 추가돼요 (입금=발주처, 지출=매입처). 오류 행은 매핑을 바꾸거나 제외하면 바로 다시 검증됩니다.</div>
+                    </div>
+                  </Popover>
                 </div>
               </div>
-              <div className="table-scroll" style={{ maxHeight: 360 }}>
+
+              {(buckets.length > 0 || excluded.size > 0) && (
+                <div className="row gap-8" style={{ padding: "10px 16px", borderBottom: "1px solid var(--line)", background: "var(--surface-2)", flexWrap: "wrap", alignItems: "center" }}>
+                  {buckets.length > 0 && <span className="text-xs fw-600 text-muted">오류 {errRows.length}건</span>}
+                  {buckets.map((b, i) => (
+                    <Fragment key={i}>
+                      <button className="btn sm" onClick={() => excludeErr(b.key)}>{b.label} {b.n} 제외</button>
+                      {b.key === "구분" && <button className="btn sm" onClick={unmapKind}>기본값 적용</button>}
+                    </Fragment>
+                  ))}
+                  {excluded.size > 0 && <button className="btn ghost sm ml-auto" onClick={() => setExcluded(new Set())}>제외 해제 ({excluded.size})</button>}
+                </div>
+              )}
+
+              <div className="table-scroll" style={{ maxHeight: 420 }}>
                 <table className="table">
                   <thead><tr><th style={{ width: 40 }}>행</th><th>날짜</th><th>거래처</th><th>계약</th><th>구분</th><th>비목</th><th className="num-right">금액</th><th>상태</th></tr></thead>
                   <tbody>
@@ -1260,38 +1280,6 @@ export const ExcelScreen = () => {
                 </div>
               </div>
             </div>
-          </div>
-
-          <div className="col gap-16" style={{ position: "sticky", top: 88 }}>
-            <div className="card card-pad">
-              <div className="row" style={{ marginBottom: 10 }}>
-                <div className="section-title">오류 수정 도우미</div>
-                <span className="badge neg ml-auto">{errRows.length}건</span>
-              </div>
-              <div className="section-sub" style={{ marginBottom: 14 }}>오류 행을 제외하거나 매핑을 바꾸면 바로 다시 검증돼요.</div>
-              {buckets.length === 0 ? (
-                <div className="text-sm text-muted" style={{ padding: "8px 0" }}>{errRows.length === 0 ? "오류가 없어요. 바로 등록할 수 있어요." : "—"}</div>
-              ) : (
-                <div className="col gap-10">
-                  {buckets.map((b, i) => (
-                    <div key={i} style={{ padding: 12, border: "1px solid var(--line)", borderRadius: 12, background: "var(--surface-2)" }}>
-                      <div className="row" style={{ marginBottom: 4 }}><span className="fw-700 text-sm">{b.label}</span><span className="badge neg ml-auto">{b.n}건</span></div>
-                      <div className="text-xs text-muted">{b.fix}</div>
-                      <div className="row gap-6" style={{ marginTop: 10 }}>
-                        <button className="btn sm" onClick={() => excludeErr(b.key)}>오류 행 제외</button>
-                        {b.key === "구분" && <button className="btn sm" onClick={unmapKind}>기본값 적용</button>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {excluded.size > 0 && <button className="btn ghost sm" style={{ marginTop: 12 }} onClick={() => setExcluded(new Set())}>제외 해제 ({excluded.size})</button>}
-            </div>
-            <div className="card card-pad" style={{ background: "var(--brand-soft)", borderColor: "transparent" }}>
-              <div className="row gap-8" style={{ marginBottom: 6 }}><Icon.Sparkle/><div className="fw-700">미등록 거래처는 자동 등록</div></div>
-              <div className="text-sm" style={{ color: "var(--brand-ink)" }}>엑셀에만 있는 거래처는 등록 시 자동으로 거래처 목록에 추가돼요 (입금=발주처, 지출=매입처).</div>
-            </div>
-          </div>
         </div>
       )}
     </div>

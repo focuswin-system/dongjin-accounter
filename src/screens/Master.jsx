@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, Fragment } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput } from '../lib/ui'
+import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, Popover } from '../lib/ui'
 import { api } from '../lib/api'
 
 const fmtDateLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -443,8 +443,377 @@ export const RefMasterPanel = ({ cfg, page = false }) => {
   )
 }
 
+// ── 거래처 엑셀 업로드 마법사 ─────────────────────────────────────
+const VENDOR_IMPORT_TARGETS = ["사용 안함", "상호명", "거래구분", "거래유형", "사업자번호", "대표자", "담당자", "전화", "팩스", "이메일", "주소"]
+
+const guessVendorTarget = (h) => {
+  const s = String(h).replace(/\s/g, '')
+  if (/사업자|등록번호|biz/i.test(s)) return "사업자번호"
+  if (/구분|gubu/i.test(s)) return "거래구분"
+  if (/유형|업종|type|category/i.test(s)) return "거래유형"
+  if (/대표|ceo|사장/i.test(s)) return "대표자"
+  if (/담당|contact/i.test(s)) return "담당자"
+  if (/팩스|fax/i.test(s)) return "팩스"
+  if (/이메일|메일|mail/i.test(s)) return "이메일"
+  if (/주소|소재지|address/i.test(s)) return "주소"
+  if (/전화|연락처|휴대|tel|phone|hp/i.test(s)) return "전화"
+  if (/상호|거래처|업체|공급|회사|거래선|vendor|name/i.test(s)) return "상호명"
+  return "사용 안함"
+}
+
+const normBizNo = (v) => String(v ?? '').replace(/[^0-9]/g, '')
+// 상호 정규화: 법인격·공백·기호 제거 후 소문자 — 유사 상호 매칭용
+const normVendorName = (v) => String(v ?? '')
+  .replace(/\(주\)|\(유\)|\(재\)|\(사\)|㈜|㈔|㈕|주식회사|유한회사|재단법인|사단법인/g, '')
+  .replace(/[\s()\-.,·]/g, '')
+  .toLowerCase()
+
+const normGubu = (v) => {
+  const s = String(v ?? '').trim()
+  if (!s) return null
+  if (/기관|금융|은행|관공|공공|정부|카드사|^e$/i.test(s)) return 'E'
+  if (/매입|외주|자재|원자재|협력|하청|구매|^a$/i.test(s)) return 'A'
+  if (/발주|매출|수금|고객|판매|^b$/i.test(s)) return 'B'
+  return null
+}
+
+const VENDOR_STATE_META = {
+  error:     { badge: 'neg',     label: '상호 없음' },
+  'new':     { badge: 'pos',     label: '신규' },
+  dup:       { badge: 'warn',    label: '중복' },
+  ambiguous: { badge: 'brand',   label: '확인 필요' },
+  filedup:   { badge: 'outline', label: '파일 내 중복' },
+}
+
+const VendorImportWizard = ({ existing, onCancel, onDone }) => {
+  const toast = useToast()
+  const fileRef = useRef(null)
+  const [file, setFile] = useState(null)
+  const [rawRows, setRawRows] = useState([])
+  const [mapping, setMapping] = useState([])
+  const [defaultGubu, setDefaultGubu] = useState('A')
+  const [overrides, setOverrides] = useState({})   // idx -> 'insert' | 'skip' | 'update:<id>'
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState(null)
+
+  const onFile = async (f) => {
+    if (!f) return
+    setBusy(true); setResult(null)
+    try {
+      const { headers, rows } = await api.parseVendorExcel(f)
+      if (!headers.length) { toast.push('열을 인식하지 못했어요. 첫 행이 머리글인지 확인하세요.'); setBusy(false); return }
+      setFile({ name: f.name, size: f.size })
+      setRawRows(rows)
+      setMapping(headers.map(h => ({ excelCol: h, target: guessVendorTarget(h) })))
+      setOverrides({})
+    } catch (e) { toast.push(e.message || '파싱 실패') }
+    setBusy(false)
+  }
+
+  const reset = () => { setFile(null); setRawRows([]); setMapping([]); setOverrides({}); setResult(null) }
+  const colFor = (t) => mapping.find(m => m.target === t)?.excelCol
+  const setMap = (i, k, v) => setMapping(ms => ms.map((m, idx) => idx === i ? { ...m, [k]: v } : m))
+
+  // 기존 거래처 조회 인덱스 (사업자번호 / 정확 상호 / 정규화 상호)
+  const idx = useMemo(() => {
+    const byBiz = new Map(), byName = new Map(), byNorm = new Map()
+    for (const v of existing) {
+      const b = normBizNo(v.biz_no); if (b) byBiz.set(b, v)
+      const nm = String(v.name || '').trim(); if (nm && !byName.has(nm)) byName.set(nm, v)
+      const nn = normVendorName(v.name); if (nn) { if (!byNorm.has(nn)) byNorm.set(nn, []); byNorm.get(nn).push(v) }
+    }
+    return { byBiz, byName, byNorm }
+  }, [existing])
+
+  const preview = useMemo(() => {
+    const seen = new Set()
+    return rawRows.map((row, i) => {
+      const g = (t) => { const c = colFor(t); return c != null ? String(row[c] ?? '').trim() : '' }
+      const name = g('상호명')
+      const bizRaw = g('사업자번호')
+      const bizN = normBizNo(bizRaw)
+      const gCol = colFor('거래구분')
+      const gubu = gCol != null ? (normGubu(row[gCol]) || defaultGubu) : defaultGubu
+      const base = {
+        i, name, gubu, biz_no: bizRaw, type: g('거래유형'), ceo: g('대표자'),
+        contact: g('담당자'), phone: g('전화'), fax: g('팩스'), email: g('이메일'), address: g('주소'),
+      }
+      if (!name) return { ...base, state: 'error', candidates: [], def: 'skip' }
+      let matched = null
+      if (bizN && idx.byBiz.get(bizN)) matched = idx.byBiz.get(bizN)
+      else if (idx.byName.get(name)) matched = idx.byName.get(name)
+      const nn = normVendorName(name)
+      const candidates = matched ? [matched] : (idx.byNorm.get(nn) || [])
+      const key = bizN || nn
+      const fileDup = key && seen.has(key)
+      if (key) seen.add(key)
+      let state, def
+      if (matched) { state = 'dup'; def = 'skip' }
+      else if (candidates.length) { state = 'ambiguous'; def = 'skip' }
+      else if (fileDup) { state = 'filedup'; def = 'skip' }
+      else { state = 'new'; def = 'insert' }
+      return { ...base, state, candidates, def }
+    })
+  }, [rawRows, mapping, defaultGubu, idx])
+
+  const eff = (r) => overrides[r.i] ?? r.def
+  const setAction = (i, v) => setOverrides(o => ({ ...o, [i]: v }))
+
+  const counts = useMemo(() => {
+    const c = { new: 0, dup: 0, ambiguous: 0, filedup: 0, error: 0, insert: 0, update: 0, skip: 0 }
+    for (const r of preview) {
+      c[r.state]++
+      const a = eff(r)
+      if (r.state === 'error' || a === 'skip') c.skip++
+      else if (a === 'insert') c.insert++
+      else if (a.startsWith('update:')) c.update++
+    }
+    return c
+  }, [preview, overrides])
+
+  const applyBulk = (action) => setOverrides(o => {
+    const n = { ...o }
+    for (const r of preview) {
+      if (r.state === 'error' || r.state === 'new') continue
+      if (action === 'skip') n[r.i] = 'skip'
+      else if (action === 'insert') n[r.i] = 'insert'
+      else if (action === 'overwrite' && r.candidates.length === 1) n[r.i] = 'update:' + r.candidates[0].id
+    }
+    return n
+  })
+
+  const onCommit = async () => {
+    const items = preview
+      .filter(r => r.state !== 'error')
+      .map(r => ({ r, a: eff(r) }))
+      .filter(({ a }) => a !== 'skip')
+      .map(({ r, a }) => ({
+        action: a.startsWith('update:') ? 'update' : 'insert',
+        id: a.startsWith('update:') ? a.slice(7) : undefined,
+        name: r.name, gubu: r.gubu, type: r.type, biz_no: r.biz_no, ceo: r.ceo,
+        contact: r.contact, phone: r.phone, fax: r.fax, email: r.email, address: r.address,
+      }))
+    if (!items.length) return toast.push('등록·갱신할 거래처가 없어요')
+    setBusy(true)
+    const res = await api.commitVendorImport(items)
+    setBusy(false)
+    if (!res.ok) return toast.push(res.error || '등록 실패')
+    setResult(res)
+    toast.push(`신규 ${res.inserted}건 · 갱신 ${res.updated}건 반영됐어요`)
+  }
+
+  const downloadTemplate = async () => {
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch('/api/vendors/import/template', { headers: token ? { Authorization: 'Bearer ' + token } : {} })
+      if (!res.ok) throw new Error()
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob); const a = document.createElement('a')
+      a.href = url; a.download = '거래처_업로드_양식.xlsx'; a.click(); URL.revokeObjectURL(url)
+    } catch { toast.push('양식 다운로드에 실패했어요') }
+  }
+
+  const stage = result ? 3 : (file ? 2 : 1)
+  const rowOpts = (r) => [
+    { value: 'skip', label: '건너뛰기' },
+    { value: 'insert', label: '새로 등록' },
+    ...r.candidates.map(c => ({ value: 'update:' + c.id, label: `덮어쓰기 → ${c.name}`, sub: c.biz_no || GUBU_LABEL[c.gubu] || '' })),
+  ]
+
+  return (
+    <div className="import-wrap" style={{ padding: 20 }}>
+      <div className="row" style={{ marginBottom: 6, gap: 10, flexWrap: 'wrap' }}>
+        <div>
+          <div className="section-title">거래처 엑셀 업로드</div>
+          <div className="section-sub">거래처 목록을 엑셀(.xlsx)·CSV로 한 번에 등록하세요. 이미 있는 거래처는 중복 판정 후 건너뛰거나 덮어쓸 수 있어요.</div>
+        </div>
+        <div className="ml-auto row gap-8">
+          <button className="btn" onClick={downloadTemplate}><Icon.Download/> 양식 다운로드</button>
+          <button className="btn ghost" onClick={onCancel}><Icon.Close size={14}/> 닫기</button>
+        </div>
+      </div>
+      <Spacer h={16}/>
+
+      <div className="row gap-12" style={{ marginBottom: 20 }}>
+        {[{ n: 1, t: '파일 업로드' }, { n: 2, t: '컬럼 매핑 · 중복 검토' }, { n: 3, t: '일괄 등록' }].map((s, i2, arr) => (
+          <Fragment key={s.n}>
+            <div className="row gap-8" style={{ opacity: stage >= s.n ? 1 : 0.4 }}>
+              <div style={{ width: 28, height: 28, borderRadius: '50%', background: stage >= s.n ? 'var(--ink)' : '#fff', color: stage >= s.n ? '#fff' : 'var(--muted)', border: '1px solid var(--line-strong)', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 12 }}>
+                {stage > s.n ? <Icon.Check size={14}/> : s.n}
+              </div>
+              <div className={`text-sm ${stage >= s.n ? 'fw-700' : 'text-muted'}`}>{s.t}</div>
+            </div>
+            {i2 < arr.length - 1 && <div style={{ flex: 1, height: 1, background: 'var(--line)' }}/>}
+          </Fragment>
+        ))}
+      </div>
+
+      <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }} onChange={e => onFile(e.target.files[0])}/>
+
+      {result ? (
+        <div className="card card-pad fade-up" style={{ textAlign: 'center', padding: '48px 24px', maxWidth: 520, margin: '0 auto' }}>
+          <div style={{ width: 48, height: 48, borderRadius: 14, background: 'var(--pos-soft)', color: 'var(--pos)', display: 'grid', placeItems: 'center', margin: '0 auto 16px' }}><Icon.Check size={24}/></div>
+          <div className="fw-700" style={{ fontSize: 16, marginBottom: 8 }}>거래처가 반영됐어요</div>
+          <div className="text-sm text-muted" style={{ marginBottom: 20 }}>신규 등록 {result.inserted}건 · 기존 갱신 {result.updated}건</div>
+          <div className="row gap-8" style={{ justifyContent: 'center' }}>
+            <button className="btn" onClick={reset}>새 파일 업로드</button>
+            <button className="btn primary" onClick={onDone}>거래처 목록으로</button>
+          </div>
+        </div>
+      ) : !file ? (
+        <div className="card card-pad">
+          <div className="drop" style={{ padding: 48, cursor: 'pointer', textAlign: 'center' }}
+            onClick={() => fileRef.current?.click()}
+            onDragOver={e => e.preventDefault()}
+            onDrop={e => { e.preventDefault(); onFile(e.dataTransfer.files[0]) }}>
+            <Icon.Excel size={36} style={{ color: 'var(--pos)' }}/>
+            <div className="fw-600" style={{ marginTop: 8 }}>{busy ? '분석 중...' : '엑셀·CSV 파일을 끌어다 놓거나 클릭해서 업로드'}</div>
+            <div className="text-xs text-muted2" style={{ marginTop: 4 }}>.xlsx · .xls · .csv · 최대 20MB · 첫 행은 머리글</div>
+          </div>
+        </div>
+      ) : (
+        <div className="col gap-16">
+            <div className="card card-pad">
+              <div className="row gap-12">
+                <div style={{ width: 44, height: 44, borderRadius: 10, background: '#E7F4ED', color: 'var(--pos)', display: 'grid', placeItems: 'center' }}><Icon.Excel size={22}/></div>
+                <div style={{ minWidth: 0 }}>
+                  <div className="fw-700" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</div>
+                  <div className="text-xs text-muted2">{Math.round(file.size / 1024)}KB · {rawRows.length}행 인식됨</div>
+                </div>
+                <div className="ml-auto row gap-6">
+                  <button className="btn sm" onClick={() => fileRef.current?.click()}>다시 업로드</button>
+                  <button className="btn ghost sm" onClick={reset}><Icon.Close size={14}/></button>
+                </div>
+              </div>
+              <div style={{ height: 1, background: 'var(--line)', margin: '14px 0' }}/>
+              <div className="row gap-10" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                <span className="text-sm fw-600">기본 거래구분</span>
+                <span className="text-xs text-muted2">‘거래구분’ 컬럼을 매핑하면 그 값이 우선해요</span>
+                <div className="row gap-6 ml-auto">
+                  {GUBU_OPTS.map(o => (
+                    <button key={o.value} className={`chip ${defaultGubu === o.value ? 'active' : ''}`} onClick={() => setDefaultGubu(o.value)}>{GUBU_LABEL[o.value]}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="card card-pad">
+              <div className="section-title" style={{ marginBottom: 4 }}>컬럼 매핑</div>
+              <div className="section-sub" style={{ marginBottom: 14 }}>왼쪽은 엑셀 컬럼명(수정 가능), 오른쪽은 우리 항목으로 연결하세요. ‘상호명’은 필수예요.</div>
+              <div className="table-scroll">
+                <table className="table" style={{ marginTop: 6 }}>
+                  <thead><tr><th style={{ width: 200 }}>엑셀 컬럼</th><th>샘플 값</th><th style={{ width: 200 }}>매핑 항목</th></tr></thead>
+                  <tbody>
+                    {mapping.map((m, i) => (
+                      <tr key={i}>
+                        <td><input className="input" value={m.excelCol} onChange={e => setMap(i, 'excelCol', e.target.value)}/></td>
+                        <td className="text-muted num text-sm" style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(rawRows[0]?.[m.excelCol] ?? '—') || '—'}</td>
+                        <td>
+                          <div className="row gap-6" style={{ alignItems: 'center' }}>
+                            <Icon.Right size={12} className="text-muted2"/>
+                            <div style={{ flex: 1 }}>
+                              <Combobox value={m.target} onChange={v => setMap(i, 'target', v)} allowAdd={false}
+                                options={VENDOR_IMPORT_TARGETS.map(o => ({ value: o, label: o }))}/>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {!colFor('상호명') && (
+                <div className="alert-row" style={{ marginTop: 12, background: 'var(--neg-soft)', borderColor: 'transparent' }}>
+                  <Icon.Warn/>
+                  <div><div className="lead">‘상호명’ 컬럼을 지정해주세요</div><div className="body">상호명이 없으면 거래처를 등록할 수 없어요.</div></div>
+                </div>
+              )}
+            </div>
+
+            <div className="card">
+              <div className="row" style={{ padding: '14px 16px', borderBottom: '1px solid var(--line)', flexWrap: 'wrap', gap: 8 }}>
+                <div className="section-title">미리보기 · 중복 처리</div>
+                <div className="ml-auto row gap-8" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span className="badge pos"><Icon.Check size={11}/> 신규 {counts.new}</span>
+                  {counts.dup > 0 && <span className="badge warn">중복 {counts.dup}</span>}
+                  {counts.ambiguous > 0 && <span className="badge brand">확인 필요 {counts.ambiguous}</span>}
+                  {counts.filedup > 0 && <span className="badge outline">파일 중복 {counts.filedup}</span>}
+                  {counts.error > 0 && <span className="badge neg"><Icon.Warn size={11}/> 오류 {counts.error}</span>}
+                  <Popover align="right" width={280}
+                    trigger={<button className="icon-btn" title="중복 판정 기준"><Icon.Help size={16}/></button>}>
+                    <div style={{ padding: 14 }}>
+                      <div className="fw-700" style={{ marginBottom: 6 }}>중복은 이렇게 판정해요</div>
+                      <div className="text-sm text-muted" style={{ lineHeight: 1.6 }}>
+                        사업자번호가 같으면 <b>중복</b>, 상호가 똑같아도 <b>중복</b>이에요. 법인격·띄어쓰기만 다른 비슷한 상호는 <b>확인 필요</b>로 표시하니, 처리 칸에서 맞는 거래처를 골라 덮어쓰세요. 미등록 거래처는 <b>신규</b>로 등록됩니다.
+                      </div>
+                    </div>
+                  </Popover>
+                </div>
+              </div>
+
+              {(counts.dup + counts.ambiguous + counts.filedup) > 0 && (
+                <div className="row gap-8" style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', background: 'var(--surface-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span className="text-xs fw-600 text-muted">중복 {counts.dup + counts.ambiguous + counts.filedup}건 일괄</span>
+                  <button className="btn sm" onClick={() => applyBulk('skip')}>전체 건너뛰기</button>
+                  <button className="btn sm" onClick={() => applyBulk('overwrite')}>전체 덮어쓰기 <span className="text-muted2" style={{ fontSize: 11 }}>(후보 1곳)</span></button>
+                  <button className="btn sm" onClick={() => applyBulk('insert')}>전체 새로 등록</button>
+                  {Object.keys(overrides).length > 0 && <button className="btn ghost sm ml-auto" onClick={() => setOverrides({})}>처리 초기화</button>}
+                </div>
+              )}
+
+              <div className="table-scroll" style={{ maxHeight: 420 }}>
+                <table className="table">
+                  <thead><tr><th style={{ width: 40 }}>행</th><th>상호명</th><th style={{ width: 64 }}>구분</th><th>사업자번호</th><th>대표자</th><th>연락처</th><th style={{ width: 84 }}>판정</th><th style={{ width: 220 }}>처리</th></tr></thead>
+                  <tbody>
+                    {preview.slice(0, 200).map((r) => {
+                      const a = eff(r)
+                      const skipped = r.state === 'error' || a === 'skip'
+                      return (
+                        <tr key={r.i} style={{ background: r.state === 'error' ? 'rgba(255,80,80,0.04)' : undefined, opacity: skipped && r.state !== 'error' ? 0.55 : 1 }}>
+                          <td className="num text-muted2">{r.i + 2}</td>
+                          <td className="fw-600">{r.name || <span className="text-neg">—</span>}</td>
+                          <td><span className="badge outline" style={{ fontSize: 10 }}>{GUBU_LABEL[r.gubu]}</span></td>
+                          <td className="num text-sm text-muted">{r.biz_no || '—'}</td>
+                          <td className="text-sm">{r.ceo || '—'}</td>
+                          <td className="text-sm text-muted">{r.contact || r.phone || '—'}</td>
+                          <td><span className={`badge ${VENDOR_STATE_META[r.state].badge}`}>{VENDOR_STATE_META[r.state].label}</span></td>
+                          <td>
+                            {r.state === 'error' ? (
+                              <span className="text-xs text-muted2">상호명 필요</span>
+                            ) : r.state === 'new' ? (
+                              <div className="row gap-6">
+                                <button className={`chip sm ${a === 'insert' ? 'active' : ''}`} onClick={() => setAction(r.i, 'insert')}>신규 등록</button>
+                                <button className={`chip sm ${a === 'skip' ? 'active' : ''}`} onClick={() => setAction(r.i, 'skip')}>제외</button>
+                              </div>
+                            ) : (
+                              <Combobox value={a} onChange={v => setAction(r.i, v)} allowAdd={false} options={rowOpts(r)}/>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="row" style={{ padding: 16, borderTop: '1px solid var(--line)', flexWrap: 'wrap', gap: 8 }}>
+                <span className="text-sm text-muted">{preview.length > 200 ? `상위 200행 표시 · 전체 ${preview.length}행` : `전체 ${preview.length}행`}</span>
+                <div className="ml-auto row gap-8">
+                  <button className="btn" onClick={onCancel}>취소</button>
+                  <button className="btn primary" disabled={busy || (!counts.insert && !counts.update)} style={{ opacity: (busy || (!counts.insert && !counts.update)) ? 0.5 : 1 }} onClick={onCommit}>
+                    <Icon.Check size={14}/> {busy ? '등록 중...' : `신규 ${counts.insert} · 갱신 ${counts.update} 반영`}
+                  </button>
+                </div>
+              </div>
+            </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 const VendorPanel = () => {
   const toast = useToast()
+  const [importing,   setImporting]   = useState(false)
   const [vendors,     setVendors]     = useState([])
   const [q,           setQ]           = useState('')
   const [filterGubu,  setFilterGubu]  = useState('')
@@ -489,6 +858,13 @@ const VendorPanel = () => {
     load()
   }
 
+  if (importing) return (
+    <VendorImportWizard
+      existing={vendors}
+      onCancel={() => setImporting(false)}
+      onDone={() => { setImporting(false); load() }}/>
+  )
+
   return (
     <div style={{ padding: 20 }}>
       <div className="row" style={{ marginBottom: 16, gap: 10, flexWrap: 'wrap' }}>
@@ -507,6 +883,7 @@ const VendorPanel = () => {
           <Icon.Search size={14}/>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="상호·담당자·연락처"/>
         </div>
+        <button className="btn excel" onClick={() => setImporting(true)}><Icon.Excel/> 엑셀 업로드</button>
         <button className="btn primary" onClick={openNew}><Icon.Plus size={14}/> 거래처 등록</button>
       </div>
 
