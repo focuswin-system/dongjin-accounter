@@ -10,6 +10,7 @@ import { TransactionForm } from './screens/Form'
 import { ContractListScreen, ContractScreen, CONTRACT_LIST } from './screens/Contract'
 import { DocsScreen, EvidenceScreen, EvidenceAttachDrawer, ExcelScreen, ReportsScreen } from './screens/Docs'
 import { HRScreen } from './screens/HR'
+import { LaborContractScreen, OutsourcingScreen } from './screens/WorkContract'
 import { MasterScreen, RefMasterPanel, REF_CONFIGS } from './screens/Master'
 import { BillingScreen } from './screens/Billing'
 import { TaxVatScreen, OtherTaxScreen } from './screens/Tax'
@@ -331,8 +332,8 @@ function AppInner({ onLogout, user }) {
       case "master":          return <MasterScreen user={user} section="base"/>;
       case "settings":        return <MasterScreen user={user} section="settings"/>;
       case "hr_base":         return <MasterScreen user={user} section="hr"/>;
-      case "hr_labor_contract": return <RefMasterPanel cfg={REF_CONFIGS.labor_contract} page/>;
-      case "hr_outsourcing":  return <RefMasterPanel cfg={REF_CONFIGS.outsourcing} page/>;
+      case "hr_labor_contract": return <LaborContractScreen/>;
+      case "hr_outsourcing":  return <OutsourcingScreen/>;
       case "misc_pl":         return <MiscPLScreen/>;
       case "mgmt_dash":       return <MgmtDashScreen/>;
       case "excel_modal":     return <ExcelScreen/>;

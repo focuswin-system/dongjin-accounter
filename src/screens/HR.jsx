@@ -101,8 +101,6 @@ export const HRScreen = () => {
   const toast = useToast();
   const { confirm } = useConfirm();
   const [tab, setTab] = useState("급여대장");
-  const [empDrawer, setEmpDrawer] = useState(null);
-  const [employees, setEmployees] = useState([]);
 
   // 급여대장
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -112,12 +110,10 @@ export const HRScreen = () => {
   const [editSlip, setEditSlip] = useState(null);
   const [payTarget, setPayTarget] = useState(null);
 
-  const reloadEmployees = () => api.getEmployees().then(setEmployees);
   const loadPayroll = async () => {
     const [rows, s] = await Promise.all([api.getPayroll(month), api.getPayrollSummary(month)]);
     setPayRows(rows); setPaySummary(s);
   };
-  useEffect(() => { reloadEmployees() }, []);
   useEffect(() => { api.getAccounts().then(setAccounts) }, []);
   useEffect(() => { loadPayroll() }, [month]);
 
@@ -158,25 +154,20 @@ export const HRScreen = () => {
     loadPayroll();
   };
 
-  const active = employees.filter(e => e.status === "재직" || e.status === "수습");
-
   return (
     <>
       <div className="fade-up">
         <div className="row" style={{ marginBottom: 8 }}>
           <div>
             <div className="page-title">인사관리</div>
-            <div className="page-sub">직원 명부와 매달 급여를 한 곳에서 관리하세요. 4대보험·원천세 신고 자료는 보고서에서 받을 수 있어요.</div>
-          </div>
-          <div className="ml-auto row gap-8">
-            {tab === "직원" && <button className="btn primary" onClick={() => setEmpDrawer({ mode: "new" })}><Icon.Plus/> 직원 등록</button>}
+            <div className="page-sub">근로 급여대장과 용역·일용 지급을 한 곳에서 관리하세요. 직원 등록·근로계약은 <b>근로계약</b> 메뉴에서, 4대보험·원천세 자료는 보고서에서 받을 수 있어요.</div>
           </div>
         </div>
         <Spacer h={20}/>
 
         <div className="card" style={{ overflow: "hidden" }}>
           <div className="tab-bar" style={{ padding: "0 12px" }}>
-            {["급여대장", "직원"].map(t => (
+            {["급여대장", "용역·일용 대장"].map(t => (
               <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t}</button>
             ))}
           </div>
@@ -277,58 +268,7 @@ export const HRScreen = () => {
             </div>
           )}
 
-          {tab === "직원" && (
-            <div>
-              <div className="row" style={{ padding: "16px 18px", borderBottom: "1px solid var(--line)" }}>
-                <div>
-                  <div className="section-title">직원 명부</div>
-                  <div className="section-sub">전체 {employees.length}명 · 재직 {active.length}명</div>
-                </div>
-                <div className="ml-auto row gap-8">
-                  <div className="search" style={{ margin: 0, width: 220, padding: "6px 10px" }}>
-                    <Icon.Search size={14}/>
-                    <input placeholder="이름·사번 검색"/>
-                  </div>
-                  <button className="btn"><Icon.Filter/> 필터</button>
-                </div>
-              </div>
-              <div className="table-scroll">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>사번</th><th>이름</th><th>부서</th><th>직위</th><th>입사일</th>
-                      <th>재직 상태</th><th className="num-right">기본급</th><th>부양가족</th><th>급여 계좌</th><th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {employees.map((e, i) => (
-                      <tr key={i} style={{ cursor: "pointer" }} onClick={() => setEmpDrawer({ mode: "edit", emp: e })}>
-                        <td className="num text-muted text-sm">{e.code}</td>
-                        <td className="fw-700">{e.name}</td>
-                        <td className="text-sm">{e.dept}</td>
-                        <td className="text-sm">{e.pos}</td>
-                        <td className="num text-sm text-muted">{e.join}</td>
-                        <td><StatusBadge status={e.status}/></td>
-                        <td className="num-cell num-right">{fmtNum(e.pay.base)}</td>
-                        <td className="text-sm text-muted">{e.pay.dependents + e.pay.childDependents}명</td>
-                        <td className="text-sm text-muted">{e.account}</td>
-                        <td>
-                          <div className="row gap-4">
-                            <button className="btn ghost sm" onClick={(ev) => { ev.stopPropagation(); setEmpDrawer({ mode: "edit", emp: e }); }}>편집</button>
-                            <button className="btn ghost sm" style={{ color: "var(--neg)" }} onClick={async (ev) => {
-                              ev.stopPropagation();
-                              const ok = await confirm({ tone: "neg", icon: <Icon.Warn size={22}/>, title: `${e.name} 삭제`, body: "직원 정보를 삭제합니다. 복구할 수 없어요.", confirmLabel: "삭제" });
-                              if (ok) { await api.deleteEmployee(e.id); reloadEmployees(); toast.push("삭제됐어요"); }
-                            }}>삭제</button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+          {tab === "용역·일용 대장" && <ServiceLedgerTab month={month} setMonth={setMonth}/>}
         </div>
 
         <div className="row gap-10" style={{ marginTop: 16, padding: "12px 14px", fontSize: 12, color: "var(--muted-2)" }}>
@@ -341,207 +281,68 @@ export const HRScreen = () => {
 
       <PayslipEditorDrawer row={editSlip} onClose={() => setEditSlip(null)} onSaved={() => { setEditSlip(null); loadPayroll(); }}/>
       <PayDrawer row={payTarget} accounts={accounts} onClose={() => setPayTarget(null)} onSaved={() => loadPayroll()}/>
-
-      <EmployeeDrawer info={empDrawer} onClose={() => setEmpDrawer(null)} onSaved={reloadEmployees}/>
     </>
   );
 };
 
-/* ───────── 직원 등록/편집 Drawer ───────── */
-const EmployeeDrawer = ({ info, onClose, onSaved }) => {
-  const toast = useToast();
-  const [depts, setDepts] = useState([]);
-  const [positions, setPositions] = useState([]);
-  const EMPTY = { name: "", dept: "", pos: "", join: "", birth: "", status: "재직", base: 0, positionAllowance: 0, mealAllowance: 0, vehicleAllowance: 0, dependents: 1, childDependents: 0 };
-  const [form, setForm] = useState(EMPTY);
+/* ───────── 용역·일용 대장 (월별 지급 회차, seq>=1) ───────── */
+const ServiceLedgerTab = ({ month, setMonth }) => {
+  const [rows, setRows] = useState([]);
+  const load = () => api.getPayroll(month, "service").then(setRows);
+  useEffect(() => { load() }, [month]);
 
-  useEffect(() => {
-    api.getHrCodes('dept').then(setDepts);
-    api.getHrCodes('pos').then(setPositions);
-  }, []);
-
-  useEffect(() => {
-    if (!info) return;
-    const e = info.emp;
-    setForm(e ? {
-      name: e.name, dept: e.dept === "—" ? "" : e.dept, pos: e.pos === "—" ? "" : e.pos,
-      join: e.join === "—" ? "" : e.join, birth: e.birth || "", status: e.status, base: e.pay?.base || 0,
-      positionAllowance: e.pay?.positionAllowance || 0,
-      mealAllowance: e.pay?.mealAllowance || 0,
-      vehicleAllowance: e.pay?.vehicleAllowance || 0,
-      dependents: e.pay?.dependents || 1,
-      childDependents: e.pay?.childDependents || 0,
-    } : EMPTY);
-  }, [info]);
-
-  const handleSave = async () => {
-    if (!form.name) return toast.push("이름을 입력해주세요");
-    const body = {
-      name:               form.name,
-      role:               form.pos,
-      department:         form.dept,
-      base_salary:        form.base || 0,
-      join_date:          form.join || null,
-      birth_date:         form.birth || null,
-      position_allowance: form.positionAllowance || 0,
-      meal_allowance:     form.mealAllowance || 0,
-      vehicle_allowance:  form.vehicleAllowance || 0,
-      dependents:         form.dependents || 1,
-      child_dependents:   form.childDependents || 0,
-      status:             form.status,
-      active:             form.status !== "퇴사",
-    };
-    const editing = info.mode === "edit" && info.emp?.id;
-    const res = editing ? await api.updateEmployee(info.emp.id, body) : await api.addEmployee(body);
-    if (res?.id || res?.ok) {
-      toast.push(editing ? "직원 정보를 저장했어요" : "직원이 등록됐어요");
-      onSaved?.();
-      onClose();
-    } else {
-      toast.push("저장에 실패했어요");
-    }
-  };
-
-  if (!info) return null;
-  const isNew = info.mode === "new";
-  const e = info.emp || {};
+  const gross = rows.reduce((s, r) => s + (Number(r.net_salary) || 0), 0);
+  const paid = rows.reduce((s, r) => s + (Number(r.paid) || 0), 0);
+  const unpaid = rows.reduce((s, r) => s + (Number(r.unpaid) || 0), 0);
+  const people = new Set(rows.map(r => r.employee_id)).size;
 
   return (
-    <Drawer open={true} onClose={onClose} width="min(560px, 100vw)">
-        <div className="drawer-head">
-          <div>
-            <div className="fw-700" style={{ fontSize: 16 }}>{isNew ? "새 직원 등록" : `${e.name} 직원 정보`}</div>
-            <div className="text-xs text-muted">{isNew ? "기본 정보와 급여 정보를 입력하세요." : `${e.code} · ${e.dept} · ${e.pos}`}</div>
-          </div>
-          <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
+    <div style={{ padding: "18px 18px 8px" }}>
+      <div className="row gap-8" style={{ marginBottom: 14 }}>
+        <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, -1))}><Icon.Left size={14}/></button>
+        <div className="fw-700" style={{ fontSize: 15, minWidth: 90, textAlign: "center" }}>{monthLabel(month)}</div>
+        <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, 1))}><Icon.Right size={14}/></button>
+        <div className="ml-auto text-xs text-muted2">지급 등록은 <b>기타 용역·일용</b> 메뉴의 인력 상세에서 해요</div>
+      </div>
+
+      <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
+        <MiniStat label="지급 발생"  value={fmtNum(gross) + "원"}  sub={`${rows.length}건`}     tone="ink"/>
+        <MiniStat label="지급 완료"  value={fmtNum(paid) + "원"}   sub="실제 이체분"            tone="brand"/>
+        <MiniStat label="미지급"     value={fmtNum(unpaid) + "원"} sub="아직 못 준 금액"        tone={unpaid > 0 ? "warn" : "ink"}/>
+        <MiniStat label="인원"       value={people + "명"}         sub="용역·일용"              tone="ink"/>
+      </div>
+
+      {rows.length === 0 ? (
+        <div style={{ padding: "36px 0 44px", textAlign: "center", color: "var(--muted-2)" }}>
+          {monthLabel(month)}에 용역·일용 지급 내역이 없어요.
         </div>
-
-        <div className="drawer-body">
-          <div className="text-xs text-muted2 fw-600" style={{ letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 12 }}>기본 정보</div>
-          <div className="col gap-form" style={{ marginBottom: 28 }}>
-            <FieldRow label="이름" required><input className="input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="홍길동"/></FieldRow>
-            <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-              <FieldRow label="부서">
-                <Combobox
-                  value={form.dept}
-                  onChange={v => setForm(f => ({ ...f, dept: v }))}
-                  options={depts.map(d => ({ value: d.name, label: d.name }))}
-                  placeholder="부서 선택"
-                  onAddNew={async (name) => {
-                    const res = await api.addHrCode('dept', name);
-                    if (res.ok) {
-                      const updated = await api.getHrCodes('dept');
-                      setDepts(updated);
-                      setForm(f => ({ ...f, dept: name }));
-                      toast.push(`"${name}" 부서 추가됐어요`);
-                    }
-                  }}
-                  addNewLabel="부서로 추가"
-                />
-              </FieldRow>
-              <FieldRow label="직위">
-                <Combobox
-                  value={form.pos}
-                  onChange={v => setForm(f => ({ ...f, pos: v }))}
-                  options={positions.map(p => ({ value: p.name, label: p.name }))}
-                  placeholder="직위 선택"
-                  onAddNew={async (name) => {
-                    const res = await api.addHrCode('pos', name);
-                    if (res.ok) {
-                      const updated = await api.getHrCodes('pos');
-                      setPositions(updated);
-                      setForm(f => ({ ...f, pos: name }));
-                      toast.push(`"${name}" 직위 추가됐어요`);
-                    }
-                  }}
-                  addNewLabel="직위로 추가"
-                />
-              </FieldRow>
-            </div>
-            <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-              <FieldRow label="입사일"><input className="input num" type="date" value={form.join} onChange={e => setForm(f => ({ ...f, join: e.target.value }))}/></FieldRow>
-              <FieldRow label="재직 상태">
-                <div className="row gap-6">
-                  {["재직", "수습", "휴직", "퇴사"].map(s => (
-                    <button key={s} type="button" className={`chip ${form.status === s ? "active" : ""}`} onClick={() => setForm(f => ({ ...f, status: s }))}>{s}</button>
-                  ))}
-                </div>
-              </FieldRow>
-            </div>
-            <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-              <FieldRow label="생년월일" hint="급여명세서 표기용"><input className="input num" type="date" value={form.birth} onChange={e => setForm(f => ({ ...f, birth: e.target.value }))}/></FieldRow>
-              <FieldRow label="급여 계좌"><input className="input" defaultValue={e.account} placeholder="은행 / 계좌번호"/></FieldRow>
-            </div>
-            <FieldRow label="주민등록번호"><input className="input num" placeholder="900101-1******"/></FieldRow>
-          </div>
-
-          <div className="text-xs text-muted2 fw-600" style={{ letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 12 }}>급여 정보</div>
-          <div className="col gap-form">
-            <div className="alert-row" style={{ background: "var(--surface-2)", borderColor: "var(--line)", marginBottom: 6 }}>
-              <Icon.Sparkle/>
-              <div>
-                <div className="lead">여기 입력한 기본급·직책수당·식대·자가운전 보조금은 급여대장 생성 시 명세서에 자동으로 채워집니다.</div>
-                <div className="body">4대보험·소득세처럼 매달 바뀌는 공제액만 급여대장 명세서에서 세무서·공단 고지 금액으로 직접 입력하면 돼요.</div>
-              </div>
-            </div>
-            <FieldRow label="기본급 (월)" required><MoneyInputControlled value={form.base} onChange={v => setForm(f => ({ ...f, base: v }))}/></FieldRow>
-            <FieldRow label="직책수당 (월)"><MoneyInputControlled value={form.positionAllowance} onChange={v => setForm(f => ({ ...f, positionAllowance: v }))}/></FieldRow>
-            <FieldRow label="식대 (월)" hint="월 20만원까지 비과세"><MoneyInputControlled value={form.mealAllowance} onChange={v => setForm(f => ({ ...f, mealAllowance: v }))}/></FieldRow>
-            <FieldRow label="자가운전 보조금 (월)" hint="월 20만원까지 비과세 · 본인 차량 업무 사용 시"><MoneyInputControlled value={form.vehicleAllowance} onChange={v => setForm(f => ({ ...f, vehicleAllowance: v }))}/></FieldRow>
-            <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-              <FieldRow label="부양가족 수" hint="본인 포함 · 참고용">
-                <input className="input num" type="number" min="1" value={form.dependents} onChange={e => setForm(f => ({ ...f, dependents: parseInt(e.target.value) || 0 }))}/>
-              </FieldRow>
-              <FieldRow label="20세 이하 자녀 수">
-                <input className="input num" type="number" min="0" value={form.childDependents} onChange={e => setForm(f => ({ ...f, childDependents: parseInt(e.target.value) || 0 }))}/>
-              </FieldRow>
-            </div>
-          </div>
-        </div>
-
-        <div className="drawer-foot">
-          {!isNew && <button className="btn" style={{ color: "var(--neg-ink)" }}>퇴사 처리</button>}
-          <div className="ml-auto row gap-8">
-            <button className="btn" onClick={onClose}>취소</button>
-            <button className="btn primary" onClick={handleSave}>
-              <Icon.Check size={14}/> {isNew ? "등록" : "저장"}
-            </button>
-          </div>
-        </div>
-    </Drawer>
-  );
-};
-
-const FieldRow = ({ label, hint, required, children }) => (
-  <div>
-    <label className="label">
-      {label} {required && <span style={{ color: "var(--neg-ink)" }}>*</span>}
-      {hint && <span className="text-muted2 fw-600" style={{ marginLeft: 6, fontWeight: 400 }}>· {hint}</span>}
-    </label>
-    {children}
-  </div>
-);
-
-const MoneyInput = ({ defaultValue }) => {
-  const [v, setV] = useState(defaultValue || 0);
-  return (
-    <div style={{ position: "relative" }}>
-      <input className="input num fw-700" style={{ paddingRight: 32 }}
-        value={fmtNum(v)}
-        onChange={e => setV(parseInt(e.target.value.replace(/[^0-9]/g, "")) || 0)}/>
-      <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", color: "var(--muted-2)", fontSize: 12 }}>원</span>
+      ) : (
+        <table className="table">
+          <thead><tr>
+            <th>성명</th><th>회차</th><th>업무</th><th className="num-right">지급액</th>
+            <th className="num-right">지급 완료</th><th>상태</th>
+          </tr></thead>
+          <tbody>
+            {rows.map(r => {
+              const lines = Array.isArray(r.qty_lines) ? r.qty_lines : [];
+              const work = lines.map(l => l.name).filter(Boolean).join(", ");
+              return (
+                <tr key={r.id}>
+                  <td className="fw-700">{r.name}</td>
+                  <td className="text-sm text-muted">#{r.seq}</td>
+                  <td className="text-sm text-muted">{work || "—"}</td>
+                  <td className="num-cell num-right">{fmtNum(r.net_salary)}</td>
+                  <td className="num-cell num-right">{fmtNum(r.paid)}</td>
+                  <td><StatusBadge status={r.payStatus}/></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 };
-
-const MoneyInputControlled = ({ value, onChange }) => (
-  <div style={{ position: "relative" }}>
-    <input className="input num fw-700" style={{ paddingRight: 32 }}
-      value={fmtNum(value)}
-      onChange={e => onChange(parseInt(e.target.value.replace(/[^0-9]/g, "")) || 0)}/>
-    <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", color: "var(--muted-2)", fontSize: 12 }}>원</span>
-  </div>
-);
 
 /* ───────── 급여 명세서 편집 Drawer (항목별 %·수치 입력) ───────── */
 const PayslipEditorDrawer = ({ row, onClose, onSaved }) => {

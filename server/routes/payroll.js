@@ -78,6 +78,7 @@ async function enrich(conn, p) {
   return {
     ...p,
     items: parseItems(p.items),
+    qty_lines: parseItems(p.qty_lines),   // 용역·일용 단가×수량 라인(있으면)
     payments: txns,
     paid,
     remain,                       // 양수=미지급, 음수=과지급
@@ -87,15 +88,17 @@ async function enrich(conn, p) {
   }
 }
 
-// ── 목록: ?month= 으로 월별, 없으면 전체 ──
+// ── 목록: ?month= 월별, ?scope= labor(급여대장, seq=0 기본) | service(용역·일용 회차, seq>=1) | all ──
 router.get('/', async (req, res, next) => {
   const conn = await pool.getConnection()
   try {
-    const { month } = req.query
+    const { month, scope } = req.query
+    // 급여대장(근로)은 seq=0만. 용역·일용은 seq>=1. 기본은 labor(급여대장 화면 호환).
+    const seqCond = scope === 'service' ? ' AND p.seq > 0' : scope === 'all' ? '' : ' AND p.seq = 0'
     const base = 'SELECT p.*, e.name, e.role, e.department, e.emp_no, e.join_date, e.birth_date FROM payroll p JOIN employees e ON p.employee_id = e.id'
     const [rows] = month
-      ? await conn.execute(base + ' WHERE p.month = ? ORDER BY e.department, e.name', [month])
-      : await conn.execute(base + ' ORDER BY p.month DESC, e.name')
+      ? await conn.execute(base + ' WHERE p.month = ?' + seqCond + ' ORDER BY e.department, e.name, p.seq', [month])
+      : await conn.execute(base + ' WHERE 1=1' + seqCond + ' ORDER BY p.month DESC, e.name, p.seq')
     const out = []
     for (const p of rows) out.push(await enrich(conn, p))
     res.json(out)
@@ -107,8 +110,9 @@ router.get('/summary', async (req, res, next) => {
   const conn = await pool.getConnection()
   try {
     const month = req.query.month || new Date().toISOString().slice(0, 7)
+    // 급여대장 요약은 근로(seq=0)만 — 용역·일용 회차가 섞여 총액이 부풀지 않게
     const [rows] = await conn.execute(
-      'SELECT p.*, e.name, e.department FROM payroll p JOIN employees e ON p.employee_id = e.id WHERE p.month = ?',
+      'SELECT p.*, e.name, e.department FROM payroll p JOIN employees e ON p.employee_id = e.id WHERE p.month = ? AND p.seq = 0',
       [month]
     )
     const list = []
@@ -167,26 +171,51 @@ router.post('/', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// ── 월 급여대장 일괄 생성: 재직 직원 중 미작성분만 기본 템플릿으로 ──
+// ── 월 급여대장 일괄 생성: 그 달에 유효한 근로계약 기준으로 미작성분만(seq=0) ──
+// 소스는 근로계약(work_contracts.pay_items). 급여 항목 마스터는 계약 pay_items의 '초기값'을 만드는
+// 템플릿으로 역할이 물러났다. 계약이 없거나 pay_items가 비면 예전 방식(직원 컬럼)으로 폴백한다.
 router.post('/generate', async (req, res, next) => {
   const conn = await pool.getConnection()
   try {
     const { month, pay_date } = req.body
     if (!month) return res.status(400).json({ error: 'month 필수' })
-    const [emps] = await conn.execute("SELECT * FROM employees WHERE active = 1")
+    const monthStart = `${month}-01`
+    const monthEnd = `${month}-31`
+    // 그 달에 유효한 근로계약: 시작 <= 월말 AND (종료 없음 OR 종료 >= 월초) AND 진행중 + 직원 재직
+    const [contracts] = await conn.execute(
+      `SELECT w.*, e.name FROM work_contracts w JOIN employees e ON w.employee_id = e.id
+       WHERE w.kind = 'labor' AND w.status = '진행중' AND e.active = 1
+         AND (w.start_date IS NULL OR w.start_date <= ?)
+         AND (w.end_date IS NULL OR w.end_date >= ?)`,
+      [monthEnd, monthStart]
+    )
     const [masters] = await conn.execute('SELECT * FROM payroll_item_types WHERE active = 1 ORDER BY sort_order, label')
-    const [exist] = await conn.execute('SELECT employee_id FROM payroll WHERE month = ?', [month])
+    // 이미 근로 급여(seq=0)가 있는 직원은 건너뛴다(용역 회차 seq>=1은 무관)
+    const [exist] = await conn.execute('SELECT employee_id FROM payroll WHERE month = ? AND seq = 0', [month])
     const has = new Set(exist.map(r => r.employee_id))
     await conn.beginTransaction()
     let created = 0
-    for (const e of emps) {
-      if (has.has(e.id)) continue
-      const items = itemsFromMaster(masters, e)
+    // 한 직원에 계약이 여러 개면 가장 최근 시작 계약 하나만
+    const byEmp = new Map()
+    for (const w of contracts) {
+      const prev = byEmp.get(w.employee_id)
+      if (!prev || String(w.start_date || '') > String(prev.start_date || '')) byEmp.set(w.employee_id, w)
+    }
+    for (const w of byEmp.values()) {
+      if (has.has(w.employee_id)) continue
+      let items = []
+      try { items = JSON.parse(w.pay_items || '[]') } catch { items = [] }
+      // 계약에 급여 기준이 없으면 폴백(직원 컬럼 + 마스터) — 마이그레이션 전 데이터 보호
+      if (!Array.isArray(items) || items.length === 0) {
+        const [[emp]] = await conn.execute('SELECT * FROM employees WHERE id = ?', [w.employee_id])
+        items = itemsFromMaster(masters, emp || {})
+      }
       const { base, gross, deduction, net } = computePayslip(items)
       await conn.execute(`
-        INSERT INTO payroll (id, employee_id, month, base_salary, allowance, deduction, net_salary, gross, items, pay_date, status)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)
-      `, [randomUUID(), e.id, month, base, gross - base, deduction, net, gross, JSON.stringify(items), pay_date || `${month}-25`, '작성중'])
+        INSERT INTO payroll (id, employee_id, work_contract_id, seq, month, base_salary, allowance, deduction, net_salary, gross, items, pay_date, status)
+        VALUES (?,?,?,0,?,?,?,?,?,?,?,?,?)
+      `, [randomUUID(), w.employee_id, w.id, month, base, gross - base, deduction, net, gross, JSON.stringify(items),
+          pay_date || (w.pay_day ? `${month}-${String(w.pay_day).padStart(2, '0')}` : `${month}-25`), '작성중'])
       created++
     }
     await conn.commit()

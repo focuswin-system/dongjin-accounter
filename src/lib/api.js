@@ -840,8 +840,9 @@ export const api = {
   },
 
   // ─── 급여대장 ─────────────────────────────────────────────────
-  async getPayroll(month) {
-    try { return await req('/payroll' + (month ? `?month=${month}` : '')) } catch { return [] }
+  async getPayroll(month, scope) {
+    const qs = new URLSearchParams(Object.entries({ month, scope }).filter(([, v]) => v)).toString()
+    try { return await req('/payroll' + (qs ? `?${qs}` : '')) } catch { return [] }
   },
   async getPayrollSummary(month) {
     try { return await req('/payroll/summary' + (month ? `?month=${month}` : '')) } catch { return null }
@@ -877,6 +878,51 @@ export const api = {
   },
   async deletePayrollItemType(id) {
     try { await req('/payroll-items/' + id, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }
+  },
+
+  // 고용형태 마스터 (근로·용역계약 유형)
+  async getEmployTypes(kind) {
+    try { return await req('/employ-types' + (kind ? `?kind=${kind}` : '')) } catch { return [] }
+  },
+  async addEmployType(data) {
+    try { return await req('/employ-types', { method: 'POST', body: data }) } catch (e) { return { ok: false, error: e.message } }
+  },
+  async updateEmployType(id, data) {
+    try { return await req('/employ-types/' + id, { method: 'PUT', body: data }) } catch (e) { return { ok: false, error: e.message } }
+  },
+  async deleteEmployType(id) {
+    try { await req('/employ-types/' + id, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }
+  },
+
+  // 근로·용역 계약
+  async getWorkContracts(params = {}) {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== '')).toString()
+    try { return await req('/work-contracts' + (qs ? `?${qs}` : '')) } catch { return [] }
+  },
+  async getWorkContract(id) {
+    try { return await req('/work-contracts/' + id) } catch { return null }
+  },
+  async saveWorkContract(data) {
+    const path = data.id ? '/work-contracts/' + data.id : '/work-contracts'
+    try { return await req(path, { method: data.id ? 'PUT' : 'POST', body: data }) } catch (e) { return { ok: false, error: e.message } }
+  },
+  async duplicateWorkContract(id, data = {}) {
+    try { return await req(`/work-contracts/${id}/duplicate`, { method: 'POST', body: data }) } catch (e) { return { ok: false, error: e.message } }
+  },
+  async deleteWorkContract(id) {
+    try { await req('/work-contracts/' + id, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }
+  },
+  async payWorkContract(id, data) {
+    try { return await req(`/work-contracts/${id}/pay`, { method: 'POST', body: data }) } catch (e) { return { ok: false, error: e.message } }
+  },
+  async addWorkContractDoc(id, data) {
+    try { return await req(`/work-contracts/${id}/docs`, { method: 'POST', body: data }) } catch (e) { return { ok: false, error: e.message } }
+  },
+  async deleteWorkContractDoc(docId) {
+    try { await req('/work-contracts/docs/' + docId, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }
+  },
+  async getConversionAlerts() {
+    try { return await req('/work-contracts/alerts/conversion') } catch { return [] }
   },
 
   // ─── 홈 대시보드 ──────────────────────────────────────────────

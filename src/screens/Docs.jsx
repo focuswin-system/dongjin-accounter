@@ -1429,7 +1429,8 @@ const ReportMonthly = ({ toast }) => {
 const ReportTax4 = ({ toast }) => {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [rows, setRows] = useState([])
-  useEffect(() => { api.getPayroll(month).then(r => setRows(Array.isArray(r) ? r : [])) }, [month])
+  // 근로소득(급여대장, seq=0)만 집계 — 용역·일용·기타소득은 원천세 신고 구분이 달라 섞지 않는다.
+  useEffect(() => { api.getPayroll(month, "labor").then(r => setRows(Array.isArray(r) ? r : [])) }, [month])
 
   const data = rows.map(r => ({ row: r, ...computeItems(r.items) }))
   const dedLabels = []
@@ -1452,8 +1453,8 @@ const ReportTax4 = ({ toast }) => {
       <div className="card card-pad" style={{ background: "var(--brand-soft)", borderColor: "transparent", marginBottom: 16 }}>
         <div className="row gap-8">
           <Icon.Bell size={14}/>
-          <span className="text-sm fw-600">급여대장에 입력된 실제 지급·공제액을 집계했어요</span>
-          <span className="text-xs text-muted" style={{ marginLeft: 4 }}>세무서·공단 고지 금액을 급여대장 명세서에 입력하면 이 표에 그대로 반영됩니다</span>
+          <span className="text-sm fw-600">근로소득 급여대장의 실제 지급·공제액을 집계했어요</span>
+          <span className="text-xs text-muted" style={{ marginLeft: 4 }}>용역·일용·기타소득은 원천세 구분이 달라 제외됩니다 (인사관리 → 용역·일용 대장에서 확인)</span>
         </div>
       </div>
 

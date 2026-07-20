@@ -489,6 +489,87 @@ async function initDb() {
       )
     `)
 
+    // ── 인사급여: 근로·용역계약 ──
+    // 고용형태 마스터. 사용자가 직접 유형을 만들고 기본값을 정한다.
+    // '세법이 정하는 축(income_type)은 닫고, 회사가 정하는 축(고용형태)은 연다'는 원칙의 실체.
+    // 계약은 이 값을 스냅샷으로 복사하므로, 마스터를 나중에 고쳐도 기존 계약서와 어긋나지 않는다.
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS employ_types (
+        id                VARCHAR(36) PRIMARY KEY,
+        label             VARCHAR(50) NOT NULL,
+        kind              ENUM('labor','service','daily') DEFAULT 'labor',
+        income_type       ENUM('근로','사업','일용','기타') DEFAULT '근로',
+        pay_form          ENUM('annual','monthly','hourly','daily','piece') DEFAULT 'monthly',
+        default_unit      VARCHAR(30),
+        insure_np         TINYINT DEFAULT 0,
+        insure_hi         TINYINT DEFAULT 0,
+        insure_ei         TINYINT DEFAULT 0,
+        insure_ai         TINYINT DEFAULT 0,
+        conv_alert_months INT DEFAULT 0,
+        sort_order        INT DEFAULT 0,
+        active            TINYINT DEFAULT 1,
+        created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `)
+    // 근로·용역 계약. 급여대장의 '근거'이자 급여 기준(pay_items)의 소스.
+    // 연봉이 오르면 UPDATE가 아니라 새 행을 만든다 → 이력이 자연히 남는다.
+    //   kind        = 어느 화면에서 관리하나 (배치 축)
+    //   income_type = 어느 신고자료로 가나 (세법 축)
+    // 둘은 대개 붙어 다니지만 항상은 아니다(자문 계약 = service + 기타소득).
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS work_contracts (
+        id                VARCHAR(36) PRIMARY KEY,
+        employee_id       VARCHAR(36),
+        kind              ENUM('labor','service','daily') NOT NULL DEFAULT 'labor',
+        income_type       ENUM('근로','사업','일용','기타') NOT NULL DEFAULT '근로',
+        title             VARCHAR(255),
+        employ_type_id    VARCHAR(36),
+        employ_type       VARCHAR(50),
+        start_date        VARCHAR(20),
+        end_date          VARCHAR(20),
+        term_mode         ENUM('fixed','auto_renew','open') DEFAULT 'fixed',
+        status            VARCHAR(20) DEFAULT '진행중',
+        pay_form          ENUM('annual','monthly','hourly','daily','piece') DEFAULT 'monthly',
+        work_hours        VARCHAR(50),
+        pay_day           INT,
+        pay_items         TEXT,
+        insure_np         TINYINT DEFAULT 0,
+        insure_hi         TINYINT DEFAULT 0,
+        insure_ei         TINYINT DEFAULT 0,
+        insure_ai         TINYINT DEFAULT 1,
+        conv_alert_months INT DEFAULT 3,
+        memo              TEXT,
+        created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+      )
+    `)
+    // 용역·일용 단가표. contract_items(기성형 품목 단가표)와 같은 모양.
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS work_contract_items (
+        id               VARCHAR(36) PRIMARY KEY,
+        work_contract_id VARCHAR(36) NOT NULL,
+        item_id          VARCHAR(36),
+        name             VARCHAR(255) NOT NULL,
+        spec             VARCHAR(255),
+        unit             VARCHAR(30),
+        unit_price       BIGINT DEFAULT 0,
+        sort_order       INT DEFAULT 0,
+        created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (work_contract_id) REFERENCES work_contracts(id) ON DELETE CASCADE
+      )
+    `)
+    // 계약서 첨부(다중). contract_docs와 동형 — 공용 FileAttach 재사용.
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS work_contract_docs (
+        id               VARCHAR(36) PRIMARY KEY,
+        work_contract_id VARCHAR(36) NOT NULL,
+        file_url         VARCHAR(500),
+        file_name        VARCHAR(255),
+        created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (work_contract_id) REFERENCES work_contracts(id) ON DELETE CASCADE
+      )
+    `)
+
     // ── 마이그레이션: 기존 DB에 신규 컬럼 추가 (MySQL은 ADD COLUMN IF NOT EXISTS 미지원) ──
     const ensureColumn = async (table, col, ddl) => {
       const [[{ cnt }]] = await c.execute(
@@ -569,6 +650,14 @@ async function initDb() {
     await ensureColumn('employees', 'birth_date',         "birth_date VARCHAR(20)")
     // 재직상태(재직·수습·휴직·퇴사). active(bool)만으론 수습·휴직을 표현 못 하고 퇴사↔재활성 버그가 났다 → 상태를 직접 저장.
     await ensureColumn('employees', 'status',             "status VARCHAR(20) DEFAULT '재직'")
+    // 사람 구분: 직원(근로계약) / 용역·일용 인력. 계약 kind로도 알 수 있지만
+    // '아직 계약이 없는 사람'이 있으므로 사람 자체에 둔다.
+    await ensureColumn('employees', 'person_kind',        "person_kind VARCHAR(20) DEFAULT 'employee'")
+    await ensureColumn('employees', 'leave_date',         "leave_date VARCHAR(20)")
+    // 급여대장 행의 근거 계약 + 월 내 회차(근로=0, 용역·일용=1..N) + 용역 단가×수량 라인
+    await ensureColumn('payroll',   'work_contract_id',   "work_contract_id VARCHAR(36)")
+    await ensureColumn('payroll',   'seq',                "seq INT DEFAULT 0")
+    await ensureColumn('payroll',   'qty_lines',          "qty_lines TEXT")
     // 기존 행 백필: 컬럼 DEFAULT가 '재직'이라 신규 컬럼은 전부 '재직'으로 채워진다 → 퇴사(active=0)만 바로잡으면 된다.
     // active=0 ⟺ 퇴사 불변식(active는 status에서 파생)이라 재실행해도 멱등 — 수습/휴직(active=1)은 절대 안 건드린다.
     await runOnce('2026-07_employee_status_backfill', async () => {
@@ -630,6 +719,28 @@ async function initDb() {
       }
     }
     await ensureUniqueIndex('contracts', 'uq_contracts_contract_no', 'contract_no')
+
+    // payroll 유니크 교체: (employee_id, month) → (employee_id, month, seq)
+    // 용역·일용은 한 달에 여러 회차를 지급하므로 옛 유니크로는 2회차부터 막힌다.
+    // 근로계약은 항상 seq=0이라 중복 방지 효과는 이전과 완전히 동일하다.
+    // ⚠ 순서 주의: employee_id FK가 인덱스를 요구하므로 새 인덱스를 먼저 만들고 옛것을 지운다
+    //    (먼저 지우면 errno 150으로 실패).
+    const indexExists = async (table, index) => {
+      const [[{ cnt }]] = await c.execute(
+        `SELECT COUNT(*) AS cnt FROM information_schema.statistics
+         WHERE table_schema = ? AND table_name = ? AND index_name = ?`,
+        [DB_NAME, table, index]
+      )
+      return cnt > 0
+    }
+    if (!(await indexExists('payroll', 'uq_emp_month_seq'))) {
+      try { await c.execute('ALTER TABLE `payroll` ADD UNIQUE INDEX `uq_emp_month_seq` (employee_id, month, seq)') }
+      catch (e) { console.warn(`[migration] uq_emp_month_seq 생성 실패: ${e.message}`) }
+    }
+    if (await indexExists('payroll', 'uq_emp_month_seq') && await indexExists('payroll', 'uq_emp_month')) {
+      try { await c.execute('ALTER TABLE `payroll` DROP INDEX `uq_emp_month`') }
+      catch (e) { console.warn(`[migration] uq_emp_month 제거 실패: ${e.message}`) }
+    }
 
     // 표준 공제 항목 4대보험 요율: 2025년 시드값 → 2026년 확정값으로 1회 보정
     // (사용자가 직접 바꾼 값은 건드리지 않도록, 구(舊)값과 정확히 일치할 때만 갱신)
@@ -898,17 +1009,86 @@ async function initDb() {
         )
       }
     }
+
+    // 고용형태 마스터 시딩 (비어 있을 때만 — 사용자가 지운 유형이 재부팅 때 되살아나면 안 된다)
+    //   4대보험: 일용·단시간은 조건부(1개월 이상 + 월 8일/60시간 이상)라 기본값을 꺼두고 계약마다 정한다.
+    //            프리랜서·일시용역은 사업/기타소득이라 급여 공제 대상이 아니다.
+    //   conv_alert_months: 일용이 계속 고용되면 상용근로자로 전환해야 하는 기준(세법).
+    //                      일반 3개월 / 건설공사 1년. 근로·용역은 해당 없음(0).
+    const [[{ ecnt }]] = await c.execute('SELECT COUNT(*) AS ecnt FROM employ_types')
+    if (ecnt === 0) {
+      const types = [
+        // label,           kind,      income, pay_form,  unit,   np hi ei ai  conv, sort
+        ["정규직",         "labor",   "근로", "annual",  null,   1, 1, 1, 1,   0,  1],
+        ["계약직",         "labor",   "근로", "annual",  null,   1, 1, 1, 1,   0,  2],
+        ["수습",           "labor",   "근로", "monthly", null,   1, 1, 1, 1,   0,  3],
+        ["단시간",         "labor",   "근로", "hourly",  "시간", 0, 0, 1, 1,   0,  4],
+        ["일용(일반)",     "daily",   "일용", "daily",   "일",   0, 0, 1, 1,   3,  5],
+        ["일용(건설)",     "daily",   "일용", "daily",   "일",   0, 0, 1, 1,  12,  6],
+        ["프리랜서(사업)", "service", "사업", "piece",   "건",   0, 0, 0, 0,   0,  7],
+        ["일시용역(기타)", "service", "기타", "piece",   "건",   0, 0, 0, 0,   0,  8],
+      ]
+      for (const [label, kind, income, payForm, unit, np, hi, ei, ai, conv, so] of types) {
+        await c.execute(
+          `INSERT INTO employ_types
+             (id, label, kind, income_type, pay_form, default_unit, insure_np, insure_hi, insure_ei, insure_ai, conv_alert_months, sort_order)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [randomUUID(), label, kind, income, payForm, unit, np, hi, ei, ai, conv, so]
+        )
+      }
+    }
+
+    // 기존 직원 → 최초 근로계약 자동 생성 (1회만).
+    // 급여 기준이 직원 컬럼에 흩어져 있던 것을 계약의 pay_items로 옮긴다.
+    // 이 마이그레이션 전의 직원도 급여대장 생성이 끊기지 않게 하는 것이 목적
+    // (payroll.js의 itemsFromMaster 폴백과 이중 안전장치).
+    await runOnce('work_contracts_from_employees_v1', async () => {
+      const [emps] = await c.execute('SELECT * FROM employees')
+      if (!emps.length) return
+      const [masters] = await c.execute('SELECT * FROM payroll_item_types WHERE active = 1 ORDER BY sort_order, label')
+      const [[etype]] = await c.execute("SELECT id, label FROM employ_types WHERE label = '정규직' LIMIT 1")
+      for (const e of emps) {
+        const [[{ wc }]] = await c.execute('SELECT COUNT(*) AS wc FROM work_contracts WHERE employee_id = ?', [e.id])
+        if (wc > 0) continue
+        // 직원 고정 수당을 라벨 유연매칭으로 채운다(payroll.js itemsFromMaster와 같은 규칙).
+        const empValueFor = (label) => {
+          const l = String(label || '')
+          if (/기본급/.test(l))             return Number(e.base_salary) || 0
+          if (/직책|직급/.test(l))          return Number(e.position_allowance) || 0
+          if (/식대/.test(l))               return Number(e.meal_allowance) || 0
+          if (/자가운전|차량|운전/.test(l)) return Number(e.vehicle_allowance) || 0
+          return null
+        }
+        let items = masters.map(m => {
+          const ev = (m.kind === 'earn' && m.mode === 'fixed') ? empValueFor(m.label) : null
+          return { label: m.label, kind: m.kind, mode: m.mode, value: ev != null ? ev : (Number(m.default_value) || 0) }
+        })
+        if (!items.some(i => i.kind === 'earn' && /기본급/.test(i.label || ''))) {
+          items.unshift({ label: '기본급', kind: 'earn', mode: 'fixed', value: Number(e.base_salary) || 0 })
+        }
+        await c.execute(
+          `INSERT INTO work_contracts
+             (id, employee_id, kind, income_type, title, employ_type_id, employ_type, start_date, term_mode,
+              status, pay_form, pay_day, pay_items, insure_np, insure_hi, insure_ei, insure_ai, conv_alert_months)
+           VALUES (?,?,'labor','근로',?,?,?,?,'open',?,'monthly',?,?,1,1,1,1,0)`,
+          [randomUUID(), e.id, `${e.name} 근로계약`, etype?.id || null, etype?.label || '정규직',
+           e.join_date || null, e.status === '퇴사' ? '만료' : '진행중', 25, JSON.stringify(items)]
+        )
+      }
+    })
   } finally {
     c.release()
   }
 }
 
+// epoch(ms) → 한국시간 날짜(YYYY-MM-DD). 서버/DB 타임존과 무관하게 KST 달력일을 뽑는다.
+const kstDate = (ms) => new Date(ms + 9 * 3600 * 1000).toISOString().slice(0, 10)
 // 오늘(한국시간, YYYY-MM-DD). 서버 타임존이 UTC여도 KST로 계산해 새벽에 날짜가 밀리지 않게 한다.
-const kstToday = () => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10)
+const kstToday = () => kstDate(Date.now())
 // 지출·입금은 실제로 오간 돈이라 미래 일자로 등록/처리할 수 없다(오늘까지만 허용).
 // 미래면 에러 메시지, 아니면 null.
 const futureDateError = (date) => (date && date > kstToday())
   ? '미래 날짜로는 처리할 수 없어요 (오늘까지만 가능)'
   : null
 
-module.exports = { pool, initDb, kstToday, futureDateError }
+module.exports = { pool, initDb, kstDate, kstToday, futureDateError }

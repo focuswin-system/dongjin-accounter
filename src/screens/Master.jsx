@@ -75,6 +75,7 @@ const MASTER_TABS = [
   { id: "approval",        label: "결재선", custom: true },
   // 기준 설정
   { id: "payrollItems",    label: "급여 항목", custom: true },
+  { id: "employType",      label: "고용형태", custom: true },
   { id: "company",         label: "회사 정보", custom: true },
   { id: "template",        label: "문서 양식" },
 ];
@@ -109,6 +110,7 @@ const MASTER_SECTIONS = {
     groups: [
       { label: "조직", tabs: ["department", "position"] },
       { label: "급여", tabs: ["payrollItems"] },
+      { label: "근로·용역", tabs: ["employType"] },
     ],
   },
 };
@@ -246,29 +248,7 @@ export const REF_CONFIGS = {
       { key: 'memo', label: '비고', kind: 'text' },
     ],
   },
-  labor_contract: {
-    type: 'labor_contract', label: '근로계약',
-    sub: '직원 근로계약(고용형태·급여·계약기간)을 관리합니다.',
-    fields: [
-      { key: 'name', label: '직원명', kind: 'text', req: true },
-      { key: 'code', label: '사번', kind: 'text', w: 100 },
-      { key: 'party', label: '고용형태', kind: 'text', w: 110 },
-      { key: 'amount', label: '연봉/급여', kind: 'num', w: 130 },
-      { key: 'start_date', label: '계약시작', kind: 'date', w: 130 },
-      { key: 'end_date', label: '계약종료', kind: 'date', w: 130 },
-    ],
-  },
-  outsourcing: {
-    type: 'outsourcing', label: '기타 용역·일용',
-    sub: '용역·일용직 등 비정규 인력의 지급 내역을 관리합니다.',
-    fields: [
-      { key: 'name', label: '성명', kind: 'text', req: true },
-      { key: 'party', label: '구분', kind: 'text', w: 100 },
-      { key: 'spec', label: '업무내용', kind: 'text' },
-      { key: 'amount', label: '지급액', kind: 'num', w: 120 },
-      { key: 'start_date', label: '지급일', kind: 'date', w: 130 },
-    ],
-  },
+  // labor_contract·outsourcing은 실화면(WorkContract.jsx)으로 대체됨 — ref 목록 패널 제거.
 }
 
 const emptyRefForm = (fields) => {
@@ -1945,7 +1925,7 @@ export const MasterScreen = ({ user, section = "base" }) => {
     )
   }, []);
 
-  const isCustomTab = ["account", "accountBalance", "recurringExpense", "recurringInvoice", "payroll", "payrollItems", "accountSubject", "category", "vendor", "department", "position", "company", "user", "approval", "jeokyo", "item", "insurance", "fixed_asset", "intangible_asset"].includes(activeTab)
+  const isCustomTab = ["account", "accountBalance", "recurringExpense", "recurringInvoice", "payroll", "payrollItems", "employType", "accountSubject", "category", "vendor", "department", "position", "company", "user", "approval", "jeokyo", "item", "insurance", "fixed_asset", "intangible_asset"].includes(activeTab)
   const data = !isCustomTab ? MASTER_DATA[activeTab] : null
   const rawRows = activeTab === "user" ? userRows : (data?.rows || [])
   const rows = rawRows.filter(r => !q || r.some(c => String(c).toLowerCase().includes(q.toLowerCase())));
@@ -1963,6 +1943,7 @@ export const MasterScreen = ({ user, section = "base" }) => {
     if (activeTab === "recurringExpense") return <RecurringExpensePanel/>
     if (activeTab === "recurringInvoice") return <RecurringInvoicePanel/>
     if (activeTab === "payrollItems")     return <PayrollItemPanel/>
+    if (activeTab === "employType")       return <EmployTypePanel/>
     if (activeTab === "user")             return <UserPanel currentUser={user}/>
     if (activeTab === "approval")         return <ApprovalPanel/>
     if (activeTab === "department")       return <HrCodePanel type="dept" label="부서"/>
@@ -2527,6 +2508,162 @@ const PayrollItemPanel = () => {
 
         <Table kind="earn"   title="지급 항목 (+)" tone="var(--brand-ink)"/>
         <Table kind="deduct" title="공제 항목 (−)" tone="var(--neg-ink)"/>
+      </div>
+    </div>
+  );
+};
+
+// 고용형태 마스터 — 근로·용역계약의 유형별 기본값(소득구분·단가단위·보험·상용전환 기준).
+// income_type만 세법이 정한 닫힌 값. 계약 등록 시 여기 기본값이 자동으로 채워진다.
+const ET_KINDS = [["labor", "근로"], ["service", "용역"], ["daily", "일용"]];
+const ET_INCOME = [["근로", "근로소득"], ["일용", "일용근로"], ["사업", "사업소득"], ["기타", "기타소득"]];
+const ET_FORMS = [["annual", "연봉"], ["monthly", "월급"], ["hourly", "시급"], ["daily", "일당"], ["piece", "건당"]];
+const emptyET = () => ({ label: "", kind: "labor", income_type: "근로", pay_form: "monthly", default_unit: "",
+  insure_np: 1, insure_hi: 1, insure_ei: 1, insure_ai: 1, conv_alert_months: 0 });
+
+const FieldRow = ({ label, hint, required, children }) => (
+  <div>
+    <div className="row" style={{ marginBottom: 6, gap: 6, alignItems: "baseline" }}>
+      <span className="text-sm fw-700">{label}{required && <span style={{ color: "var(--neg)" }}> *</span>}</span>
+      {hint && <span className="text-xs text-muted2">{hint}</span>}
+    </div>
+    {children}
+  </div>
+);
+
+const EmployTypePanel = () => {
+  const toast = useToast();
+  const { confirm } = useConfirm();
+  const [types, setTypes] = useState([]);
+  const [form, setForm] = useState(emptyET());
+  const [editingId, setEditingId] = useState(null);
+  const [open, setOpen] = useState(false);
+
+  const load = () => api.getEmployTypes().then(setTypes);
+  useEffect(() => { load() }, []);
+
+  const reset = () => { setForm(emptyET()); setEditingId(null); setOpen(false); };
+  const save = async () => {
+    if (!form.label.trim()) return toast.push("고용형태 이름을 입력하세요");
+    const res = editingId ? await api.updateEmployType(editingId, form) : await api.addEmployType(form);
+    if (res.ok) { toast.push(editingId ? "수정됐어요" : "고용형태가 추가됐어요"); reset(); load(); }
+    else toast.push(res.error || "저장에 실패했어요");
+  };
+  const edit = (t) => {
+    setEditingId(t.id); setOpen(true);
+    setForm({ label: t.label, kind: t.kind, income_type: t.income_type, pay_form: t.pay_form,
+      default_unit: t.default_unit || "", insure_np: t.insure_np, insure_hi: t.insure_hi,
+      insure_ei: t.insure_ei, insure_ai: t.insure_ai, conv_alert_months: Number(t.conv_alert_months) || 0 });
+  };
+  const del = async (t) => {
+    const ok = await confirm({ tone: "neg", icon: <Icon.Warn size={22}/>, title: `"${t.label}" 삭제`,
+      body: "고용형태 목록에서 제거됩니다. 이미 이 유형으로 맺은 계약은 그대로 유지돼요.", confirmLabel: "삭제" });
+    if (ok) { await api.deleteEmployType(t.id); load(); toast.push("삭제됐어요"); }
+  };
+
+  const insBadges = (t) => ["insure_np", "insure_hi", "insure_ei", "insure_ai"]
+    .map((k, i) => t[k] ? ["국민", "건강", "고용", "산재"][i] : null).filter(Boolean).join("·") || "—";
+  const kindLabel = (k) => (ET_KINDS.find(x => x[0] === k) || [, k])[1];
+  const formLabel = (f) => (ET_FORMS.find(x => x[0] === f) || [, f])[1];
+
+  return (
+    <div>
+      <div className="row" style={{ padding: "16px 18px", borderBottom: "1px solid var(--line)", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <div className="section-title">고용형태</div>
+          <div className="section-sub">근로계약·용역·일용에서 쓰는 고용형태를 직접 만들어두세요. 계약을 등록할 때 소득구분·단가 단위·4대보험 적용이 자동으로 채워집니다.</div>
+        </div>
+        {!open && <button className="btn primary ml-auto" onClick={() => { setForm(emptyET()); setEditingId(null); setOpen(true); }}><Icon.Plus size={14}/> 고용형태 추가</button>}
+      </div>
+
+      <div style={{ padding: 20 }}>
+        {open && (
+          <div className="card" style={{ padding: 16, marginBottom: 22, border: editingId ? "1px solid var(--brand)" : "1px solid var(--line)" }}>
+            <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <FieldRow label="고용형태 이름" required>
+                <input className="input" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))}
+                  placeholder="예: 정규직, 일용(행사), 프리랜서"/>
+              </FieldRow>
+              <FieldRow label="구분 (화면 배치)">
+                <div className="row gap-4">
+                  {ET_KINDS.map(([k, lbl]) => (
+                    <button key={k} type="button" className={`chip ${form.kind === k ? "active" : ""}`}
+                      onClick={() => setForm(f => ({ ...f, kind: k }))}>{lbl}</button>
+                  ))}
+                </div>
+              </FieldRow>
+              <FieldRow label="소득구분 (세법)" hint="명세서·지급명세서 양식이 여기서 갈려요">
+                <div className="row gap-4" style={{ flexWrap: "wrap" }}>
+                  {ET_INCOME.map(([k, lbl]) => (
+                    <button key={k} type="button" className={`chip ${form.income_type === k ? "active" : ""}`}
+                      onClick={() => setForm(f => ({ ...f, income_type: k }))}>{lbl}</button>
+                  ))}
+                </div>
+              </FieldRow>
+              <FieldRow label="급여 형태">
+                <div className="row gap-4" style={{ flexWrap: "wrap" }}>
+                  {ET_FORMS.map(([k, lbl]) => (
+                    <button key={k} type="button" className={`chip ${form.pay_form === k ? "active" : ""}`}
+                      onClick={() => setForm(f => ({ ...f, pay_form: k }))}>{lbl}</button>
+                  ))}
+                </div>
+              </FieldRow>
+              <FieldRow label="단가 단위" hint="용역·일용 단가표 기본 단위 (일/시간/건)">
+                <input className="input" style={{ maxWidth: 140 }} value={form.default_unit}
+                  onChange={e => setForm(f => ({ ...f, default_unit: e.target.value }))} placeholder="예: 일, 시간, 건"/>
+              </FieldRow>
+              <FieldRow label="상용전환 경고" hint="일용이 이 개월수 이상 계속 고용되면 알림 (0=끔, 건설 12)">
+                <div className="row gap-4" style={{ alignItems: "center" }}>
+                  <input className="input num" style={{ width: 80 }} value={form.conv_alert_months}
+                    onChange={e => setForm(f => ({ ...f, conv_alert_months: parseInt(e.target.value.replace(/[^0-9]/g, "")) || 0 }))}/>
+                  <span className="text-sm text-muted2">개월</span>
+                </div>
+              </FieldRow>
+            </div>
+            <FieldRow label="4대보험 적용" hint="일용·단시간은 조건부라 계약마다 다를 수 있어요">
+              <div className="row gap-4" style={{ flexWrap: "wrap" }}>
+                {[["insure_np", "국민연금"], ["insure_hi", "건강보험"], ["insure_ei", "고용보험"], ["insure_ai", "산재보험"]].map(([k, lbl]) => (
+                  <button key={k} type="button" className={`chip ${form[k] ? "active" : ""}`}
+                    onClick={() => setForm(f => ({ ...f, [k]: f[k] ? 0 : 1 }))}>{form[k] ? "✓ " : ""}{lbl}</button>
+                ))}
+              </div>
+            </FieldRow>
+            <div className="row gap-8" style={{ marginTop: 14 }}>
+              <button className="btn primary" onClick={save}>{editingId ? "수정" : "추가"}</button>
+              <button className="btn" onClick={reset}>취소</button>
+            </div>
+          </div>
+        )}
+
+        <div className="card" style={{ overflow: "hidden" }}>
+          <table className="table">
+            <thead><tr>
+              <th>고용형태</th><th style={{ width: 70 }}>구분</th><th style={{ width: 90 }}>소득구분</th>
+              <th style={{ width: 70 }}>급여</th><th style={{ width: 60 }}>단위</th>
+              <th style={{ width: 150 }}>4대보험</th><th style={{ width: 90 }}>상용전환</th><th style={{ width: 120 }}></th>
+            </tr></thead>
+            <tbody>
+              {types.length === 0 && <tr><td colSpan={8} style={{ textAlign: "center", padding: 28, color: "var(--muted-2)", fontSize: 13 }}>고용형태가 없어요. 위에서 추가하세요.</td></tr>}
+              {types.map(t => (
+                <tr key={t.id}>
+                  <td className="fw-700">{t.label}</td>
+                  <td className="text-sm text-muted">{kindLabel(t.kind)}</td>
+                  <td className="text-sm">{t.income_type}</td>
+                  <td className="text-sm text-muted">{formLabel(t.pay_form)}</td>
+                  <td className="text-sm text-muted">{t.default_unit || "—"}</td>
+                  <td className="text-xs text-muted">{insBadges(t)}</td>
+                  <td className="text-sm text-muted">{Number(t.conv_alert_months) > 0 ? `${t.conv_alert_months}개월` : "—"}</td>
+                  <td>
+                    <div className="row gap-4">
+                      <button className="btn ghost sm" onClick={() => edit(t)}>편집</button>
+                      <button className="btn ghost sm" style={{ color: "var(--neg)" }} onClick={() => del(t)}>삭제</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
