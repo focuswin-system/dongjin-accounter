@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { pool } = require('../db')
+const { pool, kstToday } = require('../db')
 const { dueDatesToGenerate } = require('../lib/recurrence')
 
 const router = Router()
@@ -52,7 +52,7 @@ router.patch('/:id/toggle', async (req, res, next) => {
 })
 
 router.post('/generate', async (_, res, next) => {
-  const today = new Date()
+  const today = kstToday()
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
