@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, localToday } from '../lib/ui'
 import { MiniStat } from './Home'
 import { api } from '../lib/api'
 
@@ -484,7 +484,7 @@ const PayDrawer = ({ row, accounts, onClose, onSaved }) => {
   useEffect(() => {
     if (!row) return;
     setAmount(row.remain > 0 ? row.remain : 0);
-    setDate(new Date().toISOString().slice(0, 10));
+    setDate(localToday());   // KST — 서버 futureDateError와 정렬
     setAccountId("");
     setMethod("계좌이체");
   }, [row]);
@@ -533,7 +533,7 @@ const PayDrawer = ({ row, accounts, onClose, onSaved }) => {
           <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             <div>
               <label className="label">지급일</label>
-              <input className="input num" type="date" value={date} onChange={e => setDate(e.target.value)}/>
+              <input className="input num" type="date" value={date} max={localToday()} onChange={e => setDate(e.target.value)}/>
             </div>
             <div>
               <label className="label">지급 수단</label>

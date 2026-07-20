@@ -136,8 +136,12 @@ router.put('/:id', async (req, res, next) => {
 
 router.patch('/:id/status', async (req, res, next) => {
   try {
-    const { status } = req.body
+    let { status } = req.body
     if (!status) return res.status(400).json({ error: 'status 필수' })
+    // 완료 상태는 무공백 표준형으로 정규화 — 계좌 잔액 계산(accounts.js)이 정확히 '지급완료'/'입금완료'만
+    // 지출/입금으로 세므로, '지급 완료'(공백)로 들어오면 잔액에서 누락된다(F-02 계열 방지).
+    if (status === '지급 완료') status = '지급완료'
+    else if (status === '입금 완료') status = '입금완료'
     const [result] = await pool.execute('UPDATE transactions SET status=? WHERE id=?', [status, req.params.id])
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })

@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { pool } = require('../db')
+const { pool, futureDateError } = require('../db')
 
 const router = Router()
 
@@ -228,6 +228,8 @@ router.post('/:id/pay', async (req, res, next) => {
   const conn = await pool.getConnection()
   try {
     const { amount, date, account_id, method, memo } = req.body
+    // 급여 지급은 실제 이체라 미래 일자 금지(앱 전체 KST 규칙 일관 — 용역 지급·거래 등록과 동일).
+    const de = futureDateError(date); if (de) return res.status(400).json({ error: de })
     const [[p]] = await conn.execute('SELECT p.*, e.name FROM payroll p JOIN employees e ON p.employee_id = e.id WHERE p.id = ?', [req.params.id])
     if (!p) return res.status(404).json({ error: 'Not found' })
     const amt = Number(amount) || 0

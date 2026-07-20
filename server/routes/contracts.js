@@ -6,6 +6,9 @@ const { buildContractWorkbook } = require('../contract-export')
 
 const router = Router()
 
+// cost_budget(JSON)이 손상된 행 하나가 계약 목록/상세 응답 전체를 500으로 만들지 않도록 안전 파싱.
+const safeBudget = (raw, fallback = null) => { if (!raw) return fallback; try { return JSON.parse(raw) } catch { return fallback } }
+
 // 계약 한 건의 금액 지표. 화면마다 다르게 계산하다 어긋나지 않도록 여기서만 만든다.
 //
 // 매출 계약(gubu B)과 매입 계약(gubu A·E)은 보는 관점이 다르다.
@@ -49,7 +52,7 @@ const metrics = (r) => {
     // 매출 계약의 원가는 '이 계약에 귀속된 지출'(cost_contract_id)이지, 이 계약이 근거인 지출이 아니다.
     cost:   isPurchase ? null : cost,
     profit: isPurchase ? null : in_done - cost,
-    cost_budget: r.cost_budget ? JSON.parse(r.cost_budget) : null,
+    cost_budget: safeBudget(r.cost_budget),
   }
 }
 
@@ -784,7 +787,7 @@ router.get('/:id/cost-analysis', async (req, res, next) => {
     const [cRows] = await pool.execute('SELECT * FROM contracts WHERE id = ?', [req.params.id])
     if (!cRows[0]) return res.status(404).json({ error: 'Not found' })
     const c = cRows[0]
-    const budget = c.cost_budget ? JSON.parse(c.cost_budget) : { material: 0, outsource: 0, labor: 0, overhead: 0 }
+    const budget = safeBudget(c.cost_budget, { material: 0, outsource: 0, labor: 0, overhead: 0 })
     const [txns] = await pool.execute(
       "SELECT category, SUM(amount) AS total FROM transactions WHERE contract_id = ? AND kind='expense' AND status='지급완료' GROUP BY category",
       [req.params.id]

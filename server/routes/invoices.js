@@ -240,13 +240,27 @@ router.get('/:id/matchable', async (req, res, next) => {
 })
 
 router.delete('/:id/matches/:matchId', async (req, res, next) => {
+  const conn = await pool.getConnection()
   try {
-    await pool.execute(
-      'DELETE FROM invoice_matches WHERE id = ? AND invoice_id = ?',
-      [req.params.matchId, req.params.id]
-    )
-    res.json({ ok: true })
-  } catch (e) { next(e) }
+    await conn.beginTransaction()
+    const [[inv]] = await conn.execute('SELECT * FROM invoices WHERE id = ? FOR UPDATE', [req.params.id])
+    if (!inv) { await conn.rollback(); return res.status(404).json({ error: 'Not found' }) }
+    // 삭제할 매칭의 거래는 청구서 연결만 해제(장부에는 남김 — 실제 오간 돈일 수 있어 삭제하지 않는다).
+    const [[match]] = await conn.execute('SELECT txn_id FROM invoice_matches WHERE id = ? AND invoice_id = ?', [req.params.matchId, req.params.id])
+    await conn.execute('DELETE FROM invoice_matches WHERE id = ? AND invoice_id = ?', [req.params.matchId, req.params.id])
+    if (match && match.txn_id) await conn.execute('UPDATE transactions SET invoice_id = NULL WHERE id = ?', [match.txn_id])
+    // 남은 매칭 누계로 청구서·마일스톤 상태 재계산 — 안 하면 remain이 생겨도 '완료'로 남아 미수/미지급이 누락된다.
+    const [[{ paid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [req.params.id])
+    const isIssued = inv.kind === 'issued'
+    const total = Number(inv.total_amount)
+    const status = Number(paid) <= 0 ? (isIssued ? '입금 예정' : '지급 대기')
+      : Number(paid) >= total ? (isIssued ? '입금 완료' : '지급 완료')
+      : (isIssued ? '일부 입금' : '일부 지급')
+    await conn.execute('UPDATE invoices SET status = ? WHERE id = ?', [status, req.params.id])
+    await conn.execute('UPDATE milestones SET status = ? WHERE invoice_id = ?', [status, req.params.id])
+    await conn.commit()
+    res.json({ ok: true, status })
+  } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
 })
 
 // ── 청구서 첨부 서류 ──

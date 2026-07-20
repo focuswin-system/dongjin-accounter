@@ -224,6 +224,11 @@ router.post('/', async (req, res, next) => {
     if (!employeeId) { await conn.rollback(); return res.status(400).json({ error: '대상 인력이 필요해요' }) }
 
     const f = normalize(req.body)
+    // 근로계약은 직원당 1건만 진행중 — 연봉 인상/재계약으로 새 근로계약을 만들면 기존 진행중 근로계약을
+    // 만료로 돌려 이력으로 남긴다(안 그러면 목록에 같은 직원이 진행중 2건으로 중복 노출된다).
+    if (f.kind === 'labor') {
+      await conn.execute("UPDATE work_contracts SET status = '만료' WHERE employee_id = ? AND kind = 'labor' AND status = '진행중'", [employeeId])
+    }
     const id = randomUUID()
     await conn.execute(
       `INSERT INTO work_contracts
