@@ -12,6 +12,17 @@ app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:4173'] }))
 app.use(express.json())
 app.use('/uploads', express.static(require('path').join(__dirname, 'uploads')))
 
+// ── 인증 게이트 ──
+// 로그인·헬스체크만 공개(로그인 자체 + deploy.sh 무토큰 헬스체크), 나머지 모든 /api 요청은 JWT 필요.
+// 프론트 api.js의 req()·업로드·엑셀·내보내기·템플릿 다운로드 전부 Authorization 헤더를 실어 보낸다.
+// (정적 SPA·/uploads 파일은 /api 경로가 아니라 통과.)
+const authMiddleware = require('./middleware/auth')
+const PUBLIC_API = new Set(['/api/auth/login', '/api/health'])
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/') || PUBLIC_API.has(req.path)) return next()
+  return authMiddleware(req, res, next)
+})
+
 app.use('/api/auth',               require('./routes/auth'))
 app.use('/api/uploads',            require('./routes/uploads'))
 app.use('/api/categories',         require('./routes/categories'))
