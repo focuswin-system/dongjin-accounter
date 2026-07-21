@@ -700,6 +700,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const [formOpen, setFormOpen] = useState(false)
   const [editInvoice, setEditInvoice] = useState(null)
   const [statusFilter, setStatusFilter] = useState(collect ? "미정산" : "전체")
+  const [paidTarget, setPaidTarget] = useState(null)   // 기입금/기지급 처리 대상(계좌·날짜 드로어)
 
   // 청구할 것은 두 갈래로 생긴다: 계약의 청구 일정(마일스톤)과 정기청구 회차(유지보수 등).
   // 경리가 청구서 메뉴 한 곳만 열면 이번 달 청구할 게 다 보이도록 '발행 예정'에서 합친다.
@@ -735,30 +736,25 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const pendingTotal = pending.reduce((s, p) => s + p.amount + (p.vat != null ? p.vat : Math.round(p.amount * 0.1)), 0)
 
   const issueSchedule = async (p, paid) => {
+    // 기입금/기지급은 "돈이 어느 계좌로 오갔나"가 핵심이라, 계좌·날짜를 받는 드로어로 넘긴다.
+    if (paid) { setPaidTarget(p); return }
     const supply = p.amount || 0
     const vat = p.vat != null ? p.vat : Math.round(supply * 0.1)
     const isRecurring = p.source === 'recurring'
     const ok = await confirm({
-      tone: "brand", icon: paid ? <Icon.Check size={22}/> : <Icon.Receipt size={22}/>,
-      title: isIssued ? (paid ? "기입금 처리" : "청구서 발행") : (paid ? "기지급 처리" : "매입 청구서 등록"),
+      tone: "brand", icon: <Icon.Receipt size={22}/>,
+      title: isIssued ? "청구서 발행" : "매입 청구서 등록",
       body: isIssued
-        ? (paid
-            ? `${p.vendor_name} · ${p.type} ${fmtNum(supply + vat)}원을 이미 입금된 건으로 처리해요. (청구서가 입금 완료로 생성됩니다)`
-            : `${p.vendor_name} · ${p.type}${isRecurring ? ` (${p.due_date} 회차)` : ''} ${fmtNum(supply + vat)}원(VAT 포함) 청구서를 발행해요. 미수금으로 등록됩니다.`)
-        : (paid
-            ? `${p.vendor_name} · ${p.type} ${fmtNum(supply + vat)}원을 이미 지급한 건으로 처리해요. (지급 완료로 생성됩니다)`
-            : `${p.vendor_name} · ${p.type} ${fmtNum(supply + vat)}원(VAT 포함) 매입 청구서를 등록해요. 미지급금으로 잡힙니다.`),
-      confirmLabel: isIssued ? (paid ? "기입금 처리" : "청구서 발행") : (paid ? "기지급 처리" : "청구서 등록"),
+        ? `${p.vendor_name} · ${p.type}${isRecurring ? ` (${p.due_date} 회차)` : ''} ${fmtNum(supply + vat)}원(VAT 포함) 청구서를 발행해요. 미수금으로 등록됩니다.`
+        : `${p.vendor_name} · ${p.type} ${fmtNum(supply + vat)}원(VAT 포함) 매입 청구서를 등록해요. 미지급금으로 잡힙니다.`,
+      confirmLabel: isIssued ? "청구서 발행" : "청구서 등록",
     })
     if (!ok) return
-    // 두 갈래를 각자의 API로 보낸다. 둘 다 원자적(청구서 + 기입금 시 거래·매칭까지 한 트랜잭션).
     const res = isRecurring
-      ? await api.issueRecurring(p.recurring_id, { due: p.due_date, paid })
-      : await api.issueSchedule(p.milestone_id, { paid })
+      ? await api.issueRecurring(p.recurring_id, { due: p.due_date, paid: false })
+      : await api.issueSchedule(p.milestone_id, { paid: false })
     if (!res.ok) { toast.push(res.error || "처리에 실패했어요"); return }
-    toast.push(isIssued
-      ? (paid ? "기입금 처리했어요" : "청구서를 발행했어요")
-      : (paid ? "기지급 처리했어요" : "매입 청구서를 등록했어요"))
+    toast.push(isIssued ? "청구서를 발행했어요" : "매입 청구서를 등록했어요")
     load()
   }
 
@@ -880,6 +876,73 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
         toast={toast}
         onSave={handleSave}
       />
+
+      <PaidIssueDrawer target={paidTarget} isIssued={isIssued}
+        onClose={() => setPaidTarget(null)}
+        onDone={() => { setPaidTarget(null); load() }}/>
     </div>
+  )
+}
+
+// 기입금/기지급 처리 — 청구서 발행 + 즉시 정산. "돈이 어느 계좌로 오갔나"를 반드시 받는다.
+const PaidIssueDrawer = ({ target, isIssued, onClose, onDone }) => {
+  const toast = useToast()
+  const today = localDate()
+  const [accounts, setAccounts] = useState([])
+  const [accountId, setAccountId] = useState("")
+  const [date, setDate] = useState(today)
+  useEffect(() => {
+    if (!target) return
+    setDate(localDate())
+    api.getAccounts().then(a => { setAccounts(a); const bank = a.find(x => x.kind === 'bank'); setAccountId(bank ? bank.id : "") })
+  }, [target])
+  if (!target) return null
+  const supply = target.amount || 0
+  const vat = target.vat != null ? target.vat : Math.round(supply * 0.1)
+  const total = supply + vat
+  const isRecurring = target.source === 'recurring'
+  const submit = async () => {
+    if (date > today) return toast.push("미래 날짜로는 처리할 수 없어요")
+    const res = isRecurring
+      ? await api.issueRecurring(target.recurring_id, { due: target.due_date, paid: true, account_id: accountId || null })
+      : await api.issueSchedule(target.milestone_id, { paid: true, date, account_id: accountId || null })
+    if (!res.ok) { toast.push(res.error || "처리에 실패했어요"); return }
+    toast.push(isIssued ? "기입금 처리했어요" : "기지급 처리했어요")
+    onDone()
+  }
+  return (
+    <Drawer open onClose={onClose} width="min(460px, 100vw)">
+      <div className="drawer-head">
+        <div>
+          <div className="fw-700" style={{ fontSize: 16 }}>{isIssued ? "기입금 처리" : "기지급 처리"}</div>
+          <div className="text-xs text-muted">{target.vendor_name} · {target.type} · {fmtNum(total)}원</div>
+        </div>
+        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
+      </div>
+      <div className="drawer-body col gap-form">
+        <div className="alert-row" style={{ background: "var(--surface-2)", borderColor: "var(--line)" }}>
+          <Icon.Sparkle/>
+          <div className="text-sm">청구서를 발행하고 <b>{fmtNum(total)}원</b>을 {isIssued ? "입금" : "지급"} 완료로 함께 기록해요. {isIssued ? "입금받은" : "출금한"} 계좌를 선택하세요.</div>
+        </div>
+        <div>
+          <label className="label">{isIssued ? "입금 계좌" : "출금 계좌"}</label>
+          <div className="row gap-6" style={{ flexWrap: "wrap" }}>
+            {accounts.filter(a => a.kind === 'bank').map(a => (
+              <button key={a.id} type="button" className={`chip ${accountId === a.id ? "active" : ""}`} onClick={() => setAccountId(a.id)}>{a.name}</button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <label className="label">{isIssued ? "입금일" : "지급일"}</label>
+          <input className="input num" type="date" value={date} max={today} onChange={e => setDate(e.target.value)}/>
+        </div>
+      </div>
+      <div className="drawer-foot">
+        <div className="ml-auto row gap-8">
+          <button className="btn" onClick={onClose}>취소</button>
+          <button className="btn primary" onClick={submit}><Icon.Check size={14}/> {isIssued ? "기입금 처리" : "기지급 처리"}</button>
+        </div>
+      </div>
+    </Drawer>
   )
 }

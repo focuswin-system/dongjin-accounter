@@ -1667,6 +1667,8 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
   const [dueAt, setDueAt] = useState('');
   const [paid, setPaid] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [accounts, setAccounts] = useState([]);
+  const [accountId, setAccountId] = useState('');
 
   const isPurchase = contract?.vendor_gubu === 'A' || contract?.vendor_gubu === 'E';
   const exempt = contract?.vat_mode === 'exempt';
@@ -1680,6 +1682,7 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
     })));
     setIssuedAt(localToday());
     setDueAt(''); setPaid(false);
+    api.getAccounts().then(a => { setAccounts(a); const bank = a.find(x => x.kind === 'bank'); setAccountId(bank ? bank.id : ''); });
   }, [open, contract]);
 
   // 수량 입력 시 금액 자동(수동 수정 전까지). 금액을 직접 고치면 그 값을 유지.
@@ -1700,7 +1703,7 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
     if (lines.length === 0) return toast.push('수량 또는 금액이 있는 품목을 입력해주세요');
     setSaving(true);
     const res = await api.issueProgressInvoice(contract.id, {
-      issued_at: issuedAt, due_at: dueAt || null, paid,
+      issued_at: issuedAt, due_at: dueAt || null, paid, account_id: paid ? (accountId || null) : null,
       lines: lines.map(r => ({
         item_id: r.item_id || null, name: r.name, spec: r.spec, unit: r.unit,
         qty: Number(String(r.qty).replace(/[^0-9.]/g, '')) || 0,
@@ -1780,6 +1783,16 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
               <input type="checkbox" checked={paid} onChange={e => setPaid(e.target.checked)}/>
               <span className="text-sm">발행과 동시에 {isPurchase ? '지급' : '입금'} 완료로 처리 (실제 거래·정산까지 반영)</span>
             </label>
+            {paid && (
+              <div style={{ marginTop: 10 }}>
+                <label className="label">{isPurchase ? '출금 계좌' : '입금 계좌'}</label>
+                <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+                  {accounts.filter(a => a.kind === 'bank').map(a => (
+                    <button key={a.id} type="button" className={`chip ${accountId === a.id ? 'active' : ''}`} onClick={() => setAccountId(a.id)}>{a.name}</button>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>

@@ -652,8 +652,8 @@ export const api = {
     try { return await req('/recurring-invoices/pending') } catch { return [] }
   },
   // 정기청구 회차 1건 발행 (paid=true면 기입금 처리까지)
-  async issueRecurring(recurringId, { due, paid = false } = {}) {
-    try { const r = await req(`/recurring-invoices/${recurringId}/issue`, { method: 'POST', body: { due, paid } }); return { ok: true, ...r } }
+  async issueRecurring(recurringId, { due, paid = false, account_id } = {}) {
+    try { const r = await req(`/recurring-invoices/${recurringId}/issue`, { method: 'POST', body: { due, paid, account_id } }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
   },
 
@@ -662,8 +662,8 @@ export const api = {
     try { return await req(`/contracts/schedule/pending${forKind ? `?for=${forKind}` : ''}`) } catch { return [] }
   },
   // 청구 일정 → 청구서 발행(원자적). paid=true면 기입금(거래+매칭까지 생성)
-  async issueSchedule(milestoneId, { paid = false, date } = {}) {
-    try { const r = await req(`/contracts/schedule/${milestoneId}/issue`, { method: 'POST', body: { paid, date } }); return { ok: true, id: r.id, invoice_no: r.invoice_no } }
+  async issueSchedule(milestoneId, { paid = false, date, account_id } = {}) {
+    try { const r = await req(`/contracts/schedule/${milestoneId}/issue`, { method: 'POST', body: { paid, date, account_id } }); return { ok: true, id: r.id, invoice_no: r.invoice_no } }
     catch (e) { return { ok: false, error: e.message } }
   },
   async updateMilestoneStatus(id, status) {

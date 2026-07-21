@@ -96,7 +96,7 @@ router.get('/pending', async (_, res, next) => {
 // 앞선 회차를 건너뛰고 발행하면 last_generated 때문에 그 앞 회차가 영영 안 뜨므로,
 // 가장 이른 미생성 회차만 발행하도록 제한한다.
 router.post('/:id/issue', async (req, res, next) => {
-  const { due, paid } = req.body
+  const { due, paid, account_id } = req.body
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
@@ -130,11 +130,17 @@ router.post('/:id/issue', async (req, res, next) => {
     const supply = Number(r.supply_amount)
     const vat    = r.vat_mode === 'none' ? 0 : Math.round(supply * 0.1)
     const total  = supply + vat
+    // 발행 즉시 정산(기입금) 시 반영할 계좌: 사용자가 고른 계좌 > 정기청구 규칙 계좌 > 주거래(첫 은행).
+    let acctId = account_id || r.account_id || null
+    if (paid && !acctId) {
+      const [[defBank]] = await conn.execute("SELECT id FROM accounts WHERE kind='bank' ORDER BY created_at LIMIT 1")
+      acctId = defBank ? defBank.id : null
+    }
     const id = randomUUID()
     await conn.execute(
       'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, invoice_no, 'issued', r.vendor_id || null, r.contract_id || null, supply, vat, total,
-       target, addDays(target, 30), paid ? '입금 완료' : '입금 예정', r.account_id || null,
+       target, addDays(target, 30), paid ? '입금 완료' : '입금 예정', acctId,
        `정기청구 · ${r.item || ''}`.trim()]
     )
     // 기입금 처리: 실제 입금 거래 + 매칭까지 (계약 상세의 수금·미수금에 반영)
@@ -143,7 +149,7 @@ router.post('/:id/issue', async (req, res, next) => {
       await conn.execute(
         `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, doc_no, invoice_id, memo)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [txnId, 'income', r.vendor_id || null, r.contract_id || null, r.account_id || null,
+        [txnId, 'income', r.vendor_id || null, r.contract_id || null, acctId,
          '수금', total, target, '계좌이체', '입금완료', '공통', '', id, `청구서 ${invoice_no} 정산`]
       )
       await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount) VALUES (?,?,?,?)',

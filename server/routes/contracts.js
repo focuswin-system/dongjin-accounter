@@ -254,7 +254,7 @@ router.patch('/milestones/:id/status', async (req, res, next) => {
 // 청구 일정 → 청구서 발행 (+선택적 기입금). 원자적: 청구서·(기입금 시)거래·매칭·일정 상태를 한 트랜잭션에서 처리.
 // 거래처 gubu로 매출(issued)/매입(received) 자동 판별. 이미 발행된 일정은 409로 거부(중복 방지).
 router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
-  const { paid, date } = req.body
+  const { paid, date, account_id } = req.body
   // 기입금(paid)이면 실제 입/출금 거래가 생기므로 미래 일자 금지
   if (paid) { const de = futureDateError(date); if (de) return res.status(400).json({ error: de }) }
   const conn = await pool.getConnection()
@@ -286,9 +286,9 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
       [kind, `${prefix}-${year}-%`]
     )
     const invoice_no = `${prefix}-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
-    // 기입금 시 반영할 기본 계좌(주거래 계좌). 없으면 null
+    // 기입금 시 반영할 계좌: 사용자가 고른 계좌 우선, 없으면 주거래(첫 은행) 계좌.
     const [[defAcc]] = await conn.execute("SELECT id FROM accounts WHERE kind='bank' ORDER BY created_at LIMIT 1")
-    const accountId = defAcc ? defAcc.id : null
+    const accountId = account_id || (defAcc ? defAcc.id : null)
     const invId = randomUUID()
     const status = paid ? (isPurchase ? '지급 완료' : '입금 완료') : (isPurchase ? '지급 대기' : '입금 예정')
     await conn.execute(
@@ -319,7 +319,7 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
 // 총액형의 schedule/issue와 달리 마일스톤이 없고, 품목 line 합계가 곧 공급가액이다.
 // body: { issued_at, due_at?, paid?, lines:[{ item_id, name, spec, unit, qty, unit_price, amount }] }
 router.post('/:id/progress-invoice', async (req, res, next) => {
-  const { issued_at, due_at, paid, lines } = req.body
+  const { issued_at, due_at, paid, lines, account_id } = req.body
   if (!Array.isArray(lines) || lines.length === 0) {
     return res.status(400).json({ error: '청구할 품목을 하나 이상 입력해주세요' })
   }
@@ -366,8 +366,9 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
       [kind, `${prefix}-${year}-%`]
     )
     const invoice_no = `${prefix}-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
+    // 발행 즉시 정산 시 반영할 계좌: 사용자가 고른 계좌 우선, 없으면 주거래(첫 은행) 계좌.
     const [[defAcc]] = await conn.execute("SELECT id FROM accounts WHERE kind='bank' ORDER BY created_at LIMIT 1")
-    const accountId = defAcc ? defAcc.id : null
+    const accountId = account_id || (defAcc ? defAcc.id : null)
     const invId = randomUUID()
     const status = paid ? (isPurchase ? '지급 완료' : '입금 완료') : (isPurchase ? '지급 대기' : '입금 예정')
     await conn.execute(
