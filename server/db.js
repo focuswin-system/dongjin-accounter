@@ -1144,4 +1144,8 @@ const futureDateError = (date) => (date && date > kstToday())
   ? '미래 날짜로는 처리할 수 없어요 (오늘까지만 가능)'
   : null
 
-module.exports = { pool, initDb, kstDate, kstToday, futureDateError }
+// ⚠ pool은 의도적으로 export 하지 않는다.
+// 멀티테넌트에서 전역 풀을 쓰면 '어느 회사 DB인지'가 사라져 교차 테넌트 유출이 된다.
+// 라우트는 반드시 req.db(tenant 미들웨어가 주입한 회사별 풀)만 사용한다.
+// export를 막아두면 실수로 가져다 쓰는 코드가 조용히 동작하지 않고 즉시 터진다.
+module.exports = { initDb, kstDate, kstToday, futureDateError }

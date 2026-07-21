@@ -1,15 +1,15 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { pool, futureDateError, kstToday } = require('../db')
+const { futureDateError, kstToday } = require('../db')
 
 const router = Router()
 
 const RECEIVABLE_STATUSES = new Set(['입금 예정', '일부 입금', '기한 지남', '장기 미수'])
 const PAYABLE_STATUSES    = new Set(['지급 대기', '지급 예정', '일부 지급', '기한 지남'])
 
-async function attachMatches(invoice) {
-  const [matches] = await pool.execute('SELECT * FROM invoice_matches WHERE invoice_id = ?', [invoice.id])
-  const [docs] = await pool.execute('SELECT id, url, name, doc_type, size, created_at FROM invoice_docs WHERE invoice_id = ? ORDER BY created_at', [invoice.id])
+async function attachMatches(db, invoice) {
+  const [matches] = await db.execute('SELECT * FROM invoice_matches WHERE invoice_id = ?', [invoice.id])
+  const [docs] = await db.execute('SELECT id, url, name, doc_type, size, created_at FROM invoice_docs WHERE invoice_id = ? ORDER BY created_at', [invoice.id])
   const paid = matches.reduce((s, m) => s + Number(m.amount), 0)
   return { ...invoice, matches, docs, paidAmount: paid, remainAmount: Number(invoice.total_amount) - paid }
 }
@@ -25,16 +25,16 @@ router.get('/', async (req, res, next) => {
     if (from)     { sql += ' AND i.issued_at >= ?'; params.push(from) }
     if (to)       { sql += ' AND i.issued_at <= ?'; params.push(to) }
     sql += ' ORDER BY i.issued_at DESC'
-    const [rows] = await pool.execute(sql, params)
-    res.json(await Promise.all(rows.map(attachMatches)))
+    const [rows] = await req.db.execute(sql, params)
+    res.json(await Promise.all(rows.map(r => attachMatches(req.db, r))))
   } catch (e) { next(e) }
 })
 
-router.get('/summary/receivables', async (_, res, next) => {
+router.get('/summary/receivables', async (req, res, next) => {
   try {
-    const [rows] = await pool.execute("SELECT * FROM invoices WHERE kind='issued'")
+    const [rows] = await req.db.execute("SELECT * FROM invoices WHERE kind='issued'")
     const active = rows.filter(r => RECEIVABLE_STATUSES.has(r.status))
-    const withMatches = await Promise.all(active.map(attachMatches))
+    const withMatches = await Promise.all(active.map(r => attachMatches(req.db, r)))
     const today = kstToday()
     const overdueRows = withMatches.filter(r => r.remainAmount > 0 && r.due_at && r.due_at < today)
     const summary = {
@@ -48,10 +48,10 @@ router.get('/summary/receivables', async (_, res, next) => {
   } catch (e) { next(e) }
 })
 
-router.get('/summary/payables', async (_, res, next) => {
+router.get('/summary/payables', async (req, res, next) => {
   try {
-    const [rows] = await pool.execute("SELECT * FROM invoices WHERE kind='received'")
-    const withMatches = await Promise.all(rows.map(attachMatches))
+    const [rows] = await req.db.execute("SELECT * FROM invoices WHERE kind='received'")
+    const withMatches = await Promise.all(rows.map(r => attachMatches(req.db, r)))
     const pending = withMatches.filter(r => PAYABLE_STATUSES.has(r.status))
     const today = kstToday()
     const overdueRows = pending.filter(r => r.remainAmount > 0 && r.due_at && r.due_at < today)
@@ -74,7 +74,7 @@ router.get('/summary/vat', async (req, res, next) => {
     if (!months.length) return res.json({ salesVat: 0, purchaseVat: 0, netVat: 0, rows: [] })
     const placeholders = months.map(() => 'i.issued_at LIKE ?').join(' OR ')
     const params = months.map(m => `${y}-${m}%`)
-    const [all] = await pool.execute(
+    const [all] = await req.db.execute(
       `SELECT i.*, v.name AS vendor_name FROM invoices i
        LEFT JOIN vendors v ON i.vendor_id = v.id
        WHERE (${placeholders})`,
@@ -88,9 +88,9 @@ router.get('/summary/vat', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const [rows] = await pool.execute('SELECT * FROM invoices WHERE id = ?', [req.params.id])
+    const [rows] = await req.db.execute('SELECT * FROM invoices WHERE id = ?', [req.params.id])
     if (!rows[0]) return res.status(404).json({ error: 'Not found' })
-    res.json(await attachMatches(rows[0]))
+    res.json(await attachMatches(req.db, rows[0]))
   } catch (e) { next(e) }
 })
 
@@ -101,12 +101,12 @@ router.post('/', async (req, res, next) => {
     // 친화적 청구번호 생성: 청구-2026-0001 / 매입-2026-0001 (최대 일련번호+1 — 삭제해도 재사용 안 됨)
     const year = String(issued_at || '').slice(0, 4) || String(new Date().getFullYear())
     const prefix = kind === 'issued' ? '청구' : '매입'
-    const [[{ maxno }]] = await pool.execute(
+    const [[{ maxno }]] = await req.db.execute(
       "SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(invoice_no, '-', -1) AS UNSIGNED)), 0) AS maxno FROM invoices WHERE kind = ? AND invoice_no LIKE ?",
       [kind, `${prefix}-${year}-%`]
     )
     const invoice_no = `${prefix}-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
-    await pool.execute(
+    await req.db.execute(
       'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, invoice_no, kind, vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, status||(kind==='issued' ? '입금 예정' : '지급 대기'), account_id||null, memo||'']
     )
@@ -117,7 +117,7 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const { vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo } = req.body
-    const [result] = await pool.execute(
+    const [result] = await req.db.execute(
       'UPDATE invoices SET vendor_id=?, contract_id=?, supply_amount=?, vat_amount=?, total_amount=?, issued_at=?, due_at=?, status=?, account_id=?, memo=? WHERE id=?',
       [vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, status, account_id||null, memo||'', req.params.id]
     )
@@ -127,7 +127,7 @@ router.put('/:id', async (req, res, next) => {
 })
 
 router.delete('/:id', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const id = req.params.id
@@ -150,7 +150,7 @@ router.post('/:id/matches', async (req, res, next) => {
   const invoiceId = req.params.id
   const dateErr = futureDateError(date)
   if (dateErr) return res.status(400).json({ error: dateErr })
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[inv]] = await conn.execute('SELECT * FROM invoices WHERE id = ? FOR UPDATE', [invoiceId])
@@ -207,13 +207,13 @@ router.post('/:id/matches', async (req, res, next) => {
 // ── 매칭 후보: 거래내역에 이미 있는(미매칭) 같은 종류 거래 ──
 router.get('/:id/matchable', async (req, res, next) => {
   try {
-    const [invRows] = await pool.execute('SELECT kind, vendor_id, supply_amount, total_amount FROM invoices WHERE id = ?', [req.params.id])
+    const [invRows] = await req.db.execute('SELECT kind, vendor_id, supply_amount, total_amount FROM invoices WHERE id = ?', [req.params.id])
     const inv = invRows[0]
     if (!inv) return res.json([])
     const txnKind = inv.kind === 'issued' ? 'income' : 'expense'
-    const [[{ paid }]] = await pool.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [req.params.id])
+    const [[{ paid }]] = await req.db.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [req.params.id])
     const supply = Number(inv.supply_amount), total = Number(inv.total_amount), remain = total - Number(paid)
-    const [rows] = await pool.execute(`
+    const [rows] = await req.db.execute(`
       SELECT t.id, t.amount, t.date, t.category, t.vendor_id, v.name AS vendor_name
       FROM transactions t
       LEFT JOIN vendors v ON t.vendor_id = v.id
@@ -240,7 +240,7 @@ router.get('/:id/matchable', async (req, res, next) => {
 })
 
 router.delete('/:id/matches/:matchId', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[inv]] = await conn.execute('SELECT * FROM invoices WHERE id = ? FOR UPDATE', [req.params.id])
@@ -269,7 +269,7 @@ router.post('/:id/docs', async (req, res, next) => {
     const { url, name, doc_type, size } = req.body
     if (!url) return res.status(400).json({ error: 'url 필수' })
     const id = randomUUID()
-    await pool.execute(
+    await req.db.execute(
       'INSERT INTO invoice_docs (id, invoice_id, url, name, doc_type, size) VALUES (?,?,?,?,?,?)',
       [id, req.params.id, url, name || '', doc_type || '', size || 0]
     )
@@ -279,7 +279,7 @@ router.post('/:id/docs', async (req, res, next) => {
 
 router.delete('/docs/:docId', async (req, res, next) => {
   try {
-    await pool.execute('DELETE FROM invoice_docs WHERE id = ?', [req.params.docId])
+    await req.db.execute('DELETE FROM invoice_docs WHERE id = ?', [req.params.docId])
     res.json({ ok: true })
   } catch (e) { next(e) }
 })

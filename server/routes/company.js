@@ -1,12 +1,11 @@
 const { Router } = require('express')
-const { pool } = require('../db')
 
 const router = Router()
 const COMPANY_ID = 'main' // 자사 정보는 단일 레코드
 
-router.get('/', async (_, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
-    const [rows] = await pool.execute('SELECT * FROM company_info WHERE id = ?', [COMPANY_ID])
+    const [rows] = await req.db.execute('SELECT * FROM company_info WHERE id = ?', [COMPANY_ID])
     res.json(rows[0] || null)
   } catch (e) { next(e) }
 })
@@ -14,7 +13,7 @@ router.get('/', async (_, res, next) => {
 router.put('/', async (req, res, next) => {
   try {
     const { name, biz_no, ceo, biz_type, biz_item, address, phone, fax, email, main_account } = req.body
-    await pool.execute(
+    await req.db.execute(
       `INSERT INTO company_info
          (id, name, biz_no, ceo, biz_type, biz_item, address, phone, fax, email, main_account)
        VALUES (?,?,?,?,?,?,?,?,?,?,?)

@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { pool, futureDateError } = require('../db')
+const { futureDateError } = require('../db')
 
 const router = Router()
 
@@ -8,8 +8,10 @@ const router = Router()
 //  완료(납부/환급) → 지출/입금 거래를 생성(또는 갱신). 완료 취소 → 그 거래 삭제.
 //  반환: 연결된 txn_id (완료 아니면 null)
 // 비목(category)·적요(memo)·계정과목(accountCode)은 화면에서 사용자가 정한 값을 그대로 거래에 넣는다.
-// db: 트랜잭션 커넥션(conn) 또는 기본 pool. 세금 저장과 거래 반영을 한 트랜잭션으로 묶기 위해 주입받는다.
-async function syncTaxTxn({ existingTxnId, isDone, isRefund, amount, accountId, date, category, memo, accountCode }, db = pool) {
+// db: 트랜잭션 커넥션(conn) 또는 요청의 테넌트 풀(req.db). 세금 저장과 거래 반영을 한 트랜잭션으로 묶기 위해 주입받는다.
+async function syncTaxTxn({ existingTxnId, isDone, isRefund, amount, accountId, date, category, memo, accountCode }, db) {
+  // db는 필수. 기본값(전역 풀)을 두면 호출자가 빠뜨렸을 때 조용히 남의 회사 DB를 건드린다.
+  if (!db) throw new Error('syncTaxTxn: 테넌트 연결(db)이 필요합니다')
   // 완료가 아니거나 금액 0 → 기존 거래 있으면 삭제하고 연결 해제
   if (!isDone || !amount) {
     if (existingTxnId) await db.execute('DELETE FROM transactions WHERE id=?', [existingTxnId])
@@ -41,7 +43,7 @@ async function syncTaxTxn({ existingTxnId, isDone, isRefund, amount, accountId, 
 router.get('/vat', async (req, res, next) => {
   try {
     const year = parseInt(req.query.year, 10) || new Date().getFullYear()
-    const [agg] = await pool.execute(
+    const [agg] = await req.db.execute(
       `SELECT QUARTER(issued_at) AS q,
               SUM(CASE WHEN kind='issued'   THEN vat_amount ELSE 0 END) AS sales_vat,
               SUM(CASE WHEN kind='received' THEN vat_amount ELSE 0 END) AS purchase_vat
@@ -50,7 +52,7 @@ router.get('/vat', async (req, res, next) => {
        GROUP BY QUARTER(issued_at)`,
       [year]
     )
-    const [filings] = await pool.execute('SELECT * FROM vat_filings WHERE year = ?', [year])
+    const [filings] = await req.db.execute('SELECT * FROM vat_filings WHERE year = ?', [year])
     const aggBy = Object.fromEntries(agg.map(r => [Number(r.q), r]))
     const fileBy = Object.fromEntries(filings.map(r => [Number(r.quarter), r]))
 
@@ -88,7 +90,7 @@ router.put('/vat', async (req, res, next) => {
   // 납부/환급 완료면 실제 지출/입금 거래가 생기므로 미래 납부일 금지
   const isDoneStatus = status === '납부 완료' || status === '환급 완료'
   if (isDoneStatus) { const de = futureDateError(paid_date); if (de) return res.status(400).json({ error: de }) }
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [exist] = await conn.execute('SELECT * FROM vat_filings WHERE year=? AND quarter=?', [year, quarter])
@@ -134,13 +136,14 @@ const otPick = (b) => OT_FIELDS.map(f => (
 
 router.get('/others', async (req, res, next) => {
   try {
-    const [rows] = await pool.execute('SELECT * FROM other_taxes ORDER BY created_at DESC')
+    const [rows] = await req.db.execute('SELECT * FROM other_taxes ORDER BY created_at DESC')
     res.json(rows)
   } catch (e) { next(e) }
 })
 
 // 기타세액도 납부 완료 → 지출 / 환급 완료 → 입금 거래 연결. 비목·계정과목은 사용자가 정한 값.
-async function syncOtherTaxTxn(body, existingTxnId, db = pool) {
+async function syncOtherTaxTxn(body, existingTxnId, db) {
+  if (!db) throw new Error('syncOtherTaxTxn: 테넌트 연결(db)이 필요합니다')
   const st = body.status || '납부 대기'
   const isDone = st === '납부 완료' || st === '환급 완료'
   const isRefund = st === '환급 완료'
@@ -160,7 +163,7 @@ const otFutureErr = (body) =>
 router.post('/others', async (req, res, next) => {
   if (!req.body.name) return res.status(400).json({ error: '세목명 필수' })
   { const de = otFutureErr(req.body); if (de) return res.status(400).json({ error: de }) }
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const id = randomUUID()
@@ -177,7 +180,7 @@ router.post('/others', async (req, res, next) => {
 
 router.put('/others/:id', async (req, res, next) => {
   { const de = otFutureErr(req.body); if (de) return res.status(400).json({ error: de }) }
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[cur]] = await conn.execute('SELECT txn_id FROM other_taxes WHERE id=?', [req.params.id])
@@ -194,7 +197,7 @@ router.put('/others/:id', async (req, res, next) => {
 })
 
 router.delete('/others/:id', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[cur]] = await conn.execute('SELECT txn_id FROM other_taxes WHERE id=?', [req.params.id])

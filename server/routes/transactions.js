@@ -2,17 +2,17 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const multer = require('multer')
 const xlsx = require('xlsx')
-const { pool, futureDateError } = require('../db')
+const { futureDateError } = require('../db')
 
 const router = Router()
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
 
 // 거래 목록/상세에 첨부 서류(다중) 붙이기
-async function attachDocs(rows) {
+async function attachDocs(db, rows) {
   if (!rows.length) return
   const ids = rows.map(r => r.id)
   const ph = ids.map(() => '?').join(',')
-  const [docs] = await pool.execute(
+  const [docs] = await db.execute(
     `SELECT id, txn_id, url, name, doc_type, size, created_at FROM transaction_docs WHERE txn_id IN (${ph}) ORDER BY created_at`, ids)
   const byTxn = {}
   for (const d of docs) { if (!byTxn[d.txn_id]) byTxn[d.txn_id] = []; byTxn[d.txn_id].push(d) }
@@ -44,8 +44,8 @@ router.get('/', async (req, res, next) => {
     if (from)       { sql += ' AND t.date >= ?';       params.push(from) }
     if (to)         { sql += ' AND t.date <= ?';       params.push(to) }
     sql += ' ORDER BY t.date DESC'
-    const [rows] = await pool.execute(sql, params)
-    await attachDocs(rows)
+    const [rows] = await req.db.execute(sql, params)
+    await attachDocs(req.db, rows)
     res.json(rows)
   } catch (e) { next(e) }
 })
@@ -58,14 +58,14 @@ router.get('/summary', async (req, res, next) => {
     if (buyerType) { sql += ' AND buyer_type = ?'; params.push(buyerType) }
     if (year && month) { sql += ' AND date LIKE ?'; params.push(`${year}-${month}%`) }
     sql += ' GROUP BY category ORDER BY total DESC'
-    const [rows] = await pool.execute(sql, params)
+    const [rows] = await req.db.execute(sql, params)
     res.json(rows)
   } catch (e) { next(e) }
 })
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const [rows] = await pool.execute(`
+    const [rows] = await req.db.execute(`
       SELECT t.*, v.name AS vendor_name, c.name AS contract_name, a.name AS account_name,
              e.name AS employee_name, ri.name AS item_name, cc.name AS cost_contract_name
       FROM transactions t
@@ -77,7 +77,7 @@ router.get('/:id', async (req, res, next) => {
       LEFT JOIN ref_items ri ON t.item_id = ri.id
       WHERE t.id = ?`, [req.params.id])
     if (!rows[0]) return res.status(404).json({ error: 'Not found' })
-    await attachDocs(rows)
+    await attachDocs(req.db, rows)
     res.json(rows[0])
   } catch (e) { next(e) }
 })
@@ -95,7 +95,7 @@ router.post('/', async (req, res, next) => {
     const id = randomUUID()
     // 원가 귀속(cost_contract_id)은 지출에만 의미가 있다 — 수금에 붙으면 매출계약 원가가 부풀어 오른다
     const costId = kind === 'expense' ? (cost_contract_id || null) : null
-    await pool.execute(`
+    await req.db.execute(`
       INSERT INTO transactions (id, kind, vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
         amount, date, method, status, buyer_type, vessel_no, usage_place,
         invoice_id, recurring_id, doc_no, employee_id, evid_type, evid_url, memo, item_id, account_code)
@@ -118,10 +118,10 @@ router.put('/:id', async (req, res, next) => {
     const dateErr = futureDateError(date)
     if (dateErr) return res.status(400).json({ error: dateErr })
     // 편집으로 수입 거래가 되면 원가 귀속은 떨어진다
-    const [[cur]] = await pool.execute('SELECT kind FROM transactions WHERE id = ?', [req.params.id])
+    const [[cur]] = await req.db.execute('SELECT kind FROM transactions WHERE id = ?', [req.params.id])
     if (!cur) return res.status(404).json({ error: 'Not found' })
     const costId = cur.kind === 'expense' ? (cost_contract_id || null) : null
-    const [result] = await pool.execute(`
+    const [result] = await req.db.execute(`
       UPDATE transactions SET vendor_id=?, contract_id=?, cost_contract_id=?, account_id=?, category=?, sub_category=?,
         amount=?, date=?, method=?, status=?, buyer_type=?, vessel_no=?, usage_place=?,
         doc_no=?, employee_id=?, evid_type=?, evid_url=?, memo=?, item_id=?, account_code=?
@@ -142,7 +142,7 @@ router.patch('/:id/status', async (req, res, next) => {
     // 지출/입금으로 세므로, '지급 완료'(공백)로 들어오면 잔액에서 누락된다(F-02 계열 방지).
     if (status === '지급 완료') status = '지급완료'
     else if (status === '입금 완료') status = '입금완료'
-    const [result] = await pool.execute('UPDATE transactions SET status=? WHERE id=?', [status, req.params.id])
+    const [result] = await req.db.execute('UPDATE transactions SET status=? WHERE id=?', [status, req.params.id])
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
   } catch (e) { next(e) }
@@ -152,7 +152,7 @@ router.patch('/:id/status', async (req, res, next) => {
 router.patch('/:id/evidence', async (req, res, next) => {
   try {
     const { evid_url, evid_type } = req.body
-    const [result] = await pool.execute(
+    const [result] = await req.db.execute(
       'UPDATE transactions SET evid_url=?, evid_type=? WHERE id=?',
       [evid_url||'', evid_type||'', req.params.id]
     )
@@ -167,7 +167,7 @@ router.post('/:id/docs', async (req, res, next) => {
     const { url, name, doc_type, size } = req.body
     if (!url) return res.status(400).json({ error: 'url 필수' })
     const id = randomUUID()
-    await pool.execute(
+    await req.db.execute(
       'INSERT INTO transaction_docs (id, txn_id, url, name, doc_type, size) VALUES (?,?,?,?,?,?)',
       [id, req.params.id, url, name || '', doc_type || '', size || 0]
     )
@@ -177,13 +177,13 @@ router.post('/:id/docs', async (req, res, next) => {
 
 router.delete('/docs/:docId', async (req, res, next) => {
   try {
-    await pool.execute('DELETE FROM transaction_docs WHERE id = ?', [req.params.docId])
+    await req.db.execute('DELETE FROM transaction_docs WHERE id = ?', [req.params.docId])
     res.json({ ok: true })
   } catch (e) { next(e) }
 })
 
 router.delete('/:id', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     // 이 거래에 걸린 청구서 매칭을 정리하고 청구서 상태를 재계산한다.
@@ -229,7 +229,7 @@ router.post('/import/parse', uploadMem.single('file'), (req, res, next) => {
 
 // ── 엑셀 임포트: 일괄 등록(미등록 거래처는 자동 생성) ──
 router.post('/import/commit', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     const items = Array.isArray(req.body.items) ? req.body.items : []
     const [vs] = await conn.execute('SELECT id, name FROM vendors')

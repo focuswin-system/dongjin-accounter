@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { pool, futureDateError, kstToday } = require('../db')
+const { futureDateError, kstToday } = require('../db')
 
 const router = Router()
 
@@ -26,9 +26,9 @@ const nextDocNo = async (execFn, dateStr) => {
 }
 
 // 목록 (최신순)
-router.get('/', async (_, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
-    const [rows] = await pool.execute(
+    const [rows] = await req.db.execute(
       `SELECT er.*, v.name AS vendor_name2 FROM expense_resolutions er
        LEFT JOIN vendors v ON er.vendor_id = v.id ORDER BY er.created_at DESC`)
     res.json(rows.map(adapt))
@@ -38,14 +38,14 @@ router.get('/', async (_, res, next) => {
 // 특정 지출 거래에 연결된 결의서 (증빙 영역에서 열람용). 없으면 null.
 router.get('/by-txn/:txnId', async (req, res, next) => {
   try {
-    const [[r]] = await pool.execute('SELECT * FROM expense_resolutions WHERE txn_id = ?', [req.params.txnId])
+    const [[r]] = await req.db.execute('SELECT * FROM expense_resolutions WHERE txn_id = ?', [req.params.txnId])
     res.json(r ? adapt(r) : null)
   } catch (e) { next(e) }
 })
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const [[r]] = await pool.execute('SELECT * FROM expense_resolutions WHERE id = ?', [req.params.id])
+    const [[r]] = await req.db.execute('SELECT * FROM expense_resolutions WHERE id = ?', [req.params.id])
     if (!r) return res.status(404).json({ error: 'Not found' })
     res.json(adapt(r))
   } catch (e) { next(e) }
@@ -59,20 +59,20 @@ router.post('/', async (req, res, next) => {
     const itemList = Array.isArray(items) && items.length ? items
       : [{ name: title || '지출', unit: '식', qty: 1, price: Number(req.body.amount) || 0, amount: Number(req.body.amount) || 0, note: '' }]
     const amount = itemList.reduce((s, it) => s + (Number(it.amount) || 0), 0)
-    const doc_no = await nextDocNo((sql, p) => pool.execute(sql, p), pay_date)
+    const doc_no = await nextDocNo((sql, p) => req.db.execute(sql, p), pay_date)
     const id = randomUUID()
     // 결재선: 요청에 있으면 그걸 쓰고(만들 때 고른 프리셋), 없으면 기본 프리셋
     const approval = Array.isArray(req.body.approval) && req.body.approval.length
       ? req.body.approval
-      : await defaultApproval((sql, p) => pool.execute(sql, p))
-    await pool.execute(
+      : await defaultApproval((sql, p) => req.db.execute(sql, p))
+    await req.db.execute(
       `INSERT INTO expense_resolutions (id, doc_no, vendor_id, vendor_name, title, amount, pay_method, pay_date, applicant, items, note, approval, status)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [id, doc_no, vendor_id || null, vendor_name || '', title || '지출 결의', amount,
        pay_method || '계좌이체', pay_date || null,
        applicant || req.user?.name || req.user?.username || '관리자',
        JSON.stringify(itemList), note || '', JSON.stringify(approval), '작성'])
-    const [[created]] = await pool.execute('SELECT * FROM expense_resolutions WHERE id = ?', [id])
+    const [[created]] = await req.db.execute('SELECT * FROM expense_resolutions WHERE id = ?', [id])
     res.json(adapt(created))
   } catch (e) { next(e) }
 })
@@ -80,7 +80,7 @@ router.post('/', async (req, res, next) => {
 // 매입 청구서 1건 → 결의서 생성(있으면 그대로 반환). 지급 전 결재용.
 // 거래(txn_id)는 아직 없을 수 있다 — 나중에 지급 매칭되면 그 거래와 연결(선택).
 router.post('/from-invoice/:invoiceId', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[existing]] = await conn.execute('SELECT * FROM expense_resolutions WHERE invoice_id = ?', [req.params.invoiceId])
@@ -126,7 +126,7 @@ router.post('/from-invoice/:invoiceId', async (req, res, next) => {
        req.user?.name || req.user?.username || '관리자',
        JSON.stringify(items), '', JSON.stringify(approval), '작성'])
     await conn.commit()
-    const [[created]] = await pool.execute('SELECT * FROM expense_resolutions WHERE id = ?', [id])
+    const [[created]] = await req.db.execute('SELECT * FROM expense_resolutions WHERE id = ?', [id])
     res.json(adapt(created))
   } catch (e) { await conn.rollback(); next(e) }
   finally { conn.release() }
@@ -136,9 +136,9 @@ router.post('/from-invoice/:invoiceId', async (req, res, next) => {
 // 거래처가 같으면 위로, 금액이 비슷하면 위로. 이미 결의서가 붙은 거래는 제외.
 router.get('/:id/matchable', async (req, res, next) => {
   try {
-    const [[r]] = await pool.execute('SELECT * FROM expense_resolutions WHERE id = ?', [req.params.id])
+    const [[r]] = await req.db.execute('SELECT * FROM expense_resolutions WHERE id = ?', [req.params.id])
     if (!r) return res.status(404).json({ error: 'Not found' })
-    const [rows] = await pool.execute(
+    const [rows] = await req.db.execute(
       `SELECT t.id, t.date, t.amount, t.category, t.status, v.name AS vendor_name
        FROM transactions t LEFT JOIN vendors v ON t.vendor_id = v.id
        WHERE t.kind='expense'
@@ -156,7 +156,7 @@ router.get('/:id/matchable', async (req, res, next) => {
 // 어느 쪽이든 지출 doc_no에 결의서번호를 역참조해, 그 지출의 증빙에서 결의서를 찾을 수 있게 한다.
 router.post('/:id/process', async (req, res, next) => {
   const { mode, txn_id, amount, date, account_id } = req.body
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[r]] = await conn.execute('SELECT * FROM expense_resolutions WHERE id = ? FOR UPDATE', [req.params.id])
@@ -236,7 +236,7 @@ router.post('/:id/process', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const { title, amount, pay_method, pay_date, applicant, items, note, status, vendor_name, approval } = req.body
-    const [r] = await pool.execute(
+    const [r] = await req.db.execute(
       `UPDATE expense_resolutions SET title=?, amount=?, pay_method=?, pay_date=?, applicant=?, items=?, note=?, status=?, vendor_name=?, approval=?
        WHERE id=?`,
       [title || '', Number(amount) || 0, pay_method || '', pay_date || null, applicant || '',
@@ -249,7 +249,7 @@ router.put('/:id', async (req, res, next) => {
 
 router.delete('/:id', async (req, res, next) => {
   try {
-    await pool.execute('DELETE FROM expense_resolutions WHERE id = ?', [req.params.id])
+    await req.db.execute('DELETE FROM expense_resolutions WHERE id = ?', [req.params.id])
     res.json({ ok: true })
   } catch (e) { next(e) }
 })

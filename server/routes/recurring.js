@@ -1,13 +1,13 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { pool, kstToday } = require('../db')
+const { kstToday } = require('../db')
 const { dueDatesToGenerate } = require('../lib/recurrence')
 
 const router = Router()
 
-router.get('/', async (_, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
-    const [rows] = await pool.execute(`
+    const [rows] = await req.db.execute(`
       SELECT r.*, v.name AS vendor_name
       FROM recurring_expenses r
       LEFT JOIN vendors v ON r.vendor_id = v.id
@@ -21,7 +21,7 @@ router.post('/', async (req, res, next) => {
   try {
     const { vendor_id, contract_id, category, amount, period, day_of_month, start_date, end_date, account_id } = req.body
     const id = randomUUID()
-    await pool.execute(
+    await req.db.execute(
       'INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, period, day_of_month, start_date, end_date, account_id) VALUES (?,?,?,?,?,?,?,?,?,?)',
       [id, vendor_id||null, contract_id||null, category||'', amount, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null]
     )
@@ -32,7 +32,7 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const { vendor_id, contract_id, category, amount, period, day_of_month, start_date, end_date, account_id } = req.body
-    const [result] = await pool.execute(
+    const [result] = await req.db.execute(
       'UPDATE recurring_expenses SET vendor_id=?, contract_id=?, category=?, amount=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=? WHERE id=?',
       [vendor_id||null, contract_id||null, category||'', amount, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, req.params.id]
     )
@@ -43,17 +43,17 @@ router.put('/:id', async (req, res, next) => {
 
 router.patch('/:id/toggle', async (req, res, next) => {
   try {
-    const [rows] = await pool.execute('SELECT active FROM recurring_expenses WHERE id = ?', [req.params.id])
+    const [rows] = await req.db.execute('SELECT active FROM recurring_expenses WHERE id = ?', [req.params.id])
     if (!rows[0]) return res.status(404).json({ error: 'Not found' })
     const newActive = rows[0].active ? 0 : 1
-    await pool.execute('UPDATE recurring_expenses SET active = ? WHERE id = ?', [newActive, req.params.id])
+    await req.db.execute('UPDATE recurring_expenses SET active = ? WHERE id = ?', [newActive, req.params.id])
     res.json({ active: !!newActive })
   } catch (e) { next(e) }
 })
 
-router.post('/generate', async (_, res, next) => {
+router.post('/generate', async (req, res, next) => {
   const today = kstToday()
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [recurrings] = await conn.execute('SELECT * FROM recurring_expenses WHERE active = 1')

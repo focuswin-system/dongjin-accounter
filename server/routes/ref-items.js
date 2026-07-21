@@ -1,6 +1,5 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { pool } = require('../db')
 
 const router = Router()
 
@@ -15,8 +14,8 @@ router.get('/', async (req, res, next) => {
   try {
     const { type } = req.query
     const [rows] = type
-      ? await pool.execute('SELECT * FROM ref_items WHERE type=? ORDER BY sort_order, name', [type])
-      : await pool.execute('SELECT * FROM ref_items ORDER BY type, sort_order, name')
+      ? await req.db.execute('SELECT * FROM ref_items WHERE type=? ORDER BY sort_order, name', [type])
+      : await req.db.execute('SELECT * FROM ref_items ORDER BY type, sort_order, name')
     res.json(rows)
   } catch (e) { next(e) }
 })
@@ -26,9 +25,9 @@ router.post('/', async (req, res, next) => {
   try {
     const { type, name } = req.body
     if (!type || !name) return res.status(400).json({ error: 'type·name 필수' })
-    const [[{ maxOrder }]] = await pool.execute('SELECT COALESCE(MAX(sort_order),0) AS maxOrder FROM ref_items WHERE type=?', [type])
+    const [[{ maxOrder }]] = await req.db.execute('SELECT COALESCE(MAX(sort_order),0) AS maxOrder FROM ref_items WHERE type=?', [type])
     const id = randomUUID()
-    await pool.execute(
+    await req.db.execute(
       'INSERT INTO ref_items (id, type, name, code, spec, unit, party, amount, start_date, end_date, memo, period, pay_day, account_id, file_url, file_name, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, type, ...pick(req.body), maxOrder + 1]
     )
@@ -39,7 +38,7 @@ router.post('/', async (req, res, next) => {
 // 수정
 router.put('/:id', async (req, res, next) => {
   try {
-    const [result] = await pool.execute(
+    const [result] = await req.db.execute(
       'UPDATE ref_items SET name=?, code=?, spec=?, unit=?, party=?, amount=?, start_date=?, end_date=?, memo=?, period=?, pay_day=?, account_id=?, file_url=?, file_name=? WHERE id=?',
       [...pick(req.body), req.params.id]
     )
@@ -51,7 +50,7 @@ router.put('/:id', async (req, res, next) => {
 // 삭제
 router.delete('/:id', async (req, res, next) => {
   try {
-    await pool.execute('DELETE FROM ref_items WHERE id=?', [req.params.id])
+    await req.db.execute('DELETE FROM ref_items WHERE id=?', [req.params.id])
     res.json({ ok: true })
   } catch (e) { next(e) }
 })

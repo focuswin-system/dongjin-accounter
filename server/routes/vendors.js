@@ -2,7 +2,6 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const multer = require('multer')
 const xlsx = require('xlsx')
-const { pool } = require('../db')
 
 const router = Router()
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
@@ -11,15 +10,15 @@ router.get('/', async (req, res, next) => {
   try {
     const { gubu } = req.query
     const [rows] = gubu
-      ? await pool.execute('SELECT * FROM vendors WHERE gubu = ? ORDER BY name', [gubu])
-      : await pool.execute('SELECT * FROM vendors ORDER BY gubu, name')
+      ? await req.db.execute('SELECT * FROM vendors WHERE gubu = ? ORDER BY name', [gubu])
+      : await req.db.execute('SELECT * FROM vendors ORDER BY gubu, name')
     res.json(rows)
   } catch (e) { next(e) }
 })
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const [rows] = await pool.execute('SELECT * FROM vendors WHERE id = ?', [req.params.id])
+    const [rows] = await req.db.execute('SELECT * FROM vendors WHERE id = ?', [req.params.id])
     if (!rows[0]) return res.status(404).json({ error: 'Not found' })
     res.json(rows[0])
   } catch (e) { next(e) }
@@ -29,7 +28,7 @@ router.post('/', async (req, res, next) => {
   try {
     const { name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email } = req.body
     const id = randomUUID()
-    await pool.execute(
+    await req.db.execute(
       'INSERT INTO vendors (id, name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, name, biz_no||'', ceo||'', address||'', phone||'', gubu||'A', type||'', service_type||'', contact||'', fax||'', email||'']
     )
@@ -40,7 +39,7 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const { name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email } = req.body
-    const [result] = await pool.execute(
+    const [result] = await req.db.execute(
       'UPDATE vendors SET name=?, biz_no=?, ceo=?, address=?, phone=?, gubu=?, type=?, service_type=?, contact=?, fax=?, email=? WHERE id=?',
       [name, biz_no||'', ceo||'', address||'', phone||'', gubu||'A', type||'', service_type||'', contact||'', fax||'', email||'', req.params.id]
     )
@@ -51,7 +50,7 @@ router.put('/:id', async (req, res, next) => {
 
 router.delete('/:id', async (req, res, next) => {
   try {
-    await pool.execute('DELETE FROM vendors WHERE id = ?', [req.params.id])
+    await req.db.execute('DELETE FROM vendors WHERE id = ?', [req.params.id])
     res.json({ ok: true })
   } catch (e) { next(e) }
 })
@@ -74,7 +73,7 @@ router.post('/import/parse', uploadMem.single('file'), (req, res, next) => {
 // update는 기존 값을 유지하고 엑셀에 값이 있는 칸만 덮어쓴다(빈 칸으로 기존 정보를 지우지 않음).
 const VENDOR_FIELDS = ['name', 'biz_no', 'ceo', 'address', 'phone', 'gubu', 'type', 'contact', 'fax', 'email']
 router.post('/import/commit', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     const items = Array.isArray(req.body.items) ? req.body.items : []
     await conn.beginTransaction()

@@ -1,5 +1,4 @@
 const { Router } = require('express')
-const { pool } = require('../db')
 
 const router = Router()
 
@@ -9,7 +8,7 @@ router.get('/', async (req, res, next) => {
     let sql = 'SELECT id, acct_type, category, name, code, note, postable FROM account_subjects'
     if (String(req.query.postable) === '1') sql += ' WHERE postable = 1'
     sql += ' ORDER BY sort_order'
-    const [rows] = await pool.execute(sql)
+    const [rows] = await req.db.execute(sql)
     res.json(rows)
   } catch (e) { next(e) }
 })

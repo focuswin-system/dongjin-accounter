@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { pool, futureDateError } = require('../db')
+const { futureDateError } = require('../db')
 const model = require('../contract-model')
 const { buildContractWorkbook } = require('../contract-export')
 
@@ -82,7 +82,7 @@ router.get('/', async (req, res, next) => {
     if (buyerCode) { sql += ' AND c.buyer_code = ?'; params.push(buyerCode) }
     if (status)    { sql += ' AND c.status = ?';     params.push(status) }
     sql += ' ORDER BY c.created_at DESC'
-    const [rows] = await pool.execute(sql, params)
+    const [rows] = await req.db.execute(sql, params)
     res.json(rows.map(metrics))
   } catch (e) { next(e) }
 })
@@ -102,7 +102,7 @@ router.get('/schedule/pending', async (req, res, next) => {
     if (forKind === 'purchase')  sql += " AND v.gubu IN ('A','E')"
     else if (forKind === 'sales') sql += " AND (v.gubu IS NULL OR v.gubu = 'B')"
     sql += ' ORDER BY m.due_date'
-    const [rows] = await pool.execute(sql)
+    const [rows] = await req.db.execute(sql)
     // vat를 서버가 계약 vat_mode로 계산해 내려준다(면세=0). 화면이 0.1을 하드코딩하면 면세에 유령 VAT가 붙는다.
     res.json(rows.map(r => {
       const amount = Number(r.amount)
@@ -123,7 +123,7 @@ router.get('/export.xlsx', async (req, res, next) => {
     if (kind === 'purchase')   sql += " AND v.gubu IN ('A','E')"
     else if (kind === 'sales') sql += " AND (v.gubu IS NULL OR v.gubu = 'B')"
     sql += ' ORDER BY c.start_date DESC, c.created_at DESC'
-    const [rows] = await pool.execute(sql)
+    const [rows] = await req.db.execute(sql)
     const contracts = rows.map(metrics)
 
     const wb = await buildContractWorkbook(contracts, { kind })
@@ -159,7 +159,7 @@ router.get('/renewals/upcoming', async (req, res, next) => {
     if (forKind === 'purchase')   sql += " AND v.gubu IN ('A','E')"
     else if (forKind === 'sales') sql += " AND (v.gubu IS NULL OR v.gubu = 'B')"
     sql += ' ORDER BY c.end_date'
-    const [rows] = await pool.execute(sql)
+    const [rows] = await req.db.execute(sql)
     res.json(rows.map(r => ({ ...r, amount: Number(r.amount), unit_amount: r.unit_amount == null ? null : Number(r.unit_amount), days_left: Number(r.days_left) })))
   } catch (e) { next(e) }
 })
@@ -172,7 +172,7 @@ router.get('/renewals/upcoming', async (req, res, next) => {
 // enum은 ASCII로 받는다 — 한글 문자열로 받으면 인코딩이 틀어질 때 조용히 오작동한다.
 router.post('/:id/renew', async (req, res, next) => {
   const { new_end_date, new_amount, new_unit_amount, memo, result, renewed_at } = req.body
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[c]] = await conn.execute('SELECT * FROM contracts WHERE id = ? FOR UPDATE', [req.params.id])
@@ -245,7 +245,7 @@ router.post('/:id/renew', async (req, res, next) => {
 // 청구 일정 단건 상태 변경(레거시 — 필요 시)
 router.patch('/milestones/:id/status', async (req, res, next) => {
   try {
-    const [result] = await pool.execute('UPDATE milestones SET status=? WHERE id=?', [req.body.status || '예정', req.params.id])
+    const [result] = await req.db.execute('UPDATE milestones SET status=? WHERE id=?', [req.body.status || '예정', req.params.id])
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
   } catch (e) { next(e) }
@@ -257,7 +257,7 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
   const { paid, date, account_id } = req.body
   // 기입금(paid)이면 실제 입/출금 거래가 생기므로 미래 일자 금지
   if (paid) { const de = futureDateError(date); if (de) return res.status(400).json({ error: de }) }
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[ms]] = await conn.execute(
@@ -325,7 +325,7 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
   }
   // 기입금(paid)이면 실제 입/출금 거래가 생기므로 미래 일자 금지
   if (paid) { const de = futureDateError(issued_at); if (de) return res.status(400).json({ error: de }) }
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[c]] = await conn.execute(
@@ -402,7 +402,7 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const [cRows] = await pool.execute(
+    const [cRows] = await req.db.execute(
       `SELECT c.*, v.name AS vendor_name, v.gubu AS vendor_gubu, v.gubu, ${METRIC_COLS}
        FROM contracts c LEFT JOIN vendors v ON c.vendor_id = v.id WHERE c.id = ?`,
       [req.params.id]
@@ -410,11 +410,11 @@ router.get('/:id', async (req, res, next) => {
     if (!cRows[0]) return res.status(404).json({ error: 'Not found' })
     const c = cRows[0]
     const m = metrics(c)
-    const [milestones] = await pool.execute(
+    const [milestones] = await req.db.execute(
       'SELECT * FROM milestones WHERE contract_id = ? ORDER BY due_date',
       [req.params.id]
     )
-    const [incomeRows] = await pool.execute(
+    const [incomeRows] = await req.db.execute(
       "SELECT t.*, v.name AS vendor_name FROM transactions t LEFT JOIN vendors v ON t.vendor_id=v.id WHERE t.contract_id=? AND t.kind='income' ORDER BY t.date DESC",
       [req.params.id]
     )
@@ -422,7 +422,7 @@ router.get('/:id', async (req, res, next) => {
     //   매입 계약 → 이 계약이 근거인 지급 (contract_id)
     //   매출 계약 → 이 계약에 귀속된 원가 (cost_contract_id) — 외주비는 외주 매입계약에 지급되지만 원가는 여기 붙는다
     const isPurchaseC = c.vendor_gubu === 'A' || c.vendor_gubu === 'E'
-    const [expenseRows] = await pool.execute(
+    const [expenseRows] = await req.db.execute(
       `SELECT t.*, v.name AS vendor_name, pc.name AS paid_contract_name
        FROM transactions t
        LEFT JOIN vendors v ON t.vendor_id=v.id
@@ -466,7 +466,7 @@ router.get('/:id', async (req, res, next) => {
     }
 
     // 계약 첨부 서류(다중) + 레거시 단일 계약서(file_url) 병합
-    const [attRows] = await pool.execute(
+    const [attRows] = await req.db.execute(
       'SELECT id, url, name, doc_type, size, created_at FROM contract_docs WHERE contract_id = ? ORDER BY created_at',
       [req.params.id]
     )
@@ -476,27 +476,27 @@ router.get('/:id', async (req, res, next) => {
     }
 
     // 갱신 이력 + 이 계약에 걸린 정기청구(금액·기간이 계약과 어긋나는지 화면에서 대조)
-    const [renewals] = await pool.execute(
+    const [renewals] = await req.db.execute(
       'SELECT * FROM contract_renewals WHERE contract_id = ? ORDER BY seq DESC', [req.params.id]
     )
     const num = (v) => (v == null ? null : Number(v))
     // 정기 반복은 매출이면 정기청구(받을 돈), 매입이면 정기지출(나갈 돈)에 들어 있다
     const [recRows] = isPurchaseC
-      ? await pool.execute(
+      ? await req.db.execute(
           'SELECT id, category AS item, amount AS supply_amount, period, day_of_month, start_date, end_date, active, last_generated FROM recurring_expenses WHERE contract_id = ?',
           [req.params.id])
-      : await pool.execute(
+      : await req.db.execute(
           'SELECT id, item, supply_amount, period, day_of_month, start_date, end_date, active, last_generated FROM recurring_invoices WHERE contract_id = ?',
           [req.params.id])
     const recurrings = recRows.map(r => ({ ...r, supply_amount: Number(r.supply_amount), active: !!r.active }))
 
     // 기성형 계약: 품목 단가표 + 품목별 누적 기성(이 계약의 청구서 line 합계)
-    const [itemRows] = await pool.execute(
+    const [itemRows] = await req.db.execute(
       'SELECT id, item_id, name, spec, unit, unit_price, sort_order FROM contract_items WHERE contract_id = ? ORDER BY sort_order, name',
       [req.params.id]
     )
     const contract_items = itemRows.map(r => ({ ...r, unit_price: Number(r.unit_price) }))
-    const [progRows] = await pool.execute(
+    const [progRows] = await req.db.execute(
       `SELECT il.item_id, il.name, il.spec, il.unit,
               SUM(il.qty) AS qty_sum, SUM(il.amount) AS amount_sum
        FROM invoice_lines il JOIN invoices i ON il.invoice_id = i.id
@@ -510,7 +510,7 @@ router.get('/:id', async (req, res, next) => {
       qty_sum: Number(r.qty_sum), amount_sum: Number(r.amount_sum),
     }))
     // 기성형: 이 계약으로 발행한 기성 청구서 목록(품목수 포함) — 상세 '기성 청구 내역' 탭용
-    const [progInvRows] = await pool.execute(
+    const [progInvRows] = await req.db.execute(
       `SELECT i.id, i.invoice_no, i.kind, i.issued_at, i.due_at, i.total_amount, i.status,
               (SELECT COUNT(*) FROM invoice_lines il WHERE il.invoice_id = i.id) AS line_count
        FROM invoices i WHERE i.contract_id = ? ORDER BY i.issued_at DESC, i.created_at DESC`,
@@ -557,7 +557,7 @@ router.post('/', async (req, res, next) => {
   const { vendor_id, name, start_date, status, buyer_code, pu_no, order_no, vessel_code, cost_budget, file_url, file_name, contract_no } = req.body
   const f = model.normalize(req.body)   // 금액·기간·갱신 필드는 모델이 결정 (모순된 조합 저장 방지)
   const id = randomUUID()
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     await conn.execute(
@@ -632,7 +632,7 @@ router.post('/', async (req, res, next) => {
 
 router.put('/:id', async (req, res, next) => {
   const { vendor_id, name, start_date, status, buyer_code, pu_no, order_no, vessel_code, file_url, file_name, contract_no } = req.body
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     // 이번 텀 총액은 현재 텀 시작일 기준으로 다시 산출 (편집으로 단가·종료일이 바뀔 수 있음)
@@ -673,8 +673,8 @@ router.put('/:id', async (req, res, next) => {
 //   매입 계약(gubu A·E)    → recurring_expenses (나갈 돈: 정기지출)
 // 이걸 안 나누면 매입 계약에 건 반복이 '받을 돈(미수금)'으로 둔갑한다.
 const purchaseContract = (c) => c.gubu === 'A' || c.gubu === 'E'
-const loadContractWithGubu = async (id) => {
-  const [[c]] = await pool.execute(
+const loadContractWithGubu = async (db, id) => {
+  const [[c]] = await db.execute(
     'SELECT c.*, v.gubu FROM contracts c LEFT JOIN vendors v ON c.vendor_id = v.id WHERE c.id = ?', [id]
   )
   return c
@@ -684,7 +684,7 @@ const loadContractWithGubu = async (id) => {
 // 계약의 주기·금액·기간·거래처를 그대로 가져간다 (계약이 원본, 반복은 실행 장치).
 router.post('/:id/recurring', async (req, res, next) => {
   try {
-    const c = await loadContractWithGubu(req.params.id)
+    const c = await loadContractWithGubu(req.db, req.params.id)
     if (!c) return res.status(404).json({ error: '계약을 찾을 수 없어요' })
     if (c.billing_mode !== 'recurring') return res.status(400).json({ error: '정기형 계약이 아니에요' })
     if (!c.unit_amount)  return res.status(400).json({ error: '주기당 금액이 없어요' })
@@ -692,21 +692,21 @@ router.post('/:id/recurring', async (req, res, next) => {
 
     const isPurchase = purchaseContract(c)
     const table = isPurchase ? 'recurring_expenses' : 'recurring_invoices'
-    const [[dup]] = await pool.execute(`SELECT COUNT(*) AS n FROM ${table} WHERE contract_id=? AND active=1`, [req.params.id])
+    const [[dup]] = await req.db.execute(`SELECT COUNT(*) AS n FROM ${table} WHERE contract_id=? AND active=1`, [req.params.id])
     if (Number(dup.n) > 0) {
       return res.status(409).json({ error: `이미 이 계약에 걸린 ${isPurchase ? '정기지출' : '정기청구'}이 있어요` })
     }
 
     const id = randomUUID()
     if (isPurchase) {
-      await pool.execute(
+      await req.db.execute(
         `INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, period, day_of_month, start_date, end_date, account_id)
          VALUES (?,?,?,?,?,?,?,?,?,?)`,
         [id, c.vendor_id || null, c.id, c.name || '정기지출', Number(c.unit_amount),
          c.billing_period || 'monthly', c.billing_day || 1, c.start_date, c.end_date || null, req.body.account_id || null]
       )
     } else {
-      await pool.execute(
+      await req.db.execute(
         `INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id)
          VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
         [id, c.vendor_id || null, c.id, c.name || '', Number(c.unit_amount), c.vat_mode === 'exempt' ? 'none' : 'exclusive',
@@ -720,16 +720,16 @@ router.post('/:id/recurring', async (req, res, next) => {
 // 계약에 걸린 정기 반복을 계약 조건에 다시 맞춘다(금액·주기·청구일·종료일).
 router.patch('/:id/recurring/sync', async (req, res, next) => {
   try {
-    const c = await loadContractWithGubu(req.params.id)
+    const c = await loadContractWithGubu(req.db, req.params.id)
     if (!c) return res.status(404).json({ error: '계약을 찾을 수 없어요' })
     if (c.billing_mode !== 'recurring') return res.status(400).json({ error: '정기형 계약이 아니에요' })
     const isPurchase = purchaseContract(c)
     // 매출 정기청구는 계약의 과세/면세(vat_mode)도 함께 맞춘다(계약을 과세↔면세로 바꾼 뒤 sync 시 반영).
     const [r] = isPurchase
-      ? await pool.execute(
+      ? await req.db.execute(
           'UPDATE recurring_expenses SET amount=?, period=?, day_of_month=?, end_date=? WHERE contract_id=?',
           [Number(c.unit_amount) || 0, c.billing_period || 'monthly', c.billing_day || 1, c.end_date || null, req.params.id])
-      : await pool.execute(
+      : await req.db.execute(
           'UPDATE recurring_invoices SET supply_amount=?, vat_mode=?, period=?, day_of_month=?, end_date=? WHERE contract_id=?',
           [Number(c.unit_amount) || 0, c.vat_mode === 'exempt' ? 'none' : 'exclusive', c.billing_period || 'monthly', c.billing_day || 1, c.end_date || null, req.params.id])
     res.json({ ok: true, updated: r.affectedRows })
@@ -739,20 +739,20 @@ router.patch('/:id/recurring/sync', async (req, res, next) => {
 // 계약에 걸린 정기 반복 중지/재개 — 매출·매입 어느 쪽이든 계약 화면에서 처리한다
 router.patch('/:id/recurring/:recId/toggle', async (req, res, next) => {
   try {
-    const c = await loadContractWithGubu(req.params.id)
+    const c = await loadContractWithGubu(req.db, req.params.id)
     if (!c) return res.status(404).json({ error: '계약을 찾을 수 없어요' })
     const table = purchaseContract(c) ? 'recurring_expenses' : 'recurring_invoices'
-    const [[row]] = await pool.execute(`SELECT active FROM ${table} WHERE id=? AND contract_id=?`, [req.params.recId, req.params.id])
+    const [[row]] = await req.db.execute(`SELECT active FROM ${table} WHERE id=? AND contract_id=?`, [req.params.recId, req.params.id])
     if (!row) return res.status(404).json({ error: '정기 항목을 찾을 수 없어요' })
     const next_ = row.active ? 0 : 1
-    await pool.execute(`UPDATE ${table} SET active=? WHERE id=?`, [next_, req.params.recId])
+    await req.db.execute(`UPDATE ${table} SET active=? WHERE id=?`, [next_, req.params.recId])
     res.json({ ok: true, active: !!next_ })
   } catch (e) { next(e) }
 })
 
 router.post('/:id/milestones', async (req, res, next) => {
   const { milestones } = req.body
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     await conn.execute('DELETE FROM milestones WHERE contract_id = ?', [req.params.id])
@@ -774,7 +774,7 @@ router.post('/:id/milestones', async (req, res, next) => {
 
 router.put('/:id/cost-budget', async (req, res, next) => {
   try {
-    const [result] = await pool.execute(
+    const [result] = await req.db.execute(
       'UPDATE contracts SET cost_budget = ? WHERE id = ?',
       [JSON.stringify(req.body), req.params.id]
     )
@@ -785,11 +785,11 @@ router.put('/:id/cost-budget', async (req, res, next) => {
 
 router.get('/:id/cost-analysis', async (req, res, next) => {
   try {
-    const [cRows] = await pool.execute('SELECT * FROM contracts WHERE id = ?', [req.params.id])
+    const [cRows] = await req.db.execute('SELECT * FROM contracts WHERE id = ?', [req.params.id])
     if (!cRows[0]) return res.status(404).json({ error: 'Not found' })
     const c = cRows[0]
     const budget = safeBudget(c.cost_budget, { material: 0, outsource: 0, labor: 0, overhead: 0 })
-    const [txns] = await pool.execute(
+    const [txns] = await req.db.execute(
       "SELECT category, SUM(amount) AS total FROM transactions WHERE contract_id = ? AND kind='expense' AND status='지급완료' GROUP BY category",
       [req.params.id]
     )
@@ -818,7 +818,7 @@ router.post('/:id/docs', async (req, res, next) => {
     const { url, name, doc_type, size } = req.body
     if (!url) return res.status(400).json({ error: 'url 필수' })
     const id = randomUUID()
-    await pool.execute(
+    await req.db.execute(
       'INSERT INTO contract_docs (id, contract_id, url, name, doc_type, size) VALUES (?,?,?,?,?,?)',
       [id, req.params.id, url, name || '', doc_type || '', size || 0]
     )
@@ -828,7 +828,7 @@ router.post('/:id/docs', async (req, res, next) => {
 
 router.delete('/docs/:docId', async (req, res, next) => {
   try {
-    await pool.execute('DELETE FROM contract_docs WHERE id = ?', [req.params.docId])
+    await req.db.execute('DELETE FROM contract_docs WHERE id = ?', [req.params.docId])
     res.json({ ok: true })
   } catch (e) { next(e) }
 })
@@ -836,7 +836,7 @@ router.delete('/docs/:docId', async (req, res, next) => {
 // 계약 메모 저장(단일 필드)
 router.patch('/:id/memo', async (req, res, next) => {
   try {
-    const [r] = await pool.execute('UPDATE contracts SET memo = ? WHERE id = ?', [req.body.memo ?? null, req.params.id])
+    const [r] = await req.db.execute('UPDATE contracts SET memo = ? WHERE id = ?', [req.body.memo ?? null, req.params.id])
     if (r.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
   } catch (e) { next(e) }
@@ -845,7 +845,7 @@ router.patch('/:id/memo', async (req, res, next) => {
 // 레거시 단일 계약서(file_url) 제거
 router.patch('/:id/clear-file', async (req, res, next) => {
   try {
-    await pool.execute('UPDATE contracts SET file_url=NULL, file_name=NULL WHERE id=?', [req.params.id])
+    await req.db.execute('UPDATE contracts SET file_url=NULL, file_name=NULL WHERE id=?', [req.params.id])
     res.json({ ok: true })
   } catch (e) { next(e) }
 })

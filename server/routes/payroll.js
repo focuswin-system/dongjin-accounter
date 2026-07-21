@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { pool, futureDateError } = require('../db')
+const { futureDateError } = require('../db')
 
 const router = Router()
 
@@ -90,7 +90,7 @@ async function enrich(conn, p) {
 
 // ── 목록: ?month= 월별, ?scope= labor(급여대장, seq=0 기본) | service(용역·일용 회차, seq>=1) | all ──
 router.get('/', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     const { month, scope } = req.query
     // 급여대장(근로)은 seq=0만. 용역·일용은 seq>=1. 기본은 labor(급여대장 화면 호환).
@@ -107,7 +107,7 @@ router.get('/', async (req, res, next) => {
 
 // ── 대표님용 요약: 지급 예정일 · 미지급 총액 · 과지급 건 ──
 router.get('/summary', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     const month = req.query.month || new Date().toISOString().slice(0, 7)
     // 급여대장 요약은 근로(seq=0)만 — 용역·일용 회차가 섞여 총액이 부풀지 않게
@@ -135,7 +135,7 @@ router.get('/summary', async (req, res, next) => {
 
 // ── 직원별 전월 이력(미지급/과지급 누계) ──
 router.get('/employee/:id', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     const [[emp]] = await conn.execute('SELECT * FROM employees WHERE id = ?', [req.params.id])
     if (!emp) return res.status(404).json({ error: 'Not found' })
@@ -160,7 +160,7 @@ router.post('/', async (req, res, next) => {
     const allowance = gross - base
     const itemsJson = JSON.stringify(Array.isArray(items) ? items : [])
     const rowId = id || randomUUID()
-    await pool.execute(`
+    await req.db.execute(`
       INSERT INTO payroll (id, employee_id, month, base_salary, allowance, deduction, net_salary, gross, items, pay_date, status)
       VALUES (?,?,?,?,?,?,?,?,?,?,?)
       ON DUPLICATE KEY UPDATE base_salary=VALUES(base_salary), allowance=VALUES(allowance),
@@ -175,7 +175,7 @@ router.post('/', async (req, res, next) => {
 // 소스는 근로계약(work_contracts.pay_items). 급여 항목 마스터는 계약 pay_items의 '초기값'을 만드는
 // 템플릿으로 역할이 물러났다. 계약이 없거나 pay_items가 비면 예전 방식(직원 컬럼)으로 폴백한다.
 router.post('/generate', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     const { month, pay_date } = req.body
     if (!month) return res.status(400).json({ error: 'month 필수' })
@@ -225,7 +225,7 @@ router.post('/generate', async (req, res, next) => {
 
 // ── 실제 급여 지급 등록: 지출 거래 생성 + 급여대장 연결 ──
 router.post('/:id/pay', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     const { amount, date, account_id, method, memo } = req.body
     // 급여 지급은 실제 이체라 미래 일자 금지(앱 전체 KST 규칙 일관 — 용역 지급·거래 등록과 동일).
@@ -256,7 +256,7 @@ router.post('/:id/pay', async (req, res, next) => {
 
 // ── 지급 취소(연결된 지출 삭제) ──
 router.delete('/:id/pay/:txnId', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     await conn.execute('DELETE FROM transactions WHERE id = ? AND payroll_id = ?', [req.params.txnId, req.params.id])
@@ -275,7 +275,7 @@ router.delete('/:id/pay/:txnId', async (req, res, next) => {
 // ── 이 달 급여대장 전체 비우기: 한 트랜잭션으로 (프론트 건별 반복 삭제의 부분 실패 방지) ──
 // 급여대장(근로, seq=0)만 대상 — 용역·일용 회차(seq>=1)는 별도. 연결 지출 거래는 보존(연결만 해제).
 router.delete('/month/:month', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[{ cnt }]] = await conn.execute('SELECT COUNT(*) AS cnt FROM payroll WHERE month = ? AND seq = 0', [req.params.month])
@@ -290,7 +290,7 @@ router.delete('/month/:month', async (req, res, next) => {
 })
 
 router.delete('/:id', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     // 연결된 급여 지출의 연결만 해제(거래 자체는 보존). 두 문을 한 트랜잭션으로 묶어

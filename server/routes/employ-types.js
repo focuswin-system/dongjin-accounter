@@ -1,6 +1,5 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { pool } = require('../db')
 
 const router = Router()
 
@@ -16,8 +15,8 @@ router.get('/', async (req, res, next) => {
   try {
     const { kind } = req.query
     const [rows] = kind
-      ? await pool.execute('SELECT * FROM employ_types WHERE active = 1 AND kind = ? ORDER BY sort_order, label', [kind])
-      : await pool.execute('SELECT * FROM employ_types WHERE active = 1 ORDER BY sort_order, label')
+      ? await req.db.execute('SELECT * FROM employ_types WHERE active = 1 AND kind = ? ORDER BY sort_order, label', [kind])
+      : await req.db.execute('SELECT * FROM employ_types WHERE active = 1 ORDER BY sort_order, label')
     res.json(rows)
   } catch (e) { next(e) }
 })
@@ -27,9 +26,9 @@ router.post('/', async (req, res, next) => {
     const { label, kind, income_type, pay_form, default_unit,
             insure_np, insure_hi, insure_ei, insure_ai, conv_alert_months } = req.body
     if (!label || !label.trim()) return res.status(400).json({ error: '고용형태 이름을 입력해주세요' })
-    const [[{ maxOrder }]] = await pool.execute('SELECT COALESCE(MAX(sort_order),0) AS maxOrder FROM employ_types')
+    const [[{ maxOrder }]] = await req.db.execute('SELECT COALESCE(MAX(sort_order),0) AS maxOrder FROM employ_types')
     const id = randomUUID()
-    await pool.execute(
+    await req.db.execute(
       `INSERT INTO employ_types
          (id, label, kind, income_type, pay_form, default_unit, insure_np, insure_hi, insure_ei, insure_ai, conv_alert_months, sort_order)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -46,7 +45,7 @@ router.put('/:id', async (req, res, next) => {
   try {
     const { label, kind, income_type, pay_form, default_unit,
             insure_np, insure_hi, insure_ei, insure_ai, conv_alert_months } = req.body
-    const [r] = await pool.execute(
+    const [r] = await req.db.execute(
       `UPDATE employ_types SET label=?, kind=?, income_type=?, pay_form=?, default_unit=?,
          insure_np=?, insure_hi=?, insure_ei=?, insure_ai=?, conv_alert_months=? WHERE id=?`,
       [label, KINDS.includes(kind) ? kind : 'labor', INCOME.includes(income_type) ? income_type : '근로',
@@ -62,7 +61,7 @@ router.put('/:id', async (req, res, next) => {
 // 소프트 삭제 — 이미 이 유형으로 맺은 계약의 스냅샷은 보존된다(계약이 label을 복사해뒀으므로).
 router.delete('/:id', async (req, res, next) => {
   try {
-    await pool.execute('UPDATE employ_types SET active = 0 WHERE id = ?', [req.params.id])
+    await req.db.execute('UPDATE employ_types SET active = 0 WHERE id = ?', [req.params.id])
     res.json({ ok: true })
   } catch (e) { next(e) }
 })

@@ -1,6 +1,5 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { pool } = require('../db')
 
 const router = Router()
 
@@ -9,8 +8,8 @@ router.get('/', async (req, res, next) => {
   try {
     const { kind } = req.query
     const [rows] = kind
-      ? await pool.execute('SELECT * FROM payroll_item_types WHERE active = 1 AND kind = ? ORDER BY sort_order, label', [kind])
-      : await pool.execute('SELECT * FROM payroll_item_types WHERE active = 1 ORDER BY sort_order, label')
+      ? await req.db.execute('SELECT * FROM payroll_item_types WHERE active = 1 AND kind = ? ORDER BY sort_order, label', [kind])
+      : await req.db.execute('SELECT * FROM payroll_item_types WHERE active = 1 ORDER BY sort_order, label')
     res.json(rows)
   } catch (e) { next(e) }
 })
@@ -19,9 +18,9 @@ router.post('/', async (req, res, next) => {
   try {
     const { label, kind, mode, default_value } = req.body
     if (!label || !['earn', 'deduct'].includes(kind)) return res.status(400).json({ error: 'label·kind 확인' })
-    const [[{ maxOrder }]] = await pool.execute('SELECT COALESCE(MAX(sort_order),0) AS maxOrder FROM payroll_item_types')
+    const [[{ maxOrder }]] = await req.db.execute('SELECT COALESCE(MAX(sort_order),0) AS maxOrder FROM payroll_item_types')
     const id = randomUUID()
-    await pool.execute(
+    await req.db.execute(
       'INSERT INTO payroll_item_types (id, label, kind, mode, default_value, sort_order) VALUES (?,?,?,?,?,?)',
       [id, label, kind, mode === 'percent' ? 'percent' : 'fixed', Number(default_value) || 0, maxOrder + 1]
     )
@@ -32,7 +31,7 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const { label, kind, mode, default_value } = req.body
-    const [r] = await pool.execute(
+    const [r] = await req.db.execute(
       'UPDATE payroll_item_types SET label=?, kind=?, mode=?, default_value=? WHERE id=?',
       [label, kind === 'deduct' ? 'deduct' : 'earn', mode === 'percent' ? 'percent' : 'fixed', Number(default_value) || 0, req.params.id]
     )
@@ -43,7 +42,7 @@ router.put('/:id', async (req, res, next) => {
 
 router.delete('/:id', async (req, res, next) => {
   try {
-    await pool.execute('UPDATE payroll_item_types SET active = 0 WHERE id = ?', [req.params.id])
+    await req.db.execute('UPDATE payroll_item_types SET active = 0 WHERE id = ?', [req.params.id])
     res.json({ ok: true })
   } catch (e) { next(e) }
 })

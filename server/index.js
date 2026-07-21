@@ -17,10 +17,13 @@ app.use('/uploads', express.static(require('path').join(__dirname, 'uploads')))
 // 프론트 api.js의 req()·업로드·엑셀·내보내기·템플릿 다운로드 전부 Authorization 헤더를 실어 보낸다.
 // (정적 SPA·/uploads 파일은 /api 경로가 아니라 통과.)
 const authMiddleware = require('./middleware/auth')
+const tenantMiddleware = require('./middleware/tenant')
 const PUBLIC_API = new Set(['/api/auth/login', '/api/health'])
 app.use((req, res, next) => {
   if (!req.path.startsWith('/api/') || PUBLIC_API.has(req.path)) return next()
-  return authMiddleware(req, res, next)
+  // 인증 통과 후 곧바로 테넌트를 확정한다 — JWT의 dbName으로 회사 DB 풀을 req.db에 주입.
+  // 이 순서가 보장돼야 라우트가 '어느 회사인지 모르는 상태'로 실행되는 일이 없다.
+  return authMiddleware(req, res, (err) => (err ? next(err) : tenantMiddleware(req, res, next)))
 })
 
 app.use('/api/auth',               require('./routes/auth'))

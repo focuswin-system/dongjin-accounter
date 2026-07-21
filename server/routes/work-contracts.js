@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { pool, futureDateError } = require('../db')
+const { futureDateError } = require('../db')
 
 const router = Router()
 
@@ -99,7 +99,7 @@ async function withMetrics(conn, c) {
 
 // ── 목록: ?kind= (labor / service,daily) ──
 router.get('/', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     const { kind, income_type, status } = req.query
     let sql = `SELECT w.*, e.name AS employee_name, e.emp_no, e.department, e.status AS emp_status, e.leave_date
@@ -129,9 +129,9 @@ router.get('/', async (req, res, next) => {
 
 // ── 상용전환 경고 대상: 일용 계약 중 계속 고용 개월수 >= conv_alert_months ──
 // ⚠ '/:id' 보다 먼저 선언해야 한다(안 그러면 id='alerts'로 잡힌다).
-router.get('/alerts/conversion', async (_req, res, next) => {
+router.get('/alerts/conversion', async (req, res, next) => {
   try {
-    const [rows] = await pool.execute(
+    const [rows] = await req.db.execute(
       `SELECT w.id, w.title, w.conv_alert_months, w.start_date, e.name AS employee_name,
               (SELECT MAX(p.month) FROM payroll p WHERE p.work_contract_id = w.id) AS last_month,
               TIMESTAMPDIFF(MONTH, w.start_date,
@@ -147,7 +147,7 @@ router.get('/alerts/conversion', async (_req, res, next) => {
 
 // ── 상세: 계약 + 단가표 + 첨부 + 지급 회차 + 품목별 누적 ──
 router.get('/:id', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     const [[c]] = await conn.execute(
       `SELECT w.*, e.name AS employee_name, e.emp_no, e.role, e.department, e.birth_date, e.join_date, e.status AS emp_status, e.leave_date
@@ -203,7 +203,7 @@ router.get('/:id', async (req, res, next) => {
 
 // ── 계약 생성. body.employee(신규 인력)면 사람도 함께 만든다. ──
 router.post('/', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     let employeeId = req.body.employee_id
@@ -246,7 +246,7 @@ router.post('/', async (req, res, next) => {
 })
 
 router.put('/:id', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[cur]] = await conn.execute('SELECT id, kind FROM work_contracts WHERE id = ? FOR UPDATE', [req.params.id])
@@ -272,7 +272,7 @@ router.put('/:id', async (req, res, next) => {
 
 // ── 복제: 계약 + 단가표를 새 계약으로. 같은 인력의 다음 계약 or 다른 인력에게 같은 조건. ──
 router.post('/:id/duplicate', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[src]] = await conn.execute('SELECT * FROM work_contracts WHERE id = ?', [req.params.id])
@@ -303,7 +303,7 @@ router.post('/:id/duplicate', async (req, res, next) => {
 })
 
 router.delete('/:id', async (req, res, next) => {
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     // 지급된 회차(payroll)의 거래는 보존하고 연결만 해제 → 계약 삭제해도 장부는 남는다.
@@ -322,7 +322,7 @@ router.post('/:id/docs', async (req, res, next) => {
     const u = url || file_url
     if (!u) return res.status(400).json({ error: 'url 필수' })
     const id = randomUUID()
-    await pool.execute('INSERT INTO work_contract_docs (id, work_contract_id, file_url, file_name) VALUES (?,?,?,?)',
+    await req.db.execute('INSERT INTO work_contract_docs (id, work_contract_id, file_url, file_name) VALUES (?,?,?,?)',
       [id, req.params.id, u, name || file_name || '계약서'])
     res.json({ ok: true, id })
   } catch (e) { next(e) }
@@ -330,7 +330,7 @@ router.post('/:id/docs', async (req, res, next) => {
 
 router.delete('/docs/:docId', async (req, res, next) => {
   try {
-    await pool.execute('DELETE FROM work_contract_docs WHERE id = ?', [req.params.docId])
+    await req.db.execute('DELETE FROM work_contract_docs WHERE id = ?', [req.params.docId])
     res.json({ ok: true })
   } catch (e) { next(e) }
 })
@@ -340,7 +340,7 @@ router.delete('/docs/:docId', async (req, res, next) => {
 router.post('/:id/pay', async (req, res, next) => {
   const { month, pay_date, lines, deductions, paid, account_id, date, memo } = req.body
   if (paid) { const de = futureDateError(date || pay_date); if (de) return res.status(400).json({ error: de }) }
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[c]] = await conn.execute(

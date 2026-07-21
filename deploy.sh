@@ -38,6 +38,7 @@ echo "[4/4] 원격 의존성 설치 + DB 스키마 준비 + pm2 재시작 + 헬�
 # setup-db.js는 멱등이라 매 배포마다 돌아도 안전하다(관리 계정 DB_ADMIN_USER 필요).
 "${SSH[@]}" "$REMOTE" "cd ~/$APPDIR/server && \
   npm ci --omit=dev --no-audit --no-fund && \
+  npm run check:isolation && \
   npm run setup:db && \
   pm2 startOrReload ecosystem.config.js --update-env && \
   pm2 save && \

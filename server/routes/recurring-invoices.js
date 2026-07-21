@@ -1,13 +1,13 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { pool, futureDateError, kstToday, kstDate } = require('../db')
+const { futureDateError, kstToday, kstDate } = require('../db')
 const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS } = require('../lib/recurrence')
 
 const router = Router()
 
-router.get('/', async (_, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
-    const [rows] = await pool.execute(`
+    const [rows] = await req.db.execute(`
       SELECT r.*, v.name AS vendor_name, c.name AS contract_name
       FROM recurring_invoices r
       LEFT JOIN vendors v   ON r.vendor_id = v.id
@@ -22,7 +22,7 @@ router.post('/', async (req, res, next) => {
   try {
     const { vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id } = req.body
     const id = randomUUID()
-    await pool.execute(
+    await req.db.execute(
       'INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
       [id, vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null]
     )
@@ -33,7 +33,7 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const { vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id } = req.body
-    const [result] = await pool.execute(
+    const [result] = await req.db.execute(
       'UPDATE recurring_invoices SET vendor_id=?, contract_id=?, item=?, supply_amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=? WHERE id=?',
       [vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, req.params.id]
     )
@@ -44,19 +44,19 @@ router.put('/:id', async (req, res, next) => {
 
 router.patch('/:id/toggle', async (req, res, next) => {
   try {
-    const [rows] = await pool.execute('SELECT active FROM recurring_invoices WHERE id = ?', [req.params.id])
+    const [rows] = await req.db.execute('SELECT active FROM recurring_invoices WHERE id = ?', [req.params.id])
     if (!rows[0]) return res.status(404).json({ error: 'Not found' })
     const newActive = rows[0].active ? 0 : 1
-    await pool.execute('UPDATE recurring_invoices SET active = ? WHERE id = ?', [newActive, req.params.id])
+    await req.db.execute('UPDATE recurring_invoices SET active = ? WHERE id = ?', [newActive, req.params.id])
     res.json({ active: !!newActive })
   } catch (e) { next(e) }
 })
 
 // 청구 예정 회차(아직 청구서가 안 만들어진 회차) — 대금청구 '발행 예정' 목록에 계약 청구일정과 함께 뜬다.
 // 경리가 청구서 메뉴 한 곳만 열면 이번 달 청구할 게 다 보이게 하기 위함.
-router.get('/pending', async (_, res, next) => {
+router.get('/pending', async (req, res, next) => {
   try {
-    const [recs] = await pool.execute(`
+    const [recs] = await req.db.execute(`
       SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch,
              v.name AS vendor_name, c.name AS contract_name, c.contract_no
       FROM recurring_invoices r
@@ -97,7 +97,7 @@ router.get('/pending', async (_, res, next) => {
 // 가장 이른 미생성 회차만 발행하도록 제한한다.
 router.post('/:id/issue', async (req, res, next) => {
   const { due, paid, account_id } = req.body
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[r]] = await conn.execute(
@@ -164,9 +164,9 @@ router.post('/:id/issue', async (req, res, next) => {
 
 // 대기 항목 생성: 활성 정기청구 → 미생성 회차마다 '입금 예정' 청구서(미수) 생성.
 // 등록일(setup_date)~오늘 사이 놓친 회차는 모두 소급 생성(등록 전 과거는 제외 — 무기한 계약 홍수 방지).
-router.post('/generate', async (_, res, next) => {
+router.post('/generate', async (req, res, next) => {
   const today = kstToday()
-  const conn = await pool.getConnection()
+  const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [recs] = await conn.execute("SELECT *, UNIX_TIMESTAMP(created_at) AS created_epoch FROM recurring_invoices WHERE active = 1")
