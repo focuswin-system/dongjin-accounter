@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, Fragment, Component } from 'react
 import logoSymbol from './assets/company/favicon.svg'
 import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider } from './lib/ui'
 import { api } from './lib/api'
-import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID } from './lib/nav'
+import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID } from './lib/nav'
 import { LoginScreen } from './screens/Login'
 import { HomeScreen } from './screens/Home'
 import { LedgerScreen } from './screens/Ledger'
@@ -316,6 +316,8 @@ function AppInner({ onLogout, user }) {
       return <LedgerScreen initialFilter={filter} refreshTrigger={txnVersion} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
     }
     if (PORTAL_CAT_BY_ID[route]) return <PortalScreen node={PORTAL_CAT_BY_ID[route]} go={go}/>;
+    // 기준정보 서브메뉴(master_<탭>): 내부 서브내브 없이 해당 탭만 전체폭으로.
+    if (route.startsWith("master_")) return <MasterScreen user={user} section="base" forcedTab={route.slice(7)}/>;
     switch (route) {
       case "home":            return <HomeScreen go={go} user={user} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
       case "billing":         return <BillingScreen/>;
@@ -352,11 +354,12 @@ function AppInner({ onLogout, user }) {
   const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger"
                 : route.startsWith("billing") ? "billing"
                 : (route === "contract_sales" || route === "contract_purchase") ? "contract"
-                : (route === "settings" || route === "hr_base" || route === "hr_labor_contract" || route === "hr_outsourcing") ? "master"
+                : (route === "settings" || route === "hr_base" || route === "hr_labor_contract" || route === "hr_outsourcing" || route.startsWith("master")) ? "master"
                 : route === "mgmt_dash" ? "report" : route;
   const help = HELP_MAP[helpKey] || HELP_MAP.home;
 
-  let crumbs = CRUMB_MAP[route] || ["홈"];
+  // 기준정보 서브메뉴(master_<탭>)는 CRUMB_MAP에 없으니 nav 잎 정보로 브레드크럼 구성
+  let crumbs = CRUMB_MAP[route] || (LEAF_BY_ID[route] ? [LEAF_BY_ID[route].domain, "기준정보", LEAF_BY_ID[route].label] : ["홈"]);
   if (route === "contract_detail") {
     crumbs = ["계약", contractName || "계약 상세"];
   }

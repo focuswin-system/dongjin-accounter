@@ -621,7 +621,7 @@ const VendorImportWizard = ({ existing, onCancel, onDone }) => {
   ]
 
   return (
-    <div className="import-wrap" style={{ padding: 20 }}>
+    <div className="import-wrap" style={{ padding: '20px 20px 104px' }}>
       <div className="row" style={{ marginBottom: 6, gap: 10, flexWrap: 'wrap' }}>
         <div>
           <div className="section-title">거래처 엑셀 업로드</div>
@@ -2284,13 +2284,15 @@ const UserPanel = ({ currentUser }) => {
   );
 };
 
-export const MasterScreen = ({ user, section = "base" }) => {
+export const MasterScreen = ({ user, section = "base", forcedTab }) => {
   const toast = useToast();
   const sectionCfg = MASTER_SECTIONS[section] || MASTER_SECTIONS.base;
   const allowedTabs = sectionCfg.groups.flatMap(g => g.tabs);
   const [tab, setTab] = useState(allowedTabs[0]);
-  // 라우트(섹션) 변경으로 현재 탭이 이 섹션에 없으면 첫 탭으로 자동 폴백
-  const activeTab = allowedTabs.includes(tab) ? tab : allowedTabs[0];
+  // forcedTab(사이드바 서브메뉴로 진입)이면 그 탭 고정 + 내부 서브내브 숨김 + 전체폭.
+  // 없으면 기존 탭 방식(내부 서브내브). 라우트 변경으로 탭이 이 섹션에 없으면 첫 탭 폴백.
+  const activeTab = forcedTab || (allowedTabs.includes(tab) ? tab : allowedTabs[0]);
+  const single = !!forcedTab;
   const [q, setQ] = useState("");
   const [drawer, setDrawer] = useState(null);
   const [collapsed, setCollapsed] = useState({});
@@ -2332,8 +2334,8 @@ export const MasterScreen = ({ user, section = "base" }) => {
     <div className="fade-up">
       <div className="row" style={{ marginBottom: 8 }}>
         <div>
-          <div className="page-title">{sectionCfg.title}</div>
-          <div className="page-sub">{sectionCfg.sub}</div>
+          <div className="page-title">{single ? (TAB_BY_ID[activeTab]?.label || sectionCfg.title) : sectionCfg.title}</div>
+          <div className="page-sub">{single ? sectionCfg.title : sectionCfg.sub}</div>
         </div>
         <div className="ml-auto row gap-8">
           {!isCustomTab && data && (
@@ -2348,9 +2350,9 @@ export const MasterScreen = ({ user, section = "base" }) => {
 
       <Spacer h={20}/>
 
-      <div className="master-layout" style={{ display: "grid", gridTemplateColumns: "200px 1fr", gap: 16, alignItems: "start" }}>
-        {/* Sub-nav (섹션별 그룹) */}
-        <div className="card" style={{ padding: 8 }}>
+      <div className="master-layout" style={{ display: "grid", gridTemplateColumns: single ? "1fr" : "200px 1fr", gap: 16, alignItems: "start" }}>
+        {/* Sub-nav (섹션별 그룹) — 사이드바 서브메뉴로 진입한 단일 탭 모드에선 숨김(전체폭) */}
+        {!single && <div className="card" style={{ padding: 8 }}>
           {sectionCfg.groups.map((group, gi) => (
             <div key={group.label} style={{ marginTop: gi ? 10 : 0 }}>
               <div className="nav-group-label" style={{ padding: "6px 10px 4px" }}>{group.label}</div>
@@ -2381,7 +2383,7 @@ export const MasterScreen = ({ user, section = "base" }) => {
               })}
             </div>
           ))}
-        </div>
+        </div>}
 
         {/* Right panel */}
         <div className="card" style={{ overflow: "hidden" }}>

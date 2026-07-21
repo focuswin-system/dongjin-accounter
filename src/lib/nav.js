@@ -32,7 +32,16 @@ export const NAV_TREE = [
         { id: "tax_etc", label: "기타세액", icon: Icon.Doc },
       ]},
       { label: "기준정보", items: [
-        { id: "master", label: "기준정보 관리", icon: Icon.Folder },
+        { id: "master_vendor",          label: "거래처",     icon: Icon.Building },
+        { id: "master_accountSubject",  label: "계정과목",   icon: Icon.Book },
+        { id: "master_category",        label: "비목",       icon: Icon.Folder },
+        { id: "master_jeokyo",          label: "적요",       icon: Icon.Doc },
+        { id: "master_item",            label: "품목",       icon: Icon.Receipt },
+        { id: "master_fixed_asset",     label: "고정자산",   icon: Icon.Wallet },
+        { id: "master_intangible_asset",label: "무형자산",   icon: Icon.File },
+        { id: "master_account",         label: "계좌/카드",  icon: Icon.Card },
+        { id: "master_accountBalance",  label: "계좌 잔액",  icon: Icon.Bank },
+        { id: "master_insurance",       label: "보험",       icon: Icon.Doc },
       ]},
     ],
   },
@@ -95,7 +104,11 @@ export const PORTAL = [
       { id: 'acct_tax', label: '세무관리', icon: Icon.Doc, desc: '부가세·기타세액 신고', groups: [
         { label: '', items: ['tax_vat', 'tax_etc'] },
       ]},
-      { id: 'master', label: '기준정보', icon: Icon.Folder, desc: '거래처·계정·품목·자산 등', route: 'master' },
+      { id: 'master', label: '기준정보', icon: Icon.Folder, desc: '거래처·계정·품목·자산 등', groups: [
+        { label: '거래 기준', items: ['master_vendor', 'master_accountSubject', 'master_category', 'master_jeokyo'] },
+        { label: '품목·자산', items: ['master_item', 'master_fixed_asset', 'master_intangible_asset'] },
+        { label: '자금·결제', items: ['master_account', 'master_accountBalance', 'master_insurance'] },
+      ]},
     ],
   },
   {
@@ -124,6 +137,7 @@ for (const d of PORTAL) for (const c of d.categories) if (c.groups) PORTAL_CAT_B
 // 포털 카테고리 라우트도 소속 도메인으로 매핑(사이드바 도메인 자동 펼침)
 DOMAIN_OF['acct_process'] = 'acct'
 DOMAIN_OF['acct_tax'] = 'acct'
+DOMAIN_OF['master'] = 'acct'   // 기준정보 포털 카테고리(groups) — 사이드바 도메인 자동 펼침
 DOMAIN_OF['hr_labor'] = 'hr_dom'
 
 // 라우트(하위 라우트 포함) → 사이드바에서 활성 표시할 잎 id
