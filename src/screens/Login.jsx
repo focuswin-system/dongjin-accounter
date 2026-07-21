@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Icon } from '../lib/ui'
 
 export const LoginScreen = ({ onLogin }) => {
+  // 회사코드는 마지막 로그인 값을 기억한다(같은 PC는 대개 같은 회사에서 쓴다).
+  const [company, setCompany] = useState(() => localStorage.getItem('companyCode') || '');
   const [id, setId] = useState('');
   const [pw, setPw] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -11,8 +13,8 @@ export const LoginScreen = ({ onLogin }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    if (!id.trim() || !pw.trim()) {
-      setError('아이디와 비밀번호를 모두 입력해주세요.');
+    if (!company.trim() || !id.trim() || !pw.trim()) {
+      setError('회사코드·아이디·비밀번호를 모두 입력해주세요.');
       return;
     }
     setLoading(true);
@@ -20,7 +22,11 @@ export const LoginScreen = ({ onLogin }) => {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: id.trim(), password: pw }),
+        body: JSON.stringify({
+          companyCode: company.trim().toLowerCase(),
+          username: id.trim(),
+          password: pw,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -28,6 +34,8 @@ export const LoginScreen = ({ onLogin }) => {
         return;
       }
       localStorage.setItem('token', data.token);
+      localStorage.setItem('companyCode', data.company?.code || company.trim().toLowerCase());
+      if (data.company?.name) localStorage.setItem('companyName', data.company.name);
       onLogin({ displayName: data.user.name || data.user.username, role: data.user.role, id: data.user.id });
     } catch {
       setError('서버에 연결할 수 없습니다. 서버가 실행 중인지 확인해주세요.');
@@ -132,6 +140,25 @@ export const LoginScreen = ({ onLogin }) => {
           <form onSubmit={handleSubmit}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
 
+              {/* 회사코드 */}
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 7 }}>
+                  회사코드
+                </label>
+                <input
+                  className="input"
+                  type="text"
+                  placeholder="예: dongjin"
+                  value={company}
+                  onChange={e => { setCompany(e.target.value); setError(''); }}
+                  autoComplete="organization"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  autoFocus={!company}
+                  style={{ width: '100%', height: 44 }}
+                />
+              </div>
+
               {/* 아이디 */}
               <div>
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 7 }}>
@@ -144,7 +171,7 @@ export const LoginScreen = ({ onLogin }) => {
                   value={id}
                   onChange={e => { setId(e.target.value); setError(''); }}
                   autoComplete="username"
-                  autoFocus
+                  autoFocus={!!company}
                   style={{ width: '100%', height: 44 }}
                 />
               </div>

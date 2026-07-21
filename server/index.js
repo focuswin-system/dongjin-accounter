@@ -3,7 +3,7 @@ const express = require('express')
 const cors = require('cors')
 const path = require('path')
 const fs = require('fs')
-const { initDb } = require('./db')
+const { assertPlatformReady } = require('./platform/db')
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -67,11 +67,16 @@ app.use((err, req, res, _next) => {
   res.status(500).json({ error: err.message })
 })
 
-initDb()
+// ── 기동 ──
+// 런타임은 DDL을 하지 않는다. 스키마 준비는 배포 시점(npm run setup:db)의 책임이고,
+// 여기서는 '준비됐는지'만 확인해 문제를 조용한 런타임 오류가 아니라 명확한 기동 실패로 만든다.
+assertPlatformReady()
   .then(() => {
-    app.listen(PORT, () => console.log(`동진테크 ERP 서버: http://localhost:${PORT}/api`))
+    app.listen(PORT, () => console.log(`focus-accounter 서버: http://localhost:${PORT}/api`))
   })
   .catch(err => {
-    console.error('DB 초기화 실패:', err.message)
+    console.error('\n❌ 기동 실패\n')
+    console.error(err.message)
+    console.error('')
     process.exit(1)
   })

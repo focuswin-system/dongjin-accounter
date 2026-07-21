@@ -60,7 +60,6 @@ router.post('/', async (req, res, next) => {
       : [{ name: title || '지출', unit: '식', qty: 1, price: Number(req.body.amount) || 0, amount: Number(req.body.amount) || 0, note: '' }]
     const amount = itemList.reduce((s, it) => s + (Number(it.amount) || 0), 0)
     const doc_no = await nextDocNo((sql, p) => pool.execute(sql, p), pay_date)
-    const [[user]] = await pool.execute('SELECT name FROM users ORDER BY created_at LIMIT 1')
     const id = randomUUID()
     // 결재선: 요청에 있으면 그걸 쓰고(만들 때 고른 프리셋), 없으면 기본 프리셋
     const approval = Array.isArray(req.body.approval) && req.body.approval.length
@@ -70,7 +69,8 @@ router.post('/', async (req, res, next) => {
       `INSERT INTO expense_resolutions (id, doc_no, vendor_id, vendor_name, title, amount, pay_method, pay_date, applicant, items, note, approval, status)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [id, doc_no, vendor_id || null, vendor_name || '', title || '지출 결의', amount,
-       pay_method || '계좌이체', pay_date || null, applicant || (user && user.name) || '관리자',
+       pay_method || '계좌이체', pay_date || null,
+       applicant || req.user?.name || req.user?.username || '관리자',
        JSON.stringify(itemList), note || '', JSON.stringify(approval), '작성'])
     const [[created]] = await pool.execute('SELECT * FROM expense_resolutions WHERE id = ?', [id])
     res.json(adapt(created))
@@ -116,14 +116,14 @@ router.post('/from-invoice/:invoiceId', async (req, res, next) => {
       items = [{ name: title, unit: '식', qty: 1, price: gross, amount: gross, note: inv.invoice_no || '' }]
     }
 
-    const [[user]] = await conn.execute('SELECT name FROM users ORDER BY created_at LIMIT 1')
     const approval = await defaultApproval((sql, p) => conn.execute(sql, p))
     const id = randomUUID()
     await conn.execute(
       `INSERT INTO expense_resolutions (id, doc_no, invoice_id, vendor_id, vendor_name, title, amount, pay_method, pay_date, applicant, items, note, approval, status)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [id, doc_no, inv.id, inv.vendor_id || null, inv.vendor_name || '', title,
-       Number(inv.total_amount), '계좌이체', inv.due_at || null, (user && user.name) || '관리자',
+       Number(inv.total_amount), '계좌이체', inv.due_at || null,
+       req.user?.name || req.user?.username || '관리자',
        JSON.stringify(items), '', JSON.stringify(approval), '작성'])
     await conn.commit()
     const [[created]] = await pool.execute('SELECT * FROM expense_resolutions WHERE id = ?', [id])

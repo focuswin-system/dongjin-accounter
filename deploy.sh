@@ -33,9 +33,12 @@ tar czf - -C server \
     --exclude=err.log . \
   | "${SSH[@]}" "$REMOTE" "mkdir -p ~/$APPDIR/server/uploads && tar xzf - -C ~/$APPDIR/server"
 
-echo "[4/4] 원격 의존성 설치 + pm2 재시작 + 헬스체크"
+echo "[4/4] 원격 의존성 설치 + DB 스키마 준비 + pm2 재시작 + 헬스체크"
+# 앱 런타임은 DDL을 하지 않는다 → 스키마 생성·마이그레이션은 배포 시점의 책임이다.
+# setup-db.js는 멱등이라 매 배포마다 돌아도 안전하다(관리 계정 DB_ADMIN_USER 필요).
 "${SSH[@]}" "$REMOTE" "cd ~/$APPDIR/server && \
   npm ci --omit=dev --no-audit --no-fund && \
+  npm run setup:db && \
   pm2 startOrReload ecosystem.config.js --update-env && \
   pm2 save && \
   sleep 2 && curl -sS -m 5 http://127.0.0.1:8081/api/health && echo"

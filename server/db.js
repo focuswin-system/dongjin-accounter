@@ -18,20 +18,27 @@ const pool = mysql.createPool({
   connectionLimit:    10,
 })
 
-async function initDb() {
-  // DB 생성 (없는 경우). 운영 서버처럼 DB가 이미 있고 계정에 CREATE 권한이
-  // 없으면 조용히 건너뛴다(전용 계정은 자기 DB 권한만 가짐).
+/**
+ * 테넌트 DB 스키마 생성·마이그레이션 (멱등).
+ *
+ * ⚠ DDL을 수행하므로 **관리 계정 연결**로 호출해야 한다.
+ *   운영: scripts/setup-db.js · scripts/provision-tenant.js 가 withAdmin()으로 호출한다.
+ *   개발: 연결을 넘기지 않으면 앱 풀로 폴백한다(로컬 계정이 DDL 권한을 가진 경우에만 동작).
+ *
+ * DB 자체(CREATE DATABASE)는 여기서 만들지 않는다 — 프로비저닝의 책임이다.
+ * 대상 스키마는 연결이 붙어 있는 DB(SELECT DATABASE())로 결정되므로,
+ * 어느 테넌트 DB에든 그대로 적용할 수 있다.
+ *
+ * @param {import('mysql2/promise').Connection} [conn] 관리 계정 연결(대상 DB에 접속된 상태)
+ */
+async function initDb(conn) {
+  const c = conn || await pool.getConnection()
+  const pooled = !conn   // 풀에서 빌린 연결만 release 한다
   try {
-    const conn = await mysql.createConnection(baseConfig)
-    await conn.execute(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8 COLLATE utf8_general_ci`)
-    await conn.end()
-  } catch (e) {
-    console.warn('DB 생성 단계 건너뜀:', e.code || e.message)
-  }
-
-  // 테이블 생성
-  const c = await pool.getConnection()
-  try {
+    // information_schema 조회는 '지금 붙어 있는 DB' 기준이어야 한다.
+    // env의 DB_NAME을 쓰면 다른 테넌트를 초기화할 때 엉뚱한 스키마를 본다.
+    const [[{ schemaName }]] = await c.execute('SELECT DATABASE() AS schemaName')
+    if (!schemaName) throw new Error('initDb: 연결에 대상 데이터베이스가 지정되어 있지 않습니다')
     await c.execute(`
       CREATE TABLE IF NOT EXISTS accounts (
         id              VARCHAR(36) PRIMARY KEY,
@@ -261,6 +268,9 @@ async function initDb() {
         created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `)
+    // ⚠ 레거시 — 로그인 계정은 공용 관리 DB(acct_platform.users)로 이전됐다.
+    // 이 테이블은 최초 부트스트랩(레거시 계정 이전)의 읽기 소스로만 남아 있으며,
+    // 신규 테넌트에서는 사용하지 않는다. P7 정리 단계에서 제거 예정.
     await c.execute(`
       CREATE TABLE IF NOT EXISTS users (
         id         VARCHAR(36) PRIMARY KEY,
@@ -575,7 +585,7 @@ async function initDb() {
       const [[{ cnt }]] = await c.execute(
         `SELECT COUNT(*) AS cnt FROM information_schema.columns
          WHERE table_schema = ? AND table_name = ? AND column_name = ?`,
-        [DB_NAME, table, col]
+        [schemaName, table, col]
       )
       if (cnt === 0) await c.execute(`ALTER TABLE \`${table}\` ADD COLUMN ${ddl}`)
     }
@@ -697,7 +707,7 @@ async function initDb() {
       const [[{ cnt }]] = await c.execute(
         `SELECT COUNT(*) AS cnt FROM information_schema.columns
          WHERE table_schema = ? AND table_name = ? AND column_name = ?`,
-        [DB_NAME, table, col]
+        [schemaName, table, col]
       )
       if (cnt > 0) await c.execute(`ALTER TABLE \`${table}\` DROP COLUMN \`${col}\``)
     }
@@ -713,7 +723,7 @@ async function initDb() {
       const [[{ cnt }]] = await c.execute(
         `SELECT COUNT(*) AS cnt FROM information_schema.statistics
          WHERE table_schema = ? AND table_name = ? AND index_name = ?`,
-        [DB_NAME, table, index]
+        [schemaName, table, index]
       )
       if (cnt === 0) {
         try { await c.execute(`ALTER TABLE \`${table}\` ADD UNIQUE INDEX \`${index}\` (${col})`) }
@@ -766,7 +776,7 @@ async function initDb() {
       const [[{ cnt }]] = await c.execute(
         `SELECT COUNT(*) AS cnt FROM information_schema.statistics
          WHERE table_schema = ? AND table_name = ? AND index_name = ?`,
-        [DB_NAME, table, index]
+        [schemaName, table, index]
       )
       return cnt > 0
     }
@@ -1120,7 +1130,7 @@ async function initDb() {
       await c.execute("UPDATE transactions SET status='지급완료' WHERE kind='expense' AND status='지급 완료'")
     })
   } finally {
-    c.release()
+    if (pooled) c.release()
   }
 }
 

@@ -344,7 +344,30 @@ function getPool(dbName) {
 - 다운로드 라우트는 **요청자의 companyId와 파일 경로의 companyId 일치 검증**(URL 추측으로 타사 증빙 접근 차단)
 - 정적 서빙 금지 → 인증·권한(`download`) 통과 후 스트리밍
 
-### 5.4 도메인 라우팅
+### 5.4 DB 계정 권한 분리 (DDL / DML)
+
+**원칙: 앱 런타임은 DDL을 하지 않는다.** 스키마 생성·마이그레이션·테넌트 DB 생성은 배포 시점 작업이며, 웹 요청 경로가 탈취돼도 스키마를 건드리거나 DB를 만들 수 없어야 한다.
+
+| 계정 | 용도 | 권한 | 사용처 |
+|---|---|---|---|
+| **앱 계정** (`DB_USER`) | 런타임 | `acct_platform` + `acct\_%` 에 **SELECT/INSERT/UPDATE/DELETE만** | Express 요청 처리 |
+| **관리 계정** (`DB_ADMIN_USER`) | DDL | DB 생성·스키마 변경 | `setup-db.js`, `provision-tenant.js`, 마이그레이션 러너 |
+
+- 관리 계정 연결은 **상시 유지하지 않는다** — `withAdmin()`이 필요할 때 열고 즉시 닫는다
+- `DB_ADMIN_USER` 미설정 시 앱 계정으로 폴백(로컬 개발 편의). 운영에서는 반드시 분리
+- ⚠ GRANT에서 `_`는 와일드카드다. 리터럴은 `` `acct\_%` `` 로 이스케이프해야 `acct_` 접두사만 매칭된다
+
+**기동 시 동작**: `assertPlatformReady()`가 공용 DB 접근·스키마 완전성·회사 등록 여부만 **검증**한다(DDL 없음). 미비하면 조용한 런타임 오류가 아니라 **명확한 기동 실패 + 실행할 명령 안내**로 끝낸다.
+
+**운영 도구**
+```
+npm run setup:db         공용 DB + 테넌트 스키마 + 부트스트랩 (멱등, 배포마다 실행)
+npm run setup:db:check   변경 없이 상태만 점검
+npm run check:db         계정별 권한 진단 → 부족한 GRANT 문을 그대로 출력
+```
+`deploy.sh` 4단계에 `npm run setup:db`가 포함되어, 런타임에서 뺀 DDL 책임을 배포가 진다.
+
+### 5.5 도메인 라우팅
 
 - **단일 도메인 + JWT companyId** 방식 채택(수백 개사에서 서브도메인/와일드카드 인증서보다 운영 단순)
 - `https://acct.custwin.shop` 하나 유지(현행 Cloudflare 터널 그대로), 로그인 시 회사코드 입력으로 테넌트 구분
