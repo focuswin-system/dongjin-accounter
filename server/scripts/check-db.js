@@ -83,7 +83,10 @@ async function main() {
 
     // 신규 테넌트(acct_c0002 …)를 앱이 읽고 쓸 수 있어야 한다
     const g = await grantsOf(app)
-    const hasWildcard = g.some(s => s.includes(`\`${TENANT_PATTERN.replace('_', '\\_')}%\``))
+    // MariaDB는 SHOW GRANTS에서 이스케이프를 빼고 표시한다(`acct\_%` → `acct_%`).
+    // 표시 형식에 의존하지 않도록 양쪽에서 백슬래시를 제거하고 비교한다.
+    const unescape = (s) => s.replace(/\\/g, '')
+    const hasWildcard = g.some(s => unescape(s).includes(`\`${TENANT_PATTERN}%\``))
     if (hasWildcard) ok(`신규 테넌트(${TENANT_PATTERN}%) 와일드카드 권한 있음`)
     else {
       warn(`신규 테넌트(${TENANT_PATTERN}%) 와일드카드 권한 없음 — 회사 추가 시 앱이 접근 못 합니다`)
@@ -108,7 +111,9 @@ async function main() {
     ok('서버 접속')
     // GRANT 문자열 파싱은 오판이 잦다(자기 DB 한정 ALL PRIVILEGES를 전역으로 착각).
     // 임시 DB를 실제로 만들었다 지워서 확실하게 판정한다.
-    const probe = '__acct_privcheck_tmp'
+    // ⚠ 이름은 반드시 테넌트 접두사(acct_)를 따라야 한다. 권한을 `acct\_%` 로 한정해 주는 게
+    //   정석인데, 접두사를 안 지키면 올바른 설정에서도 실패해 오탐이 난다.
+    const probe = `${TENANT_PATTERN}privchk_tmp`
     try {
       await adm.query(`CREATE DATABASE IF NOT EXISTS \`${probe}\``)
       await adm.query(`DROP DATABASE \`${probe}\``)
