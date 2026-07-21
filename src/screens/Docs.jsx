@@ -2041,7 +2041,7 @@ export const ReportsScreen = () => {
           </div>
         </div>
         <div className="page-title" style={{ marginBottom: 4 }}>{report.t}</div>
-        <div className="page-sub" style={{ marginBottom: 24 }}>2026년 5월 기준 · 2026.05.19 조회</div>
+        <div className="page-sub" style={{ marginBottom: 24 }}>{localToday()} 조회 기준</div>
         <View toast={toast}/>
       </div>
     )

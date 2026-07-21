@@ -688,6 +688,8 @@ async function initDb() {
     await ensureColumn('contracts', 'initial_amount',     "initial_amount BIGINT")
     // 부가세 과세 여부. taxable(과세, 공급가×10%) / exempt(면세, 부가세 0). 청구서 발행·정기청구에 반영.
     await ensureColumn('contracts', 'vat_mode',           "vat_mode VARCHAR(10) DEFAULT 'taxable'")
+    // 계약 자유 메모(단일 필드). 계약 상세 '메모/히스토리' 탭에서 편집.
+    await ensureColumn('contracts', 'memo',               "memo TEXT")
     // 이번 텀 시작일이 빈 계약은 계약 시작일로 채움(= 첫 텀)
     await c.execute("UPDATE contracts SET current_term_start = start_date WHERE (current_term_start IS NULL OR current_term_start='') AND start_date IS NOT NULL AND start_date <> ''")
     // 앞선 시안(contract_type/renewal_type/renew_months) 정리 — 값은 전부 기본값이라 손실 없음

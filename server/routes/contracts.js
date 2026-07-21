@@ -832,6 +832,15 @@ router.delete('/docs/:docId', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+// 계약 메모 저장(단일 필드)
+router.patch('/:id/memo', async (req, res, next) => {
+  try {
+    const [r] = await pool.execute('UPDATE contracts SET memo = ? WHERE id = ?', [req.body.memo ?? null, req.params.id])
+    if (r.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
 // 레거시 단일 계약서(file_url) 제거
 router.patch('/:id/clear-file', async (req, res, next) => {
   try {

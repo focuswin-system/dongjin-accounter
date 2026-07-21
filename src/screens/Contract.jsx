@@ -894,6 +894,14 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     setTab("청구 일정");
   }, [contractId]);
 
+  // 계약이 바뀌면 저장된 메모를 텍스트영역에 로드(입금/지출 refresh 때 덮어쓰지 않게 c.id 기준).
+  useEffect(() => { setMemo(c?.memo || ""); }, [c?.id]);
+
+  const saveMemo = async () => {
+    const res = await api.updateContractMemo(contractId, memo);
+    if (res.ok) { toast.push("메모를 저장했어요"); reload(); } else toast.push("저장에 실패했어요");
+  };
+
   // 계약 상세에서 입금/지출 등록 시 자동 갱신
   useEffect(() => { if (refreshTrigger > 0 && contractId) reload(); }, [refreshTrigger]);
 
@@ -1523,11 +1531,9 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                 placeholder="계약에 관련된 메모를 자유롭게 적어주세요"
                 style={{ resize: "vertical", fontFamily: "inherit" }}/>
               <div className="row" style={{ marginTop: 8 }}>
-                <span className="text-xs text-muted2">메모는 계약 히스토리에 시간순으로 기록됩니다.</span>
-                <button className="btn primary sm ml-auto" disabled={!memo.trim()}
-                  style={{ opacity: memo.trim() ? 1 : 0.4 }}
-                  onClick={() => toast.push("계약 메모 저장은 준비 중이에요")}>
-                  <Icon.Pencil size={12}/> 메모 남기기
+                <span className="text-xs text-muted2">이 계약에 대한 자유 메모를 저장해두세요.</span>
+                <button className="btn primary sm ml-auto" onClick={saveMemo}>
+                  <Icon.Pencil size={12}/> 메모 저장
                 </button>
               </div>
             </div>

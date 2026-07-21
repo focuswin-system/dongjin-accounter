@@ -593,6 +593,10 @@ export const api = {
       return { ok: true }
     } catch (e) { return { ok: false, error: e.message } }
   },
+  async updateContractMemo(id, memo) {
+    try { await req(`/contracts/${id}/memo`, { method: 'PATCH', body: { memo } }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
 
   // 계약 목록 엑셀 내려받기 (kind: 'sales'|'purchase'|'all').
   // 인증 헤더가 필요해서 <a href>로는 안 되고, blob으로 받아 저장한다.
