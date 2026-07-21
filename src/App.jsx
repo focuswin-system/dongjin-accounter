@@ -316,8 +316,9 @@ function AppInner({ onLogout, user }) {
       return <LedgerScreen initialFilter={filter} refreshTrigger={txnVersion} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
     }
     if (PORTAL_CAT_BY_ID[route]) return <PortalScreen node={PORTAL_CAT_BY_ID[route]} go={go}/>;
-    // 기준정보 서브메뉴(master_<탭>): 내부 서브내브 없이 해당 탭만 전체폭으로.
+    // 기준정보 서브메뉴: 내부 서브내브 없이 해당 탭만 전체폭으로. (일반회계 master_ / 인사급여 hrbase_)
     if (route.startsWith("master_")) return <MasterScreen user={user} section="base" forcedTab={route.slice(7)}/>;
+    if (route.startsWith("hrbase_")) return <MasterScreen user={user} section="hr" forcedTab={route.slice(7)}/>;
     switch (route) {
       case "home":            return <HomeScreen go={go} user={user} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
       case "billing":         return <BillingScreen/>;
@@ -354,7 +355,7 @@ function AppInner({ onLogout, user }) {
   const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger"
                 : route.startsWith("billing") ? "billing"
                 : (route === "contract_sales" || route === "contract_purchase") ? "contract"
-                : (route === "settings" || route === "hr_base" || route === "hr_labor_contract" || route === "hr_outsourcing" || route.startsWith("master")) ? "master"
+                : (route === "settings" || route === "hr_base" || route === "hr_labor_contract" || route === "hr_outsourcing" || route.startsWith("master") || route.startsWith("hrbase")) ? "master"
                 : route === "mgmt_dash" ? "report" : route;
   const help = HELP_MAP[helpKey] || HELP_MAP.home;
 

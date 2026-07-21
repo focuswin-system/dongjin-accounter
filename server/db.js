@@ -722,6 +722,41 @@ async function initDb() {
     }
     await ensureUniqueIndex('contracts', 'uq_contracts_contract_no', 'contract_no')
 
+    // 사번·청구번호 유니크화: 먼저 기존 중복을 재번호(뒤 생성분을 그룹 최대+1)한 뒤 유니크 인덱스를 건다.
+    // (동시/다경로 생성 시 MAX+1 채번이 겹쳐 중복이 조용히 생기는 것을 DB가 차단. 중복이 남아 있으면
+    //  인덱스 생성이 실패하므로 dedup을 선행 — runOnce 가드로 1회만.)
+    await runOnce('dedup_emp_invoice_no_v1', async () => {
+      // emp_no 중복/공백 재번호
+      const [emps] = await c.execute('SELECT id, emp_no FROM employees ORDER BY created_at, id')
+      let maxN = 0
+      for (const e of emps) { const n = parseInt(String(e.emp_no || '').replace(/[^0-9]/g, ''), 10) || 0; if (n > maxN) maxN = n }
+      const seen = new Set()
+      for (const e of emps) {
+        const no = e.emp_no || ''
+        if (!no || seen.has(no)) {
+          maxN++; const newNo = 'EMP-' + String(maxN).padStart(3, '0')
+          await c.execute('UPDATE employees SET emp_no = ? WHERE id = ?', [newNo, e.id]); seen.add(newNo)
+        } else seen.add(no)
+      }
+      // invoice_no 중복 재번호(prefix-year 그룹 유지, 그 그룹 최대+1)
+      const [invs] = await c.execute("SELECT id, invoice_no, kind FROM invoices WHERE invoice_no IS NOT NULL AND invoice_no <> '' ORDER BY created_at, id")
+      const maxSeq = {}
+      for (const iv of invs) { const m = String(iv.invoice_no).match(/^(.+-\d{4})-(\d+)$/); if (m) { const k = m[1], s = parseInt(m[2], 10) || 0; if (!(k in maxSeq) || s > maxSeq[k]) maxSeq[k] = s } }
+      const seenInv = new Set()
+      for (const iv of invs) {
+        const no = iv.invoice_no
+        if (seenInv.has(no)) {
+          const m = String(no).match(/^(.+-\d{4})-(\d+)$/)
+          const key = m ? m[1] : `${iv.kind === 'received' ? '매입' : '청구'}-0000`
+          maxSeq[key] = (maxSeq[key] || 0) + 1
+          const newNo = `${key}-${String(maxSeq[key]).padStart(4, '0')}`
+          await c.execute('UPDATE invoices SET invoice_no = ? WHERE id = ?', [newNo, iv.id]); seenInv.add(newNo)
+        } else seenInv.add(no)
+      }
+    })
+    await ensureUniqueIndex('employees', 'uq_emp_no', 'emp_no')
+    await ensureUniqueIndex('invoices', 'uq_invoice_no', 'invoice_no')
+
     // payroll 유니크 교체: (employee_id, month) → (employee_id, month, seq)
     // 용역·일용은 한 달에 여러 회차를 지급하므로 옛 유니크로는 2회차부터 막힌다.
     // 근로계약은 항상 seq=0이라 중복 방지 효과는 이전과 완전히 동일하다.

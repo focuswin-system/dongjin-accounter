@@ -890,6 +890,10 @@ export const api = {
   async deletePayslip(id) {
     try { await req('/payroll/' + id, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }
   },
+  async clearPayrollMonth(month) {
+    try { const r = await req('/payroll/month/' + month, { method: 'DELETE' }); return { ok: true, deleted: r.deleted } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
 
   // 급여 항목 마스터(지급/공제 표준 목록)
   async getPayrollItemTypes(kind) {

@@ -272,6 +272,23 @@ router.delete('/:id/pay/:txnId', async (req, res, next) => {
   } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
 })
 
+// ── 이 달 급여대장 전체 비우기: 한 트랜잭션으로 (프론트 건별 반복 삭제의 부분 실패 방지) ──
+// 급여대장(근로, seq=0)만 대상 — 용역·일용 회차(seq>=1)는 별도. 연결 지출 거래는 보존(연결만 해제).
+router.delete('/month/:month', async (req, res, next) => {
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [[{ cnt }]] = await conn.execute('SELECT COUNT(*) AS cnt FROM payroll WHERE month = ? AND seq = 0', [req.params.month])
+    await conn.execute(
+      'UPDATE transactions SET payroll_id = NULL WHERE payroll_id IN (SELECT id FROM payroll WHERE month = ? AND seq = 0)',
+      [req.params.month]
+    )
+    await conn.execute('DELETE FROM payroll WHERE month = ? AND seq = 0', [req.params.month])
+    await conn.commit()
+    res.json({ ok: true, deleted: cnt })
+  } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
+})
+
 router.delete('/:id', async (req, res, next) => {
   const conn = await pool.getConnection()
   try {

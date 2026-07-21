@@ -56,7 +56,10 @@ export const NAV_TREE = [
         { id: "hr_outsourcing",    label: "기타 용역·일용", icon: Icon.Briefcase },
       ]},
       { label: "기준정보", items: [
-        { id: "hr_base", label: "부서·직위·급여", icon: Icon.Folder },
+        { id: "hrbase_department",   label: "부서",     icon: Icon.Building },
+        { id: "hrbase_position",     label: "직위",     icon: Icon.Sign },
+        { id: "hrbase_payrollItems", label: "급여 항목", icon: Icon.Wallet },
+        { id: "hrbase_employType",   label: "고용형태",  icon: Icon.Briefcase },
       ]},
     ],
   },
@@ -118,7 +121,10 @@ export const PORTAL = [
       { id: 'hr_labor', label: '근로·용역', icon: Icon.Sign, desc: '근로계약·용역·일용', groups: [
         { label: '', items: ['hr_labor_contract', 'hr_outsourcing'] },
       ]},
-      { id: 'hr_base', label: '기준정보', icon: Icon.Folder, desc: '부서·직위·급여항목', route: 'hr_base' },
+      { id: 'hr_base', label: '기준정보', icon: Icon.Folder, desc: '부서·직위·급여항목·고용형태', groups: [
+        { label: '조직', items: ['hrbase_department', 'hrbase_position'] },
+        { label: '급여·근로', items: ['hrbase_payrollItems', 'hrbase_employType'] },
+      ]},
     ],
   },
   {
@@ -139,6 +145,7 @@ DOMAIN_OF['acct_process'] = 'acct'
 DOMAIN_OF['acct_tax'] = 'acct'
 DOMAIN_OF['master'] = 'acct'   // 기준정보 포털 카테고리(groups) — 사이드바 도메인 자동 펼침
 DOMAIN_OF['hr_labor'] = 'hr_dom'
+DOMAIN_OF['hr_base'] = 'hr_dom' // 인사급여 기준정보 포털 카테고리(groups)
 
 // 라우트(하위 라우트 포함) → 사이드바에서 활성 표시할 잎 id
 export function leafIdOf(route) {

@@ -151,8 +151,10 @@ export const HRScreen = () => {
       confirmLabel: "전체 삭제",
     });
     if (!ok) return;
-    for (const r of payRows) await api.deletePayslip(r.id);
-    toast.push(`${monthLabel(month)} 급여대장을 비웠어요`);
+    // 건별 반복 대신 한 트랜잭션으로 일괄 삭제(부분 실패 방지).
+    const res = await api.clearPayrollMonth(month);
+    if (res.ok) toast.push(`${monthLabel(month)} 급여대장을 비웠어요`);
+    else toast.push("삭제에 실패했어요");
     loadPayroll();
   };
 
