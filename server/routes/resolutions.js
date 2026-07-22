@@ -166,12 +166,14 @@ router.post('/:id/process', async (req, res, next) => {
 
     // 매입 청구서 연결 결의서인데 그 청구서가 이미 완납이면, 새 지출을 만들어봐야 매칭할 잔액이 없어
     // 지출만 붕 뜬다(이중 계상). 처리 자체를 막는다.
-    // 겸사겸사 청구서의 출금 계좌를 받아둔다 — 아래에서 계좌 기본값으로 승계한다.
+    // 겸사겸사 청구서의 출금 계좌와 계약을 받아둔다 — 아래에서 지출 거래에 승계한다.
     let invAccountId = null
+    let invContractId = null
     if (r.invoice_id) {
-      const [[inv]] = await conn.execute('SELECT total_amount, account_id FROM invoices WHERE id = ?', [r.invoice_id])
+      const [[inv]] = await conn.execute('SELECT total_amount, account_id, contract_id FROM invoices WHERE id = ?', [r.invoice_id])
       if (inv) {
         invAccountId = inv.account_id || null
+        invContractId = inv.contract_id || null
         const [[{ paid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [r.invoice_id])
         if (Number(inv.total_amount) - Number(paid) <= 0) {
           await rollbackQuietly(conn); return res.status(409).json({ error: '연결된 청구서가 이미 지급 완료됐어요' })
@@ -185,8 +187,21 @@ router.post('/:id/process', async (req, res, next) => {
     let linkedTxnId = null
     if (mode === 'link') {
       if (!txn_id) { await rollbackQuietly(conn); return res.status(400).json({ error: '연결할 지출 거래를 선택해주세요' }) }
-      const [[t]] = await conn.execute("SELECT id, status, account_id FROM transactions WHERE id = ? AND kind='expense'", [txn_id])
+      // FOR UPDATE — 같은 거래를 두 결의서가 동시에 집으려 할 때 한쪽을 기다리게 한다.
+      const [[t]] = await conn.execute("SELECT id, status, account_id FROM transactions WHERE id = ? AND kind='expense' FOR UPDATE", [txn_id])
       if (!t) { await rollbackQuietly(conn); return res.status(404).json({ error: '지출 거래를 찾을 수 없어요' }) }
+      // 이미 다른 결의서가 집행한 지출이면 막는다.
+      // 후보 목록(/:id/matchable)이 연결된 거래를 빼주긴 하지만, 그 목록은 드로어를 열 때
+      // 한 번만 받아온다. 결의서 A를 처리한 뒤 열어둔 B의 드로어에서 같은 거래를 고르면
+      // 한 번 나간 돈으로 두 결의서가 '완료'가 되고, B에 해당하는 지출은 영영 기록되지 않는다.
+      const [[dupRes]] = await conn.execute(
+        'SELECT id, doc_no FROM expense_resolutions WHERE txn_id = ? AND id <> ? LIMIT 1', [txn_id, req.params.id])
+      if (dupRes) {
+        await rollbackQuietly(conn)
+        return res.status(409).json({
+          error: `이 지출은 이미 결의서 ${dupRes.doc_no || ''}에 연결돼 있어요. 다른 지출을 고르거나 '지출 새로 등록'을 쓰세요.`.replace('  ', ' '),
+        })
+      }
       // 결의서 처리는 '집행'이다. 연결 대상이 아직 미지급이면 지급완료로 바꿔야 잔액에서 빠진다.
       const acct = t.account_id || account_id || invAccountId || null
       if (!acct) { await rollbackQuietly(conn); return res.status(400).json({ error: '이 지출에는 출금 계좌가 없어요. 계좌를 선택해주세요' }) }
@@ -204,10 +219,12 @@ router.post('/:id/process', async (req, res, next) => {
       const acct = account_id || invAccountId || null
       if (!acct) { await rollbackQuietly(conn); return res.status(400).json({ error: '출금 계좌를 선택해주세요' }) }
       const id = randomUUID()
+      // contract_id 를 청구서에서 승계한다. 안 넣으면 그 매입계약의 지급 내역·원가 실적에서
+      // 통째로 빠져, 같은 청구서를 결의서 없이 바로 '지급 처리'했을 때와 숫자가 달라진다.
       await conn.execute(
-        `INSERT INTO transactions (id, kind, vendor_id, account_id, category, amount, date, method, status, buyer_type, doc_no, memo)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [id, 'expense', r.vendor_id || null, acct, r.title || '지출', amt,
+        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, doc_no, memo)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [id, 'expense', r.vendor_id || null, invContractId, acct, r.title || '지출', amt,
          effDate, r.pay_method || '계좌이체',
          '지급완료', '공통', r.doc_no, `결의서 ${r.doc_no} 집행`])
       linkedTxnId = id
