@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { futureDateError } = require('../db')
+const { futureDateError, kstToday } = require('../db')
 
 const router = Router()
 
@@ -387,15 +387,17 @@ router.post('/:id/pay', async (req, res, next) => {
 
     let txnId = null
     if (paid) {
+      // 예전에는 계좌 미지정 시 '가장 오래된 은행계좌'로 조용히 대체했다. 그러면 실제로 돈이
+      // 나간 계좌가 아닌 곳에서 차감돼 두 계좌가 동시에 틀어진다(한쪽은 과소, 한쪽은 과대).
+      // 은행계좌가 하나도 없으면 NULL이 되어 어느 잔액에도 안 잡혔다. 명시 선택을 요구한다.
+      if (!account_id) { await conn.rollback(); return res.status(400).json({ error: '출금 계좌를 선택해주세요' }) }
       txnId = randomUUID()
-      const [[defAcc]] = await conn.execute("SELECT id FROM accounts WHERE kind='bank' ORDER BY created_at LIMIT 1")
-      const acc = account_id || (defAcc ? defAcc.id : null)
       // 소득구분에 맞는 카테고리로 지출 기록(급여와 구분되어 신고자료 집계가 섞이지 않게)
       const category = c.income_type === '일용' ? '일용노무비' : c.income_type === '기타' ? '기타소득 지급' : '용역비'
       await conn.execute(
         `INSERT INTO transactions (id, kind, account_id, category, amount, date, method, status, buyer_type, employee_id, payroll_id, memo)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [txnId, 'expense', acc, category, net, date || pay_date || new Date().toISOString().slice(0, 10),
+        [txnId, 'expense', account_id, category, net, date || pay_date || kstToday(),
          '계좌이체', '지급완료', '공통', c.employee_id, payrollId, memo || `${m} ${c.employee_name} ${category}`]
       )
       // ↑ status '지급완료'(공백 없음) — 계좌 잔액 계산(accounts.js)이 이 값만 지출로 센다.

@@ -860,6 +860,8 @@ const ServicePayDrawer = ({ contract, onClose, onSaved }) => {
     const usable = lines.filter(l => (Number(l.qty) || 0) > 0)
     if (usable.length === 0) return toast.push('수량을 입력한 항목이 없어요')
     if (payNow && date > today) return toast.push('미래 날짜로는 지급할 수 없어요')
+    // 계좌가 비면 그 지출이 계좌 잔액에서 빠지지 않는다(서버도 400으로 막는다)
+    if (payNow && !accountId) return toast.push('출금 계좌를 선택해주세요')
     const res = await api.payWorkContract(contract.id, {
       month: date.slice(0, 7), pay_date: date,
       lines: usable.map(l => ({ name: l.name, unit: l.unit, qty: l.qty, unit_price: l.unit_price })),
@@ -922,9 +924,10 @@ const ServicePayDrawer = ({ contract, onClose, onSaved }) => {
             <span className="text-sm">지금 지급 처리 (거래내역에 지출로 자동 기록)</span>
           </label>
           {payNow && (
-            <Field label="출금 계좌">
+            <Field label="출금 계좌 *">
               <Combobox value={accountId} onChange={setAccountId}
-                options={accounts.map(a => ({ value: a.id, label: a.name, sub: a.bank }))} placeholder="계좌 선택"/>
+                options={accounts.map(a => ({ value: a.id, label: a.name, sub: [a.kind === 'card' ? '카드' : a.bankName, a.number].filter(Boolean).join(' ') }))}
+                placeholder="계좌 선택"/>
             </Field>
           )}
         </div>
