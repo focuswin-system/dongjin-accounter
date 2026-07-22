@@ -7,6 +7,22 @@ const { futureDateError } = require('../db')
 const router = Router()
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
 
+// 청구서 매칭 누계로 청구서·마일스톤 상태를 다시 계산한다.
+// 거래가 지워지거나 금액이 바뀌면 정산액이 달라지므로 반드시 다시 계산해야 한다.
+// (db는 필수 인자 — 기본값을 두면 호출자가 빠뜨렸을 때 조용히 다른 회사 DB를 건드린다)
+async function recalcInvoiceStatus(db, invoiceId) {
+  const [[inv]] = await db.execute('SELECT kind, total_amount FROM invoices WHERE id = ?', [invoiceId])
+  if (!inv) return
+  const [[{ paid }]] = await db.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [invoiceId])
+  const isIssued = inv.kind === 'issued'
+  const total = Number(inv.total_amount)
+  const status = Number(paid) <= 0 ? (isIssued ? '입금 예정' : '지급 대기')
+    : Number(paid) >= total ? (isIssued ? '입금 완료' : '지급 완료')
+    : (isIssued ? '일부 입금' : '일부 지급')
+  await db.execute('UPDATE invoices SET status = ? WHERE id = ?', [status, invoiceId])
+  await db.execute('UPDATE milestones SET status = ? WHERE invoice_id = ?', [status, invoiceId])
+}
+
 // 거래 목록/상세에 첨부 서류(다중) 붙이기
 async function attachDocs(db, rows) {
   if (!rows.length) return
@@ -121,16 +137,39 @@ router.put('/:id', async (req, res, next) => {
     const [[cur]] = await req.db.execute('SELECT kind FROM transactions WHERE id = ?', [req.params.id])
     if (!cur) return res.status(404).json({ error: 'Not found' })
     const costId = cur.kind === 'expense' ? (cost_contract_id || null) : null
-    const [result] = await req.db.execute(`
-      UPDATE transactions SET vendor_id=?, contract_id=?, cost_contract_id=?, account_id=?, category=?, sub_category=?,
-        amount=?, date=?, method=?, status=?, buyer_type=?, vessel_no=?, usage_place=?,
-        doc_no=?, employee_id=?, evid_type=?, evid_url=?, memo=?, item_id=?, account_code=?
-      WHERE id=?
-    `, [vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
-        amount, date, method||'', status||'지급완료', buyer_type||'공통', vessel_no||'', usage_place||'',
-        doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'', item_id||null, account_code||null, req.params.id])
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
-    res.json({ ok: true })
+    // 금액이 바뀌면 청구서 매칭액도 따라가야 한다. 거래 수정과 매칭 갱신이 갈라지면
+    // 청구서 정산액이 옛 금액으로 남아 미수/미지급이 틀어지므로 한 트랜잭션으로 묶는다.
+    const conn = await req.db.getConnection()
+    try {
+      await conn.beginTransaction()
+      const [result] = await conn.execute(`
+        UPDATE transactions SET vendor_id=?, contract_id=?, cost_contract_id=?, account_id=?, category=?, sub_category=?,
+          amount=?, date=?, method=?, status=?, buyer_type=?, vessel_no=?, usage_place=?,
+          doc_no=?, employee_id=?, evid_type=?, evid_url=?, memo=?, item_id=?, account_code=?
+        WHERE id=?
+      `, [vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
+          amount, date, method||'', status||'지급완료', buyer_type||'공통', vessel_no||'', usage_place||'',
+          doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'', item_id||null, account_code||null, req.params.id])
+      if (result.affectedRows === 0) { await conn.rollback(); return res.status(404).json({ error: 'Not found' }) }
+
+      // 이 거래에 걸린 청구서 매칭을 새 금액에 맞춰 조정하고 청구서 상태를 재계산한다.
+      const [links] = await conn.execute('SELECT id, invoice_id, amount FROM invoice_matches WHERE txn_id = ?', [req.params.id])
+      for (const link of links) {
+        // 같은 청구서의 다른 매칭을 뺀 잔여를 넘지 않도록 제한(과입금·과지급 방지)
+        const [[{ others }]] = await conn.execute(
+          'SELECT COALESCE(SUM(amount),0) AS others FROM invoice_matches WHERE invoice_id = ? AND id <> ?',
+          [link.invoice_id, link.id])
+        const [[inv]] = await conn.execute('SELECT total_amount FROM invoices WHERE id = ?', [link.invoice_id])
+        const remainForThis = Number(inv?.total_amount || 0) - Number(others)
+        const newMatch = Math.max(0, Math.min(Number(amount) || 0, remainForThis))
+        await conn.execute('UPDATE invoice_matches SET amount = ? WHERE id = ?', [newMatch, link.id])
+        await recalcInvoiceStatus(conn, link.invoice_id)
+      }
+
+      await conn.commit()
+      res.json({ ok: true })
+    } catch (e) { await conn.rollback(); throw e }
+    finally { conn.release() }
   } catch (e) { next(e) }
 })
 
@@ -190,18 +229,7 @@ router.delete('/:id', async (req, res, next) => {
     // 안 하면 매칭이 고아로 남아 청구서가 '완료'인 채 미수/미지급이 누락된다.
     const [matches] = await conn.execute('SELECT invoice_id FROM invoice_matches WHERE txn_id = ?', [req.params.id])
     await conn.execute('DELETE FROM invoice_matches WHERE txn_id = ?', [req.params.id])
-    for (const m of matches) {
-      const [[inv]] = await conn.execute('SELECT kind, total_amount FROM invoices WHERE id = ?', [m.invoice_id])
-      if (!inv) continue
-      const [[{ paid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [m.invoice_id])
-      const isIssued = inv.kind === 'issued'
-      const total = Number(inv.total_amount)
-      const status = Number(paid) <= 0 ? (isIssued ? '입금 예정' : '지급 대기')
-        : Number(paid) >= total ? (isIssued ? '입금 완료' : '지급 완료')
-        : (isIssued ? '일부 입금' : '일부 지급')
-      await conn.execute('UPDATE invoices SET status = ? WHERE id = ?', [status, m.invoice_id])
-      await conn.execute('UPDATE milestones SET status = ? WHERE invoice_id = ?', [status, m.invoice_id])
-    }
+    for (const m of matches) await recalcInvoiceStatus(conn, m.invoice_id)
     await conn.execute('DELETE FROM transactions WHERE id = ?', [req.params.id])
     await conn.commit()
     res.json({ ok: true })
