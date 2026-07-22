@@ -9,7 +9,7 @@ const SAMPLE = {
 import { computeItems, shiftMonth, monthLabel } from './HR'
 import { api } from '../lib/api'
 
-const todayStr = () => new Date().toISOString().slice(0, 10)
+const todayStr = () => localToday()   // UTC 금지 — KST 새벽에 하루 전으로 찍힌다
 
 const FormBlock = ({ title, hint, children }) => (
   <div>
@@ -25,7 +25,7 @@ export const ExpenseDrawer = ({ open, onClose }) => {
   const [form, setForm] = useState({
     vendor: "", contract: "", category: "",
     supply: "", vat: "", total: "", simple: false,
-    method: "계좌이체", employee: "", date: new Date().toISOString().slice(0, 10), memo: "", evid: true, makeDoc: true,
+    method: "계좌이체", employee: "", date: localToday(), memo: "", evid: true, makeDoc: true,
   });
   const totalSteps = 7;
   const stepLabels = ["거래처", "계약/공통", "계정과목/비목", "금액", "결제수단", "증빙", "결의서"];
@@ -1506,7 +1506,7 @@ const ReportMonthly = ({ toast }) => {
 
 // ── 2. 4대보험·원천세 신고 자료 ─────────────────────────────
 const ReportTax4 = ({ toast }) => {
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7))
+  const [month, setMonth] = useState(() => localToday().slice(0, 7))
   const [rows, setRows] = useState([])
   // 근로소득(급여대장, seq=0)만 집계 — 용역·일용·기타소득은 원천세 신고 구분이 달라 섞지 않는다.
   useEffect(() => { api.getPayroll(month, "labor").then(r => setRows(Array.isArray(r) ? r : [])) }, [month])

@@ -5,6 +5,14 @@
 
 const BASE = '/api'
 
+// 오늘 / 이번 달 — 로컬(KST) 기준. new Date().toISOString()은 UTC라 KST 00~09시에
+// 하루 전 날짜가 나온다(월 경계에선 전월). 서버 kstToday()와 짝을 맞춘다.
+const localToday = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+const localMonth = () => localToday().slice(0, 7)
+
 async function req(path, opts = {}) {
   const token = localStorage.getItem('token')
   const res = await fetch(BASE + path, {
@@ -197,7 +205,7 @@ export const api = {
     try {
       await req(`/accounts/${accountId}/adjustments`, {
         method: 'POST',
-        body: { amount, reason, date: new Date().toISOString().slice(0, 10), created_by: by },
+        body: { amount, reason, date: localToday(), created_by: by },
       })
       return { ok: true }
     } catch { return { ok: false } }
@@ -614,7 +622,7 @@ export const api = {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${label}_${new Date().toISOString().slice(0, 10)}.xlsx`
+      a.download = `${label}_${localToday()}.xlsx`
       // Firefox는 anchor가 DOM에 있어야 다운로드되고, 같은 tick에 revoke하면 진행 중 다운로드가 취소된다.
       document.body.appendChild(a)
       a.click()
@@ -890,7 +898,9 @@ export const api = {
     try { await req(`/payroll/${id}/pay/${txnId}`, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }
   },
   async deletePayslip(id) {
-    try { await req('/payroll/' + id, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }
+    // 지급 이력이 있으면 서버가 409 + 안내를 준다. 사유를 버리면 화면이 이유를 못 보여준다.
+    try { await req('/payroll/' + id, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
   },
   async clearPayrollMonth(month) {
     try { const r = await req('/payroll/month/' + month, { method: 'DELETE' }); return { ok: true, deleted: r.deleted } }
@@ -979,7 +989,7 @@ export const api = {
       this.getPayablesSummary(),
     ])
     const invs = await this.getInvoices({ kind: 'received', status: '지급 대기' })
-    const month = new Date().toISOString().slice(0, 7)
+    const month = localMonth()
     const monthOut = invs.filter(i => (i.dueAt || '').startsWith(month))
       .reduce((s, i) => s + i.remainAmount, 0)
     const monthOutCount = invs.filter(i => (i.dueAt || '').startsWith(month)).length
@@ -993,7 +1003,7 @@ export const api = {
 
   async getMonthCashFlow() {
     try {
-      const month = new Date().toISOString().slice(0, 7)
+      const month = localMonth()
       const [inInvs, outInvs] = await Promise.all([
         this.getInvoices({ kind: 'issued' }),
         this.getInvoices({ kind: 'received' }),
@@ -1158,7 +1168,7 @@ export const api = {
   async getReceivables() {
     const invs  = await this.getInvoices({ kind: 'issued' })
     const today = new Date(); today.setHours(0, 0, 0, 0)
-    const month = new Date().toISOString().slice(0, 7)
+    const month = localMonth()
     const PENDING = new Set(['입금 예정', '일부 입금', '기한 지남', '장기 미수'])
     const rows = invs
       .filter(i => PENDING.has(i.status))
@@ -1194,7 +1204,7 @@ export const api = {
   async getPayables() {
     const invs  = await this.getInvoices({ kind: 'received' })
     const today = new Date(); today.setHours(0, 0, 0, 0)
-    const month = new Date().toISOString().slice(0, 7)
+    const month = localMonth()
     const PENDING = ['지급 대기', '지급 예정', '일부 지급', '기한 지남']
     const rows = invs
       .map(i => {

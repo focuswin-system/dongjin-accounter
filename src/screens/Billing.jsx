@@ -11,9 +11,14 @@ const STATUS_TONE = {
   "기한 지남": "neg",  "장기 미수": "neg",
 }
 
+// 만기까지 남은 일수. new Date('2026-07-31')는 UTC 자정으로 파싱되므로 현재시각과 직접 빼면
+// KST 21시 이후 만기 당일 건이 '+1일 초과'로 표시된다. 로컬 자정끼리 비교한다.
+const dayDiff = (due) => Math.round(
+  (new Date(`${due}T00:00:00`) - new Date(`${localDate()}T00:00:00`)) / 86400000)
+
 const dday = (due) => {
   if (!due) return ""
-  const diff = Math.round((new Date(due) - new Date()) / 86400000)
+  const diff = dayDiff(due)
   if (diff === 0) return "오늘"
   if (diff < 0)   return `+${Math.abs(diff)}일 초과`
   return `D-${diff}`
@@ -21,7 +26,7 @@ const dday = (due) => {
 
 const ddayTone = (due) => {
   if (!due) return "outline"
-  const diff = Math.round((new Date(due) - new Date()) / 86400000)
+  const diff = dayDiff(due)
   if (diff < 0)  return "neg"
   if (diff <= 3) return "warn"
   return "outline"
@@ -482,7 +487,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
       vendor_id: vendorObj?.id || null,
       contract_id: contractObj?.id || null,
       supply_amount: supply, vat_amount: vat, total_amount: total,
-      issued_at: editInvoice ? editInvoice.issuedAt : new Date().toISOString().slice(0, 10),
+      issued_at: editInvoice ? editInvoice.issuedAt : localDate(),
       due_at: form.dueAt || null,
       status: editInvoice ? editInvoice.status : (form.kind === "issued" ? "입금 예정" : "지급 예정"),
       account_id: form.accountId || null, memo: form.memo || "",

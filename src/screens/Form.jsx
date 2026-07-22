@@ -113,7 +113,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       amount:    editTxn.amount   || 0,
       account:   editTxn.account  || accounts[0]?.name || '',
       method:    editTxn.method   || '계좌이체',
-      date:      editTxn.date     || new Date().toISOString().slice(0, 10),
+      date:      editTxn.date     || localToday(),
       memo:      editTxn.memo     || '',
       taxFree:   false,
       supply,

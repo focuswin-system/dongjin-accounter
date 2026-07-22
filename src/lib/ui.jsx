@@ -13,10 +13,13 @@ export const fmtDate = (s) => s;
 
 // 오늘(브라우저 로컬 달력, YYYY-MM-DD). 지출·입금의 미래 일자 방지(max·기본값) 기준.
 // toISOString(UTC)이 아니라 로컬 달력을 써야 새벽에 '오늘'이 하루 밀리지 않는다.
+// 오늘 / 이번 달 — 브라우저 로컬 시각 기준(국내 사용 전제, 서버 kstToday()와 정렬).
+// new Date().toISOString()은 UTC라 KST 00~09시에 하루 전 날짜가 나온다. 쓰지 말 것.
 export const localToday = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
+export const localMonth = () => localToday().slice(0, 7);
 
 /* ── 금액 입력 공통 컴포넌트 ──
    입력 중 천단위 콤마(1,000)를 보여주고 값은 숫자만 남겨 부모에 전달한다.

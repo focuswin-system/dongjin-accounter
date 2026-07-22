@@ -56,7 +56,7 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
 
   const exportCsv = () => {
     if (filtered.length === 0) return toast.push("내보낼 거래가 없어요");
-    downloadCsv(`거래내역_${new Date().toISOString().slice(0, 10)}.csv`,
+    downloadCsv(`거래내역_${localToday()}.csv`,
       ["날짜", "구분", "거래처", "계약/공통", "비목", "금액", "상태"],
       filtered.map(t => [t.date, t.kind === "income" ? "입금" : "지출", t.vendor, t.scope, t.category, t.sign * t.amount, t.status]));
   };

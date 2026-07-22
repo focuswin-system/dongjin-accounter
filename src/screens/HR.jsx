@@ -105,7 +105,7 @@ export const HRScreen = () => {
   const [tab, setTab] = useState("급여대장");
 
   // 급여대장
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [month, setMonth] = useState(() => localToday().slice(0, 7));
   const [payRows, setPayRows] = useState([]);
   const [paySummary, setPaySummary] = useState(null);
   const [accounts, setAccounts] = useState([]);
@@ -131,14 +131,15 @@ export const HRScreen = () => {
       tone: "neg", icon: <Icon.Warn size={22}/>,
       title: `${r.name} 급여 명세 삭제`,
       body: hasPaid
-        ? "이 직원의 이번 달 급여 명세를 삭제합니다. 이미 기록된 지출 거래는 거래내역에 그대로 남고, 이 급여와의 연결만 끊겨요."
+        // 지급 이력이 있으면 서버가 409로 막는다(이미 나간 돈이 '미지급'으로 되살아나 재지급을 유도하므로).
+        ? "이미 지급한 내역이 있어 바로 삭제할 수 없어요. 급여 상세에서 지급 내역을 먼저 취소한 뒤 다시 시도하세요."
         : "이 직원의 이번 달 급여 명세를 삭제합니다. 다시 만들려면 '급여대장 생성'을 누르세요.",
-      confirmLabel: "삭제",
+      confirmLabel: hasPaid ? "확인" : "삭제",
     });
-    if (!ok) return;
+    if (!ok || hasPaid) return;
     const res = await api.deletePayslip(r.id);
     if (res.ok) { toast.push("급여 명세를 삭제했어요"); loadPayroll(); }
-    else toast.push("삭제에 실패했어요");
+    else toast.push(res.error || "삭제에 실패했어요", { tone: "warn" });
   };
 
   const handleClearMonth = async () => {
@@ -147,14 +148,16 @@ export const HRScreen = () => {
     const ok = await confirm({
       tone: "neg", icon: <Icon.Warn size={22}/>,
       title: `${monthLabel(month)} 급여대장 전체 삭제`,
-      body: `${payRows.length}명의 이번 달 급여 명세를 모두 삭제합니다.${anyPaid ? " 이미 기록된 지출 거래는 거래내역에 남고 연결만 끊겨요." : ""} 급여 명세는 복구할 수 없어요.`,
-      confirmLabel: "전체 삭제",
+      body: anyPaid
+        ? "이미 지급한 내역이 있어 비울 수 없어요. 각 직원의 급여 상세에서 지급 내역을 먼저 취소해주세요."
+        : `${payRows.length}명의 이번 달 급여 명세를 모두 삭제합니다. 급여 명세는 복구할 수 없어요.`,
+      confirmLabel: anyPaid ? "확인" : "전체 삭제",
     });
-    if (!ok) return;
+    if (!ok || anyPaid) return;
     // 건별 반복 대신 한 트랜잭션으로 일괄 삭제(부분 실패 방지).
     const res = await api.clearPayrollMonth(month);
     if (res.ok) toast.push(`${monthLabel(month)} 급여대장을 비웠어요`);
-    else toast.push("삭제에 실패했어요");
+    else toast.push(res.error || "삭제에 실패했어요", { tone: "warn" });
     loadPayroll();
   };
 
