@@ -72,7 +72,54 @@ Phase 4  권한 관리(P5) + 셀프 가입(P4)
 | `Tax.jsx` | 451 | 12 | 2 |
 | **합계** | 14575 | **192** | **62** |
 
-### 2.1 `DataTable` (최우선)
+### 2.0 착수 순서 — 실측 근거 (2026-07-22 측정)
+
+| 순위 | 대상 | 개수 | 현재 상태 | 근거 |
+|---|---|---|---|---|
+| **1** | **KPI 카드** | **53** | **정의가 3벌로 분기** | 통합 비용 최소인데 **이미 버그를 만들고 있음** |
+| **2** | 표(DataTable) | 62 (+빈상태 78) | 없음 | 정렬·합계·빈상태를 62곳이 각자 재구현 |
+| 3 | 컨테이너 / Drawer 머리·발 | 35 / 34 | `Drawer`만 존재 | 껍데기는 있는데 머리·발은 각자 만듦 |
+| 4 | 경고·확인창 | confirm 25 / toast 234 | **부품은 이미 있음** | 필요한 건 컴포넌트가 아니라 **문구 규약** |
+| 5 | 버튼 | 274 (+icon-btn 61) | CSS로 통일됨 | 개수 1위지만 로직이 없어 **얻는 것 대비 회귀 위험이 큼** |
+| — | 로딩 | — | ✅ `Spinner`/`Loading` 완료 | 2026-07-22 추가 |
+
+`ui.jsx`가 이미 제공: `Drawer` `useConfirm` `useToast` `Combobox` `StatusBadge` `MoneyInput` `FilterSelect` `Spinner` `Loading` `Popover`
+
+#### KPI 카드를 1순위로 두는 이유
+
+정의가 셋으로 갈라져 있고 **prop 이름이 서로 다릅니다**:
+
+```jsx
+Docs.jsx:1345  StatCard ({ label, value,  unit = "원", tone })   // 30곳
+Tax.jsx:9      StatCard ({ label, amount, tone = 'ink', hint })  //  7곳
+Home.jsx:27    MiniStat ({ label, value,  sub, tone })           // 16곳
+```
+
+`Docs`의 `<StatCard value={…}/>`를 `Tax`로 복사하면 **에러 없이 빈 칸이 렌더**됩니다.
+(같은 유형의 실제 버그를 2026-07-22에 발견: `WorkContract.jsx`가 존재하지 않는 `a.bank`를 읽고 있었음 — `adaptAccount`는 `bankName`을 준다)
+
+#### 곁다리 효과 — 화면 간 의존 해소
+
+현재 **화면이 화면에서 부품을 꺼내 쓰고 있습니다**:
+
+```
+Contract.jsx     → './Home'  (MiniStat)
+HR.jsx           → './Home'  (MiniStat)
+Ledger.jsx       → './Docs'  (ResolutionDocument)
+Docs.jsx         → './HR'    (computeItems·shiftMonth·monthLabel)
+WorkContract.jsx → './HR'    (computeItems·monthLabel)
+```
+
+`Home.jsx`를 건드리면 `Contract`·`HR`이 같이 흔들립니다.
+**KPI 카드를 `lib/components/`로 빼면 이 의존 5개 중 3개가 저절로 사라집니다.**
+
+> 2026-07-22: `WorkContract.jsx`가 `'./Hr'`(실제 파일은 `HR.jsx`)를 참조하던 대소문자
+> 오타를 발견·수정(커밋 `6bf0121`). Windows에선 드러나지 않고 **리눅스 빌드에서만** 깨지는
+> 종류였음. 화면 간 직접 import가 줄면 이런 사고 표면도 함께 줄어듭니다.
+
+---
+
+### 2.1 `DataTable`
 62곳의 테이블 마크업이 각자 정렬·빈상태·로딩·합계행을 다시 구현하고 있음.
 
 ```jsx
