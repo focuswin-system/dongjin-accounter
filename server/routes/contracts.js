@@ -803,8 +803,11 @@ router.get('/:id/cost-analysis', async (req, res, next) => {
     if (!cRows[0]) return res.status(404).json({ error: 'Not found' })
     const c = cRows[0]
     const budget = safeBudget(c.cost_budget, { material: 0, outsource: 0, labor: 0, overhead: 0 })
+    // ⚠ 원가는 cost_contract_id 축이다. contract_id 는 '이 계약이 근거인 지출'(매입계약의
+    // 지급액)이라 매출계약에는 붙지 않아, 예전 코드는 항상 0을 반환했다(호출자가 없어
+    // 드러나지 않았을 뿐이다). 계약 상세가 쓰는 cost_total(METRIC_COLS)과 같은 축으로 맞춘다.
     const [txns] = await req.db.execute(
-      "SELECT category, SUM(amount) AS total FROM transactions WHERE contract_id = ? AND kind='expense' AND status='지급완료' GROUP BY category",
+      "SELECT category, SUM(amount) AS total FROM transactions WHERE cost_contract_id = ? AND kind='expense' AND status='지급완료' GROUP BY category",
       [req.params.id]
     )
     const actual = { material: 0, outsource: 0, labor: 0, overhead: 0 }
