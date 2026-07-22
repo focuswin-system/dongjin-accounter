@@ -174,7 +174,18 @@ router.post('/:id/matches', async (req, res, next) => {
       if (ex) realTxnId = ex.id
     }
     if (realTxnId) {
-      await conn.execute('UPDATE transactions SET invoice_id = ? WHERE id = ?', [invoiceId, realTxnId])
+      // 기존 거래를 재사용할 때 invoice_id만 붙이면, 그 거래가 아직 '지급 대기'인 경우
+      // 청구서만 완료되고 지출은 계좌 잔액에서 빠지지 않는다(accounts.js는 '지급완료'만 센다).
+      // 정산했다는 것은 실제로 돈이 오갔다는 뜻이므로 거래도 완료 상태로 맞춘다.
+      const [[cur]] = await conn.execute('SELECT status, account_id FROM transactions WHERE id = ?', [realTxnId])
+      const acct = cur?.account_id || inv.account_id || null
+      if (!acct) {
+        await conn.rollback()
+        return res.status(400).json({ error: '이 거래에는 계좌가 없어요. 거래내역에서 계좌를 지정한 뒤 정산해주세요' })
+      }
+      await conn.execute(
+        'UPDATE transactions SET invoice_id = ?, status = ?, account_id = ? WHERE id = ?',
+        [invoiceId, isIssued ? '입금완료' : '지급완료', acct, realTxnId])
     } else {
       realTxnId = randomUUID()
       const cat   = (category && category.trim()) || (isIssued ? '수금' : '대금 지급')
@@ -184,7 +195,7 @@ router.post('/:id/matches', async (req, res, next) => {
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `, [realTxnId, isIssued ? 'income' : 'expense', inv.vendor_id || null, inv.contract_id || null,
           inv.account_id || null, cat, matchAmount,
-          date || new Date().toISOString().slice(0, 10), '계좌이체',
+          date || kstToday(), '계좌이체',   // UTC(new Date())면 KST 새벽에 하루 전으로 찍힌다
           isIssued ? '입금완료' : '지급완료', '공통', inv.contract_id ? '' : '공통', invoiceId, memoV, account_code || null])
     }
 
@@ -214,7 +225,7 @@ router.get('/:id/matchable', async (req, res, next) => {
     const [[{ paid }]] = await req.db.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [req.params.id])
     const supply = Number(inv.supply_amount), total = Number(inv.total_amount), remain = total - Number(paid)
     const [rows] = await req.db.execute(`
-      SELECT t.id, t.amount, t.date, t.category, t.vendor_id, v.name AS vendor_name
+      SELECT t.id, t.amount, t.date, t.category, t.vendor_id, t.status, t.account_id, v.name AS vendor_name
       FROM transactions t
       LEFT JOIN vendors v ON t.vendor_id = v.id
       WHERE t.kind = ?
