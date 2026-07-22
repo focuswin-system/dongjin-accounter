@@ -277,17 +277,33 @@ router.delete('/:id/pay/:txnId', async (req, res, next) => {
   } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
 })
 
+// 이미 지급된 급여가 붙어 있는 급여대장은 지우지 않는다.
+//
+// 예전에는 지출 거래의 payroll_id 만 NULL로 끊고 대장을 지웠다. 그러면 돈은 이미 나갔는데
+// (거래는 '지급완료'로 남아 계좌 잔액에서도 빠진 상태) 급여대장을 다시 만들면 그 직원이
+// 전액 '미지급'으로 되살아난다 → 화면이 재지급을 유도해 이중 지급이 난다.
+// '지급 취소'(DELETE /:id/pay/:txnId)가 이미 있으므로, 그걸 먼저 하도록 순서를 강제한다.
+async function linkedPayments(db, where, params) {
+  const [[r]] = await db.execute(
+    `SELECT COUNT(*) AS cnt, COALESCE(SUM(amount),0) AS amt FROM transactions WHERE payroll_id IN (${where})`,
+    params)
+  return { cnt: Number(r.cnt), amt: Number(r.amt) }
+}
+
 // ── 이 달 급여대장 전체 비우기: 한 트랜잭션으로 (프론트 건별 반복 삭제의 부분 실패 방지) ──
-// 급여대장(근로, seq=0)만 대상 — 용역·일용 회차(seq>=1)는 별도. 연결 지출 거래는 보존(연결만 해제).
+// 급여대장(근로, seq=0)만 대상 — 용역·일용 회차(seq>=1)는 별도.
 router.delete('/month/:month', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
+    const paid = await linkedPayments(conn, 'SELECT id FROM payroll WHERE month = ? AND seq = 0', [req.params.month])
+    if (paid.cnt > 0) {
+      await conn.rollback()
+      return res.status(409).json({
+        error: `이미 지급한 급여 ${paid.cnt}건(${paid.amt.toLocaleString('ko-KR')}원)이 있어 비울 수 없어요. 급여 상세에서 지급 내역을 먼저 취소해주세요.`,
+      })
+    }
     const [[{ cnt }]] = await conn.execute('SELECT COUNT(*) AS cnt FROM payroll WHERE month = ? AND seq = 0', [req.params.month])
-    await conn.execute(
-      'UPDATE transactions SET payroll_id = NULL WHERE payroll_id IN (SELECT id FROM payroll WHERE month = ? AND seq = 0)',
-      [req.params.month]
-    )
     await conn.execute('DELETE FROM payroll WHERE month = ? AND seq = 0', [req.params.month])
     await conn.commit()
     res.json({ ok: true, deleted: cnt })
@@ -298,9 +314,13 @@ router.delete('/:id', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
-    // 연결된 급여 지출의 연결만 해제(거래 자체는 보존). 두 문을 한 트랜잭션으로 묶어
-    // unlink만 되고 급여대장이 남는 어긋난 상태를 막는다.
-    await conn.execute('UPDATE transactions SET payroll_id = NULL WHERE payroll_id = ?', [req.params.id])
+    const paid = await linkedPayments(conn, 'SELECT ?', [req.params.id])
+    if (paid.cnt > 0) {
+      await conn.rollback()
+      return res.status(409).json({
+        error: `이미 지급한 급여 ${paid.cnt}건(${paid.amt.toLocaleString('ko-KR')}원)이 있어 삭제할 수 없어요. 지급 내역을 먼저 취소해주세요.`,
+      })
+    }
     await conn.execute('DELETE FROM payroll WHERE id = ?', [req.params.id])
     await conn.commit()
     res.json({ ok: true })
