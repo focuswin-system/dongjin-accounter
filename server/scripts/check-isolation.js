@@ -84,6 +84,12 @@ console.log('\n[5] 권한 자원 카탈로그 ↔ nav.js 동기화')
 try {
   const { RESOURCE_IDS } = require('../platform/permissions')
   const navPath = path.join(__dirname, '..', '..', 'src', 'lib', 'nav.js')
+  // 배포 서버에는 프런트 소스가 없다(server/ 와 dist/ 만 전송). 소스가 있는
+  // 환경(로컬·CI)에서만 의미 있는 검사이므로, 없으면 실패가 아니라 건너뛴다.
+  if (!fs.existsSync(navPath)) {
+    console.log('  ⏭  프런트 소스 없음(배포 환경) — 건너뜀')
+    throw { skip: true }
+  }
   const navSrc = fs.readFileSync(navPath, 'utf8')
   // nav.js의 잎 id 추출 — { id: "xxx", label: ... } 형태만 대상(도메인 노드 제외는 label 유무로 판별 불가하므로 전부 모아 비교)
   const navIds = new Set()
@@ -103,7 +109,7 @@ try {
   if (missingInNav.length)     fail(`권한 카탈로그에 있으나 nav에 없음: ${missingInNav.join(', ')}`)
   if (!missingInCatalog.length && !missingInNav.length) ok(`자원 ${catalog.size}개 동기화 확인`)
 } catch (e) {
-  fail(`동기화 검사 실패: ${e.message}`)
+  if (!e.skip) fail(`동기화 검사 실패: ${e.message}`)
 }
 
 console.log('\n' + '━'.repeat(64))
