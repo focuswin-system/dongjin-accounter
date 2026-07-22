@@ -226,6 +226,26 @@ router.delete('/:id', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
+    // 세금 납부 거래는 여기서 지우면 안 된다.
+    // vat_filings·other_taxes 의 txn_id 는 나중에 ensureColumn 으로 붙인 컬럼이라 FK가 없어,
+    // 지워도 DB가 막아주지 않는다. 그러면 세무 화면은 '납부 완료 / 납부액 500만'인데
+    // 거래내역엔 그 지출이 없고 계좌 잔액만 500만 늘어난 상태가 된다.
+    // 되돌리는 정상 경로는 세무관리 화면에서 상태를 되돌리는 것이다(syncTaxTxn 이 거래도 지운다).
+    const [[vat]] = await conn.execute('SELECT year, quarter FROM vat_filings WHERE txn_id = ? LIMIT 1', [req.params.id])
+    if (vat) {
+      await rollbackQuietly(conn)
+      return res.status(409).json({
+        error: `${vat.year}년 ${vat.quarter}분기 부가세 납부 거래예요. 세무관리 > 부가세 화면에서 납부를 취소하면 이 거래도 함께 정리됩니다.`,
+      })
+    }
+    const [[ot]] = await conn.execute('SELECT name FROM other_taxes WHERE txn_id = ? LIMIT 1', [req.params.id])
+    if (ot) {
+      await rollbackQuietly(conn)
+      return res.status(409).json({
+        error: `'${ot.name}' 세액 납부 거래예요. 세무관리 > 기타세액 화면에서 납부를 취소하면 이 거래도 함께 정리됩니다.`,
+      })
+    }
+
     // 이 거래에 걸린 청구서 매칭을 정리하고 청구서 상태를 재계산한다.
     // 안 하면 매칭이 고아로 남아 청구서가 '완료'인 채 미수/미지급이 누락된다.
     const [matches] = await conn.execute('SELECT invoice_id FROM invoice_matches WHERE txn_id = ?', [req.params.id])

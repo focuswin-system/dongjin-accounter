@@ -357,7 +357,7 @@ export const api = {
     try {
       await req(`/transactions/${id}`, { method: 'DELETE' })
       return { ok: true }
-    } catch { return { ok: false } }
+    } catch (e) { return { ok: false, error: e.message } }   // 409 사유(세금 납부·결의서·급여 연결)를 화면까지
   },
 
   async uploadFile(file) {

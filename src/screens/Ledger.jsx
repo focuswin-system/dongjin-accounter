@@ -421,7 +421,9 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
             if (ok) {
               const res = await api.deleteTransaction(txn.id);
               if (res.ok) { toast.push("삭제됐어요"); onClose(); onAction?.(); }
-              else toast.push("삭제에 실패했어요");
+              // 세금 납부·결의서·급여에 연결된 거래는 409로 막힌다. 사유를 그대로 보여줘야
+              // 사용자가 어디서 취소해야 하는지 알 수 있다.
+              else toast.push(res.error || "삭제에 실패했어요", { tone: "warn" });
             }
           }}><Icon.Trash size={14}/> 삭제</button>
           <div className="ml-auto row gap-8">
