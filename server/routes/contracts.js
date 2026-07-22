@@ -61,13 +61,19 @@ const metrics = (r) => {
 //   contract_id      = 이 계약이 근거인 돈 (매출계약의 수금 / 매입계약의 지급)
 //   cost_contract_id = 이 계약(매출)에 귀속된 원가 (외주비 등 — 그 돈은 외주 매입계약에 지급된 것이기도 하다)
 // 이번 텀 합계는 current_term_start 이후 거래만 센다.
+//
+// ⚠ 지출은 반드시 status='지급완료'만 센다 — 계좌 잔액 계산(accounts.js calcBalance)과
+// 같은 조건이어야 한다. 안 그러면 아직 나가지도 않은 '지급 대기'(정기지출 자동 생성분 등)가
+// '지급액'에 섞여, 매입계약의 미지급 잔액이 실제보다 적게 보이고 원가는 부풀려진다.
+// (입금은 calcBalance도 status를 보지 않으므로 여기서도 동일하게 맞춘다)
+const PAID = "status='지급완료'"
 const METRIC_COLS = `
   COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='income'),0)  AS in_done,
-  COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='expense'),0) AS out_total,
-  COALESCE((SELECT SUM(amount) FROM transactions WHERE cost_contract_id=c.id AND kind='expense'),0) AS cost_total,
+  COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='expense' AND ${PAID}),0) AS out_total,
+  COALESCE((SELECT SUM(amount) FROM transactions WHERE cost_contract_id=c.id AND kind='expense' AND ${PAID}),0) AS cost_total,
   COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='income'
             AND (c.current_term_start IS NULL OR date >= c.current_term_start)),0)  AS term_in_done,
-  COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='expense'
+  COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='expense' AND ${PAID}
             AND (c.current_term_start IS NULL OR date >= c.current_term_start)),0)  AS term_out,
   COALESCE((SELECT SUM(total_amount) FROM invoices WHERE contract_id=c.id),0) AS billed,
   COALESCE((SELECT SUM(total_amount) FROM invoices WHERE contract_id=c.id
