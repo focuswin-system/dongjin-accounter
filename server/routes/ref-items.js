@@ -50,7 +50,30 @@ router.put('/:id', async (req, res, next) => {
 // 삭제
 router.delete('/:id', async (req, res, next) => {
   try {
-    await req.db.execute('DELETE FROM ref_items WHERE id=?', [req.params.id])
+    // 품목 기준정보는 거래·계약·청구서가 item_id 로 참조하는데 FK가 없다.
+    // 그냥 지우면 이미 기록된 거래의 품목명이 조용히 빈칸이 된다(목록은 JOIN 으로 이름을 붙인다).
+    // 과거 기록을 훼손하지 않도록, 쓰인 적 있는 항목은 지우지 못하게 막는다.
+    const id = req.params.id
+    const [[c]] = await req.db.execute(
+      `SELECT
+         (SELECT COUNT(*) FROM transactions        WHERE item_id = ?) AS txns,
+         (SELECT COUNT(*) FROM contract_items      WHERE item_id = ?) AS citems,
+         (SELECT COUNT(*) FROM invoice_lines       WHERE item_id = ?) AS ilines,
+         (SELECT COUNT(*) FROM work_contract_items WHERE item_id = ?) AS witems`,
+      [id, id, id, id]
+    )
+    const parts = []
+    if (Number(c.txns)   > 0) parts.push(`거래 ${c.txns}건`)
+    if (Number(c.citems) > 0) parts.push(`계약 품목 ${c.citems}건`)
+    if (Number(c.ilines) > 0) parts.push(`청구서 품목 ${c.ilines}건`)
+    if (Number(c.witems) > 0) parts.push(`용역계약 품목 ${c.witems}건`)
+    if (parts.length) {
+      return res.status(409).json({
+        error: `이 항목은 ${parts.join(' · ')}에 쓰였어요. 지우면 그 기록의 품목명이 사라져요. 이름만 바꿔 쓰시거나 그대로 두세요.`,
+      })
+    }
+    const [r] = await req.db.execute('DELETE FROM ref_items WHERE id=?', [id])
+    if (r.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
   } catch (e) { next(e) }
 })

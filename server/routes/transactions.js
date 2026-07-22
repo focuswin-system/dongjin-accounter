@@ -6,6 +6,7 @@ const { futureDateError } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
 const { normalizeStatus, ledgerError } = require('../lib/ledger')
 const { restoreLastGenerated } = require('../lib/recurrence')
+const { removeUploadedFile } = require('../lib/uploads')
 
 const router = Router()
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
@@ -231,7 +232,10 @@ router.post('/:id/docs', async (req, res, next) => {
 
 router.delete('/docs/:docId', async (req, res, next) => {
   try {
+    // DB 행만 지우면 실제 파일이 uploads/{companyId}/ 에 그대로 남는다(고아 파일).
+    const [[doc]] = await req.db.execute('SELECT url FROM transaction_docs WHERE id = ?', [req.params.docId])
     await req.db.execute('DELETE FROM transaction_docs WHERE id = ?', [req.params.docId])
+    if (doc) removeUploadedFile(doc.url, req.user?.companyId)
     res.json({ ok: true })
   } catch (e) { next(e) }
 })

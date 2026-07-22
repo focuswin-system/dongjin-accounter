@@ -59,18 +59,37 @@ router.put('/:id', async (req, res, next) => {
 
 router.delete('/:id', async (req, res, next) => {
   try {
-    // 거래·청구·정기지출·정기청구에 연결돼 있으면 삭제 차단 (FK 보호).
-    // recurring_invoices도 RESTRICT라 빼먹으면 가드를 통과한 뒤 FK로 500이 난다.
-    const [[{ refCnt }]] = await req.db.execute(
+    // 이 계좌를 참조하는 곳이 있으면 삭제 차단.
+    // FK가 있는 곳(거래·청구서·정기)만 보면, FK 없이 account_id 만 들고 있는 테이블
+    // (세금 납부·기준정보·잔액조정 — 나중에 ensureColumn 으로 붙은 컬럼들)은 통과해버려
+    // 계좌가 사라진 뒤 그 화면들이 지워진 계좌를 가리키게 된다.
+    // 어디에 걸렸는지 세어 알려준다 — "어딘가 연결돼 있다"만으로는 정리할 수가 없다.
+    const id = req.params.id
+    const [[c]] = await req.db.execute(
       `SELECT
-         (SELECT COUNT(*) FROM transactions       WHERE account_id = ?) +
-         (SELECT COUNT(*) FROM invoices           WHERE account_id = ?) +
-         (SELECT COUNT(*) FROM recurring_expenses WHERE account_id = ?) +
-         (SELECT COUNT(*) FROM recurring_invoices WHERE account_id = ?) AS refCnt`,
-      [req.params.id, req.params.id, req.params.id, req.params.id]
+         (SELECT COUNT(*) FROM transactions        WHERE account_id = ?) AS txns,
+         (SELECT COUNT(*) FROM invoices            WHERE account_id = ?) AS invs,
+         (SELECT COUNT(*) FROM recurring_expenses  WHERE account_id = ?) AS rexp,
+         (SELECT COUNT(*) FROM recurring_invoices  WHERE account_id = ?) AS rinv,
+         (SELECT COUNT(*) FROM vat_filings         WHERE account_id = ?) AS vat,
+         (SELECT COUNT(*) FROM other_taxes         WHERE account_id = ?) AS otax,
+         (SELECT COUNT(*) FROM ref_items           WHERE account_id = ?) AS refi,
+         (SELECT COUNT(*) FROM account_adjustments WHERE account_id = ?) AS adj`,
+      [id, id, id, id, id, id, id, id]
     )
-    if (refCnt > 0) {
-      return res.status(409).json({ error: '이 계좌/카드에 연결된 거래·청구·정기 항목이 있어 삭제할 수 없습니다' })
+    const parts = []
+    if (Number(c.txns) > 0) parts.push(`거래 ${c.txns}건`)
+    if (Number(c.invs) > 0) parts.push(`청구서 ${c.invs}건`)
+    if (Number(c.rexp) > 0) parts.push(`정기지출 ${c.rexp}건`)
+    if (Number(c.rinv) > 0) parts.push(`정기청구 ${c.rinv}건`)
+    if (Number(c.vat)  > 0) parts.push(`부가세 납부 ${c.vat}건`)
+    if (Number(c.otax) > 0) parts.push(`기타세액 ${c.otax}건`)
+    if (Number(c.refi) > 0) parts.push(`기준정보 ${c.refi}건`)
+    if (Number(c.adj)  > 0) parts.push(`잔액조정 ${c.adj}건`)
+    if (parts.length) {
+      return res.status(409).json({
+        error: `이 계좌/카드에 ${parts.join(' · ')}이 연결돼 있어 삭제할 수 없어요. 먼저 정리해주세요.`,
+      })
     }
     const [result] = await req.db.execute('DELETE FROM accounts WHERE id = ?', [req.params.id])
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
