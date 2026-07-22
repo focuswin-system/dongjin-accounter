@@ -1,9 +1,39 @@
 # focus-accounter — Claude Code 컨텍스트
 
+## 🔴 최우선 규칙 — 멀티테넌트
+
+이 서비스는 **하나의 서버에서 여러 회사의 회계 데이터**를 다룹니다(DB-per-tenant).
+아래를 어기면 **에러 없이 조용히 남의 회사 데이터를 읽거나 씁니다.**
+
+| 하지 말 것 | 대신 |
+|---|---|
+| `require('../db')` 에서 `pool` 가져오기 | **`req.db`** (tenant 미들웨어가 주입) |
+| `async (_, res, next)` | `async (req, res, next)` — `req` 없으면 `req.db`도 없음 |
+| 헬퍼에서 전역 풀 참조 | 헬퍼에 **`db`를 인자로** 전달 (`db = pool` 같은 기본값 금지) |
+| 파일을 `uploads/` 바로 아래 저장 | `uploads/{companyId}/` |
+| 앱 코드에서 `CREATE`/`ALTER` | 배포 시점 `npm run setup:db` |
+| 화면(nav) 추가 후 그냥 두기 | `server/platform/permissions.js` `RESOURCES`에도 등록 |
+
+**작업 후 필수**: `cd server && npm run check:isolation`
+
+- 상세 규칙·실수 사례: `docs/reference/multi-tenant-dev-guide.md`
+- 회사 추가/삭제·운영: `docs/reference/tenant-operations.md`
+- 구조 설계: `docs/02-design/features/multi-tenant-saas.design.md`
+- 향후 로드맵: `docs/01-plan/features/post-multitenant-roadmap.plan.md`
+
+---
+
 ## 프로젝트 개요
 
-동진테크 (방산 정밀가공, ~22명) 전용 회계관리 ERP 프로토타입.
-React + Vite 기반 클라이언트 전용 SPA. 현재 목 데이터 단계 — 서버/DB 미연결.
+**도니도라** — 재무·회계관리 SaaS. `https://donidora.com`
+Express + MariaDB 백엔드 + React/Vite SPA. **멀티테넌트 운영 중**(2026-07-22~).
+
+- 운영 테넌트: `fowin` ((주)포커스윈) / 테스트: `claude`
+- 회사 추가: `cd server && npm run tenant -- --code … --name … --user … --password …`
+- 로그인은 **3필드**: 회사코드 + 아이디 + 비밀번호
+
+> 아래 문서의 일부 서술(동진테크 전용·목 데이터 단계 등)은 초기 프로토타입 기준이라
+> 현재와 다를 수 있습니다. 도메인 지식 참고용으로만 보세요.
 
 ---
 

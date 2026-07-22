@@ -580,6 +580,33 @@ async function initDb(conn) {
       )
     `)
 
+    // ── 경영 도우미: 대화(세션)형 조회 ──
+    // 사용자별 대화 목록 + 각 대화의 차트 타임라인. 설계 docs/02-design/features/mgmt-chat-sessions.design.md
+    // 채팅 셸을 먼저, LLM은 나중 — 이 두 테이블이 곧 LLM 챗의 히스토리 백엔드가 된다.
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS analytics_chats (
+        id          VARCHAR(36) PRIMARY KEY,
+        user_id     VARCHAR(36) NOT NULL,
+        title       VARCHAR(120) NOT NULL DEFAULT '새 대화',
+        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_chats_user (user_id, updated_at)
+      )
+    `)
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS analytics_chat_items (
+        id           VARCHAR(36) PRIMARY KEY,
+        chat_id      VARCHAR(36) NOT NULL,
+        spec_json    JSON NOT NULL,
+        title        VARCHAR(160),
+        result_json  JSON,
+        refreshed_at TIMESTAMP NULL,
+        sort_order   INT DEFAULT 0,
+        created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (chat_id) REFERENCES analytics_chats(id) ON DELETE CASCADE
+      )
+    `)
+
     // ── 마이그레이션: 기존 DB에 신규 컬럼 추가 (MySQL은 ADD COLUMN IF NOT EXISTS 미지원) ──
     const ensureColumn = async (table, col, ddl) => {
       const [[{ cnt }]] = await c.execute(

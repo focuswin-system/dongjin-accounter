@@ -960,6 +960,16 @@ export const api = {
     try { return await req('/analytics/aggregate' + (qs ? `?${qs}` : '')) } catch { return { rows: [], total: 0 } }
   },
 
+  // ─── 경영 도우미(대화·세션) ───────────────────────────────────
+  async getChats() { try { return await req('/analytics/chats') } catch { return [] } },
+  async createChat(title) { return req('/analytics/chats', { method: 'POST', body: { title } }) },
+  async renameChat(id, title) { return req(`/analytics/chats/${id}`, { method: 'PATCH', body: { title } }) },
+  async deleteChat(id) { return req(`/analytics/chats/${id}`, { method: 'DELETE' }) },
+  async getChatItems(chatId) { try { return await req(`/analytics/chats/${chatId}/items`) } catch { return [] } },
+  async addChatItem(chatId, spec) { return req(`/analytics/chats/${chatId}/items`, { method: 'POST', body: { spec } }) },
+  async refreshChatItem(itemId) { return req(`/analytics/chat-items/${itemId}/refresh`, { method: 'POST' }) },
+  async deleteChatItem(itemId) { return req(`/analytics/chat-items/${itemId}`, { method: 'DELETE' }) },
+
   // ─── 홈 대시보드 ──────────────────────────────────────────────
   async getHomeStats() {
     const [arSum, apSum] = await Promise.all([
