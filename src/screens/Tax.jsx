@@ -1,20 +1,11 @@
 import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, Drawer, Combobox, MoneyInput, localToday } from '../lib/ui'
 import { api } from '../lib/api'
+import { Kpi, KpiRow } from '../lib/components/Kpi'
 
 const QUARTER_PERIOD = { 1: '1~3월', 2: '4~6월', 3: '7~9월', 4: '10~12월' }
 const VAT_STATUSES = ['납부 대기', '납부 완료', '환급 완료']
 const STATUS_TONE = { '납부 대기': 'outline', '납부 완료': 'pos', '환급 완료': 'brand' }
-
-const StatCard = ({ label, amount, tone = 'ink', hint }) => (
-  <div className="card card-pad" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-    <div className="text-sm text-muted" style={{ fontWeight: 600 }}>{label}</div>
-    <div className="num fw-700" style={{ fontSize: 22, letterSpacing: '-0.02em', color: `var(--${tone})` }}>
-      {amount < 0 ? '−' : ''}{fmtNum(Math.abs(amount))}<span style={{ fontSize: 13, fontWeight: 600, opacity: 0.6, marginLeft: 3 }}>원</span>
-    </div>
-    {hint && <div className="text-xs text-muted2">{hint}</div>}
-  </div>
-)
 
 const FilingDrawer = ({ target, year, onClose, onSaved }) => {
   const toast = useToast()
@@ -183,12 +174,12 @@ export const TaxVatScreen = () => {
       </div>
       <Spacer h={20}/>
 
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
-        <StatCard label={totals.payable >= 0 ? '연간 납부세액' : '연간 환급세액'} amount={totals.payable} tone={totals.payable >= 0 ? 'neg-ink' : 'brand'} hint="신고세액(없으면 예상) 합계"/>
-        <StatCard label="미납 부가세" amount={unpaid} tone="warn-ink" hint="신고했으나 미납한 분기"/>
-        <StatCard label="환급 예정" amount={refundDue} tone="brand" hint="신고했으나 미수령 환급"/>
-        <StatCard label="연간 매출세액" amount={totals.sales} tone="muted" hint={`매입세액 ${fmtNum(totals.purchase)}원`}/>
-      </div>
+      <KpiRow cols={4} gap={16}>
+        <Kpi label={totals.payable >= 0 ? '연간 납부세액' : '연간 환급세액'} value={totals.payable} tone={totals.payable >= 0 ? 'neg-ink' : 'brand'} hint="신고세액(없으면 예상) 합계"/>
+        <Kpi label="미납 부가세" value={unpaid} tone="warn-ink" hint="신고했으나 미납한 분기"/>
+        <Kpi label="환급 예정" value={refundDue} tone="brand" hint="신고했으나 미수령 환급"/>
+        <Kpi label="연간 매출세액" value={totals.sales} tone="muted" hint={`매입세액 ${fmtNum(totals.purchase)}원`}/>
+      </KpiRow>
       <Spacer h={24}/>
 
       <div className="card" style={{ overflow: 'hidden' }}>
@@ -399,11 +390,11 @@ export const OtherTaxScreen = () => {
       </div>
       <Spacer h={20}/>
 
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-        <StatCard label="신고세액 합계" amount={totals.tax} tone="ink"/>
-        <StatCard label="납부액 합계" amount={totals.paid} tone="pos"/>
-        <StatCard label="미납 세액" amount={totals.unpaid} tone="warn-ink" hint="납부 미완료 합계"/>
-      </div>
+      <KpiRow cols={3} gap={16}>
+        <Kpi label="신고세액 합계" value={totals.tax} tone="ink"/>
+        <Kpi label="납부액 합계" value={totals.paid} tone="pos"/>
+        <Kpi label="미납 세액" value={totals.unpaid} tone="warn-ink" hint="납부 미완료 합계"/>
+      </KpiRow>
       <Spacer h={24}/>
 
       <div className="card" style={{ overflow: 'hidden' }}>

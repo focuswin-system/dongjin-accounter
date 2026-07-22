@@ -149,11 +149,22 @@ try {
 // 자주 안 쓰는 버튼(엑셀 내보내기 등)에 숨어 있으면 배포 후에야 발견된다.
 // 실제로 2026-07-22 에 두 건 있었다(Master.jsx·Ledger.jsx의 localToday).
 try {
-  console.log('\n[7] 프런트 — ui.jsx 심볼 import 누락')
+  console.log('\n[7] 프런트 — 공용 부품 심볼 import 누락')
   const srcRoot = path.join(__dirname, '..', '..', 'src')
   if (!fs.existsSync(srcRoot)) throw { skip: true }
-  const uiSrc = fs.readFileSync(path.join(srcRoot, 'lib', 'ui.jsx'), 'utf8')
-  const exported = [...uiSrc.matchAll(/^export (?:const|function)\s+([A-Za-z_]\w*)/gm)].map(m => m[1])
+  // 공용 부품 원본: lib/ui.jsx + lib/components/*.jsx (컴포넌트화로 부품이 여러 파일로 흩어진다)
+  const libDir = path.join(srcRoot, 'lib')
+  const compDir = path.join(libDir, 'components')
+  const sourceFiles = [path.join(libDir, 'ui.jsx')]
+  if (fs.existsSync(compDir)) {
+    for (const f of fs.readdirSync(compDir)) if (/\.jsx?$/.test(f)) sourceFiles.push(path.join(compDir, f))
+  }
+  const exported = [], selfPaths = new Set()
+  for (const f of sourceFiles) {
+    selfPaths.add(f.split(path.sep).join('/'))
+    const s = fs.readFileSync(f, 'utf8')
+    for (const m of s.matchAll(/^export (?:const|function)\s+([A-Za-z_]\w*)/gm)) exported.push(m[1])
+  }
   const missing = []
   const walk = (dir) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -161,10 +172,14 @@ try {
       if (e.isDirectory()) { walk(p); continue }
       if (!/\.jsx?$/.test(e.name)) continue
       const posix = p.split(path.sep).join('/')
-      if (posix.endsWith('lib/ui.jsx')) continue
+      if (selfPaths.has(posix)) continue
       const src = fs.readFileSync(p, 'utf8')
-      const imp = src.match(/import\s*\{([^}]*)\}\s*from\s*['"][^'"]*lib\/ui['"]/)
-      const imported = new Set(imp ? imp[1].split(',').map(x => x.trim()) : [])
+      // import 경로는 파일 위치마다 다르다('../lib/ui' vs '../ui') — 경로를 따지지 말고
+      // 이 파일이 이름을 가져오기는 했는지만 본다. 못 잡는 건 '정의 없는 참조'뿐이라 이걸로 충분하다.
+      const imported = new Set()
+      for (const m of src.matchAll(/import\s*(?:[\w*]+\s*,\s*)?\{([^}]*)\}\s*from/g)) {
+        for (const x of m[1].split(',')) imported.add(x.trim().split(/\s+as\s+/).pop().trim())
+      }
       for (const sym of exported) {
         if (imported.has(sym)) continue
         if (new RegExp('(?:const|function|let|var)\\s+' + sym + '\\b').test(src)) continue
@@ -174,8 +189,8 @@ try {
     }
   }
   walk(srcRoot)
-  if (missing.length) fail(`ui.jsx 심볼을 import 없이 사용: ${missing.join(', ')}`)
-  else ok('ui.jsx 심볼 import 누락 없음')
+  if (missing.length) fail(`공용 부품 심볼을 import 없이 사용: ${missing.join(', ')}`)
+  else ok(`공용 부품 심볼 import 누락 없음 (검사 대상 ${exported.length}개)`)
 } catch (e) {
   if (e.skip) console.log('  ⏭ src/ 없음 — 배포 서버에서는 건너뜀')
   else fail(`import 검사 실패: ${e.message}`)

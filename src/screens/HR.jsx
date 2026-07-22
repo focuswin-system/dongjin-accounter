@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, localToday } from '../lib/ui'
-import { MiniStat } from './Home'
+import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { api } from '../lib/api'
 
 /* ───────── 급여대장: 항목별(%·수치) 계산 ───────── */
@@ -207,12 +207,12 @@ export const HRScreen = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-4-to-2" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 4 }}>
-                  <MiniStat label="실수령 합계"  value={fmtNum(paySummary?.netTotal || 0) + "원"}    sub={`재직 ${paySummary?.count || 0}명`} tone="brand"/>
-                  <MiniStat label="지급 완료"    value={fmtNum(paySummary?.paidTotal || 0) + "원"}   sub="실제 이체분"                       tone="ink"/>
-                  <MiniStat label="미지급 합계"  value={fmtNum(paySummary?.unpaidTotal || 0) + "원"} sub="아직 못 준 급여"                   tone={paySummary?.unpaidTotal > 0 ? "warn" : "ink"}/>
-                  <MiniStat label="과지급"       value={(paySummary?.overpaidCount || 0) + "건"}     sub="초과 지급 확인"                    tone={paySummary?.overpaidCount > 0 ? "neg" : "ink"}/>
-                </div>
+                <KpiRow cols={4} style={{ marginBottom: 4 }}>
+                  <Kpi label="실수령 합계"  value={fmtNum(paySummary?.netTotal || 0) + "원"}    badge={`재직 ${paySummary?.count || 0}명`} badgeTone="brand"/>
+                  <Kpi label="지급 완료"    value={fmtNum(paySummary?.paidTotal || 0) + "원"}   badge="실제 이체분"                       badgeTone="ink"/>
+                  <Kpi label="미지급 합계"  value={fmtNum(paySummary?.unpaidTotal || 0) + "원"} badge="아직 못 준 급여"                   badgeTone={paySummary?.unpaidTotal > 0 ? "warn" : "ink"}/>
+                  <Kpi label="과지급"       value={(paySummary?.overpaidCount || 0) + "건"}     badge="초과 지급 확인"                    badgeTone={paySummary?.overpaidCount > 0 ? "neg" : "ink"}/>
+                </KpiRow>
               </div>
 
               {payRows.length === 0 ? (
@@ -315,12 +315,12 @@ const ServiceLedgerTab = ({ month, setMonth }) => {
         <div className="ml-auto text-xs text-muted2">지급 등록은 <b>기타 용역·일용</b> 메뉴의 인력 상세에서 해요</div>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
-        <MiniStat label="지급 발생"  value={fmtNum(gross) + "원"}  sub={`${rows.length}건`}     tone="ink"/>
-        <MiniStat label="지급 완료"  value={fmtNum(paid) + "원"}   sub="실제 이체분"            tone="brand"/>
-        <MiniStat label="미지급"     value={fmtNum(unpaid) + "원"} sub="아직 못 준 금액"        tone={unpaid > 0 ? "warn" : "ink"}/>
-        <MiniStat label="인원"       value={people + "명"}         sub="용역·일용"              tone="ink"/>
-      </div>
+      <KpiRow cols={4} style={{ marginBottom: 16 }}>
+        <Kpi label="지급 발생"  value={fmtNum(gross) + "원"}  badge={`${rows.length}건`}     badgeTone="ink"/>
+        <Kpi label="지급 완료"  value={fmtNum(paid) + "원"}   badge="실제 이체분"            badgeTone="brand"/>
+        <Kpi label="미지급"     value={fmtNum(unpaid) + "원"} badge="아직 못 준 금액"        badgeTone={unpaid > 0 ? "warn" : "ink"}/>
+        <Kpi label="인원"       value={people + "명"}         badge="용역·일용"              badgeTone="ink"/>
+      </KpiRow>
 
       {rows.length === 0 ? (
         <div style={{ padding: "36px 0 44px", textAlign: "center", color: "var(--muted-2)" }}>
@@ -527,11 +527,12 @@ const PayDrawer = ({ row, accounts, onClose, onSaved }) => {
       </div>
 
       <div className="drawer-body">
-        <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 18 }}>
-          <MiniStat label="실수령" value={fmtNum(row.net_salary) + "원"} tone="ink"/>
-          <MiniStat label="지급 완료" value={fmtNum(row.paid) + "원"} tone="brand"/>
-          <MiniStat label={remain >= 0 ? "미지급" : "과지급"} value={fmtNum(Math.abs(remain)) + "원"} tone={remain > 0 ? "warn" : remain < 0 ? "neg" : "ink"}/>
-        </div>
+        {/* 뱃지 없이 색만 쓰는 자리 — 예전엔 tone 이 빈 뱃지를 칠했다(문구가 없어 빈 알약만 떴다). 이제 숫자 색으로 신호를 준다. */}
+        <KpiRow cols={3} gap={10} style={{ marginBottom: 18 }}>
+          <Kpi label="실수령" value={fmtNum(row.net_salary) + "원"}/>
+          <Kpi label="지급 완료" value={fmtNum(row.paid) + "원"} tone="brand"/>
+          <Kpi label={remain >= 0 ? "미지급" : "과지급"} value={fmtNum(Math.abs(remain)) + "원"} tone={remain > 0 ? "warn-ink" : remain < 0 ? "neg-ink" : undefined}/>
+        </KpiRow>
 
         <div className="col gap-form">
           <div>

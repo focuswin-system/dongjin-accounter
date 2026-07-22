@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, Popover, PopItem } from '../lib/ui'
+import { Icon, Popover, PopItem } from '../lib/ui'
 import { api } from '../lib/api'
 import { PORTAL, ALL_LEAVES, LEAF_BY_ID } from '../lib/nav'
 
@@ -18,17 +18,6 @@ const TODO_KIND_META = {
 }
 
 const DEFAULT_FAVS = ['income', 'expense', 'billing_issued', 'contract', 'tax_vat']
-
-// Contract.jsx 등에서 재사용
-export const MiniStat = ({ label, value, sub, tone = "ink" }) => (
-  <div className="card" style={{ padding: "16px 18px", minWidth: 0 }}>
-    <div className="row gap-8" style={{ marginBottom: 6 }}>
-      <span className="text-sm text-muted fw-600" style={{ whiteSpace: "nowrap" }}>{label}</span>
-      <span className={`badge ${tone === "ink" ? "outline" : tone}`} style={{ marginLeft: "auto" }}>{sub}</span>
-    </div>
-    <div className="num fw-700" style={{ fontSize: 22, letterSpacing: "-0.02em", whiteSpace: "nowrap" }}>{value}</div>
-  </div>
-)
 
 export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
   const [todos, setTodos] = useState([])

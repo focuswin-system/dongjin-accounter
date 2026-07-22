@@ -8,6 +8,7 @@ const SAMPLE = {
 }
 import { computeItems, shiftMonth, monthLabel } from './HR'
 import { api } from '../lib/api'
+import { Kpi, KpiRow } from '../lib/components/Kpi'
 
 const todayStr = () => localToday()   // UTC 금지 — KST 새벽에 하루 전으로 찍힌다
 
@@ -1143,19 +1144,6 @@ const RBar = ({ pct, tone = "pos" }) => (
   </div>
 )
 
-const StatCard = ({ label, value, unit = "원", tone }) => {
-  const isNum = typeof value === "number"
-  return (
-    <div className="card card-pad">
-      <div className="text-sm text-muted fw-600" style={{ marginBottom: 6 }}>{label}</div>
-      <div className={`${isNum ? "num " : ""}fw-700`} style={{ fontSize: 22, color: tone ? `var(--${tone})` : undefined }}>
-        {isNum ? fmtNum(value) : value}
-        {isNum && unit && <span className="text-muted" style={{ fontSize: 13, fontWeight: 400, marginLeft: 3 }}>{unit}</span>}
-      </div>
-    </div>
-  )
-}
-
 // 보고서 공용 원장 로더 — 거래내역을 한 번 불러 입금/지출과 월 목록으로 나눠 쓴다.
 // (보고서마다 따로 부르면 같은 화면에서 여러 번 조회하게 된다)
 const useLedger = () => {
@@ -1237,11 +1225,11 @@ const ReportMonthly = ({ toast }) => {
   return (
     <div>
       <PeriodFilter value={period} onChange={setPeriod} months={led.months}/>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 24 }}>
-        <StatCard label="총 입금" value={totalIn} tone="pos"/>
-        <StatCard label="총 지출" value={totalOut}/>
-        <StatCard label="순차액" value={totalIn - totalOut} tone={totalIn >= totalOut ? "pos" : "neg"}/>
-      </div>
+      <KpiRow cols={3} style={{ marginBottom: 24 }}>
+        <Kpi label="총 입금" value={totalIn} tone="pos"/>
+        <Kpi label="총 지출" value={totalOut}/>
+        <Kpi label="순차액" value={totalIn - totalOut} tone={totalIn >= totalOut ? "pos" : "neg"}/>
+      </KpiRow>
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
           <thead>
@@ -1322,11 +1310,11 @@ const ReportTax4 = ({ toast }) => {
         </div>
       ) : (
         <>
-          <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 24 }}>
-            <StatCard label="급여 총액" value={sumGross}/>
-            <StatCard label="공제 합계" value={sumDed} tone="warn"/>
-            <StatCard label="실지급액" value={sumNet}/>
-          </div>
+          <KpiRow cols={3} style={{ marginBottom: 24 }}>
+            <Kpi label="급여 총액" value={sumGross}/>
+            <Kpi label="공제 합계" value={sumDed} tone="warn"/>
+            <Kpi label="실지급액" value={sumNet}/>
+          </KpiRow>
           <div className="card" style={{ overflow: "hidden" }}>
             <table className="table">
               <thead>
@@ -1370,11 +1358,11 @@ const ReportContract = ({ toast }) => {
 
   return (
     <div>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 24 }}>
-        <StatCard label="총 수주금액" value={totalAmount}/>
-        <StatCard label="총 손익"     value={totalProfit} tone="pos"/>
-        <StatCard label="평균 이익률" value={totalAmount > 0 ? parseFloat((totalProfit / totalAmount * 100).toFixed(1)) : 0} unit="%" tone="pos"/>
-      </div>
+      <KpiRow cols={3} style={{ marginBottom: 24 }}>
+        <Kpi label="총 수주금액" value={totalAmount}/>
+        <Kpi label="총 손익"     value={totalProfit} tone="pos"/>
+        <Kpi label="평균 이익률" value={totalAmount > 0 ? parseFloat((totalProfit / totalAmount * 100).toFixed(1)) : 0} unit="%" tone="pos"/>
+      </KpiRow>
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
           <thead>
@@ -1432,11 +1420,11 @@ const ReportCategory = ({ toast }) => {
   return (
     <div>
       <PeriodFilter value={period} onChange={setPeriod} months={led.months}/>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 24 }}>
-        <StatCard label="총 지출"  value={total}/>
-        <StatCard label="비목 수"  value={`${rows.length}개`} unit=""/>
-        <StatCard label="최다 비목" value={rows[0]?.cat} unit=""/>
-      </div>
+      <KpiRow cols={3} style={{ marginBottom: 24 }}>
+        <Kpi label="총 지출"  value={total}/>
+        <Kpi label="비목 수"  value={`${rows.length}개`} unit=""/>
+        <Kpi label="최다 비목" value={rows[0]?.cat} unit=""/>
+      </KpiRow>
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
           <thead>
@@ -1489,12 +1477,12 @@ const ReportVendor = ({ toast }) => {
   return (
     <div>
       <PeriodFilter value={period} onChange={setPeriod} months={led.months}/>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
-        <StatCard label="발주처 수"    value={`${rows.length}개사`} unit=""/>
-        <StatCard label="청구 합계"    value={grandTotal}/>
-        <StatCard label="실현 매출"    value={totalRealized} tone="pos"/>
-        <StatCard label="미입금 잔액"  value={totalPending}  tone="warn"/>
-      </div>
+      <KpiRow cols={4} style={{ marginBottom: 24 }}>
+        <Kpi label="발주처 수"    value={`${rows.length}개사`} unit=""/>
+        <Kpi label="청구 합계"    value={grandTotal}/>
+        <Kpi label="실현 매출"    value={totalRealized} tone="pos"/>
+        <Kpi label="미입금 잔액"  value={totalPending}  tone="warn"/>
+      </KpiRow>
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
           <thead>
@@ -1538,12 +1526,12 @@ const ReportAR = ({ toast }) => {
   const { summary = {}, rows = [] } = data
   return (
     <div>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
-        <StatCard label="미수금 합계"      value={summary.total}/>
-        <StatCard label="이번 달 회수 예정" value={summary.thisMonth} tone="brand"/>
-        <StatCard label="기한 초과"         value={summary.overdue}   tone="neg"/>
-        <StatCard label="장기 미수"         value={summary.longOverdue} tone="neg"/>
-      </div>
+      <KpiRow cols={4} style={{ marginBottom: 24 }}>
+        <Kpi label="미수금 합계"      value={summary.total}/>
+        <Kpi label="이번 달 회수 예정" value={summary.thisMonth} tone="brand"/>
+        <Kpi label="기한 초과"         value={summary.overdue}   tone="neg"/>
+        <Kpi label="장기 미수"         value={summary.longOverdue} tone="neg"/>
+      </KpiRow>
       {rows.length === 0 && (
         <div className="text-sm text-muted2" style={{ padding: 24, textAlign: "center" }}>
           미수금이 없어요. 발행한 청구서가 모두 입금 완료 상태입니다.
@@ -1610,12 +1598,12 @@ const ReportSubcontract = ({ toast }) => {
   return (
     <div>
       <PeriodFilter value={period} onChange={setPeriod} months={led.months}/>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
-        <StatCard label="협력사 수"      value={`${rows.length}개사`} unit=""/>
-        <StatCard label="외주가공비 합계" value={total}/>
-        <StatCard label="미지급 잔액"    value={totalPending} tone="warn"/>
-        <StatCard label="총 지출 대비"   value={totalExp > 0 ? parseFloat((total / totalExp * 100).toFixed(1)) : 0} unit="%"/>
-      </div>
+      <KpiRow cols={4} style={{ marginBottom: 24 }}>
+        <Kpi label="협력사 수"      value={`${rows.length}개사`} unit=""/>
+        <Kpi label="외주가공비 합계" value={total}/>
+        <Kpi label="미지급 잔액"    value={totalPending} tone="warn"/>
+        <Kpi label="총 지출 대비"   value={totalExp > 0 ? parseFloat((total / totalExp * 100).toFixed(1)) : 0} unit="%"/>
+      </KpiRow>
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
           <thead>
@@ -1664,11 +1652,11 @@ const ReportDefense = ({ toast }) => {
         </div>
         <RBar pct={(totalDone / totalAmount) * 100} tone="pos"/>
       </div>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 24 }}>
-        <StatCard label="총 수주금액"   value={totalAmount}/>
-        <StatCard label="납품 완료금액" value={totalDone} tone="pos"/>
-        <StatCard label="잔여금액"      value={totalAmount - totalDone}/>
-      </div>
+      <KpiRow cols={3} style={{ marginBottom: 24 }}>
+        <Kpi label="총 수주금액"   value={totalAmount}/>
+        <Kpi label="납품 완료금액" value={totalDone} tone="pos"/>
+        <Kpi label="잔여금액"      value={totalAmount - totalDone}/>
+      </KpiRow>
       <div className="col gap-12">
         {rows.map((r, i) => {
           const pct  = r.inDone / r.amount * 100
@@ -1843,11 +1831,11 @@ const ReportVAT = ({ toast }) => {
       </div>
 
       {/* 요약 카드 */}
-      <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 24 }}>
-        <StatCard label="매출세액 (참고)" value={salesVat}                            tone="pos"/>
-        <StatCard label="매입세액 (참고)" value={purchaseVat}                         tone="neg"/>
-        <StatCard label="납부세액 (참고)" value={netVat} tone={netVat > 0 ? "neg" : "pos"}/>
-      </div>
+      <KpiRow cols={3} style={{ marginBottom: 24 }}>
+        <Kpi label="매출세액 (참고)" value={salesVat}                            tone="pos"/>
+        <Kpi label="매입세액 (참고)" value={purchaseVat}                         tone="neg"/>
+        <Kpi label="납부세액 (참고)" value={netVat} tone={netVat > 0 ? "neg" : "pos"}/>
+      </KpiRow>
 
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         {/* 매출 */}

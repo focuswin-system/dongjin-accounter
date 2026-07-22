@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect, Drawer, Combobox, MoneyInput, localToday } from '../lib/ui'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
-import { MiniStat } from './Home'
+import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { BILLING_MODES, TERM_MODES, BILLING_PERIODS, billingLabel, termLabel, periodLabel, periodMonths,
          isRecurring, isProgress, isOpenEnded, hasTotal, amountLabel, renewalInfo, nextEndDate, recurringMismatch } from '../lib/renewal'
 
@@ -1953,18 +1953,18 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
       <Spacer h={20}/>
 
       {/* 색은 '지금 챙길 게 있다'는 신호일 때만 켠다. 평상시엔 무채색(ink) — 다 칠하면 색이 의미를 잃는다. */}
-      <div className="grid grid-4-to-2" style={{ gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
-        <MiniStat label="진행중 계약"   value={`${scoped.filter(c => c.status === "진행중").length}건`} sub={`총 ${scoped.length}건`} tone="ink"/>
-        <MiniStat label="계약금액 합계" value={fmtNum(totals.amount) + "원"}  sub="무기한 계약 제외"  tone="ink"/>
-        <MiniStat label={kind === "purchase" ? "월 고정지출" : "월 고정수입"} value={fmtNum(totals.monthly) + "원"}
-          sub={`정기계약 ${scoped.filter(c => isRecurring(c) && c.status === '진행중').length}건 · 월 환산`} tone="ink"/>
-        <MiniStat label={kind === "purchase" ? "미지급 잔액" : "남은 미수금"} value={fmtNum(totals.remain) + "원"}
-          sub={`${scoped.filter(c => rowRemain(c) > 0).length}건 잔존`}
-          tone={totals.remain > 0 ? "warn" : "ink"}/>
-        <MiniStat label="갱신 챙길 계약" value={`${renewDue + renewExpired}건`}
-          sub={renewExpired > 0 ? `만료 방치 ${renewExpired}건` : renewDue > 0 ? "통보 기한 임박" : "임박 없음"}
-          tone={renewExpired > 0 ? "neg" : renewDue > 0 ? "warn" : "ink"}/>
-      </div>
+      <KpiRow cols={5}>
+        <Kpi label="진행중 계약"   value={`${scoped.filter(c => c.status === "진행중").length}건`} badge={`총 ${scoped.length}건`} badgeTone="ink"/>
+        <Kpi label="계약금액 합계" value={fmtNum(totals.amount) + "원"}  badge="무기한 계약 제외"  badgeTone="ink"/>
+        <Kpi label={kind === "purchase" ? "월 고정지출" : "월 고정수입"} value={fmtNum(totals.monthly) + "원"}
+          badge={`정기계약 ${scoped.filter(c => isRecurring(c) && c.status === '진행중').length}건 · 월 환산`} badgeTone="ink"/>
+        <Kpi label={kind === "purchase" ? "미지급 잔액" : "남은 미수금"} value={fmtNum(totals.remain) + "원"}
+          badge={`${scoped.filter(c => rowRemain(c) > 0).length}건 잔존`}
+          badgeTone={totals.remain > 0 ? "warn" : "ink"}/>
+        <Kpi label="갱신 챙길 계약" value={`${renewDue + renewExpired}건`}
+          badge={renewExpired > 0 ? `만료 방치 ${renewExpired}건` : renewDue > 0 ? "통보 기한 임박" : "임박 없음"}
+          badgeTone={renewExpired > 0 ? "neg" : renewDue > 0 ? "warn" : "ink"}/>
+      </KpiRow>
       <Spacer h={20}/>
 
       <div className="card">

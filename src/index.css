@@ -513,6 +513,29 @@ a { color: inherit; text-decoration: none; }
 .ml-auto { margin-left: auto; }
 .grid { display: grid; }
 
+/* ── KPI 지표 줄 (lib/components/Kpi.jsx의 KpiRow) ──
+   카드 안 금액은 줄바꿈 없이 한 줄이라, 열이 좁아지면 뒷자리가 잘려 나간다.
+   예전엔 화면마다 grid를 손으로 적었고 접힘은 ≤480px에서 한 번뿐이라, 노트북(1280) 폭에서도
+   5열짜리 계약 화면의 금액이 카드 밖으로 새어 나갔다. 열 수를 단계적으로 줄여 접는다.
+   열 수는 data-cols 로만 정한다(인라인 style 금지) — 선택자 특이성을 전부 같게 맞춰야
+   아래 media 규칙이 순서대로 덮어써진다. !important 로 싸우기 시작하면 곧 못 고친다. */
+.kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); }
+.kpi-row[data-cols="1"] { grid-template-columns: 1fr; }
+.kpi-row[data-cols="2"] { grid-template-columns: repeat(2, 1fr); }
+.kpi-row[data-cols="3"] { grid-template-columns: repeat(3, 1fr); }
+.kpi-row[data-cols="4"] { grid-template-columns: repeat(4, 1fr); }
+.kpi-row[data-cols="5"] { grid-template-columns: repeat(5, 1fr); }
+@media (max-width: 1400px) { .kpi-row[data-cols="5"] { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 1180px) {
+  .kpi-row[data-cols="4"], .kpi-row[data-cols="5"] { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 900px) {
+  .kpi-row[data-cols="3"], .kpi-row[data-cols="4"], .kpi-row[data-cols="5"] { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 620px) {
+  .kpi-row[data-cols="2"], .kpi-row[data-cols="3"], .kpi-row[data-cols="4"], .kpi-row[data-cols="5"] { grid-template-columns: 1fr; }
+}
+
 /* 엑셀 임포트 마법사: 사이드바 없이 단일 full-width. 넓은 표는 카드 안에서 가로 스크롤. */
 .import-wrap { min-width: 0; padding-bottom: 104px; }  /* 하단 액션바(일괄 등록)가 우측 하단 도움말 FAB에 가려지지 않게 여백 확보 */
 .import-wrap .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
