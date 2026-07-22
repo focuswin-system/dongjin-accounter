@@ -489,16 +489,18 @@ const PayDrawer = ({ row, accounts, onClose, onSaved }) => {
     if (!row) return;
     setAmount(row.remain > 0 ? row.remain : 0);
     setDate(localToday());   // KST — 서버 futureDateError와 정렬
-    setAccountId("");
+    // 출금 계좌는 필수다. 비우면 그 지출이 계좌 잔액에서 빠지지 않으므로 은행계좌를 기본 선택한다.
+    setAccountId(accounts.find(a => a.kind === "bank")?.id || accounts[0]?.id || "");
     setMethod("계좌이체");
-  }, [row]);
+  }, [row, accounts]);
 
   if (!row) return null;
   const remain = row.remain;
 
   const register = async () => {
     if (!amount || amount <= 0) return toast.push("지급액을 입력해주세요");
-    const res = await api.payPayroll(row.id, { amount, date, account_id: accountId || null, method });
+    if (!accountId) return toast.push("출금 계좌를 선택해주세요");
+    const res = await api.payPayroll(row.id, { amount, date, account_id: accountId, method });
     if (res.ok) { toast.push("급여 지급을 등록했어요 (거래내역에 반영)"); onSaved(); onClose(); }
     else toast.push(res.error || "등록에 실패했어요");
   };
@@ -549,10 +551,11 @@ const PayDrawer = ({ row, accounts, onClose, onSaved }) => {
             </div>
           </div>
           <div>
-            <label className="label">출금 계좌</label>
+            <label className="label">출금 계좌 <span style={{ color: "var(--neg-ink)" }}>*</span></label>
             <Combobox value={accountId} onChange={setAccountId}
-              options={accounts.map(a => ({ value: a.id, label: a.name, sub: a.number }))}
-              placeholder="계좌 선택 (선택)"/>
+              options={accounts.map(a => ({ value: a.id, label: a.name, sub: [a.kind === "card" ? "카드" : a.bankName, a.number].filter(Boolean).join(" ") }))}
+              placeholder="계좌 선택"/>
+            <div className="text-xs text-muted2" style={{ marginTop: 6 }}>이 계좌에서 나간 것으로 기록돼 잔액에 반영됩니다.</div>
           </div>
         </div>
 

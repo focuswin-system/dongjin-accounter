@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { futureDateError } = require('../db')
+const { futureDateError, kstToday } = require('../db')
 
 const router = Router()
 
@@ -234,15 +234,20 @@ router.post('/:id/pay', async (req, res, next) => {
     if (!p) return res.status(404).json({ error: 'Not found' })
     const amt = Number(amount) || 0
     if (amt <= 0) return res.status(400).json({ error: '금액을 확인해주세요' })
+    // 계좌가 없으면 이 지출은 어느 계좌 잔액에서도 빠지지 않는다(accounts.js calcBalance는
+    // account_id로 계좌를 특정해 합산한다). 실제로 돈은 나갔는데 잔액은 그대로인 상태가 되므로
+    // NULL 저장을 허용하지 않는다 — 과거 F-02와 동일 유형.
+    if (!account_id) return res.status(400).json({ error: '출금 계좌를 선택해주세요' })
 
     await conn.beginTransaction()
     const txnId = randomUUID()
     await conn.execute(`
       INSERT INTO transactions (id, kind, account_id, category, amount, date, method, status, buyer_type, employee_id, payroll_id, memo)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-    `, [txnId, 'expense', account_id || null, '급여', amt, date || new Date().toISOString().slice(0, 10),
+    `, [txnId, 'expense', account_id, '급여', amt, date || kstToday(),
         method || '계좌이체', '지급완료', '공통', p.employee_id, p.id, memo || `${p.month} ${p.name} 급여 지급`])
     // ↑ 거래 status는 '지급완료'(공백 없음) — 계좌 잔액 계산(accounts.js)이 이 값만 지출로 센다.
+    //   날짜 폴백도 kstToday() — UTC(new Date())를 쓰면 KST 새벽 등록 시 하루 전으로 찍힌다.
 
     // 누적 지급액으로 상태 갱신
     const [[{ paid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM transactions WHERE payroll_id = ?', [p.id])
