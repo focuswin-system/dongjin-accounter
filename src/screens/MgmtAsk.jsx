@@ -116,7 +116,7 @@ export const MgmtAskScreen = () => {
     const summary = rows.length === 0
       ? `${periodLabel} ${topicLabel} 데이터가 없어요.`
       : chart === 'line'
-        ? `${periodLabel} ${topicLabel}은 총 ${won(total)}예요.` + (top ? ` 가장 많은 달은 ${top.label}(${won(top.value)}).` : '')
+        ? `${periodLabel} ${topicLabel}은 총 ${won(total)}이에요.` + (top ? ` 가장 많은 달은 ${top.label}(${won(top.value)}).` : '')
         : `${periodLabel} ${topicLabel}은 총 ${won(total)}, ${groupLabel} ${rows.length}건.` + (top ? ` 가장 큰 건 ${top.label}(${won(top.value)}).` : '')
     return (
       <div className="fade-up">
