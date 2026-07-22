@@ -76,6 +76,9 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
   const [matchCategory, setMatchCategory] = useState("")
   const [matchMemo, setMatchMemo] = useState("")
   const [matchAcct, setMatchAcct] = useState("")
+  // 입출금 계좌 — 위 matchAcct(계정과목 코드)와 다른 값이다. 비면 잔액에 반영되지 않는다.
+  const [bankAccounts, setBankAccounts] = useState([])
+  const [matchBankId, setMatchBankId] = useState("")
   const [categories, setCategories] = useState([])
   const [acctSubjects, setAcctSubjects] = useState([])
   const [jeokyos, setJeokyos] = useState([])
@@ -85,6 +88,13 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
     setShowAll(false)
   }, [invoice?.id, invoice?.remainAmount])
   useEffect(() => { setDocs(invoice?.docs || []) }, [invoice?.id])
+  // 청구서에 계좌가 지정돼 있으면 그걸, 없으면 은행계좌를 기본값으로 (정기청구 자동 생성분은 계좌가 비어 있다)
+  useEffect(() => {
+    api.getAccounts().then(list => {
+      setBankAccounts(list)
+      setMatchBankId(invoice?.accountId || list.find(a => a.kind === "bank")?.id || "")
+    })
+  }, [invoice?.id])
   useEffect(() => {
     api.getCategories().then(setCategories)
     api.getAccountSubjects().then(setAcctSubjects)
@@ -113,13 +123,15 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
     const amount = parseInt(matchAmt.replace(/[^0-9]/g, ""))
     if (!amount) { toast.push("금액을 입력하세요", { tone: "warn" }); return }
     if (amount > invoice.remainAmount) { toast.push("잔여 금액을 초과할 수 없어요", { tone: "warn" }); return }
+    // 계좌가 비면 이 돈이 어느 계좌 잔액에도 잡히지 않는다(서버도 400으로 막는다)
+    if (!matchBankId) { toast.push(`${isIssued ? "입금" : "출금"} 계좌를 선택해주세요`, { tone: "warn" }); return }
     const ok = await confirm({
       tone: "brand", icon: <Icon.Check size={22}/>,
       title: `${isIssued ? "입금" : "지급"} 매칭 처리`,
       body: `${fmtNum(amount)}원을 매칭 처리합니다.`,
       confirmLabel: "매칭 처리",
     })
-    if (ok) { onMatch(invoice.id, amount, matchDate, null, { category: matchCategory, memo: matchMemo, account_code: matchAcct }); onClose() }
+    if (ok) { onMatch(invoice.id, amount, matchDate, null, { category: matchCategory, memo: matchMemo, account_code: matchAcct, account_id: matchBankId }); onClose() }
   }
 
   const linkMatch = async (txn) => {
@@ -129,7 +141,8 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
       body: `${txn.date} · ${fmtNum(txn.amount)}원 거래를 이 청구서에 연결해요. 새 거래는 만들지 않아요.`,
       confirmLabel: "연결",
     })
-    if (ok) { onMatch(invoice.id, txn.amount, txn.date, txn.id); onClose() }
+    // 연결 대상에 계좌가 있으면 서버가 그걸 우선 쓴다. 없을 때만 여기 값이 폴백으로 쓰인다.
+    if (ok) { onMatch(invoice.id, txn.amount, txn.date, txn.id, { account_id: matchBankId }); onClose() }
   }
 
   return (
@@ -302,6 +315,14 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
                         <Combobox value={matchAcct} onChange={setMatchAcct}
                           options={acctSubjects.map(a => ({ value: a.code, label: a.name, sub: `${a.code} · ${a.category}`, keywords: a.note || "" }))}
                           placeholder="계정과목 선택 (선택)" allowAdd={false}/>
+
+                        <label className="label" style={{ marginTop: 4 }}>
+                          {isIssued ? "입금" : "출금"} 계좌 <span style={{ color: "var(--neg-ink)" }}>*</span>
+                        </label>
+                        <Combobox value={matchBankId} onChange={setMatchBankId}
+                          options={bankAccounts.map(a => ({ value: a.id, label: a.name, sub: [a.kind === "card" ? "카드" : a.bankName, a.number].filter(Boolean).join(" ") }))}
+                          placeholder="계좌 선택" allowAdd={false}/>
+                        <div className="text-xs text-muted2">이 계좌의 잔액에 반영됩니다.</div>
 
                         <button className="btn primary" style={{ marginTop: 8 }} onClick={handleMatch}>
                           <Icon.Check size={14}/> {labelPaid} 처리 (새 거래 생성)
@@ -759,8 +780,9 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   }
 
   const handleMatch = async (invoiceId, amount, date, txnId, extra) => {
-    await api.matchInvoice(invoiceId, { txnId: txnId || null, amount, date, ...extra })
-    toast.push("매칭 처리가 완료됐어요")
+    const r = await api.matchInvoice(invoiceId, { txnId: txnId || null, amount, date, ...extra })
+    // 결과를 보지 않고 성공 문구를 띄우면, 계좌 누락 같은 400을 사용자가 모른 채 넘어간다
+    toast.push(r.ok ? "매칭 처리가 완료됐어요" : (r.error || "매칭 처리에 실패했어요"), r.ok ? undefined : { tone: "warn" })
     load()
   }
 

@@ -146,7 +146,8 @@ router.delete('/:id', async (req, res, next) => {
 })
 
 router.post('/:id/matches', async (req, res, next) => {
-  const { txn_id, amount, date, category, memo, account_code } = req.body
+  // account_code(계정과목 코드)와 account_id(입출금 계좌)는 다른 값이다 — 섞지 말 것.
+  const { txn_id, amount, date, category, memo, account_code, account_id } = req.body
   const invoiceId = req.params.id
   const dateErr = futureDateError(date)
   if (dateErr) return res.status(400).json({ error: dateErr })
@@ -178,7 +179,7 @@ router.post('/:id/matches', async (req, res, next) => {
       // 청구서만 완료되고 지출은 계좌 잔액에서 빠지지 않는다(accounts.js는 '지급완료'만 센다).
       // 정산했다는 것은 실제로 돈이 오갔다는 뜻이므로 거래도 완료 상태로 맞춘다.
       const [[cur]] = await conn.execute('SELECT status, account_id FROM transactions WHERE id = ?', [realTxnId])
-      const acct = cur?.account_id || inv.account_id || null
+      const acct = cur?.account_id || account_id || inv.account_id || null
       if (!acct) {
         await conn.rollback()
         return res.status(400).json({ error: '이 거래에는 계좌가 없어요. 거래내역에서 계좌를 지정한 뒤 정산해주세요' })
@@ -187,6 +188,15 @@ router.post('/:id/matches', async (req, res, next) => {
         'UPDATE transactions SET invoice_id = ?, status = ?, account_id = ? WHERE id = ?',
         [invoiceId, isIssued ? '입금완료' : '지급완료', acct, realTxnId])
     } else {
+      // 정산은 실제로 돈이 오간 것이므로 status를 완료형으로 확정한다. 그런데 계좌가 비면
+      // 그 돈은 어느 계좌 잔액에도 잡히지 않는다(accounts.js calcBalance는 account_id로 계좌를
+      // 특정해 합산). 정기청구·계약에서 자동 생성된 청구서는 account_id가 NULL이므로
+      // 여기서 막지 않으면 입금이 통째로 잔액에서 누락된다 — 과거 F-02와 동일 유형.
+      const acct = account_id || inv.account_id || null
+      if (!acct) {
+        await conn.rollback()
+        return res.status(400).json({ error: `${isIssued ? '입금' : '출금'} 계좌를 선택해주세요` })
+      }
       realTxnId = randomUUID()
       const cat   = (category && category.trim()) || (isIssued ? '수금' : '대금 지급')
       const memoV = (memo && memo.trim()) || `청구서 ${inv.invoice_no || ''} 정산`.trim()
@@ -194,7 +204,7 @@ router.post('/:id/matches', async (req, res, next) => {
         INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, doc_no, invoice_id, memo, account_code)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `, [realTxnId, isIssued ? 'income' : 'expense', inv.vendor_id || null, inv.contract_id || null,
-          inv.account_id || null, cat, matchAmount,
+          acct, cat, matchAmount,
           date || kstToday(), '계좌이체',   // UTC(new Date())면 KST 새벽에 하루 전으로 찍힌다
           isIssued ? '입금완료' : '지급완료', '공통', inv.contract_id ? '' : '공통', invoiceId, memoV, account_code || null])
     }

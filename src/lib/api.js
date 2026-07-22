@@ -281,11 +281,12 @@ export const api = {
     try { return await req(`/invoices/${invoiceId}/matchable`) } catch { return [] }
   },
 
-  async matchInvoice(invoiceId, { txnId, amount, date, category, memo, account_code }) {
+  // account_code = 계정과목 코드, account_id = 입출금 계좌. 서로 다른 값이니 섞지 말 것.
+  async matchInvoice(invoiceId, { txnId, amount, date, category, memo, account_code, account_id }) {
     try {
-      await req(`/invoices/${invoiceId}/matches`, { method: 'POST', body: { txn_id: txnId, amount, date, category, memo, account_code } })
+      await req(`/invoices/${invoiceId}/matches`, { method: 'POST', body: { txn_id: txnId, amount, date, category, memo, account_code, account_id } })
       return { ok: true }
-    } catch { return { ok: false } }
+    } catch (e) { return { ok: false, error: e.message } }   // 실패 사유를 화면까지 전달한다
   },
 
   // ─── 거래내역 ─────────────────────────────────────────────────
