@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, StatusBadge, localToday } from '../lib/ui'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
-import { computeItems, monthLabel } from './Hr'
+import { computeItems, monthLabel } from './HR'
 
 /* 근로·용역·일용 계약 화면.
  * 근로계약(hr_labor_contract)과 기타 용역·일용(hr_outsourcing)이 같은 work_contracts를 쓰되
