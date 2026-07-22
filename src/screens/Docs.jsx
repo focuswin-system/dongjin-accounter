@@ -1355,16 +1355,28 @@ const StatCard = ({ label, value, unit = "원", tone }) => {
   )
 }
 
-// 데이터에서 사용 가능한 월 목록 자동 추출
-const ALL_MONTHS = [...new Set([
-  ...SAMPLE.incomes.map(r => (r.date || '').slice(0, 7)),
-  ...SAMPLE.expenses.map(r => (r.date || '').slice(0, 7)),
-])].sort((a, b) => b.localeCompare(a))
+// 보고서 공용 원장 로더 — 거래내역을 한 번 불러 입금/지출과 월 목록으로 나눠 쓴다.
+// (보고서마다 따로 부르면 같은 화면에서 여러 번 조회하게 된다)
+const useLedger = () => {
+  const [data, setData] = useState(null)
+  useEffect(() => {
+    api.getTransactions().then(rows => {
+      const list = Array.isArray(rows) ? rows : []
+      setData({
+        incomes:  list.filter(r => r.kind === 'income'),
+        expenses: list.filter(r => r.kind === 'expense'),
+        months: [...new Set(list.map(r => (r.date || '').slice(0, 7)).filter(Boolean))]
+          .sort((a, b) => b.localeCompare(a)),
+      })
+    })
+  }, [])
+  return data
+}
 
-const PeriodFilter = ({ value, onChange }) => (
+const PeriodFilter = ({ value, onChange, months = [] }) => (
   <div className="row gap-8" style={{ marginBottom: 20 }}>
     <span className="text-sm text-muted fw-600" style={{ lineHeight: "28px" }}>기간</span>
-    {["전체", ...ALL_MONTHS].map(m => (
+    {["전체", ...months].map(m => (
       <button key={m} className={`chip${value === m ? " active" : ""}`} onClick={() => onChange(m)}>
         {m === "전체" ? "전체" : `${parseInt(m.slice(5))}월`}
       </button>
@@ -1374,6 +1386,13 @@ const PeriodFilter = ({ value, onChange }) => (
 
 const filterByPeriod = (rows, period, dateKey = "date") =>
   period === "전체" ? rows : rows.filter(r => r[dateKey]?.startsWith(period))
+
+// 완료 여부 판정 — 거래는 무공백 표준형('입금완료'/'지급완료'), 청구서는 공백형('입금 완료')을 쓴다.
+// 보고서가 두 표기를 섞어 받으므로 공백을 지우고 비교한다(안 그러면 전부 미완료로 분류된다).
+const isSettled = s => {
+  const v = String(s || "").replace(/\s/g, "")
+  return v === "입금완료" || v === "지급완료"
+}
 
 const REPORTS = [
   { id: "monthly",     t: "월별 입금/지출 현황",       d: "이번 달과 지난 달을 비교해보세요." },
@@ -1391,8 +1410,10 @@ const REPORTS = [
 // ── 1. 월별 입금/지출 현황 ───────────────────────────────────
 const ReportMonthly = ({ toast }) => {
   const [period, setPeriod] = useState("전체")
-  const incomes  = filterByPeriod(SAMPLE.incomes,  period)
-  const expenses = filterByPeriod(SAMPLE.expenses, period)
+  const led = useLedger()
+  if (!led) return <Loading label="거래내역을 불러오는 중…"/>
+  const incomes  = filterByPeriod(led.incomes,  period)
+  const expenses = filterByPeriod(led.expenses, period)
 
   const bucket = {}
   incomes.forEach(r => {
@@ -1414,7 +1435,7 @@ const ReportMonthly = ({ toast }) => {
 
   return (
     <div>
-      <PeriodFilter value={period} onChange={setPeriod}/>
+      <PeriodFilter value={period} onChange={setPeriod} months={led.months}/>
       <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 24 }}>
         <StatCard label="총 입금" value={totalIn} tone="pos"/>
         <StatCard label="총 지출" value={totalOut}/>
@@ -1593,21 +1614,23 @@ const ReportContract = ({ toast }) => {
 // ── 4. 비목별 지출 현황 ──────────────────────────────────────
 const ReportCategory = ({ toast }) => {
   const [period, setPeriod] = useState("전체")
-  const expenses = filterByPeriod(SAMPLE.expenses, period)
+  const led = useLedger()
+  if (!led) return <Loading label="지출 내역을 불러오는 중…"/>
+  const expenses = filterByPeriod(led.expenses, period)
 
   const bucket = {}
   expenses.forEach(r => {
     if (!bucket[r.category]) bucket[r.category] = 0
-    bucket[r.category] += r.amount
+    bucket[r.category] += Number(r.amount) || 0
   })
   const total = Object.values(bucket).reduce((a, v) => a + v, 0)
   const rows = Object.entries(bucket)
     .sort(([, a], [, b]) => b - a)
-    .map(([cat, amt]) => ({ cat, amt, pct: (amt / total) * 100 }))
+    .map(([cat, amt]) => ({ cat, amt, pct: total > 0 ? (amt / total) * 100 : 0 }))
 
   return (
     <div>
-      <PeriodFilter value={period} onChange={setPeriod}/>
+      <PeriodFilter value={period} onChange={setPeriod} months={led.months}/>
       <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 24 }}>
         <StatCard label="총 지출"  value={total}/>
         <StatCard label="비목 수"  value={`${rows.length}개`} unit=""/>
@@ -1642,15 +1665,17 @@ const ReportCategory = ({ toast }) => {
 // ── 5. 발주처별 거래 현황 ────────────────────────────────────
 const ReportVendor = ({ toast }) => {
   const [period, setPeriod] = useState("전체")
-  const incomes = filterByPeriod(SAMPLE.incomes, period)
+  const led = useLedger()
+  if (!led) return <Loading label="거래내역을 불러오는 중…"/>
+  const incomes = filterByPeriod(led.incomes, period)
 
-  // 실현 매출(입금 완료·일부 입금)과 미실현(예정·미수)을 분리
-  const REALIZED = new Set(["입금 완료", "일부 입금"])
+  // 실현 매출(입금 완료)과 미실현(예정·미수)을 분리
   const bucket = {}
   incomes.forEach(r => {
     if (!bucket[r.vendor]) bucket[r.vendor] = { realized: 0, pending: 0, count: 0 }
-    if (REALIZED.has(r.status)) bucket[r.vendor].realized += r.amount
-    else                        bucket[r.vendor].pending  += r.amount
+    const amt = Number(r.amount) || 0
+    if (isSettled(r.status) || r.status === "일부 입금") bucket[r.vendor].realized += amt
+    else                                                bucket[r.vendor].pending  += amt
     bucket[r.vendor].count++
   })
   const rows = Object.entries(bucket)
@@ -1662,7 +1687,7 @@ const ReportVendor = ({ toast }) => {
 
   return (
     <div>
-      <PeriodFilter value={period} onChange={setPeriod}/>
+      <PeriodFilter value={period} onChange={setPeriod} months={led.months}/>
       <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
         <StatCard label="발주처 수"    value={`${rows.length}개사`} unit=""/>
         <StatCard label="청구 합계"    value={grandTotal}/>
@@ -1761,15 +1786,17 @@ const ReportAR = ({ toast }) => {
 // ── 7. 외주가공비 분석 ───────────────────────────────────────
 const ReportSubcontract = ({ toast }) => {
   const [period, setPeriod] = useState("전체")
+  const led = useLedger()
+  if (!led) return <Loading label="외주가공비를 불러오는 중…"/>
   // expenses만 사용 — payables와 중복 집계 방지 (payables는 미지급 잔액 뷰)
-  const subRows = filterByPeriod(SAMPLE.expenses, period).filter(r => r.category === "외주가공비")
+  const subRows = filterByPeriod(led.expenses, period).filter(r => r.category === "외주가공비")
 
-  const PAID = new Set(["지급 완료"])
   const bucket = {}
   subRows.forEach(r => {
     if (!bucket[r.vendor]) bucket[r.vendor] = { paid: 0, pending: 0, count: 0 }
-    if (PAID.has(r.pay)) bucket[r.vendor].paid    += r.amount
-    else                  bucket[r.vendor].pending += r.amount
+    const amt = Number(r.amount) || 0
+    if (isSettled(r.status)) bucket[r.vendor].paid    += amt
+    else                     bucket[r.vendor].pending += amt
     bucket[r.vendor].count++
   })
   const rows = Object.entries(bucket)
@@ -1777,11 +1804,11 @@ const ReportSubcontract = ({ toast }) => {
     .map(([vendor, v]) => ({ vendor, ...v, total: v.paid + v.pending }))
   const total    = rows.reduce((a, r) => a + r.total, 0)
   const totalPending = rows.reduce((a, r) => a + r.pending, 0)
-  const totalExp = filterByPeriod(SAMPLE.expenses, period).reduce((a, r) => a + r.amount, 0)
+  const totalExp = filterByPeriod(led.expenses, period).reduce((a, r) => a + (Number(r.amount) || 0), 0)
 
   return (
     <div>
-      <PeriodFilter value={period} onChange={setPeriod}/>
+      <PeriodFilter value={period} onChange={setPeriod} months={led.months}/>
       <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
         <StatCard label="협력사 수"      value={`${rows.length}개사`} unit=""/>
         <StatCard label="외주가공비 합계" value={total}/>
