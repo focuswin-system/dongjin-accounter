@@ -8,6 +8,14 @@ const { assertPlatformReady } = require('./platform/db')
 const app = express()
 const PORT = process.env.PORT || 3001
 
+// ⚠ Express는 기본적으로 라우트를 대소문자 무시로 매칭한다.
+// 그러면 '/API/vendors' 가 '/api/vendors' 라우터에 도달하는데,
+// 아래 인증 게이트는 req.path 를 대소문자 구분해 판정하므로 게이트만 건너뛰게 된다
+// (실제로 /API/vendors/import/template 이 무인증 200을 반환했다).
+// 라우팅을 대소문자 구분으로 바꿔 우회 경로 자체를 없앤다.
+app.set('case sensitive routing', true)
+app.set('strict routing', false)
+
 app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:4173'] }))
 app.use(express.json())
 // ⚠ /uploads 는 절대 정적 서빙하지 않는다.
@@ -21,9 +29,13 @@ app.use('/uploads', require('./routes/files'))
 // (정적 SPA·/uploads 파일은 /api 경로가 아니라 통과.)
 const authMiddleware = require('./middleware/auth')
 const tenantMiddleware = require('./middleware/tenant')
-const PUBLIC_API = new Set(['/api/auth/login', '/api/health'])
+// 로그아웃은 인증을 요구하지 않는다 — 토큰이 이미 만료된 상태에서도 쿠키는 정리되어야 한다.
+const PUBLIC_API = new Set(['/api/auth/login', '/api/auth/logout', '/api/health'])
 app.use((req, res, next) => {
-  if (!req.path.startsWith('/api/') || PUBLIC_API.has(req.path)) return next()
+  // 대소문자를 낮춰 판정한다(이중 방어). case sensitive routing 과 함께 두어,
+  // 둘 중 하나가 설정 변경으로 풀려도 게이트가 뚫리지 않게 한다.
+  const p = req.path.toLowerCase()
+  if (!p.startsWith('/api/') || PUBLIC_API.has(p)) return next()
   // 인증 통과 후 곧바로 테넌트를 확정한다 — JWT의 dbName으로 회사 DB 풀을 req.db에 주입.
   // 이 순서가 보장돼야 라우트가 '어느 회사인지 모르는 상태'로 실행되는 일이 없다.
   return authMiddleware(req, res, (err) => (err ? next(err) : tenantMiddleware(req, res, next)))
@@ -69,9 +81,13 @@ if (fs.existsSync(path.join(DIST, 'index.html'))) {
   })
 }
 
+// 예기치 못한 오류 처리.
+// 사용자에게 보여줄 메시지는 각 라우트가 4xx로 직접 반환한다(next(new Error(...)) 사용처 없음).
+// 여기까지 온 것은 SQL 오류·TypeError 같은 내부 오류이므로, 원문을 그대로 내보내면
+// 테이블·컬럼명 등 내부 구조가 노출된다. 상세는 서버 로그로만 남긴다.
 app.use((err, req, res, _next) => {
-  console.error(err)
-  res.status(500).json({ error: err.message })
+  console.error(`[500] ${req.method} ${req.originalUrl}`, err)
+  res.status(500).json({ error: '처리 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.' })
 })
 
 // ── 기동 ──

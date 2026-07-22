@@ -16,7 +16,7 @@ const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
 const { platformPool, audit } = require('../platform/db')
 const authMiddleware = require('../middleware/auth')
-const { setFileCookie } = require('../middleware/fileAuth')
+const { setFileCookie, clearFileCookie } = require('../middleware/fileAuth')
 
 const router = Router()
 
@@ -79,6 +79,15 @@ router.post('/login', async (req, res, next) => {
       },
     })
   } catch (e) { next(e) }
+})
+
+// ── 로그아웃 ──
+// JWT는 서버에 상태가 없어 무효화할 수 없지만(만료까지 유효), 첨부파일 쿠키는 반드시 지워야 한다.
+// 안 지우면 로그아웃 후에도 8시간 동안 같은 브라우저에서 이전 회사 첨부에 접근할 수 있다.
+// 인증을 요구하지 않는다 — 토큰이 이미 만료된 상태에서도 쿠키는 정리되어야 하기 때문.
+router.post('/logout', (req, res) => {
+  clearFileCookie(res)
+  res.json({ ok: true })
 })
 
 // ── 내 정보 ──

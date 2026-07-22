@@ -98,10 +98,10 @@ async function runAggregate(db, spec) {
   const top = rows.filter(r => r.key !== 'total').slice().sort((a, b) => b.value - a.value)[0]
   const dataRows = rows.filter(r => r.key !== 'total')
   const summary = dataRows.length === 0
-    ? `${periodLabel} ${topicLabel} 데이터가 없어요.`
+    ? `${periodLabel} ${topicLabel} 데이터가 없습니다.`
     : chart === 'line'
-      ? `${periodLabel} ${topicLabel}은 총 ${won(total)}이에요.` + (top ? ` 가장 많은 달은 ${top.label}(${won(top.value)}).` : '')
-      : `${periodLabel} ${topicLabel}은 총 ${won(total)}, ${grp.ko} ${dataRows.length}건.` + (top ? ` 가장 큰 건 ${top.label}(${won(top.value)}).` : '')
+      ? `${periodLabel} ${topicLabel}은 총 ${won(total)}입니다.` + (top ? ` 가장 많았던 달은 ${top.label}로 ${won(top.value)}입니다.` : '')
+      : `${periodLabel} ${topicLabel}은 총 ${won(total)}이며, ${grp.ko}로는 ${dataRows.length}건입니다.` + (top ? ` 가장 큰 곳은 ${top.label}로 ${won(top.value)}입니다.` : '')
   const title = `${topicLabel} · ${grp.ko} · ${periodLabel}`
 
   return { spec: s, topic: s.topic, group: s.group, topicLabel, groupLabel: grp.ko, periodLabel, from, to, chart, rows, total, summary, title }

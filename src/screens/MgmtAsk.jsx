@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { Icon, fmtNum, useToast, useConfirm } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, localToday } from '../lib/ui'
 import { api } from '../lib/api'
 
 /* 경영 도우미 — 대화(세션)형 조회.
- * 좌측 대화 목록 + 우측 차트 타임라인. 하단 컴포저(메뉴 드릴다운)로 질문을 만들면 차트 버블이 쌓인다.
+ * 좌측 세션 관리 + 우측 채팅(내 질문=우측 버블, 도우미 답변=좌측 AI 카드).
+ * 하단 컴포저(무엇을·기준·기간, 기간 직접입력 지원)로 질문을 만들면 답변 카드가 쌓인다.
  * 각 차트는 저장된 조건(QuerySpec)으로 언제든 새로고침(기준시각 표시). 스냅샷은 서버 result에 박제.
  * 추후 LLM: 컴포저를 텍스트 입력으로 교체하면 됨 — 세션·저장·차트·새로고침 그대로.
  * 설계: docs/02-design/features/mgmt-chat-sessions.design.md */
@@ -28,6 +29,7 @@ const GROUPS = [
 const PERIODS = [
   { v: 'this_month', label: '이번 달' }, { v: 'this_quarter', label: '이번 분기' },
   { v: 'last_3m', label: '최근 3개월' }, { v: 'this_year', label: '올해' }, { v: 'last_12m', label: '최근 12개월' },
+  { v: 'custom', label: '직접 입력' },
 ]
 
 const RefreshIcon = ({ size = 14 }) => (
@@ -44,18 +46,18 @@ const BarChart = ({ rows }) => {
     <div className="col" style={{ gap: 8, padding: '2px' }}>
       {top.map((r, i) => (
         <div key={i} className="row" style={{ gap: 10, alignItems: 'center' }}>
-          <div className="text-sm" style={{ width: 130, minWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.label}>{r.label}</div>
+          <div className="text-sm" style={{ width: 150, minWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.label}>{r.label}</div>
           <div style={{ flex: 1, background: 'var(--surface-2)', borderRadius: 6, height: 20 }}>
             <div style={{ width: `${Math.max(2, (r.value / max) * 100)}%`, height: '100%', background: BAR_COLOR, borderRadius: 6, transition: 'width .3s' }}/>
           </div>
-          <div className="num text-sm fw-600" style={{ width: 116, textAlign: 'right' }}>{won(r.value)}</div>
+          <div className="num text-sm fw-600" style={{ width: 124, textAlign: 'right' }}>{won(r.value)}</div>
         </div>
       ))}
     </div>
   )
 }
 const LineChart = ({ rows }) => {
-  const w = 620, h = 190, pad = 32
+  const w = 720, h = 210, pad = 34
   if (!rows.length) return null
   const max = Math.max(1, ...rows.map(r => r.value))
   const stepX = rows.length > 1 ? (w - pad * 2) / (rows.length - 1) : 0
@@ -77,8 +79,8 @@ const LineChart = ({ rows }) => {
   )
 }
 
-// ── 응답 카드(차트 버블) ──
-const ChartCard = ({ item, onRefresh, onDelete }) => {
+// ── 도우미 답변(AI 카드, 좌측) ──
+const AnswerCard = ({ item, onRefresh, onDelete }) => {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const r = item.result || {}
@@ -86,17 +88,13 @@ const ChartCard = ({ item, onRefresh, onDelete }) => {
   const dataRows = rows.filter(x => x.key !== 'total')
   const doRefresh = async () => { setBusy(true); await onRefresh(item.id); setBusy(false) }
   return (
-    <div className="col" style={{ gap: 8, alignItems: 'stretch', maxWidth: 720 }}>
-      {/* 질문 버블(우측) */}
-      <div className="row" style={{ justifyContent: 'flex-end' }}>
-        <div style={{ background: 'var(--brand)', color: '#fff', padding: '7px 13px', borderRadius: '14px 14px 3px 14px', fontSize: 13.5, fontWeight: 600 }}>{item.title}</div>
+    <div className="row" style={{ gap: 10, alignItems: 'flex-start', maxWidth: 860 }}>
+      <div className="ai-avatar row" style={{ width: 30, height: 30, minWidth: 30, borderRadius: '50%', background: 'var(--brand-soft)', color: 'var(--brand)', justifyContent: 'center', alignItems: 'center', marginTop: 2 }}>
+        <Icon.Sparkle size={16}/>
       </div>
-      {/* 응답 카드 */}
-      <div className="card card-pad" style={{ borderRadius: '3px 14px 14px 14px' }}>
+      <div className="card card-pad" style={{ flex: 1, borderRadius: '4px 14px 14px 14px' }}>
         <div className="row" style={{ alignItems: 'flex-start', marginBottom: 10, gap: 8 }}>
-          <div className="row gap-8" style={{ alignItems: 'flex-start', flex: 1 }}>
-            <Icon.Sparkle size={16}/><span className="fw-600 text-sm" style={{ lineHeight: 1.5 }}>{r.summary}</span>
-          </div>
+          <span className="fw-600 text-sm" style={{ lineHeight: 1.55, flex: 1 }}>{r.summary}</span>
           <div className="row gap-6" style={{ flexShrink: 0, alignItems: 'center' }}>
             <span className="text-xs text-muted2" title={item.refreshed_at ? new Date(item.refreshed_at).toLocaleString('ko-KR') : ''}>{rel(item.refreshed_at)} 기준</span>
             <button className="icon-btn" title="새로고침" onClick={doRefresh} disabled={busy} style={{ opacity: busy ? 0.5 : 1 }}><RefreshIcon/></button>
@@ -104,7 +102,7 @@ const ChartCard = ({ item, onRefresh, onDelete }) => {
           </div>
         </div>
         {dataRows.length === 0 ? (
-          <div className="text-sm text-muted2" style={{ padding: '12px 0' }}>표시할 데이터가 없어요.</div>
+          <div className="text-sm text-muted2" style={{ padding: '8px 0' }}>표시할 데이터가 없습니다.</div>
         ) : (
           <>
             <div style={{ margin: '4px 0 6px' }}>{r.chart === 'line' ? <LineChart rows={rows}/> : <BarChart rows={dataRows}/>}</div>
@@ -135,25 +133,41 @@ const Chip = ({ on, onClick, children }) => (
 
 // ── 하단 컴포저 ──
 const Composer = ({ onAdd, busy }) => {
-  const [spec, setSpec] = useState({ topic: '', group: '', period: '' })
-  const ready = spec.topic && spec.group && spec.period
-  const add = async () => { if (!ready) return; await onAdd(spec); setSpec({ topic: '', group: '', period: '' }) }
+  const [spec, setSpec] = useState({ topic: '', group: '', period: '', from: '', to: '' })
+  const customOk = spec.period !== 'custom' || (spec.from && spec.to && spec.from <= spec.to)
+  const ready = spec.topic && spec.group && spec.period && customOk
+  const set = (patch) => setSpec(s => ({ ...s, ...patch }))
+  const add = async () => {
+    if (!ready) return
+    const payload = spec.period === 'custom'
+      ? { topic: spec.topic, group: spec.group, period: 'custom', from: spec.from, to: spec.to }
+      : { topic: spec.topic, group: spec.group, period: spec.period }
+    await onAdd(payload)
+    setSpec({ topic: '', group: '', period: '', from: '', to: '' })
+  }
   return (
-    <div className="card card-pad col" style={{ gap: 12, borderColor: 'var(--brand-soft)' }}>
+    <div className="card card-pad col" style={{ gap: 11, borderColor: 'var(--brand-soft)' }}>
       <div className="row gap-8" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
-        <span className="text-xs fw-700 text-muted2" style={{ width: 54 }}>무엇을</span>
-        {TOPICS.map(t => <Chip key={t.v} on={spec.topic === t.v} onClick={() => setSpec(s => ({ ...s, topic: t.v }))}>{t.label}</Chip>)}
+        <span className="text-xs fw-700 text-muted2" style={{ width: 44 }}>무엇을</span>
+        {TOPICS.map(t => <Chip key={t.v} on={spec.topic === t.v} onClick={() => set({ topic: t.v })}>{t.label}</Chip>)}
         <button className="btn primary ml-auto" disabled={!ready || busy} onClick={add}>
-          <Icon.Plus size={14}/> {busy ? '추가 중…' : '차트 추가'}
+          <Icon.Plus size={14}/> {busy ? '분석 중…' : '보내기'}
         </button>
       </div>
       <div className="row gap-8" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
-        <span className="text-xs fw-700 text-muted2" style={{ width: 54 }}>기준</span>
-        {GROUPS.map(g => <Chip key={g.v} on={spec.group === g.v} onClick={() => setSpec(s => ({ ...s, group: g.v }))}>{g.label}</Chip>)}
+        <span className="text-xs fw-700 text-muted2" style={{ width: 44 }}>기준</span>
+        {GROUPS.map(g => <Chip key={g.v} on={spec.group === g.v} onClick={() => set({ group: g.v })}>{g.label}</Chip>)}
       </div>
       <div className="row gap-8" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
-        <span className="text-xs fw-700 text-muted2" style={{ width: 54 }}>기간</span>
-        {PERIODS.map(p => <Chip key={p.v} on={spec.period === p.v} onClick={() => setSpec(s => ({ ...s, period: p.v }))}>{p.label}</Chip>)}
+        <span className="text-xs fw-700 text-muted2" style={{ width: 44 }}>기간</span>
+        {PERIODS.map(p => <Chip key={p.v} on={spec.period === p.v} onClick={() => set({ period: p.v })}>{p.label}</Chip>)}
+        {spec.period === 'custom' && (
+          <div className="row gap-6" style={{ alignItems: 'center', marginLeft: 4 }}>
+            <input type="date" className="input" max={localToday()} value={spec.from} onChange={e => set({ from: e.target.value })} style={{ height: 32, fontSize: 13, width: 150 }}/>
+            <span className="text-muted2">~</span>
+            <input type="date" className="input" max={localToday()} value={spec.to} onChange={e => set({ to: e.target.value })} style={{ height: 32, fontSize: 13, width: 150 }}/>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -165,16 +179,12 @@ export const MgmtAskScreen = () => {
   const [chats, setChats] = useState([])
   const [activeId, setActiveId] = useState(null)
   const [items, setItems] = useState([])
-  const [renaming, setRenaming] = useState(null)  // chatId 편집 중
+  const [renaming, setRenaming] = useState(null)
   const [renameText, setRenameText] = useState('')
   const [addBusy, setAddBusy] = useState(false)
   const threadEnd = useRef(null)
 
-  const loadChats = async () => {
-    const list = await api.getChats()
-    setChats(list)
-    return list
-  }
+  const loadChats = async () => { const list = await api.getChats(); setChats(list); return list }
   useEffect(() => { (async () => { const list = await loadChats(); if (list.length) setActiveId(list[0].id) })() }, [])
   useEffect(() => { if (activeId) api.getChatItems(activeId).then(setItems); else setItems([]) }, [activeId])
   useEffect(() => { threadEnd.current?.scrollIntoView({ behavior: 'smooth' }) }, [items.length])
@@ -206,8 +216,9 @@ export const MgmtAskScreen = () => {
     try {
       const it = await api.addChatItem(activeId, spec)
       setItems(prev => [...prev, it])
-      if (it.autoTitle) setChats(prev => prev.map(x => x.id === activeId ? { ...x, title: it.autoTitle, item_count: (x.item_count || 0) + 1 } : x))
-      else setChats(prev => prev.map(x => x.id === activeId ? { ...x, item_count: (x.item_count || 0) + 1 } : x))
+      setChats(prev => prev.map(x => x.id === activeId
+        ? { ...x, title: it.autoTitle || x.title, item_count: (x.item_count || 0) + 1, updated_at: new Date().toISOString() }
+        : x))
     } catch { toast.push('차트를 만들지 못했어요') }
     setAddBusy(false)
   }
@@ -225,65 +236,72 @@ export const MgmtAskScreen = () => {
   const active = chats.find(c => c.id === activeId)
 
   return (
-    <div className="fade-up col" style={{ height: 'calc(100vh - 132px)', minHeight: 460 }}>
-      <div style={{ marginBottom: 12 }}>
-        <div className="page-title">경영 도우미</div>
-        <div className="page-sub">자주 보는 매출·매입 차트를 대화로 저장해 두고, 아무 때나 새로고침하세요.</div>
-      </div>
-      <div className="row" style={{ flex: 1, gap: 16, alignItems: 'stretch', minHeight: 0 }}>
-        {/* 좌측: 대화 목록 */}
-        <div className="card col" style={{ width: 244, minWidth: 244, padding: 10, gap: 4, overflow: 'hidden' }}>
-          <button className="btn primary" style={{ justifyContent: 'center', marginBottom: 6 }} onClick={newChat}><Icon.Plus size={14}/> 새 대화</button>
-          <div className="col" style={{ gap: 3, overflowY: 'auto', flex: 1 }}>
-            {chats.length === 0 && <div className="text-sm text-muted2" style={{ padding: 12, textAlign: 'center' }}>대화를 만들어<br/>차트를 저장해 보세요.</div>}
-            {chats.map(c => (
-              <div key={c.id} className={`chat-row row ${c.id === activeId ? 'active' : ''}`} onClick={() => setActiveId(c.id)}
-                style={{ padding: '8px 10px', borderRadius: 8, cursor: 'pointer', gap: 6, alignItems: 'center', background: c.id === activeId ? 'var(--brand-soft)' : 'transparent' }}>
-                {renaming === c.id ? (
-                  <input autoFocus className="input" value={renameText} onChange={e => setRenameText(e.target.value)}
-                    onBlur={() => saveRename(c)} onKeyDown={e => { if (e.key === 'Enter') saveRename(c); if (e.key === 'Escape') setRenaming(null) }}
-                    onClick={e => e.stopPropagation()} style={{ height: 28, fontSize: 13, padding: '2px 6px' }}/>
-                ) : (
-                  <>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="text-sm fw-600" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</div>
-                      <div className="text-xs text-muted2">{c.item_count || 0}개 · {rel(c.updated_at)}</div>
-                    </div>
-                    <button className="icon-btn chat-act" title="이름 변경" onClick={e => { e.stopPropagation(); setRenaming(c.id); setRenameText(c.title) }}><Icon.Pencil size={13}/></button>
-                    <button className="icon-btn chat-act" title="삭제" onClick={e => { e.stopPropagation(); delChat(c) }}><Icon.Trash size={13}/></button>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
+    <div className="fade-up row" style={{ gap: 14, alignItems: 'stretch', height: 'calc(100vh - var(--header-h) - 96px)', minHeight: 420, overflow: 'hidden' }}>
+      {/* 좌측: 세션 관리 */}
+      <aside className="card col" style={{ width: 252, minWidth: 252, padding: 10, gap: 4, overflow: 'hidden' }}>
+        <div className="row" style={{ padding: '2px 4px 8px', alignItems: 'center' }}>
+          <span className="fw-700 text-sm">대화</span>
+          <button className="btn primary sm ml-auto" onClick={newChat}><Icon.Plus size={13}/> 새 대화</button>
         </div>
-
-        {/* 우측: 스레드 + 컴포저 */}
-        <div className="col" style={{ flex: 1, minWidth: 0, gap: 12 }}>
-          {!active ? (
-            <div className="card card-pad col" style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-              <Icon.Sparkle size={28}/>
-              <div className="fw-700">대화를 시작하세요</div>
-              <div className="text-sm text-muted2" style={{ textAlign: 'center' }}>왼쪽 <b>새 대화</b>를 누르고, 아래에서 매출·매입 차트를 골라 저장하면<br/>여기 타임라인에 쌓이고 언제든 새로고침할 수 있어요.</div>
-              <button className="btn primary" onClick={newChat} style={{ marginTop: 4 }}><Icon.Plus size={14}/> 새 대화</button>
-            </div>
-          ) : (
-            <>
-              <div className="col" style={{ flex: 1, overflowY: 'auto', gap: 18, paddingRight: 4, minHeight: 0 }}>
-                {items.length === 0 && (
-                  <div className="col" style={{ alignItems: 'center', justifyContent: 'center', flex: 1, gap: 6, color: 'var(--muted-2)' }}>
-                    <Icon.Chart size={26}/>
-                    <div className="text-sm">아래에서 <b>무엇을 · 기준 · 기간</b>을 골라 첫 차트를 추가해 보세요.</div>
+        <div className="col" style={{ gap: 3, overflowY: 'auto', flex: 1 }}>
+          {chats.length === 0 && <div className="text-sm text-muted2" style={{ padding: 12, textAlign: 'center' }}>대화를 만들어<br/>차트를 저장해 보세요.</div>}
+          {chats.map(c => (
+            <div key={c.id} className="row" onClick={() => setActiveId(c.id)}
+              style={{ padding: '8px 10px', borderRadius: 8, cursor: 'pointer', gap: 6, alignItems: 'center', background: c.id === activeId ? 'var(--brand-soft)' : 'transparent' }}>
+              {renaming === c.id ? (
+                <input autoFocus className="input" value={renameText} onChange={e => setRenameText(e.target.value)}
+                  onBlur={() => saveRename(c)} onKeyDown={e => { if (e.key === 'Enter') saveRename(c); if (e.key === 'Escape') setRenaming(null) }}
+                  onClick={e => e.stopPropagation()} style={{ height: 28, fontSize: 13, padding: '2px 6px' }}/>
+              ) : (
+                <>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="text-sm fw-600" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</div>
+                    <div className="text-xs text-muted2">{c.item_count || 0}개 · {rel(c.updated_at)}</div>
                   </div>
-                )}
-                {items.map(it => <ChartCard key={it.id} item={it} onRefresh={refreshItem} onDelete={delItem}/>)}
-                <div ref={threadEnd}/>
-              </div>
-              <Composer onAdd={addItem} busy={addBusy}/>
-            </>
-          )}
+                  <button className="icon-btn" title="이름 변경" onClick={e => { e.stopPropagation(); setRenaming(c.id); setRenameText(c.title) }}><Icon.Pencil size={13}/></button>
+                  <button className="icon-btn" title="삭제" onClick={e => { e.stopPropagation(); delChat(c) }}><Icon.Trash size={13}/></button>
+                </>
+              )}
+            </div>
+          ))}
         </div>
-      </div>
+      </aside>
+
+      {/* 우측: 채팅 */}
+      <section className="col" style={{ flex: 1, minWidth: 0, gap: 12 }}>
+        {!active ? (
+          <div className="card card-pad col" style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+            <div className="row" style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--brand-soft)', color: 'var(--brand)', justifyContent: 'center', alignItems: 'center' }}><Icon.Sparkle size={22}/></div>
+            <div className="fw-700" style={{ fontSize: 16 }}>무엇이 궁금하세요?</div>
+            <div className="text-sm text-muted2" style={{ textAlign: 'center', lineHeight: 1.6 }}>
+              <b>새 대화</b>를 시작하고, 아래에서 <b>무엇을 · 기준 · 기간</b>을 골라 보내면<br/>매출·매입을 차트로 분석해 드립니다. 자주 보는 질문은 대화로 저장돼요.</div>
+            <button className="btn primary" onClick={newChat} style={{ marginTop: 4 }}><Icon.Plus size={14}/> 새 대화 시작</button>
+          </div>
+        ) : (
+          <>
+            <div className="col" style={{ flex: 1, overflowY: 'auto', gap: 18, padding: '4px 4px 4px 0', minHeight: 0 }}>
+              {items.length === 0 && (
+                <div className="col" style={{ alignItems: 'center', justifyContent: 'center', flex: 1, gap: 8, color: 'var(--muted-2)' }}>
+                  <Icon.Chart size={28}/>
+                  <div className="text-sm">아래에서 <b>무엇을 · 기준 · 기간</b>을 골라 첫 질문을 보내 보세요.</div>
+                </div>
+              )}
+              {items.map(it => (
+                <div key={it.id} className="col" style={{ gap: 8 }}>
+                  {/* 내 질문(우측 버블) */}
+                  <div className="row" style={{ justifyContent: 'flex-end' }}>
+                    <div style={{ background: 'var(--brand)', color: '#fff', padding: '8px 14px', borderRadius: '14px 14px 3px 14px', fontSize: 13.5, fontWeight: 600, maxWidth: 520 }}>{it.title}</div>
+                  </div>
+                  {/* 도우미 답변(좌측 AI 카드) */}
+                  <AnswerCard item={it} onRefresh={refreshItem} onDelete={delItem}/>
+                </div>
+              ))}
+              <div ref={threadEnd}/>
+            </div>
+            <Composer onAdd={addItem} busy={addBusy}/>
+          </>
+        )}
+      </section>
     </div>
   )
 }

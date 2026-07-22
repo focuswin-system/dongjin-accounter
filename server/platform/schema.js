@@ -184,6 +184,7 @@ async function ensurePresetRoles(c, companyId) {
   const { PRESET_ROLES, expandPresetPerms } = require('./permissions')
   let created = 0
   let masterRoleId = null
+  let backfilled = 0
   for (const preset of PRESET_ROLES) {
     const [[exist]] = await c.execute(
       'SELECT id FROM roles WHERE company_id = ? AND name = ?', [companyId, preset.name]
@@ -193,15 +194,25 @@ async function ensurePresetRoles(c, companyId) {
       roleId = randomUUID()
       await c.execute('INSERT INTO roles (id, company_id, name, is_system) VALUES (?,?,?,?)',
         [roleId, companyId, preset.name, preset.isSystem ? 1 : 0])
-      for (const [resource, action] of expandPresetPerms(preset.perms)) {
-        await c.execute('INSERT IGNORE INTO role_perms (role_id, resource, action) VALUES (?,?,?)',
-          [roleId, resource, action])
-      }
       created++
+    }
+    // ⚠ 역할이 이미 있어도 권한 행은 항상 채워 넣는다.
+    //   건너뛰면, 나중에 permissions.js에 자원이 추가돼도(예: mgmt_ask) 기존 회사의
+    //   '마스터' 역할에는 그 권한이 영영 생기지 않아 새 화면에 못 들어간다.
+    //   INSERT IGNORE라 이미 있는 행은 건드리지 않는다 —
+    //   ⚠ 단 이는 '프리셋에 있는 권한을 보충'만 한다. 마스터가 의도적으로 **뺀** 권한도
+    //     다시 채워지므로, 시스템 역할(is_system)에 한해서만 수행한다.
+    if (preset.isSystem) {
+      for (const [resource, action] of expandPresetPerms(preset.perms)) {
+        const [r] = await c.execute(
+          'INSERT IGNORE INTO role_perms (role_id, resource, action) VALUES (?,?,?)',
+          [roleId, resource, action])
+        if (r.affectedRows > 0 && exist) backfilled++
+      }
     }
     if (preset.name === '마스터') masterRoleId = roleId
   }
-  return { created, masterRoleId }
+  return { created, backfilled, masterRoleId }
 }
 
 module.exports = { PLATFORM_TABLES, createPlatformSchema, bootstrapFirstCompany, ensurePresetRoles }

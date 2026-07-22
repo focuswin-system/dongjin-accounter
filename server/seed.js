@@ -1,16 +1,28 @@
 /**
- * 동진테크 ERP 초기 데이터 시딩 (MySQL)
+ * 초기 데이터 시딩 (개발용)
  * 실행: node seed.js
+ *
+ * ⚠ 멀티테넌트 전환 후: 전역 pool은 더 이상 export 되지 않는다(회사 구분이 사라지므로).
+ *   이 스크립트는 **DB_NAME 이 가리키는 첫 테넌트**에만 관리 계정으로 시딩한다.
+ *   다른 회사에 데이터를 넣으려면 그 회사로 로그인해 화면에서 입력하거나,
+ *   withAdmin(..., { database: '<그 회사 db_name>' }) 로 대상 DB를 지정해야 한다.
  */
 require('dotenv').config()
 const { randomUUID } = require('crypto')
-const { pool, initDb } = require('./db')
+const { initDb } = require('./db')
+const { withAdmin, assertDbName } = require('./platform/db')
+
+const TARGET_DB = assertDbName(process.env.DB_NAME || 'dongjin_erp')
 
 async function seed() {
-  await initDb()
-  const c = await pool.getConnection()
+  await withAdmin(async (c) => {
+    await initDb(c)
+    await seedInto(c)
+  }, { database: TARGET_DB })
+}
 
-  try {
+async function seedInto(c) {
+  {
     // ─── 1. 계좌 ─────────────────────────────────────────────────
     const [[{ accCnt }]] = await c.execute('SELECT COUNT(*) AS accCnt FROM accounts')
     if (accCnt === 0) {
@@ -132,10 +144,10 @@ async function seed() {
     console.log('\n✅ 기준정보 시딩 완료')
     console.log('다음 단계: 계약·거래·청구서는 UI에서 직접 입력하세요.')
 
-  } finally {
-    c.release()
-    await pool.end()
   }
+  // 연결 정리는 withAdmin 이 담당한다(열었다 반드시 닫음).
 }
 
-seed().catch(e => { console.error('시딩 실패:', e.message); process.exit(1) })
+seed()
+  .then(() => process.exit(0))
+  .catch(e => { console.error('시딩 실패:', e.message); process.exit(1) })

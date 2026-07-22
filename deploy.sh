@@ -41,11 +41,14 @@ tar czf - -C server \
 echo "[4/4] 원격 의존성 설치 + DB 스키마 준비 + pm2 재시작 + 헬스체크"
 # 앱 런타임은 DDL을 하지 않는다 → 스키마 생성·마이그레이션은 배포 시점의 책임이다.
 # setup-db.js는 멱등이라 매 배포마다 돌아도 안전하다(관리 계정 DB_ADMIN_USER 필요).
+# setup:db 실패는 배포를 중단시킨다(스키마가 코드와 안 맞으면 기동해도 500이 난다).
+# 반면 migrate:uploads 실패로 pm2 재시작을 막으면 "새 코드는 전송됐는데 구 프로세스가 계속 도는"
+# 더 나쁜 상태가 되므로, 경고만 남기고 배포는 계속한다.
 "${SSH[@]}" "$REMOTE" "cd ~/$APPDIR/server && \
   npm ci --omit=dev --no-audit --no-fund && \
   npm run check:isolation && \
   npm run setup:db && \
-  npm run migrate:uploads && \
+  { npm run migrate:uploads || echo '⚠ migrate:uploads 실패 — 첨부 경로 확인 필요(배포는 계속)'; } && \
   pm2 startOrReload ecosystem.config.js --update-env && \
   pm2 save && \
   sleep 2 && curl -sS -m 5 http://127.0.0.1:8081/api/health && echo"

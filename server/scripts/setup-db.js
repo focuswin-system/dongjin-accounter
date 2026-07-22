@@ -15,7 +15,7 @@
  */
 require('dotenv').config()
 const {
-  PLATFORM_DB, withAdmin, assertDbName, validateCompanyCode, hasDedicatedAdmin, adminConfig,
+  platformPool, PLATFORM_DB, withAdmin, assertDbName, validateCompanyCode, hasDedicatedAdmin, adminConfig,
 } = require('../platform/db')
 const { createPlatformSchema, bootstrapFirstCompany, ensurePresetRoles } = require('../platform/schema')
 const { initDb } = require('../db')
@@ -57,14 +57,17 @@ async function main() {
     }, { database: PLATFORM_DB })
   }
 
-  // ── 2. 테넌트 DB 스키마 ──
-  step(2, `테넌트 DB(${TENANT_DB}) 스키마·마이그레이션`)
+  // ── 2. 기존(첫) 테넌트 DB 준비 ──
+  // 부트스트랩(3단계)이 이 DB의 users·company_info를 읽어가므로 먼저 처리한다.
+  step(2, `기존 테넌트 DB(${TENANT_DB}) 준비`)
   await withAdmin(async (conn) => {
     const [rows] = await conn.query('SHOW DATABASES LIKE ?', [TENANT_DB])
     if (rows.length === 0) {
       if (CHECK_ONLY) return log('   · 없음 — 생성이 필요합니다')
       await conn.query(`CREATE DATABASE \`${TENANT_DB}\` CHARACTER SET utf8 COLLATE utf8_general_ci`)
       log('   · 데이터베이스 생성됨')
+    } else {
+      log('   · 데이터베이스 존재')
     }
   })
   if (CHECK_ONLY) {
@@ -91,7 +94,8 @@ async function main() {
       if (!CHECK_ONLY) {
         for (const c of list) {
           const r = await ensurePresetRoles(platformConn, c.id)
-          if (r.created > 0) log(`   · ${c.code}: 기본 역할 ${r.created}종 생성(보정)`)
+          if (r.created > 0)    log(`   · ${c.code}: 기본 역할 ${r.created}종 생성(보정)`)
+          if (r.backfilled > 0) log(`   · ${c.code}: 신규 자원 권한 ${r.backfilled}건 보충`)
           // 역할이 하나도 연결 안 된 계정을 메운다.
           // admin은 마스터, 그 외는 조회전용을 기본으로 준다(권한은 마스터가 나중에 조정).
           if (r.masterRoleId) {
@@ -138,6 +142,40 @@ async function main() {
       log(`   · 이제 로그인 시 회사코드에 '${result.code}' 를 입력합니다`)
     }
   }, { database: PLATFORM_DB })
+
+  // ── 4. 전 테넌트 스키마 적용 ──
+  // ⚠ 이 단계가 없으면 두 번째 회사부터 스키마가 영원히 고정된다.
+  //   (db.js에 컬럼을 추가하고 배포해도 첫 회사에만 적용되어, 나머지 회사는
+  //    해당 화면이 전부 ER_BAD_FIELD_ERROR 500으로 죽는다)
+  // initDb는 멱등이라 매번 전체에 돌려도 안전하다. 회사가 수백 개로 늘어 느려지면
+  // 그때 tenant_migrations 기반 버전드 러너로 승격한다(현재는 단순함이 더 가치 있음).
+  step(4, '전 테넌트 스키마 적용')
+  const [companies] = await platformPool.execute(
+    'SELECT code, db_name FROM companies ORDER BY created_at'
+  )
+  if (CHECK_ONLY) {
+    log(`   · 대상 ${companies.length}개: ${companies.map(c => c.db_name).join(', ')}`)
+    log('   · (--check: 적용 생략)')
+  } else {
+    const failed = []
+    for (const c of companies) {
+      try {
+        await withAdmin(conn => initDb(conn), { database: c.db_name })
+        log(`   · ${c.code.padEnd(12)} ${c.db_name} ✅`)
+      } catch (e) {
+        // 한 회사가 실패해도 나머지는 진행한다 — 전체가 멈추면 복구가 더 어렵다.
+        failed.push({ code: c.code, db: c.db_name, err: e.message })
+        log(`   · ${c.code.padEnd(12)} ${c.db_name} ❌ ${e.code || e.message}`)
+      }
+    }
+    if (failed.length) {
+      throw new Error(
+        `테넌트 ${failed.length}개의 스키마 적용에 실패했습니다:\n` +
+        failed.map(f => `  - ${f.code} (${f.db}): ${f.err}`).join('\n') +
+        `\n  나머지 회사는 정상 적용되었습니다. 위 회사만 개별 확인하세요.`
+      )
+    }
+  }
 
   log('\n' + '━'.repeat(60))
   log(CHECK_ONLY ? ' 점검 완료 (변경 없음)' : ' ✅ 준비 완료')

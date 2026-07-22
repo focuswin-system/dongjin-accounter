@@ -47,15 +47,26 @@ function fileAuth(req, res, next) {
   next()
 }
 
-/** 로그인 응답에서 호출 — 파일 접근용 쿠키를 심는다. */
-function setFileCookie(res, token) {
-  res.cookie(COOKIE_NAME, token, {
-    httpOnly: true,
-    sameSite: 'strict',
-    path: '/uploads',            // API 요청에는 전송되지 않는다
-    maxAge: 8 * 60 * 60 * 1000,  // JWT 만료(8h)와 동일
-    secure: process.env.COOKIE_SECURE === '1',  // HTTPS 배포에서 1로 설정
-  })
+const COOKIE_OPTS = {
+  httpOnly: true,
+  sameSite: 'strict',
+  path: '/uploads',            // API 요청에는 전송되지 않는다
+  secure: process.env.COOKIE_SECURE === '1',  // HTTPS 배포에서 1로 설정(.env.example 참조)
 }
 
-module.exports = { fileAuth, setFileCookie, COOKIE_NAME }
+/** 로그인 응답에서 호출 — 파일 접근용 쿠키를 심는다. */
+function setFileCookie(res, token) {
+  res.cookie(COOKIE_NAME, token, { ...COOKIE_OPTS, maxAge: 8 * 60 * 60 * 1000 })
+}
+
+/**
+ * 로그아웃 시 호출 — 쿠키를 제거한다.
+ * 이게 없으면 로그아웃 후에도 쿠키가 8시간 살아 있어, 같은 브라우저를 쓰는 다음 사람이
+ * /uploads/{companyId}/{파일명} 을 직접 입력해 이전 사용자 회사의 첨부를 받을 수 있다.
+ * ⚠ clearCookie는 옵션(path/secure/sameSite)이 발급 때와 같아야 지워진다.
+ */
+function clearFileCookie(res) {
+  res.clearCookie(COOKIE_NAME, COOKIE_OPTS)
+}
+
+module.exports = { fileAuth, setFileCookie, clearFileCookie, COOKIE_NAME }

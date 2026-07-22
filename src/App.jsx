@@ -885,6 +885,10 @@ export default function App() {
     setUser(u); setLoggedIn(true);
   };
   const handleLogout = () => {
+    // 첨부파일 접근 쿠키(httpOnly)는 서버만 지울 수 있다. localStorage만 비우면
+    // 로그아웃 후에도 8시간 동안 /uploads 로 이전 회사 첨부에 접근할 수 있다.
+    // 실패해도 로그아웃은 계속 진행한다(응답을 기다리지 않음).
+    fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     localStorage.removeItem('loggedIn');
     localStorage.removeItem('user');
     localStorage.removeItem('token');

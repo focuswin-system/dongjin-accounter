@@ -14,7 +14,9 @@
 const mysql = require('mysql2/promise')
 const { appConfig, assertDbName } = require('../platform/db')
 
-const MAX_POOLS    = Number(process.env.TENANT_POOL_MAX        || 50)
+// 기본값 근거: MAX_POOLS(30) x CONN_LIMIT(3) = 90, + platformPool 10 = 100.
+// MariaDB 기본 max_connections=151 아래로 잡는다. 늘리려면 서버의 max_connections도 함께 올릴 것.
+const MAX_POOLS    = Number(process.env.TENANT_POOL_MAX        || 30)
 const CONN_LIMIT   = Number(process.env.TENANT_POOL_CONN_LIMIT || 3)
 const IDLE_MS      = Number(process.env.TENANT_POOL_IDLE_MS    || 10 * 60 * 1000)
 const SWEEP_MS     = 60 * 1000

@@ -92,6 +92,16 @@ async function provisionTenant({
     await withAdmin(c => initDb(c), { database: dbName })
     log('스키마·기준정보 시드 적용')
 
+    // 회사명을 테넌트의 company_info 에도 심는다.
+    // 이게 없으면 신규 회사의 지급결의서·보고서 인쇄물 헤더가 공란으로 나간다
+    // (routes/company.js 는 id='main' 단일 레코드를 읽는다).
+    await withAdmin(c => c.execute(
+      `INSERT INTO company_info (id, name) VALUES ('main', ?)
+       ON DUPLICATE KEY UPDATE name = VALUES(name)`,
+      [String(name).trim()]
+    ), { database: dbName })
+    log('회사 정보 초기화')
+
     // ── 3. 기본 역할 + 권한 매트릭스 ──
     // 기존 회사 흡수(bootstrapFirstCompany)와 같은 함수를 쓴다 — 생성 경로가 갈라지면
     // '신규 회사에만 있는 역할' 같은 불일치가 생긴다.
