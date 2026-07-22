@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, Fragment } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, Popover } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, Popover, Loading } from '../lib/ui'
 // SAMPLE placeholder — Docs 화면은 실 API 연동 전까지 빈 데이터로 동작
 const SAMPLE = {
   docs: [], evidences: [], evidenceMissing: [], excelPreview: [],
@@ -1702,8 +1702,14 @@ const ReportVendor = ({ toast }) => {
 }
 
 // ── 6. 미수금 현황 ───────────────────────────────────────────
+// api.getReceivables()가 이 화면이 쓰는 { summary, rows } 형태를 그대로 돌려준다.
 const ReportAR = ({ toast }) => {
-  const { summary = {}, rows = [] } = SAMPLE.receivables || {}
+  const [data, setData] = useState(null)
+  useEffect(() => { api.getReceivables().then(setData) }, [])
+
+  // 0원을 확신 있게 보여주면 사용자가 회수할 미수금이 없다고 오판한다. 로딩 중에는 숫자를 감춘다.
+  if (!data) return <Loading label="미수금을 불러오는 중…"/>
+  const { summary = {}, rows = [] } = data
   return (
     <div>
       <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
@@ -1712,6 +1718,11 @@ const ReportAR = ({ toast }) => {
         <StatCard label="기한 초과"         value={summary.overdue}   tone="neg"/>
         <StatCard label="장기 미수"         value={summary.longOverdue} tone="neg"/>
       </div>
+      {rows.length === 0 && (
+        <div className="text-sm text-muted2" style={{ padding: 24, textAlign: "center" }}>
+          미수금이 없어요. 발행한 청구서가 모두 입금 완료 상태입니다.
+        </div>
+      )}
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
           <thead>
