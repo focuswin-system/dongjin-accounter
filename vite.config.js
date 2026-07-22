@@ -27,7 +27,7 @@ export default defineConfig(({ mode }) => {
         registerType: 'autoUpdate',
         devOptions: { enabled: true },
         manifest: {
-          name: '도니도라 - 재무·회계관리',
+          name: '도니도라 - 회계관리',
           short_name: '도니도라',
           theme_color: '#0f172a',
           background_color: '#ffffff',

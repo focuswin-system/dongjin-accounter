@@ -100,7 +100,7 @@ export const LoginScreen = ({ onLogin }) => {
             fontSize: 46, fontWeight: 800, color: '#fff',
             letterSpacing: '-0.04em', lineHeight: 1.1, marginBottom: 24,
           }}>
-            재무·회계관리
+            회계관리
           </div>
           <div style={{
             fontSize: 18, fontWeight: 500, color: 'rgba(255,255,255,0.5)',
@@ -113,7 +113,7 @@ export const LoginScreen = ({ onLogin }) => {
 
         {/* 하단 */}
         <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.25)', letterSpacing: '-0.01em' }}>
-          © 2026 도니도라. All rights reserved.
+          © 2026 (주)포커스윈. All rights reserved.
         </div>
       </div>
 
