@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
+const { insertWithDocNo } = require('../lib/docno')
 
 const router = Router()
 
@@ -19,11 +20,17 @@ const defaultApproval = async (execFn) => {
 }
 
 // 문서번호 채번 DJ-YYYY-NNNN (최대 일련번호 +1, 삭제해도 재사용 안 함)
+//
+// ⚠ FOR UPDATE 가 반드시 필요하다.
+// 트랜잭션(REPEATABLE READ) 안에서 그냥 SELECT 하면 스냅샷을 읽으므로, 다른 트랜잭션이
+// 방금 커밋한 번호가 보이지 않는다. 그래서 충돌 후 다시 뽑아도 **같은 번호**가 나와
+// 재시도가 무의미했다(실제로 6건 동시 생성 시 4건이 실패). FOR UPDATE 는 최신 커밋을
+// 읽고 그 구간을 잠가, 동시에 채번하는 트랜잭션을 줄 세운다.
 const nextDocNo = async (execFn, dateStr) => {
   const year = (dateStr || kstToday()).slice(0, 4)
   const [[{ maxno }]] = await execFn(
     `SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(doc_no, '-', -1) AS UNSIGNED)), 0) AS maxno
-     FROM expense_resolutions WHERE doc_no LIKE ?`, [`DJ-${year}-%`])
+     FROM expense_resolutions WHERE doc_no LIKE ? FOR UPDATE`, [`DJ-${year}-%`])
   return `DJ-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
 }
 
@@ -61,19 +68,20 @@ router.post('/', async (req, res, next) => {
     const itemList = Array.isArray(items) && items.length ? items
       : [{ name: title || '지출', unit: '식', qty: 1, price: Number(req.body.amount) || 0, amount: Number(req.body.amount) || 0, note: '' }]
     const amount = itemList.reduce((s, it) => s + (Number(it.amount) || 0), 0)
-    const doc_no = await nextDocNo((sql, p) => req.db.execute(sql, p), pay_date)
     const id = randomUUID()
     // 결재선: 요청에 있으면 그걸 쓰고(만들 때 고른 프리셋), 없으면 기본 프리셋
     const approval = Array.isArray(req.body.approval) && req.body.approval.length
       ? req.body.approval
       : await defaultApproval((sql, p) => req.db.execute(sql, p))
-    await req.db.execute(
-      `INSERT INTO expense_resolutions (id, doc_no, vendor_id, vendor_name, title, amount, pay_method, pay_date, applicant, items, note, approval, status)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [id, doc_no, vendor_id || null, vendor_name || '', title || '지출 결의', amount,
-       pay_method || '계좌이체', pay_date || null,
-       applicant || req.user?.name || req.user?.username || '관리자',
-       JSON.stringify(itemList), note || '', JSON.stringify(approval), '작성'])
+    await insertWithDocNo(
+      () => nextDocNo((sql, p) => req.db.execute(sql, p), pay_date),
+      (doc_no) => req.db.execute(
+        `INSERT INTO expense_resolutions (id, doc_no, vendor_id, vendor_name, title, amount, pay_method, pay_date, applicant, items, note, approval, status)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [id, doc_no, vendor_id || null, vendor_name || '', title || '지출 결의', amount,
+         pay_method || '계좌이체', pay_date || null,
+         applicant || req.user?.name || req.user?.username || '관리자',
+         JSON.stringify(itemList), note || '', JSON.stringify(approval), '작성']))
     const [[created]] = await req.db.execute('SELECT * FROM expense_resolutions WHERE id = ?', [id])
     res.json(adapt(created))
   } catch (e) { next(e) }
@@ -96,7 +104,6 @@ router.post('/from-invoice/:invoiceId', async (req, res, next) => {
     if (!inv) { await rollbackQuietly(conn); return res.status(404).json({ error: '청구서를 찾을 수 없어요' }) }
     if (inv.kind !== 'received') { await rollbackQuietly(conn); return res.status(400).json({ error: '매입(수취) 청구서만 지급결의서를 만들 수 있어요' }) }
 
-    const doc_no = await nextDocNo((sql, p) => conn.execute(sql, p), inv.issued_at)
 
     // 지급결의서는 '지급액'(gross, VAT 포함)을 결재받는 문서 → 라인 합계가 지급액과 같아야 한다.
     const gross = Number(inv.total_amount) || 0
@@ -120,15 +127,20 @@ router.post('/from-invoice/:invoiceId', async (req, res, next) => {
 
     const approval = await defaultApproval((sql, p) => conn.execute(sql, p))
     const id = randomUUID()
-    await conn.execute(
-      `INSERT INTO expense_resolutions (id, doc_no, invoice_id, vendor_id, vendor_name, title, amount, pay_method, pay_date, applicant, items, note, approval, status)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [id, doc_no, inv.id, inv.vendor_id || null, inv.vendor_name || '', title,
-       Number(inv.total_amount), '계좌이체', inv.due_at || null,
-       req.user?.name || req.user?.username || '관리자',
-       JSON.stringify(items), '', JSON.stringify(approval), '작성'])
+    // 동시에 두 명이 만들면 같은 doc_no 를 뽑는다 → 충돌 시 번호를 다시 뽑아 재시도
+    await insertWithDocNo(
+      () => nextDocNo((sql, p) => conn.execute(sql, p), inv.issued_at),
+      (doc_no) => conn.execute(
+        `INSERT INTO expense_resolutions (id, doc_no, invoice_id, vendor_id, vendor_name, title, amount, pay_method, pay_date, applicant, items, note, approval, status)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [id, doc_no, inv.id, inv.vendor_id || null, inv.vendor_name || '', title,
+         Number(inv.total_amount), '계좌이체', inv.due_at || null,
+         req.user?.name || req.user?.username || '관리자',
+         JSON.stringify(items), '', JSON.stringify(approval), '작성']))
     await conn.commit()
-    const [[created]] = await req.db.execute('SELECT * FROM expense_resolutions WHERE id = ?', [id])
+    // 커밋 뒤 재조회도 같은 커넥션으로. req.db 를 쓰면 아직 conn 을 쥔 채 두 번째
+    // 커넥션을 요구하게 되는데, 테넌트 풀은 작아서(기본 3) 동시 요청 시 고갈된다.
+    const [[created]] = await conn.execute('SELECT * FROM expense_resolutions WHERE id = ?', [id])
     res.json(adapt(created))
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }

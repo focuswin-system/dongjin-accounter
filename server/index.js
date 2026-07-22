@@ -96,6 +96,32 @@ app.use((err, req, res, _next) => {
       : (err.expose && err.message) || '요청을 처리할 수 없어요. 입력값을 확인해 주세요.'
     return res.status(status).json({ error: msg })
   }
+  // 문서번호 충돌 — 두 사람이 동시에 발행하면 같은 MAX+1 을 뽑는다.
+  // 유니크 인덱스가 중복 저장은 막아주지만, 그대로 두면 사용자는 원인 모를 500 을 본다.
+  // (결의서는 lib/docno.js 로 자동 재시도한다. 나머지 채번은 번호가 후속 문장으로
+  //  흘러가 재시도 구조를 넣기 어려워, 여기서 '다시 시도' 안내로 바꾼다)
+  if (err && (err.code === 'ER_DUP_ENTRY' || err.errno === 1062)) {
+    const msg = /invoice_no/.test(err.sqlMessage || '') ? '청구번호'
+              : /doc_no/.test(err.sqlMessage || '')     ? '문서번호'
+              : null
+    console.warn(`[409] ${req.method} ${req.originalUrl}`, err.sqlMessage || err.message)
+    return res.status(409).json({
+      error: msg
+        ? `${msg}가 다른 작업과 겹쳤어요. 잠시 후 다시 시도해주세요.`
+        : '이미 등록된 값이에요. 중복되지 않는 값으로 입력해주세요.',
+    })
+  }
+  // 잠금 경합 — 여러 사람이 같은 순간에 같은 자원을 건드렸다.
+  //   1213 교착: InnoDB가 트랜잭션 전체를 롤백한다(= 아무것도 저장되지 않음)
+  //   1205 잠금 대기 초과
+  // 데이터는 안전하지만 그대로 500 을 주면 사용자는 무엇이 잘못됐는지 알 수 없다.
+  // 완전한 해법은 트랜잭션 전체를 재시도하는 것이고, 그건 라우트 구조를 바꿔야 한다.
+  if (err && (err.errno === 1213 || err.errno === 1205)) {
+    console.warn(`[409] ${req.method} ${req.originalUrl}  잠금 경합(${err.errno})`)
+    return res.status(409).json({
+      error: '다른 작업과 겹쳐 처리하지 못했어요. 저장된 건 없으니 다시 시도해주세요.',
+    })
+  }
   console.error(`[500] ${req.method} ${req.originalUrl}`, err)
   res.status(500).json({ error: '처리 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.' })
 })

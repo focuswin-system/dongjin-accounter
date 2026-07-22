@@ -91,9 +91,13 @@ async function enrich(conn, p) {
 }
 
 // ── 목록: ?month= 월별, ?scope= labor(급여대장, seq=0 기본) | service(용역·일용 회차, seq>=1) | all ──
+// 읽기 전용이라 트랜잭션이 필요 없다. 예전에는 커넥션 하나를 잡아 아래 N+1 루프
+// (행마다 enrich 가 추가 질의) 내내 쥐고 있었는데, 테넌트 풀은 작아서(기본 3)
+// 급여 화면 몇 개만 동시에 열려도 고갈된다. getConnection 이 try 밖이라
+// 획득 실패가 라우트를 빠져나가던 문제도 함께 사라진다.
 router.get('/', async (req, res, next) => {
-  const conn = await req.db.getConnection()
   try {
+    const conn = req.db
     const { month, scope } = req.query
     // 급여대장(근로)은 seq=0만. 용역·일용은 seq>=1. 기본은 labor(급여대장 화면 호환).
     const seqCond = scope === 'service' ? ' AND p.seq > 0' : scope === 'all' ? '' : ' AND p.seq = 0'
@@ -104,7 +108,7 @@ router.get('/', async (req, res, next) => {
     const out = []
     for (const p of rows) out.push(await enrich(conn, p))
     res.json(out)
-  } catch (e) { next(e) } finally { conn.release() }
+  } catch (e) { next(e) }
 })
 
 // ── 대표님용 요약: 지급 예정일 · 미지급 총액 · 과지급 건 ──

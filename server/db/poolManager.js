@@ -49,6 +49,7 @@ function wrap(pool, entry) {
     // 트랜잭션용. release() 될 때까지 사용 중으로 센다.
     getConnection: async () => {
       entry.inFlight++
+      entry.lastUsed = Date.now()
       let conn
       try {
         conn = await pool.getConnection()
@@ -62,6 +63,12 @@ function wrap(pool, entry) {
         if (released) return          // 이중 release 방어 (카운터가 음수로 새는 것 방지)
         released = true
         entry.inFlight--
+        // ⚠ 끝난 시점을 반드시 기록한다(track과 동일).
+        //   트랜잭션 쿼리는 conn.execute 로 나가 이 래퍼를 거치지 않으므로,
+        //   갱신하지 않으면 lastUsed 가 트랜잭션 시작 전 값으로 남는다.
+        //   그러면 40초짜리 임포트가 끝난 직후 그 풀이 '오래 안 쓴 풀'로 오인돼
+        //   회수되고, 같은 요청의 후속 쿼리가 "Pool is closed"로 죽는다.
+        entry.lastUsed = Date.now()
         release()
       }
       return conn
