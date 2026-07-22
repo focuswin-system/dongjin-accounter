@@ -323,9 +323,10 @@ export const api = {
     return res.json() // { headers, rows }
   },
 
-  async commitImport(items) {
+  // accountId — 대량 등록분이 어느 계좌에서 오간 것인지. 없으면 잔액에 반영되지 않아 서버가 400을 준다.
+  async commitImport(items, accountId) {
     try {
-      const r = await req('/transactions/import/commit', { method: 'POST', body: { items } })
+      const r = await req('/transactions/import/commit', { method: 'POST', body: { items, account_id: accountId || null } })
       return { ok: true, ...r }
     } catch (e) { return { ok: false, error: e.message } }
   },

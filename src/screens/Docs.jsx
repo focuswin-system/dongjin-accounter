@@ -1082,6 +1082,15 @@ export const ExcelScreen = () => {
   const [excluded, setExcluded] = useState(() => new Set())
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
+  // 대량 등록분이 어느 계좌에서 오간 것인지 — 없으면 잔액에 반영되지 않는다
+  const [importAccounts, setImportAccounts] = useState([])
+  const [importAccountId, setImportAccountId] = useState("")
+  useEffect(() => {
+    api.getAccounts().then(list => {
+      setImportAccounts(list)
+      setImportAccountId(prev => prev || list.find(a => a.kind === "bank")?.id || "")
+    })
+  }, [])
 
   const onFile = async (f) => {
     if (!f) return
@@ -1140,9 +1149,11 @@ export const ExcelScreen = () => {
 
   const onCommit = async () => {
     if (!okRows.length) return toast.push("등록할 정상 행이 없어요")
+    // 계좌가 없으면 등록된 수백 건이 통째로 계좌 잔액에서 빠진다(서버도 400으로 막는다)
+    if (!importAccountId) return toast.push("입출금 계좌를 선택해주세요")
     setBusy(true)
     const items = okRows.map(r => ({ date: r.date, vendor: r.vendor, contract: r.contract, kind: r.kind, category: r.category, amount: r.amount, memo: r.memo }))
-    const res = await api.commitImport(items)
+    const res = await api.commitImport(items, importAccountId)
     setBusy(false)
     if (!res.ok) return toast.push(res.error || "등록 실패")
     setResult(res)
@@ -1318,11 +1329,22 @@ export const ExcelScreen = () => {
                   </tbody>
                 </table>
               </div>
-              <div className="row" style={{ padding: 16, borderTop: "1px solid var(--line)" }}>
+              <div className="row" style={{ padding: 16, borderTop: "1px solid var(--line)", flexWrap: "wrap", gap: 12 }}>
+                <div style={{ minWidth: 260 }}>
+                  <label className="label" style={{ marginBottom: 6 }}>
+                    입출금 계좌 <span style={{ color: "var(--neg-ink)" }}>*</span>
+                  </label>
+                  <Combobox value={importAccountId} onChange={setImportAccountId}
+                    options={importAccounts.map(a => ({ value: a.id, label: a.name, sub: [a.kind === "card" ? "카드" : a.bankName, a.number].filter(Boolean).join(" ") }))}
+                    placeholder="계좌 선택" allowAdd={false}/>
+                  <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+                    이 거래들이 오간 계좌예요. 지정해야 계좌 잔액에 반영됩니다.
+                  </div>
+                </div>
                 <span className="text-sm text-muted">{preview.length > 100 ? `상위 100행 표시 · 전체 ${preview.length}행` : `전체 ${preview.length}행`}</span>
                 <div className="ml-auto row gap-8">
                   <button className="btn" onClick={reset}>취소</button>
-                  <button className="btn primary" disabled={busy || !okRows.length} style={{ opacity: (busy || !okRows.length) ? 0.5 : 1 }} onClick={onCommit}>
+                  <button className="btn primary" disabled={busy || !okRows.length || !importAccountId} style={{ opacity: (busy || !okRows.length || !importAccountId) ? 0.5 : 1 }} onClick={onCommit}>
                     <Icon.Check size={14}/> {busy ? "등록 중..." : `정상 ${okRows.length}건 일괄 등록`}
                   </button>
                 </div>

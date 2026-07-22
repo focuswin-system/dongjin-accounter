@@ -260,6 +260,13 @@ router.post('/import/commit', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     const items = Array.isArray(req.body.items) ? req.body.items : []
+    // 대량 등록은 '완료' 상태로 들어가므로 계좌가 없으면 그 수백 건이 통째로
+    // 계좌 잔액에서 누락된다(accounts.js calcBalance는 account_id로 계좌를 특정해 합산).
+    // 행별 계좌(it.account_id)를 우선하고, 없으면 일괄 지정 계좌를 쓴다.
+    const accountId = req.body.account_id || null
+    if (!accountId && items.some(it => !it.account_id)) {
+      return res.status(400).json({ error: '입출금 계좌를 선택해주세요. 계좌를 지정해야 잔액에 반영됩니다.' })
+    }
     const [vs] = await conn.execute('SELECT id, name FROM vendors')
     const vendorMap = {}; for (const v of vs) vendorMap[v.name] = v.id
     const [cs] = await conn.execute('SELECT id, name FROM contracts')
@@ -283,10 +290,13 @@ router.post('/import/commit', async (req, res, next) => {
       }
       const cname = String(it.contract || '').trim()
       const contractId = (cname && contractMap[cname]) ? contractMap[cname] : null
+      // account_id 를 반드시 넣는다. 빠지면 위 주석대로 '완료 상태'로만 들어가고
+      // 계좌 잔액에는 영원히 안 잡혀, 대량 등록 직후부터 통장과 장부가 어긋난다.
       await conn.execute(`
-        INSERT INTO transactions (id, kind, vendor_id, contract_id, category, amount, date, method, status, buyer_type, doc_no, memo)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-      `, [randomUUID(), it.kind, vendorId, contractId, it.category || '', it.amount, it.date,
+        INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, doc_no, memo)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `, [randomUUID(), it.kind, vendorId, contractId, it.account_id || accountId,
+          it.category || '', it.amount, it.date,
           '계좌이체', it.kind === 'income' ? '입금완료' : '지급완료', '공통',
           (cname && !contractId) ? cname : '', it.memo || ''])
       inserted++
