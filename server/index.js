@@ -86,8 +86,29 @@ if (fs.existsSync(path.join(DIST, 'index.html'))) {
 // 여기까지 온 것은 SQL 오류·TypeError 같은 내부 오류이므로, 원문을 그대로 내보내면
 // 테이블·컬럼명 등 내부 구조가 노출된다. 상세는 서버 로그로만 남긴다.
 app.use((err, req, res, _next) => {
+  // 미들웨어가 붙인 상태코드(예: multer 파일 크기 초과 413)는 존중한다.
+  // 전부 500으로 뭉개면 사용자는 자기 입력 문제인지 서버 장애인지 알 수 없다.
+  const status = Number(err.status || err.statusCode) || 0
+  if (status >= 400 && status < 500) {
+    console.warn(`[${status}] ${req.method} ${req.originalUrl}`, err.message)
+    const msg = err.code === 'LIMIT_FILE_SIZE'
+      ? '파일이 너무 커요 (최대 20MB)'
+      : (err.expose && err.message) || '요청을 처리할 수 없어요. 입력값을 확인해 주세요.'
+    return res.status(status).json({ error: msg })
+  }
   console.error(`[500] ${req.method} ${req.originalUrl}`, err)
   res.status(500).json({ error: '처리 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.' })
+})
+
+// ── 마지막 안전망 ──
+// Express 4는 async 핸들러의 rejection을 잡지 못한다. 그래서 catch 안에서
+// `await conn.rollback()` 이 다시 던지거나, try 밖의 `getConnection()` 이 실패하면
+// 그 거부가 라우트를 빠져나가 처리되지 않은 Promise 거부가 된다.
+// Node 20 기본값(--unhandled-rejections=throw)에서는 그 순간 **프로세스가 죽는다**
+// — 즉 한 요청의 DB 연결 문제가 전 회사의 서비스를 내린다.
+// 여기서 붙잡아, 최악의 결과를 '서버 다운'에서 '그 요청 하나 실패'로 낮춘다.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection] 요청 처리 중 붙잡히지 않은 거부:', reason)
 })
 
 // ── 기동 ──

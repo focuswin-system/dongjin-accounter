@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { kstToday } = require('../db')
 const { dueDatesToGenerate } = require('../lib/recurrence')
+const { rollbackQuietly } = require('../lib/tx')
 
 const router = Router()
 
@@ -79,7 +80,7 @@ router.post('/generate', async (req, res, next) => {
     await conn.commit()
     res.json({ generated, count: generated.length })
   } catch (e) {
-    await conn.rollback()
+    await rollbackQuietly(conn)
     next(e)
   } finally {
     conn.release()

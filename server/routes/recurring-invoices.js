@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday, kstDate } = require('../db')
 const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS } = require('../lib/recurrence')
+const { rollbackQuietly } = require('../lib/tx')
 
 const router = Router()
 
@@ -104,21 +105,21 @@ router.post('/:id/issue', async (req, res, next) => {
       "SELECT *, UNIX_TIMESTAMP(created_at) AS created_epoch FROM recurring_invoices WHERE id = ? FOR UPDATE",
       [req.params.id]
     )
-    if (!r) { await conn.rollback(); return res.status(404).json({ error: '정기청구를 찾을 수 없어요' }) }
+    if (!r) { await rollbackQuietly(conn); return res.status(404).json({ error: '정기청구를 찾을 수 없어요' }) }
     r.setup_date = kstDate(Number(r.created_epoch) * 1000)
     // pending과 동일한 미리보기 범위 — 발행 예정에 뜬 미래 회차를 그대로 발행할 수 있어야 한다.
     const dues = dueDatesToGenerate(r, kstToday(), { horizonDays: LOOKAHEAD_DAYS })
-    if (dues.length === 0) { await conn.rollback(); return res.status(409).json({ error: '발행할 회차가 없어요' }) }
+    if (dues.length === 0) { await rollbackQuietly(conn); return res.status(409).json({ error: '발행할 회차가 없어요' }) }
     const target = due || dues[0]
     if (target !== dues[0]) {
-      await conn.rollback()
+      await rollbackQuietly(conn)
       return res.status(409).json({ error: `앞선 회차(${dues[0]})부터 발행해주세요` })
     }
     // 미래 회차는 미수(입금 예정) 청구서로만 미리 발행 가능. 기입금(paid)은 실제 입금 거래가
     // 생기므로 미래 일자 금지 — 다른 발행 경로(계약 청구일정·거래·세금)와 동일한 규칙.
     if (paid) {
       const de = futureDateError(target)
-      if (de) { await conn.rollback(); return res.status(400).json({ error: de }) }
+      if (de) { await rollbackQuietly(conn); return res.status(400).json({ error: de }) }
     }
 
     const year = target.slice(0, 4)
@@ -158,7 +159,7 @@ router.post('/:id/issue', async (req, res, next) => {
     await conn.execute('UPDATE recurring_invoices SET last_generated = ? WHERE id = ?', [target, r.id])
     await conn.commit()
     res.json({ ok: true, id, invoice_no })
-  } catch (e) { await conn.rollback(); next(e) }
+  } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
 
@@ -204,7 +205,7 @@ router.post('/generate', async (req, res, next) => {
     await conn.commit()
     res.json({ generated, count: generated.length })
   } catch (e) {
-    await conn.rollback()
+    await rollbackQuietly(conn)
     next(e)
   } finally {
     conn.release()

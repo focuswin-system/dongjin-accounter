@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto')
 const multer = require('multer')
 const xlsx = require('xlsx')
 const { futureDateError } = require('../db')
+const { rollbackQuietly } = require('../lib/tx')
 
 const router = Router()
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
@@ -150,7 +151,7 @@ router.put('/:id', async (req, res, next) => {
       `, [vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
           amount, date, method||'', status||'지급완료', buyer_type||'공통', vessel_no||'', usage_place||'',
           doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'', item_id||null, account_code||null, req.params.id])
-      if (result.affectedRows === 0) { await conn.rollback(); return res.status(404).json({ error: 'Not found' }) }
+      if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
 
       // 이 거래에 걸린 청구서 매칭을 새 금액에 맞춰 조정하고 청구서 상태를 재계산한다.
       const [links] = await conn.execute('SELECT id, invoice_id, amount FROM invoice_matches WHERE txn_id = ?', [req.params.id])
@@ -168,7 +169,7 @@ router.put('/:id', async (req, res, next) => {
 
       await conn.commit()
       res.json({ ok: true })
-    } catch (e) { await conn.rollback(); throw e }
+    } catch (e) { await rollbackQuietly(conn); throw e }
     finally { conn.release() }
   } catch (e) { next(e) }
 })
@@ -234,7 +235,7 @@ router.delete('/:id', async (req, res, next) => {
     await conn.commit()
     res.json({ ok: true })
   } catch (e) {
-    await conn.rollback()
+    await rollbackQuietly(conn)
     if (e.code === 'ER_ROW_IS_REFERENCED_2' || e.errno === 1451) {
       return res.status(409).json({ error: '지급결의서·급여에 연결된 거래라 삭제할 수 없어요' })
     }
@@ -303,7 +304,7 @@ router.post('/import/commit', async (req, res, next) => {
     }
     await conn.commit()
     res.json({ inserted, createdVendors, skippedFuture })
-  } catch (e) { await conn.rollback(); next(e) }
+  } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
 

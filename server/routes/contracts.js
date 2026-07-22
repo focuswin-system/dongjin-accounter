@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto')
 const { futureDateError } = require('../db')
 const model = require('../contract-model')
 const { buildContractWorkbook } = require('../contract-export')
+const { rollbackQuietly } = require('../lib/tx')
 
 const router = Router()
 
@@ -176,20 +177,20 @@ router.post('/:id/renew', async (req, res, next) => {
   try {
     await conn.beginTransaction()
     const [[c]] = await conn.execute('SELECT * FROM contracts WHERE id = ? FOR UPDATE', [req.params.id])
-    if (!c) { await conn.rollback(); return res.status(404).json({ error: '계약을 찾을 수 없어요' }) }
+    if (!c) { await rollbackQuietly(conn); return res.status(404).json({ error: '계약을 찾을 수 없어요' }) }
 
     if (!['renew', 'close'].includes(result)) {
-      await conn.rollback(); return res.status(400).json({ error: "result는 'renew' 또는 'close'여야 해요" })
+      await rollbackQuietly(conn); return res.status(400).json({ error: "result는 'renew' 또는 'close'여야 해요" })
     }
     if (c.term_mode === 'open') {
-      await conn.rollback(); return res.status(400).json({ error: '무기한 계약은 갱신 대상이 아니에요. 끝내려면 계약 상태를 완료로 바꾸세요.' })
+      await rollbackQuietly(conn); return res.status(400).json({ error: '무기한 계약은 갱신 대상이 아니에요. 끝내려면 계약 상태를 완료로 바꾸세요.' })
     }
     const isRenew = result === 'renew'
     if (isRenew && !new_end_date) {
-      await conn.rollback(); return res.status(400).json({ error: '새 종료일을 입력해주세요' })
+      await rollbackQuietly(conn); return res.status(400).json({ error: '새 종료일을 입력해주세요' })
     }
     if (isRenew && c.end_date && new_end_date <= c.end_date) {
-      await conn.rollback(); return res.status(400).json({ error: '새 종료일은 기존 종료일보다 뒤여야 해요' })
+      await rollbackQuietly(conn); return res.status(400).json({ error: '새 종료일은 기존 종료일보다 뒤여야 해요' })
     }
 
     const recurring = c.billing_mode === 'recurring'
@@ -238,7 +239,7 @@ router.post('/:id/renew', async (req, res, next) => {
     }
     await conn.commit()
     res.json({ ok: true, seq: Number(maxseq) + 1, result: isRenew ? '갱신' : '미갱신', recurringExtended })
-  } catch (e) { await conn.rollback(); next(e) }
+  } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
 
@@ -266,9 +267,9 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
        LEFT JOIN vendors v ON c.vendor_id = v.id WHERE m.id = ? FOR UPDATE`,
       [req.params.milestoneId]
     )
-    if (!ms) { await conn.rollback(); return res.status(404).json({ error: '청구 일정을 찾을 수 없어요' }) }
+    if (!ms) { await rollbackQuietly(conn); return res.status(404).json({ error: '청구 일정을 찾을 수 없어요' }) }
     if (ms.status !== '예정' || (ms.invoice_id && ms.invoice_id !== '')) {
-      await conn.rollback(); return res.status(409).json({ error: '이미 발행된 청구 일정이에요' })
+      await rollbackQuietly(conn); return res.status(409).json({ error: '이미 발행된 청구 일정이에요' })
     }
     const isPurchase = ms.gubu === 'A' || ms.gubu === 'E'
     const kind = isPurchase ? 'received' : 'issued'
@@ -311,7 +312,7 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
       [paid ? (isPurchase ? '지급 완료' : '입금 완료') : (isPurchase ? '지급 예정' : '입금 예정'), invId, req.params.milestoneId])
     await conn.commit()
     res.json({ ok: true, id: invId, invoice_no, kind })
-  } catch (e) { await conn.rollback(); next(e) }
+  } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
 
@@ -332,8 +333,8 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
       'SELECT c.*, v.gubu FROM contracts c LEFT JOIN vendors v ON c.vendor_id = v.id WHERE c.id = ? FOR UPDATE',
       [req.params.id]
     )
-    if (!c) { await conn.rollback(); return res.status(404).json({ error: '계약을 찾을 수 없어요' }) }
-    if (c.billing_mode !== 'progress') { await conn.rollback(); return res.status(400).json({ error: '기성형 계약이 아니에요' }) }
+    if (!c) { await rollbackQuietly(conn); return res.status(404).json({ error: '계약을 찾을 수 없어요' }) }
+    if (c.billing_mode !== 'progress') { await rollbackQuietly(conn); return res.status(400).json({ error: '기성형 계약이 아니에요' }) }
 
     // 품목 정규화: 수량·단가·금액 계산(금액이 오면 그대로, 없으면 수량×단가). 이름 없거나 금액 0 이하 행은 제외.
     const clean = []
@@ -348,7 +349,7 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
       if (amount <= 0) continue
       clean.push({ item_id: l.item_id || null, name: nm, spec: l.spec || null, unit: l.unit || null, qty, unit_price: price, amount })
     }
-    if (clean.length === 0) { await conn.rollback(); return res.status(400).json({ error: '청구 금액이 있는 품목이 없어요' }) }
+    if (clean.length === 0) { await rollbackQuietly(conn); return res.status(400).json({ error: '청구 금액이 있는 품목이 없어요' }) }
 
     const supply = clean.reduce((s, l) => s + l.amount, 0)
     const vat = c.vat_mode === 'exempt' ? 0 : Math.round(supply * 0.1)
@@ -396,7 +397,7 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
     }
     await conn.commit()
     res.json({ ok: true, id: invId, invoice_no, kind, supply, vat, total })
-  } catch (e) { await conn.rollback(); next(e) }
+  } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
 
@@ -622,7 +623,7 @@ router.post('/', async (req, res, next) => {
     await conn.commit()
     res.json({ id })
   } catch (e) {
-    await conn.rollback()
+    await rollbackQuietly(conn)
     if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '이미 사용 중인 계약번호예요' })
     next(e)
   } finally {
@@ -637,7 +638,7 @@ router.put('/:id', async (req, res, next) => {
     await conn.beginTransaction()
     // 이번 텀 총액은 현재 텀 시작일 기준으로 다시 산출 (편집으로 단가·종료일이 바뀔 수 있음)
     const [[cur]] = await conn.execute('SELECT current_term_start, start_date FROM contracts WHERE id = ? FOR UPDATE', [req.params.id])
-    if (!cur) { await conn.rollback(); return res.status(404).json({ error: 'Not found' }) }
+    if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     const termStart = cur.current_term_start || start_date || cur.start_date || null
     const f = model.normalize({ ...req.body, current_term_start: termStart })
     const [result] = await conn.execute(
@@ -649,7 +650,7 @@ router.put('/:id', async (req, res, next) => {
        file_url||null, file_name||null, contract_no||null,
        f.billing_mode, f.term_mode, f.unit_amount, f.billing_period, f.billing_day, f.initial_amount, f.term_months, f.notice_days, termStart, f.vat_mode, req.params.id]
     )
-    if (result.affectedRows === 0) { await conn.rollback(); return res.status(404).json({ error: 'Not found' }) }
+    if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     // 품목 단가표: 기성형이면 폼에서 넘어온 대로 통째 교체. 기성형이 아니면(총액형·정기형으로 전환 등)
     // 남아 있을 수 있는 품목표를 비워 고아 데이터를 남기지 않는다.
     if (f.billing_mode === 'progress') {
@@ -660,7 +661,7 @@ router.put('/:id', async (req, res, next) => {
     await conn.commit()
     res.json({ ok: true })
   } catch (e) {
-    await conn.rollback()
+    await rollbackQuietly(conn)
     if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '이미 사용 중인 계약번호예요' })
     next(e)
   } finally {
@@ -765,7 +766,7 @@ router.post('/:id/milestones', async (req, res, next) => {
     await conn.commit()
     res.json({ ok: true })
   } catch (e) {
-    await conn.rollback()
+    await rollbackQuietly(conn)
     next(e)
   } finally {
     conn.release()

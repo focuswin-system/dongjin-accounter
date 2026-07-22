@@ -1,6 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
+const { rollbackQuietly } = require('../lib/tx')
 
 const router = Router()
 
@@ -220,7 +221,7 @@ router.post('/generate', async (req, res, next) => {
     }
     await conn.commit()
     res.json({ ok: true, created })
-  } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
+  } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
 })
 
 // ── 실제 급여 지급 등록: 지출 거래 생성 + 급여대장 연결 ──
@@ -256,7 +257,7 @@ router.post('/:id/pay', async (req, res, next) => {
     await conn.execute('UPDATE payroll SET status = ? WHERE id = ?', [status, p.id])
     await conn.commit()
     res.json({ ok: true, txnId, paid: Number(paid), remain: net - Number(paid) })
-  } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
+  } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
 })
 
 // ── 지급 취소(연결된 지출 삭제) ──
@@ -274,7 +275,7 @@ router.delete('/:id/pay/:txnId', async (req, res, next) => {
     }
     await conn.commit()
     res.json({ ok: true })
-  } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
+  } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
 })
 
 // 이미 지급된 급여가 붙어 있는 급여대장은 지우지 않는다.
@@ -298,7 +299,7 @@ router.delete('/month/:month', async (req, res, next) => {
     await conn.beginTransaction()
     const paid = await linkedPayments(conn, 'SELECT id FROM payroll WHERE month = ? AND seq = 0', [req.params.month])
     if (paid.cnt > 0) {
-      await conn.rollback()
+      await rollbackQuietly(conn)
       return res.status(409).json({
         error: `이미 지급한 급여 ${paid.cnt}건(${paid.amt.toLocaleString('ko-KR')}원)이 있어 비울 수 없어요. 급여 상세에서 지급 내역을 먼저 취소해주세요.`,
       })
@@ -307,7 +308,7 @@ router.delete('/month/:month', async (req, res, next) => {
     await conn.execute('DELETE FROM payroll WHERE month = ? AND seq = 0', [req.params.month])
     await conn.commit()
     res.json({ ok: true, deleted: cnt })
-  } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
+  } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
 })
 
 router.delete('/:id', async (req, res, next) => {
@@ -316,7 +317,7 @@ router.delete('/:id', async (req, res, next) => {
     await conn.beginTransaction()
     const paid = await linkedPayments(conn, 'SELECT ?', [req.params.id])
     if (paid.cnt > 0) {
-      await conn.rollback()
+      await rollbackQuietly(conn)
       return res.status(409).json({
         error: `이미 지급한 급여 ${paid.cnt}건(${paid.amt.toLocaleString('ko-KR')}원)이 있어 삭제할 수 없어요. 지급 내역을 먼저 취소해주세요.`,
       })
@@ -324,7 +325,7 @@ router.delete('/:id', async (req, res, next) => {
     await conn.execute('DELETE FROM payroll WHERE id = ?', [req.params.id])
     await conn.commit()
     res.json({ ok: true })
-  } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
+  } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
 })
 
 module.exports = router

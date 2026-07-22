@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const multer = require('multer')
 const xlsx = require('xlsx')
+const { rollbackQuietly } = require('../lib/tx')
 
 const router = Router()
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
@@ -130,7 +131,7 @@ router.post('/import/commit', async (req, res, next) => {
     }
     await conn.commit()
     res.json({ inserted, updated, createdNames })
-  } catch (e) { await conn.rollback(); next(e) }
+  } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
 

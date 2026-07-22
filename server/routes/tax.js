@@ -1,6 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError } = require('../db')
+const { rollbackQuietly } = require('../lib/tx')
 
 const router = Router()
 
@@ -122,7 +123,7 @@ router.put('/vat', async (req, res, next) => {
     }
     await conn.commit()
     res.json({ ok: true, txnId })
-  } catch (e) { await conn.rollback(); next(e) }
+  } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
 
@@ -174,7 +175,7 @@ router.post('/others', async (req, res, next) => {
     )
     await conn.commit()
     res.json({ ok: true, id })
-  } catch (e) { await conn.rollback(); next(e) }
+  } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
 
@@ -184,7 +185,7 @@ router.put('/others/:id', async (req, res, next) => {
   try {
     await conn.beginTransaction()
     const [[cur]] = await conn.execute('SELECT txn_id FROM other_taxes WHERE id=?', [req.params.id])
-    if (!cur) { await conn.rollback(); return res.status(404).json({ error: 'Not found' }) }
+    if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     const txnId = await syncOtherTaxTxn(req.body, cur.txn_id || null, conn)
     await conn.execute(
       'UPDATE other_taxes SET name=?, period=?, tax_amount=?, paid_amount=?, paid_date=?, status=?, memo=?, account_id=?, txn_id=?, account_code=? WHERE id=?',
@@ -192,7 +193,7 @@ router.put('/others/:id', async (req, res, next) => {
     )
     await conn.commit()
     res.json({ ok: true })
-  } catch (e) { await conn.rollback(); next(e) }
+  } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
 
@@ -205,7 +206,7 @@ router.delete('/others/:id', async (req, res, next) => {
     if (cur?.txn_id) await conn.execute('DELETE FROM transactions WHERE id=?', [cur.txn_id])   // 연결된 납부 거래도 정리
     await conn.commit()
     res.json({ ok: true })
-  } catch (e) { await conn.rollback(); next(e) }
+  } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
 

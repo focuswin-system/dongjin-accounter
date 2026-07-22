@@ -1,6 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
+const { rollbackQuietly } = require('../lib/tx')
 
 const router = Router()
 
@@ -98,9 +99,12 @@ async function withMetrics(conn, c) {
 }
 
 // ── 목록: ?kind= (labor / service,daily) ──
+// 읽기 전용이라 트랜잭션이 필요 없다. 예전에는 커넥션을 하나 잡아 아래 N+1 루프 내내
+// 쥐고 있었는데, 테넌트 풀은 작아서(기본 3) 목록 몇 개만 동시에 열려도 고갈된다.
+// 게다가 getConnection() 이 try 밖에 있어 획득 실패가 라우트를 빠져나갔다.
 router.get('/', async (req, res, next) => {
-  const conn = await req.db.getConnection()
   try {
+    const conn = req.db
     const { kind, income_type, status } = req.query
     let sql = `SELECT w.*, e.name AS employee_name, e.emp_no, e.department, e.status AS emp_status, e.leave_date
                FROM work_contracts w LEFT JOIN employees e ON w.employee_id = e.id WHERE 1=1`
@@ -124,7 +128,7 @@ router.get('/', async (req, res, next) => {
       out.push(await withMetrics(conn, { ...r, pay_items: undefined, monthly_net }))
     }
     res.json(out)
-  } catch (e) { next(e) } finally { conn.release() }
+  } catch (e) { next(e) }
 })
 
 // ── 상용전환 경고 대상: 일용 계약 중 계속 고용 개월수 >= conv_alert_months ──
@@ -221,7 +225,7 @@ router.post('/', async (req, res, next) => {
       )
       employeeId = eid
     }
-    if (!employeeId) { await conn.rollback(); return res.status(400).json({ error: '대상 인력이 필요해요' }) }
+    if (!employeeId) { await rollbackQuietly(conn); return res.status(400).json({ error: '대상 인력이 필요해요' }) }
 
     const f = normalize(req.body)
     // 근로계약은 직원당 1건만 진행중 — 연봉 인상/재계약으로 새 근로계약을 만들면 기존 진행중 근로계약을
@@ -242,7 +246,7 @@ router.post('/', async (req, res, next) => {
     if (f.kind !== 'labor') await replaceItems(conn, id, req.body.items)
     await conn.commit()
     res.json({ ok: true, id, employee_id: employeeId })
-  } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
+  } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
 })
 
 router.put('/:id', async (req, res, next) => {
@@ -250,7 +254,7 @@ router.put('/:id', async (req, res, next) => {
   try {
     await conn.beginTransaction()
     const [[cur]] = await conn.execute('SELECT id, kind FROM work_contracts WHERE id = ? FOR UPDATE', [req.params.id])
-    if (!cur) { await conn.rollback(); return res.status(404).json({ error: 'Not found' }) }
+    if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     const f = normalize(req.body)
     await conn.execute(
       `UPDATE work_contracts SET kind=?, income_type=?, title=?, employ_type_id=?, employ_type=?, start_date=?, end_date=?,
@@ -267,7 +271,7 @@ router.put('/:id', async (req, res, next) => {
     }
     await conn.commit()
     res.json({ ok: true })
-  } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
+  } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
 })
 
 // ── 복제: 계약 + 단가표를 새 계약으로. 같은 인력의 다음 계약 or 다른 인력에게 같은 조건. ──
@@ -276,7 +280,7 @@ router.post('/:id/duplicate', async (req, res, next) => {
   try {
     await conn.beginTransaction()
     const [[src]] = await conn.execute('SELECT * FROM work_contracts WHERE id = ?', [req.params.id])
-    if (!src) { await conn.rollback(); return res.status(404).json({ error: 'Not found' }) }
+    if (!src) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     const newId = randomUUID()
     const employeeId = req.body.employee_id || src.employee_id
     await conn.execute(
@@ -299,7 +303,7 @@ router.post('/:id/duplicate', async (req, res, next) => {
     }
     await conn.commit()
     res.json({ ok: true, id: newId })
-  } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
+  } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
 })
 
 router.delete('/:id', async (req, res, next) => {
@@ -312,7 +316,7 @@ router.delete('/:id', async (req, res, next) => {
     await conn.execute('DELETE FROM work_contracts WHERE id = ?', [req.params.id])  // items·docs는 CASCADE
     await conn.commit()
     res.json({ ok: true })
-  } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
+  } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
 })
 
 // ── 계약서 첨부(다중) ──
@@ -347,7 +351,7 @@ router.post('/:id/pay', async (req, res, next) => {
       'SELECT w.*, e.name AS employee_name FROM work_contracts w JOIN employees e ON w.employee_id = e.id WHERE w.id = ? FOR UPDATE',
       [req.params.id]
     )
-    if (!c) { await conn.rollback(); return res.status(404).json({ error: '계약을 찾을 수 없어요' }) }
+    if (!c) { await rollbackQuietly(conn); return res.status(404).json({ error: '계약을 찾을 수 없어요' }) }
 
     // 라인 정규화(수량×단가). 이름 없거나 금액 0 이하 제외.
     const clean = []
@@ -361,7 +365,7 @@ router.post('/:id/pay', async (req, res, next) => {
       if (amount <= 0) continue
       clean.push({ item_id: l.item_id || null, name: nm, spec: l.spec || null, unit: l.unit || null, qty, unit_price: price, amount })
     }
-    if (clean.length === 0) { await conn.rollback(); return res.status(400).json({ error: '지급할 항목이 없어요' }) }
+    if (clean.length === 0) { await rollbackQuietly(conn); return res.status(400).json({ error: '지급할 항목이 없어요' }) }
 
     // 명세 items = 용역비 라인(earn) + 원천징수 등 공제. 공제는 확정 금액 입력(요율 계산 안 함).
     const items = clean.map(l => ({ label: l.name, kind: 'earn', mode: 'fixed', value: l.amount }))
@@ -390,7 +394,7 @@ router.post('/:id/pay', async (req, res, next) => {
       // 예전에는 계좌 미지정 시 '가장 오래된 은행계좌'로 조용히 대체했다. 그러면 실제로 돈이
       // 나간 계좌가 아닌 곳에서 차감돼 두 계좌가 동시에 틀어진다(한쪽은 과소, 한쪽은 과대).
       // 은행계좌가 하나도 없으면 NULL이 되어 어느 잔액에도 안 잡혔다. 명시 선택을 요구한다.
-      if (!account_id) { await conn.rollback(); return res.status(400).json({ error: '출금 계좌를 선택해주세요' }) }
+      if (!account_id) { await rollbackQuietly(conn); return res.status(400).json({ error: '출금 계좌를 선택해주세요' }) }
       txnId = randomUUID()
       // 소득구분에 맞는 카테고리로 지출 기록(급여와 구분되어 신고자료 집계가 섞이지 않게)
       const category = c.income_type === '일용' ? '일용노무비' : c.income_type === '기타' ? '기타소득 지급' : '용역비'
@@ -405,7 +409,7 @@ router.post('/:id/pay', async (req, res, next) => {
     }
     await conn.commit()
     res.json({ ok: true, id: payrollId, seq, gross, deduction, net, txnId })
-  } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
+  } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
 })
 
 module.exports = router

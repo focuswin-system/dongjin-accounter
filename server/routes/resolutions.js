@@ -1,6 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
+const { rollbackQuietly } = require('../lib/tx')
 
 const router = Router()
 
@@ -91,8 +92,8 @@ router.post('/from-invoice/:invoiceId', async (req, res, next) => {
        LEFT JOIN vendors v ON i.vendor_id = v.id
        LEFT JOIN contracts c ON i.contract_id = c.id
        WHERE i.id = ? FOR UPDATE`, [req.params.invoiceId])
-    if (!inv) { await conn.rollback(); return res.status(404).json({ error: '청구서를 찾을 수 없어요' }) }
-    if (inv.kind !== 'received') { await conn.rollback(); return res.status(400).json({ error: '매입(수취) 청구서만 지급결의서를 만들 수 있어요' }) }
+    if (!inv) { await rollbackQuietly(conn); return res.status(404).json({ error: '청구서를 찾을 수 없어요' }) }
+    if (inv.kind !== 'received') { await rollbackQuietly(conn); return res.status(400).json({ error: '매입(수취) 청구서만 지급결의서를 만들 수 있어요' }) }
 
     const doc_no = await nextDocNo((sql, p) => conn.execute(sql, p), inv.issued_at)
 
@@ -128,7 +129,7 @@ router.post('/from-invoice/:invoiceId', async (req, res, next) => {
     await conn.commit()
     const [[created]] = await req.db.execute('SELECT * FROM expense_resolutions WHERE id = ?', [id])
     res.json(adapt(created))
-  } catch (e) { await conn.rollback(); next(e) }
+  } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
 
@@ -160,8 +161,8 @@ router.post('/:id/process', async (req, res, next) => {
   try {
     await conn.beginTransaction()
     const [[r]] = await conn.execute('SELECT * FROM expense_resolutions WHERE id = ? FOR UPDATE', [req.params.id])
-    if (!r) { await conn.rollback(); return res.status(404).json({ error: '결의서를 찾을 수 없어요' }) }
-    if (r.status === '완료') { await conn.rollback(); return res.status(409).json({ error: '이미 처리된 결의서예요' }) }
+    if (!r) { await rollbackQuietly(conn); return res.status(404).json({ error: '결의서를 찾을 수 없어요' }) }
+    if (r.status === '완료') { await rollbackQuietly(conn); return res.status(409).json({ error: '이미 처리된 결의서예요' }) }
 
     // 매입 청구서 연결 결의서인데 그 청구서가 이미 완납이면, 새 지출을 만들어봐야 매칭할 잔액이 없어
     // 지출만 붕 뜬다(이중 계상). 처리 자체를 막는다.
@@ -173,7 +174,7 @@ router.post('/:id/process', async (req, res, next) => {
         invAccountId = inv.account_id || null
         const [[{ paid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [r.invoice_id])
         if (Number(inv.total_amount) - Number(paid) <= 0) {
-          await conn.rollback(); return res.status(409).json({ error: '연결된 청구서가 이미 지급 완료됐어요' })
+          await rollbackQuietly(conn); return res.status(409).json({ error: '연결된 청구서가 이미 지급 완료됐어요' })
         }
       }
     }
@@ -183,12 +184,12 @@ router.post('/:id/process', async (req, res, next) => {
     // 그대로 남아 조용히 틀어진다. 아래 두 분기 모두 이 조건을 반드시 만족시킨다.
     let linkedTxnId = null
     if (mode === 'link') {
-      if (!txn_id) { await conn.rollback(); return res.status(400).json({ error: '연결할 지출 거래를 선택해주세요' }) }
+      if (!txn_id) { await rollbackQuietly(conn); return res.status(400).json({ error: '연결할 지출 거래를 선택해주세요' }) }
       const [[t]] = await conn.execute("SELECT id, status, account_id FROM transactions WHERE id = ? AND kind='expense'", [txn_id])
-      if (!t) { await conn.rollback(); return res.status(404).json({ error: '지출 거래를 찾을 수 없어요' }) }
+      if (!t) { await rollbackQuietly(conn); return res.status(404).json({ error: '지출 거래를 찾을 수 없어요' }) }
       // 결의서 처리는 '집행'이다. 연결 대상이 아직 미지급이면 지급완료로 바꿔야 잔액에서 빠진다.
       const acct = t.account_id || account_id || invAccountId || null
-      if (!acct) { await conn.rollback(); return res.status(400).json({ error: '이 지출에는 출금 계좌가 없어요. 계좌를 선택해주세요' }) }
+      if (!acct) { await rollbackQuietly(conn); return res.status(400).json({ error: '이 지출에는 출금 계좌가 없어요. 계좌를 선택해주세요' }) }
       linkedTxnId = txn_id
       await conn.execute("UPDATE transactions SET doc_no = ? WHERE id = ? AND (doc_no IS NULL OR doc_no = '' OR doc_no = '공통')", [r.doc_no, txn_id])
       await conn.execute("UPDATE transactions SET status = '지급완료', account_id = ? WHERE id = ?", [acct, txn_id])
@@ -196,12 +197,12 @@ router.post('/:id/process', async (req, res, next) => {
       // 실효 지출일 = 넘어온 date, 없으면 결의서 지급예정일(pay_date), 그것도 없으면 오늘.
       // date만 검사하면 미래인 pay_date로 집행될 때 미래날짜 차단이 우회되므로 실효 날짜로 막는다.
       const effDate = date || r.pay_date || kstToday()
-      if (futureDateError(effDate)) { await conn.rollback(); return res.status(400).json({ error: '미래 날짜로는 처리할 수 없어요 (오늘까지만 가능)' }) }
+      if (futureDateError(effDate)) { await rollbackQuietly(conn); return res.status(400).json({ error: '미래 날짜로는 처리할 수 없어요 (오늘까지만 가능)' }) }
       const amt = Number(amount) > 0 ? Number(amount) : Number(r.amount)
       // 계좌가 없으면 만들지 않는다. NULL로 넣으면 지출이 어느 계좌 잔액에서도 빠지지 않아
       // 사용자는 돈이 나간 줄 모른 채 잔액을 과대 계상하게 된다(과거 F-02와 동일 유형).
       const acct = account_id || invAccountId || null
-      if (!acct) { await conn.rollback(); return res.status(400).json({ error: '출금 계좌를 선택해주세요' }) }
+      if (!acct) { await rollbackQuietly(conn); return res.status(400).json({ error: '출금 계좌를 선택해주세요' }) }
       const id = randomUUID()
       await conn.execute(
         `INSERT INTO transactions (id, kind, vendor_id, account_id, category, amount, date, method, status, buyer_type, doc_no, memo)
@@ -211,7 +212,7 @@ router.post('/:id/process', async (req, res, next) => {
          '지급완료', '공통', r.doc_no, `결의서 ${r.doc_no} 집행`])
       linkedTxnId = id
     } else {
-      await conn.rollback(); return res.status(400).json({ error: "mode는 'link' 또는 'create'여야 해요" })
+      await rollbackQuietly(conn); return res.status(400).json({ error: "mode는 'link' 또는 'create'여야 해요" })
     }
 
     // 매입 청구서에서 발행한 결의서면, 처리한 지출을 그 청구서에 지급 매칭한다.
@@ -224,7 +225,7 @@ router.post('/:id/process', async (req, res, next) => {
         const remainBefore = Number(inv.total_amount) - Number(prevPaid)
         // 이 지출이 이미 다른 청구서에 매칭돼 있으면 재매칭 금지(이중 계상 방지)
         const [[dupMatch]] = await conn.execute('SELECT invoice_id FROM invoice_matches WHERE txn_id = ? LIMIT 1', [linkedTxnId])
-        if (dupMatch) { await conn.rollback(); return res.status(409).json({ error: '이미 다른 청구서에 매칭된 지출이에요' }) }
+        if (dupMatch) { await rollbackQuietly(conn); return res.status(409).json({ error: '이미 다른 청구서에 매칭된 지출이에요' }) }
         if (remainBefore > 0) {
           const [[txnRow]] = await conn.execute('SELECT amount FROM transactions WHERE id = ?', [linkedTxnId])
           const matchAmount = Math.min(Number(txnRow.amount) || 0, remainBefore)
@@ -242,7 +243,7 @@ router.post('/:id/process', async (req, res, next) => {
     await conn.execute("UPDATE expense_resolutions SET status='완료', txn_id=? WHERE id=?", [linkedTxnId, req.params.id])
     await conn.commit()
     res.json({ ok: true, txn_id: linkedTxnId, invoicePaid })
-  } catch (e) { await conn.rollback(); next(e) }
+  } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
 

@@ -1,6 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
+const { rollbackQuietly } = require('../lib/tx')
 
 const router = Router()
 
@@ -133,7 +134,7 @@ router.delete('/:id', async (req, res, next) => {
     const id = req.params.id
     // 입금/지급(매칭) 내역이 있으면 삭제 금지 — 이미 장부에 반영된 돈이므로
     const [[{ mcnt }]] = await conn.execute('SELECT COUNT(*) AS mcnt FROM invoice_matches WHERE invoice_id = ?', [id])
-    if (mcnt > 0) { await conn.rollback(); return res.status(409).json({ error: '입금·지급 내역이 있는 청구서는 삭제할 수 없어요. 먼저 입금 매칭을 취소하세요.' }) }
+    if (mcnt > 0) { await rollbackQuietly(conn); return res.status(409).json({ error: '입금·지급 내역이 있는 청구서는 삭제할 수 없어요. 먼저 입금 매칭을 취소하세요.' }) }
     await conn.execute('DELETE FROM invoice_matches WHERE invoice_id = ?', [id])
     await conn.execute('DELETE FROM invoice_docs WHERE invoice_id = ?', [id])
     await conn.execute('UPDATE transactions SET invoice_id = NULL WHERE invoice_id = ?', [id])
@@ -142,7 +143,7 @@ router.delete('/:id', async (req, res, next) => {
     await conn.execute('DELETE FROM invoices WHERE id = ?', [id])
     await conn.commit()
     res.json({ ok: true })
-  } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
+  } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
 })
 
 router.post('/:id/matches', async (req, res, next) => {
@@ -155,22 +156,22 @@ router.post('/:id/matches', async (req, res, next) => {
   try {
     await conn.beginTransaction()
     const [[inv]] = await conn.execute('SELECT * FROM invoices WHERE id = ? FOR UPDATE', [invoiceId])
-    if (!inv) { await conn.rollback(); return res.status(404).json({ error: 'Not found' }) }
+    if (!inv) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     const isIssued = inv.kind === 'issued'
 
     // 과입금 방지: 잔여를 초과하지 않도록 매칭 금액 제한
     const [[{ paid: prevPaid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [invoiceId])
     const remainBefore = Number(inv.total_amount) - Number(prevPaid)
-    if (remainBefore <= 0) { await conn.rollback(); return res.status(400).json({ error: '이미 정산이 완료된 청구서예요' }) }
+    if (remainBefore <= 0) { await rollbackQuietly(conn); return res.status(400).json({ error: '이미 정산이 완료된 청구서예요' }) }
     const matchAmount = Math.min(Number(amount) || 0, remainBefore)
-    if (matchAmount <= 0) { await conn.rollback(); return res.status(400).json({ error: '매칭 금액이 올바르지 않아요' }) }
+    if (matchAmount <= 0) { await rollbackQuietly(conn); return res.status(400).json({ error: '매칭 금액이 올바르지 않아요' }) }
 
     // 매칭 대상 거래: 기존 거래가 있으면 그대로, 없으면 실제 거래를 새로 만들어 거래내역에 반영
     let realTxnId = null
     if (txn_id) {
       // 다른 청구서에 이미 매칭된 거래는 재사용 금지(이중 매칭 방지)
       const [[dup]] = await conn.execute('SELECT invoice_id FROM invoice_matches WHERE txn_id = ? LIMIT 1', [txn_id])
-      if (dup) { await conn.rollback(); return res.status(409).json({ error: '이미 다른 청구서에 매칭된 거래예요' }) }
+      if (dup) { await rollbackQuietly(conn); return res.status(409).json({ error: '이미 다른 청구서에 매칭된 거래예요' }) }
       const [[ex]] = await conn.execute('SELECT id FROM transactions WHERE id = ?', [txn_id])
       if (ex) realTxnId = ex.id
     }
@@ -181,7 +182,7 @@ router.post('/:id/matches', async (req, res, next) => {
       const [[cur]] = await conn.execute('SELECT status, account_id FROM transactions WHERE id = ?', [realTxnId])
       const acct = cur?.account_id || account_id || inv.account_id || null
       if (!acct) {
-        await conn.rollback()
+        await rollbackQuietly(conn)
         return res.status(400).json({ error: '이 거래에는 계좌가 없어요. 거래내역에서 계좌를 지정한 뒤 정산해주세요' })
       }
       await conn.execute(
@@ -194,7 +195,7 @@ router.post('/:id/matches', async (req, res, next) => {
       // 여기서 막지 않으면 입금이 통째로 잔액에서 누락된다 — 과거 F-02와 동일 유형.
       const acct = account_id || inv.account_id || null
       if (!acct) {
-        await conn.rollback()
+        await rollbackQuietly(conn)
         return res.status(400).json({ error: `${isIssued ? '입금' : '출금'} 계좌를 선택해주세요` })
       }
       realTxnId = randomUUID()
@@ -221,7 +222,7 @@ router.post('/:id/matches', async (req, res, next) => {
 
     await conn.commit()
     res.json({ id, txn_id: realTxnId })
-  } catch (e) { await conn.rollback(); next(e) }
+  } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
 
@@ -265,7 +266,7 @@ router.delete('/:id/matches/:matchId', async (req, res, next) => {
   try {
     await conn.beginTransaction()
     const [[inv]] = await conn.execute('SELECT * FROM invoices WHERE id = ? FOR UPDATE', [req.params.id])
-    if (!inv) { await conn.rollback(); return res.status(404).json({ error: 'Not found' }) }
+    if (!inv) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     // 삭제할 매칭의 거래는 청구서 연결만 해제(장부에는 남김 — 실제 오간 돈일 수 있어 삭제하지 않는다).
     const [[match]] = await conn.execute('SELECT txn_id FROM invoice_matches WHERE id = ? AND invoice_id = ?', [req.params.matchId, req.params.id])
     await conn.execute('DELETE FROM invoice_matches WHERE id = ? AND invoice_id = ?', [req.params.matchId, req.params.id])
@@ -281,7 +282,7 @@ router.delete('/:id/matches/:matchId', async (req, res, next) => {
     await conn.execute('UPDATE milestones SET status = ? WHERE invoice_id = ?', [status, req.params.id])
     await conn.commit()
     res.json({ ok: true, status })
-  } catch (e) { await conn.rollback(); next(e) } finally { conn.release() }
+  } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
 })
 
 // ── 청구서 첨부 서류 ──
