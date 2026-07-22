@@ -4,6 +4,7 @@ const { futureDateError, kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
 const { insertWithDocNo } = require('../lib/docno')
+const { withTx, httpError } = require('../lib/withTx')
 
 const router = Router()
 
@@ -89,20 +90,21 @@ router.post('/', async (req, res, next) => {
 
 // 매입 청구서 1건 → 결의서 생성(있으면 그대로 반환). 지급 전 결재용.
 // 거래(txn_id)는 아직 없을 수 있다 — 나중에 지급 매칭되면 그 거래와 연결(선택).
+// 동시 생성이 많은 경로라 교착(deadlock)이 실제로 난다. 교착은 트랜잭션 전체가
+// 롤백되므로 문 단위 재시도로는 못 살린다 → withTx 로 begin 부터 다시 시도한다.
 router.post('/from-invoice/:invoiceId', async (req, res, next) => {
-  const conn = await req.db.getConnection()
   try {
-    await conn.beginTransaction()
+    const out = await withTx(req.db, async (conn) => {
     const [[existing]] = await conn.execute('SELECT * FROM expense_resolutions WHERE invoice_id = ?', [req.params.invoiceId])
-    if (existing) { await conn.commit(); return res.json({ ...adapt(existing), reused: true }) }
+    if (existing) return { ...adapt(existing), reused: true }
 
     const [[inv]] = await conn.execute(
       `SELECT i.*, v.name AS vendor_name, c.name AS contract_name FROM invoices i
        LEFT JOIN vendors v ON i.vendor_id = v.id
        LEFT JOIN contracts c ON i.contract_id = c.id
        WHERE i.id = ? FOR UPDATE`, [req.params.invoiceId])
-    if (!inv) { await rollbackQuietly(conn); return res.status(404).json({ error: '청구서를 찾을 수 없어요' }) }
-    if (inv.kind !== 'received') { await rollbackQuietly(conn); return res.status(400).json({ error: '매입(수취) 청구서만 지급결의서를 만들 수 있어요' }) }
+    if (!inv) throw httpError(404, '청구서를 찾을 수 없어요')
+    if (inv.kind !== 'received') throw httpError(400, '매입(수취) 청구서만 지급결의서를 만들 수 있어요')
 
 
     // 지급결의서는 '지급액'(gross, VAT 포함)을 결재받는 문서 → 라인 합계가 지급액과 같아야 한다.
@@ -137,13 +139,13 @@ router.post('/from-invoice/:invoiceId', async (req, res, next) => {
          Number(inv.total_amount), '계좌이체', inv.due_at || null,
          req.user?.name || req.user?.username || '관리자',
          JSON.stringify(items), '', JSON.stringify(approval), '작성']))
-    await conn.commit()
-    // 커밋 뒤 재조회도 같은 커넥션으로. req.db 를 쓰면 아직 conn 을 쥔 채 두 번째
-    // 커넥션을 요구하게 되는데, 테넌트 풀은 작아서(기본 3) 동시 요청 시 고갈된다.
+    // 커밋 전 같은 커넥션으로 재조회. req.db 를 쓰면 conn 을 쥔 채 두 번째 커넥션을
+    // 요구하게 되는데, 테넌트 풀은 작아서(기본 3) 동시 요청 시 고갈된다.
     const [[created]] = await conn.execute('SELECT * FROM expense_resolutions WHERE id = ?', [id])
-    res.json(adapt(created))
-  } catch (e) { await rollbackQuietly(conn); next(e) }
-  finally { conn.release() }
+    return adapt(created)
+    })
+    res.json(out)
+  } catch (e) { next(e) }
 })
 
 // 처리 후보 지출 거래 — 이 결의서와 연결할 만한 미연결 지출.

@@ -1,5 +1,6 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
+const { rollbackQuietly } = require('../lib/tx')
 
 const router = Router()
 
@@ -42,13 +43,23 @@ router.put('/:id', async (req, res, next) => {
 })
 
 // 기본 프리셋 지정(하나만 기본이 되도록)
+//
+// 예전에는 '전체 해제 → 대상 지정' 두 문을 트랜잭션 없이 실행했다. 대상 id 가 없거나
+// 두 문 사이에서 실패하면 **아무것도 기본이 아닌 상태**로 남는다. 그러면 결의서를 만들 때
+// defaultApproval() 이 프리셋을 못 찾아 하드코딩 결재선(담당/결재/대표)으로 조용히 떨어진다
+// — 회사가 설정한 결재선이 무시된 채 문서가 만들어진다.
 router.patch('/:id/default', async (req, res, next) => {
+  const conn = await req.db.getConnection()
   try {
-    await req.db.execute('UPDATE approval_presets SET is_default=0')
-    const [r] = await req.db.execute('UPDATE approval_presets SET is_default=1 WHERE id=?', [req.params.id])
-    if (r.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
+    await conn.beginTransaction()
+    const [[hit]] = await conn.execute('SELECT id FROM approval_presets WHERE id = ?', [req.params.id])
+    if (!hit) { await rollbackQuietly(conn); return res.status(404).json({ error: '결재선을 찾을 수 없어요' }) }
+    await conn.execute('UPDATE approval_presets SET is_default=0')
+    await conn.execute('UPDATE approval_presets SET is_default=1 WHERE id=?', [req.params.id])
+    await conn.commit()
     res.json({ ok: true })
-  } catch (e) { next(e) }
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
 })
 
 router.delete('/:id', async (req, res, next) => {
