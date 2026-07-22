@@ -10,7 +10,8 @@
     "setup:db:check": "node scripts/setup-db.js --check",
     "check:db": "node scripts/check-db.js",
     "check:isolation": "node scripts/check-isolation.js",
-    "migrate:uploads": "node scripts/migrate-uploads.js"
+    "migrate:uploads": "node scripts/migrate-uploads.js",
+    "tenant": "node scripts/provision-tenant.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

@@ -78,6 +78,34 @@ if (/require\(['"]\.\/middleware\/tenant['"]\)/.test(idxSrc)) {
   fail('index.js에 tenant 미들웨어가 없다 — req.db가 주입되지 않는다')
 }
 
+// ── 5. 권한 자원 카탈로그 ↔ 프런트 nav 동기화 ──
+// 어긋나면 '화면은 있는데 권한을 줄 수 없는' 또는 그 반대 상태가 된다.
+console.log('\n[5] 권한 자원 카탈로그 ↔ nav.js 동기화')
+try {
+  const { RESOURCE_IDS } = require('../platform/permissions')
+  const navPath = path.join(__dirname, '..', '..', 'src', 'lib', 'nav.js')
+  const navSrc = fs.readFileSync(navPath, 'utf8')
+  // nav.js의 잎 id 추출 — { id: "xxx", label: ... } 형태만 대상(도메인 노드 제외는 label 유무로 판별 불가하므로 전부 모아 비교)
+  const navIds = new Set()
+  const re = /\{\s*(?:type:\s*"leaf",\s*)?id:\s*["']([a-zA-Z_][\w]*)["']/g
+  let m
+  while ((m = re.exec(navSrc))) navIds.add(m[1])
+  // 도메인·포털 카테고리 컨테이너 id는 '화면'이 아니라 묶음이라 권한 자원이 아니다.
+  // (route를 가진 hr·report·mgmt_dash는 실제 화면이므로 제외하지 않는다)
+  const CONTAINERS = ['acct', 'hr_dom', 'mgmt', 'acct_process', 'acct_tax', 'master', 'hr_labor', 'hr_base']
+  for (const d of CONTAINERS) navIds.delete(d)
+
+  const catalog = new Set(RESOURCE_IDS)
+  const missingInCatalog = [...navIds].filter(id => !catalog.has(id))
+  const missingInNav = [...catalog].filter(id => !navIds.has(id) && id !== 'home' && id !== 'settings')
+
+  if (missingInCatalog.length) fail(`nav에 있으나 권한 카탈로그에 없음: ${missingInCatalog.join(', ')}`)
+  if (missingInNav.length)     fail(`권한 카탈로그에 있으나 nav에 없음: ${missingInNav.join(', ')}`)
+  if (!missingInCatalog.length && !missingInNav.length) ok(`자원 ${catalog.size}개 동기화 확인`)
+} catch (e) {
+  fail(`동기화 검사 실패: ${e.message}`)
+}
+
 console.log('\n' + '━'.repeat(64))
 if (failures === 0) {
   console.log(' ✅ 격리 검사 통과')
