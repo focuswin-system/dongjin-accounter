@@ -19,7 +19,7 @@ const defaultApproval = async (execFn) => {
 
 // 문서번호 채번 DJ-YYYY-NNNN (최대 일련번호 +1, 삭제해도 재사용 안 함)
 const nextDocNo = async (execFn, dateStr) => {
-  const year = (dateStr || new Date().toISOString().slice(0, 10)).slice(0, 4)
+  const year = (dateStr || kstToday()).slice(0, 4)
   const [[{ maxno }]] = await execFn(
     `SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(doc_no, '-', -1) AS UNSIGNED)), 0) AS maxno
      FROM expense_resolutions WHERE doc_no LIKE ?`, [`DJ-${year}-%`])

@@ -376,7 +376,7 @@ router.post('/:id/pay', async (req, res, next) => {
     }
     const { base, gross, deduction, net } = computeItems(items)
 
-    const m = month || (date || pay_date || new Date().toISOString().slice(0, 10)).slice(0, 7)
+    const m = month || (date || pay_date || kstToday()).slice(0, 7)
     const [[{ maxseq }]] = await conn.execute(
       'SELECT COALESCE(MAX(seq),0) AS maxseq FROM payroll WHERE employee_id = ? AND month = ?', [c.employee_id, m]
     )

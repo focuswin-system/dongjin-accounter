@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { futureDateError } = require('../db')
+const { futureDateError, kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
 
 const router = Router()
@@ -20,7 +20,7 @@ async function syncTaxTxn({ existingTxnId, isDone, isRefund, amount, accountId, 
   }
   const kind = isRefund ? 'income' : 'expense'
   const status = isRefund ? '입금완료' : '지급완료'
-  const d = date || new Date().toISOString().slice(0, 10)
+  const d = date || kstToday()
   // 이미 연결된 거래가 있으면 그 행이 실제로 존재하는지로 판정한다.
   // (UPDATE affectedRows는 mysql2에서 '변경된 행' 수라, 값이 그대로면 0이 되어 새 거래가 잘못 생긴다)
   if (existingTxnId) {
@@ -43,7 +43,7 @@ async function syncTaxTxn({ existingTxnId, isDone, isRefund, amount, accountId, 
 // 부가세 분기별 집계 (매출세액 − 매입세액) + 신고 상태
 router.get('/vat', async (req, res, next) => {
   try {
-    const year = parseInt(req.query.year, 10) || new Date().getFullYear()
+    const year = parseInt(req.query.year, 10) || Number(kstToday().slice(0, 4))
     const [agg] = await req.db.execute(
       `SELECT QUARTER(issued_at) AS q,
               SUM(CASE WHEN kind='issued'   THEN vat_amount ELSE 0 END) AS sales_vat,

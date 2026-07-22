@@ -110,7 +110,7 @@ router.get('/', async (req, res, next) => {
 router.get('/summary', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
-    const month = req.query.month || new Date().toISOString().slice(0, 7)
+    const month = req.query.month || kstToday().slice(0, 7)
     // 급여대장 요약은 근로(seq=0)만 — 용역·일용 회차가 섞여 총액이 부풀지 않게
     const [rows] = await conn.execute(
       'SELECT p.*, e.name, e.department FROM payroll p JOIN employees e ON p.employee_id = e.id WHERE p.month = ? AND p.seq = 0',

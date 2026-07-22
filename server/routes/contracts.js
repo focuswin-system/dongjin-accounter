@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { futureDateError } = require('../db')
+const { futureDateError, kstToday } = require('../db')
 const model = require('../contract-model')
 const { buildContractWorkbook } = require('../contract-export')
 const { rollbackQuietly } = require('../lib/tx')
@@ -135,7 +135,7 @@ router.get('/export.xlsx', async (req, res, next) => {
 
     const wb = await buildContractWorkbook(contracts, { kind })
     const label = kind === 'purchase' ? '매입계약' : kind === 'sales' ? '매출계약' : '계약'
-    const filename = `${label}_${new Date().toISOString().slice(0, 10)}.xlsx`
+    const filename = `${label}_${kstToday()}.xlsx`
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     // 한글 파일명 — 구형 클라이언트용 ASCII fallback + RFC 5987
     res.setHeader('Content-Disposition',
@@ -221,7 +221,7 @@ router.post('/:id/renew', async (req, res, next) => {
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
       [randomUUID(), req.params.id, Number(maxseq) + 1, c.end_date || null, isRenew ? new_end_date : null,
        Number(c.amount) || 0, nextAmount, prevUnit, isRenew ? nextUnit : null,
-       renewed_at || new Date().toISOString().slice(0, 10), isRenew ? '갱신' : '미갱신', memo || null]
+       renewed_at || kstToday(), isRenew ? '갱신' : '미갱신', memo || null]
     )
 
     let recurringExtended = 0
@@ -283,7 +283,7 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
     // 면세 계약이면 부가세 0
     const vat = ms.vat_mode === 'exempt' ? 0 : Math.round(supply * 0.1)
     const total = supply + vat
-    const today = new Date().toISOString().slice(0, 10)
+    const today = kstToday()   // UTC면 KST 00~09시에 하루 전(연초엔 전년도 채번)으로 찍힌다
     const year = today.slice(0, 4)
     const prefix = isPurchase ? '매입' : '청구'
     // 채번: 최대 일련번호+1 (삭제해도 재사용 안 됨)
@@ -363,7 +363,7 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
 
     const isPurchase = c.gubu === 'A' || c.gubu === 'E'
     const kind = isPurchase ? 'received' : 'issued'
-    const today = new Date().toISOString().slice(0, 10)
+    const today = kstToday()   // UTC면 KST 00~09시에 하루 전(연초엔 전년도 채번)으로 찍힌다
     const issuedAt = issued_at || today
     const year = String(issuedAt).slice(0, 4)
     const prefix = isPurchase ? '매입' : '청구'

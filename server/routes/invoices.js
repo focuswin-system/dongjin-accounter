@@ -70,7 +70,7 @@ router.get('/summary/payables', async (req, res, next) => {
 router.get('/summary/vat', async (req, res, next) => {
   try {
     const { quarter, year } = req.query
-    const y = year || new Date().getFullYear()
+    const y = year || Number(kstToday().slice(0, 4))
     const months = { Q1: ['01','02','03'], Q2: ['04','05','06'], Q3: ['07','08','09'], Q4: ['10','11','12'] }[quarter] || []
     if (!months.length) return res.json({ salesVat: 0, purchaseVat: 0, netVat: 0, rows: [] })
     const placeholders = months.map(() => 'i.issued_at LIKE ?').join(' OR ')
@@ -100,7 +100,7 @@ router.post('/', async (req, res, next) => {
     const { kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo } = req.body
     const id = randomUUID()
     // 친화적 청구번호 생성: 청구-2026-0001 / 매입-2026-0001 (최대 일련번호+1 — 삭제해도 재사용 안 됨)
-    const year = String(issued_at || '').slice(0, 4) || String(new Date().getFullYear())
+    const year = String(issued_at || '').slice(0, 4) || kstToday().slice(0, 4)
     const prefix = kind === 'issued' ? '청구' : '매입'
     const [[{ maxno }]] = await req.db.execute(
       "SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(invoice_no, '-', -1) AS UNSIGNED)), 0) AS maxno FROM invoices WHERE kind = ? AND invoice_no LIKE ?",
