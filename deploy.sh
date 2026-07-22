@@ -40,6 +40,7 @@ echo "[4/4] 원격 의존성 설치 + DB 스키마 준비 + pm2 재시작 + 헬�
   npm ci --omit=dev --no-audit --no-fund && \
   npm run check:isolation && \
   npm run setup:db && \
+  npm run migrate:uploads && \
   pm2 startOrReload ecosystem.config.js --update-env && \
   pm2 save && \
   sleep 2 && curl -sS -m 5 http://127.0.0.1:8081/api/health && echo"

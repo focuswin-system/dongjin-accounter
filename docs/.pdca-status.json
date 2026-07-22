@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-21T07:03:05.534Z",
+  "lastUpdated": "2026-07-21T11:28:27.856Z",
   "activeFeatures": [
     "focus-accounter",
     "screens",
@@ -23,7 +23,7 @@
       "documents": {},
       "timestamps": {
         "started": "2026-05-15T05:42:27.292Z",
-        "lastUpdated": "2026-07-21T07:03:05.534Z"
+        "lastUpdated": "2026-07-21T11:28:27.856Z"
       },
       "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\deploy.sh"
     },
@@ -49,7 +49,7 @@
       "documents": {},
       "timestamps": {
         "started": "2026-05-28T02:41:31.412Z",
-        "lastUpdated": "2026-07-21T06:10:40.371Z"
+        "lastUpdated": "2026-07-21T07:09:30.727Z"
       },
       "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\index.js"
     },
@@ -62,9 +62,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-05-28T02:41:56.724Z",
-        "lastUpdated": "2026-07-21T04:53:28.669Z"
+        "lastUpdated": "2026-07-21T07:09:39.859Z"
       },
-      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\routes\\resolutions.js"
+      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\routes\\auth.js"
     },
     "middleware": {
       "phase": "do",
@@ -75,9 +75,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-06-01T00:56:40.979Z",
-        "lastUpdated": "2026-07-21T05:52:48.954Z"
+        "lastUpdated": "2026-07-21T07:08:55.922Z"
       },
-      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\middleware\\tenant.js"
+      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\middleware\\fileAuth.js"
     },
     "scratchpad": {
       "phase": "do",
@@ -101,9 +101,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-07-20T01:43:38.006Z",
-        "lastUpdated": "2026-07-21T06:10:32.504Z"
+        "lastUpdated": "2026-07-21T07:10:07.804Z"
       },
-      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\scripts\\check-isolation.js"
+      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\scripts\\migrate-uploads.js"
     },
     "platform": {
       "phase": "do",
@@ -140,7 +140,7 @@
   "session": {
     "startedAt": "2026-05-15T05:18:29.210Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-07-21T07:03:05.534Z"
+    "lastActivity": "2026-07-21T11:28:27.856Z"
   },
   "history": [
     {
@@ -11161,6 +11161,60 @@
     },
     {
       "timestamp": "2026-07-21T07:03:05.534Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-21T07:08:55.922Z",
+      "feature": "middleware",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-21T07:09:09.798Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-21T07:09:18.852Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-21T07:09:23.476Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-21T07:09:30.727Z",
+      "feature": "server",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-21T07:09:34.489Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-21T07:09:39.859Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-21T07:10:07.804Z",
+      "feature": "scripts",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-21T11:28:27.856Z",
       "feature": "focus-accounter",
       "phase": "do",
       "action": "updated"

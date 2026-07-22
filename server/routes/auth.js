@@ -16,6 +16,7 @@ const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
 const { platformPool, audit } = require('../platform/db')
 const authMiddleware = require('../middleware/auth')
+const { setFileCookie } = require('../middleware/fileAuth')
 
 const router = Router()
 
@@ -67,6 +68,8 @@ router.post('/login', async (req, res, next) => {
       { expiresIn: '8h' }
     )
     audit({ companyId: company.id, userId: user.id, username: user.username, action: 'login', ip: clientIp(req) })
+    // 첨부파일은 브라우저가 직접 열기 때문에 헤더를 실을 수 없다 → /uploads 전용 쿠키로 인증한다.
+    setFileCookie(res, token)
     res.json({
       token,
       company: { code: company.code, name: company.name },

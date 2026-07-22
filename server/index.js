@@ -10,7 +10,10 @@ const PORT = process.env.PORT || 3001
 
 app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:4173'] }))
 app.use(express.json())
-app.use('/uploads', express.static(require('path').join(__dirname, 'uploads')))
+// ⚠ /uploads 는 절대 정적 서빙하지 않는다.
+// 예전에는 express.static으로 통째로 열려 있어, 경로만 알면 인증 없이 남의 회사
+// 증빙·계약서를 받아갈 수 있었다. 이제 인증 + 소유 회사 확인을 거쳐야 한다.
+app.use('/uploads', require('./routes/files'))
 
 // ── 인증 게이트 ──
 // 로그인·헬스체크만 공개(로그인 자체 + deploy.sh 무토큰 헬스체크), 나머지 모든 /api 요청은 JWT 필요.
