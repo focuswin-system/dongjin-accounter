@@ -205,6 +205,7 @@ function ComingSoon({ title }) {
 function AppInner({ onLogout, user }) {
   const [route, setRoute] = useState("home");
   const [contractId, setContractId] = useState("CT-2026-101");
+  const [focusInvoiceId, setFocusInvoiceId] = useState(null);   // 홈 할 일 → 청구서 바로 열기
   const [contractName, setContractName] = useState("");
   const [txnForm, setTxnForm] = useState(null); // null | { kind, contract? }
   const [txnVersion, setTxnVersion] = useState(0);
@@ -301,6 +302,8 @@ function AppInner({ onLogout, user }) {
   const go = (id, opts = {}) => {
     if (opts.contractId) setContractId(opts.contractId);
     if (opts.contractName != null) setContractName(opts.contractName);
+    // 홈 '할 일'에서 특정 청구서를 바로 열 때 사용 (없으면 목록만 보여준다)
+    setFocusInvoiceId(opts.invoiceId || null);
     setRoute(id);
     window.location.hash = id;
     window.scrollTo({ top: 0 });
@@ -346,14 +349,14 @@ function AppInner({ onLogout, user }) {
       case "income":          return <LedgerScreen initialFilter="income" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
       case "expense":         return <LedgerScreen initialFilter="expense" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
       // 미수금/미지급금은 청구서 기준 → 발행 청구서와 같은 BillingScreen을 '회수 모드'로 재사용
-      case "ar":              return <BillingScreen initialTab="issued"  role="collect" openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
-      case "ap":              return <BillingScreen initialTab="received" role="collect" openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
+      case "ar":              return <BillingScreen initialTab="issued"  role="collect" focusInvoiceId={focusInvoiceId} openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
+      case "ap":              return <BillingScreen initialTab="received" role="collect" focusInvoiceId={focusInvoiceId} openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
       case "doc":             return <DocsScreen/>;
       case "evidence":        return <EvidenceScreen onAttach={(item) => setEvidenceAttach(item)}/>;
       case "excel":           return <ExcelScreen/>;
       default:                return <HomeScreen go={go} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
     }
-  }, [route, contractId, txnVersion]);
+  }, [route, contractId, txnVersion, focusInvoiceId]);
 
   const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger"
                 : route.startsWith("billing") ? "billing"

@@ -52,7 +52,27 @@ router.delete('/:id', async (req, res, next) => {
   try {
     await req.db.execute('DELETE FROM vendors WHERE id = ?', [req.params.id])
     res.json({ ok: true })
-  } catch (e) { next(e) }
+  } catch (e) {
+    // 거래·청구서·계약이 걸려 있으면 FK가 막는다. 그대로 두면 500 일반 오류가 나가고
+    // 사용자는 무엇이 문제인지 알 수 없다 — 어디를 정리해야 하는지 알려준다.
+    if (e.code === 'ER_ROW_IS_REFERENCED_2' || e.errno === 1451) {
+      const [[c]] = await req.db.execute(`
+        SELECT
+          (SELECT COUNT(*) FROM transactions WHERE vendor_id = ?) AS txns,
+          (SELECT COUNT(*) FROM invoices     WHERE vendor_id = ?) AS invs,
+          (SELECT COUNT(*) FROM contracts    WHERE vendor_id = ?) AS ctrs`,
+        [req.params.id, req.params.id, req.params.id])
+      const parts = []
+      if (Number(c.txns) > 0) parts.push(`거래 ${c.txns}건`)
+      if (Number(c.invs) > 0) parts.push(`청구서 ${c.invs}건`)
+      if (Number(c.ctrs) > 0) parts.push(`계약 ${c.ctrs}건`)
+      const detail = parts.length ? parts.join(' · ') : '연결된 자료'
+      return res.status(409).json({
+        error: `이 거래처에 ${detail}이 연결돼 있어 삭제할 수 없어요. 먼저 정리하거나 거래처를 '미사용'으로 두세요.`,
+      })
+    }
+    next(e)
+  }
 })
 
 // ── 거래처 엑셀 임포트: 파싱(머리글 + 행) ──

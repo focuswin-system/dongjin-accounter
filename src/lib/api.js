@@ -712,7 +712,7 @@ export const api = {
     try {
       await req(`/vendors/${id}`, { method: 'DELETE' })
       return { ok: true }
-    } catch(e) { return { ok: false } }
+    } catch(e) { return { ok: false, error: e.message } }   // 실패 사유(FK 409)를 화면까지 전달
   },
 
   // ─── 거래처 엑셀 임포트 ────────────────────────────────────────
@@ -1017,7 +1017,7 @@ export const api = {
         .filter(r => ['입금 예정', '일부 입금', '기한 지남', '장기 미수'].includes(r.status))
         .slice(0, 4)
         .forEach(r => todos.push({
-          id: 'ar-' + r.id, kind: 'ar',
+          id: 'ar-' + r.id, kind: 'ar', invoiceId: r.id,
           tag: r.delay > 0 ? `${r.delay}일 초과` : '입금 예정',
           title: `${r.vendor} 입금 확인`, sub: `${r.contract || ''} ${won(r.remain)}`.trim(), action: '입금 처리',
         }))
@@ -1025,14 +1025,15 @@ export const api = {
         .filter(r => ['지급 예정', '지급 대기', '기한 지남'].includes(r.pay))
         .slice(0, 4)
         .forEach(r => todos.push({
-          id: 'ap-' + r.id, kind: 'ap', tag: '지급 예정',
+          id: 'ap-' + r.id, kind: 'ap', invoiceId: r.id, tag: '지급 예정',
           title: `${r.vendor} 이체`, sub: `${r.category || ''} ${won(r.amount)}`.trim(), action: '이체',
         }))
       return todos
     } catch { return [] }
   },
-
-  async completeTodo() { return { ok: true } },
+  // completeTodo 는 아무것도 하지 않는 스텁이었다. 홈에서 그걸 부르고 '입금이 처리되었어요'를
+  // 띄우고 있어, 실제로는 거래가 하나도 안 남았는데 사용자는 처리된 줄 알았다.
+  // 할 일은 청구서 상태에서 파생되므로 별도 완료 표시가 필요 없다 — 정산하면 목록에서 빠진다.
 
   async getAlerts() {
     const invs = await this.getInvoices()

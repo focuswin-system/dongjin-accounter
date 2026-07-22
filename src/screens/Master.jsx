@@ -853,8 +853,9 @@ const VendorPanel = () => {
     load()
   }
   const handleDelete = async (v) => {
-    await api.deleteVendor(v.id)
-    toast.push(`${v.name} 삭제됐어요`)
+    // 결과를 보지 않고 '삭제됐어요'를 띄우면, FK로 막혀 실패했는데도 성공한 줄 알게 된다
+    const res = await api.deleteVendor(v.id)
+    toast.push(res.ok ? `${v.name} 삭제됐어요` : (res.error || '삭제에 실패했어요'), res.ok ? undefined : { tone: 'warn' })
     load()
   }
 

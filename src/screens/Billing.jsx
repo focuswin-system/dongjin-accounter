@@ -706,7 +706,7 @@ const PendingScheduleTable = ({ rows, onIssue, onPaid, isIssued = true }) => (
 
 // ── 메인 BillingScreen ───────────────────────────────────────────
 // role='issue'(발행 청구서: 발행 중심) | 'collect'(입금·환불/지급·환입: 청구서 기준 회수 중심)
-export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefund, openReturn }) => {
+export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefund, openReturn, focusInvoiceId }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const kind = initialTab              // 'issued'(대금청구) | 'received'(수취)
@@ -741,6 +741,12 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     setInvoices(rows); setRecSummary(rec); setPaySum(pay); setPending(merged)
   }
   useEffect(() => { load() }, [])
+  // 홈 '할 일'에서 특정 청구서를 지목해 들어오면 그 상세를 바로 연다.
+  useEffect(() => {
+    if (!focusInvoiceId || !invoices.length) return
+    const hit = invoices.find(inv => inv.id === focusInvoiceId)
+    if (hit) setSelected(hit)
+  }, [focusInvoiceId, invoices])
 
   const kindRows = invoices.filter(inv => inv.kind === kind)
   // 미정산(아직 안 받은/안 낸) 청구서 상태 그룹 — 미수금/미지급금의 정의
