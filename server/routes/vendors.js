@@ -7,13 +7,32 @@ const { rollbackQuietly } = require('../lib/tx')
 const router = Router()
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
 
+// 목록.
+//   기본       — 사용중인 거래처만 (거래 등록 등에서 고를 대상)
+//   ?all=1     — 미사용 포함 전체 (기준정보 관리 화면)
+// 미사용 거래처를 기본에서 빼는 것이 이 기능의 핵심이다. 안 그러면 안 쓰는 거래처가
+// 계속 드롭다운에 쌓여, 거래처가 늘수록 고르기 어려워진다.
 router.get('/', async (req, res, next) => {
   try {
-    const { gubu } = req.query
-    const [rows] = gubu
-      ? await req.db.execute('SELECT * FROM vendors WHERE gubu = ? ORDER BY name', [gubu])
-      : await req.db.execute('SELECT * FROM vendors ORDER BY gubu, name')
+    const { gubu, all } = req.query
+    const where = []
+    const params = []
+    if (gubu) { where.push('gubu = ?'); params.push(gubu) }
+    if (all !== '1') where.push('active = 1')
+    const sql = `SELECT * FROM vendors${where.length ? ' WHERE ' + where.join(' AND ') : ''}`
+      + (gubu ? ' ORDER BY name' : ' ORDER BY gubu, name')
+    const [rows] = await req.db.execute(sql, params)
     res.json(rows)
+  } catch (e) { next(e) }
+})
+
+// 사용/미사용 전환. 미사용으로 둬도 기존 거래·청구서·계약은 그대로 남는다.
+router.patch('/:id/active', async (req, res, next) => {
+  try {
+    const active = req.body.active ? 1 : 0
+    const [r] = await req.db.execute('UPDATE vendors SET active = ? WHERE id = ?', [active, req.params.id])
+    if (r.affectedRows === 0) return res.status(404).json({ error: '거래처를 찾을 수 없어요' })
+    res.json({ ok: true, active })
   } catch (e) { next(e) }
 })
 
@@ -69,7 +88,7 @@ router.delete('/:id', async (req, res, next) => {
       if (Number(c.ctrs) > 0) parts.push(`계약 ${c.ctrs}건`)
       const detail = parts.length ? parts.join(' · ') : '연결된 자료'
       return res.status(409).json({
-        error: `이 거래처에 ${detail}이 연결돼 있어 삭제할 수 없어요. 지난 기록을 지우면 장부가 어긋나므로, 이름만 바꿔 쓰시거나 연결된 자료를 먼저 정리해주세요.`,
+        error: `이 거래처에 ${detail}이 연결돼 있어 삭제할 수 없어요. 지난 기록을 지우면 장부가 어긋나요. 앞으로 안 쓰실 거면 '미사용'으로 바꿔주세요 — 선택 목록에서만 빠지고 기존 기록은 그대로 남아요.`,
       })
     }
     next(e)

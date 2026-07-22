@@ -817,11 +817,13 @@ const VendorPanel = () => {
   const [vendors,     setVendors]     = useState([])
   const [q,           setQ]           = useState('')
   const [filterGubu,  setFilterGubu]  = useState('')
+  const [showInactive, setShowInactive] = useState(false)   // 미사용 거래처는 기본으로 감춘다
   const [drawerOpen,  setDrawerOpen]  = useState(false)
   const [editing,     setEditing]     = useState(null)
   const [form, setForm] = useState({ name:'', gubu:'A', type:'', biz_no:'', ceo:'', contact:'', phone:'', fax:'', email:'', address:'' })
 
-  const load = () => api.getVendors().then(setVendors)
+  // 기준정보 화면이므로 미사용까지 다 불러온다(다른 화면의 선택 목록은 사용중만 받는다).
+  const load = () => api.getVendors({ all: true }).then(setVendors)
   useEffect(() => { load() }, [])
 
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
@@ -829,8 +831,20 @@ const VendorPanel = () => {
   const filtered = vendors.filter(v => {
     const matchQ = !q || [v.name, v.biz_no, v.ceo, v.contact, v.phone, v.email].some(s => s?.includes(q))
     const matchG = !filterGubu || v.gubu === filterGubu
-    return matchQ && matchG
+    const matchA = showInactive || v.active !== 0
+    return matchQ && matchG && matchA
   })
+  const inactiveCount = vendors.filter(v => v.active === 0).length
+
+  const toggleActive = async (v) => {
+    const next = v.active === 0
+    const res = await api.setVendorActive(v.id, next)
+    if (!res.ok) return toast.push(res.error || '변경에 실패했어요', { tone: 'warn' })
+    toast.push(next
+      ? `${v.name} 다시 사용해요`
+      : `${v.name} 미사용으로 바꿨어요. 새 거래의 거래처 목록에서 빠지고, 기존 기록은 그대로 남아요`)
+    load()
+  }
 
   const openNew = () => {
     setEditing(null)
@@ -880,6 +894,11 @@ const VendorPanel = () => {
             </button>
           ))}
         </div>
+        {inactiveCount > 0 && (
+          <button className={`chip ${showInactive ? 'active' : ''}`} onClick={() => setShowInactive(s => !s)}>
+            미사용 {inactiveCount}
+          </button>
+        )}
         <div className="search" style={{ margin: 0, width: 200, padding: '6px 10px' }}>
           <Icon.Search size={14}/>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="상호·담당자·연락처"/>
@@ -900,15 +919,16 @@ const VendorPanel = () => {
               <th>담당자</th>
               <th>전화</th>
               <th>이메일</th>
-              <th style={{ width: 90 }}></th>
+              <th style={{ width: 70 }}>상태</th>
+              <th style={{ width: 150 }}></th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={9} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)' }}>등록된 거래처가 없어요</td></tr>
+              <tr><td colSpan={10} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)' }}>등록된 거래처가 없어요</td></tr>
             )}
             {filtered.map(v => (
-              <tr key={v.id}>
+              <tr key={v.id} style={v.active === 0 ? { opacity: 0.55 } : undefined}>
                 <td className="fw-700">{v.name}</td>
                 <td><span className={`badge ${v.gubu === 'B' ? 'brand' : v.gubu === 'E' ? 'outline' : 'warn'}`}>{GUBU_LABEL[v.gubu] || v.gubu}</span></td>
                 <td className="text-sm text-muted">{v.type || '—'}</td>
@@ -918,8 +938,16 @@ const VendorPanel = () => {
                 <td className="text-sm">{v.phone || '—'}</td>
                 <td className="text-sm">{v.email || '—'}</td>
                 <td>
+                  {v.active === 0
+                    ? <span className="badge outline">미사용</span>
+                    : <span className="badge pos">사용중</span>}
+                </td>
+                <td>
                   <div className="row gap-6">
                     <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => openEdit(v)}>수정</button>
+                    <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => toggleActive(v)}>
+                      {v.active === 0 ? '사용' : '미사용'}
+                    </button>
                     <button className="btn" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--neg)' }} onClick={() => handleDelete(v)}>삭제</button>
                   </div>
                 </td>

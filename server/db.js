@@ -78,6 +78,9 @@ async function initDb(conn) {
         contact      VARCHAR(100),
         fax          VARCHAR(50),
         email        VARCHAR(200),
+        -- 거래 기록이 붙은 거래처는 지울 수 없다(지우면 장부가 어긋난다).
+        -- 대신 미사용으로 두면 선택 목록에서만 빠지고 과거 기록은 그대로 남는다.
+        active       TINYINT(1) NOT NULL DEFAULT 1,
         created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `)
@@ -627,6 +630,10 @@ async function initDb(conn) {
       await fn()
       await c.execute('INSERT INTO schema_migrations (id) VALUES (?)', [key])
     }
+    // 거래처 사용/미사용. 거래·청구서·계약이 붙은 거래처는 FK 때문에 삭제할 수 없고,
+    // 삭제해서도 안 된다(과거 장부가 어긋난다). 미사용으로 두면 새 거래의 선택 목록에서만
+    // 빠지고 기존 기록은 그대로 유지된다. 기존 행은 전부 사용중(1)으로 시작한다.
+    await ensureColumn('vendors', 'active', "active TINYINT(1) NOT NULL DEFAULT 1")
     // 결의서 결재선 스냅샷(기존 DB 대상). [{label, position, name}]
     await ensureColumn('expense_resolutions', 'approval', "approval TEXT")
     // 부가세: 자동집계(예상)와 별개로 실제 신고세액을 직접 입력. NULL이면 아직 신고 전(예상값 사용).

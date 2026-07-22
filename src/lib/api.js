@@ -695,11 +695,22 @@ export const api = {
   },
 
   // ─── 거래처 ───────────────────────────────────────────────────
-  async getVendors({ gubu } = {}) {
+  // 기본은 사용중인 거래처만. all:true 는 기준정보 관리 화면처럼 미사용까지 봐야 할 때만.
+  async getVendors({ gubu, all } = {}) {
     try {
-      const params = gubu ? `?gubu=${gubu}` : ''
+      const q = new URLSearchParams()
+      if (gubu) q.set('gubu', gubu)
+      if (all) q.set('all', '1')
+      const params = q.toString() ? `?${q}` : ''
       return await req(`/vendors${params}`)
     } catch { return [] }
+  },
+
+  async setVendorActive(id, active) {
+    try {
+      await req(`/vendors/${id}/active`, { method: 'PATCH', body: { active } })
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
   },
 
   async addVendor(data) {
