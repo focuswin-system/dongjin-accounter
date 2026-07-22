@@ -21,6 +21,9 @@ router.get('/', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const { vendor_id, contract_id, category, amount, period, day_of_month, start_date, end_date, account_id } = req.body
+    // start_date 는 NOT NULL 이라 없으면 SQL 오류(500)가 난다. 원인을 알려주는 400으로 바꾼다.
+    if (!start_date) return res.status(400).json({ error: '시작일을 선택해주세요' })
+    if (!(Number(amount) > 0)) return res.status(400).json({ error: '금액을 입력해주세요' })
     const id = randomUUID()
     await req.db.execute(
       'INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, period, day_of_month, start_date, end_date, account_id) VALUES (?,?,?,?,?,?,?,?,?,?)',

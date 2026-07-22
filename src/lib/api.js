@@ -433,20 +433,23 @@ export const api = {
     } catch { return [] }
   },
 
+  // 폼이 보내는 snake_case 를 그대로 쓴다. 예전에는 camelCase(vendorId·startDate…)를 읽었는데
+  // 폼은 다른 이름으로 보내고 있어, 필수값이 통째로 undefined 로 전달돼 저장이 항상 실패했다.
   async addRecurringExpense(data) {
     try {
       const result = await req('/recurring-expenses', { method: 'POST', body: {
-        vendor_id: data.vendorId,
+        vendor_id: data.vendor_id ?? data.vendorId ?? null,
+        contract_id: data.contract_id ?? null,
         category: data.category,
         amount: data.amount,
         period: data.period,
-        day_of_month: data.dayOfMonth,
-        start_date: data.startDate,
-        end_date: data.endDate,
-        account_id: data.accountId,
+        day_of_month: data.day_of_month ?? data.dayOfMonth,
+        start_date: data.start_date ?? data.startDate,
+        end_date: data.end_date ?? data.endDate ?? null,
+        account_id: data.account_id ?? data.accountId ?? null,
       }})
       return { ok: true, id: result.id }
-    } catch { return { ok: false } }
+    } catch (e) { return { ok: false, error: e.message } }
   },
 
   async toggleRecurringExpense(id) {

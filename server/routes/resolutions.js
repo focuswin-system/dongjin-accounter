@@ -271,11 +271,25 @@ router.post('/:id/process', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const { title, amount, pay_method, pay_date, applicant, items, note, status, vendor_name, approval } = req.body
+    const [[cur]] = await req.db.execute('SELECT status, amount FROM expense_resolutions WHERE id = ?', [req.params.id])
+    if (!cur) return res.status(404).json({ error: 'Not found' })
+
+    // 이미 집행된 결의서는 금액·상태를 바꿀 수 없다.
+    //  · status 를 안 보내면 '작성'으로 떨어져(기존 `status || '작성'`) 처리 가드를 통과,
+    //    같은 결의서를 두 번 집행할 수 있었다 — 한 번 나간 돈으로 지출이 두 건 생긴다.
+    //  · 금액을 바꾸면 이미 만들어진 지출 거래와 어긋나 장부가 틀어진다.
+    // 적요·결재선 같은 문서 정보는 집행 후에도 고칠 수 있게 둔다.
+    const done = cur.status === '완료'
+    if (done && Number(amount) !== Number(cur.amount)) {
+      return res.status(409).json({ error: '이미 처리된 결의서의 금액은 바꿀 수 없어요. 연결된 지출 거래와 어긋나요.' })
+    }
+    const nextStatus = done ? '완료' : (status || '작성')
+
     const [r] = await req.db.execute(
       `UPDATE expense_resolutions SET title=?, amount=?, pay_method=?, pay_date=?, applicant=?, items=?, note=?, status=?, vendor_name=?, approval=?
        WHERE id=?`,
       [title || '', Number(amount) || 0, pay_method || '', pay_date || null, applicant || '',
-       JSON.stringify(items || []), note || '', status || '작성', vendor_name || '',
+       JSON.stringify(items || []), note || '', nextStatus, vendor_name || '',
        JSON.stringify(approval || []), req.params.id])
     if (r.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
