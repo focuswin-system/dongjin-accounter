@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
 const { restoreLastGenerated } = require('../lib/recurrence')
+const { ledgerError } = require('../lib/ledger')
 
 const router = Router()
 
@@ -188,10 +189,8 @@ router.post('/:id/matches', async (req, res, next) => {
       // 정산했다는 것은 실제로 돈이 오갔다는 뜻이므로 거래도 완료 상태로 맞춘다.
       const [[cur]] = await conn.execute('SELECT status, account_id FROM transactions WHERE id = ?', [realTxnId])
       const acct = cur?.account_id || account_id || inv.account_id || null
-      if (!acct) {
-        await rollbackQuietly(conn)
-        return res.status(400).json({ error: '이 거래에는 계좌가 없어요. 거래내역에서 계좌를 지정한 뒤 정산해주세요' })
-      }
+      const lerr = ledgerError({ kind: isIssued ? 'income' : 'expense', account_id: acct, status: isIssued ? '입금완료' : '지급완료' })
+      if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
       await conn.execute(
         'UPDATE transactions SET invoice_id = ?, status = ?, account_id = ? WHERE id = ?',
         [invoiceId, isIssued ? '입금완료' : '지급완료', acct, realTxnId])
@@ -201,10 +200,8 @@ router.post('/:id/matches', async (req, res, next) => {
       // 특정해 합산). 정기청구·계약에서 자동 생성된 청구서는 account_id가 NULL이므로
       // 여기서 막지 않으면 입금이 통째로 잔액에서 누락된다 — 과거 F-02와 동일 유형.
       const acct = account_id || inv.account_id || null
-      if (!acct) {
-        await rollbackQuietly(conn)
-        return res.status(400).json({ error: `${isIssued ? '입금' : '출금'} 계좌를 선택해주세요` })
-      }
+      const lerr = ledgerError({ kind: isIssued ? 'income' : 'expense', account_id: acct, status: isIssued ? '입금완료' : '지급완료' })
+      if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
       realTxnId = randomUUID()
       const cat   = (category && category.trim()) || (isIssued ? '수금' : '대금 지급')
       const memoV = (memo && memo.trim()) || `청구서 ${inv.invoice_no || ''} 정산`.trim()

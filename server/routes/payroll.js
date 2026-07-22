@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
+const { ledgerError } = require('../lib/ledger')
 
 const router = Router()
 
@@ -238,7 +239,8 @@ router.post('/:id/pay', async (req, res, next) => {
     // 계좌가 없으면 이 지출은 어느 계좌 잔액에서도 빠지지 않는다(accounts.js calcBalance는
     // account_id로 계좌를 특정해 합산한다). 실제로 돈은 나갔는데 잔액은 그대로인 상태가 되므로
     // NULL 저장을 허용하지 않는다 — 과거 F-02와 동일 유형.
-    if (!account_id) return res.status(400).json({ error: '출금 계좌를 선택해주세요' })
+    const lerr = ledgerError({ kind: 'expense', account_id, status: '지급완료' })
+    if (lerr) return res.status(400).json({ error: lerr })
 
     await conn.beginTransaction()
     const txnId = randomUUID()

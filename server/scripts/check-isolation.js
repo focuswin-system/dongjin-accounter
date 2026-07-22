@@ -112,6 +112,37 @@ try {
   if (!e.skip) fail(`동기화 검사 실패: ${e.message}`)
 }
 
+// ── [6] 장부 불변식: 거래를 만드는 곳이 계좌 가드를 거치는가 ──
+//
+// 계좌 잔액은 account_id 가 있고 지출이면 status='지급완료' 인 거래만 센다(accounts.js calcBalance).
+// 이 조건을 어긴 거래는 **에러 없이** 장부를 틀어지게 한다 — 2026-07-22 검토에서 이 유형의
+// P0 결함이 6건 나왔다(결의서·급여·청구서정산·엑셀임포트·청구서연결·과거 F-02).
+// 그래서 거래를 INSERT 하는 파일은 lib/ledger.js 의 가드를 거치도록 강제한다.
+try {
+  console.log('\n[6] 장부 불변식 — 거래 생성 지점의 계좌 가드')
+  const routeDir = path.join(__dirname, '..', 'routes')
+  // 계좌 없이 생성되는 것이 정상인 경로(미완료 상태로만 만든다)는 면제한다.
+  const EXEMPT = {
+    'recurring.js': "정기지출은 '지급 대기'로 생성 — 잔액 집계 대상이 아니다",
+  }
+  const offenders = []
+  for (const f of fs.readdirSync(routeDir).filter(n => n.endsWith('.js'))) {
+    const src = fs.readFileSync(path.join(routeDir, f), 'utf8')
+    if (!/INSERT INTO transactions/.test(src)) continue
+    if (EXEMPT[f]) continue
+    if (!/require\(['"]\.\.\/lib\/ledger['"]\)/.test(src)) offenders.push(f)
+  }
+  if (offenders.length) {
+    fail(`거래를 만드는데 lib/ledger.js 가드를 안 씁니다: ${offenders.join(', ')}\n` +
+         `      → ledgerError({ kind, account_id, status }) 로 검사하고 400을 반환하세요.\n` +
+         `      → 계좌 없이 만드는 게 정상인 경로면 check-isolation.js 의 EXEMPT 에 사유와 함께 등록하세요.`)
+  } else {
+    ok('거래 생성 지점이 모두 계좌 가드를 거칩니다')
+  }
+} catch (e) {
+  fail(`장부 불변식 검사 실패: ${e.message}`)
+}
+
 console.log('\n' + '━'.repeat(64))
 if (failures === 0) {
   console.log(' ✅ 격리 검사 통과')

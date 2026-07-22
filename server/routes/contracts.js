@@ -4,6 +4,7 @@ const { futureDateError, kstToday } = require('../db')
 const model = require('../contract-model')
 const { buildContractWorkbook } = require('../contract-export')
 const { rollbackQuietly } = require('../lib/tx')
+const { ledgerError } = require('../lib/ledger')
 
 const router = Router()
 
@@ -304,6 +305,9 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
     )
     // 기입금: 실제 입/출금 거래 + 매칭 생성(장부·계좌·계약 수금에 반영)
     if (paid) {
+      // 완료 상태로 넣으므로 계좌가 없으면 잔액에 안 잡힌다(lib/ledger.js)
+      const lerr = ledgerError({ kind: isPurchase ? 'expense' : 'income', account_id: accountId, status: isPurchase ? '지급완료' : '입금완료' })
+      if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
       const txnId = randomUUID()
       await conn.execute(
         `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, doc_no, invoice_id, memo)
@@ -391,6 +395,8 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
     }
     // 기입금: 실제 입/출금 거래 + 매칭 생성(장부·계좌·계약 수금에 반영)
     if (paid) {
+      const lerr = ledgerError({ kind: isPurchase ? 'expense' : 'income', account_id: accountId, status: isPurchase ? '지급완료' : '입금완료' })
+      if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
       const txnId = randomUUID()
       await conn.execute(
         `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, doc_no, invoice_id, memo)

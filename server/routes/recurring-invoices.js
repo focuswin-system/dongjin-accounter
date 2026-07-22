@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto')
 const { futureDateError, kstToday, kstDate } = require('../db')
 const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS } = require('../lib/recurrence')
 const { rollbackQuietly } = require('../lib/tx')
+const { ledgerError } = require('../lib/ledger')
 
 const router = Router()
 
@@ -146,6 +147,8 @@ router.post('/:id/issue', async (req, res, next) => {
     )
     // 기입금 처리: 실제 입금 거래 + 매칭까지 (계약 상세의 수금·미수금에 반영)
     if (paid) {
+      const lerr = ledgerError({ kind: 'income', account_id: acctId, status: '입금완료' })
+      if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
       const txnId = randomUUID()
       await conn.execute(
         `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, doc_no, invoice_id, memo)

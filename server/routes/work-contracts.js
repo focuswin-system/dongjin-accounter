@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
+const { ledgerError } = require('../lib/ledger')
 
 const router = Router()
 
@@ -394,7 +395,8 @@ router.post('/:id/pay', async (req, res, next) => {
       // 예전에는 계좌 미지정 시 '가장 오래된 은행계좌'로 조용히 대체했다. 그러면 실제로 돈이
       // 나간 계좌가 아닌 곳에서 차감돼 두 계좌가 동시에 틀어진다(한쪽은 과소, 한쪽은 과대).
       // 은행계좌가 하나도 없으면 NULL이 되어 어느 잔액에도 안 잡혔다. 명시 선택을 요구한다.
-      if (!account_id) { await rollbackQuietly(conn); return res.status(400).json({ error: '출금 계좌를 선택해주세요' }) }
+      const lerr = ledgerError({ kind: 'expense', account_id, status: '지급완료' })
+      if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
       txnId = randomUUID()
       // 소득구분에 맞는 카테고리로 지출 기록(급여와 구분되어 신고자료 집계가 섞이지 않게)
       const category = c.income_type === '일용' ? '일용노무비' : c.income_type === '기타' ? '기타소득 지급' : '용역비'

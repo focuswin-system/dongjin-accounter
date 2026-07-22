@@ -4,6 +4,7 @@ const multer = require('multer')
 const xlsx = require('xlsx')
 const { futureDateError } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
+const { normalizeStatus, ledgerError } = require('../lib/ledger')
 const { restoreLastGenerated } = require('../lib/recurrence')
 
 const router = Router()
@@ -110,6 +111,10 @@ router.post('/', async (req, res, next) => {
     } = req.body
     const dateErr = futureDateError(date)
     if (dateErr) return res.status(400).json({ error: dateErr })
+    // 완료 상태인데 계좌가 없으면 잔액에 잡히지 않는다(lib/ledger.js 참고)
+    const st = normalizeStatus(status || '지급완료')
+    const lerr = ledgerError({ kind, account_id, status: st })
+    if (lerr) return res.status(400).json({ error: lerr })
     const id = randomUUID()
     // 원가 귀속(cost_contract_id)은 지출에만 의미가 있다 — 수금에 붙으면 매출계약 원가가 부풀어 오른다
     const costId = kind === 'expense' ? (cost_contract_id || null) : null
@@ -119,7 +124,7 @@ router.post('/', async (req, res, next) => {
         invoice_id, recurring_id, doc_no, employee_id, evid_type, evid_url, memo, item_id, account_code)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `, [id, kind, vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
-        amount, date, method||'', status||'지급완료', buyer_type||'공통', vessel_no||'', usage_place||'',
+        amount, date, method||'', st, buyer_type||'공통', vessel_no||'', usage_place||'',
         invoice_id||null, recurring_id||null, doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'',
         item_id||null, account_code||null])
     res.json({ id })
@@ -177,13 +182,21 @@ router.put('/:id', async (req, res, next) => {
 
 router.patch('/:id/status', async (req, res, next) => {
   try {
-    let { status } = req.body
+    const { account_id } = req.body
+    // 완료 상태는 무공백 표준형으로 정규화 — 잔액 계산(accounts.js)이 '지급완료'/'입금완료'만
+    // 세므로 '지급 완료'(공백)로 들어오면 누락된다(F-02 계열 방지).
+    const status = normalizeStatus(req.body.status)
     if (!status) return res.status(400).json({ error: 'status 필수' })
-    // 완료 상태는 무공백 표준형으로 정규화 — 계좌 잔액 계산(accounts.js)이 정확히 '지급완료'/'입금완료'만
-    // 지출/입금으로 세므로, '지급 완료'(공백)로 들어오면 잔액에서 누락된다(F-02 계열 방지).
-    if (status === '지급 완료') status = '지급완료'
-    else if (status === '입금 완료') status = '입금완료'
-    const [result] = await req.db.execute('UPDATE transactions SET status=? WHERE id=?', [status, req.params.id])
+    const [[cur]] = await req.db.execute('SELECT kind, account_id FROM transactions WHERE id = ?', [req.params.id])
+    if (!cur) return res.status(404).json({ error: 'Not found' })
+    // 계좌가 비어 있으면 '완료'로 바꿔도 잔액에서 움직이지 않는다. 정기지출은 계좌 없이
+    // '지급 대기'로 생성될 수 있어(recurring.js), 거래내역의 '이체 실행'이 이 경로를 탄다.
+    // 요청이 계좌를 함께 보냈으면 그걸로 채우고, 그래도 없으면 막는다.
+    const acct = cur.account_id || account_id || null
+    const err = ledgerError({ kind: cur.kind, account_id: acct, status })
+    if (err) return res.status(400).json({ error: err })
+    const [result] = await req.db.execute(
+      'UPDATE transactions SET status = ?, account_id = ? WHERE id = ?', [status, acct, req.params.id])
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
   } catch (e) { next(e) }

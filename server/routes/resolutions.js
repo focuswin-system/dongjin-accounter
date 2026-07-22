@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
+const { ledgerError } = require('../lib/ledger')
 
 const router = Router()
 
@@ -204,7 +205,8 @@ router.post('/:id/process', async (req, res, next) => {
       }
       // 결의서 처리는 '집행'이다. 연결 대상이 아직 미지급이면 지급완료로 바꿔야 잔액에서 빠진다.
       const acct = t.account_id || account_id || invAccountId || null
-      if (!acct) { await rollbackQuietly(conn); return res.status(400).json({ error: '이 지출에는 출금 계좌가 없어요. 계좌를 선택해주세요' }) }
+      const lerrL = ledgerError({ kind: 'expense', account_id: acct, status: '지급완료' })
+      if (lerrL) { await rollbackQuietly(conn); return res.status(400).json({ error: lerrL }) }
       linkedTxnId = txn_id
       await conn.execute("UPDATE transactions SET doc_no = ? WHERE id = ? AND (doc_no IS NULL OR doc_no = '' OR doc_no = '공통')", [r.doc_no, txn_id])
       await conn.execute("UPDATE transactions SET status = '지급완료', account_id = ? WHERE id = ?", [acct, txn_id])
@@ -217,7 +219,8 @@ router.post('/:id/process', async (req, res, next) => {
       // 계좌가 없으면 만들지 않는다. NULL로 넣으면 지출이 어느 계좌 잔액에서도 빠지지 않아
       // 사용자는 돈이 나간 줄 모른 채 잔액을 과대 계상하게 된다(과거 F-02와 동일 유형).
       const acct = account_id || invAccountId || null
-      if (!acct) { await rollbackQuietly(conn); return res.status(400).json({ error: '출금 계좌를 선택해주세요' }) }
+      const lerrC = ledgerError({ kind: 'expense', account_id: acct, status: '지급완료' })
+      if (lerrC) { await rollbackQuietly(conn); return res.status(400).json({ error: lerrC }) }
       const id = randomUUID()
       // contract_id 를 청구서에서 승계한다. 안 넣으면 그 매입계약의 지급 내역·원가 실적에서
       // 통째로 빠져, 같은 청구서를 결의서 없이 바로 '지급 처리'했을 때와 숫자가 달라진다.

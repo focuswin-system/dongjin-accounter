@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
+const { ledgerError } = require('../lib/ledger')
 
 const router = Router()
 
@@ -38,6 +39,20 @@ async function syncTaxTxn({ existingTxnId, isDone, isRefund, amount, accountId, 
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
     [id, kind, accountId || null, category, amount, d, '계좌이체', status, '공통', '공통', memo, accountCode || null])
   return id
+}
+
+/**
+ * 세금 납부/환급을 '완료'로 저장하기 전 검사.
+ * 완료면 실제로 돈이 오간 것이므로 계좌가 있어야 잔액에 반영된다(lib/ledger.js).
+ * 라우트가 저장 직전에 부른다 — syncTaxTxn 안에서 던지면 트랜잭션 중간에 끊긴다.
+ */
+function taxLedgerError({ isDone, isRefund, amount, accountId }) {
+  if (!isDone || !amount) return null
+  return ledgerError({
+    kind: isRefund ? 'income' : 'expense',
+    account_id: accountId,
+    status: isRefund ? '입금완료' : '지급완료',
+  })
 }
 
 // 부가세 분기별 집계 (매출세액 − 매입세액) + 신고 상태
@@ -102,6 +117,9 @@ router.put('/vat', async (req, res, next) => {
     // 납부 완료 → 지출 거래 / 환급 완료 → 입금 거래. 완료 취소 시 삭제.
     const isDone = st === '납부 완료' || st === '환급 완료'
     const isRefund = st === '환급 완료'
+    // 완료로 저장하는데 계좌가 없으면 그 납부/환급이 계좌 잔액에서 움직이지 않는다.
+    const lerr = taxLedgerError({ isDone, isRefund, amount, accountId: account_id })
+    if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
     const txnId = await syncTaxTxn({
       existingTxnId: exist[0]?.txn_id || null,
       isDone, isRefund, amount, accountId: account_id, date: paid_date,
@@ -161,9 +179,21 @@ async function syncOtherTaxTxn(body, existingTxnId, db) {
 const otFutureErr = (body) =>
   (body.status === '납부 완료' || body.status === '환급 완료') ? futureDateError(body.paid_date) : null
 
+// 기타세액 저장 전 계좌 검사 — 완료인데 계좌가 없으면 잔액에 반영되지 않는다.
+const otLedgerErr = (body) => {
+  const st = body.status || '납부 대기'
+  return taxLedgerError({
+    isDone: st === '납부 완료' || st === '환급 완료',
+    isRefund: st === '환급 완료',
+    amount: parseInt(String(body.paid_amount).replace(/[^0-9-]/g, ''), 10) || 0,
+    accountId: body.account_id,
+  })
+}
+
 router.post('/others', async (req, res, next) => {
   if (!req.body.name) return res.status(400).json({ error: '세목명 필수' })
   { const de = otFutureErr(req.body); if (de) return res.status(400).json({ error: de }) }
+  { const le = otLedgerErr(req.body); if (le) return res.status(400).json({ error: le }) }
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
@@ -181,6 +211,7 @@ router.post('/others', async (req, res, next) => {
 
 router.put('/others/:id', async (req, res, next) => {
   { const de = otFutureErr(req.body); if (de) return res.status(400).json({ error: de }) }
+  { const le = otLedgerErr(req.body); if (le) return res.status(400).json({ error: le }) }
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
