@@ -139,7 +139,7 @@ router.get('/:id/matchable', async (req, res, next) => {
     const [[r]] = await req.db.execute('SELECT * FROM expense_resolutions WHERE id = ?', [req.params.id])
     if (!r) return res.status(404).json({ error: 'Not found' })
     const [rows] = await req.db.execute(
-      `SELECT t.id, t.date, t.amount, t.category, t.status, v.name AS vendor_name
+      `SELECT t.id, t.date, t.amount, t.category, t.status, t.account_id, v.name AS vendor_name
        FROM transactions t LEFT JOIN vendors v ON t.vendor_id = v.id
        WHERE t.kind='expense'
          AND t.id NOT IN (SELECT txn_id FROM expense_resolutions WHERE txn_id IS NOT NULL)
@@ -165,9 +165,12 @@ router.post('/:id/process', async (req, res, next) => {
 
     // 매입 청구서 연결 결의서인데 그 청구서가 이미 완납이면, 새 지출을 만들어봐야 매칭할 잔액이 없어
     // 지출만 붕 뜬다(이중 계상). 처리 자체를 막는다.
+    // 겸사겸사 청구서의 출금 계좌를 받아둔다 — 아래에서 계좌 기본값으로 승계한다.
+    let invAccountId = null
     if (r.invoice_id) {
-      const [[inv]] = await conn.execute('SELECT total_amount FROM invoices WHERE id = ?', [r.invoice_id])
+      const [[inv]] = await conn.execute('SELECT total_amount, account_id FROM invoices WHERE id = ?', [r.invoice_id])
       if (inv) {
+        invAccountId = inv.account_id || null
         const [[{ paid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [r.invoice_id])
         if (Number(inv.total_amount) - Number(paid) <= 0) {
           await conn.rollback(); return res.status(409).json({ error: '연결된 청구서가 이미 지급 완료됐어요' })
@@ -175,24 +178,35 @@ router.post('/:id/process', async (req, res, next) => {
       }
     }
 
+    // 계좌 잔액은 `kind='expense' AND account_id=? AND status='지급완료'` 인 거래만 차감한다
+    // (routes/accounts.js calcBalance). 둘 중 하나라도 어긋나면 통장은 줄었는데 장부 잔액은
+    // 그대로 남아 조용히 틀어진다. 아래 두 분기 모두 이 조건을 반드시 만족시킨다.
     let linkedTxnId = null
     if (mode === 'link') {
       if (!txn_id) { await conn.rollback(); return res.status(400).json({ error: '연결할 지출 거래를 선택해주세요' }) }
-      const [[t]] = await conn.execute("SELECT id FROM transactions WHERE id = ? AND kind='expense'", [txn_id])
+      const [[t]] = await conn.execute("SELECT id, status, account_id FROM transactions WHERE id = ? AND kind='expense'", [txn_id])
       if (!t) { await conn.rollback(); return res.status(404).json({ error: '지출 거래를 찾을 수 없어요' }) }
+      // 결의서 처리는 '집행'이다. 연결 대상이 아직 미지급이면 지급완료로 바꿔야 잔액에서 빠진다.
+      const acct = t.account_id || account_id || invAccountId || null
+      if (!acct) { await conn.rollback(); return res.status(400).json({ error: '이 지출에는 출금 계좌가 없어요. 계좌를 선택해주세요' }) }
       linkedTxnId = txn_id
       await conn.execute("UPDATE transactions SET doc_no = ? WHERE id = ? AND (doc_no IS NULL OR doc_no = '' OR doc_no = '공통')", [r.doc_no, txn_id])
+      await conn.execute("UPDATE transactions SET status = '지급완료', account_id = ? WHERE id = ?", [acct, txn_id])
     } else if (mode === 'create') {
       // 실효 지출일 = 넘어온 date, 없으면 결의서 지급예정일(pay_date), 그것도 없으면 오늘.
       // date만 검사하면 미래인 pay_date로 집행될 때 미래날짜 차단이 우회되므로 실효 날짜로 막는다.
       const effDate = date || r.pay_date || kstToday()
       if (futureDateError(effDate)) { await conn.rollback(); return res.status(400).json({ error: '미래 날짜로는 처리할 수 없어요 (오늘까지만 가능)' }) }
       const amt = Number(amount) > 0 ? Number(amount) : Number(r.amount)
+      // 계좌가 없으면 만들지 않는다. NULL로 넣으면 지출이 어느 계좌 잔액에서도 빠지지 않아
+      // 사용자는 돈이 나간 줄 모른 채 잔액을 과대 계상하게 된다(과거 F-02와 동일 유형).
+      const acct = account_id || invAccountId || null
+      if (!acct) { await conn.rollback(); return res.status(400).json({ error: '출금 계좌를 선택해주세요' }) }
       const id = randomUUID()
       await conn.execute(
         `INSERT INTO transactions (id, kind, vendor_id, account_id, category, amount, date, method, status, buyer_type, doc_no, memo)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [id, 'expense', r.vendor_id || null, account_id || null, r.title || '지출', amt,
+        [id, 'expense', r.vendor_id || null, acct, r.title || '지출', amt,
          effDate, r.pay_method || '계좌이체',
          '지급완료', '공통', r.doc_no, `결의서 ${r.doc_no} 집행`])
       linkedTxnId = id

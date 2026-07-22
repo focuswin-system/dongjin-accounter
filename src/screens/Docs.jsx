@@ -439,6 +439,25 @@ const NewResolutionDrawer = ({ open, onClose, onCreated }) => {
   );
 };
 
+// 출금 계좌 선택 — 계좌가 비면 그 지출은 어느 계좌 잔액에서도 빠지지 않으므로 필수 입력이다.
+const AccountPick = ({ accounts, value, onChange, hint }) => (
+  <div>
+    <label className="label" style={{ marginBottom: 8 }}>출금 계좌 <span style={{ color: 'var(--danger, #dc2626)' }}>*</span></label>
+    <Combobox
+      value={value}
+      onChange={onChange}
+      options={accounts.map(a => ({
+        value: a.id,
+        label: a.name,
+        sub: [a.kind === 'card' ? '카드' : a.bankName, a.number].filter(Boolean).join(' '),
+      }))}
+      placeholder="계좌 선택"/>
+    <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+      {hint || '이 계좌에서 나간 것으로 기록돼 잔액에 반영됩니다.'}
+    </div>
+  </div>
+);
+
 // 결의서 처리 — 이 결의서대로 지출을 집행한다.
 //   기존 지출 연결: 이미 카드·이체로 나간 지출을 이 결의서에 붙임
 //   새 지출 등록: 결의서 내용으로 지출 거래를 생성(금액 자동, 수정 가능)
@@ -450,20 +469,34 @@ const ProcessDrawer = ({ open, onClose, doc, onDone }) => {
   const [date, setDate] = useState(todayStr());
   const [candidates, setCandidates] = useState([]);
   const [pickedTxn, setPickedTxn] = useState(null);
+  const [accounts, setAccounts] = useState([]);
+  const [accountId, setAccountId] = useState('');
 
   useEffect(() => {
     if (!open) return;
     setMode('create'); setAmount(String(doc.amount || '')); setDate(doc.pay_date || todayStr()); setPickedTxn(null);
     api.getResolutionMatchable(doc.id).then(setCandidates);
+    api.getAccounts().then(list => {
+      setAccounts(list);
+      // 은행계좌를 기본 선택(kind='bank' — type은 '보통예금'/'법인카드' 값이라 쓰면 안 된다).
+      // 카드 지출도 있으므로 목록에서는 카드도 고를 수 있게 둔다.
+      const bank = list.find(a => a.kind === 'bank') || list[0];
+      setAccountId(prev => prev || bank?.id || '');
+    });
   }, [open, doc.id]);
 
   const amountNum = parseInt(String(amount).replace(/[^0-9]/g, ''), 10) || 0;
+  // 연결 대상이 이미 계좌를 갖고 있으면 그 계좌가 쓰인다(서버 우선순위). 없을 때만 골라야 한다.
+  const pickedRow = candidates.find(t => t.id === pickedTxn);
+  const linkNeedsAccount = mode === 'link' && pickedRow && !pickedRow.account_id;
+  const needsAccount = mode === 'create' || linkNeedsAccount;
 
   const submit = async () => {
-    const body = mode === 'link'
-      ? { mode: 'link', txn_id: pickedTxn }
-      : { mode: 'create', amount: amountNum, date };
     if (mode === 'link' && !pickedTxn) return toast.push('연결할 지출을 선택해주세요');
+    if (needsAccount && !accountId) return toast.push('출금 계좌를 선택해주세요');
+    const body = mode === 'link'
+      ? { mode: 'link', txn_id: pickedTxn, account_id: accountId || null }
+      : { mode: 'create', amount: amountNum, date, account_id: accountId || null };
     const res = await api.processResolution(doc.id, body);
     if (!res.ok) return toast.push(res.error || '처리에 실패했어요');
     const base = mode === 'link' ? '기존 지출에 연결했어요' : '지출을 등록하고 처리했어요';
@@ -503,6 +536,7 @@ const ProcessDrawer = ({ open, onClose, doc, onDone }) => {
               <label className="label" style={{ marginBottom: 8 }}>지출일</label>
               <input className="input" type="date" max={localToday()} value={date} onChange={e => setDate(e.target.value)}/>
             </div>
+            <AccountPick accounts={accounts} value={accountId} onChange={setAccountId}/>
             <div className="text-xs text-muted2">{doc.vendor_name || '거래처 미지정'} · {doc.pay_method || '계좌이체'}로 지출 거래가 생성됩니다.</div>
           </>
         ) : (
@@ -523,9 +557,23 @@ const ProcessDrawer = ({ open, onClose, doc, onDone }) => {
                       {t.related && <span className="badge outline" style={{ fontSize: 10 }}>같은 거래처</span>}
                       <span className="ml-auto num fw-700">{fmtNum(t.amount)}원</span>
                     </div>
-                    <div className="text-xs text-muted2" style={{ marginTop: 3 }}>{t.date} · {t.category || '—'} · {t.status}</div>
+                    <div className="text-xs text-muted2" style={{ marginTop: 3 }}>
+                      {t.date} · {t.category || '—'} · {t.status}
+                      {!t.account_id && <span style={{ color: 'var(--warn, #b45309)' }}> · 계좌 없음</span>}
+                    </div>
                   </button>
                 ))}
+              </div>
+            )}
+            {pickedRow && pickedRow.status !== '지급완료' && (
+              <div className="text-xs" style={{ marginTop: 8, color: 'var(--muted-2)' }}>
+                이 거래는 아직 <b>{pickedRow.status}</b> 상태예요. 연결하면 <b>지급완료</b>로 함께 처리돼 계좌 잔액에서 빠집니다.
+              </div>
+            )}
+            {linkNeedsAccount && (
+              <div style={{ marginTop: 10 }}>
+                <AccountPick accounts={accounts} value={accountId} onChange={setAccountId}
+                  hint="이 거래에는 출금 계좌가 없어요. 지정해야 잔액에 반영됩니다."/>
               </div>
             )}
           </div>
