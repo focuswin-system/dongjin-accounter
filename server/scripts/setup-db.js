@@ -92,6 +92,29 @@ async function main() {
         for (const c of list) {
           const r = await ensurePresetRoles(platformConn, c.id)
           if (r.created > 0) log(`   · ${c.code}: 기본 역할 ${r.created}종 생성(보정)`)
+          // 역할이 하나도 연결 안 된 계정을 메운다.
+          // admin은 마스터, 그 외는 조회전용을 기본으로 준다(권한은 마스터가 나중에 조정).
+          if (r.masterRoleId) {
+            const [[viewer]] = await platformConn.execute(
+              "SELECT id FROM roles WHERE company_id = ? AND name = '조회전용'", [c.id]
+            )
+            const [orphans] = await platformConn.execute(
+              `SELECT u.id, u.role FROM users u
+                WHERE u.company_id = ?
+                  AND NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id)`,
+              [c.id]
+            )
+            let linked = 0
+            for (const u of orphans) {
+              const roleId = u.role === 'admin' ? r.masterRoleId : viewer?.id
+              if (!roleId) continue
+              await platformConn.execute(
+                'INSERT IGNORE INTO user_roles (user_id, role_id) VALUES (?,?)', [u.id, roleId]
+              )
+              linked++
+            }
+            if (linked > 0) log(`   · ${c.code}: 계정 ${linked}개에 역할 연결(보정)`)
+          }
         }
       }
       return
