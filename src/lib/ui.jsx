@@ -319,6 +319,17 @@ export const Sparkline = ({ data, w = 160, h = 40, color = "var(--brand)" }) => 
 /* ── Spacer ── */
 export const Spacer = ({ h = 16 }) => <div style={{ height: h }} />;
 
+/* ── Spinner / Loading ── 공용 로딩 표시. 화면별 데이터 로딩에 재사용. */
+export const Spinner = ({ size = 20 }) => (
+  <span className="spinner" style={{ width: size, height: size, borderWidth: Math.max(2, Math.round(size / 8)) }} role="status" aria-label="로딩 중" />
+);
+export const Loading = ({ label = "불러오는 중…", size = 26 }) => (
+  <div className="col" style={{ alignItems: "center", justifyContent: "center", gap: 10, padding: "40px 0", flex: 1, color: "var(--muted-2)" }}>
+    <Spinner size={size} />
+    {label && <span className="text-sm">{label}</span>}
+  </div>
+);
+
 export const Drawer = ({ open, onClose, width = "min(480px, 100vw)", label, children }) => {
   if (!open) return null;
   return createPortal(

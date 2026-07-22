@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, localToday, Spinner, Loading } from '../lib/ui'
 import { api } from '../lib/api'
 
 /* 경영 도우미 — 대화(세션)형 조회.
@@ -182,12 +182,20 @@ export const MgmtAskScreen = () => {
   const [renaming, setRenaming] = useState(null)
   const [renameText, setRenameText] = useState('')
   const [addBusy, setAddBusy] = useState(false)
+  const [chatsLoading, setChatsLoading] = useState(true)
+  const [itemsLoading, setItemsLoading] = useState(false)
   const threadEnd = useRef(null)
 
   const loadChats = async () => { const list = await api.getChats(); setChats(list); return list }
-  useEffect(() => { (async () => { const list = await loadChats(); if (list.length) setActiveId(list[0].id) })() }, [])
-  useEffect(() => { if (activeId) api.getChatItems(activeId).then(setItems); else setItems([]) }, [activeId])
-  useEffect(() => { threadEnd.current?.scrollIntoView({ behavior: 'smooth' }) }, [items.length])
+  useEffect(() => { (async () => { const list = await loadChats(); if (list.length) setActiveId(list[0].id); setChatsLoading(false) })() }, [])
+  useEffect(() => {
+    if (!activeId) { setItems([]); return }
+    let alive = true
+    setItemsLoading(true)
+    api.getChatItems(activeId).then(r => { if (alive) { setItems(r); setItemsLoading(false) } })
+    return () => { alive = false }
+  }, [activeId])
+  useEffect(() => { threadEnd.current?.scrollIntoView({ behavior: 'smooth' }) }, [items.length, addBusy])
 
   const newChat = async () => {
     const c = await api.createChat()
@@ -244,7 +252,8 @@ export const MgmtAskScreen = () => {
           <button className="btn primary sm ml-auto" onClick={newChat}><Icon.Plus size={13}/> 새 대화</button>
         </div>
         <div className="col" style={{ gap: 3, overflowY: 'auto', flex: 1 }}>
-          {chats.length === 0 && <div className="text-sm text-muted2" style={{ padding: 12, textAlign: 'center' }}>대화를 만들어<br/>차트를 저장해 보세요.</div>}
+          {chatsLoading && <div className="row" style={{ justifyContent: 'center', padding: 16 }}><Spinner size={20}/></div>}
+          {!chatsLoading && chats.length === 0 && <div className="text-sm text-muted2" style={{ padding: 12, textAlign: 'center' }}>대화를 만들어<br/>차트를 저장해 보세요.</div>}
           {chats.map(c => (
             <div key={c.id} className="row" onClick={() => setActiveId(c.id)}
               style={{ padding: '8px 10px', borderRadius: 8, cursor: 'pointer', gap: 6, alignItems: 'center', background: c.id === activeId ? 'var(--brand-soft)' : 'transparent' }}>
@@ -269,7 +278,9 @@ export const MgmtAskScreen = () => {
 
       {/* 우측: 채팅 */}
       <section className="col" style={{ flex: 1, minWidth: 0, gap: 12 }}>
-        {!active ? (
+        {chatsLoading ? (
+          <div className="card col" style={{ flex: 1 }}><Loading label="경영 도우미를 준비하고 있어요…"/></div>
+        ) : !active ? (
           <div className="card card-pad col" style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 }}>
             <div className="row" style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--brand-soft)', color: 'var(--brand)', justifyContent: 'center', alignItems: 'center' }}><Icon.Sparkle size={22}/></div>
             <div className="fw-700" style={{ fontSize: 16 }}>무엇이 궁금하세요?</div>
@@ -280,22 +291,33 @@ export const MgmtAskScreen = () => {
         ) : (
           <>
             <div className="col" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', gap: 18, padding: '4px 4px 4px 0', minHeight: 0 }}>
-              {items.length === 0 && (
+              {itemsLoading ? (
+                <Loading label="차트를 불러오는 중…"/>
+              ) : items.length === 0 && !addBusy ? (
                 <div className="col" style={{ alignItems: 'center', justifyContent: 'center', flex: 1, gap: 8, color: 'var(--muted-2)' }}>
                   <Icon.Chart size={28}/>
                   <div className="text-sm">아래에서 <b>무엇을 · 기준 · 기간</b>을 골라 첫 질문을 보내 보세요.</div>
                 </div>
-              )}
-              {items.map(it => (
-                <div key={it.id} className="col" style={{ gap: 8 }}>
-                  {/* 내 질문(우측 버블) */}
-                  <div className="row" style={{ justifyContent: 'flex-end' }}>
-                    <div style={{ background: 'var(--brand)', color: '#fff', padding: '8px 14px', borderRadius: '14px 14px 3px 14px', fontSize: 13.5, fontWeight: 600, maxWidth: 520 }}>{it.title}</div>
+              ) : (
+                items.map(it => (
+                  <div key={it.id} className="col" style={{ gap: 8 }}>
+                    {/* 내 질문(우측 버블) */}
+                    <div className="row" style={{ justifyContent: 'flex-end' }}>
+                      <div style={{ background: 'var(--brand)', color: '#fff', padding: '8px 14px', borderRadius: '14px 14px 3px 14px', fontSize: 13.5, fontWeight: 600, maxWidth: 520 }}>{it.title}</div>
+                    </div>
+                    {/* 도우미 답변(좌측 AI 카드) */}
+                    <AnswerCard item={it} onRefresh={refreshItem} onDelete={delItem}/>
                   </div>
-                  {/* 도우미 답변(좌측 AI 카드) */}
-                  <AnswerCard item={it} onRefresh={refreshItem} onDelete={delItem}/>
+                ))
+              )}
+              {addBusy && (
+                <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+                  <div className="row" style={{ width: 30, height: 30, minWidth: 30, borderRadius: '50%', background: 'var(--brand-soft)', color: 'var(--brand)', justifyContent: 'center', alignItems: 'center', marginTop: 2 }}><Icon.Sparkle size={16}/></div>
+                  <div className="card card-pad row gap-8" style={{ borderRadius: '4px 14px 14px 14px', alignItems: 'center' }}>
+                    <Spinner size={15}/><span className="text-sm text-muted2">분석하고 있어요…</span>
+                  </div>
                 </div>
-              ))}
+              )}
               <div ref={threadEnd}/>
             </div>
             <Composer onAdd={addItem} busy={addBusy}/>

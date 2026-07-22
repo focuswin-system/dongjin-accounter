@@ -695,6 +695,7 @@ body:has([data-modal-open]) {
 /* ───── Animations ───── */
 @keyframes fadeUp { from { opacity: 0; } to { opacity: 1; } }
 @keyframes spin { to { transform: rotate(360deg); } }
+.spinner { display: inline-block; border: 2.5px solid var(--surface-3); border-top-color: var(--brand); border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
 @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
 @keyframes nudgePop { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 @keyframes nudgeBubble { from { transform: translateX(14px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
