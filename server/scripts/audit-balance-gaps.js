@@ -12,7 +12,8 @@
  *       두 경우 모두 통장은 줄었는데 장부 잔액은 그대로 남는다.
  *
  * 사용: cd server && node scripts/audit-balance-gaps.js
- *       특정 DB만: node scripts/audit-balance-gaps.js winc_ac
+ *       특정 DB만:   node scripts/audit-balance-gaps.js winc_ac
+ *       문제 행 나열: node scripts/audit-balance-gaps.js --detail
  */
 require('dotenv').config()
 const mysql = require('mysql2/promise')
@@ -70,6 +71,36 @@ const CHECKS = [
   },
 ]
 
+/** --detail 일 때 문제 행을 실제로 나열한다 (역시 SELECT만) */
+const DETAILS = [
+  {
+    label: 'account_id 가 비어 잔액에 반영되지 않는 거래',
+    sql: `SELECT t.id, t.date, t.kind, t.amount, t.status,
+                 COALESCE(v.name,'-') vendor, COALESCE(t.category,'-') category,
+                 COALESCE(NULLIF(t.doc_no,''),'-') doc_no,
+                 COALESCE(NULLIF(t.memo,''),'-') memo
+            FROM transactions t
+            LEFT JOIN vendors v ON v.id = t.vendor_id
+           WHERE t.account_id IS NULL AND t.kind IN ('income','expense')
+           ORDER BY t.date DESC LIMIT 50`,
+  },
+]
+
+async function detailDb(conn, dbName) {
+  for (const d of DETAILS) {
+    const [rows] = await conn.query(d.sql)
+    if (!rows.length) continue
+    console.log(`\n  ▸ ${d.label} (${rows.length}건)`)
+    for (const r of rows) {
+      const date = r.date instanceof Date ? r.date.toISOString().slice(0, 10) : String(r.date).slice(0, 10)
+      console.log(`    ${date}  ${r.kind === 'income' ? '입금' : '지출'}  ${won(r.amount).padStart(14)}  ${r.status}`)
+      console.log(`      거래처: ${r.vendor} / 비목: ${r.category} / 문서: ${r.doc_no}`)
+      console.log(`      적요: ${r.memo}`)
+      console.log(`      id: ${r.id}`)
+    }
+  }
+}
+
 const won = (n) => Number(n).toLocaleString('ko-KR') + '원'
 
 async function auditDb(conn, dbName) {
@@ -91,7 +122,9 @@ async function auditDb(conn, dbName) {
 }
 
 ;(async () => {
-  const only = process.argv[2]
+  const args = process.argv.slice(2)
+  const detail = args.includes('--detail')
+  const only = args.find((a) => !a.startsWith('--'))
   const base = {
     host: process.env.DB_HOST,
     port: Number(process.env.DB_PORT || 3306),
@@ -119,6 +152,7 @@ async function auditDb(conn, dbName) {
     const conn = await mysql.createConnection({ ...base, database: dbName })
     try {
       totalDirty += await auditDb(conn, dbName)
+      if (detail) await detailDb(conn, dbName)
     } finally {
       await conn.end()
     }
