@@ -162,7 +162,46 @@ async function bootstrapFirstCompany(c, legacyConn, { code, dbName, fallbackName
       [u.id, companyId, u.username, u.password, u.name || '', u.role || 'user', u.active ? 1 : 0]
     )
   }
-  return { skipped: false, code, users: legacyUsers.length, companyId }
+  // 신규 생성(provisionTenant)과 동일하게 기본 역할을 만들어 준다.
+  // 이게 빠지면 '이전해 온 회사만 역할이 없는' 상태가 되어 권한 관리(P5)에서 갈라진다.
+  const roles = await ensurePresetRoles(c, companyId)
+  // 기존 admin 계정은 마스터 역할에 연결
+  if (roles.masterRoleId) {
+    for (const u of legacyUsers.filter(x => (x.role || 'user') === 'admin')) {
+      await c.execute('INSERT IGNORE INTO user_roles (user_id, role_id) VALUES (?,?)',
+        [u.id, roles.masterRoleId])
+    }
+  }
+  return { skipped: false, code, users: legacyUsers.length, companyId, roles: roles.created }
 }
 
-module.exports = { PLATFORM_TABLES, createPlatformSchema, bootstrapFirstCompany }
+/**
+ * 회사에 기본 역할(마스터/경리/조회전용) + 권한 매트릭스를 만든다. 이미 있으면 건너뛴다(멱등).
+ * provisionTenant(신규 회사)와 bootstrapFirstCompany(기존 회사 흡수) 양쪽에서 쓴다.
+ */
+async function ensurePresetRoles(c, companyId) {
+  // 순환 참조를 피하려고 지연 로드 (permissions는 순수 데이터 모듈)
+  const { PRESET_ROLES, expandPresetPerms } = require('./permissions')
+  let created = 0
+  let masterRoleId = null
+  for (const preset of PRESET_ROLES) {
+    const [[exist]] = await c.execute(
+      'SELECT id FROM roles WHERE company_id = ? AND name = ?', [companyId, preset.name]
+    )
+    let roleId = exist?.id
+    if (!roleId) {
+      roleId = randomUUID()
+      await c.execute('INSERT INTO roles (id, company_id, name, is_system) VALUES (?,?,?,?)',
+        [roleId, companyId, preset.name, preset.isSystem ? 1 : 0])
+      for (const [resource, action] of expandPresetPerms(preset.perms)) {
+        await c.execute('INSERT IGNORE INTO role_perms (role_id, resource, action) VALUES (?,?,?)',
+          [roleId, resource, action])
+      }
+      created++
+    }
+    if (preset.name === '마스터') masterRoleId = roleId
+  }
+  return { created, masterRoleId }
+}
+
+module.exports = { PLATFORM_TABLES, createPlatformSchema, bootstrapFirstCompany, ensurePresetRoles }

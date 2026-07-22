@@ -19,6 +19,11 @@ SSH=(ssh -i "$KEY" -p "$SSH_PORT"
      -o ConnectTimeout=20)
 REMOTE="$SSH_USER@$HOST"
 
+echo "[0/4] 테넌트 격리 검사 (로컬 — 프런트 소스가 있어야 nav 동기화까지 검사된다)"
+# 원격에서도 한 번 더 돌지만, 거기엔 src/가 없어 nav 동기화 검사가 건너뛰어진다.
+# 권한 카탈로그 누락을 실제로 잡으려면 여기(소스가 있는 로컬)에서 돌아야 한다.
+( cd server && npm run check:isolation )
+
 echo "[1/4] 프론트 빌드 (Vite)"
 npm run build
 

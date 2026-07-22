@@ -18,7 +18,7 @@
 const bcrypt = require('bcryptjs')
 const { randomUUID } = require('crypto')
 const { platformPool, withAdmin, assertDbName, validateCompanyCode } = require('../platform/db')
-const { PRESET_ROLES, expandPresetPerms } = require('../platform/permissions')
+const { ensurePresetRoles } = require('../platform/schema')
 const { initDb } = require('../db')
 
 const DB_PREFIX = process.env.TENANT_DB_PREFIX || 'acct_'
@@ -93,21 +93,10 @@ async function provisionTenant({
     log('스키마·기준정보 시드 적용')
 
     // ── 3. 기본 역할 + 권한 매트릭스 ──
-    for (const preset of PRESET_ROLES) {
-      const roleId = randomUUID()
-      await platformPool.execute(
-        'INSERT INTO roles (id, company_id, name, is_system) VALUES (?,?,?,?)',
-        [roleId, companyId, preset.name, preset.isSystem ? 1 : 0]
-      )
-      const pairs = expandPresetPerms(preset.perms)
-      for (const [resource, action] of pairs) {
-        await platformPool.execute(
-          'INSERT IGNORE INTO role_perms (role_id, resource, action) VALUES (?,?,?)',
-          [roleId, resource, action]
-        )
-      }
-    }
-    log(`기본 역할 ${PRESET_ROLES.length}종 생성`)
+    // 기존 회사 흡수(bootstrapFirstCompany)와 같은 함수를 쓴다 — 생성 경로가 갈라지면
+    // '신규 회사에만 있는 역할' 같은 불일치가 생긴다.
+    const roleResult = await ensurePresetRoles(platformPool, companyId)
+    log(`기본 역할 ${roleResult.created}종 생성`)
 
     // ── 4. 마스터 계정 ──
     const userId = randomUUID()
@@ -117,12 +106,9 @@ async function provisionTenant({
        masterName || '', masterEmail || null, 'admin']
     )
     // 마스터 역할 연결
-    const [[masterRole]] = await platformPool.execute(
-      "SELECT id FROM roles WHERE company_id = ? AND name = '마스터'", [companyId]
-    )
-    if (masterRole) {
+    if (roleResult.masterRoleId) {
       await platformPool.execute(
-        'INSERT IGNORE INTO user_roles (user_id, role_id) VALUES (?,?)', [userId, masterRole.id]
+        'INSERT IGNORE INTO user_roles (user_id, role_id) VALUES (?,?)', [userId, roleResult.masterRoleId]
       )
     }
     log(`마스터 계정 생성: ${masterUsername}`)

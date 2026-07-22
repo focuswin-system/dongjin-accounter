@@ -69,6 +69,7 @@ const RESOURCES = [
 
   { id: 'report',                  label: '보고서',        group: '경영관리' },
   { id: 'mgmt_dash',               label: '경영 대시보드',  group: '경영관리' },
+  { id: 'mgmt_ask',                label: '경영 질의',      group: '경영관리' },
 
   { id: 'settings',                label: '환경설정',      group: '공통' },
 ]

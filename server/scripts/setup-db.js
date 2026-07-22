@@ -17,7 +17,7 @@ require('dotenv').config()
 const {
   PLATFORM_DB, withAdmin, assertDbName, validateCompanyCode, hasDedicatedAdmin, adminConfig,
 } = require('../platform/db')
-const { createPlatformSchema, bootstrapFirstCompany } = require('../platform/schema')
+const { createPlatformSchema, bootstrapFirstCompany, ensurePresetRoles } = require('../platform/schema')
 const { initDb } = require('../db')
 
 const CHECK_ONLY = process.argv.includes('--check')
@@ -84,9 +84,16 @@ async function main() {
   await withAdmin(async (platformConn) => {
     const [[{ cnt }]] = await platformConn.execute('SELECT COUNT(*) AS cnt FROM companies')
     if (cnt > 0) {
-      const [list] = await platformConn.execute('SELECT code, name, db_name FROM companies ORDER BY created_at')
+      const [list] = await platformConn.execute('SELECT id, code, name, db_name FROM companies ORDER BY created_at')
       log(`   · 이미 ${cnt}개 회사가 등록되어 있습니다:`)
       for (const c of list) log(`       - ${c.code}  (${c.name})  →  ${c.db_name}`)
+      // 기본 역할 보정 — 초기 부트스트랩에 역할 생성이 없던 시절에 이전된 회사를 메운다.
+      if (!CHECK_ONLY) {
+        for (const c of list) {
+          const r = await ensurePresetRoles(platformConn, c.id)
+          if (r.created > 0) log(`   · ${c.code}: 기본 역할 ${r.created}종 생성(보정)`)
+        }
+      }
       return
     }
     if (CHECK_ONLY) return log('   · 등록된 회사 없음 — 부트스트랩이 필요합니다')
