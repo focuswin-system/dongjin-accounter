@@ -954,6 +954,12 @@ export const api = {
     try { return await req('/work-contracts/alerts/conversion') } catch { return [] }
   },
 
+  // ─── 경영 도우미(범용 집계) ───────────────────────────────────
+  async getAnalytics(spec = {}) {
+    const qs = new URLSearchParams(Object.entries(spec).filter(([, v]) => v != null && v !== '')).toString()
+    try { return await req('/analytics/aggregate' + (qs ? `?${qs}` : '')) } catch { return { rows: [], total: 0 } }
+  },
+
   // ─── 홈 대시보드 ──────────────────────────────────────────────
   async getHomeStats() {
     const [arSum, apSum] = await Promise.all([

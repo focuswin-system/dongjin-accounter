@@ -145,10 +145,11 @@ export const LoginScreen = ({ onLogin }) => {
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 7 }}>
                   회사코드
                 </label>
+                {/* placeholder에 실제 회사코드를 예시로 두지 않는다 — 타사 코드를 추측할 단서가 된다 */}
                 <input
                   className="input"
                   type="text"
-                  placeholder="예: dongjin"
+                  placeholder="회사코드를 입력하세요"
                   value={company}
                   onChange={e => { setCompany(e.target.value); setError(''); }}
                   autoComplete="organization"

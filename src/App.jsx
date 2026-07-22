@@ -16,6 +16,7 @@ import { BillingScreen } from './screens/Billing'
 import { TaxVatScreen, OtherTaxScreen } from './screens/Tax'
 import { MiscPLScreen } from './screens/MiscPL'
 import { MgmtDashScreen } from './screens/Mgmt'
+import { MgmtAskScreen } from './screens/MgmtAsk'
 import { PortalScreen } from './screens/Portal'
 
 const CRUMB_MAP = {
@@ -41,6 +42,7 @@ const CRUMB_MAP = {
   hr_outsourcing:  ["인사급여", "기타 용역·일용"],
   misc_pl:         ["구매·매입", "경비·잡손익"],
   mgmt_dash:       ["경영관리", "경영 대시보드"],
+  mgmt_ask:        ["경영관리", "경영 도우미"],
   report:          ["보고서"],
   acct_process:    ["일반회계", "회계처리"],
   acct_tax:        ["일반회계", "세무관리"],
@@ -339,6 +341,7 @@ function AppInner({ onLogout, user }) {
       case "hr_outsourcing":  return <OutsourcingScreen/>;
       case "misc_pl":         return <MiscPLScreen/>;
       case "mgmt_dash":       return <MgmtDashScreen/>;
+      case "mgmt_ask":        return <MgmtAskScreen/>;
       case "excel_modal":     return <ExcelScreen/>;
       case "income":          return <LedgerScreen initialFilter="income" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
       case "expense":         return <LedgerScreen initialFilter="expense" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
@@ -356,7 +359,7 @@ function AppInner({ onLogout, user }) {
                 : route.startsWith("billing") ? "billing"
                 : (route === "contract_sales" || route === "contract_purchase") ? "contract"
                 : (route === "settings" || route === "hr_base" || route === "hr_labor_contract" || route === "hr_outsourcing" || route.startsWith("master") || route.startsWith("hrbase")) ? "master"
-                : route === "mgmt_dash" ? "report" : route;
+                : (route === "mgmt_dash" || route === "mgmt_ask") ? "report" : route;
   const help = HELP_MAP[helpKey] || HELP_MAP.home;
 
   // 기준정보 서브메뉴(master_<탭>)는 CRUMB_MAP에 없으니 nav 잎 정보로 브레드크럼 구성

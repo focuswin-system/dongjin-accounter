@@ -71,6 +71,7 @@ export const NAV_TREE = [
       ]},
       { label: "경영관리", items: [
         { id: "mgmt_dash", label: "경영 대시보드", icon: Icon.Trend },
+        { id: "mgmt_ask", label: "경영 도우미", icon: Icon.Sparkle },
       ]},
     ],
   },
@@ -132,6 +133,7 @@ export const PORTAL = [
     categories: [
       { id: 'report', label: '장부관리', icon: Icon.Chart, desc: '보고서·집계 자료', route: 'report' },
       { id: 'mgmt_dash', label: '경영관리', icon: Icon.Trend, desc: '경영 대시보드', route: 'mgmt_dash' },
+      { id: 'mgmt_ask', label: '경영 도우미', icon: Icon.Sparkle, desc: '골라서 묻는 매출·매입 분석', route: 'mgmt_ask' },
     ],
   },
 ]
