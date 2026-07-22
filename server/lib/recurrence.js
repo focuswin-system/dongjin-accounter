@@ -63,4 +63,37 @@ function dueDatesToGenerate(rec, today = new Date(), opts = {}) {
   return out
 }
 
-module.exports = { dueDatesToGenerate, fmtDate, daysInMonth, addDays, LOOKAHEAD_DAYS }
+/**
+ * 생성물(청구서·거래)을 지웠을 때 그 회차가 다시 생성될 수 있도록 last_generated 를 되돌린다.
+ *
+ * last_generated 는 '이 값 이하 회차는 이미 생성됨'을 뜻하는 하한선이다(위 genFloor).
+ * 생성 코드는 이 값을 전진시키기만 해서, 만든 청구서를 지워도 하한선이 그대로 남았다.
+ * 그러면 그 회차는 '발행 예정'에도 자동 생성에도 영영 나오지 않는다 —
+ * 그 달 매출이 아무 경고 없이 미청구로 사라진다.
+ *
+ * 되돌리는 방법: 지워진 회차 날짜의 '하루 전'으로 낮춘다.
+ * 그 회차만 다시 열리고(ds > genFloor), 그보다 앞선 회차는 여전히 하한 아래라 재생성되지 않는다.
+ *
+ * 단, 지워진 것이 '마지막으로 생성된 회차'일 때만 되돌린다. 중간 회차를 지웠는데 하한을
+ * 낮추면 이미 만들어둔 뒤 회차까지 다시 생성돼 중복 청구서가 생긴다.
+ *
+ * @returns {{restored: boolean, note: string|null}} restored=false 면 그 회차는 수동으로 만들어야 한다.
+ */
+async function restoreLastGenerated(db, table, recurringId, removedDate) {
+  if (!db) throw new Error('restoreLastGenerated: 테넌트 연결(db)이 필요합니다')
+  if (!recurringId || !removedDate) return { restored: false, note: null }
+  if (table !== 'recurring_invoices' && table !== 'recurring_expenses') {
+    throw new Error(`restoreLastGenerated: 알 수 없는 테이블 ${table}`)
+  }
+  const [[rec]] = await db.execute(`SELECT last_generated FROM ${table} WHERE id = ?`, [recurringId])
+  if (!rec) return { restored: false, note: null }
+  const removed = String(removedDate).slice(0, 10)
+  if (String(rec.last_generated || '').slice(0, 10) !== removed) {
+    // 마지막 회차가 아니다 — 하한을 낮추면 뒤 회차가 중복 생성된다.
+    return { restored: false, note: '이 회차는 자동으로 다시 만들어지지 않아요. 필요하면 직접 발행해주세요.' }
+  }
+  await db.execute(`UPDATE ${table} SET last_generated = ? WHERE id = ?`, [addDays(removed, -1), recurringId])
+  return { restored: true, note: '이 회차는 다시 발행 예정에 나타나요.' }
+}
+
+module.exports = { dueDatesToGenerate, fmtDate, daysInMonth, addDays, LOOKAHEAD_DAYS, restoreLastGenerated }

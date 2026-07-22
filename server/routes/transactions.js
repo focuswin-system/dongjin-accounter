@@ -4,6 +4,7 @@ const multer = require('multer')
 const xlsx = require('xlsx')
 const { futureDateError } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
+const { restoreLastGenerated } = require('../lib/recurrence')
 
 const router = Router()
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
@@ -251,9 +252,14 @@ router.delete('/:id', async (req, res, next) => {
     const [matches] = await conn.execute('SELECT invoice_id FROM invoice_matches WHERE txn_id = ?', [req.params.id])
     await conn.execute('DELETE FROM invoice_matches WHERE txn_id = ?', [req.params.id])
     for (const m of matches) await recalcInvoiceStatus(conn, m.invoice_id)
+    // 정기지출에서 자동 생성된 거래면 last_generated 를 되돌려 그 회차가 다시 생성되게 한다.
+    const [[cur]] = await conn.execute('SELECT recurring_id, date FROM transactions WHERE id = ?', [req.params.id])
     await conn.execute('DELETE FROM transactions WHERE id = ?', [req.params.id])
+    const rec = cur?.recurring_id
+      ? await restoreLastGenerated(conn, 'recurring_expenses', cur.recurring_id, cur.date)
+      : { restored: false, note: null }
     await conn.commit()
-    res.json({ ok: true })
+    res.json({ ok: true, recurringNote: rec.note })
   } catch (e) {
     await rollbackQuietly(conn)
     if (e.code === 'ER_ROW_IS_REFERENCED_2' || e.errno === 1451) {

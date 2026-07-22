@@ -142,6 +142,10 @@ async function initDb(conn) {
         due_at         VARCHAR(20),
         status         VARCHAR(50) DEFAULT '입금 예정',
         account_id     VARCHAR(36),
+        -- 어느 정기청구에서 나온 회차인지. 삭제 시 last_generated 를 되돌려
+        -- 그 회차가 '발행 예정'에 다시 뜨게 하기 위해 필요하다(FK는 두지 않는다 —
+        -- 정기청구 규칙을 지워도 이미 발행된 청구서는 남아야 한다).
+        recurring_id   VARCHAR(36),
         memo           TEXT,
         created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (vendor_id)    REFERENCES vendors(id),
@@ -634,6 +638,10 @@ async function initDb(conn) {
     // 삭제해서도 안 된다(과거 장부가 어긋난다). 미사용으로 두면 새 거래의 선택 목록에서만
     // 빠지고 기존 기록은 그대로 유지된다. 기존 행은 전부 사용중(1)으로 시작한다.
     await ensureColumn('vendors', 'active', "active TINYINT(1) NOT NULL DEFAULT 1")
+    // 정기청구 → 청구서 역참조. 청구서를 지우면 그 회차의 last_generated 를 되돌려야
+    // '발행 예정'에 다시 뜬다. 이 링크가 없으면 그 달 매출이 조용히 미청구로 사라진다.
+    // (기존 청구서는 NULL — memo 로 추정 복원하면 엉뚱한 회차를 되살릴 수 있어 하지 않는다)
+    await ensureColumn('invoices', 'recurring_id', "recurring_id VARCHAR(36)")
     // 결의서 결재선 스냅샷(기존 DB 대상). [{label, position, name}]
     await ensureColumn('expense_resolutions', 'approval', "approval TEXT")
     // 부가세: 자동집계(예상)와 별개로 실제 신고세액을 직접 입력. NULL이면 아직 신고 전(예상값 사용).

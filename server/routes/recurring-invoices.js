@@ -139,9 +139,9 @@ router.post('/:id/issue', async (req, res, next) => {
     }
     const id = randomUUID()
     await conn.execute(
-      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, invoice_no, 'issued', r.vendor_id || null, r.contract_id || null, supply, vat, total,
-       target, addDays(target, 30), paid ? '입금 완료' : '입금 예정', acctId,
+       target, addDays(target, 30), paid ? '입금 완료' : '입금 예정', acctId, r.id,
        `정기청구 · ${r.item || ''}`.trim()]
     )
     // 기입금 처리: 실제 입금 거래 + 매칭까지 (계약 상세의 수금·미수금에 반영)
@@ -194,8 +194,8 @@ router.post('/generate', async (req, res, next) => {
         const dueAt  = addDays(dueStr, 30)
         const id = randomUUID()
         await conn.execute(
-          'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-          [id, invoice_no, 'issued', r.vendor_id||null, r.contract_id||null, supply, vat, total, dueStr, dueAt, '입금 예정', r.account_id||null, `정기청구 자동 생성 · ${r.item||''}`.trim()]
+          'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+          [id, invoice_no, 'issued', r.vendor_id||null, r.contract_id||null, supply, vat, total, dueStr, dueAt, '입금 예정', r.account_id||null, r.id, `정기청구 자동 생성 · ${r.item||''}`.trim()]
         )
         generated.push({ id, invoice_no, vendor_id: r.vendor_id, item: r.item, total, date: dueStr })
       }

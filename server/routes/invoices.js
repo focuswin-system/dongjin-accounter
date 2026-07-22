@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
+const { restoreLastGenerated } = require('../lib/recurrence')
 
 const router = Router()
 
@@ -135,14 +136,20 @@ router.delete('/:id', async (req, res, next) => {
     // 입금/지급(매칭) 내역이 있으면 삭제 금지 — 이미 장부에 반영된 돈이므로
     const [[{ mcnt }]] = await conn.execute('SELECT COUNT(*) AS mcnt FROM invoice_matches WHERE invoice_id = ?', [id])
     if (mcnt > 0) { await rollbackQuietly(conn); return res.status(409).json({ error: '입금·지급 내역이 있는 청구서는 삭제할 수 없어요. 먼저 입금 매칭을 취소하세요.' }) }
+    // 정기청구에서 나온 회차면 last_generated 를 되돌려 '발행 예정'에 다시 뜨게 한다.
+    // 안 하면 그 달치가 자동 생성에도 예정 목록에도 안 나와 매출이 조용히 미청구로 사라진다.
+    const [[inv]] = await conn.execute('SELECT recurring_id, issued_at FROM invoices WHERE id = ?', [id])
     await conn.execute('DELETE FROM invoice_matches WHERE invoice_id = ?', [id])
     await conn.execute('DELETE FROM invoice_docs WHERE invoice_id = ?', [id])
     await conn.execute('UPDATE transactions SET invoice_id = NULL WHERE invoice_id = ?', [id])
     // 연결된 청구 일정은 '예정'으로 되돌려 발행 예정에 다시 노출(고아 방지)
     await conn.execute("UPDATE milestones SET status = '예정', invoice_id = NULL WHERE invoice_id = ?", [id])
     await conn.execute('DELETE FROM invoices WHERE id = ?', [id])
+    const rec = inv?.recurring_id
+      ? await restoreLastGenerated(conn, 'recurring_invoices', inv.recurring_id, inv.issued_at)
+      : { restored: false, note: null }
     await conn.commit()
-    res.json({ ok: true })
+    res.json({ ok: true, recurringNote: rec.note })
   } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
 })
 
