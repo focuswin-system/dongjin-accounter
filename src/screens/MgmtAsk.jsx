@@ -279,7 +279,7 @@ export const MgmtAskScreen = () => {
           </div>
         ) : (
           <>
-            <div className="col" style={{ flex: 1, overflowY: 'auto', gap: 18, padding: '4px 4px 4px 0', minHeight: 0 }}>
+            <div className="col" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', gap: 18, padding: '4px 4px 4px 0', minHeight: 0 }}>
               {items.length === 0 && (
                 <div className="col" style={{ alignItems: 'center', justifyContent: 'center', flex: 1, gap: 8, color: 'var(--muted-2)' }}>
                   <Icon.Chart size={28}/>
