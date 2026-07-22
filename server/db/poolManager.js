@@ -20,6 +20,8 @@ const MAX_POOLS    = Number(process.env.TENANT_POOL_MAX        || 30)
 const CONN_LIMIT   = Number(process.env.TENANT_POOL_CONN_LIMIT || 3)
 const IDLE_MS      = Number(process.env.TENANT_POOL_IDLE_MS    || 10 * 60 * 1000)
 const SWEEP_MS     = 60 * 1000
+// 최근 이 시간 안에 쓰인 풀은 회수하지 않는다(요청이 쿼리 사이에 있을 수 있다).
+const EVICT_GRACE_MS = Number(process.env.TENANT_POOL_EVICT_GRACE_MS || 30 * 1000)
 
 /** dbName → { pool, wrapped, lastUsed, inFlight } */
 const entries = new Map()
@@ -31,7 +33,15 @@ const entries = new Map()
 function wrap(pool, entry) {
   const track = (p) => {
     entry.inFlight++
-    return p.finally(() => { entry.inFlight-- })
+    entry.lastUsed = Date.now()
+    return p.finally(() => {
+      entry.inFlight--
+      // ⚠ 쿼리가 끝난 시점도 기록한다.
+      //   getPool(요청 시작) 때만 갱신하면, 한 요청이 쿼리와 쿼리 사이에 있을 때
+      //   (inFlight 이 잠깐 0) '오래 안 쓴 풀'로 오인되어 회수될 수 있다.
+      //   그러면 그 요청의 다음 쿼리가 "Pool is closed" 로 죽는다.
+      entry.lastUsed = Date.now()
+    })
   }
   return {
     execute: (...args) => track(pool.execute(...args)),
@@ -85,17 +95,24 @@ function getPool(dbName) {
   return entry.wrapped
 }
 
-/** 한도를 넘으면 '사용 중이 아닌' 것 중 가장 오래 안 쓴 풀을 닫는다. */
+/**
+ * 한도를 넘으면 '사용 중이 아닌' 것 중 가장 오래 안 쓴 풀을 닫는다.
+ * 진행 중인 요청을 끊지 않기 위해 두 겹으로 방어한다:
+ *   · inFlight > 0        — 쿼리·트랜잭션이 실제로 돌고 있는 풀
+ *   · 최근 EVICT_GRACE_MS 내 사용 — 쿼리 사이의 짧은 공백일 수 있는 풀
+ */
 function evictIfNeeded() {
   if (entries.size < MAX_POOLS) return
+  const now = Date.now()
   let victimKey = null
   let oldest = Infinity
   for (const [k, e] of entries) {
-    if (e.inFlight > 0) continue          // 사용 중인 풀은 건드리지 않는다
+    if (e.inFlight > 0) continue                       // 사용 중
+    if (now - e.lastUsed < EVICT_GRACE_MS) continue    // 방금 쓴 풀 — 요청 진행 중일 수 있다
     if (e.lastUsed < oldest) { oldest = e.lastUsed; victimKey = k }
   }
-  // 전부 사용 중이면 회수하지 않는다 — 일시적으로 한도를 넘는 편이
-  // 진행 중인 트랜잭션을 끊는 것보다 안전하다.
+  // 회수할 게 없으면 그냥 넘어간다 — 일시적으로 한도를 넘는 편이
+  // 진행 중인 요청을 끊는 것보다 안전하다(스위퍼가 곧 유휴 풀을 정리한다).
   if (victimKey) closePool(victimKey)
 }
 

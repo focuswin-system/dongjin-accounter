@@ -64,11 +64,16 @@ async function createPlatformSchema(c) {
       FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
     )
   `)
+  // FK 필수 — 없으면 회사/계정이 지워져도 이 행이 남아 고아가 된다
+  // (프로비저닝이 계정 생성 후 실패해 보상 정리될 때 실제로 발생했다).
   await c.execute(`
     CREATE TABLE IF NOT EXISTS user_roles (
       user_id VARCHAR(36) NOT NULL,
       role_id VARCHAR(36) NOT NULL,
-      PRIMARY KEY (user_id, role_id)
+      PRIMARY KEY (user_id, role_id),
+      KEY idx_user_roles_role (role_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
     )
   `)
   await c.execute(`
@@ -118,6 +123,46 @@ async function createPlatformSchema(c) {
       PRIMARY KEY (db_name, version)
     )
   `)
+
+  await migratePlatformSchema(c)
+}
+
+/**
+ * 기존 설치본 보정 (멱등).
+ * CREATE TABLE IF NOT EXISTS 는 이미 있는 테이블을 바꾸지 않으므로,
+ * 나중에 추가한 제약은 여기서 따로 적용한다.
+ */
+async function migratePlatformSchema(c) {
+  const [[{ db }]] = await c.execute('SELECT DATABASE() AS db')
+
+  // user_roles 에 FK 추가 — 없으면 users/roles 가 지워져도 행이 남아 고아가 된다.
+  const [[{ fkCnt }]] = await c.execute(
+    `SELECT COUNT(*) AS fkCnt FROM information_schema.table_constraints
+      WHERE table_schema = ? AND table_name = 'user_roles' AND constraint_type = 'FOREIGN KEY'`,
+    [db]
+  )
+  if (fkCnt === 0) {
+    // FK를 걸기 전에 기존 고아 행부터 정리해야 한다(있으면 ALTER 가 실패한다).
+    const [o1] = await c.execute(
+      'DELETE ur FROM user_roles ur LEFT JOIN users u ON u.id = ur.user_id WHERE u.id IS NULL'
+    )
+    const [o2] = await c.execute(
+      'DELETE ur FROM user_roles ur LEFT JOIN roles r ON r.id = ur.role_id WHERE r.id IS NULL'
+    )
+    const removed = (o1.affectedRows || 0) + (o2.affectedRows || 0)
+    if (removed > 0) console.log(`[platform] user_roles 고아 행 ${removed}건 정리`)
+    try {
+      await c.execute('ALTER TABLE user_roles ADD KEY idx_user_roles_role (role_id)')
+    } catch { /* 이미 있으면 무시 */ }
+    try {
+      await c.execute(`ALTER TABLE user_roles
+        ADD FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        ADD FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE`)
+      console.log('[platform] user_roles FK 추가 완료')
+    } catch (e) {
+      console.warn('[platform] user_roles FK 추가 실패:', e.code || e.message)
+    }
+  }
 }
 
 /**

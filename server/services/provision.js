@@ -29,12 +29,27 @@ const DB_PREFIX = process.env.TENANT_DB_PREFIX || 'acct_'
  * DB 이름은 내부 식별자다. 둘을 묶으면 코드 변경·특수문자 처리가 지저분해진다.
  */
 async function allocateDbName() {
-  const [rows] = await platformPool.execute('SELECT db_name FROM companies')
+  const re = new RegExp(`^${DB_PREFIX}c(\\d+)$`)
   let max = 0
-  for (const r of rows) {
-    const m = new RegExp(`^${DB_PREFIX}c(\\d+)$`).exec(r.db_name)
+  const bump = (name) => {
+    const m = re.exec(name || '')
     if (m) max = Math.max(max, parseInt(m[1], 10))
   }
+
+  // (1) 등록된 회사
+  const [rows] = await platformPool.execute('SELECT db_name FROM companies')
+  for (const r of rows) bump(r.db_name)
+
+  // (2) ⚠ 실제 서버에 존재하는 DB도 반드시 함께 본다.
+  //   보상 정리의 DROP DATABASE 가 실패하면(로그만 남고 삼켜짐) DB는 남고 companies 행만
+  //   지워진다. 그러면 (1)만 보는 로직은 그 번호를 다시 할당하고, CREATE DATABASE 가
+  //   ER_DB_CREATE_EXISTS 로 실패한다 → 이후 모든 회사 생성이 영구 차단된다.
+  const existing = await withAdmin(async (c) => {
+    const [dbs] = await c.query('SHOW DATABASES LIKE ?', [`${DB_PREFIX}c%`])
+    return dbs.map(d => Object.values(d)[0])
+  })
+  for (const name of existing) bump(name)
+
   return assertDbName(`${DB_PREFIX}c${String(max + 1).padStart(4, '0')}`)
 }
 
