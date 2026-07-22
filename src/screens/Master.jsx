@@ -942,19 +942,19 @@ const VendorPanel = () => {
 
           <div style={{ height: 1, background: 'var(--line)' }}/>
 
-          <div className="row gap-16" style={{ alignItems: 'flex-start' }}>
-            <div style={{ flex: 1 }}>
-              <label className="label" style={{ marginBottom: 8 }}>거래 구분 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-              <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
-                {GUBU_OPTS.map(o => (
-                  <button key={o.value} type="button" className={`chip ${form.gubu === o.value ? 'active' : ''}`} onClick={() => f('gubu', o.value)}>{o.label}</button>
-                ))}
-              </div>
+          {/* 거래 구분은 칩 라벨이 길어('매입처/외주 (지급)') 절반 폭에서는 2줄로 접힌다. 한 줄을 다 쓴다. */}
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>거래 구분 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+            <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+              {GUBU_OPTS.map(o => (
+                <button key={o.value} type="button" className={`chip ${form.gubu === o.value ? 'active' : ''}`} onClick={() => f('gubu', o.value)}>{o.label}</button>
+              ))}
             </div>
-            <div style={{ flex: 1 }}>
-              <label className="label" style={{ marginBottom: 8 }}>거래 유형</label>
-              <input className="input" value={form.type} onChange={e => f('type', e.target.value)} placeholder="발주처 / 외주가공 / 원자재"/>
-            </div>
+          </div>
+
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>거래 유형</label>
+            <input className="input" value={form.type} onChange={e => f('type', e.target.value)} placeholder="발주처 / 외주가공 / 원자재"/>
           </div>
 
           <div style={{ height: 1, background: 'var(--line)' }}/>

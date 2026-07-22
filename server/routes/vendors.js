@@ -69,7 +69,7 @@ router.delete('/:id', async (req, res, next) => {
       if (Number(c.ctrs) > 0) parts.push(`계약 ${c.ctrs}건`)
       const detail = parts.length ? parts.join(' · ') : '연결된 자료'
       return res.status(409).json({
-        error: `이 거래처에 ${detail}이 연결돼 있어 삭제할 수 없어요. 먼저 정리하거나 거래처를 '미사용'으로 두세요.`,
+        error: `이 거래처에 ${detail}이 연결돼 있어 삭제할 수 없어요. 지난 기록을 지우면 장부가 어긋나므로, 이름만 바꿔 쓰시거나 연결된 자료를 먼저 정리해주세요.`,
       })
     }
     next(e)
