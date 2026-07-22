@@ -120,9 +120,12 @@ export const HRScreen = () => {
   useEffect(() => { loadPayroll() }, [month]);
 
   const handleGeneratePayroll = async () => {
-    const res = await api.generatePayroll(month, `${month}-25`);
+    // pay_date 를 넘기지 않는다. 넘기면 서버가 그 값으로 전원을 덮어써(payroll.js:224
+    // `pay_date || (w.pay_day ? … : 25일)`) 근로계약에 설정한 급여지급일이 무시된다.
+    // 비워두면 계약별 pay_day 를, 없는 사람만 25일로 채운다.
+    const res = await api.generatePayroll(month);
     if (res.ok) { toast.push(res.created > 0 ? `${res.created}명 급여대장을 만들었어요` : "이미 모두 작성돼 있어요"); loadPayroll(); }
-    else toast.push("생성에 실패했어요");
+    else toast.push(res.error || "생성에 실패했어요", { tone: "warn" });
   };
 
   const handleDeleteRow = async (r) => {

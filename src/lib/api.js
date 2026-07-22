@@ -902,8 +902,9 @@ export const api = {
   async savePayslip(data) {
     try { return await req('/payroll', { method: 'POST', body: data }) } catch (e) { return { ok: false, error: e.message } }
   },
+  // payDate 를 주면 전원이 그 날짜로 고정된다. 비워두면 서버가 근로계약의 pay_day 를 쓴다.
   async generatePayroll(month, payDate) {
-    try { return await req('/payroll/generate', { method: 'POST', body: { month, pay_date: payDate } }) } catch (e) { return { ok: false, error: e.message } }
+    try { return await req('/payroll/generate', { method: 'POST', body: { month, pay_date: payDate || null } }) } catch (e) { return { ok: false, error: e.message } }
   },
   async payPayroll(id, data) {
     try { return await req(`/payroll/${id}/pay`, { method: 'POST', body: data }) } catch (e) { return { ok: false, error: e.message } }

@@ -5,6 +5,36 @@ import { api } from '../lib/api'
 const fmtDateLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const todayStr = () => fmtDateLocal(new Date())
 
+// 정기 항목의 '다음 생성/청구' 예정일.
+// 서버 lib/recurrence.js 의 dueDatesToGenerate 와 같은 규칙이어야 화면과 실제가 어긋나지 않는다.
+//   · 말일 clamp — new Date(2026, 1, 31) 은 3월 3일이 된다(오버플로). 그 달 말일로 맞춘다
+//   · 주기 반영 — 분기·연 계약도 1개월씩 더하고 있었다
+const daysInMonth = (y, m) => new Date(y, m + 1, 0).getDate()
+const nextRunDate = (rec) => {
+  const anchor = Number(rec.dayOfMonth ?? rec.day_of_month) || 1
+  const step = rec.period === 'yearly' ? 12 : rec.period === 'quarterly' ? 3 : 1
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const start = rec.startDate || rec.start_date
+  const end = rec.endDate || rec.end_date
+
+  // 앵커는 시작일의 '절대 월'에서 step 간격으로 밟는다. 매번 원 앵커로 계산하므로
+  // 말일 clamp 가 누적되지 않는다(예: 31일 앵커가 2월을 지나며 28일로 굳어버리지 않는다).
+  const [sy, sm] = String(start || fmtDateLocal(today)).split('-').map(Number)
+  if (!sy || !sm) return '—'
+  for (let i = 0; i < 600; i++) {
+    const abs = (sm - 1) + i * step
+    const y = sy + Math.floor(abs / 12)
+    const m = ((abs % 12) + 12) % 12
+    const d = new Date(y, m, Math.min(anchor, daysInMonth(y, m)))
+    if (d <= today) continue
+    const s = fmtDateLocal(d)
+    if (end && s > end) return '—'
+    return s
+  }
+  return '—'
+}
+
 const MASTER_DATA = {
   vendor: {
     label: "거래처",
@@ -1803,15 +1833,6 @@ const RecurringExpensePanel = () => {
     load()
   }
 
-  const nextDate = (rec) => {
-    const d = new Date()
-    const next = new Date(d.getFullYear(), d.getMonth(), rec.dayOfMonth)
-    if (next <= d) next.setMonth(next.getMonth() + 1)
-    const y = next.getFullYear()
-    const m = String(next.getMonth() + 1).padStart(2, '0')
-    const day = String(next.getDate()).padStart(2, '0')
-    return `${y}-${m}-${day}`
-  }
 
   return (
     <div style={{ padding: 20 }}>
@@ -1836,7 +1857,7 @@ const RecurringExpensePanel = () => {
                 <td className="text-sm text-muted">{r.category}</td>
                 <td className="num-cell num-right">{fmtNum(r.amount)}</td>
                 <td className="text-sm">{PERIOD_LABEL[r.period]} {r.dayOfMonth}일</td>
-                <td className="text-sm">{r.active ? nextDate(r) : "—"}</td>
+                <td className="text-sm">{r.active ? nextRunDate(r) : "—"}</td>
                 <td>
                   <span className={`badge ${r.active ? "pos" : "outline"}`}>{r.active ? "활성" : "비활성"}</span>
                 </td>
@@ -1998,17 +2019,6 @@ const RecurringInvoicePanel = () => {
     load()
   }
 
-  const nextDate = (rec) => {
-    const step = rec.period === 'yearly' ? 12 : rec.period === 'quarterly' ? 3 : 1
-    const today = new Date()
-    const [sy, sm] = (rec.startDate || todayStr()).split('-').map(Number)
-    let d = new Date(sy, sm - 1, rec.dayOfMonth || 1)
-    let guard = 0
-    while (d <= today && guard++ < 600) d = new Date(d.getFullYear(), d.getMonth() + step, rec.dayOfMonth || 1)
-    if (rec.endDate && fmtDateLocal(d) > rec.endDate) return "—"
-    return fmtDateLocal(d)
-  }
-
   const totalOf = (r) => r.supplyAmount + (r.vatMode === 'none' ? 0 : Math.round(r.supplyAmount * 0.1))
 
   return (
@@ -2053,7 +2063,7 @@ const RecurringInvoicePanel = () => {
                 </td>
                 <td className="num-cell num-right">{fmtNum(totalOf(r))}</td>
                 <td className="text-sm">{PERIOD_LABEL[r.period]} {r.dayOfMonth}일</td>
-                <td className="text-sm">{r.active ? nextDate(r) : "—"}</td>
+                <td className="text-sm">{r.active ? nextRunDate(r) : "—"}</td>
                 <td><span className={`badge ${r.active ? "pos" : "outline"}`}>{r.active ? "활성" : "비활성"}</span></td>
                 <td>
                   <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => handleToggle(r.id)}>
