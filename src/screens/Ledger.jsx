@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Popover, PopItem, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect, Drawer, localToday } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
+import { DataTable } from '../lib/components/DataTable'
 import { api } from '../lib/api'
 import { ResolutionDocument } from './Docs'
 
@@ -180,47 +181,34 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
             </div>
           )}
 
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th style={{ width: 110 }}>날짜</th>
-                  <th>거래처</th>
-                  <th>계약/공통</th>
-                  <th>비목</th>
-                  <th className="num-right">금액</th>
-                  <th style={{ width: 110 }}>상태</th>
-                  <th style={{ width: 70 }}>증빙</th>
-                  <th style={{ width: 130 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.length === 0 && (
-                  <tr><td colSpan={8} style={{ textAlign: "center", padding: 50, color: "var(--muted-2)", fontSize: 13 }}>
-                    조건에 맞는 거래내역이 없어요.
-                  </td></tr>
-                )}
-                {filtered.map((t, i) => (
-                  <tr key={i} style={{ cursor: "pointer" }} onClick={() => setSel(t)}>
-                    <td className="num-cell text-muted text-sm">{t.date}</td>
-                    <td className="fw-700">{t.vendor}</td>
-                    <td className="text-muted text-sm">{t.scope}</td>
-                    <td><span className="badge outline">{t.category}</span></td>
-                    <td className="num-cell num-right fw-700" style={{ color: t.sign > 0 ? "var(--pos)" : "var(--ink)" }}>
-                      {t.sign > 0 ? "+" : "−"}{fmtNum(t.amount)}
-                    </td>
-                    <td><StatusBadge status={t.status}/></td>
-                    <td>
-                      {t.evid
-                        ? <span className="badge pos" style={{ padding: "2px 8px" }}><Icon.Check size={11}/></span>
-                        : <span className="badge neg" style={{ padding: "2px 8px" }}><Icon.Warn size={11}/></span>}
-                    </td>
-                    <td><TxnActions txn={t} toast={toast} confirm={confirm} onAction={reload}/></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            rows={filtered}
+            onRowClick={setSel}
+            empty="조건에 맞는 거래내역이 없어요."
+            columns={[
+              { key: 'date', header: '날짜', width: 110, sortable: true,
+                render: t => <span className="num-cell text-muted text-sm">{t.date}</span> },
+              { key: 'vendor', header: '거래처', sortable: true,
+                render: t => <span className="fw-700">{t.vendor}</span> },
+              { key: 'scope', header: '계약/공통',
+                render: t => <span className="text-muted text-sm">{t.scope}</span> },
+              { key: 'category', header: '비목',
+                render: t => <span className="badge outline">{t.category}</span> },
+              { key: 'amount', header: '금액', align: 'right', sortable: true,
+                sortValue: t => t.sign * t.amount,
+                render: t => <span className="num-cell fw-700" style={{ color: t.sign > 0 ? "var(--pos)" : "var(--ink)" }}>
+                  {t.sign > 0 ? "+" : "−"}{fmtNum(t.amount)}
+                </span> },
+              { key: 'status', header: '상태', width: 110,
+                render: t => <StatusBadge status={t.status}/> },
+              { key: 'evid', header: '증빙', width: 70,
+                render: t => t.evid
+                  ? <span className="badge pos" style={{ padding: "2px 8px" }}><Icon.Check size={11}/></span>
+                  : <span className="badge neg" style={{ padding: "2px 8px" }}><Icon.Warn size={11}/></span> },
+              { key: 'actions', header: '', width: 130,
+                render: t => <TxnActions txn={t} toast={toast} confirm={confirm} onAction={reload}/> },
+            ]}
+          />
 
           <div className="row" style={{ padding: "14px 18px", borderTop: "1px solid var(--line)", color: "var(--muted)", fontSize: 12.5 }}>
             전체 {filtered.length}건
