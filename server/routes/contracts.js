@@ -6,6 +6,7 @@ const { buildContractWorkbook } = require('../contract-export')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
 const { removeUploadedFile } = require('../lib/uploads')
+const { vatOf, vatRateOf, taxTypeOfMode } = require('../lib/vat')
 
 const router = Router()
 
@@ -52,7 +53,7 @@ const metrics = (r) => {
   // 총액 개념이 없는 계약: 무기한 정기 + 기성형(품목 단가×수량으로 그때그때 청구).
   const noTotal = openEnded || r.billing_mode === 'progress'
   // amount는 정기형이면 '이번 텀 총액'(저장 시 서버가 산출), 총액형이면 계약 총액. 면세면 부가세 없음.
-  const vatMul = r.vat_mode === 'exempt' ? 1 : 1.1
+  const vatMul = 1 + vatRateOf(r.vat_mode)
   const termTotal = noTotal ? null : Math.round((Number(r.amount) || 0) * vatMul)
   const remain = termTotal == null ? null : Math.max(0, termTotal - term_collected)
   const ar_remain = Math.max(0, billed - collected)
@@ -126,7 +127,7 @@ router.get('/schedule/pending', async (req, res, next) => {
     // vat를 서버가 계약 vat_mode로 계산해 내려준다(면세=0). 화면이 0.1을 하드코딩하면 면세에 유령 VAT가 붙는다.
     res.json(rows.map(r => {
       const amount = Number(r.amount)
-      return { ...r, amount, vat: r.vat_mode === 'exempt' ? 0 : Math.round(amount * 0.1) }
+      return { ...r, amount, vat: vatOf(amount, r.vat_mode) }
     }))
   } catch (e) { next(e) }
 })
@@ -294,7 +295,7 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
     const kind = isPurchase ? 'received' : 'issued'
     const supply = Number(ms.amount) || 0
     // 면세 계약이면 부가세 0
-    const vat = ms.vat_mode === 'exempt' ? 0 : Math.round(supply * 0.1)
+    const vat = vatOf(supply, ms.vat_mode)
     const total = supply + vat
     const today = kstToday()   // UTC면 KST 00~09시에 하루 전(연초엔 전년도 채번)으로 찍힌다
     const year = today.slice(0, 4)
@@ -312,8 +313,8 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
     const invId = randomUUID()
     const status = paid ? (isPurchase ? '지급 완료' : '입금 완료') : (isPurchase ? '지급 대기' : '입금 예정')
     await conn.execute(
-      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [invId, invoice_no, kind, ms.vendor_id || null, ms.contract_id, supply, vat, total, today, ms.due_date || null, status, paid ? accountId : null, `${ms.contract_name} · ${ms.type}`]
+      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [invId, invoice_no, kind, ms.vendor_id || null, ms.contract_id, supply, vat, total, today, ms.due_date || null, status, paid ? accountId : null, `${ms.contract_name} · ${ms.type}`, taxTypeOfMode(ms.vat_mode)]
     )
     // 기입금: 실제 입/출금 거래 + 매칭 생성(장부·계좌·계약 수금에 반영)
     if (paid) {
@@ -385,7 +386,7 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
     if (clean.length === 0) { await rollbackQuietly(conn); return res.status(400).json({ error: '청구 금액이 있는 품목이 없어요' }) }
 
     const supply = clean.reduce((s, l) => s + l.amount, 0)
-    const vat = c.vat_mode === 'exempt' ? 0 : Math.round(supply * 0.1)
+    const vat = vatOf(supply, c.vat_mode)
     const total = supply + vat
 
     const isPurchase = c.gubu === 'A' || c.gubu === 'E'
@@ -406,8 +407,8 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
     const invId = randomUUID()
     const status = paid ? (isPurchase ? '지급 완료' : '입금 완료') : (isPurchase ? '지급 대기' : '입금 예정')
     await conn.execute(
-      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [invId, invoice_no, kind, c.vendor_id || null, c.id, supply, vat, total, issuedAt, due_at || null, status, paid ? accountId : null, `${c.name} · 기성 ${clean.length}개 품목`]
+      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [invId, invoice_no, kind, c.vendor_id || null, c.id, supply, vat, total, issuedAt, due_at || null, status, paid ? accountId : null, `${c.name} · 기성 ${clean.length}개 품목`, taxTypeOfMode(c.vat_mode)]
     )
     let ord = 0
     for (const l of clean) {
@@ -641,7 +642,7 @@ router.post('/', async (req, res, next) => {
           await conn.execute(
             `INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id)
              VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-            [randomUUID(), vendor_id || null, id, name || '', Number(f.unit_amount), f.vat_mode === 'exempt' ? 'none' : 'exclusive',
+            [randomUUID(), vendor_id || null, id, name || '', Number(f.unit_amount), vatRateOf(f.vat_mode) === 0 ? 'none' : 'exclusive',
              f.billing_period || 'monthly', f.billing_day || 1, start_date, f.end_date || null, null]
           )
         }
@@ -751,7 +752,7 @@ router.post('/:id/recurring', async (req, res, next) => {
       await req.db.execute(
         `INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id)
          VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-        [id, c.vendor_id || null, c.id, c.name || '', Number(c.unit_amount), c.vat_mode === 'exempt' ? 'none' : 'exclusive',
+        [id, c.vendor_id || null, c.id, c.name || '', Number(c.unit_amount), vatRateOf(c.vat_mode) === 0 ? 'none' : 'exclusive',
          c.billing_period || 'monthly', c.billing_day || 1, c.start_date, c.end_date || null, req.body.account_id || null]
       )
     }
@@ -773,7 +774,7 @@ router.patch('/:id/recurring/sync', async (req, res, next) => {
           [Number(c.unit_amount) || 0, c.billing_period || 'monthly', c.billing_day || 1, c.end_date || null, req.params.id])
       : await req.db.execute(
           'UPDATE recurring_invoices SET supply_amount=?, vat_mode=?, period=?, day_of_month=?, end_date=? WHERE contract_id=?',
-          [Number(c.unit_amount) || 0, c.vat_mode === 'exempt' ? 'none' : 'exclusive', c.billing_period || 'monthly', c.billing_day || 1, c.end_date || null, req.params.id])
+          [Number(c.unit_amount) || 0, vatRateOf(c.vat_mode) === 0 ? 'none' : 'exclusive', c.billing_period || 'monthly', c.billing_day || 1, c.end_date || null, req.params.id])
     res.json({ ok: true, updated: r.affectedRows })
   } catch (e) { next(e) }
 })

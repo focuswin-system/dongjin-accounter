@@ -73,7 +73,8 @@ function normalize(body) {
     billing_mode: billing,
     term_mode: term,
     // 부가세: 면세(exempt)면 청구서 발행 시 부가세 0, 아니면 과세(taxable, 공급가×10%)
-    vat_mode: body.vat_mode === 'exempt' ? 'exempt' : 'taxable',
+    // 과세 / 면세 / 영세(수출·해외용역 — 세율 0%지만 과세거래)
+    vat_mode: ['exempt', 'zero'].includes(body.vat_mode) ? body.vat_mode : 'taxable',
     // 무기한 계약은 종료일이 없다
     end_date: isOpen ? null : (body.end_date || null),
     // 만료가 있는 계약만 갱신 통보 기한·텀 길이가 의미 있음

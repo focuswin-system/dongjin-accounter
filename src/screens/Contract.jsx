@@ -173,15 +173,17 @@ const ContractTermFields = ({ form, set }) => {
       <div>
         <label className="label" style={{ marginBottom: 8 }}>부가세</label>
         <div className="row gap-6">
-          {[{ value: 'taxable', label: '과세' }, { value: 'exempt', label: '면세' }].map(t => (
+          {[{ value: 'taxable', label: '과세' }, { value: 'exempt', label: '면세' }, { value: 'zero', label: '영세' }].map(t => (
             <button key={t.value} type="button" className={`chip ${(form.vat_mode || 'taxable') === t.value ? 'active' : ''}`}
               onClick={() => set(f => ({ ...f, vat_mode: t.value }))}>{t.label}</button>
           ))}
         </div>
         <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-          {(form.vat_mode || 'taxable') === 'exempt'
+          {form.vat_mode === 'exempt'
             ? '부가세 없는 계약(면세). 청구서 발행 시 부가세 0으로 처리돼요.'
-            : '공급가액에 부가세 10%가 붙어 청구돼요.'}
+            : form.vat_mode === 'zero'
+              ? '영세율(수출·해외용역) — 세율 0%라 세액은 없지만, 공급가액은 부가세 신고의 과세표준에 들어가요.'
+              : '공급가액에 부가세 10%가 붙어 청구돼요.'}
         </div>
       </div>
 
@@ -279,8 +281,8 @@ const ContractTermFields = ({ form, set }) => {
             )}
             {totalAmt > 0 && (
               <div className="text-xs text-muted" style={{ marginTop: 6 }}>
-                {form.vat_mode === 'exempt'
-                  ? <>면세 계약 — 부가세 없이 <span className="num fw-600" style={{ color: 'var(--ink)' }}>{totalAmt.toLocaleString()}원</span> 청구</>
+                {form.vat_mode === 'exempt' || form.vat_mode === 'zero'
+                  ? <>{form.vat_mode === 'zero' ? '영세율' : '면세'} 계약 — 부가세 없이 <span className="num fw-600" style={{ color: 'var(--ink)' }}>{totalAmt.toLocaleString()}원</span> 청구</>
                   : <>부가세 포함 총액: <span className="num fw-600" style={{ color: 'var(--ink)' }}>{Math.round(totalAmt * 1.1).toLocaleString()}원</span></>}
               </div>
             )}
@@ -949,7 +951,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     if (!c) return;
     const supply = ms.amount || 0;
     // 면세 계약이면 부가세 0 — 확인창 금액이 서버 계산과 어긋나지 않게(면세인데 VAT 포함으로 오표시 방지).
-    const exempt = c.vat_mode === 'exempt';
+    const exempt = c.vat_mode === 'exempt' || c.vat_mode === 'zero';   // 면세·영세 모두 세액 0
     const vat = exempt ? 0 : Math.round(supply * 0.1);
     const ok = await confirm({
       tone: "brand", icon: <Icon.Receipt size={22}/>,
@@ -1761,7 +1763,7 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
   const [accountId, setAccountId] = useState('');
 
   const isPurchase = contract?.vendor_gubu === 'A' || contract?.vendor_gubu === 'E';
-  const exempt = contract?.vat_mode === 'exempt';
+  const exempt = contract?.vat_mode === 'exempt' || contract?.vat_mode === 'zero';
 
   // 열릴 때 계약 품목표를 수량 0으로 깔아준다(단가는 계약 단가 스냅샷).
   useEffect(() => {
@@ -1909,7 +1911,7 @@ const contractPayload = (form, vendorId) => ({
   file_name:   form.file_name || null,
   billing_mode:   form.billing_mode,
   term_mode:      form.term_mode,
-  vat_mode:       form.vat_mode === 'exempt' ? 'exempt' : 'taxable',
+  vat_mode:       ['exempt', 'zero'].includes(form.vat_mode) ? form.vat_mode : 'taxable',
   // 계약 품목표 — 서버가 전체 교체 저장(이름 있는 행만). 청구 방식과 무관하게 저장된다.
   items:          (form.items || []).map(it => ({
     item_id: it.item_id || null, name: it.name, spec: it.spec || '', unit: it.unit || '',

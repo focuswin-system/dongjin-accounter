@@ -56,6 +56,7 @@ const RESOURCES = [
   { id: 'master_accountSubject',   label: '계정과목',      group: '일반회계 · 기준정보' },
   { id: 'master_category',         label: '비목',          group: '일반회계 · 기준정보' },
   { id: 'master_jeokyo',           label: '적요',          group: '일반회계 · 기준정보' },
+  { id: 'master_evidence_type',    label: '증빙유형',      group: '일반회계 · 기준정보' },
   { id: 'master_item',             label: '품목',          group: '일반회계 · 기준정보' },
   { id: 'master_fixed_asset',      label: '고정자산',      group: '일반회계 · 기준정보' },
   { id: 'master_intangible_asset', label: '무형자산',      group: '일반회계 · 기준정보' },

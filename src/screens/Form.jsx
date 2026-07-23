@@ -3,11 +3,25 @@ import { Icon, fmtNum, useToast, Combobox, Drawer, MoneyInput, localToday } from
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 
+// 과세유형 3종. 영세 = 세율 0%인 과세거래(수출·해외용역) — 세액은 0이지만 과세표준엔 들어간다.
+// 면세와 값을 나눠 두지 않으면 신고서에서 둘을 구분할 수 없다. 서버 lib/vat.js와 같은 값집합.
+const TAX_TYPES = ["과세", "면세", "영세"];
+
+/** 금액 한 값에서 공급가·세액·합계를 한 번에 맞춘다.
+ *  bySupply=true 면 입력값이 공급가액(세금계산서 기준), false 면 VAT 포함 총액. */
+const applyTax = (f, value, bySupply) => {
+  const v = Number(value) || 0;
+  if (f.taxType !== "과세") return { ...f, amount: v, supply: v, vat: 0 };
+  if (bySupply) { const vat = Math.round(v * 0.1); return { ...f, supply: v, vat, amount: v + vat }; }
+  const supply = Math.round(v / 1.1);
+  return { ...f, amount: v, supply, vat: v - supply };
+};
+
 const initialFormFor = (kind, contract = "", firstAccount = "", costContract = "") => {
   const today = localToday();
   return kind === "income"
-    ? { vendor: "", contract, acctGroup: "", category: "", item: "", itemId: "", accountCode: "", amount: 0, account: firstAccount, date: today, memo: "", taxFree: false, supply: 0, vat: 0, docs: [] }
-    : { vendor: "", contract, costContract, acctGroup: "", category: "", item: "", itemId: "", accountCode: "", amount: 0, method: "계좌이체", account: firstAccount, employee: "", date: today, memo: "", taxFree: false, supply: 0, vat: 0, docs: [] };
+    ? { vendor: "", contract, acctGroup: "", category: "", item: "", itemId: "", accountCode: "", amount: 0, account: firstAccount, date: today, memo: "", taxType: "과세", vatDeductible: true, supply: 0, vat: 0, docs: [] }
+    : { vendor: "", contract, costContract, acctGroup: "", category: "", item: "", itemId: "", accountCode: "", amount: 0, method: "계좌이체", account: firstAccount, employee: "", date: today, memo: "", taxType: "과세", vatDeductible: true, supply: 0, vat: 0, docs: [] };
 };
 
 const FormField = ({ label, required, hint, children }) => (
@@ -29,12 +43,14 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   const [form, setForm] = useState(initialFormFor(initialKind, initialContract, "", initialCostContract));
   const [showMore, setShowMore] = useState(false);
   const [supplyMode, setSupplyMode] = useState(false);
+  const taxable = form.taxType === "과세";
   const [taxWarningDismissed, setTaxWarningDismissed] = useState(false);
   const [vendors, setVendors] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [items, setItems] = useState([]);            // 품목(선택)
   const [jeokyos, setJeokyos] = useState([]);        // 적요
+  const [evidenceTypes, setEvidenceTypes] = useState([]);  // 적격증빙 유형(매입세액 공제 판정)
   const [acctSubjects, setAcctSubjects] = useState([]); // 계정과목(선택)
   const [contracts, setContracts] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -79,6 +95,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     api.getCategories().then(setCategories);
     api.getRefItems('item').then(setItems);
     api.getRefItems('jeokyo').then(setJeokyos);
+    api.getRefItems('evidence_type').then(setEvidenceTypes);
     api.getAccountSubjects({ postableOnly: true }).then(setAcctSubjects);
   }, []);
 
@@ -115,9 +132,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       method:    editTxn.method   || '계좌이체',
       date:      editTxn.date     || localToday(),
       memo:      editTxn.memo     || '',
-      taxFree:   false,
-      supply,
-      vat:       (editTxn.amount || 0) - supply,
+      // 과세유형·공급가·세액은 저장된 값이 있으면 그대로. 이 기능 이전 거래는 값이 없어 합계에서 역산한다.
+      taxType:   editTxn.tax_type || '과세',
+      vatDeductible: editTxn.vat_deductible !== 0,
+      supply:    editTxn.supply_amount != null ? editTxn.supply_amount : supply,
+      vat:       editTxn.vat_amount != null ? editTxn.vat_amount : (editTxn.amount || 0) - supply,
       evid_url:  editTxn.evid_url  || '',
       evid_type: editTxn.evid_type || '',
       evidFile:  null,
@@ -176,6 +195,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       item_id:      form.itemId || null,
       account_code: form.accountCode || null,
       amount,
+      // 부가세: 화면에서 이미 갈라 둔 공급가·세액을 그대로 넘긴다(서버가 유형 기준으로 한 번 더 검증).
+      supply_amount:  form.supply,
+      vat_amount:     form.vat,
+      tax_type:       form.taxType || "과세",
+      vat_deductible: form.vatDeductible === false ? 0 : 1,
       date:         form.date,
       method:       form.method || "계좌이체",
       status:       editTxn?.status || (kind === "income" ? "입금완료" : "지급완료"),
@@ -278,7 +302,16 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                 onChange={(v) => {
                   const catItems = categories.filter(c => c.id?.startsWith(kind === "income" ? "INC-" : "EXP-"))
                   const c = catItems.find(x => x.name === v)
-                  setForm(f => ({ ...f, category: v, acctGroup: c?.group_name || "" }))
+                  setForm(f => {
+                    // 비목이 정해 둔 과세유형·매입세액 공제 여부를 기본값으로 물려받는다(거래별 수정 가능).
+                    const next = { ...f, category: v, acctGroup: c?.group_name || "" }
+                    if (c) {
+                      if (c.vat === "면세" || c.vat === "영세") next.taxType = c.vat
+                      else if (c.vat === "10%") next.taxType = "과세"
+                      next.vatDeductible = c.vat_deductible !== 0
+                    }
+                    return applyTax(next, next.amount, false)
+                  })
                 }}
                 options={categories.filter(c => c.id?.startsWith(kind === "income" ? "INC-" : "EXP-"))
                   .map(c => ({ value: c.name, label: c.name, sub: c.group_name || "" }))}
@@ -297,12 +330,10 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                       // 들어오는 돈은 출고가(amount), 나가는 돈은 매입가(purchase_price)가 맞는 단가다.
                       // 매입가가 없는 품목이면 종전대로 출고가로 채운다.
                       const unit = kind === 'expense' ? (Number(it.purchase_price) || Number(it.amount)) : Number(it.amount)
-                      if (unit && !f.amount) {                                // 단가(공급가액)로 자동 채움 — 총액 = 단가 + 부가세
-                        const supply = Number(unit)
-                        const vat = f.taxFree ? 0 : Math.round(supply * 0.1)
-                        next.supply = supply
-                        next.vat = vat
-                        next.amount = supply + vat
+                      // 품목에 과세유형이 정해져 있으면 그것도 따라간다(기준정보 tax_type → 거래).
+                      if (it.tax_type) next.taxType = it.tax_type
+                      if (unit && !f.amount) {                                // 단가는 공급가액 — 총액 = 단가 + 부가세
+                        Object.assign(next, applyTax(next, unit, true))
                       }
                     }
                     return next
@@ -349,17 +380,29 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
               </div>
             )}
 
+            {/* 과세유형은 입금·지출 모두에 필요하다. 여태 지출에만 '면세' 체크가 있었고 입금은
+                무조건 세액 0으로 처리돼, 청구서를 안 거친 매출의 세액이 부가세 신고에서 빠졌다. */}
+            <FormField label="과세유형" hint={
+              taxable ? "공급가액에 부가세 10%" : form.taxType === "영세" ? "세율 0% — 세액은 없지만 과세표준에는 들어가요" : "부가세 없는 거래"}>
+              <div className="row gap-6" style={{ flexWrap: "wrap" }}>
+                {TAX_TYPES.map(t => (
+                  <button key={t} type="button" className={`chip ${form.taxType === t ? "active" : ""}`}
+                    onClick={() => setForm(f => applyTax({ ...f, taxType: t }, f.amount, false))}>{t}</button>
+                ))}
+              </div>
+            </FormField>
+
             <FormField label="금액" required>
-              {kind === "expense" && !form.taxFree && (
+              {taxable && (
                 <div className="row gap-6" style={{ marginBottom: 8 }}>
                   <button type="button"
                     className={`chip ${!supplyMode ? "active" : ""}`}
-                    onClick={() => { setSupplyMode(false); setForm(f => ({ ...f, supply: Math.round(f.amount / 1.1), vat: f.amount - Math.round(f.amount / 1.1) })); }}>
+                    onClick={() => { setSupplyMode(false); setForm(f => applyTax(f, f.amount, false)); }}>
                     총액 입력
                   </button>
                   <button type="button"
                     className={`chip ${supplyMode ? "active" : ""}`}
-                    onClick={() => { setSupplyMode(true); setForm(f => ({ ...f, supply: f.amount, vat: Math.round(f.amount * 0.1), amount: f.amount + Math.round(f.amount * 0.1) })); }}>
+                    onClick={() => { setSupplyMode(true); setForm(f => applyTax(f, f.supply || f.amount, true)); }}>
                     공급가액 입력
                   </button>
                   <span className="text-muted2" style={{ fontSize: 11.5, alignSelf: "center" }}>
@@ -369,51 +412,49 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
               )}
               <div style={{ position: "relative" }}>
                 <MoneyInput className="input num fw-700" style={{ fontSize: 22, paddingRight: 40 }}
-                  value={supplyMode ? form.supply : form.amount}
-                  onChange={(raw, v) => {
-                    if (supplyMode) {
-                      const vat = form.taxFree ? 0 : Math.round(v * 0.1);
-                      setForm({ ...form, supply: v, vat, amount: v + vat });
-                    } else {
-                      const supply = kind === "expense" && !form.taxFree ? Math.round(v / 1.1) : v;
-                      setForm({ ...form, amount: v, supply, vat: v - supply });
-                    }
-                  }}/>
+                  value={supplyMode && taxable ? form.supply : form.amount}
+                  onChange={(raw, v) => setForm(f => applyTax(f, v, supplyMode && taxable))}/>
                 <span style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", color: "var(--muted-2)", fontSize: 14, fontWeight: 600 }}>원</span>
               </div>
-              {kind === "expense" && (form.amount > 0 || form.supply > 0) && (
-                <div className="row gap-6" style={{ marginTop: 8, fontSize: 11.5, color: "var(--muted)" }}>
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-                    <input type="checkbox" checked={form.taxFree} onChange={e => {
-                      const tf = e.target.checked;
-                      setSupplyMode(false);
-                      setForm({ ...form, taxFree: tf, supply: tf ? form.amount : Math.round(form.amount / 1.1), vat: tf ? 0 : form.amount - Math.round(form.amount / 1.1) });
-                    }}/>
-                    면세
-                  </label>
-                  {!form.taxFree && (
-                    <span style={{ marginLeft: 8 }}>
-                      공급가액 <b className="num" style={{ color: "var(--ink)" }}>{fmtNum(form.supply)}</b> ·
-                      부가세 <b className="num" style={{ color: "var(--ink)" }}>{fmtNum(form.vat)}</b> ·
-                      합계 <b className="num" style={{ color: "var(--ink)" }}>{fmtNum(form.amount)}</b>
-                    </span>
-                  )}
+              {taxable && form.amount > 0 && (
+                <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--muted)" }}>
+                  공급가액 <b className="num" style={{ color: "var(--ink)" }}>{fmtNum(form.supply)}</b> ·
+                  부가세 <b className="num" style={{ color: "var(--ink)" }}>{fmtNum(form.vat)}</b> ·
+                  합계 <b className="num" style={{ color: "var(--ink)" }}>{fmtNum(form.amount)}</b>
                 </div>
+              )}
+              {/* 접대비·비영업용 승용차 등은 세금계산서를 받아도 매입세액을 공제받지 못한다.
+                  세액은 그대로 기록하되 부가세 집계의 공제분에서만 뺀다. */}
+              {kind === "expense" && taxable && form.amount > 0 && (
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", marginTop: 8, fontSize: 11.5, color: "var(--muted)" }}>
+                  <input type="checkbox" checked={!form.vatDeductible}
+                    onChange={e => setForm(f => ({ ...f, vatDeductible: !e.target.checked }))}/>
+                  매입세액 불공제 <span className="text-muted2">(접대비·비영업용 승용차 등)</span>
+                </label>
               )}
               <div className="row gap-6" style={{ marginTop: 8, flexWrap: "wrap" }}>
                 {(kind === "income" ? [5000000, 10000000, 20000000, 50000000] : [500000, 1000000, 3000000, 5000000]).map(a => (
-                  <button key={a} type="button" className="chip" onClick={() => {
-                    if (supplyMode) {
-                      const vat = Math.round(a * 0.1);
-                      setForm({ ...form, supply: a, vat, amount: a + vat });
-                    } else {
-                      const supply = kind === "expense" && !form.taxFree ? Math.round(a / 1.1) : a;
-                      setForm({ ...form, amount: a, supply, vat: a - supply });
-                    }
-                  }}>{fmtNum(a)}원</button>
+                  <button key={a} type="button" className="chip"
+                    onClick={() => setForm(f => applyTax(f, a, supplyMode && taxable))}>{fmtNum(a)}원</button>
                 ))}
               </div>
             </FormField>
+
+            {/* 매입세액 공제는 '적격증빙'이 있어야 받는다 — 공제 여부를 좌우하므로 추가정보에 숨기지 않는다.
+                불공제 증빙(간이영수증 등)을 고르면 불공제 체크도 같이 맞춰 준다. */}
+            {kind === "expense" && taxable && (
+              <FormField label="증빙유형" hint="선택 · 매입세액 공제 판정에 쓰여요">
+                <Combobox value={form.evid_type}
+                  onChange={(v) => {
+                    const e = evidenceTypes.find(x => x.name === v)
+                    setForm(f => ({ ...f, evid_type: v, vatDeductible: e ? e.deductible !== 0 : f.vatDeductible }))
+                  }}
+                  options={evidenceTypes.map(e => ({ value: e.name, label: e.name,
+                    sub: [e.deductible === 0 ? '매입세액 공제 불가' : '공제 가능', e.memo].filter(Boolean).join(' · ') }))}
+                  placeholder="증빙유형 선택 (선택)"
+                  allowAdd={false}/>
+              </FormField>
+            )}
 
             {kind === "expense" ? (
               <FormField label="결제수단" required>
@@ -496,7 +537,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                     {form.evid_url && (
                       <div className="row gap-10" style={{ padding: '10px 14px', border: '1px solid var(--line)', borderRadius: 10, background: 'var(--surface-2)', marginBottom: 8 }}>
                         <Icon.Receipt size={15} style={{ color: 'var(--brand)', flexShrink: 0 }}/>
-                        <span className="text-sm fw-600" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{form.evid_type || '기존 증빙'}</span>
+                        <span className="text-sm fw-600" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(form.evid_url).split('/').pop() || '기존 증빙'}</span>
                         <a className="btn ghost sm" href={form.evid_url} target="_blank" rel="noreferrer"><Icon.Eye size={13}/></a>
                         <button type="button" className="icon-btn" onClick={() => setForm(f => ({ ...f, evidFile: null, evid_url: '', evid_type: '' }))}><Icon.Close size={14}/></button>
                       </div>

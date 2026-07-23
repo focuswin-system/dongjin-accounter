@@ -184,8 +184,20 @@ export const TaxVatScreen = () => {
           columns={[
             { key: 'quarter', header: '분기', render: q => <span className="fw-700">{q.quarter}분기</span> },
             { key: 'period', header: '과세기간', render: q => <span className="text-sm text-muted num">{year}.{QUARTER_PERIOD[q.quarter]}</span> },
-            { key: 'sales_vat', header: '매출세액', align: 'right', render: q => <span className="num-cell">{fmtNum(q.sales_vat)}</span> },
-            { key: 'purchase_vat', header: '매입세액', align: 'right', render: q => <span className="num-cell text-muted">{fmtNum(q.purchase_vat)}</span> },
+            // 청구서분 + 직접 입력 거래분을 합친 값. 어디서 왔는지 궁금할 때를 위해 내역을 툴팁으로 붙인다.
+            { key: 'sales_vat', header: '매출세액', align: 'right', render: q => (
+              <span className="num-cell" title={`청구서 ${fmtNum(q.sales_vat_invoice || 0)} + 직접입력 ${fmtNum(q.sales_vat_direct || 0)}`}>
+                {fmtNum(q.sales_vat)}
+              </span>
+            ) },
+            { key: 'purchase_vat', header: '매입세액', align: 'right', render: q => (
+              <span className="num-cell text-muted"
+                title={`청구서 ${fmtNum(q.purchase_vat_invoice || 0)} + 직접입력 ${fmtNum(q.purchase_vat_direct || 0)}`
+                  + (q.non_deductible_vat ? ` · 불공제 제외 ${fmtNum(q.non_deductible_vat)}` : '')}>
+                {fmtNum(q.purchase_vat)}
+                {q.non_deductible_vat > 0 && <span className="text-xs text-muted2"> (불공제 {fmtNum(q.non_deductible_vat)})</span>}
+              </span>
+            ) },
             { key: 'estimate', header: '예상세액', align: 'right', render: q => <span className="num-cell text-muted2">{q.estimate < 0 ? '환급 ' : ''}{fmtNum(Math.abs(q.estimate))}</span> },
             { key: 'payable', header: '신고세액', align: 'right', render: q => {
               const refund = q.payable < 0, filedYet = q.filed_amount != null

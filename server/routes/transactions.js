@@ -7,6 +7,7 @@ const { rollbackQuietly } = require('../lib/tx')
 const { normalizeStatus, ledgerError } = require('../lib/ledger')
 const { restoreLastGenerated } = require('../lib/recurrence')
 const { removeUploadedFile } = require('../lib/uploads')
+const { vatFields } = require('../lib/vat')
 
 const router = Router()
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
@@ -108,10 +109,11 @@ router.post('/', async (req, res, next) => {
       kind, vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
       amount, date, method, status, buyer_type, vessel_no, usage_place,
       invoice_id, recurring_id, doc_no, employee_id, evid_type, evid_url, memo,
-      item_id, account_code
+      item_id, account_code, supply_amount, vat_amount, tax_type, vat_deductible
     } = req.body
     const dateErr = futureDateError(date)
     if (dateErr) return res.status(400).json({ error: dateErr })
+    const vat = vatFields({ amount, supply_amount, vat_amount, tax_type, vat_deductible })
     // 완료 상태인데 계좌가 없으면 잔액에 잡히지 않는다(lib/ledger.js 참고)
     const st = normalizeStatus(status || '지급완료')
     const lerr = ledgerError({ kind, account_id, status: st })
@@ -122,12 +124,14 @@ router.post('/', async (req, res, next) => {
     await req.db.execute(`
       INSERT INTO transactions (id, kind, vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
         amount, date, method, status, buyer_type, vessel_no, usage_place,
-        invoice_id, recurring_id, doc_no, employee_id, evid_type, evid_url, memo, item_id, account_code)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        invoice_id, recurring_id, doc_no, employee_id, evid_type, evid_url, memo, item_id, account_code,
+        supply_amount, vat_amount, tax_type, vat_deductible)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `, [id, kind, vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
         amount, date, method||'', st, buyer_type||'공통', vessel_no||'', usage_place||'',
         invoice_id||null, recurring_id||null, doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'',
-        item_id||null, account_code||null])
+        item_id||null, account_code||null,
+        vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible])
     res.json({ id })
   } catch (e) { next(e) }
 })
@@ -137,10 +141,12 @@ router.put('/:id', async (req, res, next) => {
     const {
       vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
       amount, date, method, status, buyer_type, vessel_no, usage_place,
-      doc_no, employee_id, evid_type, evid_url, memo, item_id, account_code
+      doc_no, employee_id, evid_type, evid_url, memo, item_id, account_code,
+      supply_amount, vat_amount, tax_type, vat_deductible
     } = req.body
     const dateErr = futureDateError(date)
     if (dateErr) return res.status(400).json({ error: dateErr })
+    const vat = vatFields({ amount, supply_amount, vat_amount, tax_type, vat_deductible })
     // 편집으로 수입 거래가 되면 원가 귀속은 떨어진다
     const [[cur]] = await req.db.execute('SELECT kind FROM transactions WHERE id = ?', [req.params.id])
     if (!cur) return res.status(404).json({ error: 'Not found' })
@@ -153,11 +159,13 @@ router.put('/:id', async (req, res, next) => {
       const [result] = await conn.execute(`
         UPDATE transactions SET vendor_id=?, contract_id=?, cost_contract_id=?, account_id=?, category=?, sub_category=?,
           amount=?, date=?, method=?, status=?, buyer_type=?, vessel_no=?, usage_place=?,
-          doc_no=?, employee_id=?, evid_type=?, evid_url=?, memo=?, item_id=?, account_code=?
+          doc_no=?, employee_id=?, evid_type=?, evid_url=?, memo=?, item_id=?, account_code=?,
+          supply_amount=?, vat_amount=?, tax_type=?, vat_deductible=?
         WHERE id=?
       `, [vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
           amount, date, method||'', status||'지급완료', buyer_type||'공통', vessel_no||'', usage_place||'',
-          doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'', item_id||null, account_code||null, req.params.id])
+          doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'', item_id||null, account_code||null,
+          vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible, req.params.id])
       if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
 
       // 이 거래에 걸린 청구서 매칭을 새 금액에 맞춰 조정하고 청구서 상태를 재계산한다.

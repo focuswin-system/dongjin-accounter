@@ -5,6 +5,7 @@ const { rollbackQuietly } = require('../lib/tx')
 const { restoreLastGenerated } = require('../lib/recurrence')
 const { ledgerError } = require('../lib/ledger')
 const { removeUploadedFile } = require('../lib/uploads')
+const { normalizeTaxType } = require('../lib/vat')
 
 const router = Router()
 
@@ -100,7 +101,10 @@ router.get('/:id', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo } = req.body
+    const { kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type } = req.body
+    // 과세유형: 화면이 정해 보내면 그대로, 아니면 세액 유무로 과세/면세를 가른다.
+    // (영세는 세액이 0이라 추론이 안 되므로 반드시 명시해야 한다 — 계약에서 발행하면 자동으로 채워진다)
+    const taxType = normalizeTaxType(tax_type || (Number(vat_amount) > 0 ? '과세' : '면세'))
     const id = randomUUID()
     // 친화적 청구번호 생성: 청구-2026-0001 / 매입-2026-0001 (최대 일련번호+1 — 삭제해도 재사용 안 됨)
     const year = String(issued_at || '').slice(0, 4) || kstToday().slice(0, 4)
@@ -111,8 +115,8 @@ router.post('/', async (req, res, next) => {
     )
     const invoice_no = `${prefix}-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
     await req.db.execute(
-      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [id, invoice_no, kind, vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, status||(kind==='issued' ? '입금 예정' : '지급 대기'), account_id||null, memo||'']
+      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [id, invoice_no, kind, vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, status||(kind==='issued' ? '입금 예정' : '지급 대기'), account_id||null, memo||'', taxType]
     )
     res.json({ id, invoice_no })
   } catch (e) { next(e) }

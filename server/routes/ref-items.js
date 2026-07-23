@@ -5,8 +5,8 @@ const router = Router()
 
 const FIELDS = ['name', 'code', 'spec', 'unit', 'party', 'amount', 'start_date', 'end_date', 'memo',
   'period', 'pay_day', 'account_id', 'file_url', 'file_name',
-  'purchase_price', 'item_kind', 'tax_type', 'item_group']
-const NUM_FIELDS = new Set(['amount', 'pay_day', 'purchase_price'])
+  'purchase_price', 'item_kind', 'tax_type', 'item_group', 'deductible']
+const NUM_FIELDS = new Set(['amount', 'pay_day', 'purchase_price', 'deductible'])
 const pick = (body) => FIELDS.map(f =>
   NUM_FIELDS.has(f) ? (parseInt(String(body[f] ?? '').replace(/[^0-9-]/g, ''), 10) || 0) : (body[f] ?? null))
 
@@ -29,7 +29,7 @@ router.post('/', async (req, res, next) => {
     const [[{ maxOrder }]] = await req.db.execute('SELECT COALESCE(MAX(sort_order),0) AS maxOrder FROM ref_items WHERE type=?', [type])
     const id = randomUUID()
     await req.db.execute(
-      'INSERT INTO ref_items (id, type, name, code, spec, unit, party, amount, start_date, end_date, memo, period, pay_day, account_id, file_url, file_name, purchase_price, item_kind, tax_type, item_group, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO ref_items (id, type, name, code, spec, unit, party, amount, start_date, end_date, memo, period, pay_day, account_id, file_url, file_name, purchase_price, item_kind, tax_type, item_group, deductible, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, type, ...pick(req.body), maxOrder + 1]
     )
     res.json({ ok: true, id })
@@ -40,7 +40,7 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const [result] = await req.db.execute(
-      'UPDATE ref_items SET name=?, code=?, spec=?, unit=?, party=?, amount=?, start_date=?, end_date=?, memo=?, period=?, pay_day=?, account_id=?, file_url=?, file_name=?, purchase_price=?, item_kind=?, tax_type=?, item_group=? WHERE id=?',
+      'UPDATE ref_items SET name=?, code=?, spec=?, unit=?, party=?, amount=?, start_date=?, end_date=?, memo=?, period=?, pay_day=?, account_id=?, file_url=?, file_name=?, purchase_price=?, item_kind=?, tax_type=?, item_group=?, deductible=? WHERE id=?',
       [...pick(req.body), req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })

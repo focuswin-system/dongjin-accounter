@@ -17,7 +17,7 @@ router.get('/', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    let { id, kind, name, group_name, vat, pay_method } = req.body
+    let { id, kind, name, group_name, vat, pay_method, vat_deductible } = req.body
     if (!name) return res.status(400).json({ error: 'name 필수' })
     // 코드 미지정 시 구분(지출=EXP / 수입=INC)에 따라 자동 채번
     if (!id) {
@@ -30,8 +30,8 @@ router.post('/', async (req, res, next) => {
     }
     const [[{ maxOrd }]] = await req.db.execute('SELECT COALESCE(MAX(sort_order),0)+1 AS maxOrd FROM categories')
     await req.db.execute(
-      'INSERT INTO categories (id, name, group_name, vat, pay_method, sort_order) VALUES (?,?,?,?,?,?)',
-      [id, name, group_name || '', vat || '10%', pay_method || '계좌이체', maxOrd]
+      'INSERT INTO categories (id, name, group_name, vat, pay_method, sort_order, vat_deductible) VALUES (?,?,?,?,?,?,?)',
+      [id, name, group_name || '', vat || '10%', pay_method || '계좌이체', maxOrd, vat_deductible === 0 ? 0 : 1]
     )
     res.json({ id })
   } catch (e) {
@@ -42,10 +42,10 @@ router.post('/', async (req, res, next) => {
 
 router.put('/:id', async (req, res, next) => {
   try {
-    const { name, group_name, vat, pay_method } = req.body
+    const { name, group_name, vat, pay_method, vat_deductible } = req.body
     const [result] = await req.db.execute(
-      'UPDATE categories SET name=?, group_name=?, vat=?, pay_method=? WHERE id=?',
-      [name, group_name || '', vat || '10%', pay_method || '계좌이체', req.params.id]
+      'UPDATE categories SET name=?, group_name=?, vat=?, pay_method=?, vat_deductible=? WHERE id=?',
+      [name, group_name || '', vat || '10%', pay_method || '계좌이체', vat_deductible === 0 ? 0 : 1, req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })

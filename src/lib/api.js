@@ -122,6 +122,11 @@ function adaptTransaction(row) {
     category: row.category || '—',
     subCategory: row.sub_category,
     amount: row.amount,
+    // 부가세: null이면 이 기능 이전 거래(세액 미상) — 화면이 합계에서 역산한다
+    supply_amount: row.supply_amount ?? null,
+    vat_amount: row.vat_amount ?? null,
+    tax_type: row.tax_type || '',
+    vat_deductible: row.vat_deductible == null ? 1 : Number(row.vat_deductible),
     method: row.method,
     status: row.status,
     accountId: row.account_id,

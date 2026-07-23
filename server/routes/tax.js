@@ -68,21 +68,48 @@ router.get('/vat', async (req, res, next) => {
        GROUP BY QUARTER(issued_at)`,
       [year]
     )
+    // 청구서를 거치지 않은 직접 입력 거래의 세액. 이게 빠져 있어서 카드·현금 매입세액이 통째로 누락됐다.
+    //   invoice_id IS NOT NULL 인 거래는 청구서 정산분이라 위 집계에 이미 들어 있다 → 반드시 제외(이중계상).
+    //   vat_amount IS NULL 은 이 기능 이전에 쌓인 거래 → 세액을 모르므로 집계하지 않는다.
+    //   매입은 불공제(vat_deductible=0)를 빼야 실제 공제세액이 된다.
+    //   증빙유형이 불공제(간이영수증·거래명세서 등)면 거래의 vat_deductible과 무관하게 공제 대상이 아니다.
+    //   증빙유형을 안 적은 거래는 종전대로 공제로 본다(과거 데이터를 갑자기 불공제로 만들지 않는다).
+    const [txnAgg] = await req.db.execute(
+      `SELECT QUARTER(t.date) AS q,
+              SUM(CASE WHEN t.kind='income'  THEN t.vat_amount ELSE 0 END) AS sales_vat,
+              SUM(CASE WHEN t.kind='expense' AND t.vat_deductible = 1 AND COALESCE(ev.deductible, 1) = 1
+                       THEN t.vat_amount ELSE 0 END) AS purchase_vat,
+              SUM(CASE WHEN t.kind='expense' AND (t.vat_deductible = 0 OR COALESCE(ev.deductible, 1) = 0)
+                       THEN t.vat_amount ELSE 0 END) AS non_deductible_vat
+       FROM transactions t
+       LEFT JOIN ref_items ev ON ev.type = 'evidence_type' AND ev.name = t.evid_type
+       WHERE YEAR(t.date) = ? AND t.invoice_id IS NULL AND t.vat_amount IS NOT NULL
+       GROUP BY QUARTER(t.date)`,
+      [year]
+    )
     const [filings] = await req.db.execute('SELECT * FROM vat_filings WHERE year = ?', [year])
     const aggBy = Object.fromEntries(agg.map(r => [Number(r.q), r]))
+    const txnBy = Object.fromEntries(txnAgg.map(r => [Number(r.q), r]))
     const fileBy = Object.fromEntries(filings.map(r => [Number(r.quarter), r]))
 
     const quarters = [1, 2, 3, 4].map(q => {
       const a = aggBy[q] || {}
+      const t = txnBy[q] || {}
       const f = fileBy[q] || {}
-      const sales_vat = Number(a.sales_vat || 0)
-      const purchase_vat = Number(a.purchase_vat || 0)
-      const estimate = sales_vat - purchase_vat            // 청구서 기준 자동집계(예상)
+      const sales_vat = Number(a.sales_vat || 0) + Number(t.sales_vat || 0)
+      const purchase_vat = Number(a.purchase_vat || 0) + Number(t.purchase_vat || 0)
+      const estimate = sales_vat - purchase_vat            // 청구서 + 직접거래 자동집계(예상)
       const filed = f.filed_amount == null ? null : Number(f.filed_amount)  // 실제 신고세액(입력 전이면 null)
       return {
         quarter: q,
         sales_vat,
         purchase_vat,
+        // 출처별 내역 — "청구서엔 없는데 세액이 왜 이렇지?"를 화면에서 설명할 수 있게 나눠 준다
+        sales_vat_invoice: Number(a.sales_vat || 0),
+        sales_vat_direct: Number(t.sales_vat || 0),
+        purchase_vat_invoice: Number(a.purchase_vat || 0),
+        purchase_vat_direct: Number(t.purchase_vat || 0),
+        non_deductible_vat: Number(t.non_deductible_vat || 0),   // 불공제로 빠진 매입세액
         estimate,                        // +면 납부 예상, −면 환급 예상
         filed_amount: filed,             // null이면 아직 신고 전
         payable: filed != null ? filed : estimate,  // 관리 기준: 신고세액 우선, 없으면 예상

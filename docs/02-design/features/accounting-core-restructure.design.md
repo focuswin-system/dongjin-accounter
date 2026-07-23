@@ -99,11 +99,13 @@
 
 ## 3. 부가세 정합성 (I8~I11)
 
-### 3.1 직접 입력 거래의 공급가/세액 분리 (I8) — ⭐ 핵심
+### 3.1 직접 입력 거래의 공급가/세액 분리 (I8) — ⭐ 핵심 · ✅ 완료
 현재 `transactions.amount` 하나. 청구서(`invoices`)는 `supply_amount/vat_amount/total_amount` 분리.
-- `transactions`에 추가: `supply_amount BIGINT`, `vat_amount BIGINT`. (`amount`=합계 유지)
-- 입력 UX: 합계 입력 + 과세유형에 따라 세액 자동 역산(합계/1.1), 또는 공급가 입력 + 세액 자동. 면세는 세액 0.
-- → 부가세 매출/매입 세액 집계가 **청구서 + 직접거래 모두**에서 성립(지금은 청구서 경유만).
+- `transactions`에 추가: `supply_amount BIGINT`, `vat_amount BIGINT`, **`tax_type VARCHAR(10)`**. (`amount`=합계 유지)
+- 입력 UX: 합계 입력 + 과세유형에 따라 세액 자동 역산(합계/1.1), 또는 공급가 입력 + 세액 자동. 면세·영세는 세액 0.
+- **구현 시 확인된 것**: 화면(`Form.jsx`)은 이미 공급가·세액을 계산하고 있었는데 **저장하지 않고 버리고 있었다.** 게다가 그 계산은 지출에만 있어서, 입금 거래는 세액이 항상 0이었다 — 청구서를 안 거친 **매출세액도 같이 누락**되고 있었다. 과세유형 칩을 양방향(입금·지출) 공통으로 올렸다.
+- 서버는 화면 값을 받되 `lib/vat.js`가 유형 기준으로 한 번 더 정리한다(면세·영세에 세액이 실려 와도 0으로). 구버전 호출이 `amount`만 보내도 역산해 채운다.
+- 집계(`tax.js /vat`): 청구서 + **직접거래**를 더한다. 이때 `invoice_id IS NOT NULL`인 거래는 청구서 정산분이라 반드시 제외(이중계상). `vat_amount IS NULL`(이 기능 이전 데이터)은 세액 미상이라 집계하지 않는다.
 
 ### 3.2 영세율 (I9) — ✅ 채택 (해외매출 있음)
 - `category.vat`/`contract.vat_mode`/품목 `tax_type` 의 값 집합에 `영세` 추가 → **과세 / 면세 / 영세** 3종.
@@ -111,15 +113,17 @@
 - 부가세 화면: 매출 과세표준을 `과세 / 영세` 로 나눠 표시(신고서 서식과 동일), 면세는 별도.
 - 매입세액 공제에는 영향 없음(매입 영세는 드묾, 값집합엔 동일하게 허용).
 
-### 3.3 매입세액 불공제 (I10)
+### 3.3 매입세액 불공제 (I10) — ✅ 완료
 - `transactions`(또는 비목)에 `vat_deductible TINYINT DEFAULT 1` 플래그.
 - 접대비·비영업용 승용차 등 불공제 항목 표시 → 부가세 매입세액 집계에서 제외.
 - 간이 수준에선 비목 단위 기본값으로 충분(비목에 `vat_deductible` 두고 거래가 상속).
 
-### 3.4 적격증빙 유형 (I11) — 기존 계획과 합류
+### 3.4 적격증빙 유형 (I11) — ✅ 완료
 CLAUDE.md에 이미 계획됨: `ref_items type='evidence_type'` (세금계산서·계산서·카드전표·현금영수증·간이영수증·거래명세서 + **공제가능 여부**).
-- 이 유형 마스터를 구현하고 `transactions.evid_type`(이미 존재)와 연결.
-- 매입세액 공제 집계 = 적격증빙 + `vat_deductible` 조합.
+- `ref_items.deductible` 컬럼 + 6종 시딩. 목업이던 `MASTER_DATA.evidenceType` 탭을 지우고 실 CRUD(`REF_CONFIGS.evidence_type`)로 교체, 기준정보 nav 숨김 해제.
+- 거래 폼: 지출·과세일 때 증빙유형 선택(추가정보에 숨기지 않는다 — 공제 여부를 좌우하므로). 불공제 증빙을 고르면 불공제 체크가 함께 맞춰진다.
+- 매입세액 공제 집계 = 거래 `vat_deductible` **AND** 증빙유형 `deductible`. 증빙유형이 빈 거래는 종전대로 공제로 본다(과거 데이터를 갑자기 불공제로 만들지 않는다).
+- `transactions.evid_type`은 여태 첨부파일 라벨로도 쓰이고 있었다 → 증빙 위젯이 파일명을 직접 쓰도록 바꿔 의미를 하나로 정리.
 
 ---
 
@@ -185,8 +189,10 @@ CLAUDE.md에 이미 계획됨: `ref_items type='evidence_type'` (세금계산서
 | `contract_items` | cost_price, qty | — |
 | `invoice_lines` | cost_price | — |
 | `contracts` | project_no | buyer_code·pu_no 제거, vessel_code→project_no 이관, order_no 범용화, cost_budget 구현 |
-| `transactions` | supply_amount, vat_amount, vat_deductible, project_no, site | buyer_type 제거, vessel_no→project_no·usage_place→site 이관 |
-| `categories`(비목) | vat_deductible(선택) | vat 값집합에 '영세' 추가 |
+| `transactions` | supply_amount, vat_amount, tax_type, vat_deductible, project_no, site | buyer_type 제거, vessel_no→project_no·usage_place→site 이관 |
+| `invoices` | tax_type | 계약 vat_mode에서 자동 결정 |
+| `categories`(비목) | vat_deductible | vat 값집합에 '영세' 추가 |
+| `contracts` (부가세) | — | vat_mode에 'zero'(영세) 추가 |
 | `vendors` | biz_type, biz_item, pay_account | — |
 | `employees` | salary_account | 주민번호는 저장 안 함 |
 | (신규) `closed_periods` | 기간 잠금 | — |
@@ -201,7 +207,7 @@ CLAUDE.md에 이미 계획됨: `ref_items type='evidence_type'` (세금계산서
 - **P1 — 품목 마스터 필드** ✅ 완료: purchase_price/item_kind/tax_type(과세·면세·영세)/item_group + 마진 표시. 기준정보 품목 화면 보강.
 - **P2 — 계약 전 타입 품목 허용 + 라인 원가 + 원가예산** ✅ 완료: contract_items(cost_price·qty)/invoice_lines(cost_price), 계약폼 품목 편집기 전 타입 노출(합계=계약금액, 서버 `contract-model`이 재계산), 계약 상세 품목표, 지출폼이 매입가로 자동채움, 원가 실적 분류 업종중립화(§5.1b).
 - **P3 — 회계처리 IA 재편** ✅ 완료: nav/포털을 판매·매출 / 매입 / 경비 / 장부로 재편, MiscPL 부활(+필터 교정), 정기청구·정기지출 독립 화면화, 권한 자원 카탈로그 동기화(36개).
-- **P4 — 부가세 정합성**: transactions supply/vat 분리, 영세율 3종 값집합, vat_deductible, 적격증빙 유형 구현.
+- **P4 — 부가세 정합성** ✅ 완료: transactions supply/vat/tax_type 분리 + 집계 통합(청구서+직접거래, 이중계상 방지), 영세율 3종(비목·계약·품목·거래·청구서), vat_deductible(비목 기본값→거래 상속), 적격증빙 유형 실구현. 세액 해석은 `server/lib/vat.js` 한 곳으로 모음.
 - **P5 — 위생·마감**: 잔재 컬럼 범용화(project_no/site/order_no)+입력 UI, closed_periods 도입.
 - **P6 — 거래처·인사 필드**: biz_type/biz_item/pay_account, salary_account.
 - **(후속·경영관리)** 손익계산서(매출−매출원가−판관비=영업이익+영업외) 리포트 — P2/P4의 데이터가 전제. 이 문서 범위 밖.

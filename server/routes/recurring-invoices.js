@@ -4,8 +4,16 @@ const { futureDateError, kstToday, kstDate } = require('../db')
 const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS } = require('../lib/recurrence')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
+const { taxTypeOfMode } = require('../lib/vat')
 
 const router = Router()
+
+/* 정기청구로 발행하는 청구서의 과세유형.
+   정기청구 규칙의 vat_mode는 exclusive/none 두 값뿐이라 면세와 영세를 구분하지 못한다
+   → 계약에 걸린 정기청구면 계약의 vat_mode(taxable/exempt/zero)를 따른다. */
+const invTaxType = (r) => (r.contract_vat_mode
+  ? taxTypeOfMode(r.contract_vat_mode)
+  : (r.vat_mode === 'none' ? '면세' : '과세'))
 
 router.get('/', async (req, res, next) => {
   try {
@@ -103,7 +111,7 @@ router.post('/:id/issue', async (req, res, next) => {
   try {
     await conn.beginTransaction()
     const [[r]] = await conn.execute(
-      "SELECT *, UNIX_TIMESTAMP(created_at) AS created_epoch FROM recurring_invoices WHERE id = ? FOR UPDATE",
+      "SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch, c.vat_mode AS contract_vat_mode FROM recurring_invoices r LEFT JOIN contracts c ON r.contract_id = c.id WHERE r.id = ? FOR UPDATE",
       [req.params.id]
     )
     if (!r) { await rollbackQuietly(conn); return res.status(404).json({ error: '정기청구를 찾을 수 없어요' }) }
@@ -140,10 +148,10 @@ router.post('/:id/issue', async (req, res, next) => {
     }
     const id = randomUUID()
     await conn.execute(
-      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, invoice_no, 'issued', r.vendor_id || null, r.contract_id || null, supply, vat, total,
        target, addDays(target, 30), paid ? '입금 완료' : '입금 예정', acctId, r.id,
-       `정기청구 · ${r.item || ''}`.trim()]
+       `정기청구 · ${r.item || ''}`.trim(), invTaxType(r)]
     )
     // 기입금 처리: 실제 입금 거래 + 매칭까지 (계약 상세의 수금·미수금에 반영)
     if (paid) {
@@ -173,7 +181,7 @@ router.post('/generate', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
-    const [recs] = await conn.execute("SELECT *, UNIX_TIMESTAMP(created_at) AS created_epoch FROM recurring_invoices WHERE active = 1")
+    const [recs] = await conn.execute("SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch, c.vat_mode AS contract_vat_mode FROM recurring_invoices r LEFT JOIN contracts c ON r.contract_id = c.id WHERE r.active = 1")
     const generated = []
 
     for (const r of recs) {
@@ -197,8 +205,8 @@ router.post('/generate', async (req, res, next) => {
         const dueAt  = addDays(dueStr, 30)
         const id = randomUUID()
         await conn.execute(
-          'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-          [id, invoice_no, 'issued', r.vendor_id||null, r.contract_id||null, supply, vat, total, dueStr, dueAt, '입금 예정', r.account_id||null, r.id, `정기청구 자동 생성 · ${r.item||''}`.trim()]
+          'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+          [id, invoice_no, 'issued', r.vendor_id||null, r.contract_id||null, supply, vat, total, dueStr, dueAt, '입금 예정', r.account_id||null, r.id, `정기청구 자동 생성 · ${r.item||''}`.trim(), invTaxType(r)]
         )
         generated.push({ id, invoice_no, vendor_id: r.vendor_id, item: r.item, total, date: dueStr })
       }

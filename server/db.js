@@ -705,6 +705,23 @@ async function initDb(conn) {
     await ensureColumn('invoice_lines',  'cost_price', "cost_price BIGINT DEFAULT 0")
     // 총액형·정기형 계약의 품목 수량. 기성형은 계약 시점에 수량이 없고 청구할 때 넣으므로 0으로 둔다.
     await ensureColumn('contract_items', 'qty',        "qty DECIMAL(14,2) DEFAULT 0")
+    // ── 부가세 정합성 ──
+    // 직접 입력 거래에도 공급가/세액을 남긴다. 여태 amount(합계) 하나뿐이라, 청구서를 거치지 않은
+    // 거래의 매출·매입세액이 부가세 집계에서 통째로 빠졌다. NULL = 세액을 모르는 과거 거래(집계 제외).
+    await ensureColumn('transactions', 'supply_amount', "supply_amount BIGINT")
+    await ensureColumn('transactions', 'vat_amount',    "vat_amount BIGINT")
+    // 과세유형: 과세 / 면세 / 영세. 영세(수출·해외용역)는 세액 0이지만 과세표준에는 들어가므로
+    // 세액이 0이라는 것만으로 면세와 구분할 수 없다 → 값을 직접 남긴다.
+    await ensureColumn('transactions', 'tax_type',      "tax_type VARCHAR(10)")
+    // 매입세액 불공제(접대비·비영업용 승용차 등). 기본은 공제 가능.
+    await ensureColumn('transactions', 'vat_deductible', "vat_deductible TINYINT DEFAULT 1")
+    // 비목 단위 기본값 — 접대비 비목을 불공제로 두면 거래가 그 값을 물려받는다.
+    await ensureColumn('categories',   'vat_deductible', "vat_deductible TINYINT DEFAULT 1")
+    // 청구서도 면세/영세를 구분해 저장(과세표준 구분용). 기존 행은 NULL → 세액>0이면 과세로 본다.
+    await ensureColumn('invoices',     'tax_type',      "tax_type VARCHAR(10)")
+    // 적격증빙 유형(ref_items type='evidence_type')의 매입세액 공제 가능 여부.
+    // 세금계산서·카드전표·현금영수증(지출증빙)은 공제, 간이영수증·거래명세서는 불공제.
+    await ensureColumn('ref_items',    'deductible',    "deductible TINYINT DEFAULT 1")
     // 직원 고정 수당(급여대장 생성 시 명세서에 자동 채움) + 부양가족(참고용)
     await ensureColumn('employees', 'emp_no',             "emp_no VARCHAR(20)")
     await ensureColumn('employees', 'position_allowance', "position_allowance BIGINT DEFAULT 0")
@@ -981,6 +998,28 @@ async function initDb(conn) {
         await c.execute(
           'INSERT INTO ref_items (id, type, name, memo, sort_order) VALUES (?,?,?,?,?)',
           [randomUUID(), 'jeokyo', name, memo, ++jo]
+        )
+      }
+    }
+
+    // 적격증빙 유형 시딩 (하나도 없을 때만). 부가세 매입세액 공제는 '적격증빙'이 있어야 받는다.
+    // deductible=0 은 증빙으로 인정은 되지만 매입세액 공제는 안 되는 것들.
+    const [[{ evcnt }]] = await c.execute("SELECT COUNT(*) AS evcnt FROM ref_items WHERE type='evidence_type'")
+    if (evcnt === 0) {
+      const evidences = [
+        // [이름, 공제가능, 설명]
+        ['세금계산서',        1, '가장 일반적인 적격증빙 (전자세금계산서 포함)'],
+        ['신용카드매출전표',  1, '사업용 카드 결제분 — 공급자가 과세사업자일 때'],
+        ['현금영수증',        1, '지출증빙용으로 발급받은 것만 공제 가능'],
+        ['계산서',            0, '면세 거래용 — 애초에 매입세액이 없다'],
+        ['간이영수증',        0, '적격증빙이 아니라 매입세액 공제 불가'],
+        ['거래명세서',        0, '증빙 참고용 — 단독으로는 공제 불가'],
+      ]
+      let eo = 0
+      for (const [name, deductible, memo] of evidences) {
+        await c.execute(
+          'INSERT INTO ref_items (id, type, name, deductible, memo, sort_order) VALUES (?,?,?,?,?,?)',
+          [randomUUID(), 'evidence_type', name, deductible, memo, ++eo]
         )
       }
     }

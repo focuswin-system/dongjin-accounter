@@ -43,6 +43,7 @@ export const NAV_TREE = [
         { id: "master_accountSubject",  label: "계정과목",   icon: Icon.Book },
         { id: "master_category",        label: "비목",       icon: Icon.Folder },
         { id: "master_jeokyo",          label: "적요",       icon: Icon.Doc },
+        { id: "master_evidence_type",   label: "증빙유형",   icon: Icon.Receipt },
         { id: "master_item",            label: "품목",       icon: Icon.Receipt },
         { id: "master_fixed_asset",     label: "고정자산",   icon: Icon.Wallet },
         { id: "master_intangible_asset",label: "무형자산",   icon: Icon.File },
@@ -117,7 +118,7 @@ export const PORTAL = [
         { label: '', items: ['tax_vat', 'tax_etc'] },
       ]},
       { id: 'master', label: '기준정보', icon: Icon.Folder, desc: '거래처·계정·품목·자산 등', groups: [
-        { label: '거래 기준', items: ['master_vendor', 'master_accountSubject', 'master_category', 'master_jeokyo'] },
+        { label: '거래 기준', items: ['master_vendor', 'master_accountSubject', 'master_category', 'master_jeokyo', 'master_evidence_type'] },
         { label: '품목·자산', items: ['master_item', 'master_fixed_asset', 'master_intangible_asset'] },
         { label: '자금·결제', items: ['master_account', 'master_accountBalance', 'master_insurance'] },
       ]},

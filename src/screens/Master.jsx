@@ -48,14 +48,7 @@ const MASTER_DATA = {
     columns: ["유형", "은행/카드사", "계좌·카드번호", "별칭", "용도"],
     rows: [],
   },
-  // ⚠️ 목업(mock) — 저장/백엔드 없음. 기준정보 nav에서 숨김 처리됨(MASTER_SECTIONS.base).
-  // 추후 적격증빙 분류(세금계산서·카드전표·현금영수증·간이영수증·거래명세서 + 부가세 공제가능 여부)로
-  // 구현 예정. 구현 시: ref_items type='evidence_type' CRUD + 거래 증빙첨부 드롭다운 + 부가세 매입 집계 연동.
-  evidenceType: {
-    label: "증빙유형",
-    columns: ["유형명", "설명", "필수 입력", "기본 첨부"],
-    rows: [],
-  },
+  // (증빙유형 목업은 제거 — REF_CONFIGS.evidence_type 실 CRUD로 대체됨)
   user: {
     label: "사용자 / 결재선",
     columns: ["이름", "아이디", "권한", "상태"],
@@ -90,7 +83,7 @@ const MASTER_TABS = [
   { id: "accountSubject",  label: "계정과목", custom: true },
   { id: "category",        label: "비목" },
   { id: "jeokyo",          label: "적요", custom: true },
-  { id: "evidenceType",    label: "증빙유형" },
+  { id: "evidence_type",   label: "증빙유형", custom: true },
   { id: "item",            label: "품목", custom: true },
   { id: "insurance",       label: "보험", custom: true },
   { id: "fixed_asset",     label: "고정자산", custom: true },
@@ -120,8 +113,8 @@ const MASTER_SECTIONS = {
     title: "기준정보",
     sub: "거래처·계정과목·계좌·품목·자산 등 회계 처리의 기준이 되는 정보를 관리합니다.",
     groups: [
-      // 증빙유형(evidenceType)은 목업 상태라 기준정보에서 숨김 — 추후 적격증빙 분류로 구현 시 tabs에 "evidenceType" 다시 추가
-      { label: "거래 기준", tabs: ["vendor", "accountSubject", "category", "jeokyo"] },
+      // 증빙유형: 목업이던 evidenceType 탭을 버리고 실제 CRUD(ref_items type='evidence_type')로 교체.
+      { label: "거래 기준", tabs: ["vendor", "accountSubject", "category", "jeokyo", "evidence_type"] },
       { label: "품목·자산", tabs: ["item", "fixed_asset", "intangible_asset"] },
       { label: "자금·결제", tabs: ["account", "accountBalance", "insurance"] },
       // 정기청구/정기지출은 기준정보(정적 참조)가 아니라 계약에서 파생되는 흐름이라 여기서 제거.
@@ -256,6 +249,17 @@ export const REF_CONFIGS = {
         hint: '비워두면 비목의 부가세 설정을 따라갑니다' },
     ],
   },
+  evidence_type: {
+    type: 'evidence_type', label: '증빙유형',
+    sub: '거래에 붙이는 증빙의 종류입니다. 매입세액 공제는 적격증빙(세금계산서·카드전표·지출증빙 현금영수증)이 있어야 받아요.',
+    fields: [
+      { key: 'name', label: '증빙유형', kind: 'text', req: true },
+      { key: 'deductible', label: '매입세액', kind: 'flag', def: 1, w: 120,
+        options: [[1, '공제 가능'], [0, '공제 불가']],
+        hint: '공제 불가로 두면 이 증빙을 붙인 지출이 부가세 매입세액 집계에서 빠져요' },
+      { key: 'memo', label: '설명', kind: 'text' },
+    ],
+  },
   insurance: {
     type: 'insurance', label: '보험',
     sub: '가입 보험(보험사·증권번호·보험료·납입·기간)과 증권을 관리합니다.',
@@ -304,6 +308,7 @@ const emptyRefForm = (fields) => {
   const o = {}
   for (const fd of editableFields(fields)) {
     if (fd.kind === 'file') { o.file_url = ''; o.file_name = '' }
+    else if (fd.kind === 'flag') o[fd.key] = fd.def ?? 1
     else o[fd.key] = ''
   }
   return o
@@ -312,6 +317,7 @@ const rowToForm = (fields, r) => {
   const o = {}
   for (const fd of editableFields(fields)) {
     if (fd.kind === 'file') { o.file_url = r.file_url ?? ''; o.file_name = r.file_name ?? '' }
+    else if (fd.kind === 'flag') o[fd.key] = r[fd.key] == null ? (fd.def ?? 1) : Number(r[fd.key])
     else o[fd.key] = r[fd.key] ?? ''
   }
   return o
@@ -399,6 +405,10 @@ export const RefMasterPanel = ({ cfg, page = false }) => {
       // 역마진(매입가 > 출고가)은 눈에 띄어야 한다
       return <span style={v < 0 ? { color: 'var(--neg-ink)' } : undefined}>{fmtNum(v)}</span>
     }
+    if (fd.kind === 'flag') {
+      const hit = fd.options.find(([v]) => Number(r[fd.key] ?? fd.def ?? 1) === v)
+      return <span className={`badge ${Number(r[fd.key] ?? fd.def ?? 1) ? 'brand' : 'outline'}`}>{hit ? hit[1] : '—'}</span>
+    }
     const val = r[fd.key]
     if (val == null || val === '') return '—'
     if (fd.kind === 'num') return fmtNum(val)
@@ -469,6 +479,13 @@ export const RefMasterPanel = ({ cfg, page = false }) => {
                   {fd.options.map(o => (
                     <button key={o} type="button" className={`chip ${form[fd.key] === o ? 'active' : ''}`}
                       onClick={() => f(fd.key, form[fd.key] === o ? '' : o)}>{o}</button>
+                  ))}
+                </div>
+              ) : fd.kind === 'flag' ? (
+                <div className="row gap-6">
+                  {fd.options.map(([v, label]) => (
+                    <button key={label} type="button" className={`chip ${Number(form[fd.key]) === v ? 'active' : ''}`}
+                      onClick={() => f(fd.key, v)}>{label}</button>
                   ))}
                 </div>
               ) : fd.kind === 'account' ? (
@@ -1170,7 +1187,8 @@ const AccountSubjectPanel = () => {
 }
 
 // ── F0: 비목 패널 (회사 자유 CRUD) ───────────────────────────────
-const VAT_OPTS = ["10%", "면세", "—"]
+// 영세 = 세율 0%인 과세거래(수출·해외용역). 세액은 없지만 과세표준에 들어가므로 면세와 나눠 둔다.
+const VAT_OPTS = ["10%", "면세", "영세", "—"]
 const PAY_OPTS = ["계좌이체", "법인카드", "현금", "—"]
 
 const kindOf = (c) => (c.id?.startsWith('INC-') ? 'inc' : 'exp')
@@ -1306,6 +1324,22 @@ const CategoryPanel = () => {
               ))}
             </div>
           </div>
+          {/* 접대비·비영업용 승용차처럼 세금계산서를 받아도 매입세액을 못 빼는 비목이 있다.
+              여기서 꺼두면 이 비목으로 등록하는 지출이 기본 불공제로 들어간다(거래별로 다시 바꿀 수 있음). */}
+          {kindOf(form) === 'exp' && (
+            <div>
+              <label className="label">매입세액</label>
+              <div className="row gap-6">
+                {[[1, '공제 가능'], [0, '불공제']].map(([v, label]) => (
+                  <button key={label} type="button" className={`chip ${(form.vat_deductible ?? 1) === v ? 'active' : ''}`}
+                    onClick={() => setForm(p => ({ ...p, vat_deductible: v }))}>{label}</button>
+                ))}
+              </div>
+              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+                불공제로 두면 이 비목의 지출이 부가세 매입세액 집계에서 빠져요 (접대비·비영업용 승용차 등).
+              </div>
+            </div>
+          )}
         </div>
         <DrawerFooter onCancel={() => setDrawerOpen(false)} onSave={handleSave}/>
       </Drawer>
