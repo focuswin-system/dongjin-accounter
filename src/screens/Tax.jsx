@@ -3,6 +3,7 @@ import { Icon, fmtNum, useToast, useConfirm, Spacer, Drawer, Combobox, MoneyInpu
 import { api } from '../lib/api'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
+import { DataTable } from '../lib/components/DataTable'
 
 const QUARTER_PERIOD = { 1: '1~3월', 2: '4~6월', 3: '7~9월', 4: '10~12월' }
 const VAT_STATUSES = ['납부 대기', '납부 완료', '환급 완료']
@@ -180,46 +181,31 @@ export const TaxVatScreen = () => {
       </KpiRow>
       <Spacer h={24}/>
 
+      {/* 분기는 항상 4개 고정 — 정렬·빈상태 불필요. 구조 일관성 위해 DataTable 로 통일. */}
       <div className="card" style={{ overflow: 'hidden' }}>
-        <div className="table-scroll">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>분기</th><th>과세기간</th>
-                <th className="num-right">매출세액</th><th className="num-right">매입세액</th>
-                <th className="num-right">예상세액</th><th className="num-right">신고세액</th>
-                <th>신고 상태</th><th className="num-right">납부·환급액</th><th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {quarters.map(q => {
-                const refund = q.payable < 0
-                const filedYet = q.filed_amount != null
-                return (
-                  <tr key={q.quarter}>
-                    <td className="fw-700">{q.quarter}분기</td>
-                    <td className="text-sm text-muted num">{year}.{QUARTER_PERIOD[q.quarter]}</td>
-                    <td className="num-cell num-right">{fmtNum(q.sales_vat)}</td>
-                    <td className="num-cell num-right text-muted">{fmtNum(q.purchase_vat)}</td>
-                    {/* 예상(자동집계) — 참고 */}
-                    <td className="num-cell num-right text-muted2">
-                      {q.estimate < 0 ? '환급 ' : ''}{fmtNum(Math.abs(q.estimate))}
-                    </td>
-                    {/* 신고세액 — 관리 기준. 미입력이면 '미신고' */}
-                    <td className="num-cell num-right fw-700" style={{ color: filedYet ? (refund ? 'var(--brand)' : 'var(--neg-ink)') : 'var(--muted-2)' }}>
-                      {filedYet ? `${refund ? '환급 ' : ''}${fmtNum(Math.abs(q.payable))}` : '미신고'}
-                    </td>
-                    <td><span className={`badge ${STATUS_TONE[q.status] || 'outline'}`}>{q.status}</span></td>
-                    <td className="num-cell num-right">{q.paid_amount ? fmtNum(q.paid_amount) : '—'}</td>
-                    <td>
-                      <button className="btn sm" onClick={() => setTarget(q)}>{q.status === '납부 대기' ? (filedYet ? (refund ? '환급 처리' : '납부 처리') : '신고 등록') : '수정'}</button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          rows={quarters}
+          rowKey={q => q.quarter}
+          columns={[
+            { key: 'quarter', header: '분기', render: q => <span className="fw-700">{q.quarter}분기</span> },
+            { key: 'period', header: '과세기간', render: q => <span className="text-sm text-muted num">{year}.{QUARTER_PERIOD[q.quarter]}</span> },
+            { key: 'sales_vat', header: '매출세액', align: 'right', render: q => <span className="num-cell">{fmtNum(q.sales_vat)}</span> },
+            { key: 'purchase_vat', header: '매입세액', align: 'right', render: q => <span className="num-cell text-muted">{fmtNum(q.purchase_vat)}</span> },
+            { key: 'estimate', header: '예상세액', align: 'right', render: q => <span className="num-cell text-muted2">{q.estimate < 0 ? '환급 ' : ''}{fmtNum(Math.abs(q.estimate))}</span> },
+            { key: 'payable', header: '신고세액', align: 'right', render: q => {
+              const refund = q.payable < 0, filedYet = q.filed_amount != null
+              return <span className="num-cell fw-700" style={{ color: filedYet ? (refund ? 'var(--brand)' : 'var(--neg-ink)') : 'var(--muted-2)' }}>
+                {filedYet ? `${refund ? '환급 ' : ''}${fmtNum(Math.abs(q.payable))}` : '미신고'}
+              </span>
+            } },
+            { key: 'status', header: '신고 상태', render: q => <span className={`badge ${STATUS_TONE[q.status] || 'outline'}`}>{q.status}</span> },
+            { key: 'paid_amount', header: '납부·환급액', align: 'right', render: q => <span className="num-cell">{q.paid_amount ? fmtNum(q.paid_amount) : '—'}</span> },
+            { key: 'action', header: '', render: q => {
+              const refund = q.payable < 0, filedYet = q.filed_amount != null
+              return <button className="btn sm" onClick={() => setTarget(q)}>{q.status === '납부 대기' ? (filedYet ? (refund ? '환급 처리' : '납부 처리') : '신고 등록') : '수정'}</button>
+            } },
+          ]}
+        />
       </div>
 
       <FilingDrawer target={target} year={year} onClose={() => setTarget(null)} onSaved={load}/>
@@ -393,42 +379,26 @@ export const OtherTaxScreen = () => {
       <Spacer h={24}/>
 
       <div className="card" style={{ overflow: 'hidden' }}>
-        <div className="table-scroll">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>세목</th><th>과세기간/귀속</th>
-                <th className="num-right">신고세액</th><th className="num-right">납부액</th>
-                <th className="num-right">미납</th><th>상태</th><th>납부일</th><th style={{ width: 90 }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 && (
-                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)' }}>등록된 기타세액이 없어요. '기타세액 등록'을 눌러 추가하세요.</td></tr>
-              )}
-              {rows.map(r => {
-                const unpaid = otUnpaid(r)
-                return (
-                  <tr key={r.id}>
-                    <td className="fw-700">{r.name}</td>
-                    <td className="text-sm text-muted">{r.period || '—'}</td>
-                    <td className="num-cell num-right">{fmtNum(r.tax_amount)}</td>
-                    <td className="num-cell num-right text-muted">{fmtNum(r.paid_amount)}</td>
-                    <td className="num-cell num-right fw-700" style={{ color: unpaid > 0 ? 'var(--neg-ink)' : 'var(--muted-2)' }}>{unpaid > 0 ? fmtNum(unpaid) : '—'}</td>
-                    <td><span className={`badge ${STATUS_TONE[r.status] || 'outline'}`}>{r.status}</span></td>
-                    <td className="text-sm num">{r.paid_date || '—'}</td>
-                    <td>
-                      <div className="row gap-6">
-                        <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => openEdit(r)}>수정</button>
-                        <button className="btn" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--neg)' }} onClick={() => handleDelete(r)}>삭제</button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          rows={rows}
+          empty="등록된 기타세액이 없어요. '기타세액 등록'을 눌러 추가하세요."
+          columns={[
+            { key: 'name', header: '세목', sortable: true, render: r => <span className="fw-700">{r.name}</span> },
+            { key: 'period', header: '과세기간/귀속', render: r => <span className="text-sm text-muted">{r.period || '—'}</span> },
+            { key: 'tax_amount', header: '신고세액', align: 'right', sortable: true, render: r => <span className="num-cell">{fmtNum(r.tax_amount)}</span> },
+            { key: 'paid_amount', header: '납부액', align: 'right', render: r => <span className="num-cell text-muted">{fmtNum(r.paid_amount)}</span> },
+            { key: 'unpaid', header: '미납', align: 'right', sortable: true, sortValue: r => otUnpaid(r),
+              render: r => { const u = otUnpaid(r); return <span className="num-cell fw-700" style={{ color: u > 0 ? 'var(--neg-ink)' : 'var(--muted-2)' }}>{u > 0 ? fmtNum(u) : '—'}</span> } },
+            { key: 'status', header: '상태', render: r => <span className={`badge ${STATUS_TONE[r.status] || 'outline'}`}>{r.status}</span> },
+            { key: 'paid_date', header: '납부일', render: r => <span className="text-sm num">{r.paid_date || '—'}</span> },
+            { key: 'action', header: '', width: 90, render: r => (
+              <div className="row gap-6">
+                <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => openEdit(r)}>수정</button>
+                <button className="btn" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--neg)' }} onClick={() => handleDelete(r)}>삭제</button>
+              </div>
+            ) },
+          ]}
+        />
       </div>
 
       <OtherTaxDrawer open={drawerOpen} editing={editing} onClose={() => setDrawerOpen(false)} onSaved={load}/>

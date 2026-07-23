@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { fmtNum, Spacer, StatusBadge } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
+import { DataTable } from '../lib/components/DataTable'
 import { api } from '../lib/api'
 
 const TABS = [
@@ -32,26 +33,18 @@ export const MiscPLScreen = () => {
           ))}
           <div className="ml-auto text-sm text-muted">합계 <span className="num fw-700" style={{ color: 'var(--ink)' }}>{fmtNum(total)}원</span> · {rows.length}건</div>
         </div>
-        <div className="table-scroll">
-          <table className="table">
-            <thead>
-              <tr><th>날짜</th><th>거래처</th><th>비목</th><th>적요/구분</th><th className="num-right">금액</th><th>상태</th></tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)' }}>해당 거래가 없어요</td></tr>}
-              {rows.map(r => (
-                <tr key={r.id}>
-                  <td className="num text-sm">{r.date}</td>
-                  <td className="fw-600">{r.vendor}</td>
-                  <td><span className="badge outline">{r.category}</span></td>
-                  <td className="text-sm text-muted">{r.scope}</td>
-                  <td className="num-cell num-right fw-700">{fmtNum(r.amount)}</td>
-                  <td><StatusBadge status={r.status}/></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          rows={rows}
+          empty="해당 거래가 없어요"
+          columns={[
+            { key: 'date', header: '날짜', sortable: true, render: r => <span className="num text-sm">{r.date}</span> },
+            { key: 'vendor', header: '거래처', sortable: true, render: r => <span className="fw-600">{r.vendor}</span> },
+            { key: 'category', header: '비목', render: r => <span className="badge outline">{r.category}</span> },
+            { key: 'scope', header: '적요/구분', render: r => <span className="text-sm text-muted">{r.scope}</span> },
+            { key: 'amount', header: '금액', align: 'right', sortable: true, render: r => <span className="num-cell fw-700">{fmtNum(r.amount)}</span> },
+            { key: 'status', header: '상태', render: r => <StatusBadge status={r.status}/> },
+          ]}
+        />
       </div>
     </div>
   )

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
+import { DataTable } from '../lib/components/DataTable'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 
@@ -611,55 +612,35 @@ const SummaryCard = ({ label, amount, count, accent = "blue", warn }) => (
 // ── 청구서 테이블 ────────────────────────────────────────────────
 const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여" }) => (
   <div className="card" style={{ overflow: "hidden" }}>
-    <table className="table">
-      <thead>
-        <tr>
-          <th>청구번호</th>
-          <th>거래처</th>
-          <th>계약</th>
-          <th className="num-right">청구금액</th>
-          <th className="num-right">{remainLabel}</th>
-          <th>기한</th>
-          <th>상태</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.length === 0 && (
-          <tr><td colSpan={8} className="text-center text-muted" style={{ padding: 32 }}>해당 청구서가 없습니다</td></tr>
-        )}
-        {rows.map(inv => (
-          <tr key={inv.id} style={{ cursor: "pointer" }} onClick={() => onSelect(inv)}>
-            <td className="text-sm text-muted num">{inv.invoiceNo}</td>
-            <td className="fw-700">{inv.vendor}</td>
-            <td className="text-sm text-muted">{inv.contract || "—"}</td>
-            <td className="num-cell num-right">{fmtNum(inv.totalAmount)}</td>
-            <td className="num-cell num-right">
-              {inv.remainAmount > 0
-                ? <span style={{ color: "var(--warn-ink)", fontWeight: 700 }}>{fmtNum(inv.remainAmount)}</span>
-                : <span className="text-muted">—</span>}
-            </td>
-            <td>
-              <span className="text-sm">{inv.dueAt}</span>
-              {inv.dueAt && (
-                <span className={`badge ${ddayTone(inv.dueAt)}`} style={{ marginLeft: 6, fontSize: 10 }}>
-                  {dday(inv.dueAt)}
-                </span>
-              )}
-            </td>
-            <td><StatusBadge status={effStatus(inv)}/></td>
-            {/* 아직 안 받은/안 낸 청구서는 목록에서 바로 처리 버튼. 누르면 상세의 매칭 탭이 열린다. */}
-            <td className="num-right">
-              {inv.remainAmount > 0 && (
-                <button className="btn primary sm" onClick={(e) => { e.stopPropagation(); onSelect(inv); }}>
-                  {inv.kind === "issued" ? "입금 처리" : "지급 처리"}
-                </button>
-              )}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <DataTable
+      rows={rows}
+      onRowClick={onSelect}
+      empty="해당 청구서가 없습니다"
+      columns={[
+        { key: 'invoiceNo', header: '청구번호', sortable: true, render: inv => <span className="text-sm text-muted num">{inv.invoiceNo}</span> },
+        { key: 'vendor', header: '거래처', sortable: true, render: inv => <span className="fw-700">{inv.vendor}</span> },
+        { key: 'contract', header: '계약', render: inv => <span className="text-sm text-muted">{inv.contract || "—"}</span> },
+        { key: 'totalAmount', header: '청구금액', align: 'right', sortable: true, render: inv => <span className="num-cell">{fmtNum(inv.totalAmount)}</span> },
+        { key: 'remainAmount', header: remainLabel, align: 'right', sortable: true, render: inv => (
+          inv.remainAmount > 0
+            ? <span style={{ color: "var(--warn-ink)", fontWeight: 700 }}>{fmtNum(inv.remainAmount)}</span>
+            : <span className="text-muted">—</span>
+        ) },
+        { key: 'dueAt', header: '기한', sortable: true, render: inv => (
+          <><span className="text-sm">{inv.dueAt}</span>
+            {inv.dueAt && <span className={`badge ${ddayTone(inv.dueAt)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(inv.dueAt)}</span>}</>
+        ) },
+        { key: 'status', header: '상태', render: inv => <StatusBadge status={effStatus(inv)}/> },
+        // 아직 안 받은/안 낸 청구서는 목록에서 바로 처리 버튼. 누르면 상세의 매칭 탭이 열린다.
+        { key: 'action', header: '', align: 'right', render: inv => (
+          inv.remainAmount > 0 && (
+            <button className="btn primary sm" onClick={(e) => { e.stopPropagation(); onSelect(inv); }}>
+              {inv.kind === "issued" ? "입금 처리" : "지급 처리"}
+            </button>
+          )
+        ) },
+      ]}
+    />
   </div>
 )
 
@@ -667,46 +648,33 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여" }) => (
 // 계약에 깔아둔 청구/지급 일정 → 아직 청구서가 안 만들어진 건. 매출은 '발행', 매입은 '등록' 관점.
 const PendingScheduleTable = ({ rows, onIssue, onPaid, isIssued = true }) => (
   <div className="card" style={{ overflow: "hidden" }}>
-    <table className="table">
-      <thead>
-        <tr>
-          <th>예정일</th><th>거래처</th><th>계약</th><th>유형</th>
-          <th className="num-right">{isIssued ? "청구금액" : "지급금액"}(VAT 포함)</th><th style={{ width: 210 }}></th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.length === 0 && (
-          <tr><td colSpan={6} className="text-center text-muted" style={{ padding: 32 }}>
-            {isIssued
-              ? "발행 예정인 청구 일정이 없어요. 계약 상세의 '청구 일정'에서 청구할 금액·시점을 등록하세요."
-              : "예정된 지급 일정이 없어요. 매입 계약 상세의 '청구 일정'에서 지급할 금액·시점을 등록하세요."}
-          </td></tr>
-        )}
-        {rows.map(p => {
-          const total = p.amount + (p.vat != null ? p.vat : Math.round(p.amount * 0.1))
-          return (
-            <tr key={p.source === 'recurring' ? `r-${p.recurring_id}-${p.due_date}` : `m-${p.milestone_id}`}>
-              <td className="num text-sm">
-                {p.due_date || "—"}
-                {p.due_date && <span className={`badge ${ddayTone(p.due_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(p.due_date)}</span>}
-              </td>
-              <td className="fw-700">{p.vendor_name || "—"}</td>
-              <td className="text-sm text-muted">{p.contract_name}{p.contract_no ? ` · ${p.contract_no}` : ""}</td>
-              <td><span className="badge outline">{p.type}</span></td>
-              <td className="num-cell num-right fw-700">{fmtNum(total)}</td>
-              <td>
-                <div className="row gap-6">
-                  <button className="btn primary sm" onClick={() => onIssue(p)}>
-                    <Icon.Receipt size={12}/> {isIssued ? "발행 처리" : "청구서 등록"}
-                  </button>
-                  <button className="btn sm" onClick={() => onPaid(p)}>{isIssued ? "기입금 처리" : "기지급 처리"}</button>
-                </div>
-              </td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
+    <DataTable
+      rows={rows}
+      rowKey={p => p.source === 'recurring' ? `r-${p.recurring_id}-${p.due_date}` : `m-${p.milestone_id}`}
+      empty={isIssued
+        ? "발행 예정인 청구 일정이 없어요. 계약 상세의 '청구 일정'에서 청구할 금액·시점을 등록하세요."
+        : "예정된 지급 일정이 없어요. 매입 계약 상세의 '청구 일정'에서 지급할 금액·시점을 등록하세요."}
+      columns={[
+        { key: 'due_date', header: '예정일', sortable: true, render: p => (
+          <span className="num text-sm">{p.due_date || "—"}
+            {p.due_date && <span className={`badge ${ddayTone(p.due_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(p.due_date)}</span>}</span>
+        ) },
+        { key: 'vendor_name', header: '거래처', sortable: true, render: p => <span className="fw-700">{p.vendor_name || "—"}</span> },
+        { key: 'contract_name', header: '계약', render: p => <span className="text-sm text-muted">{p.contract_name}{p.contract_no ? ` · ${p.contract_no}` : ""}</span> },
+        { key: 'type', header: '유형', render: p => <span className="badge outline">{p.type}</span> },
+        { key: 'total', header: `${isIssued ? "청구금액" : "지급금액"}(VAT 포함)`, align: 'right', sortable: true,
+          sortValue: p => p.amount + (p.vat != null ? p.vat : Math.round(p.amount * 0.1)),
+          render: p => <span className="num-cell fw-700">{fmtNum(p.amount + (p.vat != null ? p.vat : Math.round(p.amount * 0.1)))}</span> },
+        { key: 'action', header: '', width: 210, render: p => (
+          <div className="row gap-6">
+            <button className="btn primary sm" onClick={() => onIssue(p)}>
+              <Icon.Receipt size={12}/> {isIssued ? "발행 처리" : "청구서 등록"}
+            </button>
+            <button className="btn sm" onClick={() => onPaid(p)}>{isIssued ? "기입금 처리" : "기지급 처리"}</button>
+          </div>
+        ) },
+      ]}
+    />
   </div>
 )
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, StatusBadge, localToday } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
+import { DataTable } from '../lib/components/DataTable'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { computeItems, monthLabel } from './HR'
@@ -227,30 +228,22 @@ export const LaborContractScreen = () => {
           </div>
           <div className="ml-auto text-sm text-muted2">{list.length}명</div>
         </div>
-        <div className="table-scroll">
-          <table className="table">
-            <thead><tr>
-              <th>사번</th><th>이름</th><th>부서</th><th>고용형태</th><th>계약기간</th>
-              <th className="num-right">월 기준급여</th><th>4대보험</th><th>상태</th><th></th>
-            </tr></thead>
-            <tbody>
-              {list.length === 0 && <tr><td colSpan={9} style={{ textAlign: 'center', padding: 36, color: 'var(--muted-2)' }}>근로계약이 없어요. 직원을 등록하세요.</td></tr>}
-              {list.map(r => (
-                <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => setDetail(r.id)}>
-                  <td className="num text-muted text-sm">{r.emp_no || '—'}</td>
-                  <td className="fw-700">{r.employee_name}</td>
-                  <td className="text-sm">{r.department || '—'}</td>
-                  <td className="text-sm">{r.employ_type || '—'}</td>
-                  <td className="text-sm text-muted">{r.start_date || '—'}{r.end_date ? ` ~ ${r.end_date}` : (r.term_mode === 'open' ? ' ~ (무기한)' : '')}</td>
-                  <td className="num-cell num-right">{won(r.monthly_net || 0)}</td>
-                  <td className="text-xs text-muted">{insBadges(r)}</td>
-                  <td><StatusBadge status={r.emp_status === '퇴사' ? '퇴사' : r.status}/></td>
-                  <td><button className="btn ghost sm" onClick={e => { e.stopPropagation(); setDrawer({ mode: 'edit', id: r.id }) }}>편집</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          rows={list}
+          onRowClick={r => setDetail(r.id)}
+          empty="근로계약이 없어요. 직원을 등록하세요."
+          columns={[
+            { key: 'emp_no', header: '사번', sortable: true, render: r => <span className="num text-muted text-sm">{r.emp_no || '—'}</span> },
+            { key: 'employee_name', header: '이름', sortable: true, render: r => <span className="fw-700">{r.employee_name}</span> },
+            { key: 'department', header: '부서', render: r => <span className="text-sm">{r.department || '—'}</span> },
+            { key: 'employ_type', header: '고용형태', render: r => <span className="text-sm">{r.employ_type || '—'}</span> },
+            { key: 'term', header: '계약기간', render: r => <span className="text-sm text-muted">{r.start_date || '—'}{r.end_date ? ` ~ ${r.end_date}` : (r.term_mode === 'open' ? ' ~ (무기한)' : '')}</span> },
+            { key: 'monthly_net', header: '월 기준급여', align: 'right', sortable: true, render: r => <span className="num-cell">{won(r.monthly_net || 0)}</span> },
+            { key: 'ins', header: '4대보험', render: r => <span className="text-xs text-muted">{insBadges(r)}</span> },
+            { key: 'status', header: '상태', render: r => <StatusBadge status={r.emp_status === '퇴사' ? '퇴사' : r.status}/> },
+            { key: 'action', header: '', render: r => <button className="btn ghost sm" onClick={e => { e.stopPropagation(); setDrawer({ mode: 'edit', id: r.id }) }}>편집</button> },
+          ]}
+        />
       </div>
 
       {drawer && <LaborDrawer info={drawer} onClose={() => setDrawer(null)} onSaved={() => { setDrawer(null); load() }}/>}
@@ -601,29 +594,21 @@ export const OutsourcingScreen = () => {
           </div>
           <div className="ml-auto text-sm text-muted2">{list.length}명</div>
         </div>
-        <div className="table-scroll">
-          <table className="table">
-            <thead><tr>
-              <th>성명</th><th>고용형태</th><th>소득구분</th><th>업무내용</th><th>계약기간</th>
-              <th className="num-right">누적 지급</th><th className="num-right">미지급</th><th></th>
-            </tr></thead>
-            <tbody>
-              {list.length === 0 && <tr><td colSpan={8} style={{ textAlign: 'center', padding: 36, color: 'var(--muted-2)' }}>용역·일용 인력이 없어요. 인력을 등록하세요.</td></tr>}
-              {list.map(r => (
-                <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => setDetail(r.id)}>
-                  <td className="fw-700">{r.employee_name} {alertIds.has(r.id) && <span className="chip" style={{ padding: '1px 6px', fontSize: 10, color: 'var(--warn-ink)', background: 'var(--warn-soft)' }}>전환검토</span>}</td>
-                  <td className="text-sm">{r.employ_type || '—'}</td>
-                  <td className="text-sm">{INCOME_LABEL[r.income_type] || r.income_type}</td>
-                  <td className="text-sm text-muted">{r.title || '—'}</td>
-                  <td className="text-sm text-muted">{r.start_date || '—'}{r.end_date ? ` ~ ${r.end_date}` : (r.term_mode === 'open' ? ' ~ (무기한)' : '')}</td>
-                  <td className="num-cell num-right">{won(r.paid_sum || 0)}</td>
-                  <td className="num-cell num-right" style={{ color: r.unpaid > 0 ? 'var(--warn-ink)' : undefined }}>{won(r.unpaid || 0)}</td>
-                  <td><button className="btn ghost sm" onClick={e => { e.stopPropagation(); setDrawer({ mode: 'edit', id: r.id }) }}>편집</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          rows={list}
+          onRowClick={r => setDetail(r.id)}
+          empty="용역·일용 인력이 없어요. 인력을 등록하세요."
+          columns={[
+            { key: 'employee_name', header: '성명', sortable: true, render: r => <span className="fw-700">{r.employee_name} {alertIds.has(r.id) && <span className="chip" style={{ padding: '1px 6px', fontSize: 10, color: 'var(--warn-ink)', background: 'var(--warn-soft)' }}>전환검토</span>}</span> },
+            { key: 'employ_type', header: '고용형태', render: r => <span className="text-sm">{r.employ_type || '—'}</span> },
+            { key: 'income_type', header: '소득구분', render: r => <span className="text-sm">{INCOME_LABEL[r.income_type] || r.income_type}</span> },
+            { key: 'title', header: '업무내용', render: r => <span className="text-sm text-muted">{r.title || '—'}</span> },
+            { key: 'term', header: '계약기간', render: r => <span className="text-sm text-muted">{r.start_date || '—'}{r.end_date ? ` ~ ${r.end_date}` : (r.term_mode === 'open' ? ' ~ (무기한)' : '')}</span> },
+            { key: 'paid_sum', header: '누적 지급', align: 'right', sortable: true, render: r => <span className="num-cell">{won(r.paid_sum || 0)}</span> },
+            { key: 'unpaid', header: '미지급', align: 'right', sortable: true, render: r => <span className="num-cell" style={{ color: r.unpaid > 0 ? 'var(--warn-ink)' : undefined }}>{won(r.unpaid || 0)}</span> },
+            { key: 'action', header: '', render: r => <button className="btn ghost sm" onClick={e => { e.stopPropagation(); setDrawer({ mode: 'edit', id: r.id }) }}>편집</button> },
+          ]}
+        />
       </div>
 
       {drawer && <OutsourcingDrawer info={drawer} onClose={() => setDrawer(null)} onSaved={() => { setDrawer(null); load() }}/>}

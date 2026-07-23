@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, localToday } from '../lib/ui'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
+import { DataTable } from '../lib/components/DataTable'
 import { api } from '../lib/api'
 
 /* ───────── 급여대장: 항목별(%·수치) 계산 ───────── */
@@ -216,49 +217,31 @@ export const HRScreen = () => {
                   <button className="btn primary" onClick={handleGeneratePayroll}><Icon.Plus/> 재직 직원 급여대장 만들기</button>
                 </div>
               ) : (
-                <div className="table-scroll" style={{ marginTop: 12 }}>
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>직원</th>
-                        <th className="num-right">실수령</th>
-                        <th className="num-right">지급 완료</th>
-                        <th className="num-right">미지급 / 과지급</th>
-                        <th>지급일</th>
-                        <th>상태</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {payRows.map((r) => {
-                        const remain = r.remain;
-                        return (
-                          <tr key={r.id}>
-                            <td>
-                              <div className="fw-700">{r.name}</div>
-                              <div className="text-xs text-muted2">{r.department || "—"} · {r.role || "—"}</div>
-                            </td>
-                            <td className="num-cell num-right fw-700">{fmtNum(r.net_salary)}</td>
-                            <td className="num-cell num-right text-muted">{fmtNum(r.paid)}</td>
-                            <td className="num-cell num-right">
-                              {remain > 0 ? <span className="text-warn fw-700">미지급 {fmtNum(remain)}</span>
-                                : remain < 0 ? <span className="text-neg fw-700">과지급 {fmtNum(-remain)}</span>
-                                : <span className="text-muted">—</span>}
-                            </td>
-                            <td className="num text-sm text-muted">{r.pay_date || "—"}</td>
-                            <td><StatusBadge status={r.payStatus}/></td>
-                            <td>
-                              <div className="row gap-4">
-                                <button className="btn ghost sm" onClick={() => setEditSlip(r)}>명세서</button>
-                                <button className="btn ghost sm" onClick={() => setPayTarget(r)}>지급</button>
-                                <button className="btn ghost sm" style={{ color: "var(--neg)" }} onClick={() => handleDeleteRow(r)}>삭제</button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot>
+                <div style={{ marginTop: 12 }}>
+                  <DataTable
+                    rows={payRows}
+                    columns={[
+                      { key: 'name', header: '직원', sortable: true, render: r => (
+                        <><div className="fw-700">{r.name}</div><div className="text-xs text-muted2">{r.department || "—"} · {r.role || "—"}</div></>
+                      ) },
+                      { key: 'net_salary', header: '실수령', align: 'right', sortable: true, render: r => <span className="num-cell fw-700">{fmtNum(r.net_salary)}</span> },
+                      { key: 'paid', header: '지급 완료', align: 'right', render: r => <span className="num-cell text-muted">{fmtNum(r.paid)}</span> },
+                      { key: 'remain', header: '미지급 / 과지급', align: 'right', sortable: true, render: r => (
+                        r.remain > 0 ? <span className="text-warn fw-700">미지급 {fmtNum(r.remain)}</span>
+                          : r.remain < 0 ? <span className="text-neg fw-700">과지급 {fmtNum(-r.remain)}</span>
+                          : <span className="text-muted">—</span>
+                      ) },
+                      { key: 'pay_date', header: '지급일', render: r => <span className="num text-sm text-muted">{r.pay_date || "—"}</span> },
+                      { key: 'payStatus', header: '상태', render: r => <StatusBadge status={r.payStatus}/> },
+                      { key: 'action', header: '', render: r => (
+                        <div className="row gap-4">
+                          <button className="btn ghost sm" onClick={() => setEditSlip(r)}>명세서</button>
+                          <button className="btn ghost sm" onClick={() => setPayTarget(r)}>지급</button>
+                          <button className="btn ghost sm" style={{ color: "var(--neg)" }} onClick={() => handleDeleteRow(r)}>삭제</button>
+                        </div>
+                      ) },
+                    ]}
+                    footer={
                       <tr style={{ background: "var(--surface-2)" }}>
                         <td className="fw-700" style={{ padding: "14px 14px" }}>합계 {payRows.length}명</td>
                         <td className="num-cell num-right fw-700">{fmtNum(paySummary?.netTotal || 0)}</td>
@@ -266,8 +249,8 @@ export const HRScreen = () => {
                         <td className="num-cell num-right fw-700 text-warn">{fmtNum(paySummary?.unpaidTotal || 0)}</td>
                         <td colSpan={3}></td>
                       </tr>
-                    </tfoot>
-                  </table>
+                    }
+                  />
                 </div>
               )}
             </div>
@@ -317,34 +300,21 @@ const ServiceLedgerTab = ({ month, setMonth }) => {
         <Kpi label="인원"       value={people + "명"}         badge="용역·일용"              badgeTone="ink"/>
       </KpiRow>
 
-      {rows.length === 0 ? (
-        <div style={{ padding: "36px 0 44px", textAlign: "center", color: "var(--muted-2)" }}>
-          {monthLabel(month)}에 용역·일용 지급 내역이 없어요.
-        </div>
-      ) : (
-        <table className="table">
-          <thead><tr>
-            <th>성명</th><th>회차</th><th>업무</th><th className="num-right">지급액</th>
-            <th className="num-right">지급 완료</th><th>상태</th>
-          </tr></thead>
-          <tbody>
-            {rows.map(r => {
-              const lines = Array.isArray(r.qty_lines) ? r.qty_lines : [];
-              const work = lines.map(l => l.name).filter(Boolean).join(", ");
-              return (
-                <tr key={r.id}>
-                  <td className="fw-700">{r.name}</td>
-                  <td className="text-sm text-muted">#{r.seq}</td>
-                  <td className="text-sm text-muted">{work || "—"}</td>
-                  <td className="num-cell num-right">{fmtNum(r.net_salary)}</td>
-                  <td className="num-cell num-right">{fmtNum(r.paid)}</td>
-                  <td><StatusBadge status={r.payStatus}/></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
+      <DataTable
+        rows={rows}
+        empty={`${monthLabel(month)}에 용역·일용 지급 내역이 없어요.`}
+        columns={[
+          { key: 'name', header: '성명', sortable: true, render: r => <span className="fw-700">{r.name}</span> },
+          { key: 'seq', header: '회차', render: r => <span className="text-sm text-muted">#{r.seq}</span> },
+          { key: 'work', header: '업무', render: r => {
+            const work = (Array.isArray(r.qty_lines) ? r.qty_lines : []).map(l => l.name).filter(Boolean).join(", ");
+            return <span className="text-sm text-muted">{work || "—"}</span>
+          } },
+          { key: 'net_salary', header: '지급액', align: 'right', sortable: true, render: r => <span className="num-cell">{fmtNum(r.net_salary)}</span> },
+          { key: 'paid', header: '지급 완료', align: 'right', render: r => <span className="num-cell">{fmtNum(r.paid)}</span> },
+          { key: 'payStatus', header: '상태', render: r => <StatusBadge status={r.payStatus}/> },
+        ]}
+      />
     </div>
   );
 };
