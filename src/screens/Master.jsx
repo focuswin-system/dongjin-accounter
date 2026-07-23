@@ -222,6 +222,12 @@ const HrCodePanel = ({ type, label }) => {
 }
 
 // ── 기준정보 범용 패널 (적요·품목·보험·고정자산·무형자산·근로계약·기타용역) ──
+// 품목유형: 매출 품목(제품·상품·서비스)과 매입 품목(원재료·부재료)의 성격 구분.
+// 업종중립 — 제조든 SW든 같은 축으로 쓴다(SW 개발=서비스, 라이선스 재판매=상품).
+export const ITEM_KINDS = ['제품', '상품', '서비스', '원재료', '부재료']
+// 영세 = 세율 0%인 과세거래(수출·해외용역). 면세(과세표준 제외)와 다르므로 반드시 구분한다.
+export const TAX_TYPES = ['과세', '면세', '영세']
+
 export const REF_CONFIGS = {
   jeokyo: {
     type: 'jeokyo', label: '적요',
@@ -233,13 +239,20 @@ export const REF_CONFIGS = {
   },
   item: {
     type: 'item', label: '품목',
-    sub: '거래·청구에 쓰는 품목(품명·규격·단위·단가)을 관리합니다.',
+    sub: '거래·계약·청구에 쓰는 품목을 관리합니다. 매입가·출고가를 넣으면 마진이 자동으로 잡혀요.',
     fields: [
-      { key: 'code', label: '품목코드', kind: 'text', w: 120 },
+      { key: 'code', label: '품목코드', kind: 'text', w: 110 },
       { key: 'name', label: '품명', kind: 'text', req: true },
+      { key: 'item_kind', label: '유형', kind: 'select', options: ITEM_KINDS, w: 82,
+        hint: '팔 것(제품·상품·서비스) / 살 것(원재료·부재료)' },
+      { key: 'item_group', label: '분류', kind: 'text', w: 110, hint: '품목을 묶는 이름 (예: 웹서비스, 가공품)' },
       { key: 'spec', label: '규격', kind: 'text' },
-      { key: 'unit', label: '단위', kind: 'text', w: 80 },
-      { key: 'amount', label: '단가', kind: 'num', w: 120 },
+      { key: 'unit', label: '단위', kind: 'text', w: 70 },
+      { key: 'purchase_price', label: '매입가', kind: 'num', w: 110, hint: '원가 — 외주·자재 매입 단가' },
+      { key: 'amount', label: '출고가', kind: 'num', w: 110, hint: '판매 단가 — 계약·청구서에 자동으로 채워져요' },
+      { key: 'margin', label: '마진', kind: 'num', w: 100, calc: r => (Number(r.amount) || 0) - (Number(r.purchase_price) || 0) },
+      { key: 'tax_type', label: '과세', kind: 'select', options: TAX_TYPES, w: 76,
+        hint: '비워두면 비목의 부가세 설정을 따라갑니다' },
     ],
   },
   insurance: {
@@ -283,9 +296,12 @@ export const REF_CONFIGS = {
   // labor_contract·outsourcing은 실화면(WorkContract.jsx)으로 대체됨 — ref 목록 패널 제거.
 }
 
+// calc 필드(마진 등)는 표에만 나오는 계산값 — 저장하지 않으므로 폼에서 제외한다.
+const editableFields = (fields) => fields.filter(fd => !fd.calc)
+
 const emptyRefForm = (fields) => {
   const o = {}
-  for (const fd of fields) {
+  for (const fd of editableFields(fields)) {
     if (fd.kind === 'file') { o.file_url = ''; o.file_name = '' }
     else o[fd.key] = ''
   }
@@ -293,7 +309,7 @@ const emptyRefForm = (fields) => {
 }
 const rowToForm = (fields, r) => {
   const o = {}
-  for (const fd of fields) {
+  for (const fd of editableFields(fields)) {
     if (fd.kind === 'file') { o.file_url = r.file_url ?? ''; o.file_name = r.file_name ?? '' }
     else o[fd.key] = r[fd.key] ?? ''
   }
@@ -375,6 +391,13 @@ export const RefMasterPanel = ({ cfg, page = false }) => {
   }
 
   const cell = (fd, r) => {
+    if (fd.calc) {
+      const v = fd.calc(r)
+      if (v == null) return '—'
+      if (fd.kind !== 'num') return v
+      // 역마진(매입가 > 출고가)은 눈에 띄어야 한다
+      return <span style={v < 0 ? { color: 'var(--neg-ink)' } : undefined}>{fmtNum(v)}</span>
+    }
     const val = r[fd.key]
     if (val == null || val === '') return '—'
     if (fd.kind === 'num') return fmtNum(val)
@@ -433,16 +456,18 @@ export const RefMasterPanel = ({ cfg, page = false }) => {
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
         <DrawerHead title={editing ? `${cfg.label} 수정` : `${cfg.label} 등록`} onClose={() => setDrawerOpen(false)}/>
         <div className="drawer-body col gap-form">
-          {cfg.fields.map(fd => (
+          {editableFields(cfg.fields).map(fd => (
             <div key={fd.key}>
               <label className="label" style={{ marginBottom: 8 }}>
                 {fd.label} {fd.req && <span style={{ color: 'var(--neg-ink)' }}>*</span>}
                 {fd.hint && <span className="text-muted2" style={{ fontWeight: 400, marginLeft: 6, fontSize: 12 }}>· {fd.hint}</span>}
               </label>
               {fd.kind === 'select' ? (
+                // 선택 항목이라 고른 칩을 다시 누르면 해제된다(과세유형처럼 '비워두기'가 뜻을 갖는 필드가 있다)
                 <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
                   {fd.options.map(o => (
-                    <button key={o} type="button" className={`chip ${form[fd.key] === o ? 'active' : ''}`} onClick={() => f(fd.key, o)}>{o}</button>
+                    <button key={o} type="button" className={`chip ${form[fd.key] === o ? 'active' : ''}`}
+                      onClick={() => f(fd.key, form[fd.key] === o ? '' : o)}>{o}</button>
                   ))}
                 </div>
               ) : fd.kind === 'account' ? (

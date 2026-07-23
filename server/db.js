@@ -692,6 +692,13 @@ async function initDb(conn) {
     await ensureColumn('ref_items', 'account_id', "account_id VARCHAR(36)")
     await ensureColumn('ref_items', 'file_url',   "file_url VARCHAR(500)")
     await ensureColumn('ref_items', 'file_name',  "file_name VARCHAR(300)")
+    // 품목 1급화: 매입가(원가)·품목유형·과세유형·분류. amount(단가)는 그대로 '출고가(판매단가)'다 —
+    // 계약 품목표·거래 금액 자동채움이 이미 amount를 읽으므로 sale_price를 따로 두지 않는다(같은 값 두 벌 = 드리프트).
+    // 마진 = amount − purchase_price.
+    await ensureColumn('ref_items', 'purchase_price', "purchase_price BIGINT DEFAULT 0")
+    await ensureColumn('ref_items', 'item_kind',      "item_kind VARCHAR(20)")
+    await ensureColumn('ref_items', 'tax_type',       "tax_type VARCHAR(10)")   // 과세·면세·영세 (비어 있으면 비목 기준 폴백)
+    await ensureColumn('ref_items', 'item_group',     "item_group VARCHAR(50)")
     // 직원 고정 수당(급여대장 생성 시 명세서에 자동 채움) + 부양가족(참고용)
     await ensureColumn('employees', 'emp_no',             "emp_no VARCHAR(20)")
     await ensureColumn('employees', 'position_allowance', "position_allowance BIGINT DEFAULT 0")
@@ -977,29 +984,29 @@ async function initDb(conn) {
     const [[{ icnt2 }]] = await c.execute("SELECT COUNT(*) AS icnt2 FROM ref_items WHERE type='item'")
     if (icnt2 === 0) {
       const goods = [
-        // [품목코드, 품명, 규격, 단위, 단가]
-        ['SW-01',  '웹사이트 구축',       '기본형',   '식',   0],
-        ['SW-02',  '웹사이트 유지보수',   '월정액',   '월',   500000],
-        ['SW-03',  '서버·호스팅',         '',         '월',   100000],
-        ['SW-04',  '도메인 등록·갱신',    '',         '년',   22000],
-        ['SW-05',  'SSL 인증서',          '',         '년',   110000],
-        ['SW-06',  '소프트웨어 라이선스', '1 user',   '개',   0],
-        ['SW-07',  '기술 컨설팅',         '',         '시간', 100000],
-        ['SW-08',  '퍼블리싱·디자인',     '',         '식',   0],
-        ['MFG-01', '실린더 블록',         'SCM440',   'EA',   0],
-        ['MFG-02', '기어 하우징',         'AL6061',   'EA',   0],
-        ['MFG-03', '밸브 바디',           'STS304',   'EA',   0],
-        ['MFG-04', '구동 샤프트',         'SCM440',   'EA',   0],
-        ['MFG-05', '커넥터 하우징',       'AL6061',   'EA',   0],
-        ['MFG-06', '마운트 브라켓',       'AL7075',   'EA',   0],
-        ['MFG-07', '플랜지',              'STS316',   'EA',   0],
-        ['MFG-08', '피스톤 로드',         'SCM440',   'EA',   0],
+        // [품목코드, 품명, 규격, 단위, 출고가, 품목유형]
+        ['SW-01',  '웹사이트 구축',       '기본형',   '식',   0,      '서비스'],
+        ['SW-02',  '웹사이트 유지보수',   '월정액',   '월',   500000, '서비스'],
+        ['SW-03',  '서버·호스팅',         '',         '월',   100000, '서비스'],
+        ['SW-04',  '도메인 등록·갱신',    '',         '년',   22000,  '상품'],
+        ['SW-05',  'SSL 인증서',          '',         '년',   110000, '상품'],
+        ['SW-06',  '소프트웨어 라이선스', '1 user',   '개',   0,      '상품'],
+        ['SW-07',  '기술 컨설팅',         '',         '시간', 100000, '서비스'],
+        ['SW-08',  '퍼블리싱·디자인',     '',         '식',   0,      '서비스'],
+        ['MFG-01', '실린더 블록',         'SCM440',   'EA',   0,      '제품'],
+        ['MFG-02', '기어 하우징',         'AL6061',   'EA',   0,      '제품'],
+        ['MFG-03', '밸브 바디',           'STS304',   'EA',   0,      '제품'],
+        ['MFG-04', '구동 샤프트',         'SCM440',   'EA',   0,      '제품'],
+        ['MFG-05', '커넥터 하우징',       'AL6061',   'EA',   0,      '제품'],
+        ['MFG-06', '마운트 브라켓',       'AL7075',   'EA',   0,      '제품'],
+        ['MFG-07', '플랜지',              'STS316',   'EA',   0,      '제품'],
+        ['MFG-08', '피스톤 로드',         'SCM440',   'EA',   0,      '제품'],
       ]
       let go2 = 0
-      for (const [code, name, spec, unit, amount] of goods) {
+      for (const [code, name, spec, unit, amount, kind] of goods) {
         await c.execute(
-          'INSERT INTO ref_items (id, type, name, code, spec, unit, amount, sort_order) VALUES (?,?,?,?,?,?,?,?)',
-          [randomUUID(), 'item', name, code, spec, unit, amount, ++go2]
+          'INSERT INTO ref_items (id, type, name, code, spec, unit, amount, item_kind, sort_order) VALUES (?,?,?,?,?,?,?,?,?)',
+          [randomUUID(), 'item', name, code, spec, unit, amount, kind, ++go2]
         )
       }
     }

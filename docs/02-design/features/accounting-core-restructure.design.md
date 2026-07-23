@@ -49,11 +49,13 @@
 |---|---|---|
 | `item_kind` | VARCHAR(20) | 제품/상품/서비스/원재료/부재료 (I2). 매출품목/매입품목 성격의 기반 |
 | `purchase_price` | BIGINT | 매입가(원가) (I1) |
-| `sale_price` | BIGINT | 출고가(판매가) (I1). 기존 `amount`는 `sale_price`로 매핑 후 유지(호환) |
-| `tax_type` | VARCHAR(10) | 과세/면세/영세 (I3). 없으면 비목 기준으로 폴백 |
+| `tax_type` | VARCHAR(10) | 과세/면세/영세 (I3). 비면 비목 기준으로 폴백 |
 | `item_group` | VARCHAR(50) | 분류/그룹 (I4) |
 
-> 마진 = `sale_price − purchase_price`. 서비스·무형도 매입가(외주단가)를 넣으면 마진이 잡힌다.
+> **출고가는 기존 `amount`를 그대로 쓴다** — 별도 `sale_price` 컬럼을 만들지 않음(구현 시 확정).
+> 계약 품목표(`Contract.jsx:27,54`)·거래 금액 자동채움이 이미 `amount`를 판매단가로 읽고 있어, 같은 값을 두 컬럼에 두면 드리프트만 생긴다. UI 라벨만 "단가"→"출고가"로 바꿨다.
+>
+> 마진 = `amount − purchase_price`. 서비스·무형도 매입가(외주단가)를 넣으면 마진이 잡힌다.
 
 ### 1.3 계약/청구 라인에 원가 스냅샷 (I5)
 `contract_items` · `invoice_lines` 는 현재 `unit_price`(판매가)만 스냅샷.
@@ -100,9 +102,11 @@
 - 입력 UX: 합계 입력 + 과세유형에 따라 세액 자동 역산(합계/1.1), 또는 공급가 입력 + 세액 자동. 면세는 세액 0.
 - → 부가세 매출/매입 세액 집계가 **청구서 + 직접거래 모두**에서 성립(지금은 청구서 경유만).
 
-### 3.2 영세율 (I9) — 조건부
-- `category.vat`/`contract.vat_mode`/품목 `tax_type` 의 값 집합에 `영세(zero)` 추가.
-- 국내 전용이면 생략 가능하나, SW 해외매출·수출 발생 시 필요. **본인 사업에 해외매출 있는지 확인 후 결정**(§7).
+### 3.2 영세율 (I9) — ✅ 채택 (해외매출 있음)
+- `category.vat`/`contract.vat_mode`/품목 `tax_type` 의 값 집합에 `영세` 추가 → **과세 / 면세 / 영세** 3종.
+- 영세율 = 과세거래이나 세율 0% → **세액 0, 공급가는 과세표준에 포함**. 면세(과세표준 제외)와 집계에서 반드시 구분.
+- 부가세 화면: 매출 과세표준을 `과세 / 영세` 로 나눠 표시(신고서 서식과 동일), 면세는 별도.
+- 매입세액 공제에는 영향 없음(매입 영세는 드묾, 값집합엔 동일하게 허용).
 
 ### 3.3 매입세액 불공제 (I10)
 - `transactions`(또는 비목)에 `vat_deductible TINYINT DEFAULT 1` 플래그.
@@ -125,22 +129,42 @@ CLAUDE.md에 이미 계획됨: `ref_items type='evidence_type'` (세금계산서
 | `biz_item` | 종목 |
 | `pay_account` | 지급계좌(매입처 이체 편의) |
 
-### 4.2 인사 (I13) — 개인정보 검토 필요
+### 4.2 인사 (I13) — ✅ 주민번호 미저장 확정
 | 신규 컬럼 | 의미 | 비고 |
 |---|---|---|
-| `resident_no` | 주민등록번호 | 원천세·4대보험 신고자료에 필요. **개인정보 — 저장 여부·암호화·마스킹 방침 먼저 결정**(§7) |
 | `salary_account` | 급여이체 계좌 | 급여 지급 편의 |
+| ~~`resident_no`~~ | 주민등록번호 | **저장하지 않음.** 신고 시 수기 처리 |
 
-> 생년월일·부양가족·자녀수는 이미 있음(간이세액표용). 주민번호는 저장하지 않고 "신고 시 수기"로 갈 수도 있음 — 방침 결정 후.
+> 생년월일·부양가족·자녀수는 이미 있음(간이세액표용). 주민번호는 저장·암호화·파기 의무가 붙는데, 원천징수이행상황신고서·연말정산 자동생성은 §8 비범위라 지금 얻는 게 없다. 신고서 자동화를 범위에 넣는 시점에 재검토.
 
 ---
 
 ## 5. 위생·정합성 (I14~I15)
 
-### 5.1 잔재 컬럼 정리 (I14)
-- 죽은 컬럼: `transactions`(buyer_type·vessel_no·usage_place), `contracts`(buyer_code·pu_no·order_no·vessel_code). 프런트 미사용(Form.jsx의 `buyer_type:"공통"` 기본값 1곳 제외).
-- 조치: 코드에서 제거 → 이후 마이그레이션으로 컬럼 DROP(또는 방치). **DROP은 배포·백업 후 별도 단계.**
-- `contracts.cost_budget`(원가예산): §1.3 라인 원가로 대체 가능 → 구현하거나 제거 결정.
+### 5.1 잔재 컬럼 → 업종중립 필드로 범용화 (I14) — ✅ 범용화 확정
+
+출처: 2026-05-28 동진테크(조선·방산 협력업체) 실자료 분석 때 특정사 업무체계가 컬럼에 그대로 박힘(`system-flow.design.md:327-378`). **이 제품의 목표는 다업종(SW·방산·천막·선반 등 영세기업) SaaS**이므로, 삭제가 아니라 업종중립 개념으로 바꿔 살린다.
+
+| 기존 | 원래 의미 | 조치 |
+|---|---|---|
+| `contracts.buyer_code` | 발주처 코드 `HHIO`/`HHIM` | **제거** — `vendor_id`와 중복 |
+| `transactions.buyer_type` | `HHIO`/`HHIM`/`공통` 원가 귀속 | **제거** — `vendor_id`·`cost_contract_id`가 대체 |
+| `contracts.pu_no` | 현대 PU계약번호 | **제거** — `order_no`로 흡수 |
+| `contracts.order_no` | 한화오션 발주번호 | **유지·범용화** = 상대방 발주번호(수주번호) |
+| `contracts.vessel_code` | 호선/공사번호 | → **`project_no`** 프로젝트·공사번호 |
+| `transactions.vessel_no` | 호선번호 | → **`project_no`** (동일 개념, 거래 측) |
+| `transactions.usage_place` | 사용처 | → **`site`** 현장·사용처 |
+
+업종별 해석 예: 조선=호선번호 / 천막=설치현장 / 선반=작업지시번호 / SW=프로젝트코드.
+
+- **UI 신설**: 지금은 컬럼만 있고 입력 화면이 없어 항상 빈 값이 쌓인다(`transactions.js:109-159`가 기본값 `'공통'`/`''` 주입). 계약폼·거래폼에 **선택 입력**으로 노출하고, 원장 필터(`project_no`)를 살린다. 값이 없으면 열·필터를 숨겨 다른 업종에 방해되지 않게.
+- **라벨**: 1차는 업종중립 고정 라벨("프로젝트·공사번호", "현장"). 회사별 라벨 커스터마이즈는 후속(회사정보에 라벨 오버라이드를 얹으면 되는 구조로 둔다).
+- **DROP**: 신규 컬럼 추가 + 데이터 이관(`vessel_code`→`project_no`) 후, 구 컬럼 DROP은 **배포·백업 후 별도 단계**.
+
+### 5.1b 원가예산 `cost_budget` (I14) — ✅ 구현 확정
+- 형태: JSON `{ material, outsource, labor, overhead }`(설계상 이미 이 구조). 컬럼은 `contracts.cost_budget TEXT`로 존재 — **파싱·저장·표시가 없어 미구현 상태.**
+- 구현: 계약 등록/수정 폼에 원가예산 4항목 입력 → 계약 상세에 **예산 대비 실적**(실적 = `cost_contract_id`로 귀속된 지출 + §1.3 라인 `cost_price` 합계) 표시.
+- 목적: 계약 수익성(예상 마진 vs 실제 마진) 관리. §1.3 라인 원가와 상호보완 — 예산은 사전, 라인 원가는 사후.
 
 ### 5.2 마감/기간잠금 (I15)
 - `closed_periods`(연·월/분기 잠금) 개념 도입: 잠긴 기간의 거래는 수정·삭제 차단(또는 경고).
@@ -153,14 +177,14 @@ CLAUDE.md에 이미 계획됨: `ref_items type='evidence_type'` (세금계산서
 
 | 테이블 | 추가 | 변경/정리 |
 |---|---|---|
-| `ref_items`(item) | item_kind, purchase_price, sale_price, tax_type, item_group | amount→sale_price 매핑(호환) |
+| `ref_items`(item) | item_kind, purchase_price, tax_type, item_group | amount = 출고가(그대로 유지, 라벨만 변경) |
 | `contract_items` | cost_price | — |
 | `invoice_lines` | cost_price | — |
-| `contracts` | (품목 전타입 허용은 코드) | buyer_code·pu_no·order_no·vessel_code·cost_budget 정리 |
-| `transactions` | supply_amount, vat_amount, vat_deductible | buyer_type·vessel_no·usage_place 정리 |
-| `categories`(비목) | vat_deductible(선택) | vat 값집합에 '영세' 추가(조건부) |
+| `contracts` | project_no | buyer_code·pu_no 제거, vessel_code→project_no 이관, order_no 범용화, cost_budget 구현 |
+| `transactions` | supply_amount, vat_amount, vat_deductible, project_no, site | buyer_type 제거, vessel_no→project_no·usage_place→site 이관 |
+| `categories`(비목) | vat_deductible(선택) | vat 값집합에 '영세' 추가 |
 | `vendors` | biz_type, biz_item, pay_account | — |
-| `employees` | resident_no(검토), salary_account | — |
+| `employees` | salary_account | 주민번호는 저장 안 함 |
 | (신규) `closed_periods` | 기간 잠금 | — |
 | `ref_items`(evidence_type) | (신규 type 활성화) | 적격증빙 마스터 |
 
@@ -170,12 +194,12 @@ CLAUDE.md에 이미 계획됨: `ref_items type='evidence_type'` (세금계산서
 
 ## 7. 단계 로드맵 (저위험 → 고위험)
 
-- **P1 — 품목 마스터 필드**: purchase_price/sale_price/item_kind/tax_type/item_group. 기준정보 품목 화면 보강. (독립·저위험)
-- **P2 — 계약 전 타입 품목 허용 + 라인 원가**: contract_items/invoice_lines에 cost_price, 계약폼 품목 편집기 전 타입 노출. 지출폼 품목 선택 살리기.
+- **P1 — 품목 마스터 필드** ✅ 완료: purchase_price/item_kind/tax_type(과세·면세·영세)/item_group + 마진 표시. 기준정보 품목 화면 보강.
+- **P2 — 계약 전 타입 품목 허용 + 라인 원가 + 원가예산**: contract_items/invoice_lines에 cost_price, 계약폼 품목 편집기 전 타입 노출, 지출폼 품목 선택 살리기, `cost_budget` 입력·예산대비실적(§5.1b).
 - **P3 — 회계처리 IA 재편**: nav 재구성, MiscPL·정기지출/정기청구 패널 부활·재배치.
-- **P4 — 부가세 정합성**: transactions supply/vat 분리, vat_deductible, 적격증빙 유형 구현.
-- **P5 — 위생·마감**: 잔재 컬럼 제거, closed_periods 도입.
-- **P6 — 거래처·인사 필드**: biz_type/biz_item/pay_account, salary_account, (검토 후)resident_no.
+- **P4 — 부가세 정합성**: transactions supply/vat 분리, 영세율 3종 값집합, vat_deductible, 적격증빙 유형 구현.
+- **P5 — 위생·마감**: 잔재 컬럼 범용화(project_no/site/order_no)+입력 UI, closed_periods 도입.
+- **P6 — 거래처·인사 필드**: biz_type/biz_item/pay_account, salary_account.
 - **(후속·경영관리)** 손익계산서(매출−매출원가−판관비=영업이익+영업외) 리포트 — P2/P4의 데이터가 전제. 이 문서 범위 밖.
 
 ---
@@ -189,14 +213,18 @@ CLAUDE.md에 이미 계획됨: `ref_items type='evidence_type'` (세금계산서
 
 ---
 
-## 9. 열린 결정 (착수 전 확정 필요)
+## 9. 확정된 결정 (2026-07-23, 착수 승인)
 
-1. **품목 저장 방식**: `ref_items` nullable 확장(저마찰) vs 신규 `items` 테이블(정규화). — 권고: 확장.
-2. **매출계약 품목**: 권장(0줄 허용) vs 필수. — 권고: 권장(정기 단일서비스 호환).
-3. **영세율(I9)**: 본인 사업에 해외매출/수출이 있는가? 없으면 P4에서 제외.
-4. **주민번호(I13)**: 저장(암호화/마스킹)할 것인가, 신고 시 수기로 둘 것인가.
-5. **잔재 컬럼(I14)**: 코드 제거만 vs 컬럼 DROP까지.
-6. **`cost_budget`**: 라인 원가로 대체(제거) vs 원가예산 기능 구현.
+| # | 결정 | 내용 |
+|---|---|---|
+| 1 | 품목 저장 방식 | **`ref_items` nullable 확장** (신규 `items` 테이블 분리 안 함) |
+| 2 | 매출계약 품목 | **권장·0줄 허용** (필수 아님 — 정기 단일서비스 호환) |
+| 3 | 영세율(I9) | **채택** — 해외매출 있음. 과세/면세/영세 3종 (§3.2) |
+| 4 | 주민번호(I13) | **저장하지 않음** — 신고 시 수기. `salary_account`만 추가 (§4.2) |
+| 5 | 잔재 컬럼(I14) | **업종중립 범용화** — project_no·site·order_no + 입력 UI 신설 (§5.1) |
+| 6 | `cost_budget` | **원가예산 기능 구현** — 예산 대비 실적 (§5.1b) |
+
+> 제품 방향 전제(2026-07-23 확인): 이 서비스는 본인 SW 개발사 전용이 아니라 **방산·천막·선반 등 여러 영세 회사가 함께 쓰는 다업종 SaaS**를 목표로 한다. 특정 업종 용어·코드값을 스키마와 UI에 박지 않는다.
 
 ---
 
