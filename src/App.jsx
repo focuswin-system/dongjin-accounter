@@ -218,6 +218,7 @@ function AppInner({ onLogout, user }) {
   const [idlePhase, setIdlePhase] = useState("hidden"); // "hidden" | "showing" | "dismissing"
   const [nudgeMode, setNudgeMode] = useState(() => localStorage.getItem("nudgeMode") || "always");
   const idleRef = useRef(null);
+  const contentRef = useRef(null);   // 데스크톱 내부 스크롤 컨테이너(.content) — 라우트 전환 시 맨 위로
   const toast = useToast();
   const { confirm } = useConfirm();
   const unreadCount = notifRead ? 0 : notifs.length;
@@ -271,13 +272,17 @@ function AppInner({ onLogout, user }) {
       startTimer();
     };
     const moveEvents   = ["mousemove", "touchmove"];
-    const actionEvents = ["click", "keydown", "scroll", "touchstart"];
+    const actionEvents = ["click", "keydown", "touchstart"];
     moveEvents.forEach(e   => window.addEventListener(e, onMove,   { passive: true }));
     actionEvents.forEach(e => window.addEventListener(e, onAction, { passive: true }));
+    // 스크롤은 캡처 단계로 — 데스크톱은 body가 아니라 .content 내부에서 스크롤되므로
+    // (스크롤 이벤트는 버블링하지 않아) window 캡처로 받아야 유휴 타이머가 리셋된다.
+    window.addEventListener("scroll", onAction, { passive: true, capture: true });
     startTimer();
     return () => {
       moveEvents.forEach(e   => window.removeEventListener(e, onMove));
       actionEvents.forEach(e => window.removeEventListener(e, onAction));
+      window.removeEventListener("scroll", onAction, { capture: true });
       clearTimeout(idleRef.current);
     };
   }, [faqOpen, nudgeMode]);
@@ -299,6 +304,13 @@ function AppInner({ onLogout, user }) {
   }, [activeId]);
   const toggleDomain = (id) => setOpenDomains(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
+  // 라우트가 바뀌면 새 화면을 맨 위에서 보여준다. 데스크톱은 내부 스크롤(.content),
+  // 모바일은 body 스크롤이라 둘 다 리셋한다.
+  useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0 });
+    window.scrollTo({ top: 0 });
+  }, [route]);
+
   const go = (id, opts = {}) => {
     if (opts.contractId) setContractId(opts.contractId);
     if (opts.contractName != null) setContractName(opts.contractName);
@@ -306,8 +318,8 @@ function AppInner({ onLogout, user }) {
     setFocusInvoiceId(opts.invoiceId || null);
     setRoute(id);
     window.location.hash = id;
-    window.scrollTo({ top: 0 });
     setSidebarOpen(false);
+    // 스크롤 리셋은 route 변경 effect에서(데스크톱은 .content, 모바일은 window) 처리한다.
   };
 
   const Screen = useMemo(() => {
@@ -579,10 +591,12 @@ function AppInner({ onLogout, user }) {
           </Popover>
         </div>
 
-        <div className="content">
-          <ErrorBoundary routeKey={route}>
-            {Screen}
-          </ErrorBoundary>
+        <div className="content" ref={contentRef}>
+          <div className="page-shell">
+            <ErrorBoundary routeKey={route}>
+              {Screen}
+            </ErrorBoundary>
+          </div>
         </div>
       </main>
 

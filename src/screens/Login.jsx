@@ -47,16 +47,14 @@ export const LoginScreen = ({ onLogin }) => {
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: '#fff' }}>
 
-      {/* 좌측 브랜드 패널 */}
-      <div style={{
-        width: '42%',
+      {/* 좌측 브랜드 패널 — 좁은 화면에선 CSS(.login-brand)가 숨긴다 */}
+      <div className="login-brand" style={{
         background: 'var(--ink)',
         display: 'flex',
         flexDirection: 'column',
-        padding: '48px 44px 20px',
+        padding: '48px 44px 32px',
         position: 'relative',
         overflow: 'hidden',
-        flexShrink: 0,
       }}>
         {/* 배경 장식 */}
         <div style={{
@@ -107,12 +105,12 @@ export const LoginScreen = ({ onLogin }) => {
             letterSpacing: '-0.02em', lineHeight: 1.65,
           }}>
             계약·입출금·증빙·인사까지<br/>
-            전 영역을 하나의 플랫폼에서 관리하세요.
+            하나의 플랫폼에서 관리하세요.
           </div>
         </div>
 
         {/* 하단 */}
-        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.25)', letterSpacing: '-0.01em' }}>
+        <div className="login-copyright" style={{ letterSpacing: '-0.01em' }}>
           © 2026 (주)포커스윈. All rights reserved.
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { fmtNum, Spacer, StatusBadge } from '../lib/ui'
+import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
 
 const TABS = [
@@ -23,13 +24,7 @@ export const MiscPLScreen = () => {
 
   return (
     <div className="fade-up">
-      <div className="row" style={{ marginBottom: 8 }}>
-        <div>
-          <div className="page-title">경비·잡손익</div>
-          <div className="page-sub">계약과 무관한 일반 경비·수수료·잡수익·잡손실 거래를 모아봅니다. 등록·수정은 거래내역에서 하세요.</div>
-        </div>
-      </div>
-      <Spacer h={20}/>
+      <PageHeader title="경비·잡손익" sub="계약과 무관한 일반 경비·수수료·잡수익·잡손실 거래를 모아봅니다. 등록·수정은 거래내역에서 하세요."/>
       <div className="card">
         <div className="row gap-8" style={{ padding: '16px 16px', borderBottom: '1px solid var(--line)' }}>
           {TABS.map(t => (

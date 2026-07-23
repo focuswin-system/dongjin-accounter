@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Icon, Popover, PopItem } from '../lib/ui'
+import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
 import { PORTAL, ALL_LEAVES, LEAF_BY_ID } from '../lib/nav'
 
@@ -48,12 +49,10 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
     <>
     <div className="fade-up">
       {/* Hero */}
-      <div className="row page-header-row" style={{ alignItems: "flex-end", marginBottom: 22 }}>
-        <div>
-          <div className="page-title">{user?.displayName || "관리자"}님, 안녕하세요</div>
-          <div className="page-sub">{todayLabel()}</div>
-        </div>
-        <div className="ml-auto row gap-8">
+      <PageHeader
+        title={`${user?.displayName || "관리자"}님, 안녕하세요`}
+        sub={todayLabel()}
+        actions={<>
           <button className="btn" onClick={() => go("settings")}><Icon.Cog size={15}/> <span className="btn-label-hide">환경설정</span></button>
           <Popover align="right" width={220}
             trigger={<button className="btn primary"><Icon.Plus/> 거래 등록 <Icon.Down size={12} style={{ marginLeft: 2 }}/></button>}>
@@ -64,8 +63,8 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
               <PopItem icon={<Icon.Excel size={16}/>} label="엑셀 업로드" sub="여러 건 한 번에"   onClick={() => go("excel_modal")}/>
             </div>
           </Popover>
-        </div>
-      </div>
+        </>}
+      />
 
       {/* 지금 해야 할 일 */}
       <div style={{ marginBottom: 24 }}>

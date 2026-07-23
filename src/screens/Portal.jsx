@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Icon, Spacer } from '../lib/ui'
+import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
 import { LEAF_BY_ID } from '../lib/nav'
 
@@ -18,13 +19,7 @@ export const PortalScreen = ({ node, go, openIncome, openExpense }) => {
 
   return (
     <div className="fade-up">
-      <div className="row" style={{ marginBottom: 8, alignItems: 'flex-start' }}>
-        <div>
-          <div className="page-title">{node.label}</div>
-          {node.desc && <div className="page-sub">{node.desc}</div>}
-        </div>
-      </div>
-      <Spacer h={20}/>
+      <PageHeader title={node.label} sub={node.desc}/>
 
       {/* 관련 해야 할 일 */}
       {node.todos && (

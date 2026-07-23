@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, StatusBadge, localToday } from '../lib/ui'
+import { PageHeader } from '../lib/components/PageHeader'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { computeItems, monthLabel } from './HR'
@@ -211,13 +212,11 @@ export const LaborContractScreen = () => {
 
   return (
     <div className="fade-up">
-      <div className="row" style={{ marginBottom: 8 }}>
-        <div>
-          <div className="page-title">근로계약</div>
-          <div className="page-sub">직원 근로계약과 급여 기준을 관리하세요. 급여대장은 여기 등록된 계약을 바탕으로 만들어집니다.</div>
-        </div>
-        <button className="btn primary ml-auto" onClick={() => setDrawer({ mode: 'new' })}><Icon.Plus/> 직원 등록</button>
-      </div>
+      <PageHeader
+        title="근로계약"
+        sub="직원 근로계약과 급여 기준을 관리하세요. 급여대장은 여기 등록된 계약을 바탕으로 만들어집니다."
+        actions={<button className="btn primary" onClick={() => setDrawer({ mode: 'new' })}><Icon.Plus/> 직원 등록</button>}
+      />
 
       <div className="card" style={{ overflow: 'hidden', marginTop: 16 }}>
         <div className="row" style={{ padding: '14px 18px', borderBottom: '1px solid var(--line)', gap: 8 }}>
@@ -578,13 +577,11 @@ export const OutsourcingScreen = () => {
 
   return (
     <div className="fade-up">
-      <div className="row" style={{ marginBottom: 8 }}>
-        <div>
-          <div className="page-title">기타 용역·일용</div>
-          <div className="page-sub">용역·일용 인력의 계약과 단가를 관리하고, 지급을 등록하면 거래내역에 자동 기록됩니다.</div>
-        </div>
-        <button className="btn primary ml-auto" onClick={() => setDrawer({ mode: 'new' })}><Icon.Plus/> 인력 등록</button>
-      </div>
+      <PageHeader
+        title="기타 용역·일용"
+        sub="용역·일용 인력의 계약과 단가를 관리하고, 지급을 등록하면 거래내역에 자동 기록됩니다."
+        actions={<button className="btn primary" onClick={() => setDrawer({ mode: 'new' })}><Icon.Plus/> 인력 등록</button>}
+      />
 
       {alerts.length > 0 && (
         <div className="alert-row" style={{ marginTop: 12, background: 'var(--warn-soft)', borderColor: 'transparent' }}>

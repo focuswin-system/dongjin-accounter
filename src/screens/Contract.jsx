@@ -3,6 +3,7 @@ import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, PERIOD_PRESETS
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
+import { PageHeader } from '../lib/components/PageHeader'
 import { BILLING_MODES, TERM_MODES, BILLING_PERIODS, billingLabel, termLabel, periodLabel, periodMonths,
          isRecurring, isProgress, isOpenEnded, hasTotal, amountLabel, renewalInfo, nextEndDate, recurringMismatch } from '../lib/renewal'
 
@@ -996,7 +997,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
 
   return (
     <div className="fade-up">
-      <div className="row gap-12" style={{ alignItems: "center", color: "var(--muted)", fontSize: 12.5, marginBottom: 8 }}>
+      <div className="row gap-12" style={{ alignItems: "center", color: "var(--muted)", fontSize: 12.5, paddingTop: 30, marginBottom: 8 }}>
         <button className="btn ghost sm" onClick={goList} style={{ padding: "4px 8px" }}><Icon.Left size={14}/> 계약 목록</button>
         <span style={{ color: "var(--subtle)" }}>/</span>
         <span style={{ color: "var(--ink)", fontWeight: 600 }}>{c.name}</span>
@@ -1938,19 +1939,16 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
 
   return (
     <div className="fade-up">
-      <div className="row" style={{ marginBottom: 8 }}>
-        <div>
-          <div className="page-title">{meta.title}</div>
-          <div className="page-sub">{meta.sub}</div>
-        </div>
-        <div className="ml-auto row gap-8">
+      <PageHeader
+        title={meta.title}
+        sub={meta.sub}
+        actions={<>
           <button className="btn" onClick={exportXlsx} disabled={exporting}>
             <Icon.Download/> {exporting ? "만드는 중..." : "엑셀 내보내기"}
           </button>
           <button className="btn primary" onClick={() => { setNewForm(NEW_CONTRACT_FORM); setNewOpen(true); }}><Icon.Plus/> 새 계약</button>
-        </div>
-      </div>
-      <Spacer h={20}/>
+        </>}
+      />
 
       {/* 색은 '지금 챙길 게 있다'는 신호일 때만 켠다. 평상시엔 무채색(ink) — 다 칠하면 색이 의미를 잃는다. */}
       <KpiRow cols={5}>

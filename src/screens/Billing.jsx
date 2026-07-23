@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput } from '../lib/ui'
+import { PageHeader } from '../lib/components/PageHeader'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 
@@ -824,30 +825,21 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
 
   return (
     <div className="fade-up">
-      <div className="row" style={{ marginBottom: 6 }}>
-        <div>
-          <div className="page-title">
-            {collect ? (isIssued ? "입금·환불" : "지급·환입") : "대금 청구서"}
-          </div>
-          {collect && (
-            <div className="page-sub">
-              {isIssued
-                ? "발행한 청구서 중 아직 안 받은 미수금이에요. 청구서를 열어 입금 처리하고, 받은 돈을 돌려줄 땐 '환불 등록'을 쓰세요."
-                : "받은 청구서 중 아직 안 낸 미지급금이에요. 청구서를 열어 지급 처리하고, 준 돈을 돌려받을 땐 '환입 등록'을 쓰세요."}
-            </div>
-          )}
-        </div>
-        <div className="ml-auto row gap-8">
-          {collect
-            ? <button className="btn" onClick={isIssued ? openRefund : openReturn}>
-                <Icon.Plus size={14}/> {isIssued ? "환불 등록" : "환입 등록"}
-              </button>
-            : <button className="btn primary" onClick={() => { setEditInvoice(null); setFormOpen(true) }}>
-                <Icon.Plus size={14}/> 청구서 {isIssued ? "발행" : "등록"}
-              </button>}
-        </div>
-      </div>
-      <Spacer h={16}/>
+      <PageHeader
+        title={collect ? (isIssued ? "입금·환불" : "지급·환입") : "대금 청구서"}
+        sub={collect
+          ? (isIssued
+              ? "발행한 청구서 중 아직 안 받은 미수금이에요. 청구서를 열어 입금 처리하고, 받은 돈을 돌려줄 땐 '환불 등록'을 쓰세요."
+              : "받은 청구서 중 아직 안 낸 미지급금이에요. 청구서를 열어 지급 처리하고, 준 돈을 돌려받을 땐 '환입 등록'을 쓰세요.")
+          : undefined}
+        actions={collect
+          ? <button className="btn" onClick={isIssued ? openRefund : openReturn}>
+              <Icon.Plus size={14}/> {isIssued ? "환불 등록" : "환입 등록"}
+            </button>
+          : <button className="btn primary" onClick={() => { setEditInvoice(null); setFormOpen(true) }}>
+              <Icon.Plus size={14}/> 청구서 {isIssued ? "발행" : "등록"}
+            </button>}
+      />
 
       {/* 요약 카드 — 회수 모드는 미수/미지급 2칸(발행 예정 없음), 발행 모드는 3칸 */}
       <div className="grid" style={{ gridTemplateColumns: `repeat(${collect ? 2 : 3}, 1fr)`, gap: 16, marginBottom: 24 }}>

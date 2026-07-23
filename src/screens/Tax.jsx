@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, Drawer, Combobox, MoneyInput, localToday } from '../lib/ui'
 import { api } from '../lib/api'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
+import { PageHeader } from '../lib/components/PageHeader'
 
 const QUARTER_PERIOD = { 1: '1~3월', 2: '4~6월', 3: '7~9월', 4: '10~12월' }
 const VAT_STATUSES = ['납부 대기', '납부 완료', '환급 완료']
@@ -161,18 +162,15 @@ export const TaxVatScreen = () => {
 
   return (
     <div className="fade-up">
-      <div className="row" style={{ marginBottom: 8 }}>
-        <div>
-          <div className="page-title">부가세</div>
-          <div className="page-sub">청구서에서 분기별 세액을 예상으로 집계해요. 실제 신고세액을 입력하고 납부·환급을 기록하면, 그 신고세액 기준으로 관리됩니다.</div>
-        </div>
-        <div className="ml-auto row gap-6" style={{ alignItems: 'center' }}>
+      <PageHeader
+        title="부가세"
+        sub="청구서에서 분기별 세액을 예상으로 집계해요. 실제 신고세액을 입력하고 납부·환급을 기록하면, 그 신고세액 기준으로 관리됩니다."
+        actions={<>
           <button className="icon-btn" onClick={() => setYear(y => y - 1)} title="이전 연도"><Icon.Left size={16}/></button>
           <span className="fw-700 num" style={{ fontSize: 15, minWidth: 64, textAlign: 'center' }}>{year}년</span>
           <button className="icon-btn" onClick={() => setYear(y => y + 1)} title="다음 연도"><Icon.Right size={16}/></button>
-        </div>
-      </div>
-      <Spacer h={20}/>
+        </>}
+      />
 
       <KpiRow cols={4} gap={16}>
         <Kpi label={totals.payable >= 0 ? '연간 납부세액' : '연간 환급세액'} value={totals.payable} tone={totals.payable >= 0 ? 'neg-ink' : 'brand'} hint="신고세액(없으면 예상) 합계"/>
@@ -381,14 +379,11 @@ export const OtherTaxScreen = () => {
 
   return (
     <div className="fade-up">
-      <div className="row" style={{ marginBottom: 8 }}>
-        <div>
-          <div className="page-title">기타세액</div>
-          <div className="page-sub">원천세·지방소득세 등 부가세 외 세금의 신고세액·납부·환급을 정리합니다.</div>
-        </div>
-        <button className="btn primary ml-auto" onClick={openNew}><Icon.Plus size={14}/> 기타세액 등록</button>
-      </div>
-      <Spacer h={20}/>
+      <PageHeader
+        title="기타세액"
+        sub="원천세·지방소득세 등 부가세 외 세금의 신고세액·납부·환급을 정리합니다."
+        actions={<button className="btn primary" onClick={openNew}><Icon.Plus size={14}/> 기타세액 등록</button>}
+      />
 
       <KpiRow cols={3} gap={16}>
         <Kpi label="신고세액 합계" value={totals.tax} tone="ink"/>

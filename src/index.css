@@ -185,6 +185,22 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 1100px) { .portal-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 640px)  { .portal-grid { grid-template-columns: 1fr; } }
 .portal-panel { padding: 18px 20px; }
+
+/* ───── 로그인 ───── */
+/* 인라인 스타일로는 media 쿼리를 못 써서 반응형이 안 됐다.
+   좁은 화면(≤860px)에선 좌측 브랜드 패널을 숨기고 폼만 가운데 둔다. */
+.login-brand {
+  width: 42%;
+  min-height: 100vh;
+  flex-shrink: 0;
+}
+.login-copyright {
+  color: rgba(255, 255, 255, 0.55);   /* 짙은 남색 배경에 묻히지 않게 */
+  font-size: 12.5px;
+}
+@media (max-width: 860px) {
+  .login-brand { display: none; }
+}
 .portal-phead {
   display: flex; align-items: center; gap: 10px;
   padding-bottom: 14px; margin-bottom: 4px;
@@ -351,11 +367,42 @@ a { color: inherit; text-decoration: none; }
 }
 .icon-btn:hover { background: var(--surface-2); color: var(--ink); }
 
-.content {
-  padding: 32px 32px 64px;
-  max-width: 1280px;
-  width: 100%;
+/* 스크롤 컨테이너 — 데스크톱(≥769px)에선 이 안에서만 세로 스크롤이 생긴다(셸 고정).
+   모바일(≤768)에선 아래 미디어쿼리에서 잠그지 않아 기존처럼 body가 스크롤된다. */
+.content { min-width: 0; }
+
+/* 본문 폭 — 좌우 여백만 두고 넓게 쓰되, 초대형 모니터에선 1680px로 상한(표 가독성 보호). */
+.page-shell {
+  max-width: 1680px;
   margin: 0 auto;
+  padding: 0 20px 48px;
+}
+
+/* 화면 상단 헤더 — (제목+부제) 왼쪽, 액션 버튼 오른쪽, 세로 가운데. lib/components/PageHeader.jsx
+   데스크톱에선 스크롤 컨테이너(.content) 안에서 sticky 로 상단에 고정된다(본문만 스크롤). */
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 30px 0 16px;
+}
+.page-header-main { min-width: 0; }
+.page-header-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+/* 데스크톱: 셸 고정 + 내부 스크롤. topbar·헤더는 가만히, .content 안쪽만 스크롤. */
+@media (min-width: 769px) {
+  .app  { height: 100dvh; overflow: hidden; }
+  .main { height: 100dvh; min-height: 0; }
+  .content { flex: 1; min-height: 0; overflow-y: auto; }
+  .page-header { position: sticky; top: 0; z-index: 5; background: var(--bg); }
+}
+
+/* 인쇄 안전판 — 내부 스크롤 컨테이너가 인쇄 시 보이는 부분만 찍히지 않도록 높이·overflow 해제. */
+@media print {
+  .app { height: auto; overflow: visible; }
+  .main { height: auto; }
+  .content { overflow: visible; }
+  .page-header { position: static; }
 }
 
 /* ───── Typography helpers ───── */
@@ -767,7 +814,7 @@ body:has([data-modal-open]) {
 /* Tablet (≤ 1024px) */
 @media (max-width: 1024px) {
   .search { width: 200px; }
-  .content { padding: 24px 24px 48px; }
+  .page-shell { padding: 0 24px 48px; }
   .topbar { padding: 0 24px; }
 }
 
@@ -813,19 +860,20 @@ body:has([data-modal-open]) {
     font-size: 12px;
   }
 
-  .content {
-    padding: 16px 16px 48px;
+  .page-shell {
+    padding: 0 16px 48px;
   }
+  .page-header { padding-top: 16px; }
 
   .page-title { font-size: 20px; }
 
-  /* Stack header row on mobile */
-  .page-header-row {
+  /* Stack header row on mobile — 구 .page-header-row(Home·Ledger) + 공용 .page-header 둘 다 */
+  .page-header-row, .page-header {
     flex-direction: column;
     align-items: flex-start !important;
     gap: 12px !important;
   }
-  .page-header-row .ml-auto {
+  .page-header-row .ml-auto, .page-header-actions {
     margin-left: 0;
     flex-wrap: wrap;
   }
@@ -851,5 +899,5 @@ body:has([data-modal-open]) {
 
   .drawer { width: 100% !important; }
 
-  .content { padding: 12px 12px 48px; }
+  .page-shell { padding: 0 12px 48px; }
 }

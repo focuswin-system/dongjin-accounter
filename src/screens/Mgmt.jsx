@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { fmtNum, Spacer } from '../lib/ui'
+import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
 
 const Card = ({ label, amount, tone = 'ink', sub }) => (
@@ -34,13 +35,7 @@ export const MgmtDashScreen = () => {
 
   return (
     <div className="fade-up">
-      <div className="row" style={{ marginBottom: 8 }}>
-        <div>
-          <div className="page-title">경영 대시보드</div>
-          <div className="page-sub">계약·미수·미지급·세무 현황을 한 화면에서 확인합니다.</div>
-        </div>
-      </div>
-      <Spacer h={20}/>
+      <PageHeader title="경영 대시보드" sub="계약·미수·미지급·세무 현황을 한 화면에서 확인합니다."/>
 
       <div className="grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
         <Card label="계약금액 합계" amount={contractTotal} tone="ink" sub={`${d.contracts.length}건`}/>

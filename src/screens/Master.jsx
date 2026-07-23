@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, Popover } from '../lib/ui'
+import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
 
 const fmtDateLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -2421,23 +2422,17 @@ export const MasterScreen = ({ user, section = "base", forcedTab }) => {
 
   return (
     <div className="fade-up">
-      <div className="row" style={{ marginBottom: 8 }}>
-        <div>
-          <div className="page-title">{single ? (TAB_BY_ID[activeTab]?.label || sectionCfg.title) : sectionCfg.title}</div>
-          <div className="page-sub">{single ? sectionCfg.title : sectionCfg.sub}</div>
-        </div>
-        <div className="ml-auto row gap-8">
-          {!isCustomTab && data && (
-            <>
-              <button className="btn" onClick={() => toast.push(`${data.label} 양식을 내려받았어요`)}><Icon.Download/> <span className="btn-label-hide">양식 다운로드</span></button>
-              <button className="btn" onClick={() => toast.push(`${data.label} 일괄 업로드 창을 열었어요`)}><Icon.Excel/> <span className="btn-label-hide">일괄 업로드</span></button>
-              <button className="btn primary" onClick={() => setDrawer("new")}><Icon.Plus/> {data.label} 등록</button>
-            </>
-          )}
-        </div>
-      </div>
-
-      <Spacer h={20}/>
+      <PageHeader
+        title={single ? (TAB_BY_ID[activeTab]?.label || sectionCfg.title) : sectionCfg.title}
+        sub={single ? sectionCfg.title : sectionCfg.sub}
+        actions={!isCustomTab && data && (
+          <>
+            <button className="btn" onClick={() => toast.push(`${data.label} 양식을 내려받았어요`)}><Icon.Download/> <span className="btn-label-hide">양식 다운로드</span></button>
+            <button className="btn" onClick={() => toast.push(`${data.label} 일괄 업로드 창을 열었어요`)}><Icon.Excel/> <span className="btn-label-hide">일괄 업로드</span></button>
+            <button className="btn primary" onClick={() => setDrawer("new")}><Icon.Plus/> {data.label} 등록</button>
+          </>
+        )}
+      />
 
       <div className="master-layout" style={{ display: "grid", gridTemplateColumns: single ? "1fr" : "200px 1fr", gap: 16, alignItems: "start" }}>
         {/* Sub-nav (섹션별 그룹) — 사이드바 서브메뉴로 진입한 단일 탭 모드에선 숨김(전체폭) */}

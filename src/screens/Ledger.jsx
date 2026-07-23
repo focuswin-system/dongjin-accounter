@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Popover, PopItem, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect, Drawer, localToday } from '../lib/ui'
+import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
 import { ResolutionDocument } from './Docs'
 
@@ -80,12 +81,10 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
   return (
     <>
       <div className="fade-up">
-        <div className="row page-header-row" style={{ marginBottom: 8 }}>
-          <div>
-            <div className="page-title">{titleMap[filter]}</div>
-            <div className="page-sub">{subMap[filter]}</div>
-          </div>
-          <div className="ml-auto row gap-8">
+        <PageHeader
+          title={titleMap[filter]}
+          sub={subMap[filter]}
+          actions={<>
             <button className="btn excel" onClick={openExcel}><Icon.Excel/> <span className="btn-label-hide">엑셀 업로드</span></button>
             <button className="btn" onClick={exportCsv}><Icon.Download/> <span className="btn-label-hide">내보내기</span></button>
             <Popover align="right" width={220}
@@ -95,10 +94,8 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
                 <PopItem icon={<Icon.Out size={16}/>} label="지출 등록" onClick={openExpense}/>
               </div>
             </Popover>
-          </div>
-        </div>
-
-        <Spacer h={20}/>
+          </>}
+        />
 
         {/* 미수금/미지급금은 청구서 기준(요약만 표시). 카드 클릭 시 회수 화면으로 이동. */}
         <div className="grid grid-4-to-2" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 }}>

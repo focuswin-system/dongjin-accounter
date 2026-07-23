@@ -9,6 +9,7 @@ const SAMPLE = {
 import { computeItems, shiftMonth, monthLabel } from './HR'
 import { api } from '../lib/api'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
+import { PageHeader } from '../lib/components/PageHeader'
 
 const todayStr = () => localToday()   // UTC 금지 — KST 새벽에 하루 전으로 찍힌다
 
@@ -48,15 +49,11 @@ export const DocsScreen = () => {
 
   return (
     <div className="fade-up">
-      <div className="row" style={{ marginBottom: 20 }}>
-        <div>
-          <div className="page-title">지급결의서</div>
-          <div className="page-sub">청구서 없는 지출(비품·간식 등)은 여기서 바로 만드세요. 세금계산서가 있는 매입 대금은 구매·매입의 '대금 청구서'에서 발행할 수 있어요.</div>
-        </div>
-        <div className="ml-auto row gap-8">
-          <button className="btn primary" onClick={() => setNewOpen(true)}><Icon.Plus/> 새 결의서</button>
-        </div>
-      </div>
+      <PageHeader
+        title="지급결의서"
+        sub="청구서 없는 지출(비품·간식 등)은 여기서 바로 만드세요. 세금계산서가 있는 매입 대금은 구매·매입의 '대금 청구서'에서 발행할 수 있어요."
+        actions={<button className="btn primary" onClick={() => setNewOpen(true)}><Icon.Plus/> 새 결의서</button>}
+      />
 
       <NewResolutionDrawer open={newOpen} onClose={() => setNewOpen(false)} onCreated={(id) => { setNewOpen(false); load().then(() => setSelId(id)); }}/>
 
@@ -661,16 +658,14 @@ export const EvidenceScreen = ({ onAttach }) => {
 
   return (
     <div className="fade-up">
-      <div className="row" style={{ marginBottom: 20 }}>
-        <div>
-          <div className="page-title">증빙 관리</div>
-          <div className="page-sub">영수증·세금계산서·통장내역을 한 곳에 모으고, 입출금 내역과 연결하세요.</div>
-        </div>
-        <div className="ml-auto row gap-8">
+      <PageHeader
+        title="증빙 관리"
+        sub="영수증·세금계산서·통장내역을 한 곳에 모으고, 입출금 내역과 연결하세요."
+        actions={<>
           <button className="btn" onClick={() => toast.push("증빙 파일을 ZIP으로 내려받았어요")}><Icon.Download/> 일괄 내려받기</button>
           <button className="btn primary" onClick={() => toast.push("파일 선택 창을 열었어요")}><Icon.Upload/> 파일 업로드</button>
-        </div>
-      </div>
+        </>}
+      />
 
       <div className="grid" style={{ gridTemplateColumns: "1fr clamp(240px, 280px, 320px)", gap: 16, alignItems: "start" }}>
         <div>
@@ -953,16 +948,11 @@ export const ExcelScreen = () => {
 
   return (
     <div className="fade-up import-wrap">
-      <div className="row" style={{ marginBottom: 6 }}>
-        <div>
-          <div className="page-title">엑셀 업로드</div>
-          <div className="page-sub">기존 입출금 자료를 엑셀(.xlsx)·CSV로 한 번에 등록하세요.</div>
-        </div>
-        <div className="ml-auto row gap-8">
-          <button className="btn" onClick={downloadTemplate}><Icon.Download/> 양식 다운로드</button>
-        </div>
-      </div>
-      <Spacer h={20}/>
+      <PageHeader
+        title="엑셀 업로드"
+        sub="기존 입출금 자료를 엑셀(.xlsx)·CSV로 한 번에 등록하세요."
+        actions={<button className="btn" onClick={downloadTemplate}><Icon.Download/> 양식 다운로드</button>}
+      />
 
       <div className="row gap-12" style={{ marginBottom: 20 }}>
         {[{ n: 1, t: "파일 업로드" }, { n: 2, t: "데이터 유형" }, { n: 3, t: "컬럼 매핑 · 미리보기" }, { n: 4, t: "일괄 등록" }].map((s, i, arr) => (
@@ -1908,7 +1898,7 @@ export const ReportsScreen = () => {
     const View = REPORT_VIEWS[active]
     return (
       <div className="fade-up">
-        <div className="row" style={{ marginBottom: 20 }}>
+        <div className="row" style={{ paddingTop: 30, marginBottom: 20 }}>
           <button className="btn" onClick={() => setActive(null)}><Icon.Left size={14}/> 보고서 목록</button>
           <div className="ml-auto row gap-8">
             <button className="btn" onClick={() => toast.push("PDF로 내려받았어요")}><Icon.Download size={14}/> PDF</button>
@@ -1924,9 +1914,7 @@ export const ReportsScreen = () => {
 
   return (
     <div className="fade-up">
-      <div className="page-title">보고서</div>
-      <div className="page-sub">월별·계약별·발주처별·세무사 전달용 자료를 한 번에 확인하세요.</div>
-      <Spacer h={20}/>
+      <PageHeader title="보고서" sub="월별·계약별·발주처별·세무사 전달용 자료를 한 번에 확인하세요."/>
       <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
         {REPORTS.map(r => (
           <button key={r.id} className="card card-pad"
