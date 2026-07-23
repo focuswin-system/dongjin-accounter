@@ -4,6 +4,7 @@ import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
+import { DataTable } from '../lib/components/DataTable'
 import { BILLING_MODES, TERM_MODES, BILLING_PERIODS, billingLabel, termLabel, periodLabel, periodMonths,
          isRecurring, isProgress, isOpenEnded, hasTotal, amountLabel, renewalInfo, nextEndDate, recurringMismatch } from '../lib/renewal'
 
@@ -1995,96 +1996,63 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
             )}
           </div>
         )}
-        <div className="table-scroll">
-          <table className="table">
-            <thead>
-              <tr>
-                <th style={{ width: "24%" }}>계약</th><th style={{ width: 110 }}>계약번호</th><th>거래처</th>
-                <th style={{ width: 175 }}>계약기간 · 갱신</th>
-                <th className="num-right">금액</th>
-                <th className="num-right">{kind === "purchase" ? "지급액" : "수금"}</th>
-                <th className="num-right">남은 잔액</th>
-                {/* 매입 계약엔 원가·손익이 없다 → 미지급금으로 대체 */}
-                <th className="num-right">{kind === "purchase" ? "미지급금" : "원가"}</th>
-                {kind !== "purchase" && <th className="num-right">예상 손익</th>}
-                <th>상태</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => {
-                const recurring = isRecurring(r);
-                const openEnded = !hasTotal(r);
-                // 진행률은 '이번 계약기간' 기준. 무기한 계약은 채울 총액이 없으므로 막대를 안 그린다.
-                // 총액은 서버 metrics의 term_total 사용(vat_mode 반영 — 면세는 ×1.0). 화면에서 ×1.1 재계산 금지.
-                const total = r.term_total ?? 0;
-                const pct = openEnded || total <= 0 ? null
-                  : Math.min(100, Math.round(((r.term_collected ?? 0) / total) * 100));
-                return (
-                  <tr key={i} style={{ cursor: "pointer" }} onClick={() => goDetail(r.id, r.name)}>
-                    <td>
-                      <div className="fw-600">{r.name}</div>
-                      <div className="row gap-8" style={{ marginTop: 8 }}>
-                        {pct == null ? (
-                          <span className="text-xs text-muted2">청구 {r.billed ? fmtNum(r.billed) : 0}원 · 수금 {fmtNum(r.collected ?? 0)}원</span>
-                        ) : (
-                          <>
-                            <div className="bar-track" style={{ width: 120 }}>
-                              <div className="bar-fill" style={{ width: `${pct}%` }}/>
-                            </div>
-                            <span className="text-xs text-muted2 num">{pct}%</span>
-                          </>
-                        )}
-                        <span className="text-xs text-muted2">· {billingLabel(r)}/{termLabel(r)}</span>
-                      </div>
-                    </td>
-                    <td className="text-sm num" style={{ color: r.contract_no ? undefined : "var(--muted-2)" }}>{r.contract_no || '—'}</td>
-                    <td className="fw-600">{r.vendor_name || r.vendor || '—'}</td>
-                    <td>
-                      <div className="text-sm num">
-                        {openEnded || !r.end_date
-                          ? `${r.start_date || '—'} ~ 해지 시까지`
-                          : [r.start_date, r.end_date].filter(Boolean).join(' ~ ')}
-                      </div>
-                      {renewalInfo(r).managed && (
-                        <div style={{ marginTop: 6 }}><RenewalBadge contract={r}/></div>
-                      )}
-                    </td>
-                    <td className="num-cell num-right">
-                      {recurring
-                        ? <div>
-                            <div className="fw-600">{fmtNum(r.unit_amount || 0)}<span className="text-xs text-muted2">/{periodLabel(r.billing_period)}</span></div>
-                            {!openEnded && <div className="text-xs text-muted2">기간 총 {fmtNum(r.amount || 0)}</div>}
-                          </div>
-                        : fmtNum(r.amount || 0)}
-                    </td>
-                    <td className="num-cell num-right">{fmtNum(r.collected ?? 0)}</td>
-                    <td className="num-cell num-right fw-700" style={{ color: rowRemain(r) > 0 ? "var(--warn-ink)" : "var(--muted-2)" }}>
-                      {rowRemain(r) > 0 ? fmtNum(rowRemain(r)) : "—"}
-                      {openEnded && rowRemain(r) > 0 && <div className="text-xs fw-400 text-muted2">{isPurchase(r) ? '미지급금' : '미수금'}</div>}
-                    </td>
-                    {isPurchase(r) ? (
-                      <td className="num-cell num-right fw-700" style={{ color: (r.ar_remain || 0) > 0 ? "var(--warn-ink)" : "var(--muted-2)" }}>
-                        {(r.ar_remain || 0) > 0 ? fmtNum(r.ar_remain) : "—"}
-                      </td>
-                    ) : (
-                      <td className="num-cell num-right text-muted">{fmtNum(r.out || 0)}</td>
-                    )}
-                    {/* 매입 계약은 손익 칸 자체가 없다. '전체' 목록에선 칸을 비워 정렬을 맞춘다. */}
-                    {/* 손익은 '마이너스'일 때만 색으로 경고. 정상 이익까지 초록으로 칠하면 눈에 안 들어온다. */}
-                    {kind !== "purchase" && (
-                      isPurchase(r)
-                        ? <td className="num-cell num-right text-muted2">—</td>
-                        : <td className="num-cell num-right fw-700" style={{ color: (r.profit || 0) < 0 ? "var(--neg-ink)" : undefined }}>
-                            {(r.profit || 0) >= 0 ? "+" : ""}{fmtNum(r.profit || 0)}
-                          </td>
-                    )}
-                    <td><StatusBadge status={r.status}/></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          rows={rows}
+          rowKey={r => r.id}
+          onRowClick={r => goDetail(r.id, r.name)}
+          empty="조건에 맞는 계약이 없어요"
+          columns={[
+            { key: 'name', header: '계약', width: '24%', render: r => {
+              const openEnded = !hasTotal(r);
+              // 진행률은 '이번 계약기간' 기준. 무기한 계약은 채울 총액이 없어 막대를 안 그린다.
+              // 총액은 서버 metrics의 term_total 사용(vat_mode 반영). 화면에서 ×1.1 재계산 금지.
+              const total = r.term_total ?? 0;
+              const pct = openEnded || total <= 0 ? null : Math.min(100, Math.round(((r.term_collected ?? 0) / total) * 100));
+              return <>
+                <div className="fw-600">{r.name}</div>
+                <div className="row gap-8" style={{ marginTop: 8 }}>
+                  {pct == null
+                    ? <span className="text-xs text-muted2">청구 {r.billed ? fmtNum(r.billed) : 0}원 · 수금 {fmtNum(r.collected ?? 0)}원</span>
+                    : <><div className="bar-track" style={{ width: 120 }}><div className="bar-fill" style={{ width: `${pct}%` }}/></div><span className="text-xs text-muted2 num">{pct}%</span></>}
+                  <span className="text-xs text-muted2">· {billingLabel(r)}/{termLabel(r)}</span>
+                </div>
+              </>
+            } },
+            { key: 'contract_no', header: '계약번호', width: 110, sortable: true, render: r => <span className="text-sm num" style={{ color: r.contract_no ? undefined : "var(--muted-2)" }}>{r.contract_no || '—'}</span> },
+            { key: 'vendor', header: '거래처', sortable: true, sortValue: r => r.vendor_name || r.vendor || '', render: r => <span className="fw-600">{r.vendor_name || r.vendor || '—'}</span> },
+            { key: 'term', header: '계약기간 · 갱신', width: 175, render: r => <>
+              <div className="text-sm num">
+                {!hasTotal(r) || !r.end_date ? `${r.start_date || '—'} ~ 해지 시까지` : [r.start_date, r.end_date].filter(Boolean).join(' ~ ')}
+              </div>
+              {renewalInfo(r).managed && <div style={{ marginTop: 6 }}><RenewalBadge contract={r}/></div>}
+            </> },
+            { key: 'amount', header: '금액', align: 'right', sortable: true, sortValue: r => r.amount || 0, render: r => (
+              isRecurring(r)
+                ? <div><div className="fw-600">{fmtNum(r.unit_amount || 0)}<span className="text-xs text-muted2">/{periodLabel(r.billing_period)}</span></div>{hasTotal(r) && <div className="text-xs text-muted2">기간 총 {fmtNum(r.amount || 0)}</div>}</div>
+                : <span className="num-cell">{fmtNum(r.amount || 0)}</span>
+            ) },
+            { key: 'collected', header: kind === "purchase" ? "지급액" : "수금", align: 'right', sortable: true, sortValue: r => r.collected ?? 0, render: r => <span className="num-cell">{fmtNum(r.collected ?? 0)}</span> },
+            { key: 'remain', header: '남은 잔액', align: 'right', sortable: true, sortValue: r => rowRemain(r), render: r => (
+              <span className="num-cell fw-700" style={{ color: rowRemain(r) > 0 ? "var(--warn-ink)" : "var(--muted-2)" }}>
+                {rowRemain(r) > 0 ? fmtNum(rowRemain(r)) : "—"}
+                {!hasTotal(r) && rowRemain(r) > 0 && <div className="text-xs fw-400 text-muted2">{isPurchase(r) ? '미지급금' : '미수금'}</div>}
+              </span>
+            ) },
+            // 매입 계약엔 원가·손익이 없다 → 미지급금으로 대체
+            { key: 'cost', header: kind === "purchase" ? "미지급금" : "원가", align: 'right', render: r => (
+              isPurchase(r)
+                ? <span className="num-cell fw-700" style={{ color: (r.ar_remain || 0) > 0 ? "var(--warn-ink)" : "var(--muted-2)" }}>{(r.ar_remain || 0) > 0 ? fmtNum(r.ar_remain) : "—"}</span>
+                : <span className="num-cell text-muted">{fmtNum(r.out || 0)}</span>
+            ) },
+            // 매입 계약은 손익 칸 자체가 없다('전체'에선 칸 비워 정렬 맞춤). 손익은 마이너스일 때만 색 경고.
+            ...(kind !== "purchase" ? [{ key: 'profit', header: '예상 손익', align: 'right', sortable: true, sortValue: r => isPurchase(r) ? null : (r.profit || 0), render: r => (
+              isPurchase(r)
+                ? <span className="num-cell text-muted2">—</span>
+                : <span className="num-cell fw-700" style={{ color: (r.profit || 0) < 0 ? "var(--neg-ink)" : undefined }}>{(r.profit || 0) >= 0 ? "+" : ""}{fmtNum(r.profit || 0)}</span>
+            ) }] : []),
+            { key: 'status', header: '상태', render: r => <StatusBadge status={r.status}/> },
+          ]}
+        />
       </div>
 
       <Drawer open={newOpen} onClose={() => setNewOpen(false)} width="min(480px,100vw)" label="새 계약 등록">
