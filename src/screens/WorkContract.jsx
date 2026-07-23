@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, StatusBadge, localToday } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
+import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
@@ -331,13 +332,7 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
 
   return (
     <Drawer open={true} onClose={onClose} width="min(640px, 100vw)">
-      <div className="drawer-head">
-        <div>
-          <div className="fw-700" style={{ fontSize: 16 }}>{editing ? `${form.name} 근로계약` : (info.employeeId ? '새 근로계약' : '직원 등록')}</div>
-          <div className="text-xs text-muted">인적 정보와 근로계약·급여 기준을 입력하세요.</div>
-        </div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead title={editing ? `${form.name} 근로계약` : (info.employeeId ? '새 근로계약' : '직원 등록')} sub="인적 정보와 근로계약·급여 기준을 입력하세요." onClose={onClose}/>
 
       <div className="drawer-body">
         {!info.employeeId && (
@@ -441,13 +436,10 @@ const LaborDetailDrawer = ({ id, onClose, onChanged, onNewContract }) => {
 
   return (
     <Drawer open={true} onClose={onClose} width="min(680px, 100vw)">
-      <div className="drawer-head">
-        <div>
-          <div className="fw-700" style={{ fontSize: 16 }}>{c.employee_name} <span className="text-muted" style={{ fontSize: 13, fontWeight: 400 }}>· {c.employ_type || '근로계약'}</span></div>
-          <div className="text-xs text-muted">{c.emp_no || ''} · {c.department || '—'} · {c.emp_status === '퇴사' ? '퇴사' : c.status}</div>
-        </div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead
+        title={<>{c.employee_name} <span className="text-muted" style={{ fontSize: 13, fontWeight: 400 }}>· {c.employ_type || '근로계약'}</span></>}
+        sub={<>{c.emp_no || ''} · {c.department || '—'} · {c.emp_status === '퇴사' ? '퇴사' : c.status}</>}
+        onClose={onClose}/>
 
       <div className="tab-bar" style={{ padding: '0 18px' }}>
         {TABS.map(t => <button key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{t}</button>)}
@@ -666,13 +658,7 @@ const OutsourcingDrawer = ({ info, onClose, onSaved }) => {
 
   return (
     <Drawer open={true} onClose={onClose} width="min(620px, 100vw)">
-      <div className="drawer-head">
-        <div>
-          <div className="fw-700" style={{ fontSize: 16 }}>{editing ? `${form.name} 용역계약` : '용역·일용 인력 등록'}</div>
-          <div className="text-xs text-muted">고용형태를 고르면 소득구분·단가 단위가 자동으로 채워져요.</div>
-        </div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead title={editing ? `${form.name} 용역계약` : '용역·일용 인력 등록'} sub="고용형태를 고르면 소득구분·단가 단위가 자동으로 채워져요." onClose={onClose}/>
 
       <div className="drawer-body">
         <div className="col gap-form" style={{ marginBottom: 22 }}>
@@ -743,13 +729,10 @@ const OutsourcingDetailDrawer = ({ id, onClose, onChanged, onEdit }) => {
   return (
     <>
       <Drawer open={true} onClose={onClose} width="min(720px, 100vw)">
-        <div className="drawer-head">
-          <div>
-            <div className="fw-700" style={{ fontSize: 16 }}>{c.employee_name} <span className="text-muted" style={{ fontSize: 13, fontWeight: 400 }}>· {c.employ_type || KIND_LABEL[c.kind]}</span></div>
-            <div className="text-xs text-muted">{INCOME_LABEL[c.income_type]} · {c.title || '—'}</div>
-          </div>
-          <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-        </div>
+        <DrawerHead
+          title={<>{c.employee_name} <span className="text-muted" style={{ fontSize: 13, fontWeight: 400 }}>· {c.employ_type || KIND_LABEL[c.kind]}</span></>}
+          sub={<>{INCOME_LABEL[c.income_type]} · {c.title || '—'}</>}
+          onClose={onClose}/>
 
         <div className="row" style={{ padding: '12px 18px 0', gap: 12 }}>
           <Tile label="누적 지급" value={won(c.paid_sum || 0)} tone="brand"/>
@@ -856,13 +839,10 @@ const ServicePayDrawer = ({ contract, onClose, onSaved }) => {
 
   return (
     <Drawer open={true} onClose={onClose} width="min(560px, 100vw)">
-      <div className="drawer-head">
-        <div>
-          <div className="fw-700" style={{ fontSize: 16 }}>{contract.employee_name} 지급 등록</div>
-          <div className="text-xs text-muted">단가표 수량을 넣으면 금액이 계산돼요. 원천징수는 확정 금액을 직접 입력하세요.</div>
-        </div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead
+        title={<>{contract.employee_name} 지급 등록</>}
+        sub="단가표 수량을 넣으면 금액이 계산돼요. 원천징수는 확정 금액을 직접 입력하세요."
+        onClose={onClose}/>
 
       <div className="drawer-body">
         <div className="text-xs text-muted2 fw-600" style={{ marginBottom: 10 }}>업무별 수량</div>

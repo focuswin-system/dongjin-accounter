@@ -3,6 +3,7 @@ import { Icon, fmtNum, useToast, useConfirm, Spacer, Drawer, Combobox, MoneyInpu
 import { api } from '../lib/api'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
+import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 
 const QUARTER_PERIOD = { 1: '1~3월', 2: '4~6월', 3: '7~9월', 4: '10~12월' }
@@ -64,13 +65,10 @@ const FilingDrawer = ({ target, year, onClose, onSaved }) => {
 
   return (
     <Drawer open={!!target} onClose={onClose}>
-      <div className="drawer-head">
-        <div>
-          <div className="fw-700" style={{ fontSize: 16 }}>{year}년 {target.quarter}분기 부가세</div>
-          <div className="text-xs text-muted">자동집계 예상 {target.estimate < 0 ? '환급 ' : ''}{fmtNum(Math.abs(target.estimate ?? 0))}원 (매출세액 − 매입세액)</div>
-        </div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead
+        title={<>{year}년 {target.quarter}분기 부가세</>}
+        sub={<>자동집계 예상 {target.estimate < 0 ? '환급 ' : ''}{fmtNum(Math.abs(target.estimate ?? 0))}원 (매출세액 − 매입세액)</>}
+        onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div>
           <label className="label" style={{ marginBottom: 8 }}>신고세액 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 실제 신고한 금액 (환급이면 음수)</span></label>
@@ -135,10 +133,7 @@ const FilingDrawer = ({ target, year, onClose, onSaved }) => {
             placeholder="적요 입력" onAddNew={v => f('memo', v)} addNewLabel="이 적요로 입력"/>
         </div>
       </div>
-      <div className="drawer-foot">
-        <button className="btn" onClick={onClose}>취소</button>
-        <button className="btn primary ml-auto" onClick={save}><Icon.Check size={14}/> 저장</button>
-      </div>
+      <DrawerFooter onCancel={onClose} onSave={save}/>
     </Drawer>
   )
 }
@@ -260,10 +255,7 @@ const OtherTaxDrawer = ({ open, editing, onClose, onSaved }) => {
 
   return (
     <Drawer open={open} onClose={onClose}>
-      <div className="drawer-head">
-        <div className="fw-700" style={{ fontSize: 16 }}>{editing ? '기타세액 수정' : '기타세액 등록'}</div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead title={editing ? '기타세액 수정' : '기타세액 등록'} onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div>
           <label className="label" style={{ marginBottom: 8 }}>세목 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
@@ -333,10 +325,7 @@ const OtherTaxDrawer = ({ open, editing, onClose, onSaved }) => {
             placeholder="적요 입력" onAddNew={v => f('memo', v)} addNewLabel="이 적요로 입력"/>
         </div>
       </div>
-      <div className="drawer-foot">
-        <button className="btn" onClick={onClose}>취소</button>
-        <button className="btn primary ml-auto" onClick={save}><Icon.Check size={14}/> 저장</button>
-      </div>
+      <DrawerFooter onCancel={onClose} onSave={save}/>
     </Drawer>
   )
 }

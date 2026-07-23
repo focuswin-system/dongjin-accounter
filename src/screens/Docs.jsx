@@ -10,6 +10,7 @@ import { computeItems, shiftMonth, monthLabel } from './HR'
 import { api } from '../lib/api'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
+import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 
 const todayStr = () => localToday()   // UTC 금지 — KST 새벽에 하루 전으로 찍힌다
 
@@ -145,10 +146,7 @@ const NewResolutionDrawer = ({ open, onClose, onCreated }) => {
 
   return (
     <Drawer open={open} onClose={onClose} width="min(460px,100vw)" label="새 결의서">
-      <div className="drawer-head">
-        <div className="fw-700" style={{ fontSize: 16 }}>새 지급결의서</div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead title="새 지급결의서" onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div className="text-sm text-muted">청구서(세금계산서) 없는 지출을 결의서로 만들어요. 품목을 여러 줄로 나누려면 만든 뒤 상세에서 편집하세요.</div>
         <div>
@@ -208,10 +206,7 @@ const NewResolutionDrawer = ({ open, onClose, onCreated }) => {
           </div>
         )}
       </div>
-      <div className="drawer-foot">
-        <button className="btn" onClick={onClose}>취소</button>
-        <button className="btn primary ml-auto" onClick={save}><Icon.Check size={14}/> 결의서 만들기</button>
-      </div>
+      <DrawerFooter onCancel={onClose} onSave={save} saveLabel="결의서 만들기"/>
     </Drawer>
   );
 };
@@ -283,13 +278,7 @@ const ProcessDrawer = ({ open, onClose, doc, onDone }) => {
 
   return (
     <Drawer open={open} onClose={onClose} width="min(480px,100vw)" label="결의서 처리">
-      <div className="drawer-head">
-        <div>
-          <div className="fw-700" style={{ fontSize: 16 }}>결의서 처리</div>
-          <div className="text-xs text-muted">{doc.doc_no} · {doc.title} · {fmtNum(doc.amount)}원</div>
-        </div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead title="결의서 처리" sub={<>{doc.doc_no} · {doc.title} · {fmtNum(doc.amount)}원</>} onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div className="text-sm text-muted">이 결의서대로 지출을 집행합니다. 처리하면 목록의 '처리 대기'에서 빠져요.</div>
         <div className="row gap-6">
@@ -356,10 +345,7 @@ const ProcessDrawer = ({ open, onClose, doc, onDone }) => {
           </div>
         )}
       </div>
-      <div className="drawer-foot">
-        <button className="btn" onClick={onClose}>취소</button>
-        <button className="btn primary ml-auto" onClick={submit}><Icon.Check size={14}/> 처리 완료</button>
-      </div>
+      <DrawerFooter onCancel={onClose} onSave={submit} saveLabel="처리 완료"/>
     </Drawer>
   );
 };
@@ -751,13 +737,7 @@ export const EvidenceAttachDrawer = ({ item, onClose }) => {
   if (!item) return null;
   return (
     <Drawer open={true} onClose={onClose} width="min(480px, 100vw)" label="증빙 첨부">
-        <div className="drawer-head">
-          <div>
-            <div className="fw-700" style={{ fontSize: 16 }}>증빙 첨부</div>
-            <div className="text-xs text-muted">아래 지출에 증빙 파일을 연결하세요.</div>
-          </div>
-          <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-        </div>
+        <DrawerHead title="증빙 첨부" sub="아래 지출에 증빙 파일을 연결하세요." onClose={onClose}/>
         <div className="drawer-body">
           <div className="card" style={{ padding: 16, background: "var(--surface-2)", border: "1px solid var(--line)", marginBottom: 20 }}>
             <div className="text-xs text-muted2 fw-600" style={{ marginBottom: 4 }}>대상 지출</div>

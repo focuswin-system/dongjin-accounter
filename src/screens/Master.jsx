@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, Popover } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
+import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { api } from '../lib/api'
 
 const fmtDateLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -430,10 +431,7 @@ export const RefMasterPanel = ({ cfg, page = false }) => {
       </div>
 
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
-        <div className="drawer-head">
-          <div className="fw-700" style={{ fontSize: 16 }}>{editing ? `${cfg.label} 수정` : `${cfg.label} 등록`}</div>
-          <button className="icon-btn ml-auto" onClick={() => setDrawerOpen(false)}><Icon.Close size={16}/></button>
-        </div>
+        <DrawerHead title={editing ? `${cfg.label} 수정` : `${cfg.label} 등록`} onClose={() => setDrawerOpen(false)}/>
         <div className="drawer-body col gap-form">
           {cfg.fields.map(fd => (
             <div key={fd.key}>
@@ -465,10 +463,7 @@ export const RefMasterPanel = ({ cfg, page = false }) => {
             </div>
           ))}
         </div>
-        <div className="drawer-foot">
-          <button className="btn" onClick={() => setDrawerOpen(false)}>취소</button>
-          <button className="btn primary ml-auto" onClick={handleSave}><Icon.Check size={14}/> 저장</button>
-        </div>
+        <DrawerFooter onCancel={() => setDrawerOpen(false)} onSave={handleSave}/>
       </Drawer>
     </div>
   )
@@ -989,10 +984,7 @@ const VendorPanel = () => {
       </div>
 
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
-        <div className="drawer-head">
-          <div className="fw-700" style={{ fontSize: 16 }}>{editing ? '거래처 수정' : '거래처 등록'}</div>
-          <button className="icon-btn ml-auto" onClick={() => setDrawerOpen(false)}><Icon.Close size={16}/></button>
-        </div>
+        <DrawerHead title={editing ? '거래처 수정' : '거래처 등록'} onClose={() => setDrawerOpen(false)}/>
         <div className="drawer-body col gap-form">
           <div>
             <label className="label" style={{ marginBottom: 8 }}>상호명 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
@@ -1058,10 +1050,7 @@ const VendorPanel = () => {
             <input className="input" value={form.address} onChange={e => f('address', e.target.value)} placeholder="경기도 안산시 ..."/>
           </div>
         </div>
-        <div className="drawer-foot">
-          <button className="btn" onClick={() => setDrawerOpen(false)}>취소</button>
-          <button className="btn primary ml-auto" onClick={handleSave}><Icon.Check size={14}/> 저장</button>
-        </div>
+        <DrawerFooter onCancel={() => setDrawerOpen(false)} onSave={handleSave}/>
       </Drawer>
     </div>
   )
@@ -1256,10 +1245,7 @@ const CategoryPanel = () => {
       </div>
 
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
-        <div className="drawer-head">
-          <div className="fw-700" style={{ fontSize: 16 }}>{editing ? "비목 수정" : "비목 추가"}</div>
-          <button className="icon-btn ml-auto" onClick={() => setDrawerOpen(false)}><Icon.Close size={16}/></button>
-        </div>
+        <DrawerHead title={editing ? "비목 수정" : "비목 추가"} onClose={() => setDrawerOpen(false)}/>
         <div className="drawer-body col gap-form">
           <div>
             <label className="label">구분 <span style={{ color: "var(--neg-ink)" }}>*</span></label>
@@ -1295,10 +1281,7 @@ const CategoryPanel = () => {
             </div>
           </div>
         </div>
-        <div className="drawer-foot">
-          <button className="btn" onClick={() => setDrawerOpen(false)}>취소</button>
-          <button className="btn primary ml-auto" onClick={handleSave}><Icon.Check size={14}/> 저장</button>
-        </div>
+        <DrawerFooter onCancel={() => setDrawerOpen(false)} onSave={handleSave}/>
       </Drawer>
     </div>
   )
@@ -1318,13 +1301,7 @@ const AdjustDrawer = ({ account, onClose, onSave }) => {
   }
   return (
     <Drawer open={!!account} onClose={onClose}>
-      <div className="drawer-head">
-        <div>
-          <div className="fw-700" style={{ fontSize: 16 }}>잔액 조정</div>
-          <div className="text-xs text-muted">{account.name}</div>
-        </div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead title="잔액 조정" sub={account.name} onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div className="row gap-8">
           <button className={`chip ${type === "minus" ? "active" : ""}`} onClick={() => setType("minus")}>- 차감</button>
@@ -1339,10 +1316,7 @@ const AdjustDrawer = ({ account, onClose, onSave }) => {
           <input className="input" placeholder="은행 수수료, 오입력 수정 등" value={reason} onChange={e => setReason(e.target.value)}/>
         </div>
       </div>
-      <div className="drawer-foot">
-        <button className="btn" onClick={onClose}>취소</button>
-        <button className="btn primary ml-auto" onClick={handleSave}><Icon.Check size={14}/> 조정 등록</button>
-      </div>
+      <DrawerFooter onCancel={onClose} onSave={handleSave} saveLabel="조정 등록"/>
     </Drawer>
   )
 }
@@ -1568,10 +1542,7 @@ const AccountPanel = () => {
       </div>
 
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
-        <div className="drawer-head">
-          <div className="fw-700" style={{ fontSize: 16 }}>{editing ? '계좌/카드 수정' : '계좌/카드 등록'}</div>
-          <button className="icon-btn ml-auto" onClick={() => setDrawerOpen(false)}><Icon.Close size={16}/></button>
-        </div>
+        <DrawerHead title={editing ? '계좌/카드 수정' : '계좌/카드 등록'} onClose={() => setDrawerOpen(false)}/>
         <div className="drawer-body col gap-form">
           <div>
             <label className="label" style={{ marginBottom: 8 }}>종류 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
@@ -1626,10 +1597,7 @@ const AccountPanel = () => {
             )}
           </div>
         </div>
-        <div className="drawer-foot">
-          <button className="btn" onClick={() => setDrawerOpen(false)}>취소</button>
-          <button className="btn primary ml-auto" onClick={handleSave}><Icon.Check size={14}/> 저장</button>
-        </div>
+        <DrawerFooter onCancel={() => setDrawerOpen(false)} onSave={handleSave}/>
       </Drawer>
     </div>
   )
@@ -1696,10 +1664,7 @@ const AccountBalancePanel = () => {
 
       {/* 조정 이력 */}
       <Drawer open={!!histTarget} onClose={() => setHistTarget(null)}>
-        <div className="drawer-head">
-          <div className="fw-700" style={{ fontSize: 16 }}>조정 이력 — {histTarget?.name}</div>
-          <button className="icon-btn ml-auto" onClick={() => setHistTarget(null)}><Icon.Close size={16}/></button>
-        </div>
+        <DrawerHead title={<>조정 이력 — {histTarget?.name}</>} onClose={() => setHistTarget(null)}/>
         <div className="drawer-body">
           {histTarget?.adjustments?.length === 0 ? (
             <div className="text-muted text-sm" style={{ padding: "20px 0" }}>조정 이력이 없습니다</div>
@@ -1756,10 +1721,7 @@ const RecurringFormDrawer = ({ open, onClose, onSave, vendors = [], accounts = [
   const toast = useToast()
   return (
     <Drawer open={open} onClose={onClose}>
-      <div className="drawer-head">
-        <div className="fw-700" style={{ fontSize: 16 }}>정기 지출 등록</div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead title="정기 지출 등록" onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div><label className="label">거래처 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
           <Combobox value={form.vendor_id} onChange={v => f("vendor_id", v)} allowAdd={false}
@@ -1803,10 +1765,7 @@ const RecurringFormDrawer = ({ open, onClose, onSave, vendors = [], accounts = [
           <div className="text-xs text-muted2" style={{ marginTop: 6 }}>자동 생성된 지출을 이체 처리할 때 이 계좌가 쓰여요.</div>
         </div>
       </div>
-      <div className="drawer-foot">
-        <button className="btn" onClick={onClose}>취소</button>
-        <button className="btn primary ml-auto" onClick={handleSave}><Icon.Check size={14}/> 등록</button>
-      </div>
+      <DrawerFooter onCancel={onClose} onSave={handleSave} saveLabel="등록"/>
     </Drawer>
   )
 }
@@ -1922,10 +1881,7 @@ const RecurringInvoiceFormDrawer = ({ open, onClose, onSave, vendors, contracts,
 
   return (
     <Drawer open={open} onClose={onClose}>
-      <div className="drawer-head">
-        <div className="fw-700" style={{ fontSize: 16 }}>정기 청구 등록</div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead title="정기 청구 등록" onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div><label className="label">계약 연결 <span className="text-muted">(선택)</span></label>
           <Combobox value={form.contractId} onChange={pickContract} allowAdd={false}
@@ -1980,10 +1936,7 @@ const RecurringInvoiceFormDrawer = ({ open, onClose, onSave, vendors, contracts,
             placeholder="입금 계좌 선택"/>
         </div>
       </div>
-      <div className="drawer-foot">
-        <button className="btn" onClick={onClose}>취소</button>
-        <button className="btn primary ml-auto" onClick={handleSave}><Icon.Check size={14}/> 등록</button>
-      </div>
+      <DrawerFooter onCancel={onClose} onSave={handleSave} saveLabel="등록"/>
     </Drawer>
   )
 }
@@ -2159,10 +2112,7 @@ const ApprovalPanel = () => {
 
       {editing && (
         <Drawer open={true} onClose={() => setEditing(null)} width="min(460px,100vw)" label="결재선 편집">
-          <div className="drawer-head">
-            <div className="fw-700" style={{ fontSize: 16 }}>{editing.id ? '결재선 수정' : '새 결재선'}</div>
-            <button className="icon-btn ml-auto" onClick={() => setEditing(null)}><Icon.Close size={16}/></button>
-          </div>
+          <DrawerHead title={editing.id ? '결재선 수정' : '새 결재선'} onClose={() => setEditing(null)}/>
           <div className="drawer-body col gap-form">
             <div>
               <label className="label" style={{ marginBottom: 8 }}>이름 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
@@ -2191,10 +2141,7 @@ const ApprovalPanel = () => {
               <span className="text-sm">이 결재선을 기본으로 (새 결의서에 자동 적용)</span>
             </label>
           </div>
-          <div className="drawer-foot">
-            <button className="btn" onClick={() => setEditing(null)}>취소</button>
-            <button className="btn primary ml-auto" onClick={save}><Icon.Check size={14}/> 저장</button>
-          </div>
+          <DrawerFooter onCancel={() => setEditing(null)} onSave={save}/>
         </Drawer>
       )}
     </div>
@@ -2263,13 +2210,7 @@ const UserPanel = ({ currentUser }) => {
 
   const pwDrawer = (
     <Drawer open={!!pwTarget} onClose={() => setPwTarget(null)}>
-      <div className="drawer-head">
-        <div>
-          <div className="fw-700" style={{ fontSize: 16 }}>비밀번호 변경</div>
-          <div className="text-xs text-muted">{pwTarget?.name || pwTarget?.username}</div>
-        </div>
-        <button className="icon-btn ml-auto" onClick={() => setPwTarget(null)}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead title="비밀번호 변경" sub={pwTarget?.name || pwTarget?.username} onClose={() => setPwTarget(null)}/>
       <div className="drawer-body col gap-form">
         <div>
           <label className="label">새 비밀번호</label>
@@ -2280,10 +2221,7 @@ const UserPanel = ({ currentUser }) => {
         </div>
         <div className="text-xs text-muted2" style={{ marginTop: 8 }}>변경 후 해당 사용자는 새 비밀번호로 다시 로그인해야 해요.</div>
       </div>
-      <div className="drawer-foot">
-        <button className="btn" onClick={() => setPwTarget(null)}>취소</button>
-        <button className="btn primary ml-auto" onClick={savePw}><Icon.Check size={14}/> 변경</button>
-      </div>
+      <DrawerFooter onCancel={() => setPwTarget(null)} onSave={savePw} saveLabel="변경"/>
     </Drawer>
   );
 
@@ -2755,17 +2693,9 @@ const MasterDrawer = ({ open, mode, category, rowIndex, groupedSel, onClose, onS
 
   return (
     <Drawer open={true} onClose={onClose} width="min(520px, 100vw)" label={title}>
-        <div className="drawer-head">
-          <div>
-            <div className="fw-700" style={{ fontSize: 16 }}>{title}</div>
-            <div className="text-xs text-muted">
-              {mode === "new"
+        <DrawerHead title={title} sub={mode === "new"
                 ? "필수 항목만 채우면 바로 등록할 수 있어요."
-                : "변경한 내용은 즉시 반영됩니다."}
-            </div>
-          </div>
-          <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-        </div>
+                : "변경한 내용은 즉시 반영됩니다."} onClose={onClose}/>
 
         <div className="drawer-body">
           <div className="col gap-form">

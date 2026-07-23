@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
+import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
@@ -500,17 +501,10 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
 
   return (
     <Drawer open={open} onClose={onClose}>
-        <div className="drawer-head">
-          <div>
-            <div className="fw-700" style={{ fontSize: 16 }}>
-              {editInvoice ? "청구서 수정" : (form.kind === "issued" ? "청구서 발행" : "청구서 등록 (수취)")}
-            </div>
-            <div className="text-xs text-muted">
-              {editInvoice ? "청구서 내용을 수정합니다" : (form.kind === "issued" ? "발주처에 청구서를 발행합니다" : "협력사로부터 받은 청구서를 등록합니다")}
-            </div>
-          </div>
-          <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-        </div>
+        <DrawerHead
+          title={editInvoice ? "청구서 수정" : (form.kind === "issued" ? "청구서 발행" : "청구서 등록 (수취)")}
+          sub={editInvoice ? "청구서 내용을 수정합니다" : (form.kind === "issued" ? "발주처에 청구서를 발행합니다" : "협력사로부터 받은 청구서를 등록합니다")}
+          onClose={onClose}/>
         <div className="drawer-body col gap-form">
           {!editInvoice && (
             <div className="row gap-8">
@@ -588,10 +582,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
               label="세금계산서·납품확인서 등 첨부"/>
           </div>
         </div>
-        <div className="drawer-foot">
-          <button className="btn" onClick={onClose}>취소</button>
-          <button className="btn primary ml-auto" onClick={handleSave}><Icon.Check size={14}/> {editInvoice ? "저장" : "등록"}</button>
-        </div>
+        <DrawerFooter onCancel={onClose} onSave={handleSave} saveLabel={editInvoice ? "저장" : "등록"}/>
     </Drawer>
   )
 }
@@ -905,13 +896,10 @@ const PaidIssueDrawer = ({ target, isIssued, onClose, onDone }) => {
   }
   return (
     <Drawer open onClose={onClose} width="min(460px, 100vw)">
-      <div className="drawer-head">
-        <div>
-          <div className="fw-700" style={{ fontSize: 16 }}>{isIssued ? "기입금 처리" : "기지급 처리"}</div>
-          <div className="text-xs text-muted">{target.vendor_name} · {target.type} · {fmtNum(total)}원</div>
-        </div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead
+        title={isIssued ? "기입금 처리" : "기지급 처리"}
+        sub={<>{target.vendor_name} · {target.type} · {fmtNum(total)}원</>}
+        onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div className="alert-row" style={{ background: "var(--surface-2)", borderColor: "var(--line)" }}>
           <Icon.Sparkle/>

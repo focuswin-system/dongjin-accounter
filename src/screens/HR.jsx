@@ -3,6 +3,7 @@ import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combob
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DataTable } from '../lib/components/DataTable'
+import { DrawerHead } from '../lib/components/Drawer'
 import { api } from '../lib/api'
 
 /* ───────── 급여대장: 항목별(%·수치) 계산 ───────── */
@@ -392,13 +393,10 @@ const PayslipEditorDrawer = ({ row, onClose, onSaved }) => {
 
   return (
     <Drawer open={true} onClose={onClose} width="min(640px, 100vw)">
-      <div className="drawer-head">
-        <div>
-          <div className="fw-700" style={{ fontSize: 16 }}>{row.name} 급여 명세 — {monthLabel(row.month)}</div>
-          <div className="text-xs text-muted">{row.department || "—"} · {row.role || "—"} · 각 항목을 %나 금액으로 직접 입력하세요</div>
-        </div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead
+        title={<>{row.name} 급여 명세 — {monthLabel(row.month)}</>}
+        sub={<>{row.department || "—"} · {row.role || "—"} · 각 항목을 %나 금액으로 직접 입력하세요</>}
+        onClose={onClose}/>
 
       <div className="drawer-body">
         <div className="card" style={{ padding: 16, background: "var(--surface-2)", border: "1px solid var(--line)", marginBottom: 18 }}>
@@ -483,13 +481,10 @@ const PayDrawer = ({ row, accounts, onClose, onSaved }) => {
 
   return (
     <Drawer open={true} onClose={onClose} width="min(520px, 100vw)">
-      <div className="drawer-head">
-        <div>
-          <div className="fw-700" style={{ fontSize: 16 }}>{row.name} 급여 지급 — {monthLabel(row.month)}</div>
-          <div className="text-xs text-muted">실제 이체분을 등록하면 거래내역(지출)에 자동 기록돼요</div>
-        </div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead
+        title={<>{row.name} 급여 지급 — {monthLabel(row.month)}</>}
+        sub="실제 이체분을 등록하면 거래내역(지출)에 자동 기록돼요"
+        onClose={onClose}/>
 
       <div className="drawer-body">
         {/* 뱃지 없이 색만 쓰는 자리 — 예전엔 tone 이 빈 뱃지를 칠했다(문구가 없어 빈 알약만 떴다). 이제 숫자 색으로 신호를 준다. */}

@@ -4,6 +4,7 @@ import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
+import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { BILLING_MODES, TERM_MODES, BILLING_PERIODS, billingLabel, termLabel, periodLabel, periodMonths,
          isRecurring, isProgress, isOpenEnded, hasTotal, amountLabel, renewalInfo, nextEndDate, recurringMismatch } from '../lib/renewal'
@@ -314,13 +315,7 @@ export const IncomeDrawer = ({ open, onClose }) => {
 
   return (
     <Drawer open={open} onClose={onClose} label="입금 등록">
-        <div className="drawer-head">
-          <div>
-            <div className="fw-700" style={{ fontSize: 16 }}>입금 등록</div>
-            <div className="text-xs text-muted">회사에 들어온 돈을 빠르게 기록하세요.</div>
-          </div>
-          <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-        </div>
+        <DrawerHead title="입금 등록" sub="회사에 들어온 돈을 빠르게 기록하세요." onClose={onClose}/>
 
         <div className="drawer-body">
           <div className="steps" style={{ marginBottom: 18 }}>
@@ -642,10 +637,7 @@ function MilestoneEditDrawer({ open, onClose, contractId, contractAmount, initia
 
   return (
     <Drawer open={open} onClose={onClose} width="min(620px,100vw)" label="청구 일정 편집">
-      <div className="drawer-head">
-        <div className="fw-700" style={{ fontSize: 16 }}>청구 일정 편집</div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead title="청구 일정 편집" onClose={onClose}/>
       <div className="drawer-body col gap-form">
         {total > 0 && (
           <div className="text-xs text-muted2" style={{ padding: '2px 0' }}>
@@ -690,10 +682,7 @@ function MilestoneEditDrawer({ open, onClose, contractId, contractAmount, initia
         })}
         <button className="btn" onClick={addRow}><Icon.Plus size={13}/> 청구 일정 추가</button>
       </div>
-      <div className="drawer-foot">
-        <button className="btn" onClick={onClose}>취소</button>
-        <button className="btn primary ml-auto" onClick={save}><Icon.Check size={14}/> 저장</button>
-      </div>
+      <DrawerFooter onCancel={onClose} onSave={save}/>
     </Drawer>
   )
 }
@@ -723,10 +712,7 @@ function BudgetEditDrawer({ open, onClose, contractId, initial, onSaved }) {
 
   return (
     <Drawer open={open} onClose={onClose} width="min(440px,100vw)" label="원가 예산 수정">
-      <div className="drawer-head">
-        <div className="fw-700" style={{ fontSize: 16 }}>원가 예산 수정</div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead title="원가 예산 수정" onClose={onClose}/>
       <div className="drawer-body col gap-form">
         {FIELDS.map(([k, label]) => (
           <div key={k}>
@@ -736,10 +722,7 @@ function BudgetEditDrawer({ open, onClose, contractId, initial, onSaved }) {
         ))}
         <div className="text-xs text-muted2">실적은 거래내역(지급 완료)에서 자동 집계돼요.</div>
       </div>
-      <div className="drawer-foot">
-        <button className="btn" onClick={onClose}>취소</button>
-        <button className="btn primary ml-auto" onClick={save}><Icon.Check size={14}/> 저장</button>
-      </div>
+      <DrawerFooter onCancel={onClose} onSave={save}/>
     </Drawer>
   )
 }
@@ -791,10 +774,7 @@ function RenewDrawer({ open, onClose, contract, onSaved }) {
 
   return (
     <Drawer open={open} onClose={onClose} width="min(460px,100vw)" label="계약 갱신 처리">
-      <div className="drawer-head">
-        <div className="fw-700" style={{ fontSize: 16 }}>계약 갱신 처리</div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead title="계약 갱신 처리" onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div className="text-sm text-muted">
           현재 종료일 <b className="text-ink num">{contract.end_date || '—'}</b>
@@ -862,10 +842,7 @@ function RenewDrawer({ open, onClose, contract, onSaved }) {
           </div>
         )}
       </div>
-      <div className="drawer-foot">
-        <button className="btn" onClick={onClose}>취소</button>
-        <button className="btn primary ml-auto" onClick={save}><Icon.Check size={14}/> {isRenew ? '갱신 처리' : '미갱신 종료'}</button>
-      </div>
+      <DrawerFooter onCancel={onClose} onSave={save} saveLabel={isRenew ? '갱신 처리' : '미갱신 종료'}/>
     </Drawer>
   )
 }
@@ -1643,10 +1620,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
             </div>
           </div>
         </div>
-        <div className="drawer-foot">
-          <button className="btn" onClick={() => setEditOpen(false)}>취소</button>
-          <button className="btn primary ml-auto" onClick={handleEditSave}><Icon.Check size={14}/> 저장</button>
-        </div>
+        <DrawerFooter onCancel={() => setEditOpen(false)} onSave={handleEditSave}/>
       </Drawer>
 
       <MilestoneEditDrawer open={msOpen} onClose={() => setMsOpen(false)} contractId={contractId}
@@ -1720,13 +1694,7 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
 
   return (
     <Drawer open={open} onClose={onClose} label="기성 청구">
-      <div className="drawer-head">
-        <div>
-          <div className="fw-700" style={{ fontSize: 16 }}>기성 청구 발행</div>
-          <div className="text-xs text-muted">{contract?.name} · 품목별 수량을 넣으면 금액이 자동 계산돼요.</div>
-        </div>
-        <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
-      </div>
+      <DrawerHead title="기성 청구 발행" sub={<>{contract?.name} · 품목별 수량을 넣으면 금액이 자동 계산돼요.</>} onClose={onClose}/>
       <div className="drawer-body">
         {(contract?.contract_items || []).length === 0 ? (
           <div className="text-sm text-muted">
@@ -2105,10 +2073,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
             </div>
           </div>
         </div>
-        <div className="drawer-foot">
-          <button className="btn" onClick={() => setNewOpen(false)}>취소</button>
-          <button className="btn primary ml-auto" onClick={handleNewSave}><Icon.Check size={14}/> 등록</button>
-        </div>
+        <DrawerFooter onCancel={() => setNewOpen(false)} onSave={handleNewSave} saveLabel="등록"/>
       </Drawer>
     </div>
   );
