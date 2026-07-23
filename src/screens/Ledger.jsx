@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Popover, PopItem, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect, Drawer, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Popover, PopItem, StatusBadge, periodToRange, FilterSelect, Drawer, localToday } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DataTable } from '../lib/components/DataTable'
+import { TableToolbar } from '../lib/components/TableToolbar'
 import { api } from '../lib/api'
 import { ResolutionDocument } from './Docs'
 
@@ -21,10 +22,8 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
   const [filter, setFilter] = useState(initialFilter);
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(null);
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [period, setPeriod] = useState("all");
-  const [customFrom, setCustomFrom] = useState("");
-  const [customTo, setCustomTo] = useState("");
+  // 날짜 범위는 두 인풋(from~to)이 본체. 기본값 = 이번 달(프리셋 버튼이 값을 바꿔줌).
+  const [range, setRange] = useState(() => periodToRange("month"));
   const [filterCat, setFilterCat] = useState(null);
   const [txns, setTxns] = useState([]);
   // 미수금/미지급금은 청구서 기준(회수는 입금·환불/지급·환입 화면에서). 여기선 요약만 청구서 기준으로 표시.
@@ -47,14 +46,15 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
     let rows = txns;
     if (filter === "income")  rows = rows.filter(t => t.kind === "income");
     else if (filter === "expense") rows = rows.filter(t => t.kind === "expense");
-    if (period !== "all") rows = rows.filter(t => inPeriod(t.date, period, { from: customFrom, to: customTo }));
-    if (filterCat)        rows = rows.filter(t => t.category === filterCat);
+    if (range?.from) rows = rows.filter(t => t.date >= range.from);
+    if (range?.to)   rows = rows.filter(t => t.date <= range.to);
+    if (filterCat)   rows = rows.filter(t => t.category === filterCat);
     if (q) {
       const lc = q.toLowerCase();
       rows = rows.filter(t => t.vendor.toLowerCase().includes(lc) || t.scope?.toLowerCase().includes(lc) || t.category?.toLowerCase().includes(lc));
     }
     return rows;
-  }, [txns, filter, q, period, customFrom, customTo, filterCat]);
+  }, [txns, filter, q, range, filterCat]);
 
   const exportCsv = () => {
     if (filtered.length === 0) return toast.push("내보낼 거래가 없어요");
@@ -107,79 +107,22 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
         </div>
 
         <div className="card" style={{ overflow: "hidden" }}>
+          {/* 탭(전체 거래/입금/지출) — 상단 KPI 카드 클릭과 연동. 툴바와 별개로 유지. */}
           <div className="row gap-6" style={{ padding: 12, borderBottom: "1px solid var(--line)", flexWrap: "wrap" }}>
             {tabs.map(t => (
               <button key={t.id} className={`chip ${filter === t.id ? "active" : ""}`} onClick={() => setFilter(t.id)}>
                 {t.label} <span style={{ marginLeft: 4, opacity: 0.7 }}>{t.count}</span>
               </button>
             ))}
-            <div className="ml-auto row gap-8">
-              <div className="search" style={{ margin: 0, width: 220, padding: "6px 10px" }}>
-                <Icon.Search size={14}/>
-                <input value={q} onChange={e => setQ(e.target.value)} placeholder="거래처·계약·비목 검색"/>
-              </div>
-              <button
-                className="btn"
-                onClick={() => setFilterOpen(s => !s)}
-                style={{ position: "relative" }}>
-                <Icon.Filter/>
-                필터
-                {(period !== "all" || filterCat) && (
-                  <span style={{ position: "absolute", top: 6, right: 6, width: 6, height: 6, borderRadius: "50%", background: "var(--brand)" }}/>
-                )}
-              </button>
-              <button
-                className={`btn ${period === "month" ? "active" : ""}`}
-                onClick={() => setPeriod(p => p === "month" ? "all" : "month")}>
-                <Icon.Calendar/>
-                이번 달
-              </button>
-            </div>
           </div>
 
-          {filterOpen && (
-            <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", background: "var(--surface-2)", display: "flex", flexDirection: "column", gap: 10 }}>
-              <div className="row gap-8" style={{ flexWrap: "wrap", alignItems: "center" }}>
-                <span className="text-xs fw-600 text-muted" style={{ width: 36, flexShrink: 0 }}>기간</span>
-                {PERIOD_PRESETS.map(p => (
-                  <button key={p.id} className={`chip ${period === p.id ? "active" : ""}`} onClick={() => setPeriod(p.id)}>
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-              {period === "custom" && (
-                <div className="row gap-8" style={{ alignItems: "center", paddingLeft: 44 }}>
-                  <input type="date" className="input num" style={{ height: 34, width: 148, fontSize: 13 }}
-                    value={customFrom} onChange={e => setCustomFrom(e.target.value)}/>
-                  <span className="text-muted fw-600">~</span>
-                  <input type="date" className="input num" style={{ height: 34, width: 148, fontSize: 13 }}
-                    value={customTo} onChange={e => setCustomTo(e.target.value)}/>
-                </div>
-              )}
-              <div className="row gap-8" style={{ alignItems: "center" }}>
-                <span className="text-xs fw-600 text-muted" style={{ width: 36, flexShrink: 0 }}>비목</span>
-                <FilterSelect value={filterCat} onChange={setFilterCat} options={categories} placeholder="전체"/>
-              </div>
-              {(period !== "all" || filterCat) && (
-                <div className="row gap-10" style={{ alignItems: "center" }}>
-                  {period !== "all" && (() => {
-                    const label = periodRangeLabel(period, { from: customFrom, to: customTo });
-                    return (
-                      <span style={{ fontSize: 12, color: "var(--muted)" }}>
-                        <span className="fw-600" style={{ color: "var(--brand-ink)" }}>
-                          {PERIOD_PRESETS.find(p => p.id === period)?.label}
-                        </span>
-                        {label && <span className="num" style={{ marginLeft: 6 }}>({label})</span>}
-                      </span>
-                    );
-                  })()}
-                  <button className="btn ghost sm" onClick={() => { setPeriod("all"); setFilterCat(null); setCustomFrom(""); setCustomTo(""); }}>
-                    <Icon.Close size={12}/> 초기화
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+          <TableToolbar
+            date={{ from: range?.from || "", to: range?.to || "", onChange: setRange }}
+            search={{ value: q, onChange: setQ, placeholder: "거래처·계약·비목 검색" }}
+            filters={[{ label: "비목", node: <FilterSelect value={filterCat} onChange={setFilterCat} options={categories} placeholder="전체"/> }]}
+            hasActiveFilter={!!filterCat}
+            onReset={() => setFilterCat(null)}
+          />
 
           <DataTable
             rows={filtered}
