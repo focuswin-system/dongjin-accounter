@@ -60,6 +60,8 @@
 ### 1.3 계약/청구 라인에 원가 스냅샷 (I5)
 `contract_items` · `invoice_lines` 는 현재 `unit_price`(판매가)만 스냅샷.
 - 추가: `cost_price BIGINT`(매입원가 스냅샷). 발행 시점 품목 매입가를 복사(기준정보가 바뀌어도 계약 조건 유지 — 기존 스냅샷 원칙 동일).
+- 추가: `contract_items.qty`(구현 시 확정) — §1.4의 "총액형 품목 합계 = 계약 총액"이 성립하려면 계약 시점 수량이 있어야 한다. 기성형은 수량을 청구 때 넣으므로 0.
+- 기성 발행 시 `cost_price`는 **화면이 보내준 값을 믿지 않고 계약 품목표에서 다시 찾아** 청구 라인에 복사한다(원가가 조용히 0으로 새지 않게).
 - → 라인별 마진, 계약별 원가 합계가 데이터로 성립(경영관리 손익 리포트의 전제).
 
 ### 1.4 계약폼 — 전 타입 품목 리스트 (I6)
@@ -162,8 +164,9 @@ CLAUDE.md에 이미 계획됨: `ref_items type='evidence_type'` (세금계산서
 - **DROP**: 신규 컬럼 추가 + 데이터 이관(`vessel_code`→`project_no`) 후, 구 컬럼 DROP은 **배포·백업 후 별도 단계**.
 
 ### 5.1b 원가예산 `cost_budget` (I14) — ✅ 구현 확정
-- 형태: JSON `{ material, outsource, labor, overhead }`(설계상 이미 이 구조). 컬럼은 `contracts.cost_budget TEXT`로 존재 — **파싱·저장·표시가 없어 미구현 상태.**
-- 구현: 계약 등록/수정 폼에 원가예산 4항목 입력 → 계약 상세에 **예산 대비 실적**(실적 = `cost_contract_id`로 귀속된 지출 + §1.3 라인 `cost_price` 합계) 표시.
+- 형태: JSON `{ material, outsource, labor, overhead }`. 컬럼 `contracts.cost_budget TEXT`.
+- **조사 정정(구현 시 확인)**: 미구현이 아니었다. 계약 상세 **'원가 예산' 탭 + 예산 수정 드로어 + `PUT /:id/cost-budget`이 이미 동작**한다. 실제 결함은 **실적 집계가 방산 전용**이었다는 것 — 비목명을 `철강|도금|열처리|방전…` 정규식으로 매칭해, 다른 업종(천막=원단, SW=외주 개발)은 전부 '경비'로 떨어졌다.
+- 조치: 분류를 **비목 그룹(`categories.group_name`) + 일반 단어**로 바꿔 업종중립화(`costBucket`). 상세 탭과 `/cost-analysis`가 같은 함수를 쓴다.
 - 목적: 계약 수익성(예상 마진 vs 실제 마진) 관리. §1.3 라인 원가와 상호보완 — 예산은 사전, 라인 원가는 사후.
 
 ### 5.2 마감/기간잠금 (I15)
@@ -178,7 +181,7 @@ CLAUDE.md에 이미 계획됨: `ref_items type='evidence_type'` (세금계산서
 | 테이블 | 추가 | 변경/정리 |
 |---|---|---|
 | `ref_items`(item) | item_kind, purchase_price, tax_type, item_group | amount = 출고가(그대로 유지, 라벨만 변경) |
-| `contract_items` | cost_price | — |
+| `contract_items` | cost_price, qty | — |
 | `invoice_lines` | cost_price | — |
 | `contracts` | project_no | buyer_code·pu_no 제거, vessel_code→project_no 이관, order_no 범용화, cost_budget 구현 |
 | `transactions` | supply_amount, vat_amount, vat_deductible, project_no, site | buyer_type 제거, vessel_no→project_no·usage_place→site 이관 |
@@ -195,7 +198,7 @@ CLAUDE.md에 이미 계획됨: `ref_items type='evidence_type'` (세금계산서
 ## 7. 단계 로드맵 (저위험 → 고위험)
 
 - **P1 — 품목 마스터 필드** ✅ 완료: purchase_price/item_kind/tax_type(과세·면세·영세)/item_group + 마진 표시. 기준정보 품목 화면 보강.
-- **P2 — 계약 전 타입 품목 허용 + 라인 원가 + 원가예산**: contract_items/invoice_lines에 cost_price, 계약폼 품목 편집기 전 타입 노출, 지출폼 품목 선택 살리기, `cost_budget` 입력·예산대비실적(§5.1b).
+- **P2 — 계약 전 타입 품목 허용 + 라인 원가 + 원가예산** ✅ 완료: contract_items(cost_price·qty)/invoice_lines(cost_price), 계약폼 품목 편집기 전 타입 노출(합계=계약금액, 서버 `contract-model`이 재계산), 계약 상세 품목표, 지출폼이 매입가로 자동채움, 원가 실적 분류 업종중립화(§5.1b).
 - **P3 — 회계처리 IA 재편**: nav 재구성, MiscPL·정기지출/정기청구 패널 부활·재배치.
 - **P4 — 부가세 정합성**: transactions supply/vat 분리, 영세율 3종 값집합, vat_deductible, 적격증빙 유형 구현.
 - **P5 — 위생·마감**: 잔재 컬럼 범용화(project_no/site/order_no)+입력 UI, closed_periods 도입.

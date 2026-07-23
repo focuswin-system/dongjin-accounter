@@ -12,19 +12,27 @@ import { BILLING_MODES, TERM_MODES, BILLING_PERIODS, billingLabel, termLabel, pe
 const numOnly = (v) => String(v ?? '').replace(/[^0-9]/g, '');
 const asNum   = (v) => parseInt(numOnly(v), 10) || 0;
 
-/* 기성형 계약의 품목 단가표 편집기. 품목은 기준정보(ref_items type='item')에서 고르거나 인라인 추가.
-   단가는 기준정보 단가가 기본값이고 계약별로 수정 가능하다. 수량은 여기 없다(청구할 때 입력). */
-const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster }) => {
+/* 계약 품목표 = "이 계약으로 무엇을 주고받나". 청구 방식(총액·정기·기성)과는 별개 축이라 전 타입에서 쓴다.
+     총액형·정기형 — 수량×단가 합계가 곧 계약금액(정기형은 주기당 금액). 품목 0줄이면 금액을 직접 입력.
+     기성형     — 수량은 계약 때 정하지 않는다(청구할 때 입력) → 수량 칸을 숨기고 단가표로만 쓴다.
+   품목은 기준정보(ref_items type='item')에서 고르거나 인라인 추가. 단가·매입가는 기준정보값이 기본이고
+   계약별로 수정 가능하며, 저장 시 스냅샷으로 남는다(기준정보를 나중에 고쳐도 이 계약 조건은 그대로). */
+const lineAmount = (r) => (asNum(r.qty) || 1) * asNum(r.unit_price);
+const itemsTotal = (rows) => (rows || []).filter(r => (r.name || '').trim()).reduce((s, r) => s + lineAmount(r), 0);
+const itemsCost  = (rows) => (rows || []).filter(r => (r.name || '').trim()).reduce((s, r) => s + (asNum(r.qty) || 1) * asNum(r.cost_price), 0);
+
+const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster, withQty = false, required = false, hint }) => {
   const rows = form.items || [];
   const setRows = (fn) => set(f => ({ ...f, items: fn(f.items || []) }));
-  const add = () => setRows(rs => [...rs, { item_id: '', name: '', spec: '', unit: '', unit_price: '' }]);
+  const add = () => setRows(rs => [...rs, { item_id: '', name: '', spec: '', unit: '', qty: '', unit_price: '', cost_price: '' }]);
   const upd = (i, patch) => setRows(rs => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r));
   const del = (i) => setRows(rs => rs.filter((_, idx) => idx !== i));
-  // 기준정보에서 품목을 고르면 규격·단위·단가를 자동으로 채운다(계약별로 다시 수정 가능).
+  // 기준정보에서 품목을 고르면 규격·단위·출고가·매입가를 자동으로 채운다(계약별로 다시 수정 가능).
   const pick = (i, name) => {
     const it = itemMaster.find(x => x.name === name);
     upd(i, it
-      ? { item_id: it.id, name: it.name, spec: it.spec || '', unit: it.unit || '', unit_price: String(it.amount || '') }
+      ? { item_id: it.id, name: it.name, spec: it.spec || '', unit: it.unit || '',
+          unit_price: String(it.amount || ''), cost_price: String(it.purchase_price || '') }
       : { item_id: '', name });
   };
   // 목록에 없는 품목을 입력하면 기준정보에 새로 등록하고 이 행에 연결(거래처 인라인 추가와 같은 방식).
@@ -34,13 +42,16 @@ const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster }) => {
     await reloadMaster();
     upd(i, { item_id: res.id || '', name: nm });
   };
+  const total = itemsTotal(rows), cost = itemsCost(rows);
 
   return (
     <div>
-      <label className="label" style={{ marginBottom: 8 }}>품목 단가표 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-      <div className="text-xs text-muted2" style={{ marginBottom: 10 }}>
-        기성 청구할 품목과 단가를 등록하세요. 청구는 계약 상세의 <b>기성 청구</b>에서 품목별 수량을 넣어 발행합니다.
-      </div>
+      <label className="label" style={{ marginBottom: 8 }}>
+        품목 {required
+          ? <span style={{ color: 'var(--neg-ink)' }}>*</span>
+          : <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span>}
+      </label>
+      <div className="text-xs text-muted2" style={{ marginBottom: 10 }}>{hint}</div>
       <div className="col gap-8">
         {rows.map((r, i) => (
           <div key={i} className="col gap-6" style={{ padding: 10, border: '1px solid var(--line)', borderRadius: 10, background: 'var(--surface-2)' }}>
@@ -62,18 +73,40 @@ const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster }) => {
                 onChange={e => upd(i, { spec: e.target.value })}/>
               <input className="input" style={{ width: 72 }} value={r.unit || ''} placeholder="단위"
                 onChange={e => upd(i, { unit: e.target.value })}/>
+              {withQty && (
+                <input className="input num" style={{ width: 76 }} value={r.qty ?? ''} placeholder="수량"
+                  onChange={e => upd(i, { qty: numOnly(e.target.value) })}/>
+              )}
+            </div>
+            <div className="row gap-6">
               <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-                <MoneyInput className="input num" style={{ paddingRight: 26 }} value={r.unit_price} placeholder="단가"
+                <MoneyInput className="input num" style={{ paddingRight: 26 }} value={r.unit_price} placeholder="출고가"
                   onChange={raw => upd(i, { unit_price: raw })}/>
                 <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 12 }}>원</span>
               </div>
+              <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+                <MoneyInput className="input num" style={{ paddingRight: 26 }} value={r.cost_price} placeholder="매입가(원가)"
+                  onChange={raw => upd(i, { cost_price: raw })}/>
+                <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 12 }}>원</span>
+              </div>
             </div>
+            {withQty && asNum(r.unit_price) > 0 && (
+              <div className="text-xs text-muted2 num" style={{ textAlign: 'right' }}>
+                {asNum(r.qty) || 1} × {asNum(r.unit_price).toLocaleString()} = <b className="text-ink">{lineAmount(r).toLocaleString()}원</b>
+              </div>
+            )}
           </div>
         ))}
       </div>
       <button type="button" className="btn ghost sm" style={{ marginTop: 10 }} onClick={add}>
         <Icon.Plus size={13}/> 품목 추가
       </button>
+      {total > 0 && (
+        <div className="text-xs text-muted" style={{ marginTop: 8 }}>
+          품목 합계 <b className="num text-ink">{total.toLocaleString()}원</b>
+          {cost > 0 && <> · 원가 <span className="num">{cost.toLocaleString()}원</span> · 마진 <b className="num" style={{ color: total - cost < 0 ? 'var(--neg-ink)' : undefined }}>{(total - cost).toLocaleString()}원</b></>}
+        </div>
+      )}
     </div>
   );
 };
@@ -91,10 +124,15 @@ const ContractTermFields = ({ form, set }) => {
   // 갱신 개념이 있는 계약만 연장기간·통보기한이 의미 있다.
   // (총액형+기간만료 = 구축 프로젝트는 끝나면 끝 → 갱신 임박 알림 대상도 아님. 무기한은 애초에 없음)
   const hasRenewal = !openEnded && (form.term_mode === 'auto_renew' || recurring);
+  // 품목을 적었으면 그 합계가 금액이다(서버 contract-model도 같은 규칙으로 다시 매긴다).
+  const lineSum = itemsTotal(form.items);
+  const byItems = lineSum > 0;
+  const unitAmt = byItems ? lineSum : asNum(form.unit_amount);
+  const totalAmt = byItems ? lineSum : asNum(form.amount);
   // 정기형 계약 총액 미리보기 = 주기당 금액 × 기간 안 회차수
   const preview = (() => {
     if (!recurring || openEnded || !form.start_date || !form.end_date) return null;
-    const unit = asNum(form.unit_amount);
+    const unit = unitAmt;
     if (!unit) return null;
     const s = new Date(form.start_date), e = new Date(form.end_date);
     if (isNaN(s) || isNaN(e) || e < s) return null;
@@ -147,9 +185,11 @@ const ContractTermFields = ({ form, set }) => {
         </div>
       </div>
 
-      {/* 금액 — 총액형은 계약 총액, 정기형은 주기당 금액, 기성형은 품목 단가표 */}
+      {/* 금액 — 총액형은 계약 총액, 정기형은 주기당 금액, 기성형은 품목 단가표.
+          어느 쪽이든 품목을 적으면 그 합계가 금액이 된다(품목 = '무엇', 청구방식 = '어떻게'). */}
       {progress ? (
-        <ContractItemsEditor form={form} set={set} itemMaster={itemMaster} reloadMaster={reloadMaster}/>
+        <ContractItemsEditor form={form} set={set} itemMaster={itemMaster} reloadMaster={reloadMaster} required
+          hint="기성 청구할 품목과 단가를 등록하세요. 수량은 계약 상세의 기성 청구에서 회차마다 넣습니다."/>
       ) : recurring ? (
         <>
           <div className="row gap-12">
@@ -171,16 +211,25 @@ const ContractTermFields = ({ form, set }) => {
               </div>
             </div>
           </div>
+          <ContractItemsEditor form={form} set={set} itemMaster={itemMaster} reloadMaster={reloadMaster} withQty
+            hint="매 회차 무엇을 청구하는지 품목으로 적으면 합계가 주기당 금액이 됩니다. 안 적으면 금액만 넣으면 돼요."/>
+
           <div>
             <label className="label" style={{ marginBottom: 8 }}>
               {periodLabel(form.billing_period)} 청구금액 (공급가액) <span style={{ color: 'var(--neg-ink)' }}>*</span>
             </label>
-            <div style={{ position: 'relative' }}>
-              <MoneyInput className="input num fw-700" style={{ fontSize: 20, paddingRight: 36 }}
-                value={form.unit_amount}
-                onChange={raw => set(f => ({ ...f, unit_amount: raw }))}/>
-              <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>원</span>
-            </div>
+            {byItems ? (
+              <div className="input num fw-700" style={{ fontSize: 20, background: 'var(--surface-2)', color: 'var(--muted)' }}>
+                {unitAmt.toLocaleString()} 원 <span className="text-xs fw-600" style={{ color: 'var(--muted-2)' }}>· 품목 합계</span>
+              </div>
+            ) : (
+              <div style={{ position: 'relative' }}>
+                <MoneyInput className="input num fw-700" style={{ fontSize: 20, paddingRight: 36 }}
+                  value={form.unit_amount}
+                  onChange={raw => set(f => ({ ...f, unit_amount: raw }))}/>
+                <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>원</span>
+              </div>
+            )}
             <div className="text-xs text-muted" style={{ marginTop: 6 }}>
               {openEnded
                 ? '무기한 계약이라 계약 총액은 없어요. 이 금액이 매 회차 청구됩니다.'
@@ -188,7 +237,7 @@ const ContractTermFields = ({ form, set }) => {
                   ? <>계약 총액 <b className="num text-ink">{(preview.total + asNum(form.initial_amount)).toLocaleString()}원</b>
                       {asNum(form.initial_amount) > 0 && <> = 초기 {asNum(form.initial_amount).toLocaleString()}원 + </>}
                       {asNum(form.initial_amount) > 0 ? '' : ' = '}
-                      {periodLabel(form.billing_period)} {asNum(form.unit_amount).toLocaleString()}원 × {preview.cycles}회 <span className="text-muted2">(자동 계산)</span></>
+                      {periodLabel(form.billing_period)} {unitAmt.toLocaleString()}원 × {preview.cycles}회 <span className="text-muted2">(자동 계산)</span></>
                   : '계약 기간을 넣으면 계약 총액을 자동으로 계산해요.'}
             </div>
           </div>
@@ -210,22 +259,33 @@ const ContractTermFields = ({ form, set }) => {
           </div>
         </>
       ) : (
-        <div>
-          <label className="label" style={{ marginBottom: 8 }}>계약금액 (공급가액) <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-          <div style={{ position: 'relative' }}>
-            <MoneyInput className="input num fw-700" style={{ fontSize: 20, paddingRight: 36 }}
-              value={form.amount}
-              onChange={raw => set(f => ({ ...f, amount: raw }))}/>
-            <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>원</span>
+        <>
+          <ContractItemsEditor form={form} set={set} itemMaster={itemMaster} reloadMaster={reloadMaster} withQty
+            hint="납품물·구축 항목을 품목으로 적으면 합계가 계약금액이 됩니다. 안 적으면 금액만 넣으면 돼요."/>
+
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>계약금액 (공급가액) <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+            {byItems ? (
+              <div className="input num fw-700" style={{ fontSize: 20, background: 'var(--surface-2)', color: 'var(--muted)' }}>
+                {totalAmt.toLocaleString()} 원 <span className="text-xs fw-600" style={{ color: 'var(--muted-2)' }}>· 품목 합계</span>
+              </div>
+            ) : (
+              <div style={{ position: 'relative' }}>
+                <MoneyInput className="input num fw-700" style={{ fontSize: 20, paddingRight: 36 }}
+                  value={form.amount}
+                  onChange={raw => set(f => ({ ...f, amount: raw }))}/>
+                <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>원</span>
+              </div>
+            )}
+            {totalAmt > 0 && (
+              <div className="text-xs text-muted" style={{ marginTop: 6 }}>
+                {form.vat_mode === 'exempt'
+                  ? <>면세 계약 — 부가세 없이 <span className="num fw-600" style={{ color: 'var(--ink)' }}>{totalAmt.toLocaleString()}원</span> 청구</>
+                  : <>부가세 포함 총액: <span className="num fw-600" style={{ color: 'var(--ink)' }}>{Math.round(totalAmt * 1.1).toLocaleString()}원</span></>}
+              </div>
+            )}
           </div>
-          {asNum(form.amount) > 0 && (
-            <div className="text-xs text-muted" style={{ marginTop: 6 }}>
-              {form.vat_mode === 'exempt'
-                ? <>면세 계약 — 부가세 없이 <span className="num fw-600" style={{ color: 'var(--ink)' }}>{asNum(form.amount).toLocaleString()}원</span> 청구</>
-                : <>부가세 포함 총액: <span className="num fw-600" style={{ color: 'var(--ink)' }}>{Math.round(asNum(form.amount) * 1.1).toLocaleString()}원</span></>}
-            </div>
-          )}
-        </div>
+        </>
       )}
 
       {/* 기간 — 무기한이면 종료일이 없다 */}
@@ -915,11 +975,12 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       file_url:    c.file_url   || '',
       file_name:   c.file_name  || '',
       docs:        [],   // 편집 폼에서 새로 올리는 첨부만. 기존 첨부는 상세 '증빙' 탭에서 관리.
-      // 기성형 품목 단가표(있으면). 편집 시 그대로 불러와 수정 → 저장 시 통째 교체된다.
+      // 계약 품목표(있으면). 편집 시 그대로 불러와 수정 → 저장 시 통째 교체된다.
       items:       (c.contract_items || []).map(it => ({
         item_id: it.item_id || '', name: it.name || '', spec: it.spec || '', unit: it.unit || '',
-        unit_price: String(it.unit_price || ''),
+        qty: it.qty ? String(it.qty) : '', unit_price: String(it.unit_price || ''), cost_price: String(it.cost_price || ''),
       })),
+      cost_budget: c.cost_budget || null,
       billing_mode:   c.billing_mode || 'onetime',
       term_mode:      c.term_mode    || 'fixed',
       vat_mode:       c.vat_mode     || 'taxable',
@@ -1168,6 +1229,59 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           <Spacer h={20}/>
         </>
       )}
+
+      {/* 총액형·정기형도 품목으로 구성할 수 있다(선택). 적어 뒀으면 무엇을 얼마에 주고받는지 여기서 본다.
+          기성형과 달리 수량이 계약에 있으므로 라인 금액·원가·마진이 그대로 확정된다. */}
+      {!progress && (c.contract_items || []).length > 0 && (() => {
+        const rows = c.contract_items || [];
+        const sum  = rows.reduce((s, it) => s + (Number(it.qty) || 1) * Number(it.unit_price || 0), 0);
+        const cost = rows.reduce((s, it) => s + (Number(it.qty) || 1) * Number(it.cost_price || 0), 0);
+        return (
+          <>
+            <div className="card card-pad">
+              <div className="section-title">계약 품목</div>
+              <table className="table" style={{ marginTop: 12 }}>
+                <thead>
+                  <tr>
+                    <th>품목</th><th>규격</th><th>단위</th>
+                    <th style={{ textAlign: 'right' }}>수량</th>
+                    <th style={{ textAlign: 'right' }}>출고가</th>
+                    <th style={{ textAlign: 'right' }}>금액</th>
+                    <th style={{ textAlign: 'right' }}>매입가</th>
+                    <th style={{ textAlign: 'right' }}>마진</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(it => {
+                    const qty = Number(it.qty) || 1;
+                    const amt = qty * Number(it.unit_price || 0);
+                    const cst = qty * Number(it.cost_price || 0);
+                    return (
+                      <tr key={it.id}>
+                        <td className="fw-600">{it.name}</td>
+                        <td className="text-muted">{it.spec || '—'}</td>
+                        <td className="text-muted">{it.unit || '—'}</td>
+                        <td className="num" style={{ textAlign: 'right' }}>{fmtNum(qty)}</td>
+                        <td className="num" style={{ textAlign: 'right' }}>{fmtNum(it.unit_price)}</td>
+                        <td className="num fw-600" style={{ textAlign: 'right' }}>{fmtNum(amt)}</td>
+                        <td className="num text-muted" style={{ textAlign: 'right' }}>{it.cost_price ? fmtNum(it.cost_price) : '—'}</td>
+                        <td className="num" style={{ textAlign: 'right', color: amt - cst < 0 ? 'var(--neg-ink)' : undefined }}>
+                          {it.cost_price ? fmtNum(amt - cst) : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div className="text-xs text-muted" style={{ marginTop: 10 }}>
+                합계 <b className="num text-ink">{fmtNum(sum)}원</b>
+                {cost > 0 && <> · 원가 <span className="num">{fmtNum(cost)}원</span> · 마진 <b className="num">{fmtNum(sum - cost)}원</b> (기준정보 매입가 기준 스냅샷)</>}
+              </div>
+            </div>
+            <Spacer h={20}/>
+          </>
+        );
+      })()}
 
       {/* 갱신 관리 — 만료가 있는 계약만 (무기한은 갱신 개념이 없다) */}
       {!openEnded && (
@@ -1654,7 +1768,7 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
     if (!open) return;
     setRows((contract?.contract_items || []).map(it => ({
       item_id: it.item_id || '', name: it.name, spec: it.spec || '', unit: it.unit || '',
-      unit_price: Number(it.unit_price) || 0, qty: '', amount: '',
+      unit_price: Number(it.unit_price) || 0, cost_price: Number(it.cost_price) || 0, qty: '', amount: '',
     })));
     setIssuedAt(localToday());
     setDueAt(''); setPaid(false);
@@ -1683,7 +1797,7 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
       lines: lines.map(r => ({
         item_id: r.item_id || null, name: r.name, spec: r.spec, unit: r.unit,
         qty: Number(String(r.qty).replace(/[^0-9.]/g, '')) || 0,
-        unit_price: r.unit_price, amount: Number(r.amount) || 0,
+        unit_price: r.unit_price, cost_price: r.cost_price || 0, amount: Number(r.amount) || 0,
       })),
     });
     setSaving(false);
@@ -1796,11 +1910,14 @@ const contractPayload = (form, vendorId) => ({
   billing_mode:   form.billing_mode,
   term_mode:      form.term_mode,
   vat_mode:       form.vat_mode === 'exempt' ? 'exempt' : 'taxable',
-  // 기성형 품목 단가표 — 서버가 전체 교체 저장(이름 있는 행만). 다른 유형이면 무시됨.
+  // 계약 품목표 — 서버가 전체 교체 저장(이름 있는 행만). 청구 방식과 무관하게 저장된다.
   items:          (form.items || []).map(it => ({
     item_id: it.item_id || null, name: it.name, spec: it.spec || '', unit: it.unit || '',
-    unit_price: asNum(it.unit_price),
+    qty: asNum(it.qty), unit_price: asNum(it.unit_price), cost_price: asNum(it.cost_price),
   })),
+  // 원가예산은 상세의 '예산 수정'이 주 편집기다. 여기선 값이 있을 때만 실어 보낸다
+  // (안 실으면 서버가 손대지 않는다 → 계약 편집 저장이 예산을 지우는 사고를 막는다).
+  ...(form.cost_budget ? { cost_budget: form.cost_budget } : {}),
   amount:         asNum(form.amount),
   unit_amount:    asNum(form.unit_amount),
   billing_period: form.billing_period,
@@ -1844,8 +1961,10 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
     const progress  = newForm.billing_mode === 'progress';
     if (progress && !(newForm.items || []).some(it => (it.name || '').trim() && asNum(it.unit_price) > 0))
       return toast.push("품목과 단가를 하나 이상 입력해주세요");
-    if (recurring && !asNum(newForm.unit_amount)) return toast.push(`${periodLabel(newForm.billing_period)} 청구금액을 입력해주세요`);
-    if (!recurring && !progress && !asNum(newForm.amount)) return toast.push("계약금액을 입력해주세요");
+    // 금액은 직접 입력하거나 품목으로 구성하거나 — 둘 중 하나만 있으면 된다.
+    const lineSum = itemsTotal(newForm.items);
+    if (recurring && !asNum(newForm.unit_amount) && !lineSum) return toast.push(`${periodLabel(newForm.billing_period)} 청구금액을 입력하거나 품목을 등록해주세요`);
+    if (!recurring && !progress && !asNum(newForm.amount) && !lineSum) return toast.push("계약금액을 입력하거나 품목을 등록해주세요");
     if (newForm.term_mode !== 'open' && !newForm.end_date) return toast.push("계약 종료일을 입력해주세요 (무기한이면 종료 방식을 '무기한'으로)");
     const vendorObj = vendors.find(v => v.name === newForm.vendor);
     const res = await api.addContract(contractPayload(newForm, vendorObj?.id));

@@ -48,6 +48,20 @@ function termTotal(c) {
   return initial + unit * billingCycles(start, c.end_date, c.billing_period)
 }
 
+/** 품목 라인 합계 = Σ(수량 × 단가).
+ *  수량을 안 적은 라인은 1로 본다("웹사이트 구축 500만원" 같은 단일 라인을 수량 없이 쓰는 게 자연스럽다). */
+function itemsTotal(items) {
+  if (!Array.isArray(items)) return 0
+  let sum = 0
+  for (const it of items) {
+    if (!it || String(it.name ?? '').trim() === '') continue
+    const price = Number(String(it.unit_price ?? '').replace(/[^0-9]/g, '')) || 0
+    const qty = Number(String(it.qty ?? '').replace(/[^0-9.]/g, '')) || 0
+    sum += Math.round((qty || 1) * price)
+  }
+  return sum
+}
+
 /** 요청 body → 계약 컬럼값. 유형에 안 맞는 필드는 비워서 모순된 상태가 저장되지 않게 한다. */
 function normalize(body) {
   // 청구 방식 3종: onetime(총액) / recurring(주기 정액) / progress(품목 단가×수량 기성)
@@ -72,14 +86,18 @@ function normalize(body) {
     amount: 0,
   }
 
+  // 품목을 적었으면 그 합계가 곧 금액이다. 화면에서 계산한 값을 믿지 않고 여기서 다시 매겨,
+  // 품목표와 계약금액이 어긋난 채로 저장되는 일이 없게 한다. (품목 0줄이면 기존처럼 직접 입력)
+  const lineTotal = itemsTotal(body.items)
+
   if (billing === 'recurring') {
-    out.unit_amount = Number(String(body.unit_amount ?? '').replace(/[^0-9]/g, '')) || 0
+    out.unit_amount = lineTotal || Number(String(body.unit_amount ?? '').replace(/[^0-9]/g, '')) || 0
     out.billing_period = PERIOD_MONTHS[body.billing_period] ? body.billing_period : 'monthly'
     out.billing_day = Number(body.billing_day) >= 1 && Number(body.billing_day) <= 31 ? Number(body.billing_day) : 1
     out.initial_amount = Number(String(body.initial_amount ?? '').replace(/[^0-9]/g, '')) || 0
     out.amount = termTotal({ ...out, current_term_start: body.current_term_start, start_date: body.start_date })
   } else if (billing === 'onetime') {
-    out.amount = Number(String(body.amount ?? '').replace(/[^0-9]/g, '')) || 0
+    out.amount = lineTotal || Number(String(body.amount ?? '').replace(/[^0-9]/g, '')) || 0
   }
   // progress는 총액이 없다 → out.amount = 0(기본값 유지), 정기 필드도 전부 null(기본값 유지)
   return out
@@ -105,4 +123,4 @@ function dayAfter(dateStr) {
   return d.toISOString().slice(0, 10)
 }
 
-module.exports = { normalize, termTotal, billingCycles, periodMonths, nextEndDate, dayAfter }
+module.exports = { normalize, termTotal, billingCycles, periodMonths, nextEndDate, dayAfter, itemsTotal }

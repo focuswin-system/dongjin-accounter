@@ -12,6 +12,17 @@ const router = Router()
 // cost_budget(JSON)이 손상된 행 하나가 계약 목록/상세 응답 전체를 500으로 만들지 않도록 안전 파싱.
 const safeBudget = (raw, fallback = null) => { if (!raw) return fallback; try { return JSON.parse(raw) } catch { return fallback } }
 
+// 지출을 원가 4분류로 나눈다 — 원가예산 대비 실적용.
+// 비목명만 보고 방산 용어(철강·도금·열처리…)를 찾던 걸 비목 그룹 + 일반 단어로 바꿨다.
+// 업종이 달라도(천막=원단 매입, SW=외주 개발) 그룹만 제대로 잡혀 있으면 분류된다. 못 잡으면 overhead.
+const costBucket = (categoryName, groupName) => {
+  const s = `${groupName || ''} ${categoryName || ''}`
+  if (/외주|하도급|용역|가공|위탁/.test(s))          return 'outsource'
+  if (/인건|급여|임금|노무|퇴직|복리|상여/.test(s))   return 'labor'
+  if (/재료|자재|원단|부품|매입|소모품|공구/.test(s)) return 'material'
+  return 'overhead'
+}
+
 // 계약 한 건의 금액 지표. 화면마다 다르게 계산하다 어긋나지 않도록 여기서만 만든다.
 //
 // 매출 계약(gubu B)과 매입 계약(gubu A·E)은 보는 관점이 다르다.
@@ -347,6 +358,16 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
     if (!c) { await rollbackQuietly(conn); return res.status(404).json({ error: '계약을 찾을 수 없어요' }) }
     if (c.billing_mode !== 'progress') { await rollbackQuietly(conn); return res.status(400).json({ error: '기성형 계약이 아니에요' }) }
 
+    // 매입원가 스냅샷은 계약 품목표에서 가져온다(화면이 안 보내줘도 원가가 새는 일이 없게).
+    const [ciRows] = await conn.execute(
+      'SELECT item_id, name, cost_price FROM contract_items WHERE contract_id = ?', [req.params.id]
+    )
+    const costOf = (l) => {
+      if (l.cost_price != null && l.cost_price !== '') return Number(String(l.cost_price).replace(/[^0-9]/g, '')) || 0
+      const hit = ciRows.find(ci => (l.item_id && ci.item_id === l.item_id) || ci.name === String(l.name ?? '').trim())
+      return hit ? Number(hit.cost_price) || 0 : 0
+    }
+
     // 품목 정규화: 수량·단가·금액 계산(금액이 오면 그대로, 없으면 수량×단가). 이름 없거나 금액 0 이하 행은 제외.
     const clean = []
     for (const l of lines) {
@@ -358,7 +379,8 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
         ? (Number(String(l.amount).replace(/[^0-9]/g, '')) || 0)
         : Math.round(qty * price)
       if (amount <= 0) continue
-      clean.push({ item_id: l.item_id || null, name: nm, spec: l.spec || null, unit: l.unit || null, qty, unit_price: price, amount })
+      clean.push({ item_id: l.item_id || null, name: nm, spec: l.spec || null, unit: l.unit || null,
+        qty, unit_price: price, amount, cost_price: costOf(l) })
     }
     if (clean.length === 0) { await rollbackQuietly(conn); return res.status(400).json({ error: '청구 금액이 있는 품목이 없어요' }) }
 
@@ -390,8 +412,8 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
     let ord = 0
     for (const l of clean) {
       await conn.execute(
-        'INSERT INTO invoice_lines (id, invoice_id, item_id, name, spec, unit, qty, unit_price, amount, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)',
-        [randomUUID(), invId, l.item_id, l.name, l.spec, l.unit, l.qty, l.unit_price, l.amount, ++ord]
+        'INSERT INTO invoice_lines (id, invoice_id, item_id, name, spec, unit, qty, unit_price, cost_price, amount, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        [randomUUID(), invId, l.item_id, l.name, l.spec, l.unit, l.qty, l.unit_price, l.cost_price, l.amount, ++ord]
       )
     }
     // 기입금: 실제 입/출금 거래 + 매칭 생성(장부·계좌·계약 수금에 반영)
@@ -437,10 +459,11 @@ router.get('/:id', async (req, res, next) => {
     //   매출 계약 → 이 계약에 귀속된 원가 (cost_contract_id) — 외주비는 외주 매입계약에 지급되지만 원가는 여기 붙는다
     const isPurchaseC = c.vendor_gubu === 'A' || c.vendor_gubu === 'E'
     const [expenseRows] = await req.db.execute(
-      `SELECT t.*, v.name AS vendor_name, pc.name AS paid_contract_name
+      `SELECT t.*, v.name AS vendor_name, pc.name AS paid_contract_name, cat.group_name AS category_group
        FROM transactions t
        LEFT JOIN vendors v ON t.vendor_id=v.id
        LEFT JOIN contracts pc ON t.contract_id = pc.id
+       LEFT JOIN categories cat ON t.category = cat.name
        WHERE t.${isPurchaseC ? 'contract_id' : 'cost_contract_id'}=? AND t.kind='expense' ORDER BY t.date DESC`,
       [req.params.id]
     )
@@ -467,16 +490,11 @@ router.get('/:id', async (req, res, next) => {
       date: t.date, amount: Number(t.amount), status: t.status,
     }))
 
-    // 원가 실적 집계 (지급완료만, 비목 패턴 매칭)
+    // 원가 실적 집계 (지급완료만) — 비목 그룹으로 4분류. 계약 원가예산과 같은 축이다.
     const cost_actual = { material: 0, outsource: 0, labor: 0, overhead: 0 }
     for (const t of expenseRows) {
       if (t.status !== '지급완료') continue
-      const cat = t.category || ''
-      const amt = Number(t.amount)
-      if (/재료비|철강|원자재|비철|특수강|부자재/.test(cat))         cost_actual.material  += amt
-      else if (/외주|가공|표면|도금|열처리|용접|연삭|방전/.test(cat)) cost_actual.outsource += amt
-      else if (/급여|인건|복리|퇴직/.test(cat))                      cost_actual.labor     += amt
-      else                                                          cost_actual.overhead  += amt
+      cost_actual[costBucket(t.category, t.category_group)] += Number(t.amount)
     }
 
     // 계약 첨부 서류(다중) + 레거시 단일 계약서(file_url) 병합
@@ -504,12 +522,14 @@ router.get('/:id', async (req, res, next) => {
           [req.params.id])
     const recurrings = recRows.map(r => ({ ...r, supply_amount: Number(r.supply_amount), active: !!r.active }))
 
-    // 기성형 계약: 품목 단가표 + 품목별 누적 기성(이 계약의 청구서 line 합계)
+    // 계약 품목표 + 품목별 누적 기성(이 계약의 청구서 line 합계 — 기성형에서만 채워진다)
     const [itemRows] = await req.db.execute(
-      'SELECT id, item_id, name, spec, unit, unit_price, sort_order FROM contract_items WHERE contract_id = ? ORDER BY sort_order, name',
+      'SELECT id, item_id, name, spec, unit, qty, unit_price, cost_price, sort_order FROM contract_items WHERE contract_id = ? ORDER BY sort_order, name',
       [req.params.id]
     )
-    const contract_items = itemRows.map(r => ({ ...r, unit_price: Number(r.unit_price) }))
+    const contract_items = itemRows.map(r => ({
+      ...r, qty: Number(r.qty), unit_price: Number(r.unit_price), cost_price: Number(r.cost_price),
+    }))
     const [progRows] = await req.db.execute(
       `SELECT il.item_id, il.name, il.spec, il.unit,
               SUM(il.qty) AS qty_sum, SUM(il.amount) AS amount_sum
@@ -550,8 +570,12 @@ router.get('/:id', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// 기성형 계약의 품목 단가표를 통째로 교체 저장한다(마일스톤 편집기와 같은 전체 교체 방식).
-// items: [{ item_id?, name, spec, unit, unit_price }]. 이름 없는 행은 건너뛴다.
+// 계약의 품목표를 통째로 교체 저장한다(마일스톤 편집기와 같은 전체 교체 방식).
+// items: [{ item_id?, name, spec, unit, qty?, unit_price, cost_price? }]. 이름 없는 행은 건너뛴다.
+// 청구 방식과 무관하게 쓴다 — '무엇을 주고받나'(품목)와 '어떻게 청구하나'(billing_mode)는 별개 축이다.
+//   총액형·정기형: 수량×단가 합계 = 계약금액(정기형은 주기당 금액). 품목 0줄이면 금액 직접 입력.
+//   기성형: 수량은 청구할 때 넣으므로 여기선 0.
+// cost_price(매입원가)는 스냅샷 — 기준정보 매입가가 나중에 바뀌어도 이 계약의 원가는 그대로 남는다.
 async function replaceContractItems(conn, contractId, items) {
   await conn.execute('DELETE FROM contract_items WHERE contract_id = ?', [contractId])
   if (!Array.isArray(items)) return
@@ -560,9 +584,11 @@ async function replaceContractItems(conn, contractId, items) {
     const nm = (it && it.name != null) ? String(it.name).trim() : ''
     if (!nm) continue
     const price = Number(String(it.unit_price ?? '').replace(/[^0-9]/g, '')) || 0
+    const cost  = Number(String(it.cost_price ?? '').replace(/[^0-9]/g, '')) || 0
+    const qty   = Number(String(it.qty ?? '').replace(/[^0-9.]/g, '')) || 0
     await conn.execute(
-      'INSERT INTO contract_items (id, contract_id, item_id, name, spec, unit, unit_price, sort_order) VALUES (?,?,?,?,?,?,?,?)',
-      [randomUUID(), contractId, it.item_id || null, nm, it.spec || null, it.unit || null, price, ++ord]
+      'INSERT INTO contract_items (id, contract_id, item_id, name, spec, unit, qty, unit_price, cost_price, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      [randomUUID(), contractId, it.item_id || null, nm, it.spec || null, it.unit || null, qty, price, cost, ++ord]
     )
   }
 }
@@ -621,8 +647,7 @@ router.post('/', async (req, res, next) => {
         }
       }
     } else if (f.billing_mode === 'progress') {
-      // 기성형: 총액·마일스톤 없음. 품목 단가표만 깔고, 청구는 계약 상세의 '기성 청구'에서 그때그때 발행한다.
-      await replaceContractItems(conn, id, req.body.items)
+      // 기성형: 총액·마일스톤 없음. 청구는 계약 상세의 '기성 청구'에서 그때그때 발행한다.
     } else if (Number(f.amount) > 0) {
       // 단건 계약: 계약금액 전체를 '예정' 청구 일정 1건으로 자동 생성 → 발행예정에 바로 뜬다.
       // 선급/기성/잔금으로 쪼갤 거면 청구 일정 탭에서 편집하면 이 1건이 대체된다(편집기는 전체 교체 방식).
@@ -632,6 +657,8 @@ router.post('/', async (req, res, next) => {
         [randomUUID(), id, '일시', 100, f.amount, start_date || null, '예정']
       )
     }
+    // 품목표는 청구 방식과 무관하게 저장한다(총액형·정기형도 품목으로 구성 가능 — 선택).
+    await replaceContractItems(conn, id, req.body.items)
 
     await conn.commit()
     res.json({ id })
@@ -645,7 +672,7 @@ router.post('/', async (req, res, next) => {
 })
 
 router.put('/:id', async (req, res, next) => {
-  const { vendor_id, name, start_date, status, buyer_code, pu_no, order_no, vessel_code, file_url, file_name, contract_no } = req.body
+  const { vendor_id, name, start_date, status, buyer_code, pu_no, order_no, vessel_code, file_url, file_name, contract_no, cost_budget } = req.body
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
@@ -664,13 +691,14 @@ router.put('/:id', async (req, res, next) => {
        f.billing_mode, f.term_mode, f.unit_amount, f.billing_period, f.billing_day, f.initial_amount, f.term_months, f.notice_days, termStart, f.vat_mode, req.params.id]
     )
     if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
-    // 품목 단가표: 기성형이면 폼에서 넘어온 대로 통째 교체. 기성형이 아니면(총액형·정기형으로 전환 등)
-    // 남아 있을 수 있는 품목표를 비워 고아 데이터를 남기지 않는다.
-    if (f.billing_mode === 'progress') {
-      if (req.body.items !== undefined) await replaceContractItems(conn, req.params.id, req.body.items)
-    } else {
-      await conn.execute('DELETE FROM contract_items WHERE contract_id = ?', [req.params.id])
+    // 원가예산은 보낸 요청만 갱신한다(예산을 다루지 않는 화면의 저장이 기존 예산을 지우면 안 된다)
+    if (cost_budget !== undefined) {
+      await conn.execute('UPDATE contracts SET cost_budget = ? WHERE id = ?',
+        [cost_budget ? JSON.stringify(cost_budget) : null, req.params.id])
     }
+    // 품목표: 폼에서 넘어온 대로 통째 교체(청구 방식 무관). items를 아예 안 보낸 요청은
+    // 품목을 다루지 않는 화면이므로 기존 품목표를 건드리지 않는다.
+    if (req.body.items !== undefined) await replaceContractItems(conn, req.params.id, req.body.items)
     await conn.commit()
     res.json({ ok: true })
   } catch (e) {
@@ -807,16 +835,15 @@ router.get('/:id/cost-analysis', async (req, res, next) => {
     // 지급액)이라 매출계약에는 붙지 않아, 예전 코드는 항상 0을 반환했다(호출자가 없어
     // 드러나지 않았을 뿐이다). 계약 상세가 쓰는 cost_total(METRIC_COLS)과 같은 축으로 맞춘다.
     const [txns] = await req.db.execute(
-      "SELECT category, SUM(amount) AS total FROM transactions WHERE cost_contract_id = ? AND kind='expense' AND status='지급완료' GROUP BY category",
+      `SELECT t.category, cat.group_name AS category_group, SUM(t.amount) AS total
+       FROM transactions t LEFT JOIN categories cat ON t.category = cat.name
+       WHERE t.cost_contract_id = ? AND t.kind='expense' AND t.status='지급완료'
+       GROUP BY t.category, cat.group_name`,
       [req.params.id]
     )
     const actual = { material: 0, outsource: 0, labor: 0, overhead: 0 }
     for (const t of txns) {
-      const total = Number(t.total)
-      if (/재료비|철강|원자재/.test(t.category))  actual.material  += total
-      else if (/외주|가공/.test(t.category))       actual.outsource += total
-      else if (/급여|인건/.test(t.category))        actual.labor     += total
-      else                                          actual.overhead  += total
+      actual[costBucket(t.category, t.category_group)] += Number(t.total)
     }
     const totalBudget = Object.values(budget).reduce((s, v) => s + v, 0)
     const totalActual = Object.values(actual).reduce((s, v) => s + v, 0)

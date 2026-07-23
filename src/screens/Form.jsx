@@ -294,8 +294,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                     const next = { ...f, item: v, itemId: it?.id || "" }
                     if (it) {
                       if (!f.memo || f.memo === f.item) next.memo = it.name   // 적요 자동 채움(비어있거나 이전 품목명일 때만)
-                      if (it.amount && !f.amount) {                           // 단가(공급가액)로 자동 채움 — 총액 = 단가 + 부가세 (지출·입금 동일)
-                        const supply = Number(it.amount)
+                      // 들어오는 돈은 출고가(amount), 나가는 돈은 매입가(purchase_price)가 맞는 단가다.
+                      // 매입가가 없는 품목이면 종전대로 출고가로 채운다.
+                      const unit = kind === 'expense' ? (Number(it.purchase_price) || Number(it.amount)) : Number(it.amount)
+                      if (unit && !f.amount) {                                // 단가(공급가액)로 자동 채움 — 총액 = 단가 + 부가세
+                        const supply = Number(unit)
                         const vat = f.taxFree ? 0 : Math.round(supply * 0.1)
                         next.supply = supply
                         next.vat = vat
@@ -305,8 +308,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                     return next
                   })
                 }}
-                options={items.map(it => ({ value: it.name, label: it.name,
-                  sub: [it.code, it.spec, it.unit, it.amount ? fmtNum(it.amount) + '원' : ''].filter(Boolean).join(' · ') }))}
+                options={items.map(it => {
+                  const unit = kind === 'expense' ? (Number(it.purchase_price) || Number(it.amount)) : Number(it.amount)
+                  return { value: it.name, label: it.name,
+                    sub: [it.code, it.spec, it.unit, unit ? fmtNum(unit) + '원' : ''].filter(Boolean).join(' · ') }
+                })}
                 placeholder="품목 선택 (선택)"
                 allowAdd={false}/>
             </FormField>

@@ -699,6 +699,12 @@ async function initDb(conn) {
     await ensureColumn('ref_items', 'item_kind',      "item_kind VARCHAR(20)")
     await ensureColumn('ref_items', 'tax_type',       "tax_type VARCHAR(10)")   // 과세·면세·영세 (비어 있으면 비목 기준 폴백)
     await ensureColumn('ref_items', 'item_group',     "item_group VARCHAR(50)")
+    // 계약·청구 라인의 매입원가 스냅샷. 발행 시점 품목 매입가를 복사한다(기준정보가 바뀌어도 계약 조건은 유지 —
+    // name·spec·unit·unit_price와 같은 스냅샷 원칙). 라인별 마진·계약별 원가 합계의 근거가 된다.
+    await ensureColumn('contract_items', 'cost_price', "cost_price BIGINT DEFAULT 0")
+    await ensureColumn('invoice_lines',  'cost_price', "cost_price BIGINT DEFAULT 0")
+    // 총액형·정기형 계약의 품목 수량. 기성형은 계약 시점에 수량이 없고 청구할 때 넣으므로 0으로 둔다.
+    await ensureColumn('contract_items', 'qty',        "qty DECIMAL(14,2) DEFAULT 0")
     // 직원 고정 수당(급여대장 생성 시 명세서에 자동 채움) + 부양가족(참고용)
     await ensureColumn('employees', 'emp_no',             "emp_no VARCHAR(20)")
     await ensureColumn('employees', 'position_allowance', "position_allowance BIGINT DEFAULT 0")
