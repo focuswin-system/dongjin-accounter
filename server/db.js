@@ -722,6 +722,51 @@ async function initDb(conn) {
     // 적격증빙 유형(ref_items type='evidence_type')의 매입세액 공제 가능 여부.
     // 세금계산서·카드전표·현금영수증(지출증빙)은 공제, 간이영수증·거래명세서는 불공제.
     await ensureColumn('ref_items',    'deductible',    "deductible TINYINT DEFAULT 1")
+
+    // ── 업종중립 필드 (구 방산·조선 전용 컬럼의 후신) ──
+    // 이 제품은 여러 업종의 영세기업이 함께 쓰는 SaaS다. 초기에 조선 협력업체 엑셀을 그대로 옮기며
+    // 'vessel_no(호선번호)·usage_place(사용처)·buyer_code(HHIO/HHIM)'가 스키마에 박혔는데,
+    // 그중 개념이 살아 있는 것만 업종중립 이름으로 옮긴다.
+    //   project_no  프로젝트·공사번호 (조선=호선 / 천막=현장 / 선반=작업지시 / SW=프로젝트코드)
+    //   site        현장·사용처
+    //   order_no    상대방 발주(수주)번호 — 기존 컬럼 그대로 뜻만 범용화
+    // buyer_code·buyer_type·pu_no는 vendor_id·cost_contract_id와 중복이라 코드에서 걷어낸다.
+    await ensureColumn('contracts',    'project_no',    "project_no VARCHAR(50)")
+    await ensureColumn('transactions', 'project_no',    "project_no VARCHAR(50)")
+    await ensureColumn('transactions', 'site',          "site VARCHAR(200)")
+    // 기존 값 이관. ⚠ 1회만 — 매번 돌면 사용자가 새로 비운 값이 옛 값으로 되살아난다.
+    await runOnce('2026-07_industry_neutral_fields', async () => {
+      await c.execute("UPDATE contracts SET project_no = vessel_code WHERE (project_no IS NULL OR project_no = '') AND vessel_code IS NOT NULL AND vessel_code <> ''")
+      await c.execute("UPDATE transactions SET project_no = vessel_no WHERE (project_no IS NULL OR project_no = '') AND vessel_no IS NOT NULL AND vessel_no <> ''")
+      await c.execute("UPDATE transactions SET site = usage_place WHERE (site IS NULL OR site = '') AND usage_place IS NOT NULL AND usage_place <> ''")
+      // pu_no는 발주번호의 옛 이름 — order_no가 비었을 때만 옮긴다(둘 다 있으면 order_no가 정답)
+      await c.execute("UPDATE contracts SET order_no = pu_no WHERE (order_no IS NULL OR order_no = '') AND pu_no IS NOT NULL AND pu_no <> ''")
+    })
+    // 구 컬럼(vessel_code·vessel_no·usage_place·pu_no·buyer_code·buyer_type)은 DROP하지 않는다.
+    // 코드에서 참조만 끊고, 컬럼 삭제는 운영 DB 백업 후 별도 단계로. (되돌리기 쉬운 순서로 간다)
+
+    // ── 거래처·인사 필드 보강 ──
+    // 업태·종목은 세금계산서 발행 항목이라 거래처마다 들고 있어야 한다.
+    // 지급계좌는 매입처에 이체할 때 매번 찾아 적는 수고를 없앤다.
+    await ensureColumn('vendors',   'biz_type',    "biz_type VARCHAR(100)")
+    await ensureColumn('vendors',   'biz_item',    "biz_item VARCHAR(100)")
+    await ensureColumn('vendors',   'pay_account', "pay_account VARCHAR(200)")
+    // 급여이체 계좌. 주민등록번호는 저장하지 않는다 —
+    // 원천징수·연말정산 신고서 자동생성이 범위 밖이라 지금 얻는 게 없고, 저장하는 순간
+    // 암호화·파기 의무가 붙는다. 신고서 자동화를 범위에 넣을 때 다시 판단한다.
+    await ensureColumn('employees', 'salary_account', "salary_account VARCHAR(200)")
+
+    // 월 마감(기간 잠금). 부가세 신고·월 마감을 끝낸 기간의 거래가 뒤에서 바뀌면
+    // 이미 제출한 신고자료와 장부가 어긋난다 → 잠근 달의 거래는 등록·수정·삭제를 막는다.
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS closed_periods (
+        id         VARCHAR(36) PRIMARY KEY,
+        period     VARCHAR(7) NOT NULL UNIQUE,   -- 'YYYY-MM'
+        memo       VARCHAR(500),
+        closed_by  VARCHAR(100),
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `)
     // 직원 고정 수당(급여대장 생성 시 명세서에 자동 채움) + 부양가족(참고용)
     await ensureColumn('employees', 'emp_no',             "emp_no VARCHAR(20)")
     await ensureColumn('employees', 'position_allowance', "position_allowance BIGINT DEFAULT 0")

@@ -95,12 +95,11 @@ const METRIC_COLS = `
 
 router.get('/', async (req, res, next) => {
   try {
-    const { vendorId, buyerCode, status } = req.query
+    const { vendorId, status } = req.query
     let sql = `SELECT c.*, v.name AS vendor_name, v.gubu, ${METRIC_COLS}
       FROM contracts c LEFT JOIN vendors v ON c.vendor_id = v.id WHERE 1=1`
     const params = []
     if (vendorId)  { sql += ' AND c.vendor_id = ?';  params.push(vendorId) }
-    if (buyerCode) { sql += ' AND c.buyer_code = ?'; params.push(buyerCode) }
     if (status)    { sql += ' AND c.status = ?';     params.push(status) }
     sql += ' ORDER BY c.created_at DESC'
     const [rows] = await req.db.execute(sql, params)
@@ -323,11 +322,11 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
       if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
       const txnId = randomUUID()
       await conn.execute(
-        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, doc_no, invoice_id, memo)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, invoice_id, memo)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [txnId, isPurchase ? 'expense' : 'income', ms.vendor_id || null, ms.contract_id, accountId,
          isPurchase ? '대금 지급' : '수금', total, date || today, '계좌이체',
-         isPurchase ? '지급완료' : '입금완료', '공통', '', invId, `청구서 ${invoice_no} 정산`]
+         isPurchase ? '지급완료' : '입금완료', '', invId, `청구서 ${invoice_no} 정산`]
       )
       await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount) VALUES (?,?,?,?)', [randomUUID(), invId, txnId, total])
     }
@@ -423,11 +422,11 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
       if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
       const txnId = randomUUID()
       await conn.execute(
-        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, doc_no, invoice_id, memo)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, invoice_id, memo)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [txnId, isPurchase ? 'expense' : 'income', c.vendor_id || null, c.id, accountId,
          isPurchase ? '대금 지급' : '수금', total, issuedAt, '계좌이체',
-         isPurchase ? '지급완료' : '입금완료', '공통', '', invId, `청구서 ${invoice_no} 정산`]
+         isPurchase ? '지급완료' : '입금완료', '', invId, `청구서 ${invoice_no} 정산`]
       )
       await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount) VALUES (?,?,?,?)', [randomUUID(), invId, txnId, total])
     }
@@ -595,18 +594,18 @@ async function replaceContractItems(conn, contractId, items) {
 }
 
 router.post('/', async (req, res, next) => {
-  const { vendor_id, name, start_date, status, buyer_code, pu_no, order_no, vessel_code, cost_budget, file_url, file_name, contract_no } = req.body
+  const { vendor_id, name, start_date, status, order_no, project_no, cost_budget, file_url, file_name, contract_no } = req.body
   const f = model.normalize(req.body)   // 금액·기간·갱신 필드는 모델이 결정 (모순된 조합 저장 방지)
   const id = randomUUID()
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     await conn.execute(
-      `INSERT INTO contracts (id, vendor_id, name, amount, start_date, end_date, status, buyer_code, pu_no, order_no, vessel_code,
+      `INSERT INTO contracts (id, vendor_id, name, amount, start_date, end_date, status, order_no, project_no,
                               cost_budget, file_url, file_name, contract_no,
                               billing_mode, term_mode, unit_amount, billing_period, billing_day, initial_amount, term_months, notice_days, current_term_start, vat_mode)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [id, vendor_id||null, name, f.amount, start_date||null, f.end_date, status||'진행중', buyer_code||null, pu_no||null, order_no||null, vessel_code||null,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [id, vendor_id||null, name, f.amount, start_date||null, f.end_date, status||'진행중', order_no||null, project_no||null,
        cost_budget ? JSON.stringify(cost_budget) : null, file_url||null, file_name||null, contract_no||null,
        f.billing_mode, f.term_mode, f.unit_amount, f.billing_period, f.billing_day, f.initial_amount, f.term_months, f.notice_days, start_date||null, f.vat_mode]
     )
@@ -673,7 +672,7 @@ router.post('/', async (req, res, next) => {
 })
 
 router.put('/:id', async (req, res, next) => {
-  const { vendor_id, name, start_date, status, buyer_code, pu_no, order_no, vessel_code, file_url, file_name, contract_no, cost_budget } = req.body
+  const { vendor_id, name, start_date, status, order_no, project_no, file_url, file_name, contract_no, cost_budget } = req.body
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
@@ -683,11 +682,11 @@ router.put('/:id', async (req, res, next) => {
     const termStart = cur.current_term_start || start_date || cur.start_date || null
     const f = model.normalize({ ...req.body, current_term_start: termStart })
     const [result] = await conn.execute(
-      `UPDATE contracts SET vendor_id=?, name=?, amount=?, start_date=?, end_date=?, status=?, buyer_code=?, pu_no=?, order_no=?, vessel_code=?,
+      `UPDATE contracts SET vendor_id=?, name=?, amount=?, start_date=?, end_date=?, status=?, order_no=?, project_no=?,
                             file_url=?, file_name=?, contract_no=?,
                             billing_mode=?, term_mode=?, unit_amount=?, billing_period=?, billing_day=?, initial_amount=?, term_months=?, notice_days=?, current_term_start=?, vat_mode=?
        WHERE id=?`,
-      [vendor_id||null, name, f.amount, start_date||null, f.end_date, status||'진행중', buyer_code||null, pu_no||null, order_no||null, vessel_code||null,
+      [vendor_id||null, name, f.amount, start_date||null, f.end_date, status||'진행중', order_no||null, project_no||null,
        file_url||null, file_name||null, contract_no||null,
        f.billing_mode, f.term_mode, f.unit_amount, f.billing_period, f.billing_day, f.initial_amount, f.term_months, f.notice_days, termStart, f.vat_mode, req.params.id]
     )

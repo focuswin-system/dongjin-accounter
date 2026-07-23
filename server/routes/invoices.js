@@ -211,12 +211,12 @@ router.post('/:id/matches', async (req, res, next) => {
       const cat   = (category && category.trim()) || (isIssued ? '수금' : '대금 지급')
       const memoV = (memo && memo.trim()) || `청구서 ${inv.invoice_no || ''} 정산`.trim()
       await conn.execute(`
-        INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, doc_no, invoice_id, memo, account_code)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, invoice_id, memo, account_code)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `, [realTxnId, isIssued ? 'income' : 'expense', inv.vendor_id || null, inv.contract_id || null,
           acct, cat, matchAmount,
           date || kstToday(), '계좌이체',   // UTC(new Date())면 KST 새벽에 하루 전으로 찍힌다
-          isIssued ? '입금완료' : '지급완료', '공통', inv.contract_id ? '' : '공통', invoiceId, memoV, account_code || null])
+          isIssued ? '입금완료' : '지급완료', inv.contract_id ? '' : '공통', invoiceId, memoV, account_code || null])
     }
 
     const id = randomUUID()

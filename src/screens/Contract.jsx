@@ -290,6 +290,25 @@ const ContractTermFields = ({ form, set }) => {
         </>
       )}
 
+      {/* 상대방 발주번호·프로젝트번호 — 업종중립 선택 입력.
+          업종마다 부르는 이름이 다르다(조선=호선번호, 천막=설치현장, 선반=작업지시번호, SW=프로젝트코드). */}
+      <div className="row gap-12">
+        <div style={{ flex: 1 }}>
+          <label className="label" style={{ marginBottom: 8 }}>
+            발주번호 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span>
+          </label>
+          <input className="input" value={form.order_no || ''} placeholder="상대방 발주·수주번호"
+            onChange={e => set(f => ({ ...f, order_no: e.target.value }))}/>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className="label" style={{ marginBottom: 8 }}>
+            프로젝트·공사번호 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span>
+          </label>
+          <input className="input" value={form.project_no || ''} placeholder="예: 231호선 / PRJ-2026-01"
+            onChange={e => set(f => ({ ...f, project_no: e.target.value }))}/>
+        </div>
+      </div>
+
       {/* 기간 — 무기한이면 종료일이 없다 */}
       <div className="row gap-12">
         <div style={{ flex: 1 }}>
@@ -972,6 +991,8 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     setEditForm({
       vendor:      c.vendor_name || '',
       contract_no: c.contract_no || '',
+      order_no:    c.order_no    || '',
+      project_no:  c.project_no  || '',
       name:        c.name || '',
       status:      c.status     || '진행중',
       file_url:    c.file_url   || '',
@@ -1895,7 +1916,7 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
 
 /* ============ 계약 목록 ============ */
 const NEW_CONTRACT_FORM = {
-  vendor: "", contract_no: "", name: "", status: "진행중", file_url: "", file_name: "",
+  vendor: "", contract_no: "", order_no: "", project_no: "", name: "", status: "진행중", file_url: "", file_name: "",
   billing_mode: "onetime", term_mode: "fixed", vat_mode: "taxable", docs: [], items: [],
   amount: "", unit_amount: "", billing_period: "monthly", billing_day: "1", initial_amount: "",
   start_date: "", end_date: "", term_months: "12", notice_days: "60",
@@ -1905,6 +1926,8 @@ const NEW_CONTRACT_FORM = {
 const contractPayload = (form, vendorId) => ({
   vendor_id:   vendorId || null,
   contract_no: form.contract_no?.trim() || null,
+  order_no:    form.order_no?.trim()    || null,
+  project_no:  form.project_no?.trim()  || null,
   name:        form.name,
   status:      form.status,
   file_url:    form.file_url  || null,

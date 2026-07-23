@@ -130,9 +130,9 @@ function adaptTransaction(row) {
     method: row.method,
     status: row.status,
     accountId: row.account_id,
-    buyerType: row.buyer_type,
-    vesselNo: row.vessel_no,
-    usagePlace: row.usage_place,
+    // 업종중립 필드: 프로젝트·공사번호 / 현장·사용처 (구 vessel_no·usage_place)
+    project_no: row.project_no || '',
+    site: row.site || '',
     invoiceId: row.invoice_id,
     docNo: row.doc_no,
     evid_url: row.evid_url || '',
@@ -159,7 +159,9 @@ function adaptEmployee(row) {
     birth: row.birth_date || '',
     status: row.status || (row.active ? '재직' : '퇴사'),
     baseSalary: row.base_salary || 0,
-    account: '—',
+    // 급여이체 계좌 — 없으면 '—'(화면이 그대로 찍는다)
+    account: row.salary_account || '—',
+    salary_account: row.salary_account || '',
     pay: {
       base: row.base_salary || 0,
       mealAllowance: row.meal_allowance || 0,
@@ -789,6 +791,18 @@ export const api = {
   },
 
   // 부가세(세무관리) — 분기별 신고 집계+상태 (Docs의 getVatSummary(quarter)와 별개)
+  // 월 마감(기간 잠금) — 잠근 달의 거래는 등록·수정·삭제가 막힌다
+  async getClosings() {
+    try { return await req('/closings') } catch { return [] }
+  },
+  async closePeriod(period, memo) {
+    try { await req('/closings', { method: 'POST', body: { period, memo } }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async reopenPeriod(period) {
+    try { await req(`/closings/${period}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
   async getVatFilings(year) {
     try { return await req(`/tax/vat?year=${year}`) } catch { return { year, quarters: [] } }
   },

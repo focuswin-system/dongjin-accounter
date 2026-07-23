@@ -73,8 +73,8 @@ router.post('/generate', async (req, res, next) => {
       // kind를 안 넣으면 NULL로 들어가 지출 목록·계약 원가 어디에도 안 잡힌다(돈이 조용히 샌다).
       // 계약에 걸린 정기지출이면 그 계약(매입)에 귀속시킨다.
       await conn.execute(
-        'INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, recurring_id, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-        [id, 'expense', r.vendor_id||null, r.contract_id||null, r.account_id||null, r.category, r.amount, target, '계좌이체', '지급 대기', '공통', r.id, '정기 지출 자동 생성']
+        'INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, recurring_id, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+        [id, 'expense', r.vendor_id||null, r.contract_id||null, r.account_id||null, r.category, r.amount, target, '계좌이체', '지급 대기', r.id, '정기 지출 자동 생성']
       )
       await conn.execute('UPDATE recurring_expenses SET last_generated = ? WHERE id = ?', [target, r.id])
       generated.push({ id, vendor_id: r.vendor_id, category: r.category, amount: r.amount, date: target })

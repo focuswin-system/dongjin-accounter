@@ -35,9 +35,9 @@ async function syncTaxTxn({ existingTxnId, isDone, isRefund, amount, accountId, 
   }
   const id = randomUUID()
   await db.execute(
-    `INSERT INTO transactions (id, kind, account_id, category, amount, date, method, status, buyer_type, doc_no, memo, account_code)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [id, kind, accountId || null, category, amount, d, '계좌이체', status, '공통', '공통', memo, accountCode || null])
+    `INSERT INTO transactions (id, kind, account_id, category, amount, date, method, status, doc_no, memo, account_code)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    [id, kind, accountId || null, category, amount, d, '계좌이체', status, '공통', memo, accountCode || null])
   return id
 }
 

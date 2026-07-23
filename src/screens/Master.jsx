@@ -103,6 +103,7 @@ const MASTER_TABS = [
   { id: "employType",      label: "고용형태", custom: true },
   { id: "company",         label: "회사 정보", custom: true },
   { id: "template",        label: "문서 양식" },
+  { id: "closing",         label: "월 마감", custom: true },
 ];
 
 const TAB_BY_ID = Object.fromEntries(MASTER_TABS.map(t => [t.id, t]));
@@ -128,6 +129,7 @@ const MASTER_SECTIONS = {
     groups: [
       { label: "회사", tabs: ["company"] },
       { label: "시스템", tabs: ["user", "approval", "template"] },
+      { label: "장부 마감", tabs: ["closing"] },
     ],
   },
   hr: {
@@ -889,7 +891,7 @@ const VendorPanel = () => {
   const [showInactive, setShowInactive] = useState(false)   // 미사용 거래처는 기본으로 감춘다
   const [drawerOpen,  setDrawerOpen]  = useState(false)
   const [editing,     setEditing]     = useState(null)
-  const [form, setForm] = useState({ name:'', gubu:'A', type:'', biz_no:'', ceo:'', contact:'', phone:'', fax:'', email:'', address:'' })
+  const [form, setForm] = useState({ name:'', gubu:'A', type:'', biz_no:'', ceo:'', contact:'', phone:'', fax:'', email:'', address:'', biz_type:'', biz_item:'', pay_account:'' })
 
   // 기준정보 화면이므로 미사용까지 다 불러온다(다른 화면의 선택 목록은 사용중만 받는다).
   const load = () => api.getVendors({ all: true }).then(setVendors)
@@ -917,12 +919,12 @@ const VendorPanel = () => {
 
   const openNew = () => {
     setEditing(null)
-    setForm({ name:'', gubu:'A', type:'', biz_no:'', ceo:'', contact:'', phone:'', fax:'', email:'', address:'' })
+    setForm({ name:'', gubu:'A', type:'', biz_no:'', ceo:'', contact:'', phone:'', fax:'', email:'', address:'', biz_type:'', biz_item:'', pay_account:'' })
     setDrawerOpen(true)
   }
   const openEdit = (v) => {
     setEditing(v)
-    setForm({ name:v.name, gubu:v.gubu||'A', type:v.type||'', biz_no:v.biz_no||'', ceo:v.ceo||'', contact:v.contact||'', phone:v.phone||'', fax:v.fax||'', email:v.email||'', address:v.address||'' })
+    setForm({ name:v.name, gubu:v.gubu||'A', type:v.type||'', biz_no:v.biz_no||'', ceo:v.ceo||'', contact:v.contact||'', phone:v.phone||'', fax:v.fax||'', email:v.email||'', address:v.address||'', biz_type:v.biz_type||'', biz_item:v.biz_item||'', pay_account:v.pay_account||'' })
     setDrawerOpen(true)
   }
   const handleSave = async () => {
@@ -1062,6 +1064,26 @@ const VendorPanel = () => {
               <label className="label" style={{ marginBottom: 8 }}>대표자</label>
               <input className="input" value={form.ceo} onChange={e => f('ceo', e.target.value)} placeholder="홍길동"/>
             </div>
+          </div>
+
+          {/* 업태·종목은 세금계산서에 찍히는 항목이라 거래처마다 들고 있어야 한다 */}
+          <div className="row gap-16" style={{ alignItems: 'flex-start' }}>
+            <div style={{ flex: 1 }}>
+              <label className="label" style={{ marginBottom: 8 }}>업태</label>
+              <input className="input" value={form.biz_type} onChange={e => f('biz_type', e.target.value)} placeholder="예: 제조업, 서비스업"/>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="label" style={{ marginBottom: 8 }}>종목</label>
+              <input className="input" value={form.biz_item} onChange={e => f('biz_item', e.target.value)} placeholder="예: 소프트웨어 개발"/>
+            </div>
+          </div>
+
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>
+              지급계좌 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택 (이 거래처에 이체할 계좌)</span>
+            </label>
+            <input className="input" value={form.pay_account} onChange={e => f('pay_account', e.target.value)}
+              placeholder="예: 기업은행 123-456789-01-011 (주)○○"/>
           </div>
 
           <div className="row gap-16" style={{ alignItems: 'flex-start' }}>
@@ -2377,6 +2399,86 @@ const UserPanel = ({ currentUser }) => {
   );
 };
 
+/* 월 마감 — 부가세 신고·월 마감을 끝낸 달의 장부를 잠근다.
+   잠근 달의 거래는 등록·수정·삭제가 서버에서 막힌다(lib/closing.js). 되돌리려면 해제. */
+const ClosingPanel = () => {
+  const toast = useToast()
+  const { confirm } = useConfirm()
+  const [rows, setRows] = useState([])
+  const [period, setPeriod] = useState(() => {
+    const d = new Date(); d.setMonth(d.getMonth() - 1)   // 보통 마감하는 건 지난달
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
+  const [memo, setMemo] = useState('')
+
+  const load = () => api.getClosings().then(setRows)
+  useEffect(() => { load() }, [])
+
+  const close = async () => {
+    const res = await api.closePeriod(period, memo)
+    if (!res.ok) return toast.push(res.error || '마감에 실패했어요')
+    toast.push(`${period} 장부를 마감했어요`); setMemo(''); load()
+  }
+  const reopen = async (p) => {
+    const ok = await confirm({
+      tone: 'warn', icon: <Icon.Warn size={22}/>, title: `${p} 마감 해제`,
+      body: '해제하면 이 달의 거래를 다시 고칠 수 있어요. 이미 제출한 신고자료와 장부가 어긋날 수 있으니 주의하세요.',
+      confirmLabel: '해제',
+    })
+    if (!ok) return
+    const res = await api.reopenPeriod(p)
+    if (!res.ok) return toast.push(res.error || '해제에 실패했어요')
+    toast.push(`${p} 마감을 해제했어요`); load()
+  }
+
+  return (
+    <div style={{ padding: 20 }}>
+      <div style={{ marginBottom: 16 }}>
+        <div className="section-title">월 마감</div>
+        <div className="section-sub">
+          부가세 신고나 월 결산을 끝낸 달을 잠급니다. 잠근 달의 거래는 등록·수정·삭제가 막혀,
+          이미 제출한 자료와 장부가 어긋나지 않아요.
+        </div>
+      </div>
+
+      <div className="card card-pad" style={{ marginBottom: 16 }}>
+        <div className="row gap-12" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ width: 170 }}>
+            <label className="label" style={{ marginBottom: 8 }}>마감할 달</label>
+            <input className="input" type="month" value={period} onChange={e => setPeriod(e.target.value)}/>
+          </div>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <label className="label" style={{ marginBottom: 8 }}>메모 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+            <input className="input" value={memo} placeholder="예: 1기 예정 부가세 신고 완료" onChange={e => setMemo(e.target.value)}/>
+          </div>
+          <button className="btn primary" onClick={close}><Icon.Check size={14}/> 마감</button>
+        </div>
+      </div>
+
+      <div className="card" style={{ overflow: 'hidden' }}>
+        <table className="table">
+          <thead><tr><th style={{ width: 120 }}>마감한 달</th><th>메모</th><th style={{ width: 150 }}>마감 시각</th><th style={{ width: 90 }}></th></tr></thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr><td colSpan={4} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)' }}>마감한 달이 없어요.</td></tr>
+            )}
+            {rows.map(r => (
+              <tr key={r.id}>
+                <td className="fw-600 num">{r.period}</td>
+                <td className="text-sm text-muted">{r.memo || '—'}</td>
+                <td className="text-sm text-muted2 num">{String(r.created_at || '').slice(0, 16).replace('T', ' ')}</td>
+                <td>
+                  <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => reopen(r.period)}>해제</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 export const MasterScreen = ({ user, section = "base", forcedTab }) => {
   const toast = useToast();
   const sectionCfg = MASTER_SECTIONS[section] || MASTER_SECTIONS.base;
@@ -2397,7 +2499,7 @@ export const MasterScreen = ({ user, section = "base", forcedTab }) => {
     )
   }, []);
 
-  const isCustomTab = ["account", "accountBalance", "recurringExpense", "recurringInvoice", "payroll", "payrollItems", "employType", "accountSubject", "category", "vendor", "department", "position", "company", "user", "approval", "jeokyo", "item", "insurance", "fixed_asset", "intangible_asset"].includes(activeTab)
+  const isCustomTab = ["account", "accountBalance", "recurringExpense", "recurringInvoice", "payroll", "payrollItems", "employType", "accountSubject", "category", "vendor", "department", "position", "company", "user", "approval", "jeokyo", "item", "insurance", "fixed_asset", "intangible_asset", "evidence_type", "closing"].includes(activeTab)
   const data = !isCustomTab ? MASTER_DATA[activeTab] : null
   const rawRows = activeTab === "user" ? userRows : (data?.rows || [])
   const rows = rawRows.filter(r => !q || r.some(c => String(c).toLowerCase().includes(q.toLowerCase())));
@@ -2418,6 +2520,7 @@ export const MasterScreen = ({ user, section = "base", forcedTab }) => {
     if (activeTab === "employType")       return <EmployTypePanel/>
     if (activeTab === "user")             return <UserPanel currentUser={user}/>
     if (activeTab === "approval")         return <ApprovalPanel/>
+    if (activeTab === "closing")          return <ClosingPanel/>
     if (activeTab === "department")       return <HrCodePanel type="dept" label="부서"/>
     if (activeTab === "position")         return <HrCodePanel type="pos"  label="직위"/>
     return null

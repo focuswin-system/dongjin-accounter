@@ -156,7 +156,7 @@ router.get('/:id', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     const [[c]] = await conn.execute(
-      `SELECT w.*, e.name AS employee_name, e.emp_no, e.role, e.department, e.birth_date, e.join_date, e.status AS emp_status, e.leave_date
+      `SELECT w.*, e.name AS employee_name, e.emp_no, e.role, e.department, e.birth_date, e.salary_account, e.join_date, e.status AS emp_status, e.leave_date
        FROM work_contracts w LEFT JOIN employees e ON w.employee_id = e.id WHERE w.id = ?`,
       [req.params.id]
     )
@@ -220,10 +220,10 @@ router.post('/', async (req, res, next) => {
       const empNo = await nextEmpNo(conn)
       const personKind = req.body.kind === 'labor' ? 'employee' : 'worker'
       await conn.execute(
-        `INSERT INTO employees (id, emp_no, name, role, department, base_salary, join_date, birth_date, status, active, person_kind)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO employees (id, emp_no, name, role, department, base_salary, join_date, birth_date, status, active, person_kind, salary_account)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
         [eid, empNo, e.name, e.role || '', e.department || '', e.base_salary || 0,
-         e.join_date || req.body.start_date || null, e.birth_date || null, '재직', 1, personKind]
+         e.join_date || req.body.start_date || null, e.birth_date || null, '재직', 1, personKind, e.salary_account || null]
       )
       employeeId = eid
     }
@@ -405,10 +405,10 @@ router.post('/:id/pay', async (req, res, next) => {
       // 소득구분에 맞는 카테고리로 지출 기록(급여와 구분되어 신고자료 집계가 섞이지 않게)
       const category = c.income_type === '일용' ? '일용노무비' : c.income_type === '기타' ? '기타소득 지급' : '용역비'
       await conn.execute(
-        `INSERT INTO transactions (id, kind, account_id, category, amount, date, method, status, buyer_type, employee_id, payroll_id, memo)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO transactions (id, kind, account_id, category, amount, date, method, status, employee_id, payroll_id, memo)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
         [txnId, 'expense', account_id, category, net, date || pay_date || kstToday(),
-         '계좌이체', '지급완료', '공통', c.employee_id, payrollId, memo || `${m} ${c.employee_name} ${category}`]
+         '계좌이체', '지급완료', c.employee_id, payrollId, memo || `${m} ${c.employee_name} ${category}`]
       )
       // ↑ status '지급완료'(공백 없음) — 계좌 잔액 계산(accounts.js)이 이 값만 지출로 센다.
       await conn.execute('UPDATE payroll SET status = ? WHERE id = ?', ['지급완료', payrollId])

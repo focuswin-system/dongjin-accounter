@@ -174,10 +174,11 @@ CLAUDE.md에 이미 계획됨: `ref_items type='evidence_type'` (세금계산서
 - 조치: 분류를 **비목 그룹(`categories.group_name`) + 일반 단어**로 바꿔 업종중립화(`costBucket`). 상세 탭과 `/cost-analysis`가 같은 함수를 쓴다.
 - 목적: 계약 수익성(예상 마진 vs 실제 마진) 관리. §1.3 라인 원가와 상호보완 — 예산은 사전, 라인 원가는 사후.
 
-### 5.2 마감/기간잠금 (I15)
-- `closed_periods`(연·월/분기 잠금) 개념 도입: 잠긴 기간의 거래는 수정·삭제 차단(또는 경고).
-- 부가세 신고 완료·월 마감 시 잠금 → 신고자료와 장부 불일치 방지.
-- 간이 수준: 월 단위 잠금 플래그 + 관리자만 해제.
+### 5.2 마감/기간잠금 (I15) — ✅ 완료
+- `closed_periods`(YYYY-MM 단위) + `server/lib/closing.js`. 잠긴 달의 거래는 **등록·수정·삭제 모두 409로 차단**.
+- **수정은 옮기기 전·후 두 날짜를 모두 검사한다.** 한쪽만 보면 잠긴 달에서 거래를 빼내거나(잠긴 달 → 열린 달) 밀어넣을 수 있다.
+- 아직 지나지 않은 달은 마감할 수 없다(그 달의 거래를 아예 못 넣게 되는 사고 방지).
+- UI: 환경설정 > 장부 마감. 해제는 경고 확인 후 가능.
 
 ---
 
@@ -208,8 +209,8 @@ CLAUDE.md에 이미 계획됨: `ref_items type='evidence_type'` (세금계산서
 - **P2 — 계약 전 타입 품목 허용 + 라인 원가 + 원가예산** ✅ 완료: contract_items(cost_price·qty)/invoice_lines(cost_price), 계약폼 품목 편집기 전 타입 노출(합계=계약금액, 서버 `contract-model`이 재계산), 계약 상세 품목표, 지출폼이 매입가로 자동채움, 원가 실적 분류 업종중립화(§5.1b).
 - **P3 — 회계처리 IA 재편** ✅ 완료: nav/포털을 판매·매출 / 매입 / 경비 / 장부로 재편, MiscPL 부활(+필터 교정), 정기청구·정기지출 독립 화면화, 권한 자원 카탈로그 동기화(36개).
 - **P4 — 부가세 정합성** ✅ 완료: transactions supply/vat/tax_type 분리 + 집계 통합(청구서+직접거래, 이중계상 방지), 영세율 3종(비목·계약·품목·거래·청구서), vat_deductible(비목 기본값→거래 상속), 적격증빙 유형 실구현. 세액 해석은 `server/lib/vat.js` 한 곳으로 모음.
-- **P5 — 위생·마감**: 잔재 컬럼 범용화(project_no/site/order_no)+입력 UI, closed_periods 도입.
-- **P6 — 거래처·인사 필드**: biz_type/biz_item/pay_account, salary_account.
+- **P5 — 위생·마감** ✅ 완료: 잔재 컬럼 업종중립 범용화(project_no·site·order_no) + 1회 데이터 이관 + 계약폼·거래폼 입력 UI 신설, closed_periods 월 마감(등록·수정·삭제 차단, 옮기기는 전후 두 날짜 검사).
+- **P6 — 거래처·인사 필드** ✅ 완료: vendors biz_type·biz_item·pay_account, employees salary_account(부분 업데이트가 지우지 않게 COALESCE). 주민번호는 미저장.
 - **(후속·경영관리)** 손익계산서(매출−매출원가−판관비=영업이익+영업외) 리포트 — P2/P4의 데이터가 전제. 이 문서 범위 밖.
 
 ---

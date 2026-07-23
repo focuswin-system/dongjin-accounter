@@ -239,11 +239,11 @@ router.post('/:id/process', async (req, res, next) => {
       // contract_id 를 청구서에서 승계한다. 안 넣으면 그 매입계약의 지급 내역·원가 실적에서
       // 통째로 빠져, 같은 청구서를 결의서 없이 바로 '지급 처리'했을 때와 숫자가 달라진다.
       await conn.execute(
-        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, doc_no, memo)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, memo)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
         [id, 'expense', r.vendor_id || null, invContractId, acct, r.title || '지출', amt,
          effDate, r.pay_method || '계좌이체',
-         '지급완료', '공통', r.doc_no, `결의서 ${r.doc_no} 집행`])
+         '지급완료', r.doc_no, `결의서 ${r.doc_no} 집행`])
       linkedTxnId = id
     } else {
       await rollbackQuietly(conn); return res.status(400).json({ error: "mode는 'link' 또는 'create'여야 해요" })

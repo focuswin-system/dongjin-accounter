@@ -46,11 +46,11 @@ router.get('/:id', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email } = req.body
+    const { name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email, biz_type, biz_item, pay_account } = req.body
     const id = randomUUID()
     await req.db.execute(
-      'INSERT INTO vendors (id, name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-      [id, name, biz_no||'', ceo||'', address||'', phone||'', gubu||'A', type||'', service_type||'', contact||'', fax||'', email||'']
+      'INSERT INTO vendors (id, name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email, biz_type, biz_item, pay_account) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [id, name, biz_no||'', ceo||'', address||'', phone||'', gubu||'A', type||'', service_type||'', contact||'', fax||'', email||'', biz_type||'', biz_item||'', pay_account||'']
     )
     res.json({ id })
   } catch (e) { next(e) }
@@ -58,10 +58,10 @@ router.post('/', async (req, res, next) => {
 
 router.put('/:id', async (req, res, next) => {
   try {
-    const { name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email } = req.body
+    const { name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email, biz_type, biz_item, pay_account } = req.body
     const [result] = await req.db.execute(
-      'UPDATE vendors SET name=?, biz_no=?, ceo=?, address=?, phone=?, gubu=?, type=?, service_type=?, contact=?, fax=?, email=? WHERE id=?',
-      [name, biz_no||'', ceo||'', address||'', phone||'', gubu||'A', type||'', service_type||'', contact||'', fax||'', email||'', req.params.id]
+      'UPDATE vendors SET name=?, biz_no=?, ceo=?, address=?, phone=?, gubu=?, type=?, service_type=?, contact=?, fax=?, email=?, biz_type=?, biz_item=?, pay_account=? WHERE id=?',
+      [name, biz_no||'', ceo||'', address||'', phone||'', gubu||'A', type||'', service_type||'', contact||'', fax||'', email||'', biz_type||'', biz_item||'', pay_account||'', req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })

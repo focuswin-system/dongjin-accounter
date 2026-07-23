@@ -8,6 +8,7 @@ const { normalizeStatus, ledgerError } = require('../lib/ledger')
 const { restoreLastGenerated } = require('../lib/recurrence')
 const { removeUploadedFile } = require('../lib/uploads')
 const { vatFields } = require('../lib/vat')
+const { closedPeriodError } = require('../lib/closing')
 
 const router = Router()
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
@@ -42,7 +43,7 @@ async function attachDocs(db, rows) {
 
 router.get('/', async (req, res, next) => {
   try {
-    const { kind, contractId, buyerType, vesselNo, category, from, to, accountId } = req.query
+    const { kind, contractId, projectNo, category, from, to, accountId } = req.query
     let sql = `SELECT t.*, v.name AS vendor_name, c.name AS contract_name, a.name AS account_name,
                       e.name AS employee_name, ri.name AS item_name,
                       cc.name AS cost_contract_name
@@ -58,8 +59,7 @@ router.get('/', async (req, res, next) => {
     if (kind)       { sql += ' AND t.kind = ?';        params.push(kind) }
     // 계약으로 거를 땐 두 축을 모두 본다 (그 계약의 근거 거래 + 그 계약에 귀속된 원가)
     if (contractId) { sql += ' AND (t.contract_id = ? OR t.cost_contract_id = ?)'; params.push(contractId, contractId) }
-    if (buyerType)  { sql += ' AND t.buyer_type = ?';  params.push(buyerType) }
-    if (vesselNo)   { sql += ' AND t.vessel_no = ?';   params.push(vesselNo) }
+    if (projectNo)  { sql += ' AND t.project_no = ?';  params.push(projectNo) }
     if (category)   { sql += ' AND t.category = ?';    params.push(category) }
     if (accountId)  { sql += ' AND t.account_id = ?';  params.push(accountId) }
     if (from)       { sql += ' AND t.date >= ?';       params.push(from) }
@@ -73,10 +73,9 @@ router.get('/', async (req, res, next) => {
 
 router.get('/summary', async (req, res, next) => {
   try {
-    const { buyerType, year, month } = req.query
+    const { year, month } = req.query
     let sql = "SELECT category, SUM(amount) AS total, COUNT(*) AS cnt FROM transactions WHERE kind='expense'"
     const params = []
-    if (buyerType) { sql += ' AND buyer_type = ?'; params.push(buyerType) }
     if (year && month) { sql += ' AND date LIKE ?'; params.push(`${year}-${month}%`) }
     sql += ' GROUP BY category ORDER BY total DESC'
     const [rows] = await req.db.execute(sql, params)
@@ -107,12 +106,14 @@ router.post('/', async (req, res, next) => {
   try {
     const {
       kind, vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
-      amount, date, method, status, buyer_type, vessel_no, usage_place,
+      amount, date, method, status, project_no, site,
       invoice_id, recurring_id, doc_no, employee_id, evid_type, evid_url, memo,
       item_id, account_code, supply_amount, vat_amount, tax_type, vat_deductible
     } = req.body
     const dateErr = futureDateError(date)
     if (dateErr) return res.status(400).json({ error: dateErr })
+    const closedErr = await closedPeriodError(req.db, date)
+    if (closedErr) return res.status(409).json({ error: closedErr })
     const vat = vatFields({ amount, supply_amount, vat_amount, tax_type, vat_deductible })
     // 완료 상태인데 계좌가 없으면 잔액에 잡히지 않는다(lib/ledger.js 참고)
     const st = normalizeStatus(status || '지급완료')
@@ -123,12 +124,12 @@ router.post('/', async (req, res, next) => {
     const costId = kind === 'expense' ? (cost_contract_id || null) : null
     await req.db.execute(`
       INSERT INTO transactions (id, kind, vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
-        amount, date, method, status, buyer_type, vessel_no, usage_place,
+        amount, date, method, status, project_no, site,
         invoice_id, recurring_id, doc_no, employee_id, evid_type, evid_url, memo, item_id, account_code,
         supply_amount, vat_amount, tax_type, vat_deductible)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `, [id, kind, vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
-        amount, date, method||'', st, buyer_type||'공통', vessel_no||'', usage_place||'',
+        amount, date, method||'', st, project_no||'', site||'',
         invoice_id||null, recurring_id||null, doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'',
         item_id||null, account_code||null,
         vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible])
@@ -140,7 +141,7 @@ router.put('/:id', async (req, res, next) => {
   try {
     const {
       vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
-      amount, date, method, status, buyer_type, vessel_no, usage_place,
+      amount, date, method, status, project_no, site,
       doc_no, employee_id, evid_type, evid_url, memo, item_id, account_code,
       supply_amount, vat_amount, tax_type, vat_deductible
     } = req.body
@@ -148,8 +149,11 @@ router.put('/:id', async (req, res, next) => {
     if (dateErr) return res.status(400).json({ error: dateErr })
     const vat = vatFields({ amount, supply_amount, vat_amount, tax_type, vat_deductible })
     // 편집으로 수입 거래가 되면 원가 귀속은 떨어진다
-    const [[cur]] = await req.db.execute('SELECT kind FROM transactions WHERE id = ?', [req.params.id])
+    const [[cur]] = await req.db.execute('SELECT kind, date AS cur_date FROM transactions WHERE id = ?', [req.params.id])
     if (!cur) return res.status(404).json({ error: 'Not found' })
+    // 마감은 옮기기 전·후 두 날짜를 모두 본다 — 한쪽만 보면 잠긴 달에서 거래를 빼내거나 밀어넣을 수 있다
+    const closedErr = await closedPeriodError(req.db, cur.cur_date, date)
+    if (closedErr) return res.status(409).json({ error: closedErr })
     const costId = cur.kind === 'expense' ? (cost_contract_id || null) : null
     // 금액이 바뀌면 청구서 매칭액도 따라가야 한다. 거래 수정과 매칭 갱신이 갈라지면
     // 청구서 정산액이 옛 금액으로 남아 미수/미지급이 틀어지므로 한 트랜잭션으로 묶는다.
@@ -158,12 +162,12 @@ router.put('/:id', async (req, res, next) => {
       await conn.beginTransaction()
       const [result] = await conn.execute(`
         UPDATE transactions SET vendor_id=?, contract_id=?, cost_contract_id=?, account_id=?, category=?, sub_category=?,
-          amount=?, date=?, method=?, status=?, buyer_type=?, vessel_no=?, usage_place=?,
+          amount=?, date=?, method=?, status=?, project_no=?, site=?,
           doc_no=?, employee_id=?, evid_type=?, evid_url=?, memo=?, item_id=?, account_code=?,
           supply_amount=?, vat_amount=?, tax_type=?, vat_deductible=?
         WHERE id=?
       `, [vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
-          amount, date, method||'', status||'지급완료', buyer_type||'공통', vessel_no||'', usage_place||'',
+          amount, date, method||'', status||'지급완료', project_no||'', site||'',
           doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'', item_id||null, account_code||null,
           vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible, req.params.id])
       if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
@@ -252,6 +256,12 @@ router.delete('/:id', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
+    // 마감된 달의 거래는 지울 수 없다(신고자료와 장부가 어긋난다)
+    const [[del]] = await conn.execute('SELECT date FROM transactions WHERE id = ?', [req.params.id])
+    if (del) {
+      const closedErr = await closedPeriodError(conn, del.date)
+      if (closedErr) { await rollbackQuietly(conn); return res.status(409).json({ error: closedErr }) }
+    }
     // 세금 납부 거래는 여기서 지우면 안 된다.
     // vat_filings·other_taxes 의 txn_id 는 나중에 ensureColumn 으로 붙인 컬럼이라 FK가 없어,
     // 지워도 DB가 막아주지 않는다. 그러면 세무 화면은 '납부 완료 / 납부액 500만'인데
@@ -345,11 +355,11 @@ router.post('/import/commit', async (req, res, next) => {
       // account_id 를 반드시 넣는다. 빠지면 위 주석대로 '완료 상태'로만 들어가고
       // 계좌 잔액에는 영원히 안 잡혀, 대량 등록 직후부터 통장과 장부가 어긋난다.
       await conn.execute(`
-        INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, buyer_type, doc_no, memo)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, memo)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
       `, [randomUUID(), it.kind, vendorId, contractId, it.account_id || accountId,
           it.category || '', it.amount, it.date,
-          '계좌이체', it.kind === 'income' ? '입금완료' : '지급완료', '공통',
+          '계좌이체', it.kind === 'income' ? '입금완료' : '지급완료',
           (cname && !contractId) ? cname : '', it.memo || ''])
       inserted++
     }

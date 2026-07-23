@@ -262,7 +262,7 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
   const [depts, setDepts] = useState([])
   const [positions, setPositions] = useState([])
   const [form, setForm] = useState({
-    name: '', department: '', role: '', birth_date: '', start_date: '', end_date: '',
+    name: '', department: '', role: '', birth_date: '', salary_account: '', start_date: '', end_date: '',
     employ_type_id: '', employ_type: '', term_mode: 'open', pay_form: 'monthly', work_hours: '', pay_day: 25,
     insure_np: 1, insure_hi: 1, insure_ei: 1, insure_ai: 1, title: '',
   })
@@ -283,7 +283,7 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
     api.getWorkContract(info.id).then(c => {
       if (!c) return
       setForm(f => ({ ...f, name: c.employee_name, department: c.department === '—' ? '' : c.department,
-        role: c.role || '', birth_date: c.birth_date || '', start_date: c.start_date || '', end_date: c.end_date || '',
+        role: c.role || '', birth_date: c.birth_date || '', salary_account: c.salary_account || '', start_date: c.start_date || '', end_date: c.end_date || '',
         employ_type_id: c.employ_type_id || '', employ_type: c.employ_type || '', term_mode: c.term_mode || 'open',
         pay_form: c.pay_form || 'monthly', work_hours: c.work_hours || '', pay_day: c.pay_day || 25,
         insure_np: c.insure_np, insure_hi: c.insure_hi, insure_ei: c.insure_ei, insure_ai: c.insure_ai,
@@ -316,11 +316,11 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
     }
     if (editing) { body.id = info.id; body.employee_id = form.employee_id }
     else if (info.employeeId) body.employee_id = info.employeeId
-    else body.employee = { name: form.name, department: form.department, role: form.role, birth_date: form.birth_date, join_date: form.start_date }
+    else body.employee = { name: form.name, department: form.department, role: form.role, birth_date: form.birth_date, join_date: form.start_date, salary_account: form.salary_account || '' }
     const res = await api.saveWorkContract(body)
     // 편집 시 직원 인적정보도 갱신
     if (res.ok && editing && form.employee_id) {
-      await api.updateEmployee(form.employee_id, { name: form.name, department: form.department, role: form.role, birth_date: form.birth_date || null, status: '재직' })
+      await api.updateEmployee(form.employee_id, { name: form.name, department: form.department, role: form.role, birth_date: form.birth_date || null, salary_account: form.salary_account || '', status: '재직' })
     }
     if (res.ok) { toast.push(editing ? '계약을 저장했어요' : '직원·계약을 등록했어요'); onSaved() }
     else toast.push(res.error || '저장에 실패했어요')
@@ -353,6 +353,10 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
                 </Field>
               </div>
               <Field label="생년월일" hint="급여명세서 표기용"><input className="input num" type="date" value={form.birth_date} onChange={e => setForm(f => ({ ...f, birth_date: e.target.value }))}/></Field>
+              {/* 주민등록번호는 저장하지 않는다 — 신고서 자동생성이 범위 밖이라 얻는 게 없고,
+                  저장하는 순간 암호화·파기 의무가 붙는다. 급여이체 계좌만 둔다. */}
+              <Field label="급여이체 계좌" hint="선택 · 급여 지급 시 참고"><input className="input" value={form.salary_account || ''}
+                onChange={e => setForm(f => ({ ...f, salary_account: e.target.value }))} placeholder="예: 하나은행 123-456789-01 홍길동"/></Field>
             </div>
           </>
         )}

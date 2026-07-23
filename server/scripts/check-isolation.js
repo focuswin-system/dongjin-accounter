@@ -196,6 +196,63 @@ try {
   else fail(`import 검사 실패: ${e.message}`)
 }
 
+// [8] SQL — INSERT 컬럼 수와 값(placeholder) 수 일치
+// 컬럼 하나를 빼면서 VALUES의 ?를 안 줄이면 빌드도 린트도 통과하고, 그 코드가 실제로 실행되는
+// 순간에만 터진다(2026-07-23 잔재 컬럼 정리 때 9곳에서 났다). 기계적으로 세는 게 확실하다.
+try {
+  console.log('\n[8] SQL — INSERT 컬럼 수 ↔ 값 개수')
+  const roots = [path.join(__dirname, '..', 'routes'), path.join(__dirname, '..')]
+  const bad = []
+  let checked = 0
+  // 괄호 안에 NOW()·UUID() 같은 함수 호출이 있으면 단순 [^)] 매칭이 잘리므로 균형 잡힌 괄호로 읽는다
+  const readParen = (s, from) => {
+    let depth = 0
+    for (let i = from; i < s.length; i++) {
+      if (s[i] === '(') depth++
+      else if (s[i] === ')') { depth--; if (depth === 0) return { body: s.slice(from + 1, i), end: i } }
+    }
+    return null
+  }
+  const splitTop = (s) => {
+    const out = []; let depth = 0, cur = ''
+    for (const ch of s) {
+      if (ch === '(') depth++
+      if (ch === ')') depth--
+      if (ch === ',' && depth === 0) { out.push(cur); cur = ''; continue }
+      cur += ch
+    }
+    out.push(cur)
+    return out.map(x => x.trim()).filter(Boolean)
+  }
+  for (const dir of roots) {
+    if (!fs.existsSync(dir)) continue
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith('.js')) continue
+      const p = path.join(dir, f)
+      if (fs.statSync(p).isDirectory()) continue
+      const s = fs.readFileSync(p, 'utf8')
+      const re = /INSERT\s+INTO\s+(\w+)\s*\(/gis
+      let m
+      while ((m = re.exec(s))) {
+        const cols = readParen(s, m.index + m[0].length - 1)
+        if (!cols) continue
+        const after = s.slice(cols.end + 1)
+        const vm = /^\s*VALUES\s*\(/i.exec(after)
+        if (!vm) continue
+        const vals = readParen(after, vm[0].length - 1)
+        if (!vals) continue
+        checked++
+        const nc = splitTop(cols.body).length, nv = splitTop(vals.body).length
+        if (nc !== nv) bad.push(`${f}:${s.slice(0, m.index).split('\n').length} ${m[1]} 컬럼 ${nc} ≠ 값 ${nv}`)
+      }
+    }
+  }
+  if (bad.length) fail(`INSERT 컬럼/값 개수 불일치: ${bad.join(' · ')}`)
+  else ok(`INSERT 컬럼/값 개수 일치 (검사 ${checked}건)`)
+} catch (e) {
+  fail(`SQL 검사 실패: ${e.message}`)
+}
+
 console.log('\n' + '━'.repeat(64))
 if (failures === 0) {
   console.log(' ✅ 격리 검사 통과')

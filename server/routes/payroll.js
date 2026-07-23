@@ -249,10 +249,10 @@ router.post('/:id/pay', async (req, res, next) => {
     await conn.beginTransaction()
     const txnId = randomUUID()
     await conn.execute(`
-      INSERT INTO transactions (id, kind, account_id, category, amount, date, method, status, buyer_type, employee_id, payroll_id, memo)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      INSERT INTO transactions (id, kind, account_id, category, amount, date, method, status, employee_id, payroll_id, memo)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
     `, [txnId, 'expense', account_id, '급여', amt, date || kstToday(),
-        method || '계좌이체', '지급완료', '공통', p.employee_id, p.id, memo || `${p.month} ${p.name} 급여 지급`])
+        method || '계좌이체', '지급완료', p.employee_id, p.id, memo || `${p.month} ${p.name} 급여 지급`])
     // ↑ 거래 status는 '지급완료'(공백 없음) — 계좌 잔액 계산(accounts.js)이 이 값만 지출로 센다.
     //   날짜 폴백도 kstToday() — UTC(new Date())를 쓰면 KST 새벽 등록 시 하루 전으로 찍힌다.
 

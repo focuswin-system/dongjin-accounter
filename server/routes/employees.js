@@ -14,7 +14,7 @@ router.post('/', async (req, res, next) => {
   try {
     const { name, role, department, base_salary, join_date, birth_date, status,
             position_allowance, meal_allowance, vehicle_allowance, dependents, child_dependents,
-            person_kind, leave_date } = req.body
+            person_kind, leave_date, salary_account } = req.body
     const id = randomUUID()
     // 사번은 기존 최대 숫자 접미 + 1. COUNT 기반은 삭제 후 중복 사번이 나온다.
     const [existing] = await req.db.execute('SELECT emp_no FROM employees')
@@ -24,13 +24,13 @@ router.post('/', async (req, res, next) => {
     const st = status || '재직'
     await req.db.execute(
       `INSERT INTO employees (id, emp_no, name, role, department, base_salary, join_date, birth_date, status, active,
-        position_allowance, meal_allowance, vehicle_allowance, dependents, child_dependents, person_kind, leave_date)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        position_allowance, meal_allowance, vehicle_allowance, dependents, child_dependents, person_kind, leave_date, salary_account)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [id, emp_no, name, role||'', department||'', base_salary||0, join_date||null, birth_date||null,
        st, st === '퇴사' ? 0 : 1,
        position_allowance||0, meal_allowance||0, vehicle_allowance||0,
        dependents == null ? 1 : dependents, child_dependents||0,
-       person_kind === 'worker' ? 'worker' : 'employee', leave_date||null]
+       person_kind === 'worker' ? 'worker' : 'employee', leave_date||null, salary_account||null]
     )
     res.json({ id, emp_no })
   } catch (e) { next(e) }
@@ -40,21 +40,23 @@ router.put('/:id', async (req, res, next) => {
   try {
     const { name, role, department, base_salary, join_date, birth_date, active, status,
             position_allowance, meal_allowance, vehicle_allowance, dependents, child_dependents,
-            person_kind, leave_date } = req.body
+            person_kind, leave_date, salary_account } = req.body
     // 상태를 단일 소스로: status가 오면 그걸 저장하고 active를 파생(퇴사만 비활성).
     // (하위호환: status 없이 active만 오던 옛 호출은 active로 상태를 역산.)
     const st = status != null ? status : (active === false ? '퇴사' : '재직')
     // person_kind는 옛 호출(미전송)이 기존 값을 덮어쓰지 않도록 COALESCE로 보존.
+    // salary_account도 같은 이유로 COALESCE — WorkContract가 name·status만 담아 이 API를 부르는데,
+    // 그때 급여계좌가 조용히 지워지면 안 된다. 빈 문자열을 보내면 '지우기'로 동작한다.
     const [result] = await req.db.execute(
       `UPDATE employees SET name=?, role=?, department=?, base_salary=?, join_date=?, birth_date=?, status=?, active=?,
         position_allowance=?, meal_allowance=?, vehicle_allowance=?, dependents=?, child_dependents=?,
-        person_kind=COALESCE(?, person_kind), leave_date=?
+        person_kind=COALESCE(?, person_kind), leave_date=?, salary_account=COALESCE(?, salary_account)
        WHERE id=?`,
       [name, role||'', department||'', base_salary||0, join_date||null, birth_date||null, st, st === '퇴사' ? 0 : 1,
        position_allowance||0, meal_allowance||0, vehicle_allowance||0,
        dependents == null ? 1 : dependents, child_dependents||0,
        person_kind === 'worker' ? 'worker' : (person_kind === 'employee' ? 'employee' : null),
-       st === '퇴사' ? (leave_date || null) : null, req.params.id]
+       st === '퇴사' ? (leave_date || null) : null, salary_account === undefined ? null : (salary_account || ''), req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })

@@ -116,7 +116,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     if (!open || !editTxn) return;
     const supply = editTxn.amount ? Math.round(editTxn.amount / 1.1) : 0;
     setKind(editTxn.kind);
-    setShowMore(!!(editTxn.evid_url || editTxn.account_code));
+    setShowMore(!!(editTxn.evid_url || editTxn.account_code || editTxn.project_no || editTxn.site));
     setForm({
       vendor:    editTxn.vendor   || '',
       // 자동 생성 거래(청구서 정산·정기지출·급여)는 계약이 비어 있을 수 있어 '공통'으로 복원
@@ -138,6 +138,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       supply:    editTxn.supply_amount != null ? editTxn.supply_amount : supply,
       vat:       editTxn.vat_amount != null ? editTxn.vat_amount : (editTxn.amount || 0) - supply,
       evid_url:  editTxn.evid_url  || '',
+      project_no: editTxn.project_no || '',
+      site:      editTxn.site || '',
       evid_type: editTxn.evid_type || '',
       evidFile:  null,
       employee:  editTxn.employee || '',
@@ -203,7 +205,9 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       date:         form.date,
       method:       form.method || "계좌이체",
       status:       editTxn?.status || (kind === "income" ? "입금완료" : "지급완료"),
-      buyer_type:   "공통",
+      // 업종중립 선택 입력 — 조선=호선번호, 천막=설치현장, 선반=작업지시번호, SW=프로젝트코드
+      project_no:   form.project_no || "",
+      site:         form.site || "",
       // 실제 계약이 아닌 "공통 XYZ" 선택 시 doc_no에 이름 보존
       doc_no:       contractObj ? '' : (form.contract || ''),
       memo:         form.memo || "",
@@ -533,6 +537,22 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
               </button>
               {showMore && (
                 <div className="col gap-form" style={{ marginTop: 14 }}>
+                  {/* 업종중립 선택 입력. 업종마다 부르는 이름이 다르다(조선=호선번호, 천막=설치현장,
+                      선반=작업지시번호, SW=프로젝트코드) — 안 쓰는 회사는 비워두면 그만이다. */}
+                  <div className="row gap-12">
+                    <div style={{ flex: 1 }}>
+                      <FormField label="프로젝트·공사번호" hint="선택">
+                        <input className="input" value={form.project_no || ''} placeholder="예: 231호선 / PRJ-2026-01"
+                          onChange={e => setForm(f => ({ ...f, project_no: e.target.value }))}/>
+                      </FormField>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <FormField label="현장·사용처" hint="선택">
+                        <input className="input" value={form.site || ''} placeholder="예: 1공장 / 본사"
+                          onChange={e => setForm(f => ({ ...f, site: e.target.value }))}/>
+                      </FormField>
+                    </div>
+                  </div>
                   <FormField label="증빙 첨부" hint="세금계산서·영수증 등 여러 개 첨부 가능">
                     {form.evid_url && (
                       <div className="row gap-10" style={{ padding: '10px 14px', border: '1px solid var(--line)', borderRadius: 10, background: 'var(--surface-2)', marginBottom: 8 }}>
