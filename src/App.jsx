@@ -11,7 +11,7 @@ import { ContractListScreen, ContractScreen, CONTRACT_LIST } from './screens/Con
 import { DocsScreen, EvidenceScreen, EvidenceAttachDrawer, ExcelScreen, ReportsScreen } from './screens/Docs'
 import { HRScreen } from './screens/HR'
 import { LaborContractScreen, OutsourcingScreen } from './screens/WorkContract'
-import { MasterScreen, RefMasterPanel, REF_CONFIGS } from './screens/Master'
+import { MasterScreen, RefMasterPanel, REF_CONFIGS, RecurringExpensePanel, RecurringInvoicePanel } from './screens/Master'
 import { BillingScreen } from './screens/Billing'
 import { TaxVatScreen, OtherTaxScreen } from './screens/Tax'
 import { MiscPLScreen } from './screens/MiscPL'
@@ -27,20 +27,22 @@ const CRUMB_MAP = {
   ledger_ar:       ["거래내역", "미수금"],
   ledger_ap:       ["거래내역", "미지급금"],
   income:          ["판매·매출", "입금"],
-  expense:         ["구매·매입", "지출"],
+  expense:         ["매입", "지출"],
   ar:              ["판매·매출", "입금·환불"],
-  ap:              ["구매·매입", "지급·환입"],
+  ap:              ["매입", "지급·환입"],
   billing:         ["판매·매출", "대금 청구서"],
   billing_issued:  ["판매·매출", "대금 청구서"],
-  billing_received:["구매·매입", "대금 청구서"],
+  billing_received:["매입", "대금 청구서"],
   contract:        ["계약"],
   contract_sales:  ["판매·매출", "매출 계약"],
-  contract_purchase:["구매·매입", "매입 계약"],
+  contract_purchase:["매입", "매입 계약"],
   contract_detail: ["계약", null],
   hr:              ["인사관리"],
   hr_labor_contract:["인사급여", "근로계약"],
   hr_outsourcing:  ["인사급여", "기타 용역·일용"],
-  misc_pl:         ["구매·매입", "경비·잡손익"],
+  misc_pl:           ["경비", "경비·잡손익"],
+  recurring_expense: ["경비", "정기지출"],
+  recurring_invoice: ["판매·매출", "정기청구"],
   mgmt_dash:       ["경영관리", "경영 대시보드"],
   mgmt_ask:        ["경영관리", "경영 도우미"],
   report:          ["보고서"],
@@ -52,7 +54,7 @@ const CRUMB_MAP = {
   master:          ["일반회계", "기준정보"],
   settings:        ["환경설정"],
   hr_base:         ["인사급여", "기준정보"],
-  doc:             ["구매·매입", "지급결의서"],
+  doc:             ["매입", "지급결의서"],
   evidence:        ["증빙 관리"],
   excel:           ["엑셀 업로드"],
   excel_modal:     ["엑셀 업로드"],
@@ -127,7 +129,7 @@ const HELP_MAP = {
   billing: {
     title: "청구 관리",
     items: [
-      "판매·매출의 대금 청구서에서 미수금을, 구매·매입의 대금 청구서에서 미지급금을 관리하세요",
+      "판매·매출의 대금 청구서에서 미수금을, 매입의 대금 청구서에서 미지급금을 관리하세요",
       "청구서와 실제 거래내역을 매칭하면 미수금이 자동으로 차감돼요",
       "기한 지남 항목을 클릭해 독촉 또는 재청구 처리를 할 수 있어요",
       "청구서 발행 버튼으로 계약 청구 일정과 연동된 청구를 빠르게 등록해요",
@@ -149,6 +151,23 @@ const HELP_MAP = {
       "승인 요청 탭에서 미결 결의서를 빠르게 처리할 수 있어요",
       "결의서 클릭 시 세부 내역과 첨부 증빙을 확인하세요",
       "결의서 승인 후 미지급금 탭에서 이체 처리가 가능해요",
+    ]
+  },
+  misc_pl: {
+    title: "경비·잡손익",
+    items: [
+      "계약·품목에 붙지 않는 운영비(임차료·통신비·보험료 등)를 보는 화면이에요",
+      "매입(원가)과 달리 여기 지출은 판매관리비로 잡혀요",
+      "매달 같은 날 나가는 지출은 '정기지출'에 걸어두면 회차가 자동 생성돼요",
+    ]
+  },
+  recurring: {
+    title: "정기 반복",
+    items: [
+      "무엇을 · 언제 · 얼마씩 반복할지 조건을 설정하는 곳이에요",
+      "정기청구의 실제 발행은 판매·매출 → 대금 청구서의 '발행 예정'에서 해요",
+      "등록일 이전 회차는 소급 생성되지 않아요 (과거분은 직접 입력)",
+      "비활성으로 돌리면 다음 회차부터 생성이 멈춰요",
     ]
   },
   evidence: {
@@ -355,6 +374,10 @@ function AppInner({ onLogout, user }) {
       case "hr_labor_contract": return <LaborContractScreen/>;
       case "hr_outsourcing":  return <OutsourcingScreen/>;
       case "misc_pl":         return <MiscPLScreen/>;
+      // 정기 반복은 기준정보(정적 참조)가 아니라 돈 흐름이다 → 성격에 맞는 회계처리 그룹에 둔다.
+      // 정기지출=경비(판관비), 정기청구=판매·매출. 패널은 Master의 것을 그대로 재사용.
+      case "recurring_expense": return <RecurringExpensePanel page/>;
+      case "recurring_invoice": return <RecurringInvoicePanel page/>;
       case "mgmt_dash":       return <MgmtDashScreen/>;
       case "mgmt_ask":        return <MgmtAskScreen/>;
       case "excel_modal":     return <ExcelScreen/>;
@@ -377,6 +400,7 @@ function AppInner({ onLogout, user }) {
                 : route.startsWith("billing") ? "billing"
                 : (route === "contract_sales" || route === "contract_purchase") ? "contract"
                 : (route === "settings" || route === "hr_base" || route === "hr_labor_contract" || route === "hr_outsourcing" || route.startsWith("master") || route.startsWith("hrbase")) ? "master"
+                : (route === "recurring_expense" || route === "recurring_invoice") ? "recurring"
                 : (route === "mgmt_dash" || route === "mgmt_ask") ? "report" : route;
   const help = HELP_MAP[helpKey] || HELP_MAP.home;
 

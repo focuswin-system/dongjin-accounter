@@ -92,7 +92,8 @@
 ### 2.2 이미 있는 자산 재배치
 - `MiscPL`(경비·잡손익) 화면: 코드 있음, nav에서 숨김(`nav.js:23`) → **경비 그룹에 부활**.
 - `RecurringExpensePanel`/`RecurringInvoicePanel`: Master에 코드 보존, "추후 재배치" 주석(`Master.jsx:127`) → **정기지출=경비, 정기청구=판매·매출**로 이동.
-- 매입 vs 경비의 분류 기준: 비목의 `group_name`/코드 범위(EXP-1~4 생산비=원가 / EXP-5~9 관리비=판관비) 또는 계정과목 category. **새 분류 필드 추가 없이 기존 구조 활용**(3계층 분류는 유지).
+- **매입 vs 경비의 분류 기준(구현 시 확정)**: 비목 코드 범위(EXP-1~4 원가 / EXP-5~9 판관비)는 **쓰지 않는다.** 사용자가 만든 비목은 `EXP-{max+1}`로 자동 채번돼(`categories.js:24-29`) 새 비목이 전부 EXP-9xx대로 떨어진다 — 코드 범위에 뜻이 없다. 다업종 SaaS에선 더 위험하다.
+  대신 **계약 귀속 여부**를 쓴다: 이 앱은 매출원가를 계약에 귀속시키는 게 규칙이므로(`contract_id` 근거계약 / `cost_contract_id` 원가귀속), **두 축이 모두 비어 있으면 판관비**다. MiscPL 필터를 이 기준으로 교정했다(종전엔 `contract_id`만 봐서, 원가로 귀속된 지출이 경비 목록에 새어 나왔다).
 
 ---
 
@@ -199,7 +200,7 @@ CLAUDE.md에 이미 계획됨: `ref_items type='evidence_type'` (세금계산서
 
 - **P1 — 품목 마스터 필드** ✅ 완료: purchase_price/item_kind/tax_type(과세·면세·영세)/item_group + 마진 표시. 기준정보 품목 화면 보강.
 - **P2 — 계약 전 타입 품목 허용 + 라인 원가 + 원가예산** ✅ 완료: contract_items(cost_price·qty)/invoice_lines(cost_price), 계약폼 품목 편집기 전 타입 노출(합계=계약금액, 서버 `contract-model`이 재계산), 계약 상세 품목표, 지출폼이 매입가로 자동채움, 원가 실적 분류 업종중립화(§5.1b).
-- **P3 — 회계처리 IA 재편**: nav 재구성, MiscPL·정기지출/정기청구 패널 부활·재배치.
+- **P3 — 회계처리 IA 재편** ✅ 완료: nav/포털을 판매·매출 / 매입 / 경비 / 장부로 재편, MiscPL 부활(+필터 교정), 정기청구·정기지출 독립 화면화, 권한 자원 카탈로그 동기화(36개).
 - **P4 — 부가세 정합성**: transactions supply/vat 분리, 영세율 3종 값집합, vat_deductible, 적격증빙 유형 구현.
 - **P5 — 위생·마감**: 잔재 컬럼 범용화(project_no/site/order_no)+입력 UI, closed_periods 도입.
 - **P6 — 거래처·인사 필드**: biz_type/biz_item/pay_account, salary_account.

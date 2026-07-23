@@ -125,7 +125,8 @@ const MASTER_SECTIONS = {
       { label: "품목·자산", tabs: ["item", "fixed_asset", "intangible_asset"] },
       { label: "자금·결제", tabs: ["account", "accountBalance", "insurance"] },
       // 정기청구/정기지출은 기준정보(정적 참조)가 아니라 계약에서 파생되는 흐름이라 여기서 제거.
-      // 패널(RecurringInvoicePanel/RecurringExpensePanel)·데이터(recurring_*)는 코드에 보존, 추후 계약/판매·매입에서 재배치.
+      // → 회계처리로 재배치 완료: 정기청구=판매·매출(route recurring_invoice), 정기지출=경비(route recurring_expense).
+      //   패널은 이 파일에서 export해 App이 page 모드로 렌더한다.
     ],
   },
   settings: {
@@ -1797,7 +1798,8 @@ const RecurringFormDrawer = ({ open, onClose, onSave, vendors = [], accounts = [
 
 const PERIOD_LABEL = { monthly: "매월", quarterly: "매분기", yearly: "매년" }
 
-const RecurringExpensePanel = () => {
+// 정기지출 = 판관비(경비) 쪽 정기 반복. 회계처리 '경비' 그룹의 독립 화면으로도, 기준정보 탭으로도 쓴다.
+export const RecurringExpensePanel = ({ page = false }) => {
   const toast = useToast()
   const [rows, setRows] = useState([])
   const [formOpen, setFormOpen] = useState(false)
@@ -1820,9 +1822,12 @@ const RecurringExpensePanel = () => {
 
 
   return (
-    <div style={{ padding: 20 }}>
+    <div className={page ? 'fade-up' : undefined} style={page ? undefined : { padding: 20 }}>
       <div className="row" style={{ marginBottom: 16 }}>
-        <div className="section-title">정기 지출</div>
+        <div>
+          <div className={page ? 'page-title' : 'section-title'}>정기 지출</div>
+          {page && <div className="page-sub">임차료·통신비처럼 매달 같은 날 나가는 지출을 걸어두면 회차가 자동으로 생성돼요.</div>}
+        </div>
         <button className="btn primary ml-auto" onClick={() => setFormOpen(true)}>
           <Icon.Plus size={14}/> 등록
         </button>
@@ -1966,7 +1971,8 @@ const RecurringInvoiceFormDrawer = ({ open, onClose, onSave, vendors, contracts,
   )
 }
 
-const RecurringInvoicePanel = () => {
+// 정기청구 = 매출 쪽 정기 반복. 회계처리 '판매·매출' 그룹의 독립 화면으로도, 기준정보 탭으로도 쓴다.
+export const RecurringInvoicePanel = ({ page = false }) => {
   const toast = useToast()
   const [rows, setRows] = useState([])
   const [vendors, setVendors] = useState([])
@@ -2001,12 +2007,12 @@ const RecurringInvoicePanel = () => {
   const totalOf = (r) => r.supplyAmount + (r.vatMode === 'none' ? 0 : Math.round(r.supplyAmount * 0.1))
 
   return (
-    <div style={{ padding: 20 }}>
+    <div className={page ? 'fade-up' : undefined} style={page ? undefined : { padding: 20 }}>
       {/* 여기는 '무엇을 언제 얼마씩 청구할지' 설정하는 곳.
           실제 청구(발행)는 판매·매출 → 대금 청구서의 '발행 예정'에서 한다(계약 청구일정과 한 화면에서 본다).
           밀린 회차를 한 번에 밀어넣어야 할 때만 아래 일괄 생성을 쓴다. */}
       <div className="row" style={{ marginBottom: 6 }}>
-        <div className="section-title">정기 청구</div>
+        <div className={page ? 'page-title' : 'section-title'}>정기 청구</div>
         <div className="ml-auto row gap-8">
           <button className="btn" onClick={handleGenerate} disabled={busy}>
             <Icon.Calendar size={14}/> 밀린 회차 일괄 생성

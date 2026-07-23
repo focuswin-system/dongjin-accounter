@@ -9,7 +9,10 @@ const TABS = [
   { id: 'income',  label: '잡수익',            kind: 'income'  },
 ]
 
-// 계약과 무관한 일반 경비·잡손익 (계약 미연결 거래를 모아봄)
+// 판관비(운영비)·잡손익 = 어느 계약에도 붙지 않는 돈.
+// 이 앱에서 매출원가는 계약에 귀속시키는 게 규칙이라(근거 계약 contract_id / 원가 귀속 cost_contract_id),
+// '두 축 모두 비어 있음' = 계약과 무관한 판관비다. 비목 코드 범위로 나누지 않는 이유는,
+// 사용자가 새로 만든 비목이 EXP-905처럼 자동 채번돼 코드 범위에 뜻이 없기 때문.
 export const MiscPLScreen = () => {
   const [tab, setTab] = useState('expense')
   const [rows, setRows] = useState([])
@@ -17,7 +20,7 @@ export const MiscPLScreen = () => {
 
   const load = async () => {
     const list = await api.getTransactions({ kind: cur.kind })
-    setRows(list.filter(r => !r.contractId))
+    setRows(list.filter(r => !r.contractId && !r.cost_contract_id))
   }
   useEffect(() => { load() }, [tab])
 
@@ -25,7 +28,7 @@ export const MiscPLScreen = () => {
 
   return (
     <div className="fade-up">
-      <PageHeader title="경비·잡손익" sub="계약과 무관한 일반 경비·수수료·잡수익·잡손실 거래를 모아봅니다. 등록·수정은 거래내역에서 하세요."/>
+      <PageHeader title="경비·잡손익" sub="어느 계약에도 붙지 않은 운영비(임차료·통신비 등)·수수료·잡수익·잡손실입니다. 계약에 귀속된 원가는 매입 쪽에서 봅니다. 등록·수정은 거래내역에서 하세요."/>
       <div className="card">
         <div className="row gap-8" style={{ padding: '16px 16px', borderBottom: '1px solid var(--line)' }}>
           {TABS.map(t => (

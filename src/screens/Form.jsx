@@ -333,7 +333,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                   <div style={{ fontSize: 13, fontWeight: 600, color: "var(--warn-ink, #92400e)" }}>세금계산서가 있는 지출이에요</div>
                 </div>
                 <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.6, marginBottom: 10 }}>
-                  재료비·외주가공비는 구매·매입 &gt; 대금 청구서에 먼저 등록하세요.<br/>
+                  재료비·외주가공비는 매입 &gt; 대금 청구서에 먼저 등록하세요.<br/>
                   미지급금 추적과 부가세 신고 자료가 자동으로 맞춰집니다.
                 </div>
                 <div className="row gap-8">

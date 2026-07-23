@@ -52,7 +52,7 @@ export const DocsScreen = () => {
     <div className="fade-up">
       <PageHeader
         title="지급결의서"
-        sub="청구서 없는 지출(비품·간식 등)은 여기서 바로 만드세요. 세금계산서가 있는 매입 대금은 구매·매입의 '대금 청구서'에서 발행할 수 있어요."
+        sub="청구서 없는 지출(비품·간식 등)은 여기서 바로 만드세요. 세금계산서가 있는 매입 대금은 매입의 '대금 청구서'에서 발행할 수 있어요."
         actions={<button className="btn primary" onClick={() => setNewOpen(true)}><Icon.Plus/> 새 결의서</button>}
       />
 
@@ -75,7 +75,7 @@ export const DocsScreen = () => {
           <div style={{ maxHeight: 680, overflowY: "auto" }}>
             {list.length === 0 && (
               <div style={{ padding: 40, textAlign: "center", color: "var(--muted-2)", fontSize: 13 }}>
-                {showDone ? "결의서가 없어요." : "처리 대기 중인 결의서가 없어요."}<br/>'새 결의서'로 만들거나 구매·매입의 대금 청구서에서 발행하세요.
+                {showDone ? "결의서가 없어요." : "처리 대기 중인 결의서가 없어요."}<br/>'새 결의서'로 만들거나 매입의 대금 청구서에서 발행하세요.
               </div>
             )}
             {list.map((d, i) => (
