@@ -4,7 +4,7 @@ const { futureDateError, kstToday, kstDate } = require('../db')
 const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS } = require('../lib/recurrence')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
-const { taxTypeOfMode } = require('../lib/vat')
+const { taxTypeOfMode, recurFromSupply, recurVat } = require('../lib/vat')
 
 const router = Router()
 
@@ -13,7 +13,7 @@ const router = Router()
    → 계약에 걸린 정기청구면 계약의 vat_mode(taxable/exempt/zero)를 따른다. */
 const invTaxType = (r) => (r.contract_vat_mode
   ? taxTypeOfMode(r.contract_vat_mode)
-  : (r.vat_mode === 'none' ? '면세' : '과세'))
+  : recurVat(r.vat_mode).tax)   // exclusive→과세 / none→면세 / zero→영세
 
 router.get('/', async (req, res, next) => {
   try {
@@ -80,7 +80,7 @@ router.get('/pending', async (req, res, next) => {
       // 다가오는 회차(LOOKAHEAD_DAYS)까지 미리 노출 — 경리가 대금청구서를 미리 발행할 수 있게.
       for (const due of dueDatesToGenerate(r, today, { horizonDays: LOOKAHEAD_DAYS })) {
         const supply = Number(r.supply_amount)
-        const vat = r.vat_mode === 'none' ? 0 : Math.round(supply * 0.1)
+        const vat = recurFromSupply(supply, r.vat_mode).vat
         out.push({
           source: 'recurring',
           recurring_id: r.id,
@@ -138,7 +138,7 @@ router.post('/:id/issue', async (req, res, next) => {
     )
     const invoice_no = `청구-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
     const supply = Number(r.supply_amount)
-    const vat    = r.vat_mode === 'none' ? 0 : Math.round(supply * 0.1)
+    const vat    = recurFromSupply(supply, r.vat_mode).vat
     const total  = supply + vat
     // 발행 즉시 정산(기입금) 시 반영할 계좌: 사용자가 고른 계좌 > 정기청구 규칙 계좌 > 주거래(첫 은행).
     let acctId = account_id || r.account_id || null
@@ -200,7 +200,7 @@ router.post('/generate', async (req, res, next) => {
         )
         const invoice_no = `청구-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
         const supply = Number(r.supply_amount)
-        const vat    = r.vat_mode === 'none' ? 0 : Math.round(supply * 0.1)
+        const vat    = recurFromSupply(supply, r.vat_mode).vat
         const total  = supply + vat
         const dueAt  = addDays(dueStr, 30)
         const id = randomUUID()

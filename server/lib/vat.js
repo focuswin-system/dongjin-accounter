@@ -60,4 +60,36 @@ const taxTypeOfMode = (vatMode) => (vatMode === 'exempt' ? '면세' : vatMode ==
 /** 공급가액 → 세액 (계약 vat_mode 기준) */
 const vatOf = (supply, vatMode) => Math.round((Number(supply) || 0) * vatRateOf(vatMode))
 
-module.exports = { TAX_TYPES, normalizeTaxType, vatFields, CONTRACT_VAT_MODES, vatRateOf, taxTypeOfMode, vatOf }
+/* ── 정기 반복(recurring_*)의 vat_mode ──
+ * exclusive(과세, 10%) / none(면세) / zero(영세). 정기청구는 이 값을 직접 저장하고,
+ * 정기지출은 이 값이 있으면 그걸, 없으면 비목(categories.vat)을 따른다. */
+const RECUR_VAT = {
+  exclusive: { rate: 0.1, tax: '과세' },
+  none:      { rate: 0,   tax: '면세' },
+  zero:      { rate: 0,   tax: '영세' },
+}
+const recurVat = (mode) => RECUR_VAT[mode] || RECUR_VAT.exclusive
+
+/** 정기청구: 공급가액 → { supply, vat, tax_type } (vat_mode 기준) */
+function recurFromSupply(supply, vatMode) {
+  const s = Number(supply) || 0
+  const { rate, tax } = recurVat(vatMode)
+  return { supply: s, vat: Math.round(s * rate), tax_type: tax }
+}
+
+/** 정기지출: 합계(VAT 포함) → { supply, vat, tax_type } (vat_mode 기준) */
+function recurFromTotal(total, vatMode) {
+  const t = Number(total) || 0
+  const { rate, tax } = recurVat(vatMode)
+  if (rate === 0) return { supply: t, vat: 0, tax_type: tax }
+  const supply = Math.round(t / (1 + rate))
+  return { supply, vat: t - supply, tax_type: tax }
+}
+
+/** 비목 vat('10%'/'면세'/'영세'/'—') → 정기 vat_mode */
+const modeFromCatVat = (catVat) => (catVat === '10%' ? 'exclusive' : catVat === '영세' ? 'zero' : 'none')
+
+module.exports = {
+  TAX_TYPES, normalizeTaxType, vatFields, CONTRACT_VAT_MODES, vatRateOf, taxTypeOfMode, vatOf,
+  recurVat, recurFromSupply, recurFromTotal, modeFromCatVat,
+}

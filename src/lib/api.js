@@ -434,6 +434,7 @@ export const api = {
         startDate: r.start_date,
         endDate: r.end_date,
         accountId: r.account_id,
+        vatMode: r.vat_mode,
         active: r.active === 1,
         lastGenerated: r.last_generated,
       }))
@@ -449,6 +450,7 @@ export const api = {
         contract_id: data.contract_id ?? null,
         category: data.category,
         amount: data.amount,
+        vat_mode: data.vat_mode ?? data.vatMode ?? null,
         period: data.period,
         day_of_month: data.day_of_month ?? data.dayOfMonth,
         start_date: data.start_date ?? data.startDate,
@@ -466,6 +468,7 @@ export const api = {
         contract_id: data.contract_id ?? null,
         category: data.category,
         amount: data.amount,
+        vat_mode: data.vat_mode ?? data.vatMode ?? null,
         period: data.period,
         day_of_month: data.day_of_month ?? data.dayOfMonth,
         start_date: data.start_date ?? data.startDate,

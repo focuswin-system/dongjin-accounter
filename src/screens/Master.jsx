@@ -1778,11 +1778,16 @@ const AccountBalancePanel = () => {
 // 예전 폼은 거래처를 자유 텍스트(vendor)로, 생성일을 camelCase(dayOfMonth)로 보냈고
 // start_date·account_id 는 아예 안 보냈다. start_date 는 NOT NULL 이라 저장이 항상
 // 실패했는데 호출부가 결과를 안 보고 '등록됐어요'를 띄워, 사용자는 등록된 줄 알았다.
+// 정기 반복(정기지출·정기청구)의 부가세 칩. 값은 서버 lib/vat.js의 recurring vat_mode와 같다.
+const RECUR_VAT_OPTS = [["exclusive", "과세 10%"], ["none", "면세"], ["zero", "영세"]]
+// 비목 vat('10%'/'면세'/'영세'/'—') → 정기 vat_mode (비목 선택 시 부가세 칩 자동 채움용)
+const catVatToMode = (catVat) => (catVat === '10%' ? 'exclusive' : catVat === '영세' ? 'zero' : 'none')
+
 // addGubu: 인라인으로 새 거래처를 만들 때 부여할 구분. 정기지출은 매입처(A).
 // reloadVendors: 부모가 거래처 목록을 다시 불러오게 하는 콜백(추가 후 새 id로 잡기 위함).
 // editing: 수정 대상(api.getRecurringExpenses 형태, camelCase). null이면 등록.
 const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], accounts = [], addGubu = 'A', reloadVendors }) => {
-  const empty = { vendor_id: "", category: "", amount: "", period: "monthly", day_of_month: "1", start_date: todayStr(), end_date: "", account_id: "" }
+  const empty = { vendor_id: "", category: "", amount: "", vat_mode: "exclusive", period: "monthly", day_of_month: "1", start_date: todayStr(), end_date: "", account_id: "" }
   const [form, setForm] = useState(empty)
   // 비목은 반드시 실제 비목 마스터에서 고른다. 예전엔 ["임차료","통신비"…]를 하드코딩해서,
   // 마스터 이름과 한 글자라도 다르면(예: 마스터는 '통신비(관리)') 회차를 청구서로 만들 때
@@ -1796,6 +1801,7 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
       setForm({
         vendor_id: editing.vendorId || "", category: editing.category || "",
         amount: editing.amount ? String(editing.amount) : "",
+        vat_mode: editing.vatMode || "exclusive",
         period: editing.period || "monthly", day_of_month: String(editing.dayOfMonth || 1),
         start_date: editing.startDate || todayStr(), end_date: editing.endDate || "",
         account_id: editing.accountId || "",
@@ -1807,8 +1813,8 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
   }, [open, editing, accounts])
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
   const handleSave = () => {
+    // 비목은 선택(강제하지 않음 — 초기 진입 부담을 줄인다). 부가세는 폼에서 직접 고른다.
     if (!form.vendor_id) return toast.push("거래처를 선택해주세요")
-    if (!form.category)  return toast.push("비목을 선택해주세요")
     if (!form.amount)    return toast.push("금액을 입력해주세요")
     if (!form.start_date) return toast.push("시작일을 선택해주세요")
     if (!form.account_id) return toast.push("출금 계좌를 선택해주세요")
@@ -1840,16 +1846,29 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
             }}
             addNewLabel="거래처로 추가"/>
         </div>
-        <div><label className="label">비목 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-          <Combobox value={form.category} onChange={v => f("category", v)} allowAdd={false}
+        <div><label className="label">비목 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+          <Combobox value={form.category}
+            onChange={v => {
+              // 비목을 고르면 그 비목의 부가세 설정을 부가세 칸에 채워준다(참고값 — 아래서 바꿀 수 있다)
+              const c = cats.find(x => x.name === v)
+              setForm(p => ({ ...p, category: v, vat_mode: c ? catVatToMode(c.vat) : p.vat_mode }))
+            }}
+            allowAdd={false}
             options={cats.map(c => ({ value: c.name, label: c.name,
               sub: [c.group_name, c.vat && c.vat !== '—' ? `부가세 ${c.vat}` : ''].filter(Boolean).join(' · ') }))}
-            placeholder="비목 선택"/>
+            placeholder="비목 선택 (선택)"/>
+        </div>
+        <div><label className="label">금액 <span style={{ color: 'var(--neg-ink)' }}>*</span> <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· VAT 포함 합계</span></label><MoneyInput value={form.amount} onChange={raw => f("amount", raw)}/></div>
+        <div><label className="label">부가세</label>
+          <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+            {RECUR_VAT_OPTS.map(([v, l]) => (
+              <button key={v} type="button" className={`chip ${form.vat_mode === v ? 'active' : ''}`} onClick={() => f("vat_mode", v)}>{l}</button>
+            ))}
+          </div>
           <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-            청구서를 만들 때 이 비목의 부가세 설정(과세·면세·영세)을 그대로 따라가요.
+            비목을 고르면 자동으로 맞춰지고, 여기서 바꿀 수 있어요. 금액은 부가세 포함 합계로 넣으세요.
           </div>
         </div>
-        <div><label className="label">금액 <span style={{ color: 'var(--neg-ink)' }}>*</span></label><MoneyInput value={form.amount} onChange={raw => f("amount", raw)}/></div>
         <div className="row gap-12">
           <div style={{ flex: 1 }}>
             <label className="label">반복 주기</label>
@@ -2063,7 +2082,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
           </div>
           <div style={{ flex: 1 }}><label className="label">부가세</label>
             <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
-              {[["exclusive","10% 별도"],["none","면세"]].map(([v, l]) => (
+              {RECUR_VAT_OPTS.map(([v, l]) => (
                 <button key={v} type="button" className={`chip ${form.vatMode === v ? 'active' : ''}`} onClick={() => f("vatMode", v)}>{l}</button>
               ))}
             </div>

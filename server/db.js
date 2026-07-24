@@ -755,6 +755,10 @@ async function initDb(conn) {
     // 원천징수·연말정산 신고서 자동생성이 범위 밖이라 지금 얻는 게 없고, 저장하는 순간
     // 암호화·파기 의무가 붙는다. 신고서 자동화를 범위에 넣을 때 다시 판단한다.
     await ensureColumn('employees', 'salary_account', "salary_account VARCHAR(200)")
+    // 정기지출도 부가세를 직접 저장한다(과세=exclusive / 면세=none / 영세=zero).
+    // 비목을 강제하지 않으려는 것 — 비목을 고르면 그 값으로 채워지되, 폼에서 바꿀 수 있다.
+    // NULL이면 옛 방식(비목 categories.vat)을 따른다(하위호환).
+    await ensureColumn('recurring_expenses', 'vat_mode', "vat_mode VARCHAR(12)")
 
     // 월 마감(기간 잠금). 부가세 신고·월 마감을 끝낸 기간의 거래가 뒤에서 바뀌면
     // 이미 제출한 신고자료와 장부가 어긋난다 → 잠근 달의 거래는 등록·수정·삭제를 막는다.

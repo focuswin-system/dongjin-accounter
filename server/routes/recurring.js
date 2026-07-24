@@ -5,17 +5,14 @@ const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS } = require('../lib/recurren
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
 const { closedPeriodError } = require('../lib/closing')
+const { recurFromTotal, modeFromCatVat } = require('../lib/vat')
 
 const router = Router()
 
-/* 정기지출의 부가세: 정기지출은 amount(합계 = VAT 포함) 하나만 들고, 세율은 비목(categories.vat)을 따른다.
-   비목 vat: '10%'=과세 / '면세' / '영세' / '—'(미설정 → 면세로 본다). 매출의 vat_mode와 짝. */
-const expenseVat = (total, catVat) => {
-  const t = Number(total) || 0
-  if (catVat === '10%') { const supply = Math.round(t / 1.1); return { supply, vat: t - supply, tax_type: '과세' } }
-  if (catVat === '영세') return { supply: t, vat: 0, tax_type: '영세' }
-  return { supply: t, vat: 0, tax_type: '면세' }   // 면세·—·기타
-}
+/* 정기지출의 부가세: amount(합계 = VAT 포함)에서 세액을 뺀다.
+   vat_mode가 저장돼 있으면(폼에서 직접 선택) 그걸 쓰고, 없으면(옛 데이터) 비목 categories.vat를 따른다. */
+const expenseVat = (total, vatMode, catVat) =>
+  recurFromTotal(total, vatMode || modeFromCatVat(catVat))
 
 router.get('/', async (req, res, next) => {
   try {
@@ -31,14 +28,14 @@ router.get('/', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { vendor_id, contract_id, category, amount, period, day_of_month, start_date, end_date, account_id } = req.body
+    const { vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id } = req.body
     // start_date 는 NOT NULL 이라 없으면 SQL 오류(500)가 난다. 원인을 알려주는 400으로 바꾼다.
     if (!start_date) return res.status(400).json({ error: '시작일을 선택해주세요' })
     if (!(Number(amount) > 0)) return res.status(400).json({ error: '금액을 입력해주세요' })
     const id = randomUUID()
     await req.db.execute(
-      'INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, period, day_of_month, start_date, end_date, account_id) VALUES (?,?,?,?,?,?,?,?,?,?)',
-      [id, vendor_id||null, contract_id||null, category||'', amount, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null]
+      'INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+      [id, vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null]
     )
     res.json({ id })
   } catch (e) { next(e) }
@@ -46,10 +43,10 @@ router.post('/', async (req, res, next) => {
 
 router.put('/:id', async (req, res, next) => {
   try {
-    const { vendor_id, contract_id, category, amount, period, day_of_month, start_date, end_date, account_id } = req.body
+    const { vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id } = req.body
     const [result] = await req.db.execute(
-      'UPDATE recurring_expenses SET vendor_id=?, contract_id=?, category=?, amount=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=? WHERE id=?',
-      [vendor_id||null, contract_id||null, category||'', amount, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, req.params.id]
+      'UPDATE recurring_expenses SET vendor_id=?, contract_id=?, category=?, amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=? WHERE id=?',
+      [vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
@@ -83,7 +80,7 @@ router.get('/pending', async (req, res, next) => {
     for (const r of recs) {
       r.setup_date = kstDate(Number(r.created_epoch) * 1000)   // 등록일(KST) — 소급 하한
       for (const due of dueDatesToGenerate(r, today, { horizonDays: LOOKAHEAD_DAYS })) {
-        const { supply, vat } = expenseVat(r.amount, r.cat_vat)
+        const { supply, vat } = expenseVat(r.amount, r.vat_mode, r.cat_vat)
         out.push({
           source: 'recurring-expense',
           recurring_id: r.id,
@@ -129,7 +126,7 @@ router.post('/:id/issue', async (req, res, next) => {
       const ce = await closedPeriodError(conn, target); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
     }
 
-    const { supply, vat, tax_type } = expenseVat(r.amount, r.cat_vat)
+    const { supply, vat, tax_type } = expenseVat(r.amount, r.vat_mode, r.cat_vat)
     const total = supply + vat
     const year = target.slice(0, 4)
     const [[{ maxno }]] = await conn.execute(
