@@ -793,7 +793,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   return (
     <div className="fade-up">
       <PageHeader
-        title={collect ? (isIssued ? "입금·환불" : "지급·환입") : "대금 청구서"}
+        title={collect ? (isIssued ? "미수금" : "미지급금") : "대금 청구서"}
         sub={collect
           ? (isIssued
               ? "발행한 청구서 중 아직 안 받은 미수금이에요. 청구서를 열어 입금 처리하고, 받은 돈을 돌려줄 땐 '환불 등록'을 쓰세요."

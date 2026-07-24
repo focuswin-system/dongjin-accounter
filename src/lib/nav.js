@@ -11,22 +11,28 @@ export const NAV_TREE = [
       //   판매·매출 = 수익 / 매입 = 매출원가(직접비) / 경비 = 판관비(운영비) / 장부 = 조회 전용
       // 메뉴 순서 = 실제 일하는 순서. 계약 → 청구 → 회수.
       // '입금'·'지출'은 거래내역 화면에 필터만 건 같은 뷰라 메뉴에서 뺐다(거래내역에서 본다).
+      // 판매·매출과 매입은 같은 순서로 읽힌다: 계약 → 청구서 → 정기 → 미회수/미지급.
+      // 정기청구(매출)와 정기지출(매입)이 서로 마주보는 자리에 있어야 흐름이 대칭으로 보인다.
       { label: "판매·매출", items: [
         { id: "contract_sales",    label: "매출 계약",   icon: Icon.Briefcase },
         { id: "billing_issued",    label: "대금 청구서", icon: Icon.Receipt },
         { id: "recurring_invoice", label: "정기청구",    icon: Icon.Clock },
-        { id: "ar",                label: "입금·환불",   icon: Icon.Recv },
+        { id: "ar",                label: "미수금",      icon: Icon.Recv },
       ]},
       { label: "매입", items: [
         { id: "contract_purchase", label: "매입 계약",   icon: Icon.Briefcase },
         { id: "billing_received",  label: "대금 청구서", icon: Icon.Receipt },
-        { id: "doc",               label: "지급결의서",  icon: Icon.Sign },
-        { id: "ap",                label: "지급·환입",   icon: Icon.Pay },
-      ]},
-      // 판관비 — 계약·품목에 붙지 않는 운영비(임차·통신·보험 등)와 잡손익.
-      { label: "경비", items: [
-        { id: "misc_pl",           label: "경비·잡손익", icon: Icon.Wallet },
         { id: "recurring_expense", label: "정기지출",    icon: Icon.Clock },
+        { id: "ap",                label: "미지급금",    icon: Icon.Pay },
+      ]},
+      // 판관비 — 계약·품목에 붙지 않는 운영비(임차·통신·보험 등). 잡손익은 영업외라 따로 둔다.
+      { label: "경비", items: [
+        { id: "misc_pl",     label: "일반 경비", icon: Icon.Wallet },
+        { id: "misc_income", label: "잡손익",    icon: Icon.Trend },
+      ]},
+      // 결의서는 매입 청구서에서도, 경비에서도 올라온다 → 어느 한쪽에 두지 않고 독립.
+      { label: "지출 승인", items: [
+        { id: "doc", label: "지급결의서", icon: Icon.Sign },
       ]},
       { label: "장부", items: [
         { id: "ledger",   label: "전체 거래내역", icon: Icon.Wallet },
@@ -110,8 +116,9 @@ export const PORTAL = [
     categories: [
       { id: 'acct_process', label: '회계처리', icon: Icon.Wallet, desc: '판매·매입·경비 거래 처리', todos: true, groups: [
         { label: '판매·매출', items: ['contract_sales', 'billing_issued', 'recurring_invoice', 'ar'] },
-        { label: '매입',     items: ['contract_purchase', 'doc', 'billing_received', 'ap'] },
-        { label: '경비',     items: ['misc_pl', 'recurring_expense'] },
+        { label: '매입',     items: ['contract_purchase', 'billing_received', 'recurring_expense', 'ap'] },
+        { label: '경비',     items: ['misc_pl', 'misc_income'] },
+        { label: '지출 승인', items: ['doc'] },
         { label: '장부',     items: ['ledger', 'contract'] },   // '증빙 관리'는 목업이라 숨김(추후 실구현 예정)
       ]},
       { id: 'acct_tax', label: '세무관리', icon: Icon.Doc, desc: '부가세·기타세액 신고', groups: [

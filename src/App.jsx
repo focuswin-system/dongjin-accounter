@@ -28,8 +28,8 @@ const CRUMB_MAP = {
   ledger_ap:       ["거래내역", "미지급금"],
   income:          ["판매·매출", "입금"],
   expense:         ["매입", "지출"],
-  ar:              ["판매·매출", "입금·환불"],
-  ap:              ["매입", "지급·환입"],
+  ar:              ["판매·매출", "미수금"],
+  ap:              ["매입", "미지급금"],
   billing:         ["판매·매출", "대금 청구서"],
   billing_issued:  ["판매·매출", "대금 청구서"],
   billing_received:["매입", "대금 청구서"],
@@ -40,8 +40,9 @@ const CRUMB_MAP = {
   hr:              ["인사관리"],
   hr_labor_contract:["인사급여", "근로계약"],
   hr_outsourcing:  ["인사급여", "기타 용역·일용"],
-  misc_pl:           ["경비", "경비·잡손익"],
-  recurring_expense: ["경비", "정기지출"],
+  misc_pl:           ["경비", "일반 경비"],
+  misc_income:       ["경비", "잡손익"],
+  recurring_expense: ["매입", "정기지출"],
   recurring_invoice: ["판매·매출", "정기청구"],
   mgmt_dash:       ["경영관리", "경영 대시보드"],
   mgmt_ask:        ["경영관리", "경영 도우미"],
@@ -54,7 +55,7 @@ const CRUMB_MAP = {
   master:          ["일반회계", "기준정보"],
   settings:        ["환경설정"],
   hr_base:         ["인사급여", "기준정보"],
-  doc:             ["매입", "지급결의서"],
+  doc:             ["지출 승인", "지급결의서"],
   evidence:        ["증빙 관리"],
   excel:           ["엑셀 업로드"],
   excel_modal:     ["엑셀 업로드"],
@@ -154,11 +155,12 @@ const HELP_MAP = {
     ]
   },
   misc_pl: {
-    title: "경비·잡손익",
+    title: "일반 경비 · 잡손익",
     items: [
-      "계약·품목에 붙지 않는 운영비(임차료·통신비·보험료 등)를 보는 화면이에요",
+      "계약·품목에 붙지 않는 운영비(임차료·통신비·보험료 등)를 등록하는 화면이에요",
       "매입(원가)과 달리 여기 지출은 판매관리비로 잡혀요",
-      "매달 같은 날 나가는 지출은 '정기지출'에 걸어두면 회차가 자동 생성돼요",
+      "행을 클릭하면 바로 수정하고, 오른쪽 삭제 버튼으로 지울 수 있어요",
+      "매달 같은 날 나가는 지출은 매입의 '정기지출'에 걸어두세요",
     ]
   },
   recurring: {
@@ -373,7 +375,10 @@ function AppInner({ onLogout, user }) {
       case "hr_base":         return <MasterScreen user={user} section="hr"/>;
       case "hr_labor_contract": return <LaborContractScreen/>;
       case "hr_outsourcing":  return <OutsourcingScreen/>;
-      case "misc_pl":         return <MiscPLScreen refreshTrigger={txnVersion}
+      // 일반 경비 / 잡손익 — 화면은 하나를 공유하고 진입 메뉴가 초기 탭을 정한다
+      case "misc_pl":
+      case "misc_income":     return <MiscPLScreen initialTab={route === "misc_income" ? "income" : "expense"}
+                                       refreshTrigger={txnVersion}
                                        openExpense={() => setTxnForm({ kind: "expense" })}
                                        openIncome={() => setTxnForm({ kind: "income" })}
                                        openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
@@ -404,6 +409,7 @@ function AppInner({ onLogout, user }) {
                 : (route === "contract_sales" || route === "contract_purchase") ? "contract"
                 : (route === "settings" || route === "hr_base" || route === "hr_labor_contract" || route === "hr_outsourcing" || route.startsWith("master") || route.startsWith("hrbase")) ? "master"
                 : (route === "recurring_expense" || route === "recurring_invoice") ? "recurring"
+                : (route === "misc_income") ? "misc_pl"
                 : (route === "mgmt_dash" || route === "mgmt_ask") ? "report" : route;
   const help = HELP_MAP[helpKey] || HELP_MAP.home;
 

@@ -1779,8 +1779,13 @@ const AccountBalancePanel = () => {
 // start_date·account_id 는 아예 안 보냈다. start_date 는 NOT NULL 이라 저장이 항상
 // 실패했는데 호출부가 결과를 안 보고 '등록됐어요'를 띄워, 사용자는 등록된 줄 알았다.
 const RecurringFormDrawer = ({ open, onClose, onSave, vendors = [], accounts = [] }) => {
-  const empty = { vendor_id: "", category: "임차료", amount: "", period: "monthly", day_of_month: "1", start_date: todayStr(), end_date: "", account_id: "" }
+  const empty = { vendor_id: "", category: "", amount: "", period: "monthly", day_of_month: "1", start_date: todayStr(), end_date: "", account_id: "" }
   const [form, setForm] = useState(empty)
+  // 비목은 반드시 실제 비목 마스터에서 고른다. 예전엔 ["임차료","통신비"…]를 하드코딩해서,
+  // 마스터 이름과 한 글자라도 다르면(예: 마스터는 '통신비(관리)') 회차를 청구서로 만들 때
+  // 비목을 못 찾아 부가세가 면세로 떨어졌다. 이름이 곧 조인 키다(recurring_expenses.category = categories.name).
+  const [cats, setCats] = useState([])
+  useEffect(() => { if (open) api.getCategories({ type: 'exp' }).then(setCats) }, [open])
   useEffect(() => {
     if (!open) return
     // 출금 계좌 기본값 — 비어 있으면 생성된 지출을 '이체 실행'할 때 계좌가 없어 막힌다
@@ -1789,6 +1794,7 @@ const RecurringFormDrawer = ({ open, onClose, onSave, vendors = [], accounts = [
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
   const handleSave = () => {
     if (!form.vendor_id) return toast.push("거래처를 선택해주세요")
+    if (!form.category)  return toast.push("비목을 선택해주세요")
     if (!form.amount)    return toast.push("금액을 입력해주세요")
     if (!form.start_date) return toast.push("시작일을 선택해주세요")
     if (!form.account_id) return toast.push("출금 계좌를 선택해주세요")
@@ -1809,9 +1815,14 @@ const RecurringFormDrawer = ({ open, onClose, onSave, vendors = [], accounts = [
           <Combobox value={form.vendor_id} onChange={v => f("vendor_id", v)} allowAdd={false}
             options={vendors.map(v => ({ value: v.id, label: v.name, sub: v.type || "" }))} placeholder="거래처 선택"/>
         </div>
-        <div><label className="label">비목</label>
+        <div><label className="label">비목 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
           <Combobox value={form.category} onChange={v => f("category", v)} allowAdd={false}
-            options={["임차료","통신비","전력비","안전관리비","보험료","기타"].map(c => ({ value: c, label: c }))}/>
+            options={cats.map(c => ({ value: c.name, label: c.name,
+              sub: [c.group_name, c.vat && c.vat !== '—' ? `부가세 ${c.vat}` : ''].filter(Boolean).join(' · ') }))}
+            placeholder="비목 선택"/>
+          <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+            청구서를 만들 때 이 비목의 부가세 설정(과세·면세·영세)을 그대로 따라가요.
+          </div>
         </div>
         <div><label className="label">금액 <span style={{ color: 'var(--neg-ink)' }}>*</span></label><MoneyInput value={form.amount} onChange={raw => f("amount", raw)}/></div>
         <div className="row gap-12">

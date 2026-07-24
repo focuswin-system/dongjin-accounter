@@ -36,15 +36,18 @@ const RESOURCES = [
   { id: 'contract_sales',          label: '매출 계약',      group: '일반회계 · 판매·매출' },
   { id: 'billing_issued',          label: '대금 청구서(매출)', group: '일반회계 · 판매·매출' },
   { id: 'recurring_invoice',       label: '정기청구',       group: '일반회계 · 판매·매출' },
-  { id: 'ar',                      label: '입금·환불',      group: '일반회계 · 판매·매출' },
+  { id: 'ar',                      label: '미수금',         group: '일반회계 · 판매·매출' },
 
   { id: 'contract_purchase',       label: '매입 계약',      group: '일반회계 · 매입' },
   { id: 'billing_received',        label: '대금 청구서(매입)', group: '일반회계 · 매입' },
-  { id: 'doc',                     label: '지급결의서',     group: '일반회계 · 매입' },
-  { id: 'ap',                      label: '지급·환입',      group: '일반회계 · 매입' },
+  { id: 'recurring_expense',       label: '정기지출',       group: '일반회계 · 매입' },
+  { id: 'ap',                      label: '미지급금',       group: '일반회계 · 매입' },
 
-  { id: 'misc_pl',                 label: '경비·잡손익',    group: '일반회계 · 경비' },
-  { id: 'recurring_expense',       label: '정기지출',       group: '일반회계 · 경비' },
+  { id: 'misc_pl',                 label: '일반 경비',      group: '일반회계 · 경비' },
+  { id: 'misc_income',             label: '잡손익',         group: '일반회계 · 경비' },
+
+  // 결의서는 매입·경비 양쪽에서 올라온다 → 독립 그룹
+  { id: 'doc',                     label: '지급결의서',     group: '일반회계 · 지출 승인' },
 
   { id: 'ledger',                  label: '전체 거래내역',  group: '일반회계 · 장부' },
   { id: 'contract',                label: '계약',          group: '일반회계 · 장부' },

@@ -74,7 +74,7 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
 
   const titleMap = { all: "거래내역", income: "거래내역 · 입금", expense: "거래내역 · 지출" };
   const subMap = {
-    all:     "실제로 오간 모든 입금·지출 기록이에요. 미수금·미지급금은 '입금·환불'·'지급·환입'에서 관리해요.",
+    all:     "실제로 오간 모든 입금·지출 기록이에요. 미수금·미지급금은 판매·매출의 '미수금', 매입의 '미지급금'에서 관리해요.",
     income:  "발주처에서 들어온 돈을 등록하고 처리하세요.",
     expense: "외주가공·자재·운영비를 등록하고 결의·이체로 처리하세요.",
   };
@@ -102,8 +102,8 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
         <div className="grid grid-4-to-2" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 }}>
           <LedgerCard label="입금 합계"  amount={inSum}  tone="pos"   active={filter === "income"} onClick={() => setFilter("income")}/>
           <LedgerCard label="지출 합계"  amount={outSum} tone="neg"   active={filter === "expense"} onClick={() => setFilter("expense")}/>
-          <LedgerCard label="미수금"        amount={recSummary?.total ?? 0}  tone="brand" note="입금·환불로 이동" onClick={() => { window.location.hash = "ar"; }}/>
-          <LedgerCard label="미지급금"      amount={paySummary?.total ?? 0}  tone="warn"  note="지급·환입으로 이동" onClick={() => { window.location.hash = "ap"; }}/>
+          <LedgerCard label="미수금"        amount={recSummary?.total ?? 0}  tone="brand" note="미수금 화면으로" onClick={() => { window.location.hash = "ar"; }}/>
+          <LedgerCard label="미지급금"      amount={paySummary?.total ?? 0}  tone="warn"  note="미지급금 화면으로" onClick={() => { window.location.hash = "ap"; }}/>
         </div>
 
         <div className="card" style={{ overflow: "hidden" }}>

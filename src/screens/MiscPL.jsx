@@ -4,9 +4,21 @@ import { PageHeader } from '../lib/components/PageHeader'
 import { DataTable } from '../lib/components/DataTable'
 import { api } from '../lib/api'
 
+// 같은 '계약 없는 돈'이지만 메뉴가 둘로 갈린다:
+//   일반 경비 = 판관비 지출(임차료·통신비·수수료 등)  ← 대부분의 건
+//   잡손익    = 영업외 수입(이자·환급·잡수익)
+// 화면은 하나를 공유하고 진입 메뉴가 초기 탭을 정한다(대금청구서의 발행/수취와 같은 방식).
 const TABS = [
-  { id: 'expense', label: '경비·수수료·잡손실', kind: 'expense' },
-  { id: 'income',  label: '잡수익',            kind: 'income'  },
+  { id: 'expense', label: '일반 경비', kind: 'expense',
+    title: '일반 경비',
+    sub: '어느 계약에도 붙지 않은 운영비(임차료·통신비·수수료 등)를 등록·관리합니다. 계약에 걸린 원가·지급은 매입 쪽에서 봅니다.',
+    empty: '등록된 경비가 없어요. 위 "경비 등록"으로 추가하세요.',
+    addLabel: '경비 등록' },
+  { id: 'income',  label: '잡손익', kind: 'income',
+    title: '잡손익',
+    sub: '영업과 무관하게 생긴 수입(이자·환급·잡수익)입니다. 나가는 돈은 일반 경비에서 봅니다.',
+    empty: '등록된 잡수익이 없어요.',
+    addLabel: '잡수익 등록' },
 ]
 
 // 판관비(운영비)·잡손익 = 어느 계약에도 붙지 않는 돈.
@@ -16,10 +28,12 @@ const TABS = [
 //
 // 이 화면은 '조회'가 아니라 '등록'하는 곳이다 — 계약 없는 경비는 여기서 등록·수정·삭제까지 끝난다.
 // (계약에 걸린 원가·지급은 매입 쪽에서, 세금계산서 있는 매입 대금은 매입 대금청구서에서)
-export const MiscPLScreen = ({ refreshTrigger, openExpense, openIncome, openEdit }) => {
+export const MiscPLScreen = ({ initialTab = 'expense', refreshTrigger, openExpense, openIncome, openEdit }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
-  const [tab, setTab] = useState('expense')
+  const [tab, setTab] = useState(initialTab)
+  // 메뉴(일반 경비 ↔ 잡손익)로 다시 들어오면 그 탭으로 맞춘다
+  useEffect(() => { setTab(initialTab) }, [initialTab])
   const [rows, setRows] = useState([])
   const cur = TABS.find(t => t.id === tab)
 
@@ -44,15 +58,15 @@ export const MiscPLScreen = ({ refreshTrigger, openExpense, openIncome, openEdit
     load()
   }
 
-  const addBtn = tab === 'expense'
-    ? <button className="btn primary" onClick={openExpense}><Icon.Plus size={14}/> 경비 등록</button>
-    : <button className="btn primary" onClick={openIncome}><Icon.Plus size={14}/> 잡수익 등록</button>
+  const addBtn = (
+    <button className="btn primary" onClick={cur.kind === 'expense' ? openExpense : openIncome}>
+      <Icon.Plus size={14}/> {cur.addLabel}
+    </button>
+  )
 
   return (
     <div className="fade-up">
-      <PageHeader title="경비·잡손익"
-        sub="어느 계약에도 붙지 않은 운영비(임차료·통신비 등)·수수료·잡수익·잡손실을 여기서 등록·관리합니다. 계약에 걸린 원가·지급은 매입 쪽에서 봅니다."
-        actions={addBtn}/>
+      <PageHeader title={cur.title} sub={cur.sub} actions={addBtn}/>
       <div className="card">
         <div className="row gap-8" style={{ padding: '16px 16px', borderBottom: '1px solid var(--line)' }}>
           {TABS.map(t => (
@@ -63,7 +77,7 @@ export const MiscPLScreen = ({ refreshTrigger, openExpense, openIncome, openEdit
         <DataTable
           rows={rows}
           onRowClick={(r) => openEdit(r)}
-          empty={tab === 'expense' ? '등록된 경비가 없어요. 위 "경비 등록"으로 추가하세요.' : '등록된 잡수익이 없어요.'}
+          empty={cur.empty}
           columns={[
             { key: 'date', header: '날짜', sortable: true, render: r => <span className="num text-sm">{r.date}</span> },
             { key: 'vendor', header: '거래처', sortable: true, render: r => <span className="fw-600">{r.vendor}</span> },
