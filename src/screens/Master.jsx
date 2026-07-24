@@ -1778,7 +1778,9 @@ const AccountBalancePanel = () => {
 // 예전 폼은 거래처를 자유 텍스트(vendor)로, 생성일을 camelCase(dayOfMonth)로 보냈고
 // start_date·account_id 는 아예 안 보냈다. start_date 는 NOT NULL 이라 저장이 항상
 // 실패했는데 호출부가 결과를 안 보고 '등록됐어요'를 띄워, 사용자는 등록된 줄 알았다.
-const RecurringFormDrawer = ({ open, onClose, onSave, vendors = [], accounts = [] }) => {
+// addGubu: 인라인으로 새 거래처를 만들 때 부여할 구분. 정기지출은 매입처(A).
+// reloadVendors: 부모가 거래처 목록을 다시 불러오게 하는 콜백(추가 후 새 id로 잡기 위함).
+const RecurringFormDrawer = ({ open, onClose, onSave, vendors = [], accounts = [], addGubu = 'A', reloadVendors }) => {
   const empty = { vendor_id: "", category: "", amount: "", period: "monthly", day_of_month: "1", start_date: todayStr(), end_date: "", account_id: "" }
   const [form, setForm] = useState(empty)
   // 비목은 반드시 실제 비목 마스터에서 고른다. 예전엔 ["임차료","통신비"…]를 하드코딩해서,
@@ -1812,8 +1814,19 @@ const RecurringFormDrawer = ({ open, onClose, onSave, vendors = [], accounts = [
       <DrawerHead title="정기 지출 등록" onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div><label className="label">거래처 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-          <Combobox value={form.vendor_id} onChange={v => f("vendor_id", v)} allowAdd={false}
-            options={vendors.map(v => ({ value: v.id, label: v.name, sub: v.type || "" }))} placeholder="거래처 선택"/>
+          <Combobox value={form.vendor_id} onChange={v => f("vendor_id", v)}
+            options={vendors.map(v => ({ value: v.id, label: v.name, sub: v.type || "" }))} placeholder="거래처 선택·검색"
+            onAddNew={async (q) => {
+              const nm = (q || '').trim(); if (!nm) return
+              const res = await api.addVendor({ name: nm, gubu: addGubu })
+              if (!res.ok) return toast.push("거래처 등록에 실패했어요")
+              // 목록을 다시 받아 방금 만든 거래처를 id로 잡는다(Combobox 값이 이름이 아니라 id라서)
+              const fresh = reloadVendors ? await reloadVendors() : []
+              const hit = fresh.find(v => v.name === nm)
+              f("vendor_id", hit ? hit.id : "")
+              toast.push(`"${nm}" 거래처가 등록됐어요`)
+            }}
+            addNewLabel="거래처로 추가"/>
         </div>
         <div><label className="label">비목 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
           <Combobox value={form.category} onChange={v => f("category", v)} allowAdd={false}
@@ -1876,8 +1889,13 @@ export const RecurringExpensePanel = ({ page = false }) => {
   const load = async () => setRows(await api.getRecurringExpenses())
   useEffect(() => { load() }, [])
   // 매입처(A)·기관(E) 만 — 정기 지출의 상대는 돈을 주는 쪽이다
+  const reloadVendors = async () => {
+    const list = (await api.getVendors()).filter(x => x.gubu === 'A' || x.gubu === 'E')
+    setVendors(list)
+    return list
+  }
   useEffect(() => {
-    api.getVendors().then(v => setVendors(v.filter(x => x.gubu === 'A' || x.gubu === 'E')))
+    reloadVendors()
     api.getAccounts().then(setAccounts)
   }, [])
 
@@ -1936,6 +1954,7 @@ export const RecurringExpensePanel = ({ page = false }) => {
         </table>
       </div>
       <RecurringFormDrawer open={formOpen} onClose={() => setFormOpen(false)} vendors={vendors} accounts={accounts}
+        addGubu="A" reloadVendors={reloadVendors}
         onSave={async (data) => {
           // 결과를 보지 않고 성공 문구를 띄우면, 저장이 실패해도 등록된 줄 알게 된다
           const res = await api.addRecurringExpense(data)
@@ -1948,7 +1967,8 @@ export const RecurringExpensePanel = ({ page = false }) => {
 }
 
 // ── 정기 청구(고정수입) 패널 ──────────────────────────────────────
-const RecurringInvoiceFormDrawer = ({ open, onClose, onSave, vendors, contracts, accounts }) => {
+const RecurringInvoiceFormDrawer = ({ open, onClose, onSave, vendors, contracts, accounts, reloadVendors }) => {
+  const toast = useToast()
   const empty = { vendorId: "", contractId: "", item: "", supply: "", vatMode: "exclusive", period: "monthly", dayOfMonth: "1", startDate: todayStr(), endDate: "", accountId: "" }
   const [form, setForm] = useState(empty)
   useEffect(() => { if (open) setForm(empty) }, [open])
@@ -1993,9 +2013,19 @@ const RecurringInvoiceFormDrawer = ({ open, onClose, onSave, vendors, contracts,
             placeholder="계약 선택 (없으면 비워두기)"/>
         </div>
         <div><label className="label">고객사 (발주처)</label>
-          <Combobox value={form.vendorId} onChange={v => f("vendorId", v)} allowAdd={false}
+          <Combobox value={form.vendorId} onChange={v => f("vendorId", v)}
             options={vendors.map(v => ({ value: v.id, label: v.name, sub: v.type }))}
-            placeholder="고객사 선택"/>
+            placeholder="고객사 선택·검색"
+            onAddNew={async (q) => {
+              const nm = (q || '').trim(); if (!nm) return
+              const res = await api.addVendor({ name: nm, gubu: 'B' })   // 정기청구 상대는 발주처(B)
+              if (!res.ok) return toast.push("고객사 등록에 실패했어요")
+              const fresh = reloadVendors ? await reloadVendors() : []
+              const hit = fresh.find(v => v.name === nm)
+              f("vendorId", hit ? hit.id : "")
+              toast.push(`"${nm}" 고객사가 등록됐어요`)
+            }}
+            addNewLabel="고객사로 추가"/>
         </div>
         <div><label className="label">청구 항목</label>
           <input className="input" value={form.item} onChange={e => f("item", e.target.value)} placeholder="예: OO 홈페이지 유지보수"/>
@@ -2056,9 +2086,14 @@ export const RecurringInvoicePanel = ({ page = false }) => {
   const [busy, setBusy] = useState(false)
 
   const load = async () => setRows(await api.getRecurringInvoices())
+  const reloadVendors = async () => {
+    const list = await api.getVendors({ gubu: "B" })
+    setVendors(list)
+    return list
+  }
   useEffect(() => {
     load()
-    api.getVendors({ gubu: "B" }).then(setVendors)
+    reloadVendors()
     api.getContracts().then(setContracts)
     api.getAccounts().then(setAccounts)
   }, [])
@@ -2146,7 +2181,7 @@ export const RecurringInvoicePanel = ({ page = false }) => {
         </table>
       </div>
       <RecurringInvoiceFormDrawer open={formOpen} onClose={() => setFormOpen(false)}
-        vendors={vendors} contracts={contracts} accounts={accounts}
+        vendors={vendors} contracts={contracts} accounts={accounts} reloadVendors={reloadVendors}
         onSave={async (data) => { await api.addRecurringInvoice(data); toast.push("정기 청구가 등록됐어요"); load() }}/>
     </div>
   )
