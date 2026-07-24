@@ -20,7 +20,7 @@ const FilingDrawer = ({ target, year, onClose, onSaved }) => {
   useEffect(() => {
     api.getAccounts().then(list => setAccounts(list.filter(a => a.kind === 'bank')))
     api.getCategories().then(setCategories)
-    api.getAccountSubjects().then(setAcctSubjects)
+    api.getAccountSubjects({ postableOnly: true }).then(setAcctSubjects)
     api.getRefItems('jeokyo').then(setJeokyos)
   }, [])
 
@@ -233,7 +233,7 @@ const OtherTaxDrawer = ({ open, editing, onClose, onSaved }) => {
   useEffect(() => {
     api.getAccounts().then(list => setAccounts(list.filter(a => a.kind === 'bank')))
     api.getCategories().then(setCategories)
-    api.getAccountSubjects().then(setAcctSubjects)
+    api.getAccountSubjects({ postableOnly: true }).then(setAcctSubjects)
     api.getRefItems('jeokyo').then(setJeokyos)
   }, [])
   useEffect(() => {

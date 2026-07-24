@@ -577,8 +577,8 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
             <div style={{ padding: "10px 12px 8px", borderBottom: "1px solid var(--line)" }}>
               <div className="text-xs text-muted2 fw-600" style={{ letterSpacing: "0.02em", marginBottom: 6 }}>자주 쓰는 항목</div>
               <div className="row gap-6" style={{ flexWrap: "wrap" }}>
-                {freqOptions.map(o => (
-                  <button key={o.value} type="button" className={`chip ${value === o.value ? "active" : ""}`}
+                {freqOptions.map((o, i) => (
+                  <button key={`${o.value ?? ''}-${i}`} type="button" className={`chip ${value === o.value ? "active" : ""}`}
                     onClick={() => pick(o)} style={{ fontSize: 12, padding: "4px 10px" }}>{o.label}</button>
                 ))}
               </div>
@@ -591,7 +591,8 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
               </div>
             )}
             {filtered.map((o, i) => (
-              <button key={o.value} type="button" onClick={() => pick(o)} onMouseEnter={() => setHi(i)}
+              // key는 value+index — value가 null/중복이어도(집계 계정 등) 안전하게 유일해진다
+              <button key={`${o.value ?? ''}-${i}`} type="button" onClick={() => pick(o)} onMouseEnter={() => setHi(i)}
                 style={{ width: "100%", textAlign: "left", padding: "9px 14px", border: 0,
                   background: hi === i ? "var(--surface-2)" : "transparent",
                   cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 10 }}>

@@ -76,7 +76,9 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
   const [matchAmt, setMatchAmt] = useState("")
   const [matchDate, setMatchDate] = useState(localDate())
   const [innerTab, setInnerTab] = useState("match")
-  const [matchMode, setMatchMode] = useState("link")
+  // 기본은 '새 거래로 등록'(정상 워크플로우 — 청구서 열어 바로 입금/지급 기록).
+  // '거래내역에서 연결'은 이미 들어온 거래를 뒤늦게 이 청구서에 붙이는 보조 경로라 뒤로.
+  const [matchMode, setMatchMode] = useState("new")
   const [candidates, setCandidates] = useState([])
   const [showAll, setShowAll] = useState(false)
   const [docs, setDocs] = useState([])
@@ -105,7 +107,9 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
   }, [invoice?.id])
   useEffect(() => {
     api.getCategories().then(setCategories)
-    api.getAccountSubjects().then(setAcctSubjects)
+    // 거래 입력용은 postable 계정만 — 집계 계정(code=NULL)이 섞이면 code로 만든 옵션이
+    // value=null 로 여럿 생겨 Combobox key가 중복된다(선택도 불가).
+    api.getAccountSubjects({ postableOnly: true }).then(setAcctSubjects)
     api.getRefItems('jeokyo').then(setJeokyos)
   }, [])
   // 청구서 열릴 때 분류 기본값 채움: 비목=수금/대금 지급, 적요=청구서 정산
@@ -243,7 +247,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
                 {invoice.remainAmount > 0 && (
                   <div className="col gap-10">
                     <div style={{ display: "flex", background: "var(--surface-2)", borderRadius: 8, padding: 3, gap: 2 }}>
-                      {[["link", `거래내역에서 연결${(relatedCands.length || candidates.length) ? ` (${relatedCands.length || candidates.length})` : ""}`], ["new", "새 거래로 등록"]].map(([v, l]) => (
+                      {[["new", "새 거래로 등록"], ["link", `거래내역에서 연결${(relatedCands.length || candidates.length) ? ` (${relatedCands.length || candidates.length})` : ""}`]].map(([v, l]) => (
                         <button key={v} onClick={() => setMatchMode(v)}
                           style={{ flex: 1, padding: "7px 0", border: 0, borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit",
                             background: matchMode === v ? "#fff" : "transparent", color: matchMode === v ? "var(--ink)" : "var(--muted-2)",
