@@ -1,6 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
+const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
 const { restoreLastGenerated } = require('../lib/recurrence')
 const { ledgerError } = require('../lib/ledger')
@@ -165,6 +166,9 @@ router.post('/:id/matches', async (req, res, next) => {
   const invoiceId = req.params.id
   const dateErr = futureDateError(date)
   if (dateErr) return res.status(400).json({ error: dateErr })
+  // 매칭은 실제 입금/지급 거래를 만들거나 상태를 완료로 바꾼다 → 마감된 달이면 막는다
+  const closedErr = await closedPeriodError(req.db, date)
+  if (closedErr) return res.status(409).json({ error: closedErr })
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()

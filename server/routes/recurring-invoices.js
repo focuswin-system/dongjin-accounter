@@ -5,6 +5,7 @@ const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS } = require('../lib/recurren
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
 const { taxTypeOfMode, recurFromSupply, recurVat } = require('../lib/vat')
+const { closedPeriodError } = require('../lib/closing')
 
 const router = Router()
 
@@ -14,6 +15,13 @@ const router = Router()
 const invTaxType = (r) => (r.contract_vat_mode
   ? taxTypeOfMode(r.contract_vat_mode)
   : recurVat(r.vat_mode).tax)   // exclusive→과세 / none→면세 / zero→영세
+
+/* 세액 계산에 쓸 vat_mode. 과세유형(invTaxType)과 '같은 소스'여야 한다.
+   예전엔 세액은 규칙 vat_mode로, 과세유형은 계약 vat_mode로 정해서
+   면세·영세 계약에 10% 세액이 붙은 청구서가 나갔다(고객 과청구 + 신고자료 불일치). */
+const effVatMode = (r) => (r.contract_vat_mode
+  ? (r.contract_vat_mode === 'exempt' ? 'none' : r.contract_vat_mode === 'zero' ? 'zero' : 'exclusive')
+  : r.vat_mode)
 
 router.get('/', async (req, res, next) => {
   try {
@@ -68,7 +76,8 @@ router.get('/pending', async (req, res, next) => {
   try {
     const [recs] = await req.db.execute(`
       SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch,
-             v.name AS vendor_name, c.name AS contract_name, c.contract_no
+             v.name AS vendor_name, c.name AS contract_name, c.contract_no,
+             c.vat_mode AS contract_vat_mode
       FROM recurring_invoices r
       LEFT JOIN vendors v   ON r.vendor_id = v.id
       LEFT JOIN contracts c ON r.contract_id = c.id
@@ -80,7 +89,7 @@ router.get('/pending', async (req, res, next) => {
       // 다가오는 회차(LOOKAHEAD_DAYS)까지 미리 노출 — 경리가 대금청구서를 미리 발행할 수 있게.
       for (const due of dueDatesToGenerate(r, today, { horizonDays: LOOKAHEAD_DAYS })) {
         const supply = Number(r.supply_amount)
-        const vat = recurFromSupply(supply, r.vat_mode).vat
+        const vat = recurFromSupply(supply, effVatMode(r)).vat
         out.push({
           source: 'recurring',
           recurring_id: r.id,
@@ -129,6 +138,9 @@ router.post('/:id/issue', async (req, res, next) => {
     if (paid) {
       const de = futureDateError(target)
       if (de) { await rollbackQuietly(conn); return res.status(400).json({ error: de }) }
+      // 기입금은 실제 거래를 만든다 → 마감된 달이면 막는다(지출 쪽과 대칭)
+      const ce = await closedPeriodError(conn, target)
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
     }
 
     const year = target.slice(0, 4)
@@ -138,7 +150,7 @@ router.post('/:id/issue', async (req, res, next) => {
     )
     const invoice_no = `청구-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
     const supply = Number(r.supply_amount)
-    const vat    = recurFromSupply(supply, r.vat_mode).vat
+    const vat    = recurFromSupply(supply, effVatMode(r)).vat
     const total  = supply + vat
     // 발행 즉시 정산(기입금) 시 반영할 계좌: 사용자가 고른 계좌 > 정기청구 규칙 계좌 > 주거래(첫 은행).
     let acctId = account_id || r.account_id || null
@@ -200,7 +212,7 @@ router.post('/generate', async (req, res, next) => {
         )
         const invoice_no = `청구-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
         const supply = Number(r.supply_amount)
-        const vat    = recurFromSupply(supply, r.vat_mode).vat
+        const vat    = recurFromSupply(supply, effVatMode(r)).vat
         const total  = supply + vat
         const dueAt  = addDays(dueStr, 30)
         const id = randomUUID()

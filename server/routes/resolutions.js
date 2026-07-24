@@ -1,6 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
+const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
 const { insertWithDocNo } = require('../lib/docno')
@@ -172,6 +173,11 @@ router.get('/:id/matchable', async (req, res, next) => {
 // 어느 쪽이든 지출 doc_no에 결의서번호를 역참조해, 그 지출의 증빙에서 결의서를 찾을 수 있게 한다.
 router.post('/:id/process', async (req, res, next) => {
   const { mode, txn_id, amount, date, account_id } = req.body
+  // 결의서 처리는 실제 지출 거래를 만들거나 기존 거래를 완료로 바꾼다 → 마감된 달이면 막는다
+  {
+    const ce = await closedPeriodError(req.db, date)
+    if (ce) return res.status(409).json({ error: ce })
+  }
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()

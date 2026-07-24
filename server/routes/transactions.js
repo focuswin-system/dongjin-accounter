@@ -154,6 +154,12 @@ router.put('/:id', async (req, res, next) => {
     // 마감은 옮기기 전·후 두 날짜를 모두 본다 — 한쪽만 보면 잠긴 달에서 거래를 빼내거나 밀어넣을 수 있다
     const closedErr = await closedPeriodError(req.db, cur.cur_date, date)
     if (closedErr) return res.status(409).json({ error: closedErr })
+    // 장부 불변식은 등록(POST)·상태변경(PATCH)과 똑같이 수정에도 걸어야 한다.
+    // 여기가 비어 있어서, 완료 상태 지출을 계좌 없이 저장하면 거래는 남고 계좌 잔액에서만
+    // 조용히 빠지는 상태가 만들어졌다(F-02 계열). 상태는 표준형으로 정규화한 뒤 검사한다.
+    const st = normalizeStatus(status || '지급완료')
+    const lerr = ledgerError({ kind: cur.kind, account_id, status: st })
+    if (lerr) return res.status(400).json({ error: lerr })
     const costId = cur.kind === 'expense' ? (cost_contract_id || null) : null
     // 금액이 바뀌면 청구서 매칭액도 따라가야 한다. 거래 수정과 매칭 갱신이 갈라지면
     // 청구서 정산액이 옛 금액으로 남아 미수/미지급이 틀어지므로 한 트랜잭션으로 묶는다.
@@ -167,7 +173,7 @@ router.put('/:id', async (req, res, next) => {
           supply_amount=?, vat_amount=?, tax_type=?, vat_deductible=?
         WHERE id=?
       `, [vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
-          amount, date, method||'', status||'지급완료', project_no||'', site||'',
+          amount, date, method||'', st, project_no||'', site||'',
           doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'', item_id||null, account_code||null,
           vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible, req.params.id])
       if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
@@ -335,10 +341,12 @@ router.post('/import/commit', async (req, res, next) => {
     const contractMap = {}; for (const c of cs) contractMap[c.name] = c.id
 
     await conn.beginTransaction()
-    let inserted = 0, skippedFuture = 0; const createdVendors = []
+    let inserted = 0, skippedFuture = 0, skippedClosed = 0; const createdVendors = []
     for (const it of items) {
       // 미래 일자 거래는 건너뛴다 — 완료 상태로 들어가 계좌 잔액에 즉시 반영되므로 개별 등록과 같은 규칙 적용.
       if (futureDateError(it.date)) { skippedFuture++; continue }
+      // 마감된 달도 같은 이유로 건너뛴다 — 개별 등록이면 409로 막히는 행이 일괄에서만 통과하면 안 된다.
+      if (await closedPeriodError(conn, it.date)) { skippedClosed++; continue }
       let vendorId = null
       const vname = String(it.vendor || '').trim()
       if (vname) {
@@ -364,7 +372,7 @@ router.post('/import/commit', async (req, res, next) => {
       inserted++
     }
     await conn.commit()
-    res.json({ inserted, createdVendors, skippedFuture })
+    res.json({ inserted, createdVendors, skippedFuture, skippedClosed })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })

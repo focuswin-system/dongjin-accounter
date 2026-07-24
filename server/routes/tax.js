@@ -1,6 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
+const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
 
@@ -147,6 +148,11 @@ router.put('/vat', async (req, res, next) => {
     // 완료로 저장하는데 계좌가 없으면 그 납부/환급이 계좌 잔액에서 움직이지 않는다.
     const lerr = taxLedgerError({ isDone, isRefund, amount, accountId: account_id })
     if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
+    // 완료로 저장하면 실제 거래가 생기거나 바뀐다 → 마감된 달이면 막는다
+    if (isDone) {
+      const ce = await closedPeriodError(conn, paid_date || kstToday())
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
+    }
     const txnId = await syncTaxTxn({
       existingTxnId: exist[0]?.txn_id || null,
       isDone, isRefund, amount, accountId: account_id, date: paid_date,
@@ -217,10 +223,18 @@ const otLedgerErr = (body) => {
   })
 }
 
+// 완료 상태면 실제 거래가 생기므로 마감된 달인지 검사(거래 등록과 같은 규칙)
+const otClosedErr = async (db, body) => {
+  const st = body.status || '납부 대기'
+  if (st !== '납부 완료' && st !== '환급 완료') return null
+  return closedPeriodError(db, body.paid_date || kstToday())
+}
+
 router.post('/others', async (req, res, next) => {
   if (!req.body.name) return res.status(400).json({ error: '세목명 필수' })
   { const de = otFutureErr(req.body); if (de) return res.status(400).json({ error: de }) }
   { const le = otLedgerErr(req.body); if (le) return res.status(400).json({ error: le }) }
+  { const ce = await otClosedErr(req.db, req.body); if (ce) return res.status(409).json({ error: ce }) }
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
@@ -240,6 +254,7 @@ router.put('/others/:id', async (req, res, next) => {
   { const de = otFutureErr(req.body); if (de) return res.status(400).json({ error: de }) }
   { const le = otLedgerErr(req.body); if (le) return res.status(400).json({ error: le }) }
   const conn = await req.db.getConnection()
+  { const ce = await otClosedErr(req.db, req.body); if (ce) return res.status(409).json({ error: ce }) }
   try {
     await conn.beginTransaction()
     const [[cur]] = await conn.execute('SELECT txn_id FROM other_taxes WHERE id=?', [req.params.id])

@@ -427,6 +427,7 @@ export const api = {
         id: r.id,
         vendor: r.vendor_name || '(미확인)',
         vendorId: r.vendor_id,
+        contractId: r.contract_id,   // 수정 시 계약 연결을 잃지 않도록 함께 싣는다
         category: r.category,
         amount: r.amount,
         period: r.period,
@@ -465,7 +466,9 @@ export const api = {
     try {
       await req(`/recurring-expenses/${id}`, { method: 'PUT', body: {
         vendor_id: data.vendor_id ?? data.vendorId ?? null,
-        contract_id: data.contract_id ?? null,
+        // 계약 연결은 폼이 다루지 않으므로 기존 값을 그대로 실어 보낸다.
+        // 예전엔 항상 null이라, 계약에 걸린 정기지출을 수정하면 연결이 조용히 끊겼다.
+        contract_id: data.contract_id ?? data.contractId ?? null,
         category: data.category,
         amount: data.amount,
         vat_mode: data.vat_mode ?? data.vatMode ?? null,

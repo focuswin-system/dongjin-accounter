@@ -1,6 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
+const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
 
@@ -245,6 +246,9 @@ router.post('/:id/pay', async (req, res, next) => {
     // NULL 저장을 허용하지 않는다 — 과거 F-02와 동일 유형.
     const lerr = ledgerError({ kind: 'expense', account_id, status: '지급완료' })
     if (lerr) return res.status(400).json({ error: lerr })
+    // 마감된 달에는 실제 급여 지출을 만들 수 없다(신고자료와 장부 불일치 방지)
+    const ce = await closedPeriodError(conn, date || kstToday())
+    if (ce) return res.status(409).json({ error: ce })
 
     await conn.beginTransaction()
     const txnId = randomUUID()

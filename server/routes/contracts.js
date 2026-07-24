@@ -7,6 +7,7 @@ const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
 const { removeUploadedFile } = require('../lib/uploads')
 const { vatOf, vatRateOf, taxTypeOfMode } = require('../lib/vat')
+const { closedPeriodError } = require('../lib/closing')
 
 const router = Router()
 
@@ -320,6 +321,9 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
       // 완료 상태로 넣으므로 계좌가 없으면 잔액에 안 잡힌다(lib/ledger.js)
       const lerr = ledgerError({ kind: isPurchase ? 'expense' : 'income', account_id: accountId, status: isPurchase ? '지급완료' : '입금완료' })
       if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
+      // 마감된 달에는 실제 거래를 만들 수 없다
+      const ce = await closedPeriodError(conn, date || today)
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
       const txnId = randomUUID()
       await conn.execute(
         `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, invoice_id, memo)
@@ -420,6 +424,8 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
     if (paid) {
       const lerr = ledgerError({ kind: isPurchase ? 'expense' : 'income', account_id: accountId, status: isPurchase ? '지급완료' : '입금완료' })
       if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
+      const ce = await closedPeriodError(conn, issuedAt)
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
       const txnId = randomUUID()
       await conn.execute(
         `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, invoice_id, memo)
@@ -754,7 +760,7 @@ router.delete('/:id', async (req, res, next) => {
     await conn.execute('DELETE FROM contracts          WHERE id = ?', [id])
     await conn.commit()
     // 커밋 후 파일 정리 — 실패해도 계약 삭제는 이미 끝났으므로 조용히 넘어간다(고아 파일만 남을 뿐)
-    for (const u of fileUrls) { try { await removeUploadedFile(u) } catch {} }
+    for (const u of fileUrls) { try { removeUploadedFile(u, req.user?.companyId) } catch {} }
     res.json({ ok: true })
   } catch (e) {
     await rollbackQuietly(conn)

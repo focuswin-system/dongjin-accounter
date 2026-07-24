@@ -1,6 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
+const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
 const { removeUploadedFile } = require('../lib/uploads')
@@ -337,9 +338,10 @@ router.post('/:id/docs', async (req, res, next) => {
 router.delete('/docs/:docId', async (req, res, next) => {
   try {
     // DB 행만 지우면 실제 파일이 uploads/{companyId}/ 에 그대로 남는다(고아 파일).
-    const [[doc]] = await req.db.execute('SELECT url FROM work_contract_docs WHERE id = ?', [req.params.docId])
+    // 컬럼명은 file_url (url 아님) — 잘못된 컬럼이면 SELECT가 ER_BAD_FIELD로 500나고 삭제가 영영 안 된다.
+    const [[doc]] = await req.db.execute('SELECT file_url FROM work_contract_docs WHERE id = ?', [req.params.docId])
     await req.db.execute('DELETE FROM work_contract_docs WHERE id = ?', [req.params.docId])
-    if (doc) removeUploadedFile(doc.url, req.user?.companyId)
+    if (doc) removeUploadedFile(doc.file_url, req.user?.companyId)
     res.json({ ok: true })
   } catch (e) { next(e) }
 })
@@ -401,6 +403,8 @@ router.post('/:id/pay', async (req, res, next) => {
       // 은행계좌가 하나도 없으면 NULL이 되어 어느 잔액에도 안 잡혔다. 명시 선택을 요구한다.
       const lerr = ledgerError({ kind: 'expense', account_id, status: '지급완료' })
       if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
+      const ce = await closedPeriodError(conn, date || pay_date || kstToday())
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
       txnId = randomUUID()
       // 소득구분에 맞는 카테고리로 지출 기록(급여와 구분되어 신고자료 집계가 섞이지 않게)
       const category = c.income_type === '일용' ? '일용노무비' : c.income_type === '기타' ? '기타소득 지급' : '용역비'

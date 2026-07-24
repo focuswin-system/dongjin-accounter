@@ -270,6 +270,8 @@ try {
       const c = s[i], prev = s[i - 1]
       if (quote) { if (c === quote && prev !== BS) quote = null; cur += c; continue }
       if (c === "'" || c === '"' || c === '`') { quote = c; cur += c; continue }
+      // 값 배열 안의 줄 주석은 건너뛴다 — 주석 속 쉼표를 항목으로 세면 개수가 틀린다(오탐).
+      if (c === '/' && s[i + 1] === '/') { while (i < s.length && s[i] !== '\n') i++; continue }
       if ('([{'.includes(c)) depth++
       if (')]}'.includes(c)) depth--
       if (c === ',' && depth === 0) { out.push(cur); cur = ''; continue }

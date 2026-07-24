@@ -1240,14 +1240,18 @@ const CategoryPanel = () => {
   }
   const openEdit = (c) => {
     setEditing(c)
-    setForm({ kind: kindOf(c), name: c.name, vat: c.vat, pay_method: c.pay_method })
+    // vat_deductible을 안 실으면 칩이 항상 '공제 가능'으로 보이고, 저장 시 서버가 1로 되돌린다
+    setForm({ kind: kindOf(c), name: c.name, vat: c.vat, pay_method: c.pay_method,
+              vat_deductible: c.vat_deductible == null ? 1 : Number(c.vat_deductible) })
     setDrawerOpen(true)
   }
   const handleSave = async () => {
     if (!form.name.trim()) return toast.push("비목명을 입력하세요")
+    // 매입세액 불공제(접대비 등)는 반드시 payload에 넣는다 — 빠지면 서버가 1(공제가능)로 강제한다
+    const vatDeductible = (form.vat_deductible ?? 1) === 0 ? 0 : 1
     const res = editing
-      ? await api.updateCategory(editing.id, { name: form.name, group_name: editing.group_name || '', vat: form.vat, pay_method: form.pay_method })
-      : await api.addCategory({ kind: form.kind, name: form.name, vat: form.vat, pay_method: form.pay_method })
+      ? await api.updateCategory(editing.id, { name: form.name, group_name: editing.group_name || '', vat: form.vat, pay_method: form.pay_method, vat_deductible: vatDeductible })
+      : await api.addCategory({ kind: form.kind, name: form.name, vat: form.vat, pay_method: form.pay_method, vat_deductible: vatDeductible })
     if (!res.ok) return toast.push(res.error || "저장 실패")
     toast.push(editing ? "수정됐어요" : "등록됐어요")
     setDrawerOpen(false)
@@ -1801,6 +1805,8 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
       // 목록 행(camelCase) → 폼(snake_case) 복원
       setForm({
         vendor_id: editing.vendorId || "", category: editing.category || "",
+        // 계약 연결은 폼에서 다루지 않지만, 수정 시 잃지 않도록 들고 다닌다
+        contract_id: editing.contractId || null,
         amount: editing.amount ? String(editing.amount) : "",
         vat_mode: editing.vatMode || "exclusive",
         period: editing.period || "monthly", day_of_month: String(editing.dayOfMonth || 1),
@@ -2021,6 +2027,9 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
   }, [open, editing])
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
+  // 계약 vat_mode(taxable/exempt/zero) → 정기청구 vat_mode(exclusive/none/zero)
+  const modeFromContract = (vm) => (vm === 'exempt' ? 'none' : vm === 'zero' ? 'zero' : 'exclusive')
+
   const pickContract = (cid) => {
     setForm(p => {
       const c = contracts.find(x => x.id === cid)
@@ -2029,6 +2038,9 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
         contractId: cid,
         vendorId: p.vendorId || (c ? c.vendor_id : ""),
         item: p.item || (c ? c.name : ""),
+        // 계약을 걸면 그 계약의 과세유형을 따라간다. 이걸 안 맞추면 발행 시 세액은 규칙(기본 과세 10%)으로
+        // 계산되는데 청구서 과세유형은 계약(면세/영세)으로 저장돼, 면세 계약에 10% 세액이 붙는다.
+        vatMode: c ? modeFromContract(c.vat_mode) : p.vatMode,
       }
     })
   }
@@ -2161,7 +2173,8 @@ export const RecurringInvoicePanel = ({ page = false }) => {
     load()
   }
 
-  const totalOf = (r) => r.supplyAmount + (r.vatMode === 'none' ? 0 : Math.round(r.supplyAmount * 0.1))
+  // 영세(zero)도 세액 0 — 'none만 0'으로 보면 영세 청구액이 10% 부풀어 보인다
+  const totalOf = (r) => r.supplyAmount + (r.vatMode === 'exclusive' ? Math.round(r.supplyAmount * 0.1) : 0)
 
   const openNew = () => { setEditing(null); setFormOpen(true) }
   const openEdit = (r) => { setEditing(r); setFormOpen(true) }
