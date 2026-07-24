@@ -459,6 +459,22 @@ export const api = {
     } catch (e) { return { ok: false, error: e.message } }
   },
 
+  async updateRecurringExpense(id, data) {
+    try {
+      await req(`/recurring-expenses/${id}`, { method: 'PUT', body: {
+        vendor_id: data.vendor_id ?? data.vendorId ?? null,
+        contract_id: data.contract_id ?? null,
+        category: data.category,
+        amount: data.amount,
+        period: data.period,
+        day_of_month: data.day_of_month ?? data.dayOfMonth,
+        start_date: data.start_date ?? data.startDate,
+        end_date: data.end_date ?? data.endDate ?? null,
+        account_id: data.account_id ?? data.accountId ?? null,
+      }})
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
   async toggleRecurringExpense(id) {
     try {
       const result = await req(`/recurring-expenses/${id}/toggle`, { method: 'PATCH', body: {} })
@@ -516,6 +532,23 @@ export const api = {
     } catch { return { ok: false } }
   },
 
+  async updateRecurringInvoice(id, data) {
+    try {
+      await req(`/recurring-invoices/${id}`, { method: 'PUT', body: {
+        vendor_id: data.vendorId ?? data.vendor_id ?? null,
+        contract_id: data.contractId ?? data.contract_id ?? null,
+        item: data.item,
+        supply_amount: data.supplyAmount ?? data.supply_amount,
+        vat_mode: data.vatMode ?? data.vat_mode,
+        period: data.period,
+        day_of_month: data.dayOfMonth ?? data.day_of_month,
+        start_date: data.startDate ?? data.start_date,
+        end_date: data.endDate ?? data.end_date ?? null,
+        account_id: data.accountId ?? data.account_id ?? null,
+      }})
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
   async toggleRecurringInvoice(id) {
     try {
       const result = await req(`/recurring-invoices/${id}/toggle`, { method: 'PATCH', body: {} })

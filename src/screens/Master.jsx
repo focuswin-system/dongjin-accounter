@@ -1780,7 +1780,8 @@ const AccountBalancePanel = () => {
 // 실패했는데 호출부가 결과를 안 보고 '등록됐어요'를 띄워, 사용자는 등록된 줄 알았다.
 // addGubu: 인라인으로 새 거래처를 만들 때 부여할 구분. 정기지출은 매입처(A).
 // reloadVendors: 부모가 거래처 목록을 다시 불러오게 하는 콜백(추가 후 새 id로 잡기 위함).
-const RecurringFormDrawer = ({ open, onClose, onSave, vendors = [], accounts = [], addGubu = 'A', reloadVendors }) => {
+// editing: 수정 대상(api.getRecurringExpenses 형태, camelCase). null이면 등록.
+const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], accounts = [], addGubu = 'A', reloadVendors }) => {
   const empty = { vendor_id: "", category: "", amount: "", period: "monthly", day_of_month: "1", start_date: todayStr(), end_date: "", account_id: "" }
   const [form, setForm] = useState(empty)
   // 비목은 반드시 실제 비목 마스터에서 고른다. 예전엔 ["임차료","통신비"…]를 하드코딩해서,
@@ -1790,9 +1791,20 @@ const RecurringFormDrawer = ({ open, onClose, onSave, vendors = [], accounts = [
   useEffect(() => { if (open) api.getCategories({ type: 'exp' }).then(setCats) }, [open])
   useEffect(() => {
     if (!open) return
-    // 출금 계좌 기본값 — 비어 있으면 생성된 지출을 '이체 실행'할 때 계좌가 없어 막힌다
-    setForm({ ...empty, account_id: accounts.find(a => a.kind === "bank")?.id || accounts[0]?.id || "" })
-  }, [open, accounts])
+    if (editing) {
+      // 목록 행(camelCase) → 폼(snake_case) 복원
+      setForm({
+        vendor_id: editing.vendorId || "", category: editing.category || "",
+        amount: editing.amount ? String(editing.amount) : "",
+        period: editing.period || "monthly", day_of_month: String(editing.dayOfMonth || 1),
+        start_date: editing.startDate || todayStr(), end_date: editing.endDate || "",
+        account_id: editing.accountId || "",
+      })
+    } else {
+      // 출금 계좌 기본값 — 비어 있으면 생성된 지출을 '이체 실행'할 때 계좌가 없어 막힌다
+      setForm({ ...empty, account_id: accounts.find(a => a.kind === "bank")?.id || accounts[0]?.id || "" })
+    }
+  }, [open, editing, accounts])
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
   const handleSave = () => {
     if (!form.vendor_id) return toast.push("거래처를 선택해주세요")
@@ -1811,7 +1823,7 @@ const RecurringFormDrawer = ({ open, onClose, onSave, vendors = [], accounts = [
   const toast = useToast()
   return (
     <Drawer open={open} onClose={onClose}>
-      <DrawerHead title="정기 지출 등록" onClose={onClose}/>
+      <DrawerHead title={editing ? "정기 지출 수정" : "정기 지출 등록"} onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div><label className="label">거래처 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
           <Combobox value={form.vendor_id} onChange={v => f("vendor_id", v)}
@@ -1871,7 +1883,7 @@ const RecurringFormDrawer = ({ open, onClose, onSave, vendors = [], accounts = [
           <div className="text-xs text-muted2" style={{ marginTop: 6 }}>자동 생성된 지출을 이체 처리할 때 이 계좌가 쓰여요.</div>
         </div>
       </div>
-      <DrawerFooter onCancel={onClose} onSave={handleSave} saveLabel="등록"/>
+      <DrawerFooter onCancel={onClose} onSave={handleSave} saveLabel={editing ? "수정" : "등록"}/>
     </Drawer>
   )
 }
@@ -1883,6 +1895,7 @@ export const RecurringExpensePanel = ({ page = false }) => {
   const toast = useToast()
   const [rows, setRows] = useState([])
   const [formOpen, setFormOpen] = useState(false)
+  const [editing, setEditing] = useState(null)   // 수정 대상(없으면 등록)
   const [vendors, setVendors] = useState([])
   const [accounts, setAccounts] = useState([])
 
@@ -1906,8 +1919,10 @@ export const RecurringExpensePanel = ({ page = false }) => {
   }
 
 
+  const openNew = () => { setEditing(null); setFormOpen(true) }
+  const openEdit = (r) => { setEditing(r); setFormOpen(true) }
   const addBtn = (
-    <button className="btn primary" onClick={() => setFormOpen(true)}>
+    <button className="btn primary" onClick={openNew}>
       <Icon.Plus size={14}/> 등록
     </button>
   )
@@ -1929,7 +1944,7 @@ export const RecurringExpensePanel = ({ page = false }) => {
           <thead>
             <tr>
               <th>거래처</th><th>비목</th><th className="num-right">금액</th>
-              <th>주기</th><th>다음 생성</th><th style={{ width: 60 }}>상태</th><th style={{ width: 60 }}></th>
+              <th>주기</th><th>다음 생성</th><th style={{ width: 60 }}>상태</th><th style={{ width: 110 }}></th>
             </tr>
           </thead>
           <tbody>
@@ -1944,21 +1959,24 @@ export const RecurringExpensePanel = ({ page = false }) => {
                   <span className={`badge ${r.active ? "pos" : "outline"}`}>{r.active ? "활성" : "비활성"}</span>
                 </td>
                 <td>
-                  <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => handleToggle(r.id)}>
-                    {r.active ? "중지" : "재개"}
-                  </button>
+                  <div className="row gap-6">
+                    <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => openEdit(r)}>수정</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => handleToggle(r.id)}>
+                      {r.active ? "중지" : "재개"}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <RecurringFormDrawer open={formOpen} onClose={() => setFormOpen(false)} vendors={vendors} accounts={accounts}
+      <RecurringFormDrawer open={formOpen} editing={editing} onClose={() => setFormOpen(false)} vendors={vendors} accounts={accounts}
         addGubu="A" reloadVendors={reloadVendors}
         onSave={async (data) => {
           // 결과를 보지 않고 성공 문구를 띄우면, 저장이 실패해도 등록된 줄 알게 된다
-          const res = await api.addRecurringExpense(data)
-          toast.push(res?.ok === false ? (res.error || "등록에 실패했어요") : "정기 지출이 등록됐어요",
+          const res = editing ? await api.updateRecurringExpense(editing.id, data) : await api.addRecurringExpense(data)
+          toast.push(res?.ok === false ? (res.error || "저장에 실패했어요") : (editing ? "정기 지출을 수정했어요" : "정기 지출이 등록됐어요"),
                      res?.ok === false ? { tone: "warn" } : undefined)
           load()
         }}/>
@@ -1967,11 +1985,20 @@ export const RecurringExpensePanel = ({ page = false }) => {
 }
 
 // ── 정기 청구(고정수입) 패널 ──────────────────────────────────────
-const RecurringInvoiceFormDrawer = ({ open, onClose, onSave, vendors, contracts, accounts, reloadVendors }) => {
+const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, contracts, accounts, reloadVendors }) => {
   const toast = useToast()
   const empty = { vendorId: "", contractId: "", item: "", supply: "", vatMode: "exclusive", period: "monthly", dayOfMonth: "1", startDate: todayStr(), endDate: "", accountId: "" }
   const [form, setForm] = useState(empty)
-  useEffect(() => { if (open) setForm(empty) }, [open])
+  useEffect(() => {
+    if (!open) return
+    setForm(editing ? {
+      vendorId: editing.vendorId || "", contractId: editing.contractId || "", item: editing.item || "",
+      supply: editing.supplyAmount ? String(editing.supplyAmount) : "",
+      vatMode: editing.vatMode || "exclusive", period: editing.period || "monthly",
+      dayOfMonth: String(editing.dayOfMonth || 1), startDate: editing.startDate || todayStr(),
+      endDate: editing.endDate || "", accountId: editing.accountId || "",
+    } : empty)
+  }, [open, editing])
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
   const pickContract = (cid) => {
@@ -2005,7 +2032,7 @@ const RecurringInvoiceFormDrawer = ({ open, onClose, onSave, vendors, contracts,
 
   return (
     <Drawer open={open} onClose={onClose}>
-      <DrawerHead title="정기 청구 등록" onClose={onClose}/>
+      <DrawerHead title={editing ? "정기 청구 수정" : "정기 청구 등록"} onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div><label className="label">계약 연결 <span className="text-muted">(선택)</span></label>
           <Combobox value={form.contractId} onChange={pickContract} allowAdd={false}
@@ -2070,7 +2097,7 @@ const RecurringInvoiceFormDrawer = ({ open, onClose, onSave, vendors, contracts,
             placeholder="입금 계좌 선택"/>
         </div>
       </div>
-      <DrawerFooter onCancel={onClose} onSave={handleSave} saveLabel="등록"/>
+      <DrawerFooter onCancel={onClose} onSave={handleSave} saveLabel={editing ? "수정" : "등록"}/>
     </Drawer>
   )
 }
@@ -2083,6 +2110,7 @@ export const RecurringInvoicePanel = ({ page = false }) => {
   const [contracts, setContracts] = useState([])
   const [accounts, setAccounts] = useState([])
   const [formOpen, setFormOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
   const [busy, setBusy] = useState(false)
 
   const load = async () => setRows(await api.getRecurringInvoices())
@@ -2115,12 +2143,14 @@ export const RecurringInvoicePanel = ({ page = false }) => {
 
   const totalOf = (r) => r.supplyAmount + (r.vatMode === 'none' ? 0 : Math.round(r.supplyAmount * 0.1))
 
+  const openNew = () => { setEditing(null); setFormOpen(true) }
+  const openEdit = (r) => { setEditing(r); setFormOpen(true) }
   const recActions = (
     <div className="row gap-8">
       <button className="btn" onClick={handleGenerate} disabled={busy}>
         <Icon.Calendar size={14}/> 밀린 회차 일괄 생성
       </button>
-      <button className="btn primary" onClick={() => setFormOpen(true)}>
+      <button className="btn primary" onClick={openNew}>
         <Icon.Plus size={14}/> 등록
       </button>
     </div>
@@ -2150,7 +2180,7 @@ export const RecurringInvoicePanel = ({ page = false }) => {
           <thead>
             <tr>
               <th>고객사</th><th>항목 / 계약</th><th className="num-right">청구액(VAT 포함)</th>
-              <th>주기</th><th>다음 청구</th><th style={{ width: 60 }}>상태</th><th style={{ width: 60 }}></th>
+              <th>주기</th><th>다음 청구</th><th style={{ width: 60 }}>상태</th><th style={{ width: 110 }}></th>
             </tr>
           </thead>
           <tbody>
@@ -2171,18 +2201,26 @@ export const RecurringInvoicePanel = ({ page = false }) => {
                 <td className="text-sm">{r.active ? nextRunDate(r) : "—"}</td>
                 <td><span className={`badge ${r.active ? "pos" : "outline"}`}>{r.active ? "활성" : "비활성"}</span></td>
                 <td>
-                  <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => handleToggle(r.id)}>
-                    {r.active ? "중지" : "재개"}
-                  </button>
+                  <div className="row gap-6">
+                    <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => openEdit(r)}>수정</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => handleToggle(r.id)}>
+                      {r.active ? "중지" : "재개"}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <RecurringInvoiceFormDrawer open={formOpen} onClose={() => setFormOpen(false)}
+      <RecurringInvoiceFormDrawer open={formOpen} editing={editing} onClose={() => setFormOpen(false)}
         vendors={vendors} contracts={contracts} accounts={accounts} reloadVendors={reloadVendors}
-        onSave={async (data) => { await api.addRecurringInvoice(data); toast.push("정기 청구가 등록됐어요"); load() }}/>
+        onSave={async (data) => {
+          const res = editing ? await api.updateRecurringInvoice(editing.id, data) : await api.addRecurringInvoice(data)
+          toast.push(res?.ok === false ? (res.error || "저장에 실패했어요") : (editing ? "정기 청구를 수정했어요" : "정기 청구가 등록됐어요"),
+                     res?.ok === false ? { tone: "warn" } : undefined)
+          load()
+        }}/>
     </div>
   )
 }
