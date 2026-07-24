@@ -111,6 +111,28 @@ const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster, withQty = fa
   );
 };
 
+/* 상대편 번호·프로젝트 번호 — 둘 다 선택 입력이라 폼 맨 아래(계약서 첨부 위)에 둔다.
+   업종마다 부르는 이름이 다르다(조선=호선번호, 천막=설치현장, 선반=작업지시번호, SW=프로젝트코드)
+   → 라벨은 업종중립으로 두고 예시로 감을 준다. */
+const ContractRefFields = ({ form, set }) => (
+  <div className="row gap-12">
+    <div style={{ flex: 1 }}>
+      <label className="label" style={{ marginBottom: 8 }}>
+        발주번호 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span>
+      </label>
+      <input className="input" value={form.order_no || ''} placeholder="고객사에서 받은 발주번호"
+        onChange={e => set(f => ({ ...f, order_no: e.target.value }))}/>
+    </div>
+    <div style={{ flex: 1 }}>
+      <label className="label" style={{ marginBottom: 8 }}>
+        프로젝트·공사번호 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span>
+      </label>
+      <input className="input" value={form.project_no || ''} placeholder="예: PRJ-2026-01 / 231호선"
+        onChange={e => set(f => ({ ...f, project_no: e.target.value }))}/>
+    </div>
+  </div>
+)
+
 /* 계약 조건 입력 — 새 계약/편집 Drawer 공용.
    청구 방식(총액형·정기형·기성형)과 종료 방식(만료·자동갱신·무기한)이 독립이라, 금액·기간 칸도 그에 따라 바뀐다. */
 const ContractTermFields = ({ form, set }) => {
@@ -289,25 +311,6 @@ const ContractTermFields = ({ form, set }) => {
           </div>
         </>
       )}
-
-      {/* 상대방 발주번호·프로젝트번호 — 업종중립 선택 입력.
-          업종마다 부르는 이름이 다르다(조선=호선번호, 천막=설치현장, 선반=작업지시번호, SW=프로젝트코드). */}
-      <div className="row gap-12">
-        <div style={{ flex: 1 }}>
-          <label className="label" style={{ marginBottom: 8 }}>
-            발주번호 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span>
-          </label>
-          <input className="input" value={form.order_no || ''} placeholder="상대방 발주·수주번호"
-            onChange={e => set(f => ({ ...f, order_no: e.target.value }))}/>
-        </div>
-        <div style={{ flex: 1 }}>
-          <label className="label" style={{ marginBottom: 8 }}>
-            프로젝트·공사번호 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span>
-          </label>
-          <input className="input" value={form.project_no || ''} placeholder="예: 231호선 / PRJ-2026-01"
-            onChange={e => set(f => ({ ...f, project_no: e.target.value }))}/>
-        </div>
-      </div>
 
       {/* 기간 — 무기한이면 종료일이 없다 */}
       <div className="row gap-12">
@@ -1738,6 +1741,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                 ))}
               </div>
             </div>
+            <ContractRefFields form={editForm} set={setEditForm}/>
             <div>
               <label className="label" style={{ marginBottom: 8 }}>계약서 추가 첨부 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 여러 개 가능</span></label>
               {editForm.file_url && (
@@ -2206,6 +2210,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
                 ))}
               </div>
             </div>
+            <ContractRefFields form={newForm} set={setNewForm}/>
             <div>
               <label className="label" style={{ marginBottom: 8 }}>계약서 첨부 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택 · 여러 개 가능</span></label>
               <FileAttach

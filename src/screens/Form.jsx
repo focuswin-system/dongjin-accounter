@@ -542,7 +542,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                   <div className="row gap-12">
                     <div style={{ flex: 1 }}>
                       <FormField label="프로젝트·공사번호" hint="선택">
-                        <input className="input" value={form.project_no || ''} placeholder="예: 231호선 / PRJ-2026-01"
+                        <input className="input" value={form.project_no || ''} placeholder="예: PRJ-2026-01 / 231호선"
                           onChange={e => setForm(f => ({ ...f, project_no: e.target.value }))}/>
                       </FormField>
                     </div>
