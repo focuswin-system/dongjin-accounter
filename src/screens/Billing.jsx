@@ -794,11 +794,6 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     <div className="fade-up">
       <PageHeader
         title={collect ? (isIssued ? "미수금" : "미지급금") : "대금 청구서"}
-        sub={collect
-          ? (isIssued
-              ? "발행한 청구서 중 아직 안 받은 미수금이에요. 청구서를 열어 입금 처리하고, 받은 돈을 돌려줄 땐 '환불 등록'을 쓰세요."
-              : "받은 청구서 중 아직 안 낸 미지급금이에요. 청구서를 열어 지급 처리하고, 준 돈을 돌려받을 땐 '환입 등록'을 쓰세요.")
-          : undefined}
         actions={collect
           ? <button className="btn" onClick={isIssued ? openRefund : openReturn}>
               <Icon.Plus size={14}/> {isIssued ? "환불 등록" : "환입 등록"}

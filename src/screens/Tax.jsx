@@ -160,7 +160,6 @@ export const TaxVatScreen = () => {
     <div className="fade-up">
       <PageHeader
         title="부가세"
-        sub="청구서에서 분기별 세액을 예상으로 집계해요. 실제 신고세액을 입력하고 납부·환급을 기록하면, 그 신고세액 기준으로 관리됩니다."
         actions={<>
           <button className="icon-btn" onClick={() => setYear(y => y - 1)} title="이전 연도"><Icon.Left size={16}/></button>
           <span className="fw-700 num" style={{ fontSize: 15, minWidth: 64, textAlign: 'center' }}>{year}년</span>
@@ -368,7 +367,6 @@ export const OtherTaxScreen = () => {
     <div className="fade-up">
       <PageHeader
         title="기타세액"
-        sub="원천세·지방소득세 등 부가세 외 세금의 신고세액·납부·환급을 정리합니다."
         actions={<button className="btn primary" onClick={openNew}><Icon.Plus size={14}/> 기타세액 등록</button>}
       />
 

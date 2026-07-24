@@ -52,7 +52,6 @@ export const DocsScreen = () => {
     <div className="fade-up">
       <PageHeader
         title="지급결의서"
-        sub="청구서 없는 지출(비품·간식 등)은 여기서 바로 만드세요. 세금계산서가 있는 매입 대금은 매입의 '대금 청구서'에서 발행할 수 있어요."
         actions={<button className="btn primary" onClick={() => setNewOpen(true)}><Icon.Plus/> 새 결의서</button>}
       />
 
@@ -646,7 +645,6 @@ export const EvidenceScreen = ({ onAttach }) => {
     <div className="fade-up">
       <PageHeader
         title="증빙 관리"
-        sub="영수증·세금계산서·통장내역을 한 곳에 모으고, 입출금 내역과 연결하세요."
         actions={<>
           <button className="btn" onClick={() => toast.push("증빙 파일을 ZIP으로 내려받았어요")}><Icon.Download/> 일괄 내려받기</button>
           <button className="btn primary" onClick={() => toast.push("파일 선택 창을 열었어요")}><Icon.Upload/> 파일 업로드</button>
@@ -930,7 +928,6 @@ export const ExcelScreen = () => {
     <div className="fade-up import-wrap">
       <PageHeader
         title="엑셀 업로드"
-        sub="기존 입출금 자료를 엑셀(.xlsx)·CSV로 한 번에 등록하세요."
         actions={<button className="btn" onClick={downloadTemplate}><Icon.Download/> 양식 다운로드</button>}
       />
 
@@ -1894,7 +1891,7 @@ export const ReportsScreen = () => {
 
   return (
     <div className="fade-up">
-      <PageHeader title="보고서" sub="월별·계약별·발주처별·세무사 전달용 자료를 한 번에 확인하세요."/>
+      <PageHeader title="보고서"/>
       <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
         {REPORTS.map(r => (
           <button key={r.id} className="card card-pad"

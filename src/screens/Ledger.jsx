@@ -84,7 +84,6 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
       <div className="fade-up">
         <PageHeader
           title={titleMap[filter]}
-          sub={subMap[filter]}
           actions={<>
             <button className="btn excel" onClick={openExcel}><Icon.Excel/> <span className="btn-label-hide">엑셀 업로드</span></button>
             <button className="btn" onClick={exportCsv}><Icon.Download/> <span className="btn-label-hide">내보내기</span></button>

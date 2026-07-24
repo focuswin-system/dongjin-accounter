@@ -216,7 +216,6 @@ export const LaborContractScreen = () => {
     <div className="fade-up">
       <PageHeader
         title="근로계약"
-        sub="직원 근로계약과 급여 기준을 관리하세요. 급여대장은 여기 등록된 계약을 바탕으로 만들어집니다."
         actions={<button className="btn primary" onClick={() => setDrawer({ mode: 'new' })}><Icon.Plus/> 직원 등록</button>}
       />
 
@@ -568,7 +567,6 @@ export const OutsourcingScreen = () => {
     <div className="fade-up">
       <PageHeader
         title="기타 용역·일용"
-        sub="용역·일용 인력의 계약과 단가를 관리하고, 지급을 등록하면 거래내역에 자동 기록됩니다."
         actions={<button className="btn primary" onClick={() => setDrawer({ mode: 'new' })}><Icon.Plus/> 인력 등록</button>}
       />
 

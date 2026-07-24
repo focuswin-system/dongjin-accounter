@@ -1899,7 +1899,6 @@ export const RecurringExpensePanel = ({ page = false }) => {
       {/* 독립 화면일 땐 공용 PageHeader를 쓴다 — 다른 화면과 상단 여백·sticky 동작을 맞추기 위해 */}
       {page ? (
         <PageHeader title="정기 지출"
-          sub="임차료·통신비처럼 매달 같은 날 나가는 지출을 등록해 두는 곳이에요."
           actions={addBtn}/>
       ) : (
         <div className="row" style={{ marginBottom: 16 }}>
@@ -2099,7 +2098,6 @@ export const RecurringInvoicePanel = ({ page = false }) => {
           밀린 회차를 한 번에 밀어넣어야 할 때만 일괄 생성을 쓴다. */}
       {page ? (
         <PageHeader title="정기 청구"
-          sub={<>청구 조건을 설정하는 곳이에요. 실제 청구서 발행은 <b>판매·매출 → 대금 청구서</b>의 '발행 예정'에서 계약 청구일정과 함께 처리합니다.</>}
           actions={recActions}/>
       ) : (
         <>
@@ -2561,7 +2559,6 @@ export const MasterScreen = ({ user, section = "base", forcedTab }) => {
     <div className="fade-up">
       <PageHeader
         title={single ? (TAB_BY_ID[activeTab]?.label || sectionCfg.title) : sectionCfg.title}
-        sub={single ? sectionCfg.title : sectionCfg.sub}
         actions={!isCustomTab && data && (
           <>
             <button className="btn" onClick={() => toast.push(`${data.label} 양식을 내려받았어요`)}><Icon.Download/> <span className="btn-label-hide">양식 다운로드</span></button>

@@ -35,7 +35,7 @@ export const MgmtDashScreen = () => {
 
   return (
     <div className="fade-up">
-      <PageHeader title="경영 대시보드" sub="계약·미수·미지급·세무 현황을 한 화면에서 확인합니다."/>
+      <PageHeader title="경영 대시보드"/>
 
       <div className="grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
         <Card label="계약금액 합계" amount={contractTotal} tone="ink" sub={`${d.contracts.length}건`}/>

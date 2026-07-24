@@ -2054,7 +2054,6 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
     <div className="fade-up">
       <PageHeader
         title={meta.title}
-        sub={meta.sub}
         actions={<>
           <button className="btn" onClick={exportXlsx} disabled={exporting}>
             <Icon.Download/> {exporting ? "만드는 중..." : "엑셀 내보내기"}

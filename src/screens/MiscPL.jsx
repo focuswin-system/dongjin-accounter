@@ -66,7 +66,7 @@ export const MiscPLScreen = ({ initialTab = 'expense', refreshTrigger, openExpen
 
   return (
     <div className="fade-up">
-      <PageHeader title={cur.title} sub={cur.sub} actions={addBtn}/>
+      <PageHeader title={cur.title} actions={addBtn}/>
       <div className="card">
         <div className="row gap-8" style={{ padding: '16px 16px', borderBottom: '1px solid var(--line)' }}>
           {TABS.map(t => (

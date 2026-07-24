@@ -19,7 +19,7 @@ export const PortalScreen = ({ node, go, openIncome, openExpense }) => {
 
   return (
     <div className="fade-up">
-      <PageHeader title={node.label} sub={node.desc}/>
+      <PageHeader title={node.label}/>
 
       {/* 관련 해야 할 일 */}
       {node.todos && (

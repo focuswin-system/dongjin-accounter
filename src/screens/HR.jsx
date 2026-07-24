@@ -170,7 +170,7 @@ export const HRScreen = () => {
   return (
     <>
       <div className="fade-up">
-        <PageHeader title="인사관리" sub={<>근로 급여대장과 용역·일용 지급을 한 곳에서 관리하세요. 직원 등록·근로계약은 <b>근로계약</b> 메뉴에서, 4대보험·원천세 자료는 보고서에서 받을 수 있어요.</>}/>
+        <PageHeader title="인사관리"/>
 
         <div className="card" style={{ overflow: "hidden" }}>
           <div className="tab-bar" style={{ padding: "0 12px" }}>
