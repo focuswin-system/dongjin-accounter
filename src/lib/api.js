@@ -651,6 +651,10 @@ export const api = {
       return { ok: true, id: result.id }
     } catch (e) { return { ok: false, error: e.message } }
   },
+  async deleteContract(id) {
+    try { await req(`/contracts/${id}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }   // 409 사유(청구서·거래 연결)를 화면까지
+  },
 
   async updateContract(id, data) {
     try {

@@ -989,6 +989,20 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     reload();
   };
 
+  const handleDelete = async () => {
+    if (!c) return;
+    const ok = await confirm({
+      tone: 'warn', icon: <Icon.Warn size={22}/>, title: `${c.name} 삭제`,
+      body: '이 계약과 그 설정(청구 일정·품목표·갱신 이력·첨부)을 지웁니다. 청구서·거래·정기반복이 연결돼 있으면 지울 수 없어요.',
+      confirmLabel: '삭제',
+    });
+    if (!ok) return;
+    const res = await api.deleteContract(contractId);
+    if (!res.ok) return toast.push(res.error || '삭제에 실패했어요', { tone: 'warn' });
+    toast.push('계약을 삭제했어요');
+    goList();
+  };
+
   const openEdit = () => {
     if (!c) return;
     setEditForm({
@@ -1084,6 +1098,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
             ? <a className="btn" href={c.file_url || c.attachments[0].url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}><Icon.File size={14}/> 계약서 보기</a>
             : null}
           <button className="btn" onClick={openEdit}><Icon.Pencil size={14}/> 편집</button>
+          <button className="btn" style={{ color: 'var(--neg)' }} onClick={handleDelete}><Icon.Trash size={14}/> 삭제</button>
           {/* 기성형 = 품목 단가×수량으로 그때그때 청구. 매출이면 발행(받을 돈), 매입이면 매입 기성(나갈 돈). */}
           {progress && (
             <button className="btn primary" onClick={() => setProgressOpen(true)}><Icon.Plus/> 기성 청구</button>

@@ -710,6 +710,60 @@ router.put('/:id', async (req, res, next) => {
   }
 })
 
+// 계약 삭제 — 돈 기록(청구서·거래·정기반복)이 하나라도 걸려 있으면 막는다.
+// 걸린 게 없을 때만 지우고, 그때 설정 성격(마일스톤·품목표·갱신이력·첨부)은 함께 지운다.
+// 거래처·거래 삭제와 같은 '안전 삭제' 방식 — 지우면 조용히 고아가 되거나 잔액이 틀어질 걸 미리 차단.
+router.delete('/:id', async (req, res, next) => {
+  const id = req.params.id
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [[c]] = await conn.execute('SELECT id, name FROM contracts WHERE id = ? FOR UPDATE', [id])
+    if (!c) { await rollbackQuietly(conn); return res.status(404).json({ error: '계약을 찾을 수 없어요' }) }
+
+    // 돈 기록 집계 — 거래는 두 축(근거 contract_id / 원가귀속 cost_contract_id)을 모두 본다
+    const [[cnt]] = await conn.execute(`
+      SELECT
+        (SELECT COUNT(*) FROM invoices           WHERE contract_id = ?) AS invs,
+        (SELECT COUNT(*) FROM transactions        WHERE contract_id = ? OR cost_contract_id = ?) AS txns,
+        (SELECT COUNT(*) FROM recurring_invoices  WHERE contract_id = ?) AS recin,
+        (SELECT COUNT(*) FROM recurring_expenses  WHERE contract_id = ?) AS recex`,
+      [id, id, id, id, id])
+    const parts = []
+    if (Number(cnt.invs)  > 0) parts.push(`청구서 ${cnt.invs}건`)
+    if (Number(cnt.txns)  > 0) parts.push(`거래 ${cnt.txns}건`)
+    if (Number(cnt.recin) > 0) parts.push(`정기청구 ${cnt.recin}건`)
+    if (Number(cnt.recex) > 0) parts.push(`정기지출 ${cnt.recex}건`)
+    if (parts.length) {
+      await rollbackQuietly(conn)
+      return res.status(409).json({
+        error: `이 계약엔 ${parts.join(' · ')}이 연결돼 있어 지울 수 없어요. 먼저 그 기록을 정리하거나, 계약 상태를 '완료'·'보류'로 두세요.`,
+      })
+    }
+
+    // 첨부 파일 경로를 먼저 모아둔다(행을 지우기 전에) — 디스크에서도 지워 고아 파일을 막는다
+    const [docRows] = await conn.execute('SELECT url FROM contract_docs WHERE contract_id = ?', [id])
+    const [[cf]] = await conn.execute('SELECT file_url FROM contracts WHERE id = ?', [id])
+    const fileUrls = [...docRows.map(d => d.url), cf?.file_url].filter(Boolean)
+
+    // 설정 성격만 남았다 — 명시적으로 지운다(FK CASCADE에 기대지 않고 의도를 코드로 드러낸다)
+    await conn.execute('DELETE FROM milestones        WHERE contract_id = ?', [id])
+    await conn.execute('DELETE FROM contract_items     WHERE contract_id = ?', [id])
+    await conn.execute('DELETE FROM contract_renewals  WHERE contract_id = ?', [id])
+    await conn.execute('DELETE FROM contract_docs      WHERE contract_id = ?', [id])
+    await conn.execute('DELETE FROM contracts          WHERE id = ?', [id])
+    await conn.commit()
+    // 커밋 후 파일 정리 — 실패해도 계약 삭제는 이미 끝났으므로 조용히 넘어간다(고아 파일만 남을 뿐)
+    for (const u of fileUrls) { try { await removeUploadedFile(u) } catch {} }
+    res.json({ ok: true })
+  } catch (e) {
+    await rollbackQuietly(conn)
+    next(e)
+  } finally {
+    conn.release()
+  }
+})
+
 // 계약의 정기 반복은 매출/매입에 따라 들어가는 곳이 다르다.
 //   매출 계약(gubu B·미상) → recurring_invoices (받을 돈: 정기청구)
 //   매입 계약(gubu A·E)    → recurring_expenses (나갈 돈: 정기지출)
