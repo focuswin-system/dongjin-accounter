@@ -127,8 +127,9 @@ router.post('/users', authMiddleware, async (req, res, next) => {
 
     const hashed = await bcrypt.hash(password, 10)
     const id = randomUUID()
+    // 관리자가 초기 비번을 정해 건네므로, 새 계정도 최초 로그인 시 본인이 비번을 바꾸게 강제한다.
     await platformPool.execute(
-      'INSERT INTO users (id, company_id, username, password, name, email, role) VALUES (?,?,?,?,?,?,?)',
+      'INSERT INTO users (id, company_id, username, password, name, email, role, must_change_pw) VALUES (?,?,?,?,?,?,?,1)',
       [id, req.user.companyId, String(username).trim(), hashed, name || '', email || null,
        role === 'admin' ? 'admin' : 'user']
     )

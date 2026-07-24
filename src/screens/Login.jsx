@@ -36,7 +36,9 @@ export const LoginScreen = ({ onLogin }) => {
       localStorage.setItem('token', data.token);
       localStorage.setItem('companyCode', data.company?.code || company.trim().toLowerCase());
       if (data.company?.name) localStorage.setItem('companyName', data.company.name);
-      onLogin({ displayName: data.user.name || data.user.username, role: data.user.role, id: data.user.id });
+      // mustChangePw: 관리자가 비번을 리셋한 계정 → 최초 로그인 시 비번 변경을 강제한다(App에서 게이트)
+      onLogin({ displayName: data.user.name || data.user.username, role: data.user.role, id: data.user.id,
+                mustChangePw: !!data.user.mustChangePw });
     } catch {
       setError('서버에 연결할 수 없습니다. 서버가 실행 중인지 확인해주세요.');
     } finally {

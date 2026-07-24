@@ -948,11 +948,66 @@ export default function App() {
     setUser(null); setLoggedIn(false);
   };
 
+  // 관리자가 리셋한 임시 비번으로 들어온 계정은 새 비번을 정하기 전엔 앱에 못 들어간다.
+  const clearMustChange = () => {
+    const u = { ...user, mustChangePw: false };
+    localStorage.setItem('user', JSON.stringify(u));
+    setUser(u);
+  };
+
   return (
     <ToastProvider>
       <ConfirmProvider>
-        {loggedIn ? <AppInner onLogout={handleLogout} user={user}/> : <LoginScreen onLogin={handleLogin}/>}
+        {!loggedIn
+          ? <LoginScreen onLogin={handleLogin}/>
+          : user?.mustChangePw
+            ? <ForcePasswordChange user={user} onDone={clearMustChange} onLogout={handleLogout}/>
+            : <AppInner onLogout={handleLogout} user={user}/>}
       </ConfirmProvider>
     </ToastProvider>
+  );
+}
+
+// 최초 로그인(관리자 리셋) 시 비번 변경 강제 — 성공해야 앱으로 들어간다.
+function ForcePasswordChange({ user, onDone, onLogout }) {
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    if (pw.length < 4) return setErr('비밀번호는 4자 이상으로 해주세요.');
+    if (pw !== pw2) return setErr('두 비밀번호가 일치하지 않아요.');
+    setBusy(true);
+    const res = await api.updateUserPassword(user.id, pw);   // 본인 변경 → 서버가 must_change_pw=0으로
+    setBusy(false);
+    if (!res.ok) return setErr(res.error || '변경에 실패했어요.');
+    onDone();
+  };
+  return (
+    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#fff', padding: 20 }}>
+      <form onSubmit={submit} style={{ width: '100%', maxWidth: 360 }}>
+        <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.03em', marginBottom: 6 }}>비밀번호 변경</div>
+        <div style={{ fontSize: 13.5, color: 'var(--muted)', marginBottom: 24 }}>
+          임시 비밀번호로 로그인했어요. 계속하려면 새 비밀번호를 정해주세요.
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <input className="input" type="password" autoFocus placeholder="새 비밀번호 (4자 이상)"
+            value={pw} onChange={e => { setPw(e.target.value); setErr(''); }} style={{ height: 44 }}/>
+          <input className="input" type="password" placeholder="새 비밀번호 확인"
+            value={pw2} onChange={e => { setPw2(e.target.value); setErr(''); }} style={{ height: 44 }}/>
+          {err && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 10,
+              background: 'var(--neg-soft)', color: 'var(--neg-ink)', fontSize: 13 }}>
+              <Icon.Warn size={14}/> {err}
+            </div>
+          )}
+          <button className="btn primary" type="submit" disabled={busy} style={{ height: 46, fontWeight: 700 }}>
+            {busy ? '변경 중...' : '변경하고 시작하기'}
+          </button>
+          <button type="button" className="btn" onClick={onLogout} style={{ height: 40 }}>다른 계정으로 로그인</button>
+        </div>
+      </form>
+    </div>
   );
 }
