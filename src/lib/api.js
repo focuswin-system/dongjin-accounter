@@ -465,6 +465,15 @@ export const api = {
       return { ok: true, active: result.active }
     } catch { return { ok: false } }
   },
+  // 지급 예정인 정기지출 회차(아직 매입 청구서 미생성) — 매입 대금청구서 '지급 예정'에 계약 지급일정과 함께
+  async getPendingRecurringExpenses() {
+    try { return await req('/recurring-expenses/pending') } catch { return [] }
+  },
+  // 정기지출 회차 1건을 매입 청구서(미지급금)로 등록. paid=true면 지급 처리까지
+  async issueRecurringExpense(recurringId, { due, paid = false, account_id } = {}) {
+    try { const r = await req(`/recurring-expenses/${recurringId}/issue`, { method: 'POST', body: { due, paid, account_id } }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
 
   // ─── 정기청구(고정수입) ───────────────────────────────────────
   async getRecurringInvoices() {

@@ -641,7 +641,7 @@ const PendingScheduleTable = ({ rows, onIssue, onPaid, isIssued = true }) => (
   <div className="card" style={{ overflow: "hidden" }}>
     <DataTable
       rows={rows}
-      rowKey={p => p.source === 'recurring' ? `r-${p.recurring_id}-${p.due_date}` : `m-${p.milestone_id}`}
+      rowKey={p => p.recurring_id ? `r-${p.recurring_id}-${p.due_date}` : `m-${p.milestone_id}`}
       empty={isIssued
         ? "발행 예정인 청구 일정이 없어요. 계약 상세의 '청구 일정'에서 청구할 금액·시점을 등록하세요."
         : "예정된 지급 일정이 없어요. 매입 계약 상세의 '청구 일정'에서 지급할 금액·시점을 등록하세요."}
@@ -692,12 +692,13 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   // 경리가 청구서 메뉴 한 곳만 열면 이번 달 청구할 게 다 보이도록 '발행 예정'에서 합친다.
   // (정기청구는 매출 전용 — 매입의 정기지출은 별도 흐름)
   const load = async () => {
+    // 정기 반복은 성격에 맞는 쪽에만 뜬다: 매출=정기청구 / 매입=정기지출 (완전 대칭)
     const [rows, rec, pay, sched, recurring] = await Promise.all([
       api.getInvoices(),
       api.getReceivablesSummary(),
       api.getPayablesSummary(),
       api.getPendingSchedules(isIssued ? "sales" : "purchase"),
-      isIssued ? api.getPendingRecurring() : Promise.resolve([]),
+      isIssued ? api.getPendingRecurring() : api.getPendingRecurringExpenses(),
     ])
     const merged = [
       ...sched.map(s => ({ ...s, source: 'milestone' })),
@@ -727,6 +728,15 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     : kindRows.filter(inv => statusFilter === "전체" || effStatus(inv) === statusFilter)
   const pendingTotal = pending.reduce((s, p) => s + p.amount + (p.vat != null ? p.vat : Math.round(p.amount * 0.1)), 0)
 
+  // 예정 회차 1건을 청구서로 발행/등록. 출처(마일스톤/정기청구/정기지출)마다 API가 다르다.
+  const issuePending = (p, paid) => {
+    const opts = { paid, account_id: paid ? (p._accountId || null) : undefined }
+    if (p.source === 'recurring')          return api.issueRecurring(p.recurring_id, { due: p.due_date, ...opts })
+    if (p.source === 'recurring-expense')  return api.issueRecurringExpense(p.recurring_id, { due: p.due_date, ...opts })
+    // 마일스톤은 기지급 시 사용자가 고른 날짜(_date)를 쓴다(정기 회차는 회차일 고정)
+    return api.issueSchedule(p.milestone_id, { date: p._date || p.due_date, ...opts })
+  }
+
   const issueSchedule = async (p, paid) => {
     // 기입금/기지급은 "돈이 어느 계좌로 오갔나"가 핵심이라, 계좌·날짜를 받는 드로어로 넘긴다.
     if (paid) { setPaidTarget(p); return }
@@ -742,9 +752,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       confirmLabel: isIssued ? "청구서 발행" : "청구서 등록",
     })
     if (!ok) return
-    const res = isRecurring
-      ? await api.issueRecurring(p.recurring_id, { due: p.due_date, paid: false })
-      : await api.issueSchedule(p.milestone_id, { paid: false })
+    const res = await issuePending(p, false)
     if (!res.ok) { toast.push(res.error || "처리에 실패했어요"); return }
     toast.push(isIssued ? "청구서를 발행했어요" : "매입 청구서를 등록했어요")
     load()
@@ -862,6 +870,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       />
 
       <PaidIssueDrawer target={paidTarget} isIssued={isIssued}
+        onIssuePaid={(p) => issuePending(p, true)}
         onClose={() => setPaidTarget(null)}
         onDone={() => { setPaidTarget(null); load() }}/>
     </div>
@@ -869,7 +878,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
 }
 
 // 기입금/기지급 처리 — 청구서 발행 + 즉시 정산. "돈이 어느 계좌로 오갔나"를 반드시 받는다.
-const PaidIssueDrawer = ({ target, isIssued, onClose, onDone }) => {
+const PaidIssueDrawer = ({ target, isIssued, onClose, onDone, onIssuePaid }) => {
   const toast = useToast()
   const today = localDate()
   const [accounts, setAccounts] = useState([])
@@ -884,12 +893,10 @@ const PaidIssueDrawer = ({ target, isIssued, onClose, onDone }) => {
   const supply = target.amount || 0
   const vat = target.vat != null ? target.vat : Math.round(supply * 0.1)
   const total = supply + vat
-  const isRecurring = target.source === 'recurring'
   const submit = async () => {
     if (date > today) return toast.push("미래 날짜로는 처리할 수 없어요")
-    const res = isRecurring
-      ? await api.issueRecurring(target.recurring_id, { due: target.due_date, paid: true, account_id: accountId || null })
-      : await api.issueSchedule(target.milestone_id, { paid: true, date, account_id: accountId || null })
+    // onIssuePaid는 부모의 issuePending을 그대로 쓴다(출처별 분기 한 곳에서만)
+    const res = await onIssuePaid({ ...target, _accountId: accountId || null, _date: date })
     if (!res.ok) { toast.push(res.error || "처리에 실패했어요"); return }
     toast.push(isIssued ? "기입금 처리했어요" : "기지급 처리했어요")
     onDone()

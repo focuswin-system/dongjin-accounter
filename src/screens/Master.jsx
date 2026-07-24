@@ -1877,17 +1877,25 @@ export const RecurringExpensePanel = ({ page = false }) => {
   }
 
 
+  const addBtn = (
+    <button className="btn primary" onClick={() => setFormOpen(true)}>
+      <Icon.Plus size={14}/> 등록
+    </button>
+  )
+
   return (
     <div className={page ? 'fade-up' : undefined} style={page ? undefined : { padding: 20 }}>
-      <div className="row" style={{ marginBottom: 16 }}>
-        <div>
-          <div className={page ? 'page-title' : 'section-title'}>정기 지출</div>
-          {page && <div className="page-sub">임차료·통신비처럼 매달 같은 날 나가는 지출을 걸어두면 회차가 자동으로 생성돼요.</div>}
+      {/* 독립 화면일 땐 공용 PageHeader를 쓴다 — 다른 화면과 상단 여백·sticky 동작을 맞추기 위해 */}
+      {page ? (
+        <PageHeader title="정기 지출"
+          sub="임차료·통신비처럼 매달 같은 날 나가는 지출을 등록해 두는 곳이에요."
+          actions={addBtn}/>
+      ) : (
+        <div className="row" style={{ marginBottom: 16 }}>
+          <div className="section-title">정기 지출</div>
+          <div className="ml-auto">{addBtn}</div>
         </div>
-        <button className="btn primary ml-auto" onClick={() => setFormOpen(true)}>
-          <Icon.Plus size={14}/> 등록
-        </button>
-      </div>
+      )}
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
           <thead>
@@ -2062,25 +2070,37 @@ export const RecurringInvoicePanel = ({ page = false }) => {
 
   const totalOf = (r) => r.supplyAmount + (r.vatMode === 'none' ? 0 : Math.round(r.supplyAmount * 0.1))
 
+  const recActions = (
+    <div className="row gap-8">
+      <button className="btn" onClick={handleGenerate} disabled={busy}>
+        <Icon.Calendar size={14}/> 밀린 회차 일괄 생성
+      </button>
+      <button className="btn primary" onClick={() => setFormOpen(true)}>
+        <Icon.Plus size={14}/> 등록
+      </button>
+    </div>
+  )
+
   return (
     <div className={page ? 'fade-up' : undefined} style={page ? undefined : { padding: 20 }}>
       {/* 여기는 '무엇을 언제 얼마씩 청구할지' 설정하는 곳.
           실제 청구(발행)는 판매·매출 → 대금 청구서의 '발행 예정'에서 한다(계약 청구일정과 한 화면에서 본다).
-          밀린 회차를 한 번에 밀어넣어야 할 때만 아래 일괄 생성을 쓴다. */}
-      <div className="row" style={{ marginBottom: 6 }}>
-        <div className={page ? 'page-title' : 'section-title'}>정기 청구</div>
-        <div className="ml-auto row gap-8">
-          <button className="btn" onClick={handleGenerate} disabled={busy}>
-            <Icon.Calendar size={14}/> 밀린 회차 일괄 생성
-          </button>
-          <button className="btn primary" onClick={() => setFormOpen(true)}>
-            <Icon.Plus size={14}/> 등록
-          </button>
-        </div>
-      </div>
-      <div className="text-sm text-muted" style={{ marginBottom: 16 }}>
-        청구 조건을 설정하는 곳이에요. 실제 청구서 발행은 <b>판매·매출 → 대금 청구서</b>의 '발행 예정'에서 계약 청구일정과 함께 처리합니다.
-      </div>
+          밀린 회차를 한 번에 밀어넣어야 할 때만 일괄 생성을 쓴다. */}
+      {page ? (
+        <PageHeader title="정기 청구"
+          sub={<>청구 조건을 설정하는 곳이에요. 실제 청구서 발행은 <b>판매·매출 → 대금 청구서</b>의 '발행 예정'에서 계약 청구일정과 함께 처리합니다.</>}
+          actions={recActions}/>
+      ) : (
+        <>
+          <div className="row" style={{ marginBottom: 6 }}>
+            <div className="section-title">정기 청구</div>
+            <div className="ml-auto">{recActions}</div>
+          </div>
+          <div className="text-sm text-muted" style={{ marginBottom: 16 }}>
+            청구 조건을 설정하는 곳이에요. 실제 청구서 발행은 <b>판매·매출 → 대금 청구서</b>의 '발행 예정'에서 계약 청구일정과 함께 처리합니다.
+          </div>
+        </>
+      )}
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
           <thead>
