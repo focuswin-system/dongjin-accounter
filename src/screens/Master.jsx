@@ -125,10 +125,11 @@ const MASTER_SECTIONS = {
   },
   settings: {
     title: "환경설정",
-    sub: "회사 정보와 시스템 사용자·문서 양식을 관리합니다.",
+    sub: "회사 정보·사용자·결재선·장부 마감을 관리합니다.",
     groups: [
+      // '문서 양식'(template)은 목업이라 제외. 실동작 항목만.
       { label: "회사", tabs: ["company"] },
-      { label: "시스템", tabs: ["user", "approval", "template"] },
+      { label: "시스템", tabs: ["user", "approval"] },
       { label: "장부 마감", tabs: ["closing"] },
     ],
   },

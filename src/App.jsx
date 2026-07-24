@@ -357,6 +357,7 @@ function AppInner({ onLogout, user }) {
     // 기준정보 서브메뉴: 내부 서브내브 없이 해당 탭만 전체폭으로. (일반회계 master_ / 인사급여 hrbase_)
     if (route.startsWith("master_")) return <MasterScreen user={user} section="base" forcedTab={route.slice(7)}/>;
     if (route.startsWith("hrbase_")) return <MasterScreen user={user} section="hr" forcedTab={route.slice(7)}/>;
+    if (route.startsWith("settings_")) return <MasterScreen user={user} section="settings" forcedTab={route.slice(9)}/>;
     switch (route) {
       case "home":            return <HomeScreen go={go} user={user} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
       case "billing":         return <BillingScreen/>;
@@ -371,7 +372,7 @@ function AppInner({ onLogout, user }) {
       case "tax_vat":         return <TaxVatScreen/>;
       case "tax_etc":         return <OtherTaxScreen/>;
       case "master":          return <MasterScreen user={user} section="base"/>;
-      case "settings":        return <MasterScreen user={user} section="settings"/>;
+      // 'settings'는 위 PORTAL_CAT_BY_ID에서 타일 페이지로 처리됨(각 타일 → settings_<tab>)
       case "hr_base":         return <MasterScreen user={user} section="hr"/>;
       case "hr_labor_contract": return <LaborContractScreen/>;
       case "hr_outsourcing":  return <OutsourcingScreen/>;
@@ -407,14 +408,15 @@ function AppInner({ onLogout, user }) {
   const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger"
                 : route.startsWith("billing") ? "billing"
                 : (route === "contract_sales" || route === "contract_purchase") ? "contract"
-                : (route === "settings" || route === "hr_base" || route === "hr_labor_contract" || route === "hr_outsourcing" || route.startsWith("master") || route.startsWith("hrbase")) ? "master"
+                : (route === "settings" || route === "hr_base" || route === "hr_labor_contract" || route === "hr_outsourcing" || route.startsWith("master") || route.startsWith("hrbase") || route.startsWith("settings_")) ? "master"
                 : (route === "recurring_expense" || route === "recurring_invoice") ? "recurring"
                 : (route === "misc_income") ? "misc_pl"
                 : (route === "mgmt_dash" || route === "mgmt_ask") ? "report" : route;
   const help = HELP_MAP[helpKey] || HELP_MAP.home;
 
-  // 기준정보 서브메뉴(master_<탭>)는 CRUMB_MAP에 없으니 nav 잎 정보로 브레드크럼 구성
-  let crumbs = CRUMB_MAP[route] || (LEAF_BY_ID[route] ? [LEAF_BY_ID[route].domain, "기준정보", LEAF_BY_ID[route].label] : ["홈"]);
+  // 기준정보·환경설정 서브메뉴(master_/settings_<탭>)는 CRUMB_MAP에 없으니 nav 잎 정보로 구성.
+  // 중간 라벨은 잎의 section을 쓴다(기준정보 잎은 "기준정보", 환경설정 잎은 "환경설정").
+  let crumbs = CRUMB_MAP[route] || (LEAF_BY_ID[route] ? [LEAF_BY_ID[route].domain, LEAF_BY_ID[route].section, LEAF_BY_ID[route].label] : ["홈"]);
   if (route === "contract_detail") {
     crumbs = ["계약", contractName || "계약 상세"];
   }

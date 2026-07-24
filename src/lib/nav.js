@@ -94,6 +94,15 @@ export const NAV_TREE = [
 // 환경설정(사이드바 하단·포털 별도 타일)
 export const SETTINGS_LEAF = { id: "settings", label: "환경설정", icon: Icon.Cog }
 
+// 환경설정 하위 화면 — 기준정보처럼 각 항목을 forcedTab 잎으로(내부 서브내브 없이 전체폭, 공용 레이아웃).
+// '문서 양식'(template)은 목업이라 제외. 클릭 시 route=settings_<tab> → MasterScreen forcedTab.
+export const SETTINGS_LEAVES = [
+  { id: "settings_company",  label: "회사 정보", icon: Icon.Building },
+  { id: "settings_user",     label: "사용자",    icon: Icon.Sign },
+  { id: "settings_approval", label: "결재선",    icon: Icon.Doc },
+  { id: "settings_closing",  label: "월 마감",   icon: Icon.Bank },
+]
+
 // 잎 id → 소속 도메인 id (활성 도메인 자동 펼침용)
 export const DOMAIN_OF = {}
 for (const node of NAV_TREE) {
@@ -106,6 +115,9 @@ for (const node of NAV_TREE) {
   if (node.type === "leaf") { if (node.id !== "home") ALL_LEAVES.push({ id: node.id, label: node.label, icon: node.icon }) }
   else for (const s of node.sections) for (const it of s.items) ALL_LEAVES.push({ id: it.id, label: it.label, icon: it.icon, domain: node.label, section: s.label })
 }
+// 환경설정 잎도 평탄화 목록에 넣는다(포털 타일·브레드크럼·명령팔레트에서 찾게)
+for (const l of SETTINGS_LEAVES) ALL_LEAVES.push({ ...l, domain: "환경설정", section: "환경설정" })
+
 export const LEAF_BY_ID = Object.fromEntries(ALL_LEAVES.map(l => [l.id, l]))
 
 // ── 홈택스식 다단계 포털 구조 (도메인 → 카테고리 → 그룹 → 화면) ──
@@ -158,6 +170,13 @@ export const PORTAL = [
 export const PORTAL_CAT_BY_ID = {}
 for (const d of PORTAL) for (const c of d.categories) if (c.groups) PORTAL_CAT_BY_ID[c.id] = { ...c, domainLabel: d.label }
 
+// 환경설정도 포털 타일 페이지로(기준정보와 같은 방식) — 'settings' 루트가 타일을 보여주고,
+// 각 타일은 settings_<tab> forcedTab 화면으로 들어간다.
+PORTAL_CAT_BY_ID['settings'] = {
+  id: 'settings', label: '환경설정', icon: Icon.Cog, domainLabel: '환경설정',
+  groups: [{ label: '', items: SETTINGS_LEAVES.map(l => l.id) }],
+}
+
 // 포털 카테고리 라우트도 소속 도메인으로 매핑(사이드바 도메인 자동 펼침)
 DOMAIN_OF['acct_process'] = 'acct'
 DOMAIN_OF['acct_tax'] = 'acct'
@@ -174,6 +193,7 @@ export function leafIdOf(route) {
   if (route === "ledger_ap") return "ap"
   if (route === "excel_modal" || route === "excel") return "ledger"
   if (route === "billing") return "billing_issued"
-  if (route === "settings") return "settings"
+  // 환경설정 하위(settings_<tab>)는 사이드바 하단 '환경설정'을 활성으로
+  if (route === "settings" || route.startsWith("settings_")) return "settings"
   return route
 }

@@ -101,6 +101,10 @@ try {
   const CONTAINERS = ['acct', 'hr_dom', 'mgmt', 'acct_process', 'acct_tax', 'master', 'hr_labor', 'hr_base']
   for (const d of CONTAINERS) navIds.delete(d)
 
+  // settings_<tab>(회사정보·사용자·결재선·월마감)은 단일 자원 'settings'가 통째로 관장한다
+  // (모두 admin 전용 화면). 개별 권한 자원으로 쪼개지 않으므로 카탈로그 대조에서 제외.
+  for (const id of [...navIds]) if (id.startsWith('settings_')) navIds.delete(id)
+
   const catalog = new Set(RESOURCE_IDS)
   const missingInCatalog = [...navIds].filter(id => !catalog.has(id))
   const missingInNav = [...catalog].filter(id => !navIds.has(id) && id !== 'home' && id !== 'settings')
