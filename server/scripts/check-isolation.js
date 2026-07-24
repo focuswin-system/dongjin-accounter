@@ -253,6 +253,78 @@ try {
   fail(`SQL 검사 실패: ${e.message}`)
 }
 
+// [9] SQL — 플레이스홀더(?) 수와 값 배열 길이 일치 (INSERT·UPDATE·SELECT 전부)
+// [8]은 INSERT의 '컬럼 수 ↔ ? 수'만 본다. 값 배열이 하나 모자라거나 UPDATE의 SET을
+// 고치면서 값을 안 맞추면 [8]을 통과하고 실행 시점에만 터진다 — 그 사각지대를 메운다.
+// 스프레드(...pick(body))가 든 배열은 길이를 정적으로 셀 수 없어 건너뛴다.
+try {
+  console.log('\n[9] SQL — 플레이스홀더 수 ↔ 값 배열 길이')
+  const BS = String.fromCharCode(92)
+  const splitTop = (s) => {
+    let depth = 0, quote = null, cur = '', out = []
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i], prev = s[i - 1]
+      if (quote) { if (c === quote && prev !== BS) quote = null; cur += c; continue }
+      if (c === "'" || c === '"' || c === '`') { quote = c; cur += c; continue }
+      if ('([{'.includes(c)) depth++
+      if (')]}'.includes(c)) depth--
+      if (c === ',' && depth === 0) { out.push(cur); cur = ''; continue }
+      cur += c
+    }
+    out.push(cur)
+    return out.map(x => x.trim()).filter(x => x.length)
+  }
+  const readBalanced = (s, from) => {
+    let depth = 0, quote = null
+    for (let i = from; i < s.length; i++) {
+      const c = s[i], prev = s[i - 1]
+      if (quote) { if (c === quote && prev !== BS) quote = null; continue }
+      if (c === "'" || c === '"' || c === '`') { quote = c; continue }
+      if (c === '(') depth++
+      else if (c === ')') { depth--; if (depth === 0) return i }
+    }
+    return -1
+  }
+  const bad = []
+  let checked = 0, skipped = 0
+  for (const dir of ['routes', '.', 'lib', 'platform']) {
+    const d = path.join(__dirname, '..', dir)
+    if (!fs.existsSync(d)) continue
+    for (const f of fs.readdirSync(d)) {
+      if (!f.endsWith('.js')) continue
+      const p = path.join(d, f)
+      if (fs.statSync(p).isDirectory()) continue
+      const s = fs.readFileSync(p, 'utf8')
+      const re = /\.(?:execute|query)\s*\(/g
+      let m
+      while ((m = re.exec(s))) {
+        const open = m.index + m[0].length - 1
+        const close = readBalanced(s, open)
+        if (close < 0) continue
+        const args = splitTop(s.slice(open + 1, close))
+        if (args.length < 2) continue
+        const sql = args[0]
+        const rest = args.slice(1).join(',').trim()
+        if (!rest.startsWith('[')) continue      // 값을 변수로 넘기면 정적 분석 불가
+        if (!/^['"`]/.test(sql)) continue        // SQL이 변수면 ?를 셀 수 없다
+        if (sql.includes('${')) continue         // 동적 SQL(? 개수가 런타임 결정)
+        const inner = rest.slice(1, rest.lastIndexOf(']'))
+        if (inner.includes('...')) { skipped++; continue }   // 스프레드는 길이를 못 센다
+        const vals = inner.trim() ? splitTop(inner).length : 0
+        const qs = (sql.match(/\?/g) || []).length
+        checked++
+        if (qs !== vals) {
+          bad.push(`${f}:${s.slice(0, m.index).split('\n').length} ?=${qs} 값=${vals}`)
+        }
+      }
+    }
+  }
+  if (bad.length) fail(`SQL 플레이스홀더/값 개수 불일치: ${bad.join(' · ')}`)
+  else ok(`플레이스홀더/값 개수 일치 (검사 ${checked}건, 스프레드 ${skipped}건 제외)`)
+} catch (e) {
+  fail(`SQL 값 검사 실패: ${e.message}`)
+}
+
 console.log('\n' + '━'.repeat(64))
 if (failures === 0) {
   console.log(' ✅ 격리 검사 통과')
