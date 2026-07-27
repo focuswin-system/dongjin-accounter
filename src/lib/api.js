@@ -1114,18 +1114,21 @@ export const api = {
       const todos = []
       ;(rec.rows || [])
         .filter(r => ['입금 예정', '일부 입금', '기한 지남', '장기 미수'].includes(r.status))
-        .slice(0, 4)
+        .slice(0, 6)
         .forEach(r => todos.push({
           id: 'ar-' + r.id, kind: 'ar', invoiceId: r.id,
           tag: r.delay > 0 ? `${r.delay}일 초과` : '입금 예정',
-          title: `${r.vendor} 입금 확인`, sub: `${r.contract || ''} ${won(r.remain)}`.trim(), action: '입금 처리',
+          title: r.vendor, sub: [won(r.remain), r.contract].filter(Boolean).join(' · '),
+          amount: r.remain, action: '입금 처리',
         }))
       ;(pay.rows || [])
         .filter(r => ['지급 예정', '지급 대기', '기한 지남'].includes(r.pay))
-        .slice(0, 4)
+        .slice(0, 6)
         .forEach(r => todos.push({
-          id: 'ap-' + r.id, kind: 'ap', invoiceId: r.id, tag: '지급 예정',
-          title: `${r.vendor} 이체`, sub: `${r.category || ''} ${won(r.amount)}`.trim(), action: '이체',
+          id: 'ap-' + r.id, kind: 'ap', invoiceId: r.id,
+          tag: r.pay === '기한 지남' ? '지급 기한 지남' : '지급 예정',
+          title: r.vendor, sub: [won(r.amount), r.category].filter(Boolean).join(' · '),
+          amount: r.amount, action: '이체',
         }))
       return todos
     } catch { return [] }

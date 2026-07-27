@@ -126,7 +126,7 @@ export const PORTAL = [
   {
     id: 'acct', label: '일반회계', icon: Icon.Book,
     categories: [
-      { id: 'acct_process', label: '회계처리', icon: Icon.Wallet, desc: '판매·매입·경비 거래 처리', todos: true, groups: [
+      { id: 'acct_process', label: '회계처리', icon: Icon.Wallet, desc: '판매·매입·경비 거래 처리', todos: true, expandGroups: true, groups: [
         { label: '판매·매출', items: ['contract_sales', 'billing_issued', 'recurring_invoice', 'ar'] },
         { label: '매입',     items: ['contract_purchase', 'billing_received', 'recurring_expense', 'ap'] },
         { label: '경비',     items: ['misc_pl', 'misc_income'] },

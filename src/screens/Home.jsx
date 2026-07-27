@@ -20,6 +20,14 @@ const TODO_KIND_META = {
 
 const DEFAULT_FAVS = ['income', 'expense', 'billing_issued', 'contract', 'tax_vat']
 
+// 도메인 → 홈 타일 목록. expandGroups 카테고리(회계처리)는 각 섹션(판매·매출·매입…)을 개별 타일로 펼치고,
+// route형 카테고리(인사관리·보고서 등)는 바로가기 타일, 그 외(세무·기준정보)는 하위메뉴를 묶은 링크 타일.
+const sectionTiles = (domain) => domain.categories.flatMap(cat => {
+  if (cat.route) return [{ key: cat.id, label: cat.label, desc: cat.desc, route: cat.route, Ic: cat.icon, items: [] }]
+  if (cat.expandGroups) return cat.groups.map((g, i) => ({ key: `${cat.id}-${i}`, label: g.label, items: g.items }))
+  return [{ key: cat.id, label: cat.label, items: (cat.groups || []).flatMap(g => g.items) }]
+})
+
 export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
   const [todos, setTodos] = useState([])
   const [favorites, setFavorites] = useState(() => {
@@ -77,17 +85,27 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
             <span className="text-sm fw-600" style={{ color: "var(--ink)" }}>지금 처리할 일이 없어요.</span>
           </div>
         ) : (
-          <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
+          <div className="todo-grid">
             {pendingTodos.slice(0, 4).map(t => (
-              <div key={t.id} className="card" style={{ padding: "14px 16px", flex: "1 1 240px", minWidth: 220, display: "flex", gap: 12, alignItems: "center" }}>
-                <div style={{ width: 34, height: 34, borderRadius: 10, flexShrink: 0, background: t.soft, color: t.toneColor, display: "grid", placeItems: "center" }}>{t.icon}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="text-xs fw-700" style={{ color: t.toneColor }}>{t.tag}</div>
-                  <div className="fw-700 text-sm" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</div>
-                </div>
-                <button className="btn primary sm" onClick={() => handleTodoAction(t)} style={{ flexShrink: 0 }}>{t.action}</button>
-              </div>
+              <button key={t.id} type="button" className="todo-card" onClick={() => handleTodoAction(t)}>
+                <span className="todo-ico" style={{ background: t.soft, color: t.toneColor }}>{t.icon}</span>
+                <span className="todo-main">
+                  <span className="todo-tag" style={{ color: t.toneColor }}>{t.tag}</span>
+                  <span className="todo-title">{t.title}</span>
+                  {t.sub && <span className="todo-sub">{t.sub}</span>}
+                </span>
+                <span className="todo-go">{t.action} <Icon.Right size={12}/></span>
+              </button>
             ))}
+            {pendingTodos.length > 4 && (
+              <button type="button" className="todo-card todo-more" onClick={() => go("ar")}>
+                <span className="todo-main">
+                  <span className="todo-title">+{pendingTodos.length - 4}건 더</span>
+                  <span className="todo-sub">미수금·미지급금에서 전체 보기</span>
+                </span>
+                <Icon.Right size={14}/>
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -131,7 +149,7 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
         </div>
       </div>
 
-      {/* 도메인 라인 (세로 스택) → 큰 카테고리 타일 */}
+      {/* 도메인 라인 → 섹션 타일(사이드바 구조 그대로 홈에 펼침) */}
       {PORTAL.map(domain => {
         const Dic = domain.icon
         return (
@@ -140,18 +158,34 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
               <div className="d-ico"><Dic size={15}/></div>
               <div className="d-label">{domain.label}</div>
             </div>
-            <div className="tile-row">
-              {domain.categories.map(cat => {
-                const Cic = cat.icon
-                return (
-                  <button key={cat.id} className="cat-tile" onClick={() => go(cat.route || cat.id)}>
-                    <div className="c-ico"><Cic size={20}/></div>
-                    <div className="c-label">{cat.label}</div>
-                    {cat.desc && <div className="c-desc">{cat.desc}</div>}
+            <div className="sec-tile-grid">
+              {sectionTiles(domain).map(tile => (
+                tile.items.length ? (
+                  <div key={tile.key} className="sec-tile">
+                    <div className="sec-tile-title">{tile.label}</div>
+                    <div className="sec-tile-links">
+                      {tile.items.map(id => {
+                        const l = LEAF_BY_ID[id]
+                        if (!l) return null
+                        const Ic = l.icon
+                        return (
+                          <button key={id} type="button" className="sec-link" onClick={() => go(id)}>
+                            <Ic size={13} style={{ opacity: 0.7, flexShrink: 0 }}/>
+                            <span>{l.label}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <button key={tile.key} className="cat-tile" onClick={() => go(tile.route)}>
+                    <div className="c-ico"><tile.Ic size={20}/></div>
+                    <div className="c-label">{tile.label}</div>
+                    {tile.desc && <div className="c-desc">{tile.desc}</div>}
                     <div className="c-go">바로가기 <Icon.Right size={11}/></div>
                   </button>
                 )
-              })}
+              ))}
             </div>
           </div>
         )
