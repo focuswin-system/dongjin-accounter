@@ -60,9 +60,9 @@ export const SettlementDocument = ({ doc, company }) => {
             <th>출장기간</th><td>{doc.trip_period || ''}</td>
           </tr>
           <tr>
-            <th>수령액</th><td className="num fw-700">₩ {fmtNum(received)}</td>
-            <th>지출총액</th><td className="num">₩ {fmtNum(total)}</td>
-            <th>잔　액</th><td className="num fw-700" style={{ color: balance < 0 ? 'var(--neg-ink)' : undefined }}>₩ {fmtNum(balance)}</td>
+            <th>수령액</th><td className="num fw-700">{fmtNum(received)}</td>
+            <th>지출총액</th><td className="num">{fmtNum(total)}</td>
+            <th>잔　액</th><td className="num fw-700" style={{ color: balance < 0 ? 'var(--neg-ink)' : undefined }}>{fmtNum(balance)}</td>
           </tr>
           {doc.purpose ? <tr><th>구분</th><td colSpan={5}>{doc.purpose}</td></tr> : null}
         </tbody>

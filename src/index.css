@@ -756,8 +756,12 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 .doc-ws-viewport.is-portrait { display: flex; justify-content: center; }
 @media (max-width: 960px) { .doc-ws { grid-template-columns: 1fr; } }
 
-/* 定算內譯書 — 실물이 A4 세로(portrait). 화면에서도 세로 비율로 가운데 정렬(가로로 안 퍼지게). */
-.settle-paper { max-width: 800px; margin-left: auto; margin-right: auto; }
+/* 定算內譯書 — 실물이 A4 세로. 내용에 따라 크기가 변하지 않게 A4 고정 캔버스(210×297)를 갖는다.
+   내용이 적으면 아래 여백으로 남고, 많으면(기타경비 다수) 그만큼 늘어난다(인쇄 시 다음 장). */
+.settle-paper { width: 794px; max-width: 100%; min-height: 1123px; margin-left: auto; margin-right: auto; }
+/* 상단 헤더 금액은 줄바꿈 금지(잔액 잘림 방지). 라벨은 좁게 고정해 값에 폭을 준다. */
+.settle-paper .res-head th { width: 66px; white-space: nowrap; }
+.settle-paper .res-head td { white-space: nowrap; }
 /* 좌우 2단 본문 */
 .settle-body { display: flex; gap: 0; margin-top: 8px; }
 .settle-body > table { flex: 1; margin: 0; table-layout: fixed; }
