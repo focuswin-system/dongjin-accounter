@@ -226,29 +226,19 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
               ))}
             </div>
           )}
-          <table className="res-table settle-foot">
-            <colgroup>
-              <col style={{ width: 24 }}/><col style={{ width: 116 }}/><col style={{ width: 92 }}/>
-              <col style={{ width: 24 }}/><col/><col style={{ width: 92 }}/>
-            </colgroup>
-            <tbody>
-              <tr>
-                <th className="settle-cat">특기사항</th>
-                <td colSpan={2} className="settle-note">{edit ? <CellIn value={form.note} onChange={v => setH('note', v)} placeholder="예: 우리.090-044469-13-301 계좌인출 후 송금"/> : form.note}</td>
-                <th className="settle-cat">결　재</th>
-                <td colSpan={2} className="settle-approve-cell">
-                  <div className="settle-approve">
-                    {approval.map((s, i) => (
-                      <div key={i} className="settle-approve-col">
-                        <div className="settle-approve-h">{s.label}{s.position ? <div className="settle-approve-pos">{s.position}</div> : null}</div>
-                        <div className="settle-approve-sign"/>
-                      </div>
-                    ))}
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          {/* 하단 특기사항·결재 — 지급결의서와 동일한 res-foot(컴팩트 결재표) */}
+          <div className="res-foot">
+            <div className="res-note">
+              <div className="res-note-head">특기사항</div>
+              <div className="res-note-body">{edit ? <input className="settle-cellin" value={form.note} onChange={e => setH('note', e.target.value)} placeholder="예: 우리.090-044469-13-301 계좌인출 후 송금"/> : form.note}</div>
+            </div>
+            <table className="res-approve">
+              <tbody>
+                <tr>{approval.map((s, i) => <th key={i}>{s.label}{s.position ? <div style={{ fontWeight: 400, fontSize: 10, color: '#888' }}>{s.position}</div> : null}</th>)}</tr>
+                <tr>{approval.map((_, i) => <td key={i}></td>)}</tr>
+              </tbody>
+            </table>
+          </div>
 
           <div className="settle-notes">
             {FOOTNOTES.map((t, i) => <div key={i}>※ {t}</div>)}
