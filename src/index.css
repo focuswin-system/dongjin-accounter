@@ -732,11 +732,18 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 
 /* ── 지급결의서 양식 ── */
 .resolution-paper { padding: 36px 40px; }
-/* 정산내역서(定算內譯書) 좌우 2단 본문 */
+/* 定算內譯書 — 실물이 A4 세로(portrait). 화면에서도 세로 비율로 가운데 정렬(가로로 안 퍼지게). */
+.settle-paper { max-width: 800px; margin-left: auto; margin-right: auto; }
+/* 좌우 2단 본문 */
 .settle-body { display: flex; gap: 0; margin-top: 8px; }
-.settle-body > table { flex: 1; margin: 0; }
+.settle-body > table { flex: 1; margin: 0; table-layout: fixed; }
 .settle-body .settle-left { border-right: none; }
-.settle-cat { background: #f6f7f9 !important; font-weight: 700; text-align: center; vertical-align: middle; white-space: nowrap; }
+/* 분류 라벨은 실물처럼 세로쓰기(도/로/비) — 좁은 세로 칸 */
+.settle-cat {
+  background: #f6f7f9 !important; font-weight: 700; text-align: center; vertical-align: middle;
+  writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 0.12em;
+  width: 26px; padding: 4px 2px; white-space: nowrap;
+}
 .settle-memo { color: #888; font-size: 11px; }
 .settle-total { margin-top: -1px; }
 .settle-total th { background: #f6f7f9; text-align: center; }

@@ -42,7 +42,7 @@ export const SettlementDocument = ({ doc, company }) => {
   while (etcRows.length < FIXED_ROWS) etcRows.push(null)   // 좌우 높이 맞춤
 
   return (
-    <div className="doc-paper resolution-paper resolution-print">
+    <div className="doc-paper resolution-paper resolution-print settle-paper">
       <div className="res-title-ko">정산내역서</div>
       <div className="res-title">定 算 內 譯 書</div>
       <div className="res-date num">{doc.settle_date || ''}</div>
@@ -67,7 +67,7 @@ export const SettlementDocument = ({ doc, company }) => {
       <div className="settle-body">
         {/* 좌측: 고정 분류·슬롯 */}
         <table className="res-table settle-left">
-          <thead><tr><th style={{ width: 62 }}>분류</th><th>항목</th><th style={{ width: 110 }}>지출액</th></tr></thead>
+          <thead><tr><th style={{ width: 26 }}></th><th>항목</th><th style={{ width: 96 }}>지출액</th></tr></thead>
           <tbody>
             {SLOT_GROUPS.flatMap(g => g.slots.map((s, si) => {
               const v = slotVal[key(g.cat, s)]
@@ -84,7 +84,7 @@ export const SettlementDocument = ({ doc, company }) => {
 
         {/* 우측: 기타경비 자유 목록 */}
         <table className="res-table settle-right">
-          <thead><tr><th style={{ width: 62 }}>분류</th><th>항목</th><th style={{ width: 120 }}>지출액</th></tr></thead>
+          <thead><tr><th style={{ width: 26 }}></th><th>항목</th><th style={{ width: 110 }}>지출액</th></tr></thead>
           <tbody>
             {etcRows.map((l, i) => (
               <tr key={i}>
