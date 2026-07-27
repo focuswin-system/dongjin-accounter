@@ -405,6 +405,9 @@ async function initDb(conn) {
         doc_no          VARCHAR(30) NOT NULL,
         settler         VARCHAR(100),
         settle_date     VARCHAR(20),
+        trip_area       VARCHAR(200),
+        trip_period     VARCHAR(200),
+        purpose         VARCHAR(200),
         received_amount BIGINT NOT NULL DEFAULT 0,
         note            VARCHAR(1000),
         approval        TEXT,
@@ -832,6 +835,10 @@ async function initDb(conn) {
     // 지급결의서: 청구서(지급 예정) 단계에서도 만들 수 있게 invoice_id 연결.
     // 지급 전에 결재받는 게 실무 순서 → 거래(txn_id) 없이 청구서만으로도 결의서 생성.
     await ensureColumn('expense_resolutions', 'invoice_id', "invoice_id VARCHAR(36)")
+    // 정산내역서 헤더: 출장지역·출장기간·구분(定算內譯書 상단 칸). 기존 테이블에 뒤늦게 추가.
+    await ensureColumn('settlements', 'trip_area',   "trip_area VARCHAR(200)")
+    await ensureColumn('settlements', 'trip_period', "trip_period VARCHAR(200)")
+    await ensureColumn('settlements', 'purpose',     "purpose VARCHAR(200)")
     // ── 계약 모델: 독립된 두 축 ──
     // billing_mode : onetime(총액을 마일스톤으로 나눠 청구) / recurring(주기마다 정액 청구)
     // term_mode    : fixed(종료일에 만료 — 재계약해야 이어짐) / auto_renew(해지 통보 없으면 자동 연장) / open(무기한 — 해지 시까지)

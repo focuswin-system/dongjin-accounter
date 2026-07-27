@@ -4,65 +4,102 @@ import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 
-// 定算內譯書 분류 — 동진테크 양식 기준(도로비·교통비·영업비·운송료·기타경비).
-const CATEGORIES = ['기타경비', '도로비', '교통비', '영업비', '운송료']
-const emptyLine = () => ({ category: '기타경비', title: '', amount: '', memo: '' })
+// 定算內譯書 좌측 고정 분류·슬롯(동진테크 양식). 우측은 기타경비 자유 목록.
+const SLOT_GROUPS = [
+  { cat: '도로비', slots: ['터널비', '고속도로통행료'] },
+  { cat: '교통비', slots: ['승선료', '대중교통비', '철도·항공'] },
+  { cat: '영업비', slots: ['직접정산', '회사정산'] },
+  { cat: '운송료', slots: ['선편', '화물', '택배·퀵', '버스', '우편'] },
+]
+const ETC = '기타경비'
+const FIXED_ROWS = SLOT_GROUPS.reduce((s, g) => s + g.slots.length, 0)  // 좌측 슬롯 총 개수
+const key = (cat, title) => `${cat}|${title}`
 const numOf = (v) => (typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, ''), 10) || 0 : Number(v) || 0)
 
-// ── 인쇄 양식(定算內譯書) ─────────────────────────────────────────
+// doc.lines → 좌측 고정슬롯 값 맵 + 우측 기타경비 목록으로 분리
+const splitLines = (lines) => {
+  const slotVal = {}
+  const etc = []
+  for (const l of (lines || [])) {
+    const grp = SLOT_GROUPS.find(g => g.cat === l.category && g.slots.includes(l.title))
+    if (grp) slotVal[key(l.category, l.title)] = l
+    else etc.push(l)
+  }
+  return { slotVal, etc }
+}
+
+// ── 인쇄 양식(定算內譯書) — 좌우 2단 ───────────────────────────────
 export const SettlementDocument = ({ doc, company }) => {
   const ceo = company?.ceo || '대표이사'
-  const lines = doc.lines && doc.lines.length ? doc.lines : []
-  const total = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0)
+  const total = (doc.lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0)
   const received = Number(doc.received_amount) || 0
   const balance = received - total
   const approval = (doc.approval && doc.approval.length)
     ? doc.approval
     : [{ label: '담당' }, { label: '결재' }, { label: '대표이사', position: ceo }]
-  // 분류 순서대로 정렬해 보여준다
-  const ordered = [...lines].sort((a, b) => CATEGORIES.indexOf(a.category) - CATEGORIES.indexOf(b.category))
+  const { slotVal, etc } = splitLines(doc.lines)
+  const etcRows = [...etc]
+  while (etcRows.length < FIXED_ROWS) etcRows.push(null)   // 좌우 높이 맞춤
+
   return (
     <div className="doc-paper resolution-paper resolution-print">
       <div className="res-title-ko">정산내역서</div>
       <div className="res-title">定 算 內 譯 書</div>
       <div className="res-date num">{doc.settle_date || ''}</div>
+      <div className="res-note-line">아래 내역과 같이 經費 使用 部分에 대하여 定算코자 하오니 決裁하여 주시기 바랍니다.</div>
 
       <table className="res-table res-head">
         <tbody>
-          <tr><th>정산자</th><td>{doc.settler || '—'}</td><th>수령액</th><td className="num fw-700">₩ {fmtNum(received)}</td></tr>
-          <tr><th>문서번호</th><td className="num">{doc.doc_no}</td><th>지출총액</th><td className="num">₩ {fmtNum(total)}</td></tr>
-          <tr><th>정산일</th><td className="num">{doc.settle_date || '—'}</td><th>잔　액</th>
-            <td className="num fw-700" style={{ color: balance < 0 ? 'var(--neg-ink)' : undefined }}>₩ {fmtNum(balance)}</td></tr>
+          <tr>
+            <th>정산자</th><td>{doc.settler || ''}</td>
+            <th>출장지역</th><td>{doc.trip_area || ''}</td>
+            <th>출장기간</th><td>{doc.trip_period || ''}</td>
+          </tr>
+          <tr>
+            <th>수령액</th><td className="num fw-700">₩ {fmtNum(received)}</td>
+            <th>지출총액</th><td className="num">₩ {fmtNum(total)}</td>
+            <th>잔　액</th><td className="num fw-700" style={{ color: balance < 0 ? 'var(--neg-ink)' : undefined }}>₩ {fmtNum(balance)}</td>
+          </tr>
+          {doc.purpose ? <tr><th>구분</th><td colSpan={5}>{doc.purpose}</td></tr> : null}
         </tbody>
       </table>
 
-      <div className="res-note-line">아래 내역과 같이 經費 使用 部分에 대하여 定算코자 하오니 決裁하여 주시기 바랍니다.</div>
+      <div className="settle-body">
+        {/* 좌측: 고정 분류·슬롯 */}
+        <table className="res-table settle-left">
+          <thead><tr><th style={{ width: 62 }}>분류</th><th>항목</th><th style={{ width: 110 }}>지출액</th></tr></thead>
+          <tbody>
+            {SLOT_GROUPS.flatMap(g => g.slots.map((s, si) => {
+              const v = slotVal[key(g.cat, s)]
+              return (
+                <tr key={g.cat + s}>
+                  {si === 0 && <th rowSpan={g.slots.length} className="settle-cat">{g.cat}</th>}
+                  <td>{s}{v && v.memo ? <span className="settle-memo"> · {v.memo}</span> : null}</td>
+                  <td className="num" style={{ textAlign: 'right' }}>{v ? fmtNum(v.amount) : ''}</td>
+                </tr>
+              )
+            }))}
+          </tbody>
+        </table>
 
-      <table className="res-table res-items">
-        <thead>
-          <tr>
-            <th style={{ width: 34 }}>NO</th><th style={{ width: 80 }}>분류</th><th>항목</th>
-            <th style={{ width: 120 }}>지출액</th><th style={{ width: 150 }}>비고</th>
-          </tr>
-        </thead>
+        {/* 우측: 기타경비 자유 목록 */}
+        <table className="res-table settle-right">
+          <thead><tr><th style={{ width: 62 }}>분류</th><th>항목</th><th style={{ width: 120 }}>지출액</th></tr></thead>
+          <tbody>
+            {etcRows.map((l, i) => (
+              <tr key={i}>
+                {i === 0 && <th rowSpan={etcRows.length} className="settle-cat">기타경비</th>}
+                <td>{l ? l.title : ' '}{l && l.memo ? <span className="settle-memo"> · {l.memo}</span> : null}</td>
+                <td className="num" style={{ textAlign: 'right' }}>{l ? fmtNum(l.amount) : ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <table className="res-table settle-total">
         <tbody>
-          {ordered.map((l, i) => (
-            <tr key={i}>
-              <td className="num" style={{ textAlign: 'center' }}>{i + 1}</td>
-              <td style={{ textAlign: 'center' }}>{l.category}</td>
-              <td>{l.title}</td>
-              <td className="num fw-600" style={{ textAlign: 'right' }}>{fmtNum(l.amount || 0)}</td>
-              <td>{l.memo}</td>
-            </tr>
-          ))}
-          {Array.from({ length: Math.max(0, 5 - ordered.length) }).map((_, i) => (
-            <tr key={`e${i}`}><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>
-          ))}
-          <tr className="res-total">
-            <th colSpan={3} style={{ textAlign: 'center' }}>합　계</th>
-            <td className="num fw-700" style={{ textAlign: 'right' }}>{fmtNum(total)}</td>
-            <td></td>
-          </tr>
+          <tr><th style={{ width: 62 }}>합　계</th><td className="num fw-700" style={{ textAlign: 'right' }}>{fmtNum(total)}</td></tr>
         </tbody>
       </table>
 
@@ -78,16 +115,21 @@ export const SettlementDocument = ({ doc, company }) => {
           </tbody>
         </table>
       </div>
+      <div className="settle-notes">
+        ※ 출장 항목(도로비·교통비·영업비 등)은 출장지역·기간을 상단에 기재하세요.<br/>
+        ※ 운송료는 발송지역·인수자를 비고에 적으세요. 기타경비는 은행인출·계좌이체 등 그 외 집행분을 적습니다.
+      </div>
       <div className="res-company num">{company?.name || ''}</div>
     </div>
   )
 }
 
-// ── 새/편집 정산내역서 드로어 ────────────────────────────────────
+// ── 새/편집 드로어 ───────────────────────────────────────────────
 const SettlementDrawer = ({ open, editDoc, onClose, onSaved }) => {
   const toast = useToast()
-  const [form, setForm] = useState({ settler: '', settle_date: localToday(), received_amount: '', note: '' })
-  const [lines, setLines] = useState([emptyLine()])
+  const [form, setForm] = useState({ settler: '', settle_date: localToday(), trip_area: '', trip_period: '', purpose: '', received_amount: '', note: '' })
+  const [slots, setSlots] = useState({})                       // key 'cat|slot' -> { amount, memo }
+  const [etc, setEtc] = useState([{ title: '', amount: '', memo: '' }])
   const [presets, setPresets] = useState([])
   const [presetId, setPresetId] = useState('')
 
@@ -98,33 +140,45 @@ const SettlementDrawer = ({ open, editDoc, onClose, onSaved }) => {
       setPresetId((list.find(p => p.is_default) || list[0])?.id || '')
     })
     if (editDoc) {
-      setForm({ settler: editDoc.settler || '', settle_date: editDoc.settle_date || localToday(),
-        received_amount: String(editDoc.received_amount || ''), note: editDoc.note || '' })
-      setLines(editDoc.lines && editDoc.lines.length
-        ? editDoc.lines.map(l => ({ category: l.category || '기타경비', title: l.title || '', amount: String(l.amount || ''), memo: l.memo || '' }))
-        : [emptyLine()])
+      setForm({
+        settler: editDoc.settler || '', settle_date: editDoc.settle_date || localToday(),
+        trip_area: editDoc.trip_area || '', trip_period: editDoc.trip_period || '', purpose: editDoc.purpose || '',
+        received_amount: String(editDoc.received_amount || ''), note: editDoc.note || '',
+      })
+      const { slotVal, etc: et } = splitLines(editDoc.lines)
+      const sl = {}
+      for (const k of Object.keys(slotVal)) sl[k] = { amount: String(slotVal[k].amount || ''), memo: slotVal[k].memo || '' }
+      setSlots(sl)
+      setEtc(et.length ? et.map(l => ({ title: l.title || '', amount: String(l.amount || ''), memo: l.memo || '' })) : [{ title: '', amount: '', memo: '' }])
     } else {
-      setForm({ settler: '', settle_date: localToday(), received_amount: '', note: '' })
-      setLines([emptyLine()])
+      setForm({ settler: '', settle_date: localToday(), trip_area: '', trip_period: '', purpose: '', received_amount: '', note: '' })
+      setSlots({}); setEtc([{ title: '', amount: '', memo: '' }])
     }
   }, [open, editDoc])
 
-  const total = lines.reduce((s, l) => s + numOf(l.amount), 0)
+  const setSlot = (k, field, v) => setSlots(s => ({ ...s, [k]: { ...(s[k] || { amount: '', memo: '' }), [field]: v } }))
+  const setEtcLine = (i, field, v) => setEtc(ls => ls.map((l, j) => j === i ? { ...l, [field]: v } : l))
+  const addEtc = () => setEtc(ls => [...ls, { title: '', amount: '', memo: '' }])
+  const removeEtc = (i) => setEtc(ls => ls.length > 1 ? ls.filter((_, j) => j !== i) : ls)
+
+  const slotTotal = Object.values(slots).reduce((s, v) => s + numOf(v.amount), 0)
+  const etcTotal = etc.reduce((s, l) => s + numOf(l.amount), 0)
+  const total = slotTotal + etcTotal
   const balance = numOf(form.received_amount) - total
-  const setLine = (i, k, v) => setLines(ls => ls.map((l, j) => j === i ? { ...l, [k]: v } : l))
-  const addLine = () => setLines(ls => [...ls, emptyLine()])
-  const removeLine = (i) => setLines(ls => ls.length > 1 ? ls.filter((_, j) => j !== i) : ls)
   const chosen = presets.find(p => p.id === presetId)
 
   const save = async () => {
-    const clean = lines.filter(l => l.title.trim() || numOf(l.amount))
-    if (!clean.length) return toast.push('지출 항목을 한 줄 이상 입력해주세요')
+    const lines = []
+    for (const g of SLOT_GROUPS) for (const s of g.slots) {
+      const v = slots[key(g.cat, s)]
+      if (v && numOf(v.amount)) lines.push({ category: g.cat, title: s, amount: numOf(v.amount), memo: (v.memo || '').trim() })
+    }
+    for (const l of etc) if (l.title.trim() || numOf(l.amount)) lines.push({ category: ETC, title: l.title.trim(), amount: numOf(l.amount), memo: l.memo.trim() })
+    if (!lines.length) return toast.push('지출 항목을 하나 이상 입력해주세요')
     const payload = {
-      settler: form.settler.trim(),
-      settle_date: form.settle_date || null,
-      received_amount: numOf(form.received_amount),
-      note: form.note.trim(),
-      lines: clean.map(l => ({ category: l.category, title: l.title.trim(), amount: numOf(l.amount), memo: l.memo.trim() })),
+      settler: form.settler.trim(), settle_date: form.settle_date || null,
+      trip_area: form.trip_area.trim(), trip_period: form.trip_period.trim(), purpose: form.purpose.trim(),
+      received_amount: numOf(form.received_amount), note: form.note.trim(), lines,
       approval: chosen ? chosen.steps.map(s => ({ label: s.label, position: s.position || '', name: '' })) : undefined,
     }
     const res = editDoc ? await api.updateSettlement(editDoc.id, payload) : await api.createSettlement(payload)
@@ -134,19 +188,33 @@ const SettlementDrawer = ({ open, editDoc, onClose, onSaved }) => {
   }
 
   return (
-    <Drawer open={open} onClose={onClose} width="min(640px,100vw)" label="정산내역서">
+    <Drawer open={open} onClose={onClose} width="min(720px,100vw)" label="정산내역서">
       <DrawerHead title={editDoc ? '정산내역서 수정' : '새 정산내역서'} onClose={onClose}/>
       <div className="drawer-body col gap-form">
-        <div className="text-sm text-muted">수령한 자금(수령액)을 분류별로 정산하고 잔액을 맞추는 문서예요. 잔액 = 수령액 − 지출 합계.</div>
+        <div className="text-sm text-muted">수령한 자금을 분류별로 정산하고 잔액을 맞추는 문서예요. 좌측은 출장·운송 고정 분류, 우측(기타경비)은 은행인출·계좌이체 등 자유 항목.</div>
 
-        <div className="row gap-12">
-          <div style={{ flex: 1 }}>
+        <div className="row gap-12" style={{ flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 140px' }}>
             <label className="label" style={{ marginBottom: 8 }}>정산자</label>
             <input className="input" value={form.settler} onChange={e => setForm(f => ({ ...f, settler: e.target.value }))} placeholder="정산 담당자"/>
           </div>
-          <div style={{ width: 160 }}>
+          <div style={{ width: 150 }}>
             <label className="label" style={{ marginBottom: 8 }}>정산일</label>
             <input className="input" type="date" value={form.settle_date} onChange={e => setForm(f => ({ ...f, settle_date: e.target.value }))}/>
+          </div>
+        </div>
+        <div className="row gap-12" style={{ flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 120px' }}>
+            <label className="label" style={{ marginBottom: 8 }}>출장지역 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+            <input className="input" value={form.trip_area} onChange={e => setForm(f => ({ ...f, trip_area: e.target.value }))} placeholder="예: 서울 동진조선"/>
+          </div>
+          <div style={{ flex: '1 1 120px' }}>
+            <label className="label" style={{ marginBottom: 8 }}>출장기간 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+            <input className="input" value={form.trip_period} onChange={e => setForm(f => ({ ...f, trip_period: e.target.value }))} placeholder="예: 4/28~4/30"/>
+          </div>
+          <div style={{ flex: '1 1 120px' }}>
+            <label className="label" style={{ marginBottom: 8 }}>구분 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+            <input className="input" value={form.purpose} onChange={e => setForm(f => ({ ...f, purpose: e.target.value }))} placeholder="예: 세금납부·자재대 외"/>
           </div>
         </div>
 
@@ -159,26 +227,44 @@ const SettlementDrawer = ({ open, editDoc, onClose, onSaved }) => {
           </div>
         </div>
 
+        {/* 좌측 고정 분류·슬롯 */}
+        <div>
+          <label className="label" style={{ marginBottom: 8 }}>출장·운송 분류 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 쓴 항목만 금액 입력</span></label>
+          <div className="col gap-10">
+            {SLOT_GROUPS.map(g => (
+              <div key={g.cat}>
+                <div className="text-xs fw-700" style={{ color: 'var(--muted-2)', marginBottom: 4, paddingLeft: 2 }}>{g.cat}</div>
+                <div className="col gap-6">
+                  {g.slots.map(s => {
+                    const k = key(g.cat, s)
+                    const v = slots[k] || { amount: '', memo: '' }
+                    return (
+                      <div key={s} className="row gap-6" style={{ alignItems: 'center' }}>
+                        <span className="text-sm" style={{ width: 96, flexShrink: 0 }}>{s}</span>
+                        <div style={{ width: 130 }}><MoneyInput className="input num" value={v.amount} onChange={raw => setSlot(k, 'amount', raw)}/></div>
+                        <input className="input" style={{ flex: 1, minWidth: 100 }} value={v.memo} onChange={e => setSlot(k, 'memo', e.target.value)} placeholder="비고(발송·인수 등)"/>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 우측 기타경비 */}
         <div>
           <div className="row" style={{ marginBottom: 8, alignItems: 'center' }}>
-            <label className="label" style={{ margin: 0 }}>지출 항목</label>
-            <button className="btn sm ml-auto" onClick={addLine}><Icon.Plus size={12}/> 항목 추가</button>
+            <label className="label" style={{ margin: 0 }}>기타경비 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 은행인출·계좌이체 등</span></label>
+            <button className="btn sm ml-auto" onClick={addEtc}><Icon.Plus size={12}/> 항목 추가</button>
           </div>
-          <div className="col gap-8">
-            {lines.map((l, i) => (
+          <div className="col gap-6">
+            {etc.map((l, i) => (
               <div key={i} className="row gap-6" style={{ alignItems: 'center' }}>
-                <div style={{ width: 96 }}>
-                  <Combobox value={l.category} onChange={v => setLine(i, 'category', v || '기타경비')} allowAdd={false}
-                    options={CATEGORIES.map(c => ({ value: c, label: c }))} placeholder="분류"/>
-                </div>
-                <input className="input" style={{ flex: 1, minWidth: 100 }} value={l.title}
-                  onChange={e => setLine(i, 'title', e.target.value)} placeholder="항목명 (예: 고속도로통행료)"/>
-                <div style={{ width: 120 }}>
-                  <MoneyInput className="input num" value={l.amount} onChange={raw => setLine(i, 'amount', raw)}/>
-                </div>
-                <input className="input" style={{ width: 130 }} value={l.memo}
-                  onChange={e => setLine(i, 'memo', e.target.value)} placeholder="비고"/>
-                <button className="icon-btn" onClick={() => removeLine(i)} title="삭제"><Icon.Close size={14}/></button>
+                <input className="input" style={{ flex: 1, minWidth: 120 }} value={l.title} onChange={e => setEtcLine(i, 'title', e.target.value)} placeholder="항목(예: 은행인출-법인세)"/>
+                <div style={{ width: 130 }}><MoneyInput className="input num" value={l.amount} onChange={raw => setEtcLine(i, 'amount', raw)}/></div>
+                <input className="input" style={{ width: 120 }} value={l.memo} onChange={e => setEtcLine(i, 'memo', e.target.value)} placeholder="비고"/>
+                <button className="icon-btn" onClick={() => removeEtc(i)} title="삭제"><Icon.Close size={14}/></button>
               </div>
             ))}
           </div>
@@ -199,7 +285,7 @@ const SettlementDrawer = ({ open, editDoc, onClose, onSaved }) => {
 
         <div>
           <label className="label" style={{ marginBottom: 8 }}>특기사항 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
-          <input className="input" value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} placeholder="예: 계좌인출 후 송금"/>
+          <input className="input" value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} placeholder="예: 우리.090-044469-13-301 계좌인출 후 송금"/>
         </div>
       </div>
       <DrawerFooter onCancel={onClose} onSave={save} saveLabel={editDoc ? '저장' : '정산내역서 만들기'}/>
@@ -207,14 +293,15 @@ const SettlementDrawer = ({ open, editDoc, onClose, onSaved }) => {
   )
 }
 
-// ── 정산내역서 화면 ─────────────────────────────────────────────
+// ── 화면 ─────────────────────────────────────────────────────────
 export const SettlementScreen = () => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [list, setList] = useState([])
   const [company, setCompany] = useState(null)
   const [selId, setSelId] = useState(null)
-  const [drawer, setDrawer] = useState(null)   // null | 'new' | editDoc
+  const [sel, setSel] = useState(null)
+  const [drawer, setDrawer] = useState(null)
 
   const load = async (keepId) => {
     const [rows, comp] = await Promise.all([api.getSettlements(), api.getCompany()])
@@ -225,8 +312,6 @@ export const SettlementScreen = () => {
     })
   }
   useEffect(() => { load() }, [])
-
-  const [sel, setSel] = useState(null)
   useEffect(() => {
     if (!selId) { setSel(null); return }
     api.getSettlement(selId).then(setSel)

@@ -732,6 +732,15 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 
 /* ── 지급결의서 양식 ── */
 .resolution-paper { padding: 36px 40px; }
+/* 정산내역서(定算內譯書) 좌우 2단 본문 */
+.settle-body { display: flex; gap: 0; margin-top: 8px; }
+.settle-body > table { flex: 1; margin: 0; }
+.settle-body .settle-left { border-right: none; }
+.settle-cat { background: #f6f7f9 !important; font-weight: 700; text-align: center; vertical-align: middle; white-space: nowrap; }
+.settle-memo { color: #888; font-size: 11px; }
+.settle-total { margin-top: -1px; }
+.settle-total th { background: #f6f7f9; text-align: center; }
+.settle-notes { margin-top: 14px; font-size: 11px; color: #777; line-height: 1.7; }
 .res-title-ko { text-align: center; font-size: 12px; font-weight: 600; letter-spacing: 0.3em; color: #888; margin-bottom: 2px; }
 .res-title { text-align: center; font-size: 26px; font-weight: 800; letter-spacing: 0.22em; margin-bottom: 6px; }
 .res-date { text-align: center; font-size: 12px; color: #555; margin-bottom: 18px; }

@@ -59,7 +59,7 @@ const insertLines = async (conn, settlementId, lines) => {
 
 // 새 정산내역서 — 헤더 + 라인. 정산서는 잔액 계산·인쇄용 문서라 거래는 만들지 않는다(단일소스 유지, 연동은 후속).
 router.post('/', async (req, res, next) => {
-  const { settler, settle_date, received_amount, note, lines } = req.body
+  const { settler, settle_date, trip_area, trip_period, purpose, received_amount, note, lines } = req.body
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
@@ -74,9 +74,10 @@ router.post('/', async (req, res, next) => {
       ? req.body.approval
       : await defaultApproval((sql, p) => conn.execute(sql, p))
     await conn.execute(
-      `INSERT INTO settlements (id, doc_no, settler, settle_date, received_amount, note, approval, status)
-       VALUES (?,?,?,?,?,?,?,?)`,
+      `INSERT INTO settlements (id, doc_no, settler, settle_date, trip_area, trip_period, purpose, received_amount, note, approval, status)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       [id, doc_no, settler || req.user?.name || req.user?.username || '관리자', settle_date || null,
+       trip_area || '', trip_period || '', purpose || '',
        Number(received_amount) || 0, note || '', JSON.stringify(approval), '작성'])
     await insertLines(conn, id, lines)
     await conn.commit()
@@ -89,15 +90,16 @@ router.post('/', async (req, res, next) => {
 
 // 수정 — 헤더 갱신 + 라인 통째 교체(삭제 후 재삽입)
 router.put('/:id', async (req, res, next) => {
-  const { settler, settle_date, received_amount, note, status, approval, lines } = req.body
+  const { settler, settle_date, trip_area, trip_period, purpose, received_amount, note, status, approval, lines } = req.body
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[cur]] = await conn.execute('SELECT id FROM settlements WHERE id = ? FOR UPDATE', [req.params.id])
     if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     await conn.execute(
-      `UPDATE settlements SET settler=?, settle_date=?, received_amount=?, note=?, status=?, approval=? WHERE id=?`,
-      [settler || '', settle_date || null, Number(received_amount) || 0, note || '',
+      `UPDATE settlements SET settler=?, settle_date=?, trip_area=?, trip_period=?, purpose=?, received_amount=?, note=?, status=?, approval=? WHERE id=?`,
+      [settler || '', settle_date || null, trip_area || '', trip_period || '', purpose || '',
+       Number(received_amount) || 0, note || '',
        status || '작성', JSON.stringify(Array.isArray(approval) ? approval : []), req.params.id])
     await conn.execute('DELETE FROM settlement_lines WHERE settlement_id = ?', [req.params.id])
     await insertLines(conn, req.params.id, lines)
