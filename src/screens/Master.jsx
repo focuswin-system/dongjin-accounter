@@ -265,7 +265,7 @@ export const REF_CONFIGS = {
   },
   insurance: {
     type: 'insurance', label: '보험',
-    sub: '가입 보험(구분·보험사·증권번호·보험료·납입·기간)과 증권을 등록해 두는 관리 대장이에요. "이 보험 언제까지·얼마였지"를 한눈에.',
+    sub: '가입 보험 등록·관리 대장.',
     fields: [
       // 보험은 성격이 갈린다 — 정기납입(화재·자동차·배상책임) / 계약보증(보증보험) / 저축성. 먼저 구분해 등록.
       // 저장은 ref_items.item_kind 컬럼 재사용(보험 행에선 이 컬럼이 비어 있어 품목 로직과 안 겹친다) → 서버/DB 변경 불필요.
@@ -354,7 +354,7 @@ const RefFileField = ({ url, name, uploading, onUpload, onRemove }) => {
 }
 
 // page=true 면 도메인 독립 화면(페이지 타이틀), 아니면 기준정보 서브패널
-export const RefMasterPanel = ({ cfg, page = false }) => {
+export const RefMasterPanel = ({ cfg, page = false, embedded = false }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [rows, setRows] = useState([])
@@ -429,10 +429,15 @@ export const RefMasterPanel = ({ cfg, page = false }) => {
   return (
     <div className={page ? 'fade-up' : undefined} style={page ? undefined : { padding: 20 }}>
       <div className="row" style={{ marginBottom: 16, gap: 10, flexWrap: 'wrap' }}>
-        <div>
-          <div className={page ? 'page-title' : 'section-title'}>{cfg.label}</div>
-          <div className={page ? 'page-sub' : 'section-sub'}>{cfg.sub} · 총 {rows.length}건</div>
-        </div>
+        {/* 사이드 서브메뉴로 단독 진입(embedded)하면 상단 PageHeader가 이미 제목을 보여준다 → 중복 제목·문구 숨기고 건수만 */}
+        {embedded ? (
+          <div className="section-sub" style={{ alignSelf: 'center' }}>총 {rows.length}건</div>
+        ) : (
+          <div>
+            <div className={page ? 'page-title' : 'section-title'}>{cfg.label}</div>
+            {cfg.sub && <div className={page ? 'page-sub' : 'section-sub'}>{cfg.sub} · 총 {rows.length}건</div>}
+          </div>
+        )}
         <div className="search" style={{ margin: 0, marginLeft: 'auto', width: 200, padding: '6px 10px' }}>
           <Icon.Search size={14}/>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder={`${cfg.label} 검색`}/>
@@ -2651,7 +2656,7 @@ export const MasterScreen = ({ user, section = "base", forcedTab }) => {
   const toggleGroup = (name) => setCollapsed(c => ({ ...c, [name]: !c[name] }));
 
   const renderCustomPanel = () => {
-    if (REF_CONFIGS[activeTab])           return <RefMasterPanel key={activeTab} cfg={REF_CONFIGS[activeTab]}/>
+    if (REF_CONFIGS[activeTab])           return <RefMasterPanel key={activeTab} cfg={REF_CONFIGS[activeTab]} embedded={single}/>
     if (activeTab === "vendor")           return <VendorPanel/>
     if (activeTab === "account")          return <AccountPanel/>
     if (activeTab === "company")          return <CompanyPanel/>
