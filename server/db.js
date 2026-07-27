@@ -470,6 +470,45 @@ async function initDb(conn) {
         FOREIGN KEY (req_id) REFERENCES purchase_reqs(id) ON DELETE CASCADE
       )
     `)
+    // 견적요청서(REQUEST FOR QUOTATION) — 공급업체에 견적을 요청하는 문서. 단가는 업체가 채우는 형태라 0으로 두는 칸이 많다.
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS quote_reqs (
+        id             VARCHAR(36) PRIMARY KEY,
+        doc_no         VARCHAR(30) NOT NULL,
+        req_date       VARCHAR(20),
+        vendor_id      VARCHAR(36),
+        vendor_code    VARCHAR(60),
+        vendor_name    VARCHAR(255),
+        order_source   VARCHAR(120),
+        ship_no        VARCHAR(120),
+        drawing        VARCHAR(120),
+        pay_terms      VARCHAR(60),
+        deliver_place  VARCHAR(255),
+        currency       VARCHAR(20) DEFAULT 'WON',
+        applicant      VARCHAR(100),
+        note           VARCHAR(1000),
+        status         VARCHAR(20) DEFAULT '작성',
+        created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_quote_reqs_doc_no (doc_no)
+      )
+    `)
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS quote_req_items (
+        id          VARCHAR(36) PRIMARY KEY,
+        req_id      VARCHAR(36) NOT NULL,
+        code        VARCHAR(60),
+        name        VARCHAR(255),
+        spec        VARCHAR(255),
+        unit        VARCHAR(30),
+        qty         DECIMAL(18,2) DEFAULT 0,
+        unit_price  BIGINT DEFAULT 0,
+        amount      BIGINT DEFAULT 0,
+        memo        VARCHAR(500),
+        sort_order  INT DEFAULT 0,
+        INDEX idx_quote_req_items (req_id),
+        FOREIGN KEY (req_id) REFERENCES quote_reqs(id) ON DELETE CASCADE
+      )
+    `)
     await c.execute(`
       CREATE TABLE IF NOT EXISTS hr_codes (
         id         VARCHAR(36) PRIMARY KEY,

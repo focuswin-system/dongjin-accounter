@@ -50,6 +50,7 @@ const RESOURCES = [
   { id: 'doc',                     label: '지급결의서',     group: '일반회계 · 문서' },
   { id: 'settlement',              label: '정산내역서',     group: '일반회계 · 문서' },
   { id: 'purchase_req',            label: '구매품의서',     group: '일반회계 · 문서' },
+  { id: 'quote_req',               label: '견적요청서',     group: '일반회계 · 문서' },
 
   { id: 'ledger',                  label: '전체 거래내역',  group: '일반회계 · 장부' },
   { id: 'contract',                label: '계약',          group: '일반회계 · 장부' },

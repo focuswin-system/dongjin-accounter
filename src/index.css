@@ -805,6 +805,14 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 /* 품명 셀 품목 Combobox — 표 안에서 얇게 */
 .pr-items .pr-item-name { padding: 1px 4px; }
 .pr-items .pr-item-name .input { padding-top: 3px; padding-bottom: 3px; font-size: 11.5px; border-radius: 5px; }
+/* 견적요청서 — 제목/회사정보 상단, 헤더B(견적요청번호 등) */
+.qr-top { position: relative; margin-bottom: 12px; min-height: 62px; }
+.qr-corp { position: absolute; left: 2px; top: 4px; font-size: 11px; color: #555; line-height: 1.7; }
+.qr-titles { text-align: center; padding-top: 2px; }
+.qr-title-en { font-size: 12px; letter-spacing: 0.18em; color: #888; margin-top: 2px; }
+.qr-head2 { margin-top: -1px; }
+.qr-head2 th { width: 66px; white-space: nowrap; }
+.qr-head2 td { text-align: center; }
 .res-title-ko { text-align: center; font-size: 12px; font-weight: 600; letter-spacing: 0.3em; color: #888; margin-bottom: 2px; }
 .res-title { text-align: center; font-size: 26px; font-weight: 800; letter-spacing: 0.22em; margin-bottom: 6px; }
 .res-date { text-align: center; font-size: 12px; color: #555; margin-bottom: 18px; }

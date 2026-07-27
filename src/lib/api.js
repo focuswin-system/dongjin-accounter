@@ -703,6 +703,25 @@ export const api = {
     catch (e) { return { ok: false, error: e.message } }
   },
 
+  async getQuoteReqs() {
+    try { return await req('/quote-reqs') } catch { return [] }
+  },
+  async getQuoteReq(id) {
+    try { return await req(`/quote-reqs/${id}`) } catch { return null }
+  },
+  async createQuoteReq(data) {
+    try { const r = await req('/quote-reqs', { method: 'POST', body: data }); return { ok: true, req: r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async updateQuoteReq(id, data) {
+    try { await req(`/quote-reqs/${id}`, { method: 'PUT', body: data }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async deleteQuoteReq(id) {
+    try { await req(`/quote-reqs/${id}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
   async addContract(data) {
     try {
       const result = await req('/contracts', { method: 'POST', body: data })

@@ -11,6 +11,7 @@ import { ContractListScreen, ContractScreen, CONTRACT_LIST } from './screens/Con
 import { DocsScreen, EvidenceScreen, EvidenceAttachDrawer, ExcelScreen, ReportsScreen } from './screens/Docs'
 import { SettlementScreen } from './screens/Settlement'
 import { PurchaseReqScreen } from './screens/PurchaseReq'
+import { QuoteRequestScreen } from './screens/QuoteRequest'
 import { HRScreen } from './screens/HR'
 import { LaborContractScreen, OutsourcingScreen } from './screens/WorkContract'
 import { MasterScreen, RefMasterPanel, REF_CONFIGS, RecurringExpensePanel, RecurringInvoicePanel } from './screens/Master'
@@ -65,6 +66,7 @@ const CRUMB_MAP = {
   doc:             ["문서", "지급결의서"],
   settlement:      ["문서", "정산내역서"],
   purchase_req:    ["문서", "구매품의서"],
+  quote_req:       ["문서", "견적요청서"],
   evidence:        ["증빙 관리"],
   excel:           ["엑셀 업로드"],
   excel_modal:     ["엑셀 업로드"],
@@ -411,6 +413,7 @@ function AppInner({ onLogout, user }) {
       case "doc":             return <DocsScreen/>;
       case "settlement":      return <SettlementScreen/>;
       case "purchase_req":    return <PurchaseReqScreen/>;
+      case "quote_req":       return <QuoteRequestScreen/>;
       // 증빙 관리는 아직 목 데이터만 보여주는 화면이라 nav 에서 뺐는데, #evidence 해시로는
       // 계속 들어와져 가짜 숫자가 실데이터처럼 보였다. 실구현 전까지 '준비 중'으로 막는다.
       // (화면 코드 EvidenceScreen 은 그대로 둔다 — 추후 실구현 시 여기만 되돌리면 된다)

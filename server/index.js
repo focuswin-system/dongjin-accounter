@@ -67,6 +67,7 @@ app.use('/api/company',            require('./routes/company'))
 app.use('/api/resolutions',        require('./routes/resolutions'))
 app.use('/api/settlements',        require('./routes/settlements'))
 app.use('/api/purchase-reqs',      require('./routes/purchase-reqs'))
+app.use('/api/quote-reqs',         require('./routes/quote-reqs'))
 app.use('/api/approval-presets',   require('./routes/approval-presets'))
 
 app.get('/api/health', (_, res) => res.json({ ok: true, time: new Date().toISOString() }))
