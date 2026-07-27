@@ -46,6 +46,7 @@ const CRUMB_MAP = {
   recurring_invoice: ["판매·매출", "정기청구"],
   mgmt_dash:       ["경영관리", "경영 대시보드"],
   mgmt_ask:        ["경영관리", "경영 도우미"],
+  mgmt_biz:        ["경영관리"],
   report:          ["보고서"],
   acct_sales:      ["일반회계", "판매·매출"],
   acct_purchase:   ["일반회계", "매입"],

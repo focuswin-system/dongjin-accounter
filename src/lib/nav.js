@@ -166,10 +166,12 @@ export const PORTAL = [
   },
   {
     id: 'mgmt', label: '경영관리', icon: Icon.Trend,
+    // 좌측 사이드바 섹션과 맞춘다: 장부관리(보고서) / 경영관리(경영 대시보드·경영 도우미)
     categories: [
-      { id: 'report', label: '장부관리', icon: Icon.Chart, desc: '보고서·집계 자료', route: 'report' },
-      { id: 'mgmt_dash', label: '경영관리', icon: Icon.Trend, desc: '경영 대시보드', route: 'mgmt_dash' },
-      { id: 'mgmt_ask', label: '경영 도우미', icon: Icon.Sparkle, desc: '골라서 묻는 매출·매입 분석', route: 'mgmt_ask' },
+      { id: 'mgmt_report', label: '장부관리', icon: Icon.Chart, desc: '보고서·집계 자료', route: 'report' },
+      { id: 'mgmt_biz', label: '경영관리', icon: Icon.Trend, desc: '경영 대시보드·도우미', groups: [
+        { label: '', items: ['mgmt_dash', 'mgmt_ask'] },
+      ]},
     ],
   },
 ]
@@ -194,6 +196,8 @@ DOMAIN_OF['acct_tax'] = 'acct'
 DOMAIN_OF['master'] = 'acct'   // 기준정보 포털 카테고리(groups) — 사이드바 도메인 자동 펼침
 DOMAIN_OF['hr_labor'] = 'hr_dom'
 DOMAIN_OF['hr_base'] = 'hr_dom' // 인사급여 기준정보 포털 카테고리(groups)
+DOMAIN_OF['mgmt_report'] = 'mgmt'
+DOMAIN_OF['mgmt_biz'] = 'mgmt'  // 경영관리 포털 카테고리(groups)
 
 // 라우트(하위 라우트 포함) → 사이드바에서 활성 표시할 잎 id
 export function leafIdOf(route) {
