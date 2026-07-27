@@ -1,11 +1,10 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const multer = require('multer')
 const xlsx = require('xlsx')
 const { rollbackQuietly } = require('../lib/tx')
+const { uploadMem, parseSheet } = require('../lib/xlsx-import')
 
 const router = Router()
-const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
 
 // 목록.
 //   기본       — 사용중인 거래처만 (거래 등록 등에서 고를 대상)
@@ -99,12 +98,7 @@ router.delete('/:id', async (req, res, next) => {
 router.post('/import/parse', uploadMem.single('file'), (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: '파일이 없습니다' })
-    const wb = xlsx.read(req.file.buffer, { type: 'buffer', cellDates: true })
-    const sheet = wb.Sheets[wb.SheetNames[0]]
-    if (!sheet) return res.json({ headers: [], rows: [] })
-    const json = xlsx.utils.sheet_to_json(sheet, { defval: '', raw: false })
-    const headers = json.length ? Object.keys(json[0]) : []
-    res.json({ headers, rows: json.slice(0, 1000) })
+    res.json(parseSheet(req.file.buffer))
   } catch (e) { next(e) }
 })
 
