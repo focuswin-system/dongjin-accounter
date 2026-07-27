@@ -265,8 +265,12 @@ export const REF_CONFIGS = {
   },
   insurance: {
     type: 'insurance', label: '보험',
-    sub: '가입 보험(보험사·증권번호·보험료·납입·기간)과 증권을 관리합니다.',
+    sub: '가입 보험(구분·보험사·증권번호·보험료·납입·기간)과 증권을 등록해 두는 관리 대장이에요. "이 보험 언제까지·얼마였지"를 한눈에.',
     fields: [
+      // 보험은 성격이 갈린다 — 정기납입(화재·자동차·배상책임) / 계약보증(보증보험) / 저축성. 먼저 구분해 등록.
+      // 저장은 ref_items.item_kind 컬럼 재사용(보험 행에선 이 컬럼이 비어 있어 품목 로직과 안 겹친다) → 서버/DB 변경 불필요.
+      { key: 'item_kind', label: '구분', kind: 'select', w: 96,
+        options: ['화재·재산', '자동차', '배상책임', '보증보험', '저축성·연금', '기타'] },
       { key: 'name', label: '보험명', kind: 'text', req: true },
       { key: 'party', label: '보험사', kind: 'text', w: 110 },
       { key: 'code', label: '증권번호', kind: 'text', w: 130 },
@@ -276,6 +280,9 @@ export const REF_CONFIGS = {
       { key: 'start_date', label: '시작일', kind: 'date', w: 130, hideCol: true },
       { key: 'end_date', label: '만기일', kind: 'date', w: 120 },
       { key: 'account_id', label: '자동이체 계좌', kind: 'account', hideCol: true },
+      // 자유 메모 — 보증보험이면 보증종류·귀속계약·보증금액 등 유형별 특수정보를 여기에.
+      { key: 'memo', label: '비고', kind: 'text', hideCol: true,
+        hint: '보증보험이면 보증종류·귀속계약·보증금액 등을 자유롭게 적어두세요' },
       { key: 'file', label: '증권 첨부', kind: 'file', hideCol: true },
     ],
   },
