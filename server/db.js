@@ -429,6 +429,45 @@ async function initDb(conn) {
         FOREIGN KEY (settlement_id) REFERENCES settlements(id) ON DELETE CASCADE
       )
     `)
+    // 구매품의서(購買稟議書) — 지출 전 구매 결재 문서. 공급업체·수주처·호선·품목(단가×수량)·품의금액.
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS purchase_reqs (
+        id            VARCHAR(36) PRIMARY KEY,
+        doc_no        VARCHAR(30) NOT NULL,
+        req_date      VARCHAR(20),
+        vendor_id     VARCHAR(36),
+        vendor_name   VARCHAR(255),
+        order_source  VARCHAR(120),
+        ship_no       VARCHAR(120),
+        summary       VARCHAR(255),
+        arrival_date  VARCHAR(20),
+        order_amount  BIGINT DEFAULT 0,
+        pay_terms     VARCHAR(60),
+        man_hours     VARCHAR(60),
+        applicant     VARCHAR(100),
+        note          VARCHAR(1000),
+        approval      TEXT,
+        status        VARCHAR(20) DEFAULT '작성',
+        created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_purchase_reqs_doc_no (doc_no)
+      )
+    `)
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS purchase_req_items (
+        id          VARCHAR(36) PRIMARY KEY,
+        req_id      VARCHAR(36) NOT NULL,
+        name        VARCHAR(255),
+        spec        VARCHAR(255),
+        unit        VARCHAR(30),
+        qty         DECIMAL(18,2) DEFAULT 0,
+        unit_price  BIGINT DEFAULT 0,
+        amount      BIGINT DEFAULT 0,
+        memo        VARCHAR(500),
+        sort_order  INT DEFAULT 0,
+        INDEX idx_purchase_req_items (req_id),
+        FOREIGN KEY (req_id) REFERENCES purchase_reqs(id) ON DELETE CASCADE
+      )
+    `)
     await c.execute(`
       CREATE TABLE IF NOT EXISTS hr_codes (
         id         VARCHAR(36) PRIMARY KEY,

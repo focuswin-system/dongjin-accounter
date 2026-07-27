@@ -35,6 +35,7 @@ export const NAV_TREE = [
       { label: "문서", items: [
         { id: "doc", label: "지급결의서", icon: Icon.Sign },
         { id: "settlement", label: "정산내역서", icon: Icon.Doc },
+        { id: "purchase_req", label: "구매품의서", icon: Icon.Receipt },
       ]},
       { label: "장부", items: [
         { id: "ledger",   label: "전체 거래내역", icon: Icon.Wallet },
@@ -139,8 +140,8 @@ export const PORTAL = [
       { id: 'acct_expense', label: '경비', icon: Icon.Wallet, desc: '일반 경비·잡손익', groups: [
         { label: '', items: ['misc_pl', 'misc_income'] },
       ]},
-      { id: 'acct_docs', label: '문서', icon: Icon.Sign, desc: '지급결의서·정산내역서', groups: [
-        { label: '', items: ['doc', 'settlement'] },
+      { id: 'acct_docs', label: '문서', icon: Icon.Sign, desc: '지급결의서·정산내역서·구매품의서', groups: [
+        { label: '', items: ['doc', 'settlement', 'purchase_req'] },
       ]},
       { id: 'acct_ledger', label: '장부', icon: Icon.Book, desc: '거래내역·계약 조회', groups: [
         { label: '', items: ['ledger', 'contract'] },   // '증빙 관리'는 목업이라 숨김(추후 실구현 예정)

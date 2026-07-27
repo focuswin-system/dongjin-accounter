@@ -683,6 +683,26 @@ export const api = {
     catch (e) { return { ok: false, error: e.message } }
   },
 
+  // ── 구매품의서 ──────────────────────────────────────────────
+  async getPurchaseReqs() {
+    try { return await req('/purchase-reqs') } catch { return [] }
+  },
+  async getPurchaseReq(id) {
+    try { return await req(`/purchase-reqs/${id}`) } catch { return null }
+  },
+  async createPurchaseReq(data) {
+    try { const r = await req('/purchase-reqs', { method: 'POST', body: data }); return { ok: true, req: r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async updatePurchaseReq(id, data) {
+    try { await req(`/purchase-reqs/${id}`, { method: 'PUT', body: data }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async deletePurchaseReq(id) {
+    try { await req(`/purchase-reqs/${id}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
   async addContract(data) {
     try {
       const result = await req('/contracts', { method: 'POST', body: data })

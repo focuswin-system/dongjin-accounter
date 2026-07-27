@@ -49,6 +49,7 @@ const RESOURCES = [
   // 결의서·정산내역서는 매입·경비 양쪽에서 올라온다 → 독립 '문서' 그룹
   { id: 'doc',                     label: '지급결의서',     group: '일반회계 · 문서' },
   { id: 'settlement',              label: '정산내역서',     group: '일반회계 · 문서' },
+  { id: 'purchase_req',            label: '구매품의서',     group: '일반회계 · 문서' },
 
   { id: 'ledger',                  label: '전체 거래내역',  group: '일반회계 · 장부' },
   { id: 'contract',                label: '계약',          group: '일반회계 · 장부' },
