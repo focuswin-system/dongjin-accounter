@@ -2621,8 +2621,10 @@ export const MasterScreen = ({ user, section = "base", forcedTab }) => {
   const [tab, setTab] = useState(allowedTabs[0]);
   // forcedTab(사이드바 서브메뉴로 진입)이면 그 탭 고정 + 내부 서브내브 숨김 + 전체폭.
   // 없으면 기존 탭 방식(내부 서브내브). 라우트 변경으로 탭이 이 섹션에 없으면 첫 탭 폴백.
-  const activeTab = forcedTab || (allowedTabs.includes(tab) ? tab : allowedTabs[0]);
-  const single = !!forcedTab;
+  // 잘못된 forcedTab(오타 라우트·구버전 해시)은 이 섹션 탭이 아니면 무시 — data.label 등에서 화면 전체가 크래시하지 않게.
+  const forced = forcedTab && allowedTabs.includes(forcedTab) ? forcedTab : null;
+  const activeTab = forced || (allowedTabs.includes(tab) ? tab : allowedTabs[0]);
+  const single = !!forced;
   const [q, setQ] = useState("");
   const [drawer, setDrawer] = useState(null);
   const [collapsed, setCollapsed] = useState({});
