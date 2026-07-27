@@ -151,9 +151,20 @@ const NewResolutionDrawer = ({ open, onClose, onCreated }) => {
         <div>
           <label className="label" style={{ marginBottom: 8 }}>지출처 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
           <Combobox value={form.vendor} onChange={v => setForm(f => ({ ...f, vendor: v }))}
-            options={vendors.map(v => ({ value: v.name, label: v.name }))}
-            placeholder="거래처 선택 또는 직접 입력"
-            onAddNew={(q) => setForm(f => ({ ...f, vendor: q }))} addNewLabel="이 이름으로 입력"/>
+            options={vendors.map(v => ({ value: v.name, label: v.name, sub: v.type || '' }))}
+            placeholder="거래처 선택 또는 새로 추가"
+            onAddNew={async (q) => {
+              // 지출처는 매입처(A)로 등록 — 이후 다른 화면에서도 선택 가능. 상세 문구는 결의서 상세에서 수정.
+              const res = await api.addVendor({ name: q, gubu: 'A' })
+              if (res.ok) {
+                setVendors(await api.getVendors())
+                setForm(f => ({ ...f, vendor: q }))
+                toast.push(`"${q}" 거래처가 등록됐어요`)
+              } else {
+                toast.push(res.error || '거래처 등록에 실패했어요')
+              }
+            }}
+            addNewLabel="거래처로 추가"/>
         </div>
         <div>
           <label className="label" style={{ marginBottom: 8 }}>지출 목적 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>

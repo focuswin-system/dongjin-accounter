@@ -522,10 +522,12 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
   }, [q, options]);
 
   const selected = options.find(o => o.value === value);
-  // 목록에 없는 자유입력 값(적요·직접 입력 계약 등)은 원문 그대로 표시.
-  // 단 옵션이 아직 안 실린(async 로딩) 동안은 코드/ID가 잠깐 노출되지 않게 폴백을 미룬다
-  // (options가 실린 뒤 매칭 실패 = 진짜 자유입력/삭제된 값 → 그때만 원문 표시).
-  const display = selected?.label || (options.length ? value : "") || "";
+  // 목록에 없는 자유입력 값(적요·직접 입력 계약·거래처 등)은 원문 그대로 표시.
+  // 코드형(계정과목 등, allowAdd=false)은 옵션이 async로 실리기 전 코드/ID가 잠깐 노출되지 않게
+  // 옵션이 실린 뒤에만 폴백한다. 반면 자유입력 필드(allowAdd+onAddNew)는 값 자체가 표시 라벨이라
+  // 옵션이 비어도(거래처 0건인 새 회사 등) 반드시 원문을 보여준다 — 안 그러면 입력해도 빈칸처럼 보인다.
+  const freeInput = allowAdd && !!onAddNew;
+  const display = selected?.label || ((options.length || freeInput) ? value : "") || "";
 
   const pick = (opt) => { onChange(opt.value); setOpen(false); setQ(""); };
 
