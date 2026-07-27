@@ -13,8 +13,7 @@ const SLOT_GROUPS = [
   { cat: '운송료', slots: ['선편', '화물', '택배·퀵', '버스', '우편'] },
 ]
 const ETC = '기타경비'
-const FIXED_ROWS = SLOT_GROUPS.reduce((s, g) => s + g.slots.length, 0)  // 좌측 슬롯 총 개수
-const key = (cat, title) => `${cat}|${title}`
+const keyOf = (cat, title) => `${cat}|${title}`
 const numOf = (v) => (typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, ''), 10) || 0 : Number(v) || 0)
 
 // doc.lines → 좌측 고정슬롯 값 맵 + 우측 기타경비 목록으로 분리
@@ -23,13 +22,13 @@ const splitLines = (lines) => {
   const etc = []
   for (const l of (lines || [])) {
     const grp = SLOT_GROUPS.find(g => g.cat === l.category && g.slots.includes(l.title))
-    if (grp) slotVal[key(l.category, l.title)] = l
+    if (grp) slotVal[keyOf(l.category, l.title)] = l
     else etc.push(l)
   }
   return { slotVal, etc }
 }
 
-// ── 인쇄 양식(定算內譯書) — 좌우 2단 ───────────────────────────────
+// ── 인쇄 양식(定算內譯書) — 실물처럼 좌우 한 그리드 ─────────────────
 export const SettlementDocument = ({ doc, company }) => {
   const ceo = company?.ceo || '대표이사'
   const total = (doc.lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0)
@@ -39,8 +38,12 @@ export const SettlementDocument = ({ doc, company }) => {
     ? doc.approval
     : [{ label: '담당' }, { label: '결재' }, { label: '대표이사', position: ceo }]
   const { slotVal, etc } = splitLines(doc.lines)
-  const etcRows = [...etc]
-  while (etcRows.length < FIXED_ROWS) etcRows.push(null)   // 좌우 높이 맞춤
+
+  // 좌측 고정슬롯 행 + 우측 기타경비 행을 한 그리드로 합친다(이음새 없이).
+  const leftCells = []
+  for (const g of SLOT_GROUPS) g.slots.forEach((s, i) => leftCells.push({ span: i === 0 ? g.slots.length : 0, cat: g.cat, slot: s, v: slotVal[keyOf(g.cat, s)] }))
+  const rowCount = Math.max(leftCells.length, etc.length)
+  const padLeft = rowCount - leftCells.length
 
   return (
     <div className="doc-paper resolution-paper resolution-print settle-paper">
@@ -65,42 +68,35 @@ export const SettlementDocument = ({ doc, company }) => {
         </tbody>
       </table>
 
-      <div className="settle-body">
-        {/* 좌측: 고정 분류·슬롯 */}
-        <table className="res-table settle-left">
-          <thead><tr><th style={{ width: 26 }}></th><th>항목</th><th style={{ width: 96 }}>지출액</th></tr></thead>
-          <tbody>
-            {SLOT_GROUPS.flatMap(g => g.slots.map((s, si) => {
-              const v = slotVal[key(g.cat, s)]
-              return (
-                <tr key={g.cat + s}>
-                  {si === 0 && <th rowSpan={g.slots.length} className="settle-cat">{g.cat}</th>}
-                  <td>{s}{v && v.memo ? <span className="settle-memo"> · {v.memo}</span> : null}</td>
-                  <td className="num" style={{ textAlign: 'right' }}>{v ? fmtNum(v.amount) : ''}</td>
-                </tr>
-              )
-            }))}
-          </tbody>
-        </table>
-
-        {/* 우측: 기타경비 자유 목록 */}
-        <table className="res-table settle-right">
-          <thead><tr><th style={{ width: 26 }}></th><th>항목</th><th style={{ width: 110 }}>지출액</th></tr></thead>
-          <tbody>
-            {etcRows.map((l, i) => (
-              <tr key={i}>
-                {i === 0 && <th rowSpan={etcRows.length} className="settle-cat">기타경비</th>}
-                <td>{l ? l.title : ' '}{l && l.memo ? <span className="settle-memo"> · {l.memo}</span> : null}</td>
-                <td className="num" style={{ textAlign: 'right' }}>{l ? fmtNum(l.amount) : ''}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <table className="res-table settle-total">
+      <table className="res-table settle-grid">
+        <colgroup>
+          <col style={{ width: 26 }}/><col/><col style={{ width: 92 }}/>
+          <col style={{ width: 26 }}/><col/><col style={{ width: 104 }}/>
+        </colgroup>
+        <thead>
+          <tr><th colSpan={2}>항　목</th><th>지출액</th><th colSpan={2}>항　목</th><th>지출액</th></tr>
+        </thead>
         <tbody>
-          <tr><th style={{ width: 62 }}>합　계</th><td className="num fw-700" style={{ textAlign: 'right' }}>{fmtNum(total)}</td></tr>
+          {Array.from({ length: rowCount }).map((_, i) => {
+            const L = leftCells[i]
+            const R = etc[i]
+            return (
+              <tr key={i}>
+                {L
+                  ? (L.span > 0 ? <th rowSpan={L.span} className="settle-cat">{L.cat}</th> : null)
+                  : (i === leftCells.length ? <th rowSpan={padLeft} className="settle-cat"> </th> : null)}
+                <td>{L ? <>{L.slot}{L.v && L.v.memo ? <span className="settle-memo"> · {L.v.memo}</span> : null}</> : ''}</td>
+                <td className="num" style={{ textAlign: 'right' }}>{L && L.v ? fmtNum(L.v.amount) : ''}</td>
+                {i === 0 ? <th rowSpan={rowCount} className="settle-cat">기타경비</th> : null}
+                <td>{R ? <>{R.title}{R.memo ? <span className="settle-memo"> · {R.memo}</span> : null}</> : ''}</td>
+                <td className="num" style={{ textAlign: 'right' }}>{R ? fmtNum(R.amount) : ''}</td>
+              </tr>
+            )
+          })}
+          <tr className="res-total">
+            <th colSpan={5} style={{ textAlign: 'center' }}>합　계</th>
+            <td className="num fw-700" style={{ textAlign: 'right' }}>{fmtNum(total)}</td>
+          </tr>
         </tbody>
       </table>
 
@@ -171,7 +167,7 @@ const SettlementDrawer = ({ open, editDoc, onClose, onSaved }) => {
   const save = async () => {
     const lines = []
     for (const g of SLOT_GROUPS) for (const s of g.slots) {
-      const v = slots[key(g.cat, s)]
+      const v = slots[keyOf(g.cat, s)]
       if (v && numOf(v.amount)) lines.push({ category: g.cat, title: s, amount: numOf(v.amount), memo: (v.memo || '').trim() })
     }
     for (const l of etc) if (l.title.trim() || numOf(l.amount)) lines.push({ category: ETC, title: l.title.trim(), amount: numOf(l.amount), memo: l.memo.trim() })
@@ -237,7 +233,7 @@ const SettlementDrawer = ({ open, editDoc, onClose, onSaved }) => {
                 <div className="text-xs fw-700" style={{ color: 'var(--muted-2)', marginBottom: 4, paddingLeft: 2 }}>{g.cat}</div>
                 <div className="col gap-6">
                   {g.slots.map(s => {
-                    const k = key(g.cat, s)
+                    const k = keyOf(g.cat, s)
                     const v = slots[k] || { amount: '', memo: '' }
                     return (
                       <div key={s} className="row gap-6" style={{ alignItems: 'center' }}>

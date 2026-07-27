@@ -749,6 +749,9 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 .doc-ws-row-amt { margin-left: auto; }
 .doc-ws-toolbar { padding: 12px 16px; margin-bottom: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .doc-ws-empty { padding: 48px 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 300px; color: var(--muted-2); }
+/* 문서 영역은 흰 배경 카드. 문서(paper)는 그 위에 놓이므로 자체 그림자·테두리는 제거해 이음새 없이. */
+.doc-ws-viewport { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 28px 24px; }
+.doc-ws-viewport .doc-paper { box-shadow: none; border: none; border-radius: 0; }
 /* 세로 양식은 콘텐츠 안에서 가운데(가로 양식=지급결의서는 그대로 폭 채움) */
 .doc-ws-viewport.is-portrait { display: flex; justify-content: center; }
 @media (max-width: 960px) { .doc-ws { grid-template-columns: 1fr; } }
