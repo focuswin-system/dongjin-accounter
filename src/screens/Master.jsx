@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, Popover } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
+import { DataTable } from '../lib/components/DataTable'
 import { api } from '../lib/api'
 
 const fmtDateLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -148,7 +149,7 @@ const MASTER_SECTIONS = {
 const GUBU_LABEL = { B: '발주처', A: '매입처/외주', E: '기관' }
 const GUBU_OPTS  = [{ value: 'B', label: '발주처 (수금)' }, { value: 'A', label: '매입처/외주 (지급)' }, { value: 'E', label: '기관' }]
 
-const HrCodePanel = ({ type, label }) => {
+const HrCodePanel = ({ type, label, embedded = false }) => {
   const toast = useToast()
   const [items, setItems] = useState([])
   const [newName, setNewName] = useState("")
@@ -174,10 +175,14 @@ const HrCodePanel = ({ type, label }) => {
   return (
     <div style={{ padding: 20 }}>
       <div className="row" style={{ marginBottom: 16 }}>
-        <div>
-          <div className="section-title">{label} 관리</div>
-          <div className="section-sub">총 {items.length}개</div>
-        </div>
+        {embedded ? (
+          <div className="section-sub" style={{ alignSelf: 'center' }}>총 {items.length}개</div>
+        ) : (
+          <div>
+            <div className="section-title">{label} 관리</div>
+            <div className="section-sub">총 {items.length}개</div>
+          </div>
+        )}
       </div>
       <div className="row gap-8" style={{ marginBottom: 16 }}>
         <input
@@ -446,37 +451,40 @@ export const RefMasterPanel = ({ cfg, page = false, embedded = false }) => {
       </div>
 
       <div className="card" style={{ overflow: 'hidden' }}>
-        <table className="table">
-          <thead>
-            <tr>
-              {visibleFields.map(fd => <th key={fd.key} className={fd.kind === 'num' ? 'num-right' : undefined} style={fd.w ? { width: fd.w } : undefined}>{fd.label}</th>)}
-              <th style={{ width: 90 }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 && (
-              <tr><td colSpan={visibleFields.length + 1} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)' }}>등록된 {cfg.label}이(가) 없어요. 위에서 추가하세요.</td></tr>
-            )}
-            {filtered.map(r => (
-              <tr key={r.id}>
-                {visibleFields.map((fd, i) => (
-                  <td key={fd.key}
-                    className={fd.kind === 'num' ? 'num-cell num-right' : (i === 0 ? 'fw-600' : 'text-sm')}
-                    style={{ color: (r[fd.key] == null || r[fd.key] === '') ? 'var(--muted-2)' : undefined }}>
-                    {i === 0 && r.file_url && <Icon.Receipt size={12} style={{ marginRight: 4, color: 'var(--brand)', verticalAlign: -1 }}/>}
-                    {cell(fd, r)}
-                  </td>
-                ))}
-                <td>
-                  <div className="row gap-6">
-                    <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => openEdit(r)}>수정</button>
-                    <button className="btn" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--neg)' }} onClick={() => handleDelete(r)}>삭제</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable
+          columns={[
+            ...visibleFields.map((fd, i) => ({
+              key: fd.key,
+              header: fd.label,
+              width: fd.w,
+              align: fd.kind === 'num' ? 'right' : undefined,
+              sortable: true,
+              // 표시값과 정렬값이 다른 열은 정렬 기준을 따로 준다(계산열=계산결과, 계좌=계좌명)
+              sortValue: fd.calc ? (r => fd.calc(r))
+                : fd.kind === 'account' ? (r => accounts.find(a => a.id === r[fd.key])?.name || '')
+                : undefined,
+              className: fd.kind === 'num' ? 'num-cell' : (i === 0 ? 'fw-600' : 'text-sm'),
+              render: (r) => (
+                <span style={{ color: (r[fd.key] == null || r[fd.key] === '') && !fd.calc && fd.kind !== 'flag' ? 'var(--muted-2)' : undefined }}>
+                  {i === 0 && r.file_url && <Icon.Receipt size={12} style={{ marginRight: 4, color: 'var(--brand)', verticalAlign: -1 }}/>}
+                  {cell(fd, r)}
+                </span>
+              ),
+            })),
+            {
+              key: '__actions', header: '', width: 90,
+              render: (r) => (
+                <div className="row gap-6">
+                  <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => openEdit(r)}>수정</button>
+                  <button className="btn" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--neg)' }} onClick={() => handleDelete(r)}>삭제</button>
+                </div>
+              ),
+            },
+          ]}
+          rows={filtered}
+          rowKey={r => r.id}
+          empty={`등록된 ${cfg.label}이(가) 없어요. 위에서 추가하세요.`}
+        />
       </div>
 
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
@@ -895,7 +903,7 @@ const VendorImportWizard = ({ existing, onCancel, onDone }) => {
   )
 }
 
-const VendorPanel = () => {
+const VendorPanel = ({ embedded = false }) => {
   const toast = useToast()
   const [importing,   setImporting]   = useState(false)
   const [vendors,     setVendors]     = useState([])
@@ -967,10 +975,14 @@ const VendorPanel = () => {
   return (
     <div style={{ padding: 20 }}>
       <div className="row" style={{ marginBottom: 16, gap: 10, flexWrap: 'wrap' }}>
-        <div>
-          <div className="section-title">거래처</div>
-          <div className="section-sub">총 {vendors.length}건 · DB 기준</div>
-        </div>
+        {embedded ? (
+          <div className="section-sub" style={{ alignSelf: 'center' }}>총 {vendors.length}건 · DB 기준</div>
+        ) : (
+          <div>
+            <div className="section-title">거래처</div>
+            <div className="section-sub">총 {vendors.length}건 · DB 기준</div>
+          </div>
+        )}
         <div className="row gap-6" style={{ marginLeft: 'auto' }}>
           {['', 'B', 'A', 'E'].map(g => (
             <button key={g} className={`chip ${filterGubu === g ? 'active' : ''}`} onClick={() => setFilterGubu(g)}>
@@ -1138,7 +1150,7 @@ const VendorPanel = () => {
 const ACCT_TYPES = ["자산", "부채", "자본", "수익", "비용"]
 const ACCT_TYPE_BADGE = { 자산: "brand", 부채: "warn", 자본: "outline", 수익: "pos", 비용: "neg" }
 
-const AccountSubjectPanel = () => {
+const AccountSubjectPanel = ({ embedded = false }) => {
   const [rows, setRows] = useState([])
   const [q, setQ] = useState("")
   const [type, setType] = useState("")
@@ -1161,10 +1173,14 @@ const AccountSubjectPanel = () => {
   return (
     <div style={{ padding: 20 }}>
       <div className="row" style={{ marginBottom: 16, gap: 10, flexWrap: "wrap" }}>
-        <div>
-          <div className="section-title">계정과목</div>
-          <div className="section-sub">한국채택 회계기준(K-GAAP) 표준 계정과목이에요. 거래 입력 시 선택용으로 쓰이며, 이 목록은 수정할 수 없어요. · 총 {rows.length}개</div>
-        </div>
+        {embedded ? (
+          <div className="section-sub" style={{ alignSelf: 'center' }}>K-GAAP 표준 계정과목 · 선택 전용(수정 불가) · 총 {rows.length}개</div>
+        ) : (
+          <div>
+            <div className="section-title">계정과목</div>
+            <div className="section-sub">한국채택 회계기준(K-GAAP) 표준 계정과목이에요. 거래 입력 시 선택용으로 쓰이며, 이 목록은 수정할 수 없어요. · 총 {rows.length}개</div>
+          </div>
+        )}
         <div className="search" style={{ margin: 0, marginLeft: "auto", width: 200, padding: "6px 10px" }}>
           <Icon.Search size={14}/>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="계정과목·코드·내용"/>
@@ -1228,7 +1244,7 @@ const PAY_OPTS = ["계좌이체", "법인카드", "현금", "—"]
 
 const kindOf = (c) => (c.id?.startsWith('INC-') ? 'inc' : 'exp')
 
-const CategoryPanel = () => {
+const CategoryPanel = ({ embedded = false }) => {
   const toast = useToast()
   const [cats, setCats] = useState([])
   const [q, setQ] = useState("")
@@ -1278,10 +1294,14 @@ const CategoryPanel = () => {
   return (
     <div style={{ padding: 20 }}>
       <div className="row" style={{ marginBottom: 16, gap: 10, flexWrap: "wrap" }}>
-        <div>
-          <div className="section-title">비목</div>
-          <div className="section-sub">회사가 자유롭게 쓰는 지출·수입 항목이에요. 거래 입력 시 필수로 선택합니다. · 총 {cats.length}개</div>
-        </div>
+        {embedded ? (
+          <div className="section-sub" style={{ alignSelf: 'center' }}>거래 입력 시 필수 선택 항목 · 총 {cats.length}개</div>
+        ) : (
+          <div>
+            <div className="section-title">비목</div>
+            <div className="section-sub">회사가 자유롭게 쓰는 지출·수입 항목이에요. 거래 입력 시 필수로 선택합니다. · 총 {cats.length}개</div>
+          </div>
+        )}
         <div className="row gap-6" style={{ marginLeft: "auto" }}>
           {[["", "전체"], ["exp", "지출"], ["inc", "수입"]].map(([k, label]) => (
             <button key={k} className={`chip ${filterKind === k ? "active" : ""}`} onClick={() => setFilterKind(k)}>{label}</button>
@@ -1421,7 +1441,7 @@ const AdjustDrawer = ({ account, onClose, onSave }) => {
 }
 
 // ── 회사 정보 패널 (자사 기준정보, 단일 레코드) ────────────────────
-const CompanyPanel = () => {
+const CompanyPanel = ({ embedded = false }) => {
   const toast = useToast()
   const [form, setForm] = useState({ name:'', biz_no:'', ceo:'', biz_type:'', biz_item:'', address:'', phone:'', fax:'', email:'', main_account:'' })
   const [accounts, setAccounts] = useState([])
@@ -1448,10 +1468,14 @@ const CompanyPanel = () => {
   return (
     <div style={{ padding: 20 }}>
       <div className="row" style={{ marginBottom: 16 }}>
-        <div>
-          <div className="section-title">회사 정보</div>
-          <div className="section-sub">세금계산서·보고서·세무 자료에 들어갈 자사 기준정보예요.</div>
-        </div>
+        {embedded ? (
+          <div className="section-sub" style={{ alignSelf: 'center' }}>세금계산서·보고서·세무 자료에 들어갈 자사 기준정보예요.</div>
+        ) : (
+          <div>
+            <div className="section-title">회사 정보</div>
+            <div className="section-sub">세금계산서·보고서·세무 자료에 들어갈 자사 기준정보예요.</div>
+          </div>
+        )}
         <button className="btn primary ml-auto" onClick={handleSave}><Icon.Check size={14}/> 저장</button>
       </div>
 
@@ -1524,7 +1548,7 @@ const BANK_TYPES = ['보통예금', '당좌예금', '정기예금']
 const CARD_TYPES = ['법인카드', '개인카드', '체크카드']
 const emptyAccountForm = () => ({ kind: 'bank', type: '보통예금', bank: '', number: '', name: '', purpose: '', initial_balance: '' })
 
-const AccountPanel = () => {
+const AccountPanel = ({ embedded = false }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [accounts, setAccounts] = useState([])
@@ -1590,10 +1614,14 @@ const AccountPanel = () => {
   return (
     <div style={{ padding: 20 }}>
       <div className="row" style={{ marginBottom: 16, gap: 10, flexWrap: 'wrap' }}>
-        <div>
-          <div className="section-title">계좌 / 카드</div>
-          <div className="section-sub">총 {accounts.length}건 · 결제수단으로 사용됩니다</div>
-        </div>
+        {embedded ? (
+          <div className="section-sub" style={{ alignSelf: 'center' }}>총 {accounts.length}건 · 결제수단으로 사용됩니다</div>
+        ) : (
+          <div>
+            <div className="section-title">계좌 / 카드</div>
+            <div className="section-sub">총 {accounts.length}건 · 결제수단으로 사용됩니다</div>
+          </div>
+        )}
         <div className="search" style={{ margin: 0, marginLeft: 'auto', width: 200, padding: '6px 10px' }}>
           <Icon.Search size={14}/>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="별칭·은행·번호"/>
@@ -1702,7 +1730,7 @@ const AccountPanel = () => {
   )
 }
 
-const AccountBalancePanel = () => {
+const AccountBalancePanel = ({ embedded = false }) => {
   const toast = useToast()
   const [accounts, setAccounts] = useState([])
   const [adjustTarget, setAdjustTarget] = useState(null)
@@ -1726,7 +1754,7 @@ const AccountBalancePanel = () => {
   return (
     <div style={{ padding: 20 }}>
       <div className="row" style={{ marginBottom: 16 }}>
-        <div className="section-title">계좌별 잔액</div>
+        {!embedded && <div className="section-title">계좌별 잔액</div>}
         <div className="text-sm text-muted ml-auto">거래내역 기반 자동 집계 + 수동 조정</div>
       </div>
       <div className="col gap-12">
@@ -2273,7 +2301,7 @@ export const RecurringInvoicePanel = ({ page = false }) => {
 // ── 사용자 / 계정 관리 패널 ────────────────────────────────────────
 // 결재선 프리셋 — 자주 쓰는 결재 단계(담당→결재→대표)를 저장해두고 결의서에서 골라 쓴다.
 // 단계의 직위는 인사 기준정보 직위(hr pos)에서 고르거나 직접 입력.
-const ApprovalPanel = () => {
+const ApprovalPanel = ({ embedded = false }) => {
   const toast = useToast();
   const { confirm } = useConfirm();
   const [presets, setPresets] = useState([]);
@@ -2312,7 +2340,7 @@ const ApprovalPanel = () => {
   return (
     <div style={{ padding: 20 }}>
       <div className="row" style={{ marginBottom: 6 }}>
-        <div className="section-title">결재선</div>
+        {!embedded && <div className="section-title">결재선</div>}
         <button className="btn primary ml-auto" onClick={startNew}><Icon.Plus size={14}/> 새 결재선</button>
       </div>
       <div className="text-sm text-muted" style={{ marginBottom: 16 }}>
@@ -2382,7 +2410,7 @@ const ApprovalPanel = () => {
   );
 };
 
-const UserPanel = ({ currentUser }) => {
+const UserPanel = ({ currentUser, embedded = false }) => {
   const toast = useToast();
   const { confirm } = useConfirm();
   const isAdmin = currentUser?.role === 'admin';
@@ -2465,7 +2493,7 @@ const UserPanel = ({ currentUser }) => {
       <div>
         <div className="row" style={{ padding: "16px 18px", borderBottom: "1px solid var(--line)" }}>
           <div>
-            <div className="section-title">내 계정</div>
+            {!embedded && <div className="section-title">내 계정</div>}
             <div className="section-sub">비밀번호를 변경할 수 있어요. 계정 추가·권한 관리는 관리자 권한이 필요합니다.</div>
           </div>
         </div>
@@ -2486,7 +2514,7 @@ const UserPanel = ({ currentUser }) => {
     <div>
       <div className="row" style={{ padding: "16px 18px", borderBottom: "1px solid var(--line)", flexWrap: "wrap", gap: 10 }}>
         <div>
-          <div className="section-title">사용자</div>
+          {!embedded && <div className="section-title">사용자</div>}
           <div className="section-sub">로그인 계정을 만들고 권한·비밀번호를 관리하세요. (관리자 전용)</div>
         </div>
       </div>
@@ -2548,7 +2576,7 @@ const UserPanel = ({ currentUser }) => {
 
 /* 월 마감 — 부가세 신고·월 마감을 끝낸 달의 장부를 잠근다.
    잠근 달의 거래는 등록·수정·삭제가 서버에서 막힌다(lib/closing.js). 되돌리려면 해제. */
-const ClosingPanel = () => {
+const ClosingPanel = ({ embedded = false }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [rows, setRows] = useState([])
@@ -2581,7 +2609,7 @@ const ClosingPanel = () => {
   return (
     <div style={{ padding: 20 }}>
       <div style={{ marginBottom: 16 }}>
-        <div className="section-title">월 마감</div>
+        {!embedded && <div className="section-title">월 마감</div>}
         <div className="section-sub">
           부가세 신고나 월 결산을 끝낸 달을 잠급니다. 잠근 달의 거래는 등록·수정·삭제가 막혀,
           이미 제출한 자료와 장부가 어긋나지 않아요.
@@ -2657,21 +2685,21 @@ export const MasterScreen = ({ user, section = "base", forcedTab }) => {
 
   const renderCustomPanel = () => {
     if (REF_CONFIGS[activeTab])           return <RefMasterPanel key={activeTab} cfg={REF_CONFIGS[activeTab]} embedded={single}/>
-    if (activeTab === "vendor")           return <VendorPanel/>
-    if (activeTab === "account")          return <AccountPanel/>
-    if (activeTab === "company")          return <CompanyPanel/>
-    if (activeTab === "accountSubject")   return <AccountSubjectPanel/>
-    if (activeTab === "category")         return <CategoryPanel/>
-    if (activeTab === "accountBalance")   return <AccountBalancePanel/>
+    if (activeTab === "vendor")           return <VendorPanel embedded={single}/>
+    if (activeTab === "account")          return <AccountPanel embedded={single}/>
+    if (activeTab === "company")          return <CompanyPanel embedded={single}/>
+    if (activeTab === "accountSubject")   return <AccountSubjectPanel embedded={single}/>
+    if (activeTab === "category")         return <CategoryPanel embedded={single}/>
+    if (activeTab === "accountBalance")   return <AccountBalancePanel embedded={single}/>
     if (activeTab === "recurringExpense") return <RecurringExpensePanel/>
     if (activeTab === "recurringInvoice") return <RecurringInvoicePanel/>
-    if (activeTab === "payrollItems")     return <PayrollItemPanel/>
-    if (activeTab === "employType")       return <EmployTypePanel/>
-    if (activeTab === "user")             return <UserPanel currentUser={user}/>
-    if (activeTab === "approval")         return <ApprovalPanel/>
-    if (activeTab === "closing")          return <ClosingPanel/>
-    if (activeTab === "department")       return <HrCodePanel type="dept" label="부서"/>
-    if (activeTab === "position")         return <HrCodePanel type="pos"  label="직위"/>
+    if (activeTab === "payrollItems")     return <PayrollItemPanel embedded={single}/>
+    if (activeTab === "employType")       return <EmployTypePanel embedded={single}/>
+    if (activeTab === "user")             return <UserPanel currentUser={user} embedded={single}/>
+    if (activeTab === "approval")         return <ApprovalPanel embedded={single}/>
+    if (activeTab === "closing")          return <ClosingPanel embedded={single}/>
+    if (activeTab === "department")       return <HrCodePanel type="dept" label="부서" embedded={single}/>
+    if (activeTab === "position")         return <HrCodePanel type="pos"  label="직위" embedded={single}/>
     return null
   }
 
@@ -3114,7 +3142,7 @@ const MasterDrawer = ({ open, mode, category, rowIndex, groupedSel, onClose, onS
 };
 
 // 급여 항목 마스터: 지급(+)/공제(-) 표준 목록을 사용자가 직접 관리
-const PayrollItemPanel = () => {
+const PayrollItemPanel = ({ embedded = false }) => {
   const toast = useToast();
   const { confirm } = useConfirm();
   const [items, setItems] = useState([]);
@@ -3177,7 +3205,7 @@ const PayrollItemPanel = () => {
     <div>
       <div className="row" style={{ padding: "16px 18px", borderBottom: "1px solid var(--line)", flexWrap: "wrap", gap: 10 }}>
         <div>
-          <div className="section-title">급여 항목</div>
+          {!embedded && <div className="section-title">급여 항목</div>}
           <div className="section-sub">매달 급여명세에 쓰는 지급(+)·공제(−) 항목을 직접 만들어두세요. 급여대장 생성 시 자동으로 채워집니다.</div>
         </div>
       </div>
@@ -3240,7 +3268,7 @@ const FieldRow = ({ label, hint, required, children }) => (
   </div>
 );
 
-const EmployTypePanel = () => {
+const EmployTypePanel = ({ embedded = false }) => {
   const toast = useToast();
   const { confirm } = useConfirm();
   const [types, setTypes] = useState([]);
@@ -3279,7 +3307,7 @@ const EmployTypePanel = () => {
     <div>
       <div className="row" style={{ padding: "16px 18px", borderBottom: "1px solid var(--line)", flexWrap: "wrap", gap: 10 }}>
         <div>
-          <div className="section-title">고용형태</div>
+          {!embedded && <div className="section-title">고용형태</div>}
           <div className="section-sub">근로계약·용역·일용에서 쓰는 고용형태를 직접 만들어두세요. 계약을 등록할 때 소득구분·단가 단위·4대보험 적용이 자동으로 채워집니다.</div>
         </div>
         {!open && <button className="btn primary ml-auto" onClick={() => { setForm(emptyET()); setEditingId(null); setOpen(true); }}><Icon.Plus size={14}/> 고용형태 추가</button>}
