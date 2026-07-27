@@ -3,6 +3,7 @@ import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, local
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
+import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 
 // 定算內譯書 좌측 고정 분류·슬롯(동진테크 양식). 우측은 기타경비 자유 목록.
 const SLOT_GROUPS = [
@@ -331,43 +332,32 @@ export const SettlementScreen = () => {
       <PageHeader title="정산내역서"
         actions={<button className="btn primary" onClick={() => setDrawer('new')}><Icon.Plus size={14}/> 새 정산내역서</button>}/>
 
-      <div className="master-layout" style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, alignItems: 'start' }}>
-        <div className="card" style={{ padding: 8 }}>
-          {list.length === 0 && <div className="text-sm text-muted2" style={{ padding: 20, textAlign: 'center' }}>정산내역서가 없어요.<br/>위에서 새로 만드세요.</div>}
-          {list.map(d => (
-            <button key={d.id} className={`nav-item ${selId === d.id ? 'active' : ''}`}
-              style={{ width: '100%', flexDirection: 'column', alignItems: 'flex-start', gap: 2, padding: '10px 12px' }}
-              onClick={() => setSelId(d.id)}>
-              <span className="row" style={{ width: '100%', gap: 6 }}>
-                <span className="fw-700 text-sm num">{d.doc_no}</span>
-                <span className="text-xs text-muted2 ml-auto">{d.settle_date || ''}</span>
-              </span>
-              <span className="text-xs text-muted" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
-                {d.settler || '—'} · 잔액 <b style={{ color: (d.balance || 0) < 0 ? 'var(--neg-ink)' : 'var(--ink)' }}>{fmtNum(d.balance || 0)}</b>
-              </span>
-            </button>
-          ))}
-        </div>
-
-        <div>
+      <DocWorkspace>
+        <DocSide>
+          {list.length === 0
+            ? <DocSideEmpty>정산내역서가 없어요.<br/>'새 정산내역서'로 만드세요.</DocSideEmpty>
+            : list.map(d => (
+              <DocListRow key={d.id} active={selId === d.id} onClick={() => setSelId(d.id)}
+                docNo={d.doc_no} right={<span className="text-xs text-muted2">{d.settle_date || ''}</span>}
+                title={d.settler || '—'} meta="잔액" amount={d.balance || 0}/>
+            ))}
+        </DocSide>
+        <DocMain>
           {sel ? (
             <>
-              <div className="card no-print" style={{ padding: '12px 16px', marginBottom: 16, display: 'flex', gap: 10, alignItems: 'center' }}>
-                <span className="fw-700 num">{sel.doc_no}</span>
-                <span className="text-sm text-muted">잔액 <b className="num" style={{ color: (sel.balance || 0) < 0 ? 'var(--neg-ink)' : 'var(--brand-ink)' }}>{fmtNum(sel.balance || 0)}원</b></span>
-                <div className="ml-auto row gap-8">
-                  <button className="btn" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
-                  <button className="btn" onClick={() => setDrawer(sel)}><Icon.Pencil size={14}/> 편집</button>
-                  <button className="btn" style={{ color: 'var(--neg)' }} onClick={doDelete}><Icon.Trash size={14}/> 삭제</button>
-                </div>
-              </div>
-              <SettlementDocument doc={sel} company={company}/>
+              <DocToolbar docNo={sel.doc_no}
+                status={<span className="text-sm text-muted">잔액 <b className="num" style={{ color: (sel.balance || 0) < 0 ? 'var(--neg-ink)' : 'var(--brand-ink)' }}>{fmtNum(sel.balance || 0)}원</b></span>}>
+                <button className="btn" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
+                <button className="btn" onClick={() => setDrawer(sel)}><Icon.Pencil size={14}/> 편집</button>
+                <button className="btn" style={{ color: 'var(--neg)' }} onClick={doDelete}><Icon.Trash size={14}/> 삭제</button>
+              </DocToolbar>
+              <DocViewport portrait><SettlementDocument doc={sel} company={company}/></DocViewport>
             </>
           ) : (
-            <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--muted-2)' }}>왼쪽에서 정산내역서를 고르거나 새로 만드세요.</div>
+            <DocEmpty icon={<Icon.Doc size={32} style={{ opacity: 0.3 }}/>}>왼쪽에서 정산내역서를 고르거나 새로 만드세요.</DocEmpty>
           )}
-        </div>
-      </div>
+        </DocMain>
+      </DocWorkspace>
 
       <SettlementDrawer open={!!drawer} editDoc={drawer === 'new' ? null : drawer}
         onClose={() => setDrawer(null)}

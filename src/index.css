@@ -732,6 +732,27 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 
 /* ── 지급결의서 양식 ── */
 .resolution-paper { padding: 36px 40px; }
+/* ── 문서 센터 공용 레이아웃(DocWorkspace) — 좌 리스트 + 우 헤더/콘텐츠 ── */
+.doc-ws { display: grid; grid-template-columns: clamp(280px, 320px, 360px) 1fr; gap: 16px; align-items: start; }
+.doc-ws-side { overflow: hidden; padding: 0; }
+.doc-ws-side-top { padding: 12px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.doc-ws-side-scroll { max-height: calc(100dvh - 220px); overflow-y: auto; }
+.doc-ws-side-empty { padding: 40px 20px; text-align: center; color: var(--muted-2); font-size: 13px; line-height: 1.6; }
+.doc-ws-row { display: block; width: 100%; text-align: left; border: 0; background: transparent; cursor: pointer; padding: 14px 16px; border-top: 1px solid var(--line); font-family: inherit; transition: background .12s ease; }
+.doc-ws-row:first-child { border-top: 0; }
+.doc-ws-row:hover { background: var(--surface-2); }
+.doc-ws-row.active { background: var(--surface-3); }
+.doc-ws-row-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.doc-ws-row-right { margin-left: auto; }
+.doc-ws-row-title { font-weight: 600; color: var(--ink); margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.doc-ws-row-meta { display: flex; align-items: baseline; gap: 8px; }
+.doc-ws-row-amt { margin-left: auto; }
+.doc-ws-toolbar { padding: 12px 16px; margin-bottom: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.doc-ws-empty { padding: 48px 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 300px; color: var(--muted-2); }
+/* 세로 양식은 콘텐츠 안에서 가운데(가로 양식=지급결의서는 그대로 폭 채움) */
+.doc-ws-viewport.is-portrait { display: flex; justify-content: center; }
+@media (max-width: 960px) { .doc-ws { grid-template-columns: 1fr; } }
+
 /* 定算內譯書 — 실물이 A4 세로(portrait). 화면에서도 세로 비율로 가운데 정렬(가로로 안 퍼지게). */
 .settle-paper { max-width: 800px; margin-left: auto; margin-right: auto; }
 /* 좌우 2단 본문 */

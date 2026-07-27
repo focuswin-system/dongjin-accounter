@@ -11,6 +11,7 @@ import { api } from '../lib/api'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
+import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 
 const todayStr = () => localToday()   // UTC 금지 — KST 새벽에 하루 전으로 찍힌다
 
@@ -57,51 +58,33 @@ export const DocsScreen = () => {
 
       <NewResolutionDrawer open={newOpen} onClose={() => setNewOpen(false)} onCreated={(id) => { setNewOpen(false); load().then(() => setSelId(id)); }}/>
 
-      <div className="grid" style={{ gridTemplateColumns: "clamp(280px, 340px, 380px) 1fr", gap: 16, alignItems: "start" }}>
-        <div className="card" style={{ overflow: "hidden" }}>
-          <div style={{ padding: 12, borderBottom: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 10 }}>
-            <div className="row gap-6">
-              <button className={`chip ${!showDone ? "active" : ""}`} onClick={() => setShowDone(false)}>
-                처리 대기 {pendingCount > 0 && <span className="badge brand" style={{ marginLeft: 6 }}>{pendingCount}</span>}
-              </button>
-              <button className={`chip ${showDone ? "active" : ""}`} onClick={() => setShowDone(true)}>전체</button>
-            </div>
-            <div className="search" style={{ margin: 0, padding: "6px 10px" }}>
-              <Icon.Search size={14}/>
-              <input value={q} onChange={e => setQ(e.target.value)} placeholder="문서번호·거래처·목적 검색"/>
-            </div>
+      <DocWorkspace>
+        <DocSide top={<>
+          <div className="row gap-6">
+            <button className={`chip ${!showDone ? "active" : ""}`} onClick={() => setShowDone(false)}>
+              처리 대기 {pendingCount > 0 && <span className="badge brand" style={{ marginLeft: 6 }}>{pendingCount}</span>}
+            </button>
+            <button className={`chip ${showDone ? "active" : ""}`} onClick={() => setShowDone(true)}>전체</button>
           </div>
-          <div style={{ maxHeight: 680, overflowY: "auto" }}>
-            {list.length === 0 && (
-              <div style={{ padding: 40, textAlign: "center", color: "var(--muted-2)", fontSize: 13 }}>
-                {showDone ? "결의서가 없어요." : "처리 대기 중인 결의서가 없어요."}<br/>'새 결의서'로 만들거나 매입의 대금 청구서에서 발행하세요.
-              </div>
-            )}
-            {list.map((d, i) => (
-              <div key={d.id} onClick={() => setSelId(d.id)}
-                style={{ padding: "16px 18px", background: d.id === selId ? "var(--surface-3)" : "transparent", borderTop: i === 0 ? 0 : "1px solid var(--line)", cursor: "pointer", transition: "background .12s ease" }}>
-                <div className="row gap-8" style={{ marginBottom: 8 }}>
-                  <span className="num text-xs text-muted2 fw-600">{d.doc_no}</span>
-                  <span style={{ marginLeft: "auto" }}><StatusBadge status={d.status}/></span>
-                </div>
-                <div className="fw-600" style={{ marginBottom: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "var(--ink)" }}>{d.title}</div>
-                <div className="row gap-8" style={{ alignItems: "baseline" }}>
-                  <span className="text-xs text-muted">{d.pay_date || "—"}</span>
-                  <span className="text-xs text-muted2">· {d.vendor_name || "—"}</span>
-                  <span style={{ marginLeft: "auto" }} className="num fw-700 text-sm">{fmtNum(d.amount)}<span className="text-muted2" style={{ fontWeight: 400, marginLeft: 2 }}>원</span></span>
-                </div>
-              </div>
+          <div className="search" style={{ margin: 0, padding: "6px 10px" }}>
+            <Icon.Search size={14}/>
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="문서번호·거래처·목적 검색"/>
+          </div>
+        </>}>
+          {list.length === 0
+            ? <DocSideEmpty>{showDone ? "결의서가 없어요." : "처리 대기 중인 결의서가 없어요."}<br/>'새 결의서'로 만들거나 매입의 대금 청구서에서 발행하세요.</DocSideEmpty>
+            : list.map(d => (
+              <DocListRow key={d.id} active={d.id === selId} onClick={() => setSelId(d.id)}
+                docNo={d.doc_no} right={<StatusBadge status={d.status}/>}
+                title={d.title} meta={`${d.pay_date || "—"} · ${d.vendor_name || "—"}`} amount={d.amount}/>
             ))}
-          </div>
-        </div>
-        {sel
-          ? <ResolutionPreview doc={sel} company={company} onSaved={load} onDeleted={() => { setSelId(null); load(); }}/>
-          : <div className="card card-pad" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 300, color: "var(--muted-2)", gap: 12 }}>
-              <Icon.Receipt size={32} style={{ opacity: 0.3 }}/>
-              <div className="text-sm">결의서를 선택하면 내용이 표시됩니다</div>
-            </div>
-        }
-      </div>
+        </DocSide>
+        <DocMain>
+          {sel
+            ? <ResolutionPreview doc={sel} company={company} onSaved={load} onDeleted={() => { setSelId(null); load(); }}/>
+            : <DocEmpty icon={<Icon.Receipt size={32} style={{ opacity: 0.3 }}/>}>결의서를 선택하면 내용이 표시됩니다</DocEmpty>}
+        </DocMain>
+      </DocWorkspace>
     </div>
   );
 };
@@ -488,35 +471,32 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
   const displayItems = edit ? items : (items.length ? items : [{ name: form.title, unit: '식', qty: 1, price: form.amount, amount: form.amount, note: '' }]);
 
   return (
-    <div>
-      {/* 화면 전용 액션 바 (인쇄 시 숨김) */}
-      <div className="card no-print" style={{ padding: "14px 16px", marginBottom: 16, display: "flex", gap: 10, alignItems: "center" }}>
-        <span className="num text-sm text-muted">{doc.doc_no}</span>
-        <StatusBadge status={doc.status}/>
-        <div className="ml-auto row gap-6">
-          {edit ? (
-            <>
-              <button className="btn" onClick={() => { setForm(doc); setEdit(false); }}>취소</button>
-              <button className="btn primary" onClick={save}><Icon.Check size={14}/> 저장</button>
-            </>
-          ) : (
-            <>
-              {!done && <button className="btn ghost" onClick={remove}><Icon.Trash size={14}/></button>}
-              {!done && <button className="btn" onClick={() => setEdit(true)}><Icon.Pencil size={14}/> 편집</button>}
-              <button className="btn" onClick={doPrint}><Icon.Print/> 인쇄</button>
-              {/* 처리 = 이 결의서대로 지출 집행. 처리되면 목록에서 빠진다. */}
-              {done
-                ? <span className="badge pos" style={{ alignSelf: 'center' }}><span className="dot"/>처리 완료</span>
-                : <button className="btn primary" onClick={() => setProcessOpen(true)}><Icon.Check size={14}/> 처리</button>}
-            </>
-          )}
-        </div>
-      </div>
+    <>
+      {/* 콘텐츠 헤더(공용) — 문서번호·상태 + 액션(편집·인쇄·처리·삭제) */}
+      <DocToolbar docNo={doc.doc_no} status={<StatusBadge status={doc.status}/>}>
+        {edit ? (
+          <>
+            <button className="btn" onClick={() => { setForm(doc); setEdit(false); }}>취소</button>
+            <button className="btn primary" onClick={save}><Icon.Check size={14}/> 저장</button>
+          </>
+        ) : (
+          <>
+            {!done && <button className="btn ghost" onClick={remove}><Icon.Trash size={14}/></button>}
+            {!done && <button className="btn" onClick={() => setEdit(true)}><Icon.Pencil size={14}/> 편집</button>}
+            <button className="btn" onClick={doPrint}><Icon.Print/> 인쇄</button>
+            {/* 처리 = 이 결의서대로 지출 집행. 처리되면 목록에서 빠진다. */}
+            {done
+              ? <span className="badge pos" style={{ alignSelf: 'center' }}><span className="dot"/>처리 완료</span>
+              : <button className="btn primary" onClick={() => setProcessOpen(true)}><Icon.Check size={14}/> 처리</button>}
+          </>
+        )}
+      </DocToolbar>
 
       <ProcessDrawer open={processOpen} onClose={() => setProcessOpen(false)} doc={doc}
         onDone={() => { setProcessOpen(false); onSaved(); }}/>
 
-      {/* 인쇄 대상 — 실제 결의서 양식 */}
+      {/* 인쇄 대상 — 실제 결의서 양식(가로 계열이라 그대로 폭 채움) */}
+      <DocViewport>
       <div className="doc-paper resolution-paper" id="resolution-print">
         <div className="res-title-ko">지출결의서</div>
         <div className="res-title">支 出 決 議 書</div>
@@ -614,7 +594,8 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
           {company?.name || ''}{company?.biz_no ? ` · 사업자 ${company.biz_no}` : ''}
         </div>
       </div>
-    </div>
+      </DocViewport>
+    </>
   );
 };
 
