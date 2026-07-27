@@ -30,16 +30,23 @@ router.post('/', async (req, res, next) => {
 })
 
 router.put('/:id', async (req, res, next) => {
+  const conn = await req.db.getConnection()
   try {
     const { name, steps, is_default } = req.body
-    if (is_default) await req.db.execute('UPDATE approval_presets SET is_default=0')
-    const [r] = await req.db.execute(
+    await conn.beginTransaction()
+    // 대상을 먼저 갱신한다 — 없는 id면 여기서 0행이라 롤백. (예전엔 존재 확인 전에 모든 기본을
+    // 해제해서, 대상이 없으면 '아무것도 기본이 아닌' 상태로 남아 결재선이 하드코딩으로 떨어졌다)
+    const [r] = await conn.execute(
       'UPDATE approval_presets SET name=?, steps=?, is_default=? WHERE id=?',
       [name || '', JSON.stringify(steps || []), is_default ? 1 : 0, req.params.id]
     )
-    if (r.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
+    if (r.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    // 이 프리셋을 기본으로 지정했으면 나머지의 기본 플래그를 내린다(자기 자신은 제외)
+    if (is_default) await conn.execute('UPDATE approval_presets SET is_default=0 WHERE id <> ?', [req.params.id])
+    await conn.commit()
     res.json({ ok: true })
-  } catch (e) { next(e) }
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
 })
 
 // 기본 프리셋 지정(하나만 기본이 되도록)

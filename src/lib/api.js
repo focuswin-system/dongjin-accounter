@@ -88,6 +88,7 @@ function adaptInvoice(row) {
     supplyAmount: row.supply_amount,
     vatAmount: row.vat_amount,
     totalAmount: row.total_amount,
+    taxType: row.tax_type || '',   // 과세/면세/영세 — 편집 시 자동 10% 재계산을 막는 데 필요
     issuedAt: row.issued_at,
     dueAt: row.due_at || null,
     status: row.status,
@@ -275,14 +276,14 @@ export const api = {
     try {
       const result = await req('/invoices', { method: 'POST', body: data })
       return { ok: true, id: result.id }
-    } catch { return { ok: false } }
+    } catch (e) { return { ok: false, error: e.message } }
   },
 
   async updateInvoice(id, data) {
     try {
       await req(`/invoices/${id}`, { method: 'PUT', body: data })
       return { ok: true }
-    } catch { return { ok: false } }
+    } catch (e) { return { ok: false, error: e.message } }
   },
 
   async deleteInvoice(id) {
@@ -321,7 +322,7 @@ export const api = {
     try {
       const result = await req('/transactions', { method: 'POST', body: data })
       return { ok: true, id: result.id }
-    } catch { return { ok: false } }
+    } catch (e) { return { ok: false, error: e.message } }   // 마감·계좌 등 400/409 사유를 화면까지
   },
 
   // ─── 엑셀 임포트 ───────────────────────────────────────────────
@@ -350,14 +351,14 @@ export const api = {
     try {
       await req(`/transactions/${id}`, { method: 'PUT', body: data })
       return { ok: true }
-    } catch { return { ok: false } }
+    } catch (e) { return { ok: false, error: e.message } }   // 마감·계좌 등 400/409 사유를 화면까지
   },
 
   async updateTransactionStatus(id, status) {
     try {
       await req(`/transactions/${id}/status`, { method: 'PATCH', body: { status } })
       return { ok: true }
-    } catch { return { ok: false } }
+    } catch (e) { return { ok: false, error: e.message } }
   },
 
   async deleteTransaction(id) {
@@ -940,7 +941,9 @@ export const api = {
 
   async updateUserPassword(id, password) {
     try {
-      await req(`/auth/users/${id}/password`, { method: 'PUT', body: { password } })
+      // 본인이 임시 비번을 바꾸면 서버가 mustChangePw를 뗀 새 토큰을 준다 → 저장해 게이트를 푼다
+      const r = await req(`/auth/users/${id}/password`, { method: 'PUT', body: { password } })
+      if (r && r.token) localStorage.setItem('token', r.token)
       return { ok: true }
     } catch(e) { return { ok: false, error: e.message } }
   },

@@ -83,7 +83,9 @@ router.get('/vat', async (req, res, next) => {
               SUM(CASE WHEN t.kind='expense' AND (t.vat_deductible = 0 OR COALESCE(ev.deductible, 1) = 0)
                        THEN t.vat_amount ELSE 0 END) AS non_deductible_vat
        FROM transactions t
-       LEFT JOIN ref_items ev ON ev.type = 'evidence_type' AND ev.name = t.evid_type
+       LEFT JOIN (
+         SELECT name, MIN(deductible) AS deductible FROM ref_items WHERE type = 'evidence_type' GROUP BY name
+       ) ev ON ev.name = t.evid_type
        WHERE YEAR(t.date) = ? AND t.invoice_id IS NULL AND t.vat_amount IS NOT NULL
        GROUP BY QUARTER(t.date)`,
       [year]

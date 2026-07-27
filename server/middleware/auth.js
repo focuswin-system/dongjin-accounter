@@ -21,6 +21,18 @@ module.exports = function authMiddleware(req, res, next) {
   if (!payload.companyId || !payload.dbName) {
     return res.status(401).json({ error: '다시 로그인해 주세요' })
   }
+  // 임시 비밀번호 계정(mustChangePw)은 비번을 바꾸기 전엔 다른 API를 못 쓴다.
+  // 프런트 게이트만으로는 localStorage를 지우면 우회되므로 서버에서도 막는다(JWT에 실린 플래그로 DB조회 없이).
+  // 허용: 내 정보 조회·로그아웃·본인 비번 변경. 그 외는 403.
+  if (payload.mustChangePw) {
+    // 전역 미들웨어라 req.path는 전체 경로(/api/auth/...). 허용: 내 정보·로그아웃·본인 비번 변경.
+    const p = req.path
+    const isPwChange = req.method === 'PUT' && /^\/api\/auth\/users\/[^/]+\/password$/.test(p)
+    const allowed = p === '/api/auth/me' || p === '/api/auth/logout' || isPwChange
+    if (!allowed) {
+      return res.status(403).json({ error: '임시 비밀번호예요. 먼저 비밀번호를 변경해주세요.', mustChangePw: true })
+    }
+  }
   req.user = payload
   next()
 }

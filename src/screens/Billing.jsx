@@ -444,31 +444,40 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
         vendor: editInvoice.vendor || "",
         contract: editInvoice.contract || "",
         supplyAmount: String(editInvoice.supplyAmount || ""),
-        vatAmount: String(editInvoice.vatAmount || ""),
+        // 세액 0(면세·영세)이 String(0||'')로 ''가 되어 자동 10%로 되살아나던 버그 → null만 빈칸.
+        vatAmount: editInvoice.vatAmount != null ? String(editInvoice.vatAmount) : "",
+        // 과세유형: 저장값이 있으면 그대로, 없으면(옛 청구서) 세액 유무로 추론
+        taxType: editInvoice.taxType || (Number(editInvoice.vatAmount) > 0 ? "과세" : "면세"),
         dueAt: editInvoice.dueAt || "",
         memo: editInvoice.memoRaw || "",
         accountId: editInvoice.accountId || accounts[0]?.id || "",
       })
     } else {
-      setForm({ kind: defaultKind, vendor: "", contract: "", supplyAmount: "", vatAmount: "", dueAt: "", memo: "", accountId: accounts[0]?.id || "" })
+      setForm({ kind: defaultKind, vendor: "", contract: "", supplyAmount: "", vatAmount: "", taxType: "과세", dueAt: "", memo: "", accountId: accounts[0]?.id || "" })
     }
   }, [open, defaultKind, editInvoice])
 
   const f = (k, v) => {
     const next = { ...form, [k]: v }
+    // 과세일 때만 공급가 변경 시 세액을 10%로 자동 채운다. 면세·영세는 세액 0을 유지한다.
     if (k === "supplyAmount") {
       const n = parseInt(v.replace(/[^0-9]/g, "")) || 0
-      next.vatAmount = String(Math.round(n * 0.1))
+      next.vatAmount = next.taxType === "과세" ? String(Math.round(n * 0.1)) : "0"
       next.supplyAmount = v
+    }
+    if (k === "taxType") {
+      const n = parseInt(String(next.supplyAmount).replace(/[^0-9]/g, "")) || 0
+      next.vatAmount = v === "과세" ? String(Math.round(n * 0.1)) : "0"
     }
     if (k === "vendor") next.contract = ""
     setForm(next)
   }
 
+  const taxable = form.taxType === "과세"
   const supply = parseInt(form.supplyAmount.replace(/[^0-9]/g, "")) || 0
-  // 면세(0) 명시 입력 존중: 빈칸이면 자동 10%, 값이 있으면(0 포함) 그대로
   const vatRaw = String(form.vatAmount).replace(/[^0-9]/g, "")
-  const vat    = vatRaw === "" ? Math.round(supply * 0.1) : parseInt(vatRaw)
+  // 과세면 빈칸일 때 자동 10%, 값 있으면 그대로. 면세·영세는 항상 0.
+  const vat    = !taxable ? 0 : (vatRaw === "" ? Math.round(supply * 0.1) : parseInt(vatRaw))
   const total  = supply + vat
 
   const vendorOptions = (form.kind === "issued"
@@ -494,6 +503,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
       vendor_id: vendorObj?.id || null,
       contract_id: contractObj?.id || null,
       supply_amount: supply, vat_amount: vat, total_amount: total,
+      tax_type: form.taxType || "과세",
       issued_at: editInvoice ? editInvoice.issuedAt : localDate(),
       due_at: form.dueAt || null,
       status: editInvoice ? editInvoice.status : (form.kind === "issued" ? "입금 예정" : "지급 예정"),
@@ -541,13 +551,22 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
               addNewLabel="직접 입력"/>
           </div>
           <div>
+            <label className="label">과세유형</label>
+            <div className="row gap-6" style={{ flexWrap: "wrap" }}>
+              {["과세", "면세", "영세"].map(t => (
+                <button key={t} type="button" className={`chip ${form.taxType === t ? "active" : ""}`} onClick={() => f("taxType", t)}>{t}</button>
+              ))}
+            </div>
+          </div>
+          <div>
             <label className="label">공급가액</label>
             <MoneyInput value={form.supplyAmount} onChange={raw => f("supplyAmount", raw)}/>
           </div>
           <div className="row gap-12">
             <div style={{ flex: 1 }}>
               <label className="label">부가세</label>
-              <MoneyInput placeholder="자동 계산" value={form.vatAmount} onChange={raw => f("vatAmount", raw)}/>
+              <MoneyInput placeholder={taxable ? "자동 계산" : "면세·영세 (0)"} value={taxable ? form.vatAmount : "0"}
+                onChange={raw => f("vatAmount", raw)} disabled={!taxable}/>
             </div>
             <div style={{ flex: 1 }}>
               <label className="label">합계</label>

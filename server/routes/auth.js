@@ -63,6 +63,8 @@ router.post('/login', async (req, res, next) => {
         username: user.username,
         name: user.name,
         role: user.role,
+        // 임시 비번이면 토큰에 플래그 → 미들웨어가 비번 변경 전까지 다른 API를 막는다(서버 강제)
+        mustChangePw: !!user.must_change_pw,
       },
       process.env.JWT_SECRET,
       { expiresIn: '8h' }
@@ -161,6 +163,15 @@ router.put('/users/:id/password', authMiddleware, async (req, res, next) => {
     audit({ companyId: req.user.companyId, userId: req.user.id, username: req.user.username,
             action: isSelf ? 'password_change' : 'password_reset', resource: 'user',
             targetId: req.params.id, ip: clientIp(req) })
+    // 본인이 임시 비번을 바꾼 경우: 기존 토큰엔 mustChangePw=true가 남아 미들웨어가 계속 막는다
+    // → mustChangePw를 뗀 새 토큰을 발급해 게이트를 즉시 푼다.
+    if (isSelf && req.user.mustChangePw) {
+      const token = jwt.sign(
+        { id: req.user.id, companyId: req.user.companyId, dbName: req.user.dbName,
+          username: req.user.username, name: req.user.name, role: req.user.role, mustChangePw: false },
+        process.env.JWT_SECRET, { expiresIn: '8h' })
+      return res.json({ ok: true, token })
+    }
     res.json({ ok: true })
   } catch (e) { next(e) }
 })

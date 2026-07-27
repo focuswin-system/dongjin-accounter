@@ -858,7 +858,7 @@ router.post('/:id/milestones', async (req, res, next) => {
   try {
     await conn.beginTransaction()
     await conn.execute('DELETE FROM milestones WHERE contract_id = ?', [req.params.id])
-    for (const m of milestones) {
+    for (const m of (Array.isArray(milestones) ? milestones : [])) {
       await conn.execute(
         'INSERT INTO milestones (id, contract_id, type, ratio, amount, due_date, status, invoice_id) VALUES (?,?,?,?,?,?,?,?)',
         [randomUUID(), req.params.id, m.type, m.ratio||0, m.amount, m.due_date||null, m.status||'예정', m.invoice_id||null]

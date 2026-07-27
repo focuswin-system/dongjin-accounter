@@ -125,10 +125,12 @@ router.post('/', async (req, res, next) => {
 
 router.put('/:id', async (req, res, next) => {
   try {
-    const { vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo } = req.body
+    const { vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type } = req.body
+    // 과세유형: 보내면 그대로, 안 보내면(옛 호출) 세액 유무로 추론(기존 값을 임의로 안 덮게)
+    const taxType = normalizeTaxType(tax_type || (Number(vat_amount) > 0 ? '과세' : '면세'))
     const [result] = await req.db.execute(
-      'UPDATE invoices SET vendor_id=?, contract_id=?, supply_amount=?, vat_amount=?, total_amount=?, issued_at=?, due_at=?, status=?, account_id=?, memo=? WHERE id=?',
-      [vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, status, account_id||null, memo||'', req.params.id]
+      'UPDATE invoices SET vendor_id=?, contract_id=?, supply_amount=?, vat_amount=?, total_amount=?, issued_at=?, due_at=?, status=?, account_id=?, memo=?, tax_type=? WHERE id=?',
+      [vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, status, account_id||null, memo||'', taxType, req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })

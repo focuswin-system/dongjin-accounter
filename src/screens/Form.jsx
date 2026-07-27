@@ -114,7 +114,6 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   // editTxn에서 직접 복원(품목명·직원명은 서버 조인으로 옴) → 늦은 로드가 입력 중 폼을 리셋하지 않게 함
   useEffect(() => {
     if (!open || !editTxn) return;
-    const supply = editTxn.amount ? Math.round(editTxn.amount / 1.1) : 0;
     setKind(editTxn.kind);
     setShowMore(!!(editTxn.evid_url || editTxn.account_code || editTxn.project_no || editTxn.site));
     setForm({
@@ -132,11 +131,12 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       method:    editTxn.method   || '계좌이체',
       date:      editTxn.date     || localToday(),
       memo:      editTxn.memo     || '',
-      // 과세유형·공급가·세액은 저장된 값이 있으면 그대로. 이 기능 이전 거래는 값이 없어 합계에서 역산한다.
-      taxType:   editTxn.tax_type || '과세',
+      // 과세유형·공급가·세액: 저장된 값이 있으면 그대로. 값이 없는 거래(급여·보험·청구서정산 등
+      // 자동생성분)를 과세로 역산하면 없던 부가세가 생겨 매입세액이 부풀었다 → 세액 없으면 면세로 본다.
+      taxType:   editTxn.tax_type || (Number(editTxn.vat_amount) > 0 ? '과세' : '면세'),
       vatDeductible: editTxn.vat_deductible !== 0,
-      supply:    editTxn.supply_amount != null ? editTxn.supply_amount : supply,
-      vat:       editTxn.vat_amount != null ? editTxn.vat_amount : (editTxn.amount || 0) - supply,
+      supply:    editTxn.supply_amount != null ? editTxn.supply_amount : (editTxn.amount || 0),
+      vat:       editTxn.vat_amount != null ? editTxn.vat_amount : 0,
       evid_url:  editTxn.evid_url  || '',
       project_no: editTxn.project_no || '',
       site:      editTxn.site || '',
@@ -229,7 +229,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       onSave?.()
       toast.push(editTxn ? "수정됐어요" : (kind === "income" ? "입금 내역이 등록됐어요" : "지출 내역이 등록됐어요"))
     } else {
-      toast.push("저장에 실패했어요. 다시 시도해주세요.")
+      // 마감된 달·계좌 누락 등 서버가 알려준 사유를 그대로 보여준다(막연한 '실패' 대신)
+      toast.push(res.error || "저장에 실패했어요. 다시 시도해주세요.")
     }
   };
 
@@ -338,6 +339,9 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                       if (it.tax_type) next.taxType = it.tax_type
                       if (unit && !f.amount) {                                // 단가는 공급가액 — 총액 = 단가 + 부가세
                         Object.assign(next, applyTax(next, unit, true))
+                      } else if (it.tax_type) {
+                        // 금액은 그대로 두되, 바뀐 과세유형으로 공급가/세액을 다시 나눈다(면세로 바꿨는데 부가세가 남지 않게)
+                        Object.assign(next, applyTax(next, next.amount, false))
                       }
                     }
                     return next
