@@ -454,16 +454,18 @@ async function initDb(conn) {
     `)
     await c.execute(`
       CREATE TABLE IF NOT EXISTS purchase_req_items (
-        id          VARCHAR(36) PRIMARY KEY,
-        req_id      VARCHAR(36) NOT NULL,
-        name        VARCHAR(255),
-        spec        VARCHAR(255),
-        unit        VARCHAR(30),
-        qty         DECIMAL(18,2) DEFAULT 0,
-        unit_price  BIGINT DEFAULT 0,
-        amount      BIGINT DEFAULT 0,
-        memo        VARCHAR(500),
-        sort_order  INT DEFAULT 0,
+        id            VARCHAR(36) PRIMARY KEY,
+        req_id        VARCHAR(36) NOT NULL,
+        name          VARCHAR(255),
+        spec          VARCHAR(255),
+        unit          VARCHAR(30),
+        qty           DECIMAL(18,2) DEFAULT 0,
+        unit_price    BIGINT DEFAULT 0,
+        amount        BIGINT DEFAULT 0,
+        actual_price  BIGINT DEFAULT 0,
+        actual_amount BIGINT DEFAULT 0,
+        memo          VARCHAR(500),
+        sort_order    INT DEFAULT 0,
         INDEX idx_purchase_req_items (req_id),
         FOREIGN KEY (req_id) REFERENCES purchase_reqs(id) ON DELETE CASCADE
       )
@@ -878,6 +880,9 @@ async function initDb(conn) {
     await ensureColumn('settlements', 'trip_area',   "trip_area VARCHAR(200)")
     await ensureColumn('settlements', 'trip_period', "trip_period VARCHAR(200)")
     await ensureColumn('settlements', 'purpose',     "purpose VARCHAR(200)")
+    // 구매품의서 품목: 실적가(단가·금액) — 공급업체 견적가와 별도로 과거 실적 단가를 나란히 보여준다.
+    await ensureColumn('purchase_req_items', 'actual_price',  "actual_price BIGINT DEFAULT 0")
+    await ensureColumn('purchase_req_items', 'actual_amount', "actual_amount BIGINT DEFAULT 0")
     // ── 계약 모델: 독립된 두 축 ──
     // billing_mode : onetime(총액을 마일스톤으로 나눠 청구) / recurring(주기마다 정액 청구)
     // term_mode    : fixed(종료일에 만료 — 재계약해야 이어짐) / auto_renew(해지 통보 없으면 자동 연장) / open(무기한 — 해지 시까지)

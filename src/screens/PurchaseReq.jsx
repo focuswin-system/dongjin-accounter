@@ -5,7 +5,8 @@ import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 
 const numOf = (v) => (typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, ''), 10) || 0 : Number(v) || 0)
-const emptyItem = () => ({ name: '', spec: '', unit: '', qty: '', unit_price: '', amount: '', memo: '' })
+const ROWS = 15
+const emptyItem = () => ({ name: '', unit: '', qty: '', unit_price: '', amount: '', actual_price: '', actual_amount: '', memo: '' })
 
 const CellIn = ({ value, onChange, right, placeholder }) => (
   <input className={`settle-cellin ${right ? 'num' : ''}`} value={value ?? ''} placeholder={placeholder}
@@ -31,8 +32,9 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
       order_amount: doc.order_amount ? String(doc.order_amount) : '', pay_terms: doc.pay_terms || '', man_hours: doc.man_hours || '',
       note: doc.note || '',
       items: (doc.items && doc.items.length ? doc.items : []).map(it => ({
-        name: it.name || '', spec: it.spec || '', unit: it.unit || '',
-        qty: it.qty ? String(it.qty) : '', unit_price: it.unit_price ? String(it.unit_price) : '', amount: it.amount ? String(it.amount) : '', memo: it.memo || '',
+        name: it.name || '', unit: it.unit || '', qty: it.qty ? String(it.qty) : '',
+        unit_price: it.unit_price ? String(it.unit_price) : '', amount: it.amount ? String(it.amount) : '',
+        actual_price: it.actual_price ? String(it.actual_price) : '', actual_amount: it.actual_amount ? String(it.actual_amount) : '', memo: it.memo || '',
       })),
       approval: (doc.approval && doc.approval.length) ? doc.approval : [],
     })
@@ -43,35 +45,36 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
     const items = [...f.items]
     if (i === items.length) items.push(emptyItem())
     const it = { ...items[i], [field]: v }
-    if (field === 'qty' || field === 'unit_price') it.amount = String(numOf(field === 'qty' ? v : it.qty) * numOf(field === 'unit_price' ? v : it.unit_price))
+    const qty = numOf(field === 'qty' ? v : it.qty)
+    it.amount = String(qty * numOf(field === 'unit_price' ? v : it.unit_price))
+    it.actual_amount = String(qty * numOf(field === 'actual_price' ? v : it.actual_price))
     items[i] = it
     return { ...f, items }
   })
 
   const viewItems = edit ? form.items : (doc?.items || [])
-  const total = (edit ? form.items : (doc?.items || [])).reduce((s, it) => s + numOf(it.amount), 0)
+  const total = viewItems.reduce((s, it) => s + numOf(it.amount), 0)          // 품의금액 = 견적 금액 합
   const ceo = company?.ceo || '대표이사'
-  const defApproval = [{ label: '담당' }, { label: '부장' }, { label: '이사' }, { label: '대표이사', position: ceo }]
+  const defApproval = [{ label: '담당' }, { label: '부장' }, { label: '이사' }, { label: '대표이사' }, { label: '대표이사', position: ceo }]
   const approval = edit ? (form.approval && form.approval.length ? form.approval : defApproval) : (doc?.approval && doc.approval.length ? doc.approval : defApproval)
   const applyPreset = (p) => setForm(f => ({ ...f, approval: (p.steps || []).map(s => ({ label: s.label, position: s.position || '', name: '' })) }))
-  const itemRows = edit ? [...viewItems, emptyItem()] : viewItems   // 편집 시 맨 끝 ghost 행
-  const minRows = 6
-  const padRows = Math.max(0, minRows - itemRows.length)
+  const itemRows = edit ? [...viewItems, emptyItem()] : viewItems
+  const padRows = Math.max(0, ROWS - itemRows.length)
+  const vendorLabel = form.vendor_name || '견적가'
 
   const save = async () => {
     const items = form.items.filter(it => (it.name || '').trim() || numOf(it.amount) || numOf(it.qty))
-      .map(it => ({ name: (it.name || '').trim(), spec: (it.spec || '').trim(), unit: (it.unit || '').trim(),
-        qty: numOf(it.qty), unit_price: numOf(it.unit_price), amount: numOf(it.amount) || numOf(it.qty) * numOf(it.unit_price), memo: (it.memo || '').trim() }))
+      .map(it => ({ name: (it.name || '').trim(), unit: (it.unit || '').trim(), qty: numOf(it.qty),
+        unit_price: numOf(it.unit_price), amount: numOf(it.amount) || numOf(it.qty) * numOf(it.unit_price),
+        actual_price: numOf(it.actual_price), actual_amount: numOf(it.actual_amount) || numOf(it.qty) * numOf(it.actual_price), memo: (it.memo || '').trim() }))
     if (!items.length) return toast.push('품목을 하나 이상 입력해주세요')
-    const chosen = presets.find(p => p.is_default) || presets[0]
     const vendorObj = vendors.find(v => v.name === form.vendor_name.trim())
     const payload = {
       req_date: form.req_date || null, vendor_id: vendorObj?.id || null, vendor_name: form.vendor_name.trim(),
       order_source: form.order_source.trim(), ship_no: form.ship_no.trim(), summary: form.summary.trim(),
       arrival_date: form.arrival_date || null, order_amount: numOf(form.order_amount),
       pay_terms: form.pay_terms.trim(), man_hours: form.man_hours.trim(), note: form.note.trim(), items,
-      approval: (form.approval && form.approval.length) ? form.approval
-        : (chosen ? chosen.steps.map(s => ({ label: s.label, position: s.position || '', name: '' })) : undefined),
+      approval,   // 화면에 보이는 결재선(form.approval 없으면 defApproval)을 그대로 저장 — WYSIWYG
     }
     const res = isNew ? await api.createPurchaseReq(payload) : await api.updatePurchaseReq(doc.id, payload)
     if (!res.ok) return toast.push(res.error || '저장에 실패했어요')
@@ -86,7 +89,7 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
     if (!res.ok) return toast.push(res.error || '삭제에 실패했어요')
     toast.push('삭제됐어요'); onDeleted()
   }
-  const cell = (v) => (v || v === 0 ? v : '')
+  const amt = (n) => (n ? fmtNum(n) : '')
 
   return (
     <>
@@ -110,69 +113,86 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
         <div className="doc-paper resolution-paper resolution-print" id="resolution-print">
           <div className="res-title-ko">구매품의서</div>
           <div className="res-title">購 買 稟 議 書</div>
-          <div className="res-date num">{form.req_date || ''}</div>
+          <div className="pr-date num">품의일자 {edit ? <input className="settle-cellin" style={{ width: 110, display: 'inline-block' }} value={form.req_date} onChange={e => setH('req_date', e.target.value)} placeholder="YYYY-MM-DD"/> : form.req_date}</div>
 
-          <table className="res-table res-head">
+          {/* 헤더 — 가로 표(라벨행 + 값행), 품의금액은 금번/누계 */}
+          <table className="res-table pr-head">
+            <thead>
+              <tr>
+                <th rowSpan={2}>구매품의NO</th><th rowSpan={2}>수주처</th><th rowSpan={2}>호선NO</th>
+                <th rowSpan={2}>품명</th><th rowSpan={2}>입하일자</th><th rowSpan={2}>수주금액</th>
+                <th colSpan={2}>품의금액</th>
+                <th rowSpan={2}>지불조건</th><th rowSpan={2}>소요M/H</th><th rowSpan={2}>담당자</th>
+              </tr>
+              <tr><th>금번</th><th>누계</th></tr>
+            </thead>
             <tbody>
               <tr>
-                <th>구매품의NO</th><td className="num">{isNew ? '(자동)' : doc.doc_no}</td>
-                <th>품의일자</th><td>{edit ? <CellIn value={form.req_date} onChange={v => setH('req_date', v)} placeholder="YYYY-MM-DD"/> : form.req_date}</td>
-                <th>담당자</th><td>{doc?.applicant || ''}</td>
-              </tr>
-              <tr>
-                <th>공급업체</th>
-                <td>{edit
-                  ? <Combobox value={form.vendor_name} onChange={v => setH('vendor_name', v)}
-                      options={vendors.map(v => ({ value: v.name, label: v.name, sub: v.type || '' }))}
-                      placeholder="공급업체 선택 또는 추가"
-                      onAddNew={async (q) => { const name = await onVendorAdd(q); if (name) setH('vendor_name', name) }} addNewLabel="거래처로 추가"/>
-                  : form.vendor_name}</td>
-                <th>수주처</th><td>{edit ? <CellIn value={form.order_source} onChange={v => setH('order_source', v)} placeholder="예: 현대·한화·공용"/> : form.order_source}</td>
-                <th>호선/작지</th><td>{edit ? <CellIn value={form.ship_no} onChange={v => setH('ship_no', v)}/> : form.ship_no}</td>
-              </tr>
-              <tr>
-                <th>품명</th><td>{edit ? <CellIn value={form.summary} onChange={v => setH('summary', v)} placeholder="예: 사무실"/> : form.summary}</td>
-                <th>입하일자</th><td>{edit ? <CellIn value={form.arrival_date} onChange={v => setH('arrival_date', v)} placeholder="YYYY-MM-DD"/> : form.arrival_date}</td>
-                <th>지불조건</th><td>{edit ? <CellIn value={form.pay_terms} onChange={v => setH('pay_terms', v)} placeholder="예: 정기"/> : form.pay_terms}</td>
-              </tr>
-              <tr>
-                <th>수주금액</th><td className="num">{edit ? <CellIn value={form.order_amount} onChange={v => setH('order_amount', v)} right/> : (form.order_amount ? fmtNum(numOf(form.order_amount)) : '')}</td>
-                <th>품의금액</th><td className="num fw-700">{fmtNum(total)}</td>
-                <th>소요M/H</th><td>{edit ? <CellIn value={form.man_hours} onChange={v => setH('man_hours', v)}/> : form.man_hours}</td>
+                <td className="num">{isNew ? '(자동)' : doc.doc_no}</td>
+                <td>{edit ? <CellIn value={form.order_source} onChange={v => setH('order_source', v)}/> : form.order_source}</td>
+                <td>{edit ? <CellIn value={form.ship_no} onChange={v => setH('ship_no', v)}/> : form.ship_no}</td>
+                <td>{edit ? <CellIn value={form.summary} onChange={v => setH('summary', v)}/> : form.summary}</td>
+                <td>{edit ? <CellIn value={form.arrival_date} onChange={v => setH('arrival_date', v)} placeholder="YYYY-MM-DD"/> : form.arrival_date}</td>
+                <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={form.order_amount} onChange={v => setH('order_amount', v)} right/> : (form.order_amount ? fmtNum(numOf(form.order_amount)) : '')}</td>
+                <td className="num fw-700" style={{ textAlign: 'right' }}>{amt(total)}</td>
+                <td className="num" style={{ textAlign: 'right' }}>{amt(total)}</td>
+                <td>{edit ? <CellIn value={form.pay_terms} onChange={v => setH('pay_terms', v)}/> : form.pay_terms}</td>
+                <td>{edit ? <CellIn value={form.man_hours} onChange={v => setH('man_hours', v)}/> : form.man_hours}</td>
+                <td>{doc?.applicant || ''}</td>
               </tr>
             </tbody>
           </table>
 
           <div className="res-note-line">아래 내역과 같이 購買코자 하오니 稟議하오며 決裁하여 주시기 바랍니다.</div>
 
-          <table className="res-table res-items">
+          {/* 품목 — 이중 단가(공급업체 견적 / 실적가) */}
+          <table className="res-table res-items pr-items">
             <thead>
               <tr>
-                <th style={{ width: 34 }}>NO</th><th>품명 및 규격</th><th style={{ width: 48 }}>단위</th>
-                <th style={{ width: 60 }}>수량</th><th style={{ width: 100 }}>단가</th><th style={{ width: 110 }}>금액</th><th style={{ width: 90 }}>비고</th>
+                <th rowSpan={2} style={{ width: 30 }}>NO</th>
+                <th rowSpan={2}>품명 및 규격</th>
+                <th rowSpan={2} style={{ width: 40 }}>단위</th>
+                <th rowSpan={2} style={{ width: 52 }}>수량</th>
+                <th colSpan={2}>{edit
+                  ? <Combobox value={form.vendor_name} onChange={v => setH('vendor_name', v)}
+                      options={vendors.map(v => ({ value: v.name, label: v.name, sub: v.type || '' }))}
+                      placeholder="공급업체(견적처) 선택·추가"
+                      onAddNew={async (q) => { const name = await onVendorAdd(q); if (name) setH('vendor_name', name) }} addNewLabel="거래처로 추가"/>
+                  : vendorLabel}</th>
+                <th colSpan={2}>실적가</th>
+                <th rowSpan={2} style={{ width: 64 }}>비고</th>
+              </tr>
+              <tr>
+                <th style={{ width: 78 }}>단가</th><th style={{ width: 92 }}>금액</th>
+                <th style={{ width: 78 }}>단가</th><th style={{ width: 92 }}>금액</th>
               </tr>
             </thead>
             <tbody>
               {itemRows.map((it, i) => {
                 const isGhost = edit && i === viewItems.length
+                const has = it && (it.name || numOf(it.amount) || numOf(it.qty))
                 return (
                   <tr key={i}>
-                    <td className="num" style={{ textAlign: 'center' }}>{it && (it.name || numOf(it.amount)) ? i + 1 : (edit ? '' : '')}</td>
-                    <td>{edit ? <CellIn value={it?.name} onChange={v => setItem(i, 'name', v)} placeholder={isGhost ? '+ 품목' : ''}/> : cell(it.spec ? `${it.name} · ${it.spec}` : it.name)}</td>
-                    <td style={{ textAlign: 'center' }}>{edit ? <CellIn value={it?.unit} onChange={v => setItem(i, 'unit', v)}/> : cell(it.unit)}</td>
-                    <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={it?.qty} onChange={v => setItem(i, 'qty', v)} right/> : (it.qty ? fmtNum(it.qty) : '')}</td>
-                    <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={it?.unit_price} onChange={v => setItem(i, 'unit_price', v)} right/> : (it.unit_price ? fmtNum(it.unit_price) : '')}</td>
-                    <td className="num fw-600" style={{ textAlign: 'right' }}>{(it && numOf(it.amount)) ? fmtNum(numOf(it.amount)) : ''}</td>
-                    <td>{edit ? <CellIn value={it?.memo} onChange={v => setItem(i, 'memo', v)}/> : cell(it.memo)}</td>
+                    <td className="num" style={{ textAlign: 'center' }}>{has ? i + 1 : ''}</td>
+                    <td>{edit ? <CellIn value={it?.name} onChange={v => setItem(i, 'name', v)} placeholder={isGhost ? '+ 품목' : ''}/> : (it?.name || '')}</td>
+                    <td style={{ textAlign: 'center' }}>{edit ? <CellIn value={it?.unit} onChange={v => setItem(i, 'unit', v)}/> : (it?.unit || '')}</td>
+                    <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={it?.qty} onChange={v => setItem(i, 'qty', v)} right/> : (it?.qty ? fmtNum(it.qty) : '')}</td>
+                    <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={it?.unit_price} onChange={v => setItem(i, 'unit_price', v)} right/> : (it?.unit_price ? fmtNum(it.unit_price) : '')}</td>
+                    <td className="num fw-600" style={{ textAlign: 'right' }}>{it && numOf(it.amount) ? fmtNum(numOf(it.amount)) : ''}</td>
+                    <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={it?.actual_price} onChange={v => setItem(i, 'actual_price', v)} right/> : (it?.actual_price ? fmtNum(it.actual_price) : '')}</td>
+                    <td className="num" style={{ textAlign: 'right' }}>{it && numOf(it.actual_amount) ? fmtNum(numOf(it.actual_amount)) : ''}</td>
+                    <td>{edit ? <CellIn value={it?.memo} onChange={v => setItem(i, 'memo', v)}/> : (it?.memo || '')}</td>
                   </tr>
                 )
               })}
               {Array.from({ length: padRows }).map((_, i) => (
-                <tr key={`e${i}`}><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+                <tr key={`e${i}`}><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
               ))}
               <tr className="res-total">
                 <th colSpan={5} style={{ textAlign: 'center' }}>합　계</th>
                 <td className="num fw-700" style={{ textAlign: 'right' }}>{fmtNum(total)}</td>
+                <td></td>
+                <td className="num fw-700" style={{ textAlign: 'right' }}>{fmtNum(viewItems.reduce((s, it) => s + numOf(it.actual_amount), 0))}</td>
                 <td></td>
               </tr>
             </tbody>
@@ -246,7 +266,7 @@ export const PurchaseReqScreen = () => {
             : list.map(d => (
               <DocListRow key={d.id} active={!creating && selId === d.id} onClick={() => { setCreating(false); setSelId(d.id) }}
                 docNo={d.doc_no} right={<span className="text-xs text-muted2">{d.req_date || ''}</span>}
-                title={d.vendor_name || '—'} meta={d.summary || d.order_source || ''} amount={d.total || 0}/>
+                title={d.vendor_name || d.summary || '—'} meta={d.order_source || ''} amount={d.total || 0}/>
             ))}
         </DocSide>
         <DocMain>

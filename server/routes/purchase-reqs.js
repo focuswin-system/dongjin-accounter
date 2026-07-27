@@ -14,7 +14,8 @@ const defaultApproval = async (execFn) => {
   return [{ label: '담당', position: '' }, { label: '부장', position: '' }, { label: '이사', position: '' }, { label: '대표이사', position: '' }]
 }
 
-const adaptItem = (it) => ({ ...it, qty: Number(it.qty) || 0, unit_price: Number(it.unit_price) || 0, amount: Number(it.amount) || 0 })
+const adaptItem = (it) => ({ ...it, qty: Number(it.qty) || 0, unit_price: Number(it.unit_price) || 0, amount: Number(it.amount) || 0,
+  actual_price: Number(it.actual_price) || 0, actual_amount: Number(it.actual_amount) || 0 })
 const adapt = (r, items) => {
   const its = (items || []).map(adaptItem)
   const total = its.reduce((s, it) => s + it.amount, 0)
@@ -44,11 +45,12 @@ const insertItems = async (conn, reqId, items) => {
   const list = Array.isArray(items) ? items.filter(it => (it.name && it.name.trim()) || Number(it.amount) || Number(it.qty)) : []
   let i = 0
   for (const it of list) {
-    const qty = Number(it.qty) || 0, price = Number(it.unit_price) || 0
+    const qty = Number(it.qty) || 0, price = Number(it.unit_price) || 0, aprice = Number(it.actual_price) || 0
     const amount = Number(it.amount) || qty * price
+    const aamount = Number(it.actual_amount) || qty * aprice
     await conn.execute(
-      'INSERT INTO purchase_req_items (id, req_id, name, spec, unit, qty, unit_price, amount, memo, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)',
-      [randomUUID(), reqId, it.name || '', it.spec || '', it.unit || '', qty, price, amount, it.memo || '', i++])
+      'INSERT INTO purchase_req_items (id, req_id, name, spec, unit, qty, unit_price, amount, actual_price, actual_amount, memo, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      [randomUUID(), reqId, it.name || '', it.spec || '', it.unit || '', qty, price, amount, aprice, aamount, it.memo || '', i++])
   }
 }
 
