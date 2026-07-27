@@ -98,7 +98,9 @@ try {
   while ((m = re.exec(navSrc))) navIds.add(m[1])
   // 도메인·포털 카테고리 컨테이너 id는 '화면'이 아니라 묶음이라 권한 자원이 아니다.
   // (route를 가진 hr·report·mgmt_dash는 실제 화면이므로 제외하지 않는다)
-  const CONTAINERS = ['acct', 'hr_dom', 'mgmt', 'acct_process', 'acct_tax', 'master', 'hr_labor', 'hr_base']
+  const CONTAINERS = ['acct', 'hr_dom', 'mgmt',
+    'acct_sales', 'acct_purchase', 'acct_expense', 'acct_approval', 'acct_ledger', 'acct_tax', 'master',
+    'hr_labor', 'hr_base']
   for (const d of CONTAINERS) navIds.delete(d)
 
   // settings_<tab>(회사정보·사용자·결재선·월마감)은 단일 자원 'settings'가 통째로 관장한다

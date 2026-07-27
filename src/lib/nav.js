@@ -125,13 +125,21 @@ export const LEAF_BY_ID = Object.fromEntries(ALL_LEAVES.map(l => [l.id, l]))
 export const PORTAL = [
   {
     id: 'acct', label: '일반회계', icon: Icon.Book,
+    // 홈은 이 카테고리들이 '깔끔한 카드' 한 벌로 보인다(하위메뉴 나열 X). 각 카드를 누르면
+    // 그 영역 포털(또는 단일 화면)로 들어간다. 늘어난 업무(경비·지출승인·장부)를 각 카드로 세운다.
     categories: [
-      { id: 'acct_process', label: '회계처리', icon: Icon.Wallet, desc: '판매·매입·경비 거래 처리', todos: true, expandGroups: true, groups: [
-        { label: '판매·매출', items: ['contract_sales', 'billing_issued', 'recurring_invoice', 'ar'] },
-        { label: '매입',     items: ['contract_purchase', 'billing_received', 'recurring_expense', 'ap'] },
-        { label: '경비',     items: ['misc_pl', 'misc_income'] },
-        { label: '지출 승인', items: ['doc'] },
-        { label: '장부',     items: ['ledger', 'contract'] },   // '증빙 관리'는 목업이라 숨김(추후 실구현 예정)
+      { id: 'acct_sales', label: '판매·매출', icon: Icon.Recv, desc: '매출 계약·청구·수금', groups: [
+        { label: '', items: ['contract_sales', 'billing_issued', 'recurring_invoice', 'ar'] },
+      ]},
+      { id: 'acct_purchase', label: '매입', icon: Icon.Pay, desc: '매입 계약·청구·지급', groups: [
+        { label: '', items: ['contract_purchase', 'billing_received', 'recurring_expense', 'ap'] },
+      ]},
+      { id: 'acct_expense', label: '경비', icon: Icon.Wallet, desc: '일반 경비·잡손익', groups: [
+        { label: '', items: ['misc_pl', 'misc_income'] },
+      ]},
+      { id: 'acct_approval', label: '지출 승인', icon: Icon.Sign, desc: '지급결의서 작성·결재', route: 'doc' },
+      { id: 'acct_ledger', label: '장부', icon: Icon.Book, desc: '거래내역·계약 조회', groups: [
+        { label: '', items: ['ledger', 'contract'] },   // '증빙 관리'는 목업이라 숨김(추후 실구현 예정)
       ]},
       { id: 'acct_tax', label: '세무관리', icon: Icon.Doc, desc: '부가세·기타세액 신고', groups: [
         { label: '', items: ['tax_vat', 'tax_etc'] },
@@ -178,7 +186,10 @@ PORTAL_CAT_BY_ID['settings'] = {
 }
 
 // 포털 카테고리 라우트도 소속 도메인으로 매핑(사이드바 도메인 자동 펼침)
-DOMAIN_OF['acct_process'] = 'acct'
+DOMAIN_OF['acct_sales'] = 'acct'
+DOMAIN_OF['acct_purchase'] = 'acct'
+DOMAIN_OF['acct_expense'] = 'acct'
+DOMAIN_OF['acct_ledger'] = 'acct'
 DOMAIN_OF['acct_tax'] = 'acct'
 DOMAIN_OF['master'] = 'acct'   // 기준정보 포털 카테고리(groups) — 사이드바 도메인 자동 펼침
 DOMAIN_OF['hr_labor'] = 'hr_dom'

@@ -20,14 +20,6 @@ const TODO_KIND_META = {
 
 const DEFAULT_FAVS = ['income', 'expense', 'billing_issued', 'contract', 'tax_vat']
 
-// 도메인 → 홈 타일 목록. expandGroups 카테고리(회계처리)는 각 섹션(판매·매출·매입…)을 개별 타일로 펼치고,
-// route형 카테고리(인사관리·보고서 등)는 바로가기 타일, 그 외(세무·기준정보)는 하위메뉴를 묶은 링크 타일.
-const sectionTiles = (domain) => domain.categories.flatMap(cat => {
-  if (cat.route) return [{ key: cat.id, label: cat.label, desc: cat.desc, route: cat.route, Ic: cat.icon, items: [] }]
-  if (cat.expandGroups) return cat.groups.map((g, i) => ({ key: `${cat.id}-${i}`, label: g.label, items: g.items }))
-  return [{ key: cat.id, label: cat.label, items: (cat.groups || []).flatMap(g => g.items) }]
-})
-
 export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
   const [todos, setTodos] = useState([])
   const [favorites, setFavorites] = useState(() => {
@@ -149,7 +141,7 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
         </div>
       </div>
 
-      {/* 도메인 라인 → 섹션 타일(사이드바 구조 그대로 홈에 펼침) */}
+      {/* 도메인 라인 → 통일된 카테고리 카드(하위메뉴 나열 없이 깔끔하게, 클릭 시 해당 영역으로) */}
       {PORTAL.map(domain => {
         const Dic = domain.icon
         return (
@@ -158,34 +150,18 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
               <div className="d-ico"><Dic size={15}/></div>
               <div className="d-label">{domain.label}</div>
             </div>
-            <div className="sec-tile-grid">
-              {sectionTiles(domain).map(tile => (
-                tile.items.length ? (
-                  <div key={tile.key} className="sec-tile">
-                    <div className="sec-tile-title">{tile.label}</div>
-                    <div className="sec-tile-links">
-                      {tile.items.map(id => {
-                        const l = LEAF_BY_ID[id]
-                        if (!l) return null
-                        const Ic = l.icon
-                        return (
-                          <button key={id} type="button" className="sec-link" onClick={() => go(id)}>
-                            <Ic size={13} style={{ opacity: 0.7, flexShrink: 0 }}/>
-                            <span>{l.label}</span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                ) : (
-                  <button key={tile.key} className="cat-tile" onClick={() => go(tile.route)}>
-                    <div className="c-ico"><tile.Ic size={20}/></div>
-                    <div className="c-label">{tile.label}</div>
-                    {tile.desc && <div className="c-desc">{tile.desc}</div>}
+            <div className="tile-row">
+              {domain.categories.map(cat => {
+                const Cic = cat.icon
+                return (
+                  <button key={cat.id} className="cat-tile" onClick={() => go(cat.route || cat.id)}>
+                    <div className="c-ico"><Cic size={20}/></div>
+                    <div className="c-label">{cat.label}</div>
+                    {cat.desc && <div className="c-desc">{cat.desc}</div>}
                     <div className="c-go">바로가기 <Icon.Right size={11}/></div>
                   </button>
                 )
-              ))}
+              })}
             </div>
           </div>
         )
