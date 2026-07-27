@@ -67,21 +67,25 @@ export const PERIOD_PRESETS = [
   { id: "custom",  label: "직접 입력" },
 ];
 
+// 해당 연·월(1-indexed month)의 말일. '-31' 하드코딩은 2월·30일달·2·3분기에
+// 2026-02-31 같은 없는 날짜를 만들어 <input type=date>가 값을 거부하고 빈칸이 됐다.
+const lastDay = (y, m1) => new Date(y, m1, 0).getDate();
+const ymd = (y, m1, day) => `${y}-${String(m1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+
 export const periodToRange = (id) => {
   if (!id || id === "all") return null;
   const d = new Date(), y = d.getFullYear(), m = d.getMonth(); // m: 0-indexed
   if (id === "month") {
-    const ms = String(m + 1).padStart(2, "0");
-    return { from: `${y}-${ms}-01`, to: `${y}-${ms}-31` };
+    const m1 = m + 1;
+    return { from: ymd(y, m1, 1), to: ymd(y, m1, lastDay(y, m1)) };
   }
   if (id === "last") {
     const lm = m === 0 ? 12 : m, ly = m === 0 ? y - 1 : y;
-    const ls = String(lm).padStart(2, "0");
-    return { from: `${ly}-${ls}-01`, to: `${ly}-${ls}-31` };
+    return { from: ymd(ly, lm, 1), to: ymd(ly, lm, lastDay(ly, lm)) };
   }
   if (id === "quarter") {
     const qs = Math.floor(m / 3) * 3 + 1, qe = qs + 2;
-    return { from: `${y}-${String(qs).padStart(2,"0")}-01`, to: `${y}-${String(qe).padStart(2,"0")}-31` };
+    return { from: ymd(y, qs, 1), to: ymd(y, qe, lastDay(y, qe)) };
   }
   if (id === "year") return { from: `${y}-01-01`, to: `${y}-12-31` };
   return null;

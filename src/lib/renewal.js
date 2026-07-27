@@ -111,8 +111,10 @@ export const nextEndDate = (c) => {
 export const recurringMismatch = (c, rec) => {
   if (!c || !rec || !isRecurring(c)) return [];
   const out = [];
-  if (Number(rec.supply_amount) !== Number(c.unit_amount || 0)) {
-    out.push(`청구금액 ${Number(rec.supply_amount).toLocaleString()}원 ≠ 계약 ${Number(c.unit_amount || 0).toLocaleString()}원`);
+  // supply_amount가 없으면 Number(undefined)=NaN이라 항상 불일치로 잡히고 'NaN원'이 노출된다 → 0으로 방어
+  const recSupply = Number(rec.supply_amount) || 0;
+  if (recSupply !== Number(c.unit_amount || 0)) {
+    out.push(`청구금액 ${recSupply.toLocaleString()}원 ≠ 계약 ${Number(c.unit_amount || 0).toLocaleString()}원`);
   }
   if (rec.period !== c.billing_period) {
     out.push(`청구주기 ${periodLabel(rec.period)} ≠ 계약 ${periodLabel(c.billing_period)}`);

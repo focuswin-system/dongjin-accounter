@@ -872,7 +872,7 @@ export const api = {
     try { await req(`/tax/others/${id}`, { method: 'PUT', body: data }); return { ok: true } } catch (e) { return { ok: false, error: e.message } }
   },
   async deleteOtherTax(id) {
-    try { await req(`/tax/others/${id}`, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }
+    try { await req(`/tax/others/${id}`, { method: 'DELETE' }); return { ok: true } } catch (e) { return { ok: false, error: e.message } }
   },
 
   // ─── 임직원 ───────────────────────────────────────────────────

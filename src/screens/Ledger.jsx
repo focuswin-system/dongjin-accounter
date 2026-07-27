@@ -358,13 +358,13 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
             {txn.kind === "income" && ["입금 예정", "일부 입금", "장기 미수"].includes(txn.status) && (
               <button className="btn primary" onClick={async () => {
                 const ok = await confirm({ tone: "brand", icon: <Icon.In size={22}/>, title: "입금 처리", body: `${fmtNum(txn.amount)}원을 입금 완료로 처리합니다.`, confirmLabel: "입금 처리" });
-                if (ok) { const res = await api.updateTransactionStatus(txn.id, "입금완료"); if (res.ok) { toast.push("입금이 처리됐어요"); onClose(); onAction?.(); } }
+                if (ok) { const res = await api.updateTransactionStatus(txn.id, "입금완료"); if (res.ok) { toast.push("입금이 처리됐어요"); onClose(); onAction?.(); } else toast.push(res.error || "처리에 실패했어요", { tone: "warn" }); }
               }}><Icon.Check size={14}/> 입금 처리</button>
             )}
             {txn.kind === "expense" && ["지급 예정", "지급 대기", "기한 지남"].includes(txn.status) && (
               <button className="btn primary" onClick={async () => {
                 const ok = await confirm({ tone: "neg", icon: <Icon.Bank size={22}/>, title: "이체 실행", body: `${fmtNum(txn.amount)}원을 지급완료로 처리합니다.`, confirmLabel: "이체 실행" });
-                if (ok) { const res = await api.updateTransactionStatus(txn.id, "지급완료"); if (res.ok) { toast.push("이체가 완료됐어요"); onClose(); onAction?.(); } }
+                if (ok) { const res = await api.updateTransactionStatus(txn.id, "지급완료"); if (res.ok) { toast.push("이체가 완료됐어요"); onClose(); onAction?.(); } else toast.push(res.error || "처리에 실패했어요", { tone: "warn" }); }
               }}><Icon.Bank size={14}/> 이체 실행</button>
             )}
           </div>

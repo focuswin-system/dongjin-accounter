@@ -254,7 +254,11 @@ function AppInner({ onLogout, user }) {
   useEffect(() => {
     const apply = () => {
       const h = window.location.hash.replace("#", "");
-      if (h && CRUMB_MAP[h]) setRoute(h);
+      // 알려진 라우트면 반영한다. CRUMB_MAP에만 의존하면 기준정보·인사기준·환경설정 하위탭
+      // (master_/hrbase_/settings_)과 포털 카테고리가 빠져, 새로고침·뒤로가기 시 홈으로 튕겼다.
+      const known = CRUMB_MAP[h] || LEAF_BY_ID[h] || PORTAL_CAT_BY_ID[h]
+        || /^(master_|hrbase_|settings_)/.test(h);
+      if (h && known) setRoute(h);
     };
     apply();
     window.addEventListener("hashchange", apply);

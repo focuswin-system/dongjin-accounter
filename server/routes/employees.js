@@ -42,8 +42,15 @@ router.put('/:id', async (req, res, next) => {
             position_allowance, meal_allowance, vehicle_allowance, dependents, child_dependents,
             person_kind, leave_date, salary_account } = req.body
     // 상태를 단일 소스로: status가 오면 그걸 저장하고 active를 파생(퇴사만 비활성).
-    // (하위호환: status 없이 active만 오던 옛 호출은 active로 상태를 역산.)
+    // ⚠ 상태·재직 정보를 아예 안 보낸 부분 업데이트(근로계약 편집 등)는 기존 상태를 유지한다.
+    //   예전엔 미전송 시 '재직'으로 강제해, 퇴사자의 계약을 편집하면 직원이 조용히 부활했다.
+    const hasStatusInput = status !== undefined || active !== undefined
     const st = status != null ? status : (active === false ? '퇴사' : '재직')
+    const stCol     = hasStatusInput ? st : null                       // null → COALESCE로 기존 유지
+    const activeCol = hasStatusInput ? (st === '퇴사' ? 0 : 1) : null   // null → 기존 유지
+    // leave_date: 상태를 바꿀 때만 세팅(퇴사=날짜, 재직=비움). 미전송이면 기존 유지.
+    const leaveGuard = hasStatusInput ? 1 : null
+    const leaveVal   = hasStatusInput ? (st === '퇴사' ? (leave_date || null) : null) : null
     // ⚠ 부분 업데이트 보존: WorkContract 등은 name·status 등 일부만 보낸다. 그때 급여·수당·부양가족을
     //   기본값(0/1)으로 덮어쓰면 직원의 급여정보가 조용히 사라진다 → 모든 선택 필드를 COALESCE로 보존.
     //   보낸 필드만 갱신, 안 보낸(undefined) 필드는 유지. 값을 지우려면 명시적으로 빈값/0을 보내야 한다.
@@ -52,16 +59,17 @@ router.put('/:id', async (req, res, next) => {
     const keepNum = (v) => (v === undefined ? null : (parseInt(String(v).replace(/[^0-9-]/g, ''), 10) || 0))
     const [result] = await req.db.execute(
       `UPDATE employees SET
-         name=?, status=?, active=?,
+         name=?,
+         status=COALESCE(?, status), active=COALESCE(?, active),
          role=COALESCE(?, role), department=COALESCE(?, department),
          base_salary=COALESCE(?, base_salary), join_date=COALESCE(?, join_date), birth_date=COALESCE(?, birth_date),
          position_allowance=COALESCE(?, position_allowance), meal_allowance=COALESCE(?, meal_allowance),
          vehicle_allowance=COALESCE(?, vehicle_allowance), dependents=COALESCE(?, dependents),
          child_dependents=COALESCE(?, child_dependents),
          person_kind=COALESCE(?, person_kind), salary_account=COALESCE(?, salary_account),
-         leave_date=?
+         leave_date=CASE WHEN ? IS NULL THEN leave_date ELSE ? END
        WHERE id=?`,
-      [name, st, st === '퇴사' ? 0 : 1,
+      [name, stCol, activeCol,
        keep(role), keep(department),
        keepNum(base_salary), keep(join_date), keep(birth_date),
        keepNum(position_allowance), keepNum(meal_allowance),
@@ -69,8 +77,7 @@ router.put('/:id', async (req, res, next) => {
        keepNum(child_dependents),
        person_kind === 'worker' ? 'worker' : (person_kind === 'employee' ? 'employee' : null),
        salary_account === undefined ? null : (salary_account || ''),
-       // 퇴사 처리 시에만 leave_date 세팅, 재직 복귀 시 비운다(상태에서 파생이라 COALESCE 안 함)
-       st === '퇴사' ? (leave_date || null) : null, req.params.id]
+       leaveGuard, leaveVal, req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })

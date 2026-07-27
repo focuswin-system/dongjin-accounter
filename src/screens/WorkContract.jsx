@@ -317,9 +317,10 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
     else if (info.employeeId) body.employee_id = info.employeeId
     else body.employee = { name: form.name, department: form.department, role: form.role, birth_date: form.birth_date, join_date: form.start_date, salary_account: form.salary_account || '' }
     const res = await api.saveWorkContract(body)
-    // 편집 시 직원 인적정보도 갱신
+    // 편집 시 직원 인적정보도 갱신. status는 보내지 않는다 — 계약 편집이 직원의
+    // 재직/퇴사 상태를 건드리면 안 된다(퇴사자 부활 방지). 서버는 미전송 상태를 유지한다.
     if (res.ok && editing && form.employee_id) {
-      await api.updateEmployee(form.employee_id, { name: form.name, department: form.department, role: form.role, birth_date: form.birth_date || null, salary_account: form.salary_account || '', status: '재직' })
+      await api.updateEmployee(form.employee_id, { name: form.name, department: form.department, role: form.role, birth_date: form.birth_date || null, salary_account: form.salary_account || '' })
     }
     if (res.ok) { toast.push(editing ? '계약을 저장했어요' : '직원·계약을 등록했어요'); onSaved() }
     else toast.push(res.error || '저장에 실패했어요')

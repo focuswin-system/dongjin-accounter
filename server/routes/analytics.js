@@ -95,13 +95,23 @@ async function runAggregate(db, spec) {
 
   const topicLabel = TOPIC_LABEL[s.topic]
   const chart = grp.chart
+  // 측정값 표기: 금액이면 '원', 건수(count)면 '건'을 붙인다(건수에 원을 붙이던 오류 방지)
+  const fmtVal = (n) => s.measure === 'count'
+    ? (Math.round(Number(n) || 0)).toLocaleString('ko-KR') + '건'
+    : won(n)
   const top = rows.filter(r => r.key !== 'total').slice().sort((a, b) => b.value - a.value)[0]
   const dataRows = rows.filter(r => r.key !== 'total')
-  const summary = dataRows.length === 0
+  // group='none'(합계) 조회는 rows가 [total] 한 건뿐이라 dataRows가 항상 비어,
+  // 예전엔 total이 얼마든 '데이터 없음'으로 나왔다 → 합계 경로는 total로 직접 판단한다.
+  const summary = s.group === 'none'
+    ? (total === 0 && rows[0]?.count === 0
+        ? `${periodLabel} ${topicLabel} 데이터가 없습니다.`
+        : `${periodLabel} ${topicLabel}은 총 ${fmtVal(total)}입니다.`)
+    : dataRows.length === 0
     ? `${periodLabel} ${topicLabel} 데이터가 없습니다.`
     : chart === 'line'
-      ? `${periodLabel} ${topicLabel}은 총 ${won(total)}입니다.` + (top ? ` 가장 많았던 달은 ${top.label}, ${won(top.value)}입니다.` : '')
-      : `${periodLabel} ${topicLabel}은 총 ${won(total)}이며, ${grp.ko}로는 ${dataRows.length}건입니다.` + (top ? ` 가장 큰 곳은 ${top.label}, ${won(top.value)}입니다.` : '')
+      ? `${periodLabel} ${topicLabel}은 총 ${fmtVal(total)}입니다.` + (top ? ` 가장 많았던 달은 ${top.label}, ${fmtVal(top.value)}입니다.` : '')
+      : `${periodLabel} ${topicLabel}은 총 ${fmtVal(total)}이며, ${grp.ko}로는 ${dataRows.length}건입니다.` + (top ? ` 가장 큰 곳은 ${top.label}, ${fmtVal(top.value)}입니다.` : '')
   const title = `${topicLabel} · ${grp.ko} · ${periodLabel}`
 
   return { spec: s, topic: s.topic, group: s.group, topicLabel, groupLabel: grp.ko, periodLabel, from, to, chart, rows, total, summary, title }

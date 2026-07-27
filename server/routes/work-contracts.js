@@ -259,13 +259,21 @@ router.put('/:id', async (req, res, next) => {
     const [[cur]] = await conn.execute('SELECT id, kind FROM work_contracts WHERE id = ? FOR UPDATE', [req.params.id])
     if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     const f = normalize(req.body)
+    // 편집 드로어는 status·memo를 안 보낸다(각각 상세 상단·메모 탭에서 관리) → 미전송이면 기존 값 유지.
+    // 예전엔 normalize가 status='진행중'·memo=null로 강제해, 편집 저장이 만료계약을 진행중으로
+    // 되돌리고 메모를 지웠다. work_hours·conv_alert_months도 폼에 없을 때 보존한다.
+    const keepStatus = req.body.status !== undefined ? f.status : null
+    const keepMemo   = req.body.memo !== undefined ? (req.body.memo || null) : null
+    const keepWH     = req.body.work_hours !== undefined ? (req.body.work_hours || null) : null
+    const keepConv   = req.body.conv_alert_months !== undefined ? f.conv_alert_months : null
     await conn.execute(
       `UPDATE work_contracts SET kind=?, income_type=?, title=?, employ_type_id=?, employ_type=?, start_date=?, end_date=?,
-         term_mode=?, status=?, pay_form=?, work_hours=?, pay_day=?, pay_items=?,
-         insure_np=?, insure_hi=?, insure_ei=?, insure_ai=?, conv_alert_months=?, memo=? WHERE id=?`,
+         term_mode=?, status=COALESCE(?, status), pay_form=?, work_hours=COALESCE(?, work_hours), pay_day=?, pay_items=?,
+         insure_np=?, insure_hi=?, insure_ei=?, insure_ai=?,
+         conv_alert_months=COALESCE(?, conv_alert_months), memo=COALESCE(?, memo) WHERE id=?`,
       [f.kind, f.income_type, f.title, f.employ_type_id, f.employ_type, f.start_date, f.end_date, f.term_mode,
-       f.status, f.pay_form, f.work_hours, f.pay_day, f.pay_items,
-       f.insure_np, f.insure_hi, f.insure_ei, f.insure_ai, f.conv_alert_months, f.memo, req.params.id]
+       keepStatus, f.pay_form, keepWH, f.pay_day, f.pay_items,
+       f.insure_np, f.insure_hi, f.insure_ei, f.insure_ai, keepConv, keepMemo, req.params.id]
     )
     if (f.kind !== 'labor') {
       if (req.body.items !== undefined) await replaceItems(conn, req.params.id, req.body.items)

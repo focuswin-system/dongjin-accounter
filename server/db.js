@@ -922,8 +922,11 @@ async function initDb(conn) {
     await bumpRate('건강보험', 3.545, 3.595)
     await bumpRate('장기요양', 0.459, 0.472)
 
-    // 자동 생성 거래(청구서 정산·정기지출·급여)에 계약/공통 스코프가 비어 편집 시 공란이 되는 문제 보정
-    await c.execute("UPDATE transactions SET doc_no='공통' WHERE (doc_no IS NULL OR doc_no='') AND (contract_id IS NULL OR contract_id='') AND (invoice_id IS NOT NULL OR recurring_id IS NOT NULL OR payroll_id IS NOT NULL)")
+    // 자동 생성 거래(청구서 정산·정기지출·급여)에 계약/공통 스코프가 비어 편집 시 공란이 되던 문제 보정.
+    // ⚠ 1회만 — 매 부팅마다 돌면 사용자가 일부러 비운 doc_no를 '공통'으로 되살린다.
+    await runOnce('2026-07_backfill_doc_no_common', async () => {
+      await c.execute("UPDATE transactions SET doc_no='공통' WHERE (doc_no IS NULL OR doc_no='') AND (contract_id IS NULL OR contract_id='') AND (invoice_id IS NOT NULL OR recurring_id IS NOT NULL OR payroll_id IS NOT NULL)")
+    })
 
     // 결재선 기본 프리셋 1개 (비어 있을 때만) — 담당 → 결재 → 대표
     const [[{ apcnt }]] = await c.execute('SELECT COUNT(*) AS apcnt FROM approval_presets')

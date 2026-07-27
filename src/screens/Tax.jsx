@@ -360,7 +360,9 @@ export const OtherTaxScreen = () => {
   const handleDelete = async (r) => {
     const ok = await confirm({ tone: 'warn', icon: <Icon.Warn size={22}/>, title: `${r.name} 삭제`, body: '이 기타세액 항목을 삭제할까요?', confirmLabel: '삭제' })
     if (!ok) return
-    await api.deleteOtherTax(r.id); toast.push('삭제됐어요'); load()
+    const res = await api.deleteOtherTax(r.id)
+    toast.push(res.ok ? '삭제됐어요' : (res.error || '삭제에 실패했어요'), res.ok ? undefined : { tone: 'warn' })
+    load()
   }
 
   return (

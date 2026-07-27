@@ -27,15 +27,19 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
     const col = columns.find(c => c.key === sort.key)
     if (!col) return rows
     const val = (r) => (col.sortValue ? col.sortValue(r) : r[col.key])
-    const arr = [...rows].sort((a, b) => {
+    // 방향은 '값 비교'에만 적용한다. reverse()로 뒤집으면 빈 값(뒤에 있던 것)이 맨 앞으로 와
+    // '빈 값은 항상 뒤로' 규약이 내림차순에서 깨진다.
+    const dir = sort.dir === 'desc' ? -1 : 1
+    return [...rows].sort((a, b) => {
       const x = val(a), y = val(b)
       if (x == null && y == null) return 0
-      if (x == null) return 1          // 빈 값은 항상 뒤로
+      if (x == null) return 1          // 빈 값은 항상 뒤로(방향 무관)
       if (y == null) return -1
-      if (typeof x === 'number' && typeof y === 'number') return x - y
-      return String(x).localeCompare(String(y), 'ko')
+      const c = (typeof x === 'number' && typeof y === 'number')
+        ? x - y
+        : String(x).localeCompare(String(y), 'ko')
+      return c * dir
     })
-    return sort.dir === 'desc' ? arr.reverse() : arr
   }, [rows, sort, columns])
 
   const clickSort = (col) => {
