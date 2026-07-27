@@ -48,7 +48,7 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
   const toast = useToast()
   const { confirm } = useConfirm()
   const [edit, setEdit] = useState(!!isNew)
-  const emptyForm = () => ({ settler: '', settle_date: localToday(), trip_area: '', trip_period: '', purpose: '', received_amount: '', note: '', slots: {}, etc: [] })
+  const emptyForm = () => ({ settler: '', settle_date: localToday(), trip_area: '', trip_period: '', purpose: '', received_amount: '', note: '', slots: {}, etc: [], approval: [] })
   const [form, setForm] = useState(emptyForm())
   const [presets, setPresets] = useState([])
   const [presetId, setPresetId] = useState('')
@@ -65,6 +65,7 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
       trip_area: doc.trip_area || '', trip_period: doc.trip_period || '', purpose: doc.purpose || '',
       received_amount: doc.received_amount ? String(doc.received_amount) : '', note: doc.note || '',
       slots, etc: etc.map(l => ({ title: l.title || '', amount: String(l.amount || ''), memo: l.memo || '' })),
+      approval: (doc.approval && doc.approval.length) ? doc.approval : [],
     })
   }, [doc?.id, isNew])
 
@@ -83,8 +84,11 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
   const received = edit ? numOf(form.received_amount) : (Number(doc?.received_amount) || 0)
   const balance = received - total
   const ceo = company?.ceo || '대표이사'
-  const approval = (doc?.approval && doc.approval.length) ? doc.approval
-    : [{ label: '담당' }, { label: '결재' }, { label: '대표이사', position: ceo }]
+  const defApproval = [{ label: '담당' }, { label: '결재' }, { label: '대표이사', position: ceo }]
+  const approval = edit
+    ? (form.approval && form.approval.length ? form.approval : defApproval)
+    : (doc?.approval && doc.approval.length ? doc.approval : defApproval)
+  const applyPreset = (p) => setForm(f => ({ ...f, approval: (p.steps || []).map(s => ({ label: s.label, position: s.position || '', name: '' })) }))
 
   // 표시용 데이터(편집 중이면 form, 아니면 doc)
   const view = edit
@@ -109,7 +113,7 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
       settler: form.settler.trim(), settle_date: form.settle_date || null,
       trip_area: form.trip_area.trim(), trip_period: form.trip_period.trim(), purpose: form.purpose.trim(),
       received_amount: numOf(form.received_amount), note: form.note.trim(), lines,
-      approval: (doc?.approval && doc.approval.length) ? doc.approval
+      approval: (form.approval && form.approval.length) ? form.approval
         : (chosen ? chosen.steps.map(s => ({ label: s.label, position: s.position || '', name: '' })) : undefined),
     }
     const res = isNew ? await api.createSettlement(payload) : await api.updateSettlement(doc.id, payload)
@@ -175,8 +179,8 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
 
           <table className="res-table settle-grid">
             <colgroup>
-              <col style={{ width: 24 }}/><col/><col style={{ width: 96 }}/>
-              <col style={{ width: 24 }}/><col/><col style={{ width: 96 }}/>
+              <col style={{ width: 24 }}/><col style={{ width: 116 }}/><col style={{ width: 92 }}/>
+              <col style={{ width: 24 }}/><col/><col style={{ width: 92 }}/>
             </colgroup>
             <thead>
               <tr><th colSpan={2}>항　목</th><th>지출액</th><th colSpan={2}>항　목</th><th>지출액</th></tr>
@@ -214,10 +218,18 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
             </tbody>
           </table>
 
+          {edit && presets.length > 0 && (
+            <div className="no-print row gap-6" style={{ margin: '10px 0 4px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <span className="text-xs text-muted2">결재선</span>
+              {presets.map(p => (
+                <button key={p.id} className="btn ghost sm" onClick={() => applyPreset(p)}>{p.name}</button>
+              ))}
+            </div>
+          )}
           <table className="res-table settle-foot">
             <colgroup>
-              <col style={{ width: 24 }}/><col/><col style={{ width: 96 }}/>
-              <col style={{ width: 24 }}/><col/><col style={{ width: 96 }}/>
+              <col style={{ width: 24 }}/><col style={{ width: 116 }}/><col style={{ width: 92 }}/>
+              <col style={{ width: 24 }}/><col/><col style={{ width: 92 }}/>
             </colgroup>
             <tbody>
               <tr>
