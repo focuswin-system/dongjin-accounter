@@ -21,8 +21,10 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
     arrival_date: '', order_amount: '', pay_terms: '', man_hours: '', note: '', items: [emptyItem()], approval: [] })
   const [form, setForm] = useState(empty())
   const [presets, setPresets] = useState([])
+  const [itemMaster, setItemMaster] = useState([])   // 품목 기준정보 — 행에서 골라 규격·단위·매입단가 자동채움
 
-  useEffect(() => { api.getApprovalPresets().then(setPresets) }, [])
+  const reloadMaster = () => api.getRefItems('item').then(r => setItemMaster(r || []))
+  useEffect(() => { api.getApprovalPresets().then(setPresets); reloadMaster() }, [])
   useEffect(() => {
     setEdit(!!isNew)
     if (!doc) { setForm(empty()); return }
@@ -51,6 +53,32 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
     items[i] = it
     return { ...f, items }
   })
+  // 품목 기준정보에서 고르면 품명(＋규격)·단위·견적단가(매입가)를 자동으로 채운다.
+  // 매 키 입력마다 호출되며, 입력값이 품목명과 정확히 일치할 때만 자동채움(계약 화면과 동일 방식).
+  const pickItem = (i, name) => setForm(f => {
+    const items = [...f.items]
+    if (i === items.length) items.push(emptyItem())
+    const base = items[i]
+    const m = itemMaster.find(x => x.name === name)
+    if (m) {
+      const nm = m.spec ? `${m.name} ${m.spec}` : m.name
+      const qty = numOf(base.qty)
+      const price = numOf(m.purchase_price) || numOf(base.unit_price)
+      items[i] = { ...base, name: nm, unit: m.unit || base.unit,
+        unit_price: m.purchase_price ? String(m.purchase_price) : base.unit_price,
+        amount: String(qty * price) }
+    } else {
+      items[i] = { ...base, name }
+    }
+    return { ...f, items }
+  })
+  // 목록에 없는 품목은 기준정보에 새로 등록하고 이 행에 채운다(계약·거래처 인라인 추가와 동일).
+  const addNewItem = async (i, q) => {
+    const nm = (q || '').trim(); if (!nm) return
+    await api.addRefItem({ type: 'item', name: nm })
+    await reloadMaster()
+    setItem(i, 'name', nm)
+  }
 
   const viewItems = edit ? form.items : (doc?.items || [])
   const total = viewItems.reduce((s, it) => s + numOf(it.amount), 0)          // 품의금액 = 견적 금액 합
@@ -174,7 +202,12 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
                 return (
                   <tr key={i}>
                     <td className="num" style={{ textAlign: 'center' }}>{has ? i + 1 : ''}</td>
-                    <td>{edit ? <CellIn value={it?.name} onChange={v => setItem(i, 'name', v)} placeholder={isGhost ? '+ 품목' : ''}/> : (it?.name || '')}</td>
+                    <td className="pr-item-name">{edit
+                      ? <Combobox value={it?.name || ''} onChange={v => pickItem(i, v)} onAddNew={q => addNewItem(i, q)}
+                          options={itemMaster.map(m => ({ value: m.name, label: m.name,
+                            sub: [m.spec, m.unit, m.purchase_price ? fmtNum(m.purchase_price) + '원' : ''].filter(Boolean).join(' · ') }))}
+                          addNewLabel="새 품목 등록" placeholder={isGhost ? '+ 품목 선택·검색' : '품목'}/>
+                      : (it?.name || '')}</td>
                     <td style={{ textAlign: 'center' }}>{edit ? <CellIn value={it?.unit} onChange={v => setItem(i, 'unit', v)}/> : (it?.unit || '')}</td>
                     <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={it?.qty} onChange={v => setItem(i, 'qty', v)} right/> : (it?.qty ? fmtNum(it.qty) : '')}</td>
                     <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={it?.unit_price} onChange={v => setItem(i, 'unit_price', v)} right/> : (it?.unit_price ? fmtNum(it.unit_price) : '')}</td>
