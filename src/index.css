@@ -770,8 +770,17 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 .settle-cat {
   background: #f6f7f9 !important; font-weight: 700; text-align: center; vertical-align: middle;
   writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 0.12em;
-  width: 26px; padding: 4px 2px; white-space: nowrap;
+  width: 24px; padding: 4px 1px; white-space: nowrap;
 }
+.settle-tag { font-size: 9px; color: #999; }
+/* 행 높이 고정 — 내용이 달라도 문서마다 같은 레이아웃(A4 세로) 유지 */
+.settle-grid tbody td, .settle-grid tbody th { height: 26px; padding: 2px 8px; white-space: nowrap; overflow: hidden; }
+.settle-slotcell { padding-left: 6px !important; padding-right: 6px !important; }
+/* 짧은 슬롯명을 칸 폭에 맞춰 양끝으로 벌린다(터  널  비) */
+.settle-slot { display: flex; justify-content: space-between; width: 100%; }
+/* 인라인 편집 셀 입력 */
+.settle-cellin { width: 100%; border: 0; background: transparent; font: inherit; color: inherit; padding: 0; outline: none; }
+.settle-cellin:focus { background: var(--brand-soft); }
 .settle-memo { color: #888; font-size: 11px; }
 /* 하단 특기사항·결재 — 본문 그리드에 이어붙임(위 테두리 공유) */
 .settle-foot { margin-top: -1px; }
