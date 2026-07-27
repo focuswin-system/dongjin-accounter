@@ -922,6 +922,8 @@ async function initDb(conn) {
     // 구매품의서 품목: 실적가(단가·금액) — 공급업체 견적가와 별도로 과거 실적 단가를 나란히 보여준다.
     await ensureColumn('purchase_req_items', 'actual_price',  "actual_price BIGINT DEFAULT 0")
     await ensureColumn('purchase_req_items', 'actual_amount', "actual_amount BIGINT DEFAULT 0")
+    // 구매품의서 → 미지급금(매입 청구서) 연결. 한 번만 등록되게 생성된 invoices.id 를 물고 있는다.
+    await ensureColumn('purchase_reqs', 'invoice_id', "invoice_id VARCHAR(36)")
     // ── 계약 모델: 독립된 두 축 ──
     // billing_mode : onetime(총액을 마일스톤으로 나눠 청구) / recurring(주기마다 정액 청구)
     // term_mode    : fixed(종료일에 만료 — 재계약해야 이어짐) / auto_renew(해지 통보 없으면 자동 연장) / open(무기한 — 해지 시까지)

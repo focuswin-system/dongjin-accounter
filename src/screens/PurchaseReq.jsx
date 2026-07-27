@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, MoneyInput, Drawer } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
@@ -22,6 +22,10 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
   const [form, setForm] = useState(empty())
   const [presets, setPresets] = useState([])
   const [itemMaster, setItemMaster] = useState([])   // 품목 기준정보 — 행에서 골라 규격·단위·매입단가 자동채움
+  const [payOpen, setPayOpen] = useState(false)      // 미지급금 등록 다이얼로그
+  const [paySupply, setPaySupply] = useState('')
+  const [payVat, setPayVat] = useState('과세')
+  const [payDue, setPayDue] = useState('')
 
   const reloadMaster = () => api.getRefItems('item').then(r => setItemMaster(r || []))
   useEffect(() => { api.getApprovalPresets().then(setPresets); reloadMaster() }, [])
@@ -119,6 +123,19 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
   }
   const amt = (n) => (n ? fmtNum(n) : '')
 
+  // ── 미지급금 등록 ──
+  const due30 = () => { const d = new Date(); d.setDate(d.getDate() + 30); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` }
+  const openPay = () => { setPaySupply(String(total)); setPayVat('과세'); setPayDue(due30()); setPayOpen(true) }
+  const paySupplyN = numOf(paySupply)
+  const payVatAmt = payVat === '과세' ? Math.round(paySupplyN * 0.1) : 0
+  const submitPayable = async () => {
+    if (!paySupplyN) return toast.push('공급가를 입력해주세요')
+    const res = await api.issuePurchaseReqPayable(doc.id, { supply_amount: paySupplyN, vat_mode: payVat, due: payDue || null })
+    if (!res.ok) return toast.push(res.error || '등록에 실패했어요')
+    toast.push(`미지급금 ${res.invoice_no}로 등록됐어요`)
+    setPayOpen(false); onSaved(doc.id)
+  }
+
   return (
     <>
       <DocToolbar docNo={isNew ? '새 구매품의서' : doc.doc_no}
@@ -130,6 +147,9 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
           </>
         ) : (
           <>
+            {doc?.payable
+              ? <span className="chip" title={`합계 ${fmtNum(doc.payable.total)}원`}><Icon.Check size={12}/> 미지급 {doc.payable.invoice_no} · {doc.payable.status}</span>
+              : <button className="btn" onClick={openPay}><Icon.Receipt size={14}/> 미지급금 등록</button>}
             <button className="btn ghost" onClick={remove}><Icon.Trash size={14}/></button>
             <button className="btn" onClick={() => setEdit(true)}><Icon.Pencil size={14}/> 편집</button>
             <button className="btn" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
@@ -252,6 +272,36 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
           <div className="res-company num">{company?.name || ''}</div>
         </div>
       </DocViewport>
+
+      <Drawer open={payOpen} onClose={() => setPayOpen(false)} width="min(420px, 100vw)" label="미지급금 등록">
+        <div className="col gap-16" style={{ padding: 20 }}>
+          <div className="text-sm text-muted2">이 구매품의서를 매입 청구서(미지급금)로 등록합니다. 미지급금·부가세 매입세액·지급결의서에 반영돼요.</div>
+          <div>
+            <label className="label" style={{ marginBottom: 6, display: 'block' }}>공급가</label>
+            <MoneyInput value={paySupply} onChange={setPaySupply}/>
+          </div>
+          <div>
+            <label className="label" style={{ marginBottom: 6, display: 'block' }}>과세유형</label>
+            <div className="row gap-6">
+              {['과세', '면세', '영세'].map(t => (
+                <button key={t} type="button" className={`chip ${payVat === t ? 'active' : ''}`} onClick={() => setPayVat(t)}>{t}</button>
+              ))}
+            </div>
+            <div className="text-xs text-muted2" style={{ marginTop: 8 }}>
+              {payVat === '과세' ? '공급가 + VAT 10%' : payVat === '면세' ? '세액 없음' : '영세율(세액 0, 과세표준 포함)'}
+              {' · 세액 '}<b className="num">{fmtNum(payVatAmt)}</b>{' · 합계 '}<b className="num">{fmtNum(paySupplyN + payVatAmt)}원</b>
+            </div>
+          </div>
+          <div>
+            <label className="label" style={{ marginBottom: 6, display: 'block' }}>지급 예정일</label>
+            <input className="input" type="date" value={payDue} onChange={e => setPayDue(e.target.value)}/>
+          </div>
+          <div className="row gap-8" style={{ justifyContent: 'flex-end', marginTop: 4 }}>
+            <button className="btn" onClick={() => setPayOpen(false)}>취소</button>
+            <button className="btn primary" onClick={submitPayable}><Icon.Check size={14}/> 미지급금 등록</button>
+          </div>
+        </div>
+      </Drawer>
     </>
   )
 }
@@ -268,10 +318,11 @@ export const PurchaseReqScreen = () => {
   const load = async (keepId) => {
     const [rows, comp, vs] = await Promise.all([api.getPurchaseReqs(), api.getCompany(), api.getVendors()])
     setList(rows); setCompany(comp); setVendors(vs)
-    setSelId(prev => {
-      const want = keepId || prev
-      return want && rows.some(r => r.id === want) ? want : (rows[0]?.id || null)
-    })
+    const want = keepId || selId
+    const nextId = want && rows.some(r => r.id === want) ? want : (rows[0]?.id || null)
+    setSelId(nextId)
+    // 선택 id가 그대로여도 상세를 다시 읽는다 — 미지급금 등록 후 payable 상태 최신화
+    if (nextId) api.getPurchaseReq(nextId).then(setSel); else setSel(null)
   }
   useEffect(() => { load() }, [])
   useEffect(() => {

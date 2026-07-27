@@ -702,6 +702,11 @@ export const api = {
     try { await req(`/purchase-reqs/${id}`, { method: 'DELETE' }); return { ok: true } }
     catch (e) { return { ok: false, error: e.message } }
   },
+  // 구매품의서 → 미지급금(매입 청구서) 등록
+  async issuePurchaseReqPayable(id, { supply_amount, vat_mode, due } = {}) {
+    try { const r = await req(`/purchase-reqs/${id}/issue-payable`, { method: 'POST', body: { supply_amount, vat_mode, due } }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
 
   async getQuoteReqs() {
     try { return await req('/quote-reqs') } catch { return [] }

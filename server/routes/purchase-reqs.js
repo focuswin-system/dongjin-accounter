@@ -2,6 +2,8 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
+const { addDays } = require('../lib/recurrence')
+const { recurFromSupply } = require('../lib/vat')
 
 const router = Router()
 const parseJson = (v, fb) => { try { return v ? JSON.parse(v) : fb } catch { return fb } }
@@ -37,7 +39,13 @@ router.get('/:id', async (req, res, next) => {
     const [[r]] = await req.db.execute('SELECT * FROM purchase_reqs WHERE id = ?', [req.params.id])
     if (!r) return res.status(404).json({ error: 'Not found' })
     const [items] = await req.db.execute('SELECT * FROM purchase_req_items WHERE req_id = ? ORDER BY sort_order, id', [req.params.id])
-    res.json(adapt(r, items))
+    // 미지급금 등록 상태(삭제됐으면 링크가 남아 있어도 null → 재등록 허용)
+    let payable = null
+    if (r.invoice_id) {
+      const [[inv]] = await req.db.execute('SELECT id, invoice_no, status, total_amount FROM invoices WHERE id = ?', [r.invoice_id])
+      if (inv) payable = { id: inv.id, invoice_no: inv.invoice_no, status: inv.status, total: Number(inv.total_amount) || 0 }
+    }
+    res.json({ ...adapt(r, items), payable })
   } catch (e) { next(e) }
 })
 
@@ -106,6 +114,45 @@ router.delete('/:id', async (req, res, next) => {
     await req.db.execute('DELETE FROM purchase_reqs WHERE id = ?', [req.params.id])
     res.json({ ok: true })
   } catch (e) { next(e) }
+})
+
+// 구매품의서 → 미지급금(매입 청구서) 등록. 품의금액을 공급가로 보고 과세유형으로 세액을 매긴다.
+// 실제 지급이 아니라 '지급 대기' 상태의 미지급금만 만든다(자금 이동·마감 검사 불필요).
+const VAT_MODES = { '과세': 'exclusive', '면세': 'none', '영세': 'zero', exclusive: 'exclusive', none: 'none', zero: 'zero' }
+router.post('/:id/issue-payable', async (req, res, next) => {
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [[r]] = await conn.execute('SELECT * FROM purchase_reqs WHERE id = ? FOR UPDATE', [req.params.id])
+    if (!r) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    if (r.invoice_id) {
+      const [[inv]] = await conn.execute('SELECT invoice_no FROM invoices WHERE id = ?', [r.invoice_id])
+      if (inv) { await rollbackQuietly(conn); return res.status(409).json({ error: `이미 미지급금(${inv.invoice_no})으로 등록됐어요` }) }
+    }
+    if (!r.vendor_id) { await rollbackQuietly(conn); return res.status(400).json({ error: '공급업체를 거래처로 지정한 뒤 등록해주세요' }) }
+
+    const supplyIn = Number(req.body.supply_amount)
+    const supplyBase = Number.isFinite(supplyIn) && supplyIn > 0 ? supplyIn : null
+    if (!supplyBase) { await rollbackQuietly(conn); return res.status(400).json({ error: '공급가를 확인해주세요' }) }
+    const vatMode = VAT_MODES[req.body.vat_mode] || 'exclusive'
+    const { supply, vat, tax_type } = recurFromSupply(supplyBase, vatMode)
+    const total = supply + vat
+    const issued = kstToday()
+    const due = req.body.due || addDays(issued, 30)
+    const year = issued.slice(0, 4)
+    const [[{ maxno }]] = await conn.execute(
+      "SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(invoice_no, '-', -1) AS UNSIGNED)), 0) AS maxno FROM invoices WHERE kind='received' AND invoice_no LIKE ?",
+      [`매입-${year}-%`])
+    const invoice_no = `매입-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
+    const invId = randomUUID()
+    await conn.execute(
+      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [invId, invoice_no, 'received', r.vendor_id, null, supply, vat, total, issued, due, '지급 대기', null, null, `구매품의서 ${r.doc_no}`, tax_type])
+    await conn.execute('UPDATE purchase_reqs SET invoice_id = ? WHERE id = ?', [invId, req.params.id])
+    await conn.commit()
+    res.json({ ok: true, invoice_id: invId, invoice_no })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
 })
 
 module.exports = router
