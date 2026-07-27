@@ -30,9 +30,11 @@ export const NAV_TREE = [
         { id: "misc_pl",     label: "일반 경비", icon: Icon.Wallet },
         { id: "misc_income", label: "잡손익",    icon: Icon.Trend },
       ]},
-      // 결의서는 매입 청구서에서도, 경비에서도 올라온다 → 어느 한쪽에 두지 않고 독립.
-      { label: "지출 승인", items: [
+      // 결재·정산 문서 모음. 결의서는 매입·경비 양쪽에서 올라오고, 정산내역서는 자금 집행 정산이라
+      // 어느 한쪽에 두지 않고 독립 '문서' 섹션에 둔다. 새 회사 양식은 여기에 전용 문서로 계속 추가.
+      { label: "문서", items: [
         { id: "doc", label: "지급결의서", icon: Icon.Sign },
+        { id: "settlement", label: "정산내역서", icon: Icon.Doc },
       ]},
       { label: "장부", items: [
         { id: "ledger",   label: "전체 거래내역", icon: Icon.Wallet },
@@ -137,7 +139,9 @@ export const PORTAL = [
       { id: 'acct_expense', label: '경비', icon: Icon.Wallet, desc: '일반 경비·잡손익', groups: [
         { label: '', items: ['misc_pl', 'misc_income'] },
       ]},
-      { id: 'acct_approval', label: '지출 승인', icon: Icon.Sign, desc: '지급결의서 작성·결재', route: 'doc' },
+      { id: 'acct_docs', label: '문서', icon: Icon.Sign, desc: '지급결의서·정산내역서', groups: [
+        { label: '', items: ['doc', 'settlement'] },
+      ]},
       { id: 'acct_ledger', label: '장부', icon: Icon.Book, desc: '거래내역·계약 조회', groups: [
         { label: '', items: ['ledger', 'contract'] },   // '증빙 관리'는 목업이라 숨김(추후 실구현 예정)
       ]},
@@ -191,6 +195,7 @@ PORTAL_CAT_BY_ID['settings'] = {
 DOMAIN_OF['acct_sales'] = 'acct'
 DOMAIN_OF['acct_purchase'] = 'acct'
 DOMAIN_OF['acct_expense'] = 'acct'
+DOMAIN_OF['acct_docs'] = 'acct'
 DOMAIN_OF['acct_ledger'] = 'acct'
 DOMAIN_OF['acct_tax'] = 'acct'
 DOMAIN_OF['master'] = 'acct'   // 기준정보 포털 카테고리(groups) — 사이드바 도메인 자동 펼침

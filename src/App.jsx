@@ -9,6 +9,7 @@ import { LedgerScreen } from './screens/Ledger'
 import { TransactionForm } from './screens/Form'
 import { ContractListScreen, ContractScreen, CONTRACT_LIST } from './screens/Contract'
 import { DocsScreen, EvidenceScreen, EvidenceAttachDrawer, ExcelScreen, ReportsScreen } from './screens/Docs'
+import { SettlementScreen } from './screens/Settlement'
 import { HRScreen } from './screens/HR'
 import { LaborContractScreen, OutsourcingScreen } from './screens/WorkContract'
 import { MasterScreen, RefMasterPanel, REF_CONFIGS, RecurringExpensePanel, RecurringInvoicePanel } from './screens/Master'
@@ -51,6 +52,7 @@ const CRUMB_MAP = {
   acct_sales:      ["일반회계", "판매·매출"],
   acct_purchase:   ["일반회계", "매입"],
   acct_expense:    ["일반회계", "경비"],
+  acct_docs:       ["일반회계", "문서"],
   acct_ledger:     ["일반회계", "장부"],
   acct_tax:        ["일반회계", "세무관리"],
   hr_labor:        ["인사급여", "근로·용역"],
@@ -59,7 +61,8 @@ const CRUMB_MAP = {
   master:          ["일반회계", "기준정보"],
   settings:        ["환경설정"],
   hr_base:         ["인사급여", "기준정보"],
-  doc:             ["지출 승인", "지급결의서"],
+  doc:             ["문서", "지급결의서"],
+  settlement:      ["문서", "정산내역서"],
   evidence:        ["증빙 관리"],
   excel:           ["엑셀 업로드"],
   excel_modal:     ["엑셀 업로드"],
@@ -404,6 +407,7 @@ function AppInner({ onLogout, user }) {
       case "ar":              return <BillingScreen initialTab="issued"  role="collect" focusInvoiceId={focusInvoiceId} openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
       case "ap":              return <BillingScreen initialTab="received" role="collect" focusInvoiceId={focusInvoiceId} openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
       case "doc":             return <DocsScreen/>;
+      case "settlement":      return <SettlementScreen/>;
       // 증빙 관리는 아직 목 데이터만 보여주는 화면이라 nav 에서 뺐는데, #evidence 해시로는
       // 계속 들어와져 가짜 숫자가 실데이터처럼 보였다. 실구현 전까지 '준비 중'으로 막는다.
       // (화면 코드 EvidenceScreen 은 그대로 둔다 — 추후 실구현 시 여기만 되돌리면 된다)

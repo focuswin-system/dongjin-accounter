@@ -396,6 +396,36 @@ async function initDb(conn) {
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `)
+    // 정산내역서(定算內譯書) — 수령액(자금)을 받아 분류별로 집행하고 잔액을 맞추는 정산 문서.
+    // 지급결의서(건별 승인)와 달리, 한 기간의 여러 지출을 분류(도로비·교통비·영업비·운송료·기타경비)로
+    // 묶어 수령액 대비 잔액을 정산한다. settlement_lines 가 항목별 지출.
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS settlements (
+        id              VARCHAR(36) PRIMARY KEY,
+        doc_no          VARCHAR(30) NOT NULL,
+        settler         VARCHAR(100),
+        settle_date     VARCHAR(20),
+        received_amount BIGINT NOT NULL DEFAULT 0,
+        note            VARCHAR(1000),
+        approval        TEXT,
+        status          VARCHAR(20) DEFAULT '작성',
+        created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_settlements_doc_no (doc_no)
+      )
+    `)
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS settlement_lines (
+        id            VARCHAR(36) PRIMARY KEY,
+        settlement_id VARCHAR(36) NOT NULL,
+        category      VARCHAR(30),
+        title         VARCHAR(255),
+        amount        BIGINT NOT NULL DEFAULT 0,
+        memo          VARCHAR(500),
+        sort_order    INT DEFAULT 0,
+        INDEX idx_settlement_lines (settlement_id),
+        FOREIGN KEY (settlement_id) REFERENCES settlements(id) ON DELETE CASCADE
+      )
+    `)
     await c.execute(`
       CREATE TABLE IF NOT EXISTS hr_codes (
         id         VARCHAR(36) PRIMARY KEY,

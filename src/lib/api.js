@@ -38,6 +38,20 @@ async function req(path, opts = {}) {
   return res.json()
 }
 
+// 엑셀 임포트 파싱용 — multipart라 req()(JSON 전용)를 쓸 수 없다
+async function postImportFile(path, file) {
+  const fd = new FormData()
+  fd.append('file', file)
+  const token = localStorage.getItem('token')
+  const res = await fetch(BASE + path, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: fd,
+  })
+  if (!res.ok) throw new Error('엑셀 파싱에 실패했어요')
+  return res.json() // { headers, rows, total, truncated }
+}
+
 // 서버 응답 → 컴포넌트 형식 변환
 function adaptAccount(row) {
   return {
@@ -649,6 +663,26 @@ export const api = {
     catch (e) { return { ok: false, error: e.message } }
   },
 
+  // ── 정산내역서 ──────────────────────────────────────────────
+  async getSettlements() {
+    try { return await req('/settlements') } catch { return [] }
+  },
+  async getSettlement(id) {
+    try { return await req(`/settlements/${id}`) } catch { return null }
+  },
+  async createSettlement(data) {
+    try { const r = await req('/settlements', { method: 'POST', body: data }); return { ok: true, settlement: r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async updateSettlement(id, data) {
+    try { await req(`/settlements/${id}`, { method: 'PUT', body: data }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async deleteSettlement(id) {
+    try { await req(`/settlements/${id}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
   async addContract(data) {
     try {
       const result = await req('/contracts', { method: 'POST', body: data })
@@ -798,22 +832,21 @@ export const api = {
   },
 
   // ─── 거래처 엑셀 임포트 ────────────────────────────────────────
-  async parseVendorExcel(file) {
-    const fd = new FormData()
-    fd.append('file', file)
-    const token = localStorage.getItem('token')
-    const res = await fetch(`${BASE}/vendors/import/parse`, {
-      method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: fd,
-    })
-    if (!res.ok) throw new Error('엑셀 파싱에 실패했어요')
-    return res.json() // { headers, rows }
-  },
+  parseVendorExcel(file) { return postImportFile('/vendors/import/parse', file) },
 
   async commitVendorImport(items) {
     try {
       const r = await req('/vendors/import/commit', { method: 'POST', body: { items } })
+      return { ok: true, ...r }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
+
+  // ─── 기준정보(품목·자산·적요) 엑셀 임포트 ──────────────────────
+  parseRefItemExcel(file) { return postImportFile('/ref-items/import/parse', file) },
+
+  async commitRefItemImport(type, items) {
+    try {
+      const r = await req('/ref-items/import/commit', { method: 'POST', body: { type, items } })
       return { ok: true, ...r }
     } catch (e) { return { ok: false, error: e.message } }
   },

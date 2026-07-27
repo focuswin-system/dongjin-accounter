@@ -99,7 +99,7 @@ try {
   // 도메인·포털 카테고리 컨테이너 id는 '화면'이 아니라 묶음이라 권한 자원이 아니다.
   // (route를 가진 hr·report·mgmt_dash는 실제 화면이므로 제외하지 않는다)
   const CONTAINERS = ['acct', 'hr_dom', 'mgmt',
-    'acct_sales', 'acct_purchase', 'acct_expense', 'acct_approval', 'acct_ledger', 'acct_tax', 'master',
+    'acct_sales', 'acct_purchase', 'acct_expense', 'acct_docs', 'acct_ledger', 'acct_tax', 'master',
     'hr_labor', 'hr_base', 'mgmt_report', 'mgmt_biz']
   for (const d of CONTAINERS) navIds.delete(d)
 
