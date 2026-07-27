@@ -71,7 +71,7 @@ export const SettlementDocument = ({ doc, company }) => {
       <table className="res-table settle-grid">
         <colgroup>
           <col style={{ width: 26 }}/><col/><col style={{ width: 92 }}/>
-          <col style={{ width: 26 }}/><col/><col style={{ width: 104 }}/>
+          <col style={{ width: 26 }}/><col/><col style={{ width: 92 }}/>
         </colgroup>
         <thead>
           <tr><th colSpan={2}>항　목</th><th>지출액</th><th colSpan={2}>항　목</th><th>지출액</th></tr>
@@ -93,25 +93,33 @@ export const SettlementDocument = ({ doc, company }) => {
               </tr>
             )
           })}
-          <tr className="res-total">
-            <th colSpan={5} style={{ textAlign: 'center' }}>합　계</th>
-            <td className="num fw-700" style={{ textAlign: 'right' }}>{fmtNum(total)}</td>
-          </tr>
         </tbody>
       </table>
 
-      <div className="res-foot">
-        <div className="res-note">
-          <div className="res-note-head">특기사항</div>
-          <div className="res-note-body">{doc.note || ''}</div>
-        </div>
-        <table className="res-approve">
-          <tbody>
-            <tr>{approval.map((s, i) => <th key={i}>{s.label}{s.position ? <div style={{ fontWeight: 400, fontSize: 10, color: '#888' }}>{s.position}</div> : null}</th>)}</tr>
-            <tr>{approval.map((_, i) => <td key={i}></td>)}</tr>
-          </tbody>
-        </table>
-      </div>
+      {/* 특기사항·결재 — 본문 그리드에 이어붙여 한 몸으로(세로 라벨). PDF 하단과 동일 구조. */}
+      <table className="res-table settle-foot">
+        <colgroup>
+          <col style={{ width: 26 }}/><col/><col style={{ width: 92 }}/>
+          <col style={{ width: 26 }}/><col/><col style={{ width: 92 }}/>
+        </colgroup>
+        <tbody>
+          <tr>
+            <th className="settle-cat">특기사항</th>
+            <td colSpan={2} className="settle-note">{doc.note || ''}</td>
+            <th className="settle-cat">결　재</th>
+            <td colSpan={2} className="settle-approve-cell">
+              <div className="settle-approve">
+                {approval.map((s, i) => (
+                  <div key={i} className="settle-approve-col">
+                    <div className="settle-approve-h">{s.label}{s.position ? <div className="settle-approve-pos">{s.position}</div> : null}</div>
+                    <div className="settle-approve-sign"/>
+                  </div>
+                ))}
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
       <div className="settle-notes">
         ※ 출장 항목(도로비·교통비·영업비 등)은 출장지역·기간을 상단에 기재하세요.<br/>
         ※ 운송료는 발송지역·인수자를 비고에 적으세요. 기타경비는 은행인출·계좌이체 등 그 외 집행분을 적습니다.

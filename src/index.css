@@ -749,9 +749,9 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 .doc-ws-row-amt { margin-left: auto; }
 .doc-ws-toolbar { padding: 12px 16px; margin-bottom: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .doc-ws-empty { padding: 48px 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 300px; color: var(--muted-2); }
-/* 문서 영역은 흰 배경 카드. 문서(paper)는 그 위에 놓이므로 자체 그림자·테두리는 제거해 이음새 없이. */
-.doc-ws-viewport { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 28px 24px; }
-.doc-ws-viewport .doc-paper { box-shadow: none; border: none; border-radius: 0; }
+/* 문서 영역은 흰 배경 데스크. 실제 인쇄될 문서(paper)는 그 위에서 박스 쉐도우로 도드라지게 구분한다. */
+.doc-ws-viewport { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 32px 28px; }
+.doc-ws-viewport .doc-paper { box-shadow: 0 6px 28px -10px rgba(15,23,42,0.22); border: 1px solid var(--line); border-radius: 2px; }
 /* 세로 양식은 콘텐츠 안에서 가운데(가로 양식=지급결의서는 그대로 폭 채움) */
 .doc-ws-viewport.is-portrait { display: flex; justify-content: center; }
 @media (max-width: 960px) { .doc-ws { grid-template-columns: 1fr; } }
@@ -769,6 +769,17 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
   width: 26px; padding: 4px 2px; white-space: nowrap;
 }
 .settle-memo { color: #888; font-size: 11px; }
+/* 하단 특기사항·결재 — 본문 그리드에 이어붙임(위 테두리 공유) */
+.settle-foot { margin-top: -1px; }
+.settle-foot td { height: 84px; vertical-align: top; padding: 8px 10px; }
+.settle-note { font-size: 12px; color: #333; }
+.settle-approve-cell { padding: 0 !important; }
+.settle-approve { display: flex; height: 100%; }
+.settle-approve-col { flex: 1; border-left: 1px solid #232733; display: flex; flex-direction: column; }
+.settle-approve-col:first-child { border-left: none; }
+.settle-approve-h { border-bottom: 1px solid #232733; background: #f6f7f9; text-align: center; font-size: 12px; font-weight: 600; padding: 4px 2px; }
+.settle-approve-pos { font-weight: 400; font-size: 10px; color: #888; }
+.settle-approve-sign { flex: 1; min-height: 44px; }
 .settle-total { margin-top: -1px; }
 .settle-total th { background: #f6f7f9; text-align: center; }
 .settle-notes { margin-top: 14px; font-size: 11px; color: #777; line-height: 1.7; }
