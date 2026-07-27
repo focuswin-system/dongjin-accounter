@@ -827,6 +827,7 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 .res-total td { background: #F8F9FA; }
 .cell-input { width: 100%; border: 1px solid var(--line-strong, #ccc); border-radius: 4px; padding: 3px 6px; font-size: 12.5px; font-family: inherit; background: #fff; }
 .res-foot { display: grid; grid-template-columns: 1fr 260px; gap: 14px; margin-top: 16px; align-items: start; }
+.res-foot.is-full { grid-template-columns: 1fr; }   /* 결재란 없는 문서(견적요청서 등) — 특기사항이 전체 폭 */
 .res-note { border: 1px solid #333; min-height: 90px; }
 .res-note-head { background: #F1F3F5; border-bottom: 1px solid #333; padding: 5px 9px; font-size: 12px; font-weight: 700; }
 .res-note-body { padding: 8px 9px; font-size: 12px; white-space: pre-wrap; min-height: 60px; }

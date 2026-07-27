@@ -230,8 +230,8 @@ const QuoteRequestPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSave
             </tbody>
           </table>
 
-          <div className="res-foot">
-            <div className="res-note" style={{ flex: 1 }}>
+          <div className="res-foot is-full">
+            <div className="res-note">
               <div className="res-note-head">＊ 특기사항</div>
               <div className="res-note-body">{edit ? <input className="settle-cellin" value={form.note} onChange={e => setH('note', e.target.value)}/> : form.note}</div>
             </div>
