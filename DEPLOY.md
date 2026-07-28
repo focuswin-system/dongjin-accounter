@@ -3,9 +3,10 @@
 동진테크 회계 ERP를 **focuswin 서버(192.168.0.34)** 에 다른 서비스와 격리해서 서비스한다.
 
 ## 접속 주소
-- 🌐 외부(HTTPS): **https://acct.custwin.shop**  (Cloudflare 터널)
+- 🌐 외부(HTTPS): **https://donidora.com**  (Cloudflare 터널)
 - 🏢 사무실 LAN: **http://192.168.0.34:8081**
-- 최초 관리자: `admin` / `dongjin2026!` → **로그인 후 반드시 비밀번호 변경**
+- 로그인은 3필드: 회사코드 + 아이디 + 비밀번호
+- 최초 관리자 계정 정보는 `접속정보.md`(gitignore)에. **문서·커밋에 비밀번호를 적지 말 것**
 
 ## 아키텍처 (기존 서비스 0 영향)
 ```
@@ -39,9 +40,10 @@ pm2 reload dongjin-accounter
 ```
 
 ## 주의사항
-- **`.env`의 DB 비밀번호는 반드시 따옴표로** 감쌀 것: `DB_PASSWORD="smart2026##!"`
-  (`#` 때문에 dotenv가 주석처리 → 따옴표 없으면 DB 접속 실패)
-- MariaDB root 비번은 `접속정보.md`(gitignore)에. 전용 계정 `winc_ac`는 `winc_ac` DB에만 권한(격리).
+- **`.env`의 DB 비밀번호는 반드시 따옴표로** 감쌀 것: `DB_PASSWORD="<비밀번호>"`
+  (비번에 `#`가 들어가면 dotenv가 주석으로 잘라먹음 → 따옴표 없으면 DB 접속 실패)
+- **실제 비밀번호는 `접속정보.md`(gitignore)에만.** MariaDB root·전용 계정 모두 해당.
+  전용 계정 `winc_ac`는 `winc_ac` DB에만 권한(격리).
 - Cloudflare 터널을 pm2로 상시 구동 → bizai(localhost:9000) ingress도 같이 활성(앱이 떠 있으면 서비스됨).
 - 코드는 MariaDB/구형 MySQL 모두 호환(utf8·TIMESTAMP 기본값). 프론트 빌드는 반드시 로컬/CI에서.
 

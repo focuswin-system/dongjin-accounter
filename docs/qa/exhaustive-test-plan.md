@@ -8,7 +8,7 @@
 
 ## 0. 실행 환경·방법 (별도 세션 공통)
 
-- 임시 풀스택 서버 **PORT=3096~3099**, `DB_USER=root DB_PASSWORD=1234 DB_NAME=winc_dj_ac`(로컬 `.env` 비번 불일치 → root 오버라이드). **3001(사용자)·운영 절대 금지.**
+- 임시 풀스택 서버 **PORT=3096~3099**, `DB_NAME=winc_dj_ac`. 로컬 `.env`와 비번이 다르면 계정/비번을 환경변수로 오버라이드(값은 문서에 적지 말 것). **3001(사용자)·운영 절대 금지.**
 - 로그인 우회: `localStorage.loggedIn=1` + user. SW 캐시 시 `?v=N`.
 - **조작=Playwright, 부작용 검증=API/DB 조회**(잔액·거래·미수/미지급은 화면에 안 보이는 side-effect라 반드시 교차검증).
 - 한글 API 테스트는 Bash curl UTF-8 깨짐 → **Node http 스크립트**.
