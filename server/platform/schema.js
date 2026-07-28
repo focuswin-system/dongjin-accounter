@@ -110,7 +110,10 @@ async function createPlatformSchema(c) {
       ip         VARCHAR(45),
       detail     TEXT,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      KEY idx_audit_company_time (company_id, created_at)
+      KEY idx_audit_company_time (company_id, created_at),
+      -- 로그인 시도 제한(lib/loginGuard.js)이 매 로그인마다 이 조합으로 조회한다.
+      -- 인덱스가 없으면 감사 로그가 쌓일수록 로그인이 느려진다.
+      KEY idx_audit_login_attempt (company_id, username, action, created_at)
     )
   `)
 
@@ -161,6 +164,25 @@ async function migratePlatformSchema(c) {
       console.log('[platform] user_roles FK 추가 완료')
     } catch (e) {
       console.warn('[platform] user_roles FK 추가 실패:', e.code || e.message)
+    }
+  }
+
+  // 로그인 시도 제한 조회용 인덱스 — 기존 설치본에는 audit_logs가 이미 있어
+  // CREATE TABLE IF NOT EXISTS 로는 붙지 않는다.
+  const [[{ idxCnt }]] = await c.execute(
+    `SELECT COUNT(*) AS idxCnt FROM information_schema.statistics
+      WHERE table_schema = ? AND table_name = 'audit_logs'
+        AND index_name = 'idx_audit_login_attempt'`,
+    [db]
+  )
+  if (idxCnt === 0) {
+    try {
+      await c.execute(
+        'ALTER TABLE audit_logs ADD KEY idx_audit_login_attempt (company_id, username, action, created_at)'
+      )
+      console.log('[platform] audit_logs 로그인 시도 인덱스 추가 완료')
+    } catch (e) {
+      console.warn('[platform] audit_logs 인덱스 추가 실패:', e.code || e.message)
     }
   }
 }

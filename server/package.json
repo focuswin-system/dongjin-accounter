@@ -5,6 +5,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
+    "test": "node --test test/",
     "seed": "node seed.js",
     "setup:db": "node scripts/setup-db.js",
     "setup:db:check": "node scripts/setup-db.js --check",

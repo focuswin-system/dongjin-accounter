@@ -17,13 +17,15 @@ const jwt = require('jsonwebtoken')
 const { platformPool, audit } = require('../platform/db')
 const authMiddleware = require('../middleware/auth')
 const { setFileCookie, clearFileCookie } = require('../middleware/fileAuth')
+const {
+  clientIp, noteFailure, noteSuccess, ipBlockedFor, accountBlockedFor, waitMessage,
+} = require('../lib/loginGuard')
 
 const router = Router()
 
 // role은 P1에서 기존 값(admin/user)을 유지한다. admin ≡ 회사 마스터.
 // P5(RBAC)에서 role_perms 매트릭스로 대체하며 master/member 네이밍으로 이관 예정.
 const isMaster = (req) => req.user?.role === 'admin'
-const clientIp = (req) => req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip || null
 
 // ── 로그인 ──
 router.post('/login', async (req, res, next) => {
@@ -33,25 +35,54 @@ router.post('/login', async (req, res, next) => {
       return res.status(400).json({ error: '회사코드·아이디·비밀번호를 모두 입력하세요' })
     }
 
+    // ── 무차별 대입 방어 ──
+    // IP 층을 가장 먼저 본다. 회사코드 조회·bcrypt 비교보다 앞이어야
+    // 잠긴 공격자가 DB와 해시 연산을 계속 소모시키지 못한다(느린 bcrypt는 그 자체로 부하).
+    const ip = clientIp(req)
+    const ipWait = ipBlockedFor(ip)
+    if (ipWait) {
+      res.set('Retry-After', String(ipWait))
+      return res.status(429).json({ error: waitMessage(ipWait) })
+    }
+
     const code = String(companyCode).trim().toLowerCase()
     const [companies] = await platformPool.execute(
       'SELECT id, code, name, db_name, active, status FROM companies WHERE code = ?', [code]
     )
     const company = companies[0]
     // 회사코드는 비밀이 아니므로 존재 여부를 알려줘도 안전하다(오히려 오타 안내에 유용).
-    if (!company) return res.status(401).json({ error: '회사코드를 찾을 수 없습니다' })
+    // 다만 없는 코드를 계속 찍어보는 것도 시도이므로 IP 층에는 실패로 센다.
+    if (!company) {
+      noteFailure(ip)
+      return res.status(401).json({ error: '회사코드를 찾을 수 없습니다' })
+    }
     if (!company.active || company.status !== 'active') {
       return res.status(403).json({ error: '이용이 중지된 회사입니다. 관리자에게 문의하세요' })
     }
 
+    // 계정 층 — 이 회사의 이 아이디가 최근에 반복 실패했는지.
+    // audit_logs 에 남는 username 과 맞춰 trim 한 값으로 조회한다.
+    const uname = String(username).trim()
+    const acctWait = await accountBlockedFor(platformPool, company.id, uname)
+    if (acctWait) {
+      // 잠긴 계정을 계속 두드리는 것도 실패로 센다. 이게 없으면 공격자가 잠금 상태에서
+      // 요청마다 DB 조회 + 감사기록을 무한히 유발할 수 있다(잠금이 오히려 부하가 된다).
+      // IP 층이 곧 잠기면 이후 요청은 맨 위에서 DB 접근 없이 끊긴다.
+      noteFailure(ip)
+      audit({ companyId: company.id, username: uname, action: 'login_blocked', ip })
+      res.set('Retry-After', String(acctWait))
+      return res.status(429).json({ error: waitMessage(acctWait) })
+    }
+
     const [rows] = await platformPool.execute(
       'SELECT * FROM users WHERE company_id = ? AND username = ? AND active = 1',
-      [company.id, String(username).trim()]
+      [company.id, uname]
     )
     const user = rows[0]
     // 아이디/비번은 어느 쪽이 틀렸는지 구분해서 알려주지 않는다.
     if (!user || !(await bcrypt.compare(password, user.password))) {
-      audit({ companyId: company.id, username, action: 'login_fail', ip: clientIp(req) })
+      noteFailure(ip)
+      audit({ companyId: company.id, username: uname, action: 'login_fail', ip })
       return res.status(401).json({ error: '아이디 또는 비밀번호가 올바르지 않습니다' })
     }
 
@@ -69,7 +100,9 @@ router.post('/login', async (req, res, next) => {
       process.env.JWT_SECRET,
       { expiresIn: '8h' }
     )
-    audit({ companyId: company.id, userId: user.id, username: user.username, action: 'login', ip: clientIp(req) })
+    // 성공했으니 이 IP의 누적 실패는 지운다(같은 사무실 다른 사람이 애먼 잠금에 걸리지 않도록).
+    noteSuccess(ip)
+    audit({ companyId: company.id, userId: user.id, username: user.username, action: 'login', ip })
     // 첨부파일은 브라우저가 직접 열기 때문에 헤더를 실을 수 없다 → /uploads 전용 쿠키로 인증한다.
     setFileCookie(res, token)
     res.json({
