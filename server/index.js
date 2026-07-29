@@ -16,8 +16,32 @@ const PORT = process.env.PORT || 3001
 app.set('case sensitive routing', true)
 app.set('strict routing', false)
 
+// ── 기본 보안 헤더 ──
+// nosniff·frameguard·referrer 정책 등 표준 헤더를 한 번에 붙이고 X-Powered-By 를 지운다.
+//
+// CSP 는 일부러 끈다. 이 SPA 는 인쇄를 iframe.srcdoc + 인라인 style 로 만들고(HR.jsx,
+// WorkContract.jsx) Vite 빌드도 인라인을 섞는다. 잘못된 CSP 는 화면을 통째로 깨뜨리는데
+// 그게 배포 후에야 드러난다. 켜려면 실제 리소스를 전수 조사한 뒤 별도로 다뤄야 한다.
+//
+// HSTS 도 끈다. 이 서버는 0.0.0.0:8081 에 바인딩돼 사무실 LAN 에서 http 로 직접 접속한다.
+// HSTS 를 내보내면 브라우저가 그 호스트를 https 로 강제해 LAN 접속이 막힌다.
+// 외부(donidora.com)의 https 강제는 Cloudflare 쪽에서 하는 것이 맞다.
+const helmet = require('helmet')
+app.use(helmet({
+  contentSecurityPolicy: false,
+  strictTransportSecurity: false,
+  // 첨부파일·이미지를 개발 환경(5173)에서도 열 수 있어야 한다. 운영은 동일 오리진이다.
+  crossOriginResourcePolicy: { policy: 'same-site' },
+}))
+
 app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:4173'] }))
-app.use(express.json())
+// 본문 크기 상한 — 기본값(100kb)보다 넉넉하되 무제한은 아니다.
+// 엑셀 일괄 업로드는 파일을 multer 로 받지만, 매핑 결과를 JSON 으로 되보내는 경로가 있어
+// 100kb 는 빠듯할 수 있다. 파일 자체는 multer 의 20MB 제한이 따로 건다.
+app.use(express.json({ limit: '1mb' }))
+
+// /api 전역 요청 한도(완만). 로그인은 loginGuard 가 따로, 더 엄격하게 막는다.
+app.use('/api', require('./lib/rateLimit').apiRateLimit())
 // ⚠ /uploads 는 절대 정적 서빙하지 않는다.
 // 예전에는 express.static으로 통째로 열려 있어, 경로만 알면 인증 없이 남의 회사
 // 증빙·계약서를 받아갈 수 있었다. 이제 인증 + 소유 회사 확인을 거쳐야 한다.
