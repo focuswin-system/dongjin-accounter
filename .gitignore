@@ -27,3 +27,6 @@ screenshots/
 dev-dist/
 .bkit/
 /payslip-*.png
+
+# 배포 provenance — deploy.sh 가 서버에 직접 기록한다(커밋 대상 아님)
+server/deploy-info.json

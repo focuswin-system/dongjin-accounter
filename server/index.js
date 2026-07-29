@@ -94,7 +94,19 @@ app.use('/api/purchase-reqs',      require('./routes/purchase-reqs'))
 app.use('/api/quote-reqs',         require('./routes/quote-reqs'))
 app.use('/api/approval-presets',   require('./routes/approval-presets'))
 
-app.get('/api/health', (_, res) => res.json({ ok: true, time: new Date().toISOString() }))
+// ── 헬스체크 ──
+// deploy.sh 가 배포 시점에 기록한 provenance 를 함께 돌려준다.
+// 이 스크립트는 git 이 아니라 작업 트리를 전송하므로, 이게 없으면 "지금 운영에 뭐가
+// 도는지"를 커밋으로 답할 수 없다. 장애 때 무엇으로 되돌려야 하는지가 여기서 나온다.
+// 파일이 없으면(로컬 개발) null — 기동 시 한 번만 읽는다.
+let DEPLOY_INFO = null
+try {
+  DEPLOY_INFO = JSON.parse(fs.readFileSync(path.join(__dirname, 'deploy-info.json'), 'utf8'))
+} catch { /* 로컬 개발이거나 provenance 이전에 배포된 서버 */ }
+
+app.get('/api/health', (_, res) => res.json({
+  ok: true, time: new Date().toISOString(), deploy: DEPLOY_INFO,
+}))
 
 // ── 정적 SPA 서빙 (배포 환경) ──
 // 빌드된 dist/가 있으면 프론트도 이 서버가 직접 서빙한다. dist가 없으면
