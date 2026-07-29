@@ -1,6 +1,10 @@
 /**
- * API layer — Express/SQLite 서버 전용 (localhost:3001)
- * 서버가 꺼져 있으면 빈 배열/null 반환 (mock 없음)
+ * API layer — Express + MariaDB 백엔드 전용. 모든 요청은 같은 오리진의 /api 로 나간다
+ * (개발에서는 Vite 프록시가 로컬 서버로 넘긴다 — 포트는 vite.config.js 참조).
+ *
+ * ⚠ 조회 계열 메서드는 실패를 `catch { return [] }` 로 삼켜 화면이 안 깨지게 한다.
+ *   대신 그대로 두면 서버 장애와 '데이터 0건'이 똑같아 보이므로, 삼키기 전에
+ *   req() 가 setApiFailureHandler 로 알린다(아래 notifyInfra 참조).
  */
 
 const BASE = '/api'

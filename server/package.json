@@ -1,7 +1,7 @@
 {
   "name": "focus-accounter-server",
   "version": "1.0.0",
-  "description": "동진테크 ERP 백엔드 — Express + SQLite",
+  "description": "도니도라 회계관리 백엔드 — Express + MariaDB (멀티테넌트, DB-per-tenant)",
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
