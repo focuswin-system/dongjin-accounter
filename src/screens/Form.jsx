@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { Icon, fmtNum, useToast, Combobox, Drawer, MoneyInput, localToday } from '../lib/ui'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
+import { quickAddCategory, quickAddRefItem } from '../lib/quickAdd'
 
 // 과세유형 3종. 영세 = 세율 0%인 과세거래(수출·해외용역) — 세액은 0이지만 과세표준엔 들어간다.
 // 면세와 값을 나눠 두지 않으면 신고서에서 둘을 구분할 수 없다. 서버 lib/vat.js와 같은 값집합.
@@ -321,7 +322,15 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                 options={categories.filter(c => c.id?.startsWith(kind === "income" ? "INC-" : "EXP-"))
                   .map(c => ({ value: c.name, label: c.name, sub: c.group_name || "" }))}
                 placeholder={kind === "income" ? "수금 유형을 검색하거나 선택하세요" : "비목을 검색하거나 선택하세요"}
-                allowAdd={false}/>
+                onAddNew={async (q) => {
+                  const nm = await quickAddCategory(q, {
+                    kind: kind === "income" ? "inc" : "exp", setCategories, toast,
+                  })
+                  // 새 비목은 서버 기본값(과세 10%·공제 가능)으로 만들어진다.
+                  // 그 값들을 폼에도 그대로 반영해 '고른 것'과 '만든 것'이 같게 동작하게 한다.
+                  if (nm) setForm(f => applyTax({ ...f, category: nm, acctGroup: "", taxType: "과세", vatDeductible: true }, f.amount, false))
+                }}
+                addNewLabel={kind === "income" ? "수금 유형으로 등록" : "비목으로 등록"}/>
             </FormField>
 
             <FormField label="품목" hint="선택 · 고르면 적요·금액 자동 채움">
@@ -353,7 +362,12 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                     sub: [it.code, it.spec, it.unit, unit ? fmtNum(unit) + '원' : ''].filter(Boolean).join(' · ') }
                 })}
                 placeholder="품목 선택 (선택)"
-                allowAdd={false}/>
+                onAddNew={async (q) => {
+                  const nm = await quickAddRefItem('item', q, { setList: setItems, toast, label: '품목' })
+                  // 규격·단가는 아직 없으므로 적요·금액 자동 채움은 일어나지 않는다(그게 맞다).
+                  if (nm) setForm(f => ({ ...f, item: nm }))
+                }}
+                addNewLabel="품목으로 등록"/>
             </FormField>
 
             <FormField label="적요" required hint="거래 내용">

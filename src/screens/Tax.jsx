@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, Drawer, Combobox, MoneyInput, localToday } from '../lib/ui'
 import { api } from '../lib/api'
+import { quickAddCategory } from '../lib/quickAdd'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
@@ -112,7 +113,12 @@ const FilingDrawer = ({ target, year, onClose, onSaved }) => {
               <label className="label" style={{ marginBottom: 8 }}>비목</label>
               <Combobox value={form.category} onChange={v => f('category', v)}
                 options={categories.filter(c => c.id?.startsWith(isRefund ? 'INC-' : 'EXP-')).map(c => ({ value: c.name, label: c.name, sub: c.group_name || '' }))}
-                placeholder="비목 선택" onAddNew={v => f('category', v)} addNewLabel="이 비목으로 입력"/>
+                placeholder="비목 선택"
+                onAddNew={async (q) => {
+                  const nm = await quickAddCategory(q, { kind: isRefund ? 'inc' : 'exp', setCategories, toast })
+                  if (nm) f('category', nm)
+                }}
+                addNewLabel="비목으로 등록"/>
             </div>
             <div>
               <label className="label" style={{ marginBottom: 8 }}>계정과목 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
@@ -319,7 +325,12 @@ const OtherTaxDrawer = ({ open, editing, onClose, onSaved }) => {
               <label className="label" style={{ marginBottom: 8 }}>비목</label>
               <Combobox value={form.category} onChange={v => f('category', v)}
                 options={categories.filter(c => c.id?.startsWith(isRefund ? 'INC-' : 'EXP-')).map(c => ({ value: c.name, label: c.name, sub: c.group_name || '' }))}
-                placeholder="비목 선택" onAddNew={v => f('category', v)} addNewLabel="이 비목으로 입력"/>
+                placeholder="비목 선택"
+                onAddNew={async (q) => {
+                  const nm = await quickAddCategory(q, { kind: isRefund ? 'inc' : 'exp', setCategories, toast })
+                  if (nm) f('category', nm)
+                }}
+                addNewLabel="비목으로 등록"/>
             </div>
             <div>
               <label className="label" style={{ marginBottom: 8 }}>계정과목 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>

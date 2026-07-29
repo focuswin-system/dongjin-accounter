@@ -5,6 +5,7 @@ import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
+import { quickAddCategory } from '../lib/quickAdd'
 
 const STATUS_TONE = {
   "입금 완료": "pos",  "지급 완료": "pos",
@@ -318,7 +319,13 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
                         <label className="label" style={{ marginTop: 4 }}>비목</label>
                         <Combobox value={matchCategory} onChange={setMatchCategory}
                           options={categories.filter(c => c.id?.startsWith(isIssued ? "INC-" : "EXP-")).map(c => ({ value: c.name, label: c.name, sub: c.group_name || "" }))}
-                          placeholder="비목 선택" onAddNew={setMatchCategory} addNewLabel="이 비목으로 입력"/>
+                          placeholder="비목 선택"
+                          onAddNew={async (q) => {
+                            // 예전에는 값만 넣고 끝나서, 같은 비목을 다음 정산 때 또 타이핑해야 했다.
+                            const nm = await quickAddCategory(q, { kind: isIssued ? 'inc' : 'exp', setCategories, toast })
+                            if (nm) setMatchCategory(nm)
+                          }}
+                          addNewLabel="비목으로 등록"/>
                         <label className="label" style={{ marginTop: 4 }}>적요</label>
                         <Combobox value={matchMemo} onChange={setMatchMemo}
                           options={jeokyos.map(j => ({ value: j.name, label: j.name, sub: j.memo || "" }))}
