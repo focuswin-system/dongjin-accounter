@@ -51,7 +51,7 @@ async function insertWithDocNo(computeNo, insert) {
       await sleep(10 * (i + 1) + Math.floor(Math.random() * 15))
     }
   }
-  // 5번 연속 충돌은 정상 경합이 아니다(번호 규칙이 깨졌거나 데이터가 이상하다)
+  // MAX_TRIES 연속 충돌은 정상 경합이 아니다(번호 규칙이 깨졌거나 데이터가 이상하다)
   const err = new Error('문서번호를 만들지 못했어요. 잠시 후 다시 시도해주세요.')
   err.status = 409
   err.expose = true
