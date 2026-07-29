@@ -473,18 +473,23 @@ export const useToast = () => useContext(ToastCtx);
 
 export const ToastProvider = ({ children }) => {
   const [items, setItems] = useState([]);
+  // ⚠ tone 은 오래 무시되고 있었다 — 호출부는 { tone: "warn" } 을 넘기는데 저장도 표시도
+  //   하지 않아, "금액을 입력하세요"·"삭제에 실패했어요" 가 성공과 똑같은 체크 표시로 떴다.
+  //   실패를 성공처럼 보여주는 것은 알리지 않는 것보다 나쁘다.
   const push = (msg, opts = {}) => {
     const id = Math.random().toString(36).slice(2);
-    setItems(cur => [...cur, { id, msg, icon: opts.icon }]);
-    setTimeout(() => setItems(cur => cur.filter(t => t.id !== id)), opts.duration || 2400);
+    const tone = opts.tone === "warn" || opts.tone === "neg" ? opts.tone : null;
+    setItems(cur => [...cur, { id, msg, icon: opts.icon, tone }]);
+    // 경고는 읽는 데 시간이 더 걸린다(대기 시간 안내 등 문장이 길다).
+    setTimeout(() => setItems(cur => cur.filter(t => t.id !== id)), opts.duration || (tone ? 4200 : 2400));
   };
   return (
     <ToastCtx.Provider value={{ push }}>
       {children}
       <div className="toast-stack">
         {items.map(t => (
-          <div key={t.id} className="toast">
-            <Icon.Check size={16}/>
+          <div key={t.id} className={`toast${t.tone ? ` is-${t.tone}` : ""}`}>
+            {t.tone ? <Icon.Warn size={16}/> : <Icon.Check size={16}/>}
             <span>{t.msg}</span>
           </div>
         ))}

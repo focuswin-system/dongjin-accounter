@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, Fragment, Component } from 'react'
 import logoSymbol from './assets/company/favicon.svg'
 import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider } from './lib/ui'
-import { api } from './lib/api'
+import { api, setApiFailureHandler } from './lib/api'
 import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID } from './lib/nav'
 import { LoginScreen } from './screens/Login'
 import { HomeScreen } from './screens/Home'
@@ -254,6 +254,47 @@ function AppInner({ onLogout, user }) {
   const toast = useToast();
   const { confirm } = useConfirm();
   const unreadCount = notifRead ? 0 : notifs.length;
+
+  // ── 놓친 비동기 실패를 사용자에게 알린다 ──
+  // 화면 코드 대부분은 load() 안에서 api 를 await 만 하고 try 로 감싸지 않는다(호출 265곳,
+  // try 12곳). ErrorBoundary 는 '렌더' 오류만 잡으므로 이런 실패는 어디에도 걸리지 않고,
+  // 결과적으로 화면이 조용히 빈 상태로 남는다 — 사용자는 데이터가 없는 것인지 서버가
+  // 죽은 것인지 알 수 없다. 마지막 안전망으로 여기서 받아 토스트로 알린다.
+  //
+  // 근본 해결은 각 호출부가 실패를 다루는 것이지만, 그때까지도 '조용히 실패'만은 없어야 한다.
+  useEffect(() => {
+    // 한 화면이 API를 5~10번 부르므로 서버가 죽으면 같은 문구가 그만큼 쏟아진다.
+    // 사용자에게 필요한 정보는 "서버가 안 된다" 하나뿐이다 — 잠깐 사이 같은 문구는 한 번만.
+    let lastMsg = '', lastAt = 0;
+    const announce = (msg) => {
+      const now = Date.now();
+      if (msg === lastMsg && now - lastAt < 3000) return;
+      lastMsg = msg; lastAt = now;
+      toast.push(msg, { tone: 'warn' });
+    };
+
+    // (1) 요청 계층이 직접 알리는 인프라 실패.
+    //     조회 메서드는 실패를 `catch { return [] }` 로 삼켜 화면을 빈 목록으로 만든다.
+    //     rejection 이 생기지 않으므로 아래 (2) 로는 절대 잡히지 않는다 — 이 경로가 본체다.
+    setApiFailureHandler((err) => announce(err.message));
+
+    // (2) 아무도 잡지 않은 나머지 실패(마지막 안전망).
+    const onRejection = (e) => {
+      const err = e.reason;
+      // 401은 이미 로그인 화면으로 되돌리는 중이라 토스트가 오히려 혼란스럽다.
+      if (err?.kind === 'auth') { e.preventDefault(); return }
+      // (1)에서 이미 알린 오류를 두 번 띄우지 않는다.
+      if (!err?.notified) announce(err?.message || '요청을 처리하지 못했어요.');
+      // 콘솔에는 원본을 남긴다(운영 진단용). 기본 'Uncaught (in promise)' 는 막는다.
+      console.warn('[처리되지 않은 요청 실패]', err);
+      e.preventDefault();
+    };
+    window.addEventListener('unhandledrejection', onRejection);
+    return () => {
+      setApiFailureHandler(null);
+      window.removeEventListener('unhandledrejection', onRejection);
+    };
+  }, [toast]);
 
   // 실데이터 알림 로드 (거래/청구서 변동 시 갱신)
   useEffect(() => {

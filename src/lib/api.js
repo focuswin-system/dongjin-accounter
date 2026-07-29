@@ -13,27 +13,76 @@ const localToday = () => {
 }
 const localMonth = () => localToday().slice(0, 7)
 
+/**
+ * 실패를 사용자에게 설명 가능한 형태로 만든다.
+ *
+ * 화면 코드 대부분은 load() 안에서 이 함수를 await 만 하고 try 로 감싸지 않는다.
+ * 그대로 두면 실패가 unhandledrejection 으로 새어나가 **화면이 조용히 빈 상태로 남는다**
+ * — 사용자는 '데이터가 없는 것'과 '서버가 죽은 것'을 구분할 수 없다.
+ * 그래서 던지는 오류에 status·kind 를 붙여, App 의 전역 핸들러가 무엇이 잘못됐는지
+ * 토스트로 알려줄 수 있게 한다.
+ */
+function apiError(message, { status = 0, kind = 'http' } = {}) {
+  const e = new Error(message)
+  e.status = status
+  e.kind = kind      // 'network' | 'auth' | 'ratelimit' | 'http'
+  return e
+}
+
+/**
+ * 인프라 실패 알림 — App 이 토스트에 연결한다.
+ *
+ * ⚠ 조회 계열 메서드는 대부분 `catch { return [] }` 로 실패를 빈 배열로 바꾼다.
+ * 화면이 안 깨지는 대신 **서버가 죽은 것과 데이터가 0건인 것이 똑같아 보인다.**
+ * 그래서 삼켜지기 전, 요청 계층에서 한 번 알린다. 여기서 알리지 않으면
+ * 전역 unhandledrejection 핸들러도 소용없다 — 애초에 rejection 이 생기지 않으니까.
+ *
+ * 다만 모든 실패를 알리지는 않는다. 400/409 같은 업무 규칙 위반은 호출부가 이미
+ * 화면에 사유를 띄우므로(마감된 기간·계좌 미선택 등) 토스트까지 겹치면 시끄럽다.
+ * 화면 코드가 어찌할 수 없는 것 — 네트워크 단절·5xx·429 — 만 알린다.
+ */
+let infraFailureHandler = null
+export function setApiFailureHandler(fn) { infraFailureHandler = fn }
+
+function notifyInfra(err) {
+  const infra = err.kind === 'network' || err.kind === 'ratelimit' || err.status >= 500
+  if (!infra || !infraFailureHandler) return err
+  err.notified = true   // 전역 핸들러가 같은 오류를 두 번 띄우지 않도록
+  try { infraFailureHandler(err) } catch { /* 알림 실패가 요청을 막지 않는다 */ }
+  return err
+}
+
 async function req(path, opts = {}) {
   const token = localStorage.getItem('token')
-  const res = await fetch(BASE + path, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    ...opts,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  })
+  let res
+  try {
+    res = await fetch(BASE + path, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      ...opts,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    })
+  } catch {
+    // fetch 자체가 실패 = 서버가 내려갔거나 네트워크가 끊겼다.
+    // 기본 메시지("Failed to fetch")는 사용자에게 아무 의미가 없다.
+    throw notifyInfra(apiError('서버에 연결할 수 없어요. 잠시 후 다시 시도해주세요.', { kind: 'network' }))
+  }
   if (res.status === 401) {
     localStorage.removeItem('token')
     localStorage.removeItem('loggedIn')
     localStorage.removeItem('user')
     window.location.reload()
-    throw new Error('인증이 만료되었습니다')
+    // kind:'auth' — 어차피 로그인 화면으로 되돌아가므로 토스트를 띄우지 않는다.
+    throw apiError('인증이 만료되었습니다', { status: 401, kind: 'auth' })
   }
   if (!res.ok) {
-    let msg = `API ${path} → ${res.status}`
+    let msg = `요청을 처리하지 못했어요 (${res.status})`
     try { const body = await res.json(); if (body?.error) msg = body.error } catch { /* 본문 없음 */ }
-    throw new Error(msg)
+    // 429는 서버가 이유와 대기 시간을 문구에 담아 보낸다(시도 제한·요청 한도).
+    // 이걸 삼키면 사용자는 왜 막혔는지 모른 채 빈 화면만 본다.
+    throw notifyInfra(apiError(msg, { status: res.status, kind: res.status === 429 ? 'ratelimit' : 'http' }))
   }
   return res.json()
 }
