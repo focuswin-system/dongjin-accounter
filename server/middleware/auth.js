@@ -1,4 +1,6 @@
 const jwt = require('jsonwebtoken')
+const { renewedToken } = require('../lib/session')
+const { setFileCookie } = require('./fileAuth')
 
 /**
  * JWT 검증. 멀티테넌트 전환 후 토큰에는 companyId·dbName이 반드시 실려 있어야 한다
@@ -33,6 +35,15 @@ module.exports = function authMiddleware(req, res, next) {
       return res.status(403).json({ error: '임시 비밀번호예요. 먼저 비밀번호를 변경해주세요.', mustChangePw: true })
     }
   }
+  // 만료가 다가오면 조용히 새 토큰을 실어 보낸다(슬라이딩 세션).
+  // 일하는 도중에 튕기지 않게 하는 장치다 — 자세한 정책은 lib/session.js 참고.
+  // 첨부파일용 쿠키도 같은 토큰으로 맞춰야 /uploads 접근이 함께 연장된다.
+  const renewed = renewedToken(payload)
+  if (renewed) {
+    res.set('X-Renewed-Token', renewed)
+    setFileCookie(res, renewed)
+  }
+
   req.user = payload
   next()
 }

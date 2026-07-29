@@ -20,6 +20,7 @@ const { setFileCookie, clearFileCookie } = require('../middleware/fileAuth')
 const {
   clientIp, noteFailure, noteSuccess, ipBlockedFor, accountBlockedFor, waitMessage,
 } = require('../lib/loginGuard')
+const { signSession } = require('../lib/session')
 
 const router = Router()
 
@@ -93,20 +94,17 @@ router.post('/login', async (req, res, next) => {
       return res.status(401).json({ error: '아이디 또는 비밀번호가 올바르지 않습니다' })
     }
 
-    const token = jwt.sign(
-      {
-        id: user.id,
-        companyId: company.id,
-        dbName: company.db_name,   // tenant 미들웨어가 이 값으로 회사 DB를 고른다(P2)
-        username: user.username,
-        name: user.name,
-        role: user.role,
-        // 임시 비번이면 토큰에 플래그 → 미들웨어가 비번 변경 전까지 다른 API를 막는다(서버 강제)
-        mustChangePw: !!user.must_change_pw,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: '8h' }
-    )
+    // 수명·갱신 정책은 lib/session.js 한곳에서 정한다(쓰는 동안 튕기지 않도록 슬라이딩).
+    const token = signSession({
+      id: user.id,
+      companyId: company.id,
+      dbName: company.db_name,   // tenant 미들웨어가 이 값으로 회사 DB를 고른다(P2)
+      username: user.username,
+      name: user.name,
+      role: user.role,
+      // 임시 비번이면 토큰에 플래그 → 미들웨어가 비번 변경 전까지 다른 API를 막는다(서버 강제)
+      mustChangePw: !!user.must_change_pw,
+    })
     // 성공했으니 이 IP의 누적 실패를 한 번분 덜어낸다(같은 사무실 다른 사람이 애먼 잠금에 걸리지 않도록).
     noteSuccess(ip)
     // 이 기록이 계정 층의 카운트 기준선을 민다 = 잠겨 있었더라도 여기서 풀린다.
@@ -208,10 +206,11 @@ router.put('/users/:id/password', authMiddleware, async (req, res, next) => {
     // 본인이 임시 비번을 바꾼 경우: 기존 토큰엔 mustChangePw=true가 남아 미들웨어가 계속 막는다
     // → mustChangePw를 뗀 새 토큰을 발급해 게이트를 즉시 푼다.
     if (isSelf && req.user.mustChangePw) {
-      const token = jwt.sign(
+      // 최초 로그인 시각(loginAt)은 그대로 물려준다 — 비번을 바꿨다고 절대 상한이 밀리면 안 된다.
+      const token = signSession(
         { id: req.user.id, companyId: req.user.companyId, dbName: req.user.dbName,
-          username: req.user.username, name: req.user.name, role: req.user.role, mustChangePw: false },
-        process.env.JWT_SECRET, { expiresIn: '8h' })
+          username: req.user.username, name: req.user.name, role: req.user.role,
+          mustChangePw: false, loginAt: req.user.loginAt })
       return res.json({ ok: true, token })
     }
     res.json({ ok: true })

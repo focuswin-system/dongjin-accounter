@@ -73,6 +73,11 @@ async function req(path, opts = {}) {
     // 기본 메시지("Failed to fetch")는 사용자에게 아무 의미가 없다.
     throw notifyInfra(apiError('서버에 연결할 수 없어요. 잠시 후 다시 시도해주세요.', { kind: 'network' }))
   }
+  // 슬라이딩 세션 — 서버가 만료 임박을 감지하면 새 토큰을 실어 보낸다.
+  // 조용히 갈아끼운다(사용자에게 알릴 일이 아니다). 이게 있어야 일하는 도중에 안 튕긴다.
+  const renewed = res.headers.get('X-Renewed-Token')
+  if (renewed) localStorage.setItem('token', renewed)
+
   if (res.status === 401) {
     localStorage.removeItem('token')
     localStorage.removeItem('loggedIn')

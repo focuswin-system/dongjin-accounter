@@ -34,7 +34,12 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'same-site' },
 }))
 
-app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:4173'] }))
+// exposedHeaders: 슬라이딩 세션이 실어 보내는 갱신 토큰을 브라우저 JS가 읽을 수 있어야 한다.
+// (운영은 동일 오리진이라 무관하지만, 개발은 5173→서버로 크로스 오리진이다)
+app.use(cors({
+  origin: ['http://localhost:5173', 'http://localhost:4173'],
+  exposedHeaders: ['X-Renewed-Token'],
+}))
 // 본문 크기 상한 — 기본값(100kb)보다 넉넉하되 무제한은 아니다.
 // 엑셀 일괄 업로드는 파일을 multer 로 받지만, 매핑 결과를 JSON 으로 되보내는 경로가 있어
 // 100kb 는 빠듯할 수 있다. 파일 자체는 multer 의 20MB 제한이 따로 건다.
