@@ -62,27 +62,34 @@ router.post('/login', async (req, res, next) => {
 
     // 계정 층 — 이 회사의 이 아이디가 최근에 반복 실패했는지.
     // audit_logs 에 남는 username 과 맞춰 trim 한 값으로 조회한다.
+    //
+    // ⚠ 잠겨 있어도 여기서 바로 끊지 않는다. 회사코드는 비밀이 아니고 마스터 아이디는
+    // 'admin' 으로 고정이라, 즉시 차단하면 아무나 틀린 비번 5회로 남의 회사 마스터를
+    // 무기한 잠글 수 있다(15분마다 5회면 IP 층 임계값에도 안 걸린다 = 잠금이 DoS 무기가 된다).
+    // 비밀번호는 끝까지 확인하고 맞으면 통과시킨다. 추측을 막는 목적은 그대로다 —
+    // 틀린 비번은 잠금이 풀릴 때까지 계속 429로 거부된다.
     const uname = String(username).trim()
     const acctWait = await accountBlockedFor(platformPool, company.id, uname)
-    if (acctWait) {
-      // 잠긴 계정을 계속 두드리는 것도 실패로 센다. 이게 없으면 공격자가 잠금 상태에서
-      // 요청마다 DB 조회 + 감사기록을 무한히 유발할 수 있다(잠금이 오히려 부하가 된다).
-      // IP 층이 곧 잠기면 이후 요청은 맨 위에서 DB 접근 없이 끊긴다.
-      noteFailure(ip)
-      audit({ companyId: company.id, username: uname, action: 'login_blocked', ip })
-      res.set('Retry-After', String(acctWait))
-      return res.status(429).json({ error: waitMessage(acctWait) })
-    }
 
     const [rows] = await platformPool.execute(
       'SELECT * FROM users WHERE company_id = ? AND username = ? AND active = 1',
       [company.id, uname]
     )
     const user = rows[0]
-    // 아이디/비번은 어느 쪽이 틀렸는지 구분해서 알려주지 않는다.
-    if (!user || !(await bcrypt.compare(password, user.password))) {
+    const ok = !!user && await bcrypt.compare(password, user.password)
+    if (!ok) {
       noteFailure(ip)
-      audit({ companyId: company.id, username: uname, action: 'login_fail', ip })
+      // 이 기록이 곧 계정 층의 카운트 근거다. fire-and-forget 으로 두면 동시에 들어온
+      // 요청들이 서로의 실패를 보지 못하고 전부 잠금을 통과한다 → 응답 전에 확실히 남긴다.
+      await audit({
+        companyId: company.id, username: uname, action: 'login_fail', ip,
+        detail: acctWait ? 'locked' : null,
+      })
+      if (acctWait) {
+        res.set('Retry-After', String(acctWait))
+        return res.status(429).json({ error: waitMessage(acctWait) })
+      }
+      // 아이디/비번은 어느 쪽이 틀렸는지 구분해서 알려주지 않는다.
       return res.status(401).json({ error: '아이디 또는 비밀번호가 올바르지 않습니다' })
     }
 
@@ -100,9 +107,11 @@ router.post('/login', async (req, res, next) => {
       process.env.JWT_SECRET,
       { expiresIn: '8h' }
     )
-    // 성공했으니 이 IP의 누적 실패는 지운다(같은 사무실 다른 사람이 애먼 잠금에 걸리지 않도록).
+    // 성공했으니 이 IP의 누적 실패를 한 번분 덜어낸다(같은 사무실 다른 사람이 애먼 잠금에 걸리지 않도록).
     noteSuccess(ip)
-    audit({ companyId: company.id, userId: user.id, username: user.username, action: 'login', ip })
+    // 이 기록이 계정 층의 카운트 기준선을 민다 = 잠겨 있었더라도 여기서 풀린다.
+    // 응답보다 먼저 남아야 바로 다음 요청이 이미 풀린 상태를 본다.
+    await audit({ companyId: company.id, userId: user.id, username: user.username, action: 'login', ip })
     // 첨부파일은 브라우저가 직접 열기 때문에 헤더를 실을 수 없다 → /uploads 전용 쿠키로 인증한다.
     setFileCookie(res, token)
     res.json({

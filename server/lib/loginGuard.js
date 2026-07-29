@@ -29,7 +29,7 @@ const ACCOUNT_HARD_FAILS = 10   // 계속 두드리면
 const ACCOUNT_HARD_LOCK_MIN = 60 // 잠금을 늘린다
 
 const IP_WINDOW_MIN = 10
-const IP_MAX_FAILS = 20         // 한 사무실에서 여러 명이 쓸 수 있으므로 계정보다 넉넉히
+const IP_MAX_FAILS = 30         // 한 사무실에서 여러 명이 쓸 수 있으므로 계정보다 넉넉히
 const IP_LOCK_MIN = 10
 
 const MIN = 60 * 1000
@@ -68,10 +68,12 @@ function pruneIp(now) {
   }
 }
 
-/** 로그인 실패를 IP 층에 기록한다. 회사코드가 틀린 경우처럼 계정을 특정할 수 없을 때도 부른다. */
-function noteFailure(ip) {
+/**
+ * 로그인 실패를 IP 층에 기록한다. 회사코드가 틀린 경우처럼 계정을 특정할 수 없을 때도 부른다.
+ * now 는 테스트에서 시간 경과를 재현하기 위한 주입점이다(운영에서는 넘기지 않는다).
+ */
+function noteFailure(ip, now = Date.now()) {
   if (!ip) return
-  const now = Date.now()
   if (ipFails.size > 5000) pruneIp(now)   // 방치 시 메모리 증가 방지
   const rec = ipFails.get(ip)
   if (!rec || now - rec.first > IP_WINDOW_MIN * MIN) {
@@ -82,25 +84,46 @@ function noteFailure(ip) {
   if (rec.count >= IP_MAX_FAILS) rec.until = now + IP_LOCK_MIN * MIN
 }
 
-/** 로그인 성공 — 그 IP의 누적 실패를 지운다(정상 사용자가 오래 묶이지 않도록). */
+/**
+ * 로그인 성공 — 그 IP의 누적 실패를 한 번분만 덜어낸다.
+ *
+ * ⚠ 여기서 카운터를 통째로 지우면 안 된다. 이 서비스는 멀티테넌트라 공격자가
+ * '자기 회사의 정상 계정'을 갖고 있는 것이 흔한 상황인데, 지워버리면
+ * [남의 회사 admin 을 29회 두드림 → 자기 계정으로 1회 로그인 → 카운터 0] 을
+ * 반복해 IP 층을 통째로 우회할 수 있다.
+ *
+ * 한 번분만 덜면 정상 사용자(성공이 실패보다 잦다)는 자연히 0으로 수렴하고,
+ * 공격자는 실패가 성공보다 압도적으로 많아 결국 잠긴다.
+ */
 function noteSuccess(ip) {
-  if (ip) ipFails.delete(ip)
+  if (!ip) return
+  const rec = ipFails.get(ip)
+  if (!rec) return
+  rec.count -= 1
+  if (rec.count <= 0) ipFails.delete(ip)
 }
 
 /** IP가 잠겨 있으면 남은 초, 아니면 0. */
-function ipBlockedFor(ip) {
+function ipBlockedFor(ip, now = Date.now()) {
   if (!ip) return 0
   const rec = ipFails.get(ip)
   if (!rec || !rec.until) return 0
-  const left = Math.ceil((rec.until - Date.now()) / 1000)
+  const left = Math.ceil((rec.until - now) / 1000)
   return left > 0 ? left : 0
 }
 
 /**
  * 계정이 잠겨 있으면 남은 초, 아니면 0.
  *
+ * ⚠ 호출자는 이 값이 0이 아니라고 해서 즉시 차단하면 안 된다.
+ * 회사코드는 비밀이 아니고 마스터 아이디는 'admin' 으로 고정이라, 즉시 차단하면
+ * 아무나 틀린 비번 5회로 남의 회사 마스터를 무기한 잠글 수 있다(잠금이 DoS 무기가 된다).
+ * 비밀번호는 끝까지 확인하고 **맞으면 통과**시킨 뒤, 틀렸을 때만 이 값으로 429를 준다.
+ * 추측을 막는다는 목적은 그대로다 — 틀린 비번은 잠금이 풀릴 때까지 계속 거부된다.
+ *
  * 마지막 '성공' 이후의 실패만 센다 — 몇 번 틀리다 로그인에 성공한 사용자가
  * 잠시 뒤 한 번 더 틀렸다고 잠기면 안 되기 때문이다.
+ * (성공이 기준선을 밀기 때문에, 위 정책대로 통과한 로그인은 잠금도 함께 푼다.)
  *
  * 시간 비교는 전부 DB 안에서 한다(클라이언트 시계와 DB 시계가 어긋나도 영향 없음).
  *
@@ -110,6 +133,18 @@ function ipBlockedFor(ip) {
  */
 async function accountBlockedFor(platformPool, companyId, username) {
   if (!companyId || !username) return 0
+  try {
+    return await queryAccountBlock(platformPool, companyId, username)
+  } catch (e) {
+    // 판정에 실패하면 '열어둔다'. 이 조회 하나가 전 사용자의 로그인을 막는
+    // 단일 실패점이 되어선 안 된다 — 시도 제한은 부가 방어이고, 로그인 가용성이
+    // 회계 업무의 본체다. 대신 반드시 눈에 띄게 남긴다.
+    console.warn('[loginGuard] 계정 시도 제한 판정 실패 — 통과시킴:', e.code || e.message)
+    return 0
+  }
+}
+
+async function queryAccountBlock(platformPool, companyId, username) {
   // 임계값은 전부 이 파일의 상수다(사용자 입력이 SQL로 들어가지 않는다).
   const [[row]] = await platformPool.execute(
     `SELECT COUNT(*) AS fails,

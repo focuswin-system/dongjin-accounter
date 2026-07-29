@@ -55,13 +55,48 @@ test('IP 층 — 임계값에 도달하면 잠기고 남은 시간을 준다', (
   assert.ok(left <= _thresholds.IP_LOCK_MIN * 60, '남은 초가 잠금 시간을 넘지 않는다')
 })
 
-test('IP 층 — 로그인 성공은 누적 실패를 지운다', () => {
+test('IP 층 — 로그인 성공은 누적 실패를 한 번분만 덜어낸다', () => {
   // 같은 사무실(같은 공인 IP)의 다른 사람이 애먼 잠금에 걸리지 않게 하는 장치.
-  const ip = 'test-cleared'
-  for (let i = 0; i < _thresholds.IP_MAX_FAILS; i++) noteFailure(ip)
-  assert.ok(ipBlockedFor(ip) > 0)
+  // 다만 '통째로 지우기'는 아니어야 한다 — 아래 우회 테스트 참고.
+  const ip = 'test-decrement'
+  noteFailure(ip); noteFailure(ip); noteFailure(ip)
   noteSuccess(ip)
-  assert.strictEqual(ipBlockedFor(ip), 0)
+  // 3회 - 1회 = 2회 남았으므로, 임계값까지 남은 횟수는 IP_MAX_FAILS - 2 이다.
+  for (let i = 0; i < _thresholds.IP_MAX_FAILS - 3; i++) noteFailure(ip)
+  assert.strictEqual(ipBlockedFor(ip), 0, '아직 임계값에 못 미쳐야 한다')
+  noteFailure(ip)
+  assert.ok(ipBlockedFor(ip) > 0, '한 번 더 실패하면 잠겨야 한다')
+})
+
+test('IP 층 — 성공을 끼워넣어도 제한을 우회할 수 없다', () => {
+  // 멀티테넌트라 공격자가 '자기 회사의 정상 계정'을 가진 상황이 흔하다.
+  // 성공 시 카운터를 통째로 지우면 [29회 공격 → 자기 계정 1회 로그인] 반복으로
+  // IP 층이 통째로 무력화된다. 실패가 성공보다 많으면 결국 잠겨야 한다.
+  const ip = 'test-no-bypass'
+  for (let round = 0; round < 10; round++) {
+    for (let i = 0; i < 5; i++) noteFailure(ip)
+    noteSuccess(ip)   // 공격자가 자기 계정으로 로그인해 카운터를 씻으려 시도
+  }
+  assert.ok(ipBlockedFor(ip) > 0, '실패 50회 · 성공 10회면 잠겨 있어야 한다')
+})
+
+test('IP 층 — 윈도우가 지나면 누적이 리셋된다', () => {
+  // 오래 전 실패까지 영원히 누적되면 정상 사용자가 언젠가는 잠긴다.
+  const ip = 'test-window'
+  const t0 = 1_000_000_000_000
+  for (let i = 0; i < _thresholds.IP_MAX_FAILS - 1; i++) noteFailure(ip, t0)
+  const later = t0 + (_thresholds.IP_WINDOW_MIN + 1) * 60 * 1000
+  noteFailure(ip, later)
+  assert.strictEqual(ipBlockedFor(ip, later), 0, '윈도우 밖 실패는 잊혀야 한다')
+})
+
+test('IP 층 — 잠금은 시간이 지나면 자동으로 풀린다', () => {
+  const ip = 'test-expiry'
+  const t0 = 2_000_000_000_000
+  for (let i = 0; i < _thresholds.IP_MAX_FAILS; i++) noteFailure(ip, t0)
+  assert.ok(ipBlockedFor(ip, t0) > 0, '잠긴 직후에는 남은 시간이 있다')
+  const after = t0 + (_thresholds.IP_LOCK_MIN * 60 + 1) * 1000
+  assert.strictEqual(ipBlockedFor(ip, after), 0, '잠금 시간이 지나면 풀린다')
 })
 
 test('IP 층 — IP를 모르면(null) 아무것도 세지 않는다', () => {

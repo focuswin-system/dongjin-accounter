@@ -126,9 +126,13 @@ async function assertPlatformReady() {
 
 /**
  * 감사 로그 기록. 실패해도 본 요청을 막지 않는다(로그 때문에 업무가 멈추면 안 됨).
+ *
+ * 프로미스를 반환하므로 필요하면 await 할 수 있다. 대부분의 호출은 기다릴 이유가 없지만,
+ * 로그인 시도 제한처럼 **이 기록 자체가 다음 판정의 근거**인 곳은 반드시 await 해야 한다
+ * (기다리지 않으면 동시 요청들이 서로의 실패를 보지 못하고 전부 통과한다).
  */
 function audit({ companyId, userId, username, action, resource, targetId, ip, detail }) {
-  platformPool
+  return platformPool
     .execute(
       `INSERT INTO audit_logs (id, company_id, user_id, username, action, resource, target_id, ip, detail)
        VALUES (?,?,?,?,?,?,?,?,?)`,
