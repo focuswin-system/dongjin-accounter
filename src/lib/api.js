@@ -560,6 +560,11 @@ export const api = {
       return { ok: true, active: result.active }
     } catch { return { ok: false } }
   },
+  // 정기지출 삭제 — 앞으로 자동 생성만 멈춘다. 이미 만들어진 청구서·거래는 남는다(실제 돈 기록).
+  async deleteRecurringExpense(id) {
+    try { const r = await req(`/recurring-expenses/${id}`, { method: 'DELETE' }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
   // 지급 예정인 정기지출 회차(아직 매입 청구서 미생성) — 매입 대금청구서 '지급 예정'에 계약 지급일정과 함께
   async getPendingRecurringExpenses() {
     try { return await req('/recurring-expenses/pending') } catch { return [] }
@@ -633,6 +638,11 @@ export const api = {
       const result = await req(`/recurring-invoices/${id}/toggle`, { method: 'PATCH', body: {} })
       return { ok: true, active: result.active }
     } catch { return { ok: false } }
+  },
+  // 정기청구 삭제 — 앞으로 자동 발행만 멈춘다. 이미 발행된 청구서는 남는다.
+  async deleteRecurringInvoice(id) {
+    try { const r = await req(`/recurring-invoices/${id}`, { method: 'DELETE' }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
   },
 
   async generateRecurringInvoices() {

@@ -60,6 +60,23 @@ router.put('/:id', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/**
+ * 정기청구 삭제 — '앞으로 자동 발행하지 않는다'는 뜻이다.
+ * 이미 발행된 청구서·거래는 지우지 않는다(실제 돈 기록). 자세한 배경은 routes/recurring.js 참고.
+ */
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const [[rec]] = await req.db.execute('SELECT id FROM recurring_invoices WHERE id = ?', [req.params.id])
+    if (!rec) return res.status(404).json({ error: 'Not found' })
+    const [[kept]] = await req.db.execute(
+      `SELECT (SELECT COUNT(*) FROM invoices     WHERE recurring_id = ?) AS invs,
+              (SELECT COUNT(*) FROM transactions WHERE recurring_id = ?) AS txns`,
+      [req.params.id, req.params.id])
+    await req.db.execute('DELETE FROM recurring_invoices WHERE id = ?', [req.params.id])
+    res.json({ ok: true, keptInvoices: Number(kept.invs) || 0, keptTxns: Number(kept.txns) || 0 })
+  } catch (e) { next(e) }
+})
+
 router.patch('/:id/toggle', async (req, res, next) => {
   try {
     const [rows] = await req.db.execute('SELECT active FROM recurring_invoices WHERE id = ?', [req.params.id])

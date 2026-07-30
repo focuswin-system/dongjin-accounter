@@ -53,6 +53,31 @@ router.put('/:id', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/**
+ * 정기지출 삭제 — '앞으로 자동 생성하지 않는다'는 뜻이다.
+ *
+ * 이미 만들어진 청구서·거래는 **지우지 않는다**. 그건 실제로 오간 돈의 기록이라,
+ * 자동 생성 규칙을 지운다고 함께 사라지면 장부에 구멍이 난다.
+ * (transactions·invoices 의 recurring_id 는 '어디서 생성됐는지' 추적용이고 FK 가 없다.
+ *  가리키던 규칙이 사라져도 금액·집계에는 영향이 없다.)
+ *
+ * 지금까지는 삭제 자체가 없어서, 잘못 만든 정기지출을 끄는 것 말고는 방법이 없었다.
+ * 게다가 계약 삭제가 정기 건수를 세어 막는 탓에 계약도 못 지우는 막다른 골목이 됐다.
+ */
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const [[rec]] = await req.db.execute('SELECT id FROM recurring_expenses WHERE id = ?', [req.params.id])
+    if (!rec) return res.status(404).json({ error: 'Not found' })
+    // 남게 될 기록을 세어 알려준다 — 사용자가 '같이 지워지는 것 아닌가' 걱정하지 않도록.
+    const [[kept]] = await req.db.execute(
+      `SELECT (SELECT COUNT(*) FROM invoices     WHERE recurring_id = ?) AS invs,
+              (SELECT COUNT(*) FROM transactions WHERE recurring_id = ?) AS txns`,
+      [req.params.id, req.params.id])
+    await req.db.execute('DELETE FROM recurring_expenses WHERE id = ?', [req.params.id])
+    res.json({ ok: true, keptInvoices: Number(kept.invs) || 0, keptTxns: Number(kept.txns) || 0 })
+  } catch (e) { next(e) }
+})
+
 router.patch('/:id/toggle', async (req, res, next) => {
   try {
     const [rows] = await req.db.execute('SELECT active FROM recurring_expenses WHERE id = ?', [req.params.id])

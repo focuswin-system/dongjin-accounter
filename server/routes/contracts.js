@@ -742,8 +742,13 @@ router.delete('/:id', async (req, res, next) => {
     if (Number(cnt.recex) > 0) parts.push(`정기지출 ${cnt.recex}건`)
     if (parts.length) {
       await rollbackQuietly(conn)
+      // 어디서 정리하는지까지 알려준다. 예전에는 "먼저 정리하세요"라고만 해서,
+      // 정작 정기지출·정기청구는 지울 화면이 없어 사용자가 막다른 골목에 갇혔다.
+      const where = (Number(cnt.recin) > 0 || Number(cnt.recex) > 0)
+        ? " 정기청구·정기지출은 기준정보 화면에서 삭제할 수 있어요."
+        : ""
       return res.status(409).json({
-        error: `이 계약엔 ${parts.join(' · ')}이 연결돼 있어 지울 수 없어요. 먼저 그 기록을 정리하거나, 계약 상태를 '완료'·'보류'로 두세요.`,
+        error: `이 계약엔 ${parts.join(' · ')}이 연결돼 있어 지울 수 없어요. 먼저 그 기록을 정리하거나, 계약 상태를 '완료'·'보류'로 두세요.${where}`,
       })
     }
 

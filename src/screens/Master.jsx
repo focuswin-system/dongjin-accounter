@@ -4,6 +4,7 @@ import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { ImportWizard } from '../lib/components/ImportWizard'
+import { normBizNo, normVendorName } from '../lib/normalize'
 import { api } from '../lib/api'
 
 const fmtDateLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -553,13 +554,6 @@ export const RefMasterPanel = ({ cfg, page = false, embedded = false }) => {
 // ── 엑셀 업로드 어댑터 ────────────────────────────────────────────
 // 마법사 UI(파일→매핑→중복검토→등록)는 lib/components/ImportWizard.jsx 공용이고,
 // 여기엔 "무엇을 어떤 키로 중복 판정하느냐"만 둔다. 임포트 대상이 늘면 어댑터만 추가.
-
-const normBizNo = (v) => String(v ?? '').replace(/[^0-9]/g, '')
-// 상호 정규화: 법인격·공백·기호 제거 후 소문자 — 유사 상호 매칭용
-const normVendorName = (v) => String(v ?? '')
-  .replace(/\(주\)|\(유\)|\(재\)|\(사\)|㈜|㈔|㈕|주식회사|유한회사|재단법인|사단법인/g, '')
-  .replace(/[\s()\-.,·]/g, '')
-  .toLowerCase()
 
 const normGubu = (v) => {
   const s = String(v ?? '').trim()
@@ -1868,6 +1862,7 @@ const PERIOD_LABEL = { monthly: "매월", quarterly: "매분기", yearly: "매�
 // 정기지출 = 판관비(경비) 쪽 정기 반복. 회계처리 '경비' 그룹의 독립 화면으로도, 기준정보 탭으로도 쓴다.
 export const RecurringExpensePanel = ({ page = false }) => {
   const toast = useToast()
+  const { confirm } = useConfirm()
   const [rows, setRows] = useState([])
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState(null)   // 수정 대상(없으면 등록)
@@ -1890,6 +1885,24 @@ export const RecurringExpensePanel = ({ page = false }) => {
   const handleToggle = async (id) => {
     const res = await api.toggleRecurringExpense(id)
     toast.push(res.active ? "정기 지출이 활성화됐어요" : "정기 지출이 비활성화됐어요")
+    load()
+  }
+
+  // 삭제는 '앞으로 자동 생성하지 않는다'는 뜻이다. 이미 만들어진 청구서·거래는 남는다
+  // (실제로 오간 돈의 기록이라 함께 지우면 장부에 구멍이 난다) — 그 점을 미리 알린다.
+  const handleDelete = async (r) => {
+    const ok = await confirm({
+      tone: "neg", icon: <Icon.Warn size={22}/>,
+      title: "정기 지출 삭제",
+      body: `${r.vendor} · ${r.category}의 정기 지출을 삭제합니다. 앞으로 자동 생성되지 않아요.`,
+      detail: "이미 만들어진 청구서와 거래는 그대로 남습니다. 잠시 멈추기만 하려면 '중지'를 쓰세요.",
+      confirmLabel: "삭제",
+    })
+    if (!ok) return
+    const res = await api.deleteRecurringExpense(r.id)
+    if (!res.ok) { toast.push(res.error || "삭제에 실패했어요", { tone: "warn" }); return }
+    const kept = (res.keptInvoices || 0) + (res.keptTxns || 0)
+    toast.push(kept ? `정기 지출을 삭제했어요 (기존 기록 ${kept}건은 유지)` : "정기 지출을 삭제했어요")
     load()
   }
 
@@ -1939,6 +1952,8 @@ export const RecurringExpensePanel = ({ page = false }) => {
                     <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => handleToggle(r.id)}>
                       {r.active ? "중지" : "재개"}
                     </button>
+                    <button className="btn" style={{ fontSize: 11, padding: "3px 8px", color: "var(--neg-ink)" }}
+                      onClick={() => handleDelete(r)}>삭제</button>
                   </div>
                 </td>
               </tr>
@@ -2086,6 +2101,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
 // 정기청구 = 매출 쪽 정기 반복. 회계처리 '판매·매출' 그룹의 독립 화면으로도, 기준정보 탭으로도 쓴다.
 export const RecurringInvoicePanel = ({ page = false }) => {
   const toast = useToast()
+  const { confirm } = useConfirm()
   const [rows, setRows] = useState([])
   const [vendors, setVendors] = useState([])
   const [contracts, setContracts] = useState([])
@@ -2110,6 +2126,23 @@ export const RecurringInvoicePanel = ({ page = false }) => {
   const handleToggle = async (id) => {
     const res = await api.toggleRecurringInvoice(id)
     toast.push(res.active ? "정기 청구가 활성화됐어요" : "정기 청구가 비활성화됐어요")
+    load()
+  }
+
+  // 정기지출 쪽과 같은 원칙 — 자동 발행만 멈추고, 이미 발행된 청구서는 남긴다.
+  const handleDelete = async (r) => {
+    const ok = await confirm({
+      tone: "neg", icon: <Icon.Warn size={22}/>,
+      title: "정기 청구 삭제",
+      body: `${r.vendor} · ${r.item || r.contractName || ""}의 정기 청구를 삭제합니다. 앞으로 자동 발행되지 않아요.`.replace(/ · \./, "."),
+      detail: "이미 발행된 청구서와 거래는 그대로 남습니다. 잠시 멈추기만 하려면 '중지'를 쓰세요.",
+      confirmLabel: "삭제",
+    })
+    if (!ok) return
+    const res = await api.deleteRecurringInvoice(r.id)
+    if (!res.ok) { toast.push(res.error || "삭제에 실패했어요", { tone: "warn" }); return }
+    const kept = (res.keptInvoices || 0) + (res.keptTxns || 0)
+    toast.push(kept ? `정기 청구를 삭제했어요 (기존 기록 ${kept}건은 유지)` : "정기 청구를 삭제했어요")
     load()
   }
 
@@ -2188,6 +2221,8 @@ export const RecurringInvoicePanel = ({ page = false }) => {
                     <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => handleToggle(r.id)}>
                       {r.active ? "중지" : "재개"}
                     </button>
+                    <button className="btn" style={{ fontSize: 11, padding: "3px 8px", color: "var(--neg-ink)" }}
+                      onClick={() => handleDelete(r)}>삭제</button>
                   </div>
                 </td>
               </tr>
