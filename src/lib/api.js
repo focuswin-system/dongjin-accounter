@@ -161,6 +161,7 @@ function adaptInvoice(row) {
     vatAmount: row.vat_amount,
     totalAmount: row.total_amount,
     taxType: row.tax_type || '',   // 과세/면세/영세 — 편집 시 자동 10% 재계산을 막는 데 필요
+    ntsConfirmNo: row.nts_confirm_no || '',   // 홈택스 승인번호 — 세금계산서 임포트의 중복 판정 키
     issuedAt: row.issued_at,
     dueAt: row.due_at || null,
     status: row.status,
@@ -574,6 +575,14 @@ export const api = {
     try { const r = await req(`/recurring-expenses/${recurringId}/issue`, { method: 'POST', body: { due, paid, account_id } }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
   },
+  // 놓친 회차 일괄 등록 — 예정일이 지난 미등록 회차를 모두 '지급 대기' 청구서로.
+  // 계좌는 건드리지 않는다(지급 처리는 회차별 '기지급 처리'에서). 매출 쪽과 대칭.
+  async issueMissedRecurringExpenses() {
+    try {
+      const r = await req('/recurring-expenses/issue-missed', { method: 'POST', body: {} })
+      return { ok: true, count: r.count, generated: r.generated }
+    } catch (e) { return { ok: false, count: 0, error: e.message } }
+  },
 
   // ─── 정기청구(고정수입) ───────────────────────────────────────
   async getRecurringInvoices() {
@@ -645,11 +654,13 @@ export const api = {
     catch (e) { return { ok: false, error: e.message } }
   },
 
-  async generateRecurringInvoices() {
+  // 놓친 회차 일괄 발행 — 예정일이 지난 미발행 회차를 모두 '입금 예정' 청구서로.
+  // 계좌는 건드리지 않는다(입금 처리는 회차별 '기입금 처리'에서).
+  async issueMissedRecurringInvoices() {
     try {
-      const result = await req('/recurring-invoices/generate', { method: 'POST', body: {} })
-      return { ok: true, count: result.count, generated: result.generated }
-    } catch { return { ok: false, count: 0 } }
+      const r = await req('/recurring-invoices/issue-missed', { method: 'POST', body: {} })
+      return { ok: true, count: r.count, generated: r.generated }
+    } catch (e) { return { ok: false, count: 0, error: e.message } }
   },
 
   // ─── 계약 ─────────────────────────────────────────────────────
@@ -959,6 +970,16 @@ export const api = {
   async commitRefItemImport(type, items) {
     try {
       const r = await req('/ref-items/import/commit', { method: 'POST', body: { type, items } })
+      return { ok: true, ...r }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
+
+  // ─── 홈택스 세금계산서 엑셀 임포트(→ 청구서) ───────────────────
+  parseTaxInvoiceExcel(file) { return postImportFile('/invoices/import/parse', file) },
+
+  async commitTaxInvoiceImport(items, { registerItems = false } = {}) {
+    try {
+      const r = await req('/invoices/import/commit', { method: 'POST', body: { items, registerItems } })
       return { ok: true, ...r }
     } catch (e) { return { ok: false, error: e.message } }
   },

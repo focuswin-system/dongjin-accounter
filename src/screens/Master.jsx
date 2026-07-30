@@ -4,40 +4,43 @@ import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { ImportWizard } from '../lib/components/ImportWizard'
+import { RecurringCycles, useRecurringCycles, cycleSummaryByRule } from '../lib/components/RecurringCycles'
+import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { normBizNo, normVendorName } from '../lib/normalize'
 import { api } from '../lib/api'
 
 const fmtDateLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const todayStr = () => fmtDateLocal(new Date())
 
-// 정기 항목의 '다음 생성/청구' 예정일.
-// 서버 lib/recurrence.js 의 dueDatesToGenerate 와 같은 규칙이어야 화면과 실제가 어긋나지 않는다.
-//   · 말일 clamp — new Date(2026, 1, 31) 은 3월 3일이 된다(오버플로). 그 달 말일로 맞춘다
-//   · 주기 반영 — 분기·연 계약도 1개월씩 더하고 있었다
-const daysInMonth = (y, m) => new Date(y, m + 1, 0).getDate()
-const nextRunDate = (rec) => {
-  const anchor = Number(rec.dayOfMonth ?? rec.day_of_month) || 1
-  const step = rec.period === 'yearly' ? 12 : rec.period === 'quarterly' ? 3 : 1
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const start = rec.startDate || rec.start_date
-  const end = rec.endDate || rec.end_date
+/* (제거) nextRunDate — 정기 항목의 '다음 생성일'을 화면에서 다시 계산하던 함수.
+ * 미래 회차만 돌려주는 탓에 등록일 하한(setup_date)·last_generated를 모르고, 그래서
+ * 8·9월을 놓친 상태에서 10월에 열면 "다음 생성 10/13"만 보이고 놓친 2건이 감춰졌다.
+ * 대체: 서버 pending(state 포함)을 그대로 쓰는 cycleSummaryByRule — 화면과 실제가 어긋날 수 없다. */
 
-  // 앵커는 시작일의 '절대 월'에서 step 간격으로 밟는다. 매번 원 앵커로 계산하므로
-  // 말일 clamp 가 누적되지 않는다(예: 31일 앵커가 2월을 지나며 28일로 굳어버리지 않는다).
-  const [sy, sm] = String(start || fmtDateLocal(today)).split('-').map(Number)
-  if (!sy || !sm) return '—'
+const daysInMonth = (y, m) => new Date(y, m + 1, 0).getDate()
+
+/**
+ * 정기 규칙의 '첫 회차 예정일' 미리보기 — 등록 폼에서 그 자리에서 보여준다.
+ * 시작일이 2020년이어도 등록일(오늘) 이전 회차는 생성되지 않는다는 사실을,
+ * 설명 문구가 아니라 결과로 알려주기 위한 것. 서버 dueDatesToGenerate와 같은 규칙이다
+ * (시작일·앵커일·주기·말일 clamp + 등록일 하한).
+ */
+const firstCycleDate = (startDate, dayOfMonth, period) => {
+  const [sy, sm] = String(startDate || '').split('-').map(Number)
+  if (!sy || !sm) return null
+  const anchor = Number(dayOfMonth) || 1
+  const step = period === 'yearly' ? 12 : period === 'quarterly' ? 3 : 1
+  const floor = todayStr()   // 등록일 하한 — 오늘 등록하므로 오늘이 하한
   for (let i = 0; i < 600; i++) {
     const abs = (sm - 1) + i * step
     const y = sy + Math.floor(abs / 12)
     const m = ((abs % 12) + 12) % 12
-    const d = new Date(y, m, Math.min(anchor, daysInMonth(y, m)))
-    if (d <= today) continue
-    const s = fmtDateLocal(d)
-    if (end && s > end) return '—'
+    const s = fmtDateLocal(new Date(y, m, Math.min(anchor, daysInMonth(y, m))))
+    if (s < startDate) continue
+    if (s < floor) continue
     return s
   }
-  return '—'
+  return null
 }
 
 const MASTER_DATA = {
@@ -1837,7 +1840,7 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
           <div style={{ flex: 1 }}>
             <label className="label">시작일 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
             <input className="input" type="date" value={form.start_date} onChange={e => f("start_date", e.target.value)}/>
-            <div className="text-xs text-muted2" style={{ marginTop: 6 }}>이 날짜 이전으로는 소급 생성되지 않아요.</div>
+            <FirstCycleHint startDate={form.start_date} dayOfMonth={form.day_of_month} period={form.period} verb="지출" editing={!!editing}/>
           </div>
           <div style={{ flex: 1 }}>
             <label className="label">종료일 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
@@ -1859,8 +1862,54 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
 
 const PERIOD_LABEL = { monthly: "매월", quarterly: "매분기", yearly: "매년" }
 
+/* 첫 회차 예정일 안내 — 등록 폼의 시작일 아래.
+ * "이 날짜 이전으로는 소급되지 않아요"라는 규칙 설명만으로는, 시작일에 2020년을 넣은 사람이
+ * 무슨 일이 벌어질지 알 수 없다. 결과(첫 회차 날짜)를 그 자리에서 보여준다. */
+const FirstCycleHint = ({ startDate, dayOfMonth, period, verb, editing = false }) => {
+  // 수정 중일 때는 계산하지 않는다. 하한은 '등록일'인데 여기선 오늘을 하한으로 쓰므로,
+  // 옛 규칙을 열면 "첫 회차"가 실제와 다르게 나온다(그 규칙의 하한은 등록 당시 날짜다).
+  if (editing) {
+    return (
+      <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+        등록일 이전으로는 소급되지 않아요. 남은 회차는 목록의 ‘다음 예정’에서 확인하세요.
+      </div>
+    )
+  }
+  if (!startDate) return <div className="text-xs text-muted2" style={{ marginTop: 6 }}>시작일을 선택하면 첫 회차를 알려드려요.</div>
+  const first = firstCycleDate(startDate, dayOfMonth, period)
+  const past = startDate < todayStr()
+  return (
+    <div className="text-xs" style={{ marginTop: 6, color: past ? 'var(--brand-ink)' : 'var(--muted2)' }}>
+      {first
+        ? <>첫 {verb} 회차 <b>{first}</b>{past && ' · 등록일 이전 회차는 만들어지지 않아요'}</>
+        : '종료일 안에 도래하는 회차가 없어요'}
+    </div>
+  )
+}
+
+/* 계약 기반 표시 — 이동 수단(onGo)이 있으면 버튼, 없으면 표시만.
+   눌러도 아무 일이 없는 버튼은 고장으로 읽힌다. */
+const ContractBadge = ({ name, onGo }) => (
+  onGo
+    ? <button className="badge brand" style={{ marginLeft: 6, fontSize: 10, cursor: 'pointer', border: 0 }}
+        title={`${name || '계약'} — 계약에서 관리`} onClick={onGo}><Icon.Link size={10}/> 계약</button>
+    : <span className="badge brand" style={{ marginLeft: 6, fontSize: 10 }}
+        title={`${name || '계약'} — 계약에서 관리`}>계약</span>
+)
+
+// 규칙 목록 필터 — 계약 기반은 금액·종료 시점의 출처가 계약이라 관리 경로가 다르다.
+const RULE_FILTERS = [
+  { value: 'all', label: '전체' },
+  { value: 'plain', label: '일반' },
+  { value: 'contract', label: '계약 기반' },
+]
+const filterRules = (rows, f) =>
+  f === 'plain' ? rows.filter(r => !r.contractId)
+  : f === 'contract' ? rows.filter(r => !!r.contractId)
+  : rows
+
 // 정기지출 = 판관비(경비) 쪽 정기 반복. 회계처리 '경비' 그룹의 독립 화면으로도, 기준정보 탭으로도 쓴다.
-export const RecurringExpensePanel = ({ page = false }) => {
+export const RecurringExpensePanel = ({ page = false, goRoute }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [rows, setRows] = useState([])
@@ -1868,8 +1917,11 @@ export const RecurringExpensePanel = ({ page = false }) => {
   const [editing, setEditing] = useState(null)   // 수정 대상(없으면 등록)
   const [vendors, setVendors] = useState([])
   const [accounts, setAccounts] = useState([])
+  const [ruleFilter, setRuleFilter] = useState('all')   // all | plain | contract
 
   const load = async () => setRows(await api.getRecurringExpenses())
+  // 회차 이행 현황(놓친/임박/예정) — 정기청구와 공용 훅. 회차가 바뀌면 규칙의 '다음 예정'도 달라진다.
+  const cyc = useRecurringCycles('purchase', { onChanged: load })
   useEffect(() => { load() }, [])
   // 매입처(A)·기관(E) 만 — 정기 지출의 상대는 돈을 주는 쪽이다
   const reloadVendors = async () => {
@@ -1885,7 +1937,7 @@ export const RecurringExpensePanel = ({ page = false }) => {
   const handleToggle = async (id) => {
     const res = await api.toggleRecurringExpense(id)
     toast.push(res.active ? "정기 지출이 활성화됐어요" : "정기 지출이 비활성화됐어요")
-    load()
+    load(); cyc.reload()   // 중지/재개는 예정 회차 목록을 바꾼다
   }
 
   // 삭제는 '앞으로 자동 생성하지 않는다'는 뜻이다. 이미 만들어진 청구서·거래는 남는다
@@ -1903,12 +1955,14 @@ export const RecurringExpensePanel = ({ page = false }) => {
     if (!res.ok) { toast.push(res.error || "삭제에 실패했어요", { tone: "warn" }); return }
     const kept = (res.keptInvoices || 0) + (res.keptTxns || 0)
     toast.push(kept ? `정기 지출을 삭제했어요 (기존 기록 ${kept}건은 유지)` : "정기 지출을 삭제했어요")
-    load()
+    load(); cyc.reload()
   }
 
 
   const openNew = () => { setEditing(null); setFormOpen(true) }
   const openEdit = (r) => { setEditing(r); setFormOpen(true) }
+  const ruleRows = filterRules(rows, ruleFilter)
+  const cycSummary = cycleSummaryByRule(cyc.cycles)
   const addBtn = (
     <button className="btn primary" onClick={openNew}>
       <Icon.Plus size={14}/> 등록
@@ -1920,6 +1974,7 @@ export const RecurringExpensePanel = ({ page = false }) => {
       {/* 독립 화면일 땐 공용 PageHeader를 쓴다 — 다른 화면과 상단 여백·sticky 동작을 맞추기 위해 */}
       {page ? (
         <PageHeader title="정기 지출"
+          sub={cyc.overdueCount > 0 ? `놓친 회차 ${cyc.overdueCount}건이 있어요` : undefined}
           actions={addBtn}/>
       ) : (
         <div className="row" style={{ marginBottom: 16 }}>
@@ -1927,22 +1982,49 @@ export const RecurringExpensePanel = ({ page = false }) => {
           <div className="ml-auto">{addBtn}</div>
         </div>
       )}
+      {/* 이행 현황 — 놓친 회차/임박/예정. 규칙만 보여주던 화면의 빈 곳을 채운다 */}
+      <RecurringCycles cycles={cyc.cycles} kind="purchase" busy={cyc.busy}
+        onIssue={cyc.issue} onPaid={cyc.openPaid} onBulk={cyc.bulk}
+        onOpenContract={() => goRoute?.('contract_purchase')}/>
+
+      <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="section-title" style={{ fontSize: 13 }}>정기 지출 규칙 {ruleRows.length}건</div>
+        <div className="row gap-6 ml-auto">
+          {RULE_FILTERS.map(f => (
+            <button key={f.value} className={`chip ${ruleFilter === f.value ? 'active' : ''}`}
+              onClick={() => setRuleFilter(f.value)}>{f.label}</button>
+          ))}
+        </div>
+      </div>
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
           <thead>
             <tr>
               <th>거래처</th><th>비목</th><th className="num-right">금액</th>
-              <th>주기</th><th>다음 생성</th><th style={{ width: 60 }}>상태</th><th style={{ width: 110 }}></th>
+              <th>주기</th><th>다음 예정</th><th style={{ width: 60 }}>상태</th><th style={{ width: 110 }}></th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
+            {ruleRows.map(r => {
+              const s = cycSummary.get(r.id)
+              return (
               <tr key={r.id} style={{ opacity: r.active ? 1 : 0.45 }}>
-                <td className="fw-700">{r.vendor}</td>
+                <td className="fw-700">
+                  {r.vendor}
+                  {/* 계약 기반은 금액·종료 시점의 출처가 계약이다 → 수정은 계약에서.
+                      goRoute가 없는 자리(기준정보 탭)에서는 눌러도 아무 일이 없으니 표시만 한다 */}
+                  {r.contractId && <ContractBadge name={r.contractName} onGo={goRoute && (() => goRoute('contract_purchase'))}/>}
+                </td>
                 <td className="text-sm text-muted">{r.category}</td>
                 <td className="num-cell num-right">{fmtNum(r.amount)}</td>
                 <td className="text-sm">{PERIOD_LABEL[r.period]} {r.dayOfMonth}일</td>
-                <td className="text-sm">{r.active ? nextRunDate(r) : "—"}</td>
+                {/* 서버가 계산한 회차를 쓴다 — 화면에서 다시 계산하면 놓친 회차가 감춰진다 */}
+                <td className="text-sm">
+                  {r.active ? (s?.next || "—") : "—"}
+                  {s?.overdue > 0 && (
+                    <span className="badge neg" style={{ marginLeft: 6, fontSize: 10 }}>미처리 {s.overdue}</span>
+                  )}
+                </td>
                 <td>
                   <span className={`badge ${r.active ? "pos" : "outline"}`}>{r.active ? "활성" : "비활성"}</span>
                 </td>
@@ -1957,7 +2039,8 @@ export const RecurringExpensePanel = ({ page = false }) => {
                   </div>
                 </td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -1968,8 +2051,11 @@ export const RecurringExpensePanel = ({ page = false }) => {
           const res = editing ? await api.updateRecurringExpense(editing.id, data) : await api.addRecurringExpense(data)
           toast.push(res?.ok === false ? (res.error || "저장에 실패했어요") : (editing ? "정기 지출을 수정했어요" : "정기 지출이 등록됐어요"),
                      res?.ok === false ? { tone: "warn" } : undefined)
-          load()
+          load(); cyc.reload()
         }}/>
+      {/* 기지급 처리 — 계좌·날짜를 받는다. 대금청구서 화면과 같은 공용 드로어 */}
+      <PaidIssueDrawer target={cyc.paidTarget} isIssued={false}
+        onIssuePaid={cyc.issuePaid} onClose={cyc.closePaid} onDone={cyc.donePaid}/>
     </div>
   )
 }
@@ -2082,6 +2168,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
         <div className="row gap-12">
           <div style={{ flex: 1 }}><label className="label">시작일</label>
             <input className="input" type="date" value={form.startDate} onChange={e => f("startDate", e.target.value)}/>
+            <FirstCycleHint startDate={form.startDate} dayOfMonth={form.dayOfMonth} period={form.period} verb="청구" editing={!!editing}/>
           </div>
           <div style={{ flex: 1 }}><label className="label">종료일 <span className="text-muted">(선택)</span></label>
             <input className="input" type="date" value={form.endDate} onChange={e => f("endDate", e.target.value)}/>
@@ -2099,7 +2186,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
 }
 
 // 정기청구 = 매출 쪽 정기 반복. 회계처리 '판매·매출' 그룹의 독립 화면으로도, 기준정보 탭으로도 쓴다.
-export const RecurringInvoicePanel = ({ page = false }) => {
+export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [rows, setRows] = useState([])
@@ -2108,9 +2195,11 @@ export const RecurringInvoicePanel = ({ page = false }) => {
   const [accounts, setAccounts] = useState([])
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState(null)
-  const [busy, setBusy] = useState(false)
+  const [ruleFilter, setRuleFilter] = useState('all')
 
   const load = async () => setRows(await api.getRecurringInvoices())
+  // 정기지출과 완전히 같은 훅 — 회차 이행(놓친/임박/예정)과 일괄 발행
+  const cyc = useRecurringCycles('sales', { onChanged: load })
   const reloadVendors = async () => {
     const list = await api.getVendors({ gubu: "B" })
     setVendors(list)
@@ -2126,7 +2215,7 @@ export const RecurringInvoicePanel = ({ page = false }) => {
   const handleToggle = async (id) => {
     const res = await api.toggleRecurringInvoice(id)
     toast.push(res.active ? "정기 청구가 활성화됐어요" : "정기 청구가 비활성화됐어요")
-    load()
+    load(); cyc.reload()
   }
 
   // 정기지출 쪽과 같은 원칙 — 자동 발행만 멈추고, 이미 발행된 청구서는 남긴다.
@@ -2143,41 +2232,31 @@ export const RecurringInvoicePanel = ({ page = false }) => {
     if (!res.ok) { toast.push(res.error || "삭제에 실패했어요", { tone: "warn" }); return }
     const kept = (res.keptInvoices || 0) + (res.keptTxns || 0)
     toast.push(kept ? `정기 청구를 삭제했어요 (기존 기록 ${kept}건은 유지)` : "정기 청구를 삭제했어요")
-    load()
+    load(); cyc.reload()
   }
-
-  const handleGenerate = async () => {
-    setBusy(true)
-    const res = await api.generateRecurringInvoices()
-    setBusy(false)
-    if (!res.ok) return toast.push("청구서 생성에 실패했어요")
-    toast.push(res.count > 0 ? `청구서 ${res.count}건을 '입금 예정'으로 생성했어요` : "생성할 청구 회차가 없어요")
-    load()
-  }
+  // '밀린 회차 일괄 생성' 버튼은 이행 현황의 '놓친 회차 일괄 발행'으로 흡수했다
+  // (같은 동작이 두 자리에 있으면 어느 쪽이 무엇을 만드는지 알 수 없다).
 
   // 영세(zero)도 세액 0 — 'none만 0'으로 보면 영세 청구액이 10% 부풀어 보인다
   const totalOf = (r) => r.supplyAmount + (r.vatMode === 'exclusive' ? Math.round(r.supplyAmount * 0.1) : 0)
 
   const openNew = () => { setEditing(null); setFormOpen(true) }
   const openEdit = (r) => { setEditing(r); setFormOpen(true) }
+  const ruleRows = filterRules(rows, ruleFilter)
+  const cycSummary = cycleSummaryByRule(cyc.cycles)
   const recActions = (
-    <div className="row gap-8">
-      <button className="btn" onClick={handleGenerate} disabled={busy}>
-        <Icon.Calendar size={14}/> 밀린 회차 일괄 생성
-      </button>
-      <button className="btn primary" onClick={openNew}>
-        <Icon.Plus size={14}/> 등록
-      </button>
-    </div>
+    <button className="btn primary" onClick={openNew}>
+      <Icon.Plus size={14}/> 등록
+    </button>
   )
 
   return (
     <div className={page ? 'fade-up' : undefined} style={page ? undefined : { padding: 20 }}>
-      {/* 여기는 '무엇을 언제 얼마씩 청구할지' 설정하는 곳.
-          실제 청구(발행)는 판매·매출 → 대금 청구서의 '발행 예정'에서 한다(계약 청구일정과 한 화면에서 본다).
-          밀린 회차를 한 번에 밀어넣어야 할 때만 일괄 생성을 쓴다. */}
+      {/* 상단은 '이번에 청구할 것'(이행), 아래는 '무엇을 언제 얼마씩 청구할지'(규칙).
+          같은 회차를 대금 청구서의 '발행 예정'에서도 처리할 수 있다 — 같은 API·같은 컴포넌트를 쓴다. */}
       {page ? (
         <PageHeader title="정기 청구"
+          sub={cyc.overdueCount > 0 ? `놓친 회차 ${cyc.overdueCount}건이 있어요` : undefined}
           actions={recActions}/>
       ) : (
         <>
@@ -2186,34 +2265,60 @@ export const RecurringInvoicePanel = ({ page = false }) => {
             <div className="ml-auto">{recActions}</div>
           </div>
           <div className="text-sm text-muted" style={{ marginBottom: 16 }}>
-            청구 조건을 설정하는 곳이에요. 실제 청구서 발행은 <b>판매·매출 → 대금 청구서</b>의 '발행 예정'에서 계약 청구일정과 함께 처리합니다.
+            청구 조건을 설정하는 곳이에요. 도래한 회차는 아래에서 바로 발행할 수 있고, <b>판매·매출 → 대금 청구서</b>의 '발행 예정'에서 계약 청구일정과 함께 처리해도 됩니다.
           </div>
         </>
       )}
+
+      <RecurringCycles cycles={cyc.cycles} kind="sales" busy={cyc.busy}
+        onIssue={cyc.issue} onPaid={cyc.openPaid} onBulk={cyc.bulk}
+        onOpenContract={() => goRoute?.('contract_sales')}/>
+
+      <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="section-title" style={{ fontSize: 13 }}>정기 청구 규칙 {ruleRows.length}건</div>
+        <div className="row gap-6 ml-auto">
+          {RULE_FILTERS.map(f => (
+            <button key={f.value} className={`chip ${ruleFilter === f.value ? 'active' : ''}`}
+              onClick={() => setRuleFilter(f.value)}>{f.label}</button>
+          ))}
+        </div>
+      </div>
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
           <thead>
             <tr>
               <th>고객사</th><th>항목 / 계약</th><th className="num-right">청구액(VAT 포함)</th>
-              <th>주기</th><th>다음 청구</th><th style={{ width: 60 }}>상태</th><th style={{ width: 110 }}></th>
+              <th>주기</th><th>다음 예정</th><th style={{ width: 60 }}>상태</th><th style={{ width: 110 }}></th>
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && (
+            {ruleRows.length === 0 && (
               <tr><td colSpan={7} className="text-sm text-muted" style={{ textAlign: "center", padding: 24 }}>
-                등록된 정기 청구가 없어요. 유지보수·호스팅 등 매달 청구하는 건을 등록해보세요.
+                {rows.length === 0
+                  ? "등록된 정기 청구가 없어요. 유지보수·호스팅 등 매달 청구하는 건을 등록해보세요."
+                  : "이 조건에 맞는 정기 청구가 없어요."}
               </td></tr>
             )}
-            {rows.map(r => (
+            {ruleRows.map(r => {
+              const s = cycSummary.get(r.id)
+              return (
               <tr key={r.id} style={{ opacity: r.active ? 1 : 0.45 }}>
-                <td className="fw-700">{r.vendor}</td>
+                <td className="fw-700">
+                  {r.vendor}
+                  {r.contractId && <ContractBadge name={r.contractName} onGo={goRoute && (() => goRoute('contract_sales'))}/>}
+                </td>
                 <td className="text-sm">
                   {r.item || "—"}
                   {r.contractName && <div className="text-xs text-muted">계약: {r.contractName}</div>}
                 </td>
                 <td className="num-cell num-right">{fmtNum(totalOf(r))}</td>
                 <td className="text-sm">{PERIOD_LABEL[r.period]} {r.dayOfMonth}일</td>
-                <td className="text-sm">{r.active ? nextRunDate(r) : "—"}</td>
+                <td className="text-sm">
+                  {r.active ? (s?.next || "—") : "—"}
+                  {s?.overdue > 0 && (
+                    <span className="badge neg" style={{ marginLeft: 6, fontSize: 10 }}>미처리 {s.overdue}</span>
+                  )}
+                </td>
                 <td><span className={`badge ${r.active ? "pos" : "outline"}`}>{r.active ? "활성" : "비활성"}</span></td>
                 <td>
                   <div className="row gap-6">
@@ -2226,7 +2331,8 @@ export const RecurringInvoicePanel = ({ page = false }) => {
                   </div>
                 </td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -2236,8 +2342,11 @@ export const RecurringInvoicePanel = ({ page = false }) => {
           const res = editing ? await api.updateRecurringInvoice(editing.id, data) : await api.addRecurringInvoice(data)
           toast.push(res?.ok === false ? (res.error || "저장에 실패했어요") : (editing ? "정기 청구를 수정했어요" : "정기 청구가 등록됐어요"),
                      res?.ok === false ? { tone: "warn" } : undefined)
-          load()
+          load(); cyc.reload()
         }}/>
+      {/* 기입금 처리 — 정기지출과 같은 공용 드로어(계좌·날짜 필수) */}
+      <PaidIssueDrawer target={cyc.paidTarget} isIssued
+        onIssuePaid={cyc.issuePaid} onClose={cyc.closePaid} onDone={cyc.donePaid}/>
     </div>
   )
 }

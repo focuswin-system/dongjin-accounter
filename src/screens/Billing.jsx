@@ -1,8 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
+import { ImportWizard } from '../lib/components/ImportWizard'
+import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
+import { taxInvoiceImportAdapter } from '../lib/taxInvoiceImport'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { quickAddCategory } from '../lib/quickAdd'
@@ -717,6 +720,8 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const [editInvoice, setEditInvoice] = useState(null)
   const [statusFilter, setStatusFilter] = useState(collect ? "미정산" : "전체")
   const [paidTarget, setPaidTarget] = useState(null)   // 기입금/기지급 처리 대상(계좌·날짜 드로어)
+  const [importing, setImporting] = useState(false)    // 홈택스 세금계산서 엑셀 업로드 화면
+  const [ourBizNo, setOurBizNo] = useState('')         // 우리 회사 사업자번호 — 매출/매입 자동 판정용
 
   // 청구할 것은 두 갈래로 생긴다: 계약의 청구 일정(마일스톤)과 정기청구 회차(유지보수 등).
   // 경리가 청구서 메뉴 한 곳만 열면 이번 달 청구할 게 다 보이도록 '발행 예정'에서 합친다.
@@ -737,6 +742,12 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     setInvoices(rows); setRecSummary(rec); setPaySum(pay); setPending(merged)
   }
   useEffect(() => { load() }, [])
+  // 세금계산서 업로드의 매출/매입 판정 기준. 환경설정 › 회사 정보에 사업자번호가 있어야 자동으로 갈린다.
+  useEffect(() => { api.getCompany().then(c => setOurBizNo(c?.biz_no || '')) }, [])
+  // 어댑터는 옵션이 바뀔 때만 새로 만든다 — 매 렌더 새 객체면 마법사가 중복 판정을 통째로 다시 계산한다.
+  const importAdapter = useMemo(
+    () => taxInvoiceImportAdapter({ ourBizNo, defaultKind: kind }), [ourBizNo, kind])
+
   // 홈 '할 일'에서 특정 청구서를 지목해 들어오면 그 상세를 바로 연다.
   useEffect(() => {
     if (!focusInvoiceId || !invoices.length) return
@@ -820,6 +831,15 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     load()
   }
 
+  // 세금계산서 업로드는 목록을 통째로 바꾸므로 화면을 넘겨받는다(기준정보 엑셀 업로드와 같은 방식).
+  if (importing) return (
+    <ImportWizard
+      adapter={importAdapter}
+      existing={invoices}
+      onCancel={() => setImporting(false)}
+      onDone={() => { setImporting(false); load() }}/>
+  )
+
   return (
     <div className="fade-up">
       <PageHeader
@@ -828,9 +848,14 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           ? <button className="btn" onClick={isIssued ? openRefund : openReturn}>
               <Icon.Plus size={14}/> {isIssued ? "환불 등록" : "환입 등록"}
             </button>
-          : <button className="btn primary" onClick={() => { setEditInvoice(null); setFormOpen(true) }}>
-              <Icon.Plus size={14}/> 청구서 {isIssued ? "발행" : "등록"}
-            </button>}
+          : <>
+              <button className="btn" onClick={() => setImporting(true)}>
+                <Icon.Excel size={14}/> 홈택스 업로드
+              </button>
+              <button className="btn primary" onClick={() => { setEditInvoice(null); setFormOpen(true) }}>
+                <Icon.Plus size={14}/> 청구서 {isIssued ? "발행" : "등록"}
+              </button>
+            </>}
       />
 
       {/* 요약 카드 — 회수 모드는 미수/미지급 2칸(발행 예정 없음), 발행 모드는 3칸 */}
@@ -902,60 +927,5 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   )
 }
 
-// 기입금/기지급 처리 — 청구서 발행 + 즉시 정산. "돈이 어느 계좌로 오갔나"를 반드시 받는다.
-const PaidIssueDrawer = ({ target, isIssued, onClose, onDone, onIssuePaid }) => {
-  const toast = useToast()
-  const today = localDate()
-  const [accounts, setAccounts] = useState([])
-  const [accountId, setAccountId] = useState("")
-  const [date, setDate] = useState(today)
-  useEffect(() => {
-    if (!target) return
-    setDate(localDate())
-    api.getAccounts().then(a => { setAccounts(a); const bank = a.find(x => x.kind === 'bank'); setAccountId(bank ? bank.id : "") })
-  }, [target])
-  if (!target) return null
-  const supply = target.amount || 0
-  const vat = target.vat != null ? target.vat : Math.round(supply * 0.1)
-  const total = supply + vat
-  const submit = async () => {
-    if (date > today) return toast.push("미래 날짜로는 처리할 수 없어요")
-    // onIssuePaid는 부모의 issuePending을 그대로 쓴다(출처별 분기 한 곳에서만)
-    const res = await onIssuePaid({ ...target, _accountId: accountId || null, _date: date })
-    if (!res.ok) { toast.push(res.error || "처리에 실패했어요"); return }
-    toast.push(isIssued ? "기입금 처리했어요" : "기지급 처리했어요")
-    onDone()
-  }
-  return (
-    <Drawer open onClose={onClose} width="min(460px, 100vw)">
-      <DrawerHead
-        title={isIssued ? "기입금 처리" : "기지급 처리"}
-        sub={<>{target.vendor_name} · {target.type} · {fmtNum(total)}원</>}
-        onClose={onClose}/>
-      <div className="drawer-body col gap-form">
-        <div className="alert-row" style={{ background: "var(--surface-2)", borderColor: "var(--line)" }}>
-          <Icon.Sparkle/>
-          <div className="text-sm">청구서를 발행하고 <b>{fmtNum(total)}원</b>을 {isIssued ? "입금" : "지급"} 완료로 함께 기록해요. {isIssued ? "입금받은" : "출금한"} 계좌를 선택하세요.</div>
-        </div>
-        <div>
-          <label className="label">{isIssued ? "입금 계좌" : "출금 계좌"}</label>
-          <div className="row gap-6" style={{ flexWrap: "wrap" }}>
-            {accounts.filter(a => a.kind === 'bank').map(a => (
-              <button key={a.id} type="button" className={`chip ${accountId === a.id ? "active" : ""}`} onClick={() => setAccountId(a.id)}>{a.name}</button>
-            ))}
-          </div>
-        </div>
-        <div>
-          <label className="label">{isIssued ? "입금일" : "지급일"}</label>
-          <input className="input num" type="date" value={date} max={today} onChange={e => setDate(e.target.value)}/>
-        </div>
-      </div>
-      <div className="drawer-foot">
-        <div className="ml-auto row gap-8">
-          <button className="btn" onClick={onClose}>취소</button>
-          <button className="btn primary" onClick={submit}><Icon.Check size={14}/> {isIssued ? "기입금 처리" : "기지급 처리"}</button>
-        </div>
-      </div>
-    </Drawer>
-  )
-}
+// 기입금/기지급 처리 드로어는 lib/components/PaidIssueDrawer.jsx 공용
+// (대금청구서·정기청구·정기지출이 같은 드로어를 쓴다).

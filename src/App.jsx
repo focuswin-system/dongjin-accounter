@@ -441,8 +441,8 @@ function AppInner({ onLogout, user }) {
                                        openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
       // 정기 반복은 기준정보(정적 참조)가 아니라 돈 흐름이다 → 성격에 맞는 회계처리 그룹에 둔다.
       // 정기지출=경비(판관비), 정기청구=판매·매출. 패널은 Master의 것을 그대로 재사용.
-      case "recurring_expense": return <RecurringExpensePanel page/>;
-      case "recurring_invoice": return <RecurringInvoicePanel page/>;
+      case "recurring_expense": return <RecurringExpensePanel page goRoute={go}/>;
+      case "recurring_invoice": return <RecurringInvoicePanel page goRoute={go}/>;
       case "mgmt_dash":       return <MgmtDashScreen/>;
       case "mgmt_ask":        return <MgmtAskScreen/>;
       case "excel_modal":     return <ExcelScreen/>;
