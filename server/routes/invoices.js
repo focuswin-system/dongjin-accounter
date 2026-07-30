@@ -1,5 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
+const xlsx = require('xlsx')
+const { uploadMem, parseSheet } = require('../lib/xlsx-import')
 const { futureDateError, kstToday } = require('../db')
 const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
@@ -89,6 +91,276 @@ router.get('/summary/vat', async (req, res, next) => {
     const salesVat    = all.filter(r => r.kind === 'issued').reduce((s, r) => s + Number(r.vat_amount), 0)
     const purchaseVat = all.filter(r => r.kind === 'received').reduce((s, r) => s + Number(r.vat_amount), 0)
     res.json({ salesVat, purchaseVat, netVat: salesVat - purchaseVat, rows: all })
+  } catch (e) { next(e) }
+})
+
+/* ── 홈택스 전자세금계산서 엑셀 임포트 ────────────────────────────────
+ * 세금계산서 발행/수취는 채권·채무가 생긴 것이므로 청구서로 넣는다(매출→미수금 / 매입→미지급금).
+ * 실제 입금·지급은 종전대로 청구서 정산(matches)에서 처리한다 — 여기서 거래를 만들지 않는다.
+ *
+ * ⚠ 이 세 라우트는 반드시 '/:id' 보다 위에 있어야 한다.
+ *   아래로 내려가면 GET /import/template 이 GET /:id 에 먹혀 404가 된다.
+ */
+router.post('/import/parse', uploadMem.single('file'), (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: '파일이 없습니다' })
+    res.json(parseSheet(req.file.buffer))
+  } catch (e) { next(e) }
+})
+
+const intOf = (v) => parseInt(String(v ?? '').replace(/[^0-9-]/g, ''), 10) || 0
+const digitsOf = (v) => String(v ?? '').replace(/[^0-9]/g, '')
+const numOf = (v) => { const n = parseFloat(String(v ?? '').replace(/[^0-9.-]/g, '')); return Number.isFinite(n) ? n : 0 }
+
+const refKey = (v) => String(v ?? '').replace(/[\s()\-.,·/]/g, '').toLowerCase()
+
+/**
+ * 기준정보 품목(ref_items type='item') 색인 — 엑셀 품목명을 기존 품목에 연결하기 위해.
+ * 이름＋규격이 정확히 맞으면 그 품목, 규격이 비었으면 이름만으로 찾되
+ * **후보가 둘 이상이면 연결하지 않는다**(규격이 다른 엉뚱한 품목에 붙으면 집계가 조용히 섞인다).
+ */
+async function buildItemIndex(db) {
+  const [rows] = await db.execute("SELECT id, name, spec FROM ref_items WHERE type='item'")
+  const byNameSpec = new Map(), byName = new Map()
+  let maxOrder = 0
+  for (const r of rows) {
+    const ns = refKey(r.name) + '|' + refKey(r.spec)
+    if (!byNameSpec.has(ns)) byNameSpec.set(ns, r.id)
+    const n = refKey(r.name)
+    byName.set(n, byName.has(n) ? null : r.id)   // null = 동명이품 → 모호
+  }
+  const [[{ mo }]] = await db.execute("SELECT COALESCE(MAX(sort_order),0) AS mo FROM ref_items WHERE type='item'")
+  maxOrder = Number(mo) || 0
+  return { byNameSpec, byName, order: maxOrder, created: [] }
+}
+
+/** 품목 한 줄 → 기준정보 품목 id. 없으면 register일 때만 만든다. */
+async function resolveItemId(db, idx, line, register) {
+  if (!idx || !line.name) return null
+  const ns = refKey(line.name) + '|' + refKey(line.spec)
+  const exact = idx.byNameSpec.get(ns)
+  if (exact) return exact
+  if (!line.spec) {
+    const byName = idx.byName.get(refKey(line.name))
+    if (byName) return byName
+    if (byName === null && idx.byName.has(refKey(line.name))) return null   // 모호 → 연결 안 함
+  }
+  if (!register) return null
+  // 단가는 넣지 않는다 — 계산서 한 건의 값을 기준단가로 굳히면 나중 견적·계약이 그 값을 물려받는다.
+  const id = randomUUID()
+  await db.execute(
+    'INSERT INTO ref_items (id, type, name, spec, sort_order, memo) VALUES (?,?,?,?,?,?)',
+    [id, 'item', line.name, line.spec, ++idx.order, '세금계산서 업로드로 등록'])
+  idx.byNameSpec.set(ns, id)
+  if (!idx.byName.has(refKey(line.name))) idx.byName.set(refKey(line.name), id)
+  idx.created.push(line.name)
+  return id
+}
+
+/**
+ * 세금계산서 품목 내역을 청구서에 단다.
+ * itemIdx가 없으면(옵션 끔) item_id를 비운 채 이름·규격만 스냅샷으로 남긴다 —
+ * 표기가 조금씩 다른 품목이 기준정보에서 수백 개로 불어나는 것이 기본 동작이 되지 않게.
+ */
+async function replaceInvoiceLines(db, invoiceId, lines, itemIdx = null, register = false) {
+  const clean = (Array.isArray(lines) ? lines : [])
+    .map(l => ({
+      name: String(l.name || '').trim(),
+      spec: String(l.spec || '').trim() || null,
+      qty: numOf(l.qty),
+      unit_price: intOf(l.unit_price),
+      amount: intOf(l.amount),
+    }))
+    .filter(l => l.name || l.amount)
+  if (!clean.length) return 0
+  await db.execute('DELETE FROM invoice_lines WHERE invoice_id = ?', [invoiceId])
+  let ord = 0
+  for (const l of clean) {
+    const itemId = await resolveItemId(db, itemIdx, l, register)
+    await db.execute(
+      'INSERT INTO invoice_lines (id, invoice_id, item_id, name, spec, unit, qty, unit_price, amount, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      [randomUUID(), invoiceId, itemId, l.name || '(품목명 없음)', l.spec, null, l.qty, l.unit_price, l.amount, ++ord])
+  }
+  return clean.length
+}
+
+/**
+ * 세금계산서의 상대방 거래처를 찾고, 없으면 만든다.
+ * 사업자번호 → 상호 순으로 찾는다(홈택스 상호는 우리가 등록한 이름과 표기가 다를 수 있다).
+ * db는 인자로 받는다 — 전역 풀 기본값을 두면 조용히 남의 회사 DB에 거래처를 만든다.
+ */
+async function findOrCreateVendor(db, { name, bizNo, kind }) {
+  const biz = digitsOf(bizNo)
+  if (biz) {
+    const [hit] = await db.execute(
+      "SELECT id FROM vendors WHERE REPLACE(REPLACE(biz_no, '-', ''), ' ', '') = ? LIMIT 1", [biz])
+    if (hit[0]) return { id: hit[0].id, created: false }
+  }
+  const nm = String(name || '').trim()
+  if (!nm) return { id: null, created: false }
+  const [byName] = await db.execute('SELECT id FROM vendors WHERE name = ? LIMIT 1', [nm])
+  if (byName[0]) return { id: byName[0].id, created: false }
+  // 매출 세금계산서의 상대는 발주처(B), 매입은 매입처(A).
+  const id = randomUUID()
+  await db.execute('INSERT INTO vendors (id, name, biz_no, gubu) VALUES (?,?,?,?)',
+    [id, nm, String(bizNo || '').trim() || null, kind === 'issued' ? 'B' : 'A'])
+  return { id, created: true, name: nm }
+}
+
+router.post('/import/commit', async (req, res, next) => {
+  const items = Array.isArray(req.body.items) ? req.body.items : []
+  if (!items.length) return res.json({ ok: true, inserted: 0, updated: 0 })
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+
+    // 청구번호 채번(청구-2026-0001). 행마다 MAX를 다시 읽으면 느리므로 종류·연도별로 한 번만 읽고 올린다.
+    const seq = new Map()
+    const nextInvoiceNo = async (kind, year) => {
+      const prefix = kind === 'issued' ? '청구' : '매입'
+      const key = `${kind}|${year}`
+      if (!seq.has(key)) {
+        const [[{ maxno }]] = await conn.execute(
+          "SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(invoice_no, '-', -1) AS UNSIGNED)), 0) AS maxno FROM invoices WHERE kind = ? AND invoice_no LIKE ?",
+          [kind, `${prefix}-${year}-%`])
+        seq.set(key, Number(maxno))
+      }
+      const n = seq.get(key) + 1
+      seq.set(key, n)
+      return `${prefix}-${year}-${String(n).padStart(4, '0')}`
+    }
+
+    let inserted = 0, updated = 0, amountKept = 0, linedInvoices = 0, dupSkipped = 0
+    const createdVendors = []
+    // 미등록 품목을 기준정보에 함께 등록할지 — 화면 옵션(기본 꺼짐).
+    // 켠 경우에만 기존 품목과의 연결(item_id)도 한다. 끄면 종전처럼 이름만 남긴다.
+    const registerItems = req.body.registerItems === true
+    const itemIdx = registerItems ? await buildItemIndex(conn) : null
+    for (const it of items) {
+      const kind = it.kind === 'issued' ? 'issued' : 'received'
+      const issuedAt = String(it.issued_at || '').slice(0, 10)
+      if (!issuedAt) continue                      // 작성일자 없는 행은 화면에서 이미 걸러진다
+      const vat = intOf(it.vat_amount)
+      const supply = intOf(it.supply_amount)
+      const total = intOf(it.total_amount) || (supply + vat)
+      const taxType = normalizeTaxType(it.tax_type || (vat > 0 ? '과세' : '면세'))
+      const confirmNo = String(it.nts_confirm_no || '').trim() || null
+      const dueAt = String(it.due_at || '').slice(0, 10) || null
+
+      if (it.action === 'update' && it.id) {
+        // 이미 입금·지급이 붙은 청구서의 금액을 엑셀로 덮으면 정산 잔액이 어긋난다.
+        // 그런 건은 승인번호만 채우고 금액·일자는 그대로 둔다(무엇이 유지됐는지 결과로 알린다).
+        const [[{ mcnt }]] = await conn.execute(
+          'SELECT COUNT(*) AS mcnt FROM invoice_matches WHERE invoice_id = ?', [it.id])
+        if (Number(mcnt) > 0) {
+          // 품목도 건드리지 않는다 — 금액은 옛 값 그대로인데 품목만 새 것이면 둘이 어긋난다.
+          await conn.execute(
+            'UPDATE invoices SET nts_confirm_no = COALESCE(nts_confirm_no, ?) WHERE id = ?', [confirmNo, it.id])
+          amountKept++
+        } else {
+          const v = await findOrCreateVendor(conn, { name: it.vendor_name, bizNo: it.biz_no, kind })
+          if (v.created) createdVendors.push(v.name)
+          await conn.execute(
+            `UPDATE invoices SET vendor_id = COALESCE(?, vendor_id), supply_amount = ?, vat_amount = ?,
+                    total_amount = ?, issued_at = ?, due_at = COALESCE(?, due_at), tax_type = ?,
+                    nts_confirm_no = COALESCE(?, nts_confirm_no)
+             WHERE id = ?`,
+            [v.id, supply, vat, total, issuedAt, dueAt, taxType, confirmNo, it.id])
+          // 엑셀에 품목이 있을 때만 갈아끼운다. 빈 채로 덮으면 기성 청구의 품목 내역이 날아간다.
+          if (await replaceInvoiceLines(conn, it.id, it.lines, itemIdx, registerItems)) linedInvoices++
+        }
+        updated++
+        continue
+      }
+
+      // 승인번호는 국세청이 부여한 유일값이다 → 같은 번호의 청구서가 이미 있으면 새로 만들지 않는다.
+      // 여태 중복 판정이 업로드 화면에만 있어서, 같은 payload가 다시 오면(재시도·중복 제출·
+      // 사용자가 '전체 새로 등록'을 고른 경우) 서버가 그대로 두 벌 만들었다.
+      // "같은 파일을 다시 올려도 두 번 쌓이지 않는다"는 약속을 서버에서도 지킨다.
+      if (confirmNo) {
+        const [[exists]] = await conn.execute(
+          'SELECT id FROM invoices WHERE nts_confirm_no = ? LIMIT 1', [confirmNo])
+        if (exists) { dupSkipped++; continue }
+      }
+      const v = await findOrCreateVendor(conn, { name: it.vendor_name, bizNo: it.biz_no, kind })
+      if (v.created) createdVendors.push(v.name)
+      const newId = randomUUID()
+      await conn.execute(
+        `INSERT INTO invoices (id, invoice_no, kind, vendor_id, supply_amount, vat_amount, total_amount,
+                               issued_at, due_at, status, memo, tax_type, nts_confirm_no)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [newId, await nextInvoiceNo(kind, issuedAt.slice(0, 4)), kind, v.id,
+         supply, vat, total, issuedAt, dueAt,
+         kind === 'issued' ? '입금 예정' : '지급 대기', String(it.memo || ''), taxType, confirmNo])
+      if (await replaceInvoiceLines(conn, newId, it.lines, itemIdx, registerItems)) linedInvoices++
+      inserted++
+    }
+
+    await conn.commit()
+    res.json({
+      ok: true, inserted, updated, amountKept, linedInvoices, dupSkipped, createdVendors,
+      createdItems: itemIdx ? itemIdx.created : [],
+    })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
+})
+
+// 양식 다운로드 — 홈택스 '전자세금계산서 목록조회 → 엑셀받기'와 같은 머리글로 만든다.
+router.get('/import/template', (req, res, next) => {
+  try {
+    // 품목 상세 포함 형식으로 만든다 — 첫 두 행은 같은 승인번호(= 품목 2줄짜리 계산서 1건)다.
+    const cols = ['작성일자', '승인번호', '공급자 사업자등록번호', '공급자 상호',
+      '공급받는자 사업자등록번호', '공급받는자 상호', '합계금액', '공급가액', '세액', '종류',
+      '품목명', '품목 규격', '품목 수량', '품목 단가', '품목 공급가액', '비고']
+    const rows = [
+      cols,
+      ['2026-07-05', '20260705-41000000-11111111', '000-00-00000', '(주)포커스윈',
+        '111-11-11111', '(주)한화오션', 11000000, 10000000, 1000000, '일반',
+        '회원관리 시스템 개발', '2차', 1, 7000000, 7000000, '7월 기성'],
+      ['2026-07-05', '20260705-41000000-11111111', '000-00-00000', '(주)포커스윈',
+        '111-11-11111', '(주)한화오션', 11000000, 10000000, 1000000, '일반',
+        '유지보수', '월 정액', 6, 500000, 3000000, ''],
+      ['2026-07-10', '20260710-41000000-22222222', '222-22-22222', '정밀가공(주)',
+        '000-00-00000', '(주)포커스윈', 1650000, 1500000, 150000, '일반',
+        'CNC 가공', 'AL6061', 30, 50000, 1500000, '외주'],
+    ]
+    const ws = xlsx.utils.aoa_to_sheet(rows)
+    ws['!cols'] = [{ wch: 12 }, { wch: 28 }, { wch: 18 }, { wch: 20 },
+      { wch: 20 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 8 },
+      { wch: 22 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 16 }]
+
+    const guide = [
+      ['홈택스 세금계산서 업로드 — 작성 안내'],
+      [''],
+      ['• 홈택스 › 조회/발급 › 전자세금계산서 › 목록조회에서 내려받은 엑셀을 그대로 올리면 됩니다.'],
+      ['  (머리글이 달라도 업로드 화면에서 컬럼을 직접 연결할 수 있어요)'],
+      [''],
+      ['• 매출/매입 구분: 공급자·공급받는자 사업자등록번호를 우리 회사 번호와 비교해 자동으로 가릅니다.'],
+      ['  우리 회사 번호는 환경설정 › 회사 정보에서 가져옵니다(거기가 비어 있으면 업로드 화면에서 직접 넣을 수 있습니다).'],
+      ['  우리 번호와 어느 쪽도 맞지 않으면 업로드 화면에서 고른 기본 구분으로 들어가고, 행에 표시됩니다.'],
+      ['• 작성일자: 필수. 부가세 귀속 분기를 정하는 날짜입니다(발급일자·전송일자가 아닙니다).'],
+      ['• 세액이 0이면 면세로 봅니다. 영세율 건은 종류 칸에 "영세"가 있어야 영세로 들어갑니다.'],
+      ['• 승인번호: 중복 판정의 기준입니다. 있으면 같은 파일을 다시 올려도 두 번 등록되지 않아요.'],
+      ['• 품목: 승인번호가 같은 여러 행은 한 계산서의 품목들로 보고 묶습니다(위 1~2행 참고).'],
+      ['  품목 칸을 안 쓰면 계산서 한 줄짜리로 등록되고, 금액·부가세에는 아무 차이가 없습니다.'],
+      ['  품목을 넣으면 매입 지급결의서가 품목별 명세로 자동 작성됩니다.'],
+      ['  ※ 기준정보 품목 등록은 업로드 화면의 "미등록 품목 등록" 옵션으로 켤 수 있습니다(기본 꺼짐).'],
+      ['• 결제기한은 홈택스 엑셀에 없으므로 업로드 화면에서 "작성일자 + N일"로 정합니다.'],
+      [''],
+      ['• 등록 결과: 매출은 미수금(입금 예정), 매입은 미지급금(지급 대기)으로 잡히고 부가세 집계에 바로 반영됩니다.'],
+      ['  실제 입금·지급 처리는 청구서를 열어 정산(매칭)에서 하세요.'],
+    ]
+    const wsGuide = xlsx.utils.aoa_to_sheet(guide)
+    wsGuide['!cols'] = [{ wch: 100 }]
+
+    const wb = xlsx.utils.book_new()
+    xlsx.utils.book_append_sheet(wb, ws, '세금계산서')
+    xlsx.utils.book_append_sheet(wb, wsGuide, '작성안내')
+    const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' })
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader('Content-Disposition', `attachment; filename="tax_invoice_import_template.xlsx"; filename*=UTF-8''${encodeURIComponent('세금계산서_업로드_양식.xlsx')}`)
+    res.send(buf)
   } catch (e) { next(e) }
 })
 

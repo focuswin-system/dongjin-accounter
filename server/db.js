@@ -832,6 +832,9 @@ async function initDb(conn) {
     await ensureColumn('categories',   'vat_deductible', "vat_deductible TINYINT DEFAULT 1")
     // 청구서도 면세/영세를 구분해 저장(과세표준 구분용). 기존 행은 NULL → 세액>0이면 과세로 본다.
     await ensureColumn('invoices',     'tax_type',      "tax_type VARCHAR(10)")
+    // 홈택스 전자세금계산서 승인번호(24자리). 임포트에서 같은 계산서가 두 번 쌓이는 걸 막는 유일한 키다.
+    // 수기로 등록한 청구서는 비어 있고, 나중에 엑셀을 올리면 그 청구서에 채워진다.
+    await ensureColumn('invoices',     'nts_confirm_no', "nts_confirm_no VARCHAR(40)")
     // 적격증빙 유형(ref_items type='evidence_type')의 매입세액 공제 가능 여부.
     // 세금계산서·카드전표·현금영수증(지출증빙)은 공제, 간이영수증·거래명세서는 불공제.
     await ensureColumn('ref_items',    'deductible',    "deductible TINYINT DEFAULT 1")

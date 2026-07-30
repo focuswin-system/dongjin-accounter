@@ -11,14 +11,18 @@ import { Icon, Spacer, Combobox, Popover, useToast } from '../ui'
 //   targets[], requiredTarget  — 매핑 대상 라벨 목록 / 필수 항목
 //   guess(header)              — 엑셀 머리글 → 매핑 대상 추측
 //   initialOpts, renderOpts()  — 어댑터 전용 옵션(예: 거래처 기본 구분)
-//   mapRow(get, opts)          — 매핑된 컬럼 → 저장용 데이터 객체
+//   groupRows(rows, colFor)    — (선택) 여러 행이 한 건인 파일을 합친다. 매핑 확정 후 호출된다.
+//                                합친 행에 __row(원본 행 번호)를 붙이면 표에 그 번호가 뜬다
+//   mapRow(get, opts, row)     — 매핑된 컬럼 → 저장용 데이터 객체 (row: 원본/합쳐진 행)
 //   isValid(data)              — 필수값 확인
+//   invalidLabel(data)         — 왜 못 넣는지 한 줄(없으면 '<requiredTarget> 필요')
 //   matchKey(data)             — 파일 안 중복 판정 키
 //   buildIndex(existing) / findMatch(data, idx) — 기존 자료와의 중복 판정
 //   candidateLabel(row)        — 덮어쓰기 후보 표시
 //   rowWarns(data, get)        — 행별 주의 문구(값을 못 알아봤을 때)
 //   previewCols[]              — 미리보기 표 컬럼
-//   commit(items)              — 서버 반영
+//   commit(items, opts)        — 서버 반영. { ok, inserted, updated, note? }
+//                                note: 건수만으로는 안 보이는 부수효과(거래처 자동 생성 등)를 결과 화면에 남긴다
 const STATE_META = {
   error:     { badge: 'neg',     label: '필수값 없음' },
   'new':     { badge: 'pos',     label: '신규' },
@@ -56,17 +60,33 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
 
   const reset = () => { setFile(null); setRawRows([]); setMapping([]); setOverrides({}); setResult(null); setTruncated(null) }
   const colFor = (t) => mapping.find(m => m.target === t)?.excelCol
-  const setMap = (i, k, v) => setMapping(ms => ms.map((m, idx) => idx === i ? { ...m, [k]: v } : m))
+  // 매핑을 바꾸면 행별 처리(overrides)를 비운다.
+  // overrides는 행 순번으로 저장되는데, 매핑이 바뀌면 행 자체가 달라질 수 있다
+  // (묶는 기준 컬럼을 바꾸면 groupRows 결과의 개수·순서가 변한다).
+  // 안 비우면 '건너뛰기'로 표시해둔 처리가 엉뚱한 다른 건에 붙는다 — 조용히 잘못 등록된다.
+  const setMap = (i, k, v) => {
+    setMapping(ms => ms.map((m, idx) => idx === i ? { ...m, [k]: v } : m))
+    setOverrides(o => (Object.keys(o).length ? {} : o))
+  }
 
   const idx = useMemo(() => adapter.buildIndex(existing), [existing, adapter])
 
+  // 파일에서 '여러 행이 한 건'인 경우(예: 세금계산서 품목 상세)를 어댑터가 합칠 기회를 준다.
+  // 매핑이 정해진 뒤에야 어느 컬럼이 묶는 기준인지 알 수 있으므로 파싱이 아니라 여기서 한다.
+  const rows = useMemo(
+    () => (adapter.groupRows ? adapter.groupRows(rawRows, colFor) : rawRows),
+    [rawRows, mapping, adapter])
+
   const preview = useMemo(() => {
     const seen = new Set()
-    return rawRows.map((row, i) => {
+    return rows.map((row, i) => {
       const get = (t) => { const c = colFor(t); return c != null ? String(row[c] ?? '').trim() : '' }
-      const data = adapter.mapRow(get, opts)
-      const warns = adapter.rowWarns?.(data, get) ?? []
-      if (!adapter.isValid(data)) return { i, data, warns, state: 'error', candidates: [], def: 'skip' }
+      const data = adapter.mapRow(get, opts, row)
+      // 합쳐진 행은 원본 엑셀 행 번호가 순번과 달라진다 — 표에는 원본 번호를 보여준다
+      const excelRow = row.__row != null ? row.__row : i
+      // opts를 함께 넘긴다 — 경고 문구가 어댑터 옵션(예: 우리 회사 사업자번호)에 따라 달라진다
+      const warns = adapter.rowWarns?.(data, get, opts) ?? []
+      if (!adapter.isValid(data)) return { i, excelRow, data, warns, state: 'error', candidates: [], def: 'skip' }
 
       const { matched, candidates } = adapter.findMatch(data, idx)
       const key = adapter.matchKey(data)
@@ -78,9 +98,9 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
       else if (candidates.length) { state = 'ambiguous'; def = 'skip' }
       else if (fileDup) { state = 'filedup'; def = 'skip' }
       else { state = 'new'; def = 'insert' }
-      return { i, data, warns, state, candidates: matched ? [matched] : candidates, def }
+      return { i, excelRow, data, warns, state, candidates: matched ? [matched] : candidates, def }
     })
-  }, [rawRows, mapping, opts, idx, adapter])
+  }, [rows, mapping, opts, idx, adapter])
 
   const eff = (r) => overrides[r.i] ?? r.def
   const setAction = (i, v) => setOverrides(o => ({ ...o, [i]: v }))
@@ -121,7 +141,7 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
       }))
     if (!items.length) return toast.push(`등록·갱신할 ${adapter.label}이(가) 없어요`)
     setBusy(true)
-    const res = await adapter.commit(items)
+    const res = await adapter.commit(items, opts)
     setBusy(false)
     if (!res.ok) return toast.push(res.error || '등록 실패')
     setResult(res)
@@ -183,7 +203,9 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
         <div className="card card-pad fade-up" style={{ textAlign: 'center', padding: '48px 24px', maxWidth: 520, margin: '0 auto' }}>
           <div style={{ width: 48, height: 48, borderRadius: 14, background: 'var(--pos-soft)', color: 'var(--pos)', display: 'grid', placeItems: 'center', margin: '0 auto 16px' }}><Icon.Check size={24}/></div>
           <div className="fw-700" style={{ fontSize: 16, marginBottom: 8 }}>{adapter.label}이(가) 반영됐어요</div>
-          <div className="text-sm text-muted" style={{ marginBottom: 20 }}>신규 등록 {result.inserted}건 · 기존 갱신 {result.updated}건</div>
+          <div className="text-sm text-muted" style={{ marginBottom: result.note ? 8 : 20 }}>신규 등록 {result.inserted}건 · 기존 갱신 {result.updated}건</div>
+          {/* 건수만 보면 모르는 일(거래처가 새로 생겼다 등)은 반드시 적는다 */}
+          {result.note && <div className="text-xs text-muted2" style={{ marginBottom: 20, lineHeight: 1.6 }}>{result.note}</div>}
           <div className="row gap-8" style={{ justifyContent: 'center' }}>
             <button className="btn" onClick={reset}>새 파일 업로드</button>
             <button className="btn primary" onClick={onDone}>{adapter.label} 목록으로</button>
@@ -207,7 +229,10 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
                 <div style={{ width: 44, height: 44, borderRadius: 10, background: '#E7F4ED', color: 'var(--pos)', display: 'grid', placeItems: 'center' }}><Icon.Excel size={22}/></div>
                 <div style={{ minWidth: 0 }}>
                   <div className="fw-700" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</div>
-                  <div className="text-xs text-muted2">{Math.round(file.size / 1024)}KB · {rawRows.length}행 인식됨</div>
+                  <div className="text-xs text-muted2">
+                    {Math.round(file.size / 1024)}KB · {rawRows.length}행 인식됨
+                    {rows.length !== rawRows.length && ` → ${rows.length}건으로 묶임`}
+                  </div>
                 </div>
                 <div className="ml-auto row gap-6">
                   <button className="btn sm" onClick={() => fileRef.current?.click()}>다시 업로드</button>
@@ -311,7 +336,7 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
                       const skipped = r.state === 'error' || a === 'skip'
                       return (
                         <tr key={r.i} style={{ background: r.state === 'error' ? 'rgba(255,80,80,0.04)' : undefined, opacity: skipped && r.state !== 'error' ? 0.55 : 1 }}>
-                          <td className="num text-muted2">{r.i + 2}</td>
+                          <td className="num text-muted2">{r.excelRow + 2}</td>
                           {adapter.previewCols.map(c => (
                             <td key={c.header} className={c.className}>{c.render(r.data)}</td>
                           ))}
@@ -325,7 +350,7 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
                           </td>
                           <td>
                             {r.state === 'error' ? (
-                              <span className="text-xs text-muted2">{adapter.requiredTarget} 필요</span>
+                              <span className="text-xs text-muted2">{adapter.invalidLabel?.(r.data) || `${adapter.requiredTarget} 필요`}</span>
                             ) : r.state === 'new' ? (
                               <div className="row gap-6">
                                 <button className={`chip sm ${a === 'insert' ? 'active' : ''}`} onClick={() => setAction(r.i, 'insert')}>신규 등록</button>
@@ -342,7 +367,7 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
                 </table>
               </div>
               <div className="row" style={{ padding: 16, borderTop: '1px solid var(--line)', flexWrap: 'wrap', gap: 8 }}>
-                <span className="text-sm text-muted">{preview.length > 200 ? `상위 200행 표시 · 전체 ${preview.length}행` : `전체 ${preview.length}행`}</span>
+                <span className="text-sm text-muted">{preview.length > 200 ? `상위 200건 표시 · 전체 ${preview.length}건` : `전체 ${preview.length}건`}</span>
                 <div className="ml-auto row gap-8">
                   <button className="btn" onClick={onCancel}>취소</button>
                   <button className="btn primary" disabled={busy || (!counts.insert && !counts.update)} style={{ opacity: (busy || (!counts.insert && !counts.update)) ? 0.5 : 1 }} onClick={onCommit}>
