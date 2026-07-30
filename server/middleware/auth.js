@@ -27,8 +27,15 @@ module.exports = function authMiddleware(req, res, next) {
   // 프런트 게이트만으로는 localStorage를 지우면 우회되므로 서버에서도 막는다(JWT에 실린 플래그로 DB조회 없이).
   // 허용: 내 정보 조회·로그아웃·본인 비번 변경. 그 외는 403.
   if (payload.mustChangePw) {
-    // 전역 미들웨어라 req.path는 전체 경로(/api/auth/...). 허용: 내 정보·로그아웃·본인 비번 변경.
-    const p = req.path
+    /* 허용: 내 정보 조회·로그아웃·본인 비번 변경. 그 외는 403.
+     *
+     * ⚠ 경로는 req.path 가 아니라 req.originalUrl 로 판정한다.
+     * 이 미들웨어는 두 곳에서 돈다 — index.js 의 전역 게이트, 그리고 routes/auth.js 의
+     * 라우트별 미들웨어. 라우터 안에서는 Express 가 마운트 경로(/api/auth)를 벗겨내므로
+     * req.path 가 '/users/<id>/password' 가 된다. 전체 경로로 만든 허용 목록이 전부
+     * 빗나가서, 임시 비번 계정은 /me 도 비번 변경도 403이 되어 로그인 후 아무것도 할 수
+     * 없었다(비번을 바꿀 수도 없어 영구 잠금). originalUrl 은 마운트와 무관하게 전체 경로다. */
+    const p = String(req.originalUrl || req.path || '').split('?')[0]
     const isPwChange = req.method === 'PUT' && /^\/api\/auth\/users\/[^/]+\/password$/.test(p)
     const allowed = p === '/api/auth/me' || p === '/api/auth/logout' || isPwChange
     if (!allowed) {
