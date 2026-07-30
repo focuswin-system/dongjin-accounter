@@ -173,17 +173,29 @@ router.get('/:id/matchable', async (req, res, next) => {
 // 어느 쪽이든 지출 doc_no에 결의서번호를 역참조해, 그 지출의 증빙에서 결의서를 찾을 수 있게 한다.
 router.post('/:id/process', async (req, res, next) => {
   const { mode, txn_id, amount, date, account_id } = req.body
-  // 결의서 처리는 실제 지출 거래를 만들거나 기존 거래를 완료로 바꾼다 → 마감된 달이면 막는다
-  {
-    const ce = await closedPeriodError(req.db, date)
-    if (ce) return res.status(409).json({ error: ce })
-  }
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[r]] = await conn.execute('SELECT * FROM expense_resolutions WHERE id = ? FOR UPDATE', [req.params.id])
     if (!r) { await rollbackQuietly(conn); return res.status(404).json({ error: '결의서를 찾을 수 없어요' }) }
     if (r.status === '완료') { await rollbackQuietly(conn); return res.status(409).json({ error: '이미 처리된 결의서예요' }) }
+
+    /* 마감 검사 — body의 date 하나만 보면 두 갈래로 우회된다.
+     *   · create: 실제 거래일은 `date || r.pay_date || today`인데 date만 검사했다 →
+     *     date를 비우면 마감월 pay_date로 지출이 들어갔다.
+     *   · link:   화면(Docs.jsx)이 link 모드에서 date를 아예 보내지 않는다 →
+     *     closedPeriodError(undefined)가 즉시 null이라 **항상 무검사**였다.
+     * 그래서 '실제로 쓰일 날짜'를 모두 모아서 검사한다(연결 대상 거래의 날짜까지). */
+    let linkTxnDate = null
+    if (mode === 'link' && txn_id) {
+      const [[lt]] = await conn.execute('SELECT date FROM transactions WHERE id = ?', [txn_id])
+      linkTxnDate = lt?.date || null
+    }
+    {
+      const effDateForCheck = mode === 'link' ? linkTxnDate : (date || r.pay_date || kstToday())
+      const ce = await closedPeriodError(conn, effDateForCheck)
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
+    }
 
     // 매입 청구서 연결 결의서인데 그 청구서가 이미 완납이면, 새 지출을 만들어봐야 매칭할 잔액이 없어
     // 지출만 붕 뜬다(이중 계상). 처리 자체를 막는다.

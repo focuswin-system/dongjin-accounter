@@ -78,6 +78,11 @@ const RESOURCES = [
   { id: 'hrbase_payrollItems',     label: '급여 항목',     group: '인사급여 · 기준정보' },
   { id: 'hrbase_employType',       label: '고용형태',      group: '인사급여 · 기준정보' },
 
+  // 재무관리 — 차입금 원금·투자금은 손익이 아니라 부채·자본이다(lib/pnl.js)
+  { id: 'finance_loan',            label: '차입금',        group: '재무관리' },
+  { id: 'finance_investment',      label: '투자',          group: '재무관리' },
+  { id: 'finance_dash',            label: '재무 현황',      group: '재무관리' },
+
   { id: 'report',                  label: '보고서',        group: '경영관리' },
   { id: 'mgmt_dash',               label: '경영 대시보드',  group: '경영관리' },
   { id: 'mgmt_ask',                label: '경영 질의',      group: '경영관리' },

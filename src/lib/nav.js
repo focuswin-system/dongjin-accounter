@@ -82,6 +82,20 @@ export const NAV_TREE = [
     ],
   },
   {
+    /* 재무관리 — 성과(손익)와 재무(대차)는 성격이 다르다. 일반회계 안에 섞으면 헛갈린다.
+     * 대출 원금·투자금은 손익이 아니라 부채·자본이다(server/lib/pnl.js). */
+    type: "domain", id: "finance", label: "재무관리", icon: Icon.Bank,
+    sections: [
+      { label: "자금 조달", items: [
+        { id: "finance_loan",       label: "차입금",   icon: Icon.Wallet },
+        { id: "finance_investment", label: "투자",     icon: Icon.Trend },
+      ]},
+      { label: "현황", items: [
+        { id: "finance_dash",       label: "재무 현황", icon: Icon.Chart },
+      ]},
+    ],
+  },
+  {
     type: "domain", id: "mgmt", label: "경영관리", icon: Icon.Trend,
     sections: [
       { label: "장부관리", items: [

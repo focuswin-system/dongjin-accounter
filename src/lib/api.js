@@ -984,6 +984,60 @@ export const api = {
     } catch (e) { return { ok: false, error: e.message } }
   },
 
+  // ─── 재무관리 (차입금·투자) ─────────────────────────────────────
+  // 대출 원금·투자금은 손익이 아니라 부채·자본이다 → 매출 집계에 잡히지 않는다(server/lib/pnl.js)
+  async getLoans() {
+    try { return await req('/finance/loans') } catch { return [] }
+  },
+  async getLoan(id) {
+    try { return await req(`/finance/loans/${id}`) } catch { return null }
+  },
+  /** 등록 전 상환 스케줄 미리보기 — 총 이자를 그 자리에서 보여준다(저장 없음) */
+  async previewLoan(data) {
+    try { return await req('/finance/loans/preview', { method: 'POST', body: data }) }
+    catch { return { schedule: [], totals: null } }
+  },
+  async addLoan(data) {
+    try { const r = await req('/finance/loans', { method: 'POST', body: data }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async updateLoan(id, data) {
+    try { await req(`/finance/loans/${id}`, { method: 'PUT', body: data }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async deleteLoan(id) {
+    try { await req(`/finance/loans/${id}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  /** 상환 처리 — 원금·이자를 각각 다른 거래로 만든다(원금은 부채, 이자는 비용) */
+  async repayLoan(id, { seq, date, account_id } = {}) {
+    try { const r = await req(`/finance/loans/${id}/repay`, { method: 'POST', body: { seq, date, account_id } }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  /** 놓친 상환 일괄 처리 — 예정일이 지난 회차를 순서대로 모두. 각 회차는 그 예정일로 기록된다 */
+  async repayMissedLoan(id, { account_id } = {}) {
+    try { const r = await req(`/finance/loans/${id}/repay-missed`, { method: 'POST', body: { account_id } }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async cancelRepayment(id, seq) {
+    try { await req(`/finance/loans/${id}/repay/${seq}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async getInvestments() {
+    try { return await req('/finance/investments') } catch { return [] }
+  },
+  async addInvestment(data) {
+    try { const r = await req('/finance/investments', { method: 'POST', body: data }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async deleteInvestment(id) {
+    try { await req(`/finance/investments/${id}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async getFinanceSummary() {
+    try { return await req('/finance/summary') } catch { return null }
+  },
+
   // ─── HR 코드 (부서/직급) ──────────────────────────────────────
   async getHrCodes(type) {
     try { return await req(`/hr-codes${type ? `?type=${type}` : ''}`) } catch { return [] }

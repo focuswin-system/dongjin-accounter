@@ -37,6 +37,12 @@ export const addDays = (ymd, n) => {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
 }
 
+/** 오늘(로컬 달력). toISOString(UTC)은 KST 새벽에 하루 전이 되므로 쓰지 않는다. */
+export const localTodayStr = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 /** 매핑 대상 라벨 — 화면의 컬럼 매핑 드롭다운과 mapRow가 같은 문자열을 쓴다. */
 export const T = {
   date:    '작성일자',
@@ -247,6 +253,13 @@ export const hometaxRowWarns = (d, opts = {}) => {
     if (sum !== d.supply_amount) {
       w.push(`품목 합계(${sum.toLocaleString()}원)가 공급가액과 달라요 — 금액은 계산서 기준으로 넣고 품목만 그대로 둡니다`)
     }
+  }
+  /* 작성일자가 먼 미래면 컬럼 매핑 실수나 엑셀 오타다.
+   * 정기청구의 미리 발행처럼 가까운 미래는 정당하므로 막지 않고, 1년을 넘는 것만 알린다
+   * (2030년 계산서가 조용히 들어가면 그 분기 부가세와 미수금에 계상된다). */
+  const horizon = addDays(opts.today || localTodayStr(), 365)
+  if (d.issued_at && horizon && d.issued_at > horizon) {
+    w.push(`작성일자(${d.issued_at})가 1년 넘게 미래예요 — 컬럼이나 엑셀 값을 확인하세요`)
   }
   if (!d.nts_confirm_no) {
     w.push(d._mergedRows > 1

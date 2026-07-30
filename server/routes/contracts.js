@@ -312,9 +312,14 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
     const accountId = account_id || (defAcc ? defAcc.id : null)
     const invId = randomUUID()
     const status = paid ? (isPurchase ? '지급 완료' : '입금 완료') : (isPurchase ? '지급 대기' : '입금 예정')
+    /* 만기일은 발행일보다 앞설 수 없다.
+     * 청구 일정의 예정일이 이미 지난 뒤 발행하면(늦은 청구) due_at < issued_at 이 되어
+     * 발행 즉시 '연체 미수금'으로 집계됐다 — 연체 금액·건수가 실제와 다르게 잡힌다.
+     * 예정일이 지났으면 발행일을 만기로 본다(그날부터 받을 돈이다). */
+    const dueAt = ms.due_date && ms.due_date >= today ? ms.due_date : today
     await conn.execute(
       'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [invId, invoice_no, kind, ms.vendor_id || null, ms.contract_id, supply, vat, total, today, ms.due_date || null, status, paid ? accountId : null, `${ms.contract_name} · ${ms.type}`, taxTypeOfMode(ms.vat_mode)]
+      [invId, invoice_no, kind, ms.vendor_id || null, ms.contract_id, supply, vat, total, today, dueAt, status, paid ? accountId : null, `${ms.contract_name} · ${ms.type}`, taxTypeOfMode(ms.vat_mode)]
     )
     // 기입금: 실제 입/출금 거래 + 매칭 생성(장부·계좌·계약 수금에 반영)
     if (paid) {

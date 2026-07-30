@@ -150,9 +150,18 @@ router.put('/vat', async (req, res, next) => {
     // 완료로 저장하는데 계좌가 없으면 그 납부/환급이 계좌 잔액에서 움직이지 않는다.
     const lerr = taxLedgerError({ isDone, isRefund, amount, accountId: account_id })
     if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
-    // 완료로 저장하면 실제 거래가 생기거나 바뀐다 → 마감된 달이면 막는다
-    if (isDone) {
-      const ce = await closedPeriodError(conn, paid_date || kstToday())
+    /* 마감 검사 — 새 납부일과 **기존 납부 거래의 날짜** 양쪽을 본다.
+     * 완료를 취소하면(완료 → 대기) syncTaxTxn이 기존 지출 거래를 삭제하는데,
+     * 여기서 새 날짜만 검사하던 탓에 마감월 납부를 되돌려 그 달 잔액을 사후에 늘릴 수 있었다.
+     * 거래 쪽은 "세금 납부 거래는 세무 화면에서 되돌려라"며 직접 삭제를 막으므로,
+     * 이 경로가 막히지 않으면 마감 우회의 정식 출구가 된다. */
+    let prevTxnDate = null
+    if (exist[0]?.txn_id) {
+      const [[pt]] = await conn.execute('SELECT date FROM transactions WHERE id = ?', [exist[0].txn_id])
+      prevTxnDate = pt?.date || null
+    }
+    {
+      const ce = await closedPeriodError(conn, prevTxnDate, isDone ? (paid_date || kstToday()) : null)
       if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
     }
     const txnId = await syncTaxTxn({
@@ -225,11 +234,18 @@ const otLedgerErr = (body) => {
   })
 }
 
-// 완료 상태면 실제 거래가 생기므로 마감된 달인지 검사(거래 등록과 같은 규칙)
-const otClosedErr = async (db, body) => {
+/* 마감 검사 — 새 납부일과 **기존 납부 거래의 날짜** 양쪽.
+ * 완료를 취소하거나 삭제하면 기존 거래가 사라져 그 달 잔액이 바뀐다.
+ * 완료일 때만 검사하던 탓에, 마감월 납부를 '납부 대기'로 되돌려 지출을 없앨 수 있었다. */
+const otClosedErr = async (db, body, existingTxnId) => {
   const st = body.status || '납부 대기'
-  if (st !== '납부 완료' && st !== '환급 완료') return null
-  return closedPeriodError(db, body.paid_date || kstToday())
+  const isDone = st === '납부 완료' || st === '환급 완료'
+  let prevDate = null
+  if (existingTxnId) {
+    const [[pt]] = await db.execute('SELECT date FROM transactions WHERE id = ?', [existingTxnId])
+    prevDate = pt?.date || null
+  }
+  return closedPeriodError(db, prevDate, isDone ? (body.paid_date || kstToday()) : null)
 }
 
 router.post('/others', async (req, res, next) => {
@@ -256,11 +272,12 @@ router.put('/others/:id', async (req, res, next) => {
   { const de = otFutureErr(req.body); if (de) return res.status(400).json({ error: de }) }
   { const le = otLedgerErr(req.body); if (le) return res.status(400).json({ error: le }) }
   const conn = await req.db.getConnection()
-  { const ce = await otClosedErr(req.db, req.body); if (ce) return res.status(409).json({ error: ce }) }
   try {
     await conn.beginTransaction()
     const [[cur]] = await conn.execute('SELECT txn_id FROM other_taxes WHERE id=?', [req.params.id])
     if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    // 기존 납부 거래의 날짜까지 검사한다(완료 취소 시 그 거래가 사라져 마감월 잔액이 바뀐다)
+    { const ce = await otClosedErr(conn, req.body, cur.txn_id); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
     const txnId = await syncOtherTaxTxn(req.body, cur.txn_id || null, conn)
     await conn.execute(
       'UPDATE other_taxes SET name=?, period=?, tax_amount=?, paid_amount=?, paid_date=?, status=?, memo=?, account_id=?, txn_id=?, account_code=? WHERE id=?',
@@ -277,8 +294,16 @@ router.delete('/others/:id', async (req, res, next) => {
   try {
     await conn.beginTransaction()
     const [[cur]] = await conn.execute('SELECT txn_id FROM other_taxes WHERE id=?', [req.params.id])
+    if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    // 삭제하면 연결된 납부 거래도 사라져 그 달 잔액이 바뀐다 → 마감월이면 막는다.
+    // (검사가 없어서 이 경로가 마감 우회의 정식 출구였다)
+    if (cur.txn_id) {
+      const [[pt]] = await conn.execute('SELECT date FROM transactions WHERE id=?', [cur.txn_id])
+      const ce = pt ? await closedPeriodError(conn, pt.date) : null
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
+    }
     await conn.execute('DELETE FROM other_taxes WHERE id=?', [req.params.id])
-    if (cur?.txn_id) await conn.execute('DELETE FROM transactions WHERE id=?', [cur.txn_id])   // 연결된 납부 거래도 정리
+    if (cur.txn_id) await conn.execute('DELETE FROM transactions WHERE id=?', [cur.txn_id])   // 연결된 납부 거래도 정리
     await conn.commit()
     res.json({ ok: true })
   } catch (e) { await rollbackQuietly(conn); next(e) }

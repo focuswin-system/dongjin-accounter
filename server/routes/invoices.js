@@ -9,6 +9,7 @@ const { restoreLastGenerated } = require('../lib/recurrence')
 const { ledgerError } = require('../lib/ledger')
 const { removeUploadedFile } = require('../lib/uploads')
 const { normalizeTaxType } = require('../lib/vat')
+const { recalcInvoiceStatus, paidAmountOf } = require('../lib/invoiceStatus')
 
 const router = Router()
 
@@ -230,7 +231,14 @@ router.post('/import/commit', async (req, res, next) => {
       return `${prefix}-${year}-${String(n).padStart(4, '0')}`
     }
 
-    let inserted = 0, updated = 0, amountKept = 0, linedInvoices = 0, dupSkipped = 0
+    let inserted = 0, updated = 0, amountKept = 0, linedInvoices = 0, dupSkipped = 0, closedSkipped = 0
+    // 마감월 판정은 같은 달을 반복 조회하지 않게 캐시한다(200건이면 같은 달이 수십 번 나온다)
+    const closedCache = new Map()
+    const isClosedMonth = async (date) => {
+      const m = String(date || '').slice(0, 7)
+      if (!closedCache.has(m)) closedCache.set(m, !!(await closedPeriodError(conn, date)))
+      return closedCache.get(m)
+    }
     const createdVendors = []
     // 미등록 품목을 기준정보에 함께 등록할지 — 화면 옵션(기본 꺼짐).
     // 켠 경우에만 기존 품목과의 연결(item_id)도 한다. 끄면 종전처럼 이름만 남긴다.
@@ -240,10 +248,15 @@ router.post('/import/commit', async (req, res, next) => {
       const kind = it.kind === 'issued' ? 'issued' : 'received'
       const issuedAt = String(it.issued_at || '').slice(0, 10)
       if (!issuedAt) continue                      // 작성일자 없는 행은 화면에서 이미 걸러진다
-      const vat = intOf(it.vat_amount)
+      // 마감된 달의 행은 건너뛴다. 200건 중 한 건 때문에 전체를 거절하면 실무가 막히고,
+      // 조용히 넣으면 신고 끝난 분기의 부가세가 바뀐다 → 스킵하고 몇 건인지 보고한다.
+      if (await isClosedMonth(issuedAt)) { closedSkipped++; continue }
       const supply = intOf(it.supply_amount)
+      const taxType = normalizeTaxType(it.tax_type || (intOf(it.vat_amount) > 0 ? '과세' : '면세'))
+      /* 면세·영세에 세액이 실려 오면 버린다 — lib/vat.js vatFields()의 규칙("유형이 우선")과 같다.
+       * 임포트만 이 규칙을 안 타서, 과세유형은 면세인데 세액이 남아 부가세 매출세액에 합산됐다. */
+      const vat = taxType === '과세' ? intOf(it.vat_amount) : 0
       const total = intOf(it.total_amount) || (supply + vat)
-      const taxType = normalizeTaxType(it.tax_type || (vat > 0 ? '과세' : '면세'))
       const confirmNo = String(it.nts_confirm_no || '').trim() || null
       const dueAt = String(it.due_at || '').slice(0, 10) || null
 
@@ -306,7 +319,7 @@ router.post('/import/commit', async (req, res, next) => {
 
     await conn.commit()
     res.json({
-      ok: true, inserted, updated, amountKept, linedInvoices, dupSkipped, createdVendors,
+      ok: true, inserted, updated, amountKept, linedInvoices, dupSkipped, closedSkipped, createdVendors,
       createdItems: itemIdx ? itemIdx.created : [],
     })
   } catch (e) { await rollbackQuietly(conn); next(e) }
@@ -383,6 +396,10 @@ router.get('/:id', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const { kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type } = req.body
+    // 마감된 달에는 청구서를 새로 발행할 수 없다 — 부가세 집계의 주 소스가 청구서이므로,
+    // 신고를 끝낸 분기에 청구서가 추가되면 제출 자료와 장부가 어긋난다.
+    // (미래 발행일은 막지 않는다 — 정기청구의 미리 발행이 정당한 업무다)
+    { const ce = await closedPeriodError(req.db, issued_at); if (ce) return res.status(409).json({ error: ce }) }
     // 과세유형: 화면이 정해 보내면 그대로, 아니면 세액 유무로 과세/면세를 가른다.
     // (영세는 세액이 0이라 추론이 안 되므로 반드시 명시해야 한다 — 계약에서 발행하면 자동으로 채워진다)
     const taxType = normalizeTaxType(tax_type || (Number(vat_amount) > 0 ? '과세' : '면세'))
@@ -403,18 +420,54 @@ router.post('/', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/**
+ * 청구서 수정.
+ *
+ * 여기에는 가드가 하나도 없었다. 그 결과 두 방향으로 장부가 조용히 틀어졌다:
+ *   · 감액: 2,200만(1,500만 정산)을 220만으로 내리면 잔여가 −1,280만이 되고,
+ *     미수금 요약이 그 음수를 단순 합산해 **다른 청구서의 정상 미수를 상계해 없앤다**.
+ *   · 증액: 완납 건을 올리면 status가 '입금 완료'로 남아 미수금 화면·대시보드 양쪽에서
+ *     제외된다(둘 다 status로 걸러낸다) → 늘어난 미수가 장부에서 사라진다.
+ * 거래 수정 경로(transactions.js)는 매칭 재조정 + 상태 재계산을 묶어 두었는데 이쪽엔 그 짝이 없었다.
+ *
+ * 그래서 셋을 넣는다: 마감 검사(날짜 이동은 양쪽) · 정산액 하한 검사 · 상태 재계산.
+ * status는 클라이언트가 보낸 값을 믿지 않고 정산 누계로 확정한다(화면이 옛 status를 그대로 되보낸다).
+ */
 router.put('/:id', async (req, res, next) => {
+  const conn = await req.db.getConnection()
   try {
-    const { vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type } = req.body
-    // 과세유형: 보내면 그대로, 안 보내면(옛 호출) 세액 유무로 추론(기존 값을 임의로 안 덮게)
+    const { vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, account_id, memo, tax_type } = req.body
+    await conn.beginTransaction()
+    const [[cur]] = await conn.execute('SELECT issued_at, total_amount FROM invoices WHERE id = ? FOR UPDATE', [req.params.id])
+    if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+
+    // 부가세 집계의 주 소스가 청구서다 → 마감된 달의 신고 자료가 사후에 바뀌면 안 된다.
+    // 날짜를 옮기는 경우 양쪽을 본다(잠긴 달에서 빼내거나 밀어넣는 것도 막는다 — 거래와 같은 규칙).
+    const ce = await closedPeriodError(conn, cur.issued_at, issued_at)
+    if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
+
+    // 이미 정산된 금액보다 낮출 수 없다. 낮추면 잔여가 음수가 되어 다른 미수금을 상계한다.
+    const paid = await paidAmountOf(conn, req.params.id)
+    const newTotal = Number(total_amount) || 0
+    if (paid > 0 && newTotal < paid) {
+      await rollbackQuietly(conn)
+      return res.status(409).json({
+        error: `이미 ${paid.toLocaleString('ko-KR')}원이 정산된 청구서예요. 그보다 적은 금액(${newTotal.toLocaleString('ko-KR')}원)으로는 바꿀 수 없어요. 먼저 정산을 취소하세요.`,
+      })
+    }
+
     const taxType = normalizeTaxType(tax_type || (Number(vat_amount) > 0 ? '과세' : '면세'))
-    const [result] = await req.db.execute(
-      'UPDATE invoices SET vendor_id=?, contract_id=?, supply_amount=?, vat_amount=?, total_amount=?, issued_at=?, due_at=?, status=?, account_id=?, memo=?, tax_type=? WHERE id=?',
-      [vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, status, account_id||null, memo||'', taxType, req.params.id]
+    const [result] = await conn.execute(
+      'UPDATE invoices SET vendor_id=?, contract_id=?, supply_amount=?, vat_amount=?, total_amount=?, issued_at=?, due_at=?, account_id=?, memo=?, tax_type=? WHERE id=?',
+      [vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, account_id||null, memo||'', taxType, req.params.id]
     )
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
-    res.json({ ok: true })
-  } catch (e) { next(e) }
+    if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    // 금액이 바뀌면 상태도 바뀐다(완납이 일부입금으로, 또는 그 반대). 정산 누계로 확정한다.
+    const st = await recalcInvoiceStatus(conn, req.params.id)
+    await conn.commit()
+    res.json({ ok: true, status: st?.status, paidAmount: st?.paid, remainAmount: st?.remain })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
 })
 
 router.delete('/:id', async (req, res, next) => {
@@ -428,6 +481,9 @@ router.delete('/:id', async (req, res, next) => {
     // 정기청구에서 나온 회차면 last_generated 를 되돌려 '발행 예정'에 다시 뜨게 한다.
     // 안 하면 그 달치가 자동 생성에도 예정 목록에도 안 나와 매출이 조용히 미청구로 사라진다.
     const [[inv]] = await conn.execute('SELECT recurring_id, issued_at FROM invoices WHERE id = ?', [id])
+    if (!inv) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    // 마감된 달의 청구서를 지우면 이미 신고한 부가세 자료가 줄어든다 → 막는다
+    { const ce = await closedPeriodError(conn, inv.issued_at); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
     await conn.execute('DELETE FROM invoice_matches WHERE invoice_id = ?', [id])
     await conn.execute('DELETE FROM invoice_docs WHERE invoice_id = ?', [id])
     await conn.execute('UPDATE transactions SET invoice_id = NULL WHERE invoice_id = ?', [id])
@@ -506,14 +562,15 @@ router.post('/:id/matches', async (req, res, next) => {
     }
 
     const id = randomUUID()
-    await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount) VALUES (?,?,?,?)', [id, invoiceId, realTxnId, matchAmount])
+    // txn_created: 이 거래를 정산이 만들었는가. 취소할 때 함께 지울지가 여기서 갈린다.
+    // 기존 거래를 연결한 경우(txn_id를 받은 경우)는 0 — 취소해도 그 거래는 남아야 한다.
+    const createdHere = !txn_id
+    await conn.execute(
+      'INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,?)',
+      [id, invoiceId, realTxnId, matchAmount, createdHere ? 1 : 0])
 
-    // 매칭 누계로 청구서 상태 자동 갱신
-    const [[{ paid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [invoiceId])
-    const total = Number(inv.total_amount)
-    const status = Number(paid) >= total ? (isIssued ? '입금 완료' : '지급 완료') : (isIssued ? '일부 입금' : '일부 지급')
-    await conn.execute('UPDATE invoices SET status = ? WHERE id = ?', [status, invoiceId])
-    await conn.execute('UPDATE milestones SET status = ? WHERE invoice_id = ?', [status, invoiceId])
+    // 매칭 누계로 청구서 상태 자동 갱신 (규칙은 lib/invoiceStatus.js 하나에만 둔다)
+    await recalcInvoiceStatus(conn, invoiceId)
 
     await conn.commit()
     res.json({ id, txn_id: realTxnId })
@@ -562,21 +619,32 @@ router.delete('/:id/matches/:matchId', async (req, res, next) => {
     await conn.beginTransaction()
     const [[inv]] = await conn.execute('SELECT * FROM invoices WHERE id = ? FOR UPDATE', [req.params.id])
     if (!inv) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
-    // 삭제할 매칭의 거래는 청구서 연결만 해제(장부에는 남김 — 실제 오간 돈일 수 있어 삭제하지 않는다).
-    const [[match]] = await conn.execute('SELECT txn_id FROM invoice_matches WHERE id = ? AND invoice_id = ?', [req.params.matchId, req.params.id])
+    const [[match]] = await conn.execute(
+      'SELECT txn_id, txn_created FROM invoice_matches WHERE id = ? AND invoice_id = ?', [req.params.matchId, req.params.id])
+    if (!match) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    /* 정산이 만든 거래는 함께 지운다. 남기면 같은 돈이 두 몫으로 존재한다 —
+     * 계좌 잔액에는 입금이 그대로 있는데 미수금도 부활해서, 자산이 그만큼 과대 계상된다.
+     * 반대로 이미 있던 거래를 연결한 것(txn_created=0)은 청구서 연결만 끊고 장부에 남긴다.
+     * 그 거래는 실제로 오간 돈의 독립 기록이고, 지우면 계좌 잔액이 틀어진다.
+     * 구분 컬럼이 없던 시절(txn_created 기본 0) 데이터는 보수적으로 '남기는' 쪽이다. */
+    let removedTxn = null
+    if (match.txn_id) {
+      if (Number(match.txn_created) === 1) {
+        // 마감된 달의 거래를 지우면 그 달 잔액이 사후에 바뀐다 → 막는다
+        const [[txn]] = await conn.execute('SELECT date FROM transactions WHERE id = ?', [match.txn_id])
+        const ce = txn ? await closedPeriodError(conn, txn.date) : null
+        if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
+        await conn.execute('DELETE FROM transactions WHERE id = ?', [match.txn_id])
+        removedTxn = match.txn_id
+      } else {
+        await conn.execute('UPDATE transactions SET invoice_id = NULL WHERE id = ?', [match.txn_id])
+      }
+    }
     await conn.execute('DELETE FROM invoice_matches WHERE id = ? AND invoice_id = ?', [req.params.matchId, req.params.id])
-    if (match && match.txn_id) await conn.execute('UPDATE transactions SET invoice_id = NULL WHERE id = ?', [match.txn_id])
-    // 남은 매칭 누계로 청구서·마일스톤 상태 재계산 — 안 하면 remain이 생겨도 '완료'로 남아 미수/미지급이 누락된다.
-    const [[{ paid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [req.params.id])
-    const isIssued = inv.kind === 'issued'
-    const total = Number(inv.total_amount)
-    const status = Number(paid) <= 0 ? (isIssued ? '입금 예정' : '지급 대기')
-      : Number(paid) >= total ? (isIssued ? '입금 완료' : '지급 완료')
-      : (isIssued ? '일부 입금' : '일부 지급')
-    await conn.execute('UPDATE invoices SET status = ? WHERE id = ?', [status, req.params.id])
-    await conn.execute('UPDATE milestones SET status = ? WHERE invoice_id = ?', [status, req.params.id])
+    // 남은 매칭 누계로 상태 재계산 — 안 하면 remain이 생겨도 '완료'로 남아 미수/미지급이 누락된다.
+    const st = await recalcInvoiceStatus(conn, req.params.id)
     await conn.commit()
-    res.json({ ok: true, status })
+    res.json({ ok: true, status: st?.status, removedTxn })
   } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
 })
 

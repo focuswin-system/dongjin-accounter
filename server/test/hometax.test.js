@@ -321,3 +321,15 @@ test('필수값 — 작성일자·거래처·금액이 없으면 등록하지 �
   assert.strictEqual(M.isHometaxRowValid(noVendor), false)
   assert.match(M.hometaxInvalidLabel(noVendor), /거래처/)
 })
+
+test('경고 — 1년 넘게 미래인 작성일자를 알린다(정상 날짜엔 안 뜬다)', async () => {
+  const M = await loading
+  const far = M.mapHometaxRow(getter({ ...SALE_ROW(M), [M.T.date]: '2030-12-31' }), { ourBizNo: OUR })
+  assert.ok(M.hometaxRowWarns(far, { ourBizNo: OUR, today: '2026-07-30' }).some(w => /1년 넘게/.test(w)))
+  // 가까운 미래(정기청구 미리 발행)는 정당하므로 경고하지 않는다
+  const near = M.mapHometaxRow(getter({ ...SALE_ROW(M), [M.T.date]: '2026-09-05' }), { ourBizNo: OUR })
+  assert.deepStrictEqual(M.hometaxRowWarns(near, { ourBizNo: OUR, today: '2026-07-30' }), [])
+  // today를 안 넘겨도 모든 행에 경고가 붙지 않아야 한다(오늘 기준으로 계산)
+  const normal = M.mapHometaxRow(getter(SALE_ROW(M)), { ourBizNo: OUR })
+  assert.deepStrictEqual(M.hometaxRowWarns(normal, { ourBizNo: OUR }), [])
+})

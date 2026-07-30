@@ -727,6 +727,73 @@ async function initDb(conn) {
       )
     `)
 
+    /* ── 재무관리: 차입금(대출) ──
+     * 대출 원금은 부채다(손익 아님). 계좌 잔액은 늘지만 매출이 아니므로,
+     * 거래에 붙는 계정과목(acct_code_*)이 손익 제외의 근거가 된다(lib/pnl.js).
+     * 상환 스케줄은 계산으로 만들고(lib/loan.js) 실제 처리한 회차만 loan_repayments에 남긴다
+     * — 정기지출이 미래 회차를 미리 만들지 않는 것과 같은 철학.
+     * 설계: docs/02-design/features/finance-management.design.md */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS loans (
+        id            VARCHAR(36) PRIMARY KEY,
+        name          VARCHAR(200) NOT NULL,
+        lender        VARCHAR(200),
+        vendor_id     VARCHAR(36),
+        principal     BIGINT NOT NULL,
+        annual_rate   DECIMAL(6,3) DEFAULT 0,
+        method        ENUM('equal_payment','equal_principal','bullet') NOT NULL DEFAULT 'equal_payment',
+        term_months   INT NOT NULL DEFAULT 12,
+        start_date    VARCHAR(20) NOT NULL,
+        pay_day       INT DEFAULT 1,
+        end_date      VARCHAR(20),
+        account_id    VARCHAR(36),
+        acct_code_principal VARCHAR(10),
+        acct_code_interest  VARCHAR(10),
+        status        ENUM('active','closed') NOT NULL DEFAULT 'active',
+        memo          TEXT,
+        txn_id        VARCHAR(36),
+        created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (vendor_id) REFERENCES vendors(id)
+      )
+    `)
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS loan_repayments (
+        id          VARCHAR(36) PRIMARY KEY,
+        loan_id     VARCHAR(36) NOT NULL,
+        seq         INT NOT NULL,
+        due_date    VARCHAR(20) NOT NULL,
+        principal   BIGINT NOT NULL DEFAULT 0,
+        interest    BIGINT NOT NULL DEFAULT 0,
+        paid_date   VARCHAR(20),
+        txn_principal_id VARCHAR(36),
+        txn_interest_id  VARCHAR(36),
+        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_loan_seq (loan_id, seq),
+        FOREIGN KEY (loan_id) REFERENCES loans(id) ON DELETE CASCADE
+      )
+    `)
+    /* 투자 — 받은 돈(자본)과 한 돈(투자자산). 둘 다 손익이 아니다.
+     * 투자받은 돈은 자본금과 주식발행초과금으로 갈린다(액면가 × 주식수 = 자본금).
+     * 지분율·평가손익은 범위 밖(설계 §6). */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS investments (
+        id             VARCHAR(36) PRIMARY KEY,
+        direction      ENUM('in','out') NOT NULL,
+        counterparty   VARCHAR(200) NOT NULL,
+        vendor_id      VARCHAR(36),
+        amount         BIGINT NOT NULL,
+        invested_at    VARCHAR(20) NOT NULL,
+        account_id     VARCHAR(36),
+        capital_amount BIGINT DEFAULT 0,
+        premium_amount BIGINT DEFAULT 0,
+        acct_code      VARCHAR(10),
+        txn_id         VARCHAR(36),
+        memo           TEXT,
+        created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (vendor_id) REFERENCES vendors(id)
+      )
+    `)
+
     // ── 마이그레이션: 기존 DB에 신규 컬럼 추가 (MySQL은 ADD COLUMN IF NOT EXISTS 미지원) ──
     const ensureColumn = async (table, col, ddl) => {
       const [[{ cnt }]] = await c.execute(
@@ -837,6 +904,16 @@ async function initDb(conn) {
     // 홈택스 전자세금계산서 승인번호(24자리). 임포트에서 같은 계산서가 두 번 쌓이는 걸 막는 유일한 키다.
     // 수기로 등록한 청구서는 비어 있고, 나중에 엑셀을 올리면 그 청구서에 채워진다.
     await ensureColumn('invoices',     'nts_confirm_no', "nts_confirm_no VARCHAR(40)")
+    // 재무 거래 역참조 — 이 지출/입금이 어느 대출·투자에서 나왔는지(정기의 recurring_id와 같은 용도).
+    // FK는 두지 않는다: 대출 기록을 지워도 실제로 오간 돈의 기록은 남아야 한다.
+    /* 정산(매칭)이 만든 거래인가. 취소할 때 이 값으로 갈린다:
+     *   1 = 정산이 새로 만든 거래 → 취소하면 함께 지운다(그 매칭이 유일한 근거였다)
+     *   0 = 이미 있던 거래를 연결한 것 → 취소해도 남긴다(실제로 오간 돈의 독립 기록)
+     * 구분이 없던 동안은 둘 다 남겨서, 정산 취소 뒤 같은 돈이 '들어온 돈'과 '못 받은 돈'으로
+     * 동시에 존재했다(계좌 잔액은 그대로, 미수금은 부활). 기존 행은 0(보수적으로 유지). */
+    await ensureColumn('invoice_matches', 'txn_created', "txn_created TINYINT(1) NOT NULL DEFAULT 0")
+    await ensureColumn('transactions', 'loan_id',       "loan_id VARCHAR(36)")
+    await ensureColumn('transactions', 'investment_id', "investment_id VARCHAR(36)")
     // 적격증빙 유형(ref_items type='evidence_type')의 매입세액 공제 가능 여부.
     // 세금계산서·카드전표·현금영수증(지출증빙)은 공제, 간이영수증·거래명세서는 불공제.
     await ensureColumn('ref_items',    'deductible',    "deductible TINYINT DEFAULT 1")

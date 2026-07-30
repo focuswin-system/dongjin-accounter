@@ -1,17 +1,27 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
+const { futureDateError } = require('../db')
+const { closedPeriodError } = require('../lib/closing')
+const { SETTLED_INCOME, SETTLED_EXPENSE } = require('../lib/ledger')
 
 const router = Router()
 
+/* 계좌 잔액.
+ *
+ * 수입도 지출과 같이 **완료 상태만** 센다. 여태 지출에만 status 조건이 있어서,
+ * 아직 안 들어온 수입('입금 예정' 등)이 잔액에 포함됐다 — 거래내역 화면의 '입금 합계'는
+ * '입금완료'만 세므로 같은 화면 안에서 두 숫자가 어긋났다.
+ * (실데이터 확인: 로컬·운영의 수입 거래는 전부 '입금완료'라 기존 잔액은 바뀌지 않는다.
+ *  Ledger에 '입금 처리' 버튼이 있어 미결 수입이 언제든 생길 수 있으므로 미리 대칭으로 맞춘다) */
 async function calcBalance(db, accountId) {
   const [rows] = await db.execute(`
     SELECT
       a.initial_balance,
-      COALESCE((SELECT SUM(amount) FROM transactions WHERE kind='income'  AND account_id=a.id), 0) AS income_total,
-      COALESCE((SELECT SUM(amount) FROM transactions WHERE kind='expense' AND account_id=a.id AND status='지급완료'), 0) AS expense_total,
+      COALESCE((SELECT SUM(amount) FROM transactions WHERE kind='income'  AND account_id=a.id AND status=?), 0) AS income_total,
+      COALESCE((SELECT SUM(amount) FROM transactions WHERE kind='expense' AND account_id=a.id AND status=?), 0) AS expense_total,
       COALESCE((SELECT SUM(amount) FROM account_adjustments WHERE account_id=a.id), 0) AS adj_total
     FROM accounts a WHERE a.id = ?
-  `, [accountId])
+  `, [SETTLED_INCOME, SETTLED_EXPENSE, accountId])
   const row = rows[0]
   if (!row) return 0
   return Number(row.initial_balance) + Number(row.income_total) - Number(row.expense_total) + Number(row.adj_total)
@@ -112,13 +122,25 @@ router.get('/:id/adjustments', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/* 잔액 조정 — 계좌 잔액을 거래 없이 직접 움직이는 유일한 경로다.
+ * 그런데 가드가 하나도 없어서 미래 날짜(2099년)로도, 마감된 달로도 조정이 들어갔다.
+ * 거래에 걸린 규칙과 같은 선을 적용한다(마감·미래일자). 사유도 남기게 한다 —
+ * 나중에 "이 5백만은 왜 조정됐나"에 답할 수 없으면 조정 자체가 장부를 흐린다. */
 router.post('/:id/adjustments', async (req, res, next) => {
   try {
     const { amount, reason, date, created_by } = req.body
+    const amt = parseInt(String(amount ?? '').replace(/[^0-9-]/g, ''), 10)
+    if (!Number.isFinite(amt) || amt === 0) return res.status(400).json({ error: '조정 금액을 입력해주세요' })
+    if (!date) return res.status(400).json({ error: '조정 일자를 선택해주세요' })
+    { const de = futureDateError(date); if (de) return res.status(400).json({ error: de }) }
+    { const ce = await closedPeriodError(req.db, date); if (ce) return res.status(409).json({ error: ce }) }
+    if (!String(reason || '').trim()) return res.status(400).json({ error: '조정 사유를 입력해주세요' })
+    const [[acct]] = await req.db.execute('SELECT id FROM accounts WHERE id = ?', [req.params.id])
+    if (!acct) return res.status(404).json({ error: '계좌를 찾을 수 없어요' })
     const id = randomUUID()
     await req.db.execute(
       'INSERT INTO account_adjustments (id, account_id, amount, reason, date, created_by) VALUES (?,?,?,?,?,?)',
-      [id, req.params.id, amount, reason||'', date, created_by||'']
+      [id, req.params.id, amt, String(reason).trim(), date, created_by||'']
     )
     res.json({ id })
   } catch (e) { next(e) }

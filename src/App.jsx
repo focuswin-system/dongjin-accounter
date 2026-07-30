@@ -15,6 +15,7 @@ import { QuoteRequestScreen } from './screens/QuoteRequest'
 import { HRScreen } from './screens/HR'
 import { LaborContractScreen, OutsourcingScreen } from './screens/WorkContract'
 import { MasterScreen, RefMasterPanel, REF_CONFIGS, RecurringExpensePanel, RecurringInvoicePanel } from './screens/Master'
+import { LoanScreen, InvestmentScreen, FinanceDashScreen } from './screens/Finance'
 import { BillingScreen } from './screens/Billing'
 import { TaxVatScreen, OtherTaxScreen } from './screens/Tax'
 import { MiscPLScreen } from './screens/MiscPL'
@@ -241,8 +242,8 @@ function AppInner({ onLogout, user }) {
   const [contractName, setContractName] = useState("");
   const [txnForm, setTxnForm] = useState(null); // null | { kind, contract? }
   const [txnVersion, setTxnVersion] = useState(0);
-  // 잎 id → 놓친 회차 수 (사이드바 배지). 0이면 배지를 그리지 않는다.
-  const [overdueCycles, setOverdueCycles] = useState({ recurring_invoice: 0, recurring_expense: 0 });
+  // 잎 id → 처리가 밀린 건수 (사이드바 배지). 0이면 배지를 그리지 않는다.
+  const [overdueCycles, setOverdueCycles] = useState({ recurring_invoice: 0, recurring_expense: 0, finance_loan: 0 });
   const [evidenceAttach, setEvidenceAttach] = useState(null);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -305,17 +306,22 @@ function AppInner({ onLogout, user }) {
     return () => { alive = false }
   }, [txnVersion]);
 
-  /* 정기 회차 '놓친 건수' — 사이드바 배지.
-   * 정기 화면에 이행 관리가 생겼지만, 그 화면을 열지 않으면 밀린 게 있는지 여전히 모른다.
-   * 회차는 정기 화면·대금청구서에서 처리되므로 라우트가 바뀔 때 다시 센다
-   * (그 화면에 있는 동안은 화면 자체가 진실을 보여주므로 실시간 갱신이 필요 없다). */
+  /* '처리가 밀린 건수' — 사이드바 배지.
+   * 이행 관리 화면을 만들어도 그 화면을 열지 않으면 밀린 게 있는지 모른다.
+   * 정기 회차(청구·지출)와 차입금 상환이 같은 성격이라 함께 센다 —
+   * 셋 다 "예정일이 지났는데 처리되지 않은 것"이고, 방치하면 그 달 장부에 구멍이 난다.
+   * 라우트가 바뀔 때 다시 센다(그 화면에 있는 동안은 화면 자체가 진실을 보여준다). */
   useEffect(() => {
     let alive = true
     const overdueOf = (list) => (list || []).filter(c => c.state === 'overdue').length
-    Promise.all([api.getPendingRecurring(), api.getPendingRecurringExpenses()])
-      .then(([sales, purchase]) => {
+    Promise.all([api.getPendingRecurring(), api.getPendingRecurringExpenses(), api.getFinanceSummary()])
+      .then(([sales, purchase, finance]) => {
         if (!alive) return
-        setOverdueCycles({ recurring_invoice: overdueOf(sales), recurring_expense: overdueOf(purchase) })
+        setOverdueCycles({
+          recurring_invoice: overdueOf(sales),
+          recurring_expense: overdueOf(purchase),
+          finance_loan: finance?.overdue_count || 0,
+        })
       })
       .catch(() => {})
     return () => { alive = false }
@@ -442,6 +448,11 @@ function AppInner({ onLogout, user }) {
       case "contract_purchase": return <ContractListScreen kind="purchase" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
       case "contract_detail": return <ContractScreen goList={() => go("contract")} contractId={contractId} refreshTrigger={txnVersion} openIncome={(contract, vendor) => setTxnForm({ kind: "income", contract, vendor })} openExpense={(contract, vendor, opts) => setTxnForm(opts?.asCost ? { kind: "expense", costContract: contract, vendor } : { kind: "expense", contract, vendor })}/>;
       case "hr":              return <HRScreen/>;
+      // 재무관리 — 차입금·투자. 손익이 아니라 부채·자본이다(server/lib/pnl.js)
+      case "finance_loan":       return <LoanScreen/>;
+      case "finance_investment": return <InvestmentScreen/>;
+      case "finance_dash":       return <FinanceDashScreen/>;
+
       case "report":          return <ReportsScreen/>;
       case "tax_vat":         return <TaxVatScreen/>;
       case "tax_etc":         return <OtherTaxScreen/>;

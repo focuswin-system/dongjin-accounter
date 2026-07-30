@@ -1,6 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { kstToday } = require('../db')
+const { pnlOnly, pnlParams } = require('../lib/pnl')
 
 const router = Router()
 
@@ -72,8 +73,10 @@ async function runAggregate(db, spec) {
   const statusCond = (s.status_scope === 'completed' && kind === 'expense') ? " AND t.status = '지급완료'" : ''
   const AGG = s.measure === 'count' ? 'COUNT(*)' : 'COALESCE(SUM(t.amount), 0)'
 
-  const where = ['t.kind = ?', 't.date BETWEEN ? AND ?']
-  const params = [kind, from, to]
+  // 재무 거래(차입금 원금·자본금·투자자산)는 매출/매입이 아니다 → 손익 거래만 집계한다.
+  // 대출 수령을 income으로 넣는 순간 이 조건이 없으면 그대로 '매출'로 잡힌다(lib/pnl.js).
+  const where = ['t.kind = ?', 't.date BETWEEN ? AND ?', pnlOnly('t')]
+  const params = [kind, from, to, ...pnlParams()]
   const filter = s.filter || {}
   for (const [k, col] of Object.entries(FILTER_COLS)) if (filter[k]) { where.push(`${col} = ?`); params.push(filter[k]) }
   const whereSql = where.join(' AND ') + statusCond

@@ -65,4 +65,31 @@ function ledgerError({ kind, account_id, status }) {
   return null
 }
 
-module.exports = { SETTLED_EXPENSE, SETTLED_INCOME, normalizeStatus, isSettled, ledgerError }
+/** 거래 종류별 기본 완료 상태 — 수입에 '지급완료'가 박히면 상태 배지가 틀리고
+ *  '입금완료'만 세는 집계(거래내역 입금 합계)에서 빠진다. */
+const defaultSettledStatus = (kind) => (kind === 'income' ? SETTLED_INCOME : SETTLED_EXPENSE)
+
+/* 금액 상한 — BIGINT 한계가 아니라 '사람이 실수로 넣은 값'을 걸러내는 선.
+ * 1조원은 이 제품(영세·중소기업 회계)의 어떤 정상 거래보다 크다. */
+const MAX_AMOUNT = 1_000_000_000_000
+
+/**
+ * 거래 금액 검증. 문제가 있으면 사용자에게 보여줄 한국어 메시지, 없으면 null.
+ *
+ * 서버에 부호 검증이 전혀 없어서 음수 금액이 그대로 저장됐다.
+ * −330만 지출을 넣으면 계좌 잔액이 **늘고**, 부가세 매입세액이 −30만이 되어 공제세액이 줄었다.
+ * 화면·엑셀 마법사는 숫자만 남기지만(`[^0-9]`), 프런트만 믿는 구조가 과거 사고(F-02)의 뿌리였다.
+ */
+function amountError(amount, { allowZero = false } = {}) {
+  const n = Number(amount)
+  if (!Number.isFinite(n)) return '금액을 숫자로 입력해주세요'
+  if (n < 0) return '금액은 0보다 작을 수 없어요. 반대 방향 거래로 등록하거나 환불·환입을 쓰세요.'
+  if (!allowZero && n === 0) return '금액을 입력해주세요'
+  if (n > MAX_AMOUNT) return `금액이 너무 큽니다(${MAX_AMOUNT.toLocaleString('ko-KR')}원 초과). 자릿수를 확인해주세요.`
+  return null
+}
+
+module.exports = {
+  SETTLED_EXPENSE, SETTLED_INCOME, normalizeStatus, isSettled, ledgerError,
+  defaultSettledStatus, amountError, MAX_AMOUNT,
+}

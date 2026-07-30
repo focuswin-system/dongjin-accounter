@@ -118,10 +118,12 @@ const Section = ({ state, cycles, sales, onIssue, onPaid, onOpenContract, onBulk
         <span className="fw-700 text-sm">{cycles.length}건</span>
         <span className="num text-sm text-muted">{fmtNum(sum)}원</span>
         {open && <span className="text-xs text-muted2" style={{ flex: 1 }}>{meta.hint(sales)}</span>}
-        {/* 일괄은 '놓친 회차'에만 — 미래 회차를 한꺼번에 만들면 미수/미지급이 조기에 부푼다 */}
+        {/* 일괄은 '놓친 회차'에만 — 미래 회차를 한꺼번에 만들면 미수/미지급이 조기에 부푼다.
+            단 서버는 '오늘까지 도래한 회차'를 처리하므로, 오늘 회차(soon 구획)도 대상이다.
+            확인창에 그 회차까지 보여주지 않으면 "1건 발행" 하고 2건이 생긴다. */}
         {state === 'overdue' && onBulk && (
-          <button className="btn sm ml-auto" disabled={busy} onClick={() => onBulk(cycles)}>
-            <Icon.Receipt size={12}/> {cycles.length}건 일괄 {sales ? '발행' : '등록'}
+          <button className="btn sm ml-auto" disabled={busy} onClick={() => onBulk()}>
+            <Icon.Receipt size={12}/> 놓친 회차 일괄 {sales ? '발행' : '등록'}
           </button>
         )}
       </div>
@@ -231,8 +233,14 @@ export const useRecurringCycles = (kind, { onChanged } = {}) => {
   const openPaid = (c) => setPaidTarget(c)
   const issuePaid = (t) => A.issue.call(api, t.recurring_id, { due: t.due_date, paid: true, account_id: t._accountId })
 
-  // 놓친 회차 일괄 — 무엇이 만들어지는지 전부 보여주고 확인받는다(되돌리는 비용이 큰 동작)
-  const bulk = async (overdue) => {
+  /* 놓친 회차 일괄 — 무엇이 만들어지는지 전부 보여주고 확인받는다(되돌리는 비용이 큰 동작).
+   * 대상은 화면의 'overdue' 구획이 아니라 **서버가 실제로 처리하는 범위**(오늘까지 도래한 회차)다.
+   * 오늘 회차는 화면에서 '오늘·임박'으로 분류되는데 서버는 그것까지 만들기 때문에,
+   * overdue만 세어 보여주면 "1건 발행"이라 확인받고 2건이 생겼다. */
+  const bulk = async () => {
+    const today = localToday()
+    const overdue = cycles.filter(c => c.due_date <= today).sort((a, b) => a.due_date.localeCompare(b.due_date))
+    if (!overdue.length) return toast.push('처리할 회차가 없어요')
     const ok = await confirm({
       tone: 'brand', icon: <Icon.Receipt size={22}/>,
       title: `놓친 회차 ${overdue.length}건 일괄 ${sales ? '발행' : '등록'}`,

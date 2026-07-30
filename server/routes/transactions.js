@@ -4,30 +4,18 @@ const multer = require('multer')
 const xlsx = require('xlsx')
 const { futureDateError } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
-const { normalizeStatus, ledgerError } = require('../lib/ledger')
+const { normalizeStatus, ledgerError, defaultSettledStatus, amountError } = require('../lib/ledger')
 const { restoreLastGenerated } = require('../lib/recurrence')
 const { removeUploadedFile } = require('../lib/uploads')
 const { vatFields } = require('../lib/vat')
 const { closedPeriodError } = require('../lib/closing')
+const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
 
 const router = Router()
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
 
-// 청구서 매칭 누계로 청구서·마일스톤 상태를 다시 계산한다.
-// 거래가 지워지거나 금액이 바뀌면 정산액이 달라지므로 반드시 다시 계산해야 한다.
-// (db는 필수 인자 — 기본값을 두면 호출자가 빠뜨렸을 때 조용히 다른 회사 DB를 건드린다)
-async function recalcInvoiceStatus(db, invoiceId) {
-  const [[inv]] = await db.execute('SELECT kind, total_amount FROM invoices WHERE id = ?', [invoiceId])
-  if (!inv) return
-  const [[{ paid }]] = await db.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [invoiceId])
-  const isIssued = inv.kind === 'issued'
-  const total = Number(inv.total_amount)
-  const status = Number(paid) <= 0 ? (isIssued ? '입금 예정' : '지급 대기')
-    : Number(paid) >= total ? (isIssued ? '입금 완료' : '지급 완료')
-    : (isIssued ? '일부 입금' : '일부 지급')
-  await db.execute('UPDATE invoices SET status = ? WHERE id = ?', [status, invoiceId])
-  await db.execute('UPDATE milestones SET status = ? WHERE invoice_id = ?', [status, invoiceId])
-}
+// 청구서 상태 재계산은 lib/invoiceStatus.js 공용
+// (거래 수정·삭제, 정산 추가·취소, 청구서 금액 수정이 모두 같은 규칙을 써야 한다)
 
 // 거래 목록/상세에 첨부 서류(다중) 붙이기
 async function attachDocs(db, rows) {
@@ -114,9 +102,12 @@ router.post('/', async (req, res, next) => {
     if (dateErr) return res.status(400).json({ error: dateErr })
     const closedErr = await closedPeriodError(req.db, date)
     if (closedErr) return res.status(409).json({ error: closedErr })
+    // 음수·초대형 금액을 서버에서 막는다 — 음수 지출은 계좌 잔액을 늘리고 매입세액을 깎는다
+    { const ae = amountError(amount); if (ae) return res.status(400).json({ error: ae }) }
     const vat = vatFields({ amount, supply_amount, vat_amount, tax_type, vat_deductible })
     // 완료 상태인데 계좌가 없으면 잔액에 잡히지 않는다(lib/ledger.js 참고)
-    const st = normalizeStatus(status || '지급완료')
+    // 기본 상태는 종류별로 — 수입에 '지급완료'가 박히면 '입금완료'만 세는 집계에서 빠진다
+    const st = normalizeStatus(status || defaultSettledStatus(kind))
     const lerr = ledgerError({ kind, account_id, status: st })
     if (lerr) return res.status(400).json({ error: lerr })
     const id = randomUUID()
@@ -147,6 +138,8 @@ router.put('/:id', async (req, res, next) => {
     } = req.body
     const dateErr = futureDateError(date)
     if (dateErr) return res.status(400).json({ error: dateErr })
+    // 등록과 같은 금액 검증 — 수정으로 음수를 넣는 경로도 막아야 한다
+    { const ae = amountError(amount); if (ae) return res.status(400).json({ error: ae }) }
     const vat = vatFields({ amount, supply_amount, vat_amount, tax_type, vat_deductible })
     // 편집으로 수입 거래가 되면 원가 귀속은 떨어진다
     const [[cur]] = await req.db.execute('SELECT kind, date AS cur_date FROM transactions WHERE id = ?', [req.params.id])
@@ -157,7 +150,7 @@ router.put('/:id', async (req, res, next) => {
     // 장부 불변식은 등록(POST)·상태변경(PATCH)과 똑같이 수정에도 걸어야 한다.
     // 여기가 비어 있어서, 완료 상태 지출을 계좌 없이 저장하면 거래는 남고 계좌 잔액에서만
     // 조용히 빠지는 상태가 만들어졌다(F-02 계열). 상태는 표준형으로 정규화한 뒤 검사한다.
-    const st = normalizeStatus(status || '지급완료')
+    const st = normalizeStatus(status || defaultSettledStatus(cur.kind))
     const lerr = ledgerError({ kind: cur.kind, account_id, status: st })
     if (lerr) return res.status(400).json({ error: lerr })
     const costId = cur.kind === 'expense' ? (cost_contract_id || null) : null
@@ -206,8 +199,12 @@ router.patch('/:id/status', async (req, res, next) => {
     // 세므로 '지급 완료'(공백)로 들어오면 누락된다(F-02 계열 방지).
     const status = normalizeStatus(req.body.status)
     if (!status) return res.status(400).json({ error: 'status 필수' })
-    const [[cur]] = await req.db.execute('SELECT kind, account_id FROM transactions WHERE id = ?', [req.params.id])
+    const [[cur]] = await req.db.execute('SELECT kind, account_id, date FROM transactions WHERE id = ?', [req.params.id])
     if (!cur) return res.status(404).json({ error: 'Not found' })
+    // 상태를 바꾸면 계좌 잔액이 움직인다('지급 대기'↔'지급완료'). 마감된 달이면 막는다 —
+    // POST·PUT·DELETE는 모두 검사하는데 여기만 빠져 있어서, 거래내역의 '이체 실행' 버튼 하나로
+    // 마감월 잔액이 사후에 바뀌었다(양방향 모두).
+    { const ce = await closedPeriodError(req.db, cur.date); if (ce) return res.status(409).json({ error: ce }) }
     // 계좌가 비어 있으면 '완료'로 바꿔도 잔액에서 움직이지 않는다. 정기지출은 계좌 없이
     // '지급 대기'로 생성될 수 있어(recurring.js), 거래내역의 '이체 실행'이 이 경로를 탄다.
     // 요청이 계좌를 함께 보냈으면 그걸로 채우고, 그래도 없으면 막는다.

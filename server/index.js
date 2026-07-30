@@ -98,6 +98,7 @@ app.use('/api/settlements',        require('./routes/settlements'))
 app.use('/api/purchase-reqs',      require('./routes/purchase-reqs'))
 app.use('/api/quote-reqs',         require('./routes/quote-reqs'))
 app.use('/api/approval-presets',   require('./routes/approval-presets'))
+app.use('/api/finance',            require('./routes/finance'))
 
 // ── 헬스체크 ──
 // deploy.sh 가 배포 시점에 기록한 provenance 를 함께 돌려준다.

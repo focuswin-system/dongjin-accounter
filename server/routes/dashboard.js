@@ -24,16 +24,22 @@ router.get('/', async (req, res, next) => {
       return { ...a, balance: Number(r.initial_balance) + Number(r.inc) - Number(r.exp) + Number(r.adj) }
     }))
 
-    // 미수금
-    const [receivables] = await req.db.execute("SELECT * FROM invoices WHERE kind='issued' AND status NOT IN ('입금 완료')")
+    // 미수금 — 판정 기준은 lib/invoiceStatus.js 하나로 (미수금 화면과 어긋나지 않게).
+    // 여태 여기만 `NOT IN ('입금 완료')` 블랙리스트라, status가 엉뚱한 값인 청구서가
+    // 이 화면에만 잡혀 대시보드와 미수금 화면의 금액이 달랐다.
+    const rc = pendingCond('issued')
+    const [receivables] = await req.db.execute(
+      `SELECT * FROM invoices WHERE kind='issued' AND ${rc.sql}`, rc.params)
     let receivableTotal = 0
     for (const r of receivables) {
       const [mRows] = await req.db.execute('SELECT COALESCE(SUM(amount),0) AS t FROM invoice_matches WHERE invoice_id=?', [r.id])
       receivableTotal += Number(r.total_amount) - Number(mRows[0].t)
     }
 
-    // 미지급금
-    const [payables] = await req.db.execute("SELECT * FROM invoices WHERE kind='received' AND status NOT IN ('지급 완료')")
+    // 미지급금 — 같은 기준(lib/invoiceStatus.js)
+    const pc = pendingCond('received')
+    const [payables] = await req.db.execute(
+      `SELECT * FROM invoices WHERE kind='received' AND ${pc.sql}`, pc.params)
     let payableTotal = 0
     for (const r of payables) {
       const [mRows] = await req.db.execute('SELECT COALESCE(SUM(amount),0) AS t FROM invoice_matches WHERE invoice_id=?', [r.id])
