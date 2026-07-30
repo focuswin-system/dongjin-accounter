@@ -736,6 +736,8 @@ async function initDb(conn) {
       )
       if (cnt === 0) await c.execute(`ALTER TABLE \`${table}\` ADD COLUMN ${ddl}`)
     }
+
+    // (UNIQUE 인덱스는 아래쪽 ensureUniqueIndex 를 쓴다 — 계약번호·사번·청구번호와 같은 자리)
     // ── 1회성 데이터 마이그레이션 가드 ──
     // 데이터를 '변형'하는 마이그레이션은 부팅마다 재실행되면 안 된다(신규 입력 데이터를 오염시킴).
     // ensureColumn 같은 순수 스키마 추가는 멱등이라 가드 불필요 — 이건 데이터 UPDATE 전용.
@@ -977,6 +979,10 @@ async function initDb(conn) {
       }
     }
     await ensureUniqueIndex('contracts', 'uq_contracts_contract_no', 'contract_no')
+    // 홈택스 승인번호는 국세청이 부여한 유일값 → 같은 번호의 청구서가 둘 존재하는 것은 항상 잘못이다.
+    // 임포트가 앱에서도 "조회 후 없으면 삽입"으로 막지만, 그 사이의 틈(동시 요청)은 인덱스만 닫는다.
+    // NULL 다중 허용이라 승인번호 없는 수기 청구서는 공존한다.
+    await ensureUniqueIndex('invoices', 'uq_invoices_nts_confirm_no', 'nts_confirm_no')
 
     // 사번·청구번호 유니크화: 먼저 기존 중복을 재번호(뒤 생성분을 그룹 최대+1)한 뒤 유니크 인덱스를 건다.
     // (동시/다경로 생성 시 MAX+1 채번이 겹쳐 중복이 조용히 생기는 것을 DB가 차단. 중복이 남아 있으면

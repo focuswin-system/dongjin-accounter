@@ -285,13 +285,21 @@ router.post('/import/commit', async (req, res, next) => {
       const v = await findOrCreateVendor(conn, { name: it.vendor_name, bizNo: it.biz_no, kind })
       if (v.created) createdVendors.push(v.name)
       const newId = randomUUID()
-      await conn.execute(
-        `INSERT INTO invoices (id, invoice_no, kind, vendor_id, supply_amount, vat_amount, total_amount,
-                               issued_at, due_at, status, memo, tax_type, nts_confirm_no)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [newId, await nextInvoiceNo(kind, issuedAt.slice(0, 4)), kind, v.id,
-         supply, vat, total, issuedAt, dueAt,
-         kind === 'issued' ? '입금 예정' : '지급 대기', String(it.memo || ''), taxType, confirmNo])
+      try {
+        await conn.execute(
+          `INSERT INTO invoices (id, invoice_no, kind, vendor_id, supply_amount, vat_amount, total_amount,
+                                 issued_at, due_at, status, memo, tax_type, nts_confirm_no)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [newId, await nextInvoiceNo(kind, issuedAt.slice(0, 4)), kind, v.id,
+           supply, vat, total, issuedAt, dueAt,
+           kind === 'issued' ? '입금 예정' : '지급 대기', String(it.memo || ''), taxType, confirmNo])
+      } catch (e) {
+        // UNIQUE(nts_confirm_no)가 걸린 경우: 위 조회와 이 삽입 사이에 다른 요청이 먼저 넣었다.
+        // 그 한 건 때문에 배치 전체를 500으로 되돌리면 나머지 수백 건이 통째로 날아간다 →
+        // 중복으로 세고 넘어간다(결과 화면에 dupSkipped로 보고된다).
+        if (e.code === 'ER_DUP_ENTRY') { dupSkipped++; continue }
+        throw e
+      }
       if (await replaceInvoiceLines(conn, newId, it.lines, itemIdx, registerItems)) linedInvoices++
       inserted++
     }

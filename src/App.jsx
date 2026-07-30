@@ -241,6 +241,8 @@ function AppInner({ onLogout, user }) {
   const [contractName, setContractName] = useState("");
   const [txnForm, setTxnForm] = useState(null); // null | { kind, contract? }
   const [txnVersion, setTxnVersion] = useState(0);
+  // 잎 id → 놓친 회차 수 (사이드바 배지). 0이면 배지를 그리지 않는다.
+  const [overdueCycles, setOverdueCycles] = useState({ recurring_invoice: 0, recurring_expense: 0 });
   const [evidenceAttach, setEvidenceAttach] = useState(null);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -302,6 +304,22 @@ function AppInner({ onLogout, user }) {
     api.getNotifications().then(list => { if (alive) { setNotifs(list); setNotifRead(false); } }).catch(() => {})
     return () => { alive = false }
   }, [txnVersion]);
+
+  /* 정기 회차 '놓친 건수' — 사이드바 배지.
+   * 정기 화면에 이행 관리가 생겼지만, 그 화면을 열지 않으면 밀린 게 있는지 여전히 모른다.
+   * 회차는 정기 화면·대금청구서에서 처리되므로 라우트가 바뀔 때 다시 센다
+   * (그 화면에 있는 동안은 화면 자체가 진실을 보여주므로 실시간 갱신이 필요 없다). */
+  useEffect(() => {
+    let alive = true
+    const overdueOf = (list) => (list || []).filter(c => c.state === 'overdue').length
+    Promise.all([api.getPendingRecurring(), api.getPendingRecurringExpenses()])
+      .then(([sales, purchase]) => {
+        if (!alive) return
+        setOverdueCycles({ recurring_invoice: overdueOf(sales), recurring_expense: overdueOf(purchase) })
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [route, txnVersion]);
 
   useEffect(() => {
     const apply = () => {
@@ -506,11 +524,17 @@ function AppInner({ onLogout, user }) {
             const Dic = node.icon;
             const open = openDomains.includes(node.id);
             const inDomain = DOMAIN_OF[activeId] === node.id;
+            // 도메인을 접어두면 안쪽 배지가 안 보인다 → 합계를 도메인 줄에도 올린다
+            const domainOverdue = node.sections.reduce((s, sec) =>
+              s + sec.items.reduce((n, it) => n + (overdueCycles[it.id] || 0), 0), 0);
             return (
               <div key={node.id} style={{ marginTop: 4 }}>
                 <button className={`nav-domain${inDomain ? " has-active" : ""}`} onClick={() => toggleDomain(node.id)}>
                   <Dic className="nav-ico"/>
                   <span>{node.label}</span>
+                  {!open && domainOverdue > 0 && (
+                    <span className="nav-count neg ml-auto" title={`처리가 밀린 정기 회차 ${domainOverdue}건`}>{domainOverdue}</span>
+                  )}
                   <Icon.Down className="nav-chev" style={{ transform: open ? "none" : "rotate(-90deg)" }}/>
                 </button>
                 {open && node.sections.map(section => (
@@ -528,10 +552,15 @@ function AppInner({ onLogout, user }) {
                           </div>
                         );
                       }
+                      const overdue = overdueCycles[it.id] || 0;
                       return (
                         <div key={it.id} className={`nav-item nav-sub${activeId === it.id ? " active" : ""}`} onClick={() => go(it.id)}>
                           <Lic className="nav-ico"/>
                           <span>{it.label}</span>
+                          {/* 놓친 회차 — '해야 하는데 안 된 것'이라 개수만 조용히 놓지 않고 눈에 걸리게 */}
+                          {overdue > 0 && (
+                            <span className="nav-count neg" title={`처리가 밀린 회차 ${overdue}건`}>{overdue}</span>
+                          )}
                         </div>
                       );
                     })}
