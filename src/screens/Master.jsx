@@ -1652,7 +1652,9 @@ const AccountBalancePanel = ({ embedded = false }) => {
   useEffect(() => { load() }, [])
 
   const handleAdjust = async (accountId, data) => {
-    await api.addAdjustment(accountId, data)
+    // 결과를 안 보고 성공 문구를 띄우면, 마감된 달이라 거절돼도 등록된 줄 안다
+    const res = await api.addAdjustment(accountId, data)
+    if (!res.ok) { toast.push(res.error || "잔액 조정에 실패했어요", { tone: "warn" }); return }
     toast.push("잔액 조정이 등록됐어요")
     load()
   }

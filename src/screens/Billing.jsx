@@ -811,7 +811,9 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     let invoiceId = payload.id
     if (payload.id) {
       const res = await api.updateInvoice(payload.id, payload)
-      if (!res.ok) { toast.push("수정 실패"); return }
+      // 서버 메시지를 버리면 "마감된 달" · "이미 정산된 금액보다 적게 바꿀 수 없다" 같은
+      // 거절 이유가 사라져, 사용자는 그냥 고장난 것으로 받아들인다
+      if (!res.ok) { toast.push(res.error || "청구서 수정에 실패했어요", { tone: "warn" }); return }
       toast.push("청구서가 수정됐어요")
     } else {
       const res = await api.addInvoice(payload)

@@ -50,6 +50,9 @@ export const taxInvoiceImportAdapter = ({ ourBizNo = '', defaultKind = 'issued' 
     if (r.linedInvoices) {
       notes.push(`${r.linedInvoices}건에 품목 내역이 함께 등록됐어요 — 매입 지급결의서가 품목별로 작성됩니다`)
     }
+    if (r.closedSkipped) {
+      notes.push(`마감된 달의 ${r.closedSkipped}건은 등록하지 않았어요 — 이미 신고한 부가세 자료가 바뀌지 않게 막습니다. 필요하면 환경설정에서 마감을 해제하세요`)
+    }
     if (r.dupSkipped) {
       notes.push(`승인번호가 이미 등록된 ${r.dupSkipped}건은 건너뛰었어요 — 같은 세금계산서를 두 번 등록하지 않습니다`)
     }

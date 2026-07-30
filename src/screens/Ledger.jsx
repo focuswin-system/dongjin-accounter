@@ -191,7 +191,7 @@ const TxnActions = ({ txn, toast, confirm, onAction }) => {
     if (ok) {
       const res = await api.updateTransactionStatus(txn.id, "입금완료");
       if (res.ok) { toast.push("입금이 처리됐어요"); onAction?.(); }
-      else toast.push("처리에 실패했어요");
+      else toast.push(res.error || "처리에 실패했어요", { tone: "warn" });
     }
   };
   const doExpense = async (e) => {
@@ -200,7 +200,7 @@ const TxnActions = ({ txn, toast, confirm, onAction }) => {
     if (ok) {
       const res = await api.updateTransactionStatus(txn.id, "지급완료");
       if (res.ok) { toast.push("이체가 완료됐어요"); onAction?.(); }
-      else toast.push("처리에 실패했어요");
+      else toast.push(res.error || "처리에 실패했어요", { tone: "warn" });
     }
   };
 

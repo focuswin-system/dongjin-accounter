@@ -289,7 +289,10 @@ export const api = {
         body: { amount, reason, date: localToday(), created_by: by },
       })
       return { ok: true }
-    } catch { return { ok: false } }
+    } catch (e) {
+      // 서버 메시지를 버리면 마감된 달·사유 누락 같은 거절 이유를 사용자가 알 수 없다
+      return { ok: false, error: e.message }
+    }
   },
 
   // ─── 회사 정보 ────────────────────────────────────────────────
