@@ -1,7 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday, kstDate } = require('../db')
-const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS } = require('../lib/recurrence')
+const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS, pendingCycle } = require('../lib/recurrence')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
 const { closedPeriodError } = require('../lib/closing')
@@ -106,25 +106,96 @@ router.get('/pending', async (req, res, next) => {
       r.setup_date = kstDate(Number(r.created_epoch) * 1000)   // 등록일(KST) — 소급 하한
       for (const due of dueDatesToGenerate(r, today, { horizonDays: LOOKAHEAD_DAYS })) {
         const { supply, vat } = expenseVat(r.amount, r.vat_mode, r.cat_vat)
-        out.push({
+        out.push(pendingCycle(r, due, today, {
           source: 'recurring-expense',
-          recurring_id: r.id,
-          due_date: due,
-          vendor_id: r.vendor_id,
-          vendor_name: r.vendor_name || '',
-          contract_name: r.contract_name || r.category || '',
-          contract_no: r.contract_no || '',
           type: '정기지출',
           item: r.category || '',
           amount: supply,
           vat,
-          period: r.period,
-        })
+          // 계약 이름이 없으면 비목으로 대신 표시(계약 무관 정기지출)
+          contract_name: r.contract_name || r.category || '',
+        }))
       }
     }
     out.sort((a, b) => a.due_date.localeCompare(b.due_date))
     res.json(out)
   } catch (e) { next(e) }
+})
+
+/**
+ * 정기지출 회차 1건 → 매입 청구서(+ paid면 지급 거래·매칭).
+ * 건별 등록(/:id/issue)과 일괄 등록(/issue-missed)이 같은 코드를 쓰게 떼어냈다 —
+ * 두 벌로 두면 한쪽만 고쳐져서 금액·상태가 조용히 달라진다.
+ * 호출 전 검사(회차 순서·미래일자·마감)는 라우트가 한다.
+ */
+async function createExpenseInvoice(conn, r, target, { paid = false, accountId = null } = {}) {
+  const { supply, vat, tax_type } = expenseVat(r.amount, r.vat_mode, r.cat_vat)
+  const total = supply + vat
+  const year = target.slice(0, 4)
+  const [[{ maxno }]] = await conn.execute(
+    "SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(invoice_no, '-', -1) AS UNSIGNED)), 0) AS maxno FROM invoices WHERE kind='received' AND invoice_no LIKE ?",
+    [`매입-${year}-%`])
+  const invoice_no = `매입-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
+  let acctId = accountId || r.account_id || null
+  if (paid && !acctId) {
+    const [[defBank]] = await conn.execute("SELECT id FROM accounts WHERE kind='bank' ORDER BY created_at LIMIT 1")
+    acctId = defBank ? defBank.id : null
+  }
+  const invId = randomUUID()
+  await conn.execute(
+    'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    [invId, invoice_no, 'received', r.vendor_id || null, r.contract_id || null, supply, vat, total,
+     target, addDays(target, 30), paid ? '지급 완료' : '지급 대기', acctId, r.id,
+     `정기지출 · ${r.category || ''}`.trim(), tax_type]
+  )
+  if (paid) {
+    const lerr = ledgerError({ kind: 'expense', account_id: acctId, status: '지급완료' })
+    if (lerr) return { error: lerr }
+    const txnId = randomUUID()
+    // 계약에 걸린 정기지출이면 그 계약(매입)에 귀속(contract_id)
+    await conn.execute(
+      `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, invoice_id, memo)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [txnId, 'expense', r.vendor_id || null, r.contract_id || null, acctId,
+       r.category || '대금 지급', total, target, '계좌이체', '지급완료', '', invId, `청구서 ${invoice_no} 정산`])
+    await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount) VALUES (?,?,?,?)',
+      [randomUUID(), invId, txnId, total])
+  }
+  await conn.execute('UPDATE recurring_expenses SET last_generated = ? WHERE id = ?', [target, r.id])
+  return { invId, invoice_no, total }
+}
+
+/**
+ * 놓친 회차 일괄 등록 — 예정일이 지났는데 청구서가 없는 회차를 모두 '지급 대기'로 만든다.
+ *
+ * 미래 회차는 대상이 아니고(미지급금 조기 부풀림 방지), 소급 범위는 등록일(setup_date)부터다 —
+ * 2020년 시작 계약을 올해 등록해도 등록일 이전 회차는 만들어지지 않는다(dueDatesToGenerate의 하한).
+ * 계좌는 건드리지 않는다(paid=false) — 실제 이체를 확인하지 않은 채 잔액을 움직이지 않기 위해.
+ * 지급 처리는 회차별 '기지급 처리'에서 계좌·날짜를 정해 한다. (매출 /issue-missed와 대칭)
+ */
+router.post('/issue-missed', async (req, res, next) => {
+  const today = kstToday()
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    // FOR UPDATE — 같은 일괄이 두 번 겹쳐 실행되면(빠른 재클릭·두 탭) 양쪽이 같은 last_generated를
+    // 읽어 같은 회차를 두 벌 만든다. 건별 issue와 같은 잠금을 쓴다.
+    const [recs] = await conn.execute(
+      `SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch, cat.vat AS cat_vat
+       FROM recurring_expenses r LEFT JOIN categories cat ON r.category = cat.name
+       WHERE r.active = 1 FOR UPDATE`)
+    const generated = []
+    for (const r of recs) {
+      r.setup_date = kstDate(Number(r.created_epoch) * 1000)
+      for (const due of dueDatesToGenerate(r, today)) {   // horizon 없음 = 오늘까지만
+        const made = await createExpenseInvoice(conn, r, due)
+        generated.push({ id: made.invId, invoice_no: made.invoice_no, date: due, total: made.total })
+      }
+    }
+    await conn.commit()
+    res.json({ ok: true, count: generated.length, generated })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
 })
 
 // 정기지출 회차 1건을 매입 청구서(미지급금)로 등록. 매출 정기청구 issue와 대칭.
@@ -151,80 +222,17 @@ router.post('/:id/issue', async (req, res, next) => {
       const ce = await closedPeriodError(conn, target); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
     }
 
-    const { supply, vat, tax_type } = expenseVat(r.amount, r.vat_mode, r.cat_vat)
-    const total = supply + vat
-    const year = target.slice(0, 4)
-    const [[{ maxno }]] = await conn.execute(
-      "SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(invoice_no, '-', -1) AS UNSIGNED)), 0) AS maxno FROM invoices WHERE kind='received' AND invoice_no LIKE ?",
-      [`매입-${year}-%`])
-    const invoice_no = `매입-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
-    let acctId = account_id || r.account_id || null
-    if (paid && !acctId) {
-      const [[defBank]] = await conn.execute("SELECT id FROM accounts WHERE kind='bank' ORDER BY created_at LIMIT 1")
-      acctId = defBank ? defBank.id : null
-    }
-    const invId = randomUUID()
-    await conn.execute(
-      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [invId, invoice_no, 'received', r.vendor_id || null, r.contract_id || null, supply, vat, total,
-       target, addDays(target, 30), paid ? '지급 완료' : '지급 대기', acctId, r.id,
-       `정기지출 · ${r.category || ''}`.trim(), tax_type]
-    )
-    if (paid) {
-      const lerr = ledgerError({ kind: 'expense', account_id: acctId, status: '지급완료' })
-      if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
-      const txnId = randomUUID()
-      // 계약에 걸린 정기지출이면 그 계약(매입)에 귀속(contract_id)
-      await conn.execute(
-        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, invoice_id, memo)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [txnId, 'expense', r.vendor_id || null, r.contract_id || null, acctId,
-         r.category || '대금 지급', total, target, '계좌이체', '지급완료', '', invId, `청구서 ${invoice_no} 정산`])
-      await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount) VALUES (?,?,?,?)',
-        [randomUUID(), invId, txnId, total])
-    }
-    await conn.execute('UPDATE recurring_expenses SET last_generated = ? WHERE id = ?', [target, r.id])
+    const made = await createExpenseInvoice(conn, r, target, { paid, accountId: account_id })
+    if (made.error) { await rollbackQuietly(conn); return res.status(400).json({ error: made.error }) }
     await conn.commit()
-    res.json({ ok: true, id: invId, invoice_no })
+    res.json({ ok: true, id: made.invId, invoice_no: made.invoice_no })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
 
-// (구) 배치 생성 — pending/issue로 대체됨. 호출자 없음. 지급 대기 거래를 직접 만들던 방식이라
-// 미지급금 추적을 건너뛰었다. 하위호환 위해 남겨두되 새 흐름은 위 pending/issue를 쓴다.
-router.post('/generate', async (req, res, next) => {
-  const today = kstToday()
-  const conn = await req.db.getConnection()
-  try {
-    await conn.beginTransaction()
-    const [recurrings] = await conn.execute('SELECT * FROM recurring_expenses WHERE active = 1')
-    const generated = []
-
-    for (const r of recurrings) {
-      // 정기지출은 소급 생성하지 않는다(과거 지급대기 홍수 방지) — 가장 최근 미생성 회차 1건만.
-      // period(월/분기/연)·월말일은 공용 dueDatesToGenerate가 정확히 반영한다.
-      const dues = dueDatesToGenerate(r, today)
-      if (!dues.length) continue
-      const target = dues[dues.length - 1]
-      const id = randomUUID()
-      // kind를 안 넣으면 NULL로 들어가 지출 목록·계약 원가 어디에도 안 잡힌다(돈이 조용히 샌다).
-      // 계약에 걸린 정기지출이면 그 계약(매입)에 귀속시킨다.
-      await conn.execute(
-        'INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, recurring_id, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-        [id, 'expense', r.vendor_id||null, r.contract_id||null, r.account_id||null, r.category, r.amount, target, '계좌이체', '지급 대기', r.id, '정기 지출 자동 생성']
-      )
-      await conn.execute('UPDATE recurring_expenses SET last_generated = ? WHERE id = ?', [target, r.id])
-      generated.push({ id, vendor_id: r.vendor_id, category: r.category, amount: r.amount, date: target })
-    }
-
-    await conn.commit()
-    res.json({ generated, count: generated.length })
-  } catch (e) {
-    await rollbackQuietly(conn)
-    next(e)
-  } finally {
-    conn.release()
-  }
-})
+/* (제거) POST /generate — 옛 배치 생성.
+ * 청구서를 건너뛰고 '지급 대기' 거래를 바로 만들어 미지급금 추적에서 빠졌고,
+ * 등록일 하한(setup_date)을 안 걸어서 소급 방지도 적용되지 않았다. 호출자도 없었다.
+ * 대체: POST /issue-missed (청구서로 만들고, 등록일 이후 회차만). */
 
 module.exports = router

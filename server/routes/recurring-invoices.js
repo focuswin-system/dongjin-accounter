@@ -1,7 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday, kstDate } = require('../db')
-const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS } = require('../lib/recurrence')
+const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS, pendingCycle } = require('../lib/recurrence')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
 const { taxTypeOfMode, recurFromSupply, recurVat } = require('../lib/vat')
@@ -107,20 +107,15 @@ router.get('/pending', async (req, res, next) => {
       for (const due of dueDatesToGenerate(r, today, { horizonDays: LOOKAHEAD_DAYS })) {
         const supply = Number(r.supply_amount)
         const vat = recurFromSupply(supply, effVatMode(r)).vat
-        out.push({
+        out.push(pendingCycle(r, due, today, {
           source: 'recurring',
-          recurring_id: r.id,
-          due_date: due,
-          vendor_id: r.vendor_id,
-          vendor_name: r.vendor_name || '',
-          contract_name: r.contract_name || r.item || '',
-          contract_no: r.contract_no || '',
           type: '정기청구',
           item: r.item || '',
           amount: supply,
           vat,
-          period: r.period,
-        })
+          // 계약 이름이 없으면 항목으로 대신 표시(계약 무관 정기청구)
+          contract_name: r.contract_name || r.item || '',
+        }))
       }
     }
     out.sort((a, b) => a.due_date.localeCompare(b.due_date))
@@ -203,14 +198,22 @@ router.post('/:id/issue', async (req, res, next) => {
   finally { conn.release() }
 })
 
-// 대기 항목 생성: 활성 정기청구 → 미생성 회차마다 '입금 예정' 청구서(미수) 생성.
-// 등록일(setup_date)~오늘 사이 놓친 회차는 모두 소급 생성(등록 전 과거는 제외 — 무기한 계약 홍수 방지).
-router.post('/generate', async (req, res, next) => {
+/**
+ * 놓친 회차 일괄 발행 — 예정일이 지났는데 청구서가 없는 회차를 모두 '입금 예정'으로 만든다.
+ *
+ * 미래 회차는 대상이 아니고(미수금 조기 부풀림 방지), 소급 범위는 등록일(setup_date)부터다 —
+ * 2020년 시작 계약을 올해 등록해도 등록일 이전 회차는 만들어지지 않는다.
+ * 계좌를 건드리지 않는다(입금 처리 아님) — 실제 입금 확인 없이 잔액을 움직이지 않기 위해.
+ * (매입 정기지출 /issue-missed와 대칭)
+ */
+router.post('/issue-missed', async (req, res, next) => {
   const today = kstToday()
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
-    const [recs] = await conn.execute("SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch, c.vat_mode AS contract_vat_mode FROM recurring_invoices r LEFT JOIN contracts c ON r.contract_id = c.id WHERE r.active = 1")
+    // FOR UPDATE — 일괄이 두 번 겹쳐 돌면 같은 last_generated를 읽어 같은 회차를 두 벌 발행한다.
+    // (FOR UPDATE OF r 로 좁히지 않는다 — MariaDB 버전에 따라 지원이 갈린다. 짧은 트랜잭션이라 무해)
+    const [recs] = await conn.execute("SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch, c.vat_mode AS contract_vat_mode FROM recurring_invoices r LEFT JOIN contracts c ON r.contract_id = c.id WHERE r.active = 1 FOR UPDATE")
     const generated = []
 
     for (const r of recs) {
@@ -243,7 +246,7 @@ router.post('/generate', async (req, res, next) => {
     }
 
     await conn.commit()
-    res.json({ generated, count: generated.length })
+    res.json({ ok: true, count: generated.length, generated })
   } catch (e) {
     await rollbackQuietly(conn)
     next(e)

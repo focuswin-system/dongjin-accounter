@@ -115,3 +115,55 @@ test('아직 시작 전이면 아무것도 만들지 않는다', () => {
     { start_date: '2027-01-01', period: 'monthly', day_of_month: 1 }, '2026-07-29')
   assert.deepStrictEqual(out, [])
 })
+
+// ── 회차 상태 분류 (놓침 / 오늘·임박 / 예정) ──
+// 화면의 세 구획이 이 값을 그대로 쓴다. 화면에서 다시 계산하면 서버와 어긋난다.
+
+const { cycleState, pendingCycle, SOON_DAYS } = require('../lib/recurrence')
+
+test('cycleState — 지난 회차는 overdue(놓침)', () => {
+  assert.strictEqual(cycleState('2026-07-13', '2026-07-30'), 'overdue')
+  assert.strictEqual(cycleState('2026-07-29', '2026-07-30'), 'overdue')
+})
+
+test('cycleState — 오늘과 7일 안은 soon', () => {
+  assert.strictEqual(cycleState('2026-07-30', '2026-07-30'), 'soon', '오늘도 soon')
+  assert.strictEqual(cycleState('2026-08-06', '2026-07-30'), 'soon', `+${SOON_DAYS}일 경계 포함`)
+})
+
+test('cycleState — 7일 밖은 upcoming', () => {
+  assert.strictEqual(cycleState('2026-08-07', '2026-07-30'), 'upcoming')
+  assert.strictEqual(cycleState('2026-09-13', '2026-07-30'), 'upcoming')
+})
+
+test('pendingCycle — 계약 기반 여부(contract_id)를 빠뜨리지 않는다', () => {
+  // 두 라우트가 각자 객체를 만들던 탓에 한쪽에만 필드가 없던 적이 있다.
+  // 이 값이 없으면 화면에서 '계약 기반 / 일반'을 가를 수 없다.
+  const withContract = pendingCycle(
+    { id: 'r1', vendor_id: 'v1', vendor_name: '(주)세이프넷', contract_id: 'c1', period: 'monthly' },
+    '2026-08-13', '2026-07-30', { amount: 100000, vat: 10000 })
+  assert.strictEqual(withContract.contract_id, 'c1')
+  assert.strictEqual(withContract.state, 'upcoming')
+  assert.strictEqual(withContract.amount, 100000)
+
+  const plain = pendingCycle({ id: 'r2', period: 'monthly' }, '2026-07-13', '2026-07-30', {})
+  assert.strictEqual(plain.contract_id, null, '계약 무관 정기는 null')
+  assert.strictEqual(plain.state, 'overdue')
+})
+
+test('일괄 등록 대상 — 등록일 이전 회차는 절대 포함되지 않는다', () => {
+  // 2020년 시작 계약을 2026-07-26에 등록한 경우.
+  // 일괄 등록은 horizon 없이 dueDatesToGenerate(오늘까지)를 쓰므로 이 목록이 곧 대상이다.
+  const rec = { start_date: '2020-01-13', day_of_month: 13, period: 'monthly', setup_date: '2026-07-26' }
+  const dues = dueDatesToGenerate(rec, '2026-10-05')
+  assert.deepStrictEqual(dues, ['2026-08-13', '2026-09-13'],
+    '등록일 이후 도래분만 — 2020~2026-07은 소급하지 않는다')
+  assert.ok(dues.every(d => d >= '2026-07-26'))
+})
+
+test('일괄 등록 대상 — 미래 회차는 포함되지 않는다', () => {
+  // 미수/미지급이 조기에 부풀지 않게, 일괄은 오늘까지만 만든다.
+  const rec = { start_date: '2026-01-13', day_of_month: 13, period: 'monthly', setup_date: '2026-01-13' }
+  const dues = dueDatesToGenerate(rec, '2026-03-01')
+  assert.deepStrictEqual(dues, ['2026-01-13', '2026-02-13'])
+})

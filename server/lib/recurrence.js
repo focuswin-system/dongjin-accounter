@@ -63,6 +63,42 @@ function dueDatesToGenerate(rec, today = new Date(), opts = {}) {
   return out
 }
 
+// '오늘·임박'으로 볼 범위(일). 화면의 구획과 서버 판정이 어긋나지 않게 여기 한 곳에서 정한다.
+const SOON_DAYS = 7
+
+/**
+ * 회차 상태 — 화면 세 구획(놓침 / 오늘·임박 / 예정)의 근거.
+ *   overdue  예정일이 지났는데 아직 청구서가 없다 → 실제로 돈이 나갔을 수 있다(가장 급함)
+ *   soon     오늘~SOON_DAYS 안
+ *   upcoming 그 뒤(미리보기)
+ * 화면에서 따로 계산하면 서버 규칙과 어긋난다 — pending이 이 값을 실어 보낸다.
+ */
+function cycleState(due, today) {
+  if (due < today) return 'overdue'
+  return due <= addDays(today, SOON_DAYS) ? 'soon' : 'upcoming'
+}
+
+/**
+ * 회차 1건의 공통 응답 필드 — 정기청구(매출)·정기지출(매입) pending이 같은 모양을 내게 한다.
+ * 두 라우트가 각자 객체를 만들던 탓에 한쪽에만 필드가 빠지기 쉬웠다(contract_id가 그랬다).
+ * 금액·세액처럼 성격이 다른 값만 extra로 받는다.
+ */
+function pendingCycle(r, due, today, extra = {}) {
+  return {
+    recurring_id: r.id,
+    due_date: due,
+    state: cycleState(due, today),
+    vendor_id: r.vendor_id || null,
+    vendor_name: r.vendor_name || '',
+    // 계약 기반인지 일반 정기인지 — 화면에서 관리 경로를 나누는 기준
+    contract_id: r.contract_id || null,
+    contract_name: r.contract_name || '',
+    contract_no: r.contract_no || '',
+    period: r.period,
+    ...extra,
+  }
+}
+
 /**
  * 생성물(청구서·거래)을 지웠을 때 그 회차가 다시 생성될 수 있도록 last_generated 를 되돌린다.
  *
@@ -96,4 +132,7 @@ async function restoreLastGenerated(db, table, recurringId, removedDate) {
   return { restored: true, note: '이 회차는 다시 발행 예정에 나타나요.' }
 }
 
-module.exports = { dueDatesToGenerate, fmtDate, daysInMonth, addDays, LOOKAHEAD_DAYS, restoreLastGenerated }
+module.exports = {
+  dueDatesToGenerate, fmtDate, daysInMonth, addDays, LOOKAHEAD_DAYS, restoreLastGenerated,
+  SOON_DAYS, cycleState, pendingCycle,
+}
