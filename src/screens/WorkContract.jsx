@@ -6,6 +6,8 @@ import { DataTable } from '../lib/components/DataTable'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { computeItems, monthLabel } from './HR'
+// 지급 등록 Drawer — 급여대장과 같은 컴포넌트(같은 API POST /payroll/:id/pay)
+import { PayrollPayDrawer } from '../lib/components/PayrollPayDrawer'
 
 /* 근로·용역·일용 계약 화면.
  * 근로계약(hr_labor_contract)과 기타 용역·일용(hr_outsourcing)이 같은 work_contracts를 쓰되
@@ -654,7 +656,11 @@ const OutsourcingDrawer = ({ info, onClose, onSaved }) => {
     if (editing) { body.id = info.id; body.employee_id = form.employee_id }
     else body.employee = { name: form.name }
     const res = await api.saveWorkContract(body)
-    if (res.ok && editing && form.employee_id) await api.updateEmployee(form.employee_id, { name: form.name, status: '재직', person_kind: 'worker' })
+    /* status 는 보내지 않는다. 여기서 '재직'을 같이 보내던 탓에, 퇴사한 용역자의 계약을
+       (단가 정정 같은 이유로) 열어 저장만 해도 **퇴사자가 재직으로 되살아났다** —
+       퇴사일이 지워지고 인원수·급여 대상 목록에 다시 잡힌다.
+       재직/퇴사는 인사 화면에서만 바꾼다. 서버는 status 미전송 시 기존 상태를 유지한다. */
+    if (res.ok && editing && form.employee_id) await api.updateEmployee(form.employee_id, { name: form.name, person_kind: 'worker' })
     if (res.ok) { toast.push(editing ? '계약을 저장했어요' : '인력·계약을 등록했어요'); onSaved() }
     else toast.push(res.error || '저장에 실패했어요', { tone: 'warn' })
   }
@@ -718,9 +724,13 @@ const OutsourcingDetailDrawer = ({ id, onClose, onChanged, onEdit }) => {
   const [tab, setTab] = useState('지급 내역')
   const [payDrawer, setPayDrawer] = useState(false)
   const [company, setCompany] = useState('')
+  // 미지급으로 남은 회차를 지급 처리할 대상(payroll row) + 출금 계좌 목록
+  const [payRow, setPayRow] = useState(null)
+  const [accounts, setAccounts] = useState([])
 
   const load = () => api.getWorkContract(id).then(setC)
   useEffect(() => { load(); api.getCompany().then(x => setCompany(x?.name || '')) }, [id])
+  useEffect(() => { api.getAccounts().then(setAccounts) }, [])
   if (!c) return null
   const TABS = ['지급 내역', '단가표', '계약서', '메모']
 
@@ -770,7 +780,19 @@ const OutsourcingDetailDrawer = ({ id, onClose, onChanged, onEdit }) => {
                   </div>
                   <div className="row" style={{ marginTop: 6 }}>
                     <div className="text-xs text-muted">지급일 {p.pay_date} · 지급 {won(p.paid)}{p.unpaid > 0 ? ` · 미지급 ${won(p.unpaid)}` : ''}</div>
-                    <button className="btn ghost sm ml-auto" onClick={() => printWorkPayslip(p, c, company)}><Icon.Print size={12}/> 명세</button>
+                    <div className="ml-auto row gap-6">
+                      {/* 미지급으로 남은 회차를 실제로 지급 처리할 자리. 여기가 없어서 '명세 저장'으로
+                          만든 회차는 미지급이 영영 남았다(계좌에서도 나가지 않는다).
+                          '지급 등록' 버튼은 새 회차를 만드는 것이라 이 잔액을 못 없앤다. */}
+                      {Number(p.unpaid) > 0 && (
+                        <button className="btn sm" onClick={() => setPayRow({
+                          id: p.id, name: c.employee_name, month: p.month,
+                          net_salary: p.net_salary, paid: p.paid, remain: p.unpaid,
+                          // 이 화면의 회차 응답에는 개별 이체 목록이 없다 → 취소 목록은 용역대장에서 본다
+                        })}><Icon.Bank size={12}/> 지급</button>
+                      )}
+                      <button className="btn ghost sm" onClick={() => printWorkPayslip(p, c, company)}><Icon.Print size={12}/> 명세</button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -800,6 +822,8 @@ const OutsourcingDetailDrawer = ({ id, onClose, onChanged, onEdit }) => {
         </div>
       </Drawer>
       {payDrawer && <ServicePayDrawer contract={c} onClose={() => setPayDrawer(false)} onSaved={() => { setPayDrawer(false); load(); onChanged?.() }}/>}
+      {payRow && <PayrollPayDrawer row={payRow} accounts={accounts}
+        onClose={() => setPayRow(null)} onSaved={() => { load(); onChanged?.() }}/>}
     </>
   )
 }

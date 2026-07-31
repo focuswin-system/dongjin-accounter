@@ -14,9 +14,23 @@ import { NAV_TREE, SETTINGS_LEAVES, PORTAL, ALL_LEAVES } from './nav'
 /** perms 가 비어 있으면(= 역할 미배정 계정) 전부 허용한다 — 서버 게이트와 같은 규칙 */
 const unrestricted = (perms) => !perms || Object.keys(perms).length === 0
 
+/**
+ * 화면 id → 권한 자원 이름.
+ *
+ * 환경설정 하위 탭(settings_company·settings_user·settings_approval·settings_closing)은
+ * **'settings' 자원 하나**가 통째로 관장한다(서버 permissions.js·apiPerms.js와 같은 규칙).
+ * 서버는 settings_* 라는 자원을 아예 갖고 있지 않다.
+ *
+ * 이 변환을 빼먹으면 `can(perms,'settings_user')`가 항상 false가 되어,
+ * **settings:access 를 가진 마스터가 환경설정 포털에서 통째로 튕긴다**
+ * ("환경설정을(를) 볼 권한이 없어요" — 2026-07-31 확인). 변환을 can() 안에 둬서
+ * 호출부(사이드바·포털·즐겨찾기·버튼)가 각자 기억하지 않아도 되게 한다.
+ */
+export const resourceOf = (id) => (String(id || '').startsWith('settings') ? 'settings' : id)
+
 export function can(perms, resource, action = 'access') {
   if (unrestricted(perms)) return true
-  const list = perms[resource]
+  const list = perms[resourceOf(resource)]
   return Array.isArray(list) && list.includes(action)
 }
 
@@ -74,7 +88,7 @@ export function visiblePortal(perms) {
 
 /** '자주 찾는 메뉴' 후보·즐겨찾기 표시 목록도 같은 규칙으로 거른다 */
 export const visibleLeaves = (perms) =>
-  unrestricted(perms) ? ALL_LEAVES : ALL_LEAVES.filter(l => can(perms, l.id.startsWith('settings') ? 'settings' : l.id))
+  unrestricted(perms) ? ALL_LEAVES : ALL_LEAVES.filter(l => can(perms, l.id))   // can()이 settings_* → settings 로 변환
 
 // ── React 배선 ────────────────────────────────────────────────
 // prop drilling으로 화면 40여 개에 perms를 흘리는 건 현실적이지 않다 → context 하나.

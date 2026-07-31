@@ -369,7 +369,7 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
          isPurchase ? '대금 지급' : '수금', total, date || today, '계좌이체',
          isPurchase ? '지급완료' : '입금완료', '', invId, `청구서 ${invoice_no} 정산`]
       )
-      await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount) VALUES (?,?,?,?)', [randomUUID(), invId, txnId, total])
+      await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,1)', [randomUUID(), invId, txnId, total])
     }
     await conn.execute('UPDATE milestones SET status = ?, invoice_id = ? WHERE id = ?',
       [paid ? (isPurchase ? '지급 완료' : '입금 완료') : (isPurchase ? '지급 예정' : '입금 예정'), invId, req.params.milestoneId])
@@ -475,7 +475,7 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
          isPurchase ? '대금 지급' : '수금', total, issuedAt, '계좌이체',
          isPurchase ? '지급완료' : '입금완료', '', invId, `청구서 ${invoice_no} 정산`]
       )
-      await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount) VALUES (?,?,?,?)', [randomUUID(), invId, txnId, total])
+      await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,1)', [randomUUID(), invId, txnId, total])
     }
     await conn.commit()
     res.json({ ok: true, id: invId, invoice_no, kind, supply, vat, total })

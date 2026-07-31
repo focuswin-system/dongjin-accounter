@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { Icon, fmtNum, useToast, Combobox, Drawer, MoneyInput, localToday } from '../lib/ui'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
-import { quickAddCategory, quickAddRefItem } from '../lib/quickAdd'
+import { quickAddCategory, quickAddRefItemWithId } from '../lib/quickAdd'
 
 // 과세유형 3종. 영세 = 세율 0%인 과세거래(수출·해외용역) — 세액은 0이지만 과세표준엔 들어간다.
 // 면세와 값을 나눠 두지 않으면 신고서에서 둘을 구분할 수 없다. 서버 lib/vat.js와 같은 값집합.
@@ -285,8 +285,16 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
               <Combobox value={form.contract} onChange={v => setForm({...form, contract: v})}
                 options={contractOpts}
                 placeholder={kind === "expense" ? "매입 계약 선택 (없으면 공통)" : "매출 계약을 검색하거나 선택하세요"}
-                onAddNew={(q) => { setForm({...form, contract: q}); toast.push(`"${q}" 계약을 새로 등록했어요`); }}
-                addNewLabel="계약으로 추가"/>
+                /* 계약은 거래처·품목과 달리 이름만으로 만들 수 없다(거래처·금액·기간·청구방식이 있어야
+                   미수금과 기성 집계가 성립한다). 그래서 여기서 입력한 이름은 계약이 되지 않고
+                   이 거래의 '참조'(doc_no)로만 남는다 — 계약별 매출·원가 집계에는 잡히지 않는다.
+                   예전엔 "계약을 새로 등록했어요"라고 알려서, 등록된 줄 알고 넘어가면
+                   그 매출이 계약 실적에서 통째로 빠졌다. 무슨 일이 일어나는지 그대로 말한다. */
+                onAddNew={(q) => {
+                  setForm({ ...form, contract: q })
+                  toast.push(`"${q}"는 참조로만 적어둡니다. 계약 실적에 넣으려면 계약 화면에서 등록 후 다시 연결해주세요.`, { tone: 'warn' })
+                }}
+                addNewLabel="계약 없이 이 이름으로 적어두기"/>
             </FormField>
 
             {/* 원가 귀속 — 이 지출이 어느 매출건의 원가인지. 외주비는 외주계약에 '지급'되면서 그 프로젝트의 '원가'가 된다.
@@ -322,7 +330,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                       else if (c.vat === "10%") next.taxType = "과세"
                       next.vatDeductible = c.vat_deductible !== 0
                     }
-                    return applyTax(next, next.amount, false)
+                    // 과세유형 칩과 같은 이유로 입력 기준을 지킨다(공급가액 입력 모드 보존)
+                    return applyTax(next, supplyMode ? next.supply : next.amount, supplyMode)
                   })
                 }}
                 options={categories.filter(c => c.id?.startsWith(kind === "income" ? "INC-" : "EXP-"))
@@ -369,9 +378,10 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                 })}
                 placeholder="품목 선택 (선택)"
                 onAddNew={async (q) => {
-                  const nm = await quickAddRefItem('item', q, { setList: setItems, toast, label: '품목' })
+                  const it = await quickAddRefItemWithId('item', q, { setList: setItems, toast, label: '품목' })
                   // 규격·단가는 아직 없으므로 적요·금액 자동 채움은 일어나지 않는다(그게 맞다).
-                  if (nm) setForm(f => ({ ...f, item: nm }))
+                  // itemId 를 반드시 같이 채운다 — 안 채우면 이 거래에 품목이 연결되지 않는다.
+                  if (it) setForm(f => ({ ...f, item: it.name, itemId: it.id }))
                 }}
                 addNewLabel="품목으로 등록"/>
             </FormField>
@@ -414,8 +424,12 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
               taxable ? "공급가액에 부가세 10%" : form.taxType === "영세" ? "세율 0% — 세액은 없지만 과세표준에는 들어가요" : "부가세 없는 거래"}>
               <div className="row gap-6" style={{ flexWrap: "wrap" }}>
                 {TAX_TYPES.map(t => (
+                  /* 입력 기준(supplyMode)을 지켜서 재계산한다.
+                     예전엔 항상 f.amount(VAT 포함 총액)를 넘겨서, '공급가액 입력' 모드에서
+                     과세 100만(총액 110만) → 영세로 바꾸면 **공급가가 110만**이 됐다.
+                     영세는 세액이 0이어도 공급가가 과세표준에 들어가므로 신고가 10% 부풀어진다. */
                   <button key={t} type="button" className={`chip ${form.taxType === t ? "active" : ""}`}
-                    onClick={() => setForm(f => applyTax({ ...f, taxType: t }, f.amount, false))}>{t}</button>
+                    onClick={() => setForm(f => applyTax({ ...f, taxType: t }, supplyMode ? f.supply : f.amount, supplyMode))}>{t}</button>
                 ))}
               </div>
             </FormField>

@@ -200,7 +200,8 @@ function adaptInvoice(row) {
     dueAt: row.due_at || null,
     status: row.status,
     accountId: row.account_id,
-    matches: (row.matches || []).map(m => ({ txnId: m.txn_id, amount: m.amount, matchedAt: m.matched_at })),
+    // id 는 정산 취소에 필요하다(없으면 화면에서 어느 매칭인지 지목할 수 없다)
+    matches: (row.matches || []).map(m => ({ id: m.id, txnId: m.txn_id, amount: m.amount, matchedAt: m.matched_at })),
     docs: (row.docs || []).map(d => ({ id: d.id, url: d.url, name: d.name, type: d.doc_type || '기타', size: d.size || 0 })),
     paidAmount: row.paidAmount || 0,
     remainAmount: row.remainAmount ?? row.total_amount,
@@ -423,6 +424,15 @@ export const api = {
       await req(`/invoices/${invoiceId}/matches`, { method: 'POST', body: { txn_id: txnId, amount, date, category, memo, account_code, account_id } })
       return { ok: true }
     } catch (e) { return { ok: false, error: e.message } }   // 실패 사유를 화면까지 전달한다
+  },
+
+  /** 정산(입금·지급 매칭) 취소. 잘못 연결한 입금을 되돌리는 유일한 길이다.
+   *  서버가 정산이 만든 거래는 함께 지우고, 원래 있던 거래는 연결만 끊는다. */
+  async unmatchInvoice(invoiceId, matchId) {
+    try {
+      const r = await req(`/invoices/${invoiceId}/matches/${matchId}`, { method: 'DELETE' })
+      return { ok: true, removedTxn: r?.removedTxn || null }
+    } catch (e) { return { ok: false, error: e.message } }
   },
 
   // ─── 거래내역 ─────────────────────────────────────────────────

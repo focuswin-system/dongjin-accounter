@@ -75,8 +75,10 @@ const localDate = () => {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 }
 
-const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toast }) => {
+const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onChanged, toast }) => {
   const { confirm } = useConfirm()
+  // 취소 중인 매칭 id — 같은 줄을 두 번 눌러 이미 지운 매칭을 또 지우려 하는 걸 막는다
+  const [unmatching, setUnmatching] = useState(null)
   const [matchAmt, setMatchAmt] = useState("")
   const [matchDate, setMatchDate] = useState(localDate())
   const [innerTab, setInnerTab] = useState("match")
@@ -148,6 +150,26 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
       confirmLabel: "매칭 처리",
     })
     if (ok) { onMatch(invoice.id, amount, matchDate, null, { category: matchCategory, memo: matchMemo, account_code: matchAcct, account_id: matchBankId }); onClose() }
+  }
+
+  /* 정산 취소. 되돌리면 미수금(미지급금)이 그만큼 되살아난다.
+     정산이 만든 거래는 서버가 함께 지우고, 원래 있던 거래는 연결만 끊는다 —
+     어느 쪽인지 사용자가 미리 알아야 하므로 확인창에 그대로 적는다. */
+  const cancelMatch = async (m) => {
+    const ok = await confirm({
+      tone: "neg", icon: <Icon.Warn size={22}/>,
+      title: `${isIssued ? "입금" : "지급"} 정산 취소`,
+      body: `${fmtNum(m.amount)}원 정산을 취소해요. ${isIssued ? "미수금" : "미지급금"}이 그만큼 다시 늘어나고, `
+        + `이 정산으로 만들어진 거래가 있으면 함께 삭제됩니다.`,
+      confirmLabel: "정산 취소",
+    })
+    if (!ok) return
+    setUnmatching(m.id)
+    const r = await api.unmatchInvoice(invoice.id, m.id)
+    setUnmatching(null)
+    if (!r.ok) return toast.push(r.error || "정산 취소에 실패했어요", { tone: 'warn' })
+    toast.push(r.removedTxn ? "정산을 취소하고 거래도 삭제했어요" : "정산을 취소했어요")
+    onChanged?.()
   }
 
   const linkMatch = async (txn) => {
@@ -229,11 +251,18 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
                 {(invoice.matches?.length ?? 0) > 0 ? (
                   <div className="col gap-6" style={{ marginBottom: 12 }}>
                     {(invoice.matches || []).map((m, i) => (
-                      <div key={i} className="row gap-10"
+                      <div key={m.id || i} className="row gap-10"
                         style={{ padding: "8px 12px", borderRadius: 8, background: "var(--surface-2)", fontSize: 13 }}>
                         <Icon.Check size={14} style={{ color: "var(--pos)" }}/>
                         <span className="text-muted">{m.matchedAt}</span>
                         <span className="num fw-700 ml-auto">{fmtNum(m.amount)}</span>
+                        {/* 정산 취소 — 서버엔 있었는데 부르는 화면이 없어서, 금액이나 상대를 잘못 넣은
+                            입금은 되돌릴 방법이 없었다(청구서를 통째로 지우는 수밖에). */}
+                        <button className="icon-btn" title={`${isIssued ? "입금" : "지급"} 정산 취소`}
+                          disabled={unmatching === m.id || !m.id}
+                          onClick={() => cancelMatch(m)}>
+                          <Icon.Close size={14}/>
+                        </button>
                       </div>
                     ))}
                     <div className="row" style={{ paddingTop: 8, borderTop: "1px solid var(--line)", fontSize: 13 }}>
@@ -740,6 +769,10 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       ...recurring,
     ].sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')))
     setInvoices(rows); setRecSummary(rec); setPaySum(pay); setPending(merged)
+    /* 상세를 열어둔 채 정산·취소를 하면 목록만 새로고침되고 열린 상세는 옛 값 그대로였다
+       — 입금을 등록해도 이력·미수금이 그대로라 한 번 더 넣게 된다. 같은 건을 다시 물려준다.
+       사라진 청구서(삭제)면 닫는다. */
+    setSelected(prev => prev ? (rows.find(r => r.id === prev.id) || null) : prev)
   }
   useEffect(() => { load() }, [])
   // 세금계산서 업로드의 매출/매입 판정 기준. 환경설정 › 회사 정보에 사업자번호가 있어야 자동으로 갈린다.
@@ -909,6 +942,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
         onMatch={handleMatch}
         onDelete={async (id) => { const r = await api.deleteInvoice(id); toast.push(r.ok ? "청구서가 삭제됐어요" : (r.error || "삭제에 실패했어요")); load() }}
         onEdit={(inv) => { setEditInvoice(inv); setSelected(null); setFormOpen(true) }}
+        onChanged={load}
         toast={toast}
       />
 

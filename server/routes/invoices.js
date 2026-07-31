@@ -638,6 +638,20 @@ router.delete('/:id/matches/:matchId', async (req, res, next) => {
      * 반대로 이미 있던 거래를 연결한 것(txn_created=0)은 청구서 연결만 끊고 장부에 남긴다.
      * 그 거래는 실제로 오간 돈의 독립 기록이고, 지우면 계좌 잔액이 틀어진다.
      * 구분 컬럼이 없던 시절(txn_created 기본 0) 데이터는 보수적으로 '남기는' 쪽이다. */
+    /* 지급결의서로 집행된 지출은 여기서 못 끊는다.
+     * 결의서(expense_resolutions)가 그 거래를 자기 결과물로 붙들고 있어서(status='완료', txn_id),
+     * 연결만 끊으면 결의서는 '완료'인데 청구서는 미지급으로 되살아나 같은 건이 두 번 지급 대상이 된다.
+     * 되돌릴 곳은 결의서다 — 어디로 가야 하는지 알려주고 막는다. */
+    if (match.txn_id) {
+      const [[res0]] = await conn.execute(
+        'SELECT doc_no FROM expense_resolutions WHERE txn_id = ? LIMIT 1', [match.txn_id])
+      if (res0) {
+        await rollbackQuietly(conn)
+        return res.status(409).json({
+          error: `이 건은 지급결의서 ${res0.doc_no || ''}로 집행됐어요. 결의서에서 되돌려주세요.`.replace('  ', ' '),
+        })
+      }
+    }
     let removedTxn = null
     if (match.txn_id) {
       if (Number(match.txn_created) === 1) {

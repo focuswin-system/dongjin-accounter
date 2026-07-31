@@ -191,7 +191,7 @@ router.post('/:id/issue', async (req, res, next) => {
         [txnId, 'income', r.vendor_id || null, r.contract_id || null, acctId,
          '수금', total, target, '계좌이체', '입금완료', '', id, `청구서 ${invoice_no} 정산`]
       )
-      await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount) VALUES (?,?,?,?)',
+      await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,1)',
         [randomUUID(), id, txnId, total])
     }
     await conn.execute('UPDATE recurring_invoices SET last_generated = ? WHERE id = ?', [target, r.id])

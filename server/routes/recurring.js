@@ -158,7 +158,7 @@ async function createExpenseInvoice(conn, r, target, { paid = false, accountId =
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [txnId, 'expense', r.vendor_id || null, r.contract_id || null, acctId,
        r.category || '대금 지급', total, target, '계좌이체', '지급완료', '', invId, `청구서 ${invoice_no} 정산`])
-    await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount) VALUES (?,?,?,?)',
+    await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,1)',
       [randomUUID(), invId, txnId, total])
   }
   await conn.execute('UPDATE recurring_expenses SET last_generated = ? WHERE id = ?', [target, r.id])

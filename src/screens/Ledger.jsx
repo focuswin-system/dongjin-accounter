@@ -42,10 +42,12 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
 
   const categories = useMemo(() => [...new Set(txns.map(t => t.category).filter(Boolean))].sort(), [txns]);
 
-  const filtered = useMemo(() => {
+  /* 기간·비목·검색까지만 적용한 범위. 입금/지출 탭은 아직 안 나눈다.
+     합계 카드와 탭 옆 건수는 이 범위를 쓴다 — 예전엔 둘 다 전체 txns 로 계산해서
+     "2026년 7월"로 좁혀놔도 카드에는 **개업 이래 누계**가, 탭에는 전체 건수가 떠 있었다.
+     화면의 표와 숫자가 서로 다른 기간을 말하니 그 값을 그대로 보고에 옮기면 틀린다. */
+  const scoped = useMemo(() => {
     let rows = txns;
-    if (filter === "income")  rows = rows.filter(t => t.kind === "income");
-    else if (filter === "expense") rows = rows.filter(t => t.kind === "expense");
     if (range?.from) rows = rows.filter(t => t.date >= range.from);
     if (range?.to)   rows = rows.filter(t => t.date <= range.to);
     if (filterCat)   rows = rows.filter(t => t.category === filterCat);
@@ -54,7 +56,14 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
       rows = rows.filter(t => t.vendor.toLowerCase().includes(lc) || t.scope?.toLowerCase().includes(lc) || t.category?.toLowerCase().includes(lc));
     }
     return rows;
-  }, [txns, filter, q, range, filterCat]);
+  }, [txns, q, range, filterCat]);
+
+  // 표에 실제로 그려지는 행 = 범위 + 탭
+  const filtered = useMemo(() => {
+    if (filter === "income")  return scoped.filter(t => t.kind === "income");
+    if (filter === "expense") return scoped.filter(t => t.kind === "expense");
+    return scoped;
+  }, [scoped, filter]);
 
   const exportCsv = () => {
     if (filtered.length === 0) return toast.push("내보낼 거래가 없어요");
@@ -63,13 +72,13 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
       filtered.map(t => [t.date, t.kind === "income" ? "입금" : "지출", t.vendor, t.scope, t.category, t.sign * t.amount, t.status]));
   };
 
-  const inSum  = txns.filter(t => t.kind === "income"  && t.status === "입금완료").reduce((a, t) => a + t.amount, 0);
-  const outSum = txns.filter(t => t.kind === "expense" && t.status === "지급완료").reduce((a, t) => a + t.amount, 0);
+  const inSum  = scoped.filter(t => t.kind === "income"  && t.status === "입금완료").reduce((a, t) => a + t.amount, 0);
+  const outSum = scoped.filter(t => t.kind === "expense" && t.status === "지급완료").reduce((a, t) => a + t.amount, 0);
 
   const tabs = [
-    { id: "all",     label: "전체 거래",  count: txns.length },
-    { id: "income",  label: "입금",       count: txns.filter(t => t.kind === "income").length },
-    { id: "expense", label: "지출",       count: txns.filter(t => t.kind === "expense").length },
+    { id: "all",     label: "전체 거래",  count: scoped.length },
+    { id: "income",  label: "입금",       count: scoped.filter(t => t.kind === "income").length },
+    { id: "expense", label: "지출",       count: scoped.filter(t => t.kind === "expense").length },
   ];
 
   const titleMap = { all: "거래내역", income: "거래내역 · 입금", expense: "거래내역 · 지출" };

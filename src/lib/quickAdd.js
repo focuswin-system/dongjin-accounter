@@ -51,3 +51,25 @@ export async function quickAddRefItem(type, name, { setList, toast, label = '항
   toast?.push(`"${nm}" ${label}을(를) 등록했어요`)
   return nm
 }
+
+/**
+ * 품목을 그 자리에서 등록하고 **id까지** 돌려준다.
+ *
+ * 이름만 받으면 호출부가 item_id 를 채울 수 없어 **그 거래에 품목이 안 붙는다**
+ * — item_id 가 null 로 저장되고, 거래를 다시 열면 품목 칸이 비어 있으며 품목별 집계에서도 빠진다.
+ * 기존 품목을 고르는 경로는 id 를 채우는데 신규 등록 경로만 달랐다.
+ *
+ * @returns {{id: string, name: string}|null}
+ */
+export async function quickAddRefItemWithId(type, q, { setList, toast, label = '항목' } = {}) {
+  const nm = (q || '').trim()
+  if (!nm) return null
+  const res = await api.addRefItem({ type, name: nm })
+  if (!res.ok) {
+    toast?.push(res.error || `${label}을(를) 등록하지 못했어요`, { tone: 'warn' })
+    return null
+  }
+  setList?.(await api.getRefItems(type))
+  toast?.push(`"${nm}" ${label}을(를) 등록했어요`)
+  return { id: res.id || '', name: nm }
+}
