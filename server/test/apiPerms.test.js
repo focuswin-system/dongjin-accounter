@@ -74,3 +74,18 @@ test('자원 목록이 빈 매핑은 없다 — 있으면 아무도 통과 못 �
     assert.ok(Array.isArray(list) && list.length, `${prefix} 자원 목록이 비었다`)
   }
 })
+
+test('직원 전체 목록은 공용이 아니다 — 급여·생년월일·급여계좌가 들어 있다', () => {
+  // /api/employees 를 통째로 LOOKUP 에 넣었더니, 인사가 차단된 경리 역할도
+  // 전 직원 기본급을 볼 수 있었다(SELECT * 이라 salary_account 까지 나갔다).
+  const need = requiredPerm('GET', '/api/employees')
+  assert.ok(need, '직원 목록은 권한 검사를 거쳐야 한다')
+  assert.deepEqual(need.resources, ['hr'])
+  assert.equal(requiredPerm('GET', '/api/employees/options'), null)   // 고르기용 최소 목록만 공용
+})
+
+test('계좌 목록은 공용이되 잔액은 라우트가 따로 가린다', () => {
+  // 결제수단이라 목록 자체는 열어야 한다. 잔액 차단은 routes/accounts.js canSeeBalance 소관.
+  assert.equal(requiredPerm('GET', '/api/accounts'), null)
+  assert.equal(requiredPerm('POST', '/api/accounts').action, 'create')
+})

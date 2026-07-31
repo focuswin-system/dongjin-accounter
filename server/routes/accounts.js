@@ -28,9 +28,20 @@ async function calcBalance(db, accountId) {
   return Number(row.initial_balance) + Number(row.income_total) - Number(row.expense_total) + Number(row.adj_total)
 }
 
+/* 잔액을 볼 자격 — 계좌 목록 자체는 결제수단이라 누구나 골라야 하지만 잔액은 다르다.
+ * 권한 게이트가 목록 조회를 공용으로 열어 놨기 때문에(apiPerms LOOKUP) 여기서 한 번 더 가른다.
+ * 역할 미배정 계정은 제한 없음(게이트와 같은 규칙)이라 req.perms 가 비면 통과시킨다. */
+const canSeeBalance = (req) => {
+  const perms = req.perms
+  if (!perms || perms.size === 0) return true
+  return ['master_accountBalance', 'master_account', 'cash_report', 'home']
+    .some(r => perms.has(`${r}:view`))
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const [accounts] = await req.db.execute('SELECT * FROM accounts ORDER BY name')
+    if (!canSeeBalance(req)) return res.json(accounts.map(a => ({ ...a, balance: null })))
     const result = await Promise.all(accounts.map(async a => ({ ...a, balance: await calcBalance(req.db, a.id) })))
     res.json(result)
   } catch (e) { next(e) }

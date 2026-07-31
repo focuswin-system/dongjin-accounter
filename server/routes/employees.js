@@ -3,6 +3,23 @@ const { randomUUID } = require('crypto')
 
 const router = Router()
 
+/**
+ * 드롭다운용 최소 목록 — 이름을 고르는 데 필요한 것만.
+ *
+ * 전체 목록(GET /)은 `SELECT *`라 기본급·생년월일·급여계좌가 함께 나간다.
+ * 거래 등록 폼은 직원을 '고르기만' 하면 되는데, 그걸 위해 전체 목록을 열어두면
+ * **인사 권한이 없는 사람도 전 직원 급여를 볼 수 있다**(경리 역할은 인사가 차단인데
+ * 그 차단이 통째로 무의미해진다). 그래서 고르기용 경로를 따로 둔다 —
+ * 이 경로만 권한 없이 열려 있다(platform/apiPerms.js LOOKUP_PATHS).
+ */
+router.get('/options', async (req, res, next) => {
+  try {
+    const [rows] = await req.db.execute(
+      'SELECT id, emp_no, name, department, position, status FROM employees ORDER BY emp_no ASC')
+    res.json(rows)
+  } catch (e) { next(e) }
+})
+
 router.get('/', async (req, res, next) => {
   try {
     const [rows] = await req.db.execute('SELECT * FROM employees ORDER BY emp_no ASC')

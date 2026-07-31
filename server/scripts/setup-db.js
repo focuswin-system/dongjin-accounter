@@ -96,28 +96,41 @@ async function main() {
           const r = await ensurePresetRoles(platformConn, c.id)
           if (r.created > 0)    log(`   · ${c.code}: 기본 역할 ${r.created}종 생성(보정)`)
           if (r.backfilled > 0) log(`   · ${c.code}: 신규 자원 권한 ${r.backfilled}건 보충`)
-          // 역할이 하나도 연결 안 된 계정을 메운다.
-          // admin은 마스터, 그 외는 조회전용을 기본으로 준다(권한은 마스터가 나중에 조정).
+          /* 역할이 하나도 연결 안 된 **관리자** 계정에만 '마스터'를 연결한다.
+           *
+           * ⚠ 일반 계정에는 아무것도 주지 않는다. 예전엔 '조회전용'을 기본으로 줬는데,
+           *   그때는 권한 강제가 없어 표시용 메타데이터에 불과했다. 지금은 middleware/perm.js 가
+           *   실제로 막는다 — 그대로 두면 배포하는 순간 멀쩡히 일하던 일반 계정이
+           *   등록·수정·삭제·업로드를 전부 잃는다(조회전용에 그 권한이 없다).
+           *   "어제까지 되던 게 오늘 안 된다"가 되고 원인도 안 보인다.
+           *
+           *   역할 없는 계정은 게이트가 '제한 없음'으로 통과시킨다(perm.js·src/lib/perms.js
+           *   같은 규칙) = 배포 전과 똑같이 동작한다. 제한은 회사 마스터가 환경설정 › 사용자에서
+           *   역할을 배정하는 순간부터 걸린다. 목록에는 '미지정(전체 허용)'으로 눈에 띄게 나온다. */
           if (r.masterRoleId) {
-            const [[viewer]] = await platformConn.execute(
-              "SELECT id FROM roles WHERE company_id = ? AND name = '조회전용'", [c.id]
-            )
-            const [orphans] = await platformConn.execute(
-              `SELECT u.id, u.role FROM users u
-                WHERE u.company_id = ?
+            const [orphanAdmins] = await platformConn.execute(
+              `SELECT u.id FROM users u
+                WHERE u.company_id = ? AND u.role = 'admin'
                   AND NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id)`,
               [c.id]
             )
-            let linked = 0
-            for (const u of orphans) {
-              const roleId = u.role === 'admin' ? r.masterRoleId : viewer?.id
-              if (!roleId) continue
+            for (const u of orphanAdmins) {
               await platformConn.execute(
-                'INSERT IGNORE INTO user_roles (user_id, role_id) VALUES (?,?)', [u.id, roleId]
+                'INSERT IGNORE INTO user_roles (user_id, role_id) VALUES (?,?)', [u.id, r.masterRoleId]
               )
-              linked++
             }
-            if (linked > 0) log(`   · ${c.code}: 계정 ${linked}개에 역할 연결(보정)`)
+            if (orphanAdmins.length > 0) log(`   · ${c.code}: 관리자 ${orphanAdmins.length}명에 마스터 연결(보정)`)
+
+            const [noRole] = await platformConn.execute(
+              `SELECT u.username FROM users u
+                WHERE u.company_id = ? AND u.active = 1
+                  AND NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id)`,
+              [c.id]
+            )
+            if (noRole.length > 0) {
+              log(`   ⚠ ${c.code}: 역할 미배정 ${noRole.length}명(${noRole.map(x => x.username).join(', ')})` +
+                  ` — 현재 제한 없이 전체 사용 가능. 환경설정 › 사용자에서 역할을 배정하세요.`)
+            }
           }
         }
       }

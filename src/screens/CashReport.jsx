@@ -180,6 +180,7 @@ export const CashReportScreen = ({ page = true }) => {
                       <span className="text-sm" style={{ flex: 1, minWidth: 0 }}>
                         {it.label || '—'}
                         {it.overdue && <span className="badge neg" style={{ marginLeft: 6, fontSize: 10 }}>기한 지남</span>}
+                        {it.noDue && <span className="badge warn" style={{ marginLeft: 6, fontSize: 10 }}>기한 미정</span>}
                       </span>
                       <span className="text-xs text-muted2" style={{ flexShrink: 0 }}>{it.source}</span>
                       <span className="num-cell text-sm" style={{
@@ -233,9 +234,13 @@ export const DailyTrialScreen = () => {
     return () => { alive = false }
   }, [date])
 
+  /* 날짜 이동 — toISOString()은 UTC라 쓰면 안 된다(src/lib/ui.jsx 규약).
+   * new Date("2026-07-31")은 UTC 자정 파싱인데 setDate/getDate는 로컬 기준이라,
+   * UTC+9에서는 우연히 맞고 그 외 시간대에서는 하루씩 밀린다. 로컬 달력으로만 센다. */
   const shift = (n) => {
-    const d = new Date(date); d.setDate(d.getDate() + n)
-    setDate(d.toISOString().slice(0, 10))
+    const [y, m, d] = date.split('-').map(Number)
+    const t = new Date(y, m - 1, d + n)
+    setDate(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`)
   }
 
   return (
@@ -260,14 +265,20 @@ export const DailyTrialScreen = () => {
       {data && (
         <>
           {/* 합계가 안 맞으면 그 사실을 감추지 않는다 — 조용히 맞추면 틀린 장부가 맞는 것처럼 보인다 */}
-          {!data.balanced && (
+          {/* 합계가 우연히 맞아도 짝 잃은 거래가 있으면 알린다 — 그게 더 위험하다
+              (장부가 맞는 것처럼 보이는데 실제로는 두 거래가 서로의 오류를 가리고 있다) */}
+          {data.unbalanced.length > 0 && (
             <div className="card card-pad" style={{ marginBottom: 16, borderColor: 'var(--neg)', background: 'rgba(220,38,38,0.04)' }}>
               <div className="fw-700 text-sm" style={{ color: 'var(--neg-ink)', marginBottom: 4 }}>
-                차변과 대변이 맞지 않아요 (차이 {fmtNum(Math.abs(data.debitTotal - data.creditTotal))}원)
+                {data.totalsMatch
+                  ? '합계는 맞지만 짝이 없는 거래가 있어요'
+                  : `차변과 대변이 맞지 않아요 (차이 ${fmtNum(Math.abs(data.debitTotal - data.creditTotal))}원)`}
               </div>
               <div className="text-sm text-muted" style={{ lineHeight: 1.7 }}>
                 계좌나 계정과목이 비어 있는 거래가 {data.unbalanced.length}건 있어요.
-                한쪽 다리가 없으면 합계가 맞을 수 없습니다. 아래 목록의 거래를 고쳐주세요.
+                {data.totalsMatch
+                  ? ' 우연히 금액이 상쇄돼 합계는 맞아 보이지만, 장부가 맞는 건 아니에요.'
+                  : ' 한쪽 다리가 없으면 합계가 맞을 수 없습니다.'} 아래 목록의 거래를 고쳐주세요.
               </div>
               <div style={{ marginTop: 10 }}>
                 <DataTable

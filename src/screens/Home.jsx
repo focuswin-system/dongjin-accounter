@@ -61,9 +61,11 @@ const CashSummary = ({ go }) => {
         </div>
       )}
       {/* 카드 전체를 누르면 자금일보로 — 감싸는 div 에 클릭을 걸어 Kpi 를 그대로 쓴다 */}
+      {/* 래퍼에 minWidth:0 이 필요하다 — Kpi 는 카드에 그걸 걸어 nowrap 금액이 그리드 트랙을
+          밀지 않게 한다. 래퍼를 씌우면 래퍼가 그리드 아이템이 되어 그 방어가 사라진다. */}
       <KpiRow cols={4}>
         {cards.map(c => (
-          <div key={c.label} onClick={() => go('cash_report')} style={{ cursor: 'pointer' }}>
+          <div key={c.label} onClick={() => go('cash_report')} style={{ cursor: 'pointer', minWidth: 0 }}>
             <Kpi label={c.label} value={c.value} tone={c.tone} hint={c.sub}/>
           </div>
         ))}

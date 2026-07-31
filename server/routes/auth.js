@@ -179,9 +179,10 @@ router.get('/users', authMiddleware, async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// ── 회사의 역할 목록 (배정 드롭다운용) ──
+// ── 회사의 역할 목록 (배정 드롭다운용) — 계정 관리 화면에서만 쓰므로 마스터 전용 ──
 router.get('/roles', authMiddleware, async (req, res, next) => {
   try {
+    if (!isMaster(req)) return res.status(403).json({ error: '권한이 없습니다' })
     const [rows] = await platformPool.execute(
       `SELECT r.id, r.name, r.is_system,
               (SELECT COUNT(*) FROM role_perms rp WHERE rp.role_id = r.id) AS perm_count,
@@ -208,7 +209,9 @@ router.put('/users/:id/roles', authMiddleware, async (req, res, next) => {
     // 로그인·인증이 쓰는 플랫폼 풀이 간헐적으로 깨진다(로그인했다 튕기는 증상).
     if (!isMaster(req)) return res.status(403).json({ error: '권한이 없습니다' })
     if (req.user.id === req.params.id) return res.status(400).json({ error: '본인 역할은 변경할 수 없어요' })
-    const roleIds = Array.isArray(req.body.roleIds) ? req.body.roleIds.filter(Boolean) : []
+    // 중복 제거 — 같은 역할이 두 번 오면 user_roles PK 충돌로 "이미 등록된 값이에요"라는
+    // 엉뚱한 409가 났다(사용자는 무슨 값이 중복인지 알 수 없다).
+    const roleIds = [...new Set(Array.isArray(req.body.roleIds) ? req.body.roleIds.filter(Boolean) : [])]
     await conn.beginTransaction()
     const [[target]] = await conn.execute(
       'SELECT id FROM users WHERE id = ? AND company_id = ?', [req.params.id, req.user.companyId])

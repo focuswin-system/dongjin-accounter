@@ -71,26 +71,34 @@ async function upcomingFlows(db, { from, to }) {
   // 1·2. 미수금·미지급금 — 이미 정산된 부분(invoice_matches)은 빼고 남은 잔액만
   for (const kind of ['issued', 'received']) {
     const cond = pendingCond(kind)
+    /* 결제기한이 비어 있는 청구서도 **반드시 포함한다.**
+     * 예전엔 `due_at IS NOT NULL` 로 걸러냈는데, 그러면 같은 화면의 '나갈 돈' KPI(전체 합계)와
+     * 예측이 어긋난다. 기한 없는 미지급 1억이 있으면 KPI는 1억인데 최저 예상 잔액은 0원 나간
+     * 것처럼 계산된다 — 이 문서의 결론이 **낙관 쪽으로 틀린다.**
+     * 기한을 모르는 돈은 '언제 나갈지 모르니 지금 있는 것으로' 보는 편이 안전하다. */
     const [rows] = await db.execute(`
       SELECT i.id, i.invoice_no, i.due_at, i.total_amount, i.account_id, v.name AS vendor_name,
              COALESCE((SELECT SUM(amount) FROM invoice_matches WHERE invoice_id = i.id), 0) AS matched
         FROM invoices i
         LEFT JOIN vendors v ON v.id = i.vendor_id
-       WHERE i.kind = ? AND ${cond.sql} AND i.due_at IS NOT NULL AND i.due_at <> ''
+       WHERE i.kind = ? AND ${cond.sql}
        ORDER BY i.due_at`, [kind, ...cond.params])
     for (const r of rows) {
       const remain = num(r.total_amount) - num(r.matched)
       if (remain <= 0) continue
-      // 기한이 이미 지난 것도 넣는다 — '오늘까지 들어왔어야 할 돈'이라 잔액 예측에 그대로 영향을 준다.
-      // 다만 from 이전 것은 from 날짜에 몰아 표시한다(연체는 언제 들어올지 모르니 앞에 세운다).
-      const date = r.due_at < from ? from : r.due_at
+      const due = r.due_at || ''
+      const noDue = !due
+      // 기한이 이미 지난 것도 넣는다 — '오늘까지 들어왔어야 할 돈'이라 예측에 그대로 영향을 준다.
+      // 기한 이전·미정인 것은 기준일에 몰아 표시한다(언제일지 모르니 가장 앞에 세운다).
+      const date = (noDue || due < from) ? from : due
       if (date > to) continue
       out.push({
         date, kind: kind === 'issued' ? 'in' : 'out', amount: remain,
         label: `${r.vendor_name || '거래처'} ${r.invoice_no || ''}`.trim(),
         source: kind === 'issued' ? '미수금' : '미지급금',
         account_id: r.account_id || null,
-        overdue: r.due_at < from,
+        overdue: !noDue && due < from,
+        noDue,                       // 화면에서 '기한 미정'으로 표시한다
       })
     }
   }
@@ -226,7 +234,12 @@ async function dailyTrial(db, date) {
   return {
     date, lines,
     debitTotal, creditTotal,
-    balanced: debitTotal === creditTotal,
+    /* 합계가 같은 것만으로는 '맞다'고 할 수 없다.
+     * 한쪽 다리가 빠진 거래 둘의 금액이 같으면(입금 100만 계좌 미지정 + 지출 100만 계정과목 없음)
+     * 차변합 = 대변합 이 된다. 그날은 결함 거래가 있는데도 화면이 "일치"라고 단언하고
+     * 고칠 목록도 안 보여줬다. 짝 잃은 거래가 없어야 비로소 맞는 것이다. */
+    balanced: debitTotal === creditTotal && unbalanced.length === 0,
+    totalsMatch: debitTotal === creditTotal,
     txnCount: rows.length,
     // 짝이 안 맞는 거래를 숨기지 않는다 — 합계가 안 맞는 이유가 여기 있다
     unbalanced,

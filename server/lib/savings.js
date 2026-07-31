@@ -88,6 +88,49 @@ function paidPrincipal(s, payments = []) {
   return payments.reduce((a, p) => a + intOf(p.amount), 0)
 }
 
+/** 두 날짜 사이의 개월 수(내림). 이자는 월 단위로 붙는다 */
+function monthsBetween(from, to) {
+  if (!from || !to) return 0
+  const [fy, fm, fd] = String(from).split('-').map(Number)
+  const [ty, tm, td] = String(to).split('-').map(Number)
+  if (!fy || !ty) return 0
+  let m = (ty - fy) * 12 + (tm - fm)
+  if (td < fd) m -= 1              // 날짜가 안 찼으면 그 달은 안 센다
+  return Math.max(0, m)
+}
+
+/**
+ * **실제로 넣은 돈에 붙은** 이자(단리·세전).
+ *
+ * maturitySummary 는 "약속대로 끝까지 넣었을 때"를 계산한다. 만기 처리 화면이 그 값을
+ * 기본값으로 쓰면, 12회 중 1회만 낸 적금을 만기 처리할 때 12회분 이자가 들어간다
+ * (이자수익도 계좌 잔액도 그만큼 부푼다). 원금은 실적 기준(paidPrincipal)인데 이자만
+ * 스케줄 기준이라 전제가 어긋나 있었다.
+ *
+ * @param payments 실제 납입 실적 [{ amount, paid_date, due_date }]
+ * @param asOf     수령일(중도해지면 그 날). 없으면 만기일.
+ */
+function accruedInterest(s, payments = [], asOf) {
+  const r = (Number(s.annual_rate) || 0) / 100
+  if (r <= 0) return 0
+  const end = asOf || maturityDateOf(s)
+  if (!end) return 0
+  const cap = Math.trunc(Number(s.term_months) || 0)
+
+  if (s.kind === 'deposit') {
+    const held = Math.min(monthsBetween(s.start_date, end), cap)
+    return Math.round(intOf(s.principal) * r * (held / 12))
+  }
+  // 적금 — 회차마다 예치 기간이 다르다. 낸 회차만, 낸 날부터 센다.
+  let total = 0
+  for (const p of payments) {
+    const from = p.paid_date || p.due_date
+    const held = Math.min(monthsBetween(from, end), cap)
+    total += intOf(p.amount) * (r / 12) * held
+  }
+  return Math.round(total)
+}
+
 /** 만기 예상액 요약 — 등록 화면에서 가입 전에 보여준다 */
 function maturitySummary(s) {
   const n = Math.trunc(Number(s.term_months) || 0)
@@ -128,7 +171,7 @@ function maturityDateOf(s) {
 
 module.exports = {
   KINDS, TAX_RATE,
-  installmentInterest, depositInterest,
+  installmentInterest, depositInterest, accruedInterest, monthsBetween,
   paymentSchedule, unpaidPayments, paidPrincipal,
   maturitySummary, maturityDateOf,
 }

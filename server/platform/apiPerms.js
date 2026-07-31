@@ -91,9 +91,21 @@ const ANY_AUTHENTICATED = ['/api/auth', '/api/uploads']
  * 회사 간 격리는 그대로다 — req.db 가 자기 회사 DB만 본다.
  */
 const LOOKUP_PREFIXES = [
-  '/api/vendors', '/api/account-subjects', '/api/categories', '/api/accounts',
-  '/api/ref-items', '/api/employees',
+  '/api/vendors', '/api/account-subjects', '/api/categories', '/api/ref-items',
+  /* 계좌는 결제수단이라 어느 화면에서든 골라야 한다. 다만 응답의 **잔액은 따로 가린다** —
+   * routes/accounts.js 가 req.perms 를 보고 권한 없는 사람에겐 balance 를 빼고 내려준다.
+   * 계좌 '목록'과 계좌 '잔액'은 민감도가 다르다. */
+  '/api/accounts',
 ]
+
+/**
+ * 경로 하나만 공용으로 여는 예외(접두어 전체가 아니라).
+ *
+ * `/api/employees` 전체를 열었더니 `SELECT *`가 **기본급·생년월일·급여계좌**까지 내보냈다.
+ * 경리 프리셋은 인사를 통째로 차단하는데, 그 차단이 이 예외 하나로 무의미해졌다.
+ * 고르기용 최소 목록(/options)만 연다.
+ */
+const LOOKUP_PATHS = ['/api/employees/options']
 
 /**
  * 경로별 행위 재정의. 메서드만으로는 업로드·다운로드·출력을 가를 수 없다.
@@ -132,8 +144,11 @@ function requiredPerm(method, fullPath) {
   const resources = API_RESOURCES[prefix]
   if (!resources) return null      // 매핑 누락 — check:isolation 이 잡는다(런타임에선 막지 않는다)
   const action = actionFor(method, fullPath)
-  // 기준정보 조회는 공용(위 LOOKUP_PREFIXES 설명 참고). 다운로드·업로드·등록·수정·삭제는 그대로 막는다.
-  if (action === 'view' && LOOKUP_PREFIXES.includes(prefix)) return null
+  // 기준정보 조회는 공용(위 설명 참고). 다운로드·업로드·등록·수정·삭제는 그대로 막는다.
+  if (action === 'view') {
+    if (LOOKUP_PREFIXES.includes(prefix)) return null
+    if (LOOKUP_PATHS.includes(fullPath)) return null
+  }
   return { resources, action }
 }
 
@@ -148,6 +163,6 @@ function unknownResources() {
 }
 
 module.exports = {
-  METHOD_ACTION, API_RESOURCES, ANY_AUTHENTICATED, ACTION_OVERRIDES, LOOKUP_PREFIXES,
+  METHOD_ACTION, API_RESOURCES, ANY_AUTHENTICATED, ACTION_OVERRIDES, LOOKUP_PREFIXES, LOOKUP_PATHS,
   actionFor, prefixOf, requiredPerm, unknownResources,
 }

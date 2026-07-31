@@ -6,6 +6,7 @@ const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
 const {
   KINDS, paymentSchedule, unpaidPayments, paidPrincipal, maturitySummary, maturityDateOf,
+  accruedInterest,
 } = require('../lib/savings')
 
 const router = Router()
@@ -26,7 +27,10 @@ const router = Router()
 const ACCT = {
   shortTerm: '1201',   // 단기금융상품 (1년 이내)
   longTerm:  '1501',   // 장기금융상품 (1년 초과)
-  interest:  'INC-204',// 이자수익
+  // ⚠ 계정과목(account_subjects) 코드여야 한다. transactions.account_code 가 그 체계다.
+  //   예전에 'INC-204'(비목 categories 코드)를 넣어, 일계표가 이름을 못 찾아 원문 코드로
+  //   대분류 빈 칸으로 찍혔다. 손익 판정은 우연히 맞아 조용히 틀렸다.
+  interest:  '4201',   // 이자수익(수익·영업외수익)
 }
 
 const intOf = (v) => parseInt(String(v ?? '').replace(/[^0-9-]/g, ''), 10) || 0
@@ -134,9 +138,12 @@ router.post('/', async (req, res, next) => {
     if (recorded) {
       const le = ledgerError({ kind: 'expense', account_id, status: '지급완료' })
       if (le) return res.status(400).json({ error: le })
-      const ce = await closedPeriodError(conn, start_date)
-      if (ce) return res.status(400).json({ error: ce })
     }
+    /* 마감 검사는 적금에도 필요하다. 거래를 안 만들어도, 마감된 달을 가입일로 잡으면
+     * 1회차 예정일이 그 달이 되어 납입이 영구히 거절된다(회차를 건너뛸 수 없다).
+     * 되돌릴 수 없는 상태의 적금이 남는다. */
+    const ce = await closedPeriodError(conn, start_date)
+    if (ce) return res.status(400).json({ error: ce })
 
     const id = randomUUID()
     const acct_code = b.acct_code || defaultAcctCode(term_months)
@@ -183,30 +190,91 @@ router.put('/:id', async (req, res, next) => {
       return res.status(409).json({
         error: `이미 ${cnt}회차를 납입해서 금액·기간은 바꿀 수 없어요. 조건이 달라졌다면 해지 후 새로 등록해주세요.` })
     }
-    await req.db.execute(
-      `UPDATE savings SET name=?, bank=?, vendor_id=?, annual_rate=?, term_months=?, monthly_amount=?,
-              pay_day=?, maturity_date=?, account_id=?, acct_code=?, memo=? WHERE id=?`,
-      [String(b.name || cur.name).trim(), b.bank ?? cur.bank, b.vendor_id ?? cur.vendor_id,
-       numOf(b.annual_rate), term_months, monthly_amount,
-       intOf(b.pay_day) || cur.pay_day,
-       maturityDateOf({ start_date: cur.start_date, term_months }),
-       b.account_id ?? cur.account_id, b.acct_code || cur.acct_code, b.memo ?? cur.memo, req.params.id])
-    res.json({ ok: true })
+    /* 예금 예치 금액 — 화면은 편집할 수 있게 그리는데 UPDATE 문에 없어서 조용히 무시됐다
+     * ("수정했어요"는 뜨는데 금액은 그대로). 가입 출금 거래도 함께 맞춰야 잔액이 안 어긋난다. */
+    const principal = cur.kind === 'deposit' ? (intOf(b.principal) || Number(cur.principal)) : 0
+    if (cur.kind === 'deposit' && principal <= 0) {
+      return res.status(400).json({ error: '예치 금액을 입력해주세요' })
+    }
+    // 이율은 numOf 가 빈 값을 0으로 만든다 — 일부 필드만 보낸 요청에서 이율이 조용히 사라졌다
+    const annual_rate = b.annual_rate != null && String(b.annual_rate) !== ''
+      ? numOf(b.annual_rate) : Number(cur.annual_rate)
+    // 기간이 1년을 넘나들면 회계 분류(단기↔장기 금융상품)도 따라가야 한다
+    const acct_code = b.acct_code || (term_months !== cur.term_months ? defaultAcctCode(term_months) : cur.acct_code)
+
+    const conn = await req.db.getConnection()
+    try {
+      await conn.beginTransaction()
+      await conn.execute(
+        `UPDATE savings SET name=?, bank=?, vendor_id=?, principal=?, annual_rate=?, term_months=?, monthly_amount=?,
+                pay_day=?, maturity_date=?, account_id=?, acct_code=?, memo=? WHERE id=?`,
+        [String(b.name || cur.name).trim(), b.bank ?? cur.bank, b.vendor_id ?? cur.vendor_id,
+         principal, annual_rate, term_months, monthly_amount,
+         intOf(b.pay_day) || cur.pay_day,
+         maturityDateOf({ start_date: cur.start_date, term_months }),
+         b.account_id ?? cur.account_id, acct_code, b.memo ?? cur.memo, req.params.id])
+      // 예치 금액이 바뀌면 가입 출금 거래도 같은 금액으로 — 안 맞추면 계좌 잔액이 어긋난다
+      if (cur.kind === 'deposit' && cur.txn_id && principal !== Number(cur.principal)) {
+        const [[txn]] = await conn.execute('SELECT date FROM transactions WHERE id = ?', [cur.txn_id])
+        if (txn) {
+          const ce = await closedPeriodError(conn, txn.date)
+          if (ce) { await rollbackQuietly(conn); conn.release(); return res.status(400).json({ error: ce }) }
+          await conn.execute('UPDATE transactions SET amount = ?, account_code = ? WHERE id = ?',
+            [principal, acct_code, cur.txn_id])
+        }
+      }
+      await conn.commit()
+      res.json({ ok: true })
+    } catch (e) { await rollbackQuietly(conn); throw e }
+    finally { conn.release() }
   } catch (e) { next(e) }
 })
 
+/**
+ * 삭제 — 잘못 만든 것을 되무르는 용도.
+ *
+ * ⚠ 가입 출금 거래(예금)를 **반드시 함께 지운다.** 안 지우면 통장에서 돈은 나갔는데 그 돈을
+ *   담고 있던 상품이 사라져, 자금일보의 '묶인 자금'에서 증발한다(가용도 아니고 묶인 것도
+ *   아닌 돈이 되어 총자산이 그만큼 과소계상). transactions.savings_id 는 FK가 아니라
+ *   거래가 알아서 지워지지 않는다. 차입금 삭제(routes/finance.js)가 실행 거래를 함께
+ *   지우는 것과 같은 이유다.
+ *
+ *   예금은 savings_payments 행이 구조적으로 0건이라(회차가 없다) 기존 가드가 항상 통과했다.
+ *
+ * ⚠ 트랜잭션 + FOR UPDATE — 건수 확인과 삭제 사이에 다른 요청이 납입을 커밋하면
+ *   CASCADE로 회차만 지워지고 지출 거래는 남는다.
+ */
 router.delete('/:id', async (req, res, next) => {
+  const conn = await req.db.getConnection()
   try {
-    const [[{ cnt }]] = await req.db.execute(
+    await conn.beginTransaction()
+    const [[s]] = await conn.execute('SELECT * FROM savings WHERE id = ? FOR UPDATE', [req.params.id])
+    if (!s) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    if (s.status !== 'active') {
+      await rollbackQuietly(conn)
+      return res.status(409).json({ error: '이미 만기·해지된 상품은 삭제할 수 없어요. 기록으로 남겨두세요.' })
+    }
+    const [[{ cnt }]] = await conn.execute(
       'SELECT COUNT(*) AS cnt FROM savings_payments WHERE savings_id = ? AND paid_date IS NOT NULL', [req.params.id])
     if (cnt > 0) {
+      await rollbackQuietly(conn)
       return res.status(409).json({
         error: `납입 실적 ${cnt}건이 있어 삭제할 수 없어요. 잘못 만든 게 아니라면 해지로 처리해주세요.` })
     }
-    const [r] = await req.db.execute('DELETE FROM savings WHERE id = ?', [req.params.id])
-    if (r.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
+    // 예금 가입 출금 거래 — 마감된 달이면 지울 수 없다(장부가 이미 확정됐다)
+    if (s.txn_id) {
+      const [[txn]] = await conn.execute('SELECT date FROM transactions WHERE id = ?', [s.txn_id])
+      if (txn) {
+        const ce = await closedPeriodError(conn, txn.date)
+        if (ce) { await rollbackQuietly(conn); return res.status(400).json({ error: ce }) }
+        await conn.execute('DELETE FROM transactions WHERE id = ?', [s.txn_id])
+      }
+    }
+    await conn.execute('DELETE FROM savings WHERE id = ?', [req.params.id])
+    await conn.commit()
     res.json({ ok: true })
-  } catch (e) { next(e) }
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
 })
 
 /**
@@ -283,6 +351,10 @@ router.post('/:id/pay-missed', async (req, res, next) => {
     await conn.beginTransaction()
     const [[s]] = await conn.execute('SELECT * FROM savings WHERE id = ? FOR UPDATE', [req.params.id])
     if (!s) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    // /pay 와 같은 검사 — 여기만 빠져 있어 만기 처리된 상품에 납입이 더 들어갈 수 있었다
+    // (다른 탭에서 만기를 누른 뒤, 이미 열어둔 일괄 드로어를 저장하는 경우).
+    // 그 돈은 계좌에서 나가지만 묶인 자금에는 안 잡혀(active만 센다) 총자산이 그만큼 준다.
+    if (s.status !== 'active') { await rollbackQuietly(conn); return res.status(409).json({ error: '만기·해지된 상품이에요' }) }
     if (s.kind !== 'installment') { await rollbackQuietly(conn); return res.status(400).json({ error: '예금은 납입 회차가 없어요' }) }
     const acct = req.body.account_id || s.account_id
     const le = ledgerError({ kind: 'expense', account_id: acct, status: '지급완료' })
@@ -338,9 +410,21 @@ router.post('/:id/mature', async (req, res, next) => {
       await rollbackQuietly(conn)
       return res.status(400).json({ error: '납입 실적이 없어요. 먼저 납입을 기록해주세요.' })
     }
-    // 이자는 실제 수령액을 받는다(우대금리·중도해지로 예상과 다를 수 있다). 없으면 예상치로 채운다.
-    const interest = req.body.interest != null ? intOf(req.body.interest) : maturitySummary(s).interest
+    /* 이자는 실제 수령액을 받는다(우대금리·중도해지로 예상과 다를 수 있다).
+     * 기본값은 **실제로 넣은 돈에 붙은 이자**다 — 예전엔 "끝까지 넣었을 때"(maturitySummary)를
+     * 써서, 1회만 낸 적금을 만기 처리하면 12회분 이자가 들어가 이자수익이 부풀었다. */
+    const expected = accruedInterest(s, payRows, recvDate)
+    const interest = req.body.interest != null ? intOf(req.body.interest) : expected
     if (interest < 0) { await rollbackQuietly(conn); return res.status(400).json({ error: '이자는 음수일 수 없어요' }) }
+    /* 자릿수 오타 방어 — 260,000을 2,600,000으로 치면 이자수익이 부풀고 되돌리기 어렵다.
+     * 약속대로 끝까지 넣었을 때의 이자를 상한으로 본다(우대금리를 감안해 1.5배까지). */
+    const ceiling = Math.max(Math.round(maturitySummary(s).interest * 1.5), 10000)
+    if (interest > ceiling) {
+      await rollbackQuietly(conn)
+      return res.status(400).json({
+        error: `이자 ${intOf(interest).toLocaleString('ko-KR')}원은 이 상품에서 나올 수 있는 금액을 넘어요`
+             + ` (예상 ${expected.toLocaleString('ko-KR')}원). 자릿수를 확인해주세요.` })
+    }
 
     const mkTxn = async (amount, category, acctCode, memo) => {
       if (amount <= 0) return null

@@ -66,14 +66,14 @@ export const SavingsScreen = () => {
 
   const doPay = async (s, cycle, body) => {
     const r = await api.paySavings(s.id, body)
-    if (!r.ok) return toast.push(r.error || '납입 처리에 실패했어요')
+    if (!r.ok) return toast.push(r.error || '납입 처리에 실패했어요', { tone: 'warn' })
     toast.push(`${s.name} ${r.seq}회차 ${fmtNum(r.amount)}원 납입했어요`)
     setPayTarget(null); load()
   }
 
   const doBulk = async (s, accountId) => {
     const r = await api.paySavingsMissed(s.id, { account_id: accountId })
-    if (!r.ok) return toast.push(r.error || '일괄 처리에 실패했어요')
+    if (!r.ok) return toast.push(r.error || '일괄 처리에 실패했어요', { tone: 'warn' })
     toast.push(r.count ? `${r.count}건 · ${fmtNum(r.total)}원 납입 처리했어요` : '처리할 회차가 없어요')
     setBulkTarget(null); load()
   }
@@ -85,11 +85,15 @@ export const SavingsScreen = () => {
     })
     if (!ok) return
     const r = await api.deleteSavings(s.id)
-    if (!r.ok) return toast.push(r.error || '삭제에 실패했어요')
+    if (!r.ok) return toast.push(r.error || '삭제에 실패했어요', { tone: 'warn' })
     toast.push('삭제했어요'); load()
   }
 
-  if (loading) return <div className="text-sm text-muted" style={{ padding: 40, textAlign: 'center' }}>불러오는 중…</div>
+  // 첫 로딩에만 통째로 가린다. 갱신할 때마다 가리면 표가 언마운트돼
+  // 사용자가 걸어둔 정렬이 매번 풀린다(납입 한 건 처리할 때마다 순서가 되돌아간다).
+  if (loading && rows.length === 0) {
+    return <div className="text-sm text-muted" style={{ padding: 40, textAlign: 'center' }}>불러오는 중…</div>
+  }
 
   return (
     <div className="fade-up">
@@ -233,29 +237,18 @@ const SavingsDetail = ({ s }) => {
         <span>세후 수령 <b className="num">{fmtNum(s.maturity?.afterTax || 0)}원</b></span>
       </div>
       <div style={{ maxHeight: 260, overflowY: 'auto' }}>
-        <table className="table">
-          <thead><tr>
-            <th style={{ width: 60 }}>회차</th><th style={{ width: 120 }}>납입일</th>
-            <th className="num-right" style={{ width: 120 }}>금액</th>
-            <th className="num-right" style={{ width: 130 }}>누계</th>
-            <th style={{ width: 90 }}>상태</th>
-          </tr></thead>
-          <tbody>
-            {sched.map(c => (
-              <tr key={c.seq}>
-                <td className="num text-sm">{c.seq}</td>
-                <td className="num text-sm">{c.due_date}</td>
-                <td className="num-cell num-right">{fmtNum(c.amount)}</td>
-                <td className="num-cell num-right text-muted">{fmtNum(c.cumulative)}</td>
-                <td>
-                  {paidSeq.has(c.seq)
-                    ? <span className="badge pos">납입</span>
-                    : <span className={`badge ${ddayTone(c.due_date)}`}>{dday(c.due_date)}</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable
+          rows={sched}
+          rowKey={c => c.seq}
+          columns={[
+            { key: 'seq', header: '회차', width: 60, className: 'num text-sm' },
+            { key: 'due_date', header: '납입일', width: 120, className: 'num text-sm' },
+            { key: 'amount', header: '금액', width: 120, align: 'right', className: 'num-cell', render: c => fmtNum(c.amount) },
+            { key: 'cumulative', header: '누계', width: 130, align: 'right', className: 'num-cell text-muted', render: c => fmtNum(c.cumulative) },
+            { key: 'state', header: '상태', width: 90, render: c => (paidSeq.has(c.seq)
+              ? <span className="badge pos">납입</span>
+              : <span className={`badge ${ddayTone(c.due_date)}`}>{dday(c.due_date)}</span>) },
+          ]}/>
       </div>
     </div>
   )
@@ -271,10 +264,13 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
   }
   const [f, setF] = useState(blank)
   const [preview, setPreview] = useState(null)
+  // 왕복 중 두 번 누르면 예금은 출금 거래가 두 건 생겨 계좌 잔액이 두 번 빠진다
+  // (납입·만기는 서버가 FOR UPDATE로 막지만 등록에는 그런 방어가 없다)
+  const [busy, setBusy] = useState(false)
   const set = (k, v) => setF(prev => ({ ...prev, [k]: v }))
 
   useEffect(() => {
-    if (!open) return
+    if (!open) { setPreview(null); return }   // 닫을 때 비운다 — 다음에 열 때 직전 상품 숫자가 남는다
     setF(editing ? {
       kind: editing.kind, name: editing.name, bank: editing.bank || '',
       monthly_amount: String(editing.monthly_amount || ''), principal: String(editing.principal || ''),
@@ -298,17 +294,21 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
   }, [open, f.kind, f.principal, f.monthly_amount, f.annual_rate, f.term_months, f.start_date, f.pay_day])
 
   const save = async () => {
-    const body = {
-      kind: f.kind, name: f.name.trim(), bank: f.bank.trim(),
-      monthly_amount: f.monthly_amount, principal: f.principal,
-      annual_rate: f.annual_rate, term_months: f.term_months,
-      start_date: f.start_date, pay_day: f.pay_day,
-      account_id: f.account_id || null, memo: f.memo,
-    }
-    const r = editing ? await api.updateSavings(editing.id, body) : await api.addSavings(body)
-    if (!r.ok) return toast.push(r.error || '저장에 실패했어요')
-    toast.push(editing ? '수정했어요' : '등록했어요')
-    onSaved()
+    if (busy) return
+    setBusy(true)
+    try {
+      const body = {
+        kind: f.kind, name: f.name.trim(), bank: f.bank.trim(),
+        monthly_amount: f.monthly_amount, principal: f.principal,
+        annual_rate: f.annual_rate, term_months: f.term_months,
+        start_date: f.start_date, pay_day: f.pay_day,
+        account_id: f.account_id || null, memo: f.memo,
+      }
+      const r = editing ? await api.updateSavings(editing.id, body) : await api.addSavings(body)
+      if (!r.ok) return toast.push(r.error || '저장에 실패했어요', { tone: 'warn' })
+      toast.push(editing ? '수정했어요' : '등록했어요')
+      onSaved()
+    } finally { setBusy(false) }
   }
 
   return (
@@ -417,7 +417,8 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
           </div>
         )}
       </div>
-      <DrawerFooter onCancel={onClose} onSave={save} saveLabel={editing ? '수정' : '등록'}/>
+      <DrawerFooter onCancel={onClose} onSave={save} saveDisabled={busy}
+        saveLabel={busy ? '저장 중…' : (editing ? '수정' : '등록')}/>
     </Drawer>
   )
 }
@@ -483,17 +484,14 @@ const BulkPayDrawer = ({ target, accounts, onClose, onPay }) => {
           </div>
         </div>
         <div style={{ maxHeight: 180, overflowY: 'auto' }}>
-          <table className="table">
-            <tbody>
-              {cycles.map(c => (
-                <tr key={c.seq}>
-                  <td className="num text-sm">{c.due_date}</td>
-                  <td className="text-sm text-muted">{c.seq}회차</td>
-                  <td className="num-cell num-right">{fmtNum(c.amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            rows={cycles}
+            rowKey={c => c.seq}
+            columns={[
+              { key: 'due_date', header: '납입일', className: 'num text-sm' },
+              { key: 'seq', header: '회차', width: 90, className: 'text-sm text-muted', render: c => `${c.seq}회차` },
+              { key: 'amount', header: '금액', width: 120, align: 'right', className: 'num-cell', render: c => fmtNum(c.amount) },
+            ]}/>
         </div>
         <div>
           <label className="label">출금 계좌 *</label>
@@ -523,7 +521,7 @@ const MatureDrawer = ({ target, accounts, onClose, onDone }) => {
   const principal = Number(target.balance || 0)
   const save = async () => {
     const r = await api.matureSavings(target.id, { received_date: date, account_id: acct, interest })
-    if (!r.ok) return toast.push(r.error || '만기 처리에 실패했어요')
+    if (!r.ok) return toast.push(r.error || '만기 처리에 실패했어요', { tone: 'warn' })
     toast.push(`${fmtNum(r.total)}원 입금 처리했어요 (원금 ${fmtNum(r.principal)} + 이자 ${fmtNum(r.interest)})`)
     onDone()
   }

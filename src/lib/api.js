@@ -1189,6 +1189,11 @@ export const api = {
   async getEmployees() {
     try { return (await req('/employees')).map(adaptEmployee) } catch { return [] }
   },
+  /** 드롭다운용 최소 목록 — 이름을 고르는 데 필요한 것만.
+   *  전체 목록은 급여·생년월일·급여계좌까지 담고 있어 인사 권한이 필요하다. */
+  async getEmployeeOptions() {
+    try { return (await req('/employees/options')).map(adaptEmployee) } catch { return [] }
+  },
   async addEmployee(data) {
     try { return await req('/employees', { method: 'POST', body: data }) } catch { return { ok: false } }
   },

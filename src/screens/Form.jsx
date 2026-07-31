@@ -92,7 +92,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       if (list.length > 0) setForm(f => ({ ...f, account: f.account || list[0].name }));
     });
     api.getContracts().then(list => setContracts(list));
-    api.getEmployees().then(setEmployees);
+    // 고르기만 하면 되므로 최소 목록 — 전체 목록은 급여까지 담고 있어 인사 권한이 필요하다
+    api.getEmployeeOptions().then(setEmployees);
     api.getCategories().then(setCategories);
     api.getRefItems('item').then(setItems);
     api.getRefItems('jeokyo').then(setJeokyos);

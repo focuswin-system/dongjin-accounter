@@ -22,14 +22,20 @@ const { loadUserPerms, canAny } = require('../platform/userPerms')
 module.exports = async function permGate(req, res, next) {
   try {
     const need = requiredPerm(req.method, (req.originalUrl || req.path).split('?')[0])
-    if (!need) return next()
 
     const { companyId, id: userId } = req.user || {}
     if (!companyId || !userId) return res.status(401).json({ error: '다시 로그인해 주세요' })
 
+    /* 게이트를 통과시키는 경로에서도 권한을 실어준다.
+     * 라우트가 **응답 안에서** 민감한 필드를 가려야 할 때가 있다 —
+     * 계좌 목록은 결제수단이라 누구나 골라야 하지만 '잔액'은 아니다(routes/accounts.js).
+     * 30초 캐시라 매 요청 쿼리가 아니다. */
     const { perms, roles } = await loadUserPerms(platformPool, { companyId, userId })
+    req.perms = perms
+    req.permRoles = roles
+    if (!need) return next()
     // 역할 미배정 계정은 강제 대상이 아니다(위 설계 결정 참고)
-    if (!roles.length) { req.perms = perms; return next() }
+    if (!roles.length) return next()
 
     if (!canAny(perms, need.resources, need.action)) {
       const LABEL = { access: '접근', view: '조회', create: '등록', edit: '수정',
@@ -39,7 +45,6 @@ module.exports = async function permGate(req, res, next) {
         deniedAction: need.action,
       })
     }
-    req.perms = perms
     next()
   } catch (e) { next(e) }
 }

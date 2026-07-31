@@ -6,7 +6,7 @@ const test = require('node:test')
 const assert = require('node:assert')
 const {
   installmentInterest, depositInterest, paymentSchedule, unpaidPayments,
-  paidPrincipal, maturitySummary, maturityDateOf, TAX_RATE,
+  paidPrincipal, maturitySummary, maturityDateOf, TAX_RATE, accruedInterest, monthsBetween,
 } = require('../lib/savings')
 
 test('적금 이자 — 예치 기간이 회차마다 다르다', () => {
@@ -115,4 +115,35 @@ test('납입일을 안 정하면 가입일과 같은 날 — 가입일보다 앞
   // 말일이라 짧은 달은 그 달 말일로 밀린다
   assert.equal(sch[1].due_date, '2026-08-31')
   assert.equal(sch[7].due_date, '2027-02-28')
+})
+
+test('실제로 넣은 돈에만 이자가 붙는다 — 1회만 낸 적금에 12회분 이자를 주면 안 된다', () => {
+  // 만기 처리 기본값이 maturitySummary(끝까지 넣었을 때)였을 때 생기던 과대계상.
+  const s = { kind: 'installment', monthly_amount: 1_000_000, term_months: 12,
+              annual_rate: 4, start_date: '2026-01-01', pay_day: 1 }
+  const full = maturitySummary(s).interest            // 260,000 (12회 전부)
+  const one = accruedInterest(s, [{ amount: 1_000_000, paid_date: '2026-01-01' }], '2027-01-01')
+  assert.equal(full, 260_000)
+  assert.equal(one, 40_000)                            // 100만 × 4%/12 × 12개월
+  assert.ok(one < full, '납입 실적이 적으면 이자도 적어야 한다')
+})
+
+test('끝까지 납입하면 폐쇄식 계산과 같은 값이 나온다', () => {
+  const s = { kind: 'installment', monthly_amount: 1_000_000, term_months: 12,
+              annual_rate: 4, start_date: '2026-01-01', pay_day: 1 }
+  const payments = paymentSchedule(s).map(c => ({ amount: c.amount, paid_date: c.due_date }))
+  assert.equal(accruedInterest(s, payments, maturityDateOf(s)), installmentInterest(1_000_000, 4, 12))
+})
+
+test('예금 중도해지 — 예치한 기간만큼만 이자가 붙는다', () => {
+  const s = { kind: 'deposit', principal: 12_000_000, term_months: 12, annual_rate: 3, start_date: '2026-01-01' }
+  assert.equal(accruedInterest(s, [], '2027-01-01'), 360_000)   // 만기: 1200만 × 3%
+  assert.equal(accruedInterest(s, [], '2026-07-01'), 180_000)   // 6개월: 절반
+  assert.equal(accruedInterest(s, [], '2028-01-01'), 360_000)   // 약정 기간 이상은 안 붙는다
+})
+
+test('개월 수는 날짜가 차야 센다', () => {
+  assert.equal(monthsBetween('2026-01-31', '2026-02-28'), 0)   // 하루 모자람
+  assert.equal(monthsBetween('2026-01-01', '2026-02-01'), 1)
+  assert.equal(monthsBetween('2026-01-01', '2025-12-01'), 0)   // 역순은 0
 })
