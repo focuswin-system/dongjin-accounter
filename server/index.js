@@ -122,10 +122,22 @@ app.get('/api/health', (_, res) => res.json({
 // (로컬 개발: Vite가 별도 서빙) 이 블록은 건너뛴다.
 const DIST = path.join(__dirname, '..', 'dist')
 if (fs.existsSync(path.join(DIST, 'index.html'))) {
-  app.use(express.static(DIST))
+  /* index.html·sw.js 는 절대 캐시하지 않는다.
+   *
+   * 번들 파일명에는 해시가 붙어 있어 캐시해도 안전하지만, **그 파일명을 가리키는
+   * index.html 이 캐시되면 배포해도 사용자는 옛 화면을 계속 본다.** 서비스워커(sw.js)도
+   * 마찬가지다 — 옛 워커가 캐시된 채로 남으면 스스로 갱신할 기회조차 없다.
+   * 실제로 이것 때문에 고친 코드가 반영되지 않아 같은 증상을 며칠 더 보게 됐다. */
+  const noStore = (res, filePath) => {
+    if (/(index\.html|sw\.js|workbox-[^/\\]*\.js)$/.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+    }
+  }
+  app.use(express.static(DIST, { setHeaders: noStore }))
   // SPA 폴백: /api·/uploads 외의 모든 경로는 index.html로
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) return next()
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
     res.sendFile(path.join(DIST, 'index.html'))
   })
 }

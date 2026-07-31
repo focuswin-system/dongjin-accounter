@@ -1,6 +1,18 @@
 import { useState } from 'react'
 import { Icon } from '../lib/ui'
 
+/* 직전에 세션이 끊겨 되돌아왔는지 — **모듈 로드 시 한 번만** 읽는다.
+ * 컴포넌트 안(useState 초기화)에서 읽고 지우면 StrictMode의 이중 마운트 때문에
+ * 첫 마운트가 지워버리고 두 번째 마운트는 못 읽어서 배너가 안 뜬다. */
+const KICKED = (() => {
+  try {
+    const raw = sessionStorage.getItem('authFail')
+    if (!raw) return null
+    sessionStorage.removeItem('authFail')
+    return JSON.parse(raw)
+  } catch { return null }
+})()
+
 export const LoginScreen = ({ onLogin }) => {
   // 회사코드는 마지막 로그인 값을 기억한다(같은 PC는 대개 같은 회사에서 쓴다).
   const [company, setCompany] = useState(() => localStorage.getItem('companyCode') || '');
@@ -9,6 +21,10 @@ export const LoginScreen = ({ onLogin }) => {
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // 직전에 세션이 끊겨 여기로 되돌아왔다면 이유를 보여준다.
+  // 아무 설명 없이 로그인 화면으로 돌아오면 사용자는 '그냥 튕겼다'고만 느끼고,
+  // 원인을 좁힐 단서도 남지 않는다.
+  const kicked = KICKED;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -136,6 +152,19 @@ export const LoginScreen = ({ onLogin }) => {
               계정 정보를 입력하세요
             </div>
           </div>
+
+          {kicked && (
+            <div style={{
+              background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 10,
+              padding: '12px 14px', marginBottom: 18, fontSize: 13, lineHeight: 1.6, color: '#78350f',
+            }}>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>세션이 끊겨 다시 로그인이 필요해요</div>
+              <div>{kicked.why || '인증이 만료되었습니다'}</div>
+              <div style={{ fontSize: 11, opacity: 0.75, marginTop: 6 }}>
+                {kicked.method} {kicked.path}
+              </div>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>

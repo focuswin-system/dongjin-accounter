@@ -79,6 +79,37 @@ async function req(path, opts = {}) {
   if (renewed) localStorage.setItem('token', renewed)
 
   if (res.status === 401) {
+    // opts.softAuth: 401이어도 세션을 지우지 않는다.
+    // 앱이 켜지자마자 배경으로 부르는 호출(권한 조회 등)에 쓴다 — 이런 호출이 세션을 지우면
+    // 일시적인 401 하나에 작업 중이던 사람이 통째로 튕긴다. 진짜 만료라면 사용자가
+    // 무언가를 눌렀을 때 그 호출이 아래 정상 경로로 처리한다.
+    if (opts.softAuth) throw apiError('인증이 만료되었습니다', { status: 401, kind: 'auth' })
+
+    /* 죽은 세션의 늦은 응답은 무시한다 — **로그인 직후 튕기던 원인**.
+     *
+     * 만료된 토큰이 localStorage 에 남아 있으면 앱이 켜지면서 그 토큰으로 요청 십수 개를
+     * 한꺼번에 쏜다. 그중 하나가 401을 물고 와 세션을 지우고 로그인 화면으로 되돌린다.
+     * 여기까지는 맞다. 그런데 **느린 요청**(/finance/summary 는 상환 스케줄까지 계산한다)은
+     * 그 사이에 아직 날아다니고 있다가, 사용자가 새로 로그인해 화면에 들어간 **뒤에** 401로
+     * 돌아온다. 그러면 방금 받은 멀쩡한 토큰까지 지우고 또 튕긴다.
+     *
+     * 그래서 요청을 보낼 때 쓴 토큰이 지금도 그대로인지 본다. 바뀌었다면 그 401은
+     * 이미 끝난 세션의 것이므로 버린다. 지금 세션은 건드리지 않는다. */
+    if (token !== localStorage.getItem('token')) {
+      throw apiError('지난 세션의 요청이라 무시했어요', { status: 401, kind: 'auth' })
+    }
+
+    // 어느 요청이 세션을 끊었는지 남긴다.
+    // 이게 없으면 사용자에게는 '갑자기 로그인 화면으로 튕겼다'로만 보이고,
+    // 고치는 쪽에서도 어디를 봐야 할지 알 수 없다(실제로 원인 추적에 오래 걸렸다).
+    let why = ''
+    try { const b = await res.clone().json(); why = b?.error || '' } catch { /* 본문 없음 */ }
+    console.error(`[auth] 401 — ${opts.method || 'GET'} ${path} :: ${why}`)
+    try {
+      sessionStorage.setItem('authFail', JSON.stringify({
+        path, method: opts.method || 'GET', why, at: new Date().toISOString(),
+      }))
+    } catch { /* 저장 실패는 무시 */ }
     localStorage.removeItem('token')
     localStorage.removeItem('loggedIn')
     localStorage.removeItem('user')
@@ -250,7 +281,9 @@ function adaptEmployee(row) {
 export const api = {
   // ─── 내 정보·권한 ─────────────────────────────────────────────
   // 권한은 토큰이 아니라 매번 서버에서 읽는다. 관리자가 역할을 바꿔도 재로그인 없이 반영된다.
-  async me() { return req('/auth/me') },
+  // softAuth — 앱이 켜지는 즉시 배경으로 부르는 호출이라, 이게 401 하나로 세션을 지우면
+  // 작업 중이던 사람이 아무것도 안 눌렀는데 로그인 화면으로 튕긴다.
+  async me() { return req('/auth/me', { softAuth: true }) },
 
   // ─── 계좌 ─────────────────────────────────────────────────────
   async getAccounts() {

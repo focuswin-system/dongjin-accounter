@@ -203,8 +203,11 @@ router.get('/roles', authMiddleware, async (req, res, next) => {
 router.put('/users/:id/roles', authMiddleware, async (req, res, next) => {
   const conn = await platformPool.getConnection()
   try {
-    if (!isMaster(req)) { conn.release(); return res.status(403).json({ error: '권한이 없습니다' }) }
-    if (req.user.id === req.params.id) { conn.release(); return res.status(400).json({ error: '본인 역할은 변경할 수 없어요' }) }
+    // ⚠ 여기서 conn.release() 를 부르면 안 된다 — 아래 finally 가 또 반납해서 **이중 반납**이 된다.
+    // 같은 커넥션이 풀에 두 번 들어가면 서로 다른 두 요청이 같은 커넥션을 동시에 쓰게 되고,
+    // 로그인·인증이 쓰는 플랫폼 풀이 간헐적으로 깨진다(로그인했다 튕기는 증상).
+    if (!isMaster(req)) return res.status(403).json({ error: '권한이 없습니다' })
+    if (req.user.id === req.params.id) return res.status(400).json({ error: '본인 역할은 변경할 수 없어요' })
     const roleIds = Array.isArray(req.body.roleIds) ? req.body.roleIds.filter(Boolean) : []
     await conn.beginTransaction()
     const [[target]] = await conn.execute(

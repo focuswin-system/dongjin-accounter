@@ -4,6 +4,7 @@ import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmPro
 import { api, setApiFailureHandler } from './lib/api'
 import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID } from './lib/nav'
 import { PermCtx, usePerms, visibleNav, visiblePortalNode } from './lib/perms'
+import { sessionAlive, clearSession } from './lib/session'
 import { LoginScreen } from './screens/Login'
 import { HomeScreen } from './screens/Home'
 import { LedgerScreen } from './screens/Ledger'
@@ -1072,8 +1073,12 @@ const CommandPalette = ({ open, onClose, onPick }) => {
 };
 
 export default function App() {
-  const [loggedIn, setLoggedIn] = useState(() => localStorage.getItem('loggedIn') === '1');
+  // 토큰이 죽었으면 앱을 그리지 않는다.
+  // 플래그만 보고 들어가면 죽은 토큰으로 요청 십수 개를 쏘고, 그 401들이 세션을 지우며
+  // '들어갔다 다시 튕겨나오는' 화면이 된다(어제 쓰던 브라우저를 아침에 열면 매번).
+  const [loggedIn, setLoggedIn] = useState(() => sessionAlive());
   const [user, setUser] = useState(() => {
+    if (!sessionAlive()) return null;
     try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; }
   });
   // 권한 — 서버가 진실이다. 토큰에 싣지 않으므로 새로고침·로그인마다 다시 읽는다.
@@ -1099,9 +1104,7 @@ export default function App() {
     // 로그아웃 후에도 8시간 동안 /uploads 로 이전 회사 첨부에 접근할 수 있다.
     // 실패해도 로그아웃은 계속 진행한다(응답을 기다리지 않음).
     fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
-    localStorage.removeItem('loggedIn');
-    localStorage.removeItem('user');
-    localStorage.removeItem('token');
+    clearSession();
     setUser(null); setLoggedIn(false);
   };
 
