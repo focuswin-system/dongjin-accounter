@@ -109,7 +109,7 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
       approval,   // 화면에 보이는 결재선(form.approval 없으면 defApproval)을 그대로 저장 — WYSIWYG
     }
     const res = isNew ? await api.createPurchaseReq(payload) : await api.updatePurchaseReq(doc.id, payload)
-    if (!res.ok) return toast.push(res.error || '저장에 실패했어요')
+    if (!res.ok) return toast.push(res.error || '저장에 실패했어요', { tone: 'warn' })
     toast.push(isNew ? `구매품의서 ${res.req?.doc_no || ''}를 만들었어요` : '저장됐어요')
     setEdit(false); onSaved(isNew ? res.req?.id : doc.id)
   }
@@ -118,7 +118,7 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
     const ok = await confirm({ tone: 'neg', icon: <Icon.Warn size={22}/>, title: `${doc.doc_no} 삭제`, body: '이 구매품의서를 삭제할까요? 복구할 수 없어요.', confirmLabel: '삭제' })
     if (!ok) return
     const res = await api.deletePurchaseReq(doc.id)
-    if (!res.ok) return toast.push(res.error || '삭제에 실패했어요')
+    if (!res.ok) return toast.push(res.error || '삭제에 실패했어요', { tone: 'warn' })
     toast.push('삭제됐어요'); onDeleted()
   }
   const amt = (n) => (n ? fmtNum(n) : '')
@@ -131,7 +131,7 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
   const submitPayable = async () => {
     if (!paySupplyN) return toast.push('공급가를 입력해주세요')
     const res = await api.issuePurchaseReqPayable(doc.id, { supply_amount: paySupplyN, vat_mode: payVat, due: payDue || null })
-    if (!res.ok) return toast.push(res.error || '등록에 실패했어요')
+    if (!res.ok) return toast.push(res.error || '등록에 실패했어요', { tone: 'warn' })
     toast.push(`미지급금 ${res.invoice_no}로 등록됐어요`)
     setPayOpen(false); onSaved(doc.id)
   }
@@ -334,7 +334,7 @@ export const PurchaseReqScreen = () => {
   const addVendor = async (q) => {
     const res = await api.addVendor({ name: q, gubu: 'A' })
     if (res.ok) { setVendors(await api.getVendors()); toast.push(`"${q}" 거래처가 등록됐어요`); return q }
-    toast.push(res.error || '거래처 등록에 실패했어요'); return ''
+    toast.push(res.error || '거래처 등록에 실패했어요', { tone: 'warn' }); return ''
   }
 
   const blankDoc = { id: '__new', req_date: localToday(), items: [], approval: [] }

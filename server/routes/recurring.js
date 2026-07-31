@@ -188,6 +188,15 @@ router.post('/issue-missed', async (req, res, next) => {
     for (const r of recs) {
       r.setup_date = kstDate(Number(r.created_epoch) * 1000)
       for (const due of dueDatesToGenerate(r, today)) {   // horizon 없음 = 오늘까지만
+        /* 마감된 달이 하나라도 섞이면 전체를 거절한다.
+         * 예전엔 일괄 경로에만 마감 검사가 없어, 신고를 끝낸 달로 매입 청구서가 새로 꽂혔다
+         * → 그 분기 매입세액이 신고 후에 늘어난다. 회차는 순서를 건너뛸 수 없으므로
+         *   일부만 처리하면 남은 회차를 영영 못 넣는다 → 전체 거절이 맞다. */
+        const ce = await closedPeriodError(conn, due)
+        if (ce) {
+          await rollbackQuietly(conn)
+          return res.status(409).json({ error: `${due} 회차가 마감된 달이라 전체를 처리하지 않았어요. ${ce}` })
+        }
         const made = await createExpenseInvoice(conn, r, due)
         generated.push({ id: made.invId, invoice_no: made.invoice_no, date: due, total: made.total })
       }

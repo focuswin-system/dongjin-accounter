@@ -59,7 +59,7 @@ const FilingDrawer = ({ target, year, onClose, onSaved }) => {
       category: form.category || null,
       account_code: form.account_code || null,
     })
-    if (!res.ok) return toast.push(res.error || '저장 실패')
+    if (!res.ok) return toast.push(res.error || '저장 실패', { tone: 'warn' })
     toast.push(isDone ? `${isRefund ? '환급' : '납부'} 처리하고 거래내역에 반영했어요` : '신고 내용이 저장됐어요')
     onSaved(); onClose()
   }
@@ -265,7 +265,7 @@ const OtherTaxDrawer = ({ open, editing, onClose, onSaved }) => {
       paid_date: form.paid_date || null, memo: form.memo || null, account_id: form.account_id || null,
     }
     const res = editing ? await api.updateOtherTax(editing.id, payload) : await api.addOtherTax(payload)
-    if (!res.ok) return toast.push(res.error || '저장 실패')
+    if (!res.ok) return toast.push(res.error || '저장 실패', { tone: 'warn' })
     toast.push(isDone ? `${isRefund ? '환급' : '납부'} 처리하고 거래내역에 반영했어요` : (editing ? '수정됐어요' : '등록됐어요'))
     onSaved(); onClose()
   }

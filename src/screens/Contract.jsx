@@ -714,7 +714,7 @@ function MilestoneEditDrawer({ open, onClose, contractId, contractAmount, initia
       invoice_id: m.invoice_id || null,   // 발행된 청구서 연결 보존(재저장 시 유실 방지)
     }))
     const res = await api.addMilestones(contractId, payload)
-    if (!res.ok) return toast.push('저장 실패')
+    if (!res.ok) return toast.push('저장 실패', { tone: 'warn' })
     toast.push('청구 일정이 저장됐어요')
     onSaved(); onClose()
   }
@@ -789,7 +789,7 @@ function BudgetEditDrawer({ open, onClose, contractId, initial, onSaved }) {
     const res = await api.updateCostBudget(contractId, {
       material: num(b.material), outsource: num(b.outsource), labor: num(b.labor), overhead: num(b.overhead),
     })
-    if (!res.ok) return toast.push('저장 실패')
+    if (!res.ok) return toast.push('저장 실패', { tone: 'warn' })
     toast.push('예산이 저장됐어요')
     onSaved(); onClose()
   }
@@ -845,7 +845,7 @@ function RenewDrawer({ open, onClose, contract, onSaved }) {
       new_unit_amount: isRenew && recurring  ? unitNum   : null,
       memo: form.memo || null,
     })
-    if (!res.ok) return toast.push(res.error || '갱신 처리에 실패했어요')
+    if (!res.ok) return toast.push(res.error || '갱신 처리에 실패했어요', { tone: 'warn' })
     if (isRenew) {
       toast.push(res.recurringExtended > 0
         ? `${form.new_end_date}까지 갱신하고 정기청구도 함께 연장했어요`
@@ -962,7 +962,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
 
   const saveMemo = async () => {
     const res = await api.updateContractMemo(contractId, memo);
-    if (res.ok) { toast.push("메모를 저장했어요"); reload(); } else toast.push("저장에 실패했어요");
+    if (res.ok) { toast.push("메모를 저장했어요"); reload(); } else toast.push("저장에 실패했어요", { tone: 'warn' });
   };
 
   // 계약 상세에서 입금/지출 등록 시 자동 갱신
@@ -984,7 +984,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     if (!ok) return;
     // 원자적 발행(청구서+일정 상태·연결). 거래처 gubu로 매출/매입 자동 판별.
     const res = await api.issueSchedule(ms.id, { paid: false });
-    if (!res.ok) { toast.push(res.error || "청구서 발행에 실패했어요"); return; }
+    if (!res.ok) { toast.push(res.error || "청구서 발행에 실패했어요", { tone: 'warn' }); return; }
     toast.push(`${ms.type} 청구서를 발행했어요`);
     reload();
   };
@@ -1045,7 +1045,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       for (const d of (editForm.docs || [])) await api.addContractDoc(contractId, { url: d.url, name: d.name, doc_type: '계약서', size: d.size || 0 });
       toast.push("수정됐어요"); setEditOpen(false); reload();
     }
-    else toast.push(res.error || "저장 실패");
+    else toast.push(res.error || "저장 실패", { tone: 'warn' });
   };
 
   if (!c) return <div style={{ padding: 40, textAlign: "center", color: "var(--muted-2)" }}>불러오는 중...</div>;
@@ -1181,7 +1181,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                         </span>
                         <button className="btn ghost sm" onClick={async () => {
                           const res = await api.toggleContractRecurring(contractId, r.id);
-                          if (!res.ok) return toast.push(res.error || '처리에 실패했어요');
+                          if (!res.ok) return toast.push(res.error || '처리에 실패했어요', { tone: 'warn' });
                           const what = isPurchase ? '정기지출' : '정기청구';
                           toast.push(res.active ? `${what}을 재개했어요` : `${what}을 중지했어요. 다음 회차부터 생성되지 않아요`);
                           reload();
@@ -1195,7 +1195,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                           </div>
                           <button className="btn sm" onClick={async () => {
                             const res = await api.syncContractRecurring(contractId);
-                            if (!res.ok) return toast.push(res.error || '맞추기에 실패했어요');
+                            if (!res.ok) return toast.push(res.error || '맞추기에 실패했어요', { tone: 'warn' });
                             toast.push('계약 조건으로 맞췄어요');
                             reload();
                           }}>계약 조건으로 맞추기</button>
@@ -1209,7 +1209,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                 <div className="ml-auto">
                   <button className="btn primary" onClick={async () => {
                     const res = await api.addContractRecurring(contractId);
-                    if (!res.ok) return toast.push(res.error || '생성에 실패했어요');
+                    if (!res.ok) return toast.push(res.error || '생성에 실패했어요', { tone: 'warn' });
                     toast.push(isPurchase
                       ? '정기지출을 걸었어요. 회차가 되면 지출이 자동 생성됩니다'
                       : '정기청구를 걸었어요. 대금 청구서의 "발행 예정"에서 회차를 발행하세요');
@@ -1625,12 +1625,12 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
               docs={c.attachments || []}
               onAdd={async (d) => {
                 const res = await api.addContractDoc(c.id, { url: d.url, name: d.name, doc_type: '기타', size: d.size || 0 });
-                if (res.ok) { toast.push("첨부됐어요"); reload(); } else toast.push("첨부에 실패했어요");
+                if (res.ok) { toast.push("첨부됐어요"); reload(); } else toast.push("첨부에 실패했어요", { tone: 'warn' });
               }}
               onRemove={async (d) => {
                 // 레거시 단일 파일(file_url, id 없음)은 clear-file로, 나머지는 contract_docs 삭제
                 const res = d.id ? await api.deleteContractDoc(d.id) : await api.clearContractFile(c.id);
-                if (res.ok) { toast.push("삭제됐어요"); reload(); } else toast.push("삭제에 실패했어요");
+                if (res.ok) { toast.push("삭제됐어요"); reload(); } else toast.push("삭제에 실패했어요", { tone: 'warn' });
               }}
               label="계약서·증빙을 끌어다 놓거나 클릭해서 추가"/>
           </div>
@@ -1843,7 +1843,7 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
       })),
     });
     setSaving(false);
-    if (!res.ok) return toast.push(res.error || '발행에 실패했어요');
+    if (!res.ok) return toast.push(res.error || '발행에 실패했어요', { tone: 'warn' });
     toast.push(`${res.invoice_no} 발행됐어요${paid ? ' · 정산까지 반영' : ''}`);
     onClose(); onSaved?.();
   };
@@ -2020,7 +2020,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
       setNewForm(NEW_CONTRACT_FORM);
       reload();
     } else {
-      toast.push(res.error || "저장에 실패했어요");
+      toast.push(res.error || "저장에 실패했어요", { tone: 'warn' });
     }
   };
 

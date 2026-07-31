@@ -330,6 +330,10 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
      * 발행 즉시 '연체 미수금'으로 집계됐다 — 연체 금액·건수가 실제와 다르게 잡힌다.
      * 예정일이 지났으면 발행일을 만기로 본다(그날부터 받을 돈이다). */
     const dueAt = ms.due_date && ms.due_date >= today ? ms.due_date : today
+    /* 마감된 달로는 청구서를 발행할 수 없다. 예전엔 'paid' 일 때(거래를 만들 때)만 검사해서,
+     * 마감·신고를 끝낸 달로 청구서만 새로 꽂을 수 있었다 → 그 분기 부가세 집계가 신고 후에 바뀐다.
+     * 수동 등록(POST /invoices)은 처음부터 issued_at 으로 막고 있었다. */
+    { const ce = await closedPeriodError(conn, today); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
     await conn.execute(
       'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [invId, invoice_no, kind, ms.vendor_id || null, ms.contract_id, supply, vat, total, today, dueAt, status, paid ? accountId : null, `${ms.contract_name} · ${ms.type}`, taxTypeOfMode(ms.vat_mode)]
@@ -427,6 +431,10 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
     const accountId = account_id || (defAcc ? defAcc.id : null)
     const invId = randomUUID()
     const status = paid ? (isPurchase ? '지급 완료' : '입금 완료') : (isPurchase ? '지급 대기' : '입금 예정')
+    /* 마감된 달로는 청구서를 발행할 수 없다. 예전엔 'paid' 일 때(거래를 만들 때)만 검사해서,
+     * 마감·신고를 끝낸 달로 청구서만 새로 꽂을 수 있었다 → 그 분기 부가세 집계가 신고 후에 바뀐다.
+     * 수동 등록(POST /invoices)은 처음부터 issued_at 으로 막고 있었다. */
+    { const ce = await closedPeriodError(conn, issuedAt); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
     await conn.execute(
       'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [invId, invoice_no, kind, c.vendor_id || null, c.id, supply, vat, total, issuedAt, due_at || null, status, paid ? accountId : null, `${c.name} · 기성 ${clean.length}개 품목`, taxTypeOfMode(c.vat_mode)]

@@ -92,7 +92,7 @@ const QuoteRequestPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSave
       currency: form.currency.trim() || 'WON', applicant: form.applicant.trim(), note: form.note.trim(), items,
     }
     const res = isNew ? await api.createQuoteReq(payload) : await api.updateQuoteReq(doc.id, payload)
-    if (!res.ok) return toast.push(res.error || '저장에 실패했어요')
+    if (!res.ok) return toast.push(res.error || '저장에 실패했어요', { tone: 'warn' })
     toast.push(isNew ? `견적요청서 ${res.req?.doc_no || ''}를 만들었어요` : '저장됐어요')
     setEdit(false); onSaved(isNew ? res.req?.id : doc.id)
   }
@@ -101,7 +101,7 @@ const QuoteRequestPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSave
     const ok = await confirm({ tone: 'neg', icon: <Icon.Warn size={22}/>, title: `${doc.doc_no} 삭제`, body: '이 견적요청서를 삭제할까요? 복구할 수 없어요.', confirmLabel: '삭제' })
     if (!ok) return
     const res = await api.deleteQuoteReq(doc.id)
-    if (!res.ok) return toast.push(res.error || '삭제에 실패했어요')
+    if (!res.ok) return toast.push(res.error || '삭제에 실패했어요', { tone: 'warn' })
     toast.push('삭제됐어요'); onDeleted()
   }
 
@@ -270,7 +270,7 @@ export const QuoteRequestScreen = () => {
   const addVendor = async (q) => {
     const res = await api.addVendor({ name: q, gubu: 'A' })
     if (res.ok) { setVendors(await api.getVendors()); toast.push(`"${q}" 거래처가 등록됐어요`); return q }
-    toast.push(res.error || '거래처 등록에 실패했어요'); return ''
+    toast.push(res.error || '거래처 등록에 실패했어요', { tone: 'warn' }); return ''
   }
 
   const blankDoc = { id: '__new', req_date: localToday(), items: [] }

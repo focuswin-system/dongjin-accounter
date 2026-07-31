@@ -121,7 +121,7 @@ const NewResolutionDrawer = ({ open, onClose, onCreated }) => {
       note: form.note.trim(),
       approval: chosen ? chosen.steps.map(s => ({ label: s.label, position: s.position || '', name: '' })) : undefined,
     });
-    if (!res.ok) return toast.push(res.error || '생성에 실패했어요');
+    if (!res.ok) return toast.push(res.error || '생성에 실패했어요', { tone: 'warn' });
     toast.push(`결의서 ${res.resolution.doc_no}를 만들었어요`);
     onCreated(res.resolution.id);
   };
@@ -144,7 +144,7 @@ const NewResolutionDrawer = ({ open, onClose, onCreated }) => {
                 setForm(f => ({ ...f, vendor: q }))
                 toast.push(`"${q}" 거래처가 등록됐어요`)
               } else {
-                toast.push(res.error || '거래처 등록에 실패했어요')
+                toast.push(res.error || '거래처 등록에 실패했어요', { tone: 'warn' })
               }
             }}
             addNewLabel="거래처로 추가"/>
@@ -263,7 +263,7 @@ const ProcessDrawer = ({ open, onClose, doc, onDone }) => {
       ? { mode: 'link', txn_id: pickedTxn, account_id: accountId || null }
       : { mode: 'create', amount: amountNum, date, account_id: accountId || null };
     const res = await api.processResolution(doc.id, body);
-    if (!res.ok) return toast.push(res.error || '처리에 실패했어요');
+    if (!res.ok) return toast.push(res.error || '처리에 실패했어요', { tone: 'warn' });
     const base = mode === 'link' ? '기존 지출에 연결했어요' : '지출을 등록하고 처리했어요';
     toast.push(res.invoicePaid ? `${base}. 청구서도 지급 처리됐어요` : base);
     onDone();
@@ -455,14 +455,14 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
 
   const save = async () => {
     const res = await api.updateResolution(doc.id, { ...form, amount: itemsTotal || form.amount });
-    if (!res.ok) return toast.push(res.error || '저장에 실패했어요');
+    if (!res.ok) return toast.push(res.error || '저장에 실패했어요', { tone: 'warn' });
     toast.push('결의서를 저장했어요'); setEdit(false); onSaved();
   };
   const remove = async () => {
     const ok = await confirm({ tone: 'neg', title: '결의서 삭제', body: `${doc.doc_no} 결의서를 삭제할까요? 거래는 그대로 남아요.`, confirmLabel: '삭제' });
     if (!ok) return;
     const res = await api.deleteResolution(doc.id);
-    if (!res.ok) return toast.push('삭제에 실패했어요');
+    if (!res.ok) return toast.push('삭제에 실패했어요', { tone: 'warn' });
     toast.push('삭제됐어요'); onDeleted();
   };
   const doPrint = () => window.print();
@@ -847,7 +847,7 @@ export const ExcelScreen = () => {
       setRawRows(rows)
       setMapping(headers.map(h => ({ excelCol: h, target: guessTarget(h) })))
       setExcluded(new Set())
-    } catch (e) { toast.push(e.message || "파싱 실패") }
+    } catch (e) { toast.push(e.message || "파싱 실패", { tone: 'warn' }) }
     setBusy(false)
   }
 
@@ -900,7 +900,7 @@ export const ExcelScreen = () => {
     const items = okRows.map(r => ({ date: r.date, vendor: r.vendor, contract: r.contract, kind: r.kind, category: r.category, amount: r.amount, memo: r.memo }))
     const res = await api.commitImport(items, importAccountId)
     setBusy(false)
-    if (!res.ok) return toast.push(res.error || "등록 실패")
+    if (!res.ok) return toast.push(res.error || "등록 실패", { tone: 'warn' })
     setResult(res)
     toast.push(`${res.inserted}건이 등록됐어요`)
   }
@@ -913,7 +913,7 @@ export const ExcelScreen = () => {
       const blob = await res.blob()
       const url = URL.createObjectURL(blob); const a = document.createElement('a')
       a.href = url; a.download = '거래내역_업로드_양식.xlsx'; a.click(); URL.revokeObjectURL(url)
-    } catch { toast.push('양식 다운로드에 실패했어요') }
+    } catch { toast.push('양식 다운로드에 실패했어요', { tone: 'warn' }) }
   }
 
   return (

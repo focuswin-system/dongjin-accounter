@@ -275,6 +275,16 @@ router.delete('/:id/pay/:txnId', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
+    /* 마감된 달의 지출 거래는 지울 수 없다.
+     * 거래내역 화면(routes/transactions.js DELETE)은 같은 삭제를 마감으로 막는데
+     * 여기만 뚫려 있어서, 마감·신고를 끝낸 달의 급여 지출이 사후에 사라지고
+     * 계좌 잔액과 그 달 손익이 바뀌었다. */
+    const [[txn]] = await conn.execute(
+      'SELECT date FROM transactions WHERE id = ? AND payroll_id = ?', [req.params.txnId, req.params.id])
+    if (txn) {
+      const ce = await closedPeriodError(conn, txn.date)
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
+    }
     await conn.execute('DELETE FROM transactions WHERE id = ? AND payroll_id = ?', [req.params.txnId, req.params.id])
     const [[p]] = await conn.execute('SELECT * FROM payroll WHERE id = ?', [req.params.id])
     if (p) {

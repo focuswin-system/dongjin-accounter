@@ -43,6 +43,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   const [kind, setKind] = useState(initialKind);
   const [form, setForm] = useState(initialFormFor(initialKind, initialContract, "", initialCostContract));
   const [showMore, setShowMore] = useState(false);
+  // Ctrl+Enter 단축키까지 있어 두 번 눌리기 쉽다 — 같은 거래가 2건 등록되는 걸 막는다
+  const [busy, setBusy] = useState(false);
   const [supplyMode, setSupplyMode] = useState(false);
   const taxable = form.taxType === "과세";
   const [taxWarningDismissed, setTaxWarningDismissed] = useState(false);
@@ -167,6 +169,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   }, [open, form, kind]);
 
   const handleSave = async () => {
+    if (busy) return;
     if (!form.vendor)   { toast.push("거래처를 선택해주세요"); return; }
     if (!form.contract) { toast.push("계약/공통을 선택해주세요"); return; }
     if (!form.category) { toast.push(kind === "income" ? "수금 유형을 선택해주세요" : "비목을 선택해주세요"); return; }
@@ -217,9 +220,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       evid_url:     form.evid_url  || "",
     }
 
+    setBusy(true);
     const res = editTxn
       ? await api.updateTransaction(editTxn.id, txnData)
       : await api.addTransaction(txnData)
+    setBusy(false);
 
     if (res.ok) {
       // 폼에서 올린 증빙(여러 개)을 거래에 연결
@@ -232,7 +237,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       toast.push(editTxn ? "수정됐어요" : (kind === "income" ? "입금 내역이 등록됐어요" : "지출 내역이 등록됐어요"))
     } else {
       // 마감된 달·계좌 누락 등 서버가 알려준 사유를 그대로 보여준다(막연한 '실패' 대신)
-      toast.push(res.error || "저장에 실패했어요. 다시 시도해주세요.")
+      toast.push(res.error || "저장에 실패했어요. 다시 시도해주세요.", { tone: 'warn' })
     }
   };
 
@@ -269,7 +274,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                     setForm(f => ({ ...f, vendor: q }))
                     toast.push(`"${q}" 거래처가 등록됐어요`)
                   } else {
-                    toast.push("거래처 등록에 실패했어요")
+                    toast.push("거래처 등록에 실패했어요", { tone: 'warn' })
                   }
                 }}
                 addNewLabel="거래처로 추가"/>
@@ -597,7 +602,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
           <button className="btn" onClick={onClose}>취소</button>
           <div className="ml-auto row gap-8" style={{ alignItems: "center" }}>
             <span className="text-xs text-muted2"><span className="kbd">⌘</span> <span className="kbd">↵</span> 저장</span>
-            <button className="btn primary" onClick={handleSave}><Icon.Check size={14}/> {editTxn ? "수정" : "등록"}</button>
+            <button className="btn primary" onClick={handleSave} disabled={busy}><Icon.Check size={14}/> {busy ? "저장 중…" : (editTxn ? "수정" : "등록")}</button>
           </div>
         </div>
     </Drawer>

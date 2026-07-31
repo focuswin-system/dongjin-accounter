@@ -287,15 +287,15 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
             const attach = async (file, docType) => {
               if (!file) return;
               const up = await api.uploadFile(file);
-              if (!up?.url) { toast.push("업로드에 실패했어요"); return; }
+              if (!up?.url) { toast.push("업로드에 실패했어요", { tone: 'warn' }); return; }
               const res = await api.addTransactionDoc(txn.id, { url: up.url, name: up.originalName || file.name, doc_type: docType || '기타', size: up.size || 0 });
               if (res.ok) { setDocs(prev => [...prev, { id: res.id, url: up.url, name: up.originalName || file.name, type: docType || '기타', size: up.size || 0 }]); toast.push("증빙이 첨부됐어요"); onAction?.(); }
-              else toast.push("첨부에 실패했어요");
+              else toast.push("첨부에 실패했어요", { tone: 'warn' });
             };
             const remove = async (d) => {
               const res = d.id ? await api.deleteTransactionDoc(d.id) : await api.updateTransactionEvidence(txn.id, { evid_url: '', evid_type: '' });
               if (res.ok) { setDocs(prev => prev.filter(x => x !== d)); toast.push("삭제됐어요"); onAction?.(); }
-              else toast.push("삭제에 실패했어요");
+              else toast.push("삭제에 실패했어요", { tone: 'warn' });
             };
             return (
             <div className="col gap-10">

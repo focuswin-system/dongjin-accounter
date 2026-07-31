@@ -385,13 +385,13 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
               onAdd={async (d) => {
                 const res = await api.addInvoiceDoc(invoice.id, { url: d.url, name: d.name, doc_type: '기타', size: d.size || 0 })
                 if (res.ok) setDocs(prev => [...prev, { id: res.id, url: d.url, name: d.name, type: '기타', size: d.size || 0 }])
-                else toast.push("첨부에 실패했어요")
+                else toast.push("첨부에 실패했어요", { tone: 'warn' })
               }}
               onRemove={async (d) => {
                 if (!d.id) { setDocs(prev => prev.filter(x => x !== d)); return }
                 const res = await api.deleteInvoiceDoc(d.id)
                 if (res.ok) setDocs(prev => prev.filter(x => x.id !== d.id))
-                else toast.push("삭제에 실패했어요")
+                else toast.push("삭제에 실패했어요", { tone: 'warn' })
               }}
               label="세금계산서·납품확인서 등을 끌어다 놓거나 클릭 (여러 개 가능)"/>
           )}
@@ -411,7 +411,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, toas
                 <button className="btn primary" style={{ marginLeft: "auto" }}
                   onClick={async () => {
                     const res = await api.createResolutionFromInvoice(invoice.id);
-                    if (!res.ok) return toast.push(res.error || "결의서 생성에 실패했어요");
+                    if (!res.ok) return toast.push(res.error || "결의서 생성에 실패했어요", { tone: 'warn' });
                     toast.push(res.resolution.reused ? "이미 만든 결의서를 엽니다" : `지급결의서 ${res.resolution.doc_no}를 만들었어요`);
                     onClose();
                     window.location.hash = "doc";
@@ -794,7 +794,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     })
     if (!ok) return
     const res = await issuePending(p, false)
-    if (!res.ok) { toast.push(res.error || "처리에 실패했어요"); return }
+    if (!res.ok) { toast.push(res.error || "처리에 실패했어요", { tone: 'warn' }); return }
     toast.push(isIssued ? "청구서를 발행했어요" : "매입 청구서를 등록했어요")
     load()
   }
@@ -817,7 +817,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       toast.push("청구서가 수정됐어요")
     } else {
       const res = await api.addInvoice(payload)
-      if (!res.ok) { toast.push(res.error || "청구서 등록에 실패했어요"); return }
+      if (!res.ok) { toast.push(res.error || "청구서 등록에 실패했어요", { tone: 'warn' }); return }
       invoiceId = res.id
       toast.push("청구서가 등록됐어요")
     }

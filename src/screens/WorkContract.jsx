@@ -323,7 +323,7 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
       await api.updateEmployee(form.employee_id, { name: form.name, department: form.department, role: form.role, birth_date: form.birth_date || null, salary_account: form.salary_account || '' })
     }
     if (res.ok) { toast.push(editing ? '계약을 저장했어요' : '직원·계약을 등록했어요'); onSaved() }
-    else toast.push(res.error || '저장에 실패했어요')
+    else toast.push(res.error || '저장에 실패했어요', { tone: 'warn' })
   }
 
   const chip = (val, cur, on, label) => (
@@ -511,7 +511,7 @@ const LaborPayItemsTab = ({ contract, onSaved }) => {
   const save = async () => {
     // 계약 전체를 펼치고 pay_items만 덮어쓴다 — 필드를 일부만 재구성하면 work_hours·conv_alert_months·memo가 유실된다.
     const res = await api.saveWorkContract({ ...contract, id: contract.id, employee_id: contract.employee_id, pay_items: items })
-    if (res.ok) { toast.push('급여 기준을 저장했어요'); onSaved?.() } else toast.push('저장에 실패했어요')
+    if (res.ok) { toast.push('급여 기준을 저장했어요'); onSaved?.() } else toast.push('저장에 실패했어요', { tone: 'warn' })
   }
   return (
     <div>
@@ -540,7 +540,7 @@ const WorkContractMemoTab = ({ contract, onSaved }) => {
   const [memo, setMemo] = useState(contract.memo || '')
   const save = async () => {
     const res = await api.saveWorkContract({ ...contract, id: contract.id, employee_id: contract.employee_id, pay_items: contract.pay_items, items: contract.items, memo })
-    if (res.ok) { toast.push('메모를 저장했어요'); onSaved?.() } else toast.push('저장에 실패했어요')
+    if (res.ok) { toast.push('메모를 저장했어요'); onSaved?.() } else toast.push('저장에 실패했어요', { tone: 'warn' })
   }
   return (
     <div>
@@ -656,7 +656,7 @@ const OutsourcingDrawer = ({ info, onClose, onSaved }) => {
     const res = await api.saveWorkContract(body)
     if (res.ok && editing && form.employee_id) await api.updateEmployee(form.employee_id, { name: form.name, status: '재직', person_kind: 'worker' })
     if (res.ok) { toast.push(editing ? '계약을 저장했어요' : '인력·계약을 등록했어요'); onSaved() }
-    else toast.push(res.error || '저장에 실패했어요')
+    else toast.push(res.error || '저장에 실패했어요', { tone: 'warn' })
   }
 
   return (
@@ -726,7 +726,7 @@ const OutsourcingDetailDrawer = ({ id, onClose, onChanged, onEdit }) => {
 
   const dup = async () => {
     const res = await api.duplicateWorkContract(c.id, {})
-    if (res.ok) { toast.push('계약을 복제했어요'); onChanged?.() } else toast.push('복제에 실패했어요')
+    if (res.ok) { toast.push('계약을 복제했어요'); onChanged?.() } else toast.push('복제에 실패했어요', { tone: 'warn' })
   }
 
   return (
@@ -811,6 +811,7 @@ const ServicePayDrawer = ({ contract, onClose, onSaved }) => {
   const [lines, setLines] = useState((contract.items || []).map(it => ({ name: it.name, unit: it.unit, unit_price: Number(it.unit_price), qty: 0 })))
   const [deductions, setDeductions] = useState([{ label: '원천징수 소득세', value: 0 }, { label: '지방소득세', value: 0 }])
   const [payNow, setPayNow] = useState(true)
+  const [busy, setBusy] = useState(false)
   const [date, setDate] = useState(today)
   const [accounts, setAccounts] = useState([])
   const [accountId, setAccountId] = useState('')
@@ -824,20 +825,26 @@ const ServicePayDrawer = ({ contract, onClose, onSaved }) => {
   const updLine = (i, patch) => setLines(lines.map((l, idx) => idx === i ? { ...l, ...patch } : l))
   const updDed = (i, patch) => setDeductions(deductions.map((d, idx) => idx === i ? { ...d, ...patch } : d))
 
+  /* 왕복 중 두 번 누르면 회차(seq = MAX+1)가 하나 더 생기고 지출 거래도 두 건 만들어진다.
+   * 유니크 충돌도 안 나므로 서버가 못 막는다 — 화면에서 잠가야 한다. */
   const submit = async () => {
+    if (busy) return
     const usable = lines.filter(l => (Number(l.qty) || 0) > 0)
-    if (usable.length === 0) return toast.push('수량을 입력한 항목이 없어요')
-    if (payNow && date > today) return toast.push('미래 날짜로는 지급할 수 없어요')
+    if (usable.length === 0) return toast.push('수량을 입력한 항목이 없어요', { tone: 'warn' })
+    if (payNow && date > today) return toast.push('미래 날짜로는 지급할 수 없어요', { tone: 'warn' })
     // 계좌가 비면 그 지출이 계좌 잔액에서 빠지지 않는다(서버도 400으로 막는다)
-    if (payNow && !accountId) return toast.push('출금 계좌를 선택해주세요')
-    const res = await api.payWorkContract(contract.id, {
-      month: date.slice(0, 7), pay_date: date,
-      lines: usable.map(l => ({ name: l.name, unit: l.unit, qty: l.qty, unit_price: l.unit_price })),
-      deductions: deductions.filter(d => d.label && asNum(d.value) > 0),
-      paid: payNow, date, account_id: accountId || null,
-    })
-    if (res.ok) { toast.push(payNow ? '지급을 등록했어요' : '지급 명세를 저장했어요'); onSaved() }
-    else toast.push(res.error || '등록에 실패했어요')
+    if (payNow && !accountId) return toast.push('출금 계좌를 선택해주세요', { tone: 'warn' })
+    setBusy(true)
+    try {
+      const res = await api.payWorkContract(contract.id, {
+        month: date.slice(0, 7), pay_date: date,
+        lines: usable.map(l => ({ name: l.name, unit: l.unit, qty: l.qty, unit_price: l.unit_price })),
+        deductions: deductions.filter(d => d.label && asNum(d.value) > 0),
+        paid: payNow, date, account_id: accountId || null,
+      })
+      if (res.ok) { toast.push(payNow ? '지급을 등록했어요' : '지급 명세를 저장했어요'); onSaved() }
+      else toast.push(res.error || '등록에 실패했어요', { tone: 'warn' })
+    } finally { setBusy(false) }
   }
 
   return (
@@ -901,7 +908,7 @@ const ServicePayDrawer = ({ contract, onClose, onSaved }) => {
       <div className="drawer-foot">
         <div className="ml-auto row gap-8">
           <button className="btn" onClick={onClose}>취소</button>
-          <button className="btn primary" onClick={submit}><Icon.Check size={14}/> {payNow ? '지급 등록' : '명세 저장'}</button>
+          <button className="btn primary" onClick={submit} disabled={busy}><Icon.Check size={14}/> {busy ? '처리 중…' : (payNow ? '지급 등록' : '명세 저장')}</button>
         </div>
       </div>
     </Drawer>

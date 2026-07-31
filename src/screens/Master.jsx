@@ -168,7 +168,7 @@ const HrCodePanel = ({ type, label, embedded = false }) => {
     if (items.some(i => i.name === name)) return toast.push("이미 있는 항목이에요")
     const res = await api.addHrCode(type, name)
     if (res.ok) { setNewName(""); load(); toast.push(`"${name}" 등록됐어요`) }
-    else toast.push("저장 실패")
+    else toast.push("저장 실패", { tone: 'warn' })
   }
 
   const handleDelete = async (item) => {
@@ -399,7 +399,7 @@ export const RefMasterPanel = ({ cfg, page = false, embedded = false }) => {
     const res = await api.uploadFile(file)
     setUploading(false)
     if (res.url) setForm(p => ({ ...p, file_url: res.url, file_name: res.originalName || file.name }))
-    else toast.push('파일 업로드에 실패했어요')
+    else toast.push('파일 업로드에 실패했어요', { tone: 'warn' })
   }
   const handleSave = async () => {
     const reqField = cfg.fields.find(fd => fd.req)
@@ -412,7 +412,7 @@ export const RefMasterPanel = ({ cfg, page = false, embedded = false }) => {
         return toast.push(`이미 쓰고 있는 ${codeField.label}예요: ${code}`)
     }
     const res = editing ? await api.updateRefItem(editing.id, form) : await api.addRefItem({ type: cfg.type, ...form })
-    if (!res.ok) return toast.push(res.error || '저장 실패')
+    if (!res.ok) return toast.push(res.error || '저장 실패', { tone: 'warn' })
     toast.push(editing ? '수정됐어요' : '등록됐어요')
     setDrawerOpen(false); load()
   }
@@ -858,7 +858,7 @@ const VendorPanel = ({ embedded = false }) => {
     const res = editing
       ? await api.updateVendor(editing.id, form)
       : await api.addVendor(form)
-    if (!res.ok) return toast.push(res.error || '저장 실패')
+    if (!res.ok) return toast.push(res.error || '저장 실패', { tone: 'warn' })
     toast.push(editing ? '수정됐어요' : '거래처가 등록됐어요')
     setDrawerOpen(false)
     load()
@@ -1186,7 +1186,7 @@ const CategoryPanel = ({ embedded = false }) => {
     const res = editing
       ? await api.updateCategory(editing.id, { name: form.name, group_name: editing.group_name || '', vat: form.vat, pay_method: form.pay_method, vat_deductible: vatDeductible })
       : await api.addCategory({ kind: form.kind, name: form.name, vat: form.vat, pay_method: form.pay_method, vat_deductible: vatDeductible })
-    if (!res.ok) return toast.push(res.error || "저장 실패")
+    if (!res.ok) return toast.push(res.error || "저장 실패", { tone: 'warn' })
     toast.push(editing ? "수정됐어요" : "등록됐어요")
     setDrawerOpen(false)
     load()
@@ -1367,7 +1367,7 @@ const CompanyPanel = ({ embedded = false }) => {
   const handleSave = async () => {
     if (!form.name) return toast.push('상호(법인명)를 입력하세요')
     const res = await api.saveCompany(form)
-    if (!res.ok) return toast.push(res.error || '저장 실패')
+    if (!res.ok) return toast.push(res.error || '저장 실패', { tone: 'warn' })
     toast.push('회사 정보가 저장됐어요')
   }
 
@@ -1496,7 +1496,7 @@ const AccountPanel = ({ embedded = false }) => {
       initial_balance: form.kind === 'bank' ? (parseInt(String(form.initial_balance).replace(/[^0-9-]/g, '')) || 0) : 0,
     }
     const res = editing ? await api.updateAccount(editing.id, payload) : await api.addAccount(payload)
-    if (!res.ok) return toast.push(res.error || '저장 실패')
+    if (!res.ok) return toast.push(res.error || '저장 실패', { tone: 'warn' })
     toast.push(editing ? '수정됐어요' : '등록됐어요')
     setDrawerOpen(false)
     load()
@@ -1792,7 +1792,7 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
             onAddNew={async (q) => {
               const nm = (q || '').trim(); if (!nm) return
               const res = await api.addVendor({ name: nm, gubu: addGubu })
-              if (!res.ok) return toast.push("거래처 등록에 실패했어요")
+              if (!res.ok) return toast.push("거래처 등록에 실패했어요", { tone: 'warn' })
               // 목록을 다시 받아 방금 만든 거래처를 id로 잡는다(Combobox 값이 이름이 아니라 id라서)
               const fresh = reloadVendors ? await reloadVendors() : []
               const hit = fresh.find(v => v.name === nm)
@@ -2130,7 +2130,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
             onAddNew={async (q) => {
               const nm = (q || '').trim(); if (!nm) return
               const res = await api.addVendor({ name: nm, gubu: 'B' })   // 정기청구 상대는 발주처(B)
-              if (!res.ok) return toast.push("고객사 등록에 실패했어요")
+              if (!res.ok) return toast.push("고객사 등록에 실패했어요", { tone: 'warn' })
               const fresh = reloadVendors ? await reloadVendors() : []
               const hit = fresh.find(v => v.name === nm)
               f("vendorId", hit ? hit.id : "")
@@ -2382,7 +2382,7 @@ const ApprovalPanel = ({ embedded = false }) => {
     if (steps.length === 0) return toast.push('결재 단계를 하나 이상 넣어주세요');
     const body = { name: editing.name.trim(), steps, is_default: editing.is_default };
     const res = editing.id ? await api.updateApprovalPreset(editing.id, body) : await api.addApprovalPreset(body);
-    if (!res.ok) return toast.push(res.error || '저장에 실패했어요');
+    if (!res.ok) return toast.push(res.error || '저장에 실패했어요', { tone: 'warn' });
     toast.push('저장했어요'); setEditing(null); load();
   };
   const remove = async (p) => {
@@ -2485,7 +2485,7 @@ const UserPanel = ({ currentUser, embedded = false }) => {
   const saveRoles = async () => {
     if (!roleTarget) return;
     const res = await api.setUserRoles(roleTarget.id, pickedRoles);
-    if (!res.ok) return toast.push(res.error || "역할 변경에 실패했어요");
+    if (!res.ok) return toast.push(res.error || "역할 변경에 실패했어요", { tone: 'warn' });
     toast.push(`${roleTarget.name || roleTarget.username} 역할을 변경했어요`);
     setRoleTarget(null); load();
   };
@@ -2496,7 +2496,7 @@ const UserPanel = ({ currentUser, embedded = false }) => {
     if (form.password.length < 4) return toast.push("비밀번호는 4자 이상으로 해주세요");
     const res = await api.addUser({ username, password: form.password, name: form.name.trim(), role: form.role });
     if (res.ok) { toast.push("계정이 추가됐어요"); setForm({ username: "", name: "", password: "", role: "user" }); load(); }
-    else toast.push(res.error || "추가에 실패했어요 (아이디 중복일 수 있어요)");
+    else toast.push(res.error || "추가에 실패했어요 (아이디 중복일 수 있어요)", { tone: 'warn' });
   };
 
   const openPw = (u) => { setPwTarget(u); setNewPw(""); };
@@ -2505,7 +2505,7 @@ const UserPanel = ({ currentUser, embedded = false }) => {
     if (newPw.length < 4) return toast.push("비밀번호는 4자 이상으로 해주세요");
     const res = await api.updateUserPassword(pwTarget.id, newPw);
     if (res.ok) { toast.push(`${pwTarget.name || pwTarget.username} 비밀번호를 변경했어요`); setPwTarget(null); setNewPw(""); }
-    else toast.push(res.error || "변경에 실패했어요");
+    else toast.push(res.error || "변경에 실패했어요", { tone: 'warn' });
   };
 
   const toggleActive = async (u) => {
@@ -2517,7 +2517,7 @@ const UserPanel = ({ currentUser, embedded = false }) => {
     }
     const res = await api.setUserActive(u.id, next);
     if (res.ok) { toast.push(next ? "활성화됐어요" : "비활성화됐어요"); load(); }
-    else toast.push("변경에 실패했어요");
+    else toast.push("변경에 실패했어요", { tone: 'warn' });
   };
 
   const changeRole = async (u) => {
@@ -2535,7 +2535,7 @@ const UserPanel = ({ currentUser, embedded = false }) => {
     if (!ok) return;
     const res = await api.setUserRole(u.id, next);
     if (res.ok) { toast.push("권한을 변경했어요"); load(); }
-    else toast.push(res.error || "변경에 실패했어요");
+    else toast.push(res.error || "변경에 실패했어요", { tone: 'warn' });
   };
 
   const pwDrawer = (
@@ -2717,7 +2717,7 @@ const ClosingPanel = ({ embedded = false }) => {
 
   const close = async () => {
     const res = await api.closePeriod(period, memo)
-    if (!res.ok) return toast.push(res.error || '마감에 실패했어요')
+    if (!res.ok) return toast.push(res.error || '마감에 실패했어요', { tone: 'warn' })
     toast.push(`${period} 장부를 마감했어요`); setMemo(''); load()
   }
   const reopen = async (p) => {
@@ -2728,7 +2728,7 @@ const ClosingPanel = ({ embedded = false }) => {
     })
     if (!ok) return
     const res = await api.reopenPeriod(p)
-    if (!res.ok) return toast.push(res.error || '해제에 실패했어요')
+    if (!res.ok) return toast.push(res.error || '해제에 실패했어요', { tone: 'warn' })
     toast.push(`${p} 마감을 해제했어요`); load()
   }
 
@@ -3283,7 +3283,7 @@ const PayrollItemPanel = ({ embedded = false }) => {
     if (!form.label.trim()) return toast.push("항목명을 입력하세요");
     const res = editingId ? await api.updatePayrollItemType(editingId, form) : await api.addPayrollItemType(form);
     if (res.ok) { toast.push(editingId ? "수정됐어요" : "항목이 추가됐어요"); reset(); load(); }
-    else toast.push("저장에 실패했어요");
+    else toast.push("저장에 실패했어요", { tone: 'warn' });
   };
   const edit = (it) => { setEditingId(it.id); setForm({ label: it.label, kind: it.kind, mode: it.mode, default_value: Number(it.default_value) }); };
   const del = async (it) => {
@@ -3410,7 +3410,7 @@ const EmployTypePanel = ({ embedded = false }) => {
     if (!form.label.trim()) return toast.push("고용형태 이름을 입력하세요");
     const res = editingId ? await api.updateEmployType(editingId, form) : await api.addEmployType(form);
     if (res.ok) { toast.push(editingId ? "수정됐어요" : "고용형태가 추가됐어요"); reset(); load(); }
-    else toast.push(res.error || "저장에 실패했어요");
+    else toast.push(res.error || "저장에 실패했어요", { tone: 'warn' });
   };
   const edit = (t) => {
     setEditingId(t.id); setOpen(true);

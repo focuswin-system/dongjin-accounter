@@ -171,6 +171,9 @@ router.post('/:id/issue', async (req, res, next) => {
       acctId = defBank ? defBank.id : null
     }
     const id = randomUUID()
+    /* 마감된 달로는 청구서를 발행할 수 없다. 예전엔 paid 일 때만 검사해서, 마감·신고를 끝낸
+     * 달로 청구서만 새로 꽂을 수 있었다 → 그 분기 부가세 집계가 신고 후에 바뀐다. */
+    { const ce = await closedPeriodError(conn, target); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
     await conn.execute(
       'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, invoice_no, 'issued', r.vendor_id || null, r.contract_id || null, supply, vat, total,
@@ -236,6 +239,11 @@ router.post('/issue-missed', async (req, res, next) => {
         const total  = supply + vat
         const dueAt  = addDays(dueStr, 30)
         const id = randomUUID()
+        /* 마감된 달이 하나라도 섞이면 전체를 거절한다 — 회차 순서를 건너뛸 수 없으므로
+         * 일부만 처리하면 남은 회차를 영영 못 넣는다(대출·적금 일괄과 같은 규칙). */
+        { const ce = await closedPeriodError(conn, dueStr)
+          if (ce) { await rollbackQuietly(conn)
+            return res.status(409).json({ error: `${dueStr} 회차가 마감된 달이라 전체를 처리하지 않았어요. ${ce}` }) } }
         await conn.execute(
           'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
           [id, invoice_no, 'issued', r.vendor_id||null, r.contract_id||null, supply, vat, total, dueStr, dueAt, '입금 예정', r.account_id||null, r.id, `정기청구 자동 생성 · ${r.item||''}`.trim(), invTaxType(r)]

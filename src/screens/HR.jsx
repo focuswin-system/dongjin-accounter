@@ -352,7 +352,7 @@ const PayslipEditorDrawer = ({ row, onClose, onSaved }) => {
   const save = async () => {
     const res = await api.savePayslip({ id: row.id, employee_id: row.employee_id, month: row.month, items, pay_date: payDate || `${row.month}-25`, status: row.status });
     if (res.ok) { toast.push("급여 명세를 저장했어요"); onSaved(); }
-    else toast.push("저장에 실패했어요");
+    else toast.push("저장에 실패했어요", { tone: 'warn' });
   };
 
   // 컴포넌트로 정의해 <ItemList/>로 렌더하면 매 렌더마다 새 타입이 돼 input이 언마운트→포커스 유실.
@@ -453,6 +453,7 @@ const PayDrawer = ({ row, accounts, onClose, onSaved }) => {
   const [date, setDate] = useState("");
   const [accountId, setAccountId] = useState("");
   const [method, setMethod] = useState("계좌이체");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!row) return;
@@ -466,17 +467,23 @@ const PayDrawer = ({ row, accounts, onClose, onSaved }) => {
   if (!row) return null;
   const remain = row.remain;
 
+  // 왕복 중 두 번 누르면 지출 거래가 두 건 생겨 **계좌에서 두 번 빠진다**.
+  // 서버에 멱등키가 없어(회차 개념도 없다) 화면에서 막아야 한다.
   const register = async () => {
-    if (!amount || amount <= 0) return toast.push("지급액을 입력해주세요");
-    if (!accountId) return toast.push("출금 계좌를 선택해주세요");
-    const res = await api.payPayroll(row.id, { amount, date, account_id: accountId, method });
-    if (res.ok) { toast.push("급여 지급을 등록했어요 (거래내역에 반영)"); onSaved(); onClose(); }
-    else toast.push(res.error || "등록에 실패했어요");
+    if (busy) return;
+    if (!amount || amount <= 0) return toast.push("지급액을 입력해주세요", { tone: 'warn' });
+    if (!accountId) return toast.push("출금 계좌를 선택해주세요", { tone: 'warn' });
+    setBusy(true);
+    try {
+      const res = await api.payPayroll(row.id, { amount, date, account_id: accountId, method });
+      if (res.ok) { toast.push("급여 지급을 등록했어요 (거래내역에 반영)"); onSaved(); onClose(); }
+      else toast.push(res.error || "등록에 실패했어요", { tone: 'warn' });
+    } finally { setBusy(false); }
   };
   const removePay = async (txnId) => {
     const res = await api.deletePayrollPayment(row.id, txnId);
     if (res.ok) { toast.push("지급 내역을 취소했어요"); onSaved(); onClose(); }
-    else toast.push("취소에 실패했어요");
+    else toast.push("취소에 실패했어요", { tone: 'warn' });
   };
 
   return (
@@ -544,7 +551,9 @@ const PayDrawer = ({ row, accounts, onClose, onSaved }) => {
 
       <div className="drawer-foot">
         <button className="btn" onClick={onClose}>닫기</button>
-        <button className="btn primary ml-auto" onClick={register}><Icon.Bank size={14}/> 지급 등록</button>
+        <button className="btn primary ml-auto" onClick={register} disabled={busy}>
+          <Icon.Bank size={14}/> {busy ? '처리 중…' : '지급 등록'}
+        </button>
       </div>
     </Drawer>
   );

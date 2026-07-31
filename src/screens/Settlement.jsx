@@ -117,7 +117,7 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
         : (chosen ? chosen.steps.map(s => ({ label: s.label, position: s.position || '', name: '' })) : undefined),
     }
     const res = isNew ? await api.createSettlement(payload) : await api.updateSettlement(doc.id, payload)
-    if (!res.ok) return toast.push(res.error || '저장에 실패했어요')
+    if (!res.ok) return toast.push(res.error || '저장에 실패했어요', { tone: 'warn' })
     toast.push(isNew ? `정산내역서 ${res.settlement?.doc_no || ''}를 만들었어요` : '저장됐어요')
     setEdit(false)
     onSaved(isNew ? res.settlement?.id : doc.id)
@@ -127,7 +127,7 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
     const ok = await confirm({ tone: 'neg', icon: <Icon.Warn size={22}/>, title: `${doc.doc_no} 삭제`, body: '이 정산내역서를 삭제할까요? 복구할 수 없어요.', confirmLabel: '삭제' })
     if (!ok) return
     const res = await api.deleteSettlement(doc.id)
-    if (!res.ok) return toast.push(res.error || '삭제에 실패했어요')
+    if (!res.ok) return toast.push(res.error || '삭제에 실패했어요', { tone: 'warn' })
     toast.push('삭제됐어요'); onDeleted()
   }
 
