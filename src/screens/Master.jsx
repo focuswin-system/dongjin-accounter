@@ -2473,9 +2473,22 @@ const UserPanel = ({ currentUser, embedded = false }) => {
   const [form, setForm] = useState({ username: "", name: "", password: "", role: "user" });
   const [pwTarget, setPwTarget] = useState(null);
   const [newPw, setNewPw] = useState("");
+  // 역할 = 권한 묶음(마스터·경리·조회전용). users.role(admin/user)은 '계정 관리 권한'이라 별개다.
+  const [roles, setRoles] = useState([]);
+  const [roleTarget, setRoleTarget] = useState(null);   // 역할 배정 중인 사용자
+  const [pickedRoles, setPickedRoles] = useState([]);
 
   const load = () => api.getUsers().then(setUsers);
-  useEffect(() => { load() }, []);
+  useEffect(() => { load(); if (isAdmin) api.getRoles().then(setRoles) }, [isAdmin]);
+
+  const openRoles = (u) => { setRoleTarget(u); setPickedRoles(u.roleIds || []); };
+  const saveRoles = async () => {
+    if (!roleTarget) return;
+    const res = await api.setUserRoles(roleTarget.id, pickedRoles);
+    if (!res.ok) return toast.push(res.error || "역할 변경에 실패했어요");
+    toast.push(`${roleTarget.name || roleTarget.username} 역할을 변경했어요`);
+    setRoleTarget(null); load();
+  };
 
   const add = async () => {
     const username = form.username.trim();
@@ -2542,6 +2555,47 @@ const UserPanel = ({ currentUser, embedded = false }) => {
     </Drawer>
   );
 
+  const roleDrawer = (
+    <Drawer open={!!roleTarget} onClose={() => setRoleTarget(null)}>
+      <DrawerHead title="역할 배정" sub={roleTarget?.name || roleTarget?.username} onClose={() => setRoleTarget(null)}/>
+      <div className="drawer-body col gap-form">
+        <div className="text-sm text-muted" style={{ lineHeight: 1.6 }}>
+          역할은 이 사람이 <b>볼 수 있는 화면과 할 수 있는 일</b>을 정해요. 여러 개를 함께 줄 수 있고,
+          그 경우 권한은 합쳐집니다.
+        </div>
+        <div className="col gap-8">
+          {roles.length === 0 && <div className="text-sm text-muted2">역할이 없어요.</div>}
+          {roles.map(r => {
+            const on = pickedRoles.includes(r.id);
+            return (
+              <button key={r.id} type="button" className="card" style={{
+                  padding: "12px 14px", textAlign: "left", cursor: "pointer",
+                  borderColor: on ? "var(--brand)" : undefined,
+                  background: on ? "var(--brand-weak, var(--surface-2))" : undefined,
+                }}
+                onClick={() => setPickedRoles(p => on ? p.filter(x => x !== r.id) : [...p, r.id])}>
+                <div className="row" style={{ alignItems: "center", gap: 8 }}>
+                  <span className="fw-700">{r.name}</span>
+                  {!!r.is_system && <span className="badge outline text-xs">기본</span>}
+                  {on && <Icon.Check size={16} style={{ marginLeft: "auto", color: "var(--brand)" }}/>}
+                </div>
+                <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
+                  권한 {r.perm_count}개 · 사용 중 {r.user_count}명
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {pickedRoles.length === 0 && (
+          <div className="text-xs" style={{ color: "var(--warn, var(--muted-2))", lineHeight: 1.6 }}>
+            역할을 하나도 주지 않으면 <b>제한 없이 모든 화면</b>을 볼 수 있어요. 제한하려면 하나 이상 골라주세요.
+          </div>
+        )}
+      </div>
+      <DrawerFooter onCancel={() => setRoleTarget(null)} onSave={saveRoles} saveLabel="저장"/>
+    </Drawer>
+  );
+
   // 일반 사용자 — 본인 비밀번호만 변경 가능
   if (!isAdmin) {
     return (
@@ -2598,17 +2652,28 @@ const UserPanel = ({ currentUser, embedded = false }) => {
         {/* 계정 목록 */}
         <div className="card" style={{ overflow: "hidden" }}>
           <table className="table">
-            <thead><tr><th>이름</th><th>아이디</th><th style={{ width: 100 }}>권한</th><th style={{ width: 90 }}>상태</th><th style={{ width: 280 }}></th></tr></thead>
+            <thead><tr><th>이름</th><th>아이디</th><th style={{ width: 100 }}>계정 권한</th><th style={{ width: 190 }}>역할(화면 권한)</th><th style={{ width: 90 }}>상태</th><th style={{ width: 300 }}></th></tr></thead>
             <tbody>
-              {users.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", padding: 28, color: "var(--muted-2)", fontSize: 13 }}>계정이 없어요. 위에서 추가하세요.</td></tr>}
+              {users.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", padding: 28, color: "var(--muted-2)", fontSize: 13 }}>계정이 없어요. 위에서 추가하세요.</td></tr>}
               {users.map(u => (
                 <tr key={u.id} style={{ opacity: u.active ? 1 : 0.5 }}>
                   <td className="fw-700">{u.name || u.username}{u.id === currentUser?.id && <span className="text-xs text-muted2" style={{ marginLeft: 6 }}>(나)</span>}</td>
                   <td className="text-sm text-muted">{u.username}</td>
                   <td><span className={`badge ${u.role === "admin" ? "ink" : "outline"}`}>{u.role === "admin" ? "관리자" : "일반"}</span></td>
+                  <td>
+                    {(u.roleNames || []).length
+                      ? <div className="row gap-4" style={{ flexWrap: "wrap" }}>
+                          {u.roleNames.map(n => <span key={n} className="badge outline">{n}</span>)}
+                        </div>
+                      /* 역할이 없으면 서버가 제한을 걸지 않는다 — 조용한 전체 허용이라 눈에 띄게 표시한다 */
+                      : <span className="badge warn" title="역할이 없으면 모든 화면을 볼 수 있어요">미지정(전체 허용)</span>}
+                  </td>
                   <td><span className={`badge ${u.active ? "pos" : "outline"}`}>{u.active ? "활성" : "비활성"}</span></td>
                   <td>
                     <div className="row gap-4">
+                      <button className="btn ghost sm" disabled={u.id === currentUser?.id}
+                        style={{ color: u.id === currentUser?.id ? "var(--muted-2)" : undefined }}
+                        onClick={() => openRoles(u)}>역할</button>
                       <button className="btn ghost sm" onClick={() => openPw(u)}>비번 변경</button>
                       <button className="btn ghost sm" disabled={u.id === currentUser?.id}
                         style={{ color: u.id === currentUser?.id ? "var(--muted-2)" : undefined }}
@@ -2623,8 +2688,14 @@ const UserPanel = ({ currentUser, embedded = false }) => {
             </tbody>
           </table>
         </div>
+
+        <div className="text-xs text-muted2" style={{ marginTop: 10, lineHeight: 1.7 }}>
+          · <b>계정 권한</b>(관리자/일반)은 계정을 만들고 관리할 수 있는지를 정해요.<br/>
+          · <b>역할</b>은 어떤 화면을 보고 무엇을 할 수 있는지를 정해요. 역할을 하나도 주지 않으면 제한 없이 전부 볼 수 있어요.
+        </div>
       </div>
       {pwDrawer}
+      {roleDrawer}
     </div>
   );
 };

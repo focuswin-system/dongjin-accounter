@@ -333,6 +333,43 @@ try {
   fail(`SQL 값 검사 실패: ${e.message}`)
 }
 
+// ── [10] 권한 게이트: 마운트된 모든 /api 라우터에 권한 매핑이 있는가 ──
+// 매핑이 없으면 게이트는 그 경로를 **통과시킨다**(화면이 죽는 것보다 나으므로).
+// 그래서 '빠뜨림'은 런타임에 조용히 무권한 통과가 된다 → 배포 전에 여기서 잡는다.
+console.log('\n[10] 권한 게이트 매핑 완전성')
+try {
+  const { API_RESOURCES, ANY_AUTHENTICATED, unknownResources } = require('../platform/apiPerms')
+  const mounted = []
+  const re = /app\.use\(\s*['"](\/api\/[a-z-]+)['"]/g
+  let m
+  while ((m = re.exec(idxSrc))) mounted.push(m[1])
+
+  const mapped = new Set([...Object.keys(API_RESOURCES), ...ANY_AUTHENTICATED])
+  const unmapped = [...new Set(mounted)].filter(p => !mapped.has(p))
+  if (unmapped.length) {
+    fail(`권한 매핑 없는 라우터: ${unmapped.join(', ')}\n` +
+         '      → platform/apiPerms.js API_RESOURCES 에 자원을 등록하거나,\n' +
+         '        화면과 무관한 공용 경로라면 ANY_AUTHENTICATED 에 넣으세요.')
+  }
+  // 반대 방향: 매핑은 있는데 마운트가 사라진 경로(오타·이름 변경) — 죽은 매핑은 착각을 만든다
+  const dead = Object.keys(API_RESOURCES).filter(p => !mounted.includes(p))
+  if (dead.length) fail(`마운트되지 않은 경로에 매핑이 있음(오타?): ${dead.join(', ')}`)
+
+  const bad = unknownResources()
+  if (bad.length) fail(`매핑이 카탈로그에 없는 자원을 가리킴: ${bad.join(', ')}`)
+
+  // 게이트 자체가 등록돼 있는가 — 파일만 있고 안 걸면 강제가 전혀 안 된다
+  if (!/require\(['"]\.\/middleware\/perm['"]\)/.test(idxSrc)) {
+    fail('index.js에 권한 게이트(middleware/perm)가 등록되지 않았다 — 권한이 강제되지 않는다')
+  }
+
+  if (!unmapped.length && !dead.length && !bad.length) {
+    ok(`라우터 ${new Set(mounted).size}개 전부 매핑됨 (자원 검사 통과)`)
+  }
+} catch (e) {
+  fail(`권한 매핑 검사 실패: ${e.message}`)
+}
+
 console.log('\n' + '━'.repeat(64))
 if (failures === 0) {
   console.log(' ✅ 격리 검사 통과')

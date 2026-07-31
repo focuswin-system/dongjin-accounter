@@ -20,6 +20,10 @@ const { setFileCookie, clearFileCookie } = require('../middleware/fileAuth')
 const {
   clientIp, noteFailure, noteSuccess, ipBlockedFor, accountBlockedFor, waitMessage,
 } = require('../lib/loginGuard')
+const { rollbackQuietly } = require('../lib/tx')
+const {
+  loadUserPerms, toClientShape, invalidate: invalidatePerms,
+} = require('../platform/userPerms')
 const { signSession } = require('../lib/session')
 
 const router = Router()
@@ -143,21 +147,105 @@ router.get('/me', authMiddleware, async (req, res, next) => {
       [req.user.id, req.user.companyId]
     )
     if (!rows[0]) return res.status(404).json({ error: 'Not found' })
-    res.json(rows[0])
+    // 화면이 메뉴·버튼을 가릴 수 있게 권한을 함께 내려준다.
+    // 서버도 같은 데이터로 강제하므로(middleware/perm.js) 화면이 뚫려도 API가 막는다 —
+    // 화면 가리기는 편의이고 강제는 서버가 한다.
+    const { roles, perms } = toClientShape(
+      await loadUserPerms(platformPool, { companyId: req.user.companyId, userId: req.user.id }))
+    res.json({ ...rows[0], roles, perms })
   } catch (e) { next(e) }
 })
 
-// ── 사용자 목록 (회사 마스터만, 자사 계정만) ──
+// ── 사용자 목록 (회사 마스터만, 자사 계정만) — 배정된 역할 포함 ──
 router.get('/users', authMiddleware, async (req, res, next) => {
   try {
     if (!isMaster(req)) return res.status(403).json({ error: '권한이 없습니다' })
     const [rows] = await platformPool.execute(
-      `SELECT id, username, name, email, role, active, must_change_pw, created_at
-         FROM users WHERE company_id = ? ORDER BY created_at`,
+      `SELECT u.id, u.username, u.name, u.email, u.role, u.active, u.must_change_pw, u.created_at,
+              GROUP_CONCAT(r.name ORDER BY r.name) AS role_names,
+              GROUP_CONCAT(r.id ORDER BY r.name)   AS role_ids
+         FROM users u
+         LEFT JOIN user_roles ur ON ur.user_id = u.id
+         LEFT JOIN roles r ON r.id = ur.role_id AND r.company_id = u.company_id
+        WHERE u.company_id = ?
+        GROUP BY u.id ORDER BY u.created_at`,
+      [req.user.companyId]
+    )
+    res.json(rows.map(r => ({
+      ...r,
+      roleNames: r.role_names ? r.role_names.split(',') : [],
+      roleIds: r.role_ids ? r.role_ids.split(',') : [],
+    })))
+  } catch (e) { next(e) }
+})
+
+// ── 회사의 역할 목록 (배정 드롭다운용) ──
+router.get('/roles', authMiddleware, async (req, res, next) => {
+  try {
+    const [rows] = await platformPool.execute(
+      `SELECT r.id, r.name, r.is_system,
+              (SELECT COUNT(*) FROM role_perms rp WHERE rp.role_id = r.id) AS perm_count,
+              (SELECT COUNT(*) FROM user_roles ur WHERE ur.role_id = r.id) AS user_count
+         FROM roles r WHERE r.company_id = ? ORDER BY r.is_system DESC, r.name`,
       [req.user.companyId]
     )
     res.json(rows)
   } catch (e) { next(e) }
+})
+
+/**
+ * 역할 배정 (마스터만) — 한 사용자에게 역할 목록을 통째로 지정한다.
+ *
+ * 본인 역할은 바꿀 수 없다. 마스터가 스스로 권한을 빼면 되돌릴 사람이 없어져
+ * 회사 계정이 통째로 잠긴다(임시비번 영구잠금과 같은 종류의 사고).
+ * 마지막 마스터를 다른 사람이 빼는 것도 막는다 — 같은 결과가 되기 때문이다.
+ */
+router.put('/users/:id/roles', authMiddleware, async (req, res, next) => {
+  const conn = await platformPool.getConnection()
+  try {
+    if (!isMaster(req)) { conn.release(); return res.status(403).json({ error: '권한이 없습니다' }) }
+    if (req.user.id === req.params.id) { conn.release(); return res.status(400).json({ error: '본인 역할은 변경할 수 없어요' }) }
+    const roleIds = Array.isArray(req.body.roleIds) ? req.body.roleIds.filter(Boolean) : []
+    await conn.beginTransaction()
+    const [[target]] = await conn.execute(
+      'SELECT id FROM users WHERE id = ? AND company_id = ?', [req.params.id, req.user.companyId])
+    if (!target) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    // 자사 역할만 배정할 수 있다(다른 회사 역할 id를 넣어 권한을 훔치는 것을 막는다)
+    if (roleIds.length) {
+      const ph = roleIds.map(() => '?').join(',')
+      const [ok] = await conn.execute(
+        `SELECT id FROM roles WHERE company_id = ? AND id IN (${ph})`, [req.user.companyId, ...roleIds])
+      if (ok.length !== roleIds.length) {
+        await rollbackQuietly(conn); return res.status(400).json({ error: '알 수 없는 역할이 포함돼 있어요' })
+      }
+    }
+    // 마지막 마스터를 잃지 않는다
+    const [[master]] = await conn.execute(
+      "SELECT id FROM roles WHERE company_id = ? AND name = '마스터'", [req.user.companyId])
+    if (master) {
+      const [[{ cnt }]] = await conn.execute(
+        'SELECT COUNT(*) AS cnt FROM user_roles WHERE role_id = ?', [master.id])
+      const [[had]] = await conn.execute(
+        'SELECT user_id FROM user_roles WHERE role_id = ? AND user_id = ?', [master.id, req.params.id])
+      const losingMaster = had && !roleIds.includes(master.id)
+      if (losingMaster && Number(cnt) <= 1) {
+        await rollbackQuietly(conn)
+        return res.status(409).json({ error: '마지막 마스터의 역할은 뺄 수 없어요. 다른 사람에게 마스터를 먼저 주세요.' })
+      }
+    }
+    await conn.execute('DELETE FROM user_roles WHERE user_id = ?', [req.params.id])
+    for (const rid of roleIds) {
+      await conn.execute('INSERT INTO user_roles (user_id, role_id) VALUES (?,?)', [req.params.id, rid])
+    }
+    await conn.commit()
+    // 권한 캐시를 즉시 버린다 — 안 하면 최대 TTL(30초)만큼 옛 권한으로 동작한다
+    invalidatePerms({ companyId: req.user.companyId, userId: req.params.id })
+    audit({ companyId: req.user.companyId, userId: req.user.id, username: req.user.username,
+            action: 'roles_assign', resource: 'user', targetId: req.params.id,
+            ip: clientIp(req), detail: roleIds.join(',') })
+    res.json({ ok: true })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
 })
 
 // ── 사용자 추가 (회사 마스터만) ──

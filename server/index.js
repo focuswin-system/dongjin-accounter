@@ -58,6 +58,7 @@ app.use('/uploads', require('./routes/files'))
 // (정적 SPA·/uploads 파일은 /api 경로가 아니라 통과.)
 const authMiddleware = require('./middleware/auth')
 const tenantMiddleware = require('./middleware/tenant')
+const permGate = require('./middleware/perm')
 // 로그아웃은 인증을 요구하지 않는다 — 토큰이 이미 만료된 상태에서도 쿠키는 정리되어야 한다.
 const PUBLIC_API = new Set(['/api/auth/login', '/api/auth/logout', '/api/health'])
 app.use((req, res, next) => {
@@ -67,7 +68,9 @@ app.use((req, res, next) => {
   if (!p.startsWith('/api/') || PUBLIC_API.has(p)) return next()
   // 인증 통과 후 곧바로 테넌트를 확정한다 — JWT의 dbName으로 회사 DB 풀을 req.db에 주입.
   // 이 순서가 보장돼야 라우트가 '어느 회사인지 모르는 상태'로 실행되는 일이 없다.
-  return authMiddleware(req, res, (err) => (err ? next(err) : tenantMiddleware(req, res, next)))
+  // 그 다음 권한 게이트 — 자원×행위 판정을 한 곳에서 한다(platform/apiPerms.js).
+  return authMiddleware(req, res, (err) => (err ? next(err)
+    : tenantMiddleware(req, res, (err2) => (err2 ? next(err2) : permGate(req, res, next)))))
 })
 
 app.use('/api/auth',               require('./routes/auth'))

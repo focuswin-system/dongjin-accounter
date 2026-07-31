@@ -3,6 +3,7 @@ import logoSymbol from './assets/company/favicon.svg'
 import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider } from './lib/ui'
 import { api, setApiFailureHandler } from './lib/api'
 import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID } from './lib/nav'
+import { PermCtx, usePerms, visibleNav, visiblePortalNode } from './lib/perms'
 import { LoginScreen } from './screens/Login'
 import { HomeScreen } from './screens/Home'
 import { LedgerScreen } from './screens/Ledger'
@@ -235,7 +236,26 @@ function ComingSoon({ title }) {
   );
 }
 
+// 권한 없는 화면에 주소로 직접 들어왔을 때. 서버가 이미 403을 주므로 데이터는 안 나오지만,
+// 빈 화면에 에러 토스트만 뜨면 고장으로 보인다 → 왜 못 보는지 알려준다.
+function NoPermission({ title }) {
+  return (
+    <div className="card card-pad fade-up" style={{ textAlign: "center", padding: "56px 24px", maxWidth: 460, margin: "40px auto" }}>
+      <div style={{ width: 48, height: 48, borderRadius: 14, background: "var(--surface-3)", color: "var(--muted-2)", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
+        <Icon.Warn size={24}/>
+      </div>
+      <div className="fw-700" style={{ fontSize: 16, marginBottom: 8 }}>{title || "이 화면"}을(를) 볼 권한이 없어요</div>
+      <div className="text-sm text-muted" style={{ lineHeight: 1.6 }}>
+        회사 관리자에게 권한을 요청하세요.<br/>환경설정 › 사용자에서 역할을 배정할 수 있어요.
+      </div>
+    </div>
+  );
+}
+
 function AppInner({ onLogout, user }) {
+  // 권한 없는 메뉴는 아예 그리지 않는다. 눌러서 403을 받는 것보다 없는 게 낫다.
+  const { perms, can: canDo } = usePerms();
+  const navTree = useMemo(() => visibleNav(perms), [perms]);
   const [route, setRoute] = useState("home");
   const [contractId, setContractId] = useState("CT-2026-101");
   const [focusInvoiceId, setFocusInvoiceId] = useState(null);   // 홈 할 일 → 청구서 바로 열기
@@ -314,7 +334,13 @@ function AppInner({ onLogout, user }) {
   useEffect(() => {
     let alive = true
     const overdueOf = (list) => (list || []).filter(c => c.state === 'overdue').length
-    Promise.all([api.getPendingRecurring(), api.getPendingRecurringExpenses(), api.getFinanceSummary()])
+    // 권한 없는 화면의 배지는 세지 않는다 — 세려고 부르면 403만 쌓이고 숫자는 어차피 안 나온다
+    const skip = Promise.resolve([])
+    Promise.all([
+      canDo("recurring_invoice") ? api.getPendingRecurring() : skip,
+      canDo("recurring_expense") ? api.getPendingRecurringExpenses() : skip,
+      canDo("finance_loan") ? api.getFinanceSummary() : skip,
+    ])
       .then(([sales, purchase, finance]) => {
         if (!alive) return
         setOverdueCycles({
@@ -325,7 +351,7 @@ function AppInner({ onLogout, user }) {
       })
       .catch(() => {})
     return () => { alive = false }
-  }, [route, txnVersion]);
+  }, [route, txnVersion, perms]);
 
   useEffect(() => {
     const apply = () => {
@@ -424,6 +450,14 @@ function AppInner({ onLogout, user }) {
   };
 
   const Screen = useMemo(() => {
+    // 주소창·북마크·옛 링크로 권한 없는 화면에 들어오는 경우. 메뉴에서 숨겨도 이 길은 열려 있다.
+    // (막지 않아도 서버가 403을 주지만, 이유를 보여주는 편이 낫다)
+    // settings_* 하위 탭은 'settings' 자원 하나가 관장한다(서버 apiPerms와 같은 규칙).
+    const guardId = route.startsWith("settings") ? "settings"
+                  : PORTAL_CAT_BY_ID[route] ? null      // 포털은 내용물이 걸러지므로 통째로 막지 않는다
+                  : LEAF_BY_ID[route] ? route : null;
+    if (guardId && !canDo(guardId)) return <NoPermission title={LEAF_BY_ID[guardId]?.label}/>;
+
     // 미수금/미지급금(구 ledger_ar/ledger_ap)은 청구서 기준 회수 화면으로 이관됨
     if (route === "ledger_ar") return <BillingScreen initialTab="issued"  role="collect" openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
     if (route === "ledger_ap") return <BillingScreen initialTab="received" role="collect" openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
@@ -433,7 +467,11 @@ function AppInner({ onLogout, user }) {
                    : "all";
       return <LedgerScreen initialFilter={filter} refreshTrigger={txnVersion} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
     }
-    if (PORTAL_CAT_BY_ID[route]) return <PortalScreen node={PORTAL_CAT_BY_ID[route]} go={go}/>;
+    if (PORTAL_CAT_BY_ID[route]) {
+      // 포털 타일도 권한대로 걸러 그린다. 남는 게 없으면 들어갈 데가 없다는 뜻.
+      const node = visiblePortalNode(perms, PORTAL_CAT_BY_ID[route]);
+      return node ? <PortalScreen node={node} go={go}/> : <NoPermission title={PORTAL_CAT_BY_ID[route].label}/>;
+    }
     // 기준정보 서브메뉴: 내부 서브내브 없이 해당 탭만 전체폭으로. (일반회계 master_ / 인사급여 hrbase_)
     if (route.startsWith("master_")) return <MasterScreen user={user} section="base" forcedTab={route.slice(7)}/>;
     if (route.startsWith("hrbase_")) return <MasterScreen user={user} section="hr" forcedTab={route.slice(7)}/>;
@@ -491,7 +529,7 @@ function AppInner({ onLogout, user }) {
       case "excel":           return <ExcelScreen/>;
       default:                return <HomeScreen go={go} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
     }
-  }, [route, contractId, txnVersion, focusInvoiceId]);
+  }, [route, contractId, txnVersion, focusInvoiceId, perms]);
 
   const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger"
                 : route.startsWith("billing") ? "billing"
@@ -522,7 +560,7 @@ function AppInner({ onLogout, user }) {
         </div>
 
         <div className="nav-scroll" style={{ flex: 1, overflowY: "auto", minHeight: 0, marginRight: -4, paddingRight: 4 }}>
-          {NAV_TREE.map(node => {
+          {navTree.map(node => {
             if (node.type === "leaf") {
               const Ic = node.icon;
               return (
@@ -582,12 +620,14 @@ function AppInner({ onLogout, user }) {
           })}
         </div>
 
-        <div style={{ paddingTop: 8, marginTop: 8, borderTop: "1px solid var(--line)" }}>
-          <div className={`nav-item${activeId === "settings" ? " active" : ""}`} onClick={() => go("settings")}>
-            <Icon.Cog className="nav-ico" size={18}/>
-            <span>환경설정</span>
+        {canDo("settings") && (
+          <div style={{ paddingTop: 8, marginTop: 8, borderTop: "1px solid var(--line)" }}>
+            <div className={`nav-item${activeId === "settings" ? " active" : ""}`} onClick={() => go("settings")}>
+              <Icon.Cog className="nav-ico" size={18}/>
+              <span>환경설정</span>
+            </div>
           </div>
-        </div>
+        )}
 
         <Popover align="left" width={200} direction="up"
           trigger={
@@ -948,6 +988,7 @@ function FaqPanel({ open, onClose, route, go }) {
 }
 
 const CommandPalette = ({ open, onClose, onPick }) => {
+  const { can: canDo } = usePerms();
   const [q, setQ] = useState("");
   const [idx, setIdx] = useState(0);
   const [index, setIndex] = useState([]);
@@ -956,9 +997,12 @@ const CommandPalette = ({ open, onClose, onPick }) => {
   const listRef = useRef(null);
 
   const ql = q.trim().toLowerCase();
+  // 권한 없는 화면으로 가는 항목은 검색에도 안 뜬다 — 뜨면 눌렀을 때 403만 본다.
+  // (거래처·계약 같은 데이터 항목은 서버가 이미 권한대로 걸러 내려준다)
+  const allowed = index.filter(c => !c.route || canDo(c.route));
   const results = (ql
-    ? index.filter(c => c.label.toLowerCase().includes(ql) || (c.sub || "").toLowerCase().includes(ql) || c.kind.includes(q.trim()))
-    : index
+    ? allowed.filter(c => c.label.toLowerCase().includes(ql) || (c.sub || "").toLowerCase().includes(ql) || c.kind.includes(q.trim()))
+    : allowed
   ).slice(0, 50);
 
   // 열릴 때 실데이터 인덱스 로드(거래처·계약·청구서 + 메뉴)
@@ -1032,6 +1076,18 @@ export default function App() {
   const [user, setUser] = useState(() => {
     try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; }
   });
+  // 권한 — 서버가 진실이다. 토큰에 싣지 않으므로 새로고침·로그인마다 다시 읽는다.
+  // null = 아직 못 읽음 → 그 동안은 제한 없이 보여준다(빈 사이드바가 잠깐 번쩍이는 게 더 나쁘다).
+  // 어차피 서버가 막으므로 이 짧은 구간에 권한 없는 화면을 눌러도 데이터는 안 나온다.
+  const [perms, setPerms] = useState(null);
+  useEffect(() => {
+    if (!loggedIn) { setPerms(null); return; }
+    let alive = true;
+    api.me()
+      .then(me => { if (alive) setPerms(me?.perms || {}); })
+      .catch(() => { /* 실패 시 제한 없음 유지 — 서버 게이트가 최종 판정 */ });
+    return () => { alive = false; };
+  }, [loggedIn]);
 
   const handleLogin = (u) => {
     localStorage.setItem('loggedIn', '1');
@@ -1059,11 +1115,13 @@ export default function App() {
   return (
     <ToastProvider>
       <ConfirmProvider>
-        {!loggedIn
-          ? <LoginScreen onLogin={handleLogin}/>
-          : user?.mustChangePw
-            ? <ForcePasswordChange user={user} onDone={clearMustChange} onLogout={handleLogout}/>
-            : <AppInner onLogout={handleLogout} user={user}/>}
+        <PermCtx.Provider value={perms}>
+          {!loggedIn
+            ? <LoginScreen onLogin={handleLogin}/>
+            : user?.mustChangePw
+              ? <ForcePasswordChange user={user} onDone={clearMustChange} onLogout={handleLogout}/>
+              : <AppInner onLogout={handleLogout} user={user}/>}
+        </PermCtx.Provider>
       </ConfirmProvider>
     </ToastProvider>
   );

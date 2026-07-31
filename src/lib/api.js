@@ -248,6 +248,10 @@ function adaptEmployee(row) {
 }
 
 export const api = {
+  // ─── 내 정보·권한 ─────────────────────────────────────────────
+  // 권한은 토큰이 아니라 매번 서버에서 읽는다. 관리자가 역할을 바꿔도 재로그인 없이 반영된다.
+  async me() { return req('/auth/me') },
+
   // ─── 계좌 ─────────────────────────────────────────────────────
   async getAccounts() {
     try { return (await req('/accounts')).map(adaptAccount) } catch { return [] }
@@ -1181,6 +1185,19 @@ export const api = {
   async setUserRole(id, role) {
     try {
       await req(`/auth/users/${id}/role`, { method: 'PATCH', body: { role } })
+      return { ok: true }
+    } catch(e) { return { ok: false, error: e.message } }
+  },
+
+  // ─── 역할(권한 묶음) ──────────────────────────────────────────
+  async getRoles() {
+    try { return await req('/auth/roles') } catch { return [] }
+  },
+
+  /** 사용자의 역할을 통째로 지정한다(부분 추가·삭제가 아니라 전체 교체) */
+  async setUserRoles(id, roleIds) {
+    try {
+      await req(`/auth/users/${id}/roles`, { method: 'PUT', body: { roleIds } })
       return { ok: true }
     } catch(e) { return { ok: false, error: e.message } }
   },

@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { Icon, Popover, PopItem } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
-import { PORTAL, ALL_LEAVES, LEAF_BY_ID } from '../lib/nav'
+import { LEAF_BY_ID } from '../lib/nav'
+import { usePerms, visiblePortal, visibleLeaves } from '../lib/perms'
 
 const WEEK_KO = ["일", "월", "화", "수", "목", "금", "토"]
 const todayLabel = () => {
@@ -21,6 +22,11 @@ const TODO_KIND_META = {
 const DEFAULT_FAVS = ['income', 'expense', 'billing_issued', 'contract', 'tax_vat']
 
 export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
+  // 홈 타일·즐겨찾기도 사이드바와 같은 규칙으로 가린다.
+  // (홈에는 보이는데 메뉴엔 없으면 사용자는 어디서 들어가는 화면인지 알 수 없다)
+  const { perms, can: canDo } = usePerms()
+  const portal = visiblePortal(perms)
+  const leaves = visibleLeaves(perms)
   const [todos, setTodos] = useState([])
   const [favorites, setFavorites] = useState(() => {
     try { const s = JSON.parse(localStorage.getItem('homeFavorites')); return Array.isArray(s) ? s : DEFAULT_FAVS } catch { return DEFAULT_FAVS }
@@ -30,7 +36,10 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
   useEffect(() => { localStorage.setItem('homeFavorites', JSON.stringify(favorites)) }, [favorites])
 
   // 할 일은 청구서 상태에서 파생된다 — 정산하면 다음 조회에서 자연히 빠지므로 별도 완료표시가 없다
-  const pendingTodos = todos.map(t => ({ ...t, ...TODO_KIND_META[t.kind] }))
+  // 갈 수 없는 화면의 할 일은 보여주지 않는다 — 눌러도 못 가는 항목은 할 일이 아니다
+  const pendingTodos = todos
+    .filter(t => canDo(t.kind === "ap" ? "ap" : "ar"))
+    .map(t => ({ ...t, ...TODO_KIND_META[t.kind] }))
 
   // 예전에는 여기서 모달을 띄우고 '입금이 처리되었어요'를 보여줬지만, 실제로는 아무 거래도
   // 만들지 않는 빈 호출이었다(api.completeTodo 는 {ok:true}만 돌려주는 스텁). 사용자는 돈이
@@ -53,7 +62,7 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
         title={`${user?.displayName || "관리자"}님, 안녕하세요`}
         sub={todayLabel()}
         actions={<>
-          <button className="btn" onClick={() => go("settings")}><Icon.Cog size={15}/> <span className="btn-label-hide">환경설정</span></button>
+          {canDo("settings") && <button className="btn" onClick={() => go("settings")}><Icon.Cog size={15}/> <span className="btn-label-hide">환경설정</span></button>}
           <Popover align="right" width={220}
             trigger={<button className="btn primary"><Icon.Plus/> 거래 등록 <Icon.Down size={12} style={{ marginLeft: 2 }}/></button>}>
             <div style={{ padding: 6 }}>
@@ -108,7 +117,8 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
         <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
           {favorites.map(id => {
             const l = LEAF_BY_ID[id]
-            if (!l) return null
+            // 즐겨찾기는 localStorage에 남아 있다 — 권한을 잃은 화면은 조용히 뺀다
+            if (!l || !canDo(id.startsWith("settings") ? "settings" : id)) return null
             const Ic = l.icon
             return (
               <div key={id} className="fav-chip" onClick={() => go(id)}>
@@ -121,7 +131,7 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
           <Popover align="left" width={260}
             trigger={<button className="fav-chip" style={{ borderStyle: "dashed", color: "var(--muted)" }}><Icon.Plus size={14}/> 추가</button>}>
             <div style={{ maxHeight: 320, overflowY: "auto", padding: 6 }}>
-              {ALL_LEAVES.map(l => {
+              {leaves.map(l => {
                 const active = favorites.includes(l.id)
                 const Ic = l.icon
                 return (
@@ -142,7 +152,7 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
       </div>
 
       {/* 도메인 라인 → 통일된 카테고리 카드(하위메뉴 나열 없이 깔끔하게, 클릭 시 해당 영역으로) */}
-      {PORTAL.map(domain => {
+      {portal.map(domain => {
         const Dic = domain.icon
         return (
           <div key={domain.id} className="domain-line">
@@ -168,7 +178,7 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
       })}
 
       {/* 환경설정 (라인과 별도) */}
-      <div className="domain-line" style={{ marginBottom: 0 }}>
+      {canDo("settings") && <div className="domain-line" style={{ marginBottom: 0 }}>
         <div className="domain-line-head">
           <div className="d-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Cog size={15}/></div>
           <div className="d-label">환경설정</div>
@@ -181,7 +191,7 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
             <div className="c-go">바로가기 <Icon.Right size={11}/></div>
           </button>
         </div>
-      </div>
+      </div>}
     </div>
     </>
   )
