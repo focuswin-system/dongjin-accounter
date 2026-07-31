@@ -1,6 +1,8 @@
-import { useState, useEffect, useMemo, Fragment } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, localToday } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
+import { Kpi, KpiRow } from '../lib/components/Kpi'
+import { DataTable } from '../lib/components/DataTable'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { api } from '../lib/api'
 
@@ -97,27 +99,14 @@ export const SavingsScreen = () => {
           <Icon.Plus size={14}/> 예적금 등록
         </button>}/>
 
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 20 }}>
-        <div className="card card-pad">
-          <div className="text-xs text-muted2">묶인 자금</div>
-          <div className="num fw-700" style={{ fontSize: 20, marginTop: 4 }}>{fmtNum(totalBalance)}원</div>
-          <div className="text-xs text-muted2" style={{ marginTop: 2 }}>진행 중 {active.length}건 · 당장 쓸 수 없어요</div>
-        </div>
-        <div className="card card-pad">
-          <div className="text-xs text-muted2">만기까지 받을 이자</div>
-          <div className="num fw-700" style={{ fontSize: 20, marginTop: 4 }}>{fmtNum(expectedInterest)}원</div>
-          <div className="text-xs text-muted2" style={{ marginTop: 2 }}>세전 · 단리 기준</div>
-        </div>
-        <div className="card card-pad">
-          <div className="text-xs text-muted2">가장 가까운 만기</div>
-          <div className="num fw-700" style={{ fontSize: 20, marginTop: 4 }}>
-            {nextMaturity ? nextMaturity.maturity_date : '—'}
-          </div>
-          <div className="text-xs text-muted2" style={{ marginTop: 2 }}>
-            {nextMaturity ? `${nextMaturity.name} · ${dday(nextMaturity.maturity_date)}` : '진행 중인 상품이 없어요'}
-          </div>
-        </div>
-      </div>
+      <KpiRow cols={3} style={{ marginBottom: 20 }}>
+        <Kpi label="묶인 자금" value={totalBalance} badge={`${active.length}건`}
+          hint="만기까지 당장 쓸 수 없어요"/>
+        <Kpi label="만기까지 받을 이자" value={expectedInterest} tone="pos" hint="세전 · 단리 기준"/>
+        <Kpi label="가장 가까운 만기" value={nextMaturity ? nextMaturity.maturity_date : '—'}
+          badge={nextMaturity ? dday(nextMaturity.maturity_date) : undefined}
+          hint={nextMaturity ? nextMaturity.name : '진행 중인 상품이 없어요'}/>
+      </KpiRow>
 
       {/* 놓친 납입 — 자동이체가 실패했을 수 있으니 맨 위에 세운다 */}
       {overdue.length > 0 && (
@@ -137,92 +126,66 @@ export const SavingsScreen = () => {
               </button>
             ))}
           </div>
-          <table className="table">
-            <tbody>
-              {overdue.map(({ s, cycle }) => (
-                <tr key={`${s.id}-${cycle.seq}`}>
-                  <td className="num text-sm" style={{ width: 170 }}>{cycle.due_date}
-                    <span className={`badge ${ddayTone(cycle.due_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(cycle.due_date)}</span>
-                  </td>
-                  <td className="fw-700">{s.name}</td>
-                  <td className="text-sm text-muted">{cycle.seq}회차</td>
-                  <td className="num-cell num-right fw-700">{fmtNum(cycle.amount)}</td>
-                  <td style={{ width: 120 }}>
-                    <button className="btn sm primary" onClick={() => setPayTarget({ s, cycle })}>납입 처리</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            rowKey={r => `${r.s.id}-${r.cycle.seq}`}
+            rows={overdue}
+            columns={[
+              { key: 'due', header: '납입일', width: 170, render: ({ cycle }) => (
+                <span className="num text-sm">{cycle.due_date}
+                  <span className={`badge ${ddayTone(cycle.due_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(cycle.due_date)}</span>
+                </span>
+              )},
+              { key: 'name', header: '상품', className: 'fw-700', render: ({ s }) => s.name },
+              { key: 'seq', header: '회차', width: 80, className: 'text-sm text-muted', render: ({ cycle }) => `${cycle.seq}회차` },
+              { key: 'amount', header: '금액', width: 130, align: 'right', className: 'num-cell fw-700', render: ({ cycle }) => fmtNum(cycle.amount) },
+              { key: 'act', header: '', width: 120, render: (r) => (
+                <button className="btn sm primary" onClick={() => setPayTarget(r)}>납입 처리</button>
+              )},
+            ]}/>
         </div>
       )}
 
       <div className="card" style={{ overflow: 'hidden' }}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>상품</th>
-              <th style={{ width: 90 }}>구분</th>
-              <th style={{ width: 110 }}>금융기관</th>
-              <th style={{ width: 90 }}>이율</th>
-              <th className="num-right" style={{ width: 130 }}>쌓인 금액</th>
-              <th className="num-right" style={{ width: 130 }}>만기 수령(세전)</th>
-              <th style={{ width: 130 }}>만기일</th>
-              <th style={{ width: 90 }}>상태</th>
-              <th style={{ width: 200 }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && (
-              <tr><td colSpan={9} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)', fontSize: 13 }}>
-                등록된 예금·적금이 없어요. 위에서 추가하세요.
-              </td></tr>
-            )}
-            {rows.map(s => (
-              <Fragment key={s.id}>
-                <tr style={{ opacity: s.status === 'active' ? 1 : 0.55 }}>
-                  <td className="fw-700" style={{ cursor: 'pointer' }} onClick={() => setExpanded(expanded === s.id ? null : s.id)}>
-                    <Icon.Down size={12} style={{ marginRight: 6, transform: expanded === s.id ? 'none' : 'rotate(-90deg)', opacity: 0.5 }}/>
-                    {s.name}
-                  </td>
-                  <td><span className="badge outline">{KIND_LABEL[s.kind]}</span></td>
-                  <td className="text-sm text-muted">{s.bank || '—'}</td>
-                  <td className="num text-sm">{Number(s.annual_rate) ? `연 ${Number(s.annual_rate)}%` : '—'}</td>
-                  <td className="num-cell num-right fw-700">{fmtNum(s.balance)}</td>
-                  <td className="num-cell num-right">{fmtNum(s.maturity?.total || 0)}</td>
-                  <td className="num text-sm">
-                    {s.maturity_date || '—'}
-                    {s.status === 'active' && s.maturity_date && (
-                      <span className={`badge ${ddayTone(s.maturity_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(s.maturity_date)}</span>
-                    )}
-                  </td>
-                  <td><span className={`badge ${s.status === 'active' ? 'pos' : 'outline'}`}>{STATUS_LABEL[s.status]}</span></td>
-                  <td>
-                    <div className="row gap-4">
-                      {s.status === 'active' && s.kind === 'installment' && s.next_payment && (
-                        <button className="btn sm primary" onClick={() => setPayTarget({ s, cycle: s.next_payment })}>납입</button>
-                      )}
-                      {s.status === 'active' && (
-                        <button className="btn ghost sm" onClick={() => setMatureTarget(s)}>만기</button>
-                      )}
-                      {s.status === 'active' && (
-                        <button className="btn ghost sm" onClick={() => { setEditing(s); setFormOpen(true) }}>수정</button>
-                      )}
-                      <button className="btn ghost sm" style={{ color: 'var(--neg)' }} onClick={() => doDelete(s)}>삭제</button>
-                    </div>
-                  </td>
-                </tr>
-                {expanded === s.id && (
-                  <tr>
-                    <td colSpan={9} style={{ background: 'var(--surface-2)', padding: 0 }}>
-                      <SavingsDetail s={s}/>
-                    </td>
-                  </tr>
+        <DataTable
+          rows={rows}
+          empty="등록된 예금·적금이 없어요. 위에서 추가하세요."
+          renderExpanded={s => (expanded === s.id ? <SavingsDetail s={s}/> : null)}
+          columns={[
+            { key: 'name', header: '상품', sortable: true, className: 'fw-700', render: s => (
+              <span style={{ cursor: 'pointer' }} onClick={() => setExpanded(expanded === s.id ? null : s.id)}>
+                <Icon.Down size={12} style={{ marginRight: 6, transform: expanded === s.id ? 'none' : 'rotate(-90deg)', opacity: 0.5 }}/>
+                {s.name}
+              </span>
+            )},
+            { key: 'kind', header: '구분', width: 90, render: s => <span className="badge outline">{KIND_LABEL[s.kind]}</span> },
+            { key: 'bank', header: '금융기관', width: 110, className: 'text-sm text-muted', sortable: true, render: s => s.bank || '—' },
+            { key: 'annual_rate', header: '이율', width: 90, className: 'num text-sm', sortable: true,
+              render: s => (Number(s.annual_rate) ? `연 ${Number(s.annual_rate)}%` : '—') },
+            { key: 'balance', header: '쌓인 금액', width: 130, align: 'right', className: 'num-cell fw-700',
+              sortable: true, sortValue: s => Number(s.balance) || 0, render: s => fmtNum(s.balance) },
+            { key: 'total', header: '만기 수령(세전)', width: 140, align: 'right', className: 'num-cell',
+              sortable: true, sortValue: s => s.maturity?.total || 0, render: s => fmtNum(s.maturity?.total || 0) },
+            { key: 'maturity_date', header: '만기일', width: 140, className: 'num text-sm', sortable: true, render: s => (
+              <>{s.maturity_date || '—'}
+                {s.status === 'active' && s.maturity_date && (
+                  <span className={`badge ${ddayTone(s.maturity_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(s.maturity_date)}</span>
                 )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+              </>
+            )},
+            { key: 'status', header: '상태', width: 90, render: s => (
+              <span className={`badge ${s.status === 'active' ? 'pos' : 'outline'}`}>{STATUS_LABEL[s.status]}</span>
+            )},
+            { key: 'act', header: '', width: 200, render: s => (
+              <div className="row gap-4">
+                {s.status === 'active' && s.kind === 'installment' && s.next_payment && (
+                  <button className="btn sm primary" onClick={() => setPayTarget({ s, cycle: s.next_payment })}>납입</button>
+                )}
+                {s.status === 'active' && <button className="btn ghost sm" onClick={() => setMatureTarget(s)}>만기</button>}
+                {s.status === 'active' && <button className="btn ghost sm" onClick={() => { setEditing(s); setFormOpen(true) }}>수정</button>}
+                <button className="btn ghost sm" style={{ color: 'var(--neg)' }} onClick={() => doDelete(s)}>삭제</button>
+              </div>
+            )},
+          ]}/>
       </div>
 
       <div className="text-xs text-muted2" style={{ marginTop: 14, lineHeight: 1.7 }}>

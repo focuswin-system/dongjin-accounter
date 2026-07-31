@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, Fragment } from 'react'
 import { Icon } from '../ui'
 
 // 표 코어 — 앱 전역 표(약 49개)의 공통 뼈대.
@@ -19,7 +19,10 @@ import { Icon } from '../ui'
 // }]
 // rows: 배열 / onRowClick(row): 행 클릭 / empty: 빈 상태(문자열·노드)
 // footer: <tfoot> 내용(합계 행 등, 옵션) / rowKey(row): key 추출(기본 row.id ?? index)
-export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용이 없어요', footer, rowKey }) => {
+// renderExpanded(row): 펼침 내용. 값을 돌려주는 행만 아래에 전폭 행이 하나 더 붙는다.
+//   (차입금 상환 스케줄·예적금 납입 스케줄처럼 '행 안의 표'가 필요한 화면이 여럿이라 여기 둔다.
+//    화면마다 Fragment로 <tr>을 직접 끼우면 colSpan·배경·구분선을 매번 다시 맞춰야 한다)
+export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용이 없어요', footer, rowKey, renderExpanded }) => {
   const [sort, setSort] = useState(null)   // { key, dir: 'asc' | 'desc' } | null
 
   const sorted = useMemo(() => {
@@ -78,17 +81,27 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
         <tbody>
           {sorted.length === 0 ? (
             <tr><td colSpan={columns.length} className="dt-empty">{empty}</td></tr>
-          ) : sorted.map((row, i) => (
-            <tr key={rowKey ? rowKey(row) : (row.id ?? i)}
-              onClick={onRowClick ? () => onRowClick(row) : undefined}
-              style={onRowClick ? { cursor: 'pointer' } : undefined}>
-              {columns.map((c, ci) => (
-                <td key={c.key ?? ci} className={`${alignClass(c.align)} ${c.className || ''}`.trim()}>
-                  {c.render ? c.render(row, i) : row[c.key]}
-                </td>
-              ))}
-            </tr>
-          ))}
+          ) : sorted.map((row, i) => {
+            const key = rowKey ? rowKey(row) : (row.id ?? i)
+            const expanded = renderExpanded ? renderExpanded(row, i) : null
+            return (
+              <Fragment key={key}>
+                <tr onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  style={onRowClick ? { cursor: 'pointer' } : undefined}>
+                  {columns.map((c, ci) => (
+                    <td key={c.key ?? ci} className={`${alignClass(c.align)} ${c.className || ''}`.trim()}>
+                      {c.render ? c.render(row, i) : row[c.key]}
+                    </td>
+                  ))}
+                </tr>
+                {expanded && (
+                  <tr className="dt-expanded">
+                    <td colSpan={columns.length} style={{ padding: 0, background: 'var(--surface-2)' }}>{expanded}</td>
+                  </tr>
+                )}
+              </Fragment>
+            )
+          })}
         </tbody>
         {footer && <tfoot>{footer}</tfoot>}
       </table>

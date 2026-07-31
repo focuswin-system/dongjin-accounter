@@ -627,6 +627,11 @@ a { color: inherit; text-decoration: none; }
 .gap-form { gap: var(--drawer-gap); } /* 드로어 입력 필드 공통 간격 (--drawer-gap로 일괄 조정) */
 .ml-auto { margin-left: auto; }
 .grid { display: grid; }
+/* 좌우 2단 — 좁아지면 위아래로 접힌다.
+   화면마다 `style={{gridTemplateColumns:'1fr 1fr'}}` 를 인라인으로 적으면 media 규칙을 걸 수 없어
+   태블릿·모바일에서 두 칸이 그대로 눌린 채 남는다(KPI 줄에서 이미 겪은 문제와 같다). */
+.cols-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .cols-2 { grid-template-columns: 1fr; } }
 
 /* ── KPI 지표 줄 (lib/components/Kpi.jsx의 KpiRow) ──
    카드 안 금액은 줄바꿈 없이 한 줄이라, 열이 좁아지면 뒷자리가 잘려 나간다.

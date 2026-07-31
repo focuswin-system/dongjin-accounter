@@ -1,6 +1,8 @@
-import { useState, useEffect, Fragment } from 'react'
+import { useState, useEffect } from 'react'
 import { Icon, fmtNum, localToday } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
+import { Kpi, KpiRow } from '../lib/components/Kpi'
+import { DataTable } from '../lib/components/DataTable'
 import { api } from '../lib/api'
 
 /* 자금일보 — "지금 돈이 어디 얼마 있고, 앞으로 언제 들어오고 나가는가".
@@ -102,55 +104,50 @@ export const CashReportScreen = ({ page = true }) => {
       </div>
 
       {/* 지금 상태 */}
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 20 }}>
-        {[
-          { label: '지금 쓸 수 있는 돈', value: data.available, sub: `통장 ${data.accounts.filter(a => a.kind !== 'card').length}개` },
-          { label: '묶인 돈 (예적금)', value: data.locked, sub: data.lockedItems.length ? `${data.lockedItems.length}건 · 만기까지 못 씀` : '없어요' },
-          { label: '받을 돈 (미수금)', value: data.receivable.total, sub: `${data.receivable.count}건` },
-          { label: '나갈 돈 (미지급금)', value: data.payable.total, sub: `${data.payable.count}건` },
-        ].map(k => (
-          <div key={k.label} className="card card-pad">
-            <div className="text-xs text-muted2">{k.label}</div>
-            <div className="num fw-700" style={{ fontSize: 20, marginTop: 4 }}>{fmtNum(k.value)}원</div>
-            <div className="text-xs text-muted2" style={{ marginTop: 2 }}>{k.sub}</div>
-          </div>
-        ))}
-      </div>
+      <KpiRow cols={4} style={{ marginBottom: 20 }}>
+        <Kpi label="지금 쓸 수 있는 돈" value={data.available}
+          tone={data.available < 0 ? 'neg-ink' : undefined}
+          hint={`통장 ${data.accounts.filter(a => a.kind !== 'card').length}개`}/>
+        <Kpi label="묶인 돈 (예적금)" value={data.locked}
+          badge={data.lockedItems.length ? `${data.lockedItems.length}건` : undefined}
+          hint={data.lockedItems.length ? '만기까지 못 씀' : '없어요'}/>
+        <Kpi label="받을 돈 (미수금)" value={data.receivable.total} tone="pos"
+          badge={`${data.receivable.count}건`}/>
+        <Kpi label="나갈 돈 (미지급금)" value={data.payable.total} tone="neg-ink"
+          badge={`${data.payable.count}건`}/>
+      </KpiRow>
 
-      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+      <div className="cols-2">
         {/* 계좌별 잔액 */}
         <div className="card" style={{ overflow: 'hidden' }}>
           <div className="row" style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
             <span className="fw-700 text-sm">계좌별 잔액</span>
             <span className="num text-sm text-muted ml-auto">{fmtNum(data.available)}원</span>
           </div>
-          <table className="table">
-            <tbody>
-              {data.accounts.filter(a => a.kind !== 'card').map(a => (
-                <tr key={a.id}>
-                  <td className="fw-700 text-sm">{a.name}
-                    <div className="text-xs text-muted2">{[a.bank, a.number].filter(Boolean).join(' ')}</div>
-                  </td>
-                  <td className="text-xs text-muted2" style={{ width: 90 }}>{a.type}</td>
-                  <td className="num-cell num-right fw-700">{fmtNum(a.balance)}</td>
-                </tr>
-              ))}
-              {data.lockedItems.map(s => (
-                <tr key={s.id} style={{ opacity: 0.7 }}>
-                  <td className="text-sm">{s.name}
-                    <div className="text-xs text-muted2">{s.bank} · 만기 {s.maturity_date || '—'}</div>
-                  </td>
-                  <td style={{ width: 90 }}><span className="badge outline" style={{ fontSize: 10 }}>묶임</span></td>
-                  <td className="num-cell num-right text-muted">{fmtNum(s.balance)}</td>
-                </tr>
-              ))}
-              {data.accounts.filter(a => a.kind !== 'card').length === 0 && (
-                <tr><td colSpan={3} style={{ textAlign: 'center', padding: 24, color: 'var(--muted-2)', fontSize: 13 }}>
-                  등록된 계좌가 없어요.
-                </td></tr>
-              )}
-            </tbody>
-          </table>
+          {/* 통장과 묶인 돈(예적금)을 한 표에 — 둘 다 회사 돈이지만 쓸 수 있는지가 다르다 */}
+          <DataTable
+            rows={[
+              ...data.accounts.filter(a => a.kind !== 'card')
+                .map(a => ({ id: a.id, name: a.name, sub: [a.bank, a.number].filter(Boolean).join(' '), tag: a.type, amount: a.balance })),
+              ...data.lockedItems
+                .map(s => ({ id: s.id, name: s.name, sub: `${s.bank || ''} · 만기 ${s.maturity_date || '—'}`, locked: true, amount: s.balance })),
+            ]}
+            empty="등록된 계좌가 없어요."
+            columns={[
+              { key: 'name', header: '계좌', render: r => (
+                <div style={{ opacity: r.locked ? 0.7 : 1 }}>
+                  <div className={r.locked ? 'text-sm' : 'fw-700 text-sm'}>{r.name}</div>
+                  <div className="text-xs text-muted2">{r.sub}</div>
+                </div>
+              )},
+              { key: 'tag', header: '', width: 90, render: r => (r.locked
+                ? <span className="badge outline" style={{ fontSize: 10 }}>묶임</span>
+                : <span className="text-xs text-muted2">{r.tag}</span>) },
+              { key: 'amount', header: '잔액', width: 130, align: 'right',
+                className: 'num-cell', render: r => (
+                  <span className={r.locked ? 'text-muted' : 'fw-700'}>{fmtNum(r.amount)}</span>
+                )},
+            ]}/>
           {data.loanRemaining > 0 && (
             <div className="row" style={{ padding: '10px 16px', borderTop: '1px solid var(--line)', background: 'var(--surface-2)' }}>
               <span className="text-xs text-muted2">갚아야 할 차입금 {data.loanCount}건</span>
@@ -167,46 +164,49 @@ export const CashReportScreen = ({ page = true }) => {
               +{fmtNum(f.totalIn)} / −{fmtNum(f.totalOut)}
             </span>
           </div>
+          {/* 날짜 한 줄 + 그날 항목들 — DataTable 의 펼침 행을 항상 열어 쓴다 */}
           <div style={{ maxHeight: 460, overflowY: 'auto' }}>
-            <table className="table">
-              <tbody>
-                {f.days.length === 0 && (
-                  <tr><td style={{ textAlign: 'center', padding: 24, color: 'var(--muted-2)', fontSize: 13 }}>
-                    이 기간에 예정된 입출금이 없어요.
-                  </td></tr>
-                )}
-                {f.days.map(d => (
-                  <Fragment key={d.date}>
-                    <tr style={{ background: 'var(--surface-2)' }}>
-                      <td className="num text-sm fw-700" colSpan={2}>
-                        {d.date} <span className="text-xs text-muted2" style={{ fontWeight: 400 }}>{dday(d.date, data.date)}</span>
-                      </td>
-                      <td className="num-cell num-right text-sm">
-                        <span style={{ color: d.net >= 0 ? 'var(--pos-ink)' : 'var(--neg-ink)' }}>
-                          {d.net >= 0 ? '+' : ''}{fmtNum(d.net)}
-                        </span>
-                      </td>
-                      <td className="num-cell num-right fw-700" style={{ color: d.balance < 0 ? 'var(--neg-ink)' : undefined }}>
-                        {fmtNum(d.balance)}
-                      </td>
-                    </tr>
-                    {d.items.map((it, i) => (
-                      <tr key={i}>
-                        <td style={{ paddingLeft: 20 }} className="text-sm">
-                          {it.label || '—'}
-                          {it.overdue && <span className="badge neg" style={{ marginLeft: 6, fontSize: 10 }}>기한 지남</span>}
-                        </td>
-                        <td className="text-xs text-muted2" style={{ width: 90 }}>{it.source}</td>
-                        <td className="num-cell num-right text-sm" colSpan={2}
-                          style={{ color: it.kind === 'in' ? 'var(--pos-ink)' : 'var(--neg-ink)' }}>
-                          {it.kind === 'in' ? '+' : '−'}{fmtNum(it.amount)}
-                        </td>
-                      </tr>
-                    ))}
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
+            <DataTable
+              rows={f.days}
+              rowKey={d => d.date}
+              empty="이 기간에 예정된 입출금이 없어요."
+              renderExpanded={d => (
+                <div>
+                  {d.items.map((it, i) => (
+                    <div key={i} className="row" style={{
+                      gap: 8, padding: '8px 14px 8px 24px',
+                      borderTop: i === 0 ? 'none' : '1px solid var(--line)',
+                    }}>
+                      <span className="text-sm" style={{ flex: 1, minWidth: 0 }}>
+                        {it.label || '—'}
+                        {it.overdue && <span className="badge neg" style={{ marginLeft: 6, fontSize: 10 }}>기한 지남</span>}
+                      </span>
+                      <span className="text-xs text-muted2" style={{ flexShrink: 0 }}>{it.source}</span>
+                      <span className="num-cell text-sm" style={{
+                        width: 110, textAlign: 'right', flexShrink: 0,
+                        color: it.kind === 'in' ? 'var(--pos-ink)' : 'var(--neg-ink)',
+                      }}>
+                        {it.kind === 'in' ? '+' : '−'}{fmtNum(it.amount)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              columns={[
+                { key: 'date', header: '날짜', render: d => (
+                  <span className="num text-sm fw-700">{d.date}
+                    <span className="text-xs text-muted2" style={{ fontWeight: 400, marginLeft: 6 }}>{dday(d.date, data.date)}</span>
+                  </span>
+                )},
+                { key: 'net', header: '증감', width: 120, align: 'right', className: 'num-cell text-sm', render: d => (
+                  <span style={{ color: d.net >= 0 ? 'var(--pos-ink)' : 'var(--neg-ink)' }}>
+                    {d.net >= 0 ? '+' : ''}{fmtNum(d.net)}
+                  </span>
+                )},
+                { key: 'balance', header: '잔액', width: 130, align: 'right', className: 'num-cell fw-700', render: d => (
+                  <span style={{ color: d.balance < 0 ? 'var(--neg-ink)' : undefined }}>{fmtNum(d.balance)}</span>
+                )},
+              ]}/>
           </div>
         </div>
       </div>
@@ -267,18 +267,19 @@ export const DailyTrialScreen = () => {
                 계좌나 계정과목이 비어 있는 거래가 {data.unbalanced.length}건 있어요.
                 한쪽 다리가 없으면 합계가 맞을 수 없습니다. 아래 목록의 거래를 고쳐주세요.
               </div>
-              <table className="table" style={{ marginTop: 10 }}>
-                <tbody>
-                  {data.unbalanced.map(u => (
-                    <tr key={u.id}>
-                      <td className="text-sm">{u.category || '(내용 없음)'}</td>
-                      <td className="text-xs text-muted2" style={{ width: 120 }}>{u.account_name || '계좌 없음'}</td>
-                      <td className="text-xs" style={{ width: 130, color: 'var(--neg-ink)' }}>{u.missing} 없음</td>
-                      <td className="num-cell num-right text-sm">{fmtNum(u.amount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div style={{ marginTop: 10 }}>
+                <DataTable
+                  rows={data.unbalanced}
+                  columns={[
+                    { key: 'category', header: '내용', className: 'text-sm', render: u => u.category || '(내용 없음)' },
+                    { key: 'account_name', header: '계좌', width: 130, className: 'text-xs text-muted2',
+                      render: u => u.account_name || '계좌 없음' },
+                    { key: 'missing', header: '빠진 것', width: 140, className: 'text-xs',
+                      render: u => <span style={{ color: 'var(--neg-ink)' }}>{u.missing} 없음</span> },
+                    { key: 'amount', header: '금액', width: 120, align: 'right', className: 'num-cell text-sm',
+                      render: u => fmtNum(u.amount) },
+                  ]}/>
+              </div>
             </div>
           )}
 
@@ -292,45 +293,31 @@ export const DailyTrialScreen = () => {
                 <span className="badge pos ml-auto"><Icon.Check size={12}/> 차·대변 일치</span>
               )}
             </div>
-            <table className="table">
-              <thead>
+            <DataTable
+              rows={data.lines}
+              rowKey={l => l.code}
+              empty="이 날짜에 완료된 거래가 없어요."
+              footer={data.lines.length > 0 && (
                 <tr>
-                  <th className="num-right" style={{ width: 200 }}>차변</th>
-                  <th style={{ textAlign: 'center' }}>계정과목</th>
-                  <th className="num-right" style={{ width: 200 }}>대변</th>
+                  <td className="num-cell num-right">{fmtNum(data.debitTotal)}</td>
+                  <td className="text-sm text-center">합계</td>
+                  <td className="num-cell num-right">{fmtNum(data.creditTotal)}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {data.lines.length === 0 && (
-                  <tr><td colSpan={3} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)', fontSize: 13 }}>
-                    이 날짜에 완료된 거래가 없어요.
-                  </td></tr>
-                )}
-                {data.lines.map(l => (
-                  <tr key={l.code}>
-                    <td className="num-cell num-right fw-700">{l.debit ? fmtNum(l.debit) : ''}</td>
-                    {/* 코드·이름·대분류를 한 칸에 모은다. 컬럼으로 쪼개면 좌우 숫자가 멀어진다 */}
-                    <td style={{ textAlign: 'center' }}>
-                      <div className="row" style={{ gap: 8, justifyContent: 'center', alignItems: 'baseline' }}>
-                        <span className="num text-xs text-muted2">{l.code}</span>
-                        <span className="text-sm fw-600">{l.name}</span>
-                        {l.acct_type && <span className="badge outline" style={{ fontSize: 10 }}>{l.acct_type}</span>}
-                      </div>
-                    </td>
-                    <td className="num-cell num-right fw-700">{l.credit ? fmtNum(l.credit) : ''}</td>
-                  </tr>
-                ))}
-              </tbody>
-              {data.lines.length > 0 && (
-                <tfoot>
-                  <tr>
-                    <td className="num-cell num-right">{fmtNum(data.debitTotal)}</td>
-                    <td style={{ textAlign: 'center' }} className="text-sm">합계</td>
-                    <td className="num-cell num-right">{fmtNum(data.creditTotal)}</td>
-                  </tr>
-                </tfoot>
               )}
-            </table>
+              columns={[
+                { key: 'debit', header: '차변', width: 200, align: 'right', className: 'num-cell fw-700',
+                  render: l => (l.debit ? fmtNum(l.debit) : '') },
+                // 코드·이름·대분류를 한 칸에 모은다. 컬럼으로 쪼개면 좌우 숫자가 멀어져 T자로 안 읽힌다
+                { key: 'name', header: '계정과목', align: 'center', render: l => (
+                  <div className="row" style={{ gap: 8, justifyContent: 'center', alignItems: 'baseline' }}>
+                    <span className="num text-xs text-muted2">{l.code}</span>
+                    <span className="text-sm fw-600">{l.name}</span>
+                    {l.acct_type && <span className="badge outline" style={{ fontSize: 10 }}>{l.acct_type}</span>}
+                  </div>
+                )},
+                { key: 'credit', header: '대변', width: 200, align: 'right', className: 'num-cell fw-700',
+                  render: l => (l.credit ? fmtNum(l.credit) : '') },
+              ]}/>
           </div>
 
           <div className="text-xs text-muted2" style={{ marginTop: 14, lineHeight: 1.7 }}>

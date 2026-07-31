@@ -4,6 +4,7 @@ import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
 import { LEAF_BY_ID } from '../lib/nav'
 import { usePerms, visiblePortal, visibleLeaves } from '../lib/perms'
+import { Kpi, KpiRow } from '../lib/components/Kpi'
 
 const WEEK_KO = ["일", "월", "화", "수", "목", "금", "토"]
 const todayLabel = () => {
@@ -36,9 +37,9 @@ const CashSummary = ({ go }) => {
   const cards = [
     { label: '지금 쓸 수 있는 돈', value: d.available, sub: `통장 ${d.accountCount}개` },
     { label: '이번 주 들어올 돈', value: d.weekIn, sub: `받을 돈 ${fmtNum(d.receivable.total)}원`, tone: 'pos' },
-    { label: '이번 주 나갈 돈', value: d.weekOut, sub: `나갈 돈 ${fmtNum(d.payable.total)}원`, tone: 'neg' },
+    { label: '이번 주 나갈 돈', value: d.weekOut, sub: `나갈 돈 ${fmtNum(d.payable.total)}원`, tone: 'neg-ink' },
     { label: '이번 주 최저 잔액', value: d.lowest?.balance ?? d.available,
-      sub: d.lowest?.date === d.date ? '오늘이 가장 낮아요' : d.lowest?.date || '', tone: short ? 'neg' : undefined },
+      sub: d.lowest?.date === d.date ? '오늘이 가장 낮아요' : d.lowest?.date || '', tone: short ? 'neg-ink' : undefined },
   ]
 
   return (
@@ -59,19 +60,14 @@ const CashSummary = ({ go }) => {
           </div>
         </div>
       )}
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+      {/* 카드 전체를 누르면 자금일보로 — 감싸는 div 에 클릭을 걸어 Kpi 를 그대로 쓴다 */}
+      <KpiRow cols={4}>
         {cards.map(c => (
-          <button key={c.label} className="card card-pad" style={{ textAlign: 'left', cursor: 'pointer', border: '1px solid var(--line)' }}
-            onClick={() => go('cash_report')}>
-            <div className="text-xs text-muted2">{c.label}</div>
-            <div className="num fw-700" style={{
-              fontSize: 19, marginTop: 4,
-              color: c.tone === 'neg' ? 'var(--neg-ink)' : c.tone === 'pos' ? 'var(--pos-ink)' : undefined,
-            }}>{fmtNum(c.value)}원</div>
-            <div className="text-xs text-muted2" style={{ marginTop: 2 }}>{c.sub}</div>
-          </button>
+          <div key={c.label} onClick={() => go('cash_report')} style={{ cursor: 'pointer' }}>
+            <Kpi label={c.label} value={c.value} tone={c.tone} hint={c.sub}/>
+          </div>
         ))}
-      </div>
+      </KpiRow>
       {d.overdueCount > 0 && (
         <div className="text-xs" style={{ marginTop: 8, color: 'var(--neg-ink)' }}>
           기한이 지난 입출금 {d.overdueCount}건이 예정에 섞여 있어요 — 실제로는 더 늦게 들어올 수 있습니다.
