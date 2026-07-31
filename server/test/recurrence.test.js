@@ -167,3 +167,33 @@ test('일괄 등록 대상 — 미래 회차는 포함되지 않는다', () => {
   const dues = dueDatesToGenerate(rec, '2026-03-01')
   assert.deepStrictEqual(dues, ['2026-01-13', '2026-02-13'])
 })
+
+test('청구일을 바꿔도 이미 발행한 달이 되살아나지 않는다', () => {
+  // 매월 1일 규칙으로 7월분을 발행한 상태(last_generated=2026-07-01)에서
+  // 거래처 요청으로 청구일을 25일로 바꾸면, 예전 구현은 07-25 > 07-01 이라
+  // 7월을 '놓친 회차'로 다시 내놨다 → 발행하면 7월분 청구서가 두 장(미수금 2배).
+  const base = { start_date: '2026-01-01', period: 'monthly', last_generated: '2026-07-01' }
+  const moved = { ...base, day_of_month: 25 }
+  const got = dueDatesToGenerate(moved, '2026-07-31')
+  assert.deepEqual(got, [], '7월은 이미 발행했으므로 아무것도 안 나와야 한다')
+})
+
+test('청구일을 앞당겨도 그 달을 건너뛰지 않는다', () => {
+  // 25일 → 1일로 당긴 경우. 예전엔 08-01 이 07-25 보다 커서 통과했지만,
+  // 같은 규칙이 반대로 작동하면(당긴 달이 last_generated 보다 작아) 그 달이 통째로 사라졌다.
+  const rec = { start_date: '2026-01-25', period: 'monthly', day_of_month: 1, last_generated: '2026-07-25' }
+  assert.deepEqual(dueDatesToGenerate(rec, '2026-08-31'), ['2026-08-01'])
+})
+
+test('다음 달 회차는 정상적으로 나온다 — 과잉 차단이 아니다', () => {
+  const rec = { start_date: '2026-01-01', period: 'monthly', day_of_month: 1, last_generated: '2026-07-01' }
+  assert.deepEqual(dueDatesToGenerate(rec, '2026-09-15'), ['2026-08-01', '2026-09-01'])
+})
+
+test('분기·연 주기도 달 단위로 판정한다', () => {
+  const q = { start_date: '2026-01-10', period: 'quarterly', day_of_month: 10, last_generated: '2026-04-10' }
+  // 4월분은 끝났고 7월분만 남는다. 앵커를 20일로 옮겨도 4월이 되살아나지 않아야 한다.
+  assert.deepEqual(dueDatesToGenerate({ ...q, day_of_month: 20 }, '2026-07-31'), ['2026-07-20'])
+  const y = { start_date: '2026-03-01', period: 'yearly', day_of_month: 1, last_generated: '2026-03-01' }
+  assert.deepEqual(dueDatesToGenerate(y, '2026-12-31'), [])
+})

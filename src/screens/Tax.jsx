@@ -201,6 +201,13 @@ export const TaxVatScreen = () => {
                   + (q.non_deductible_vat ? ` · 불공제 제외 ${fmtNum(q.non_deductible_vat)}` : '')}>
                 {fmtNum(q.purchase_vat)}
                 {q.non_deductible_vat > 0 && <span className="text-xs text-muted2"> (불공제 {fmtNum(q.non_deductible_vat)})</span>}
+                {/* 같은 돈이 청구서와 거래 양쪽에서 세어지는 경우 — 정산 연결을 안 하면 매입세액이 2배가 된다 */}
+                {q.dup_suspect_count > 0 && (
+                  <span className="badge neg" style={{ marginLeft: 6, fontSize: 10 }}
+                    title={`정산되지 않은 매입 청구서와 거래처·금액이 같은 직접 거래 ${q.dup_suspect_count}건(세액 ${fmtNum(q.dup_suspect_vat)}원)이 함께 집계되고 있어요. 같은 거래라면 청구서 상세에서 그 거래를 정산에 연결해주세요.`}>
+                    중복 의심 {q.dup_suspect_count}
+                  </span>
+                )}
               </span>
             ) },
             { key: 'estimate', header: '예상세액', align: 'right', render: q => <span className="num-cell text-muted2">{q.estimate < 0 ? '환급 ' : ''}{fmtNum(Math.abs(q.estimate))}</span> },

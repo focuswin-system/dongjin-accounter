@@ -157,6 +157,28 @@ router.put('/:id', async (req, res, next) => {
     // 마감은 옮기기 전·후 두 날짜를 모두 본다 — 한쪽만 보면 잠긴 달에서 거래를 빼내거나 밀어넣을 수 있다
     const closedErr = await closedPeriodError(req.db, cur.cur_date, date)
     if (closedErr) return res.status(409).json({ error: closedErr })
+    /* 다른 장부가 참조하는 거래는 **수정도** 막는다.
+     * 삭제만 막고 있었는데, 부가세 납부 거래 금액을 500만 → 300만으로 고치면
+     * 계좌는 300만인데 vat_filings.paid_amount 는 500만 그대로가 된다 — 세무 화면과 어긋난다.
+     * 재무 거래도 같다(원금을 고치면 차입금 잔액과 안 맞는다). */
+    const OWNED = [
+      ['vat_filings', 'txn_id', '부가세 납부', '세무관리 > 부가세'],
+      ['other_taxes', 'txn_id', '세액 납부', '세무관리 > 기타세액'],
+      ['loans', 'txn_id', '차입금 실행', '재무관리 > 차입금'],
+      ['loan_repayments', 'txn_principal_id', '차입금 상환(원금)', '재무관리 > 차입금'],
+      ['loan_repayments', 'txn_interest_id', '차입금 상환(이자)', '재무관리 > 차입금'],
+      ['savings', 'txn_id', '예금 가입', '재무관리 > 예금·적금'],
+      ['savings_payments', 'txn_id', '적금 납입', '재무관리 > 예금·적금'],
+      ['investments', 'txn_id', '투자', '재무관리 > 투자'],
+    ]
+    for (const [table, col, label, where] of OWNED) {
+      const [[hit]] = await req.db.execute(`SELECT 1 AS x FROM ${table} WHERE ${col} = ? LIMIT 1`, [req.params.id])
+      if (hit) {
+        return res.status(409).json({
+          error: `${label} 거래는 여기서 고칠 수 없어요. ${where} 화면에서 되돌린 뒤 다시 등록해주세요.`,
+        })
+      }
+    }
     // 장부 불변식은 등록(POST)·상태변경(PATCH)과 똑같이 수정에도 걸어야 한다.
     // 여기가 비어 있어서, 완료 상태 지출을 계좌 없이 저장하면 거래는 남고 계좌 잔액에서만
     // 조용히 빠지는 상태가 만들어졌다(F-02 계열). 상태는 표준형으로 정규화한 뒤 검사한다.
@@ -293,6 +315,32 @@ router.delete('/:id', async (req, res, next) => {
       return res.status(409).json({
         error: `'${ot.name}' 세액 납부 거래예요. 세무관리 > 기타세액 화면에서 납부를 취소하면 이 거래도 함께 정리됩니다.`,
       })
+    }
+    /* 재무 거래(차입금·예적금·투자)도 같은 이유로 막는다.
+     * loans.txn_id, loan_repayments.txn_*_id, savings.txn_id, savings_payments.txn_id,
+     * investments.txn_id 는 전부 ensureColumn 으로 붙인 컬럼이라 **FK가 없다** — 지워도 DB가
+     * 안 막는다. 3회차 상환 거래를 지우면 계좌 잔액은 복구되는데 loan_repayments 의
+     * paid_date 는 그대로 남아 **통장·장부·차입금 잔액 3자가 어긋난다.**
+     * 되돌리는 정상 경로는 각 화면의 '상환 취소'·'해지'다(거래까지 함께 정리한다).
+     * 급여·결의서는 FK가 있어 이미 막히는데 재무 쪽만 뚫려 있었다. */
+    const FIN_REFS = [
+      ['loans', 'txn_id', '차입금 실행'],
+      ['loan_repayments', 'txn_principal_id', '차입금 상환(원금)'],
+      ['loan_repayments', 'txn_interest_id', '차입금 상환(이자)'],
+      ['savings', 'txn_id', '예금 가입'],
+      ['savings', 'txn_maturity_id', '예적금 만기(원금)'],
+      ['savings', 'txn_interest_id', '예적금 만기(이자)'],
+      ['savings_payments', 'txn_id', '적금 납입'],
+      ['investments', 'txn_id', '투자'],
+    ]
+    for (const [table, col, label] of FIN_REFS) {
+      const [[hit]] = await conn.execute(`SELECT 1 AS x FROM ${table} WHERE ${col} = ? LIMIT 1`, [req.params.id])
+      if (hit) {
+        await rollbackQuietly(conn)
+        return res.status(409).json({
+          error: `${label} 거래예요. 재무관리 화면에서 되돌려야 관련 기록이 함께 정리됩니다.`,
+        })
+      }
     }
 
     // 이 거래에 걸린 청구서 매칭을 정리하고 청구서 상태를 재계산한다.

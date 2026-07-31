@@ -90,6 +90,28 @@ router.get('/vat', async (req, res, next) => {
        GROUP BY QUARTER(t.date)`,
       [year]
     )
+    /* 이중 계상 의심 건 — 같은 돈이 청구서와 거래 양쪽에서 세어지는 경우.
+     *
+     * 세금계산서를 임포트해 매입 청구서를 만들고, 통장 출금도 따로 거래로 등록한 뒤
+     * **정산 매칭을 하지 않으면** invoice_id 가 NULL 이라 두 집계에 모두 들어간다
+     * → 매입세액이 2배가 된다. 앱이 "같은 거래"라고 확신할 수는 없으므로 지우지 않고,
+     *   거래처와 금액이 같은데 한 번도 정산되지 않은 청구서가 있는 건을 찾아 **알린다.**
+     *   해결은 청구서 상세에서 그 거래를 정산에 연결하는 것이다. */
+    const [dupAgg] = await req.db.execute(
+      `SELECT QUARTER(t.date) AS q, COUNT(*) AS cnt, COALESCE(SUM(t.vat_amount), 0) AS vat
+         FROM transactions t
+        WHERE YEAR(t.date) = ? AND t.kind = 'expense'
+          AND t.invoice_id IS NULL AND t.vat_amount IS NOT NULL AND t.vendor_id IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM invoices i
+             WHERE i.kind = 'received' AND i.vendor_id = t.vendor_id
+               AND i.total_amount = t.amount
+               AND NOT EXISTS (SELECT 1 FROM invoice_matches m WHERE m.invoice_id = i.id)
+          )
+        GROUP BY QUARTER(t.date)`,
+      [year]
+    )
+    const dupBy = Object.fromEntries(dupAgg.map(r => [Number(r.q), r]))
     const [filings] = await req.db.execute('SELECT * FROM vat_filings WHERE year = ?', [year])
     const aggBy = Object.fromEntries(agg.map(r => [Number(r.q), r]))
     const txnBy = Object.fromEntries(txnAgg.map(r => [Number(r.q), r]))
@@ -113,6 +135,9 @@ router.get('/vat', async (req, res, next) => {
         purchase_vat_invoice: Number(a.purchase_vat || 0),
         purchase_vat_direct: Number(t.purchase_vat || 0),
         non_deductible_vat: Number(t.non_deductible_vat || 0),   // 불공제로 빠진 매입세액
+        // 이중 계상 의심 — 정산되지 않은 매입 청구서와 거래처·금액이 같은 직접 거래
+        dup_suspect_count: Number((dupBy[q] || {}).cnt || 0),
+        dup_suspect_vat:   Number((dupBy[q] || {}).vat || 0),
         estimate,                        // +면 납부 예상, −면 환급 예상
         filed_amount: filed,             // null이면 아직 신고 전
         payable: filed != null ? filed : estimate,  // 관리 기준: 신고세액 우선, 없으면 예상

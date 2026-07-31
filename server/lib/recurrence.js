@@ -45,7 +45,17 @@ function dueDatesToGenerate(rec, today = new Date(), opts = {}) {
   const todayStr = typeof today === 'string' ? today : fmtDate(today)
   const horizonDays = Number(opts.horizonDays) || 0
   const horizonStr = horizonDays > 0 ? addDays(todayStr, horizonDays) : todayStr
-  const genFloor = rec.last_generated || '' // 이 값 이하(포함)는 이미 생성됨
+  /* 이미 생성된 회차 판정은 **달 단위**로 한다.
+   *
+   * 예전엔 날짜 그대로 비교했다(`ds > last_generated`). 그러면 청구일을 바꾸는 순간
+   * 그 달 회차가 다시 열린다 — 매월 1일 규칙으로 2026-07-01 을 발행한 뒤(last_generated=07-01)
+   * 거래처 요청으로 청구일을 25일로 바꾸면 07-25 > 07-01 이라 **7월이 '놓친 회차'로 되살아나고
+   * 발행하면 7월분 청구서가 두 장** 나간다(미수금 2배). 반대로 25→1일로 바꾸면 그 달이
+   * 통째로 건너뛰어진다.
+   *
+   * 정기청구는 '주기당 한 번'이 규칙이므로, 같은 달(분기·연 주기도 회차가 놓인 달)에 이미
+   * 발행했으면 앵커일이 어디로 옮겨가든 그 회차는 끝난 것이다. */
+  const genFloorMonth = String(rec.last_generated || '').slice(0, 7)   // 'YYYY-MM'
   const setupFloor = rec.setup_date || ''   // 등록일 이전 회차는 소급 금지(비면 제약 없음)
   const out = []
   for (let i = 0; i < 1200; i++) { // 안전 상한(월간이면 100년치)
@@ -58,7 +68,7 @@ function dueDatesToGenerate(rec, today = new Date(), opts = {}) {
     if (rec.end_date && ds > rec.end_date) break
     if (ds < rec.start_date) continue
     if (setupFloor && ds < setupFloor) continue // 설정 시점 이전 회차 건너뜀
-    if (ds > genFloor) out.push(ds)
+    if (!genFloorMonth || ds.slice(0, 7) > genFloorMonth) out.push(ds)
   }
   return out
 }
