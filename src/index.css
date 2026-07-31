@@ -517,6 +517,18 @@ a { color: inherit; text-decoration: none; }
 }
 .table tbody tr:hover { background: var(--surface-2); }
 .table tbody tr:last-child td { border-bottom: 0; }
+/* 합계 행(tfoot) — DataTable 의 footer prop 과 일계표가 쓴다.
+   여태 tbody td 에만 스타일이 있어서 합계 줄만 패딩도 선도 없이 떠 있었다.
+   회계 표의 합계는 위에 굵은 선을 긋는 게 관례라 그 모양을 따른다. */
+.table tfoot td {
+  padding: 14px;
+  font-size: 13.5px;
+  font-weight: 700;
+  vertical-align: middle;
+  background: var(--surface-2);
+  border-top: 2px solid var(--line-strong, var(--line));
+}
+.table tfoot tr:first-child td { border-top-width: 2px; }
 .num-cell { font-family: "JetBrains Mono", ui-monospace, monospace; font-feature-settings: "tnum" 1; letter-spacing: -0.02em; }
 .num-right { text-align: right; }
 .text-center { text-align: center; }

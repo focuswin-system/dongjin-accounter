@@ -239,7 +239,9 @@ export const DailyTrialScreen = () => {
   }
 
   return (
-    <div className="fade-up">
+    /* 표가 T자라 폭을 860으로 묶었다. 제목·날짜 이동까지 같은 폭 안에 둬야
+       머리글과 표가 한 덩어리로 읽힌다(제목만 왼쪽 끝에 떨어져 있으면 어긋나 보인다). */
+    <div className="fade-up" style={{ maxWidth: 860, margin: '0 auto' }}>
       <PageHeader title="일계표"
         sub="하루치 거래를 계정과목별로 차변·대변에 나눠 봅니다"
         actions={
@@ -280,6 +282,8 @@ export const DailyTrialScreen = () => {
             </div>
           )}
 
+          {/* 일계표는 T자다 — 차변 | 계정과목 | 대변 이 가운데로 모여야 읽힌다.
+              넓은 화면에서 폭을 다 쓰면 가운데가 텅 비어 좌우 숫자를 눈으로 잇기 어렵다. */}
           <div className="card" style={{ overflow: 'hidden' }}>
             <div className="row" style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', gap: 10 }}>
               <span className="fw-700 text-sm">{data.date}</span>
@@ -291,37 +295,38 @@ export const DailyTrialScreen = () => {
             <table className="table">
               <thead>
                 <tr>
-                  <th className="num-right" style={{ width: 160 }}>차변</th>
-                  <th style={{ width: 90 }}>코드</th>
-                  <th>계정과목</th>
-                  <th style={{ width: 80 }}>구분</th>
-                  <th className="num-right" style={{ width: 160 }}>대변</th>
+                  <th className="num-right" style={{ width: 200 }}>차변</th>
+                  <th style={{ textAlign: 'center' }}>계정과목</th>
+                  <th className="num-right" style={{ width: 200 }}>대변</th>
                 </tr>
               </thead>
               <tbody>
                 {data.lines.length === 0 && (
-                  <tr><td colSpan={5} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)', fontSize: 13 }}>
+                  <tr><td colSpan={3} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)', fontSize: 13 }}>
                     이 날짜에 완료된 거래가 없어요.
                   </td></tr>
                 )}
                 {data.lines.map(l => (
                   <tr key={l.code}>
                     <td className="num-cell num-right fw-700">{l.debit ? fmtNum(l.debit) : ''}</td>
-                    <td className="num text-xs text-muted2">{l.code}</td>
-                    <td className="text-sm">{l.name}
-                      {l.category && <span className="text-xs text-muted2" style={{ marginLeft: 6 }}>{l.category}</span>}
+                    {/* 코드·이름·대분류를 한 칸에 모은다. 컬럼으로 쪼개면 좌우 숫자가 멀어진다 */}
+                    <td style={{ textAlign: 'center' }}>
+                      <div className="row" style={{ gap: 8, justifyContent: 'center', alignItems: 'baseline' }}>
+                        <span className="num text-xs text-muted2">{l.code}</span>
+                        <span className="text-sm fw-600">{l.name}</span>
+                        {l.acct_type && <span className="badge outline" style={{ fontSize: 10 }}>{l.acct_type}</span>}
+                      </div>
                     </td>
-                    <td><span className="badge outline" style={{ fontSize: 10 }}>{l.acct_type || '—'}</span></td>
                     <td className="num-cell num-right fw-700">{l.credit ? fmtNum(l.credit) : ''}</td>
                   </tr>
                 ))}
               </tbody>
               {data.lines.length > 0 && (
                 <tfoot>
-                  <tr style={{ background: 'var(--surface-2)' }}>
-                    <td className="num-cell num-right fw-700">{fmtNum(data.debitTotal)}</td>
-                    <td colSpan={3} style={{ textAlign: 'center' }} className="text-sm fw-700">합계</td>
-                    <td className="num-cell num-right fw-700">{fmtNum(data.creditTotal)}</td>
+                  <tr>
+                    <td className="num-cell num-right">{fmtNum(data.debitTotal)}</td>
+                    <td style={{ textAlign: 'center' }} className="text-sm">합계</td>
+                    <td className="num-cell num-right">{fmtNum(data.creditTotal)}</td>
                   </tr>
                 </tfoot>
               )}
