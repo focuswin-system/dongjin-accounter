@@ -39,7 +39,11 @@ export const MiscPLScreen = ({ initialTab = 'expense', refreshTrigger, openExpen
 
   const load = async () => {
     const list = await api.getTransactions({ kind: cur.kind })
-    setRows(list.filter(r => !r.contractId && !r.cost_contract_id))
+    /* 재무 거래(대출 실행·원금 상환·예적금 납입·투자)는 손익이 아니라 여기서 뺀다.
+     * 이 화면은 계약 두 축이 비었는지만 봤는데, 재무 거래도 계약이 없어서 그대로 섞였다
+     * → 3억 대출을 실행하면 **잡손익 합계가 3억**이 됐다. 손익 아닌 돈이 수익으로 보인다.
+     * 판정은 서버가 계정과목 대분류로 한다(server/lib/pnl.js 와 같은 규칙). */
+    setRows(list.filter(r => !r.contractId && !r.cost_contract_id && r.isPnl !== false))
   }
   useEffect(() => { load() }, [tab, refreshTrigger])
 

@@ -149,7 +149,10 @@ function adaptAccount(row) {
     bankName: row.bank,
     type: row.type,
     initialBalance: row.initial_balance,
-    currentBalance: row.balance ?? row.initial_balance,
+    /* 서버가 권한 없는 사용자에게 balance: null 을 준다. 여기서 `?? initial_balance` 로
+     * 메우면 **개설 잔액이 현재 잔액인 척** 표시된다 — 가리려던 의도도 못 지키고,
+     * 아무 경고 없이 틀린 숫자를 보여주게 된다. null 은 null 로 두고 화면이 '—' 를 그린다. */
+    currentBalance: row.balance ?? null,
     adjustments: row.adjustments ?? [],
     kind: row.kind || 'bank',
     number: row.number || '',
@@ -248,6 +251,10 @@ function adaptTransaction(row) {
     item_id: row.item_id || '',
     item_name: row.item_name || '',
     account_code: row.account_code || '',
+    /* 손익 거래인가 — 서버가 계정과목 대분류로 판정해 내려준다(server/lib/pnl.js 와 같은 규칙).
+     * 대출 실행·원금 상환·예적금 납입·투자는 계좌는 오가지만 손익이 아니다.
+     * 값이 없는 옛 응답은 손익으로 본다(종전 동작 유지). */
+    isPnl: row.is_pnl == null ? true : !!Number(row.is_pnl),
     employee: row.employee_name || '',
   }
 }

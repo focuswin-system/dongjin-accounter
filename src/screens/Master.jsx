@@ -1561,7 +1561,7 @@ const AccountPanel = ({ embedded = false }) => {
                 <td className="text-sm">{a.bankName || '—'}</td>
                 <td className="text-sm num">{a.number || '—'}</td>
                 <td className="text-sm">{a.purpose || '—'}</td>
-                <td className="num-cell num-right">{a.kind === 'card' ? '—' : fmtNum(a.currentBalance)}</td>
+                <td className="num-cell num-right">{a.kind === 'card' || a.currentBalance == null ? '—' : fmtNum(a.currentBalance)}</td>
                 <td>
                   <div className="row gap-6">
                     <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => openEdit(a)}>수정</button>
@@ -1674,7 +1674,7 @@ const AccountBalancePanel = ({ embedded = false }) => {
                 <div className="text-xs text-muted">{acc.bankName} · {acc.type}</div>
               </div>
               <div className="num fw-700 ml-auto" style={{ fontSize: 22, letterSpacing: "-0.02em" }}>
-                {fmtNum(acc.currentBalance)}
+                {acc.currentBalance == null ? "—" : fmtNum(acc.currentBalance)}
               </div>
             </div>
             <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: "4px 12px", fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>

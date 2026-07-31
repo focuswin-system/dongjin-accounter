@@ -1124,7 +1124,12 @@ const useLedger = () => {
   const [data, setData] = useState(null)
   useEffect(() => {
     api.getTransactions().then(rows => {
-      const list = Array.isArray(rows) ? rows : []
+      const all = Array.isArray(rows) ? rows : []
+      /* 보고서는 **손익만** 센다.
+       * 예전엔 kind 하나로만 갈라서, 대출 실행(income)이 매출로·원금 상환과 예적금 납입이
+       * 비용으로 잡혔다. 3억 대출을 받으면 발주처별 거래 현황에 은행이 발주처로 뜨고
+       * 실현 매출이 3억 늘었다. 판정은 서버가 계정과목 대분류로 한다(lib/pnl.js와 같은 규칙). */
+      const list = all.filter(r => r.isPnl !== false)
       setData({
         incomes:  list.filter(r => r.kind === 'income'),
         expenses: list.filter(r => r.kind === 'expense'),
@@ -1157,16 +1162,21 @@ const isSettled = s => {
   return v === "입금완료" || v === "지급완료"
 }
 
+/* ⚠ 목록에서 뺀 보고서 — 실 데이터 연동이 안 된 것들이다.
+ *   · 계약별 손익 현황 / 방산 납품 실적 — SAMPLE.contractSummary(빈 배열)를 읽어
+ *     "총 수주 0원 · 총 손익 0원 · 평균 이익률 NaN%" 를 **확신 있게** 표시했다.
+ *     0원과 NaN 은 "데이터가 없다"가 아니라 "회사가 0원을 벌었다"로 읽힌다 —
+ *     비어 있는 화면보다 나쁘다.
+ *   · 세무사 전달용 자료 — 건수·기간이 하드코딩이고 ZIP 버튼이 토스트만 띄운다.
+ *   계약별 손익은 계약 화면에서 이미 실데이터로 볼 수 있다(계약 상세의 원가·손익).
+ *   실구현하면 다시 넣는다. */
 const REPORTS = [
   { id: "monthly",     t: "월별 입금/지출 현황",       d: "이번 달과 지난 달을 비교해보세요." },
-  { id: "tax4",        t: "4대보험·원천세 신고 자료",   d: "매달 10일 납부 기한 전에 신고서를 받으세요. 다음 납부: 6월 10일." },
-  { id: "contract",    t: "계약별 손익 현황",           d: "납품 계약마다 자금 흐름과 예상 손익을 한눈에." },
+  { id: "tax4",        t: "4대보험·원천세 신고 자료",   d: "매달 10일 납부 기한 전에 신고서를 받으세요." },
   { id: "category",    t: "비목별 지출 현황",           d: "재료비·외주가공비·시험검사비 등 비목별 비교." },
-  { id: "vendor",      t: "발주처별 거래 현황",         d: "한화·LIG·현대로템 등 발주처별 거래 규모." },
+  { id: "vendor",      t: "발주처별 거래 현황",         d: "발주처별 거래 규모를 비교해보세요." },
   { id: "ar",          t: "미수금 현황",                d: "받을 돈이 어디서 얼마나 남았는지 정리해드려요." },
   { id: "subcontract", t: "외주가공비 분석",             d: "협력사별 외주비 비중과 단가 추이." },
-  { id: "defense",     t: "방산 납품 실적 보고서",       d: "방산물자 지정업체 대상 납품 실적 자료." },
-  { id: "taxoffice",   t: "세무사 전달용 자료",          d: "월별 입출금·증빙 묶음을 ZIP으로 받으세요." },
   { id: "vat",         t: "부가세 신고 자료",            d: "분기별 매출·매입세액 및 납부세액을 확인하세요." },
 ]
 
@@ -1175,8 +1185,10 @@ const ReportMonthly = ({ toast }) => {
   const [period, setPeriod] = useState("전체")
   const led = useLedger()
   if (!led) return <Loading label="거래내역을 불러오는 중…"/>
-  const incomes  = filterByPeriod(led.incomes,  period)
-  const expenses = filterByPeriod(led.expenses, period)
+  /* 완료된 거래만 센다 — 거래내역 화면(Ledger.jsx)이 그렇게 세므로 맞춰야 한다.
+   * 안 맞추면 같은 달인데 두 화면의 숫자가 다르다(정기지출은 계좌 없이 '지급 대기'로 생길 수 있다). */
+  const incomes  = filterByPeriod(led.incomes,  period).filter(r => isSettled(r.status))
+  const expenses = filterByPeriod(led.expenses, period).filter(r => isSettled(r.status))
 
   const bucket = {}
   incomes.forEach(r => {
@@ -1379,7 +1391,8 @@ const ReportCategory = ({ toast }) => {
   const [period, setPeriod] = useState("전체")
   const led = useLedger()
   if (!led) return <Loading label="지출 내역을 불러오는 중…"/>
-  const expenses = filterByPeriod(led.expenses, period)
+  // 완료된 지출만 — 거래내역 화면과 같은 기준(ReportMonthly 와 동일한 이유)
+  const expenses = filterByPeriod(led.expenses, period).filter(r => isSettled(r.status))
 
   const bucket = {}
   expenses.forEach(r => {

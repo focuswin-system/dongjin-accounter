@@ -70,8 +70,15 @@ async function runAggregate(db, spec) {
   const kind = KIND[s.topic]
   const grp = GROUP[s.group]
   const { from, to, label: periodLabel } = resolvePeriod(s)
-  const statusCond = (s.status_scope === 'completed' && kind === 'expense') ? " AND t.status = '지급완료'" : ''
-  const AGG = s.measure === 'count' ? 'COUNT(*)' : 'COALESCE(SUM(t.amount), 0)'
+  /* 완료된 것만 세는 옵션이 지출에만 걸려 있었다 — 매출은 어떤 값을 줘도 status 조건이 안 붙어
+   * 아직 안 들어온 입금이 매출로 집계됐다. 수입도 같은 규칙으로 맞춘다. */
+  const statusCond = s.status_scope === 'completed'
+    ? (kind === 'expense' ? " AND t.status = '지급완료'" : " AND t.status = '입금완료'")
+    : ''
+  /* 금액은 **공급가액**으로 센다. 부가세는 회사 돈이 아니라 받아서 내는 돈이라,
+   * VAT 포함 금액으로 매출·원가를 집계하면 손익이 10% 부풀려진다.
+   * 부가세 컬럼이 없던 시절 거래는 supply_amount 가 NULL 이라 amount 로 폴백한다. */
+  const AGG = s.measure === 'count' ? 'COUNT(*)' : 'COALESCE(SUM(COALESCE(t.supply_amount, t.amount)), 0)'
 
   // 재무 거래(차입금 원금·자본금·투자자산)는 매출/매입이 아니다 → 손익 거래만 집계한다.
   // 대출 수령을 income으로 넣는 순간 이 조건이 없으면 그대로 '매출'로 잡힌다(lib/pnl.js).

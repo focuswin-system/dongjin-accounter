@@ -67,7 +67,9 @@ const metrics = (r) => {
     // 매입 계약에 원가·손익 개념을 붙이면 "나간 돈 = 손해"로 읽히는 거짓 숫자가 나온다.
     // 매출 계약의 원가는 '이 계약에 귀속된 지출'(cost_contract_id)이지, 이 계약이 근거인 지출이 아니다.
     cost:   isPurchase ? null : cost,
-    profit: isPurchase ? null : in_done - cost,
+    /* 손익은 공급가액 기준 — 부가세는 회사 돈이 아니라 받아서 내는 돈이다.
+     * VAT 포함 금액으로 계산하면 1.1S − 1.1C 이 되어 손익이 정확히 10% 부풀려진다. */
+    profit: isPurchase ? null : Number(r.in_supply || 0) - Number(r.cost_supply || 0),
     cost_budget: safeBudget(r.cost_budget),
   }
 }
@@ -82,16 +84,29 @@ const metrics = (r) => {
 // '지급액'에 섞여, 매입계약의 미지급 잔액이 실제보다 적게 보이고 원가는 부풀려진다.
 // (입금은 calcBalance도 status를 보지 않으므로 여기서도 동일하게 맞춘다)
 const PAID = "status='지급완료'"
+/* 수입도 완료된 것만 센다. 예전 주석은 'calcBalance 가 입금 status 를 안 본다'였는데
+ * 그 뒤 calcBalance 가 SETTLED_INCOME 으로 막도록 바뀌었고 여기만 남았다 →
+ * 아직 안 들어온 입금이 계약 수금액·손익에 섞여 손익이 부풀었다. */
+const RECV = "status='입금완료'"
+/* 손익은 **공급가액** 기준이다. 부가세는 회사 돈이 아니라 받아서 내는 돈이라,
+ * 매출·원가를 VAT 포함 금액으로 계산하면 손익이 정확히 10% 부풀려진다(1.1S − 1.1C).
+ * 부가세 컬럼이 없던 시절 거래는 supply_amount 가 NULL 이므로 amount 로 폴백한다
+ * — 옛 데이터의 숫자를 갑자기 바꾸지 않으면서, 데이터가 채워질수록 정확해진다. */
+const SUPPLY = 'COALESCE(supply_amount, amount)'
 /* 계약 성격에 맞는 청구서 종류. 매입 계약(거래처 gubu A=외주/매입, E=기관)은 수취 청구서,
  * 매출 계약(B=발주처)은 발행 청구서. 판정 기준은 위 isPurchase 와 같아야 한다.
  * 이 필터가 없으면 외주비 매입 청구서를 매출 계약에 귀속시켰을 때 그 금액이 매출 계약의
  * '청구액'에 더해지고, 받을 돈이 아닌데 미수금(billed − collected)으로 뜬다. */
 const PURCHASE_KIND = "IF(v.gubu IN ('A','E'), 'received', 'issued')"
 const METRIC_COLS = `
-  COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='income'),0)  AS in_done,
+  COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='income' AND ${RECV}),0)  AS in_done,
   COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='expense' AND ${PAID}),0) AS out_total,
   COALESCE((SELECT SUM(amount) FROM transactions WHERE cost_contract_id=c.id AND kind='expense' AND ${PAID}),0) AS cost_total,
-  COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='income'
+  /* 손익용 공급가 합계 — 위 in_done·cost_total 은 실제로 오간 돈(VAT 포함)이라 그대로 두고,
+     손익은 이 값으로 계산한다. 둘을 섞으면 손익이 10% 부풀려진다. */
+  COALESCE((SELECT SUM(${SUPPLY}) FROM transactions WHERE contract_id=c.id AND kind='income' AND ${RECV}),0) AS in_supply,
+  COALESCE((SELECT SUM(${SUPPLY}) FROM transactions WHERE cost_contract_id=c.id AND kind='expense' AND ${PAID}),0) AS cost_supply,
+  COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='income' AND ${RECV}
             AND (c.current_term_start IS NULL OR date >= c.current_term_start)),0)  AS term_in_done,
   COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='expense' AND ${PAID}
             AND (c.current_term_start IS NULL OR date >= c.current_term_start)),0)  AS term_out,

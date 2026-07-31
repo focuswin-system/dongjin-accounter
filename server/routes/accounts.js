@@ -51,6 +51,8 @@ router.get('/:id', async (req, res, next) => {
   try {
     const [rows] = await req.db.execute('SELECT * FROM accounts WHERE id = ?', [req.params.id])
     if (!rows[0]) return res.status(404).json({ error: 'Not found' })
+    // 목록과 같은 규칙으로 가린다 — 여기만 열려 있으면 계좌 id 만 알면 잔액을 읽을 수 있다
+    if (!canSeeBalance(req)) return res.json({ ...rows[0], balance: null })
     res.json({ ...rows[0], balance: await calcBalance(req.db, req.params.id) })
   } catch (e) { next(e) }
 })
@@ -131,6 +133,8 @@ router.delete('/:id', async (req, res, next) => {
 
 router.get('/:id/adjustments', async (req, res, next) => {
   try {
+    // 조정 이력은 금액을 담고 있다 — 잔액과 같은 민감도다
+    if (!canSeeBalance(req)) return res.status(403).json({ error: '계좌 잔액을 볼 권한이 없어요' })
     const [rows] = await req.db.execute(
       'SELECT * FROM account_adjustments WHERE account_id = ? ORDER BY date DESC',
       [req.params.id]

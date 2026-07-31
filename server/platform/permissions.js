@@ -113,11 +113,16 @@ const PRESET_ROLES = [
   {
     name: '경리',
     isSystem: true,
-    describe: '회계 업무 전반. 인사급여는 제외, 삭제 권한 없음',
+    describe: '회계 업무 전반(월마감·결재선 포함). 인사급여는 제외, 삭제 권한 없음',
     perms: Object.fromEntries(
       RESOURCE_IDS.map(id => {
         if (HR_RESOURCES.includes(id)) return [id, []]                    // 인사급여 차단
-        if (id === 'settings') return [id, ['access', 'view']]
+        /* settings 자원 하나가 회사정보·사용자·결재선·월마감을 통째로 관장한다.
+         * 조회만 주면 **경리가 월마감을 못 한다** — 회계의 마지막 행위인데 막혀 있었다
+         * (결재선도 못 만들어 지급결의서 출력이 반쪽이 된다).
+         * 계정 관리(사용자 추가·역할 배정)는 이 권한과 무관하게 routes/auth.js 의
+         * isMaster(users.role='admin')가 따로 막으므로, 여기서 열어도 계정은 안 열린다. */
+        if (id === 'settings') return [id, ['access', 'view', 'create', 'edit', 'delete']]
         // 삭제는 마스터만 — 회계 데이터 삭제는 되돌리기 어렵다
         return [id, ['access', 'view', 'create', 'edit', 'upload', 'download', 'export']]
       })

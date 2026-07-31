@@ -32,9 +32,19 @@ async function attachDocs(db, rows) {
 router.get('/', async (req, res, next) => {
   try {
     const { kind, contractId, projectNo, category, from, to, accountId } = req.query
+    /* is_pnl — 이 거래가 손익인가. 판정 기준은 lib/pnl.js 와 같다(계정과목 대분류).
+     *
+     * 화면이 이걸 스스로 판단할 수 없었다. 응답에 account_code 는 있었지만 그 코드가
+     * 자산·부채·자본인지 알려면 계정과목표가 필요했고, 그래서 경비·잡손익 화면과 보고서가
+     * **대출 실행을 매출로, 원금 상환·예적금 납입을 경비로** 집계했다.
+     * 서버가 한 번에 판정해 내려준다 — 규칙이 두 벌이 되지 않게. */
     let sql = `SELECT t.*, v.name AS vendor_name, c.name AS contract_name, a.name AS account_name,
                       e.name AS employee_name, ri.name AS item_name,
-                      cc.name AS cost_contract_name
+                      cc.name AS cost_contract_name,
+                      (t.account_code IS NULL OR t.account_code = '' OR NOT EXISTS (
+                         SELECT 1 FROM account_subjects s
+                          WHERE s.code = t.account_code AND s.acct_type IN ('자산','부채','자본')
+                      )) AS is_pnl
               FROM transactions t
               LEFT JOIN vendors v ON t.vendor_id = v.id
               LEFT JOIN contracts c ON t.contract_id = c.id
