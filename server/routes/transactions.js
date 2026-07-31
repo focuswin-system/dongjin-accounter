@@ -338,7 +338,7 @@ router.post('/import/commit', async (req, res, next) => {
     const contractMap = {}; for (const c of cs) contractMap[c.name] = c.id
 
     await conn.beginTransaction()
-    let inserted = 0, skippedFuture = 0, skippedClosed = 0; const createdVendors = []
+    let inserted = 0, skippedFuture = 0, skippedClosed = 0, skippedAmount = 0; const createdVendors = []
     for (const it of items) {
       // 미래 일자 거래는 건너뛴다 — 완료 상태로 들어가 계좌 잔액에 즉시 반영되므로 개별 등록과 같은 규칙 적용.
       if (futureDateError(it.date)) { skippedFuture++; continue }
@@ -359,17 +359,31 @@ router.post('/import/commit', async (req, res, next) => {
       const contractId = (cname && contractMap[cname]) ? contractMap[cname] : null
       // account_id 를 반드시 넣는다. 빠지면 위 주석대로 '완료 상태'로만 들어가고
       // 계좌 잔액에는 영원히 안 잡혀, 대량 등록 직후부터 통장과 장부가 어긋난다.
+      /* 부가세 필드를 반드시 채운다.
+       * 예전엔 supply_amount·vat_amount·tax_type 이 INSERT 목록에 아예 없어 전부 NULL 이었다.
+       * 부가세 집계(routes/tax.js)는 `vat_amount IS NOT NULL` 인 거래만 세므로,
+       * **엑셀로 올린 수백 건의 매입세액이 신고 자료에서 통째로 빠졌다.**
+       * 개별 등록(POST /)은 처음부터 vatFields 를 거쳤다 — 이 경로만 빠져 있었다. */
+      const vat = vatFields({
+        amount: it.amount, supply_amount: it.supply_amount, vat_amount: it.vat_amount,
+        tax_type: it.tax_type, vat_deductible: it.vat_deductible,
+      })
+      // 금액 검증도 개별 등록과 같게 — 음수 지출이 들어오면 계좌 잔액이 늘어난다
+      const ae = amountError(it.amount)
+      if (ae) { skippedAmount++; continue }
       await conn.execute(`
-        INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, memo)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, memo,
+                                  supply_amount, vat_amount, tax_type, vat_deductible)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `, [randomUUID(), it.kind, vendorId, contractId, it.account_id || accountId,
           it.category || '', it.amount, it.date,
           '계좌이체', it.kind === 'income' ? '입금완료' : '지급완료',
-          (cname && !contractId) ? cname : '', it.memo || ''])
+          (cname && !contractId) ? cname : '', it.memo || '',
+          vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible])
       inserted++
     }
     await conn.commit()
-    res.json({ inserted, createdVendors, skippedFuture, skippedClosed })
+    res.json({ inserted, createdVendors, skippedFuture, skippedClosed, skippedAmount })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })

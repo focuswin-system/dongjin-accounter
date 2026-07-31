@@ -33,8 +33,7 @@ const ACCT = {
   interest:  '4201',   // 이자수익(수익·영업외수익)
 }
 
-const intOf = (v) => parseInt(String(v ?? '').replace(/[^0-9-]/g, ''), 10) || 0
-const numOf = (v) => { const n = parseFloat(String(v ?? '').replace(/[^0-9.-]/g, '')); return Number.isFinite(n) ? n : 0 }
+const { moneyOf: intOf, numOf } = require('../lib/money')
 
 /** 기간이 1년을 넘으면 장기금융상품 — 회계 분류가 갈린다 */
 const defaultAcctCode = (termMonths) => (Number(termMonths) > 12 ? ACCT.longTerm : ACCT.shortTerm)

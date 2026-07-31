@@ -946,6 +946,21 @@ export const ExcelScreen = () => {
           {result.createdVendors?.length > 0 && (
             <div className="text-sm text-muted" style={{ marginBottom: 16 }}>신규 거래처 {result.createdVendors.length}곳 자동 등록: {result.createdVendors.slice(0, 5).join(', ')}{result.createdVendors.length > 5 ? ' 외' : ''}</div>
           )}
+          {/* 서버가 건너뛴 행을 반드시 보여준다 — 예전엔 "N건 등록됐어요"만 떠서
+              마감월·미래일자·금액오류로 빠진 행을 사용자가 영영 몰랐다. */}
+          {(result.skippedClosed > 0 || result.skippedFuture > 0 || result.skippedAmount > 0) && (
+            <div className="card card-pad" style={{ marginBottom: 16, textAlign: 'left', background: 'var(--warn-soft, var(--surface-2))' }}>
+              <div className="fw-700 text-sm" style={{ marginBottom: 4 }}>
+                {(result.skippedClosed || 0) + (result.skippedFuture || 0) + (result.skippedAmount || 0)}건은 등록하지 않았어요
+              </div>
+              <div className="text-sm text-muted" style={{ lineHeight: 1.7 }}>
+                {result.skippedClosed > 0 && <>· 마감된 달: {result.skippedClosed}건<br/></>}
+                {result.skippedFuture > 0 && <>· 미래 날짜: {result.skippedFuture}건<br/></>}
+                {result.skippedAmount > 0 && <>· 금액 오류(0·음수·과대): {result.skippedAmount}건<br/></>}
+                해당 행을 고쳐서 다시 올려주세요.
+              </div>
+            </div>
+          )}
           <button className="btn primary" onClick={reset}>새 파일 업로드</button>
         </div>
       ) : !file ? (

@@ -333,3 +333,15 @@ test('경고 — 1년 넘게 미래인 작성일자를 알린다(정상 날짜�
   const normal = M.mapHometaxRow(getter(SALE_ROW(M)), { ourBizNo: OUR })
   assert.deepStrictEqual(M.hometaxRowWarns(normal, { ourBizNo: OUR }), [])
 })
+
+test('금액 파싱이 서버 lib/money.js 와 같은 규칙이어야 한다', async () => {
+  // 같은 엑셀을 프런트가 파싱하든 서버가 다시 계산하든 값이 같아야 한다.
+  // 어긋나면 화면에 보인 금액과 저장된 금액이 다르다.
+  const M = await loading
+  const { moneyOf } = require('../lib/money')
+  for (const v of ['1,100,000.00', '(1,100,000)', '₩1,100,000', '1.100.000', '', '없음', '-500', 1100000.5]) {
+    assert.equal(M.intOf(v), moneyOf(v), `입력 ${JSON.stringify(v)} 에서 어긋남`)
+  }
+  // 100배 사고가 재발하지 않는지 못 박는다
+  assert.equal(M.intOf('1,100,000.00'), 1_100_000)
+})

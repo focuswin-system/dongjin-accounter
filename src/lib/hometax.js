@@ -9,7 +9,27 @@
  */
 
 export const digits = (v) => String(v ?? '').replace(/[^0-9]/g, '')
-export const intOf = (v) => parseInt(String(v ?? '').replace(/[^0-9-]/g, ''), 10) || 0
+/**
+ * 금액 파싱 — 서버 lib/money.js 와 **같은 규칙이어야 한다**(같은 파일을 두 번 읽어도 값이 같아야 함).
+ *
+ * 예전엔 숫자·부호만 남기고 parseInt 했다. 그러면 소수점이 지워져
+ *   '1,100,000.00' → 110000000  (110만원의 **100배**)
+ *   '(1,100,000)'  → 1100000    (회계형식 음수가 **양수**)
+ * 가 된다. 엑셀은 서식이 적용된 문자열을 그대로 주고, 공급가·세액·합계가 똑같이 100배가 되므로
+ * `공급가+세액 ≠ 합계` 검증도 통과한다 — 조용히 100배 틀린 청구서가 만들어졌다.
+ */
+export const intOf = (v) => {
+  if (v == null || v === '') return 0
+  if (typeof v === 'number') return Number.isFinite(v) ? Math.round(v) : 0
+  let s = String(v).trim()
+  const paren = /^\(.*\)$/.test(s)           // 회계형식 (1,100,000) = 음수
+  s = s.replace(/[^0-9.-]/g, '')
+  if (!s || s === '-' || s === '.') return 0
+  if ((s.match(/\./g) || []).length > 1) s = s.replace(/\./g, '')   // 점이 여럿이면 천단위 구분자
+  const n = parseFloat(s)
+  if (!Number.isFinite(n)) return 0
+  return Math.round(paren ? -Math.abs(n) : n)
+}
 /** 수량은 소수가 올 수 있다(0.5개월·1.5시간). 금액과 달리 반올림하지 않는다. */
 export const numOf = (v) => {
   const n = parseFloat(String(v ?? '').replace(/[^0-9.-]/g, ''))

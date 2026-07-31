@@ -109,9 +109,9 @@ router.post('/import/parse', uploadMem.single('file'), (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-const intOf = (v) => parseInt(String(v ?? '').replace(/[^0-9-]/g, ''), 10) || 0
+// 금액 파싱은 lib/money.js 단일 규칙 — 엑셀 서식('1,100,000.00', 회계형식 괄호)이 그대로 들어온다
+const { moneyOf: intOf, numOf } = require('../lib/money')
 const digitsOf = (v) => String(v ?? '').replace(/[^0-9]/g, '')
-const numOf = (v) => { const n = parseFloat(String(v ?? '').replace(/[^0-9.-]/g, '')); return Number.isFinite(n) ? n : 0 }
 
 const refKey = (v) => String(v ?? '').replace(/[\s()\-.,·/]/g, '').toLowerCase()
 
@@ -514,12 +514,23 @@ router.post('/:id/matches', async (req, res, next) => {
     if (!inv) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     const isIssued = inv.kind === 'issued'
 
-    // 과입금 방지: 잔여를 초과하지 않도록 매칭 금액 제한
+    /* 잔여를 넘는 정산은 **거절한다**(예전엔 잘라서 기록했다).
+     *
+     * 자르면 통장에 300만이 들어왔는데 장부에는 100만만 남고, 화면은 "매칭 처리가 완료됐어요"를
+     * 띄운다 — 사용자는 200만이 사라진 걸 모른다. 다른 탭이 먼저 정산해 잔여가 줄었을 때
+     * 실제로 일어나는 일이고, 조용히 틀린 금액은 되돌리기도 어렵다.
+     * 잔여가 바뀐 사실을 알려주고 사용자가 다시 판단하게 하는 편이 맞다. */
     const [[{ paid: prevPaid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [invoiceId])
     const remainBefore = Number(inv.total_amount) - Number(prevPaid)
     if (remainBefore <= 0) { await rollbackQuietly(conn); return res.status(400).json({ error: '이미 정산이 완료된 청구서예요' }) }
-    const matchAmount = Math.min(Number(amount) || 0, remainBefore)
+    const matchAmount = Number(amount) || 0
     if (matchAmount <= 0) { await rollbackQuietly(conn); return res.status(400).json({ error: '매칭 금액이 올바르지 않아요' }) }
+    if (matchAmount > remainBefore) {
+      await rollbackQuietly(conn)
+      return res.status(409).json({
+        error: `남은 금액은 ${remainBefore.toLocaleString('ko-KR')}원이에요`
+             + `(${matchAmount.toLocaleString('ko-KR')}원 입력). 그 사이 다른 정산이 있었는지 확인하고 다시 시도해주세요.` })
+    }
 
     // 매칭 대상 거래: 기존 거래가 있으면 그대로, 없으면 실제 거래를 새로 만들어 거래내역에 반영
     let realTxnId = null

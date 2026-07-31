@@ -82,6 +82,11 @@ const metrics = (r) => {
 // '지급액'에 섞여, 매입계약의 미지급 잔액이 실제보다 적게 보이고 원가는 부풀려진다.
 // (입금은 calcBalance도 status를 보지 않으므로 여기서도 동일하게 맞춘다)
 const PAID = "status='지급완료'"
+/* 계약 성격에 맞는 청구서 종류. 매입 계약(거래처 gubu A=외주/매입, E=기관)은 수취 청구서,
+ * 매출 계약(B=발주처)은 발행 청구서. 판정 기준은 위 isPurchase 와 같아야 한다.
+ * 이 필터가 없으면 외주비 매입 청구서를 매출 계약에 귀속시켰을 때 그 금액이 매출 계약의
+ * '청구액'에 더해지고, 받을 돈이 아닌데 미수금(billed − collected)으로 뜬다. */
+const PURCHASE_KIND = "IF(v.gubu IN ('A','E'), 'received', 'issued')"
 const METRIC_COLS = `
   COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='income'),0)  AS in_done,
   COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='expense' AND ${PAID}),0) AS out_total,
@@ -90,9 +95,17 @@ const METRIC_COLS = `
             AND (c.current_term_start IS NULL OR date >= c.current_term_start)),0)  AS term_in_done,
   COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='expense' AND ${PAID}
             AND (c.current_term_start IS NULL OR date >= c.current_term_start)),0)  AS term_out,
-  COALESCE((SELECT SUM(total_amount) FROM invoices WHERE contract_id=c.id),0) AS billed,
-  COALESCE((SELECT SUM(total_amount) FROM invoices WHERE contract_id=c.id
-            AND (c.current_term_start IS NULL OR issued_at >= c.current_term_start)),0) AS term_billed`
+  /* ⚠ 계약의 성격에 맞는 청구서만 센다.
+   *   매출 계약(gubu='B')에는 발행 청구서(issued), 매입 계약에는 수취 청구서(received).
+   *   kind 필터가 없으면, 외주비 매입 청구서를 프로젝트(매출) 계약에 귀속시켰을 때
+   *   그 금액이 매출 계약의 '청구액'에 더해지고 collected 는 그대로라
+   *   **받을 돈이 아닌데 미수금으로 뜬다**(ar_remain = billed − collected).
+   *   청구서 등록 폼은 매출·매입 구분 없이 모든 계약을 후보로 주므로 실제로 일어나는 입력이다. */
+  COALESCE((SELECT SUM(total_amount) FROM invoices i WHERE i.contract_id=c.id
+            AND i.kind = ${PURCHASE_KIND}),0) AS billed,
+  COALESCE((SELECT SUM(total_amount) FROM invoices i WHERE i.contract_id=c.id
+            AND i.kind = ${PURCHASE_KIND}
+            AND (c.current_term_start IS NULL OR i.issued_at >= c.current_term_start)),0) AS term_billed`
 
 router.get('/', async (req, res, next) => {
   try {
@@ -642,10 +655,15 @@ router.post('/', async (req, res, next) => {
       // 월 정액은 정기청구(매출)/정기지출(매입)로 자동 세팅 → 회차가 도래하면 발행예정에 뜬다
       if (Number(f.unit_amount) > 0 && start_date) {
         if (isPurchase) {
+          /* ⚠ vat_mode 를 반드시 넣는다. 빠뜨리면 recurring.js 가 비목명으로 세액을 유추하는데,
+           * 여기서 category 에 넣는 값은 비목명이 아니라 **계약명**이라 조인이 절대 안 맞는다
+           * → modeFromCatVat(null) → 'none'(면세) → 과세 매입계약인데 매달 부가세 0으로 청구되어
+           *   **매입세액이 매달 사라졌다.** 바로 아래 매출(recurring_invoices)은 원래 넣고 있었다. */
           await conn.execute(
-            `INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, period, day_of_month, start_date, end_date, account_id)
-             VALUES (?,?,?,?,?,?,?,?,?,?)`,
+            `INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
             [randomUUID(), vendor_id || null, id, name || '정기지출', Number(f.unit_amount),
+             vatRateOf(f.vat_mode) === 0 ? 'none' : 'exclusive',
              f.billing_period || 'monthly', f.billing_day || 1, start_date, f.end_date || null, null]
           )
         } else {

@@ -14,8 +14,12 @@ const router = Router()
  */
 router.get('/options', async (req, res, next) => {
   try {
+    // ⚠ 직위 컬럼명은 `role` 이다(`position` 아님 — 그건 position_allowance 뿐).
+    //   틀린 컬럼을 넣었더니 500이 났고, api.js 가 그걸 삼켜 빈 배열을 돌려주면서
+    //   거래 등록 폼의 직원 목록이 통째로 비었다. 더 나쁜 건 수정 저장 시
+    //   `employees.find(...)` 가 undefined 가 되어 employee_id 가 null 로 덮인 것이다.
     const [rows] = await req.db.execute(
-      'SELECT id, emp_no, name, department, position, status FROM employees ORDER BY emp_no ASC')
+      'SELECT id, emp_no, name, department, role, status FROM employees ORDER BY emp_no ASC')
     res.json(rows)
   } catch (e) { next(e) }
 })

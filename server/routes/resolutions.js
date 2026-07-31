@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
 const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
+const { vatFields } = require('../lib/vat')
 const { ledgerError } = require('../lib/ledger')
 const { insertWithDocNo } = require('../lib/docno')
 const { withTx, httpError } = require('../lib/withTx')
@@ -256,12 +257,19 @@ router.post('/:id/process', async (req, res, next) => {
       const id = randomUUID()
       // contract_id 를 청구서에서 승계한다. 안 넣으면 그 매입계약의 지급 내역·원가 실적에서
       // 통째로 빠져, 같은 청구서를 결의서 없이 바로 '지급 처리'했을 때와 숫자가 달라진다.
+      /* 부가세 필드를 채운다. 예전엔 INSERT 목록에 없어 전부 NULL 이었고,
+       * 부가세 집계(routes/tax.js)가 `vat_amount IS NOT NULL` 만 세므로
+       * **청구서 없는 소액경비 결의서의 매입세액이 신고 자료에서 통째로 빠졌다.**
+       * (매입 청구서에서 발행한 결의서는 아래에서 invoice_id 가 붙어 청구서 쪽으로 집계된다) */
+      const vat = vatFields({ amount: amt, tax_type: r.tax_type, vat_deductible: r.vat_deductible })
       await conn.execute(
-        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, memo)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, memo,
+                                   supply_amount, vat_amount, tax_type, vat_deductible)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [id, 'expense', r.vendor_id || null, invContractId, acct, r.title || '지출', amt,
          effDate, r.pay_method || '계좌이체',
-         '지급완료', r.doc_no, `결의서 ${r.doc_no} 집행`])
+         '지급완료', r.doc_no, `결의서 ${r.doc_no} 집행`,
+         vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible])
       linkedTxnId = id
     } else {
       await rollbackQuietly(conn); return res.status(400).json({ error: "mode는 'link' 또는 'create'여야 해요" })

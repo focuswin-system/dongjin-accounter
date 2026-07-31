@@ -28,8 +28,7 @@ const ACCT = {
   investOut: '1502',   // 장기투자증권(자산)
 }
 
-const intOf = (v) => parseInt(String(v ?? '').replace(/[^0-9-]/g, ''), 10) || 0
-const numOf = (v) => { const n = parseFloat(String(v ?? '').replace(/[^0-9.-]/g, '')); return Number.isFinite(n) ? n : 0 }
+const { moneyOf: intOf, numOf } = require('../lib/money')
 
 /** 대출 1건 + 실적 + 잔여 + 다음 회차 */
 async function loanDetail(db, loan) {
