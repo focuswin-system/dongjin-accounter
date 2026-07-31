@@ -58,6 +58,9 @@ async function createPlatformSchema(c) {
       id         VARCHAR(36) PRIMARY KEY,
       company_id VARCHAR(36) NOT NULL,
       name       VARCHAR(50) NOT NULL,
+      -- 이 역할이 뭘 할 수 있는지 한 줄 설명. 역할 배정 화면이 이걸 보여준다
+      -- (권한 개수는 사람이 판단할 수 있는 정보가 아니다 — '275개'로는 뭘 되는지 모른다).
+      description VARCHAR(200) NULL,
       is_system  TINYINT DEFAULT 0,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       UNIQUE KEY uq_company_role (company_id, name),
@@ -167,6 +170,36 @@ async function migratePlatformSchema(c) {
     }
   }
 
+  /* roles.description — 기존 설치본에는 CREATE TABLE IF NOT EXISTS 로 붙지 않는다.
+     (컬럼명이 description 인 이유: `describe` 는 MariaDB 예약어라 백틱 없이는 문법 오류다)
+     역할 배정 화면이 이 값을 보여주므로, 없으면 설명 없는 카드가 된다. */
+  const [[{ dcnt }]] = await c.execute(
+    `SELECT COUNT(*) AS dcnt FROM information_schema.columns
+      WHERE table_schema = ? AND table_name = 'roles' AND column_name = 'description'`, [db])
+  if (dcnt === 0) {
+    try {
+      await c.execute('ALTER TABLE roles ADD COLUMN description VARCHAR(200) NULL AFTER name')
+      console.log('[platform] roles.description 컬럼 추가 완료')
+    } catch (e) { console.warn('[platform] roles.description 추가 실패:', e.code || e.message) }
+  }
+
+  /* 시스템 역할 이름 변경. 역할 id 를 그대로 두고 name 만 바꾸므로
+     이미 배정된 사용자·권한 행(user_roles·role_perms)은 손대지 않는다.
+     ⚠ (company_id, name) 유니크라, 옮길 이름이 이미 있으면 충돌한다 → 그 회사는 건너뛴다
+       (직접 만든 동명 역할을 덮어쓰지 않는 쪽이 안전하다). */
+  const ROLE_RENAMES = [['경리', '실무']]
+  for (const [from, to] of ROLE_RENAMES) {
+    const [olds] = await c.execute(
+      'SELECT id, company_id FROM roles WHERE name = ? AND is_system = 1', [from])
+    for (const r of olds) {
+      const [[clash]] = await c.execute(
+        'SELECT id FROM roles WHERE company_id = ? AND name = ?', [r.company_id, to])
+      if (clash) { console.warn(`[platform] 역할 '${from}'→'${to}' 건너뜀 — 이미 '${to}'가 있음 (회사 ${r.company_id})`); continue }
+      await c.execute('UPDATE roles SET name = ? WHERE id = ?', [to, r.id])
+      console.log(`[platform] 역할 이름 변경 '${from}' → '${to}' (회사 ${r.company_id})`)
+    }
+  }
+
   // 로그인 시도 제한 조회용 인덱스 — 기존 설치본에는 audit_logs가 이미 있어
   // CREATE TABLE IF NOT EXISTS 로는 붙지 않는다.
   const [[{ idxCnt }]] = await c.execute(
@@ -243,7 +276,7 @@ async function bootstrapFirstCompany(c, legacyConn, { code, dbName, fallbackName
 }
 
 /**
- * 회사에 기본 역할(마스터/경리/조회전용) + 권한 매트릭스를 만든다. 이미 있으면 건너뛴다(멱등).
+ * 회사에 기본 역할(마스터/실무/조회전용) + 권한 매트릭스를 만든다. 이미 있으면 건너뛴다(멱등).
  * provisionTenant(신규 회사)와 bootstrapFirstCompany(기존 회사 흡수) 양쪽에서 쓴다.
  */
 async function ensurePresetRoles(c, companyId) {
@@ -259,9 +292,12 @@ async function ensurePresetRoles(c, companyId) {
     let roleId = exist?.id
     if (!roleId) {
       roleId = randomUUID()
-      await c.execute('INSERT INTO roles (id, company_id, name, is_system) VALUES (?,?,?,?)',
-        [roleId, companyId, preset.name, preset.isSystem ? 1 : 0])
+      await c.execute('INSERT INTO roles (id, company_id, name, description, is_system) VALUES (?,?,?,?,?)',
+        [roleId, companyId, preset.name, preset.describe || null, preset.isSystem ? 1 : 0])
       created++
+    } else if (preset.isSystem) {
+      // 설명은 코드가 진실이다 — 프리셋 문구를 고치면 기존 회사에도 반영한다.
+      await c.execute('UPDATE roles SET description = ? WHERE id = ?', [preset.describe || null, roleId])
     }
     // ⚠ 역할이 이미 있어도 권한 행은 항상 채워 넣는다.
     //   건너뛰면, 나중에 permissions.js에 자원이 추가돼도(예: mgmt_ask) 기존 회사의

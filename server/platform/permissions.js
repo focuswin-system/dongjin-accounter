@@ -107,18 +107,21 @@ const PRESET_ROLES = [
   {
     name: '마스터',
     isSystem: true,
-    describe: '모든 화면·기능 + 계정/권한 관리',
+    describe: '모든 화면과 기능. 계정 만들기·역할 배정까지 할 수 있어요.',
     perms: { '*': ACTIONS },
   },
   {
-    name: '경리',
+    /* 이름은 '실무'다. '경리'는 직함이라 이 역할을 받을 사람(구매·영업 담당 등)과 어긋났다.
+     * 기존 회사의 '경리' 역할은 schema.js 의 ROLE_RENAMES 가 이 이름으로 옮긴다
+     * (역할 id 를 유지하므로 이미 배정된 사람의 권한은 그대로다). */
+    name: '실무',
     isSystem: true,
-    describe: '회계 업무 전반(월마감·결재선 포함). 인사급여는 제외, 삭제 권한 없음',
+    describe: '회계 업무 전반을 등록·수정할 수 있어요. 월 마감·결재선도 포함. 인사급여는 볼 수 없고, 삭제는 안 돼요.',
     perms: Object.fromEntries(
       RESOURCE_IDS.map(id => {
         if (HR_RESOURCES.includes(id)) return [id, []]                    // 인사급여 차단
         /* settings 자원 하나가 회사정보·사용자·결재선·월마감을 통째로 관장한다.
-         * 조회만 주면 **경리가 월마감을 못 한다** — 회계의 마지막 행위인데 막혀 있었다
+         * 조회만 주면 **실무 역할이 월마감을 못 한다** — 회계의 마지막 행위인데 막혀 있었다
          * (결재선도 못 만들어 지급결의서 출력이 반쪽이 된다).
          * 계정 관리(사용자 추가·역할 배정)는 이 권한과 무관하게 routes/auth.js 의
          * isMaster(users.role='admin')가 따로 막으므로, 여기서 열어도 계정은 안 열린다. */
@@ -131,7 +134,7 @@ const PRESET_ROLES = [
   {
     name: '조회전용',
     isSystem: true,
-    describe: '전 화면 조회·출력만 가능. 등록/수정/삭제 불가',
+    describe: '모든 화면을 보고 인쇄·내려받기만 할 수 있어요. 등록·수정·삭제는 안 돼요.',
     perms: Object.fromEntries(RESOURCE_IDS.map(id => [id, READ_ONLY])),
   },
 ]

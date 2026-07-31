@@ -184,10 +184,13 @@ router.get('/roles', authMiddleware, async (req, res, next) => {
   try {
     if (!isMaster(req)) return res.status(403).json({ error: '권한이 없습니다' })
     const [rows] = await platformPool.execute(
-      `SELECT r.id, r.name, r.is_system,
+      /* 정렬은 '권한이 넓은 것부터'. 이름순으로 두면 역할 이름을 바꿀 때마다 순서가 바뀐다
+         (실제로 '경리'→'실무'로 바꾸자 목록 맨 앞이던 것이 가운데로 갔다). */
+      `SELECT r.id, r.name, r.description, r.is_system,
               (SELECT COUNT(*) FROM role_perms rp WHERE rp.role_id = r.id) AS perm_count,
               (SELECT COUNT(*) FROM user_roles ur WHERE ur.role_id = r.id) AS user_count
-         FROM roles r WHERE r.company_id = ? ORDER BY r.is_system DESC, r.name`,
+         FROM roles r WHERE r.company_id = ?
+        ORDER BY r.is_system DESC, perm_count DESC, r.name`,
       [req.user.companyId]
     )
     res.json(rows)

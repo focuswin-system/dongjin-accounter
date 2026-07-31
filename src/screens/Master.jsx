@@ -2473,13 +2473,17 @@ const UserPanel = ({ currentUser, embedded = false }) => {
   const [form, setForm] = useState({ username: "", name: "", password: "", role: "user" });
   const [pwTarget, setPwTarget] = useState(null);
   const [newPw, setNewPw] = useState("");
-  // 역할 = 권한 묶음(마스터·경리·조회전용). users.role(admin/user)은 '계정 관리 권한'이라 별개다.
+  // 역할 = 권한 묶음(마스터·실무·조회전용). users.role(admin/user)은 '계정 관리 권한'이라 별개다.
   const [roles, setRoles] = useState([]);
+  const [rolesError, setRolesError] = useState("");
   const [roleTarget, setRoleTarget] = useState(null);   // 역할 배정 중인 사용자
   const [pickedRoles, setPickedRoles] = useState([]);
 
   const load = () => api.getUsers().then(setUsers);
-  useEffect(() => { load(); if (isAdmin) api.getRoles().then(setRoles) }, [isAdmin]);
+  const loadRoles = () => api.getRoles()
+    .then(rs => { setRoles(rs); setRolesError("") })
+    .catch(e => setRolesError(e.message || "역할 목록을 불러오지 못했어요"));
+  useEffect(() => { load(); if (isAdmin) loadRoles() }, [isAdmin]);
 
   const openRoles = (u) => { setRoleTarget(u); setPickedRoles(u.roleIds || []); };
   const saveRoles = async () => {
@@ -2564,7 +2568,15 @@ const UserPanel = ({ currentUser, embedded = false }) => {
           그 경우 권한은 합쳐집니다.
         </div>
         <div className="col gap-8">
-          {roles.length === 0 && <div className="text-sm text-muted2">역할이 없어요.</div>}
+          {/* 못 불러온 것과 '진짜 하나도 없는 것'은 다르다. 전자를 후자로 보여주면
+              역할이 지워진 줄 알고 새로 만들게 된다. */}
+          {rolesError && (
+            <div className="text-sm" style={{ color: "var(--neg-ink)", lineHeight: 1.6 }}>
+              역할 목록을 불러오지 못했어요 — {rolesError}
+              <button className="btn ghost sm" style={{ marginLeft: 8 }} onClick={loadRoles}>다시 시도</button>
+            </div>
+          )}
+          {!rolesError && roles.length === 0 && <div className="text-sm text-muted2">역할이 없어요.</div>}
           {roles.map(r => {
             const on = pickedRoles.includes(r.id);
             return (
@@ -2579,9 +2591,15 @@ const UserPanel = ({ currentUser, embedded = false }) => {
                   {!!r.is_system && <span className="badge outline text-xs">기본</span>}
                   {on && <Icon.Check size={16} style={{ marginLeft: "auto", color: "var(--brand)" }}/>}
                 </div>
-                <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
-                  권한 {r.perm_count}개 · 사용 중 {r.user_count}명
+                {/* 권한 개수(275개…)는 사람이 판단할 수 있는 정보가 아니다 — 그 숫자로는
+                    뭘 할 수 있는지 알 수 없어 역할을 고를 근거가 못 된다. 무엇이 되고
+                    무엇이 안 되는지를 문장으로 보여준다. */}
+                <div className="text-xs text-muted" style={{ marginTop: 4, lineHeight: 1.55 }}>
+                  {r.description || "설명이 없는 역할이에요."}
                 </div>
+                {r.user_count > 0 && (
+                  <div className="text-xs text-muted2" style={{ marginTop: 4 }}>지금 {r.user_count}명이 쓰고 있어요</div>
+                )}
               </button>
             );
           })}
