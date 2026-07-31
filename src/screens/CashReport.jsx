@@ -241,7 +241,9 @@ export const DailyTrialScreen = () => {
   return (
     /* 표가 T자라 폭을 860으로 묶었다. 제목·날짜 이동까지 같은 폭 안에 둬야
        머리글과 표가 한 덩어리로 읽힌다(제목만 왼쪽 끝에 떨어져 있으면 어긋나 보인다). */
-    <div className="fade-up" style={{ maxWidth: 860, margin: '0 auto' }}>
+    /* margin 축약형을 쓰면 React가 marginTop 같은 개별 속성과 섞였다고 경고한다
+       (같은 자리에 다른 화면이 들어왔다 나가면서 스타일이 교체될 때). 개별 속성으로 적는다. */
+    <div className="fade-up" style={{ maxWidth: 860, marginLeft: 'auto', marginRight: 'auto' }}>
       <PageHeader title="일계표"
         sub="하루치 거래를 계정과목별로 차변·대변에 나눠 봅니다"
         actions={

@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, localToday } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
+import { Kpi, KpiRow } from '../lib/components/Kpi'
+import { DataTable } from '../lib/components/DataTable'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { api } from '../lib/api'
 
@@ -290,24 +292,17 @@ const BulkRepayDrawer = ({ loan, cycles, onClose, onDone, accounts }) => {
         <div>
           <label className="label">처리할 회차</label>
           <div className="card" style={{ overflow: 'hidden' }}>
-            <div className="table-scroll" style={{ maxHeight: 220 }}>
-              <table className="table">
-                <thead><tr>
-                  <th style={{ width: 44 }}>회차</th><th>예정일</th>
-                  <th className="num-right">원금</th><th className="num-right">이자</th><th className="num-right">납입</th>
-                </tr></thead>
-                <tbody>
-                  {cycles.map(c => (
-                    <tr key={c.seq}>
-                      <td className="num text-muted2">{c.seq}</td>
-                      <td className="num text-sm">{c.due_date}</td>
-                      <td className="num-cell num-right">{fmtNum(c.principal)}</td>
-                      <td className="num-cell num-right text-muted">{fmtNum(c.interest)}</td>
-                      <td className="num-cell num-right fw-600">{fmtNum(c.total)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+              <DataTable
+                rows={cycles}
+                rowKey={c => c.seq}
+                columns={[
+                  { key: 'seq', header: '회차', width: 56, className: 'num text-muted2' },
+                  { key: 'due_date', header: '예정일', className: 'num text-sm' },
+                  { key: 'principal', header: '원금', align: 'right', className: 'num-cell', render: c => fmtNum(c.principal) },
+                  { key: 'interest', header: '이자', align: 'right', className: 'num-cell text-muted', render: c => fmtNum(c.interest) },
+                  { key: 'total', header: '납입', align: 'right', className: 'num-cell fw-600', render: c => fmtNum(c.total) },
+                ]}/>
             </div>
             <div className="row" style={{ padding: '10px 14px', borderTop: '1px solid var(--line)', background: 'var(--surface-2)' }}>
               <span className="text-sm fw-700">합계</span>
@@ -410,21 +405,12 @@ export const LoanScreen = ({ page = true }) => {
           <Icon.Plus size={14}/> 차입금 등록
         </button>}/>
 
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 20 }}>
-        {[
-          { label: '차입 잔여 원금', value: totalRemaining, sub: `진행 중 ${active.length}건` },
-          { label: '이번 회차 납입액', value: monthlyDue, sub: '원금+이자 합계' },
-          { label: '놓친 상환', value: null, count: overdue.length, sub: overdue.length ? '처리가 필요해요' : '없어요' },
-        ].map(k => (
-          <div key={k.label} className="card card-pad">
-            <div className="text-xs text-muted2">{k.label}</div>
-            <div className="num fw-700" style={{ fontSize: 20, marginTop: 4, color: k.count ? 'var(--neg-ink)' : undefined }}>
-              {k.value != null ? `${fmtNum(k.value)}원` : `${k.count}건`}
-            </div>
-            <div className="text-xs text-muted2" style={{ marginTop: 2 }}>{k.sub}</div>
-          </div>
-        ))}
-      </div>
+      <KpiRow cols={3} style={{ marginBottom: 20 }}>
+        <Kpi label="차입 잔여 원금" value={totalRemaining} badge={`진행 중 ${active.length}건`}/>
+        <Kpi label="이번 회차 납입액" value={monthlyDue} hint="원금+이자 합계"/>
+        <Kpi label="놓친 상환" value={`${overdue.length}건`} tone={overdue.length ? 'neg-ink' : undefined}
+          hint={overdue.length ? '처리가 필요해요' : '없어요'}/>
+      </KpiRow>
 
       {/* 놓친 상환 — 실제로 돈이 나갔을 가능성이 높으니 맨 위에 */}
       {overdue.length > 0 && (
@@ -444,132 +430,72 @@ export const LoanScreen = ({ page = true }) => {
               </button>
             ))}
           </div>
-          <table className="table">
-            <tbody>
-              {overdue.map(({ loan, cycle }) => (
-                <tr key={`${loan.id}-${cycle.seq}`}>
-                  <td className="num text-sm" style={{ width: 170 }}>{cycle.due_date}
-                    <span className={`badge ${ddayTone(cycle.due_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(cycle.due_date)}</span>
-                  </td>
-                  <td className="fw-700">{loan.name}</td>
-                  <td className="text-sm text-muted">{cycle.seq}회차</td>
-                  <td className="num-cell num-right fw-700">{fmtNum(cycle.total)}</td>
-                  <td style={{ width: 120 }}>
-                    <button className="btn sm primary" onClick={() => setRepayTarget({ loan, cycle })}>상환 처리</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            rows={overdue}
+            rowKey={r => `${r.loan.id}-${r.cycle.seq}`}
+            columns={[
+              { key: 'due', header: '예정일', width: 170, render: ({ cycle }) => (
+                <span className="num text-sm">{cycle.due_date}
+                  <span className={`badge ${ddayTone(cycle.due_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(cycle.due_date)}</span>
+                </span>
+              )},
+              { key: 'name', header: '대출명', className: 'fw-700', render: ({ loan }) => loan.name },
+              { key: 'seq', header: '회차', width: 80, className: 'text-sm text-muted', render: ({ cycle }) => `${cycle.seq}회차` },
+              { key: 'total', header: '납입액', width: 130, align: 'right', className: 'num-cell fw-700',
+                render: ({ cycle }) => fmtNum(cycle.total) },
+              { key: 'act', header: '', width: 120, render: (r) => (
+                <button className="btn sm primary" onClick={() => setRepayTarget(r)}>상환 처리</button>
+              )},
+            ]}/>
         </div>
       )}
 
       <div className="card" style={{ overflow: 'hidden' }}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>대출명</th><th>기관</th><th>방식</th>
-              <th className="num-right">원금</th><th className="num-right">잔여</th>
-              <th>다음 상환</th><th style={{ width: 60 }}>상태</th><th style={{ width: 150 }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {loans.length === 0 && (
-              <tr><td colSpan={8} className="text-sm text-muted" style={{ textAlign: 'center', padding: 24 }}>
-                등록된 차입금이 없어요. 대출·관계사 차입을 등록하면 상환 스케줄이 자동으로 만들어집니다.
-              </td></tr>
-            )}
-            {loans.map(l => (
-              <>
-                <tr key={l.id} style={{ opacity: l.status === 'closed' ? 0.5 : 1 }}>
-                  <td className="fw-700" style={{ cursor: 'pointer' }} onClick={() => setOpenId(openId === l.id ? null : l.id)}>
-                    <Icon.Right size={11} style={{ transform: openId === l.id ? 'rotate(90deg)' : 'none', marginRight: 4 }}/>
-                    {l.name}
-                  </td>
-                  <td className="text-sm text-muted">{l.lender || l.vendor_name || '—'}</td>
-                  <td className="text-sm">{METHOD_LABEL[l.method]}
-                    <span className="text-xs text-muted2"> · {Number(l.annual_rate) || 0}%</span>
-                  </td>
-                  <td className="num-cell num-right">{fmtNum(l.principal)}</td>
-                  <td className="num-cell num-right fw-700">{fmtNum(l.remaining)}</td>
-                  <td className="text-sm">
-                    {l.next_cycle ? (
-                      <>{l.next_cycle.due_date}
-                        <span className={`badge ${ddayTone(l.next_cycle.due_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>
-                          {dday(l.next_cycle.due_date)}
-                        </span></>
-                    ) : '—'}
-                  </td>
-                  <td><span className={`badge ${l.status === 'active' ? 'brand' : 'outline'}`}>
-                    {l.status === 'active' ? '진행' : '완료'}</span></td>
-                  <td>
-                    <div className="row gap-6">
-                      {l.next_cycle && (
-                        <button className="btn sm primary" style={{ fontSize: 11, padding: '3px 8px' }}
-                          onClick={() => setRepayTarget({ loan: l, cycle: l.next_cycle })}>상환</button>
-                      )}
-                      <button className="btn" style={{ fontSize: 11, padding: '3px 8px' }}
-                        onClick={() => { setEditing(l); setFormOpen(true) }}>수정</button>
-                      <button className="btn" style={{ fontSize: 11, padding: '3px 8px', color: 'var(--neg-ink)' }}
-                        onClick={() => handleDelete(l)}>삭제</button>
-                    </div>
-                  </td>
-                </tr>
-                {openId === l.id && (
-                  <tr key={l.id + '-detail'}>
-                    <td colSpan={8} style={{ background: 'var(--surface-2)', padding: 16 }}>
-                      <div className="row" style={{ marginBottom: 8, gap: 16, flexWrap: 'wrap' }}>
-                        <span className="text-sm">총 이자 <b className="num">{fmtNum(l.totals?.interest || 0)}</b>원</span>
-                        <span className="text-sm">총 상환 <b className="num">{fmtNum(l.totals?.total || 0)}</b>원</span>
-                        <span className="text-sm">처리 {l.paid_count}/{l.totals?.months}회차</span>
-                      </div>
-                      <div className="table-scroll" style={{ maxHeight: 280 }}>
-                        <table className="table">
-                          <thead><tr>
-                            <th style={{ width: 50 }}>회차</th><th>예정일</th>
-                            <th className="num-right">원금</th><th className="num-right">이자</th>
-                            <th className="num-right">납입액</th><th className="num-right">잔액</th>
-                            <th style={{ width: 110 }}>처리</th>
-                          </tr></thead>
-                          <tbody>
-                            {(l.schedule || []).map(c => {
-                              const done = l.repayments.find(r => r.seq === c.seq && r.paid_date)
-                              const isNext = l.next_cycle?.seq === c.seq
-                              return (
-                                <tr key={c.seq} style={{ opacity: done ? 0.6 : 1 }}>
-                                  <td className="num text-muted2">{c.seq}</td>
-                                  <td className="num text-sm">{c.due_date}</td>
-                                  <td className="num-cell num-right">{fmtNum(c.principal)}</td>
-                                  <td className="num-cell num-right text-muted">{fmtNum(c.interest)}</td>
-                                  <td className="num-cell num-right fw-600">{fmtNum(c.total)}</td>
-                                  <td className="num-cell num-right text-muted2">{fmtNum(c.balance)}</td>
-                                  <td>
-                                    {done ? (
-                                      <div className="row gap-4" style={{ alignItems: 'center' }}>
-                                        <span className="badge pos" style={{ fontSize: 10 }}>{done.paid_date}</span>
-                                        <button className="btn ghost sm" style={{ fontSize: 10, padding: '1px 5px' }}
-                                          onClick={() => cancelRepay(l, c.seq)}>취소</button>
-                                      </div>
-                                    ) : isNext ? (
-                                      <button className="btn sm primary" style={{ fontSize: 10, padding: '2px 7px' }}
-                                        onClick={() => setRepayTarget({ loan: l, cycle: c })}>상환 처리</button>
-                                    ) : (
-                                      <span className="text-xs text-muted2">앞선 회차부터</span>
-                                    )}
-                                  </td>
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </td>
-                  </tr>
+        <DataTable
+          rows={loans}
+          empty="등록된 차입금이 없어요. 대출·관계사 차입을 등록하면 상환 스케줄이 자동으로 만들어집니다."
+          renderExpanded={l => (openId === l.id ? <LoanSchedule loan={l} onRepay={setRepayTarget} onCancel={cancelRepay}/> : null)}
+          columns={[
+            { key: 'name', header: '대출명', sortable: true, className: 'fw-700', render: l => (
+              <span style={{ cursor: 'pointer', opacity: l.status === 'closed' ? 0.5 : 1 }}
+                onClick={() => setOpenId(openId === l.id ? null : l.id)}>
+                <Icon.Right size={11} style={{ transform: openId === l.id ? 'rotate(90deg)' : 'none', marginRight: 4 }}/>
+                {l.name}
+              </span>
+            )},
+            { key: 'lender', header: '기관', className: 'text-sm text-muted', sortable: true,
+              render: l => l.lender || l.vendor_name || '—' },
+            { key: 'method', header: '방식', className: 'text-sm', render: l => (
+              <>{METHOD_LABEL[l.method]}<span className="text-xs text-muted2"> · {Number(l.annual_rate) || 0}%</span></>
+            )},
+            { key: 'principal', header: '원금', align: 'right', className: 'num-cell', sortable: true,
+              sortValue: l => Number(l.principal) || 0, render: l => fmtNum(l.principal) },
+            { key: 'remaining', header: '잔여', align: 'right', className: 'num-cell fw-700', sortable: true,
+              sortValue: l => Number(l.remaining) || 0, render: l => fmtNum(l.remaining) },
+            { key: 'next', header: '다음 상환', className: 'text-sm',
+              sortValue: l => l.next_cycle?.due_date || null, sortable: true, render: l => (l.next_cycle ? (
+                <>{l.next_cycle.due_date}
+                  <span className={`badge ${ddayTone(l.next_cycle.due_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>
+                    {dday(l.next_cycle.due_date)}
+                  </span></>
+              ) : '—')},
+            { key: 'status', header: '상태', width: 70, render: l => (
+              <span className={`badge ${l.status === 'active' ? 'brand' : 'outline'}`}>
+                {l.status === 'active' ? '진행' : '완료'}</span>
+            )},
+            { key: 'act', header: '', width: 160, render: l => (
+              <div className="row gap-6">
+                {l.next_cycle && (
+                  <button className="btn sm primary" style={{ fontSize: 11, padding: '3px 8px' }}
+                    onClick={() => setRepayTarget({ loan: l, cycle: l.next_cycle })}>상환</button>
                 )}
-              </>
-            ))}
-          </tbody>
-        </table>
+                <button className="btn" style={{ fontSize: 11, padding: '3px 8px' }}
+                  onClick={() => { setEditing(l); setFormOpen(true) }}>수정</button>
+                <button className="btn" style={{ fontSize: 11, padding: '3px 8px', color: 'var(--neg-ink)' }}
+                  onClick={() => handleDelete(l)}>삭제</button>
+              </div>
+            )},
+          ]}/>
       </div>
 
       <LoanFormDrawer open={formOpen} editing={editing} vendors={vendors} accounts={accounts}
@@ -581,6 +507,47 @@ export const LoanScreen = ({ page = true }) => {
     </div>
   )
 }
+
+/* 상환 스케줄 — 대출 행을 펼치면 나온다.
+ * 회차는 앞에서부터 순서대로만 처리할 수 있다(건너뛰면 잔액이 어긋난다).
+ * 그래서 '다음 회차'에만 버튼을 주고 나머지는 왜 못 누르는지 적어둔다. */
+const LoanSchedule = ({ loan: l, onRepay, onCancel }) => (
+  <div style={{ padding: 16 }}>
+    <div className="row" style={{ marginBottom: 8, gap: 16, flexWrap: 'wrap' }}>
+      <span className="text-sm">총 이자 <b className="num">{fmtNum(l.totals?.interest || 0)}</b>원</span>
+      <span className="text-sm">총 상환 <b className="num">{fmtNum(l.totals?.total || 0)}</b>원</span>
+      <span className="text-sm">처리 {l.paid_count}/{l.totals?.months}회차</span>
+    </div>
+    <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+      <DataTable
+        rows={l.schedule || []}
+        rowKey={c => c.seq}
+        columns={[
+          { key: 'seq', header: '회차', width: 60, className: 'num text-muted2' },
+          { key: 'due_date', header: '예정일', className: 'num text-sm' },
+          { key: 'principal', header: '원금', align: 'right', className: 'num-cell', render: c => fmtNum(c.principal) },
+          { key: 'interest', header: '이자', align: 'right', className: 'num-cell text-muted', render: c => fmtNum(c.interest) },
+          { key: 'total', header: '납입액', align: 'right', className: 'num-cell fw-600', render: c => fmtNum(c.total) },
+          { key: 'balance', header: '잔액', align: 'right', className: 'num-cell text-muted2', render: c => fmtNum(c.balance) },
+          { key: 'act', header: '처리', width: 120, render: c => {
+            const done = l.repayments.find(r => r.seq === c.seq && r.paid_date)
+            if (done) return (
+              <div className="row gap-4" style={{ alignItems: 'center' }}>
+                <span className="badge pos" style={{ fontSize: 10 }}>{done.paid_date}</span>
+                <button className="btn ghost sm" style={{ fontSize: 10, padding: '1px 5px' }}
+                  onClick={() => onCancel(l, c.seq)}>취소</button>
+              </div>
+            )
+            if (l.next_cycle?.seq === c.seq) return (
+              <button className="btn sm primary" style={{ fontSize: 10, padding: '2px 7px' }}
+                onClick={() => onRepay({ loan: l, cycle: c })}>상환 처리</button>
+            )
+            return <span className="text-xs text-muted2">앞선 회차부터</span>
+          }},
+        ]}/>
+    </div>
+  </div>
+)
 
 /* ── 투자 화면 ───────────────────────────────────────────────── */
 const InvestFormDrawer = ({ open, onClose, onSave, vendors, accounts }) => {
@@ -709,18 +676,10 @@ export const InvestmentScreen = () => {
           <Icon.Plus size={14}/> 투자 등록
         </button>}/>
 
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: 16, marginBottom: 20 }}>
-        <div className="card card-pad">
-          <div className="text-xs text-muted2">투자받은 돈 · 자본</div>
-          <div className="num fw-700" style={{ fontSize: 20, marginTop: 4 }}>{fmtNum(sumIn)}원</div>
-          <div className="text-xs text-muted2" style={{ marginTop: 2 }}>수익이 아니라 자본으로 잡혀요</div>
-        </div>
-        <div className="card card-pad">
-          <div className="text-xs text-muted2">투자한 돈 · 투자자산</div>
-          <div className="num fw-700" style={{ fontSize: 20, marginTop: 4 }}>{fmtNum(sumOut)}원</div>
-          <div className="text-xs text-muted2" style={{ marginTop: 2 }}>비용이 아니라 자산으로 잡혀요</div>
-        </div>
-      </div>
+      <KpiRow cols={2} style={{ marginBottom: 20 }}>
+        <Kpi label="투자받은 돈 · 자본" value={sumIn} hint="수익이 아니라 자본으로 잡혀요"/>
+        <Kpi label="투자한 돈 · 투자자산" value={sumOut} hint="비용이 아니라 자산으로 잡혀요"/>
+      </KpiRow>
 
       <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <div className="section-title" style={{ fontSize: 13 }}>투자 기록 {shown.length}건</div>
@@ -732,40 +691,28 @@ export const InvestmentScreen = () => {
       </div>
 
       <div className="card" style={{ overflow: 'hidden' }}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th style={{ width: 90 }}>구분</th><th>상대</th><th>일자</th>
-              <th className="num-right">금액</th><th>내역</th><th style={{ width: 70 }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {shown.length === 0 && (
-              <tr><td colSpan={6} className="text-sm text-muted" style={{ textAlign: 'center', padding: 24 }}>
-                투자 기록이 없어요.
-              </td></tr>
-            )}
-            {shown.map(r => (
-              <tr key={r.id}>
-                <td><span className={`badge ${r.direction === 'in' ? 'brand' : 'outline'}`}>
-                  {r.direction === 'in' ? '받은 돈' : '한 돈'}</span></td>
-                <td className="fw-700">{r.counterparty}
-                  {r.vendor_name && <span className="text-xs text-muted2"> · {r.vendor_name}</span>}</td>
-                <td className="num text-sm">{r.invested_at}</td>
-                <td className="num-cell num-right fw-700">{fmtNum(r.amount)}</td>
-                <td className="text-sm text-muted">
-                  {r.direction === 'in'
-                    ? <>자본금 {fmtNum(r.capital_amount)}{r.premium_amount > 0 && ` · 주식발행초과금 ${fmtNum(r.premium_amount)}`}</>
-                    : (r.memo || '투자자산')}
-                </td>
-                <td>
-                  <button className="btn" style={{ fontSize: 11, padding: '3px 8px', color: 'var(--neg-ink)' }}
-                    onClick={() => handleDelete(r)}>삭제</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable
+          rows={shown}
+          empty="투자 기록이 없어요."
+          columns={[
+            { key: 'direction', header: '구분', width: 90, render: r => (
+              <span className={`badge ${r.direction === 'in' ? 'brand' : 'outline'}`}>
+                {r.direction === 'in' ? '받은 돈' : '한 돈'}</span>
+            )},
+            { key: 'counterparty', header: '상대', className: 'fw-700', sortable: true, render: r => (
+              <>{r.counterparty}{r.vendor_name && <span className="text-xs text-muted2"> · {r.vendor_name}</span>}</>
+            )},
+            { key: 'invested_at', header: '일자', className: 'num text-sm', sortable: true },
+            { key: 'amount', header: '금액', align: 'right', className: 'num-cell fw-700', sortable: true,
+              sortValue: r => Number(r.amount) || 0, render: r => fmtNum(r.amount) },
+            { key: 'detail', header: '내역', className: 'text-sm text-muted', render: r => (r.direction === 'in'
+              ? <>자본금 {fmtNum(r.capital_amount)}{r.premium_amount > 0 && ` · 주식발행초과금 ${fmtNum(r.premium_amount)}`}</>
+              : (r.memo || '투자자산')) },
+            { key: 'act', header: '', width: 70, render: r => (
+              <button className="btn" style={{ fontSize: 11, padding: '3px 8px', color: 'var(--neg-ink)' }}
+                onClick={() => handleDelete(r)}>삭제</button>
+            )},
+          ]}/>
       </div>
 
       <InvestFormDrawer open={formOpen} vendors={vendors} accounts={accounts}
@@ -793,15 +740,9 @@ export const FinanceDashScreen = () => {
     <div className="fade-up">
       <PageHeader title="재무 현황"
         sub={s?.overdue_count > 0 ? `상환일이 지난 회차 ${s.overdue_count}건` : undefined}/>
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 20 }}>
-        {cards.map(c => (
-          <div key={c.label} className="card card-pad">
-            <div className="text-xs text-muted2">{c.label}</div>
-            <div className="num fw-700" style={{ fontSize: 20, marginTop: 4 }}>{fmtNum(c.v || 0)}원</div>
-            <div className="text-xs text-muted2" style={{ marginTop: 2 }}>{c.sub}</div>
-          </div>
-        ))}
-      </div>
+      <KpiRow cols={cards.length} style={{ marginBottom: 20 }}>
+        {cards.map(c => <Kpi key={c.label} label={c.label} value={c.v || 0} hint={c.sub}/>)}
+      </KpiRow>
       <div className="card card-pad">
         <div className="section-title" style={{ marginBottom: 6 }}>재무 거래는 손익이 아닙니다</div>
         <div className="text-sm text-muted" style={{ lineHeight: 1.7 }}>
