@@ -794,6 +794,57 @@ async function initDb(conn) {
       )
     `)
 
+    /* 예금·적금 — 자금 '운용'. 차입금(자금 조달)의 거울상이다.
+     *
+     * accounts 에 넣지 않은 이유: accounts 는 11개 화면에서 결제수단 드롭다운으로 쓰인다.
+     * 적금을 섞으면 그 전부를 걸러야 하고, 한 곳만 빠뜨려도 '적금에서 외주비 지급' 같은 게
+     * 조용히 만들어진다(마감 우회와 같은 실패 패턴). 자금일보에서 '묶인 자금'으로 합산한다.
+     *
+     * 회계상 정기예금·적금은 현금및현금성자산이 아니라 금융상품이다 —
+     * 1201 단기금융상품(1년 이내) / 1501 장기금융상품(1년 초과). 그래서 acct_code 를 둔다.
+     * 납입은 자산 증가라 손익이 아니다(lib/pnl.js 가 acct_type='자산'으로 걸러낸다). */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS savings (
+        id             VARCHAR(36) PRIMARY KEY,
+        name           VARCHAR(200) NOT NULL,
+        bank           VARCHAR(200),
+        vendor_id      VARCHAR(36),
+        kind           ENUM('installment','deposit') NOT NULL DEFAULT 'installment',
+        principal      BIGINT DEFAULT 0,          -- 예금: 예치 원금 / 적금: 0(납입으로 쌓인다)
+        monthly_amount BIGINT DEFAULT 0,          -- 적금 월 납입액
+        annual_rate    DECIMAL(6,3) DEFAULT 0,
+        term_months    INT NOT NULL DEFAULT 12,
+        start_date     VARCHAR(20) NOT NULL,
+        pay_day        INT DEFAULT 1,
+        maturity_date  VARCHAR(20),
+        account_id     VARCHAR(36),               -- 납입 출금 / 만기 입금 계좌(보통예금)
+        acct_code      VARCHAR(10),               -- 1201 단기금융상품 / 1501 장기금융상품
+        acct_code_interest VARCHAR(10),           -- 만기 이자수익 계정(INC-204 계열)
+        status         ENUM('active','matured','closed') NOT NULL DEFAULT 'active',
+        memo           TEXT,
+        txn_id         VARCHAR(36),               -- 예금 가입 시 출금 거래
+        matured_at     VARCHAR(20),
+        txn_maturity_id  VARCHAR(36),             -- 만기 원금 입금 거래
+        txn_interest_id  VARCHAR(36),             -- 만기 이자 입금 거래
+        created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (vendor_id) REFERENCES vendors(id)
+      )
+    `)
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS savings_payments (
+        id          VARCHAR(36) PRIMARY KEY,
+        savings_id  VARCHAR(36) NOT NULL,
+        seq         INT NOT NULL,
+        due_date    VARCHAR(20) NOT NULL,
+        amount      BIGINT NOT NULL DEFAULT 0,
+        paid_date   VARCHAR(20),
+        txn_id      VARCHAR(36),
+        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_savings_seq (savings_id, seq),
+        FOREIGN KEY (savings_id) REFERENCES savings(id) ON DELETE CASCADE
+      )
+    `)
+
     // ── 마이그레이션: 기존 DB에 신규 컬럼 추가 (MySQL은 ADD COLUMN IF NOT EXISTS 미지원) ──
     const ensureColumn = async (table, col, ddl) => {
       const [[{ cnt }]] = await c.execute(
@@ -849,6 +900,25 @@ async function initDb(conn) {
     // 선택 입력: 품목(ref_items) · 계정과목(account_subjects 코드)
     await ensureColumn('transactions', 'item_id',      "item_id VARCHAR(36)")
     await ensureColumn('transactions', 'account_code', "account_code VARCHAR(10)")
+
+    /* 계좌의 계정과목 — 일계표(복식 전개)에 필요하다.
+     *
+     * 이 앱의 거래는 겉보기엔 단식(income/expense)이지만 실은 복식 한 쌍을 담고 있다.
+     *   입금: 차변 = 계좌 계정과목(보통예금)   / 대변 = transactions.account_code
+     *   지출: 차변 = transactions.account_code / 대변 = 계좌 계정과목
+     * 계좌 쪽 계정과목이 없으면 차변·대변 한쪽이 비어 일계표 합계가 맞지 않는다.
+     *
+     * 기본값은 계좌 종류(type)를 따라간다 — 현금 1101 / 당좌예금 1102 / 그 외 보통예금 1103.
+     * 카드는 실제로는 미지급금이지만 이 앱은 카드 지출도 즉시 출금으로 다루므로 보통예금으로 둔다
+     * (카드 결제일·미결제 잔액 개념이 아직 없다. 생기면 2101 미지급금으로 바꿔야 한다). */
+    await ensureColumn('accounts', 'acct_code', "acct_code VARCHAR(10)")
+    const [acctFill] = await c.execute(`
+      UPDATE accounts SET acct_code = CASE
+        WHEN type = '현금'     THEN '1101'
+        WHEN type = '당좌예금' THEN '1102'
+        ELSE '1103' END
+      WHERE acct_code IS NULL OR acct_code = ''`)
+    if (acctFill.affectedRows > 0) console.log(`[db] 계좌 계정과목 ${acctFill.affectedRows}건 기본값 설정`)
     // ── 거래의 두 축 ──
     // contract_id      이 돈이 나가고/들어오는 '근거 계약'. 수금=매출계약, 지급=매입계약(외주 계약 등)
     // cost_contract_id 이 지출이 '어느 매출계약의 원가'인지. (외주비는 매입계약에 지급되면서 동시에 매출건의 원가다)
@@ -913,6 +983,8 @@ async function initDb(conn) {
      * 동시에 존재했다(계좌 잔액은 그대로, 미수금은 부활). 기존 행은 0(보수적으로 유지). */
     await ensureColumn('invoice_matches', 'txn_created', "txn_created TINYINT(1) NOT NULL DEFAULT 0")
     await ensureColumn('transactions', 'loan_id',       "loan_id VARCHAR(36)")
+    // 예적금 납입·만기 거래를 되짚기 위한 역참조(대출의 loan_id와 같은 역할)
+    await ensureColumn('transactions', 'savings_id',    "savings_id VARCHAR(36)")
     await ensureColumn('transactions', 'investment_id', "investment_id VARCHAR(36)")
     // 적격증빙 유형(ref_items type='evidence_type')의 매입세액 공제 가능 여부.
     // 세금계산서·카드전표·현금영수증(지출증빙)은 공제, 간이영수증·거래명세서는 불공제.

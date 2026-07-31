@@ -18,6 +18,8 @@ import { HRScreen } from './screens/HR'
 import { LaborContractScreen, OutsourcingScreen } from './screens/WorkContract'
 import { MasterScreen, RefMasterPanel, REF_CONFIGS, RecurringExpensePanel, RecurringInvoicePanel } from './screens/Master'
 import { LoanScreen, InvestmentScreen, FinanceDashScreen } from './screens/Finance'
+import { SavingsScreen } from './screens/Savings'
+import { CashReportScreen, DailyTrialScreen } from './screens/CashReport'
 import { BillingScreen } from './screens/Billing'
 import { TaxVatScreen, OtherTaxScreen } from './screens/Tax'
 import { MiscPLScreen } from './screens/MiscPL'
@@ -490,8 +492,11 @@ function AppInner({ onLogout, user }) {
       // 재무관리 — 차입금·투자. 손익이 아니라 부채·자본이다(server/lib/pnl.js)
       case "finance_loan":       return <LoanScreen/>;
       case "finance_investment": return <InvestmentScreen/>;
+      case "finance_savings":    return <SavingsScreen/>;
       case "finance_dash":       return <FinanceDashScreen/>;
 
+      case "cash_report":     return <CashReportScreen/>;
+      case "report_daily":    return <DailyTrialScreen/>;
       case "report":          return <ReportsScreen/>;
       case "tax_vat":         return <TaxVatScreen/>;
       case "tax_etc":         return <OtherTaxScreen/>;

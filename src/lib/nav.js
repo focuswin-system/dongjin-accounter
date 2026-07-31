@@ -90,6 +90,12 @@ export const NAV_TREE = [
         { id: "finance_loan",       label: "차입금",   icon: Icon.Wallet },
         { id: "finance_investment", label: "투자",     icon: Icon.Trend },
       ]},
+      /* 조달과 운용은 한 쌍이다. 적금은 대출의 거울상이라(매월 넣고 만기에 받는다)
+       * 같은 도메인에서 마주보게 둔다. 보통예금·카드 같은 '결제수단'은 기준정보에 남는다 —
+       * 예적금은 묶여 있어 당장 못 쓰는 돈이라 성격이 다르다. */
+      { label: "자금 운용", items: [
+        { id: "finance_savings",    label: "예금·적금", icon: Icon.Bank },
+      ]},
       { label: "현황", items: [
         { id: "finance_dash",       label: "재무 현황", icon: Icon.Chart },
       ]},
@@ -98,8 +104,15 @@ export const NAV_TREE = [
   {
     type: "domain", id: "mgmt", label: "경영관리", icon: Icon.Trend,
     sections: [
+      /* 자금일보는 매일 아침 제일 먼저 여는 화면이다. 보고서(월 1~2회 보는 과거 집계) 안에
+       * 묻으면 매일 3클릭이 되고, 그러면 안 본다. 그래서 잎으로 세운다.
+       * 일계표는 반대다 — 그날 분개를 맞추는 과거 집계라 보고서 안이 맞다. */
+      { label: "자금", items: [
+        { id: "cash_report", label: "자금일보", icon: Icon.Bank },
+      ]},
       { label: "장부관리", items: [
         { id: "report", label: "보고서", icon: Icon.Chart },
+        { id: "report_daily", label: "일계표", icon: Icon.Book },
       ]},
       { label: "경영관리", items: [
         { id: "mgmt_dash", label: "경영 대시보드", icon: Icon.Trend },
@@ -185,10 +198,25 @@ export const PORTAL = [
     ],
   },
   {
+    /* 재무관리는 사이드바에만 있고 홈 포털에서 빠져 있었다 — 홈에서는 들어갈 길이 없었다는 뜻이다.
+     * (nav.js NAV_TREE 와 PORTAL 이 어긋나 있던 자리) */
+    id: 'finance', label: '재무관리', icon: Icon.Bank,
+    categories: [
+      { id: 'finance_fund', label: '자금 조달', icon: Icon.Wallet, desc: '차입금·투자', groups: [
+        { label: '', items: ['finance_loan', 'finance_investment'] },
+      ]},
+      { id: 'finance_ops', label: '자금 운용', icon: Icon.Bank, desc: '예금·적금', route: 'finance_savings' },
+      { id: 'finance_status', label: '재무 현황', icon: Icon.Chart, desc: '차입·투자 현황', route: 'finance_dash' },
+    ],
+  },
+  {
     id: 'mgmt', label: '경영관리', icon: Icon.Trend,
     // 좌측 사이드바 섹션과 맞춘다: 장부관리(보고서) / 경영관리(경영 대시보드·경영 도우미)
     categories: [
-      { id: 'mgmt_report', label: '장부관리', icon: Icon.Chart, desc: '보고서·집계 자료', route: 'report' },
+      { id: 'mgmt_cash', label: '자금일보', icon: Icon.Bank, desc: '오늘 잔액과 앞으로 들어올·나갈 돈', route: 'cash_report' },
+      { id: 'mgmt_report', label: '장부관리', icon: Icon.Chart, desc: '보고서·일계표', groups: [
+        { label: '', items: ['report', 'report_daily'] },
+      ]},
       { id: 'mgmt_biz', label: '경영관리', icon: Icon.Trend, desc: '경영 대시보드·도우미', groups: [
         { label: '', items: ['mgmt_dash', 'mgmt_ask'] },
       ]},

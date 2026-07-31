@@ -46,6 +46,7 @@ const API_RESOURCES = {
   '/api/quote-reqs':          ['quote_req'],
   '/api/tax':                 ['tax_vat', 'tax_etc'],
   '/api/finance':             ['finance_loan', 'finance_investment', 'finance_dash'],
+  '/api/savings':             ['finance_savings'],
   '/api/vendors':             ['master_vendor'],
   '/api/account-subjects':    ['master_accountSubject'],
   '/api/categories':          ['master_category'],
@@ -60,7 +61,8 @@ const API_RESOURCES = {
   '/api/employ-types':        ['hrbase_employType'],
   '/api/hr-codes':            ['hrbase_department', 'hrbase_position'],
   '/api/analytics':           ['mgmt_ask', 'mgmt_dash', 'report'],
-  '/api/dashboard':           ['home'],
+  // 홈 요약과 자금일보·일계표를 한 라우터가 받는다(같은 집계를 쓴다)
+  '/api/dashboard':           ['home', 'cash_report', 'report_daily'],
   '/api/closings':            ['settings'],
   '/api/company':             ['settings'],
   '/api/approval-presets':    ['settings'],

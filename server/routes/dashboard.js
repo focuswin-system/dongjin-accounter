@@ -1,76 +1,133 @@
 const { Router } = require('express')
-const { kstDate } = require('../db')
+const { kstDate, kstToday } = require('../db')
+const { pendingCond } = require('../lib/invoiceStatus')
+const { balancesAsOf, upcomingFlows, project, dailyTrial } = require('../lib/cashReport')
+const { paidPrincipal } = require('../lib/savings')
+const { remainingPrincipal } = require('../lib/loan')
 
 const router = Router()
 
+/* 홈 요약 · 자금일보 · 일계표.
+ *
+ * ⚠ 이 파일은 한동안 죽어 있었다 — 프런트에서 아무도 부르지 않았고, pendingCond import 가
+ *   빠져 있어 호출되면 바로 터졌다. 게다가 잔액 산식이 routes/accounts.js 와 달라
+ *   (수입에 status 조건이 없었다) 살아났더라도 화면마다 잔액이 다르게 나왔을 것이다.
+ *   지금은 집계 로직을 lib/cashReport.js 한 곳에 두고 accounts.js 와 같은 산식을 쓴다.
+ *
+ * ⚠ 멀티테넌트 — req.db 로만 질의한다.
+ */
+
+const num = (v) => Number(v) || 0
+
+/** 미수/미지급 잔액 합계 — 이미 정산된 부분을 뺀 '남은 돈' */
+async function openInvoiceTotal(db, kind) {
+  const cond = pendingCond(kind)
+  const [[r]] = await db.execute(`
+    SELECT COALESCE(SUM(i.total_amount), 0) AS total,
+           COALESCE(SUM((SELECT COALESCE(SUM(amount),0) FROM invoice_matches WHERE invoice_id = i.id)), 0) AS matched,
+           COUNT(*) AS cnt
+      FROM invoices i
+     WHERE i.kind = ? AND ${cond.sql}`, [kind, ...cond.params])
+  return { total: num(r.total) - num(r.matched), count: Number(r.cnt) }
+}
+
+/** 묶인 자금 — 예적금에 들어가 있어 당장 못 쓰는 돈 */
+async function lockedFunds(db) {
+  const [rows] = await db.execute("SELECT * FROM savings WHERE status='active'")
+  let total = 0
+  const items = []
+  for (const s of rows) {
+    const [pays] = await db.execute(
+      'SELECT amount FROM savings_payments WHERE savings_id = ? AND paid_date IS NOT NULL', [s.id])
+    const bal = paidPrincipal(s, pays)
+    total += bal
+    items.push({ id: s.id, name: s.name, bank: s.bank, kind: s.kind, balance: bal, maturity_date: s.maturity_date })
+  }
+  return { total, items }
+}
+
+/** 차입 잔여 원금 */
+async function loanRemaining(db) {
+  const [loans] = await db.execute("SELECT id, name, principal FROM loans WHERE status='active'")
+  let total = 0
+  for (const l of loans) {
+    const [reps] = await db.execute('SELECT principal FROM loan_repayments WHERE loan_id = ?', [l.id])
+    total += remainingPrincipal(l.principal, reps)
+  }
+  return { total, count: loans.length }
+}
+
+/**
+ * 자금일보.
+ *
+ * @query date  기준일(기본 오늘). 과거 날짜를 주면 그날 시점으로 되짚는다.
+ * @query days  앞으로 며칠까지 볼지(기본 30). 자금 압박은 보통 한 달 안에 드러난다.
+ */
+router.get('/cash-report', async (req, res, next) => {
+  try {
+    const date = req.query.date || kstToday()
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 180)
+    const to = kstDate(new Date(`${date}T00:00:00Z`).getTime() + days * 86400000 - 9 * 3600 * 1000)
+
+    const accounts = await balancesAsOf(req.db, date)
+    // 가용 자금 = 통장에 있어 당장 쓸 수 있는 돈. 카드는 결제수단이지 보유 자금이 아니다.
+    const available = accounts.filter(a => a.kind !== 'card').reduce((s, a) => s + a.balance, 0)
+
+    const [locked, loan, ar, ap, flows] = await Promise.all([
+      lockedFunds(req.db),
+      loanRemaining(req.db),
+      openInvoiceTotal(req.db, 'issued'),
+      openInvoiceTotal(req.db, 'received'),
+      upcomingFlows(req.db, { from: date, to }),
+    ])
+
+    res.json({
+      date, days, to,
+      accounts,
+      available,                    // 지금 쓸 수 있는 돈
+      locked: locked.total,         // 예적금에 묶인 돈
+      lockedItems: locked.items,
+      totalAssets: available + locked.total,
+      loanRemaining: loan.total,
+      loanCount: loan.count,
+      receivable: ar,               // 받을 돈
+      payable: ap,                  // 나갈 돈
+      // 앞으로 N일 — 이 문서의 결론은 forecast.lowest 다("며칠에 얼마까지 떨어지나")
+      forecast: project(available, flows, { from: date, to }),
+    })
+  } catch (e) { next(e) }
+})
+
+/** 일계표 — 하루치 거래를 계정과목별 차변/대변으로 */
+router.get('/daily-trial', async (req, res, next) => {
+  try {
+    res.json(await dailyTrial(req.db, req.query.date || kstToday()))
+  } catch (e) { next(e) }
+})
+
+/**
+ * 홈 요약 — 자금일보의 앞부분만. 홈에서 매일 보는 숫자라 가볍게 유지한다.
+ * 자세한 건 자금일보로 들어간다.
+ */
 router.get('/', async (req, res, next) => {
   try {
-    // KST 기준 — 다른 화면(청구·미수/미지급)이 전부 KST라 UTC를 쓰면 자정 근처에 연체/도래 판정이 어긋난다.
-    const today = kstDate(Date.now())
-    const sevenDays = kstDate(Date.now() + 7 * 86400000)
-
-    // 계좌 잔액
-    const [accountRows] = await req.db.execute('SELECT * FROM accounts')
-    const accountBalances = await Promise.all(accountRows.map(async a => {
-      const [rows] = await req.db.execute(`
-        SELECT
-          a.initial_balance,
-          COALESCE((SELECT SUM(amount) FROM transactions WHERE kind='income'  AND account_id=a.id), 0) AS inc,
-          COALESCE((SELECT SUM(amount) FROM transactions WHERE kind='expense' AND account_id=a.id AND status='지급완료'), 0) AS exp,
-          COALESCE((SELECT SUM(amount) FROM account_adjustments WHERE account_id=a.id), 0) AS adj
-        FROM accounts a WHERE a.id = ?
-      `, [a.id])
-      const r = rows[0]
-      return { ...a, balance: Number(r.initial_balance) + Number(r.inc) - Number(r.exp) + Number(r.adj) }
-    }))
-
-    // 미수금 — 판정 기준은 lib/invoiceStatus.js 하나로 (미수금 화면과 어긋나지 않게).
-    // 여태 여기만 `NOT IN ('입금 완료')` 블랙리스트라, status가 엉뚱한 값인 청구서가
-    // 이 화면에만 잡혀 대시보드와 미수금 화면의 금액이 달랐다.
-    const rc = pendingCond('issued')
-    const [receivables] = await req.db.execute(
-      `SELECT * FROM invoices WHERE kind='issued' AND ${rc.sql}`, rc.params)
-    let receivableTotal = 0
-    for (const r of receivables) {
-      const [mRows] = await req.db.execute('SELECT COALESCE(SUM(amount),0) AS t FROM invoice_matches WHERE invoice_id=?', [r.id])
-      receivableTotal += Number(r.total_amount) - Number(mRows[0].t)
-    }
-
-    // 미지급금 — 같은 기준(lib/invoiceStatus.js)
-    const pc = pendingCond('received')
-    const [payables] = await req.db.execute(
-      `SELECT * FROM invoices WHERE kind='received' AND ${pc.sql}`, pc.params)
-    let payableTotal = 0
-    for (const r of payables) {
-      const [mRows] = await req.db.execute('SELECT COALESCE(SUM(amount),0) AS t FROM invoice_matches WHERE invoice_id=?', [r.id])
-      payableTotal += Number(r.total_amount) - Number(mRows[0].t)
-    }
-
-    // 7일 내 입금 예정
-    const [upcomingIncome] = await req.db.execute(`
-      SELECT i.*, v.name AS vendor_name FROM invoices i
-      LEFT JOIN vendors v ON i.vendor_id = v.id
-      WHERE i.kind='issued' AND i.due_at BETWEEN ? AND ? AND i.status IN ('입금 예정','일부 입금')
-      ORDER BY i.due_at
-    `, [today, sevenDays])
-
-    // 대기 중 정기 지출
-    const [pendingRecurring] = await req.db.execute(`
-      SELECT t.*, v.name AS vendor_name FROM transactions t
-      LEFT JOIN vendors v ON t.vendor_id = v.id
-      WHERE t.status='지급 대기' AND t.recurring_id IS NOT NULL
-      ORDER BY t.date
-    `)
-
-    // 연체 청구서
-    const [overdueInvoices] = await req.db.execute(`
-      SELECT i.*, v.name AS vendor_name FROM invoices i
-      LEFT JOIN vendors v ON i.vendor_id = v.id
-      WHERE i.due_at < ? AND i.status IN ('입금 예정','일부 입금','지급 대기','지급 예정')
-      ORDER BY i.due_at
-    `, [today])
-
-    res.json({ accountBalances, receivableTotal, payableTotal, upcomingIncome, pendingRecurring, overdueInvoices })
+    const date = kstToday()
+    const to = kstDate(Date.now() + 7 * 86400000)
+    const accounts = await balancesAsOf(req.db, date)
+    const available = accounts.filter(a => a.kind !== 'card').reduce((s, a) => s + a.balance, 0)
+    const [ar, ap, flows] = await Promise.all([
+      openInvoiceTotal(req.db, 'issued'),
+      openInvoiceTotal(req.db, 'received'),
+      upcomingFlows(req.db, { from: date, to }),
+    ])
+    const f = project(available, flows, { from: date, to })
+    res.json({
+      date, available, accountCount: accounts.filter(a => a.kind !== 'card').length,
+      receivable: ar, payable: ap,
+      weekIn: f.totalIn, weekOut: f.totalOut,
+      lowest: f.lowest,
+      overdueCount: flows.filter(x => x.overdue).length,
+    })
   } catch (e) { next(e) }
 })
 

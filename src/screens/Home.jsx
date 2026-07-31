@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, Popover, PopItem } from '../lib/ui'
+import { Icon, Popover, PopItem, fmtNum } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
 import { LEAF_BY_ID } from '../lib/nav'
@@ -20,6 +20,66 @@ const TODO_KIND_META = {
 }
 
 const DEFAULT_FAVS = ['income', 'expense', 'billing_issued', 'contract', 'tax_vat']
+
+/* 자금 요약 — 홈에서 매일 보는 네 숫자.
+ *
+ * 중소기업이 무너지는 건 대개 적자가 아니라 흑자도산이다. 손익은 흑자인데 미수금이 안 들어와
+ * 급여일에 현금이 없는 것. 그래서 손익보다 이 네 개를 먼저 보여준다.
+ * 자세한 계좌별 잔액·날짜별 예정은 자금일보에서 본다(여기서 다 보여주면 홈이 무거워진다).
+ */
+const CashSummary = ({ go }) => {
+  const [d, setD] = useState(null)
+  useEffect(() => { api.getCashSummary().then(setD).catch(() => {}) }, [])
+  if (!d) return null
+
+  const short = d.lowest && d.lowest.balance < 0
+  const cards = [
+    { label: '지금 쓸 수 있는 돈', value: d.available, sub: `통장 ${d.accountCount}개` },
+    { label: '이번 주 들어올 돈', value: d.weekIn, sub: `받을 돈 ${fmtNum(d.receivable.total)}원`, tone: 'pos' },
+    { label: '이번 주 나갈 돈', value: d.weekOut, sub: `나갈 돈 ${fmtNum(d.payable.total)}원`, tone: 'neg' },
+    { label: '이번 주 최저 잔액', value: d.lowest?.balance ?? d.available,
+      sub: d.lowest?.date === d.date ? '오늘이 가장 낮아요' : d.lowest?.date || '', tone: short ? 'neg' : undefined },
+  ]
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div className="row" style={{ marginBottom: 10, padding: '0 2px', alignItems: 'center' }}>
+        <div className="text-xs fw-700" style={{ color: 'var(--muted-2)', letterSpacing: '0.02em' }}>자금 현황</div>
+        <button className="btn ghost sm ml-auto" onClick={() => go('cash_report')}>
+          자금일보 <Icon.Right size={11}/>
+        </button>
+      </div>
+      {short && (
+        <div className="card card-pad" style={{ marginBottom: 10, borderColor: 'var(--neg)', background: 'rgba(220,38,38,0.04)' }}>
+          <div className="text-sm fw-700" style={{ color: 'var(--neg-ink)' }}>
+            이번 주 {d.lowest.date}에 잔액이 {fmtNum(d.lowest.balance)}원까지 떨어져요
+          </div>
+          <div className="text-sm text-muted" style={{ marginTop: 2 }}>
+            미수금을 앞당겨 받거나 지급 일정을 조정해야 할 수 있어요.
+          </div>
+        </div>
+      )}
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+        {cards.map(c => (
+          <button key={c.label} className="card card-pad" style={{ textAlign: 'left', cursor: 'pointer', border: '1px solid var(--line)' }}
+            onClick={() => go('cash_report')}>
+            <div className="text-xs text-muted2">{c.label}</div>
+            <div className="num fw-700" style={{
+              fontSize: 19, marginTop: 4,
+              color: c.tone === 'neg' ? 'var(--neg-ink)' : c.tone === 'pos' ? 'var(--pos-ink)' : undefined,
+            }}>{fmtNum(c.value)}원</div>
+            <div className="text-xs text-muted2" style={{ marginTop: 2 }}>{c.sub}</div>
+          </button>
+        ))}
+      </div>
+      {d.overdueCount > 0 && (
+        <div className="text-xs" style={{ marginTop: 8, color: 'var(--neg-ink)' }}>
+          기한이 지난 입출금 {d.overdueCount}건이 예정에 섞여 있어요 — 실제로는 더 늦게 들어올 수 있습니다.
+        </div>
+      )}
+    </div>
+  )
+}
 
 export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
   // 홈 타일·즐겨찾기도 사이드바와 같은 규칙으로 가린다.
@@ -74,6 +134,10 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
           </Popover>
         </>}
       />
+
+      {/* 자금 현황 — 아침에 제일 먼저 보는 숫자. 자세한 건 자금일보로 들어간다.
+          여기 있는 게 도움말(App.jsx)이 말하던 '자금 현황 카드'다 — 문구만 있고 구현이 없었다. */}
+      {canDo("cash_report") && <CashSummary go={go}/>}
 
       {/* 지금 해야 할 일 */}
       <div style={{ marginBottom: 24 }}>

@@ -1,0 +1,602 @@
+import { useState, useEffect, useMemo, Fragment } from 'react'
+import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, localToday } from '../lib/ui'
+import { PageHeader } from '../lib/components/PageHeader'
+import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
+import { api } from '../lib/api'
+
+/* 예금·적금 — 자금 '운용'. 차입금(자금 조달)의 거울상이다.
+ *
+ * 화면에서 계속 드러내는 것 두 가지:
+ *   1. 납입은 **비용이 아니다.** 돈이 통장에서 나가지만 회사 재산은 그대로다.
+ *      숫자만 보여주면 사용자가 '지출'로 오해하고 손익을 잘못 읽는다.
+ *   2. 여기 있는 돈은 **당장 못 쓴다.** 그래서 자금일보에서 '묶인 자금'으로 따로 센다.
+ */
+
+const KIND_LABEL = { installment: '적금', deposit: '예금' }
+const KIND_HINT = {
+  installment: '매월 정해진 금액을 넣고 만기에 원리금을 받아요.',
+  deposit: '목돈을 한 번에 넣고 만기에 원리금을 받아요.',
+}
+const STATUS_LABEL = { active: '진행 중', matured: '만기', closed: '해지' }
+
+const dday = (date) => {
+  if (!date) return ''
+  const d = Math.round((new Date(date) - new Date(localToday())) / 86400000)
+  return d === 0 ? '오늘' : d > 0 ? `D-${d}` : `${-d}일 지남`
+}
+const ddayTone = (date) => {
+  const d = Math.round((new Date(date) - new Date(localToday())) / 86400000)
+  return d < 0 ? 'neg' : d <= 7 ? 'warn' : 'outline'
+}
+
+export const SavingsScreen = () => {
+  const toast = useToast()
+  const { confirm } = useConfirm()
+  const [rows, setRows] = useState([])
+  const [accounts, setAccounts] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [formOpen, setFormOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [payTarget, setPayTarget] = useState(null)      // { s, cycle }
+  const [bulkTarget, setBulkTarget] = useState(null)    // { s, cycles }
+  const [matureTarget, setMatureTarget] = useState(null)
+  const [expanded, setExpanded] = useState(null)
+
+  const load = async () => {
+    setLoading(true)
+    const [list, accs] = await Promise.all([api.getSavings(), api.getAccounts()])
+    setRows(list)
+    setAccounts(accs.filter(a => a.kind !== 'card'))
+    setLoading(false)
+  }
+  useEffect(() => { load() }, [])
+
+  const active = rows.filter(r => r.status === 'active')
+  const totalBalance = active.reduce((s, r) => s + Number(r.balance || 0), 0)
+  const expectedInterest = active.reduce((s, r) => s + Number(r.maturity?.interest || 0), 0)
+  // 예정일이 지났는데 안 낸 회차 — 자동이체가 실패했거나 잔액이 모자랐던 경우다
+  const overdue = active.flatMap(s => (s.overdue_payments || []).map(c => ({ s, cycle: c })))
+
+  const nextMaturity = useMemo(() => {
+    const withDate = active.filter(r => r.maturity_date).sort((a, b) => (a.maturity_date < b.maturity_date ? -1 : 1))
+    return withDate[0] || null
+  }, [rows])
+
+  const doPay = async (s, cycle, body) => {
+    const r = await api.paySavings(s.id, body)
+    if (!r.ok) return toast.push(r.error || '납입 처리에 실패했어요')
+    toast.push(`${s.name} ${r.seq}회차 ${fmtNum(r.amount)}원 납입했어요`)
+    setPayTarget(null); load()
+  }
+
+  const doBulk = async (s, accountId) => {
+    const r = await api.paySavingsMissed(s.id, { account_id: accountId })
+    if (!r.ok) return toast.push(r.error || '일괄 처리에 실패했어요')
+    toast.push(r.count ? `${r.count}건 · ${fmtNum(r.total)}원 납입 처리했어요` : '처리할 회차가 없어요')
+    setBulkTarget(null); load()
+  }
+
+  const doDelete = async (s) => {
+    const ok = await confirm({
+      tone: 'neg', icon: <Icon.Warn size={22}/>, title: `"${s.name}" 삭제`,
+      body: '등록을 취소합니다. 납입 실적이 있으면 삭제되지 않아요.', confirmLabel: '삭제',
+    })
+    if (!ok) return
+    const r = await api.deleteSavings(s.id)
+    if (!r.ok) return toast.push(r.error || '삭제에 실패했어요')
+    toast.push('삭제했어요'); load()
+  }
+
+  if (loading) return <div className="text-sm text-muted" style={{ padding: 40, textAlign: 'center' }}>불러오는 중…</div>
+
+  return (
+    <div className="fade-up">
+      <PageHeader title="예금·적금"
+        sub={overdue.length > 0 ? `납입일이 지난 회차 ${overdue.length}건이 있어요` : '자금 운용 — 여기 있는 돈은 만기까지 묶여 있어요'}
+        actions={<button className="btn primary" onClick={() => { setEditing(null); setFormOpen(true) }}>
+          <Icon.Plus size={14}/> 예적금 등록
+        </button>}/>
+
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 20 }}>
+        <div className="card card-pad">
+          <div className="text-xs text-muted2">묶인 자금</div>
+          <div className="num fw-700" style={{ fontSize: 20, marginTop: 4 }}>{fmtNum(totalBalance)}원</div>
+          <div className="text-xs text-muted2" style={{ marginTop: 2 }}>진행 중 {active.length}건 · 당장 쓸 수 없어요</div>
+        </div>
+        <div className="card card-pad">
+          <div className="text-xs text-muted2">만기까지 받을 이자</div>
+          <div className="num fw-700" style={{ fontSize: 20, marginTop: 4 }}>{fmtNum(expectedInterest)}원</div>
+          <div className="text-xs text-muted2" style={{ marginTop: 2 }}>세전 · 단리 기준</div>
+        </div>
+        <div className="card card-pad">
+          <div className="text-xs text-muted2">가장 가까운 만기</div>
+          <div className="num fw-700" style={{ fontSize: 20, marginTop: 4 }}>
+            {nextMaturity ? nextMaturity.maturity_date : '—'}
+          </div>
+          <div className="text-xs text-muted2" style={{ marginTop: 2 }}>
+            {nextMaturity ? `${nextMaturity.name} · ${dday(nextMaturity.maturity_date)}` : '진행 중인 상품이 없어요'}
+          </div>
+        </div>
+      </div>
+
+      {/* 놓친 납입 — 자동이체가 실패했을 수 있으니 맨 위에 세운다 */}
+      {overdue.length > 0 && (
+        <div className="card" style={{ overflow: 'hidden', marginBottom: 16 }}>
+          <div className="row" style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span className="badge neg"><Icon.Warn size={12}/> 놓친 납입</span>
+            <span className="fw-700 text-sm">{overdue.length}건</span>
+            <span className="num text-sm text-muted">{fmtNum(overdue.reduce((s, o) => s + o.cycle.amount, 0))}원</span>
+            <span className="text-xs text-muted2" style={{ flex: 1 }}>납입일이 지났는데 처리되지 않았어요</span>
+            {/* 상품별로 묶어 일괄 — 회차 순서를 건너뛸 수 없으므로 한 상품씩 처리한다 */}
+            {Object.values(overdue.reduce((acc, o) => {
+              (acc[o.s.id] ||= { s: o.s, cycles: [] }).cycles.push(o.cycle)
+              return acc
+            }, {})).map(g => (
+              <button key={g.s.id} className="btn sm" onClick={() => setBulkTarget(g)}>
+                <Icon.Receipt size={12}/> {g.s.name} {g.cycles.length}건 일괄
+              </button>
+            ))}
+          </div>
+          <table className="table">
+            <tbody>
+              {overdue.map(({ s, cycle }) => (
+                <tr key={`${s.id}-${cycle.seq}`}>
+                  <td className="num text-sm" style={{ width: 170 }}>{cycle.due_date}
+                    <span className={`badge ${ddayTone(cycle.due_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(cycle.due_date)}</span>
+                  </td>
+                  <td className="fw-700">{s.name}</td>
+                  <td className="text-sm text-muted">{cycle.seq}회차</td>
+                  <td className="num-cell num-right fw-700">{fmtNum(cycle.amount)}</td>
+                  <td style={{ width: 120 }}>
+                    <button className="btn sm primary" onClick={() => setPayTarget({ s, cycle })}>납입 처리</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="card" style={{ overflow: 'hidden' }}>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>상품</th>
+              <th style={{ width: 90 }}>구분</th>
+              <th style={{ width: 110 }}>금융기관</th>
+              <th style={{ width: 90 }}>이율</th>
+              <th className="num-right" style={{ width: 130 }}>쌓인 금액</th>
+              <th className="num-right" style={{ width: 130 }}>만기 수령(세전)</th>
+              <th style={{ width: 130 }}>만기일</th>
+              <th style={{ width: 90 }}>상태</th>
+              <th style={{ width: 200 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr><td colSpan={9} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)', fontSize: 13 }}>
+                등록된 예금·적금이 없어요. 위에서 추가하세요.
+              </td></tr>
+            )}
+            {rows.map(s => (
+              <Fragment key={s.id}>
+                <tr style={{ opacity: s.status === 'active' ? 1 : 0.55 }}>
+                  <td className="fw-700" style={{ cursor: 'pointer' }} onClick={() => setExpanded(expanded === s.id ? null : s.id)}>
+                    <Icon.Down size={12} style={{ marginRight: 6, transform: expanded === s.id ? 'none' : 'rotate(-90deg)', opacity: 0.5 }}/>
+                    {s.name}
+                  </td>
+                  <td><span className="badge outline">{KIND_LABEL[s.kind]}</span></td>
+                  <td className="text-sm text-muted">{s.bank || '—'}</td>
+                  <td className="num text-sm">{Number(s.annual_rate) ? `연 ${Number(s.annual_rate)}%` : '—'}</td>
+                  <td className="num-cell num-right fw-700">{fmtNum(s.balance)}</td>
+                  <td className="num-cell num-right">{fmtNum(s.maturity?.total || 0)}</td>
+                  <td className="num text-sm">
+                    {s.maturity_date || '—'}
+                    {s.status === 'active' && s.maturity_date && (
+                      <span className={`badge ${ddayTone(s.maturity_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(s.maturity_date)}</span>
+                    )}
+                  </td>
+                  <td><span className={`badge ${s.status === 'active' ? 'pos' : 'outline'}`}>{STATUS_LABEL[s.status]}</span></td>
+                  <td>
+                    <div className="row gap-4">
+                      {s.status === 'active' && s.kind === 'installment' && s.next_payment && (
+                        <button className="btn sm primary" onClick={() => setPayTarget({ s, cycle: s.next_payment })}>납입</button>
+                      )}
+                      {s.status === 'active' && (
+                        <button className="btn ghost sm" onClick={() => setMatureTarget(s)}>만기</button>
+                      )}
+                      {s.status === 'active' && (
+                        <button className="btn ghost sm" onClick={() => { setEditing(s); setFormOpen(true) }}>수정</button>
+                      )}
+                      <button className="btn ghost sm" style={{ color: 'var(--neg)' }} onClick={() => doDelete(s)}>삭제</button>
+                    </div>
+                  </td>
+                </tr>
+                {expanded === s.id && (
+                  <tr>
+                    <td colSpan={9} style={{ background: 'var(--surface-2)', padding: 0 }}>
+                      <SavingsDetail s={s}/>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="text-xs text-muted2" style={{ marginTop: 14, lineHeight: 1.7 }}>
+        · 납입한 돈은 <b>비용이 아니에요.</b> 통장에서 나가지만 회사 재산은 그대로예요(보통예금 → 금융상품).
+        그래서 손익에는 잡히지 않고, 만기 이자만 수익으로 잡혀요.<br/>
+        · 여기 있는 돈은 만기까지 묶여 있어서 <b>자금일보에서 '묶인 자금'</b>으로 따로 보여드려요.
+      </div>
+
+      <SavingsForm open={formOpen} onClose={() => setFormOpen(false)} editing={editing}
+        accounts={accounts} onSaved={() => { setFormOpen(false); load() }}/>
+      <PayDrawer target={payTarget} accounts={accounts} onClose={() => setPayTarget(null)} onPay={doPay}/>
+      <BulkPayDrawer target={bulkTarget} accounts={accounts} onClose={() => setBulkTarget(null)} onPay={doBulk}/>
+      <MatureDrawer target={matureTarget} accounts={accounts} onClose={() => setMatureTarget(null)}
+        onDone={() => { setMatureTarget(null); load() }}/>
+    </div>
+  )
+}
+
+/** 펼침 — 납입 스케줄과 실적 */
+const SavingsDetail = ({ s }) => {
+  const paidSeq = new Set((s.payments || []).map(p => Number(p.seq)))
+  const sched = s.schedule || []
+  if (s.kind === 'deposit') {
+    return (
+      <div style={{ padding: '14px 18px' }} className="text-sm">
+        <div className="row gap-16" style={{ flexWrap: 'wrap' }}>
+          <span>예치 원금 <b className="num">{fmtNum(s.principal)}원</b></span>
+          <span>만기 이자(세전) <b className="num">{fmtNum(s.maturity?.interest || 0)}원</b></span>
+          <span>이자소득세 예상 <b className="num">{fmtNum(s.maturity?.tax || 0)}원</b></span>
+          <span>세후 수령 <b className="num">{fmtNum(s.maturity?.afterTax || 0)}원</b></span>
+        </div>
+        <div className="text-xs text-muted2" style={{ marginTop: 8 }}>
+          예금은 납입 회차가 없어요. 가입할 때 목돈이 한 번 나갑니다.
+          이자소득세는 참고용이에요 — 법인은 원천징수 후 법인세에서 정산해요.
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div style={{ padding: '10px 18px 16px' }}>
+      <div className="row gap-16 text-sm" style={{ flexWrap: 'wrap', marginBottom: 10 }}>
+        <span>월 납입 <b className="num">{fmtNum(s.monthly_amount)}원</b></span>
+        <span>납입 {s.paid_count}/{sched.length}회</span>
+        <span>만기 이자(세전) <b className="num">{fmtNum(s.maturity?.interest || 0)}원</b></span>
+        <span>세후 수령 <b className="num">{fmtNum(s.maturity?.afterTax || 0)}원</b></span>
+      </div>
+      <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+        <table className="table">
+          <thead><tr>
+            <th style={{ width: 60 }}>회차</th><th style={{ width: 120 }}>납입일</th>
+            <th className="num-right" style={{ width: 120 }}>금액</th>
+            <th className="num-right" style={{ width: 130 }}>누계</th>
+            <th style={{ width: 90 }}>상태</th>
+          </tr></thead>
+          <tbody>
+            {sched.map(c => (
+              <tr key={c.seq}>
+                <td className="num text-sm">{c.seq}</td>
+                <td className="num text-sm">{c.due_date}</td>
+                <td className="num-cell num-right">{fmtNum(c.amount)}</td>
+                <td className="num-cell num-right text-muted">{fmtNum(c.cumulative)}</td>
+                <td>
+                  {paidSeq.has(c.seq)
+                    ? <span className="badge pos">납입</span>
+                    : <span className={`badge ${ddayTone(c.due_date)}`}>{dday(c.due_date)}</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+/** 등록·수정 — 저장 전에 만기 수령액을 계산해 보여준다(가입 판단의 핵심 숫자다) */
+const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
+  const toast = useToast()
+  const blank = {
+    kind: 'installment', name: '', bank: '', monthly_amount: '', principal: '',
+    annual_rate: '', term_months: '12', start_date: localToday(), pay_day: '',
+    account_id: '', memo: '',
+  }
+  const [f, setF] = useState(blank)
+  const [preview, setPreview] = useState(null)
+  const set = (k, v) => setF(prev => ({ ...prev, [k]: v }))
+
+  useEffect(() => {
+    if (!open) return
+    setF(editing ? {
+      kind: editing.kind, name: editing.name, bank: editing.bank || '',
+      monthly_amount: String(editing.monthly_amount || ''), principal: String(editing.principal || ''),
+      annual_rate: String(editing.annual_rate || ''), term_months: String(editing.term_months || '12'),
+      start_date: editing.start_date, pay_day: String(editing.pay_day || ''),
+      account_id: editing.account_id || '', memo: editing.memo || '',
+    } : blank)
+  }, [open, editing])
+
+  // 입력이 바뀔 때마다 서버에 계산을 맡긴다 — 화면과 서버가 다른 식을 쓰면 저장 후 숫자가 달라진다
+  useEffect(() => {
+    if (!open) return
+    const t = setTimeout(async () => {
+      setPreview(await api.previewSavings({
+        kind: f.kind, principal: f.principal, monthly_amount: f.monthly_amount,
+        annual_rate: f.annual_rate, term_months: f.term_months,
+        start_date: f.start_date, pay_day: f.pay_day,
+      }))
+    }, 250)
+    return () => clearTimeout(t)
+  }, [open, f.kind, f.principal, f.monthly_amount, f.annual_rate, f.term_months, f.start_date, f.pay_day])
+
+  const save = async () => {
+    const body = {
+      kind: f.kind, name: f.name.trim(), bank: f.bank.trim(),
+      monthly_amount: f.monthly_amount, principal: f.principal,
+      annual_rate: f.annual_rate, term_months: f.term_months,
+      start_date: f.start_date, pay_day: f.pay_day,
+      account_id: f.account_id || null, memo: f.memo,
+    }
+    const r = editing ? await api.updateSavings(editing.id, body) : await api.addSavings(body)
+    if (!r.ok) return toast.push(r.error || '저장에 실패했어요')
+    toast.push(editing ? '수정했어요' : '등록했어요')
+    onSaved()
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose}>
+      <DrawerHead title={editing ? '예적금 수정' : '예적금 등록'}
+        sub={KIND_HINT[f.kind]} onClose={onClose}/>
+      <div className="drawer-body col gap-form">
+        <div>
+          <label className="label">구분</label>
+          <div className="row gap-4">
+            {['installment', 'deposit'].map(k => (
+              <button key={k} type="button" className={`chip ${f.kind === k ? 'active' : ''}`}
+                disabled={!!editing} onClick={() => set('kind', k)}>{KIND_LABEL[k]}</button>
+            ))}
+          </div>
+          {editing && <div className="text-xs text-muted2" style={{ marginTop: 4 }}>구분은 등록 후 바꿀 수 없어요.</div>}
+        </div>
+        <div>
+          <label className="label">상품명 *</label>
+          <input className="input" value={f.name} onChange={e => set('name', e.target.value)} placeholder="예) 기업 정기적금"/>
+        </div>
+        <div>
+          <label className="label">금융기관</label>
+          <input className="input" value={f.bank} onChange={e => set('bank', e.target.value)} placeholder="예) 기업은행"/>
+        </div>
+        {f.kind === 'installment' ? (
+          <div>
+            <label className="label">월 납입액 *</label>
+            <MoneyInput value={f.monthly_amount} onChange={v => set('monthly_amount', v)}/>
+          </div>
+        ) : (
+          <div>
+            <label className="label">예치 금액 *</label>
+            <MoneyInput value={f.principal} onChange={v => set('principal', v)}/>
+          </div>
+        )}
+        <div className="row gap-8">
+          <div style={{ flex: 1 }}>
+            <label className="label">연 이율 (%)</label>
+            <input className="input" value={f.annual_rate} onChange={e => set('annual_rate', e.target.value)} placeholder="4.0"/>
+          </div>
+          <div style={{ flex: 1 }}>
+            <label className="label">기간 (개월) *</label>
+            <input className="input" value={f.term_months} onChange={e => set('term_months', e.target.value)} placeholder="12"/>
+          </div>
+        </div>
+        <div className="row gap-8">
+          <div style={{ flex: 1 }}>
+            <label className="label">가입일 *</label>
+            <input className="input" type="date" value={f.start_date} onChange={e => set('start_date', e.target.value)}/>
+          </div>
+          {f.kind === 'installment' && (
+            <div style={{ flex: 1 }}>
+              <label className="label">납입일</label>
+              <input className="input" value={f.pay_day} onChange={e => set('pay_day', e.target.value)} placeholder="가입일과 같은 날"/>
+            </div>
+          )}
+        </div>
+        <div>
+          <label className="label">{f.kind === 'deposit' ? '출금 계좌' : '납입 출금 계좌'}</label>
+          <Combobox value={f.account_id} onChange={v => set('account_id', v)}
+            options={accounts.map(a => ({ value: a.id, label: a.name, sub: [a.bankName, a.number].filter(Boolean).join(' ') }))}
+            placeholder="계좌 선택"/>
+          <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
+            {f.kind === 'deposit'
+              ? '가입하는 순간 이 계좌에서 목돈이 빠져나갑니다.'
+              : '매월 이 계좌에서 납입액이 빠져나갑니다. 가입만으로는 돈이 나가지 않아요.'}
+          </div>
+        </div>
+        <div>
+          <label className="label">메모</label>
+          <input className="input" value={f.memo} onChange={e => set('memo', e.target.value)}/>
+        </div>
+
+        {/* 만기 미리보기 — 가입 판단의 핵심 숫자라 저장 전에 보여준다 */}
+        {preview && preview.principal > 0 && (
+          <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
+            <div className="text-xs fw-700" style={{ marginBottom: 8 }}>만기에 이렇게 됩니다</div>
+            <div className="col gap-4 text-sm">
+              <div className="row" style={{ justifyContent: 'space-between' }}>
+                <span className="text-muted">{f.kind === 'installment' ? '총 납입 원금' : '예치 원금'}</span>
+                <b className="num">{fmtNum(preview.principal)}원</b>
+              </div>
+              <div className="row" style={{ justifyContent: 'space-between' }}>
+                <span className="text-muted">이자 (세전)</span>
+                <b className="num" style={{ color: 'var(--pos-ink)' }}>+{fmtNum(preview.interest)}원</b>
+              </div>
+              <div className="row" style={{ justifyContent: 'space-between' }}>
+                <span className="text-muted">이자소득세 15.4% (참고)</span>
+                <span className="num text-muted">−{fmtNum(preview.tax)}원</span>
+              </div>
+              <div className="row" style={{ justifyContent: 'space-between', borderTop: '1px solid var(--line)', paddingTop: 6, marginTop: 2 }}>
+                <span className="fw-700">세후 수령액</span>
+                <b className="num" style={{ fontSize: 15 }}>{fmtNum(preview.afterTax)}원</b>
+              </div>
+              <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
+                만기 {preview.maturityDate || '—'}
+                {f.kind === 'installment' && preview.firstDue && ` · 첫 납입 ${preview.firstDue} · 마지막 ${preview.lastDue}`}
+              </div>
+            </div>
+            {f.kind === 'installment' && (
+              <div className="text-xs text-muted2" style={{ marginTop: 8, lineHeight: 1.6 }}>
+                적금 이자는 회차마다 예치 기간이 달라요. 그래서 "총 납입액 × 이율"보다 적게 나옵니다.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      <DrawerFooter onCancel={onClose} onSave={save} saveLabel={editing ? '수정' : '등록'}/>
+    </Drawer>
+  )
+}
+
+const PayDrawer = ({ target, accounts, onClose, onPay }) => {
+  const [payDate, setPayDate] = useState(localToday())
+  const [acct, setAcct] = useState('')
+  useEffect(() => {
+    if (!target) return
+    setPayDate(target.cycle.due_date > localToday() ? localToday() : target.cycle.due_date)
+    setAcct(target.s.account_id || '')
+  }, [target])
+  if (!target) return null
+  const { s, cycle } = target
+  return (
+    <Drawer open onClose={onClose}>
+      <DrawerHead title="적금 납입" sub={`${s.name} ${cycle.seq}회차`} onClose={onClose}/>
+      <div className="drawer-body col gap-form">
+        <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <span className="text-muted text-sm">납입액</span>
+            <b className="num" style={{ fontSize: 16 }}>{fmtNum(cycle.amount)}원</b>
+          </div>
+          <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+            예정일 {cycle.due_date} · 이 돈은 <b>비용이 아니라 자산</b>이에요(보통예금 → 금융상품).
+          </div>
+        </div>
+        <div>
+          <label className="label">납입일</label>
+          <input className="input" type="date" value={payDate} onChange={e => setPayDate(e.target.value)}/>
+        </div>
+        <div>
+          <label className="label">출금 계좌 *</label>
+          <Combobox value={acct} onChange={setAcct}
+            options={accounts.map(a => ({ value: a.id, label: a.name, sub: [a.bankName, a.number].filter(Boolean).join(' ') }))}
+            placeholder="계좌 선택"/>
+          <div className="text-xs text-muted2" style={{ marginTop: 4 }}>이 계좌의 잔액에서 빠집니다.</div>
+        </div>
+      </div>
+      <DrawerFooter onCancel={onClose} onSave={() => onPay(s, cycle, { pay_date: payDate, account_id: acct, seq: cycle.seq })} saveLabel="납입 처리"/>
+    </Drawer>
+  )
+}
+
+const BulkPayDrawer = ({ target, accounts, onClose, onPay }) => {
+  const [acct, setAcct] = useState('')
+  useEffect(() => { if (target) setAcct(target.s.account_id || '') }, [target])
+  if (!target) return null
+  const { s, cycles } = target
+  const total = cycles.reduce((a, c) => a + c.amount, 0)
+  return (
+    <Drawer open onClose={onClose}>
+      <DrawerHead title="놓친 납입 일괄 처리" sub={`${s.name} · ${cycles.length}건`} onClose={onClose}/>
+      <div className="drawer-body col gap-form">
+        <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <span className="text-muted text-sm">합계</span>
+            <b className="num" style={{ fontSize: 16 }}>{fmtNum(total)}원</b>
+          </div>
+          <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+            각 회차는 <b>예정일 그대로</b> 기록돼요(자동이체가 그날 나갔을 테니까요).
+            마감된 달이 하나라도 섞여 있으면 전체가 취소돼요.
+          </div>
+        </div>
+        <div style={{ maxHeight: 180, overflowY: 'auto' }}>
+          <table className="table">
+            <tbody>
+              {cycles.map(c => (
+                <tr key={c.seq}>
+                  <td className="num text-sm">{c.due_date}</td>
+                  <td className="text-sm text-muted">{c.seq}회차</td>
+                  <td className="num-cell num-right">{fmtNum(c.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <label className="label">출금 계좌 *</label>
+          <Combobox value={acct} onChange={setAcct}
+            options={accounts.map(a => ({ value: a.id, label: a.name, sub: [a.bankName, a.number].filter(Boolean).join(' ') }))}
+            placeholder="계좌 선택"/>
+        </div>
+      </div>
+      <DrawerFooter onCancel={onClose} onSave={() => onPay(s, acct)} saveLabel={`${cycles.length}건 처리`}/>
+    </Drawer>
+  )
+}
+
+/** 만기 — 원금과 이자를 나눠 기록한다. 이자는 실제 수령액을 받는다(우대금리·중도해지로 다를 수 있다) */
+const MatureDrawer = ({ target, accounts, onClose, onDone }) => {
+  const toast = useToast()
+  const [date, setDate] = useState(localToday())
+  const [acct, setAcct] = useState('')
+  const [interest, setInterest] = useState('')
+  useEffect(() => {
+    if (!target) return
+    setDate(localToday())
+    setAcct(target.account_id || '')
+    setInterest(String(target.maturity?.interest || 0))
+  }, [target])
+  if (!target) return null
+  const principal = Number(target.balance || 0)
+  const save = async () => {
+    const r = await api.matureSavings(target.id, { received_date: date, account_id: acct, interest })
+    if (!r.ok) return toast.push(r.error || '만기 처리에 실패했어요')
+    toast.push(`${fmtNum(r.total)}원 입금 처리했어요 (원금 ${fmtNum(r.principal)} + 이자 ${fmtNum(r.interest)})`)
+    onDone()
+  }
+  return (
+    <Drawer open onClose={onClose}>
+      <DrawerHead title="만기 수령" sub={target.name} onClose={onClose}/>
+      <div className="drawer-body col gap-form">
+        <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <span className="text-muted text-sm">받을 원금 (실제 납입분)</span>
+            <b className="num">{fmtNum(principal)}원</b>
+          </div>
+          <div className="text-xs text-muted2" style={{ marginTop: 6, lineHeight: 1.6 }}>
+            원금은 <b>수익이 아니에요</b> — 맡겨둔 내 돈이 돌아오는 거예요. 이자만 수익으로 기록됩니다.
+            그래서 거래가 두 건으로 나뉩니다.
+          </div>
+        </div>
+        <div>
+          <label className="label">실제 받은 이자 (세전)</label>
+          <MoneyInput value={interest} onChange={setInterest}/>
+          <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
+            예상값을 넣어뒀어요. 우대금리나 중도해지로 달라졌다면 실제 금액으로 고쳐주세요.
+          </div>
+        </div>
+        <div>
+          <label className="label">입금일</label>
+          <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)}/>
+        </div>
+        <div>
+          <label className="label">입금 계좌 *</label>
+          <Combobox value={acct} onChange={setAcct}
+            options={accounts.map(a => ({ value: a.id, label: a.name, sub: [a.bankName, a.number].filter(Boolean).join(' ') }))}
+            placeholder="계좌 선택"/>
+        </div>
+      </div>
+      <DrawerFooter onCancel={onClose} onSave={save} saveLabel="만기 처리"/>
+    </Drawer>
+  )
+}

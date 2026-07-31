@@ -1078,6 +1078,56 @@ export const api = {
     try { return await req('/finance/summary') } catch { return null }
   },
 
+  // ─── 예금·적금 (자금 운용) ────────────────────────────────────
+  async getSavings() {
+    try { return await req('/savings') } catch { return [] }
+  },
+  async getSavingsOne(id) {
+    try { return await req(`/savings/${id}`) } catch { return null }
+  },
+  /** 저장 전 만기 미리보기 — 이자·수령액을 가입 전에 보여준다 */
+  async previewSavings(params) {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== '' && v != null)).toString()
+    try { return await req(`/savings/preview?${qs}`) } catch { return null }
+  },
+  async addSavings(data) {
+    try { const r = await req('/savings', { method: 'POST', body: data }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async updateSavings(id, data) {
+    try { await req(`/savings/${id}`, { method: 'PUT', body: data }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async deleteSavings(id) {
+    try { await req(`/savings/${id}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async paySavings(id, body) {
+    try { const r = await req(`/savings/${id}/pay`, { method: 'POST', body }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async paySavingsMissed(id, body) {
+    try { const r = await req(`/savings/${id}/pay-missed`, { method: 'POST', body }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async matureSavings(id, body) {
+    try { const r = await req(`/savings/${id}/mature`, { method: 'POST', body }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
+  // ─── 자금일보 · 일계표 ────────────────────────────────────────
+  async getCashReport({ date, days } = {}) {
+    const qs = new URLSearchParams(Object.entries({ date, days }).filter(([, v]) => v)).toString()
+    try { return await req('/dashboard/cash-report' + (qs ? `?${qs}` : '')) } catch { return null }
+  },
+  /** 홈 요약 — 자금일보의 앞부분만 가볍게 */
+  async getCashSummary() {
+    try { return await req('/dashboard') } catch { return null }
+  },
+  async getDailyTrial(date) {
+    try { return await req('/dashboard/daily-trial' + (date ? `?date=${date}` : '')) } catch { return null }
+  },
+
   // ─── HR 코드 (부서/직급) ──────────────────────────────────────
   async getHrCodes(type) {
     try { return await req(`/hr-codes${type ? `?type=${type}` : ''}`) } catch { return [] }

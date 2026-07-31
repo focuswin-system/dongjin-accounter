@@ -81,7 +81,10 @@ const RESOURCES = [
   // 재무관리 — 차입금 원금·투자금은 손익이 아니라 부채·자본이다(lib/pnl.js)
   { id: 'finance_loan',            label: '차입금',        group: '재무관리' },
   { id: 'finance_investment',      label: '투자',          group: '재무관리' },
+  { id: 'finance_savings',         label: '예금·적금',      group: '재무관리' },
   { id: 'finance_dash',            label: '재무 현황',      group: '재무관리' },
+  { id: 'cash_report',             label: '자금일보',       group: '경영관리' },
+  { id: 'report_daily',            label: '일계표',        group: '경영관리' },
 
   { id: 'report',                  label: '보고서',        group: '경영관리' },
   { id: 'mgmt_dash',               label: '경영 대시보드',  group: '경영관리' },

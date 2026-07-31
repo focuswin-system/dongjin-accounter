@@ -1,0 +1,134 @@
+/**
+ * 예금·적금 계산 — 자금 '운용' 쪽. 차입금(lib/loan.js)의 거울상이다.
+ *
+ *   대출: 목돈을 받고 → 매월 갚고 → 만기에 끝난다
+ *   적금: 매월 넣고  → 만기에 원리금을 받는다
+ *   예금: 목돈을 넣고 → 만기에 원리금을 받는다
+ *
+ * 그래서 회차 날짜 계산은 loan.js 의 dueDateOf 를 그대로 쓴다(같은 규칙이어야 한다).
+ *
+ * ── 왜 accounts 에 넣지 않았나 ──
+ * accounts 는 11개 화면에서 **결제수단 드롭다운**으로 쓰인다(거래 등록·청구서 정산·급여이체…).
+ * 여기에 적금을 섞으면 그 11곳을 전부 걸러야 하고, 한 곳만 빠뜨려도 '적금 계좌에서 외주비 지급'
+ * 같은 게 조용히 만들어진다. 마감 우회 결함과 같은 실패 패턴이라 아예 다른 테이블로 둔다.
+ * 대신 자금일보에서 **묶인 자금**으로 합산해 보여준다 — 회사 돈인 건 맞으니까.
+ *
+ * ── 이자 계산 ──
+ * 실무 상품 대부분이 **단리**다(복리 상품은 별도 표기가 붙는다). 세전 기준으로 계산하고,
+ * 이자소득세(15.4%)는 표시만 한다 — 법인은 원천징수 후 법인세에서 정산하므로
+ * 여기서 세후를 확정해버리면 오히려 틀린 숫자가 된다.
+ */
+
+const { dueDateOf } = require('./loan')
+
+const KINDS = ['installment', 'deposit']   // 적금(매월 납입) / 예금(목돈 예치)
+
+/** 이자소득세율(원천징수) — 소득세 14% + 지방소득세 1.4% */
+const TAX_RATE = 0.154
+
+const intOf = (v) => Math.round(Number(v) || 0)
+
+/**
+ * 적금 만기이자(단리, 세전).
+ *
+ * 매월 넣은 돈은 각각 예치 기간이 다르다. 1회차는 n개월, 2회차는 n-1개월 … n회차는 1개월.
+ * 그래서 총 이자 = 월납입 × (연이율/12) × (n + (n-1) + … + 1) = 월납입 × r/12 × n(n+1)/2
+ * 흔히 하는 실수: 총 납입액 × 연이율 × 기간 — 그러면 이자가 2배 가까이 부풀려진다.
+ */
+function installmentInterest(monthlyAmount, annualRate, months) {
+  const m = intOf(monthlyAmount)
+  const n = Math.trunc(Number(months) || 0)
+  const r = (Number(annualRate) || 0) / 100
+  if (m <= 0 || n <= 0 || r <= 0) return 0
+  return Math.round(m * (r / 12) * (n * (n + 1) / 2))
+}
+
+/** 예금 만기이자(단리, 세전) = 원금 × 연이율 × 개월/12 */
+function depositInterest(principal, annualRate, months) {
+  const p = intOf(principal)
+  const n = Math.trunc(Number(months) || 0)
+  const r = (Number(annualRate) || 0) / 100
+  if (p <= 0 || n <= 0 || r <= 0) return 0
+  return Math.round(p * r * (n / 12))
+}
+
+/**
+ * 납입 스케줄. 적금만 회차가 있다(예금은 가입할 때 한 번 넣고 끝).
+ * @returns {{seq, due_date, amount, cumulative}[]}
+ */
+function paymentSchedule(s) {
+  if (s.kind !== 'installment') return []
+  const n = Math.trunc(Number(s.term_months) || 0)
+  const m = intOf(s.monthly_amount)
+  if (n <= 0 || m <= 0) return []
+  const out = []
+  let cum = 0
+  for (let i = 1; i <= n; i++) {
+    cum += m
+    // 1회차는 가입일(start_date) 당일에 낸다 — 그래서 dueDateOf(…, i-1).
+    // 대출은 돈을 먼저 받고 다음 달부터 갚으므로 i 부터다. 방향이 반대라 한 칸 당긴다.
+    out.push({ seq: i, due_date: dueDateOf(s.start_date, s.pay_day, i - 1), amount: m, cumulative: cum })
+  }
+  return out
+}
+
+/** 아직 납입하지 않은 회차 */
+function unpaidPayments(s, paidSeqs = []) {
+  const done = new Set(paidSeqs.map(Number))
+  return paymentSchedule(s).filter(c => !done.has(c.seq))
+}
+
+/**
+ * 지금까지 쌓인 원금 — **실제 납입 실적** 기준.
+ * 스케줄이 아니라 실적으로 센다(밀린 회차가 있으면 스케줄과 어긋난다).
+ * 예금은 가입 시점에 전액이므로 principal 그대로.
+ */
+function paidPrincipal(s, payments = []) {
+  if (s.kind === 'deposit') return intOf(s.principal)
+  return payments.reduce((a, p) => a + intOf(p.amount), 0)
+}
+
+/** 만기 예상액 요약 — 등록 화면에서 가입 전에 보여준다 */
+function maturitySummary(s) {
+  const n = Math.trunc(Number(s.term_months) || 0)
+  const principal = s.kind === 'installment'
+    ? intOf(s.monthly_amount) * n
+    : intOf(s.principal)
+  const interest = s.kind === 'installment'
+    ? installmentInterest(s.monthly_amount, s.annual_rate, n)
+    : depositInterest(s.principal, s.annual_rate, n)
+  const tax = Math.round(interest * TAX_RATE)
+  const sched = paymentSchedule(s)
+  return {
+    months: n,
+    principal,                      // 총 납입(예치) 원금
+    interest,                       // 세전 이자
+    tax,                            // 원천징수 예상액(표시용)
+    total: principal + interest,    // 세전 만기 수령액
+    afterTax: principal + interest - tax,
+    firstDue: sched[0]?.due_date || s.start_date || null,
+    lastDue: sched[sched.length - 1]?.due_date || null,
+    maturityDate: maturityDateOf(s),
+  }
+}
+
+/**
+ * 만기일 — 가입일에서 term_months 만큼 뒤.
+ * 말일 처리는 dueDateOf 가 이미 한다(1/31 + 1개월 = 2/28).
+ * 적금은 마지막 납입 다음 달이 아니라, 가입일 + 기간이 만기다.
+ */
+function maturityDateOf(s) {
+  if (!s.start_date) return null
+  const n = Math.trunc(Number(s.term_months) || 0)
+  if (n <= 0) return null
+  // pay_day 를 가입일의 '일'로 고정해 계산한다(만기는 납입일과 무관하다)
+  const day = Number(String(s.start_date).slice(8, 10)) || 1
+  return dueDateOf(s.start_date, day, n)
+}
+
+module.exports = {
+  KINDS, TAX_RATE,
+  installmentInterest, depositInterest,
+  paymentSchedule, unpaidPayments, paidPrincipal,
+  maturitySummary, maturityDateOf,
+}
