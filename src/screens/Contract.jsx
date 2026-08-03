@@ -1143,9 +1143,11 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
         </div>
       ) : (
       <div className="grid" style={{ gridTemplateColumns: `repeat(${isPurchase ? 4 : 5}, 1fr)`, gap: 12 }}>
+        {/* 옆 타일(수금·미수금·원가)이 모두 부가세 포함 금액이라 여기도 기준을 맞춘다.
+            공급가만 보여주면 '계약 840만 · 수금 924만'처럼 앞뒤가 안 맞아 보인다. */}
         <SummaryTile
           label={openEnded ? `${periodLabel(c.billing_period)} ${isPurchase ? '지급' : '청구'}금액` : recurring ? "이번 계약기간 총액" : "계약금액"}
-          amount={openEnded ? (c.unit_amount || 0) : c.amount}/>
+          amount={openEnded ? (c.unit_amount || 0) : (c.term_total ?? c.amount)}/>
         <SummaryTile
           label={openEnded ? `누적 ${doneLabel}` : `${doneLabel} 완료`}
           amount={openEnded ? doneAll : done}
@@ -2109,7 +2111,9 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
             미수금 4,664만원이 떠 있었다 — 홈·미수금 화면은 0원인데 여기만 다른 말을 했다.
             진짜 미수금(청구했는데 안 들어온 돈)은 ar_remain 이므로 뱃지로 따로 보여준다. */}
         <Kpi label={kind === "purchase" ? "남은 계약분(지급)" : "남은 계약분"} value={fmtNum(totals.remain) + "원"}
-          badge={totals.arRemain > 0
+          /* 뱃지는 '다를 때만' 의미가 있다. 두 값이 같으면(총액형이 전부 완납이라
+             남은 계약분 = 미수금인 경우) 같은 숫자를 두 번 보여주는 꼴이라 오히려 헷갈린다. */
+          badge={totals.arRemain > 0 && totals.arRemain !== totals.remain
             ? `그중 ${kind === "purchase" ? "미지급금" : "미수금"} ${fmtNum(totals.arRemain)}원`
             : `${scoped.filter(c => rowRemain(c) > 0).length}건 잔존`}
           badgeTone={totals.arRemain > 0 ? "warn" : "ink"}/>
@@ -2186,7 +2190,14 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
             { key: 'amount', header: '금액', align: 'right', sortable: true, sortValue: r => r.amount || 0, render: r => (
               isRecurring(r)
                 ? <div><div className="fw-600">{fmtNum(r.unit_amount || 0)}<span className="text-xs text-muted2">/{periodLabel(r.billing_period)}</span></div>{hasTotal(r) && <div className="text-xs text-muted2">기간 총 {fmtNum(r.amount || 0)}</div>}</div>
-                : <span className="num-cell">{fmtNum(r.amount || 0)}</span>
+                /* 옆 칸의 '수금'·'남은 계약분'은 전부 **부가세 포함** 금액이다.
+                   여기만 공급가(c.amount)를 보여줘서, 계약 8,400,000 인데 수금 9,240,000 처럼
+                   같은 행의 숫자끼리 앞뒤가 안 맞아 보였다("계약보다 많이 받았나?").
+                   기준을 맞춰 VAT 포함 총액(term_total)을 크게 두고, 공급가는 밑에 적는다. */
+                : (r.term_total != null && r.term_total !== r.amount
+                    ? <div><div className="num-cell">{fmtNum(r.term_total)}</div>
+                        <div className="text-xs text-muted2">공급가 {fmtNum(r.amount || 0)}</div></div>
+                    : <span className="num-cell">{fmtNum(r.amount || 0)}</span>)
             ) },
             { key: 'collected', header: kind === "purchase" ? "지급액" : "수금", align: 'right', sortable: true, sortValue: r => r.collected ?? 0, render: r => <span className="num-cell">{fmtNum(r.collected ?? 0)}</span> },
             /* 총액형은 '계약잔액'(아직 청구 안 한 몫 포함), 기성·무기한형은 remain 이 없어
