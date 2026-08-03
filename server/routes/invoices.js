@@ -7,6 +7,7 @@ const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
 const { restoreLastGenerated } = require('../lib/recurrence')
 const { ledgerError, amountError } = require('../lib/ledger')
+const { settleAcctCode } = require('../lib/acctCode')
 const { removeUploadedFile } = require('../lib/uploads')
 const { normalizeTaxType } = require('../lib/vat')
 const { recalcInvoiceStatus, paidAmountOf } = require('../lib/invoiceStatus')
@@ -581,7 +582,13 @@ router.post('/:id/matches', async (req, res, next) => {
       `, [realTxnId, isIssued ? 'income' : 'expense', inv.vendor_id || null, inv.contract_id || null,
           acct, cat, matchAmount,
           date || kstToday(), '계좌이체',   // UTC(new Date())면 KST 새벽에 하루 전으로 찍힌다
-          isIssued ? '입금완료' : '지급완료', inv.contract_id ? '' : '공통', invoiceId, memoV, account_code || null])
+          isIssued ? '입금완료' : '지급완료', inv.contract_id ? '' : '공통', invoiceId, memoV,
+          /* 계정과목은 화면에서 '선택'이라 대부분 비워서 온다. 그대로 두면 일계표에서
+             상대 계정이 없어 차변·대변이 안 맞는다(실제로 수금 1,687만원 거래가 불일치로 떴다).
+             정산 거래의 상대 계정은 이미 정해져 있다 — 매출·매입은 청구서 발행 시점에
+             인식됐고 지금은 그때 생긴 채권·채무가 사라지는 것이다(외상매출금/외상매입금).
+             사용자가 고른 값이 있으면 그것을 우선한다. */
+          account_code || settleAcctCode(isIssued ? 'income' : 'expense')])
     }
 
     const id = randomUUID()

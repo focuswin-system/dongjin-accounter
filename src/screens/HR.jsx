@@ -129,8 +129,15 @@ export const HRScreen = () => {
     // `pay_date || (w.pay_day ? … : 25일)`) 근로계약에 설정한 급여지급일이 무시된다.
     // 비워두면 계약별 pay_day 를, 없는 사람만 25일로 채운다.
     const res = await api.generatePayroll(month);
-    if (res.ok) { toast.push(res.created > 0 ? `${res.created}명 급여대장을 만들었어요` : "이미 모두 작성돼 있어요"); loadPayroll(); }
-    else toast.push(res.error || "생성에 실패했어요", { tone: "warn" });
+    if (!res.ok) return toast.push(res.error || "생성에 실패했어요", { tone: "warn" });
+    /* 0건일 때 이유를 갈라 말한다. 예전엔 무조건 "이미 모두 작성돼 있어요"였는데,
+       근로계약이 하나도 없어서 만들 게 없는 경우까지 그렇게 안내해서
+       "작성돼 있다는데 왜 대장이 비었지"로 막혔다(직원만 등록하면 이 상태가 된다). */
+    if (res.created > 0) toast.push(`${res.created}명 급여대장을 만들었어요`);
+    else if (res.reason === 'noContract')
+      toast.push("이 달에 유효한 근로계약이 없어요. 인사급여 › 근로계약에서 먼저 등록해주세요.", { tone: "warn" });
+    else toast.push("이미 모두 작성돼 있어요");
+    loadPayroll();
   };
 
   const handleDeleteRow = async (r) => {

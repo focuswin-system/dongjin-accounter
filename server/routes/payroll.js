@@ -227,7 +227,17 @@ router.post('/generate', async (req, res, next) => {
       created++
     }
     await conn.commit()
-    res.json({ ok: true, created })
+    /* created=0 인 이유를 구분해 돌려준다.
+     * 급여대장은 **근로계약(work_contracts)** 이 있어야 만들어진다. 직원만 등록해 두고
+     * 생성을 누르면 0건이 되는데, 화면은 그걸 "이미 모두 작성돼 있어요"로 안내했다.
+     * 전혀 다른 상황인데 같은 말이 나와서 "작성돼 있다는데 왜 대장이 비었지"에서 막힌다.
+     *   noContract  — 그 달에 유효한 근로계약이 하나도 없다(등록부터 해야 한다)
+     *   allExists   — 대상은 있는데 전원 이미 작성돼 있다(정상)                       */
+    const eligible = byEmp.size
+    res.json({
+      ok: true, created, eligible, skipped: eligible - created,
+      reason: created > 0 ? null : (eligible === 0 ? 'noContract' : 'allExists'),
+    })
   } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
 })
 
