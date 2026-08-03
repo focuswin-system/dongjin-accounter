@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import './index.css'
 import { pruneDeadSession } from './lib/session'
+import { watchAppUpdate } from './lib/appUpdate'
 
 /* 앱을 그리기 전에 죽은 세션을 걷어낸다.
  * 남겨두면 만료된 토큰으로 첫 요청 묶음이 나가고, 그 401들이 세션을 지우며 화면이
@@ -25,6 +26,10 @@ if (import.meta.env.DEV && 'serviceWorker' in navigator) {
     window.location.reload()
   }).catch(() => { /* 워커 정리는 실패해도 앱 동작과 무관 */ })
 }
+
+/* 배포로 새 버전이 올라오면 알려준다 — 열려 있는 탭은 옛 코드를 계속 돌리기 때문.
+ * 자동 새로고침은 하지 않는다(작성 중인 폼이 날아간다). 자세한 배경은 lib/appUpdate.js */
+watchAppUpdate()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

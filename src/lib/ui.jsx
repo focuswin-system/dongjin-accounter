@@ -288,6 +288,7 @@ export const Icon = {
   Trend:   (p) => <I {...p} d={<><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></>} />,
   TrendDn: (p) => <I {...p} d={<><path d="M3 7l6 6 4-4 8 8"/><path d="M14 17h7v-7"/></>} />,
   Menu:    (p) => <I {...p} d={<><path d="M3 6h18M3 12h18M3 18h18"/></>} />,
+  Refresh: (p) => <I {...p} d={<><path d="M20 11a8 8 0 1 0-.9 4.5"/><path d="M20 5v6h-6"/></>} />,
   Help:    (p) => <I {...p} d={<><circle cx="12" cy="12" r="9"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none"/></>} />,
 };
 

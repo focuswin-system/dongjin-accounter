@@ -5,6 +5,7 @@ import { api, setApiFailureHandler } from './lib/api'
 import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID } from './lib/nav'
 import { PermCtx, usePerms, visibleNav, visiblePortalNode } from './lib/perms'
 import { sessionAlive, clearSession } from './lib/session'
+import { UpdateBanner } from './lib/components/UpdateBanner'
 import { LoginScreen } from './screens/Login'
 import { HomeScreen } from './screens/Home'
 import { LedgerScreen } from './screens/Ledger'
@@ -1129,6 +1130,9 @@ export default function App() {
             : user?.mustChangePw
               ? <ForcePasswordChange user={user} onDone={clearMustChange} onLogout={handleLogout}/>
               : <AppInner onLogout={handleLogout} user={user}/>}
+          {/* 배포로 새 버전이 올라왔을 때만 뜬다. 로그인 화면에서도 보여야 한다 —
+              옛 번들이 옛 인증 흐름을 타면 로그인 자체가 이상하게 동작할 수 있다. */}
+          <UpdateBanner/>
         </PermCtx.Provider>
       </ConfirmProvider>
     </ToastProvider>
