@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, Fragment, Component } from 'react
 import logoSymbol from './assets/company/favicon.svg'
 import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider } from './lib/ui'
 import { api, setApiFailureHandler } from './lib/api'
-import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID } from './lib/nav'
+import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID, MASTER_LEAVES } from './lib/nav'
 import { PermCtx, usePerms, visibleNav, visiblePortalNode } from './lib/perms'
 import { sessionAlive, clearSession } from './lib/session'
 import { UpdateBanner } from './lib/components/UpdateBanner'
@@ -66,7 +66,7 @@ const CRUMB_MAP = {
   hr_labor:        ["인사급여", "근로·용역"],
   tax_vat:         ["세무관리", "부가세"],
   tax_etc:         ["세무관리", "기타세액"],
-  master:          ["일반회계", "기준정보"],
+  master:          ["기준정보"],   // 일반회계 하위가 아니라 독립 영역(인사 기준정보까지 모은다)
   settings:        ["환경설정"],
   hr_base:         ["인사급여", "기준정보"],
   doc:             ["문서", "지급결의서"],
@@ -260,6 +260,9 @@ function AppInner({ onLogout, user }) {
   // 권한 없는 메뉴는 아예 그리지 않는다. 눌러서 403을 받는 것보다 없는 게 낫다.
   const { perms, can: canDo } = usePerms();
   const navTree = useMemo(() => visibleNav(perms), [perms]);
+  /* 기준정보는 15개 화면의 묶음이라, 그중 하나라도 볼 수 있으면 메뉴를 세운다.
+     하나도 못 보는 사람에게 빈 페이지로 가는 메뉴를 보여줄 이유가 없다. */
+  const masterVisible = useMemo(() => MASTER_LEAVES.some(l => canDo(l.id)), [perms]);
   const [route, setRoute] = useState("home");
   const [contractId, setContractId] = useState("CT-2026-101");
   const [focusInvoiceId, setFocusInvoiceId] = useState(null);   // 홈 할 일 → 청구서 바로 열기
@@ -627,12 +630,22 @@ function AppInner({ onLogout, user }) {
           })}
         </div>
 
-        {canDo("settings") && (
+        {/* 기준정보·환경설정 — 매일 쓰는 업무 메뉴와 성격이 달라 아래에 따로 세운다.
+            둘 다 '한 번 세팅하고 가끔 손보는' 것들이라 위쪽 흐름을 차지하지 않는다. */}
+        {(masterVisible || canDo("settings")) && (
           <div style={{ paddingTop: 8, marginTop: 8, borderTop: "1px solid var(--line)" }}>
-            <div className={`nav-item${activeId === "settings" ? " active" : ""}`} onClick={() => go("settings")}>
-              <Icon.Cog className="nav-ico" size={18}/>
-              <span>환경설정</span>
-            </div>
+            {masterVisible && (
+              <div className={`nav-item${activeId === "master" ? " active" : ""}`} onClick={() => go("master")}>
+                <Icon.Folder className="nav-ico" size={18}/>
+                <span>기준정보</span>
+              </div>
+            )}
+            {canDo("settings") && (
+              <div className={`nav-item${activeId === "settings" ? " active" : ""}`} onClick={() => go("settings")}>
+                <Icon.Cog className="nav-ico" size={18}/>
+                <span>환경설정</span>
+              </div>
+            )}
           </div>
         )}
 

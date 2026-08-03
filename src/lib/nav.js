@@ -48,19 +48,6 @@ export const NAV_TREE = [
         { id: "tax_vat", label: "부가세",   icon: Icon.Doc },
         { id: "tax_etc", label: "기타세액", icon: Icon.Doc },
       ]},
-      { label: "기준정보", items: [
-        { id: "master_vendor",          label: "거래처",     icon: Icon.Building },
-        { id: "master_accountSubject",  label: "계정과목",   icon: Icon.Book },
-        { id: "master_category",        label: "비목",       icon: Icon.Folder },
-        { id: "master_jeokyo",          label: "적요",       icon: Icon.Doc },
-        { id: "master_evidence_type",   label: "증빙유형",   icon: Icon.Receipt },
-        { id: "master_item",            label: "품목",       icon: Icon.Receipt },
-        { id: "master_fixed_asset",     label: "고정자산",   icon: Icon.Wallet },
-        { id: "master_intangible_asset",label: "무형자산",   icon: Icon.File },
-        { id: "master_account",         label: "계좌/카드",  icon: Icon.Card },
-        { id: "master_accountBalance",  label: "계좌 잔액",  icon: Icon.Bank },
-        { id: "master_insurance",       label: "보험",       icon: Icon.Doc },
-      ]},
     ],
   },
   {
@@ -72,12 +59,6 @@ export const NAV_TREE = [
       { label: "근로·용역", items: [
         { id: "hr_labor_contract", label: "근로계약",      icon: Icon.Sign },
         { id: "hr_outsourcing",    label: "기타 용역·일용", icon: Icon.Briefcase },
-      ]},
-      { label: "기준정보", items: [
-        { id: "hrbase_department",   label: "부서",     icon: Icon.Building },
-        { id: "hrbase_position",     label: "직위",     icon: Icon.Sign },
-        { id: "hrbase_payrollItems", label: "급여 항목", icon: Icon.Wallet },
-        { id: "hrbase_employType",   label: "고용형태",  icon: Icon.Briefcase },
       ]},
     ],
   },
@@ -122,6 +103,48 @@ export const NAV_TREE = [
   },
 ]
 
+/* ── 기준정보 (사이드바 하단·환경설정 위) ──────────────────────────
+ *
+ * 예전엔 일반회계 안에 11개, 인사급여 안에 4개가 흩어져 사이드바에 상시 노출됐다.
+ * 그런데 기준정보는 **처음 세팅하고 나면 거의 안 건드린다** — 계정과목은 K-GAAP 표준이라
+ * 수정 자체가 막혀 있고, 부서·직위·고용형태는 몇 년에 한 번 바뀐다.
+ * 매일 쓰는 대금 청구서와 같은 무게로 자리를 차지할 이유가 없었다.
+ *
+ * 사이드바 44개 중 15개(34%)가 이것들이었다. 한 곳으로 모아 '기준정보' 한 항목으로 세운다.
+ * 찾아가는 길은 오히려 늘었다 — 홈 포털 타일, 사이드바 하단, 그리고 Ctrl+K 검색
+ * ('통장'·'품목'·'거래처' 같은 말로도 걸린다. LEAF_TAGS 참고).
+ *
+ * ⚠ 각 항목의 id(=권한 자원)는 그대로 둔다. 위치만 옮기는 것이고 권한 체계는 손대지 않는다.
+ */
+export const MASTER_LEAF = { id: "master", label: "기준정보", icon: Icon.Folder }
+
+export const MASTER_GROUPS = [
+  { label: "거래·품목", items: [
+    { id: "master_vendor",          label: "거래처",     icon: Icon.Building },
+    { id: "master_item",            label: "품목",       icon: Icon.Receipt },
+    { id: "master_category",        label: "비목",       icon: Icon.Folder },
+    { id: "master_jeokyo",          label: "적요",       icon: Icon.Doc },
+    { id: "master_evidence_type",   label: "증빙유형",   icon: Icon.Receipt },
+    { id: "master_accountSubject",  label: "계정과목",   icon: Icon.Book },
+  ]},
+  { label: "자금·자산", items: [
+    { id: "master_account",         label: "계좌/카드",  icon: Icon.Card },
+    { id: "master_accountBalance",  label: "계좌 잔액",  icon: Icon.Bank },
+    { id: "master_fixed_asset",     label: "고정자산",   icon: Icon.Wallet },
+    { id: "master_intangible_asset",label: "무형자산",   icon: Icon.File },
+    { id: "master_insurance",       label: "보험",       icon: Icon.Doc },
+  ]},
+  { label: "인사", items: [
+    { id: "hrbase_department",   label: "부서",     icon: Icon.Building },
+    { id: "hrbase_position",     label: "직위",     icon: Icon.Sign },
+    { id: "hrbase_payrollItems", label: "급여 항목", icon: Icon.Wallet },
+    { id: "hrbase_employType",   label: "고용형태",  icon: Icon.Briefcase },
+  ]},
+]
+
+export const MASTER_LEAVES = MASTER_GROUPS.flatMap(g =>
+  g.items.map(it => ({ ...it, domain: "기준정보", section: g.label })))
+
 // 환경설정(사이드바 하단·포털 별도 타일)
 export const SETTINGS_LEAF = { id: "settings", label: "환경설정", icon: Icon.Cog }
 
@@ -146,7 +169,10 @@ for (const node of NAV_TREE) {
   if (node.type === "leaf") { if (node.id !== "home") ALL_LEAVES.push({ id: node.id, label: node.label, icon: node.icon }) }
   else for (const s of node.sections) for (const it of s.items) ALL_LEAVES.push({ id: it.id, label: it.label, icon: it.icon, domain: node.label, section: s.label })
 }
-// 환경설정 잎도 평탄화 목록에 넣는다(포털 타일·브레드크럼·명령팔레트에서 찾게)
+/* 기준정보·환경설정 잎도 평탄화 목록에 넣는다.
+   사이드바 트리에서는 빠졌지만 **찾을 수 있어야 한다** —
+   포털 타일·브레드크럼·명령팔레트(Ctrl+K)가 모두 이 목록을 쓴다. */
+for (const l of MASTER_LEAVES) ALL_LEAVES.push(l)
 for (const l of SETTINGS_LEAVES) ALL_LEAVES.push({ ...l, domain: "환경설정", section: "환경설정" })
 
 export const LEAF_BY_ID = Object.fromEntries(ALL_LEAVES.map(l => [l.id, l]))
@@ -252,11 +278,6 @@ export const PORTAL = [
       { id: 'acct_tax', label: '세무관리', icon: Icon.Doc, desc: '부가세·기타세액 신고', groups: [
         { label: '', items: ['tax_vat', 'tax_etc'] },
       ]},
-      { id: 'master', label: '기준정보', icon: Icon.Folder, desc: '거래처·계정·품목·자산 등', groups: [
-        { label: '거래 기준', items: ['master_vendor', 'master_accountSubject', 'master_category', 'master_jeokyo', 'master_evidence_type'] },
-        { label: '품목·자산', items: ['master_item', 'master_fixed_asset', 'master_intangible_asset'] },
-        { label: '자금·결제', items: ['master_account', 'master_accountBalance', 'master_insurance'] },
-      ]},
     ],
   },
   {
@@ -308,6 +329,13 @@ for (const d of PORTAL) for (const c of d.categories) if (c.groups) PORTAL_CAT_B
 PORTAL_CAT_BY_ID['settings'] = {
   id: 'settings', label: '환경설정', icon: Icon.Cog, domainLabel: '환경설정',
   groups: [{ label: '', items: SETTINGS_LEAVES.map(l => l.id) }],
+}
+
+/* 기준정보도 같은 방식의 포털 페이지. 일반회계 도메인 안에 있던 것을 꺼내
+   독립 타일로 세운다 — 일반회계뿐 아니라 인사 기준정보까지 한 곳에 모으기 때문이다. */
+PORTAL_CAT_BY_ID['master'] = {
+  id: 'master', label: '기준정보', icon: Icon.Folder, domainLabel: '기준정보',
+  groups: MASTER_GROUPS.map(g => ({ label: g.label, items: g.items.map(it => it.id) })),
 }
 
 // 포털 카테고리 라우트도 소속 도메인으로 매핑(사이드바 도메인 자동 펼침)
