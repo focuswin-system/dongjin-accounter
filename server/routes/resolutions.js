@@ -278,7 +278,13 @@ router.post('/:id/process', async (req, res, next) => {
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [id, 'expense', r.vendor_id || null, invContractId, acct,
          r.invoice_id ? settleAcctCode('expense') : null,
-         r.title || '지출', amt,
+         /* 비목(category)은 기준정보의 분류값이어야 한다. 결의서 제목(r.title)을 그대로
+          * 넣던 탓에 '5축 가공 외주 단가계약'·'AL7075 판재 7월분' 같은 자유 텍스트가
+          * 비목 칸에 들어갔다 — 그런 비목은 기준정보에 없으므로 비목별 집계가 오염된다.
+          * 청구서 기반 결의서는 청구서 정산과 같은 성격이므로 같은 값('대금 지급')을 쓴다.
+          * 청구서 없는 소액경비는 고를 비목이 없어 제목을 그대로 두되, 결의서에 비목 칸을
+          * 붙이는 것이 근본 해결이다(비목→계정과목 매핑과 같은 과제). */
+         r.invoice_id ? '대금 지급' : (r.title || '지출'), amt,
          effDate, r.pay_method || '계좌이체',
          '지급완료', r.doc_no, `결의서 ${r.doc_no} 집행`,
          vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible])
