@@ -394,6 +394,17 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
   if (!Array.isArray(lines) || lines.length === 0) {
     return res.status(400).json({ error: '청구할 품목을 하나 이상 입력해주세요' })
   }
+  /* 청구일은 반드시 받는다.
+   * 예전엔 없으면 조용히 오늘로 대체했다(`issued_at || today`). 그 결과
+   *   · 3~7월 기성으로 보낸 청구서 9건이 전부 **오늘 날짜로** 저장됐고
+   *     (호출부가 필드명을 `date` 로 잘못 보냈는데 아무 말이 없었다),
+   *   · 마감된 달로 청구해도 **오늘로 바뀌어 마감 검사를 그냥 지나갔다.**
+   * 부가세는 발행일로 분기를 가르므로, 날짜가 조용히 바뀌면 신고 자료가 통째로 틀어진다.
+   * 화면은 늘 값을 보내므로(Contract.jsx) 이 검사에 걸리지 않는다 — 잘못 부른 쪽만 걸린다. */
+  if (!issued_at) return res.status(400).json({ error: '청구일을 선택해주세요' })
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(issued_at))) {
+    return res.status(400).json({ error: '청구일 형식이 올바르지 않아요 (YYYY-MM-DD)' })
+  }
   // 기입금(paid)이면 실제 입/출금 거래가 생기므로 미래 일자 금지
   if (paid) { const de = futureDateError(issued_at); if (de) return res.status(400).json({ error: de }) }
   const conn = await req.db.getConnection()

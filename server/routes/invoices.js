@@ -406,6 +406,13 @@ router.post('/', async (req, res, next) => {
      * 다른 청구서를 상계하고, 부가세 과세표준도 함께 줄인다.
      * 거래(transactions)·결의서는 이미 amountError 를 통과해야 하는데 청구서만 빠져 있었다. */
     { const ae = amountError(total_amount); if (ae) return res.status(400).json({ error: ae }) }
+    /* 발행일은 반드시 받는다. 없으면 DB의 NOT NULL 제약에 걸려 **500**이 났다 —
+     * 사용자에겐 "처리 중 오류"라고만 보여서 무엇을 안 넣었는지 알 수 없다.
+     * 게다가 발행일이 없으면 바로 아래 마감 검사가 undefined 로 통과해 버린다. */
+    if (!issued_at) return res.status(400).json({ error: '발행일을 선택해주세요' })
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(issued_at))) {
+      return res.status(400).json({ error: '발행일 형식이 올바르지 않아요 (YYYY-MM-DD)' })
+    }
     // 마감된 달에는 청구서를 새로 발행할 수 없다 — 부가세 집계의 주 소스가 청구서이므로,
     // 신고를 끝낸 분기에 청구서가 추가되면 제출 자료와 장부가 어긋난다.
     // (미래 발행일은 막지 않는다 — 정기청구의 미리 발행이 정당한 업무다)
