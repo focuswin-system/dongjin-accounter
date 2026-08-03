@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Fragment } from 'react'
+import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, Popover, Loading } from '../lib/ui'
 // SAMPLE placeholder — Docs 화면은 실 API 연동 전까지 빈 데이터로 동작
 const SAMPLE = {
@@ -796,7 +796,7 @@ export const EvidenceAttachDrawer = ({ item, onClose }) => {
 /* 계정과목을 받는다. 없으면 일계표에서 상대 계정이 비어 차·대변이 안 맞는다 —
     수백 건을 한 번에 올리는 경로라 빠지면 그날들이 통째로 깨진다.
     회계 프로그램에서 뽑은 자료에는 대개 계정과목이 들어 있다. */
-const IMPORT_TARGETS = ["사용 안함", "날짜", "거래처", "계약명", "입금/지출 구분", "비목", "계정과목", "금액", "공급가액", "부가세", "메모"]
+const IMPORT_TARGETS = ["사용 안함", "날짜", "거래처", "계약명", "입금/지출 구분", "비목", "계정과목", "금액", "공급가액", "부가세", "계좌", "메모"]
 const guessTarget = (h) => {
   const s = String(h).replace(/\s/g, '')
   /* ⚠ 순서가 중요하다 — 먼저 걸리는 규칙이 이긴다.
@@ -806,6 +806,7 @@ const guessTarget = (h) => {
   if (/공급가|과세표준|supply/i.test(s)) return "공급가액"
   if (/부가세|세액|vat/i.test(s)) return "부가세"
   if (/계정과목|계정코드|acct/i.test(s)) return "계정과목"
+  if (/계좌|장부|통장|카드|account/i.test(s)) return "계좌"
   if (/거래처|상호|업체|공급처|공급자|vendor/i.test(s)) return "거래처"
   if (/계약|프로젝트|현장|contract/i.test(s)) return "계약명"
   if (/구분|입출|유형|type/i.test(s)) return "입금/지출 구분"
@@ -873,18 +874,32 @@ export const ExcelScreen = () => {
   const colFor = (t) => mapping.find(m => m.target === t)?.excelCol
   const setMap = (i, k, v) => setMapping(ms => ms.map((m, idx) => idx === i ? { ...m, [k]: v } : m))
 
+  /* 계좌 이름 → 계좌 id. 회계 프로그램에서 뽑은 통합 분개장은 여러 통장·카드가 섞여 있어,
+     계좌를 하나로만 지정하면 그 수백 건이 전부 한 계좌에 붙어 자금일보·잔액이 통째로 틀린다. */
+  const acctByName = useMemo(() => {
+    const m = {}
+    for (const a of importAccounts) { const k = String(a.name || '').replace(/\s/g, ''); if (k && !m[k]) m[k] = a.id }
+    return m
+  }, [importAccounts])
+  const matchAccount = (v) => acctByName[String(v || '').replace(/\s/g, '')] || null
+
   const preview = rawRows.map((row, idx) => {
     const g = (t) => { const c = colFor(t); return c != null ? row[c] : '' }
     const date = normDate(g("날짜"))
     const kCol = colFor("입금/지출 구분")
     const kind = kCol != null ? normKind(row[kCol]) : defaultKind
     const amount = normAmount(g("금액"))
+    const acctCol = colFor("계좌")
+    const acctName = acctCol != null ? String(row[acctCol] || '').trim() : ''
+    // 매핑했는데 이름이 안 맞으면 오류로 잡는다. 조용히 일괄 계좌로 흘리면 엉뚱한 통장 잔액이 된다.
+    const account_id = acctName ? matchAccount(acctName) : null
     const errs = []
     if (!colFor("날짜") || !date) errs.push("날짜")
     if (!colFor("금액") || amount == null) errs.push("금액")
     if (!kind) errs.push("구분")
+    if (acctName && !account_id) errs.push("계좌")
     return {
-      idx, date, kind, amount,
+      idx, date, kind, amount, account_id, acctName,
       vendor: String(g("거래처") || '').trim(),
       contract: String(g("계약명") || '').trim(),
       category: String(g("비목") || '').trim(),
@@ -904,6 +919,7 @@ export const ExcelScreen = () => {
     { key: "날짜", label: "날짜 오류", fix: "날짜가 비었거나 형식을 인식 못했어요. 매핑을 다시 보거나 해당 행을 제외하세요." },
     { key: "금액", label: "금액 오류", fix: "금액이 비었거나 숫자가 아니에요. 매핑을 다시 보거나 해당 행을 제외하세요." },
     { key: "구분", label: "입금/지출 구분 오류", fix: "구분을 인식 못했어요. '구분' 매핑을 해제하면 위의 기본 유형이 적용돼요." },
+    { key: "계좌", label: "계좌 이름을 못 찾음", fix: "엑셀의 계좌 이름과 기준정보의 계좌·카드 이름이 정확히 같아야 해요. 기준정보에 추가하거나, '계좌' 매핑을 해제하면 아래 일괄 계좌가 적용돼요." },
   ].map(b => ({ ...b, n: errRows.filter(r => r.errs.includes(b.key)).length })).filter(b => b.n > 0)
 
   const excludeErr = (key) => setExcluded(s => {
@@ -915,8 +931,9 @@ export const ExcelScreen = () => {
 
   const onCommit = async () => {
     if (!okRows.length) return toast.push("등록할 정상 행이 없어요")
-    // 계좌가 없으면 등록된 수백 건이 통째로 계좌 잔액에서 빠진다(서버도 400으로 막는다)
-    if (!importAccountId) return toast.push("입출금 계좌를 선택해주세요")
+    // 계좌가 없으면 등록된 수백 건이 통째로 계좌 잔액에서 빠진다(서버도 400으로 막는다).
+    // 행마다 계좌가 붙어 있으면 일괄 계좌는 필요 없다.
+    if (!importAccountId && okRows.some(r => !r.account_id)) return toast.push("입출금 계좌를 선택해주세요")
     setBusy(true)
     /* 계정과목·공급가·부가세도 함께 보낸다. 안 보내면 서버가 금액에서 역산하는데,
        회계 프로그램에서 뽑은 자료는 이미 정확한 값을 갖고 있으므로 그걸 그대로 쓰는 게 맞다.
@@ -925,6 +942,8 @@ export const ExcelScreen = () => {
       date: r.date, vendor: r.vendor, contract: r.contract, kind: r.kind,
       category: r.category, amount: r.amount, memo: r.memo,
       account_code: r.account_code || null,
+      // 행별 계좌가 있으면 그걸 쓰고, 없는 행만 아래 일괄 계좌로 간다(서버도 같은 순서)
+      account_id: r.account_id || null,
       supply_amount: r.supply_amount || null,
       vat_amount: r.vat_amount || null,
     }))
@@ -1089,7 +1108,7 @@ export const ExcelScreen = () => {
 
               <div className="table-scroll" style={{ maxHeight: 420 }}>
                 <table className="table">
-                  <thead><tr><th style={{ width: 40 }}>행</th><th>날짜</th><th>거래처</th><th>계약</th><th>구분</th><th>비목</th><th className="num-right">금액</th><th>상태</th></tr></thead>
+                  <thead><tr><th style={{ width: 40 }}>행</th><th>날짜</th><th>거래처</th><th>계약</th><th>구분</th><th>비목</th><th className="num-right">금액</th>{colFor("계좌") != null && <th>계좌</th>}<th>상태</th></tr></thead>
                   <tbody>
                     {preview.slice(0, 100).map((r) => {
                       const ex = excluded.has(r.idx)
@@ -1102,6 +1121,13 @@ export const ExcelScreen = () => {
                           <td>{r.kind ? <span className="badge outline">{r.kind === "income" ? "입금" : "지출"}</span> : <span className="text-neg text-xs">?</span>}</td>
                           <td className="text-sm">{r.category || "—"}</td>
                           <td className="num-cell num-right">{r.amount != null ? fmtNum(r.amount) : <span className="text-neg">—</span>}</td>
+                          {colFor("계좌") != null && (
+                            <td className="text-sm">
+                              {!r.acctName ? <span className="text-muted2">일괄</span>
+                                : r.account_id ? r.acctName
+                                : <span className="text-neg">{r.acctName}</span>}
+                            </td>
+                          )}
                           <td>
                             {ex ? <span className="badge outline">제외</span>
                               : r.errs.length === 0 ? <span className="badge pos"><Icon.Check size={11}/> 정상</span>
@@ -1116,19 +1142,21 @@ export const ExcelScreen = () => {
               <div className="row" style={{ padding: 16, borderTop: "1px solid var(--line)", flexWrap: "wrap", gap: 12 }}>
                 <div style={{ minWidth: 260 }}>
                   <label className="label" style={{ marginBottom: 6 }}>
-                    입출금 계좌 <span style={{ color: "var(--neg-ink)" }}>*</span>
+                    입출금 계좌 {okRows.some(r => !r.account_id) && <span style={{ color: "var(--neg-ink)" }}>*</span>}
                   </label>
                   <Combobox value={importAccountId} onChange={setImportAccountId}
                     options={importAccounts.map(a => ({ value: a.id, label: a.name, sub: [a.kind === "card" ? "카드" : a.bankName, a.number].filter(Boolean).join(" ") }))}
                     placeholder="계좌 선택" allowAdd={false}/>
                   <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-                    이 거래들이 오간 계좌예요. 지정해야 계좌 잔액에 반영됩니다.
+                    {colFor("계좌") != null
+                      ? "계좌 열이 비어 있는 행에만 적용돼요."
+                      : "이 거래들이 오간 계좌예요. 지정해야 계좌 잔액에 반영됩니다. 엑셀에 계좌 열이 있으면 '계좌'로 매핑하세요."}
                   </div>
                 </div>
                 <span className="text-sm text-muted">{preview.length > 100 ? `상위 100행 표시 · 전체 ${preview.length}행` : `전체 ${preview.length}행`}</span>
                 <div className="ml-auto row gap-8">
                   <button className="btn" onClick={reset}>취소</button>
-                  <button className="btn primary" disabled={busy || !okRows.length || !importAccountId} style={{ opacity: (busy || !okRows.length || !importAccountId) ? 0.5 : 1 }} onClick={onCommit}>
+                  <button className="btn primary" disabled={busy || !okRows.length || (!importAccountId && okRows.some(r => !r.account_id))} style={{ opacity: (busy || !okRows.length || (!importAccountId && okRows.some(r => !r.account_id))) ? 0.5 : 1 }} onClick={onCommit}>
                     <Icon.Check size={14}/> {busy ? "등록 중..." : `정상 ${okRows.length}건 일괄 등록`}
                   </button>
                 </div>
