@@ -1080,7 +1080,10 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   const arRemain   = c.ar_remain ?? 0;           // 미수금(청구했는데 안 들어온 돈)
   const donePct    = termTotal > 0 ? Math.min(100, Math.round((done / termTotal) * 100)) : 0;
   const vendor  = c.vendor_name || c.vendor || '—';
-  const period  = openEnded
+  /* 기간 표시는 openEnded(=총액 개념 없음)가 아니라 **실제 종료일 유무**로 정한다.
+     기성형은 총액이 없어 openEnded 로 잡히는데, 종료일이 있는 단가계약을
+     '해지할 때까지'로 보여주면 갱신 시점을 놓친다(목록도 같은 원인으로 틀렸다). */
+  const period  = (isOpenEnded(c) || !c.end_date)
     ? `${c.start_date || '—'} ~ 해지할 때까지`
     : [c.start_date, c.end_date].filter(Boolean).join(' ~ ') || '—';
   const rn = renewalInfo(c);
@@ -2165,7 +2168,11 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
             { key: 'vendor', header: '거래처', sortable: true, sortValue: r => r.vendor_name || r.vendor || '', render: r => <span className="fw-600">{r.vendor_name || r.vendor || '—'}</span> },
             { key: 'term', header: '계약기간 · 갱신', width: 175, render: r => <>
               <div className="text-sm num">
-                {!hasTotal(r) || !r.end_date ? `${r.start_date || '—'} ~ 해지 시까지` : [r.start_date, r.end_date].filter(Boolean).join(' ~ ')}
+                {/* 기간은 **총액 유무와 무관하다.** 예전엔 hasTotal 로 갈랐는데, 기성형은
+                    총액 개념이 없어 hasTotal=false 라서 종료일을 넣어도 늘 '해지 시까지'로 떴다
+                    (2026-12-31 까지인 단가계약이 무기한처럼 보였다 — 갱신 시점을 놓친다).
+                    기간은 종료일이 있느냐, 무기한(term_mode=open)이냐로만 정한다. */}
+                {isOpenEnded(r) || !r.end_date ? `${r.start_date || '—'} ~ 해지 시까지` : [r.start_date, r.end_date].filter(Boolean).join(' ~ ')}
               </div>
               {renewalInfo(r).managed && <div style={{ marginTop: 6 }}><RenewalBadge contract={r}/></div>}
             </> },
