@@ -6,6 +6,9 @@
  *   대신 그대로 두면 서버 장애와 '데이터 0건'이 똑같아 보이므로, 삼키기 전에
  *   req() 가 setApiFailureHandler 로 알린다(아래 notifyInfra 참조).
  */
+// 메뉴 색인·검색 태그 — 명령팔레트(Ctrl+K)가 화면 전체를 찾을 수 있게 한다
+import { ALL_LEAVES, LEAF_TAGS } from './nav'
+
 
 const BASE = '/api'
 
@@ -1602,17 +1605,32 @@ export const api = {
     vendors.forEach(v => cmds.push({
       kind: '거래처', label: v.name,
       sub: [v.gubu === 'B' ? '발주처' : v.gubu === 'E' ? '기관' : '매입처', v.type].filter(Boolean).join(' · '),
-      route: 'contract',
+      // 거래처를 고르면 **거래처 화면**으로 간다. 예전엔 'contract'(계약)로 보내서,
+      // 거래처를 검색해 눌렀는데 엉뚱하게 계약 목록이 열렸다.
+      route: 'master_vendor',
     }))
     invoices.forEach(i => cmds.push({
       kind: i.kind === 'issued' ? '청구서' : '매입',
       label: i.invoiceNo, sub: [i.vendor, won(i.totalAmount)].filter(Boolean).join(' · '),
       route: i.kind === 'issued' ? 'billing_issued' : 'billing_received',
     }))
-    // 자주 쓰는 메뉴 단축
-    cmds.push({ kind: '메뉴', label: '미수금 관리', sub: '', route: 'ar' })
-    cmds.push({ kind: '메뉴', label: '미지급금 관리', sub: '', route: 'ap' })
-    cmds.push({ kind: '메뉴', label: '엑셀 업로드', sub: '', route: 'excel' })
+    /* 메뉴 전체를 색인한다.
+     *
+     * 예전엔 미수금·미지급금·엑셀 3개만 있었다. 화면이 44개인데 3개만 검색되니
+     * "보험이 어디 있지" 하고 Ctrl+K 를 눌러도 아무것도 안 나온다 —
+     * 처음 쓰는 사람일수록 사이드바에서 찾기 어려운데 검색도 안 되는 상태였다.
+     *
+     * 태그(LEAF_TAGS)를 함께 실어, 메뉴명이 아니라 **업무에서 쓰는 말**로도 찾게 한다:
+     *   '세금계산서' → 대금 청구서 / '인사' → 인사관리 / '통장' → 계좌·카드 */
+    for (const l of ALL_LEAVES) {
+      cmds.push({
+        kind: '메뉴', label: l.label,
+        sub: [l.domain, l.section].filter(Boolean).join(' › '),
+        keywords: LEAF_TAGS[l.id] || '',
+        route: l.id,
+      })
+    }
+    cmds.push({ kind: '메뉴', label: '엑셀 업로드', sub: '', keywords: '엑셀 일괄 업로드 임포트 가져오기', route: 'excel' })
     return cmds
   },
 

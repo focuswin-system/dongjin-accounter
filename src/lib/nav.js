@@ -151,6 +151,81 @@ for (const l of SETTINGS_LEAVES) ALL_LEAVES.push({ ...l, domain: "환경설정",
 
 export const LEAF_BY_ID = Object.fromEntries(ALL_LEAVES.map(l => [l.id, l]))
 
+/**
+ * 메뉴 검색 태그 — **사용자가 쓰는 말**로 메뉴를 찾게 한다.
+ *
+ * 메뉴명만으로 검색하면 처음 쓰는 사람이 못 찾는다. 실제로 이런 말로 찾는다:
+ *   "보험" → 보험 화면이 어디 있는지 모름
+ *   "인사" → '인사관리'인지 '근로계약'인지 모름
+ *   "미지급금 처리" → 어디서 지급하는지 모름
+ *   "세금계산서" → 대금 청구서라는 걸 모름
+ *
+ * 그래서 **동의어·업무 표현·오타에 가까운 말**까지 붙여둔다.
+ * 라벨과 겹치는 말은 굳이 안 넣는다(라벨로 이미 걸린다).
+ */
+export const LEAF_TAGS = {
+  // 판매·매출
+  contract_sales:   '수주 발주 납품계약 매출계약 오더',
+  billing_issued:   '세금계산서 계산서 청구 발행 매출 인보이스 수금',
+  recurring_invoice:'정기 매달 월정액 자동청구 구독',
+  ar:               '받을돈 채권 외상매출금 미수 연체 독촉 회수',
+  // 매입
+  contract_purchase:'외주계약 하도급 구매계약 매입',
+  billing_received: '매입세금계산서 수취 매입계산서 청구받은',
+  recurring_expense:'정기지출 고정비 임차료 월세 리스 자동이체',
+  ap:               '줄돈 채무 외상매입금 미지급 결제 지급처리',
+  // 경비
+  misc_pl:          '경비 비용 지출 소액 카드값 잡비',
+  misc_income:      '잡수익 기타수익 이자수익 환급',
+  // 문서
+  doc:              '결의서 지출결의 품의 결재 승인',
+  settlement:       '정산 출장비 가지급 여비 경비정산',
+  quote_req:        '견적 RFQ 단가문의',
+  purchase_req:     '품의 구매요청 발주요청 稟議',
+  // 장부
+  ledger:           '거래 입출금 통장내역 원장 전표 입금 출금',
+  contract:         '계약조회 계약목록',
+  // 세무
+  tax_vat:          '부가가치세 신고 매출세액 매입세액 환급 홈택스',
+  tax_etc:          '원천세 법인세 지방소득세 4대보험 납부',
+  // 기준정보
+  master_vendor:        '거래처 업체 협력사 공급사 발주처 매입처 사업자등록',
+  master_accountSubject:'계정 계정코드 분개 차변 대변 KGAAP',
+  master_category:      '비목 항목 분류 지출항목',
+  master_jeokyo:        '적요 메모양식 상용구',
+  master_evidence_type: '증빙 영수증종류 적격증빙',
+  master_item:          '품목 제품 부품 자재 도면 규격 단가',
+  master_fixed_asset:   '자산 설비 기계 장비 차량 감가상각',
+  master_intangible_asset:'무형 소프트웨어 라이선스 특허 상표',
+  master_account:       '통장 계좌 카드 은행 법인카드 결제수단',
+  master_accountBalance:'잔액 통장잔고 시재',
+  master_insurance:     '보험 화재보험 배상책임 보험료 증권',
+  // 인사급여
+  hr:               '인사 급여 급여대장 월급 인건비 직원 사원',
+  hr_labor_contract:'근로계약 정규직 채용 입사 퇴사 4대보험',
+  hr_outsourcing:   '용역 프리랜서 일용직 외주인력 사업소득 기타소득',
+  hrbase_department:'부서 조직 팀',
+  hrbase_position:  '직위 직급 직책',
+  hrbase_payrollItems:'급여항목 수당 공제 기본급 식대',
+  hrbase_employType:'고용형태 근로형태',
+  // 재무
+  finance_loan:     '대출 차입 융자 상환 이자 원리금',
+  finance_investment:'투자 출자 증자 유치 가수금',
+  finance_savings:  '예금 적금 정기예금 만기 예치',
+  finance_dash:     '재무 부채 자본 차입현황',
+  // 경영
+  cash_report:      '자금 자금계획 현금흐름 잔액예측 자금수지',
+  report:           '보고서 리포트 통계 분석 현황',
+  report_daily:     '일계표 일보 분개 차대변 시산표',
+  mgmt_dash:        '경영 대시보드 지표 KPI 현황판',
+  mgmt_ask:         '질의 도우미 물어보기',
+  // 환경설정
+  settings_company: '회사정보 사업자등록증 대표자 회사',
+  settings_user:    '사용자 계정 권한 로그인 비밀번호 역할',
+  settings_approval:'결재선 결재 승인라인',
+  settings_closing: '마감 월마감 장부마감 결산',
+}
+
 // ── 홈택스식 다단계 포털 구조 (도메인 → 카테고리 → 그룹 → 화면) ──
 // 카테고리: route(바로 화면) 또는 groups(하위 라인 → 화면 버튼들, 포털 페이지)
 export const PORTAL = [

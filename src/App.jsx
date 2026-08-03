@@ -1007,8 +1007,18 @@ const CommandPalette = ({ open, onClose, onPick }) => {
   // 권한 없는 화면으로 가는 항목은 검색에도 안 뜬다 — 뜨면 눌렀을 때 403만 본다.
   // (거래처·계약 같은 데이터 항목은 서버가 이미 권한대로 걸러 내려준다)
   const allowed = index.filter(c => !c.route || canDo(c.route));
+  /* keywords 는 화면에 안 보이는 검색 태그다(lib/nav.js LEAF_TAGS).
+     '세금계산서'로 대금 청구서를, '통장'으로 계좌·카드를 찾게 해준다 —
+     메뉴명만으로 검색하면 처음 쓰는 사람은 무슨 이름인지 몰라서 못 찾는다. */
+  const match = (c) =>
+    c.label.toLowerCase().includes(ql)
+    || (c.sub || "").toLowerCase().includes(ql)
+    || (c.keywords || "").toLowerCase().includes(ql)
+    || c.kind.includes(q.trim());
+  /* 메뉴를 위로 올린다. 거래처가 수십·수백 건이면 메뉴가 목록 밑으로 밀려
+     '보험'을 쳐도 보험 거래처만 잔뜩 나오고 정작 보험 화면은 안 보인다. */
   const results = (ql
-    ? allowed.filter(c => c.label.toLowerCase().includes(ql) || (c.sub || "").toLowerCase().includes(ql) || c.kind.includes(q.trim()))
+    ? allowed.filter(match).sort((a, b) => (a.kind === '메뉴' ? 0 : 1) - (b.kind === '메뉴' ? 0 : 1))
     : allowed
   ).slice(0, 50);
 
@@ -1059,7 +1069,10 @@ const CommandPalette = ({ open, onClose, onPick }) => {
               style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", border: 0,
                 background: i === idx ? "var(--surface-2)" : "transparent",
                 textAlign: "left", fontFamily: "inherit", cursor: "pointer", borderRadius: 8 }}>
-              <span className="badge outline" style={{ width: 56, justifyContent: "center" }}>{c.kind}</span>
+              {/* 메뉴는 '어디로 가는 길'이라 데이터 항목과 성격이 다르다 —
+                  처음 쓰는 사람이 찾는 게 대개 이쪽이라 눈에 띄게 둔다. */}
+              <span className={`badge ${c.kind === '메뉴' ? 'brand' : 'outline'}`}
+                style={{ width: 56, justifyContent: "center" }}>{c.kind}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="fw-600 text-sm">{c.label}</div>
                 {c.sub && <div className="text-xs text-muted2">{c.sub}</div>}
