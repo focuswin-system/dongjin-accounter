@@ -761,7 +761,7 @@ function AppInner({ onLogout, user }) {
                 {help.items.map((item, i) => (
                   <div key={i} className="row gap-8" style={{ alignItems: "flex-start" }}>
                     <span style={{ color: "var(--brand)", flexShrink: 0, marginTop: 2, fontSize: 12 }}>·</span>
-                    <span className="text-sm" style={{ lineHeight: 1.55, color: "var(--text)" }}>{item}</span>
+                    <span className="text-sm" style={{ lineHeight: 1.55, color: "var(--ink)" }}>{item}</span>
                   </div>
                 ))}
               </div>
@@ -944,7 +944,7 @@ function FaqPanel({ open, onClose, route, go }) {
           <div style={{ flex:1, overflowY:"auto", padding:"22px 18px" }}>
             <span className="badge outline" style={{ marginBottom:14, display:"inline-block" }}>{sel.cat}</span>
             <div className="fw-700" style={{ fontSize:16, marginBottom:16, lineHeight:1.45, letterSpacing:"-0.01em" }}>{sel.q}</div>
-            <div className="text-sm" style={{ lineHeight:1.8, color:"var(--text)" }}>{sel.a}</div>
+            <div className="text-sm" style={{ lineHeight:1.8, color:"var(--ink)" }}>{sel.a}</div>
             {sel.action && (
               <button className="btn primary sm" style={{ marginTop:20 }} onClick={() => go(sel.action.route)}>
                 {sel.action.label} <Icon.Right size={13}/>

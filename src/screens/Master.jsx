@@ -1881,7 +1881,7 @@ const FirstCycleHint = ({ startDate, dayOfMonth, period, verb, editing = false }
   const first = firstCycleDate(startDate, dayOfMonth, period)
   const past = startDate < todayStr()
   return (
-    <div className="text-xs" style={{ marginTop: 6, color: past ? 'var(--brand-ink)' : 'var(--muted2)' }}>
+    <div className="text-xs" style={{ marginTop: 6, color: past ? 'var(--brand-ink)' : 'var(--muted-2)' }}>
       {first
         ? <>첫 {verb} 회차 <b>{first}</b>{past && ' · 등록일 이전 회차는 만들어지지 않아요'}</>
         : '종료일 안에 도래하는 회차가 없어요'}

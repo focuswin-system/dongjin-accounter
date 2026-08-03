@@ -7,7 +7,8 @@
     "dev": "vite",
     "dev:all": "concurrently -n \"server,client\" -c \"yellow,cyan\" \"npm run dev --prefix server\" \"vite\"",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:css": "node scripts/check-css-vars.js"
   },
   "dependencies": {
     "react": "^18.3.1",

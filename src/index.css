@@ -20,6 +20,9 @@
 
   --pos: oklch(0.55 0.13 165);
   --pos-soft: oklch(0.96 0.04 165);
+  /* 글자용 진한 톤. brand/warn/neg 는 -ink 가 있는데 pos 만 빠져 있어서,
+     이걸 쓰던 자리(자금일보 증감·예적금 이자)가 색 없이 기본 검정으로 나왔다. */
+  --pos-ink: oklch(0.45 0.12 165);
 
   --warn: oklch(0.68 0.15 65);
   --warn-soft: oklch(0.97 0.06 75);

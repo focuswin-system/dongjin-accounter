@@ -1748,7 +1748,7 @@ const ReportDefense = ({ toast }) => {
                 </div>
                 <div style={{ width: 80 }}><RBar pct={pct} tone="pos"/></div>
                 <StatusBadge status={r.status}/>
-                <Icon.Right size={13} style={{ color: "var(--muted2)", transform: open ? "rotate(90deg)" : "none", transition: "transform .15s", flexShrink: 0 }}/>
+                <Icon.Right size={13} style={{ color: "var(--muted-2)", transform: open ? "rotate(90deg)" : "none", transition: "transform .15s", flexShrink: 0 }}/>
               </button>
               {/* 품목 테이블 */}
               {open && (
