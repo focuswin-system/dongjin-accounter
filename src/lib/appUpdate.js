@@ -37,7 +37,30 @@ export function onAppUpdate(fn) {
   return () => listeners.delete(fn)
 }
 
-export const applyAppUpdate = () => window.location.reload()
+/**
+ * 새 버전으로 갈아탄다.
+ *
+ * ⚠ 단순 reload 로는 안 된다. 서비스워커가 선캐시해 둔 index.html·번들을 그대로 다시
+ *   내주기 때문에 **새로고침해도 옛 화면이 또 나온다**(2026-08-03에 재현 — 두 번
+ *   새로고침해도 옛 번들이었다). 그러면 배너의 "새로고침하면 반영됩니다"가 거짓말이 된다.
+ *
+ * 그래서 워커 등록을 풀고 캐시를 비운 뒤 새로고침한다. 다음 로드는 네트워크에서
+ * 새 파일을 받고, 그 로드에서 워커가 다시 등록되어 선캐시가 새로 채워진다.
+ * (오프라인 캐시가 잠깐 비지만 곧 다시 채워진다 — 옛 화면을 계속 보는 것보다 낫다.)
+ */
+export async function applyAppUpdate() {
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations()
+      await Promise.all(regs.map(r => r.unregister()))
+    }
+    if (window.caches) {
+      const keys = await caches.keys()
+      await Promise.all(keys.map(k => caches.delete(k)))
+    }
+  } catch { /* 정리에 실패해도 새로고침은 한다 — 최소한 서버 응답을 다시 받는다 */ }
+  window.location.reload()
+}
 
 /* 확인 주기. 경리 업무는 한 탭을 하루 종일 띄워두는 일이 흔해서, 방문 시점에만 보면
    배포한 날 내내 옛 화면을 쓰게 된다. 요청 하나가 아주 가벼워 10분이면 충분하다. */
