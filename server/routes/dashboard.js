@@ -1,7 +1,7 @@
 const { Router } = require('express')
 const { kstDate, kstToday } = require('../db')
 const { pendingCond } = require('../lib/invoiceStatus')
-const { balancesAsOf, upcomingFlows, project, dailyTrial } = require('../lib/cashReport')
+const { balancesAsOf, upcomingFlows, project, projectByAccount, dailyTrial } = require('../lib/cashReport')
 const { paidPrincipal } = require('../lib/savings')
 const { remainingPrincipal } = require('../lib/loan')
 
@@ -94,6 +94,9 @@ router.get('/cash-report', async (req, res, next) => {
       payable: ap,                  // 나갈 돈
       // 앞으로 N일 — 이 문서의 결론은 forecast.lowest 다("며칠에 얼마까지 떨어지나")
       forecast: project(available, flows, { from: date, to }),
+      /* 계좌별 예측 — 합계만 보면 "어느 통장이 부족한지"를 알 수 없다.
+         카드는 보유 자금이 아니라 결제수단이므로 뺀다(available 과 같은 기준). */
+      byAccount: projectByAccount(accounts.filter(a => a.kind !== 'card'), flows, { from: date, to }),
     })
   } catch (e) { next(e) }
 })

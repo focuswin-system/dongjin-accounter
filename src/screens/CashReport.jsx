@@ -47,6 +47,18 @@ export const CashReportScreen = ({ page = true }) => {
   const willRunShort = f.lowest.balance < 0
   const tight = !willRunShort && f.lowest.balance < data.available * 0.2
 
+  /* 계좌별 예측 — 합계가 넉넉해도 특정 통장은 마이너스일 수 있다.
+     실제로 이 회사가 그랬다: 주거래 +3억 7,154만 / 급여계좌 −5,357만.
+     합계만 보면 "자금 넉넉해요"라 급여일에 이체가 안 나가는 걸 알 수 없다. */
+  const ba = data.byAccount || { accounts: [], unassigned: { in: 0, out: 0, items: [] } }
+  const byAcct = new Map(ba.accounts.map(a => [a.id, a]))
+  const unassigned = ba.unassigned
+  const shortAccounts = ba.accounts.filter(a => a.lowest && a.lowest.balance < 0)
+  // 옮겨올 수 있는 통장 = 예상 최저가 가장 넉넉한 곳
+  const richest = ba.accounts
+    .filter(a => a.lowest && a.lowest.balance > 0)
+    .sort((x, y) => y.lowest.balance - x.lowest.balance)[0] || null
+
   return (
     <div className="fade-up">
       {page && (
@@ -124,11 +136,16 @@ export const CashReportScreen = ({ page = true }) => {
             <span className="fw-700 text-sm">계좌별 잔액</span>
             <span className="num text-sm text-muted ml-auto">{fmtNum(data.available)}원</span>
           </div>
-          {/* 통장과 묶인 돈(예적금)을 한 표에 — 둘 다 회사 돈이지만 쓸 수 있는지가 다르다 */}
+          {/* 통장과 묶인 돈(예적금)을 한 표에 — 둘 다 회사 돈이지만 쓸 수 있는지가 다르다.
+              여기에 **계좌별 예상 최저 잔액**을 함께 둔다. 합계만 보면
+              "회사 전체로는 넉넉한데 급여계좌는 마이너스"를 알 수 없다(실제로 그런 상태였다). */}
           <DataTable
             rows={[
-              ...data.accounts.filter(a => a.kind !== 'card')
-                .map(a => ({ id: a.id, name: a.name, sub: [a.bank, a.number].filter(Boolean).join(' '), tag: a.type, amount: a.balance })),
+              ...data.accounts.filter(a => a.kind !== 'card').map(a => {
+                const f = byAcct.get(a.id)
+                return { id: a.id, name: a.name, sub: [a.bank, a.number].filter(Boolean).join(' '),
+                  tag: a.type, amount: a.balance, low: f?.lowest, flowIn: f?.in || 0, flowOut: f?.out || 0 }
+              }),
               ...data.lockedItems
                 .map(s => ({ id: s.id, name: s.name, sub: `${s.bank || ''} · 만기 ${s.maturity_date || '—'}`, locked: true, amount: s.balance })),
             ]}
@@ -140,14 +157,55 @@ export const CashReportScreen = ({ page = true }) => {
                   <div className="text-xs text-muted2">{r.sub}</div>
                 </div>
               )},
-              { key: 'tag', header: '', width: 90, render: r => (r.locked
-                ? <span className="badge outline" style={{ fontSize: 10 }}>묶임</span>
-                : <span className="text-xs text-muted2">{r.tag}</span>) },
-              { key: 'amount', header: '잔액', width: 130, align: 'right',
+              { key: 'amount', header: '지금 잔액', width: 120, align: 'right',
                 className: 'num-cell', render: r => (
                   <span className={r.locked ? 'text-muted' : 'fw-700'}>{fmtNum(r.amount)}</span>
                 )},
+              /* 예상 최저 = 앞으로 N일 사이 이 통장이 가장 낮아지는 순간.
+                 지금 잔액이 넉넉해도 그 사이 빠져나갈 게 많으면 여기서 드러난다. */
+              { key: 'low', header: `예상 최저 (${data.days}일)`, width: 150, align: 'right', render: r => {
+                if (r.locked) return <span className="text-xs text-muted2">—</span>
+                const v = r.low?.balance
+                if (v == null) return <span className="text-xs text-muted2">—</span>
+                const short = v < 0
+                return (
+                  <div>
+                    <div className={`num-cell ${short ? 'fw-700' : 'text-muted'}`}
+                      style={short ? { color: 'var(--neg-ink)' } : undefined}>{fmtNum(v)}</div>
+                    {(r.flowIn > 0 || r.flowOut > 0) && (
+                      <div className="text-xs text-muted2">{r.low?.date}</div>
+                    )}
+                  </div>
+                )
+              }},
             ]}/>
+          {/* 부족해지는 통장은 표 밑에서 한 번 더 짚는다 — 표만 보면 지나치기 쉽다.
+              얼마를 옮겨야 하는지까지 계산해줘야 바로 행동으로 이어진다. */}
+          {shortAccounts.length > 0 && (
+            <div style={{ padding: '10px 16px', borderTop: '1px solid var(--line)', background: 'var(--neg-weak, var(--surface-2))' }}>
+              {shortAccounts.map(a => (
+                <div key={a.id} className="text-xs" style={{ lineHeight: 1.7 }}>
+                  <b style={{ color: 'var(--neg-ink)' }}>{a.name}</b>이 {a.lowest.date}에{' '}
+                  <b className="num">{fmtNum(Math.abs(a.lowest.balance))}원</b> 부족해요
+                  {richest && richest.id !== a.id && richest.lowest.balance > Math.abs(a.lowest.balance) && (
+                    <> — <b>{richest.name}</b>에서 옮기면 돼요</>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {/* 어느 통장으로 들어올지 안 정한 돈. 임의로 한 계좌에 몰아넣으면 그 계좌가
+              실제보다 넉넉해 보이므로 따로 세워 "정해주세요"라고 말한다. */}
+          {(unassigned.in > 0 || unassigned.out > 0) && (
+            <div className="row" style={{ padding: '10px 16px', borderTop: '1px solid var(--line)' }}>
+              <span className="text-xs text-muted2">계좌를 안 정한 예정 {unassigned.items.length}건</span>
+              <span className="num text-sm ml-auto">
+                {unassigned.in > 0 && <span style={{ color: 'var(--pos)' }}>+{fmtNum(unassigned.in)}</span>}
+                {unassigned.in > 0 && unassigned.out > 0 && ' / '}
+                {unassigned.out > 0 && <span style={{ color: 'var(--neg-ink)' }}>−{fmtNum(unassigned.out)}</span>}
+              </span>
+            </div>
+          )}
           {data.loanRemaining > 0 && (
             <div className="row" style={{ padding: '10px 16px', borderTop: '1px solid var(--line)', background: 'var(--surface-2)' }}>
               <span className="text-xs text-muted2">갚아야 할 차입금 {data.loanCount}건</span>

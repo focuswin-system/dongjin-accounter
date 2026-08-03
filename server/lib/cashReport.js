@@ -246,4 +246,66 @@ async function dailyTrial(db, date) {
   }
 }
 
-module.exports = { balancesAsOf, upcomingFlows, project, dailyTrial }
+/**
+ * 계좌별 자금 예측 — "어느 통장이 언제 부족해지나".
+ *
+ * ── 왜 필요한가 ──
+ * project() 는 전 계좌를 하나로 합쳐 회사 전체의 최저 잔액만 낸다. 그런데 돈은 통장별로
+ * 따로 있고 이체는 사람이 해야 한다. 실제로 이 회사가 그랬다:
+ *   주거래 +3억 7,154만 / 급여계좌 **−5,357만** → 합계는 3억이라 "자금 넉넉해요"
+ * 합계만 보면 급여일에 이체가 안 나간다는 걸 알 수 없다. 경영자가 "어느 계좌에서
+ * 얼마를 옮겨야 하나"를 판단하려면 통장 단위로 봐야 한다.
+ *
+ * ── 계좌가 안 정해진 흐름 ──
+ * 미수금 청구서는 수금 계좌를 안 잡고 발행하는 일이 흔하다(기성 청구가 특히 그렇다).
+ * 그런 돈을 임의로 주거래에 몰아넣으면 **주거래가 실제보다 넉넉해 보인다.**
+ * 아예 빼면 들어올 돈이 없는 것처럼 보인다. 그래서 '계좌 미지정' 칸에 따로 모아
+ * 그대로 보여준다 — "이 돈을 어느 통장으로 받을지 정하세요"가 그 자체로 할 일이 된다.
+ *
+ * @param accounts balancesAsOf() 결과 (카드 포함 — 걸러내는 건 호출부 몫)
+ * @param flows    upcomingFlows() 결과
+ * @returns {{accounts: [...], unassigned: {...}}}
+ */
+function projectByAccount(accounts, flows, { from, to }) {
+  const byId = new Map()
+  for (const a of accounts) {
+    byId.set(a.id, {
+      id: a.id, name: a.name, kind: a.kind, type: a.type, number: a.number,
+      balance: num(a.balance), in: 0, out: 0,
+      lowest: { date: from, balance: num(a.balance) },
+      items: [],
+    })
+  }
+  // 계좌를 못 찾은(또는 안 정해진) 흐름은 여기로 모은다
+  const unassigned = { in: 0, out: 0, items: [] }
+
+  const perDay = new Map()   // accountId → Map(date → {in,out})
+  for (const f of flows) {
+    const bucket = f.account_id && byId.has(f.account_id) ? byId.get(f.account_id) : unassigned
+    bucket[f.kind] += f.amount
+    bucket.items.push(f)
+    if (bucket === unassigned) continue
+    if (!perDay.has(bucket.id)) perDay.set(bucket.id, new Map())
+    const m = perDay.get(bucket.id)
+    if (!m.has(f.date)) m.set(f.date, { in: 0, out: 0 })
+    m.get(f.date)[f.kind] += f.amount
+  }
+
+  // 계좌마다 날짜순으로 접어 최저 잔액을 찾는다(project() 와 같은 방식, 범위만 계좌 단위)
+  for (const acc of byId.values()) {
+    const m = perDay.get(acc.id)
+    if (!m) continue
+    let bal = acc.balance
+    for (const date of [...m.keys()].sort()) {
+      const d = m.get(date)
+      bal = bal + d.in - d.out
+      if (bal < acc.lowest.balance) acc.lowest = { date, balance: bal }
+    }
+    acc.endBalance = bal
+  }
+  for (const acc of byId.values()) if (acc.endBalance == null) acc.endBalance = acc.balance
+
+  return { accounts: [...byId.values()], unassigned, range: { from, to } }
+}
+
+module.exports = { balancesAsOf, upcomingFlows, project, projectByAccount, dailyTrial }
