@@ -349,11 +349,13 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
             </FormField>
 
             <FormField label="품목" hint="선택 · 고르면 적요·금액 자동 채움">
-              <Combobox value={form.item}
+              {/* value 는 품목 id. 이름을 값으로 쓰면 규격만 다른 동명 품목(도면 개정 등)이
+                  한 값으로 뭉개져 무엇을 골라도 첫 번째가 잡힌다 — 단가·과세유형까지 그 품목 것이 들어온다. */}
+              <Combobox value={form.itemId || form.item}
                 onChange={(v) => {
-                  const it = items.find(x => x.name === v)
+                  const it = items.find(x => String(x.id) === String(v))
                   setForm(f => {
-                    const next = { ...f, item: v, itemId: it?.id || "" }
+                    const next = { ...f, item: it ? it.name : v, itemId: it?.id || "" }
                     if (it) {
                       if (!f.memo || f.memo === f.item) next.memo = it.name   // 적요 자동 채움(비어있거나 이전 품목명일 때만)
                       // 들어오는 돈은 출고가(amount), 나가는 돈은 매입가(purchase_price)가 맞는 단가다.
@@ -373,7 +375,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                 }}
                 options={items.map(it => {
                   const unit = kind === 'expense' ? (Number(it.purchase_price) || Number(it.amount)) : Number(it.amount)
-                  return { value: it.name, label: it.name,
+                  return { value: it.id, label: it.name,
                     sub: [it.code, it.spec, it.unit, unit ? fmtNum(unit) + '원' : ''].filter(Boolean).join(' · ') }
                 })}
                 placeholder="품목 선택 (선택)"

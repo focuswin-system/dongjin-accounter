@@ -101,9 +101,10 @@ const RateItemsEditor = ({ items, setItems, itemMaster, reloadMaster, defaultUni
   const add = () => setItems([...items, { item_id: '', name: '', spec: '', unit: defaultUnit || '', unit_price: '' }])
   const upd = (i, patch) => setItems(items.map((r, idx) => idx === i ? { ...r, ...patch } : r))
   const del = (i) => setItems(items.filter((_, idx) => idx !== i))
-  const pick = (i, name) => {
-    const it = itemMaster.find(x => x.name === name)
-    upd(i, it ? { item_id: it.id, name: it.name, spec: it.spec || '', unit: it.unit || defaultUnit || '', unit_price: String(it.amount || '') } : { item_id: '', name })
+  // id 로 찾는다 — 이름이 같고 규격만 다른 품목(도면 개정 등)이 있으면 이름 매칭은 항상 첫 번째를 집는다.
+  const pick = (i, id) => {
+    const it = itemMaster.find(x => String(x.id) === String(id))
+    upd(i, it ? { item_id: it.id, name: it.name, spec: it.spec || '', unit: it.unit || defaultUnit || '', unit_price: String(it.amount || '') } : { item_id: '', name: id })
   }
   const addNew = async (i, name) => {
     const nm = (name || '').trim(); if (!nm) return
@@ -120,8 +121,8 @@ const RateItemsEditor = ({ items, setItems, itemMaster, reloadMaster, defaultUni
           <div key={i} className="col gap-6" style={{ padding: 10, border: '1px solid var(--line)', borderRadius: 10, background: 'var(--surface-2)' }}>
             <div className="row gap-6" style={{ alignItems: 'center' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <Combobox value={r.name} onChange={v => pick(i, v)} onAddNew={q => addNew(i, q)}
-                  options={itemMaster.map(it => ({ value: it.name, label: it.name, sub: [it.unit, it.amount ? fmtNum(it.amount) + '원' : ''].filter(Boolean).join(' · ') }))}
+                <Combobox value={r.item_id || r.name} onChange={v => pick(i, v)} onAddNew={q => addNew(i, q)}
+                  options={itemMaster.map(it => ({ value: it.id, label: it.name, sub: [it.spec, it.unit, it.amount ? fmtNum(it.amount) + '원' : ''].filter(Boolean).join(' · ') }))}
                   addNewLabel="새 업무·품목 등록" placeholder="업무 선택·검색"/>
               </div>
               <button type="button" className="icon-btn" onClick={() => del(i)}><Icon.Close size={14}/></button>

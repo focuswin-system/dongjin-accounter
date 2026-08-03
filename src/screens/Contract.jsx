@@ -27,13 +27,21 @@ const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster, withQty = fa
   const add = () => setRows(rs => [...rs, { item_id: '', name: '', spec: '', unit: '', qty: '', unit_price: '', cost_price: '' }]);
   const upd = (i, patch) => setRows(rs => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r));
   const del = (i) => setRows(rs => rs.filter((_, idx) => idx !== i));
-  // 기준정보에서 품목을 고르면 규격·단위·출고가·매입가를 자동으로 채운다(계약별로 다시 수정 가능).
-  const pick = (i, name) => {
-    const it = itemMaster.find(x => x.name === name);
+  /* 기준정보에서 품목을 고르면 규격·단위·출고가·매입가를 자동으로 채운다(계약별로 다시 수정 가능).
+   *
+   * ⚠ 고른 품목을 **id 로** 찾는다. 예전엔 이름으로 찾았는데(`find(x => x.name === name)`),
+   *   같은 이름에 규격만 다른 품목이 있으면 **항상 첫 번째가 걸렸다.**
+   *   항공부품처럼 도면 개정이 계속 생기는 곳에서는 이게 곧 돈이다 —
+   *   'RIB ASSY, WING / KAI-A50-2211-**2**'(512,000원)를 골라도
+   *   '…-**1**'(486,000원)의 규격·단가가 들어가 그 값으로 청구서가 나간다.
+   *   드롭다운은 규격까지 보여줘 사람은 제대로 골랐는데 시스템만 다른 걸 집었다.
+   */
+  const pick = (i, id) => {
+    const it = itemMaster.find(x => String(x.id) === String(id));
     upd(i, it
       ? { item_id: it.id, name: it.name, spec: it.spec || '', unit: it.unit || '',
           unit_price: String(it.amount || ''), cost_price: String(it.purchase_price || '') }
-      : { item_id: '', name });
+      : { item_id: '', name: id });   // 목록에 없으면 사용자가 친 문자열을 이름으로 둔다
   };
   // 목록에 없는 품목을 입력하면 기준정보에 새로 등록하고 이 행에 연결(거래처 인라인 추가와 같은 방식).
   const addNew = async (i, name) => {
@@ -58,10 +66,12 @@ const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster, withQty = fa
             {/* 품목은 한 줄 전체 폭 — 좁은 드로어에서 검색 input이 눌리지 않게 */}
             <div className="row gap-6" style={{ alignItems: 'center' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <Combobox value={r.name}
+                {/* value 는 item_id 다. 이름을 값으로 쓰면 같은 이름의 개정판들이 한 값으로 뭉개져
+                    무엇을 골라도 첫 번째가 선택된다(옵션 key 도 중복된다). */}
+                <Combobox value={r.item_id || r.name}
                   onChange={v => pick(i, v)}
                   onAddNew={q => addNew(i, q)}
-                  options={itemMaster.map(it => ({ value: it.name, label: it.name,
+                  options={itemMaster.map(it => ({ value: it.id, label: it.name,
                     sub: [it.code, it.spec, it.unit, it.amount ? fmtNum(it.amount) + '원' : ''].filter(Boolean).join(' · ') }))}
                   addNewLabel="새 품목 등록"
                   placeholder="품목 선택·검색"/>

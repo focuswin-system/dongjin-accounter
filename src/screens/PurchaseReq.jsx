@@ -63,7 +63,9 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
     const items = [...f.items]
     if (i === items.length) items.push(emptyItem())
     const base = items[i]
-    const m = itemMaster.find(x => x.name === name)
+    // id 로 찾는다 — 이름이 같고 규격만 다른 품목(도면 개정 등)이면 이름 매칭은 늘 첫 번째를 집어
+    // 다른 개정판의 단위·단가가 들어가고 품명에도 엉뚱한 규격이 붙는다.
+    const m = itemMaster.find(x => String(x.id) === String(name))
     if (m) {
       const nm = m.spec ? `${m.name} ${m.spec}` : m.name
       const qty = numOf(base.qty)
@@ -224,7 +226,7 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
                     <td className="num" style={{ textAlign: 'center' }}>{has ? i + 1 : ''}</td>
                     <td className="pr-item-name">{edit
                       ? <Combobox value={it?.name || ''} onChange={v => pickItem(i, v)} onAddNew={q => addNewItem(i, q)}
-                          options={itemMaster.map(m => ({ value: m.name, label: m.name,
+                          options={itemMaster.map(m => ({ value: m.id, label: m.name,
                             sub: [m.spec, m.unit, m.purchase_price ? fmtNum(m.purchase_price) + '원' : ''].filter(Boolean).join(' · ') }))}
                           addNewLabel="새 품목 등록" placeholder={isGhost ? '+ 품목 선택·검색' : '품목'}/>
                       : (it?.name || '')}</td>
