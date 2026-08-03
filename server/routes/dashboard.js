@@ -127,6 +127,12 @@ router.get('/', async (req, res, next) => {
       weekIn: f.totalIn, weekOut: f.totalOut,
       lowest: f.lowest,
       overdueCount: flows.filter(x => x.overdue).length,
+      /* 기한이 없는 청구서는 '언제 들어올지 모르는 돈'이라 기준일에 몰아 세운다.
+         그러면 '이번 주 들어올 돈'에 통째로 섞여, 실제로는 기약 없는 돈을 이번 주 자금으로
+         계획하게 된다(자금일보는 '기한 미정' 배지로 구분해 주는데 홈만 단정하고 있었다).
+         금액을 함께 내려 홈이 "그중 얼마는 기한 미정"이라고 말할 수 있게 한다. */
+      noDueIn:  flows.filter(x => x.noDue && x.kind === 'in').reduce((s, x) => s + x.amount, 0),
+      noDueOut: flows.filter(x => x.noDue && x.kind === 'out').reduce((s, x) => s + x.amount, 0),
     })
   } catch (e) { next(e) }
 })
