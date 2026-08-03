@@ -2068,11 +2068,11 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
   // 대신 월정액 합계(MRR)를 따로 센다 — 정기형 계약의 실질 규모는 이쪽이다.
   const totals = scoped.reduce((a, c) => ({
     amount: a.amount + (hasTotal(c) ? (c.amount || 0) : 0),
-    remain: a.remain + rowRemain(c),
-    out:    a.out + (c.out || 0),
+    remain: a.remain + rowRemain(c),        // 계약잔액 — 아직 청구 안 한 금액을 포함한다
+    arRemain: a.arRemain + (c.ar_remain || 0),  // 진짜 미수금 — 청구했는데 안 들어온 돈
     monthly: a.monthly + (isRecurring(c) && c.status === '진행중'
       ? Math.round((c.unit_amount || 0) / periodMonths(c.billing_period)) : 0),
-  }), { amount: 0, remain: 0, out: 0, monthly: 0 });
+  }), { amount: 0, remain: 0, arRemain: 0, monthly: 0 });
 
   // 엑셀 내보내기 — 서버가 서식·요약까지 갖춘 .xlsx를 만든다
   // (계약 목록 / 갱신 관리 / 정기 계약 3개 시트)
@@ -2103,9 +2103,16 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
         <Kpi label="계약금액 합계" value={fmtNum(totals.amount) + "원"}  badge="무기한 계약 제외"  badgeTone="ink"/>
         <Kpi label={kind === "purchase" ? "월 고정지출" : "월 고정수입"} value={fmtNum(totals.monthly) + "원"}
           badge={`정기계약 ${scoped.filter(c => isRecurring(c) && c.status === '진행중').length}건 · 월 환산`} badgeTone="ink"/>
-        <Kpi label={kind === "purchase" ? "미지급 잔액" : "남은 미수금"} value={fmtNum(totals.remain) + "원"}
-          badge={`${scoped.filter(c => rowRemain(c) > 0).length}건 잔존`}
-          badgeTone={totals.remain > 0 ? "warn" : "ink"}/>
+        {/* ⚠ 이 카드는 '미수금'이 아니라 **남은 계약분**이다.
+            totals.remain 은 계약잔액(계약 총액 − 수금)이라 **아직 청구조차 안 한 금액을 포함**한다.
+            예전엔 '남은 미수금'이라고 불러서, 계약만 맺고 청구는 한 장도 안 한 상태에서
+            미수금 4,664만원이 떠 있었다 — 홈·미수금 화면은 0원인데 여기만 다른 말을 했다.
+            진짜 미수금(청구했는데 안 들어온 돈)은 ar_remain 이므로 뱃지로 따로 보여준다. */}
+        <Kpi label={kind === "purchase" ? "남은 계약분(지급)" : "남은 계약분"} value={fmtNum(totals.remain) + "원"}
+          badge={totals.arRemain > 0
+            ? `그중 ${kind === "purchase" ? "미지급금" : "미수금"} ${fmtNum(totals.arRemain)}원`
+            : `${scoped.filter(c => rowRemain(c) > 0).length}건 잔존`}
+          badgeTone={totals.arRemain > 0 ? "warn" : "ink"}/>
         <Kpi label="갱신 챙길 계약" value={`${renewDue + renewExpired}건`}
           badge={renewExpired > 0 ? `만료 방치 ${renewExpired}건` : renewDue > 0 ? "통보 기한 임박" : "임박 없음"}
           badgeTone={renewExpired > 0 ? "neg" : renewDue > 0 ? "warn" : "ink"}/>
@@ -2182,10 +2189,16 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
                 : <span className="num-cell">{fmtNum(r.amount || 0)}</span>
             ) },
             { key: 'collected', header: kind === "purchase" ? "지급액" : "수금", align: 'right', sortable: true, sortValue: r => r.collected ?? 0, render: r => <span className="num-cell">{fmtNum(r.collected ?? 0)}</span> },
-            { key: 'remain', header: '남은 잔액', align: 'right', sortable: true, sortValue: r => rowRemain(r), render: r => (
+            /* 총액형은 '계약잔액'(아직 청구 안 한 몫 포함), 기성·무기한형은 remain 이 없어
+               ar_remain(미수금)이 온다. 둘은 성격이 다르므로 무엇을 보고 있는지 밑줄에 적는다. */
+            { key: 'remain', header: '남은 계약분', align: 'right', sortable: true, sortValue: r => rowRemain(r), render: r => (
               <span className="num-cell fw-700" style={{ color: rowRemain(r) > 0 ? "var(--warn-ink)" : "var(--muted-2)" }}>
                 {rowRemain(r) > 0 ? fmtNum(rowRemain(r)) : "—"}
-                {!hasTotal(r) && rowRemain(r) > 0 && <div className="text-xs fw-400 text-muted2">{isPurchase(r) ? '미지급금' : '미수금'}</div>}
+                {rowRemain(r) > 0 && (
+                  <div className="text-xs fw-400 text-muted2">
+                    {hasTotal(r) ? '미청구 포함' : (isPurchase(r) ? '미지급금' : '미수금')}
+                  </div>
+                )}
               </span>
             ) },
             // 매입 계약엔 원가·손익이 없다 → 미지급금으로 대체
