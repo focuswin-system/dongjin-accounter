@@ -1198,9 +1198,15 @@ const useLedger = () => {
        * (3억 대출이 실현 매출로 잡히던 문제). 그것들은 청구서와 무관하므로 invoiceId 가 없다.
        * 그래서 '손익이거나, 청구서 정산이거나'로 판정한다. */
       const list = all.filter(r => r.isPnl !== false || r.invoiceId)
+      /* 걸러낸 것도 알려준다. 안 그러면 통장에서 돈이 나갔는데 보고서 그 달 지출이 '0원'이다.
+         ((주)포커스윈 실자료: 4월에 재고 매입 331,240원이 나갔는데 월별 현황엔 −0 으로 보였다.
+          숫자가 틀린 건 아니지만, 화면이 무엇을 뺐는지 말해주지 않으면 사용자는 누락으로 읽는다.) */
+      const cut = all.filter(r => !(r.isPnl !== false || r.invoiceId))
+      const sum = (a, k) => a.filter(r => r.kind === k).reduce((s, r) => s + (Number(r.amount) || 0), 0)
       setData({
         incomes:  list.filter(r => r.kind === 'income'),
         expenses: list.filter(r => r.kind === 'expense'),
+        excluded: { n: cut.length, income: sum(cut, 'income'), expense: sum(cut, 'expense') },
         months: [...new Set(list.map(r => (r.date || '').slice(0, 7)).filter(Boolean))]
           .sort((a, b) => b.localeCompare(a)),
       })
@@ -1321,6 +1327,15 @@ const ReportMonthly = ({ toast }) => {
           </tbody>
         </table>
       </div>
+      {led.excluded?.n > 0 && (
+        <div className="text-xs text-muted2" style={{ marginTop: 10, lineHeight: 1.7 }}>
+          · 이 표는 <b>손익</b>만 셉니다. 재고 매입·대출 실행·원금 상환·예적금 납입처럼 비용·수익이 아닌 거래
+          {led.excluded.expense > 0 && <> 지출 {fmtNum(led.excluded.expense)}원</>}
+          {led.excluded.income > 0 && <>{led.excluded.expense > 0 ? ' ·' : ''} 입금 {fmtNum(led.excluded.income)}원</>}
+          {' '}({led.excluded.n}건)은 빠져 있어요.
+          <br/>· 통장에서 실제로 오간 전액은 <b>전체 거래내역</b>에서 보세요.
+        </div>
+      )}
     </div>
   )
 }
