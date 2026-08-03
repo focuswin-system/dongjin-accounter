@@ -23,6 +23,7 @@
 const listeners = new Set()
 let updated = false
 let baseline = null        // 이 탭이 처음 확인했을 때의 배포 커밋
+let nextCommit = null      // 새로 올라온 커밋(문의 대응용 표시)
 
 const markUpdated = () => {
   if (updated) return
@@ -33,7 +34,7 @@ const markUpdated = () => {
 /** 새 버전이 준비됐는지 구독한다. @returns 해제 함수 */
 export function onAppUpdate(fn) {
   listeners.add(fn)
-  if (updated) fn(true)          // 이미 감지된 뒤에 구독했으면 바로 알려준다
+  if (updated) fn(true, { from: baseline, to: nextCommit })   // 이미 감지된 뒤 구독했으면 바로
   return () => listeners.delete(fn)
 }
 
@@ -64,7 +65,7 @@ export async function applyAppUpdate() {
 
 /* 확인 주기. 경리 업무는 한 탭을 하루 종일 띄워두는 일이 흔해서, 방문 시점에만 보면
    배포한 날 내내 옛 화면을 쓰게 된다. 요청 하나가 아주 가벼워 10분이면 충분하다. */
-const CHECK_INTERVAL_MS = 10 * 60 * 1000
+const CHECK_INTERVAL_MS = 10 * 60 * 1000   // 10분
 
 async function currentCommit() {
   try {
@@ -80,7 +81,7 @@ async function check() {
   const c = await currentCommit()
   if (!c) return
   if (baseline == null) { baseline = c; return }   // 첫 확인은 기준값만 잡는다
-  if (c !== baseline) markUpdated()
+  if (c !== baseline) markUpdated(c)
 }
 
 /** 앱 시작 시 1회 호출 (main.jsx). 운영 빌드에서만 동작한다. */
