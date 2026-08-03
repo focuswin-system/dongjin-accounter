@@ -283,6 +283,9 @@ function adaptTransaction(row) {
      * 대출 실행·원금 상환·예적금 납입·투자는 계좌는 오가지만 손익이 아니다.
      * 값이 없는 옛 응답은 손익으로 본다(종전 동작 유지). */
     isPnl: row.is_pnl == null ? true : !!Number(row.is_pnl),
+    /* 청구서 정산으로 생긴 거래인가. 보고서가 '재무거래(대출·투자)'와
+     * '매출 수금'을 갈라내는 데 쓴다 — 둘 다 손익 거래가 아니지만 성격이 정반대다. */
+    invoiceId: row.invoice_id || '',
     employee: row.employee_name || '',
   }
 }

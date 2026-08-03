@@ -127,7 +127,15 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
 
   // ── 미지급금 등록 ──
   const due30 = () => { const d = new Date(); d.setDate(d.getDate() + 30); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` }
-  const openPay = () => { setPaySupply(String(total)); setPayVat('과세'); setPayDue(due30()); setPayOpen(true) }
+  /* 공급업체(거래처)가 없으면 서버가 등록을 거절한다. 예전엔 그걸 모른 채 창이 열려
+     금액·과세유형·지급예정일을 다 채우고 누른 **뒤에야** 거절당했다.
+     못 할 일이면 시작하기 전에 알려주는 편이 낫다 — 헛일을 시키지 않는다. */
+  const openPay = () => {
+    if (!doc?.vendor_id) {
+      return toast.push('공급업체를 먼저 거래처로 지정해주세요. 편집에서 공급업체를 고르면 돼요.', { tone: 'warn' })
+    }
+    setPaySupply(String(total)); setPayVat('과세'); setPayDue(due30()); setPayOpen(true)
+  }
   const paySupplyN = numOf(paySupply)
   const payVatAmt = payVat === '과세' ? Math.round(paySupplyN * 0.1) : 0
   const submitPayable = async () => {
