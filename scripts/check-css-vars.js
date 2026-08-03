@@ -8,10 +8,11 @@
  *
  * fallback 이 있는 것(`var(--x, #fff)`)은 의도된 것으로 보고 넘어간다.
  */
-const fs = require('fs')
-const path = require('path')
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const ROOT = path.join(__dirname, '..')
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SRC = path.join(ROOT, 'src')
 
 const css = fs.readFileSync(path.join(SRC, 'index.css'), 'utf8')
