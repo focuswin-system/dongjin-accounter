@@ -393,6 +393,29 @@ router.post('/:id/pay', async (req, res, next) => {
     const { base, gross, deduction, net } = computeItems(items)
 
     const m = month || (date || pay_date || kstToday()).slice(0, 7)
+
+    /* 중복 제출 가드 — 이 경로는 요청마다 **새 회차를 만든다.**
+     * 두 번 도착하면 명세가 2장 발급되고 계좌에서도 두 번 빠진다. 화면의 busy 가드는
+     * 같은 탭에서 연타하는 것만 막는다(느려서 새로고침 후 다시 누르거나 탭이 둘이면 통과).
+     *
+     * 같은 계약·같은 달·같은 지급일·같은 실지급액이면 중복으로 본다. 정말 한 번 더
+     * 지급해야 하는 경우(같은 날 같은 금액을 두 번)는 화면에서 확인을 받아 force 로 다시 보낸다.
+     * 계약 행은 위에서 FOR UPDATE 로 잠갔으므로 동시 요청도 여기서 순서가 갈린다. */
+    const payDate = pay_date || date || `${m}-25`
+    if (!req.body.force) {
+      const [[dup]] = await conn.execute(
+        `SELECT id, seq FROM payroll
+          WHERE work_contract_id = ? AND month = ? AND pay_date = ? AND net_salary = ?
+          LIMIT 1`, [c.id, m, payDate, net])
+      if (dup) {
+        await rollbackQuietly(conn)
+        return res.status(409).json({
+          code: 'duplicate',
+          error: `${m} ${payDate}에 실지급 ${Number(net).toLocaleString('ko-KR')}원 회차(${dup.seq}회차)가 이미 있어요. 같은 지급을 한 번 더 등록할까요?`,
+        })
+      }
+    }
+
     const [[{ maxseq }]] = await conn.execute(
       'SELECT COALESCE(MAX(seq),0) AS maxseq FROM payroll WHERE employee_id = ? AND month = ?', [c.employee_id, m]
     )
@@ -402,7 +425,7 @@ router.post('/:id/pay', async (req, res, next) => {
       `INSERT INTO payroll (id, employee_id, work_contract_id, seq, month, base_salary, allowance, deduction, net_salary, gross, items, qty_lines, pay_date, status)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [payrollId, c.employee_id, c.id, seq, m, base, gross - base, deduction, net, gross,
-       JSON.stringify(items), JSON.stringify(clean), pay_date || date || `${m}-25`, '확정']
+       JSON.stringify(items), JSON.stringify(clean), payDate, '확정']
     )
 
     let txnId = null

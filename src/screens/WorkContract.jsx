@@ -841,6 +841,7 @@ const OutsourcingDetailDrawer = ({ id, onClose, onChanged, onEdit }) => {
 // 용역·일용 지급 등록 (단가표 수량 → 금액 자동, 원천징수 확정 입력)
 const ServicePayDrawer = ({ contract, onClose, onSaved }) => {
   const toast = useToast()
+  const { confirm } = useConfirm()
   const today = localToday()   // KST 기준(백엔드 futureDateError와 정렬)
   const [lines, setLines] = useState((contract.items || []).map(it => ({ name: it.name, unit: it.unit, unit_price: Number(it.unit_price), qty: 0 })))
   const [deductions, setDeductions] = useState([{ label: '원천징수 소득세', value: 0 }, { label: '지방소득세', value: 0 }])
@@ -860,7 +861,9 @@ const ServicePayDrawer = ({ contract, onClose, onSaved }) => {
   const updDed = (i, patch) => setDeductions(deductions.map((d, idx) => idx === i ? { ...d, ...patch } : d))
 
   /* 왕복 중 두 번 누르면 회차(seq = MAX+1)가 하나 더 생기고 지출 거래도 두 건 만들어진다.
-   * 유니크 충돌도 안 나므로 서버가 못 막는다 — 화면에서 잠가야 한다. */
+   * 이 busy 가드는 같은 탭에서 연타하는 것만 막는다 — 느려서 새로고침 후 다시 누르거나
+   * 탭이 둘이면 그대로 통과하므로, 서버도 같은 회차(계약·달·지급일·실지급액)를 409로 막는다.
+   * 정말 한 번 더 지급해야 하면 아래에서 확인을 받아 force 로 다시 보낸다. */
   const submit = async () => {
     if (busy) return
     const usable = lines.filter(l => (Number(l.qty) || 0) > 0)
@@ -870,12 +873,23 @@ const ServicePayDrawer = ({ contract, onClose, onSaved }) => {
     if (payNow && !accountId) return toast.push('출금 계좌를 선택해주세요', { tone: 'warn' })
     setBusy(true)
     try {
-      const res = await api.payWorkContract(contract.id, {
+      const body = {
         month: date.slice(0, 7), pay_date: date,
         lines: usable.map(l => ({ name: l.name, unit: l.unit, qty: l.qty, unit_price: l.unit_price })),
         deductions: deductions.filter(d => d.label && asNum(d.value) > 0),
         paid: payNow, date, account_id: accountId || null,
-      })
+      }
+      let res = await api.payWorkContract(contract.id, body)
+      if (res.code === 'duplicate') {
+        const again = await confirm({
+          title: '같은 지급이 이미 있어요',
+          body: res.error,
+          detail: '실수로 두 번 눌렀다면 취소하세요. 등록하면 명세가 한 장 더 생기고 계좌에서도 한 번 더 빠집니다.',
+          tone: 'warn', confirmLabel: '한 번 더 등록', cancelLabel: '취소',
+        })
+        if (!again) return
+        res = await api.payWorkContract(contract.id, { ...body, force: true })
+      }
       if (res.ok) { toast.push(payNow ? '지급을 등록했어요' : '지급 명세를 저장했어요'); onSaved() }
       else toast.push(res.error || '등록에 실패했어요', { tone: 'warn' })
     } finally { setBusy(false) }

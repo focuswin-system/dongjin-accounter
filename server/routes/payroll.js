@@ -248,25 +248,47 @@ router.post('/:id/pay', async (req, res, next) => {
     const { amount, date, account_id, method, memo } = req.body
     // 급여 지급은 실제 이체라 미래 일자 금지(앱 전체 KST 규칙 일관 — 용역 지급·거래 등록과 동일).
     const de = futureDateError(date); if (de) return res.status(400).json({ error: de })
-    /* 근로계약의 소득구분을 함께 읽는다 — 아래 비목 판정에 쓴다.
-       work_contract_id 가 없으면(정규 급여대장) 근로소득으로 본다. */
+    /* 근무계약의 소득구분을 함께 읽는다 — 아래 비목 판정에 쓴다.
+       work_contract_id 가 없으면(정규 급여대장) 근로소득으로 본다.
+
+       ⚠ 트랜잭션을 **먼저 열고 FOR UPDATE 로 잠근다.**
+       예전엔 잠금 없이 읽고 바로 INSERT 해서, 같은 급여에 지급 요청이 두 번 도착하면
+       지출 거래가 2건 생기고 **계좌에서 두 번 빠졌다.** 화면의 busy 가드는 같은 탭에서
+       빠르게 두 번 누르는 것만 막는다 — 느려서 새로고침하고 다시 누르거나, 탭이 둘이거나,
+       브라우저가 재시도하면 그대로 통과한다. 급여는 금액이 커서 한 번이면 사고다. */
+    await conn.beginTransaction()
     const [[p]] = await conn.execute(
       `SELECT p.*, e.name, wc.income_type
          FROM payroll p
          JOIN employees e ON p.employee_id = e.id
          LEFT JOIN work_contracts wc ON wc.id = p.work_contract_id
-        WHERE p.id = ?`, [req.params.id])
-    if (!p) return res.status(404).json({ error: 'Not found' })
+        WHERE p.id = ? FOR UPDATE`, [req.params.id])
+    if (!p) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     const amt = Number(amount) || 0
-    if (amt <= 0) return res.status(400).json({ error: '금액을 확인해주세요' })
+    if (amt <= 0) { await rollbackQuietly(conn); return res.status(400).json({ error: '금액을 확인해주세요' }) }
+
+    /* 실지급액을 넘겨 지급할 수 없다 — 중복 제출이 여기서 걸린다.
+       일부 지급을 나눠 하는 건 되지만, 합계가 명세의 실지급액을 넘으면 그건 착오다. */
+    const [[{ already }]] = await conn.execute(
+      'SELECT COALESCE(SUM(amount),0) AS already FROM transactions WHERE payroll_id = ?', [p.id])
+    const netSalary = Number(p.net_salary) || 0
+    if (Number(already) + amt > netSalary) {
+      await rollbackQuietly(conn)
+      const remain = netSalary - Number(already)
+      return res.status(409).json({
+        error: remain <= 0
+          ? `이미 전액(${netSalary.toLocaleString('ko-KR')}원) 지급된 급여예요. 더 지급할 금액이 없습니다.`
+          : `남은 지급액은 ${remain.toLocaleString('ko-KR')}원이에요. 그보다 많이 지급할 수 없습니다.`,
+      })
+    }
     // 계좌가 없으면 이 지출은 어느 계좌 잔액에서도 빠지지 않는다(accounts.js calcBalance는
     // account_id로 계좌를 특정해 합산한다). 실제로 돈은 나갔는데 잔액은 그대로인 상태가 되므로
     // NULL 저장을 허용하지 않는다 — 과거 F-02와 동일 유형.
     const lerr = ledgerError({ kind: 'expense', account_id, status: '지급완료' })
-    if (lerr) return res.status(400).json({ error: lerr })
+    if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
     // 마감된 달에는 실제 급여 지출을 만들 수 없다(신고자료와 장부 불일치 방지)
     const ce = await closedPeriodError(conn, date || kstToday())
-    if (ce) return res.status(409).json({ error: ce })
+    if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
 
     /* 비목·적요를 소득구분에 맞춘다.
      *
@@ -280,7 +302,7 @@ router.post('/:id/pay', async (req, res, next) => {
     const category = laborCategory(p.income_type)
     const payLabel = category
 
-    await conn.beginTransaction()
+    // (트랜잭션은 위에서 이미 열려 있다 — 급여 행을 FOR UPDATE 로 잠근 그 트랜잭션이다)
     const txnId = randomUUID()
     await conn.execute(`
       INSERT INTO transactions (id, kind, account_id, account_code, category, amount, date, method, status, employee_id, payroll_id, memo)

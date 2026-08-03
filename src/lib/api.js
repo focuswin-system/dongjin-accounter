@@ -56,10 +56,12 @@ export const minuteOf = (v) => {
  * 그래서 던지는 오류에 status·kind 를 붙여, App 의 전역 핸들러가 무엇이 잘못됐는지
  * 토스트로 알려줄 수 있게 한다.
  */
-function apiError(message, { status = 0, kind = 'http' } = {}) {
+function apiError(message, { status = 0, kind = 'http', code = '' } = {}) {
   const e = new Error(message)
   e.status = status
   e.kind = kind      // 'network' | 'auth' | 'ratelimit' | 'http'
+  // 서버가 준 사유 코드(예: 'duplicate'). 화면이 문구를 다시 파싱하지 않고 분기할 수 있게 남긴다.
+  e.code = code
   return e
 }
 
@@ -149,10 +151,11 @@ async function req(path, opts = {}) {
   }
   if (!res.ok) {
     let msg = `요청을 처리하지 못했어요 (${res.status})`
-    try { const body = await res.json(); if (body?.error) msg = body.error } catch { /* 본문 없음 */ }
+    let code = ''
+    try { const body = await res.json(); if (body?.error) msg = body.error; code = body?.code || '' } catch { /* 본문 없음 */ }
     // 429는 서버가 이유와 대기 시간을 문구에 담아 보낸다(시도 제한·요청 한도).
     // 이걸 삼키면 사용자는 왜 막혔는지 모른 채 빈 화면만 본다.
-    throw notifyInfra(apiError(msg, { status: res.status, kind: res.status === 429 ? 'ratelimit' : 'http' }))
+    throw notifyInfra(apiError(msg, { status: res.status, kind: res.status === 429 ? 'ratelimit' : 'http', code }))
   }
   return res.json()
 }
@@ -1426,7 +1429,9 @@ export const api = {
     try { await req('/work-contracts/' + id, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }
   },
   async payWorkContract(id, data) {
-    try { return await req(`/work-contracts/${id}/pay`, { method: 'POST', body: data }) } catch (e) { return { ok: false, error: e.message } }
+    // code 도 같이 넘긴다 — 중복 지급('duplicate')이면 화면이 확인을 받고 force 로 다시 부른다.
+    try { return await req(`/work-contracts/${id}/pay`, { method: 'POST', body: data }) }
+    catch (e) { return { ok: false, error: e.message, code: e.code || '' } }
   },
   async addWorkContractDoc(id, data) {
     try { return await req(`/work-contracts/${id}/docs`, { method: 'POST', body: data }) } catch (e) { return { ok: false, error: e.message } }
