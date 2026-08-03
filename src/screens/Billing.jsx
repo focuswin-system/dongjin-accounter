@@ -907,7 +907,11 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           </>
         ) : (
           <>
-            {!collect && <SummaryCard label="지급 예정(대기)" amount={pendingTotal} count={pending.length} accent="brand"/>}
+            {/* pending 은 '아직 청구서가 안 만들어진 회차'다(정기지출·계약 지급일정).
+                '지급 예정(대기)'라고 부르니 옆의 '미지급금 합계'와 구분이 안 됐다 —
+                둘 다 "3건"으로 떠서 같은 3건처럼 보인다. 실제로는 겹치지 않는 별개다.
+                매출 쪽 '발행 예정'과 대칭이 되게 '등록 예정'으로 부른다. */}
+            {!collect && <SummaryCard label="등록 예정(청구서 전)" amount={pendingTotal} count={pending.length} accent="brand"/>}
             <SummaryCard label={collect ? "줄 미지급금" : "미지급금 합계"} amount={paySum?.total ?? 0} count={paySum?.count ?? 0} accent="warn"/>
             <SummaryCard label="연체 미지급금" amount={paySum?.overdueAmount ?? 0} count={paySum?.overdueCount ?? 0} accent="neg" warn/>
           </>

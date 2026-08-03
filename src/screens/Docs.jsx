@@ -239,7 +239,16 @@ const ProcessDrawer = ({ open, onClose, doc, onDone }) => {
 
   useEffect(() => {
     if (!open) return;
-    setMode('create'); setAmount(String(doc.amount || '')); setDate(doc.pay_date || todayStr()); setPickedTxn(null);
+    setMode('create'); setAmount(String(doc.amount || ''));
+    /* 지출일 기본값은 **오늘까지**로 자른다.
+     * doc.pay_date 는 '언제까지 주기로 한 날'(지급 기한)이라 대개 미래다. 그걸 그대로
+     * 채워 두면 사용자가 아무것도 안 바꾸고 '처리 완료'를 눌렀을 때
+     * 서버가 "미래 날짜로는 처리할 수 없어요"로 거절한다 — 화면이 스스로 만든 기본값이
+     * 자기 규칙에 걸리는 셈이라, 뭘 고쳐야 하는지도 알기 어렵다.
+     * 결의서 처리의 지출일은 '실제로 돈이 나간 날'이므로 미래일 수 없다. */
+    const t = todayStr();
+    setDate(doc.pay_date && doc.pay_date <= t ? doc.pay_date : t);
+    setPickedTxn(null);
     api.getResolutionMatchable(doc.id).then(setCandidates);
     api.getAccounts().then(list => {
       setAccounts(list);
