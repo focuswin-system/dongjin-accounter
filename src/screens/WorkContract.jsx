@@ -648,6 +648,15 @@ const OutsourcingDrawer = ({ info, onClose, onSaved }) => {
 
   const save = async () => {
     if (!form.name.trim()) return toast.push('성명을 입력해주세요')
+    /* 단가표(업무)가 하나도 없으면 **지급 자체를 못 한다** — 지급 등록은 단가표의
+     * 수량을 받아 금액을 만들기 때문에, 항목이 없으면 "지급할 항목이 없어요"로 막힌다.
+     * 그런데 등록은 그냥 통과해서, 나중에 지급하려다 막히고서야 알게 됐다
+     * (실데이터 검수에서 그렇게 등록된 인력이 2명 남아 있었다).
+     * 이름이 비어 서버가 버리는 행도 있으므로 **이름 있는 행**만 센다. */
+    const filled = (items || []).filter(r => String(r.name || '').trim())
+    if (filled.length === 0) {
+      return toast.push('업무(품목)와 단가를 하나 이상 등록해주세요. 지급은 이 단가표로 계산돼요.', { tone: 'warn' })
+    }
     const body = {
       kind: form.kind, income_type: form.income_type, title: form.title,
       employ_type_id: form.employ_type_id || null, employ_type: form.employ_type || null,
