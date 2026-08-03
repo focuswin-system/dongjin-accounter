@@ -799,14 +799,17 @@ export const EvidenceAttachDrawer = ({ item, onClose }) => {
 const IMPORT_TARGETS = ["사용 안함", "날짜", "거래처", "계약명", "입금/지출 구분", "비목", "계정과목", "금액", "공급가액", "부가세", "메모"]
 const guessTarget = (h) => {
   const s = String(h).replace(/\s/g, '')
+  /* ⚠ 순서가 중요하다 — 먼저 걸리는 규칙이 이긴다.
+     '공급가액' 열이 거래처 규칙의 '공급'(공급업체)에 먼저 잡혀 **금액이 거래처로 매핑**됐다.
+     그래서 구체적인 열 이름(공급가액·부가세·계정과목)을 거래처보다 앞에 둔다. */
   if (/날짜|일자|date/i.test(s)) return "날짜"
-  if (/거래처|상호|업체|공급|vendor/i.test(s)) return "거래처"
-  if (/계약|프로젝트|현장|contract/i.test(s)) return "계약명"
-  if (/구분|입출|유형|type/i.test(s)) return "입금/지출 구분"
-  if (/계정과목|계정코드|acct/i.test(s)) return "계정과목"
-  if (/비목|항목|category/i.test(s)) return "비목"
   if (/공급가|과세표준|supply/i.test(s)) return "공급가액"
   if (/부가세|세액|vat/i.test(s)) return "부가세"
+  if (/계정과목|계정코드|acct/i.test(s)) return "계정과목"
+  if (/거래처|상호|업체|공급처|공급자|vendor/i.test(s)) return "거래처"
+  if (/계약|프로젝트|현장|contract/i.test(s)) return "계약명"
+  if (/구분|입출|유형|type/i.test(s)) return "입금/지출 구분"
+  if (/비목|항목|category/i.test(s)) return "비목"
   if (/금액|amount|합계/i.test(s)) return "금액"
   if (/메모|비고|적요|note/i.test(s)) return "메모"
   return "사용 안함"
