@@ -5,6 +5,7 @@ const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
 const { vatFields } = require('../lib/vat')
 const { ledgerError } = require('../lib/ledger')
+const { settleAcctCode } = require('../lib/acctCode')
 const { insertWithDocNo } = require('../lib/docno')
 const { withTx, httpError } = require('../lib/withTx')
 
@@ -263,10 +264,21 @@ router.post('/:id/process', async (req, res, next) => {
        * (매입 청구서에서 발행한 결의서는 아래에서 invoice_id 가 붙어 청구서 쪽으로 집계된다) */
       const vat = vatFields({ amount: amt, tax_type: r.tax_type, vat_deductible: r.vat_deductible })
       await conn.execute(
-        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, memo,
+        /* 매입 청구서에서 발행한 결의서면 이 지출은 **청구서 정산**이다 —
+         * 매입은 청구서 수취 시점에 이미 인식됐고, 지금은 그때 생긴 외상매입금이 사라지는 것.
+         * 계정과목을 안 넣으면 일계표에서 상대 계정이 비어 차·대변이 안 맞는다
+         * (실데이터 검수에서 8,580,000원 지출이 그대로 불일치로 떴다).
+         *
+         * 청구서 없는 소액경비 결의서(r.invoice_id 없음)는 실제 비용 발생이라 계정과목이
+         * 비목마다 다른데, 지금 구조에는 비목→계정과목 매핑이 없다 → null 로 두고
+         * 일계표가 '계정과목 없음' 목록으로 알려주게 한다(그건 설계대로다).
+         * 근본 해결은 비목 기준정보에 계정과목 칸을 붙이는 것 — 별도 과제. */
+        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, account_code, category, amount, date, method, status, doc_no, memo,
                                    supply_amount, vat_amount, tax_type, vat_deductible)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [id, 'expense', r.vendor_id || null, invContractId, acct, r.title || '지출', amt,
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [id, 'expense', r.vendor_id || null, invContractId, acct,
+         r.invoice_id ? settleAcctCode('expense') : null,
+         r.title || '지출', amt,
          effDate, r.pay_method || '계좌이체',
          '지급완료', r.doc_no, `결의서 ${r.doc_no} 집행`,
          vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible])
