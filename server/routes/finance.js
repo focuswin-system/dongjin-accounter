@@ -93,6 +93,19 @@ router.post('/loans', async (req, res, next) => {
   if (!b.start_date) return res.status(400).json({ error: '실행일을 선택해주세요' })
   const principal = intOf(b.principal)
   if (principal <= 0) return res.status(400).json({ error: '원금을 입력해주세요' })
+  /* 이율은 **안 넣은 것과 0%를 구분**해야 한다.
+   * 검증이 없어서 이율 없이 대출이 만들어졌고, 그러면 상환 스케줄의 이자가 전부 0이 된다.
+   * 실제로는 매달 이자를 내는데 장부에는 이자비용이 한 푼도 안 잡혀 손익이 그만큼 부풀고,
+   * 나중에 알아채도 이미 몇 달치 상환이 잘못 기록된 뒤다.
+   * 0%(무이자 정책자금 등)는 실제로 있으므로 **명시적으로 0을 보내면 허용**한다. */
+  if (b.annual_rate == null || b.annual_rate === '') {
+    return res.status(400).json({ error: '연이율을 입력해주세요. 무이자면 0을 넣어주세요.' })
+  }
+  const annualRate = numOf(b.annual_rate)
+  if (!Number.isFinite(annualRate) || annualRate < 0) {
+    return res.status(400).json({ error: '연이율을 숫자로 입력해주세요' })
+  }
+  if (annualRate > 100) return res.status(400).json({ error: '연이율이 너무 큽니다(100% 초과). 값을 확인해주세요.' })
   const method = METHODS.includes(b.method) ? b.method : 'equal_payment'
   const received = b.received === true || b.received === 'true'
   // 실제로 돈이 들어온 것으로 기록하려면 미래 날짜·마감월은 막는다(거래 등록과 같은 규칙)
