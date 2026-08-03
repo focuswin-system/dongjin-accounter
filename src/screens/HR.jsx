@@ -214,7 +214,10 @@ export const HRScreen = () => {
                 </div>
 
                 <KpiRow cols={4} style={{ marginBottom: 4 }}>
-                  <Kpi label="실수령 합계"  value={fmtNum(paySummary?.netTotal || 0) + "원"}    badge={`재직 ${paySummary?.count || 0}명`} badgeTone="brand"/>
+                  {/* count 는 '그 달 급여대장 행 수'다. '재직 N명'이라고 부르니 대장을 아직
+                      안 만든 달에 '재직 0명'이 떠서 **직원이 하나도 없는 것처럼** 보였다
+                      (근로계약 화면엔 4명이 있는데도). 무엇을 세는 값인지 그대로 적는다. */}
+                  <Kpi label="실수령 합계"  value={fmtNum(paySummary?.netTotal || 0) + "원"}    badge={`대장 ${paySummary?.count || 0}명분`} badgeTone="brand"/>
                   <Kpi label="지급 완료"    value={fmtNum(paySummary?.paidTotal || 0) + "원"}   badge="실제 이체분"                       badgeTone="ink"/>
                   <Kpi label="미지급 합계"  value={fmtNum(paySummary?.unpaidTotal || 0) + "원"} badge="아직 못 준 급여"                   badgeTone={paySummary?.unpaidTotal > 0 ? "warn" : "ink"}/>
                   <Kpi label="과지급"       value={(paySummary?.overpaidCount || 0) + "건"}     badge="초과 지급 확인"                    badgeTone={paySummary?.overpaidCount > 0 ? "neg" : "ink"}/>
