@@ -17,7 +17,8 @@ const monthLabel = (m) => { const [y, mo] = (m || '').split('-'); return y ? `${
  *
  * row: { id, name, month, net_salary, paid, remain, payments? }
  */
-export const PayrollPayDrawer = ({ row, accounts, onClose, onSaved }) => {
+/** label: 이 지급의 성격. 용역·일용은 '급여'가 아니다 — 용역계약 상세에서 열면 '용역비'로 부른다. */
+export const PayrollPayDrawer = ({ row, accounts, onClose, onSaved, label = '급여' }) => {
   const toast = useToast();
   const [amount, setAmount] = useState(0);
   const [date, setDate] = useState("");
@@ -46,7 +47,7 @@ export const PayrollPayDrawer = ({ row, accounts, onClose, onSaved }) => {
     setBusy(true);
     try {
       const res = await api.payPayroll(row.id, { amount, date, account_id: accountId, method });
-      if (res.ok) { toast.push("급여 지급을 등록했어요 (거래내역에 반영)"); onSaved(); onClose(); }
+      if (res.ok) { toast.push(`${label} 지급을 등록했어요 (거래내역에 반영)`); onSaved(); onClose(); }
       else toast.push(res.error || "등록에 실패했어요", { tone: 'warn' });
     } finally { setBusy(false); }
   };
@@ -59,7 +60,7 @@ export const PayrollPayDrawer = ({ row, accounts, onClose, onSaved }) => {
   return (
     <Drawer open={true} onClose={onClose} width="min(520px, 100vw)">
       <DrawerHead
-        title={<>{row.name} 급여 지급 — {monthLabel(row.month)}</>}
+        title={<>{row.name} {label} 지급 — {monthLabel(row.month)}</>}
         sub="실제 이체분을 등록하면 거래내역(지출)에 자동 기록돼요"
         onClose={onClose}/>
 

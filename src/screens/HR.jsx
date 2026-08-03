@@ -327,7 +327,7 @@ const ServiceLedgerTab = ({ month, setMonth }) => {
           ) },
         ]}
       />
-      <PayrollPayDrawer row={payTarget} accounts={accounts}
+      <PayrollPayDrawer row={payTarget} accounts={accounts} label="용역비"
         onClose={() => setPayTarget(null)} onSaved={() => load()}/>
     </div>
   );

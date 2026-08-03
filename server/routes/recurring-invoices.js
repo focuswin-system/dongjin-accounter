@@ -188,9 +188,10 @@ router.post('/:id/issue', async (req, res, next) => {
       if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
       const txnId = randomUUID()
       await conn.execute(
-        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, invoice_id, memo)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, account_code, category, amount, date, method, status, doc_no, invoice_id, memo)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [txnId, 'income', r.vendor_id || null, r.contract_id || null, acctId,
+         settleAcctCode('income'),   // 외상매출금 — 없으면 일계표 차·대변이 안 맞는다
          '수금', total, target, '계좌이체', '입금완료', '', id, `청구서 ${invoice_no} 정산`]
       )
       await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,1)',

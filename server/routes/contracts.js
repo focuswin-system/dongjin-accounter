@@ -5,6 +5,7 @@ const model = require('../contract-model')
 const { buildContractWorkbook } = require('../contract-export')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError, amountError } = require('../lib/ledger')
+const { settleAcctCode } = require('../lib/acctCode')
 const { removeUploadedFile } = require('../lib/uploads')
 const { vatOf, vatRateOf, taxTypeOfMode } = require('../lib/vat')
 const { closedPeriodError } = require('../lib/closing')
@@ -366,9 +367,12 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
       if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
       const txnId = randomUUID()
       await conn.execute(
-        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, invoice_id, memo)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, account_code, category, amount, date, method, status, doc_no, invoice_id, memo)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [txnId, isPurchase ? 'expense' : 'income', ms.vendor_id || null, ms.contract_id, accountId,
+         // 정산은 채권·채무가 사라지는 거래다 → 상대 계정은 외상매출금/외상매입금.
+         // 비우면 일계표에서 한쪽 다리가 없어 차변·대변이 안 맞는다.
+         settleAcctCode(isPurchase ? 'expense' : 'income'),
          isPurchase ? '대금 지급' : '수금', total, date || today, '계좌이체',
          isPurchase ? '지급완료' : '입금완료', '', invId, `청구서 ${invoice_no} 정산`]
       )
@@ -474,9 +478,10 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
       if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
       const txnId = randomUUID()
       await conn.execute(
-        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, invoice_id, memo)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, account_code, category, amount, date, method, status, doc_no, invoice_id, memo)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [txnId, isPurchase ? 'expense' : 'income', c.vendor_id || null, c.id, accountId,
+         settleAcctCode(isPurchase ? 'expense' : 'income'),   // 위 마일스톤 발행과 같은 이유
          isPurchase ? '대금 지급' : '수금', total, issuedAt, '계좌이체',
          isPurchase ? '지급완료' : '입금완료', '', invId, `청구서 ${invoice_no} 정산`]
       )

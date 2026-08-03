@@ -822,7 +822,7 @@ const OutsourcingDetailDrawer = ({ id, onClose, onChanged, onEdit }) => {
         </div>
       </Drawer>
       {payDrawer && <ServicePayDrawer contract={c} onClose={() => setPayDrawer(false)} onSaved={() => { setPayDrawer(false); load(); onChanged?.() }}/>}
-      {payRow && <PayrollPayDrawer row={payRow} accounts={accounts}
+      {payRow && <PayrollPayDrawer row={payRow} accounts={accounts} label="용역비"
         onClose={() => setPayRow(null)} onSaved={() => { load(); onChanged?.() }}/>}
     </>
   )

@@ -4,6 +4,7 @@ const { futureDateError, kstToday } = require('../db')
 const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
+const { laborAcctCode, laborCategory } = require('../lib/acctCode')
 
 const router = Router()
 
@@ -237,7 +238,14 @@ router.post('/:id/pay', async (req, res, next) => {
     const { amount, date, account_id, method, memo } = req.body
     // 급여 지급은 실제 이체라 미래 일자 금지(앱 전체 KST 규칙 일관 — 용역 지급·거래 등록과 동일).
     const de = futureDateError(date); if (de) return res.status(400).json({ error: de })
-    const [[p]] = await conn.execute('SELECT p.*, e.name FROM payroll p JOIN employees e ON p.employee_id = e.id WHERE p.id = ?', [req.params.id])
+    /* 근로계약의 소득구분을 함께 읽는다 — 아래 비목 판정에 쓴다.
+       work_contract_id 가 없으면(정규 급여대장) 근로소득으로 본다. */
+    const [[p]] = await conn.execute(
+      `SELECT p.*, e.name, wc.income_type
+         FROM payroll p
+         JOIN employees e ON p.employee_id = e.id
+         LEFT JOIN work_contracts wc ON wc.id = p.work_contract_id
+        WHERE p.id = ?`, [req.params.id])
     if (!p) return res.status(404).json({ error: 'Not found' })
     const amt = Number(amount) || 0
     if (amt <= 0) return res.status(400).json({ error: '금액을 확인해주세요' })
@@ -250,13 +258,27 @@ router.post('/:id/pay', async (req, res, next) => {
     const ce = await closedPeriodError(conn, date || kstToday())
     if (ce) return res.status(409).json({ error: ce })
 
+    /* 비목·적요를 소득구분에 맞춘다.
+     *
+     * 여태 소득구분과 무관하게 '급여'로 박았다. 그래서 **사업소득 용역비가 인건비(급여)로
+     * 기표되어** 손익계산서의 급여 항목이 부풀고 외주비는 비었다. 원천징수 신고 구분과도
+     * 어긋난다(근로소득 vs 사업소득).
+     *
+     * 게다가 '급여'라는 비목은 기준정보에 없는 경우가 많다(생산 급여/관리 급여로 나뉜다) →
+     * 비목별 집계에서 미분류로 빠졌다. 그래서 후보 중 **그 회사에 실제로 있는 비목**을
+     * 먼저 찾고, 없을 때만 기본 이름을 쓴다. */
+    const category = laborCategory(p.income_type)
+    const payLabel = category
+
     await conn.beginTransaction()
     const txnId = randomUUID()
     await conn.execute(`
-      INSERT INTO transactions (id, kind, account_id, category, amount, date, method, status, employee_id, payroll_id, memo)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)
-    `, [txnId, 'expense', account_id, '급여', amt, date || kstToday(),
-        method || '계좌이체', '지급완료', p.employee_id, p.id, memo || `${p.month} ${p.name} 급여 지급`])
+      INSERT INTO transactions (id, kind, account_id, account_code, category, amount, date, method, status, employee_id, payroll_id, memo)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    `, [txnId, 'expense', account_id, laborAcctCode(p.income_type), category, amt, date || kstToday(),
+        method || '계좌이체', '지급완료', p.employee_id, p.id, memo || `${p.month} ${p.name} ${payLabel} 지급`])
+    /* ↑ account_code 를 반드시 넣는다. 없으면 일계표가 이 거래의 상대 계정을 못 찾아
+     *   차변·대변이 안 맞는다 — 급여는 매달 나가므로 그 화면이 늘 경고 상태가 된다. */
     // ↑ 거래 status는 '지급완료'(공백 없음) — 계좌 잔액 계산(accounts.js)이 이 값만 지출로 센다.
     //   날짜 폴백도 kstToday() — UTC(new Date())를 쓰면 KST 새벽 등록 시 하루 전으로 찍힌다.
 

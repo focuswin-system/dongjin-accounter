@@ -4,6 +4,7 @@ const { futureDateError, kstToday } = require('../db')
 const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
+const { laborAcctCode, laborCategory } = require('../lib/acctCode')
 const { removeUploadedFile } = require('../lib/uploads')
 
 const router = Router()
@@ -414,12 +415,15 @@ router.post('/:id/pay', async (req, res, next) => {
       const ce = await closedPeriodError(conn, date || pay_date || kstToday())
       if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
       txnId = randomUUID()
-      // 소득구분에 맞는 카테고리로 지출 기록(급여와 구분되어 신고자료 집계가 섞이지 않게)
-      const category = c.income_type === '일용' ? '일용노무비' : c.income_type === '기타' ? '기타소득 지급' : '용역비'
+      /* 소득구분에 맞는 비목·계정과목으로 지출 기록(급여와 구분되어 신고자료 집계가 섞이지 않게).
+         규칙은 lib/acctCode.js 한 곳 — 회차 지급(payroll.js)과 반드시 같은 값이어야 한다.
+         두 벌로 두면 어느 화면에서 지급했느냐에 따라 비목이 갈려 집계가 조용히 쪼개진다.
+         account_code 가 없으면 일계표에서 상대 계정이 비어 차·대변이 안 맞는다. */
+      const category = laborCategory(c.income_type)
       await conn.execute(
-        `INSERT INTO transactions (id, kind, account_id, category, amount, date, method, status, employee_id, payroll_id, memo)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-        [txnId, 'expense', account_id, category, net, date || pay_date || kstToday(),
+        `INSERT INTO transactions (id, kind, account_id, account_code, category, amount, date, method, status, employee_id, payroll_id, memo)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [txnId, 'expense', account_id, laborAcctCode(c.income_type), category, net, date || pay_date || kstToday(),
          '계좌이체', '지급완료', c.employee_id, payrollId, memo || `${m} ${c.employee_name} ${category}`]
       )
       // ↑ status '지급완료'(공백 없음) — 계좌 잔액 계산(accounts.js)이 이 값만 지출로 센다.

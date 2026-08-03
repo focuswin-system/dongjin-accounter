@@ -157,9 +157,10 @@ async function createExpenseInvoice(conn, r, target, { paid = false, accountId =
     const txnId = randomUUID()
     // 계약에 걸린 정기지출이면 그 계약(매입)에 귀속(contract_id)
     await conn.execute(
-      `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, invoice_id, memo)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, account_code, category, amount, date, method, status, doc_no, invoice_id, memo)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [txnId, 'expense', r.vendor_id || null, r.contract_id || null, acctId,
+       settleAcctCode('expense'),   // 외상매입금 — 없으면 일계표 차·대변이 안 맞는다
        r.category || '대금 지급', total, target, '계좌이체', '지급완료', '', invId, `청구서 ${invoice_no} 정산`])
     await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,1)',
       [randomUUID(), invId, txnId, total])
