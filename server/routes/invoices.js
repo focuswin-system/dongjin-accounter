@@ -6,7 +6,7 @@ const { futureDateError, kstToday } = require('../db')
 const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
 const { restoreLastGenerated } = require('../lib/recurrence')
-const { ledgerError } = require('../lib/ledger')
+const { ledgerError, amountError } = require('../lib/ledger')
 const { removeUploadedFile } = require('../lib/uploads')
 const { normalizeTaxType } = require('../lib/vat')
 const { recalcInvoiceStatus, paidAmountOf } = require('../lib/invoiceStatus')
@@ -231,7 +231,7 @@ router.post('/import/commit', async (req, res, next) => {
       return `${prefix}-${year}-${String(n).padStart(4, '0')}`
     }
 
-    let inserted = 0, updated = 0, amountKept = 0, linedInvoices = 0, dupSkipped = 0, closedSkipped = 0
+    let inserted = 0, updated = 0, amountKept = 0, linedInvoices = 0, dupSkipped = 0, closedSkipped = 0, amountSkipped = 0
     // 마감월 판정은 같은 달을 반복 조회하지 않게 캐시한다(200건이면 같은 달이 수십 번 나온다)
     const closedCache = new Map()
     const isClosedMonth = async (date) => {
@@ -295,6 +295,10 @@ router.post('/import/commit', async (req, res, next) => {
           'SELECT id FROM invoices WHERE nts_confirm_no = ? LIMIT 1', [confirmNo])
         if (exists) { dupSkipped++; continue }
       }
+      /* 금액이 0·음수인 행은 만들지 않는다. 여기만 검사가 없어 엑셀의 빈 금액 칸이
+       * 0원 청구서로 들어왔다. 한 행 때문에 배치 전체를 세우면 나머지 수백 건이 날아가므로
+       * (중복 처리와 같은 이유) 세어서 결과 화면에 보고한다. */
+      if (amountError(total)) { amountSkipped++; continue }
       const v = await findOrCreateVendor(conn, { name: it.vendor_name, bizNo: it.biz_no, kind })
       if (v.created) createdVendors.push(v.name)
       const newId = randomUUID()
@@ -319,7 +323,7 @@ router.post('/import/commit', async (req, res, next) => {
 
     await conn.commit()
     res.json({
-      ok: true, inserted, updated, amountKept, linedInvoices, dupSkipped, closedSkipped, createdVendors,
+      ok: true, inserted, updated, amountKept, linedInvoices, dupSkipped, closedSkipped, amountSkipped, createdVendors,
       createdItems: itemIdx ? itemIdx.created : [],
     })
   } catch (e) { await rollbackQuietly(conn); next(e) }
@@ -396,6 +400,11 @@ router.get('/:id', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const { kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type } = req.body
+    /* 금액 검증이 아예 없어서 **0원·음수 청구서가 그대로 저장됐다**(실제로 0원 청구서가
+     * '입금 예정'으로 남아 홈 '할 일'에 떠 있었다). 음수 청구서는 미수금 총액을 깎아
+     * 다른 청구서를 상계하고, 부가세 과세표준도 함께 줄인다.
+     * 거래(transactions)·결의서는 이미 amountError 를 통과해야 하는데 청구서만 빠져 있었다. */
+    { const ae = amountError(total_amount); if (ae) return res.status(400).json({ error: ae }) }
     // 마감된 달에는 청구서를 새로 발행할 수 없다 — 부가세 집계의 주 소스가 청구서이므로,
     // 신고를 끝낸 분기에 청구서가 추가되면 제출 자료와 장부가 어긋난다.
     // (미래 발행일은 막지 않는다 — 정기청구의 미리 발행이 정당한 업무다)
@@ -445,6 +454,9 @@ router.put('/:id', async (req, res, next) => {
     // 날짜를 옮기는 경우 양쪽을 본다(잠긴 달에서 빼내거나 밀어넣는 것도 막는다 — 거래와 같은 규칙).
     const ce = await closedPeriodError(conn, cur.issued_at, issued_at)
     if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
+
+    // 수정에도 같은 규칙 — 발행만 막고 수정으로 0원을 만들 수 있으면 막은 의미가 없다.
+    { const ae = amountError(total_amount); if (ae) { await rollbackQuietly(conn); return res.status(400).json({ error: ae }) } }
 
     // 이미 정산된 금액보다 낮출 수 없다. 낮추면 잔여가 음수가 되어 다른 미수금을 상계한다.
     const paid = await paidAmountOf(conn, req.params.id)

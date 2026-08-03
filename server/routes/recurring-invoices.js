@@ -3,7 +3,7 @@ const { randomUUID } = require('crypto')
 const { futureDateError, kstToday, kstDate } = require('../db')
 const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS, pendingCycle } = require('../lib/recurrence')
 const { rollbackQuietly } = require('../lib/tx')
-const { ledgerError } = require('../lib/ledger')
+const { ledgerError, amountError } = require('../lib/ledger')
 const { taxTypeOfMode, recurFromSupply, recurVat } = require('../lib/vat')
 const { closedPeriodError } = require('../lib/closing')
 
@@ -174,6 +174,8 @@ router.post('/:id/issue', async (req, res, next) => {
     /* 마감된 달로는 청구서를 발행할 수 없다. 예전엔 paid 일 때만 검사해서, 마감·신고를 끝낸
      * 달로 청구서만 새로 꽂을 수 있었다 → 그 분기 부가세 집계가 신고 후에 바뀐다. */
     { const ce = await closedPeriodError(conn, target); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
+    // 금액 없는 정기청구가 매달 0원 청구서를 찍어내면 미수금 목록만 부풀린다.
+    { const ae = amountError(total); if (ae) { await rollbackQuietly(conn); return res.status(400).json({ error: ae }) } }
     await conn.execute(
       'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, invoice_no, 'issued', r.vendor_id || null, r.contract_id || null, supply, vat, total,
@@ -244,6 +246,11 @@ router.post('/issue-missed', async (req, res, next) => {
         { const ce = await closedPeriodError(conn, dueStr)
           if (ce) { await rollbackQuietly(conn)
             return res.status(409).json({ error: `${dueStr} 회차가 마감된 달이라 전체를 처리하지 않았어요. ${ce}` }) } }
+        /* 금액이 0이면 회차마다 0원 청구서가 찍힌다. 위 마감과 같은 이유로 전체를 세운다 —
+         * 금액은 회차가 아니라 정기청구 설정에서 오므로, 한 회차가 0이면 나머지도 전부 0이다. */
+        { const ae = amountError(total)
+          if (ae) { await rollbackQuietly(conn)
+            return res.status(400).json({ error: `${ae} (정기청구 "${r.item || ''}"의 금액을 확인해주세요)` }) } }
         await conn.execute(
           'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
           [id, invoice_no, 'issued', r.vendor_id||null, r.contract_id||null, supply, vat, total, dueStr, dueAt, '입금 예정', r.account_id||null, r.id, `정기청구 자동 생성 · ${r.item||''}`.trim(), invTaxType(r)]

@@ -7,7 +7,7 @@ import { ImportWizard } from '../lib/components/ImportWizard'
 import { RecurringCycles, useRecurringCycles, cycleSummaryByRule } from '../lib/components/RecurringCycles'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { normBizNo, normVendorName } from '../lib/normalize'
-import { api } from '../lib/api'
+import { api, minuteOf } from '../lib/api'
 
 const fmtDateLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const todayStr = () => fmtDateLocal(new Date())
@@ -2785,7 +2785,7 @@ const ClosingPanel = ({ embedded = false }) => {
               <tr key={r.id}>
                 <td className="fw-600 num">{r.period}</td>
                 <td className="text-sm text-muted">{r.memo || '—'}</td>
-                <td className="text-sm text-muted2 num">{String(r.created_at || '').slice(0, 16).replace('T', ' ')}</td>
+                <td className="text-sm text-muted2 num">{minuteOf(r.created_at)}</td>
                 <td>
                   <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => reopen(r.period)}>해제</button>
                 </td>

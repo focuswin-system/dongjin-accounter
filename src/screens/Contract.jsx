@@ -1051,7 +1051,8 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   if (!c) return <div style={{ padding: 40, textAlign: "center", color: "var(--muted-2)" }}>불러오는 중...</div>;
 
   const inDone  = c.in_done  || 0;
-  const out     = c.out      || 0;
+  const out     = c.out      || 0;   // 이 계약이 근거인 지출(매입계약의 지급액)
+  const cost    = c.cost     || 0;   // 이 매출계약에 귀속된 원가 — 손익(profit)이 빼는 값
   const profit  = c.profit   || 0;
   // 매입 계약(gubu A/E)이면 '지급' 관점, 매출이면 '수금' 관점
   const isPurchase = c.vendor_gubu === 'A' || c.vendor_gubu === 'E';
@@ -1144,7 +1145,9 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           <SummaryTile label="미지급금" amount={arRemain} big/>
         ) : (
           <>
-            <SummaryTile label="이 계약 원가" amount={out}/>
+            {/* 손익이 빼는 값과 같은 축이어야 한다 — out 을 쓰면 원가 0 · 손익 +323,000 처럼
+                타일끼리 뺄셈이 안 맞는다(목록 '원가' 열과 같은 원인). */}
+            <SummaryTile label="이 계약 원가" amount={cost}/>
             <SummaryTile label={openEnded ? "누적 손익" : "예상 손익"} amount={profit ?? 0} big/>
           </>
         )}
@@ -2172,7 +2175,13 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
             { key: 'cost', header: kind === "purchase" ? "미지급금" : "원가", align: 'right', render: r => (
               isPurchase(r)
                 ? <span className="num-cell fw-700" style={{ color: (r.ar_remain || 0) > 0 ? "var(--warn-ink)" : "var(--muted-2)" }}>{(r.ar_remain || 0) > 0 ? fmtNum(r.ar_remain) : "—"}</span>
-                : <span className="num-cell text-muted">{fmtNum(r.out || 0)}</span>
+                /* r.out 이 아니라 r.cost 다.
+                   out  = 이 계약이 '근거'인 지출(contract_id)      — 매입계약의 지급액
+                   cost = 이 매출계약에 '귀속'된 원가(cost_contract_id) — 외주비 등
+                   매출 계약의 원가는 후자다. out 을 쓰던 탓에 원가가 늘 0으로 보였고,
+                   손익은 cost 를 빼고 계산해서 **수금 523,000 · 원가 0 · 손익 +323,000**처럼
+                   화면 안에서 뺄셈이 맞지 않았다(손익이 틀린 게 아니라 원가 칸이 거짓이었다). */
+                : <span className="num-cell text-muted">{fmtNum(r.cost || 0)}</span>
             ) },
             // 매입 계약은 손익 칸 자체가 없다('전체'에선 칸 비워 정렬 맞춤). 손익은 마이너스일 때만 색 경고.
             ...(kind !== "purchase" ? [{ key: 'profit', header: '예상 손익', align: 'right', sortable: true, sortValue: r => isPurchase(r) ? null : (r.profit || 0), render: r => (

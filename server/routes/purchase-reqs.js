@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
+const { amountError } = require('../lib/ledger')
 const { addDays } = require('../lib/recurrence')
 const { recurFromSupply } = require('../lib/vat')
 
@@ -145,6 +146,8 @@ router.post('/:id/issue-payable', async (req, res, next) => {
       [`매입-${year}-%`])
     const invoice_no = `매입-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
     const invId = randomUUID()
+    // 품목 금액이 비어 있으면 0원 매입 청구서가 되어 '지급 대기'로 남는다.
+    { const ae = amountError(total); if (ae) { await rollbackQuietly(conn); return res.status(400).json({ error: ae }) } }
     await conn.execute(
       'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [invId, invoice_no, 'received', r.vendor_id, null, supply, vat, total, issued, due, '지급 대기', null, null, `구매품의서 ${r.doc_no}`, tax_type])

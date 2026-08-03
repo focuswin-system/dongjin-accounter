@@ -4,7 +4,7 @@ const { futureDateError, kstToday } = require('../db')
 const model = require('../contract-model')
 const { buildContractWorkbook } = require('../contract-export')
 const { rollbackQuietly } = require('../lib/tx')
-const { ledgerError } = require('../lib/ledger')
+const { ledgerError, amountError } = require('../lib/ledger')
 const { removeUploadedFile } = require('../lib/uploads')
 const { vatOf, vatRateOf, taxTypeOfMode } = require('../lib/vat')
 const { closedPeriodError } = require('../lib/closing')
@@ -349,6 +349,9 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
      * 마감·신고를 끝낸 달로 청구서만 새로 꽂을 수 있었다 → 그 분기 부가세 집계가 신고 후에 바뀐다.
      * 수동 등록(POST /invoices)은 처음부터 issued_at 으로 막고 있었다. */
     { const ce = await closedPeriodError(conn, today); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
+    // 금액 0(마일스톤 금액을 안 채운 채 발행)이면 '입금 예정 0원' 청구서가 남아
+    // 홈 '할 일'과 미수금 목록을 채운다 — 실제로 그런 청구서가 생겨 있었다.
+    { const ae = amountError(total); if (ae) { await rollbackQuietly(conn); return res.status(400).json({ error: ae }) } }
     await conn.execute(
       'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [invId, invoice_no, kind, ms.vendor_id || null, ms.contract_id, supply, vat, total, today, dueAt, status, paid ? accountId : null, `${ms.contract_name} · ${ms.type}`, taxTypeOfMode(ms.vat_mode)]
@@ -450,6 +453,8 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
      * 마감·신고를 끝낸 달로 청구서만 새로 꽂을 수 있었다 → 그 분기 부가세 집계가 신고 후에 바뀐다.
      * 수동 등록(POST /invoices)은 처음부터 issued_at 으로 막고 있었다. */
     { const ce = await closedPeriodError(conn, issuedAt); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
+    // 수량을 0으로 둔 채 기성 발행하면 0원 청구서가 된다 — 마일스톤 발행과 같은 이유로 막는다.
+    { const ae = amountError(total); if (ae) { await rollbackQuietly(conn); return res.status(400).json({ error: ae }) } }
     await conn.execute(
       'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [invId, invoice_no, kind, c.vendor_id || null, c.id, supply, vat, total, issuedAt, due_at || null, status, paid ? accountId : null, `${c.name} · 기성 ${clean.length}개 품목`, taxTypeOfMode(c.vat_mode)]

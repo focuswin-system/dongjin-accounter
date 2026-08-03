@@ -3,7 +3,7 @@ const { randomUUID } = require('crypto')
 const { futureDateError, kstToday, kstDate } = require('../db')
 const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS, pendingCycle } = require('../lib/recurrence')
 const { rollbackQuietly } = require('../lib/tx')
-const { ledgerError } = require('../lib/ledger')
+const { ledgerError, amountError } = require('../lib/ledger')
 const { closedPeriodError } = require('../lib/closing')
 const { recurFromTotal, modeFromCatVat } = require('../lib/vat')
 
@@ -131,6 +131,9 @@ router.get('/pending', async (req, res, next) => {
 async function createExpenseInvoice(conn, r, target, { paid = false, accountId = null } = {}) {
   const { supply, vat, tax_type } = expenseVat(r.amount, r.vat_mode, r.cat_vat)
   const total = supply + vat
+  // 금액 없는 정기지출이 매달 0원 매입 청구서를 찍어내면 '지급 대기'만 쌓인다.
+  // (호출부는 { error } 를 받아 그대로 사용자에게 돌려준다)
+  { const ae = amountError(total); if (ae) return { error: ae } }
   const year = target.slice(0, 4)
   const [[{ maxno }]] = await conn.execute(
     "SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(invoice_no, '-', -1) AS UNSIGNED)), 0) AS maxno FROM invoices WHERE kind='received' AND invoice_no LIKE ?",

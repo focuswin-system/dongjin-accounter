@@ -680,8 +680,12 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여" }) => (
             : <span className="text-muted">—</span>
         ) },
         { key: 'dueAt', header: '기한', sortable: true, render: inv => (
+          /* D-day 뱃지는 **아직 받을(낼) 돈이 남았을 때만** 붙인다.
+             예전엔 기한만 보고 붙여서, 이미 다 받은 '입금 완료' 청구서에도 '+3일 초과'가
+             빨갛게 떴다 — 처리할 게 남은 것처럼 보여 다시 들여다보게 만든다. */
           <><span className="text-sm">{inv.dueAt}</span>
-            {inv.dueAt && <span className={`badge ${ddayTone(inv.dueAt)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(inv.dueAt)}</span>}</>
+            {inv.dueAt && inv.remainAmount > 0 &&
+              <span className={`badge ${ddayTone(inv.dueAt)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(inv.dueAt)}</span>}</>
         ) },
         { key: 'status', header: '상태', render: inv => <StatusBadge status={effStatus(inv)}/> },
         // 아직 안 받은/안 낸 청구서는 목록에서 바로 처리 버튼. 누르면 상세의 매칭 탭이 열린다.

@@ -18,6 +18,33 @@ const localToday = () => {
 const localMonth = () => localToday().slice(0, 7)
 
 /**
+ * TIMESTAMP 컬럼(created_at·matched_at 등) → 화면에 쓸 'YYYY-MM-DD'.
+ *
+ * mysql2 는 TIMESTAMP 를 Date 로 주고 JSON 직렬화에서 UTC ISO 문자열이 된다.
+ * 그걸 그대로 뿌리면 화면에 **'2026-08-02T23:53:31.000Z'** 가 나온다(실제로 입금 이력이
+ * 그랬다). 게다가 UTC라 KST 오전 9시 이전 기록은 하루 앞 날짜로 보인다.
+ * DATE 컬럼('YYYY-MM-DD')이 들어와도 그대로 통과시킨다.
+ */
+export const dayOf = (v) => {
+  if (!v) return ''
+  const s = String(v)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s          // 이미 날짜만
+  const d = new Date(s)
+  if (Number.isNaN(d.getTime())) return s              // 못 읽으면 원문 유지
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** 시각까지 보여야 하는 자리(마감 시각 등) → 'YYYY-MM-DD HH:mm' (로컬=KST).
+ *  문자열을 잘라 쓰면 UTC 시각이 그대로 나와 9시간 어긋난다. */
+export const minuteOf = (v) => {
+  if (!v) return ''
+  const d = new Date(String(v))
+  if (Number.isNaN(d.getTime())) return String(v)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+/**
  * 실패를 사용자에게 설명 가능한 형태로 만든다.
  *
  * 화면 코드 대부분은 load() 안에서 이 함수를 await 만 하고 try 로 감싸지 않는다.
@@ -201,7 +228,7 @@ function adaptInvoice(row) {
     status: row.status,
     accountId: row.account_id,
     // id 는 정산 취소에 필요하다(없으면 화면에서 어느 매칭인지 지목할 수 없다)
-    matches: (row.matches || []).map(m => ({ id: m.id, txnId: m.txn_id, amount: m.amount, matchedAt: m.matched_at })),
+    matches: (row.matches || []).map(m => ({ id: m.id, txnId: m.txn_id, amount: m.amount, matchedAt: dayOf(m.matched_at) })),
     docs: (row.docs || []).map(d => ({ id: d.id, url: d.url, name: d.name, type: d.doc_type || '기타', size: d.size || 0 })),
     paidAmount: row.paidAmount || 0,
     remainAmount: row.remainAmount ?? row.total_amount,
