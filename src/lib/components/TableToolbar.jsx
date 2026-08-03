@@ -37,13 +37,23 @@ export const TableToolbar = ({ date, search, filters, hasActiveFilter, onReset, 
             <input type="date" className="input num tbar-dateinput"
               value={date.to || ''} min={date.from || undefined}
               onChange={e => date.onChange({ from: date.from, to: e.target.value })}/>
+            {/* 지금 걸린 범위와 같은 프리셋은 눌린 상태로 보여준다.
+                예전엔 어느 버튼에도 표시가 없어서, **기본값이 '이번 달'인데 필터가 없다고
+                믿게 됐다** — 거래내역에 98건 중 4건만 뜨니 "왜 안 나오지"가 된다.
+                '전체'도 범위가 비었을 때 눌린 것으로 보여야 짝이 맞는다. */}
             <div className="tbar-presets">
-              {DATE_PRESETS.map(p => (
-                <button key={p.id} className="btn ghost sm" onClick={() => date.onChange(periodToRange(p.id))}>{p.label}</button>
-              ))}
-              {(date.from || date.to) && (
-                <button className="btn ghost sm" onClick={() => date.onChange({ from: '', to: '' })}>전체</button>
-              )}
+              {DATE_PRESETS.map(p => {
+                const r = periodToRange(p.id)
+                const on = date.from === r.from && date.to === r.to
+                return (
+                  <button key={p.id} className={`btn ghost sm${on ? ' active' : ''}`}
+                    aria-pressed={on}
+                    onClick={() => date.onChange(r)}>{p.label}</button>
+                )
+              })}
+              <button className={`btn ghost sm${!date.from && !date.to ? ' active' : ''}`}
+                aria-pressed={!date.from && !date.to}
+                onClick={() => date.onChange({ from: '', to: '' })}>전체</button>
             </div>
           </div>
         )}

@@ -286,6 +286,9 @@ function adaptTransaction(row) {
     /* 청구서 정산으로 생긴 거래인가. 보고서가 '재무거래(대출·투자)'와
      * '매출 수금'을 갈라내는 데 쓴다 — 둘 다 손익 거래가 아니지만 성격이 정반대다. */
     invoiceId: row.invoice_id || '',
+    /* 급여·용역 지급으로 생긴 거래인가. 인사급여에서 관리하는 건이라
+     * '일반 경비' 목록에서는 빼야 한다(안 빼면 경비의 대부분이 급여가 된다). */
+    payrollId: row.payroll_id || '',
     employee: row.employee_name || '',
   }
 }

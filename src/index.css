@@ -550,6 +550,11 @@ a { color: inherit; text-decoration: none; }
 /* .input 의 width:100% 를 이기려면 특이성이 더 높아야 한다(flex 안에서 148px 고정) */
 .tbar-date .tbar-dateinput { flex: 0 0 148px; width: 148px; height: 34px; padding: 6px 10px; font-size: 13px; }
 .tbar-presets { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+/* 지금 걸린 기간 프리셋. 표시가 없으면 기본값('이번 달')이 걸린 줄 모르고
+   "왜 데이터가 몇 건 안 나오지"가 된다 — 눌린 상태를 분명히 보여준다. */
+.tbar-presets .btn.active {
+  background: var(--ink); color: #fff; border-color: var(--ink);
+}
 .tbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
 .tbar-search { margin: 0; width: 240px; padding: 7px 10px; }
 .tbar-dot { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }

@@ -43,7 +43,14 @@ export const MiscPLScreen = ({ initialTab = 'expense', refreshTrigger, openExpen
      * 이 화면은 계약 두 축이 비었는지만 봤는데, 재무 거래도 계약이 없어서 그대로 섞였다
      * → 3억 대출을 실행하면 **잡손익 합계가 3억**이 됐다. 손익 아닌 돈이 수익으로 보인다.
      * 판정은 서버가 계정과목 대분류로 한다(server/lib/pnl.js 와 같은 규칙). */
-    setRows(list.filter(r => !r.contractId && !r.cost_contract_id && r.isPnl !== false))
+    /* ⚠ 급여·청구서 정산은 뺀다.
+     * 이 화면은 '계약에 안 붙는 자잘한 수익·비용'을 보는 곳인데, 계약 두 축이 비었는지만
+     * 봐서 **급여와 청구서 정산이 그대로 섞였다.** 실데이터로 보니 58건 중
+     * 급여 20건(6,208만)·정산 2건(1,452만)이 들어와, 합계의 대부분이 급여였다
+     * — 경비를 보려고 연 화면에서 경비가 안 보인다.
+     * 둘 다 각자의 화면(인사급여·대금청구서)에서 관리하는 건이라 여기서 셀 이유가 없다. */
+    setRows(list.filter(r =>
+      !r.contractId && !r.cost_contract_id && r.isPnl !== false && !r.payrollId && !r.invoiceId))
   }
   useEffect(() => { load() }, [tab, refreshTrigger])
 
