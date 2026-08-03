@@ -793,15 +793,21 @@ export const EvidenceAttachDrawer = ({ item, onClose }) => {
 };
 
 /* ============ 엑셀 업로드 (실 기능) ============ */
-const IMPORT_TARGETS = ["사용 안함", "날짜", "거래처", "계약명", "입금/지출 구분", "비목", "금액", "메모"]
+/* 계정과목을 받는다. 없으면 일계표에서 상대 계정이 비어 차·대변이 안 맞는다 —
+    수백 건을 한 번에 올리는 경로라 빠지면 그날들이 통째로 깨진다.
+    회계 프로그램에서 뽑은 자료에는 대개 계정과목이 들어 있다. */
+const IMPORT_TARGETS = ["사용 안함", "날짜", "거래처", "계약명", "입금/지출 구분", "비목", "계정과목", "금액", "공급가액", "부가세", "메모"]
 const guessTarget = (h) => {
   const s = String(h).replace(/\s/g, '')
   if (/날짜|일자|date/i.test(s)) return "날짜"
   if (/거래처|상호|업체|공급|vendor/i.test(s)) return "거래처"
   if (/계약|프로젝트|현장|contract/i.test(s)) return "계약명"
   if (/구분|입출|유형|type/i.test(s)) return "입금/지출 구분"
-  if (/비목|계정|항목|category/i.test(s)) return "비목"
-  if (/금액|amount|가액|합계|공급가/i.test(s)) return "금액"
+  if (/계정과목|계정코드|acct/i.test(s)) return "계정과목"
+  if (/비목|항목|category/i.test(s)) return "비목"
+  if (/공급가|과세표준|supply/i.test(s)) return "공급가액"
+  if (/부가세|세액|vat/i.test(s)) return "부가세"
+  if (/금액|amount|합계/i.test(s)) return "금액"
   if (/메모|비고|적요|note/i.test(s)) return "메모"
   return "사용 안함"
 }
@@ -879,6 +885,9 @@ export const ExcelScreen = () => {
       vendor: String(g("거래처") || '').trim(),
       contract: String(g("계약명") || '').trim(),
       category: String(g("비목") || '').trim(),
+      account_code: String(g("계정과목") || '').trim(),
+      supply_amount: normAmount(g("공급가액")),
+      vat_amount: normAmount(g("부가세")),
       memo: String(g("메모") || '').trim(), errs,
     }
   })
@@ -906,7 +915,16 @@ export const ExcelScreen = () => {
     // 계좌가 없으면 등록된 수백 건이 통째로 계좌 잔액에서 빠진다(서버도 400으로 막는다)
     if (!importAccountId) return toast.push("입출금 계좌를 선택해주세요")
     setBusy(true)
-    const items = okRows.map(r => ({ date: r.date, vendor: r.vendor, contract: r.contract, kind: r.kind, category: r.category, amount: r.amount, memo: r.memo }))
+    /* 계정과목·공급가·부가세도 함께 보낸다. 안 보내면 서버가 금액에서 역산하는데,
+       회계 프로그램에서 뽑은 자료는 이미 정확한 값을 갖고 있으므로 그걸 그대로 쓰는 게 맞다.
+       계정과목이 빠지면 일계표에서 상대 계정이 비어 그날 차·대변이 안 맞는다. */
+    const items = okRows.map(r => ({
+      date: r.date, vendor: r.vendor, contract: r.contract, kind: r.kind,
+      category: r.category, amount: r.amount, memo: r.memo,
+      account_code: r.account_code || null,
+      supply_amount: r.supply_amount || null,
+      vat_amount: r.vat_amount || null,
+    }))
     const res = await api.commitImport(items, importAccountId)
     setBusy(false)
     if (!res.ok) return toast.push(res.error || "등록 실패", { tone: 'warn' })

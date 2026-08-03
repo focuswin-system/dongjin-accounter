@@ -429,11 +429,16 @@ router.post('/import/commit', async (req, res, next) => {
       // 금액 검증도 개별 등록과 같게 — 음수 지출이 들어오면 계좌 잔액이 늘어난다
       const ae = amountError(it.amount)
       if (ae) { skippedAmount++; continue }
+      /* account_code — 빠지면 일계표에서 상대 계정이 비어 차·대변이 안 맞는다.
+         엑셀 대량 등록은 수백 건이 한 번에 들어오는 경로라, 빠지면 그날들이 통째로 깨진다.
+         (주석은 값 배열 **밖에** 둔다 — check:isolation 의 인자 개수 검사가 주석 안의
+          콤마까지 값으로 세어 '?=17 값=18' 오탐이 난다) */
       await conn.execute(`
-        INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, memo,
+        INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, account_code, category, amount, date, method, status, doc_no, memo,
                                   supply_amount, vat_amount, tax_type, vat_deductible)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `, [randomUUID(), it.kind, vendorId, contractId, it.account_id || accountId,
+          it.account_code || null,
           it.category || '', it.amount, it.date,
           '계좌이체', it.kind === 'income' ? '입금완료' : '지급완료',
           (cname && !contractId) ? cname : '', it.memo || '',
