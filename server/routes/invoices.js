@@ -398,6 +398,30 @@ router.get('/:id', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/** 매출/매입 구분 — 이 둘 말고는 어느 목록에도 안 잡혀 '보이지 않는 청구서'가 된다 */
+const INVOICE_KINDS = new Set(['issued', 'received'])
+
+/**
+ * 청구서 등록 시 요청 본문 검증 (금액 총액은 amountError 가 따로 본다).
+ *
+ * 순수 함수로 빼두어 DB 없이 검증한다 — 여기서 놓치면 500 이 되고,
+ * 사용자는 무엇이 잘못됐는지 알 수 없는 "처리 중 오류"만 본다.
+ */
+function invoiceCreateError({ kind, supply_amount, vat_amount }) {
+  if (!INVOICE_KINDS.has(kind)) return '매출/매입 구분이 없거나 올바르지 않아요'
+  // 0 은 허용한다 — 면세는 세액이 0 이고, 총액 0 은 amountError 가 이미 막았다.
+  for (const [label, v] of [['공급가액', supply_amount], ['부가세액', vat_amount]]) {
+    /* ⚠ Number(null)·Number('') 은 0 이다. 그래서 숫자 검사만 하면 이 둘이 통과하는데,
+     * supply_amount·vat_amount 컬럼은 NOT NULL 이고 서버 sql_mode 가 STRICT_TRANS_TABLES 라
+     * null 도 '' 도 그대로 넣으면 **500** 이 된다. 값의 '있음'을 먼저 본다. */
+    if (v === undefined || v === null || v === '') return `${label}을 입력해주세요`
+    const num = Number(v)
+    if (!Number.isFinite(num)) return `${label}을 숫자로 입력해주세요`
+    if (num < 0) return `${label}은 0보다 작을 수 없어요`
+  }
+  return null
+}
+
 router.post('/', async (req, res, next) => {
   try {
     const { kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type } = req.body
@@ -406,6 +430,19 @@ router.post('/', async (req, res, next) => {
      * 다른 청구서를 상계하고, 부가세 과세표준도 함께 줄인다.
      * 거래(transactions)·결의서는 이미 amountError 를 통과해야 하는데 청구서만 빠져 있었다. */
     { const ae = amountError(total_amount); if (ae) return res.status(400).json({ error: ae }) }
+    /* 나머지 필수 필드도 같은 이유로 막는다.
+     *
+     * total_amount·issued_at 만 검사하고 kind·supply_amount·vat_amount 는 무방비였다.
+     * 셋 중 하나라도 빠지면 undefined 가 그대로 INSERT 파라미터로 들어가
+     * mysql2 가 "Bind parameters must not contain undefined" 로 던진다 → **500**.
+     * 사용자에겐 "처리 중 오류"만 보여 무엇을 안 넣었는지 알 수 없다
+     * (실제로 운영 로그에 이 500 이 찍혀 있었다).
+     *
+     * 바로 아래 issued_at 주석이 같은 사고를 이미 한 번 적어뒀는데, 그때 그 필드만
+     * 고치고 나머지는 보지 않았다. 이번엔 이 INSERT 가 요청 본문에서 받는 값을 전부 본다.
+     * (다른 청구서 INSERT 7곳은 계약·정기 규칙에서 내부 계산하므로 이 문제가 없다) */
+    { const e = invoiceCreateError({ kind, supply_amount, vat_amount })
+      if (e) return res.status(400).json({ error: e }) }
     /* 발행일은 반드시 받는다. 없으면 DB의 NOT NULL 제약에 걸려 **500**이 났다 —
      * 사용자에겐 "처리 중 오류"라고만 보여서 무엇을 안 넣었는지 알 수 없다.
      * 게다가 발행일이 없으면 바로 아래 마감 검사가 undefined 로 통과해 버린다. */
@@ -724,3 +761,5 @@ router.delete('/docs/:docId', async (req, res, next) => {
 })
 
 module.exports = router
+// 입력 검증은 DB 없이 검증한다(test/invoiceCreate.test.js) — 여기서 놓치면 500이 된다
+module.exports._invoiceCreateError = invoiceCreateError
