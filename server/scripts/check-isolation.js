@@ -342,13 +342,28 @@ try {
 // 그래서 '빠뜨림'은 런타임에 조용히 무권한 통과가 된다 → 배포 전에 여기서 잡는다.
 console.log('\n[10] 권한 게이트 매핑 완전성')
 try {
-  const { API_RESOURCES, ANY_AUTHENTICATED, unknownResources } = require('../platform/apiPerms')
+  const { API_RESOURCES, ANY_AUTHENTICATED, TENANT_GATE_EXEMPT, unknownResources } = require('../platform/apiPerms')
   const mounted = []
   const re = /app\.use\(\s*['"](\/api\/[a-z-]+)['"]/g
   let m
   while ((m = re.exec(idxSrc))) mounted.push(m[1])
 
-  const mapped = new Set([...Object.keys(API_RESOURCES), ...ANY_AUTHENTICATED])
+  /* 게이트 밖 경로는 '깜빡한 것'과 구별되어야 한다. 선언만으로 통과시키면 그 선언이
+     곧 우회 수단이 되므로, **실제로 게이트 앞에 있고 LAN 게이트를 쓰는지** 확인한다. */
+  const gateAt = idxSrc.indexOf('authMiddleware(req, res,')
+  for (const prefix of TENANT_GATE_EXEMPT) {
+    const mountRe = new RegExp(`app\\.use\\(\\s*['"]${prefix.replace(/\//g, '\\/')}['"]([^\\n]*)`)
+    const hit = mountRe.exec(idxSrc)
+    if (!hit) { fail(`게이트 예외로 선언됐지만 마운트가 없음: ${prefix}`); continue }
+    if (gateAt > -1 && hit.index > gateAt) {
+      fail(`${prefix} 가 인증 게이트 뒤에 마운트됨 — 게이트를 타면 회사 없는 토큰은 401이 된다`)
+    }
+    if (!/lanOnly/.test(hit[1])) {
+      fail(`${prefix} 에 LAN 게이트(lanOnly)가 없음 — 전 테넌트를 보는 문이 인터넷에 열린다`)
+    }
+  }
+
+  const mapped = new Set([...Object.keys(API_RESOURCES), ...ANY_AUTHENTICATED, ...TENANT_GATE_EXEMPT])
   const unmapped = [...new Set(mounted)].filter(p => !mapped.has(p))
   if (unmapped.length) {
     fail(`권한 매핑 없는 라우터: ${unmapped.join(', ')}\n` +

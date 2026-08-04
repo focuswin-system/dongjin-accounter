@@ -13,7 +13,9 @@
     "check:isolation": "node scripts/check-isolation.js",
     "migrate:uploads": "node scripts/migrate-uploads.js",
     "tenant": "node scripts/provision-tenant.js",
-    "tenant:delete": "node scripts/delete-tenant.js"
+    "tenant:delete": "node scripts/delete-tenant.js",
+    "admin": "node scripts/platform-admin.js",
+    "admin:list": "node scripts/platform-admin.js --list"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

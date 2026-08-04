@@ -155,7 +155,12 @@ async function queryAccountBlock(platformPool, companyId, username) {
         AND created_at >= NOW() - INTERVAL ${ACCOUNT_WINDOW_MIN} MINUTE
         AND created_at > COALESCE(
               (SELECT MAX(s.created_at) FROM audit_logs s
-                WHERE s.company_id = ? AND s.username = ? AND s.action = 'login'),
+                WHERE s.company_id = ? AND s.username = ?
+                  /* 'unlock' 도 기준선이다 — 운영자가 잠금을 풀어주는 경로
+                     (routes/admin.js). 가짜 'login' 기록을 넣는 대신 자기 이름으로
+                     남기고 여기서 인정한다. 로그인하지 않은 사람이 로그인한 것으로
+                     남으면 감사 기록 자체를 믿을 수 없게 된다. */
+                  AND s.action IN ('login', 'unlock')),
               '1970-01-01 00:00:00')`,
     [companyId, username, companyId, username]
   )

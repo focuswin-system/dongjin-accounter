@@ -52,6 +52,25 @@ app.use('/api', require('./lib/rateLimit').apiRateLimit())
 // 증빙·계약서를 받아갈 수 있었다. 이제 인증 + 소유 회사 확인을 거쳐야 한다.
 app.use('/uploads', require('./routes/files'))
 
+/* ── 운영자 콘솔 ──
+ *
+ * ⚠ 아래 테넌트 인증 게이트보다 **먼저** 마운트한다. 그 게이트는 회사(JWT의 companyId)를
+ * 요구하는데, 운영자 토큰에는 회사가 없다 — 게이트를 타면 401로 죽는다.
+ * 대신 자물쇠 두 개를 직접 건다:
+ *   1) lanOnly       사무실 LAN 밖에서는 404. 문 자체가 안 보인다.
+ *   2) platformAuth  platform_admins 토큰만(라우터 안에서. 로그인 경로는 열려 있어야 하므로).
+ *
+ * 콘솔 화면(/admin)도 같은 LAN 게이트를 통과해야 한다. 화면만 열려 있어도
+ * "여기 관리자 콘솔이 있다"를 밖에 알려주는 셈이다.
+ */
+const lanOnly = require('./middleware/lanOnly')
+app.use('/api/admin', lanOnly, require('./routes/admin'))
+/* 콘솔은 단일 HTML 이라 해시 붙은 번들이 없다 → 캐시되면 고쳐도 옛 화면이 계속 뜬다.
+   SPA 의 index.html 을 no-store 로 두는 것과 같은 이유다(아래 noStore 참고). */
+app.use('/admin', lanOnly, express.static(path.join(__dirname, 'admin'), {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'),
+}))
+
 // ── 인증 게이트 ──
 // 로그인·헬스체크만 공개(로그인 자체 + deploy.sh 무토큰 헬스체크), 나머지 모든 /api 요청은 JWT 필요.
 // 프론트 api.js의 req()·업로드·엑셀·내보내기·템플릿 다운로드 전부 Authorization 헤더를 실어 보낸다.
@@ -118,6 +137,8 @@ let DEPLOY_INFO = null
 try {
   DEPLOY_INFO = JSON.parse(fs.readFileSync(path.join(__dirname, 'deploy-info.json'), 'utf8'))
 } catch { /* 로컬 개발이거나 provenance 이전에 배포된 서버 */ }
+// 운영자 콘솔이 '지금 무엇이 돌고 있나'를 보여줄 수 있게 앱에 실어둔다(routes/admin.js overview)
+app.set('deployInfo', DEPLOY_INFO)
 
 app.get('/api/health', (_, res) => res.json({
   ok: true, time: new Date().toISOString(), deploy: DEPLOY_INFO,
@@ -142,7 +163,8 @@ if (fs.existsSync(path.join(DIST, 'index.html'))) {
   app.use(express.static(DIST, { setHeaders: noStore }))
   // SPA 폴백: /api·/uploads 외의 모든 경로는 index.html로
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) return next()
+    // /admin 은 운영자 콘솔(server/admin/)이다. 여기로 흘리면 고객용 SPA가 대신 뜬다.
+    if (req.path.startsWith('/api') || req.path.startsWith('/uploads') || req.path.startsWith('/admin')) return next()
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
     res.sendFile(path.join(DIST, 'index.html'))
   })

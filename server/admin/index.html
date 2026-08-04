@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>도니도라 운영 콘솔</title>
+<!--
+  운영자 콘솔 — 고객용 SPA(src/)와 **일부러 분리**했다.
+
+  같은 번들에 넣으면 운영자 화면 코드가 모든 고객에게 배포된다. API는 LAN으로 막히지만,
+  화면 구조·엔드포인트 이름까지 알려줄 이유가 없다. 여기는 의존성 없는 단일 파일이라
+  빌드도 필요 없고, 고객 번들 크기에도 영향이 없다.
+
+  이 페이지 자체도 middleware/lanOnly 를 통과해야 열린다(index.js).
+-->
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171b21; --line:#262c35; --ink:#e6e9ee; --muted:#98a2b3;
+    --accent:#6aa5ff; --bad:#ff6b6b; --warn:#ffb454; --ok:#5ad19b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic",sans-serif}
+  a{color:var(--accent)}
+  .wrap{max-width:1180px;margin:0 auto;padding:24px 20px 60px}
+  header{display:flex;align-items:baseline;gap:12px;margin-bottom:4px}
+  h1{font-size:18px;margin:0;letter-spacing:-.2px}
+  .sub{color:var(--muted);font-size:12px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-top:18px;overflow:hidden}
+  .card > h2{font-size:13px;margin:0;padding:12px 16px;border-bottom:1px solid var(--line);
+             color:var(--muted);font-weight:600;display:flex;justify-content:space-between;align-items:center}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:9px 16px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+  tr:last-child td{border-bottom:none}
+  td.num{font-variant-numeric:tabular-nums}
+  .muted{color:var(--muted)}
+  .bad{color:var(--bad)} .warn{color:var(--warn)} .ok{color:var(--ok)}
+  .pill{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11px;
+        background:#222833;color:var(--muted);border:1px solid var(--line)}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+  button{background:#222833;color:var(--ink);border:1px solid var(--line);border-radius:7px;
+         padding:6px 12px;font-size:13px;cursor:pointer}
+  button:hover{border-color:#3a4351}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#0b1220;font-weight:600}
+  input{background:#0e1116;color:var(--ink);border:1px solid var(--line);border-radius:7px;
+        padding:9px 11px;font-size:14px;width:100%}
+  label{display:block;font-size:12px;color:var(--muted);margin:12px 0 6px}
+  .login{max-width:330px;margin:14vh auto}
+  .err{color:var(--bad);font-size:13px;min-height:18px;margin-top:10px}
+  .empty{padding:26px 16px;text-align:center;color:var(--muted)}
+  .row{display:flex;gap:10px;align-items:center}
+  .grow{flex:1}
+  details summary{cursor:pointer;color:var(--muted);font-size:12px}
+  pre{margin:8px 0 0;white-space:pre-wrap;word-break:break-all;color:var(--muted);font-size:11.5px}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script>
+const $ = (h) => { const d = document.createElement('div'); d.innerHTML = h.trim(); return d.firstChild }
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))
+const app = document.getElementById('app')
+
+let token = sessionStorage.getItem('adminToken') || ''
+
+/* 토큰은 sessionStorage 에 둔다 — 탭을 닫으면 사라진다.
+   전 회사를 보는 세션이 브라우저에 영구히 남아 있을 이유가 없다. */
+async function api(path, opts = {}) {
+  const res = await fetch('/api/admin' + path, {
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+    ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  })
+  if (res.status === 401 || res.status === 403) { logout(); throw new Error('세션이 만료되었습니다') }
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || '요청에 실패했어요')
+  return data
+}
+
+function logout() { token = ''; sessionStorage.removeItem('adminToken'); renderLogin() }
+
+const when = (v) => {
+  if (!v) return '—'
+  const d = new Date(v)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+const ago = (v) => {
+  if (!v) return '—'
+  const m = Math.floor((Date.now() - new Date(v)) / 60000)
+  if (m < 1) return '방금'
+  if (m < 60) return m + '분 전'
+  if (m < 1440) return Math.floor(m / 60) + '시간 전'
+  return Math.floor(m / 1440) + '일 전'
+}
+
+// ── 로그인 ──
+function renderLogin() {
+  app.innerHTML = ''
+  const box = $(`<div class="login">
+    <header><h1>도니도라 운영 콘솔</h1></header>
+    <div class="sub">사무실 네트워크에서만 열립니다.</div>
+    <div class="card" style="padding:16px">
+      <label>아이디</label><input id="u" autocomplete="username">
+      <label>비밀번호</label><input id="p" type="password" autocomplete="current-password">
+      <div class="err" id="e"></div>
+      <button class="primary" id="go" style="width:100%;margin-top:6px">로그인</button>
+    </div>
+  </div>`)
+  app.appendChild(box)
+  const go = async () => {
+    const e = box.querySelector('#e'); e.textContent = ''
+    try {
+      const r = await fetch('/api/admin/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: box.querySelector('#u').value, password: box.querySelector('#p').value }),
+      })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) { e.textContent = d.error || '로그인에 실패했어요'; return }
+      token = d.token; sessionStorage.setItem('adminToken', token)
+      renderDash()
+    } catch { e.textContent = '서버에 연결할 수 없어요' }
+  }
+  box.querySelector('#go').onclick = go
+  box.querySelector('#p').onkeydown = (ev) => { if (ev.key === 'Enter') go() }
+  box.querySelector('#u').focus()
+}
+
+// ── 대시보드 ──
+async function renderDash() {
+  app.innerHTML = '<div class="muted" style="padding:40px 0">불러오는 중…</div>'
+  let ov, errs, fails
+  try {
+    [ov, errs, fails] = await Promise.all([
+      api('/overview'), api('/errors?days=7&limit=30'), api('/login-failures?days=3&limit=30'),
+    ])
+  } catch (e) { app.innerHTML = `<div class="err" style="padding:40px 0">${esc(e.message)}</div>`; return }
+
+  const dep = ov.server
+  app.innerHTML = ''
+  app.appendChild($(`<header>
+      <h1>도니도라 운영 콘솔</h1>
+      <span class="sub">${dep ? '배포 ' + esc(String(dep.commit || '').slice(0, 7)) + ' · ' + when(dep.deployedAt) : '로컬 실행(배포 정보 없음)'}</span>
+      <span class="grow"></span>
+      <button id="reload">새로고침</button>
+      <button id="out">로그아웃</button>
+    </header>`))
+  app.querySelector('#reload').onclick = renderDash
+  app.querySelector('#out').onclick = logout
+
+  // 테넌트 현황
+  const comp = ov.companies.map(c => `<tr>
+      <td><b>${esc(c.code)}</b>${c.active ? '' : ' <span class="pill">중지</span>'}<div class="muted" style="font-size:12px">${esc(c.name)}</div></td>
+      <td class="mono muted">${esc(c.db_name)}</td>
+      <td class="num">${c.users}</td>
+      <td class="num muted">${ago(c.last_login)}</td>
+      <td class="num ${c.errors_7d > 0 ? 'bad' : 'muted'}">${c.errors_7d}</td>
+      <td class="num ${c.login_fails_1d > 0 ? 'warn' : 'muted'}">${c.login_fails_1d}</td>
+      <td><button data-users="${esc(c.id)}">계정 관리</button></td>
+    </tr>`).join('')
+  const compCard = $(`<div class="card">
+      <h2><span>테넌트 ${ov.companies.length}개</span>${ov.orphanErrors7d ? `<span class="muted">회사 미상 오류 ${ov.orphanErrors7d}건(7일)</span>` : ''}</h2>
+      <table><thead><tr>
+        <th>회사</th><th>DB</th><th>사용자</th><th>마지막 로그인</th><th>오류 7일</th><th>로그인 실패 24h</th><th></th>
+      </tr></thead><tbody>${comp || '<tr><td colspan="7" class="empty">등록된 회사가 없습니다.</td></tr>'}</tbody></table>
+    </div>`)
+  compCard.querySelectorAll('[data-users]').forEach(b => {
+    b.onclick = () => renderUsers(b.getAttribute('data-users'))
+  })
+  app.appendChild(compCard)
+
+  // 최근 오류(묶음)
+  const erows = errs.rows.map(e => `<tr>
+      <td class="num muted">${when(e.last_seen)}<div class="muted" style="font-size:11px">${ago(e.last_seen)}</div></td>
+      <td class="num ${e.hits > 5 ? 'bad' : ''}"><b>${e.hits}</b></td>
+      <td class="mono">${esc(e.code || '—')}<div class="muted mono" style="font-size:11px">${esc(e.path || '')}</div></td>
+      <td class="mono muted">${esc(e.message || '')}</td>
+      <td class="num muted">${e.companies}</td>
+    </tr>`).join('')
+  app.appendChild($(`<div class="card">
+      <h2><span>최근 오류 · 7일 (같은 것끼리 묶음)</span><span class="muted">금액·거래처는 저장되지 않습니다</span></h2>
+      <table><thead><tr>
+        <th>마지막 발생</th><th>횟수</th><th>코드 / 경로</th><th>메시지</th><th>회사 수</th>
+      </tr></thead><tbody>${erows || '<tr><td colspan="5" class="empty">오류가 없습니다. 좋은 신호입니다.</td></tr>'}</tbody></table>
+    </div>`))
+
+  // 로그인 실패
+  const frows = fails.rows.map(f => `<tr>
+      <td class="num muted">${when(f.created_at)}</td>
+      <td>${esc(f.company_code || '—')}</td>
+      <td>${esc(f.username || '—')}</td>
+      <td class="mono muted">${esc(f.ip || '—')}</td>
+      <td class="muted">${f.detail === 'locked' ? '<span class="warn">잠김</span>' : ''}</td>
+    </tr>`).join('')
+  app.appendChild($(`<div class="card">
+      <h2>로그인 실패 · 3일</h2>
+      <table><thead><tr><th>시각</th><th>회사</th><th>아이디</th><th>IP</th><th></th></tr></thead>
+      <tbody>${frows || '<tr><td colspan="5" class="empty">실패한 로그인이 없습니다.</td></tr>'}</tbody></table>
+    </div>`))
+}
+
+// ── 회사별 계정 관리 ──
+//
+// 여기서 하는 일은 전부 **그 회사의 변경 이력에 남는다**(ops:<아이디> 로 표시).
+// 고객이 "내가 안 한 비번 변경"을 자기 화면에서 볼 수 있어야, 이 편의가 정당해진다.
+async function renderUsers(companyId) {
+  app.innerHTML = '<div class="muted" style="padding:40px 0">불러오는 중…</div>'
+  let d
+  try { d = await api('/companies/' + companyId + '/users') }
+  catch (e) { app.innerHTML = `<div class="err" style="padding:40px 0">${esc(e.message)}</div>`; return }
+
+  app.innerHTML = ''
+  app.appendChild($(`<header>
+      <h1>${esc(d.company.name)} <span class="pill">${esc(d.company.code)}</span></h1>
+      <span class="grow"></span>
+      <button id="back">← 현황으로</button>
+    </header>`))
+  app.querySelector('#back').onclick = renderDash
+
+  const act = async (fn, msg) => {
+    try { await fn(); renderUsers(companyId) }
+    catch (e) { alert((msg ? msg + '\n\n' : '') + e.message) }
+  }
+  const askPw = (who) => {
+    const p = prompt(`${who} 의 임시 비밀번호를 입력하세요 (8자 이상).\n\n` +
+      '이 작업은 해당 회사의 변경 이력에 운영자 이름으로 남습니다.\n' +
+      '사용자는 다음 로그인 때 비밀번호를 반드시 바꾸게 됩니다.')
+    if (p == null) return null
+    if (p.length < 8) { alert('8자 이상이어야 합니다'); return null }
+    return p
+  }
+
+  const rows = d.rows.map(u => `<tr>
+      <td><b>${esc(u.username)}</b>${u.role === 'admin' ? ' <span class="pill">마스터</span>' : ''}
+          <div class="muted" style="font-size:12px">${esc(u.name || '')}</div></td>
+      <td>${u.active ? '<span class="ok">사용</span>' : '<span class="muted">정지</span>'}
+          ${u.must_change_pw ? '<div class="warn" style="font-size:11px">비번 변경 대기</div>' : ''}</td>
+      <td class="num muted">${ago(u.last_login)}</td>
+      <td class="num ${u.recent_fails >= 5 ? 'bad' : 'muted'}">${u.recent_fails}${u.recent_fails >= 5 ? ' (잠김)' : ''}</td>
+      <td class="row" style="gap:6px;flex-wrap:wrap">
+        <button data-pw="${esc(u.id)}" data-u="${esc(u.username)}">비번 초기화</button>
+        <button data-act="${esc(u.id)}" data-on="${u.active ? '0' : '1'}">${u.active ? '정지' : '사용'}</button>
+        ${u.recent_fails >= 5 ? `<button data-unlock="${esc(u.id)}">잠금 해제</button>` : ''}
+      </td>
+    </tr>`).join('')
+
+  const card = $(`<div class="card">
+      <h2><span>계정 ${d.rows.length}개</span><span class="muted">모든 변경은 이 회사의 변경 이력에 남습니다</span></h2>
+      <table><thead><tr><th>아이디</th><th>상태</th><th>마지막 로그인</th><th>최근 실패</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="5" class="empty">계정이 없습니다.</td></tr>'}</tbody></table>
+    </div>`)
+  card.querySelectorAll('[data-pw]').forEach(b => b.onclick = () => {
+    const pw = askPw(b.getAttribute('data-u')); if (!pw) return
+    act(() => api(`/companies/${companyId}/users/${b.getAttribute('data-pw')}/password`,
+                  { method: 'POST', body: { password: pw } }))
+  })
+  card.querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
+    const on = b.getAttribute('data-on') === '1'
+    if (!confirm(on ? '이 계정을 다시 사용하게 할까요?' : '이 계정을 정지할까요? 로그인할 수 없게 됩니다.')) return
+    act(() => api(`/companies/${companyId}/users/${b.getAttribute('data-act')}/active`,
+                  { method: 'PATCH', body: { active: on } }))
+  })
+  card.querySelectorAll('[data-unlock]').forEach(b => b.onclick = () =>
+    act(() => api(`/companies/${companyId}/users/${b.getAttribute('data-unlock')}/unlock`, { method: 'POST' })))
+  app.appendChild(card)
+
+  // 계정 추가
+  const add = $(`<div class="card">
+      <h2>계정 추가</h2>
+      <div style="padding:14px 16px">
+        <div class="row" style="gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:130px"><label>아이디</label><input id="nu"></div>
+          <div style="flex:1;min-width:130px"><label>이름</label><input id="nn"></div>
+          <div style="flex:1;min-width:160px"><label>임시 비밀번호 (8자 이상)</label><input id="np"></div>
+          <div style="min-width:120px"><label>역할</label>
+            <select id="nr" style="width:100%;padding:9px 11px;background:#0e1116;color:var(--ink);border:1px solid var(--line);border-radius:7px">
+              <option value="user">일반 사용자</option><option value="admin">마스터</option>
+            </select></div>
+        </div>
+        <div class="err" id="ne"></div>
+        <button class="primary" id="nadd" style="margin-top:8px">추가</button>
+      </div>
+    </div>`)
+  add.querySelector('#nadd').onclick = async () => {
+    const e = add.querySelector('#ne'); e.textContent = ''
+    const body = {
+      username: add.querySelector('#nu').value.trim(),
+      name: add.querySelector('#nn').value.trim(),
+      password: add.querySelector('#np').value,
+      role: add.querySelector('#nr').value,
+    }
+    if (!body.username || body.password.length < 8) { e.textContent = '아이디와 8자 이상의 임시 비밀번호가 필요합니다'; return }
+    try { await api('/companies/' + companyId + '/users', { method: 'POST', body }); renderUsers(companyId) }
+    catch (err) { e.textContent = err.message }
+  }
+  app.appendChild(add)
+}
+
+token ? renderDash() : renderLogin()
+</script>
+</body>
+</html>

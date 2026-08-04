@@ -82,6 +82,19 @@ const API_RESOURCES = {
 const ANY_AUTHENTICATED = ['/api/auth', '/api/uploads']
 
 /**
+ * **테넌트 게이트 자체를 타지 않는** 경로.
+ *
+ * 위 두 분류(자원 매핑·로그인만 필요)는 모두 '회사 사용자가 통과하는' 문이다.
+ * 여기는 성격이 다르다 — 운영자 콘솔은 회사에 속하지 않은 계정이 쓰고, 전 테넌트를
+ * 가로질러 본다. 그래서 index.js 에서 인증 게이트보다 **먼저** 마운트되고
+ * 자기 자물쇠(lanOnly + platformAuth)를 직접 건다.
+ *
+ * 이 목록에 넣는다는 것은 "권한 매핑을 깜빡한 게 아니라 의도적으로 게이트 밖"이라는 선언이다.
+ * scripts/check-isolation.js [10] 이 실제로 그런지(게이트 앞 마운트·LAN 게이트 적용) 확인한다.
+ */
+const TENANT_GATE_EXEMPT = ['/api/admin']
+
+/**
  * **조회는 공용, 수정은 자기 자원** — 기준정보처럼 다른 화면이 선택 목록으로 쓰는 라우터.
  *
  * 왜 필요한가: 거래 하나를 등록하려면 거래처·계정과목·비목·품목·적요·계좌 목록을 읽어야 한다.
@@ -166,6 +179,7 @@ function unknownResources() {
 }
 
 module.exports = {
-  METHOD_ACTION, API_RESOURCES, ANY_AUTHENTICATED, ACTION_OVERRIDES, LOOKUP_PREFIXES, LOOKUP_PATHS,
+  METHOD_ACTION, API_RESOURCES, ANY_AUTHENTICATED, TENANT_GATE_EXEMPT,
+  ACTION_OVERRIDES, LOOKUP_PREFIXES, LOOKUP_PATHS,
   actionFor, prefixOf, requiredPerm, unknownResources,
 }
