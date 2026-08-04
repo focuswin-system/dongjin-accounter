@@ -147,12 +147,29 @@ if (fs.existsSync(path.join(DIST, 'index.html'))) {
 // 사용자에게 보여줄 메시지는 각 라우트가 4xx로 직접 반환한다(next(new Error(...)) 사용처 없음).
 // 여기까지 온 것은 SQL 오류·TypeError 같은 내부 오류이므로, 원문을 그대로 내보내면
 // 테이블·컬럼명 등 내부 구조가 노출된다. 상세는 서버 로그로만 남긴다.
+//
+// 그 '서버 로그'도 그냥 찍으면 안 된다. MariaDB 오류 메시지에는 실제 값이 박혀 오고
+// (Duplicate entry 'INV-2026-0001' …) mysql2 오류 객체에는 실행한 SQL이 붙는다.
+// 여러 회사의 회계 데이터를 한 서버에서 다루므로 오류는 safeErr()로 값을 걷어내고,
+// 대신 reqTag()로 '어느 회사의 누가' 를 반드시 남긴다 — 그게 없으면 장애가 나도
+// 어느 테넌트 문제인지 알 수 없다. 자세한 원칙은 lib/logSafe.js.
+const { safeErr, reqTag } = require('./lib/logSafe')
+
+// 500은 stdout 에만 두지 않고 공용 관리 DB에도 남긴다 — 그래야 "언제부터 몇 번 났는지"를
+// 답할 수 있다(지금까지는 장애를 고객 전화로 알았다). 기록은 요청을 막지 않는다: await 하지
+// 않고, 실패해도 삼킨다. 자세한 설계는 lib/errorLog.js.
+const { platformPool } = require('./platform/db')
+const errorRecorder = require('./lib/errorLog').createErrorRecorder({
+  exec: (sql, params) => platformPool.execute(sql, params),
+  release: (DEPLOY_INFO && (DEPLOY_INFO.commit || DEPLOY_INFO.deployedAt)) || null,
+})
+
 app.use((err, req, res, _next) => {
   // 미들웨어가 붙인 상태코드(예: multer 파일 크기 초과 413)는 존중한다.
   // 전부 500으로 뭉개면 사용자는 자기 입력 문제인지 서버 장애인지 알 수 없다.
   const status = Number(err.status || err.statusCode) || 0
   if (status >= 400 && status < 500) {
-    console.warn(`[${status}] ${req.method} ${req.originalUrl}`, err.message)
+    console.warn(`[${status}] ${reqTag(req)}`, safeErr(err).message)
     const msg = err.code === 'LIMIT_FILE_SIZE'
       ? '파일이 너무 커요 (최대 20MB)'
       : (err.expose && err.message) || '요청을 처리할 수 없어요. 입력값을 확인해 주세요.'
@@ -166,7 +183,8 @@ app.use((err, req, res, _next) => {
     const msg = /invoice_no/.test(err.sqlMessage || '') ? '청구번호'
               : /doc_no/.test(err.sqlMessage || '')     ? '문서번호'
               : null
-    console.warn(`[409] ${req.method} ${req.originalUrl}`, err.sqlMessage || err.message)
+    // 중복 값 자체(청구번호·사업자번호 등)는 남기지 않는다 — 어느 제약이 걸렸는지만 남는다.
+    console.warn(`[409] ${reqTag(req)}`, safeErr(err).message)
     return res.status(409).json({
       error: msg
         ? `${msg}가 다른 작업과 겹쳤어요. 잠시 후 다시 시도해주세요.`
@@ -179,12 +197,13 @@ app.use((err, req, res, _next) => {
   // 데이터는 안전하지만 그대로 500 을 주면 사용자는 무엇이 잘못됐는지 알 수 없다.
   // 완전한 해법은 트랜잭션 전체를 재시도하는 것이고, 그건 라우트 구조를 바꿔야 한다.
   if (err && (err.errno === 1213 || err.errno === 1205)) {
-    console.warn(`[409] ${req.method} ${req.originalUrl}  잠금 경합(${err.errno})`)
+    console.warn(`[409] ${reqTag(req)}  잠금 경합(${err.errno})`)
     return res.status(409).json({
       error: '다른 작업과 겹쳐 처리하지 못했어요. 저장된 건 없으니 다시 시도해주세요.',
     })
   }
-  console.error(`[500] ${req.method} ${req.originalUrl}`, err)
+  console.error(`[500] ${reqTag(req)}`, safeErr(err))
+  errorRecorder.record({ err, req, status: 500 })   // 의도적으로 await 하지 않는다
   res.status(500).json({ error: '처리 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.' })
 })
 
@@ -196,7 +215,10 @@ app.use((err, req, res, _next) => {
 // — 즉 한 요청의 DB 연결 문제가 전 회사의 서비스를 내린다.
 // 여기서 붙잡아, 최악의 결과를 '서버 다운'에서 '그 요청 하나 실패'로 낮춘다.
 process.on('unhandledRejection', (reason) => {
-  console.error('[unhandledRejection] 요청 처리 중 붙잡히지 않은 거부:', reason)
+  console.error('[unhandledRejection] 요청 처리 중 붙잡히지 않은 거부:', safeErr(reason))
+  // 어느 요청이었는지는 알 수 없다(이 시점엔 req 가 없다). 그래도 남긴다 —
+  // 이건 프로세스를 죽일 뻔한 부류라 놓치면 안 된다.
+  errorRecorder.record({ err: reason, req: null, status: 0 })
 })
 
 // ── 기동 ──
@@ -204,6 +226,8 @@ process.on('unhandledRejection', (reason) => {
 // 여기서는 '준비됐는지'만 확인해 문제를 조용한 런타임 오류가 아니라 명확한 기동 실패로 만든다.
 assertPlatformReady()
   .then(() => {
+    // 보관 기간이 지난 오류 기록 정리. 실패해도 기동을 막지 않는다(수집은 부가 기능이다).
+    errorRecorder.prune()
     app.listen(PORT, () => console.log(`focus-accounter 서버: http://localhost:${PORT}/api`))
   })
   .catch(err => {

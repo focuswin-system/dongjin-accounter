@@ -11,7 +11,7 @@ const { randomUUID } = require('crypto')
 /** 공용 DB에 있어야 하는 테이블 — 준비 상태 점검(assertPlatformReady)에도 쓰인다. */
 const PLATFORM_TABLES = [
   'companies', 'users', 'roles', 'user_roles', 'role_perms',
-  'platform_admins', 'audit_logs', 'tenant_migrations',
+  'platform_admins', 'audit_logs', 'error_logs', 'tenant_migrations',
 ]
 
 /**
@@ -117,6 +117,38 @@ async function createPlatformSchema(c) {
       -- 로그인 시도 제한(lib/loginGuard.js)이 매 로그인마다 이 조합으로 조회한다.
       -- 인덱스가 없으면 감사 로그가 쌓일수록 로그인이 느려진다.
       KEY idx_audit_login_attempt (company_id, username, action, created_at)
+    )
+  `)
+
+  /* 서버 오류 수집 — 지금까지는 장애를 고객이 전화로 알려줬다.
+   *
+   * stdout(systemd/pm2 로그)에도 그대로 찍히지만, 그건 서버에 들어가야 볼 수 있고
+   * 재시작하면 흩어진다. 여기 쌓아두면 관리자 콘솔이 '최근 에러'를 바로 읽는다.
+   *
+   * ⚠ 저장되는 값은 반드시 lib/logSafe.js 의 safeErr()를 거친 것이어야 한다.
+   *   원본 오류에는 SQL 파라미터 값(금액·거래처명)이 박혀 있다.
+   *
+   * fingerprint: 같은 오류를 묶는 열쇠. 이게 없으면 한 건이 300번 터진 것과
+   * 서로 다른 300건을 구별할 수 없어, 목록만 보고는 심각도를 알 수 없다. */
+  await c.execute(`
+    CREATE TABLE IF NOT EXISTS error_logs (
+      id          VARCHAR(36) PRIMARY KEY,
+      company_id  VARCHAR(36),
+      user_id     VARCHAR(36),
+      username    VARCHAR(100),
+      method      VARCHAR(10),
+      path        VARCHAR(255),
+      status      SMALLINT,
+      code        VARCHAR(64),
+      errno       INT,
+      message     VARCHAR(500),
+      stack       TEXT,
+      fingerprint CHAR(40),
+      release_id  VARCHAR(80),
+      created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_error_time (created_at),
+      KEY idx_error_group (fingerprint, created_at),
+      KEY idx_error_company (company_id, created_at)
     )
   `)
 

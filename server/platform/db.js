@@ -15,6 +15,7 @@ require('dotenv').config()
 const mysql = require('mysql2/promise')
 const { randomUUID } = require('crypto')
 const { PLATFORM_TABLES } = require('./schema')
+const { safeErr } = require('../lib/logSafe')
 
 const PLATFORM_DB = process.env.PLATFORM_DB_NAME || 'acct_platform'
 
@@ -139,7 +140,7 @@ function audit({ companyId, userId, username, action, resource, targetId, ip, de
       [randomUUID(), companyId || null, userId || null, username || null, action || null,
        resource || null, targetId || null, ip || null, detail || null]
     )
-    .catch(e => console.warn('[audit] 기록 실패:', e.code || e.message))
+    .catch(e => console.warn('[audit] 기록 실패:', safeErr(e).message))
 }
 
 module.exports = {
