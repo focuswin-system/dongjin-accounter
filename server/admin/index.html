@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="/admin/logo.png">
 <title>도니도라 운영 콘솔</title>
 <!--
   운영자 콘솔 — 고객용 SPA(src/)와 **일부러 분리**했다.
@@ -11,63 +12,165 @@
   같은 번들에 넣으면 운영자 화면 코드가 모든 고객에게 배포된다. API는 LAN으로 막히지만,
   화면 구조·엔드포인트 이름까지 알려줄 이유가 없다. 여기는 의존성 없는 단일 파일이라
   빌드도 필요 없고, 고객 번들 크기에도 영향이 없다.
+  (로고는 src/assets 를 못 쓴다 — 거긴 Vite 번들이다. logo.png 를 같이 둔다)
 
   이 페이지 자체도 middleware/lanOnly 를 통과해야 열린다(index.js).
+
+  ── 화면 구성 ──
+  운영자가 아침에 여는 화면이다. 알고 싶은 건 순서대로 세 가지다.
+    "지금 문제 있나" → "어디가 문제인가" → "그래서 뭘 해야 하나"
+  그래서 요약 → 오류 묶음 → 발생 건별 상세로 파고들게 배치했다.
+  숫자를 크게 두고 설명을 아래 작게 붙인 것도 같은 이유다 — 훑을 때 숫자만 봐도 되게.
 -->
 <style>
   :root{
-    --bg:#0f1216; --panel:#171b21; --line:#262c35; --ink:#e6e9ee; --muted:#98a2b3;
-    --accent:#6aa5ff; --bad:#ff6b6b; --warn:#ffb454; --ok:#5ad19b;
+    --bg:#F2F4F6; --card:#FFFFFF; --line:#EDEFF2;
+    --ink:#191F28; --ink-2:#4E5968; --ink-3:#8B95A1;
+    --blue:#3182F6; --blue-ink:#1B64DA; --blue-bg:#E8F3FF;
+    --red:#F04452; --red-bg:#FEECEE;
+    --amber:#FF9500; --amber-bg:#FFF4E6;
+    --green:#02B77A; --green-bg:#E5F8F1;
+    --r:20px; --r-sm:12px;
+    --sh:0 1px 3px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04);
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);
-       font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic",sans-serif}
-  a{color:var(--accent)}
-  .wrap{max-width:1180px;margin:0 auto;padding:24px 20px 60px}
-  header{display:flex;align-items:baseline;gap:12px;margin-bottom:4px}
-  h1{font-size:18px;margin:0;letter-spacing:-.2px}
-  .sub{color:var(--muted);font-size:12px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-top:18px;overflow:hidden}
-  .card > h2{font-size:13px;margin:0;padding:12px 16px;border-bottom:1px solid var(--line);
-             color:var(--muted);font-weight:600;display:flex;justify-content:space-between;align-items:center}
-  table{width:100%;border-collapse:collapse}
-  th,td{padding:9px 16px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
-  th{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
-  tr:last-child td{border-bottom:none}
-  td.num{font-variant-numeric:tabular-nums}
-  .muted{color:var(--muted)}
-  .bad{color:var(--bad)} .warn{color:var(--warn)} .ok{color:var(--ok)}
-  .pill{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11px;
-        background:#222833;color:var(--muted);border:1px solid var(--line)}
-  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
-  button{background:#222833;color:var(--ink);border:1px solid var(--line);border-radius:7px;
-         padding:6px 12px;font-size:13px;cursor:pointer}
-  button:hover{border-color:#3a4351}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#0b1220;font-weight:600}
-  input{background:#0e1116;color:var(--ink);border:1px solid var(--line);border-radius:7px;
-        padding:9px 11px;font-size:14px;width:100%}
-  label{display:block;font-size:12px;color:var(--muted);margin:12px 0 6px}
-  .login{max-width:330px;margin:14vh auto}
-  .err{color:var(--bad);font-size:13px;min-height:18px;margin-top:10px}
-  .empty{padding:26px 16px;text-align:center;color:var(--muted)}
-  .row{display:flex;gap:10px;align-items:center}
-  .grow{flex:1}
-  details summary{cursor:pointer;color:var(--muted);font-size:12px}
-  pre{margin:8px 0 0;white-space:pre-wrap;word-break:break-all;color:var(--muted);font-size:11.5px}
+       font:15px/1.5 -apple-system,BlinkMacSystemFont,"Pretendard Variable",Pretendard,
+            "Segoe UI","Malgun Gothic",sans-serif;
+       -webkit-font-smoothing:antialiased;letter-spacing:-.01em}
+  .num{font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;letter-spacing:0}
+  .t2{color:var(--ink-2)} .t3{color:var(--ink-3)}
+  .red{color:var(--red)} .amber{color:var(--amber)} .green{color:var(--green)}
+  .row{display:flex;align-items:center;gap:12px} .grow{flex:1} .wrap{flex-wrap:wrap}
+
+  /* ── 헤더 ── */
+  header.top{position:sticky;top:0;z-index:30;background:rgba(255,255,255,.88);
+             backdrop-filter:saturate(180%) blur(12px);border-bottom:1px solid var(--line)}
+  .top-in{max-width:1180px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:14px}
+  .logo{width:32px;height:32px;object-fit:contain;flex-shrink:0}
+  .brand-t{font-weight:700;font-size:17px;letter-spacing:-.4px;white-space:nowrap}
+  .brand-s{font-size:12px;color:var(--ink-3);white-space:nowrap;margin-top:1px}
+  nav.tabs{max-width:1180px;margin:0 auto;padding:0 24px;display:flex;gap:22px;overflow-x:auto}
+  nav.tabs::-webkit-scrollbar{display:none}
+  nav.tabs button{background:none;border:0;border-bottom:2.5px solid transparent;color:var(--ink-3);
+    padding:12px 0 11px;font-size:15px;font-weight:600;cursor:pointer;white-space:nowrap;
+    font-family:inherit;letter-spacing:-.02em}
+  nav.tabs button:hover{color:var(--ink-2)}
+  nav.tabs button.on{color:var(--ink);border-bottom-color:var(--ink)}
+  nav.tabs .pip{margin-left:6px;padding:1px 7px;border-radius:99px;font-size:11.5px;font-weight:700;
+                background:var(--red-bg);color:var(--red);vertical-align:1px}
+
+  main{max-width:1180px;margin:0 auto;padding:24px 24px 80px}
+
+  /* ── 요약 ── */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:22px}
+  .kpi{background:var(--card);border-radius:var(--r);padding:20px 22px;box-shadow:var(--sh)}
+  .kpi .k{font-size:13.5px;color:var(--ink-3);font-weight:600}
+  .kpi .v{font-size:32px;font-weight:800;letter-spacing:-1.2px;margin-top:6px;line-height:1.15}
+  .kpi .s{font-size:13px;color:var(--ink-3);margin-top:4px}
+  .kpi.alert{background:linear-gradient(180deg,var(--red-bg),var(--card) 62%)}
+  .kpi.attn{background:linear-gradient(180deg,var(--amber-bg),var(--card) 62%)}
+
+  /* ── 카드·표 ── */
+  .card{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);overflow:hidden;margin-bottom:18px}
+  .card > h2{margin:0;padding:20px 22px 14px;font-size:16px;font-weight:700;letter-spacing:-.3px;
+             display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .card > h2 .sub{font-size:13px;color:var(--ink-3);font-weight:500;letter-spacing:-.01em}
+  .tw{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;min-width:640px}
+  th,td{padding:14px 22px;text-align:left;vertical-align:middle}
+  th{font-size:12.5px;color:var(--ink-3);font-weight:600;white-space:nowrap;
+     border-bottom:1px solid var(--line);border-top:1px solid var(--line)}
+  td{border-bottom:1px solid var(--line);font-size:14.5px}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr.clickable{cursor:pointer;transition:background .12s}
+  tbody tr.clickable:hover{background:#FAFBFC}
+  .empty{padding:44px 22px;text-align:center;color:var(--ink-3);font-size:14.5px}
+
+  .pill{display:inline-block;padding:3px 9px;border-radius:8px;font-size:12px;font-weight:700;
+        background:var(--bg);color:var(--ink-2);white-space:nowrap;letter-spacing:-.01em}
+  .pill.ok{background:var(--green-bg);color:var(--green)}
+  .pill.bad{background:var(--red-bg);color:var(--red)}
+  .pill.warn{background:var(--amber-bg);color:var(--amber)}
+  .pill.blue{background:var(--blue-bg);color:var(--blue-ink)}
+
+  button.btn{background:var(--bg);color:var(--ink-2);border:0;border-radius:var(--r-sm);
+             padding:9px 14px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;
+             white-space:nowrap;letter-spacing:-.02em;transition:background .12s}
+  button.btn:hover{background:#E5E8EB}
+  button.btn.primary{background:var(--blue);color:#fff}
+  button.btn.primary:hover{background:var(--blue-ink)}
+  button.btn.danger{background:var(--red-bg);color:var(--red)}
+  button.btn.danger:hover{background:#FCDDE1}
+  button.btn.sm{padding:7px 12px;font-size:13.5px}
+  button.btn:disabled{opacity:.45;cursor:default}
+
+  input,select{background:var(--bg);color:var(--ink);border:1px solid transparent;border-radius:var(--r-sm);
+               padding:13px 14px;font-size:15px;width:100%;font-family:inherit;letter-spacing:-.01em}
+  input::placeholder{color:var(--ink-3)}
+  input:focus,select:focus{outline:none;background:var(--card);border-color:var(--blue)}
+  label{display:block;font-size:13.5px;color:var(--ink-2);font-weight:600;margin:0 0 7px}
+  .field{margin-bottom:14px}
+  .err{color:var(--red);font-size:13.5px;min-height:19px;margin:8px 0 2px;font-weight:500}
+
+  /* ── 로그인 ── */
+  .login-wrap{min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--card)}
+  .login{width:100%;max-width:360px}
+  .login img{width:52px;height:52px;object-fit:contain;margin-bottom:20px}
+  .login h1{font-size:26px;font-weight:800;letter-spacing:-1px;margin:0 0 8px;line-height:1.3}
+  .login .note{font-size:15px;color:var(--ink-3);margin:0 0 30px;line-height:1.55}
+  .login input{background:var(--bg)}
+  .login .btn{width:100%;padding:15px;font-size:16px;border-radius:14px;margin-top:6px}
+
+  /* ── 상세 패널 ── */
+  .scrim{position:fixed;inset:0;background:rgba(0,0,0,.32);z-index:40}
+  .drawer{position:fixed;top:0;right:0;bottom:0;width:min(760px,100%);background:var(--bg);
+          z-index:41;display:flex;flex-direction:column;box-shadow:-8px 0 40px rgba(0,0,0,.1)}
+  .drawer-h{padding:20px 24px;background:var(--card);border-bottom:1px solid var(--line);
+            display:flex;align-items:flex-start;gap:12px}
+  .drawer-b{padding:18px 24px 40px;overflow:auto}
+  pre{margin:10px 0 0;white-space:pre-wrap;word-break:break-all;color:var(--ink-2);
+      font:12px/1.7 ui-monospace,Menlo,Consolas,monospace;background:var(--bg);
+      border-radius:var(--r-sm);padding:14px}
+
+  /* ── 확인창 ── */
+  .modal{position:fixed;inset:0;display:grid;place-items:center;z-index:50;padding:24px;
+         background:rgba(0,0,0,.32)}
+  .modal .box{background:var(--card);border-radius:var(--r);padding:26px;width:100%;max-width:420px;
+              box-shadow:0 12px 48px rgba(0,0,0,.16)}
+  .modal h3{margin:0 0 10px;font-size:19px;font-weight:700;letter-spacing:-.5px}
+  .modal p{margin:0 0 18px;font-size:14.5px;color:var(--ink-2);line-height:1.65}
+
+  /* ── 알림 ── */
+  .toasts{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);z-index:60;
+          display:flex;flex-direction:column;gap:8px;align-items:center}
+  .toast{background:var(--ink);color:#fff;border-radius:14px;padding:13px 20px;font-size:14.5px;
+         font-weight:600;box-shadow:0 8px 28px rgba(0,0,0,.2);letter-spacing:-.02em}
+  .toast.bad{background:var(--red)}
+  .toast.ok{background:var(--ink)}
+
+  .skel{height:14px;border-radius:7px;background:linear-gradient(90deg,#EDEFF2,#F6F7F9,#EDEFF2);
+        background-size:200% 100%;animation:sh 1.2s infinite}
+  @keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
 </style>
 </head>
 <body>
-<div class="wrap" id="app"></div>
+<div id="root"></div>
+<div class="toasts" id="toasts"></div>
 
 <script>
-const $ = (h) => { const d = document.createElement('div'); d.innerHTML = h.trim(); return d.firstChild }
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))
-const app = document.getElementById('app')
-
-let token = sessionStorage.getItem('adminToken') || ''
+/* ── 뼈대 ─────────────────────────────────────────────────────────── */
+const el = (h) => { const d = document.createElement('div'); d.innerHTML = h.trim(); return d.firstElementChild }
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+  ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]))
+const root = document.getElementById('root')
 
 /* 토큰은 sessionStorage 에 둔다 — 탭을 닫으면 사라진다.
    전 회사를 보는 세션이 브라우저에 영구히 남아 있을 이유가 없다. */
+let token = sessionStorage.getItem('adminToken') || ''
+let me = null
+
 async function api(path, opts = {}) {
   const res = await fetch('/api/admin' + path, {
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
@@ -79,14 +182,51 @@ async function api(path, opts = {}) {
   if (!res.ok) throw new Error(data.error || '요청에 실패했어요')
   return data
 }
+function logout() { token = ''; me = null; sessionStorage.removeItem('adminToken'); renderLogin() }
 
-function logout() { token = ''; sessionStorage.removeItem('adminToken'); renderLogin() }
+const toast = (msg, tone = '') => {
+  const t = el(`<div class="toast ${tone}">${esc(msg)}</div>`)
+  document.getElementById('toasts').appendChild(t)
+  setTimeout(() => t.remove(), 3400)
+}
 
+/** 확인창 — 브라우저 confirm 은 문구를 다듬을 수 없고 위험도를 구분하지 못한다 */
+const ask = ({ title, body, confirmLabel = '확인', danger = false, input = null }) => new Promise(resolve => {
+  const m = el(`<div class="modal"><div class="box">
+      <h3>${esc(title)}</h3>
+      ${body ? `<p>${body}</p>` : ''}
+      ${input ? `<div class="field"><label>${esc(input.label)}</label>
+                 <input id="mi" type="${input.type || 'text'}" placeholder="${esc(input.placeholder || '')}"></div>` : ''}
+      <div class="err" id="me"></div>
+      <div class="row" style="justify-content:flex-end;gap:8px">
+        <button class="btn" id="mc">취소</button>
+        <button class="btn ${danger ? 'danger' : 'primary'}" id="mo">${esc(confirmLabel)}</button>
+      </div></div></div>`)
+  document.body.appendChild(m)
+  const onKey = (e) => { if (e.key === 'Escape') close(null) }
+  const close = (v) => { m.remove(); document.removeEventListener('keydown', onKey); resolve(v) }
+  const submit = () => {
+    if (!input) return close(true)
+    const v = m.querySelector('#mi').value
+    const bad = input.validate && input.validate(v)
+    if (bad) { m.querySelector('#me').textContent = bad; return }
+    close(v)
+  }
+  document.addEventListener('keydown', onKey)
+  m.querySelector('#mc').onclick = () => close(null)
+  m.querySelector('#mo').onclick = submit
+  m.onclick = (e) => { if (e.target === m) close(null) }
+  if (input) {
+    const i = m.querySelector('#mi')
+    i.focus(); i.onkeydown = (e) => { if (e.key === 'Enter') submit() }
+  } else { m.querySelector('#mo').focus() }
+})
+
+/* ── 표시 도우미 ── */
 const when = (v) => {
   if (!v) return '—'
-  const d = new Date(v)
-  const p = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  const d = new Date(v), p = (x) => String(x).padStart(2, '0')
+  return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 const ago = (v) => {
   if (!v) return '—'
@@ -94,212 +234,359 @@ const ago = (v) => {
   if (m < 1) return '방금'
   if (m < 60) return m + '분 전'
   if (m < 1440) return Math.floor(m / 60) + '시간 전'
-  return Math.floor(m / 1440) + '일 전'
+  const d = Math.floor(m / 1440)
+  return d < 30 ? d + '일 전' : Math.floor(d / 30) + '개월 전'
 }
+const n = (v) => Number(v || 0).toLocaleString('ko-KR')
 
-// ── 로그인 ──
+/* ── 로그인 ───────────────────────────────────────────────────────── */
 function renderLogin() {
-  app.innerHTML = ''
-  const box = $(`<div class="login">
-    <header><h1>도니도라 운영 콘솔</h1></header>
-    <div class="sub">사무실 네트워크에서만 열립니다.</div>
-    <div class="card" style="padding:16px">
-      <label>아이디</label><input id="u" autocomplete="username">
-      <label>비밀번호</label><input id="p" type="password" autocomplete="current-password">
+  root.innerHTML = ''
+  const v = el(`<div class="login-wrap"><div class="login">
+      <img src="/admin/logo.png" alt="도니도라">
+      <h1>운영 콘솔</h1>
+      <p class="note">서비스 전체 상태를 확인하고 관리합니다.<br>사무실 네트워크에서만 열립니다.</p>
+      <div class="field"><label>아이디</label><input id="u" autocomplete="username" placeholder="운영자 아이디"></div>
+      <div class="field"><label>비밀번호</label><input id="p" type="password" autocomplete="current-password" placeholder="비밀번호"></div>
       <div class="err" id="e"></div>
-      <button class="primary" id="go" style="width:100%;margin-top:6px">로그인</button>
-    </div>
-  </div>`)
-  app.appendChild(box)
+      <button class="btn primary" id="go">로그인</button>
+    </div></div>`)
+  root.appendChild(v)
   const go = async () => {
-    const e = box.querySelector('#e'); e.textContent = ''
+    const e = v.querySelector('#e'), btn = v.querySelector('#go')
+    e.textContent = ''; btn.disabled = true; btn.textContent = '확인 중…'
     try {
       const r = await fetch('/api/admin/login', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: box.querySelector('#u').value, password: box.querySelector('#p').value }),
+        body: JSON.stringify({ username: v.querySelector('#u').value, password: v.querySelector('#p').value }),
       })
       const d = await r.json().catch(() => ({}))
       if (!r.ok) { e.textContent = d.error || '로그인에 실패했어요'; return }
-      token = d.token; sessionStorage.setItem('adminToken', token)
-      renderDash()
+      token = d.token; me = d.admin; sessionStorage.setItem('adminToken', token)
+      renderApp('overview')
     } catch { e.textContent = '서버에 연결할 수 없어요' }
+    finally { btn.disabled = false; btn.textContent = '로그인' }
   }
-  box.querySelector('#go').onclick = go
-  box.querySelector('#p').onkeydown = (ev) => { if (ev.key === 'Enter') go() }
-  box.querySelector('#u').focus()
+  v.querySelector('#go').onclick = go
+  for (const id of ['#u', '#p']) v.querySelector(id).onkeydown = (ev) => { if (ev.key === 'Enter') go() }
+  v.querySelector('#u').focus()
 }
 
-// ── 대시보드 ──
-async function renderDash() {
-  app.innerHTML = '<div class="muted" style="padding:40px 0">불러오는 중…</div>'
-  let ov, errs, fails
-  try {
-    [ov, errs, fails] = await Promise.all([
-      api('/overview'), api('/errors?days=7&limit=30'), api('/login-failures?days=3&limit=30'),
-    ])
-  } catch (e) { app.innerHTML = `<div class="err" style="padding:40px 0">${esc(e.message)}</div>`; return }
+/* ── 앱 셸 ────────────────────────────────────────────────────────── */
+const TABS = [
+  { id: 'overview', label: '현황' },
+  { id: 'errors',   label: '오류' },
+  { id: 'security', label: '로그인 실패' },
+  { id: 'accounts', label: '계정' },
+]
+const state = { tab: 'overview', company: null }
+
+async function renderApp(tab) {
+  state.tab = tab || state.tab
+  root.innerHTML = `
+    <header class="top">
+      <div class="top-in">
+        <img class="logo" src="/admin/logo.png" alt="">
+        <div><div class="brand-t">운영 콘솔</div><div class="brand-s" id="dep">불러오는 중…</div></div>
+        <div class="grow"></div>
+        <span class="t3" id="who" style="font-size:13.5px;font-weight:600"></span>
+        <button class="btn sm" id="rl">새로고침</button>
+        <button class="btn sm" id="out">로그아웃</button>
+      </div>
+      <nav class="tabs" id="tabs"></nav>
+    </header>
+    <main id="main"></main>`
+  root.querySelector('#rl').onclick = () => renderApp(state.tab)
+  root.querySelector('#out').onclick = logout
+  const setWho = () => { if (me) root.querySelector('#who').textContent = `${me.name || ''} (${me.username})` }
+  setWho()
+
+  const main = root.querySelector('#main')
+  main.innerHTML = `<div class="card" style="padding:24px">
+      <div class="skel" style="width:38%"></div><div class="skel" style="width:66%;margin-top:12px"></div>
+      <div class="skel" style="width:52%;margin-top:12px"></div></div>`
+
+  let ov
+  try { ov = await api('/overview') }
+  catch (e) { main.innerHTML = `<div class="card"><div class="empty red">${esc(e.message)}</div></div>`; return }
+  if (!me) { try { me = (await api('/me')).admin; setWho() } catch { /* 표시용이라 실패해도 넘어간다 */ } }
 
   const dep = ov.server
-  app.innerHTML = ''
-  app.appendChild($(`<header>
-      <h1>도니도라 운영 콘솔</h1>
-      <span class="sub">${dep ? '배포 ' + esc(String(dep.commit || '').slice(0, 7)) + ' · ' + when(dep.deployedAt) : '로컬 실행(배포 정보 없음)'}</span>
-      <span class="grow"></span>
-      <button id="reload">새로고침</button>
-      <button id="out">로그아웃</button>
-    </header>`))
-  app.querySelector('#reload').onclick = renderDash
-  app.querySelector('#out').onclick = logout
+  root.querySelector('#dep').textContent = dep
+    ? `배포 ${String(dep.commit || '').slice(0, 8)} · ${when(dep.deployedAt)}`
+    : '로컬 실행'
 
-  // 테넌트 현황
-  const comp = ov.companies.map(c => `<tr>
-      <td><b>${esc(c.code)}</b>${c.active ? '' : ' <span class="pill">중지</span>'}<div class="muted" style="font-size:12px">${esc(c.name)}</div></td>
-      <td class="mono muted">${esc(c.db_name)}</td>
-      <td class="num">${c.users}</td>
-      <td class="num muted">${ago(c.last_login)}</td>
-      <td class="num ${c.errors_7d > 0 ? 'bad' : 'muted'}">${c.errors_7d}</td>
-      <td class="num ${c.login_fails_1d > 0 ? 'warn' : 'muted'}">${c.login_fails_1d}</td>
-      <td><button data-users="${esc(c.id)}">계정 관리</button></td>
-    </tr>`).join('')
-  const compCard = $(`<div class="card">
-      <h2><span>테넌트 ${ov.companies.length}개</span>${ov.orphanErrors7d ? `<span class="muted">회사 미상 오류 ${ov.orphanErrors7d}건(7일)</span>` : ''}</h2>
-      <table><thead><tr>
-        <th>회사</th><th>DB</th><th>사용자</th><th>마지막 로그인</th><th>오류 7일</th><th>로그인 실패 24h</th><th></th>
-      </tr></thead><tbody>${comp || '<tr><td colspan="7" class="empty">등록된 회사가 없습니다.</td></tr>'}</tbody></table>
-    </div>`)
-  compCard.querySelectorAll('[data-users]').forEach(b => {
-    b.onclick = () => renderUsers(b.getAttribute('data-users'))
-  })
-  app.appendChild(compCard)
+  // 탭에 숫자를 달아, 어디를 봐야 하는지 먼저 보이게 한다
+  const err7 = ov.companies.reduce((a, c) => a + Number(c.errors_7d || 0), 0) + Number(ov.orphanErrors7d || 0)
+  const fail1 = ov.companies.reduce((a, c) => a + Number(c.login_fails_1d || 0), 0)
+  const badge = { errors: err7, security: fail1 }
+  const tabs = root.querySelector('#tabs')
+  for (const t of TABS) {
+    const b = el(`<button class="${t.id === state.tab ? 'on' : ''}">${t.label}${
+      badge[t.id] ? `<span class="pip">${n(badge[t.id])}</span>` : ''}</button>`)
+    b.onclick = () => renderApp(t.id)
+    tabs.appendChild(b)
+  }
 
-  // 최근 오류(묶음)
-  const erows = errs.rows.map(e => `<tr>
-      <td class="num muted">${when(e.last_seen)}<div class="muted" style="font-size:11px">${ago(e.last_seen)}</div></td>
-      <td class="num ${e.hits > 5 ? 'bad' : ''}"><b>${e.hits}</b></td>
-      <td class="mono">${esc(e.code || '—')}<div class="muted mono" style="font-size:11px">${esc(e.path || '')}</div></td>
-      <td class="mono muted">${esc(e.message || '')}</td>
-      <td class="num muted">${e.companies}</td>
-    </tr>`).join('')
-  app.appendChild($(`<div class="card">
-      <h2><span>최근 오류 · 7일 (같은 것끼리 묶음)</span><span class="muted">금액·거래처는 저장되지 않습니다</span></h2>
-      <table><thead><tr>
-        <th>마지막 발생</th><th>횟수</th><th>코드 / 경로</th><th>메시지</th><th>회사 수</th>
-      </tr></thead><tbody>${erows || '<tr><td colspan="5" class="empty">오류가 없습니다. 좋은 신호입니다.</td></tr>'}</tbody></table>
-    </div>`))
-
-  // 로그인 실패
-  const frows = fails.rows.map(f => `<tr>
-      <td class="num muted">${when(f.created_at)}</td>
-      <td>${esc(f.company_code || '—')}</td>
-      <td>${esc(f.username || '—')}</td>
-      <td class="mono muted">${esc(f.ip || '—')}</td>
-      <td class="muted">${f.detail === 'locked' ? '<span class="warn">잠김</span>' : ''}</td>
-    </tr>`).join('')
-  app.appendChild($(`<div class="card">
-      <h2>로그인 실패 · 3일</h2>
-      <table><thead><tr><th>시각</th><th>회사</th><th>아이디</th><th>IP</th><th></th></tr></thead>
-      <tbody>${frows || '<tr><td colspan="5" class="empty">실패한 로그인이 없습니다.</td></tr>'}</tbody></table>
-    </div>`))
+  const views = { overview: viewOverview, errors: viewErrors, security: viewSecurity, accounts: viewAccounts }
+  main.innerHTML = ''
+  await views[state.tab](main, ov)
 }
 
-// ── 회사별 계정 관리 ──
-//
-// 여기서 하는 일은 전부 **그 회사의 변경 이력에 남는다**(ops:<아이디> 로 표시).
-// 고객이 "내가 안 한 비번 변경"을 자기 화면에서 볼 수 있어야, 이 편의가 정당해진다.
-async function renderUsers(companyId) {
-  app.innerHTML = '<div class="muted" style="padding:40px 0">불러오는 중…</div>'
+/* ── 현황 ── */
+async function viewOverview(main, ov) {
+  const users = ov.companies.reduce((a, c) => a + Number(c.users || 0), 0)
+  const err7 = ov.companies.reduce((a, c) => a + Number(c.errors_7d || 0), 0) + Number(ov.orphanErrors7d || 0)
+  const fail1 = ov.companies.reduce((a, c) => a + Number(c.login_fails_1d || 0), 0)
+  const active = ov.companies.filter(c => c.active).length
+
+  main.appendChild(el(`<div class="kpis">
+      <div class="kpi"><div class="k">테넌트</div><div class="v num">${n(active)}</div>
+        <div class="s">${ov.companies.length > active
+          ? `중지 ${n(ov.companies.length - active)}개 포함 총 ${n(ov.companies.length)}개` : '전부 사용 중'}</div></div>
+      <div class="kpi"><div class="k">활성 사용자</div><div class="v num">${n(users)}</div>
+        <div class="s">전 회사 합계</div></div>
+      <div class="kpi ${err7 ? 'alert' : ''}"><div class="k">오류 · 7일</div>
+        <div class="v num ${err7 ? 'red' : ''}">${n(err7)}</div>
+        <div class="s">${err7 ? '오류 탭에서 확인하세요' : '문제 없음'}</div></div>
+      <div class="kpi ${fail1 ? 'attn' : ''}"><div class="k">로그인 실패 · 24시간</div>
+        <div class="v num ${fail1 ? 'amber' : ''}">${n(fail1)}</div>
+        <div class="s">${fail1 ? '반복되면 확인이 필요합니다' : '정상'}</div></div>
+    </div>`))
+
+  const rows = ov.companies.map(c => `<tr>
+      <td><b>${esc(c.code)}</b>${c.active ? '' : ' <span class="pill">중지</span>'}
+          <div class="t3" style="font-size:13px;margin-top:2px">${esc(c.name)}</div></td>
+      <td class="mono t3">${esc(c.db_name)}</td>
+      <td class="num">${n(c.users)}</td>
+      <td class="num t3">${ago(c.last_login)}</td>
+      <td class="num"><b class="${c.errors_7d > 0 ? 'red' : 't3'}">${n(c.errors_7d)}</b></td>
+      <td class="num"><b class="${c.login_fails_1d > 0 ? 'amber' : 't3'}">${n(c.login_fails_1d)}</b></td>
+      <td><button class="btn sm" data-acc="${esc(c.id)}">계정 관리</button></td>
+    </tr>`).join('')
+  const card = el(`<div class="card">
+      <h2>테넌트 ${ov.companies.length}개
+        ${ov.orphanErrors7d ? `<span class="sub">· 회사를 특정할 수 없는 오류 ${n(ov.orphanErrors7d)}건(7일)</span>` : ''}</h2>
+      <div class="tw"><table><thead><tr>
+        <th>회사</th><th>DB</th><th>사용자</th><th>마지막 로그인</th><th>오류 7일</th><th>로그인 실패 24h</th><th></th>
+      </tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty">등록된 회사가 없습니다.</td></tr>'}</tbody></table></div>
+    </div>`)
+  card.querySelectorAll('[data-acc]').forEach(b => b.onclick = () => {
+    state.company = b.getAttribute('data-acc'); renderApp('accounts')
+  })
+  main.appendChild(card)
+}
+
+/* ── 오류 ── */
+async function viewErrors(main) {
+  const box = el(`<div class="card"><h2>최근 오류 · 7일
+      <span class="sub">같은 것끼리 묶었습니다 · 줄을 누르면 발생 건별로 볼 수 있어요</span></h2>
+      <div class="tw" id="t"><div class="empty">불러오는 중…</div></div></div>`)
+  main.appendChild(box)
   let d
-  try { d = await api('/companies/' + companyId + '/users') }
-  catch (e) { app.innerHTML = `<div class="err" style="padding:40px 0">${esc(e.message)}</div>`; return }
+  try { d = await api('/errors?days=7&limit=60') }
+  catch (e) { box.querySelector('#t').innerHTML = `<div class="empty red">${esc(e.message)}</div>`; return }
 
-  app.innerHTML = ''
-  app.appendChild($(`<header>
-      <h1>${esc(d.company.name)} <span class="pill">${esc(d.company.code)}</span></h1>
-      <span class="grow"></span>
-      <button id="back">← 현황으로</button>
-    </header>`))
-  app.querySelector('#back').onclick = renderDash
-
-  const act = async (fn, msg) => {
-    try { await fn(); renderUsers(companyId) }
-    catch (e) { alert((msg ? msg + '\n\n' : '') + e.message) }
+  if (!d.rows.length) {
+    box.querySelector('#t').innerHTML = '<div class="empty">7일간 오류가 없습니다. 좋은 신호입니다.</div>'
+    return
   }
-  const askPw = (who) => {
-    const p = prompt(`${who} 의 임시 비밀번호를 입력하세요 (8자 이상).\n\n` +
-      '이 작업은 해당 회사의 변경 이력에 운영자 이름으로 남습니다.\n' +
-      '사용자는 다음 로그인 때 비밀번호를 반드시 바꾸게 됩니다.')
-    if (p == null) return null
-    if (p.length < 8) { alert('8자 이상이어야 합니다'); return null }
-    return p
+  const rows = d.rows.map(e => `<tr class="clickable" data-fp="${esc(e.fingerprint)}">
+      <td class="num"><b style="font-size:17px" class="${e.hits > 5 ? 'red' : ''}">${n(e.hits)}</b></td>
+      <td><span class="mono">${esc(e.code || '—')}</span>
+          <div class="mono t3" style="margin-top:3px">${esc(e.path || '')}</div></td>
+      <td class="mono t2">${esc(e.message || '')}</td>
+      <td class="num t3">${ago(e.last_seen)}<div style="font-size:12px;margin-top:2px">${when(e.last_seen)}</div></td>
+      <td class="num t3">${n(e.companies)}</td>
+    </tr>`).join('')
+  box.querySelector('#t').innerHTML = `<table><thead><tr>
+      <th>횟수</th><th>코드 / 경로</th><th>메시지</th><th>마지막 발생</th><th>회사 수</th>
+    </tr></thead><tbody>${rows}</tbody></table>`
+  box.querySelectorAll('[data-fp]').forEach(tr => tr.onclick = () => openError(tr.getAttribute('data-fp')))
+}
+
+/** 묶음 안을 본다 — 묶어놓고 안을 못 보면 묶은 의미가 없다 */
+async function openError(fp) {
+  const scrim = el('<div class="scrim"></div>')
+  const dr = el(`<aside class="drawer">
+      <div class="drawer-h"><div class="grow"><div style="font-weight:700;font-size:17px">오류 상세</div>
+        <div class="mono t3" style="margin-top:3px">최근 20건 · ${esc(fp.slice(0, 16))}…</div></div>
+        <button class="btn sm" id="x">닫기</button></div>
+      <div class="drawer-b" id="b"><div class="empty">불러오는 중…</div></div></aside>`)
+  const onKey = (e) => { if (e.key === 'Escape') close() }
+  const close = () => { scrim.remove(); dr.remove(); document.removeEventListener('keydown', onKey) }
+  scrim.onclick = close
+  dr.querySelector('#x').onclick = close
+  document.addEventListener('keydown', onKey)
+  document.body.append(scrim, dr)
+
+  let d
+  try { d = await api('/errors/' + encodeURIComponent(fp)) }
+  catch (e) { dr.querySelector('#b').innerHTML = `<div class="empty red">${esc(e.message)}</div>`; return }
+
+  dr.querySelector('#b').innerHTML = d.rows.map(r => `
+      <div class="card">
+        <h2>${esc(r.company_code || '회사 미상')}
+          <span class="sub">· ${esc(r.username || '비로그인')} · ${when(r.created_at)}</span>
+          <div class="grow"></div>
+          ${r.release_id ? `<span class="pill blue">배포 ${esc(String(r.release_id).slice(0, 8))}</span>` : ''}</h2>
+        <div style="padding:0 22px 20px">
+          <div class="mono">${esc(r.method || '')} ${esc(r.path || '')}
+            <span class="t3">→ ${esc(r.status || '-')}</span></div>
+          <div class="mono t2" style="margin-top:8px">${esc(r.code || '')} ${esc(r.message || '')}</div>
+          ${r.stack ? `<pre>${esc(r.stack)}</pre>` : ''}
+        </div>
+      </div>`).join('') || '<div class="empty">기록이 없습니다.</div>'
+}
+
+/* ── 로그인 실패 ── */
+async function viewSecurity(main) {
+  const box = el(`<div class="card"><h2>로그인 실패 · 3일
+      <span class="sub">성공한 로그인은 각 회사의 변경 이력에서 봅니다</span></h2>
+      <div class="tw" id="t"><div class="empty">불러오는 중…</div></div></div>`)
+  main.appendChild(box)
+  let d
+  try { d = await api('/login-failures?days=3&limit=100') }
+  catch (e) { box.querySelector('#t').innerHTML = `<div class="empty red">${esc(e.message)}</div>`; return }
+
+  if (!d.rows.length) {
+    box.querySelector('#t').innerHTML = '<div class="empty">3일간 실패한 로그인이 없습니다.</div>'
+    return
+  }
+  /* 한 건 한 건은 오타일 뿐이다. 신호는 **같은 조합의 반복**이다 —
+     세어서 붙여주지 않으면 목록을 눈으로 훑어야 알 수 있다. */
+  const key = (r) => `${r.company_code || '?'}|${r.username || '?'}|${r.ip || '?'}`
+  const cnt = {}
+  for (const r of d.rows) cnt[key(r)] = (cnt[key(r)] || 0) + 1
+  const rows = d.rows.map(f => `<tr>
+      <td class="num t3">${when(f.created_at)}</td>
+      <td><b>${esc(f.company_code || '—')}</b>
+          <div class="t3" style="font-size:13px;margin-top:2px">${esc(f.company_name || '')}</div></td>
+      <td>${esc(f.username || '—')}</td>
+      <td class="mono t3">${esc(f.ip || '—')}</td>
+      <td>${cnt[key(f)] >= 5 ? `<span class="pill bad">이 조합 ${cnt[key(f)]}회</span>` : ''}
+          ${f.detail === 'locked' ? ' <span class="pill warn">잠김</span>' : ''}</td>
+    </tr>`).join('')
+  box.querySelector('#t').innerHTML = `<table><thead><tr>
+      <th>시각</th><th>회사</th><th>아이디</th><th>IP</th><th></th>
+    </tr></thead><tbody>${rows}</tbody></table>`
+}
+
+/* ── 계정 ──
+ * 여기서 하는 일은 전부 **그 회사의 변경 이력에 남는다**(ops:<아이디> 로 표시).
+ * 고객이 "내가 안 한 비번 변경"을 자기 화면에서 볼 수 있어야 이 편의가 정당해진다. */
+async function viewAccounts(main, ov) {
+  const cid = state.company || (ov.companies[0] && ov.companies[0].id)
+  if (!cid) { main.appendChild(el('<div class="card"><div class="empty">회사가 없습니다.</div></div>')); return }
+  state.company = cid
+
+  const picker = el(`<div class="card"><div style="padding:18px 22px" class="row wrap">
+      <label style="margin:0">회사</label>
+      <select id="c" style="width:auto;min-width:260px">${ov.companies.map(c =>
+        `<option value="${esc(c.id)}" ${c.id === cid ? 'selected' : ''}>${esc(c.code)} — ${esc(c.name)}</option>`).join('')}</select>
+      <div class="grow"></div>
+      <span class="t3" style="font-size:13px">모든 변경은 해당 회사의 변경 이력에 남습니다</span>
+    </div></div>`)
+  picker.querySelector('#c').onchange = (e) => { state.company = e.target.value; renderApp('accounts') }
+  main.appendChild(picker)
+
+  const box = el('<div class="card"><div class="empty">불러오는 중…</div></div>')
+  main.appendChild(box)
+  let d
+  try { d = await api(`/companies/${cid}/users`) }
+  catch (e) { box.innerHTML = `<div class="empty red">${esc(e.message)}</div>`; return }
+
+  const run = async (fn, okMsg) => {
+    try { await fn(); toast(okMsg, 'ok'); renderApp('accounts') } catch (e) { toast(e.message, 'bad') }
   }
 
   const rows = d.rows.map(u => `<tr>
-      <td><b>${esc(u.username)}</b>${u.role === 'admin' ? ' <span class="pill">마스터</span>' : ''}
-          <div class="muted" style="font-size:12px">${esc(u.name || '')}</div></td>
-      <td>${u.active ? '<span class="ok">사용</span>' : '<span class="muted">정지</span>'}
-          ${u.must_change_pw ? '<div class="warn" style="font-size:11px">비번 변경 대기</div>' : ''}</td>
-      <td class="num muted">${ago(u.last_login)}</td>
-      <td class="num ${u.recent_fails >= 5 ? 'bad' : 'muted'}">${u.recent_fails}${u.recent_fails >= 5 ? ' (잠김)' : ''}</td>
-      <td class="row" style="gap:6px;flex-wrap:wrap">
-        <button data-pw="${esc(u.id)}" data-u="${esc(u.username)}">비번 초기화</button>
-        <button data-act="${esc(u.id)}" data-on="${u.active ? '0' : '1'}">${u.active ? '정지' : '사용'}</button>
-        ${u.recent_fails >= 5 ? `<button data-unlock="${esc(u.id)}">잠금 해제</button>` : ''}
-      </td>
+      <td><b>${esc(u.username)}</b>${u.role === 'admin' ? ' <span class="pill blue">마스터</span>' : ''}
+          <div class="t3" style="font-size:13px;margin-top:2px">${esc(u.name || '')}</div></td>
+      <td>${u.active ? '<span class="pill ok">사용</span>' : '<span class="pill">정지</span>'}
+          ${u.must_change_pw ? '<div class="amber" style="font-size:12.5px;margin-top:4px;font-weight:600">비번 변경 대기</div>' : ''}</td>
+      <td class="num t3">${ago(u.last_login)}</td>
+      <td class="num">${u.recent_fails >= 5
+          ? `<span class="pill bad">잠김 · ${n(u.recent_fails)}회</span>`
+          : `<span class="t3">${n(u.recent_fails)}</span>`}</td>
+      <td><div class="row wrap" style="gap:6px">
+        <button class="btn sm" data-pw="${esc(u.id)}" data-u="${esc(u.username)}">비번 초기화</button>
+        <button class="btn sm ${u.active ? 'danger' : ''}" data-act="${esc(u.id)}"
+                data-on="${u.active ? '0' : '1'}" data-u="${esc(u.username)}">${u.active ? '정지' : '사용'}</button>
+        ${u.recent_fails >= 5 ? `<button class="btn sm" data-unlock="${esc(u.id)}" data-u="${esc(u.username)}">잠금 해제</button>` : ''}
+      </div></td>
     </tr>`).join('')
 
-  const card = $(`<div class="card">
-      <h2><span>계정 ${d.rows.length}개</span><span class="muted">모든 변경은 이 회사의 변경 이력에 남습니다</span></h2>
-      <table><thead><tr><th>아이디</th><th>상태</th><th>마지막 로그인</th><th>최근 실패</th><th></th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="5" class="empty">계정이 없습니다.</td></tr>'}</tbody></table>
-    </div>`)
-  card.querySelectorAll('[data-pw]').forEach(b => b.onclick = () => {
-    const pw = askPw(b.getAttribute('data-u')); if (!pw) return
-    act(() => api(`/companies/${companyId}/users/${b.getAttribute('data-pw')}/password`,
-                  { method: 'POST', body: { password: pw } }))
+  box.innerHTML = `<h2>${esc(d.company.name)} <span class="pill">${esc(d.company.code)}</span>
+      <span class="sub">· 계정 ${d.rows.length}개</span></h2>
+    <div class="tw"><table><thead><tr>
+      <th>아이디</th><th>상태</th><th>마지막 로그인</th><th>최근 실패</th><th></th>
+    </tr></thead><tbody>${rows || '<tr><td colspan="5" class="empty">계정이 없습니다.</td></tr>'}</tbody></table></div>`
+
+  box.querySelectorAll('[data-pw]').forEach(b => b.onclick = async () => {
+    const who = b.getAttribute('data-u')
+    const pw = await ask({
+      title: `${who} 비밀번호 초기화`,
+      body: '이 작업은 <b>해당 회사의 변경 이력에 운영자 이름으로 남습니다.</b><br>'
+          + '사용자는 다음 로그인 때 비밀번호를 반드시 바꾸게 됩니다.',
+      confirmLabel: '초기화',
+      input: {
+        label: '임시 비밀번호 (8자 이상)', placeholder: '예: temp-2026-0804',
+        validate: (v) => (v.length < 8 ? '8자 이상이어야 합니다' : null),
+      },
+    })
+    if (pw == null) return
+    run(() => api(`/companies/${cid}/users/${b.getAttribute('data-pw')}/password`,
+                  { method: 'POST', body: { password: pw } }), `${who} 비밀번호를 초기화했습니다`)
   })
-  card.querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
-    const on = b.getAttribute('data-on') === '1'
-    if (!confirm(on ? '이 계정을 다시 사용하게 할까요?' : '이 계정을 정지할까요? 로그인할 수 없게 됩니다.')) return
-    act(() => api(`/companies/${companyId}/users/${b.getAttribute('data-act')}/active`,
-                  { method: 'PATCH', body: { active: on } }))
+
+  box.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
+    const on = b.getAttribute('data-on') === '1', who = b.getAttribute('data-u')
+    const ok = await ask({
+      title: on ? `${who} 계정 사용` : `${who} 계정 정지`,
+      body: on ? '이 계정으로 다시 로그인할 수 있게 됩니다.'
+               : '이 계정은 <b>로그인할 수 없게 됩니다.</b> 남긴 기록은 그대로 유지됩니다.',
+      confirmLabel: on ? '사용' : '정지', danger: !on,
+    })
+    if (!ok) return
+    run(() => api(`/companies/${cid}/users/${b.getAttribute('data-act')}/active`,
+                  { method: 'PATCH', body: { active: on } }),
+        on ? `${who} 계정을 사용 처리했습니다` : `${who} 계정을 정지했습니다`)
   })
-  card.querySelectorAll('[data-unlock]').forEach(b => b.onclick = () =>
-    act(() => api(`/companies/${companyId}/users/${b.getAttribute('data-unlock')}/unlock`, { method: 'POST' })))
-  app.appendChild(card)
+
+  box.querySelectorAll('[data-unlock]').forEach(b => b.onclick = () =>
+    run(() => api(`/companies/${cid}/users/${b.getAttribute('data-unlock')}/unlock`, { method: 'POST' }),
+        `${b.getAttribute('data-u')} 의 로그인 잠금을 해제했습니다`))
 
   // 계정 추가
-  const add = $(`<div class="card">
-      <h2>계정 추가</h2>
-      <div style="padding:14px 16px">
-        <div class="row" style="gap:10px;flex-wrap:wrap">
-          <div style="flex:1;min-width:130px"><label>아이디</label><input id="nu"></div>
-          <div style="flex:1;min-width:130px"><label>이름</label><input id="nn"></div>
-          <div style="flex:1;min-width:160px"><label>임시 비밀번호 (8자 이상)</label><input id="np"></div>
-          <div style="min-width:120px"><label>역할</label>
-            <select id="nr" style="width:100%;padding:9px 11px;background:#0e1116;color:var(--ink);border:1px solid var(--line);border-radius:7px">
-              <option value="user">일반 사용자</option><option value="admin">마스터</option>
-            </select></div>
-        </div>
-        <div class="err" id="ne"></div>
-        <button class="primary" id="nadd" style="margin-top:8px">추가</button>
+  const add = el(`<div class="card"><h2>계정 추가</h2><div style="padding:0 22px 22px">
+      <div class="row wrap" style="align-items:flex-end;gap:12px">
+        <div class="field" style="flex:1;min-width:140px;margin:0"><label>아이디</label><input id="nu"></div>
+        <div class="field" style="flex:1;min-width:140px;margin:0"><label>이름</label><input id="nn"></div>
+        <div class="field" style="flex:1;min-width:190px;margin:0"><label>임시 비밀번호 (8자 이상)</label><input id="np"></div>
+        <div class="field" style="min-width:140px;margin:0"><label>역할</label>
+          <select id="nr"><option value="user">일반 사용자</option><option value="admin">마스터</option></select></div>
+        <button class="btn primary" id="go" style="padding:13px 22px">추가</button>
       </div>
-    </div>`)
-  add.querySelector('#nadd').onclick = async () => {
-    const e = add.querySelector('#ne'); e.textContent = ''
+      <div class="err" id="e"></div>
+      <div class="t3" style="font-size:13px">추가된 계정은 첫 로그인 때 비밀번호를 바꾸게 됩니다.</div>
+    </div></div>`)
+  add.querySelector('#go').onclick = () => {
+    const e = add.querySelector('#e'); e.textContent = ''
     const body = {
       username: add.querySelector('#nu').value.trim(),
       name: add.querySelector('#nn').value.trim(),
       password: add.querySelector('#np').value,
       role: add.querySelector('#nr').value,
     }
-    if (!body.username || body.password.length < 8) { e.textContent = '아이디와 8자 이상의 임시 비밀번호가 필요합니다'; return }
-    try { await api('/companies/' + companyId + '/users', { method: 'POST', body }); renderUsers(companyId) }
-    catch (err) { e.textContent = err.message }
+    if (!body.username) { e.textContent = '아이디를 입력하세요'; return }
+    if (body.password.length < 8) { e.textContent = '임시 비밀번호는 8자 이상이어야 합니다'; return }
+    run(() => api(`/companies/${cid}/users`, { method: 'POST', body }), `${body.username} 계정을 만들었습니다`)
   }
-  app.appendChild(add)
+  main.appendChild(add)
 }
 
-token ? renderDash() : renderLogin()
+token ? renderApp('overview') : renderLogin()
 </script>
 </body>
 </html>
