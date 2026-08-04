@@ -114,14 +114,52 @@
   .field{margin-bottom:14px}
   .err{color:var(--red);font-size:13.5px;min-height:19px;margin:8px 0 2px;font-weight:500}
 
-  /* ── 로그인 ── */
-  .login-wrap{min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--card)}
-  .login{width:100%;max-width:360px}
-  .login img{width:52px;height:52px;object-fit:contain;margin-bottom:20px}
-  .login h1{font-size:26px;font-weight:800;letter-spacing:-1px;margin:0 0 8px;line-height:1.3}
-  .login .note{font-size:15px;color:var(--ink-3);margin:0 0 30px;line-height:1.55}
-  .login input{background:var(--bg)}
-  .login .btn{width:100%;padding:15px;font-size:16px;border-radius:14px;margin-top:6px}
+  /* ── 로그인 ──
+   * 고객용 로그인(src/screens/Login.jsx)과 **같은 뼈대**를 쓴다 — 좌측 브랜드 패널 +
+   * 우측 폼(360px), 라벨·44px 입력·비번 표시토글·전폭 버튼. 같은 서비스니까.
+   *
+   * 다만 **결은 다르게** 한다. 여기는 전 회사를 들여다보는 사내 도구다.
+   * 고객 화면과 구분이 안 되면 "내가 지금 어디에 로그인하는 건지" 헷갈리는데,
+   * 그 헷갈림이 곧 사고다. 그래서 파랑 대신 주황 계열(로고의 그 색)을 쓰고,
+   * 'LAN 전용·사내 운영자' 를 화면에 대놓고 적는다. */
+  .lg{display:flex;min-height:100vh;background:#fff}
+  .lg-brand{width:42%;min-height:100vh;flex-shrink:0;background:#12151A;color:#fff;
+            padding:48px 44px 32px;display:flex;flex-direction:column;position:relative;overflow:hidden}
+  .lg-deco{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+  /* 원판이 아니라 '빛'이어야 한다 — 단색 원은 경계가 도드라져 탁해 보인다.
+     가장자리로 갈수록 사라지는 radial-gradient 로 둔다. */
+  .lg-deco i{position:absolute;border-radius:50%;display:block}
+  .lg-deco i:nth-child(1){width:520px;height:520px;top:-180px;right:-160px;
+    background:radial-gradient(circle,rgba(255,149,0,.20),rgba(255,149,0,0) 68%)}
+  .lg-deco i:nth-child(2){width:400px;height:400px;bottom:20px;left:-140px;
+    background:radial-gradient(circle,rgba(49,130,246,.16),rgba(49,130,246,0) 68%)}
+  .lg-top{display:flex;align-items:center;gap:10px;margin-bottom:auto;position:relative}
+  .lg-top img{width:22px;height:22px;object-fit:contain}
+  .lg-top span{font-weight:700;font-size:15px;letter-spacing:-.02em;color:rgba(255,255,255,.9)}
+  .lg-copy{margin-bottom:auto;position:relative}
+  .lg-tag{display:inline-block;padding:5px 11px;border-radius:99px;font-size:12.5px;font-weight:700;
+          background:rgba(255,149,0,.16);color:#FFB454;margin-bottom:18px;letter-spacing:-.01em}
+  .lg-h{font-size:46px;font-weight:800;letter-spacing:-.04em;line-height:1.1;color:#fff}
+  .lg-sub{font-size:18px;font-weight:500;color:rgba(255,255,255,.5);letter-spacing:-.02em;
+          line-height:1.65;margin-top:24px}
+  .lg-foot{font-size:12.5px;color:rgba(255,255,255,.5);letter-spacing:-.01em;position:relative}
+  .lg-form{flex:1;display:flex;align-items:center;justify-content:center;padding:48px 40px;background:#fff}
+  .lg-form .in{width:100%;max-width:360px}
+  .lg-form h1{font-size:24px;font-weight:700;letter-spacing:-.03em;margin:0 0 8px}
+  .lg-form .note{font-size:13.5px;color:var(--ink-3);margin:0 0 32px}
+  .lg-form label{font-size:13px}
+  .lg-form input{height:46px;padding:0 14px;background:var(--bg)}
+  .lg-form .pw{position:relative}
+  .lg-form .pw input{padding-right:44px}
+  .lg-form .pw button{position:absolute;right:10px;top:50%;transform:translateY(-50%);
+    background:none;border:0;cursor:pointer;color:var(--ink-3);display:grid;place-items:center;padding:4px}
+  .lg-form .pw button.on{color:var(--ink)}
+  .lg-alert{display:flex;align-items:flex-start;gap:8px;padding:11px 14px;border-radius:var(--r-sm);
+            background:var(--red-bg);color:var(--red);font-size:13.5px;font-weight:500;margin-bottom:16px}
+  .lg-form .btn{width:100%;height:48px;font-size:15.5px;border-radius:14px;margin-top:8px}
+  .lg-hint{margin-top:18px;padding:12px 14px;border-radius:var(--r-sm);background:var(--bg);
+           font-size:12.5px;color:var(--ink-3);line-height:1.6}
+  @media (max-width:860px){ .lg-brand{display:none} }
 
   /* ── 상세 패널 ── */
   .scrim{position:fixed;inset:0;background:rgba(0,0,0,.32);z-index:40}
@@ -240,31 +278,78 @@ const ago = (v) => {
 const n = (v) => Number(v || 0).toLocaleString('ko-KR')
 
 /* ── 로그인 ───────────────────────────────────────────────────────── */
+const EYE = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+  stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`
+const EYE_OFF = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+  stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/>
+  <line x1="1" y1="1" x2="23" y2="23"/></svg>`
+const WARN = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+  stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px">
+  <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`
+
 function renderLogin() {
   root.innerHTML = ''
-  const v = el(`<div class="login-wrap"><div class="login">
-      <img src="/admin/logo.png" alt="도니도라">
-      <h1>운영 콘솔</h1>
-      <p class="note">서비스 전체 상태를 확인하고 관리합니다.<br>사무실 네트워크에서만 열립니다.</p>
-      <div class="field"><label>아이디</label><input id="u" autocomplete="username" placeholder="운영자 아이디"></div>
-      <div class="field"><label>비밀번호</label><input id="p" type="password" autocomplete="current-password" placeholder="비밀번호"></div>
-      <div class="err" id="e"></div>
-      <button class="btn primary" id="go">로그인</button>
-    </div></div>`)
+  const v = el(`<div class="lg">
+      <div class="lg-brand">
+        <div class="lg-deco"><i></i><i></i></div>
+        <div class="lg-top"><img src="/admin/logo.png" alt=""><span>도니도라</span></div>
+        <div class="lg-copy">
+          <span class="lg-tag">사내 운영자 전용</span>
+          <div class="lg-h">운영 콘솔</div>
+          <div class="lg-sub">테넌트 현황·오류·계정을<br>한 곳에서 관리합니다.</div>
+        </div>
+        <div class="lg-foot">© 2026 (주)포커스윈. All rights reserved.</div>
+      </div>
+
+      <div class="lg-form"><div class="in">
+        <h1>운영자 로그인</h1>
+        <div class="note">서비스 전체를 다루는 화면입니다.</div>
+        <div id="alert"></div>
+        <div class="field"><label>아이디</label>
+          <input id="u" autocomplete="username" placeholder="아이디를 입력하세요" spellcheck="false"></div>
+        <div class="field"><label>비밀번호</label>
+          <div class="pw">
+            <input id="p" type="password" autocomplete="current-password" placeholder="비밀번호를 입력하세요">
+            <button type="button" id="tp" aria-label="비밀번호 표시">${EYE_OFF}</button>
+          </div></div>
+        <button class="btn primary" id="go">로그인</button>
+        <div class="lg-hint">이 콘솔은 <b>사무실 네트워크</b>에서만 열립니다.
+          바깥에서는 주소를 알아도 접속되지 않습니다.</div>
+      </div></div>
+    </div>`)
   root.appendChild(v)
+
+  const pw = v.querySelector('#p'), tp = v.querySelector('#tp')
+  tp.onclick = () => {
+    const show = pw.type === 'password'
+    pw.type = show ? 'text' : 'password'
+    tp.innerHTML = show ? EYE : EYE_OFF
+    tp.classList.toggle('on', show)
+    pw.focus()
+  }
+
+  const showErr = (msg) => {
+    v.querySelector('#alert').innerHTML = msg ? `<div class="lg-alert">${WARN}<span>${esc(msg)}</span></div>` : ''
+  }
   const go = async () => {
-    const e = v.querySelector('#e'), btn = v.querySelector('#go')
-    e.textContent = ''; btn.disabled = true; btn.textContent = '확인 중…'
+    const btn = v.querySelector('#go')
+    showErr('')
+    const username = v.querySelector('#u').value.trim()
+    if (!username || !pw.value) { showErr('아이디와 비밀번호를 모두 입력해주세요.'); return }
+    btn.disabled = true; btn.textContent = '로그인 중…'
     try {
       const r = await fetch('/api/admin/login', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: v.querySelector('#u').value, password: v.querySelector('#p').value }),
+        body: JSON.stringify({ username, password: pw.value }),
       })
       const d = await r.json().catch(() => ({}))
-      if (!r.ok) { e.textContent = d.error || '로그인에 실패했어요'; return }
+      if (!r.ok) { showErr(d.error || '로그인에 실패했어요'); return }
       token = d.token; me = d.admin; sessionStorage.setItem('adminToken', token)
       renderApp('overview')
-    } catch { e.textContent = '서버에 연결할 수 없어요' }
+    } catch { showErr('서버에 연결할 수 없습니다.') }
     finally { btn.disabled = false; btn.textContent = '로그인' }
   }
   v.querySelector('#go').onclick = go
