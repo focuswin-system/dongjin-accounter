@@ -5,192 +5,194 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <link rel="icon" href="/admin/logo.png">
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" rel="stylesheet">
 <title>도니도라 운영 콘솔</title>
 <!--
   운영자 콘솔 — 고객용 SPA(src/)와 **일부러 분리**했다.
 
   같은 번들에 넣으면 운영자 화면 코드가 모든 고객에게 배포된다. API는 LAN으로 막히지만,
-  화면 구조·엔드포인트 이름까지 알려줄 이유가 없다. 여기는 의존성 없는 단일 파일이라
-  빌드도 필요 없고, 고객 번들 크기에도 영향이 없다.
-  (로고는 src/assets 를 못 쓴다 — 거긴 Vite 번들이다. logo.png 를 같이 둔다)
+  화면 구조·엔드포인트 이름까지 알려줄 이유가 없다. 의존성 없는 단일 파일이라
+  빌드도 필요 없고 고객 번들에도 영향이 없다(폰트만 앱과 같은 Pretendard를 쓴다).
+  로고는 src/assets 를 못 쓴다 — 거긴 Vite 번들이다. logo.png 를 같이 둔다.
 
   이 페이지 자체도 middleware/lanOnly 를 통과해야 열린다(index.js).
 
-  ── 화면 구성 ──
-  운영자가 아침에 여는 화면이다. 알고 싶은 건 순서대로 세 가지다.
+  ── 화면 원칙 ──
+  운영자가 아침에 여는 화면이다. 알고 싶은 순서가 정해져 있다.
     "지금 문제 있나" → "어디가 문제인가" → "그래서 뭘 해야 하나"
-  그래서 요약 → 오류 묶음 → 발생 건별 상세로 파고들게 배치했다.
-  숫자를 크게 두고 설명을 아래 작게 붙인 것도 같은 이유다 — 훑을 때 숫자만 봐도 되게.
+
+  그래서 시각 요소를 아낀다.
+    · **정상 상태에는 표식을 달지 않는다.** 전부 칠하면 아무것도 눈에 안 띈다.
+      색과 배지는 '예외'에만 쓴다 — 0건이면 회색, 1건부터 색이 붙는다.
+    · 굵기는 숫자와 제목에만. 본문까지 굵으면 강조가 사라진다.
+    · 카드는 테두리·그림자 없이 배경 대비로만 띄운다(선을 겹쳐 그으면 지저분해진다).
 -->
 <style>
   :root{
-    --bg:#F2F4F6; --card:#FFFFFF; --line:#EDEFF2;
-    --ink:#191F28; --ink-2:#4E5968; --ink-3:#8B95A1;
-    --blue:#3182F6; --blue-ink:#1B64DA; --blue-bg:#E8F3FF;
-    --red:#F04452; --red-bg:#FEECEE;
-    --amber:#FF9500; --amber-bg:#FFF4E6;
-    --green:#02B77A; --green-bg:#E5F8F1;
-    --r:20px; --r-sm:12px;
-    --sh:0 1px 3px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04);
+    /* 회색조가 기본이다. 색은 의미가 있을 때만 꺼낸다. */
+    --g900:#191F28; --g800:#333D4B; --g700:#4E5968; --g600:#6B7684;
+    --g500:#8B95A1; --g400:#B0B8C1; --g300:#D1D6DB; --g200:#E5E8EB;
+    --g100:#F2F4F6; --g50:#F9FAFB; --white:#FFFFFF;
+    --blue:#3182F6; --blue-d:#1B64DA; --blue-l:#E8F3FF;
+    --red:#F04452;  --red-l:#FEECEE;
+    --amber:#FF9500; --amber-l:#FFF6E8;
+    --green:#02B77A;
+    --r:16px; --r-s:10px;
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-       font:15px/1.5 -apple-system,BlinkMacSystemFont,"Pretendard Variable",Pretendard,
-            "Segoe UI","Malgun Gothic",sans-serif;
-       -webkit-font-smoothing:antialiased;letter-spacing:-.01em}
-  .num{font-variant-numeric:tabular-nums;letter-spacing:-.02em}
-  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;letter-spacing:0}
-  .t2{color:var(--ink-2)} .t3{color:var(--ink-3)}
-  .red{color:var(--red)} .amber{color:var(--amber)} .green{color:var(--green)}
-  .row{display:flex;align-items:center;gap:12px} .grow{flex:1} .wrap{flex-wrap:wrap}
+  body{margin:0;background:var(--g50);color:var(--g900);
+       font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,
+                   system-ui,"Apple SD Gothic Neo",sans-serif;
+       font-size:15px;line-height:1.5;letter-spacing:-.02em;font-weight:400;
+       -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+  .num{font-variant-numeric:tabular-nums}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+        font-size:13px;letter-spacing:0}
+  .g5{color:var(--g500)} .g6{color:var(--g600)} .g7{color:var(--g700)}
+  .red{color:var(--red)} .amber{color:var(--amber)}
+  .row{display:flex;align-items:center;gap:10px} .grow{flex:1} .wrap{flex-wrap:wrap}
+  .r{text-align:right}
 
   /* ── 헤더 ── */
-  header.top{position:sticky;top:0;z-index:30;background:rgba(255,255,255,.88);
-             backdrop-filter:saturate(180%) blur(12px);border-bottom:1px solid var(--line)}
-  .top-in{max-width:1180px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:14px}
-  .logo{width:32px;height:32px;object-fit:contain;flex-shrink:0}
-  .brand-t{font-weight:700;font-size:17px;letter-spacing:-.4px;white-space:nowrap}
-  .brand-s{font-size:12px;color:var(--ink-3);white-space:nowrap;margin-top:1px}
-  nav.tabs{max-width:1180px;margin:0 auto;padding:0 24px;display:flex;gap:22px;overflow-x:auto}
+  header.top{background:var(--white);border-bottom:1px solid var(--g100);position:sticky;top:0;z-index:30}
+  .top-in{max-width:1160px;margin:0 auto;padding:16px 24px 0;display:flex;align-items:center;gap:12px}
+  .top-in img{width:26px;height:26px;object-fit:contain}
+  .b-t{font-size:16px;font-weight:600;letter-spacing:-.03em}
+  .b-s{font-size:12px;color:var(--g500);margin-top:1px}
+  nav.tabs{max-width:1160px;margin:0 auto;padding:0 24px;display:flex;gap:20px;overflow-x:auto}
   nav.tabs::-webkit-scrollbar{display:none}
-  nav.tabs button{background:none;border:0;border-bottom:2.5px solid transparent;color:var(--ink-3);
-    padding:12px 0 11px;font-size:15px;font-weight:600;cursor:pointer;white-space:nowrap;
-    font-family:inherit;letter-spacing:-.02em}
-  nav.tabs button:hover{color:var(--ink-2)}
-  nav.tabs button.on{color:var(--ink);border-bottom-color:var(--ink)}
-  nav.tabs .pip{margin-left:6px;padding:1px 7px;border-radius:99px;font-size:11.5px;font-weight:700;
-                background:var(--red-bg);color:var(--red);vertical-align:1px}
+  nav.tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:14px 0 12px;
+    font-family:inherit;font-size:15px;font-weight:500;color:var(--g500);cursor:pointer;
+    white-space:nowrap;letter-spacing:-.02em;transition:color .12s}
+  nav.tabs button:hover{color:var(--g700)}
+  nav.tabs button.on{color:var(--g900);font-weight:600;border-bottom-color:var(--g900)}
+  nav.tabs .pip{margin-left:5px;font-size:13px;font-weight:600;color:var(--red)}
 
-  main{max-width:1180px;margin:0 auto;padding:24px 24px 80px}
+  main{max-width:1160px;margin:0 auto;padding:24px 24px 80px}
 
   /* ── 요약 ── */
-  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:22px}
-  .kpi{background:var(--card);border-radius:var(--r);padding:20px 22px;box-shadow:var(--sh)}
-  .kpi .k{font-size:13.5px;color:var(--ink-3);font-weight:600}
-  .kpi .v{font-size:32px;font-weight:800;letter-spacing:-1.2px;margin-top:6px;line-height:1.15}
-  .kpi .s{font-size:13px;color:var(--ink-3);margin-top:4px}
-  .kpi.alert{background:linear-gradient(180deg,var(--red-bg),var(--card) 62%)}
-  .kpi.attn{background:linear-gradient(180deg,var(--amber-bg),var(--card) 62%)}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:24px}
+  .kpi{background:var(--white);border-radius:var(--r);padding:20px 22px}
+  .kpi .k{font-size:13px;color:var(--g500);font-weight:500}
+  .kpi .v{font-size:30px;font-weight:700;letter-spacing:-.045em;margin-top:8px;line-height:1.1}
+  .kpi .s{font-size:13px;color:var(--g500);margin-top:6px}
 
-  /* ── 카드·표 ── */
-  .card{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);overflow:hidden;margin-bottom:18px}
-  .card > h2{margin:0;padding:20px 22px 14px;font-size:16px;font-weight:700;letter-spacing:-.3px;
+  /* ── 카드 ── */
+  .card{background:var(--white);border-radius:var(--r);overflow:hidden;margin-bottom:14px}
+  .card > h2{margin:0;padding:20px 22px 4px;font-size:17px;font-weight:600;letter-spacing:-.03em;
              display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .card > h2 .sub{font-size:13px;color:var(--ink-3);font-weight:500;letter-spacing:-.01em}
+  .card > h2 .sub{font-size:13px;color:var(--g500);font-weight:400;letter-spacing:-.02em}
+  .card > .pad{padding:16px 22px 22px}
+
+  /* ── 표 ── */
   .tw{overflow-x:auto}
-  table{width:100%;border-collapse:collapse;min-width:640px}
-  th,td{padding:14px 22px;text-align:left;vertical-align:middle}
-  th{font-size:12.5px;color:var(--ink-3);font-weight:600;white-space:nowrap;
-     border-bottom:1px solid var(--line);border-top:1px solid var(--line)}
-  td{border-bottom:1px solid var(--line);font-size:14.5px}
-  tbody tr:last-child td{border-bottom:none}
-  tbody tr.clickable{cursor:pointer;transition:background .12s}
-  tbody tr.clickable:hover{background:#FAFBFC}
-  .empty{padding:44px 22px;text-align:center;color:var(--ink-3);font-size:14.5px}
+  table{width:100%;border-collapse:collapse;min-width:620px}
+  th{font-size:13px;font-weight:500;color:var(--g500);text-align:left;padding:14px 22px 12px;
+     white-space:nowrap}
+  td{font-size:15px;padding:16px 22px;border-top:1px solid var(--g100);vertical-align:middle}
+  thead th{border-bottom:1px solid var(--g100)}
+  tbody tr:first-child td{border-top:0}
+  tbody tr.click{cursor:pointer;transition:background .1s}
+  tbody tr.click:hover{background:var(--g50)}
+  .sub-l{font-size:13px;color:var(--g500);margin-top:3px}
+  .empty{padding:56px 22px;text-align:center;color:var(--g500);font-size:15px}
 
-  .pill{display:inline-block;padding:3px 9px;border-radius:8px;font-size:12px;font-weight:700;
-        background:var(--bg);color:var(--ink-2);white-space:nowrap;letter-spacing:-.01em}
-  .pill.ok{background:var(--green-bg);color:var(--green)}
-  .pill.bad{background:var(--red-bg);color:var(--red)}
-  .pill.warn{background:var(--amber-bg);color:var(--amber)}
-  .pill.blue{background:var(--blue-bg);color:var(--blue-ink)}
+  /* ── 칩 ── 정상에는 안 붙인다. 예외에만. */
+  .chip{display:inline-block;padding:3px 8px;border-radius:7px;font-size:12.5px;font-weight:600;
+        letter-spacing:-.02em;background:var(--g100);color:var(--g600);white-space:nowrap}
+  .chip.red{background:var(--red-l);color:var(--red)}
+  .chip.amber{background:var(--amber-l);color:#C77700}
+  .chip.blue{background:var(--blue-l);color:var(--blue-d)}
 
-  button.btn{background:var(--bg);color:var(--ink-2);border:0;border-radius:var(--r-sm);
-             padding:9px 14px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;
-             white-space:nowrap;letter-spacing:-.02em;transition:background .12s}
-  button.btn:hover{background:#E5E8EB}
-  button.btn.primary{background:var(--blue);color:#fff}
-  button.btn.primary:hover{background:var(--blue-ink)}
-  button.btn.danger{background:var(--red-bg);color:var(--red)}
-  button.btn.danger:hover{background:#FCDDE1}
-  button.btn.sm{padding:7px 12px;font-size:13.5px}
-  button.btn:disabled{opacity:.45;cursor:default}
+  /* ── 버튼 ── */
+  .btn{background:var(--g100);color:var(--g700);border:0;border-radius:var(--r-s);
+       padding:9px 14px;font-family:inherit;font-size:14px;font-weight:600;letter-spacing:-.02em;
+       cursor:pointer;white-space:nowrap;transition:background .12s}
+  .btn:hover{background:var(--g200)}
+  .btn.pri{background:var(--blue);color:#fff}
+  .btn.pri:hover{background:var(--blue-d)}
+  .btn.dan{background:var(--red-l);color:var(--red)}
+  .btn.dan:hover{background:#FCDCE0}
+  .btn.sm{padding:7px 12px;font-size:13.5px}
+  .btn:disabled{opacity:.4;cursor:default}
+  .btn.ghost{background:transparent;color:var(--g600)}
+  .btn.ghost:hover{background:var(--g100)}
 
-  input,select{background:var(--bg);color:var(--ink);border:1px solid transparent;border-radius:var(--r-sm);
-               padding:13px 14px;font-size:15px;width:100%;font-family:inherit;letter-spacing:-.01em}
-  input::placeholder{color:var(--ink-3)}
-  input:focus,select:focus{outline:none;background:var(--card);border-color:var(--blue)}
-  label{display:block;font-size:13.5px;color:var(--ink-2);font-weight:600;margin:0 0 7px}
+  /* ── 입력 ── */
+  input,select{width:100%;background:var(--g100);color:var(--g900);border:1px solid transparent;
+    border-radius:var(--r-s);padding:12px 14px;font-family:inherit;font-size:15px;letter-spacing:-.02em}
+  input::placeholder{color:var(--g400)}
+  input:focus,select:focus{outline:none;background:var(--white);border-color:var(--blue)}
+  label{display:block;font-size:13px;font-weight:500;color:var(--g600);margin:0 0 7px}
   .field{margin-bottom:14px}
-  .err{color:var(--red);font-size:13.5px;min-height:19px;margin:8px 0 2px;font-weight:500}
 
   /* ── 로그인 ──
-   * 고객용 로그인(src/screens/Login.jsx)과 **같은 뼈대**를 쓴다 — 좌측 브랜드 패널 +
-   * 우측 폼(360px), 라벨·44px 입력·비번 표시토글·전폭 버튼. 같은 서비스니까.
-   *
-   * 다만 **결은 다르게** 한다. 여기는 전 회사를 들여다보는 사내 도구다.
-   * 고객 화면과 구분이 안 되면 "내가 지금 어디에 로그인하는 건지" 헷갈리는데,
-   * 그 헷갈림이 곧 사고다. 그래서 파랑 대신 주황 계열(로고의 그 색)을 쓰고,
-   * 'LAN 전용·사내 운영자' 를 화면에 대놓고 적는다. */
-  .lg{display:flex;min-height:100vh;background:#fff}
-  .lg-brand{width:42%;min-height:100vh;flex-shrink:0;background:#12151A;color:#fff;
-            padding:48px 44px 32px;display:flex;flex-direction:column;position:relative;overflow:hidden}
-  .lg-deco{position:absolute;inset:0;pointer-events:none;overflow:hidden}
-  /* 원판이 아니라 '빛'이어야 한다 — 단색 원은 경계가 도드라져 탁해 보인다.
-     가장자리로 갈수록 사라지는 radial-gradient 로 둔다. */
-  .lg-deco i{position:absolute;border-radius:50%;display:block}
-  .lg-deco i:nth-child(1){width:520px;height:520px;top:-180px;right:-160px;
-    background:radial-gradient(circle,rgba(255,149,0,.20),rgba(255,149,0,0) 68%)}
-  .lg-deco i:nth-child(2){width:400px;height:400px;bottom:20px;left:-140px;
-    background:radial-gradient(circle,rgba(49,130,246,.16),rgba(49,130,246,0) 68%)}
-  .lg-top{display:flex;align-items:center;gap:10px;margin-bottom:auto;position:relative}
-  .lg-top img{width:22px;height:22px;object-fit:contain}
-  .lg-top span{font-weight:700;font-size:15px;letter-spacing:-.02em;color:rgba(255,255,255,.9)}
-  .lg-copy{margin-bottom:auto;position:relative}
-  .lg-tag{display:inline-block;padding:5px 11px;border-radius:99px;font-size:12.5px;font-weight:700;
-          background:rgba(255,149,0,.16);color:#FFB454;margin-bottom:18px;letter-spacing:-.01em}
-  .lg-h{font-size:46px;font-weight:800;letter-spacing:-.04em;line-height:1.1;color:#fff}
-  .lg-sub{font-size:18px;font-weight:500;color:rgba(255,255,255,.5);letter-spacing:-.02em;
-          line-height:1.65;margin-top:24px}
-  .lg-foot{font-size:12.5px;color:rgba(255,255,255,.5);letter-spacing:-.01em;position:relative}
-  .lg-form{flex:1;display:flex;align-items:center;justify-content:center;padding:48px 40px;background:#fff}
-  .lg-form .in{width:100%;max-width:360px}
-  .lg-form h1{font-size:24px;font-weight:700;letter-spacing:-.03em;margin:0 0 8px}
-  .lg-form .note{font-size:13.5px;color:var(--ink-3);margin:0 0 32px}
-  .lg-form label{font-size:13px}
-  .lg-form input{height:46px;padding:0 14px;background:var(--bg)}
-  .lg-form .pw{position:relative}
-  .lg-form .pw input{padding-right:44px}
-  .lg-form .pw button{position:absolute;right:10px;top:50%;transform:translateY(-50%);
-    background:none;border:0;cursor:pointer;color:var(--ink-3);display:grid;place-items:center;padding:4px}
-  .lg-form .pw button.on{color:var(--ink)}
-  .lg-alert{display:flex;align-items:flex-start;gap:8px;padding:11px 14px;border-radius:var(--r-sm);
-            background:var(--red-bg);color:var(--red);font-size:13.5px;font-weight:500;margin-bottom:16px}
-  .lg-form .btn{width:100%;height:48px;font-size:15.5px;border-radius:14px;margin-top:8px}
-  .lg-hint{margin-top:18px;padding:12px 14px;border-radius:var(--r-sm);background:var(--bg);
-           font-size:12.5px;color:var(--ink-3);line-height:1.6}
-  @media (max-width:860px){ .lg-brand{display:none} }
+   * 고객 로그인(src/screens/Login.jsx)과 같은 뼈대 — 좌측 브랜드 패널 + 우측 폼.
+   * 다만 결은 다르게 둔다. 전 회사를 들여다보는 사내 도구라, 고객 화면과 구분이
+   * 안 되면 "지금 어디에 로그인하는 건지" 헷갈리고 그 헷갈림이 곧 사고다. */
+  .lg{display:flex;min-height:100vh;background:var(--white)}
+  .lg-b{width:44%;flex-shrink:0;background:var(--g900);color:#fff;padding:44px 44px 32px;
+        display:flex;flex-direction:column;position:relative;overflow:hidden}
+  .lg-b .glow{position:absolute;border-radius:50%;pointer-events:none}
+  .lg-b .glow.a{width:560px;height:560px;top:-200px;right:-180px;
+    background:radial-gradient(circle,rgba(255,149,0,.16),rgba(255,149,0,0) 66%)}
+  .lg-b .glow.b{width:420px;height:420px;bottom:-60px;left:-150px;
+    background:radial-gradient(circle,rgba(49,130,246,.14),rgba(49,130,246,0) 66%)}
+  .lg-top{display:flex;align-items:center;gap:9px;margin-bottom:auto;position:relative}
+  .lg-top img{width:20px;height:20px;object-fit:contain}
+  .lg-top span{font-size:14px;font-weight:600;color:rgba(255,255,255,.82);letter-spacing:-.02em}
+  .lg-mid{margin-bottom:auto;position:relative}
+  .lg-tag{display:inline-block;padding:5px 10px;border-radius:7px;font-size:12.5px;font-weight:600;
+          background:rgba(255,255,255,.1);color:rgba(255,255,255,.78);margin-bottom:20px}
+  .lg-h{font-size:40px;font-weight:700;letter-spacing:-.045em;line-height:1.2;color:#fff}
+  .lg-s{font-size:16px;font-weight:400;color:rgba(255,255,255,.52);line-height:1.7;margin-top:18px}
+  .lg-f{font-size:12.5px;color:rgba(255,255,255,.38);position:relative}
+  .lg-r{flex:1;display:flex;align-items:center;justify-content:center;padding:48px 40px}
+  .lg-in{width:100%;max-width:340px}
+  .lg-in h1{font-size:24px;font-weight:700;letter-spacing:-.04em;margin:0 0 8px}
+  .lg-in .note{font-size:14px;color:var(--g500);margin:0 0 32px}
+  .lg-in input{height:50px;padding:0 14px;background:var(--g50);border-color:var(--g200)}
+  .lg-in input:focus{background:var(--white);border-color:var(--blue)}
+  .pw{position:relative}
+  .pw input{padding-right:46px}
+  .pw button{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:0;
+    cursor:pointer;color:var(--g400);display:grid;place-items:center;padding:6px;border-radius:8px}
+  .pw button:hover{color:var(--g600);background:var(--g100)}
+  .lg-err{display:flex;align-items:flex-start;gap:7px;padding:12px 14px;border-radius:var(--r-s);
+          background:var(--red-l);color:var(--red);font-size:14px;margin-bottom:18px;line-height:1.5}
+  .lg-in .btn{width:100%;height:52px;font-size:16px;border-radius:12px;margin-top:10px}
+  .lg-hint{margin-top:20px;font-size:13px;color:var(--g500);line-height:1.65;text-align:center}
 
   /* ── 상세 패널 ── */
-  .scrim{position:fixed;inset:0;background:rgba(0,0,0,.32);z-index:40}
-  .drawer{position:fixed;top:0;right:0;bottom:0;width:min(760px,100%);background:var(--bg);
-          z-index:41;display:flex;flex-direction:column;box-shadow:-8px 0 40px rgba(0,0,0,.1)}
-  .drawer-h{padding:20px 24px;background:var(--card);border-bottom:1px solid var(--line);
-            display:flex;align-items:flex-start;gap:12px}
-  .drawer-b{padding:18px 24px 40px;overflow:auto}
-  pre{margin:10px 0 0;white-space:pre-wrap;word-break:break-all;color:var(--ink-2);
-      font:12px/1.7 ui-monospace,Menlo,Consolas,monospace;background:var(--bg);
-      border-radius:var(--r-sm);padding:14px}
+  .scrim{position:fixed;inset:0;background:rgba(0,0,0,.28);z-index:40}
+  .drawer{position:fixed;top:0;right:0;bottom:0;width:min(720px,100%);background:var(--g50);
+          z-index:41;display:flex;flex-direction:column}
+  .dr-h{padding:22px 24px;background:var(--white);border-bottom:1px solid var(--g100);
+        display:flex;align-items:flex-start;gap:12px}
+  .dr-b{padding:16px 24px 48px;overflow:auto}
+  pre{margin:12px 0 0;white-space:pre-wrap;word-break:break-all;color:var(--g600);
+      font:12.5px/1.75 ui-monospace,Menlo,Consolas,monospace;background:var(--g50);
+      border-radius:var(--r-s);padding:14px 16px}
 
   /* ── 확인창 ── */
   .modal{position:fixed;inset:0;display:grid;place-items:center;z-index:50;padding:24px;
-         background:rgba(0,0,0,.32)}
-  .modal .box{background:var(--card);border-radius:var(--r);padding:26px;width:100%;max-width:420px;
-              box-shadow:0 12px 48px rgba(0,0,0,.16)}
-  .modal h3{margin:0 0 10px;font-size:19px;font-weight:700;letter-spacing:-.5px}
-  .modal p{margin:0 0 18px;font-size:14.5px;color:var(--ink-2);line-height:1.65}
+         background:rgba(0,0,0,.28)}
+  .modal .box{background:var(--white);border-radius:20px;padding:28px;width:100%;max-width:400px}
+  .modal h3{margin:0 0 10px;font-size:19px;font-weight:700;letter-spacing:-.04em}
+  .modal p{margin:0 0 20px;font-size:15px;color:var(--g700);line-height:1.6}
+  .modal .err{color:var(--red);font-size:13.5px;min-height:19px;margin-bottom:4px}
 
   /* ── 알림 ── */
   .toasts{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);z-index:60;
           display:flex;flex-direction:column;gap:8px;align-items:center}
-  .toast{background:var(--ink);color:#fff;border-radius:14px;padding:13px 20px;font-size:14.5px;
-         font-weight:600;box-shadow:0 8px 28px rgba(0,0,0,.2);letter-spacing:-.02em}
+  .toast{background:var(--g900);color:#fff;border-radius:12px;padding:14px 20px;font-size:14.5px;
+         font-weight:500;letter-spacing:-.02em;box-shadow:0 6px 20px rgba(0,0,0,.16)}
   .toast.bad{background:var(--red)}
-  .toast.ok{background:var(--ink)}
 
-  .skel{height:14px;border-radius:7px;background:linear-gradient(90deg,#EDEFF2,#F6F7F9,#EDEFF2);
-        background-size:200% 100%;animation:sh 1.2s infinite}
-  @keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
+  .skel{height:15px;border-radius:8px;background:var(--g100)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+  .skel{animation:pulse 1.4s ease-in-out infinite}
 </style>
 </head>
 <body>
@@ -238,7 +240,7 @@ const ask = ({ title, body, confirmLabel = '확인', danger = false, input = nul
       <div class="err" id="me"></div>
       <div class="row" style="justify-content:flex-end;gap:8px">
         <button class="btn" id="mc">취소</button>
-        <button class="btn ${danger ? 'danger' : 'primary'}" id="mo">${esc(confirmLabel)}</button>
+        <button class="btn ${danger ? 'dan' : 'pri'}" id="mo">${esc(confirmLabel)}</button>
       </div></div></div>`)
   document.body.appendChild(m)
   const onKey = (e) => { if (e.key === 'Escape') close(null) }
@@ -276,35 +278,36 @@ const ago = (v) => {
   return d < 30 ? d + '일 전' : Math.floor(d / 30) + '개월 전'
 }
 const n = (v) => Number(v || 0).toLocaleString('ko-KR')
+/** 0은 회색, 1부터 색 — 정상까지 칠하면 예외가 안 보인다 */
+const mark = (v, cls) => (Number(v) > 0 ? `<span class="${cls}">${n(v)}</span>` : `<span class="g5">0</span>`)
 
 /* ── 로그인 ───────────────────────────────────────────────────────── */
-const EYE = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-  stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+const EYE = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+  stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
   <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`
-const EYE_OFF = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-  stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+const EYE_OFF = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+  stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
   <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/>
   <line x1="1" y1="1" x2="23" y2="23"/></svg>`
-const WARN = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-  stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px">
-  <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`
+const WARN = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+  stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:2px">
+  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`
 
 function renderLogin() {
   root.innerHTML = ''
   const v = el(`<div class="lg">
-      <div class="lg-brand">
-        <div class="lg-deco"><i></i><i></i></div>
+      <div class="lg-b">
+        <div class="glow a"></div><div class="glow b"></div>
         <div class="lg-top"><img src="/admin/logo.png" alt=""><span>도니도라</span></div>
-        <div class="lg-copy">
+        <div class="lg-mid">
           <span class="lg-tag">사내 운영자 전용</span>
           <div class="lg-h">운영 콘솔</div>
-          <div class="lg-sub">테넌트 현황·오류·계정을<br>한 곳에서 관리합니다.</div>
+          <div class="lg-s">테넌트 현황과 오류, 계정을<br>한 곳에서 관리합니다.</div>
         </div>
-        <div class="lg-foot">© 2026 (주)포커스윈. All rights reserved.</div>
+        <div class="lg-f">© 2026 (주)포커스윈</div>
       </div>
 
-      <div class="lg-form"><div class="in">
+      <div class="lg-r"><div class="lg-in">
         <h1>운영자 로그인</h1>
         <div class="note">서비스 전체를 다루는 화면입니다.</div>
         <div id="alert"></div>
@@ -315,9 +318,8 @@ function renderLogin() {
             <input id="p" type="password" autocomplete="current-password" placeholder="비밀번호를 입력하세요">
             <button type="button" id="tp" aria-label="비밀번호 표시">${EYE_OFF}</button>
           </div></div>
-        <button class="btn primary" id="go">로그인</button>
-        <div class="lg-hint">이 콘솔은 <b>사무실 네트워크</b>에서만 열립니다.
-          바깥에서는 주소를 알아도 접속되지 않습니다.</div>
+        <button class="btn pri" id="go">로그인</button>
+        <div class="lg-hint">사무실 네트워크에서만 열립니다.</div>
       </div></div>
     </div>`)
   root.appendChild(v)
@@ -327,19 +329,17 @@ function renderLogin() {
     const show = pw.type === 'password'
     pw.type = show ? 'text' : 'password'
     tp.innerHTML = show ? EYE : EYE_OFF
-    tp.classList.toggle('on', show)
     pw.focus()
   }
-
   const showErr = (msg) => {
-    v.querySelector('#alert').innerHTML = msg ? `<div class="lg-alert">${WARN}<span>${esc(msg)}</span></div>` : ''
+    v.querySelector('#alert').innerHTML = msg ? `<div class="lg-err">${WARN}<span>${esc(msg)}</span></div>` : ''
   }
   const go = async () => {
     const btn = v.querySelector('#go')
     showErr('')
     const username = v.querySelector('#u').value.trim()
     if (!username || !pw.value) { showErr('아이디와 비밀번호를 모두 입력해주세요.'); return }
-    btn.disabled = true; btn.textContent = '로그인 중…'
+    btn.disabled = true; btn.textContent = '로그인 중'
     try {
       const r = await fetch('/api/admin/login', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -371,25 +371,26 @@ async function renderApp(tab) {
   root.innerHTML = `
     <header class="top">
       <div class="top-in">
-        <img class="logo" src="/admin/logo.png" alt="">
-        <div><div class="brand-t">운영 콘솔</div><div class="brand-s" id="dep">불러오는 중…</div></div>
+        <img src="/admin/logo.png" alt="">
+        <div><div class="b-t">운영 콘솔</div><div class="b-s" id="dep"></div></div>
         <div class="grow"></div>
-        <span class="t3" id="who" style="font-size:13.5px;font-weight:600"></span>
-        <button class="btn sm" id="rl">새로고침</button>
-        <button class="btn sm" id="out">로그아웃</button>
+        <span class="g5" id="who" style="font-size:13.5px"></span>
+        <button class="btn sm ghost" id="rl">새로고침</button>
+        <button class="btn sm ghost" id="out">로그아웃</button>
       </div>
       <nav class="tabs" id="tabs"></nav>
     </header>
     <main id="main"></main>`
   root.querySelector('#rl').onclick = () => renderApp(state.tab)
   root.querySelector('#out').onclick = logout
-  const setWho = () => { if (me) root.querySelector('#who').textContent = `${me.name || ''} (${me.username})` }
+  const setWho = () => { if (me) root.querySelector('#who').textContent = `${me.name || ''} · ${me.username}` }
   setWho()
 
   const main = root.querySelector('#main')
-  main.innerHTML = `<div class="card" style="padding:24px">
-      <div class="skel" style="width:38%"></div><div class="skel" style="width:66%;margin-top:12px"></div>
-      <div class="skel" style="width:52%;margin-top:12px"></div></div>`
+  main.innerHTML = `<div class="card"><div class="pad">
+      <div class="skel" style="width:34%"></div>
+      <div class="skel" style="width:62%;margin-top:12px"></div>
+      <div class="skel" style="width:48%;margin-top:12px"></div></div></div>`
 
   let ov
   try { ov = await api('/overview') }
@@ -398,15 +399,14 @@ async function renderApp(tab) {
 
   const dep = ov.server
   root.querySelector('#dep').textContent = dep
-    ? `배포 ${String(dep.commit || '').slice(0, 8)} · ${when(dep.deployedAt)}`
-    : '로컬 실행'
+    ? `${String(dep.commit || '').slice(0, 8)} · ${when(dep.deployedAt)}` : '로컬 실행'
 
-  // 탭에 숫자를 달아, 어디를 봐야 하는지 먼저 보이게 한다
   const err7 = ov.companies.reduce((a, c) => a + Number(c.errors_7d || 0), 0) + Number(ov.orphanErrors7d || 0)
   const fail1 = ov.companies.reduce((a, c) => a + Number(c.login_fails_1d || 0), 0)
   const badge = { errors: err7, security: fail1 }
   const tabs = root.querySelector('#tabs')
   for (const t of TABS) {
+    // 배지는 '볼 일이 있을 때만' 붙는다. 0을 달아두면 늘 붙어 있어 신호가 되지 못한다.
     const b = el(`<button class="${t.id === state.tab ? 'on' : ''}">${t.label}${
       badge[t.id] ? `<span class="pip">${n(badge[t.id])}</span>` : ''}</button>`)
     b.onclick = () => renderApp(t.id)
@@ -428,32 +428,34 @@ async function viewOverview(main, ov) {
   main.appendChild(el(`<div class="kpis">
       <div class="kpi"><div class="k">테넌트</div><div class="v num">${n(active)}</div>
         <div class="s">${ov.companies.length > active
-          ? `중지 ${n(ov.companies.length - active)}개 포함 총 ${n(ov.companies.length)}개` : '전부 사용 중'}</div></div>
+          ? `중지 ${n(ov.companies.length - active)}개 포함 ${n(ov.companies.length)}개` : '전부 사용 중'}</div></div>
       <div class="kpi"><div class="k">활성 사용자</div><div class="v num">${n(users)}</div>
         <div class="s">전 회사 합계</div></div>
-      <div class="kpi ${err7 ? 'alert' : ''}"><div class="k">오류 · 7일</div>
-        <div class="v num ${err7 ? 'red' : ''}">${n(err7)}</div>
-        <div class="s">${err7 ? '오류 탭에서 확인하세요' : '문제 없음'}</div></div>
-      <div class="kpi ${fail1 ? 'attn' : ''}"><div class="k">로그인 실패 · 24시간</div>
-        <div class="v num ${fail1 ? 'amber' : ''}">${n(fail1)}</div>
-        <div class="s">${fail1 ? '반복되면 확인이 필요합니다' : '정상'}</div></div>
+      <div class="kpi"><div class="k">오류</div>
+        <div class="v num ${err7 ? 'red' : 'g5'}">${n(err7)}</div>
+        <div class="s">${err7 ? '최근 7일 · 확인이 필요합니다' : '최근 7일 · 문제 없음'}</div></div>
+      <div class="kpi"><div class="k">로그인 실패</div>
+        <div class="v num ${fail1 ? 'amber' : 'g5'}">${n(fail1)}</div>
+        <div class="s">${fail1 ? '최근 24시간 · 반복되면 확인' : '최근 24시간 · 정상'}</div></div>
     </div>`))
 
   const rows = ov.companies.map(c => `<tr>
-      <td><b>${esc(c.code)}</b>${c.active ? '' : ' <span class="pill">중지</span>'}
-          <div class="t3" style="font-size:13px;margin-top:2px">${esc(c.name)}</div></td>
-      <td class="mono t3">${esc(c.db_name)}</td>
-      <td class="num">${n(c.users)}</td>
-      <td class="num t3">${ago(c.last_login)}</td>
-      <td class="num"><b class="${c.errors_7d > 0 ? 'red' : 't3'}">${n(c.errors_7d)}</b></td>
-      <td class="num"><b class="${c.login_fails_1d > 0 ? 'amber' : 't3'}">${n(c.login_fails_1d)}</b></td>
-      <td><button class="btn sm" data-acc="${esc(c.id)}">계정 관리</button></td>
+      <td><span style="font-weight:600">${esc(c.code)}</span>${
+          c.active ? '' : ' <span class="chip">중지</span>'}
+          <div class="sub-l">${esc(c.name)}</div></td>
+      <td class="mono g5">${esc(c.db_name)}</td>
+      <td class="r num">${n(c.users)}</td>
+      <td class="r num g6">${ago(c.last_login)}</td>
+      <td class="r num">${mark(c.errors_7d, 'red')}</td>
+      <td class="r num">${mark(c.login_fails_1d, 'amber')}</td>
+      <td class="r"><button class="btn sm" data-acc="${esc(c.id)}">계정</button></td>
     </tr>`).join('')
   const card = el(`<div class="card">
-      <h2>테넌트 ${ov.companies.length}개
-        ${ov.orphanErrors7d ? `<span class="sub">· 회사를 특정할 수 없는 오류 ${n(ov.orphanErrors7d)}건(7일)</span>` : ''}</h2>
+      <h2>테넌트<span class="sub">${ov.companies.length}개${
+        ov.orphanErrors7d ? ` · 회사 미상 오류 ${n(ov.orphanErrors7d)}건` : ''}</span></h2>
       <div class="tw"><table><thead><tr>
-        <th>회사</th><th>DB</th><th>사용자</th><th>마지막 로그인</th><th>오류 7일</th><th>로그인 실패 24h</th><th></th>
+        <th>회사</th><th>DB</th><th class="r">사용자</th><th class="r">마지막 로그인</th>
+        <th class="r">오류 7일</th><th class="r">로그인 실패 24h</th><th></th>
       </tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty">등록된 회사가 없습니다.</td></tr>'}</tbody></table></div>
     </div>`)
   card.querySelectorAll('[data-acc]').forEach(b => b.onclick = () => {
@@ -464,28 +466,27 @@ async function viewOverview(main, ov) {
 
 /* ── 오류 ── */
 async function viewErrors(main) {
-  const box = el(`<div class="card"><h2>최근 오류 · 7일
-      <span class="sub">같은 것끼리 묶었습니다 · 줄을 누르면 발생 건별로 볼 수 있어요</span></h2>
-      <div class="tw" id="t"><div class="empty">불러오는 중…</div></div></div>`)
+  const box = el(`<div class="card"><h2>오류<span class="sub">최근 7일 · 같은 것끼리 묶었습니다</span></h2>
+      <div class="tw" id="t"><div class="empty">불러오는 중</div></div></div>`)
   main.appendChild(box)
   let d
   try { d = await api('/errors?days=7&limit=60') }
   catch (e) { box.querySelector('#t').innerHTML = `<div class="empty red">${esc(e.message)}</div>`; return }
 
   if (!d.rows.length) {
-    box.querySelector('#t').innerHTML = '<div class="empty">7일간 오류가 없습니다. 좋은 신호입니다.</div>'
+    box.querySelector('#t').innerHTML = '<div class="empty">7일간 오류가 없습니다.</div>'
     return
   }
-  const rows = d.rows.map(e => `<tr class="clickable" data-fp="${esc(e.fingerprint)}">
-      <td class="num"><b style="font-size:17px" class="${e.hits > 5 ? 'red' : ''}">${n(e.hits)}</b></td>
+  const rows = d.rows.map(e => `<tr class="click" data-fp="${esc(e.fingerprint)}">
+      <td class="r num ${e.hits > 5 ? 'red' : ''}" style="font-weight:700;font-size:17px">${n(e.hits)}</td>
       <td><span class="mono">${esc(e.code || '—')}</span>
-          <div class="mono t3" style="margin-top:3px">${esc(e.path || '')}</div></td>
-      <td class="mono t2">${esc(e.message || '')}</td>
-      <td class="num t3">${ago(e.last_seen)}<div style="font-size:12px;margin-top:2px">${when(e.last_seen)}</div></td>
-      <td class="num t3">${n(e.companies)}</td>
+          <div class="mono g5" style="margin-top:3px">${esc(e.path || '')}</div></td>
+      <td class="mono g7">${esc(e.message || '')}</td>
+      <td class="r num g6">${ago(e.last_seen)}<div class="sub-l">${when(e.last_seen)}</div></td>
+      <td class="r num g6">${n(e.companies)}</td>
     </tr>`).join('')
   box.querySelector('#t').innerHTML = `<table><thead><tr>
-      <th>횟수</th><th>코드 / 경로</th><th>메시지</th><th>마지막 발생</th><th>회사 수</th>
+      <th class="r">횟수</th><th>코드 · 경로</th><th>메시지</th><th class="r">마지막 발생</th><th class="r">회사</th>
     </tr></thead><tbody>${rows}</tbody></table>`
   box.querySelectorAll('[data-fp]').forEach(tr => tr.onclick = () => openError(tr.getAttribute('data-fp')))
 }
@@ -494,10 +495,11 @@ async function viewErrors(main) {
 async function openError(fp) {
   const scrim = el('<div class="scrim"></div>')
   const dr = el(`<aside class="drawer">
-      <div class="drawer-h"><div class="grow"><div style="font-weight:700;font-size:17px">오류 상세</div>
-        <div class="mono t3" style="margin-top:3px">최근 20건 · ${esc(fp.slice(0, 16))}…</div></div>
+      <div class="dr-h"><div class="grow">
+        <div style="font-size:18px;font-weight:600;letter-spacing:-.03em">오류 상세</div>
+        <div class="g5" style="font-size:13px;margin-top:3px">최근 20건</div></div>
         <button class="btn sm" id="x">닫기</button></div>
-      <div class="drawer-b" id="b"><div class="empty">불러오는 중…</div></div></aside>`)
+      <div class="dr-b" id="b"><div class="empty">불러오는 중</div></div></aside>`)
   const onKey = (e) => { if (e.key === 'Escape') close() }
   const close = () => { scrim.remove(); dr.remove(); document.removeEventListener('keydown', onKey) }
   scrim.onclick = close
@@ -510,25 +512,24 @@ async function openError(fp) {
   catch (e) { dr.querySelector('#b').innerHTML = `<div class="empty red">${esc(e.message)}</div>`; return }
 
   dr.querySelector('#b').innerHTML = d.rows.map(r => `
-      <div class="card">
-        <h2>${esc(r.company_code || '회사 미상')}
-          <span class="sub">· ${esc(r.username || '비로그인')} · ${when(r.created_at)}</span>
+      <div class="card"><div class="pad">
+        <div class="row wrap" style="gap:8px">
+          <span style="font-weight:600">${esc(r.company_code || '회사 미상')}</span>
+          <span class="g5" style="font-size:13.5px">${esc(r.username || '비로그인')} · ${when(r.created_at)}</span>
           <div class="grow"></div>
-          ${r.release_id ? `<span class="pill blue">배포 ${esc(String(r.release_id).slice(0, 8))}</span>` : ''}</h2>
-        <div style="padding:0 22px 20px">
-          <div class="mono">${esc(r.method || '')} ${esc(r.path || '')}
-            <span class="t3">→ ${esc(r.status || '-')}</span></div>
-          <div class="mono t2" style="margin-top:8px">${esc(r.code || '')} ${esc(r.message || '')}</div>
-          ${r.stack ? `<pre>${esc(r.stack)}</pre>` : ''}
+          ${r.release_id ? `<span class="chip">${esc(String(r.release_id).slice(0, 8))}</span>` : ''}
         </div>
-      </div>`).join('') || '<div class="empty">기록이 없습니다.</div>'
+        <div class="mono" style="margin-top:12px">${esc(r.method || '')} ${esc(r.path || '')}
+          <span class="g5">→ ${esc(r.status || '-')}</span></div>
+        <div class="mono g7" style="margin-top:6px">${esc(r.code || '')} ${esc(r.message || '')}</div>
+        ${r.stack ? `<pre>${esc(r.stack)}</pre>` : ''}
+      </div></div>`).join('') || '<div class="empty">기록이 없습니다.</div>'
 }
 
 /* ── 로그인 실패 ── */
 async function viewSecurity(main) {
-  const box = el(`<div class="card"><h2>로그인 실패 · 3일
-      <span class="sub">성공한 로그인은 각 회사의 변경 이력에서 봅니다</span></h2>
-      <div class="tw" id="t"><div class="empty">불러오는 중…</div></div></div>`)
+  const box = el(`<div class="card"><h2>로그인 실패<span class="sub">최근 3일</span></h2>
+      <div class="tw" id="t"><div class="empty">불러오는 중</div></div></div>`)
   main.appendChild(box)
   let d
   try { d = await api('/login-failures?days=3&limit=100') }
@@ -538,19 +539,19 @@ async function viewSecurity(main) {
     box.querySelector('#t').innerHTML = '<div class="empty">3일간 실패한 로그인이 없습니다.</div>'
     return
   }
-  /* 한 건 한 건은 오타일 뿐이다. 신호는 **같은 조합의 반복**이다 —
+  /* 한 건은 오타일 뿐이다. 신호는 **같은 조합의 반복**이다 —
      세어서 붙여주지 않으면 목록을 눈으로 훑어야 알 수 있다. */
   const key = (r) => `${r.company_code || '?'}|${r.username || '?'}|${r.ip || '?'}`
   const cnt = {}
   for (const r of d.rows) cnt[key(r)] = (cnt[key(r)] || 0) + 1
   const rows = d.rows.map(f => `<tr>
-      <td class="num t3">${when(f.created_at)}</td>
-      <td><b>${esc(f.company_code || '—')}</b>
-          <div class="t3" style="font-size:13px;margin-top:2px">${esc(f.company_name || '')}</div></td>
+      <td class="num g6">${when(f.created_at)}</td>
+      <td><span style="font-weight:600">${esc(f.company_code || '—')}</span>
+          <div class="sub-l">${esc(f.company_name || '')}</div></td>
       <td>${esc(f.username || '—')}</td>
-      <td class="mono t3">${esc(f.ip || '—')}</td>
-      <td>${cnt[key(f)] >= 5 ? `<span class="pill bad">이 조합 ${cnt[key(f)]}회</span>` : ''}
-          ${f.detail === 'locked' ? ' <span class="pill warn">잠김</span>' : ''}</td>
+      <td class="mono g5">${esc(f.ip || '—')}</td>
+      <td class="r">${cnt[key(f)] >= 5 ? `<span class="chip red">${cnt[key(f)]}회 반복</span>` : ''}
+          ${f.detail === 'locked' ? ' <span class="chip amber">잠김</span>' : ''}</td>
     </tr>`).join('')
   box.querySelector('#t').innerHTML = `<table><thead><tr>
       <th>시각</th><th>회사</th><th>아이디</th><th>IP</th><th></th>
@@ -565,55 +566,56 @@ async function viewAccounts(main, ov) {
   if (!cid) { main.appendChild(el('<div class="card"><div class="empty">회사가 없습니다.</div></div>')); return }
   state.company = cid
 
-  const picker = el(`<div class="card"><div style="padding:18px 22px" class="row wrap">
+  const picker = el(`<div class="card"><div class="pad row wrap" style="padding:18px 22px">
       <label style="margin:0">회사</label>
       <select id="c" style="width:auto;min-width:260px">${ov.companies.map(c =>
-        `<option value="${esc(c.id)}" ${c.id === cid ? 'selected' : ''}>${esc(c.code)} — ${esc(c.name)}</option>`).join('')}</select>
+        `<option value="${esc(c.id)}" ${c.id === cid ? 'selected' : ''}>${esc(c.code)} · ${esc(c.name)}</option>`).join('')}</select>
       <div class="grow"></div>
-      <span class="t3" style="font-size:13px">모든 변경은 해당 회사의 변경 이력에 남습니다</span>
+      <span class="g5" style="font-size:13px">변경은 해당 회사의 변경 이력에 남습니다</span>
     </div></div>`)
   picker.querySelector('#c').onchange = (e) => { state.company = e.target.value; renderApp('accounts') }
   main.appendChild(picker)
 
-  const box = el('<div class="card"><div class="empty">불러오는 중…</div></div>')
+  const box = el('<div class="card"><div class="empty">불러오는 중</div></div>')
   main.appendChild(box)
   let d
   try { d = await api(`/companies/${cid}/users`) }
   catch (e) { box.innerHTML = `<div class="empty red">${esc(e.message)}</div>`; return }
 
   const run = async (fn, okMsg) => {
-    try { await fn(); toast(okMsg, 'ok'); renderApp('accounts') } catch (e) { toast(e.message, 'bad') }
+    try { await fn(); toast(okMsg); renderApp('accounts') } catch (e) { toast(e.message, 'bad') }
   }
 
   const rows = d.rows.map(u => `<tr>
-      <td><b>${esc(u.username)}</b>${u.role === 'admin' ? ' <span class="pill blue">마스터</span>' : ''}
-          <div class="t3" style="font-size:13px;margin-top:2px">${esc(u.name || '')}</div></td>
-      <td>${u.active ? '<span class="pill ok">사용</span>' : '<span class="pill">정지</span>'}
-          ${u.must_change_pw ? '<div class="amber" style="font-size:12.5px;margin-top:4px;font-weight:600">비번 변경 대기</div>' : ''}</td>
-      <td class="num t3">${ago(u.last_login)}</td>
-      <td class="num">${u.recent_fails >= 5
-          ? `<span class="pill bad">잠김 · ${n(u.recent_fails)}회</span>`
-          : `<span class="t3">${n(u.recent_fails)}</span>`}</td>
-      <td><div class="row wrap" style="gap:6px">
-        <button class="btn sm" data-pw="${esc(u.id)}" data-u="${esc(u.username)}">비번 초기화</button>
-        <button class="btn sm ${u.active ? 'danger' : ''}" data-act="${esc(u.id)}"
+      <td><span style="font-weight:600">${esc(u.username)}</span>${
+          u.role === 'admin' ? ' <span class="chip blue">마스터</span>' : ''}
+          <div class="sub-l">${esc(u.name || '')}</div></td>
+      <td>${u.active ? '<span class="g6">사용 중</span>' : '<span class="chip">정지</span>'}
+          ${u.must_change_pw ? '<div class="sub-l amber">비밀번호 변경 대기</div>' : ''}</td>
+      <td class="r num g6">${ago(u.last_login)}</td>
+      <td class="r">${u.recent_fails >= 5
+          ? `<span class="chip red">잠김 · ${n(u.recent_fails)}회</span>`
+          : `<span class="num g5">${n(u.recent_fails)}</span>`}</td>
+      <td class="r"><div class="row wrap" style="gap:6px;justify-content:flex-end">
+        <button class="btn sm" data-pw="${esc(u.id)}" data-u="${esc(u.username)}">비밀번호</button>
+        <button class="btn sm ${u.active ? 'dan' : ''}" data-act="${esc(u.id)}"
                 data-on="${u.active ? '0' : '1'}" data-u="${esc(u.username)}">${u.active ? '정지' : '사용'}</button>
         ${u.recent_fails >= 5 ? `<button class="btn sm" data-unlock="${esc(u.id)}" data-u="${esc(u.username)}">잠금 해제</button>` : ''}
       </div></td>
     </tr>`).join('')
 
-  box.innerHTML = `<h2>${esc(d.company.name)} <span class="pill">${esc(d.company.code)}</span>
-      <span class="sub">· 계정 ${d.rows.length}개</span></h2>
+  box.innerHTML = `<h2>${esc(d.company.name)}<span class="sub">${esc(d.company.code)} · 계정 ${d.rows.length}개</span></h2>
     <div class="tw"><table><thead><tr>
-      <th>아이디</th><th>상태</th><th>마지막 로그인</th><th>최근 실패</th><th></th>
+      <th>아이디</th><th>상태</th><th class="r">마지막 로그인</th><th class="r">최근 실패</th><th></th>
     </tr></thead><tbody>${rows || '<tr><td colspan="5" class="empty">계정이 없습니다.</td></tr>'}</tbody></table></div>`
 
   box.querySelectorAll('[data-pw]').forEach(b => b.onclick = async () => {
     const who = b.getAttribute('data-u')
     const pw = await ask({
-      title: `${who} 비밀번호 초기화`,
-      body: '이 작업은 <b>해당 회사의 변경 이력에 운영자 이름으로 남습니다.</b><br>'
-          + '사용자는 다음 로그인 때 비밀번호를 반드시 바꾸게 됩니다.',
+      title: '비밀번호 초기화',
+      body: `<b>${esc(who)}</b> 의 비밀번호를 바꿉니다.<br>`
+          + '이 작업은 해당 회사의 변경 이력에 운영자 이름으로 남고, '
+          + '사용자는 다음 로그인 때 비밀번호를 다시 설정하게 됩니다.',
       confirmLabel: '초기화',
       input: {
         label: '임시 비밀번호 (8자 이상)', placeholder: '예: temp-2026-0804',
@@ -628,9 +630,9 @@ async function viewAccounts(main, ov) {
   box.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
     const on = b.getAttribute('data-on') === '1', who = b.getAttribute('data-u')
     const ok = await ask({
-      title: on ? `${who} 계정 사용` : `${who} 계정 정지`,
-      body: on ? '이 계정으로 다시 로그인할 수 있게 됩니다.'
-               : '이 계정은 <b>로그인할 수 없게 됩니다.</b> 남긴 기록은 그대로 유지됩니다.',
+      title: on ? '계정 사용' : '계정 정지',
+      body: on ? `<b>${esc(who)}</b> 계정으로 다시 로그인할 수 있게 됩니다.`
+               : `<b>${esc(who)}</b> 계정은 로그인할 수 없게 됩니다.<br>남긴 기록은 그대로 유지됩니다.`,
       confirmLabel: on ? '사용' : '정지', danger: !on,
     })
     if (!ok) return
@@ -644,17 +646,18 @@ async function viewAccounts(main, ov) {
         `${b.getAttribute('data-u')} 의 로그인 잠금을 해제했습니다`))
 
   // 계정 추가
-  const add = el(`<div class="card"><h2>계정 추가</h2><div style="padding:0 22px 22px">
+  const add = el(`<div class="card"><h2>계정 추가</h2><div class="pad">
       <div class="row wrap" style="align-items:flex-end;gap:12px">
         <div class="field" style="flex:1;min-width:140px;margin:0"><label>아이디</label><input id="nu"></div>
         <div class="field" style="flex:1;min-width:140px;margin:0"><label>이름</label><input id="nn"></div>
-        <div class="field" style="flex:1;min-width:190px;margin:0"><label>임시 비밀번호 (8자 이상)</label><input id="np"></div>
+        <div class="field" style="flex:1;min-width:190px;margin:0"><label>임시 비밀번호</label>
+          <input id="np" placeholder="8자 이상"></div>
         <div class="field" style="min-width:140px;margin:0"><label>역할</label>
           <select id="nr"><option value="user">일반 사용자</option><option value="admin">마스터</option></select></div>
-        <button class="btn primary" id="go" style="padding:13px 22px">추가</button>
+        <button class="btn pri" id="go" style="height:44px">추가</button>
       </div>
-      <div class="err" id="e"></div>
-      <div class="t3" style="font-size:13px">추가된 계정은 첫 로그인 때 비밀번호를 바꾸게 됩니다.</div>
+      <div class="err" id="e" style="color:var(--red);font-size:13.5px;min-height:19px;margin-top:8px"></div>
+      <div class="g5" style="font-size:13px">추가된 계정은 첫 로그인 때 비밀번호를 다시 설정하게 됩니다.</div>
     </div></div>`)
   add.querySelector('#go').onclick = () => {
     const e = add.querySelector('#e'); e.textContent = ''
