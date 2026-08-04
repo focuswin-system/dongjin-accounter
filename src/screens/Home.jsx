@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Icon, Popover, PopItem, fmtNum } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
-import { LEAF_BY_ID } from '../lib/nav'
+import { LEAF_BY_ID, MASTER_LEAVES } from '../lib/nav'
 import { usePerms, visiblePortal, visibleLeaves, isMasterOnly } from '../lib/perms'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 
@@ -99,6 +99,8 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
   // 마스터 전용 화면(변경 이력)은 자원 권한과 별개라 여기서 한 번 더 거른다 —
   // 즐겨찾기·자주 찾는 메뉴에 눌러도 못 들어가는 항목이 뜨면 안 된다.
   const leaves = visibleLeaves(perms).filter(l => !isMasterOnly(l.id) || user?.role === 'admin')
+  // 기준정보는 15개 화면의 묶음이라, 그중 하나라도 볼 수 있으면 타일을 세운다(App 사이드바와 같은 규칙).
+  const masterVisible = MASTER_LEAVES.some(l => canDo(l.id))
   const [todos, setTodos] = useState([])
   const [favorites, setFavorites] = useState(() => {
     try { const s = JSON.parse(localStorage.getItem('homeFavorites')); return Array.isArray(s) ? s : DEFAULT_FAVS } catch { return DEFAULT_FAVS }
@@ -253,21 +255,38 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
         )
       })}
 
-      {/* 환경설정 (라인과 별도) */}
-      {canDo("settings") && <div className="domain-line" style={{ marginBottom: 0 }}>
-        <div className="domain-line-head">
-          <div className="d-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Cog size={15}/></div>
-          <div className="d-label">환경설정</div>
+      {/* 기준정보·환경설정 — 매일 쓰는 업무 메뉴와 성격이 달라 아래에 따로 세운다(사이드바와 같은 묶음).
+       *
+       * ⚠ 기준정보는 일반회계 안에 있다가 독립 영역으로 빠져나왔는데(인사 기준정보까지 모으므로),
+       * 사이드바에만 세우고 **홈에는 자리를 안 만들어 두었었다** — 메뉴엔 있는데 홈에선
+       * 들어갈 길이 없는 상태였다. nav.js visiblePortal 주석이 경계하는 것의 정반대 경우다. */}
+      {(masterVisible || canDo("settings")) && (
+        <div className="domain-line" style={{ marginBottom: 0 }}>
+          <div className="domain-line-head">
+            <div className="d-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Folder size={15}/></div>
+            <div className="d-label">기준정보 · 환경설정</div>
+          </div>
+          <div className="tile-row">
+            {/* 기준정보는 15개 화면의 묶음이라, 그중 하나라도 볼 수 있으면 타일을 세운다(사이드바와 같은 규칙) */}
+            {masterVisible && (
+              <button className="cat-tile" onClick={() => go("master")}>
+                <div className="c-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Folder size={20}/></div>
+                <div className="c-label">기준정보</div>
+                <div className="c-desc">거래처·품목·계정과목·계좌·부서 등</div>
+                <div className="c-go">바로가기 <Icon.Right size={11}/></div>
+              </button>
+            )}
+            {canDo("settings") && (
+              <button className="cat-tile" onClick={() => go("settings")}>
+                <div className="c-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Cog size={20}/></div>
+                <div className="c-label">환경설정</div>
+                <div className="c-desc">회사 정보·사용자·결재선·월 마감·변경 이력</div>
+                <div className="c-go">바로가기 <Icon.Right size={11}/></div>
+              </button>
+            )}
+          </div>
         </div>
-        <div className="tile-row">
-          <button className="cat-tile" onClick={() => go("settings")}>
-            <div className="c-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Cog size={20}/></div>
-            <div className="c-label">환경설정</div>
-            <div className="c-desc">회사정보·사용자·문서양식</div>
-            <div className="c-go">바로가기 <Icon.Right size={11}/></div>
-          </button>
-        </div>
-      </div>}
+      )}
     </div>
     </>
   )

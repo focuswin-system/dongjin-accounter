@@ -290,10 +290,13 @@ export const PORTAL = [
       { id: 'hr_labor', label: '근로·용역', icon: Icon.Sign, desc: '근로계약·용역·일용', groups: [
         { label: '', items: ['hr_labor_contract', 'hr_outsourcing'] },
       ]},
-      { id: 'hr_base', label: '기준정보', icon: Icon.Folder, desc: '부서·직위·급여항목·고용형태', groups: [
-        { label: '조직', items: ['hrbase_department', 'hrbase_position'] },
-        { label: '급여·근로', items: ['hrbase_payrollItems', 'hrbase_employType'] },
-      ]},
+      /* (제거) 'hr_base' 기준정보 카테고리 — 부서·직위·급여항목·고용형태.
+       *
+       * 기준정보를 독립 영역으로 모으면서 사이드바에서는 인사급여 안의 4개를 빼냈는데,
+       * **홈 포털에는 그대로 남아** 같은 화면으로 가는 길이 두 갈래가 됐다
+       * (홈에 '기준정보' 타일이 두 번 나왔다). 모으기로 한 이상 입구도 하나여야 한다.
+       * 이 4개는 아래 MASTER_GROUPS 의 '인사' 묶음에 그대로 있다.
+       * 라우트 'hr_base'(인사 기준정보 화면) 자체는 남겨둔다 — 구 링크·브레드크럼이 쓴다. */
     ],
   },
   {
@@ -348,9 +351,13 @@ DOMAIN_OF['acct_expense'] = 'acct'
 DOMAIN_OF['acct_docs'] = 'acct'
 DOMAIN_OF['acct_ledger'] = 'acct'
 DOMAIN_OF['acct_tax'] = 'acct'
-DOMAIN_OF['master'] = 'acct'   // 기준정보 포털 카테고리(groups) — 사이드바 도메인 자동 펼침
+/* 기준정보(master)는 **일부러 DOMAIN_OF 에 넣지 않는다.**
+   일반회계 안에 있다가 독립 영역으로 빠져나온 항목이라(인사 기준정보까지 모은다),
+   여기에 'acct' 로 매핑해두면 기준정보에 들어갈 때마다 일반회계 도메인이 펼쳐진다 —
+   사이드바에서는 아래쪽 독립 항목으로 서 있는데 위의 다른 도메인이 열리는 셈이라 어긋난다.
+   (App.jsx CRUMB_MAP 도 master 를 '일반회계 하위가 아니라 독립 영역'으로 둔다) */
 DOMAIN_OF['hr_labor'] = 'hr_dom'
-DOMAIN_OF['hr_base'] = 'hr_dom' // 인사급여 기준정보 포털 카테고리(groups)
+DOMAIN_OF['hr_base'] = 'hr_dom' // 인사 기준정보 화면(라우트) — 홈 타일에서는 뺐지만 route 는 남아 있다
 DOMAIN_OF['mgmt_report'] = 'mgmt'
 DOMAIN_OF['mgmt_biz'] = 'mgmt'  // 경영관리 포털 카테고리(groups)
 
