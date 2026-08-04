@@ -59,6 +59,7 @@ app.use('/uploads', require('./routes/files'))
 const authMiddleware = require('./middleware/auth')
 const tenantMiddleware = require('./middleware/tenant')
 const permGate = require('./middleware/perm')
+const auditTrail = require('./middleware/auditTrail')
 // 로그아웃은 인증을 요구하지 않는다 — 토큰이 이미 만료된 상태에서도 쿠키는 정리되어야 한다.
 const PUBLIC_API = new Set(['/api/auth/login', '/api/auth/logout', '/api/health'])
 app.use((req, res, next) => {
@@ -69,8 +70,11 @@ app.use((req, res, next) => {
   // 인증 통과 후 곧바로 테넌트를 확정한다 — JWT의 dbName으로 회사 DB 풀을 req.db에 주입.
   // 이 순서가 보장돼야 라우트가 '어느 회사인지 모르는 상태'로 실행되는 일이 없다.
   // 그 다음 권한 게이트 — 자원×행위 판정을 한 곳에서 한다(platform/apiPerms.js).
+  // 마지막으로 감사 로그 — 통과한 요청 중 '남겨야 할 행위'만 기록한다(platform/auditMap.js).
+  // 권한 게이트 뒤에 두는 이유: 거부된 요청은 아무것도 바꾸지 않았으므로 감사 대상이 아니다.
   return authMiddleware(req, res, (err) => (err ? next(err)
-    : tenantMiddleware(req, res, (err2) => (err2 ? next(err2) : permGate(req, res, next)))))
+    : tenantMiddleware(req, res, (err2) => (err2 ? next(err2)
+      : permGate(req, res, (err3) => (err3 ? next(err3) : auditTrail(req, res, next)))))))
 })
 
 app.use('/api/auth',               require('./routes/auth'))
@@ -103,6 +107,7 @@ app.use('/api/quote-reqs',         require('./routes/quote-reqs'))
 app.use('/api/approval-presets',   require('./routes/approval-presets'))
 app.use('/api/finance',            require('./routes/finance'))
 app.use('/api/savings',            require('./routes/savings'))
+app.use('/api/audit',              require('./routes/audit'))
 
 // ── 헬스체크 ──
 // deploy.sh 가 배포 시점에 기록한 provenance 를 함께 돌려준다.

@@ -374,6 +374,106 @@ try {
   fail(`권한 매핑 검사 실패: ${e.message}`)
 }
 
+// ── [11] 감사 로그: 장부·돈을 지우는 API가 전부 기록되는가 ──
+// 감사는 '빠뜨림'이 곧 공백이고, 그 공백은 사고가 난 뒤에야 드러난다("그거 누가 지웠지?").
+// 새 삭제 API를 추가하면서 platform/auditMap.js 등록을 잊는 걸 여기서 막는다.
+console.log('\n[11] 감사 로그 — 장부 삭제 API 등록 완전성')
+try {
+  const { AUDIT_RULES, auditRuleFor } = require('../platform/auditMap')
+
+  // 돈·장부가 걸린 라우터. 기준정보(거래처·비목 등)는 감사 대상이 아니다(잡음이 된다).
+  const LEDGER_PREFIXES = new Set([
+    '/api/transactions', '/api/invoices', '/api/contracts', '/api/payroll',
+    '/api/work-contracts', '/api/resolutions', '/api/settlements',
+    '/api/finance', '/api/savings', '/api/closings', '/api/accounts',
+  ])
+
+  // index.js 의 마운트에서 (경로 → 라우터 파일) 짝을 읽는다
+  const mounts = []
+  const mre = /app\.use\(\s*['"](\/api\/[a-z-]+)['"]\s*,\s*require\(['"]\.\/routes\/([a-z-]+)['"]\)/g
+  let mm
+  while ((mm = mre.exec(idxSrc))) mounts.push({ prefix: mm[1], file: mm[2] + '.js' })
+
+  const missing = []
+  for (const { prefix, file } of mounts) {
+    if (!LEDGER_PREFIXES.has(prefix)) continue
+    const src = fs.readFileSync(path.join(ROUTES_DIR, file), 'utf8')
+    const rre = /router\.delete\(\s*['"]([^'"]+)['"]/g
+    let rm
+    while ((rm = rre.exec(src))) {
+      // 첨부 삭제는 장부가 아니다 — 의도적으로 감사 대상에서 뺀다
+      if (rm[1].includes('/docs/')) continue
+      const full = (prefix + rm[1].replace(/:[A-Za-z0-9_]+/g, 'X')).replace(/\/$/, '')
+      if (!auditRuleFor('DELETE', full)) missing.push(`${file} DELETE ${rm[1]}`)
+    }
+  }
+  if (missing.length) {
+    fail(`감사 로그에 등록되지 않은 삭제 API:\n      · ${missing.join('\n      · ')}\n` +
+         '      → platform/auditMap.js AUDIT_RULES 에 규칙을 추가하세요.')
+  }
+
+  // 반대 방향: 마운트가 사라진 경로를 가리키는 죽은 규칙(오타·이름 변경)
+  const mounted = new Set(mounts.map(m => m.prefix))
+  const deadRules = AUDIT_RULES
+    .map(r => (/^\^(\/api\/[a-z-]+)/.exec(r.re.source.replace(/\\\//g, '/')) || [])[1])
+    .filter(p => p && !mounted.has(p))
+  if (deadRules.length) {
+    fail(`마운트되지 않은 경로에 감사 규칙이 있음(오타?): ${[...new Set(deadRules)].join(', ')}`)
+  }
+
+  // 미들웨어가 실제로 걸려 있는가 — 규칙만 있고 안 걸면 아무것도 남지 않는다
+  if (!/require\(['"]\.\/middleware\/auditTrail['"]\)/.test(idxSrc)) {
+    fail('index.js에 감사 미들웨어(middleware/auditTrail)가 등록되지 않았다 — 아무것도 기록되지 않는다')
+  }
+
+  if (!missing.length && !deadRules.length) {
+    ok(`장부 삭제 API 전부 등록됨 (감사 규칙 ${AUDIT_RULES.length}개)`)
+  }
+} catch (e) {
+  fail(`감사 로그 검사 실패: ${e.message}`)
+}
+
+// ── [12] 감사 로그 조회의 회사 격리 ──
+//
+// audit_logs 는 **공용 관리 DB**에 있다. 테넌트 DB가 아니므로 req.db 가 자동으로
+// 회사를 갈라주지 않는다 — 조건을 빠뜨리면 **에러 없이 남의 회사 이력이 그대로 보인다.**
+// 이 프로젝트 최우선 규칙(멀티테넌트)이 걸린 자리라 정적으로 못 박는다.
+console.log('\n[12] 감사 로그 조회 — 회사 조건 누락 검사')
+try {
+  /* 운영자 콘솔은 **전 테넌트 횡단이 목적**이라 회사 조건이 없는 게 정상이다.
+     대신 그 문은 lanOnly + platformAuth 로 따로 막고, [10] 이 그걸 확인한다.
+     여기서 예외로 두는 파일은 이 하나뿐이어야 한다 — 늘어나면 규칙이 무의미해진다. */
+  const CROSS_TENANT_BY_DESIGN = new Set(['admin.js'])
+  let scanned = 0
+  const bad = []
+  for (const f of files) {
+    if (CROSS_TENANT_BY_DESIGN.has(f)) continue
+    const src = fs.readFileSync(path.join(ROUTES_DIR, f), 'utf8')
+    if (!src.includes('audit_logs')) continue
+    // SQL 문자열(백틱·따옴표) 단위로 본다 — 한 문장 안에 회사 조건이 있어야 한다
+    const re = /`([^`]*)`|'([^']*)'|"([^"]*)"/g
+    let m
+    while ((m = re.exec(src))) {
+      const sql = m[1] ?? m[2] ?? m[3] ?? ''
+      if (!/audit_logs/.test(sql)) continue
+      scanned++
+      /* `company_id` 가 어딘가 등장하는 것으로는 부족하다 — JOIN 조건
+         (ON c.id = a.company_id)만 있어도 통과해버려, 정작 범위는 안 좁혀진다.
+         **회사로 범위를 좁히는 형태**(company_id = ? 또는 INSERT 컬럼)를 요구한다. */
+      const scoped = /company_id\s*=\s*\?/.test(sql) || /INSERT\s+INTO\s+audit_logs/i.test(sql)
+      if (!scoped) bad.push(`${f}: ${sql.replace(/\s+/g, ' ').trim().slice(0, 70)}…`)
+    }
+  }
+  if (bad.length) {
+    fail('audit_logs 를 회사 조건 없이 다루는 SQL:\n      · ' + bad.join('\n      · ') +
+         '\n      → company_id = ? 를 반드시 넣으세요(공용 DB라 req.db 가 막아주지 않습니다).')
+  } else {
+    ok(`감사 로그 SQL ${scanned}건 전부 회사 조건 있음`)
+  }
+} catch (e) {
+  fail(`감사 로그 격리 검사 실패: ${e.message}`)
+}
+
 console.log('\n' + '━'.repeat(64))
 if (failures === 0) {
   console.log(' ✅ 격리 검사 통과')

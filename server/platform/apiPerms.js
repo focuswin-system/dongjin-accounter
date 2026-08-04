@@ -64,6 +64,9 @@ const API_RESOURCES = {
   // 홈 요약과 자금일보·일계표를 한 라우터가 받는다(같은 집계를 쓴다)
   '/api/dashboard':           ['home', 'cash_report', 'report_daily'],
   '/api/closings':            ['settings'],
+  // 변경 이력 — 환경설정 하위 화면. 자원 판정은 settings 로 하되, 실제 열람은
+  // routes/audit.js 가 회사 마스터로 한 번 더 좁힌다(계정 보안 사건이 함께 보이므로).
+  '/api/audit':               ['settings'],
   '/api/company':             ['settings'],
   '/api/approval-presets':    ['settings'],
   // 첨부 업로드/다운로드는 어느 화면에서든 쓴다 → 자원으로 가르지 않고 아래 ANY_AUTHENTICATED 로 둔다

@@ -1222,6 +1222,47 @@ export const api = {
     try { await req(`/closings/${period}`, { method: 'DELETE' }); return { ok: true } }
     catch (e) { return { ok: false, error: e.message } }
   },
+  // 변경 이력(감사 로그) — 회사 마스터만. 실패해도 화면이 죽지 않게 빈 결과로 떨어진다.
+  async getAuditLogs(params = {}) {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== '' && v != null)
+    ).toString()
+    try { return await req(`/audit${qs ? `?${qs}` : ''}`) }
+    catch (e) { return { rows: [], total: 0, error: e.message } }
+  },
+  async getAuditMeta() {
+    try { return await req('/audit/meta') }
+    catch { return { actions: {}, resources: {}, usernames: [] } }
+  },
+  // 변경 이력 엑셀 — 화면과 같은 필터로 그 기간 전체를 담는다.
+  // 인증 헤더가 필요해서 <a href>로는 안 되고, blob으로 받아 저장한다(계약 내보내기와 같은 방식).
+  async exportAuditXlsx(params = {}) {
+    try {
+      const qs = new URLSearchParams(
+        Object.entries(params).filter(([, v]) => v !== '' && v != null)
+      ).toString()
+      const token = localStorage.getItem('token')
+      const res = await fetch(`${BASE}/audit/export.xlsx${qs ? `?${qs}` : ''}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) {
+        // 기간 초과·권한 없음은 서버가 이유를 준다. 삼키면 사용자는 왜 안 되는지 모른다.
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.error || '내보내기에 실패했어요')
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `변경이력_${params.from || ''}_${params.to || localToday()}.xlsx`
+      // Firefox는 anchor가 DOM에 있어야 다운로드되고, 같은 tick에 revoke하면 진행 중 다운로드가 취소된다.
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => { a.remove(); URL.revokeObjectURL(url) }, 0)
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
+
   async getVatFilings(year) {
     try { return await req(`/tax/vat?year=${year}`) } catch { return { year, quarters: [] } }
   },

@@ -3,7 +3,7 @@ import logoSymbol from './assets/company/favicon.svg'
 import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider } from './lib/ui'
 import { api, setApiFailureHandler } from './lib/api'
 import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID, MASTER_LEAVES } from './lib/nav'
-import { PermCtx, usePerms, visibleNav, visiblePortalNode } from './lib/perms'
+import { PermCtx, usePerms, visibleNav, visiblePortalNode, withoutMasterOnly } from './lib/perms'
 import { sessionAlive, clearSession } from './lib/session'
 import { UpdateBanner } from './lib/components/UpdateBanner'
 import { LoginScreen } from './screens/Login'
@@ -476,7 +476,9 @@ function AppInner({ onLogout, user }) {
     }
     if (PORTAL_CAT_BY_ID[route]) {
       // 포털 타일도 권한대로 걸러 그린다. 남는 게 없으면 들어갈 데가 없다는 뜻.
-      const node = visiblePortalNode(perms, PORTAL_CAT_BY_ID[route]);
+      // 마스터 전용 화면(변경 이력)은 자원 권한과 별개 축이라 한 번 더 거른다 —
+      // 안 그러면 실무 역할에게 눌러도 403 나는 타일이 남는다.
+      const node = withoutMasterOnly(visiblePortalNode(perms, PORTAL_CAT_BY_ID[route]), user?.role === 'admin');
       return node ? <PortalScreen node={node} go={go}/> : <NoPermission title={PORTAL_CAT_BY_ID[route].label}/>;
     }
     // 기준정보 서브메뉴: 내부 서브내브 없이 해당 탭만 전체폭으로. (일반회계 master_ / 인사급여 hrbase_)

@@ -90,6 +90,27 @@ export function visiblePortal(perms) {
 export const visibleLeaves = (perms) =>
   unrestricted(perms) ? ALL_LEAVES : ALL_LEAVES.filter(l => can(perms, l.id))   // can()이 settings_* → settings 로 변환
 
+/**
+ * 회사 마스터만 들어갈 수 있는 화면.
+ *
+ * 역할(role)은 자원 권한과 별개 축이다 — 'settings' 권한은 실무 역할도 갖지만
+ * 계정 관리와 변경 이력은 마스터만이다(서버 routes/auth.js·routes/audit.js 가 막는다).
+ * 그 화면들을 자원 권한만으로 가리면 **실무 역할에게 눌러도 403 나는 타일**이 남는다.
+ */
+export const MASTER_ONLY_LEAVES = new Set(['settings_audit'])
+
+export const isMasterOnly = (id) => MASTER_ONLY_LEAVES.has(id)
+
+/** 마스터가 아니면 마스터 전용 화면을 빼고 돌려준다(포털 노드용) */
+export function withoutMasterOnly(node, isMaster) {
+  if (!node || isMaster) return node
+  if (node.route) return isMasterOnly(node.route) ? null : node
+  const groups = (node.groups || [])
+    .map(g => ({ ...g, items: g.items.filter(id => !isMasterOnly(id)) }))
+    .filter(g => g.items.length)
+  return groups.length ? { ...node, groups } : null
+}
+
 // ── React 배선 ────────────────────────────────────────────────
 // prop drilling으로 화면 40여 개에 perms를 흘리는 건 현실적이지 않다 → context 하나.
 export const PermCtx = createContext(null)

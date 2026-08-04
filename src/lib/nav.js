@@ -155,6 +155,8 @@ export const SETTINGS_LEAVES = [
   { id: "settings_user",     label: "사용자",    icon: Icon.Sign },
   { id: "settings_approval", label: "결재선",    icon: Icon.Doc },
   { id: "settings_closing",  label: "월 마감",   icon: Icon.Bank },
+  // 변경 이력 — 회사 마스터만 열린다(서버가 막고, 화면도 마스터가 아니면 타일을 감춘다)
+  { id: "settings_audit",    label: "변경 이력", icon: Icon.Doc },
 ]
 
 // 잎 id → 소속 도메인 id (활성 도메인 자동 펼침용)
@@ -250,6 +252,7 @@ export const LEAF_TAGS = {
   settings_user:    '사용자 계정 권한 로그인 비밀번호 역할',
   settings_approval:'결재선 결재 승인라인',
   settings_closing: '마감 월마감 장부마감 결산',
+  settings_audit:   '변경이력 감사 로그 기록 이력 누가 추적 삭제기록 접속기록',
 }
 
 // ── 홈택스식 다단계 포털 구조 (도메인 → 카테고리 → 그룹 → 화면) ──

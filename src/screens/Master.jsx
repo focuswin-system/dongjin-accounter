@@ -110,9 +110,27 @@ const MASTER_TABS = [
   { id: "company",         label: "회사 정보", custom: true },
   { id: "template",        label: "문서 양식" },
   { id: "closing",         label: "월 마감", custom: true },
+  { id: "audit",           label: "변경 이력", custom: true },
 ];
 
 const TAB_BY_ID = Object.fromEntries(MASTER_TABS.map(t => [t.id, t]));
+
+/**
+ * 전용 패널로 그리는 탭 — MasterScreen 의 renderCustomPanel() 과 짝이다.
+ *
+ * ⚠ 여기 빠뜨리면 일반 표 렌더러로 흘러가 `data.label` 에서 **화면이 통째로 크래시한다**
+ * (변경 이력 탭을 추가하면서 실제로 겪었다). MASTER_TABS 의 custom 플래그와 따로 두는
+ * 이유는 그 플래그가 서브내브 건수 표시에도 쓰여 의미가 겹치지 않기 때문이다.
+ *
+ * 등록을 잊어도 최악이 '빈 카드'가 되도록, 아래 isCustomTab 은 MASTER_DATA 에 표 정의가
+ * 없는 탭도 전용 패널 경로로 보낸다 — 크래시보다는 빈 화면이 낫다.
+ */
+const CUSTOM_PANEL_TABS = new Set([
+  "account", "accountBalance", "recurringExpense", "recurringInvoice", "payroll",
+  "payrollItems", "employType", "accountSubject", "category", "vendor",
+  "department", "position", "company", "user", "approval", "jeokyo", "item",
+  "insurance", "fixed_asset", "intangible_asset", "evidence_type", "closing", "audit",
+]);
 
 // 도메인별 기준정보 섹션 (App 라우트: master=base / settings / hr_base=hr)
 const MASTER_SECTIONS = {
@@ -137,6 +155,7 @@ const MASTER_SECTIONS = {
       { label: "회사", tabs: ["company"] },
       { label: "시스템", tabs: ["user", "approval"] },
       { label: "장부 마감", tabs: ["closing"] },
+      { label: "기록", tabs: ["audit"] },
     ],
   },
   hr: {
@@ -2798,6 +2817,170 @@ const ClosingPanel = ({ embedded = false }) => {
   )
 }
 
+/* 변경 이력 — 누가 무엇을 했는지.
+ *
+ * 금액·거래처명은 일부러 없다. 서버가 남기지 않기 때문이다(구체적 수치는 회사 비밀).
+ * 여기서 '무엇이었는지'까지 알고 싶으면 대상 ID로 그 화면에서 찾아본다 —
+ * 로그 자체가 장부의 사본이 되면 안 된다. 원칙은 server/platform/auditMap.js 참고.
+ */
+const AUDIT_LIMIT = 50
+
+// 되돌리기 어려운 행위는 눈에 띄어야 한다. 목록을 훑을 때 제일 먼저 걸려야 하는 것들.
+const AUDIT_DANGER = new Set(['delete', 'delete_month', 'reopen', 'pay_cancel', 'match_cancel', 'repay_cancel'])
+
+/** 기본 조회 기간 — 최근 한 달. 기본을 '전체'로 두면 최근에 무슨 일이 있었는지가 오히려 안 보인다. */
+const auditDefaultRange = () => {
+  const to = new Date()
+  const from = new Date(to); from.setMonth(from.getMonth() - 1)
+  return { from: fmtDateLocal(from), to: fmtDateLocal(to) }
+}
+
+const AuditPanel = ({ embedded = false }) => {
+  const toast = useToast()
+  const [meta, setMeta] = useState({ actions: {}, resources: {}, usernames: [] })
+  const [filter, setFilter] = useState(() => ({
+    ...auditDefaultRange(), action: '', resource: '', username: '',
+  }))
+  const [rows, setRows] = useState([])
+  const [total, setTotal] = useState(0)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+
+  useEffect(() => { api.getAuditMeta().then(setMeta) }, [])
+
+  const load = async (offset = 0) => {
+    setLoading(true)
+    const r = await api.getAuditLogs({ ...filter, limit: AUDIT_LIMIT, offset })
+    setLoading(false)
+    // 권한 없음·기간 초과 등 서버가 말해주는 이유를 그대로 보여준다.
+    // 한 가지 이유로 뭉뚱그리면 "마스터만 볼 수 있어요"가 기간 오류에도 뜬다.
+    if (r.error) { setError(r.error); setRows([]); setTotal(0); return }
+    setError('')
+    setRows(prev => (offset ? [...prev, ...r.rows] : r.rows))
+    setTotal(r.total)
+  }
+  useEffect(() => { load(0) }, [filter])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const set = (k, v) => setFilter(prev => ({ ...prev, [k]: v }))
+  const opts = (map, all) => [{ value: '', label: all }, ...Object.entries(map).map(([value, label]) => ({ value, label }))]
+
+  const download = async () => {
+    setDownloading(true)
+    const r = await api.exportAuditXlsx(filter)
+    setDownloading(false)
+    if (!r.ok) toast.push(r.error || '내보내기에 실패했어요', { tone: 'warn' })
+  }
+
+  return (
+    <div style={{ padding: 20 }}>
+      <div style={{ marginBottom: 16 }}>
+        {!embedded && <div className="section-title">변경 이력</div>}
+        <div className="section-sub">
+          마감·삭제·지급·발행처럼 되돌리기 어려운 작업의 기록입니다. 누가 언제 무엇을 했는지 남고,
+          금액·거래처 같은 내용은 남기지 않아요. 자세한 내용은 대상 번호로 해당 화면에서 확인하세요.
+          <br/>기본은 최근 한 달이고, 한 번에 최대 1년까지 조회할 수 있어요.
+        </div>
+      </div>
+
+      <div className="card card-pad" style={{ marginBottom: 16 }}>
+        <div className="row gap-12" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ width: 150 }}>
+            <label className="label" style={{ marginBottom: 8 }}>시작일</label>
+            <input className="input" type="date" value={filter.from} onChange={e => set('from', e.target.value)}/>
+          </div>
+          <div style={{ width: 150 }}>
+            <label className="label" style={{ marginBottom: 8 }}>종료일</label>
+            <input className="input" type="date" value={filter.to} onChange={e => set('to', e.target.value)}/>
+          </div>
+          <div style={{ width: 170 }}>
+            <label className="label" style={{ marginBottom: 8 }}>대상</label>
+            <Combobox value={filter.resource} onChange={v => set('resource', v)}
+                      options={opts(meta.resources, '전체 대상')} placeholder="전체 대상"/>
+          </div>
+          <div style={{ width: 190 }}>
+            <label className="label" style={{ marginBottom: 8 }}>행위</label>
+            <Combobox value={filter.action} onChange={v => set('action', v)}
+                      options={opts(meta.actions, '전체 행위')} placeholder="전체 행위"/>
+          </div>
+          <div style={{ width: 160 }}>
+            <label className="label" style={{ marginBottom: 8 }}>사용자</label>
+            <Combobox value={filter.username} onChange={v => set('username', v)}
+                      options={[{ value: '', label: '전체 사용자' },
+                                ...meta.usernames.map(u => ({ value: u, label: u }))]}
+                      placeholder="전체 사용자"/>
+          </div>
+          <button className="btn" onClick={() => setFilter({ ...auditDefaultRange(), action: '', resource: '', username: '' })}>
+            초기화
+          </button>
+          <button className="btn" disabled={downloading || !!error} onClick={download}>
+            <Icon.Excel/> {downloading ? '내보내는 중…' : '엑셀 받기'}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="card card-pad" style={{ marginBottom: 16, textAlign: 'center', color: 'var(--neg-ink)' }}>
+          {error}
+        </div>
+      )}
+
+      <div className="card" style={{ overflow: 'hidden' }}>
+        <table className="table">
+          <thead>
+            <tr>
+              <th style={{ width: 150 }}>시각</th>
+              <th style={{ width: 120 }}>사용자</th>
+              <th style={{ width: 130 }}>대상</th>
+              <th style={{ width: 150 }}>행위</th>
+              <th>대상 번호</th>
+              <th style={{ width: 130 }}>접속 IP</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr><td colSpan={6} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)' }}>
+                {loading ? '불러오는 중…' : '기록이 없어요.'}
+              </td></tr>
+            )}
+            {rows.map(r => (
+              <tr key={r.id}>
+                <td className="text-sm text-muted2 num">{minuteOf(r.created_at)}</td>
+                {/* 'ops:xxx' 는 우리 회사 사람이 아니라 서비스 운영자가 한 일이다.
+                    그 구분이 보이지 않으면 "내가 안 한 비번 변경"이 직원 소행으로 읽힌다. */}
+                <td className="fw-600">
+                  {String(r.username || '').startsWith('ops:')
+                    ? <><span className="pill-ops">운영자</span> {r.username.slice(4)}</>
+                    : (r.username || '—')}
+                </td>
+                <td className="text-sm text-muted">{meta.resources[r.resource] || r.resource || '—'}</td>
+                <td>
+                  <span className={AUDIT_DANGER.has(r.action) ? 'fw-600 text-neg' : 'text-sm text-muted'}>
+                    {meta.actions[r.action] || r.action || '—'}
+                  </span>
+                </td>
+                <td className="text-sm text-muted2 num" style={{ wordBreak: 'break-all' }}>{r.target_id || '—'}</td>
+                <td className="text-sm text-muted2 num">{r.ip || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="row gap-12" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+        <div className="text-sm text-muted2">
+          {total > 0 ? `전체 ${fmtNum(total)}건 중 ${fmtNum(rows.length)}건 표시` : ''}
+        </div>
+        {rows.length < total && (
+          <button className="btn" disabled={loading} onClick={() => load(rows.length)}>
+            {loading ? '불러오는 중…' : '더 보기'}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export const MasterScreen = ({ user, section = "base", forcedTab }) => {
   const toast = useToast();
   const sectionCfg = MASTER_SECTIONS[section] || MASTER_SECTIONS.base;
@@ -2820,7 +3003,8 @@ export const MasterScreen = ({ user, section = "base", forcedTab }) => {
     )
   }, []);
 
-  const isCustomTab = ["account", "accountBalance", "recurringExpense", "recurringInvoice", "payroll", "payrollItems", "employType", "accountSubject", "category", "vendor", "department", "position", "company", "user", "approval", "jeokyo", "item", "insurance", "fixed_asset", "intangible_asset", "evidence_type", "closing"].includes(activeTab)
+  // 표 정의가 없는 탭도 전용 패널 경로로 보낸다 — 등록을 빠뜨려도 크래시가 아니라 빈 카드가 된다.
+  const isCustomTab = CUSTOM_PANEL_TABS.has(activeTab) || !MASTER_DATA[activeTab]
   const data = !isCustomTab ? MASTER_DATA[activeTab] : null
   const rawRows = activeTab === "user" ? userRows : (data?.rows || [])
   const rows = rawRows.filter(r => !q || r.some(c => String(c).toLowerCase().includes(q.toLowerCase())));
@@ -2842,6 +3026,7 @@ export const MasterScreen = ({ user, section = "base", forcedTab }) => {
     if (activeTab === "user")             return <UserPanel currentUser={user} embedded={single}/>
     if (activeTab === "approval")         return <ApprovalPanel embedded={single}/>
     if (activeTab === "closing")          return <ClosingPanel embedded={single}/>
+    if (activeTab === "audit")            return <AuditPanel embedded={single}/>
     if (activeTab === "department")       return <HrCodePanel type="dept" label="부서" embedded={single}/>
     if (activeTab === "position")         return <HrCodePanel type="pos"  label="직위" embedded={single}/>
     return null

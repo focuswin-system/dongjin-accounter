@@ -500,6 +500,15 @@ a { color: inherit; text-decoration: none; }
 .badge.ink { background: #0B1220; color: #fff; }
 .badge.outline { background: transparent; border-color: var(--line-strong); color: var(--muted); }
 
+/* 변경 이력 — 서비스 운영자가 한 일 표시.
+   회사 사람이 한 일과 섞여 보이면 "내가 안 한 비번 변경"을 직원 소행으로 오해한다. */
+.pill-ops {
+  display: inline-block; padding: 1px 6px; margin-right: 4px;
+  border-radius: 999px; font-size: 10.5px; font-weight: 700;
+  background: var(--warn-soft); color: var(--warn-ink);
+  vertical-align: middle;
+}
+
 /* ───── Tables ───── */
 .table { width: 100%; border-collapse: separate; border-spacing: 0; }
 .table thead th {

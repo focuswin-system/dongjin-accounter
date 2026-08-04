@@ -3,7 +3,7 @@ import { Icon, Popover, PopItem, fmtNum } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
 import { LEAF_BY_ID } from '../lib/nav'
-import { usePerms, visiblePortal, visibleLeaves } from '../lib/perms'
+import { usePerms, visiblePortal, visibleLeaves, isMasterOnly } from '../lib/perms'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 
 const WEEK_KO = ["일", "월", "화", "수", "목", "금", "토"]
@@ -96,7 +96,9 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
   // (홈에는 보이는데 메뉴엔 없으면 사용자는 어디서 들어가는 화면인지 알 수 없다)
   const { perms, can: canDo } = usePerms()
   const portal = visiblePortal(perms)
-  const leaves = visibleLeaves(perms)
+  // 마스터 전용 화면(변경 이력)은 자원 권한과 별개라 여기서 한 번 더 거른다 —
+  // 즐겨찾기·자주 찾는 메뉴에 눌러도 못 들어가는 항목이 뜨면 안 된다.
+  const leaves = visibleLeaves(perms).filter(l => !isMasterOnly(l.id) || user?.role === 'admin')
   const [todos, setTodos] = useState([])
   const [favorites, setFavorites] = useState(() => {
     try { const s = JSON.parse(localStorage.getItem('homeFavorites')); return Array.isArray(s) ? s : DEFAULT_FAVS } catch { return DEFAULT_FAVS }
