@@ -33,12 +33,12 @@ const ACTION_LABELS = {
 const RESOURCES = [
   { id: 'home',                    label: '홈',            group: '공통' },
 
-  { id: 'contract_sales',          label: '매출 계약',      group: '일반회계 · 판매·매출' },
+  { id: 'contract_sales',          label: '수주 계약',      group: '일반회계 · 판매·매출' },
   { id: 'billing_issued',          label: '대금 청구서(매출)', group: '일반회계 · 판매·매출' },
   { id: 'recurring_invoice',       label: '정기청구',       group: '일반회계 · 판매·매출' },
   { id: 'ar',                      label: '미수금',         group: '일반회계 · 판매·매출' },
 
-  { id: 'contract_purchase',       label: '매입 계약',      group: '일반회계 · 매입' },
+  { id: 'contract_purchase',       label: '발주 계약',      group: '일반회계 · 매입' },
   { id: 'billing_received',        label: '대금 청구서(매입)', group: '일반회계 · 매입' },
   { id: 'recurring_expense',       label: '정기지출',       group: '일반회계 · 매입' },
   { id: 'ap',                      label: '미지급금',       group: '일반회계 · 매입' },
@@ -53,7 +53,8 @@ const RESOURCES = [
   { id: 'quote_req',               label: '견적요청서',     group: '일반회계 · 문서' },
 
   { id: 'ledger',                  label: '전체 거래내역',  group: '일반회계 · 장부' },
-  { id: 'contract',                label: '계약',          group: '일반회계 · 장부' },
+  // 사이드바에서는 뺐지만(수주·발주와 같은 화면) 라우트·권한은 살아 있다 → nav.js HIDDEN_LEAVES
+  { id: 'contract',                label: '계약 전체',      group: '일반회계 · 장부' },
 
   { id: 'tax_vat',                 label: '부가세',        group: '일반회계 · 세무관리' },
   { id: 'tax_etc',                 label: '기타세액',      group: '일반회계 · 세무관리' },

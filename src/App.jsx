@@ -43,8 +43,8 @@ const CRUMB_MAP = {
   billing_issued:  ["판매·매출", "대금 청구서"],
   billing_received:["매입", "대금 청구서"],
   contract:        ["계약"],
-  contract_sales:  ["판매·매출", "매출 계약"],
-  contract_purchase:["매입", "매입 계약"],
+  contract_sales:  ["판매·매출", "수주 계약"],
+  contract_purchase:["매입", "발주 계약"],
   contract_detail: ["계약", null],
   hr:              ["인사관리"],
   hr_labor_contract:["인사급여", "근로계약"],
@@ -61,7 +61,7 @@ const CRUMB_MAP = {
   acct_purchase:   ["일반회계", "매입"],
   acct_expense:    ["일반회계", "경비"],
   acct_docs:       ["일반회계", "문서"],
-  acct_ledger:     ["일반회계", "장부"],
+  // acct_ledger 는 포털 페이지가 아니라 거래내역으로 바로 보내는 타일이 됐다(nav.js) → 크럼도 없앤다.
   acct_tax:        ["일반회계", "세무관리"],
   hr_labor:        ["인사급여", "근로·용역"],
   tax_vat:         ["세무관리", "부가세"],
@@ -857,7 +857,7 @@ const FAQ_DATA = [
   { id:"f03", cat:"거래 등록",       routes:["ledger"],                     q:"여러 건을 한꺼번에 올리고 싶어요",            a:"엑셀 업로드 기능을 이용하면 여러 거래를 한 번에 등록할 수 있어요. '거래 등록 → 엑셀 업로드'에서 서식을 내려받아 작성한 뒤 업로드해 주세요.", action:{ label:"엑셀 업로드로", route:"excel_modal" } },
   { id:"f04", cat:"거래 등록",       routes:["ledger"],                     q:"거래 내용을 수정하거나 삭제하고 싶어요",      a:"거래내역 화면에서 해당 행을 클릭하면 상세 패널이 열려요. 패널 하단의 수정·삭제 버튼으로 처리할 수 있어요.", action:{ label:"거래내역으로", route:"ledger" } },
   { id:"f05", cat:"거래 등록",       routes:["ledger","home"],              q:"등록하려는 거래처가 목록에 없어요",           a:"거래처는 설정 화면에서 먼저 추가해야 해요. 설정 → 거래처 탭에서 새 거래처를 등록한 뒤 다시 시도해 보세요.", action:{ label:"설정으로", route:"master" } },
-  { id:"f06", cat:"거래 등록",       routes:["ledger","home","contract"],   q:"등록하려는 계약이 목록에 없어요",             a:"계약은 계약 목록 화면에서 '새 계약' 버튼으로 먼저 만들어야 해요. 계약이 없는 지출이라면 거래 등록 시 '공통비'를 선택할 수도 있어요.", action:{ label:"계약 목록으로", route:"contract" } },
+  { id:"f06", cat:"거래 등록",       routes:["ledger","home","contract"],   q:"등록하려는 계약이 목록에 없어요",             a:"계약은 수주 계약·발주 계약 화면에서 '새 계약' 버튼으로 먼저 만들어야 해요. 계약이 없는 거래라면 거래 등록에서 계약 칸을 비워두면 됩니다(선택 입력이에요).", action:{ label:"수주 계약으로", route:"contract_sales" } },
   // 미수금·미지급금
   { id:"f07", cat:"미수금·미지급금", routes:["contract","ledger"],          q:"미수금이 자동으로 생성되지 않아요",           a:"입금 등록 2단계에서 계약을 선택했는지 확인해 보세요. 계약을 연결해야 해당 계약의 미수금이 자동으로 차감돼요.", action:{ label:"거래내역으로", route:"ledger" } },
   { id:"f08", cat:"미수금·미지급금", routes:["contract","home"],            q:"연체된 미수금은 어떻게 처리하나요?",          a:"미수금 화면의 '기한 지남' 탭에서 연체 건을 확인하세요. 행 우측 '독촉' 버튼으로 거래처에 메일을 보내고, 입금 확인 후 '입금 처리'를 누르면 돼요.", action:{ label:"미수금으로", route:"contract" } },

@@ -1538,7 +1538,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           return (
             <div style={{ padding: 20 }}>
               <div className="row" style={{ marginBottom: 14 }}>
-                <div className="text-sm text-muted">참고용 예상 원가예요. 인건비·자재비는 인사급여·매입계약에서 별도 관리돼요.</div>
+                <div className="text-sm text-muted">참고용 예상 원가예요. 인건비·자재비는 인사급여·발주 계약에서 별도 관리돼요.</div>
                 <button className="btn ml-auto" onClick={() => setBudgetOpen(true)}><Icon.Pencil size={13}/> 예산 수정</button>
               </div>
               <div className="card" style={{ overflow: "hidden", marginBottom: 14 }}>
@@ -1608,7 +1608,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
             <thead>
               <tr>
                 <th>{isPurchase ? '지급일' : '지출일'}</th><th>거래처</th><th>비목</th>
-                {!isPurchase && <th>지급 근거(매입계약)</th>}
+                {!isPurchase && <th>지급 근거(발주 계약)</th>}
                 <th className="num-right">금액</th><th>결의서</th><th>{isPurchase ? '지급' : '정산'}</th>
               </tr>
             </thead>
@@ -1991,10 +1991,13 @@ const contractPayload = (form, vendorId) => ({
   notice_days:    form.notice_days === '' ? 60 : asNum(form.notice_days),
 });
 
+/* 부제로 방향을 못박는다 — '수주'와 '발주'는 한 글자 차이인데 돈의 방향이 반대다.
+ * 특히 이 바닥에서 '발주처'는 **우리에게 발주한 고객사**(=수주 계약의 상대)를 가리켜서,
+ * 라벨만 보면 '발주 계약'을 발주처 계약으로 읽을 수 있다. 그래서 '우리가 발주한'이라고 쓴다. */
 const CONTRACT_KIND_META = {
-  all:      { title: "계약 관리", sub: "계약별 입금·지출·미수금을 한눈에 확인하세요.", addGubu: "B" },
-  sales:    { title: "매출 계약", sub: "발주처(수금) 계약입니다. 계약별 청구·입금·미수금을 관리하세요.", addGubu: "B" },
-  purchase: { title: "매입 계약", sub: "매입처·외주(지급) 계약입니다. 계약별 지급 일정·미지급을 관리하세요.", addGubu: "A" },
+  all:      { title: "계약 전체", sub: "수주·발주 계약을 한 표에서 봅니다. 계약별 입금·지출·미수금을 확인하세요.", addGubu: "B" },
+  sales:    { title: "수주 계약", sub: "우리가 수주한 계약입니다(발주처 = 고객사). 계약별 청구·입금·미수금을 관리하세요.", addGubu: "B" },
+  purchase: { title: "발주 계약", sub: "우리가 발주한 계약입니다(외주·구매). 계약별 지급 일정·미지급을 관리하세요.", addGubu: "A" },
 };
 
 export const ContractListScreen = ({ goDetail, kind = "all" }) => {

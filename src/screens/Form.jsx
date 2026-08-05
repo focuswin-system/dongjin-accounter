@@ -59,28 +59,27 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   const [employees, setEmployees] = useState([]);
 
   // 거래는 계약에 두 축으로 붙는다.
-  //   근거 계약  — 이 돈이 오간 약정. 입금=매출계약 / 지출=매입계약(외주 계약 등), 없으면 공통
+  //   근거 계약  — 이 돈이 오간 약정. 입금=수주 계약 / 지출=발주 계약(외주·구매). **없으면 비운다(선택 입력)**
   //   원가 귀속  — (지출만) 이 돈이 어느 매출건의 원가인지. 외주비는 외주계약에 '지급'되면서 그 프로젝트의 '원가'가 된다.
   const contractOpts = useMemo(() => {
     const opts = contracts
-      .filter(c => kind === 'income' ? !c.is_purchase : c.is_purchase)   // 입금=매출계약 / 지출=매입계약
+      .filter(c => kind === 'income' ? !c.is_purchase : c.is_purchase)   // 입금=수주 계약 / 지출=발주 계약
       .map(c => ({
         value: c.name, label: c.name,
         sub: [c.vendor_name, c.status].filter(Boolean).join(' · '),
       }));
-    if (kind === 'income') return opts;
-    return [
-      ...opts,
-      { value: "공통(원자재)",   label: "공통(원자재)",   sub: "계약 없이 나가는 돈" },
-      { value: "공통(생산소모)", label: "공통(생산소모)", sub: "계약 없이 나가는 돈" },
-      { value: "공통(인건비)",   label: "공통(인건비)",   sub: "급여·보험 등" },
-      { value: "공통",           label: "공통",           sub: "사무·운영" },
-    ];
+    /* 예전엔 지출에 '공통(원자재)'·'공통(생산소모)'·'공통(인건비)'·'공통' 네 개를 붙였다.
+     * 계약이 필수 입력이라 계약 없는 지출을 넣을 길이 없었기 때문인데, 두 가지가 잘못됐다.
+     *   · 그 값은 doc_no 에 들어가지만 화면에 안 보인다 — 거래 목록의 '계약' 칸은
+     *     `contract_name || memo || doc_no` 순으로 고르는데(api.js) 적요가 필수라 항상 적요가 이긴다.
+     *   · 무엇보다 **분류가 아니다.** 원자재냐 생산소모냐는 비목(category)이 이미 받고 있다.
+     * 계약은 선택 입력으로 두고, 없으면 비우는 게 맞다(contract_id 는 nullable). */
+    return opts;
   }, [contracts, kind]);
 
-  // 원가 귀속 후보 = 매출 계약만
+  // 원가 귀속 후보 = 수주 계약만
   const costContractOpts = useMemo(() => ([
-    { value: "", label: "귀속 없음", sub: "특정 매출건의 원가가 아님 (일반 경비)" },
+    { value: "", label: "귀속 없음", sub: "특정 수주건의 원가가 아님 (일반 경비)" },
     ...contracts.filter(c => !c.is_purchase).map(c => ({
       value: c.name, label: c.name,
       sub: [c.vendor_name, c.status].filter(Boolean).join(' · '),
@@ -122,8 +121,10 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     setShowMore(!!(editTxn.evid_url || editTxn.account_code || editTxn.project_no || editTxn.site));
     setForm({
       vendor:    editTxn.vendor   || '',
-      // 자동 생성 거래(청구서 정산·정기지출·급여)는 계약이 비어 있을 수 있어 '공통'으로 복원
-      contract:  editTxn.contract || '공통',
+      /* 계약이 비어 있으면 비운 채로 둔다. 예전엔 '공통'을 지어내 채웠는데(계약이 필수였으니까),
+         계약 없이 만들어진 자동 생성 거래(청구서 정산·정기지출·급여)를 한 번만 열어도
+         '공통'이 doc_no 에 박혔다. 없는 것은 없는 채로 보여준다. */
+      contract:  editTxn.contract || '',
       costContract: editTxn.cost_contract_name || '',
       acctGroup: '',                                   // 아래 파생 effect에서 채움
       category:  editTxn.category === '—' ? '' : (editTxn.category || ''),
@@ -171,7 +172,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   const handleSave = async () => {
     if (busy) return;
     if (!form.vendor)   { toast.push("거래처를 선택해주세요"); return; }
-    if (!form.contract) { toast.push("계약/공통을 선택해주세요"); return; }
+    // 계약은 선택 입력이다 — 계약 없이 오가는 돈이 정상적으로 더 많다(경비·소모품·공과금).
+    // 예전엔 필수라서 '공통'을 고르게 했고, 그게 가짜 계약 선택지가 생긴 이유였다.
     if (!form.category) { toast.push(kind === "income" ? "수금 유형을 선택해주세요" : "비목을 선택해주세요"); return; }
     if (!form.memo || !form.memo.trim()) { toast.push("적요(거래 내용)를 입력해주세요"); return; }
     if (!form.amount)   { toast.push("금액을 입력해주세요"); return; }
@@ -213,7 +215,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       // 업종중립 선택 입력 — 조선=호선번호, 천막=설치현장, 선반=작업지시번호, SW=프로젝트코드
       project_no:   form.project_no || "",
       site:         form.site || "",
-      // 실제 계약이 아닌 "공통 XYZ" 선택 시 doc_no에 이름 보존
+      // 목록에 없는 이름을 '계약 없이 이 이름으로 적어두기'로 넣은 경우에만 doc_no 에 남는다.
+      // (기존 데이터의 '공통…' 값도 이 경로로 그대로 보존된다 — 열었다고 지우지 않는다)
       doc_no:       contractObj ? '' : (form.contract || ''),
       memo:         form.memo || "",
       evid_type:    form.evid_type || "",
@@ -280,11 +283,15 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                 addNewLabel="거래처로 추가"/>
             </FormField>
 
-            <FormField label={kind === "income" ? "매출 계약" : "매입 계약 / 공통"} required
-              hint={kind === "expense" ? "이 돈이 나가는 근거 계약(외주·구매). 계약 없이 쓰는 돈이면 공통" : null}>
+            <FormField label={kind === "income" ? "수주 계약 (선택)" : "발주 계약 (선택)"}
+              hint={kind === "expense"
+                ? "이 돈이 나가는 근거 계약(외주·구매)이 있을 때만 고르세요. 경비·공과금처럼 계약 없이 쓰는 돈은 비워둡니다."
+                : "이 입금의 근거 계약이 있을 때만 고르세요. 없으면 비워둡니다."}>
               <Combobox value={form.contract} onChange={v => setForm({...form, contract: v})}
                 options={contractOpts}
-                placeholder={kind === "expense" ? "매입 계약 선택 (없으면 공통)" : "매출 계약을 검색하거나 선택하세요"}
+                placeholder={contractOpts.length
+                  ? (kind === "expense" ? "해당 발주 계약이 있으면 선택" : "해당 수주 계약이 있으면 선택")
+                  : "등록된 계약이 없어요 (비워두면 됩니다)"}
                 /* 계약은 거래처·품목과 달리 이름만으로 만들 수 없다(거래처·금액·기간·청구방식이 있어야
                    미수금과 기성 집계가 성립한다). 그래서 여기서 입력한 이름은 계약이 되지 않고
                    이 거래의 '참조'(doc_no)로만 남는다 — 계약별 매출·원가 집계에는 잡히지 않는다.
@@ -300,11 +307,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
             {/* 원가 귀속 — 이 지출이 어느 매출건의 원가인지. 외주비는 외주계약에 '지급'되면서 그 프로젝트의 '원가'가 된다.
                 두 축이 따로라 이중계상이 아니다. */}
             {kind === "expense" && (
-              <FormField label="원가 귀속 (매출 계약)"
-                hint="이 지출이 특정 매출건 때문에 나갔다면 그 계약을 고르세요. 그 계약의 손익에 원가로 잡힙니다.">
+              <FormField label="원가 귀속 (수주 계약)"
+                hint="이 지출이 특정 수주건 때문에 나갔다면 그 계약을 고르세요. 그 계약의 손익에 원가로 잡힙니다.">
                 <Combobox value={form.costContract || ""} onChange={v => setForm({...form, costContract: v})}
                   options={costContractOpts}
-                  placeholder="귀속할 매출 계약 (없으면 비워두세요)"/>
+                  placeholder="귀속할 수주 계약 (없으면 비워두세요)"/>
               </FormField>
             )}
 

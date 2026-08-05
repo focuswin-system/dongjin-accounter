@@ -524,12 +524,16 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     : vendors.filter(v => ["A", "E"].includes(v.gubu))
   ).map(v => ({ value: v.name, label: v.name, sub: v.type }))
 
-  const contractOptions = [
-    ...contracts.map(c => ({ value: c.name, label: c.name, sub: `${c.vendor_name || ''} · ${c.status || ''}` })),
-    { value: "공통(원자재)",   label: "공통(원자재)",   sub: "특정 계약 없음" },
-    { value: "공통(생산소모)", label: "공통(생산소모)", sub: "특정 계약 없음" },
-    { value: "공통",           label: "공통",           sub: "사무·운영" },
-  ]
+  /* 계약은 **선택 입력**이다. 청구서는 계약 없이도 성립한다(contract_id 는 nullable).
+   *
+   * 예전엔 여기에 '공통(원자재)'·'공통(생산소모)'·'공통' 세 개가 붙어 있었다.
+   * 계약을 안 고르면 안 될 것 같아 만든 임시방편이었는데, 실제로는 **저장될 때 통째로 버려졌다** —
+   * handleSave 가 `contracts.find(name)` 으로만 id 를 찾으므로 '공통…'은 contract_id=null 이 되고
+   * 이름을 남길 자리도 없다(거래 폼과 달리 청구서엔 doc_no 보존 경로가 없다).
+   * 고른 사람은 분류한 줄 알지만 아무 데도 안 남는다 → 빈칸과 결과가 같으면서 거짓말만 한다. 뺀다. */
+  const contractOptions = contracts.map(c => ({
+    value: c.name, label: c.name, sub: `${c.vendor_name || ''} · ${c.status || ''}`,
+  }))
 
   const handleSave = () => {
     if (!form.vendor) { toast.push("거래처를 선택하세요", { tone: "warn" }); return }
@@ -580,14 +584,17 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
               addNewLabel="직접 입력"/>
           </div>
           <div>
-            <label className="label">계약 / 귀속</label>
+            <label className="label">계약 <span className="text-muted2">(선택)</span></label>
+            {/* '직접 입력'도 뺐다 — 목록에 없는 이름을 타이핑하면 저장 때 버려져(위 주석)
+                입력한 사람만 연결됐다고 믿게 된다. 계약은 계약 화면에서 먼저 만든다. */}
             <Combobox
               value={form.contract}
               onChange={v => f("contract", v)}
               options={contractOptions}
-              placeholder="계약 선택 (선택)"
-              onAddNew={q => { f("contract", q); toast.push(`"${q}" 계약명을 직접 입력했어요`) }}
-              addNewLabel="직접 입력"/>
+              placeholder={contractOptions.length ? "해당 계약이 있으면 선택하세요" : "등록된 계약이 없어요"}/>
+            <div className="text-sm text-muted2" style={{ marginTop: 4 }}>
+              계약 없이 발행·수취하는 청구서는 비워두세요.
+            </div>
           </div>
           <div>
             <label className="label">과세유형</label>
@@ -710,7 +717,7 @@ const PendingScheduleTable = ({ rows, onIssue, onPaid, isIssued = true }) => (
       rowKey={p => p.recurring_id ? `r-${p.recurring_id}-${p.due_date}` : `m-${p.milestone_id}`}
       empty={isIssued
         ? "발행 예정인 청구 일정이 없어요. 계약 상세의 '청구 일정'에서 청구할 금액·시점을 등록하세요."
-        : "예정된 지급 일정이 없어요. 매입 계약 상세의 '청구 일정'에서 지급할 금액·시점을 등록하세요."}
+        : "예정된 지급 일정이 없어요. 발주 계약 상세의 '청구 일정'에서 지급할 금액·시점을 등록하세요."}
       columns={[
         { key: 'due_date', header: '예정일', sortable: true, render: p => (
           <span className="num text-sm">{p.due_date || "—"}

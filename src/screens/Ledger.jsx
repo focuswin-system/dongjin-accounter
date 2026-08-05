@@ -68,7 +68,7 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
   const exportCsv = () => {
     if (filtered.length === 0) return toast.push("내보낼 거래가 없어요");
     downloadCsv(`거래내역_${localToday()}.csv`,
-      ["날짜", "구분", "거래처", "계약/공통", "비목", "금액", "상태"],
+      ["날짜", "구분", "거래처", "내용", "비목", "금액", "상태"],
       filtered.map(t => [t.date, t.kind === "income" ? "입금" : "지출", t.vendor, t.scope, t.category, t.sign * t.amount, t.status]));
   };
 
@@ -141,7 +141,8 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
                 render: t => <span className="num-cell text-muted text-sm">{t.date}</span> },
               { key: 'vendor', header: '거래처', sortable: true,
                 render: t => <span className="fw-700">{t.vendor}</span> },
-              { key: 'scope', header: '계약/공통',
+              // 계약이 있으면 계약명, 없으면 적요(api.js scope) — 두 가지가 섞이므로 '내용'
+              { key: 'scope', header: '내용',
                 render: t => <span className="text-muted text-sm">{t.scope}</span> },
               { key: 'category', header: '비목',
                 render: t => <span className="badge outline">{t.category}</span> },
@@ -283,9 +284,11 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
               </div>
               <DetailRow label="거래일"    value={txn.date}/>
               <DetailRow label="거래처"    value={txn.vendor}/>
-              <DetailRow label="계약/공통" value={txn.scope}/>
+              <DetailRow label="내용" value={txn.scope}/>
               <DetailRow label="비목"      value={txn.category}/>
-              {txn.account && <DetailRow label="입금 계좌" value={txn.account}/>}
+              {/* 지출인데 '입금 계좌'라고 적혀 있었다. 바로 위 금액 칸은 sign으로 갈라 쓰면서
+                  여기만 고정 문구였다. 앱 전체가 쓰는 짝(PaidIssueDrawer·Contract·Finance)에 맞춘다. */}
+              {txn.account && <DetailRow label={txn.sign > 0 ? "입금 계좌" : "출금 계좌"} value={txn.account}/>}
               {txn.method  && <DetailRow label="결제수단"  value={txn.method}/>}
               {txn.memo    && <DetailRow label="메모"      value={txn.memo}/>}
               {txn.doc     && <DetailRow label="결의서"    value={<StatusBadge status={txn.doc}/>}/>}

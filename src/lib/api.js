@@ -260,6 +260,10 @@ function adaptTransaction(row) {
     cost_contract_id: row.cost_contract_id || '',
     cost_contract_name: row.cost_contract_name || '',
     account: row.account_name || '',
+    /* 거래내역 표의 '내용' 칸 — 계약이 있으면 계약명, 없으면 적요를 보여준다.
+       계약 없는 거래가 정상적으로 더 많으므로(경비·공과금) 계약명만 쓰면 대부분 빈칸이 된다.
+       ⚠ 이 필드를 '계약'이라 부르면 안 된다 — 표 헤더를 '계약'으로 달았다가
+          적요가 계약명인 것처럼 보였다. 두 가지가 섞여 있는 칸이라 이름도 '내용'이어야 한다. */
     scope: row.contract_name || row.memo || row.doc_no || '—',
     category: row.category || '—',
     subCategory: row.sub_category,
@@ -934,7 +938,7 @@ export const api = {
       })
       if (!res.ok) throw new Error('내보내기에 실패했어요')
       const blob = await res.blob()
-      const label = kind === 'purchase' ? '매입계약' : kind === 'sales' ? '매출계약' : '계약'
+      const label = kind === 'purchase' ? '발주계약' : kind === 'sales' ? '수주계약' : '계약'
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url

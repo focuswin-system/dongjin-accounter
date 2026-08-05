@@ -89,7 +89,7 @@ async function buildContractWorkbook(contracts, { kind = 'all', today = new Date
   wb.creator = 'focus-accounter'
   wb.created = today
 
-  const kindLabel = kind === 'purchase' ? '매입 계약' : kind === 'sales' ? '매출 계약' : '계약'
+  const kindLabel = kind === 'purchase' ? '발주 계약' : kind === 'sales' ? '수주 계약' : '계약'
   const stamp = today.toISOString().slice(0, 10)
 
   // ── 시트 1: 계약 목록 ─────────────────────────────────────────
