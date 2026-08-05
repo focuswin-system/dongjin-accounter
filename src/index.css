@@ -877,14 +877,26 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 .res-viewer-overlay { position: fixed; inset: 0; background: rgba(15,23,42,0.5); display: grid; place-items: center; z-index: 200; padding: 24px; }
 .res-viewer { background: #fff; border-radius: 10px; width: min(760px, 96vw); max-height: 92vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 20px 60px -20px rgba(0,0,0,0.4); }
 
-/* ── 인쇄 ── (id·클래스 어느 쪽이든 인쇄 대상으로 인식) */
+/* ── 인쇄 ── (id·클래스 어느 쪽이든 인쇄 대상으로 인식)
+ *
+ * body * 를 전부 숨기고 인쇄 대상만 되살리는 방식이라, **인쇄 대상 클래스를 안 붙이면
+ * 백지가 나온다.** 보고서 화면이 그랬다(인쇄 버튼이 있는데 결과가 백지).
+ * 새 인쇄 화면을 만들면 여기 whitelist 에 반드시 추가할 것. */
 @media print {
   body * { visibility: hidden; }
   #resolution-print, #resolution-print *,
-  .resolution-print, .resolution-print * { visibility: visible; }
-  #resolution-print, .resolution-print { position: absolute; left: 0; top: 0; width: 100%; border: none; box-shadow: none; padding: 0; }
+  .resolution-print, .resolution-print *,
+  .report-print, .report-print * { visibility: visible; }
+  #resolution-print, .resolution-print,
+  .report-print { position: absolute; left: 0; top: 0; width: 100%; border: none; box-shadow: none; padding: 0; }
   .no-print { display: none !important; }
   @page { size: A4; margin: 16mm; }
+
+  /* 보고서는 표가 길다 — 행이 페이지 경계에서 잘리지 않게 한다. */
+  .report-print table { page-break-inside: auto; }
+  .report-print tr { page-break-inside: avoid; page-break-after: auto; }
+  .report-print thead { display: table-header-group; }   /* 페이지마다 머리글 반복 */
+  .report-print .card { break-inside: avoid; box-shadow: none; }
 
   /* 헤더·결재란의 회색 음영은 인쇄에서 흰색으로 — 테두리만 남겨 깔끔하게 */
   .res-head th, .res-items th, .res-total th, .res-total td,

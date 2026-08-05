@@ -428,14 +428,13 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
 
         <div className="drawer-foot">
           <button className="btn" onClick={onClose}>닫기</button>
-          {/* 매출 미수금: 발주처에 독촉. 매입 미지급금: 우리가 낼 돈이라 독촉 대상이 아님 → 지급결의서 발행. */}
+          {/* 매입 미지급금은 우리가 낼 돈이라 독촉 대상이 아님 → 지급결의서 발행.
+              (제거) 매출 미수금의 '독촉 발송' — 누르면 "독촉 메일을 발송했어요"라고 알렸지만
+              서버에 메일 발송 경로가 **아예 없다**(독촉·메일 관련 코드 0건). 아무것도 안 나가는데
+              보낸 줄 알고 넘어가면 수금이 그만큼 밀리고, 보낸 이력도 남지 않아 확인할 방법도 없다.
+              메일 발송을 실제로 붙일 때 되살린다. */}
           {isIssued
-            ? (invoice.remainAmount > 0 && innerTab === "match" && (
-                <button className="btn" style={{ marginLeft: "auto" }}
-                  onClick={() => toast.push("독촉 메일을 발송했어요")}>
-                  <Icon.Bell size={14}/> 독촉 발송
-                </button>
-              ))
+            ? null
             : (
                 <button className="btn primary" style={{ marginLeft: "auto" }}
                   onClick={async () => {

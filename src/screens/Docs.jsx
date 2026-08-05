@@ -10,6 +10,7 @@ import { computeItems, shiftMonth, monthLabel } from './HR'
 import { api } from '../lib/api'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
+import { downloadVisibleTables } from '../lib/export'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 
@@ -1362,7 +1363,8 @@ const ReportTax4 = ({ toast }) => {
         <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, -1))}><Icon.Left size={14}/></button>
         <div className="fw-700" style={{ fontSize: 15, minWidth: 100, textAlign: "center" }}>{monthLabel(month)}</div>
         <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, 1))}><Icon.Right size={14}/></button>
-        <button className="btn ml-auto" onClick={() => toast.push("신고 자료를 출력했어요")}><Icon.Print size={14}/> 자료 출력</button>
+        {/* 출력·내보내기는 보고서 공통 툴바(위쪽 '인쇄'·'엑셀')가 맡는다.
+            여기 있던 '자료 출력'은 토스트만 띄우는 가짜 버튼이었고, 진짜 인쇄와 자리도 겹친다. */}
       </div>
 
       <div className="card card-pad" style={{ background: "var(--brand-soft)", borderColor: "transparent", marginBottom: 16 }}>
@@ -1844,9 +1846,27 @@ const ReportTaxOffice = ({ toast }) => {
 }
 
 // ── 10. 부가세 신고 자료 ─────────────────────────────────────
+/* 분기 → 부가세 과세기간·신고기한.
+ * 부가세는 반기(1기 1~6월 / 2기 7~12월)를 다시 예정·확정으로 나눈다. 분기와 '기'가 1:1이 아니다.
+ *   1~3월  = 1기 예정 (기한 4/25)      4~6월  = 1기 확정 (기한 7/25)
+ *   7~9월  = 2기 예정 (기한 10/25)     10~12월 = 2기 확정 (기한 다음해 1/25)
+ * ⚠ 예전 화면은 4~6월을 '2기 예정신고'라고 적어 두었는데 틀린 표기다(1기 확정이다).
+ *   신고 기한을 잘못 알려주면 가산세로 이어지므로 여기서 바로잡는다. */
+function vatPeriodOf(quarter, year) {
+  const M = {
+    Q1: { from: `${year}.01.01`, to: `${year}.03.31`, label: '1기 예정신고', due: `${year}년 4월 25일` },
+    Q2: { from: `${year}.04.01`, to: `${year}.06.30`, label: '1기 확정신고', due: `${year}년 7월 25일` },
+    Q3: { from: `${year}.07.01`, to: `${year}.09.30`, label: '2기 예정신고', due: `${year}년 10월 25일` },
+    Q4: { from: `${year}.10.01`, to: `${year}.12.31`, label: '2기 확정신고', due: `${year + 1}년 1월 25일` },
+  }
+  return M[quarter] || M.Q1
+}
+
 const ReportVAT = ({ toast }) => {
   const [quarter, setQuarter] = useState("Q2")
   const [vatData, setVatData] = useState(null)
+  // getVatSummary 가 올해 기준으로 조회한다 — 기간 표시도 같은 해를 쓴다
+  const vatPeriod = vatPeriodOf(quarter, new Date().getFullYear())
 
   useEffect(() => {
     import('../lib/api').then(({ api }) => {
@@ -1860,6 +1880,8 @@ const ReportVAT = ({ toast }) => {
   const QUARTER_LABEL = { Q1: "1분기 (1~3월)", Q2: "2분기 (4~6월)", Q3: "3분기 (7~9월)", Q4: "4분기 (10~12월)" }
   const salesTotal = salesInvoices.reduce((a, r) => a + r.supplyAmount, 0)
   const purchaseTotal = purchaseInvoices.reduce((a, r) => a + r.supplyAmount, 0)
+  // 영세율 안내는 실제 영세율 매출이 있을 때만 — 아래 배너 주석 참고
+  const zeroRated = salesInvoices.filter(r => r.taxType === '영세')
 
   return (
     <div>
@@ -1873,32 +1895,43 @@ const ReportVAT = ({ toast }) => {
         ))}
       </div>
 
-      {/* 신고 기간 */}
+      {/* 신고 기간 — 고른 분기에서 계산한다.
+          예전엔 "2026.04.01 ~ 2026.06.30 (2기 예정신고) · 기한 2026년 7월 25일"이 **글자로 박혀** 있어서
+          1·3·4분기를 골라도 2분기 날짜가 그대로 남았다. 신고 기한을 잘못 알려주는 건 그냥 틀린 정보다. */}
       <div className="card card-pad" style={{ background: "var(--brand-soft)", borderColor: "transparent", marginBottom: 12 }}>
-        <div className="row gap-8">
+        <div className="row gap-8" style={{ flexWrap: "wrap" }}>
           <Icon.Bell size={14}/>
-          <span className="text-sm fw-600">신고 기간: 2026.04.01 ~ 2026.06.30 (2기 예정신고)</span>
-          <span className="text-xs text-muted" style={{ marginLeft: 4 }}>신고 기한: 2026년 7월 25일</span>
+          <span className="text-sm fw-600">신고 기간: {vatPeriod.from} ~ {vatPeriod.to} ({vatPeriod.label})</span>
+          <span className="text-xs text-muted" style={{ marginLeft: 4 }}>신고 기한: {vatPeriod.due}</span>
         </div>
       </div>
 
-      {/* 영세율 경고 */}
-      <div className="card card-pad" style={{ background: "oklch(0.98 0.015 60)", borderColor: "oklch(0.88 0.06 60)", marginBottom: 16 }}>
-        <div className="row gap-8" style={{ alignItems: "flex-start" }}>
-          <Icon.Warn size={15} style={{ color: "var(--warn)", flexShrink: 0, marginTop: 1 }}/>
-          <div>
-            <div className="text-sm fw-700" style={{ color: "oklch(0.5 0.12 55)", marginBottom: 4 }}>
-              방산업체 영세율(0%) 주의 — 세무사 확인 필수
-            </div>
-            <div className="text-xs" style={{ color: "oklch(0.55 0.08 55)", lineHeight: 1.6 }}>
-              한화에어로스페이스·LIG넥스원 등 방산업체 납품 매출은 부가가치세법 §21에 따라
-              영세율(0%) 적용 대상일 수 있습니다. 영세율 적용 시 매출세액은 0원이며,
-              매입세액은 전액 환급 대상이 됩니다.
-              아래 수치는 단순 참고용이며 실제 신고 전 반드시 담당 세무사와 확인하세요.
+      {/* 영세율 안내 — **영세율 청구서가 실제로 있을 때만** 뜬다.
+       *
+       * 예전엔 조건 없이 "방산업체 영세율(0%) 주의 — 한화에어로스페이스·LIG넥스원 등…"이
+       * 모든 회사, 모든 분기에 떴다. 초기 프로토타입(방산 납품업체)의 문구가 그대로 남은 것인데,
+       * 지금은 여러 회사가 쓰는 서비스다. 방산과 무관한 회사의 신고 화면 맨 위를 매번
+       * 남의 업종 경고가 차지했다.
+       *
+       * 업종(company_info.biz_item)으로 거르는 방법도 있지만 **장부가 더 정확하다** —
+       * 영세율은 방산뿐 아니라 수출에도 적용되고, 방산업체라도 그 분기에 영세율 건이
+       * 없으면 안내할 게 없다. 그래서 '이 분기에 영세율로 끊은 청구서가 있나'로 판단한다. */}
+      {zeroRated.length > 0 && (
+        <div className="card card-pad" style={{ background: "oklch(0.98 0.015 60)", borderColor: "oklch(0.88 0.06 60)", marginBottom: 16 }}>
+          <div className="row gap-8" style={{ alignItems: "flex-start" }}>
+            <Icon.Warn size={15} style={{ color: "var(--warn)", flexShrink: 0, marginTop: 1 }}/>
+            <div>
+              <div className="text-sm fw-700" style={{ color: "oklch(0.5 0.12 55)", marginBottom: 4 }}>
+                영세율(0%) 매출 {zeroRated.length}건이 포함돼 있어요 — 세무사 확인 필요
+              </div>
+              <div className="text-xs" style={{ color: "oklch(0.55 0.08 55)", lineHeight: 1.6 }}>
+                수출·방산 납품 등 영세율 적용 매출은 매출세액이 0원이고 매입세액은 환급 대상이 됩니다.
+                영세율은 증빙(수출신고필증·구매확인서 등)이 있어야 인정되니 신고 전 담당 세무사와 확인하세요.
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* 요약 카드 */}
       <KpiRow cols={3} style={{ marginBottom: 24 }}>
@@ -1972,22 +2005,37 @@ const REPORT_VIEWS = {
 export const ReportsScreen = () => {
   const toast = useToast()
   const [active, setActive] = useState(null)
+  const printRef = useRef(null)
   const report = REPORTS.find(r => r.id === active)
+
+  /* 예전엔 두 버튼이 토스트만 띄웠다("PDF로 내려받았어요"). 파일은 안 받아지는데 받았다고 말하니
+     세무 신고철에 자료를 챙겼다고 믿고 넘어갈 수 있었다. 둘 다 실제로 동작하게 바꾼다.
+     · 인쇄 — PDF 생성기를 새로 들이지 않고 브라우저 인쇄를 쓴다(앱의 기존 방식). 인쇄 대화상자에서
+       'PDF로 저장'을 고르면 PDF가 된다. 그래서 버튼 이름도 실제 동작인 '인쇄'로 적는다.
+     · 엑셀 — 화면에 그려진 표를 그대로 CSV로 뽑는다(lib/export.js). 보고서마다 집계를 다시 짜지
+       않으므로 보이는 것과 받는 것이 어긋날 수 없다. */
+  const doExport = () => {
+    const ok = downloadVisibleTables(printRef.current, `${report.t}_${localToday()}.csv`)
+    if (!ok) toast.push("내보낼 표가 없어요", { tone: 'warn' })
+  }
 
   if (active && report) {
     const View = REPORT_VIEWS[active]
     return (
       <div className="fade-up">
-        <div className="row" style={{ paddingTop: 30, marginBottom: 20 }}>
+        <div className="row no-print" style={{ paddingTop: 30, marginBottom: 20 }}>
           <button className="btn" onClick={() => setActive(null)}><Icon.Left size={14}/> 보고서 목록</button>
           <div className="ml-auto row gap-8">
-            <button className="btn" onClick={() => toast.push("PDF로 내려받았어요")}><Icon.Download size={14}/> PDF</button>
-            <button className="btn excel" onClick={() => toast.push("엑셀로 내려받았어요")}><Icon.Excel size={14}/> 엑셀</button>
+            <button className="btn" onClick={() => window.print()}><Icon.Print size={14}/> 인쇄</button>
+            <button className="btn excel" onClick={doExport}><Icon.Excel size={14}/> 엑셀</button>
           </div>
         </div>
-        <div className="page-title" style={{ marginBottom: 4 }}>{report.t}</div>
-        <div className="page-sub" style={{ marginBottom: 24 }}>{localToday()} 조회 기준</div>
-        <View toast={toast}/>
+        {/* report-print — index.css 의 인쇄 whitelist. 이 클래스가 없으면 인쇄가 백지로 나온다. */}
+        <div className="report-print" ref={printRef}>
+          <div className="page-title" style={{ marginBottom: 4 }}>{report.t}</div>
+          <div className="page-sub" style={{ marginBottom: 24 }}>{localToday()} 조회 기준</div>
+          <View toast={toast}/>
+        </div>
       </div>
     )
   }

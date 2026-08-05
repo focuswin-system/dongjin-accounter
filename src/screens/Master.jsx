@@ -7,6 +7,7 @@ import { ImportWizard } from '../lib/components/ImportWizard'
 import { RecurringCycles, useRecurringCycles, cycleSummaryByRule } from '../lib/components/RecurringCycles'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { normBizNo, normVendorName } from '../lib/normalize'
+import { bizTypeOptions, bizItemOptions } from '../lib/bizTypes'
 import { api, minuteOf } from '../lib/api'
 
 const fmtDateLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -1020,11 +1021,15 @@ const VendorPanel = ({ embedded = false }) => {
           <div className="row gap-16" style={{ alignItems: 'flex-start' }}>
             <div style={{ flex: 1 }}>
               <label className="label" style={{ marginBottom: 8 }}>업태</label>
-              <input className="input" value={form.biz_type} onChange={e => f('biz_type', e.target.value)} placeholder="예: 제조업, 서비스업"/>
+              <Combobox value={form.biz_type} onChange={v => f('biz_type', v)}
+                options={bizTypeOptions()} placeholder="업태 선택 또는 직접 입력"
+                onAddNew={q => f('biz_type', q)} addNewLabel="직접 입력"/>
             </div>
             <div style={{ flex: 1 }}>
               <label className="label" style={{ marginBottom: 8 }}>종목</label>
-              <input className="input" value={form.biz_item} onChange={e => f('biz_item', e.target.value)} placeholder="예: 소프트웨어 개발"/>
+              <Combobox value={form.biz_item} onChange={v => f('biz_item', v)}
+                options={bizItemOptions(form.biz_type)} placeholder="종목 선택 또는 직접 입력"
+                onAddNew={q => f('biz_item', q)} addNewLabel="직접 입력"/>
             </div>
           </div>
 
@@ -1421,13 +1426,20 @@ const CompanyPanel = ({ embedded = false }) => {
             <label className="label" style={{ marginBottom: 8 }}>사업자등록번호</label>
             <input className="input num" value={form.biz_no} onChange={e => f('biz_no', e.target.value)} placeholder="000-00-00000"/>
           </div>
+          {/* 업태·종목은 사업자등록증에 적힌 문구를 그대로 옮기는 칸이다. 자유 입력이라
+              같은 뜻을 여러 표기로 쓰게 되므로(소프트웨어개발/소프트웨어 개발/SW개발)
+              표준 목록에서 고르게 하되, 목록에 없으면 직접 입력도 된다. */}
           <div style={{ flex: 1 }}>
             <label className="label" style={{ marginBottom: 8 }}>업태</label>
-            <input className="input" value={form.biz_type} onChange={e => f('biz_type', e.target.value)} placeholder="제조업"/>
+            <Combobox value={form.biz_type} onChange={v => f('biz_type', v)}
+              options={bizTypeOptions()} placeholder="업태 선택 또는 직접 입력"
+              onAddNew={q => f('biz_type', q)} addNewLabel="직접 입력"/>
           </div>
           <div style={{ flex: 1 }}>
             <label className="label" style={{ marginBottom: 8 }}>종목</label>
-            <input className="input" value={form.biz_item} onChange={e => f('biz_item', e.target.value)} placeholder="방산 정밀가공"/>
+            <Combobox value={form.biz_item} onChange={v => f('biz_item', v)}
+              options={bizItemOptions(form.biz_type)} placeholder="종목 선택 또는 직접 입력"
+              onAddNew={q => f('biz_item', q)} addNewLabel="직접 입력"/>
           </div>
         </div>
 

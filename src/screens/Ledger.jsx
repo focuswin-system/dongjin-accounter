@@ -4,17 +4,10 @@ import { PageHeader } from '../lib/components/PageHeader'
 import { DataTable } from '../lib/components/DataTable'
 import { TableToolbar } from '../lib/components/TableToolbar'
 import { api } from '../lib/api'
+import { downloadCsv } from '../lib/export'
 import { ResolutionDocument } from './Docs'
 
-const downloadCsv = (filename, headers, rows) => {
-  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`
-  const csv = [headers, ...rows].map(r => r.map(esc).join(',')).join('\r\n')
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = filename; a.click()
-  URL.revokeObjectURL(url)
-}
+// CSV 저장은 보고서 내보내기와 같은 것을 쓴다 → lib/export.js
 
 export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, openEdit, openExcel, refreshTrigger }) => {
   const toast = useToast();
@@ -217,13 +210,12 @@ const TxnActions = ({ txn, toast, confirm, onAction }) => {
   if (txn.kind === "income" && ["입금 예정", "일부 입금"].includes(txn.status))
     return <button className="btn primary sm" onClick={doIncome}>입금 처리</button>;
 
+  /* 장기 미수도 할 수 있는 건 '입금 처리'뿐이다.
+     (제거) '독촉' 버튼 — 눌러도 "준비 중이에요" 토스트만 떴다. 정직하긴 했지만 누를 수 있는
+     버튼이 있으면 기대가 생기고, 장기 미수 행마다 매번 그 실망을 반복하게 된다.
+     메일 발송을 실제로 붙일 때 청구서 상세의 독촉과 함께 되살린다. */
   if (txn.kind === "income" && txn.status === "장기 미수")
-    return (
-      <div className="row gap-4">
-        <button className="btn sm" onClick={(e) => { e.stopPropagation(); toast.push("독촉 메일 기능은 준비 중이에요"); }}>독촉</button>
-        <button className="btn primary sm" onClick={doIncome}>입금 처리</button>
-      </div>
-    );
+    return <button className="btn primary sm" onClick={doIncome}>입금 처리</button>;
 
   if (txn.kind === "expense" && ["지급 예정", "지급 대기", "기한 지남"].includes(txn.status))
     return <button className="btn primary sm" onClick={doExpense}>이체 실행</button>;
