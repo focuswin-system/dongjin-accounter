@@ -829,6 +829,49 @@ router.put('/:id', async (req, res, next) => {
     // 품목표: 폼에서 넘어온 대로 통째 교체(청구 방식 무관). items를 아예 안 보낸 요청은
     // 품목을 다루지 않는 화면이므로 기존 품목표를 건드리지 않는다.
     if (req.body.items !== undefined) await replaceContractItems(conn, req.params.id, req.body.items)
+
+    /* 청구 방식을 바꿔 저장했을 때 뒤따라야 할 정리 — 등록(POST)에만 있고 편집(PUT)엔 없었다.
+     *
+     * 실제로 이런 일이 있었다(운영 fowin, 2026-08-05): 단건으로 만든 계약(계약금액 5만)을
+     * 정기형(월 5만)으로 고쳤더니
+     *   · 옛 '일시' 청구 일정이 그대로 남아 대금 청구서 '발행 예정'에 216일 초과로 떠 있고
+     *   · **정기청구 규칙은 만들어지지 않아 매달 청구가 아예 안 걸렸다.**
+     * 계약 화면만 보면 정기형으로 잘 바뀐 것처럼 보여서 알아채기 어렵다.
+     */
+    if (f.billing_mode === 'recurring' || f.billing_mode === 'progress') {
+      /* '일시'(계약금액 100% 1회)는 정기·기성과 양립할 수 없다. 아직 발행 안 된 것만 지운다 —
+         이미 청구서가 나간 일정은 장부 근거라 건드리지 않는다.
+         '초기 일시금'은 정기형과 함께 쓰라고 만든 유형이므로 대상이 아니다. */
+      await conn.execute(
+        `DELETE FROM milestones
+         WHERE contract_id = ? AND type = '일시' AND status = '예정'
+           AND (invoice_id IS NULL OR invoice_id = '')`, [req.params.id])
+    }
+    if (f.billing_mode === 'recurring' && Number(f.unit_amount) > 0) {
+      /* 규칙이 **하나도 없을 때만** 만든다(active=0 도 '있는' 것으로 친다).
+         사용자가 일부러 꺼 둔 정기청구를, 계약을 저장했다는 이유로 되살리면 안 된다. */
+      const [[vg]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [vendor_id || ''])
+      const isPurchaseC = vg && (vg.gubu === 'A' || vg.gubu === 'E')
+      const table = isPurchaseC ? 'recurring_expenses' : 'recurring_invoices'
+      const [[cnt]] = await conn.execute(`SELECT COUNT(*) AS n FROM ${table} WHERE contract_id = ?`, [req.params.id])
+      if (Number(cnt.n) === 0) {
+        const vatMode = vatRateOf(f.vat_mode) === 0 ? 'none' : 'exclusive'
+        if (isPurchaseC) {
+          await conn.execute(
+            `INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+            [randomUUID(), vendor_id || null, req.params.id, name || '정기지출', Number(f.unit_amount), vatMode,
+             f.billing_period || 'monthly', f.billing_day || 1, start_date || '', f.end_date || null, null])
+        } else {
+          await conn.execute(
+            `INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+            [randomUUID(), vendor_id || null, req.params.id, name || '', Number(f.unit_amount), vatMode,
+             f.billing_period || 'monthly', f.billing_day || 1, start_date || '', f.end_date || null, null])
+        }
+      }
+    }
+
     /* '완료'로 닫으면서 화면이 동의를 받아 왔을 때만 정기 규칙의 종료일을 채운다.
        요청하지 않으면 아무것도 안 한다 — 사용자가 모르는 사이에 청구가 멈추면 안 된다. */
     let recurringClosed = null
