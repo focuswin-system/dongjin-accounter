@@ -974,6 +974,11 @@ async function initDb(conn) {
     // 홈택스 전자세금계산서 승인번호(24자리). 임포트에서 같은 계산서가 두 번 쌓이는 걸 막는 유일한 키다.
     // 수기로 등록한 청구서는 비어 있고, 나중에 엑셀을 올리면 그 청구서에 채워진다.
     await ensureColumn('invoices',     'nts_confirm_no', "nts_confirm_no VARCHAR(40)")
+    /* 소급 등록 마법사가 한 번에 만든 묶음. 잘못된 범위로 수십 건을 만들었을 때
+     * 하나씩 지우는 건 현실적이지 않아서, 이 값으로 묶어 통째로 되돌린다.
+     * 거래(transactions)에도 같은 값을 넣어 청구서와 함께 정리한다. */
+    await ensureColumn('invoices',     'backfill_batch', "backfill_batch VARCHAR(40)")
+    await ensureColumn('transactions', 'backfill_batch', "backfill_batch VARCHAR(40)")
     // 재무 거래 역참조 — 이 지출/입금이 어느 대출·투자에서 나왔는지(정기의 recurring_id와 같은 용도).
     // FK는 두지 않는다: 대출 기록을 지워도 실제로 오간 돈의 기록은 남아야 한다.
     /* 정산(매칭)이 만든 거래인가. 취소할 때 이 값으로 갈린다:

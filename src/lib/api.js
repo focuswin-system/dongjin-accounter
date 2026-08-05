@@ -926,6 +926,25 @@ export const api = {
     } catch (e) { return { ok: false, error: e.message } }
   },
 
+  /* ─── 정기 회차 소급 등록 ───────────────────────────────────
+     등록일 이전 회차는 평소 경로로는 만들어지지 않는다(소급 홍수 방지).
+     사용자가 기간을 명시적으로 열었을 때만, 미리보기 → 선택 → 일괄 생성. kind: 'invoice' | 'expense' */
+  _backfillBase(kind) { return kind === 'expense' ? '/recurring-expenses' : '/recurring-invoices' },
+
+  async backfillPreview(kind, id, { from, to }) {
+    try { return { ok: true, ...(await req(`${this._backfillBase(kind)}/${id}/backfill/preview`, { method: 'POST', body: { from, to } })) } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async backfillCommit(kind, id, cycles) {
+    try { return { ok: true, ...(await req(`${this._backfillBase(kind)}/${id}/backfill`, { method: 'POST', body: { cycles } })) } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  /** 방금 만든 묶음 통째로 되돌리기 — 잘못된 범위로 수십 건을 만들면 하나씩은 못 지운다 */
+  async backfillUndo(kind, batch) {
+    try { return { ok: true, ...(await req(`${this._backfillBase(kind)}/backfill/${batch}`, { method: 'DELETE' })) } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
   /** 계약을 '완료'로 닫기 전 확인용 — 종료일이 비어 있는(=영원히 도는) 정기 규칙 */
   async getOpenEndedRecurring(id) {
     try { return await req(`/contracts/${id}/recurring/open-ended`) }

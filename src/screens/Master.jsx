@@ -6,6 +6,7 @@ import { DataTable } from '../lib/components/DataTable'
 import { ImportWizard } from '../lib/components/ImportWizard'
 import { RecurringCycles, useRecurringCycles, cycleSummaryByRule } from '../lib/components/RecurringCycles'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
+import { BackfillWizard } from '../lib/components/BackfillWizard'
 import { normBizNo, normVendorName } from '../lib/normalize'
 import { bizTypeOptions, bizItemOptions } from '../lib/bizTypes'
 import { api, minuteOf } from '../lib/api'
@@ -1955,6 +1956,7 @@ const filterRules = (rows, f) =>
 export const RecurringExpensePanel = ({ page = false, goRoute }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
+  const [backfill, setBackfill] = useState(null)   // 소급 등록 마법사 대상 규칙
   const [rows, setRows] = useState([])
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState(null)   // 수정 대상(없으면 등록)
@@ -2074,6 +2076,9 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
                 <td>
                   <div className="row gap-6">
                     <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => openEdit(r)}>수정</button>
+                    {/* 등록일 이전 회차는 평소 경로로 안 만들어진다 → 기간을 열어 넣는 입구 */}
+                    <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }}
+                      onClick={() => setBackfill({ id: r.id, label: `${r.item || r.category || ''} · ${r.vendor_name || ''}` })}>소급 등록</button>
                     <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => handleToggle(r.id)}>
                       {r.active ? "중지" : "재개"}
                     </button>
@@ -2099,6 +2104,9 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
       {/* 기지급 처리 — 계좌·날짜를 받는다. 대금청구서 화면과 같은 공용 드로어 */}
       <PaidIssueDrawer target={cyc.paidTarget} isIssued={false}
         onIssuePaid={cyc.issuePaid} onClose={cyc.closePaid} onDone={cyc.donePaid}/>
+      {/* 도입 이전 회차 넣기 — 등록일 하한 때문에 평소 경로로는 안 만들어진다 */}
+      <BackfillWizard open={!!backfill} rule={backfill} kind="purchase"
+        onClose={() => setBackfill(null)} onDone={() => { load(); cyc.reload() }}/>
     </div>
   )
 }
@@ -2234,6 +2242,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
 export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
+  const [backfill, setBackfill] = useState(null)   // 소급 등록 마법사 대상 규칙
   const [rows, setRows] = useState([])
   const [vendors, setVendors] = useState([])
   const [contracts, setContracts] = useState([])
@@ -2368,6 +2377,9 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
                 <td>
                   <div className="row gap-6">
                     <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => openEdit(r)}>수정</button>
+                    {/* 등록일 이전 회차는 평소 경로로 안 만들어진다 → 기간을 열어 넣는 입구 */}
+                    <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }}
+                      onClick={() => setBackfill({ id: r.id, label: `${r.item || r.category || ''} · ${r.vendor_name || ''}` })}>소급 등록</button>
                     <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => handleToggle(r.id)}>
                       {r.active ? "중지" : "재개"}
                     </button>
@@ -2392,6 +2404,9 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
       {/* 기입금 처리 — 정기지출과 같은 공용 드로어(계좌·날짜 필수) */}
       <PaidIssueDrawer target={cyc.paidTarget} isIssued
         onIssuePaid={cyc.issuePaid} onClose={cyc.closePaid} onDone={cyc.donePaid}/>
+      {/* 도입 이전 회차 넣기 — 등록일 하한 때문에 평소 경로로는 안 만들어진다 */}
+      <BackfillWizard open={!!backfill} rule={backfill} kind="sales"
+        onClose={() => setBackfill(null)} onDone={() => { load(); cyc.reload() }}/>
     </div>
   )
 }

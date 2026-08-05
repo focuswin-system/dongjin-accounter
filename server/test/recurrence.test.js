@@ -239,3 +239,48 @@ test('분기·연 주기도 달 단위로 판정한다', () => {
   const y = { start_date: '2026-03-01', period: 'yearly', day_of_month: 1, last_generated: '2026-03-01' }
   assert.deepEqual(dueDatesToGenerate(y, '2026-12-31'), [])
 })
+
+// ── 소급 등록 (lib/backfill.js) ────────────────────────────────
+const { backfillCycles, tooManyError, MAX_BACKFILL } = require('../lib/backfill')
+
+test('소급 — 등록일 하한을 무시하고 지정한 기간의 회차를 만든다', () => {
+  /* 평소엔 등록일(setup_date) 이전이 막히지만, 소급은 사용자가 연 기간이 하한이 된다.
+     같은 규칙(주기·앵커일)을 쓰므로 평소 회차와 어긋나지 않는다. */
+  const rec = { start_date: '2026-01-01', period: 'monthly', day_of_month: 1, setup_date: '2026-08-05' }
+  assert.deepStrictEqual(
+    dueDatesToGenerate(rec, '2026-08-05'), [],
+    '평소 경로는 등록일(8/5) 이전을 만들지 않는다 — 8/1 앵커는 이미 지났고 9/1은 아직 안 왔다')
+  assert.deepStrictEqual(
+    backfillCycles(rec, '2026-03-01', '2026-08-05'),
+    ['2026-03-01', '2026-04-01', '2026-05-01', '2026-06-01', '2026-07-01', '2026-08-01'])
+})
+
+test('소급 — 계약 시작일보다 앞선 기간을 열어도 시작일 전은 안 만든다', () => {
+  const rec = { start_date: '2026-05-01', period: 'monthly', day_of_month: 1, setup_date: '2026-08-05' }
+  assert.deepStrictEqual(
+    backfillCycles(rec, '2026-01-01', '2026-08-05'),
+    ['2026-05-01', '2026-06-01', '2026-07-01', '2026-08-01'])
+})
+
+test('소급 — 종료일을 넘지 않는다', () => {
+  const rec = { start_date: '2026-01-01', period: 'monthly', day_of_month: 1, end_date: '2026-04-30', setup_date: '2026-08-05' }
+  assert.deepStrictEqual(
+    backfillCycles(rec, '2026-01-01', '2026-08-05'),
+    ['2026-01-01', '2026-02-01', '2026-03-01', '2026-04-01'])
+})
+
+test('소급 — 이미 발행한 회차도 목록에 나온다(중복 판단은 장부로)', () => {
+  /* last_generated 하한을 그대로 쓰면 중간에 지운 회차를 영영 못 되살린다.
+     그래서 소급 계산은 하한을 비우고, '이미 있음'은 실제 청구서 조회로 판단한다. */
+  const rec = { start_date: '2026-01-01', period: 'monthly', day_of_month: 1,
+    setup_date: '2026-08-05', last_generated: '2026-06-01' }
+  assert.deepStrictEqual(
+    backfillCycles(rec, '2026-05-01', '2026-07-31'),
+    ['2026-05-01', '2026-06-01', '2026-07-01'])
+})
+
+test('소급 — 상한을 넘으면 잘라내지 않고 거절한다', () => {
+  assert.strictEqual(tooManyError(MAX_BACKFILL), null)
+  const msg = tooManyError(MAX_BACKFILL + 1)
+  assert.ok(msg && msg.includes(String(MAX_BACKFILL + 1)), '몇 개가 나왔는지 알려줘야 범위를 좁힐 수 있다')
+})

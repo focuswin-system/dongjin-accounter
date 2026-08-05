@@ -6,6 +6,8 @@ const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError, amountError } = require('../lib/ledger')
 const { taxTypeOfMode, recurFromSupply, recurVat } = require('../lib/vat')
 const { closedPeriodError } = require('../lib/closing')
+const { backfillCycles, tooManyError } = require('../lib/backfill')
+const { settleAcctCode } = require('../lib/acctCode')
 
 const router = Router()
 
@@ -277,5 +279,175 @@ router.post('/issue-missed', async (req, res, next) => {
 })
 
 // 반복일 계산·날짜 가산은 ../lib/recurrence(dueDatesToGenerate·addDays)로 공용화.
+
+/* ── 소급 등록 마법사 ─────────────────────────────────────────────
+ * 등록일 하한을 없애지 않고, 사용자가 연 기간만 만든다. 자세한 배경은 lib/backfill.js 참고.
+ */
+
+/** 1) 미리보기 — 이 기간에 무엇이 생기는지, 무엇이 막히는지 먼저 보여준다. */
+router.post('/:id/backfill/preview', async (req, res, next) => {
+  try {
+    const { from, to } = req.body
+    if (!from) return res.status(400).json({ error: '소급 시작일을 선택해주세요' })
+    const today = kstToday()
+    // 미래는 대상이 아니다 — 기존 '발행 예정'이 담당한다(미수금 조기 부풀림 방지).
+    const end = (!to || to > today) ? today : to
+    if (from > end) return res.status(400).json({ error: '시작일이 종료일보다 뒤예요' })
+
+    const [[r]] = await req.db.execute(
+      `SELECT r.*, v.name AS vendor_name, c.vat_mode AS contract_vat_mode
+       FROM recurring_invoices r LEFT JOIN vendors v ON r.vendor_id = v.id
+       LEFT JOIN contracts c ON r.contract_id = c.id WHERE r.id = ?`, [req.params.id])
+    if (!r) return res.status(404).json({ error: '정기청구를 찾을 수 없어요' })
+
+    const dues = backfillCycles(r, from, end)
+    const over = tooManyError(dues.length)
+    if (over) return res.status(400).json({ error: over, count: dues.length })
+
+    const supply = Number(r.supply_amount)
+    const vat = recurFromSupply(supply, effVatMode(r)).vat
+    const cycles = []
+    for (const due of dues) {
+      // 이미 있는가 — 하한이 아니라 실제 장부를 본다(중간에 지운 회차를 되살릴 수 있어야 한다)
+      const [[dup]] = await req.db.execute(
+        'SELECT id, invoice_no FROM invoices WHERE recurring_id = ? AND issued_at = ? LIMIT 1', [r.id, due])
+      // 마감된 달인가 — 소급은 대개 신고가 끝난 기간에 꽂는 일이라 이게 핵심 가드다
+      const closed = await closedPeriodError(req.db, due)
+      cycles.push({
+        due_date: due, supply_amount: supply, vat_amount: vat, total_amount: supply + vat,
+        exists: !!dup, existing_no: dup ? dup.invoice_no : null,
+        closed: !!closed, closed_reason: closed || null,
+      })
+    }
+    res.json({
+      item: r.item || '', vendor_name: r.vendor_name || '', from, to: end,
+      cycles,
+      // 화면이 기본 체크를 정하는 근거 — 이미 있거나 마감된 회차는 꺼둔다
+      selectable: cycles.filter(c => !c.exists && !c.closed).length,
+    })
+  } catch (e) { next(e) }
+})
+
+/** 2) 일괄 생성 — 화면에서 고른 회차만. 금액은 회차별로 바뀔 수 있다(임차료 인상 등). */
+router.post('/:id/backfill', async (req, res, next) => {
+  const cycles = Array.isArray(req.body.cycles) ? req.body.cycles : []
+  if (cycles.length === 0) return res.status(400).json({ error: '만들 회차를 선택해주세요' })
+  const over = tooManyError(cycles.length)
+  if (over) return res.status(400).json({ error: over })
+
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [[r]] = await conn.execute(
+      `SELECT r.*, c.vat_mode AS contract_vat_mode FROM recurring_invoices r
+       LEFT JOIN contracts c ON r.contract_id = c.id WHERE r.id = ? FOR UPDATE`, [req.params.id])
+    if (!r) { await rollbackQuietly(conn); return res.status(404).json({ error: '정기청구를 찾을 수 없어요' }) }
+
+    const batch = randomUUID()
+    const today = kstToday()
+    const created = []
+    for (const c of cycles.slice().sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)))) {
+      const due = String(c.due_date || '')
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) { await rollbackQuietly(conn); return res.status(400).json({ error: `회차 날짜가 올바르지 않아요 (${due})` }) }
+      if (due > today) { await rollbackQuietly(conn); return res.status(400).json({ error: `${due}는 미래예요. 소급은 과거 회차만 만듭니다.` }) }
+      /* 마감된 달은 하나라도 섞이면 전체를 거절한다. 일부만 만들면 사용자는 전부 된 줄 안다 —
+         '무엇이 빠지는지 먼저 보여주고 사용자가 마감을 풀지 결정'하는 게 이 기능의 규칙이다. */
+      const ce = await closedPeriodError(conn, due)
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: `${due} 회차가 마감된 달이라 아무것도 만들지 않았어요. ${ce}` }) }
+      // 중복 — 미리보기 이후 다른 사람이 만들었을 수 있으므로 여기서 다시 본다
+      const [[dup]] = await conn.execute(
+        'SELECT id FROM invoices WHERE recurring_id = ? AND issued_at = ? LIMIT 1', [r.id, due])
+      if (dup) continue
+
+      const supply = Number(c.supply_amount) >= 0 ? Number(c.supply_amount) : Number(r.supply_amount)
+      const vat = Number.isFinite(Number(c.vat_amount)) ? Number(c.vat_amount) : recurFromSupply(supply, effVatMode(r)).vat
+      const total = supply + vat
+      const ae = amountError(total)
+      if (ae) { await rollbackQuietly(conn); return res.status(400).json({ error: `${due} 회차 — ${ae}` }) }
+
+      const year = due.slice(0, 4)
+      const [[{ maxno }]] = await conn.execute(
+        "SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(invoice_no, '-', -1) AS UNSIGNED)), 0) AS maxno FROM invoices WHERE kind='issued' AND invoice_no LIKE ?",
+        [`청구-${year}-%`])
+      const invoice_no = `청구-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
+
+      // 과거 회차는 대부분 이미 돈이 오갔다 → 기입금이면 거래·매칭까지 만든다
+      const paid = !!c.paid
+      let acctId = c.account_id || r.account_id || null
+      if (paid && !acctId) {
+        const [[defBank]] = await conn.execute("SELECT id FROM accounts WHERE kind='bank' ORDER BY created_at LIMIT 1")
+        acctId = defBank ? defBank.id : null
+      }
+      const id = randomUUID()
+      await conn.execute(
+        `INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount,
+                               issued_at, due_at, status, account_id, recurring_id, memo, tax_type, backfill_batch)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [id, invoice_no, 'issued', r.vendor_id || null, r.contract_id || null, supply, vat, total,
+         due, addDays(due, 30), paid ? '입금 완료' : '입금 예정', acctId, r.id,
+         `소급 등록 · ${r.item || ''}`.trim(), invTaxType(r), batch])
+
+      if (paid) {
+        const lerr = ledgerError({ kind: 'income', account_id: acctId, status: '입금완료' })
+        if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: `${due} 회차 — ${lerr}` }) }
+        const txnId = randomUUID()
+        await conn.execute(
+          `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, account_code, category, amount, date, method, status, doc_no, invoice_id, memo, backfill_batch)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [txnId, 'income', r.vendor_id || null, r.contract_id || null, acctId, settleAcctCode('income'),
+           '수금', total, due, '계좌이체', '입금완료', '', id, `청구서 ${invoice_no} 정산 (소급)`, batch])
+        await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,1)',
+          [randomUUID(), id, txnId, total])
+      }
+      created.push({ id, invoice_no, due_date: due, total, paid })
+    }
+
+    /* last_generated 는 '이 값 이하 회차는 이미 생성됨' 하한이다. 소급으로 만든 회차가
+       기존 하한보다 뒤면 밀어준다. 앞이면 건드리지 않는다 — 낮추면 이미 만든 뒤 회차가
+       다시 '놓친 회차'로 살아나 중복 청구가 된다. */
+    const last = created.length ? created[created.length - 1].due_date : null
+    if (last && (!r.last_generated || last > String(r.last_generated).slice(0, 10))) {
+      await conn.execute('UPDATE recurring_invoices SET last_generated = ? WHERE id = ?', [last, r.id])
+    }
+    await conn.commit()
+    res.json({ ok: true, batch, count: created.length, created })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
+})
+
+/** 3) 되돌리기 — 이 배치로 만든 것만 통째로. 잘못된 범위로 수십 건을 만들면 하나씩은 못 지운다. */
+router.delete('/backfill/:batch', async (req, res, next) => {
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [rows] = await conn.execute(
+      'SELECT id, invoice_no, issued_at, recurring_id FROM invoices WHERE backfill_batch = ? FOR UPDATE', [req.params.batch])
+    if (rows.length === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: '되돌릴 묶음을 찾을 수 없어요' }) }
+    /* 마감된 달이 섞였으면 되돌리기도 막는다 — 마감 후 장부가 바뀌는 건 만들 때든 지울 때든 같다. */
+    for (const inv of rows) {
+      const ce = await closedPeriodError(conn, String(inv.issued_at).slice(0, 10))
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: `${inv.invoice_no}(${String(inv.issued_at).slice(0, 10)})가 마감된 달이라 되돌리지 않았어요. ${ce}` }) }
+    }
+    // ⚠ recurring_id 는 **지우기 전에** 챙긴다(지운 뒤 조회하면 빈 결과다)
+    const recurringId = rows.find(r => r.recurring_id)?.recurring_id || null
+    const earliest = rows.map(r => String(r.issued_at).slice(0, 10)).sort()[0]
+
+    const ids = rows.map(r => r.id)
+    const ph = ids.map(() => '?').join(',')
+    // 매칭 → 거래 → 청구서 순. 이 배치가 만든 거래만 지운다(backfill_batch 로 한정).
+    await conn.execute(`DELETE FROM invoice_matches WHERE invoice_id IN (${ph})`, ids)
+    await conn.execute('DELETE FROM transactions WHERE backfill_batch = ?', [req.params.batch])
+    await conn.execute(`DELETE FROM invoices WHERE id IN (${ph})`, ids)
+    /* last_generated 를 지운 회차 앞으로 되돌린다 — 안 하면 그 회차가 '놓친 회차'에도
+       안 뜨고 영영 사라진다(lib/recurrence.js restoreLastGenerated 와 같은 이유). */
+    if (recurringId) {
+      await conn.execute('UPDATE recurring_invoices SET last_generated = ? WHERE id = ?',
+        [addDays(earliest, -1), recurringId])
+    }
+    await conn.commit()
+    res.json({ ok: true, count: rows.length })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
+})
 
 module.exports = router

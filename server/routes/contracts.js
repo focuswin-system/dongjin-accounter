@@ -34,6 +34,25 @@ async function findOpenEndedRecurring(db, contractId) {
   return { invoices, expenses }
 }
 
+/* 계약 조건 → 정기 규칙 반영. 계약이 원본이고 정기 규칙은 실행 장치다.
+ *
+ * ⚠ start_date 가 빠져 있었다. 그래서 계약 시작일을 고쳐도 규칙은 옛 날짜를 붙들었고,
+ *   화면의 어긋남 경고(recurringMismatch)에도 시작일이 없어 **아무도 알려주지 않았다.**
+ *   방향에 따라 덜 청구(시작일 앞당김)도, 더 청구(시작일 미룸)도 난다.
+ * 소급은 이걸로 열리지 않는다 — 등록일 하한(setup_date)은 그대로다. 정합성만 맞춘다.
+ */
+async function syncRecurringToContract(db, c, isPurchase) {
+  const start = c.start_date || ''
+  return isPurchase
+    ? (await db.execute(
+        'UPDATE recurring_expenses SET amount=?, period=?, day_of_month=?, start_date=?, end_date=? WHERE contract_id=?',
+        [Number(c.unit_amount) || 0, c.billing_period || 'monthly', c.billing_day || 1, start, c.end_date || null, c.id]))[0]
+    : (await db.execute(
+        'UPDATE recurring_invoices SET supply_amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=? WHERE contract_id=?',
+        [Number(c.unit_amount) || 0, vatRateOf(c.vat_mode) === 0 ? 'none' : 'exclusive',
+         c.billing_period || 'monthly', c.billing_day || 1, start, c.end_date || null, c.id]))[0]
+}
+
 async function closeOpenEndedRecurring(conn, contractId, endDate) {
   const [ri] = await conn.execute(
     `UPDATE recurring_invoices SET end_date = ?
@@ -854,7 +873,16 @@ router.put('/:id', async (req, res, next) => {
       const isPurchaseC = vg && (vg.gubu === 'A' || vg.gubu === 'E')
       const table = isPurchaseC ? 'recurring_expenses' : 'recurring_invoices'
       const [[cnt]] = await conn.execute(`SELECT COUNT(*) AS n FROM ${table} WHERE contract_id = ?`, [req.params.id])
-      if (Number(cnt.n) === 0) {
+      if (Number(cnt.n) > 0) {
+        /* 이미 규칙이 있으면 계약 조건으로 맞춘다 — 계약이 원본이기 때문이다.
+           예전엔 계약을 고쳐도 규칙이 그대로여서, 시작일을 7/1로 당겨도 규칙은 8/5를 붙들었다.
+           (화면의 '계약 조건으로 맞추기' 버튼은 그대로 둔다 — 규칙이 다른 이유로 어긋났을 때 쓴다) */
+        await syncRecurringToContract(conn, {
+          id: req.params.id, unit_amount: f.unit_amount, vat_mode: f.vat_mode,
+          billing_period: f.billing_period, billing_day: f.billing_day,
+          start_date, end_date: f.end_date,
+        }, isPurchaseC)
+      } else {
         const vatMode = vatRateOf(f.vat_mode) === 0 ? 'none' : 'exclusive'
         if (isPurchaseC) {
           await conn.execute(
@@ -1007,13 +1035,7 @@ router.patch('/:id/recurring/sync', async (req, res, next) => {
     if (c.billing_mode !== 'recurring') return res.status(400).json({ error: '정기형 계약이 아니에요' })
     const isPurchase = purchaseContract(c)
     // 매출 정기청구는 계약의 과세/면세(vat_mode)도 함께 맞춘다(계약을 과세↔면세로 바꾼 뒤 sync 시 반영).
-    const [r] = isPurchase
-      ? await req.db.execute(
-          'UPDATE recurring_expenses SET amount=?, period=?, day_of_month=?, end_date=? WHERE contract_id=?',
-          [Number(c.unit_amount) || 0, c.billing_period || 'monthly', c.billing_day || 1, c.end_date || null, req.params.id])
-      : await req.db.execute(
-          'UPDATE recurring_invoices SET supply_amount=?, vat_mode=?, period=?, day_of_month=?, end_date=? WHERE contract_id=?',
-          [Number(c.unit_amount) || 0, vatRateOf(c.vat_mode) === 0 ? 'none' : 'exclusive', c.billing_period || 'monthly', c.billing_day || 1, c.end_date || null, req.params.id])
+    const r = await syncRecurringToContract(req.db, c, isPurchase)
     res.json({ ok: true, updated: r.affectedRows })
   } catch (e) { next(e) }
 })

@@ -489,6 +489,62 @@ try {
   fail(`감사 로그 격리 검사 실패: ${e.message}`)
 }
 
+// ── [13] 서버 — 공용 헬퍼 심볼 import 누락 ──
+// 실제로 겪었다: routes/recurring.js·recurring-invoices.js 가 settleAcctCode 를 import 없이 써서
+// **기입금 발행이 ReferenceError → 500** 이었다. 호출이 조건부(paid 일 때만)라 평소 경로에서는
+// 드러나지 않고, 문법 오류도 아니라 서버는 멀쩡히 뜬다. 프런트는 [7]이 같은 걸 본다.
+console.log('\n[13] 서버 — 공용 헬퍼 심볼 import 누락')
+try {
+  const libDir = path.join(__dirname, '..', 'lib')
+  // lib/*.js 가 내보내는 이름을 모은다 — 이것들이 '어딘가에서 가져와야 하는' 심볼이다
+  const exported = new Map()   // 심볼 → 파일명
+  for (const f of fs.readdirSync(libDir).filter(n => n.endsWith('.js'))) {
+    const src = fs.readFileSync(path.join(libDir, f), 'utf8')
+    const m = src.match(/module\.exports\s*=\s*\{([^}]*)\}/s)
+    if (!m) continue
+    for (const raw of m[1].split(',')) {
+      const name = raw.split(':')[0].trim()
+      if (/^[A-Za-z_][\w]*$/.test(name)) exported.set(name, f)
+    }
+  }
+
+  const targets = []
+  for (const dir of ['routes', 'lib', 'platform', 'middleware']) {
+    const d = path.join(__dirname, '..', dir)
+    if (!fs.existsSync(d)) continue
+    for (const n of fs.readdirSync(d).filter(x => x.endsWith('.js'))) targets.push(path.join(d, n))
+  }
+
+  /* 주석은 걷어내고 본다. 이 코드베이스는 주석에 함수명을 자주 적어서
+     ("modeFromCatVat(null) → 'none'"), 안 걸러내면 오탐만 쏟아진다. */
+  const stripComments = (s) => s
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
+
+  const missing = []
+  for (const file of targets) {
+    const src = stripComments(fs.readFileSync(file, 'utf8'))
+    const rel = path.relative(path.join(__dirname, '..'), file).replace(/\\/g, '/')
+    for (const [sym, from] of exported) {
+      if (`lib/${from}` === rel) continue                       // 자기 자신이 정의한 것
+      if (!new RegExp(`\\b${sym}\\s*\\(`).test(src)) continue    // 호출하지 않으면 대상 아님
+      // 같은 파일에서 정의했거나(지역 헬퍼) require 로 가져왔으면 통과
+      const declared = new RegExp(`(const|let|function|async function)\\s+${sym}\\b`).test(src)
+      const imported = new RegExp(`require\\([^)]*\\)`).test(src) &&
+        new RegExp(`\\b${sym}\\b[^=]*=\\s*require|\\{[^}]*\\b${sym}\\b[^}]*\\}\\s*=\\s*require`, 's').test(src)
+      if (!declared && !imported) missing.push(`${rel} → ${sym} (lib/${from})`)
+    }
+  }
+  if (missing.length) {
+    fail('공용 헬퍼를 import 없이 사용:\n      · ' + [...new Set(missing)].join('\n      · ') +
+         '\n      → 호출되는 순간 ReferenceError(500)입니다. require 를 추가하세요.')
+  } else {
+    ok(`서버 공용 헬퍼 import 누락 없음 (심볼 ${exported.size}개 · 파일 ${targets.length}개)`)
+  }
+} catch (e) {
+  fail(`서버 심볼 검사 실패: ${e.message}`)
+}
+
 console.log('\n' + '━'.repeat(64))
 if (failures === 0) {
   console.log(' ✅ 격리 검사 통과')

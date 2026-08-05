@@ -122,5 +122,21 @@ export const recurringMismatch = (c, rec) => {
   if (!isOpenEnded(c) && c.end_date && rec.end_date !== c.end_date) {
     out.push(`종료일 ${rec.end_date || '없음'} ≠ 계약 ${c.end_date}`);
   }
+  /* 시작일·청구일도 봐야 한다 — 이 둘이 빠져 있어서 "계약은 7/1인데 규칙은 8/5" 같은 어긋남이
+     경고조차 안 떴다. 방향에 따라 양쪽으로 틀린다:
+       시작일을 앞당겼는데 규칙이 그대로 → 그 사이 회차가 안 잡힌다(덜 청구)
+       시작일을 미뤘는데 규칙이 그대로   → 아직 시작도 안 한 계약에 회차가 뜬다(더 청구)
+     ⚠ 시작일을 과거로 고쳐도 **등록일 하한(setup_date)은 그대로**라 소급은 열리지 않는다.
+        과거 회차는 소급 등록 마법사로만 만든다. 여기서 맞추는 건 데이터 정합성이다. */
+  const cStart = c.start_date || '';
+  const rStart = rec.start_date || '';
+  if (cStart && rStart !== cStart) {
+    out.push(`시작일 ${rStart || '없음'} ≠ 계약 ${cStart}`);
+  }
+  const cDay = Number(c.billing_day) || 1;
+  const rDay = Number(rec.day_of_month) || 1;
+  if (rDay !== cDay) {
+    out.push(`청구일 매월 ${rDay}일 ≠ 계약 ${cDay}일`);
+  }
   return out;
 };
