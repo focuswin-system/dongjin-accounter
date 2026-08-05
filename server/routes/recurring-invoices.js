@@ -40,9 +40,14 @@ router.post('/', async (req, res, next) => {
   try {
     const { vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id } = req.body
     const id = randomUUID()
+    /* start_date 는 NOT NULL 인데 아무 검사가 없었다 — 값이 안 오면 mysql2 가 던져 500이 났다
+       (정기지출 쪽은 이미 400으로 막고 있었는데 여기만 빠져 있었다).
+       다만 여기서 400으로 거절하지는 않는다. 시작일이 모호한 무기한 계약이 흔하고,
+       비워 두면 **등록일부터** 세도록 엔진이 받아준다(lib/recurrence.js 앵커 폴백).
+       빈 문자열은 '미지정'을 뜻한다. */
     await req.db.execute(
       'INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-      [id, vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null]
+      [id, vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', period||'monthly', day_of_month||1, start_date||'', end_date||null, account_id||null]
     )
     res.json({ id })
   } catch (e) { next(e) }

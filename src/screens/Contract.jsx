@@ -1049,8 +1049,46 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
 
   const handleEditSave = async () => {
     const vendorObj = vendors.find(v => v.name === editForm.vendor);
-    const res = await api.updateContract(contractId, contractPayload(editForm, vendorObj?.id || c.vendor_id));
+    const payload = contractPayload(editForm, vendorObj?.id || c.vendor_id);
+
+    /* 계약을 '완료'로 닫을 때, 종료일이 없는 정기 규칙이 걸려 있으면 먼저 물어본다.
+       무기한 계약은 종료일이 없어 닫은 뒤에도 회차가 영원히 발행 후보로 뜬다.
+       동의 없이는 아무것도 바꾸지 않는다(서버도 close_recurring 을 받아야만 처리한다). */
+    if (editForm.status === '완료' && c.status !== '완료') {
+      const open = await api.getOpenEndedRecurring(contractId);
+      const list = [...(open.invoices || []), ...(open.expenses || [])];
+      if (list.length > 0) {
+        const ok = await confirm({
+          title: '이 계약의 정기 청구·지출도 종료할까요?',
+          body: (
+            <>
+              <div style={{ marginBottom: 8 }}>
+                종료일이 없어서, 계약을 닫아도 회차가 계속 발행 후보로 올라옵니다.
+              </div>
+              <ul style={{ margin: '0 0 8px 16px', padding: 0 }}>
+                {(open.invoices || []).map(r => <li key={r.id}>정기청구 · {r.label || '(이름 없음)'}</li>)}
+                {(open.expenses || []).map(r => <li key={r.id}>정기지출 · {r.label || '(이름 없음)'}</li>)}
+              </ul>
+              <div>
+                종료일을 <b>{open.suggestedEndDate}</b>로 맞춥니다.
+                그 전에 아직 발행 안 한 회차는 ‘놓친 회차’로 남아 그대로 청구할 수 있어요.
+                나중에 정기청구·정기지출 화면에서 종료일을 지우면 되돌릴 수 있습니다.
+              </div>
+            </>
+          ),
+          confirmLabel: '종료일 맞추기',
+          cancelLabel: '그대로 두기',
+        });
+        if (ok) payload.close_recurring = true;
+      }
+    }
+
+    const res = await api.updateContract(contractId, payload);
     if (res.ok) {
+      const rc = res.recurringClosed;
+      if (rc && (rc.invoices || rc.expenses)) {
+        toast.push(`정기 ${rc.invoices + rc.expenses}건의 종료일을 ${rc.end_date}로 맞췄어요`);
+      }
       // 편집 폼에서 새로 올린 계약서 파일들을 계약 첨부(contract_docs)로 연결
       for (const d of (editForm.docs || [])) await api.addContractDoc(contractId, { url: d.url, name: d.name, doc_type: '계약서', size: d.size || 0 });
       toast.push("수정됐어요"); setEditOpen(false); reload();

@@ -12,6 +12,38 @@ const { closedPeriodError } = require('../lib/closing')
 
 const router = Router()
 
+/* 계약을 '완료'로 닫을 때, 거기 걸린 정기 규칙 중 **종료일이 빈 것**에 종료일을 채운다.
+ *
+ * 왜 '끄기'(active=0)가 아니라 '종료일 채우기'인가:
+ *   · 계약이 완료돼도 **마지막 회차 청구는 남는 게 정상**이다(8월 말 종료 → 8월분을 9월에 발행).
+ *     상태로 목록에서 잘라내면 그 회차가 사라져 못 받은 돈이 조용히 없어진다.
+ *     종료일을 채우면 과거 미청구분은 '놓친 회차'로 남고 미래만 멈춘다.
+ *   · 종료일은 정기청구·정기지출 화면에 보이고 고칠 수 있다. 잘못됐으면 날짜만 지우면 원복된다.
+ *     active 토글은 껐다 켜는 사이 회차가 '놓친 회차'로 몰려 되돌리기가 지저분하다.
+ *
+ * 기한 있는 계약은 이미 종료일이 있어 자연히 멈추므로 대상이 아니다(빈 것만 고른다).
+ * '보류'는 끝난 게 아니라 잠깐 멈춘 것이라 여기서 다루지 않는다.
+ */
+async function findOpenEndedRecurring(db, contractId) {
+  const [invoices] = await db.execute(
+    `SELECT id, item AS label, period, day_of_month FROM recurring_invoices
+     WHERE contract_id = ? AND active = 1 AND (end_date IS NULL OR end_date = '')`, [contractId])
+  const [expenses] = await db.execute(
+    `SELECT id, category AS label, period, day_of_month FROM recurring_expenses
+     WHERE contract_id = ? AND active = 1 AND (end_date IS NULL OR end_date = '')`, [contractId])
+  return { invoices, expenses }
+}
+
+async function closeOpenEndedRecurring(conn, contractId, endDate) {
+  const [ri] = await conn.execute(
+    `UPDATE recurring_invoices SET end_date = ?
+     WHERE contract_id = ? AND active = 1 AND (end_date IS NULL OR end_date = '')`, [endDate, contractId])
+  const [re] = await conn.execute(
+    `UPDATE recurring_expenses SET end_date = ?
+     WHERE contract_id = ? AND active = 1 AND (end_date IS NULL OR end_date = '')`, [endDate, contractId])
+  return { invoices: ri.affectedRows, expenses: re.affectedRows }
+}
+
 // cost_budget(JSON)이 손상된 행 하나가 계약 목록/상세 응답 전체를 500으로 만들지 않도록 안전 파싱.
 const safeBudget = (raw, fallback = null) => { if (!raw) return fallback; try { return JSON.parse(raw) } catch { return fallback } }
 
@@ -268,6 +300,7 @@ router.post('/:id/renew', async (req, res, next) => {
     )
 
     let recurringExtended = 0
+    let recurringClosed = null
     if (isRenew) {
       await conn.execute(
         'UPDATE contracts SET end_date=?, amount=?, unit_amount=?, current_term_start=?, status=? WHERE id=?',
@@ -285,9 +318,16 @@ router.post('/:id/renew', async (req, res, next) => {
       recurringExtended = ri.affectedRows
     } else {
       await conn.execute("UPDATE contracts SET status = '완료' WHERE id = ?", [req.params.id])
+      /* 미갱신 종료 — 종료일이 빈 정기 규칙은 여기서 닫아준다.
+         갱신 쪽(위)은 종료일을 새 날짜로 밀어주는데 이쪽만 아무것도 안 해서,
+         무기한 계약을 닫아도 회차가 계속 후보로 떴다. 기준일은 계약 종료일(없으면 오늘). */
+      if (req.body.close_recurring) {
+        const endDate = c.end_date || kstToday()
+        recurringClosed = { ...(await closeOpenEndedRecurring(conn, req.params.id, endDate)), end_date: endDate }
+      }
     }
     await conn.commit()
-    res.json({ ok: true, seq: Number(maxseq) + 1, result: isRenew ? '갱신' : '미갱신', recurringExtended })
+    res.json({ ok: true, seq: Number(maxseq) + 1, result: isRenew ? '갱신' : '미갱신', recurringExtended, recurringClosed })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
@@ -696,8 +736,14 @@ router.post('/', async (req, res, next) => {
           [randomUUID(), id, '초기 일시금', 0, f.initial_amount, start_date || null, '예정']
         )
       }
-      // 월 정액은 정기청구(매출)/정기지출(매입)로 자동 세팅 → 회차가 도래하면 발행예정에 뜬다
-      if (Number(f.unit_amount) > 0 && start_date) {
+      /* 월 정액은 정기청구(매출)/정기지출(매입)로 자동 세팅 → 회차가 도래하면 발행예정에 뜬다.
+       *
+       * 예전엔 `&& start_date` 가 붙어 있어서 **시작일 없는 계약은 정기 규칙이 아예 안 만들어졌다.**
+       * 계약은 저장되고 월 정액도 적혀 있는데 청구만 조용히 빠지는 것이라, 사용자가 알 방법이
+       * 없었다(무기한 유지보수처럼 시작일이 모호한 계약에서 그대로 걸린다).
+       * 월 정액을 적었다는 건 청구·지급을 하겠다는 뜻이므로 규칙은 만들고, 언제부터 셀지는
+       * 엔진이 등록일로 받아준다(lib/recurrence.js 앵커 폴백). */
+      if (Number(f.unit_amount) > 0) {
         if (isPurchase) {
           /* ⚠ vat_mode 를 반드시 넣는다. 빠뜨리면 recurring.js 가 비목명으로 세액을 유추하는데,
            * 여기서 category 에 넣는 값은 비목명이 아니라 **계약명**이라 조인이 절대 안 맞는다
@@ -708,14 +754,14 @@ router.post('/', async (req, res, next) => {
              VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
             [randomUUID(), vendor_id || null, id, name || '정기지출', Number(f.unit_amount),
              vatRateOf(f.vat_mode) === 0 ? 'none' : 'exclusive',
-             f.billing_period || 'monthly', f.billing_day || 1, start_date, f.end_date || null, null]
+             f.billing_period || 'monthly', f.billing_day || 1, start_date || '', f.end_date || null, null]
           )
         } else {
           await conn.execute(
             `INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id)
              VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
             [randomUUID(), vendor_id || null, id, name || '', Number(f.unit_amount), vatRateOf(f.vat_mode) === 0 ? 'none' : 'exclusive',
-             f.billing_period || 'monthly', f.billing_day || 1, start_date, f.end_date || null, null]
+             f.billing_period || 'monthly', f.billing_day || 1, start_date || '', f.end_date || null, null]
           )
         }
       }
@@ -742,6 +788,17 @@ router.post('/', async (req, res, next) => {
   } finally {
     conn.release()
   }
+})
+
+/* 계약을 '완료'로 바꾸기 전에 "무엇이 멈추는지"를 화면이 먼저 보여줄 수 있게 하는 조회.
+   무기한 계약은 종료일이 없어 끝난 뒤에도 회차가 영원히 후보로 뜬다 — 그걸 여기서 잡는다. */
+router.get('/:id/recurring/open-ended', async (req, res, next) => {
+  try {
+    const [[c]] = await req.db.execute('SELECT end_date FROM contracts WHERE id = ?', [req.params.id])
+    if (!c) return res.status(404).json({ error: '계약을 찾을 수 없어요' })
+    const found = await findOpenEndedRecurring(req.db, req.params.id)
+    res.json({ ...found, suggestedEndDate: c.end_date || kstToday() })
+  } catch (e) { next(e) }
 })
 
 router.put('/:id', async (req, res, next) => {
@@ -772,8 +829,15 @@ router.put('/:id', async (req, res, next) => {
     // 품목표: 폼에서 넘어온 대로 통째 교체(청구 방식 무관). items를 아예 안 보낸 요청은
     // 품목을 다루지 않는 화면이므로 기존 품목표를 건드리지 않는다.
     if (req.body.items !== undefined) await replaceContractItems(conn, req.params.id, req.body.items)
+    /* '완료'로 닫으면서 화면이 동의를 받아 왔을 때만 정기 규칙의 종료일을 채운다.
+       요청하지 않으면 아무것도 안 한다 — 사용자가 모르는 사이에 청구가 멈추면 안 된다. */
+    let recurringClosed = null
+    if (status === '완료' && req.body.close_recurring) {
+      const endDate = f.end_date || kstToday()
+      recurringClosed = { ...(await closeOpenEndedRecurring(conn, req.params.id, endDate)), end_date: endDate }
+    }
     await conn.commit()
-    res.json({ ok: true })
+    res.json({ ok: true, recurringClosed })
   } catch (e) {
     await rollbackQuietly(conn)
     if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '이미 사용 중인 계약번호예요' })
@@ -862,7 +926,8 @@ router.post('/:id/recurring', async (req, res, next) => {
     if (!c) return res.status(404).json({ error: '계약을 찾을 수 없어요' })
     if (c.billing_mode !== 'recurring') return res.status(400).json({ error: '정기형 계약이 아니에요' })
     if (!c.unit_amount)  return res.status(400).json({ error: '주기당 금액이 없어요' })
-    if (!c.start_date)   return res.status(400).json({ error: '계약 시작일이 필요해요' })
+    // 시작일은 없어도 된다 — 없으면 등록일부터 센다(lib/recurrence.js 앵커 폴백).
+    // 예전엔 여기서 400으로 막아, 시작일이 모호한 무기한 계약은 정기청구를 걸 길이 없었다.
 
     const isPurchase = purchaseContract(c)
     const table = isPurchase ? 'recurring_expenses' : 'recurring_invoices'
@@ -877,14 +942,14 @@ router.post('/:id/recurring', async (req, res, next) => {
         `INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, period, day_of_month, start_date, end_date, account_id)
          VALUES (?,?,?,?,?,?,?,?,?,?)`,
         [id, c.vendor_id || null, c.id, c.name || '정기지출', Number(c.unit_amount),
-         c.billing_period || 'monthly', c.billing_day || 1, c.start_date, c.end_date || null, req.body.account_id || null]
+         c.billing_period || 'monthly', c.billing_day || 1, c.start_date || '', c.end_date || null, req.body.account_id || null]
       )
     } else {
       await req.db.execute(
         `INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id)
          VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
         [id, c.vendor_id || null, c.id, c.name || '', Number(c.unit_amount), vatRateOf(c.vat_mode) === 0 ? 'none' : 'exclusive',
-         c.billing_period || 'monthly', c.billing_day || 1, c.start_date, c.end_date || null, req.body.account_id || null]
+         c.billing_period || 'monthly', c.billing_day || 1, c.start_date || '', c.end_date || null, req.body.account_id || null]
       )
     }
     res.json({ ok: true, id, kind: isPurchase ? 'expense' : 'invoice' })

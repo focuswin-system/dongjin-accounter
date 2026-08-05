@@ -37,11 +37,22 @@ const LOOKAHEAD_DAYS = 35
 //        문자열/ds/setup_date를 모두 같은 달력일 기준으로 비교해 타임존 혼용을 막는다.
 // 각 회차를 원 앵커의 '절대 월'(i*step)로 재계산하므로 오버플로 드리프트가 없다.
 function dueDatesToGenerate(rec, today = new Date(), opts = {}) {
-  if (!rec.start_date) return []
+  /* 앵커(회차를 세는 기준일) = 시작일, 없으면 **등록일**.
+   *
+   * 무기한 정기 계약은 "언제부터"가 모호한 경우가 흔하다(구두로 이어오던 유지보수 같은 것).
+   * 예전엔 start_date 가 비면 그냥 [] 를 돌려줬다 — 규칙은 만들어져 있고 활성이고 종료도
+   * 안 됐는데 회차가 **영원히 0건**이었다. 아무 경고도 없어서 그 달 매출이 조용히 빠졌다.
+   *
+   * 시작일을 모를 때 가장 방어 가능한 답은 '이 시스템에 등록한 날부터'다. setup_date 는
+   * 이미 소급 하한(아래 setupFloor)으로 쓰고 있어, 앵커로 써도 규칙이 어긋나지 않는다
+   * (첫 회차가 등록일이 되고, 그 이전으로는 어차피 소급되지 않는다).
+   * 둘 다 없으면 셀 기준이 없으므로 그때는 [] 가 맞다. */
+  const anchor = rec.start_date || rec.setup_date
+  if (!anchor) return []
   const step = rec.period === 'yearly' ? 12 : rec.period === 'quarterly' ? 3 : 1
-  const [sy, sm] = String(rec.start_date).split('-').map(Number) // sm: 1-indexed
+  const [sy, sm] = String(anchor).split('-').map(Number) // sm: 1-indexed
   if (!sy || !sm) return []
-  const anchorDay = Number(rec.day_of_month) || Number(String(rec.start_date).split('-')[2]) || 1
+  const anchorDay = Number(rec.day_of_month) || Number(String(anchor).split('-')[2]) || 1
   const todayStr = typeof today === 'string' ? today : fmtDate(today)
   const horizonDays = Number(opts.horizonDays) || 0
   const horizonStr = horizonDays > 0 ? addDays(todayStr, horizonDays) : todayStr
@@ -66,7 +77,7 @@ function dueDatesToGenerate(rec, today = new Date(), opts = {}) {
     const ds = fmtDate(new Date(y, m, day))
     if (ds > horizonStr) break
     if (rec.end_date && ds > rec.end_date) break
-    if (ds < rec.start_date) continue
+    if (ds < anchor) continue
     if (setupFloor && ds < setupFloor) continue // 설정 시점 이전 회차 건너뜀
     if (!genFloorMonth || ds.slice(0, 7) > genFloorMonth) out.push(ds)
   }

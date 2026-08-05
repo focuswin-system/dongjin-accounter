@@ -919,9 +919,17 @@ export const api = {
 
   async updateContract(id, data) {
     try {
-      await req(`/contracts/${id}`, { method: 'PUT', body: data })
-      return { ok: true }
+      // 응답을 그대로 실어 보낸다 — 계약을 닫으며 정기 규칙 종료일을 맞췄는지(recurringClosed)를
+      // 화면이 알아야 결과를 알려줄 수 있다.
+      const r = await req(`/contracts/${id}`, { method: 'PUT', body: data })
+      return { ok: true, ...(r || {}) }
     } catch (e) { return { ok: false, error: e.message } }
+  },
+
+  /** 계약을 '완료'로 닫기 전 확인용 — 종료일이 비어 있는(=영원히 도는) 정기 규칙 */
+  async getOpenEndedRecurring(id) {
+    try { return await req(`/contracts/${id}/recurring/open-ended`) }
+    catch { return { invoices: [], expenses: [], suggestedEndDate: '' } }
   },
   async updateContractMemo(id, memo) {
     try { await req(`/contracts/${id}/memo`, { method: 'PATCH', body: { memo } }); return { ok: true } }

@@ -1908,7 +1908,17 @@ const FirstCycleHint = ({ startDate, dayOfMonth, period, verb, editing = false }
       </div>
     )
   }
-  if (!startDate) return <div className="text-xs text-muted2" style={{ marginTop: 6 }}>시작일을 선택하면 첫 회차를 알려드려요.</div>
+  /* 시작일을 비운 채로 둘 수 있으므로(무기한 계약), '안 고르면 어떻게 되는지'를 그 자리에서 말해준다.
+     예전 문구("시작일을 선택하면 첫 회차를 알려드려요")는 고르라는 뜻으로 읽혀,
+     비워도 된다는 걸 알 수 없었다. */
+  if (!startDate) {
+    const first = firstCycleDate(todayStr(), dayOfMonth, period)
+    return (
+      <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+        비워두면 오늘(등록일)부터 시작해요{first ? <> · 첫 {verb} 회차 <b>{first}</b></> : null}
+      </div>
+    )
+  }
   const first = firstCycleDate(startDate, dayOfMonth, period)
   const past = startDate < todayStr()
   return (
@@ -2199,7 +2209,9 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
           </div>
         </div>
         <div className="row gap-12">
-          <div style={{ flex: 1 }}><label className="label">시작일</label>
+          {/* 시작일은 선택 — 무기한 계약은 "언제부터"가 모호한 경우가 흔하다(구두로 이어오던 유지보수 등).
+              비우면 등록한 날부터 센다(서버 lib/recurrence.js 앵커 폴백). */}
+          <div style={{ flex: 1 }}><label className="label">시작일 <span className="text-muted">(선택)</span></label>
             <input className="input" type="date" value={form.startDate} onChange={e => f("startDate", e.target.value)}/>
             <FirstCycleHint startDate={form.startDate} dayOfMonth={form.dayOfMonth} period={form.period} verb="청구" editing={!!editing}/>
           </div>

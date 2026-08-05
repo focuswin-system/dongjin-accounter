@@ -92,10 +92,52 @@ test('horizonDays — 미래 회차 미리보기(기본은 오늘까지만)', ()
     '월간은 다음 회차가 한 번 미리 보여야 한다')
 })
 
-test('start_date 가 없거나 형식이 깨지면 빈 배열', () => {
+test('셀 기준이 아예 없으면(시작일·등록일 둘 다) 빈 배열', () => {
   assert.deepStrictEqual(dueDatesToGenerate({ period: 'monthly' }, '2026-04-15'), [])
   assert.deepStrictEqual(dueDatesToGenerate({ start_date: '' }, '2026-04-15'), [])
   assert.deepStrictEqual(dueDatesToGenerate({ start_date: '엉터리' }, '2026-04-15'), [])
+})
+
+test('시작일이 없으면 등록일(setup_date)부터 센다', () => {
+  /* 무기한 계약은 "언제부터"가 모호한 경우가 흔하다. 예전엔 시작일이 비면 회차가
+     영원히 0건이었고(경고도 없었다) 그 달 매출이 조용히 빠졌다.
+     등록일을 앵커로 삼으면 등록한 달부터 정상적으로 청구된다. */
+  const out = dueDatesToGenerate(
+    { start_date: '', period: 'monthly', day_of_month: 10, setup_date: '2026-06-15' },
+    '2026-08-31')
+  assert.deepStrictEqual(out, ['2026-07-10', '2026-08-10'],
+    '등록일(6/15) 이후 첫 앵커일(7/10)부터 나와야 한다')
+})
+
+test('시작일이 없어도 end_date 는 그대로 듣는다 (종료된 계약은 멈춘다)', () => {
+  const out = dueDatesToGenerate(
+    { start_date: '', period: 'monthly', day_of_month: 1, setup_date: '2026-01-05', end_date: '2026-03-31' },
+    '2026-12-31')
+  assert.deepStrictEqual(out, ['2026-02-01', '2026-03-01'])
+})
+
+test('계약을 닫으며 종료일을 오늘로 맞춰도 과거 미발행 회차는 남는다', () => {
+  /* 이 성질이 '상태로 목록에서 잘라내기' 대신 '종료일 채우기'를 고른 이유다.
+     계약이 완료돼도 마지막 회차 청구는 남는 게 정상이고(8월 말 종료 → 8월분을 9월에 발행),
+     그 회차가 사라지면 못 받은 돈이 조용히 없어진다. */
+  const out = dueDatesToGenerate(
+    { start_date: '2026-01-01', period: 'monthly', day_of_month: 1,
+      setup_date: '2026-01-01', end_date: '2026-08-05' },   // 오늘(8/5)로 닫음
+    '2026-08-05')
+  assert.deepStrictEqual(out,
+    ['2026-01-01', '2026-02-01', '2026-03-01', '2026-04-01',
+     '2026-05-01', '2026-06-01', '2026-07-01', '2026-08-01'],
+    '닫기 전 회차는 그대로 청구할 수 있어야 한다')
+  // 반면 미래 회차(9/1)는 더 이상 나오지 않는다
+  assert.ok(!out.includes('2026-09-01'))
+})
+
+test('시작일이 있으면 등록일이 있어도 시작일이 앵커다', () => {
+  // 폴백이 기존 동작을 바꾸지 않는지 — 소급 하한(setup_date)은 그대로 걸린다
+  const out = dueDatesToGenerate(
+    { start_date: '2026-01-10', period: 'monthly', day_of_month: 10, setup_date: '2026-03-01' },
+    '2026-04-30')
+  assert.deepStrictEqual(out, ['2026-03-10', '2026-04-10'])
 })
 
 test('day_of_month 가 없으면 start_date 의 일자를 앵커로 쓴다', () => {
