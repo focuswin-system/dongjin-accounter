@@ -135,6 +135,11 @@ const ACTION_OVERRIDES = [
   { re: /\/export(\.xlsx)?$/, action: 'download' },
   // 인쇄·출력용 조회
   { re: /\/(print|pdf)$/, action: 'export' },
+  /* 소급 등록 '미리보기' — POST지만 아무것도 바꾸지 않는 조회다.
+     'create'로 두면 조회 권한만 있는 사람이 버튼을 눌렀을 때 403이 난다
+     (버튼은 화면을 볼 수 있으면 보이므로, 눌러보고 나서야 알게 된다).
+     실제 생성(/backfill)은 그대로 'create'다 — 이 규칙보다 위에 없으므로 걸리지 않는다. */
+  { re: /\/backfill\/preview$/, action: 'view' },
 ]
 
 /** 요청 → 필요한 행위 */
