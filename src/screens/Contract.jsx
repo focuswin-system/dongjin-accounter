@@ -1054,6 +1054,36 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     /* 계약을 '완료'로 닫을 때, 종료일이 없는 정기 규칙이 걸려 있으면 먼저 물어본다.
        무기한 계약은 종료일이 없어 닫은 뒤에도 회차가 영원히 발행 후보로 뜬다.
        동의 없이는 아무것도 바꾸지 않는다(서버도 close_recurring 을 받아야만 처리한다). */
+    /* 정기형에서 다른 청구방식으로 바꿀 때 — 걸려 있는 정기청구/정기지출을 멈출지 묻는다.
+       안 물으면 계약은 단건인데 매달 청구가 계속 나간다(과청구). 반대로 말없이 멈추면
+       청구가 왜 끊겼는지 알 수 없다. 그래서 무엇이 멈추는지 보여주고 고르게 한다. */
+    const wasRecurring = c.billing_mode === 'recurring'
+    const nowRecurring = editForm.billing_mode === 'recurring'
+    if (wasRecurring && !nowRecurring) {
+      const live = (c.recurrings || []).filter(r => r.active)
+      if (live.length > 0) {
+        const ok = await confirm({
+          title: '걸려 있는 정기 청구도 멈출까요?',
+          body: (
+            <>
+              <div style={{ marginBottom: 8 }}>
+                청구방식을 <b>{editForm.billing_mode === 'progress' ? '기성형' : '단건'}</b>으로 바꾸는데,
+                이 계약에 정기 {isPurchase ? '지출' : '청구'} {live.length}건이 아직 돌고 있어요.
+                그대로 두면 매 주기마다 계속 {isPurchase ? '지출이' : '청구가'} 잡힙니다.
+              </div>
+              <div>
+                오늘({localToday()})로 종료일을 맞춥니다. 그 전에 아직 발행 안 한 회차는
+                ‘놓친 회차’로 남아 그대로 처리할 수 있어요.
+              </div>
+            </>
+          ),
+          confirmLabel: '멈추기',
+          cancelLabel: '그대로 두기',
+        });
+        if (ok) payload.stop_recurring = true;
+      }
+    }
+
     if (editForm.status === '완료' && c.status !== '완료') {
       const open = await api.getOpenEndedRecurring(contractId);
       const list = [...(open.invoices || []), ...(open.expenses || [])];
@@ -1088,6 +1118,10 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       const rc = res.recurringClosed;
       if (rc && (rc.invoices || rc.expenses)) {
         toast.push(`정기 ${rc.invoices + rc.expenses}건의 종료일을 ${rc.end_date}로 맞췄어요`);
+      }
+      const rs = res.recurringStopped;
+      if (rs && (rs.invoices || rs.expenses)) {
+        toast.push(`정기 ${rs.invoices + rs.expenses}건을 오늘로 멈췄어요`);
       }
       // 편집 폼에서 새로 올린 계약서 파일들을 계약 첨부(contract_docs)로 연결
       for (const d of (editForm.docs || [])) await api.addContractDoc(contractId, { url: d.url, name: d.name, doc_type: '계약서', size: d.size || 0 });

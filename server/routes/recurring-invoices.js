@@ -430,7 +430,6 @@ router.delete('/backfill/:batch', async (req, res, next) => {
     }
     // ⚠ recurring_id 는 **지우기 전에** 챙긴다(지운 뒤 조회하면 빈 결과다)
     const recurringId = rows.find(r => r.recurring_id)?.recurring_id || null
-    const earliest = rows.map(r => String(r.issued_at).slice(0, 10)).sort()[0]
 
     const ids = rows.map(r => r.id)
     const ph = ids.map(() => '?').join(',')
@@ -438,11 +437,17 @@ router.delete('/backfill/:batch', async (req, res, next) => {
     await conn.execute(`DELETE FROM invoice_matches WHERE invoice_id IN (${ph})`, ids)
     await conn.execute('DELETE FROM transactions WHERE backfill_batch = ?', [req.params.batch])
     await conn.execute(`DELETE FROM invoices WHERE id IN (${ph})`, ids)
-    /* last_generated 를 지운 회차 앞으로 되돌린다 — 안 하면 그 회차가 '놓친 회차'에도
-       안 뜨고 영영 사라진다(lib/recurrence.js restoreLastGenerated 와 같은 이유). */
+    /* last_generated 는 **남은 청구서에서 다시 계산한다.**
+     *
+     * '지운 것 중 가장 이른 날짜 - 1일'로 낮추면 안 된다. 소급 배치가 3~5월이고 6~8월은
+     * 평소 경로로 발행돼 있다면, 하한을 2월로 낮추는 순간 **6~8월이 '놓친 회차'로 되살아나
+     * 중복 청구**가 된다(lib/recurrence.js restoreLastGenerated 가 같은 이유로 막는 상황).
+     * 실제 장부의 최대 발행일을 쓰면 지운 회차만 정확히 다시 열린다. */
     if (recurringId) {
+      const [[m]] = await conn.execute(
+        'SELECT MAX(issued_at) AS last FROM invoices WHERE recurring_id = ?', [recurringId])
       await conn.execute('UPDATE recurring_invoices SET last_generated = ? WHERE id = ?',
-        [addDays(earliest, -1), recurringId])
+        [m && m.last ? String(m.last).slice(0, 10) : null, recurringId])
     }
     await conn.commit()
     res.json({ ok: true, count: rows.length })

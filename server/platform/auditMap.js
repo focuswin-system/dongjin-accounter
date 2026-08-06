@@ -59,6 +59,19 @@ const AUDIT_RULES = [
   { m: 'POST',   re: /^\/api\/recurring-expenses\/issue-missed$/,       res: 'recurring_expense', action: 'issue_missed' },
   { m: 'POST',   re: /^\/api\/recurring-expenses\/([^/]+)\/issue$/,     res: 'recurring_expense', action: 'issue', target: 1 },
 
+  /* 정기 규칙 삭제 — 장부(청구서·거래)는 남지만 **앞으로의 청구·지출이 멈춘다.**
+     "왜 이번 달에 안 청구됐지"를 나중에 짚으려면 누가 언제 지웠는지가 있어야 한다. */
+  { m: 'DELETE', re: /^\/api\/recurring-invoices\/([^/]+)$/,            res: 'recurring_invoice', action: 'delete', target: 1 },
+  { m: 'DELETE', re: /^\/api\/recurring-expenses\/([^/]+)$/,            res: 'recurring_expense', action: 'delete', target: 1 },
+
+  /* ── 소급 등록 ── 한 번에 최대 60건의 청구서·거래가 생기고, 되돌리기는 그만큼을 지운다.
+   * 과거 기간에 꽂는 일이라 "이 달 숫자가 왜 달라졌지"가 나중에 반드시 나온다.
+   * (미리보기는 아무것도 바꾸지 않으므로 기록하지 않는다) */
+  { m: 'POST',   re: /^\/api\/recurring-invoices\/([^/]+)\/backfill$/,  res: 'recurring_invoice', action: 'backfill', target: 1 },
+  { m: 'DELETE', re: /^\/api\/recurring-invoices\/backfill\/([^/]+)$/,  res: 'recurring_invoice', action: 'backfill_undo', target: 1 },
+  { m: 'POST',   re: /^\/api\/recurring-expenses\/([^/]+)\/backfill$/,  res: 'recurring_expense', action: 'backfill', target: 1 },
+  { m: 'DELETE', re: /^\/api\/recurring-expenses\/backfill\/([^/]+)$/,  res: 'recurring_expense', action: 'backfill_undo', target: 1 },
+
   // ── 급여·용역 지급 ── 계좌에서 돈이 나간다
   { m: 'POST',   re: /^\/api\/payroll\/generate$/,                      res: 'payroll', action: 'generate' },
   { m: 'POST',   re: /^\/api\/payroll\/([^/]+)\/pay$/,                  res: 'payroll', action: 'pay',          target: 1 },
@@ -106,6 +119,7 @@ const ACTION_LABELS = {
   import: '일괄 등록', delete: '삭제', delete_month: '월 전체 삭제', generate: '급여 생성',
   // 발행
   issue: '발행', issue_missed: '놓친 회차 일괄 발행',
+  backfill: '지난 회차 소급 등록', backfill_undo: '소급 등록 되돌리기',
   // 입금·지급
   match: '입금 연결', match_cancel: '입금 연결 해제',
   pay: '지급', pay_cancel: '지급 취소', pay_missed: '놓친 회차 납입',

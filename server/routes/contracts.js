@@ -53,6 +53,22 @@ async function syncRecurringToContract(db, c, isPurchase) {
          c.billing_period || 'monthly', c.billing_day || 1, start, c.end_date || null, c.id]))[0]
 }
 
+/* 청구 방식을 정기형에서 **바꿨을 때** 정기 규칙을 멈춘다.
+ * closeOpenEndedRecurring 과 달리 종료일이 이미 있는 규칙도 대상이다 —
+ * 계약이 더 이상 정기형이 아닌데 그 종료일까지 계속 청구되면 안 된다.
+ * 여기서도 '끄기'가 아니라 '종료일 채우기'다(과거 미청구분은 남기고 미래만 멈춘다). */
+async function stopRecurringOnModeChange(conn, contractId, endDate) {
+  const [ri] = await conn.execute(
+    `UPDATE recurring_invoices SET end_date = ?
+     WHERE contract_id = ? AND active = 1 AND (end_date IS NULL OR end_date = '' OR end_date > ?)`,
+    [endDate, contractId, endDate])
+  const [re] = await conn.execute(
+    `UPDATE recurring_expenses SET end_date = ?
+     WHERE contract_id = ? AND active = 1 AND (end_date IS NULL OR end_date = '' OR end_date > ?)`,
+    [endDate, contractId, endDate])
+  return { invoices: ri.affectedRows, expenses: re.affectedRows }
+}
+
 async function closeOpenEndedRecurring(conn, contractId, endDate) {
   const [ri] = await conn.execute(
     `UPDATE recurring_invoices SET end_date = ?
@@ -866,6 +882,39 @@ router.put('/:id', async (req, res, next) => {
          WHERE contract_id = ? AND type = '일시' AND status = '예정'
            AND (invoice_id IS NULL OR invoice_id = '')`, [req.params.id])
     }
+    /* 정기형 → 단건/기성으로 되돌린 경우. 등록(POST)의 반대 방향인데 아무 처리가 없어서
+       **계약은 단건인데 매달 청구가 계속 나가고**(과청구), 계약금액 청구는 안 떴다(미청구).
+       청구를 멈추는 건 사용자가 모르면 안 되므로 화면이 동의를 받아 왔을 때만 한다. */
+    let recurringStopped = null
+    if (f.billing_mode !== 'recurring' && req.body.stop_recurring) {
+      recurringStopped = await stopRecurringOnModeChange(conn, req.params.id, kstToday())
+    }
+    /* 단건으로 바뀌었는데 청구 일정이 없으면 만들어 준다(POST 와 같은 규칙).
+       이미 있으면 건드리지 않는다 — 사용자가 선급/기성/잔금으로 쪼갠 걸 덮으면 안 된다. */
+    if (f.billing_mode !== 'recurring' && f.billing_mode !== 'progress' && Number(f.amount) > 0) {
+      const [[ms]] = await conn.execute(
+        `SELECT COUNT(*) AS n FROM milestones WHERE contract_id = ? AND (invoice_id IS NULL OR invoice_id = '')`,
+        [req.params.id])
+      if (Number(ms.n) === 0) {
+        await conn.execute(
+          'INSERT INTO milestones (id, contract_id, type, ratio, amount, due_date, status) VALUES (?,?,?,?,?,?,?)',
+          [randomUUID(), req.params.id, '일시', 100, f.amount, start_date || null, '예정'])
+      }
+    }
+    /* 초기 일시금(구축비)을 편집으로 **나중에 넣는** 경우. POST 에만 있어서, 계약을 만든 뒤
+       초기 일시금을 적어 넣으면 아무 일도 일어나지 않았다(청구 일정이 안 생김).
+       중복 방지를 위해 같은 유형의 미발행 일정이 없을 때만 만든다. */
+    if (f.billing_mode === 'recurring' && Number(f.initial_amount) > 0) {
+      const [[im]] = await conn.execute(
+        `SELECT COUNT(*) AS n FROM milestones
+         WHERE contract_id = ? AND type = '초기 일시금' AND (invoice_id IS NULL OR invoice_id = '')`,
+        [req.params.id])
+      if (Number(im.n) === 0) {
+        await conn.execute(
+          'INSERT INTO milestones (id, contract_id, type, ratio, amount, due_date, status) VALUES (?,?,?,?,?,?,?)',
+          [randomUUID(), req.params.id, '초기 일시금', 0, f.initial_amount, start_date || null, '예정'])
+      }
+    }
     if (f.billing_mode === 'recurring' && Number(f.unit_amount) > 0) {
       /* 규칙이 **하나도 없을 때만** 만든다(active=0 도 '있는' 것으로 친다).
          사용자가 일부러 꺼 둔 정기청구를, 계약을 저장했다는 이유로 되살리면 안 된다. */
@@ -908,7 +957,7 @@ router.put('/:id', async (req, res, next) => {
       recurringClosed = { ...(await closeOpenEndedRecurring(conn, req.params.id, endDate)), end_date: endDate }
     }
     await conn.commit()
-    res.json({ ok: true, recurringClosed })
+    res.json({ ok: true, recurringClosed, recurringStopped })
   } catch (e) {
     await rollbackQuietly(conn)
     if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '이미 사용 중인 계약번호예요' })

@@ -360,15 +360,18 @@ router.delete('/backfill/:batch', async (req, res, next) => {
       if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: `${inv.invoice_no}(${String(inv.issued_at).slice(0, 10)})가 마감된 달이라 되돌리지 않았어요. ${ce}` }) }
     }
     const recurringId = rows.find(r => r.recurring_id)?.recurring_id || null
-    const earliest = rows.map(r => String(r.issued_at).slice(0, 10)).sort()[0]
     const ids = rows.map(r => r.id)
     const ph = ids.map(() => '?').join(',')
     await conn.execute(`DELETE FROM invoice_matches WHERE invoice_id IN (${ph})`, ids)
     await conn.execute('DELETE FROM transactions WHERE backfill_batch = ?', [req.params.batch])
     await conn.execute(`DELETE FROM invoices WHERE id IN (${ph})`, ids)
+    /* 남은 청구서에서 다시 계산한다 — '지운 것 중 가장 이른 날 - 1일'로 낮추면
+       그 뒤에 이미 발행된 회차까지 되살아나 중복 지출이 된다(매출 쪽과 같은 이유). */
     if (recurringId) {
+      const [[m]] = await conn.execute(
+        'SELECT MAX(issued_at) AS last FROM invoices WHERE recurring_id = ?', [recurringId])
       await conn.execute('UPDATE recurring_expenses SET last_generated = ? WHERE id = ?',
-        [addDays(earliest, -1), recurringId])
+        [m && m.last ? String(m.last).slice(0, 10) : null, recurringId])
     }
     await conn.commit()
     res.json({ ok: true, count: rows.length })

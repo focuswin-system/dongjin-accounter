@@ -401,6 +401,10 @@ try {
     '/api/transactions', '/api/invoices', '/api/contracts', '/api/payroll',
     '/api/work-contracts', '/api/resolutions', '/api/settlements',
     '/api/finance', '/api/savings', '/api/closings', '/api/accounts',
+    /* 정기 라우터가 빠져 있었다 — 이름이 '기준정보처럼' 생겼지만 여기서 청구서·거래가
+       만들어지고 지워진다(발행·놓친회차 일괄·소급 등록/되돌리기). 실제로 소급 되돌리기가
+       최대 60건을 감사 기록 없이 지울 뻔했다. */
+    '/api/recurring-invoices', '/api/recurring-expenses',
   ])
 
   // index.js 의 마운트에서 (경로 → 라우터 파일) 짝을 읽는다

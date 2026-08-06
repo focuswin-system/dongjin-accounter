@@ -45,6 +45,17 @@ export const BackfillWizard = ({ open, onClose, rule, kind, onDone }) => {
   }
 
   const upd = (i, patch) => setRows(rs => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r))
+
+  /* 공급가액을 고치면 세액도 따라가야 한다.
+     안 그러면 5만→10만으로 올려도 세액이 5,000원에 머물러 **합계가 조용히 틀린다**
+     (거래·청구서 폼이 이미 같은 규칙을 쓴다). 세율은 그 규칙의 원래 비율에서 가져온다 —
+     면세·영세면 원래 세액이 0이므로 계속 0이 된다. */
+  const updSupply = (i, v) => setRows(rs => rs.map((r, idx) => {
+    if (idx !== i) return r
+    const base = Number(r.supply_amount) || 0        // 서버가 준 원래 공급가
+    const rate = base > 0 ? (Number(r.vat_amount) || 0) / base : 0
+    return { ...r, supply: v, vat: Math.round((Number(v) || 0) * rate) }
+  }))
   const picked = rows.filter(r => r.checked)
   const sumTotal = picked.reduce((s, r) => s + (Number(r.supply) || 0) + (Number(r.vat) || 0), 0)
   const blockedClosed = rows.filter(r => r.closed)
@@ -199,7 +210,7 @@ export const BackfillWizard = ({ open, onClose, rule, kind, onDone }) => {
                             <td className="num" style={{ maxWidth: 140 }}>
                               {/* 회차별 금액 수정 — 임차료 인상처럼 달마다 금액이 달랐던 경우가 반드시 있다 */}
                               <MoneyInput value={String(r.supply)} disabled={disabled}
-                                onChange={(raw, v) => upd(i, { supply: v })}/>
+                                onChange={(raw, v) => updSupply(i, v)}/>
                             </td>
                             <td className="num" style={{ maxWidth: 120 }}>
                               <MoneyInput value={String(r.vat)} disabled={disabled}
