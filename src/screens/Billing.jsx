@@ -803,9 +803,13 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const PENDING_STATUS = isIssued
     ? ["입금 예정", "일부 입금", "기한 지남", "장기 미수"]
     : ["지급 대기", "지급 예정", "일부 지급", "기한 지남"]
+  /* '미정산'은 **항상** 첫 칩이다.
+   * 예전엔 회수 모드(role='collect', 미수금·미지급금 메뉴)에서만 나왔다. 그런데 그 메뉴는
+   * 이 화면과 같은 화면이라 사이드바에서 합쳤고(nav.js), 칩이 회수 모드에만 있으면
+   * "못 받은 것만 보기"가 통째로 사라진다. 미수금·미지급금은 경리가 매일 보는 축이다. */
   const STATUS_OPTIONS = isIssued
-    ? [...(collect ? ["미정산"] : []), "전체", "입금 예정", "일부 입금", "기한 지남", "장기 미수", "입금 완료"]
-    : [...(collect ? ["미정산"] : []), "전체", "지급 대기", "지급 예정", "일부 지급", "기한 지남", "지급 완료"]
+    ? ["미정산", "전체", "입금 예정", "일부 입금", "기한 지남", "장기 미수", "입금 완료"]
+    : ["미정산", "전체", "지급 대기", "지급 예정", "일부 지급", "기한 지남", "지급 완료"]
   // 필터도 표시 상태(effStatus) 기준 — 뱃지에 '기한 지남'으로 뜨는 건이 '기한 지남' 필터에도 잡히게.
   const filtered = statusFilter === "미정산"
     ? kindRows.filter(inv => PENDING_STATUS.includes(effStatus(inv)))

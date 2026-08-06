@@ -20,17 +20,21 @@ export const NAV_TREE = [
       //     홈택스·세금계산서·부가세 신고서와 **글자가 같아야 대조가 된다**
       //     (매출세금계산서·매출세액은 서식 용어이고, 미수금·미지급금은 계정과목이다).
       //   그래서 '수주 계약 → 대금 청구서(매출) → 미수금'처럼 한 줄에 두 용어가 같이 선다. 의도된 것이다.
+      /* (제거) '미수금'·'미지급금' — 바로 위 '대금 청구서'와 **같은 화면**이었다.
+       * 같은 BillingScreen 에 role='collect' 만 달라서, 표도 데이터도 같고 제목·기본 필터만 달랐다.
+       * 메뉴 4개가 화면 2개였던 셈이다.
+       * 대신 청구서 화면의 상태 칩 맨 앞에 '미정산'을 항상 두어 같은 일을 하게 했다(Billing.jsx).
+       * ⚠ 라우트·권한 자원·검색어는 살려 둔다(HIDDEN_LEAVES) — 홈 화면·알림·거래내역 KPI가
+       *   #ar/#ap 로 들어오고, '미수금'은 경리가 실제로 찾는 말이자 계정과목이다. */
       { label: "판매·매출", items: [
         { id: "contract_sales",    label: "수주 계약",   icon: Icon.Briefcase },
         { id: "billing_issued",    label: "대금 청구서", icon: Icon.Receipt },
         { id: "recurring_invoice", label: "정기청구",    icon: Icon.Clock },
-        { id: "ar",                label: "미수금",      icon: Icon.Recv },
       ]},
       { label: "매입", items: [
         { id: "contract_purchase", label: "발주 계약",   icon: Icon.Briefcase },
         { id: "billing_received",  label: "대금 청구서", icon: Icon.Receipt },
         { id: "recurring_expense", label: "정기지출",    icon: Icon.Clock },
-        { id: "ap",                label: "미지급금",    icon: Icon.Pay },
       ]},
       // 판관비 — 계약·품목에 붙지 않는 운영비(임차·통신·보험 등). 잡손익은 영업외라 따로 둔다.
       { label: "경비", items: [
@@ -178,6 +182,11 @@ export const SETTINGS_LEAVES = [
  * 그래서 없애지 않고 감춘다. 기준정보·환경설정 잎을 다루는 방식과 같다. */
 export const HIDDEN_LEAVES = [
   { id: "contract", label: "계약 전체", icon: Icon.Briefcase, domain: "일반회계", section: "장부" },
+  /* 미수금·미지급금 — 대금 청구서와 같은 화면이라 트리에서 뺐지만 살아 있다.
+     홈 화면·알림·거래내역 KPI가 이 라우트로 들어오고, Ctrl+K 에서 '미수금'으로 찾으면
+     청구서 화면이 '미정산' 필터로 열린다. 권한 자원(ar·ap)도 그대로 유지된다. */
+  { id: "ar", label: "미수금 (대금 청구서)",   icon: Icon.Recv, domain: "일반회계", section: "판매·매출" },
+  { id: "ap", label: "미지급금 (대금 청구서)", icon: Icon.Pay,  domain: "일반회계", section: "매입" },
 ]
 
 // 잎 id → 소속 도메인 id (활성 도메인 자동 펼침용)
@@ -219,12 +228,14 @@ export const LEAF_TAGS = {
   // ⚠ '발주'는 여기 넣지 않는다 — 발주 계약(우리가 발주한 것)과 헷갈린다.
   //    다만 '발주처'(우리에게 발주한 고객사)로 찾는 사람은 여기가 맞다.
   contract_sales:   '매출계약 매출 수주계약 납품계약 오더 주문 발주처 계약',
-  billing_issued:   '세금계산서 계산서 청구 발행 매출 인보이스 수금',
+  /* 미수금 메뉴를 청구서로 합치면서 그 검색어를 여기로 옮겼다 —
+     경리는 '미수금·받을돈·연체'로 찾지 '대금 청구서'로 찾지 않는다. */
+  billing_issued:   '세금계산서 계산서 청구 발행 매출 인보이스 수금 미수금 받을돈 채권 외상매출금 미수 연체 독촉 회수 미정산',
   recurring_invoice:'정기 매달 월정액 자동청구 구독',
   ar:               '받을돈 채권 외상매출금 미수 연체 독촉 회수',
   // 매입
   contract_purchase:'매입계약 매입 발주계약 외주계약 하도급 구매계약 계약',
-  billing_received: '매입세금계산서 수취 매입계산서 청구받은',
+  billing_received: '매입세금계산서 수취 매입계산서 청구받은 미지급금 줄돈 채무 외상매입금 미지급 결제 지급처리 미정산',
   recurring_expense:'정기지출 고정비 임차료 월세 리스 자동이체',
   ap:               '줄돈 채무 외상매입금 미지급 결제 지급처리',
   // 경비
@@ -289,10 +300,10 @@ export const PORTAL = [
     // 그 영역 포털(또는 단일 화면)로 들어간다. 늘어난 업무(경비·지출승인·장부)를 각 카드로 세운다.
     categories: [
       { id: 'acct_sales', label: '판매·매출', icon: Icon.Recv, desc: '수주·청구·수금', groups: [
-        { label: '', items: ['contract_sales', 'billing_issued', 'recurring_invoice', 'ar'] },
+        { label: '', items: ['contract_sales', 'billing_issued', 'recurring_invoice'] },
       ]},
       { id: 'acct_purchase', label: '매입', icon: Icon.Pay, desc: '발주·청구·지급', groups: [
-        { label: '', items: ['contract_purchase', 'billing_received', 'recurring_expense', 'ap'] },
+        { label: '', items: ['contract_purchase', 'billing_received', 'recurring_expense'] },
       ]},
       { id: 'acct_expense', label: '경비', icon: Icon.Wallet, desc: '일반 경비·잡손익', groups: [
         { label: '', items: ['misc_pl', 'misc_income'] },
@@ -392,9 +403,12 @@ export function leafIdOf(route) {
   if (route === "contract_detail") return "contract"
   if (route === "ledger_income") return "income"
   if (route === "ledger_expense") return "expense"
-  if (route === "ledger_ar") return "ar"
-  if (route === "ledger_ap") return "ap"
   if (route === "excel_modal" || route === "excel") return "ledger"
+  /* 미수금·미지급금은 대금 청구서와 같은 화면이라 메뉴를 합쳤다(HIDDEN_LEAVES).
+     그 라우트로 들어와도 사이드바에서 '대금 청구서'가 켜져야 지금 어디인지 알 수 있다 —
+     안 그러면 아무것도 활성화되지 않아 길을 잃는다. */
+  if (route === "ar" || route === "ledger_ar") return "billing_issued"
+  if (route === "ap" || route === "ledger_ap") return "billing_received"
   if (route === "billing") return "billing_issued"
   // 환경설정 하위(settings_<tab>)는 사이드바 하단 '환경설정'을 활성으로
   if (route === "settings" || route.startsWith("settings_")) return "settings"
