@@ -78,6 +78,8 @@ router.delete('/:id', async (req, res, next) => {
       `SELECT (SELECT COUNT(*) FROM invoices     WHERE recurring_id = ?) AS invs,
               (SELECT COUNT(*) FROM transactions WHERE recurring_id = ?) AS txns`,
       [req.params.id, req.params.id])
+    // 건너뛴 기록도 함께(매출 쪽과 같은 이유 — 규칙과 수명을 같이하는 설정값이다)
+    await req.db.execute("DELETE FROM recurring_skips WHERE kind = 'expense' AND recurring_id = ?", [req.params.id])
     await req.db.execute('DELETE FROM recurring_expenses WHERE id = ?', [req.params.id])
     res.json({ ok: true, keptInvoices: Number(kept.invs) || 0, keptTxns: Number(kept.txns) || 0 })
   } catch (e) { next(e) }

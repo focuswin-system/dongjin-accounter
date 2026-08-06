@@ -79,6 +79,10 @@ router.delete('/:id', async (req, res, next) => {
       `SELECT (SELECT COUNT(*) FROM invoices     WHERE recurring_id = ?) AS invs,
               (SELECT COUNT(*) FROM transactions WHERE recurring_id = ?) AS txns`,
       [req.params.id, req.params.id])
+    /* 건너뛴 기록도 함께 지운다. 규칙이 없어지면 이 행들은 아무 데서도 안 읽히는 고아가 되고,
+       같은 id 가 재사용되진 않지만 테이블에 계속 쌓인다. 청구서·거래와 달리 장부가 아니라
+       '이 규칙의 그 회차를 건너뛴다'는 설정값이므로 규칙과 수명을 같이한다. */
+    await req.db.execute("DELETE FROM recurring_skips WHERE kind = 'invoice' AND recurring_id = ?", [req.params.id])
     await req.db.execute('DELETE FROM recurring_invoices WHERE id = ?', [req.params.id])
     res.json({ ok: true, keptInvoices: Number(kept.invs) || 0, keptTxns: Number(kept.txns) || 0 })
   } catch (e) { next(e) }

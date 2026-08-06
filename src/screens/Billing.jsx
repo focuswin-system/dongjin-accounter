@@ -656,17 +656,27 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
 }
 
 // ── 요약 카드 ────────────────────────────────────────────────────
-const SummaryCard = ({ label, amount, count, accent = "blue", warn }) => (
-  <div className="card" style={{ padding: "16px 18px" }}>
-    <div className="row" style={{ marginBottom: 6 }}>
-      <span className="text-sm text-muted fw-600">{label}</span>
-      <span className={`badge ${accent} ml-auto`}>{count}건</span>
-    </div>
-    <div className="num fw-700" style={{ fontSize: 22, color: warn ? "var(--neg-ink)" : undefined }}>
-      {fmtNum(amount)}
-    </div>
-  </div>
-)
+/* onClick 이 있으면 누를 수 있는 카드가 된다.
+ * 미수금·미지급금 메뉴를 이 화면으로 합치면서, 그 목록을 보려면 '발행됨' 탭 → '미정산' 칩으로
+ * 두 번을 눌러야 했다(상태 칩은 목록 탭에서만 나온다). 예전 메뉴는 한 번이었다.
+ * 사용자가 쫓는 숫자가 이미 이 카드에 떠 있으므로, 그 카드를 누르면 바로 그 목록으로 간다. */
+const SummaryCard = ({ label, amount, count, accent = "blue", warn, onClick, hint }) => {
+  const Tag = onClick ? 'button' : 'div'
+  return (
+    <Tag className="card" onClick={onClick} type={onClick ? 'button' : undefined}
+      style={{ padding: "16px 18px", textAlign: 'left', width: '100%',
+               cursor: onClick ? 'pointer' : undefined }}>
+      <div className="row" style={{ marginBottom: 6 }}>
+        <span className="text-sm text-muted fw-600">{label}</span>
+        <span className={`badge ${accent} ml-auto`}>{count}건</span>
+      </div>
+      <div className="num fw-700" style={{ fontSize: 22, color: warn ? "var(--neg-ink)" : undefined }}>
+        {fmtNum(amount)}
+      </div>
+      {onClick && <div className="text-xs text-muted2" style={{ marginTop: 4 }}>{hint || '눌러서 보기'}</div>}
+    </Tag>
+  )
+}
 
 // ── 청구서 테이블 ────────────────────────────────────────────────
 const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여" }) => (
@@ -911,9 +921,12 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       <div className="grid" style={{ gridTemplateColumns: `repeat(${collect ? 2 : 3}, 1fr)`, gap: 16, marginBottom: 24 }}>
         {isIssued ? (
           <>
-            {!collect && <SummaryCard label="발행 예정(대기)" amount={pendingTotal} count={pending.length} accent="brand"/>}
-            <SummaryCard label={collect ? "받을 미수금" : "미수금 합계"} amount={recSummary?.total ?? 0} count={recSummary?.count ?? 0} accent="blue"/>
-            <SummaryCard label="연체 미수금" amount={recSummary?.overdueAmount ?? 0} count={recSummary?.overdueCount ?? 0} accent="neg" warn/>
+            {!collect && <SummaryCard label="발행 예정(대기)" amount={pendingTotal} count={pending.length} accent="brand"
+              onClick={() => setView("pending")} hint="발행 예정 보기"/>}
+            <SummaryCard label={collect ? "받을 미수금" : "미수금 합계"} amount={recSummary?.total ?? 0} count={recSummary?.count ?? 0} accent="blue"
+              onClick={() => { setView("list"); setStatusFilter("미정산") }} hint="못 받은 청구서 보기"/>
+            <SummaryCard label="연체 미수금" amount={recSummary?.overdueAmount ?? 0} count={recSummary?.overdueCount ?? 0} accent="neg" warn
+              onClick={() => { setView("list"); setStatusFilter("기한 지남") }} hint="기한 지난 것만 보기"/>
           </>
         ) : (
           <>
@@ -921,9 +934,12 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
                 '지급 예정(대기)'라고 부르니 옆의 '미지급금 합계'와 구분이 안 됐다 —
                 둘 다 "3건"으로 떠서 같은 3건처럼 보인다. 실제로는 겹치지 않는 별개다.
                 매출 쪽 '발행 예정'과 대칭이 되게 '등록 예정'으로 부른다. */}
-            {!collect && <SummaryCard label="등록 예정(청구서 전)" amount={pendingTotal} count={pending.length} accent="brand"/>}
-            <SummaryCard label={collect ? "줄 미지급금" : "미지급금 합계"} amount={paySum?.total ?? 0} count={paySum?.count ?? 0} accent="warn"/>
-            <SummaryCard label="연체 미지급금" amount={paySum?.overdueAmount ?? 0} count={paySum?.overdueCount ?? 0} accent="neg" warn/>
+            {!collect && <SummaryCard label="등록 예정(청구서 전)" amount={pendingTotal} count={pending.length} accent="brand"
+              onClick={() => setView("pending")} hint="등록 예정 보기"/>}
+            <SummaryCard label={collect ? "줄 미지급금" : "미지급금 합계"} amount={paySum?.total ?? 0} count={paySum?.count ?? 0} accent="warn"
+              onClick={() => { setView("list"); setStatusFilter("미정산") }} hint="안 낸 청구서 보기"/>
+            <SummaryCard label="연체 미지급금" amount={paySum?.overdueAmount ?? 0} count={paySum?.overdueCount ?? 0} accent="neg" warn
+              onClick={() => { setView("list"); setStatusFilter("기한 지남") }} hint="기한 지난 것만 보기"/>
           </>
         )}
       </div>
