@@ -64,6 +64,13 @@ const AUDIT_RULES = [
   { m: 'DELETE', re: /^\/api\/recurring-invoices\/([^/]+)$/,            res: 'recurring_invoice', action: 'delete', target: 1 },
   { m: 'DELETE', re: /^\/api\/recurring-expenses\/([^/]+)$/,            res: 'recurring_expense', action: 'delete', target: 1 },
 
+  /* ── 회차 건너뛰기 ── 그 달 청구가 사라지는 결정이다. "왜 3월만 없지"를 짚으려면 남아야 한다.
+     되살리기(DELETE)도 마찬가지 — 있던 게 다시 생기는 것이라 양쪽 다 기록한다. */
+  { m: 'POST',   re: /^\/api\/recurring-invoices\/([^/]+)\/skip$/,      res: 'recurring_invoice', action: 'skip',   target: 1 },
+  { m: 'DELETE', re: /^\/api\/recurring-invoices\/([^/]+)\/skip\/[^/]+$/, res: 'recurring_invoice', action: 'unskip', target: 1 },
+  { m: 'POST',   re: /^\/api\/recurring-expenses\/([^/]+)\/skip$/,      res: 'recurring_expense', action: 'skip',   target: 1 },
+  { m: 'DELETE', re: /^\/api\/recurring-expenses\/([^/]+)\/skip\/[^/]+$/, res: 'recurring_expense', action: 'unskip', target: 1 },
+
   /* ── 소급 등록 ── 한 번에 최대 60건의 청구서·거래가 생기고, 되돌리기는 그만큼을 지운다.
    * 과거 기간에 꽂는 일이라 "이 달 숫자가 왜 달라졌지"가 나중에 반드시 나온다.
    * (미리보기는 아무것도 바꾸지 않으므로 기록하지 않는다) */
@@ -120,6 +127,7 @@ const ACTION_LABELS = {
   // 발행
   issue: '발행', issue_missed: '놓친 회차 일괄 발행',
   backfill: '지난 회차 소급 등록', backfill_undo: '소급 등록 되돌리기',
+  skip: '회차 건너뛰기', unskip: '건너뛴 회차 되살리기',
   // 입금·지급
   match: '입금 연결', match_cancel: '입금 연결 해제',
   pay: '지급', pay_cancel: '지급 취소', pay_missed: '놓친 회차 납입',

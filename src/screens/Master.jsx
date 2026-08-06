@@ -2030,6 +2030,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
       {/* 이행 현황 — 놓친 회차/임박/예정. 규칙만 보여주던 화면의 빈 곳을 채운다 */}
       <RecurringCycles cycles={cyc.cycles} kind="purchase" busy={cyc.busy}
         onIssue={cyc.issue} onPaid={cyc.openPaid} onBulk={cyc.bulk}
+        onSkip={cyc.skip} onUnskip={cyc.unskip}
         onOpenContract={() => goRoute?.('contract_purchase')}/>
 
       <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -2326,6 +2327,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
 
       <RecurringCycles cycles={cyc.cycles} kind="sales" busy={cyc.busy}
         onIssue={cyc.issue} onPaid={cyc.openPaid} onBulk={cyc.bulk}
+        onSkip={cyc.skip} onUnskip={cyc.unskip}
         onOpenContract={() => goRoute?.('contract_sales')}/>
 
       <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>

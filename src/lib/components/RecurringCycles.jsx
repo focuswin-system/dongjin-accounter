@@ -37,6 +37,13 @@ const SECTION = {
     primary: 'issue',
     hint: () => '미리 발행해 둘 수 있어요.',
   },
+  /* 건너뛴 회차 — 감추기만 하면 되돌릴 방법이 없어진다. 접어서 맨 아래에 둔다
+     ("왜 이 달만 없지"를 여기서 확인하고 되살릴 수 있어야 한다). */
+  skipped: {
+    label: '건너뜀', tone: 'outline', icon: <Icon.Close size={13}/>,
+    primary: null,
+    hint: () => '청구하지 않기로 한 회차예요. 되살리면 다시 목록에 나타나요.',
+  },
 }
 
 // 로컬 자정끼리 비교한다. toDateString() 파싱이나 toISOString(UTC)을 쓰면 KST 새벽에 하루가 밀린다
@@ -59,7 +66,7 @@ const ddayTone = (due) => {
 /** 회차 금액(VAT 포함) — pending은 공급가(amount)와 세액(vat)을 따로 준다 */
 export const cycleTotal = (c) => (c.amount || 0) + (c.vat != null ? c.vat : Math.round((c.amount || 0) * 0.1))
 
-const Row = ({ c, sales, primary, onIssue, onPaid, onOpenContract, busy, blockedBy }) => {
+const Row = ({ c, sales, primary, onIssue, onPaid, onOpenContract, onSkip, onUnskip, skipped, busy, blockedBy }) => {
   const issueLabel = sales ? '청구서 발행' : '청구서 등록'
   const paidLabel = sales ? '기입금 처리' : '기지급 처리'
   // 서버는 그 규칙의 '가장 이른 미처리 회차'만 허용한다(앞선 회차를 건너뛰면 그 앞이 영영 안 뜬다).
@@ -93,15 +100,31 @@ const Row = ({ c, sales, primary, onIssue, onPaid, onOpenContract, busy, blocked
       <td className="num-cell num-right fw-700">{fmtNum(cycleTotal(c))}</td>
       <td>
         <div className="row gap-6" style={{ justifyContent: 'flex-end', alignItems: 'center' }}>
-          {blockedBy && <span className="text-xs text-muted2">앞선 회차부터</span>}
-          {primary === 'paid' ? <>{btn('paid')}{btn('issue')}</> : <>{btn('issue')}{btn('paid')}</>}
+          {/* 건너뛴 회차 구획에서는 되돌리기만 있으면 된다 */}
+          {skipped ? (
+            <>
+              {c.skip_reason && <span className="text-xs text-muted2">{c.skip_reason}</span>}
+              <button className="btn sm" disabled={busy} onClick={() => onUnskip(c)}>되살리기</button>
+            </>
+          ) : (
+            <>
+              {blockedBy && <span className="text-xs text-muted2">앞선 회차부터</span>}
+              {primary === 'paid' ? <>{btn('paid')}{btn('issue')}</> : <>{btn('issue')}{btn('paid')}</>}
+              {/* 회차는 저장된 행이 아니라 계산값이라 '삭제'가 없다. 예전엔 잘못 잡힌 회차를 없애려면
+                  발행한 뒤 그 청구서를 지워야 했다(청구번호만 헛되이 소모). 여기서 바로 건너뛴다. */}
+              {onSkip && (
+                <button className="btn sm" disabled={busy} title="이 회차는 청구하지 않아요"
+                  onClick={() => onSkip(c)}>건너뛰기</button>
+              )}
+            </>
+          )}
         </div>
       </td>
     </tr>
   )
 }
 
-const Section = ({ state, cycles, sales, onIssue, onPaid, onOpenContract, onBulk, busy, collapsible, earliest }) => {
+const Section = ({ state, cycles, sales, onIssue, onPaid, onOpenContract, onBulk, onSkip, onUnskip, busy, collapsible, earliest }) => {
   const [open, setOpen] = useState(!collapsible)
   const meta = SECTION[state]
   const sum = cycles.reduce((s, c) => s + cycleTotal(c), 0)
@@ -145,6 +168,7 @@ const Section = ({ state, cycles, sales, onIssue, onPaid, onOpenContract, onBulk
                 return (
                   <Row key={`${c.recurring_id}-${c.due_date}`} c={c} sales={sales} primary={meta.primary}
                     blockedBy={first && first !== c.due_date ? first : null}
+                    skipped={state === 'skipped'} onSkip={onSkip} onUnskip={onUnskip}
                     onIssue={onIssue} onPaid={onPaid} onOpenContract={onOpenContract} busy={busy}/>
                 )
               })}
@@ -163,14 +187,17 @@ const Section = ({ state, cycles, sales, onIssue, onPaid, onOpenContract, onBulk
  * @param onBulk          놓친 회차 일괄 처리
  * @param onOpenContract  계약 배지 클릭
  */
-export const RecurringCycles = ({ cycles = [], kind = 'purchase', onIssue, onPaid, onBulk, onOpenContract, busy }) => {
+export const RecurringCycles = ({ cycles = [], kind = 'purchase', onIssue, onPaid, onBulk, onOpenContract, onSkip, onUnskip, busy }) => {
   const sales = kind === 'sales'
   const by = (s) => cycles.filter(c => c.state === s)
-  const overdue = by('overdue'), soon = by('soon'), upcoming = by('upcoming')
-  // 규칙별 '가장 이른 미처리 회차' — 서버가 개별 처리를 허용하는 유일한 회차다.
-  // 구획을 나눠 보여주므로 전체 cycles에서 구해야 한다(놓친 회차가 있으면 임박 회차도 아직 못 누른다).
+  const overdue = by('overdue'), soon = by('soon'), upcoming = by('upcoming'), skipped = by('skipped')
+  /* 규칙별 '가장 이른 미처리 회차' — 서버가 개별 처리를 허용하는 유일한 회차다.
+     구획을 나눠 보여주므로 전체 cycles에서 구해야 한다(놓친 회차가 있으면 임박 회차도 아직 못 누른다).
+     ⚠ 건너뛴 회차는 빼야 한다 — 넣으면 "앞선 회차(건너뛴 날)부터 처리하세요"가 떠서
+       정작 처리해야 할 회차가 영영 안 눌린다(건너뛴 건 처리할 대상이 아니다). */
   const earliest = new Map()
   for (const c of cycles) {
+    if (c.state === 'skipped') continue
     const cur = earliest.get(c.recurring_id)
     if (!cur || c.due_date < cur) earliest.set(c.recurring_id, c.due_date)
   }
@@ -179,15 +206,20 @@ export const RecurringCycles = ({ cycles = [], kind = 'purchase', onIssue, onPai
     <div style={{ marginBottom: 20 }}>
       {overdue.length > 0 && (
         <Section state="overdue" cycles={overdue} sales={sales} earliest={earliest}
-          onIssue={onIssue} onPaid={onPaid} onBulk={onBulk} onOpenContract={onOpenContract} busy={busy}/>
+          onIssue={onIssue} onPaid={onPaid} onBulk={onBulk} onOpenContract={onOpenContract}
+          onSkip={onSkip} busy={busy}/>
       )}
       {soon.length > 0 && (
         <Section state="soon" cycles={soon} sales={sales} earliest={earliest}
-          onIssue={onIssue} onPaid={onPaid} onOpenContract={onOpenContract} busy={busy}/>
+          onIssue={onIssue} onPaid={onPaid} onOpenContract={onOpenContract} onSkip={onSkip} busy={busy}/>
       )}
       {upcoming.length > 0 && (
         <Section state="upcoming" cycles={upcoming} sales={sales} earliest={earliest} collapsible
-          onIssue={onIssue} onPaid={onPaid} onOpenContract={onOpenContract} busy={busy}/>
+          onIssue={onIssue} onPaid={onPaid} onOpenContract={onOpenContract} onSkip={onSkip} busy={busy}/>
+      )}
+      {skipped.length > 0 && (
+        <Section state="skipped" cycles={skipped} sales={sales} earliest={earliest} collapsible
+          onOpenContract={onOpenContract} onUnskip={onUnskip} busy={busy}/>
       )}
     </div>
   )
@@ -209,8 +241,12 @@ export const useRecurringCycles = (kind, { onChanged } = {}) => {
   const [paidTarget, setPaidTarget] = useState(null)
 
   const A = sales
-    ? { pending: api.getPendingRecurring, issue: api.issueRecurring, missed: api.issueMissedRecurringInvoices }
-    : { pending: api.getPendingRecurringExpenses, issue: api.issueRecurringExpense, missed: api.issueMissedRecurringExpenses }
+    ? { pending: api.getPendingRecurring, issue: api.issueRecurring, missed: api.issueMissedRecurringInvoices,
+        skip: (id, due) => api.skipRecurringCycle('sales', id, due),
+        unskip: (id, due) => api.unskipRecurringCycle('sales', id, due) }
+    : { pending: api.getPendingRecurringExpenses, issue: api.issueRecurringExpense, missed: api.issueMissedRecurringExpenses,
+        skip: (id, due) => api.skipRecurringCycle('purchase', id, due),
+        unskip: (id, due) => api.unskipRecurringCycle('purchase', id, due) }
 
   const reload = useCallback(async () => {
     setCycles(await A.pending.call(api))
@@ -239,7 +275,9 @@ export const useRecurringCycles = (kind, { onChanged } = {}) => {
    * overdue만 세어 보여주면 "1건 발행"이라 확인받고 2건이 생겼다. */
   const bulk = async () => {
     const today = localToday()
-    const overdue = cycles.filter(c => c.due_date <= today).sort((a, b) => a.due_date.localeCompare(b.due_date))
+    // 건너뛴 회차는 서버가 만들지 않는다 → 확인창 건수·목록에서도 빼야 "N건" 이 맞는다
+    const overdue = cycles.filter(c => c.state !== 'skipped' && c.due_date <= today)
+      .sort((a, b) => a.due_date.localeCompare(b.due_date))
     if (!overdue.length) return toast.push('처리할 회차가 없어요')
     const ok = await confirm({
       tone: 'brand', icon: <Icon.Receipt size={22}/>,
@@ -259,11 +297,38 @@ export const useRecurringCycles = (kind, { onChanged } = {}) => {
     after()
   }
 
+  /* 회차 건너뛰기 — "이 달은 청구 안 함".
+     회차는 저장된 행이 아니라 계산값이라 지울 대상이 없어서, 예전엔 발행한 뒤 그 청구서를
+     삭제하는 수밖에 없었다(청구번호만 헛되이 소모되고, 마감·정산에 걸리면 그마저 막힌다). */
+  const skip = async (c) => {
+    const ok = await confirm({
+      title: `${c.due_date} 회차를 건너뛸까요?`,
+      body: `${c.vendor_name || ''} · ${fmtNum(cycleTotal(c))}원 — 이 회차는 ${sales ? '청구하지' : '지출로 잡지'} 않아요. 정기 규칙은 그대로 돌아가고, 나중에 되살릴 수 있어요.`,
+      confirmLabel: '건너뛰기',
+    })
+    if (!ok) return
+    setBusy(true)
+    const res = await A.skip.call(api, c.recurring_id, c.due_date)
+    setBusy(false)
+    if (!res.ok) return toast.push(res.error || '건너뛰기에 실패했어요', { tone: 'warn' })
+    toast.push(`${c.due_date} 회차를 건너뛰었어요`)
+    after()
+  }
+
+  const unskip = async (c) => {
+    setBusy(true)
+    const res = await A.unskip.call(api, c.recurring_id, c.due_date)
+    setBusy(false)
+    if (!res.ok) return toast.push(res.error || '되살리기에 실패했어요', { tone: 'warn' })
+    toast.push(`${c.due_date} 회차를 되살렸어요`)
+    after()
+  }
+
   const closePaid = () => setPaidTarget(null)
   const donePaid = () => { setPaidTarget(null); after() }
 
   const overdueCount = cycles.filter(c => c.state === 'overdue').length
-  return { cycles, busy, reload, issue, openPaid, issuePaid, bulk, paidTarget, closePaid, donePaid, overdueCount, sales }
+  return { cycles, busy, reload, issue, openPaid, issuePaid, bulk, skip, unskip, paidTarget, closePaid, donePaid, overdueCount, sales }
 }
 
 /** 규칙 id → 그 규칙의 다음 예정일·미처리 건수 (규칙 목록 컬럼용) */

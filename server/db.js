@@ -247,6 +247,24 @@ async function initDb(conn) {
         FOREIGN KEY (account_id)  REFERENCES accounts(id)
       )
     `)
+    /* 건너뛴 정기 회차.
+     *
+     * 정기 회차는 저장된 행이 아니라 규칙에서 **계산되는 값**이라, 잘못 잡힌 회차를 지울
+     * 대상이 없었다. 그래서 "발행하고 나서 그 청구서를 삭제"하는 수밖에 없었다 —
+     * 쓸데없는 청구번호가 소모되고, 마감·정산 가드에 걸리면 그마저 막힌다.
+     * 그 달만 안 하기로 한 사실을 여기 남긴다(규칙 자체는 계속 돈다).
+     * 되돌리려면 이 행을 지우면 그 회차가 그대로 다시 나타난다. */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS recurring_skips (
+        id           VARCHAR(36) PRIMARY KEY,
+        kind         ENUM('invoice','expense') NOT NULL,
+        recurring_id VARCHAR(36) NOT NULL,
+        due_date     VARCHAR(20) NOT NULL,
+        reason       VARCHAR(255),
+        created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_recurring_skips (kind, recurring_id, due_date)
+      )
+    `)
     await c.execute(`
       CREATE TABLE IF NOT EXISTS payroll (
         id          VARCHAR(36) PRIMARY KEY,

@@ -42,4 +42,34 @@ function tooManyError(n) {
   return `한 번에 만들 수 있는 회차는 ${MAX_BACKFILL}개까지예요. ${n}개가 나왔으니 기간을 좁혀서 나눠 등록해주세요.`
 }
 
-module.exports = { backfillCycles, tooManyError, MAX_BACKFILL }
+/* ── 회차 건너뛰기 ──────────────────────────────────────────────
+ * 정기 회차는 규칙에서 계산되는 값이라 '그 회차만 삭제'가 성립하지 않는다.
+ * 예전엔 잘못 잡힌 회차를 없애려면 **발행한 뒤 그 청구서를 지우는** 수밖에 없었다
+ * (청구번호가 헛되이 소모되고, 마감·정산 가드에 걸리면 그마저 막힌다).
+ * 건너뛴 사실을 따로 기록해 계산에서 뺀다. 규칙 자체는 계속 돈다.
+ */
+const { randomUUID } = require('crypto')
+
+async function addSkip(db, kind, recurringId, dueDate, reason) {
+  await db.execute(
+    `INSERT INTO recurring_skips (id, kind, recurring_id, due_date, reason) VALUES (?,?,?,?,?)
+     ON DUPLICATE KEY UPDATE reason = VALUES(reason)`,
+    [randomUUID(), kind, recurringId, dueDate, reason || null])
+}
+
+async function removeSkip(db, kind, recurringId, dueDate) {
+  const [r] = await db.execute(
+    'DELETE FROM recurring_skips WHERE kind = ? AND recurring_id = ? AND due_date = ?',
+    [kind, recurringId, dueDate])
+  return r.affectedRows
+}
+
+/** 이 회차에 이미 청구서가 있으면 건너뛰기가 아니라 '삭제'가 맞다 — 잘못 부르지 않게 막는다. */
+async function issuedInvoiceAt(db, recurringId, dueDate) {
+  const [[row]] = await db.execute(
+    'SELECT id, invoice_no FROM invoices WHERE recurring_id = ? AND issued_at = ? LIMIT 1',
+    [recurringId, dueDate])
+  return row || null
+}
+
+module.exports = { backfillCycles, tooManyError, MAX_BACKFILL, addSkip, removeSkip, issuedInvoiceAt }

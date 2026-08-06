@@ -926,6 +926,19 @@ export const api = {
     } catch (e) { return { ok: false, error: e.message } }
   },
 
+  /* 회차 건너뛰기 — 정기 회차는 저장된 행이 아니라 계산값이라 '삭제'가 없다.
+     건너뛴 사실을 남겨 계산에서 뺀다(규칙 자체는 계속 돈다). kind: 'sales' | 'purchase' */
+  async skipRecurringCycle(kind, id, dueDate, reason) {
+    const base = kind === 'purchase' ? '/recurring-expenses' : '/recurring-invoices'
+    try { await req(`${base}/${id}/skip`, { method: 'POST', body: { due_date: dueDate, reason } }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async unskipRecurringCycle(kind, id, dueDate) {
+    const base = kind === 'purchase' ? '/recurring-expenses' : '/recurring-invoices'
+    try { await req(`${base}/${id}/skip/${dueDate}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
   /* ─── 정기 회차 소급 등록 ───────────────────────────────────
      등록일 이전 회차는 평소 경로로는 만들어지지 않는다(소급 홍수 방지).
      사용자가 기간을 명시적으로 열었을 때만, 미리보기 → 선택 → 일괄 생성. kind: 'invoice' | 'expense' */

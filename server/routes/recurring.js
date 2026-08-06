@@ -10,7 +10,7 @@ const { recurFromTotal, modeFromCatVat } = require('../lib/vat')
    호출은 조건부(paid 일 때만)라 평소 경로에서는 드러나지 않았다. 같은 실수가
    recurring-invoices.js 에도 있었다. 재발 방지는 scripts/check-isolation.js [13]. */
 const { settleAcctCode } = require('../lib/acctCode')
-const { backfillCycles, tooManyError } = require('../lib/backfill')
+const { backfillCycles, tooManyError, addSkip, removeSkip, issuedInvoiceAt } = require('../lib/backfill')
 
 const router = Router()
 
@@ -106,9 +106,18 @@ router.get('/pending', async (req, res, next) => {
       LEFT JOIN categories cat ON r.category = cat.name
       WHERE r.active = 1`)
     const today = kstToday()
+    // 건너뛴 회차는 계산에서 빼고, 되돌릴 수 있도록 state='skipped'로 함께 실어 보낸다
+    const [skipRows] = await req.db.execute(
+      "SELECT recurring_id, due_date, reason FROM recurring_skips WHERE kind = 'expense'")
+    const skipBy = new Map()
+    for (const s of skipRows) {
+      if (!skipBy.has(s.recurring_id)) skipBy.set(s.recurring_id, [])
+      skipBy.get(s.recurring_id).push(s)
+    }
     const out = []
     for (const r of recs) {
       r.setup_date = kstDate(Number(r.created_epoch) * 1000)   // 등록일(KST) — 소급 하한
+      r.skips = (skipBy.get(r.id) || []).map(s => String(s.due_date).slice(0, 10))
       for (const due of dueDatesToGenerate(r, today, { horizonDays: LOOKAHEAD_DAYS })) {
         const { supply, vat } = expenseVat(r.amount, r.vat_mode, r.cat_vat)
         out.push(pendingCycle(r, due, today, {
@@ -120,6 +129,18 @@ router.get('/pending', async (req, res, next) => {
           // 계약 이름이 없으면 비목으로 대신 표시(계약 무관 정기지출)
           contract_name: r.contract_name || r.category || '',
         }))
+      }
+      for (const s of (skipBy.get(r.id) || [])) {
+        const due = String(s.due_date).slice(0, 10)
+        const { supply, vat } = expenseVat(r.amount, r.vat_mode, r.cat_vat)
+        out.push({
+          ...pendingCycle(r, due, today, {
+            source: 'recurring-expense', type: '정기지출', item: r.category || '',
+            amount: supply, vat, contract_name: r.contract_name || r.category || '',
+            skip_reason: s.reason || '',
+          }),
+          state: 'skipped',
+        })
       }
     }
     out.sort((a, b) => a.due_date.localeCompare(b.due_date))
@@ -252,6 +273,28 @@ router.post('/:id/issue', async (req, res, next) => {
  * 청구서를 건너뛰고 '지급 대기' 거래를 바로 만들어 미지급금 추적에서 빠졌고,
  * 등록일 하한(setup_date)을 안 걸어서 소급 방지도 적용되지 않았다. 호출자도 없었다.
  * 대체: POST /issue-missed (청구서로 만들고, 등록일 이후 회차만). */
+
+/* ── 회차 건너뛰기 (매입) ── 매출과 같은 규칙. 배경은 lib/backfill.js 참고. */
+router.post('/:id/skip', async (req, res, next) => {
+  try {
+    const due = String(req.body.due_date || '')
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return res.status(400).json({ error: '건너뛸 회차 날짜가 필요해요' })
+    const [[r]] = await req.db.execute('SELECT id FROM recurring_expenses WHERE id = ?', [req.params.id])
+    if (!r) return res.status(404).json({ error: '정기지출을 찾을 수 없어요' })
+    const inv = await issuedInvoiceAt(req.db, req.params.id, due)
+    if (inv) return res.status(409).json({ error: `이 회차는 이미 ${inv.invoice_no}로 등록됐어요. 청구서를 삭제해주세요.` })
+    await addSkip(req.db, 'expense', req.params.id, due, req.body.reason)
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
+router.delete('/:id/skip/:due', async (req, res, next) => {
+  try {
+    const n = await removeSkip(req.db, 'expense', req.params.id, req.params.due)
+    if (!n) return res.status(404).json({ error: '건너뛴 기록을 찾을 수 없어요' })
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
 
 /* ── 소급 등록 마법사 (매입) ──────────────────────────────────────
  * 매출(recurring-invoices.js)과 같은 규칙. 배경은 lib/backfill.js 참고.

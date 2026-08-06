@@ -6,7 +6,7 @@ const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError, amountError } = require('../lib/ledger')
 const { taxTypeOfMode, recurFromSupply, recurVat } = require('../lib/vat')
 const { closedPeriodError } = require('../lib/closing')
-const { backfillCycles, tooManyError } = require('../lib/backfill')
+const { backfillCycles, tooManyError, addSkip, removeSkip, issuedInvoiceAt } = require('../lib/backfill')
 const { settleAcctCode } = require('../lib/acctCode')
 
 const router = Router()
@@ -107,9 +107,18 @@ router.get('/pending', async (req, res, next) => {
       LEFT JOIN contracts c ON r.contract_id = c.id
       WHERE r.active = 1`)
     const today = kstToday()
+    // 건너뛴 회차는 계산에서 빼고, 목록 맨 아래에 따로 보여준다(되돌릴 수 있어야 하므로)
+    const [skipRows] = await req.db.execute(
+      "SELECT recurring_id, due_date, reason FROM recurring_skips WHERE kind = 'invoice'")
+    const skipBy = new Map()
+    for (const s of skipRows) {
+      if (!skipBy.has(s.recurring_id)) skipBy.set(s.recurring_id, [])
+      skipBy.get(s.recurring_id).push(s)
+    }
     const out = []
     for (const r of recs) {
       r.setup_date = kstDate(Number(r.created_epoch) * 1000) // 등록일(KST) — 소급 하한
+      r.skips = (skipBy.get(r.id) || []).map(s => String(s.due_date).slice(0, 10))
       // 다가오는 회차(LOOKAHEAD_DAYS)까지 미리 노출 — 경리가 대금청구서를 미리 발행할 수 있게.
       for (const due of dueDatesToGenerate(r, today, { horizonDays: LOOKAHEAD_DAYS })) {
         const supply = Number(r.supply_amount)
@@ -123,6 +132,21 @@ router.get('/pending', async (req, res, next) => {
           // 계약 이름이 없으면 항목으로 대신 표시(계약 무관 정기청구)
           contract_name: r.contract_name || r.item || '',
         }))
+      }
+      /* 건너뛴 회차도 실어 보낸다(state='skipped'). 감추기만 하면 되돌릴 방법이 없어진다 —
+         "왜 이 달만 없지"를 화면에서 바로 확인하고 되살릴 수 있어야 한다. */
+      for (const s of (skipBy.get(r.id) || [])) {
+        const due = String(s.due_date).slice(0, 10)
+        const supply = Number(r.supply_amount)
+        out.push({
+          ...pendingCycle(r, due, today, {
+            source: 'recurring', type: '정기청구', item: r.item || '',
+            amount: supply, vat: recurFromSupply(supply, effVatMode(r)).vat,
+            contract_name: r.contract_name || r.item || '',
+            skip_reason: s.reason || '',
+          }),
+          state: 'skipped',
+        })
       }
     }
     out.sort((a, b) => a.due_date.localeCompare(b.due_date))
@@ -279,6 +303,31 @@ router.post('/issue-missed', async (req, res, next) => {
 })
 
 // 반복일 계산·날짜 가산은 ../lib/recurrence(dueDatesToGenerate·addDays)로 공용화.
+
+/* ── 회차 건너뛰기 ────────────────────────────────────────────────
+ * "이 달은 청구 안 함"을 발행 대기에서 바로 처리한다. 배경은 lib/backfill.js 참고. */
+router.post('/:id/skip', async (req, res, next) => {
+  try {
+    const due = String(req.body.due_date || '')
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return res.status(400).json({ error: '건너뛸 회차 날짜가 필요해요' })
+    const [[r]] = await req.db.execute('SELECT id FROM recurring_invoices WHERE id = ?', [req.params.id])
+    if (!r) return res.status(404).json({ error: '정기청구를 찾을 수 없어요' })
+    /* 이미 청구서가 나갔으면 건너뛰기가 아니다 — 숨기기만 하면 청구서는 그대로 남아
+       미수금에 잡힌 채 목록에서만 사라진다. 삭제로 안내한다. */
+    const inv = await issuedInvoiceAt(req.db, req.params.id, due)
+    if (inv) return res.status(409).json({ error: `이 회차는 이미 ${inv.invoice_no}로 발행됐어요. 청구서를 삭제해주세요.` })
+    await addSkip(req.db, 'invoice', req.params.id, due, req.body.reason)
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
+router.delete('/:id/skip/:due', async (req, res, next) => {
+  try {
+    const n = await removeSkip(req.db, 'invoice', req.params.id, req.params.due)
+    if (!n) return res.status(404).json({ error: '건너뛴 기록을 찾을 수 없어요' })
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
 
 /* ── 소급 등록 마법사 ─────────────────────────────────────────────
  * 등록일 하한을 없애지 않고, 사용자가 연 기간만 만든다. 자세한 배경은 lib/backfill.js 참고.

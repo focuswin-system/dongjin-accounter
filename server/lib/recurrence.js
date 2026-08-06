@@ -68,6 +68,10 @@ function dueDatesToGenerate(rec, today = new Date(), opts = {}) {
    * 발행했으면 앵커일이 어디로 옮겨가든 그 회차는 끝난 것이다. */
   const genFloorMonth = String(rec.last_generated || '').slice(0, 7)   // 'YYYY-MM'
   const setupFloor = rec.setup_date || ''   // 등록일 이전 회차는 소급 금지(비면 제약 없음)
+  /* 사용자가 '이번 달은 건너뛴다'고 표시한 회차(recurring_skips).
+     회차는 저장된 행이 아니라 계산값이라 지울 수가 없어서, 건너뛴 사실을 따로 남기고 여기서 뺀다.
+     last_generated 를 밀어 건너뛰는 방법도 있지만 그러면 **그 앞 회차까지 통째로 사라진다.** */
+  const skips = rec.skips instanceof Set ? rec.skips : new Set(rec.skips || [])
   const out = []
   for (let i = 0; i < 1200; i++) { // 안전 상한(월간이면 100년치)
     const abs = (sm - 1) + i * step // 절대 월(0-indexed)
@@ -79,6 +83,7 @@ function dueDatesToGenerate(rec, today = new Date(), opts = {}) {
     if (rec.end_date && ds > rec.end_date) break
     if (ds < anchor) continue
     if (setupFloor && ds < setupFloor) continue // 설정 시점 이전 회차 건너뜀
+    if (skips.has(ds)) continue                 // 사용자가 건너뛴 회차
     if (!genFloorMonth || ds.slice(0, 7) > genFloorMonth) out.push(ds)
   }
   return out
