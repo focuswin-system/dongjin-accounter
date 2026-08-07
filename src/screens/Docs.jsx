@@ -1240,16 +1240,21 @@ const PeriodFilter = ({ value, onChange }) => {
       <span className="text-muted fw-600">~</span>
       <input type="date" className="input num" style={{ width: 150 }} value={r.to} min={r.from || undefined}
         onChange={e => onChange({ ...r, to: e.target.value })}/>
-      {REPORT_PRESETS.map(p => {
-        const pr = periodToRange(p.id)
-        const on = r.from === pr.from && r.to === pr.to
-        return (
-          <button key={p.id} className={`btn ghost sm${on ? ' active' : ''}`} aria-pressed={on}
-            onClick={() => onChange(pr)}>{p.label}</button>
-        )
-      })}
-      <button className={`btn ghost sm${!r.from && !r.to ? ' active' : ''}`} aria-pressed={!r.from && !r.to}
-        onClick={() => onChange({ from: '', to: '' })}>전체</button>
+      {/* .tbar-presets 로 감싼다 — 고른 기간의 표시(.active) 스타일이 이 클래스 안에만 있어서,
+          밖에 두면 클래스는 붙는데 아무 변화가 없다. 어느 기간을 보고 있는지 알 수 없었다.
+          거래내역·청구서 툴바와 같은 부품을 쓰게 되니 표현도 저절로 같아진다. */}
+      <div className="tbar-presets row gap-6" style={{ flexWrap: 'wrap' }}>
+        {REPORT_PRESETS.map(p => {
+          const pr = periodToRange(p.id)
+          const on = r.from === pr.from && r.to === pr.to
+          return (
+            <button key={p.id} className={`btn ghost sm${on ? ' active' : ''}`} aria-pressed={on}
+              onClick={() => onChange(pr)}>{p.label}</button>
+          )
+        })}
+        <button className={`btn ghost sm${!r.from && !r.to ? ' active' : ''}`} aria-pressed={!r.from && !r.to}
+          onClick={() => onChange({ from: '', to: '' })}>전체</button>
+      </div>
     </div>
   )
 }

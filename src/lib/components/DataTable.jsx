@@ -65,17 +65,21 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
 
   const alignClass = (a) => (a === 'right' ? 'num-right' : a === 'center' ? 'text-center' : '')
 
+  /* 행 키는 **정렬된 목록 기준으로 한 번만** 매긴다.
+     rowKey 도 row.id 도 없을 때의 대체값이 배열 인덱스라서, 걸러낸 배열(selectable)에서 다시
+     매기면 같은 행이 다른 키를 갖는다 — 고른 것과 그려진 것이 어긋난다. */
   const keyOf = (row, i) => (rowKey ? rowKey(row) : (row.id ?? i))
+  const keyByRow = new Map(sorted.map((r, i) => [r, keyOf(r, i)]))
   const canSelect = (row) => !select?.isSelectable || select.isSelectable(row)
   const selectable = select ? sorted.filter(canSelect) : []
   const selectedSet = new Set(select?.ids || [])
   /* 머리 체크박스는 **지금 화면에 보이는 것 중 고를 수 있는 것**만 다룬다.
      필터를 걸어 놓고 전체 선택을 눌렀는데 안 보이는 행까지 선택되면, 그 다음 '일괄 삭제'가
      사용자가 보지 못한 것을 지운다. */
-  const allOn = selectable.length > 0 && selectable.every((r, i) => selectedSet.has(keyOf(r, i)))
-  const someOn = selectable.some((r, i) => selectedSet.has(keyOf(r, i)))
+  const allOn = selectable.length > 0 && selectable.every(r => selectedSet.has(keyByRow.get(r)))
+  const someOn = selectable.some(r => selectedSet.has(keyByRow.get(r)))
   const toggleAll = () => {
-    const visible = selectable.map((r, i) => keyOf(r, i))
+    const visible = selectable.map(r => keyByRow.get(r))
     select.onChange(allOn ? (select.ids || []).filter(id => !visible.includes(id))
                           : [...new Set([...(select.ids || []), ...visible])])
   }
@@ -119,7 +123,7 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
           {sorted.length === 0 ? (
             <tr><td colSpan={colCount} className="dt-empty">{empty}</td></tr>
           ) : sorted.map((row, i) => {
-            const key = keyOf(row, i)
+            const key = keyByRow.get(row) ?? keyOf(row, i)
             const expanded = renderExpanded ? renderExpanded(row, i) : null
             const on = selectedSet.has(key)
             const able = select ? canSelect(row) : false

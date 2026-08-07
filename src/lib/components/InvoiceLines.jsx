@@ -16,7 +16,7 @@ import { computeLineAmount, num, BASIS_LABEL } from '../lineAmount'
  * · 단가 기준(수량/중량)은 줄마다 다르다. 같은 청구서에 개당 파는 품목과 ㎏당 파는 자재가 섞인다.
  * · 기준정보 품목을 고르면 규격·단위·단가·중량을 채워 준다. 없으면 직접 입력해도 된다.
  */
-export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], readOnly = false }) => {
+export const InvoiceLines = ({ lines = [], onChange, itemMaster = [] }) => {
   const itemOptions = useMemo(() => itemMaster.map(it => ({
     value: it.id,
     label: it.name,
@@ -65,11 +65,9 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], readOnly =
     <div>
       <div className="row" style={{ alignItems: 'center', marginBottom: 8 }}>
         <label className="label" style={{ margin: 0 }}>품목 내역 <span className="text-muted2">(선택)</span></label>
-        {!readOnly && (
-          <button type="button" className="btn sm ml-auto" onClick={add}>
-            <Icon.Plus size={12}/> 품목 추가
-          </button>
-        )}
+        <button type="button" className="btn sm ml-auto" onClick={add}>
+          <Icon.Plus size={12}/> 품목 추가
+        </button>
       </div>
 
       {lines.length === 0 ? (
@@ -90,7 +88,7 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], readOnly =
                 <th style={{ width: 92 }}>단가 기준</th>
                 <th className="num-right" style={{ width: 110 }}>단가</th>
                 <th className="num-right" style={{ width: 120 }}>금액</th>
-                {!readOnly && <th style={{ width: 62 }}></th>}
+                <th style={{ width: 62 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -98,39 +96,43 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], readOnly =
                 <tr key={i}>
                   <td>
                     <Combobox value={l.item_id || ''} onChange={v => pickItem(i, v)} options={itemOptions}
-                      placeholder="품목 선택" disabled={readOnly}
+                      placeholder="기준정보에서 선택"
                       onAddNew={q => set(i, { item_id: '', name: q })} addNewLabel="직접 입력"/>
-                    {/* 기준정보에 없는 품목은 이름만 남긴다 — 고르지 않아도 명세서는 나와야 한다 */}
+                    {/* 기준정보에 없는 품목은 이름만 남긴다 — 고르지 않아도 명세서는 나와야 한다.
+                        두 칸이 나란히 서므로 아래쪽은 '또는'임이 문구에 드러나야 한다.
+                        안 그러면 어느 칸을 채워야 하는지가 매번 물음이 된다. */}
                     {!l.item_id && (
-                      <input className="input" style={{ marginTop: 4 }} value={l.name || ''} disabled={readOnly}
-                        placeholder="품목명" onChange={e => set(i, { name: e.target.value })}/>
+                      <input className="input" style={{ marginTop: 4 }} value={l.name || ''}
+                        placeholder="또는 품목명 직접 입력" onChange={e => set(i, { name: e.target.value })}/>
                     )}
                   </td>
-                  <td><input className="input" value={l.spec || ''} disabled={readOnly}
+                  <td><input className="input" value={l.spec || ''}
                     onChange={e => set(i, { spec: e.target.value })}/></td>
-                  <td><input className="input" value={l.unit || ''} disabled={readOnly}
-                    placeholder="EA" onChange={e => set(i, { unit: e.target.value })}/></td>
-                  <td><input className="input num" inputMode="decimal" value={l.qty ?? ''} disabled={readOnly}
+                  {/* placeholder 를 두지 않는다 — 칸이 좁아 '단위'가 '단우'로 잘리고,
+                      머리글이 이미 '단위'라 같은 말을 두 번 하는 셈이다 */}
+                  <td><input className="input" value={l.unit || ''}
+                    onChange={e => set(i, { unit: e.target.value })}/></td>
+                  <td><input className="input num" inputMode="decimal" value={l.qty ?? ''}
                     onChange={e => set(i, { qty: e.target.value })}/></td>
-                  <td><input className="input num" inputMode="decimal" value={l.weight ?? ''} disabled={readOnly}
+                  <td><input className="input num" inputMode="decimal" value={l.weight ?? ''}
                     onChange={e => set(i, { weight: e.target.value })}/></td>
                   <td>
                     {/* 짧은 enum 이라 칩. 무엇에 단가를 곱하는지가 금액의 근거다 */}
                     <div className="row gap-4">
                       {['qty', 'weight'].map(b => (
-                        <button key={b} type="button" disabled={readOnly}
+                        <button key={b} type="button"
                           className={`chip ${(l.price_basis || 'qty') === b ? 'active' : ''}`}
                           style={{ fontSize: 11, padding: '2px 8px' }}
                           onClick={() => set(i, { price_basis: b })}>{BASIS_LABEL[b]}</button>
                       ))}
                     </div>
                   </td>
-                  <td><MoneyInput value={String(l.unit_price ?? '')} disabled={readOnly}
+                  <td><MoneyInput value={String(l.unit_price ?? '')}
                     onChange={(raw, v) => set(i, { unit_price: v })}/></td>
                   <td>
-                    <MoneyInput value={String(l.amount ?? '')} disabled={readOnly}
+                    <MoneyInput value={String(l.amount ?? '')}
                       onChange={(raw, v) => set(i, { amount: v, amountTouched: true })}/>
-                    {l.amountTouched && !readOnly && (
+                    {l.amountTouched && (
                       <button type="button" className="text-xs text-muted2"
                         style={{ border: 0, background: 'none', cursor: 'pointer', padding: '2px 0' }}
                         title="수량·단가로 다시 계산"
@@ -139,17 +141,16 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], readOnly =
                       </button>
                     )}
                   </td>
-                  {!readOnly && (
-                    <td>
-                      <div className="row gap-4">
-                        <button type="button" className="btn ghost sm" title="이 줄 복사"
-                          style={{ padding: '2px 6px' }} onClick={() => dup(i)}><Icon.Plus size={11}/></button>
-                        <button type="button" className="btn ghost sm" title="이 줄 삭제"
-                          style={{ padding: '2px 6px', color: 'var(--neg-ink)' }} onClick={() => remove(i)}>
-                          <Icon.Close size={11}/></button>
-                      </div>
-                    </td>
-                  )}
+                  <td>
+                    <div className="row gap-4">
+                      {/* 복사에 Plus 를 쓰면 위쪽 '품목 추가'와 같은 아이콘이라 '새 줄'로 읽힌다 */}
+                      <button type="button" className="btn ghost sm" title="이 줄 복사"
+                        style={{ padding: '2px 6px' }} onClick={() => dup(i)}><Icon.Copy size={11}/></button>
+                      <button type="button" className="btn ghost sm" title="이 줄 삭제"
+                        style={{ padding: '2px 6px', color: 'var(--neg-ink)' }} onClick={() => remove(i)}>
+                        <Icon.Close size={11}/></button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -167,7 +168,9 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], readOnly =
   )
 }
 
+/* 새 줄. 단위는 'EA' 로 **채워서** 시작한다 — 예전엔 placeholder 로만 'EA' 를 띄웠는데,
+   회색 글씨가 값처럼 읽혀 그대로 저장하면 단위가 빈 명세서가 나왔다. 다르면 고치면 된다. */
 export const blankLine = () => ({
-  item_id: '', name: '', spec: '', unit: '', qty: '', weight: '',
+  item_id: '', name: '', spec: '', unit: 'EA', qty: '', weight: '',
   price_basis: 'qty', unit_price: '', amount: '',
 })

@@ -283,8 +283,11 @@ export const REF_CONFIGS = {
          ㎏당 단가로 파는 품목은 금액 = 중량 × 단가라, 무엇에 단가를 곱할지 함께 정한다.
          여기 값은 청구서 품목을 고를 때 출발점으로 채워지고, 청구서에서 줄마다 고칠 수 있다. */
       { key: 'weight', label: '중량', kind: 'dec', w: 90, hint: '단위당 중량 (소수 입력 가능)' },
+      /* 표에는 기본값('수량')을 안 적는다 — 품목 166건이 전부 '수량'이라 그 글자가 벽처럼
+         늘어서고, 정작 눈에 띄어야 할 '중량'이 그 안에 묻힌다(정상에는 표식을 붙이지 않는다). */
       { key: 'price_basis', label: '단가 기준', kind: 'select', options: [['qty', '수량'], ['weight', '중량']],
-        w: 92, required: true, def: 'qty', hint: '금액을 무엇에 곱해 낼지 — 기본은 수량 × 단가' },
+        w: 92, required: true, def: 'qty', mutedDefault: 'qty',
+        hint: '금액을 무엇에 곱해 낼지 — 기본은 수량 × 단가' },
       { key: 'tax_type', label: '과세', kind: 'select', options: TAX_TYPES, w: 76,
         hint: '비워두면 비목의 부가세 설정을 따라갑니다' },
     ],
@@ -464,6 +467,8 @@ export const RefMasterPanel = ({ cfg, page = false, embedded = false }) => {
     }
     const val = r[fd.key]
     if (val == null || val === '') return '—'
+    // 기본값인 행은 표에 적지 않는다 — 모든 줄에 같은 글자가 서면 다른 값이 안 보인다
+    if (fd.mutedDefault != null && val === fd.mutedDefault) return '—'
     // 값/라벨 쌍 옵션은 저장값(qty)이 아니라 사람이 읽는 이름(수량)을 보여준다
     if (fd.kind === 'select' && Array.isArray(fd.options?.[0])) {
       const hit = fd.options.find(([v]) => v === val)

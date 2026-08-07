@@ -632,7 +632,7 @@ router.delete('/:id', async (req, res, next) => {
     if (mcnt > 0) { await rollbackQuietly(conn); return res.status(409).json({ error: '입금·지급 내역이 있는 청구서는 삭제할 수 없어요. 먼저 입금 매칭을 취소하세요.' }) }
     // 정기청구에서 나온 회차면 last_generated 를 되돌려 '발행 예정'에 다시 뜨게 한다.
     // 안 하면 그 달치가 자동 생성에도 예정 목록에도 안 나와 매출이 조용히 미청구로 사라진다.
-    const [[inv]] = await conn.execute('SELECT recurring_id, issued_at FROM invoices WHERE id = ?', [id])
+    const [[inv]] = await conn.execute('SELECT recurring_id, issued_at, kind FROM invoices WHERE id = ?', [id])
     if (!inv) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     // 마감된 달의 청구서를 지우면 이미 신고한 부가세 자료가 줄어든다 → 막는다
     { const ce = await closedPeriodError(conn, inv.issued_at); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
@@ -642,8 +642,14 @@ router.delete('/:id', async (req, res, next) => {
     // 연결된 청구 일정은 '예정'으로 되돌려 발행 예정에 다시 노출(고아 방지)
     await conn.execute("UPDATE milestones SET status = '예정', invoice_id = NULL WHERE invoice_id = ?", [id])
     await conn.execute('DELETE FROM invoices WHERE id = ?', [id])
+    /* 규칙 테이블은 청구서 종류를 따라간다. 여태 매출이든 매입이든 recurring_invoices 만 봤는데,
+       정기지출에서 나온 매입 청구서의 recurring_id 는 recurring_expenses 의 것이다 —
+       그 표에서 찾으니 없는 규칙이라 조용히 아무것도 안 되돌리고, 지운 그 달치가
+       '놓친 회차'에도 자동 생성에도 영영 안 떴다(일괄 삭제는 처음부터 종류를 봤다). */
     const rec = inv?.recurring_id
-      ? await restoreLastGenerated(conn, 'recurring_invoices', inv.recurring_id, inv.issued_at)
+      ? await restoreLastGenerated(conn,
+          inv.kind === 'issued' ? 'recurring_invoices' : 'recurring_expenses',
+          inv.recurring_id, inv.issued_at)
       : { restored: false, note: null }
     await conn.commit()
     res.json({ ok: true, recurringNote: rec.note })
@@ -850,6 +856,12 @@ router.post('/bulk/delete', async (req, res, next) => {
     await conn.beginTransaction()
     const ph = ids.map(() => '?').join(',')
     const [invs] = await conn.execute(`SELECT * FROM invoices WHERE id IN (${ph}) FOR UPDATE`, ids)
+    /* 고른 것 중 없는 게 섞였으면 멈춘다. 그냥 진행하면 "8건 삭제했어요"라고 해놓고
+       실제로는 6건만 지워진다 — 목록이 낡았다는 뜻이므로 새로고침을 시켜야 한다. */
+    if (invs.length !== ids.length) {
+      await rollbackQuietly(conn)
+      return res.status(404).json({ error: '없는 청구서가 섞여 있어요. 목록을 새로고침해주세요.' })
+    }
 
     const blocked = []
     for (const inv of invs) {

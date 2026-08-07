@@ -285,6 +285,8 @@ export const Icon = {
   Card:    (p) => <I {...p} d={<><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/><path d="M7 15h3"/></>} />,
   Pencil:  (p) => <I {...p} d={<><path d="M14.5 4.5l5 5L8 21H3v-5z"/><path d="M12.5 6.5l5 5"/></>} />,
   Trash:   (p) => <I {...p} d={<><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></>} />,
+  // 줄 복사 — Plus 로 대신하면 '새로 추가'로 읽힌다(청구서 품목표에서 실제로 그랬다)
+  Copy:    (p) => <I {...p} d={<><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></>} />,
   Trend:   (p) => <I {...p} d={<><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></>} />,
   TrendDn: (p) => <I {...p} d={<><path d="M3 7l6 6 4-4 8 8"/><path d="M14 17h7v-7"/></>} />,
   Menu:    (p) => <I {...p} d={<><path d="M3 6h18M3 12h18M3 18h18"/></>} />,

@@ -7,6 +7,8 @@ import { TableToolbar } from '../lib/components/TableToolbar'
 import { ImportWizard } from '../lib/components/ImportWizard'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { InvoiceLines } from '../lib/components/InvoiceLines'
+import { computeLineAmount } from '../lib/lineAmount'
+import { accountLabels, accountIdByLabel } from '../lib/accountLabel'
 import { taxInvoiceImportAdapter } from '../lib/taxInvoiceImport'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
@@ -482,8 +484,13 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   useEffect(() => {
     if (!open) return
     setDocs([])   // 폼에서의 첨부는 이번에 새로 올리는 것만. 기존 첨부는 청구서 상세에서 관리.
-    // 수정이면 저장된 품목을 그대로 불러온다. 신규면 빈 표(사용자가 '품목 추가'로 시작).
-    setLines(editInvoice?.lines?.length ? editInvoice.lines.map(l => ({ ...l })) : [])
+    /* 수정이면 저장된 품목을 그대로 불러온다. 신규면 빈 표(사용자가 '품목 추가'로 시작).
+       ⚠ amountTouched(사람이 금액을 고쳤나)는 화면 상태라 서버에 없다. 그냥 불러오면
+       할인·끝수 조정해 저장한 줄이 '안 고친 줄'로 되살아나, 수량 한 번 만졌을 때
+       자동 계산이 그 금액을 덮어쓴다. 저장된 금액이 계산값과 다르면 사람이 고친 것으로 본다. */
+    setLines(editInvoice?.lines?.length
+      ? editInvoice.lines.map(l => ({ ...l, amountTouched: Number(l.amount) !== computeLineAmount(l) }))
+      : [])
     if (editInvoice) {
       setForm({
         kind: editInvoice.kind,
@@ -662,11 +669,13 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
           <div>
             <label className="label">{form.kind === "issued" ? "수금 계좌" : "지급 계좌"}</label>
             <div className="row gap-6" style={{ flexWrap: "wrap" }}>
-              {accounts.map(acc => (
+              {/* 이름이 겹치는 계좌에만 은행·끝자리가 붙는다 — 같은 이름의 공용 카드가
+                  두 장 있으면 칩만 보고는 어느 쪽인지 고를 수 없다(lib/accountLabel.js) */}
+              {accountLabels(accounts).map(acc => (
                 <button key={acc.id} type="button"
                   className={`chip ${form.accountId === acc.id ? "active" : ""}`}
                   onClick={() => f("accountId", acc.id)}>
-                  <Icon.Bank size={12}/>{acc.name}
+                  <Icon.Bank size={12}/>{acc.label}
                 </button>
               ))}
             </div>
@@ -927,8 +936,9 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     })
     if (!ok) return
     /* FilterSelect 는 이름 목록을 다루므로 id 로 바꿔 보낸다 —
-       이름을 account_id 자리에 넣으면 서버가 없는 계좌로 보고 잔액에 반영되지 않는다. */
-    const acctId = accounts.find(a => a.name === bulkAccount)?.id || null
+       이름을 account_id 자리에 넣으면 서버가 없는 계좌로 보고 잔액에 반영되지 않는다.
+       이름이 겹치는 계좌가 실제로 있어서(공용 카드 2장) 이름 대신 label 로 되찾는다. */
+    const acctId = accountIdByLabel(accounts, bulkAccount)
     const res = await api.bulkSettleInvoices(checkedIds, { date: bulkDate, account_id: acctId })
     if (!res.ok) return toast.push(res.error || '처리에 실패했어요', { tone: 'warn' })
     toast.push(`${res.count}건 · ${fmtNum(res.total)}원을 처리했어요`)
@@ -955,14 +965,18 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const vendorSubtotals = useMemo(() => {
     const m = new Map()
     for (const inv of filtered) {
+      const remain = Number(inv.remainAmount) || 0
+      if (remain <= 0) continue          // 정산 끝난 건은 셈에서 뺀다 — 건수도 금액도 남은 것만
       const k = inv.vendor || '(거래처 미지정)'
-      const cur = m.get(k) || { vendor: k, count: 0, total: 0, remain: 0 }
+      const cur = m.get(k) || { vendor: k, count: 0, remain: 0 }
       cur.count += 1
-      cur.total += Number(inv.totalAmount) || 0
-      cur.remain += Number(inv.remainAmount) || 0
+      cur.remain += remain
       m.set(k, cur)
     }
-    return [...m.values()].sort((a, b) => b.remain - a.remain || b.total - a.total)
+    /* 남은 금액이 0인 거래처는 뺀다. 여태 `remain || total` 로 적어서, 다 받은(다 낸)
+       거래처가 '거래처별 미수금' 자리에 청구 총액으로 섰다 — 이름표는 미수금인데 숫자는
+       이미 정산된 돈이라, 그 칩을 믿고 독촉하면 없는 채권을 쫓는 셈이 된다. */
+    return [...m.values()].filter(v => v.remain > 0).sort((a, b) => b.remain - a.remain)
   }, [filtered])
   const pendingTotal = pending.reduce((s, p) => s + p.amount + (p.vat != null ? p.vat : Math.round(p.amount * 0.1)), 0)
 
@@ -1058,7 +1072,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       />
 
       {/* 요약 카드 — 회수 모드는 미수/미지급 2칸(발행 예정 없음), 발행 모드는 3칸 */}
-      <div className="grid" style={{ gridTemplateColumns: `repeat(${collect ? 2 : 3}, 1fr)`, gap: 16, marginBottom: 24 }}>
+      <div className="grid grid-3-to-1" style={{ gridTemplateColumns: `repeat(${collect ? 2 : 3}, 1fr)`, gap: 16, marginBottom: 24 }}>
         {isIssued ? (
           <>
             {!collect && <SummaryCard label="발행 예정(대기)" amount={pendingTotal} count={pending.length} accent="brand"
@@ -1128,7 +1142,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           <div className="row" style={{ marginBottom: 8 }}>
             <span className="text-sm fw-700">거래처별 {isIssued ? "미수금" : "미지급금"}</span>
             <span className="text-xs text-muted2" style={{ marginLeft: 8 }}>
-              {filtered.length}건 · {vendorSubtotals.length}개 거래처
+              {vendorSubtotals.reduce((s, v) => s + v.count, 0)}건 · {vendorSubtotals.length}개 거래처
             </span>
           </div>
           <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
@@ -1136,7 +1150,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
               <button key={v.vendor} className="btn sm" title="이 거래처만 보기"
                 onClick={() => setVendorFilter(v.vendor)}>
                 {v.vendor}
-                <b className="num" style={{ marginLeft: 6 }}>{fmtNum(v.remain || v.total)}</b>
+                <b className="num" style={{ marginLeft: 6 }}>{fmtNum(v.remain)}</b>
                 <span className="text-muted2" style={{ marginLeft: 4 }}>({v.count})</span>
               </button>
             ))}
@@ -1171,7 +1185,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
                     {/* 계좌를 안 고르면 청구서에 적힌 계좌를 쓴다. 그것도 없으면 서버가 막는다 —
                         계좌 없는 정산은 어느 계좌 잔액에도 안 잡혀 조용히 새기 때문이다. */}
                     <FilterSelect value={bulkAccount || null} onChange={v => setBulkAccount(v || '')}
-                      options={accounts.map(a => a.name)} placeholder="청구서 계좌 사용"/>
+                      options={accountLabels(accounts).map(a => a.label)} placeholder="청구서 계좌 사용"/>
                     <button className="btn primary" onClick={doBulkSettle}>
                       <Icon.Check size={14}/> {isIssued ? '입금' : '지급'} 처리
                     </button>
