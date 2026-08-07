@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, Popover, Loading } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, Popover, Loading, periodToRange } from '../lib/ui'
 // SAMPLE placeholder — Docs 화면은 실 API 연동 전까지 빈 데이터로 동작
 const SAMPLE = {
   docs: [], evidences: [], evidenceMissing: [], excelPreview: [],
@@ -1216,19 +1216,66 @@ const useLedger = () => {
   return data
 }
 
-const PeriodFilter = ({ value, onChange, months = [] }) => (
-  <div className="row gap-8" style={{ marginBottom: 20 }}>
-    <span className="text-sm text-muted fw-600" style={{ lineHeight: "28px" }}>기간</span>
-    {["전체", ...months].map(m => (
-      <button key={m} className={`chip${value === m ? " active" : ""}`} onClick={() => onChange(m)}>
-        {m === "전체" ? "전체" : `${parseInt(m.slice(5))}월`}
-      </button>
-    ))}
-  </div>
+/* 보고서 기간 선택.
+ *
+ * 예전엔 **데이터에 존재하는 달 칩**만 늘어놓았다("전체 · 8월 · 7월"). 그래서
+ *   · 한 달치만 있는 회사는 사실상 '전체'뿐이었고("기간이 다 전체밖에 없다"는 고객 지적)
+ *   · 해가 넘어가면 '1월'이 작년인지 올해인지 알 수 없었고
+ *   · 분기·반기처럼 실제로 필요한 구간을 고를 수 없었다.
+ * 거래내역·청구서가 쓰는 것과 같은 방식(시작~끝 날짜 + 프리셋)으로 바꾼다.
+ * 화면마다 다른 기간 필터를 배우게 하지 않는다.
+ */
+const REPORT_PRESETS = [
+  { id: 'month', label: '이번 달' }, { id: 'last', label: '지난 달' },
+  { id: 'quarter', label: '이번 분기' }, { id: 'year', label: '올해' },
+]
+
+const PeriodFilter = ({ value, onChange }) => {
+  const r = value || { from: '', to: '' }
+  return (
+    <div className="row gap-8 no-print" style={{ marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+      <span className="text-sm text-muted fw-600">기간</span>
+      <input type="date" className="input num" style={{ width: 150 }} value={r.from} max={r.to || undefined}
+        onChange={e => onChange({ ...r, from: e.target.value })}/>
+      <span className="text-muted fw-600">~</span>
+      <input type="date" className="input num" style={{ width: 150 }} value={r.to} min={r.from || undefined}
+        onChange={e => onChange({ ...r, to: e.target.value })}/>
+      {REPORT_PRESETS.map(p => {
+        const pr = periodToRange(p.id)
+        const on = r.from === pr.from && r.to === pr.to
+        return (
+          <button key={p.id} className={`btn ghost sm${on ? ' active' : ''}`} aria-pressed={on}
+            onClick={() => onChange(pr)}>{p.label}</button>
+        )
+      })}
+      <button className={`btn ghost sm${!r.from && !r.to ? ' active' : ''}`} aria-pressed={!r.from && !r.to}
+        onClick={() => onChange({ from: '', to: '' })}>전체</button>
+    </div>
+  )
+}
+
+/* 인쇄·엑셀에는 "언제 기준인지"가 남아야 한다. 컨트롤은 no-print 라 안 찍히므로
+   기간 문구를 따로 둔다 — 기간이 안 적힌 보고서는 나중에 아무 근거가 되지 못한다. */
+const PeriodNote = ({ period }) => (
+  <div className="text-sm text-muted" style={{ marginBottom: 12 }}>기간: {periodLabelOf(period)}</div>
 )
 
-const filterByPeriod = (rows, period, dateKey = "date") =>
-  period === "전체" ? rows : rows.filter(r => r[dateKey]?.startsWith(period))
+/** 기간(범위)으로 거른다. 범위가 비면 전체. 날짜가 없는 행은 기간을 걸었을 때 제외한다. */
+const filterByPeriod = (rows, period, dateKey = "date") => {
+  const { from, to } = period || {}
+  if (!from && !to) return rows
+  return (rows || []).filter(r => {
+    const d = r?.[dateKey]
+    if (!d) return false
+    if (from && d < from) return false
+    if (to && d > to) return false
+    return true
+  })
+}
+
+/** 화면에 적을 기간 문구 — 인쇄물에 "언제 기준인지"가 없으면 보고서로 못 쓴다. */
+const periodLabelOf = (p) => (!p?.from && !p?.to) ? '전체 기간'
+  : `${p.from || '처음'} ~ ${p.to || '오늘'}`
 
 // 완료 여부 판정 — 거래는 무공백 표준형('입금완료'/'지급완료'), 청구서는 공백형('입금 완료')을 쓴다.
 // 보고서가 두 표기를 섞어 받으므로 공백을 지우고 비교한다(안 그러면 전부 미완료로 분류된다).
@@ -1257,7 +1304,7 @@ const REPORTS = [
 
 // ── 1. 월별 입금/지출 현황 ───────────────────────────────────
 const ReportMonthly = ({ toast }) => {
-  const [period, setPeriod] = useState("전체")
+  const [period, setPeriod] = useState({ from: "", to: "" })
   const led = useLedger()
   if (!led) return <Loading label="거래내역을 불러오는 중…"/>
   /* 완료된 거래만 센다 — 거래내역 화면(Ledger.jsx)이 그렇게 세므로 맞춰야 한다.
@@ -1285,7 +1332,8 @@ const ReportMonthly = ({ toast }) => {
 
   return (
     <div>
-      <PeriodFilter value={period} onChange={setPeriod} months={led.months}/>
+      <PeriodFilter value={period} onChange={setPeriod}/>
+      <PeriodNote period={period}/>
       <KpiRow cols={3} style={{ marginBottom: 24 }}>
         <Kpi label="총 입금" value={totalIn} tone="pos"/>
         <Kpi label="총 지출" value={totalOut}/>
@@ -1473,7 +1521,7 @@ const ReportContract = ({ toast }) => {
 
 // ── 4. 비목별 지출 현황 ──────────────────────────────────────
 const ReportCategory = ({ toast }) => {
-  const [period, setPeriod] = useState("전체")
+  const [period, setPeriod] = useState({ from: "", to: "" })
   const led = useLedger()
   if (!led) return <Loading label="지출 내역을 불러오는 중…"/>
   // 완료된 지출만 — 거래내역 화면과 같은 기준(ReportMonthly 와 동일한 이유)
@@ -1491,7 +1539,8 @@ const ReportCategory = ({ toast }) => {
 
   return (
     <div>
-      <PeriodFilter value={period} onChange={setPeriod} months={led.months}/>
+      <PeriodFilter value={period} onChange={setPeriod}/>
+      <PeriodNote period={period}/>
       <KpiRow cols={3} style={{ marginBottom: 24 }}>
         <Kpi label="총 지출"  value={total}/>
         <Kpi label="비목 수"  value={`${rows.length}개`} unit=""/>
@@ -1525,7 +1574,7 @@ const ReportCategory = ({ toast }) => {
 
 // ── 5. 발주처별 거래 현황 ────────────────────────────────────
 const ReportVendor = ({ toast }) => {
-  const [period, setPeriod] = useState("전체")
+  const [period, setPeriod] = useState({ from: "", to: "" })
   const led = useLedger()
   if (!led) return <Loading label="거래내역을 불러오는 중…"/>
   const incomes = filterByPeriod(led.incomes, period)
@@ -1548,7 +1597,8 @@ const ReportVendor = ({ toast }) => {
 
   return (
     <div>
-      <PeriodFilter value={period} onChange={setPeriod} months={led.months}/>
+      <PeriodFilter value={period} onChange={setPeriod}/>
+      <PeriodNote period={period}/>
       <KpiRow cols={4} style={{ marginBottom: 24 }}>
         <Kpi label="발주처 수"    value={`${rows.length}개사`} unit=""/>
         <Kpi label="청구 합계"    value={grandTotal}/>
@@ -1646,7 +1696,7 @@ const ReportAR = ({ toast }) => {
 
 // ── 7. 외주가공비 분석 ───────────────────────────────────────
 const ReportSubcontract = ({ toast }) => {
-  const [period, setPeriod] = useState("전체")
+  const [period, setPeriod] = useState({ from: "", to: "" })
   const led = useLedger()
   if (!led) return <Loading label="외주가공비를 불러오는 중…"/>
   // expenses만 사용 — payables와 중복 집계 방지 (payables는 미지급 잔액 뷰)
@@ -1669,7 +1719,8 @@ const ReportSubcontract = ({ toast }) => {
 
   return (
     <div>
-      <PeriodFilter value={period} onChange={setPeriod} months={led.months}/>
+      <PeriodFilter value={period} onChange={setPeriod}/>
+      <PeriodNote period={period}/>
       <KpiRow cols={4} style={{ marginBottom: 24 }}>
         <Kpi label="협력사 수"      value={`${rows.length}개사`} unit=""/>
         <Kpi label="외주가공비 합계" value={total}/>

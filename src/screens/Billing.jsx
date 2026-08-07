@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
+import { TableToolbar } from '../lib/components/TableToolbar'
 import { ImportWizard } from '../lib/components/ImportWizard'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { InvoiceLines } from '../lib/components/InvoiceLines'
@@ -802,6 +803,11 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const [formOpen, setFormOpen] = useState(false)
   const [editInvoice, setEditInvoice] = useState(null)
   const [statusFilter, setStatusFilter] = useState(collect ? "미정산" : "전체")
+  /* 기간은 **비워서 시작한다**(전체). 거래내역은 '이번 달'로 시작하는데, 청구서는 성격이 다르다 —
+     미수금은 몇 달 전 것이 대부분이라 이번 달로 좁히면 정작 받을 돈이 안 보인다. */
+  const [range, setRange] = useState({ from: '', to: '' })
+  const [vendorFilter, setVendorFilter] = useState(null)
+  const [q, setQ] = useState('')
   const [paidTarget, setPaidTarget] = useState(null)   // 기입금/기지급 처리 대상(계좌·날짜 드로어)
   const [importing, setImporting] = useState(false)    // 홈택스 세금계산서 엑셀 업로드 화면
   const [ourBizNo, setOurBizNo] = useState('')         // 우리 회사 사업자번호 — 매출/매입 자동 판정용
@@ -855,9 +861,39 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     ? ["미정산", "전체", "입금 예정", "일부 입금", "기한 지남", "장기 미수", "입금 완료"]
     : ["미정산", "전체", "지급 대기", "지급 예정", "일부 지급", "기한 지남", "지급 완료"]
   // 필터도 표시 상태(effStatus) 기준 — 뱃지에 '기한 지남'으로 뜨는 건이 '기한 지남' 필터에도 잡히게.
-  const filtered = statusFilter === "미정산"
+  const byStatus = statusFilter === "미정산"
     ? kindRows.filter(inv => PENDING_STATUS.includes(effStatus(inv)))
     : kindRows.filter(inv => statusFilter === "전체" || effStatus(inv) === statusFilter)
+
+  /* 기간·거래처·검색 — 여태 상태 칩뿐이라 "이 거래처에 이번 달 얼마 줘야 하나"를 볼 수가 없었다.
+     거래내역(Ledger)엔 이미 같은 툴바가 있는데 청구서만 없어서, 같은 앱인데 화면마다 달랐다.
+     기준 날짜는 **발행일(issued_at)** 이다 — 지급 기한으로 거르면 기한 없는 청구서가 통째로
+     사라진다(기한은 선택 입력이다). */
+  const filtered = byStatus.filter(inv => {
+    if (range?.from && inv.issuedAt < range.from) return false
+    if (range?.to && inv.issuedAt > range.to) return false
+    if (vendorFilter && inv.vendor !== vendorFilter) return false
+    if (q) {
+      const hay = [inv.invoiceNo, inv.vendor, inv.contract, inv.memo].join(' ').toLowerCase()
+      if (!hay.includes(q.toLowerCase())) return false
+    }
+    return true
+  })
+
+  /* 거래처별 소계 — 필터를 걸고 나면 반드시 "그래서 이 거래처에 얼마"가 다음 질문이다.
+     한 거래처만 골랐을 때는 굳이 안 보여준다(표 아래 합계와 같은 말이 된다). */
+  const vendorSubtotals = useMemo(() => {
+    const m = new Map()
+    for (const inv of filtered) {
+      const k = inv.vendor || '(거래처 미지정)'
+      const cur = m.get(k) || { vendor: k, count: 0, total: 0, remain: 0 }
+      cur.count += 1
+      cur.total += Number(inv.totalAmount) || 0
+      cur.remain += Number(inv.remainAmount) || 0
+      m.set(k, cur)
+    }
+    return [...m.values()].sort((a, b) => b.remain - a.remain || b.total - a.total)
+  }, [filtered])
   const pendingTotal = pending.reduce((s, p) => s + p.amount + (p.vat != null ? p.vat : Math.round(p.amount * 0.1)), 0)
 
   // 예정 회차 1건을 청구서로 발행/등록. 출처(마일스톤/정기청구/정기지출)마다 API가 다르다.
@@ -998,6 +1034,50 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           </div>
         )}
       </div>
+
+      {/* 기간·거래처·검색 — 목록 탭에서만. '발행 예정'은 아직 청구서가 아니라 이 필터의 대상이 아니다.
+          거래내역과 같은 툴바를 쓴다(화면마다 다른 필터를 배우게 하지 않는다). */}
+      {(collect || view === "list") && (
+        <TableToolbar
+          date={{ from: range.from, to: range.to, onChange: setRange }}
+          search={{ value: q, onChange: setQ, placeholder: "청구번호·거래처·계약·메모 검색" }}
+          filters={[{ label: "거래처",
+            node: <FilterSelect value={vendorFilter} onChange={setVendorFilter}
+                    options={[...new Set(kindRows.map(i => i.vendor).filter(Boolean))].sort()}
+                    placeholder="전체"/> }]}
+          hasActiveFilter={!!vendorFilter}
+          onReset={() => { setVendorFilter(null); setRange({ from: '', to: '' }); setQ('') }}
+          right={<span className="text-xs text-muted2">발행일 기준</span>}
+        />
+      )}
+
+      {/* 거래처별 소계 — 필터를 걸면 "그래서 이 거래처에 얼마"가 다음 질문이다.
+          한 거래처만 골랐으면 표 아래 합계와 같은 말이라 안 보여준다. */}
+      {(collect || view === "list") && !vendorFilter && vendorSubtotals.length > 1 && (
+        <div className="card card-pad" style={{ marginBottom: 12 }}>
+          <div className="row" style={{ marginBottom: 8 }}>
+            <span className="text-sm fw-700">거래처별 {isIssued ? "미수금" : "미지급금"}</span>
+            <span className="text-xs text-muted2" style={{ marginLeft: 8 }}>
+              {filtered.length}건 · {vendorSubtotals.length}개 거래처
+            </span>
+          </div>
+          <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
+            {vendorSubtotals.slice(0, 12).map(v => (
+              <button key={v.vendor} className="btn sm" title="이 거래처만 보기"
+                onClick={() => setVendorFilter(v.vendor)}>
+                {v.vendor}
+                <b className="num" style={{ marginLeft: 6 }}>{fmtNum(v.remain || v.total)}</b>
+                <span className="text-muted2" style={{ marginLeft: 4 }}>({v.count})</span>
+              </button>
+            ))}
+            {vendorSubtotals.length > 12 && (
+              <span className="text-xs text-muted2" style={{ alignSelf: 'center' }}>
+                외 {vendorSubtotals.length - 12}개 — 검색으로 찾으세요
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {!collect && view === "pending"
         ? <PendingScheduleTable rows={pending} isIssued={isIssued}
