@@ -9,7 +9,7 @@ import { ResolutionDocument } from './Docs'
 
 // CSV 저장은 보고서 내보내기와 같은 것을 쓴다 → lib/export.js
 
-export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, openEdit, openExcel, refreshTrigger }) => {
+export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, openEdit, openExcel, openInvoice, refreshTrigger }) => {
   const toast = useToast();
   const { confirm } = useConfirm();
   const [filter, setFilter] = useState(initialFilter);
@@ -22,6 +22,13 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
   // 미수금/미지급금은 청구서 기준(회수는 입금·환불/지급·환입 화면에서). 여기선 요약만 청구서 기준으로 표시.
   const [recSummary, setRecSummary] = useState(null);
   const [paySummary, setPaySummary] = useState(null);
+  /* '예정 포함' — 고객 요청: "전체 거래내역에서 미납금과 미지급금은 왜 안 보이냐.
+     한 번에 나갈 돈·들어올 돈·거래내역을 볼 수 있어야 되는 거 아니냐."
+     맞는 요구다. 다만 **같은 합계에 섞으면 안 된다** — 이 화면의 입금·지출 합계는 실제로
+     오간 돈이고 계좌 잔액·손익과 맞아야 한다. 아직 안 받은 돈을 더하면 그 달 매출이 부풀고
+     잔액이 안 맞는다. 그래서 행은 함께 보여주되 **합계는 실제분만** 세고, 예정은 따로 적는다. */
+  const [showPlanned, setShowPlanned] = useState(false);
+  const [openInvoices, setOpenInvoices] = useState([]);   // 아직 안 받은/안 낸 청구서
 
   useEffect(() => { setFilter(initialFilter); }, [initialFilter]);
 
@@ -29,6 +36,7 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
     api.getTransactions().then(setTxns);
     api.getReceivablesSummary().then(setRecSummary);
     api.getPayablesSummary().then(setPaySummary);
+    api.getInvoices().then(list => setOpenInvoices((list || []).filter(inv => Number(inv.remainAmount) > 0)));
   };
   useEffect(() => { reload(); }, []);
   useEffect(() => { if (refreshTrigger > 0) reload(); }, [refreshTrigger]);
@@ -51,27 +59,70 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
     return rows;
   }, [txns, q, range, filterCat]);
 
-  // 표에 실제로 그려지는 행 = 범위 + 탭
-  const filtered = useMemo(() => {
-    if (filter === "income")  return scoped.filter(t => t.kind === "income");
-    if (filter === "expense") return scoped.filter(t => t.kind === "expense");
-    return scoped;
-  }, [scoped, filter]);
+  /* 미정산 청구서를 거래 모양으로 바꾼다. 실제 거래와 **같은 필터**를 타야 한다 —
+     기간을 좁혀놓고 예정만 전 기간이 뜨면 화면이 두 기간을 동시에 말하게 된다.
+     날짜는 지급 기한(없으면 발행일)이다. "언제 들어올·나갈 돈인가"가 이 화면의 축이므로. */
+  const plannedRows = useMemo(() => {
+    if (!showPlanned) return [];
+    let rows = openInvoices.map(inv => ({
+      id: `planned-${inv.id}`,
+      planned: true,
+      invoiceId: inv.id,
+      kind: inv.kind === 'issued' ? 'income' : 'expense',
+      sign: inv.kind === 'issued' ? +1 : -1,
+      date: inv.dueAt || inv.issuedAt,
+      vendor: inv.vendor || '(거래처 미지정)',
+      scope: inv.contract || inv.memo || inv.invoiceNo,
+      category: inv.kind === 'issued' ? '미수금' : '미지급금',
+      amount: Number(inv.remainAmount) || 0,
+      status: inv.status,
+    }));
+    if (range?.from) rows = rows.filter(t => t.date >= range.from);
+    if (range?.to)   rows = rows.filter(t => t.date <= range.to);
+    if (filterCat)   rows = rows.filter(t => t.category === filterCat);
+    if (q) {
+      const lc = q.toLowerCase();
+      rows = rows.filter(t => t.vendor.toLowerCase().includes(lc) || t.scope?.toLowerCase().includes(lc) || t.category?.toLowerCase().includes(lc));
+    }
+    return rows;
+  }, [showPlanned, openInvoices, range, filterCat, q]);
 
+  // 표에 실제로 그려지는 행 = 범위 + 탭 (+ 켰으면 예정분)
+  const filtered = useMemo(() => {
+    const byTab = (rows) =>
+      filter === "income"  ? rows.filter(t => t.kind === "income")
+      : filter === "expense" ? rows.filter(t => t.kind === "expense")
+      : rows;
+    const real = byTab(scoped);
+    if (!showPlanned) return real;
+    // 날짜 순으로 섞어 놓는다 — 예정만 아래로 몰면 "언제 무엇이" 흐름이 끊긴다
+    return [...real, ...byTab(plannedRows)].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  }, [scoped, filter, showPlanned, plannedRows]);
+
+  // 예정분 합계는 실제 합계와 **따로** 적는다(섞으면 잔액·손익이 틀어진다)
+  const plannedIn  = plannedRows.filter(t => t.kind === 'income').reduce((a, t) => a + t.amount, 0);
+  const plannedOut = plannedRows.filter(t => t.kind === 'expense').reduce((a, t) => a + t.amount, 0);
+
+  /* 내보내기는 화면에 보이는 그대로 담는다. 다만 '예정'은 실제 입출금과 반드시 갈라져야 한다 —
+     한 열로 구분해 두지 않으면 받은 파일에서 합계를 내는 순간 통장과 안 맞는다. */
   const exportCsv = () => {
     if (filtered.length === 0) return toast.push("내보낼 거래가 없어요");
     downloadCsv(`거래내역_${localToday()}.csv`,
-      ["날짜", "구분", "거래처", "내용", "비목", "금액", "상태"],
-      filtered.map(t => [t.date, t.kind === "income" ? "입금" : "지출", t.vendor, t.scope, t.category, t.sign * t.amount, t.status]));
+      ["날짜", "실제/예정", "구분", "거래처", "내용", "비목", "금액", "상태"],
+      filtered.map(t => [t.date, t.planned ? "예정" : "실제", t.kind === "income" ? "입금" : "지출",
+        t.vendor, t.scope, t.category, t.sign * t.amount, t.status]));
   };
 
   const inSum  = scoped.filter(t => t.kind === "income"  && t.status === "입금완료").reduce((a, t) => a + t.amount, 0);
   const outSum = scoped.filter(t => t.kind === "expense" && t.status === "지급완료").reduce((a, t) => a + t.amount, 0);
 
+  /* 탭 숫자는 **그 탭을 눌렀을 때 표에 뜨는 줄 수**여야 한다.
+     '예정 포함'을 켜 놓고 탭이 15인데 표가 18줄이면, 어느 쪽이 틀렸나부터 의심하게 된다. */
+  const tabCount = (pred) => scoped.filter(pred).length + (showPlanned ? plannedRows.filter(pred).length : 0);
   const tabs = [
-    { id: "all",     label: "전체 거래",  count: scoped.length },
-    { id: "income",  label: "입금",       count: scoped.filter(t => t.kind === "income").length },
-    { id: "expense", label: "지출",       count: scoped.filter(t => t.kind === "expense").length },
+    { id: "all",     label: "전체 거래",  count: tabCount(() => true) },
+    { id: "income",  label: "입금",       count: tabCount(t => t.kind === "income") },
+    { id: "expense", label: "지출",       count: tabCount(t => t.kind === "expense") },
   ];
 
   const titleMap = { all: "거래내역", income: "거래내역 · 입금", expense: "거래내역 · 지출" };
@@ -123,17 +174,51 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
             filters={[{ label: "비목", node: <FilterSelect value={filterCat} onChange={setFilterCat} options={categories} placeholder="전체"/> }]}
             hasActiveFilter={!!filterCat}
             onReset={() => setFilterCat(null)}
+            right={
+              /* 아직 안 오간 돈을 이 표에 함께 띄운다. 켜져 있다는 걸 숫자로도 말해준다 —
+                 "왜 합계랑 표가 안 맞지"가 생기지 않도록. */
+              <label className="row gap-6 text-sm" style={{ cursor: 'pointer', alignItems: 'center' }}
+                title="미수금·미지급금을 함께 봅니다. 합계에는 더해지지 않아요.">
+                <input type="checkbox" checked={showPlanned} onChange={e => setShowPlanned(e.target.checked)}/>
+                예정 포함
+                {showPlanned && (
+                  <span className="text-xs text-muted2">
+                    (들어올 {fmtNum(plannedIn)} · 나갈 {fmtNum(plannedOut)})
+                  </span>
+                )}
+              </label>
+            }
           />
+
+          {showPlanned && (
+            <div className="text-xs text-muted2" style={{ padding: '8px 16px', borderBottom: '1px solid var(--line)' }}>
+              점선 행은 <b>아직 오가지 않은 돈</b>(미수금·미지급금)이에요. 위 <b>입금·지출 합계에는 들어가지 않습니다</b> —
+              그 합계는 실제로 통장을 오간 금액이라 계좌 잔액과 맞아야 하거든요. 행을 누르면 해당 청구서로 갑니다.
+            </div>
+          )}
 
           <DataTable
             rows={filtered}
-            onRowClick={setSel}
+            /* 예정 행은 거래가 아니라 청구서다 — 거래 상세를 열면 없는 거래를 보여주게 된다.
+               그 청구서 화면으로 보낸다(미수금=#ar / 미지급금=#ap, 해당 건이 열린 채로). */
+            onRowClick={t => {
+              if (!t.planned) return setSel(t)
+              openInvoice?.(t.kind, t.invoiceId)
+            }}
+            rowKey={t => t.id}
+            rowClass={t => t.planned ? 'row-planned' : ''}
             empty="조건에 맞는 거래내역이 없어요."
             columns={[
               { key: 'date', header: '날짜', width: 110, sortable: true,
                 render: t => <span className="num-cell text-muted text-sm">{t.date}</span> },
               { key: 'vendor', header: '거래처', sortable: true,
-                render: t => <span className="fw-700">{t.vendor}</span> },
+                render: t => (
+                  <span className="fw-700">
+                    {t.vendor}
+                    {/* 실제로 오간 돈과 섞여 보이면 안 된다 — 행마다 '예정'이라고 적는다 */}
+                    {t.planned && <span className="badge outline" style={{ marginLeft: 6, fontSize: 10 }}>예정</span>}
+                  </span>
+                ) },
               // 계약이 있으면 계약명, 없으면 적요(api.js scope) — 두 가지가 섞이므로 '내용'
               { key: 'scope', header: '내용',
                 render: t => <span className="text-muted text-sm">{t.scope}</span> },
@@ -146,12 +231,17 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
                 </span> },
               { key: 'status', header: '상태', width: 110,
                 render: t => <StatusBadge status={t.status}/> },
+              /* 예정 행에는 증빙·처리 버튼이 없다. 아직 일어나지 않은 일이라
+                 증빙이 '없음(경고)'으로 뜨면 거짓 경고가 되고, 처리 버튼은 대상이 없다. */
               { key: 'evid', header: '증빙', width: 70,
-                render: t => t.evid
+                render: t => t.planned ? <span className="text-muted2">—</span>
+                  : t.evid
                   ? <span className="badge pos" style={{ padding: "2px 8px" }}><Icon.Check size={11}/></span>
                   : <span className="badge neg" style={{ padding: "2px 8px" }}><Icon.Warn size={11}/></span> },
               { key: 'actions', header: '', width: 130,
-                render: t => <TxnActions txn={t} toast={toast} confirm={confirm} onAction={reload}/> },
+                render: t => t.planned
+                  ? <span className="text-xs text-muted2">청구서에서 처리</span>
+                  : <TxnActions txn={t} toast={toast} confirm={confirm} onAction={reload}/> },
             ]}
           />
 

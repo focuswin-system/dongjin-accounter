@@ -31,7 +31,7 @@ import { Icon } from '../ui'
  * 아닌 행**은 체크 자체가 안 돼야 한다. 눌러놓고 나중에 "3건 중 1건만 됐어요"라고
  * 말하는 것보다, 애초에 못 고르게 하고 이유를 붙이는 편이 낫다.
  */
-export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용이 없어요', footer, rowKey, renderExpanded, select }) => {
+export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용이 없어요', footer, rowKey, renderExpanded, select, rowClass }) => {
   const [sort, setSort] = useState(null)   // { key, dir: 'asc' | 'desc' } | null
 
   const sorted = useMemo(() => {
@@ -127,7 +127,7 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
               <Fragment key={key}>
                 <tr onClick={onRowClick ? () => onRowClick(row) : undefined}
                   style={onRowClick ? { cursor: 'pointer' } : undefined}
-                  className={on ? 'dt-selected' : undefined}>
+                  className={[on ? 'dt-selected' : '', rowClass ? rowClass(row) : ''].filter(Boolean).join(' ') || undefined}>
                   {select && (
                     /* 체크박스 칸에서는 행 클릭(상세 열기)이 일어나면 안 된다 —
                        고르려다 드로어가 열리면 선택이 아니라 방해가 된다. */

@@ -557,6 +557,11 @@ a { color: inherit; text-decoration: none; }
 .table tbody tr.dt-selected > td { background: var(--brand-soft); }
 .table tbody tr.dt-selected:hover > td { background: var(--brand-soft); }
 
+/* 예정 행 — 아직 오가지 않은 돈(거래내역의 미수금·미지급금).
+   실제 기록과 한 표에 섞이므로 눈으로도 갈려야 한다. 선을 덧붙이지 않고
+   원래 있던 아래 구분선을 점선으로 바꿔 쓴다. */
+.table tbody tr.row-planned > td { border-bottom-style: dashed; color: var(--muted); }
+
 /* TableToolbar(lib/components/TableToolbar.jsx) — 표 상단 날짜·검색·필터 바 */
 .tbar-bar {
   display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap;

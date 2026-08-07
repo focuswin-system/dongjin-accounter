@@ -472,7 +472,11 @@ function AppInner({ onLogout, user }) {
       const filter = route === "ledger_income" ? "income"
                    : route === "ledger_expense" ? "expense"
                    : "all";
-      return <LedgerScreen initialFilter={filter} refreshTrigger={txnVersion} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
+      /* 거래내역의 '예정' 행(미수금·미지급금)에서 해당 청구서로 보낸다.
+         해시에 ?invoiceId= 를 붙이면 안 된다 — 이 앱의 해시 라우터는 질의문자열을 모르고,
+         알려진 라우트가 아니라며 아무 데도 안 간다. 청구서 지정은 go(…, {invoiceId}) 소관. */
+      return <LedgerScreen initialFilter={filter} refreshTrigger={txnVersion} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}
+        openInvoice={(kind, invoiceId) => go(kind === "income" ? "ar" : "ap", { invoiceId })}/>;
     }
     if (PORTAL_CAT_BY_ID[route]) {
       // 포털 타일도 권한대로 걸러 그린다. 남는 게 없으면 들어갈 데가 없다는 뜻.
