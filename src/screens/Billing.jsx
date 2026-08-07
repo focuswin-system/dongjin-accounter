@@ -5,6 +5,7 @@ import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { ImportWizard } from '../lib/components/ImportWizard'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
+import { InvoiceLines } from '../lib/components/InvoiceLines'
 import { taxInvoiceImportAdapter } from '../lib/taxInvoiceImport'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
@@ -461,6 +462,9 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   const [vendors, setVendors] = useState([])
   const [accounts, setAccounts] = useState([])
   const [contracts, setContracts] = useState([])
+  // 거래명세서식 품목 내역(선택) — 있으면 합계가 공급가액이 된다
+  const [lines, setLines] = useState([])
+  const [itemMaster, setItemMaster] = useState([])
   // 첨부 파일 — 발행 전이라 청구서 id가 없으므로 먼저 업로드해 두고, 저장 후 청구서에 연결(지연 첨부)
   const [docs, setDocs] = useState([])
 
@@ -471,11 +475,14 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
       setForm(f => ({ ...f, accountId: f.accountId || list[0]?.id || "" }))
     })
     api.getContracts().then(setContracts)
+    api.getRefItems('item').then(setItemMaster)   // 품목 내역에서 고를 기준정보
   }, [])
 
   useEffect(() => {
     if (!open) return
     setDocs([])   // 폼에서의 첨부는 이번에 새로 올리는 것만. 기존 첨부는 청구서 상세에서 관리.
+    // 수정이면 저장된 품목을 그대로 불러온다. 신규면 빈 표(사용자가 '품목 추가'로 시작).
+    setLines(editInvoice?.lines?.length ? editInvoice.lines.map(l => ({ ...l })) : [])
     if (editInvoice) {
       setForm({
         kind: editInvoice.kind,
@@ -495,6 +502,12 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     }
   }, [open, defaultKind, editInvoice])
 
+  /* 품목 내역이 있으면 그 합계가 공급가액이다 — 두 숫자가 따로 놀면 명세서와 청구서가 어긋난다.
+     그래서 라인이 한 줄이라도 있으면 공급가액 칸은 읽기 전용이 되고 합계를 그대로 쓴다.
+     라인을 다 지우면 다시 직접 입력으로 돌아간다(기존 방식). */
+  const linesTotal = lines.reduce((s, l) => s + (Number(String(l.amount).replace(/[^0-9.-]/g, '')) || 0), 0)
+  const hasLines = lines.length > 0
+
   const f = (k, v) => {
     const next = { ...form, [k]: v }
     // 과세일 때만 공급가 변경 시 세액을 10%로 자동 채운다. 면세·영세는 세액 0을 유지한다.
@@ -512,7 +525,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   }
 
   const taxable = form.taxType === "과세"
-  const supply = parseInt(form.supplyAmount.replace(/[^0-9]/g, "")) || 0
+  const supply = hasLines ? Math.round(linesTotal) : (parseInt(form.supplyAmount.replace(/[^0-9]/g, "")) || 0)
   const vatRaw = String(form.vatAmount).replace(/[^0-9]/g, "")
   // 과세면 빈칸일 때 자동 10%, 값 있으면 그대로. 면세·영세는 항상 0.
   const vat    = !taxable ? 0 : (vatRaw === "" ? Math.round(supply * 0.1) : parseInt(vatRaw))
@@ -550,6 +563,15 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
       due_at: form.dueAt || null,
       status: editInvoice ? editInvoice.status : (form.kind === "issued" ? "입금 예정" : "지급 예정"),
       account_id: form.accountId || null, memo: form.memo || "",
+      /* 품목 내역. 화면에서 쓰는 보조 필드(amountTouched)는 빼고 보낸다 —
+         서버 컬럼이 아니라 '사용자가 금액을 고쳤나'를 기억하는 화면 상태다. */
+      lines: lines.map(({ amountTouched, id, ...l }) => ({
+        ...l,
+        qty: Number(String(l.qty).replace(/[^0-9.-]/g, '')) || 0,
+        weight: Number(String(l.weight).replace(/[^0-9.-]/g, '')) || 0,
+        unit_price: Number(String(l.unit_price).replace(/[^0-9.-]/g, '')) || 0,
+        amount: Number(String(l.amount).replace(/[^0-9.-]/g, '')) || 0,
+      })),
       _docs: docs,   // 저장 후 청구서에 연결할 첨부(부모 handleSave가 처리)
     })
     onClose()
@@ -603,9 +625,18 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
               ))}
             </div>
           </div>
+          {/* 거래명세서식 품목 입력 — 여기서 넣은 합계가 아래 공급가액이 된다 */}
+          <InvoiceLines lines={lines} onChange={setLines} itemMaster={itemMaster}/>
+
           <div>
-            <label className="label">공급가액</label>
-            <MoneyInput value={form.supplyAmount} onChange={raw => f("supplyAmount", raw)}/>
+            <label className="label">
+              공급가액
+              {hasLines && <span className="text-muted2" style={{ fontWeight: 400 }}> · 품목 합계에서 자동</span>}
+            </label>
+            {/* 품목이 있으면 직접 입력을 막는다 — 두 숫자가 어긋나면 명세서와 청구서가 다른 말을 한다.
+                고치려면 품목 줄의 금액을 고치면 된다(그쪽이 근거다). */}
+            <MoneyInput value={hasLines ? String(supply) : form.supplyAmount} disabled={hasLines}
+              onChange={raw => f("supplyAmount", raw)}/>
           </div>
           <div className="row gap-12">
             <div style={{ flex: 1 }}>

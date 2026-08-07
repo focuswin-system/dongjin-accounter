@@ -236,6 +236,15 @@ function adaptInvoice(row) {
     // id 는 정산 취소에 필요하다(없으면 화면에서 어느 매칭인지 지목할 수 없다)
     matches: (row.matches || []).map(m => ({ id: m.id, txnId: m.txn_id, amount: m.amount, matchedAt: dayOf(m.matched_at) })),
     docs: (row.docs || []).map(d => ({ id: d.id, url: d.url, name: d.name, type: d.doc_type || '기타', size: d.size || 0 })),
+    /* 거래명세서식 품목 내역. 없으면 빈 배열 = 총액만 있는 청구서(기존 방식).
+       숫자는 mysql2가 DECIMAL을 문자열로 주기도 해서 여기서 숫자로 맞춰 둔다 —
+       화면에서 문자열끼리 더하면 '10' + '5' = '105'가 된다. */
+    lines: (row.lines || []).map(l => ({
+      id: l.id, item_id: l.item_id || '', name: l.name || '', spec: l.spec || '', unit: l.unit || '',
+      qty: Number(l.qty) || 0, weight: Number(l.weight) || 0,
+      price_basis: l.price_basis === 'weight' ? 'weight' : 'qty',
+      unit_price: Number(l.unit_price) || 0, amount: Number(l.amount) || 0,
+    })),
     paidAmount: row.paidAmount || 0,
     remainAmount: row.remainAmount ?? row.total_amount,
     memo: memoDisplay,

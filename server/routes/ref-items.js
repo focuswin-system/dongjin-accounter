@@ -8,10 +8,20 @@ const router = Router()
 
 const FIELDS = ['name', 'code', 'spec', 'unit', 'party', 'amount', 'start_date', 'end_date', 'memo',
   'period', 'pay_day', 'account_id', 'file_url', 'file_name',
-  'purchase_price', 'item_kind', 'tax_type', 'item_group', 'deductible']
+  'purchase_price', 'item_kind', 'tax_type', 'item_group', 'deductible',
+  // 중량과 '단가를 무엇에 곱하는가'. 거래명세서에 중량이 들어가는 업종(금속·자재)이 있고,
+  // ㎏당 단가로 파는 품목은 금액 = 중량 × 단가다(lib/lineAmount.js).
+  'weight', 'price_basis']
 const NUM_FIELDS = new Set(['amount', 'pay_day', 'purchase_price', 'deductible'])
-const pick = (body) => FIELDS.map(f =>
-  NUM_FIELDS.has(f) ? (parseInt(String(body[f] ?? '').replace(/[^0-9-]/g, ''), 10) || 0) : (body[f] ?? null))
+/* 중량은 소수를 쓴다(㎏에 g 단위). parseInt 로 넣으면 12.5 가 12 가 되어 조용히 틀린다. */
+const DEC_FIELDS = new Set(['weight'])
+const pick = (body) => FIELDS.map(f => {
+  if (NUM_FIELDS.has(f)) return parseInt(String(body[f] ?? '').replace(/[^0-9-]/g, ''), 10) || 0
+  if (DEC_FIELDS.has(f)) return parseFloat(String(body[f] ?? '').replace(/[^0-9.-]/g, '')) || 0
+  // 아는 값만 통과시킨다 — 엉뚱한 값이 들어오면 금액 계산 기준이 흔들린다
+  if (f === 'price_basis') return body[f] === 'weight' ? 'weight' : 'qty'
+  return body[f] ?? null
+})
 
 // 목록 (type별)
 router.get('/', async (req, res, next) => {
@@ -32,7 +42,7 @@ router.post('/', async (req, res, next) => {
     const [[{ maxOrder }]] = await req.db.execute('SELECT COALESCE(MAX(sort_order),0) AS maxOrder FROM ref_items WHERE type=?', [type])
     const id = randomUUID()
     await req.db.execute(
-      'INSERT INTO ref_items (id, type, name, code, spec, unit, party, amount, start_date, end_date, memo, period, pay_day, account_id, file_url, file_name, purchase_price, item_kind, tax_type, item_group, deductible, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO ref_items (id, type, name, code, spec, unit, party, amount, start_date, end_date, memo, period, pay_day, account_id, file_url, file_name, purchase_price, item_kind, tax_type, item_group, deductible, weight, price_basis, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, type, ...pick(req.body), maxOrder + 1]
     )
     res.json({ ok: true, id })
@@ -43,7 +53,7 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const [result] = await req.db.execute(
-      'UPDATE ref_items SET name=?, code=?, spec=?, unit=?, party=?, amount=?, start_date=?, end_date=?, memo=?, period=?, pay_day=?, account_id=?, file_url=?, file_name=?, purchase_price=?, item_kind=?, tax_type=?, item_group=?, deductible=? WHERE id=?',
+      'UPDATE ref_items SET name=?, code=?, spec=?, unit=?, party=?, amount=?, start_date=?, end_date=?, memo=?, period=?, pay_day=?, account_id=?, file_url=?, file_name=?, purchase_price=?, item_kind=?, tax_type=?, item_group=?, deductible=?, weight=?, price_basis=? WHERE id=?',
       [...pick(req.body), req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })

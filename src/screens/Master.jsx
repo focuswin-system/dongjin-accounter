@@ -279,6 +279,12 @@ export const REF_CONFIGS = {
       { key: 'purchase_price', label: '매입가', kind: 'num', w: 110, hint: '원가 — 외주·자재 매입 단가' },
       { key: 'amount', label: '출고가', kind: 'num', w: 110, hint: '판매 단가 — 계약·청구서에 자동으로 채워져요' },
       { key: 'margin', label: '마진', kind: 'num', w: 100, calc: r => (Number(r.amount) || 0) - (Number(r.purchase_price) || 0) },
+      /* 중량 — 거래명세서에 중량 칸이 있는 업종(금속·자재)이 있다. 대부분 표시용이지만
+         ㎏당 단가로 파는 품목은 금액 = 중량 × 단가라, 무엇에 단가를 곱할지 함께 정한다.
+         여기 값은 청구서 품목을 고를 때 출발점으로 채워지고, 청구서에서 줄마다 고칠 수 있다. */
+      { key: 'weight', label: '중량', kind: 'dec', w: 90, hint: '단위당 중량 (소수 입력 가능)' },
+      { key: 'price_basis', label: '단가 기준', kind: 'select', options: [['qty', '수량'], ['weight', '중량']],
+        w: 92, required: true, def: 'qty', hint: '금액을 무엇에 곱해 낼지 — 기본은 수량 × 단가' },
       { key: 'tax_type', label: '과세', kind: 'select', options: TAX_TYPES, w: 76,
         hint: '비워두면 비목의 부가세 설정을 따라갑니다' },
     ],
@@ -350,7 +356,8 @@ const emptyRefForm = (fields) => {
   for (const fd of editableFields(fields)) {
     if (fd.kind === 'file') { o.file_url = ''; o.file_name = '' }
     else if (fd.kind === 'flag') o[fd.key] = fd.def ?? 1
-    else o[fd.key] = ''
+    // def 가 있는 select(단가 기준처럼 '비어 있으면 안 되는' 값)는 기본값으로 시작한다
+    else o[fd.key] = fd.def ?? ''
   }
   return o
 }
@@ -457,7 +464,14 @@ export const RefMasterPanel = ({ cfg, page = false, embedded = false }) => {
     }
     const val = r[fd.key]
     if (val == null || val === '') return '—'
+    // 값/라벨 쌍 옵션은 저장값(qty)이 아니라 사람이 읽는 이름(수량)을 보여준다
+    if (fd.kind === 'select' && Array.isArray(fd.options?.[0])) {
+      const hit = fd.options.find(([v]) => v === val)
+      return hit ? hit[1] : val
+    }
     if (fd.kind === 'num') return fmtNum(val)
+    // 중량 0은 '안 쓴다'는 뜻이라 숫자 0을 늘어놓지 않는다
+    if (fd.kind === 'dec') return Number(val) ? String(Number(val)) : '—'
     if (fd.kind === 'account') return accounts.find(a => a.id === val)?.name || '—'
     return val
   }
@@ -537,12 +551,19 @@ export const RefMasterPanel = ({ cfg, page = false, embedded = false }) => {
                 {fd.hint && <span className="text-muted2" style={{ fontWeight: 400, marginLeft: 6, fontSize: 12 }}>· {fd.hint}</span>}
               </label>
               {fd.kind === 'select' ? (
-                // 선택 항목이라 고른 칩을 다시 누르면 해제된다(과세유형처럼 '비워두기'가 뜻을 갖는 필드가 있다)
+                /* 선택 항목이라 고른 칩을 다시 누르면 해제된다(과세유형처럼 '비워두기'가 뜻을 갖는 필드가 있다).
+                   옵션은 문자열이거나 [저장값, 보여줄 이름] 쌍이다 — 저장값이 코드고 라벨이 한글인
+                   필드가 있다(price_basis: qty/weight ↔ 수량/중량). 쌍을 안 받으면 한글이 그대로
+                   저장돼 서버가 알아보지 못한다. */
                 <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
-                  {fd.options.map(o => (
-                    <button key={o} type="button" className={`chip ${form[fd.key] === o ? 'active' : ''}`}
-                      onClick={() => f(fd.key, form[fd.key] === o ? '' : o)}>{o}</button>
-                  ))}
+                  {fd.options.map(o => {
+                    const [val, label] = Array.isArray(o) ? o : [o, o]
+                    const on = form[fd.key] === val
+                    return (
+                      <button key={val} type="button" className={`chip ${on ? 'active' : ''}`}
+                        onClick={() => f(fd.key, on && !fd.required ? '' : val)}>{label}</button>
+                    )
+                  })}
                 </div>
               ) : fd.kind === 'flag' ? (
                 <div className="row gap-6">
@@ -559,11 +580,20 @@ export const RefMasterPanel = ({ cfg, page = false, embedded = false }) => {
                 <RefFileField url={form.file_url} name={form.file_name} uploading={uploading}
                   onUpload={handleUpload} onRemove={() => setForm(p => ({ ...p, file_url: '', file_name: '' }))}/>
               ) : (
+                /* 'dec' = 소수를 쓰는 수치(중량). 'num'은 정수라 12.5 를 넣으면 12 가 된다 —
+                   ㎏ 단위에 g 을 적는 경우가 있어 잘리면 조용히 틀린 값이 저장된다.
+                   콤마 서식도 넣지 않는다(입력 중에 소수점이 지워진다). */
                 <input
-                  className={`input ${fd.kind === 'num' ? 'num' : ''}`}
+                  className={`input ${fd.kind === 'num' || fd.kind === 'dec' ? 'num' : ''}`}
                   type={fd.kind === 'date' ? 'date' : 'text'}
-                  value={fd.kind === 'num' ? (form[fd.key] === '' || form[fd.key] == null ? '' : fmtNum(form[fd.key])) : (form[fd.key] ?? '')}
-                  onChange={e => f(fd.key, fd.kind === 'num' ? (parseInt(e.target.value.replace(/[^0-9-]/g, ''), 10) || 0) : e.target.value)}
+                  inputMode={fd.kind === 'dec' ? 'decimal' : undefined}
+                  value={fd.kind === 'num'
+                    ? (form[fd.key] === '' || form[fd.key] == null ? '' : fmtNum(form[fd.key]))
+                    : (form[fd.key] ?? '')}
+                  onChange={e => f(fd.key,
+                    fd.kind === 'num' ? (parseInt(e.target.value.replace(/[^0-9-]/g, ''), 10) || 0)
+                    : fd.kind === 'dec' ? e.target.value.replace(/[^0-9.]/g, '')
+                    : e.target.value)}
                   placeholder={fd.label}/>
               )}
             </div>

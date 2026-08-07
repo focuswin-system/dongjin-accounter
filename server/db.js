@@ -975,6 +975,19 @@ async function initDb(conn) {
     await ensureColumn('invoice_lines',  'cost_price', "cost_price BIGINT DEFAULT 0")
     // 총액형·정기형 계약의 품목 수량. 기성형은 계약 시점에 수량이 없고 청구할 때 넣으므로 0으로 둔다.
     await ensureColumn('contract_items', 'qty',        "qty DECIMAL(14,2) DEFAULT 0")
+    /* ── 중량 ──
+     * 거래명세서에 품목·규격·수량·단위와 함께 중량이 들어가는 업종이 있다(금속·자재).
+     * 대부분은 표시·참고용이지만, **중량으로 값을 매기는 품목**도 있다(㎏당 단가).
+     * 그래서 중량 자체와 '무엇에 단가를 곱하는가'(price_basis)를 나눠 둔다.
+     *   qty(기본) — 금액 = 수량 × 단가      weight — 금액 = 중량 × 단가
+     * 기본값을 qty 로 두어 기존 데이터·화면 동작이 그대로다.
+     * 소수 셋째 자리까지 — ㎏ 단위에서 g 단위를 적는 경우가 있다. */
+    await ensureColumn('ref_items',      'weight',      "weight DECIMAL(14,3) DEFAULT 0")
+    await ensureColumn('ref_items',      'price_basis', "price_basis VARCHAR(10) DEFAULT 'qty'")
+    await ensureColumn('contract_items', 'weight',      "weight DECIMAL(14,3) DEFAULT 0")
+    await ensureColumn('contract_items', 'price_basis', "price_basis VARCHAR(10) DEFAULT 'qty'")
+    await ensureColumn('invoice_lines',  'weight',      "weight DECIMAL(14,3) DEFAULT 0")
+    await ensureColumn('invoice_lines',  'price_basis', "price_basis VARCHAR(10) DEFAULT 'qty'")
     // ── 부가세 정합성 ──
     // 직접 입력 거래에도 공급가/세액을 남긴다. 여태 amount(합계) 하나뿐이라, 청구서를 거치지 않은
     // 거래의 매출·매입세액이 부가세 집계에서 통째로 빠졌다. NULL = 세액을 모르는 과거 거래(집계 제외).

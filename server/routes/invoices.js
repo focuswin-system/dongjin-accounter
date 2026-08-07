@@ -11,6 +11,8 @@ const { settleAcctCode } = require('../lib/acctCode')
 const { removeUploadedFile } = require('../lib/uploads')
 const { normalizeTaxType } = require('../lib/vat')
 const { recalcInvoiceStatus, paidAmountOf } = require('../lib/invoiceStatus')
+// 품목 라인 금액 규칙 — 프런트 src/lib/lineAmount.js 와 같은 규칙(중량 단가 포함)
+const { computeLineAmount, normBasis } = require('../lib/lineAmount')
 
 const router = Router()
 
@@ -20,8 +22,13 @@ const PAYABLE_STATUSES    = new Set(['지급 대기', '지급 예정', '일부 �
 async function attachMatches(db, invoice) {
   const [matches] = await db.execute('SELECT * FROM invoice_matches WHERE invoice_id = ?', [invoice.id])
   const [docs] = await db.execute('SELECT id, url, name, doc_type, size, created_at FROM invoice_docs WHERE invoice_id = ? ORDER BY created_at', [invoice.id])
+  /* 품목 내역(거래명세서) — 폼에서 수정하려면 읽을 수 있어야 한다.
+     라인이 없는 청구서(총액만)는 빈 배열이라 화면이 기존처럼 총액 입력으로 동작한다. */
+  const [lines] = await db.execute(
+    `SELECT id, item_id, name, spec, unit, qty, weight, price_basis, unit_price, amount
+     FROM invoice_lines WHERE invoice_id = ? ORDER BY sort_order, created_at`, [invoice.id])
   const paid = matches.reduce((s, m) => s + Number(m.amount), 0)
-  return { ...invoice, matches, docs, paidAmount: paid, remainAmount: Number(invoice.total_amount) - paid }
+  return { ...invoice, matches, docs, lines, paidAmount: paid, remainAmount: Number(invoice.total_amount) - paid }
 }
 
 router.get('/', async (req, res, next) => {
@@ -164,6 +171,45 @@ async function resolveItemId(db, idx, line, register) {
  * itemIdx가 없으면(옵션 끔) item_id를 비운 채 이름·규격만 스냅샷으로 남긴다 —
  * 표기가 조금씩 다른 품목이 기준정보에서 수백 개로 불어나는 것이 기본 동작이 되지 않게.
  */
+/**
+ * 청구서 금액을 확정한다. 품목 내역이 있으면 그 합계가 공급가액이다.
+ *
+ * 왜 서버에서도 하는가: 화면이 이미 그렇게 계산하지만, 그건 화면의 사정이다.
+ * 공급가액과 품목 합계가 어긋난 채 저장되면 거래명세서에 찍힌 금액과 청구 금액이 달라지고,
+ * 나중에 어느 쪽이 맞는지 판단할 근거가 없다. 근거는 품목이므로 품목을 따른다.
+ *
+ * 세액은 건드리지 않는다 — 과세/면세/영세와 끝수 조정은 화면이 정한 값을 존중한다.
+ * 다만 합계(total)는 공급가+세액으로 다시 맞춘다.
+ */
+function amountsFromLines(body) {
+  const lines = Array.isArray(body.lines) ? body.lines : null
+  if (!lines || lines.length === 0) {
+    return {
+      supply_amount: body.supply_amount,
+      vat_amount: body.vat_amount,
+      total_amount: body.total_amount,
+    }
+  }
+  const supply = lines.reduce((s, l) => {
+    const amt = l.amount === undefined || l.amount === null || l.amount === ''
+      ? computeLineAmount(l) : intOf(l.amount)
+    return s + amt
+  }, 0)
+  const vat = intOf(body.vat_amount)
+  return { supply_amount: supply, vat_amount: vat, total_amount: supply + vat }
+}
+
+/** 라인 1건 INSERT — 홈택스 임포트와 폼 입력이 **같은 컬럼**을 쓰게 한 곳에 둔다.
+ *  한쪽만 새 컬럼을 채우면 같은 청구서라도 어디서 만들었냐에 따라 명세서가 달라진다. */
+async function insertInvoiceLine(db, invoiceId, l, ord) {
+  await db.execute(
+    `INSERT INTO invoice_lines
+       (id, invoice_id, item_id, name, spec, unit, qty, weight, price_basis, unit_price, amount, sort_order)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [randomUUID(), invoiceId, l.item_id || null, l.name || '(품목명 없음)', l.spec || null, l.unit || null,
+     l.qty || 0, l.weight || 0, normBasis(l.price_basis), l.unit_price || 0, l.amount || 0, ord])
+}
+
 async function replaceInvoiceLines(db, invoiceId, lines, itemIdx = null, register = false) {
   const clean = (Array.isArray(lines) ? lines : [])
     .map(l => ({
@@ -178,11 +224,48 @@ async function replaceInvoiceLines(db, invoiceId, lines, itemIdx = null, registe
   await db.execute('DELETE FROM invoice_lines WHERE invoice_id = ?', [invoiceId])
   let ord = 0
   for (const l of clean) {
-    const itemId = await resolveItemId(db, itemIdx, l, register)
-    await db.execute(
-      'INSERT INTO invoice_lines (id, invoice_id, item_id, name, spec, unit, qty, unit_price, amount, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)',
-      [randomUUID(), invoiceId, itemId, l.name || '(품목명 없음)', l.spec, null, l.qty, l.unit_price, l.amount, ++ord])
+    l.item_id = await resolveItemId(db, itemIdx, l, register)
+    await insertInvoiceLine(db, invoiceId, l, ++ord)
   }
+  return clean.length
+}
+
+/**
+ * 청구서 폼(거래명세서식 입력)이 보낸 품목을 저장한다.
+ *
+ * 홈택스 임포트(replaceInvoiceLines)와 나눈 이유: 저쪽은 엑셀의 품목명으로 기준정보를 **찾아야**
+ * 하지만, 폼은 사용자가 이미 고른 item_id 를 그대로 들고 온다. 찾는 로직을 공유하면
+ * 폼에서 고른 품목이 이름이 비슷한 다른 품목으로 바뀔 수 있다.
+ *
+ * ⚠ 금액은 서버에서 **다시 계산하지 않는다.** 할인·끝수 조정처럼 사람이 손대는 값이라
+ *   덮으면 화면에서 본 금액과 저장된 금액이 달라진다. 대신 비어 있을 때만 계산으로 채운다.
+ *
+ * @returns 저장한 라인 수 (0이면 라인 없는 청구서 = 총액만 있는 기존 방식)
+ */
+async function writeInvoiceLines(db, invoiceId, lines) {
+  if (!Array.isArray(lines)) return null       // 아예 안 보냈으면 건드리지 않는다(부분 수정 보존)
+  await db.execute('DELETE FROM invoice_lines WHERE invoice_id = ?', [invoiceId])
+  const clean = lines
+    .map(l => {
+      const row = {
+        item_id: l.item_id || null,
+        name: String(l.name || '').trim(),
+        spec: String(l.spec || '').trim() || null,
+        unit: String(l.unit || '').trim() || null,
+        qty: numOf(l.qty),
+        weight: numOf(l.weight),
+        price_basis: normBasis(l.price_basis),
+        unit_price: intOf(l.unit_price),
+      }
+      // 금액을 안 보냈으면 계산해 채운다(화면과 같은 규칙 — lib/lineAmount.js)
+      row.amount = l.amount === undefined || l.amount === null || l.amount === ''
+        ? computeLineAmount(row) : intOf(l.amount)
+      return row
+    })
+    // 빈 줄은 버린다 — 표에 남은 마지막 빈 행이 '(품목명 없음) 0원'으로 저장되면 명세서가 지저분해진다
+    .filter(l => l.name || l.amount || l.qty || l.weight)
+  let ord = 0
+  for (const l of clean) await insertInvoiceLine(db, invoiceId, l, ++ord)
   return clean.length
 }
 
@@ -424,7 +507,11 @@ function invoiceCreateError({ kind, supply_amount, vat_amount }) {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type } = req.body
+    const { kind, vendor_id, contract_id, issued_at, due_at, status, account_id, memo, tax_type } = req.body
+    /* 품목 내역이 있으면 **그 합계가 공급가액이다.** 화면도 그렇게 동작하지만(공급가액 칸이 잠긴다)
+       서버에서도 확정한다 — 두 숫자를 각자 보내면 명세서와 청구서가 다른 말을 하는 청구서가
+       저장될 수 있고, 그건 나중에 어느 쪽이 맞는지 알 방법이 없다. */
+    const { supply_amount, vat_amount, total_amount } = amountsFromLines(req.body)
     /* 금액 검증이 아예 없어서 **0원·음수 청구서가 그대로 저장됐다**(실제로 0원 청구서가
      * '입금 예정'으로 남아 홈 '할 일'에 떠 있었다). 음수 청구서는 미수금 총액을 깎아
      * 다른 청구서를 상계하고, 부가세 과세표준도 함께 줄인다.
@@ -470,7 +557,9 @@ router.post('/', async (req, res, next) => {
       'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, invoice_no, kind, vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, status||(kind==='issued' ? '입금 예정' : '지급 대기'), account_id||null, memo||'', taxType]
     )
-    res.json({ id, invoice_no })
+    // 거래명세서식 품목 내역(선택) — 없으면 총액만 있는 기존 청구서 그대로다
+    const lineCount = await writeInvoiceLines(req.db, id, req.body.lines)
+    res.json({ id, invoice_no, lines: lineCount })
   } catch (e) { next(e) }
 })
 
@@ -490,7 +579,9 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
-    const { vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, account_id, memo, tax_type } = req.body
+    const { vendor_id, contract_id, issued_at, due_at, account_id, memo, tax_type } = req.body
+    // 등록과 같은 규칙 — 품목이 있으면 그 합계가 공급가액이다
+    const { supply_amount, vat_amount, total_amount } = amountsFromLines(req.body)
     await conn.beginTransaction()
     const [[cur]] = await conn.execute('SELECT issued_at, total_amount FROM invoices WHERE id = ? FOR UPDATE', [req.params.id])
     if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
@@ -519,6 +610,10 @@ router.put('/:id', async (req, res, next) => {
       [vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, account_id||null, memo||'', taxType, req.params.id]
     )
     if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    /* 품목 내역 — lines 를 **보낸 요청만** 갱신한다.
+       청구서를 다루지 않는 화면(정산·상태 변경)의 저장이 기존 품목표를 지우면 안 된다
+       (계약 items·cost_budget 과 같은 부분 수정 보존 원칙). */
+    await writeInvoiceLines(conn, req.params.id, req.body.lines)
     // 금액이 바뀌면 상태도 바뀐다(완납이 일부입금으로, 또는 그 반대). 정산 누계로 확정한다.
     const st = await recalcInvoiceStatus(conn, req.params.id)
     await conn.commit()
