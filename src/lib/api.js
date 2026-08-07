@@ -935,6 +935,18 @@ export const api = {
     } catch (e) { return { ok: false, error: e.message } }
   },
 
+  /* 청구서 일괄 처리 — 하나라도 막히면 서버가 전부 멈추고 무엇이 왜 걸렸는지 돌려준다.
+     일부만 처리하고 "5건 중 3건 됐어요"라고 하면 나머지를 사용자가 되짚어야 하는데,
+     돈이 오가는 일에서 그 되짚기는 현실적으로 안 일어난다. */
+  async bulkSettleInvoices(ids, { date, account_id } = {}) {
+    try { return { ok: true, ...(await req('/invoices/bulk/settle', { method: 'POST', body: { ids, date, account_id } })) } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async bulkDeleteInvoices(ids) {
+    try { return { ok: true, ...(await req('/invoices/bulk/delete', { method: 'POST', body: { ids } })) } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
   /* 회차 건너뛰기 — 정기 회차는 저장된 행이 아니라 계산값이라 '삭제'가 없다.
      건너뛴 사실을 남겨 계산에서 뺀다(규칙 자체는 계속 돈다). kind: 'sales' | 'purchase' */
   async skipRecurringCycle(kind, id, dueDate, reason) {

@@ -47,6 +47,11 @@ const AUDIT_RULES = [
   { m: 'POST',   re: /^\/api\/invoices\/([^/]+)\/matches$/,        res: 'invoice', action: 'match',        target: 1 },
   { m: 'DELETE', re: /^\/api\/invoices\/([^/]+)\/matches\/[^/]+$/, res: 'invoice', action: 'match_cancel', target: 1 },
   { m: 'DELETE', re: /^\/api\/invoices\/([^/]+)$/,                 res: 'invoice', action: 'delete',       target: 1 },
+  /* 일괄 처리 — 한 번에 최대 100건의 돈이 오가고, 삭제도 그만큼이다.
+     건별 기록(match·delete)은 대상 ID로 남지만 "누가 언제 한꺼번에 했나"가 없으면
+     "이 날 미지급금이 왜 통째로 사라졌지"를 짚을 수 없다. */
+  { m: 'POST',   re: /^\/api\/invoices\/bulk\/settle$/,            res: 'invoice', action: 'bulk_settle' },
+  { m: 'POST',   re: /^\/api\/invoices\/bulk\/delete$/,            res: 'invoice', action: 'bulk_delete' },
 
   // ── 계약 ── 기성·마일스톤 발행은 청구서를 만든다
   { m: 'POST',   re: /^\/api\/contracts\/([^/]+)\/progress-invoice$/,   res: 'invoice',  action: 'issue',  target: 1 },
@@ -128,6 +133,7 @@ const ACTION_LABELS = {
   issue: '발행', issue_missed: '놓친 회차 일괄 발행',
   backfill: '지난 회차 소급 등록', backfill_undo: '소급 등록 되돌리기',
   skip: '회차 건너뛰기', unskip: '건너뛴 회차 되살리기',
+  bulk_settle: '청구서 일괄 정산', bulk_delete: '청구서 일괄 삭제',
   // 입금·지급
   match: '입금 연결', match_cancel: '입금 연결 해제',
   pay: '지급', pay_cancel: '지급 취소', pay_missed: '놓친 회차 납입',

@@ -140,6 +140,10 @@ const ACTION_OVERRIDES = [
      (버튼은 화면을 볼 수 있으면 보이므로, 눌러보고 나서야 알게 된다).
      실제 생성(/backfill)은 그대로 'create'다 — 이 규칙보다 위에 없으므로 걸리지 않는다. */
   { re: /\/backfill\/preview$/, action: 'view' },
+  /* 일괄 삭제 — POST 로 보내지만(본문에 id 배열이 필요하다) 하는 일은 삭제다.
+     'create'로 판정되면 **삭제 권한이 없는 사람이 100건을 지울 수 있다.**
+     메서드만으로 행위를 정하면 이런 구멍이 난다. */
+  { re: /\/bulk\/delete$/, action: 'delete' },
 ]
 
 /** 요청 → 필요한 행위 */

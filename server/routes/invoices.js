@@ -747,6 +747,142 @@ router.post('/:id/matches', async (req, res, next) => {
   finally { conn.release() }
 })
 
+/* ── 일괄 처리 ────────────────────────────────────────────────────
+ *
+ * 고객 요청: "청구서 대금도 한 번에 다중 처리(일괄 지급 처리)했으면 좋겠다.
+ *            특정 거래처 대금을 한 번에 지급하는 식으로."
+ *
+ * 원칙 — **하나라도 막히면 전부 멈춘다.**
+ * 일부만 처리하고 "5건 중 3건 됐어요"라고 말하면, 나머지 2건이 무엇이었는지 사용자가
+ * 되짚어야 한다. 돈이 오가는 일에서 그 되짚기는 현실적으로 안 일어난다.
+ * 그래서 미리 전부 검사하고, 걸리는 게 있으면 무엇이 왜 걸렸는지 말한 뒤 아무것도 안 한다.
+ * (놓친 회차 일괄 발행·소급 등록이 같은 규칙을 쓴다)
+ */
+router.post('/bulk/settle', async (req, res, next) => {
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.filter(Boolean) : []
+  if (!ids.length) return res.status(400).json({ error: '처리할 청구서를 선택해주세요' })
+  if (ids.length > 100) return res.status(400).json({ error: `한 번에 100건까지예요 (${ids.length}건 선택). 기간이나 거래처로 좁혀주세요.` })
+
+  const date = String(req.body.date || kstToday())
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: '처리일 형식이 올바르지 않아요 (YYYY-MM-DD)' })
+  // 미래 날짜로 돈이 오간 것으로 만들 수 없다(단건 정산·거래 등록과 같은 규칙)
+  { const de = futureDateError(date); if (de) return res.status(400).json({ error: de }) }
+
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    // 마감된 달이면 아무것도 만들지 않는다 — 처리일 하나로 전부 들어가므로 한 번만 본다
+    { const ce = await closedPeriodError(conn, date)
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
+
+    const ph = ids.map(() => '?').join(',')
+    const [invs] = await conn.execute(`SELECT * FROM invoices WHERE id IN (${ph}) FOR UPDATE`, ids)
+    if (invs.length !== ids.length) { await rollbackQuietly(conn); return res.status(404).json({ error: '없는 청구서가 섞여 있어요. 목록을 새로고침해주세요.' }) }
+
+    // 1) 먼저 전부 검사한다(아무것도 만들기 전에)
+    const blocked = []
+    const plan = []
+    for (const inv of invs) {
+      const [[{ paid }]] = await conn.execute(
+        'SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [inv.id])
+      const remain = Number(inv.total_amount) - Number(paid)
+      if (remain <= 0) { blocked.push(`${inv.invoice_no}: 이미 정산 완료`); continue }
+      const isIssued = inv.kind === 'issued'
+      const acct = req.body.account_id || inv.account_id || null
+      const lerr = ledgerError({ kind: isIssued ? 'income' : 'expense', account_id: acct,
+        status: isIssued ? '입금완료' : '지급완료' })
+      // 계좌가 없으면 그 돈은 어느 계좌 잔액에도 안 잡힌다 — 조용히 새는 것보다 막는 게 낫다
+      if (lerr) { blocked.push(`${inv.invoice_no}: ${lerr}`); continue }
+      plan.push({ inv, remain, isIssued, acct })
+    }
+    if (blocked.length) {
+      await rollbackQuietly(conn)
+      /* 같은 이유가 건마다 반복되면(계좌 미지정 4건 등) 읽히지 않는다 —
+         이유별로 묶고 대표 청구번호만 보여준다. */
+      const byReason = new Map()
+      for (const b of blocked) {
+        const [no, ...rest] = b.split(': ')
+        const reason = rest.join(': ')
+        if (!byReason.has(reason)) byReason.set(reason, [])
+        byReason.get(reason).push(no)
+      }
+      const lines = [...byReason].map(([reason, nos]) =>
+        `${reason} (${nos.slice(0, 3).join(', ')}${nos.length > 3 ? ` 외 ${nos.length - 3}건` : ''})`)
+      return res.status(409).json({
+        error: `처리할 수 없는 청구서가 있어 아무것도 처리하지 않았어요.\n· ${lines.join('\n· ')}`,
+        blocked,
+      })
+    }
+
+    // 2) 전부 통과했을 때만 만든다. 되돌릴 수 있게 한 묶음으로 표시한다.
+    const batch = randomUUID()
+    const done = []
+    for (const { inv, remain, isIssued, acct } of plan) {
+      const txnId = randomUUID()
+      await conn.execute(`
+        INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, invoice_id, memo, account_code, backfill_batch)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [txnId, isIssued ? 'income' : 'expense', inv.vendor_id || null, inv.contract_id || null,
+         acct, isIssued ? '수금' : '대금 지급', remain, date, '계좌이체',
+         isIssued ? '입금완료' : '지급완료', inv.contract_id ? '' : '공통', inv.id,
+         `청구서 ${inv.invoice_no || ''} 정산 (일괄)`.trim(),
+         settleAcctCode(isIssued ? 'income' : 'expense'), batch])
+      await conn.execute(
+        'INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,1)',
+        [randomUUID(), inv.id, txnId, remain])
+      await recalcInvoiceStatus(conn, inv.id)
+      done.push({ id: inv.id, invoice_no: inv.invoice_no, amount: remain })
+    }
+    await conn.commit()
+    res.json({ ok: true, batch, count: done.length, total: done.reduce((s, d) => s + d.amount, 0), done })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
+})
+
+/** 일괄 삭제 — 정산이 붙은 건·마감된 달은 전체를 멈춘다(단건 삭제와 같은 가드). */
+router.post('/bulk/delete', async (req, res, next) => {
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.filter(Boolean) : []
+  if (!ids.length) return res.status(400).json({ error: '삭제할 청구서를 선택해주세요' })
+  if (ids.length > 100) return res.status(400).json({ error: `한 번에 100건까지예요 (${ids.length}건 선택).` })
+
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    const ph = ids.map(() => '?').join(',')
+    const [invs] = await conn.execute(`SELECT * FROM invoices WHERE id IN (${ph}) FOR UPDATE`, ids)
+
+    const blocked = []
+    for (const inv of invs) {
+      const [[{ mcnt }]] = await conn.execute(
+        'SELECT COUNT(*) AS mcnt FROM invoice_matches WHERE invoice_id = ?', [inv.id])
+      if (Number(mcnt) > 0) { blocked.push(`${inv.invoice_no}: 입금·지급 내역이 있어요(먼저 정산을 취소하세요)`); continue }
+      const ce = await closedPeriodError(conn, inv.issued_at)
+      if (ce) blocked.push(`${inv.invoice_no}: ${ce}`)
+    }
+    if (blocked.length) {
+      await rollbackQuietly(conn)
+      return res.status(409).json({
+        error: `지울 수 없는 청구서가 있어 아무것도 지우지 않았어요.\n· ${blocked.join('\n· ')}`, blocked })
+    }
+
+    for (const inv of invs) {
+      await conn.execute('DELETE FROM invoice_docs WHERE invoice_id = ?', [inv.id])
+      await conn.execute('UPDATE transactions SET invoice_id = NULL WHERE invoice_id = ?', [inv.id])
+      // 연결된 청구 일정은 '예정'으로 되돌린다 — 안 하면 그 일정이 영영 발행 대기에 안 뜬다
+      await conn.execute("UPDATE milestones SET status = '예정', invoice_id = NULL WHERE invoice_id = ?", [inv.id])
+      await conn.execute('DELETE FROM invoices WHERE id = ?', [inv.id])
+      // 정기청구에서 나온 회차면 하한을 되돌려 그 달이 다시 청구 가능해지게(단건 삭제와 같은 처리)
+      if (inv.recurring_id) {
+        await restoreLastGenerated(conn, inv.kind === 'issued' ? 'recurring_invoices' : 'recurring_expenses',
+          inv.recurring_id, inv.issued_at)
+      }
+    }
+    await conn.commit()
+    res.json({ ok: true, count: invs.length })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
+})
+
 // ── 매칭 후보: 거래내역에 이미 있는(미매칭) 같은 종류 거래 ──
 router.get('/:id/matchable', async (req, res, next) => {
   try {

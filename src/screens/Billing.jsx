@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
@@ -714,11 +714,12 @@ const SummaryCard = ({ label, amount, count, accent = "blue", warn, onClick, hin
 }
 
 // ── 청구서 테이블 ────────────────────────────────────────────────
-const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여" }) => (
+const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", select }) => (
   <div className="card" style={{ overflow: "hidden" }}>
     <DataTable
       rows={rows}
       onRowClick={onSelect}
+      select={select}
       empty="해당 청구서가 없습니다"
       columns={[
         { key: 'invoiceNo', header: '청구번호', sortable: true, render: inv => <span className="text-sm text-muted num">{inv.invoiceNo}</span> },
@@ -808,6 +809,14 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const [range, setRange] = useState({ from: '', to: '' })
   const [vendorFilter, setVendorFilter] = useState(null)
   const [q, setQ] = useState('')
+  // 다중 선택 — 일괄 지급·입금 처리와 일괄 삭제용
+  const [checkedIds, setCheckedIds] = useState([])
+  const [bulkDate, setBulkDate] = useState(localToday())
+  const [bulkAccount, setBulkAccount] = useState('')
+  /* 일괄 처리에서 고를 계좌. 폼 드로어에도 accounts 가 있지만 그건 그 컴포넌트의 것이라
+     화면에서는 못 쓴다(실제로 `accounts is not defined` 로 화면이 통째로 깨졌다). */
+  const [accounts, setAccounts] = useState([])
+  useEffect(() => { api.getAccounts().then(list => setAccounts(list || [])) }, [])
   const [paidTarget, setPaidTarget] = useState(null)   // 기입금/기지급 처리 대상(계좌·날짜 드로어)
   const [importing, setImporting] = useState(false)    // 홈택스 세금계산서 엑셀 업로드 화면
   const [ourBizNo, setOurBizNo] = useState('')         // 우리 회사 사업자번호 — 매출/매입 자동 판정용
@@ -879,6 +888,67 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     }
     return true
   })
+
+  /* 일괄 처리 대상 판정 — 이미 정산이 끝난 건은 **체크 자체가 안 된다.**
+     골라놓고 나중에 "3건 중 1건만 됐어요"라고 말하는 것보다, 애초에 못 고르게 하고
+     이유를 붙이는 편이 낫다(DataTable select.isSelectable). */
+  const settleable = (inv) => Number(inv.remainAmount) > 0
+  const selectedRows = filtered.filter(inv => checkedIds.includes(inv.id))
+  const selectedRemain = selectedRows.reduce((s, r) => s + (Number(r.remainAmount) || 0), 0)
+  // 필터가 바뀌면 화면에서 사라진 선택은 버린다 — 안 보이는 것을 일괄 처리하면 안 된다
+  useEffect(() => {
+    setCheckedIds(prev => prev.filter(id => filtered.some(inv => inv.id === id)))
+  }, [statusFilter, range.from, range.to, vendorFilter, q, view, kind])
+
+  const doBulkSettle = async () => {
+    if (!selectedRows.length) return
+    /* 계좌 없는 청구서는 서버가 막는다(그 돈이 어느 계좌 잔액에도 안 잡히기 때문).
+       막힌 뒤에 알려주면 "왜 안 되지"가 되고, 이유가 건별로 반복돼 읽기도 어렵다.
+       **부르기 전에** 여기서 잡고 무엇을 하면 되는지 한 줄로 말한다. */
+    const noAcct = selectedRows.filter(r => !r.accountId)
+    if (noAcct.length && !bulkAccount) {
+      return toast.push(
+        `${noAcct.length}건은 ${isIssued ? '입금' : '출금'} 계좌가 지정돼 있지 않아요. 위에서 계좌를 고르면 한 번에 처리됩니다.`,
+        { tone: 'warn' })
+    }
+    const ok = await confirm({
+      title: `${selectedRows.length}건을 ${isIssued ? '입금' : '지급'} 처리할까요?`,
+      body: (
+        <>
+          <div style={{ marginBottom: 6 }}>합계 <b>{fmtNum(selectedRemain)}원</b> · 처리일 <b>{bulkDate}</b></div>
+          <div>각 청구서의 <b>남은 금액 전액</b>이 {isIssued ? '입금' : '지급'}된 것으로 기록되고,
+            거래내역과 계좌 잔액에 반영됩니다.</div>
+          <div style={{ marginTop: 6 }} className="text-muted">
+            일부만 받은 건은 이 방식이 맞지 않아요 — 그건 청구서를 열어 금액을 넣어주세요.
+          </div>
+        </>
+      ),
+      confirmLabel: `${selectedRows.length}건 처리`,
+    })
+    if (!ok) return
+    /* FilterSelect 는 이름 목록을 다루므로 id 로 바꿔 보낸다 —
+       이름을 account_id 자리에 넣으면 서버가 없는 계좌로 보고 잔액에 반영되지 않는다. */
+    const acctId = accounts.find(a => a.name === bulkAccount)?.id || null
+    const res = await api.bulkSettleInvoices(checkedIds, { date: bulkDate, account_id: acctId })
+    if (!res.ok) return toast.push(res.error || '처리에 실패했어요', { tone: 'warn' })
+    toast.push(`${res.count}건 · ${fmtNum(res.total)}원을 처리했어요`)
+    setCheckedIds([]); load()
+  }
+
+  const doBulkDelete = async () => {
+    if (!selectedRows.length) return
+    const ok = await confirm({
+      tone: 'neg',
+      title: `${selectedRows.length}건을 삭제할까요?`,
+      body: `${selectedRows.slice(0, 5).map(r => r.invoiceNo).join(', ')}${selectedRows.length > 5 ? ` 외 ${selectedRows.length - 5}건` : ''} — 복구할 수 없어요. 입금·지급 내역이 붙은 건이 하나라도 있으면 아무것도 지우지 않습니다.`,
+      confirmLabel: '삭제',
+    })
+    if (!ok) return
+    const res = await api.bulkDeleteInvoices(checkedIds)
+    if (!res.ok) return toast.push(res.error || '삭제에 실패했어요', { tone: 'warn' })
+    toast.push(`${res.count}건을 삭제했어요`)
+    setCheckedIds([]); load()
+  }
 
   /* 거래처별 소계 — 필터를 걸고 나면 반드시 "그래서 이 거래처에 얼마"가 다음 질문이다.
      한 거래처만 골랐을 때는 굳이 안 보여준다(표 아래 합계와 같은 말이 된다). */
@@ -1082,7 +1152,43 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       {!collect && view === "pending"
         ? <PendingScheduleTable rows={pending} isIssued={isIssued}
             onIssue={(p) => issueSchedule(p, false)} onPaid={(p) => issueSchedule(p, true)}/>
-        : <InvoiceTable rows={filtered} onSelect={setSelected} remainLabel={isIssued ? "미수금" : "미지급금"}/>}
+        : <>
+            {/* 선택 바 — 고른 게 있을 때만 나타난다. 늘 떠 있으면 표를 밀어내고,
+                아무것도 못 하는 버튼만 보여주는 셈이 된다. */}
+            {checkedIds.length > 0 && (
+              <div className="card card-pad" style={{ marginBottom: 12, position: 'sticky', top: 0, zIndex: 3 }}>
+                <div className="row gap-8" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span className="fw-700 text-sm">{checkedIds.length}건 선택</span>
+                  <span className="num text-sm text-muted">
+                    {isIssued ? '받을' : '낼'} 금액 {fmtNum(selectedRemain)}원
+                  </span>
+                  <button className="btn ghost sm" onClick={() => setCheckedIds([])}>선택 해제</button>
+
+                  <div className="row gap-6 ml-auto" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span className="text-xs text-muted2">처리일</span>
+                    <input type="date" className="input num" style={{ width: 148 }} value={bulkDate}
+                      max={localToday()} onChange={e => setBulkDate(e.target.value)}/>
+                    {/* 계좌를 안 고르면 청구서에 적힌 계좌를 쓴다. 그것도 없으면 서버가 막는다 —
+                        계좌 없는 정산은 어느 계좌 잔액에도 안 잡혀 조용히 새기 때문이다. */}
+                    <FilterSelect value={bulkAccount || null} onChange={v => setBulkAccount(v || '')}
+                      options={accounts.map(a => a.name)} placeholder="청구서 계좌 사용"/>
+                    <button className="btn primary" onClick={doBulkSettle}>
+                      <Icon.Check size={14}/> {isIssued ? '입금' : '지급'} 처리
+                    </button>
+                    <button className="btn" style={{ color: 'var(--neg-ink)' }} onClick={doBulkDelete}>
+                      <Icon.Trash size={14}/> 삭제
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            <InvoiceTable rows={filtered} onSelect={setSelected} remainLabel={isIssued ? "미수금" : "미지급금"}
+              select={{
+                ids: checkedIds, onChange: setCheckedIds,
+                isSelectable: settleable,
+                disabledHint: () => '정산이 끝난 청구서라 일괄 처리 대상이 아니에요',
+              }}/>
+          </>}
 
       <InvoiceDetailDrawer
         invoice={selected}

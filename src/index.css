@@ -552,6 +552,10 @@ a { color: inherit; text-decoration: none; }
 .dt-sort[data-dir="desc"] { opacity: 0.9; }
 .table thead th:hover .dt-sort[data-dir="none"] { opacity: 0.5; }
 .dt-empty { text-align: center; padding: 50px; color: var(--muted-2); font-size: 13px; }
+/* 다중 선택 — 고른 행을 옅게 칠한다. 표식(아이콘·굵기)을 더 얹지 않는다:
+   체크박스가 이미 상태를 말하고 있고, 정상 상태에 표식을 붙이면 진짜 경고가 묻힌다. */
+.table tbody tr.dt-selected > td { background: var(--brand-soft); }
+.table tbody tr.dt-selected:hover > td { background: var(--brand-soft); }
 
 /* TableToolbar(lib/components/TableToolbar.jsx) — 표 상단 날짜·검색·필터 바 */
 .tbar-bar {

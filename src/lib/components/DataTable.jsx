@@ -22,7 +22,16 @@ import { Icon } from '../ui'
 // renderExpanded(row): 펼침 내용. 값을 돌려주는 행만 아래에 전폭 행이 하나 더 붙는다.
 //   (차입금 상환 스케줄·예적금 납입 스케줄처럼 '행 안의 표'가 필요한 화면이 여럿이라 여기 둔다.
 //    화면마다 Fragment로 <tr>을 직접 끼우면 colSpan·배경·구분선을 매번 다시 맞춰야 한다)
-export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용이 없어요', footer, rowKey, renderExpanded }) => {
+/* select: 다중 선택. 주면 맨 앞에 체크박스 열이 생긴다.
+ *   { ids, onChange(ids), isSelectable(row)?, disabledHint(row)? }
+ * 선택 상태를 화면이 들고 있는 이유: 일괄 처리 뒤 무엇을 골랐는지 유지할지 비울지는
+ * 그 화면의 사정이다(삭제는 비우고, 지급 처리는 남겨두는 편이 낫다).
+ *
+ * isSelectable 로 고를 수 없는 행을 가른다 — 이미 정산된 청구서처럼 **일괄 처리 대상이
+ * 아닌 행**은 체크 자체가 안 돼야 한다. 눌러놓고 나중에 "3건 중 1건만 됐어요"라고
+ * 말하는 것보다, 애초에 못 고르게 하고 이유를 붙이는 편이 낫다.
+ */
+export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용이 없어요', footer, rowKey, renderExpanded, select }) => {
   const [sort, setSort] = useState(null)   // { key, dir: 'asc' | 'desc' } | null
 
   const sorted = useMemo(() => {
@@ -56,11 +65,39 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
 
   const alignClass = (a) => (a === 'right' ? 'num-right' : a === 'center' ? 'text-center' : '')
 
+  const keyOf = (row, i) => (rowKey ? rowKey(row) : (row.id ?? i))
+  const canSelect = (row) => !select?.isSelectable || select.isSelectable(row)
+  const selectable = select ? sorted.filter(canSelect) : []
+  const selectedSet = new Set(select?.ids || [])
+  /* 머리 체크박스는 **지금 화면에 보이는 것 중 고를 수 있는 것**만 다룬다.
+     필터를 걸어 놓고 전체 선택을 눌렀는데 안 보이는 행까지 선택되면, 그 다음 '일괄 삭제'가
+     사용자가 보지 못한 것을 지운다. */
+  const allOn = selectable.length > 0 && selectable.every((r, i) => selectedSet.has(keyOf(r, i)))
+  const someOn = selectable.some((r, i) => selectedSet.has(keyOf(r, i)))
+  const toggleAll = () => {
+    const visible = selectable.map((r, i) => keyOf(r, i))
+    select.onChange(allOn ? (select.ids || []).filter(id => !visible.includes(id))
+                          : [...new Set([...(select.ids || []), ...visible])])
+  }
+  const toggleOne = (id) => {
+    const on = selectedSet.has(id)
+    select.onChange(on ? (select.ids || []).filter(x => x !== id) : [...(select.ids || []), id])
+  }
+  const colCount = columns.length + (select ? 1 : 0)
+
   return (
     <div className="table-scroll">
       <table className="table">
         <thead>
           <tr>
+            {select && (
+              <th style={{ width: 40 }} onClick={e => e.stopPropagation()}>
+                <input type="checkbox" checked={allOn}
+                  ref={el => { if (el) el.indeterminate = !allOn && someOn }}
+                  disabled={selectable.length === 0}
+                  onChange={toggleAll} title="보이는 것 전체 선택"/>
+              </th>
+            )}
             {columns.map((c, i) => {
               const active = sort?.key === c.key
               return (
@@ -80,14 +117,26 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
         </thead>
         <tbody>
           {sorted.length === 0 ? (
-            <tr><td colSpan={columns.length} className="dt-empty">{empty}</td></tr>
+            <tr><td colSpan={colCount} className="dt-empty">{empty}</td></tr>
           ) : sorted.map((row, i) => {
-            const key = rowKey ? rowKey(row) : (row.id ?? i)
+            const key = keyOf(row, i)
             const expanded = renderExpanded ? renderExpanded(row, i) : null
+            const on = selectedSet.has(key)
+            const able = select ? canSelect(row) : false
             return (
               <Fragment key={key}>
                 <tr onClick={onRowClick ? () => onRowClick(row) : undefined}
-                  style={onRowClick ? { cursor: 'pointer' } : undefined}>
+                  style={onRowClick ? { cursor: 'pointer' } : undefined}
+                  className={on ? 'dt-selected' : undefined}>
+                  {select && (
+                    /* 체크박스 칸에서는 행 클릭(상세 열기)이 일어나면 안 된다 —
+                       고르려다 드로어가 열리면 선택이 아니라 방해가 된다. */
+                    <td onClick={e => e.stopPropagation()}
+                      title={!able ? (select.disabledHint?.(row) || '이 건은 일괄 처리 대상이 아니에요') : undefined}>
+                      <input type="checkbox" checked={on} disabled={!able}
+                        onChange={() => toggleOne(key)}/>
+                    </td>
+                  )}
                   {columns.map((c, ci) => (
                     <td key={c.key ?? ci} className={`${alignClass(c.align)} ${c.className || ''}`.trim()}>
                       {c.render ? c.render(row, i) : row[c.key]}
@@ -96,7 +145,7 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
                 </tr>
                 {expanded && (
                   <tr className="dt-expanded">
-                    <td colSpan={columns.length} style={{ padding: 0, background: 'var(--surface-2)' }}>{expanded}</td>
+                    <td colSpan={colCount} style={{ padding: 0, background: 'var(--surface-2)' }}>{expanded}</td>
                   </tr>
                 )}
               </Fragment>
