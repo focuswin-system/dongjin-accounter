@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-08-06T01:42:30.284Z",
+  "lastUpdated": "2026-08-07T04:11:24.966Z",
   "activeFeatures": [
     "focus-accounter",
     "screens",
@@ -24,9 +24,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-05-15T05:42:27.292Z",
-        "lastUpdated": "2026-08-06T01:25:40.625Z"
+        "lastUpdated": "2026-08-07T00:42:29.872Z"
       },
-      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\src\\lib\\nav.js"
+      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\src\\lib\\components\\InvoiceLines.jsx"
     },
     "screens": {
       "phase": "do",
@@ -37,7 +37,7 @@
       "documents": {},
       "timestamps": {
         "started": "2026-05-15T05:47:46.297Z",
-        "lastUpdated": "2026-08-06T01:42:04.240Z"
+        "lastUpdated": "2026-08-07T04:11:24.966Z"
       },
       "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\src\\screens\\Billing.jsx"
     },
@@ -50,9 +50,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-05-28T02:41:31.412Z",
-        "lastUpdated": "2026-08-06T00:44:16.972Z"
+        "lastUpdated": "2026-08-07T00:38:50.219Z"
       },
-      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\lib\\backfill.js"
+      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\lib\\lineAmount.js"
     },
     "routes": {
       "phase": "do",
@@ -63,9 +63,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-05-28T02:41:56.724Z",
-        "lastUpdated": "2026-08-06T01:42:30.284Z"
+        "lastUpdated": "2026-08-07T00:58:06.572Z"
       },
-      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\routes\\recurring.js"
+      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\routes\\invoices.js"
     },
     "middleware": {
       "phase": "do",
@@ -141,9 +141,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-07-28T23:41:50.664Z",
-        "lastUpdated": "2026-08-05T07:17:55.068Z"
+        "lastUpdated": "2026-08-07T00:50:32.952Z"
       },
-      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\test\\recurrence.test.js"
+      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\test\\lineAmount.test.js"
     }
   },
   "pipeline": {
@@ -154,7 +154,7 @@
   "session": {
     "startedAt": "2026-05-15T05:18:29.210Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-08-06T01:42:30.284Z"
+    "lastActivity": "2026-08-07T04:11:24.966Z"
   },
   "history": [
     {
@@ -19624,6 +19624,186 @@
     {
       "timestamp": "2026-08-06T01:42:30.284Z",
       "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:38:18.979Z",
+      "feature": "server",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:38:36.362Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:38:50.219Z",
+      "feature": "server",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:39:31.461Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:39:45.289Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:40:12.449Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:40:37.707Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:41:06.585Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:41:35.866Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:42:29.872Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:42:42.293Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:42:49.112Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:43:07.259Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:43:28.055Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:43:37.524Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:43:55.328Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:46:43.220Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:48:37.395Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:48:51.345Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:49:12.781Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:49:22.833Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:49:36.910Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:49:51.634Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:50:32.952Z",
+      "feature": "test",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:57:36.546Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:57:50.212Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T00:58:06.572Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T04:10:47.997Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T04:11:09.125Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-08-07T04:11:24.966Z",
+      "feature": "screens",
       "phase": "do",
       "action": "updated"
     }
