@@ -577,8 +577,11 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     onClose()
   }
 
+  /* 품목 내역이 있으면 드로어를 넓힌다 — 거래명세서는 8열(품목·규격·단위·수량·중량·기준·단가·금액)
+     이라 기본 폭(480px)에서는 가로 스크롤로만 볼 수 있다. 명세서 입력이 이 폼의 주 용도인데
+     스크롤하며 숫자를 맞추게 하면 결국 안 쓰게 된다. 품목이 없으면 예전 폭 그대로. */
   return (
-    <Drawer open={open} onClose={onClose}>
+    <Drawer open={open} onClose={onClose} width={hasLines ? "min(1040px, 100vw)" : undefined}>
         <DrawerHead
           title={editInvoice ? "청구서 수정" : (form.kind === "issued" ? "청구서 발행" : "청구서 등록 (수취)")}
           sub={editInvoice ? "청구서 내용을 수정합니다" : (form.kind === "issued" ? "발주처에 청구서를 발행합니다" : "협력사로부터 받은 청구서를 등록합니다")}
