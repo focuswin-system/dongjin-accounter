@@ -371,19 +371,31 @@ function AppInner({ onLogout, user }) {
     };
     apply();
     window.addEventListener("hashchange", apply);
+    return () => window.removeEventListener("hashchange", apply);
+  }, []);
+
+  /* Ctrl+K / Esc.
+   *
+   * Esc 는 **지금 열려 있는 것 중 맨 위 하나만** 닫는다. 여러 개를 한꺼번에 닫으면
+   * 명령팔레트를 닫으려던 Esc 가 뒤에 있던 화면까지 함께 접는다.
+   *
+   * 캡처 단계로 듣는 이유: 드로어도 Esc 를 쓴다(닫기 확인). 무언가 닫았으면
+   * preventDefault 로 표시해 두면, 아래 깔린 드로어가 같은 Esc 로 "정말 닫을까요?"를
+   * 묻지 않는다(lib/ui.jsx Drawer). 버블 단계로 두면 등록 순서에 따라 누가 먼저
+   * 받을지가 달라져서, 팔레트를 드로어 위에 띄운 순간부터 순서가 뒤집힌다. */
+  useEffect(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault(); setCmdOpen(true);
-      } else if (e.key === "Escape") {
-        setCmdOpen(false); setSidebarOpen(false); setFaqOpen(false);
+        e.preventDefault(); setCmdOpen(true); return;
       }
+      if (e.key !== "Escape") return;
+      if (cmdOpen)     { setCmdOpen(false);     e.preventDefault(); return; }
+      if (faqOpen)     { setFaqOpen(false);     e.preventDefault(); return; }
+      if (sidebarOpen) { setSidebarOpen(false); e.preventDefault(); }
     };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("hashchange", apply);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, []);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [cmdOpen, faqOpen, sidebarOpen]);
 
   // nudgeMode → localStorage 저장
   useEffect(() => { localStorage.setItem("nudgeMode", nudgeMode); }, [nudgeMode]);

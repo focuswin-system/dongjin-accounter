@@ -340,13 +340,98 @@ export const Loading = ({ label = "불러오는 중…", size = 26 }) => (
   </div>
 );
 
+/* 열려 있는 드로어들. Esc 는 **맨 위 것만** 받는다 —
+   드로어 위에 드로어가 뜨는 화면이 있어서(청구서 상세 → 수정), 안 그러면 둘 다 반응한다. */
+const drawerStack = [];
+
+/**
+ * Drawer — 모든 폼·상세가 쓰는 옆판.
+ *
+ * Esc 로 닫을 때는 **한 번 묻는다.** 여태 Esc 가 아예 안 먹어서 답답했는데,
+ * 그렇다고 바로 닫으면 한참 채운 청구서가 습관적인 Esc 한 번에 통째로 사라진다.
+ *   Esc → "정말 닫을까요?"  ·  Enter → 닫기  ·  Esc 한 번 더 → 취소
+ *
+ * 바깥(백드롭) 클릭은 예전처럼 바로 닫는다. 자주 쓰는 닫기 동작이라 매번 물으면
+ * 그쪽이 성가셔진다 — 실수로 눌리는 쪽은 Esc다.
+ */
 export const Drawer = ({ open, onClose, width = "min(480px, 100vw)", label, children }) => {
+  const [asking, setAsking] = useState(false);
+  const meRef = useRef({});
+  const okRef = useRef(null);
+
+  // 열려 있는 동안만 스택에 오른다(맨 뒤가 맨 위)
+  useEffect(() => {
+    if (!open) return;
+    const me = meRef.current;
+    drawerStack.push(me);
+    return () => {
+      const i = drawerStack.indexOf(me);
+      if (i >= 0) drawerStack.splice(i, 1);
+    };
+  }, [open]);
+
+  // 닫히면 질문도 접는다 — 다음에 열 때 물음이 남아 있으면 안 된다
+  useEffect(() => { if (!open) setAsking(false); }, [open]);
+
+  const isTop = () => drawerStack[drawerStack.length - 1] === meRef.current;
+
+  /* 첫 Esc — **버블 단계**에서 받는다. 안쪽 부품(콤보박스 드롭다운)이 Esc 를 먼저 쓰고
+     전파를 끊으면 여기까지 오지 않는다. 드롭다운 하나 닫으려다 드로어가 "정말 닫을까요?"를
+     묻는 일은 없어야 한다. 명령팔레트·FAQ 도 캡처 단계에서 먼저 처리하고 preventDefault 로
+     표시하므로(App.jsx), 그때도 여기선 안 묻는다. */
+  useEffect(() => {
+    if (!open || asking) return;
+    const onKey = (e) => {
+      if (e.key !== "Escape" || e.defaultPrevented || !isTop()) return;
+      e.preventDefault();
+      setAsking(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, asking]);
+
+  /* 묻는 동안엔 Enter·Esc 를 **캡처 단계**에서 가로챈다 —
+     뒤에 있는 입력칸이나 콤보박스가 Enter 를 먼저 삼키면 '닫기'가 안 먹는다. */
+  useEffect(() => {
+    if (!open || !asking) return;
+    const onKey = (e) => {
+      if (!isTop()) return;
+      if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); setAsking(false); onClose?.(); }
+      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setAsking(false); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open, asking, onClose]);
+
+  // 물어보는 순간 '닫기'에 초점을 준다 — Enter 가 무엇을 누르는지 눈으로도 보이게
+  useEffect(() => { if (asking) okRef.current?.focus(); }, [asking]);
+
   if (!open) return null;
   return createPortal(
     <>
       <div className="drawer-backdrop open" onClick={onClose}/>
       <aside className="drawer open" role="dialog" aria-label={label} style={{ width }}>
         {children}
+        {asking && (
+          <div className="drawer-ask" onClick={() => setAsking(false)}>
+            <div className="drawer-ask-box" role="alertdialog" aria-label="닫기 확인"
+              onClick={e => e.stopPropagation()}>
+              <div className="fw-700" style={{ fontSize: 15 }}>정말 닫을까요?</div>
+              <div className="text-sm text-muted" style={{ marginTop: 6 }}>
+                쓰던 내용은 저장되지 않아요.
+              </div>
+              <div className="row gap-8" style={{ justifyContent: "flex-end", marginTop: 16 }}>
+                <button type="button" className="btn" onClick={() => setAsking(false)}>
+                  계속 쓰기 <span className="kbd" style={{ marginLeft: 4 }}>Esc</span>
+                </button>
+                <button type="button" ref={okRef} className="btn primary"
+                  onClick={() => { setAsking(false); onClose?.(); }}>
+                  닫기 <span className="kbd" style={{ marginLeft: 4 }}>↵</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </aside>
     </>,
     document.body
@@ -546,7 +631,12 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
       e.preventDefault();
       if (filtered[hi]) pick(filtered[hi]);
       else if (q && allowAdd) { onAddNew?.(q); setOpen(false); setQ(""); }
-    } else if (e.key === "Escape") { setOpen(false); setQ(""); }
+    } else if (e.key === "Escape") {
+      /* 드롭다운이 열려 있을 때의 Esc 는 **여기서 끝난다.** 위로 흘려보내면
+         드롭다운만 닫으려던 Esc 가 드로어의 "정말 닫을까요?"까지 띄운다. */
+      if (open) e.stopPropagation();
+      setOpen(false); setQ("");
+    }
     else if (e.key === "Tab") { setOpen(false); setQ(""); }
   };
 
