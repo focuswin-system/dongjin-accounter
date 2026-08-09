@@ -806,7 +806,15 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 .doc-ws-viewport .doc-paper { box-shadow: 0 6px 28px -10px rgba(15,23,42,0.22); border: 1px solid var(--line); border-radius: 2px; }
 /* 세로 양식은 콘텐츠 안에서 가운데(가로 양식=지급결의서는 그대로 폭 채움) */
 .doc-ws-viewport.is-portrait { display: flex; justify-content: center; }
-@media (max-width: 960px) { .doc-ws { grid-template-columns: 1fr; } }
+@media (max-width: 960px) {
+  .doc-ws { grid-template-columns: 1fr; }
+  /* 한 칸으로 접어도 그 칸이 852px 이 되어 화면 전체가 가로로 밀렸다.
+     그리드 칸은 기본이 min-width:auto 라 **내용보다 작아지지 않는다** — 여기 내용은
+     A4 종이(794px 고정)다. 칸이 줄어들 수 있게 풀어준다. */
+  .doc-ws-side, .doc-ws-main { min-width: 0; }
+  /* 종이 폭은 줄일 수 없다(인쇄물 그대로여야 하니까). 화면을 미는 대신 이 상자가 스크롤한다 — 표와 같은 원칙. */
+  .doc-ws-viewport { overflow-x: auto; }
+}
 
 /* 定算內譯書 — 실물이 A4 세로. 내용에 따라 크기가 변하지 않게 A4 고정 캔버스(210×297)를 갖는다.
    내용이 적으면 아래 여백으로 남고, 많으면(기타경비 다수) 그만큼 늘어난다(인쇄 시 다음 장). */
@@ -980,6 +988,7 @@ body:has([data-modal-open]) {
 }
 .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
 .drawer {
+  /* relative 가 아니라 fixed 지만, 안의 .drawer-ask(absolute) 가 이 상자를 기준 삼는다 */
   position: fixed; right: 0; top: 0; bottom: 0; width: 480px;
   background: #fff; z-index: 101;
   box-shadow: -20px 0 60px -20px rgba(15,23,42,0.18);
@@ -991,6 +1000,19 @@ body:has([data-modal-open]) {
 .drawer-head { padding: 18px 22px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
 .drawer-body { flex: 1; overflow-y: auto; padding: 22px; }
 .drawer-foot { padding: 14px 22px; border-top: 1px solid var(--line); display: flex; gap: 8px; }
+
+/* Esc 로 닫으려 할 때의 확인. 드로어 **안에** 덮는다 — 화면 한가운데로 띄우면
+   무엇을 닫는다는 건지가 멀어진다. 뒤는 살짝 가려 지금 답할 것이 이것뿐임을 말한다. */
+.drawer-ask {
+  position: absolute; inset: 0; z-index: 2;
+  background: rgba(255, 255, 255, 0.72); backdrop-filter: blur(1.5px);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.drawer-ask-box {
+  width: 100%; max-width: 340px; background: #fff;
+  border: 1px solid var(--line); border-radius: 14px; padding: 20px;
+  box-shadow: 0 18px 44px -16px rgba(15, 23, 42, 0.28);
+}
 
 /* ───── Progress steps ───── */
 .steps { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -1101,6 +1123,16 @@ body:has([data-modal-open]) {
   /* Table horizontal scroll */
   .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .table-scroll .table { min-width: 600px; }
+
+  /* DataTable 을 안 쓰고 .card 안에 표를 직접 그린 화면이 스무 곳 넘는다
+     (정기청구·정기지출·환경설정 사용자 등). .card 는 둥근 모서리를 지키려고
+     overflow:hidden 이라, 좁은 화면에서 표가 **잘린 채 스크롤도 안 됐다** —
+     오른쪽 열(상태·금액)을 볼 방법이 아예 없었다.
+     표를 직접 품은 카드만 골라 가로 스크롤을 준다.
+     그 카드들은 overflow:hidden 을 **인라인 style 로** 달고 있어서 !important 가 있어야 이긴다.
+     세로는 인라인 hidden 그대로 둔다 — 카드 높이가 내용에 맞춰지므로 잘릴 것이 없다. */
+  .card:has(> .table) { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+  .card:has(> .table) > .table { min-width: 600px; }
 
   .drawer { width: 100% !important; }
 

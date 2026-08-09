@@ -2199,12 +2199,15 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
       <Spacer h={20}/>
 
       <div className="card">
-        <div className="row gap-8" style={{ padding: "16px 16px", borderBottom: "1px solid var(--line)" }}>
+        {/* 상태 칩 6개 + 검색·필터가 한 줄에 서는데 .row 는 줄바꿈을 안 한다 —
+            좁은 화면에서 합이 상자보다 넓어져 화면 전체가 가로로 밀렸다.
+            검색칸도 220px 고정이라 접힌 줄에서 다시 비어져 나온다(거래내역·청구서와 같은 처리). */}
+        <div className="row gap-8" style={{ padding: "16px 16px", borderBottom: "1px solid var(--line)", flexWrap: "wrap" }}>
           {tabs.map(t => (
             <button key={t} className={`chip ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t}</button>
           ))}
-          <div className="ml-auto row gap-8">
-            <div className="search" style={{ margin: 0, width: 220, padding: "6px 10px" }}>
+          <div className="ml-auto row gap-8" style={{ flexWrap: "wrap" }}>
+            <div className="search" style={{ margin: 0, width: "min(220px, 100%)", padding: "6px 10px" }}>
               <Icon.Search size={14}/>
               <input value={q} onChange={e => setQ(e.target.value)} placeholder="계약/거래처 검색"/>
             </div>
