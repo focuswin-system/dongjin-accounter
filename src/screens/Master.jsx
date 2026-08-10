@@ -1437,7 +1437,7 @@ const AdjustDrawer = ({ account, onClose, onSave }) => {
 // ── 회사 정보 패널 (자사 기준정보, 단일 레코드) ────────────────────
 const CompanyPanel = ({ embedded = false }) => {
   const toast = useToast()
-  const [form, setForm] = useState({ name:'', biz_no:'', ceo:'', biz_type:'', biz_item:'', address:'', phone:'', fax:'', email:'', main_account:'' })
+  const [form, setForm] = useState({ name:'', biz_no:'', ceo:'', biz_type:'', biz_item:'', address:'', phone:'', fax:'', email:'', main_account:'', closing_day: 0, week_start_day: 1 })
   const [accounts, setAccounts] = useState([])
 
   useEffect(() => {
@@ -1446,6 +1446,7 @@ const CompanyPanel = ({ embedded = false }) => {
         name: c.name||'', biz_no: c.biz_no||'', ceo: c.ceo||'', biz_type: c.biz_type||'',
         biz_item: c.biz_item||'', address: c.address||'', phone: c.phone||'', fax: c.fax||'',
         email: c.email||'', main_account: c.main_account||'',
+        closing_day: Number(c.closing_day) || 0, week_start_day: Number(c.week_start_day ?? 1),
       })
     })
     api.getAccounts().then(list => setAccounts(list.filter(a => a.kind !== 'card')))
@@ -1537,6 +1538,44 @@ const CompanyPanel = ({ embedded = false }) => {
             options={[{ value: '', label: '선택 안 함' }, ...accounts.map(a => ({ value: a.name, label: a.name }))]}
             placeholder="대표 입금계좌 선택"/>
           <div className="text-xs text-muted2" style={{ marginTop: 6 }}>세금계산서·청구서에 표기할 기본 수금 계좌예요.</div>
+        </div>
+
+        <div style={{ height: 1, background:'var(--line)' }}/>
+
+        {/* 회사가 세는 '한 달'과 '한 주'.
+            25일 마감이면 7월분은 6/26~7/25 다 — 달력월로 세면 매입현황 표가 실물과 영영 안 맞는다. */}
+        <div>
+          <div className="fw-600" style={{ marginBottom: 4 }}>집계 기간</div>
+          <div className="text-xs text-muted2" style={{ marginBottom: 12 }}>
+            매입·매출 현황을 어느 구간으로 묶을지 정해요. 장부 마감(월 마감)과는 다른 설정이에요.
+          </div>
+
+          <div className="row gap-16" style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <label className="label" style={{ marginBottom: 8 }}>마감일</label>
+              <Combobox value={String(form.closing_day)} onChange={v => f('closing_day', Number(v) || 0)} allowAdd={false}
+                options={[{ value: '0', label: '달력월 그대로 (1일~말일)' },
+                  ...Array.from({ length: 28 }, (_, i) => ({ value: String(i + 1), label: `매월 ${i + 1}일 마감` }))]}
+                placeholder="마감일 선택"/>
+              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+                {form.closing_day > 0
+                  ? `7월분은 6월 ${form.closing_day + 1}일 ~ 7월 ${form.closing_day}일로 집계돼요.`
+                  : '7월분은 7월 1일 ~ 7월 31일로 집계돼요.'}
+                {/* 29~31 은 2월에 없는 날짜라 그 달만 조용히 어긋난다 — 아예 고를 수 없게 뒀다 */}
+              </div>
+            </div>
+
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <label className="label" style={{ marginBottom: 8 }}>주 시작 요일</label>
+              <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+                {['일', '월', '화', '수', '목', '금', '토'].map((d, i) => (
+                  <button key={i} className={`chip ${form.week_start_day === i ? 'active' : ''}`}
+                    onClick={() => f('week_start_day', i)}>{d}</button>
+                ))}
+              </div>
+              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>주별 소계를 이 요일부터 끊어요.</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

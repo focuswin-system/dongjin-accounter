@@ -50,6 +50,10 @@ export const NAV_TREE = [
         { id: "purchase_req", label: "구매품의서", icon: Icon.Receipt },
         // 매달 매입처에 일괄이체할 명단. 지금은 엑셀로 손으로 만들던 서류다.
         { id: "payment_run", label: "매입 결제내역", icon: Icon.Bank },
+        /* 품목 단위로 기간을 가로지르는 표. 실물은 "주별 총 매입 현황(매월 25일 마감)".
+           한 화면에서 매입·매출을 토글하므로 이름도 둘을 다 담는다 — '매입 현황'이라 두면
+           매출로 바꿨을 때 왼쪽 메뉴와 화면 제목이 어긋난다. */
+        { id: "purchase_status", label: "매입·매출 현황", icon: Icon.Chart },
       ]},
       { label: "장부", items: [
         { id: "ledger",   label: "전체 거래내역", icon: Icon.Wallet },
@@ -249,6 +253,7 @@ export const LEAF_TAGS = {
   quote_req:        '견적 RFQ 단가문의',
   purchase_req:     '품의 구매요청 발주요청 稟議',
   payment_run:      '결제내역 이체 일괄이체 송금 지급명단 매입처결제',
+  purchase_status:  '매입현황 주별 품목별 자재 구매현황 매출현황',
   // 장부
   ledger:           '거래 입출금 통장내역 원장 전표 입금 출금',
   contract:         '계약조회 계약목록 전체계약 수주발주 통합',
@@ -312,7 +317,7 @@ export const PORTAL = [
         { label: '', items: ['misc_pl', 'misc_income'] },
       ]},
       { id: 'acct_docs', label: '문서', icon: Icon.Sign, desc: '지급결의서·정산내역서·견적요청서·구매품의서', groups: [
-        { label: '', items: ['doc', 'settlement', 'quote_req', 'purchase_req', 'payment_run'] },
+        { label: '', items: ['doc', 'settlement', 'quote_req', 'purchase_req', 'payment_run', 'purchase_status'] },
       ]},
       /* 계약 통합 목록을 빼고 나니 남은 게 '전체 거래내역' 하나다 → 타일 안에 버튼 하나짜리
        * 포털 페이지를 두지 않고 바로 거래내역으로 보낸다(인사관리·자금 운용 타일과 같은 방식).

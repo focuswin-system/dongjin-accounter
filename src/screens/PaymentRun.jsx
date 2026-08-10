@@ -15,16 +15,6 @@ import { downloadCsv } from '../lib/export'
  *   실제 지급 처리는 대금 청구서의 일괄 정산이 맡는다 — 돈이 나가는 길을 둘로 만들면
  *   나중에 어느 쪽으로 나갔는지 못 짚는다.
  */
-const monthOptions = () => {
-  const out = []
-  const d = new Date()
-  for (let i = 0; i < 18; i++) {
-    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
-    d.setMonth(d.getMonth() - 1)
-  }
-  return out
-}
-
 export const PaymentRunScreen = ({ go }) => {
   const toast = useToast()
   const [month, setMonth] = useState(() => localToday().slice(0, 7))
@@ -76,7 +66,9 @@ export const PaymentRunScreen = ({ go }) => {
       <div className="card card-pad no-print" style={{ marginBottom: 16 }}>
         <div className="row gap-12" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
           <span className="text-sm fw-600">기준월</span>
-          <FilterSelect value={month} onChange={v => v && setMonth(v)} options={monthOptions()} placeholder="선택"/>
+          {/* 목록형은 최근 몇 달만 담게 돼 작년 자료를 못 본다. 비울 수 없는 값이라 월 입력이 맞다. */}
+          <input className="input" type="month" style={{ width: 150 }}
+            value={month} onChange={e => e.target.value && setMonth(e.target.value)}/>
           <span className="text-xs text-muted2">그 달 말일까지 낼 미지급금 — 기한이 지난 것도 함께 모읍니다</span>
           {/* ⚠ 이 칸은 **거르지 않는다.** 문서 머리에 '어느 계좌에서 보낼지'를 적을 뿐이다.
               미지급금은 아직 안 나간 돈이라 출금 계좌가 정해져 있지 않다(대개 비어 있다) —

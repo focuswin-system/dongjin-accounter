@@ -939,6 +939,12 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
   .no-print { display: none !important; }
   @page { size: A4; margin: 16mm; }
 
+  /* 화면에서 가로 스크롤로 보던 표는 종이에 그대로 옮기면 **오른쪽이 잘려 나간다**
+     (매입·매출 현황의 금액·부가세·계가 통째로 사라졌다). 종이엔 스크롤이 없으므로
+     최소 폭을 풀고 넘치는 부분을 보이게 해, 브라우저가 폭에 맞춰 접어 그리게 한다. */
+  .table-scroll { overflow: visible !important; }
+  .table-scroll > table { min-width: 0 !important; width: 100% !important; }
+
   /* 보고서는 표가 길다 — 행이 페이지 경계에서 잘리지 않게 한다. */
   .report-print table { page-break-inside: auto; }
   .report-print tr { page-break-inside: avoid; page-break-after: auto; }

@@ -1074,6 +1074,14 @@ async function initDb(conn) {
      * ⚠ 예금주는 상호와 다른 경우가 흔하다 — 실제 명단에 '김선국맑은유통', '박말숙태강금속'
      *   처럼 개인 명의 계좌가 섞여 있다. 상호로 대신할 수 없어 별도 칸이 필요하다.
      * pay_account 는 지우지 않는다(기존 입력 보존). 화면이 옛 값을 힌트로 보여준다. */
+    /* 매입·매출 집계의 '한 달'과 '한 주'를 회사가 정한다.
+     *
+     * 받은 실물 표머리에 "주별 총 매입 현황 (매월 25일 마감)" 이라 적혀 있다 — 달력월이 아니다.
+     * 25일 마감이면 7월분은 6/26~7/25 다. 이걸 달력월로 세면 표가 실물과 영영 안 맞는다.
+     * 주도 월~금이 기본이지만 회사마다 다를 수 있어 시작 요일을 연다.
+     * 0=일 … 1=월(기본). 마감일 0 은 '달력월 그대로'라는 뜻이다. */
+    await ensureColumn('company_info', 'closing_day',    "closing_day TINYINT NOT NULL DEFAULT 0")
+    await ensureColumn('company_info', 'week_start_day', "week_start_day TINYINT NOT NULL DEFAULT 1")
     await ensureColumn('vendors',   'bank_name',      "bank_name VARCHAR(60)")
     await ensureColumn('vendors',   'bank_account',   "bank_account VARCHAR(60)")
     await ensureColumn('vendors',   'account_holder', "account_holder VARCHAR(100)")

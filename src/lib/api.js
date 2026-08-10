@@ -419,6 +419,12 @@ export const api = {
     try { return await req(`/payment-runs?month=${month}`) } catch { return { month, total: 0, count: 0, missingBank: 0, vendors: [] } }
   },
 
+  /* 주별 총 매입/매출 현황 — 청구서 품목을 기간으로 모은다(조회 전용). */
+  async getPurchaseStatus(month, kind = 'received') {
+    try { return await req(`/purchase-status?month=${month}&kind=${kind}`) }
+    catch { return { month, kind, weeks: [], amount: 0, vat: 0, total: 0, count: 0, from: '', to: '', closingDay: 0 } }
+  },
+
   /* 첫 세팅 진행 상황(건수만). 실패하면 '다 됐다'로 보고 카드를 숨긴다 —
      안내가 목적인데 그것 때문에 화면에 오류가 뜨면 본말이 뒤집힌다. */
   async getSetupStatus() {

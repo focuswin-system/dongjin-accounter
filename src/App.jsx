@@ -14,6 +14,7 @@ import { ContractListScreen, ContractScreen, CONTRACT_LIST } from './screens/Con
 import { DocsScreen, EvidenceScreen, EvidenceAttachDrawer, ExcelScreen, ReportsScreen } from './screens/Docs'
 import { SettlementScreen } from './screens/Settlement'
 import { PaymentRunScreen } from './screens/PaymentRun'
+import { PurchaseStatusScreen } from './screens/PurchaseStatus'
 import { PurchaseReqScreen } from './screens/PurchaseReq'
 import { QuoteRequestScreen } from './screens/QuoteRequest'
 import { HRScreen } from './screens/HR'
@@ -561,6 +562,7 @@ function AppInner({ onLogout, user }) {
       case "doc":             return <DocsScreen/>;
       case "settlement":      return <SettlementScreen/>;
       case "payment_run":     return <PaymentRunScreen go={go}/>;
+      case "purchase_status": return <PurchaseStatusScreen go={go}/>;
       case "purchase_req":    return <PurchaseReqScreen/>;
       case "quote_req":       return <QuoteRequestScreen/>;
       // 증빙 관리는 아직 목 데이터만 보여주는 화면이라 nav 에서 뺐는데, #evidence 해시로는
