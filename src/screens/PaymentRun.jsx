@@ -78,10 +78,16 @@ export const PaymentRunScreen = ({ go }) => {
           <span className="text-sm fw-600">기준월</span>
           <FilterSelect value={month} onChange={v => v && setMonth(v)} options={monthOptions()} placeholder="선택"/>
           <span className="text-xs text-muted2">그 달 말일까지 낼 미지급금 — 기한이 지난 것도 함께 모읍니다</span>
+          {/* ⚠ 이 칸은 **거르지 않는다.** 문서 머리에 '어느 계좌에서 보낼지'를 적을 뿐이다.
+              미지급금은 아직 안 나간 돈이라 출금 계좌가 정해져 있지 않다(대개 비어 있다) —
+              그걸로 거르면 명단 대부분이 사라져서 정작 낼 돈이 안 보인다.
+              그래서 '거르는 칸'처럼 보이지 않게 이름과 설명을 붙여둔다. 고르면 걸러진다고
+              믿게 만드는 화면은 안 만든 것만 못하다. */}
           <div className="row gap-8 ml-auto" style={{ alignItems: 'center' }}>
-            <span className="text-sm fw-600">출금 계좌</span>
+            <span className="text-sm fw-600">보낼 계좌</span>
             <FilterSelect value={fromAccount} onChange={setFromAccount}
               options={accounts.map(a => a.name)} placeholder="선택 안 함"/>
+            <span className="text-xs text-muted2">문서 머리에 적어요 · 목록은 안 걸러집니다</span>
           </div>
         </div>
       </div>

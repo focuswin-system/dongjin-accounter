@@ -18,7 +18,15 @@ export const StatementDoc = ({ invoice, company, vendor, printId = 'statement-pr
   const lines = invoice?.lines || []
   const useWeight = lines.some(l => Number(l.weight) > 0)
   const supply = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0) || Number(invoice?.supplyAmount) || 0
-  const vat = Number(invoice?.vatAmount) || 0
+  /* 세액은 **줄별 값을 우선**한다. 받은 실물 명세서가 전부 줄마다 세액을 적고, 같은 장에
+     과세와 면세가 섞이기 때문이다(자재 + 근조화환). 줄에 값이 없으면 청구서 세액을 쓴다.
+     lineVat 은 '이 줄에 적을 세액' — null 이면 청구서 과세유형대로 자동 계산한다. */
+  const taxable = (invoice?.taxType || '과세') === '과세'
+  const lineVat = (l) => (l.vat === null || l.vat === undefined
+    ? (taxable ? Math.round((Number(l.amount) || 0) * 0.1) : 0)
+    : Number(l.vat) || 0)
+  const lineVatSum = lines.reduce((s, l) => s + lineVat(l), 0)
+  const vat = lines.length ? lineVatSum : (Number(invoice?.vatAmount) || 0)
 
   /* 발행(매출)이면 우리가 공급자, 수취(매입)면 거래처가 공급자다.
      명세서는 '누가 누구에게 줬는가'를 적는 서류라 이 방향이 뒤집히면 서류가 거짓말을 한다. */
@@ -39,7 +47,7 @@ export const StatementDoc = ({ invoice, company, vendor, printId = 'statement-pr
   // 양식 느낌 — 품목이 적어도 표가 너무 납작해지지 않게 빈 줄로 채운다
   const blanks = Math.max(0, 5 - lines.length)
   // NO · 품명 · 단위 · 수량 · (중량) · 단가 · 금액
-  const cols = useWeight ? 7 : 6
+  const cols = useWeight ? 8 : 7
   // 합계 줄은 '금액' 칸 하나만 남기고 나머지를 라벨로 합친다
   const labelSpan = cols - 1
 
@@ -64,8 +72,9 @@ export const StatementDoc = ({ invoice, company, vendor, printId = 'statement-pr
             <th style={{ width: 50 }}>단위</th>
             <th style={{ width: 56 }}>수량</th>
             {useWeight && <th style={{ width: 66 }}>중량</th>}
-            <th style={{ width: 92 }}>단가</th>
-            <th style={{ width: 106 }}>금액</th>
+            <th style={{ width: 88 }}>단가</th>
+            <th style={{ width: 100 }}>금액</th>
+            <th style={{ width: 84 }}>부가세</th>
           </tr>
         </thead>
         <tbody>
@@ -87,6 +96,8 @@ export const StatementDoc = ({ invoice, company, vendor, printId = 'statement-pr
               )}
               <td className="num" style={{ textAlign: 'right' }}>{fmtNum(l.unit_price || 0)}</td>
               <td className="num fw-600" style={{ textAlign: 'right' }}>{fmtNum(l.amount || 0)}</td>
+              {/* 면세 줄은 0 이 아니라 **빈 칸**이다 — 실물 명세서가 그렇게 비워둔다 */}
+              <td className="num" style={{ textAlign: 'right' }}>{lineVat(l) ? fmtNum(lineVat(l)) : ''}</td>
             </tr>
           ))}
           {Array.from({ length: blanks }).map((_, i) => (

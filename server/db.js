@@ -988,6 +988,17 @@ async function initDb(conn) {
     await ensureColumn('contract_items', 'price_basis', "price_basis VARCHAR(10) DEFAULT 'qty'")
     await ensureColumn('invoice_lines',  'weight',      "weight DECIMAL(14,3) DEFAULT 0")
     await ensureColumn('invoice_lines',  'price_basis', "price_basis VARCHAR(10) DEFAULT 'qty'")
+    /* 줄별 세액과 비고.
+     *
+     * 실제 거래명세서와 매입현황표는 **줄마다** 부가세를 적는다. 그리고 같은 청구서 안에서도
+     * 과세와 면세가 섞인다 — 매입현황표에 근조화환 80,000원은 부가세 칸이 비어 있다(면세).
+     * 청구서 단위 과세유형(tax_type)만으로는 그 표를 만들 수 없다.
+     *
+     * vat 는 NULL 이 '아직 안 정했다'는 뜻이다. 0 은 '면세라서 0'이라는 뜻이라 서로 다르다 —
+     * NULL 이면 화면이 청구서 과세유형으로 자동 계산해 채운다.
+     * note 는 단가 근거("14,500원/KG")나 수령자 이름이 들어가는 칸이다. */
+    await ensureColumn('invoice_lines',  'vat',  "vat BIGINT NULL")
+    await ensureColumn('invoice_lines',  'note', "note VARCHAR(200)")
     // ── 부가세 정합성 ──
     // 직접 입력 거래에도 공급가/세액을 남긴다. 여태 amount(합계) 하나뿐이라, 청구서를 거치지 않은
     // 거래의 매출·매입세액이 부가세 집계에서 통째로 빠졌다. NULL = 세액을 모르는 과거 거래(집계 제외).

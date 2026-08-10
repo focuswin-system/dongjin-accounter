@@ -25,7 +25,7 @@ async function attachMatches(db, invoice) {
   /* 품목 내역(거래명세서) — 폼에서 수정하려면 읽을 수 있어야 한다.
      라인이 없는 청구서(총액만)는 빈 배열이라 화면이 기존처럼 총액 입력으로 동작한다. */
   const [lines] = await db.execute(
-    `SELECT id, item_id, name, spec, unit, qty, weight, price_basis, unit_price, amount
+    `SELECT id, item_id, name, spec, unit, qty, weight, price_basis, unit_price, amount, vat, note
      FROM invoice_lines WHERE invoice_id = ? ORDER BY sort_order, created_at`, [invoice.id])
   const paid = matches.reduce((s, m) => s + Number(m.amount), 0)
   return { ...invoice, matches, docs, lines, paidAmount: paid, remainAmount: Number(invoice.total_amount) - paid }
@@ -204,10 +204,13 @@ function amountsFromLines(body) {
 async function insertInvoiceLine(db, invoiceId, l, ord) {
   await db.execute(
     `INSERT INTO invoice_lines
-       (id, invoice_id, item_id, name, spec, unit, qty, weight, price_basis, unit_price, amount, sort_order)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+       (id, invoice_id, item_id, name, spec, unit, qty, weight, price_basis, unit_price, amount, vat, note, sort_order)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [randomUUID(), invoiceId, l.item_id || null, l.name || '(품목명 없음)', l.spec || null, l.unit || null,
-     l.qty || 0, l.weight || 0, normBasis(l.price_basis), l.unit_price || 0, l.amount || 0, ord])
+     l.qty || 0, l.weight || 0, normBasis(l.price_basis), l.unit_price || 0, l.amount || 0,
+     // NULL 은 '아직 안 정했다', 0 은 '면세라서 0' — 서로 다른 뜻이라 구분해 넣는다
+     (l.vat === undefined || l.vat === null || l.vat === '') ? null : Number(l.vat) || 0,
+     l.note || null, ord])
 }
 
 async function replaceInvoiceLines(db, invoiceId, lines, itemIdx = null, register = false) {
@@ -256,6 +259,10 @@ async function writeInvoiceLines(db, invoiceId, lines) {
         weight: numOf(l.weight),
         price_basis: normBasis(l.price_basis),
         unit_price: intOf(l.unit_price),
+        /* 줄별 세액 — NULL 은 '아직 안 정했다', 0 은 '면세라서 0'. 뜻이 다르므로 뭉개지 않는다.
+           같은 청구서에 과세와 면세가 섞이는 일이 실제로 있다(자재 + 근조화환). */
+        vat: (l.vat === undefined || l.vat === null || l.vat === '') ? null : intOf(l.vat),
+        note: String(l.note || '').trim() || null,
       }
       // 금액을 안 보냈으면 계산해 채운다(화면과 같은 규칙 — lib/lineAmount.js)
       row.amount = l.amount === undefined || l.amount === null || l.amount === ''

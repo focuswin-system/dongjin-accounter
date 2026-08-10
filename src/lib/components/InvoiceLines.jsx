@@ -16,7 +16,13 @@ import { computeLineAmount, num, BASIS_LABEL } from '../lineAmount'
  * · 단가 기준(수량/중량)은 줄마다 다르다. 같은 청구서에 개당 파는 품목과 ㎏당 파는 자재가 섞인다.
  * · 기준정보 품목을 고르면 규격·단위·단가·중량을 채워 준다. 없으면 직접 입력해도 된다.
  */
-export const InvoiceLines = ({ lines = [], onChange, itemMaster = [] }) => {
+export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = '과세' }) => {
+  /* 줄별 세액의 기본값 — 비워두면 청구서 과세유형을 따라 자동으로 채워 보여준다.
+     실제 명세서·매입현황표가 줄마다 세액을 적고, 같은 청구서에 과세와 면세가 섞이는 일이
+     실제로 있다(자재 + 근조화환). 그래서 줄마다 고칠 수 있어야 하되,
+     대부분은 손댈 일이 없으므로 자동값이 보이는 편이 낫다. */
+  const autoVat = (l) => (taxType === '과세' ? Math.round(num(l.amount) * 0.1) : 0)
+  const shownVat = (l) => (l.vat === null || l.vat === undefined || l.vat === '' ? autoVat(l) : num(l.vat))
   const itemOptions = useMemo(() => itemMaster.map(it => ({
     value: it.id,
     label: it.name,
@@ -60,6 +66,7 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [] }) => {
   }
 
   const supplyTotal = lines.reduce((s, l) => s + num(l.amount), 0)
+  const vatTotal = lines.reduce((s, l) => s + shownVat(l), 0)
 
   return (
     <div>
@@ -77,7 +84,7 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [] }) => {
         </div>
       ) : (
         <div className="card" style={{ overflowX: 'auto', marginBottom: 8 }}>
-          <table className="table" style={{ minWidth: 820 }}>
+          <table className="table" style={{ minWidth: 1030 }}>
             <thead>
               <tr>
                 <th style={{ minWidth: 150 }}>품목</th>
@@ -88,6 +95,8 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [] }) => {
                 <th style={{ width: 92 }}>단가 기준</th>
                 <th className="num-right" style={{ width: 110 }}>단가</th>
                 <th className="num-right" style={{ width: 120 }}>금액</th>
+                <th className="num-right" style={{ width: 104 }}>부가세</th>
+                <th style={{ minWidth: 110 }}>비고</th>
                 <th style={{ width: 62 }}></th>
               </tr>
             </thead>
@@ -142,6 +151,23 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [] }) => {
                     )}
                   </td>
                   <td>
+                    {/* 비워두면 과세유형대로 자동. 면세 줄만 0 으로 고치면 된다 —
+                        직접 넣은 값은 그 줄의 세액으로 굳는다(자동값과 구별해 표시). */}
+                    <MoneyInput value={String(shownVat(l))}
+                      onChange={(raw, v) => set(i, { vat: v })}/>
+                    {(l.vat === null || l.vat === undefined || l.vat === '') ? (
+                      <div className="text-xs text-muted2" style={{ padding: '2px 0' }}>자동</div>
+                    ) : (
+                      <button type="button" className="text-xs text-muted2"
+                        style={{ border: 0, background: 'none', cursor: 'pointer', padding: '2px 0' }}
+                        title="과세유형대로 다시 계산" onClick={() => set(i, { vat: null })}>
+                        자동으로
+                      </button>
+                    )}
+                  </td>
+                  <td><input className="input" value={l.note || ''} placeholder="예: 14,500원/KG"
+                    onChange={e => set(i, { note: e.target.value })}/></td>
+                  <td>
                     <div className="row gap-4">
                       {/* 복사에 Plus 를 쓰면 위쪽 '품목 추가'와 같은 아이콘이라 '새 줄'로 읽힌다 */}
                       <button type="button" className="btn ghost sm" title="이 줄 복사"
@@ -160,8 +186,10 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [] }) => {
 
       {lines.length > 0 && (
         <div className="row text-sm" style={{ justifyContent: 'flex-end', gap: 8 }}>
-          <span className="text-muted">품목 {lines.length}줄 합계</span>
-          <b className="num">{fmtNum(supplyTotal)}원</b>
+          <span className="text-muted">품목 {lines.length}줄</span>
+          <span className="text-muted">공급가</span><b className="num">{fmtNum(supplyTotal)}</b>
+          <span className="text-muted">세액</span><b className="num">{fmtNum(vatTotal)}</b>
+          <span className="text-muted">계</span><b className="num">{fmtNum(supplyTotal + vatTotal)}원</b>
         </div>
       )}
     </div>
@@ -172,5 +200,5 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [] }) => {
    회색 글씨가 값처럼 읽혀 그대로 저장하면 단위가 빈 명세서가 나왔다. 다르면 고치면 된다. */
 export const blankLine = () => ({
   item_id: '', name: '', spec: '', unit: 'EA', qty: '', weight: '',
-  price_basis: 'qty', unit_price: '', amount: '',
+  price_basis: 'qty', unit_price: '', amount: '', vat: null, note: '',
 })

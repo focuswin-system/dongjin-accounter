@@ -708,6 +708,9 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
         weight: Number(String(l.weight).replace(/[^0-9.-]/g, '')) || 0,
         unit_price: Number(String(l.unit_price).replace(/[^0-9.-]/g, '')) || 0,
         amount: Number(String(l.amount).replace(/[^0-9.-]/g, '')) || 0,
+        // null 은 '자동'(서버가 그대로 NULL 로 둔다), 숫자는 이 줄에 굳힌 세액
+        vat: (l.vat === null || l.vat === undefined || l.vat === '') ? null : Number(String(l.vat).replace(/[^0-9.-]/g, '')) || 0,
+        note: l.note || '',
       })),
       _docs: docs,   // 저장 후 청구서에 연결할 첨부(부모 handleSave가 처리)
     })
@@ -766,7 +769,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
             </div>
           </div>
           {/* 거래명세서식 품목 입력 — 여기서 넣은 합계가 아래 공급가액이 된다 */}
-          <InvoiceLines lines={lines} onChange={setLines} itemMaster={itemMaster}/>
+          <InvoiceLines lines={lines} onChange={setLines} itemMaster={itemMaster} taxType={form.taxType}/>
 
           <div>
             <label className="label">
