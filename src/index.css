@@ -886,6 +886,12 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 .res-total th { background: #F8F9FA; }
 .res-total td { background: #F8F9FA; }
 .cell-input { width: 100%; border: 1px solid var(--line-strong, #ccc); border-radius: 4px; padding: 3px 6px; font-size: 12.5px; font-family: inherit; background: #fff; }
+
+/* ── 거래명세서 ── 공급자·공급받는자를 나란히 세운다(세금계산서와 같은 배치라 눈에 익다) */
+.stmt-parties { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 4px; }
+/* 이 줄의 금액이 중량 × 단가라는 표시. 숫자 옆에 작게 붙여 근거가 보이게 한다 */
+.stmt-basis { font-size: 9px; color: #888; margin-left: 3px; vertical-align: 1px; }
+@media (max-width: 700px) { .stmt-parties { grid-template-columns: 1fr; } }
 .res-foot { display: grid; grid-template-columns: 1fr 260px; gap: 14px; margin-top: 16px; align-items: start; }
 .res-foot.is-full { grid-template-columns: 1fr; }   /* 결재란 없는 문서(견적요청서 등) — 특기사항이 전체 폭 */
 .res-note { border: 1px solid #333; min-height: 90px; }
@@ -907,8 +913,10 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
   body * { visibility: hidden; }
   #resolution-print, #resolution-print *,
   .resolution-print, .resolution-print *,
+  /* 거래명세서는 드로어 안에서 인쇄한다 — 드로어째 찍히면 안 되므로 이 종이만 살린다 */
+  #statement-print, #statement-print *,
   .report-print, .report-print * { visibility: visible; }
-  #resolution-print, .resolution-print,
+  #resolution-print, .resolution-print, #statement-print,
   .report-print { position: absolute; left: 0; top: 0; width: 100%; border: none; box-shadow: none; padding: 0; }
   .no-print { display: none !important; }
   @page { size: A4; margin: 16mm; }

@@ -509,12 +509,16 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
       if (!nm) continue
       const qty = Number(String(l.qty ?? '').replace(/[^0-9.]/g, '')) || 0
       const price = Number(String(l.unit_price ?? '').replace(/[^0-9]/g, '')) || 0
+      /* ㎏당 단가로 파는 품목은 금액 = 중량 × 단가다(lib/lineAmount.js 와 같은 규칙).
+         이걸 안 보면 중량 기준 품목이 수량 기준으로 계산돼 금액이 조용히 달라진다. */
+      const weight = Number(String(l.weight ?? '').replace(/[^0-9.]/g, '')) || 0
+      const basis = l.price_basis === 'weight' ? 'weight' : 'qty'
       const amount = (l.amount != null && l.amount !== '')
         ? (Number(String(l.amount).replace(/[^0-9]/g, '')) || 0)
-        : Math.round(qty * price)
+        : Math.round((basis === 'weight' ? weight : qty) * price)
       if (amount <= 0) continue
       clean.push({ item_id: l.item_id || null, name: nm, spec: l.spec || null, unit: l.unit || null,
-        qty, unit_price: price, amount, cost_price: costOf(l) })
+        qty, weight, price_basis: basis, unit_price: price, amount, cost_price: costOf(l) })
     }
     if (clean.length === 0) { await rollbackQuietly(conn); return res.status(400).json({ error: '청구 금액이 있는 품목이 없어요' }) }
 
@@ -552,8 +556,8 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
     let ord = 0
     for (const l of clean) {
       await conn.execute(
-        'INSERT INTO invoice_lines (id, invoice_id, item_id, name, spec, unit, qty, unit_price, cost_price, amount, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-        [randomUUID(), invId, l.item_id, l.name, l.spec, l.unit, l.qty, l.unit_price, l.cost_price, l.amount, ++ord]
+        'INSERT INTO invoice_lines (id, invoice_id, item_id, name, spec, unit, qty, weight, price_basis, unit_price, cost_price, amount, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        [randomUUID(), invId, l.item_id, l.name, l.spec, l.unit, l.qty, l.weight, l.price_basis, l.unit_price, l.cost_price, l.amount, ++ord]
       )
     }
     // 기입금: 실제 입/출금 거래 + 매칭 생성(장부·계좌·계약 수금에 반영)
@@ -729,9 +733,14 @@ async function replaceContractItems(conn, contractId, items) {
     const price = Number(String(it.unit_price ?? '').replace(/[^0-9]/g, '')) || 0
     const cost  = Number(String(it.cost_price ?? '').replace(/[^0-9]/g, '')) || 0
     const qty   = Number(String(it.qty ?? '').replace(/[^0-9.]/g, '')) || 0
+    /* 중량과 '단가를 무엇에 곱하는가'. ㎏당 단가로 계약하는 자재가 있어서, 이 두 값이
+       없으면 기성 발행 때 수량 기준으로 떨어져 금액이 조용히 달라진다.
+       아는 값만 통과시킨다 — 엉뚱한 값이 들어오면 계산 기준이 흔들린다. */
+    const weight = Number(String(it.weight ?? '').replace(/[^0-9.]/g, '')) || 0
+    const basis  = it.price_basis === 'weight' ? 'weight' : 'qty'
     await conn.execute(
-      'INSERT INTO contract_items (id, contract_id, item_id, name, spec, unit, qty, unit_price, cost_price, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)',
-      [randomUUID(), contractId, it.item_id || null, nm, it.spec || null, it.unit || null, qty, price, cost, ++ord]
+      'INSERT INTO contract_items (id, contract_id, item_id, name, spec, unit, qty, weight, price_basis, unit_price, cost_price, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      [randomUUID(), contractId, it.item_id || null, nm, it.spec || null, it.unit || null, qty, weight, basis, price, cost, ++ord]
     )
   }
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday, Loading } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
@@ -7,6 +7,7 @@ import { TableToolbar } from '../lib/components/TableToolbar'
 import { ImportWizard } from '../lib/components/ImportWizard'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { InvoiceLines } from '../lib/components/InvoiceLines'
+import { StatementDoc } from '../lib/components/StatementDoc'
 import { computeLineAmount } from '../lib/lineAmount'
 import { accountLabels, accountIdByLabel } from '../lib/accountLabel'
 import { taxInvoiceImportAdapter } from '../lib/taxInvoiceImport'
@@ -86,6 +87,24 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
   const [matchAmt, setMatchAmt] = useState("")
   const [matchDate, setMatchDate] = useState(localDate())
   const [innerTab, setInnerTab] = useState("match")
+  /* 거래명세서 — 이 청구서의 품목을 서류로 뽑는다.
+     회사·거래처 정보(사업자번호·대표·주소)는 명세서를 열 때만 받아온다.
+     상세 드로어는 자주 열리는데 대부분 명세서를 안 뽑으므로, 열 때마다 두 번 더
+     부르는 건 낭비다. */
+  const [stmtOpen, setStmtOpen] = useState(false)
+  const [stmtParties, setStmtParties] = useState(null)
+  useEffect(() => {
+    if (!stmtOpen || stmtParties) return
+    let alive = true
+    Promise.all([api.getCompany(), api.getVendors({ all: true })]).then(([company, vendors]) => {
+      if (!alive) return
+      // 거래처는 이름으로 찾는다 — 청구서 어댑터가 vendor 를 이름으로만 내려준다
+      setStmtParties({ company, vendor: (vendors || []).find(v => v.name === invoice?.vendor) || { name: invoice?.vendor } })
+    })
+    return () => { alive = false }
+    /* invoice 는 null 일 수 있다(드로어가 닫히는 순간). 이 파일의 다른 훅이 전부 `invoice?.`
+       를 쓰는 이유이고, 여기만 `invoice.vendor` 로 두었다가 상세를 열 때마다 화면이 깨졌다. */
+  }, [stmtOpen, stmtParties, invoice?.vendor])
   // 기본은 '새 거래로 등록'(정상 워크플로우 — 청구서 열어 바로 입금/지급 기록).
   // '거래내역에서 연결'은 이미 들어온 거래를 뒤늦게 이 청구서에 붙이는 보조 경로라 뒤로.
   const [matchMode, setMatchMode] = useState("new")
@@ -195,6 +214,14 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
             <div className="text-xs text-muted">{invoice.invoiceNo}</div>
           </div>
           <div className="ml-auto row gap-6">
+            {/* 거래명세서 — 품목이 있는 청구서만. 품목이 없으면 명세서에 적을 내용이 없다
+                (그럴 땐 '수정'에서 품목을 넣으면 버튼이 생긴다). */}
+            {invoice.lines?.length > 0 && (
+              <button className="btn" style={{ fontSize: 12 }} onClick={() => setStmtOpen(true)}
+                title="품목 내역을 거래명세서로 인쇄합니다">
+                <Icon.Print size={13}/> 거래명세서
+              </button>
+            )}
             <button className="btn" style={{ fontSize: 12 }}
               onClick={() => onEdit?.(invoice)}>
               <Icon.Pencil size={13}/> 수정
@@ -411,6 +438,64 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
             </div>
           )}
 
+          {/* 품목 내역 — 청구 정보 탭에 함께 둔다.
+              여태 넣기만 하고 볼 데가 없었다(보려면 '수정'을 눌러 폼을 열어야 했다).
+              지급결의서·거래명세서가 이 줄들을 근거로 삼으므로, 청구서를 열었을 때
+              무엇을 청구했는지 그대로 보여야 한다. 중량은 쓰는 줄이 있을 때만 칸을 낸다. */}
+          {innerTab === "info" && invoice.lines?.length > 0 && (
+            <div className="card" style={{ overflowX: 'auto' }}>
+              <div className="row" style={{ padding: '12px 16px 0' }}>
+                <span className="text-sm fw-700">품목 내역</span>
+                <span className="text-xs text-muted2" style={{ marginLeft: 6, alignSelf: 'center' }}>
+                  {invoice.lines.length}줄
+                </span>
+              </div>
+              <table className="table" style={{ minWidth: 520 }}>
+                <thead>
+                  <tr>
+                    <th>품목</th><th>규격</th><th style={{ width: 52 }}>단위</th>
+                    <th className="num-right" style={{ width: 64 }}>수량</th>
+                    {invoice.lines.some(l => Number(l.weight) > 0) && (
+                      <th className="num-right" style={{ width: 72 }}>중량</th>
+                    )}
+                    <th className="num-right" style={{ width: 92 }}>단가</th>
+                    <th className="num-right" style={{ width: 104 }}>금액</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoice.lines.map(l => (
+                    <tr key={l.id}>
+                      <td className="fw-600">{l.name}</td>
+                      <td className="text-muted text-sm">{l.spec || '—'}</td>
+                      <td className="text-sm">{l.unit || '—'}</td>
+                      <td className="num-right num">{l.qty ? fmtNum(l.qty) : '—'}</td>
+                      {invoice.lines.some(x => Number(x.weight) > 0) && (
+                        <td className="num-right num">
+                          {Number(l.weight) ? String(Number(l.weight)) : '—'}
+                          {/* 이 줄의 금액이 무엇에 단가를 곱한 것인지 — 근거가 보여야 검산이 된다 */}
+                          {l.price_basis === 'weight' && (
+                            <span className="badge outline" style={{ marginLeft: 4, fontSize: 10 }}>기준</span>
+                          )}
+                        </td>
+                      )}
+                      <td className="num-right num">{fmtNum(l.unit_price)}</td>
+                      <td className="num-right num fw-700">{fmtNum(l.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <th colSpan={invoice.lines.some(l => Number(l.weight) > 0) ? 6 : 5}
+                      style={{ textAlign: 'right' }}>품목 합계</th>
+                    <td className="num-right num fw-700">
+                      {fmtNum(invoice.lines.reduce((s, l) => s + (Number(l.amount) || 0), 0))}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+
           {/* 탭: 첨부 서류 — 여러 파일 한 번에 첨부 가능(공용 컴포넌트) */}
           {innerTab === "docs" && (
             <FileAttach
@@ -452,6 +537,47 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                 </button>
               )}
         </div>
+
+        {/* 거래명세서 — 상세 위에 한 겹 더 띄운다. 인쇄는 이 종이(#statement-print)만 나간다.
+            드로어 안에서 바로 뽑는 이유: 명세서는 '이 청구서'의 서류라 목록으로 돌아가
+            다시 찾게 하면 흐름이 끊긴다(지출결의서 인쇄와 같은 방식). */}
+        {stmtOpen && (
+          <Drawer open={true} onClose={() => setStmtOpen(false)} width="min(900px, 100vw)" label="거래명세서">
+            <div className="drawer-head no-print">
+              <div>
+                <div className="fw-700" style={{ fontSize: 16 }}>거래명세서</div>
+                <div className="text-xs text-muted">{invoice.invoiceNo} · 품목 {invoice.lines.length}줄</div>
+              </div>
+              <div className="ml-auto row gap-6">
+                <button className="btn primary" style={{ fontSize: 12 }} onClick={() => window.print()}>
+                  <Icon.Print size={13}/> 인쇄
+                </button>
+                <button className="icon-btn" onClick={() => setStmtOpen(false)}><Icon.Close size={16}/></button>
+              </div>
+            </div>
+            <div className="drawer-body" style={{ background: 'var(--surface-2)' }}>
+              {stmtParties ? (
+                <>
+                  {/* 공급자·공급받는자가 비면 명세서를 그대로 못 쓴다(사업자번호가 없는 서류다).
+                      어디를 채우면 되는지 여기서 말해준다 — 인쇄물에는 안 나간다. */}
+                  {(() => {
+                    const missing = []
+                    if (!stmtParties.company?.biz_no) missing.push('우리 회사(환경설정 › 회사 정보)')
+                    if (!stmtParties.vendor?.biz_no) missing.push('거래처(기준정보 › 거래처)')
+                    return missing.length > 0 && (
+                      <div className="card card-pad no-print" style={{ marginBottom: 12, background: 'var(--warn-soft, #FFF8E6)' }}>
+                        <div className="text-sm">
+                          <b>사업자번호가 비어 있어요</b> — {missing.join(' · ')}에서 채우면 명세서에 나옵니다.
+                        </div>
+                      </div>
+                    )
+                  })()}
+                  <StatementDoc invoice={invoice} company={stmtParties.company} vendor={stmtParties.vendor}/>
+                </>
+              ) : <Loading label="회사·거래처 정보를 불러오는 중…"/>}
+            </div>
+          </Drawer>
+        )}
     </Drawer>
   )
 }

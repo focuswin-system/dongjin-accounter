@@ -17,14 +17,17 @@ const asNum   = (v) => parseInt(numOnly(v), 10) || 0;
      기성형     — 수량은 계약 때 정하지 않는다(청구할 때 입력) → 수량 칸을 숨기고 단가표로만 쓴다.
    품목은 기준정보(ref_items type='item')에서 고르거나 인라인 추가. 단가·매입가는 기준정보값이 기본이고
    계약별로 수정 가능하며, 저장 시 스냅샷으로 남는다(기준정보를 나중에 고쳐도 이 계약 조건은 그대로). */
-const lineAmount = (r) => (asNum(r.qty) || 1) * asNum(r.unit_price);
+/* 단가를 무엇에 곱하는가 — 수량(기본) 또는 중량. 서버·청구서와 같은 규칙(lib/lineAmount.js).
+   중량 기준인데 수량으로 곱하면 계약 금액이 조용히 달라진다. */
+const basisQty = (r) => (r?.price_basis === 'weight' ? asNum(r.weight) : (asNum(r.qty) || 1));
+const lineAmount = (r) => basisQty(r) * asNum(r.unit_price);
 const itemsTotal = (rows) => (rows || []).filter(r => (r.name || '').trim()).reduce((s, r) => s + lineAmount(r), 0);
-const itemsCost  = (rows) => (rows || []).filter(r => (r.name || '').trim()).reduce((s, r) => s + (asNum(r.qty) || 1) * asNum(r.cost_price), 0);
+const itemsCost  = (rows) => (rows || []).filter(r => (r.name || '').trim()).reduce((s, r) => s + basisQty(r) * asNum(r.cost_price), 0);
 
 const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster, withQty = false, required = false, hint }) => {
   const rows = form.items || [];
   const setRows = (fn) => set(f => ({ ...f, items: fn(f.items || []) }));
-  const add = () => setRows(rs => [...rs, { item_id: '', name: '', spec: '', unit: '', qty: '', unit_price: '', cost_price: '' }]);
+  const add = () => setRows(rs => [...rs, { item_id: '', name: '', spec: '', unit: '', qty: '', weight: '', price_basis: 'qty', unit_price: '', cost_price: '' }]);
   const upd = (i, patch) => setRows(rs => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r));
   const del = (i) => setRows(rs => rs.filter((_, idx) => idx !== i));
   /* 기준정보에서 품목을 고르면 규격·단위·출고가·매입가를 자동으로 채운다(계약별로 다시 수정 가능).
@@ -40,6 +43,8 @@ const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster, withQty = fa
     const it = itemMaster.find(x => String(x.id) === String(id));
     upd(i, it
       ? { item_id: it.id, name: it.name, spec: it.spec || '', unit: it.unit || '',
+          // 중량·단가기준도 함께 — ㎏당 단가로 파는 자재는 이게 없으면 금액이 달라진다
+          weight: String(Number(it.weight) || ''), price_basis: it.price_basis === 'weight' ? 'weight' : 'qty',
           unit_price: String(it.amount || ''), cost_price: String(it.purchase_price || '') }
       : { item_id: '', name: id });   // 목록에 없으면 사용자가 친 문자열을 이름으로 둔다
   };
@@ -88,6 +93,20 @@ const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster, withQty = fa
                   onChange={e => upd(i, { qty: numOnly(e.target.value) })}/>
               )}
             </div>
+            {/* 중량 · 단가 기준 — 기준정보에서 고르면 따라오고, 계약별로 고칠 수 있다.
+                금속·자재는 ㎏당 단가로 계약하는 일이 있어서, 무엇에 단가를 곱하는지가
+                금액의 근거다. 기본은 수량이라 대부분의 계약은 이 줄을 건드릴 일이 없다. */}
+            <div className="row gap-6" style={{ alignItems: 'center' }}>
+              <input className="input num" style={{ width: 92 }} inputMode="decimal" value={r.weight ?? ''}
+                placeholder="중량" onChange={e => upd(i, { weight: e.target.value.replace(/[^0-9.]/g, '') })}/>
+              <span className="text-xs text-muted2">단가 기준</span>
+              {['qty', 'weight'].map(b => (
+                <button key={b} type="button"
+                  className={`chip ${(r.price_basis || 'qty') === b ? 'active' : ''}`}
+                  style={{ fontSize: 11, padding: '2px 8px' }}
+                  onClick={() => upd(i, { price_basis: b })}>{b === 'qty' ? '수량' : '중량'}</button>
+              ))}
+            </div>
             <div className="row gap-6">
               <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
                 <MoneyInput className="input num" style={{ paddingRight: 26 }} value={r.unit_price} placeholder="출고가"
@@ -102,7 +121,8 @@ const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster, withQty = fa
             </div>
             {withQty && asNum(r.unit_price) > 0 && (
               <div className="text-xs text-muted2 num" style={{ textAlign: 'right' }}>
-                {asNum(r.qty) || 1} × {asNum(r.unit_price).toLocaleString()} = <b className="text-ink">{lineAmount(r).toLocaleString()}원</b>
+                {/* 무엇에 곱했는지 그대로 적는다 — 중량 기준인데 수량이 적혀 있으면 검산이 안 된다 */}
+                {basisQty(r)}{r.price_basis === 'weight' ? '(중량)' : ''} × {asNum(r.unit_price).toLocaleString()} = <b className="text-ink">{lineAmount(r).toLocaleString()}원</b>
               </div>
             )}
           </div>
@@ -1028,7 +1048,11 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       // 계약 품목표(있으면). 편집 시 그대로 불러와 수정 → 저장 시 통째 교체된다.
       items:       (c.contract_items || []).map(it => ({
         item_id: it.item_id || '', name: it.name || '', spec: it.spec || '', unit: it.unit || '',
-        qty: it.qty ? String(it.qty) : '', unit_price: String(it.unit_price || ''), cost_price: String(it.cost_price || ''),
+        qty: it.qty ? String(it.qty) : '',
+        // 저장된 중량·단가기준을 그대로 되불러온다 — 빠지면 다시 저장할 때 수량 기준으로 덮인다
+        weight: Number(it.weight) ? String(Number(it.weight)) : '',
+        price_basis: it.price_basis === 'weight' ? 'weight' : 'qty',
+        unit_price: String(it.unit_price || ''), cost_price: String(it.cost_price || ''),
       })),
       cost_budget: c.cost_budget || null,
       billing_mode:   c.billing_mode || 'onetime',
@@ -1900,6 +1924,8 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
     if (!open) return;
     setRows((contract?.contract_items || []).map(it => ({
       item_id: it.item_id || '', name: it.name, spec: it.spec || '', unit: it.unit || '',
+      // 중량·단가기준은 계약 스냅샷을 그대로 가져온다 — 여기서 빠지면 기성 청구가 수량 기준으로 떨어진다
+      weight: Number(it.weight) || 0, price_basis: it.price_basis === 'weight' ? 'weight' : 'qty',
       unit_price: Number(it.unit_price) || 0, cost_price: Number(it.cost_price) || 0, qty: '', amount: '',
     })));
     setIssuedAt(localToday());
