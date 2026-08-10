@@ -93,6 +93,11 @@ const AUDIT_RULES = [
   { m: 'POST',   re: /^\/api\/work-contracts\/([^/]+)\/pay$/,           res: 'work_contract', action: 'pay',    target: 1 },
   { m: 'DELETE', re: /^\/api\/work-contracts\/([^/]+)$/,                res: 'work_contract', action: 'delete', target: 1 },
 
+  /* 계약 귀속 변경 — 금액은 그대로지만 그 돈이 **어느 계약의 실적·원가로 잡히는지**가 바뀐다.
+     한 번에 여러 건을 옮길 수 있어서, 나중에 원가율이 이상해졌을 때 언제 무엇이 옮겨졌는지
+     짚을 수 있어야 한다. */
+  { m: 'POST',   re: /^\/api\/transactions\/link-contract$/,          res: 'transaction', action: 'link_contract' },
+
   // ── 지급결의 ── 처리하면 실제 지급 거래가 만들어진다
   { m: 'POST',   re: /^\/api\/resolutions\/([^/]+)\/process$/,          res: 'resolution', action: 'process', target: 1 },
   { m: 'DELETE', re: /^\/api\/resolutions\/([^/]+)$/,                   res: 'resolution', action: 'delete',  target: 1 },
@@ -134,6 +139,7 @@ const ACTION_LABELS = {
   backfill: '지난 회차 소급 등록', backfill_undo: '소급 등록 되돌리기',
   skip: '회차 건너뛰기', unskip: '건너뛴 회차 되살리기',
   bulk_settle: '청구서 일괄 정산', bulk_delete: '청구서 일괄 삭제',
+  link_contract: '거래 계약 연결·해제',
   // 입금·지급
   match: '입금 연결', match_cancel: '입금 연결 해제',
   pay: '지급', pay_cancel: '지급 취소', pay_missed: '놓친 회차 납입',

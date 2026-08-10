@@ -6,6 +6,8 @@ import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
+import { LinkTxnDrawer } from '../lib/components/LinkTxnDrawer'
+import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
 import { BILLING_MODES, TERM_MODES, BILLING_PERIODS, billingLabel, termLabel, periodLabel, periodMonths,
          isRecurring, isProgress, isOpenEnded, hasTotal, amountLabel, renewalInfo, nextEndDate, recurringMismatch } from '../lib/renewal'
 
@@ -981,6 +983,10 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [renewOpen, setRenewOpen] = useState(false);
   const [progressOpen, setProgressOpen] = useState(false);
+  /* 거래 연결 — 이미 등록된 입금·지출을 이 계약에 붙인다.
+     { kind, axis } 로 연다. axis 는 탭이 정한다(근거 계약 / 원가 귀속). */
+  const [linkOpen, setLinkOpen] = useState(null);
+  const [txnOpen, setTxnOpen] = useState(null);   // 계약 화면에서 연 거래 상세
 
   const reload = () => api.getContract(contractId).then(data => { if (data) setC(data); });
 
@@ -1684,59 +1690,100 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
         })()}
 
         {tab === "입금 내역" && (
-          <table className="table">
-            <thead><tr><th>입금일</th><th>구분</th><th className="num-right">금액</th><th>상태</th><th>증빙</th></tr></thead>
-            <tbody>
-              {(c.incomes || []).length === 0 && (
-                <tr><td colSpan={5} style={{ textAlign: "center", padding: 40, color: "var(--muted-2)", fontSize: 13 }}>등록된 입금 내역이 없어요.</td></tr>
-              )}
-              {(c.incomes || []).map((r, i) => (
-                <tr key={i}>
-                  <td className="num-cell text-muted">{r.date}</td>
-                  <td><span className="badge outline">{r.type}</span></td>
-                  <td className="num-cell num-right fw-700">{fmtNum(r.amount)}</td>
-                  <td><StatusBadge status={r.status}/></td>
-                  <td>{r.evid ? <span className="badge pos"><Icon.Check size={11}/> 첨부</span> : <span className="badge neg"><Icon.Warn size={11}/> 누락</span>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <>
+            {/* 이미 처리된 입금을 이 계약에 붙인다 — 엑셀로 올린 거래를 계약과 맞출 때 쓴다.
+                계약을 보고 있을 때가 대사하기 가장 자연스러운 자리다. */}
+            <div className="row" style={{ marginBottom: 10 }}>
+              <span className="text-xs text-muted2">행을 누르면 그 거래를 열어 고치거나 연결을 뗄 수 있어요.</span>
+              <button className="btn sm ml-auto" onClick={() => setLinkOpen({ kind: 'income', axis: 'contract' })}>
+                <Icon.Link size={13}/> 거래 연결
+              </button>
+            </div>
+            <table className="table">
+              {/* 거래처·적요가 없으면 "어느 거래인지" 알 수가 없다 — 잘못 붙은 걸 찾으려고
+                  전체 거래내역을 헤매게 된 이유가 이것이었다. */}
+              <thead><tr><th>입금일</th><th>거래처 · 적요</th><th>구분</th><th>계좌</th>
+                <th className="num-right">금액</th><th>상태</th><th>증빙</th></tr></thead>
+              <tbody>
+                {(c.incomes || []).length === 0 && (
+                  <tr><td colSpan={7} style={{ textAlign: "center", padding: 40, color: "var(--muted-2)", fontSize: 13 }}>
+                    등록된 입금 내역이 없어요. <b>거래 연결</b>로 이미 등록된 입금을 붙일 수 있어요.
+                  </td></tr>
+                )}
+                {(c.incomes || []).map((r, i) => (
+                  <tr key={r.id || i} style={{ cursor: r.id ? 'pointer' : undefined }}
+                    onClick={() => r.id && setTxnOpen(r.id)}>
+                    <td className="num-cell text-muted">{r.date}</td>
+                    <td>
+                      <div className="fw-600">{r.vendor || '—'}</div>
+                      {r.memo && <div className="text-xs text-muted2">{r.memo}</div>}
+                    </td>
+                    <td><span className="badge outline">{r.type}</span></td>
+                    <td className="text-sm text-muted">{r.account || '—'}</td>
+                    <td className="num-cell num-right fw-700">{fmtNum(r.amount)}</td>
+                    <td><StatusBadge status={r.status}/></td>
+                    <td>{r.evid ? <span className="badge pos"><Icon.Check size={11}/> 첨부</span> : <span className="badge neg"><Icon.Warn size={11}/> 누락</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         )}
 
         {/* 매출 계약 → 이 계약에 귀속된 '원가'. 그 돈이 어느 매입계약으로 나갔는지도 함께 보여준다.
             매입 계약 → 이 계약이 근거인 '지급'. */}
         {tab === "지출 내역" && (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>{isPurchase ? '지급일' : '지출일'}</th><th>거래처</th><th>비목</th>
-                {!isPurchase && <th>지급 근거(발주 계약)</th>}
-                <th className="num-right">금액</th><th>결의서</th><th>{isPurchase ? '지급' : '정산'}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(c.expenses || []).length === 0 && (
-                <tr><td colSpan={isPurchase ? 6 : 7} style={{ textAlign: "center", padding: 40, color: "var(--muted-2)", fontSize: 13 }}>
-                  {isPurchase
-                    ? '등록된 지급 내역이 없어요.'
-                    : '이 계약에 귀속된 원가가 없어요. 거래 등록 시 "원가 귀속"에서 이 계약을 고르면 여기에 잡힙니다.'}
-                </td></tr>
-              )}
-              {(c.expenses || []).map((r, i) => (
-                <tr key={i}>
-                  <td className="num-cell text-muted">{r.date}</td>
-                  <td className="fw-600">{r.vendor}</td>
-                  <td><span className="badge outline">{r.category}</span></td>
-                  {!isPurchase && (
-                    <td className="text-sm text-muted">{r.paidContract || <span className="text-muted2">공통 (계약 없음)</span>}</td>
-                  )}
-                  <td className="num-cell num-right fw-700">{fmtNum(r.amount)}</td>
-                  <td><StatusBadge status={r.doc}/></td>
-                  <td><StatusBadge status={r.pay}/></td>
+          <>
+            {/* ⚠ 축이 다르다. 매입 계약은 '이 계약이 근거인 지급'(contract_id),
+                매출 계약은 '이 계약에 귀속된 원가'(cost_contract_id)다.
+                외주비는 외주 매입계약에 지급되면서 동시에 프로젝트 매출계약의 원가라
+                여기서 축을 틀리면 돈이 조용히 엉뚱한 바구니로 간다. */}
+            <div className="row" style={{ marginBottom: 10 }}>
+              <span className="text-xs text-muted2">
+                {isPurchase ? '행을 누르면 그 지급 거래를 열 수 있어요.' : '행을 누르면 그 지출 거래를 열 수 있어요.'}
+              </span>
+              <button className="btn sm ml-auto"
+                onClick={() => setLinkOpen({ kind: 'expense', axis: isPurchase ? 'contract' : 'cost' })}>
+                <Icon.Link size={13}/> {isPurchase ? '지급 거래 연결' : '원가 거래 연결'}
+              </button>
+            </div>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>{isPurchase ? '지급일' : '지출일'}</th><th>거래처 · 적요</th><th>비목</th>
+                  {!isPurchase && <th>지급 근거(발주 계약)</th>}
+                  <th className="num-right">금액</th><th>결의서</th><th>{isPurchase ? '지급' : '정산'}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {(c.expenses || []).length === 0 && (
+                  <tr><td colSpan={isPurchase ? 6 : 7} style={{ textAlign: "center", padding: 40, color: "var(--muted-2)", fontSize: 13 }}>
+                    {isPurchase
+                      ? '등록된 지급 내역이 없어요. '
+                      : '이 계약에 귀속된 원가가 없어요. '}
+                    <b>{isPurchase ? '지급 거래 연결' : '원가 거래 연결'}</b>로 이미 등록된 지출을 붙일 수 있어요.
+                  </td></tr>
+                )}
+                {(c.expenses || []).map((r, i) => (
+                  <tr key={r.id || i} style={{ cursor: r.id ? 'pointer' : undefined }}
+                    onClick={() => r.id && setTxnOpen(r.id)}>
+                    <td className="num-cell text-muted">{r.date}</td>
+                    <td>
+                      <div className="fw-600">{r.vendor}</div>
+                      {r.memo && <div className="text-xs text-muted2">{r.memo}</div>}
+                    </td>
+                    <td><span className="badge outline">{r.category}</span></td>
+                    {!isPurchase && (
+                      <td className="text-sm text-muted">{r.paidContract || <span className="text-muted2">공통 (계약 없음)</span>}</td>
+                    )}
+                    <td className="num-cell num-right fw-700">{fmtNum(r.amount)}</td>
+                    <td><StatusBadge status={r.doc}/></td>
+                    <td><StatusBadge status={r.pay}/></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         )}
 
         {tab === "증빙" && (
@@ -1905,6 +1952,16 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
         initial={c.cost_budget} onSaved={reload}/>
       <RenewDrawer open={renewOpen} onClose={() => setRenewOpen(false)} contract={c} onSaved={reload}/>
       <ProgressInvoiceDrawer open={progressOpen} onClose={() => setProgressOpen(false)} contract={c} onSaved={reload}/>
+
+      {/* 이미 등록된 거래를 이 계약에 붙인다 */}
+      <LinkTxnDrawer open={!!linkOpen} onClose={() => setLinkOpen(null)}
+        contractId={contractId} contractName={c.name}
+        kind={linkOpen?.kind} axis={linkOpen?.axis} onLinked={reload}/>
+
+      {/* 계약 화면에서 연 거래 상세 — 여기서 고치거나 연결을 뗄 수 있어야
+          "잘못된 걸 그 자리에서 처리"가 된다(전체 거래내역으로 나갈 일이 없어진다). */}
+      <TxnQuickDrawer txnId={txnOpen} onClose={() => setTxnOpen(null)}
+        contractId={contractId} onChanged={() => { setTxnOpen(null); reload(); }}/>
     </div>
   );
 };

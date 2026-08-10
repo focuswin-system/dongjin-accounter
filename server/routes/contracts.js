@@ -598,7 +598,11 @@ router.get('/:id', async (req, res, next) => {
       [req.params.id]
     )
     const [incomeRows] = await req.db.execute(
-      "SELECT t.*, v.name AS vendor_name FROM transactions t LEFT JOIN vendors v ON t.vendor_id=v.id WHERE t.contract_id=? AND t.kind='income' ORDER BY t.date DESC",
+      `SELECT t.*, v.name AS vendor_name, a.name AS account_name
+         FROM transactions t
+         LEFT JOIN vendors v ON t.vendor_id=v.id
+         LEFT JOIN accounts a ON t.account_id=a.id
+        WHERE t.contract_id=? AND t.kind='income' ORDER BY t.date DESC`,
       [req.params.id]
     )
     // 지출 목록도 관점에 따라 다른 축을 본다.
@@ -615,12 +619,21 @@ router.get('/:id', async (req, res, next) => {
       [req.params.id]
     )
     // 상세 탭용 가공 데이터
+    /* ⚠ id·거래처·적요를 반드시 함께 내려준다.
+     *
+     * 예전엔 날짜·구분·금액·상태만 줬다. 그래서 "이 계약에 잘못 붙은 입금"을 발견해도
+     * 그게 **어느 거래인지** 화면에서 알 수 없어, 전체 거래내역으로 나가 금액으로
+     * 더듬어 찾아야 했다. id 가 없으니 눌러서 열 수도 없었다. */
     const incomes = incomeRows.map(t => ({
-      date: t.date, type: t.category || '입금', amount: Number(t.amount),
-      status: t.status, evid: !!(t.evid_url || t.evid_type),
+      id: t.id,
+      date: t.date, type: t.category || '입금', vendor: t.vendor_name || '—',
+      memo: t.memo || t.doc_no || '', account: t.account_name || '',
+      amount: Number(t.amount), status: t.status, evid: !!(t.evid_url || t.evid_type),
     }))
     const expenses = expenseRows.map(t => ({
+      id: t.id,
       date: t.date, vendor: t.vendor_name || '—', category: t.category || '—',
+      memo: t.memo || t.doc_no || '',
       amount: Number(t.amount), doc: t.doc_no ? '작성 완료' : '미작성', pay: t.status,
       // 매출계약 원가 목록에선 "이 돈이 어느 매입계약으로 나갔는지"를 같이 보여준다
       paidContract: t.paid_contract_name || null,

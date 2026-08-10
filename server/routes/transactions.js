@@ -81,6 +81,41 @@ router.get('/summary', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/* ⚠ 아래 '/:id' 보다 **먼저** 서 있어야 한다.
+   express 는 먼저 등록된 것부터 맞춰보므로, /:id 가 위에 있으면 'linkable' 이
+   거래 id 로 잡혀 404 가 난다(실제로 그래서 후보 목록이 늘 비어 있었다). */
+/** 이 계약에 붙일 만한 거래 후보. 이미 이 계약에 붙어 있는 것은 뺀다. */
+router.get('/linkable', async (req, res, next) => {
+  try {
+    const col = LINK_AXIS[req.query.axis] || 'contract_id'
+    const kind = req.query.kind === 'income' ? 'income' : 'expense'
+    const contractId = req.query.contractId || null
+    if (!contractId) return res.status(400).json({ error: '계약을 지정해주세요' })
+    const q = String(req.query.q || '').trim()
+
+    /* 아직 아무 계약에도 안 붙은 거래를 먼저 세운다(ORDER BY 의 첫 키).
+       다른 계약에 붙은 것도 후보에 남기는 이유는 **잘못 붙은 것을 옮기는 일**이
+       이 화면의 주 용도이기 때문이다 — 목록에 없으면 옮길 수가 없다. */
+    const params = [kind, contractId]
+    let where = `t.kind = ? AND (t.${col} IS NULL OR t.${col} <> ?)`
+    if (q) {
+      where += ' AND (v.name LIKE ? OR t.memo LIKE ? OR t.category LIKE ?)'
+      params.push(`%${q}%`, `%${q}%`, `%${q}%`)
+    }
+
+    const [rows] = await req.db.execute(
+      `SELECT t.id, t.date, t.amount, t.category, t.memo, t.status, t.kind,
+              v.name AS vendor_name, c.name AS linked_contract_name
+         FROM transactions t
+         LEFT JOIN vendors v ON t.vendor_id = v.id
+         LEFT JOIN contracts c ON t.${col} = c.id
+        WHERE ${where}
+        ORDER BY (t.${col} IS NULL) DESC, t.date DESC
+        LIMIT 100`, params)
+    res.json(rows.map(r => ({ ...r, amount: Number(r.amount) })))
+  } catch (e) { next(e) }
+})
+
 router.get('/:id', async (req, res, next) => {
   try {
     const [rows] = await req.db.execute(`
@@ -486,6 +521,65 @@ router.get('/import/template', (req, res, next) => {
     res.setHeader('Content-Disposition', `attachment; filename="transaction_import_template.xlsx"; filename*=UTF-8''${encodeURIComponent('거래내역_업로드_양식.xlsx')}`)
     res.send(buf)
   } catch (e) { next(e) }
+})
+
+
+/* ── 계약 연결 ──────────────────────────────────────────────────
+ *
+ * 고객 지적: "엑셀로 거래를 올린 뒤 계약과 맞추는 과정이 굉장히 번거롭다",
+ *           "계약에 잘못 붙은 지출/입금을 전체 거래내역에서 찾느라 헤맸다".
+ *
+ * 계약 연결은 청구서 '매칭'과 **성격이 다르다.**
+ *   청구서 매칭 — 이 돈이 저 청구서를 얼마나 갚았나(invoice_matches 에 금액 배분, 부분 입금 가능)
+ *   계약 연결   — 이 거래가 어느 계약 건인가(transactions 의 컬럼 하나, 부분은 없다)
+ * 그래서 이름도 '연결'로 쓴다. 같은 말을 쓰면 부분 연결을 기대하게 된다.
+ *
+ * ⚠ 축이 둘이다. 틀리면 돈이 엉뚱한 바구니에 **조용히** 들어간다(원가율만 이상해진다).
+ *   contract_id      — 이 계약이 근거인 거래 (매출계약의 입금 / 매입계약의 지급)
+ *   cost_contract_id — 이 지출이 원가로 붙는 매출 계약 (외주비가 대표적)
+ *   외주비는 외주 매입계약에 '지급'되면서 동시에 그 프로젝트 매출계약의 '원가'다.
+ */
+const LINK_AXIS = { contract: 'contract_id', cost: 'cost_contract_id' }
+
+/** 여러 거래를 계약에 붙이거나(contractId 지정) 뗀다(contractId 없음). */
+router.post('/link-contract', async (req, res, next) => {
+  const ids = Array.isArray(req.body.txnIds) ? req.body.txnIds.filter(Boolean) : []
+  if (!ids.length) return res.status(400).json({ error: '연결할 거래를 선택해주세요' })
+  if (ids.length > 200) return res.status(400).json({ error: `한 번에 200건까지예요 (${ids.length}건 선택)` })
+  const col = LINK_AXIS[req.body.axis] || 'contract_id'
+  const contractId = req.body.contractId || null
+
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    if (contractId) {
+      const [[c]] = await conn.execute('SELECT id FROM contracts WHERE id = ?', [contractId])
+      if (!c) { await rollbackQuietly(conn); return res.status(404).json({ error: '계약을 찾을 수 없어요' }) }
+    }
+    const ph = ids.map(() => '?').join(',')
+    const [txns] = await conn.execute(
+      `SELECT id, date, kind FROM transactions WHERE id IN (${ph}) FOR UPDATE`, ids)
+    if (txns.length !== ids.length) {
+      await rollbackQuietly(conn)
+      return res.status(404).json({ error: '없는 거래가 섞여 있어요. 목록을 새로고침해주세요.' })
+    }
+    /* 원가 귀속은 지출에만 있다. 입금에 붙이면 어느 집계에도 안 잡히는 값이 남는다. */
+    if (col === 'cost_contract_id' && txns.some(t => t.kind !== 'expense')) {
+      await rollbackQuietly(conn)
+      return res.status(400).json({ error: '원가 귀속은 지출 거래에만 붙일 수 있어요' })
+    }
+    /* 마감된 달의 거래는 못 건드린다 — 거래 수정(PUT)과 같은 규칙이다.
+       금액이 안 바뀌어도 계약 귀속이 바뀌면 그 달 원가·손익 보고가 달라진다.
+       하나라도 걸리면 전부 멈춘다 — 일부만 옮기면 어디까지 됐는지 되짚어야 한다. */
+    for (const t of txns) {
+      const ce = await closedPeriodError(conn, t.date)
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: `${t.date} 거래: ${ce}` }) }
+    }
+    await conn.execute(`UPDATE transactions SET ${col} = ? WHERE id IN (${ph})`, [contractId, ...ids])
+    await conn.commit()
+    res.json({ ok: true, count: ids.length, linked: !!contractId })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
 })
 
 module.exports = router

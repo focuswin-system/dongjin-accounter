@@ -263,17 +263,19 @@ function adaptTransaction(row) {
     date: row.date || '',
     vendor: row.vendor_name || '(미확인)',
     vendorId: row.vendor_id,
-    contract: row.contract_name || row.doc_no || '',
+    /* 근거 계약. **계약이 없으면 빈 값**이다 — doc_no 로 메우면 안 된다.
+       그 폴백 때문에 전표번호가 계약명 자리에 앉아, 계약에 붙은 거래와 안 붙은 거래를
+       화면에서 구별할 수 없었다("어떤 게 계약에 연관됐는지 명확하지 않다"). */
+    contract: row.contract_name || '',
     contractId: row.contract_id || '',
     // 원가 귀속(지출만) — 이 지출이 어느 매출계약의 원가인지. 근거 계약과 별개 축.
     cost_contract_id: row.cost_contract_id || '',
     cost_contract_name: row.cost_contract_name || '',
     account: row.account_name || '',
-    /* 거래내역 표의 '내용' 칸 — 계약이 있으면 계약명, 없으면 적요를 보여준다.
-       계약 없는 거래가 정상적으로 더 많으므로(경비·공과금) 계약명만 쓰면 대부분 빈칸이 된다.
-       ⚠ 이 필드를 '계약'이라 부르면 안 된다 — 표 헤더를 '계약'으로 달았다가
-          적요가 계약명인 것처럼 보였다. 두 가지가 섞여 있는 칸이라 이름도 '내용'이어야 한다. */
-    scope: row.contract_name || row.memo || row.doc_no || '—',
+    /* 적요 — 사람이 적은 내용. **계약명을 섞지 않는다.**
+       예전엔 `계약명 || 적요 || 전표번호` 를 한 칸에 뭉쳐 '내용'이라 불렀는데,
+       그 칸만 봐서는 계약인지 메모인지 알 수 없었다. 계약은 이제 자기 칸(contract)이 있다. */
+    scope: row.memo || row.doc_no || '—',
     category: row.category || '—',
     subCategory: row.sub_category,
     amount: row.amount,
@@ -390,6 +392,20 @@ export const api = {
       // 서버 메시지를 버리면 마감된 달·사유 누락 같은 거절 이유를 사용자가 알 수 없다
       return { ok: false, error: e.message }
     }
+  },
+
+  /* 계약에 붙일 만한 거래 후보. axis: 'contract'(근거 계약) | 'cost'(원가 귀속)
+     — 두 축은 서로 다른 컬럼이라 후보도 다르다. */
+  async getLinkableTxns({ contractId, kind, axis = 'contract', q = '' }) {
+    const p = new URLSearchParams({ contractId, kind, axis })
+    if (q) p.set('q', q)
+    try { return await req(`/transactions/linkable?${p}`) } catch { return [] }
+  },
+  /* 거래를 계약에 붙이거나(contractId) 뗀다(contractId 없음).
+     청구서 '매칭'과 달리 금액 배분이 아니라 귀속이라 부분 연결이 없다. */
+  async linkTxnsToContract({ txnIds, contractId = null, axis = 'contract' }) {
+    try { return { ok: true, ...(await req('/transactions/link-contract', { method: 'POST', body: { txnIds, contractId, axis } })) } }
+    catch (e) { return { ok: false, error: e.message } }
   },
 
   /* 화면 사용 기록 — 화면 이름만 보낸다. 실패는 삼킨다(곁다리 기록이 화면을 방해하면 안 된다).

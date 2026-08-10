@@ -549,6 +549,39 @@ try {
   fail(`서버 심볼 검사 실패: ${e.message}`)
 }
 
+// ── [14] 라우트 순서 — '/:id' 가 고정 경로를 삼키는가 ──
+/* express 는 먼저 등록된 것부터 맞춰본다. 그래서 `router.get('/:id')` 아래에
+   `router.get('/linkable')` 을 두면 'linkable' 이 id 로 잡혀 조용히 404 가 난다.
+   화면 쪽이 실패를 빈 목록으로 삼키는 경우가 많아(목록 API 의 흔한 관례) **아무 오류도
+   안 뜨고 그냥 "없어요"** 가 된다 — 실제로 계약 연결 후보가 늘 비어 있었다.
+   슬래시가 있는 고정 경로(/import/template)는 겹치지 않으므로 한 마디짜리만 본다. */
+console.log('\n[14] 라우트 순서 — 고정 경로가 /:id 뒤에 숨었는가')
+try {
+  const files = fs.readdirSync(ROUTES_DIR).filter(f => f.endsWith('.js'))
+  const shadowed = []
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(ROUTES_DIR, f), 'utf8')
+    const re = /router\.(get|post|put|patch|delete)\(\s*'(\/[^']*)'/g
+    const seen = []   // [{ method, p, idx }]
+    let m
+    while ((m = re.exec(src))) seen.push({ method: m[1], p: m[2], idx: m.index })
+    for (const r of seen) {
+      // 한 마디짜리 고정 경로만 대상 ('/linkable' O, '/import/template' X, '/:id' X)
+      if (!/^\/[a-z][a-z0-9-]*$/i.test(r.p)) continue
+      const shadow = seen.find(s => s.method === r.method && s.idx < r.idx && /^\/:[a-zA-Z]+$/.test(s.p))
+      if (shadow) shadowed.push(`routes/${f}: ${r.method.toUpperCase()} ${r.p} 이(가) ${shadow.p} 뒤에 있음`)
+    }
+  }
+  if (shadowed.length) {
+    fail('고정 경로가 /:id 뒤에 가려집니다:\n      · ' + shadowed.join('\n      · ') +
+         '\n      → 그 경로는 id 로 잡혀 404 가 납니다. /:id 보다 위로 옮기세요.')
+  } else {
+    ok(`라우트 순서 이상 없음 (라우터 ${files.length}개)`)
+  }
+} catch (e) {
+  fail(`라우트 순서 검사 실패: ${e.message}`)
+}
+
 console.log('\n' + '━'.repeat(64))
 if (failures === 0) {
   console.log(' ✅ 격리 검사 통과')
