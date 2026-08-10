@@ -948,9 +948,19 @@ function FaqPanel({ open, onClose, route, go }) {
   );
 
   return (
-    <div style={{ position:"fixed", inset:0, zIndex:90, display:"flex" }}>
-      <div onClick={onClose} style={{ flex:1, background:"rgba(11,18,32,0.18)", backdropFilter:"blur(1px)" }}/>
-      <div style={{ width:"min(380px,100vw)", background:"#fff", display:"flex", flexDirection:"column",
+    /* ⚠ 딤과 패널을 **겹쳐** 놓는다(공용 Drawer 와 같은 구조).
+     *
+     * 예전엔 flex 로 나란히 뒀는데, 딤이 `flex:1` 이라 **패널 폭만큼을 비워두고** 깔렸다.
+     * 패널은 transform 으로 오른쪽 밖에서 슬라이드해 들어오므로, 그 0.18초 동안
+     * 오른쪽 380px 띠만 안 어두운 채로 남는다 — "하얀 판이 깔렸다가 드로어가 튀어나오는"
+     * 느낌이 그것이었다(실측: 화면 1280 인데 딤은 890 까지, 패널은 x=1267 에 대기).
+     * 겹쳐 두면 열리는 순간부터 화면 전체가 균일하게 어둡고, 패널만 미끄러져 들어온다.
+     */
+    <div style={{ position:"fixed", inset:0, zIndex:90 }}>
+      <div onClick={onClose}
+        style={{ position:"absolute", inset:0, background:"rgba(11,18,32,0.18)", backdropFilter:"blur(1px)" }}/>
+      <div style={{ position:"absolute", top:0, right:0, bottom:0,
+        width:"min(380px,100vw)", background:"#fff", display:"flex", flexDirection:"column",
         boxShadow:"-8px 0 40px rgba(15,23,42,0.13)", animation:"slideInRight .18s ease both" }}>
 
         {/* Header */}
