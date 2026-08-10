@@ -414,6 +414,13 @@ export const api = {
     try { await req('/usage', { method: 'POST', body: { route } }) } catch { /* 무시 */ }
   },
 
+  /* 첫 세팅 진행 상황(건수만). 실패하면 '다 됐다'로 보고 카드를 숨긴다 —
+     안내가 목적인데 그것 때문에 화면에 오류가 뜨면 본말이 뒤집힌다. */
+  async getSetupStatus() {
+    try { return await req('/setup/status') }
+    catch { return { company: 1, accounts: 1, vendors: 1, items: 1, recurring: 1, txns: 1, invoices: 1 } }
+  },
+
   // ─── 회사 정보 ────────────────────────────────────────────────
   async getCompany() {
     try { return await req('/company') } catch { return null }

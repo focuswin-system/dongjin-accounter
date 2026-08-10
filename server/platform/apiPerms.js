@@ -82,7 +82,10 @@ const API_RESOURCES = {
 /*   /api/usage  화면 사용 집계. 어느 화면을 봤는지를 남기는 곁다리 기록이라 자원으로
  *               가를 수 없다(가르면 그 화면 권한이 없는 사람의 이동은 안 세어져,
  *               정작 '권한이 없어서 못 쓴다'는 신호를 놓친다). */
-const ANY_AUTHENTICATED = ['/api/auth', '/api/uploads', '/api/usage']
+/*   /api/setup  첫 세팅 진행 상황(건수만). 자원으로 가르면 그 화면 권한이 없는 사람에게
+ *               "아직 안 채워졌어요"조차 못 보여주는데, 정작 세팅을 해야 할 사람이
+ *               권한을 아직 못 받은 상태일 수 있다. */
+const ANY_AUTHENTICATED = ['/api/auth', '/api/uploads', '/api/usage', '/api/setup']
 
 /**
  * **테넌트 게이트 자체를 타지 않는** 경로.
