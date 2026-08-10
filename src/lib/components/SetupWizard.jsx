@@ -27,6 +27,7 @@ const STEPS = [
     why: '사업자번호·대표·주소. 세금계산서와 거래명세서에 우리 정보로 찍혀요.',
     done: (s) => s.company > 0,
     doneText: '입력됨',
+    single: true,   // 한 건짜리라 '더 등록'이 아니라 '수정'이다
   },
   {
     key: 'accounts', label: '계좌 · 카드', route: 'master_account',
@@ -109,17 +110,22 @@ export const SetupWizard = ({ open, onClose, onGo }) => {
                     {done && <span className="badge pos text-xs" style={{ marginLeft: 'auto' }}>{text}</span>}
                   </div>
                   <div className="text-sm text-muted" style={{ marginTop: 4 }}>{s.why}</div>
-                  {!done && s.importHint && (
+                  {s.importHint && (
                     <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
                       <Icon.Excel size={11}/> {s.importHint}
                     </div>
                   )}
-                  {!done && (
-                    <button className="btn sm" style={{ marginTop: 10 }}
-                      onClick={() => { onGo?.(s.route); onClose() }}>
-                      {s.label} 등록하러 가기 <Icon.Right size={12}/>
-                    </button>
-                  )}
+                  {/* 끝난 단계에도 **가는 길을 남긴다.**
+                      한 번 채웠다고 끝이 아니다 — 거래처는 계속 늘고, 정기청구도 두 번째·세 번째를
+                      걸게 된다. 예전엔 done 이면 버튼을 감춰서, 그 단계가 마법사 안에서
+                      막다른 길이 됐다(9곳 있는 거래처에 10번째를 더할 길이 없었다).
+                      다만 말은 달라야 한다 — 아직인 것은 '등록하러', 이미 있는 것은 '더/수정'. */}
+                  <button className={`btn sm ${done ? 'ghost' : ''}`} style={{ marginTop: 10 }}
+                    onClick={() => { onGo?.(s.route); onClose() }}>
+                    {done
+                      ? (s.single ? `${s.label} 수정` : `${s.label} 더 등록`)
+                      : `${s.label} 등록하러 가기`} <Icon.Right size={12}/>
+                  </button>
                 </div>
               </div>
             </div>
