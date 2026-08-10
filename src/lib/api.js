@@ -837,6 +837,12 @@ export const api = {
     try { await req(`/resolutions/${id}`, { method: 'PUT', body: data }); return { ok: true } }
     catch (e) { return { ok: false, error: e.message } }
   },
+  /* 연결된 청구서의 품목을 다시 불러온다. 만들 때 한 번 복사하고 끝이라,
+     청구서에 품목을 나중에 채워도 결의서는 "매입 대금 지급 · 식 · 1" 그대로였다. */
+  async reloadResolutionLines(id) {
+    try { const r = await req(`/resolutions/${id}/reload-lines`, { method: 'POST' }); return { ok: true, resolution: r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
   // 처리 시 연결할 만한 미연결 지출 거래 후보
   async getResolutionMatchable(id) {
     try { return await req(`/resolutions/${id}/matchable`) } catch { return [] }

@@ -15,6 +15,34 @@ const parseItems = (v) => { try { return v ? JSON.parse(v) : [] } catch { return
 const parseJson = (v, fb) => { try { return v ? JSON.parse(v) : fb } catch { return fb } }
 const adapt = (r) => ({ ...r, amount: Number(r.amount), items: parseItems(r.items), approval: parseJson(r.approval, []) })
 
+/**
+ * 청구서 1건 → 결의서 품목 줄.
+ *
+ * 결의서는 **지급액(VAT 포함)** 을 결재받는 문서다. 그래서 줄 합계가 청구서 total 과
+ * 같아야 한다 — 품목은 공급가(수량×단가)라 부가세를 한 줄 더 얹는다.
+ * 품목 내역이 없는 청구서는 예전처럼 지급액 한 줄로 뭉친다.
+ *
+ * 만들 때와 다시 불러올 때가 **같은 함수를 쓴다.** 규칙을 두 군데 두면 한쪽만 고쳐져
+ * "새로 만든 결의서와 불러온 결의서의 합계가 다른" 일이 생긴다.
+ *
+ * 품명과 규격은 한 칸에 합친다 — 양식의 칸이 '품명 및 규격' 하나이고,
+ * 구매품의서·견적요청서도 같은 방식으로 채운다(`품명 규격`).
+ */
+function itemsFromInvoice(inv, lines, fallbackTitle) {
+  if (!lines.length) {
+    const gross = Number(inv.total_amount) || 0
+    return [{ name: fallbackTitle, unit: '식', qty: 1, price: gross, amount: gross, note: inv.invoice_no || '' }]
+  }
+  const items = lines.map(l => ({
+    name: [l.name, l.spec].filter(Boolean).join(' '),
+    unit: l.unit || '', qty: Number(l.qty) || 0, price: Number(l.unit_price) || 0,
+    amount: Number(l.amount) || 0, note: '',
+  }))
+  const vat = Number(inv.vat_amount) || 0
+  if (vat > 0) items.push({ name: '부가세', unit: '', qty: 1, price: vat, amount: vat, note: inv.invoice_no || '' })
+  return items
+}
+
 // 기본 결재선 프리셋의 단계를 새 결의서에 스냅샷으로 복사 (없으면 담당/결재/대표)
 const defaultApproval = async (execFn) => {
   const [[p]] = await execFn('SELECT steps FROM approval_presets WHERE is_default=1 ORDER BY sort_order LIMIT 1')
@@ -110,25 +138,9 @@ router.post('/from-invoice/:invoiceId', async (req, res, next) => {
     if (inv.kind !== 'received') throw httpError(400, '매입(수취) 청구서만 지급결의서를 만들 수 있어요')
 
 
-    // 지급결의서는 '지급액'(gross, VAT 포함)을 결재받는 문서 → 라인 합계가 지급액과 같아야 한다.
-    const gross = Number(inv.total_amount) || 0
     const title = inv.contract_name || inv.memo || '매입 대금 지급'
-    // 기성 청구(invoice_lines 있음)면 품목별로 풀어서 결의서에 싣는다. 각 품목은 공급가(수량×단가),
-    // 부가세는 별도 라인으로 더해 라인합 = 공급가합 + 부가세 = 지급액(total)이 되게 한다.
-    // 품목 내역이 없는 일반 청구서는 기존대로 지급액 한 줄로 뭉친다.
     const [lines] = await conn.execute('SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY sort_order, name', [inv.id])
-    let items
-    if (lines.length) {
-      items = lines.map(l => ({
-        name: [l.name, l.spec].filter(Boolean).join(' · '),
-        unit: l.unit || '', qty: Number(l.qty) || 0, price: Number(l.unit_price) || 0,
-        amount: Number(l.amount) || 0, note: '',
-      }))
-      const vat = Number(inv.vat_amount) || 0
-      if (vat > 0) items.push({ name: '부가세', unit: '', qty: 1, price: vat, amount: vat, note: inv.invoice_no || '' })
-    } else {
-      items = [{ name: title, unit: '식', qty: 1, price: gross, amount: gross, note: inv.invoice_no || '' }]
-    }
+    const items = itemsFromInvoice(inv, lines, title)
 
     const approval = await defaultApproval((sql, p) => conn.execute(sql, p))
     const id = randomUUID()
@@ -351,6 +363,47 @@ router.put('/:id', async (req, res, next) => {
        JSON.stringify(approval || []), req.params.id])
     if (r.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
+/**
+ * 연결된 청구서의 품목을 **다시 불러온다.**
+ *
+ * 만들 때 한 번 복사하고 끝이라, 청구서에 품목을 나중에 채워도 결의서는 옛 모습
+ * ("매입 대금 지급 · 식 · 1") 그대로였다. 청구서 품목 입력이 생기기 전에 만든
+ * 결의서가 전부 그렇다.
+ *
+ * 이미 집행된(완료) 결의서는 막는다 — 품목을 갈아끼우면 이미 나간 지출 거래와
+ * 문서가 다른 말을 하게 된다. 금액이 같더라도 마찬가지다.
+ */
+router.post('/:id/reload-lines', async (req, res, next) => {
+  try {
+    const out = await withTx(req.db, async (conn) => {
+      const [[cur]] = await conn.execute('SELECT * FROM expense_resolutions WHERE id = ? FOR UPDATE', [req.params.id])
+      if (!cur) throw httpError(404, '결의서를 찾을 수 없어요')
+      if (cur.status === '완료') throw httpError(409, '이미 처리된 결의서는 품목을 바꿀 수 없어요. 연결된 지출 거래와 어긋나요.')
+      if (!cur.invoice_id) throw httpError(400, '청구서에서 만든 결의서가 아니에요. 품목을 직접 입력해주세요.')
+
+      const [[inv]] = await conn.execute(
+        `SELECT i.*, c.name AS contract_name FROM invoices i
+         LEFT JOIN contracts c ON i.contract_id = c.id WHERE i.id = ?`, [cur.invoice_id])
+      if (!inv) throw httpError(404, '연결된 청구서가 없어요(지워졌을 수 있어요)')
+
+      const [lines] = await conn.execute(
+        'SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY sort_order, name', [inv.id])
+      if (!lines.length) {
+        throw httpError(400, `청구서 ${inv.invoice_no || ''}에 품목 내역이 없어요. 청구서를 열어 품목을 넣고 다시 불러오세요.`.trim())
+      }
+      const items = itemsFromInvoice(inv, lines, cur.title || '매입 대금 지급')
+      /* 금액도 청구서 지급액으로 다시 맞춘다. 품목 합(공급가+부가세)이 곧 지급액이라
+         따로 두면 표의 합계와 헤더의 '지출총액'이 어긋난다. */
+      const amount = Number(inv.total_amount) || 0
+      await conn.execute('UPDATE expense_resolutions SET items = ?, amount = ? WHERE id = ?',
+        [JSON.stringify(items), amount, cur.id])
+      const [[updated]] = await conn.execute('SELECT * FROM expense_resolutions WHERE id = ?', [cur.id])
+      return { ...adapt(updated), lineCount: lines.length, invoiceNo: inv.invoice_no }
+    })
+    res.json(out)
   } catch (e) { next(e) }
 })
 

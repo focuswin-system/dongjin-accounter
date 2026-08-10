@@ -439,8 +439,10 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
   const [form, setForm] = useState(doc);
   const [processOpen, setProcessOpen] = useState(false);
   const [presets, setPresets] = useState([]);
+  const [itemMaster, setItemMaster] = useState([]);   // 품목 기준정보 — 품명·규격·단위·매입단가 자동채움
   useEffect(() => { setForm(doc); setEdit(false); }, [doc.id]);
   useEffect(() => { api.getApprovalPresets().then(setPresets); }, []);
+  useEffect(() => { api.getRefItems('item').then(list => setItemMaster(list || [])); }, []);
   const done = doc.status === '완료';
   // 결재선: 편집 중이면 form, 아니면 doc. 없으면 담당/결재/대표 기본
   const approval = (form.approval && form.approval.length)
@@ -462,6 +464,44 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
   };
   const addItem = () => setForm(f => ({ ...f, items: [...(f.items || []), { name: '', unit: '식', qty: 1, price: 0, amount: 0, note: '' }] }));
   const removeItem = (i) => setForm(f => ({ ...f, items: (f.items || []).filter((_, j) => j !== i) }));
+
+  /* 기준정보 품목에서 고르면 품명(＋규격)·단위·매입단가를 채운다.
+     id 로 찾는다 — 이름이 같고 규격만 다른 품목(도면 개정 등)이면 이름 매칭은 늘 첫 번째를
+     집어 다른 개정판의 단위·단가가 들어간다(구매품의서·견적요청서와 같은 이유). */
+  const pickItem = (i, val) => setForm(f => {
+    const items = [...(f.items || [])];
+    const base = items[i] || { name: '', unit: '식', qty: 1, price: 0, amount: 0, note: '' };
+    const m = itemMaster.find(x => String(x.id) === String(val));
+    // 목록에 없으면 친 그대로 둔다 — 소액 경비는 기준정보에 없는 게 보통이다
+    if (!m) { items[i] = { ...base, name: val }; return { ...f, items }; }
+    const price = Number(m.purchase_price) || Number(base.price) || 0;
+    const qty = Number(base.qty) || 1;
+    items[i] = { ...base,
+      name: m.spec ? `${m.name} ${m.spec}` : m.name,
+      unit: m.unit || base.unit, price, amount: qty * price };
+    return { ...f, items };
+  });
+
+  /* 연결된 청구서의 품목을 다시 가져온다. 만들 때 한 번 복사하고 끝이라, 청구서에 품목을
+     나중에 채워도 결의서는 "매입 대금 지급 · 식 · 1" 그대로 남아 있었다. */
+  const reloadLines = async () => {
+    const ok = await confirm({
+      title: '청구서 품목을 다시 불러올까요?',
+      body: '지금 결의서에 적힌 품목은 청구서 내용으로 바뀝니다. 손으로 고친 줄이 있으면 함께 사라져요.',
+      confirmLabel: '불러오기',
+    });
+    if (!ok) return;
+    const res = await api.reloadResolutionLines(doc.id);
+    if (!res.ok) return toast.push(res.error || '불러오지 못했어요', { tone: 'warn' });
+    /* 서버가 돌려준 결의서로 **직접** 갈아끼운다.
+       onSaved() 는 목록만 다시 받아오는데, 이 화면의 form 은 `doc.id` 가 바뀔 때만
+       다시 맞춰진다(편집 중 부모가 리렌더될 때마다 입력이 날아가지 않게 하려고 그렇다).
+       같은 문서의 내용만 바뀐 지금은 id 가 그대로라 form 이 옛 품목·옛 금액에 머물렀다 —
+       왼쪽 목록은 550,000인데 본문 지출총액은 500,000으로 남는 식이다. */
+    setForm(res.resolution);
+    toast.push(`${res.resolution.invoiceNo || '청구서'} 품목 ${res.resolution.lineCount}줄을 불러왔어요`);
+    setEdit(false); onSaved();
+  };
 
   const save = async () => {
     const res = await api.updateResolution(doc.id, { ...form, amount: itemsTotal || form.amount });
@@ -486,6 +526,12 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
       <DocToolbar docNo={doc.doc_no} status={<StatusBadge status={doc.status}/>}>
         {edit ? (
           <>
+            {/* 청구서에서 만든 결의서만. 직접 만든 것은 가져올 데가 없다. */}
+            {doc.invoice_id && (
+              <button className="btn" onClick={reloadLines} title="연결된 청구서의 품목 내역을 그대로 가져옵니다">
+                <Icon.Refresh size={14}/> 청구서 품목 불러오기
+              </button>
+            )}
             <button className="btn" onClick={() => { setForm(doc); setEdit(false); }}>취소</button>
             <button className="btn primary" onClick={save}><Icon.Check size={14}/> 저장</button>
           </>
@@ -551,7 +597,20 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
             {displayItems.map((it, i) => (
               <tr key={i}>
                 <td className="num" style={{ textAlign: 'center' }}>{i + 1}</td>
-                <td>{edit ? <input className="cell-input" value={it.name || ''} onChange={e => setItem(i, 'name', e.target.value)}/> : it.name}</td>
+                {/* 품명 및 규격 — 기준정보에서 고르면 '품명 규격'으로 채우고 단위·매입단가까지 따라온다.
+                    양식의 칸이 하나라 합쳐 넣는다(구매품의서·견적요청서와 같은 방식).
+                    목록에 없으면 그냥 쳐도 된다 — 소액 경비는 기준정보에 없는 게 보통이다. */}
+                {/* value 는 **저장될 이름**이다. item_id 를 주면 Combobox 가 그 id 의 라벨
+                    (규격 없는 기준정보 이름)을 그려서, 화면엔 "웹사이트 유지보수"인데
+                    인쇄물엔 "웹사이트 유지보수 월정액"이 찍힌다 — 보는 것과 나가는 것이 달라진다.
+                    id 가 필요한 건 고를 때뿐이고, 그건 옵션의 value 가 들고 있다. */}
+                <td>{edit
+                  ? <Combobox value={it.name || ''} onChange={v => pickItem(i, v)}
+                      options={itemMaster.map(m => ({ value: m.id, label: m.name,
+                        sub: [m.spec, m.unit, m.purchase_price ? `${fmtNum(m.purchase_price)}원` : null].filter(Boolean).join(' · ') }))}
+                      placeholder="품목 선택 또는 직접 입력"
+                      onAddNew={q => setItem(i, 'name', q)} addNewLabel="직접 입력"/>
+                  : it.name}</td>
                 <td style={{ textAlign: 'center' }}>{edit ? <input className="cell-input" value={it.unit || ''} onChange={e => setItem(i, 'unit', e.target.value)}/> : it.unit}</td>
                 <td className="num" style={{ textAlign: 'right' }}>{edit ? <input className="cell-input num" style={{ textAlign: 'right' }} value={it.qty ?? ''} onChange={e => setItemNum(i, 'qty', e.target.value)}/> : fmtNum(it.qty || 0)}</td>
                 <td className="num" style={{ textAlign: 'right' }}>{edit ? <MoneyInput className="cell-input num" style={{ textAlign: 'right' }} placeholder="" value={it.price || ''} onChange={raw => setItemNum(i, 'price', raw)}/> : fmtNum(it.price || 0)}</td>
