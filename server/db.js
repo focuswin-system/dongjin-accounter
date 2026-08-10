@@ -1054,6 +1054,18 @@ async function initDb(conn) {
     await ensureColumn('vendors',   'biz_type',    "biz_type VARCHAR(100)")
     await ensureColumn('vendors',   'biz_item',    "biz_item VARCHAR(100)")
     await ensureColumn('vendors',   'pay_account', "pay_account VARCHAR(200)")
+    /* 이체 정보 — 은행·계좌번호·예금주를 **나눠서** 담는다.
+     *
+     * pay_account 한 칸에 "기업은행 123-456789-01-011 (주)○○" 처럼 몰아 적던 것을 가른다.
+     * 매입처 결제내역서(월별 일괄이체 명단)가 은행·계좌·예금주를 각각 열로 요구하고,
+     * 자유 텍스트에서 그걸 갈라내려면 표기가 제각각이라 반드시 틀린다.
+     *
+     * ⚠ 예금주는 상호와 다른 경우가 흔하다 — 실제 명단에 '김선국맑은유통', '박말숙태강금속'
+     *   처럼 개인 명의 계좌가 섞여 있다. 상호로 대신할 수 없어 별도 칸이 필요하다.
+     * pay_account 는 지우지 않는다(기존 입력 보존). 화면이 옛 값을 힌트로 보여준다. */
+    await ensureColumn('vendors',   'bank_name',      "bank_name VARCHAR(60)")
+    await ensureColumn('vendors',   'bank_account',   "bank_account VARCHAR(60)")
+    await ensureColumn('vendors',   'account_holder', "account_holder VARCHAR(100)")
     // 급여이체 계좌. 주민등록번호는 저장하지 않는다 —
     // 원천징수·연말정산 신고서 자동생성이 범위 밖이라 지금 얻는 게 없고, 저장하는 순간
     // 암호화·파기 의무가 붙는다. 신고서 자동화를 범위에 넣을 때 다시 판단한다.

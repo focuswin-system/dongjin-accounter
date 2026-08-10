@@ -644,7 +644,9 @@ const vendorImportAdapter = {
   sub: '거래처 목록을 엑셀(.xlsx)·CSV로 한 번에 등록하세요. 이미 있는 거래처는 중복 판정 후 건너뛰거나 덮어쓸 수 있어요.',
   templateUrl: '/api/vendors/import/template',
   templateName: '거래처_업로드_양식.xlsx',
-  targets: ["상호명", "거래구분", "거래유형", "사업자번호", "대표자", "담당자", "전화", "팩스", "이메일", "주소"],
+  targets: ["상호명", "거래구분", "거래유형", "사업자번호", "대표자", "담당자", "전화", "팩스", "이메일", "주소",
+    // 이체 정보 — 매입처 결제내역(월별 일괄이체 명단)이 이 셋을 각각 요구한다
+    "은행", "계좌번호", "예금주"],
   requiredTarget: '상호명',
   requiredHelp: '상호명이 없으면 거래처를 등록할 수 없어요.',
   guess: guessVendorTarget,
@@ -873,7 +875,7 @@ const VendorPanel = ({ embedded = false }) => {
   const [showInactive, setShowInactive] = useState(false)   // 미사용 거래처는 기본으로 감춘다
   const [drawerOpen,  setDrawerOpen]  = useState(false)
   const [editing,     setEditing]     = useState(null)
-  const [form, setForm] = useState({ name:'', gubu:'A', type:'', biz_no:'', ceo:'', contact:'', phone:'', fax:'', email:'', address:'', biz_type:'', biz_item:'', pay_account:'' })
+  const [form, setForm] = useState({ name:'', gubu:'A', type:'', biz_no:'', ceo:'', contact:'', phone:'', fax:'', email:'', address:'', biz_type:'', biz_item:'', pay_account:'', bank_name:'', bank_account:'', account_holder:'' })
 
   // 기준정보 화면이므로 미사용까지 다 불러온다(다른 화면의 선택 목록은 사용중만 받는다).
   const load = () => api.getVendors({ all: true }).then(setVendors)
@@ -901,12 +903,13 @@ const VendorPanel = ({ embedded = false }) => {
 
   const openNew = () => {
     setEditing(null)
-    setForm({ name:'', gubu:'A', type:'', biz_no:'', ceo:'', contact:'', phone:'', fax:'', email:'', address:'', biz_type:'', biz_item:'', pay_account:'' })
+    setForm({ name:'', gubu:'A', type:'', biz_no:'', ceo:'', contact:'', phone:'', fax:'', email:'', address:'', biz_type:'', biz_item:'', pay_account:'', bank_name:'', bank_account:'', account_holder:'' })
     setDrawerOpen(true)
   }
   const openEdit = (v) => {
     setEditing(v)
-    setForm({ name:v.name, gubu:v.gubu||'A', type:v.type||'', biz_no:v.biz_no||'', ceo:v.ceo||'', contact:v.contact||'', phone:v.phone||'', fax:v.fax||'', email:v.email||'', address:v.address||'', biz_type:v.biz_type||'', biz_item:v.biz_item||'', pay_account:v.pay_account||'' })
+    setForm({ name:v.name, gubu:v.gubu||'A', type:v.type||'', biz_no:v.biz_no||'', ceo:v.ceo||'', contact:v.contact||'', phone:v.phone||'', fax:v.fax||'', email:v.email||'', address:v.address||'', biz_type:v.biz_type||'', biz_item:v.biz_item||'', pay_account:v.pay_account||'',
+      bank_name:v.bank_name||'', bank_account:v.bank_account||'', account_holder:v.account_holder||'' })
     setDrawerOpen(true)
   }
   const handleSave = async () => {
@@ -1069,12 +1072,29 @@ const VendorPanel = ({ embedded = false }) => {
             </div>
           </div>
 
+          {/* 이체 정보 — 은행·계좌번호·예금주를 **나눠서** 받는다.
+              매입처 결제내역서(월별 일괄이체 명단)가 각각을 열로 요구하고, 한 칸에 몰아
+              적은 값에서 그걸 갈라내려면 표기가 제각각이라 반드시 틀린다.
+              ⚠ 예금주는 상호와 다른 경우가 흔하다(개인 명의 계좌). 비워두면 상호로 대신하지만,
+                 실제 명단에는 '김선국맑은유통' 같은 예금주가 섞여 있어 그대로 두면 이체가 튕긴다. */}
           <div>
             <label className="label" style={{ marginBottom: 8 }}>
-              지급계좌 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택 (이 거래처에 이체할 계좌)</span>
+              이체 정보 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택 (이 거래처에 대금을 보낼 계좌)</span>
             </label>
-            <input className="input" value={form.pay_account} onChange={e => f('pay_account', e.target.value)}
-              placeholder="예: 기업은행 123-456789-01-011 (주)○○"/>
+            <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
+              <input className="input" style={{ width: 120 }} value={form.bank_name}
+                onChange={e => f('bank_name', e.target.value)} placeholder="은행"/>
+              <input className="input num" style={{ flex: 1, minWidth: 180 }} value={form.bank_account}
+                onChange={e => f('bank_account', e.target.value)} placeholder="계좌번호"/>
+              <input className="input" style={{ width: 150 }} value={form.account_holder}
+                onChange={e => f('account_holder', e.target.value)} placeholder="예금주"/>
+            </div>
+            {/* 예전에 한 칸으로 적어둔 값이 있으면 버리지 않고 보여준다 — 옮겨 적을 근거가 된다 */}
+            {form.pay_account && !form.bank_account && (
+              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+                예전 입력: {form.pay_account} <span className="text-muted2">— 위 칸으로 나눠 적어주세요</span>
+              </div>
+            )}
           </div>
 
           <div className="row gap-16" style={{ alignItems: 'flex-start' }}>

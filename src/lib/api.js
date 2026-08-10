@@ -414,6 +414,11 @@ export const api = {
     try { await req('/usage', { method: 'POST', body: { route } }) } catch { /* 무시 */ }
   },
 
+  /* 매입처 결제 내역 — 기준월 말일까지 낼 미지급금을 거래처별로 모은다(조회 전용). */
+  async getPaymentRun(month) {
+    try { return await req(`/payment-runs?month=${month}`) } catch { return { month, total: 0, count: 0, missingBank: 0, vendors: [] } }
+  },
+
   /* 첫 세팅 진행 상황(건수만). 실패하면 '다 됐다'로 보고 카드를 숨긴다 —
      안내가 목적인데 그것 때문에 화면에 오류가 뜨면 본말이 뒤집힌다. */
   async getSetupStatus() {

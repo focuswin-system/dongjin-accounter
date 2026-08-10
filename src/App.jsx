@@ -13,6 +13,7 @@ import { TransactionForm } from './screens/Form'
 import { ContractListScreen, ContractScreen, CONTRACT_LIST } from './screens/Contract'
 import { DocsScreen, EvidenceScreen, EvidenceAttachDrawer, ExcelScreen, ReportsScreen } from './screens/Docs'
 import { SettlementScreen } from './screens/Settlement'
+import { PaymentRunScreen } from './screens/PaymentRun'
 import { PurchaseReqScreen } from './screens/PurchaseReq'
 import { QuoteRequestScreen } from './screens/QuoteRequest'
 import { HRScreen } from './screens/HR'
@@ -559,6 +560,7 @@ function AppInner({ onLogout, user }) {
       case "ap":              return <BillingScreen initialTab="received" role="collect" focusInvoiceId={focusInvoiceId} openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
       case "doc":             return <DocsScreen/>;
       case "settlement":      return <SettlementScreen/>;
+      case "payment_run":     return <PaymentRunScreen go={go}/>;
       case "purchase_req":    return <PurchaseReqScreen/>;
       case "quote_req":       return <QuoteRequestScreen/>;
       // 증빙 관리는 아직 목 데이터만 보여주는 화면이라 nav 에서 뺐는데, #evidence 해시로는

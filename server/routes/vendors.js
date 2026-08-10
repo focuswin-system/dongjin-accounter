@@ -45,11 +45,12 @@ router.get('/:id', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email, biz_type, biz_item, pay_account } = req.body
+    const { name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email, biz_type, biz_item, pay_account,
+            bank_name, bank_account, account_holder } = req.body
     const id = randomUUID()
     await req.db.execute(
-      'INSERT INTO vendors (id, name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email, biz_type, biz_item, pay_account) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [id, name, biz_no||'', ceo||'', address||'', phone||'', gubu||'A', type||'', service_type||'', contact||'', fax||'', email||'', biz_type||'', biz_item||'', pay_account||'']
+      'INSERT INTO vendors (id, name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email, biz_type, biz_item, pay_account, bank_name, bank_account, account_holder) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [id, name, biz_no||'', ceo||'', address||'', phone||'', gubu||'A', type||'', service_type||'', contact||'', fax||'', email||'', biz_type||'', biz_item||'', pay_account||'', bank_name||'', bank_account||'', account_holder||'']
     )
     res.json({ id })
   } catch (e) { next(e) }
@@ -57,10 +58,11 @@ router.post('/', async (req, res, next) => {
 
 router.put('/:id', async (req, res, next) => {
   try {
-    const { name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email, biz_type, biz_item, pay_account } = req.body
+    const { name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email, biz_type, biz_item, pay_account,
+            bank_name, bank_account, account_holder } = req.body
     const [result] = await req.db.execute(
-      'UPDATE vendors SET name=?, biz_no=?, ceo=?, address=?, phone=?, gubu=?, type=?, service_type=?, contact=?, fax=?, email=?, biz_type=?, biz_item=?, pay_account=? WHERE id=?',
-      [name, biz_no||'', ceo||'', address||'', phone||'', gubu||'A', type||'', service_type||'', contact||'', fax||'', email||'', biz_type||'', biz_item||'', pay_account||'', req.params.id]
+      'UPDATE vendors SET name=?, biz_no=?, ceo=?, address=?, phone=?, gubu=?, type=?, service_type=?, contact=?, fax=?, email=?, biz_type=?, biz_item=?, pay_account=?, bank_name=?, bank_account=?, account_holder=? WHERE id=?',
+      [name, biz_no||'', ceo||'', address||'', phone||'', gubu||'A', type||'', service_type||'', contact||'', fax||'', email||'', biz_type||'', biz_item||'', pay_account||'', bank_name||'', bank_account||'', account_holder||'', req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
@@ -105,7 +107,10 @@ router.post('/import/parse', uploadMem.single('file'), (req, res, next) => {
 // ── 거래처 엑셀 임포트: 일괄 등록/갱신 ──
 // items: [{ action:'insert'|'update', id?, name, gubu, type, biz_no, ceo, contact, phone, fax, email, address }]
 // update는 기존 값을 유지하고 엑셀에 값이 있는 칸만 덮어쓴다(빈 칸으로 기존 정보를 지우지 않음).
-const VENDOR_FIELDS = ['name', 'biz_no', 'ceo', 'address', 'phone', 'gubu', 'type', 'contact', 'fax', 'email']
+/* 엑셀 일괄 업로드가 다루는 칸. 이체 정보(은행·계좌·예금주)를 함께 받는다 —
+   매입처 결제내역서가 이 셋을 요구하는데, 거래처가 수십 곳이면 하나씩 손으로 넣을 수 없다. */
+const VENDOR_FIELDS = ['name', 'biz_no', 'ceo', 'address', 'phone', 'gubu', 'type', 'contact', 'fax', 'email',
+  'bank_name', 'bank_account', 'account_holder']
 router.post('/import/commit', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
@@ -127,17 +132,19 @@ router.post('/import/commit', async (req, res, next) => {
           merged[k] = incoming !== '' ? incoming : (cur[k] ?? '')
         }
         await conn.execute(
-          'UPDATE vendors SET name=?, biz_no=?, ceo=?, address=?, phone=?, gubu=?, type=?, contact=?, fax=?, email=? WHERE id=?',
-          [merged.name, merged.biz_no, merged.ceo, merged.address, merged.phone, merged.gubu, merged.type, merged.contact, merged.fax, merged.email, it.id]
+          'UPDATE vendors SET name=?, biz_no=?, ceo=?, address=?, phone=?, gubu=?, type=?, contact=?, fax=?, email=?, bank_name=?, bank_account=?, account_holder=? WHERE id=?',
+          [merged.name, merged.biz_no, merged.ceo, merged.address, merged.phone, merged.gubu, merged.type, merged.contact, merged.fax, merged.email,
+           merged.bank_name, merged.bank_account, merged.account_holder, it.id]
         )
         updated++
       } else {
         const id = randomUUID()
         await conn.execute(
-          'INSERT INTO vendors (id, name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+          'INSERT INTO vendors (id, name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email, bank_name, bank_account, account_holder) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
           [id, name, String(it.biz_no || '').trim(), String(it.ceo || '').trim(), String(it.address || '').trim(),
            String(it.phone || '').trim(), gubu, String(it.type || '').trim(), '',
-           String(it.contact || '').trim(), String(it.fax || '').trim(), String(it.email || '').trim()]
+           String(it.contact || '').trim(), String(it.fax || '').trim(), String(it.email || '').trim(),
+           String(it.bank_name || '').trim(), String(it.bank_account || '').trim(), String(it.account_holder || '').trim()]
         )
         inserted++; createdNames.push(name)
       }
@@ -152,13 +159,14 @@ router.post('/import/commit', async (req, res, next) => {
 router.get('/import/template', (req, res, next) => {
   try {
     const rows = [
-      ["상호명", "거래구분", "거래유형", "사업자번호", "대표자", "담당자", "전화", "팩스", "이메일", "주소"],
-      ["(주)한화오션", "발주처", "발주처", "000-00-00000", "홍길동", "김담당", "031-000-0000", "031-000-0001", "sales@company.com", "경기도 안산시 ..."],
-      ["정밀가공(주)", "매입처", "외주가공", "111-11-11111", "이대표", "박담당", "051-000-0000", "", "cnc@partner.com", "부산광역시 ..."],
-      ["기업은행", "기관", "금융", "", "", "", "1588-0000", "", "", ""],
+      ["상호명", "거래구분", "거래유형", "사업자번호", "대표자", "담당자", "전화", "팩스", "이메일", "주소", "은행", "계좌번호", "예금주"],
+      ["(주)한화오션", "발주처", "발주처", "000-00-00000", "홍길동", "김담당", "031-000-0000", "031-000-0001", "sales@company.com", "경기도 안산시 ...", "", "", ""],
+      // 예금주가 상호와 다른 경우(개인 명의 계좌)가 흔해서 예시에 함께 둔다
+      ["정밀가공(주)", "매입처", "외주가공", "111-11-11111", "이대표", "박담당", "051-000-0000", "", "cnc@partner.com", "부산광역시 ...", "기업", "123-456789-01-011", "이대표정밀가공"],
+      ["기업은행", "기관", "금융", "", "", "", "1588-0000", "", "", "", "", "", ""],
     ]
     const ws = xlsx.utils.aoa_to_sheet(rows)
-    ws['!cols'] = [{ wch: 22 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 22 }, { wch: 30 }]
+    ws['!cols'] = [{ wch: 22 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 22 }, { wch: 30 }, { wch: 10 }, { wch: 20 }, { wch: 16 }]
 
     const guide = [
       ["거래처 일괄 업로드 — 작성 안내"],
