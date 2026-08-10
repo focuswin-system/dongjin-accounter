@@ -4,6 +4,7 @@ import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { ImportWizard } from '../lib/components/ImportWizard'
+import { VendorSubList, ACCOUNT_FIELDS, CONTACT_FIELDS } from '../lib/components/VendorSubList'
 import { RecurringCycles, useRecurringCycles, cycleSummaryByRule } from '../lib/components/RecurringCycles'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { BackfillWizard } from '../lib/components/BackfillWizard'
@@ -876,6 +877,9 @@ const VendorPanel = ({ embedded = false }) => {
   const [drawerOpen,  setDrawerOpen]  = useState(false)
   const [editing,     setEditing]     = useState(null)
   const [form, setForm] = useState({ name:'', gubu:'A', type:'', biz_no:'', ceo:'', contact:'', phone:'', fax:'', email:'', address:'', biz_type:'', biz_item:'', pay_account:'', bank_name:'', bank_account:'', account_holder:'' })
+  // 계좌·담당자는 여러 줄이라 form 과 따로 든다(실물 명세서에 계좌가 셋 적혀 있다)
+  const [vAccounts, setVAccounts] = useState([])
+  const [vContacts, setVContacts] = useState([])
 
   // 기준정보 화면이므로 미사용까지 다 불러온다(다른 화면의 선택 목록은 사용중만 받는다).
   const load = () => api.getVendors({ all: true }).then(setVendors)
@@ -904,19 +908,26 @@ const VendorPanel = ({ embedded = false }) => {
   const openNew = () => {
     setEditing(null)
     setForm({ name:'', gubu:'A', type:'', biz_no:'', ceo:'', contact:'', phone:'', fax:'', email:'', address:'', biz_type:'', biz_item:'', pay_account:'', bank_name:'', bank_account:'', account_holder:'' })
+    setVAccounts([]); setVContacts([])
     setDrawerOpen(true)
   }
-  const openEdit = (v) => {
+  const openEdit = async (v) => {
     setEditing(v)
     setForm({ name:v.name, gubu:v.gubu||'A', type:v.type||'', biz_no:v.biz_no||'', ceo:v.ceo||'', contact:v.contact||'', phone:v.phone||'', fax:v.fax||'', email:v.email||'', address:v.address||'', biz_type:v.biz_type||'', biz_item:v.biz_item||'', pay_account:v.pay_account||'',
       bank_name:v.bank_name||'', bank_account:v.bank_account||'', account_holder:v.account_holder||'' })
+    /* 계좌·담당자는 목록이라 상세로 따로 받는다 — 거래처 목록에 전부 실으면
+       드롭다운 한 번에 수백 줄이 따라온다(목록에는 '주'만 실린다). */
+    setVAccounts([]); setVContacts([])
     setDrawerOpen(true)
+    const full = await api.getVendor(v.id)
+    if (full) { setVAccounts(full.accounts || []); setVContacts(full.contacts || []) }
   }
   const handleSave = async () => {
     if (!form.name) return toast.push('상호명을 입력하세요')
+    const payload = { ...form, accounts: vAccounts, contacts: vContacts }
     const res = editing
-      ? await api.updateVendor(editing.id, form)
-      : await api.addVendor(form)
+      ? await api.updateVendor(editing.id, payload)
+      : await api.addVendor(payload)
     if (!res.ok) return toast.push(res.error || '저장 실패', { tone: 'warn' })
     toast.push(editing ? '수정됐어요' : '거래처가 등록됐어요')
     setDrawerOpen(false)
@@ -1077,25 +1088,22 @@ const VendorPanel = ({ embedded = false }) => {
               적은 값에서 그걸 갈라내려면 표기가 제각각이라 반드시 틀린다.
               ⚠ 예금주는 상호와 다른 경우가 흔하다(개인 명의 계좌). 비워두면 상호로 대신하지만,
                  실제 명단에는 '김선국맑은유통' 같은 예금주가 섞여 있어 그대로 두면 이체가 튕긴다. */}
-          <div>
-            <label className="label" style={{ marginBottom: 8 }}>
-              이체 정보 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택 (이 거래처에 대금을 보낼 계좌)</span>
-            </label>
-            <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
-              <input className="input" style={{ width: 120 }} value={form.bank_name}
-                onChange={e => f('bank_name', e.target.value)} placeholder="은행"/>
-              <input className="input num" style={{ flex: 1, minWidth: 180 }} value={form.bank_account}
-                onChange={e => f('bank_account', e.target.value)} placeholder="계좌번호"/>
-              <input className="input" style={{ width: 150 }} value={form.account_holder}
-                onChange={e => f('account_holder', e.target.value)} placeholder="예금주"/>
+          <VendorSubList
+            label="이체 계좌" addLabel="계좌 추가"
+            hint="거래처가 계좌를 여러 개 주는 일이 흔해요. '주로 씀'으로 표시한 계좌가 매입 결제내역 명단에 실립니다."
+            rows={vAccounts} onChange={setVAccounts} fields={ACCOUNT_FIELDS}/>
+
+          <VendorSubList
+            label="담당자" addLabel="담당자 추가"
+            hint="영업·경리·배송 담당이 다른 경우가 많아요. 위쪽 전화·팩스·이메일은 회사 대표 연락처입니다."
+            rows={vContacts} onChange={setVContacts} fields={CONTACT_FIELDS}/>
+
+          {/* 예전에 한 칸으로 적어둔 값이 있으면 버리지 않고 보여준다 — 옮겨 적을 근거가 된다 */}
+          {form.pay_account && vAccounts.length === 0 && (
+            <div className="text-xs text-muted2">
+              예전 지급계좌 입력: {form.pay_account} <span className="text-muted2">— 위 '계좌 추가'로 옮겨 적어주세요</span>
             </div>
-            {/* 예전에 한 칸으로 적어둔 값이 있으면 버리지 않고 보여준다 — 옮겨 적을 근거가 된다 */}
-            {form.pay_account && !form.bank_account && (
-              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-                예전 입력: {form.pay_account} <span className="text-muted2">— 위 칸으로 나눠 적어주세요</span>
-              </div>
-            )}
-          </div>
+          )}
 
           <div className="row gap-16" style={{ alignItems: 'flex-start' }}>
             <div style={{ flex: 1 }}>

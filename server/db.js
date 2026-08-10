@@ -1077,6 +1077,69 @@ async function initDb(conn) {
     await ensureColumn('vendors',   'bank_name',      "bank_name VARCHAR(60)")
     await ensureColumn('vendors',   'bank_account',   "bank_account VARCHAR(60)")
     await ensureColumn('vendors',   'account_holder', "account_holder VARCHAR(100)")
+
+    /* 거래처 계좌 — **여러 개**다.
+     *
+     * 받은 실물 명세서(현진특수강) 하단에 계좌가 셋 적혀 있다:
+     *   기업 177-111262-01-012 / 경남 638-07-0035120 / 국민 667901-04-223797
+     * 거래처가 여러 계좌를 주고 그중 하나로 보내는 게 실제 관행이다.
+     * vendors 의 한 벌짜리 칸(bank_*)으로는 "이번엔 어느 계좌로" 를 담을 수 없다.
+     *
+     * is_primary 는 결제내역 명단이 기본으로 집는 계좌다 — 매번 고르게 하면 31곳을
+     * 매달 고르는 일이 된다. 고를 일이 있을 때만 고르게 한다. */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS vendor_accounts (
+        id          VARCHAR(36) PRIMARY KEY,
+        vendor_id   VARCHAR(36) NOT NULL,
+        bank_name   VARCHAR(60),
+        account_no  VARCHAR(60),
+        holder      VARCHAR(100),
+        is_primary  TINYINT(1) NOT NULL DEFAULT 0,
+        memo        VARCHAR(200),
+        sort_order  INT DEFAULT 0,
+        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_vendor_accounts (vendor_id, is_primary DESC, sort_order),
+        FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE
+      )
+    `)
+
+    /* 거래처 담당자 — 이것도 여럿이다(영업·경리·배송이 다른 사람이다).
+     * vendors 의 contact/phone 은 **회사 대표 연락처**로 남기고, 사람은 여기 담는다. */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS vendor_contacts (
+        id          VARCHAR(36) PRIMARY KEY,
+        vendor_id   VARCHAR(36) NOT NULL,
+        name        VARCHAR(100),
+        role        VARCHAR(60),
+        phone       VARCHAR(50),
+        mobile      VARCHAR(50),
+        email       VARCHAR(200),
+        is_primary  TINYINT(1) NOT NULL DEFAULT 0,
+        memo        VARCHAR(200),
+        sort_order  INT DEFAULT 0,
+        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_vendor_contacts (vendor_id, is_primary DESC, sort_order),
+        FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE
+      )
+    `)
+
+    /* 한 벌짜리로 적어둔 값을 목록의 **첫 줄(주)** 로 옮긴다.
+       한 번만 돈다 — 이미 목록이 있는 거래처는 건드리지 않는다. 옮긴 뒤에도 원본 칸은
+       지우지 않는다(되돌릴 근거를 남긴다). */
+    await c.execute(`
+      INSERT INTO vendor_accounts (id, vendor_id, bank_name, account_no, holder, is_primary, sort_order)
+      SELECT UUID(), v.id, v.bank_name, v.bank_account, v.account_holder, 1, 1
+        FROM vendors v
+       WHERE COALESCE(v.bank_account, '') <> ''
+         AND NOT EXISTS (SELECT 1 FROM vendor_accounts a WHERE a.vendor_id = v.id)
+    `)
+    await c.execute(`
+      INSERT INTO vendor_contacts (id, vendor_id, name, phone, email, is_primary, sort_order)
+      SELECT UUID(), v.id, v.contact, v.phone, v.email, 1, 1
+        FROM vendors v
+       WHERE COALESCE(v.contact, '') <> ''
+         AND NOT EXISTS (SELECT 1 FROM vendor_contacts x WHERE x.vendor_id = v.id)
+    `)
     // 급여이체 계좌. 주민등록번호는 저장하지 않는다 —
     // 원천징수·연말정산 신고서 자동생성이 범위 밖이라 지금 얻는 게 없고, 저장하는 순간
     // 암호화·파기 의무가 붙는다. 신고서 자동화를 범위에 넣을 때 다시 판단한다.

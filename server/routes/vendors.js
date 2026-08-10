@@ -21,7 +21,15 @@ router.get('/', async (req, res, next) => {
     const sql = `SELECT * FROM vendors${where.length ? ' WHERE ' + where.join(' AND ') : ''}`
       + (gubu ? ' ORDER BY name' : ' ORDER BY gubu, name')
     const [rows] = await req.db.execute(sql, params)
-    res.json(rows)
+    /* 목록에는 **주 계좌·주 담당자만** 얹는다. 거래처마다 전부 실으면 드롭다운 한 번에
+       수백 줄이 따라온다 — 전체 목록은 상세(GET /:id)가 준다. */
+    const [accs] = await req.db.execute(
+      'SELECT vendor_id, bank_name, account_no, holder FROM vendor_accounts WHERE is_primary = 1')
+    const [cons] = await req.db.execute(
+      'SELECT vendor_id, name, role, phone, mobile FROM vendor_contacts WHERE is_primary = 1')
+    const accBy = new Map(accs.map(a => [a.vendor_id, a]))
+    const conBy = new Map(cons.map(c => [c.vendor_id, c]))
+    res.json(rows.map(v => ({ ...v, primary_account: accBy.get(v.id) || null, primary_contact: conBy.get(v.id) || null })))
   } catch (e) { next(e) }
 })
 
@@ -39,9 +47,45 @@ router.get('/:id', async (req, res, next) => {
   try {
     const [rows] = await req.db.execute('SELECT * FROM vendors WHERE id = ?', [req.params.id])
     if (!rows[0]) return res.status(404).json({ error: 'Not found' })
-    res.json(rows[0])
+    const [accounts] = await req.db.execute(
+      'SELECT * FROM vendor_accounts WHERE vendor_id = ? ORDER BY is_primary DESC, sort_order, created_at', [req.params.id])
+    const [contacts] = await req.db.execute(
+      'SELECT * FROM vendor_contacts WHERE vendor_id = ? ORDER BY is_primary DESC, sort_order, created_at', [req.params.id])
+    res.json({ ...rows[0], accounts, contacts })
   } catch (e) { next(e) }
 })
+
+
+/* 계좌·담당자 목록 저장 — **통째로 갈아끼운다.**
+ *
+ * 줄 단위로 추가/수정/삭제를 주고받으면 화면과 서버가 서로 다른 순서를 들고 있을 때
+ * 엉뚱한 줄이 지워진다. 목록이 몇 줄뿐이라 통째 교체가 싸고, 무엇보다 **화면에 보이는 것이
+ * 곧 저장되는 것**이 된다(청구서 품목과 같은 방식).
+ *
+ * ⚠ lines 를 아예 안 보내면(undefined) 건드리지 않는다 — 계좌를 다루지 않는 화면의
+ *   저장이 애써 넣은 계좌 목록을 지우면 안 된다(부분 수정 보존).
+ */
+async function replaceVendorList(db, table, vendorId, rows, cols) {
+  if (!Array.isArray(rows)) return null
+  await db.execute(`DELETE FROM ${table} WHERE vendor_id = ?`, [vendorId])
+  const clean = rows.filter(r => cols.some(c => String(r?.[c] ?? '').trim()))
+  // 주 표시가 하나도 없으면 첫 줄을 주로 삼는다 — 결제 명단이 집을 게 없으면 계좌가 비어 보인다
+  const hasPrimary = clean.some(r => r.is_primary)
+  let ord = 0
+  for (const r of clean) {
+    ord++
+    const vals = cols.map(c => String(r[c] ?? '').trim() || null)
+    await db.execute(
+      `INSERT INTO ${table} (id, vendor_id, ${cols.join(', ')}, is_primary, memo, sort_order)
+       VALUES (?, ?, ${cols.map(() => '?').join(', ')}, ?, ?, ?)`,
+      [randomUUID(), vendorId, ...vals,
+       (hasPrimary ? (r.is_primary ? 1 : 0) : (ord === 1 ? 1 : 0)),
+       String(r.memo ?? '').trim() || null, ord])
+  }
+  return clean.length
+}
+const ACCOUNT_COLS = ['bank_name', 'account_no', 'holder']
+const CONTACT_COLS = ['name', 'role', 'phone', 'mobile', 'email']
 
 router.post('/', async (req, res, next) => {
   try {
@@ -52,6 +96,8 @@ router.post('/', async (req, res, next) => {
       'INSERT INTO vendors (id, name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email, biz_type, biz_item, pay_account, bank_name, bank_account, account_holder) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, name, biz_no||'', ceo||'', address||'', phone||'', gubu||'A', type||'', service_type||'', contact||'', fax||'', email||'', biz_type||'', biz_item||'', pay_account||'', bank_name||'', bank_account||'', account_holder||'']
     )
+    await replaceVendorList(req.db, 'vendor_accounts', id, req.body.accounts, ACCOUNT_COLS)
+    await replaceVendorList(req.db, 'vendor_contacts', id, req.body.contacts, CONTACT_COLS)
     res.json({ id })
   } catch (e) { next(e) }
 })
@@ -65,6 +111,8 @@ router.put('/:id', async (req, res, next) => {
       [name, biz_no||'', ceo||'', address||'', phone||'', gubu||'A', type||'', service_type||'', contact||'', fax||'', email||'', biz_type||'', biz_item||'', pay_account||'', bank_name||'', bank_account||'', account_holder||'', req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
+    await replaceVendorList(req.db, 'vendor_accounts', req.params.id, req.body.accounts, ACCOUNT_COLS)
+    await replaceVendorList(req.db, 'vendor_contacts', req.params.id, req.body.contacts, CONTACT_COLS)
     res.json({ ok: true })
   } catch (e) { next(e) }
 })

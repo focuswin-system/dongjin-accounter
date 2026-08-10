@@ -1134,6 +1134,10 @@ export const api = {
     } catch (e) { return { ok: false, error: e.message } }
   },
 
+  /* 거래처 상세 — 계좌·담당자 목록이 함께 온다(목록 API 는 '주'만 준다). */
+  async getVendor(id) {
+    try { return await req(`/vendors/${id}`) } catch { return null }
+  },
   async addVendor(data) {
     try {
       const result = await req('/vendors', { method: 'POST', body: data })

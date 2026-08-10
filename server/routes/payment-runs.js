@@ -27,10 +27,13 @@ router.get('/', async (req, res, next) => {
     const [rows] = await req.db.execute(
       `SELECT i.id, i.invoice_no, i.issued_at, i.due_at, i.total_amount, i.memo,
               v.id AS vendor_id, v.name AS vendor_name,
-              v.bank_name, v.bank_account, v.account_holder, v.pay_account,
+              va.bank_name, va.account_no, va.holder, v.pay_account,
               COALESCE((SELECT SUM(m.amount) FROM invoice_matches m WHERE m.invoice_id = i.id), 0) AS paid
          FROM invoices i
          LEFT JOIN vendors v ON i.vendor_id = v.id
+         /* 거래처마다 계좌가 여럿이라(실물 명세서에 셋이 적혀 있다) **주 계좌**를 집는다.
+            매달 31곳을 하나씩 고르게 할 수는 없다 — 다를 때만 거래처에서 주 계좌를 바꾼다. */
+         LEFT JOIN vendor_accounts va ON va.vendor_id = v.id AND va.is_primary = 1
         WHERE i.kind = 'received'
           AND (i.due_at IS NULL OR i.due_at <= ?)
         ORDER BY v.name, i.due_at, i.issued_at`, [until])
@@ -48,9 +51,9 @@ router.get('/', async (req, res, next) => {
         byVendor.set(key, {
           vendor_id: r.vendor_id || null,
           vendor_name: r.vendor_name || '(거래처 미지정)',
-          bank_name: r.bank_name || '', bank_account: r.bank_account || '',
+          bank_name: r.bank_name || '', bank_account: r.account_no || '',
           // 예금주가 비면 상호로 대신한다. 개인 명의 계좌면 이게 틀리므로 화면이 경고한다.
-          account_holder: r.account_holder || '',
+          account_holder: r.holder || '',
           pay_account_legacy: r.pay_account || '',
           amount: 0, count: 0, invoices: [], overdue: 0,
         })
