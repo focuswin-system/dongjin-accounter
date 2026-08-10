@@ -5,9 +5,25 @@
  * 표를 그대로 뽑으면 **보이는 것과 받는 것이 항상 같다.**
  */
 
-/** 배열 → CSV 파일 저장. Excel이 한글을 깨지 않도록 BOM을 붙인다. */
-export function downloadCsv(filename, headers, rows) {
-  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`
+/**
+ * 배열 → CSV 파일 저장. Excel이 한글을 깨지 않도록 BOM을 붙인다.
+ *
+ * opts.textCols: **숫자로 읽히면 안 되는 열**의 번호(0부터). 계좌번호·사업자번호처럼
+ *   "값이 아니라 글자"인 칸에 쓴다.
+ *
+ * ⚠ CSV 에서 따옴표로 감싸는 것만으로는 Excel 을 못 막는다. 감싸도 내용이 숫자면 숫자로 읽어서
+ *   · 하이픈 없는 계좌번호 17306510701013 → 1.73065E+13 로 뭉개지고
+ *   · 앞자리 0(0123-456) 이 사라진다.
+ *   이체 명단에서 계좌번호가 이렇게 깨지면 **틀린 계좌로 돈이 나간다.**
+ *   그래서 그 칸만 ="…" 수식 형태로 내보내 Excel 이 글자로 받게 한다.
+ */
+export function downloadCsv(filename, headers, rows, opts = {}) {
+  const textCols = new Set(opts.textCols || [])
+  const esc = (v, i) => {
+    const s = String(v ?? '').replace(/"/g, '""')
+    // ="…" 는 Excel 에서 '이건 글자다'라는 뜻이다. 다른 도구에서도 값 자체는 그대로 읽힌다.
+    return textCols.has(i) && s !== '' ? `"=""${s}"""` : `"${s}"`
+  }
   const csv = [headers, ...rows].map(r => r.map(esc).join(',')).join('\r\n')
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)

@@ -49,13 +49,17 @@ export const PaymentRunScreen = ({ go }) => {
 
   const exportCsv = () => {
     if (!data?.vendors?.length) return toast.push('내보낼 내역이 없어요')
+    /* 계좌번호는 **글자**로 내보낸다(textCols). 그냥 두면 Excel 이 숫자로 읽어
+       하이픈 없는 계좌가 1.73065E+13 이 되고 앞자리 0 이 사라진다 — 틀린 계좌로 돈이 나간다.
+       이체금액은 반대로 숫자여야 한다(엑셀에서 합계를 내야 하므로). */
     downloadCsv(`매입처_결제내역_${month}.csv`,
       ['순번', '업체명', '은행', '계좌번호', '예금주', '이체금액', '건수', '비고'],
       data.vendors.map((v, i) => [
         i + 1, v.vendor_name, v.bank_name, v.bank_account,
         v.account_holder || v.vendor_name, v.amount, v.count,
         v.overdue > 0 ? `연체 ${fmtNum(v.overdue)}원 포함` : '',
-      ]))
+      ]),
+      { textCols: [3] })
   }
 
   return (
