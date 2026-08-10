@@ -113,6 +113,55 @@ router.get('/overview', async (req, res, next) => {
 })
 
 /**
+ * 사용 현황 — "쓰긴 쓰나, 어디서 멈추나".
+ *
+ * overview 의 '마지막 로그인'은 회사 단위라, 한 사람만 들어오고 나머지는 손을 놓은 상태를
+ * 구별하지 못한다. 여기서는 사람별로 본다. 화면 순위는 '어디까지 갔다 되돌아가는지'를
+ * 읽는 용도다 — 등록·발행 화면이 안 보이고 목록만 오르내리면 입력에서 막힌 것이다.
+ *
+ * 남아 있는 값은 화면 이름·횟수뿐이다(usage_daily). 회계 내용은 들어오지 않는다.
+ */
+router.get('/usage', async (req, res, next) => {
+  try {
+    const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 30))
+    const companyId = req.query.companyId || null
+
+    // 회사별 활동 요약 — 안 쓰는 회사를 먼저 찾으려는 것이므로 전 회사를 훑는다
+    const [companies] = await platformPool.execute(
+      `SELECT c.id, c.code, c.name, c.active,
+              MAX(u.last_at)                              AS last_seen,
+              COUNT(DISTINCT u.user_id)                   AS active_users,
+              COUNT(DISTINCT u.day)                       AS active_days,
+              COALESCE(SUM(u.hits), 0)                    AS hits
+         FROM companies c
+         LEFT JOIN usage_daily u
+               ON u.company_id = c.id AND u.day >= CURDATE() - INTERVAL ? DAY
+        GROUP BY c.id, c.code, c.name, c.active
+        ORDER BY c.active DESC, last_seen IS NULL, last_seen DESC`, [days])
+
+    // 사람별 마지막 접속 — 회사를 고르면 그 회사만
+    const userSql =
+      `SELECT u.company_id, c.code AS company_code, u.user_id, u.username,
+              MAX(u.last_at) AS last_seen, COALESCE(SUM(u.hits), 0) AS hits
+         FROM usage_daily u JOIN companies c ON c.id = u.company_id
+        WHERE u.day >= CURDATE() - INTERVAL ? DAY${companyId ? ' AND u.company_id = ?' : ''}
+        GROUP BY u.company_id, c.code, u.user_id, u.username
+        ORDER BY last_seen DESC LIMIT 100`
+    const [users] = await platformPool.execute(userSql, companyId ? [days, companyId] : [days])
+
+    // 화면 순위
+    const routeSql =
+      `SELECT u.route, COALESCE(SUM(u.hits), 0) AS hits, COUNT(DISTINCT u.company_id) AS companies
+         FROM usage_daily u
+        WHERE u.day >= CURDATE() - INTERVAL ? DAY${companyId ? ' AND u.company_id = ?' : ''}
+        GROUP BY u.route ORDER BY hits DESC LIMIT 40`
+    const [routes] = await platformPool.execute(routeSql, companyId ? [days, companyId] : [days])
+
+    res.json({ days, companyId, companies, users, routes })
+  } catch (e) { next(e) }
+})
+
+/**
  * 최근 오류 — 같은 것끼리 묶어서. 300번 난 한 건과 서로 다른 300건은 전혀 다른 상황이다.
  * 저장된 값은 이미 마스킹돼 있다(lib/logSafe.js).
  */

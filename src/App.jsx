@@ -457,6 +457,17 @@ function AppInner({ onLogout, user }) {
     window.scrollTo({ top: 0 });
   }, [route]);
 
+  /* 어느 화면을 쓰는지 남긴다(화면 이름만). 관리자 콘솔의 '사용 현황'이 이걸 읽는다.
+   *
+   * 2초 머문 뒤에만 보낸다 — 메뉴를 훑고 지나가는 이동까지 세면 "많이 쓴 화면"이
+   * 실제로 일한 화면이 아니라 **지나친 화면**이 된다.
+   * 실패해도 아무것도 하지 않는다. 곁다리 기록이 사용자의 일을 방해하면 안 된다. */
+  useEffect(() => {
+    if (!route) return;
+    const t = setTimeout(() => { api.logUsage(route); }, 2000);
+    return () => clearTimeout(t);
+  }, [route]);
+
   const go = (id, opts = {}) => {
     if (opts.contractId) setContractId(opts.contractId);
     if (opts.contractName != null) setContractName(opts.contractName);

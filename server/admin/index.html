@@ -115,6 +115,10 @@
   .btn.dan{background:var(--red-l);color:var(--red)}
   .btn.dan:hover{background:#FCDCE0}
   .btn.sm{padding:7px 12px;font-size:13.5px}
+  /* 고른 것 — 기간 선택처럼 여러 버튼 중 하나가 켜져 있는 자리에 쓴다.
+     클래스만 붙이고 스타일이 없으면 지금 무엇을 보는지 알 수 없다. */
+  .btn.on{background:var(--g900);color:#fff}
+  .btn.on:hover{background:var(--g900)}
   .btn:disabled{opacity:.4;cursor:default}
   .btn.ghost{background:transparent;color:var(--g600)}
   .btn.ghost:hover{background:var(--g100)}
@@ -360,6 +364,7 @@ function renderLogin() {
 /* ── 앱 셸 ────────────────────────────────────────────────────────── */
 const TABS = [
   { id: 'overview', label: '현황' },
+  { id: 'usage',    label: '사용' },
   { id: 'errors',   label: '오류' },
   { id: 'security', label: '로그인 실패' },
   { id: 'accounts', label: '계정' },
@@ -413,7 +418,7 @@ async function renderApp(tab) {
     tabs.appendChild(b)
   }
 
-  const views = { overview: viewOverview, errors: viewErrors, security: viewSecurity, accounts: viewAccounts }
+  const views = { overview: viewOverview, usage: viewUsage, errors: viewErrors, security: viewSecurity, accounts: viewAccounts }
   main.innerHTML = ''
   await views[state.tab](main, ov)
 }
@@ -527,6 +532,91 @@ async function openError(fp) {
 }
 
 /* ── 로그인 실패 ── */
+/* ── 사용 ──
+ *
+ * 이 화면이 답해야 할 물음은 둘이다.
+ *   1) 이 회사, 아직 쓰고 있나?  (안 쓰기 시작하면 그때 연락해야 한다)
+ *   2) 쓰다가 어디서 멈추나?     (목록만 오르내리고 등록·발행이 안 보이면 입력에서 막힌 것)
+ * 남아 있는 값은 화면 이름·횟수뿐이라 회계 내용은 보이지 않는다.
+ */
+async function viewUsage(main) {
+  const days = state.usageDays || 30
+  const box = el(`<div class="card">
+      <h2>사용 현황<span class="sub">최근 ${days}일</span>
+        <span style="margin-left:auto;display:flex;gap:6px" id="dsel"></span></h2>
+      <div id="body"><div class="empty">불러오는 중</div></div></div>`)
+  main.appendChild(box)
+
+  const dsel = box.querySelector('#dsel')
+  for (const d of [7, 30, 90]) {
+    const b = el(`<button class="btn sm ${d === days ? 'on' : ''}">${d}일</button>`)
+    b.onclick = () => { state.usageDays = d; renderApp('usage') }
+    dsel.appendChild(b)
+  }
+
+  let d
+  try { d = await api(`/usage?days=${days}`) }
+  catch (e) { box.querySelector('#body').innerHTML = `<div class="empty red">${esc(e.message)}</div>`; return }
+
+  /* 며칠째 안 들어왔는지가 이 표의 핵심이다. 날짜만 적어두면 눈으로 빼야 해서
+     "언제부터 안 쓰지"를 놓친다. */
+  const daysAgo = (t) => {
+    if (!t) return null
+    return Math.floor((Date.now() - new Date(t).getTime()) / 86400000)
+  }
+  const tone = (ago) => ago == null ? 'red' : ago >= 14 ? 'red' : ago >= 7 ? 'amber' : ''
+  const label = (ago) => ago == null ? '기록 없음' : ago === 0 ? '오늘' : `${ago}일 전`
+
+  const crows = d.companies.map(c => {
+    const ago = daysAgo(c.last_seen)
+    return `<tr>
+      <td><span style="font-weight:600">${esc(c.code)}</span>
+          <div class="sub-l">${esc(c.name || '')}</div></td>
+      <td><span class="chip ${tone(ago)}">${label(ago)}</span></td>
+      <td class="num r">${n(c.active_users || 0)}</td>
+      <td class="num r">${n(c.active_days || 0)}일</td>
+      <td class="num r">${n(c.hits || 0)}</td>
+    </tr>`
+  }).join('')
+
+  const urows = d.users.slice(0, 30).map(u => {
+    const ago = daysAgo(u.last_seen)
+    return `<tr>
+      <td class="g6">${esc(u.company_code || '—')}</td>
+      <td>${esc(u.username || '—')}</td>
+      <td><span class="chip ${tone(ago)}">${label(ago)}</span></td>
+      <td class="num r">${n(u.hits || 0)}</td>
+    </tr>`
+  }).join('')
+
+  const top = Math.max(1, ...d.routes.map(r => Number(r.hits) || 0))
+  const rrows = d.routes.slice(0, 20).map(r => `<tr>
+      <td class="mono">${esc(r.route)}</td>
+      <td style="width:50%">
+        <div style="height:6px;border-radius:3px;background:var(--g900);opacity:.75;width:${
+          Math.max(2, Math.round((Number(r.hits) || 0) / top * 100))}%"></div>
+      </td>
+      <td class="num r">${n(r.hits || 0)}</td>
+      <td class="num r g6">${n(r.companies || 0)}개사</td>
+    </tr>`).join('')
+
+  box.querySelector('#body').innerHTML = `
+    <div class="tw"><table><thead><tr>
+      <th>회사</th><th>마지막 접속</th><th class="r">쓴 사람</th><th class="r">쓴 날</th><th class="r">화면 이동</th>
+    </tr></thead><tbody>${crows || '<tr><td colspan="5" class="empty">기록이 없습니다.</td></tr>'}</tbody></table></div>
+
+    <h2 style="margin-top:26px">사람별 마지막 접속</h2>
+    <div class="tw"><table><thead><tr>
+      <th>회사</th><th>아이디</th><th>마지막 접속</th><th class="r">화면 이동</th>
+    </tr></thead><tbody>${urows || '<tr><td colspan="4" class="empty">기록이 없습니다.</td></tr>'}</tbody></table></div>
+
+    <h2 style="margin-top:26px">많이 쓴 화면
+      <span class="sub">등록·발행이 안 보이고 목록만 오르내리면 입력에서 막힌 것이다</span></h2>
+    <div class="tw"><table><thead><tr>
+      <th>화면</th><th></th><th class="r">이동</th><th class="r">쓰는 회사</th>
+    </tr></thead><tbody>${rrows || '<tr><td colspan="4" class="empty">기록이 없습니다.</td></tr>'}</tbody></table></div>`
+}
+
 async function viewSecurity(main) {
   const box = el(`<div class="card"><h2>로그인 실패<span class="sub">최근 3일</span></h2>
       <div class="tw" id="t"><div class="empty">불러오는 중</div></div></div>`)

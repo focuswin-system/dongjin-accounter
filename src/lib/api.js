@@ -392,6 +392,12 @@ export const api = {
     }
   },
 
+  /* 화면 사용 기록 — 화면 이름만 보낸다. 실패는 삼킨다(곁다리 기록이 화면을 방해하면 안 된다).
+     로그인 전이면 401 이 나는데 그것도 조용히 넘긴다. */
+  async logUsage(route) {
+    try { await req('/usage', { method: 'POST', body: { route } }) } catch { /* 무시 */ }
+  },
+
   // ─── 회사 정보 ────────────────────────────────────────────────
   async getCompany() {
     try { return await req('/company') } catch { return null }

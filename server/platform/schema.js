@@ -152,6 +152,33 @@ async function createPlatformSchema(c) {
     )
   `)
 
+  /* 화면 사용 집계 — "쓰긴 쓰나, 어디서 멈추나"를 보려고 둔다.
+   *
+   * 지금까지는 감사 로그(삭제·처리 같은 **행위**)와 로그인만 남아서, 가장 흔한 이탈 모습인
+   * "들어와서 보기만 하고 나갔다"가 안 잡혔다. 회사별 마지막 로그인은 audit_logs 로 알 수
+   * 있지만, 사용자별로 누가 안 들어오는지도, 어느 화면까지 갔다 되돌아가는지도 몰랐다.
+   *
+   * ⚠ 원본 한 줄씩 쌓지 않고 **(회사·사용자·날짜·화면) 하루 한 줄**로 누적한다.
+   *   화면 이동마다 한 행이면 몇 달 만에 수백만 행이 되는데, 우리가 답해야 할 물음
+   *   ("이 회사가 지난주에 어느 화면을 얼마나 썼나")에는 집계면 충분하다.
+   *
+   * ⚠ 남기는 것은 **화면 이름뿐**이다. 금액·거래처·대상 ID는 넣지 않는다
+   *   (감사 로그 정책과 같다 — 진단에 필요한 최소만 남긴다). */
+  await c.execute(`
+    CREATE TABLE IF NOT EXISTS usage_daily (
+      company_id VARCHAR(36) NOT NULL,
+      user_id    VARCHAR(36) NOT NULL,
+      username   VARCHAR(100),
+      day        DATE        NOT NULL,
+      route      VARCHAR(60) NOT NULL,
+      hits       INT         NOT NULL DEFAULT 0,
+      last_at    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (company_id, user_id, day, route),
+      KEY idx_usage_company_day (company_id, day),
+      KEY idx_usage_last (company_id, last_at)
+    )
+  `)
+
   // 테넌트별 마이그레이션 적용 상태 (P3 러너가 사용)
   await c.execute(`
     CREATE TABLE IF NOT EXISTS tenant_migrations (

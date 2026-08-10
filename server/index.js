@@ -98,6 +98,8 @@ app.use((req, res, next) => {
 
 app.use('/api/auth',               require('./routes/auth'))
 app.use('/api/uploads',            require('./routes/uploads'))
+// 화면 사용 집계 — 어느 화면을 쓰고 어디서 멈추는지. 화면 이름만 남긴다.
+app.use('/api/usage',              require('./routes/usage'))
 app.use('/api/categories',         require('./routes/categories'))
 app.use('/api/account-subjects',   require('./routes/account-subjects'))
 app.use('/api/accounts',           require('./routes/accounts'))

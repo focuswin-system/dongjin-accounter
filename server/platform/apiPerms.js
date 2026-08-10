@@ -79,7 +79,10 @@ const API_RESOURCES = {
  *   /api/uploads 첨부 파일. 화면별로 가르면 같은 파일을 어디서 올렸는지에 따라 접근이 갈려
  *               첨부가 조용히 깨진다. 파일 자체의 회사 격리는 middleware/fileAuth.js 가 한다.
  */
-const ANY_AUTHENTICATED = ['/api/auth', '/api/uploads']
+/*   /api/usage  화면 사용 집계. 어느 화면을 봤는지를 남기는 곁다리 기록이라 자원으로
+ *               가를 수 없다(가르면 그 화면 권한이 없는 사람의 이동은 안 세어져,
+ *               정작 '권한이 없어서 못 쓴다'는 신호를 놓친다). */
+const ANY_AUTHENTICATED = ['/api/auth', '/api/uploads', '/api/usage']
 
 /**
  * **테넌트 게이트 자체를 타지 않는** 경로.
