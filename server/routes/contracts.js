@@ -671,7 +671,8 @@ router.get('/:id', async (req, res, next) => {
 
     // 계약 품목표 + 품목별 누적 기성(이 계약의 청구서 line 합계 — 기성형에서만 채워진다)
     const [itemRows] = await req.db.execute(
-      'SELECT id, item_id, name, spec, unit, qty, unit_price, cost_price, sort_order FROM contract_items WHERE contract_id = ? ORDER BY sort_order, name',
+      // weight·price_basis 가 빠져 있어서, 계약에 중량 기준으로 적어도 화면은 늘 수량 기준으로 봤다
+      'SELECT id, item_id, name, spec, unit, qty, weight, price_basis, unit_price, cost_price, sort_order FROM contract_items WHERE contract_id = ? ORDER BY sort_order, name',
       [req.params.id]
     )
     const contract_items = itemRows.map(r => ({

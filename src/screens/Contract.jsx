@@ -95,10 +95,16 @@ const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster, withQty = fa
             </div>
             {/* 중량 · 단가 기준 — 기준정보에서 고르면 따라오고, 계약별로 고칠 수 있다.
                 금속·자재는 ㎏당 단가로 계약하는 일이 있어서, 무엇에 단가를 곱하는지가
-                금액의 근거다. 기본은 수량이라 대부분의 계약은 이 줄을 건드릴 일이 없다. */}
+                금액의 근거다. 기본은 수량이라 대부분의 계약은 이 줄을 건드릴 일이 없다.
+
+                중량 칸은 계약이 금액을 확정하는 형태(총액형·정기형)에서만 낸다.
+                기성형은 회차마다 중량이 달라 발행 화면에서 받으므로, 여기 적어봐야 안 쓰인다 —
+                안 쓰이는 칸을 띄우면 적어놓고 왜 반영이 안 되냐는 물음이 생긴다. */}
             <div className="row gap-6" style={{ alignItems: 'center' }}>
-              <input className="input num" style={{ width: 92 }} inputMode="decimal" value={r.weight ?? ''}
-                placeholder="중량" onChange={e => upd(i, { weight: e.target.value.replace(/[^0-9.]/g, '') })}/>
+              {withQty && (
+                <input className="input num" style={{ width: 92 }} inputMode="decimal" value={r.weight ?? ''}
+                  placeholder="중량" onChange={e => upd(i, { weight: e.target.value.replace(/[^0-9.]/g, '') })}/>
+              )}
               <span className="text-xs text-muted2">단가 기준</span>
               {['qty', 'weight'].map(b => (
                 <button key={b} type="button"
@@ -1925,7 +1931,9 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
     setRows((contract?.contract_items || []).map(it => ({
       item_id: it.item_id || '', name: it.name, spec: it.spec || '', unit: it.unit || '',
       // 중량·단가기준은 계약 스냅샷을 그대로 가져온다 — 여기서 빠지면 기성 청구가 수량 기준으로 떨어진다
-      weight: Number(it.weight) || 0, price_basis: it.price_basis === 'weight' ? 'weight' : 'qty',
+      // 계약의 중량은 출발점이 아니라 **빈 칸으로 시작**한다 — 회차마다 다르므로
+      // 계약값이 미리 들어가 있으면 그대로 발행해 버리기 쉽다(수량과 같은 이유로 0에서 시작).
+      weight: '', price_basis: it.price_basis === 'weight' ? 'weight' : 'qty',
       unit_price: Number(it.unit_price) || 0, cost_price: Number(it.cost_price) || 0, qty: '', amount: '',
     })));
     setIssuedAt(localToday());
@@ -1934,10 +1942,14 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
   }, [open, contract]);
 
   // 수량 입력 시 금액 자동(수동 수정 전까지). 금액을 직접 고치면 그 값을 유지.
+  /* 회차 수량(또는 중량)을 넣으면 금액이 따라온다.
+     ㎏당 단가 품목은 회차마다 **중량**이 다르다 — 계약에 적힌 중량은 출발점일 뿐이라
+     여기서 다시 받아야 한다. 안 그러면 매 회차 같은 중량으로만 청구된다. */
   const setQty = (i, v) => setRows(rs => rs.map((r, idx) => {
     if (idx !== i) return r;
-    const qty = Number(String(v).replace(/[^0-9.]/g, '')) || 0;
-    return { ...r, qty: v, amount: Math.round(qty * r.unit_price) };
+    const n = Number(String(v).replace(/[^0-9.]/g, '')) || 0;
+    if (r.price_basis === 'weight') return { ...r, weight: v, amount: Math.round(n * r.unit_price) };
+    return { ...r, qty: v, amount: Math.round(n * r.unit_price) };
   }));
   const setAmount = (i, raw) => setRows(rs => rs.map((r, idx) =>
     idx === i ? { ...r, amount: Number(String(raw).replace(/[^0-9]/g, '')) || 0 } : r));
@@ -1955,6 +1967,9 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
       lines: lines.map(r => ({
         item_id: r.item_id || null, name: r.name, spec: r.spec, unit: r.unit,
         qty: Number(String(r.qty).replace(/[^0-9.]/g, '')) || 0,
+        // 중량·단가기준을 함께 보내야 청구서 품목·거래명세서에 근거가 남는다
+        weight: Number(String(r.weight).replace(/[^0-9.]/g, '')) || 0,
+        price_basis: r.price_basis === 'weight' ? 'weight' : 'qty',
         unit_price: r.unit_price, cost_price: r.cost_price || 0, amount: Number(r.amount) || 0,
       })),
     });
@@ -1991,7 +2006,10 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
                 <tr>
                   <th>품목</th>
                   <th style={{ textAlign: 'right' }}>단가</th>
-                  <th style={{ width: 80, textAlign: 'right' }}>수량</th>
+                  {/* 중량 기준 품목이 섞여 있으면 머리글도 그렇게 적는다 */}
+                  <th style={{ width: 80, textAlign: 'right' }}>
+                    {rows.some(r => r.price_basis === 'weight') ? '수량·중량' : '수량'}
+                  </th>
                   <th style={{ width: 130, textAlign: 'right' }}>금액</th>
                 </tr>
               </thead>
@@ -2001,8 +2019,14 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
                     <td className="fw-600">{r.name}{r.spec ? <span className="text-muted2 text-xs"> · {r.spec}</span> : ''}</td>
                     <td className="num text-muted" style={{ textAlign: 'right' }}>{fmtNum(r.unit_price)}{r.unit ? `/${r.unit}` : ''}</td>
                     <td>
-                      <input className="input num" style={{ textAlign: 'right' }} value={r.qty}
+                      {/* 중량 기준 품목은 중량을 받는다 — 칸 이름이 '수량'인데 중량을 넣게 하면
+                          입력한 사람도, 나중에 명세서를 보는 사람도 무엇을 적은 건지 모른다. */}
+                      <input className="input num" style={{ textAlign: 'right' }}
+                        value={r.price_basis === 'weight' ? r.weight : r.qty}
                         onChange={e => setQty(i, e.target.value)} placeholder="0"/>
+                      {r.price_basis === 'weight' && (
+                        <div className="text-xs text-muted2" style={{ textAlign: 'right', marginTop: 2 }}>중량</div>
+                      )}
                     </td>
                     <td>
                       <MoneyInput className="input num" style={{ textAlign: 'right' }} value={r.amount}
