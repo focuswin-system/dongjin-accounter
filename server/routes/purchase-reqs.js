@@ -151,9 +151,43 @@ router.post('/:id/issue-payable', async (req, res, next) => {
     await conn.execute(
       'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [invId, invoice_no, 'received', r.vendor_id, null, supply, vat, total, issued, due, '지급 대기', null, null, `구매품의서 ${r.doc_no}`, tax_type])
+    /* 품의서에 적은 품목을 청구서에도 싣는다.
+     *
+     * 여태 총액만 넘겨서, 품명·규격·수량·단가를 다 적어 결재까지 받은 품의서가
+     * 미지급금이 되는 순간 "구매품의서 GM-… 한 줄"로 납작해졌다. 그 청구서로 만든
+     * 지급결의서도 당연히 "매입 대금 지급 · 식 · 1"이 됐다 — 같은 내용을 세 번 적고도
+     * 마지막 문서에는 아무것도 안 남는 셈이다.
+     *
+     * 금액은 청구서 쪽을 따른다. 사용자가 등록 화면에서 공급가를 고칠 수 있어서
+     * (VAT 별도/포함 전환·단가 조정) 품의 합계와 다를 수 있는데, 청구서에 찍히는 돈은
+     * supply 다. 두 값이 어긋나면 **차액을 한 줄로 세워** 합이 맞게 한다 —
+     * 조용히 안 맞느니 "조정"이 문서에 보이는 편이 낫다.
+     */
+    const [reqItems] = await conn.execute(
+      'SELECT * FROM purchase_req_items WHERE req_id = ? ORDER BY sort_order, id', [req.params.id])
+    const usable = reqItems.filter(it => (it.name || '').trim() || Number(it.amount))
+    if (usable.length) {
+      let ord = 0, sum = 0
+      for (const it of usable) {
+        const amt = Number(it.amount) || 0
+        sum += amt
+        await conn.execute(
+          `INSERT INTO invoice_lines (id, invoice_id, name, spec, unit, qty, weight, price_basis, unit_price, amount, sort_order)
+           VALUES (?,?,?,?,?,?,0,'qty',?,?,?)`,
+          [randomUUID(), invId, it.name || '(품목명 없음)', it.spec || null, it.unit || null,
+           Number(it.qty) || 0, Number(it.unit_price) || 0, amt, ++ord])
+      }
+      const diff = supply - sum
+      if (diff !== 0) {
+        await conn.execute(
+          `INSERT INTO invoice_lines (id, invoice_id, name, spec, unit, qty, weight, price_basis, unit_price, amount, sort_order)
+           VALUES (?,?,?,?,?,1,0,'qty',?,?,?)`,
+          [randomUUID(), invId, '등록 시 금액 조정', `품의 합계 ${sum.toLocaleString('ko-KR')}원 대비`, null, diff, diff, ++ord])
+      }
+    }
     await conn.execute('UPDATE purchase_reqs SET invoice_id = ? WHERE id = ?', [invId, req.params.id])
     await conn.commit()
-    res.json({ ok: true, invoice_id: invId, invoice_no })
+    res.json({ ok: true, invoice_id: invId, invoice_no, lines: usable.length })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
