@@ -918,6 +918,17 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
   .report-print, .report-print * { visibility: visible; }
   #resolution-print, .resolution-print, #statement-print,
   .report-print { position: absolute; left: 0; top: 0; width: 100%; border: none; box-shadow: none; padding: 0; }
+
+  /* 거래명세서만 **드로어 안에서** 인쇄된다(다른 문서는 본문 흐름에 있다).
+     드로어가 position:fixed 라 그 안의 absolute 는 페이지가 아니라 **드로어**를 기준으로
+     자리잡는다 — 그대로 두면 종이가 화면에서 보이던 오른쪽 자리(x≈690)에 그대로 찍혀
+     A4 왼쪽이 잘린다. 인쇄 동안만 드로어를 흐름으로 되돌려 기준을 페이지로 만든다. */
+  .drawer:has(#statement-print) {
+    position: static; width: auto !important; overflow: visible; box-shadow: none;
+  }
+  .drawer:has(#statement-print) .drawer-body {
+    overflow: visible; padding: 0; background: #fff !important;
+  }
   .no-print { display: none !important; }
   @page { size: A4; margin: 16mm; }
 

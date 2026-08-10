@@ -38,7 +38,10 @@ export const StatementDoc = ({ invoice, company, vendor, printId = 'statement-pr
 
   // 양식 느낌 — 품목이 적어도 표가 너무 납작해지지 않게 빈 줄로 채운다
   const blanks = Math.max(0, 5 - lines.length)
-  const colCount = useWeight ? 8 : 7
+  // NO · 품명 · 단위 · 수량 · (중량) · 단가 · 금액
+  const cols = useWeight ? 7 : 6
+  // 합계 줄은 '금액' 칸 하나만 남기고 나머지를 라벨로 합친다
+  const labelSpan = cols - 1
 
   return (
     <div className="doc-paper resolution-paper" id={printId}>
@@ -87,18 +90,18 @@ export const StatementDoc = ({ invoice, company, vendor, printId = 'statement-pr
             </tr>
           ))}
           {Array.from({ length: blanks }).map((_, i) => (
-            <tr key={`b${i}`}>{Array.from({ length: colCount - 1 }).map((__, j) => <td key={j}>&nbsp;</td>)}</tr>
+            <tr key={`b${i}`}>{Array.from({ length: cols }).map((__, j) => <td key={j}>&nbsp;</td>)}</tr>
           ))}
           <tr className="res-total">
-            <th colSpan={colCount - 2} style={{ textAlign: 'center' }}>공급가액</th>
+            <th colSpan={labelSpan} style={{ textAlign: 'center' }}>공급가액</th>
             <td className="num fw-700" style={{ textAlign: 'right' }}>{fmtNum(supply)}</td>
           </tr>
           <tr className="res-total">
-            <th colSpan={colCount - 2} style={{ textAlign: 'center' }}>세　액</th>
+            <th colSpan={labelSpan} style={{ textAlign: 'center' }}>세　액</th>
             <td className="num fw-700" style={{ textAlign: 'right' }}>{fmtNum(vat)}</td>
           </tr>
           <tr className="res-total">
-            <th colSpan={colCount - 2} style={{ textAlign: 'center' }}>합　계</th>
+            <th colSpan={labelSpan} style={{ textAlign: 'center' }}>합　계</th>
             <td className="num fw-700" style={{ textAlign: 'right' }}>{fmtNum(supply + vat)}</td>
           </tr>
         </tbody>

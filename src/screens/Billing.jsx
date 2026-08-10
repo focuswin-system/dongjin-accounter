@@ -541,8 +541,11 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
         {/* 거래명세서 — 상세 위에 한 겹 더 띄운다. 인쇄는 이 종이(#statement-print)만 나간다.
             드로어 안에서 바로 뽑는 이유: 명세서는 '이 청구서'의 서류라 목록으로 돌아가
             다시 찾게 하면 흐름이 끊긴다(지출결의서 인쇄와 같은 방식). */}
+        {/* confirmClose={false}: 읽기 전용 뷰어라 Esc 로 바로 닫는다 —
+            저장될 내용이 없는데 "쓰던 내용은 저장되지 않아요"라고 묻는 건 거짓 경고다. */}
         {stmtOpen && (
-          <Drawer open={true} onClose={() => setStmtOpen(false)} width="min(900px, 100vw)" label="거래명세서">
+          <Drawer open={true} onClose={() => setStmtOpen(false)} width="min(900px, 100vw)" label="거래명세서"
+            confirmClose={false}>
             <div className="drawer-head no-print">
               <div>
                 <div className="fw-700" style={{ fontSize: 16 }}>거래명세서</div>

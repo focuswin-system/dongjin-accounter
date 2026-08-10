@@ -353,8 +353,12 @@ const drawerStack = [];
  *
  * 바깥(백드롭) 클릭은 예전처럼 바로 닫는다. 자주 쓰는 닫기 동작이라 매번 물으면
  * 그쪽이 성가셔진다 — 실수로 눌리는 쪽은 Esc다.
+ *
+ * confirmClose={false} 는 **읽기 전용** 드로어용(거래명세서 같은 뷰어).
+ * 저장될 내용이 없는데 "쓰던 내용은 저장되지 않아요"라고 물으면 거짓 경고이고,
+ * 그런 경고가 쌓이면 정작 진짜 경고를 그냥 넘기게 된다.
  */
-export const Drawer = ({ open, onClose, width = "min(480px, 100vw)", label, children }) => {
+export const Drawer = ({ open, onClose, width = "min(480px, 100vw)", label, children, confirmClose = true }) => {
   const [asking, setAsking] = useState(false);
   const meRef = useRef({});
   const okRef = useRef(null);
@@ -384,11 +388,13 @@ export const Drawer = ({ open, onClose, width = "min(480px, 100vw)", label, chil
     const onKey = (e) => {
       if (e.key !== "Escape" || e.defaultPrevented || !isTop()) return;
       e.preventDefault();
+      // 읽기 전용이면 물을 것이 없다 — 바로 닫는다
+      if (!confirmClose) { onClose?.(); return; }
       setAsking(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, asking]);
+  }, [open, asking, confirmClose, onClose]);
 
   /* 묻는 동안엔 Enter·Esc 를 **캡처 단계**에서 가로챈다 —
      뒤에 있는 입력칸이나 콤보박스가 Enter 를 먼저 삼키면 '닫기'가 안 먹는다. */
