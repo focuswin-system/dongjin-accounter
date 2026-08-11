@@ -17,6 +17,25 @@ const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 // 청구서 상태 재계산은 lib/invoiceStatus.js 공용
 // (거래 수정·삭제, 정산 추가·취소, 청구서 금액 수정이 모두 같은 규칙을 써야 한다)
 
+/* 상대 계좌 스냅샷 — 어느 계좌로 오갔는지를 거래에 **베껴** 둔다.
+ *
+ * 화면이 보낸 은행·계좌번호 문자열을 그대로 믿지 않고, 고른 줄(vendor_accounts.id)을
+ * 서버가 다시 읽어 베낀다. 그래야 (1) 그 시점에 실제로 있던 계좌임이 보장되고
+ * (2) 나중에 거래처가 계좌를 고쳐도 과거 거래의 계좌는 안 바뀐다.
+ *
+ * 고른 줄이 그 거래처의 것이 아니면 무시한다 — 남의 거래처 계좌가 붙는 걸 막는다.
+ * accountId 가 비면 스냅샷 네 칸을 모두 지운다(연결 해제).
+ */
+async function counterpartySnapshot(db, vendorId, accountId) {
+  const empty = { id: null, bank: null, account: null, holder: null }
+  if (!accountId || !vendorId) return empty
+  const [[row]] = await db.execute(
+    'SELECT id, bank_name, account_no, holder FROM vendor_accounts WHERE id = ? AND vendor_id = ?',
+    [accountId, vendorId])
+  if (!row) return empty
+  return { id: row.id, bank: row.bank_name || null, account: row.account_no || null, holder: row.holder || null }
+}
+
 // 거래 목록/상세에 첨부 서류(다중) 붙이기
 async function attachDocs(db, rows) {
   if (!rows.length) return
@@ -141,7 +160,8 @@ router.post('/', async (req, res, next) => {
       kind, vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
       amount, date, method, status, project_no, site,
       invoice_id, recurring_id, doc_no, employee_id, evid_type, evid_url, memo,
-      item_id, account_code, supply_amount, vat_amount, tax_type, vat_deductible
+      item_id, account_code, supply_amount, vat_amount, tax_type, vat_deductible,
+      counterparty_account_id
     } = req.body
     const dateErr = futureDateError(date)
     if (dateErr) return res.status(400).json({ error: dateErr })
@@ -158,17 +178,20 @@ router.post('/', async (req, res, next) => {
     const id = randomUUID()
     // 원가 귀속(cost_contract_id)은 지출에만 의미가 있다 — 수금에 붙으면 매출계약 원가가 부풀어 오른다
     const costId = kind === 'expense' ? (cost_contract_id || null) : null
+    const cp = await counterpartySnapshot(req.db, vendor_id, counterparty_account_id)
     await req.db.execute(`
       INSERT INTO transactions (id, kind, vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
         amount, date, method, status, project_no, site,
         invoice_id, recurring_id, doc_no, employee_id, evid_type, evid_url, memo, item_id, account_code,
-        supply_amount, vat_amount, tax_type, vat_deductible)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        supply_amount, vat_amount, tax_type, vat_deductible,
+        counterparty_account_id, counterparty_bank, counterparty_account, counterparty_holder)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `, [id, kind, vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
         amount, date, method||'', st, project_no||'', site||'',
         invoice_id||null, recurring_id||null, doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'',
         item_id||null, account_code||null,
-        vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible])
+        vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible,
+        cp.id, cp.bank, cp.account, cp.holder])
     res.json({ id })
   } catch (e) { next(e) }
 })
@@ -179,7 +202,7 @@ router.put('/:id', async (req, res, next) => {
       vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
       amount, date, method, status, project_no, site,
       doc_no, employee_id, evid_type, evid_url, memo, item_id, account_code,
-      supply_amount, vat_amount, tax_type, vat_deductible
+      supply_amount, vat_amount, tax_type, vat_deductible, counterparty_account_id
     } = req.body
     const dateErr = futureDateError(date)
     if (dateErr) return res.status(400).json({ error: dateErr })
@@ -221,6 +244,7 @@ router.put('/:id', async (req, res, next) => {
     const lerr = ledgerError({ kind: cur.kind, account_id, status: st })
     if (lerr) return res.status(400).json({ error: lerr })
     const costId = cur.kind === 'expense' ? (cost_contract_id || null) : null
+    const cp = await counterpartySnapshot(req.db, vendor_id, counterparty_account_id)
     // 금액이 바뀌면 청구서 매칭액도 따라가야 한다. 거래 수정과 매칭 갱신이 갈라지면
     // 청구서 정산액이 옛 금액으로 남아 미수/미지급이 틀어지므로 한 트랜잭션으로 묶는다.
     const conn = await req.db.getConnection()
@@ -230,12 +254,14 @@ router.put('/:id', async (req, res, next) => {
         UPDATE transactions SET vendor_id=?, contract_id=?, cost_contract_id=?, account_id=?, category=?, sub_category=?,
           amount=?, date=?, method=?, status=?, project_no=?, site=?,
           doc_no=?, employee_id=?, evid_type=?, evid_url=?, memo=?, item_id=?, account_code=?,
-          supply_amount=?, vat_amount=?, tax_type=?, vat_deductible=?
+          supply_amount=?, vat_amount=?, tax_type=?, vat_deductible=?,
+          counterparty_account_id=?, counterparty_bank=?, counterparty_account=?, counterparty_holder=?
         WHERE id=?
       `, [vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
           amount, date, method||'', st, project_no||'', site||'',
           doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'', item_id||null, account_code||null,
-          vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible, req.params.id])
+          vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible,
+          cp.id, cp.bank, cp.account, cp.holder, req.params.id])
       if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
 
       // 이 거래에 걸린 청구서 매칭을 새 금액에 맞춰 조정하고 청구서 상태를 재계산한다.

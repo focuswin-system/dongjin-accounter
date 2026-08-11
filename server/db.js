@@ -1148,6 +1148,22 @@ async function initDb(conn) {
        WHERE COALESCE(v.contact, '') <> ''
          AND NOT EXISTS (SELECT 1 FROM vendor_contacts x WHERE x.vendor_id = v.id)
     `)
+    /* 거래에 **상대 계좌**를 남긴다 — 어느 계좌에서 어느 계좌로 갔는지.
+     *
+     * account_id 는 우리 쪽 계좌다. 상대 쪽은 지금까지 아무 데도 안 남아서,
+     * 거래처가 계좌를 셋 가진 순간 "이번엔 어디로 보냈지"를 영영 알 수 없게 된다.
+     * (통장을 다시 뒤지는 것 말고는 방법이 없다.)
+     *
+     * ⚠ 값은 **스냅샷**이다. vendor_accounts 를 참조만 걸어두면 나중에 거래처가
+     *   계좌를 바꾸거나 지웠을 때 과거 거래의 계좌까지 같이 바뀐다 —
+     *   청구서 품목이 품목 마스터를 베껴 두는 것과 같은 이유다.
+     * counterparty_account_id 는 '그때 어느 줄을 골랐나'를 남길 뿐이라
+     *   그 줄이 지워지면 NULL 이 되고, 스냅샷 세 칸은 그대로 남는다. */
+    await ensureColumn('transactions', 'counterparty_account_id', "counterparty_account_id VARCHAR(36)")
+    await ensureColumn('transactions', 'counterparty_bank',       "counterparty_bank VARCHAR(60)")
+    await ensureColumn('transactions', 'counterparty_account',    "counterparty_account VARCHAR(60)")
+    await ensureColumn('transactions', 'counterparty_holder',     "counterparty_holder VARCHAR(100)")
+
     // 급여이체 계좌. 주민등록번호는 저장하지 않는다 —
     // 원천징수·연말정산 신고서 자동생성이 범위 밖이라 지금 얻는 게 없고, 저장하는 순간
     // 암호화·파기 의무가 붙는다. 신고서 자동화를 범위에 넣을 때 다시 판단한다.

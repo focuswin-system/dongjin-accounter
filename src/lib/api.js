@@ -272,6 +272,12 @@ function adaptTransaction(row) {
     cost_contract_id: row.cost_contract_id || '',
     cost_contract_name: row.cost_contract_name || '',
     account: row.account_name || '',
+    /* 상대 계좌 — 어디로/어디서 돈이 오갔나. 거래처가 계좌를 여럿 가지면
+       '이번엔 어느 계좌로'가 여기 남아야만 알 수 있다(등록 시점 스냅샷). */
+    counterpartyAccountId: row.counterparty_account_id || '',
+    counterpartyBank: row.counterparty_bank || '',
+    counterpartyAccount: row.counterparty_account || '',
+    counterpartyHolder: row.counterparty_holder || '',
     /* 적요 — 사람이 적은 내용. **계약명을 섞지 않는다.**
        예전엔 `계약명 || 적요 || 전표번호` 를 한 칸에 뭉쳐 '내용'이라 불렀는데,
        그 칸만 봐서는 계약인지 메모인지 알 수 없었다. 계약은 이제 자기 칸(contract)이 있다. */

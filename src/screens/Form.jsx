@@ -49,6 +49,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   const taxable = form.taxType === "과세";
   const [taxWarningDismissed, setTaxWarningDismissed] = useState(false);
   const [vendors, setVendors] = useState([]);
+  const [vendorAccounts, setVendorAccounts] = useState([]);   // 고른 거래처의 계좌들(여럿일 수 있다)
   const [accounts, setAccounts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [items, setItems] = useState([]);            // 품목(선택)
@@ -148,9 +149,33 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       evid_type: editTxn.evid_type || '',
       evidFile:  null,
       employee:  editTxn.employee || '',
+      cpAccountId: editTxn.counterpartyAccountId || '',
       docs:      [],   // 편집 시 새로 올리는 첨부만
     });
   }, [open, editTxn]);
+
+  /* 고른 거래처의 계좌 목록. 거래처가 바뀌면 다시 읽고, 이전 선택은 버린다 —
+     A사 계좌를 고른 채 거래처만 B사로 바꾸면 남의 계좌가 붙는다. */
+  useEffect(() => {
+    const v = vendors.find(x => x.name === form.vendor)
+    if (!v) { setVendorAccounts([]); return }
+    let alive = true
+    api.getVendor(v.id).then(d => {
+      if (!alive) return
+      const list = d?.accounts || []
+      setVendorAccounts(list)
+      setForm(f => {
+        // 편집으로 열었을 때 이미 붙어 있던 계좌는 지키고, 목록에 없으면 비운다
+        if (f.cpAccountId && list.some(a => a.id === f.cpAccountId)) return f
+        // 계좌가 하나뿐이면 고를 것이 없다 — 그게 그 계좌다
+        const only = list.length === 1 ? list[0].id : ''
+        const primary = list.find(a => a.is_primary)?.id || ''
+        const next = only || primary || ''
+        return f.cpAccountId === next ? f : { ...f, cpAccountId: next }
+      })
+    })
+    return () => { alive = false }
+  }, [form.vendor, vendors]);
 
   // 비목의 계정과목 그룹(세금계산서 안내 배너용) 파생 — 폼 리셋 없이 acctGroup만 갱신
   useEffect(() => {
@@ -168,6 +193,27 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, form, kind]);
+
+  /* 상대 계좌 고르기 — 거래처가 계좌를 **여럿** 준 경우에만 묻는다.
+     하나뿐이면 고를 것이 없으므로 묻지 않고 그 계좌를 붙인다(위 effect).
+     입력을 늘리는 일이라, 늘려야만 하는 자리에서만 늘린다. */
+  const counterpartyPicker = (ask) => vendorAccounts.length > 1 && (
+    <div style={{ marginTop: 10 }}>
+      <div className="text-xs text-muted2" style={{ marginBottom: 6 }}>
+        {form.vendor} 계좌가 {vendorAccounts.length}개예요. {ask}
+      </div>
+      <div className="row gap-6" style={{ flexWrap: "wrap" }}>
+        {vendorAccounts.map(a => (
+          <button key={a.id} type="button"
+            className={`chip ${form.cpAccountId === a.id ? "active" : ""}`}
+            onClick={() => setForm({ ...form, cpAccountId: a.id })}>
+            {a.bank_name || "은행 미상"} {a.account_no}
+            {a.holder && <span className="text-muted2" style={{ fontWeight: 400, marginLeft: 2 }}>· {a.holder}</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
   const handleSave = async () => {
     if (busy) return;
@@ -198,6 +244,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       // 원가 귀속(지출만) — 이 돈이 어느 매출건의 원가인지. 근거 계약과 별개 축.
       cost_contract_id: kind === "expense" ? (costContractObj?.id || null) : null,
       account_id:   accountObj?.id  || null,
+      // 상대 계좌 — id 만 보낸다. 은행·계좌번호는 서버가 그 줄을 다시 읽어 베낀다.
+      counterparty_account_id: form.cpAccountId || null,
       employee_id:  employeeObj?.id || null,
       category:     form.category,
       sub_category: "",
@@ -542,6 +590,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                     ))}
                   </div>
                 )}
+                {form.method === "계좌이체" && counterpartyPicker("어디로 보냈나요?")}
               </FormField>
             ) : (
               <FormField label="입금 계좌" required>
@@ -553,6 +602,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                     </button>
                   ))}
                 </div>
+                {counterpartyPicker("어디서 들어왔나요?")}
               </FormField>
             )}
 

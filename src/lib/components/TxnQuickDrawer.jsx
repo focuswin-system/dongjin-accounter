@@ -77,6 +77,16 @@ export const TxnQuickDrawer = ({ txnId, onClose, contractId, onChanged }) => {
 
             <Row label="비목">{txn.category}</Row>
             <Row label="계좌">{txn.account || '—'}</Row>
+            {/* 상대 계좌 — 기록이 있을 때만 보여준다. 없는 거래가 대부분이라
+                '—' 로 늘 자리를 차지하면 있는 쪽이 묻힌다. */}
+            {(txn.counterpartyAccount || txn.counterpartyBank) && (
+              <Row label={txn.kind === 'expense' ? '보낸 곳' : '받은 곳'}>
+                <span className="num">{[txn.counterpartyBank, txn.counterpartyAccount].filter(Boolean).join(' ')}</span>
+                {txn.counterpartyHolder && (
+                  <span className="text-xs text-muted2" style={{ marginLeft: 6 }}>{txn.counterpartyHolder}</span>
+                )}
+              </Row>
+            )}
             <Row label="상태"><StatusBadge status={txn.status}/></Row>
             <Row label="근거 계약">{txn.contract || <span className="text-muted2">없음</span>}</Row>
             {txn.kind === 'expense' && (

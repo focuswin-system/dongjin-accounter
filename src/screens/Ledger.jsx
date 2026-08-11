@@ -481,6 +481,12 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
               {/* 지출인데 '입금 계좌'라고 적혀 있었다. 바로 위 금액 칸은 sign으로 갈라 쓰면서
                   여기만 고정 문구였다. 앱 전체가 쓰는 짝(PaidIssueDrawer·Contract·Finance)에 맞춘다. */}
               {txn.account && <DetailRow label={txn.sign > 0 ? "입금 계좌" : "출금 계좌"} value={txn.account}/>}
+              {/* 상대 계좌 — 거래처가 계좌를 여럿 가지면 여기만이 '어디로 갔나'의 답이다 */}
+              {(txn.counterpartyAccount || txn.counterpartyBank) && (
+                <DetailRow label={txn.sign > 0 ? "보낸 계좌" : "받는 계좌"}
+                  value={[[txn.counterpartyBank, txn.counterpartyAccount].filter(Boolean).join(' '),
+                          txn.counterpartyHolder].filter(Boolean).join(' · ')}/>
+              )}
               {txn.method  && <DetailRow label="결제수단"  value={txn.method}/>}
               {txn.memo    && <DetailRow label="메모"      value={txn.memo}/>}
               {txn.doc     && <DetailRow label="결의서"    value={<StatusBadge status={txn.doc}/>}/>}
