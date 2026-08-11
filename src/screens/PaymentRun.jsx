@@ -117,10 +117,25 @@ export const PaymentRunScreen = ({ go }) => {
 
           <table className="table" style={{ marginBottom: 14 }}>
             <tbody>
+              {/* 계좌를 고르기 전이 기본 상태다(고르는 건 선택). 그때 은행 자리에 '출금 계좌',
+                  옆 칸에 또 '계좌'가 찍혀 "출금 계좌 계좌 —" 라고 읽혔다 — 라벨 두 개가 겹쳤다.
+                  고르기 전에는 칸을 합쳐 무엇을 해야 하는지 한 줄로 적는다. */}
               <tr>
-                <th style={{ width: 150, background: 'var(--surface-2)' }}>{acc?.bankName || '출금 계좌'}</th>
-                <th style={{ width: 60, background: 'var(--surface-2)' }}>계좌</th>
-                <td className="num">{acc?.number || '—'}</td>
+                {acc ? (
+                  <>
+                    <th style={{ width: 150, background: 'var(--surface-2)' }}>{acc.bankName || acc.name}</th>
+                    <th style={{ width: 60, background: 'var(--surface-2)' }}>계좌</th>
+                    <td className="num">{acc.number || '—'}</td>
+                  </>
+                ) : (
+                  <>
+                    <th style={{ width: 150, background: 'var(--surface-2)' }}>출금 계좌</th>
+                    {/* 안내는 화면에서만 — 종이에 "위에서 고르면…"이 찍히면 서류가 아니라 화면 캡처가 된다 */}
+                    <td colSpan={2} className="text-muted2">
+                      <span className="no-print">위에서 고르면 여기에 적힙니다</span>
+                    </td>
+                  </>
+                )}
                 <th style={{ width: 50, background: 'var(--surface-2)' }}>₩</th>
                 <td className="num fw-700 num-right" style={{ fontSize: 16 }}>{fmtNum(data.total)}</td>
               </tr>

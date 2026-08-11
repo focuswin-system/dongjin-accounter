@@ -939,6 +939,28 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
   .no-print { display: none !important; }
   @page { size: A4; margin: 16mm; }
 
+  /* ⚠ 한 장을 넘는 문서가 **첫 장에서 잘려 나갔다.**
+   *
+   * 위에서 인쇄 대상을 position:absolute 로 끌어올리는데, 흐름 밖(out-of-flow) 상자는
+   * 브라우저가 페이지로 **쪼개지 않는다**. 그래서 보고서·결의서·결제내역처럼 긴 표는
+   * 첫 장에 담기는 만큼만 찍히고 나머지가 통째로 사라졌다
+   * (비목별 지출 16줄이 인쇄물에서 사라진 걸로 확인).
+   *
+   * absolute 를 쓴 이유는 visibility:hidden 이 **자리를 남기기** 때문이다 —
+   * 흐름에 두면 숨긴 사이드바·머리글이 종이 위쪽을 빈칸으로 차지한다.
+   * 그러면 자리째 없애면 된다: 인쇄 대상도, 그 조상도, 그 안쪽도 아닌 것은 display:none.
+   * 그러고 나면 인쇄 대상을 흐름에 되돌려도 종이 맨 위에서 시작하고, 여러 장으로 나뉜다.
+   *
+   * :has() 가 없는 옛 브라우저에서는 이 블록이 통째로 무시돼 종전 동작(한 장)으로 남는다. */
+  @supports selector(:has(*)) {
+    body *:not(:has(:is(#resolution-print, .resolution-print, #statement-print, .report-print))):not(:is(#resolution-print, .resolution-print, #statement-print, .report-print)):not(:is(#resolution-print, .resolution-print, #statement-print, .report-print) *) {
+      display: none !important;
+    }
+    #resolution-print, .resolution-print, #statement-print, .report-print {
+      position: static !important;
+    }
+  }
+
   /* 화면에서 가로 스크롤로 보던 표는 종이에 그대로 옮기면 **오른쪽이 잘려 나간다**
      (매입·매출 현황의 금액·부가세·계가 통째로 사라졌다). 종이엔 스크롤이 없으므로
      최소 폭을 풀고 넘치는 부분을 보이게 해, 브라우저가 폭에 맞춰 접어 그리게 한다. */
