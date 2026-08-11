@@ -972,6 +972,10 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
   .report-print tr { page-break-inside: avoid; page-break-after: auto; }
   .report-print thead { display: table-header-group; }   /* 페이지마다 머리글 반복 */
   .report-print .card { break-inside: avoid; box-shadow: none; }
+  /* 표를 담은 카드는 예외 — 통째로 안 나뉘게 하면 카드가 한 장에 못 들어갈 때
+     다음 장으로 통째로 밀려, 앞 장 3분의 2가 빈 채로 넘어간다(실제로 그랬다).
+     표는 줄 단위로 나뉘어도 읽힌다 — 위 tr 규칙이 줄이 잘리는 것만 막아준다. */
+  .report-print .card:has(table) { break-inside: auto; }
 
   /* 헤더·결재란의 회색 음영은 인쇄에서 흰색으로 — 테두리만 남겨 깔끔하게 */
   .res-head th, .res-items th, .res-total th, .res-total td,
