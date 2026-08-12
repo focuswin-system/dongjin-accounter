@@ -1,7 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday, kstDate } = require('../db')
-const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS, pendingCycle } = require('../lib/recurrence')
+const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS, pendingCycle , PAYMENT_TERM_DAYS } = require('../lib/recurrence')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError, amountError } = require('../lib/ledger')
 const { closedPeriodError } = require('../lib/closing')
@@ -176,7 +176,7 @@ async function createExpenseInvoice(conn, r, target, { paid = false, accountId =
   await conn.execute(
     'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
     [invId, invoice_no, 'received', r.vendor_id || null, r.contract_id || null, supply, vat, total,
-     target, addDays(target, 30), paid ? '지급 완료' : '지급 대기', acctId, r.id,
+     target, addDays(target, PAYMENT_TERM_DAYS), paid ? '지급 완료' : '지급 대기', acctId, r.id,
      `정기지출 · ${r.category || ''}`.trim(), tax_type]
   )
   if (paid) {

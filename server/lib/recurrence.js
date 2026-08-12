@@ -89,6 +89,18 @@ function dueDatesToGenerate(rec, today = new Date(), opts = {}) {
   return out
 }
 
+/* 정기 회차를 청구서로 발행할 때 붙는 **결제기한**(회차일 + 이 일수).
+ *
+ * 회차일은 '청구서를 내는 날'이고, 돈이 실제로 오가는 날은 결제기한이다.
+ * 자금 예측이 회차일에 돈을 세면, 그 회차를 발행하는 순간 같은 돈이 30일 뒤로 점프한다 —
+ * 누가 발행 버튼을 눌렀는지에 따라 "며칠에 잔고가 얼마"가 달라지면 문서를 못 믿는다.
+ * 그래서 발행 경로(routes/recurring*.js)와 예측(lib/cashReport.js)이 이 값 하나를 함께 쓴다.
+ *
+ * ⚠ 지금은 모든 정기 규칙에 같은 30일이 붙는다. 급여·임대료·카드처럼 **자동이체로 그 날
+ *   바로 빠지는 지출**은 실제와 다르다 — 규칙별 결제조건이 필요하다(미구현).
+ */
+const PAYMENT_TERM_DAYS = 30
+
 // '오늘·임박'으로 볼 범위(일). 화면의 구획과 서버 판정이 어긋나지 않게 여기 한 곳에서 정한다.
 const SOON_DAYS = 7
 
@@ -160,5 +172,5 @@ async function restoreLastGenerated(db, table, recurringId, removedDate) {
 
 module.exports = {
   dueDatesToGenerate, fmtDate, daysInMonth, addDays, LOOKAHEAD_DAYS, restoreLastGenerated,
-  SOON_DAYS, cycleState, pendingCycle,
+  SOON_DAYS, cycleState, pendingCycle, PAYMENT_TERM_DAYS,
 }

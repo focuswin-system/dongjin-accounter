@@ -17,6 +17,9 @@ const { SETTLED_INCOME, SETTLED_EXPENSE } = require('./ledger')
 const { pendingCond } = require('./invoiceStatus')
 const { paymentSchedule, unpaidPayments, paidPrincipal } = require('./savings')
 const { repaymentSchedule } = require('./loan')
+const { dueDatesToGenerate, addDays, PAYMENT_TERM_DAYS } = require('./recurrence')
+const { recurFromSupply } = require('./vat')
+const { kstDate } = require('../db')
 
 const num = (v) => Number(v) || 0
 
@@ -55,15 +58,20 @@ async function balancesAsOf(db, asOf) {
 /**
  * 앞으로 들어올·나갈 돈을 **날짜축 하나로** 모은다.
  *
- * 네 군데에서 나온다. 하나라도 빠지면 "며칠에 잔액이 얼마"가 틀려서 문서 전체가 쓸모없어진다.
+ * 여섯 군데에서 나온다. 하나라도 빠지면 "며칠에 잔액이 얼마"가 틀려서 문서 전체가 쓸모없어진다.
  *   1. 미수금  청구서 due_at (아직 정산 안 된 잔액만)
  *   2. 미지급금 청구서 due_at
- *   3. 대출 상환 스케줄 (원금+이자)
- *   4. 적금 납입 스케줄
- * 정기청구·정기지출은 **청구서/거래가 만들어진 뒤** 1·2번으로 잡히므로 여기서 또 세지 않는다
- * (세면 같은 돈이 두 번 계산된다).
+ *   3. 대출 상환 — 저장된 예정 회차
+ *   4. 적금 납입 — 저장된 예정 회차
+ *   5. 정기청구 중 아직 청구서가 안 된 회차
+ *   6. 정기지출 중 아직 청구서가 안 된 회차
  *
- * @returns {{date, kind:'in'|'out', amount, label, source, account_id}[]} 날짜 오름차순
+ * 5·6 은 한때 "청구서가 되면 1·2로 잡히니 또 세면 이중계상"이라며 빠져 있었다. 판단은
+ * 옳았지만 결과가 틀렸다 — 회차는 그 날이 와야 청구서가 되므로 **앞을 볼수록 급여·임대료·
+ * 통신비·정기수입이 통째로 빠졌다.** 이중계상은 dueDatesToGenerate 가 막아준다
+ * (이미 발행한 달의 회차는 목록에서 빠진다).
+ *
+ * @returns {{date, kind:'in'|'out', amount, label, source, account_id, planned?}[]} 날짜 오름차순
  */
 async function upcomingFlows(db, { from, to }) {
   const out = []
@@ -148,6 +156,65 @@ async function upcomingFlows(db, { from, to }) {
         label: `${s.name} ${c.seq}회차`, source: '적금 납입',
         account_id: s.account_id || null, overdue: c.due_date < from,
       })
+    }
+  }
+
+  /* 5·6. 정기청구·정기지출 중 **아직 청구서가 안 만들어진 회차**.
+   *
+   * 예전엔 "청구서가 만들어지면 1·2번으로 잡히니 여기서 또 세지 않는다"며 통째로 뺐다.
+   * 이중계상을 피한 판단은 옳지만 결과가 틀렸다 — 회차는 그 날이 와야 청구서가 되므로,
+   * **한 달 앞을 볼수록 급여·임대료·관리비·통신비·정기수입이 통째로 빠진다.**
+   * 예측이 낙관 쪽으로 틀리는 가장 큰 원인이었다("지출 날짜를 못 지키면 신용 문제").
+   *
+   * 이중계상은 dueDatesToGenerate 가 막는다 — last_generated 가 놓인 달의 회차는
+   * 이미 청구서가 됐으므로 목록에서 빠지고, 그 청구서는 1·2번이 센다.
+   * 건너뛴 회차(recurring_skips)와 등록일 소급 하한도 정기청구 화면과 같은 규칙을 쓴다.
+   */
+  const [skipRows] = await db.execute('SELECT kind, recurring_id, due_date FROM recurring_skips')
+  const skipBy = new Map()
+  for (const s of skipRows) {
+    const key = `${s.kind}:${s.recurring_id}`
+    if (!skipBy.has(key)) skipBy.set(key, [])
+    skipBy.get(key).push(String(s.due_date).slice(0, 10))
+  }
+  const spanDays = Math.max(0, Math.round((new Date(`${to}T00:00:00`) - new Date(`${from}T00:00:00`)) / 86400000))
+  // 회차일 + 결제기한 이 구간 안에 들어오는 회차까지 세려면, 회차는 그만큼 더 앞까지 봐야 한다
+  const horizonDays = spanDays
+
+  for (const spec of [
+    { table: 'recurring_invoices', skipKind: 'invoice', kind: 'in',  source: '정기청구',
+      label: r => `${r.vendor_name || '거래처'} ${r.item || ''}`.trim(),
+      // 정기청구는 공급가액을 저장한다 — 통장에 들어오는 돈은 세액을 더한 값이다
+      amount: r => { const s = num(r.supply_amount); return s + recurFromSupply(s, r.vat_mode).vat } },
+    { table: 'recurring_expenses', skipKind: 'expense', kind: 'out', source: '정기지출',
+      label: r => `${r.vendor_name || '거래처'} ${r.category || ''}`.trim(),
+      // 정기지출은 합계(VAT 포함)를 저장한다 — 그대로 나간다
+      amount: r => num(r.amount) },
+  ]) {
+    const [recs] = await db.execute(
+      `SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch, v.name AS vendor_name
+         FROM ${spec.table} r LEFT JOIN vendors v ON r.vendor_id = v.id
+        WHERE r.active = 1`)
+    for (const r of recs) {
+      r.setup_date = kstDate(Number(r.created_epoch) * 1000)   // 등록일 이전으로는 소급하지 않는다
+      r.skips = skipBy.get(`${spec.skipKind}:${r.id}`) || []
+      const amount = spec.amount(r)
+      if (amount <= 0) continue
+      /* 회차일은 '청구서를 내는 날'이고, 돈이 오가는 날은 **결제기한**이다.
+         회차일에 세면 그 회차를 발행하는 순간 같은 돈이 30일 뒤로 점프한다 —
+         발행 버튼을 눌렀는지에 따라 예측이 달라지면 문서를 못 믿는다.
+         발행 경로와 같은 상수를 쓴다(lib/recurrence.js PAYMENT_TERM_DAYS). */
+      for (const cycle of dueDatesToGenerate(r, from, { horizonDays })) {
+        const due = addDays(cycle, PAYMENT_TERM_DAYS)
+        if (due < from || due > to) continue
+        out.push({
+          date: due, cycle_date: cycle, kind: spec.kind, amount,
+          label: spec.label(r), source: spec.source,
+          account_id: r.account_id || null,
+          overdue: false,        // 아직 청구서가 없는 회차라 '연체'가 아니라 '예정'이다
+          planned: true,         // 확정이 아니라 규칙에서 나온 예정 — 화면이 구분해 보여준다
+        })
+      }
     }
   }
 
