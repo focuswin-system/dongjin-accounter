@@ -1586,7 +1586,7 @@ const CompanyPanel = ({ embedded = false }) => {
 const ACCOUNT_KINDS = [{ value: 'bank', label: '계좌' }, { value: 'card', label: '카드' }]
 const BANK_TYPES = ['보통예금', '당좌예금', '정기예금']
 const CARD_TYPES = ['법인카드', '개인카드', '체크카드']
-const emptyAccountForm = () => ({ kind: 'bank', type: '보통예금', bank: '', number: '', name: '', purpose: '', initial_balance: '' })
+const emptyAccountForm = () => ({ kind: 'bank', type: '보통예금', bank: '', number: '', name: '', purpose: '', initial_balance: '', owner: 'corp' })
 
 const AccountPanel = ({ embedded = false }) => {
   const toast = useToast()
@@ -1617,6 +1617,7 @@ const AccountPanel = ({ embedded = false }) => {
       number: a.number || '',
       name: a.name || '',
       purpose: a.purpose || '',
+      owner: a.owner === 'personal' ? 'personal' : 'corp',
       initial_balance: a.initialBalance ?? '',
     })
     setDrawerOpen(true)
@@ -1626,7 +1627,7 @@ const AccountPanel = ({ embedded = false }) => {
     if (!form.name) return toast.push('별칭을 입력하세요')
     const payload = {
       name: form.name, bank: form.bank, type: form.type, kind: form.kind,
-      number: form.number, purpose: form.purpose,
+      number: form.number, purpose: form.purpose, owner: form.owner,
       initial_balance: form.kind === 'bank' ? (parseInt(String(form.initial_balance).replace(/[^0-9-]/g, '')) || 0) : 0,
     }
     const res = editing ? await api.updateAccount(editing.id, payload) : await api.addAccount(payload)
@@ -1690,7 +1691,13 @@ const AccountPanel = ({ embedded = false }) => {
             {filtered.map(a => (
               <tr key={a.id}>
                 <td><span className={`badge ${a.kind === 'card' ? 'warn' : 'brand'}`}>{a.kind === 'card' ? '카드' : '계좌'}</span></td>
-                <td className="fw-700">{a.name}</td>
+                <td className="fw-700">
+                  {a.name}
+                  {/* 개인 것만 표시한다 — 법인이 대부분이라 양쪽에 다 붙이면 표가 시끄럽다 */}
+                  {a.owner === 'personal' && (
+                    <span className="badge" style={{ marginLeft: 6, fontSize: 10 }}>개인</span>
+                  )}
+                </td>
                 <td className="text-sm text-muted">{a.type || '—'}</td>
                 <td className="text-sm">{a.bankName || '—'}</td>
                 <td className="text-sm num">{a.number || '—'}</td>
@@ -1728,6 +1735,24 @@ const AccountPanel = ({ embedded = false }) => {
               {subTypes.map(t => (
                 <button key={t} type="button" className={`chip ${form.type === t ? 'active' : ''}`} onClick={() => f('type', t)}>{t}</button>
               ))}
+            </div>
+          </div>
+
+          {/* 소유 — 중소기업은 대표 개인 계좌·카드로 회사 돈을 쓰는 일이 흔하다.
+              자금 현황에서 법인/개인 합계를 가르는 근거이고, 개인 잔액은 마스터만 본다.
+              회계(손익·부가세)는 계좌가 아니라 등록된 거래로 잡히므로 이 값과 무관하다. */}
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>소유</label>
+            <div className="row gap-6">
+              {[['corp', '법인'], ['personal', '대표 개인']].map(([v, t]) => (
+                <button key={v} type="button" className={`chip ${form.owner === v ? 'active' : ''}`}
+                  onClick={() => f('owner', v)}>{t}</button>
+              ))}
+            </div>
+            <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+              {form.owner === 'personal'
+                ? '자금 현황에서 법인과 따로 집계돼요. 잔액은 마스터에게만 보입니다.'
+                : '회사 명의 계좌·카드예요.'}
             </div>
           </div>
 

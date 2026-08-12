@@ -60,13 +60,14 @@ router.get('/:id', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const { name, bank, type, initial_balance, kind, number, purpose } = req.body
+    const owner = req.body.owner === 'personal' ? 'personal' : 'corp'
     const id = randomUUID()
     // acct_code 를 빠뜨리면 이 계좌의 거래는 일계표에서 **한쪽 다리가 없어** 차대변이 안 맞는다.
     // (실제로 여기가 비어 있어서 새로 만든 계좌의 거래가 전부 짝을 잃었다)
     await req.db.execute(
-      'INSERT INTO accounts (id, name, bank, type, initial_balance, kind, `number`, purpose, acct_code) VALUES (?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO accounts (id, name, bank, type, initial_balance, kind, `number`, purpose, acct_code, owner) VALUES (?,?,?,?,?,?,?,?,?,?)',
       [id, name, bank||'', type||'보통예금', initial_balance||0, kind||'bank', number||'', purpose||'',
-       bankAcctCode(type)]
+       bankAcctCode(type), owner]
     )
     res.json({ id })
   } catch (e) { next(e) }
@@ -75,11 +76,12 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const { name, bank, type, initial_balance, kind, number, purpose } = req.body
+    const owner = req.body.owner === 'personal' ? 'personal' : 'corp'
     // 종류(보통예금↔당좌예금↔현금)가 바뀌면 계정과목도 따라가야 한다 — 안 그러면 일계표가 어긋난다
     const [result] = await req.db.execute(
-      'UPDATE accounts SET name=?, bank=?, type=?, initial_balance=?, kind=?, `number`=?, purpose=?, acct_code=? WHERE id=?',
+      'UPDATE accounts SET name=?, bank=?, type=?, initial_balance=?, kind=?, `number`=?, purpose=?, acct_code=?, owner=? WHERE id=?',
       [name, bank||'', type||'보통예금', initial_balance||0, kind||'bank', number||'', purpose||'',
-       bankAcctCode(type), req.params.id]
+       bankAcctCode(type), owner, req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })

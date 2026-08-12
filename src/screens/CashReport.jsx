@@ -117,9 +117,12 @@ export const CashReportScreen = ({ page = true }) => {
 
       {/* 지금 상태 */}
       <KpiRow cols={4} style={{ marginBottom: 20 }}>
+        {/* 법인 것만 센다. 개인(대표 사비)은 아래에 따로 적는다 — 섞으면 "회사에 얼마 있나"가 부풀려진다 */}
         <Kpi label="지금 쓸 수 있는 돈" value={data.available}
           tone={data.available < 0 ? 'neg-ink' : undefined}
-          hint={`통장 ${data.accounts.filter(a => a.kind !== 'card').length}개`}/>
+          hint={data.availablePersonal
+            ? `법인 통장 ${data.accounts.filter(a => a.kind !== 'card' && a.owner !== 'personal').length}개 · 개인 ${fmtNum(data.availablePersonal)}원 별도`
+            : `통장 ${data.accounts.filter(a => a.kind !== 'card').length}개`}/>
         <Kpi label="묶인 돈 (예적금)" value={data.locked}
           badge={data.lockedItems.length ? `${data.lockedItems.length}건` : undefined}
           hint={data.lockedItems.length ? '만기까지 못 씀' : '없어요'}/>

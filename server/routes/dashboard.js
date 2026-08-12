@@ -69,9 +69,18 @@ router.get('/cash-report', async (req, res, next) => {
     const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 180)
     const to = kstDate(new Date(`${date}T00:00:00Z`).getTime() + days * 86400000 - 9 * 3600 * 1000)
 
-    const accounts = await balancesAsOf(req.db, date)
+    const all = await balancesAsOf(req.db, date)
+    /* 개인 계좌(대표 사비)는 **마스터에게만** 보인다.
+     * 회계 데이터가 아니라 대표 개인 자금이라, 실무자 화면에 잔고가 뜨면 안 된다.
+     * 계정 관리와 같은 방식으로 가른다(users.role='admin' — routes/auth.js isMaster). */
+    const canSeePersonal = req.user?.role === 'admin'
+    const accounts = canSeePersonal ? all : all.filter(a => a.owner !== 'personal')
+
     // 가용 자금 = 통장에 있어 당장 쓸 수 있는 돈. 카드는 결제수단이지 보유 자금이 아니다.
-    const available = accounts.filter(a => a.kind !== 'card').reduce((s, a) => s + a.balance, 0)
+    // **법인 것만** 센다 — 개인 돈을 섞으면 "회사에 얼마 있나"가 부풀려진다.
+    const cash = accounts.filter(a => a.kind !== 'card')
+    const available = cash.filter(a => a.owner === 'corp').reduce((s, a) => s + a.balance, 0)
+    const availablePersonal = cash.filter(a => a.owner === 'personal').reduce((s, a) => s + a.balance, 0)
 
     const [locked, loan, ar, ap, flows] = await Promise.all([
       lockedFunds(req.db),
@@ -96,7 +105,10 @@ router.get('/cash-report', async (req, res, next) => {
       forecast: project(available, flows, { from: date, to }),
       /* 계좌별 예측 — 합계만 보면 "어느 통장이 부족한지"를 알 수 없다.
          카드는 보유 자금이 아니라 결제수단이므로 뺀다(available 과 같은 기준). */
-      byAccount: projectByAccount(accounts.filter(a => a.kind !== 'card'), flows, { from: date, to }),
+      byAccount: projectByAccount(cash, flows, { from: date, to }),
+      // 개인 계좌 합계 — 화면이 법인과 나눠 보여준다(엑셀의 <법인>/<개인> 구분과 같다)
+      availablePersonal,
+      canSeePersonal,
     })
   } catch (e) { next(e) }
 })

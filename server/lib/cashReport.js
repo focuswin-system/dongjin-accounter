@@ -34,7 +34,7 @@ async function balancesAsOf(db, asOf) {
   const dateCond = asOf ? ' AND date <= ?' : ''
   const p = (base) => (asOf ? [...base, asOf] : base)
   const [rows] = await db.execute(`
-    SELECT a.id, a.name, a.bank, a.type, a.kind, a.number, a.purpose, a.acct_code,
+    SELECT a.id, a.name, a.bank, a.type, a.kind, a.number, a.purpose, a.acct_code, a.owner,
            a.initial_balance,
            COALESCE((SELECT SUM(amount) FROM transactions
                       WHERE kind='income'  AND account_id=a.id AND status=?${dateCond}), 0) AS income_total,
@@ -49,6 +49,8 @@ async function balancesAsOf(db, asOf) {
   return rows.map(r => ({
     id: r.id, name: r.name, bank: r.bank, type: r.type, kind: r.kind,
     number: r.number, purpose: r.purpose, acct_code: r.acct_code,
+    // 법인/개인 — 자금 현황이 합계를 가르는 근거. 값이 없으면 법인으로 본다(기존 계좌).
+    owner: r.owner === 'personal' ? 'personal' : 'corp',
     balance: num(r.initial_balance) + num(r.income_total) - num(r.expense_total) + num(r.adj_total),
     income_total: num(r.income_total),
     expense_total: num(r.expense_total),

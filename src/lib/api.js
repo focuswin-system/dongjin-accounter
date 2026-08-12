@@ -190,6 +190,8 @@ function adaptAccount(row) {
     kind: row.kind || 'bank',
     number: row.number || '',
     purpose: row.purpose || '',
+    // 법인 것인가 대표 개인 것인가 — 자금 현황에서 합계를 가르고, 개인 잔액은 마스터만 본다
+    owner: row.owner === 'personal' ? 'personal' : 'corp',
   }
 }
 
