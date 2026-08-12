@@ -92,9 +92,16 @@ function unpaidCycles(loan, paidSeqs = []) {
 /**
  * 잔여 원금 — 실제로 처리한 상환 실적 기준.
  * 스케줄이 아니라 실적으로 계산한다(중도상환·연체로 스케줄과 어긋날 수 있다).
+ *
+ * ⚠ **paid_date 가 있는 행만 센다.** loan_repayments 에는 예정 회차도 함께 들어 있어
+ *   (paid_date IS NULL = 아직 안 낸 회차), 넘어온 행을 전부 더하면 **한 푼도 안 갚았는데
+ *   다 갚은 것으로 계산된다.** 예전엔 호출자가 SQL 로 걸러 넘기기를 믿었는데,
+ *   거르지 않는 호출자가 실제로 셋 있었다. 규칙은 돈을 세는 이 함수 안에 둔다.
  */
 const remainingPrincipal = (principal, repayments = []) =>
-  Math.max(0, (Number(principal) || 0) - repayments.reduce((s, r) => s + (Number(r.principal) || 0), 0))
+  Math.max(0, (Number(principal) || 0) - repayments
+    .filter(r => r && r.paid_date)
+    .reduce((s, r) => s + (Number(r.principal) || 0), 0))
 
 /** 스케줄 합계 — 총 이자를 미리 보여줄 때 쓴다(대출 등록 화면) */
 function scheduleTotals(loan) {

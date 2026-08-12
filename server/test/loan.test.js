@@ -124,9 +124,27 @@ test('상환일 — 해를 넘어간다', () => {
 
 test('잔여 원금은 실적 기준이다(스케줄이 아니라 실제 갚은 원금)', () => {
   // 중도상환·연체로 스케줄과 어긋날 수 있으므로 실적으로 센다
-  assert.strictEqual(remainingPrincipal(50000000, [{ principal: 1420000 }, { principal: 1425000 }]), 47155000)
+  const paid = (principal) => ({ principal, paid_date: '2026-08-05' })
+  assert.strictEqual(remainingPrincipal(50000000, [paid(1420000), paid(1425000)]), 47155000)
   assert.strictEqual(remainingPrincipal(50000000, []), 50000000)
-  assert.strictEqual(remainingPrincipal(1000000, [{ principal: 9999999 }]), 0, '음수가 되지 않는다')
+  assert.strictEqual(remainingPrincipal(1000000, [paid(9999999)]), 0, '음수가 되지 않는다')
+})
+
+/* loan_repayments 에는 예정 회차(paid_date NULL)도 함께 들어 있다.
+   이 구분이 무너지면 **한 푼도 안 갚았는데 다 갚은 것으로 보인다** — 돈이 걸린 불변식이라 못 박는다. */
+test('잔여 원금 — 예정 회차(paid_date 없음)는 세지 않는다', () => {
+  const rows = [
+    { seq: 1, principal: 1420000, paid_date: '2026-06-05' },  // 실적
+    { seq: 2, principal: 1425000, paid_date: null },           // 예정
+    { seq: 3, principal: 1430000 },                            // 예정(칸 자체가 없음)
+  ]
+  assert.strictEqual(remainingPrincipal(50000000, rows), 48580000, '실적 1건만 차감한다')
+})
+
+test('잔여 원금 — 전 회차가 예정이면 한 푼도 안 갚은 것이다', () => {
+  const all = repaymentSchedule(LOAN).map(c => ({ ...c, paid_date: null }))
+  assert.ok(all.length > 0)
+  assert.strictEqual(remainingPrincipal(LOAN.principal, all), Number(LOAN.principal))
 })
 
 test('미상환 회차 — 이미 처리한 회차는 빠진다', () => {

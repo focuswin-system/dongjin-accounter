@@ -103,13 +103,24 @@ async function upcomingFlows(db, { from, to }) {
     }
   }
 
-  // 3. 대출 상환 — 아직 처리하지 않은 회차만
+  /* 3. 대출 상환 — **저장된 예정 회차**(paid_date IS NULL)를 쓴다.
+   *
+   * 예전엔 원금·이율·기간으로 스케줄을 매번 다시 계산했다. 그러면 은행 통보서대로
+   * 고쳐 둔 금액(변동금리·중도상환·휴일 이체일)이 무시되고 공식값으로 되돌아간다.
+   * 자금 예측은 **은행이 실제로 빼갈 금액**을 알아야 쓸모가 있다. */
   const [loans] = await db.execute("SELECT * FROM loans WHERE status='active'")
   for (const l of loans) {
-    const [paid] = await db.execute('SELECT seq FROM loan_repayments WHERE loan_id = ?', [l.id])
-    const done = new Set(paid.map(p => Number(p.seq)))
-    for (const c of repaymentSchedule(l)) {
-      if (done.has(c.seq)) continue
+    const [rows] = await db.execute(
+      'SELECT seq, due_date, principal, interest, paid_date FROM loan_repayments WHERE loan_id = ? ORDER BY seq',
+      [l.id])
+    const planned = rows.filter(r => !r.paid_date)
+      .map(r => ({ seq: Number(r.seq), due_date: r.due_date, total: num(r.principal) + num(r.interest) }))
+    /* 예정 행이 하나도 없는 대출은 스케줄이 아직 안 깔린 옛 데이터다. 그때만 공식으로 만든다 —
+       빈손으로 두면 나갈 돈이 통째로 빠져 예측이 **낙관 쪽으로** 틀린다(가장 위험한 방향). */
+    const done = new Set(rows.filter(r => r.paid_date).map(r => Number(r.seq)))
+    const cycles = planned.length ? planned
+      : repaymentSchedule(l).filter(c => !done.has(c.seq))
+    for (const c of cycles) {
       const date = c.due_date < from ? from : c.due_date
       if (date > to || c.total <= 0) continue
       out.push({
@@ -120,12 +131,16 @@ async function upcomingFlows(db, { from, to }) {
     }
   }
 
-  // 4. 적금 납입 — 아직 안 낸 회차만
+  // 4. 적금 납입 — 대출과 같은 규칙(저장된 예정 회차 우선, 없으면 공식)
   const [savings] = await db.execute("SELECT * FROM savings WHERE status='active' AND kind='installment'")
   for (const s of savings) {
-    const [paid] = await db.execute(
-      'SELECT seq FROM savings_payments WHERE savings_id = ? AND paid_date IS NOT NULL', [s.id])
-    for (const c of unpaidPayments(s, paid.map(p => p.seq))) {
+    const [rows] = await db.execute(
+      'SELECT seq, due_date, amount, paid_date FROM savings_payments WHERE savings_id = ? ORDER BY seq', [s.id])
+    const planned = rows.filter(r => !r.paid_date)
+      .map(r => ({ seq: Number(r.seq), due_date: r.due_date, amount: num(r.amount) }))
+    const cycles = planned.length ? planned
+      : unpaidPayments(s, rows.filter(r => r.paid_date).map(r => r.seq))
+    for (const c of cycles) {
       const date = c.due_date < from ? from : c.due_date
       if (date > to || c.amount <= 0) continue
       out.push({

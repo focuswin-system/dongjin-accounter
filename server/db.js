@@ -1168,6 +1168,34 @@ async function initDb(conn) {
     // 원천징수·연말정산 신고서 자동생성이 범위 밖이라 지금 얻는 게 없고, 저장하는 순간
     // 암호화·파기 의무가 붙는다. 신고서 자동화를 범위에 넣을 때 다시 판단한다.
     await ensureColumn('employees', 'salary_account', "salary_account VARCHAR(200)")
+
+    /* 대출 예정 회차 채우기 — loan_repayments 에 실적만 있던 옛 데이터를 위해.
+     *
+     * 이제 한 행 = 한 회차이고 paid_date 가 비면 예정이다(routes/finance.js 머리말).
+     * 예정 행이 하나도 없는 활성 대출은 자금 예측에서 **나갈 돈이 통째로 빠지므로**
+     * (예측이 낙관 쪽으로 틀린다) 여기서 채운다.
+     *
+     * runOnce 를 쓰지 않는다 — 예정 행이 없는 대출에만 넣는 **덧붙이기**라 매번 돌아도
+     * 같은 결과이고, 한 번 실패해도 다음 배포에서 스스로 복구된다. 돈이 걸린 데이터는
+     * '한 번만 시도하고 마는' 것보다 '늘 맞춰두는' 편이 안전하다. */
+    {
+      const { repaymentSchedule } = require('./lib/loan')
+      const [loans] = await c.execute("SELECT * FROM loans WHERE status = 'active'")
+      let filled = 0
+      for (const loan of loans) {
+        const [rows] = await c.execute('SELECT seq, paid_date FROM loan_repayments WHERE loan_id = ?', [loan.id])
+        if (rows.some(r => !r.paid_date)) continue          // 이미 예정이 깔려 있다
+        const done = new Set(rows.map(r => Number(r.seq)))
+        for (const cy of repaymentSchedule(loan)) {
+          if (done.has(cy.seq)) continue                     // 이미 낸 회차는 건드리지 않는다
+          await c.execute(
+            'INSERT IGNORE INTO loan_repayments (id, loan_id, seq, due_date, principal, interest) VALUES (?,?,?,?,?,?)',
+            [randomUUID(), loan.id, cy.seq, cy.due_date, cy.principal, cy.interest])
+          filled++
+        }
+      }
+      if (filled) console.log(`   · 대출 예정 회차 ${filled}건 채움`)
+    }
     // 정기지출도 부가세를 직접 저장한다(과세=exclusive / 면세=none / 영세=zero).
     // 비목을 강제하지 않으려는 것 — 비목을 고르면 그 값으로 채워지되, 폼에서 바꿀 수 있다.
     // NULL이면 옛 방식(비목 categories.vat)을 따른다(하위호환).

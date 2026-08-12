@@ -30,13 +30,77 @@ const ACCT = {
 
 const { moneyOf: intOf, numOf } = require('../lib/money')
 
+/* ── 상환 회차: 예정도 실적과 같은 테이블에 산다 ──────────────────────────
+ *
+ * loan_repayments 한 행 = 한 회차. paid_date 가 비면 **예정**, 차면 **실적**이다.
+ * 예전엔 실적만 저장하고 예정은 원금·이율·기간으로 매번 계산했는데, 그러면
+ * 은행 통보서대로 고쳐 둘 자리가 없다 — 변동금리로 이자가 달라지거나, 중도상환·만기연장이
+ * 있거나, 이체일이 휴일이라 하루 밀리면 공식값과 어긋난다. 자금 예측은 **은행이 실제로
+ * 빼갈 금액**을 알아야 쓸모가 있으므로, 예정을 고칠 수 있는 데이터로 둔다.
+ *
+ * ⚠ 이 전제가 무너지면 안 갚은 돈이 갚은 것으로 계산된다. 그래서
+ *   · 잔여 원금은 lib/loan.js 의 remainingPrincipal 이 paid_date 있는 행만 센다
+ *   · '미상환 회차'는 아래 unpaidCyclesOf 한 곳으로만 구한다
+ */
+
+/** 회차 목록에 잔액(그 회차를 갚고 난 뒤 남는 원금)을 채운다 — 화면 표의 마지막 칸이다. */
+function withBalance(principal, cycles) {
+  let left = Number(principal) || 0
+  return cycles.map(c => {
+    left = Math.max(0, left - (Number(c.principal) || 0))
+    return { ...c, balance: left }
+  })
+}
+
+/** 저장된 회차 전부(예정+실적). 없으면 빈 배열 — 옛 데이터 판별에 쓴다. */
+async function storedCycles(db, loanId) {
+  const [rows] = await db.execute(
+    'SELECT seq, due_date, principal, interest, paid_date FROM loan_repayments WHERE loan_id = ? ORDER BY seq',
+    [loanId])
+  return rows.map(r => ({
+    seq: Number(r.seq), due_date: r.due_date,
+    principal: Number(r.principal) || 0, interest: Number(r.interest) || 0,
+    total: (Number(r.principal) || 0) + (Number(r.interest) || 0),
+    paid_date: r.paid_date || null,
+  }))
+}
+
+/**
+ * 미상환 회차 — **이 함수 하나로만 구한다.**
+ * 저장된 예정 행이 있으면 그것이 진실이다(고쳐 둔 금액이 살아 있어야 한다).
+ * 하나도 없으면 스케줄이 아직 안 깔린 옛 데이터라 그때만 공식으로 만든다.
+ */
+async function unpaidCyclesOf(db, loan) {
+  const rows = await storedCycles(db, loan.id)
+  const planned = rows.filter(c => !c.paid_date)
+  if (planned.length) return withBalance(loan.principal, rows).filter(c => !c.paid_date)
+  const done = rows.filter(c => c.paid_date).map(c => c.seq)
+  return unpaidCycles(loan, done)
+}
+
+/** 예정 회차를 다시 깐다 — **이미 낸 회차는 절대 건드리지 않는다.** */
+async function writePlannedCycles(conn, loan) {
+  const [paid] = await conn.execute(
+    'SELECT seq FROM loan_repayments WHERE loan_id = ? AND paid_date IS NOT NULL', [loan.id])
+  const done = new Set(paid.map(p => Number(p.seq)))
+  await conn.execute('DELETE FROM loan_repayments WHERE loan_id = ? AND paid_date IS NULL', [loan.id])
+  for (const c of repaymentSchedule(loan)) {
+    if (done.has(c.seq)) continue
+    await conn.execute(
+      'INSERT INTO loan_repayments (id, loan_id, seq, due_date, principal, interest) VALUES (?,?,?,?,?,?)',
+      [randomUUID(), loan.id, c.seq, c.due_date, c.principal, c.interest])
+  }
+}
+
 /** 대출 1건 + 실적 + 잔여 + 다음 회차 */
 async function loanDetail(db, loan) {
   const [reps] = await db.execute(
     'SELECT * FROM loan_repayments WHERE loan_id = ? ORDER BY seq', [loan.id])
-  const schedule = repaymentSchedule(loan)
+  const stored = await storedCycles(db, loan.id)
+  // 표에 그릴 스케줄 — 저장된 회차가 있으면 그것(고쳐 둔 금액 반영), 없으면 공식
+  const schedule = stored.length ? withBalance(loan.principal, stored) : repaymentSchedule(loan)
   const paidSeqs = reps.filter(r => r.paid_date).map(r => r.seq)
-  const upcoming = unpaidCycles(loan, paidSeqs)
+  const upcoming = await unpaidCyclesOf(db, loan)
   const today = kstToday()
   return {
     ...loan,
@@ -140,6 +204,13 @@ router.post('/loans', async (req, res, next) => {
        method, termMonths, b.start_date, intOf(b.pay_day) || Number(String(b.start_date).slice(8, 10)) || 1,
        b.end_date || null, b.account_id || null, acctPrincipal, b.acct_code_interest || ACCT.interest,
        b.memo || null, txnId])
+    /* 예정 회차를 바로 깐다. 이게 있어야 자금 예측이 "며칠에 얼마 나간다"를 알고,
+       은행 통보액으로 고칠 자리도 생긴다. */
+    await writePlannedCycles(conn, {
+      id, principal, annual_rate: numOf(b.annual_rate), method, term_months: termMonths,
+      start_date: b.start_date,
+      pay_day: intOf(b.pay_day) || Number(String(b.start_date).slice(8, 10)) || 1,
+    })
     await conn.commit()
     res.json({ ok: true, id })
   } catch (e) { await rollbackQuietly(conn); next(e) }
@@ -202,6 +273,14 @@ router.put('/loans/:id', async (req, res, next) => {
        b.acct_code_interest || cur.acct_code_interest || ACCT.interest,
        b.memo || null, b.status === 'closed' ? 'closed' : 'active', req.params.id])
     if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    /* 스케줄을 바꾸는 값이 달라졌을 때만 예정 회차를 다시 깐다.
+       늘 다시 깔면, 이름만 고쳐도 은행 통보액으로 고쳐 둔 예정 금액이 공식값으로 되돌아간다.
+       pay_day 는 LOAN_TERMS 에 없지만 예정일을 바꾸므로 여기 포함한다. */
+    const payDayChanged = Number(intOf(b.pay_day) || cur.pay_day || 1) !== Number(cur.pay_day)
+    if (changed.length || payDayChanged) {
+      const [[fresh]] = await conn.execute('SELECT * FROM loans WHERE id = ?', [req.params.id])
+      await writePlannedCycles(conn, fresh)
+    }
     await conn.commit()
     res.json({ ok: true, changedTerms: changed })
   } catch (e) { await rollbackQuietly(conn); next(e) }
@@ -261,10 +340,8 @@ router.post('/loans/:id/repay-missed', async (req, res, next) => {
      * 정기청구·정기지출은 같은 위험을 FOR UPDATE로 막고 있다(routes/recurring*.js). */
     const [[loan]] = await conn.execute('SELECT * FROM loans WHERE id = ? FOR UPDATE', [req.params.id])
     if (!loan) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
-    const [reps] = await conn.execute(
-      'SELECT seq FROM loan_repayments WHERE loan_id = ? AND paid_date IS NOT NULL', [req.params.id])
     const today = kstToday()
-    const left = unpaidCycles(loan, reps.map(r => r.seq))
+    const left = await unpaidCyclesOf(conn, loan)
     const targets = left.filter(c => c.due_date <= today)   // 놓친 것만 — 미래 회차는 대상 아니다
     if (!targets.length) { await rollbackQuietly(conn); return res.status(409).json({ error: '처리할 놓친 상환이 없어요' }) }
     const acct = account_id || loan.account_id || null
@@ -285,8 +362,9 @@ router.post('/loans/:id/repay-missed', async (req, res, next) => {
       await applyRepayment(conn, loan, c, { payDate: c.due_date, acct })
       principal += c.principal; interest += c.interest
     }
-    // 마지막 회차까지 갚았으면 완료 처리
-    if (targets[targets.length - 1].balance === 0) {
+    // 남은 예정 회차가 없으면 완료 처리 — '잔액 0'으로 보면, 예정 금액을 은행 통보액으로
+    // 고쳤을 때 합이 원금과 딱 안 맞아 영영 안 닫힌다.
+    if (!(await unpaidCyclesOf(conn, loan)).length) {
       await conn.execute("UPDATE loans SET status='closed' WHERE id = ?", [loan.id])
     }
     await conn.commit()
@@ -308,9 +386,7 @@ router.post('/loans/:id/repay', async (req, res, next) => {
      * (실적 행은 UNIQUE로 하나가 되고, 먼저 만든 거래는 고아로 남아 취소로도 안 지워진다). */
     const [[loan]] = await conn.execute('SELECT * FROM loans WHERE id = ? FOR UPDATE', [req.params.id])
     if (!loan) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
-    const [reps] = await conn.execute(
-      'SELECT seq FROM loan_repayments WHERE loan_id = ? AND paid_date IS NOT NULL', [req.params.id])
-    const left = unpaidCycles(loan, reps.map(r => r.seq))
+    const left = await unpaidCyclesOf(conn, loan)
     if (!left.length) { await rollbackQuietly(conn); return res.status(409).json({ error: '남은 상환 회차가 없어요' }) }
     const target = seq ? left.find(c => c.seq === Number(seq)) : left[0]
     if (!target) { await rollbackQuietly(conn); return res.status(409).json({ error: '이미 처리한 회차예요' }) }
@@ -332,12 +408,56 @@ router.post('/loans/:id/repay', async (req, res, next) => {
     { const le = ledgerError({ kind: 'expense', account_id: acct, status: '지급완료' }); if (le) { await rollbackQuietly(conn); return res.status(400).json({ error: le }) } }
 
     await applyRepayment(conn, loan, target, { payDate, acct })
-    // 마지막 회차까지 갚았으면 자동으로 완료 처리
-    if (target.balance === 0) {
+    // 남은 예정 회차가 없으면 자동으로 완료 처리(위 일괄 처리와 같은 규칙)
+    if (!(await unpaidCyclesOf(conn, loan)).length) {
       await conn.execute("UPDATE loans SET status='closed' WHERE id = ?", [loan.id])
     }
     await conn.commit()
     res.json({ ok: true, seq: target.seq, principal: target.principal, interest: target.interest })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
+})
+
+/**
+ * 예정 회차 수정 — 은행 통보액·실제 이체일에 맞춘다.
+ *
+ * 공식으로 뽑은 원리금은 **은행이 실제로 빼가는 금액과 몇 원씩 다르다**(변동금리·일할계산·
+ * 휴일 이월). 자금 예측은 실제로 빠질 금액을 알아야 쓸모가 있으므로 여기서 고친다.
+ * 이미 낸 회차는 못 고친다 — 그건 예측이 아니라 이미 오간 돈의 기록이고,
+ * 고치려면 상환을 취소하고 다시 처리해야 거래 금액까지 함께 맞는다.
+ */
+router.patch('/loans/:id/cycles/:seq', async (req, res, next) => {
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [[row]] = await conn.execute(
+      'SELECT * FROM loan_repayments WHERE loan_id = ? AND seq = ? FOR UPDATE',
+      [req.params.id, req.params.seq])
+    if (!row) { await rollbackQuietly(conn); return res.status(404).json({ error: '그 회차를 찾을 수 없어요' }) }
+    if (row.paid_date) {
+      await rollbackQuietly(conn)
+      return res.status(409).json({
+        error: `이미 ${row.paid_date}에 상환 처리한 회차예요. 금액을 고치려면 상환을 취소한 뒤 다시 처리해주세요.`,
+      })
+    }
+    const b = req.body
+    const principal = b.principal != null && b.principal !== '' ? intOf(b.principal) : Number(row.principal)
+    const interest  = b.interest  != null && b.interest  !== '' ? intOf(b.interest)  : Number(row.interest)
+    const dueDate   = b.due_date || row.due_date
+    // 음수는 잔여 원금을 되레 늘린다 — 서버에서 막는다(거래 등록과 같은 규칙)
+    if (principal < 0 || interest < 0) {
+      await rollbackQuietly(conn)
+      return res.status(400).json({ error: '원금·이자는 0 이상이어야 해요' })
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+      await rollbackQuietly(conn)
+      return res.status(400).json({ error: '예정일을 날짜로 입력해주세요' })
+    }
+    await conn.execute(
+      'UPDATE loan_repayments SET due_date=?, principal=?, interest=? WHERE loan_id = ? AND seq = ?',
+      [dueDate, principal, interest, req.params.id, req.params.seq])
+    await conn.commit()
+    res.json({ ok: true, seq: Number(req.params.seq), due_date: dueDate, principal, interest })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
@@ -360,7 +480,11 @@ router.delete('/loans/:id/repay/:seq', async (req, res, next) => {
     for (const t of [rep.txn_principal_id, rep.txn_interest_id]) {
       if (t) await conn.execute('DELETE FROM transactions WHERE id = ?', [t])
     }
-    await conn.execute('DELETE FROM loan_repayments WHERE loan_id = ? AND seq = ?', [req.params.id, req.params.seq])
+    /* 행을 지우지 않고 **예정으로 되돌린다.** 지우면 그 회차가 통째로 사라져
+       자금 예측에서 나갈 돈이 빠진다(예정도 같은 테이블에 살기 때문). */
+    await conn.execute(
+      'UPDATE loan_repayments SET paid_date=NULL, txn_principal_id=NULL, txn_interest_id=NULL WHERE loan_id = ? AND seq = ?',
+      [req.params.id, req.params.seq])
     await conn.execute("UPDATE loans SET status='active' WHERE id = ?", [req.params.id])
     await conn.commit()
     res.json({ ok: true })
