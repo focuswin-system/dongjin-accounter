@@ -1196,6 +1196,26 @@ async function initDb(conn) {
       }
       if (filled) console.log(`   · 대출 예정 회차 ${filled}건 채움`)
     }
+
+    /* 적금 예정 회차 채우기 — 대출과 같은 이유·같은 방식(덧붙이기, 매번 돌아도 같은 결과) */
+    {
+      const { paymentSchedule } = require('./lib/savings')
+      const [list] = await c.execute("SELECT * FROM savings WHERE status = 'active' AND kind = 'installment'")
+      let filled = 0
+      for (const sv of list) {
+        const [rows] = await c.execute('SELECT seq, paid_date FROM savings_payments WHERE savings_id = ?', [sv.id])
+        if (rows.some(r => !r.paid_date)) continue
+        const done = new Set(rows.map(r => Number(r.seq)))
+        for (const cy of paymentSchedule(sv)) {
+          if (done.has(cy.seq)) continue
+          await c.execute(
+            'INSERT IGNORE INTO savings_payments (id, savings_id, seq, due_date, amount) VALUES (?,?,?,?,?)',
+            [randomUUID(), sv.id, cy.seq, cy.due_date, cy.amount])
+          filled++
+        }
+      }
+      if (filled) console.log(`   · 적금 예정 회차 ${filled}건 채움`)
+    }
     // 정기지출도 부가세를 직접 저장한다(과세=exclusive / 면세=none / 영세=zero).
     // 비목을 강제하지 않으려는 것 — 비목을 고르면 그 값으로 채워지되, 폼에서 바꿀 수 있다.
     // NULL이면 옛 방식(비목 categories.vat)을 따른다(하위호환).

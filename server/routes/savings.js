@@ -38,13 +38,52 @@ const { moneyOf: intOf, numOf } = require('../lib/money')
 /** 기간이 1년을 넘으면 장기금융상품 — 회계 분류가 갈린다 */
 const defaultAcctCode = (termMonths) => (Number(termMonths) > 12 ? ACCT.longTerm : ACCT.shortTerm)
 
+/* ── 납입 회차: 예정도 실적과 같은 테이블에 산다 ──────────────────────────
+ * savings_payments 한 행 = 한 회차. paid_date 가 비면 **예정**, 차면 **실적**이다.
+ * 차입금과 같은 규칙이다(routes/finance.js 머리말). 자동이체 금액이 바뀌거나
+ * 이체일이 휴일로 밀리면 공식값과 어긋나는데, 그걸 고칠 자리가 있어야 한다. */
+
+/** 저장된 회차 전부(예정+실적) */
+async function storedPayments(db, savingsId) {
+  const [rows] = await db.execute(
+    'SELECT seq, due_date, amount, paid_date FROM savings_payments WHERE savings_id = ? ORDER BY seq', [savingsId])
+  return rows.map(r => ({
+    seq: Number(r.seq), due_date: r.due_date, amount: Number(r.amount) || 0, paid_date: r.paid_date || null,
+  }))
+}
+
+/** 미납 회차 — **이 함수 하나로만 구한다.** 저장된 예정이 있으면 그것이 진실이다. */
+async function unpaidPaymentsOf(db, s) {
+  const rows = await storedPayments(db, s.id)
+  const planned = rows.filter(c => !c.paid_date)
+  if (planned.length) return planned
+  return unpaidPayments(s, rows.filter(c => c.paid_date).map(c => c.seq))
+}
+
+/** 예정 회차를 다시 깐다 — 이미 낸 회차는 절대 건드리지 않는다. */
+async function writePlannedPayments(conn, s) {
+  if (s.kind !== 'installment') return          // 예금은 회차가 없다(가입 때 전액)
+  const [paid] = await conn.execute(
+    'SELECT seq FROM savings_payments WHERE savings_id = ? AND paid_date IS NOT NULL', [s.id])
+  const done = new Set(paid.map(p => Number(p.seq)))
+  await conn.execute('DELETE FROM savings_payments WHERE savings_id = ? AND paid_date IS NULL', [s.id])
+  for (const c of paymentSchedule(s)) {
+    if (done.has(c.seq)) continue
+    await conn.execute(
+      'INSERT INTO savings_payments (id, savings_id, seq, due_date, amount) VALUES (?,?,?,?,?)',
+      [randomUUID(), s.id, c.seq, c.due_date, c.amount])
+  }
+}
+
 /** 예적금 1건 + 납입 실적 + 스케줄 + 만기 요약 */
 async function savingsDetail(db, s) {
   const [payments] = await db.execute(
     'SELECT * FROM savings_payments WHERE savings_id = ? ORDER BY seq', [s.id])
   const paid = payments.filter(p => p.paid_date)
-  const schedule = paymentSchedule(s)
-  const unpaid = unpaidPayments(s, paid.map(p => p.seq))
+  const stored = await storedPayments(db, s.id)
+  // 저장된 회차가 있으면 그것이 스케줄이다(고쳐 둔 금액 반영). 없으면 공식.
+  const schedule = stored.length ? stored : paymentSchedule(s)
+  const unpaid = await unpaidPaymentsOf(db, s)
   const today = kstToday()
   return {
     ...s,
@@ -296,6 +335,39 @@ async function applyPayment(conn, s, cycle, { payDate, acct }) {
   return txnId
 }
 
+/**
+ * 예정 회차 수정 — 자동이체 금액이 바뀌거나 이체일이 휴일로 밀렸을 때 맞춘다.
+ * 이미 낸 회차는 거절한다(오간 돈의 기록이라, 고치려면 납입을 취소하고 다시 처리해야
+ * 거래 금액까지 함께 맞는다). 차입금의 같은 API 와 규칙을 맞췄다.
+ */
+router.patch('/:id/cycles/:seq', async (req, res, next) => {
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [[row]] = await conn.execute(
+      'SELECT * FROM savings_payments WHERE savings_id = ? AND seq = ? FOR UPDATE',
+      [req.params.id, req.params.seq])
+    if (!row) { await rollbackQuietly(conn); return res.status(404).json({ error: '그 회차를 찾을 수 없어요' }) }
+    if (row.paid_date) {
+      await rollbackQuietly(conn)
+      return res.status(409).json({
+        error: `이미 ${row.paid_date}에 납입 처리한 회차예요. 금액을 고치려면 납입을 취소한 뒤 다시 처리해주세요.`,
+      })
+    }
+    const amount  = req.body.amount != null && req.body.amount !== '' ? intOf(req.body.amount) : Number(row.amount)
+    const dueDate = req.body.due_date || row.due_date
+    if (amount < 0) { await rollbackQuietly(conn); return res.status(400).json({ error: '납입액은 0 이상이어야 해요' }) }
+    if (!/^d{4}-d{2}-d{2}$/.test(dueDate)) {
+      await rollbackQuietly(conn); return res.status(400).json({ error: '예정일을 날짜로 입력해주세요' })
+    }
+    await conn.execute('UPDATE savings_payments SET due_date=?, amount=? WHERE savings_id = ? AND seq = ?',
+      [dueDate, amount, req.params.id, req.params.seq])
+    await conn.commit()
+    res.json({ ok: true, seq: Number(req.params.seq), due_date: dueDate, amount })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
+})
+
 /** 회차 납입(건별) */
 router.post('/:id/pay', async (req, res, next) => {
   const conn = await req.db.getConnection()
@@ -320,9 +392,7 @@ router.post('/:id/pay', async (req, res, next) => {
     const ce = await closedPeriodError(conn, payDate)
     if (ce) { await rollbackQuietly(conn); return res.status(400).json({ error: ce }) }
 
-    const [paid] = await conn.execute(
-      'SELECT seq FROM savings_payments WHERE savings_id = ? AND paid_date IS NOT NULL', [s.id])
-    const unpaid = unpaidPayments(s, paid.map(p => p.seq))
+    const unpaid = await unpaidPaymentsOf(conn, s)
     if (!unpaid.length) { await rollbackQuietly(conn); return res.status(409).json({ error: '남은 회차가 없어요' }) }
     // 순서를 건너뛸 수 없다 — 건너뛰면 누계가 어긋나고 되돌리기 어렵다
     const cycle = req.body.seq ? unpaid.find(c => c.seq === Number(req.body.seq)) : unpaid[0]
@@ -360,9 +430,7 @@ router.post('/:id/pay-missed', async (req, res, next) => {
     if (le) { await rollbackQuietly(conn); return res.status(400).json({ error: le }) }
 
     const today = kstToday()
-    const [paid] = await conn.execute(
-      'SELECT seq FROM savings_payments WHERE savings_id = ? AND paid_date IS NOT NULL', [s.id])
-    const missed = unpaidPayments(s, paid.map(p => p.seq)).filter(c => c.due_date <= today)
+    const missed = (await unpaidPaymentsOf(conn, s)).filter(c => c.due_date <= today)
     if (!missed.length) { await rollbackQuietly(conn); return res.json({ ok: true, count: 0 }) }
 
     for (const c of missed) {
