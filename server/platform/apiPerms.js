@@ -44,6 +44,7 @@ const API_RESOURCES = {
   '/api/settlements':         ['settlement'],
   '/api/purchase-reqs':       ['purchase_req'],
   '/api/payment-runs':        ['payment_run'],
+  '/api/fund-status':          ['fund_status', 'cash_report'],
   '/api/purchase-status':     ['purchase_status'],
   '/api/quote-reqs':          ['quote_req'],
   '/api/tax':                 ['tax_vat', 'tax_etc'],

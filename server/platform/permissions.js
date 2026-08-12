@@ -87,6 +87,7 @@ const RESOURCES = [
   { id: 'finance_investment',      label: '투자',          group: '재무관리' },
   { id: 'finance_savings',         label: '예금·적금',      group: '재무관리' },
   { id: 'finance_dash',            label: '재무 현황',      group: '재무관리' },
+  { id: 'fund_status',             label: '자금 현황',      group: '경영관리' },
   { id: 'cash_report',             label: '자금일보',       group: '경영관리' },
   { id: 'report_daily',            label: '일계표',        group: '경영관리' },
 

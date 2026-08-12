@@ -427,6 +427,15 @@ export const api = {
     try { return await req(`/payment-runs?month=${month}`) } catch { return { month, total: 0, count: 0, missingBank: 0, vendors: [] } }
   },
 
+  /* 자금 현황 — 기간(주·월·분기·년) 단위. 자금일보와 같은 산식, 축만 다르다. */
+  async getFundStatus({ unit = 'month', offset = 0 } = {}) {
+    try { return await req(`/fund-status?unit=${unit}&offset=${offset}`) } catch { return null }
+  },
+  async getFundSeries({ unit = 'month', back = 6, forward = 6 } = {}) {
+    try { return await req(`/fund-status/series?unit=${unit}&back=${back}&forward=${forward}`) }
+    catch { return null }
+  },
+
   /* 주별 총 매입/매출 현황 — 청구서 품목을 기간으로 모은다(조회 전용). */
   async getPurchaseStatus(month, kind = 'received') {
     try { return await req(`/purchase-status?month=${month}&kind=${kind}`) }

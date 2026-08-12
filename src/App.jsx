@@ -15,6 +15,7 @@ import { DocsScreen, EvidenceScreen, EvidenceAttachDrawer, ExcelScreen, ReportsS
 import { SettlementScreen } from './screens/Settlement'
 import { PaymentRunScreen } from './screens/PaymentRun'
 import { PurchaseStatusScreen } from './screens/PurchaseStatus'
+import { FundStatusScreen } from './screens/FundStatus'
 import { PurchaseReqScreen } from './screens/PurchaseReq'
 import { QuoteRequestScreen } from './screens/QuoteRequest'
 import { HRScreen } from './screens/HR'
@@ -531,6 +532,7 @@ function AppInner({ onLogout, user }) {
       case "finance_dash":       return <FinanceDashScreen/>;
 
       case "cash_report":     return <CashReportScreen/>;
+      case "fund_status":     return <FundStatusScreen go={go}/>;
       case "report_daily":    return <DailyTrialScreen/>;
       case "report":          return <ReportsScreen/>;
       case "tax_vat":         return <TaxVatScreen/>;

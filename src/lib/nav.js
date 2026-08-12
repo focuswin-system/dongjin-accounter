@@ -112,6 +112,9 @@ export const NAV_TREE = [
        * 일계표는 반대다 — 그날 분개를 맞추는 과거 집계라 보고서 안이 맞다. */
       { label: "자금", items: [
         { id: "cash_report", label: "자금일보", icon: Icon.Bank },
+        /* 자금일보와 같은 데이터, 다른 축 — 자금일보는 오늘부터 N일 롤링(매일 아침 보는 것),
+           자금 현황은 주·월·분기·년 구간(대표가 "이 달에 도나"를 보는 것). */
+        { id: "fund_status", label: "자금 현황", icon: Icon.Chart },
       ]},
       { label: "장부관리", items: [
         { id: "report", label: "보고서", icon: Icon.Chart },
@@ -254,6 +257,7 @@ export const LEAF_TAGS = {
   purchase_req:     '품의 구매요청 발주요청 稟議',
   payment_run:      '결제내역 이체 일괄이체 송금 지급명단 매입처결제',
   purchase_status:  '매입현황 주별 품목별 자재 구매현황 매출현황',
+  fund_status:      '자금현황 자금수지 자금계획 월별 분기 주별 예정 잔고 현금흐름',
   // 장부
   ledger:           '거래 입출금 통장내역 원장 전표 입금 출금',
   contract:         '계약조회 계약목록 전체계약 수주발주 통합',

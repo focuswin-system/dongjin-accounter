@@ -75,8 +75,19 @@ async function balancesAsOf(db, asOf) {
  *
  * @returns {{date, kind:'in'|'out', amount, label, source, account_id, planned?}[]} 날짜 오름차순
  */
-async function upcomingFlows(db, { from, to }) {
+async function upcomingFlows(db, { from, to, anchorPast = true }) {
   const out = []
+  /* anchorPast — 기준일보다 이른(연체·기한미정) 돈을 이 구간 시작일로 끌어올릴 것인가.
+   *
+   * 오늘부터 보는 화면(자금일보)에서는 끌어올리는 게 맞다. 이미 나갔어야 할 돈이니까.
+   * 하지만 **미래 구간을 따로 세는 화면**(자금 현황의 9월·10월…)에서 매번 끌어올리면
+   * 같은 연체 청구서가 달마다 다시 잡혀 나갈 돈이 누적된다 — 실제로 58.9M→59.4M→60.4M 로
+   * 불어났다. 그 돈은 '지금' 몫이지 9월·10월 몫이 아니다.
+   * 그래서 자연 날짜가 구간보다 이르면 anchorPast=false 일 때 **건너뛴다.** */
+  const place = (natural, noDue = false) => {
+    if (noDue || !natural || natural < from) return anchorPast ? from : null
+    return natural
+  }
 
   // 1·2. 미수금·미지급금 — 이미 정산된 부분(invoice_matches)은 빼고 남은 잔액만
   for (const kind of ['issued', 'received']) {
@@ -100,8 +111,8 @@ async function upcomingFlows(db, { from, to }) {
       const noDue = !due
       // 기한이 이미 지난 것도 넣는다 — '오늘까지 들어왔어야 할 돈'이라 예측에 그대로 영향을 준다.
       // 기한 이전·미정인 것은 기준일에 몰아 표시한다(언제일지 모르니 가장 앞에 세운다).
-      const date = (noDue || due < from) ? from : due
-      if (date > to) continue
+      const date = place(due, noDue)
+      if (date === null || date > to) continue
       out.push({
         date, kind: kind === 'issued' ? 'in' : 'out', amount: remain,
         label: `${r.vendor_name || '거래처'} ${r.invoice_no || ''}`.trim(),
@@ -131,8 +142,8 @@ async function upcomingFlows(db, { from, to }) {
     const cycles = planned.length ? planned
       : repaymentSchedule(l).filter(c => !done.has(c.seq))
     for (const c of cycles) {
-      const date = c.due_date < from ? from : c.due_date
-      if (date > to || c.total <= 0) continue
+      const date = place(c.due_date)
+      if (date === null || date > to || c.total <= 0) continue
       out.push({
         date, kind: 'out', amount: c.total,
         label: `${l.name} ${c.seq}회차`, source: '대출 상환',
@@ -151,8 +162,8 @@ async function upcomingFlows(db, { from, to }) {
     const cycles = planned.length ? planned
       : unpaidPayments(s, rows.filter(r => r.paid_date).map(r => r.seq))
     for (const c of cycles) {
-      const date = c.due_date < from ? from : c.due_date
-      if (date > to || c.amount <= 0) continue
+      const date = place(c.due_date)
+      if (date === null || date > to || c.amount <= 0) continue
       out.push({
         date, kind: 'out', amount: c.amount,
         label: `${s.name} ${c.seq}회차`, source: '적금 납입',
