@@ -231,6 +231,109 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
     }
   }
 
+  /* 7. 카드 결제 — 쓴 날과 **돈이 빠지는 날**이 다르다.
+   *
+   * 받은 자금관리 엑셀에서 카드는 지출의 큰 축이다(BC 12일·국민 25일·롯데 5일·하나 27일).
+   * 카드 거래는 그 자체로 통장을 건드리지 않고, 결제일에 지정 통장에서 한꺼번에 빠진다.
+   * 그래서 카드 사용액을 **결제일에 결제계좌에서 나가는 한 건**으로 세운다.
+   *
+   * 결제일이 없으면(card_pay_day=0) 세지 않는다 — 모르는 날짜를 지어내면 그 날 잔고가
+   * 틀린다. 화면이 '결제일 미설정'이라 알려주고 사용자가 채우게 하는 편이 정직하다.
+   *
+   * ⚠ 여기서 세는 것은 **아직 결제되지 않은 사용액**이다. 결제일이 지나 실제로 통장에서
+   *   빠진 건은 그 출금 거래가 이미 잔액에 반영돼 있으므로 다시 세면 두 번 빠진다.
+   *   한 달치 사용액(지난 결제일 다음날 ~ 이번 결제일)만 본다.
+   */
+  const [cards] = await db.execute(
+    `SELECT id, name, card_pay_day, card_pay_account_id FROM accounts
+      WHERE kind = 'card' AND card_pay_day > 0`)
+  for (const c of cards) {
+    const payDay = Number(c.card_pay_day)
+    // from 이후로 오는 결제일들을 훑는다(구간이 여러 달이면 여러 번 온다)
+    const [fy, fm] = from.split('-').map(Number)
+    for (let k = 0; k < 40; k++) {
+      const d = new Date(fy, fm - 1 + k, 1)
+      const y = d.getFullYear(), m = d.getMonth() + 1
+      const last = new Date(y, m, 0).getDate()
+      const payDate = `${y}-${String(m).padStart(2, '0')}-${String(Math.min(payDay, last)).padStart(2, '0')}`
+      if (payDate < from) continue
+      if (payDate > to) break
+      // 이 결제일이 커버하는 사용 구간 = 지난 결제일 다음날 ~ 이번 결제일
+      const prev = new Date(y, m - 2, 1)
+      const prevLast = new Date(prev.getFullYear(), prev.getMonth() + 1, 0).getDate()
+      const prevPay = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}-${String(Math.min(payDay, prevLast)).padStart(2, '0')}`
+      const [[u]] = await db.execute(
+        `SELECT COALESCE(SUM(amount), 0) AS used FROM transactions
+          WHERE account_id = ? AND kind = 'expense' AND date > ? AND date <= ?`,
+        [c.id, prevPay, payDate])
+      const used = num(u.used)
+      if (used <= 0) continue
+      out.push({
+        date: payDate, kind: 'out', amount: used,
+        label: `${c.name} 결제`, source: '카드 결제',
+        account_id: c.card_pay_account_id || null,
+        overdue: false, planned: true,
+      })
+    }
+  }
+
+  /* 8. 부가세 납부 — 받은 자금관리 엑셀에도 "부가세(31일) 4,000,000" 이 큰 자리로 적혀 있다.
+   *
+   * **신고세액을 입력한 건만** 센다(filed_amount). 자동 집계한 예상세액까지 넣으면
+   * 분기 내내 추정치가 잔고를 흔들어, 정작 확정된 뒤에 숫자가 또 바뀐다.
+   * 대표가 자금표에 부가세를 적는 시점도 '금액을 알게 된 뒤'다.
+   *
+   * 납부기한: 1분기→4/25, 2분기→7/25, 3분기→10/25, 4분기→다음해 1/25.
+   * 이미 낸 만큼(paid_amount)은 빼고 남은 것만. 음수면 환급이라 들어올 돈이다.
+   */
+  const [vats] = await db.execute(
+    `SELECT year, quarter, filed_amount, paid_amount, account_id
+       FROM vat_filings WHERE filed_amount IS NOT NULL`)
+  for (const v of vats) {
+    const remain = num(v.filed_amount) - num(v.paid_amount)
+    if (remain === 0) continue
+    const q = Number(v.quarter)
+    const dueYear = Number(v.year) + (q === 4 ? 1 : 0)
+    const dueMonth = q === 4 ? 1 : q * 3 + 1
+    const due = `${dueYear}-${String(dueMonth).padStart(2, '0')}-25`
+    const date = place(due)
+    if (date === null || date > to) continue
+    out.push({
+      date, kind: remain > 0 ? 'out' : 'in', amount: Math.abs(remain),
+      label: `${v.year}년 ${q}분기 부가세${remain > 0 ? '' : ' 환급'}`,
+      source: '부가세', account_id: v.account_id || null,
+      overdue: due < from, planned: true,
+    })
+  }
+
+  /* 9. 미지급 급여 — 대표 자금표에서 단일 최대 지출이다(급여 15일 1,200만).
+   *
+   * 급여대장이 '확정'인데 아직 안 나간 돈을 지급예정일(pay_date)에 세운다.
+   * '작성중'은 세지 않는다 — 아직 금액이 확정되지 않아 잔고를 흔들면 안 된다.
+   * '일부지급'은 남은 만큼만.
+   *
+   * 대표 파일은 미지급이 여러 달 쌓여 있었다(4·5·6·7월분). 그래서 **월분을 라벨에 적는다** —
+   * 합계만 보면 "언제 것이 안 나갔나"를 알 수 없다.
+   */
+  const [pays] = await db.execute(
+    `SELECT p.month, p.pay_date, p.net_salary, p.status, e.name AS emp_name,
+            COALESCE((SELECT SUM(amount) FROM transactions t WHERE t.id = p.txn_id), 0) AS paid
+       FROM payroll p LEFT JOIN employees e ON e.id = p.employee_id
+      WHERE p.status IN ('확정', '일부지급')`)
+  for (const p of pays) {
+    const remain = num(p.net_salary) - num(p.paid)
+    if (remain <= 0) continue
+    const due = p.pay_date || `${p.month}-25`
+    const date = place(due)
+    if (date === null || date > to) continue
+    out.push({
+      date, kind: 'out', amount: remain,
+      label: `${p.emp_name || '직원'} ${p.month}분 급여`,
+      source: '미지급 급여', account_id: null,
+      overdue: due < from, planned: true,
+    })
+  }
+
   out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
   return out
 }

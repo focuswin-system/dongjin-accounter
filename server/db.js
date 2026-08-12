@@ -1180,6 +1180,15 @@ async function initDb(conn) {
      * 기존 계좌는 전부 법인(corp)으로 시작한다. */
     await ensureColumn('accounts', 'owner', "owner VARCHAR(10) NOT NULL DEFAULT 'corp'")
 
+    /* 카드 결제일과 결제 계좌 — 카드는 쓰는 날과 **돈이 빠지는 날**이 다르다.
+     *
+     * 받은 자금관리 엑셀에서 카드는 지출의 큰 축이다(BC 12일·국민 25일·롯데 5일·하나 27일).
+     * 지금은 카드를 '결제수단'으로만 알고 있어서, 이번 달 카드값이 며칠에 어느 통장에서
+     * 빠지는지 자금 예측이 알 수 없었다.
+     * pay_day 0 = 미설정(예측하지 않는다 — 모르는 걸 지어내면 그 날 잔고가 틀린다). */
+    await ensureColumn('accounts', 'card_pay_day', 'card_pay_day TINYINT NOT NULL DEFAULT 0')
+    await ensureColumn('accounts', 'card_pay_account_id', 'card_pay_account_id VARCHAR(36)')
+
     await ensureColumn('employees', 'salary_account', "salary_account VARCHAR(200)")
 
     /* 대출 예정 회차 채우기 — loan_repayments 에 실적만 있던 옛 데이터를 위해.

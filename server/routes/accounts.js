@@ -38,11 +38,22 @@ const canSeeBalance = (req) => {
     .some(r => perms.has(`${r}:view`))
 }
 
+/* 개인 계좌(대표 사비)의 **잔액**은 마스터에게만 보인다.
+ * 목록에서 통째로 빼지는 않는다 — 중소기업은 대표 개인 계좌로 회사 비용을 내는 일이
+ * 실제로 있고, 그때 실무자가 거래를 등록하려면 계좌를 고를 수 있어야 한다.
+ * 가려야 하는 건 '그 통장에 얼마 있나'이지 '그 통장이 있다'가 아니다.
+ * 가르는 방식은 계정 관리와 같다(users.role='admin' — routes/auth.js isMaster). */
+const canSeePersonal = (req) => req.user?.role === 'admin'
+
 router.get('/', async (req, res, next) => {
   try {
     const [accounts] = await req.db.execute('SELECT * FROM accounts ORDER BY name')
     if (!canSeeBalance(req)) return res.json(accounts.map(a => ({ ...a, balance: null })))
-    const result = await Promise.all(accounts.map(async a => ({ ...a, balance: await calcBalance(req.db, a.id) })))
+    const hidePersonal = !canSeePersonal(req)
+    const result = await Promise.all(accounts.map(async a => ({
+      ...a,
+      balance: (hidePersonal && a.owner === 'personal') ? null : await calcBalance(req.db, a.id),
+    })))
     res.json(result)
   } catch (e) { next(e) }
 })
@@ -53,6 +64,8 @@ router.get('/:id', async (req, res, next) => {
     if (!rows[0]) return res.status(404).json({ error: 'Not found' })
     // 목록과 같은 규칙으로 가린다 — 여기만 열려 있으면 계좌 id 만 알면 잔액을 읽을 수 있다
     if (!canSeeBalance(req)) return res.json({ ...rows[0], balance: null })
+    // 목록과 같은 규칙 — 개인 계좌 잔액은 마스터만
+    if (!canSeePersonal(req) && rows[0].owner === 'personal') return res.json({ ...rows[0], balance: null })
     res.json({ ...rows[0], balance: await calcBalance(req.db, req.params.id) })
   } catch (e) { next(e) }
 })
@@ -61,13 +74,16 @@ router.post('/', async (req, res, next) => {
   try {
     const { name, bank, type, initial_balance, kind, number, purpose } = req.body
     const owner = req.body.owner === 'personal' ? 'personal' : 'corp'
+    // 카드만 의미가 있다. 1~28 밖은 미설정으로 본다(29~31 은 짧은 달에 없는 날짜다)
+    const cardPayDay = Math.min(28, Math.max(0, parseInt(req.body.card_pay_day, 10) || 0))
+    const cardPayAcct = req.body.card_pay_account_id || null
     const id = randomUUID()
     // acct_code 를 빠뜨리면 이 계좌의 거래는 일계표에서 **한쪽 다리가 없어** 차대변이 안 맞는다.
     // (실제로 여기가 비어 있어서 새로 만든 계좌의 거래가 전부 짝을 잃었다)
     await req.db.execute(
-      'INSERT INTO accounts (id, name, bank, type, initial_balance, kind, `number`, purpose, acct_code, owner) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO accounts (id, name, bank, type, initial_balance, kind, `number`, purpose, acct_code, owner, card_pay_day, card_pay_account_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, name, bank||'', type||'보통예금', initial_balance||0, kind||'bank', number||'', purpose||'',
-       bankAcctCode(type), owner]
+       bankAcctCode(type), owner, cardPayDay, cardPayAcct]
     )
     res.json({ id })
   } catch (e) { next(e) }
@@ -77,11 +93,14 @@ router.put('/:id', async (req, res, next) => {
   try {
     const { name, bank, type, initial_balance, kind, number, purpose } = req.body
     const owner = req.body.owner === 'personal' ? 'personal' : 'corp'
+    // 카드만 의미가 있다. 1~28 밖은 미설정으로 본다(29~31 은 짧은 달에 없는 날짜다)
+    const cardPayDay = Math.min(28, Math.max(0, parseInt(req.body.card_pay_day, 10) || 0))
+    const cardPayAcct = req.body.card_pay_account_id || null
     // 종류(보통예금↔당좌예금↔현금)가 바뀌면 계정과목도 따라가야 한다 — 안 그러면 일계표가 어긋난다
     const [result] = await req.db.execute(
-      'UPDATE accounts SET name=?, bank=?, type=?, initial_balance=?, kind=?, `number`=?, purpose=?, acct_code=?, owner=? WHERE id=?',
+      'UPDATE accounts SET name=?, bank=?, type=?, initial_balance=?, kind=?, `number`=?, purpose=?, acct_code=?, owner=?, card_pay_day=?, card_pay_account_id=? WHERE id=?',
       [name, bank||'', type||'보통예금', initial_balance||0, kind||'bank', number||'', purpose||'',
-       bankAcctCode(type), owner, req.params.id]
+       bankAcctCode(type), owner, cardPayDay, cardPayAcct, req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })

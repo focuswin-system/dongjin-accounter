@@ -1586,7 +1586,7 @@ const CompanyPanel = ({ embedded = false }) => {
 const ACCOUNT_KINDS = [{ value: 'bank', label: '계좌' }, { value: 'card', label: '카드' }]
 const BANK_TYPES = ['보통예금', '당좌예금', '정기예금']
 const CARD_TYPES = ['법인카드', '개인카드', '체크카드']
-const emptyAccountForm = () => ({ kind: 'bank', type: '보통예금', bank: '', number: '', name: '', purpose: '', initial_balance: '', owner: 'corp' })
+const emptyAccountForm = () => ({ kind: 'bank', type: '보통예금', bank: '', number: '', name: '', purpose: '', initial_balance: '', owner: 'corp', card_pay_day: '', card_pay_account_id: '' })
 
 const AccountPanel = ({ embedded = false }) => {
   const toast = useToast()
@@ -1618,6 +1618,8 @@ const AccountPanel = ({ embedded = false }) => {
       name: a.name || '',
       purpose: a.purpose || '',
       owner: a.owner === 'personal' ? 'personal' : 'corp',
+      card_pay_day: a.cardPayDay || '',
+      card_pay_account_id: a.cardPayAccountId || '',
       initial_balance: a.initialBalance ?? '',
     })
     setDrawerOpen(true)
@@ -1628,6 +1630,8 @@ const AccountPanel = ({ embedded = false }) => {
     const payload = {
       name: form.name, bank: form.bank, type: form.type, kind: form.kind,
       number: form.number, purpose: form.purpose, owner: form.owner,
+      card_pay_day: form.kind === 'card' ? form.card_pay_day : 0,
+      card_pay_account_id: form.kind === 'card' ? (form.card_pay_account_id || null) : null,
       initial_balance: form.kind === 'bank' ? (parseInt(String(form.initial_balance).replace(/[^0-9-]/g, '')) || 0) : 0,
     }
     const res = editing ? await api.updateAccount(editing.id, payload) : await api.addAccount(payload)
@@ -1737,6 +1741,35 @@ const AccountPanel = ({ embedded = false }) => {
               ))}
             </div>
           </div>
+
+          {/* 카드 결제일 — 카드는 쓰는 날과 돈이 빠지는 날이 다르다.
+              이게 없으면 이번 달 카드값이 며칠에 어느 통장에서 빠지는지 자금 예측이 모른다.
+              비워두면 예측하지 않는다 — 모르는 날짜를 지어내면 그 날 잔고가 틀린다. */}
+          {isCard && (
+            <div className="row gap-16" style={{ alignItems: 'flex-start' }}>
+              <div style={{ flex: 1 }}>
+                <label className="label" style={{ marginBottom: 8 }}>결제일</label>
+                <Combobox value={String(form.card_pay_day || '')} allowAdd={false}
+                  onChange={v => f('card_pay_day', v)}
+                  options={[{ value: '', label: '설정 안 함' },
+                    ...Array.from({ length: 28 }, (_, i) => ({ value: String(i + 1), label: `매월 ${i + 1}일` }))]}
+                  placeholder="결제일 선택"/>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label className="label" style={{ marginBottom: 8 }}>결제 계좌</label>
+                <Combobox value={form.card_pay_account_id || ''} allowAdd={false}
+                  onChange={v => f('card_pay_account_id', v)}
+                  options={[{ value: '', label: '선택 안 함' },
+                    ...accounts.filter(a => a.kind !== 'card').map(a => ({ value: a.id, label: a.name }))]}
+                  placeholder="어느 통장에서 빠지나요"/>
+              </div>
+            </div>
+          )}
+          {isCard && (
+            <div className="text-xs text-muted2" style={{ marginTop: -8 }}>
+              결제일을 넣으면 이번 달 사용액이 그 날 이 통장에서 빠지는 것으로 자금 현황에 잡혀요.
+            </div>
+          )}
 
           {/* 소유 — 중소기업은 대표 개인 계좌·카드로 회사 돈을 쓰는 일이 흔하다.
               자금 현황에서 법인/개인 합계를 가르는 근거이고, 개인 잔액은 마스터만 본다.

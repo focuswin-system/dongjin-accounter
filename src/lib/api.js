@@ -192,6 +192,9 @@ function adaptAccount(row) {
     purpose: row.purpose || '',
     // 법인 것인가 대표 개인 것인가 — 자금 현황에서 합계를 가르고, 개인 잔액은 마스터만 본다
     owner: row.owner === 'personal' ? 'personal' : 'corp',
+    // 카드는 쓰는 날과 돈이 빠지는 날이 다르다 — 결제일·결제계좌가 있어야 자금 예측이 선다
+    cardPayDay: Number(row.card_pay_day) || 0,
+    cardPayAccountId: row.card_pay_account_id || '',
   }
 }
 
