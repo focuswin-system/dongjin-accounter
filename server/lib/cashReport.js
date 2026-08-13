@@ -221,13 +221,21 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
          발행 버튼을 눌렀는지에 따라 예측이 달라지면 문서를 못 믿는다.
          발행 경로와 같은 상수를 쓴다(lib/recurrence.js PAYMENT_TERM_DAYS). */
       for (const cycle of dueDatesToGenerate(r, from, { horizonDays })) {
-        const due = cashDateOf(cycle, r.pay_term)
-        if (due < from || due > to) continue
+        const natural = cashDateOf(cycle, r.pay_term)
+        /* 지난 회차를 그냥 버리면 안 된다.
+         *
+         * 예전엔 `due < from` 이면 continue 했다. 그런데 아직 청구서가 안 된 과거 회차는
+         * **아직 안 나간 돈**이다 — 청구서(1·2번)는 같은 상황을 place() 로 기준일에 끌어오는데
+         * 여기만 버려서, 놓친 급여·임대료가 통째로 예측에서 사라졌다(늘 낙관 쪽 오류).
+         * pay_term='immediate' 는 회차일=결제일이라 하루만 지나도 사라져 더 자주 샜다. */
+        const due = place(natural)
+        if (due === null || due > to) continue
         out.push({
           date: due, cycle_date: cycle, kind: spec.kind, amount,
           label: spec.label(r), source: spec.source,
           account_id: r.account_id || null,
-          overdue: false,        // 아직 청구서가 없는 회차라 '연체'가 아니라 '예정'이다
+          // 회차일이 이미 지났으면 연체다 — 화면이 '지남'으로 갈라 보여준다
+          overdue: natural < from,
           planned: true,         // 확정이 아니라 규칙에서 나온 예정 — 화면이 구분해 보여준다
         })
       }

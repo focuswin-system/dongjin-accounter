@@ -70,12 +70,28 @@ const UNITS = ['week', 'month', 'quarter', 'year']
 
 const pick = (u) => (UNITS.includes(u) ? u : 'month')
 
+/* 기준일이 **어느 회계월에 속하는가**.
+ *
+ * 25일 마감이면 8/26 은 달력으로 8월이지만 회계로는 9월분(8/26~9/25)이다.
+ * 예전엔 달력월을 그대로 써서, 마감일을 넘긴 날(매달 26~31일, 연 72일)에 offset=0 이
+ * **이미 끝난 구간**(7/26~8/25)을 가리켰다. 그 구간은 range.to < today 라 예정을 아예
+ * 안 세므로 화면이 "이 달 나갈 돈 0원"으로 떴다 — 급여일·카드결제일이 든 달을 통째로 놓친다.
+ */
+function fiscalMonthOf(baseDate, closingDay = 0) {
+  const [y, m, d] = String(baseDate).split('-').map(Number)
+  const cd = Math.min(28, Math.max(0, Number(closingDay) || 0))
+  if (!cd || d <= cd) return { y, m }
+  const t = new Date(y, m, 1)          // m 은 1-based → 다음 달
+  return { y: t.getFullYear(), m: t.getMonth() + 1 }
+}
+
 /** 그 단위의 구간 하나 — 기준일이 속한 구간을 offset 만큼 앞뒤로 옮긴 것. */
 function periodRange(unit, baseDate, offset = 0, { closingDay = 0, weekStart = 1 } = {}) {
   const u = pick(unit)
   const [y, m, d] = String(baseDate).split('-').map(Number)
 
   if (u === 'week') {
+    // 주는 마감 개념이 없다 — 주 시작요일로만 끊는다
     const base = new Date(y, m - 1, d + offset * 7)
     const ws = Math.min(6, Math.max(0, Number(weekStart) || 0))
     const back = (base.getDay() - ws + 7) % 7
@@ -84,15 +100,18 @@ function periodRange(unit, baseDate, offset = 0, { closingDay = 0, weekStart = 1
     return { unit: u, from: ymd(from), to: ymd(to) }
   }
 
+  // 월·분기·년은 **기준일이 속한 회계월**에서 출발한다(달력월이 아니다)
+  const fm = fiscalMonthOf(baseDate, closingDay)
+
   if (u === 'month') {
-    const t = new Date(y, m - 1 + offset, 1)
+    const t = new Date(fm.y, fm.m - 1 + offset, 1)
     return { unit: u, ...monthRange(`${t.getFullYear()}-${pad(t.getMonth() + 1)}`, closingDay) }
   }
 
   if (u === 'quarter') {
     // 분기 = 달 3개를 이어 붙인다. 마감일이 있으면 시작 달의 시작일 ~ 끝 달의 끝일.
-    const q = Math.floor((m - 1) / 3) + offset
-    const y2 = y + Math.floor(q / 4)
+    const q = Math.floor((fm.m - 1) / 3) + offset
+    const y2 = fm.y + Math.floor(q / 4)
     const q2 = ((q % 4) + 4) % 4
     const first = monthRange(`${y2}-${pad(q2 * 3 + 1)}`, closingDay)
     const last = monthRange(`${y2}-${pad(q2 * 3 + 3)}`, closingDay)
@@ -100,7 +119,7 @@ function periodRange(unit, baseDate, offset = 0, { closingDay = 0, weekStart = 1
   }
 
   // year — 1월분의 시작 ~ 12월분의 끝(마감일이 있으면 전년 12/26 부터 시작하기도 한다)
-  const y2 = y + offset
+  const y2 = fm.y + offset
   return { unit: u, from: monthRange(`${y2}-01`, closingDay).from, to: monthRange(`${y2}-12`, closingDay).to }
 }
 
@@ -181,6 +200,6 @@ function dayBefore(date) {
 }
 
 module.exports = {
-  monthRange, weeksOf, periodRange, periodLabel, periodSeries, UNITS,
+  monthRange, weeksOf, periodRange, periodLabel, periodSeries, UNITS, fiscalMonthOf,
   bucketsOf, dayBefore, BUCKET_OF,
 }

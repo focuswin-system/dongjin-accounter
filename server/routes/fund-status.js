@@ -41,8 +41,34 @@ async function closedState(db, from, to, today) {
   return to < today ? 'provisional' : 'current'            // 지났지만 미마감 / 진행 중
 }
 
+/* 구간 **시작 시점**의 계좌별 잔액.
+ *
+ * balancesAsOf 만으로는 미래 구간이 틀린다. 거래는 미래 날짜로 등록할 수 없으므로
+ * balancesAsOf('2026-09-01') 은 사실상 '오늘 잔액'이고, 오늘~구간 시작 사이에 나갈
+ * 급여·카드값이 하나도 안 빠져 있다. 실물로 4,000만이 과대였고, 그 결과 9월에 비는
+ * 통장이 shortfalls 에 안 잡혔다 — "며칠에 어느 통장이 비나"가 다음 달부터 틀린 것이다.
+ *
+ * 그래서 미래 구간이면 **오늘부터 구간 직전까지의 예정을 미리 반영**한다.
+ * 그 다리 구간에서는 연체·기한미정도 센다(anchorPast:true) — 지금 몫의 돈이니까.
+ */
+async function openingBalances(db, { from, today, datedOnly = false }) {
+  const rows = await balancesAsOf(db, dayBefore(from))
+  if (from <= today) return rows
+  const bridge = await upcomingFlows(db, { from: today, to: dayBefore(from), anchorPast: true })
+  const delta = new Map()
+  for (const f of bridge) {
+    /* datedOnly — 시간축(timeline)은 기한 미정·연체를 **축에서 빼고** 별도 블록으로 낸다.
+       다리 구간에서만 그걸 포함하면 이번 달 마지막 잔액과 다음 달 첫 잔액이 어긋난다
+       (실측 1억 7,818만 차이). 축과 같은 규칙을 써야 두 구간이 이어진다. */
+    if (datedOnly && (f.noDue || f.overdue)) continue
+    const k = f.account_id || ''
+    delta.set(k, (delta.get(k) || 0) + (f.kind === 'in' ? f.amount : -f.amount))
+  }
+  return rows.map(a => ({ ...a, balance: a.balance + (delta.get(a.id) || 0) }))
+}
+
 /** 그 구간에 **실제로 오간 돈**(거래 실적). 계좌별로 나눈다. */
-async function actualsIn(db, from, to) {
+async function actualsIn(db, from, to, mine) {
   const [rows] = await db.execute(
     `SELECT account_id, kind, SUM(amount) AS total
        FROM transactions
@@ -54,6 +80,14 @@ async function actualsIn(db, from, to) {
   let inSum = 0, outSum = 0
   for (const r of rows) {
     const key = r.account_id || ''
+    /* ⚠ 합계는 **화면에 서는 계좌만** 센다.
+     *
+     * 예전엔 여기서 계좌를 안 걸러, 카드 계좌 지출이 상단 KPI '나간 돈'에는 들어가는데
+     * 아래 계좌표에는 없었다(계좌표는 kind!=='card' 만 그린다). 게다가 그 사용액은
+     * 결제일에 '카드 결제'로 한 번 더 세어져 **같은 돈이 두 번** 잡혔다.
+     * 개인 계좌도 마찬가지다 — 비관리자에게는 표에 안 보이는데 KPI 에만 섞여
+     * "법인+개인+미지정" 합이 KPI 와 안 맞았다. */
+    if (key && !mine.has(key)) continue
     if (!by.has(key)) by.set(key, { in: 0, out: 0 })
     const v = Number(r.total) || 0
     if (r.kind === 'income') { by.get(key).in += v; inSum += v } else { by.get(key).out += v; outSum += v }
@@ -115,6 +149,19 @@ async function savingsStatus(db) {
  * 자금 예측(lib/cashReport.js 9·10번)이 세는 것과 같은 두 곳이다 — 한쪽만 보면
  * 요약행의 '미지급 인건비'와 예측의 '나갈 돈'이 서로 안 맞는다.
  */
+/* 직원별 급여 명세를 볼 자격.
+ *
+ * laborStatus 는 이름·월분·미지급액을 낸다 — 인사 데이터다. 그런데 이 라우터의 게이트는
+ * fund_status/cash_report 라, 인사 권한이 막힌 역할('실무' 프리셋은 hr:[] 인데
+ * fund_status 는 열려 있다)이 /api/employees 는 403 을 받으면서 여기로는 전 직원
+ * 미지급 급여를 받아 갔다. 합계는 자금 판단에 필요하니 남기고 **이름별 명세만** 가린다.
+ * 역할 미배정 계정은 제한 없음(게이트와 같은 규칙 — routes/accounts.js canSeeBalance). */
+const canSeeLaborDetail = (req) => {
+  const perms = req.perms
+  if (!perms || perms.size === 0) return true
+  return ['hr', 'hr_labor_contract', 'hr_outsourcing'].some(r => perms.has(`${r}:view`))
+}
+
 async function laborStatus(db) {
   // 급여 — 지급액은 payroll_id 로 합산한다(나눠 지급한 건을 빠뜨리면 미지급이 부푼다)
   const [pay] = await db.execute(
@@ -201,7 +248,8 @@ router.get('/', async (req, res, next) => {
 
     // 실적(그 구간에 실제로 오간 돈)과 예정(앞으로 오갈 돈)을 **함께** 낸다.
     // 지난 구간이면 예정이 비고, 미래 구간이면 실적이 빈다. 진행 중인 구간은 둘 다 있다.
-    const actual = await actualsIn(req.db, range.from, range.to)
+    const mine = new Set(accounts.map(a => a.id))
+    const actual = await actualsIn(req.db, range.from, range.to, mine)
     /* 미래 구간은 연체·기한미정 돈을 끌어오지 않는다(anchorPast:false).
        끌어오면 같은 연체 청구서가 9월·10월·11월에 거듭 잡혀 나갈 돈이 누적된다.
        그 돈은 '지금' 몫이다 — 진행 중인 구간에서만 센다. */
@@ -214,26 +262,47 @@ router.get('/', async (req, res, next) => {
     let planIn = 0, planOut = 0
     for (const f of flows) {
       const key = f.account_id || ''
+      // 실적과 같은 모집단이어야 KPI 와 계좌표 합계가 맞는다(카드·비관리자 개인 계좌 제외)
+      if (key && !mine.has(key)) continue
       if (!flowBy.has(key)) flowBy.set(key, { in: 0, out: 0, items: [] })
       const b = flowBy.get(key)
       if (f.kind === 'in') { b.in += f.amount; planIn += f.amount } else { b.out += f.amount; planOut += f.amount }
       b.items.push(f)
     }
 
+    /* 미래 구간의 '예상 잔액'은 **오늘~구간 시작 사이에 나갈 돈**도 빼야 한다.
+     * 거래는 미래 날짜로 못 넣으므로 balance 는 사실상 오늘 잔액이다. 그 사이의 급여·카드값을
+     * 안 빼면 9월 화면이 8/25 급여를 안 뺀 잔액에서 출발한다(실물 4,000만 과대).
+     * 그 다리 구간에서는 연체·기한미정도 센다 — 지금 몫의 돈이다. */
+    const bridge = new Map()
+    if (future) {
+      const pre = await upcomingFlows(req.db, { from: today, to: dayBefore(range.from), anchorPast: true })
+      for (const f of pre) {
+        const k = f.account_id || ''
+        if (k && !mine.has(k)) continue
+        bridge.set(k, (bridge.get(k) || 0) + (f.kind === 'in' ? f.amount : -f.amount))
+      }
+    }
     const byAccount = accounts.map(a => {
       const act = actual.by.get(a.id) || { in: 0, out: 0 }
       const pl = flowBy.get(a.id) || { in: 0, out: 0, items: [] }
+      const pre = bridge.get(a.id) || 0
       return {
         id: a.id, name: a.name, bank: a.bank, owner: a.owner, number: a.number,
         balance: a.balance,                       // 구간 끝 시점 잔액(실적 기준)
         actualIn: act.in, actualOut: act.out,
         planIn: pl.in, planOut: pl.out,
-        expected: a.balance + pl.in - pl.out,     // 예정까지 반영한 예상 잔액
+        // 예정까지 반영한 예상 잔액. 미래 구간이면 오늘~구간 시작 사이 예정(pre)도 뺀다.
+        expected: a.balance + pre + pl.in - pl.out,
         items: pl.items,
       }
     })
+    const bridgeUnassigned = bridge.get('') || 0
     // 어느 계좌인지 모르는 예정(계좌 미지정 청구서 등)도 감춰선 안 된다 — 합계가 안 맞는다
-    const unassigned = flowBy.get('') || { in: 0, out: 0, items: [] }
+    const un0 = flowBy.get('') || { in: 0, out: 0, items: [] }
+    /* 계좌 미지정 예정도 미래 구간이면 다리 구간 몫을 함께 낸다 —
+       화면의 '현금 과부족'이 계좌표의 '기간 말 예상'과 같은 기준이어야 한다. */
+    const unassigned = { ...un0, bridge: bridgeUnassigned }
 
     const sum = (list, f) => list.reduce((s, x) => s + f(x), 0)
     const group = (owner) => {
@@ -253,6 +322,8 @@ router.get('/', async (req, res, next) => {
     const debts = await debtStatus(req.db)
     const savings = await savingsStatus(req.db)
     const labor = await laborStatus(req.db)
+    // 합계는 자금 판단에 필요하다. 이름별 명세는 인사 권한이 있어야 본다.
+    if (!canSeeLaborDetail(req)) labor.items = []
     const incoming = await incomingNoDate(req.db, today)
 
     res.json({
@@ -302,7 +373,8 @@ router.get('/timeline', async (req, res, next) => {
     const buckets = bucketsOf(unit, range, opt)
 
     const canSeePersonal = req.user?.role === 'admin'
-    const all = await balancesAsOf(req.db, dayBefore(range.from))   // 구간 **시작 전날** 잔액
+    // 축과 같은 규칙(기한 미정·연체 제외)으로 다리 구간을 반영해야 구간이 이어진다
+    const all = await openingBalances(req.db, { from: range.from, today, datedOnly: true })
     const accounts = (canSeePersonal ? all : all.filter(a => a.owner !== 'personal'))
       .filter(a => a.kind !== 'card')
     const mine = new Set(accounts.map(a => a.id))
@@ -495,14 +567,21 @@ router.get('/series', async (req, res, next) => {
 
     const canSeePersonal = req.user?.role === 'admin'
     const all = await balancesAsOf(req.db, null)
-    const owners = new Map(all.map(a => [a.id, a.owner]))
-    const mine = (id) => canSeePersonal || owners.get(id) !== 'personal'
+    /* 카드 계좌도 뺀다 — `/` 와 같은 모집단이어야 같은 구간에서 같은 숫자가 나온다.
+       예전엔 개인만 걸러, 카드 사용액이 series 에만 들어가 offset=0 줄과 상단 KPI 가 어긋났다. */
+    const shown = new Map(all.map(a => [a.id, a]))
+    const mine = (id) => {
+      const a = shown.get(id)
+      if (!a) return true                       // 계좌 미지정은 그대로 센다
+      if (a.kind === 'card') return false
+      return canSeePersonal || a.owner !== 'personal'
+    }
 
     const series = periodSeries(unit, today, { back, forward, base, ...opt })
     const out = []
     for (const p of series) {
       const state = await closedState(req.db, p.from, p.to, today)
-      const actual = await actualsIn(req.db, p.from, p.to)
+      const actual = await actualsIn(req.db, p.from, p.to, new Set(all.filter(a => mine(a.id)).map(a => a.id)))
       let actualIn = 0, actualOut = 0
       for (const [id, v] of actual.by) {
         if (id && !mine(id)) continue

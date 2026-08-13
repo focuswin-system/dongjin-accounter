@@ -44,7 +44,9 @@ const API_RESOURCES = {
   '/api/settlements':         ['settlement'],
   '/api/purchase-reqs':       ['purchase_req'],
   '/api/payment-runs':        ['payment_run'],
-  '/api/unpaid-labor':        ['fund_status', 'hr'],
+  /* 퇴직금은 **인사 자원만** 요구한다. 자원군 판정이 OR 이라 fund_status 를 함께 두면
+     인사가 막힌 역할이 퇴직자 이름·금액을 읽고 등록·삭제까지 할 수 있었다(게이트 우회). */
+  '/api/unpaid-labor':        ['hr'],
   '/api/fund-status':          ['fund_status', 'cash_report'],
   '/api/purchase-status':     ['purchase_status'],
   '/api/quote-reqs':          ['quote_req'],
