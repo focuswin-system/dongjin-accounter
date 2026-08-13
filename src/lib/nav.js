@@ -97,7 +97,7 @@ export const NAV_TREE = [
        * 같은 도메인에서 마주보게 둔다. 보통예금·카드 같은 '결제수단'은 기준정보에 남는다 —
        * 예적금은 묶여 있어 당장 못 쓰는 돈이라 성격이 다르다. */
       { label: "자금 운용", items: [
-        { id: "finance_savings",    label: "예금·적금", icon: Icon.Bank },
+        { id: "finance_savings",    label: "예금·적금·보증금", icon: Icon.Bank },
       ]},
       { label: "현황", items: [
         { id: "finance_dash",       label: "재무 현황", icon: Icon.Chart },
@@ -287,7 +287,7 @@ export const LEAF_TAGS = {
   // 재무
   finance_loan:     '대출 차입 융자 상환 이자 원리금',
   finance_investment:'투자 출자 증자 유치 가수금',
-  finance_savings:  '예금 적금 정기예금 만기 예치',
+  finance_savings:  '예금 적금 정기예금 만기 예치 보증금 임차보증금 관리비보증금',
   finance_dash:     '재무 부채 자본 차입현황',
   // 경영
   cash_report:      '자금 자금계획 현금흐름 잔액예측 자금수지',
@@ -356,7 +356,7 @@ export const PORTAL = [
       { id: 'finance_fund', label: '자금 조달', icon: Icon.Wallet, desc: '차입금·투자', groups: [
         { label: '', items: ['finance_loan', 'finance_investment'] },
       ]},
-      { id: 'finance_ops', label: '자금 운용', icon: Icon.Bank, desc: '예금·적금', route: 'finance_savings' },
+      { id: 'finance_ops', label: '자금 운용', icon: Icon.Bank, desc: '예금·적금·보증금', route: 'finance_savings' },
       { id: 'finance_status', label: '재무 현황', icon: Icon.Chart, desc: '차입·투자 현황', route: 'finance_dash' },
     ],
   },

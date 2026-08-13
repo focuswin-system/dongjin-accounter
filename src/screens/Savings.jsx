@@ -6,19 +6,27 @@ import { DataTable } from '../lib/components/DataTable'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { api } from '../lib/api'
 
-/* 예금·적금 — 자금 '운용'. 차입금(자금 조달)의 거울상이다.
+/* 예금·적금·보증금 — 자금 '운용'. 차입금(자금 조달)의 거울상이다.
  *
  * 화면에서 계속 드러내는 것 두 가지:
  *   1. 납입은 **비용이 아니다.** 돈이 통장에서 나가지만 회사 재산은 그대로다.
  *      숫자만 보여주면 사용자가 '지출'로 오해하고 손익을 잘못 읽는다.
  *   2. 여기 있는 돈은 **당장 못 쓴다.** 그래서 자금일보에서 '묶인 자금'으로 따로 센다.
+ *
+ * 보증금이 여기 있는 이유: 임차보증금은 회사 재산인데 계약이 끝나야 돌아온다 —
+ * 위 두 성질이 예적금과 똑같다. 다만 **회계 자리는 다르다.** 예적금은 금융상품
+ * (1201 단기 / 1501 장기)이고 보증금은 **1801 보증금(기타비유동자산)**이다.
+ * 한 화면에 있다고 같은 계정과목을 붙이면 재무상태표에서 자리가 틀린다.
  */
 
-const KIND_LABEL = { installment: '적금', deposit: '예금' }
+const KIND_LABEL = { installment: '적금', deposit: '예금', guarantee: '보증금' }
 const KIND_HINT = {
   installment: '매월 정해진 금액을 넣고 만기에 원리금을 받아요.',
   deposit: '목돈을 한 번에 넣고 만기에 원리금을 받아요.',
+  guarantee: '임차보증금처럼 계약이 끝나야 돌려받는 돈이에요. 만기도 이자도 없어요.',
 }
+/** 보증금은 만기·이자·회차가 없다 — 화면 여기저기서 이 판정을 쓴다 */
+const isGuarantee = (s) => s?.kind === 'guarantee'
 const STATUS_LABEL = { active: '진행 중', matured: '만기', closed: '해지' }
 
 const dday = (date) => {
@@ -97,15 +105,15 @@ export const SavingsScreen = () => {
 
   return (
     <div className="fade-up">
-      <PageHeader title="예금·적금"
-        sub={overdue.length > 0 ? `납입일이 지난 회차 ${overdue.length}건이 있어요` : '자금 운용 — 여기 있는 돈은 만기까지 묶여 있어요'}
+      <PageHeader title="예금·적금·보증금"
+        sub={overdue.length > 0 ? `납입일이 지난 회차 ${overdue.length}건이 있어요` : '자금 운용 — 여기 있는 돈은 당장 쓸 수 없어요'}
         actions={<button className="btn primary" onClick={() => { setEditing(null); setFormOpen(true) }}>
-          <Icon.Plus size={14}/> 예적금 등록
+          <Icon.Plus size={14}/> 등록
         </button>}/>
 
       <KpiRow cols={3} style={{ marginBottom: 20 }}>
         <Kpi label="묶인 자금" value={totalBalance} badge={`${active.length}건`}
-          hint="만기까지 당장 쓸 수 없어요"/>
+          hint="예적금·보증금 — 당장 쓸 수 없어요"/>
         <Kpi label="만기까지 받을 이자" value={expectedInterest} tone="pos" hint="세전 · 단리 기준"/>
         <Kpi label="가장 가까운 만기" value={nextMaturity ? nextMaturity.maturity_date : '—'}
           badge={nextMaturity ? dday(nextMaturity.maturity_date) : undefined}
@@ -152,7 +160,7 @@ export const SavingsScreen = () => {
       <div className="card" style={{ overflow: 'hidden' }}>
         <DataTable
           rows={rows}
-          empty="등록된 예금·적금이 없어요. 위에서 추가하세요."
+          empty="등록된 예금·적금·보증금이 없어요. 위에서 추가하세요."
           renderExpanded={s => (expanded === s.id ? <SavingsDetail s={s}/> : null)}
           columns={[
             { key: 'name', header: '상품', sortable: true, className: 'fw-700', render: s => (
@@ -168,7 +176,9 @@ export const SavingsScreen = () => {
             { key: 'balance', header: '쌓인 금액', width: 130, align: 'right', className: 'num-cell fw-700',
               sortable: true, sortValue: s => Number(s.balance) || 0, render: s => fmtNum(s.balance) },
             { key: 'total', header: '만기 수령(세전)', width: 140, align: 'right', className: 'num-cell',
-              sortable: true, sortValue: s => s.maturity?.total || 0, render: s => fmtNum(s.maturity?.total || 0) },
+              sortable: true, sortValue: s => s.maturity?.total || 0,
+              // 보증금은 만기가 없다 — 0원이라 적으면 "못 받는 돈"으로 읽힌다
+              render: s => (isGuarantee(s) ? <span className="text-muted2">돌려받음</span> : fmtNum(s.maturity?.total || 0)) },
             { key: 'maturity_date', header: '만기일', width: 140, className: 'num text-sm', sortable: true, render: s => (
               <>{s.maturity_date || '—'}
                 {s.status === 'active' && s.maturity_date && (
@@ -177,14 +187,18 @@ export const SavingsScreen = () => {
               </>
             )},
             { key: 'status', header: '상태', width: 90, render: s => (
-              <span className={`badge ${s.status === 'active' ? 'pos' : 'outline'}`}>{STATUS_LABEL[s.status]}</span>
+              <span className={`badge ${s.status === 'active' ? 'pos' : 'outline'}`}>
+                {isGuarantee(s) && s.status === 'matured' ? '반환' : STATUS_LABEL[s.status]}
+              </span>
             )},
             { key: 'act', header: '', width: 200, render: s => (
               <div className="row gap-4">
                 {s.status === 'active' && s.kind === 'installment' && s.next_payment && (
                   <button className="btn sm primary" onClick={() => setPayTarget({ s, cycle: s.next_payment })}>납입</button>
                 )}
-                {s.status === 'active' && <button className="btn ghost sm" onClick={() => setMatureTarget(s)}>만기</button>}
+                {s.status === 'active' && (
+                  <button className="btn ghost sm" onClick={() => setMatureTarget(s)}>{isGuarantee(s) ? '반환' : '만기'}</button>
+                )}
                 {s.status === 'active' && <button className="btn ghost sm" onClick={() => { setEditing(s); setFormOpen(true) }}>수정</button>}
                 <button className="btn ghost sm" style={{ color: 'var(--neg)' }} onClick={() => doDelete(s)}>삭제</button>
               </div>
@@ -195,7 +209,9 @@ export const SavingsScreen = () => {
       <div className="text-xs text-muted2" style={{ marginTop: 14, lineHeight: 1.7 }}>
         · 납입한 돈은 <b>비용이 아니에요.</b> 통장에서 나가지만 회사 재산은 그대로예요(보통예금 → 금융상품).
         그래서 손익에는 잡히지 않고, 만기 이자만 수익으로 잡혀요.<br/>
-        · 여기 있는 돈은 만기까지 묶여 있어서 <b>자금일보에서 '묶인 자금'</b>으로 따로 보여드려요.
+        · 여기 있는 돈은 만기까지 묶여 있어서 <b>자금일보에서 '묶인 자금'</b>으로 따로 보여드려요.<br/>
+        · <b>보증금</b>도 같은 이유로 여기 있어요. 다만 회계 자리는 달라서 예적금은 금융상품,
+        보증금은 <b>기타비유동자산(1801 보증금)</b>으로 잡힙니다.
       </div>
 
       <SavingsForm open={formOpen} onClose={() => setFormOpen(false)} editing={editing}
@@ -212,6 +228,21 @@ export const SavingsScreen = () => {
 const SavingsDetail = ({ s }) => {
   const paidSeq = new Set((s.payments || []).map(p => Number(p.seq)))
   const sched = s.schedule || []
+  if (isGuarantee(s)) {
+    return (
+      <div style={{ padding: '14px 18px' }} className="text-sm">
+        <div className="row gap-16" style={{ flexWrap: 'wrap' }}>
+          <span>보증금 <b className="num">{fmtNum(s.principal)}원</b></span>
+          <span className="text-muted">계정과목 <b>1801 보증금</b></span>
+          <span className="text-muted">지급일 <b className="num">{s.start_date}</b></span>
+        </div>
+        <div className="text-xs text-muted2" style={{ marginTop: 8, lineHeight: 1.6 }}>
+          보증금은 만기도 이자도 없어요. 계약이 끝나면 <b>반환</b>으로 처리하면 통장에 들어온 것으로 잡힙니다.<br/>
+          재무상태표에서는 예적금(당좌·투자자산)이 아니라 <b>기타비유동자산</b>에 섭니다 — 1년 안에 현금이 되지 않으니까요.
+        </div>
+      </div>
+    )
+  }
   if (s.kind === 'deposit') {
     return (
       <div style={{ padding: '14px 18px' }} className="text-sm">
@@ -261,6 +292,9 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
     kind: 'installment', name: '', bank: '', monthly_amount: '', principal: '',
     annual_rate: '', term_months: '12', start_date: localToday(), pay_day: '',
     account_id: '', memo: '',
+    // 보증금 전용 — 지금 내는 돈인가(=출금 거래를 만든다), 예전에 이미 낸 것인가.
+    // 기본은 후자다. 대개 이미 나간 돈을 뒤늦게 등록하는데, 거래를 또 만들면 잔액이 두 번 빠진다.
+    recorded: false,
   }
   const [f, setF] = useState(blank)
   const [preview, setPreview] = useState(null)
@@ -268,6 +302,7 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
   // (납입·만기는 서버가 FOR UPDATE로 막지만 등록에는 그런 방어가 없다)
   const [busy, setBusy] = useState(false)
   const set = (k, v) => setF(prev => ({ ...prev, [k]: v }))
+  const guar = f.kind === 'guarantee'
 
   useEffect(() => {
     if (!open) { setPreview(null); return }   // 닫을 때 비운다 — 다음에 열 때 직전 상품 숫자가 남는다
@@ -276,13 +311,14 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
       monthly_amount: String(editing.monthly_amount || ''), principal: String(editing.principal || ''),
       annual_rate: String(editing.annual_rate || ''), term_months: String(editing.term_months || '12'),
       start_date: editing.start_date, pay_day: String(editing.pay_day || ''),
-      account_id: editing.account_id || '', memo: editing.memo || '',
+      account_id: editing.account_id || '', memo: editing.memo || '', recorded: false,
     } : blank)
   }, [open, editing])
 
   // 입력이 바뀔 때마다 서버에 계산을 맡긴다 — 화면과 서버가 다른 식을 쓰면 저장 후 숫자가 달라진다
   useEffect(() => {
     if (!open) return
+    if (guar) { setPreview(null); return }   // 보증금은 만기 계산이 없다
     const t = setTimeout(async () => {
       setPreview(await api.previewSavings({
         kind: f.kind, principal: f.principal, monthly_amount: f.monthly_amount,
@@ -291,7 +327,7 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
       }))
     }, 250)
     return () => clearTimeout(t)
-  }, [open, f.kind, f.principal, f.monthly_amount, f.annual_rate, f.term_months, f.start_date, f.pay_day])
+  }, [open, guar, f.kind, f.principal, f.monthly_amount, f.annual_rate, f.term_months, f.start_date, f.pay_day])
 
   const save = async () => {
     if (busy) return
@@ -303,6 +339,8 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
         annual_rate: f.annual_rate, term_months: f.term_months,
         start_date: f.start_date, pay_day: f.pay_day,
         account_id: f.account_id || null, memo: f.memo,
+        // 보증금만 의미가 있다. 예금은 서버가 기본 true, 적금은 가입만으로 출금이 없다.
+        recorded: f.kind === 'guarantee' ? !!f.recorded : undefined,
       }
       const r = editing ? await api.updateSavings(editing.id, body) : await api.addSavings(body)
       if (!r.ok) return toast.push(r.error || '저장에 실패했어요', { tone: 'warn' })
@@ -313,13 +351,13 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
 
   return (
     <Drawer open={open} onClose={onClose}>
-      <DrawerHead title={editing ? '예적금 수정' : '예적금 등록'}
+      <DrawerHead title={`${KIND_LABEL[f.kind]} ${editing ? '수정' : '등록'}`}
         sub={KIND_HINT[f.kind]} onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div>
           <label className="label">구분</label>
           <div className="row gap-4">
-            {['installment', 'deposit'].map(k => (
+            {['installment', 'deposit', 'guarantee'].map(k => (
               <button key={k} type="button" className={`chip ${f.kind === k ? 'active' : ''}`}
                 disabled={!!editing} onClick={() => set('kind', k)}>{KIND_LABEL[k]}</button>
             ))}
@@ -327,12 +365,14 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
           {editing && <div className="text-xs text-muted2" style={{ marginTop: 4 }}>구분은 등록 후 바꿀 수 없어요.</div>}
         </div>
         <div>
-          <label className="label">상품명 *</label>
-          <input className="input" value={f.name} onChange={e => set('name', e.target.value)} placeholder="예) 기업 정기적금"/>
+          <label className="label">{guar ? '보증금 이름 *' : '상품명 *'}</label>
+          <input className="input" value={f.name} onChange={e => set('name', e.target.value)}
+            placeholder={guar ? '예) 로봇랜드재단 임대료보증금' : '예) 기업 정기적금'}/>
         </div>
         <div>
-          <label className="label">금융기관</label>
-          <input className="input" value={f.bank} onChange={e => set('bank', e.target.value)} placeholder="예) 기업은행"/>
+          <label className="label">{guar ? '받는 곳' : '금융기관'}</label>
+          <input className="input" value={f.bank} onChange={e => set('bank', e.target.value)}
+            placeholder={guar ? '예) 로봇랜드재단' : '예) 기업은행'}/>
         </div>
         {f.kind === 'installment' ? (
           <div>
@@ -341,23 +381,26 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
           </div>
         ) : (
           <div>
-            <label className="label">예치 금액 *</label>
+            <label className="label">{guar ? '보증금 금액 *' : '예치 금액 *'}</label>
             <MoneyInput value={f.principal} onChange={v => set('principal', v)}/>
+          </div>
+        )}
+        {/* 보증금은 만기도 이자도 없다 — 칸을 그려 두면 사용자가 뭔가 채워야 하는 줄 안다 */}
+        {!guar && (
+          <div className="row gap-8">
+            <div style={{ flex: 1 }}>
+              <label className="label">연 이율 (%)</label>
+              <input className="input" value={f.annual_rate} onChange={e => set('annual_rate', e.target.value)} placeholder="4.0"/>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="label">기간 (개월) *</label>
+              <input className="input" value={f.term_months} onChange={e => set('term_months', e.target.value)} placeholder="12"/>
+            </div>
           </div>
         )}
         <div className="row gap-8">
           <div style={{ flex: 1 }}>
-            <label className="label">연 이율 (%)</label>
-            <input className="input" value={f.annual_rate} onChange={e => set('annual_rate', e.target.value)} placeholder="4.0"/>
-          </div>
-          <div style={{ flex: 1 }}>
-            <label className="label">기간 (개월) *</label>
-            <input className="input" value={f.term_months} onChange={e => set('term_months', e.target.value)} placeholder="12"/>
-          </div>
-        </div>
-        <div className="row gap-8">
-          <div style={{ flex: 1 }}>
-            <label className="label">가입일 *</label>
+            <label className="label">{guar ? '지급일 *' : '가입일 *'}</label>
             <input className="input" type="date" value={f.start_date} onChange={e => set('start_date', e.target.value)}/>
           </div>
           {f.kind === 'installment' && (
@@ -367,15 +410,35 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
             </div>
           )}
         </div>
+        {/* 보증금은 대개 몇 년 전에 이미 낸 것을 뒤늦게 등록한다.
+            그때 통장에 이미 출금이 찍혀 있으므로, 여기서 거래를 또 만들면 잔액이 두 번 빠진다. */}
+        {guar && (
+          <div>
+            <label className="label">지금 내는 보증금인가요?</label>
+            <div className="row gap-4">
+              {[[false, '이미 낸 보증금'], [true, '지금 내요']].map(([v, l]) => (
+                <button key={String(v)} type="button" className={`chip ${!!f.recorded === v ? 'active' : ''}`}
+                  onClick={() => set('recorded', v)}>{l}</button>
+              ))}
+            </div>
+            <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
+              {f.recorded
+                ? '아래 계좌에서 보증금이 빠져나간 것으로 거래를 만듭니다.'
+                : '거래는 만들지 않아요. 통장에 이미 찍힌 출금과 겹치지 않게요.'}
+            </div>
+          </div>
+        )}
         <div>
-          <label className="label">{f.kind === 'deposit' ? '출금 계좌' : '납입 출금 계좌'}</label>
+          <label className="label">{f.kind === 'installment' ? '납입 출금 계좌' : '출금 계좌'}</label>
           <Combobox value={f.account_id} onChange={v => set('account_id', v)}
             options={accounts.map(a => ({ value: a.id, label: a.name, sub: [a.bankName, a.number].filter(Boolean).join(' ') }))}
             placeholder="계좌 선택"/>
           <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
-            {f.kind === 'deposit'
-              ? '가입하는 순간 이 계좌에서 목돈이 빠져나갑니다.'
-              : '매월 이 계좌에서 납입액이 빠져나갑니다. 가입만으로는 돈이 나가지 않아요.'}
+            {guar
+              ? (f.recorded ? '이 계좌에서 보증금이 빠져나갑니다.' : '나중에 돌려받을 때 이 계좌로 들어온 것으로 잡아요.')
+              : f.kind === 'deposit'
+                ? '가입하는 순간 이 계좌에서 목돈이 빠져나갑니다.'
+                : '매월 이 계좌에서 납입액이 빠져나갑니다. 가입만으로는 돈이 나가지 않아요.'}
           </div>
         </div>
         <div>
@@ -519,33 +582,41 @@ const MatureDrawer = ({ target, accounts, onClose, onDone }) => {
   }, [target])
   if (!target) return null
   const principal = Number(target.balance || 0)
+  const guar = isGuarantee(target)
   const save = async () => {
-    const r = await api.matureSavings(target.id, { received_date: date, account_id: acct, interest })
-    if (!r.ok) return toast.push(r.error || '만기 처리에 실패했어요', { tone: 'warn' })
-    toast.push(`${fmtNum(r.total)}원 입금 처리했어요 (원금 ${fmtNum(r.principal)} + 이자 ${fmtNum(r.interest)})`)
+    const r = await api.matureSavings(target.id, { received_date: date, account_id: acct, interest: guar ? 0 : interest })
+    if (!r.ok) return toast.push(r.error || (guar ? '반환 처리에 실패했어요' : '만기 처리에 실패했어요'), { tone: 'warn' })
+    toast.push(guar
+      ? `보증금 ${fmtNum(r.principal)}원을 돌려받은 것으로 기록했어요`
+      : `${fmtNum(r.total)}원 입금 처리했어요 (원금 ${fmtNum(r.principal)} + 이자 ${fmtNum(r.interest)})`)
     onDone()
   }
   return (
     <Drawer open onClose={onClose}>
-      <DrawerHead title="만기 수령" sub={target.name} onClose={onClose}/>
+      <DrawerHead title={guar ? '보증금 반환' : '만기 수령'} sub={target.name} onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
           <div className="row" style={{ justifyContent: 'space-between' }}>
-            <span className="text-muted text-sm">받을 원금 (실제 납입분)</span>
+            <span className="text-muted text-sm">{guar ? '돌려받을 보증금' : '받을 원금 (실제 납입분)'}</span>
             <b className="num">{fmtNum(principal)}원</b>
           </div>
           <div className="text-xs text-muted2" style={{ marginTop: 6, lineHeight: 1.6 }}>
-            원금은 <b>수익이 아니에요</b> — 맡겨둔 내 돈이 돌아오는 거예요. 이자만 수익으로 기록됩니다.
-            그래서 거래가 두 건으로 나뉩니다.
+            {guar
+              ? <>보증금은 <b>수익이 아니에요</b> — 맡겨둔 내 돈이 돌아오는 거예요. 계약이 끝나 실제로 받았을 때만 처리하세요.</>
+              : <>원금은 <b>수익이 아니에요</b> — 맡겨둔 내 돈이 돌아오는 거예요. 이자만 수익으로 기록됩니다.
+                 그래서 거래가 두 건으로 나뉩니다.</>}
           </div>
         </div>
-        <div>
-          <label className="label">실제 받은 이자 (세전)</label>
-          <MoneyInput value={interest} onChange={setInterest}/>
-          <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
-            예상값을 넣어뒀어요. 우대금리나 중도해지로 달라졌다면 실제 금액으로 고쳐주세요.
+        {/* 보증금에는 이자가 없다 — 칸을 두면 뭔가 넣어야 하는 줄 안다 */}
+        {!guar && (
+          <div>
+            <label className="label">실제 받은 이자 (세전)</label>
+            <MoneyInput value={interest} onChange={setInterest}/>
+            <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
+              예상값을 넣어뒀어요. 우대금리나 중도해지로 달라졌다면 실제 금액으로 고쳐주세요.
+            </div>
           </div>
-        </div>
+        )}
         <div>
           <label className="label">입금일</label>
           <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)}/>
@@ -557,7 +628,7 @@ const MatureDrawer = ({ target, accounts, onClose, onDone }) => {
             placeholder="계좌 선택"/>
         </div>
       </div>
-      <DrawerFooter onCancel={onClose} onSave={save} saveLabel="만기 처리"/>
+      <DrawerFooter onCancel={onClose} onSave={save} saveLabel={guar ? '반환 처리' : '만기 처리'}/>
     </Drawer>
   )
 }

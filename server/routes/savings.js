@@ -31,12 +31,20 @@ const ACCT = {
   //   예전에 'INC-204'(비목 categories 코드)를 넣어, 일계표가 이름을 못 찾아 원문 코드로
   //   대분류 빈 칸으로 찍혔다. 손익 판정은 우연히 맞아 조용히 틀렸다.
   interest:  '4201',   // 이자수익(수익·영업외수익)
+  guarantee: '1801',   // 보증금(기타비유동자산) — "전세권, 임차보증금, 영업보증금 등"
 }
 
 const { moneyOf: intOf, numOf } = require('../lib/money')
 
-/** 기간이 1년을 넘으면 장기금융상품 — 회계 분류가 갈린다 */
-const defaultAcctCode = (termMonths) => (Number(termMonths) > 12 ? ACCT.longTerm : ACCT.shortTerm)
+/** 기간이 1년을 넘으면 장기금융상품 — 회계 분류가 갈린다.
+ *
+ * ⚠ 보증금은 여기 태우면 안 된다. 만기가 없어 term_months 가 0이라 '1201 단기금융상품'
+ *   으로 찍히는데, 보증금은 **당좌자산이 아니라 기타비유동자산**이다(계약이 끝나야
+ *   돌아오는 돈이라 1년 내 현금화되지 않는다). 재무상태표에서 자리가 통째로 틀린다. */
+const defaultAcctCode = (kind, termMonths) => (
+  kind === 'guarantee' ? ACCT.guarantee
+    : Number(termMonths) > 12 ? ACCT.longTerm
+    : ACCT.shortTerm)
 
 /* ── 납입 회차: 예정도 실적과 같은 테이블에 산다 ──────────────────────────
  * savings_payments 한 행 = 한 회차. paid_date 가 비면 **예정**, 차면 **실적**이다.
@@ -164,14 +172,28 @@ router.post('/', async (req, res, next) => {
     const fe = futureDateError(start_date)
     if (fe) return res.status(400).json({ error: fe })
 
-    const term_months = intOf(b.term_months)
-    if (term_months <= 0) return res.status(400).json({ error: '기간(개월)을 1 이상으로 입력해주세요' })
-    const principal = kind === 'deposit' ? intOf(b.principal) : 0
+    /* 보증금(guarantee)은 만기가 없다 — 계약이 끝나야 돌아온다.
+       기간을 1개월로 두어도 되지만, 그러면 '만기 임박' 같은 안내가 엉뚱하게 뜬다.
+       기간 검사는 만기가 있는 둘(예금·적금)에만 건다. */
+    const term_months = kind === 'guarantee' ? 0 : intOf(b.term_months)
+    if (kind !== 'guarantee' && term_months <= 0) {
+      return res.status(400).json({ error: '기간(개월)을 1 이상으로 입력해주세요' })
+    }
+    // 보증금도 목돈이라 principal 을 쓴다(예금과 같은 자리). 적금만 월 납입액이다.
+    const principal = kind === 'installment' ? 0 : intOf(b.principal)
     const monthly_amount = kind === 'installment' ? intOf(b.monthly_amount) : 0
     if (kind === 'deposit' && principal <= 0) return res.status(400).json({ error: '예치 금액을 입력해주세요' })
+    if (kind === 'guarantee' && principal <= 0) return res.status(400).json({ error: '보증금 금액을 입력해주세요' })
     if (kind === 'installment' && monthly_amount <= 0) return res.status(400).json({ error: '월 납입액을 입력해주세요' })
 
-    const recorded = b.recorded !== false && kind === 'deposit'   // 적금은 가입만으로 출금이 없다
+    /* 가입과 동시에 통장에서 돈이 빠지는가.
+     *   예금  — 목돈이 그 자리에서 나간다(기본 O)
+     *   적금  — 가입만으로는 안 나간다(1회차는 /pay)
+     *   보증금 — 대개 **몇 년 전에 이미 낸 것**을 뒤늦게 등록한다. 기본으로 거래를 만들면
+     *            그때 이미 찍힌 출금과 겹쳐 계좌 잔액이 두 번 빠진다 → 켤 때만 만든다. */
+    const recorded = kind === 'deposit' ? b.recorded !== false
+      : kind === 'guarantee' ? b.recorded === true
+      : false
     const account_id = b.account_id || null
     if (recorded) {
       const le = ledgerError({ kind: 'expense', account_id, status: '지급완료' })
@@ -184,7 +206,7 @@ router.post('/', async (req, res, next) => {
     if (ce) return res.status(400).json({ error: ce })
 
     const id = randomUUID()
-    const acct_code = b.acct_code || defaultAcctCode(term_months)
+    const acct_code = b.acct_code || defaultAcctCode(kind, term_months)
     const pay_day = intOf(b.pay_day) || Number(String(start_date).slice(8, 10)) || 1
     const maturity_date = maturityDateOf({ start_date, term_months })
 
@@ -196,8 +218,9 @@ router.post('/', async (req, res, next) => {
       await conn.execute(
         `INSERT INTO transactions (id, kind, vendor_id, account_id, category, amount, date, method, status, doc_no, memo, account_code, savings_id)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [txn_id, 'expense', b.vendor_id || null, account_id, '예금 예치', principal, start_date,
-         '계좌이체', '지급완료', '공통', `${name} 가입`, acct_code, id])
+        [txn_id, 'expense', b.vendor_id || null, account_id,
+         kind === 'guarantee' ? '보증금 예치' : '예금 예치', principal, start_date,
+         '계좌이체', '지급완료', '공통', `${name} ${kind === 'guarantee' ? '지급' : '가입'}`, acct_code, id])
     }
     await conn.execute(
       `INSERT INTO savings (id, name, bank, vendor_id, kind, principal, monthly_amount, annual_rate,
@@ -222,23 +245,29 @@ router.put('/:id', async (req, res, next) => {
     // 이미 납입 실적이 있으면 금액·기간을 바꿀 수 없다 — 바꾸면 지난 회차와 어긋난다
     const [[{ cnt }]] = await req.db.execute(
       'SELECT COUNT(*) AS cnt FROM savings_payments WHERE savings_id = ? AND paid_date IS NOT NULL', [req.params.id])
-    const term_months = intOf(b.term_months) || cur.term_months
+    /* 보증금은 기간을 0으로 못 박는다. 폼이 기본값 12를 같이 보내는데 그대로 받으면
+       만기일이 생겨 '만기 D-30' 같은 안내가 뜬다 — 보증금에 만기는 없다. */
+    const term_months = cur.kind === 'guarantee' ? 0 : (intOf(b.term_months) || cur.term_months)
     const monthly_amount = intOf(b.monthly_amount) || cur.monthly_amount
     if (cnt > 0 && (term_months !== cur.term_months || monthly_amount !== Number(cur.monthly_amount))) {
       return res.status(409).json({
         error: `이미 ${cnt}회차를 납입해서 금액·기간은 바꿀 수 없어요. 조건이 달라졌다면 해지 후 새로 등록해주세요.` })
     }
     /* 예금 예치 금액 — 화면은 편집할 수 있게 그리는데 UPDATE 문에 없어서 조용히 무시됐다
-     * ("수정했어요"는 뜨는데 금액은 그대로). 가입 출금 거래도 함께 맞춰야 잔액이 안 어긋난다. */
-    const principal = cur.kind === 'deposit' ? (intOf(b.principal) || Number(cur.principal)) : 0
-    if (cur.kind === 'deposit' && principal <= 0) {
-      return res.status(400).json({ error: '예치 금액을 입력해주세요' })
+     * ("수정했어요"는 뜨는데 금액은 그대로). 가입 출금 거래도 함께 맞춰야 잔액이 안 어긋난다.
+     * 보증금도 목돈이라 같은 자리를 쓴다 — 여기서 적금과 한 덩어리로 묶으면 수정할 때마다
+     * 보증금 금액이 0으로 지워진다. */
+    const lumpSum = cur.kind !== 'installment'          // 예금·보증금 = 목돈 / 적금 = 월 납입
+    const principal = lumpSum ? (intOf(b.principal) || Number(cur.principal)) : 0
+    if (lumpSum && principal <= 0) {
+      return res.status(400).json({ error: cur.kind === 'guarantee' ? '보증금 금액을 입력해주세요' : '예치 금액을 입력해주세요' })
     }
     // 이율은 numOf 가 빈 값을 0으로 만든다 — 일부 필드만 보낸 요청에서 이율이 조용히 사라졌다
     const annual_rate = b.annual_rate != null && String(b.annual_rate) !== ''
       ? numOf(b.annual_rate) : Number(cur.annual_rate)
     // 기간이 1년을 넘나들면 회계 분류(단기↔장기 금융상품)도 따라가야 한다
-    const acct_code = b.acct_code || (term_months !== cur.term_months ? defaultAcctCode(term_months) : cur.acct_code)
+    const acct_code = b.acct_code
+      || (term_months !== cur.term_months ? defaultAcctCode(cur.kind, term_months) : cur.acct_code)
 
     const conn = await req.db.getConnection()
     try {
@@ -252,7 +281,7 @@ router.put('/:id', async (req, res, next) => {
          maturityDateOf({ start_date: cur.start_date, term_months }),
          b.account_id ?? cur.account_id, acct_code, b.memo ?? cur.memo, req.params.id])
       // 예치 금액이 바뀌면 가입 출금 거래도 같은 금액으로 — 안 맞추면 계좌 잔액이 어긋난다
-      if (cur.kind === 'deposit' && cur.txn_id && principal !== Number(cur.principal)) {
+      if (lumpSum && cur.txn_id && principal !== Number(cur.principal)) {
         const [[txn]] = await conn.execute('SELECT date FROM transactions WHERE id = ?', [cur.txn_id])
         if (txn) {
           const ce = await closedPeriodError(conn, txn.date)
@@ -504,7 +533,10 @@ router.post('/:id/mature', async (req, res, next) => {
       return id
     }
     // 원금 = 금융상품 회수(자산↔자산, 손익 아님) / 이자 = 이자수익(손익)
-    const txnP = await mkTxn(principal, '예적금 만기', s.acct_code || ACCT.shortTerm, `${s.name} 만기 원금`)
+    // 보증금은 '만기'가 아니라 **계약이 끝나 돌려받는 것**이라 거래 이름을 달리 적는다
+    const back = s.kind === 'guarantee'
+    const txnP = await mkTxn(principal, back ? '보증금 반환' : '예적금 만기',
+      s.acct_code || ACCT.shortTerm, `${s.name} ${back ? '반환' : '만기 원금'}`)
     const txnI = await mkTxn(interest, '이자수익', s.acct_code_interest || ACCT.interest, `${s.name} 만기 이자`)
 
     await conn.execute(

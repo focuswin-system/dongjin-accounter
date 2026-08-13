@@ -21,7 +21,12 @@
 
 const { dueDateOf } = require('./loan')
 
-const KINDS = ['installment', 'deposit']   // 적금(매월 납입) / 예금(목돈 예치)
+/* 적금(매월 납입) / 예금(목돈 예치) / 보증금(임대차·관리비 — 계약이 끝나야 돌아온다)
+ *
+ * 보증금을 넣는 이유: 받은 자금관리 엑셀의 '저축 현황'에 로봇랜드재단 임대료보증금
+ * 5,100,000 · 관리비보증금 1,011,000 이 예적금과 나란히 서 있다. 성격도 같다 —
+ * 회사 재산이지만 지금 쓸 수 없는 돈. 다만 **만기도 이자도 없어서** 회차·이자 계산은 하지 않는다. */
+const KINDS = ['installment', 'deposit', 'guarantee']
 
 /** 이자소득세율(원천징수) — 소득세 14% + 지방소득세 1.4% */
 const TAX_RATE = 0.154
@@ -81,10 +86,11 @@ function unpaidPayments(s, paidSeqs = []) {
 /**
  * 지금까지 쌓인 원금 — **실제 납입 실적** 기준.
  * 스케줄이 아니라 실적으로 센다(밀린 회차가 있으면 스케줄과 어긋난다).
- * 예금은 가입 시점에 전액이므로 principal 그대로.
+ * 예금·보증금은 넣는 순간 전액이므로 principal 그대로 — 회차가 없다.
+ * ⚠ 'deposit' 만 보고 갈라 놓으면 보증금이 회차 합계(=0)로 떨어져 묶인 돈에서 통째로 사라진다.
  */
 function paidPrincipal(s, payments = []) {
-  if (s.kind === 'deposit') return intOf(s.principal)
+  if (s.kind !== 'installment') return intOf(s.principal)
   return payments.reduce((a, p) => a + intOf(p.amount), 0)
 }
 
