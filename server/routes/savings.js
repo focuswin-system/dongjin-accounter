@@ -230,6 +230,13 @@ router.post('/', async (req, res, next) => {
       [id, name, b.bank || '', b.vendor_id || null, kind, principal, monthly_amount, numOf(b.annual_rate),
        term_months, start_date, pay_day, maturity_date, account_id, acct_code,
        b.acct_code_interest || ACCT.interest, b.memo || '', txn_id])
+    /* 예정 회차를 바로 깐다(차입금과 같은 규칙).
+       이 호출이 없어서 savings_payments 에 예정 행이 **한 번도 생기지 않았다** —
+       회차 수정 화면이 늘 404 였고, 파일 머리말이 선언한 "은행 통보액·휴일 이체일로
+       고칠 자리"가 실현되지 않았다. */
+    await writePlannedPayments(conn, {
+      id, kind, monthly_amount, term_months, start_date, pay_day,
+    })
     await conn.commit()
     res.json({ id })
   } catch (e) { await rollbackQuietly(conn); next(e) }
@@ -280,6 +287,15 @@ router.put('/:id', async (req, res, next) => {
          intOf(b.pay_day) || cur.pay_day,
          maturityDateOf({ start_date: cur.start_date, term_months }),
          b.account_id ?? cur.account_id, acct_code, b.memo ?? cur.memo, req.params.id])
+      /* 납입 조건이 바뀌면 예정 회차를 다시 깐다(이미 낸 회차는 그대로 둔다) */
+      if (cur.kind === 'installment' &&
+          (term_months !== Number(cur.term_months) || monthly_amount !== Number(cur.monthly_amount)
+           || (intOf(b.pay_day) || cur.pay_day) !== Number(cur.pay_day))) {
+        await writePlannedPayments(conn, {
+          id: req.params.id, kind: cur.kind, monthly_amount, term_months,
+          start_date: cur.start_date, pay_day: intOf(b.pay_day) || cur.pay_day,
+        })
+      }
       // 예치 금액이 바뀌면 가입 출금 거래도 같은 금액으로 — 안 맞추면 계좌 잔액이 어긋난다
       if (lumpSum && cur.txn_id && principal !== Number(cur.principal)) {
         const [[txn]] = await conn.execute('SELECT date FROM transactions WHERE id = ?', [cur.txn_id])
@@ -386,7 +402,7 @@ router.patch('/:id/cycles/:seq', async (req, res, next) => {
     const amount  = req.body.amount != null && req.body.amount !== '' ? intOf(req.body.amount) : Number(row.amount)
     const dueDate = req.body.due_date || row.due_date
     if (amount < 0) { await rollbackQuietly(conn); return res.status(400).json({ error: '납입액은 0 이상이어야 해요' }) }
-    if (!/^d{4}-d{2}-d{2}$/.test(dueDate)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {   // \d 이스케이프가 빠져 어떤 날짜도 통과 못 했다
       await rollbackQuietly(conn); return res.status(400).json({ error: '예정일을 날짜로 입력해주세요' })
     }
     await conn.execute('UPDATE savings_payments SET due_date=?, amount=? WHERE savings_id = ? AND seq = ?',

@@ -51,7 +51,11 @@ async function loanRemaining(db) {
   const [loans] = await db.execute("SELECT id, name, principal FROM loans WHERE status='active'")
   let total = 0
   for (const l of loans) {
-    const [reps] = await db.execute('SELECT principal FROM loan_repayments WHERE loan_id = ?', [l.id])
+    /* paid_date 를 함께 뽑아야 한다 — remainingPrincipal 은 **낸 회차만** 세는데(lib/loan.js),
+       이 열이 없으면 모든 행이 걸러져 차감이 0이 된다. 아무리 갚아도 잔여가 원금 전액으로
+       남아, 같은 차입금이 홈 화면과 자금 현황에서 다른 금액으로 나왔다. */
+    const [reps] = await db.execute(
+      'SELECT principal, paid_date FROM loan_repayments WHERE loan_id = ?', [l.id])
     total += remainingPrincipal(l.principal, reps)
   }
   return { total, count: loans.length }

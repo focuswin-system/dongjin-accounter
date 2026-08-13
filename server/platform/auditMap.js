@@ -116,6 +116,11 @@ const AUDIT_RULES = [
   { m: 'POST',   re: /^\/api\/savings\/([^/]+)\/mature$/,               res: 'savings', action: 'mature',     target: 1 },
   { m: 'DELETE', re: /^\/api\/savings\/([^/]+)$/,                       res: 'savings', action: 'delete',     target: 1 },
 
+  /* ── 미지급 퇴직금 ── 여기 적힌 금액은 자금 예측이 '언젠가 나갈 돈'으로 세는 실제 자금이다
+     (실물 기준 7,351만). 지우거나 금액을 고치면 그만큼 나갈 돈이 사라지는데 기록이 없었다. */
+  { m: 'DELETE', re: /^\/api\/unpaid-labor\/([^/]+)$/,                 res: 'unpaid_labor', action: 'delete', target: 1 },
+  { m: 'PUT',    re: /^\/api\/unpaid-labor\/([^/]+)$/,                 res: 'unpaid_labor', action: 'edit',   target: 1 },
+
   // ── 계좌 삭제 ── 잔액이 붙어 있는 자원이다
   { m: 'DELETE', re: /^\/api\/accounts\/([^/]+)$/,                      res: 'account', action: 'delete',     target: 1 },
 ]
@@ -133,7 +138,7 @@ const ACTION_LABELS = {
   // 마감
   close: '마감', reopen: '마감 해제',
   // 등록·삭제
-  import: '일괄 등록', delete: '삭제', delete_month: '월 전체 삭제', generate: '급여 생성',
+  import: '일괄 등록', delete: '삭제', edit: '수정', delete_month: '월 전체 삭제', generate: '급여 생성',
   // 발행
   issue: '발행', issue_missed: '놓친 회차 일괄 발행',
   backfill: '지난 회차 소급 등록', backfill_undo: '소급 등록 되돌리기',
@@ -157,7 +162,7 @@ const RESOURCE_LABELS = {
   recurring_invoice: '정기청구', recurring_expense: '정기지출',
   payroll: '급여', work_contract: '근로·용역계약',
   resolution: '지급결의서', settlement: '정산내역서',
-  loan: '차입금', investment: '투자', savings: '예금·적금',
+  loan: '차입금', investment: '투자', savings: '예금·적금', unpaid_labor: '미지급 퇴직금',
   account: '계좌/카드', vendor: '거래처', ref_item: '기준정보', user: '사용자',
 }
 
