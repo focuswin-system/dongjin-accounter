@@ -553,6 +553,11 @@ a { color: inherit; text-decoration: none; }
   color: var(--warn-ink, #B7791F);
 }
 .fund-cal-cell.today { box-shadow: inset 0 0 0 2px var(--brand); }
+/* 펼친 칸 표시가 .neg/.short 뒤 선언에 덮여, 정작 눌러 볼 마이너스 날은 눌러도
+   아무 변화가 없었다. 배경 대신 그림자로 표시해 어느 상태에서도 남는다. */
+.fund-cal-cell.opened { box-shadow: inset 0 0 0 2px var(--brand); }
+.fund-cal-cell.opened.today { box-shadow: inset 0 0 0 3px var(--brand); }
+
 .fund-cal-day { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 5px; }
 .fund-cal-today { font-size: 10px; font-weight: 600; color: var(--brand); }
 .fund-cal-flow { font-size: 12px; line-height: 1.5; }
@@ -981,9 +986,12 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
   .resolution-print, .resolution-print *,
   /* 거래명세서는 드로어 안에서 인쇄한다 — 드로어째 찍히면 안 되므로 이 종이만 살린다 */
   #statement-print, #statement-print *,
-  .report-print, .report-print * { visibility: visible; }
+  .report-print, .report-print *,
+  /* 자금 현황도 인쇄한다 — 대표에게 내미는 자금표가 이 화면이다.
+     whitelist 에 없어서 Ctrl+P 가 백지였다(화면 안에 no-print 를 달아 둔 것과 모순). */
+  .fund-print, .fund-print * { visibility: visible; }
   #resolution-print, .resolution-print, #statement-print,
-  .report-print { position: absolute; left: 0; top: 0; width: 100%; border: none; box-shadow: none; padding: 0; }
+  .report-print, .fund-print { position: absolute; left: 0; top: 0; width: 100%; border: none; box-shadow: none; padding: 0; }
 
   /* 거래명세서만 **드로어 안에서** 인쇄된다(다른 문서는 본문 흐름에 있다).
      드로어가 position:fixed 라 그 안의 absolute 는 페이지가 아니라 **드로어**를 기준으로
@@ -1012,10 +1020,19 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
    *
    * :has() 가 없는 옛 브라우저에서는 이 블록이 통째로 무시돼 종전 동작(한 장)으로 남는다. */
   @supports selector(:has(*)) {
-    body *:not(:has(:is(#resolution-print, .resolution-print, #statement-print, .report-print))):not(:is(#resolution-print, .resolution-print, #statement-print, .report-print)):not(:is(#resolution-print, .resolution-print, #statement-print, .report-print) *) {
+    body *:not(:has(:is(#resolution-print, .resolution-print, #statement-print, .report-print, .fund-print))):not(:is(#resolution-print, .resolution-print, #statement-print, .report-print, .fund-print)):not(:is(#resolution-print, .resolution-print, #statement-print, .report-print, .fund-print) *) {
       display: none !important;
     }
-    #resolution-print, .resolution-print, #statement-print, .report-print {
+    /* 자금 현황은 앱 셸(사이드바 + 내부 스크롤 컨테이너) **안쪽 깊이** 있다.
+       조상이 좁거나 overflow:hidden 이면 종이에도 그 폭 그대로 찍힌다 —
+       실제로 1600px 화면에서 192px 짜리 기둥 하나로 나왔다(글자가 세로로 한 자씩).
+       조상만 골라 폭·넘침 제한을 푼다. 다른 인쇄 문서는 건드리지 않는다. */
+    body *:has(.fund-print) {
+      display: block !important; width: auto !important; max-width: none !important;
+      height: auto !important; max-height: none !important; overflow: visible !important;
+      padding: 0 !important; margin: 0 !important;
+    }
+    #resolution-print, .resolution-print, #statement-print, .report-print, .fund-print {
       position: static !important;
     }
   }

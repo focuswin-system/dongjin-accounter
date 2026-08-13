@@ -41,6 +41,93 @@ const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
  * 원래 벽에 붙여 놓고 보던 것도 달력이다. 표와 달력은 같은 데이터를 다르게 볼 뿐이라
  * 어느 쪽을 보든 숫자는 같다.
  */
+/* 계좌 표.
+ *
+ * ⚠ 예전엔 이 정의가 FundStatusScreen **안에** 있었다. 그러면 렌더할 때마다 새 함수가
+ *   되어 React 가 매번 다른 컴포넌트로 보고 표를 통째로 버렸다가 다시 만든다 —
+ *   계좌 하나 펼칠 때마다 가로 스크롤이 왼쪽으로 되돌아갔다(열이 7개라 늘 스크롤 상태다).
+ *   밖으로 빼고 open/setOpen 을 인자로 받는다. */
+const AccountTable = ({ group, title, unassigned, open, setOpen }) => !group || !group.accounts.length ? null : (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="row card-pad" style={{ alignItems: 'baseline', paddingBottom: 10 }}>
+        <div className="fw-700">{title}</div>
+        <div className="ml-auto text-sm">
+          <span className="text-muted2">기간 말 예상</span>{' '}
+          <b className="num" style={{ fontSize: 15, color: group.expected < 0 ? 'var(--neg-ink)' : undefined }}>
+            {group.expected < 0 ? '−' : ''}{fmtNum(Math.abs(group.expected))}원
+          </b>
+          {/* 이 숫자는 **계좌에 붙은 예정만** 센다. 미지정분(급여·퇴직금 등)을 안 밝히면
+              대표가 이 한 줄만 보고 그만큼 낙관적으로 판단한다. */}
+          {unassigned && (unassigned.in > 0 || unassigned.out > 0) && (
+            <span className="text-xs text-muted2" style={{ marginLeft: 8 }}>
+              계좌 미지정 {unassigned.in - unassigned.out < 0 ? '−' : '+'}
+              {fmtNum(Math.abs(unassigned.in - unassigned.out))} 별도
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="table-scroll" style={{ overflowX: 'auto' }}>
+        <table className="table" style={{ minWidth: 820 }}>
+          {/* '들어온 돈 / 들어올 돈'은 한 글자(온·올)만 달라서 옆에 놓으면 구분이 안 된다.
+              시제를 열 이름에 욱여넣는 대신 **실적·예정을 머리에 묶어** 갈랐다. */}
+          <thead>
+            <tr>
+              <th rowSpan={2}>계좌</th>
+              <th className="num-right" rowSpan={2} style={{ width: 120 }}>현재 잔액</th>
+              <th className="num-right" colSpan={2} style={{ borderLeft: '1px solid var(--line)' }}>실적</th>
+              <th className="num-right" colSpan={2} style={{ borderLeft: '1px solid var(--line)' }}>예정</th>
+              <th className="num-right" rowSpan={2} style={{ width: 130, borderLeft: '1px solid var(--line)' }}>예상 잔액</th>
+            </tr>
+            <tr>
+              <th className="num-right" style={{ width: 120, borderLeft: '1px solid var(--line)' }}>입금</th>
+              <th className="num-right" style={{ width: 120 }}>출금</th>
+              <th className="num-right" style={{ width: 120, borderLeft: '1px solid var(--line)' }}>입금</th>
+              <th className="num-right" style={{ width: 120 }}>출금</th>
+            </tr>
+          </thead>
+          {/* 펼친 내역은 **그 계좌 바로 밑**에 붙어야 한다.
+              예전엔 계좌를 다 그린 뒤 표 맨 아래에 붙여서, 주거래를 눌렀는데 하나은행 밑이
+              열렸다 — 어느 계좌 것인지 눈으로 되짚어야 했다. */}
+          {group.accounts.map(a => (
+            <tbody key={a.id}>
+              <tr style={{ cursor: a.items.length ? 'pointer' : 'default' }}
+                onClick={() => a.items.length && setOpen(open === a.id ? null : a.id)}>
+                <td>
+                  <span className="fw-600">{a.name}</span>
+                  {a.items.length > 0 && (
+                    <span className="text-xs text-muted2" style={{ marginLeft: 6 }}>
+                      예정 {a.items.length}건 {open === a.id ? '▲' : '▼'}
+                    </span>
+                  )}
+                </td>
+                <td className="num num-right"><Money v={a.balance} tone={a.balance < 0 ? 'neg-ink' : ''}/></td>
+                <td className="num num-right text-muted">{a.actualIn ? fmtNum(a.actualIn) : ''}</td>
+                <td className="num num-right text-muted">{a.actualOut ? fmtNum(a.actualOut) : ''}</td>
+                <td className="num num-right">{a.planIn ? fmtNum(a.planIn) : ''}</td>
+                <td className="num num-right">{a.planOut ? fmtNum(a.planOut) : ''}</td>
+                <td className="num num-right fw-700" style={{ color: a.expected < 0 ? 'var(--neg-ink)' : undefined }}>
+                  <Money v={a.expected}/>
+                </td>
+              </tr>
+              {open === a.id && (
+                <tr>
+                  <td colSpan={7} style={{ background: 'var(--surface-2)', padding: '10px 14px' }}>
+                    {/* 이미 '이 계좌' 안이라 통장 이름은 되풀이하지 않는다 */}
+                    {a.items.map((it, i) => <FlowLine key={flowKey(it, i)} it={it} showAccount={false}/>)}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          ))}
+        </table>
+      </div>
+    </div>
+  )
+
+/* 한 줄을 가리키는 키. 목록을 정렬해 그리는 자리가 여럿이라 index 를 키로 쓰면
+   정렬이 바뀔 때 React 가 서로 다른 항목을 같은 줄로 보고 내용을 덜 고친다. */
+const flowKey = (it, i) => `${it.source}|${it.label}|${it.date}|${it.amount}|${i}`
+
 const CalendarView = ({ timeline, openBuckets, onToggle }) => {
   const byDate = new Map(timeline.buckets.map(b => [b.from, b]))
   const ws = Number(timeline.weekStart) || 0
@@ -73,9 +160,23 @@ const CalendarView = ({ timeline, openBuckets, onToggle }) => {
           return (
             <div key={date}
               className={`fund-cal-cell${b?.moved ? ' movable' : ''}${today ? ' today' : ''}${opened ? ' opened' : ''}${neg ? ' neg' : short.length ? ' short' : ''}`}
+              /* 마우스로만 열리면 키보드 사용자는 상세를 영영 못 본다 —
+                 열 수 있는 칸에만 버튼 역할과 Enter/Space 를 준다. */
+              role={b?.moved ? 'button' : undefined}
+              tabIndex={b?.moved ? 0 : undefined}
+              aria-expanded={b?.moved ? opened : undefined}
+              onKeyDown={e => {
+                if (!b?.moved) return
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(date) }
+              }}
               onClick={() => b?.moved && onToggle(date)}>
               <div className="fund-cal-day">
-                {Number(date.slice(8))}
+                {/* 마감일이 있는 회사는 한 구간이 두 달에 걸친다(6/26~7/25).
+                    일만 적으면 26·27… 다음에 다시 1·2… 가 나와 어느 달인지 알 수 없었다.
+                    달이 바뀌는 첫 칸에만 'M/D' 로 적는다. */}
+                {Number(date.slice(8)) === 1 || i === lead
+                  ? `${Number(date.slice(5, 7))}/${Number(date.slice(8))}`
+                  : Number(date.slice(8))}
                 {today && <span className="fund-cal-today">오늘</span>}
               </div>
               {b && (b.in > 0 || b.out > 0) && (
@@ -115,7 +216,7 @@ const CalendarView = ({ timeline, openBuckets, onToggle }) => {
               </span>
             </div>
             {[...b.items].sort((x, y) => (x.kind === y.kind ? 0 : x.kind === 'in' ? -1 : 1))
-              .map((it, i) => <FlowLine key={i} it={it}/>)}
+              .map((it, i) => <FlowLine key={flowKey(it, i)} it={it}/>)}
           </div>
         )
       })}
@@ -197,85 +298,11 @@ export const FundStatusScreen = ({ go }) => {
 
   const st = data ? (STATE[data.state] || STATE.current) : null
 
-  const AccountTable = ({ group, title, unassigned }) => !group || !group.accounts.length ? null : (
-    <div className="card" style={{ marginBottom: 16 }}>
-      <div className="row card-pad" style={{ alignItems: 'baseline', paddingBottom: 10 }}>
-        <div className="fw-700">{title}</div>
-        <div className="ml-auto text-sm">
-          <span className="text-muted2">기간 말 예상</span>{' '}
-          <b className="num" style={{ fontSize: 15, color: group.expected < 0 ? 'var(--neg-ink)' : undefined }}>
-            {group.expected < 0 ? '−' : ''}{fmtNum(Math.abs(group.expected))}원
-          </b>
-          {/* 이 숫자는 **계좌에 붙은 예정만** 센다. 미지정분(급여·퇴직금 등)을 안 밝히면
-              대표가 이 한 줄만 보고 그만큼 낙관적으로 판단한다. */}
-          {unassigned && (unassigned.in > 0 || unassigned.out > 0) && (
-            <span className="text-xs text-muted2" style={{ marginLeft: 8 }}>
-              계좌 미지정 {unassigned.in - unassigned.out < 0 ? '−' : '+'}
-              {fmtNum(Math.abs(unassigned.in - unassigned.out))} 별도
-            </span>
-          )}
-        </div>
-      </div>
-      <div className="table-scroll" style={{ overflowX: 'auto' }}>
-        <table className="table" style={{ minWidth: 820 }}>
-          {/* '들어온 돈 / 들어올 돈'은 한 글자(온·올)만 달라서 옆에 놓으면 구분이 안 된다.
-              시제를 열 이름에 욱여넣는 대신 **실적·예정을 머리에 묶어** 갈랐다. */}
-          <thead>
-            <tr>
-              <th rowSpan={2}>계좌</th>
-              <th className="num-right" rowSpan={2} style={{ width: 120 }}>현재 잔액</th>
-              <th className="num-right" colSpan={2} style={{ borderLeft: '1px solid var(--line)' }}>실적</th>
-              <th className="num-right" colSpan={2} style={{ borderLeft: '1px solid var(--line)' }}>예정</th>
-              <th className="num-right" rowSpan={2} style={{ width: 130, borderLeft: '1px solid var(--line)' }}>예상 잔액</th>
-            </tr>
-            <tr>
-              <th className="num-right" style={{ width: 120, borderLeft: '1px solid var(--line)' }}>입금</th>
-              <th className="num-right" style={{ width: 120 }}>출금</th>
-              <th className="num-right" style={{ width: 120, borderLeft: '1px solid var(--line)' }}>입금</th>
-              <th className="num-right" style={{ width: 120 }}>출금</th>
-            </tr>
-          </thead>
-          {/* 펼친 내역은 **그 계좌 바로 밑**에 붙어야 한다.
-              예전엔 계좌를 다 그린 뒤 표 맨 아래에 붙여서, 주거래를 눌렀는데 하나은행 밑이
-              열렸다 — 어느 계좌 것인지 눈으로 되짚어야 했다. */}
-          {group.accounts.map(a => (
-            <tbody key={a.id}>
-              <tr style={{ cursor: a.items.length ? 'pointer' : 'default' }}
-                onClick={() => a.items.length && setOpen(open === a.id ? null : a.id)}>
-                <td>
-                  <span className="fw-600">{a.name}</span>
-                  {a.items.length > 0 && (
-                    <span className="text-xs text-muted2" style={{ marginLeft: 6 }}>
-                      예정 {a.items.length}건 {open === a.id ? '▲' : '▼'}
-                    </span>
-                  )}
-                </td>
-                <td className="num num-right"><Money v={a.balance} tone={a.balance < 0 ? 'neg-ink' : ''}/></td>
-                <td className="num num-right text-muted">{a.actualIn ? fmtNum(a.actualIn) : ''}</td>
-                <td className="num num-right text-muted">{a.actualOut ? fmtNum(a.actualOut) : ''}</td>
-                <td className="num num-right">{a.planIn ? fmtNum(a.planIn) : ''}</td>
-                <td className="num num-right">{a.planOut ? fmtNum(a.planOut) : ''}</td>
-                <td className="num num-right fw-700" style={{ color: a.expected < 0 ? 'var(--neg-ink)' : undefined }}>
-                  <Money v={a.expected}/>
-                </td>
-              </tr>
-              {open === a.id && (
-                <tr>
-                  <td colSpan={7} style={{ background: 'var(--surface-2)', padding: '10px 14px' }}>
-                    {/* 이미 '이 계좌' 안이라 통장 이름은 되풀이하지 않는다 */}
-                    {a.items.map((it, i) => <FlowLine key={i} it={it} showAccount={false}/>)}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          ))}
-        </table>
-      </div>
-    </div>
-  )
-
   return (
-    <div className="fade-up">
+    /* fund-print — 인쇄 whitelist. 이게 없으면 Ctrl+P 가 백지로 나온다
+       (인쇄 CSS 가 body * 를 다 숨기고 지정된 것만 되살리는 방식이다).
+       기간 고르는 칩 줄에는 no-print 가 붙어 종이에서는 빠진다. */
+    <div className="fade-up fund-print">
       <PageHeader title="자금 현황"
         sub="기간을 골라 들어온·나간 돈과 들어올·나갈 돈을 봅니다. 계좌를 누르면 항목과 날짜가 펼쳐져요."/>
 
@@ -331,7 +358,8 @@ export const FundStatusScreen = ({ go }) => {
                 {' '}계좌 잔액이 어떻게 움직이는지 봅니다. 줄을 누르면 그 날 항목이 펼쳐져요.
               </div>
             </div>
-            <div className="row gap-6 ml-auto">
+            {/* 보기 전환 단추들 — 종이에는 눌 수 없으니 인쇄에서 뺀다 */}
+            <div className="row gap-6 ml-auto no-print">
               {/* 달력은 일자 단위에서만 뜻이 있다 — 분기(주별)·년(월별)을 달력에 그릴 수 없다 */}
               {timeline.bucketUnit === 'day' && (
                 <div className="row gap-4">
@@ -415,7 +443,7 @@ export const FundStatusScreen = ({ go }) => {
                   {openBuckets.has('__undated') && (
                     <div style={{ marginTop: 8 }}>
                       {timeline.undated.items.map((it, i) => (
-                        <FlowLine key={i} it={{ ...it, date: it.overdue ? '기한 지남' : '기한 미정' }}/>
+                        <FlowLine key={flowKey(it, i)} it={{ ...it, date: it.overdue ? '기한 지남' : '기한 미정' }}/>
                       ))}
                     </div>
                   )}
@@ -498,7 +526,7 @@ export const FundStatusScreen = ({ go }) => {
                       <td colSpan={cols} style={{ background: 'var(--surface-2)', padding: '10px 14px' }}>
                         {/* 들어온 돈을 먼저, 나간 돈을 뒤에 — 섞여 있으면 그 날 무슨 일이 있었는지 안 읽힌다 */}
                         {[...b.items].sort((x, y) => (x.kind === y.kind ? 0 : x.kind === 'in' ? -1 : 1))
-                          .map((it, i) => <FlowLine key={i} it={it}/>)}
+                          .map((it, i) => <FlowLine key={flowKey(it, i)} it={it}/>)}
                       </td>
                     </tr>
                   )}
@@ -657,8 +685,8 @@ export const FundStatusScreen = ({ go }) => {
             </div>
           </div>
 
-          <AccountTable group={data.corp} title="법인 계좌" unassigned={data.unassigned}/>
-          {data.personal && <AccountTable group={data.personal} title="대표 개인 계좌"/>}
+          <AccountTable open={open} setOpen={setOpen} group={data.corp} title="법인 계좌" unassigned={data.unassigned}/>
+          {data.personal && <AccountTable open={open} setOpen={setOpen} group={data.personal} title="대표 개인 계좌"/>}
 
           {/* ── 대표 자금표 아래쪽 구성 그대로: 부채 · 저축 · 미지급 인건비 · 입금예정 ── */}
           <div className="grid-3-to-1" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16, marginBottom: 16 }}>

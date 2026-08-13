@@ -66,6 +66,11 @@ tar czf - -C dist . \
   | "${SSH[@]}" "$REMOTE" "rm -rf ~/$APPDIR/dist && mkdir -p ~/$APPDIR/dist && tar xzf - -C ~/$APPDIR/dist"
 
 echo "[4/5] 서버 코드 전송 (node_modules/.env/uploads/db 제외)"
+# ⚠ 새 코드는 스키마보다 **먼저** 디스크에 올라간다(마이그레이션이 새 코드 안에 있으니 순서를 뒤집을 수 없다).
+#   그 사이에 setup:db 가 실패하면 "새 코드 + 옛 스키마"가 디스크에 남는다. pm2 는 autorestart 라
+#   무슨 이유로든 프로세스가 죽으면 그 조합으로 기동한다 — 전면 500 이다.
+#   그래서 덮어쓰기 직전 코드를 server.prev 에 떠 두고, 아래 [5/5] 에서 실패하면 되돌린다.
+"${SSH[@]}" "$REMOTE" "mkdir -p ~/$APPDIR/server && rm -rf ~/$APPDIR/server.prev && mkdir -p ~/$APPDIR/server.prev && tar cf - -C ~/$APPDIR/server --exclude=node_modules --exclude=uploads . | tar xf - -C ~/$APPDIR/server.prev"
 tar czf - -C server \
     --exclude=node_modules --exclude=.env --exclude=uploads \
     --exclude='*.db' --exclude='*.db-shm' --exclude='*.db-wal' \
@@ -81,9 +86,13 @@ echo "[5/5] 원격 의존성 설치 + DB 스키마 준비 + pm2 재시작 + 헬�
 # deploy-info.json 은 pm2 재시작 '전에' 쓴다 — 서버는 기동할 때 이 파일을 한 번 읽어
 # /api/health 로 노출한다. 재시작 뒤에 쓰면 다음 배포까지 옛 정보가 보인다.
 "${SSH[@]}" "$REMOTE" "cd ~/$APPDIR/server && \
-  npm ci --omit=dev --no-audit --no-fund && \
-  npm run check:isolation && \
-  npm run setup:db && \
+  { npm ci --omit=dev --no-audit --no-fund && \
+    npm run check:isolation && \
+    npm run setup:db; } || { \
+      echo '❌ 의존성·스키마 준비 실패 — 전송한 코드를 배포 전으로 되돌립니다(서비스는 그대로 돕니다)'; \
+      tar cf - -C ~/$APPDIR/server.prev . | tar xf - -C ~/$APPDIR/server; \
+      exit 1; \
+    } && \
   { npm run migrate:uploads || echo '⚠ migrate:uploads 실패 — 첨부 경로 확인 필요(배포는 계속)'; } && \
   echo '$DEPLOY_INFO' > deploy-info.json && \
   pm2 startOrReload ecosystem.config.js --update-env && \

@@ -412,7 +412,9 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
         </div>
         {/* 보증금은 대개 몇 년 전에 이미 낸 것을 뒤늦게 등록한다.
             그때 통장에 이미 출금이 찍혀 있으므로, 여기서 거래를 또 만들면 잔액이 두 번 빠진다. */}
-        {guar && (
+        {/* 수정할 때는 안 보여준다 — PUT 이 recorded 를 읽지 않아 눌러도 거래가 안 생긴다.
+            "거래를 만듭니다"라는 안내가 수정 모드에서는 거짓이었다. 등록에서만 뜻이 있다. */}
+        {guar && !editing && (
           <div>
             <label className="label">지금 내는 보증금인가요?</label>
             <div className="row gap-4">

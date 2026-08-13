@@ -58,3 +58,17 @@ test('numOf 는 소수를 유지한다 — 이율 등', () => {
   assert.equal(numOf(''), 0)
   assert.equal(numOf('abc'), 0)
 })
+
+/* 아래는 "숫자 아닌 문자열이 조용히 숫자가 되던" 결함의 회귀 방지다.
+   지수표기·글자 섞인 값은 **0(못 읽음)** 이어야 한다 — 예전엔 19, 1234 가 나왔다. */
+test('숫자 덩어리가 둘이면 읽지 않는다 — 조용한 오값 방지', () => {
+  assert.equal(moneyOf('1e9'), 0)        // 예전: 19 (10억이 19원으로 저장됐다)
+  assert.equal(moneyOf('12abc34'), 0)    // 예전: 1234
+  assert.equal(numOf('1e9'), 0)          // 예전: 19 (%)
+})
+
+test('장식은 앞뒤 어디에 붙어도 읽는다', () => {
+  assert.equal(moneyOf('금액: 5,000원'), 5000)
+  assert.equal(moneyOf('₩1,100,000'), 1_100_000)
+  assert.equal(numOf('연 3.25%'), 3.25)
+})

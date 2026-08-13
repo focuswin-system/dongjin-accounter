@@ -1,7 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday, kstDate } = require('../db')
-const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS, pendingCycle , PAYMENT_TERM_DAYS, cashDateOf, PAY_TERMS } = require('../lib/recurrence')
+const { dueDatesToGenerate, LOOKAHEAD_DAYS, pendingCycle, cashDateOf, PAY_TERMS } = require('../lib/recurrence')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError, amountError } = require('../lib/ledger')
 const { closedPeriodError } = require('../lib/closing')
@@ -16,6 +16,10 @@ const router = Router()
 
 /** 결제조건은 정해진 셋 중 하나만 받는다 — 모르는 값이 들어오면 날짜 계산이 조용히 어긋난다 */
 const payTermOf = (v) => (PAY_TERMS.includes(v) ? v : 'net30')
+/* 수정에서 pay_term 을 **안 보냈으면 기존 값을 유지**한다.
+   payTermOf(undefined) 가 'net30' 이라, 부분 바디로 수정하면 저장해 둔 '당일 출금'이
+   말없이 30일 뒤로 되돌아갔다 — 이 핸들러가 고치려던 결함과 같은 종류가 반대 방향으로 열려 있었다. */
+const payTermFor = (v, cur) => (v == null || v === '' ? (cur || 'net30') : payTermOf(v))
 
 /* 정기지출의 부가세: amount(합계 = VAT 포함)에서 세액을 뺀다.
    vat_mode가 저장돼 있으면(폼에서 직접 선택) 그걸 쓰고, 없으면(옛 데이터) 비목 categories.vat를 따른다. */
@@ -52,9 +56,11 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const { vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id } = req.body
+    const [[cur]] = await req.db.execute('SELECT pay_term FROM recurring_expenses WHERE id = ?', [req.params.id])
+    if (!cur) return res.status(404).json({ error: 'Not found' })
     const [result] = await req.db.execute(
       'UPDATE recurring_expenses SET vendor_id=?, contract_id=?, category=?, amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=?, pay_term=? WHERE id=?',
-      [vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, payTermOf(req.body.pay_term), req.params.id]
+      [vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, payTermFor(req.body.pay_term, cur.pay_term), req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })

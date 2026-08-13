@@ -279,6 +279,18 @@ router.put('/loans/:id', async (req, res, next) => {
        이자는 수시 상환에서 실제 낸 금액을 직접 적는다(변동금리라 이율을 못 적는 경우도 있다). */
     // 일정이 있는 방식으로 되돌릴 땐 회차가 반드시 1 이상이어야 스케줄이 깔린다
     if (want.method !== 'none' && !(want.term_months >= 1)) want.term_months = 12
+    /* 등록에는 있고 **수정에는 없던** 검사다. 등록에서 막힌 값을 수정으로 넣으면 그대로 통과해
+       회차 이자가 음수가 되거나(잔여 원금이 늘어난다) 터무니없는 상환표가 깔렸다. */
+    if (!Number.isFinite(want.annual_rate) || want.annual_rate < 0) {
+      await rollbackQuietly(conn); return res.status(400).json({ error: '연이율을 숫자로 입력해주세요' })
+    }
+    if (want.annual_rate > 100) {
+      await rollbackQuietly(conn)
+      return res.status(400).json({ error: '연이율이 너무 큽니다(100% 초과). 값을 확인해주세요.' })
+    }
+    if (!(want.principal > 0)) {
+      await rollbackQuietly(conn); return res.status(400).json({ error: '원금을 입력해주세요' })
+    }
     const changed = LOAN_TERMS.filter(k => String(want[k]) !== String(
       k === 'annual_rate' ? Number(cur.annual_rate) : k === 'principal' || k === 'term_months' ? Number(cur[k]) : cur[k]))
     if (locked && changed.length) {
@@ -530,6 +542,15 @@ router.post('/loans/:id/repay-adhoc', async (req, res, next) => {
     }
     if (principal + interest <= 0) {
       await rollbackQuietly(conn); return res.status(400).json({ error: '갚은 금액을 입력해주세요' })
+    }
+    /* 이자에 상한이 없으면 원금 칸과 이자 칸을 바꿔 적은 실수가 **비용 폭탄**으로 남는다
+       (원금 상환은 손익에 안 가지만 이자는 전액 비용이다 — 손익계산서가 통째로 틀어진다).
+       적금 만기(1.5배 가드)와 같은 취지로, 남은 원금을 넘는 이자는 되묻는다. */
+    if (interest > Math.max(loan.principal, 1) ) {
+      await rollbackQuietly(conn)
+      return res.status(400).json({
+        error: `이자(${interest.toLocaleString('ko-KR')}원)가 대출 원금보다 큽니다. 원금 칸과 바뀌지 않았는지 확인해주세요.`,
+      })
     }
     /* 남은 원금보다 많이 갚을 수는 없다 — 넘기면 잔여가 음수가 되어 부채 현황이 뒤집힌다.
        (remainingPrincipal 이 0 으로 막아주긴 하지만, 그러면 **입력한 금액과 장부가 조용히 달라진다**) */

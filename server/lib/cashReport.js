@@ -75,6 +75,21 @@ async function balancesAsOf(db, asOf) {
  *
  * @returns {{date, kind:'in'|'out', amount, label, source, account_id, planned?}[]} 날짜 오름차순
  */
+/* 자식 행을 한 번에 받아 부모 id 로 나눠 담는다 — N+1 왕복을 하나로 줄인다.
+ * 부모가 없으면 질의 자체를 건너뛴다(IN () 은 문법 오류다). */
+async function groupBy(db, parents, sql, fk) {
+  const map = new Map()
+  if (!parents.length) return map
+  const ph = parents.map(() => '?').join(',')
+  const [rows] = await db.execute(sql.replace('IN (?)', `IN (${ph})`), parents.map(p => p.id))
+  for (const r of rows) {
+    const k = r[fk]
+    if (!map.has(k)) map.set(k, [])
+    map.get(k).push(r)
+  }
+  return map
+}
+
 async function upcomingFlows(db, { from, to, anchorPast = true }) {
   const out = []
   /* anchorPast — 기준일보다 이른(연체·기한미정) 돈을 이 구간 시작일로 끌어올릴 것인가.
@@ -129,11 +144,15 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
    * 예전엔 원금·이율·기간으로 스케줄을 매번 다시 계산했다. 그러면 은행 통보서대로
    * 고쳐 둔 금액(변동금리·중도상환·휴일 이체일)이 무시되고 공식값으로 되돌아간다.
    * 자금 예측은 **은행이 실제로 빼갈 금액**을 알아야 쓸모가 있다. */
-  const [loans] = await db.execute("SELECT * FROM loans WHERE status='active'")
+  const [loans] = await db.execute("SELECT * FROM loans WHERE status='active' ORDER BY name, id")
+  /* 대출마다 회차를 따로 조회하면 왕복이 대출 수만큼 늘어난다(N+1).
+     이 함수는 '한 눈에 보기'에서 구간마다 다시 불리므로 왕복이 수십 배로 불어난다 —
+     한 번에 받아 대출별로 나눠 담는다. */
+  const repayByLoan = await groupBy(db, loans,
+    'SELECT loan_id, seq, due_date, principal, interest, paid_date FROM loan_repayments WHERE loan_id IN (?) ORDER BY loan_id, seq',
+    'loan_id')
   for (const l of loans) {
-    const [rows] = await db.execute(
-      'SELECT seq, due_date, principal, interest, paid_date FROM loan_repayments WHERE loan_id = ? ORDER BY seq',
-      [l.id])
+    const rows = repayByLoan.get(l.id) || []
     const planned = rows.filter(r => !r.paid_date)
       .map(r => ({ seq: Number(r.seq), due_date: r.due_date, total: num(r.principal) + num(r.interest) }))
     /* 예정 행이 하나도 없는 대출은 스케줄이 아직 안 깔린 옛 데이터다. 그때만 공식으로 만든다 —
@@ -156,10 +175,13 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
   }
 
   // 4. 적금 납입 — 대출과 같은 규칙(저장된 예정 회차 우선, 없으면 공식)
-  const [savings] = await db.execute("SELECT * FROM savings WHERE status='active' AND kind='installment'")
+  const [savings] = await db.execute(
+    "SELECT * FROM savings WHERE status='active' AND kind='installment' ORDER BY name, id")
+  const payBySaving = await groupBy(db, savings,
+    'SELECT savings_id, seq, due_date, amount, paid_date FROM savings_payments WHERE savings_id IN (?) ORDER BY savings_id, seq',
+    'savings_id')
   for (const s of savings) {
-    const [rows] = await db.execute(
-      'SELECT seq, due_date, amount, paid_date FROM savings_payments WHERE savings_id = ? ORDER BY seq', [s.id])
+    const rows = payBySaving.get(s.id) || []
     const planned = rows.filter(r => !r.paid_date)
       .map(r => ({ seq: Number(r.seq), due_date: r.due_date, amount: num(r.amount) }))
     const cycles = planned.length ? planned
@@ -373,7 +395,13 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
     })
   }
 
-  out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+  /* 날짜가 같은 항목들의 순서가 **새로고침마다 달랐다.**
+   * 10개 출처를 각각 조회해 이어 붙이는데 대부분 ORDER BY 가 없어, MariaDB 가 돌려주는
+   * 순서가 계획에 따라 바뀐다. 그러면 같은 날 상세를 열 때마다 줄 차례가 뒤바뀌어
+   * "아까 보던 줄"을 다시 찾아야 했고, 인쇄본끼리도 대조가 안 됐다.
+   * 날짜 → 입금 먼저 → 출처 → 이름 → 금액 순으로 못 박는다. */
+  const ord = (f) => `${f.date}|${f.kind === 'in' ? 0 : 1}|${f.source}|${f.label}|${String(f.amount).padStart(15, '0')}`
+  out.sort((a, b) => (ord(a) < ord(b) ? -1 : ord(a) > ord(b) ? 1 : 0))
   return out
 }
 

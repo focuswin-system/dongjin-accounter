@@ -32,6 +32,22 @@ const KIND = 'severance'
  * 자금 예측에 없는 돈이 '나갈 돈'으로 선다. PUT 에 검증이 없던 탓에 부분 바디 한 번으로
  * 총액이 0으로 덮이고(= 자금 현황에서 그 퇴직금이 통째로 사라짐) 에러도 안 났다.
  */
+/* due_date 는 VARCHAR 다(비면 '기한 미정'이라 DATE 로 못 둔다).
+ * 그래서 DB 가 형식을 안 고쳐 준다 — '2026-8-1' 이 그대로 저장된다.
+ * 자금 예측은 날짜를 **문자열로 비교**하므로('2026-8-1' > '2026-08-31') 그 건은
+ * 구간에서 조용히 빠진다. 화면엔 멀쩡히 보이는데 자금표에서만 사라진다. */
+function normDate(v) {
+  if (v == null || v === '') return null
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(v).trim())
+  if (!m) return undefined                       // 형식 자체가 아님 → 호출부가 400
+  const [, y, mo, d] = m
+  const iso = `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`
+  const t = new Date(`${iso}T00:00:00`)
+  // 2026-02-31 처럼 달력에 없는 날은 Date 가 다음 달로 넘겨 버린다 — 되짚어 걸러낸다
+  return Number.isNaN(t.getTime()) || t.getDate() !== Number(d) ? undefined : iso
+}
+const DATE_ERR = '기한은 2026-08-31 형태로 입력해주세요'
+
 function amountsError(amount, paid) {
   if (!(amount > 0)) return '퇴직금 총액을 입력해주세요'
   if (paid < 0) return '지급액은 0 이상이어야 해요'
@@ -73,13 +89,15 @@ router.post('/', async (req, res, next) => {
     const amount = moneyOf(b.amount)
     const paid = moneyOf(b.paid_amount)
     { const e = amountsError(amount, paid); if (e) return res.status(400).json({ error: e }) }
+    const dueDate = normDate(b.due_date)
+    if (dueDate === undefined) return res.status(400).json({ error: DATE_ERR })
     const id = randomUUID()
     await req.db.execute(
       `INSERT INTO unpaid_labor (id, employee_id, name, kind, status, period, amount, paid_amount, due_date, memo)
        VALUES (?,?,?,?,?,?,?,?,?,?)`,
       [id, b.employee_id || null, name, KIND,
        STATUS.includes(b.status) ? b.status : 'retired',
-       b.period || null, amount, paid, b.due_date || null, b.memo || null])
+       b.period || null, amount, paid, dueDate, b.memo || null])
     res.json({ id })
   } catch (e) { next(e) }
 })
@@ -98,6 +116,11 @@ router.put('/:id', async (req, res, next) => {
     { const e = amountsError(amount, paid); if (e) return res.status(400).json({ error: e }) }
     const name = b.name != null ? String(b.name).trim() : cur.name
     if (!name) return res.status(400).json({ error: '이름을 입력해주세요' })
+    let dueDate = cur.due_date
+    if (b.due_date !== undefined) {
+      dueDate = normDate(b.due_date)
+      if (dueDate === undefined) return res.status(400).json({ error: DATE_ERR })
+    }
 
     const [r] = await req.db.execute(
       `UPDATE unpaid_labor SET employee_id=?, name=?, status=?, period=?, amount=?, paid_amount=?, due_date=?, memo=?
@@ -107,7 +130,7 @@ router.put('/:id', async (req, res, next) => {
        STATUS.includes(b.status) ? b.status : cur.status,
        b.period !== undefined ? (b.period || null) : cur.period,
        amount, paid,
-       b.due_date !== undefined ? (b.due_date || null) : cur.due_date,
+       dueDate,
        b.memo !== undefined ? (b.memo || null) : cur.memo,
        req.params.id, KIND])
     if (r.affectedRows === 0) return res.status(404).json({ error: 'Not found' })

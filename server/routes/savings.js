@@ -201,9 +201,16 @@ router.post('/', async (req, res, next) => {
     }
     /* 마감 검사는 적금에도 필요하다. 거래를 안 만들어도, 마감된 달을 가입일로 잡으면
      * 1회차 예정일이 그 달이 되어 납입이 영구히 거절된다(회차를 건너뛸 수 없다).
-     * 되돌릴 수 없는 상태의 적금이 남는다. */
-    const ce = await closedPeriodError(conn, start_date)
-    if (ce) return res.status(400).json({ error: ce })
+     * 되돌릴 수 없는 상태의 적금이 남는다.
+     *
+     * ⚠ 보증금은 예외다. 회차가 없고, '이미 낸 보증금'이면 거래도 안 만든다 —
+     *   마감된 달을 건드리지 않는다. 그런데 무조건 걸어 두어서, 화면이 유도하는
+     *   기본 시나리오(몇 년 전에 낸 보증금을 지급일과 함께 뒤늦게 등록)가 통째로 막혔다.
+     *   화면에는 마감 안내가 한 줄도 없어 "왜 안 되지"로 끝났다. */
+    if (!(kind === 'guarantee' && !recorded)) {
+      const ce = await closedPeriodError(conn, start_date)
+      if (ce) return res.status(400).json({ error: ce })
+    }
 
     const id = randomUUID()
     const acct_code = b.acct_code || defaultAcctCode(kind, term_months)
@@ -256,9 +263,22 @@ router.put('/:id', async (req, res, next) => {
        만기일이 생겨 '만기 D-30' 같은 안내가 뜬다 — 보증금에 만기는 없다. */
     const term_months = cur.kind === 'guarantee' ? 0 : (intOf(b.term_months) || cur.term_months)
     const monthly_amount = intOf(b.monthly_amount) || cur.monthly_amount
-    if (cnt > 0 && (term_months !== cur.term_months || monthly_amount !== Number(cur.monthly_amount))) {
+    /* 가입일도 잠근다 — 회차 예정일이 전부 가입일에서 계산된다. 실적이 있는데 가입일을
+       옮기면 이미 낸 3회차의 예정일이 딴 날로 바뀌어 '놓친 납입'으로 되살아난다. */
+    const startDate = b.start_date || cur.start_date
+    if (cnt > 0 && (term_months !== cur.term_months || monthly_amount !== Number(cur.monthly_amount)
+        || String(startDate) !== String(cur.start_date).slice(0, 10))) {
       return res.status(409).json({
-        error: `이미 ${cnt}회차를 납입해서 금액·기간은 바꿀 수 없어요. 조건이 달라졌다면 해지 후 새로 등록해주세요.` })
+        error: `이미 ${cnt}회차를 납입해서 금액·기간·가입일은 바꿀 수 없어요. 조건이 달라졌다면 해지 후 새로 등록해주세요.` })
+    }
+    /* 등록에는 있고 수정에는 없던 범위 검사. 음수 회차는 만기일을 **과거**로 만들고,
+       0이나 32 같은 납입일은 회차 예정일 계산에서 달을 통째로 밀어 버린다. */
+    if (!(term_months >= 0) || term_months > 600) {
+      return res.status(400).json({ error: '기간(개월)은 0~600 사이로 입력해주세요' })
+    }
+    const payDay = intOf(b.pay_day) || cur.pay_day || 1
+    if (!(payDay >= 1 && payDay <= 31)) {
+      return res.status(400).json({ error: '납입일은 1~31 사이로 입력해주세요' })
     }
     /* 예금 예치 금액 — 화면은 편집할 수 있게 그리는데 UPDATE 문에 없어서 조용히 무시됐다
      * ("수정했어요"는 뜨는데 금액은 그대로). 가입 출금 거래도 함께 맞춰야 잔액이 안 어긋난다.
@@ -272,6 +292,10 @@ router.put('/:id', async (req, res, next) => {
     // 이율은 numOf 가 빈 값을 0으로 만든다 — 일부 필드만 보낸 요청에서 이율이 조용히 사라졌다
     const annual_rate = b.annual_rate != null && String(b.annual_rate) !== ''
       ? numOf(b.annual_rate) : Number(cur.annual_rate)
+    if (!Number.isFinite(annual_rate) || annual_rate < 0 || annual_rate > 100) {
+      return res.status(400).json({ error: '연이율은 0~100 사이로 입력해주세요' })
+    }
+    { const fe = futureDateError(startDate); if (fe) return res.status(400).json({ error: fe }) }
     // 기간이 1년을 넘나들면 회계 분류(단기↔장기 금융상품)도 따라가야 한다
     const acct_code = b.acct_code
       || (term_months !== cur.term_months ? defaultAcctCode(cur.kind, term_months) : cur.acct_code)
@@ -280,12 +304,15 @@ router.put('/:id', async (req, res, next) => {
     try {
       await conn.beginTransaction()
       await conn.execute(
+        /* start_date 가 UPDATE 목록에 없어 '지급일' 수정이 조용히 무시됐다("수정했어요"는 떴다).
+           보증금은 과거 지급일을 뒤늦게 채워 넣는 게 주 용도라 특히 자주 닿는다.
+           만기일은 시작일에 딸린 값이므로 함께 다시 계산한다. */
         `UPDATE savings SET name=?, bank=?, vendor_id=?, principal=?, annual_rate=?, term_months=?, monthly_amount=?,
-                pay_day=?, maturity_date=?, account_id=?, acct_code=?, memo=? WHERE id=?`,
+                start_date=?, pay_day=?, maturity_date=?, account_id=?, acct_code=?, memo=? WHERE id=?`,
         [String(b.name || cur.name).trim(), b.bank ?? cur.bank, b.vendor_id ?? cur.vendor_id,
-         principal, annual_rate, term_months, monthly_amount,
-         intOf(b.pay_day) || cur.pay_day,
-         maturityDateOf({ start_date: cur.start_date, term_months }),
+         principal, annual_rate, term_months, monthly_amount, startDate,
+         payDay,
+         maturityDateOf({ start_date: startDate, term_months }),
          b.account_id ?? cur.account_id, acct_code, b.memo ?? cur.memo, req.params.id])
       /* 납입 조건이 바뀌면 예정 회차를 다시 깐다(이미 낸 회차는 그대로 둔다) */
       if (cur.kind === 'installment' &&

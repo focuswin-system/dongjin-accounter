@@ -873,6 +873,28 @@ async function initDb(conn) {
       if (cnt === 0) await c.execute(`ALTER TABLE \`${table}\` ADD COLUMN ${ddl}`)
     }
 
+    /* ENUM 에 값을 **더한다**. 이미 다 있으면 아무것도 하지 않는다.
+     *
+     * 예전엔 ALTER … MODIFY 를 조건 없이 매 배포마다 돌렸다. 두 가지가 문제였다:
+     *   1. MODIFY 는 테이블을 다시 만든다 — 지금은 작지만 늘어나면 배포마다 잠긴다.
+     *   2. **되돌리기가 파괴적이었다.** 구버전 코드를 다시 배포하면 그 코드의 ENUM 목록
+     *      (예: 'guarantee' 없는 목록)으로 MODIFY 가 돌아 컬럼이 **좁아진다** —
+     *      보증금 행의 kind 가 빈 값이 되거나 ALTER 자체가 실패한다.
+     * 지금은 "내 목록에 있는 값이 이미 다 들어 있나"만 보고, 모자랄 때만 넓힌다.
+     * 구버전 코드는 자기 목록이 이미 충족돼 있으므로 그냥 지나간다 — 되돌려도 안전하다. */
+    const ensureEnum = async (table, col, values, tail = '') => {
+      const [[row]] = await c.execute(
+        `SELECT COLUMN_TYPE AS t FROM information_schema.columns
+         WHERE table_schema = ? AND table_name = ? AND column_name = ?`,
+        [schemaName, table, col])
+      if (!row) return                                   // 컬럼이 없으면 CREATE TABLE 쪽이 만든다
+      const have = new Set((String(row.t).match(/'((?:[^']|'')*)'/g) || [])
+        .map(v => v.slice(1, -1).replace(/''/g, "'")))
+      if (values.every(v => have.has(v))) return
+      const list = [...new Set([...have, ...values])].map(v => `'${v.replace(/'/g, "''")}'`).join(',')
+      await c.execute(`ALTER TABLE \`${table}\` MODIFY \`${col}\` ENUM(${list}) ${tail}`.trim())
+    }
+
     // (UNIQUE 인덱스는 아래쪽 ensureUniqueIndex 를 쓴다 — 계약번호·사번·청구번호와 같은 자리)
     // ── 1회성 데이터 마이그레이션 가드 ──
     // 데이터를 '변형'하는 마이그레이션은 부팅마다 재실행되면 안 된다(신규 입력 데이터를 오염시킴).
@@ -1225,16 +1247,16 @@ async function initDb(conn) {
     /* savings.kind 에 'guarantee'(보증금)를 더한다. ENUM 은 CREATE TABLE IF NOT EXISTS 로는
        안 바뀌므로 기존 DB에는 ALTER 가 필요하다. 값을 **넓히기만** 하는 변경이라 안전하고,
        이미 넓혀져 있으면 같은 결과라 매번 돌아도 된다. */
-    await c.execute(
-      "ALTER TABLE savings MODIFY kind ENUM('installment','deposit','guarantee') NOT NULL DEFAULT 'installment'")
+    await ensureEnum('savings', 'kind', ['installment', 'deposit', 'guarantee'],
+      "NOT NULL DEFAULT 'installment'")
 
     /* loans.method 에 'none'(상환 일정 없음)을 더한다.
      *
      * 대표가수금·관계사 차입처럼 **빌린 건 맞는데 언제 갚을지 안 정한** 채무가 실무에 흔하다.
      * 여태는 표현할 방법이 없어서 등록하는 순간 공식이 상환 일정을 지어냈고, 있지도 않은
      * 출금이 자금 예측에 잡혔다. 값을 넓히기만 하는 변경이라 안전하고 여러 번 돌아도 같다. */
-    await c.execute(
-      "ALTER TABLE loans MODIFY method ENUM('equal_payment','equal_principal','bullet','none') NOT NULL DEFAULT 'equal_payment'")
+    await ensureEnum('loans', 'method', ['equal_payment', 'equal_principal', 'bullet', 'none'],
+      "NOT NULL DEFAULT 'equal_payment'")
 
     await ensureColumn('recurring_expenses', 'pay_term', "pay_term VARCHAR(12) NOT NULL DEFAULT 'net30'")
     await ensureColumn('recurring_invoices', 'pay_term', "pay_term VARCHAR(12) NOT NULL DEFAULT 'net30'")

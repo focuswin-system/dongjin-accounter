@@ -101,10 +101,21 @@ async function actualsIn(db, from, to, mine) {
 async function debtStatus(db) {
   const [loans] = await db.execute(
     "SELECT id, name, lender, principal, status FROM loans WHERE status = 'active' ORDER BY lender, name")
+  /* 대출마다 회차를 따로 조회하지 않는다 — 한 번에 받아 나눈다.
+     이 화면은 대출·저축·인건비를 한꺼번에 그리는데 대출이 14건이면 왕복만 15번이었다. */
+  const byLoan = new Map()
+  if (loans.length) {
+    const [reps] = await db.execute(
+      `SELECT loan_id, principal, paid_date FROM loan_repayments
+        WHERE loan_id IN (${loans.map(() => '?').join(',')})`, loans.map(l => l.id))
+    for (const r of reps) {
+      if (!byLoan.has(r.loan_id)) byLoan.set(r.loan_id, [])
+      byLoan.get(r.loan_id).push(r)
+    }
+  }
   const items = []
   for (const l of loans) {
-    const [reps] = await db.execute(
-      'SELECT principal, paid_date FROM loan_repayments WHERE loan_id = ?', [l.id])
+    const reps = byLoan.get(l.id) || []
     items.push({
       id: l.id, name: l.name, lender: l.lender || '기타',
       principal: Number(l.principal) || 0,
@@ -125,15 +136,19 @@ async function debtStatus(db) {
 async function savingsStatus(db) {
   const [rows] = await db.execute(
     "SELECT id, name, bank, kind, principal, monthly_amount FROM savings WHERE status = 'active' ORDER BY kind, name")
+  // 적금 납입 실적도 한 번에 — 상품마다 조회하면 왕복이 상품 수만큼 늘어난다
+  const paidBy = new Map()
+  const insts = rows.filter(r => r.kind === 'installment')
+  if (insts.length) {
+    const [ps] = await db.execute(
+      `SELECT savings_id, COALESCE(SUM(amount),0) AS paid FROM savings_payments
+        WHERE savings_id IN (${insts.map(() => '?').join(',')}) AND paid_date IS NOT NULL
+        GROUP BY savings_id`, insts.map(r => r.id))
+    for (const p of ps) paidBy.set(p.savings_id, Number(p.paid) || 0)
+  }
   const items = []
   for (const s of rows) {
-    let amount = Number(s.principal) || 0
-    if (s.kind === 'installment') {
-      const [[p]] = await db.execute(
-        'SELECT COALESCE(SUM(amount),0) AS paid FROM savings_payments WHERE savings_id = ? AND paid_date IS NOT NULL',
-        [s.id])
-      amount = Number(p.paid) || 0
-    }
+    const amount = s.kind === 'installment' ? (paidBy.get(s.id) || 0) : (Number(s.principal) || 0)
     items.push({ id: s.id, name: s.name, bank: s.bank || '', kind: s.kind, amount })
   }
   return { items, total: items.reduce((s, x) => s + x.amount, 0) }
