@@ -1,7 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday, kstDate } = require('../db')
-const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS, pendingCycle , PAYMENT_TERM_DAYS } = require('../lib/recurrence')
+const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS, pendingCycle , PAYMENT_TERM_DAYS, cashDateOf, PAY_TERMS } = require('../lib/recurrence')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError, amountError } = require('../lib/ledger')
 const { closedPeriodError } = require('../lib/closing')
@@ -13,6 +13,9 @@ const { settleAcctCode } = require('../lib/acctCode')
 const { backfillCycles, tooManyError, addSkip, removeSkip, issuedInvoiceAt } = require('../lib/backfill')
 
 const router = Router()
+
+/** 결제조건은 정해진 셋 중 하나만 받는다 — 모르는 값이 들어오면 날짜 계산이 조용히 어긋난다 */
+const payTermOf = (v) => (PAY_TERMS.includes(v) ? v : 'net30')
 
 /* 정기지출의 부가세: amount(합계 = VAT 포함)에서 세액을 뺀다.
    vat_mode가 저장돼 있으면(폼에서 직접 선택) 그걸 쓰고, 없으면(옛 데이터) 비목 categories.vat를 따른다. */
@@ -39,8 +42,8 @@ router.post('/', async (req, res, next) => {
     if (!(Number(amount) > 0)) return res.status(400).json({ error: '금액을 입력해주세요' })
     const id = randomUUID()
     await req.db.execute(
-      'INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-      [id, vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null]
+      'INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id, pay_term) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      [id, vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, payTermOf(req.body.pay_term)]
     )
     res.json({ id })
   } catch (e) { next(e) }
@@ -50,8 +53,8 @@ router.put('/:id', async (req, res, next) => {
   try {
     const { vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id } = req.body
     const [result] = await req.db.execute(
-      'UPDATE recurring_expenses SET vendor_id=?, contract_id=?, category=?, amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=? WHERE id=?',
-      [vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, req.params.id]
+      'UPDATE recurring_expenses SET vendor_id=?, contract_id=?, category=?, amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=?, pay_term=? WHERE id=?',
+      [vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, payTermOf(req.body.pay_term), req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
@@ -176,7 +179,7 @@ async function createExpenseInvoice(conn, r, target, { paid = false, accountId =
   await conn.execute(
     'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
     [invId, invoice_no, 'received', r.vendor_id || null, r.contract_id || null, supply, vat, total,
-     target, addDays(target, PAYMENT_TERM_DAYS), paid ? '지급 완료' : '지급 대기', acctId, r.id,
+     target, cashDateOf(target, r.pay_term), paid ? '지급 완료' : '지급 대기', acctId, r.id,
      `정기지출 · ${r.category || ''}`.trim(), tax_type]
   )
   if (paid) {

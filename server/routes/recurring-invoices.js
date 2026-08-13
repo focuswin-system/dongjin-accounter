@@ -1,7 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday, kstDate } = require('../db')
-const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS, pendingCycle , PAYMENT_TERM_DAYS } = require('../lib/recurrence')
+const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS, pendingCycle , PAYMENT_TERM_DAYS, cashDateOf, PAY_TERMS } = require('../lib/recurrence')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError, amountError } = require('../lib/ledger')
 const { taxTypeOfMode, recurFromSupply, recurVat } = require('../lib/vat')
@@ -10,6 +10,9 @@ const { backfillCycles, tooManyError, addSkip, removeSkip, issuedInvoiceAt } = r
 const { settleAcctCode } = require('../lib/acctCode')
 
 const router = Router()
+
+/** 결제조건은 정해진 셋 중 하나만 받는다(정기지출과 같은 규칙) */
+const payTermOf = (v) => (PAY_TERMS.includes(v) ? v : 'net30')
 
 /* 정기청구로 발행하는 청구서의 과세유형.
    정기청구 규칙의 vat_mode는 exclusive/none 두 값뿐이라 면세와 영세를 구분하지 못한다
@@ -48,8 +51,8 @@ router.post('/', async (req, res, next) => {
        비워 두면 **등록일부터** 세도록 엔진이 받아준다(lib/recurrence.js 앵커 폴백).
        빈 문자열은 '미지정'을 뜻한다. */
     await req.db.execute(
-      'INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-      [id, vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', period||'monthly', day_of_month||1, start_date||'', end_date||null, account_id||null]
+      'INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id, pay_term) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      [id, vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', period||'monthly', day_of_month||1, start_date||'', end_date||null, account_id||null, payTermOf(req.body.pay_term)]
     )
     res.json({ id })
   } catch (e) { next(e) }
@@ -58,9 +61,10 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const { vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id } = req.body
+    // pay_term 이 빠져 있어서, 등록할 때 고른 결제조건을 수정 화면에서 바꿔도 저장되지 않았다
     const [result] = await req.db.execute(
-      'UPDATE recurring_invoices SET vendor_id=?, contract_id=?, item=?, supply_amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=? WHERE id=?',
-      [vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, req.params.id]
+      'UPDATE recurring_invoices SET vendor_id=?, contract_id=?, item=?, supply_amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=?, pay_term=? WHERE id=?',
+      [vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, payTermOf(req.body.pay_term), req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
@@ -214,7 +218,7 @@ router.post('/:id/issue', async (req, res, next) => {
     await conn.execute(
       'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, invoice_no, 'issued', r.vendor_id || null, r.contract_id || null, supply, vat, total,
-       target, addDays(target, PAYMENT_TERM_DAYS), paid ? '입금 완료' : '입금 예정', acctId, r.id,
+       target, cashDateOf(target, r.pay_term), paid ? '입금 완료' : '입금 예정', acctId, r.id,
        `정기청구 · ${r.item || ''}`.trim(), invTaxType(r)]
     )
     // 기입금 처리: 실제 입금 거래 + 매칭까지 (계약 상세의 수금·미수금에 반영)

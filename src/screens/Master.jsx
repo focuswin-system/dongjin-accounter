@@ -1932,7 +1932,7 @@ const catVatToMode = (catVat) => (catVat === '10%' ? 'exclusive' : catVat === '�
 // reloadVendors: 부모가 거래처 목록을 다시 불러오게 하는 콜백(추가 후 새 id로 잡기 위함).
 // editing: 수정 대상(api.getRecurringExpenses 형태, camelCase). null이면 등록.
 const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], accounts = [], addGubu = 'A', reloadVendors }) => {
-  const empty = { vendor_id: "", category: "", amount: "", vat_mode: "exclusive", period: "monthly", day_of_month: "1", start_date: todayStr(), end_date: "", account_id: "" }
+  const empty = { vendor_id: "", category: "", amount: "", vat_mode: "exclusive", period: "monthly", day_of_month: "1", start_date: todayStr(), end_date: "", account_id: "", pay_term: "net30" }
   const [form, setForm] = useState(empty)
   // 비목은 반드시 실제 비목 마스터에서 고른다. 예전엔 ["임차료","통신비"…]를 하드코딩해서,
   // 마스터 이름과 한 글자라도 다르면(예: 마스터는 '통신비(관리)') 회차를 청구서로 만들 때
@@ -1950,6 +1950,7 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
         amount: editing.amount ? String(editing.amount) : "",
         vat_mode: editing.vatMode || "exclusive",
         period: editing.period || "monthly", day_of_month: String(editing.dayOfMonth || 1),
+        pay_term: editing.payTerm || editing.pay_term || "net30",
         start_date: editing.startDate || todayStr(), end_date: editing.endDate || "",
         account_id: editing.accountId || "",
       })
@@ -1969,6 +1970,7 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
       ...form,
       amount: parseInt(String(form.amount).replace(/[^0-9]/g, "")) || 0,
       day_of_month: parseInt(form.day_of_month) || 1,
+      pay_term: form.pay_term || 'net30',
       end_date: form.end_date || null,
     })
     onClose()
@@ -2028,6 +2030,23 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
           <div style={{ flex: 1 }}>
             <label className="label">생성 일 (매월 N일)</label>
             <input className="input" type="number" min="1" max="31" value={form.day_of_month} onChange={e => f("day_of_month", e.target.value)}/>
+          </div>
+        </div>
+        {/* 결제조건 — 회차일과 **돈이 빠지는 날**이 다르다.
+            급여·임대료·카드처럼 자동이체로 그 날 바로 나가는 지출을 30일 뒤로 잡으면
+            정작 잔고가 모자라는 날을 못 짚는다. 자금 현황이 이 값으로 날짜를 세운다. */}
+        <div>
+          <label className="label" style={{ marginBottom: 8 }}>결제조건</label>
+          <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+            {[['immediate', '당일 출금'], ['net30', '30일 후'], ['eom', '그 달 말일']].map(([v, l]) => (
+              <button key={v} type="button" className={`chip ${(form.pay_term || 'net30') === v ? 'active' : ''}`}
+                onClick={() => f('pay_term', v)}>{l}</button>
+            ))}
+          </div>
+          <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+            {form.pay_term === 'immediate' ? '자동이체처럼 그 날 바로 빠지는 돈이에요.'
+              : form.pay_term === 'eom' ? '그 달 말일에 한꺼번에 빠져요.'
+              : '세금계산서를 받고 30일 뒤에 결제해요.'}
           </div>
         </div>
         <div className="row gap-12">
@@ -2275,7 +2294,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
 // ── 정기 청구(고정수입) 패널 ──────────────────────────────────────
 const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, contracts, accounts, reloadVendors }) => {
   const toast = useToast()
-  const empty = { vendorId: "", contractId: "", item: "", supply: "", vatMode: "exclusive", period: "monthly", dayOfMonth: "1", startDate: todayStr(), endDate: "", accountId: "" }
+  const empty = { vendorId: "", contractId: "", item: "", supply: "", vatMode: "exclusive", period: "monthly", dayOfMonth: "1", startDate: todayStr(), endDate: "", accountId: "", payTerm: "net30" }
   const [form, setForm] = useState(empty)
   useEffect(() => {
     if (!open) return
@@ -2285,6 +2304,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
       vatMode: editing.vatMode || "exclusive", period: editing.period || "monthly",
       dayOfMonth: String(editing.dayOfMonth || 1), startDate: editing.startDate || todayStr(),
       endDate: editing.endDate || "", accountId: editing.accountId || "",
+      payTerm: editing.payTerm || "net30",
     } : empty)
   }, [open, editing])
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
@@ -2320,6 +2340,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
       startDate: form.startDate,
       endDate: form.endDate || null,
       accountId: form.accountId || null,
+      payTerm: form.payTerm || 'net30',
     })
     onClose()
   }
@@ -2375,6 +2396,22 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
           <div style={{ flex: 1 }}>
             <label className="label">청구일 (매월 N일)</label>
             <input className="input" type="number" min="1" max="31" value={form.dayOfMonth} onChange={e => f("dayOfMonth", e.target.value)}/>
+          </div>
+        </div>
+        {/* 결제조건 — 청구일과 **돈이 들어오는 날**은 다르다. 자금 예측이 이 값으로 입금일을 세운다.
+            정기지출 폼과 같은 값·같은 문구를 쓴다(한쪽만 다르면 같은 날짜가 화면마다 달라진다). */}
+        <div>
+          <label className="label" style={{ marginBottom: 8 }}>결제조건</label>
+          <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+            {[['immediate', '당일 입금'], ['net30', '30일 후'], ['eom', '그 달 말일']].map(([v, l]) => (
+              <button key={v} type="button" className={`chip ${(form.payTerm || 'net30') === v ? 'active' : ''}`}
+                onClick={() => f('payTerm', v)}>{l}</button>
+            ))}
+          </div>
+          <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+            {form.payTerm === 'immediate' ? '청구한 날 바로 들어오는 돈이에요.'
+              : form.payTerm === 'eom' ? '그 달 말일에 한꺼번에 들어와요.'
+              : '세금계산서를 보내고 30일 뒤에 받아요.'}
           </div>
         </div>
         <div className="row gap-12">

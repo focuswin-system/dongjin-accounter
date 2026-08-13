@@ -101,6 +101,19 @@ function dueDatesToGenerate(rec, today = new Date(), opts = {}) {
  */
 const PAYMENT_TERM_DAYS = 30
 
+/** 결제조건 — 회차일에서 실제로 돈이 오가는 날을 구한다. 발행 경로와 예측이 함께 쓴다. */
+const PAY_TERMS = ['immediate', 'net30', 'eom']
+function cashDateOf(cycleDate, payTerm) {
+  const term = PAY_TERMS.includes(payTerm) ? payTerm : 'net30'
+  if (term === 'immediate') return cycleDate
+  if (term === 'eom') {
+    const [y, m] = String(cycleDate).split('-').map(Number)
+    const last = new Date(y, m, 0).getDate()
+    return `${y}-${String(m).padStart(2, '0')}-${String(last).padStart(2, '0')}`
+  }
+  return addDays(cycleDate, PAYMENT_TERM_DAYS)
+}
+
 // '오늘·임박'으로 볼 범위(일). 화면의 구획과 서버 판정이 어긋나지 않게 여기 한 곳에서 정한다.
 const SOON_DAYS = 7
 
@@ -172,5 +185,5 @@ async function restoreLastGenerated(db, table, recurringId, removedDate) {
 
 module.exports = {
   dueDatesToGenerate, fmtDate, daysInMonth, addDays, LOOKAHEAD_DAYS, restoreLastGenerated,
-  SOON_DAYS, cycleState, pendingCycle, PAYMENT_TERM_DAYS,
+  SOON_DAYS, cycleState, pendingCycle, PAYMENT_TERM_DAYS, PAY_TERMS, cashDateOf,
 }
