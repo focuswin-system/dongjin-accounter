@@ -585,6 +585,42 @@ try {
   fail(`라우트 순서 검사 실패: ${e.message}`)
 }
 
+// ── [15] 보고서 카탈로그 ↔ 화면(REPORT_VIEWS) 동기화 ──
+//
+// 목록은 서버(platform/reportCatalog.js), 화면은 프런트(screens/Docs.jsx REPORT_VIEWS)에 있다.
+// 둘이 어긋나면 조용히 사라진다:
+//   서버에만 있음 → 화면이 그 항목을 건너뛴다(회사가 산 양식이 안 보인다 — 항의가 들어온다)
+//   화면에만 있음 → 아무도 못 본다. 실제로 이 상태의 보고서가 3개 방치돼 있었다
+//                  (계약별·방산·세무사 전달용 — 코드는 멀쩡한데 목록에 없었다)
+console.log('\n[15] 보고서 카탈로그 ↔ 화면(REPORT_VIEWS) 동기화')
+try {
+  const { BUILTIN_REPORTS } = require('../platform/reportCatalog')
+  const docsPath = path.join(__dirname, '..', '..', 'src', 'screens', 'Docs.jsx')
+  if (!fs.existsSync(docsPath)) {
+    console.log('  ⏭  프런트 소스 없음(배포 환경) — 건너뜀')
+    throw { skip: true }
+  }
+  const src = fs.readFileSync(docsPath, 'utf8')
+  const m = /const REPORT_VIEWS\s*=\s*\{([\s\S]*?)\}/.exec(src)
+  if (!m) throw new Error('Docs.jsx 에서 REPORT_VIEWS 를 찾지 못했습니다')
+  const viewKeys = new Set([...m[1].matchAll(/([a-zA-Z_][\w]*)\s*:/g)].map(x => x[1]))
+  const catKeys = BUILTIN_REPORTS.map(r => r.key)
+
+  const noView = catKeys.filter(k => !viewKeys.has(k))
+  const noCatalog = [...viewKeys].filter(k => !catKeys.includes(k))
+  if (noView.length) {
+    fail('카탈로그에 있으나 화면이 없음: ' + noView.join(', ') +
+         '\n      → screens/Docs.jsx REPORT_VIEWS 에 추가하거나 카탈로그에서 빼세요.')
+  }
+  if (noCatalog.length) {
+    fail('화면은 있으나 카탈로그에 없음(아무도 못 봅니다): ' + noCatalog.join(', ') +
+         "\n      → platform/reportCatalog.js 에 등록하세요(안 팔 거면 scope:'entitled').")
+  }
+  if (!noView.length && !noCatalog.length) ok(`보고서 ${catKeys.length}개 동기화 확인`)
+} catch (e) {
+  if (!e.skip) fail(`보고서 카탈로그 검사 실패: ${e.message}`)
+}
+
 console.log('\n' + '━'.repeat(64))
 if (failures === 0) {
   console.log(' ✅ 격리 검사 통과')

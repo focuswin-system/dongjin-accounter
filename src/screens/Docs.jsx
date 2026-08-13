@@ -1356,15 +1356,17 @@ const isSettled = s => {
  *   · 세무사 전달용 자료 — 건수·기간이 하드코딩이고 ZIP 버튼이 토스트만 띄운다.
  *   계약별 손익은 계약 화면에서 이미 실데이터로 볼 수 있다(계약 상세의 원가·손익).
  *   실구현하면 다시 넣는다. */
-const REPORTS = [
-  { id: "monthly",     t: "월별 입금/지출 현황",       d: "이번 달과 지난 달을 비교해보세요." },
-  { id: "tax4",        t: "4대보험·원천세 신고 자료",   d: "매달 10일 납부 기한 전에 신고서를 받으세요." },
-  { id: "category",    t: "비목별 지출 현황",           d: "재료비·외주가공비·시험검사비 등 비목별 비교." },
-  { id: "vendor",      t: "발주처별 거래 현황",         d: "발주처별 거래 규모를 비교해보세요." },
-  { id: "ar",          t: "미수금 현황",                d: "받을 돈이 어디서 얼마나 남았는지 정리해드려요." },
-  { id: "subcontract", t: "외주가공비 분석",             d: "협력사별 외주비 비중과 단가 추이." },
-  { id: "vat",         t: "부가세 신고 자료",            d: "분기별 매출·매입세액 및 납부세액을 확인하세요." },
-]
+/* 보고서 목록은 **서버가 준다**(api.getReports).
+ *
+ * 예전엔 여기 하드코딩 배열이었다. 그래서 회사마다 다른 양식을 줄 방법이 없었고,
+ * 아래 REPORT_VIEWS 에는 화면이 있는데 이 배열에 없어 **아무도 못 보는 보고서가 3개**
+ * (계약별·방산·세무사 전달용) 방치돼 있었다 — 목록과 화면이 이미 따로 놀고 있었다는 뜻이다.
+ *
+ * 이제 목록은 서버(platform/reportCatalog.js), 화면은 여기(REPORT_VIEWS)다.
+ * 서버가 아직 화면이 없는 key 를 줘도 화면은 **그 항목만 조용히 건너뛴다** —
+ * 서버가 먼저 배포돼도 보고서 화면이 깨지지 않는다.
+ *
+ * 설계: docs/02-design/features/company-report-templates.design.md */
 
 // ── 1. 월별 입금/지출 현황 ───────────────────────────────────
 const ReportMonthly = ({ toast }) => {
@@ -2120,8 +2122,19 @@ const REPORT_VIEWS = {
 export const ReportsScreen = () => {
   const toast = useToast()
   const [active, setActive] = useState(null)
+  const [items, setItems] = useState(null)     // null = 아직 안 불러옴
   const printRef = useRef(null)
-  const report = REPORTS.find(r => r.id === active)
+
+  useEffect(() => {
+    let alive = true
+    api.getReports().then(list => { if (alive) setItems(list) })
+    return () => { alive = false }
+  }, [])
+
+  /* 화면이 있는 것만 그린다 — 서버가 먼저 배포돼 아직 없는 key 를 줘도 깨지지 않는다.
+     잠긴 양식(안 산 것)은 화면이 없어도 카드로는 보여야 하므로 여기서 거르지 않는다. */
+  const list = (items || []).filter(r => r.locked || REPORT_VIEWS[r.key])
+  const report = list.find(r => r.key === active)
 
   /* 예전엔 두 버튼이 토스트만 띄웠다("PDF로 내려받았어요"). 파일은 안 받아지는데 받았다고 말하니
      세무 신고철에 자료를 챙겼다고 믿고 넘어갈 수 있었다. 둘 다 실제로 동작하게 바꾼다.
@@ -2130,11 +2143,11 @@ export const ReportsScreen = () => {
      · 엑셀 — 화면에 그려진 표를 그대로 CSV로 뽑는다(lib/export.js). 보고서마다 집계를 다시 짜지
        않으므로 보이는 것과 받는 것이 어긋날 수 없다. */
   const doExport = () => {
-    const ok = downloadVisibleTables(printRef.current, `${report.t}_${localToday()}.csv`)
+    const ok = downloadVisibleTables(printRef.current, `${report.title}_${localToday()}.csv`)
     if (!ok) toast.push("내보낼 표가 없어요", { tone: 'warn' })
   }
 
-  if (active && report) {
+  if (active && report && !report.locked) {
     const View = REPORT_VIEWS[active]
     return (
       <div className="fade-up">
@@ -2147,7 +2160,7 @@ export const ReportsScreen = () => {
         </div>
         {/* report-print — index.css 의 인쇄 whitelist. 이 클래스가 없으면 인쇄가 백지로 나온다. */}
         <div className="report-print" ref={printRef}>
-          <div className="page-title" style={{ marginBottom: 4 }}>{report.t}</div>
+          <div className="page-title" style={{ marginBottom: 4 }}>{report.title}</div>
           <div className="page-sub" style={{ marginBottom: 24 }}>{localToday()} 조회 기준</div>
           <View toast={toast}/>
         </div>
@@ -2158,24 +2171,37 @@ export const ReportsScreen = () => {
   return (
     <div className="fade-up">
       <PageHeader title="보고서"/>
+      {items === null ? (
+        <Loading label="보고서 목록을 불러오는 중…"/>
+      ) : list.length === 0 ? (
+        <div className="card card-pad text-sm text-muted" style={{ textAlign: "center", padding: 40 }}>
+          볼 수 있는 보고서가 없어요. 관리자에게 문의하세요.
+        </div>
+      ) : (
       <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
-        {REPORTS.map(r => (
-          <button key={r.id} className="card card-pad"
-            onClick={() => setActive(r.id)}
-            style={{ cursor: "pointer", textAlign: "left", fontFamily: "inherit", border: "1px solid var(--line)", transition: "border-color .12s, background .12s" }}
+        {list.map(r => (
+          <button key={r.key} className="card card-pad"
+            onClick={() => r.locked
+              ? toast.push(`'${r.title}'은(는) 추가 기능이에요. 도입을 원하시면 문의해주세요.`)
+              : setActive(r.key)}
+            style={{ cursor: "pointer", textAlign: "left", fontFamily: "inherit", border: "1px solid var(--line)", transition: "border-color .12s, background .12s", opacity: r.locked ? 0.72 : 1 }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--line-strong)"; e.currentTarget.style.background = "var(--surface-2)" }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--line)"; e.currentTarget.style.background = "" }}>
             <div className="row" style={{ marginBottom: 14 }}>
-              <div style={{ width: 32, height: 32, borderRadius: 10, background: "var(--brand-soft)", color: "var(--brand)", display: "grid", placeItems: "center" }}>
+              <div style={{ width: 32, height: 32, borderRadius: 10, background: r.locked ? "var(--surface-2)" : "var(--brand-soft)", color: r.locked ? "var(--muted2)" : "var(--brand)", display: "grid", placeItems: "center" }}>
                 <Icon.Chart size={16}/>
               </div>
-              <span className="ml-auto text-muted2"><Icon.Right size={14}/></span>
+              {/* 못 산 양식은 **회사 마스터에게만** 온다(서버가 거른다). 사원 화면은 광고판이 아니다. */}
+              {r.locked
+                ? <span className="badge ml-auto" style={{ fontSize: 10 }}>추가 기능</span>
+                : <span className="ml-auto text-muted2"><Icon.Right size={14}/></span>}
             </div>
-            <div className="fw-700" style={{ marginBottom: 4 }}>{r.t}</div>
-            <div className="text-sm text-muted">{r.d}</div>
+            <div className="fw-700" style={{ marginBottom: 4 }}>{r.title}</div>
+            <div className="text-sm text-muted">{r.descr}</div>
           </button>
         ))}
       </div>
+      )}
     </div>
   )
 }

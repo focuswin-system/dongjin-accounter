@@ -430,6 +430,18 @@ export const api = {
     try { return await req(`/payment-runs?month=${month}`) } catch { return { month, total: 0, count: 0, missingBank: 0, vendors: [] } }
   },
 
+  /* 보고서 카탈로그 — **회사마다 다를 수 있다.**
+   *
+   * 예전엔 목록이 화면 파일에 하드코딩돼 있었다. 그래서 회사별로 다른 양식을 줄 수 없었고,
+   * 화면 코드는 있는데 목록에 없어 아무도 못 보는 보고서가 3개 방치돼 있었다.
+   *
+   * 실패하면 **빈 목록**을 준다. 예전 방식(하드코딩 배열)으로 되돌리는 대비 코드를 두면
+   * 서버가 "이 회사는 이것만"이라고 말했는데 화면이 전부 그리는 일이 생긴다 —
+   * 잠긴 양식이 장애 중에 열리는 셈이라, 차라리 비어 보이는 편이 낫다. */
+  async getReports() {
+    try { return (await req('/reports'))?.items || [] } catch { return [] }
+  },
+
   /* 자금 현황 — 기간(주·월·분기·년) 단위. 자금일보와 같은 산식, 축만 다르다. */
   async getFundStatus({ unit = 'month', offset = 0 } = {}) {
     try { return await req(`/fund-status?unit=${unit}&offset=${offset}`) } catch { return null }

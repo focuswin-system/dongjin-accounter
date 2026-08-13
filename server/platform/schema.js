@@ -12,6 +12,7 @@ const { randomUUID } = require('crypto')
 const PLATFORM_TABLES = [
   'companies', 'users', 'roles', 'user_roles', 'role_perms',
   'platform_admins', 'audit_logs', 'error_logs', 'tenant_migrations',
+  'company_features', 'report_templates',
 ]
 
 /**
@@ -180,6 +181,48 @@ async function createPlatformSchema(c) {
   `)
 
   // 테넌트별 마이그레이션 적용 상태 (P3 러너가 사용)
+  await c.execute(`
+    /* 회사가 무엇을 쓸 수 있나(entitlement). **권한과 다른 축이다** —
+       권한은 회사 안에서 마스터가 정하고, 이건 우리(공급자)가 정한다.
+       ⚠ 회사 DB가 아니라 여기 있는 이유: 회사 DB에 두면 고객사 마스터가 자기 유료 기능을
+         스스로 켤 수 있다. 보고서 말고 다른 유료 기능도 같은 표를 쓴다.
+       설계: docs/02-design/features/company-report-templates.design.md §4.1 */
+    CREATE TABLE IF NOT EXISTS company_features (
+      id          VARCHAR(36) PRIMARY KEY,
+      company_id  VARCHAR(36) NOT NULL,
+      feature_key VARCHAR(80) NOT NULL,      -- 'report:defense' 처럼 '<영역>:<이름>'
+      enabled     TINYINT NOT NULL DEFAULT 1, -- 0 = 회수(요금제로 받은 것도 뺀다)
+      starts_on   DATE,                       -- 비면 즉시
+      expires_on  DATE,                       -- 비면 무기한. 구독으로 팔 때만 채운다
+      granted_by  VARCHAR(36),                -- platform_admins.id — 누가 켰나
+      memo        VARCHAR(300),
+      created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_company_feature (company_id, feature_key),
+      KEY idx_cf_company (company_id)
+    )
+  `)
+
+  /* 회사 전용·선언형 보고서 양식. **지금은 비어 있다** —
+     P0에서는 내장 카탈로그(platform/reportCatalog.js)만 쓴다.
+     definition(JSON)은 선언형 엔진(P3) 자리다. 스키마를 미리 두는 이유는,
+     나중에 표를 새로 만들면서 기존 데이터를 옮기는 일을 피하기 위해서다. */
+  await c.execute(`
+    CREATE TABLE IF NOT EXISTS report_templates (
+      id               VARCHAR(36) PRIMARY KEY,
+      key_name         VARCHAR(80) NOT NULL UNIQUE,   -- 화면의 REPORT_VIEWS[key] 와 1:1
+      title            VARCHAR(120) NOT NULL,
+      descr            VARCHAR(300),
+      kind             VARCHAR(20) NOT NULL DEFAULT 'custom',   -- builtin | custom
+      scope            VARCHAR(20) NOT NULL DEFAULT 'entitled', -- all | entitled
+      owner_company_id VARCHAR(36),                   -- custom 이면 그 회사 전용
+      definition       JSON,                          -- P3(선언형)에서만 채운다
+      active           TINYINT NOT NULL DEFAULT 1,
+      sort_order       INT NOT NULL DEFAULT 100,
+      created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_rt_owner (owner_company_id)
+    )
+  `)
+
   await c.execute(`
     CREATE TABLE IF NOT EXISTS tenant_migrations (
       db_name    VARCHAR(64) NOT NULL,

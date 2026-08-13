@@ -1023,11 +1023,13 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
     body *:not(:has(:is(#resolution-print, .resolution-print, #statement-print, .report-print, .fund-print))):not(:is(#resolution-print, .resolution-print, #statement-print, .report-print, .fund-print)):not(:is(#resolution-print, .resolution-print, #statement-print, .report-print, .fund-print) *) {
       display: none !important;
     }
-    /* 자금 현황은 앱 셸(사이드바 + 내부 스크롤 컨테이너) **안쪽 깊이** 있다.
-       조상이 좁거나 overflow:hidden 이면 종이에도 그 폭 그대로 찍힌다 —
-       실제로 1600px 화면에서 192px 짜리 기둥 하나로 나왔다(글자가 세로로 한 자씩).
-       조상만 골라 폭·넘침 제한을 푼다. 다른 인쇄 문서는 건드리지 않는다. */
-    body *:has(.fund-print) {
+    /* 인쇄 대상은 앱 셸(사이드바 + main flex + 내부 스크롤 컨테이너) **안쪽 깊이** 있다.
+       위에서 형제들을 display:none 하면 main 이 내용 폭으로 쪼그라들고,
+       종이에도 그 폭 그대로 찍힌다 — 1600px 화면에서 **192px 짜리 기둥 하나**로 나왔다.
+       자금 현황에서 처음 잡았는데, 재보니 **보고서·결의서도 똑같았다**
+       (main 232px → 보고서 192px). 인쇄 대상 전부의 조상에서 폭·넘침 제한을 푼다.
+       거래명세서는 드로어 안이라 아래 전용 규칙이 이미 같은 일을 하고 있었다. */
+    body *:has(:is(#resolution-print, .resolution-print, #statement-print, .report-print, .fund-print)) {
       display: block !important; width: auto !important; max-width: none !important;
       height: auto !important; max-height: none !important; overflow: visible !important;
       padding: 0 !important; margin: 0 !important;

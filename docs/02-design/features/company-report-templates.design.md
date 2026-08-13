@@ -1,0 +1,351 @@
+# 회사별 보고서 양식 — 기반 설계
+
+> **Version**: 0.1
+> **Date**: 2026-08-13
+> **Author**: Chajuick
+> **Status**: P0 구현 완료(2026-08-14). 열린 결정 3건은 §9 참조 — P0는 셋과 무관하게 동작한다
+> **관련 문서**: `multi-tenant-saas.design.md`(§3 DB 2계층 · §4 RBAC), `mgmt-query-assistant.design.md`(화이트리스트 집계 패턴)
+
+---
+
+## 0. 요약 (TL;DR)
+
+경영정보 > **보고서** 칸을, 회사마다 다른 양식을 받아볼 수 있는 자리로 만든다.
+나중에 **추가 결제 모델**로 팔 수 있는 구조까지 지금 열어 둔다.
+
+- **테넌트 격리는 추가로 할 일이 없다.** DB-per-tenant라 `req.db` 가 이미 회사별로 갈려 있다.
+  API에 `companyId` 를 받는 설계는 **금지**한다(§2).
+- 진짜 설계 대상은 **"어떤 회사가 어떤 양식을 볼 수 있나"** 와 **"양식을 어디에 담나"** 두 가지다.
+- **두 축을 분리한다**: 회사가 **샀나**(entitlement, 플랫폼 DB) × 사용자가 **볼 수 있나**(permission, 기존 RBAC). 한 필드로 합치면 나중에 못 푼다.
+- **지금 할 일은 한 가지**: 보고서 카탈로그를 하드코딩에서 **서버가 내려주는 목록**으로 바꾼다.
+  지금은 싸고, 나중에 retrofit하면 보고서 화면 전체를 다시 만져야 한다.
+- 유료 판매·선언형 엔진은 **뒤 단계**다. 지금 단계에서 회사별 목록이 달라지지 않아도 된다(§8).
+
+---
+
+## 1. 현행 파악
+
+### 1.1 보고서는 지금 어떻게 되어 있나
+
+| 구성 | 위치 | 형태 |
+|---|---|---|
+| 카탈로그 | `src/screens/Docs.jsx` `REPORTS` | **하드코딩 배열 7개** |
+| 화면 | 같은 파일 `REPORT_VIEWS` | React 컴포넌트 **10개** |
+| 데이터 | 각 컴포넌트가 기존 API 호출 | 전용 보고서 API 없음 |
+| 인쇄 | `.report-print` (index.css whitelist) | **공용** |
+| 엑셀 | `downloadVisibleTables()` — 화면의 표를 그대로 CSV | **공용** |
+
+### 1.2 이미 드러나 있는 사실 두 가지
+
+**(a) 카탈로그와 화면은 이미 분리돼 있다.**
+`REPORT_VIEWS` 에는 10개가 있는데 `REPORTS` 에는 7개만 있다.
+`contract`(계약별) · `defense`(방산) · `taxoffice`(세무사 전달용) 셋은 **코드가 살아 있는데 목록에 없어 아무도 못 본다.**
+→ "목록을 밖에서 정한다"는 구조가 이미 필요했다는 증거다. 그리고 이 셋이 **회사별로 켜는 첫 후보**다
+   (방산 보고서를 방산 아닌 회사에 보여줄 이유가 없다).
+
+**(b) 인쇄·엑셀이 공용이라, 새 양식은 만들자마자 인쇄·엑셀을 얻는다.**
+커스텀 보고서 제품의 절반이 이미 만들어져 있다. 이건 큰 이점이고, 설계에서 깨뜨리면 안 된다
+→ **모든 양식은 반드시 `.report-print` 안에 표(`<table>`)로 그린다**는 제약을 유지한다.
+
+### 1.3 지금 없는 것
+
+- **entitlement 개념이 전혀 없다.** `companies.plan` 컬럼이 플랫폼 DB에 있지만
+  **코드 어디에서도 읽지 않는다** — 껍데기만 있다.
+- 보고서 전용 API가 없다(`/api/reports` 없음).
+
+---
+
+## 2. 원칙 — API에 회사 id를 받지 않는다
+
+> 검토 요청 원문: *"api에 회사 id 넣고 검증하고..."*
+
+**이 코드베이스에서는 하면 안 된다.** 그리고 **할 필요도 없다.**
+
+```
+로그인 → JWT{ companyId, dbName } → middleware/tenant.js → req.db = getPool(dbName)
+                                                            └ 이 뒤 모든 라우트는 req.db 로만 질의
+```
+
+- 회사 식별은 **토큰**에서 오고, 서버가 **풀 선택**으로 강제한다. 요청 본문·경로에 회사 id를 받는 곳은 현재 **한 곳도 없다.**
+- 여기에 `companyId` 파라미터를 새로 만들면, **검증을 한 군데만 빠뜨려도** 남의 회사 회계 데이터를 에러 없이 읽는다.
+- `npm run check:isolation` 은 *전역 풀 사용*을 잡지, *파라미터를 믿는 코드*는 못 잡는다 — 방어망 밖이다.
+- CLAUDE.md 최우선 규칙 위반이다.
+
+**결론: 보고서 기능에서 격리를 위해 추가로 작성할 코드는 없다.** 이미 공짜다.
+
+> 유일한 예외는 **운영자 콘솔**(`/api/admin`)이다. 거기는 의도적으로 회사를 가로지르며,
+> LAN 게이트 + platformAuth 두 자물쇠로 막혀 있고 **회계 내용은 애초에 노출하지 않는다**.
+> 보고서 기능은 이 경로에 얹지 않는다(§7 D7).
+
+---
+
+## 3. 두 축 분리 — 이 설계의 핵심
+
+| 축 | 질문 | 주체 | 저장 위치 | 이유 |
+|---|---|---|---|---|
+| **Entitlement** | 이 **회사**가 샀나 | 우리(공급자) | **플랫폼 DB** `acct_platform` | 테넌트 DB에 두면 **고객사 마스터가 자기 유료 기능을 스스로 켠다** |
+| **Permission** | 이 **사용자**가 볼 수 있나 | 고객사 마스터 | 기존 `role_perms` | 회사 안의 문제. 기존 RBAC 그대로 |
+
+합치면 안 되는 이유: **"회사는 샀는데, 부장은 보고 사원은 못 본다"** 가 표현돼야 한다.
+한 필드로 뭉치면 나중에 못 푼다.
+
+판정은 **AND** 다.
+
+```
+보고서가 보인다 = entitled(회사, 양식) AND can(사용자, 'report', 'view')
+```
+
+---
+
+## 4. 데이터 모델
+
+### 4.1 플랫폼 DB — 새 테이블 2개
+
+```sql
+-- 회사가 무엇을 쓸 수 있나. 보고서 말고 다른 유료 기능도 여기 얹는다.
+CREATE TABLE IF NOT EXISTS company_features (
+  id          VARCHAR(36) PRIMARY KEY,
+  company_id  VARCHAR(36) NOT NULL,
+  feature_key VARCHAR(80) NOT NULL,      -- 'report:defense' · 'report:taxoffice' · 'report:custom:c0001-1'
+  enabled     TINYINT NOT NULL DEFAULT 1,
+  starts_on   DATE,                      -- 비면 즉시
+  expires_on  DATE,                      -- 비면 무기한(영구 판매). 구독이면 채운다
+  granted_by  VARCHAR(36),               -- platform_admins.id — 누가 켰나
+  memo        VARCHAR(300),              -- 계약번호 등
+  created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_company_feature (company_id, feature_key),
+  KEY idx_cf_company (company_id)
+);
+
+-- 양식 자체의 메타데이터. 1단계에서는 '코드로 짠 보고서'의 목록표 역할만 한다.
+CREATE TABLE IF NOT EXISTS report_templates (
+  id          VARCHAR(36) PRIMARY KEY,
+  key_name    VARCHAR(80) NOT NULL UNIQUE,  -- REPORT_VIEWS 의 id 와 1:1 (monthly, defense, …)
+  title       VARCHAR(120) NOT NULL,
+  descr       VARCHAR(300),
+  kind        VARCHAR(20) NOT NULL,          -- 'builtin' | 'custom'
+  scope       VARCHAR(20) NOT NULL,          -- 'all'(전 회사 기본) | 'entitled'(사야 보임)
+  owner_company_id VARCHAR(36),              -- custom 이면 그 회사 전용. builtin 이면 NULL
+  definition  JSON,                          -- 2단계(선언형)에서만 채운다. 1단계는 NULL
+  active      TINYINT NOT NULL DEFAULT 1,
+  sort_order  INT NOT NULL DEFAULT 100,
+  created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**왜 양식 정의를 테넌트 DB가 아니라 플랫폼 DB에 두나**
+- 양식은 **우리가 만들어 파는 자산**이다. 테넌트 DB에 흩어 두면 회사 수만큼 복사본이 생기고,
+  한 곳을 고치면 나머지가 안 고쳐진다.
+- 회사 추가/삭제(`npm run tenant`)와 무관하게 살아야 한다.
+- **단, 양식이 참조하는 값(비목 id·계정과목)은 테넌트 데이터다** → 실행 시점에 검사한다(§6.3).
+
+### 4.2 `companies.plan` 은 어떻게 하나
+
+지금 **아무도 안 읽는 죽은 컬럼**이다. 두 갈래:
+- **살린다** — `plan` 은 *묶음 기본값*(basic이면 이 5개, pro면 이 8개)을 해석하는 데만 쓰고,
+  개별 예외는 `company_features` 가 덮어쓴다.
+- **버린다** — 묶음 없이 전부 `company_features` 로만 관리한다.
+
+**추천: 일단 버리는 쪽으로 두되 컬럼은 남긴다.** 고객이 5곳 안쪽인 동안 묶음은 관리 부담만 늘린다.
+묶음이 필요해지는 시점(요금제를 실제로 인쇄물에 적기 시작할 때)에 살리면 된다. → §9 열린 결정 1
+
+---
+
+## 5. API
+
+### 5.1 새 라우트 — `GET /api/reports`
+
+```jsonc
+// 응답
+{
+  "items": [
+    { "key": "monthly", "title": "월별 입금/지출 현황", "descr": "…",
+      "kind": "builtin", "locked": false },
+    { "key": "defense", "title": "방산 원가 보고서", "descr": "…",
+      "kind": "builtin", "locked": true, "lockReason": "plan" }
+  ]
+}
+```
+
+- 회사 구분은 **`req.user.companyId`** 로만 한다(경로·본문 아님).
+- `locked` 는 **entitlement 결과**다. 권한(permission)으로 막힌 것은 애초에 이 API가 403이다.
+- `GET /api/reports/:key/data` 는 **1단계에서 만들지 않는다.** 기존 보고서는 각자 기존 API를 쓰고 있고,
+  전용 데이터 API는 2단계(선언형 엔진)에서 필요해진다. 지금 만들면 쓰지도 않는 표면만 늘어난다.
+
+### 5.2 권한 등록 (필수)
+
+`server/platform/apiPerms.js` 에 반드시 추가한다. 빠뜨리면 `check:isolation` 이 배포 전에 실패시킨다.
+
+```js
+'/api/reports': ['report'],
+```
+
+새 자원(`RESOURCES`)은 **추가하지 않는다.** 보고서 화면은 이미 `report` 자원이 있고,
+양식 하나하나를 자원으로 만들면 권한 매트릭스가 양식 수만큼 부풀어 고객사 마스터가 감당 못 한다.
+**양식 단위 제어는 permission이 아니라 entitlement의 일**이다(§3).
+
+### 5.3 잠긴 양식을 게이트하는 곳
+
+```
+목록(GET /api/reports)          → locked 플래그만 내려준다. 데이터는 없다.
+잠긴 양식 화면 진입             → 프런트가 안내 카드만 그린다. 데이터 API를 호출하지 않는다.
+(2단계) GET /reports/:key/data  → 서버가 entitlement 재확인 후 403. 프런트를 믿지 않는다.
+```
+
+---
+
+## 6. 양식을 담는 방법 — 단계별
+
+### 6.1 1단계 (지금) — 코드로 짠 보고서 + 서버 카탈로그
+
+- `REPORT_VIEWS` 는 **그대로 둔다**(코드로 짠 React 컴포넌트).
+- `REPORTS` 하드코딩 배열만 **없애고**, `GET /api/reports` 가 준 목록을 그린다.
+- 서버 목록의 `key` 로 `REPORT_VIEWS[key]` 를 찾는다. 없으면 그 항목은 **안 그린다**
+  (서버가 아직 배포 안 된 양식을 내려줄 수 있다 — 프런트가 죽으면 안 된다).
+
+장점: 지금 당장 가능하고 위험이 거의 없다. 고객 3~5곳까지 제일 싸다.
+한계: 커스텀은 우리가 코드로 짜고 **배포해야 반영**된다. 고객이 늘면 유지보수가 선형으로 는다.
+
+### 6.2 2단계 — 선언형 정의 + 화이트리스트 번역기
+
+양식 = JSON 정의. 서버가 **미리 정한 맵으로만** SQL로 번역한다.
+
+```jsonc
+{
+  "source": "transactions",          // 화이트리스트: transactions | invoices | payroll
+  "period": { "unit": "month", "field": "date" },
+  "group":  ["category", "vendor"],  // GROUP 맵의 키만 허용
+  "filter": { "kind": "expense" },   // FILTER_COLS 맵의 키만 허용
+  "columns": [{ "agg": "sum", "of": "amount", "label": "지출액" }],
+  "totals":  ["sum"]
+}
+```
+
+**절반은 이미 있다.** `server/routes/analytics.js` 가 정확히 이 패턴이다 —
+`GROUP` / `FILTER_COLS` 맵의 **값만** SQL에 들어가고 사용자 입력은 절대 안 들어간다.
+그 맵을 `server/lib/reportDsl.js` 로 승격해 두 곳이 함께 쓰면 된다.
+
+한계(의도): 부가세·4대보험처럼 **계산 규칙이 도메인인 보고서는 못 담는다.** 그건 1단계(코드)로 남긴다.
+선언형은 "집계 축과 열이 다를 뿐인 양식"을 위한 것이다 — 회사별 커스텀의 대부분이 여기 해당한다.
+
+### 6.3 회사마다 다른 비목 체계 — 이 설계의 진짜 함정
+
+`ref_items` · `categories` · 계정과목은 **테넌트 DB**에 있고 회사마다 다르다.
+같은 정의(`group: ["category"]`)도 회사마다 **다른 뜻**이 된다.
+
+- 양식 정의에는 **비목 id를 박지 않는다.** 축(`category`)만 적고 값은 실행 시점에 그 회사 것을 쓴다.
+- 특정 비목을 꼭 찍어야 하는 양식(예: "외주가공비만")은 **회사별 매핑 표**가 먼저 필요하다.
+  그 매핑 없이 양식을 회사 간에 복사하면 조용히 틀린 숫자가 나온다.
+- **1단계에서는 이 문제를 피한다** — 양식을 회사 간에 재사용하지 않고, 회사 전용으로만 만든다.
+
+---
+
+## 7. 결정 사항
+
+| # | 결정 | 이유 |
+|---|---|---|
+| D1 | API에 `companyId` 를 받지 않는다 | `req.db` 로 이미 격리. 파라미터는 구멍만 만든다 (§2) |
+| D2 | entitlement(플랫폼 DB) × permission(RBAC) 두 축 분리, 판정은 AND | "회사는 샀는데 사원은 못 본다"가 표현돼야 한다 |
+| D3 | entitlement는 **반드시 플랫폼 DB** | 테넌트 DB면 고객사 마스터가 자기 유료 기능을 켠다 |
+| D4 | 양식 단위로 **RBAC 자원을 만들지 않는다** | 권한 매트릭스가 양식 수만큼 부풀어 마스터가 감당 못 한다 |
+| D5 | 카탈로그를 서버가 내려준다 | 지금 몇 시간, 나중 retrofit이면 화면 전체 |
+| D6 | 모든 양식은 `.report-print` 안에 `<table>` 로 그린다 | 인쇄·엑셀 공용 인프라를 그대로 물려받는다 |
+| D7 | **임의 SQL·템플릿 업로드는 하지 않는다** | 임의 SQL은 테넌트 격리 우회, 템플릿 엔진은 RCE 표면 |
+| D8 | 운영자 콘솔은 고객 회계 데이터를 계속 안 본다 | 보고서 기능을 콘솔에 얹지 않는다. 켜고 끄는 스위치만 둔다 |
+| D9 | 유료 양식 조회는 `audit_logs` 에 남긴다 | 과금 근거. 감사 인프라는 이미 있다 |
+| D10 | 잠긴 양식은 **회사 마스터에게만** 잠금 표시로 보인다 | 일반 사원 화면에 광고를 띄우지 않는다 → §9 열린 결정 2 |
+
+---
+
+## 8. 단계 계획
+
+| 단계 | 내용 | 회사별로 목록이 달라지나 | 위험 |
+|---|---|---|---|
+| **P0** (지금) | `GET /api/reports` 신설 · `apiPerms` 등록 · 프런트가 서버 목록을 그림 · `company_features`/`report_templates` 스키마만 생성 | **아니오** — 전 회사 동일 목록 | 낮음. 기존 7개가 그대로 나오면 회귀 없음 |
+| **P1** | 운영자 콘솔에 회사별 기능 on/off (콘솔·감사 이미 있음) · 미노출 3개(`contract`/`defense`/`taxoffice`)를 첫 대상으로 | 예 | 낮음 |
+| **P2** | 코드형 커스텀 양식을 실제로 1~2곳에 판매 | 예 | **사업 위험**이 큼 (§10) |
+| **P3** | 선언형 엔진 (`reportDsl.js`) — 배포 없이 양식 추가 | 예 | 중간. 비목 매핑(§6.3)이 선행 |
+
+**P0의 판정 기준: 배포 후에도 기존 7개 보고서가 그대로 보이고 인쇄·엑셀이 동작한다.**
+회사별 차등은 P0의 목표가 아니다 — 문만 낸다.
+
+---
+
+## 9. 열린 결정 (판단 필요)
+
+1. **`companies.plan` 을 살릴 것인가, 버릴 것인가** (§4.2)
+   추천: 지금은 버린다(컬럼은 남긴다). 고객 5곳 안쪽에서 묶음은 관리 부담만 는다.
+
+2. **잠긴 양식을 누구에게 보일 것인가** (D10)
+   추천: **회사 마스터에게만** 잠금 표시. 일반 사원에게는 아예 안 보인다.
+   (대안 ⓐ 전원에게 보임 — 팔리긴 쉬우나 화면이 광고가 된다. ⓑ 아무에게도 안 보임 — 존재를 모르니 안 팔린다.)
+
+3. **판매 모델: 영구인가 구독인가** (`expires_on`)
+   구독이면 만료 처리·안내·유예 기간이 전부 따라온다. 영구면 `expires_on` 은 비워 둔다.
+   추천: **P2까지는 영구(수동 관리)**. 자동 과금은 고객이 10곳 넘은 뒤에 붙인다.
+
+---
+
+## 10. 위험 — 기술보다 큰 것
+
+1. **요구사항 창구가 열린다.** "커스텀 보고서"를 팔면 고객사가 계속 고쳐달라고 한다.
+   계약에 **몇 개까지 / 얼마나 자주 바꿀 수 있나**를 못 박지 않으면 개발이 그 고객 전담이 된다.
+   → 이 기능의 실패는 대개 여기서 난다. **P2 착수 조건에 계약 문구를 넣는다.**
+
+2. **비목 체계 차이**(§6.3) — 양식을 회사 간에 복사하면 조용히 틀린 숫자가 나온다.
+   1단계에서는 회사 전용으로만 만들어 이 문제를 피한다.
+
+3. **양식이 늘면 코드가 눌러앉는다.** 지금도 안 쓰는 컴포넌트가 3개 있다(§1.2a).
+   `report_templates.active=0` 으로 내려도 **코드는 남는다** — 정리 시점을 P3에 명시한다.
+
+---
+
+## 11. 부록 — P0에서 손대는 파일
+
+| 파일 | 변경 |
+|---|---|
+| `server/platform/schema.js` | `company_features` · `report_templates` 생성 (멱등) |
+| `server/routes/reports.js` | 신설 — `GET /api/reports` |
+| `server/index.js` | 라우터 등록 |
+| `server/platform/apiPerms.js` | `'/api/reports': ['report']` |
+| `server/lib/entitlements.js` | 신설 — `featuresOf(companyId)` (플랫폼 풀, 짧은 캐시) |
+| `src/lib/api.js` | `getReports()` |
+| `src/screens/Docs.jsx` | `REPORTS` 하드코딩 제거 → 서버 목록. `REPORT_VIEWS` 는 유지 |
+| `server/test/` | 카탈로그 판정 테스트(entitled/locked, 미배포 key 무시) |
+
+**변경하지 않는 것**: `downloadVisibleTables`, 기존 보고서 컴포넌트 10개, RBAC 자원 목록.
+
+---
+
+## 12. P0 구현 결과 (2026-08-14)
+
+### 실제로 만든 것
+| 파일 | 역할 |
+|---|---|
+| `server/platform/plans.js` | 요금제 **뼈대**. `PLANS.features` 는 전부 비어 있다 — 지금은 요금제가 아무 차이도 만들지 않는다 |
+| `server/platform/reportCatalog.js` | 양식 카탈로그(단일 소스) + `visibleReports()` 순수 함수 |
+| `server/lib/entitlements.js` | `featuresOf()` — 요금제 묶음 + 회사별 낱개 병합, 30초 캐시, `invalidate()`(P1용) |
+| `server/routes/reports.js` | `GET /api/reports` — 목록만. 회계 숫자 없음 |
+| `server/test/entitlements.test.js` | 14건 — 회수·기간·마스터 노출·P0 회귀 |
+| `check-isolation.js` [15] | **카탈로그 ↔ 화면 동기화 검사** |
+
+### 검사 [15]를 넣은 이유
+목록(서버)과 화면(`REPORT_VIEWS`)이 갈리면 조용히 사라진다. 실제로 그 상태의 보고서가 3개 있었다.
+이제 어느 쪽에만 있으면 **배포 전에 실패**한다.
+
+### 구현 중 잡은 결함 2건
+1. **만료가 영영 안 왔다.** mysql2 는 DATE 를 `Date` 객체로 준다. `String(date).slice(0,10)` 이
+   `'Thu Jan 01'` 이 되어 `'2026-08-14'` 와 문자열 비교하면 `'2' < 'T'` → 만료 판정이 항상 거짓.
+   **해지한 회사가 유료 양식을 계속 보는** 상태였고 에러가 한 줄도 안 난다.
+   → `dateOf()` 로 연·월·일을 직접 꺼낸다. 단위 테스트로 못 박음.
+2. **인쇄가 192px 기둥으로 나왔다(기존 결함).** 인쇄 CSS가 형제를 `display:none` 하면
+   `main`(flex)이 내용 폭으로 쪼그라들어 종이에도 그 폭으로 찍힌다.
+   자금 현황에서 처음 잡았는데 재보니 **보고서·결의서도 같았다**(main 232px → 보고서 192px).
+   → 조상 폭 해제 규칙을 인쇄 대상 4종 전부로 넓혔다. 보고서 1590px 확인.
+
+### 지금 상태
+- 기존 7개는 **전 회사 그대로**(회귀 없음).
+- 미노출이던 3개는 `scope:'entitled'` → 사원에게는 안 보이고, **마스터에게만 '추가 기능' 잠금 카드**로 뜬다.
+  이것이 P0에서 화면에 생기는 **유일한 변화**다. 원치 않으면 `reportCatalog.js` 에서 그 셋의
+  `scope` 를 `'all'` 로 바꾸거나 카탈로그에서 빼면 원상복귀된다.
+- 판매 경로는 아직 없다. `company_features` 에 행을 넣으면 즉시 잠금이 풀린다(실동작 확인).
