@@ -17,12 +17,18 @@ const METHOD_LABEL = {
   equal_payment: '원리금균등',
   equal_principal: '원금균등',
   bullet: '만기일시',
+  none: '일정 없음',
 }
 const METHOD_HINT = {
   equal_payment: '매월 같은 금액을 낸다. 초반엔 이자 비중이 크고 점점 원금이 커진다.',
   equal_principal: '원금을 균등하게 나눠 갚는다. 이자가 줄어 매월 납입액이 감소한다.',
   bullet: '만기까지 이자만 내고 원금은 만기에 한 번에 갚는다.',
+  /* 대표가수금·관계사 차입처럼 언제 갚을지 안 정한 채무. 회차를 만들지 않으므로
+     자금 예측에 출금이 안 잡히고, 부채 잔액으로만 남는다. */
+  none: '갚을 날짜가 정해지지 않은 돈이에요. 회차를 만들지 않고 잔액만 남깁니다 — 나중에 정해지면 방식을 바꾸면 돼요.',
 }
+/** 상환 일정이 없는 채무 — 회차·이율·기간 입력이 뜻을 잃는다 */
+const noSchedule = (m) => m === 'none'
 
 const dayDiff = (d) => Math.round((new Date(`${d}T00:00:00`) - new Date(`${localToday()}T00:00:00`)) / 86400000)
 const dday = (d) => { const n = dayDiff(d); return n === 0 ? '오늘' : n < 0 ? `+${Math.abs(n)}일 지남` : `D-${n}` }
@@ -107,9 +113,14 @@ const LoanFormDrawer = ({ open, editing, onClose, onSave, vendors, accounts }) =
           <div style={{ flex: 1 }}><label className="label">원금 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
             <MoneyInput value={form.principal} onChange={v => f('principal', v)}/>
           </div>
-          <div style={{ width: 130 }}><label className="label">연이율 (%)</label>
-            <input className="input num" value={form.annual_rate} onChange={e => f('annual_rate', e.target.value)} placeholder="4.2"/>
-            <div className="text-xs text-muted2" style={{ marginTop: 4 }}>무이자는 0</div>
+          <div style={{ width: 150 }}><label className="label">연이율 (%)</label>
+            <input className="input num" value={form.annual_rate} onChange={e => f('annual_rate', e.target.value)}
+              placeholder={noSchedule(form.method) ? '몰라도 됨' : '4.2'}/>
+            {/* '일정 없음'의 이율은 참고값이다 — 회차가 없어 이걸로 이자를 계산하지 않는다.
+                변동금리라 이율을 못 적는 경우와, 무이자인 경우는 다른 사실이라 지우지 않는다. */}
+            <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
+              {noSchedule(form.method) ? '적어도 계산엔 안 써요 — 이자는 갚을 때 직접 입력' : '무이자는 0'}
+            </div>
           </div>
         </div>
         <div><label className="label">상환 방식</label>
@@ -121,17 +132,22 @@ const LoanFormDrawer = ({ open, editing, onClose, onSave, vendors, accounts }) =
           </div>
           <div className="text-xs text-muted2" style={{ marginTop: 6 }}>{METHOD_HINT[form.method]}</div>
         </div>
+        {/* 일정이 없는 채무는 회차·상환일이 뜻을 잃는다 — 칸을 그리면 뭔가 채워야 하는 줄 안다 */}
         <div className="row gap-12">
-          <div style={{ flex: 1 }}><label className="label">상환 회차 (개월)</label>
-            <input className="input num" value={form.term_months} onChange={e => f('term_months', e.target.value.replace(/[^0-9]/g, ''))}/>
-          </div>
+          {!noSchedule(form.method) && (
+            <div style={{ flex: 1 }}><label className="label">상환 회차 (개월)</label>
+              <input className="input num" value={form.term_months} onChange={e => f('term_months', e.target.value.replace(/[^0-9]/g, ''))}/>
+            </div>
+          )}
           <div style={{ flex: 1 }}><label className="label">실행일 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
             <input className="input" type="date" value={form.start_date} onChange={e => f('start_date', e.target.value)}/>
           </div>
-          <div style={{ width: 110 }}><label className="label">상환일</label>
-            <input className="input num" value={form.pay_day} onChange={e => f('pay_day', e.target.value.replace(/[^0-9]/g, ''))}
-              placeholder="매월 N일"/>
-          </div>
+          {!noSchedule(form.method) && (
+            <div style={{ width: 110 }}><label className="label">상환일</label>
+              <input className="input num" value={form.pay_day} onChange={e => f('pay_day', e.target.value.replace(/[^0-9]/g, ''))}
+                placeholder="매월 N일"/>
+            </div>
+          )}
         </div>
         {/* 조건을 바꿀 때마다 결과를 보여준다 — 총 이자를 모르고 방식을 고를 수는 없다 */}
         {t && (
@@ -173,6 +189,90 @@ const LoanFormDrawer = ({ open, editing, onClose, onSave, vendors, accounts }) =
         </div>
       </div>
       <DrawerFooter onCancel={onClose} onSave={save} saveLabel={editing ? '수정' : '등록'}/>
+    </Drawer>
+  )
+}
+
+/* ── 수시 상환 Drawer — 회차 없이 금액을 직접 넣어 갚는다 ──────────────
+ *
+ * 상환 일정이 없는 채무(대표가수금 등)는 갚을 회차가 없다. 그런데 실무에서는 자금 여유가
+ * 생길 때 500만·1,000만씩 수시로 갚는다. 이 자리가 없으면 갚는 방법이 거래를 직접 등록하는
+ * 것뿐인데, 그러면 차입금과 연결이 안 돼 잔여 원금이 영영 안 줄어든다.
+ */
+const AdhocRepayDrawer = ({ loan, onClose, onDone, accounts }) => {
+  const toast = useToast()
+  const today = localToday()
+  const [date, setDate] = useState(today)
+  const [acct, setAcct] = useState('')
+  const [principal, setPrincipal] = useState('')
+  const [interest, setInterest] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    if (!loan) return
+    setDate(today); setPrincipal(''); setInterest('')
+    setAcct(loan.account_id || accounts.find(a => a.kind === 'bank')?.id || '')
+  }, [loan?.id])
+  if (!loan) return null
+  const p = Number(String(principal).replace(/[^0-9]/g, '')) || 0
+  const i = Number(String(interest).replace(/[^0-9]/g, '')) || 0
+  const left = Number(loan.remaining) || 0
+
+  const submit = async () => {
+    if (!acct) return toast.push('출금 계좌를 선택해주세요 — 안 고르면 계좌 잔액에 반영되지 않아요')
+    if (p + i <= 0) return toast.push('갚은 금액을 입력해주세요')
+    if (p > left) return toast.push(`남은 원금(${fmtNum(left)}원)보다 많이 갚을 수 없어요`, { tone: 'warn' })
+    if (date > today) return toast.push('미래 날짜로는 처리할 수 없어요')
+    setBusy(true)
+    const res = await api.repayLoanAdhoc(loan.id, { date, account_id: acct, principal: p, interest: i })
+    setBusy(false)
+    if (!res.ok) return toast.push(res.error || '처리에 실패했어요', { tone: 'warn' })
+    toast.push(p >= left ? '다 갚았어요 — 완료 처리했습니다' : `${fmtNum(p + i)}원 상환했어요 (남은 원금 ${fmtNum(res.remaining)}원)`)
+    onDone()
+  }
+  return (
+    <Drawer open onClose={onClose} width="min(460px, 100vw)">
+      <DrawerHead title="수시 상환" sub={<>{loan.name} · 남은 원금 {fmtNum(left)}원</>} onClose={onClose}/>
+      <div className="drawer-body col gap-form">
+        <div className="alert-row" style={{ background: 'var(--brand-soft)', borderColor: 'transparent' }}>
+          <Icon.Sparkle size={16}/>
+          <div>
+            <div className="lead">갚을 일정이 없는 채무예요</div>
+            <div className="body">이번에 실제로 나간 금액만 적어주세요. 남은 원금이 그만큼 줄고, 다 갚으면 완료로 바뀝니다.</div>
+          </div>
+        </div>
+        <div><label className="label">갚은 원금 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+          <MoneyInput value={principal} onChange={setPrincipal}/>
+          <div className="text-sm text-muted" style={{ marginTop: 4 }}>부채가 줄어드는 금액이에요. 비용이 아닙니다.</div>
+        </div>
+        <div><label className="label">함께 낸 이자</label>
+          <MoneyInput value={interest} onChange={setInterest}/>
+          <div className="text-sm text-muted" style={{ marginTop: 4 }}>이자를 냈다면 적어주세요. 이건 비용으로 잡힙니다. 없으면 비워두세요.</div>
+        </div>
+        <div><label className="label">출금 계좌</label>
+          <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+            {accounts.filter(a => a.kind === 'bank').map(a => (
+              <button key={a.id} type="button" className={`chip ${acct === a.id ? 'active' : ''}`}
+                onClick={() => setAcct(a.id)}>{a.name}</button>
+            ))}
+          </div>
+        </div>
+        <div><label className="label">상환일</label>
+          <input className="input num" type="date" value={date} max={today} onChange={e => setDate(e.target.value)}/>
+        </div>
+        {(p > 0 || i > 0) && (
+          <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
+            <div className="row"><span className="text-sm">출금 합계</span>
+              <span className="num fw-700 ml-auto">{fmtNum(p + i)}원</span></div>
+            <div className="row" style={{ marginTop: 4 }}><span className="text-sm text-muted">갚고 남는 원금</span>
+              <span className="num ml-auto">{fmtNum(Math.max(0, left - p))}원</span></div>
+            <div className="text-sm text-muted" style={{ marginTop: 8 }}>
+              지출 거래 <b>{(p > 0 ? 1 : 0) + (i > 0 ? 1 : 0)}건</b>으로 기록돼요 — 원금과 이자는 계정과목이 달라 뭉치면 손익이 틀어집니다.
+            </div>
+          </div>
+        )}
+      </div>
+      <DrawerFooter onCancel={onClose} onSave={submit} saveDisabled={busy}
+        saveLabel={busy ? '처리 중…' : '상환 처리'}/>
     </Drawer>
   )
 }
@@ -350,6 +450,7 @@ export const LoanScreen = ({ page = true }) => {
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState(null)
   const [repayTarget, setRepayTarget] = useState(null)   // { loan, cycle }
+  const [adhocTarget, setAdhocTarget] = useState(null)   // 일정 없는 채무의 수시 상환
   const [bulkTarget, setBulkTarget] = useState(null)     // { loan, cycles } — 놓친 상환 일괄
   const [openId, setOpenId] = useState(null)             // 스케줄 펼친 대출
 
@@ -485,7 +586,15 @@ export const LoanScreen = ({ page = true }) => {
             )},
             { key: 'act', header: '', width: 160, render: l => (
               <div className="row gap-6">
-                {l.next_cycle && (
+                {/* 일정 없는 채무는 회차가 없다 — 대신 금액을 직접 넣는 수시 상환을 연다.
+                    없애기만 하면 갚을 방법이 사라져 잔여 원금이 영영 안 줄어든다. */}
+                {l.status === 'active' && noSchedule(l.method) && (
+                  <button className="btn sm primary" style={{ fontSize: 11, padding: '3px 8px' }}
+                    onClick={() => setAdhocTarget(l)}>수시 상환</button>
+                )}
+                {/* 0원 회차는 상환할 것이 없다. 눌러도 서버가 막지만, 버튼을 보이면
+                    "왜 안 되지"로 막히므로 애초에 안 그린다. */}
+                {!noSchedule(l.method) && l.next_cycle && (Number(l.next_cycle.principal) + Number(l.next_cycle.interest)) > 0 && (
                   <button className="btn sm primary" style={{ fontSize: 11, padding: '3px 8px' }}
                     onClick={() => setRepayTarget({ loan: l, cycle: l.next_cycle })}>상환</button>
                 )}
@@ -504,6 +613,8 @@ export const LoanScreen = ({ page = true }) => {
         onClose={() => setRepayTarget(null)} onDone={() => { setRepayTarget(null); load() }}/>
       <BulkRepayDrawer loan={bulkTarget?.loan} cycles={bulkTarget?.cycles} accounts={accounts}
         onClose={() => setBulkTarget(null)} onDone={() => { setBulkTarget(null); load() }}/>
+      <AdhocRepayDrawer loan={adhocTarget} accounts={accounts}
+        onClose={() => setAdhocTarget(null)} onDone={() => { setAdhocTarget(null); load() }}/>
     </div>
   )
 }
@@ -538,6 +649,10 @@ const LoanSchedule = ({ loan: l, onRepay, onCancel }) => (
                   onClick={() => onCancel(l, c.seq)}>취소</button>
               </div>
             )
+            // 0원 회차 — 갚을 것이 없다. 처리하면 거래 없이 채무만 사라지므로 버튼을 안 준다.
+            if ((Number(c.principal) + Number(c.interest)) <= 0) {
+              return <span className="text-xs text-muted2">금액 없음</span>
+            }
             if (l.next_cycle?.seq === c.seq) return (
               <button className="btn sm primary" style={{ fontSize: 10, padding: '2px 7px' }}
                 onClick={() => onRepay({ loan: l, cycle: c })}>상환 처리</button>

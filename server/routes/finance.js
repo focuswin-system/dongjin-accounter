@@ -157,20 +157,25 @@ router.post('/loans', async (req, res, next) => {
   if (!b.start_date) return res.status(400).json({ error: '실행일을 선택해주세요' })
   const principal = intOf(b.principal)
   if (principal <= 0) return res.status(400).json({ error: '원금을 입력해주세요' })
+  const method = METHODS.includes(b.method) ? b.method : 'equal_payment'
   /* 이율은 **안 넣은 것과 0%를 구분**해야 한다.
    * 검증이 없어서 이율 없이 대출이 만들어졌고, 그러면 상환 스케줄의 이자가 전부 0이 된다.
-   * 실제로는 매달 이자를 내는데 장부에는 이자비용이 한 푼도 안 잡혀 손익이 그만큼 부풀고,
-   * 나중에 알아채도 이미 몇 달치 상환이 잘못 기록된 뒤다.
-   * 0%(무이자 정책자금 등)는 실제로 있으므로 **명시적으로 0을 보내면 허용**한다. */
-  if (b.annual_rate == null || b.annual_rate === '') {
+   * 실제로는 매달 이자를 내는데 장부에는 이자비용이 한 푼도 안 잡혀 손익이 그만큼 부풀었다.
+   * 0%(무이자 정책자금·대표가수금)는 실제로 있으므로 **명시적으로 0을 보내면 허용**한다.
+   *
+   * '일정 없음'만 예외로 이율을 안 받아도 된다 — 회차를 안 깔아서 이율로 계산할 스케줄이
+   * 아예 없기 때문이다. 넣어 두면 참고값으로만 남고, 이자는 수시 상환에서 직접 적는다.
+   * (여기서 0으로 지우지 않는다. 변동금리라 이율을 못 적는 것과, 무이자인 것은 다른 사실이다.) */
+  let annualRate = 0
+  if (b.annual_rate != null && b.annual_rate !== '') {
+    annualRate = numOf(b.annual_rate)
+    if (!Number.isFinite(annualRate) || annualRate < 0) {
+      return res.status(400).json({ error: '연이율을 숫자로 입력해주세요' })
+    }
+    if (annualRate > 100) return res.status(400).json({ error: '연이율이 너무 큽니다(100% 초과). 값을 확인해주세요.' })
+  } else if (method !== 'none') {
     return res.status(400).json({ error: '연이율을 입력해주세요. 무이자면 0을 넣어주세요.' })
   }
-  const annualRate = numOf(b.annual_rate)
-  if (!Number.isFinite(annualRate) || annualRate < 0) {
-    return res.status(400).json({ error: '연이율을 숫자로 입력해주세요' })
-  }
-  if (annualRate > 100) return res.status(400).json({ error: '연이율이 너무 큽니다(100% 초과). 값을 확인해주세요.' })
-  const method = METHODS.includes(b.method) ? b.method : 'equal_payment'
   const received = b.received === true || b.received === 'true'
   // 실제로 돈이 들어온 것으로 기록하려면 미래 날짜·마감월은 막는다(거래 등록과 같은 규칙)
   if (received) {
@@ -200,14 +205,14 @@ router.post('/loans', async (req, res, next) => {
       `INSERT INTO loans (id, name, lender, vendor_id, principal, annual_rate, method, term_months,
                           start_date, pay_day, end_date, account_id, acct_code_principal, acct_code_interest, memo, txn_id)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [id, String(b.name).trim(), b.lender || null, b.vendor_id || null, principal, numOf(b.annual_rate),
+      [id, String(b.name).trim(), b.lender || null, b.vendor_id || null, principal, annualRate,
        method, termMonths, b.start_date, intOf(b.pay_day) || Number(String(b.start_date).slice(8, 10)) || 1,
        b.end_date || null, b.account_id || null, acctPrincipal, b.acct_code_interest || ACCT.interest,
        b.memo || null, txnId])
     /* 예정 회차를 바로 깐다. 이게 있어야 자금 예측이 "며칠에 얼마 나간다"를 알고,
        은행 통보액으로 고칠 자리도 생긴다. */
     await writePlannedCycles(conn, {
-      id, principal, annual_rate: numOf(b.annual_rate), method, term_months: termMonths,
+      id, principal, annual_rate: annualRate, method, term_months: termMonths,
       start_date: b.start_date,
       pay_day: intOf(b.pay_day) || Number(String(b.start_date).slice(8, 10)) || 1,
     })
@@ -250,6 +255,10 @@ router.put('/loans/:id', async (req, res, next) => {
       term_months: b.term_months != null && b.term_months !== '' ? Math.max(1, intOf(b.term_months)) : Number(cur.term_months),
       start_date:  b.start_date || cur.start_date,
     }
+    /* '일정 없음'의 이율은 **참고값**이다 — 회차가 없어 이 이율로 이자를 계산하지 않는다.
+       이자는 수시 상환에서 실제 낸 금액을 직접 적는다(변동금리라 이율을 못 적는 경우도 있다). */
+    // 일정이 있는 방식으로 되돌릴 땐 회차가 반드시 1 이상이어야 스케줄이 깔린다
+    if (want.method !== 'none' && !(want.term_months >= 1)) want.term_months = 12
     const changed = LOAN_TERMS.filter(k => String(want[k]) !== String(
       k === 'annual_rate' ? Number(cur.annual_rate) : k === 'principal' || k === 'term_months' ? Number(cur[k]) : cur[k]))
     if (locked && changed.length) {
@@ -344,6 +353,15 @@ router.post('/loans/:id/repay-missed', async (req, res, next) => {
     const left = await unpaidCyclesOf(conn, loan)
     const targets = left.filter(c => c.due_date <= today)   // 놓친 것만 — 미래 회차는 대상 아니다
     if (!targets.length) { await rollbackQuietly(conn); return res.status(409).json({ error: '처리할 놓친 상환이 없어요' }) }
+    /* 0원 회차가 섞이면 전체를 거절한다(개별 상환과 같은 규칙).
+       건너뛰면 순서가 끊겨 뒤 회차를 못 넣고, 그냥 처리하면 거래 없이 채무만 사라진다. */
+    const zero = targets.find(c => Number(c.principal) + Number(c.interest) <= 0)
+    if (zero) {
+      await rollbackQuietly(conn)
+      return res.status(400).json({
+        error: `${zero.seq}회차(${zero.due_date})가 0원이에요. 회차 금액을 채운 뒤 다시 처리해주세요.`,
+      })
+    }
     const acct = account_id || loan.account_id || null
     const le = ledgerError({ kind: 'expense', account_id: acct, status: '지급완료' })
     if (le) { await rollbackQuietly(conn); return res.status(400).json({ error: le }) }
@@ -394,6 +412,18 @@ router.post('/loans/:id/repay', async (req, res, next) => {
     if (target.seq !== left[0].seq) {
       await rollbackQuietly(conn)
       return res.status(409).json({ error: `앞선 회차(${left[0].seq}회차 · ${left[0].due_date})부터 처리해주세요` })
+    }
+    /* ⚠ 0원 회차는 상환 처리할 수 없다.
+     *
+     * applyRepayment 의 mkTxn 이 0원을 건너뛰므로 **거래는 한 건도 안 생기는데**
+     * paid_date 는 찍힌다. 그게 마지막 예정 회차였다면 아래에서 대출이 자동으로 closed 가 되고,
+     * debtStatus 는 status='active' 만 보므로 **돈이 한 푼도 안 나갔는데 채무가 통째로 사라진다.**
+     * (예정 회차를 은행 통보액에 맞추다 0을 넣거나, 거치기간 회차가 0인 경우에 실제로 닿는다) */
+    if (Number(target.principal) + Number(target.interest) <= 0) {
+      await rollbackQuietly(conn)
+      return res.status(400).json({
+        error: '원금·이자가 모두 0원이라 상환 처리할 수 없어요. 회차 금액을 먼저 채워주세요.',
+      })
     }
     const payDate = date || target.due_date
     // 실제로 돈이 나가므로 거래 등록과 같은 규칙을 적용한다
@@ -458,6 +488,78 @@ router.patch('/loans/:id/cycles/:seq', async (req, res, next) => {
       [dueDate, principal, interest, req.params.id, req.params.seq])
     await conn.commit()
     res.json({ ok: true, seq: Number(req.params.seq), due_date: dueDate, principal, interest })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
+})
+
+/**
+ * 수시 상환 — 회차 없이 **금액을 직접 넣어** 한 번 갚는다.
+ *
+ * 대표가수금·관계사 무이자 차입처럼 상환 일정이 없는 채무(method='none')는 갚을 회차가 없다.
+ * 그런데 실무에서는 자금 여유가 생길 때 500만·1,000만씩 수시로 갚는다. 이 경로가 없으면
+ * 갚을 방법이 **거래를 직접 등록하는 것뿐**인데, 그러면 loans 와 연결이 안 돼 잔여 원금이
+ * 줄지 않는다(부채 현황이 영영 안 맞는다).
+ *
+ * 일정이 있는 대출에는 열지 않는다 — 번호가 매겨진 회차 사이에 임의 행을 끼우면
+ * "앞선 회차부터" 규칙이 깨지고 잔액 계산 근거가 흔들린다. 그쪽은 회차 상환을 쓴다.
+ *
+ * 원금과 이자는 여기서도 **거래 2건으로 나눈다**(applyRepayment 공용) — 뭉치면 원금까지 비용이 된다.
+ */
+router.post('/loans/:id/repay-adhoc', async (req, res, next) => {
+  const b = req.body
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [[loan]] = await conn.execute('SELECT * FROM loans WHERE id = ? FOR UPDATE', [req.params.id])
+    if (!loan) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    if (loan.method !== 'none') {
+      await rollbackQuietly(conn)
+      return res.status(409).json({ error: '상환 일정이 있는 대출은 회차로 상환해주세요' })
+    }
+    if (loan.status !== 'active') {
+      await rollbackQuietly(conn)
+      return res.status(409).json({ error: '이미 완료된 대출이에요' })
+    }
+    const principal = intOf(b.principal)
+    const interest = intOf(b.interest)
+    if (principal < 0 || interest < 0) {
+      await rollbackQuietly(conn); return res.status(400).json({ error: '원금·이자는 0 이상이어야 해요' })
+    }
+    if (principal + interest <= 0) {
+      await rollbackQuietly(conn); return res.status(400).json({ error: '갚은 금액을 입력해주세요' })
+    }
+    /* 남은 원금보다 많이 갚을 수는 없다 — 넘기면 잔여가 음수가 되어 부채 현황이 뒤집힌다.
+       (remainingPrincipal 이 0 으로 막아주긴 하지만, 그러면 **입력한 금액과 장부가 조용히 달라진다**) */
+    const [reps] = await conn.execute(
+      'SELECT principal, paid_date FROM loan_repayments WHERE loan_id = ?', [loan.id])
+    const left = remainingPrincipal(loan.principal, reps)
+    if (principal > left) {
+      await rollbackQuietly(conn)
+      return res.status(400).json({ error: `남은 원금(${left.toLocaleString('ko-KR')}원)보다 많이 갚을 수 없어요` })
+    }
+
+    const payDate = b.date || kstToday()
+    { const de = futureDateError(payDate); if (de) { await rollbackQuietly(conn); return res.status(400).json({ error: de }) } }
+    { const ce = await closedPeriodError(conn, payDate); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
+    if (payDate < loan.start_date) {
+      await rollbackQuietly(conn)
+      return res.status(400).json({ error: `대출 실행일(${loan.start_date}) 이전 날짜로는 상환할 수 없어요` })
+    }
+    const acct = b.account_id || loan.account_id || null
+    { const le = ledgerError({ kind: 'expense', account_id: acct, status: '지급완료' }); if (le) { await rollbackQuietly(conn); return res.status(400).json({ error: le }) } }
+
+    // 회차 번호는 이어서 붙인다(1, 2, 3…). 일정이 없으니 번호는 '몇 번째로 갚았나'라는 뜻이다.
+    const [[{ next }]] = await conn.execute(
+      'SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM loan_repayments WHERE loan_id = ?', [loan.id])
+    await applyRepayment(conn, loan,
+      { seq: Number(next), due_date: payDate, principal, interest }, { payDate, acct })
+
+    // 원금을 다 갚았으면 완료 처리 — 일정이 없어 '남은 회차'로는 판단할 수 없다
+    if (principal >= left) {
+      await conn.execute("UPDATE loans SET status='closed' WHERE id = ?", [loan.id])
+    }
+    await conn.commit()
+    res.json({ ok: true, seq: Number(next), principal, interest, remaining: left - principal })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })

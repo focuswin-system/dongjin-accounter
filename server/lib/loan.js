@@ -9,7 +9,17 @@
  */
 const { daysInMonth, fmtDate } = require('./recurrence')
 
-const METHODS = ['equal_payment', 'equal_principal', 'bullet']
+/* 상환 방식. 'none' 은 **상환 일정이 아예 없는 채무**다.
+ *
+ * 대표가수금·관계사 차입처럼 "빌린 건 맞는데 언제 갚을지 안 정한" 돈이 실무에 흔하다
+ * (받은 자금표에도 대표가수 3.2억이 잔액만 적혀 있고 상환 일정이 없다).
+ * 여태는 이걸 표현할 방법이 없어서, 등록하면 공식이 없는 상환 일정을 지어내
+ * 자금 예측에 있지도 않은 출금이 잡혔다.
+ *   none = 회차를 만들지 않는다. 나중에 갚기로 정해지면 그때 방식을 바꿔 회차를 깐다. */
+const METHODS = ['equal_payment', 'equal_principal', 'bullet', 'none']
+
+/** 상환 일정이 없는 채무인가 — 회차 생성·공식 계산을 모두 건너뛴다 */
+const isNoSchedule = (loan) => loan?.method === 'none'
 
 /** 연이율(%) → 월이율(소수). 0%도 유효하다(무이자 관계사 차입). */
 const monthlyRate = (annualRate) => (Number(annualRate) || 0) / 12 / 100
@@ -53,6 +63,8 @@ function repaymentSchedule(loan) {
   const n = Number(loan.term_months) || 0
   const method = METHODS.includes(loan.method) ? loan.method : 'equal_payment'
   const r = monthlyRate(loan.annual_rate)
+  // 상환 일정이 없는 채무는 회차를 지어내지 않는다 — 없는 출금이 자금 예측에 잡힌다
+  if (method === 'none') return []
   if (P <= 0 || n <= 0) return []
 
   const pmt = method === 'equal_payment' ? equalPayment(P, loan.annual_rate, n) : 0
@@ -117,6 +129,6 @@ function scheduleTotals(loan) {
 }
 
 module.exports = {
-  METHODS, monthlyRate, equalPayment, dueDateOf,
+  METHODS, isNoSchedule, monthlyRate, equalPayment, dueDateOf,
   repaymentSchedule, unpaidCycles, remainingPrincipal, scheduleTotals,
 }
