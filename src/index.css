@@ -521,6 +521,57 @@ a { color: inherit; text-decoration: none; }
   background: var(--surface-2);
   letter-spacing: 0.01em;
 }
+/* ── 자금 현황 달력 ──────────────────────────────────────────────
+   같은 데이터를 표가 아니라 **모양**으로 본다. 급여일·카드결제일·부가세일이 달의
+   어디쯤 몰려 있는지는 표로 훑는 것보다 달력이 빠르다. 잔액이 음수인 날은 칸 자체가
+   붉어진다 — 숫자를 읽기 전에 '언제가 고비인지'가 먼저 보여야 한다. */
+.fund-cal {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+.fund-cal-head {
+  font-size: 12px; font-weight: 700; color: var(--muted);
+  text-align: center; padding: 6px 0;
+}
+.fund-cal-cell {
+  min-height: 92px; padding: 7px 8px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); display: flex; flex-direction: column; gap: 3px;
+}
+.fund-cal-cell.empty { border-color: transparent; background: transparent; }
+.fund-cal-cell.movable { cursor: pointer; }
+.fund-cal-cell.movable:hover { border-color: var(--brand); }
+.fund-cal-cell.opened { border-color: var(--brand); background: var(--brand-soft); }
+/* 잔액이 마이너스인 날 — 칸을 통째로 물들인다 */
+.fund-cal-cell.neg { background: var(--neg-soft, #FDECEC); border-color: var(--neg-ink); }
+/* 합계는 플러스인데 **특정 통장만** 빈 날. 회사 전체가 모자란 것(neg)과 급이 달라
+   같은 빨강으로 칠하면 안 된다 — 옮기면 되는 일과 돈이 없는 일은 다른 문제다. */
+.fund-cal-cell.short { border-color: var(--warn-ink, #B7791F); background: var(--warn-soft, #FEF6E7); }
+.fund-cal-short {
+  font-size: 11px; line-height: 1.35; font-weight: 600;
+  color: var(--warn-ink, #B7791F);
+}
+.fund-cal-cell.today { box-shadow: inset 0 0 0 2px var(--brand); }
+.fund-cal-day { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 5px; }
+.fund-cal-today { font-size: 10px; font-weight: 600; color: var(--brand); }
+.fund-cal-flow { font-size: 12px; line-height: 1.5; }
+/* 그 날 끝 잔액 — 칸에서 제일 큰 글자다 */
+.fund-cal-bal { margin-top: auto; font-size: 13px; font-weight: 700; text-align: right; }
+@media (max-width: 900px) {
+  .fund-cal-cell { min-height: 74px; padding: 5px 6px; }
+  .fund-cal-flow, .fund-cal-bal { font-size: 11px; }
+}
+
+/* 시간축 표(자금 현황)는 줄이 많다 — 한 달이면 20줄 안팎이다.
+   기본 행 높이(패딩 16)로는 한 화면에 여덟 줄밖에 안 들어와서, "언제 통장이 비나"를
+   보려고 도로 스크롤을 해야 했다. 이 표만 조밀하게 둔다. */
+.timeline-table tbody td { padding: 7px 14px; }
+.timeline-table thead th { padding: 8px 14px; }
+/* 금액 열은 헤더도 오른쪽에 붙어야 값과 한 줄로 읽힌다.
+   `.table thead th`(0,2,1)가 `.num-right`(0,1,0)를 이겨서, num-right 를 붙인 헤더가
+   왼쪽에 남고 숫자만 오른쪽에 서 있었다 — 열 하나를 눈으로 두 번 훑게 된다. */
+.table thead th.num-right { text-align: right; }
 .table tbody td {
   padding: 16px 14px;
   border-bottom: 1px solid var(--line);

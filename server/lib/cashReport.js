@@ -17,7 +17,7 @@ const { SETTLED_INCOME, SETTLED_EXPENSE } = require('./ledger')
 const { pendingCond } = require('./invoiceStatus')
 const { paymentSchedule, unpaidPayments, paidPrincipal } = require('./savings')
 const { repaymentSchedule } = require('./loan')
-const { dueDatesToGenerate, addDays, PAYMENT_TERM_DAYS } = require('./recurrence')
+const { dueDatesToGenerate, cashDateOf } = require('./recurrence')
 const { recurFromSupply } = require('./vat')
 const { kstDate } = require('../db')
 
@@ -137,10 +137,13 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
     const planned = rows.filter(r => !r.paid_date)
       .map(r => ({ seq: Number(r.seq), due_date: r.due_date, total: num(r.principal) + num(r.interest) }))
     /* 예정 행이 하나도 없는 대출은 스케줄이 아직 안 깔린 옛 데이터다. 그때만 공식으로 만든다 —
-       빈손으로 두면 나갈 돈이 통째로 빠져 예측이 **낙관 쪽으로** 틀린다(가장 위험한 방향). */
+       빈손으로 두면 나갈 돈이 통째로 빠져 예측이 **낙관 쪽으로** 틀린다(가장 위험한 방향).
+       ⚠ 단 method='none'(상환 일정 없음)은 예외다. 그건 "아직 안 깐 것"이 아니라
+       **원래 일정이 없는 채무**라(대표가수금 등), 공식으로 만들면 없는 출금을 지어내게 된다.
+       나중에 갚기로 정해 회차를 깔면 그때부터 planned 가 잡힌다. */
     const done = new Set(rows.filter(r => r.paid_date).map(r => Number(r.seq)))
     const cycles = planned.length ? planned
-      : repaymentSchedule(l).filter(c => !done.has(c.seq))
+      : repaymentSchedule(l).filter(c => !done.has(c.seq))   // repaymentSchedule 이 none 이면 [] 를 낸다
     for (const c of cycles) {
       const date = place(c.due_date)
       if (date === null || date > to || c.total <= 0) continue
@@ -218,7 +221,7 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
          발행 버튼을 눌렀는지에 따라 예측이 달라지면 문서를 못 믿는다.
          발행 경로와 같은 상수를 쓴다(lib/recurrence.js PAYMENT_TERM_DAYS). */
       for (const cycle of dueDatesToGenerate(r, from, { horizonDays })) {
-        const due = addDays(cycle, PAYMENT_TERM_DAYS)
+        const due = cashDateOf(cycle, r.pay_term)
         if (due < from || due > to) continue
         out.push({
           date: due, cycle_date: cycle, kind: spec.kind, amount,
@@ -315,9 +318,13 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
    * 대표 파일은 미지급이 여러 달 쌓여 있었다(4·5·6·7월분). 그래서 **월분을 라벨에 적는다** —
    * 합계만 보면 "언제 것이 안 나갔나"를 알 수 없다.
    */
+  /* ⚠ 지급액은 payroll_id 로 센다. 예전엔 `t.id = p.txn_id` 로 **거래 한 건**만 봤는데,
+   *   급여 화면(routes/payroll.js enrich)은 `payroll_id` 로 여러 건을 합산한다.
+   *   나눠 지급하면(두 계좌로 쪼개거나 며칠 뒤 잔액을 마저 주면) 두 번째 이후 거래가
+   *   안 세어져, 이미 다 나간 급여가 예측에는 '아직 나갈 돈'으로 남았다. */
   const [pays] = await db.execute(
     `SELECT p.month, p.pay_date, p.net_salary, p.status, e.name AS emp_name,
-            COALESCE((SELECT SUM(amount) FROM transactions t WHERE t.id = p.txn_id), 0) AS paid
+            COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.payroll_id = p.id), 0) AS paid
        FROM payroll p LEFT JOIN employees e ON e.id = p.employee_id
       WHERE p.status IN ('확정', '일부지급')`)
   for (const p of pays) {
@@ -331,6 +338,30 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
       label: `${p.emp_name || '직원'} ${p.month}분 급여`,
       source: '미지급 급여', account_id: null,
       overdue: due < from, planned: true,
+    })
+  }
+
+  /* 10. 미지급 퇴직금 (unpaid_labor).
+   *
+   * ⚠ **밀린 급여는 여기서 세지 않는다.** 그건 바로 위 9번(급여대장)이 이미 센다.
+   *   둘 다 세면 같은 돈이 두 번 나가는 것으로 잡혀 '현금 과부족'이 실제보다 나쁘게 나온다.
+   *   그래서 kind='severance' 로 못 박는다(routes/unpaid-labor.js 도 퇴직금만 받는다).
+   *
+   * 기한을 모르는 경우가 대부분이라 '기한 미정'으로 둔다 — 그 돈은 지금 있는 것으로 본다.
+   * 낙관 쪽으로 틀리지 않으려는 것이고, 기한 없는 미지급 청구서와 같은 규칙이다. */
+  const [labor] = await db.execute(
+    "SELECT name, period, amount, paid_amount, due_date FROM unpaid_labor WHERE kind = 'severance'")
+  for (const u of labor) {
+    const remain = num(u.amount) - num(u.paid_amount)
+    if (remain <= 0) continue
+    const noDue = !u.due_date
+    const date = place(u.due_date || '', noDue)
+    if (date === null || date > to) continue
+    out.push({
+      date, kind: 'out', amount: remain,
+      label: `${u.name} 퇴직금`,
+      source: '미지급 퇴직금', account_id: null,
+      overdue: !noDue && u.due_date < from, noDue, planned: true,
     })
   }
 

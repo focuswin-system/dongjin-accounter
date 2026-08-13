@@ -49,10 +49,14 @@ async function paidAmountOf(db, invoiceId) {
 const RECEIVABLE_STATUSES = ['입금 예정', '일부 입금', '기한 지남', '장기 미수']
 const PAYABLE_STATUSES    = ['지급 대기', '지급 예정', '일부 지급', '기한 지남']
 
-/** SQL IN 절 조각 + 파라미터 — `WHERE kind='issued' AND ${pendingCond('issued').sql}` */
-const pendingCond = (kind) => {
+/** SQL IN 절 조각 + 파라미터 — `WHERE kind='issued' AND ${pendingCond('issued').sql}`
+ *
+ * alias 를 주면 `i.status IN (...)` 처럼 테이블을 붙인다. 계약(contracts)처럼 status 컬럼을
+ * 가진 테이블과 조인하면 붙이지 않은 status 는 "ambiguous" 로 질의가 통째로 실패한다. */
+const pendingCond = (kind, alias = '') => {
   const list = kind === 'issued' ? RECEIVABLE_STATUSES : PAYABLE_STATUSES
-  return { sql: `status IN (${list.map(() => '?').join(',')})`, params: [...list] }
+  const col = alias ? `${alias}.status` : 'status'
+  return { sql: `${col} IN (${list.map(() => '?').join(',')})`, params: [...list] }
 }
 
 module.exports = {

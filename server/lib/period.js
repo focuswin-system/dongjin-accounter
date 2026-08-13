@@ -114,14 +114,73 @@ function periodLabel(unit, range) {
   return `${range.to.slice(0, 4)}년 ${Number(range.to.slice(5, 7))}월`
 }
 
-/** 연속한 구간들 — 화면의 '한 눈에 보기'(월이면 12칸, 주면 12주). 과거→미래 순. */
-function periodSeries(unit, baseDate, { back = 6, forward = 6, closingDay = 0, weekStart = 1 } = {}) {
+/** 연속한 구간들 — 화면의 '한 눈에 보기'.
+ *
+ * base = **지금 보고 있는 구간**의 offset. 예전엔 늘 오늘 기준으로 앞뒤 6칸씩 13줄을 냈는데,
+ * 8월을 보든 11월을 보든 같은 13줄이 떠서 "고른 것과 상관없는 달"이 첫 화면을 다 먹었다.
+ * 지금은 보고 있는 구간과 그 다음 한 칸만 낸다(back=0, forward=1). offset 은 **절대값**으로
+ * 유지한다 — 화면이 이 값으로 구간을 옮기기 때문이다. */
+function periodSeries(unit, baseDate, { back = 6, forward = 6, base = 0, closingDay = 0, weekStart = 1 } = {}) {
   const out = []
-  for (let i = -Math.abs(back); i <= Math.abs(forward); i++) {
+  for (let i = base - Math.abs(back); i <= base + Math.abs(forward); i++) {
     const r = periodRange(unit, baseDate, i, { closingDay, weekStart })
     out.push({ ...r, offset: i, label: periodLabel(pick(unit), r) })
   }
   return out
 }
 
-module.exports = { monthRange, weeksOf, periodRange, periodLabel, periodSeries, UNITS }
+/* ── 구간을 한 단계 잘게 쪼갠다 ────────────────────────────────────────────
+ *
+ * 자금 현황의 결론은 "이 달에 얼마 남나"가 아니라 **"며칠에 어느 통장이 비나"** 다.
+ * 구간 합계만 보면 월말에 흑자여도 25일 급여일에 통장이 비는 걸 못 본다 —
+ * 그 날 이체가 안 나가면 신용 문제가 되므로, 합계로는 답이 안 된다.
+ *
+ * 그래서 고른 단위보다 **한 칸 잘게** 쪼갠 축을 함께 낸다.
+ *   주·월 → 일자별 / 분기 → 주별 / 년 → 월별
+ * 더 잘게 쪼개면(1년을 일자로) 칸이 365개가 되어 도로 안 보인다.
+ */
+const BUCKET_OF = { week: 'day', month: 'day', quarter: 'week', year: 'month' }
+
+function bucketsOf(unit, range, { weekStart = 1, closingDay = 0 } = {}) {
+  const b = BUCKET_OF[pick(unit)]
+  if (b === 'week') {
+    return weeksOf(range.from, range.to, weekStart)
+      .map(w => ({ ...w, label: `${w.from.slice(5)} ~ ${w.to.slice(5)}` }))
+  }
+  if (b === 'month') {
+    const out = []
+    const [fy, fm] = range.from.split('-').map(Number)
+    // 마감일이 있으면 회계월이 달력월과 어긋난다 — monthRange 로 잘라야 구간 합계와 맞는다
+    for (let k = 0; k < 14; k++) {
+      const t = new Date(fy, fm - 1 + k, 1)
+      const key = `${t.getFullYear()}-${pad(t.getMonth() + 1)}`
+      const r = monthRange(key, closingDay)
+      if (r.from > range.to) break
+      const from = r.from < range.from ? range.from : r.from
+      const to = r.to > range.to ? range.to : r.to
+      if (from > to) continue
+      out.push({ from, to, label: `${Number(key.slice(5, 7))}월` })
+    }
+    return out
+  }
+  // day
+  const out = []
+  const end = new Date(`${range.to}T00:00:00`)
+  for (let cur = new Date(`${range.from}T00:00:00`); cur <= end; cur.setDate(cur.getDate() + 1)) {
+    const day = ymd(cur)
+    out.push({ from: day, to: day, label: day.slice(5) })
+  }
+  return out
+}
+
+/** 하루 전 날짜 — 구간 시작 시점의 '전날 잔액'을 구할 때 쓴다 */
+function dayBefore(date) {
+  const d = new Date(`${date}T00:00:00`)
+  d.setDate(d.getDate() - 1)
+  return ymd(d)
+}
+
+module.exports = {
+  monthRange, weeksOf, periodRange, periodLabel, periodSeries, UNITS,
+  bucketsOf, dayBefore, BUCKET_OF,
+}
