@@ -279,7 +279,8 @@ router.post('/issue-missed', async (req, res, next) => {
         const supply = Number(r.supply_amount)
         const vat    = recurFromSupply(supply, effVatMode(r)).vat
         const total  = supply + vat
-        const dueAt  = addDays(dueStr, 30)
+        // 결제조건을 따른다 — 건별 발행과 같은 함수여야 어느 버튼을 눌러도 날짜가 같다
+        const dueAt  = cashDateOf(dueStr, r.pay_term)
         const id = randomUUID()
         /* 마감된 달이 하나라도 섞이면 전체를 거절한다 — 회차 순서를 건너뛸 수 없으므로
          * 일부만 처리하면 남은 회차를 영영 못 넣는다(대출·적금 일괄과 같은 규칙). */
@@ -441,7 +442,7 @@ router.post('/:id/backfill', async (req, res, next) => {
                                issued_at, due_at, status, account_id, recurring_id, memo, tax_type, backfill_batch)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [id, invoice_no, 'issued', r.vendor_id || null, r.contract_id || null, supply, vat, total,
-         due, addDays(due, 30), paid ? '입금 완료' : '입금 예정', acctId, r.id,
+         due, cashDateOf(due, r.pay_term), paid ? '입금 완료' : '입금 예정', acctId, r.id,
          `소급 등록 · ${r.item || ''}`.trim(), invTaxType(r), batch])
 
       if (paid) {

@@ -25,6 +25,21 @@ const STATUS = ['active', 'retired']
 /** 이 표가 담는 것은 퇴직금뿐이다. kind 컬럼은 남겨 두되 값은 하나로 고정한다 */
 const KIND = 'severance'
 
+/* 금액 검증 — POST·PUT 이 **같은 규칙**을 써야 한다.
+ *
+ * moneyOf 는 회계 표기 괄호와 음수를 그대로 살린다("(500,000)" → -500000).
+ * 그래서 음수를 안 막으면 `paid > amount` 검사를 통과해 remain 이 총액보다 커지고,
+ * 자금 예측에 없는 돈이 '나갈 돈'으로 선다. PUT 에 검증이 없던 탓에 부분 바디 한 번으로
+ * 총액이 0으로 덮이고(= 자금 현황에서 그 퇴직금이 통째로 사라짐) 에러도 안 났다.
+ */
+function amountsError(amount, paid) {
+  if (!(amount > 0)) return '퇴직금 총액을 입력해주세요'
+  if (paid < 0) return '지급액은 0 이상이어야 해요'
+  if (paid > amount) return '지급액이 총액보다 클 수 없어요'
+  if (amount > 1e12) return '금액이 너무 큽니다. 값을 확인해주세요.'
+  return null
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const [rows] = await req.db.execute(
@@ -56,9 +71,8 @@ router.post('/', async (req, res, next) => {
     const name = String(b.name || '').trim()
     if (!name) return res.status(400).json({ error: '이름을 입력해주세요' })
     const amount = moneyOf(b.amount)
-    if (amount <= 0) return res.status(400).json({ error: '금액을 입력해주세요' })
     const paid = moneyOf(b.paid_amount)
-    if (paid > amount) return res.status(400).json({ error: '지급액이 총액보다 클 수 없어요' })
+    { const e = amountsError(amount, paid); if (e) return res.status(400).json({ error: e }) }
     const id = randomUUID()
     await req.db.execute(
       `INSERT INTO unpaid_labor (id, employee_id, name, kind, status, period, amount, paid_amount, due_date, memo)
@@ -73,16 +87,29 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const b = req.body
-    const amount = moneyOf(b.amount)
-    const paid = moneyOf(b.paid_amount)
-    // 낸 돈이 총액을 넘으면 남은 금액이 음수가 되어 '들어올 돈'처럼 잡힌다
-    if (paid > amount) return res.status(400).json({ error: '지급액이 총액보다 클 수 없어요' })
+    /* 안 보낸 값은 **기존 값을 유지**한다. 예전엔 통짜로 덮어써서, 부분 바디 한 번에
+       총액이 0이 되고 성명이 빈 문자열이 되고 현직원이 퇴직자로 뒤바뀌었다. */
+    const [[cur]] = await req.db.execute(
+      'SELECT * FROM unpaid_labor WHERE id = ? AND kind = ?', [req.params.id, KIND])
+    if (!cur) return res.status(404).json({ error: 'Not found' })
+
+    const amount = b.amount != null && b.amount !== '' ? moneyOf(b.amount) : Number(cur.amount)
+    const paid = b.paid_amount != null && b.paid_amount !== '' ? moneyOf(b.paid_amount) : Number(cur.paid_amount)
+    { const e = amountsError(amount, paid); if (e) return res.status(400).json({ error: e }) }
+    const name = b.name != null ? String(b.name).trim() : cur.name
+    if (!name) return res.status(400).json({ error: '이름을 입력해주세요' })
+
     const [r] = await req.db.execute(
-      `UPDATE unpaid_labor SET name=?, status=?, period=?, amount=?, paid_amount=?, due_date=?, memo=?
+      `UPDATE unpaid_labor SET employee_id=?, name=?, status=?, period=?, amount=?, paid_amount=?, due_date=?, memo=?
         WHERE id=? AND kind=?`,
-      [String(b.name || '').trim(),
-       STATUS.includes(b.status) ? b.status : 'retired',
-       b.period || null, amount, paid, b.due_date || null, b.memo || null, req.params.id, KIND])
+      [b.employee_id !== undefined ? (b.employee_id || null) : cur.employee_id,
+       name,
+       STATUS.includes(b.status) ? b.status : cur.status,
+       b.period !== undefined ? (b.period || null) : cur.period,
+       amount, paid,
+       b.due_date !== undefined ? (b.due_date || null) : cur.due_date,
+       b.memo !== undefined ? (b.memo || null) : cur.memo,
+       req.params.id, KIND])
     if (r.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
   } catch (e) { next(e) }

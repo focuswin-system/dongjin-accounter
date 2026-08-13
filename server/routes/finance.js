@@ -92,6 +92,26 @@ async function writePlannedCycles(conn, loan) {
   }
 }
 
+/** 남은 예정 회차가 없고 **원금도 다 갚았을 때만** 완료 처리한다.
+ *
+ * 예전엔 '남은 회차 0건'만 봤다. 그래서 금액이 0원인 회차(무이자 만기일시의 거치 구간,
+ * 은행 통보액에 맞추다 0을 넣은 회차)를 처리하면 **거래가 한 건도 안 생겼는데 대출이 닫혔다.**
+ * debtStatus/cashReport 는 status='active' 만 보므로 돈이 한 푼도 안 나갔는데 채무가 통째로 사라진다.
+ *
+ * 반대로 '잔액 0'만 보면 예정 금액을 은행 통보액으로 고쳤을 때 합이 원금과 딱 안 맞아
+ * 영영 안 닫힌다. 그래서 **둘 다** 본다 — 회차가 끝났고, 남은 원금이 반올림 오차 수준일 때.
+ */
+const CLOSE_TOLERANCE = 1000   // 원. 회차 금액을 손으로 고치며 생기는 단수 차이
+
+async function closeIfSettled(conn, loan) {
+  if ((await unpaidCyclesOf(conn, loan)).length) return false
+  const [reps] = await conn.execute(
+    'SELECT principal, paid_date FROM loan_repayments WHERE loan_id = ?', [loan.id])
+  if (remainingPrincipal(loan.principal, reps) > CLOSE_TOLERANCE) return false
+  await conn.execute("UPDATE loans SET status='closed' WHERE id = ?", [loan.id])
+  return true
+}
+
 /** 대출 1건 + 실적 + 잔여 + 다음 회차 */
 async function loanDetail(db, loan) {
   const [reps] = await db.execute(
@@ -280,7 +300,11 @@ router.put('/loans/:id', async (req, res, next) => {
        intOf(b.pay_day) || cur.pay_day || 1, b.end_date || null, b.account_id || null,
        b.acct_code_principal || cur.acct_code_principal || ACCT.shortLoan,
        b.acct_code_interest || cur.acct_code_interest || ACCT.interest,
-       b.memo || null, b.status === 'closed' ? 'closed' : 'active', req.params.id])
+       b.memo || null,
+       /* status 를 안 보낸 요청(메모만 수정 등)이 완료된 대출을 조용히 되살렸다.
+          안 보내면 기존 값을 유지한다 — 상태 전이는 상환/취소 경로가 관리한다. */
+       b.status === 'closed' ? 'closed' : (b.status === 'active' ? 'active' : cur.status),
+       req.params.id])
     if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     /* 스케줄을 바꾸는 값이 달라졌을 때만 예정 회차를 다시 깐다.
        늘 다시 깔면, 이름만 고쳐도 은행 통보액으로 고쳐 둔 예정 금액이 공식값으로 되돌아간다.
@@ -353,15 +377,6 @@ router.post('/loans/:id/repay-missed', async (req, res, next) => {
     const left = await unpaidCyclesOf(conn, loan)
     const targets = left.filter(c => c.due_date <= today)   // 놓친 것만 — 미래 회차는 대상 아니다
     if (!targets.length) { await rollbackQuietly(conn); return res.status(409).json({ error: '처리할 놓친 상환이 없어요' }) }
-    /* 0원 회차가 섞이면 전체를 거절한다(개별 상환과 같은 규칙).
-       건너뛰면 순서가 끊겨 뒤 회차를 못 넣고, 그냥 처리하면 거래 없이 채무만 사라진다. */
-    const zero = targets.find(c => Number(c.principal) + Number(c.interest) <= 0)
-    if (zero) {
-      await rollbackQuietly(conn)
-      return res.status(400).json({
-        error: `${zero.seq}회차(${zero.due_date})가 0원이에요. 회차 금액을 채운 뒤 다시 처리해주세요.`,
-      })
-    }
     const acct = account_id || loan.account_id || null
     const le = ledgerError({ kind: 'expense', account_id: acct, status: '지급완료' })
     if (le) { await rollbackQuietly(conn); return res.status(400).json({ error: le }) }
@@ -380,11 +395,7 @@ router.post('/loans/:id/repay-missed', async (req, res, next) => {
       await applyRepayment(conn, loan, c, { payDate: c.due_date, acct })
       principal += c.principal; interest += c.interest
     }
-    // 남은 예정 회차가 없으면 완료 처리 — '잔액 0'으로 보면, 예정 금액을 은행 통보액으로
-    // 고쳤을 때 합이 원금과 딱 안 맞아 영영 안 닫힌다.
-    if (!(await unpaidCyclesOf(conn, loan)).length) {
-      await conn.execute("UPDATE loans SET status='closed' WHERE id = ?", [loan.id])
-    }
+    await closeIfSettled(conn, loan)
     await conn.commit()
     res.json({ ok: true, count: targets.length, principal, interest, total: principal + interest })
   } catch (e) { await rollbackQuietly(conn); next(e) }
@@ -404,6 +415,13 @@ router.post('/loans/:id/repay', async (req, res, next) => {
      * (실적 행은 UNIQUE로 하나가 되고, 먼저 만든 거래는 고아로 남아 취소로도 안 지워진다). */
     const [[loan]] = await conn.execute('SELECT * FROM loans WHERE id = ? FOR UPDATE', [req.params.id])
     if (!loan) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    /* 상환 일정이 없는 채무는 회차 상환을 쓰지 않는다.
+       취소로 되살아난 행이 회차처럼 보일 수 있는데, 그걸 여기서 처리하면
+       '남은 회차 0건'이 되어 대출이 조기에 닫힌다(closeIfSettled 가 막지만 경로 자체를 닫는다). */
+    if (loan.method === 'none') {
+      await rollbackQuietly(conn)
+      return res.status(409).json({ error: '상환 일정이 없는 채무예요. 수시 상환으로 처리해주세요.' })
+    }
     const left = await unpaidCyclesOf(conn, loan)
     if (!left.length) { await rollbackQuietly(conn); return res.status(409).json({ error: '남은 상환 회차가 없어요' }) }
     const target = seq ? left.find(c => c.seq === Number(seq)) : left[0]
@@ -412,18 +430,6 @@ router.post('/loans/:id/repay', async (req, res, next) => {
     if (target.seq !== left[0].seq) {
       await rollbackQuietly(conn)
       return res.status(409).json({ error: `앞선 회차(${left[0].seq}회차 · ${left[0].due_date})부터 처리해주세요` })
-    }
-    /* ⚠ 0원 회차는 상환 처리할 수 없다.
-     *
-     * applyRepayment 의 mkTxn 이 0원을 건너뛰므로 **거래는 한 건도 안 생기는데**
-     * paid_date 는 찍힌다. 그게 마지막 예정 회차였다면 아래에서 대출이 자동으로 closed 가 되고,
-     * debtStatus 는 status='active' 만 보므로 **돈이 한 푼도 안 나갔는데 채무가 통째로 사라진다.**
-     * (예정 회차를 은행 통보액에 맞추다 0을 넣거나, 거치기간 회차가 0인 경우에 실제로 닿는다) */
-    if (Number(target.principal) + Number(target.interest) <= 0) {
-      await rollbackQuietly(conn)
-      return res.status(400).json({
-        error: '원금·이자가 모두 0원이라 상환 처리할 수 없어요. 회차 금액을 먼저 채워주세요.',
-      })
     }
     const payDate = date || target.due_date
     // 실제로 돈이 나가므로 거래 등록과 같은 규칙을 적용한다
@@ -438,10 +444,7 @@ router.post('/loans/:id/repay', async (req, res, next) => {
     { const le = ledgerError({ kind: 'expense', account_id: acct, status: '지급완료' }); if (le) { await rollbackQuietly(conn); return res.status(400).json({ error: le }) } }
 
     await applyRepayment(conn, loan, target, { payDate, acct })
-    // 남은 예정 회차가 없으면 자동으로 완료 처리(위 일괄 처리와 같은 규칙)
-    if (!(await unpaidCyclesOf(conn, loan)).length) {
-      await conn.execute("UPDATE loans SET status='closed' WHERE id = ?", [loan.id])
-    }
+    await closeIfSettled(conn, loan)
     await conn.commit()
     res.json({ ok: true, seq: target.seq, principal: target.principal, interest: target.interest })
   } catch (e) { await rollbackQuietly(conn); next(e) }
@@ -548,6 +551,22 @@ router.post('/loans/:id/repay-adhoc', async (req, res, next) => {
     const acct = b.account_id || loan.account_id || null
     { const le = ledgerError({ kind: 'expense', account_id: acct, status: '지급완료' }); if (le) { await rollbackQuietly(conn); return res.status(400).json({ error: le }) } }
 
+    /* 같은 날짜·같은 금액이 이미 있으면 막는다 — **중복 제출 방어**.
+     * 회차 상환은 seq 가 고정이라 두 번째 요청이 "이미 처리한 회차"로 걸리는데,
+     * 수시 상환은 MAX(seq)+1 로 매번 새 번호를 받아 둘 다 성공한다. 더블클릭·모바일과 PC
+     * 동시 제출이면 통장에서 한 번 나간 돈이 장부에 두 번 찍히고 잔여 원금도 두 배로 준다.
+     * 같은 날 같은 금액을 정말 두 번 갚는 경우는 드물고, 그때는 메모나 금액을 달리하면 된다. */
+    const [[dup]] = await conn.execute(
+      `SELECT seq FROM loan_repayments
+        WHERE loan_id = ? AND paid_date = ? AND principal = ? AND interest = ? LIMIT 1`,
+      [loan.id, payDate, principal, interest])
+    if (dup) {
+      await rollbackQuietly(conn)
+      return res.status(409).json({
+        error: `${payDate}에 같은 금액(${(principal + interest).toLocaleString('ko-KR')}원)으로 이미 상환 처리했어요(${dup.seq}회차). 중복 등록이 아니라면 금액이나 날짜를 확인해주세요.`,
+      })
+    }
+
     // 회차 번호는 이어서 붙인다(1, 2, 3…). 일정이 없으니 번호는 '몇 번째로 갚았나'라는 뜻이다.
     const [[{ next }]] = await conn.execute(
       'SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM loan_repayments WHERE loan_id = ?', [loan.id])
@@ -579,14 +598,30 @@ router.delete('/loans/:id/repay/:seq', async (req, res, next) => {
       await rollbackQuietly(conn)
       return res.status(409).json({ error: `마지막으로 처리한 회차(${maxSeq}회차)부터 취소해주세요` })
     }
+    /* 마감된 달의 거래는 지울 수 없다 — 다른 삭제 경로와 같은 규칙(routes/transactions.js).
+       이게 없어서 7월 마감 뒤에 7월분 상환을 취소하면 마감된 달의 지출 2건이 사라지고
+       계좌 잔액·손익·부가세 신고자료와 장부가 어긋났다. */
+    if (rep.paid_date) {
+      const ce = await closedPeriodError(conn, rep.paid_date)
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
+    }
     for (const t of [rep.txn_principal_id, rep.txn_interest_id]) {
       if (t) await conn.execute('DELETE FROM transactions WHERE id = ?', [t])
     }
     /* 행을 지우지 않고 **예정으로 되돌린다.** 지우면 그 회차가 통째로 사라져
-       자금 예측에서 나갈 돈이 빠진다(예정도 같은 테이블에 살기 때문). */
-    await conn.execute(
-      'UPDATE loan_repayments SET paid_date=NULL, txn_principal_id=NULL, txn_interest_id=NULL WHERE loan_id = ? AND seq = ?',
-      [req.params.id, req.params.seq])
+       자금 예측에서 나갈 돈이 빠진다(예정도 같은 테이블에 살기 때문).
+       ⚠ 단 '상환 일정 없음' 채무는 반대다. 그 행은 원래 예정이 아니라 수시 상환의 실적이라,
+          되돌리면 **있지도 않은 예정 회차**가 생겨 자금 예측에 유령 출금이 영구히 잡힌다
+          (그 채무는 회차가 없다는 게 전제다). 그래서 통째로 지운다. */
+    const [[ln]] = await conn.execute('SELECT method FROM loans WHERE id = ?', [req.params.id])
+    if (ln && ln.method === 'none') {
+      await conn.execute('DELETE FROM loan_repayments WHERE loan_id = ? AND seq = ?',
+        [req.params.id, req.params.seq])
+    } else {
+      await conn.execute(
+        'UPDATE loan_repayments SET paid_date=NULL, txn_principal_id=NULL, txn_interest_id=NULL WHERE loan_id = ? AND seq = ?',
+        [req.params.id, req.params.seq])
+    }
     await conn.execute("UPDATE loans SET status='active' WHERE id = ?", [req.params.id])
     await conn.commit()
     res.json({ ok: true })
