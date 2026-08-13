@@ -827,7 +827,7 @@ async function initDb(conn) {
         name           VARCHAR(200) NOT NULL,
         bank           VARCHAR(200),
         vendor_id      VARCHAR(36),
-        kind           ENUM('installment','deposit') NOT NULL DEFAULT 'installment',
+        kind           ENUM('installment','deposit','guarantee') NOT NULL DEFAULT 'installment',
         principal      BIGINT DEFAULT 0,          -- 예금: 예치 원금 / 적금: 0(납입으로 쌓인다)
         monthly_amount BIGINT DEFAULT 0,          -- 적금 월 납입액
         annual_rate    DECIMAL(6,3) DEFAULT 0,
@@ -1167,6 +1167,35 @@ async function initDb(conn) {
     // 급여이체 계좌. 주민등록번호는 저장하지 않는다 —
     // 원천징수·연말정산 신고서 자동생성이 범위 밖이라 지금 얻는 게 없고, 저장하는 순간
     // 암호화·파기 의무가 붙는다. 신고서 자동화를 범위에 넣을 때 다시 판단한다.
+    /* 미지급 퇴직금 — 급여대장으로 담을 수 없는 것만 담는다.
+     *
+     * 급여대장(payroll)은 UNIQUE(employee_id, month), 즉 "한 사람 한 달 한 행"이다.
+     * 퇴직금은 특정 달의 급여가 아니라 근속 전체에 대한 일시금이라 그 구조에 안 들어간다.
+     * 계정과목도 다르다(급여 5201 / 퇴직급여 5202).
+     *
+     * ⚠ **밀린 급여는 여기가 아니라 급여대장이다.** 퇴사자도 employees 에 남으므로 과거
+     *   월분 행을 만들 수 있고, 그러면 미지급이 저절로 잡힌다. 양쪽에 적으면 자금 예측이
+     *   같은 돈을 두 번 센다. kind 컬럼은 남겨 두되 'severance' 만 쓴다.
+     *
+     * 자금 현황에서 이 돈은 **언젠가 나갈 돈**으로 서야 한다. 날짜를 모르면(대개 모른다)
+     * due_date 를 비워 두고 '기한 미정'으로 둔다 — 없는 날짜를 지어내지 않는다. */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS unpaid_labor (
+        id          VARCHAR(36) PRIMARY KEY,
+        employee_id VARCHAR(36),
+        name        VARCHAR(100) NOT NULL,
+        kind        VARCHAR(20) NOT NULL,        -- salary(급여) | severance(퇴직금)
+        status      VARCHAR(20) NOT NULL DEFAULT 'active',   -- active(재직) | retired(퇴직)
+        period      VARCHAR(20),                 -- '2026-04' 같은 월분(모르면 빈칸)
+        amount      BIGINT NOT NULL DEFAULT 0,
+        paid_amount BIGINT NOT NULL DEFAULT 0,
+        due_date    VARCHAR(20),                 -- 비면 기한 미정
+        memo        VARCHAR(300),
+        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_unpaid_labor (status, kind)
+      )
+    `)
+
     /* 계좌 소유 — 법인 것인가 대표 개인 것인가.
      *
      * 중소기업은 대표 개인 계좌·카드로 회사 돈을 쓰는 경우가 흔하다. 자금 현황에서는
@@ -1186,6 +1215,30 @@ async function initDb(conn) {
      * 지금은 카드를 '결제수단'으로만 알고 있어서, 이번 달 카드값이 며칠에 어느 통장에서
      * 빠지는지 자금 예측이 알 수 없었다.
      * pay_day 0 = 미설정(예측하지 않는다 — 모르는 걸 지어내면 그 날 잔고가 틀린다). */
+    /* 정기 규칙의 결제조건 — 회차일과 **돈이 오가는 날**이 다르다.
+     *
+     * 여태 모든 규칙에 '30일 후'가 붙었다. 그런데 대표 자금표의 급여(15일)·임대료(31일)·
+     * 카드는 **자동이체라 그 날 바로 빠지는 돈**이다. 30일 뒤로 잡으면 정작 잔고가
+     * 모자라는 날을 못 짚는다("지출 날짜를 못 지키면 신용 문제").
+     *   immediate 회차일 당일   net30 회차일 +30일(기존값)   eom 그 달 말일
+     * 기존 규칙은 전부 net30 으로 시작한다 — 지금 숫자가 바뀌지 않는다. */
+    /* savings.kind 에 'guarantee'(보증금)를 더한다. ENUM 은 CREATE TABLE IF NOT EXISTS 로는
+       안 바뀌므로 기존 DB에는 ALTER 가 필요하다. 값을 **넓히기만** 하는 변경이라 안전하고,
+       이미 넓혀져 있으면 같은 결과라 매번 돌아도 된다. */
+    await c.execute(
+      "ALTER TABLE savings MODIFY kind ENUM('installment','deposit','guarantee') NOT NULL DEFAULT 'installment'")
+
+    /* loans.method 에 'none'(상환 일정 없음)을 더한다.
+     *
+     * 대표가수금·관계사 차입처럼 **빌린 건 맞는데 언제 갚을지 안 정한** 채무가 실무에 흔하다.
+     * 여태는 표현할 방법이 없어서 등록하는 순간 공식이 상환 일정을 지어냈고, 있지도 않은
+     * 출금이 자금 예측에 잡혔다. 값을 넓히기만 하는 변경이라 안전하고 여러 번 돌아도 같다. */
+    await c.execute(
+      "ALTER TABLE loans MODIFY method ENUM('equal_payment','equal_principal','bullet','none') NOT NULL DEFAULT 'equal_payment'")
+
+    await ensureColumn('recurring_expenses', 'pay_term', "pay_term VARCHAR(12) NOT NULL DEFAULT 'net30'")
+    await ensureColumn('recurring_invoices', 'pay_term', "pay_term VARCHAR(12) NOT NULL DEFAULT 'net30'")
+
     await ensureColumn('accounts', 'card_pay_day', 'card_pay_day TINYINT NOT NULL DEFAULT 0')
     await ensureColumn('accounts', 'card_pay_account_id', 'card_pay_account_id VARCHAR(36)')
 

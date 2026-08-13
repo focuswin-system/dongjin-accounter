@@ -434,9 +434,15 @@ export const api = {
   async getFundStatus({ unit = 'month', offset = 0 } = {}) {
     try { return await req(`/fund-status?unit=${unit}&offset=${offset}`) } catch { return null }
   },
-  async getFundSeries({ unit = 'month', back = 6, forward = 6 } = {}) {
-    try { return await req(`/fund-status/series?unit=${unit}&back=${back}&forward=${forward}`) }
+  /* 보고 있는 구간과 그 다음 한 칸만. 예전엔 앞뒤 6칸씩 13줄이라 고른 달과 상관없는
+     구간이 첫 화면을 다 먹었다(게다가 절반은 거래가 없어 '—'였다). */
+  async getFundSeries({ unit = 'month', offset = 0, back = 0, forward = 1 } = {}) {
+    try { return await req(`/fund-status/series?unit=${unit}&offset=${offset}&back=${back}&forward=${forward}`) }
     catch { return null }
+  },
+  /** 며칠에 어느 통장이 비나 — 구간을 한 칸 잘게 쪼갠 시간축(월→일자, 분기→주, 년→월) */
+  async getFundTimeline({ unit = 'month', offset = 0 } = {}) {
+    try { return await req(`/fund-status/timeline?unit=${unit}&offset=${offset}`) } catch { return null }
   },
 
   /* 주별 총 매입/매출 현황 — 청구서 품목을 기간으로 모은다(조회 전용). */
@@ -770,6 +776,8 @@ export const api = {
         startDate: r.start_date,
         endDate: r.end_date,
         accountId: r.account_id,
+        // 회차일과 실제로 입금되는 날은 다르다 — 자금 예측이 이 값으로 날짜를 세운다
+        payTerm: r.pay_term || 'net30',
         active: r.active === 1,
         lastGenerated: r.last_generated,
       }))
@@ -789,6 +797,7 @@ export const api = {
         start_date: data.startDate,
         end_date: data.endDate,
         account_id: data.accountId,
+        pay_term: data.payTerm,
       }})
       return { ok: true, id: result.id }
     } catch { return { ok: false } }
@@ -807,6 +816,7 @@ export const api = {
         start_date: data.startDate ?? data.start_date,
         end_date: data.endDate ?? data.end_date ?? null,
         account_id: data.accountId ?? data.account_id ?? null,
+        pay_term: data.payTerm ?? data.pay_term,
       }})
       return { ok: true }
     } catch (e) { return { ok: false, error: e.message } }
@@ -1245,6 +1255,16 @@ export const api = {
     try { const r = await req(`/finance/loans/${id}/repay`, { method: 'POST', body: { seq, date, account_id } }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
   },
+  /* 수시 상환 — 회차 없이 금액을 직접 넣어 한 번 갚는다.
+     상환 일정이 없는 채무(대표가수금 등) 전용. 일정이 있는 대출은 회차 상환을 쓴다. */
+  async repayLoanAdhoc(id, { date, account_id, principal, interest } = {}) {
+    try {
+      const r = await req(`/finance/loans/${id}/repay-adhoc`, {
+        method: 'POST', body: { date, account_id, principal, interest },
+      })
+      return { ok: true, ...r }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
   /** 놓친 상환 일괄 처리 — 예정일이 지난 회차를 순서대로 모두. 각 회차는 그 예정일로 기록된다 */
   async repayMissedLoan(id, { account_id } = {}) {
     try { const r = await req(`/finance/loans/${id}/repay-missed`, { method: 'POST', body: { account_id } }); return { ok: true, ...r } }
@@ -1555,6 +1575,24 @@ export const api = {
   },
   async clearPayrollMonth(month) {
     try { const r = await req('/payroll/month/' + month, { method: 'DELETE' }); return { ok: true, deleted: r.deleted } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
+  /* 미지급 퇴직금 — 급여대장이 담을 수 없는 것만 여기 있다.
+     밀린 '급여'는 급여대장(getPayroll)에서 저절로 나온다. 여기 또 적으면 자금 예측이 두 번 센다. */
+  async getUnpaidLabor() {
+    try { return await req('/unpaid-labor') } catch { return { items: [], totals: { retired: 0, active: 0, all: 0 } } }
+  },
+  async addUnpaidLabor(data) {
+    try { const r = await req('/unpaid-labor', { method: 'POST', body: data }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async updateUnpaidLabor(id, data) {
+    try { await req('/unpaid-labor/' + id, { method: 'PUT', body: data }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async deleteUnpaidLabor(id) {
+    try { await req('/unpaid-labor/' + id, { method: 'DELETE' }); return { ok: true } }
     catch (e) { return { ok: false, error: e.message } }
   },
 
