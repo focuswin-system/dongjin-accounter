@@ -602,8 +602,9 @@ export const FundStatusScreen = ({ go }) => {
                   <th className="num-right">보통계좌</th>
                   <th className="num-right">저축·보증금</th>
                   <th className="num-right">부채</th>
+                  <th className="num-right">들어올 돈</th>
                   <th className="num-right">나갈 돈</th>
-                  <th className="num-right">미지급 인건비</th>
+                  <th className="num-right">그중 미지급 인건비</th>
                   <th className="num-right" style={{ width: 140 }}>현금 과부족</th>
                 </tr>
               </thead>
@@ -616,17 +617,28 @@ export const FundStatusScreen = ({ go }) => {
                    * 틀린다** — 실제로 이 화면에서 나갈 돈이 4,317만으로 나왔는데 위 KPI는
                    * 1억 1,317만이었다(급여·퇴직금 7,000만이 통째로 빠져 있었다).
                    * 미지정 예정은 성격상 전부 법인 돈이라(개인 계좌 전용 예정은 없다) 법인에 얹는다. */
-                  const un = label === '법인' ? (data.unassigned || { in: 0, out: 0 }) : { in: 0, out: 0 }
+                  const un = label === '법인' ? (data.unassigned || { in: 0, out: 0, bridge: 0 }) : { in: 0, out: 0, bridge: 0 }
                   const planIn = g.planIn + un.in
                   const planOut = g.planOut + un.out
-                  const gap = planIn - planOut
+                  /* '현금 과부족' = **잔액까지 세야** 뜻이 맞는다.
+                   *
+                   * 예전엔 planIn − planOut 만 계산했다. 같은 행 왼쪽에 보통계좌 잔액을 찍어 놓고
+                   * 결론 열에서는 뺐고, 20px 아래 계좌표의 '기간 말 예상'은 잔액을 포함해서
+                   * 한 화면에 결론이 두 개였다. 대표 자금표의 정의도 '잔고 − 지급예정'이다.
+                   * g.expected 는 잔액 + 예정(+미래 구간이면 다리 구간)이라 계좌표와 같은 값이다. */
+                  const gap = g.expected + un.in - un.out + (un.bridge || 0)
                   return (
                     <tr key={label}>
                       <td className="fw-600">{label}</td>
                       <td className="num num-right">{fmtNum(g.balance)}</td>
                       <td className="num num-right text-muted">{label === '법인' ? fmtNum(data.savings?.total || 0) : '—'}</td>
                       <td className="num num-right text-muted">{label === '법인' ? fmtNum(data.debts?.total || 0) : '—'}</td>
+                      <td className="num num-right" style={{ color: planIn ? 'var(--pos-ink)' : undefined }}>
+                        {planIn ? fmtNum(planIn) : ''}
+                      </td>
                       <td className="num num-right">{fmtNum(planOut)}</td>
+                      {/* '그중'이다 — 이 금액은 이미 왼쪽 '나갈 돈'에 들어 있다.
+                          그렇게 안 적으면 가로로 더해서 급여·퇴직금을 두 번 세게 된다. */}
                       <td className="num num-right text-muted">{label === '법인' ? fmtNum(data.labor?.total || 0) : '—'}</td>
                       <td className="num num-right fw-700" style={{ color: gap < 0 ? 'var(--neg-ink)' : undefined }}>
                         <Money v={gap}/>
@@ -639,8 +651,9 @@ export const FundStatusScreen = ({ go }) => {
             {/* 한 표 안에 기준이 다른 숫자가 섞여 있다. 안 밝히면 지난 구간을 볼 때
                 "7월엔 부채가 이만큼이었구나"로 잘못 읽는다 — 저 값은 오늘 잔액이다. */}
             <div className="text-sm text-muted card-pad" style={{ paddingTop: 0 }}>
-              저축·부채·미지급 인건비는 <b>오늘 기준 잔액</b>이고, 나갈 돈·현금 과부족은 <b>이 구간</b>의 예정이에요.
-              계좌를 안 정한 예정(급여·퇴직금 등)도 법인에 넣어 셉니다.
+              <b>현금 과부족 = 보통계좌 + 들어올 돈 − 나갈 돈</b>. 계좌를 안 정한 예정(급여·퇴직금 등)도 법인에 넣어 셉니다.<br/>
+              '그중 미지급 인건비'는 <b>이미 '나갈 돈'에 들어 있는 금액</b>이에요 — 따로 더하지 마세요.
+              저축·부채는 <b>오늘 기준 잔액</b>이라 지난 구간을 봐도 이 값입니다.
             </div>
           </div>
 

@@ -401,15 +401,27 @@ const SeveranceDrawer = ({ row, employees, onClose, onSaved }) => {
   // 직원을 고르면 이름·재직여부를 따라 채운다. 명단에 없는 옛 퇴사자는 이름만 직접 적을 수 있다.
   const pickEmployee = (id) => {
     const e = employees.find(x => x.id === id);
-    setF(prev => ({ ...prev, employee_id: id, name: e?.name || prev.name, status: e?.status === '퇴사' ? 'retired' : prev.status }));
+    /* 퇴사면 retired, 재직이면 active — 예전엔 퇴사일 때만 따라가고 기본값이 'retired' 라
+       재직 중인 직원을 골라도 퇴직자로 집계됐다(칩을 직접 안 누르면). */
+    setF(prev => ({
+      ...prev, employee_id: id,
+      name: e?.name || prev.name,
+      status: e ? (e.status === '퇴사' ? 'retired' : 'active') : prev.status,
+    }));
   };
 
+  const [busy, setBusy] = useState(false);
   const save = async () => {
-    const body = { ...f, employee_id: f.employee_id || null, due_date: f.due_date || null };
-    const res = isNew ? await api.addUnpaidLabor(body) : await api.updateUnpaidLabor(row.id, body);
-    if (!res.ok) return toast.push(res.error || '저장에 실패했어요', { tone: 'warn' });
-    toast.push(isNew ? '등록했어요' : '수정했어요');
-    onSaved();
+    // 왕복 중 두 번 누르면 같은 퇴직금이 2건 생기고 자금 현황이 두 번 센다
+    if (busy) return;
+    setBusy(true);
+    try {
+      const body = { ...f, employee_id: f.employee_id || null, due_date: f.due_date || null };
+      const res = isNew ? await api.addUnpaidLabor(body) : await api.updateUnpaidLabor(row.id, body);
+      if (!res.ok) return toast.push(res.error || '저장에 실패했어요', { tone: 'warn' });
+      toast.push(isNew ? '등록했어요' : '수정했어요');
+      onSaved();
+    } finally { setBusy(false); }
   };
 
   return (
@@ -419,8 +431,11 @@ const SeveranceDrawer = ({ row, employees, onClose, onSaved }) => {
       <div className="drawer-body col gap-form">
         <div>
           <label className="label">직원</label>
-          <Combobox value={f.employee_id} onChange={pickEmployee}
-            options={employees.map(e => ({ value: e.id, label: e.name, sub: [e.department, e.status].filter(Boolean).join(' · ') }))}
+          {/* allowAdd 기본값이 true 라 "Enter로 새로 등록할 수 있어요"가 떴는데 onAddNew 가 없어
+              아무 일도 안 났다. 여기서 직원을 새로 만들 일도 없다.
+              부서는 어댑터가 `dept` 로 내려준다 — `department` 로 읽어 늘 빈칸이었다. */}
+          <Combobox value={f.employee_id} onChange={pickEmployee} allowAdd={false}
+            options={employees.map(e => ({ value: e.id, label: e.name, sub: [e.dept, e.status].filter(Boolean).join(' · ') }))}
             placeholder="직원 선택 (명단에 없으면 비워두세요)"/>
         </div>
         <div>
@@ -458,7 +473,8 @@ const SeveranceDrawer = ({ row, employees, onClose, onSaved }) => {
           <input className="input" value={f.memo} onChange={e => set('memo', e.target.value)} placeholder="예) 2024년 퇴사, 분할 지급 협의"/>
         </div>
       </div>
-      <DrawerFooter onCancel={onClose} onSave={save} saveLabel={isNew ? '등록' : '수정'}/>
+      <DrawerFooter onCancel={onClose} onSave={save} saveDisabled={busy}
+        saveLabel={busy ? '저장 중…' : (isNew ? '등록' : '수정')}/>
     </Drawer>
   );
 };

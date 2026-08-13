@@ -61,7 +61,8 @@ const LoanFormDrawer = ({ open, editing, onClose, onSave, vendors, accounts }) =
     if (!open) return
     const p = Number(String(form.principal).replace(/[^0-9]/g, '')) || 0
     const n = Number(form.term_months) || 0
-    if (p <= 0 || n <= 0) { setPreview(null); return }
+    // 일정 없음은 회차를 안 만든다 — 숨겨둔 term_months 때문에 '0회·0원' 미리보기가 떴다
+    if (noSchedule(form.method) || p <= 0 || n <= 0) { setPreview(null); return }
     let alive = true
     api.previewLoan({
       principal: p, annual_rate: form.annual_rate, method: form.method,
@@ -76,7 +77,12 @@ const LoanFormDrawer = ({ open, editing, onClose, onSave, vendors, accounts }) =
     const p = Number(String(form.principal).replace(/[^0-9]/g, '')) || 0
     if (p <= 0) return toast.push('원금을 입력해주세요')
     if (form.received && !form.account_id) return toast.push('입금 계좌를 선택해주세요 — 안 고르면 계좌 잔액에 반영되지 않아요')
-    const res = await onSave({ ...form, principal: p })
+    /* 일정 없음이면 회차를 0으로 보낸다. 폼이 칸만 숨기고 값(기본 '12')은 그대로 보내서,
+       대표가수금이 term_months=12 로 저장되고 그 값으로 단기/장기차입금 계정이 갈렸다. */
+    const res = await onSave({
+      ...form, principal: p,
+      term_months: noSchedule(form.method) ? 0 : form.term_months,
+    })
     if (res?.ok === false) return toast.push(res.error || '저장에 실패했어요', { tone: 'warn' })
     onClose()
   }
@@ -594,7 +600,7 @@ export const LoanScreen = ({ page = true }) => {
                 )}
                 {/* 0원 회차는 상환할 것이 없다. 눌러도 서버가 막지만, 버튼을 보이면
                     "왜 안 되지"로 막히므로 애초에 안 그린다. */}
-                {!noSchedule(l.method) && l.next_cycle && (Number(l.next_cycle.principal) + Number(l.next_cycle.interest)) > 0 && (
+                {!noSchedule(l.method) && l.next_cycle && (
                   <button className="btn sm primary" style={{ fontSize: 11, padding: '3px 8px' }}
                     onClick={() => setRepayTarget({ loan: l, cycle: l.next_cycle })}>상환</button>
                 )}
@@ -649,10 +655,13 @@ const LoanSchedule = ({ loan: l, onRepay, onCancel }) => (
                   onClick={() => onCancel(l, c.seq)}>취소</button>
               </div>
             )
-            // 0원 회차 — 갚을 것이 없다. 처리하면 거래 없이 채무만 사라지므로 버튼을 안 준다.
-            if ((Number(c.principal) + Number(c.interest)) <= 0) {
-              return <span className="text-xs text-muted2">금액 없음</span>
-            }
+            /* 0원 회차 — 무이자 만기일시의 거치 구간처럼 **정말 낼 것이 없는** 회차다.
+               버튼을 지웠더니 그 회차를 넘길 수 없어 마지막 회차에 영영 도달 못 했다(회귀).
+               거래는 안 생기고 회차만 넘어간다는 걸 라벨로 밝힌다. */
+            if (l.next_cycle?.seq === c.seq && (Number(c.principal) + Number(c.interest)) <= 0) return (
+              <button className="btn sm" style={{ fontSize: 10, padding: '2px 7px' }}
+                onClick={() => onRepay({ loan: l, cycle: c })}>건너뛰기</button>
+            )
             if (l.next_cycle?.seq === c.seq) return (
               <button className="btn sm primary" style={{ fontSize: 10, padding: '2px 7px' }}
                 onClick={() => onRepay({ loan: l, cycle: c })}>상환 처리</button>
