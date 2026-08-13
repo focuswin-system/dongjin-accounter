@@ -3,7 +3,7 @@ const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
 const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
-const { ledgerError } = require('../lib/ledger')
+const { ledgerError, amountError } = require('../lib/ledger')
 const {
   KINDS, paymentSchedule, unpaidPayments, paidPrincipal, maturitySummary, maturityDateOf,
   accruedInterest,
@@ -185,6 +185,9 @@ router.post('/', async (req, res, next) => {
     if (kind === 'deposit' && principal <= 0) return res.status(400).json({ error: '예치 금액을 입력해주세요' })
     if (kind === 'guarantee' && principal <= 0) return res.status(400).json({ error: '보증금 금액을 입력해주세요' })
     if (kind === 'installment' && monthly_amount <= 0) return res.status(400).json({ error: '월 납입액을 입력해주세요' })
+    /* 자릿수 상한 — 거래 등록과 같은 규칙(1조원). 없으면 BIGINT 를 넘는 값이 500 이 된다. */
+    { const e = amountError(kind === 'installment' ? monthly_amount : principal, { allowZero: true })
+      if (e) return res.status(400).json({ error: e }) }
 
     /* 가입과 동시에 통장에서 돈이 빠지는가.
      *   예금  — 목돈이 그 자리에서 나간다(기본 O)
@@ -289,6 +292,10 @@ router.put('/:id', async (req, res, next) => {
     if (lumpSum && principal <= 0) {
       return res.status(400).json({ error: cur.kind === 'guarantee' ? '보증금 금액을 입력해주세요' : '예치 금액을 입력해주세요' })
     }
+    /* 자릿수 상한 — 거래 등록과 같은 규칙(1조원). 없으면 '1e20' 같은 값이 BIGINT 를 넘어
+       500(서버 오류)으로 떨어졌다. 사용자에게는 원인이 안 보이는 실패다. */
+    { const e = amountError(lumpSum ? principal : monthly_amount, { allowZero: true })
+      if (e) return res.status(400).json({ error: e }) }
     // 이율은 numOf 가 빈 값을 0으로 만든다 — 일부 필드만 보낸 요청에서 이율이 조용히 사라졌다
     const annual_rate = b.annual_rate != null && String(b.annual_rate) !== ''
       ? numOf(b.annual_rate) : Number(cur.annual_rate)

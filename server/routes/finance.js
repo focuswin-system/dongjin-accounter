@@ -3,7 +3,7 @@ const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
 const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
-const { ledgerError } = require('../lib/ledger')
+const { ledgerError, amountError } = require('../lib/ledger')
 const { repaymentSchedule, unpaidCycles, remainingPrincipal, scheduleTotals, METHODS } = require('../lib/loan')
 
 const router = Router()
@@ -177,6 +177,9 @@ router.post('/loans', async (req, res, next) => {
   if (!b.start_date) return res.status(400).json({ error: '실행일을 선택해주세요' })
   const principal = intOf(b.principal)
   if (principal <= 0) return res.status(400).json({ error: '원금을 입력해주세요' })
+  /* 자릿수 상한 — 거래 등록과 같은 규칙(1조원). 없으면 BIGINT 를 넘는 값이 500 이 된다
+     ("처리 중 오류" — 사용자에게는 무엇이 잘못됐는지 안 보이는 실패다). */
+  { const e = amountError(principal); if (e) return res.status(400).json({ error: e }) }
   const method = METHODS.includes(b.method) ? b.method : 'equal_payment'
   /* 이율은 **안 넣은 것과 0%를 구분**해야 한다.
    * 검증이 없어서 이율 없이 대출이 만들어졌고, 그러면 상환 스케줄의 이자가 전부 0이 된다.
@@ -291,6 +294,9 @@ router.put('/loans/:id', async (req, res, next) => {
     if (!(want.principal > 0)) {
       await rollbackQuietly(conn); return res.status(400).json({ error: '원금을 입력해주세요' })
     }
+    /* 자릿수 상한 — 없으면 BIGINT 를 넘는 값이 500 으로 떨어진다(원인이 안 보이는 실패) */
+    { const e = amountError(want.principal)
+      if (e) { await rollbackQuietly(conn); return res.status(400).json({ error: e }) } }
     const changed = LOAN_TERMS.filter(k => String(want[k]) !== String(
       k === 'annual_rate' ? Number(cur.annual_rate) : k === 'principal' || k === 'term_months' ? Number(cur[k]) : cur[k]))
     if (locked && changed.length) {
@@ -543,6 +549,8 @@ router.post('/loans/:id/repay-adhoc', async (req, res, next) => {
     if (principal + interest <= 0) {
       await rollbackQuietly(conn); return res.status(400).json({ error: '갚은 금액을 입력해주세요' })
     }
+    { const e = amountError(principal + interest)
+      if (e) { await rollbackQuietly(conn); return res.status(400).json({ error: e }) } }
     /* 이자에 상한이 없으면 원금 칸과 이자 칸을 바꿔 적은 실수가 **비용 폭탄**으로 남는다
        (원금 상환은 손익에 안 가지만 이자는 전액 비용이다 — 손익계산서가 통째로 틀어진다).
        적금 만기(1.5배 가드)와 같은 취지로, 남은 원금을 넘는 이자는 되묻는다. */
