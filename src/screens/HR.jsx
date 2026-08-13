@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday } from '../lib/ui'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DataTable } from '../lib/components/DataTable'
-import { DrawerHead } from '../lib/components/Drawer'
+import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 // 지급 등록 Drawer는 급여대장·용역계약 상세가 함께 쓴다(공용 컴포넌트로 분리)
 import { PayrollPayDrawer } from '../lib/components/PayrollPayDrawer'
 import { api } from '../lib/api'
@@ -183,7 +183,7 @@ export const HRScreen = () => {
 
         <div className="card" style={{ overflow: "hidden" }}>
           <div className="tab-bar" style={{ padding: "0 12px" }}>
-            {["급여대장", "용역·일용 대장"].map(t => (
+            {["급여대장", "용역·일용 대장", "미지급 퇴직금"].map(t => (
               <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t}</button>
             ))}
           </div>
@@ -270,6 +270,7 @@ export const HRScreen = () => {
           )}
 
           {tab === "용역·일용 대장" && <ServiceLedgerTab month={month} setMonth={setMonth}/>}
+          {tab === "미지급 퇴직금" && <SeveranceTab/>}
         </div>
 
         <div className="row gap-10" style={{ marginTop: 16, padding: "12px 14px", fontSize: 12, color: "var(--muted-2)" }}>
@@ -283,6 +284,182 @@ export const HRScreen = () => {
       <PayslipEditorDrawer row={editSlip} onClose={() => setEditSlip(null)} onSaved={() => { setEditSlip(null); loadPayroll(); }}/>
       <PayrollPayDrawer row={payTarget} accounts={accounts} onClose={() => setPayTarget(null)} onSaved={() => loadPayroll()}/>
     </>
+  );
+};
+
+/* ───────── 미지급 퇴직금 ─────────
+ *
+ * 급여대장(payroll)은 UNIQUE(employee_id, month) — "한 사람 한 달 한 행"이라
+ * 근속 전체에 대한 일시금인 퇴직금이 들어갈 자리가 없다. 그래서 여기만 따로 있다.
+ *
+ * ⚠ **밀린 급여는 여기가 아니다.** 급여대장에 그 달 행을 만들면 미지급이 저절로 잡히고
+ *   자금 예측이 그걸 센다. 여기 또 적으면 나갈 돈이 두 번 계산된다. 화면에도 적어 둔다.
+ */
+const SeveranceTab = () => {
+  const toast = useToast();
+  const { confirm } = useConfirm();
+  const [data, setData] = useState({ items: [], totals: { retired: 0, active: 0, all: 0 } });
+  const [employees, setEmployees] = useState([]);
+  const [editing, setEditing] = useState(null);   // 행 객체 | 'new' | null
+
+  const load = async () => setData(await api.getUnpaidLabor());
+  useEffect(() => { load(); api.getEmployees().then(setEmployees) }, []);
+
+  const doDelete = async (r) => {
+    const ok = await confirm({
+      tone: 'neg', icon: <Icon.Warn size={22}/>, title: `${r.name} 퇴직금 삭제`,
+      body: '목록에서 지웁니다. 이미 지급한 거래는 지워지지 않아요.', confirmLabel: '삭제',
+    });
+    if (!ok) return;
+    const res = await api.deleteUnpaidLabor(r.id);
+    if (!res.ok) return toast.push(res.error || '삭제에 실패했어요', { tone: 'warn' });
+    toast.push('삭제했어요'); load();
+  };
+
+  return (
+    <div>
+      <div style={{ padding: '18px 18px 0' }}>
+        <div className="alert-row" style={{ marginBottom: 16, background: 'var(--brand-soft)', borderColor: 'transparent' }}>
+          <Icon.Sparkle/>
+          <div>
+            <div className="lead">여기는 <b>퇴직금</b>만 적어요.</div>
+            <div className="body">
+              밀린 <b>급여</b>는 급여대장에 그 달 명세를 만들면 미지급으로 저절로 잡혀요(퇴사자도 됩니다).
+              양쪽에 적으면 자금 현황에서 나갈 돈이 두 번 계산돼요.
+            </div>
+          </div>
+        </div>
+
+        <KpiRow cols={3} style={{ marginBottom: 4 }}>
+          <Kpi label="퇴직자"   value={fmtNum(data.totals.retired) + '원'} badge="이미 나간 사람" badgeTone={data.totals.retired > 0 ? 'warn' : 'ink'}/>
+          <Kpi label="현직원"   value={fmtNum(data.totals.active) + '원'}  badge="재직 중 적립분" badgeTone="ink"/>
+          <Kpi label="합계"     value={fmtNum(data.totals.all) + '원'}     badge="아직 안 준 퇴직금" badgeTone={data.totals.all > 0 ? 'neg' : 'ink'}/>
+        </KpiRow>
+
+        <div className="row" style={{ margin: '14px 0' }}>
+          <button className="btn primary ml-auto" onClick={() => setEditing('new')}><Icon.Plus size={14}/> 퇴직금 등록</button>
+        </div>
+      </div>
+
+      <DataTable
+        rows={data.items}
+        empty="등록된 미지급 퇴직금이 없어요."
+        columns={[
+          { key: 'name', header: '성명', sortable: true, render: r => <span className="fw-700">{r.name}</span> },
+          { key: 'status', header: '구분', width: 90, render: r => (
+            <span className={`badge ${r.status === 'retired' ? 'warn' : 'outline'}`}>{r.status === 'retired' ? '퇴직자' : '현직원'}</span>
+          ) },
+          { key: 'amount', header: '총액', align: 'right', sortable: true, render: r => <span className="num-cell">{fmtNum(r.amount)}</span> },
+          { key: 'paid_amount', header: '지급액', align: 'right', render: r => <span className="num-cell text-muted">{fmtNum(r.paid_amount)}</span> },
+          // 다 준 건은 빨갛게 0을 쓰지 않는다 — 0원이 경고색이면 진짜 남은 돈이 묻힌다
+          { key: 'remain', header: '남은 금액', align: 'right', sortable: true, render: r => (
+            r.remain > 0
+              ? <span className="num-cell fw-700" style={{ color: 'var(--neg-ink)' }}>{fmtNum(r.remain)}</span>
+              : <span className="num-cell text-muted2">지급 완료</span>
+          ) },
+          // 기한을 모르는 게 보통이다. 없는 날짜를 지어내지 않고 '미정'이라고 적는다.
+          { key: 'due_date', header: '지급 기한', width: 120, render: r => (
+            r.due_date ? <span className="num text-sm">{r.due_date}</span> : <span className="text-xs text-muted2">미정</span>
+          ) },
+          { key: 'memo', header: '메모', className: 'text-sm text-muted', render: r => r.memo || '—' },
+          { key: 'act', header: '', width: 120, render: r => (
+            <div className="row gap-4">
+              <button className="btn ghost sm" onClick={() => setEditing(r)}>수정</button>
+              <button className="btn ghost sm" style={{ color: 'var(--neg)' }} onClick={() => doDelete(r)}>삭제</button>
+            </div>
+          ) },
+        ]}/>
+
+      <div className="text-xs text-muted2" style={{ padding: '14px 18px', lineHeight: 1.7 }}>
+        · 실제로 지급하면 <b>거래를 등록</b>하고 여기 지급액을 올려주세요. 이 표가 거래를 자동으로 만들지는 않아요
+        (자동으로 만들면 통장에 이미 찍힌 출금과 겹칩니다).<br/>
+        · 남은 금액은 <b>자금 현황</b>에서 '나갈 돈'으로 섭니다. 기한을 비워두면 '기한 미정'으로 잡아요.
+      </div>
+
+      <SeveranceDrawer row={editing} employees={employees}
+        onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }}/>
+    </div>
+  );
+};
+
+const SeveranceDrawer = ({ row, employees, onClose, onSaved }) => {
+  const toast = useToast();
+  const blank = { employee_id: '', name: '', status: 'retired', amount: '', paid_amount: '', due_date: '', memo: '' };
+  const [f, setF] = useState(blank);
+  const set = (k, v) => setF(prev => ({ ...prev, [k]: v }));
+  const isNew = row === 'new';
+  useEffect(() => {
+    if (!row) return;
+    setF(isNew ? blank : {
+      employee_id: row.employee_id || '', name: row.name || '', status: row.status || 'retired',
+      amount: String(row.amount || ''), paid_amount: String(row.paid_amount || ''),
+      due_date: row.due_date || '', memo: row.memo || '',
+    });
+  }, [row]);
+  if (!row) return null;
+
+  // 직원을 고르면 이름·재직여부를 따라 채운다. 명단에 없는 옛 퇴사자는 이름만 직접 적을 수 있다.
+  const pickEmployee = (id) => {
+    const e = employees.find(x => x.id === id);
+    setF(prev => ({ ...prev, employee_id: id, name: e?.name || prev.name, status: e?.status === '퇴사' ? 'retired' : prev.status }));
+  };
+
+  const save = async () => {
+    const body = { ...f, employee_id: f.employee_id || null, due_date: f.due_date || null };
+    const res = isNew ? await api.addUnpaidLabor(body) : await api.updateUnpaidLabor(row.id, body);
+    if (!res.ok) return toast.push(res.error || '저장에 실패했어요', { tone: 'warn' });
+    toast.push(isNew ? '등록했어요' : '수정했어요');
+    onSaved();
+  };
+
+  return (
+    <Drawer open onClose={onClose}>
+      <DrawerHead title={isNew ? '미지급 퇴직금 등록' : '미지급 퇴직금 수정'}
+        sub="아직 안 나간 퇴직금이에요. 급여는 급여대장에서 관리해요." onClose={onClose}/>
+      <div className="drawer-body col gap-form">
+        <div>
+          <label className="label">직원</label>
+          <Combobox value={f.employee_id} onChange={pickEmployee}
+            options={employees.map(e => ({ value: e.id, label: e.name, sub: [e.department, e.status].filter(Boolean).join(' · ') }))}
+            placeholder="직원 선택 (명단에 없으면 비워두세요)"/>
+        </div>
+        <div>
+          <label className="label">성명 *</label>
+          <input className="input" value={f.name} onChange={e => set('name', e.target.value)} placeholder="예) 홍길동"/>
+        </div>
+        <div>
+          <label className="label">구분</label>
+          <div className="row gap-4">
+            {[['retired', '퇴직자'], ['active', '현직원']].map(([v, l]) => (
+              <button key={v} type="button" className={`chip ${f.status === v ? 'active' : ''}`}
+                onClick={() => set('status', v)}>{l}</button>
+            ))}
+          </div>
+        </div>
+        <div className="row gap-8">
+          <div style={{ flex: 1 }}>
+            <label className="label">퇴직금 총액 *</label>
+            <MoneyInput value={f.amount} onChange={v => set('amount', v)}/>
+          </div>
+          <div style={{ flex: 1 }}>
+            <label className="label">이미 지급한 금액</label>
+            <MoneyInput value={f.paid_amount} onChange={v => set('paid_amount', v)}/>
+          </div>
+        </div>
+        <div>
+          <label className="label">지급 기한</label>
+          <input className="input" type="date" value={f.due_date} onChange={e => set('due_date', e.target.value)}/>
+          <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
+            모르면 비워두세요. '기한 미정'으로 잡아 자금 현황에서 지금 나갈 돈처럼 보수적으로 셉니다.
+          </div>
+        </div>
+        <div>
+          <label className="label">메모</label>
+          <input className="input" value={f.memo} onChange={e => set('memo', e.target.value)} placeholder="예) 2024년 퇴사, 분할 지급 협의"/>
+        </div>
+      </div>
+      <DrawerFooter onCancel={onClose} onSave={save} saveLabel={isNew ? '등록' : '수정'}/>
+    </Drawer>
   );
 };
 
