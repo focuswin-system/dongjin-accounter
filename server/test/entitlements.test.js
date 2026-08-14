@@ -113,12 +113,17 @@ test('켜 주면 그 양식만 늘어난다 — 같은 entitled 라도 나머지
   assert.deepStrictEqual(rows.map(r => r.key), ['a', 'x'])
 })
 
-/* 데이터가 안 붙은 화면을 팔 수 있는 상태로 두면 **가짜 숫자가 고객에게 간다.**
-   실제로 이 셋이 그랬다(빈 표 / NaN% / 코드에 박힌 건수). 실구현 전까지 hidden 이어야 한다. */
-test('데이터 미연결 보고서 3개는 열 수 없는 상태여야 한다', () => {
-  for (const key of ['contract', 'defense', 'taxoffice']) {
-    const r = BUILTIN_REPORTS.find(x => x.key === key)
-    assert.strictEqual(r.scope, 'hidden', `${key} 는 실구현 전까지 hidden 이어야 한다`)
+/* 데이터가 안 붙은 화면을 켤 수 있는 상태로 두면 **가짜 숫자가 고객에게 간다.**
+   방산 원가 보고서가 아직 그 상태다(빈 표 + 'NaN%'). 실구현 전까지 hidden 이어야 한다. */
+test('방산 원가 보고서는 실구현 전까지 열 수 없어야 한다', () => {
+  const r = BUILTIN_REPORTS.find(x => x.key === 'defense')
+  assert.strictEqual(r.scope, 'hidden',
+    'SAMPLE 빈 배열을 읽고 NaN% 를 찍는다 — 켜면 고객이 그걸 본다')
+})
+
+test('실데이터에 붙인 둘은 회사별로 열 수 있다', () => {
+  for (const key of ['contract', 'taxoffice']) {
+    assert.strictEqual(BUILTIN_REPORTS.find(x => x.key === key).scope, 'entitled')
   }
 })
 

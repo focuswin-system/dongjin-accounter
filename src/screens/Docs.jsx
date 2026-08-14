@@ -1535,51 +1535,142 @@ const ReportTax4 = ({ toast }) => {
   )
 }
 
-// ── 3. 계약별 손익 현황 ──────────────────────────────────────
+// ── 3. 계약별 수익 현황 ──────────────────────────────────────
+/* 데이터는 **서버가 이미 계산한 것**을 그대로 쓴다(GET /contracts).
+ *
+ * 예전엔 이 화면이 `SAMPLE.contractSummary`(=[])를 읽어서 **늘 빈 표**였다.
+ * 그렇다고 여기서 SQL을 새로 짜면 계약 화면과 숫자가 갈린다 — 같은 계약의 손익이
+ * 화면마다 다르면 둘 다 못 믿게 된다. 그래서 집계는 routes/contracts.js 한 곳에 둔다.
+ *
+ * 서버가 지켜 주는 규칙 두 가지(여기서 다시 계산하면 안 되는 이유):
+ *   · 손익은 **공급가액 기준**이다. VAT 포함으로 계산하면 정확히 10% 부풀려진다.
+ *   · 원가는 `cost_contract_id`(원가 귀속)로 붙은 지출이지, `contract_id`(근거 계약)가 아니다.
+ *     외주비 한 건은 외주 매입계약의 '지급'이면서 동시에 프로젝트 매출계약의 '원가'다.
+ *
+ * 매입 계약은 **뺀다.** 서버가 profit·cost 를 null 로 내리는데(나간 돈을 손해로 읽히게 하지
+ * 않으려고), 그 행을 섞으면 손익 열이 빈 줄로 남아 합계가 무슨 뜻인지 알 수 없게 된다.
+ */
 const ReportContract = ({ toast }) => {
-  const rows = SAMPLE.contractSummary.map(c => ({ ...c, margin: c.amount ? (c.profit || 0) / c.amount * 100 : 0 }))
-  const totalAmount = rows.reduce((a, r) => a + r.amount, 0)
-  const totalProfit = rows.reduce((a, r) => a + r.profit, 0)
+  const [rows, setRows] = useState(null)
+  const [onlyOpen, setOnlyOpen] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    api.getContracts().then(list => { if (alive) setRows(Array.isArray(list) ? list : []) })
+    return () => { alive = false }
+  }, [])
+
+  if (rows === null) return <Loading label="계약을 불러오는 중…"/>
+
+  const sales = rows
+    .filter(c => !c.is_purchase)
+    .filter(c => !onlyOpen || c.status === '진행중')
+    .map(c => {
+      const revenue = Number(c.in_supply || 0)     // 손익의 분모 — 받은 돈의 공급가액
+      const cost = Number(c.cost_supply || 0)
+      const profit = Number(c.profit || 0)
+      return {
+        ...c, revenue, cost, profit,
+        // 매출이 0인 계약은 이익률이 성립하지 않는다 — 0으로 나눠 NaN·Infinity 를 찍지 않는다
+        margin: revenue > 0 ? (profit / revenue) * 100 : null,
+      }
+    })
+    .sort((a, b) => Number(b.amount || 0) - Number(a.amount || 0))
+
+  const sum = (f) => sales.reduce((a, r) => a + f(r), 0)
+  const totalAmount = sum(r => Number(r.amount || 0))
+  const totalRevenue = sum(r => r.revenue)
+  const totalCost = sum(r => r.cost)
+  const totalProfit = sum(r => r.profit)
+  // 평균이 아니라 **합계 기준** 이익률이다. 계약별 이익률을 산술평균하면 작은 계약이 과대 반영된다.
+  const totalMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : null
 
   return (
     <div>
-      <KpiRow cols={3} style={{ marginBottom: 24 }}>
-        <Kpi label="총 수주금액" value={totalAmount}/>
-        <Kpi label="총 손익"     value={totalProfit} tone="pos"/>
-        <Kpi label="평균 이익률" value={totalAmount > 0 ? parseFloat((totalProfit / totalAmount * 100).toFixed(1)) : 0} unit="%" tone="pos"/>
+      <div className="row gap-8 no-print" style={{ marginBottom: 16 }}>
+        <button className={`chip ${!onlyOpen ? 'active' : ''}`} onClick={() => setOnlyOpen(false)}>전체</button>
+        <button className={`chip ${onlyOpen ? 'active' : ''}`} onClick={() => setOnlyOpen(true)}>진행중만</button>
+        <span className="text-sm text-muted" style={{ marginLeft: 8, alignSelf: 'center' }}>
+          매출 계약 {sales.length}건
+        </span>
+      </div>
+
+      <KpiRow cols={4} style={{ marginBottom: 24 }}>
+        <Kpi label="총 수주금액" value={totalAmount} hint="계약서 금액(부가세 별도)"/>
+        <Kpi label="받은 매출"   value={totalRevenue} hint="입금 완료분 · 공급가액"/>
+        <Kpi label="투입 원가"   value={totalCost} tone="neg" hint="이 계약에 귀속된 지출"/>
+        <Kpi label="손익"        value={totalProfit} tone={totalProfit < 0 ? 'neg' : 'pos'}
+          badge={totalMargin == null ? undefined : `${totalMargin.toFixed(1)}%`}
+          hint="받은 매출 − 투입 원가"/>
       </KpiRow>
+
       <div className="card" style={{ overflow: "hidden" }}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>계약명</th>
-              <th className="num-right">수주금액</th>
-              <th className="num-right">입금완료</th>
-              <th className="num-right">지출</th>
-              <th className="num-right">손익</th>
-              <th style={{ width: 120 }}>이익률</th>
-              <th>상태</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td className="fw-700">{r.name}</td>
-                <td className="num-cell num-right">{fmtNum(r.amount)}</td>
-                <td className="num-cell num-right" style={{ color: "var(--pos)" }}>{fmtNum(r.inDone)}</td>
-                <td className="num-cell num-right">{fmtNum(r.out)}</td>
-                <td className="num-cell num-right fw-700" style={{ color: "var(--pos)" }}>+{fmtNum(r.profit)}</td>
-                <td>
-                  <div className="row gap-6" style={{ alignItems: "center" }}>
-                    <span className="num text-sm fw-600" style={{ color: "var(--pos)", width: 36 }}>{r.margin.toFixed(0)}%</span>
-                    <RBar pct={r.margin} tone="pos"/>
-                  </div>
-                </td>
-                <td><StatusBadge status={r.status}/></td>
+        <div className="table-scroll" style={{ overflowX: 'auto' }}>
+          <table className="table" style={{ minWidth: 900 }}>
+            <thead>
+              <tr>
+                <th>계약</th>
+                <th>거래처</th>
+                <th className="num-right">수주금액</th>
+                <th className="num-right">청구액</th>
+                <th className="num-right">받은 매출</th>
+                <th className="num-right">투입 원가</th>
+                <th className="num-right">손익</th>
+                <th style={{ width: 130 }}>이익률</th>
+                <th className="num-right">미수금</th>
+                <th>상태</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {sales.map(r => (
+                <tr key={r.id}>
+                  <td className="fw-700">{r.name}</td>
+                  <td className="text-sm text-muted">{r.vendor_name || ''}</td>
+                  <td className="num-cell num-right">{fmtNum(Number(r.amount || 0))}</td>
+                  <td className="num-cell num-right text-muted">{fmtNum(Number(r.billed || 0))}</td>
+                  <td className="num-cell num-right">{fmtNum(r.revenue)}</td>
+                  <td className="num-cell num-right">{fmtNum(r.cost)}</td>
+                  <td className="num-cell num-right fw-700"
+                    style={{ color: r.profit < 0 ? "var(--neg)" : r.profit > 0 ? "var(--pos)" : undefined }}>
+                    {r.profit < 0 ? '−' : r.profit > 0 ? '+' : ''}{fmtNum(Math.abs(r.profit))}
+                  </td>
+                  <td>
+                    {/* 매출이 아직 없는 계약은 이익률 칸을 비운다 — 0%로 적으면 '본전'으로 읽힌다 */}
+                    {r.margin == null
+                      ? <span className="text-sm text-muted2">—</span>
+                      : (
+                        <div className="row gap-6" style={{ alignItems: "center" }}>
+                          <span className="num text-sm fw-600"
+                            style={{ color: r.margin < 0 ? "var(--neg)" : "var(--pos)", width: 44 }}>
+                            {r.margin.toFixed(0)}%
+                          </span>
+                          {/* 손실이면 막대를 그리지 않는다 — 길이가 0이라 빈 막대가 되고,
+                              그건 '적자'가 아니라 '데이터 없음'으로 읽힌다. 붉은 숫자가 이미 말한다. */}
+                          {r.margin > 0 && <RBar pct={Math.min(100, r.margin)} tone="pos"/>}
+                        </div>
+                      )}
+                  </td>
+                  <td className="num-cell num-right text-sm">
+                    {Number(r.ar_remain || 0) > 0 ? fmtNum(Number(r.ar_remain)) : ''}
+                  </td>
+                  <td><StatusBadge status={r.status}/></td>
+                </tr>
+              ))}
+              {sales.length === 0 && (
+                <tr><td colSpan={10} className="text-muted text-sm" style={{ textAlign: "center", padding: 24 }}>
+                  매출 계약이 없어요.
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="text-xs text-muted" style={{ marginTop: 12, lineHeight: 1.7 }}>
+        · <b>손익 = 받은 매출 − 투입 원가</b>이고 둘 다 <b>공급가액</b> 기준입니다. 부가세는 받아서 내는 돈이라 손익이 아닙니다.<br/>
+        · <b>받은 매출</b>은 입금이 완료된 것만, <b>투입 원가</b>는 지급이 완료된 것만 셉니다 — 예정은 아직 장부가 아닙니다.<br/>
+        · <b>투입 원가</b>는 이 계약에 원가로 귀속시킨 지출입니다. 거래내역에서 계약을 연결해야 잡힙니다.<br/>
+        · 매입(발주) 계약은 손익 개념이 성립하지 않아 이 표에서 뺐습니다.
       </div>
     </div>
   )
@@ -1909,54 +2000,97 @@ const ReportDefense = ({ toast }) => {
 }
 
 // ── 9. 세무사 전달용 자료 ────────────────────────────────────
-const TAXOFFICE_DOCS = [
-  { label: "월별 입출금 내역",         count: "16건", ready: true  },
-  { label: "지출결의서 (승인 완료)",    count: "7건",  ready: true  },
-  { label: "세금계산서 (매출)",         count: "5건",  ready: true  },
-  { label: "세금계산서 (매입)",         count: "8건",  ready: true  },
-  { label: "급여대장",                  count: "7명",  ready: true  },
-  { label: "원천징수이행상황신고서",    count: "1건",  ready: true  },
-  { label: "증빙 누락 항목",            count: "3건",  ready: false },
-]
-
+/* 세무사 전달용 자료.
+ *
+ * ── 예전 상태 ──
+ * 건수가 **코드에 박혀 있었다**: 16건·7건·5건·8건·7명·1건·누락 3건.
+ * 실데이터와 아무 상관이 없는데 초록 체크까지 붙어 "준비 완료"로 읽혔고,
+ * 'ZIP 내려받기'는 토스트만 띄웠다. 신고철에 이걸 믿고 넘어가면 자료가 빠진 채 넘어간다 —
+ * 화면이 거짓을 말하는, 이 코드베이스에서 제일 나쁜 종류다.
+ *
+ * ── 지금 ──
+ * 서버(lib/taxofficePack.js)가 실제로 세고, 엑셀 한 권(종류별 시트)으로 내려받는다.
+ * ZIP 이 아닌 이유: 받는 쪽은 결국 풀어서 하나씩 열게 되고, 우리는 압축 라이브러리를 더 들여야 한다.
+ *
+ * 달 구간은 **회계 마감일**을 따른다(25일 마감이면 7월분 = 6/26~7/25). 그래서 구간을 화면에 적는다 —
+ * 받는 쪽이 달력월로 오해하면 대조가 안 맞는다.
+ */
 const ReportTaxOffice = ({ toast }) => {
-  const [period, setPeriod] = useState("2026년 5월")
+  const [month, setMonth] = useState(() => localToday().slice(0, 7))
+  const [pack, setPack] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    setPack(null)
+    api.getTaxofficePack(month).then(p => { if (alive) setPack(p) })
+    return () => { alive = false }
+  }, [month])
+
+  const download = async () => {
+    setBusy(true)
+    const r = await api.downloadTaxofficeXlsx(month)
+    setBusy(false)
+    if (!r.ok) toast.push(r.error || '내려받기에 실패했어요', { tone: 'warn' })
+    else toast.push(`${monthLabel(month)} 자료를 엑셀로 내려받았어요`)
+  }
+
+  const notReady = (pack?.sections || []).filter(s => !s.ready)
+
   return (
     <div>
-      <div className="row gap-12" style={{ marginBottom: 24, alignItems: "flex-end" }}>
-        <div>
-          <div className="text-sm fw-600" style={{ marginBottom: 8 }}>전달 기간</div>
-          <div className="row gap-8">
-            {["2026년 3월", "2026년 4월", "2026년 5월"].map(m => (
-              <button key={m} className={`chip ${period === m ? "active" : ""}`} onClick={() => setPeriod(m)}>{m}</button>
-            ))}
-          </div>
-        </div>
-        <button className="btn primary ml-auto" onClick={() => toast.push(`${period} 자료를 ZIP으로 내려받았어요`)}>
-          <Icon.Download size={14}/> ZIP 내려받기
+      <div className="row gap-12 no-print" style={{ marginBottom: 20, alignItems: "center" }}>
+        <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, -1))}><Icon.Left size={14}/></button>
+        <div className="fw-700" style={{ fontSize: 15, minWidth: 100, textAlign: "center" }}>{monthLabel(month)}</div>
+        <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, 1))}><Icon.Right size={14}/></button>
+        {/* 마감일이 있는 회사는 '7월분'이 6/26~7/25 다 — 구간을 적어야 받는 쪽이 대조할 수 있다 */}
+        {pack && (
+          <span className="text-sm text-muted">집계 구간 {pack.from} ~ {pack.to}</span>
+        )}
+        <button className="btn primary ml-auto" onClick={download} disabled={!pack || busy}>
+          <Icon.Excel size={14}/> {busy ? '만드는 중…' : '엑셀로 내려받기'}
         </button>
       </div>
-      <div className="col gap-8" style={{ marginBottom: 24 }}>
-        {TAXOFFICE_DOCS.map((d, i) => (
-          <div key={i} className="row gap-12" style={{ padding: "12px 16px", border: "1px solid var(--line)", borderRadius: 12, background: "#fff" }}>
-            <div style={{ width: 22, height: 22, borderRadius: 6, background: d.ready ? "var(--pos-soft)" : "var(--neg-soft)", display: "grid", placeItems: "center", flexShrink: 0 }}>
-              {d.ready
-                ? <Icon.Check size={11} style={{ color: "var(--pos)" }}/>
-                : <Icon.Warn  size={11} style={{ color: "var(--neg)" }}/>}
+
+      {!pack ? <Loading label="자료를 세는 중…"/> : (
+        <>
+          <div className="card" style={{ overflow: "hidden", marginBottom: 16 }}>
+            <table className="table">
+              <thead><tr><th>항목</th><th className="num-right" style={{ width: 120 }}>건수</th><th style={{ width: 130 }}>상태</th></tr></thead>
+              <tbody>
+                {pack.sections.map(s => (
+                  <tr key={s.key}>
+                    <td className="fw-600 text-sm">{s.label}</td>
+                    <td className="num-cell num-right">{fmtNum(s.count)}{s.unit}</td>
+                    <td>
+                      {/* 정상이면 표식을 달지 않는다 — 전부 초록 체크가 붙으면 정작 문제가 안 보인다 */}
+                      {s.ready ? <span className="text-sm text-muted2">—</span>
+                        : <span className="badge warn" style={{ fontSize: 11 }}>확인 필요</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {notReady.length > 0 && (
+            <div className="alert-row" style={{ background: "var(--warn-soft)", borderColor: "transparent" }}>
+              <Icon.Warn/>
+              <div>
+                <div className="lead">{notReady.map(s => s.label).join(' · ')}</div>
+                <div className="body">
+                  증빙 누락은 채우고, 0건인 항목은 입력이 빠지지 않았는지 확인한 뒤 넘기세요.
+                </div>
+              </div>
             </div>
-            <span className="fw-600 text-sm">{d.label}</span>
-            <span className="badge outline ml-auto">{d.count}</span>
+          )}
+
+          <div className="text-xs text-muted" style={{ marginTop: 12, lineHeight: 1.7 }}>
+            · 입출금은 <b>완료된 거래만</b> 담습니다(예정 제외).<br/>
+            · 급여대장은 <b>월분</b> 기준이라 위 집계 구간과 다를 수 있습니다 — 급여는 '7월분'으로 신고하지 '6/26~7/25분'으로 신고하지 않습니다.<br/>
+            · <b>원천징수이행상황신고서 서식은 만들지 않습니다.</b> 대상 급여 명단만 담습니다 — 서식과 세율은 해마다 바뀌어 세무사가 작성할 자리입니다.
           </div>
-        ))}
-      </div>
-      {TAXOFFICE_DOCS.some(d => !d.ready) && (
-        <div className="alert-row" style={{ background: "var(--warn-soft)", borderColor: "transparent" }}>
-          <Icon.Warn/>
-          <div>
-            <div className="lead">증빙 누락 항목이 있어요</div>
-            <div className="body">누락 항목을 먼저 처리하면 더 완전한 자료를 전달할 수 있어요.</div>
-          </div>
-        </div>
+        </>
       )}
     </div>
   )

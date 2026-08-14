@@ -430,6 +430,38 @@ export const api = {
     try { return await req(`/payment-runs?month=${month}`) } catch { return { month, total: 0, count: 0, missingBank: 0, vendors: [] } }
   },
 
+  /* 세무사 전달용 자료 — 한 달치 회계 자료를 종류별로 센다.
+   * 예전엔 화면에 건수가 코드로 박혀 있었다(16건·7건…). 실데이터와 무관한데 초록 체크까지
+   * 붙어 "준비 완료"로 읽혔다 — 신고철에 그걸 믿고 넘어가면 자료가 빠진 채 넘어간다. */
+  async getTaxofficePack(month) {
+    try { return await req(`/reports/taxoffice?month=${encodeURIComponent(month)}`) } catch { return null }
+  },
+
+  /* 엑셀 한 권(종류별 시트)으로 내려받는다. ZIP 대신 한 파일인 이유:
+     받는 쪽이 결국 풀어서 하나씩 열게 되고, 우리는 압축 라이브러리를 더 들여야 한다. */
+  async downloadTaxofficeXlsx(month) {
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch(`${BASE}/reports/taxoffice.xlsx?month=${encodeURIComponent(month)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.error || '내려받기에 실패했어요')
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `세무사전달_${month}.xlsx`
+      // Firefox는 anchor가 DOM에 있어야 다운로드되고, 같은 tick에 revoke하면 진행 중 다운로드가 취소된다.
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => { a.remove(); URL.revokeObjectURL(url) }, 0)
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
+
   /* 보고서 카탈로그 — **회사마다 다를 수 있다.**
    *
    * 예전엔 목록이 화면 파일에 하드코딩돼 있었다. 그래서 회사별로 다른 양식을 줄 수 없었고,
