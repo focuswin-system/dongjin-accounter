@@ -31,12 +31,8 @@ router.get('/', async (req, res, next) => {
     const catalog = BUILTIN_REPORTS
 
     res.json({
-      items: visibleReports({
-        catalog,
-        features,
-        // 못 산 양식은 마스터에게만 '잠금'으로 보인다(사원 화면이 광고판이 되면 안 된다)
-        isMaster: req.user?.role === 'admin',
-      }),
+      // 볼 수 있는 것만 내려간다 — 안 켜진 양식은 마스터에게도 안 보낸다
+      items: visibleReports({ catalog, features }),
     })
   } catch (e) { next(e) }
 })

@@ -14,13 +14,17 @@
  *
  * ── scope ──
  *   all       모든 회사가 기본으로 본다(지금까지 보이던 7개)
- *   entitled  **사야 보인다.** 회사에 그 기능 키가 있어야 한다
- *   hidden    아직 안 판다 — **아무에게도 안 나간다**(마스터에게도)
+ *   entitled  **켜 준 회사만 본다.** 운영 콘솔에서 회사별로 켜고 끈다
+ *   hidden    카탈로그에는 있지만 **어디에도 안 나간다.** 콘솔에서도 켤 수 없다
  *
- * hidden 을 '카탈로그에서 빼기' 대신 둔 이유:
- *   빼면 아래 REPORT_VIEWS 에만 화면이 남아 **또 미아가 된다**(지금 이 셋이 그랬다).
- *   등록은 해 두고 안 내보내면, 검사 [15](카탈로그 ↔ 화면 동기화)가 계속 지켜준다.
- *   팔기로 하면 'entitled' 로 한 단어만 바꾸면 된다.
+ * ⚠ 안 켜진 entitled 는 **아무에게도 안 보인다** — 마스터에게도 '잠금 카드'를 띄우지 않는다.
+ *   한때 마스터에게 잠금 카드로 보여 "살 수 있다"를 알리려 했는데, 팔 물건이 정해지기 전에
+ *   광고부터 내거는 꼴이라 뺐다. 켜 주기 전까지 고객 화면은 오늘과 완전히 같다.
+ *
+ * hidden 을 '카탈로그에서 빼기' 대신 남겨둔 이유:
+ *   빼면 아래 REPORT_VIEWS 에만 화면이 남아 **또 미아가 된다**(이 셋이 그 상태였다).
+ *   등록해 두고 안 내보내면 검사 [15](카탈로그 ↔ 화면 동기화)가 계속 지켜준다.
+ *   지금은 hidden 인 항목이 없다 — 화면이 아직 없는 양식을 미리 적어둘 때 쓴다.
  *
  * 설계: docs/02-design/features/company-report-templates.design.md §1.2 · §6.1
  */
@@ -38,12 +42,12 @@ const BUILTIN_REPORTS = [
   { key: 'vat',         title: '부가세 신고 자료',         descr: '분기별 매출·매입세액 및 납부세액을 확인하세요.',      scope: 'all',      sort: 70 },
 
   /* 아래 셋은 화면 코드는 있는데 목록에 없어 여태 아무도 못 보던 것들이다.
-     회사마다 필요 여부가 갈리는 양식이라(방산 원가는 방산 회사만 쓴다) 팔 때 판매 단위가 된다.
-     ⚠ 지금은 **아무에게도 안 보인다**(hidden). 화면 변화 0 — 오늘까지와 똑같다.
-       화면이 검증되지 않았고 아직 팔 준비도 안 됐다. 팔기로 하면 'entitled' 로 바꾼다. */
-  { key: 'contract',    title: '계약별 수익 현황',         descr: '계약 단위로 매출·원가·잔액을 봅니다.',              scope: 'hidden', sort: 80 },
-  { key: 'defense',     title: '방산 원가 보고서',         descr: '방산 납품 원가 구성과 마일스톤 진행을 봅니다.',       scope: 'hidden', sort: 90 },
-  { key: 'taxoffice',   title: '세무사 전달용 자료',       descr: '월별 손익·부가세 요약을 한 장으로 묶습니다.',        scope: 'hidden', sort: 100 },
+     회사마다 필요 여부가 갈린다(방산 원가는 방산 회사만 쓴다) → 회사별로 켜 주는 대상.
+     ⚠ 켜 주기 전에는 **아무에게도 안 보인다.** 지금 전 회사가 안 켜진 상태이므로
+       고객 화면은 오늘까지와 똑같다. 운영 콘솔 '기능' 탭에서 회사별로 연다. */
+  { key: 'contract',    title: '계약별 수익 현황',         descr: '계약 단위로 매출·원가·잔액을 봅니다.',              scope: 'entitled', sort: 80 },
+  { key: 'defense',     title: '방산 원가 보고서',         descr: '방산 납품 원가 구성과 마일스톤 진행을 봅니다.',       scope: 'entitled', sort: 90 },
+  { key: 'taxoffice',   title: '세무사 전달용 자료',       descr: '월별 손익·부가세 요약을 한 장으로 묶습니다.',        scope: 'entitled', sort: 100 },
 ]
 
 const BUILTIN_BY_KEY = new Map(BUILTIN_REPORTS.map(r => [r.key, r]))
@@ -54,28 +58,14 @@ const BUILTIN_BY_KEY = new Map(BUILTIN_REPORTS.map(r => [r.key, r]))
  * @param {object}  o
  * @param {Array}   o.catalog   양식 목록(기본: 내장 카탈로그). 나중에 회사 전용 양식을 이어 붙인다
  * @param {Set}     o.features  이 회사가 가진 기능 키
- * @param {boolean} o.isMaster  회사 마스터인가 — 못 산 양식을 '잠금'으로 보여줄지 가른다
- * @returns {Array} [{ key, title, descr, kind, locked, lockReason? }]
+ * @returns {Array} [{ key, title, descr, kind }] — **볼 수 있는 것만.** 잠금 항목은 없다
  */
-function visibleReports({ catalog = BUILTIN_REPORTS, features = new Set(), isMaster = false } = {}) {
+function visibleReports({ catalog = BUILTIN_REPORTS, features = new Set() } = {}) {
   const out = []
   for (const r of [...catalog].sort((a, b) => (a.sort || 999) - (b.sort || 999))) {
-    // 아직 안 파는 양식은 여기서 끝 — 마스터에게도 안 보낸다
-    if (r.scope === 'hidden') continue
-    const needsBuy = r.scope === 'entitled'
-    const has = !needsBuy || features.has(r.feature || featureKeyOf(r.key))
-    /* 못 산 양식을 **일반 사원에게는 아예 안 보여준다.**
-       살지 말지는 회사가 정하는 일이고, 사원 화면이 광고판이 되면 안 된다.
-       마스터에게만 잠금 카드로 보여 "살 수 있는 게 있다"를 알린다. */
-    if (!has && !isMaster) continue
-    out.push({
-      key: r.key,
-      title: r.title,
-      descr: r.descr || '',
-      kind: r.kind || 'builtin',
-      locked: !has,
-      ...(has ? {} : { lockReason: 'entitlement' }),
-    })
+    if (r.scope === 'hidden') continue                      // 어디에도 안 나간다
+    if (r.scope === 'entitled' && !features.has(r.feature || featureKeyOf(r.key))) continue
+    out.push({ key: r.key, title: r.title, descr: r.descr || '', kind: r.kind || 'builtin' })
   }
   return out
 }

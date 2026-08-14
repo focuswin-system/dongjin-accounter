@@ -2132,8 +2132,8 @@ export const ReportsScreen = () => {
   }, [])
 
   /* 화면이 있는 것만 그린다 — 서버가 먼저 배포돼 아직 없는 key 를 줘도 깨지지 않는다.
-     잠긴 양식(안 산 것)은 화면이 없어도 카드로는 보여야 하므로 여기서 거르지 않는다. */
-  const list = (items || []).filter(r => r.locked || REPORT_VIEWS[r.key])
+     서버는 이미 '볼 수 있는 것'만 주므로 여기서 권한을 다시 따지지 않는다. */
+  const list = (items || []).filter(r => REPORT_VIEWS[r.key])
   const report = list.find(r => r.key === active)
 
   /* 예전엔 두 버튼이 토스트만 띄웠다("PDF로 내려받았어요"). 파일은 안 받아지는데 받았다고 말하니
@@ -2147,7 +2147,7 @@ export const ReportsScreen = () => {
     if (!ok) toast.push("내보낼 표가 없어요", { tone: 'warn' })
   }
 
-  if (active && report && !report.locked) {
+  if (active && report) {
     const View = REPORT_VIEWS[active]
     return (
       <div className="fade-up">
@@ -2181,20 +2181,15 @@ export const ReportsScreen = () => {
       <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
         {list.map(r => (
           <button key={r.key} className="card card-pad"
-            onClick={() => r.locked
-              ? toast.push(`'${r.title}'은(는) 추가 기능이에요. 도입을 원하시면 문의해주세요.`)
-              : setActive(r.key)}
-            style={{ cursor: "pointer", textAlign: "left", fontFamily: "inherit", border: "1px solid var(--line)", transition: "border-color .12s, background .12s", opacity: r.locked ? 0.72 : 1 }}
+            onClick={() => setActive(r.key)}
+            style={{ cursor: "pointer", textAlign: "left", fontFamily: "inherit", border: "1px solid var(--line)", transition: "border-color .12s, background .12s" }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--line-strong)"; e.currentTarget.style.background = "var(--surface-2)" }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--line)"; e.currentTarget.style.background = "" }}>
             <div className="row" style={{ marginBottom: 14 }}>
-              <div style={{ width: 32, height: 32, borderRadius: 10, background: r.locked ? "var(--surface-2)" : "var(--brand-soft)", color: r.locked ? "var(--muted2)" : "var(--brand)", display: "grid", placeItems: "center" }}>
+              <div style={{ width: 32, height: 32, borderRadius: 10, background: "var(--brand-soft)", color: "var(--brand)", display: "grid", placeItems: "center" }}>
                 <Icon.Chart size={16}/>
               </div>
-              {/* 못 산 양식은 **회사 마스터에게만** 온다(서버가 거른다). 사원 화면은 광고판이 아니다. */}
-              {r.locked
-                ? <span className="badge ml-auto" style={{ fontSize: 10 }}>추가 기능</span>
-                : <span className="ml-auto text-muted2"><Icon.Right size={14}/></span>}
+              <span className="ml-auto text-muted2"><Icon.Right size={14}/></span>
             </div>
             <div className="fw-700" style={{ marginBottom: 4 }}>{r.title}</div>
             <div className="text-sm text-muted">{r.descr}</div>

@@ -155,6 +155,8 @@ const ACTION_LABELS = {
   password_change: '비밀번호 변경', password_reset: '비밀번호 초기화',
   activate: '계정 사용', deactivate: '계정 정지', unlock: '로그인 잠금 해제',
   role_change: '역할 변경', roles_assign: '역할 배정',
+  // 회사별 유료 기능 (routes/admin.js) — 계약이 바뀌는 행위라 반드시 남는다
+  feature_on: '기능 사용 시작', feature_off: '기능 사용 중지',
 }
 
 const RESOURCE_LABELS = {
@@ -164,6 +166,7 @@ const RESOURCE_LABELS = {
   resolution: '지급결의서', settlement: '정산내역서',
   loan: '차입금', investment: '투자', savings: '예금·적금', unpaid_labor: '미지급 퇴직금',
   account: '계좌/카드', vendor: '거래처', ref_item: '기준정보', user: '사용자',
+  feature: '유료 기능',
 }
 
 /** 대상 ID 길이 상한 (audit_logs.target_id VARCHAR(64)) */

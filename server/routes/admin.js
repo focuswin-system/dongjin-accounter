@@ -6,6 +6,9 @@ const { signSession } = require('../lib/session')
 const { clientIp, noteFailure, noteSuccess, ipBlockedFor, waitMessage } = require('../lib/loginGuard')
 const { withTx, httpError } = require('../lib/withTx')
 const platformAuth = require('../middleware/platformAuth')
+const { BUILTIN_REPORTS, featureKeyOf } = require('../platform/reportCatalog')
+const { invalidate, dateOf } = require('../lib/entitlements')
+const { kstToday } = require('../db')
 
 const router = express.Router()
 
@@ -268,13 +271,13 @@ async function companyOr404(companyId, res) {
  * users 와 audit_logs 는 같은 공용 DB에 있으므로 한 트랜잭션에 묶을 수 있다.
  * 묶으면 '변경됐는데 기록이 없는' 경우가 생길 수 없다 — 같이 성공하거나 같이 없던 일이 된다.
  */
-function auditAsOpsTx(conn, req, { companyId, action, targetId, detail }) {
+function auditAsOpsTx(conn, req, { companyId, action, targetId, detail, resource = 'user' }) {
   return conn.execute(
     `INSERT INTO audit_logs (id, company_id, user_id, username, action, resource, target_id, ip, detail)
      VALUES (?,?,?,?,?,?,?,?,?)`,
     [randomUUID(), companyId, null,            // userId: 회사 사용자가 아니다
      `ops:${req.admin.username}`,              // 회사 사용자와 헷갈리지 않는 표기
-     action, 'user', targetId, clientIp(req), detail || null])
+     action, resource, targetId, clientIp(req), detail || null])
 }
 
 // 계정 목록
@@ -395,6 +398,119 @@ router.post('/companies/:id/users/:userId/unlock', async (req, res, next) => {
       action: 'unlock', resource: 'user', targetId: req.params.userId, ip: clientIp(req),
       detail: `ops:${req.admin.username}`,
     })
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
+/* ── 회사별 유료 기능 ────────────────────────────────────────────────────
+ *
+ * "이 회사에 이 보고서 양식을 열어준다"를 사람이 누르는 자리.
+ *
+ * ⚠ 여기서도 **회계 내용은 보지 않는다.** 다루는 것은 계약 사실뿐이다
+ *   (어떤 양식을 켰나 / 언제까지). 이 콘솔의 원칙이다.
+ *
+ * 왜 콘솔에 두나: 기능을 켜는 건 **계약**이라 우리(공급자)가 정할 일이다.
+ * 고객사 화면에 두면 고객이 스스로 켠다. 그래서 회사 DB가 아니라 플랫폼 DB에 있고,
+ * 그걸 만지는 화면도 LAN 안쪽 콘솔에만 있다.
+ *
+ * 설계: docs/02-design/features/company-report-templates.design.md §8 P1
+ */
+
+/** 켤 수 있는 것의 목록 — 지금은 보고서 양식뿐이다. 나중에 다른 선택 기능도 여기 모인다. */
+function sellableCatalog() {
+  return BUILTIN_REPORTS.map(r => ({
+    key: featureKeyOf(r.key),
+    label: r.title,
+    descr: r.descr || '',
+    group: '보고서',
+    scope: r.scope,          // all(기본 제공) | entitled(팔 수 있음) | hidden(아직 안 팖)
+  }))
+}
+
+// 현재 상태 — 카탈로그 전체에 회사의 현재 설정을 얹어서 준다
+router.get('/companies/:id/features', async (req, res, next) => {
+  try {
+    const company = await companyOr404(req.params.id, res)
+    if (!company) return
+    const [rows] = await platformPool.execute(
+      `SELECT feature_key, enabled, starts_on, expires_on, memo, created_at
+         FROM company_features WHERE company_id = ?`, [req.params.id])
+    const by = new Map(rows.map(r => [r.feature_key, r]))
+    const today = kstToday()
+
+    const items = sellableCatalog().map(c => {
+      const row = by.get(c.key) || null
+      /* 실제로 지금 켜져 있나 — 켠 흔적이 있어도 기간이 지났으면 꺼진 것이다.
+         화면이 '켬'으로 보이는데 고객에게는 안 보이는 상태를 만들지 않는다. */
+      const active = !!row && !!Number(row.enabled)
+        && (!row.starts_on || today >= dateOf(row.starts_on))
+        && (!row.expires_on || today <= dateOf(row.expires_on))
+      return {
+        ...c,
+        on: !!row && !!Number(row.enabled),
+        active,
+        starts_on: row ? dateOf(row.starts_on) : null,
+        expires_on: row ? dateOf(row.expires_on) : null,
+        memo: row ? row.memo : null,
+      }
+    })
+    res.json({ company, items })
+  } catch (e) { next(e) }
+})
+
+/* 켜기·끄기.
+ *
+ * 끌 때 행을 지우지 않고 enabled=0 으로 남긴다 — **요금제로 받은 것까지 회수**해야 하고
+ * (lib/entitlements.js mergeFeatures), 지웠다 켰다 하면 "언제부터 썼나"가 사라진다.
+ *
+ * 변경과 감사 기록은 **한 트랜잭션**이다. 계약이 바뀌는 행위라 기록이 이 기능을 정당화한다
+ * (계정 관리와 같은 이유 — auditAsOpsTx 머리말 참조).
+ */
+router.put('/companies/:id/features/:key', async (req, res, next) => {
+  try {
+    const company = await companyOr404(req.params.id, res)
+    if (!company) return
+
+    const key = String(req.params.key || '')
+    const spec = sellableCatalog().find(c => c.key === key)
+    // 카탈로그에 없는 키는 받지 않는다 — 오타로 만든 키는 아무 효과도 없이 표에만 남는다
+    if (!spec) return res.status(404).json({ error: '알 수 없는 기능입니다' })
+    /* 'all'(기본 제공)은 켜고 끌 대상이 아니다. 'hidden'(아직 안 파는 양식)은 켜 봐야
+       고객 화면에 안 나간다 — 팔려면 코드에서 scope 를 entitled 로 올리는 결정이 먼저다.
+       여기서 막지 않으면 "켰는데 왜 안 보이지"로 끝난다. */
+    if (spec.scope !== 'entitled') {
+      return res.status(409).json({
+        error: spec.scope === 'all'
+          ? '기본 제공 기능이라 켜고 끌 수 없습니다'
+          : '아직 열 수 없는 양식입니다. 열려면 reportCatalog.js 에서 scope 를 entitled 로 올려야 합니다',
+      })
+    }
+
+    const on = req.body?.on !== false
+    const expires = req.body?.expires_on ? String(req.body.expires_on).slice(0, 10) : null
+    if (expires && !/^\d{4}-\d{2}-\d{2}$/.test(expires)) {
+      return res.status(400).json({ error: '만료일은 2026-12-31 형태로 입력하세요' })
+    }
+    const memo = req.body?.memo ? String(req.body.memo).slice(0, 300) : null
+
+    await withTx(platformPool, async (conn) => {
+      await conn.execute(
+        `INSERT INTO company_features (id, company_id, feature_key, enabled, expires_on, granted_by, memo)
+              VALUES (?,?,?,?,?,?,?)
+         ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), expires_on = VALUES(expires_on),
+                                 granted_by = VALUES(granted_by), memo = VALUES(memo)`,
+        [randomUUID(), company.id, key, on ? 1 : 0, expires, req.admin.id, memo])
+      await auditAsOpsTx(conn, req, {
+        companyId: company.id, resource: 'feature',
+        action: on ? 'feature_on' : 'feature_off',
+        targetId: key.slice(0, 64),
+        // 금액·거래처가 아니라 계약 메모다. 그래도 길이는 자른다.
+        detail: [spec.label, expires ? `~${expires}` : null, memo].filter(Boolean).join(' · ').slice(0, 300),
+      })
+    })
+    /* 판정 캐시(30초)를 즉시 비운다 — 안 비우면 "켰는데 왜 안 보이지"를 최대 30초 겪는다.
+       콘솔과 고객 API 는 같은 프로세스라 이 호출이 그대로 먹는다. */
+    invalidate(company.id)
     res.json({ ok: true })
   } catch (e) { next(e) }
 })

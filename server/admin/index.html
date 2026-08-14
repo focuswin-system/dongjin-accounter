@@ -368,6 +368,7 @@ const TABS = [
   { id: 'errors',   label: '오류' },
   { id: 'security', label: '로그인 실패' },
   { id: 'accounts', label: '계정' },
+  { id: 'features', label: '기능' },
 ]
 const state = { tab: 'overview', company: null }
 
@@ -418,7 +419,7 @@ async function renderApp(tab) {
     tabs.appendChild(b)
   }
 
-  const views = { overview: viewOverview, usage: viewUsage, errors: viewErrors, security: viewSecurity, accounts: viewAccounts }
+  const views = { overview: viewOverview, usage: viewUsage, errors: viewErrors, security: viewSecurity, accounts: viewAccounts, features: viewFeatures }
   main.innerHTML = ''
   await views[state.tab](main, ov)
 }
@@ -762,6 +763,109 @@ async function viewAccounts(main, ov) {
     run(() => api(`/companies/${cid}/users`, { method: 'POST', body }), `${body.username} 계정을 만들었습니다`)
   }
   main.appendChild(add)
+}
+
+/* ── 기능 ──
+ *
+ * "이 회사에 이 보고서 양식을 열어준다". 켜는 건 **계약**이라 우리가 정할 일이고,
+ * 그래서 고객 화면이 아니라 여기(LAN 안쪽 콘솔)에만 있다.
+ *
+ * 세 가지 상태를 구분해 보여준다 — 안 그러면 "켰는데 왜 안 보이지"가 난다.
+ *   기본 제공  전 회사가 이미 본다. 켜고 끌 대상이 아니다
+ *   판매 가능  여기서 켜고 끈다
+ *   준비 중    화면은 있지만 아직 안 판다. 켜도 고객에게 안 나간다(서버가 막는다)
+ */
+async function viewFeatures(main, ov) {
+  const cid = state.company || (ov.companies[0] && ov.companies[0].id)
+  if (!cid) { main.appendChild(el('<div class="card"><div class="empty">회사가 없습니다.</div></div>')); return }
+  state.company = cid
+
+  const picker = el(`<div class="card"><div class="pad row wrap" style="padding:18px 22px">
+      <label style="margin:0">회사</label>
+      <select id="c" style="width:auto;min-width:260px">${ov.companies.map(c =>
+        `<option value="${esc(c.id)}" ${c.id === cid ? 'selected' : ''}>${esc(c.code)} · ${esc(c.name)}</option>`).join('')}</select>
+      <div class="grow"></div>
+      <span class="g5" style="font-size:13px">변경은 해당 회사의 변경 이력에 남습니다</span>
+    </div></div>`)
+  picker.querySelector('#c').onchange = (e) => { state.company = e.target.value; renderApp('features') }
+  main.appendChild(picker)
+
+  const box = el('<div class="card"><div class="empty">불러오는 중</div></div>')
+  main.appendChild(box)
+  let d
+  try { d = await api(`/companies/${cid}/features`) }
+  catch (e) { box.innerHTML = `<div class="empty red">${esc(e.message)}</div>`; return }
+
+  const run = async (fn, okMsg) => {
+    try { await fn(); toast(okMsg); renderApp('features') } catch (e) { toast(e.message, 'bad') }
+  }
+
+  const SCOPE = {
+    all:      { chip: '<span class="chip">기본 제공</span>', note: '전 회사가 이미 봅니다' },
+    entitled: { chip: '<span class="chip blue">선택 제공</span>', note: '켜 준 회사만 봅니다' },
+    hidden:   { chip: '<span class="chip">준비 중</span>', note: '아직 열 수 없는 양식입니다' },
+  }
+
+  const rows = d.items.map(f => {
+    const sc = SCOPE[f.scope] || SCOPE.hidden
+    /* '켬'과 '실제 적용'을 나눠 보여준다 — 만료된 기능은 켠 흔적이 남아 있어도
+       고객 화면에는 안 나간다. 한 칸으로 뭉치면 그 상태를 못 읽는다. */
+    const status = f.scope !== 'entitled'
+      ? '<span class="g5">—</span>'
+      : f.active ? '<span class="chip blue">사용 중</span>'
+      : f.on ? '<span class="chip amber">기간 지남</span>'
+      : '<span class="g5">꺼짐</span>'
+    return `<tr>
+      <td><span style="font-weight:600">${esc(f.label)}</span>
+          <div class="sub-l">${esc(f.descr)}</div></td>
+      <td>${sc.chip}${sc.note ? `<div class="sub-l g5">${esc(sc.note)}</div>` : ''}</td>
+      <td>${status}</td>
+      <td class="num g6">${f.expires_on ? esc(f.expires_on) + ' 까지' : (f.scope === 'entitled' && f.on ? '무기한' : '')}</td>
+      <td class="g5" style="font-size:13px">${esc(f.memo || '')}</td>
+      <td class="r">${f.scope === 'entitled'
+        ? `<button class="btn sm ${f.on ? 'dan' : 'pri'}" data-k="${esc(f.key)}" data-on="${f.on ? '0' : '1'}"
+                   data-l="${esc(f.label)}">${f.on ? '사용 중지' : '사용 시작'}</button>`
+        : ''}</td>
+    </tr>`
+  }).join('')
+
+  box.innerHTML = `<h2>${esc(d.company.name)}<span class="sub">${esc(d.company.code)} · 기능 ${d.items.length}개</span></h2>
+    <div class="tw"><table><thead><tr>
+      <th>기능</th><th>구분</th><th>상태</th><th>기간</th><th>메모</th><th></th>
+    </tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="pad g5" style="font-size:13px;padding-top:0">
+      기능을 켜면 그 회사 사용자에게 바로 보입니다. 끄면 다시 보이지 않습니다.
+      회계 내용은 이 화면에서 다루지 않습니다.
+    </div>`
+
+  box.querySelectorAll('[data-k]').forEach(b => b.onclick = async () => {
+    const on = b.getAttribute('data-on') === '1'
+    const key = b.getAttribute('data-k'), label = b.getAttribute('data-l')
+    if (on) {
+      const memo = await ask({
+        title: '기능 사용 시작',
+        body: `<b>${esc(d.company.name)}</b> 에 <b>${esc(label)}</b> 을(를) 엽니다.<br>`
+            + '그 회사 사용자에게 바로 보이게 됩니다. 이 변경은 해당 회사의 변경 이력에 운영자 이름으로 남습니다.',
+        confirmLabel: '사용 시작',
+        input: { label: '메모 (선택) — 계약번호 등', placeholder: '예: 2026 추가계약 #12' },
+      })
+      if (memo == null) return
+      run(() => api(`/companies/${cid}/features/${encodeURIComponent(key)}`,
+                    { method: 'PUT', body: { on: true, memo: memo || null } }),
+          `${label} 을(를) 열었습니다`)
+    } else {
+      const ok2 = await ask({
+        title: '기능 사용 중지',
+        body: `<b>${esc(d.company.name)}</b> 의 <b>${esc(label)}</b> 을(를) 닫습니다.<br>`
+            + '그 회사 사용자에게 더 이상 보이지 않습니다. 지금까지의 기록은 남습니다.',
+        confirmLabel: '사용 중지', danger: true,
+      })
+      if (!ok2) return
+      run(() => api(`/companies/${cid}/features/${encodeURIComponent(key)}`,
+                    { method: 'PUT', body: { on: false } }),
+          `${label} 을(를) 닫았습니다`)
+    }
+  })
 }
 
 token ? renderApp('overview') : renderLogin()
