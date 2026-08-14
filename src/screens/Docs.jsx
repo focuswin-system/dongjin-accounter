@@ -2246,11 +2246,291 @@ const ReportVAT = ({ toast }) => {
   )
 }
 
+// ── 11. 자금관리표 ───────────────────────────────────────────
+/* 대표가 쓰던 엑셀(`자금(현금)관리2026.xlsx`)의 칸 배치를 그대로 옮긴 한 장.
+ *
+ * 자금 현황 화면과 **숫자는 같고 모양이 다르다**(서버도 같은 lib 을 쓴다).
+ *   자금 현황  화면에서 읽는 문서 — 달력·시간축·펼쳐보기
+ *   자금관리표 종이로 넘기는 문서 — 엑셀 칸 배치를 지킨다
+ * 몇 년째 그 자리로 봐 온 문서라, 같은 숫자라도 자리가 바뀌면 못 읽는다.
+ *
+ * 원본에 없던 걸 하나 더했다: **들어온 돈**.
+ * 원본은 <입금 예정금액>(들어올 돈)만 있어서 "이번 달에 얼마나 들어왔나"를
+ * 통장을 따로 열어 봐야 했다.
+ */
+const FS_NEG = { color: 'var(--neg)' }
+const fsNum = (n) => {
+  const v = Number(n) || 0
+  return <span className="num" style={v < 0 ? FS_NEG : undefined}>{v < 0 ? '−' : ''}{fmtNum(Math.abs(v))}</span>
+}
+
+/* 나갈 항목 칸.
+ *
+ * 원본 엑셀은 계좌당 8칸이었는데 실제 데이터는 **44개**까지 나온다(정기지출·상환 회차).
+ * 다 뿌리면 한 행이 화면 절반을 먹어 표가 아니라 벽이 된다.
+ * 금액 큰 순 5개만 두고 나머지는 접는다 — 자금표에서 먼저 봐야 할 건 큰 돈이다.
+ * 접힌 건 **숨긴 게 아니라 접은 것**이고(눌러 펼친다), 엑셀에는 전부 들어간다. */
+const FS_TOP = 5
+const FundSheetOutItems = ({ items }) => {
+  const [open, setOpen] = useState(false)
+  if (!items.length) return <span className="text-muted2">—</span>
+  const sorted = [...items].sort((a, b) => b.amount - a.amount)
+  const shown = open ? sorted : sorted.slice(0, FS_TOP)
+  const rest = sorted.length - shown.length
+  return (
+    <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+      {shown.map((it, i) => (
+        <span key={`${it.label}-${i}`} className="badge" style={{ fontSize: 11 }}>
+          {it.label} <b className="num" style={{ marginLeft: 4 }}>{fmtNum(it.amount)}</b>
+        </span>
+      ))}
+      {rest > 0 && (
+        <button className="badge" style={{ fontSize: 11, cursor: 'pointer', border: 0 }}
+          onClick={() => setOpen(true)}>외 {rest}건 ▾</button>
+      )}
+      {open && sorted.length > FS_TOP && (
+        <button className="badge" style={{ fontSize: 11, cursor: 'pointer', border: 0 }}
+          onClick={() => setOpen(false)}>접기 ▴</button>
+      )}
+    </div>
+  )
+}
+
+const FundSheetAccounts = ({ title, g }) => {
+  if (!g.rows.length) return null
+  return (
+    <div className="card" style={{ overflow: 'hidden', marginBottom: 16 }}>
+      <div className="row card-pad" style={{ paddingBottom: 10, alignItems: 'baseline' }}>
+        <div className="fw-700">{title}</div>
+        <div className="ml-auto text-sm text-muted">계좌 {g.rows.length}개</div>
+      </div>
+      <div className="table-scroll" style={{ overflowX: 'auto' }}>
+        <table className="table" style={{ minWidth: 1000 }}>
+          <thead>
+            <tr>
+              <th style={{ minWidth: 150 }}>계좌</th>
+              <th className="num-right" style={{ width: 130 }}>잔액</th>
+              <th className="num-right" style={{ width: 120, borderLeft: '1px solid var(--line)' }}>들어온 돈</th>
+              <th className="num-right" style={{ width: 120 }}>나간 돈</th>
+              <th style={{ borderLeft: '1px solid var(--line)' }}>나갈 항목</th>
+              <th className="num-right" style={{ width: 130 }}>나갈 합계</th>
+              <th className="num-right" style={{ width: 130 }}>차액</th>
+            </tr>
+          </thead>
+          <tbody>
+            {g.rows.map(r => (
+              <tr key={r.id}>
+                <td className="fw-600">{r.name}</td>
+                <td className="num-cell num-right">{fsNum(r.balance)}</td>
+                {/* 실적 두 칸 — 원본 엑셀에 없던 열이다 */}
+                <td className="num-cell num-right text-muted" style={{ borderLeft: '1px solid var(--line)' }}>
+                  {r.actualIn ? fmtNum(r.actualIn) : ''}</td>
+                <td className="num-cell num-right text-muted">{r.actualOut ? fmtNum(r.actualOut) : ''}</td>
+                <td className="text-sm" style={{ borderLeft: '1px solid var(--line)' }}>
+                  <FundSheetOutItems items={r.outItems}/>
+                </td>
+                <td className="num-cell num-right">{r.outTotal ? fmtNum(r.outTotal) : ''}</td>
+                <td className="num-cell num-right fw-700">{fsNum(r.after)}</td>
+              </tr>
+            ))}
+            <tr style={{ background: 'var(--surface-2)' }}>
+              <td className="fw-700">합계</td>
+              <td className="num-cell num-right fw-700">{fsNum(g.total.balance)}</td>
+              <td className="num-cell num-right" style={{ borderLeft: '1px solid var(--line)' }}>{fmtNum(g.total.actualIn)}</td>
+              <td className="num-cell num-right">{fmtNum(g.total.actualOut)}</td>
+              <td style={{ borderLeft: '1px solid var(--line)' }}/>
+              <td className="num-cell num-right fw-700">{fmtNum(g.total.outTotal)}</td>
+              <td className="num-cell num-right fw-700">{fsNum(g.total.after)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+const ReportFundSheet = ({ toast }) => {
+  const [month, setMonth] = useState(() => localToday().slice(0, 7))
+  const [d, setD] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    setD(null)
+    api.getFundSheet(month).then(x => { if (alive) setD(x) })
+    return () => { alive = false }
+  }, [month])
+
+  const download = async () => {
+    setBusy(true)
+    const r = await api.downloadFundSheetXlsx(month)
+    setBusy(false)
+    if (!r.ok) toast.push(r.error || '내려받기에 실패했어요', { tone: 'warn' })
+    else toast.push(`${monthLabel(month)} 자금관리표를 내려받았어요`)
+  }
+
+  if (!d) {
+    return (
+      <div>
+        <div className="row gap-12 no-print" style={{ marginBottom: 20, alignItems: 'center' }}>
+          <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, -1))}><Icon.Left size={14}/></button>
+          <div className="fw-700" style={{ fontSize: 15, minWidth: 100, textAlign: 'center' }}>{monthLabel(month)}</div>
+          <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, 1))}><Icon.Right size={14}/></button>
+        </div>
+        <Loading label="자금 자료를 모으는 중…"/>
+      </div>
+    )
+  }
+
+  const S = d.summary
+  return (
+    <div>
+      <div className="row gap-12 no-print" style={{ marginBottom: 20, alignItems: 'center' }}>
+        <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, -1))}><Icon.Left size={14}/></button>
+        <div className="fw-700" style={{ fontSize: 15, minWidth: 100, textAlign: 'center' }}>{monthLabel(month)}</div>
+        <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, 1))}><Icon.Right size={14}/></button>
+        {/* 마감일이 있는 회사는 '8월분'이 7/26~8/25 다 — 구간을 적어야 대조할 수 있다 */}
+        <span className="text-sm text-muted">집계 구간 {d.range.from} ~ {d.range.to}</span>
+        <button className="btn primary ml-auto" onClick={download} disabled={busy}>
+          <Icon.Excel size={14}/> {busy ? '만드는 중…' : '엑셀로 내려받기'}
+        </button>
+      </div>
+
+      <KpiRow cols={4} style={{ marginBottom: 20 }}>
+        <Kpi label="들어온 돈" value={S.all.actualIn} tone="pos" hint="이 구간에 입금 완료된 돈"/>
+        <Kpi label="들어올 돈" value={S.all.planIn} hint="미수금·정기청구 등 예정"/>
+        <Kpi label="나갈 돈"   value={S.all.plan} tone="neg" hint="이 구간에 남은 지출 예정"/>
+        <Kpi label="현금 과부족" value={S.all.shortfall} tone={S.all.shortfall < 0 ? 'neg' : 'pos'}
+          hint="지금 잔액 − 나갈 돈"/>
+      </KpiRow>
+
+      <FundSheetAccounts title="법인 계좌" g={d.corp}/>
+      <FundSheetAccounts title="대표 개인 계좌" g={d.personal}/>
+
+      {/* 요약 — 원본 엑셀의 '구분 / 보통계좌 / 저축 / 부채 …' 표 */}
+      <div className="card" style={{ overflow: 'hidden', marginBottom: 16 }}>
+        <div className="card-pad fw-700" style={{ paddingBottom: 10 }}>요약</div>
+        <div className="table-scroll" style={{ overflowX: 'auto' }}>
+          <table className="table" style={{ minWidth: 900 }}>
+            <thead>
+              <tr>
+                <th>구분</th>
+                <th className="num-right">보통계좌</th>
+                <th className="num-right">저축·보증금</th>
+                <th className="num-right">부채</th>
+                <th className="num-right">나갈 돈</th>
+                <th className="num-right">미지급 인건비</th>
+                <th className="num-right">현금 과부족</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="fw-600">법인</td>
+                <td className="num-cell num-right">{fsNum(S.corp.cash)}</td>
+                <td/><td/>
+                <td className="num-cell num-right">{fmtNum(S.corp.plan)}</td>
+                <td/>
+                <td className="num-cell num-right fw-700">{fsNum(S.corp.shortfall)}</td>
+              </tr>
+              <tr>
+                <td className="fw-600">개인</td>
+                <td className="num-cell num-right">{fsNum(S.personal.cash)}</td>
+                <td/><td/>
+                <td className="num-cell num-right">{fmtNum(S.personal.plan)}</td>
+                <td/>
+                <td className="num-cell num-right fw-700">{fsNum(S.personal.shortfall)}</td>
+              </tr>
+              <tr style={{ background: 'var(--surface-2)' }}>
+                <td className="fw-700">합계</td>
+                <td className="num-cell num-right fw-700">{fsNum(S.all.cash)}</td>
+                <td className="num-cell num-right">{fmtNum(S.all.savings)}</td>
+                <td className="num-cell num-right">{fmtNum(S.all.debt)}</td>
+                <td className="num-cell num-right fw-700">{fmtNum(S.all.plan)}</td>
+                <td className="num-cell num-right">{fmtNum(S.all.labor)}</td>
+                <td className="num-cell num-right fw-700">{fsNum(S.all.shortfall)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        {/* 부채·저축은 법인/개인으로 못 가른다 — 그 구분이 데이터에 없다. 지어내지 않는다. */}
+        <div className="card-pad text-xs text-muted" style={{ paddingTop: 0 }}>
+          저축·부채는 법인/개인 구분이 데이터에 없어 합계로만 냅니다.
+        </div>
+      </div>
+
+      {/* 들어올 돈 — 원본의 <입금 예정금액> */}
+      <div className="card" style={{ overflow: 'hidden', marginBottom: 16 }}>
+        <div className="row card-pad" style={{ paddingBottom: 10, alignItems: 'baseline' }}>
+          <div className="fw-700">들어올 돈</div>
+          <div className="ml-auto num fw-700">{fmtNum(d.incoming.reduce((s, x) => s + x.amount, 0))}원</div>
+        </div>
+        <table className="table">
+          <thead><tr><th style={{ width: 130 }}>일자</th><th style={{ width: 110 }}>출처</th><th>내용</th><th>입금 계좌</th><th className="num-right" style={{ width: 140 }}>금액</th></tr></thead>
+          <tbody>
+            {d.incoming.map((it, i) => (
+              <tr key={`${it.label}-${it.date}-${i}`}>
+                <td className="num text-sm">
+                  {it.noDue ? <span className="text-muted2">기한 미정</span> : it.date}
+                  {it.overdue && <span className="badge warn" style={{ marginLeft: 6, fontSize: 10 }}>기한 지남</span>}
+                </td>
+                <td><span className="badge" style={{ fontSize: 10 }}>{it.source}</span></td>
+                <td className="text-sm">{it.label}</td>
+                <td className="text-sm text-muted">{it.account || '통장 미정'}</td>
+                <td className="num-cell num-right fw-600">{fmtNum(it.amount)}</td>
+              </tr>
+            ))}
+            {d.incoming.length === 0 && (
+              <tr><td colSpan={5} className="text-muted text-sm" style={{ textAlign: 'center', padding: 20 }}>
+                이 구간에 들어올 돈이 없어요.
+              </td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* 미지급 인건비 — 원본의 <퇴직자 미지급분> · <현직원 미지급 급여> */}
+      <div className="card" style={{ overflow: 'hidden', marginBottom: 16 }}>
+        <div className="row card-pad" style={{ paddingBottom: 10, alignItems: 'baseline' }}>
+          <div className="fw-700">미지급 인건비</div>
+          <div className="ml-auto num fw-700">{fmtNum(d.labor.total)}원</div>
+        </div>
+        {d.labor.items?.length ? (
+          <table className="table">
+            <thead><tr><th style={{ width: 90 }}>구분</th><th>이름</th><th style={{ width: 90 }}>항목</th><th style={{ width: 110 }}>월분</th><th className="num-right" style={{ width: 140 }}>금액</th></tr></thead>
+            <tbody>
+              {d.labor.items.map((it, i) => (
+                <tr key={`${it.name}-${it.kind}-${it.period || ''}-${i}`}>
+                  <td className="text-sm">{it.status === 'retired' ? '퇴직자' : '현직원'}</td>
+                  <td className="fw-600 text-sm">{it.name}</td>
+                  <td className="text-sm">{it.kind === 'severance' ? '퇴직금' : '급여'}</td>
+                  <td className="num text-sm text-muted">{it.period || ''}</td>
+                  <td className="num-cell num-right">{fmtNum(it.remain)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className="card-pad text-sm text-muted" style={{ paddingTop: 0 }}>
+            이름별 명세는 인사 권한이 있어야 보여요. 합계는 위에 있습니다.
+          </div>
+        )}
+      </div>
+
+      <div className="text-xs text-muted" style={{ lineHeight: 1.7 }}>
+        · <b>들어온 돈 / 나간 돈</b>은 원본 엑셀에 없던 항목입니다 — 이 구간에 실제로 입·출금이 끝난 금액입니다.<br/>
+        · <b>차액</b>은 지금 잔액에서 나갈 돈을 뺀 값입니다(들어올 돈은 안 셉니다 — 원본과 같은 기준).<br/>
+        · 카드 계좌는 계좌표에서 빼고, 결제일에 <b>카드 결제</b>로 한 번만 셉니다.<br/>
+        · 나갈 항목은 금액 큰 순 {FS_TOP}개만 펼쳐 보여줍니다 — '외 N건'을 누르면 전부 보이고, 엑셀에는 모두 들어갑니다.
+      </div>
+    </div>
+  )
+}
+
 const REPORT_VIEWS = {
   monthly: ReportMonthly, tax4: ReportTax4, contract: ReportContract,
   category: ReportCategory, vendor: ReportVendor, ar: ReportAR,
   subcontract: ReportSubcontract, defense: ReportDefense,
-  taxoffice: ReportTaxOffice, vat: ReportVAT,
+  taxoffice: ReportTaxOffice, vat: ReportVAT, fundsheet: ReportFundSheet,
 }
 
 export const ReportsScreen = () => {

@@ -138,3 +138,17 @@ test('scope 는 아는 값만 쓴다 — 오타가 조용히 all 처럼 동작�
     assert.ok(KNOWN.has(r.scope), `${r.key} 의 scope='${r.scope}' 는 아는 값이 아니다`)
   }
 })
+
+/* 자금관리표는 대표 보고 양식이라 열 배치가 곧 문서다.
+   항목 이름은 엑셀처럼 `급여(15일)` 꼴이어야 한다 — 날짜가 빠지면 언제 나가는지 못 읽는다. */
+const { itemLabel } = require('../lib/fundSheet')
+
+test('자금관리표 항목 이름에 일자가 붙는다', () => {
+  assert.strictEqual(itemLabel({ label: '급여', date: '2026-08-15' }), '급여(15일)')
+  assert.strictEqual(itemLabel({ label: '관리비', date: '2026-08-01' }), '관리비(1일)')
+})
+
+test('날짜가 없거나 이상하면 이름만 남긴다 — 지어내지 않는다', () => {
+  assert.strictEqual(itemLabel({ label: '미정 지출', date: '' }), '미정 지출')
+  assert.strictEqual(itemLabel({ label: '미정 지출', date: '기한 미정' }), '미정 지출')
+})

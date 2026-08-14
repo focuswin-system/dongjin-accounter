@@ -47,6 +47,10 @@ const BUILTIN_REPORTS = [
    * (빈 표 / 'NaN%' / 코드에 박힌 건수) — 그 상태로 켜면 고객이 가짜 숫자를 본다. */
   { key: 'contract',    title: '계약별 수익 현황',         descr: '계약별로 받은 매출·투입 원가·손익을 봅니다.',        scope: 'entitled', sort: 80 },
   { key: 'taxoffice',   title: '세무사 전달용 자료',       descr: '한 달치 회계 자료를 종류별로 모아 엑셀로 넘깁니다.',   scope: 'entitled', sort: 100 },
+  /* 대표가 쓰던 엑셀(자금(현금)관리)의 칸 배치를 그대로 옮긴 한 장.
+     자금 현황 화면과 숫자는 같고 모양이 다르다 — 몇 년째 그 자리로 봐 온 문서라
+     같은 숫자라도 자리가 바뀌면 못 읽는다. */
+  { key: 'fundsheet',   title: '자금관리표',              descr: '계좌별 잔액·나갈 돈·들어올 돈을 대표 보고 양식 그대로 봅니다.', scope: 'entitled', sort: 110 },
 
   /* ⚠ 방산 원가 보고서는 아직 **켤 수 없다**(hidden).
    *   SAMPLE.contractSummary(=[]) 를 읽어 늘 빈 표이고, 0으로 나눠 이행률이 'NaN%' 로 찍힌다.

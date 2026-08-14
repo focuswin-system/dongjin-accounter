@@ -462,6 +462,34 @@ export const api = {
     } catch (e) { return { ok: false, error: e.message } }
   },
 
+  /* 자금관리표 — 대표가 쓰던 엑셀 양식 그대로. 자금 현황과 숫자는 같고 모양이 다르다. */
+  async getFundSheet(month) {
+    try { return await req(`/reports/fund-sheet?month=${encodeURIComponent(month)}`) } catch { return null }
+  },
+
+  async downloadFundSheetXlsx(month) {
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch(`${BASE}/reports/fund-sheet.xlsx?month=${encodeURIComponent(month)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.error || '내려받기에 실패했어요')
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `자금관리표_${month}.xlsx`
+      // Firefox는 anchor가 DOM에 있어야 다운로드되고, 같은 tick에 revoke하면 진행 중 다운로드가 취소된다.
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => { a.remove(); URL.revokeObjectURL(url) }, 0)
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
+
   /* 보고서 카탈로그 — **회사마다 다를 수 있다.**
    *
    * 예전엔 목록이 화면 파일에 하드코딩돼 있었다. 그래서 회사별로 다른 양식을 줄 수 없었고,

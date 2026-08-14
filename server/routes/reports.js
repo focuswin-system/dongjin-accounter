@@ -5,6 +5,8 @@ const { BUILTIN_REPORTS, visibleReports, featureKeyOf } = require('../platform/r
 const { kstToday } = require('../db')
 const xlsx = require('xlsx')
 const { taxofficePack, SHEETS } = require('../lib/taxofficePack')
+const { fundSheet } = require('../lib/fundSheet')
+const { canSeeLaborDetail } = require('../lib/fundStatus')
 
 const router = Router()
 
@@ -135,6 +137,153 @@ router.get('/taxoffice.xlsx', async (req, res, next) => {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     res.setHeader('Content-Disposition',
       `attachment; filename="taxoffice_${month}.xlsx"; filename*=UTF-8''${encodeURIComponent(`세무사전달_${month}.xlsx`)}`)
+    res.send(buf)
+  } catch (e) { next(e) }
+})
+
+/* ── 자금관리표 ──────────────────────────────────────────────────────────
+ *
+ * 대표가 쓰던 엑셀(`자금(현금)관리2026.xlsx`)의 칸 배치를 그대로 옮긴 한 장이다.
+ * 자금 현황 화면과 **숫자는 같고 모양이 다르다**(lib/fundSheet.js 머리말 참조).
+ *
+ * 원본에 없던 '들어온 돈'을 더한다 — 원본은 <입금 예정금액>만 있어서
+ * "이번 달에 얼마나 들어왔나"를 통장을 따로 열어 봐야 했다.
+ */
+async function fundSheetOf(req) {
+  const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(req.query.month || '')) ? String(req.query.month) : null
+  return fundSheet(req.db, {
+    month, today: kstToday(), closingDay: await closingDayOf(req.db),
+    // 이름별 미지급 인건비는 인사 권한이 있어야 본다(자금 판단에는 합계면 된다)
+    canSeeLabor: canSeeLaborDetail(req),
+  })
+}
+
+router.get('/fund-sheet', async (req, res, next) => {
+  try {
+    if (!(await requireFeature(req, res, 'fundsheet'))) return
+    res.json(await fundSheetOf(req))
+  } catch (e) { next(e) }
+})
+
+/* 엑셀.
+ *
+ * 원본 시트는 나갈 항목을 **가로로 8칸** 펼쳐 놨다. 사람이 손으로 채우던 표라 그게 가능했다.
+ * 그런데 실제 데이터를 넣어 보니 계좌 하나에 항목이 **44개**까지 나온다(정기지출·상환 회차).
+ * 가로로 펼치면 44열이 되어 못 읽고, 8칸에서 자르면 **조용히 빠진 지출**이 생긴다 —
+ * 자금표에서 나갈 돈이 빠지는 건 이 문서가 가장 하면 안 되는 일이다.
+ *
+ * 그래서 한 장에는 **계좌별 요약 + 요약표 + 들어올 돈 + 미지급 인건비**를 원본 순서대로 담고,
+ * 나갈 항목·부채·저축은 **명세 시트**로 뺀다. 아무것도 자르지 않는다.
+ */
+router.get('/fund-sheet.xlsx', async (req, res, next) => {
+  try {
+    if (!(await requireFeature(req, res, 'fundsheet'))) return
+    const d = await fundSheetOf(req)
+    const money = (n) => (Number(n) || 0)
+    const wb = xlsx.utils.book_new()
+    const addSheet = (name, aoa, cols) => {
+      const ws = xlsx.utils.aoa_to_sheet(aoa)
+      if (cols) ws['!cols'] = cols
+      xlsx.utils.book_append_sheet(wb, ws, name.replace(/[:\\/?*[\]]/g, ' ').slice(0, 31))
+    }
+
+    /* ── 1장: 자금관리표 ── */
+    const main = []
+    main.push([`자금관리표  ${d.range.label}`])
+    main.push(['집계 구간', `${d.range.from} ~ ${d.range.to}`])
+    main.push(['※ 나갈 항목 명세는 [나갈 항목] 시트에 있습니다.'])
+    main.push([])
+
+    const acctBlock = (title, g) => {
+      main.push([title])
+      main.push(['계좌', '잔액', '들어온 돈', '나간 돈', '나갈 건수', '나갈 합계', '들어올 합계', '차액'])
+      for (const r of g.rows) {
+        main.push([r.name, money(r.balance), money(r.actualIn), money(r.actualOut),
+          r.outItems.length, money(r.outTotal), money(r.inTotal), money(r.after)])
+      }
+      const t = g.total
+      main.push(['합계', money(t.balance), money(t.actualIn), money(t.actualOut),
+        g.rows.reduce((a, r) => a + r.outItems.length, 0), money(t.outTotal), money(t.inTotal), money(t.after)])
+      main.push([])
+    }
+    acctBlock('<법인>', d.corp)
+    acctBlock('<개인>', d.personal)
+
+    main.push(['<요약>'])
+    main.push(['구분', '보통계좌', '저축·보증금', '부채', '나갈 돈(예정)', '미지급 인건비', '들어온 돈', '들어올 돈', '현금 과부족'])
+    main.push(['법인', money(d.summary.corp.cash), '', '', money(d.summary.corp.plan), '', '', '', money(d.summary.corp.shortfall)])
+    main.push(['개인', money(d.summary.personal.cash), '', '', money(d.summary.personal.plan), '', '', '', money(d.summary.personal.shortfall)])
+    main.push(['합계', money(d.summary.all.cash), money(d.summary.all.savings), money(d.summary.all.debt),
+      money(d.summary.all.plan), money(d.summary.all.labor),
+      money(d.summary.all.actualIn), money(d.summary.all.planIn), money(d.summary.all.shortfall)])
+    // 저축·부채는 법인/개인 구분이 데이터에 없다 — 빈 칸으로 두고 이유를 적는다(지어내지 않는다)
+    main.push(['※ 저축·부채는 법인/개인 구분이 데이터에 없어 합계로만 냅니다.'])
+    main.push([])
+
+    main.push(['<들어올 돈>'])
+    main.push(['일자', '출처', '내용', '입금 계좌', '금액'])
+    for (const it of d.incoming) {
+      main.push([it.noDue ? '기한 미정' : (it.overdue ? `${it.date} (기한 지남)` : it.date),
+        it.source, it.label, it.account, money(it.amount)])
+    }
+    main.push(['합계', '', '', '', d.incoming.reduce((a, x) => a + money(x.amount), 0)])
+    main.push([])
+    /* '들어온 돈'은 원본 엑셀에 없던 항목이다 — 원본은 예정만 있어서
+       "이번 달에 얼마나 들어왔나"를 통장을 따로 열어 봐야 했다. */
+    main.push(['<들어온 돈>', money(d.summary.all.actualIn)])
+    main.push(['※ 원본 양식에 없던 항목입니다 — 이 구간에 실제로 입금이 끝난 금액입니다.'])
+    main.push([])
+
+    main.push(['<미지급 인건비>'])
+    if ((d.labor.items || []).length) {
+      main.push(['구분', '이름', '항목', '월분', '금액'])
+      for (const it of d.labor.items) {
+        main.push([it.status === 'retired' ? '퇴직자' : '현직원', it.name,
+          it.kind === 'severance' ? '퇴직금' : '급여', it.period || '', money(it.remain)])
+      }
+    } else {
+      main.push(['(이름별 명세는 인사 권한이 있어야 보입니다)'])
+    }
+    main.push(['합계', '', '', '', money(d.labor.total)])
+
+    addSheet(d.range.label, main,
+      [{ wch: 24 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 16 }])
+
+    /* ── 2장: 나갈 항목 명세 ── 아무것도 자르지 않는다 */
+    const outs = [['계좌', '구분', '일자', '출처', '내용', '금액']]
+    for (const [label, g] of [['법인', d.corp], ['개인', d.personal]]) {
+      for (const r of g.rows) {
+        for (const it of r.outItems) outs.push([r.name, label, it.date || '', it.source || '', it.label, money(it.amount)])
+      }
+    }
+    // 계좌가 안 정해진 예정(급여·퇴직금 등)도 빠뜨리지 않는다 — 빠지면 나갈 돈이 작아 보인다
+    for (const it of (d.unassigned.items || []).filter(x => x.kind === 'out')) {
+      outs.push(['(계좌 미지정)', '', it.date || '', it.source || '', it.label, money(it.amount)])
+    }
+    outs.push(['합계', '', '', '', '', outs.slice(1).reduce((a, r) => a + money(r[5]), 0)])
+    addSheet('나갈 항목', outs, [{ wch: 20 }, { wch: 8 }, { wch: 13 }, { wch: 14 }, { wch: 34 }, { wch: 16 }])
+
+    /* ── 3장: 부채 현황 ── */
+    const debt = [['기관', '건명', '원금', '남은 원금']]
+    for (const g of d.debts.groups || []) {
+      for (const it of g.items) debt.push([g.lender, it.name, money(it.principal), money(it.remaining)])
+    }
+    debt.push(['합계', '', '', money(d.debts.total)])
+    addSheet('부채 현황', debt, [{ wch: 20 }, { wch: 30 }, { wch: 16 }, { wch: 16 }])
+
+    /* ── 4장: 저축·보증금 현황 ── */
+    const sav = [['상품', '기관', '구분', '금액']]
+    for (const it of d.savings.items || []) {
+      sav.push([it.name, it.bank || '',
+        it.kind === 'guarantee' ? '보증금' : it.kind === 'deposit' ? '예금' : '적금', money(it.amount)])
+    }
+    sav.push(['합계', '', '', money(d.savings.total)])
+    addSheet('저축·보증금 현황', sav, [{ wch: 26 }, { wch: 16 }, { wch: 10 }, { wch: 16 }])
+
+    const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' })
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader('Content-Disposition',
+      `attachment; filename="fund_sheet.xlsx"; filename*=UTF-8''${encodeURIComponent(`자금관리표_${d.range.label}.xlsx`)}`)
     res.send(buf)
   } catch (e) { next(e) }
 })
