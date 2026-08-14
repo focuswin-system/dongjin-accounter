@@ -103,12 +103,23 @@ test('화면 변화 0 — 아무것도 안 켠 회사는 기존 7개뿐이다', 
     ['monthly', 'tax4', 'category', 'vendor', 'ar', 'subcontract', 'vat'])
 })
 
-test('운영 콘솔에서 켜 주면 그 양식만 늘어난다', () => {
-  const rows = visibleReports({ features: new Set([featureKeyOf('defense')]) })
-  assert.strictEqual(rows.length, 8)
-  assert.ok(rows.some(r => r.key === 'defense'))
-  // 켠 것만 늘어난다 — 같은 entitled 라도 나머지는 그대로 닫혀 있다
-  assert.strictEqual(rows.some(r => r.key === 'taxoffice'), false)
+test('켜 주면 그 양식만 늘어난다 — 같은 entitled 라도 나머지는 닫혀 있다', () => {
+  const TWO = [
+    { key: 'a', title: '기본', scope: 'all',      sort: 1 },
+    { key: 'x', title: '선택X', scope: 'entitled', sort: 2 },
+    { key: 'y', title: '선택Y', scope: 'entitled', sort: 3 },
+  ]
+  const rows = visibleReports({ catalog: TWO, features: new Set([featureKeyOf('x')]) })
+  assert.deepStrictEqual(rows.map(r => r.key), ['a', 'x'])
+})
+
+/* 데이터가 안 붙은 화면을 팔 수 있는 상태로 두면 **가짜 숫자가 고객에게 간다.**
+   실제로 이 셋이 그랬다(빈 표 / NaN% / 코드에 박힌 건수). 실구현 전까지 hidden 이어야 한다. */
+test('데이터 미연결 보고서 3개는 열 수 없는 상태여야 한다', () => {
+  for (const key of ['contract', 'defense', 'taxoffice']) {
+    const r = BUILTIN_REPORTS.find(x => x.key === key)
+    assert.strictEqual(r.scope, 'hidden', `${key} 는 실구현 전까지 hidden 이어야 한다`)
+  }
 })
 
 test('카탈로그 key 는 중복이 없다 — 화면 매핑이 1:1이어야 한다', () => {

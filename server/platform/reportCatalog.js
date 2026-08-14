@@ -41,13 +41,20 @@ const BUILTIN_REPORTS = [
   { key: 'subcontract', title: '외주가공비 분석',          descr: '협력사별 외주비 비중과 단가 추이.',                 scope: 'all',      sort: 60 },
   { key: 'vat',         title: '부가세 신고 자료',         descr: '분기별 매출·매입세액 및 납부세액을 확인하세요.',      scope: 'all',      sort: 70 },
 
-  /* 아래 셋은 화면 코드는 있는데 목록에 없어 여태 아무도 못 보던 것들이다.
-     회사마다 필요 여부가 갈린다(방산 원가는 방산 회사만 쓴다) → 회사별로 켜 주는 대상.
-     ⚠ 켜 주기 전에는 **아무에게도 안 보인다.** 지금 전 회사가 안 켜진 상태이므로
-       고객 화면은 오늘까지와 똑같다. 운영 콘솔 '기능' 탭에서 회사별로 연다. */
-  { key: 'contract',    title: '계약별 수익 현황',         descr: '계약 단위로 매출·원가·잔액을 봅니다.',              scope: 'entitled', sort: 80 },
-  { key: 'defense',     title: '방산 원가 보고서',         descr: '방산 납품 원가 구성과 마일스톤 진행을 봅니다.',       scope: 'entitled', sort: 90 },
-  { key: 'taxoffice',   title: '세무사 전달용 자료',       descr: '월별 손익·부가세 요약을 한 장으로 묶습니다.',        scope: 'entitled', sort: 100 },
+  /* ⚠ 아래 셋은 **켤 수 없다**(hidden). 화면 코드는 있지만 **데이터가 안 붙어 있다.**
+   *   실제로 열어 보고 확인한 상태(2026-08-14):
+   *     계약별 수익 현황  SAMPLE.contractSummary(=[]) 를 읽는다 → 늘 빈 표, KPI 전부 0원
+   *     방산 원가 보고서  같은 소스. 게다가 0으로 나눠 이행률이 **'NaN%'** 로 찍힌다
+   *     세무사 전달용     숫자가 통째로 코드에 박혀 있다(16건·7건·5건·8건·7명·1건·누락 3건).
+   *                      실데이터와 아무 상관이 없고, 'ZIP 내려받기'는 토스트만 뜬다
+   *
+   *   특히 세무사 전달용은 **가짜 숫자를 진짜처럼** 보여준다. 신고철에 "16건 준비됨"을
+   *   믿고 넘어갈 수 있다 — 화면이 거짓을 말하는, 이 코드베이스에서 제일 나쁜 종류다.
+   *   그래서 '팔 수 있음(entitled)'에서 내렸다. 운영 콘솔에서도 못 켠다(409).
+   *   실구현(각 화면을 API에 붙이기)이 끝나면 그때 entitled 로 올린다. */
+  { key: 'contract',    title: '계약별 수익 현황',         descr: '계약 단위로 매출·원가·잔액을 봅니다.',              scope: 'hidden', sort: 80 },
+  { key: 'defense',     title: '방산 원가 보고서',         descr: '방산 납품 원가 구성과 마일스톤 진행을 봅니다.',       scope: 'hidden', sort: 90 },
+  { key: 'taxoffice',   title: '세무사 전달용 자료',       descr: '월별 손익·부가세 요약을 한 장으로 묶습니다.',        scope: 'hidden', sort: 100 },
 ]
 
 const BUILTIN_BY_KEY = new Map(BUILTIN_REPORTS.map(r => [r.key, r]))
