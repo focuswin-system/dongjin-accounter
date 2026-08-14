@@ -15,8 +15,12 @@
  * ── scope ──
  *   all       모든 회사가 기본으로 본다(지금까지 보이던 7개)
  *   entitled  **사야 보인다.** 회사에 그 기능 키가 있어야 한다
+ *   hidden    아직 안 판다 — **아무에게도 안 나간다**(마스터에게도)
  *
- * 지금 entitled 로 둔 셋은 원래도 아무도 못 보던 것들이다 → 이 변경으로 사라지는 화면은 없다.
+ * hidden 을 '카탈로그에서 빼기' 대신 둔 이유:
+ *   빼면 아래 REPORT_VIEWS 에만 화면이 남아 **또 미아가 된다**(지금 이 셋이 그랬다).
+ *   등록은 해 두고 안 내보내면, 검사 [15](카탈로그 ↔ 화면 동기화)가 계속 지켜준다.
+ *   팔기로 하면 'entitled' 로 한 단어만 바꾸면 된다.
  *
  * 설계: docs/02-design/features/company-report-templates.design.md §1.2 · §6.1
  */
@@ -34,10 +38,12 @@ const BUILTIN_REPORTS = [
   { key: 'vat',         title: '부가세 신고 자료',         descr: '분기별 매출·매입세액 및 납부세액을 확인하세요.',      scope: 'all',      sort: 70 },
 
   /* 아래 셋은 화면 코드는 있는데 목록에 없어 여태 아무도 못 보던 것들이다.
-     회사마다 필요 여부가 갈리는 양식이라(방산 원가는 방산 회사만 쓴다) 판매 단위로 둔다. */
-  { key: 'contract',    title: '계약별 수익 현황',         descr: '계약 단위로 매출·원가·잔액을 봅니다.',              scope: 'entitled', sort: 80 },
-  { key: 'defense',     title: '방산 원가 보고서',         descr: '방산 납품 원가 구성과 마일스톤 진행을 봅니다.',       scope: 'entitled', sort: 90 },
-  { key: 'taxoffice',   title: '세무사 전달용 자료',       descr: '월별 손익·부가세 요약을 한 장으로 묶습니다.',        scope: 'entitled', sort: 100 },
+     회사마다 필요 여부가 갈리는 양식이라(방산 원가는 방산 회사만 쓴다) 팔 때 판매 단위가 된다.
+     ⚠ 지금은 **아무에게도 안 보인다**(hidden). 화면 변화 0 — 오늘까지와 똑같다.
+       화면이 검증되지 않았고 아직 팔 준비도 안 됐다. 팔기로 하면 'entitled' 로 바꾼다. */
+  { key: 'contract',    title: '계약별 수익 현황',         descr: '계약 단위로 매출·원가·잔액을 봅니다.',              scope: 'hidden', sort: 80 },
+  { key: 'defense',     title: '방산 원가 보고서',         descr: '방산 납품 원가 구성과 마일스톤 진행을 봅니다.',       scope: 'hidden', sort: 90 },
+  { key: 'taxoffice',   title: '세무사 전달용 자료',       descr: '월별 손익·부가세 요약을 한 장으로 묶습니다.',        scope: 'hidden', sort: 100 },
 ]
 
 const BUILTIN_BY_KEY = new Map(BUILTIN_REPORTS.map(r => [r.key, r]))
@@ -54,6 +60,8 @@ const BUILTIN_BY_KEY = new Map(BUILTIN_REPORTS.map(r => [r.key, r]))
 function visibleReports({ catalog = BUILTIN_REPORTS, features = new Set(), isMaster = false } = {}) {
   const out = []
   for (const r of [...catalog].sort((a, b) => (a.sort || 999) - (b.sort || 999))) {
+    // 아직 안 파는 양식은 여기서 끝 — 마스터에게도 안 보낸다
+    if (r.scope === 'hidden') continue
     const needsBuy = r.scope === 'entitled'
     const has = !needsBuy || features.has(r.feature || featureKeyOf(r.key))
     /* 못 산 양식을 **일반 사원에게는 아예 안 보여준다.**

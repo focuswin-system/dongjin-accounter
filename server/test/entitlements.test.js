@@ -66,30 +66,55 @@ test('기본 양식(scope:all)은 아무것도 안 사도 보인다', () => {
   assert.ok(rows.every(r => !r.locked), '기본 양식은 잠기지 않는다')
 })
 
-test('안 산 양식은 일반 사원에게 아예 안 보인다 — 사원 화면은 광고판이 아니다', () => {
-  const rows = visibleReports({ features: new Set(), isMaster: false })
-  assert.strictEqual(rows.some(r => r.key === 'defense'), false)
+/* scope 별 노출 — 표로 못 박는다.
+ *   hidden    아무에게도 안 나간다(기능 키가 있어도)
+ *   entitled  마스터에게만 잠금으로. 사면 전원에게
+ *   all       전원에게 */
+const SAMPLE = [
+  { key: 'h', title: '숨김', scope: 'hidden',   sort: 1 },
+  { key: 'e', title: '유료', scope: 'entitled', sort: 2 },
+  { key: 'a', title: '기본', scope: 'all',      sort: 3 },
+]
+
+test('hidden 은 아무에게도 안 나간다 — 마스터에게도', () => {
+  for (const isMaster of [false, true]) {
+    const rows = visibleReports({ catalog: SAMPLE, features: new Set(), isMaster })
+    assert.strictEqual(rows.some(r => r.key === 'h'), false, `isMaster=${isMaster}`)
+  }
 })
 
-test('안 산 양식은 회사 마스터에게만 잠금으로 보인다', () => {
-  const rows = visibleReports({ features: new Set(), isMaster: true })
-  const d = rows.find(r => r.key === 'defense')
+test('hidden 은 기능 키를 켜 줘도 안 나간다 — 팔려면 entitled 로 바꿔야 한다', () => {
+  const rows = visibleReports({ catalog: SAMPLE, features: new Set([featureKeyOf('h')]), isMaster: true })
+  assert.strictEqual(rows.some(r => r.key === 'h'), false)
+})
+
+test('안 산 entitled 는 일반 사원에게 아예 안 보인다 — 사원 화면은 광고판이 아니다', () => {
+  const rows = visibleReports({ catalog: SAMPLE, features: new Set(), isMaster: false })
+  assert.strictEqual(rows.some(r => r.key === 'e'), false)
+})
+
+test('안 산 entitled 는 회사 마스터에게만 잠금으로 보인다', () => {
+  const rows = visibleReports({ catalog: SAMPLE, features: new Set(), isMaster: true })
+  const d = rows.find(r => r.key === 'e')
   assert.ok(d, '마스터에게는 보인다')
   assert.strictEqual(d.locked, true)
   assert.strictEqual(d.lockReason, 'entitlement')
 })
 
-test('산 양식은 사원에게도 잠금 없이 보인다', () => {
-  const rows = visibleReports({ features: new Set([featureKeyOf('defense')]), isMaster: false })
-  const d = rows.find(r => r.key === 'defense')
+test('산 entitled 는 사원에게도 잠금 없이 보인다', () => {
+  const rows = visibleReports({ catalog: SAMPLE, features: new Set([featureKeyOf('e')]), isMaster: false })
+  const d = rows.find(r => r.key === 'e')
   assert.ok(d)
   assert.strictEqual(d.locked, false)
 })
 
-test('P0 회귀 — 기존에 보이던 7개가 그대로 보인다(개수·순서)', () => {
-  const rows = visibleReports({ features: new Set(), isMaster: false })
-  assert.deepStrictEqual(rows.map(r => r.key),
-    ['monthly', 'tax4', 'category', 'vendor', 'ar', 'subcontract', 'vat'])
+test('P0 회귀 — 화면 변화 0. 사원도 마스터도 기존 7개뿐이다', () => {
+  const BEFORE = ['monthly', 'tax4', 'category', 'vendor', 'ar', 'subcontract', 'vat']
+  for (const isMaster of [false, true]) {
+    const rows = visibleReports({ features: new Set(), isMaster })
+    assert.deepStrictEqual(rows.map(r => r.key), BEFORE, `isMaster=${isMaster}`)
+    assert.ok(rows.every(r => !r.locked), '잠금 카드가 하나도 없어야 한다')
+  }
 })
 
 test('카탈로그 key 는 중복이 없다 — 화면 매핑이 1:1이어야 한다', () => {
