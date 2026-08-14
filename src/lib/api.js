@@ -462,6 +462,16 @@ export const api = {
     } catch (e) { return { ok: false, error: e.message } }
   },
 
+  /* 회사가 자기 보고서를 켜고 끈다(환경설정 > 보고서).
+   * 우리가 열어준 것 중에서 고르는 것이지, 안 열린 걸 여는 게 아니다 — 서버가 409로 막는다. */
+  async getReportPrefs() {
+    try { return (await req('/reports/manage'))?.items || [] } catch { return [] }
+  },
+  async setReportPref(key, enabled) {
+    try { await req(`/reports/manage/${encodeURIComponent(key)}`, { method: 'PUT', body: { enabled } }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
   /* 자금관리표 — 대표가 쓰던 엑셀 양식 그대로. 자금 현황과 숫자는 같고 모양이 다르다. */
   async getFundSheet(month) {
     try { return await req(`/reports/fund-sheet?month=${encodeURIComponent(month)}`) } catch { return null }

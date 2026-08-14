@@ -35,8 +35,9 @@ router.get('/', async (req, res, next) => {
     const catalog = BUILTIN_REPORTS
 
     res.json({
-      // 볼 수 있는 것만 내려간다 — 안 켜진 양식은 마스터에게도 안 보낸다
-      items: visibleReports({ catalog, features }),
+      // 볼 수 있는 것만 내려간다. 두 축을 모두 통과해야 한다 —
+      // 우리가 열어줬나(features) AND 회사가 켜 뒀나(disabled 에 없나)
+      items: visibleReports({ catalog, features, disabled: await disabledOf(req.db) }),
     })
   } catch (e) { next(e) }
 })
@@ -78,9 +79,22 @@ async function requireFeature(req, res, key) {
     return false
   }
   const features = await featuresOf(platformPool, req.user?.companyId, kstToday())
-  if (features.has(featureKeyOf(key))) return true
-  res.status(403).json({ error: '이 보고서는 사용 중이 아니에요. 도입을 원하시면 문의해주세요.' })
-  return false
+  if (!features.has(featureKeyOf(key))) {
+    res.status(403).json({ error: '이 보고서는 사용 중이 아니에요. 도입을 원하시면 문의해주세요.' })
+    return false
+  }
+  // 회사가 스스로 껐으면 그 회사에서는 안 쓰는 것이다 — 데이터도 안 준다
+  if ((await disabledOf(req.db)).has(key)) {
+    res.status(403).json({ error: '이 보고서는 회사 설정에서 꺼져 있어요. 환경설정 > 보고서에서 켤 수 있어요.' })
+    return false
+  }
+  return true
+}
+
+/** 그 회사가 스스로 끈 보고서 key 들 (report_prefs 에 행이 없으면 켜짐) */
+async function disabledOf(db) {
+  const [rows] = await db.execute('SELECT key_name FROM report_prefs WHERE enabled = 0')
+  return new Set(rows.map(r => r.key_name))
 }
 
 // 화면용 — 건수와 각 항목의 행
@@ -285,6 +299,72 @@ router.get('/fund-sheet.xlsx', async (req, res, next) => {
     res.setHeader('Content-Disposition',
       `attachment; filename="fund_sheet.xlsx"; filename*=UTF-8''${encodeURIComponent(`자금관리표_${d.range.label}.xlsx`)}`)
     res.send(buf)
+  } catch (e) { next(e) }
+})
+
+/* ── 회사가 자기 보고서를 관리한다 ─────────────────────────────────────────
+ *
+ * **두 축을 섞지 않는다.**
+ *   우리(운영 콘솔)  이 회사가 그 양식을 쓸 수 있나  ← 계약. 회사는 못 건드린다
+ *   회사(이 화면)    쓸 수 있는 것 중 무엇을 쓸까     ← 그 회사 자유
+ *
+ * 그래서 회사는 **안 열린 양식을 열 수 없다**(409). 열 수 있게 하면 고객이 유료 기능을
+ * 스스로 켜는 셈이 된다 — 이 설계가 처음부터 피한 것이다.
+ * 반대로 **열린 것과 기본 제공은 끌 수 있다.** 안 쓰는 보고서를 자기 화면에서 치우는 건
+ * 그 회사가 정할 일이고, 목록이 짧아야 쓰는 사람이 찾는다.
+ *
+ * 설계: docs/02-design/features/company-report-templates.design.md §17
+ */
+const isMaster = (req) => req.user?.role === 'admin'
+
+router.get('/manage', async (req, res, next) => {
+  try {
+    if (!isMaster(req)) return res.status(403).json({ error: '회사 마스터만 볼 수 있어요' })
+    const features = await featuresOf(platformPool, req.user?.companyId, kstToday())
+    const disabled = await disabledOf(req.db)
+    /* hidden 은 아예 없는 양식이라 목록에도 안 넣는다 — 고객에게 "준비 중인 게 있다"고
+       알릴 이유가 없고, 알리면 언제 되느냐는 문의만 생긴다. */
+    const items = BUILTIN_REPORTS.filter(r => r.scope !== 'hidden').map(r => {
+      const entitled = r.scope === 'all' || features.has(featureKeyOf(r.key))
+      return {
+        key: r.key, title: r.title, descr: r.descr || '',
+        basic: r.scope === 'all',   // 기본 제공인가
+        entitled,                   // 우리가 열어줬나
+        enabled: !disabled.has(r.key),
+        visible: entitled && !disabled.has(r.key),
+      }
+    })
+    res.json({ items })
+  } catch (e) { next(e) }
+})
+
+router.put('/manage/:key', async (req, res, next) => {
+  try {
+    if (!isMaster(req)) return res.status(403).json({ error: '회사 마스터만 바꿀 수 있어요' })
+    const key = String(req.params.key || '')
+    const spec = BUILTIN_REPORTS.find(r => r.key === key && r.scope !== 'hidden')
+    if (!spec) return res.status(404).json({ error: '없는 보고서예요' })
+
+    const enabled = req.body?.enabled !== false
+    if (enabled && spec.scope === 'entitled') {
+      /* 켤 때만 계약을 본다. 끄는 건 언제든 되어야 한다 —
+         계약이 끝나 안 보이는 양식을 '꺼짐'으로 정리하는 것까지 막을 이유가 없다. */
+      const features = await featuresOf(platformPool, req.user?.companyId, kstToday())
+      if (!features.has(featureKeyOf(key))) {
+        return res.status(409).json({
+          error: '이 보고서는 아직 사용 계약이 없어요. 도입을 원하시면 문의해주세요.',
+        })
+      }
+    }
+    /* 켜진 상태가 기본이므로 켤 때는 행을 지운다 — 그래야 우리가 나중에 조건을 바꿔도
+       '예전에 켠 기록'이 남아 판단을 흐리지 않는다. */
+    if (enabled) await req.db.execute('DELETE FROM report_prefs WHERE key_name = ?', [key])
+    else {
+      await req.db.execute(
+        `INSERT INTO report_prefs (key_name, enabled) VALUES (?, 0)
+         ON DUPLICATE KEY UPDATE enabled = 0`, [key])
+    }
+    res.json({ ok: true })
   } catch (e) { next(e) }
 })
 

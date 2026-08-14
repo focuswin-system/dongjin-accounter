@@ -1181,6 +1181,22 @@ async function initDb(conn) {
      *   청구서 품목이 품목 마스터를 베껴 두는 것과 같은 이유다.
      * counterparty_account_id 는 '그때 어느 줄을 골랐나'를 남길 뿐이라
      *   그 줄이 지워지면 NULL 이 되고, 스냅샷 세 칸은 그대로 남는다. */
+    /* 회사가 스스로 끈 보고서.
+     *
+     * ⚠ 회사별 '기능 사용 여부'(company_features, 플랫폼 DB)와 **다른 축이다.**
+     *   플랫폼 DB  우리가 그 회사에 무엇을 열어줬나  ← 계약. 회사가 못 건드린다
+     *   여기       열린 것 중 회사가 무엇을 쓸까      ← 그 회사 자유
+     * 이 표에 행이 없으면 '켜짐'이다. 끌 때만 행이 생긴다 —
+     * 그래야 우리가 새 양식을 열어줬을 때 회사가 따로 켜지 않아도 바로 보인다.
+     * 설계: docs/02-design/features/company-report-templates.design.md §17 */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS report_prefs (
+        key_name   VARCHAR(80) PRIMARY KEY,
+        enabled    TINYINT NOT NULL DEFAULT 1,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `)
+
     await ensureColumn('transactions', 'counterparty_account_id', "counterparty_account_id VARCHAR(36)")
     await ensureColumn('transactions', 'counterparty_bank',       "counterparty_bank VARCHAR(60)")
     await ensureColumn('transactions', 'counterparty_account',    "counterparty_account VARCHAR(60)")

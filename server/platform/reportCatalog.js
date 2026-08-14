@@ -66,14 +66,17 @@ const BUILTIN_BY_KEY = new Map(BUILTIN_REPORTS.map(r => [r.key, r]))
  *
  * @param {object}  o
  * @param {Array}   o.catalog   양식 목록(기본: 내장 카탈로그). 나중에 회사 전용 양식을 이어 붙인다
- * @param {Set}     o.features  이 회사가 가진 기능 키
+ * @param {Set}     o.features  이 회사가 가진 기능 키 (우리가 열어준 것)
+ * @param {Set}     o.disabled  그 회사가 스스로 끈 key (report_prefs)
  * @returns {Array} [{ key, title, descr, kind }] — **볼 수 있는 것만.** 잠금 항목은 없다
  */
-function visibleReports({ catalog = BUILTIN_REPORTS, features = new Set() } = {}) {
+function visibleReports({ catalog = BUILTIN_REPORTS, features = new Set(), disabled = new Set() } = {}) {
   const out = []
   for (const r of [...catalog].sort((a, b) => (a.sort || 999) - (b.sort || 999))) {
     if (r.scope === 'hidden') continue                      // 어디에도 안 나간다
     if (r.scope === 'entitled' && !features.has(r.feature || featureKeyOf(r.key))) continue
+    // 회사가 스스로 끈 것 — 우리가 열어준 것이라도 그 회사 화면에서는 뺀다
+    if (disabled.has(r.key)) continue
     out.push({ key: r.key, title: r.title, descr: r.descr || '', kind: r.kind || 'builtin' })
   }
   return out

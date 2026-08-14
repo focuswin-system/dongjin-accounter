@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, StatusBadge, Drawer, Combobox, MoneyInput } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, StatusBadge, Drawer, Combobox, MoneyInput, Loading } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
@@ -112,6 +112,7 @@ const MASTER_TABS = [
   { id: "employType",      label: "고용형태", custom: true },
   { id: "company",         label: "회사 정보", custom: true },
   { id: "template",        label: "문서 양식" },
+  { id: "reports",         label: "보고서", custom: true },
   { id: "closing",         label: "월 마감", custom: true },
   { id: "audit",           label: "변경 이력", custom: true },
 ];
@@ -133,6 +134,7 @@ const CUSTOM_PANEL_TABS = new Set([
   "payrollItems", "employType", "accountSubject", "category", "vendor",
   "department", "position", "company", "user", "approval", "jeokyo", "item",
   "insurance", "fixed_asset", "intangible_asset", "evidence_type", "closing", "audit",
+  "reports",
 ]);
 
 // 도메인별 기준정보 섹션 (App 라우트: master=base / settings / hr_base=hr)
@@ -156,7 +158,7 @@ const MASTER_SECTIONS = {
     groups: [
       // '문서 양식'(template)은 목업이라 제외. 실동작 항목만.
       { label: "회사", tabs: ["company"] },
-      { label: "시스템", tabs: ["user", "approval"] },
+      { label: "시스템", tabs: ["user", "approval", "reports"] },
       { label: "장부 마감", tabs: ["closing"] },
       { label: "기록", tabs: ["audit"] },
     ],
@@ -3219,6 +3221,98 @@ const AuditPanel = ({ embedded = false }) => {
   )
 }
 
+/* ── 보고서 사용 설정 ────────────────────────────────────────────────────
+ *
+ * **두 축을 섞지 않는다.**
+ *   우리(공급자)  이 회사가 그 양식을 쓸 수 있나 — 계약. 여기서는 못 바꾼다
+ *   회사(이 화면) 쓸 수 있는 것 중 무엇을 쓸까   — 자유
+ *
+ * 그래서 계약이 없는 양식은 켤 수 없다(서버가 409). 대신 **끄는 건 무엇이든 된다** —
+ * 안 쓰는 보고서를 목록에서 치우는 건 그 회사가 정할 일이고, 목록이 짧아야 쓰는 사람이 찾는다.
+ */
+export const ReportPrefPanel = ({ embedded }) => {
+  const toast = useToast()
+  const [rows, setRows] = useState(null)
+  const [busy, setBusy] = useState('')
+
+  const load = async () => setRows(await api.getReportPrefs())
+  useEffect(() => { load() }, [])
+
+  const toggle = async (r) => {
+    setBusy(r.key)
+    const res = await api.setReportPref(r.key, !r.enabled)
+    setBusy('')
+    if (!res.ok) return toast.push(res.error || '바꾸지 못했어요', { tone: 'warn' })
+    toast.push(`${r.title} 을(를) ${r.enabled ? '끔' : '켬'}`)
+    load()
+  }
+
+  if (rows === null) return <Loading label="보고서 설정을 불러오는 중…"/>
+
+  const on = rows.filter(r => r.visible).length
+  return (
+    <div className={embedded ? '' : 'fade-up'}>
+      {!embedded && <PageHeader title="보고서 사용 설정"/>}
+      <div className="card" style={{ overflow: 'hidden' }}>
+        <div className="row card-pad" style={{ paddingBottom: 10, alignItems: 'baseline' }}>
+          <div className="fw-700">보고서</div>
+          <div className="text-sm text-muted" style={{ marginLeft: 10 }}>
+            보고서 화면에 무엇을 띄울지 고릅니다 · 사용 중 {on}개
+          </div>
+        </div>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>보고서</th>
+              <th style={{ width: 120 }}>구분</th>
+              <th style={{ width: 110 }}>상태</th>
+              <th style={{ width: 120 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.key}>
+                <td>
+                  <span className="fw-600">{r.title}</span>
+                  <div className="text-sm text-muted">{r.descr}</div>
+                </td>
+                <td className="text-sm">
+                  {r.basic
+                    ? <span className="text-muted">기본 제공</span>
+                    : <span className="badge" style={{ fontSize: 11 }}>선택 제공</span>}
+                </td>
+                <td>
+                  {/* 정상(사용 중)에는 표식을 달지 않는다 — 전부 배지가 붙으면 정작 꺼진 게 안 보인다 */}
+                  {r.visible ? <span className="text-sm text-muted2">사용 중</span>
+                    : !r.entitled ? <span className="badge" style={{ fontSize: 11 }}>미계약</span>
+                    : <span className="badge warn" style={{ fontSize: 11 }}>꺼짐</span>}
+                </td>
+                <td>
+                  {/* 계약이 없으면 켤 수 없다. 켜는 단추 대신 왜 못 켜는지를 적는다 */}
+                  {!r.entitled && r.enabled
+                    ? <span className="text-xs text-muted2">문의 후 사용</span>
+                    : (
+                      <button className={`btn sm ${r.enabled ? '' : 'primary'}`}
+                        disabled={busy === r.key}
+                        onClick={() => toggle(r)}>
+                        {busy === r.key ? '…' : r.enabled ? '끄기' : '켜기'}
+                      </button>
+                    )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="card-pad text-xs text-muted" style={{ paddingTop: 0, lineHeight: 1.7 }}>
+          · 끄면 <b>보고서 화면 목록에서 빠지고</b> 그 자료도 열리지 않습니다. 언제든 다시 켤 수 있어요.<br/>
+          · <b>선택 제공</b>은 사용 계약이 있어야 켜집니다 — 도입을 원하시면 문의해주세요.<br/>
+          · 여기 설정은 <b>회사 전체</b>에 적용됩니다. 사람별로 가리는 건 환경설정 &gt; 사용자의 역할에서 정합니다.
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export const MasterScreen = ({ user, section = "base", forcedTab }) => {
   const toast = useToast();
   const sectionCfg = MASTER_SECTIONS[section] || MASTER_SECTIONS.base;
@@ -3263,6 +3357,7 @@ export const MasterScreen = ({ user, section = "base", forcedTab }) => {
     if (activeTab === "employType")       return <EmployTypePanel embedded={single}/>
     if (activeTab === "user")             return <UserPanel currentUser={user} embedded={single}/>
     if (activeTab === "approval")         return <ApprovalPanel embedded={single}/>
+    if (activeTab === "reports")          return <ReportPrefPanel embedded={single}/>
     if (activeTab === "closing")          return <ClosingPanel embedded={single}/>
     if (activeTab === "audit")            return <AuditPanel embedded={single}/>
     if (activeTab === "department")       return <HrCodePanel type="dept" label="부서" embedded={single}/>

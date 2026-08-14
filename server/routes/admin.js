@@ -6,6 +6,7 @@ const { signSession } = require('../lib/session')
 const { clientIp, noteFailure, noteSuccess, ipBlockedFor, waitMessage } = require('../lib/loginGuard')
 const { withTx, httpError } = require('../lib/withTx')
 const platformAuth = require('../middleware/platformAuth')
+const { getPool } = require('../db/poolManager')
 const { BUILTIN_REPORTS, featureKeyOf } = require('../platform/reportCatalog')
 const { invalidate, dateOf } = require('../lib/entitlements')
 const { kstToday } = require('../db')
@@ -255,7 +256,7 @@ router.get('/login-failures', async (req, res, next) => {
 /** 회사가 실제로 있는지 — 없는 회사 id로 남의 회사 행을 건드리지 못하게 */
 async function companyOr404(companyId, res) {
   const [[c]] = await platformPool.execute(
-    'SELECT id, code, name FROM companies WHERE id = ?', [companyId])
+    'SELECT id, code, name, db_name FROM companies WHERE id = ?', [companyId])
   if (!c) { res.status(404).json({ error: '회사를 찾을 수 없습니다' }); return null }
   return c
 }
@@ -438,6 +439,20 @@ router.get('/companies/:id/features', async (req, res, next) => {
     const by = new Map(rows.map(r => [r.feature_key, r]))
     const today = kstToday()
 
+    /* 그 회사가 **스스로 끈** 보고서.
+     *
+     * ⚠ 이 콘솔은 원칙적으로 회사 DB를 보지 않는다(routes/admin.js 머리말).
+     *   여기만 예외다. 이유: 이게 없으면 콘솔은 '사용 중'이라고 하는데 고객 화면에는
+     *   안 보이는 상태가 생기고, "왜 안 보여요"에 답할 수가 없다.
+     *   읽는 값은 **화면 설정 한 컬럼**이고 회계 내용이 아니다. 쓰지도 않는다(읽기 전용).
+     *   회사가 끈 걸 우리가 대신 켜 주지 않는 것도 같은 이유다 — 그건 그 회사가 정할 일이다. */
+    let disabled = new Set()
+    try {
+      const [prefs] = await getPool(company.db_name).execute(
+        'SELECT key_name FROM report_prefs WHERE enabled = 0')
+      disabled = new Set(prefs.map(r => r.key_name))
+    } catch { /* 아직 표가 없는 회사(구버전 스키마)는 '끈 것 없음'으로 본다 */ }
+
     const items = sellableCatalog().map(c => {
       const row = by.get(c.key) || null
       /* 실제로 지금 켜져 있나 — 켠 흔적이 있어도 기간이 지났으면 꺼진 것이다.
@@ -445,10 +460,14 @@ router.get('/companies/:id/features', async (req, res, next) => {
       const active = !!row && !!Number(row.enabled)
         && (!row.starts_on || today >= dateOf(row.starts_on))
         && (!row.expires_on || today <= dateOf(row.expires_on))
+      // 보고서 기능 키는 'report:<보고서key>' 다 — 회사 설정과 맞춰 보려면 뒤쪽만 쓴다
+      const reportKey = c.key.startsWith('report:') ? c.key.slice(7) : null
       return {
         ...c,
         on: !!row && !!Number(row.enabled),
         active,
+        // 회사가 자기 화면에서 껐나 — 우리가 켰는데 안 보이는 이유가 여기 있을 수 있다
+        companyOff: !!reportKey && disabled.has(reportKey),
         starts_on: row ? dateOf(row.starts_on) : null,
         expires_on: row ? dateOf(row.expires_on) : null,
         memo: row ? row.memo : null,

@@ -179,6 +179,7 @@ export const SETTINGS_LEAVES = [
   { id: "settings_company",  label: "회사 정보", icon: Icon.Building },
   { id: "settings_user",     label: "사용자",    icon: Icon.Sign },
   { id: "settings_approval", label: "결재선",    icon: Icon.Doc },
+  { id: "settings_reports",  label: "보고서",    icon: Icon.Chart },
   { id: "settings_closing",  label: "월 마감",   icon: Icon.Bank },
   // 변경 이력 — 회사 마스터만 열린다(서버가 막고, 화면도 마스터가 아니면 타일을 감춘다)
   { id: "settings_audit",    label: "변경 이력", icon: Icon.Doc },
@@ -299,6 +300,7 @@ export const LEAF_TAGS = {
   settings_company: '회사정보 사업자등록증 대표자 회사',
   settings_user:    '사용자 계정 권한 로그인 비밀번호 역할',
   settings_approval:'결재선 결재 승인라인',
+  settings_reports: '보고서 리포트 사용 설정 노출 켜기 끄기',
   settings_closing: '마감 월마감 장부마감 결산',
   settings_audit:   '변경이력 감사 로그 기록 이력 누가 추적 삭제기록 접속기록',
 }

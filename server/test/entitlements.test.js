@@ -152,3 +152,24 @@ test('날짜가 없거나 이상하면 이름만 남긴다 — 지어내지 않�
   assert.strictEqual(itemLabel({ label: '미정 지출', date: '' }), '미정 지출')
   assert.strictEqual(itemLabel({ label: '미정 지출', date: '기한 미정' }), '미정 지출')
 })
+
+/* 회사가 스스로 끈 보고서(report_prefs) — **계약과 다른 축**이다.
+   섞이면 두 방향 모두 사고다: 고객이 유료 기능을 스스로 켜거나, 우리가 끈 걸 고객이 되살린다. */
+test('회사가 끈 것은 우리가 열어줬어도 안 보인다', () => {
+  const rows = visibleReports({
+    catalog: SAMPLE,
+    features: new Set([featureKeyOf('e')]),
+    disabled: new Set(['e']),
+  })
+  assert.strictEqual(rows.some(r => r.key === 'e'), false)
+})
+
+test('회사는 기본 제공도 끌 수 있다 — 안 쓰는 보고서를 치우는 건 그 회사 자유', () => {
+  const rows = visibleReports({ catalog: SAMPLE, features: new Set(), disabled: new Set(['a']) })
+  assert.deepStrictEqual(rows.map(r => r.key), [])
+})
+
+test('회사가 켜 뒀어도 계약이 없으면 안 보인다 — 계약이 위다', () => {
+  const rows = visibleReports({ catalog: SAMPLE, features: new Set(), disabled: new Set() })
+  assert.strictEqual(rows.some(r => r.key === 'e'), false)
+})
