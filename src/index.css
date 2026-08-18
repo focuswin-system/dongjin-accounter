@@ -887,46 +887,30 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
   .doc-ws { grid-template-columns: 1fr; }
 }
 
-/* 定算內譯書 — 실물이 A4 세로. 내용에 따라 크기가 변하지 않게 A4 고정 캔버스(210×297)를 갖는다.
-   내용이 적으면 아래 여백으로 남고, 많으면(기타경비 다수) 그만큼 늘어난다(인쇄 시 다음 장). */
+/* 定算內譯書 — 실물이 A4 세로. 화면에서는 A4 한 장 크기(210×297)로 보여준다.
+   ⚠ 인쇄에서는 이 min-height 를 풀어야 한다 — @page 여백(16mm)을 빼면 찍을 수 있는 높이가
+   1123px 보다 작아서, 내용이 짧아도 종이가 넘쳐 **두 장**이 나왔다(아래 @media print). */
 .settle-paper { width: 794px; max-width: 100%; min-height: 1123px; margin-left: auto; margin-right: auto; }
 /* 상단 헤더 금액은 줄바꿈 금지(잔액 잘림 방지). 라벨은 좁게 고정해 값에 폭을 준다. */
 .settle-paper .res-head th { width: 66px; white-space: nowrap; }
 .settle-paper .res-head td { white-space: nowrap; }
-/* 좌우 2단 본문 */
-.settle-body { display: flex; gap: 0; margin-top: 8px; }
-.settle-body > table { flex: 1; margin: 0; table-layout: fixed; }
-.settle-body .settle-left { border-right: none; }
-/* 분류 라벨은 실물처럼 세로쓰기(도/로/비) — 좁은 세로 칸 */
-.settle-cat {
-  background: #f6f7f9 !important; font-weight: 700; text-align: center; vertical-align: middle;
-  writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 0.12em;
-  width: 24px; padding: 4px 1px; white-space: nowrap;
+/* 제목 줄 — 이 문서가 무엇에 대한 정산인지 한눈에. 다른 칸보다 크고 굵게 써서 '제목'으로 읽힌다. */
+.settle-subject { font-size: 15.5px; font-weight: 700; letter-spacing: -0.015em; padding-top: 9px !important; padding-bottom: 9px !important; }
+/* 항목표 — 줄 수는 쓰는 사람이 정한다(고정 분류·빈 줄 없음). 행 높이만 일정하게. */
+.settle-grid { margin-top: 8px; }
+.settle-grid th { font-size: 13px; }
+.settle-grid tbody td { height: 30px; padding: 2px 10px; white-space: nowrap; overflow: hidden; }
+/* 줄 삭제 칸 — 편집 중에만 붙고 인쇄에는 안 나간다 */
+.settle-rowact { border: none !important; background: transparent !important; padding: 0 0 0 6px !important; text-align: center; }
+.settle-del {
+  border: 0; background: transparent; color: #b0b4bd; cursor: pointer;
+  padding: 4px; line-height: 0; border-radius: 5px;
 }
-.settle-tag { font-size: 9px; color: #999; }
-/* 행 높이 고정 — 내용이 달라도 문서마다 같은 레이아웃(A4 세로) 유지 */
-.settle-grid tbody td, .settle-grid tbody th { height: 26px; padding: 2px 8px; white-space: nowrap; overflow: hidden; }
-.settle-slotcell { padding-left: 6px !important; padding-right: 6px !important; }
-/* 짧은 슬롯명을 칸 폭에 맞춰 양끝으로 벌린다(터  널  비) */
-.settle-slot { display: flex; justify-content: space-between; width: 100%; }
+.settle-del:hover { background: var(--neg-soft, #fdeceb); color: var(--neg, #d64545); }
 /* 인라인 편집 셀 입력 */
 .settle-cellin { width: 100%; border: 0; background: transparent; font: inherit; color: inherit; padding: 0; outline: none; }
 .settle-cellin:focus { background: var(--brand-soft); }
 .settle-memo { color: #888; font-size: 11px; }
-/* 하단 특기사항·결재 — 본문 그리드에 이어붙임(위 테두리 공유) */
-.settle-foot { margin-top: -1px; }
-.settle-foot td { height: 84px; vertical-align: top; padding: 8px 10px; }
-.settle-note { font-size: 12px; color: #333; }
-.settle-approve-cell { padding: 0 !important; }
-.settle-approve { display: flex; height: 100%; }
-.settle-approve-col { flex: 1; border-left: 1px solid #232733; display: flex; flex-direction: column; }
-.settle-approve-col:first-child { border-left: none; }
-.settle-approve-h { border-bottom: 1px solid #232733; background: #f6f7f9; text-align: center; font-size: 12px; font-weight: 600; padding: 4px 2px; }
-.settle-approve-pos { font-weight: 400; font-size: 10px; color: #888; }
-.settle-approve-sign { flex: 1; min-height: 44px; }
-.settle-total { margin-top: -1px; }
-.settle-total th { background: #f6f7f9; text-align: center; }
-.settle-notes { margin-top: 14px; font-size: 11px; color: #777; line-height: 1.7; }
 /* 구매품의서 — 가로 헤더표·이중단가 품목표 */
 .pr-date { text-align: right; font-size: 12px; color: #555; margin: 4px 2px 12px; }
 .pr-head th, .pr-head td { font-size: 11.5px; padding: 4px 5px; text-align: center; }
@@ -1006,6 +990,10 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
   .no-print { display: none !important; }
   @page { size: A4; margin: 16mm; }
 
+  /* 화면용 회색 바탕(--bg)은 body·html 에 있다. '배경 그래픽' 켜고 인쇄하면
+     종이 아래 남는 부분이 통째로 회색으로 찍힌다 — 인쇄에서는 흰 종이로. */
+  html, body { background: #fff !important; }
+
   /* ⚠ 한 장을 넘는 문서가 **첫 장에서 잘려 나갔다.**
    *
    * 위에서 인쇄 대상을 position:absolute 로 끌어올리는데, 흐름 밖(out-of-flow) 상자는
@@ -1033,6 +1021,9 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
       display: block !important; width: auto !important; max-width: none !important;
       height: auto !important; max-height: none !important; overflow: visible !important;
       padding: 0 !important; margin: 0 !important;
+      /* 조상들이 화면용 회색 배경(--bg)을 그대로 갖고 있어, '배경 그래픽' 켜고 인쇄하면
+         종이 아랫부분이 통째로 회색으로 찍혔다. 종이 자신의 흰 배경만 남긴다. */
+      background: #fff !important;
     }
     #resolution-print, .resolution-print, #statement-print, .report-print, .fund-print {
       position: static !important;
@@ -1054,6 +1045,15 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
      다음 장으로 통째로 밀려, 앞 장 3분의 2가 빈 채로 넘어간다(실제로 그랬다).
      표는 줄 단위로 나뉘어도 읽힌다 — 위 tr 규칙이 줄이 잘리는 것만 막아준다. */
   .report-print .card:has(table) { break-inside: auto; }
+
+  /* 정산내역서가 **내용은 짧은데 두 장**으로 나오던 문제.
+     화면용 A4 캔버스(min-height:1123px = 297mm @96dpi)를 그대로 인쇄하면,
+     @page 여백 16mm×2 를 뺀 찍을 수 있는 높이(≈265mm ≈ 1001px)보다 커서 늘 넘친다.
+     인쇄에서는 높이를 내용에 맡긴다.
+     ⚠ break-inside:avoid 는 쓰지 않는다 — 이제 항목 줄 수에 상한이 없어서 정말 두 장짜리
+     문서가 나올 수 있는데, 한 장에 못 담는 상자에 avoid 를 걸면 뒷부분이 통째로 밀리거나
+     사라진다(위 [1032] 주석의 그 사고다). */
+  .settle-paper { min-height: 0 !important; height: auto !important; }
 
   /* 헤더·결재란의 회색 음영은 인쇄에서 흰색으로 — 테두리만 남겨 깔끔하게 */
   .res-head th, .res-items th, .res-total th, .res-total td,

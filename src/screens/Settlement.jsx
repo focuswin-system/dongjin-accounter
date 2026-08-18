@@ -1,41 +1,13 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, localToday } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 
-// 定算內譯書 좌측 고정 분류·슬롯(동진테크 양식). tag = 양식 상의 항번호(주석 참조). 우측은 기타경비 자유 목록.
-const SLOT_GROUPS = [
-  { cat: '도로비', tag: '', slots: ['터널비', '고속도로통행료'] },
-  { cat: '교통비', tag: '③', slots: ['승선료', '대중교통비', '철도·항공'] },
-  { cat: '영업비', tag: '④', slots: ['직접정산', '회사정산'] },
-  { cat: '운송료', tag: '⑤', slots: ['선편', '화물', '택배·퀵', '버스', '우편'] },
-]
-const ETC = '기타경비'
-const FOOTNOTES = [
-  '① ② ③ ⑥ 항은 출장에 限하며 특기사항에 지역 및 목적지 기재할것 (예: 서울 동진조선)',
-  '③ ④ ⑥ ⑧ 항은 정산자 이외의 참석자 성명을 특기사항에 기재할것 (예: 동진조선 홍길동대리, 당사 이순신과장)',
-  '④ 항은 발송지역 및 인수자를 특기사항에 기재할것 (예: 서울 동진조선 자재과 홍길동)',
-  '⑦ 항은 해당 차량번호를 금액 뒤에 기재할것 (예: 20,000(5848))',
-]
-const keyOf = (cat, title) => `${cat}|${title}`
+// 定算內譯書 — 항목은 고정 분류(도로비·교통비…) 없이 쓰는 사람이 필요한 줄만 추가한다.
+// 옛 양식의 좌측 고정 슬롯·출장 항번호(①②③…) 주석은 2026-08 고객 요청으로 걷어냈다.
 const numOf = (v) => (typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, ''), 10) || 0 : Number(v) || 0)
-
-const splitLines = (lines) => {
-  const slotVal = {}
-  const etc = []
-  for (const l of (lines || [])) {
-    const grp = SLOT_GROUPS.find(g => g.cat === l.category && g.slots.includes(l.title))
-    if (grp) slotVal[keyOf(l.category, l.title)] = l
-    else etc.push(l)
-  }
-  return { slotVal, etc }
-}
-
-// 짧은 슬롯명을 칸 폭에 맞춰 양끝으로 벌린다(터  널  비).
-const Spread = ({ text }) => (
-  <span className="settle-slot">{[...String(text)].map((c, i) => <span key={i}>{c}</span>)}</span>
-)
+const emptyLine = () => ({ title: '', amount: '', memo: '' })
 
 // 얇은 인라인 셀 입력
 const CellIn = ({ value, onChange, right, placeholder }) => (
@@ -48,39 +20,41 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
   const toast = useToast()
   const { confirm } = useConfirm()
   const [edit, setEdit] = useState(!!isNew)
-  const emptyForm = () => ({ settler: '', settle_date: localToday(), trip_area: '', trip_period: '', purpose: '', received_amount: '', note: '', slots: {}, etc: [], approval: [] })
+  const emptyForm = () => ({ settler: '', settle_date: localToday(), purpose: '', received_amount: '', note: '', lines: [], approval: [] })
   const [form, setForm] = useState(emptyForm())
   const [presets, setPresets] = useState([])
-  const [presetId, setPresetId] = useState('')
+
+  // 조회 화면(인쇄 포함)도 상단 머리글은 form 에서 읽는다 → 편집을 취소하면 반드시 여기로 되돌려야
+  // 저장하지 않은 값이 그대로 인쇄된다. 그래서 doc → form 변환을 한 곳에 둔다.
+  const formFromDoc = (d) => ({
+    settler: d.settler || '', settle_date: d.settle_date || localToday(),
+    purpose: d.purpose || '',
+    received_amount: d.received_amount ? String(d.received_amount) : '', note: d.note || '',
+    // category 는 화면에서 사라진 옛 분류(도로비·교통비…)다. 안 들고 있으면 옛 문서를 한 번
+    // 저장하는 것만으로 전부 '기타경비'로 뭉개진다 → 손대지 않고 그대로 되돌려 보낸다.
+    lines: (d.lines || []).map(l => ({ title: l.title || '', amount: String(l.amount || ''), memo: l.memo || '', category: l.category || '' })),
+    approval: (d.approval && d.approval.length) ? d.approval : [],
+  })
 
   useEffect(() => { api.getApprovalPresets().then(setPresets) }, [])
   useEffect(() => {
     setEdit(!!isNew)
-    if (!doc) { setForm(emptyForm()); return }
-    const { slotVal, etc } = splitLines(doc.lines)
-    const slots = {}
-    for (const k of Object.keys(slotVal)) slots[k] = { amount: String(slotVal[k].amount || ''), memo: slotVal[k].memo || '' }
-    setForm({
-      settler: doc.settler || '', settle_date: doc.settle_date || localToday(),
-      trip_area: doc.trip_area || '', trip_period: doc.trip_period || '', purpose: doc.purpose || '',
-      received_amount: doc.received_amount ? String(doc.received_amount) : '', note: doc.note || '',
-      slots, etc: etc.map(l => ({ title: l.title || '', amount: String(l.amount || ''), memo: l.memo || '' })),
-      approval: (doc.approval && doc.approval.length) ? doc.approval : [],
-    })
+    setForm(doc ? formFromDoc(doc) : emptyForm())
   }, [doc?.id, isNew])
 
   const setH = (k, v) => setForm(f => ({ ...f, [k]: v }))
-  const setSlot = (k, field, v) => setForm(f => ({ ...f, slots: { ...f.slots, [k]: { ...(f.slots[k] || { amount: '', memo: '' }), [field]: v } } }))
-  const setEtc = (i, field, v) => setForm(f => {
-    const etc = [...f.etc]
-    if (i === etc.length) etc.push({ title: '', amount: '', memo: '' })   // ghost 행 입력 → 새 행
-    etc[i] = { ...etc[i], [field]: v }
-    return { ...f, etc }
+  const setLine = (i, field, v) => setForm(f => {
+    const lines = [...f.lines]
+    if (i === lines.length) lines.push(emptyLine())   // ghost 행에 입력 → 새 줄
+    lines[i] = { ...lines[i], [field]: v }
+    return { ...f, lines }
   })
+  const addLine = () => setForm(f => ({ ...f, lines: [...f.lines, emptyLine()] }))
+  const delLine = (i) => setForm(f => ({ ...f, lines: f.lines.filter((_, j) => j !== i) }))
 
-  const slotTotal = Object.values(form.slots).reduce((s, v) => s + numOf(v.amount), 0)
-  const etcTotal = form.etc.reduce((s, l) => s + numOf(l.amount), 0)
-  const total = edit ? slotTotal + etcTotal : (doc?.lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0)
+  const total = edit
+    ? form.lines.reduce((s, l) => s + numOf(l.amount), 0)
+    : (doc?.lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0)
   const received = edit ? numOf(form.received_amount) : (Number(doc?.received_amount) || 0)
   const balance = received - total
   const ceo = company?.ceo || '대표이사'
@@ -90,28 +64,22 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
     : (doc?.approval && doc.approval.length ? doc.approval : defApproval)
   const applyPreset = (p) => setForm(f => ({ ...f, approval: (p.steps || []).map(s => ({ label: s.label, position: s.position || '', name: '' })) }))
 
-  // 표시용 데이터(편집 중이면 form, 아니면 doc)
-  const view = edit
-    ? { slotVal: Object.fromEntries(Object.entries(form.slots).map(([k, v]) => [k, { amount: numOf(v.amount), memo: v.memo }])), etc: form.etc }
-    : splitLines(doc?.lines)
-  const leftCells = []
-  for (const g of SLOT_GROUPS) g.slots.forEach((s, i) => leftCells.push({ span: i === 0 ? g.slots.length : 0, cat: g.cat, slot: s }))
-  const etcRows = edit ? [...view.etc, { title: '', amount: '', memo: '' }] : view.etc   // 편집 시 맨 끝 ghost 행
-  const rowCount = Math.max(leftCells.length, etcRows.length)
-  const padLeft = rowCount - leftCells.length
+  // 표시할 줄 — 편집 중이면 입력한 줄 + 맨 끝 ghost 행, 아니면 저장된 라인 그대로
+  const rows = edit ? [...form.lines, emptyLine()] : (doc?.lines || [])
 
   const save = async () => {
     const lines = []
-    for (const g of SLOT_GROUPS) for (const s of g.slots) {
-      const v = form.slots[keyOf(g.cat, s)]
-      if (v && numOf(v.amount)) lines.push({ category: g.cat, title: s, amount: numOf(v.amount), memo: (v.memo || '').trim() })
+    for (const l of form.lines) {
+      if ((l.title || '').trim() || numOf(l.amount)) {
+        // category 는 옛 문서에서 읽어온 값만 되돌려 보낸다(새 줄은 서버 기본값).
+        lines.push({ title: (l.title || '').trim(), amount: numOf(l.amount), memo: (l.memo || '').trim(), ...(l.category ? { category: l.category } : {}) })
+      }
     }
-    for (const l of form.etc) if ((l.title || '').trim() || numOf(l.amount)) lines.push({ category: ETC, title: (l.title || '').trim(), amount: numOf(l.amount), memo: (l.memo || '').trim() })
     if (!lines.length) return toast.push('지출 항목을 하나 이상 입력해주세요')
     const chosen = presets.find(p => p.is_default) || presets[0]
     const payload = {
       settler: form.settler.trim(), settle_date: form.settle_date || null,
-      trip_area: form.trip_area.trim(), trip_period: form.trip_period.trim(), purpose: form.purpose.trim(),
+      purpose: form.purpose.trim(),
       received_amount: numOf(form.received_amount), note: form.note.trim(), lines,
       approval: (form.approval && form.approval.length) ? form.approval
         : (chosen ? chosen.steps.map(s => ({ label: s.label, position: s.position || '', name: '' })) : undefined),
@@ -122,7 +90,11 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
     setEdit(false)
     onSaved(isNew ? res.settlement?.id : doc.id)
   }
-  const cancel = () => { if (isNew) return onCancelNew(); setEdit(false) }
+  const cancel = () => {
+    if (isNew) return onCancelNew()
+    setForm(doc ? formFromDoc(doc) : emptyForm())   // 되돌리지 않으면 취소한 값이 조회·인쇄에 남는다
+    setEdit(false)
+  }
   const remove = async () => {
     const ok = await confirm({ tone: 'neg', icon: <Icon.Warn size={22}/>, title: `${doc.doc_no} 삭제`, body: '이 정산내역서를 삭제할까요? 복구할 수 없어요.', confirmLabel: '삭제' })
     if (!ok) return
@@ -161,13 +133,11 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
           <table className="res-table res-head">
             <tbody>
               <tr>
-                <th>정산자</th><td>{edit ? <CellIn value={form.settler} onChange={v => setH('settler', v)}/> : form.settler}</td>
-                <th>출장지역①</th><td>{edit ? <CellIn value={form.trip_area} onChange={v => setH('trip_area', v)}/> : form.trip_area}</td>
-                <th>출장기간②</th><td>{edit ? <CellIn value={form.trip_period} onChange={v => setH('trip_period', v)}/> : form.trip_period}</td>
+                <th>정산자</th><td colSpan={2}>{edit ? <CellIn value={form.settler} onChange={v => setH('settler', v)}/> : form.settler}</td>
+                <th>정산일</th><td colSpan={2}>{edit ? <CellIn value={form.settle_date} onChange={v => setH('settle_date', v)} placeholder="YYYY-MM-DD"/> : (form.settle_date || '')}</td>
               </tr>
               <tr>
-                <th>구분</th><td colSpan={3}>{edit ? <CellIn value={form.purpose} onChange={v => setH('purpose', v)} placeholder="예: 세금납부·자재대 외"/> : form.purpose}</td>
-                <th>정산일</th><td>{edit ? <CellIn value={form.settle_date} onChange={v => setH('settle_date', v)} placeholder="YYYY-MM-DD"/> : (form.settle_date || '')}</td>
+                <th>제　목</th><td colSpan={5} className="settle-subject">{edit ? <CellIn value={form.purpose} onChange={v => setH('purpose', v)} placeholder="예: 7월 세금납부·자재대 정산"/> : form.purpose}</td>
               </tr>
               <tr>
                 <th>수령액</th><td className="num fw-700">{edit ? <CellIn value={form.received_amount} onChange={v => setH('received_amount', v)} right/> : amt(received)}</td>
@@ -179,44 +149,44 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
 
           <table className="res-table settle-grid">
             <colgroup>
-              <col style={{ width: 24 }}/><col style={{ width: 116 }}/><col style={{ width: 92 }}/>
-              <col style={{ width: 24 }}/><col/><col style={{ width: 92 }}/>
+              <col/><col style={{ width: 160 }}/>{edit ? <col style={{ width: 34 }}/> : null}
             </colgroup>
             <thead>
-              <tr><th colSpan={2}>항　목</th><th>지출액</th><th colSpan={2}>항　목</th><th>지출액</th></tr>
+              <tr><th>항　목</th><th>지출액</th>{edit ? <th className="settle-rowact no-print"/> : null}</tr>
             </thead>
             <tbody>
-              {Array.from({ length: rowCount }).map((_, i) => {
-                const L = leftCells[i]
-                const g = L && SLOT_GROUPS.find(x => x.cat === L.cat)
-                const sv = L && view.slotVal[keyOf(L.cat, L.slot)]
-                const R = etcRows[i]
-                const isGhost = edit && i === view.etc.length
+              {rows.map((r, i) => {
+                const ghost = edit && i === form.lines.length
                 return (
                   <tr key={i}>
-                    {L
-                      ? (L.span > 0 ? <th rowSpan={L.span} className="settle-cat">{L.cat}{g.tag ? <span className="settle-tag">{g.tag}</span> : null}</th> : null)
-                      : (i === leftCells.length ? <th rowSpan={padLeft} className="settle-cat"> </th> : null)}
-                    <td className="settle-slotcell">{L ? <Spread text={L.slot}/> : ''}</td>
-                    <td className="num" style={{ textAlign: 'right' }}>
-                      {L ? (edit ? <CellIn value={form.slots[keyOf(L.cat, L.slot)]?.amount || ''} onChange={v => setSlot(keyOf(L.cat, L.slot), 'amount', v)} right/> : (sv ? fmtNum(sv.amount) : '')) : ''}
-                    </td>
-                    {i === 0 ? <th rowSpan={rowCount} className="settle-cat">{ETC}</th> : null}
                     <td>
                       {edit
-                        ? (i < etcRows.length ? <CellIn value={etcRows[i].title || ''} onChange={v => setEtc(i, 'title', v)} placeholder={isGhost ? '+ 항목' : ''}/> : '')
-                        : (R ? <>{R.title}{R.memo ? <span className="settle-memo"> · {R.memo}</span> : null}</> : '')}
+                        ? <CellIn value={r.title || ''} onChange={v => setLine(i, 'title', v)} placeholder={ghost ? '+ 여기에 입력하면 줄이 생겨요' : ''}/>
+                        : <>{r.title}{r.memo ? <span className="settle-memo"> · {r.memo}</span> : null}</>}
                     </td>
                     <td className="num" style={{ textAlign: 'right' }}>
                       {edit
-                        ? (i < etcRows.length ? <CellIn value={etcRows[i].amount || ''} onChange={v => setEtc(i, 'amount', v)} right/> : '')
-                        : (R ? fmtNum(R.amount) : '')}
+                        ? <CellIn value={r.amount || ''} onChange={v => setLine(i, 'amount', v)} right/>
+                        : fmtNum(r.amount)}
                     </td>
+                    {edit ? (
+                      <td className="settle-rowact no-print">
+                        {!ghost && <button className="settle-del" onClick={() => delLine(i)} title="줄 삭제"><Icon.Close size={12}/></button>}
+                      </td>
+                    ) : null}
                   </tr>
                 )
               })}
+              {!edit && rows.length === 0 && (
+                <tr className="no-print"><td colSpan={2} style={{ textAlign: 'center', color: '#999' }}>항목이 없어요</td></tr>
+              )}
             </tbody>
           </table>
+          {edit && (
+            <div className="no-print" style={{ marginTop: 6 }}>
+              <button className="btn ghost sm" onClick={addLine}><Icon.Plus size={13}/> 줄 추가</button>
+            </div>
+          )}
 
           {edit && presets.length > 0 && (
             <div className="no-print row gap-6" style={{ margin: '10px 0 4px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -240,9 +210,6 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
             </table>
           </div>
 
-          <div className="settle-notes">
-            {FOOTNOTES.map((t, i) => <div key={i}>※ {t}</div>)}
-          </div>
           <div className="res-company num">{company?.name || ''}</div>
         </div>
       </DocViewport>
