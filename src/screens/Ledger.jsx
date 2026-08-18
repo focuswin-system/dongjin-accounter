@@ -3,6 +3,7 @@ import { Icon, fmtNum, useToast, useConfirm, Popover, PopItem, StatusBadge, peri
 import { PageHeader } from '../lib/components/PageHeader'
 import { DataTable } from '../lib/components/DataTable'
 import { TableToolbar } from '../lib/components/TableToolbar'
+import { useTableFilter } from '../lib/tableFilter'
 import { api } from '../lib/api'
 import { downloadCsv } from '../lib/export'
 import { ResolutionDocument } from './Docs'
@@ -13,12 +14,7 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
   const toast = useToast();
   const { confirm } = useConfirm();
   const [filter, setFilter] = useState(initialFilter);
-  const [q, setQ] = useState("");
   const [sel, setSel] = useState(null);
-  // 날짜 범위는 두 인풋(from~to)이 본체. 기본값 = 이번 달(프리셋 버튼이 값을 바꿔줌).
-  const [range, setRange] = useState(() => periodToRange("month"));
-  const [filterCat, setFilterCat] = useState(null);
-  const [filterContract, setFilterContract] = useState(null);
   /* 계약 일괄 연결 — 엑셀로 올린 거래를 한꺼번에 계약에 붙인다.
      allContracts 는 이름이 아니라 **id 로 보내야** 해서 목록을 따로 받는다
      (거래에서 뽑은 이름 목록은 아직 아무 거래도 안 붙은 계약을 모른다). */
@@ -55,25 +51,27 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
   const contracts = useMemo(() => [...new Set(
     txns.flatMap(t => [t.contract, t.cost_contract_name]).filter(Boolean))].sort(), [txns]);
 
+  /* 기간·비목·계약·검색 — 규칙은 공용 훅(lib/tableFilter)에 하나만 둔다.
+     기본 기간은 이번 달(프리셋 버튼이 값을 바꿔준다). */
+  const tf = useTableFilter({
+    date: { field: 'date', initial: periodToRange("month") },
+    search: { fields: ['vendor', 'scope', 'category', 'contract'], placeholder: "거래처·계약·비목 검색" },
+    filters: [
+      { key: 'cat', label: "비목", field: 'category', options: categories },
+      /* 계약으로 거르기 — 잘못 붙은 거래를 찾으려면 "이 계약에 붙은 것 전부"를
+         한 번에 봐야 한다. 예전엔 검색어로 더듬는 수밖에 없었다.
+         두 축(근거·원가 귀속)을 모두 본다 — 이 필터의 뜻이 그것이지, 어느 컬럼이냐가 아니다. */
+      { key: 'contract', label: "계약", options: contracts,
+        match: (t, v) => t.contract === v || t.cost_contract_name === v },
+    ],
+  });
+  const { range, setRange, q, setQ } = tf;
+
   /* 기간·비목·검색까지만 적용한 범위. 입금/지출 탭은 아직 안 나눈다.
      합계 카드와 탭 옆 건수는 이 범위를 쓴다 — 예전엔 둘 다 전체 txns 로 계산해서
      "2026년 7월"로 좁혀놔도 카드에는 **개업 이래 누계**가, 탭에는 전체 건수가 떠 있었다.
      화면의 표와 숫자가 서로 다른 기간을 말하니 그 값을 그대로 보고에 옮기면 틀린다. */
-  const scoped = useMemo(() => {
-    let rows = txns;
-    if (range?.from) rows = rows.filter(t => t.date >= range.from);
-    if (range?.to)   rows = rows.filter(t => t.date <= range.to);
-    if (filterCat)   rows = rows.filter(t => t.category === filterCat);
-    /* 계약으로 거른다. 두 축(근거·원가 귀속)을 모두 본다 —
-       "이 계약에 붙은 거래 전부"가 이 필터의 뜻이지, 어느 컬럼에 붙었느냐가 아니다. */
-    if (filterContract) rows = rows.filter(t => t.contract === filterContract || t.cost_contract_name === filterContract);
-    if (q) {
-      const lc = q.toLowerCase();
-      rows = rows.filter(t => t.vendor.toLowerCase().includes(lc) || t.scope?.toLowerCase().includes(lc)
-        || t.category?.toLowerCase().includes(lc) || t.contract?.toLowerCase().includes(lc));
-    }
-    return rows;
-  }, [txns, q, range, filterCat, filterContract]);
+  const scoped = useMemo(() => tf.apply(txns), [txns, tf.apply]);
 
   /* 미정산 청구서를 거래 모양으로 바꾼다. 실제 거래와 **같은 필터**를 타야 한다 —
      기간을 좁혀놓고 예정만 전 기간이 뜨면 화면이 두 기간을 동시에 말하게 된다.
@@ -94,15 +92,10 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
       amount: Number(inv.remainAmount) || 0,
       status: inv.status,
     }));
-    if (range?.from) rows = rows.filter(t => t.date >= range.from);
-    if (range?.to)   rows = rows.filter(t => t.date <= range.to);
-    if (filterCat)   rows = rows.filter(t => t.category === filterCat);
-    if (q) {
-      const lc = q.toLowerCase();
-      rows = rows.filter(t => t.vendor.toLowerCase().includes(lc) || t.scope?.toLowerCase().includes(lc) || t.category?.toLowerCase().includes(lc));
-    }
-    return rows;
-  }, [showPlanned, openInvoices, range, filterCat, q]);
+    /* 실제 거래와 **같은 규칙**으로 거른다. 예전엔 여기에 술어를 다시 적었고,
+       그러다 계약 필터가 빠져서 계약으로 좁혀도 예정분은 전 계약이 떠 있었다. */
+    return tf.apply(rows);
+  }, [showPlanned, openInvoices, tf.apply]);
 
   // 표에 실제로 그려지는 행 = 범위 + 탭 (+ 켰으면 예정분)
   const filtered = useMemo(() => {
@@ -132,8 +125,15 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
 
   // 화면에서 사라진 선택은 버린다 — 안 보이는 거래를 계약에 붙이면 안 된다
   useEffect(() => {
-    setCheckedIds(prev => prev.filter(id => filtered.some(t => t.id === id)));
-  }, [range, filterCat, filterContract, q, filter]);
+    /* 걸러낸 결과가 **같으면 이전 배열을 그대로 돌려준다.**
+       .filter() 는 바뀐 게 없어도 늘 새 배열을 만든다 → 매번 새 상태 → 다시 렌더 →
+       이 effect 가 또 돌아 무한 루프가 된다(실제로 "Maximum update depth exceeded"가 났다).
+       의존성이 원시값이던 때는 우연히 가려져 있었을 뿐, 지우는 게 맞는 쪽이다. */
+    setCheckedIds(prev => {
+      const next = prev.filter(id => filtered.some(t => t.id === id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [filtered, filter]);
 
   /* 고른 거래를 계약에 붙이거나 뗀다.
      ⚠ 축은 **거래 종류와 계약 종류**가 정한다 — 화면이 고르게 하면 반드시 틀린다.
@@ -228,16 +228,7 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
           </div>
 
           <TableToolbar
-            date={{ from: range?.from || "", to: range?.to || "", onChange: setRange }}
-            search={{ value: q, onChange: setQ, placeholder: "거래처·계약·비목 검색" }}
-            filters={[
-              { label: "비목", node: <FilterSelect value={filterCat} onChange={setFilterCat} options={categories} placeholder="전체"/> },
-              /* 계약으로 거르기 — 잘못 붙은 거래를 찾으려면 "이 계약에 붙은 것 전부"를
-                 한 번에 봐야 한다. 예전엔 검색어로 더듬는 수밖에 없었다. */
-              { label: "계약", node: <FilterSelect value={filterContract} onChange={setFilterContract} options={contracts} placeholder="전체"/> },
-            ]}
-            hasActiveFilter={!!filterCat || !!filterContract}
-            onReset={() => { setFilterCat(null); setFilterContract(null); }}
+            {...tf.toolbarProps}
             right={
               /* 아직 안 오간 돈을 이 표에 함께 띄운다. 켜져 있다는 걸 숫자로도 말해준다 —
                  "왜 합계랑 표가 안 맞지"가 생기지 않도록. */

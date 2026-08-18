@@ -386,6 +386,7 @@ router.delete('/:id', async (req, res, next) => {
      * 급여·결의서는 FK가 있어 이미 막히는데 재무 쪽만 뚫려 있었다. */
     const FIN_REFS = [
       ['loans', 'txn_id', '차입금 실행'],
+      ['loan_draws', 'txn_id', '차입금 추가 인출'],
       ['loan_repayments', 'txn_principal_id', '차입금 상환(원금)'],
       ['loan_repayments', 'txn_interest_id', '차입금 상환(이자)'],
       ['savings', 'txn_id', '예금 가입'],

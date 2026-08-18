@@ -44,6 +44,8 @@ const AUDIT_RULES = [
 
   // ── 청구서 ── 발행은 매출·매입의 시작점, 입금 매칭은 미수금을 지운다
   { m: 'POST',   re: /^\/api\/invoices$/,                          res: 'invoice', action: 'issue',        target: 'created' },
+  // 한 번에 세금계산서 여러 장이 나간다 — 한 장 발행이 남는데 N장이 안 남을 이유가 없다
+  { m: 'POST',   re: /^\/api\/invoices\/split$/,                    res: 'invoice', action: 'issue_split' },
   { m: 'POST',   re: /^\/api\/invoices\/([^/]+)\/matches$/,        res: 'invoice', action: 'match',        target: 1 },
   { m: 'DELETE', re: /^\/api\/invoices\/([^/]+)\/matches\/[^/]+$/, res: 'invoice', action: 'match_cancel', target: 1 },
   { m: 'DELETE', re: /^\/api\/invoices\/([^/]+)$/,                 res: 'invoice', action: 'delete',       target: 1 },
@@ -100,6 +102,10 @@ const AUDIT_RULES = [
 
   // ── 지급결의 ── 처리하면 실제 지급 거래가 만들어진다
   { m: 'POST',   re: /^\/api\/resolutions\/([^/]+)\/process$/,          res: 'resolution', action: 'process', target: 1 },
+  /* 집행을 되돌리는 일은 집행 자체만큼 남겨야 한다 — 지출 거래가 사라지고 청구서가
+     미지급으로 되살아나는데, 기록이 없으면 나중에 "왜 다시 낼 돈이 생겼나"를 못 짚는다.
+     check:isolation [11] 은 DELETE 만 보므로 이런 POST 취소는 사람이 챙겨야 한다. */
+  { m: 'POST',   re: /^\/api\/resolutions\/([^/]+)\/unprocess$/,        res: 'resolution', action: 'unprocess', target: 1 },
   { m: 'DELETE', re: /^\/api\/resolutions\/([^/]+)$/,                   res: 'resolution', action: 'delete',  target: 1 },
   { m: 'DELETE', re: /^\/api\/settlements\/([^/]+)$/,                   res: 'settlement', action: 'delete',  target: 1 },
 
@@ -107,6 +113,8 @@ const AUDIT_RULES = [
   { m: 'POST',   re: /^\/api\/finance\/loans\/([^/]+)\/repay$/,         res: 'loan', action: 'repay',         target: 1 },
   { m: 'POST',   re: /^\/api\/finance\/loans\/([^/]+)\/repay-missed$/,  res: 'loan', action: 'repay_missed',  target: 1 },
   { m: 'DELETE', re: /^\/api\/finance\/loans\/([^/]+)\/repay\/[^/]+$/,  res: 'loan', action: 'repay_cancel',  target: 1 },
+  { m: 'POST',   re: /^\/api\/finance\/loans\/([^/]+)\/draw$/,          res: 'loan', action: 'draw',          target: 1 },
+  { m: 'DELETE', re: /^\/api\/finance\/loans\/([^/]+)\/draw\/[^/]+$/,   res: 'loan', action: 'draw_cancel',   target: 1 },
   { m: 'DELETE', re: /^\/api\/finance\/loans\/([^/]+)$/,                res: 'loan', action: 'delete',        target: 1 },
   { m: 'DELETE', re: /^\/api\/finance\/investments\/([^/]+)$/,          res: 'investment', action: 'delete',  target: 1 },
 
@@ -150,6 +158,8 @@ const ACTION_LABELS = {
   pay: '지급', pay_cancel: '지급 취소', pay_missed: '놓친 회차 납입',
   process: '결의서 처리', mature: '만기 처리',
   repay: '상환', repay_missed: '놓친 회차 상환', repay_cancel: '상환 취소',
+  draw: '추가 차입', draw_cancel: '추가 차입 취소',
+  unprocess: '처리 취소', issue_split: '나눠 발행',
   // 계정 (routes/auth.js)
   login: '로그인', login_fail: '로그인 실패', create: '등록',
   password_change: '비밀번호 변경', password_reset: '비밀번호 초기화',

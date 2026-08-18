@@ -39,7 +39,6 @@ export const DocsScreen = () => {
   const load = async () => {
     const [list, comp] = await Promise.all([api.getResolutions(), api.getCompany()]);
     setDocs(list); setCompany(comp);
-    setSelId(prev => prev && list.some(d => d.id === prev) ? prev : (list[0]?.id || null));
   };
   useEffect(() => { load(); }, []);
 
@@ -48,7 +47,16 @@ export const DocsScreen = () => {
   const list = docs
     .filter(d => showDone || d.status !== '완료')
     .filter(d => !q || (d.title || "").includes(q) || (d.vendor_name || "").includes(q) || (d.doc_no || "").includes(q));
-  const sel = docs.find(d => d.id === selId) || null;
+
+  /* 선택은 **지금 목록에 보이는 것** 중에서만 유지한다.
+     예전엔 전체 docs 에서 골랐다(`list[0]` 도 필터 전 배열이었다). 그래서
+     '전체' 탭에서 완료 결의서를 열어둔 채 '처리 대기'로 돌아오면 왼쪽 목록엔 없는
+     완료 문서가 오른쪽에 그대로 떠 있었다 — 탭이 거르는 의미가 사라진다.
+     검색어를 쳐서 선택 건이 목록에서 빠질 때도 같은 일이 난다. */
+  useEffect(() => {
+    setSelId(prev => (prev && list.some(d => d.id === prev)) ? prev : (list[0]?.id || null));
+  }, [docs, showDone, q]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const sel = list.find(d => d.id === selId) || null;
 
   return (
     <div className="fade-up">
@@ -509,11 +517,54 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
     toast.push('결의서를 저장했어요'); setEdit(false); onSaved();
   };
   const remove = async () => {
-    const ok = await confirm({ tone: 'neg', title: '결의서 삭제', body: `${doc.doc_no} 결의서를 삭제할까요? 거래는 그대로 남아요.`, confirmLabel: '삭제' });
+    /* 완료된 결의서는 지출 거래·청구서 정산을 물고 있다. 그냥 지우면 그것들이 고아로 남고
+       되돌릴 손잡이(결의서)만 사라진다 — 잘못 지급한 건을 영영 못 되돌린다.
+       그래서 완료 건은 "지출까지 함께 지운다"고 분명히 말하고 cascade 로 부른다. */
+    const ok = await confirm({
+      tone: 'neg',
+      title: done ? '결의서·지출 함께 삭제' : '결의서 삭제',
+      body: done
+        ? <>
+            <div style={{ marginBottom: 6 }}>{doc.doc_no} 결의서와 <b>이 결의서로 집행된 지출 이력</b>을 함께 지웁니다.</div>
+            <div>연결된 매입 청구서가 있으면 <b>미지급</b>으로 되돌아가고, 계좌 잔액도 그만큼 복구됩니다.</div>
+            <div style={{ marginTop: 6 }} className="text-muted">
+              이미 있던 거래에 연결만 한 경우, 그 거래는 실제로 오간 돈이라 지우지 않고 연결만 끊어요.
+            </div>
+          </>
+        : `${doc.doc_no} 결의서를 삭제할까요? 거래는 그대로 남아요.`,
+      confirmLabel: '삭제',
+    });
     if (!ok) return;
-    const res = await api.deleteResolution(doc.id);
-    if (!res.ok) return toast.push('삭제에 실패했어요', { tone: 'warn' });
-    toast.push('삭제됐어요'); onDeleted();
+    const res = await api.deleteResolution(doc.id, { cascade: done });
+    if (!res.ok) return toast.push(res.error || '삭제에 실패했어요', { tone: 'warn' });
+    toast.push(res.keptTxn
+      ? '삭제됐어요. 연결돼 있던 지출 거래는 장부에 남겨뒀어요(연결 전 상태로 되돌렸습니다).'
+      : '삭제됐어요');
+    onDeleted();
+  };
+
+  /* 처리 취소 — 잘못 집행한 건을 '처리 대기'로 되돌린다.
+     청구서 쪽 정산 취소가 "결의서에서 되돌려주세요"라고 안내하는 그 출구다. */
+  const unprocess = async () => {
+    const ok = await confirm({
+      tone: 'neg',
+      title: '처리를 취소할까요?',
+      body: <>
+        <div style={{ marginBottom: 6 }}>{doc.doc_no} 집행을 되돌려 <b>처리 대기</b>로 보냅니다.</div>
+        <div>이 결의서로 만든 지출 거래는 지워지고, 연결된 매입 청구서는 <b>미지급</b>으로 되돌아갑니다.</div>
+        <div style={{ marginTop: 6 }} className="text-muted">마감된 달의 지출은 되돌릴 수 없어요(그 달 잔액이 바뀝니다).</div>
+      </>,
+      confirmLabel: '처리 취소',
+    });
+    if (!ok) return;
+    const res = await api.unprocessResolution(doc.id);
+    if (!res.ok) return toast.push(res.error || '되돌리지 못했어요', { tone: 'warn' });
+    /* 무엇을 했는지 그대로 말한다. '남겨뒀다'만 말하면, 그 거래가 여전히 '지급완료'인지
+       원래 상태로 돌아갔는지 알 수 없어 사용자가 장부를 직접 확인해야 한다. */
+    toast.push(!res.keptTxn ? '처리를 취소했어요. 처리 대기로 돌아갔어요.'
+      : res.restored ? '처리를 취소했어요. 연결돼 있던 지출 거래는 연결 전 상태로 되돌렸어요.'
+      : '처리를 취소했어요. 연결돼 있던 지출 거래는 장부에 그대로 남아 있어요 — 상태를 확인해주세요.');
+    onSaved();
   };
   const doPrint = () => window.print();
 
@@ -537,12 +588,21 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
           </>
         ) : (
           <>
-            {!done && <button className="btn ghost" onClick={remove}><Icon.Trash size={14}/></button>}
+            {/* 삭제는 완료 건에도 있다. 잘못 집행한 결의서를 없앨 길이 없으면
+                틀린 지출이 장부에 영원히 남는다(완료 건은 지출까지 함께 되돌린다). */}
+            <button className="btn ghost" onClick={remove} title={done ? '결의서와 지출 이력을 함께 삭제' : '결의서 삭제'}>
+              <Icon.Trash size={14}/>
+            </button>
             {!done && <button className="btn" onClick={() => setEdit(true)}><Icon.Pencil size={14}/> 편집</button>}
             <button className="btn" onClick={doPrint}><Icon.Print/> 인쇄</button>
             {/* 처리 = 이 결의서대로 지출 집행. 처리되면 목록에서 빠진다. */}
             {done
-              ? <span className="badge pos" style={{ alignSelf: 'center' }}><span className="dot"/>처리 완료</span>
+              ? <>
+                  <span className="badge pos" style={{ alignSelf: 'center' }}><span className="dot"/>처리 완료</span>
+                  <button className="btn" onClick={unprocess} title="집행을 되돌려 처리 대기로 보냅니다">
+                    <Icon.Refresh size={14}/> 처리 취소
+                  </button>
+                </>
               : <button className="btn primary" onClick={() => setProcessOpen(true)}><Icon.Check size={14}/> 처리</button>}
           </>
         )}

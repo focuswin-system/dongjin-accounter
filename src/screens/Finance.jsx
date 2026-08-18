@@ -199,6 +199,88 @@ const LoanFormDrawer = ({ open, editing, onClose, onSave, vendors, accounts }) =
   )
 }
 
+/* ── 추가 차입 Drawer — 같은 대출에서 원금을 더 빌린다 ──────────────
+ *
+ * 수시 상환의 **정확한 반대편**이다. 개인 대출·대표 가수금·한도대출은 한 약정 안에서
+ * 잔액이 오르내리는데, 여태 더 빌리는 자리가 없어 새 대출로 등록하는 수밖에 없었다.
+ * 그러면 같은 약정이 여러 건으로 쪼개져 "이 사람에게 지금 얼마 빚졌나"를 한눈에 못 본다.
+ */
+const DrawLoanDrawer = ({ loan, onClose, onDone, accounts }) => {
+  const toast = useToast()
+  const today = localToday()
+  const [date, setDate] = useState(today)
+  const [acct, setAcct] = useState('')
+  const [amount, setAmount] = useState('')
+  const [memo, setMemo] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    if (!loan) return
+    setDate(today); setAmount(''); setMemo('')
+    setAcct(loan.account_id || accounts.find(a => a.kind === 'bank')?.id || '')
+  }, [loan?.id])
+  if (!loan) return null
+  const amt = Number(String(amount).replace(/[^0-9]/g, '')) || 0
+  const left = Number(loan.remaining) || 0
+
+  const submit = async () => {
+    if (!acct) return toast.push('입금 계좌를 선택해주세요 — 안 고르면 계좌 잔액에 반영되지 않아요')
+    if (amt <= 0) return toast.push('빌린 금액을 입력해주세요')
+    if (date > today) return toast.push('미래 날짜로는 처리할 수 없어요')
+    if (date < loan.start_date) return toast.push(`대출 실행일(${loan.start_date}) 이전 날짜로는 인출할 수 없어요`, { tone: 'warn' })
+    setBusy(true)
+    const res = await api.drawLoan(loan.id, { date, account_id: acct, amount: amt, memo })
+    setBusy(false)
+    if (!res.ok) return toast.push(res.error || '처리에 실패했어요', { tone: 'warn' })
+    toast.push(`${fmtNum(amt)}원 추가로 빌린 것으로 기록했어요 (남은 원금 ${fmtNum(left + amt)}원)`)
+    onDone()
+  }
+  return (
+    <Drawer open onClose={onClose} width="min(460px, 100vw)">
+      <DrawerHead title="추가 차입" sub={<>{loan.name} · 현재 남은 원금 {fmtNum(left)}원</>} onClose={onClose}/>
+      <div className="drawer-body col gap-form">
+        <div className="alert-row" style={{ background: 'var(--brand-soft)', borderColor: 'transparent' }}>
+          <Icon.Sparkle size={16}/>
+          <div>
+            <div className="lead">같은 대출에서 더 빌립니다</div>
+            <div className="body">새 대출을 만들지 않고 이 약정의 원금을 늘려요. 갚을 때는 지금처럼 수시 상환을 쓰면 됩니다.</div>
+          </div>
+        </div>
+        <div><label className="label">빌린 금액 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+          <MoneyInput value={amount} onChange={setAmount}/>
+          <div className="text-sm text-muted" style={{ marginTop: 4 }}>부채가 늘어나는 금액이에요. 매출이 아닙니다.</div>
+        </div>
+        <div><label className="label">입금 계좌</label>
+          <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+            {accounts.filter(a => a.kind === 'bank').map(a => (
+              <button key={a.id} type="button" className={`chip ${acct === a.id ? 'active' : ''}`}
+                onClick={() => setAcct(a.id)}>{a.name}</button>
+            ))}
+          </div>
+        </div>
+        <div><label className="label">인출일</label>
+          <input className="input num" type="date" value={date} max={today} onChange={e => setDate(e.target.value)}/>
+        </div>
+        <div><label className="label">메모 <span className="text-muted2">· 선택</span></label>
+          <input className="input" value={memo} placeholder="예: 운전자금 추가" onChange={e => setMemo(e.target.value)}/>
+        </div>
+        {amt > 0 && (
+          <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
+            <div className="row"><span className="text-sm">입금 합계</span>
+              <span className="num fw-700 ml-auto">{fmtNum(amt)}원</span></div>
+            <div className="row" style={{ marginTop: 4 }}><span className="text-sm text-muted">빌린 뒤 남는 원금</span>
+              <span className="num ml-auto">{fmtNum(left + amt)}원</span></div>
+            <div className="text-sm text-muted" style={{ marginTop: 8 }}>
+              입금 거래 <b>1건</b>으로 기록돼요 — 차입금(부채) 계정이라 매출·손익에는 잡히지 않습니다.
+            </div>
+          </div>
+        )}
+      </div>
+      <DrawerFooter onCancel={onClose} onSave={submit} saveDisabled={busy}
+        saveLabel={busy ? '처리 중…' : '추가 차입 기록'}/>
+    </Drawer>
+  )
+}
+
 /* ── 수시 상환 Drawer — 회차 없이 금액을 직접 넣어 갚는다 ──────────────
  *
  * 상환 일정이 없는 채무(대표가수금 등)는 갚을 회차가 없다. 그런데 실무에서는 자금 여유가
@@ -457,6 +539,7 @@ export const LoanScreen = ({ page = true }) => {
   const [editing, setEditing] = useState(null)
   const [repayTarget, setRepayTarget] = useState(null)   // { loan, cycle }
   const [adhocTarget, setAdhocTarget] = useState(null)   // 일정 없는 채무의 수시 상환
+  const [drawTarget, setDrawTarget] = useState(null)     // 일정 없는 채무의 추가 차입
   const [bulkTarget, setBulkTarget] = useState(null)     // { loan, cycles } — 놓친 상환 일괄
   const [openId, setOpenId] = useState(null)             // 스케줄 펼친 대출
 
@@ -496,6 +579,21 @@ export const LoanScreen = ({ page = true }) => {
     if (!ok) return
     const res = await api.cancelRepayment(l.id, seq)
     toast.push(res.ok ? '상환을 취소했어요' : (res.error || '취소에 실패했어요'), res.ok ? undefined : { tone: 'warn' })
+    if (res.ok) load()
+  }
+
+  /* 추가 차입 취소 — 잘못 기록한 인출을 되돌린다. 입금 거래도 함께 사라지므로
+     계좌 잔액이 그만큼 줄어든다는 걸 미리 말해준다(누르고 나서 알면 늦다). */
+  const cancelDraw = async (l, d) => {
+    const ok = await confirm({
+      tone: 'neg', icon: <Icon.Warn size={22}/>, title: '추가 차입 취소',
+      body: `${d.draw_date}에 빌린 ${fmtNum(d.amount)}원을 되돌립니다.`,
+      detail: '이때 만든 입금 거래도 함께 지워져 계좌 잔액이 그만큼 줄고, 누적 차입액도 되돌아가요.',
+      confirmLabel: '취소 처리',
+    })
+    if (!ok) return
+    const res = await api.cancelLoanDraw(l.id, d.id)
+    toast.push(res.ok ? '추가 차입을 취소했어요' : (res.error || '취소에 실패했어요'), res.ok ? undefined : { tone: 'warn' })
     if (res.ok) load()
   }
 
@@ -561,7 +659,7 @@ export const LoanScreen = ({ page = true }) => {
         <DataTable
           rows={loans}
           empty="등록된 차입금이 없어요. 대출·관계사 차입을 등록하면 상환 스케줄이 자동으로 만들어집니다."
-          renderExpanded={l => (openId === l.id ? <LoanSchedule loan={l} onRepay={setRepayTarget} onCancel={cancelRepay}/> : null)}
+          renderExpanded={l => (openId === l.id ? <LoanSchedule loan={l} onRepay={setRepayTarget} onCancel={cancelRepay} onCancelDraw={cancelDraw}/> : null)}
           columns={[
             { key: 'name', header: '대출명', sortable: true, className: 'fw-700', render: l => (
               <span style={{ cursor: 'pointer', opacity: l.status === 'closed' ? 0.5 : 1 }}
@@ -598,6 +696,14 @@ export const LoanScreen = ({ page = true }) => {
                   <button className="btn sm primary" style={{ fontSize: 11, padding: '3px 8px' }}
                     onClick={() => setAdhocTarget(l)}>수시 상환</button>
                 )}
+                {/* 추가 차입 — 수시 상환의 반대편이라 나란히 둔다. 일정이 있는 대출은
+                    원금을 늘리면 스케줄이 통째로 무효가 되므로 버튼 자체를 안 그린다
+                    (그 경우는 증액이 아니라 새 약정이다). */}
+                {l.status === 'active' && noSchedule(l.method) && (
+                  <button className="btn sm" style={{ fontSize: 11, padding: '3px 8px' }}
+                    title="같은 대출에서 원금을 더 빌립니다"
+                    onClick={() => setDrawTarget(l)}>추가 차입</button>
+                )}
                 {/* 0원 회차는 상환할 것이 없다. 눌러도 서버가 막지만, 버튼을 보이면
                     "왜 안 되지"로 막히므로 애초에 안 그린다. */}
                 {!noSchedule(l.method) && l.next_cycle && (
@@ -619,6 +725,9 @@ export const LoanScreen = ({ page = true }) => {
         onClose={() => setRepayTarget(null)} onDone={() => { setRepayTarget(null); load() }}/>
       <BulkRepayDrawer loan={bulkTarget?.loan} cycles={bulkTarget?.cycles} accounts={accounts}
         onClose={() => setBulkTarget(null)} onDone={() => { setBulkTarget(null); load() }}/>
+      <DrawLoanDrawer loan={drawTarget} accounts={accounts}
+        onClose={() => setDrawTarget(null)}
+        onDone={() => { setDrawTarget(null); load() }}/>
       <AdhocRepayDrawer loan={adhocTarget} accounts={accounts}
         onClose={() => setAdhocTarget(null)} onDone={() => { setAdhocTarget(null); load() }}/>
     </div>
@@ -628,8 +737,39 @@ export const LoanScreen = ({ page = true }) => {
 /* 상환 스케줄 — 대출 행을 펼치면 나온다.
  * 회차는 앞에서부터 순서대로만 처리할 수 있다(건너뛰면 잔액이 어긋난다).
  * 그래서 '다음 회차'에만 버튼을 주고 나머지는 왜 못 누르는지 적어둔다. */
-const LoanSchedule = ({ loan: l, onRepay, onCancel }) => (
+/* 추가 차입 내역 — 인출이 한 번이라도 있을 때만 낸다.
+   없으면 칸이 늘 비어 있어 표만 길어진다(거래명세서의 납품일 칸과 같은 규칙). */
+const LoanDraws = ({ loan: l, onCancelDraw }) => {
+  if (!l.draws?.length) return null
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div className="row" style={{ marginBottom: 6, gap: 8, flexWrap: 'wrap' }}>
+        <span className="text-sm fw-700">추가 차입 {l.draws.length}건</span>
+        {/* 처음 얼마로 시작해 얼마가 됐는지 — 이게 안 보이면 원금이 왜 늘었는지 알 수 없다 */}
+        <span className="text-xs text-muted2">
+          최초 {fmtNum(l.initial_principal)}원 → 누적 {fmtNum(l.principal)}원
+        </span>
+      </div>
+      <DataTable
+        rows={l.draws}
+        rowKey={d => d.id}
+        columns={[
+          { key: 'draw_date', header: '인출일', className: 'num text-sm' },
+          { key: 'amount', header: '금액', align: 'right', className: 'num-cell fw-600', render: d => fmtNum(d.amount) },
+          { key: 'memo', header: '메모', render: d => <span className="text-sm text-muted">{d.memo || '—'}</span> },
+          { key: 'act', header: '', width: 70, align: 'right', render: d => (
+            <button className="btn ghost sm" style={{ fontSize: 10, padding: '1px 5px' }}
+              title="이 인출을 되돌립니다 — 입금 거래도 함께 지워져요"
+              onClick={() => onCancelDraw(l, d)}>취소</button>
+          )},
+        ]}/>
+    </div>
+  )
+}
+
+const LoanSchedule = ({ loan: l, onRepay, onCancel, onCancelDraw }) => (
   <div style={{ padding: 16 }}>
+    <LoanDraws loan={l} onCancelDraw={onCancelDraw}/>
     <div className="row" style={{ marginBottom: 8, gap: 16, flexWrap: 'wrap' }}>
       <span className="text-sm">총 이자 <b className="num">{fmtNum(l.totals?.interest || 0)}</b>원</span>
       <span className="text-sm">총 상환 <b className="num">{fmtNum(l.totals?.total || 0)}</b>원</span>

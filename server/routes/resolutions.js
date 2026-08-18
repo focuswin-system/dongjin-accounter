@@ -8,6 +8,7 @@ const { ledgerError } = require('../lib/ledger')
 const { settleAcctCode } = require('../lib/acctCode')
 const { insertWithDocNo } = require('../lib/docno')
 const { withTx, httpError } = require('../lib/withTx')
+const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
 
 const router = Router()
 
@@ -232,11 +233,20 @@ router.post('/:id/process', async (req, res, next) => {
     // (routes/accounts.js calcBalance). 둘 중 하나라도 어긋나면 통장은 줄었는데 장부 잔액은
     // 그대로 남아 조용히 틀어진다. 아래 두 분기 모두 이 조건을 반드시 만족시킨다.
     let linkedTxnId = null
+    // 이 지출 거래를 결의서가 **직접 만들었는지**. 처리 취소 때 지울지 남길지를 가른다.
+    let txnCreated = false
+    // 연결한 기존 거래의 **연결 전** 상태·계좌 — 되돌릴 때 그대로 복원한다
+    let prevStatus = null
+    let prevAccountId = null
     if (mode === 'link') {
       if (!txn_id) { await rollbackQuietly(conn); return res.status(400).json({ error: '연결할 지출 거래를 선택해주세요' }) }
       // FOR UPDATE — 같은 거래를 두 결의서가 동시에 집으려 할 때 한쪽을 기다리게 한다.
       const [[t]] = await conn.execute("SELECT id, status, account_id FROM transactions WHERE id = ? AND kind='expense' FOR UPDATE", [txn_id])
       if (!t) { await rollbackQuietly(conn); return res.status(404).json({ error: '지출 거래를 찾을 수 없어요' }) }
+      /* 아래에서 이 거래를 '지급완료'로 바꾸고 계좌도 채운다. 되돌릴 때 쓰려면 지금 적어 둬야 한다
+         — 바꾼 뒤에는 원래 무엇이었는지 알 방법이 없다. */
+      prevStatus = t.status || null
+      prevAccountId = t.account_id || null
       // 이미 다른 결의서가 집행한 지출이면 막는다.
       // 후보 목록(/:id/matchable)이 연결된 거래를 빼주긴 하지만, 그 목록은 드로어를 열 때
       // 한 번만 받아온다. 결의서 A를 처리한 뒤 열어둔 B의 드로어에서 같은 거래를 고르면
@@ -301,6 +311,7 @@ router.post('/:id/process', async (req, res, next) => {
          '지급완료', r.doc_no, `결의서 ${r.doc_no} 집행`,
          vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible])
       linkedTxnId = id
+      txnCreated = true
     } else {
       await rollbackQuietly(conn); return res.status(400).json({ error: "mode는 'link' 또는 'create'여야 해요" })
     }
@@ -320,7 +331,7 @@ router.post('/:id/process', async (req, res, next) => {
           const [[txnRow]] = await conn.execute('SELECT amount FROM transactions WHERE id = ?', [linkedTxnId])
           const matchAmount = Math.min(Number(txnRow.amount) || 0, remainBefore)
           await conn.execute('UPDATE transactions SET invoice_id = ? WHERE id = ?', [r.invoice_id, linkedTxnId])
-          await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount) VALUES (?,?,?,?)', [randomUUID(), r.invoice_id, linkedTxnId, matchAmount])
+          await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,?)', [randomUUID(), r.invoice_id, linkedTxnId, matchAmount, txnCreated ? 1 : 0])
           const [[{ paid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [r.invoice_id])
           const status = Number(paid) >= Number(inv.total_amount) ? '지급 완료' : '일부 지급'
           await conn.execute('UPDATE invoices SET status = ? WHERE id = ?', [status, r.invoice_id])
@@ -330,7 +341,9 @@ router.post('/:id/process', async (req, res, next) => {
       }
     }
 
-    await conn.execute("UPDATE expense_resolutions SET status='완료', txn_id=? WHERE id=?", [linkedTxnId, req.params.id])
+    await conn.execute(
+      "UPDATE expense_resolutions SET status='완료', txn_id=?, txn_created=?, txn_prev_status=?, txn_prev_account_id=? WHERE id=?",
+      [linkedTxnId, txnCreated ? 1 : 0, prevStatus, prevAccountId, req.params.id])
     await conn.commit()
     res.json({ ok: true, txn_id: linkedTxnId, invoicePaid })
   } catch (e) { await rollbackQuietly(conn); next(e) }
@@ -407,10 +420,110 @@ router.post('/:id/reload-lines', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/**
+ * 집행(완료)을 되돌린다 — 처리 취소.
+ *
+ * 청구서 쪽 정산 취소(`invoices.js` DELETE /:id/matches/:matchId)는 결의서로 집행된 건을
+ * **"결의서에서 되돌려주세요"** 라며 막는다. 그 되돌릴 곳이 여기다. 없으면 잘못 처리한 건이
+ * 영영 완료로 남는다(삭제 버튼도 완료 건에는 안 나온다).
+ *
+ * 되돌리는 순서와 이유:
+ *   1. 마감 검사 — 마감된 달의 지출을 지우면 그 달 잔액이 사후에 바뀐다.
+ *   2. 청구서 정산(invoice_matches) 해제 → recalcInvoiceStatus 로 상태 재계산.
+ *      직접 UPDATE 하면 부분지급이 섞인 청구서에서 상태를 틀린다 — 규칙은 그 lib 하나뿐이다.
+ *   3. 지출 거래는 **결의서가 만든 것만**(txn_created=1) 지운다.
+ *      이미 있던 거래에 연결한 것(0)은 통장에 실제로 오간 독립 기록이라 남기고 연결만 끊는다.
+ *      지우면 계좌 잔액이 틀어진다. 대신 무엇을 남겼는지 응답으로 알려준다.
+ *   4. 결의서를 '작성'으로 되돌린다 → '처리 대기' 목록에 다시 뜬다.
+ *
+ * 공용 함수인 이유: 삭제(cascade)도 같은 되돌리기를 먼저 해야 한다. 두 벌로 두면
+ * 한쪽만 고쳐져 "취소는 맞는데 삭제하면 잔액이 틀어지는" 상태가 된다.
+ */
+const unprocessInTx = async (conn, id) => {
+  const [[r]] = await conn.execute('SELECT * FROM expense_resolutions WHERE id = ? FOR UPDATE', [id])
+  if (!r) throw httpError(404, '결의서를 찾을 수 없어요')
+  if (r.status !== '완료') return { resolution: r, changed: false, keptTxn: false }
+
+  let keptTxn = false
+  let restored = false      // 연결 전 상태로 되돌렸는가(옛 데이터는 되돌릴 근거가 없다)
+  /* 결의서의 거래 연결을 **먼저** 끊는다.
+     expense_resolutions.txn_id 는 transactions(id) 를 FK 로 참조한다. 연결을 쥔 채
+     거래를 지우면 ER_ROW_IS_REFERENCED_2 로 트랜잭션 전체가 터진다(실제로 500 이 났다).
+     같은 트랜잭션 안이라 순서만 바꾸면 되고, 중간 상태가 밖으로 보이지도 않는다. */
+  await conn.execute(
+    "UPDATE expense_resolutions SET status='작성', txn_id=NULL, txn_created=0, txn_prev_status=NULL, txn_prev_account_id=NULL WHERE id=?",
+    [id])
+
+  if (r.txn_id) {
+    const [[txn]] = await conn.execute('SELECT id, date FROM transactions WHERE id = ? FOR UPDATE', [r.txn_id])
+    if (txn) {
+      const ce = await closedPeriodError(conn, txn.date)
+      if (ce) throw httpError(409, ce)
+    }
+    // 이 지출이 물고 있던 청구서 정산을 푼다(거래를 지우기 전에).
+    const [matches] = await conn.execute('SELECT invoice_id FROM invoice_matches WHERE txn_id = ?', [r.txn_id])
+    await conn.execute('DELETE FROM invoice_matches WHERE txn_id = ?', [r.txn_id])
+    for (const invId of [...new Set(matches.map(m => m.invoice_id).filter(Boolean))]) {
+      await recalcInvoiceStatus(conn, invId)
+    }
+    if (txn) {
+      if (Number(r.txn_created) === 1) {
+        await conn.execute('DELETE FROM transactions WHERE id = ?', [r.txn_id])
+      } else {
+        /* 이미 있던 거래는 지우지 않는다 — 통장에 실제로 오간 독립 기록이다.
+           대신 **연결 전 상태·계좌로 되돌린다.** 이걸 안 하면 처리가 '지급완료'로 바꿔 둔
+           상태가 그대로 남아, 청구서는 미지급으로 되살아나는데 돈은 나간 것으로 남는다
+           → 그 청구서를 다시 지급 처리하면 같은 돈이 두 번 나간 것으로 기록된다. */
+        await conn.execute('UPDATE transactions SET invoice_id = NULL WHERE id = ?', [r.txn_id])
+        // 증빙란의 결의서번호도 지운다 — 단, 이 결의서가 붙인 번호일 때만(다른 번호는 남의 것)
+        await conn.execute('UPDATE transactions SET doc_no = NULL WHERE id = ? AND doc_no = ?', [r.txn_id, r.doc_no])
+        if (r.txn_prev_status) {
+          /* 계좌는 처리가 **비어 있을 때만** 채웠으므로, 원래 비어 있었다면 다시 비운다.
+             원래 있던 계좌는 그대로 둔다(처리가 건드리지 않았다). */
+          await conn.execute('UPDATE transactions SET status = ?, account_id = ? WHERE id = ?',
+            [r.txn_prev_status, r.txn_prev_account_id || null, r.txn_id])
+          restored = true
+        }
+        keptTxn = true
+      }
+    }
+  }
+  return { resolution: r, changed: true, keptTxn, restored }
+}
+
+// 처리 취소 — 완료 → 작성. 지출·청구서 정산을 함께 되돌린다.
+router.post('/:id/unprocess', async (req, res, next) => {
+  try {
+    const out = await withTx(req.db, (conn) => unprocessInTx(conn, req.params.id))
+    if (!out.changed) return res.status(409).json({ error: '아직 처리되지 않은 결의서예요' })
+    res.json({ ok: true, keptTxn: out.keptTxn, restored: out.restored })
+  } catch (e) { next(e) }
+})
+
+/**
+ * 삭제. 완료 건은 `?cascade=1` 이 있어야 지운다.
+ *
+ * 예전엔 행만 지웠다. 완료 건이 그렇게 지워지면 지출 거래와 청구서 정산은 그대로 남아
+ * **되돌릴 손잡이가 사라진다** — 청구서 쪽 정산 취소는 "결의서에서 되돌려라"고 하는데
+ * 그 결의서가 없다. 그래서 완료 건은 먼저 되돌린 뒤에만 지운다.
+ */
 router.delete('/:id', async (req, res, next) => {
   try {
-    await req.db.execute('DELETE FROM expense_resolutions WHERE id = ?', [req.params.id])
-    res.json({ ok: true })
+    const cascade = req.query.cascade === '1' || req.query.cascade === 'true'
+    const out = await withTx(req.db, async (conn) => {
+      const [[cur]] = await conn.execute('SELECT status, doc_no FROM expense_resolutions WHERE id = ? FOR UPDATE', [req.params.id])
+      if (!cur) throw httpError(404, '결의서를 찾을 수 없어요')
+      let keptTxn = false
+      if (cur.status === '완료') {
+        if (!cascade) {
+          throw httpError(409, '이미 처리된 결의서예요. 지출 이력까지 함께 지우려면 처리 취소 후 삭제하거나, 삭제 시 함께 삭제를 선택하세요.')
+        }
+        keptTxn = (await unprocessInTx(conn, req.params.id)).keptTxn
+      }
+      await conn.execute('DELETE FROM expense_resolutions WHERE id = ?', [req.params.id])
+      return { keptTxn }
+    })
+    res.json({ ok: true, keptTxn: out.keptTxn })
   } catch (e) { next(e) }
 })
 

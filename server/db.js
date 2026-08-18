@@ -790,6 +790,32 @@ async function initDb(conn) {
         FOREIGN KEY (loan_id) REFERENCES loans(id) ON DELETE CASCADE
       )
     `)
+    /* 추가 차입(인출) — 한 대출에서 원금을 **더** 빌린 이력.
+     *
+     * 개인 대출·대표 가수금·마이너스 통장처럼 잔액이 오르내리는 차입은 인출이 여러 번이다.
+     * 인출할 때마다 새 대출로 등록하면 같은 약정이 열 건으로 쪼개져 잔액을 한눈에 못 본다.
+     * 그렇다고 loans.principal 만 늘리면 "언제 얼마를 더 빌렸나"가 남지 않아 되돌릴 수도,
+     * 은행 거래내역과 대조할 수도 없다. 그래서 상환(loan_repayments)과 **대칭으로** 이력을 둔다.
+     *
+     * loans.principal 은 인출할 때마다 함께 늘린다 = **누적 차입액**.
+     * 잔여 원금(remainingPrincipal)이 principal − 상환누계로 계산되므로, 이렇게 해야
+     * 아래 계산들이 손대지 않고도 맞는다(자금일보·부채현황·수시상환 한도 검사까지).
+     *
+     * ⚠ 상환 일정이 있는 대출(원리금균등 등)은 원금이 바뀌면 스케줄 전체가 무효가 된다.
+     *   그건 증액이 아니라 **새 약정**이므로 새 대출로 등록해야 한다 — 라우터에서 막는다. */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS loan_draws (
+        id         VARCHAR(36) PRIMARY KEY,
+        loan_id    VARCHAR(36) NOT NULL,
+        draw_date  VARCHAR(20) NOT NULL,
+        amount     BIGINT NOT NULL,
+        memo       VARCHAR(300),
+        txn_id     VARCHAR(36),
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_loan_draws_loan (loan_id),
+        FOREIGN KEY (loan_id) REFERENCES loans(id) ON DELETE CASCADE
+      )
+    `)
     /* 투자 — 받은 돈(자본)과 한 돈(투자자산). 둘 다 손익이 아니다.
      * 투자받은 돈은 자본금과 주식발행초과금으로 갈린다(액면가 × 주식수 = 자본금).
      * 지분율·평가손익은 범위 밖(설계 §6). */
@@ -1021,6 +1047,12 @@ async function initDb(conn) {
      * note 는 단가 근거("14,500원/KG")나 수령자 이름이 들어가는 칸이다. */
     await ensureColumn('invoice_lines',  'vat',  "vat BIGINT NULL")
     await ensureColumn('invoice_lines',  'note', "note VARCHAR(200)")
+    /* 품목별 납품일(입고일) — 한 청구서에 여러 날 납품분이 섞이는 게 실무의 보통 모습이다.
+     * 8/5·8/12·8/27 납품분을 8월분으로 묶어 한 장에 청구하는 식(월합계 세금계산서).
+     * 칸이 없던 탓에 "이 줄이 언제 들어간 건지"가 저장되지 않아, 거래명세서를 뽑아도
+     * 납품일이 빠진 서류가 나갔다. 날짜는 문자열(YYYY-MM-DD) — 이 앱의 다른 날짜와 같은 형식.
+     * NULL 은 '안 적었다'(단일 납품·용역 등 날짜를 안 쓰는 청구서)라 0 과 구분해 둔다. */
+    await ensureColumn('invoice_lines',  'delivery_date', "delivery_date VARCHAR(20)")
     // ── 부가세 정합성 ──
     // 직접 입력 거래에도 공급가/세액을 남긴다. 여태 amount(합계) 하나뿐이라, 청구서를 거치지 않은
     // 거래의 매출·매입세액이 부가세 집계에서 통째로 빠졌다. NULL = 세액을 모르는 과거 거래(집계 제외).
@@ -1376,6 +1408,19 @@ async function initDb(conn) {
     // 지급결의서: 청구서(지급 예정) 단계에서도 만들 수 있게 invoice_id 연결.
     // 지급 전에 결재받는 게 실무 순서 → 거래(txn_id) 없이 청구서만으로도 결의서 생성.
     await ensureColumn('expense_resolutions', 'invoice_id', "invoice_id VARCHAR(36)")
+    /* 처리 취소용 — 그 지출 거래를 **결의서가 직접 만들었는지**(1) 이미 있던 거래에 연결했는지(0).
+     * 되돌릴 때 이 구분이 없으면 두 가지를 다 틀리게 한다: 만든 거래를 남기면 돈이 두 번 나간 것으로
+     * 남고, 연결한 거래를 지우면 통장에 실제로 오간 기록이 사라져 계좌 잔액이 틀어진다.
+     * invoice_matches.txn_created 와 같은 뜻·같은 이름. 구분이 없던 시절 데이터는 0(보수적으로 '남긴다'). */
+    await ensureColumn('expense_resolutions', 'txn_created', "txn_created TINYINT DEFAULT 0")
+    /* 연결(link) 모드로 집행할 때, **연결 전 거래의 상태와 계좌**를 적어 둔다.
+     * 처리는 그 거래를 '지급완료'로 바꾸고(계좌 잔액에서 빠진다) 계좌가 비었으면 채운다.
+     * 되돌릴 때 이 값이 없으면 원래대로 돌릴 수가 없어, 청구서만 미지급으로 되살아나고
+     * 거래는 '지급완료'로 남는다 → 통장에서는 나갔는데 장부에는 낼 돈이 다시 생긴다.
+     * 그 청구서를 다시 지급 처리하면 같은 돈이 두 번 나간 것으로 기록된다.
+     * NULL 이면 이 칸이 생기기 전에 처리된 건이라 되돌릴 근거가 없다(그때는 손대지 않는다). */
+    await ensureColumn('expense_resolutions', 'txn_prev_status',     "txn_prev_status VARCHAR(20)")
+    await ensureColumn('expense_resolutions', 'txn_prev_account_id', "txn_prev_account_id VARCHAR(36)")
     // 정산내역서 헤더: 출장지역·출장기간·구분(定算內譯書 상단 칸). 기존 테이블에 뒤늦게 추가.
     await ensureColumn('settlements', 'trip_area',   "trip_area VARCHAR(200)")
     await ensureColumn('settlements', 'trip_period', "trip_period VARCHAR(200)")

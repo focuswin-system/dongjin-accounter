@@ -16,13 +16,21 @@ import { computeLineAmount, num, BASIS_LABEL } from '../lineAmount'
  * · 단가 기준(수량/중량)은 줄마다 다르다. 같은 청구서에 개당 파는 품목과 ㎏당 파는 자재가 섞인다.
  * · 기준정보 품목을 고르면 규격·단위·단가·중량을 채워 준다. 없으면 직접 입력해도 된다.
  */
+/** 줄 하나의 세액 — 직접 적었으면 그 값, 안 적었으면 과세유형대로 자동.
+ *  품목표·분할 발행 미리보기·서버(routes/invoices.js lineVatOf)가 모두 이 규칙을 쓴다.
+ *  한 군데라도 다르면 화면에서 본 세액과 저장된 세액이 갈린다. */
+export const lineVat = (l, taxType = '과세') => (
+  (l.vat === null || l.vat === undefined || l.vat === '')
+    ? (taxType === '과세' ? Math.round(num(l.amount) * 0.1) : 0)
+    : num(l.vat)
+)
+
 export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = '과세' }) => {
   /* 줄별 세액의 기본값 — 비워두면 청구서 과세유형을 따라 자동으로 채워 보여준다.
      실제 명세서·매입현황표가 줄마다 세액을 적고, 같은 청구서에 과세와 면세가 섞이는 일이
      실제로 있다(자재 + 근조화환). 그래서 줄마다 고칠 수 있어야 하되,
      대부분은 손댈 일이 없으므로 자동값이 보이는 편이 낫다. */
-  const autoVat = (l) => (taxType === '과세' ? Math.round(num(l.amount) * 0.1) : 0)
-  const shownVat = (l) => (l.vat === null || l.vat === undefined || l.vat === '' ? autoVat(l) : num(l.vat))
+  const shownVat = (l) => lineVat(l, taxType)
   const itemOptions = useMemo(() => itemMaster.map(it => ({
     value: it.id,
     label: it.name,
@@ -81,12 +89,17 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
         <div className="text-xs text-muted2" style={{ padding: '10px 0' }}>
           품목을 넣으면 거래명세서로 출력할 수 있고, 공급가액이 자동으로 합산돼요.
           넣지 않으면 아래 공급가액만으로 청구서가 만들어집니다.
+          품목마다 <b>납품일</b>을 적어두면, 납품일별로 청구서를 나눠서 발행할 수 있어요.
         </div>
       ) : (
         <div className="card" style={{ overflowX: 'auto', marginBottom: 8 }}>
-          <table className="table" style={{ minWidth: 1030 }}>
+          <table className="table" style={{ minWidth: 1162 }}>
             <thead>
               <tr>
+                {/* 납품일(입고일) — 한 장에 여러 날 납품분이 섞이는 게 실무의 보통 모습이다.
+                    비워도 된다(단일 납품·용역). 채우면 거래명세서에 찍히고,
+                    '납품일별로 나눠 발행'의 기준이 된다. */}
+                <th style={{ width: 132 }}>납품일</th>
                 <th style={{ minWidth: 150 }}>품목</th>
                 <th style={{ minWidth: 100 }}>규격</th>
                 <th style={{ width: 74 }}>단위</th>
@@ -103,6 +116,10 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
             <tbody>
               {lines.map((l, i) => (
                 <tr key={i}>
+                  <td>
+                    <input className="input num" type="date" value={l.delivery_date || ''}
+                      onChange={e => set(i, { delivery_date: e.target.value })}/>
+                  </td>
                   <td>
                     <Combobox value={l.item_id || ''} onChange={v => pickItem(i, v)} options={itemOptions}
                       placeholder="기준정보에서 선택"
@@ -200,5 +217,18 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
    회색 글씨가 값처럼 읽혀 그대로 저장하면 단위가 빈 명세서가 나왔다. 다르면 고치면 된다. */
 export const blankLine = () => ({
   item_id: '', name: '', spec: '', unit: 'EA', qty: '', weight: '',
-  price_basis: 'qty', unit_price: '', amount: '', vat: null, note: '',
+  price_basis: 'qty', unit_price: '', amount: '', vat: null, note: '', delivery_date: '',
 })
+
+/** 납품일별로 묶는다 — 서버 /invoices/split 과 **같은 규칙**이라야 미리보기와 결과가 같다.
+ *  날짜를 안 적은 줄은 '' 한 묶음(날짜 없는 것끼리 한 장). Map 은 넣은 순서를 지킨다. */
+export const groupLinesByDelivery = (lines = []) => {
+  const g = new Map()
+  for (const l of lines) {
+    if (!String(l.name || '').trim() && !num(l.amount)) continue   // 표 맨 아래 빈 줄
+    const k = /^\d{4}-\d{2}-\d{2}$/.test(String(l.delivery_date || '')) ? l.delivery_date : ''
+    if (!g.has(k)) g.set(k, [])
+    g.get(k).push(l)
+  }
+  return [...g.entries()].map(([delivery_date, ls]) => ({ delivery_date, lines: ls }))
+}

@@ -17,6 +17,10 @@ import { fmtNum } from '../ui'
 export const StatementDoc = ({ invoice, company, vendor, printId = 'statement-print' }) => {
   const lines = invoice?.lines || []
   const useWeight = lines.some(l => Number(l.weight) > 0)
+  /* 납품일도 중량과 같은 규칙 — 적은 줄이 하나도 없으면 칸을 아예 내지 않는다.
+     단일 납품이나 용역 청구서에 늘 빈 날짜 칸이 서 있으면 서류가 지저분하고,
+     받는 쪽은 "왜 비었지"를 묻게 된다. 여러 날 납품분을 한 장에 담았을 때만 필요한 칸이다. */
+  const useDelivery = lines.some(l => l.delivery_date)
   const supply = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0) || Number(invoice?.supplyAmount) || 0
   /* 세액은 **줄별 값을 우선**한다. 받은 실물 명세서가 전부 줄마다 세액을 적고, 같은 장에
      과세와 면세가 섞이기 때문이다(자재 + 근조화환). 줄에 값이 없으면 청구서 세액을 쓴다.
@@ -46,8 +50,8 @@ export const StatementDoc = ({ invoice, company, vendor, printId = 'statement-pr
 
   // 양식 느낌 — 품목이 적어도 표가 너무 납작해지지 않게 빈 줄로 채운다
   const blanks = Math.max(0, 5 - lines.length)
-  // NO · 품명 · 단위 · 수량 · (중량) · 단가 · 금액
-  const cols = useWeight ? 8 : 7
+  // NO · (납품일) · 품명 · 단위 · 수량 · (중량) · 단가 · 금액 · 부가세
+  const cols = 7 + (useWeight ? 1 : 0) + (useDelivery ? 1 : 0)
   // 합계 줄은 '금액' 칸 하나만 남기고 나머지를 라벨로 합친다
   const labelSpan = cols - 1
 
@@ -68,6 +72,7 @@ export const StatementDoc = ({ invoice, company, vendor, printId = 'statement-pr
         <thead>
           <tr>
             <th style={{ width: 34 }}>NO</th>
+            {useDelivery && <th style={{ width: 78 }}>납품일</th>}
             <th>품명 및 규격</th>
             <th style={{ width: 50 }}>단위</th>
             <th style={{ width: 56 }}>수량</th>
@@ -81,6 +86,12 @@ export const StatementDoc = ({ invoice, company, vendor, printId = 'statement-pr
           {lines.map((l, i) => (
             <tr key={l.id || i}>
               <td className="num" style={{ textAlign: 'center' }}>{i + 1}</td>
+              {/* 연·월은 떼고 월-일만 — 발행일이 이미 문서 머리에 있고, 칸이 좁다 */}
+              {useDelivery && (
+                <td className="num" style={{ textAlign: 'center' }}>
+                  {l.delivery_date ? String(l.delivery_date).slice(5) : ''}
+                </td>
+              )}
               <td>
                 {l.name}
                 {/* 규격은 아랫줄에 흐리게 — 한 줄에 이어 붙이면 품명이 어디서 끝나는지 안 보인다 */}

@@ -116,6 +116,10 @@ async function closeIfSettled(conn, loan) {
 async function loanDetail(db, loan) {
   const [reps] = await db.execute(
     'SELECT * FROM loan_repayments WHERE loan_id = ? ORDER BY seq', [loan.id])
+  // 추가 차입 이력 — 화면이 "언제 얼마를 더 빌렸나"를 보여주고 되돌릴 수 있어야 한다
+  const [draws] = await db.execute(
+    'SELECT id, draw_date, amount, memo, txn_id FROM loan_draws WHERE loan_id = ? ORDER BY draw_date, created_at',
+    [loan.id])
   const stored = await storedCycles(db, loan.id)
   // 표에 그릴 스케줄 — 저장된 회차가 있으면 그것(고쳐 둔 금액 반영), 없으면 공식
   const schedule = stored.length ? withBalance(loan.principal, stored) : repaymentSchedule(loan)
@@ -131,6 +135,10 @@ async function loanDetail(db, loan) {
     repayments: reps.map(r => ({ ...r, principal: Number(r.principal), interest: Number(r.interest) })),
     remaining: remainingPrincipal(loan.principal, reps),
     paid_count: paidSeqs.length,
+    draws: draws.map(d => ({ ...d, amount: Number(d.amount) })),
+    /* 최초 실행액 = 누적 차입액 - 추가 인출 합. principal 을 인출 때마다 늘리므로,
+       "처음에 얼마로 시작했나"는 이렇게 되짚는다(화면에서 내역과 함께 보여준다). */
+    initial_principal: Number(loan.principal) - draws.reduce((t, d) => t + Number(d.amount), 0),
     // 다음 상환 회차와, 예정일이 지났는데 아직 처리하지 않은 회차(놓친 상환)
     next_cycle: upcoming[0] || null,
     overdue_cycles: upcoming.filter(c => c.due_date < today),
@@ -608,6 +616,128 @@ router.post('/loans/:id/repay-adhoc', async (req, res, next) => {
     }
     await conn.commit()
     res.json({ ok: true, seq: Number(next), principal, interest, remaining: left - principal })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
+})
+
+/**
+ * 추가 차입(인출) — 같은 대출에서 원금을 더 빌린다.
+ *
+ * 개인 대출·대표 가수금·한도대출은 한 약정 안에서 잔액이 오르내린다. 수시 상환(repay-adhoc)의
+ * **정확한 반대편**인데 여태 없었다 — 그래서 더 빌리면 새 대출로 등록하는 수밖에 없었고,
+ * 같은 약정이 여러 건으로 쪼개져 "이 사람에게 지금 얼마 빚졌나"를 한눈에 볼 수 없었다.
+ *
+ * 상환 일정이 있는 대출은 막는다. 원금이 바뀌면 스케줄(회차별 원금·이자 배분)이 통째로
+ * 무효가 되고, 원리금균등은 이자율까지 얽혀 "끝까지 갚아도 잔액이 0이 안 되는" 상태가 된다.
+ * 증액은 사실상 새 약정이므로 새 대출로 등록하는 것이 맞다.
+ *
+ * loans.principal 을 함께 늘려 **누적 차입액**으로 둔다. 잔여 원금이 principal - 상환누계라,
+ * 이렇게 해야 자금일보·부채현황·수시상환의 한도 검사가 손대지 않고도 맞는다.
+ */
+router.post('/loans/:id/draw', async (req, res, next) => {
+  const b = req.body
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    // FOR UPDATE — principal 을 읽고 더해서 쓰므로, 동시 인출 두 건이 같은 값을 읽으면 한 건이 사라진다
+    const [[loan]] = await conn.execute('SELECT * FROM loans WHERE id = ? FOR UPDATE', [req.params.id])
+    if (!loan) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    if (loan.method !== 'none') {
+      await rollbackQuietly(conn)
+      return res.status(409).json({
+        error: '상환 일정이 있는 대출은 원금을 늘릴 수 없어요. 조건이 새로 정해진 증액이라면 새 대출로 등록해주세요.',
+      })
+    }
+    /* 완납해서 닫힌 채무도 **다시 빌릴 수 있다.** 마이너스 통장·대표 가수금은 0까지 갚았다가
+       다시 인출하는 것이 정상이고, 수시 상환이 원금을 다 갚으면 status 를 'closed' 로 바꾼다.
+       여기서 막으면 이 기능이 정작 만들어진 이유(잔액이 오르내리는 채무)에서 못 쓰인다.
+       다시 인출하면 진행 중으로 되돌린다. */
+    const reopened = loan.status === 'closed'
+    const amount = intOf(b.amount)
+    if (amount <= 0) { await rollbackQuietly(conn); return res.status(400).json({ error: '빌린 금액을 입력해주세요' }) }
+    { const e = amountError(amount); if (e) { await rollbackQuietly(conn); return res.status(400).json({ error: e }) } }
+    /* 누적 차입액도 상한을 넘으면 안 된다 — 한 건씩은 통과해도 합이 BIGINT 를 넘으면
+       그때부터 이 대출의 모든 질의가 500 이 된다. */
+    { const e = amountError(Number(loan.principal) + amount)
+      if (e) { await rollbackQuietly(conn); return res.status(400).json({ error: `누적 차입액이 한도를 넘어요 — ${e}` }) } }
+
+    const drawDate = b.date || kstToday()
+    { const de = futureDateError(drawDate); if (de) { await rollbackQuietly(conn); return res.status(400).json({ error: de }) } }
+    { const ce = await closedPeriodError(conn, drawDate); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
+    if (drawDate < loan.start_date) {
+      await rollbackQuietly(conn)
+      return res.status(400).json({ error: `대출 실행일(${loan.start_date}) 이전 날짜로는 인출할 수 없어요` })
+    }
+    const acct = b.account_id || loan.account_id || null
+    { const le = ledgerError({ kind: 'income', account_id: acct, status: '입금완료' })
+      if (le) { await rollbackQuietly(conn); return res.status(400).json({ error: le }) } }
+
+    /* 중복 제출 방어 — 수시 상환과 같은 이유(더블클릭·두 기기 동시 제출).
+       한 번 들어온 돈이 장부에 두 번 찍히면 부채가 부풀고 계좌 잔액도 어긋난다. */
+    const [[dup]] = await conn.execute(
+      'SELECT id FROM loan_draws WHERE loan_id = ? AND draw_date = ? AND amount = ? LIMIT 1',
+      [loan.id, drawDate, amount])
+    if (dup) {
+      await rollbackQuietly(conn)
+      return res.status(409).json({
+        error: `${drawDate}에 같은 금액(${amount.toLocaleString('ko-KR')}원)으로 이미 인출 처리했어요. 중복이 아니라면 날짜나 금액을 확인해주세요.`,
+      })
+    }
+
+    /* 입금 거래 — 계정과목은 대출 실행과 **같은 부채 계정**이다.
+       매출 계정으로 잡히면 빌린 돈이 수익이 되어 손익과 부가세가 함께 틀어진다
+       (손익 판정 근거는 kind 가 아니라 account_code 다 — lib/pnl.js). */
+    const txnId = randomUUID()
+    await conn.execute(
+      `INSERT INTO transactions (id, kind, vendor_id, account_id, category, amount, date, method, status, doc_no, memo, account_code, loan_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [txnId, 'income', loan.vendor_id || null, acct, '차입금 수령', amount,
+       drawDate, '계좌이체', '입금완료', '공통',
+       String(b.memo || '').trim() || `${loan.name} 추가 차입`,
+       loan.acct_code_principal || ACCT.shortLoan, loan.id])
+
+    const drawId = randomUUID()
+    await conn.execute(
+      'INSERT INTO loan_draws (id, loan_id, draw_date, amount, memo, txn_id) VALUES (?,?,?,?,?,?)',
+      [drawId, loan.id, drawDate, amount, String(b.memo || '').trim() || null, txnId])
+    await conn.execute('UPDATE loans SET principal = principal + ? WHERE id = ?', [amount, loan.id])
+    if (reopened) await conn.execute("UPDATE loans SET status='active' WHERE id = ?", [loan.id])
+
+    await conn.commit()
+    res.json({ ok: true, id: drawId, amount, principal: Number(loan.principal) + amount, reopened })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
+})
+
+/** 추가 차입 취소 — 만든 입금 거래도 함께 지우고 누적 차입액을 되돌린다. */
+router.delete('/loans/:id/draw/:drawId', async (req, res, next) => {
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [[loan]] = await conn.execute('SELECT * FROM loans WHERE id = ? FOR UPDATE', [req.params.id])
+    if (!loan) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    const [[draw]] = await conn.execute(
+      'SELECT * FROM loan_draws WHERE id = ? AND loan_id = ?', [req.params.drawId, req.params.id])
+    if (!draw) { await rollbackQuietly(conn); return res.status(404).json({ error: '인출 내역을 찾을 수 없어요' }) }
+    /* 마감된 달의 인출을 지우면 그 달 잔액이 사후에 바뀐다 — 상환 취소와 같은 규칙 */
+    { const ce = await closedPeriodError(conn, draw.draw_date)
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
+    /* 되돌리면 누적 차입액이 준다. 이미 그만큼 갚아버린 뒤라면 잔여 원금이 음수가 되어
+       부채 현황이 뒤집히므로 막는다 — 상환을 먼저 취소해야 한다. */
+    const [reps] = await conn.execute(
+      'SELECT principal, paid_date FROM loan_repayments WHERE loan_id = ?', [loan.id])
+    const left = remainingPrincipal(loan.principal, reps)
+    if (Number(draw.amount) > left) {
+      await rollbackQuietly(conn)
+      return res.status(409).json({
+        error: `이 인출액(${Number(draw.amount).toLocaleString('ko-KR')}원)보다 남은 원금(${left.toLocaleString('ko-KR')}원)이 적어요. 상환을 먼저 취소한 뒤 되돌려주세요.`,
+      })
+    }
+    await conn.execute('DELETE FROM loan_draws WHERE id = ?', [draw.id])
+    if (draw.txn_id) await conn.execute('DELETE FROM transactions WHERE id = ?', [draw.txn_id])
+    await conn.execute('UPDATE loans SET principal = principal - ? WHERE id = ?', [draw.amount, loan.id])
+    await conn.commit()
+    res.json({ ok: true })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })

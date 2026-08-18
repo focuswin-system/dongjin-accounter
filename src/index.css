@@ -637,6 +637,14 @@ a { color: inherit; text-decoration: none; }
 .tbar-presets .btn.active {
   background: var(--ink); color: #fff; border-color: var(--ink);
 }
+/* 소계 칩(Billing SubtotalChips) — 달별·거래처별 소계를 눌러 그것만 걸러 볼 때의 '눌린' 표시.
+   .btn.active 는 여태 .tbar-presets 안에서만 스타일이 있어서, 칩을 눌러 필터가 걸려도
+   생김새가 그대로였다 — 어느 달을 보고 있는지 표에서 역추적해야 했다. */
+.subtotal-chips .btn.active {
+  background: var(--ink); color: #fff; border-color: var(--ink);
+}
+.subtotal-chips .btn.active .text-muted2 { color: rgba(255, 255, 255, 0.7); }
+
 .tbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
 .tbar-search { margin: 0; width: 240px; padding: 7px 10px; }
 .tbar-dot { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }

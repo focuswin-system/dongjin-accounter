@@ -249,6 +249,14 @@ function adaptInvoice(row) {
       qty: Number(l.qty) || 0, weight: Number(l.weight) || 0,
       price_basis: l.price_basis === 'weight' ? 'weight' : 'qty',
       unit_price: Number(l.unit_price) || 0, amount: Number(l.amount) || 0,
+      /* vat·note·delivery_date 를 여기서 떨어뜨리면 **저장 한 번에 사라진다.**
+         청구서를 열어 수정하면 폼은 이 배열을 그대로 상태로 삼고, 저장 때 그 상태를
+         서버로 보낸다 → 서버는 줄을 통째로 다시 쓰므로(writeInvoiceLines), 화면이 몰랐던
+         값은 NULL 로 덮인다. 줄별 세액(과세·면세 혼재)과 비고가 그렇게 없어지고 있었다.
+         거래명세서도 이 배열을 그리므로 납품일·세액이 서류에서 함께 빠졌다. */
+      vat: (l.vat === null || l.vat === undefined) ? null : Number(l.vat) || 0,
+      note: l.note || '',
+      delivery_date: l.delivery_date || '',
     })),
     paidAmount: row.paidAmount || 0,
     remainAmount: row.remainAmount ?? row.total_amount,
@@ -598,6 +606,12 @@ export const api = {
       const result = await req('/invoices', { method: 'POST', body: data })
       return { ok: true, id: result.id }
     } catch (e) { return { ok: false, error: e.message } }
+  },
+  /* 납품일별로 나눠 발행 — 거래처·발행일은 같고 품목·납품일만 다른 청구서 여러 장.
+     한 트랜잭션이라 하나라도 막히면 아무것도 안 만들어진다(절반만 발행되는 상태를 막는다). */
+  async splitInvoices(data) {
+    try { const r = await req('/invoices/split', { method: 'POST', body: data }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
   },
 
   async updateInvoice(id, data) {
@@ -1008,8 +1022,17 @@ export const api = {
     try { const r = await req(`/resolutions/${id}/process`, { method: 'POST', body }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
   },
-  async deleteResolution(id) {
-    try { await req(`/resolutions/${id}`, { method: 'DELETE' }); return { ok: true } }
+  /* 처리 취소 — 집행(완료)을 되돌린다. 지출 거래·청구서 정산도 함께 풀린다.
+     결의서가 만든 거래는 지워지고, 이미 있던 거래에 연결한 것은 남는다(keptTxn=true). */
+  async unprocessResolution(id) {
+    try { const r = await req(`/resolutions/${id}/unprocess`, { method: 'POST' }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  // cascade=true 면 완료된 결의서도 지운다(지출 이력까지 되돌린 뒤 삭제)
+  async deleteResolution(id, { cascade = false } = {}) {
+    /* 서버 응답(keptTxn)을 그대로 넘긴다 — 버리면 화면이 "연결돼 있던 지출은 남겼다"를
+       말할 수 없다(res.keptTxn 이 늘 undefined 라 안내가 통째로 사라졌다). */
+    try { const r = await req(`/resolutions/${id}${cascade ? '?cascade=1' : ''}`, { method: 'DELETE' }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
   },
 
@@ -1350,6 +1373,20 @@ export const api = {
       })
       return { ok: true, ...r }
     } catch (e) { return { ok: false, error: e.message } }
+  },
+  /* 추가 차입(인출) — 같은 대출에서 원금을 더 빌린다. 수시 상환의 반대편.
+     상환 일정이 없는 채무(개인 대출·대표가수금·한도대출) 전용 — 일정이 있으면 서버가 막고
+     새 대출로 등록하라고 알려준다(원금이 바뀌면 스케줄이 통째로 무효가 되기 때문). */
+  async drawLoan(id, { date, account_id, amount, memo } = {}) {
+    try {
+      const r = await req(`/finance/loans/${id}/draw`, { method: 'POST', body: { date, account_id, amount, memo } })
+      return { ok: true, ...r }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
+  /** 추가 차입 취소 — 만든 입금 거래도 함께 지우고 누적 차입액을 되돌린다 */
+  async cancelLoanDraw(id, drawId) {
+    try { await req(`/finance/loans/${id}/draw/${drawId}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
   },
   /** 놓친 상환 일괄 처리 — 예정일이 지난 회차를 순서대로 모두. 각 회차는 그 예정일로 기록된다 */
   async repayMissedLoan(id, { account_id } = {}) {

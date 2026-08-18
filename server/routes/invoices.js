@@ -25,7 +25,7 @@ async function attachMatches(db, invoice) {
   /* 품목 내역(거래명세서) — 폼에서 수정하려면 읽을 수 있어야 한다.
      라인이 없는 청구서(총액만)는 빈 배열이라 화면이 기존처럼 총액 입력으로 동작한다. */
   const [lines] = await db.execute(
-    `SELECT id, item_id, name, spec, unit, qty, weight, price_basis, unit_price, amount, vat, note
+    `SELECT id, item_id, name, spec, unit, qty, weight, price_basis, unit_price, amount, vat, note, delivery_date
      FROM invoice_lines WHERE invoice_id = ? ORDER BY sort_order, created_at`, [invoice.id])
   const paid = matches.reduce((s, m) => s + Number(m.amount), 0)
   return { ...invoice, matches, docs, lines, paidAmount: paid, remainAmount: Number(invoice.total_amount) - paid }
@@ -199,18 +199,32 @@ function amountsFromLines(body) {
   return { supply_amount: supply, vat_amount: vat, total_amount: supply + vat }
 }
 
+/* 납품일 정규화 — 빈 문자열은 NULL 로 눕힌다.
+   ''(빈 칸)을 그대로 넣으면 '적었는데 비어 있음'과 '안 적었음'이 DB에서 섞이고,
+   날짜로 정렬·묶을 때 빈 문자열이 실제 날짜보다 앞에 서서 분할 결과가 뒤집힌다. */
+const normDeliveryDate = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null)
+
+/** 줄 하나의 세액 — 직접 적었으면 그 값, 안 적었으면 과세유형대로 자동(과세 10%, 그 외 0).
+ *  화면(InvoiceLines.shownVat)·거래명세서(StatementDoc.lineVat)와 **같은 규칙**이라야
+ *  사용자가 표에서 본 숫자와 저장되는 숫자가 같다. */
+const lineVatOf = (l, taxType) => (
+  (l.vat === undefined || l.vat === null || l.vat === '')
+    ? (taxType === '과세' ? Math.round(intOf(l.amount) * 0.1) : 0)
+    : intOf(l.vat)
+)
+
 /** 라인 1건 INSERT — 홈택스 임포트와 폼 입력이 **같은 컬럼**을 쓰게 한 곳에 둔다.
  *  한쪽만 새 컬럼을 채우면 같은 청구서라도 어디서 만들었냐에 따라 명세서가 달라진다. */
 async function insertInvoiceLine(db, invoiceId, l, ord) {
   await db.execute(
     `INSERT INTO invoice_lines
-       (id, invoice_id, item_id, name, spec, unit, qty, weight, price_basis, unit_price, amount, vat, note, sort_order)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       (id, invoice_id, item_id, name, spec, unit, qty, weight, price_basis, unit_price, amount, vat, note, sort_order, delivery_date)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [randomUUID(), invoiceId, l.item_id || null, l.name || '(품목명 없음)', l.spec || null, l.unit || null,
      l.qty || 0, l.weight || 0, normBasis(l.price_basis), l.unit_price || 0, l.amount || 0,
      // NULL 은 '아직 안 정했다', 0 은 '면세라서 0' — 서로 다른 뜻이라 구분해 넣는다
      (l.vat === undefined || l.vat === null || l.vat === '') ? null : Number(l.vat) || 0,
-     l.note || null, ord])
+     l.note || null, ord, normDeliveryDate(l.delivery_date)])
 }
 
 async function replaceInvoiceLines(db, invoiceId, lines, itemIdx = null, register = false) {
@@ -263,6 +277,8 @@ async function writeInvoiceLines(db, invoiceId, lines) {
            같은 청구서에 과세와 면세가 섞이는 일이 실제로 있다(자재 + 근조화환). */
         vat: (l.vat === undefined || l.vat === null || l.vat === '') ? null : intOf(l.vat),
         note: String(l.note || '').trim() || null,
+        // 품목별 납품일(입고일). 안 적으면 NULL — 분할 발행에서 '날짜 없음' 묶음이 된다.
+        delivery_date: normDeliveryDate(l.delivery_date),
       }
       // 금액을 안 보냈으면 계산해 채운다(화면과 같은 규칙 — lib/lineAmount.js)
       row.amount = l.amount === undefined || l.amount === null || l.amount === ''
@@ -583,6 +599,111 @@ router.post('/', async (req, res, next) => {
  * 그래서 셋을 넣는다: 마감 검사(날짜 이동은 양쪽) · 정산액 하한 검사 · 상태 재계산.
  * status는 클라이언트가 보낸 값을 믿지 않고 정산 누계로 확정한다(화면이 옛 status를 그대로 되보낸다).
  */
+/**
+ * 납품일별로 **나눠서** 발행한다 — 거래처·발행일은 같고 품목·납품일만 다른 청구서 여러 장.
+ *
+ * ── 왜 청구서를 쪼개나 ──
+ * 돈이 오가는 단위는 **세금계산서(청구서) 한 장**이다. 채권이 그 단위로 성립하고,
+ * 거래처의 지급 시스템도 세금계산서 번호로 돈다. 그래서 "이 납품분만 따로 받아야 한다"는
+ * 요구는 품목별 입금으로 풀면 안 된다 — 장부의 채권 단위와 세금계산서가 어긋나서,
+ * 나중에 어느 쪽이 맞는지 알 방법이 없어진다. **청구서를 나누는 것**이 정석이다.
+ * 그 나누는 일을 손으로 N번 반복하지 않게 해주는 것이 이 엔드포인트다.
+ *
+ * ── 규칙 ──
+ * · 묶는 기준은 납품일. 날짜를 안 적은 줄은 '날짜 없음' 한 묶음으로 함께 발행한다.
+ * · 청구번호는 한 트랜잭션 안에서 이어서 채번한다(청구-2026-0001, -0002 …).
+ *   따로따로 POST 하면 동시 발행 때 같은 번호를 두 장이 집을 수 있다.
+ * · 세액은 **묶음의 공급가로 다시 계산한다.** 줄에 세액을 적어 놨으면 그 합을 쓴다.
+ *   나뉜 뒤에는 각 장이 독립된 세금계산서라, 그 장의 공급가에 대한 세액이 맞는 값이다.
+ *   (원본 한 장의 세액을 비율로 쪼개면 끝수가 어디로 갔는지 설명할 수 없다)
+ * · 하나라도 막히면 **아무것도 만들지 않는다.** 절반만 발행되면 무엇이 나갔는지
+ *   사람이 되짚어야 하고, 그 상태를 되돌릴 방법도 마땅치 않다.
+ */
+router.post('/split', async (req, res, next) => {
+  try {
+    const { kind, vendor_id, contract_id, issued_at, due_at, status, account_id, memo, tax_type } = req.body
+    const lines = Array.isArray(req.body.lines) ? req.body.lines : []
+    if (!lines.length) return res.status(400).json({ error: '나눌 품목이 없어요. 품목을 먼저 입력해주세요.' })
+    if (!issued_at) return res.status(400).json({ error: '발행일을 선택해주세요' })
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(issued_at))) {
+      return res.status(400).json({ error: '발행일 형식이 올바르지 않아요 (YYYY-MM-DD)' })
+    }
+    const taxType = normalizeTaxType(tax_type || '과세')
+
+    /* 납품일로 묶는다. 빈 값은 '' 한 칸에 모은다(날짜 없는 줄끼리 한 장).
+       Map 은 넣은 순서를 지키므로, 화면에서 본 줄 순서가 청구서 순서로 이어진다. */
+    const groups = new Map()
+    for (const l of lines) {
+      const name = String(l.name || '').trim()
+      const amt = (l.amount === undefined || l.amount === null || l.amount === '')
+        ? computeLineAmount(l) : intOf(l.amount)
+      if (!name && !amt) continue              // 표 맨 아래 빈 줄
+      const key = normDeliveryDate(l.delivery_date) || ''
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key).push({ ...l, amount: amt })
+    }
+    if (!groups.size) return res.status(400).json({ error: '나눌 품목이 없어요. 품목을 먼저 입력해주세요.' })
+    if (groups.size === 1) {
+      return res.status(400).json({ error: '납품일이 모두 같아요. 나눌 필요 없이 그냥 발행하시면 됩니다.' })
+    }
+
+    const conn = await req.db.getConnection()
+    try {
+      await conn.beginTransaction()
+      // 마감 검사는 한 번만 — 모든 장이 같은 발행일을 쓴다
+      const ce = await closedPeriodError(conn, issued_at)
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
+
+      const year = String(issued_at).slice(0, 4) || kstToday().slice(0, 4)
+      const prefix = kind === 'issued' ? '청구' : '매입'
+      /* FOR UPDATE — 이 구간을 잠가 동시에 발행하는 요청을 줄 세운다.
+         잠그지 않으면 두 요청이 같은 maxno 를 읽어 같은 번호를 만든다(결의서 채번과 같은 이유). */
+      const [[{ maxno }]] = await conn.execute(
+        "SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(invoice_no, '-', -1) AS UNSIGNED)), 0) AS maxno FROM invoices WHERE kind = ? AND invoice_no LIKE ? FOR UPDATE",
+        [kind, `${prefix}-${year}-%`])
+
+      let seq = Number(maxno)
+      const created = []
+      for (const [deliveryDate, groupLines] of groups) {
+        const supply = groupLines.reduce((s, l) => s + intOf(l.amount), 0)
+        /* 세액은 **줄마다** 정한다: 직접 적었으면 그 값, 안 적었으면 과세유형대로 자동.
+         * 그 합이 이 장의 세액이다.
+         *
+         * 예전엔 "명시한 줄이 하나라도 있으면 명시값의 합"으로 계산했다. 그러면 과세·면세가
+         * 섞인 장에서 면세 줄만 0으로 고쳤을 때, 나머지 과세 줄의 자동 세액이 통째로 0이 된다
+         * — 화면 품목표에는 자동값이 떠 있는데 저장은 다른 숫자가 되는, 제일 나쁜 종류의 어긋남이다.
+         * 거래명세서(StatementDoc.lineVat)·품목표(InvoiceLines.shownVat)와 같은 규칙이다. */
+        const vat = groupLines.reduce((t, l) => t + lineVatOf(l, taxType), 0)
+        const total = supply + vat
+        const ae = amountError(total)
+        if (ae) {
+          await rollbackQuietly(conn)
+          return res.status(400).json({ error: `${deliveryDate || '납품일 없음'} 묶음: ${ae}` })
+        }
+        const ie = invoiceCreateError({ kind, supply_amount: supply, vat_amount: vat })
+        if (ie) { await rollbackQuietly(conn); return res.status(400).json({ error: ie }) }
+
+        const id = randomUUID()
+        const invoice_no = `${prefix}-${year}-${String(++seq).padStart(4, '0')}`
+        /* 메모에 납품일을 남긴다 — 목록에서는 품목 줄이 안 보이므로, 같은 거래처·같은 날짜로
+           여러 장이 나란히 서면 어느 장이 어느 납품분인지 구분할 단서가 필요하다. */
+        const noteBase = String(memo || '').trim()
+        const noteDate = deliveryDate ? `납품 ${deliveryDate}` : '납품일 미기재'
+        await conn.execute(
+          'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+          [id, invoice_no, kind, vendor_id || null, contract_id || null, supply, vat, total, issued_at,
+           due_at || null, status || (kind === 'issued' ? '입금 예정' : '지급 대기'),
+           account_id || null, noteBase ? `${noteBase} · ${noteDate}` : noteDate, taxType])
+        await writeInvoiceLines(conn, id, groupLines)
+        created.push({ id, invoice_no, delivery_date: deliveryDate || null, supply, vat, total, lines: groupLines.length })
+      }
+      await conn.commit()
+      res.json({ ok: true, count: created.length, invoices: created })
+    } catch (e) { await rollbackQuietly(conn); throw e }
+    finally { conn.release() }
+  } catch (e) { next(e) }
+})
+
 router.put('/:id', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {

@@ -4,9 +4,10 @@ import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { TableToolbar } from '../lib/components/TableToolbar'
+import { useTableFilter, monthRange, activeMonthOf } from '../lib/tableFilter'
 import { ImportWizard } from '../lib/components/ImportWizard'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
-import { InvoiceLines } from '../lib/components/InvoiceLines'
+import { InvoiceLines, groupLinesByDelivery, lineVat } from '../lib/components/InvoiceLines'
 import { StatementDoc } from '../lib/components/StatementDoc'
 import { computeLineAmount } from '../lib/lineAmount'
 import { accountLabels, accountIdByLabel } from '../lib/accountLabel'
@@ -596,6 +597,8 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   const [contracts, setContracts] = useState([])
   // 거래명세서식 품목 내역(선택) — 있으면 합계가 공급가액이 된다
   const [lines, setLines] = useState([])
+  // 납품일별로 나눠 발행할지 — 새로 발행할 때만(수정 중인 청구서를 쪼갤 수는 없다)
+  const [splitByDelivery, setSplitByDelivery] = useState(false)
   const [itemMaster, setItemMaster] = useState([])
   // 첨부 파일 — 발행 전이라 청구서 id가 없으므로 먼저 업로드해 두고, 저장 후 청구서에 연결(지연 첨부)
   const [docs, setDocs] = useState([])
@@ -684,12 +687,20 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     value: c.name, label: c.name, sub: `${c.vendor_name || ''} · ${c.status || ''}`,
   }))
 
+  /* 납품일별 묶음 — 미리보기와 서버가 **같은 함수**로 묶는다(InvoiceLines.groupLinesByDelivery).
+     따로 묶으면 "미리보기엔 3장인데 2장이 발행됐다"가 난다. */
+  const deliveryGroups = useMemo(() => groupLinesByDelivery(lines), [lines])
+  const canSplit = !editInvoice && deliveryGroups.length > 1
+  // 나눌 수 없게 되면(줄을 지워 날짜가 하나가 됨) 켜둔 스위치도 함께 내린다
+  useEffect(() => { if (!canSplit && splitByDelivery) setSplitByDelivery(false) }, [canSplit, splitByDelivery])
+
   const handleSave = () => {
     if (!form.vendor) { toast.push("거래처를 선택하세요", { tone: "warn" }); return }
     if (!supply) { toast.push("공급가액을 입력하세요", { tone: "warn" }); return }
     const vendorObj = vendors.find(v => v.name === form.vendor)
     const contractObj = contracts.find(c => c.name === form.contract)
     onSave({
+      _split: splitByDelivery && canSplit,
       id: editInvoice?.id,
       kind: form.kind,
       vendor_id: vendorObj?.id || null,
@@ -771,6 +782,58 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
           {/* 거래명세서식 품목 입력 — 여기서 넣은 합계가 아래 공급가액이 된다 */}
           <InvoiceLines lines={lines} onChange={setLines} itemMaster={itemMaster} taxType={form.taxType}/>
 
+          {/* 납품일이 여러 개면 나눠 발행할 수 있다고 **그 자리에서** 알려준다.
+              메뉴 어딘가에 숨겨두면, 품목을 다 적고 나서야 필요해지는 기능을 못 찾는다. */}
+          {canSplit && (
+            <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
+              <label className="row gap-8" style={{ cursor: 'pointer', alignItems: 'flex-start' }}>
+                <input type="checkbox" style={{ marginTop: 3 }} checked={splitByDelivery}
+                  onChange={e => setSplitByDelivery(e.target.checked)}/>
+                <span>
+                  <b>납품일별로 나눠서 발행</b>
+                  <div className="text-xs text-muted2" style={{ marginTop: 2 }}>
+                    납품일이 {deliveryGroups.length}가지예요. 나누면 <b>청구서 {deliveryGroups.length}장</b>이 만들어집니다
+                    (거래처·발행일은 같고, 청구번호는 각각 따로).
+                  </div>
+                </span>
+              </label>
+
+              {splitByDelivery && (
+                <div style={{ marginTop: 10 }}>
+                  <div className="table-scroll">
+                    <table className="table">
+                      <thead><tr>
+                        <th>납품일</th><th className="num-right">품목</th>
+                        <th className="num-right">공급가</th><th className="num-right">세액</th><th className="num-right">합계</th>
+                      </tr></thead>
+                      <tbody>
+                        {deliveryGroups.map(g => {
+                          const sup = g.lines.reduce((a, l) => a + (Number(String(l.amount).replace(/[^0-9.-]/g, '')) || 0), 0)
+                          /* 세액은 **줄마다** 정해 더한다(직접 적었으면 그 값, 아니면 자동).
+                             나뉜 뒤에는 각 장이 독립된 세금계산서라, 원본 한 장의 세액을 비율로
+                             쪼개면 끝수의 근거가 사라진다. 서버(/invoices/split)도 같은 규칙이다. */
+                          const v = g.lines.reduce((a, l) => a + lineVat(l, form.taxType), 0)
+                          return (
+                            <tr key={g.delivery_date || '(없음)'}>
+                              <td className="num">{g.delivery_date || <span className="text-muted2">납품일 미기재</span>}</td>
+                              <td className="num-right text-muted">{g.lines.length}줄</td>
+                              <td className="num-right num">{fmtNum(sup)}</td>
+                              <td className="num-right num">{fmtNum(v)}</td>
+                              <td className="num-right num fw-700">{fmtNum(sup + v)}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+                    한 장이라도 막히면 아무것도 만들어지지 않아요 — 절반만 발행되는 일은 없습니다.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <label className="label">
               공급가액
@@ -826,7 +889,10 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
               label="세금계산서·납품확인서 등 첨부"/>
           </div>
         </div>
-        <DrawerFooter onCancel={onClose} onSave={handleSave} saveLabel={editInvoice ? "저장" : "등록"}/>
+        <DrawerFooter onCancel={onClose} onSave={handleSave}
+          saveLabel={editInvoice ? "저장"
+            : (splitByDelivery && canSplit) ? `${deliveryGroups.length}장 발행`
+            : "등록"}/>
     </Drawer>
   )
 }
@@ -894,13 +960,53 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", select }) => (
   </div>
 )
 
+/* 예정 회차의 키·금액 — 표(rowKey)와 일괄 처리가 **같은 함수**를 써야 한다.
+   따로 두면 체크한 줄과 실제로 처리되는 줄이 어긋나, 고르지 않은 회차가 발행된다. */
+export const pendingKey = (p) => p.recurring_id ? `r-${p.recurring_id}-${p.due_date}` : `m-${p.milestone_id}`
+/** 거래처가 비어 있는 줄을 가리키는 이름표. 실제 거래처명과 겹치지 않게 괄호를 붙인다. */
+const NO_VENDOR = '(거래처 미지정)'
+// VAT 포함 금액. vat 가 없는 회차는 10% 로 본다(표·소계·합계가 모두 이 값을 쓴다).
+const pendingGross = (p) => (p.amount || 0) + (p.vat != null ? p.vat : Math.round((p.amount || 0) * 0.1))
+
+/* 소계 칩 — "그래서 어디에(언제) 얼마"를 한 줄로 보여주고, 누르면 그것만 거른다.
+   목록의 거래처별 소계와 예정 탭의 달별·거래처별 소계가 같은 모양을 쓴다.
+   화면마다 다른 모양을 배우게 하지 않는다. */
+const SubtotalChips = ({ title, note, rows, onPick, activeKey, limit = 12, moreHint }) => {
+  if (!rows.length) return null
+  return (
+    <div className="card card-pad subtotal-chips" style={{ marginBottom: 12 }}>
+      <div className="row" style={{ marginBottom: 8 }}>
+        <span className="text-sm fw-700">{title}</span>
+        {note && <span className="text-xs text-muted2" style={{ marginLeft: 8 }}>{note}</span>}
+      </div>
+      <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
+        {rows.slice(0, limit).map(r => (
+          <button key={r.key} className={`btn sm${activeKey === r.key ? ' active' : ''}`} title="이것만 보기"
+            aria-pressed={activeKey === r.key}
+            onClick={() => onPick(r)}>
+            {r.label}
+            <b className="num" style={{ marginLeft: 6 }}>{fmtNum(r.amount)}</b>
+            <span className="text-muted2" style={{ marginLeft: 4 }}>({r.count})</span>
+          </button>
+        ))}
+        {rows.length > limit && (
+          <span className="text-xs text-muted2" style={{ alignSelf: 'center' }}>
+            외 {rows.length - limit}개{moreHint ? ` — ${moreHint}` : ''}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── 발행 예정(대기) 청구 일정 테이블 ─────────────────────────────
 // 계약에 깔아둔 청구/지급 일정 → 아직 청구서가 안 만들어진 건. 매출은 '발행', 매입은 '등록' 관점.
-const PendingScheduleTable = ({ rows, onIssue, onPaid, isIssued = true }) => (
+const PendingScheduleTable = ({ rows, onIssue, onPaid, isIssued = true, select }) => (
   <div className="card" style={{ overflow: "hidden" }}>
     <DataTable
       rows={rows}
-      rowKey={p => p.recurring_id ? `r-${p.recurring_id}-${p.due_date}` : `m-${p.milestone_id}`}
+      rowKey={pendingKey}
+      select={select}
       empty={isIssued
         ? "발행 예정인 청구 일정이 없어요. 계약 상세의 '청구 일정'에서 청구할 금액·시점을 등록하세요."
         : "예정된 지급 일정이 없어요. 발주 계약 상세의 '청구 일정'에서 지급할 금액·시점을 등록하세요."}
@@ -913,8 +1019,8 @@ const PendingScheduleTable = ({ rows, onIssue, onPaid, isIssued = true }) => (
         { key: 'contract_name', header: '계약', render: p => <span className="text-sm text-muted">{p.contract_name}{p.contract_no ? ` · ${p.contract_no}` : ""}</span> },
         { key: 'type', header: '유형', render: p => <span className="badge outline">{p.type}</span> },
         { key: 'total', header: `${isIssued ? "청구금액" : "지급금액"}(VAT 포함)`, align: 'right', sortable: true,
-          sortValue: p => p.amount + (p.vat != null ? p.vat : Math.round(p.amount * 0.1)),
-          render: p => <span className="num-cell fw-700">{fmtNum(p.amount + (p.vat != null ? p.vat : Math.round(p.amount * 0.1)))}</span> },
+          sortValue: pendingGross,
+          render: p => <span className="num-cell fw-700">{fmtNum(pendingGross(p))}</span> },
         { key: 'action', header: '', width: 210, render: p => (
           <div className="row gap-6">
             <button className="btn primary sm" onClick={() => onIssue(p)}>
@@ -947,11 +1053,11 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const [statusFilter, setStatusFilter] = useState(collect ? "미정산" : "전체")
   /* 기간은 **비워서 시작한다**(전체). 거래내역은 '이번 달'로 시작하는데, 청구서는 성격이 다르다 —
      미수금은 몇 달 전 것이 대부분이라 이번 달로 좁히면 정작 받을 돈이 안 보인다. */
-  const [range, setRange] = useState({ from: '', to: '' })
-  const [vendorFilter, setVendorFilter] = useState(null)
-  const [q, setQ] = useState('')
+
   // 다중 선택 — 일괄 지급·입금 처리와 일괄 삭제용
   const [checkedIds, setCheckedIds] = useState([])
+  const [pendChecked, setPendChecked] = useState([])
+  const [issuing, setIssuing] = useState(false)
   const [bulkDate, setBulkDate] = useState(localToday())
   const [bulkAccount, setBulkAccount] = useState('')
   /* 일괄 처리에서 고를 계좌. 폼 드로어에도 accounts 가 있지만 그건 그 컴포넌트의 것이라
@@ -1016,19 +1122,18 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     : kindRows.filter(inv => statusFilter === "전체" || effStatus(inv) === statusFilter)
 
   /* 기간·거래처·검색 — 여태 상태 칩뿐이라 "이 거래처에 이번 달 얼마 줘야 하나"를 볼 수가 없었다.
-     거래내역(Ledger)엔 이미 같은 툴바가 있는데 청구서만 없어서, 같은 앱인데 화면마다 달랐다.
-     기준 날짜는 **발행일(issued_at)** 이다 — 지급 기한으로 거르면 기한 없는 청구서가 통째로
+     거래내역(Ledger)과 **같은 훅**을 쓴다(lib/tableFilter) — 화면마다 다른 필터를 배우게 하지 않는다.
+     기준 날짜는 **발행일(issuedAt)** 이다 — 지급 기한으로 거르면 기한 없는 청구서가 통째로
      사라진다(기한은 선택 입력이다). */
-  const filtered = byStatus.filter(inv => {
-    if (range?.from && inv.issuedAt < range.from) return false
-    if (range?.to && inv.issuedAt > range.to) return false
-    if (vendorFilter && inv.vendor !== vendorFilter) return false
-    if (q) {
-      const hay = [inv.invoiceNo, inv.vendor, inv.contract, inv.memo].join(' ').toLowerCase()
-      if (!hay.includes(q.toLowerCase())) return false
-    }
-    return true
+  const listF = useTableFilter({
+    date: { field: 'issuedAt' },
+    search: { fields: ['invoiceNo', 'vendor', 'contract', 'memo'], placeholder: "청구번호·거래처·계약·메모 검색" },
+    filters: [{ key: 'vendor', label: "거래처", field: 'vendor',
+      options: [...new Set(kindRows.map(i => i.vendor).filter(Boolean))].sort() }],
   })
+  const vendorFilter = listF.values.vendor ?? null
+  const setVendorFilter = (v) => listF.setValue('vendor', v)
+  const filtered = useMemo(() => listF.apply(byStatus), [byStatus, listF.apply])
 
   /* 일괄 처리 대상 판정 — 이미 정산이 끝난 건은 **체크 자체가 안 된다.**
      골라놓고 나중에 "3건 중 1건만 됐어요"라고 말하는 것보다, 애초에 못 고르게 하고
@@ -1038,8 +1143,15 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const selectedRemain = selectedRows.reduce((s, r) => s + (Number(r.remainAmount) || 0), 0)
   // 필터가 바뀌면 화면에서 사라진 선택은 버린다 — 안 보이는 것을 일괄 처리하면 안 된다
   useEffect(() => {
-    setCheckedIds(prev => prev.filter(id => filtered.some(inv => inv.id === id)))
-  }, [statusFilter, range.from, range.to, vendorFilter, q, view, kind])
+    /* 걸러낸 결과가 **같으면 이전 배열을 그대로 돌려준다.**
+       .filter() 는 바뀐 게 없어도 늘 새 배열을 만든다 → 매번 새 상태 → 다시 렌더 →
+       이 effect 가 또 돌아 무한 루프가 된다(실제로 "Maximum update depth exceeded"가 났다).
+       의존성이 원시값이던 때는 우연히 가려져 있었을 뿐, 지우는 게 맞는 쪽이다. */
+    setCheckedIds(prev => {
+      const next = prev.filter(id => filtered.some(inv => inv.id === id))
+      return next.length === prev.length ? prev : next
+    })
+  }, [filtered, view, kind])
 
   const doBulkSettle = async () => {
     if (!selectedRows.length) return
@@ -1110,7 +1222,117 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
        이미 정산된 돈이라, 그 칩을 믿고 독촉하면 없는 채권을 쫓는 셈이 된다. */
     return [...m.values()].filter(v => v.remain > 0).sort((a, b) => b.remain - a.remain)
   }, [filtered])
-  const pendingTotal = pending.reduce((s, p) => s + p.amount + (p.vat != null ? p.vat : Math.round(p.amount * 0.1)), 0)
+  const pendingTotal = pending.reduce((s, p) => s + pendingGross(p), 0)
+
+  /* ── 발행/지급 예정 탭: 기간(예정일)·거래처·검색 ────────────────
+     여태 이 탭엔 필터가 하나도 없었다. 정기청구가 늘면서 수십 줄이 한 화면에 쏟아지는데,
+     경리가 실제로 묻는 건 "이번 달 무엇을 발행해야 하나"와 "이 거래처 것만"이다.
+     목록 탭과 **다른 훅 인스턴스**를 쓴다 — 한 벌로 묶으면 목록에서 걸어둔 기간이
+     예정 탭에도 걸려 "왜 갑자기 비었지"가 된다(기준 날짜부터 다르다: 발행일 vs 예정일). */
+  const pendF = useTableFilter({
+    date: { field: 'due_date' },
+    search: { fields: ['vendor_name', 'contract_name', 'contract_no', 'type'], placeholder: "거래처·계약·유형 검색" },
+    /* '(거래처 미지정)' 은 값이 아니라 **빈 거래처를 가리키는 이름표**다. field 매칭으로는
+       잡히지 않아(vendor_name 이 '' 이거나 null) 소계 칩을 눌러도 거를 수가 없었다. */
+    filters: [{ key: 'vendor', label: "거래처",
+      options: [...new Set(pending.map(p => p.vendor_name).filter(Boolean))].sort(),
+      match: (p, v) => (v === NO_VENDOR ? !p.vendor_name : p.vendor_name === v) }],
+  })
+  const pendRange = pendF.range
+  const pendVendor = pendF.values.vendor ?? null
+  const setPendVendor = (v) => pendF.setValue('vendor', v)
+  const pendingFiltered = useMemo(() => pendF.apply(pending), [pending, pendF.apply])
+
+  /* 달별 소계 — 기간 칩은 **거래처·검색까지 반영하되 기간은 빼고** 센다.
+     기간까지 반영하면 한 달을 고르는 순간 다른 달 칩이 전부 사라져 되돌아갈 길이 없다. */
+  const pendingByMonth = useMemo(() => {
+    const m = new Map()
+    /* 기간만 뺀 나머지(거래처·검색)를 그대로 반영한다. 검색을 빠뜨렸더니 칩의 건수·금액이
+       표에서 걸러진 줄까지 세어, 바로 위 툴바의 합계와 다른 숫자를 말하고 있었다. */
+    const hay = (p) => [p.vendor_name, p.contract_name, p.contract_no, p.type].join(' ').toLowerCase()
+    for (const p of pending) {
+      if (pendVendor && (pendVendor === NO_VENDOR ? !!p.vendor_name : (p.vendor_name || '') !== pendVendor)) continue
+      if (pendF.q && !hay(p).includes(pendF.q.toLowerCase())) continue
+      const month = (p.due_date || '').slice(0, 7)
+      if (!month) continue
+      const cur = m.get(month) || { key: month, label: `${Number(month.slice(5, 7))}월`, count: 0, amount: 0 }
+      cur.count += 1; cur.amount += pendingGross(p)
+      m.set(month, cur)
+    }
+    return [...m.values()].sort((a, b) => a.key.localeCompare(b.key))
+  }, [pending, pendVendor, pendF.q])
+
+  // 거래처별 소계 — 기간이 걸려 있으면 그 기간 안에서 센다(칩과 표가 같은 말을 하도록)
+  const pendingByVendor = useMemo(() => {
+    const m = new Map()
+    for (const p of pending) {
+      const d = p.due_date || ''
+      if (pendRange.from && (!d || d < pendRange.from)) continue
+      if (pendRange.to && (!d || d > pendRange.to)) continue
+      const k = p.vendor_name || NO_VENDOR
+      const cur = m.get(k) || { key: k, label: k, count: 0, amount: 0 }
+      cur.count += 1; cur.amount += pendingGross(p)
+      m.set(k, cur)
+    }
+    return [...m.values()].sort((a, b) => b.amount - a.amount)
+  }, [pending, pendRange.from, pendRange.to])
+
+  // 달 칩 → 그 달 1일~말일(lib/tableFilter). 이미 그 달이면 한 번 더 눌러 해제한다.
+  const activeMonth = activeMonthOf(pendRange)
+  const pickMonth = (month) => pendF.setRange(activeMonth === month ? { from: '', to: '' } : monthRange(month))
+
+  const pendingSelected = pendingFiltered.filter(p => pendChecked.includes(pendingKey(p)))
+  const pendingSelTotal = pendingSelected.reduce((s, p) => s + pendingGross(p), 0)
+  // 화면에서 사라진 선택은 버린다 — 안 보이는 회차를 발행하면 안 된다(목록 탭과 같은 규칙)
+  useEffect(() => {
+    setPendChecked(prev => {
+      const next = prev.filter(k => pendingFiltered.some(p => pendingKey(p) === k))
+      return next.length === prev.length ? prev : next
+    })
+  }, [pendingFiltered])
+
+  /* 일괄 발행/등록 — 회차마다 출처(마일스톤·정기청구·정기지출)가 달라 API 가 갈린다.
+     서버에 일괄 엔드포인트를 새로 파지 않고 **한 건씩 순서대로** 부른다:
+       · 각 엔드포인트의 가드(마감월·중복 회차·미래 날짜)를 그대로 통과해야 한다.
+       · 한 건이 막혀도 나머지는 발행되는 편이 낫다 — 매달 쌓인 회차를 한 건 때문에
+         통째로 못 넘기면 결국 다시 한 건씩 누르게 된다.
+     대신 **무엇이 왜 실패했는지**를 반드시 돌려준다(조용한 부분 실패가 제일 나쁘다). */
+  const doBulkIssue = async () => {
+    if (!pendingSelected.length || issuing) return
+    const ok = await confirm({
+      tone: 'brand', icon: <Icon.Receipt size={22}/>,
+      title: isIssued ? `${pendingSelected.length}건을 발행할까요?` : `${pendingSelected.length}건을 등록할까요?`,
+      body: <>
+        <div style={{ marginBottom: 6 }}>합계 <b>{fmtNum(pendingSelTotal)}원</b>(VAT 포함)</div>
+        <div>{isIssued
+          ? '선택한 회차로 청구서가 발행되고 미수금으로 잡힙니다.'
+          : '선택한 회차로 매입 청구서가 등록되고 미지급금으로 잡힙니다.'}</div>
+        <div style={{ marginTop: 6 }} className="text-muted">
+          이미 받은(낸) 건이라면 이게 아니라 각 줄의 '{isIssued ? '기입금' : '기지급'} 처리'를 쓰세요.
+        </div>
+      </>,
+      confirmLabel: isIssued ? `${pendingSelected.length}건 발행` : `${pendingSelected.length}건 등록`,
+    })
+    if (!ok) return
+    setIssuing(true)
+    const fails = []
+    for (const p of pendingSelected) {
+      const res = await issuePending(p, false)
+      if (!res?.ok) fails.push({ p, error: res?.error || '처리 실패' })
+    }
+    setIssuing(false)
+    setPendChecked([])
+    await load()
+    const done = pendingSelected.length - fails.length
+    if (!fails.length) {
+      toast.push(`${done}건을 ${isIssued ? '발행' : '등록'}했어요`)
+    } else {
+      const first = fails[0]
+      toast.push(
+        `${done}건 완료 · ${fails.length}건 실패 — ${first.p.vendor_name || '거래처 미상'} ${first.p.due_date || ''}: ${first.error}`,
+        { tone: 'warn' })
+    }
+  }
 
   // 예정 회차 1건을 청구서로 발행/등록. 출처(마일스톤/정기청구/정기지출)마다 API가 다르다.
   const issuePending = (p, paid) => {
@@ -1150,8 +1372,31 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   }
 
   const handleSave = async (data) => {
-    const { _docs, ...payload } = data
+    const { _docs, _split, ...payload } = data
     let invoiceId = payload.id
+    /* 납품일별 분할 발행 — 한 번의 호출로 여러 장이 만들어진다.
+       첨부는 **첫 장에 붙이고 어디에 붙였는지 말한다.** 어느 장의 서류인지는 사람만 알지만,
+       안 붙이면 이미 업로드된 파일이 어느 청구서에도 안 걸려 화면에서 볼 수도 지울 수도 없는
+       고아 파일로 남는다(사용자는 다시 올려야 한다). 첫 장에 있으면 옮기든 지우든 할 수 있다. */
+    if (_split) {
+      const res = await api.splitInvoices(payload)
+      if (!res.ok) { toast.push(res.error || "나눠 발행에 실패했어요", { tone: 'warn' }); return }
+      toast.push(`청구서 ${res.count}장을 발행했어요 (${res.invoices.map(i => i.invoice_no).join(', ')})`)
+      const first = res.invoices?.[0]
+      if (first && Array.isArray(_docs) && _docs.length) {
+        let failed = 0
+        for (const d of _docs) {
+          const r = await api.addInvoiceDoc(first.id, { url: d.url, name: d.name, doc_type: '기타', size: d.size || 0 })
+          if (!r.ok) failed++
+        }
+        toast.push(failed
+          ? `첨부 ${failed}건을 붙이지 못했어요 — ${first.invoice_no}를 열어 다시 올려주세요`
+          : `첨부 ${_docs.length}건은 첫 장(${first.invoice_no})에 붙였어요. 다른 장의 서류라면 옮겨주세요.`,
+          { tone: 'warn' })
+      }
+      load()
+      return
+    }
     if (payload.id) {
       const res = await api.updateInvoice(payload.id, payload)
       // 서버 메시지를 버리면 "마감된 달" · "이미 정산된 금액보다 적게 바꿀 수 없다" 같은
@@ -1254,50 +1499,70 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       {/* 기간·거래처·검색 — 목록 탭에서만. '발행 예정'은 아직 청구서가 아니라 이 필터의 대상이 아니다.
           거래내역과 같은 툴바를 쓴다(화면마다 다른 필터를 배우게 하지 않는다). */}
       {(collect || view === "list") && (
-        <TableToolbar
-          date={{ from: range.from, to: range.to, onChange: setRange }}
-          search={{ value: q, onChange: setQ, placeholder: "청구번호·거래처·계약·메모 검색" }}
-          filters={[{ label: "거래처",
-            node: <FilterSelect value={vendorFilter} onChange={setVendorFilter}
-                    options={[...new Set(kindRows.map(i => i.vendor).filter(Boolean))].sort()}
-                    placeholder="전체"/> }]}
-          hasActiveFilter={!!vendorFilter}
-          onReset={() => { setVendorFilter(null); setRange({ from: '', to: '' }); setQ('') }}
-          right={<span className="text-xs text-muted2">발행일 기준</span>}
-        />
+        <TableToolbar {...listF.toolbarProps}
+          right={<span className="text-xs text-muted2">발행일 기준</span>}/>
       )}
 
       {/* 거래처별 소계 — 필터를 걸면 "그래서 이 거래처에 얼마"가 다음 질문이다.
           한 거래처만 골랐으면 표 아래 합계와 같은 말이라 안 보여준다. */}
       {(collect || view === "list") && !vendorFilter && vendorSubtotals.length > 1 && (
-        <div className="card card-pad" style={{ marginBottom: 12 }}>
-          <div className="row" style={{ marginBottom: 8 }}>
-            <span className="text-sm fw-700">거래처별 {isIssued ? "미수금" : "미지급금"}</span>
-            <span className="text-xs text-muted2" style={{ marginLeft: 8 }}>
-              {vendorSubtotals.reduce((s, v) => s + v.count, 0)}건 · {vendorSubtotals.length}개 거래처
-            </span>
-          </div>
-          <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
-            {vendorSubtotals.slice(0, 12).map(v => (
-              <button key={v.vendor} className="btn sm" title="이 거래처만 보기"
-                onClick={() => setVendorFilter(v.vendor)}>
-                {v.vendor}
-                <b className="num" style={{ marginLeft: 6 }}>{fmtNum(v.remain)}</b>
-                <span className="text-muted2" style={{ marginLeft: 4 }}>({v.count})</span>
-              </button>
-            ))}
-            {vendorSubtotals.length > 12 && (
-              <span className="text-xs text-muted2" style={{ alignSelf: 'center' }}>
-                외 {vendorSubtotals.length - 12}개 — 검색으로 찾으세요
-              </span>
-            )}
-          </div>
-        </div>
+        <SubtotalChips
+          title={`거래처별 ${isIssued ? "미수금" : "미지급금"}`}
+          note={`${vendorSubtotals.reduce((s, v) => s + v.count, 0)}건 · ${vendorSubtotals.length}개 거래처`}
+          rows={vendorSubtotals.map(v => ({ key: v.vendor, label: v.vendor, amount: v.remain, count: v.count }))}
+          onPick={(r) => setVendorFilter(r.key)}
+          moreHint="검색으로 찾으세요"/>
       )}
 
       {!collect && view === "pending"
-        ? <PendingScheduleTable rows={pending} isIssued={isIssued}
-            onIssue={(p) => issueSchedule(p, false)} onPaid={(p) => issueSchedule(p, true)}/>
+        ? <>
+            {/* 기간(예정일)·거래처·검색 — 목록 탭과 같은 툴바. 다른 건 기준 날짜뿐이다. */}
+            <TableToolbar {...pendF.toolbarProps}
+              right={<span className="text-xs text-muted2">
+                예정일 기준 · {pendingFiltered.length}건 {fmtNum(pendingFiltered.reduce((s, p) => s + pendingGross(p), 0))}원
+              </span>}/>
+
+            {/* 달별 — "이번 달에 뭘 발행해야 하나"가 이 탭의 첫 질문이다. 누르면 그 달만 남는다. */}
+            {pendingByMonth.length > 1 && (
+              <SubtotalChips
+                title={`달별 ${isIssued ? "발행 예정" : "등록 예정"}`}
+                note="예정일 기준 · 누르면 그 달만 봅니다"
+                rows={pendingByMonth} activeKey={activeMonth} limit={18}
+                onPick={(r) => pickMonth(r.key)}/>
+            )}
+
+            {/* 거래처별 — 한 거래처만 고른 뒤엔 표 합계와 같은 말이라 감춘다. */}
+            {!pendVendor && pendingByVendor.length > 1 && (
+              <SubtotalChips
+                title={`거래처별 ${isIssued ? "발행 예정" : "등록 예정"}`}
+                note={`${pendingByVendor.reduce((s, v) => s + v.count, 0)}건 · ${pendingByVendor.length}개 거래처`}
+                rows={pendingByVendor}
+                onPick={(r) => setPendVendor(r.key)}
+                moreHint="검색으로 찾으세요"/>
+            )}
+
+            {/* 선택 바 — 고른 게 있을 때만. 목록 탭의 일괄 정산 바와 같은 자리·같은 모양. */}
+            {pendChecked.length > 0 && (
+              <div className="card card-pad" style={{ marginBottom: 12, position: 'sticky', top: 0, zIndex: 3 }}>
+                <div className="row gap-8" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span className="fw-700 text-sm">{pendingSelected.length}건 선택</span>
+                  <span className="num text-sm text-muted">합계 {fmtNum(pendingSelTotal)}원</span>
+                  <button className="btn ghost sm" onClick={() => setPendChecked([])}>선택 해제</button>
+                  <div className="row gap-6 ml-auto">
+                    <button className="btn primary" onClick={doBulkIssue} disabled={issuing}>
+                      <Icon.Receipt size={14}/> {issuing
+                        ? (isIssued ? '발행 중…' : '등록 중…')
+                        : `${pendingSelected.length}건 ${isIssued ? '발행' : '등록'}`}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <PendingScheduleTable rows={pendingFiltered} isIssued={isIssued}
+              onIssue={(p) => issueSchedule(p, false)} onPaid={(p) => issueSchedule(p, true)}
+              select={{ ids: pendChecked, onChange: setPendChecked }}/>
+          </>
         : <>
             {/* 선택 바 — 고른 게 있을 때만 나타난다. 늘 떠 있으면 표를 밀어내고,
                 아무것도 못 하는 버튼만 보여주는 셈이 된다. */}
