@@ -1816,7 +1816,12 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       </div>
 
       {/* 편집 Drawer */}
-      <Drawer open={editOpen} onClose={() => setEditOpen(false)} width="min(480px,100vw)" label="주문 편집">
+      <Drawer open={editOpen} onClose={() => setEditOpen(false)}
+        /* 품목표가 뜨면 넓힌다 — 청구서 드로어와 같은 규칙(Billing.jsx).
+           품목표는 8~9열이라 480px 안에서는 첫 칸부터 가로 스크롤이 된다.
+           품목이 없으면 예전 폭 그대로 — 나머지 칸은 좁아야 읽기 쉽다. */
+        width={(editForm.items || []).length > 0 ? "min(1240px,100vw)" : "min(480px,100vw)"}
+        label="주문 편집">
         <div className="drawer-body">
           <div className="col gap-form">
             <div>
@@ -2338,7 +2343,9 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
         />
       </div>
 
-      <Drawer open={newOpen} onClose={() => setNewOpen(false)} width="min(480px,100vw)" label="신규 생성">
+      <Drawer open={newOpen} onClose={() => setNewOpen(false)}
+        width={(newForm.items || []).length > 0 ? "min(1240px,100vw)" : "min(480px,100vw)"}
+        label="신규 생성">
         <div className="drawer-body">
           <div className="col gap-form">
             <div>
