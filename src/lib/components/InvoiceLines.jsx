@@ -25,7 +25,34 @@ export const lineVat = (l, taxType = '과세') => (
     : num(l.vat)
 )
 
-export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = '과세' }) => {
+/** 실제로 쓰이는 줄인가 — 표는 빈 줄 하나로 시작하므로, '품목을 쓰고 있는지'를
+ *  이 규칙 하나로 판정한다. 청구서 폼(공급가액 잠금)·분할 미리보기·저장이 모두 이걸 쓴다.
+ *  한 군데라도 다르면 "표에는 보이는데 저장 안 된 줄"이 생긴다. */
+export const isFilledLine = (l) => (
+  !!String(l?.name || '').trim() || !!String(l?.item_id || '') ||
+  num(l?.amount) > 0 || num(l?.qty) > 0 || num(l?.unit_price) > 0
+)
+
+/* 글자 수에 맞춰 칸을 넓힌다.
+ *
+ * 열두 칸이 나란히 서는 표라 글자 칸은 늘 좁았다. 규격("SUS304 t2.0 1219×2438")이
+ * 여덟 자만 보이면 뭘 청구하는지 검산이 안 된다. 그렇다고 처음부터 다 넓혀 두면
+ * 짧은 품목명만 쓰는 사람은 빈 여백을 가로로 스크롤하게 된다.
+ * 그래서 **적은 만큼** 늘린다 — 상한을 둬서 한 칸이 표를 삼키지는 않게. */
+const growWidth = (lines, get, min, max) => {
+  /* 글자 수가 아니라 **폭**으로 센다 — 한글은 영문의 두 배 가까이 넓다.
+     길이로만 재면 '알루미늄 브라켓 가공품' 같은 한글 품목명이 늘 잘린 채로 남는다. */
+  const widthOf = (s) => [...String(s ?? '')].reduce(
+    (w, ch) => w + (/[ᄀ-ᇿ　-〿㄰-㆏가-힯＀-｠]/.test(ch) ? 2 : 1), 0)
+  const longest = lines.reduce((m, l) => Math.max(m, widthOf(get(l))), 0)
+  return Math.round(Math.max(min, Math.min(max, longest * 7.4 + 34)))
+}
+
+export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = '과세', kind = 'issued' }) => {
+  /* 같은 날짜라도 부르는 이름이 다르다 — 우리가 내보내면 납품일, 우리가 받으면 입고일.
+     칸(delivery_date)은 하나고 이름표만 바뀐다. 매입 청구서에 '납품일'이라고 쓰여 있으면
+     "우리가 납품한 날인가?" 하고 한 번 멈추게 된다. */
+  const dateLabel = kind === 'received' ? '입고일' : '납품일'
   /* 줄별 세액의 기본값 — 비워두면 청구서 과세유형을 따라 자동으로 채워 보여준다.
      실제 명세서·매입현황표가 줄마다 세액을 적고, 같은 청구서에 과세와 면세가 섞이는 일이
      실제로 있다(자재 + 근조화환). 그래서 줄마다 고칠 수 있어야 하되,
@@ -58,8 +85,24 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
     onChange([...lines.slice(0, i + 1), copy, ...lines.slice(i + 1)])
   }
 
+  /* 품목 칸에 넣을 값 — 거래처 칸과 같은 방식이다.
+   *
+   * Combobox 는 옵션에 없는 값을 **원문 그대로** 보여준다(ui.jsx `display`).
+   * 그래서 기준정보에서 고른 줄은 id 를, 직접 적은 줄은 이름 자체를 넣으면
+   * 두 경우가 한 칸에서 다 보인다. 예전엔 늘 item_id 를 넣었는데, 직접 입력하면
+   * item_id 가 비어 표시할 값이 없어져서 **아래에 입력칸을 하나 더** 달아야 했다.
+   * 기준정보에 없는 품목이 흔한 건 맞지만, 그건 칸을 나눌 이유가 아니라
+   * 이 칸이 이름을 받아야 할 이유였다.
+   *
+   * 기준정보에서 지워진 품목을 물고 있는 옛 줄은 id 가 매칭되지 않는다 —
+   * 그대로 두면 칸에 UUID 가 노출되므로, 그때도 이름으로 떨어뜨린다. */
+  const shownItem = (l) => (
+    itemMaster.some(it => it.id === l.item_id) ? l.item_id : (l.name || '')
+  )
+
   const pickItem = (i, itemId) => {
     const it = itemMaster.find(x => x.id === itemId)
+    // 목록에서 고른 게 아니면(있을 수 없지만) 이름은 지키고 연결만 끊는다
     if (!it) return set(i, { item_id: '' })
     // 기준정보 값은 **출발점**이다. 고른 뒤 이 청구서에서 고쳐도 기준정보는 안 바뀐다(스냅샷).
     set(i, {
@@ -73,8 +116,16 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
     })
   }
 
-  const supplyTotal = lines.reduce((s, l) => s + num(l.amount), 0)
-  const vatTotal = lines.reduce((s, l) => s + shownVat(l), 0)
+  const filled = lines.filter(isFilledLine)
+  const supplyTotal = filled.reduce((s, l) => s + num(l.amount), 0)
+  const vatTotal = filled.reduce((s, l) => s + shownVat(l), 0)
+
+  // 글자 칸만 내용에 따라 자란다. 숫자·날짜 칸은 들어갈 값의 길이가 정해져 있어 고정.
+  const nameW = growWidth(lines, l => l.name, 170, 340)
+  const specW = growWidth(lines, l => l.spec, 120, 280)
+  // 최소폭은 placeholder('예: 14,500원/KG')가 안 잘리는 길이다 — 예시가 잘리면 예시가 아니다
+  const noteW = growWidth(lines, l => l.note, 145, 260)
+  const tableW = 130 + nameW + specW + 70 + 84 + 88 + 92 + 112 + 124 + 108 + noteW + 58
 
   return (
     <div>
@@ -89,28 +140,28 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
         <div className="text-xs text-muted2" style={{ padding: '10px 0' }}>
           품목을 넣으면 거래명세서로 출력할 수 있고, 공급가액이 자동으로 합산돼요.
           넣지 않으면 아래 공급가액만으로 청구서가 만들어집니다.
-          품목마다 <b>납품일</b>을 적어두면, 납품일별로 청구서를 나눠서 발행할 수 있어요.
+          품목마다 <b>{dateLabel}</b>을 적어두면, {dateLabel}별로 청구서를 나눠서 발행할 수 있어요.
         </div>
       ) : (
         <div className="card" style={{ overflowX: 'auto', marginBottom: 8 }}>
-          <table className="table" style={{ minWidth: 1162 }}>
+          <table className="table line-table" style={{ minWidth: tableW }}>
             <thead>
               <tr>
-                {/* 납품일(입고일) — 한 장에 여러 날 납품분이 섞이는 게 실무의 보통 모습이다.
+                {/* 납품일(매입이면 입고일) — 한 장에 여러 날 납품분이 섞이는 게 실무의 보통 모습이다.
                     비워도 된다(단일 납품·용역). 채우면 거래명세서에 찍히고,
-                    '납품일별로 나눠 발행'의 기준이 된다. */}
-                <th style={{ width: 132 }}>납품일</th>
-                <th style={{ minWidth: 150 }}>품목</th>
-                <th style={{ minWidth: 100 }}>규격</th>
-                <th style={{ width: 74 }}>단위</th>
+                    '날짜별로 나눠 발행'의 기준이 된다. */}
+                <th style={{ width: 130 }}>{dateLabel}</th>
+                <th style={{ width: nameW }}>품목</th>
+                <th style={{ width: specW }}>규격</th>
+                <th style={{ width: 70 }}>단위</th>
                 <th className="num-right" style={{ width: 84 }}>수량</th>
-                <th className="num-right" style={{ width: 90 }}>중량</th>
+                <th className="num-right" style={{ width: 88 }}>중량</th>
                 <th style={{ width: 92 }}>단가 기준</th>
-                <th className="num-right" style={{ width: 110 }}>단가</th>
-                <th className="num-right" style={{ width: 120 }}>금액</th>
-                <th className="num-right" style={{ width: 104 }}>부가세</th>
-                <th style={{ minWidth: 110 }}>비고</th>
-                <th style={{ width: 62 }}></th>
+                <th className="num-right" style={{ width: 112 }}>단가</th>
+                <th className="num-right" style={{ width: 124 }}>금액</th>
+                <th className="num-right" style={{ width: 108 }}>부가세</th>
+                <th style={{ width: noteW }}>비고</th>
+                <th style={{ width: 58 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -121,16 +172,13 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
                       onChange={e => set(i, { delivery_date: e.target.value })}/>
                   </td>
                   <td>
-                    <Combobox value={l.item_id || ''} onChange={v => pickItem(i, v)} options={itemOptions}
-                      placeholder="기준정보에서 선택"
+                    {/* 기준정보에 없는 품목은 이름만 남는다 — 고르지 않아도 명세서는 나와야 한다.
+                        목록에 없는 이름을 치면 아래 '직접 입력'으로 그대로 넣을 수 있다(거래처 칸과 동일). */}
+                    {/* portal — 이 표는 가로 스크롤 상자라, 목록을 상자 안에 그리면
+                        아랫부분('직접 입력')이 잘려 목록에 없는 품목을 넣을 길이 막힌다. */}
+                    <Combobox value={shownItem(l)} onChange={v => pickItem(i, v)} options={itemOptions}
+                      placeholder="품목 선택 · 직접 입력" portal
                       onAddNew={q => set(i, { item_id: '', name: q })} addNewLabel="직접 입력"/>
-                    {/* 기준정보에 없는 품목은 이름만 남긴다 — 고르지 않아도 명세서는 나와야 한다.
-                        두 칸이 나란히 서므로 아래쪽은 '또는'임이 문구에 드러나야 한다.
-                        안 그러면 어느 칸을 채워야 하는지가 매번 물음이 된다. */}
-                    {!l.item_id && (
-                      <input className="input" style={{ marginTop: 4 }} value={l.name || ''}
-                        placeholder="또는 품목명 직접 입력" onChange={e => set(i, { name: e.target.value })}/>
-                    )}
                   </td>
                   <td><input className="input" value={l.spec || ''}
                     onChange={e => set(i, { spec: e.target.value })}/></td>
@@ -201,9 +249,11 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
         </div>
       )}
 
-      {lines.length > 0 && (
+      {/* 합계줄은 **채운 줄이 있을 때만**. 표가 빈 줄 하나로 시작하므로 줄 수로 재면
+          폼을 열자마자 "품목 1줄 · 공급가 0" 이 떠서, 아무것도 안 적었는데 적은 것처럼 읽힌다. */}
+      {filled.length > 0 && (
         <div className="row text-sm" style={{ justifyContent: 'flex-end', gap: 8 }}>
-          <span className="text-muted">품목 {lines.length}줄</span>
+          <span className="text-muted">품목 {filled.length}줄</span>
           <span className="text-muted">공급가</span><b className="num">{fmtNum(supplyTotal)}</b>
           <span className="text-muted">세액</span><b className="num">{fmtNum(vatTotal)}</b>
           <span className="text-muted">계</span><b className="num">{fmtNum(supplyTotal + vatTotal)}원</b>
@@ -225,7 +275,7 @@ export const blankLine = () => ({
 export const groupLinesByDelivery = (lines = []) => {
   const g = new Map()
   for (const l of lines) {
-    if (!String(l.name || '').trim() && !num(l.amount)) continue   // 표 맨 아래 빈 줄
+    if (!isFilledLine(l)) continue   // 손대지 않은 빈 줄(표는 빈 줄 하나로 시작한다)
     const k = /^\d{4}-\d{2}-\d{2}$/.test(String(l.delivery_date || '')) ? l.delivery_date : ''
     if (!g.has(k)) g.set(k, [])
     g.get(k).push(l)

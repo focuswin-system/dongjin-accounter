@@ -7,7 +7,7 @@ import { TableToolbar } from '../lib/components/TableToolbar'
 import { useTableFilter, monthRange, activeMonthOf } from '../lib/tableFilter'
 import { ImportWizard } from '../lib/components/ImportWizard'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
-import { InvoiceLines, groupLinesByDelivery, lineVat } from '../lib/components/InvoiceLines'
+import { InvoiceLines, groupLinesByDelivery, lineVat, blankLine, isFilledLine } from '../lib/components/InvoiceLines'
 import { StatementDoc } from '../lib/components/StatementDoc'
 import { computeLineAmount } from '../lib/lineAmount'
 import { accountLabels, accountIdByLabel } from '../lib/accountLabel'
@@ -616,13 +616,16 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   useEffect(() => {
     if (!open) return
     setDocs([])   // 폼에서의 첨부는 이번에 새로 올리는 것만. 기존 첨부는 청구서 상세에서 관리.
-    /* 수정이면 저장된 품목을 그대로 불러온다. 신규면 빈 표(사용자가 '품목 추가'로 시작).
+    /* 수정이면 저장된 품목을 그대로 불러온다. 신규면 **빈 줄 하나**로 시작한다 —
+       예전엔 빈 표였고 '품목 추가'를 한 번 눌러야 칸이 나왔다. 품목을 적는 게 이 폼의
+       보통 쓰임인데 매번 같은 버튼을 먼저 누르게 하는 셈이었다. 손대지 않은 빈 줄은
+       저장 때 버려지므로(isFilledLine), 총액만 적는 기존 방식도 그대로 된다.
        ⚠ amountTouched(사람이 금액을 고쳤나)는 화면 상태라 서버에 없다. 그냥 불러오면
        할인·끝수 조정해 저장한 줄이 '안 고친 줄'로 되살아나, 수량 한 번 만졌을 때
        자동 계산이 그 금액을 덮어쓴다. 저장된 금액이 계산값과 다르면 사람이 고친 것으로 본다. */
     setLines(editInvoice?.lines?.length
       ? editInvoice.lines.map(l => ({ ...l, amountTouched: Number(l.amount) !== computeLineAmount(l) }))
-      : [])
+      : [blankLine()])
     if (editInvoice) {
       setForm({
         kind: editInvoice.kind,
@@ -643,10 +646,13 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   }, [open, defaultKind, editInvoice])
 
   /* 품목 내역이 있으면 그 합계가 공급가액이다 — 두 숫자가 따로 놀면 명세서와 청구서가 어긋난다.
-     그래서 라인이 한 줄이라도 있으면 공급가액 칸은 읽기 전용이 되고 합계를 그대로 쓴다.
-     라인을 다 지우면 다시 직접 입력으로 돌아간다(기존 방식). */
-  const linesTotal = lines.reduce((s, l) => s + (Number(String(l.amount).replace(/[^0-9.-]/g, '')) || 0), 0)
-  const hasLines = lines.length > 0
+     그래서 라인을 **실제로 채우면** 공급가액 칸은 읽기 전용이 되고 합계를 그대로 쓴다.
+     라인을 다 지우면 다시 직접 입력으로 돌아간다(기존 방식).
+     ⚠ 판정 기준은 `lines.length` 가 아니라 isFilledLine 이다 — 표가 빈 줄 하나로 시작하므로,
+     줄 수로 재면 폼을 열자마자 공급가액이 0으로 잠겨 총액만 적는 청구서를 못 만든다. */
+  const filledLines = lines.filter(isFilledLine)
+  const linesTotal = filledLines.reduce((s, l) => s + (Number(String(l.amount).replace(/[^0-9.-]/g, '')) || 0), 0)
+  const hasLines = filledLines.length > 0
 
   const f = (k, v) => {
     const next = { ...form, [k]: v }
@@ -690,6 +696,8 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   /* 납품일별 묶음 — 미리보기와 서버가 **같은 함수**로 묶는다(InvoiceLines.groupLinesByDelivery).
      따로 묶으면 "미리보기엔 3장인데 2장이 발행됐다"가 난다. */
   const deliveryGroups = useMemo(() => groupLinesByDelivery(lines), [lines])
+  // 품목표와 같은 이름표를 쓴다 — 표에는 '입고일', 나눠 발행 안내에는 '납품일'이면 같은 칸이 아닌 줄 안다
+  const deliveryLabel = form.kind === "received" ? "입고일" : "납품일"
   const canSplit = !editInvoice && deliveryGroups.length > 1
   // 나눌 수 없게 되면(줄을 지워 날짜가 하나가 됨) 켜둔 스위치도 함께 내린다
   useEffect(() => { if (!canSplit && splitByDelivery) setSplitByDelivery(false) }, [canSplit, splitByDelivery])
@@ -711,9 +719,11 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
       due_at: form.dueAt || null,
       status: editInvoice ? editInvoice.status : (form.kind === "issued" ? "입금 예정" : "지급 예정"),
       account_id: form.accountId || null, memo: form.memo || "",
-      /* 품목 내역. 화면에서 쓰는 보조 필드(amountTouched)는 빼고 보낸다 —
+      /* 품목 내역. 손대지 않은 빈 줄은 여기서 걸러낸다 — 표가 빈 줄로 시작하므로
+         그냥 보내면 이름도 금액도 없는 줄이 거래명세서·지급결의서에 그대로 찍힌다.
+         화면에서 쓰는 보조 필드(amountTouched)도 빼고 보낸다 —
          서버 컬럼이 아니라 '사용자가 금액을 고쳤나'를 기억하는 화면 상태다. */
-      lines: lines.map(({ amountTouched, id, ...l }) => ({
+      lines: filledLines.map(({ amountTouched, id, ...l }) => ({
         ...l,
         qty: Number(String(l.qty).replace(/[^0-9.-]/g, '')) || 0,
         weight: Number(String(l.weight).replace(/[^0-9.-]/g, '')) || 0,
@@ -728,11 +738,15 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     onClose()
   }
 
-  /* 품목 내역이 있으면 드로어를 넓힌다 — 거래명세서는 8열(품목·규격·단위·수량·중량·기준·단가·금액)
-     이라 기본 폭(480px)에서는 가로 스크롤로만 볼 수 있다. 명세서 입력이 이 폼의 주 용도인데
-     스크롤하며 숫자를 맞추게 하면 결국 안 쓰게 된다. 품목이 없으면 예전 폭 그대로. */
+  /* 품목표가 떠 있으면 드로어를 넓힌다 — 명세서식 입력은 12열(날짜·품목·규격·단위·수량·중량·
+     기준·단가·금액·부가세·비고)이라 기본 폭(480px)에서는 가로 스크롤로만 볼 수 있다.
+     명세서 입력이 이 폼의 주 용도인데 스크롤하며 숫자를 맞추게 하면 결국 안 쓰게 된다.
+     ⚠ 기준은 hasLines(채운 줄)가 아니라 **표가 보이는지**다 — 빈 줄 하나로 시작하므로
+     채우기 전부터 표가 떠 있고, 좁은 드로어에 넣으면 첫 글자부터 스크롤이다.
+     회계 실무자는 가로가 긴 모니터를 쓴다. 앱 셸과 같은 상한(1680px)까지 내주고,
+     그보다 좁은 화면은 화면 폭. 그래도 모자라면 표만 가로로 스크롤한다(폼 전체가 아니라). */
   return (
-    <Drawer open={open} onClose={onClose} width={hasLines ? "min(1040px, 100vw)" : undefined}>
+    <Drawer open={open} onClose={onClose} width={lines.length > 0 ? "min(1680px, 100vw)" : undefined}>
         <DrawerHead
           title={editInvoice ? "청구서 수정" : (form.kind === "issued" ? "청구서 발행" : "청구서 등록 (수취)")}
           sub={editInvoice ? "청구서 내용을 수정합니다" : (form.kind === "issued" ? "발주처에 청구서를 발행합니다" : "협력사로부터 받은 청구서를 등록합니다")}
@@ -780,9 +794,10 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
             </div>
           </div>
           {/* 거래명세서식 품목 입력 — 여기서 넣은 합계가 아래 공급가액이 된다 */}
-          <InvoiceLines lines={lines} onChange={setLines} itemMaster={itemMaster} taxType={form.taxType}/>
+          <InvoiceLines lines={lines} onChange={setLines} itemMaster={itemMaster}
+            taxType={form.taxType} kind={form.kind}/>
 
-          {/* 납품일이 여러 개면 나눠 발행할 수 있다고 **그 자리에서** 알려준다.
+          {/* 납품일(입고일)이 여러 개면 나눠 발행할 수 있다고 **그 자리에서** 알려준다.
               메뉴 어딘가에 숨겨두면, 품목을 다 적고 나서야 필요해지는 기능을 못 찾는다. */}
           {canSplit && (
             <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
@@ -790,9 +805,9 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
                 <input type="checkbox" style={{ marginTop: 3 }} checked={splitByDelivery}
                   onChange={e => setSplitByDelivery(e.target.checked)}/>
                 <span>
-                  <b>납품일별로 나눠서 발행</b>
+                  <b>{deliveryLabel}별로 나눠서 발행</b>
                   <div className="text-xs text-muted2" style={{ marginTop: 2 }}>
-                    납품일이 {deliveryGroups.length}가지예요. 나누면 <b>청구서 {deliveryGroups.length}장</b>이 만들어집니다
+                    {deliveryLabel}이 {deliveryGroups.length}가지예요. 나누면 <b>청구서 {deliveryGroups.length}장</b>이 만들어집니다
                     (거래처·발행일은 같고, 청구번호는 각각 따로).
                   </div>
                 </span>
@@ -803,7 +818,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
                   <div className="table-scroll">
                     <table className="table">
                       <thead><tr>
-                        <th>납품일</th><th className="num-right">품목</th>
+                        <th>{deliveryLabel}</th><th className="num-right">품목</th>
                         <th className="num-right">공급가</th><th className="num-right">세액</th><th className="num-right">합계</th>
                       </tr></thead>
                       <tbody>
@@ -815,7 +830,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
                           const v = g.lines.reduce((a, l) => a + lineVat(l, form.taxType), 0)
                           return (
                             <tr key={g.delivery_date || '(없음)'}>
-                              <td className="num">{g.delivery_date || <span className="text-muted2">납품일 미기재</span>}</td>
+                              <td className="num">{g.delivery_date || <span className="text-muted2">{deliveryLabel} 미기재</span>}</td>
                               <td className="num-right text-muted">{g.lines.length}줄</td>
                               <td className="num-right num">{fmtNum(sup)}</td>
                               <td className="num-right num">{fmtNum(v)}</td>

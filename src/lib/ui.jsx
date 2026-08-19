@@ -593,10 +593,18 @@ export const ToastProvider = ({ children }) => {
 };
 
 /* ── Combobox ── */
-export const Combobox = ({ value, onChange, options, frequent = [], placeholder, onAddNew, allowAdd = true, addNewLabel = "새 항목 등록" }) => {
+/* portal — 목록을 body 로 띄운다.
+ *
+ * 기본은 부모 안에 absolute 로 그린다(대부분의 폼은 그걸로 충분하고, 스크롤을 따라
+ * 같이 움직여서 자연스럽다). 하지만 **스크롤 컨테이너 안**에 놓인 Combobox 는
+ * 목록이 그 상자에 잘린다 — 청구서 품목표(가로 스크롤)가 그렇다. 거기서는 목록의
+ * 아랫부분('직접 입력' 버튼)이 통째로 잘려, 목록에 없는 값을 넣을 방법이 사라진다.
+ * 그런 자리에서만 portal 을 켠다. 켜지 않은 곳의 동작은 그대로다. */
+export const Combobox = ({ value, onChange, options, frequent = [], placeholder, onAddNew, allowAdd = true, addNewLabel = "새 항목 등록", portal = false }) => {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [hi, setHi] = useState(0);
+  const [anchor, setAnchor] = useState(null);   // portal 일 때의 화면 좌표
   const inputRef = useRef(null);
   const popRef = useRef(null);
   const rootRef = useRef(null);
@@ -604,11 +612,39 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
   useEffect(() => {
     if (!open) return;
     const onDoc = (e) => {
-      if (!rootRef.current?.contains(e.target)) { setOpen(false); setQ(""); }
+      /* portal 이면 목록이 rootRef 밖에 있다 — root 만 보면 **목록 안을 눌러도 닫힌다.**
+         닫히면서 클릭이 사라져 항목이 안 골라진다. 목록도 함께 확인한다. */
+      if (rootRef.current?.contains(e.target)) return;
+      if (popRef.current?.contains(e.target)) return;
+      setOpen(false); setQ("");
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
+
+  /* 뜬 목록을 트리거 밑에 붙여 둔다. position:fixed 라 조상의 스크롤을 따라오지 않으므로
+     스크롤·리사이즈마다 다시 잰다. 아래 공간이 모자라면 위로 뒤집는다. */
+  useEffect(() => {
+    if (!portal || !open) { setAnchor(null); return; }
+    const place = () => {
+      const r = rootRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const below = window.innerHeight - r.bottom;
+      setAnchor({
+        left: r.left, width: r.width,
+        ...(below < 240 && r.top > below
+          ? { bottom: window.innerHeight - r.top + 4, maxHeight: Math.min(320, r.top - 12) }
+          : { top: r.bottom + 4, maxHeight: Math.min(320, below - 12) }),
+      });
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [portal, open]);
 
   const filtered = useMemo(() => {
     if (!q) return options;
@@ -647,6 +683,8 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
   };
 
   const freqOptions = frequent.map(v => options.find(o => o.value === v)).filter(Boolean);
+  // portal 이면 목록만 body 로 옮긴다 — 트리거(칸)는 제자리에 그대로 있다.
+  const renderPop = (node) => (portal ? createPortal(node, document.body) : node);
 
   return (
     <div ref={rootRef} style={{ position: "relative" }}>
@@ -676,12 +714,16 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
         <Icon.Down size={14} className="text-muted2" style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}/>
       </div>
 
-      {open && (
+      {open && renderPop(
         <div ref={popRef}
-          style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
+          style={{
+            ...(portal
+              // 드로어(z-index 높음) 위에 떠야 하므로 z 를 넉넉히 준다
+              ? { position: "fixed", zIndex: 1200, ...(anchor || { left: -9999, top: -9999 }) }
+              : { position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50, maxHeight: 320 }),
             background: "#fff", border: "1px solid var(--line)", borderRadius: 12,
             boxShadow: "0 16px 40px -12px rgba(15,23,42,0.18), 0 1px 0 rgba(15,23,42,0.04)",
-            zIndex: 50, maxHeight: 320, overflow: "hidden",
+            overflow: "hidden",
             display: "flex", flexDirection: "column", animation: "fadeUp .14s ease" }}>
           {!q && freqOptions.length > 0 && (
             <div style={{ padding: "10px 12px 8px", borderBottom: "1px solid var(--line)" }}>
