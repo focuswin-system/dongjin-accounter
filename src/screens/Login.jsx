@@ -51,7 +51,9 @@ const LOOKS = [
 const typeOf = (look) => (look.startsWith('photo-full') ? 'B' : 'A');
 
 export const LoginScreen = ({ onLogin }) => {
-  const [look, setLook] = useState(() => localStorage.getItem('loginLook') || BRAND_THEME);
+  /* 기본값은 LOOKS 의 id 와 **정확히 같아야** 한다 — 'photo-full' 로 두면
+     보이는 화면은 맞는데 어느 칩도 선택 표시가 안 된다(id 는 'photo-full v-a'). */
+  const [look, setLook] = useState(() => localStorage.getItem('loginLook') || 'photo-full v-a');
   const pickLook = (id) => { setLook(id); localStorage.setItem('loginLook', id); };
   const activeType = typeOf(look);
   // 회사코드는 마지막 로그인 값을 기억한다(같은 PC는 대개 같은 회사에서 쓴다).
