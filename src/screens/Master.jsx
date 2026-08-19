@@ -1500,20 +1500,29 @@ const AdjustDrawer = ({ account, onClose, onSave }) => {
       <DrawerHead title="잔액 조정" sub={account.name} onClose={onClose}/>
       <div className="drawer-body col gap-form">
 
+        {/* 맞춰야 할 기준을 **맨 위에** 둔다 — 어느 통장인지(번호)와 지금 얼마인지가
+            먼저 확정돼야 그 아래 숫자를 채울 수 있다. 통장을 옆에 놓고 보는 화면이다. */}
+        <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
+          <div className="row" style={{ alignItems: 'baseline', marginBottom: 8 }}>
+            <span className="text-sm fw-600">{account.bankName || account.type}</span>
+            {account.number && (
+              <span className="num text-sm text-muted ml-auto">{account.number}</span>
+            )}
+          </div>
+          <div className="row" style={{ alignItems: 'baseline' }}>
+            {/* 어느 날짜 기준인지 라벨에 박는다 — 과거 날짜를 고르면 이 숫자가 바뀌므로,
+                날짜를 안 적으면 "무엇의 잔액인지"가 사라진다. */}
+            <span className="text-sm text-muted">{date || todayStr()} 기준 현재 잔액</span>
+            <span className="num fw-700 ml-auto" style={{ fontSize: 18 }}>
+              {base == null ? <span className="text-muted2 text-sm">불러오는 중…</span> : `${fmtNum(base)}원`}
+            </span>
+          </div>
+        </div>
+
         <div>
           <label className="label">조정 일자</label>
           <DateInput className="input num" value={date} max={todayStr()}
             onChange={e => setDate(e.target.value)}/>
-        </div>
-
-        {/* 그날 잔액 — 맞춰야 할 기준값이다. 못 읽었으면 숫자 대신 그렇다고 말한다. */}
-        <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
-          <div className="row" style={{ alignItems: 'baseline' }}>
-            <span className="text-sm text-muted">{isPast ? '그날 잔액' : '현재 잔액'}</span>
-            <span className="num fw-700 ml-auto" style={{ fontSize: 17 }}>
-              {base == null ? <span className="text-muted2 text-sm">불러오는 중…</span> : `${fmtNum(base)}원`}
-            </span>
-          </div>
         </div>
 
         <div>
@@ -2025,7 +2034,12 @@ const AccountBalancePanel = ({ embedded = false }) => {
             <div className="row" style={{ marginBottom: 10 }}>
               <div>
                 <div className="fw-700" style={{ fontSize: 15 }}>{acc.name}</div>
+                {/* 계좌번호까지 보여준다 — 같은 은행에 통장이 여러 개면 별칭만으로는
+                    어느 통장인지 확정할 수 없다. 통장을 옆에 놓고 맞추는 화면이라 번호가 근거다. */}
                 <div className="text-xs text-muted">{acc.bankName} · {acc.type}</div>
+                {acc.number && (
+                  <div className="text-xs text-muted2 num" style={{ marginTop: 2 }}>{acc.number}</div>
+                )}
               </div>
               <div className="num fw-700 ml-auto" style={{ fontSize: 22, letterSpacing: "-0.02em" }}>
                 {acc.currentBalance == null ? "—" : fmtNum(acc.currentBalance)}
