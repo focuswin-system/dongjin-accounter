@@ -14,10 +14,12 @@ const KICKED = (() => {
 })()
 
 /* 좌측 브랜드 패널의 색. 상호(도니도라 = 돈이 들어오다)에 맞춰 황금빛으로 간다.
- *   'gold-dark'  — 짙은 먹빛 바탕 + 금빛 글씨·장식. 앱의 나머지 다크 톤과 이어진다.
+ *   'gold-photo' — 받아 온 배경 이미지(금빛 물결·상승 차트). **현재 쓰는 것.**
+ *   'gold-dark'  — 짙은 먹빛 바탕 + 금빛 글씨·장식. 이미지 없이 갈 때.
  *   'gold-light' — 금빛 바탕 + 먹빛 글씨. 인상은 세지만 혼자 튄다.
- * 색은 index.css 의 .login-brand.<테마> 가 CSS 변수로 정한다 — 여기 한 줄만 바꾸면 갈린다. */
-const BRAND_THEME = 'gold-dark'
+ * 색·배경은 index.css 의 .login-brand.<테마> 가 CSS 변수로 정한다 —
+ * 여기 한 줄만 바꾸면 갈린다(JSX 는 var() 만 읽는다). */
+const BRAND_THEME = 'gold-fine'
 
 export const LoginScreen = ({ onLogin }) => {
   // 회사코드는 마지막 로그인 값을 기억한다(같은 PC는 대개 같은 회사에서 쓴다).
@@ -111,18 +113,13 @@ export const LoginScreen = ({ onLogin }) => {
 
         {/* 메인 카피 */}
         <div style={{ marginBottom: 'auto' }}>
-          <div style={{
-            fontSize: 46, fontWeight: 800, color: 'var(--brand-title)',
-            letterSpacing: '-0.04em', lineHeight: 1.1, marginBottom: 4,
-          }}>
+          <div className="login-title" style={{ color: 'var(--brand-title)', marginBottom: 4 }}>
             도니도라
           </div>
-          <div style={{
-            fontSize: 46, fontWeight: 800, color: 'var(--brand-title-2)',
-            letterSpacing: '-0.04em', lineHeight: 1.1, marginBottom: 24,
-          }}>
+          <div className="login-title" style={{ color: 'var(--brand-title-2)' }}>
             회계관리
           </div>
+          <div className="login-rule"/>
           <div style={{
             fontSize: 18, fontWeight: 500, color: 'var(--brand-sub)',
             letterSpacing: '-0.02em', lineHeight: 1.65,

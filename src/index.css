@@ -221,6 +221,78 @@ a { color: inherit; text-decoration: none; }
   --login-copy:  oklch(0.98 0.01 85 / 0.5);
 }
 
+/* gold-photo — 받아 온 배경 이미지(금빛 물결·상승 차트)를 그대로 깐다. **기본값.**
+ *
+ * ── 크롭 ──
+ * 원본은 가로로 긴 그림인데(1448×1086) 이 패널은 세로로 긴 칸이다. 게다가 볼거리가
+ * **왼쪽에 몰려 있고** 오른쪽 40%는 거의 빈 크림색이다. 그래서 cover + left 로 앉힌다 —
+ * center 로 두면 물결과 차트가 잘려 나가고 빈 크림만 남는다.
+ *
+ * ── 글씨가 묻히지 않게 ──
+ * 그림이 밝아서 먹빛 글씨는 어디서든 읽히지만, 금색 '도니도라'는 물결의 밝은 부분과
+ * 겹치면 흐려진다. 그래서 글자가 앉는 왼쪽 위에만 아주 옅은 크림 막을 덮는다
+ * (그림을 탁하게 만들지 않을 만큼만 — 위 40%에 최대 0.5 알파).
+ * 장식 원(orb)은 그림에 이미 원이 있어 겹치면 지저분하다 → 투명으로 끈다. */
+.login-brand.gold-photo {
+  background-color: oklch(0.97 0.02 85);        /* 이미지 로딩 전·레터박스 대비 */
+  background-image:
+    linear-gradient(180deg, oklch(0.99 0.012 88 / 0.5) 0%, oklch(0.99 0.012 88 / 0.12) 42%, transparent 62%),
+    url('/login-bg.jpg');
+  background-size: cover, cover;
+  background-position: left top, left center;
+  background-repeat: no-repeat, no-repeat;
+  --brand-orb-1: transparent;                   /* 그림에 원이 이미 있다 */
+  --brand-orb-2: transparent;
+  --brand-rule:  transparent;
+  --brand-mark:  oklch(0.58 0.10 72);           /* 상단 작은 로고 — 금갈색 */
+  --brand-title:   oklch(0.68 0.13 78);         /* '도니도라' — 금색 */
+  --brand-title-2: oklch(0.22 0.02 60);         /* '회계관리' — 먹빛. 두 줄을 갈라 대비를 준다 */
+  --brand-sub:   oklch(0.42 0.02 65);
+  --brand-accent: oklch(0.72 0.13 80);          /* 제목 아래 짧은 금빛 선 */
+  --login-copy:  oklch(0.45 0.015 65);
+}
+
+/* gold-fine — 이미지 없이 CSS 만으로. gold-photo 와 같은 크림·금빛 톤인데,
+ * 촌스러워지는 요소(반짝이·리본·베벨·입체 그림자)를 전부 뺐다.
+ *
+ * ── 무엇으로 만드나 ──
+ * 남는 건 셋뿐이다. 얇은 동심원 **헤어라인**(1px), 아주 옅은 사선 결, 은은한 발광 두 점.
+ * 장식이 '그려진 그림'처럼 보이기 시작하면 촌스러워지므로, 어느 요소도 스스로 도드라지지
+ * 않게 알파를 0.1 아래로 눌렀다 — 멀리서 보면 종이의 질감처럼만 읽힌다.
+ *
+ * 전부 background-image 레이어다(가상요소·추가 DOM 없음). 배경으로 깔리므로 글씨를
+ * 덮을 일이 없고, 장식 원(orb)은 겹치면 지저분해서 끈다. */
+.login-brand.gold-fine {
+  background-color: oklch(0.97 0.025 88);
+  background-image:
+    /* 1. 도트 그리드 — 왼쪽 위에서만 나타났다 사라진다(마스크 대신 발광으로 농도를 준다).
+          전면에 깔면 스크린톤처럼 보이므로 반드시 한쪽으로 빠져야 한다 */
+    radial-gradient(oklch(0.52 0.12 76 / 0.16) 1px, transparent 1.6px),
+    /* 2. 동심원 헤어라인 — 굵은 원 하나보다 얇은 여러 겹이 차분하다 */
+    repeating-radial-gradient(circle at 2% 4%,
+      transparent 0 148px, oklch(0.58 0.13 78 / 0.20) 148px 149.5px, transparent 149.5px 300px),
+    /* 3. 발광 — 왼쪽 위 크게, 오른쪽 아래 작게. 빛의 방향을 하나로 잡아준다 */
+    radial-gradient(1100px 820px at 6% 10%, oklch(0.93 0.095 88 / 0.55), transparent 62%),
+    radial-gradient(640px 640px at 92% 94%, oklch(0.82 0.130 72 / 0.50), transparent 66%),
+    /* 4. 바탕 — 크림이 아니라 **금빛**이 되도록 채도를 올리고 밝기를 내렸다 */
+    linear-gradient(158deg, oklch(0.955 0.048 92) 0%, oklch(0.900 0.086 84) 48%, oklch(0.845 0.115 77) 100%);
+  /* 레이어 순서와 1:1로 맞춘다 — 도트만 타일이고 나머지는 패널 전체.
+     도트는 패널 전면에 깔리되 알파가 0.13이라 가까이서만 보인다. 한쪽으로 몰지 않은 건
+     CSS 로 레이어 하나만 잘라낼 방법이 없어서다(mask 는 글씨까지 함께 깎는다). */
+  background-size: 23px 23px, auto, auto, auto, auto;
+  background-repeat: repeat, no-repeat, no-repeat, no-repeat, no-repeat;
+  --brand-orb-1: transparent;
+  --brand-orb-2: transparent;
+  --brand-rule:  transparent;
+  /* 바탕이 진해진 만큼 글자도 함께 내린다 — 밝은 금색 그대로 두면 바탕에 묻힌다 */
+  --brand-mark:  oklch(0.46 0.11 68);
+  --brand-title:   oklch(0.52 0.15 72);
+  --brand-title-2: oklch(0.20 0.02 60);
+  --brand-sub:   oklch(0.36 0.025 62);
+  --brand-accent: oklch(0.58 0.15 74);
+  --login-copy:  oklch(0.40 0.02 62);
+}
+
 /* gold-light — 금빛 바탕에 먹빛 글씨. 대비가 강해 인상은 세다.
    다만 우측 폼(흰색)·상단 헤더(먹빛)와 톤이 갈리므로 브랜드 전반을 같이 봐야 한다. */
 .login-brand.gold-light {
@@ -238,6 +310,26 @@ a { color: inherit; text-decoration: none; }
   /* 테마가 정한 색. 변수가 없으면(테마 클래스 누락) 예전처럼 흰 계열로 떨어진다. */
   color: var(--login-copy, rgba(255, 255, 255, 0.55));
   font-size: 12.5px;
+}
+/* 제목은 패널 폭을 따라간다 — 패널이 42vw 라 고정 px 로 두면 와이드 모니터에서는
+   글씨만 작아 보이고, 860px 언저리에서는 두 줄로 접힌다. 위아래로 못을 박아 둔다. */
+.login-title {
+  /* 하한 34px — 패널이 가장 좁아지는 지점(뷰포트 860px, 그 아래는 패널 자체가 숨는다)에서도
+     네 글자가 여유 있게 들어간다. 상한 56px 은 와이드 모니터에서 제목이 작아 보이지 않을 크기. */
+  font-size: clamp(34px, 2.98vw, 56px);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+/* 제목과 설명 사이의 짧은 금빛 선. 두 덩이를 갈라 제목이 문장처럼 흘러가지 않게 잡는다.
+   --brand-accent 를 안 정한 테마에서는 제목 색을 그대로 쓴다. */
+.login-rule {
+  width: 54px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--brand-accent, var(--brand-title));
+  margin: 22px 0 20px;
 }
 @media (max-width: 860px) {
   .login-brand { display: none; }
