@@ -272,7 +272,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                   <span className="num fw-700 ml-auto" style={{ flexShrink: 0 }}>{fmtNum(invoice.totalAmount)}원</span>
                 </div>
                 <div className="text-xs text-muted2" style={{ marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {invoice.contract || "계약 없음"}
+                  {invoice.contract || "주문 없음"}
                 </div>
               </div>
 
@@ -423,7 +423,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
             <div className="card" style={{ padding: 16, background: "var(--surface-2)" }}>
               <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "10px 16px", fontSize: 13 }}>
                 <span className="text-muted">거래처</span><span className="fw-700">{invoice.vendor}</span>
-                <span className="text-muted">계약</span><span>{invoice.contract || "—"}</span>
+                <span className="text-muted">주문</span><span>{invoice.contract || "—"}</span>
                 <span className="text-muted">공급가액</span><span className="num fw-600">{fmtNum(invoice.supplyAmount)}</span>
                 <span className="text-muted">부가세</span><span className="num fw-600">{fmtNum(invoice.vatAmount)}</span>
                 <span className="text-muted">청구금액</span>
@@ -682,10 +682,10 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     : vendors.filter(v => ["A", "E"].includes(v.gubu))
   ).map(v => ({ value: v.name, label: v.name, sub: v.type }))
 
-  /* 계약은 **선택 입력**이다. 청구서는 계약 없이도 성립한다(contract_id 는 nullable).
+  /* 주문은 **선택 입력**이다. 청구서는 주문 없이도 성립한다(contract_id 는 nullable).
    *
    * 예전엔 여기에 '공통(원자재)'·'공통(생산소모)'·'공통' 세 개가 붙어 있었다.
-   * 계약을 안 고르면 안 될 것 같아 만든 임시방편이었는데, 실제로는 **저장될 때 통째로 버려졌다** —
+   * 주문을 안 고르면 안 될 것 같아 만든 임시방편이었는데, 실제로는 **저장될 때 통째로 버려졌다** —
    * handleSave 가 `contracts.find(name)` 으로만 id 를 찾으므로 '공통…'은 contract_id=null 이 되고
    * 이름을 남길 자리도 없다(거래 폼과 달리 청구서엔 doc_no 보존 경로가 없다).
    * 고른 사람은 분류한 줄 알지만 아무 데도 안 남는다 → 빈칸과 결과가 같으면서 거짓말만 한다. 뺀다. */
@@ -773,16 +773,16 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
               addNewLabel="직접 입력"/>
           </div>
           <div>
-            <label className="label">계약 <span className="text-muted2">(선택)</span></label>
+            <label className="label">주문 <span className="text-muted2">(선택)</span></label>
             {/* '직접 입력'도 뺐다 — 목록에 없는 이름을 타이핑하면 저장 때 버려져(위 주석)
-                입력한 사람만 연결됐다고 믿게 된다. 계약은 계약 화면에서 먼저 만든다. */}
+                입력한 사람만 연결됐다고 믿게 된다. 주문은 주문 화면에서 먼저 만든다. */}
             <Combobox
               value={form.contract}
               onChange={v => f("contract", v)}
               options={contractOptions}
-              placeholder={contractOptions.length ? "해당 계약이 있으면 선택하세요" : "등록된 계약이 없어요"}/>
+              placeholder={contractOptions.length ? "해당 주문이 있으면 선택하세요" : "등록된 주문이 없어요"}/>
             <div className="text-sm text-muted2" style={{ marginTop: 4 }}>
-              계약 없이 발행·수취하는 청구서는 비워두세요.
+              주문 없이 발행·수취하는 청구서는 비워두세요.
             </div>
           </div>
           <div>
@@ -946,7 +946,7 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", select }) => (
       columns={[
         { key: 'invoiceNo', header: '청구번호', sortable: true, render: inv => <span className="text-sm text-muted num">{inv.invoiceNo}</span> },
         { key: 'vendor', header: '거래처', sortable: true, render: inv => <span className="fw-700">{inv.vendor}</span> },
-        { key: 'contract', header: '계약', render: inv => <span className="text-sm text-muted">{inv.contract || "—"}</span> },
+        { key: 'contract', header: '주문', render: inv => <span className="text-sm text-muted">{inv.contract || "—"}</span> },
         { key: 'totalAmount', header: '청구금액', align: 'right', sortable: true, render: inv => <span className="num-cell">{fmtNum(inv.totalAmount)}</span> },
         { key: 'remainAmount', header: remainLabel, align: 'right', sortable: true, render: inv => (
           inv.remainAmount > 0
@@ -1015,7 +1015,7 @@ const SubtotalChips = ({ title, note, rows, onPick, activeKey, limit = 12, moreH
 }
 
 // ── 발행 예정(대기) 청구 일정 테이블 ─────────────────────────────
-// 계약에 깔아둔 청구/지급 일정 → 아직 청구서가 안 만들어진 건. 매출은 '발행', 매입은 '등록' 관점.
+// 주문에 깔아둔 청구/지급 일정 → 아직 청구서가 안 만들어진 건. 매출은 '발행', 매입은 '등록' 관점.
 const PendingScheduleTable = ({ rows, onIssue, onPaid, isIssued = true, select }) => (
   <div className="card" style={{ overflow: "hidden" }}>
     <DataTable
@@ -1023,15 +1023,15 @@ const PendingScheduleTable = ({ rows, onIssue, onPaid, isIssued = true, select }
       rowKey={pendingKey}
       select={select}
       empty={isIssued
-        ? "발행 예정인 청구 일정이 없어요. 계약 상세의 '청구 일정'에서 청구할 금액·시점을 등록하세요."
-        : "예정된 지급 일정이 없어요. 발주 계약 상세의 '청구 일정'에서 지급할 금액·시점을 등록하세요."}
+        ? "발행 예정인 청구 일정이 없어요. 주문 상세의 '청구 일정'에서 청구할 금액·시점을 등록하세요."
+        : "예정된 지급 일정이 없어요. 발주 상세의 '청구 일정'에서 지급할 금액·시점을 등록하세요."}
       columns={[
         { key: 'due_date', header: '예정일', sortable: true, render: p => (
           <span className="num text-sm">{p.due_date || "—"}
             {p.due_date && <span className={`badge ${ddayTone(p.due_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(p.due_date)}</span>}</span>
         ) },
         { key: 'vendor_name', header: '거래처', sortable: true, render: p => <span className="fw-700">{p.vendor_name || "—"}</span> },
-        { key: 'contract_name', header: '계약', render: p => <span className="text-sm text-muted">{p.contract_name}{p.contract_no ? ` · ${p.contract_no}` : ""}</span> },
+        { key: 'contract_name', header: '주문', render: p => <span className="text-sm text-muted">{p.contract_name}{p.contract_no ? ` · ${p.contract_no}` : ""}</span> },
         { key: 'type', header: '유형', render: p => <span className="badge outline">{p.type}</span> },
         { key: 'total', header: `${isIssued ? "청구금액" : "지급금액"}(VAT 포함)`, align: 'right', sortable: true,
           sortValue: pendingGross,
@@ -1083,7 +1083,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const [importing, setImporting] = useState(false)    // 홈택스 세금계산서 엑셀 업로드 화면
   const [ourBizNo, setOurBizNo] = useState('')         // 우리 회사 사업자번호 — 매출/매입 자동 판정용
 
-  // 청구할 것은 두 갈래로 생긴다: 계약의 청구 일정(마일스톤)과 정기청구 회차(유지보수 등).
+  // 청구할 것은 두 갈래로 생긴다: 주문의 청구 일정(마일스톤)과 정기청구 회차(유지보수 등).
   // 경리가 청구서 메뉴 한 곳만 열면 이번 달 청구할 게 다 보이도록 '발행 예정'에서 합친다.
   // (정기청구는 매출 전용 — 매입의 정기지출은 별도 흐름)
   const load = async () => {
@@ -1142,7 +1142,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
      사라진다(기한은 선택 입력이다). */
   const listF = useTableFilter({
     date: { field: 'issuedAt' },
-    search: { fields: ['invoiceNo', 'vendor', 'contract', 'memo'], placeholder: "청구번호·거래처·계약·메모 검색" },
+    search: { fields: ['invoiceNo', 'vendor', 'contract', 'memo'], placeholder: "청구번호·거래처·주문·메모 검색" },
     filters: [{ key: 'vendor', label: "거래처", field: 'vendor',
       options: [...new Set(kindRows.map(i => i.vendor).filter(Boolean))].sort() }],
   })
@@ -1246,7 +1246,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
      예정 탭에도 걸려 "왜 갑자기 비었지"가 된다(기준 날짜부터 다르다: 발행일 vs 예정일). */
   const pendF = useTableFilter({
     date: { field: 'due_date' },
-    search: { fields: ['vendor_name', 'contract_name', 'contract_no', 'type'], placeholder: "거래처·계약·유형 검색" },
+    search: { fields: ['vendor_name', 'contract_name', 'contract_no', 'type'], placeholder: "거래처·주문·유형 검색" },
     /* '(거래처 미지정)' 은 값이 아니라 **빈 거래처를 가리키는 이름표**다. field 매칭으로는
        잡히지 않아(vendor_name 이 '' 이거나 null) 소계 칩을 눌러도 거를 수가 없었다. */
     filters: [{ key: 'vendor', label: "거래처",
@@ -1476,7 +1476,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           </>
         ) : (
           <>
-            {/* pending 은 '아직 청구서가 안 만들어진 회차'다(정기지출·계약 지급일정).
+            {/* pending 은 '아직 청구서가 안 만들어진 회차'다(정기지출·주문 지급일정).
                 '지급 예정(대기)'라고 부르니 옆의 '미지급금 합계'와 구분이 안 됐다 —
                 둘 다 "3건"으로 떠서 같은 3건처럼 보인다. 실제로는 겹치지 않는 별개다.
                 매출 쪽 '발행 예정'과 대칭이 되게 '등록 예정'으로 부른다. */}

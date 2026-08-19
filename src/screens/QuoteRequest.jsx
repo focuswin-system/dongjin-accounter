@@ -49,7 +49,7 @@ const QuoteRequestPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSave
     items[i] = it
     return { ...f, items }
   })
-  // 품목 기준정보에서 고르면 자재코드·품명(＋규격)·단위·단가를 자동으로 채운다(계약·구매품의서와 동일 방식).
+  // 품목 기준정보에서 고르면 자재코드·품명(＋규격)·단위·단가를 자동으로 채운다(주문·구매품의서와 동일 방식).
   const pickItem = (i, name) => setForm(f => {
     const items = [...f.items]
     if (i === items.length) items.push(emptyItem())

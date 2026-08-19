@@ -10,9 +10,9 @@ import { FilterSelect } from './ui'
  *   rows.filter(t => t.date >= range.from) ...   // 같은 술어를 또 손으로
  *
  * 손으로 다시 쓰니 조용히 갈라졌다. 실제로 거래내역에서
- *   · scoped       기간·비목·**계약**·검색
- *   · plannedRows  기간·비목·검색        ← 계약 필터가 빠져 있었다
- * 그래서 계약으로 좁혀도 예정분(미수금·미지급금)은 전 계약이 그대로 떠 있었다.
+ *   · scoped       기간·비목·**주문**·검색
+ *   · plannedRows  기간·비목·검색        ← 주문 필터가 빠져 있었다
+ * 그래서 주문으로 좁혀도 예정분(미수금·미지급금)은 전 주문이 그대로 떠 있었다.
  * 한 화면이 두 가지 기준을 동시에 말한 셈이다. 규칙을 여기 하나만 둔다.
  *
  * ── 쓰는 법 ──
@@ -73,7 +73,7 @@ export const useTableFilter = ({ date, search, filters = [] } = {}) => {
         const v = values[f.key]
         if (v == null) continue
         // match 를 주면 그걸 쓴다 — 한 값이 여러 칸에 걸리는 축이 있다
-        // (계약: 근거 계약과 원가 귀속 계약 둘 다 봐야 "이 계약에 붙은 것 전부"가 된다).
+        // (주문: 근거 주문과 원가 귀속 주문 둘 다 봐야 "이 주문에 붙은 것 전부"가 된다).
         if (f.match ? !f.match(row, v) : get(row, f.field || f.key) !== v) return false
       }
       if (q && search?.fields?.length) {

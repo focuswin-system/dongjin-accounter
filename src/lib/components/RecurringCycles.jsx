@@ -89,12 +89,12 @@ const Row = ({ c, sales, primary, onIssue, onPaid, onOpenContract, onSkip, onUns
       <td className="fw-700">{c.vendor_name || '(거래처 미지정)'}</td>
       <td className="text-sm text-muted">
         {c.item || c.contract_name || '—'}
-        {/* 계약 기반이면 금액·종료 시점의 출처가 계약이다 → 그쪽으로 보낸다.
+        {/* 주문 기반이면 금액·종료 시점의 출처가 주문이다 → 그쪽으로 보낸다.
             이동 수단이 없는 자리(기준정보 탭 안)에서는 눌러도 아무 일이 없으니 버튼으로 만들지 않는다 */}
         {c.contract_id && (onOpenContract
           ? <button className="badge brand" style={{ marginLeft: 6, fontSize: 10, cursor: 'pointer', border: 0 }}
-              title="계약 상세로 이동" onClick={() => onOpenContract(c)}><Icon.Link size={10}/> 계약</button>
-          : <span className="badge brand" style={{ marginLeft: 6, fontSize: 10 }} title="계약에서 관리하는 항목입니다">계약</span>
+              title="주문 상세로 이동" onClick={() => onOpenContract(c)}><Icon.Link size={10}/> 주문</button>
+          : <span className="badge brand" style={{ marginLeft: 6, fontSize: 10 }} title="주문에서 관리하는 항목입니다">주문</span>
         )}
       </td>
       <td className="num-cell num-right fw-700">{fmtNum(cycleTotal(c))}</td>
@@ -185,7 +185,7 @@ const Section = ({ state, cycles, sales, onIssue, onPaid, onOpenContract, onBulk
  * @param kind            'sales'(정기청구) | 'purchase'(정기지출)
  * @param onIssue/onPaid  회차 1건 처리
  * @param onBulk          놓친 회차 일괄 처리
- * @param onOpenContract  계약 배지 클릭
+ * @param onOpenContract  주문 배지 클릭
  */
 export const RecurringCycles = ({ cycles = [], kind = 'purchase', onIssue, onPaid, onBulk, onOpenContract, onSkip, onUnskip, busy }) => {
   const sales = kind === 'sales'

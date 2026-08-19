@@ -59,26 +59,26 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   const [contracts, setContracts] = useState([]);
   const [employees, setEmployees] = useState([]);
 
-  // 거래는 계약에 두 축으로 붙는다.
-  //   근거 계약  — 이 돈이 오간 약정. 입금=수주 계약 / 지출=발주 계약(외주·구매). **없으면 비운다(선택 입력)**
-  //   원가 귀속  — (지출만) 이 돈이 어느 매출건의 원가인지. 외주비는 외주계약에 '지급'되면서 그 프로젝트의 '원가'가 된다.
+  // 거래는 주문에 두 축으로 붙는다.
+  //   근거 주문  — 이 돈이 오간 약정. 입금=수주 / 지출=발주(외주·구매). **없으면 비운다(선택 입력)**
+  //   원가 귀속  — (지출만) 이 돈이 어느 매출건의 원가인지. 외주비는 외주주문에 '지급'되면서 그 프로젝트의 '원가'가 된다.
   const contractOpts = useMemo(() => {
     const opts = contracts
-      .filter(c => kind === 'income' ? !c.is_purchase : c.is_purchase)   // 입금=수주 계약 / 지출=발주 계약
+      .filter(c => kind === 'income' ? !c.is_purchase : c.is_purchase)   // 입금=수주 / 지출=발주
       .map(c => ({
         value: c.name, label: c.name,
         sub: [c.vendor_name, c.status].filter(Boolean).join(' · '),
       }));
     /* 예전엔 지출에 '공통(원자재)'·'공통(생산소모)'·'공통(인건비)'·'공통' 네 개를 붙였다.
-     * 계약이 필수 입력이라 계약 없는 지출을 넣을 길이 없었기 때문인데, 두 가지가 잘못됐다.
-     *   · 그 값은 doc_no 에 들어가지만 화면에 안 보인다 — 거래 목록의 '계약' 칸은
+     * 주문이 필수 입력이라 주문 없는 지출을 넣을 길이 없었기 때문인데, 두 가지가 잘못됐다.
+     *   · 그 값은 doc_no 에 들어가지만 화면에 안 보인다 — 거래 목록의 '주문' 칸은
      *     `contract_name || memo || doc_no` 순으로 고르는데(api.js) 적요가 필수라 항상 적요가 이긴다.
      *   · 무엇보다 **분류가 아니다.** 원자재냐 생산소모냐는 비목(category)이 이미 받고 있다.
-     * 계약은 선택 입력으로 두고, 없으면 비우는 게 맞다(contract_id 는 nullable). */
+     * 주문은 선택 입력으로 두고, 없으면 비우는 게 맞다(contract_id 는 nullable). */
     return opts;
   }, [contracts, kind]);
 
-  // 원가 귀속 후보 = 수주 계약만
+  // 원가 귀속 후보 = 수주만
   const costContractOpts = useMemo(() => ([
     { value: "", label: "귀속 없음", sub: "특정 수주건의 원가가 아님 (일반 경비)" },
     ...contracts.filter(c => !c.is_purchase).map(c => ({
@@ -122,8 +122,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     setShowMore(!!(editTxn.evid_url || editTxn.account_code || editTxn.project_no || editTxn.site));
     setForm({
       vendor:    editTxn.vendor   || '',
-      /* 계약이 비어 있으면 비운 채로 둔다. 예전엔 '공통'을 지어내 채웠는데(계약이 필수였으니까),
-         계약 없이 만들어진 자동 생성 거래(청구서 정산·정기지출·급여)를 한 번만 열어도
+      /* 주문이 비어 있으면 비운 채로 둔다. 예전엔 '공통'을 지어내 채웠는데(주문이 필수였으니까),
+         주문 없이 만들어진 자동 생성 거래(청구서 정산·정기지출·급여)를 한 번만 열어도
          '공통'이 doc_no 에 박혔다. 없는 것은 없는 채로 보여준다. */
       contract:  editTxn.contract || '',
       costContract: editTxn.cost_contract_name || '',
@@ -218,8 +218,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   const handleSave = async () => {
     if (busy) return;
     if (!form.vendor)   { toast.push("거래처를 선택해주세요"); return; }
-    // 계약은 선택 입력이다 — 계약 없이 오가는 돈이 정상적으로 더 많다(경비·소모품·공과금).
-    // 예전엔 필수라서 '공통'을 고르게 했고, 그게 가짜 계약 선택지가 생긴 이유였다.
+    // 주문은 선택 입력이다 — 주문 없이 오가는 돈이 정상적으로 더 많다(경비·소모품·공과금).
+    // 예전엔 필수라서 '공통'을 고르게 했고, 그게 가짜 주문 선택지가 생긴 이유였다.
     if (!form.category) { toast.push(kind === "income" ? "수금 유형을 선택해주세요" : "비목을 선택해주세요"); return; }
     if (!form.memo || !form.memo.trim()) { toast.push("적요(거래 내용)를 입력해주세요"); return; }
     if (!form.amount)   { toast.push("금액을 입력해주세요"); return; }
@@ -241,7 +241,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       kind,
       vendor_id:    vendorObj?.id   || null,
       contract_id:  contractObj?.id || null,
-      // 원가 귀속(지출만) — 이 돈이 어느 매출건의 원가인지. 근거 계약과 별개 축.
+      // 원가 귀속(지출만) — 이 돈이 어느 매출건의 원가인지. 근거 주문과 별개 축.
       cost_contract_id: kind === "expense" ? (costContractObj?.id || null) : null,
       account_id:   accountObj?.id  || null,
       // 상대 계좌 — id 만 보낸다. 은행·계좌번호는 서버가 그 줄을 다시 읽어 베낀다.
@@ -263,7 +263,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       // 업종중립 선택 입력 — 조선=호선번호, 천막=설치현장, 선반=작업지시번호, SW=프로젝트코드
       project_no:   form.project_no || "",
       site:         form.site || "",
-      // 목록에 없는 이름을 '계약 없이 이 이름으로 적어두기'로 넣은 경우에만 doc_no 에 남는다.
+      // 목록에 없는 이름을 '주문 없이 이 이름으로 적어두기'로 넣은 경우에만 doc_no 에 남는다.
       // (기존 데이터의 '공통…' 값도 이 경로로 그대로 보존된다 — 열었다고 지우지 않는다)
       doc_no:       contractObj ? '' : (form.contract || ''),
       memo:         form.memo || "",
@@ -331,35 +331,35 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                 addNewLabel="거래처로 추가"/>
             </FormField>
 
-            <FormField label={kind === "income" ? "수주 계약 (선택)" : "발주 계약 (선택)"}
+            <FormField label={kind === "income" ? "수주 (선택)" : "발주 (선택)"}
               hint={kind === "expense"
-                ? "이 돈이 나가는 근거 계약(외주·구매)이 있을 때만 고르세요. 경비·공과금처럼 계약 없이 쓰는 돈은 비워둡니다."
-                : "이 입금의 근거 계약이 있을 때만 고르세요. 없으면 비워둡니다."}>
+                ? "이 돈이 나가는 근거 주문(외주·구매)이 있을 때만 고르세요. 경비·공과금처럼 주문 없이 쓰는 돈은 비워둡니다."
+                : "이 입금의 근거 주문이 있을 때만 고르세요. 없으면 비워둡니다."}>
               <Combobox value={form.contract} onChange={v => setForm({...form, contract: v})}
                 options={contractOpts}
                 placeholder={contractOpts.length
-                  ? (kind === "expense" ? "해당 발주 계약이 있으면 선택" : "해당 수주 계약이 있으면 선택")
-                  : "등록된 계약이 없어요 (비워두면 됩니다)"}
-                /* 계약은 거래처·품목과 달리 이름만으로 만들 수 없다(거래처·금액·기간·청구방식이 있어야
-                   미수금과 기성 집계가 성립한다). 그래서 여기서 입력한 이름은 계약이 되지 않고
-                   이 거래의 '참조'(doc_no)로만 남는다 — 계약별 매출·원가 집계에는 잡히지 않는다.
-                   예전엔 "계약을 새로 등록했어요"라고 알려서, 등록된 줄 알고 넘어가면
-                   그 매출이 계약 실적에서 통째로 빠졌다. 무슨 일이 일어나는지 그대로 말한다. */
+                  ? (kind === "expense" ? "해당 발주가 있으면 선택" : "해당 수주가 있으면 선택")
+                  : "등록된 주문이 없어요 (비워두면 됩니다)"}
+                /* 주문은 거래처·품목과 달리 이름만으로 만들 수 없다(거래처·금액·기간·청구방식이 있어야
+                   미수금과 기성 집계가 성립한다). 그래서 여기서 입력한 이름은 주문이 되지 않고
+                   이 거래의 '참조'(doc_no)로만 남는다 — 주문별 매출·원가 집계에는 잡히지 않는다.
+                   예전엔 "주문을 새로 등록했어요"라고 알려서, 등록된 줄 알고 넘어가면
+                   그 매출이 주문 실적에서 통째로 빠졌다. 무슨 일이 일어나는지 그대로 말한다. */
                 onAddNew={(q) => {
                   setForm({ ...form, contract: q })
-                  toast.push(`"${q}"는 참조로만 적어둡니다. 계약 실적에 넣으려면 계약 화면에서 등록 후 다시 연결해주세요.`, { tone: 'warn' })
+                  toast.push(`"${q}"는 참조로만 적어둡니다. 주문 실적에 넣으려면 주문 화면에서 등록 후 다시 연결해주세요.`, { tone: 'warn' })
                 }}
-                addNewLabel="계약 없이 이 이름으로 적어두기"/>
+                addNewLabel="주문 없이 이 이름으로 적어두기"/>
             </FormField>
 
-            {/* 원가 귀속 — 이 지출이 어느 매출건의 원가인지. 외주비는 외주계약에 '지급'되면서 그 프로젝트의 '원가'가 된다.
+            {/* 원가 귀속 — 이 지출이 어느 매출건의 원가인지. 외주비는 외주주문에 '지급'되면서 그 프로젝트의 '원가'가 된다.
                 두 축이 따로라 이중계상이 아니다. */}
             {kind === "expense" && (
-              <FormField label="원가 귀속 (수주 계약)"
-                hint="이 지출이 특정 수주건 때문에 나갔다면 그 계약을 고르세요. 그 계약의 손익에 원가로 잡힙니다.">
+              <FormField label="원가 귀속 (수주)"
+                hint="이 지출이 특정 수주건 때문에 나갔다면 그 주문을 고르세요. 그 주문의 손익에 원가로 잡힙니다.">
                 <Combobox value={form.costContract || ""} onChange={v => setForm({...form, costContract: v})}
                   options={costContractOpts}
-                  placeholder="귀속할 수주 계약 (없으면 비워두세요)"/>
+                  placeholder="귀속할 수주 (없으면 비워두세요)"/>
               </FormField>
             )}
 

@@ -15,9 +15,9 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
   const { confirm } = useConfirm();
   const [filter, setFilter] = useState(initialFilter);
   const [sel, setSel] = useState(null);
-  /* 계약 일괄 연결 — 엑셀로 올린 거래를 한꺼번에 계약에 붙인다.
+  /* 주문 일괄 연결 — 엑셀로 올린 거래를 한꺼번에 주문에 붙인다.
      allContracts 는 이름이 아니라 **id 로 보내야** 해서 목록을 따로 받는다
-     (거래에서 뽑은 이름 목록은 아직 아무 거래도 안 붙은 계약을 모른다). */
+     (거래에서 뽑은 이름 목록은 아직 아무 거래도 안 붙은 주문을 모른다). */
   const [checkedIds, setCheckedIds] = useState([]);
   const [bulkContract, setBulkContract] = useState(null);
   const [allContracts, setAllContracts] = useState([]);
@@ -46,22 +46,22 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
   useEffect(() => { if (refreshTrigger > 0) reload(); }, [refreshTrigger]);
 
   const categories = useMemo(() => [...new Set(txns.map(t => t.category).filter(Boolean))].sort(), [txns]);
-  /* 계약 목록 — 근거 계약과 원가 귀속 둘 다 모은다. 외주비는 매입계약에 '지급'되면서
-     동시에 매출계약의 '원가'라, 한 축만 보면 그 거래를 못 찾는다. */
+  /* 주문 목록 — 근거 주문과 원가 귀속 둘 다 모은다. 외주비는 매입주문에 '지급'되면서
+     동시에 매출주문의 '원가'라, 한 축만 보면 그 거래를 못 찾는다. */
   const contracts = useMemo(() => [...new Set(
     txns.flatMap(t => [t.contract, t.cost_contract_name]).filter(Boolean))].sort(), [txns]);
 
-  /* 기간·비목·계약·검색 — 규칙은 공용 훅(lib/tableFilter)에 하나만 둔다.
+  /* 기간·비목·주문·검색 — 규칙은 공용 훅(lib/tableFilter)에 하나만 둔다.
      기본 기간은 이번 달(프리셋 버튼이 값을 바꿔준다). */
   const tf = useTableFilter({
     date: { field: 'date', initial: periodToRange("month") },
-    search: { fields: ['vendor', 'scope', 'category', 'contract'], placeholder: "거래처·계약·비목 검색" },
+    search: { fields: ['vendor', 'scope', 'category', 'contract'], placeholder: "거래처·주문·비목 검색" },
     filters: [
       { key: 'cat', label: "비목", field: 'category', options: categories },
-      /* 계약으로 거르기 — 잘못 붙은 거래를 찾으려면 "이 계약에 붙은 것 전부"를
+      /* 주문으로 거르기 — 잘못 붙은 거래를 찾으려면 "이 주문에 붙은 것 전부"를
          한 번에 봐야 한다. 예전엔 검색어로 더듬는 수밖에 없었다.
          두 축(근거·원가 귀속)을 모두 본다 — 이 필터의 뜻이 그것이지, 어느 컬럼이냐가 아니다. */
-      { key: 'contract', label: "계약", options: contracts,
+      { key: 'contract', label: "주문", options: contracts,
         match: (t, v) => t.contract === v || t.cost_contract_name === v },
     ],
   });
@@ -93,7 +93,7 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
       status: inv.status,
     }));
     /* 실제 거래와 **같은 규칙**으로 거른다. 예전엔 여기에 술어를 다시 적었고,
-       그러다 계약 필터가 빠져서 계약으로 좁혀도 예정분은 전 계약이 떠 있었다. */
+       그러다 주문 필터가 빠져서 주문으로 좁혀도 예정분은 전 주문이 떠 있었다. */
     return tf.apply(rows);
   }, [showPlanned, openInvoices, tf.apply]);
 
@@ -118,12 +118,12 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
   const exportCsv = () => {
     if (filtered.length === 0) return toast.push("내보낼 거래가 없어요");
     downloadCsv(`거래내역_${localToday()}.csv`,
-      ["날짜", "실제/예정", "구분", "거래처", "계약", "원가 귀속", "적요", "비목", "금액", "상태"],
+      ["날짜", "실제/예정", "구분", "거래처", "주문", "원가 귀속", "적요", "비목", "금액", "상태"],
       filtered.map(t => [t.date, t.planned ? "예정" : "실제", t.kind === "income" ? "입금" : "지출",
         t.vendor, t.contract || "", t.cost_contract_name || "", t.scope, t.category, t.sign * t.amount, t.status]));
   };
 
-  // 화면에서 사라진 선택은 버린다 — 안 보이는 거래를 계약에 붙이면 안 된다
+  // 화면에서 사라진 선택은 버린다 — 안 보이는 거래를 주문에 붙이면 안 된다
   useEffect(() => {
     /* 걸러낸 결과가 **같으면 이전 배열을 그대로 돌려준다.**
        .filter() 는 바뀐 게 없어도 늘 새 배열을 만든다 → 매번 새 상태 → 다시 렌더 →
@@ -135,16 +135,16 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
     });
   }, [filtered, filter]);
 
-  /* 고른 거래를 계약에 붙이거나 뗀다.
-     ⚠ 축은 **거래 종류와 계약 종류**가 정한다 — 화면이 고르게 하면 반드시 틀린다.
-        지출 + 매출 계약  → 원가 귀속(cost)
-        그 외             → 근거 계약(contract)
+  /* 고른 거래를 주문에 붙이거나 뗀다.
+     ⚠ 축은 **거래 종류와 주문 종류**가 정한다 — 화면이 고르게 하면 반드시 틀린다.
+        지출 + 매출 주문  → 원가 귀속(cost)
+        그 외             → 근거 주문(contract)
      지출·입금이 섞여 있으면 축이 갈리므로 나눠 보낸다. */
   const doBulkLink = async (unlink) => {
     const rows = filtered.filter(t => checkedIds.includes(t.id) && !t.planned);
     if (!rows.length) return;
     const target = unlink ? null : allContracts.find(c => c.name === bulkContract);
-    if (!unlink && !target) return toast.push('계약을 골라주세요', { tone: 'warn' });
+    if (!unlink && !target) return toast.push('주문을 골라주세요', { tone: 'warn' });
 
     const isPurchaseC = target && (target.gubu === 'A' || target.gubu === 'E' || target.is_purchase);
     const groups = new Map();   // axis → txnIds
@@ -167,8 +167,8 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
       if (!res.ok) return toast.push(res.error || '연결에 실패했어요', { tone: 'warn' });
       done += res.count;
     }
-    if (!done) return toast.push('연결된 계약이 없는 거래예요');
-    toast.push(unlink ? `${done}건의 계약 연결을 뗐어요` : `${done}건을 ${bulkContract}에 연결했어요`);
+    if (!done) return toast.push('연결된 주문이 없는 거래예요');
+    toast.push(unlink ? `${done}건의 주문 연결을 뗐어요` : `${done}건을 ${bulkContract}에 연결했어요`);
     setCheckedIds([]); setBulkContract(null); reload();
   };
 
@@ -186,7 +186,7 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
 
   const titleMap = { all: "거래내역", income: "거래내역 · 입금", expense: "거래내역 · 지출" };
   const subMap = {
-    all:     "실제로 오간 모든 입금·지출 기록이에요. 미수금·미지급금은 판매·매출의 '미수금', 매입의 '미지급금'에서 관리해요.",
+    all:     "실제로 오간 모든 입금·지출 기록이에요. 미수금·미지급금은 판매·수주(매출)의 '미수금', 매입의 '미지급금'에서 관리해요.",
     income:  "발주처에서 들어온 돈을 등록하고 처리하세요.",
     expense: "외주가공·자재·운영비를 등록하고 결의·이체로 처리하세요.",
   };
@@ -252,7 +252,7 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
             </div>
           )}
 
-          {/* 선택 바 — 엑셀로 올린 거래를 계약에 한꺼번에 붙이는 자리.
+          {/* 선택 바 — 엑셀로 올린 거래를 주문에 한꺼번에 붙이는 자리.
               한 건씩 열어 고르던 것이 "굉장히 번거롭다"는 지적에서 나왔다. */}
           {checkedIds.length > 0 && (
             <div className="card card-pad" style={{ margin: '0 16px 12px', position: 'sticky', top: 0, zIndex: 3 }}>
@@ -260,20 +260,20 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
                 <span className="fw-700 text-sm">{checkedIds.length}건 선택</span>
                 <button className="btn ghost sm" onClick={() => setCheckedIds([])}>선택 해제</button>
                 <div className="row gap-6 ml-auto" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
-                  <span className="text-xs text-muted2">계약</span>
+                  <span className="text-xs text-muted2">주문</span>
                   <FilterSelect value={bulkContract} onChange={setBulkContract}
-                    options={allContracts.map(c => c.name)} placeholder="계약 선택"/>
+                    options={allContracts.map(c => c.name)} placeholder="주문 선택"/>
                   <button className="btn primary" onClick={() => doBulkLink(false)} disabled={!bulkContract}>
                     <Icon.Link size={14}/> 연결
                   </button>
                   <button className="btn" onClick={() => doBulkLink(true)}>연결 떼기</button>
                 </div>
               </div>
-              {/* 지출을 매출 계약에 붙이는 건 '원가 귀속'이다 — 근거 계약과 다른 축이라
+              {/* 지출을 매출 주문에 붙이는 건 '원가 귀속'이다 — 근거 주문과 다른 축이라
                   무엇으로 붙는지 미리 말해줘야 한다. 조용히 틀리면 원가율만 이상해진다. */}
               <div className="text-xs text-muted2" style={{ marginTop: 8 }}>
-                금액은 바뀌지 않아요. 지출을 <b>매출 계약</b>에 붙이면 그 계약의 <b>원가</b>로,
-                <b>발주 계약</b>에 붙이면 <b>지급 근거</b>로 잡힙니다.
+                금액은 바뀌지 않아요. 지출을 <b>매출 주문</b>에 붙이면 그 주문의 <b>원가</b>로,
+                <b>발주</b>에 붙이면 <b>지급 근거</b>로 잡힙니다.
               </div>
             </div>
           )}
@@ -288,9 +288,9 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
             }}
             select={{
               ids: checkedIds, onChange: setCheckedIds,
-              // 예정 행은 청구서라 계약에 붙일 거래가 아니다
+              // 예정 행은 청구서라 주문에 붙일 거래가 아니다
               isSelectable: t => !t.planned,
-              disabledHint: () => '아직 오가지 않은 돈이라 계약에 붙일 수 없어요',
+              disabledHint: () => '아직 오가지 않은 돈이라 주문에 붙일 수 없어요',
             }}
             rowKey={t => t.id}
             rowClass={t => t.planned ? 'row-planned' : ''}
@@ -306,16 +306,16 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
                     {t.planned && <span className="badge outline" style={{ marginLeft: 6, fontSize: 10 }}>예정</span>}
                   </span>
                 ) },
-              /* 계약 — 적요와 **한 칸에 뭉치지 않는다.**
-                 예전엔 `계약명 || 적요 || 전표번호` 를 '내용' 한 칸에 넣어서,
-                 계약에 붙은 거래인지 아닌지를 화면에서 알 수 없었다.
-                 원가 귀속(cost_contract_name)은 근거 계약과 다른 축이라 표식을 달아 가른다. */
-              { key: 'contract', header: '계약', sortable: true,
+              /* 주문 — 적요와 **한 칸에 뭉치지 않는다.**
+                 예전엔 `주문명 || 적요 || 전표번호` 를 '내용' 한 칸에 넣어서,
+                 주문에 붙은 거래인지 아닌지를 화면에서 알 수 없었다.
+                 원가 귀속(cost_contract_name)은 근거 주문과 다른 축이라 표식을 달아 가른다. */
+              { key: 'contract', header: '주문', sortable: true,
                 render: t => {
                   if (t.planned) return <span className="text-muted2 text-sm">—</span>
                   if (t.contract) return <span className="badge outline text-sm">{t.contract}</span>
                   if (t.cost_contract_name) return (
-                    <span className="badge outline text-sm" title="이 지출이 원가로 붙은 매출 계약">
+                    <span className="badge outline text-sm" title="이 지출이 원가로 붙은 매출 주문">
                       {t.cost_contract_name} <span className="text-muted2" style={{ fontSize: 10 }}>원가</span>
                     </span>
                   )

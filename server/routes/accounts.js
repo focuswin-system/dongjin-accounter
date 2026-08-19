@@ -4,6 +4,7 @@ const { futureDateError } = require('../db')
 const { closedPeriodError } = require('../lib/closing')
 const { SETTLED_INCOME, SETTLED_EXPENSE } = require('../lib/ledger')
 const { bankAcctCode } = require('../lib/acctCode')
+const { balancesAsOf } = require('../lib/cashReport')
 
 const router = Router()
 
@@ -150,6 +151,28 @@ router.delete('/:id', async (req, res, next) => {
     }
     next(e)
   }
+})
+
+/* 기준일 시점 잔액 — 잔액 조정 화면이 "그날 통장에 얼마였나"를 보여주는 데 쓴다.
+ *
+ * 조정은 날짜로 잘려 합산되므로(cashReport.balancesAsOf), 과거 날짜로 조정하려면
+ * **그 날짜 기준 잔액**을 보고 맞춰야 한다. 오늘 잔액만 보여주면서 과거 날짜를 고르게 하면
+ * 사람이 머릿속으로 되짚어 빼야 한다 — 그게 틀리면 조정이 또 틀린다.
+ *
+ * 자금 현황(/dashboard/cash-report)도 같은 값을 주지만 그쪽은 미수금·대출·예정 흐름까지
+ * 끌어오는 무거운 집계다. 계좌 하나의 잔액만 필요한 자리라 가볍게 따로 낸다. */
+router.get('/:id/balance', async (req, res, next) => {
+  try {
+    if (!canSeeBalance(req)) return res.status(403).json({ error: '계좌 잔액을 볼 권한이 없어요' })
+    const date = String(req.query.date || '').trim()
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: '기준일 형식이 올바르지 않아요' })
+    }
+    const rows = await balancesAsOf(req.db, date || null)
+    const acc = rows.find(r => r.id === req.params.id)
+    if (!acc) return res.status(404).json({ error: '계좌를 찾을 수 없어요' })
+    res.json({ id: acc.id, date: date || null, balance: acc.balance })
+  } catch (e) { next(e) }
 })
 
 router.get('/:id/adjustments', async (req, res, next) => {

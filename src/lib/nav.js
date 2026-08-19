@@ -8,35 +8,35 @@ export const NAV_TREE = [
     type: "domain", id: "acct", label: "일반회계", icon: Icon.Book,
     sections: [
       // 돈 흐름의 '성격'으로 나눈다 — 회계 계정 성격과 같은 축이라 보고서(손익)까지 그대로 이어진다.
-      //   판매·매출 = 수익 / 매입 = 매출원가(직접비) / 경비 = 판관비(운영비) / 장부 = 조회 전용
-      // 메뉴 순서 = 실제 일하는 순서. 계약 → 청구 → 회수.
+      //   판매·수주(매출) = 수익 / 매입 = 매출원가(직접비) / 경비 = 판관비(운영비) / 장부 = 조회 전용
+      // 메뉴 순서 = 실제 일하는 순서. 주문 → 청구 → 회수.
       // '입금'·'지출'은 거래내역 화면에 필터만 건 같은 뷰라 메뉴에서 뺐다(거래내역에서 본다).
-      // 판매·매출과 매입은 같은 순서로 읽힌다: 계약 → 청구서 → 정기 → 미회수/미지급.
+      // 판매·수주(매출)과 매입은 같은 순서로 읽힌다: 주문 → 청구서 → 정기 → 미회수/미지급.
       // 정기청구(매출)와 정기지출(매입)이 서로 마주보는 자리에 있어야 흐름이 대칭으로 보인다.
       //
       // ⚠ 용어를 단계별로 나눠 쓴다 — 전면 통일하지 않는다.
-      //   영업 단계(계약)   → **수주 / 발주**. 실무가 쓰는 말이다("수주계약서"). '매출 계약'은 어색했다.
+      //   영업 단계(주문)   → **수주 / 발주**. 실무가 쓰는 말이다("수주계약서"). '매출 주문'은 어색했다.
       //   회계 단계(청구서·미수금·미지급금·부가세) → **매출 / 매입 유지**.
       //     홈택스·세금계산서·부가세 신고서와 **글자가 같아야 대조가 된다**
       //     (매출세금계산서·매출세액은 서식 용어이고, 미수금·미지급금은 계정과목이다).
-      //   그래서 '수주 계약 → 대금 청구서(매출) → 미수금'처럼 한 줄에 두 용어가 같이 선다. 의도된 것이다.
+      //   그래서 '수주 → 대금 청구서(매출) → 미수금'처럼 한 줄에 두 용어가 같이 선다. 의도된 것이다.
       /* (제거) '미수금'·'미지급금' — 바로 위 '대금 청구서'와 **같은 화면**이었다.
        * 같은 BillingScreen 에 role='collect' 만 달라서, 표도 데이터도 같고 제목·기본 필터만 달랐다.
        * 메뉴 4개가 화면 2개였던 셈이다.
        * 대신 청구서 화면의 상태 칩 맨 앞에 '미정산'을 항상 두어 같은 일을 하게 했다(Billing.jsx).
        * ⚠ 라우트·권한 자원·검색어는 살려 둔다(HIDDEN_LEAVES) — 홈 화면·알림·거래내역 KPI가
        *   #ar/#ap 로 들어오고, '미수금'은 경리가 실제로 찾는 말이자 계정과목이다. */
-      { label: "판매·매출", items: [
-        { id: "contract_sales",    label: "수주 계약",   icon: Icon.Briefcase },
+      { label: "판매·수주(매출)", items: [
+        { id: "contract_sales",    label: "수주",   icon: Icon.Briefcase },
         { id: "billing_issued",    label: "대금 청구서", icon: Icon.Receipt },
         { id: "recurring_invoice", label: "정기청구",    icon: Icon.Clock },
       ]},
-      { label: "매입", items: [
-        { id: "contract_purchase", label: "발주 계약",   icon: Icon.Briefcase },
+      { label: "구매·발주(매입)", items: [
+        { id: "contract_purchase", label: "발주",   icon: Icon.Briefcase },
         { id: "billing_received",  label: "대금 청구서", icon: Icon.Receipt },
         { id: "recurring_expense", label: "정기지출",    icon: Icon.Clock },
       ]},
-      // 판관비 — 계약·품목에 붙지 않는 운영비(임차·통신·보험 등). 잡손익은 영업외라 따로 둔다.
+      // 판관비 — 주문·품목에 붙지 않는 운영비(임차·통신·보험 등). 잡손익은 영업외라 따로 둔다.
       { label: "경비", items: [
         { id: "misc_pl",     label: "일반 경비", icon: Icon.Wallet },
         { id: "misc_income", label: "잡손익",    icon: Icon.Trend },
@@ -57,12 +57,12 @@ export const NAV_TREE = [
       ]},
       { label: "장부", items: [
         { id: "ledger",   label: "전체 거래내역", icon: Icon.Wallet },
-        /* (제거) 'contract' 계약 통합 목록 —
-         * 같은 ContractListScreen 을 kind="all" 로 연 것뿐이라, 사이드바에 계약이 세 번 서 있었다
-         * (수주 계약·발주 계약·계약). 게다가 위 둘을 수주/발주로 바꾸고 나면 이 항목만 라벨이
-         * 궁색해진다 — "계약"이라 부르면 위 둘은 계약이 아닌 게 되니까.
-         * 라우트·권한 자원은 살려 둔다(HIDDEN_LEAVES). 계약 상세의 브레드크럼이 여기로 돌아오고,
-         * Ctrl+K 로는 '계약 전체'로 여전히 찾을 수 있다. */
+        /* (제거) 'contract' 주문 통합 목록 —
+         * 같은 ContractListScreen 을 kind="all" 로 연 것뿐이라, 사이드바에 주문이 세 번 서 있었다
+         * (수주·발주·주문). 게다가 위 둘을 수주/발주로 바꾸고 나면 이 항목만 라벨이
+         * 궁색해진다 — "주문"이라 부르면 위 둘은 주문이 아닌 게 되니까.
+         * 라우트·권한 자원은 살려 둔다(HIDDEN_LEAVES). 주문 상세의 브레드크럼이 여기로 돌아오고,
+         * Ctrl+K 로는 '주문 전체'로 여전히 찾을 수 있다. */
         // '증빙 관리'는 아직 목업(SAMPLE 데이터·실동작 없음)이라 메뉴에서 숨김.
         // 추후 여유 있을 때 거래 evid_url 집계 + 증빙 누락 관리로 실구현 예정.
       ]},
@@ -186,16 +186,16 @@ export const SETTINGS_LEAVES = [
 ]
 
 /* 사이드바·포털에서는 뺐지만 **살아 있는 화면** — 라우트·권한 자원·검색은 그대로 둔다.
- * 'contract'(계약 전체 목록)는 수주/발주 두 메뉴와 같은 화면이라 트리에서 뺐지만,
- *   · 계약 상세(contract_detail)의 브레드크럼이 이 라우트로 돌아오고
+ * 'contract'(주문 전체 목록)는 수주/발주 두 메뉴와 같은 화면이라 트리에서 뺐지만,
+ *   · 주문 상세(contract_detail)의 브레드크럼이 이 라우트로 돌아오고
  *   · 자주 쓰진 않아도 '수주+발주를 한 표에서' 보고 싶을 때가 있다(Ctrl+K)
  * 그래서 없애지 않고 감춘다. 기준정보·환경설정 잎을 다루는 방식과 같다. */
 export const HIDDEN_LEAVES = [
-  { id: "contract", label: "계약 전체", icon: Icon.Briefcase, domain: "일반회계", section: "장부" },
+  { id: "contract", label: "주문 전체", icon: Icon.Briefcase, domain: "일반회계", section: "장부" },
   /* 미수금·미지급금 — 대금 청구서와 같은 화면이라 트리에서 뺐지만 살아 있다.
      홈 화면·알림·거래내역 KPI가 이 라우트로 들어오고, Ctrl+K 에서 '미수금'으로 찾으면
      청구서 화면이 '미정산' 필터로 열린다. 권한 자원(ar·ap)도 그대로 유지된다. */
-  { id: "ar", label: "미수금 (대금 청구서)",   icon: Icon.Recv, domain: "일반회계", section: "판매·매출" },
+  { id: "ar", label: "미수금 (대금 청구서)",   icon: Icon.Recv, domain: "일반회계", section: "판매·수주(매출)" },
   { id: "ap", label: "미지급금 (대금 청구서)", icon: Icon.Pay,  domain: "일반회계", section: "매입" },
 ]
 
@@ -233,18 +233,21 @@ export const LEAF_BY_ID = Object.fromEntries(ALL_LEAVES.map(l => [l.id, l]))
  * 라벨과 겹치는 말은 굳이 안 넣는다(라벨로 이미 걸린다).
  */
 export const LEAF_TAGS = {
-  // 판매·매출
-  // 라벨이 '수주 계약'이 됐으니 옛 이름(매출 계약)으로 찾는 사람이 못 찾으면 안 된다.
-  // ⚠ '발주'는 여기 넣지 않는다 — 발주 계약(우리가 발주한 것)과 헷갈린다.
+  // 판매·수주(매출)
+  // 라벨이 '수주'이 됐으니 옛 이름(매출 주문)으로 찾는 사람이 못 찾으면 안 된다.
+  // ⚠ '발주'는 여기 넣지 않는다 — 발주 메뉴(우리가 낸 발주)와 헷갈린다.
   //    다만 '발주처'(우리에게 발주한 고객사)로 찾는 사람은 여기가 맞다.
-  contract_sales:   '매출계약 매출 수주계약 납품계약 오더 주문 발주처 계약',
+  /* ⚠ '계약'을 검색어로 **남겨 둔다.** 화면 이름은 수주/주문으로 바뀌었지만
+     쓰던 사람은 한동안 '계약'으로 찾는다. 옛 이름으로 못 찾으면 이름을 바꾼 게 아니라
+     기능이 사라진 걸로 읽힌다(같은 이유로 '미수금'도 남겨 뒀다). */
+  contract_sales:   '매출주문 매출 수주 납품주문 오더 주문 발주처 계약 수주계약 매출계약',
   /* 미수금 메뉴를 청구서로 합치면서 그 검색어를 여기로 옮겼다 —
      경리는 '미수금·받을돈·연체'로 찾지 '대금 청구서'로 찾지 않는다. */
   billing_issued:   '세금계산서 계산서 청구 발행 매출 인보이스 수금 미수금 받을돈 채권 외상매출금 미수 연체 독촉 회수 미정산',
   recurring_invoice:'정기 매달 월정액 자동청구 구독',
   ar:               '받을돈 채권 외상매출금 미수 연체 독촉 회수',
   // 매입
-  contract_purchase:'매입계약 매입 발주계약 외주계약 하도급 구매계약 계약',
+  contract_purchase:'매입주문 매입 발주 외주주문 하도급 구매주문 주문 계약 발주계약 매입계약',
   billing_received: '매입세금계산서 수취 매입계산서 청구받은 미지급금 줄돈 채무 외상매입금 미지급 결제 지급처리 미정산',
   recurring_expense:'정기지출 고정비 임차료 월세 리스 자동이체',
   ap:               '줄돈 채무 외상매입금 미지급 결제 지급처리',
@@ -261,7 +264,7 @@ export const LEAF_TAGS = {
   fund_status:      '자금현황 자금수지 자금계획 월별 분기 주별 예정 잔고 현금흐름',
   // 장부
   ledger:           '거래 입출금 통장내역 원장 전표 입금 출금',
-  contract:         '계약조회 계약목록 전체계약 수주발주 통합',
+  contract:         '주문조회 주문목록 전체주문 수주발주 통합',
   // 세무
   tax_vat:          '부가가치세 신고 매출세액 매입세액 환급 홈택스',
   tax_etc:          '원천세 법인세 지방소득세 4대보험 납부',
@@ -313,7 +316,7 @@ export const PORTAL = [
     // 홈은 이 카테고리들이 '깔끔한 카드' 한 벌로 보인다(하위메뉴 나열 X). 각 카드를 누르면
     // 그 영역 포털(또는 단일 화면)로 들어간다. 늘어난 업무(경비·지출승인·장부)를 각 카드로 세운다.
     categories: [
-      { id: 'acct_sales', label: '판매·매출', icon: Icon.Recv, desc: '수주·청구·수금', groups: [
+      { id: 'acct_sales', label: '판매·수주(매출)', icon: Icon.Recv, desc: '수주·청구·수금', groups: [
         { label: '', items: ['contract_sales', 'billing_issued', 'recurring_invoice'] },
       ]},
       { id: 'acct_purchase', label: '매입', icon: Icon.Pay, desc: '발주·청구·지급', groups: [
@@ -325,7 +328,7 @@ export const PORTAL = [
       { id: 'acct_docs', label: '문서', icon: Icon.Sign, desc: '지급결의서·정산내역서·견적요청서·구매품의서', groups: [
         { label: '', items: ['doc', 'settlement', 'quote_req', 'purchase_req', 'payment_run', 'purchase_status'] },
       ]},
-      /* 계약 통합 목록을 빼고 나니 남은 게 '전체 거래내역' 하나다 → 타일 안에 버튼 하나짜리
+      /* 주문 통합 목록을 빼고 나니 남은 게 '전체 거래내역' 하나다 → 타일 안에 버튼 하나짜리
        * 포털 페이지를 두지 않고 바로 거래내역으로 보낸다(인사관리·자금 운용 타일과 같은 방식).
        * '증빙 관리'는 목업이라 숨김(추후 실구현 예정). */
       { id: 'acct_ledger', label: '장부', icon: Icon.Book, desc: '전체 거래내역', route: 'ledger' },

@@ -24,7 +24,7 @@ const rel = (ts) => {
 const TOPICS = [{ v: 'sales', label: '매출' }, { v: 'purchase', label: '매입' }]
 const GROUPS = [
   { v: 'month', label: '월별 추이' }, { v: 'vendor', label: '거래처별' }, { v: 'category', label: '비목별' },
-  { v: 'contract', label: '계약별' }, { v: 'item', label: '품목별' },
+  { v: 'contract', label: '주문별' }, { v: 'item', label: '품목별' },
 ]
 const PERIODS = [
   { v: 'this_month', label: '이번 달' }, { v: 'this_quarter', label: '이번 분기' },

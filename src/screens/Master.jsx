@@ -147,8 +147,8 @@ const MASTER_SECTIONS = {
       { label: "거래 기준", tabs: ["vendor", "accountSubject", "category", "jeokyo", "evidence_type"] },
       { label: "품목·자산", tabs: ["item", "fixed_asset", "intangible_asset"] },
       { label: "자금·결제", tabs: ["account", "accountBalance", "insurance"] },
-      // 정기청구/정기지출은 기준정보(정적 참조)가 아니라 계약에서 파생되는 흐름이라 여기서 제거.
-      // → 회계처리로 재배치 완료: 정기청구=판매·매출(route recurring_invoice), 정기지출=경비(route recurring_expense).
+      // 정기청구/정기지출은 기준정보(정적 참조)가 아니라 주문에서 파생되는 흐름이라 여기서 제거.
+      // → 회계처리로 재배치 완료: 정기청구=판매·수주(매출)(route recurring_invoice), 정기지출=경비(route recurring_expense).
       //   패널은 이 파일에서 export해 App이 page 모드로 렌더한다.
     ],
   },
@@ -270,7 +270,7 @@ export const REF_CONFIGS = {
   },
   item: {
     type: 'item', label: '품목',
-    sub: '거래·계약·청구에 쓰는 품목을 관리합니다. 매입가·출고가를 넣으면 마진이 자동으로 잡혀요.',
+    sub: '거래·주문·청구에 쓰는 품목을 관리합니다. 매입가·출고가를 넣으면 마진이 자동으로 잡혀요.',
     fields: [
       { key: 'code', label: '품목코드', kind: 'text', w: 110 },
       { key: 'name', label: '품명', kind: 'text', req: true },
@@ -280,7 +280,7 @@ export const REF_CONFIGS = {
       { key: 'spec', label: '규격', kind: 'text' },
       { key: 'unit', label: '단위', kind: 'text', w: 70 },
       { key: 'purchase_price', label: '매입가', kind: 'num', w: 110, hint: '원가 — 외주·자재 매입 단가' },
-      { key: 'amount', label: '출고가', kind: 'num', w: 110, hint: '판매 단가 — 계약·청구서에 자동으로 채워져요' },
+      { key: 'amount', label: '출고가', kind: 'num', w: 110, hint: '판매 단가 — 주문·청구서에 자동으로 채워져요' },
       { key: 'margin', label: '마진', kind: 'num', w: 100, calc: r => (Number(r.amount) || 0) - (Number(r.purchase_price) || 0) },
       /* 중량 — 거래명세서에 중량 칸이 있는 업종(금속·자재)이 있다. 대부분 표시용이지만
          ㎏당 단가로 파는 품목은 금액 = 중량 × 단가라, 무엇에 단가를 곱할지 함께 정한다.
@@ -323,9 +323,9 @@ export const REF_CONFIGS = {
       { key: 'start_date', label: '시작일', kind: 'date', w: 130, hideCol: true },
       { key: 'end_date', label: '만기일', kind: 'date', w: 120 },
       { key: 'account_id', label: '자동이체 계좌', kind: 'account', hideCol: true },
-      // 자유 메모 — 보증보험이면 보증종류·귀속계약·보증금액 등 유형별 특수정보를 여기에.
+      // 자유 메모 — 보증보험이면 보증종류·귀속주문·보증금액 등 유형별 특수정보를 여기에.
       { key: 'memo', label: '비고', kind: 'text', hideCol: true,
-        hint: '보증보험이면 보증종류·귀속계약·보증금액 등을 자유롭게 적어두세요' },
+        hint: '보증보험이면 보증종류·귀속주문·보증금액 등을 자유롭게 적어두세요' },
       { key: 'file', label: '증권 첨부', kind: 'file', hideCol: true },
     ],
   },
@@ -1403,35 +1403,167 @@ const CategoryPanel = ({ embedded = false }) => {
 }
 
 // ── F1: 계좌별 잔액 패널 ─────────────────────────────────────────
+
+/* 자주 쓰는 조정 사유. **DB가 아니라 고정 목록**이다 —
+   기준정보 한 칸을 더 만들면 관리할 게 늘고, 정작 실무에서 쓰는 사유는 몇 개로 수렴한다.
+   목록에 없으면 그냥 쳐서 넣으면 된다(거래처 칸과 같은 방식). */
+const ADJUST_REASONS = [
+  { value: '은행 수수료',        sub: '이체·송금·타행 수수료' },
+  { value: '이자 입금',          sub: '예금 이자' },
+  { value: '카드 연회비',        sub: '' },
+  { value: '거래 누락분 반영',   sub: '통장에는 있는데 장부에 없던 건' },
+  { value: '오입력 정정',        sub: '금액·계좌를 잘못 넣은 건' },
+  { value: '기초 잔액 보정',     sub: '개설 시점 잔액이 실제와 달랐을 때' },
+  { value: '통장 대조 차액',     sub: '원인을 못 찾은 잔액 차이' },
+]
+
+/* 잔액 조정 — 통장에 찍힌 잔액과 장부 잔액을 맞추는 유일한 경로.
+ *
+ * ── 왜 이 모양인가 ──
+ * 예전 폼은 '차감/추가' 칩 + 금액 + 사유 세 칸이었고 **일자 칸이 아예 없었다**
+ * (api.addAdjustment 가 오늘 날짜를 박아 보냈다). 그런데 실제로 하는 일은
+ * "통장을 보니 8,500,000인데 앱은 8,400,000이다" 이지, "10만원을 더해야 한다"가 아니다.
+ * 그래서 **조정 후 잔액**을 그대로 치게 하고 증감액은 자동으로 낸다. 반대로 쳐도 된다.
+ *
+ * ⚠ 조정 일자는 이력용 날짜가 아니다. 자금 현황·일계표(cashReport.balancesAsOf)가
+ * 조정을 `date <= 기준일`로 잘라 합산하므로, 과거 날짜로 넣으면 **그날 이후 모든 잔액이
+ * 같은 폭으로 움직인다.** 그래서 (1) 고른 날짜 기준 잔액을 보여주고
+ * (2) 과거 날짜를 고르면 무엇이 바뀌는지 그 자리에서 말해 준다.
+ * (오늘 잔액만 놓고 과거 날짜를 고르게 하면, 사람이 머릿속으로 되짚어 빼야 한다 —
+ *  그 계산이 틀리면 조정이 또 틀린다.) */
 const AdjustDrawer = ({ account, onClose, onSave }) => {
-  const [amount, setAmount] = useState("")
+  const [date, setDate] = useState(todayStr())
   const [reason, setReason] = useState("")
-  const [type, setType] = useState("minus")
+  // 기준일 잔액. null = 아직 못 읽음(0원과 구별해야 한다)
+  const [base, setBase] = useState(null)
+  /* 사용자가 무엇을 쳤는지 기억한다 — 조정 후 잔액과 증감액은 서로를 덮으므로,
+     '지금 쓰는 쪽'을 알아야 상대를 다시 계산해도 커서가 튀지 않는다. */
+  const [target, setTarget] = useState("")   // 조정 후 잔액
+  const [delta, setDelta] = useState("")     // 증감액(부호 포함)
+
+  const accountId = account?.id
+  useEffect(() => {
+    if (!accountId) return
+    setDate(todayStr()); setReason(""); setTarget(""); setDelta(""); setBase(null)
+  }, [accountId])
+
+  /* 날짜가 바뀌면 그 시점 잔액을 다시 읽는다. 늦게 온 응답이 최신 값을 덮지 않게 막는다.
+     ⚠ 기준 잔액이 바뀌면 '조정 후 잔액'도 다시 잡아야 한다 — 안 그러면 6월 잔액 55만원 옆에
+     8월 통장 기준으로 친 716만원이 그대로 남아, 화면의 세 숫자가 서로 안 맞는다.
+     살리는 쪽은 **증감액**이다. 실제로 저장되는 값이 그것이고, '얼마를 조정한다'는
+     날짜가 바뀌어도 그대로인 반면 '통장에 찍힌 잔액'은 날짜마다 다른 값이기 때문이다. */
+  useEffect(() => {
+    if (!accountId || !/^\d{4}-\d{2}-\d{2}$/.test(date)) { setBase(null); return }
+    let alive = true
+    api.getBalanceAsOf(accountId, date).then(b => {
+      if (!alive) return
+      setBase(b)
+      if (b == null) return
+      setDelta(d => {
+        setTarget(d === "" ? "" : String(b + (Number(String(d).replace(/[^0-9-]/g, '')) || 0)))
+        return d
+      })
+    })
+    return () => { alive = false }
+  }, [accountId, date])
+
   if (!account) return null
+
+  const num = (s) => Number(String(s).replace(/[^0-9-]/g, '')) || 0
+  const deltaNum = delta === "" ? null : num(delta)
+
+  // 조정 후 잔액을 치면 증감액이 따라오고, 증감액을 치면 조정 후 잔액이 따라온다
+  const onTarget = (raw) => {
+    setTarget(raw)
+    if (base == null || raw === "") return setDelta("")
+    setDelta(String(num(raw) - base))
+  }
+  const onDelta = (raw) => {
+    setDelta(raw)
+    if (base == null || raw === "") return setTarget("")
+    setTarget(String(base + num(raw)))
+  }
+
+  const isPast = date < todayStr()
+  const canSave = base != null && deltaNum != null && deltaNum !== 0 && !!String(reason).trim()
+
   const handleSave = () => {
-    if (!reason) return
-    const n = parseInt(amount.replace(/[^0-9]/g, "")) || 0
-    onSave(account.id, { amount: type === "minus" ? -n : n, reason })
+    if (!canSave) return
+    onSave(account.id, { amount: deltaNum, reason: String(reason).trim(), date })
     onClose()
   }
+
   return (
-    <Drawer open={!!account} onClose={onClose}>
+    <Drawer open={!!account} onClose={onClose} width="min(520px, 100vw)">
       <DrawerHead title="잔액 조정" sub={account.name} onClose={onClose}/>
       <div className="drawer-body col gap-form">
-        <div className="row gap-8">
-          <button className={`chip ${type === "minus" ? "active" : ""}`} onClick={() => setType("minus")}>- 차감</button>
-          <button className={`chip ${type === "plus" ? "active" : ""}`} onClick={() => setType("plus")}>+ 추가</button>
-        </div>
+
         <div>
-          <label className="label">조정 금액</label>
-          <MoneyInput value={amount} onChange={raw => setAmount(raw)}/>
+          <label className="label">조정 일자</label>
+          <DateInput className="input num" value={date} max={todayStr()}
+            onChange={e => setDate(e.target.value)}/>
         </div>
+
+        {/* 그날 잔액 — 맞춰야 할 기준값이다. 못 읽었으면 숫자 대신 그렇다고 말한다. */}
+        <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
+          <div className="row" style={{ alignItems: 'baseline' }}>
+            <span className="text-sm text-muted">{isPast ? '그날 잔액' : '현재 잔액'}</span>
+            <span className="num fw-700 ml-auto" style={{ fontSize: 17 }}>
+              {base == null ? <span className="text-muted2 text-sm">불러오는 중…</span> : `${fmtNum(base)}원`}
+            </span>
+          </div>
+        </div>
+
         <div>
-          <label className="label">조정 사유</label>
-          <input className="input" placeholder="은행 수수료, 오입력 수정 등" value={reason} onChange={e => setReason(e.target.value)}/>
+          <label className="label">조정 후 잔액 <span className="text-muted2">(통장에 찍힌 금액)</span></label>
+          {/* allowNegative — 잔액은 음수가 될 수 있다(카드 미결제분, 마이너스 통장).
+              빼면 '-550,000 → 549,999' 처럼 부호가 사라져 조정이 110만원짜리로 둔갑한다. */}
+          <MoneyInput value={target} allowNegative placeholder={base == null ? "" : fmtNum(base)}
+            onChange={raw => onTarget(raw)}/>
         </div>
+
+        <div>
+          <label className="label">증감액</label>
+          <MoneyInput value={delta} allowNegative placeholder="+ 또는 - 금액"
+            onChange={raw => onDelta(raw)}/>
+          {deltaNum != null && deltaNum !== 0 && (
+            <div className="text-sm" style={{ marginTop: 6, color: deltaNum > 0 ? 'var(--pos-ink, var(--brand-ink))' : 'var(--neg-ink)' }}>
+              {deltaNum > 0 ? '＋' : '－'}{fmtNum(Math.abs(deltaNum))}원 {deltaNum > 0 ? '늘어납니다' : '줄어듭니다'}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <label className="label">조정 사유 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+          <Combobox
+            value={reason} onChange={v => setReason(v)}
+            options={ADJUST_REASONS.map(r => ({ value: r.value, label: r.value, sub: r.sub }))}
+            placeholder="사유를 고르거나 직접 입력하세요"
+            onAddNew={q => setReason(q)} addNewLabel="직접 입력"/>
+          <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
+            나중에 "이 돈은 왜 조정됐나"에 답할 수 있어야 해요.
+          </div>
+        </div>
+
+        {/* 과거 날짜의 뜻 — 고른 순간에 말해준다. 저장하고 나서 알면 늦다. */}
+        {isPast && (
+          <div className="card card-pad" style={{ background: 'var(--warn-soft)', border: '1px solid var(--warn-ink)' }}>
+            <div className="row gap-8" style={{ alignItems: 'flex-start' }}>
+              <Icon.Warn size={15} style={{ color: 'var(--warn-ink)', flexShrink: 0, marginTop: 2 }}/>
+              <div className="text-sm" style={{ color: 'var(--warn-ink)' }}>
+                <b>{date} 이후 잔액이 모두 바뀝니다.</b>
+                <div style={{ marginTop: 4 }}>
+                  이 날짜는 기록용이 아니에요 — 자금 현황·자금관리표·일계표가 이 날짜부터
+                  조정을 반영하므로, {date}부터 오늘까지 모든 날의 잔액이
+                  {deltaNum ? ` ${deltaNum > 0 ? '＋' : '－'}${fmtNum(Math.abs(deltaNum))}원씩 ` : ' 같은 폭으로 '}
+                  움직입니다. 오늘 잔액은 어느 날짜를 고르든 같습니다.
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-      <DrawerFooter onCancel={onClose} onSave={handleSave} saveLabel="조정 등록"/>
+      <DrawerFooter onCancel={onClose} onSave={handleSave} saveLabel="조정 등록" saveDisabled={!canSave}/>
     </Drawer>
   )
 }
@@ -1947,7 +2079,7 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
       // 목록 행(camelCase) → 폼(snake_case) 복원
       setForm({
         vendor_id: editing.vendorId || "", category: editing.category || "",
-        // 계약 연결은 폼에서 다루지 않지만, 수정 시 잃지 않도록 들고 다닌다
+        // 주문 연결은 폼에서 다루지 않지만, 수정 시 잃지 않도록 들고 다닌다
         contract_id: editing.contractId || null,
         amount: editing.amount ? String(editing.amount) : "",
         vat_mode: editing.vatMode || "exclusive",
@@ -2090,7 +2222,7 @@ const FirstCycleHint = ({ startDate, dayOfMonth, period, verb, editing = false }
       </div>
     )
   }
-  /* 시작일을 비운 채로 둘 수 있으므로(무기한 계약), '안 고르면 어떻게 되는지'를 그 자리에서 말해준다.
+  /* 시작일을 비운 채로 둘 수 있으므로(무기한 주문), '안 고르면 어떻게 되는지'를 그 자리에서 말해준다.
      예전 문구("시작일을 선택하면 첫 회차를 알려드려요")는 고르라는 뜻으로 읽혀,
      비워도 된다는 걸 알 수 없었다. */
   if (!startDate) {
@@ -2112,21 +2244,21 @@ const FirstCycleHint = ({ startDate, dayOfMonth, period, verb, editing = false }
   )
 }
 
-/* 계약 기반 표시 — 이동 수단(onGo)이 있으면 버튼, 없으면 표시만.
+/* 주문 기반 표시 — 이동 수단(onGo)이 있으면 버튼, 없으면 표시만.
    눌러도 아무 일이 없는 버튼은 고장으로 읽힌다. */
 const ContractBadge = ({ name, onGo }) => (
   onGo
     ? <button className="badge brand" style={{ marginLeft: 6, fontSize: 10, cursor: 'pointer', border: 0 }}
-        title={`${name || '계약'} — 계약에서 관리`} onClick={onGo}><Icon.Link size={10}/> 계약</button>
+        title={`${name || '주문'} — 주문에서 관리`} onClick={onGo}><Icon.Link size={10}/> 주문</button>
     : <span className="badge brand" style={{ marginLeft: 6, fontSize: 10 }}
-        title={`${name || '계약'} — 계약에서 관리`}>계약</span>
+        title={`${name || '주문'} — 주문에서 관리`}>주문</span>
 )
 
-// 규칙 목록 필터 — 계약 기반은 금액·종료 시점의 출처가 계약이라 관리 경로가 다르다.
+// 규칙 목록 필터 — 주문 기반은 금액·종료 시점의 출처가 주문이라 관리 경로가 다르다.
 const RULE_FILTERS = [
   { value: 'all', label: '전체' },
   { value: 'plain', label: '일반' },
-  { value: 'contract', label: '계약 기반' },
+  { value: 'contract', label: '주문 기반' },
 ]
 const filterRules = (rows, f) =>
   f === 'plain' ? rows.filter(r => !r.contractId)
@@ -2238,7 +2370,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
               <tr key={r.id} style={{ opacity: r.active ? 1 : 0.45 }}>
                 <td className="fw-700">
                   {r.vendor}
-                  {/* 계약 기반은 금액·종료 시점의 출처가 계약이다 → 수정은 계약에서.
+                  {/* 주문 기반은 금액·종료 시점의 출처가 주문이다 → 수정은 주문에서.
                       goRoute가 없는 자리(기준정보 탭)에서는 눌러도 아무 일이 없으니 표시만 한다 */}
                   {r.contractId && <ContractBadge name={r.contractName} onGo={goRoute && (() => goRoute('contract_purchase'))}/>}
                 </td>
@@ -2311,7 +2443,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
   }, [open, editing])
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
-  // 계약 vat_mode(taxable/exempt/zero) → 정기청구 vat_mode(exclusive/none/zero)
+  // 주문 vat_mode(taxable/exempt/zero) → 정기청구 vat_mode(exclusive/none/zero)
   const modeFromContract = (vm) => (vm === 'exempt' ? 'none' : vm === 'zero' ? 'zero' : 'exclusive')
 
   const pickContract = (cid) => {
@@ -2322,8 +2454,8 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
         contractId: cid,
         vendorId: p.vendorId || (c ? c.vendor_id : ""),
         item: p.item || (c ? c.name : ""),
-        // 계약을 걸면 그 계약의 과세유형을 따라간다. 이걸 안 맞추면 발행 시 세액은 규칙(기본 과세 10%)으로
-        // 계산되는데 청구서 과세유형은 계약(면세/영세)으로 저장돼, 면세 계약에 10% 세액이 붙는다.
+        // 주문을 걸면 그 주문의 과세유형을 따라간다. 이걸 안 맞추면 발행 시 세액은 규칙(기본 과세 10%)으로
+        // 계산되는데 청구서 과세유형은 주문(면세/영세)으로 저장돼, 면세 주문에 10% 세액이 붙는다.
         vatMode: c ? modeFromContract(c.vat_mode) : p.vatMode,
       }
     })
@@ -2351,10 +2483,10 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
     <Drawer open={open} onClose={onClose}>
       <DrawerHead title={editing ? "정기 청구 수정" : "정기 청구 등록"} onClose={onClose}/>
       <div className="drawer-body col gap-form">
-        <div><label className="label">계약 연결 <span className="text-muted">(선택)</span></label>
+        <div><label className="label">주문 연결 <span className="text-muted">(선택)</span></label>
           <Combobox value={form.contractId} onChange={pickContract} allowAdd={false}
             options={contracts.map(c => ({ value: c.id, label: c.name, sub: c.vendor_name }))}
-            placeholder="계약 선택 (없으면 비워두기)"/>
+            placeholder="주문 선택 (없으면 비워두기)"/>
         </div>
         <div><label className="label">고객사 (발주처)</label>
           <Combobox value={form.vendorId} onChange={v => f("vendorId", v)}
@@ -2417,7 +2549,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
           </div>
         </div>
         <div className="row gap-12">
-          {/* 시작일은 선택 — 무기한 계약은 "언제부터"가 모호한 경우가 흔하다(구두로 이어오던 유지보수 등).
+          {/* 시작일은 선택 — 무기한 주문은 "언제부터"가 모호한 경우가 흔하다(구두로 이어오던 유지보수 등).
               비우면 등록한 날부터 센다(서버 lib/recurrence.js 앵커 폴백). */}
           <div style={{ flex: 1 }}><label className="label">시작일 <span className="text-muted">(선택)</span></label>
             <DateInput className="input" value={form.startDate} onChange={e => f("startDate", e.target.value)}/>
@@ -2438,7 +2570,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
   )
 }
 
-// 정기청구 = 매출 쪽 정기 반복. 회계처리 '판매·매출' 그룹의 독립 화면으로도, 기준정보 탭으로도 쓴다.
+// 정기청구 = 매출 쪽 정기 반복. 회계처리 '판매·수주(매출)' 그룹의 독립 화면으로도, 기준정보 탭으로도 쓴다.
 export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
@@ -2519,7 +2651,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
             <div className="ml-auto">{recActions}</div>
           </div>
           <div className="text-sm text-muted" style={{ marginBottom: 16 }}>
-            청구 조건을 설정하는 곳이에요. 도래한 회차는 아래에서 바로 발행할 수 있고, <b>판매·매출 → 대금 청구서</b>의 '발행 예정'에서 계약 청구일정과 함께 처리해도 됩니다.
+            청구 조건을 설정하는 곳이에요. 도래한 회차는 아래에서 바로 발행할 수 있고, <b>판매·수주(매출) → 대금 청구서</b>의 '발행 예정'에서 주문 청구일정과 함께 처리해도 됩니다.
           </div>
         </>
       )}
@@ -2542,7 +2674,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
         <table className="table">
           <thead>
             <tr>
-              <th>고객사</th><th>항목 / 계약</th><th className="num-right">청구액(VAT 포함)</th>
+              <th>고객사</th><th>항목 / 주문</th><th className="num-right">청구액(VAT 포함)</th>
               <th>주기</th><th>다음 예정</th><th style={{ width: 60 }}>상태</th><th style={{ width: 110 }}></th>
             </tr>
           </thead>
@@ -2564,7 +2696,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
                 </td>
                 <td className="text-sm">
                   {r.item || "—"}
-                  {r.contractName && <div className="text-xs text-muted">계약: {r.contractName}</div>}
+                  {r.contractName && <div className="text-xs text-muted">주문: {r.contractName}</div>}
                 </td>
                 <td className="num-cell num-right">{fmtNum(totalOf(r))}</td>
                 <td className="text-sm">{PERIOD_LABEL[r.period]} {r.dayOfMonth}일</td>
@@ -3224,10 +3356,10 @@ const AuditPanel = ({ embedded = false }) => {
 /* ── 보고서 사용 설정 ────────────────────────────────────────────────────
  *
  * **두 축을 섞지 않는다.**
- *   우리(공급자)  이 회사가 그 양식을 쓸 수 있나 — 계약. 여기서는 못 바꾼다
+ *   우리(공급자)  이 회사가 그 양식을 쓸 수 있나 — 주문. 여기서는 못 바꾼다
  *   회사(이 화면) 쓸 수 있는 것 중 무엇을 쓸까   — 자유
  *
- * 그래서 계약이 없는 양식은 켤 수 없다(서버가 409). 대신 **끄는 건 무엇이든 된다** —
+ * 그래서 주문이 없는 양식은 켤 수 없다(서버가 409). 대신 **끄는 건 무엇이든 된다** —
  * 안 쓰는 보고서를 목록에서 치우는 건 그 회사가 정할 일이고, 목록이 짧아야 쓰는 사람이 찾는다.
  */
 export const ReportPrefPanel = ({ embedded }) => {
@@ -3284,11 +3416,11 @@ export const ReportPrefPanel = ({ embedded }) => {
                 <td>
                   {/* 정상(사용 중)에는 표식을 달지 않는다 — 전부 배지가 붙으면 정작 꺼진 게 안 보인다 */}
                   {r.visible ? <span className="text-sm text-muted2">사용 중</span>
-                    : !r.entitled ? <span className="badge" style={{ fontSize: 11 }}>미계약</span>
+                    : !r.entitled ? <span className="badge" style={{ fontSize: 11 }}>미주문</span>
                     : <span className="badge warn" style={{ fontSize: 11 }}>꺼짐</span>}
                 </td>
                 <td>
-                  {/* 계약이 없으면 켤 수 없다. 켜는 단추 대신 왜 못 켜는지를 적는다 */}
+                  {/* 주문이 없으면 켤 수 없다. 켜는 단추 대신 왜 못 켜는지를 적는다 */}
                   {!r.entitled && r.enabled
                     ? <span className="text-xs text-muted2">문의 후 사용</span>
                     : (
@@ -3305,7 +3437,7 @@ export const ReportPrefPanel = ({ embedded }) => {
         </table>
         <div className="card-pad text-xs text-muted" style={{ paddingTop: 0, lineHeight: 1.7 }}>
           · 끄면 <b>보고서 화면 목록에서 빠지고</b> 그 자료도 열리지 않습니다. 언제든 다시 켤 수 있어요.<br/>
-          · <b>선택 제공</b>은 사용 계약이 있어야 켜집니다 — 도입을 원하시면 문의해주세요.<br/>
+          · <b>선택 제공</b>은 사용 주문이 있어야 켜집니다 — 도입을 원하시면 문의해주세요.<br/>
           · 여기 설정은 <b>회사 전체</b>에 적용됩니다. 사람별로 가리는 건 환경설정 &gt; 사용자의 역할에서 정합니다.
         </div>
       </div>
@@ -3913,7 +4045,7 @@ const PayrollItemPanel = ({ embedded = false }) => {
 };
 
 // 고용형태 마스터 — 근로·용역계약의 유형별 기본값(소득구분·단가단위·보험·상용전환 기준).
-// income_type만 세법이 정한 닫힌 값. 계약 등록 시 여기 기본값이 자동으로 채워진다.
+// income_type만 세법이 정한 닫힌 값. 주문 등록 시 여기 기본값이 자동으로 채워진다.
 const ET_KINDS = [["labor", "근로"], ["service", "용역"], ["daily", "일용"]];
 const ET_INCOME = [["근로", "근로소득"], ["일용", "일용근로"], ["사업", "사업소득"], ["기타", "기타소득"]];
 const ET_FORMS = [["annual", "연봉"], ["monthly", "월급"], ["hourly", "시급"], ["daily", "일당"], ["piece", "건당"]];
@@ -3956,7 +4088,7 @@ const EmployTypePanel = ({ embedded = false }) => {
   };
   const del = async (t) => {
     const ok = await confirm({ tone: "neg", icon: <Icon.Warn size={22}/>, title: `"${t.label}" 삭제`,
-      body: "고용형태 목록에서 제거됩니다. 이미 이 유형으로 맺은 계약은 그대로 유지돼요.", confirmLabel: "삭제" });
+      body: "고용형태 목록에서 제거됩니다. 이미 이 유형으로 맺은 주문은 그대로 유지돼요.", confirmLabel: "삭제" });
     if (ok) { await api.deleteEmployType(t.id); load(); toast.push("삭제됐어요"); }
   };
 
@@ -3970,7 +4102,7 @@ const EmployTypePanel = ({ embedded = false }) => {
       <div className="row" style={{ padding: "16px 18px", borderBottom: "1px solid var(--line)", flexWrap: "wrap", gap: 10 }}>
         <div>
           {!embedded && <div className="section-title">고용형태</div>}
-          <div className="section-sub">근로계약·용역·일용에서 쓰는 고용형태를 직접 만들어두세요. 계약을 등록할 때 소득구분·단가 단위·4대보험 적용이 자동으로 채워집니다.</div>
+          <div className="section-sub">근로계약·용역·일용에서 쓰는 고용형태를 직접 만들어두세요. 주문을 등록할 때 소득구분·단가 단위·4대보험 적용이 자동으로 채워집니다.</div>
         </div>
         {!open && <button className="btn primary ml-auto" onClick={() => { setForm(emptyET()); setEditingId(null); setOpen(true); }}><Icon.Plus size={14}/> 고용형태 추가</button>}
       </div>
@@ -4019,7 +4151,7 @@ const EmployTypePanel = ({ embedded = false }) => {
                 </div>
               </FieldRow>
             </div>
-            <FieldRow label="4대보험 적용" hint="일용·단시간은 조건부라 계약마다 다를 수 있어요">
+            <FieldRow label="4대보험 적용" hint="일용·단시간은 조건부라 주문마다 다를 수 있어요">
               <div className="row gap-4" style={{ flexWrap: "wrap" }}>
                 {[["insure_np", "국민연금"], ["insure_hi", "건강보험"], ["insure_ei", "고용보험"], ["insure_ai", "산재보험"]].map(([k, lbl]) => (
                   <button key={k} type="button" className={`chip ${form[k] ? "active" : ""}`}

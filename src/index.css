@@ -202,8 +202,41 @@ a { color: inherit; text-decoration: none; }
   min-height: 100vh;
   flex-shrink: 0;
 }
+/* ── 브랜드 패널 테마 ──
+   상호(도니도라)에 맞춰 황금빛으로 간다. 색은 전부 여기서 변수로 내고,
+   Login.jsx 는 var() 만 읽는다 — 시안을 갈아끼울 때 JSX 를 안 건드리려고. */
+
+/* gold-dark — 짙은 먹빛 바탕에 금빛 글씨·장식.
+   앱 전체가 다크 톤(--ink, PWA theme_color #0f172a)이라 이 쪽이 이어 붙는다.
+   바탕은 남색이 아니라 **따뜻한 먹빛**이다. 금색은 차가운 남색 위에서 탁해 보인다. */
+.login-brand.gold-dark {
+  background: linear-gradient(155deg, oklch(0.22 0.03 75) 0%, oklch(0.16 0.02 70) 55%, oklch(0.13 0.015 65) 100%);
+  --brand-orb-1: oklch(0.78 0.14 85 / 0.14);
+  --brand-orb-2: oklch(0.78 0.14 85 / 0.08);
+  --brand-rule:  oklch(0.78 0.14 85 / 0.18);
+  --brand-mark:  oklch(0.82 0.13 85 / 0.9);
+  --brand-title:   oklch(0.86 0.14 87);       /* '도니도라' — 금빛 */
+  --brand-title-2: #fff;                       /* '회계관리' — 흰색으로 대비를 준다 */
+  --brand-sub:   oklch(0.98 0.01 85 / 0.5);
+  --login-copy:  oklch(0.98 0.01 85 / 0.5);
+}
+
+/* gold-light — 금빛 바탕에 먹빛 글씨. 대비가 강해 인상은 세다.
+   다만 우측 폼(흰색)·상단 헤더(먹빛)와 톤이 갈리므로 브랜드 전반을 같이 봐야 한다. */
+.login-brand.gold-light {
+  background: linear-gradient(155deg, oklch(0.88 0.13 88) 0%, oklch(0.80 0.15 82) 55%, oklch(0.72 0.14 76) 100%);
+  --brand-orb-1: oklch(1 0 0 / 0.22);
+  --brand-orb-2: oklch(0.35 0.05 70 / 0.09);
+  --brand-rule:  oklch(0.30 0.04 70 / 0.15);
+  --brand-mark:  oklch(0.28 0.04 70 / 0.75);
+  --brand-title:   oklch(0.24 0.04 70);
+  --brand-title-2: oklch(0.24 0.04 70);
+  --brand-sub:   oklch(0.30 0.04 70 / 0.72);
+  --login-copy:  oklch(0.28 0.04 70 / 0.62);
+}
 .login-copyright {
-  color: rgba(255, 255, 255, 0.55);   /* 짙은 남색 배경에 묻히지 않게 */
+  /* 테마가 정한 색. 변수가 없으면(테마 클래스 누락) 예전처럼 흰 계열로 떨어진다. */
+  color: var(--login-copy, rgba(255, 255, 255, 0.55));
   font-size: 12.5px;
 }
 @media (max-width: 860px) {

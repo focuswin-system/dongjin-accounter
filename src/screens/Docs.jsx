@@ -916,7 +916,7 @@ export const EvidenceAttachDrawer = ({ item, onClose }) => {
 /* 계정과목을 받는다. 없으면 일계표에서 상대 계정이 비어 차·대변이 안 맞는다 —
     수백 건을 한 번에 올리는 경로라 빠지면 그날들이 통째로 깨진다.
     회계 프로그램에서 뽑은 자료에는 대개 계정과목이 들어 있다. */
-const IMPORT_TARGETS = ["사용 안함", "날짜", "거래처", "계약명", "입금/지출 구분", "비목", "계정과목", "금액", "공급가액", "부가세", "계좌", "메모"]
+const IMPORT_TARGETS = ["사용 안함", "날짜", "거래처", "주문명", "입금/지출 구분", "비목", "계정과목", "금액", "공급가액", "부가세", "계좌", "메모"]
 const guessTarget = (h) => {
   const s = String(h).replace(/\s/g, '')
   /* ⚠ 순서가 중요하다 — 먼저 걸리는 규칙이 이긴다.
@@ -928,7 +928,7 @@ const guessTarget = (h) => {
   if (/계정과목|계정코드|acct/i.test(s)) return "계정과목"
   if (/계좌|장부|통장|카드|account/i.test(s)) return "계좌"
   if (/거래처|상호|업체|공급처|공급자|vendor/i.test(s)) return "거래처"
-  if (/계약|프로젝트|현장|contract/i.test(s)) return "계약명"
+  if (/주문|프로젝트|현장|contract/i.test(s)) return "주문명"
   if (/구분|입출|유형|type/i.test(s)) return "입금/지출 구분"
   if (/비목|항목|category/i.test(s)) return "비목"
   if (/금액|amount|합계/i.test(s)) return "금액"
@@ -1021,7 +1021,7 @@ export const ExcelScreen = () => {
     return {
       idx, date, kind, amount, account_id, acctName,
       vendor: String(g("거래처") || '').trim(),
-      contract: String(g("계약명") || '').trim(),
+      contract: String(g("주문명") || '').trim(),
       category: String(g("비목") || '').trim(),
       account_code: String(g("계정과목") || '').trim(),
       supply_amount: normAmount(g("공급가액")),
@@ -1228,7 +1228,7 @@ export const ExcelScreen = () => {
 
               <div className="table-scroll" style={{ maxHeight: 420 }}>
                 <table className="table">
-                  <thead><tr><th style={{ width: 40 }}>행</th><th>날짜</th><th>거래처</th><th>계약</th><th>구분</th><th>비목</th><th className="num-right">금액</th>{colFor("계좌") != null && <th>계좌</th>}<th>상태</th></tr></thead>
+                  <thead><tr><th style={{ width: 40 }}>행</th><th>날짜</th><th>거래처</th><th>주문</th><th>구분</th><th>비목</th><th className="num-right">금액</th>{colFor("계좌") != null && <th>계좌</th>}<th>상태</th></tr></thead>
                   <tbody>
                     {preview.slice(0, 100).map((r) => {
                       const ex = excluded.has(r.idx)
@@ -1409,18 +1409,18 @@ const isSettled = s => {
 }
 
 /* ⚠ 목록에서 뺀 보고서 — 실 데이터 연동이 안 된 것들이다.
- *   · 계약별 손익 현황 / 방산 납품 실적 — SAMPLE.contractSummary(빈 배열)를 읽어
+ *   · 주문별 손익 현황 / 방산 납품 실적 — SAMPLE.contractSummary(빈 배열)를 읽어
  *     "총 수주 0원 · 총 손익 0원 · 평균 이익률 NaN%" 를 **확신 있게** 표시했다.
  *     0원과 NaN 은 "데이터가 없다"가 아니라 "회사가 0원을 벌었다"로 읽힌다 —
  *     비어 있는 화면보다 나쁘다.
  *   · 세무사 전달용 자료 — 건수·기간이 하드코딩이고 ZIP 버튼이 토스트만 띄운다.
- *   계약별 손익은 계약 화면에서 이미 실데이터로 볼 수 있다(계약 상세의 원가·손익).
+ *   주문별 손익은 주문 화면에서 이미 실데이터로 볼 수 있다(주문 상세의 원가·손익).
  *   실구현하면 다시 넣는다. */
 /* 보고서 목록은 **서버가 준다**(api.getReports).
  *
  * 예전엔 여기 하드코딩 배열이었다. 그래서 회사마다 다른 양식을 줄 방법이 없었고,
  * 아래 REPORT_VIEWS 에는 화면이 있는데 이 배열에 없어 **아무도 못 보는 보고서가 3개**
- * (계약별·방산·세무사 전달용) 방치돼 있었다 — 목록과 화면이 이미 따로 놀고 있었다는 뜻이다.
+ * (주문별·방산·세무사 전달용) 방치돼 있었다 — 목록과 화면이 이미 따로 놀고 있었다는 뜻이다.
  *
  * 이제 목록은 서버(platform/reportCatalog.js), 화면은 여기(REPORT_VIEWS)다.
  * 서버가 아직 화면이 없는 key 를 줘도 화면은 **그 항목만 조용히 건너뛴다** —
@@ -1595,19 +1595,19 @@ const ReportTax4 = ({ toast }) => {
   )
 }
 
-// ── 3. 계약별 수익 현황 ──────────────────────────────────────
+// ── 3. 주문별 수익 현황 ──────────────────────────────────────
 /* 데이터는 **서버가 이미 계산한 것**을 그대로 쓴다(GET /contracts).
  *
  * 예전엔 이 화면이 `SAMPLE.contractSummary`(=[])를 읽어서 **늘 빈 표**였다.
- * 그렇다고 여기서 SQL을 새로 짜면 계약 화면과 숫자가 갈린다 — 같은 계약의 손익이
+ * 그렇다고 여기서 SQL을 새로 짜면 주문 화면과 숫자가 갈린다 — 같은 주문의 손익이
  * 화면마다 다르면 둘 다 못 믿게 된다. 그래서 집계는 routes/contracts.js 한 곳에 둔다.
  *
  * 서버가 지켜 주는 규칙 두 가지(여기서 다시 계산하면 안 되는 이유):
  *   · 손익은 **공급가액 기준**이다. VAT 포함으로 계산하면 정확히 10% 부풀려진다.
- *   · 원가는 `cost_contract_id`(원가 귀속)로 붙은 지출이지, `contract_id`(근거 계약)가 아니다.
- *     외주비 한 건은 외주 매입계약의 '지급'이면서 동시에 프로젝트 매출계약의 '원가'다.
+ *   · 원가는 `cost_contract_id`(원가 귀속)로 붙은 지출이지, `contract_id`(근거 주문)가 아니다.
+ *     외주비 한 건은 외주 매입주문의 '지급'이면서 동시에 프로젝트 매출주문의 '원가'다.
  *
- * 매입 계약은 **뺀다.** 서버가 profit·cost 를 null 로 내리는데(나간 돈을 손해로 읽히게 하지
+ * 매입 주문은 **뺀다.** 서버가 profit·cost 를 null 로 내리는데(나간 돈을 손해로 읽히게 하지
  * 않으려고), 그 행을 섞으면 손익 열이 빈 줄로 남아 합계가 무슨 뜻인지 알 수 없게 된다.
  */
 const ReportContract = ({ toast }) => {
@@ -1620,7 +1620,7 @@ const ReportContract = ({ toast }) => {
     return () => { alive = false }
   }, [])
 
-  if (rows === null) return <Loading label="계약을 불러오는 중…"/>
+  if (rows === null) return <Loading label="주문을 불러오는 중…"/>
 
   const sales = rows
     .filter(c => !c.is_purchase)
@@ -1631,7 +1631,7 @@ const ReportContract = ({ toast }) => {
       const profit = Number(c.profit || 0)
       return {
         ...c, revenue, cost, profit,
-        // 매출이 0인 계약은 이익률이 성립하지 않는다 — 0으로 나눠 NaN·Infinity 를 찍지 않는다
+        // 매출이 0인 주문은 이익률이 성립하지 않는다 — 0으로 나눠 NaN·Infinity 를 찍지 않는다
         margin: revenue > 0 ? (profit / revenue) * 100 : null,
       }
     })
@@ -1642,7 +1642,7 @@ const ReportContract = ({ toast }) => {
   const totalRevenue = sum(r => r.revenue)
   const totalCost = sum(r => r.cost)
   const totalProfit = sum(r => r.profit)
-  // 평균이 아니라 **합계 기준** 이익률이다. 계약별 이익률을 산술평균하면 작은 계약이 과대 반영된다.
+  // 평균이 아니라 **합계 기준** 이익률이다. 주문별 이익률을 산술평균하면 작은 주문이 과대 반영된다.
   const totalMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : null
 
   return (
@@ -1651,14 +1651,14 @@ const ReportContract = ({ toast }) => {
         <button className={`chip ${!onlyOpen ? 'active' : ''}`} onClick={() => setOnlyOpen(false)}>전체</button>
         <button className={`chip ${onlyOpen ? 'active' : ''}`} onClick={() => setOnlyOpen(true)}>진행중만</button>
         <span className="text-sm text-muted" style={{ marginLeft: 8, alignSelf: 'center' }}>
-          매출 계약 {sales.length}건
+          매출 주문 {sales.length}건
         </span>
       </div>
 
       <KpiRow cols={4} style={{ marginBottom: 24 }}>
         <Kpi label="총 수주금액" value={totalAmount} hint="계약서 금액(부가세 별도)"/>
         <Kpi label="받은 매출"   value={totalRevenue} hint="입금 완료분 · 공급가액"/>
-        <Kpi label="투입 원가"   value={totalCost} tone="neg" hint="이 계약에 귀속된 지출"/>
+        <Kpi label="투입 원가"   value={totalCost} tone="neg" hint="이 주문에 귀속된 지출"/>
         <Kpi label="손익"        value={totalProfit} tone={totalProfit < 0 ? 'neg' : 'pos'}
           badge={totalMargin == null ? undefined : `${totalMargin.toFixed(1)}%`}
           hint="받은 매출 − 투입 원가"/>
@@ -1669,7 +1669,7 @@ const ReportContract = ({ toast }) => {
           <table className="table" style={{ minWidth: 900 }}>
             <thead>
               <tr>
-                <th>계약</th>
+                <th>주문</th>
                 <th>거래처</th>
                 <th className="num-right">수주금액</th>
                 <th className="num-right">청구액</th>
@@ -1695,7 +1695,7 @@ const ReportContract = ({ toast }) => {
                     {r.profit < 0 ? '−' : r.profit > 0 ? '+' : ''}{fmtNum(Math.abs(r.profit))}
                   </td>
                   <td>
-                    {/* 매출이 아직 없는 계약은 이익률 칸을 비운다 — 0%로 적으면 '본전'으로 읽힌다 */}
+                    {/* 매출이 아직 없는 주문은 이익률 칸을 비운다 — 0%로 적으면 '본전'으로 읽힌다 */}
                     {r.margin == null
                       ? <span className="text-sm text-muted2">—</span>
                       : (
@@ -1718,7 +1718,7 @@ const ReportContract = ({ toast }) => {
               ))}
               {sales.length === 0 && (
                 <tr><td colSpan={10} className="text-muted text-sm" style={{ textAlign: "center", padding: 24 }}>
-                  매출 계약이 없어요.
+                  매출 주문이 없어요.
                 </td></tr>
               )}
             </tbody>
@@ -1729,8 +1729,8 @@ const ReportContract = ({ toast }) => {
       <div className="text-xs text-muted" style={{ marginTop: 12, lineHeight: 1.7 }}>
         · <b>손익 = 받은 매출 − 투입 원가</b>이고 둘 다 <b>공급가액</b> 기준입니다. 부가세는 받아서 내는 돈이라 손익이 아닙니다.<br/>
         · <b>받은 매출</b>은 입금이 완료된 것만, <b>투입 원가</b>는 지급이 완료된 것만 셉니다 — 예정은 아직 장부가 아닙니다.<br/>
-        · <b>투입 원가</b>는 이 계약에 원가로 귀속시킨 지출입니다. 거래내역에서 계약을 연결해야 잡힙니다.<br/>
-        · 매입(발주) 계약은 손익 개념이 성립하지 않아 이 표에서 뺐습니다.
+        · <b>투입 원가</b>는 이 주문에 원가로 귀속시킨 지출입니다. 거래내역에서 주문을 연결해야 잡힙니다.<br/>
+        · 매입(발주) 주문은 손익 개념이 성립하지 않아 이 표에서 뺐습니다.
       </div>
     </div>
   )
@@ -1880,7 +1880,7 @@ const ReportAR = ({ toast }) => {
         <table className="table">
           <thead>
             <tr>
-              <th>거래처</th><th>계약</th>
+              <th>거래처</th><th>주문</th>
               <th className="num-right">청구금액</th>
               <th className="num-right">입금</th>
               <th className="num-right">잔액</th>
@@ -2003,7 +2003,7 @@ const ReportDefense = ({ toast }) => {
           const open = expanded === i
           return (
             <div key={i} className="card" style={{ overflow: "hidden" }}>
-              {/* 계약 헤더 */}
+              {/* 주문 헤더 */}
               <button
                 onClick={() => setExpanded(open ? null : i)}
                 style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", width: "100%", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", borderBottom: open ? "1px solid var(--line)" : "none" }}

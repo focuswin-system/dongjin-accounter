@@ -58,7 +58,7 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
     return { ...f, items }
   })
   // 품목 기준정보에서 고르면 품명(＋규격)·단위·견적단가(매입가)를 자동으로 채운다.
-  // 매 키 입력마다 호출되며, 입력값이 품목명과 정확히 일치할 때만 자동채움(계약 화면과 동일 방식).
+  // 매 키 입력마다 호출되며, 입력값이 품목명과 정확히 일치할 때만 자동채움(주문 화면과 동일 방식).
   const pickItem = (i, name) => setForm(f => {
     const items = [...f.items]
     if (i === items.length) items.push(emptyItem())
@@ -78,7 +78,7 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
     }
     return { ...f, items }
   })
-  // 목록에 없는 품목은 기준정보에 새로 등록하고 이 행에 채운다(계약·거래처 인라인 추가와 동일).
+  // 목록에 없는 품목은 기준정보에 새로 등록하고 이 행에 채운다(주문·거래처 인라인 추가와 동일).
   const addNewItem = async (i, q) => {
     const nm = (q || '').trim(); if (!nm) return
     await api.addRefItem({ type: 'item', name: nm })

@@ -14,13 +14,13 @@ import { BILLING_MODES, TERM_MODES, BILLING_PERIODS, billingLabel, termLabel, pe
 const numOnly = (v) => String(v ?? '').replace(/[^0-9]/g, '');
 const asNum   = (v) => parseInt(numOnly(v), 10) || 0;
 
-/* 계약 품목표 = "이 계약으로 무엇을 주고받나". 청구 방식(총액·정기·기성)과는 별개 축이라 전 타입에서 쓴다.
-     총액형·정기형 — 수량×단가 합계가 곧 계약금액(정기형은 주기당 금액). 품목 0줄이면 금액을 직접 입력.
-     기성형     — 수량은 계약 때 정하지 않는다(청구할 때 입력) → 수량 칸을 숨기고 단가표로만 쓴다.
+/* 주문 품목표 = "이 주문으로 무엇을 주고받나". 청구 방식(총액·정기·기성)과는 별개 축이라 전 타입에서 쓴다.
+     총액형·정기형 — 수량×단가 합계가 곧 주문금액(정기형은 주기당 금액). 품목 0줄이면 금액을 직접 입력.
+     기성형     — 수량은 주문 때 정하지 않는다(청구할 때 입력) → 수량 칸을 숨기고 단가표로만 쓴다.
    품목은 기준정보(ref_items type='item')에서 고르거나 인라인 추가. 단가·매입가는 기준정보값이 기본이고
-   계약별로 수정 가능하며, 저장 시 스냅샷으로 남는다(기준정보를 나중에 고쳐도 이 계약 조건은 그대로). */
+   주문별로 수정 가능하며, 저장 시 스냅샷으로 남는다(기준정보를 나중에 고쳐도 이 주문 조건은 그대로). */
 /* 단가를 무엇에 곱하는가 — 수량(기본) 또는 중량. 서버·청구서와 같은 규칙(lib/lineAmount.js).
-   중량 기준인데 수량으로 곱하면 계약 금액이 조용히 달라진다. */
+   중량 기준인데 수량으로 곱하면 주문 금액이 조용히 달라진다. */
 const basisQty = (r) => (r?.price_basis === 'weight' ? asNum(r.weight) : (asNum(r.qty) || 1));
 const lineAmount = (r) => basisQty(r) * asNum(r.unit_price);
 const itemsTotal = (rows) => (rows || []).filter(r => (r.name || '').trim()).reduce((s, r) => s + lineAmount(r), 0);
@@ -32,7 +32,7 @@ const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster, withQty = fa
   const add = () => setRows(rs => [...rs, { item_id: '', name: '', spec: '', unit: '', qty: '', weight: '', price_basis: 'qty', unit_price: '', cost_price: '' }]);
   const upd = (i, patch) => setRows(rs => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r));
   const del = (i) => setRows(rs => rs.filter((_, idx) => idx !== i));
-  /* 기준정보에서 품목을 고르면 규격·단위·출고가·매입가를 자동으로 채운다(계약별로 다시 수정 가능).
+  /* 기준정보에서 품목을 고르면 규격·단위·출고가·매입가를 자동으로 채운다(주문별로 다시 수정 가능).
    *
    * ⚠ 고른 품목을 **id 로** 찾는다. 예전엔 이름으로 찾았는데(`find(x => x.name === name)`),
    *   같은 이름에 규격만 다른 품목이 있으면 **항상 첫 번째가 걸렸다.**
@@ -95,11 +95,11 @@ const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster, withQty = fa
                   onChange={e => upd(i, { qty: numOnly(e.target.value) })}/>
               )}
             </div>
-            {/* 중량 · 단가 기준 — 기준정보에서 고르면 따라오고, 계약별로 고칠 수 있다.
-                금속·자재는 ㎏당 단가로 계약하는 일이 있어서, 무엇에 단가를 곱하는지가
-                금액의 근거다. 기본은 수량이라 대부분의 계약은 이 줄을 건드릴 일이 없다.
+            {/* 중량 · 단가 기준 — 기준정보에서 고르면 따라오고, 주문별로 고칠 수 있다.
+                금속·자재는 ㎏당 단가로 주문하는 일이 있어서, 무엇에 단가를 곱하는지가
+                금액의 근거다. 기본은 수량이라 대부분의 주문은 이 줄을 건드릴 일이 없다.
 
-                중량 칸은 계약이 금액을 확정하는 형태(총액형·정기형)에서만 낸다.
+                중량 칸은 주문이 금액을 확정하는 형태(총액형·정기형)에서만 낸다.
                 기성형은 회차마다 중량이 달라 발행 화면에서 받으므로, 여기 적어봐야 안 쓰인다 —
                 안 쓰이는 칸을 띄우면 적어놓고 왜 반영이 안 되냐는 물음이 생긴다. */}
             <div className="row gap-6" style={{ alignItems: 'center' }}>
@@ -171,7 +171,7 @@ const ContractRefFields = ({ form, set }) => (
   </div>
 )
 
-/* 계약 조건 입력 — 새 계약/편집 Drawer 공용.
+/* 주문 조건 입력 — 신규 생성/편집 Drawer 공용.
    청구 방식(총액형·정기형·기성형)과 종료 방식(만료·자동갱신·무기한)이 독립이라, 금액·기간 칸도 그에 따라 바뀐다. */
 const ContractTermFields = ({ form, set }) => {
   const recurring = form.billing_mode === 'recurring';
@@ -181,7 +181,7 @@ const ContractTermFields = ({ form, set }) => {
   const [itemMaster, setItemMaster] = useState([]);
   const reloadMaster = () => api.getRefItems('item').then(r => setItemMaster(r || []));
   useEffect(() => { reloadMaster(); }, []);
-  // 갱신 개념이 있는 계약만 연장기간·통보기한이 의미 있다.
+  // 갱신 개념이 있는 주문만 연장기간·통보기한이 의미 있다.
   // (총액형+기간만료 = 구축 프로젝트는 끝나면 끝 → 갱신 임박 알림 대상도 아님. 무기한은 애초에 없음)
   const hasRenewal = !openEnded && (form.term_mode === 'auto_renew' || recurring);
   // 품목을 적었으면 그 합계가 금액이다(서버 contract-model도 같은 규칙으로 다시 매긴다).
@@ -189,7 +189,7 @@ const ContractTermFields = ({ form, set }) => {
   const byItems = lineSum > 0;
   const unitAmt = byItems ? lineSum : asNum(form.unit_amount);
   const totalAmt = byItems ? lineSum : asNum(form.amount);
-  // 정기형 계약 총액 미리보기 = 주기당 금액 × 기간 안 회차수
+  // 정기형 주문 총액 미리보기 = 주기당 금액 × 기간 안 회차수
   const preview = (() => {
     if (!recurring || openEnded || !form.start_date || !form.end_date) return null;
     const unit = unitAmt;
@@ -240,18 +240,18 @@ const ContractTermFields = ({ form, set }) => {
         </div>
         <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
           {form.vat_mode === 'exempt'
-            ? '부가세 없는 계약(면세). 청구서 발행 시 부가세 0으로 처리돼요.'
+            ? '부가세 없는 주문(면세). 청구서 발행 시 부가세 0으로 처리돼요.'
             : form.vat_mode === 'zero'
               ? '영세율(수출·해외용역) — 세율 0%라 세액은 없지만, 공급가액은 부가세 신고의 과세표준에 들어가요.'
               : '공급가액에 부가세 10%가 붙어 청구돼요.'}
         </div>
       </div>
 
-      {/* 금액 — 총액형은 계약 총액, 정기형은 주기당 금액, 기성형은 품목 단가표.
+      {/* 금액 — 총액형은 주문 총액, 정기형은 주기당 금액, 기성형은 품목 단가표.
           어느 쪽이든 품목을 적으면 그 합계가 금액이 된다(품목 = '무엇', 청구방식 = '어떻게'). */}
       {progress ? (
         <ContractItemsEditor form={form} set={set} itemMaster={itemMaster} reloadMaster={reloadMaster} required
-          hint="기성 청구할 품목과 단가를 등록하세요. 수량은 계약 상세의 기성 청구에서 회차마다 넣습니다."/>
+          hint="기성 청구할 품목과 단가를 등록하세요. 수량은 주문 상세의 기성 청구에서 회차마다 넣습니다."/>
       ) : recurring ? (
         <>
           <div className="row gap-12">
@@ -294,16 +294,16 @@ const ContractTermFields = ({ form, set }) => {
             )}
             <div className="text-xs text-muted" style={{ marginTop: 6 }}>
               {openEnded
-                ? '무기한 계약이라 계약 총액은 없어요. 이 금액이 매 회차 청구됩니다.'
+                ? '무기한 주문이라 주문 총액은 없어요. 이 금액이 매 회차 청구됩니다.'
                 : preview
-                  ? <>계약 총액 <b className="num text-ink">{(preview.total + asNum(form.initial_amount)).toLocaleString()}원</b>
+                  ? <>주문 총액 <b className="num text-ink">{(preview.total + asNum(form.initial_amount)).toLocaleString()}원</b>
                       {asNum(form.initial_amount) > 0 && <> = 초기 {asNum(form.initial_amount).toLocaleString()}원 + </>}
                       {asNum(form.initial_amount) > 0 ? '' : ' = '}
                       {periodLabel(form.billing_period)} {unitAmt.toLocaleString()}원 × {preview.cycles}회 <span className="text-muted2">(자동 계산)</span></>
-                  : '계약 기간을 넣으면 계약 총액을 자동으로 계산해요.'}
+                  : '주문 기간을 넣으면 주문 총액을 자동으로 계산해요.'}
             </div>
           </div>
-          {/* 초기 구축비 + 월 정액처럼 두 갈래로 청구되는 계약 — 계약은 하나로 두고 청구만 나눈다 */}
+          {/* 초기 구축비 + 월 정액처럼 두 갈래로 청구되는 주문 — 주문은 하나로 두고 청구만 나눈다 */}
           <div>
             <label className="label" style={{ marginBottom: 8 }}>
               초기 일시금 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택 (구축비·설치비)</span>
@@ -315,7 +315,7 @@ const ContractTermFields = ({ form, set }) => {
               <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>원</span>
             </div>
             <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-              계약 초기에 한 번만 받는 돈이 있으면 넣으세요. <b>청구 일정</b>에 1회성 항목으로 깔려서 대금청구에서 발행할 수 있고,
+              주문 초기에 한 번만 받는 돈이 있으면 넣으세요. <b>청구 일정</b>에 1회성 항목으로 깔려서 대금청구에서 발행할 수 있고,
               매달 나가는 {periodLabel(form.billing_period)} 청구는 정기청구가 따로 돕니다. 갱신 후 기간에는 붙지 않아요.
             </div>
           </div>
@@ -323,10 +323,10 @@ const ContractTermFields = ({ form, set }) => {
       ) : (
         <>
           <ContractItemsEditor form={form} set={set} itemMaster={itemMaster} reloadMaster={reloadMaster} withQty
-            hint="납품물·구축 항목을 품목으로 적으면 합계가 계약금액이 됩니다. 안 적으면 금액만 넣으면 돼요."/>
+            hint="납품물·구축 항목을 품목으로 적으면 합계가 주문금액이 됩니다. 안 적으면 금액만 넣으면 돼요."/>
 
           <div>
-            <label className="label" style={{ marginBottom: 8 }}>계약금액 (공급가액) <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+            <label className="label" style={{ marginBottom: 8 }}>주문금액 (공급가액) <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
             {byItems ? (
               <div className="input num fw-700" style={{ fontSize: 20, background: 'var(--surface-2)', color: 'var(--muted)' }}>
                 {totalAmt.toLocaleString()} 원 <span className="text-xs fw-600" style={{ color: 'var(--muted-2)' }}>· 품목 합계</span>
@@ -342,7 +342,7 @@ const ContractTermFields = ({ form, set }) => {
             {totalAmt > 0 && (
               <div className="text-xs text-muted" style={{ marginTop: 6 }}>
                 {form.vat_mode === 'exempt' || form.vat_mode === 'zero'
-                  ? <>{form.vat_mode === 'zero' ? '영세율' : '면세'} 계약 — 부가세 없이 <span className="num fw-600" style={{ color: 'var(--ink)' }}>{totalAmt.toLocaleString()}원</span> 청구</>
+                  ? <>{form.vat_mode === 'zero' ? '영세율' : '면세'} 주문 — 부가세 없이 <span className="num fw-600" style={{ color: 'var(--ink)' }}>{totalAmt.toLocaleString()}원</span> 청구</>
                   : <>부가세 포함 총액: <span className="num fw-600" style={{ color: 'var(--ink)' }}>{Math.round(totalAmt * 1.1).toLocaleString()}원</span></>}
               </div>
             )}
@@ -353,12 +353,12 @@ const ContractTermFields = ({ form, set }) => {
       {/* 기간 — 무기한이면 종료일이 없다 */}
       <div className="row gap-12">
         <div style={{ flex: 1 }}>
-          <label className="label" style={{ marginBottom: 8 }}>계약 시작일</label>
+          <label className="label" style={{ marginBottom: 8 }}>주문 시작일</label>
           <DateInput className="input" value={form.start_date || ''}
             onChange={e => set(f => ({ ...f, start_date: e.target.value }))}/>
         </div>
         <div style={{ flex: 1 }}>
-          <label className="label" style={{ marginBottom: 8 }}>계약 종료일</label>
+          <label className="label" style={{ marginBottom: 8 }}>주문 종료일</label>
           {openEnded
             ? <div className="input" style={{ display: 'flex', alignItems: 'center', color: 'var(--muted-2)' }}>해지할 때까지</div>
             : <DateInput className="input" value={form.end_date || ''}
@@ -366,7 +366,7 @@ const ContractTermFields = ({ form, set }) => {
         </div>
       </div>
 
-      {/* 갱신 조건 — 갱신 개념이 있는 계약(자동갱신 또는 정기형)만. 총액형+만료·무기한은 숨김 */}
+      {/* 갱신 조건 — 갱신 개념이 있는 주문(자동갱신 또는 정기형)만. 총액형+만료·무기한은 숨김 */}
       {hasRenewal && (
         <>
           <div className="row gap-12">
@@ -400,7 +400,7 @@ const ContractTermFields = ({ form, set }) => {
 };
 
 /* 목록·상세 공용 갱신 표시.
-   아직 여유 있는 계약(stage 'ok')까지 배지로 칠하면 목록이 배지밭이 된다 → 흐린 글씨로만.
+   아직 여유 있는 주문(stage 'ok')까지 배지로 칠하면 목록이 배지밭이 된다 → 흐린 글씨로만.
    배지는 실제로 챙겨야 할 때(통보기한 임박·만료)만 켠다. */
 const RenewalBadge = ({ contract }) => {
   const r = renewalInfo(contract);
@@ -431,7 +431,7 @@ export const IncomeDrawer = ({ open, onClose }) => {
     memo: "5월분",
   });
   const totalSteps = 6;
-  const stepLabels = ["거래처", "계약", "수금 유형", "금액", "입금일/계좌", "증빙"];
+  const stepLabels = ["거래처", "주문", "수금 유형", "금액", "입금일/계좌", "증빙"];
 
   useEffect(() => { if (open) setStep(1); }, [open]);
 
@@ -465,9 +465,9 @@ export const IncomeDrawer = ({ open, onClose }) => {
           )}
 
           {step === 2 && (
-            <FormBlock title="어떤 계약의 돈인가요?" hint="해당하는 계약을 선택해주세요.">
+            <FormBlock title="어떤 주문의 돈인가요?" hint="해당하는 주문을 선택해주세요.">
               <div className="col gap-8">
-                {["MES 유지보수", "도면관리 구축", "QMS 라이선스", "ERP 커스터마이징", "(계약 없음)"].map(v => (
+                {["MES 유지보수", "도면관리 구축", "QMS 라이선스", "ERP 커스터마이징", "(주문 없음)"].map(v => (
                   <button key={v} className="row gap-10" onClick={() => setForm({...form, contract: v})}
                     style={{ padding: "12px 14px", border: "1px solid var(--line)", borderRadius: 12, background: form.contract === v ? "var(--surface-3)" : "#fff", textAlign: "left", cursor: "pointer" }}>
                     <div style={{ width: 20, height: 20, borderRadius: "50%", border: "2px solid", borderColor: form.contract === v ? "var(--ink)" : "var(--line-strong)", display: "grid", placeItems: "center" }}>
@@ -543,7 +543,7 @@ export const IncomeDrawer = ({ open, onClose }) => {
                 <div className="fw-700 text-sm" style={{ marginBottom: 8 }}>입력 요약</div>
                 <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "6px 16px", fontSize: 12.5 }}>
                   <span className="text-muted">거래처</span><span className="fw-600">{form.vendor}</span>
-                  <span className="text-muted">계약</span><span className="fw-600">{form.contract}</span>
+                  <span className="text-muted">주문</span><span className="fw-600">{form.contract}</span>
                   <span className="text-muted">수금 유형</span><span className="fw-600">{form.type}</span>
                   <span className="text-muted">입금 계좌</span><span className="fw-600">{form.account}</span>
                   <span className="text-muted">입금일</span><span className="fw-600">{form.date}</span>
@@ -569,7 +569,7 @@ export const IncomeDrawer = ({ open, onClose }) => {
   );
 };
 
-/* ============ 계약 목록 데이터 ============ */
+/* ============ 주문 목록 데이터 ============ */
 export const CONTRACT_LIST = [
   { id: "CT-2026-101", name: "KF-21 동체 부품 가공",       vendor: "한화에어로스페이스", amount: 142000000, inDone: 113600000, remain:  28400000, out: 38500000, profit: 75100000, status: "진행중", period: "2026-01-15 ~ 2026-08-31", pm: "정수민",
     costBudget: { material: 20000000, outsource: 15000000, labor: 8000000, overhead: 3500000 },
@@ -670,7 +670,7 @@ function synthesizeDetail(row) {
     history: [
       { date: "2026-05-10", who: "한경리", what: "지출 내역 등록" },
       { date: milestones[0].date, who: row.pm, what: `계약금 ${fmtNum(milestones[0].amount)}원 입금 등록` },
-      { date: row.period?.split(" ~ ")[0] || "2026-02-01", who: row.pm, what: "계약 등록" },
+      { date: row.period?.split(" ~ ")[0] || "2026-02-01", who: row.pm, what: "주문 등록" },
     ],
   };
 }
@@ -733,7 +733,7 @@ function MilestoneEditDrawer({ open, onClose, contractId, contractAmount, initia
   const upd = (i, k, v) => setRows(r => r.map((row, idx) => {
     if (idx !== i) return row
     const next = { ...row, [k]: v }
-    // 비율(%) 입력 시 계약 총액 기준으로 금액 자동 계산(수동 수정 가능). 총액이 있을 때만.
+    // 비율(%) 입력 시 주문 총액 기준으로 금액 자동 계산(수동 수정 가능). 총액이 있을 때만.
     if (k === 'ratio' && total > 0) {
       const pct = parseInt(String(v).replace(/[^0-9]/g, ''), 10) || 0
       next.amount = pct > 0 ? String(Math.round(total * pct / 100)) : ''
@@ -763,7 +763,7 @@ function MilestoneEditDrawer({ open, onClose, contractId, contractAmount, initia
       <div className="drawer-body col gap-form">
         {total > 0 && (
           <div className="text-xs text-muted2" style={{ padding: '2px 0' }}>
-            계약 총액 <b className="text-ink">{fmtNum(total)}원</b> · 비율(%)을 넣으면 금액이 자동 계산돼요(직접 수정 가능).
+            주문 총액 <b className="text-ink">{fmtNum(total)}원</b> · 비율(%)을 넣으면 금액이 자동 계산돼요(직접 수정 가능).
           </div>
         )}
         {rows.length === 0 && <div className="text-sm text-muted2" style={{ padding: '8px 0' }}>아직 청구 일정이 없어요. 아래에서 추가하세요.</div>}
@@ -895,14 +895,14 @@ function RenewDrawer({ open, onClose, contract, onSaved }) {
   }
 
   return (
-    <Drawer open={open} onClose={onClose} width="min(460px,100vw)" label="계약 갱신 처리">
-      <DrawerHead title="계약 갱신 처리" onClose={onClose}/>
+    <Drawer open={open} onClose={onClose} width="min(460px,100vw)" label="주문 갱신 처리">
+      <DrawerHead title="주문 갱신 처리" onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div className="text-sm text-muted">
           현재 종료일 <b className="text-ink num">{contract.end_date || '—'}</b>
           {' · '}{recurring
             ? <>{periodLabel(contract.billing_period)} 청구금액 <b className="num">{fmtNum(prevUnit)}원</b></>
-            : <>계약금액 <b className="num">{fmtNum(prevAmount)}원</b></>}
+            : <>주문금액 <b className="num">{fmtNum(prevAmount)}원</b></>}
         </div>
         <div>
           <label className="label" style={{ marginBottom: 8 }}>처리 결과</label>
@@ -912,8 +912,8 @@ function RenewDrawer({ open, onClose, contract, onSaved }) {
           </div>
           <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
             {isRenew
-              ? '계약기간을 다음 기간으로 넘기고 이력을 남깁니다. 계약은 진행중으로 유지돼요.'
-              : '계약을 완료로 닫고 미갱신 이력을 남깁니다.'}
+              ? '계약기간을 다음 기간으로 넘기고 이력을 남깁니다. 주문은 진행중으로 유지돼요.'
+              : '주문을 완료로 닫고 미갱신 이력을 남깁니다.'}
           </div>
         </div>
         {isRenew && (
@@ -928,7 +928,7 @@ function RenewDrawer({ open, onClose, contract, onSaved }) {
             </div>
             <div>
               <label className="label" style={{ marginBottom: 8 }}>
-                갱신 후 {recurring ? `${periodLabel(contract.billing_period)} 청구금액` : '계약금액'} (공급가액)
+                갱신 후 {recurring ? `${periodLabel(contract.billing_period)} 청구금액` : '주문금액'} (공급가액)
               </label>
               <div style={{ position: 'relative' }}>
                 <MoneyInput className="input num fw-700" style={{ fontSize: 18, paddingRight: 36 }}
@@ -945,7 +945,7 @@ function RenewDrawer({ open, onClose, contract, onSaved }) {
               )}
               {recurring && (
                 <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-                  새 기간의 계약 총액은 이 금액 × 회차수로 자동 계산돼요.
+                  새 기간의 주문 총액은 이 금액 × 회차수로 자동 계산돼요.
                   {contract.recurring_active > 0 && ' 연결된 정기청구 금액·종료일도 같이 맞춰집니다.'}
                 </div>
               )}
@@ -960,7 +960,7 @@ function RenewDrawer({ open, onClose, contract, onSaved }) {
         {contract.recurring_active > 0 && !isRenew && (
           <div className="alert-row" style={{ background: 'var(--warn-soft)', borderColor: 'transparent' }}>
             <Icon.Warn/>
-            <div className="text-sm">이 계약에 걸린 <b>정기청구 {contract.recurring_active}건</b>이 아직 활성입니다. 미갱신 종료 후 기준정보 → 정기청구에서 중지하세요.</div>
+            <div className="text-sm">이 주문에 걸린 <b>정기청구 {contract.recurring_active}건</b>이 아직 활성입니다. 미갱신 종료 후 기준정보 → 정기청구에서 중지하세요.</div>
           </div>
         )}
       </div>
@@ -969,7 +969,7 @@ function RenewDrawer({ open, onClose, contract, onSaved }) {
   )
 }
 
-/* ============ 계약 상세 ============ */
+/* ============ 주문 상세 ============ */
 export const ContractScreen = ({ goList, contractId, openIncome, openExpense, refreshTrigger }) => {
   const toast = useToast();
   const { confirm } = useConfirm();
@@ -983,10 +983,10 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [renewOpen, setRenewOpen] = useState(false);
   const [progressOpen, setProgressOpen] = useState(false);
-  /* 거래 연결 — 이미 등록된 입금·지출을 이 계약에 붙인다.
-     { kind, axis } 로 연다. axis 는 탭이 정한다(근거 계약 / 원가 귀속). */
+  /* 거래 연결 — 이미 등록된 입금·지출을 이 주문에 붙인다.
+     { kind, axis } 로 연다. axis 는 탭이 정한다(근거 주문 / 원가 귀속). */
   const [linkOpen, setLinkOpen] = useState(null);
-  const [txnOpen, setTxnOpen] = useState(null);   // 계약 화면에서 연 거래 상세
+  const [txnOpen, setTxnOpen] = useState(null);   // 주문 화면에서 연 거래 상세
 
   const reload = () => api.getContract(contractId).then(data => { if (data) setC(data); });
 
@@ -994,12 +994,12 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     if (!contractId) return;
     reload();
     api.getVendors().then(setVendors);
-    // 계약이 바뀌면 탭을 기본으로 리셋 — 이전 계약의 탭 키가 남으면(예: 총액형에서 '원가 예산' 보다가
-    // 기성형 계약으로 이동) 그 계약에 없는 탭이라 본문이 비거나 엉뚱하게 뜬다. '청구 일정'은 두 유형 모두 안전.
+    // 주문이 바뀌면 탭을 기본으로 리셋 — 이전 주문의 탭 키가 남으면(예: 총액형에서 '원가 예산' 보다가
+    // 기성형 주문으로 이동) 그 주문에 없는 탭이라 본문이 비거나 엉뚱하게 뜬다. '청구 일정'은 두 유형 모두 안전.
     setTab("청구 일정");
   }, [contractId]);
 
-  // 계약이 바뀌면 저장된 메모를 텍스트영역에 로드(입금/지출 refresh 때 덮어쓰지 않게 c.id 기준).
+  // 주문이 바뀌면 저장된 메모를 텍스트영역에 로드(입금/지출 refresh 때 덮어쓰지 않게 c.id 기준).
   useEffect(() => { setMemo(c?.memo || ""); }, [c?.id]);
 
   const saveMemo = async () => {
@@ -1007,14 +1007,14 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     if (res.ok) { toast.push("메모를 저장했어요"); reload(); } else toast.push("저장에 실패했어요", { tone: 'warn' });
   };
 
-  // 계약 상세에서 입금/지출 등록 시 자동 갱신
+  // 주문 상세에서 입금/지출 등록 시 자동 갱신
   useEffect(() => { if (refreshTrigger > 0 && contractId) reload(); }, [refreshTrigger]);
 
   // 청구 일정 → 발행 청구서(미수금) 발행
   const issueInvoiceForMilestone = async (ms) => {
     if (!c) return;
     const supply = ms.amount || 0;
-    // 면세 계약이면 부가세 0 — 확인창 금액이 서버 계산과 어긋나지 않게(면세인데 VAT 포함으로 오표시 방지).
+    // 면세 주문이면 부가세 0 — 확인창 금액이 서버 계산과 어긋나지 않게(면세인데 VAT 포함으로 오표시 방지).
     const exempt = c.vat_mode === 'exempt' || c.vat_mode === 'zero';   // 면세·영세 모두 세액 0
     const vat = exempt ? 0 : Math.round(supply * 0.1);
     const ok = await confirm({
@@ -1035,13 +1035,13 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     if (!c) return;
     const ok = await confirm({
       tone: 'warn', icon: <Icon.Warn size={22}/>, title: `${c.name} 삭제`,
-      body: '이 계약과 그 설정(청구 일정·품목표·갱신 이력·첨부)을 지웁니다. 청구서·거래·정기반복이 연결돼 있으면 지울 수 없어요.',
+      body: '이 주문과 그 설정(청구 일정·품목표·갱신 이력·첨부)을 지웁니다. 청구서·거래·정기반복이 연결돼 있으면 지울 수 없어요.',
       confirmLabel: '삭제',
     });
     if (!ok) return;
     const res = await api.deleteContract(contractId);
     if (!res.ok) return toast.push(res.error || '삭제에 실패했어요', { tone: 'warn' });
-    toast.push('계약을 삭제했어요');
+    toast.push('주문을 삭제했어요');
     goList();
   };
 
@@ -1057,7 +1057,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       file_url:    c.file_url   || '',
       file_name:   c.file_name  || '',
       docs:        [],   // 편집 폼에서 새로 올리는 첨부만. 기존 첨부는 상세 '증빙' 탭에서 관리.
-      // 계약 품목표(있으면). 편집 시 그대로 불러와 수정 → 저장 시 통째 교체된다.
+      // 주문 품목표(있으면). 편집 시 그대로 불러와 수정 → 저장 시 통째 교체된다.
       items:       (c.contract_items || []).map(it => ({
         item_id: it.item_id || '', name: it.name || '', spec: it.spec || '', unit: it.unit || '',
         qty: it.qty ? String(it.qty) : '',
@@ -1087,11 +1087,11 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     const vendorObj = vendors.find(v => v.name === editForm.vendor);
     const payload = contractPayload(editForm, vendorObj?.id || c.vendor_id);
 
-    /* 계약을 '완료'로 닫을 때, 종료일이 없는 정기 규칙이 걸려 있으면 먼저 물어본다.
-       무기한 계약은 종료일이 없어 닫은 뒤에도 회차가 영원히 발행 후보로 뜬다.
+    /* 주문을 '완료'로 닫을 때, 종료일이 없는 정기 규칙이 걸려 있으면 먼저 물어본다.
+       무기한 주문은 종료일이 없어 닫은 뒤에도 회차가 영원히 발행 후보로 뜬다.
        동의 없이는 아무것도 바꾸지 않는다(서버도 close_recurring 을 받아야만 처리한다). */
     /* 정기형에서 다른 청구방식으로 바꿀 때 — 걸려 있는 정기청구/정기지출을 멈출지 묻는다.
-       안 물으면 계약은 단건인데 매달 청구가 계속 나간다(과청구). 반대로 말없이 멈추면
+       안 물으면 주문은 단건인데 매달 청구가 계속 나간다(과청구). 반대로 말없이 멈추면
        청구가 왜 끊겼는지 알 수 없다. 그래서 무엇이 멈추는지 보여주고 고르게 한다. */
     const wasRecurring = c.billing_mode === 'recurring'
     const nowRecurring = editForm.billing_mode === 'recurring'
@@ -1104,7 +1104,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
             <>
               <div style={{ marginBottom: 8 }}>
                 청구방식을 <b>{editForm.billing_mode === 'progress' ? '기성형' : '단건'}</b>으로 바꾸는데,
-                이 계약에 정기 {isPurchase ? '지출' : '청구'} {live.length}건이 아직 돌고 있어요.
+                이 주문에 정기 {isPurchase ? '지출' : '청구'} {live.length}건이 아직 돌고 있어요.
                 그대로 두면 매 주기마다 계속 {isPurchase ? '지출이' : '청구가'} 잡힙니다.
               </div>
               <div>
@@ -1125,11 +1125,11 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       const list = [...(open.invoices || []), ...(open.expenses || [])];
       if (list.length > 0) {
         const ok = await confirm({
-          title: '이 계약의 정기 청구·지출도 종료할까요?',
+          title: '이 주문의 정기 청구·지출도 종료할까요?',
           body: (
             <>
               <div style={{ marginBottom: 8 }}>
-                종료일이 없어서, 계약을 닫아도 회차가 계속 발행 후보로 올라옵니다.
+                종료일이 없어서, 주문을 닫아도 회차가 계속 발행 후보로 올라옵니다.
               </div>
               <ul style={{ margin: '0 0 8px 16px', padding: 0 }}>
                 {(open.invoices || []).map(r => <li key={r.id}>정기청구 · {r.label || '(이름 없음)'}</li>)}
@@ -1159,7 +1159,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       if (rs && (rs.invoices || rs.expenses)) {
         toast.push(`정기 ${rs.invoices + rs.expenses}건을 오늘로 멈췄어요`);
       }
-      // 편집 폼에서 새로 올린 계약서 파일들을 계약 첨부(contract_docs)로 연결
+      // 편집 폼에서 새로 올린 계약서 파일들을 주문 첨부(contract_docs)로 연결
       for (const d of (editForm.docs || [])) await api.addContractDoc(contractId, { url: d.url, name: d.name, doc_type: '계약서', size: d.size || 0 });
       toast.push("수정됐어요"); setEditOpen(false); reload();
     }
@@ -1169,27 +1169,27 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   if (!c) return <div style={{ padding: 40, textAlign: "center", color: "var(--muted-2)" }}>불러오는 중...</div>;
 
   const inDone  = c.in_done  || 0;
-  const out     = c.out      || 0;   // 이 계약이 근거인 지출(매입계약의 지급액)
-  const cost    = c.cost     || 0;   // 이 매출계약에 귀속된 원가 — 손익(profit)이 빼는 값
+  const out     = c.out      || 0;   // 이 주문이 근거인 지출(매입주문의 지급액)
+  const cost    = c.cost     || 0;   // 이 매출주문에 귀속된 원가 — 손익(profit)이 빼는 값
   const profit  = c.profit   || 0;
-  // 매입 계약(gubu A/E)이면 '지급' 관점, 매출이면 '수금' 관점
+  // 매입 주문(gubu A/E)이면 '지급' 관점, 매출이면 '수금' 관점
   const isPurchase = c.vendor_gubu === 'A' || c.vendor_gubu === 'E';
   const doneLabel   = isPurchase ? '지급' : '입금';
   const remainLabel = isPurchase ? '남은 미지급' : '남은 미수금';
   // 지표는 서버(metrics)가 계산한 값을 그대로 쓴다 — 화면마다 다시 계산하면 어긋난다.
-  // 무기한 정기계약은 '총액'이 없으므로 term_total/remain이 null → 진행률 대신 누적으로 본다.
+  // 무기한 정기주문은 '총액'이 없으므로 term_total/remain이 null → 진행률 대신 누적으로 본다.
   const openEnded  = !hasTotal(c);
   const recurring  = isRecurring(c);
   const progress   = isProgress(c);
   const termTotal  = c.term_total ?? 0;          // 이번 텀 총액(VAT 포함)
   const done       = c.term_collected ?? 0;      // 이번 텀에 받은(지급한) 돈
   const doneAll    = c.collected ?? (isPurchase ? out : inDone);
-  const remainAmt  = c.remain ?? 0;              // 남은 계약분
+  const remainAmt  = c.remain ?? 0;              // 남은 주문분
   const arRemain   = c.ar_remain ?? 0;           // 미수금(청구했는데 안 들어온 돈)
   const donePct    = termTotal > 0 ? Math.min(100, Math.round((done / termTotal) * 100)) : 0;
   const vendor  = c.vendor_name || c.vendor || '—';
   /* 기간 표시는 openEnded(=총액 개념 없음)가 아니라 **실제 종료일 유무**로 정한다.
-     기성형은 총액이 없어 openEnded 로 잡히는데, 종료일이 있는 단가계약을
+     기성형은 총액이 없어 openEnded 로 잡히는데, 종료일이 있는 단가주문을
      '해지할 때까지'로 보여주면 갱신 시점을 놓친다(목록도 같은 원인으로 틀렸다). */
   const period  = (isOpenEnded(c) || !c.end_date)
     ? `${c.start_date || '—'} ~ 해지할 때까지`
@@ -1199,7 +1199,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   return (
     <div className="fade-up">
       <div className="row gap-12" style={{ alignItems: "center", color: "var(--muted)", fontSize: 12.5, paddingTop: 30, marginBottom: 8 }}>
-        <button className="btn ghost sm" onClick={goList} style={{ padding: "4px 8px" }}><Icon.Left size={14}/> 계약 목록</button>
+        <button className="btn ghost sm" onClick={goList} style={{ padding: "4px 8px" }}><Icon.Left size={14}/> 주문 목록</button>
         <span style={{ color: "var(--subtle)" }}>/</span>
         <span style={{ color: "var(--ink)", fontWeight: 600 }}>{c.name}</span>
       </div>
@@ -1212,7 +1212,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           </div>
           <div className="page-sub">
             {vendor} · {billingLabel(c)}/{termLabel(c)} · {amountLabel(c, fmtNum)} · 계약기간 {period}
-            {c.contract_no ? ` · 계약번호 ${c.contract_no}` : ''}
+            {c.contract_no ? ` · 주문번호 ${c.contract_no}` : ''}
           </div>
         </div>
         <div className="ml-auto row gap-8">
@@ -1225,8 +1225,8 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           {progress && (
             <button className="btn primary" onClick={() => setProgressOpen(true)}><Icon.Plus/> 기성 청구</button>
           )}
-          {/* 매출 계약 = 수금 + 그 일에 들어간 원가(외주비 등) → 둘 다 등록.
-              매입 계약 = 나가는 돈만 → 입금은 붙을 자리가 없다. */}
+          {/* 매출 주문 = 수금 + 그 일에 들어간 원가(외주비 등) → 둘 다 등록.
+              매입 주문 = 나가는 돈만 → 입금은 붙을 자리가 없다. */}
           {isPurchase ? (
             <button className="btn primary" onClick={() => openExpense(c.name, vendor)}><Icon.Plus/> 지급 등록</button>
           ) : (
@@ -1238,10 +1238,10 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
         </div>
       </div>
 
-      {/* 지표는 계약 성격에 따라 다르게 읽어야 한다.
-          매출 계약 = 받을 돈 + 그 일에 들어간 원가 + 손익.
-          매입 계약 = 나갈 돈만. 원가·손익 개념이 없다(붙이면 "나간 돈 = 손해"라는 거짓 숫자가 된다).
-          무기한 정기계약 = 채울 총액이 없으므로 진행률 대신 누적·미수 중심. */}
+      {/* 지표는 주문 성격에 따라 다르게 읽어야 한다.
+          매출 주문 = 받을 돈 + 그 일에 들어간 원가 + 손익.
+          매입 주문 = 나갈 돈만. 원가·손익 개념이 없다(붙이면 "나간 돈 = 손해"라는 거짓 숫자가 된다).
+          무기한 정기주문 = 채울 총액이 없으므로 진행률 대신 누적·미수 중심. */}
       {progress ? (
         // 기성형은 총액·월 정액·진행률 개념이 없다 → 실제로 의미 있는 세 숫자만: 누적 기성 청구 / 누적 수금(지급) / 미수(미지급).
         <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
@@ -1252,9 +1252,9 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       ) : (
       <div className="grid" style={{ gridTemplateColumns: `repeat(${isPurchase ? 4 : 5}, 1fr)`, gap: 12 }}>
         {/* 옆 타일(수금·미수금·원가)이 모두 부가세 포함 금액이라 여기도 기준을 맞춘다.
-            공급가만 보여주면 '계약 840만 · 수금 924만'처럼 앞뒤가 안 맞아 보인다. */}
+            공급가만 보여주면 '주문 840만 · 수금 924만'처럼 앞뒤가 안 맞아 보인다. */}
         <SummaryTile
-          label={openEnded ? `${periodLabel(c.billing_period)} ${isPurchase ? '지급' : '청구'}금액` : recurring ? "이번 계약기간 총액" : "계약금액"}
+          label={openEnded ? `${periodLabel(c.billing_period)} ${isPurchase ? '지급' : '청구'}금액` : recurring ? "이번 계약기간 총액" : "주문금액"}
           amount={openEnded ? (c.unit_amount || 0) : (c.term_total ?? c.amount)}/>
         <SummaryTile
           label={openEnded ? `누적 ${doneLabel}` : `${doneLabel} 완료`}
@@ -1270,7 +1270,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           <>
             {/* 손익이 빼는 값과 같은 축이어야 한다 — out 을 쓰면 원가 0 · 손익 +323,000 처럼
                 타일끼리 뺄셈이 안 맞는다(목록 '원가' 열과 같은 원인). */}
-            <SummaryTile label="이 계약 원가" amount={cost}/>
+            <SummaryTile label="이 주문 원가" amount={cost}/>
             <SummaryTile label={openEnded ? "누적 손익" : "예상 손익"} amount={profit ?? 0} big/>
           </>
         )}
@@ -1278,23 +1278,23 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       )}
       <Spacer h={20}/>
 
-      {/* 정기청구 연결 — 정기형 계약은 정기청구가 실제 청구를 돌리는 장치다.
-          계약이 원본이고 정기청구가 실행 → 어긋나면(금액·주기·종료일) 여기서 잡는다. */}
+      {/* 정기청구 연결 — 정기형 주문은 정기청구가 실제 청구를 돌리는 장치다.
+          주문이 원본이고 정기청구가 실행 → 어긋나면(금액·주기·종료일) 여기서 잡는다. */}
       {recurring && (
         <>
           <div className="card card-pad">
             <div className="row gap-12" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
               <div>
-                {/* 매출 계약이면 정기청구(받을 돈), 매입 계약이면 정기지출(나갈 돈).
-                    이걸 안 나누면 매입 계약의 반복이 미수금으로 둔갑한다. */}
+                {/* 매출 주문이면 정기청구(받을 돈), 매입 주문이면 정기지출(나갈 돈).
+                    이걸 안 나누면 매입 주문의 반복이 미수금으로 둔갑한다. */}
                 <div className="section-title">{isPurchase ? '정기지출' : '정기청구'}</div>
                 <div className="text-sm text-muted" style={{ marginTop: 4 }}>
                   {(c.recurrings || []).length === 0
-                    ? `이 계약은 ${periodLabel(c.billing_period)}마다 ${fmtNum(c.unit_amount || 0)}원이 ${isPurchase ? '나가는' : '청구되는'} 계약인데, 아직 ${isPurchase ? '정기지출' : '정기청구'}이 걸려 있지 않아요. 지금은 ${isPurchase ? '지출이' : '청구서가'} 자동 생성되지 않습니다.`
+                    ? `이 주문은 ${periodLabel(c.billing_period)}마다 ${fmtNum(c.unit_amount || 0)}원이 ${isPurchase ? '나가는' : '청구되는'} 주문인데, 아직 ${isPurchase ? '정기지출' : '정기청구'}이 걸려 있지 않아요. 지금은 ${isPurchase ? '지출이' : '청구서가'} 자동 생성되지 않습니다.`
                     : `${periodLabel(c.billing_period)} ${fmtNum(c.unit_amount || 0)}원 · 매월 ${c.billing_day || 1}일${c.end_date ? ` · ${c.end_date}까지` : ' · 해지할 때까지'}`}
                 </div>
-                {/* 정기청구는 계약에서 관리한다(기준정보에 두면 워크플로우가 끊긴다).
-                    계약이 원본, 정기청구는 실행 장치 → 어긋나면 '계약 조건으로 맞추기'로 되돌린다. */}
+                {/* 정기청구는 주문에서 관리한다(기준정보에 두면 워크플로우가 끊긴다).
+                    주문이 원본, 정기청구는 실행 장치 → 어긋나면 '주문 조건으로 맞추기'로 되돌린다. */}
                 {(c.recurrings || []).map(r => {
                   const gaps = recurringMismatch(c, r);
                   return (
@@ -1317,14 +1317,14 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                         <div className="alert-row" style={{ marginTop: 8, background: 'var(--warn-soft)', borderColor: 'transparent' }}>
                           <Icon.Warn/>
                           <div className="text-sm" style={{ flex: 1 }}>
-                            계약과 정기청구가 달라요 — {gaps.join(' / ')}
+                            주문과 정기청구가 달라요 — {gaps.join(' / ')}
                           </div>
                           <button className="btn sm" onClick={async () => {
                             const res = await api.syncContractRecurring(contractId);
                             if (!res.ok) return toast.push(res.error || '맞추기에 실패했어요', { tone: 'warn' });
-                            toast.push('계약 조건으로 맞췄어요');
+                            toast.push('주문 조건으로 맞췄어요');
                             reload();
-                          }}>계약 조건으로 맞추기</button>
+                          }}>주문 조건으로 맞추기</button>
                         </div>
                       )}
                     </div>
@@ -1349,7 +1349,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
         </>
       )}
 
-      {/* 기성형 계약 — 품목 단가표 + 품목별 누적 기성. 청구는 '기성 청구' 버튼으로 그때그때 발행. */}
+      {/* 기성형 주문 — 품목 단가표 + 품목별 누적 기성. 청구는 '기성 청구' 버튼으로 그때그때 발행. */}
       {progress && (
         <>
           <div className="card card-pad">
@@ -1398,7 +1398,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       )}
 
       {/* 총액형·정기형도 품목으로 구성할 수 있다(선택). 적어 뒀으면 무엇을 얼마에 주고받는지 여기서 본다.
-          기성형과 달리 수량이 계약에 있으므로 라인 금액·원가·마진이 그대로 확정된다. */}
+          기성형과 달리 수량이 주문에 있으므로 라인 금액·원가·마진이 그대로 확정된다. */}
       {!progress && (c.contract_items || []).length > 0 && (() => {
         const rows = c.contract_items || [];
         const sum  = rows.reduce((s, it) => s + (Number(it.qty) || 1) * Number(it.unit_price || 0), 0);
@@ -1406,7 +1406,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
         return (
           <>
             <div className="card card-pad">
-              <div className="section-title">계약 품목</div>
+              <div className="section-title">주문 품목</div>
               <table className="table" style={{ marginTop: 12 }}>
                 <thead>
                   <tr>
@@ -1450,7 +1450,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
         );
       })()}
 
-      {/* 갱신 관리 — 만료가 있는 계약만 (무기한은 갱신 개념이 없다) */}
+      {/* 갱신 관리 — 만료가 있는 주문만 (무기한은 갱신 개념이 없다) */}
       {!openEnded && (
         <>
           <div className="card card-pad" style={{
@@ -1459,7 +1459,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
             <div className="row gap-12" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
               <div>
                 <div className="row gap-8" style={{ alignItems: 'center' }}>
-                  <div className="section-title">계약 갱신</div>
+                  <div className="section-title">주문 갱신</div>
                   <RenewalBadge contract={c}/>
                 </div>
                 <div className="text-sm text-muted" style={{ marginTop: 4 }}>
@@ -1472,7 +1472,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                 </div>
                 {c.term_mode === 'auto_renew' && (
                   <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-                    자동갱신 계약이에요. 통보기한까지 해지 통보가 없으면 실제로는 연장되니, 종료일이 지나기 전에 <b>갱신 처리</b>로 새 기간을 기록해두세요.
+                    자동갱신 주문이에요. 통보기한까지 해지 통보가 없으면 실제로는 연장되니, 종료일이 지나기 전에 <b>갱신 처리</b>로 새 기간을 기록해두세요.
                   </div>
                 )}
                 {(c.renewals?.length > 0) && (
@@ -1491,7 +1491,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
             {c.recurring_active > 0 && rn.stage === 'expired' && (
               <div className="alert-row" style={{ marginTop: 14, background: 'var(--warn-soft)', borderColor: 'transparent' }}>
                 <Icon.Warn/>
-                <div className="text-sm">계약이 만료됐는데 <b>정기청구 {c.recurring_active}건</b>이 아직 돌고 있어요. 갱신하거나 정기청구를 중지하세요.</div>
+                <div className="text-sm">주문이 만료됐는데 <b>정기청구 {c.recurring_active}건</b>이 아직 돌고 있어요. 갱신하거나 정기청구를 중지하세요.</div>
               </div>
             )}
           </div>
@@ -1499,14 +1499,14 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
         </>
       )}
 
-      {/* 진행률은 '끝이 있는 계약'에만 의미가 있다. 무기한 계약엔 채워야 할 총액이 없다. */}
+      {/* 진행률은 '끝이 있는 주문'에만 의미가 있다. 무기한 주문엔 채워야 할 총액이 없다. */}
       {!openEnded && (
         <>
           <div className="card card-pad">
             <div className="row" style={{ marginBottom: 10 }}>
-              <div className="section-title">{recurring ? '이번 계약기간 진행률' : '계약 진행률'}</div>
+              <div className="section-title">{recurring ? '이번 계약기간 진행률' : '주문 진행률'}</div>
               <div className="ml-auto text-sm text-muted">
-                {recurring ? '이번 기간 총액' : '계약금액'}의 {donePct}% {doneLabel}됨 · {remainLabel}{' '}
+                {recurring ? '이번 기간 총액' : '주문금액'}의 {donePct}% {doneLabel}됨 · {remainLabel}{' '}
                 <span className="num fw-700 text-ink" style={{ color: "var(--ink)" }}>{fmtNum(remainAmt)}원</span>
               </div>
             </div>
@@ -1520,7 +1520,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
             </div>
             {recurring && c.renewals?.length > 0 && (
               <div className="text-xs text-muted2" style={{ marginTop: 10 }}>
-                갱신된 계약이라 <b>이번 기간({c.current_term_start} ~ {c.end_date})</b>에 받은 돈만 셉니다. 누적 {doneLabel} {fmtNum(doneAll)}원.
+                갱신된 주문이라 <b>이번 기간({c.current_term_start} ~ {c.end_date})</b>에 받은 돈만 셉니다. 누적 {doneLabel} {fmtNum(doneAll)}원.
               </div>
             )}
           </div>
@@ -1528,7 +1528,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
         </>
       )}
 
-      {/* 탭도 관점에 따라 다르다. 매입 계약엔 '원가 예산'도 '입금 내역'도 없다.
+      {/* 탭도 관점에 따라 다르다. 매입 주문엔 '원가 예산'도 '입금 내역'도 없다.
           내부 키는 그대로 두고 라벨만 매입 관점으로 바꾼다(아래 분기들이 키를 쓰므로). */}
       <div className="card">
         <div className="tab-bar" style={{ padding: "0 12px" }}>
@@ -1547,11 +1547,11 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           })}
         </div>
 
-        {/* 기성 청구 내역 — 기성형 계약이 발행한 기성 청구서 목록(마일스톤 탭 대체) */}
+        {/* 기성 청구 내역 — 기성형 주문이 발행한 기성 청구서 목록(마일스톤 탭 대체) */}
         {progress && (tab === "기성 청구 내역" || tab === "청구 일정") && (
           <div style={{ padding: 20 }}>
             <div className="row" style={{ marginBottom: 14 }}>
-              <div className="text-sm text-muted">이 계약으로 발행한 기성 청구 목록이에요. 새 기성은 위 <b>기성 청구</b> 버튼으로 발행하세요.</div>
+              <div className="text-sm text-muted">이 주문으로 발행한 기성 청구 목록이에요. 새 기성은 위 <b>기성 청구</b> 버튼으로 발행하세요.</div>
               <button className="btn primary ml-auto" onClick={() => setProgressOpen(true)}><Icon.Plus size={13}/> 기성 청구</button>
             </div>
             {(c.progress_invoices || []).length === 0 ? (
@@ -1589,15 +1589,15 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           return (
             <div style={{ padding: 20 }}>
               <div className="row" style={{ marginBottom: 14 }}>
-                <div className="text-sm text-muted">이 계약에서 청구할 금액·시점을 미리 등록하세요. '청구서 발행'을 누르면 대금 청구로 넘어가요.</div>
+                <div className="text-sm text-muted">이 주문에서 청구할 금액·시점을 미리 등록하세요. '청구서 발행'을 누르면 대금 청구로 넘어가요.</div>
                 <button className="btn ml-auto" onClick={() => setMsOpen(true)}><Icon.Pencil size={13}/> 편집</button>
               </div>
               {milestones.length > 0 && Math.abs(diff) > 1 && (
                 <div className="alert-row" style={{ marginBottom: 12, background: "var(--warn-soft)", borderColor: "transparent" }}>
                   <Icon.Warn/>
                   <div>
-                    <div className="lead">청구 일정 합계가 계약금액(공급가)보다 {diff > 0 ? "많아요" : "적어요"}.</div>
-                    <div className="body">일정 합계 {fmtNum(msSum)}원 · 계약금액 {fmtNum(c.amount)}원 (차이 {fmtNum(Math.abs(diff))}원)</div>
+                    <div className="lead">청구 일정 합계가 주문금액(공급가)보다 {diff > 0 ? "많아요" : "적어요"}.</div>
+                    <div className="body">일정 합계 {fmtNum(msSum)}원 · 주문금액 {fmtNum(c.amount)}원 (차이 {fmtNum(Math.abs(diff))}원)</div>
                   </div>
                 </div>
               )}
@@ -1646,7 +1646,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           return (
             <div style={{ padding: 20 }}>
               <div className="row" style={{ marginBottom: 14 }}>
-                <div className="text-sm text-muted">참고용 예상 원가예요. 인건비·자재비는 인사급여·발주 계약에서 별도 관리돼요.</div>
+                <div className="text-sm text-muted">참고용 예상 원가예요. 인건비·자재비는 인사급여·발주에서 별도 관리돼요.</div>
                 <button className="btn ml-auto" onClick={() => setBudgetOpen(true)}><Icon.Pencil size={13}/> 예산 수정</button>
               </div>
               <div className="card" style={{ overflow: "hidden", marginBottom: 14 }}>
@@ -1676,7 +1676,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                 {[
                   { label: "예산 합계",   value: fmtNum(totalBudget), sub: `목표 원가율 ${targetRate}%` },
                   { label: "실적 합계",   value: fmtNum(totalActual), sub: `실제 원가율 ${actualRate}%`, tone: totalActual > totalBudget ? "neg" : "pos" },
-                  { label: "예상 이익",   value: fmtNum(c.amount - totalActual), sub: `계약금액 ${fmtNum(c.amount)}원 기준` },
+                  { label: "예상 이익",   value: fmtNum(c.amount - totalActual), sub: `주문금액 ${fmtNum(c.amount)}원 기준` },
                 ].map(s => (
                   <div key={s.label} className="card" style={{ padding: "14px 16px" }}>
                     <div className="text-sm text-muted" style={{ marginBottom: 6 }}>{s.label}</div>
@@ -1691,8 +1691,8 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
 
         {tab === "입금 내역" && (
           <>
-            {/* 이미 처리된 입금을 이 계약에 붙인다 — 엑셀로 올린 거래를 계약과 맞출 때 쓴다.
-                계약을 보고 있을 때가 대사하기 가장 자연스러운 자리다. */}
+            {/* 이미 처리된 입금을 이 주문에 붙인다 — 엑셀로 올린 거래를 주문과 맞출 때 쓴다.
+                주문을 보고 있을 때가 대사하기 가장 자연스러운 자리다. */}
             <div className="row" style={{ marginBottom: 10 }}>
               <span className="text-xs text-muted2">행을 누르면 그 거래를 열어 고치거나 연결을 뗄 수 있어요.</span>
               <button className="btn sm ml-auto" onClick={() => setLinkOpen({ kind: 'income', axis: 'contract' })}>
@@ -1730,13 +1730,13 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           </>
         )}
 
-        {/* 매출 계약 → 이 계약에 귀속된 '원가'. 그 돈이 어느 매입계약으로 나갔는지도 함께 보여준다.
-            매입 계약 → 이 계약이 근거인 '지급'. */}
+        {/* 매출 주문 → 이 주문에 귀속된 '원가'. 그 돈이 어느 매입주문으로 나갔는지도 함께 보여준다.
+            매입 주문 → 이 주문이 근거인 '지급'. */}
         {tab === "지출 내역" && (
           <>
-            {/* ⚠ 축이 다르다. 매입 계약은 '이 계약이 근거인 지급'(contract_id),
-                매출 계약은 '이 계약에 귀속된 원가'(cost_contract_id)다.
-                외주비는 외주 매입계약에 지급되면서 동시에 프로젝트 매출계약의 원가라
+            {/* ⚠ 축이 다르다. 매입 주문은 '이 주문이 근거인 지급'(contract_id),
+                매출 주문은 '이 주문에 귀속된 원가'(cost_contract_id)다.
+                외주비는 외주 매입주문에 지급되면서 동시에 프로젝트 매출주문의 원가라
                 여기서 축을 틀리면 돈이 조용히 엉뚱한 바구니로 간다. */}
             <div className="row" style={{ marginBottom: 10 }}>
               <span className="text-xs text-muted2">
@@ -1751,7 +1751,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
               <thead>
                 <tr>
                   <th>{isPurchase ? '지급일' : '지출일'}</th><th>거래처 · 적요</th><th>비목</th>
-                  {!isPurchase && <th>지급 근거(발주 계약)</th>}
+                  {!isPurchase && <th>지급 근거(발주)</th>}
                   <th className="num-right">금액</th><th>결의서</th><th>{isPurchase ? '지급' : '정산'}</th>
                 </tr>
               </thead>
@@ -1760,7 +1760,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                   <tr><td colSpan={isPurchase ? 6 : 7} style={{ textAlign: "center", padding: 40, color: "var(--muted-2)", fontSize: 13 }}>
                     {isPurchase
                       ? '등록된 지급 내역이 없어요. '
-                      : '이 계약에 귀속된 원가가 없어요. '}
+                      : '이 주문에 귀속된 원가가 없어요. '}
                     <b>{isPurchase ? '지급 거래 연결' : '원가 거래 연결'}</b>로 이미 등록된 지출을 붙일 수 있어요.
                   </td></tr>
                 )}
@@ -1774,7 +1774,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                     </td>
                     <td><span className="badge outline">{r.category}</span></td>
                     {!isPurchase && (
-                      <td className="text-sm text-muted">{r.paidContract || <span className="text-muted2">공통 (계약 없음)</span>}</td>
+                      <td className="text-sm text-muted">{r.paidContract || <span className="text-muted2">공통 (주문 없음)</span>}</td>
                     )}
                     <td className="num-cell num-right fw-700">{fmtNum(r.amount)}</td>
                     <td><StatusBadge status={r.doc}/></td>
@@ -1829,10 +1829,10 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
             <div style={{ marginBottom: 24 }}>
               <label className="label">새 메모 추가</label>
               <textarea className="input" rows={3} value={memo} onChange={e => setMemo(e.target.value)}
-                placeholder="계약에 관련된 메모를 자유롭게 적어주세요"
+                placeholder="주문에 관련된 메모를 자유롭게 적어주세요"
                 style={{ resize: "vertical", fontFamily: "inherit" }}/>
               <div className="row" style={{ marginTop: 8 }}>
-                <span className="text-xs text-muted2">이 계약에 대한 자유 메모를 저장해두세요.</span>
+                <span className="text-xs text-muted2">이 주문에 대한 자유 메모를 저장해두세요.</span>
                 <button className="btn primary sm ml-auto" onClick={saveMemo}>
                   <Icon.Pencil size={12}/> 메모 저장
                 </button>
@@ -1846,7 +1846,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                     <thead>
                       <tr>
                         <th style={{ width: 60 }}>회차</th><th>처리일</th><th>결과</th>
-                        <th>계약기간 변경</th><th className="num-right">계약금액 변경</th><th>메모</th>
+                        <th>계약기간 변경</th><th className="num-right">주문금액 변경</th><th>메모</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1898,7 +1898,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       </div>
 
       {/* 편집 Drawer */}
-      <Drawer open={editOpen} onClose={() => setEditOpen(false)} width="min(480px,100vw)" label="계약 편집">
+      <Drawer open={editOpen} onClose={() => setEditOpen(false)} width="min(480px,100vw)" label="주문 편집">
         <div className="drawer-body">
           <div className="col gap-form">
             <div>
@@ -1907,11 +1907,11 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                 options={vendors.map(v => ({ value: v.name, label: v.name }))} placeholder="거래처 선택"/>
             </div>
             <div>
-              <label className="label" style={{ marginBottom: 8 }}>계약명 *</label>
+              <label className="label" style={{ marginBottom: 8 }}>주문명 *</label>
               <input className="input" value={editForm.name || ''} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}/>
             </div>
             <div>
-              <label className="label" style={{ marginBottom: 8 }}>계약번호 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+              <label className="label" style={{ marginBottom: 8 }}>주문번호 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
               <input className="input" value={editForm.contract_no || ''} onChange={e => setEditForm(f => ({ ...f, contract_no: e.target.value }))} placeholder="예: CT-2026-001"/>
             </div>
             <ContractTermFields form={editForm} set={setEditForm}/>
@@ -1939,7 +1939,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                 onAdd={(d) => setEditForm(f => ({ ...f, docs: [...(f.docs || []), d] }))}
                 onRemove={(d) => setEditForm(f => ({ ...f, docs: (f.docs || []).filter(x => x !== d) }))}
                 label="계약서 파일을 끌어다 놓거나 클릭"/>
-              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>기존에 첨부한 파일은 계약 상세의 '증빙' 탭에서 확인·삭제할 수 있어요.</div>
+              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>기존에 첨부한 파일은 주문 상세의 '증빙' 탭에서 확인·삭제할 수 있어요.</div>
             </div>
           </div>
         </div>
@@ -1953,12 +1953,12 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       <RenewDrawer open={renewOpen} onClose={() => setRenewOpen(false)} contract={c} onSaved={reload}/>
       <ProgressInvoiceDrawer open={progressOpen} onClose={() => setProgressOpen(false)} contract={c} onSaved={reload}/>
 
-      {/* 이미 등록된 거래를 이 계약에 붙인다 */}
+      {/* 이미 등록된 거래를 이 주문에 붙인다 */}
       <LinkTxnDrawer open={!!linkOpen} onClose={() => setLinkOpen(null)}
         contractId={contractId} contractName={c.name}
         kind={linkOpen?.kind} axis={linkOpen?.axis} onLinked={reload}/>
 
-      {/* 계약 화면에서 연 거래 상세 — 여기서 고치거나 연결을 뗄 수 있어야
+      {/* 주문 화면에서 연 거래 상세 — 여기서 고치거나 연결을 뗄 수 있어야
           "잘못된 걸 그 자리에서 처리"가 된다(전체 거래내역으로 나갈 일이 없어진다). */}
       <TxnQuickDrawer txnId={txnOpen} onClose={() => setTxnOpen(null)}
         contractId={contractId} onChanged={() => { setTxnOpen(null); reload(); }}/>
@@ -1966,8 +1966,8 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   );
 };
 
-/* ============ 기성 청구 발행 Drawer (기성형 계약) ============
-   계약 품목 단가표를 불러와 품목별 수량을 입력 → 금액=수량×단가 자동 → 청구서 발행.
+/* ============ 기성 청구 발행 Drawer (기성형 주문) ============
+   주문 품목 단가표를 불러와 품목별 수량을 입력 → 금액=수량×단가 자동 → 청구서 발행.
    총액형의 청구 일정과 달리 마일스톤 없이 품목 line으로 청구한다. */
 const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
   const toast = useToast();
@@ -1982,14 +1982,14 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
   const isPurchase = contract?.vendor_gubu === 'A' || contract?.vendor_gubu === 'E';
   const exempt = contract?.vat_mode === 'exempt' || contract?.vat_mode === 'zero';
 
-  // 열릴 때 계약 품목표를 수량 0으로 깔아준다(단가는 계약 단가 스냅샷).
+  // 열릴 때 주문 품목표를 수량 0으로 깔아준다(단가는 주문 단가 스냅샷).
   useEffect(() => {
     if (!open) return;
     setRows((contract?.contract_items || []).map(it => ({
       item_id: it.item_id || '', name: it.name, spec: it.spec || '', unit: it.unit || '',
-      // 중량·단가기준은 계약 스냅샷을 그대로 가져온다 — 여기서 빠지면 기성 청구가 수량 기준으로 떨어진다
-      // 계약의 중량은 출발점이 아니라 **빈 칸으로 시작**한다 — 회차마다 다르므로
-      // 계약값이 미리 들어가 있으면 그대로 발행해 버리기 쉽다(수량과 같은 이유로 0에서 시작).
+      // 중량·단가기준은 주문 스냅샷을 그대로 가져온다 — 여기서 빠지면 기성 청구가 수량 기준으로 떨어진다
+      // 주문의 중량은 출발점이 아니라 **빈 칸으로 시작**한다 — 회차마다 다르므로
+      // 주문값이 미리 들어가 있으면 그대로 발행해 버리기 쉽다(수량과 같은 이유로 0에서 시작).
       weight: '', price_basis: it.price_basis === 'weight' ? 'weight' : 'qty',
       unit_price: Number(it.unit_price) || 0, cost_price: Number(it.cost_price) || 0, qty: '', amount: '',
     })));
@@ -2000,7 +2000,7 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
 
   // 수량 입력 시 금액 자동(수동 수정 전까지). 금액을 직접 고치면 그 값을 유지.
   /* 회차 수량(또는 중량)을 넣으면 금액이 따라온다.
-     ㎏당 단가 품목은 회차마다 **중량**이 다르다 — 계약에 적힌 중량은 출발점일 뿐이라
+     ㎏당 단가 품목은 회차마다 **중량**이 다르다 — 주문에 적힌 중량은 출발점일 뿐이라
      여기서 다시 받아야 한다. 안 그러면 매 회차 같은 중량으로만 청구된다. */
   const setQty = (i, v) => setRows(rs => rs.map((r, idx) => {
     if (idx !== i) return r;
@@ -2042,7 +2042,7 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
       <div className="drawer-body">
         {(contract?.contract_items || []).length === 0 ? (
           <div className="text-sm text-muted">
-            계약에 등록된 품목이 없어요. <b>편집</b>에서 품목 단가표를 먼저 등록해주세요.
+            주문에 등록된 품목이 없어요. <b>편집</b>에서 품목 단가표를 먼저 등록해주세요.
           </div>
         ) : (
           <>
@@ -2130,7 +2130,7 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
   );
 };
 
-/* ============ 계약 목록 ============ */
+/* ============ 주문 목록 ============ */
 const NEW_CONTRACT_FORM = {
   vendor: "", contract_no: "", order_no: "", project_no: "", name: "", status: "진행중", file_url: "", file_name: "",
   billing_mode: "onetime", term_mode: "fixed", vat_mode: "taxable", docs: [], items: [],
@@ -2151,13 +2151,13 @@ const contractPayload = (form, vendorId) => ({
   billing_mode:   form.billing_mode,
   term_mode:      form.term_mode,
   vat_mode:       ['exempt', 'zero'].includes(form.vat_mode) ? form.vat_mode : 'taxable',
-  // 계약 품목표 — 서버가 전체 교체 저장(이름 있는 행만). 청구 방식과 무관하게 저장된다.
+  // 주문 품목표 — 서버가 전체 교체 저장(이름 있는 행만). 청구 방식과 무관하게 저장된다.
   items:          (form.items || []).map(it => ({
     item_id: it.item_id || null, name: it.name, spec: it.spec || '', unit: it.unit || '',
     qty: asNum(it.qty), unit_price: asNum(it.unit_price), cost_price: asNum(it.cost_price),
   })),
   // 원가예산은 상세의 '예산 수정'이 주 편집기다. 여기선 값이 있을 때만 실어 보낸다
-  // (안 실으면 서버가 손대지 않는다 → 계약 편집 저장이 예산을 지우는 사고를 막는다).
+  // (안 실으면 서버가 손대지 않는다 → 주문 편집 저장이 예산을 지우는 사고를 막는다).
   ...(form.cost_budget ? { cost_budget: form.cost_budget } : {}),
   amount:         asNum(form.amount),
   unit_amount:    asNum(form.unit_amount),
@@ -2171,12 +2171,12 @@ const contractPayload = (form, vendorId) => ({
 });
 
 /* 부제로 방향을 못박는다 — '수주'와 '발주'는 한 글자 차이인데 돈의 방향이 반대다.
- * 특히 이 바닥에서 '발주처'는 **우리에게 발주한 고객사**(=수주 계약의 상대)를 가리켜서,
- * 라벨만 보면 '발주 계약'을 발주처 계약으로 읽을 수 있다. 그래서 '우리가 발주한'이라고 쓴다. */
+ * 특히 이 바닥에서 '발주처'는 **우리에게 발주한 고객사**(=수주의 상대)를 가리켜서,
+ * 라벨만 보면 '발주'을 발주처 주문으로 읽을 수 있다. 그래서 '우리가 발주한'이라고 쓴다. */
 const CONTRACT_KIND_META = {
-  all:      { title: "계약 전체", sub: "수주·발주 계약을 한 표에서 봅니다. 계약별 입금·지출·미수금을 확인하세요.", addGubu: "B" },
-  sales:    { title: "수주 계약", sub: "우리가 수주한 계약입니다(발주처 = 고객사). 계약별 청구·입금·미수금을 관리하세요.", addGubu: "B" },
-  purchase: { title: "발주 계약", sub: "우리가 발주한 계약입니다(외주·구매). 계약별 지급 일정·미지급을 관리하세요.", addGubu: "A" },
+  all:      { title: "주문 전체", sub: "수주·발주를 한 표에서 봅니다. 주문별 입금·지출·미수금을 확인하세요.", addGubu: "B" },
+  sales:    { title: "수주", sub: "우리가 수주한 주문입니다(발주처 = 고객사). 주문별 청구·입금·미수금을 관리하세요.", addGubu: "B" },
+  purchase: { title: "발주", sub: "우리가 발주한 주문입니다(외주·구매). 주문별 지급 일정·미지급을 관리하세요.", addGubu: "A" },
 };
 
 export const ContractListScreen = ({ goDetail, kind = "all" }) => {
@@ -2200,7 +2200,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
 
   const handleNewSave = async () => {
     if (!newForm.vendor) return toast.push("거래처를 선택해주세요");
-    if (!newForm.name)   return toast.push("계약명을 입력해주세요");
+    if (!newForm.name)   return toast.push("주문명을 입력해주세요");
     const recurring = newForm.billing_mode === 'recurring';
     const progress  = newForm.billing_mode === 'progress';
     if (progress && !(newForm.items || []).some(it => (it.name || '').trim() && asNum(it.unit_price) > 0))
@@ -2208,14 +2208,14 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
     // 금액은 직접 입력하거나 품목으로 구성하거나 — 둘 중 하나만 있으면 된다.
     const lineSum = itemsTotal(newForm.items);
     if (recurring && !asNum(newForm.unit_amount) && !lineSum) return toast.push(`${periodLabel(newForm.billing_period)} 청구금액을 입력하거나 품목을 등록해주세요`);
-    if (!recurring && !progress && !asNum(newForm.amount) && !lineSum) return toast.push("계약금액을 입력하거나 품목을 등록해주세요");
-    if (newForm.term_mode !== 'open' && !newForm.end_date) return toast.push("계약 종료일을 입력해주세요 (무기한이면 종료 방식을 '무기한'으로)");
+    if (!recurring && !progress && !asNum(newForm.amount) && !lineSum) return toast.push("주문금액을 입력하거나 품목을 등록해주세요");
+    if (newForm.term_mode !== 'open' && !newForm.end_date) return toast.push("주문 종료일을 입력해주세요 (무기한이면 종료 방식을 '무기한'으로)");
     const vendorObj = vendors.find(v => v.name === newForm.vendor);
     const res = await api.addContract(contractPayload(newForm, vendorObj?.id));
     if (res.ok) {
-      // 폼에서 올린 계약서 파일들을 계약 첨부(contract_docs)로 연결
+      // 폼에서 올린 계약서 파일들을 주문 첨부(contract_docs)로 연결
       for (const d of (newForm.docs || [])) await api.addContractDoc(res.id, { url: d.url, name: d.name, doc_type: '계약서', size: d.size || 0 });
-      toast.push("계약이 등록됐어요");
+      toast.push("주문이 등록됐어요");
       setNewOpen(false);
       setNewForm(NEW_CONTRACT_FORM);
       reload();
@@ -2227,8 +2227,8 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
   // 거래처 gubu로 매출(B)·매입(A/E) 분류. gubu 미상은 매출로 간주(기존 데이터 호환).
   const vendorGubu = useMemo(() => Object.fromEntries(vendors.map(v => [v.id, v.gubu])), [vendors]);
   const isPurchase = (r) => { const g = vendorGubu[r.vendor_id]; return g === "A" || g === "E"; };
-  // 남은 잔액은 서버(metrics)가 계약 성격에 맞게 계산해 준다.
-  // 무기한 정기계약은 '남은 계약분'이 없으므로(null) 미수금을 대신 보여준다.
+  // 남은 잔액은 서버(metrics)가 주문 성격에 맞게 계산해 준다.
+  // 무기한 정기주문은 '남은 주문분'이 없으므로(null) 미수금을 대신 보여준다.
   const rowRemain = (r) => (r.remain != null ? r.remain : (r.ar_remain || 0));
   const scoped = allContracts.filter(r => kind === "all" ? true : kind === "purchase" ? isPurchase(r) : !isPurchase(r));
 
@@ -2248,21 +2248,21 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
   const renewDue     = scoped.filter(r => renewalInfo(r).stage === "due").length;
   const renewExpired = scoped.filter(r => renewalInfo(r).stage === "expired").length;
 
-  // 무기한 정기계약은 총액이 없으므로 '계약금액 합계'에서 빠진다(넣으면 합계가 거짓말이 됨).
-  // 대신 월정액 합계(MRR)를 따로 센다 — 정기형 계약의 실질 규모는 이쪽이다.
+  // 무기한 정기주문은 총액이 없으므로 '주문금액 합계'에서 빠진다(넣으면 합계가 거짓말이 됨).
+  // 대신 월정액 합계(MRR)를 따로 센다 — 정기형 주문의 실질 규모는 이쪽이다.
   const totals = scoped.reduce((a, c) => ({
     amount: a.amount + (hasTotal(c) ? (c.amount || 0) : 0),
-    remain: a.remain + rowRemain(c),        // 계약잔액 — 아직 청구 안 한 금액을 포함한다
+    remain: a.remain + rowRemain(c),        // 주문잔액 — 아직 청구 안 한 금액을 포함한다
     arRemain: a.arRemain + (c.ar_remain || 0),  // 진짜 미수금 — 청구했는데 안 들어온 돈
     monthly: a.monthly + (isRecurring(c) && c.status === '진행중'
       ? Math.round((c.unit_amount || 0) / periodMonths(c.billing_period)) : 0),
   }), { amount: 0, remain: 0, arRemain: 0, monthly: 0 });
 
   // 엑셀 내보내기 — 서버가 서식·요약까지 갖춘 .xlsx를 만든다
-  // (계약 목록 / 갱신 관리 / 정기 계약 3개 시트)
+  // (주문 목록 / 갱신 관리 / 정기 주문 3개 시트)
   const [exporting, setExporting] = useState(false);
   const exportXlsx = async () => {
-    if (scoped.length === 0) return toast.push("내보낼 계약이 없어요");
+    if (scoped.length === 0) return toast.push("내보낼 주문이 없어요");
     setExporting(true);
     const res = await api.exportContractsXlsx(kind);
     setExporting(false);
@@ -2277,29 +2277,29 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
           <button className="btn" onClick={exportXlsx} disabled={exporting}>
             <Icon.Download/> {exporting ? "만드는 중..." : "엑셀 내보내기"}
           </button>
-          <button className="btn primary" onClick={() => { setNewForm(NEW_CONTRACT_FORM); setNewOpen(true); }}><Icon.Plus/> 새 계약</button>
+          <button className="btn primary" onClick={() => { setNewForm(NEW_CONTRACT_FORM); setNewOpen(true); }}><Icon.Plus/> 신규 생성</button>
         </>}
       />
 
       {/* 색은 '지금 챙길 게 있다'는 신호일 때만 켠다. 평상시엔 무채색(ink) — 다 칠하면 색이 의미를 잃는다. */}
       <KpiRow cols={5}>
-        <Kpi label="진행중 계약"   value={`${scoped.filter(c => c.status === "진행중").length}건`} badge={`총 ${scoped.length}건`} badgeTone="ink"/>
-        <Kpi label="계약금액 합계" value={fmtNum(totals.amount) + "원"}  badge="무기한 계약 제외"  badgeTone="ink"/>
+        <Kpi label="진행중 주문"   value={`${scoped.filter(c => c.status === "진행중").length}건`} badge={`총 ${scoped.length}건`} badgeTone="ink"/>
+        <Kpi label="주문금액 합계" value={fmtNum(totals.amount) + "원"}  badge="무기한 주문 제외"  badgeTone="ink"/>
         <Kpi label={kind === "purchase" ? "월 고정지출" : "월 고정수입"} value={fmtNum(totals.monthly) + "원"}
-          badge={`정기계약 ${scoped.filter(c => isRecurring(c) && c.status === '진행중').length}건 · 월 환산`} badgeTone="ink"/>
-        {/* ⚠ 이 카드는 '미수금'이 아니라 **남은 계약분**이다.
-            totals.remain 은 계약잔액(계약 총액 − 수금)이라 **아직 청구조차 안 한 금액을 포함**한다.
-            예전엔 '남은 미수금'이라고 불러서, 계약만 맺고 청구는 한 장도 안 한 상태에서
+          badge={`정기주문 ${scoped.filter(c => isRecurring(c) && c.status === '진행중').length}건 · 월 환산`} badgeTone="ink"/>
+        {/* ⚠ 이 카드는 '미수금'이 아니라 **남은 주문분**이다.
+            totals.remain 은 주문잔액(주문 총액 − 수금)이라 **아직 청구조차 안 한 금액을 포함**한다.
+            예전엔 '남은 미수금'이라고 불러서, 주문만 맺고 청구는 한 장도 안 한 상태에서
             미수금 4,664만원이 떠 있었다 — 홈·미수금 화면은 0원인데 여기만 다른 말을 했다.
             진짜 미수금(청구했는데 안 들어온 돈)은 ar_remain 이므로 뱃지로 따로 보여준다. */}
-        <Kpi label={kind === "purchase" ? "남은 계약분(지급)" : "남은 계약분"} value={fmtNum(totals.remain) + "원"}
+        <Kpi label={kind === "purchase" ? "남은 주문분(지급)" : "남은 주문분"} value={fmtNum(totals.remain) + "원"}
           /* 뱃지는 '다를 때만' 의미가 있다. 두 값이 같으면(총액형이 전부 완납이라
-             남은 계약분 = 미수금인 경우) 같은 숫자를 두 번 보여주는 꼴이라 오히려 헷갈린다. */
+             남은 주문분 = 미수금인 경우) 같은 숫자를 두 번 보여주는 꼴이라 오히려 헷갈린다. */
           badge={totals.arRemain > 0 && totals.arRemain !== totals.remain
             ? `그중 ${kind === "purchase" ? "미지급금" : "미수금"} ${fmtNum(totals.arRemain)}원`
             : `${scoped.filter(c => rowRemain(c) > 0).length}건 잔존`}
           badgeTone={totals.arRemain > 0 ? "warn" : "ink"}/>
-        <Kpi label="갱신 챙길 계약" value={`${renewDue + renewExpired}건`}
+        <Kpi label="갱신 챙길 주문" value={`${renewDue + renewExpired}건`}
           badge={renewExpired > 0 ? `만료 방치 ${renewExpired}건` : renewDue > 0 ? "통보 기한 임박" : "임박 없음"}
           badgeTone={renewExpired > 0 ? "neg" : renewDue > 0 ? "warn" : "ink"}/>
       </KpiRow>
@@ -2316,7 +2316,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
           <div className="ml-auto row gap-8" style={{ flexWrap: "wrap" }}>
             <div className="search" style={{ margin: 0, width: "min(220px, 100%)", padding: "6px 10px" }}>
               <Icon.Search size={14}/>
-              <input value={q} onChange={e => setQ(e.target.value)} placeholder="계약/거래처 검색"/>
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder="주문/거래처 검색"/>
             </div>
             <button className="btn" onClick={() => setFilterOpen(s => !s)} style={{ position: "relative" }}>
               <Icon.Filter/> 필터
@@ -2342,11 +2342,11 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
           rows={rows}
           rowKey={r => r.id}
           onRowClick={r => goDetail(r.id, r.name)}
-          empty="조건에 맞는 계약이 없어요"
+          empty="조건에 맞는 주문이 없어요"
           columns={[
-            { key: 'name', header: '계약', width: '24%', render: r => {
+            { key: 'name', header: '주문', width: '24%', render: r => {
               const openEnded = !hasTotal(r);
-              // 진행률은 '이번 계약기간' 기준. 무기한 계약은 채울 총액이 없어 막대를 안 그린다.
+              // 진행률은 '이번 계약기간' 기준. 무기한 주문은 채울 총액이 없어 막대를 안 그린다.
               // 총액은 서버 metrics의 term_total 사용(vat_mode 반영). 화면에서 ×1.1 재계산 금지.
               const total = r.term_total ?? 0;
               const pct = openEnded || total <= 0 ? null : Math.min(100, Math.round(((r.term_collected ?? 0) / total) * 100));
@@ -2360,13 +2360,13 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
                 </div>
               </>
             } },
-            { key: 'contract_no', header: '계약번호', width: 110, sortable: true, render: r => <span className="text-sm num" style={{ color: r.contract_no ? undefined : "var(--muted-2)" }}>{r.contract_no || '—'}</span> },
+            { key: 'contract_no', header: '주문번호', width: 110, sortable: true, render: r => <span className="text-sm num" style={{ color: r.contract_no ? undefined : "var(--muted-2)" }}>{r.contract_no || '—'}</span> },
             { key: 'vendor', header: '거래처', sortable: true, sortValue: r => r.vendor_name || r.vendor || '', render: r => <span className="fw-600">{r.vendor_name || r.vendor || '—'}</span> },
             { key: 'term', header: '계약기간 · 갱신', width: 175, render: r => <>
               <div className="text-sm num">
                 {/* 기간은 **총액 유무와 무관하다.** 예전엔 hasTotal 로 갈랐는데, 기성형은
                     총액 개념이 없어 hasTotal=false 라서 종료일을 넣어도 늘 '해지 시까지'로 떴다
-                    (2026-12-31 까지인 단가계약이 무기한처럼 보였다 — 갱신 시점을 놓친다).
+                    (2026-12-31 까지인 단가주문이 무기한처럼 보였다 — 갱신 시점을 놓친다).
                     기간은 종료일이 있느냐, 무기한(term_mode=open)이냐로만 정한다. */}
                 {isOpenEnded(r) || !r.end_date ? `${r.start_date || '—'} ~ 해지 시까지` : [r.start_date, r.end_date].filter(Boolean).join(' ~ ')}
               </div>
@@ -2375,9 +2375,9 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
             { key: 'amount', header: '금액', align: 'right', sortable: true, sortValue: r => r.amount || 0, render: r => (
               isRecurring(r)
                 ? <div><div className="fw-600">{fmtNum(r.unit_amount || 0)}<span className="text-xs text-muted2">/{periodLabel(r.billing_period)}</span></div>{hasTotal(r) && <div className="text-xs text-muted2">기간 총 {fmtNum(r.amount || 0)}</div>}</div>
-                /* 옆 칸의 '수금'·'남은 계약분'은 전부 **부가세 포함** 금액이다.
-                   여기만 공급가(c.amount)를 보여줘서, 계약 8,400,000 인데 수금 9,240,000 처럼
-                   같은 행의 숫자끼리 앞뒤가 안 맞아 보였다("계약보다 많이 받았나?").
+                /* 옆 칸의 '수금'·'남은 주문분'은 전부 **부가세 포함** 금액이다.
+                   여기만 공급가(c.amount)를 보여줘서, 주문 8,400,000 인데 수금 9,240,000 처럼
+                   같은 행의 숫자끼리 앞뒤가 안 맞아 보였다("주문보다 많이 받았나?").
                    기준을 맞춰 VAT 포함 총액(term_total)을 크게 두고, 공급가는 밑에 적는다. */
                 : (r.term_total != null && r.term_total !== r.amount
                     ? <div><div className="num-cell">{fmtNum(r.term_total)}</div>
@@ -2385,9 +2385,9 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
                     : <span className="num-cell">{fmtNum(r.amount || 0)}</span>)
             ) },
             { key: 'collected', header: kind === "purchase" ? "지급액" : "수금", align: 'right', sortable: true, sortValue: r => r.collected ?? 0, render: r => <span className="num-cell">{fmtNum(r.collected ?? 0)}</span> },
-            /* 총액형은 '계약잔액'(아직 청구 안 한 몫 포함), 기성·무기한형은 remain 이 없어
+            /* 총액형은 '주문잔액'(아직 청구 안 한 몫 포함), 기성·무기한형은 remain 이 없어
                ar_remain(미수금)이 온다. 둘은 성격이 다르므로 무엇을 보고 있는지 밑줄에 적는다. */
-            { key: 'remain', header: '남은 계약분', align: 'right', sortable: true, sortValue: r => rowRemain(r), render: r => (
+            { key: 'remain', header: '남은 주문분', align: 'right', sortable: true, sortValue: r => rowRemain(r), render: r => (
               <span className="num-cell fw-700" style={{ color: rowRemain(r) > 0 ? "var(--warn-ink)" : "var(--muted-2)" }}>
                 {rowRemain(r) > 0 ? fmtNum(rowRemain(r)) : "—"}
                 {rowRemain(r) > 0 && (
@@ -2397,19 +2397,19 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
                 )}
               </span>
             ) },
-            // 매입 계약엔 원가·손익이 없다 → 미지급금으로 대체
+            // 매입 주문엔 원가·손익이 없다 → 미지급금으로 대체
             { key: 'cost', header: kind === "purchase" ? "미지급금" : "원가", align: 'right', render: r => (
               isPurchase(r)
                 ? <span className="num-cell fw-700" style={{ color: (r.ar_remain || 0) > 0 ? "var(--warn-ink)" : "var(--muted-2)" }}>{(r.ar_remain || 0) > 0 ? fmtNum(r.ar_remain) : "—"}</span>
                 /* r.out 이 아니라 r.cost 다.
-                   out  = 이 계약이 '근거'인 지출(contract_id)      — 매입계약의 지급액
-                   cost = 이 매출계약에 '귀속'된 원가(cost_contract_id) — 외주비 등
-                   매출 계약의 원가는 후자다. out 을 쓰던 탓에 원가가 늘 0으로 보였고,
+                   out  = 이 주문이 '근거'인 지출(contract_id)      — 매입주문의 지급액
+                   cost = 이 매출주문에 '귀속'된 원가(cost_contract_id) — 외주비 등
+                   매출 주문의 원가는 후자다. out 을 쓰던 탓에 원가가 늘 0으로 보였고,
                    손익은 cost 를 빼고 계산해서 **수금 523,000 · 원가 0 · 손익 +323,000**처럼
                    화면 안에서 뺄셈이 맞지 않았다(손익이 틀린 게 아니라 원가 칸이 거짓이었다). */
                 : <span className="num-cell text-muted">{fmtNum(r.cost || 0)}</span>
             ) },
-            // 매입 계약은 손익 칸 자체가 없다('전체'에선 칸 비워 정렬 맞춤). 손익은 마이너스일 때만 색 경고.
+            // 매입 주문은 손익 칸 자체가 없다('전체'에선 칸 비워 정렬 맞춤). 손익은 마이너스일 때만 색 경고.
             ...(kind !== "purchase" ? [{ key: 'profit', header: '예상 손익', align: 'right', sortable: true, sortValue: r => isPurchase(r) ? null : (r.profit || 0), render: r => (
               isPurchase(r)
                 ? <span className="num-cell text-muted2">—</span>
@@ -2420,7 +2420,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
         />
       </div>
 
-      <Drawer open={newOpen} onClose={() => setNewOpen(false)} width="min(480px,100vw)" label="새 계약 등록">
+      <Drawer open={newOpen} onClose={() => setNewOpen(false)} width="min(480px,100vw)" label="신규 생성">
         <div className="drawer-body">
           <div className="col gap-form">
             <div>
@@ -2443,17 +2443,17 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
               />
             </div>
             <div>
-              <label className="label" style={{ marginBottom: 8 }}>계약명 <span style={{ color: "var(--neg-ink)" }}>*</span></label>
-              <input className="input" value={newForm.name} onChange={e => setNewForm(f => ({ ...f, name: e.target.value }))} placeholder="계약명을 입력하세요"/>
+              <label className="label" style={{ marginBottom: 8 }}>주문명 <span style={{ color: "var(--neg-ink)" }}>*</span></label>
+              <input className="input" value={newForm.name} onChange={e => setNewForm(f => ({ ...f, name: e.target.value }))} placeholder="주문명을 입력하세요"/>
             </div>
             <div>
-              <label className="label" style={{ marginBottom: 8 }}>계약번호 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+              <label className="label" style={{ marginBottom: 8 }}>주문번호 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
               <input className="input" value={newForm.contract_no} onChange={e => setNewForm(f => ({ ...f, contract_no: e.target.value }))} placeholder="예: CT-2026-001 (계약서 번호)"/>
-              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>계약을 번호로 구분하는 경우 입력하세요. 목록·상세에 표시됩니다.</div>
+              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>주문을 번호로 구분하는 경우 입력하세요. 목록·상세에 표시됩니다.</div>
             </div>
             <ContractTermFields form={newForm} set={setNewForm}/>
             <div>
-              <label className="label" style={{ marginBottom: 8 }}>계약 상태</label>
+              <label className="label" style={{ marginBottom: 8 }}>주문 상태</label>
               <div className="row gap-6">
                 {["진행중", "보류", "완료"].map(s => (
                   <button key={s} type="button" className={`chip ${newForm.status === s ? "active" : ""}`} onClick={() => setNewForm(f => ({ ...f, status: s }))}>{s}</button>

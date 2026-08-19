@@ -276,12 +276,12 @@ function adaptTransaction(row) {
     date: row.date || '',
     vendor: row.vendor_name || '(미확인)',
     vendorId: row.vendor_id,
-    /* 근거 계약. **계약이 없으면 빈 값**이다 — doc_no 로 메우면 안 된다.
-       그 폴백 때문에 전표번호가 계약명 자리에 앉아, 계약에 붙은 거래와 안 붙은 거래를
-       화면에서 구별할 수 없었다("어떤 게 계약에 연관됐는지 명확하지 않다"). */
+    /* 근거 주문. **주문이 없으면 빈 값**이다 — doc_no 로 메우면 안 된다.
+       그 폴백 때문에 전표번호가 주문명 자리에 앉아, 주문에 붙은 거래와 안 붙은 거래를
+       화면에서 구별할 수 없었다("어떤 게 주문에 연관됐는지 명확하지 않다"). */
     contract: row.contract_name || '',
     contractId: row.contract_id || '',
-    // 원가 귀속(지출만) — 이 지출이 어느 매출계약의 원가인지. 근거 계약과 별개 축.
+    // 원가 귀속(지출만) — 이 지출이 어느 매출주문의 원가인지. 근거 주문과 별개 축.
     cost_contract_id: row.cost_contract_id || '',
     cost_contract_name: row.cost_contract_name || '',
     account: row.account_name || '',
@@ -291,9 +291,9 @@ function adaptTransaction(row) {
     counterpartyBank: row.counterparty_bank || '',
     counterpartyAccount: row.counterparty_account || '',
     counterpartyHolder: row.counterparty_holder || '',
-    /* 적요 — 사람이 적은 내용. **계약명을 섞지 않는다.**
-       예전엔 `계약명 || 적요 || 전표번호` 를 한 칸에 뭉쳐 '내용'이라 불렀는데,
-       그 칸만 봐서는 계약인지 메모인지 알 수 없었다. 계약은 이제 자기 칸(contract)이 있다. */
+    /* 적요 — 사람이 적은 내용. **주문명을 섞지 않는다.**
+       예전엔 `주문명 || 적요 || 전표번호` 를 한 칸에 뭉쳐 '내용'이라 불렀는데,
+       그 칸만 봐서는 주문인지 메모인지 알 수 없었다. 주문은 이제 자기 칸(contract)이 있다. */
     scope: row.memo || row.doc_no || '—',
     category: row.category || '—',
     subCategory: row.sub_category,
@@ -400,11 +400,25 @@ export const api = {
     } catch { return [] }
   },
 
-  async addAdjustment(accountId, { amount, reason, by = '담당자' }) {
+  /* 기준일 시점 잔액 — 조정 화면이 "그날 통장에 얼마였나"를 보여주는 데 쓴다.
+     date 를 안 주면 전체(=오늘) 기준. 실패하면 null 을 준다 —
+     0 을 주면 '잔액이 0원'과 '못 읽었다'를 화면이 구분할 수 없다. */
+  async getBalanceAsOf(accountId, date) {
+    try {
+      const q = date ? `?date=${encodeURIComponent(date)}` : ''
+      const r = await req(`/accounts/${accountId}/balance${q}`)
+      return Number(r.balance)
+    } catch { return null }
+  },
+
+  /* 잔액 조정. date 는 **호출부가 정한다** —
+     예전엔 여기서 localToday() 를 박아 넣어, 화면에 일자 칸이 있어도 무시됐을 것이다.
+     서버는 이 날짜로 미래일자·마감월을 검사하고, 자금 현황은 이 날짜부터 반영한다. */
+  async addAdjustment(accountId, { amount, reason, date, by = '담당자' }) {
     try {
       await req(`/accounts/${accountId}/adjustments`, {
         method: 'POST',
-        body: { amount, reason, date: localToday(), created_by: by },
+        body: { amount, reason, date: date || localToday(), created_by: by },
       })
       return { ok: true }
     } catch (e) {
@@ -413,14 +427,14 @@ export const api = {
     }
   },
 
-  /* 계약에 붙일 만한 거래 후보. axis: 'contract'(근거 계약) | 'cost'(원가 귀속)
+  /* 주문에 붙일 만한 거래 후보. axis: 'contract'(근거 주문) | 'cost'(원가 귀속)
      — 두 축은 서로 다른 컬럼이라 후보도 다르다. */
   async getLinkableTxns({ contractId, kind, axis = 'contract', q = '' }) {
     const p = new URLSearchParams({ contractId, kind, axis })
     if (q) p.set('q', q)
     try { return await req(`/transactions/linkable?${p}`) } catch { return [] }
   },
-  /* 거래를 계약에 붙이거나(contractId) 뗀다(contractId 없음).
+  /* 거래를 주문에 붙이거나(contractId) 뗀다(contractId 없음).
      청구서 '매칭'과 달리 금액 배분이 아니라 귀속이라 부분 연결이 없다. */
   async linkTxnsToContract({ txnIds, contractId = null, axis = 'contract' }) {
     try { return { ok: true, ...(await req('/transactions/link-contract', { method: 'POST', body: { txnIds, contractId, axis } })) } }
@@ -741,7 +755,7 @@ export const api = {
     try { await req(`/transactions/docs/${docId}`, { method: 'DELETE' }); return { ok: true } }
     catch { return { ok: false } }
   },
-  // 계약 첨부 서류(다중)
+  // 주문 첨부 서류(다중)
   async addContractDoc(contractId, data) {
     try { const r = await req(`/contracts/${contractId}/docs`, { method: 'POST', body: data }); return { ok: true, id: r.id } }
     catch { return { ok: false } }
@@ -772,7 +786,7 @@ export const api = {
         id: r.id,
         vendor: r.vendor_name || '(미확인)',
         vendorId: r.vendor_id,
-        contractId: r.contract_id,   // 수정 시 계약 연결을 잃지 않도록 함께 싣는다
+        contractId: r.contract_id,   // 수정 시 주문 연결을 잃지 않도록 함께 싣는다
         category: r.category,
         amount: r.amount,
         period: r.period,
@@ -814,8 +828,8 @@ export const api = {
     try {
       await req(`/recurring-expenses/${id}`, { method: 'PUT', body: {
         vendor_id: data.vendor_id ?? data.vendorId ?? null,
-        // 계약 연결은 폼이 다루지 않으므로 기존 값을 그대로 실어 보낸다.
-        // 예전엔 항상 null이라, 계약에 걸린 정기지출을 수정하면 연결이 조용히 끊겼다.
+        // 주문 연결은 폼이 다루지 않으므로 기존 값을 그대로 실어 보낸다.
+        // 예전엔 항상 null이라, 주문에 걸린 정기지출을 수정하면 연결이 조용히 끊겼다.
         contract_id: data.contract_id ?? data.contractId ?? null,
         category: data.category,
         amount: data.amount,
@@ -841,7 +855,7 @@ export const api = {
     try { const r = await req(`/recurring-expenses/${id}`, { method: 'DELETE' }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
   },
-  // 지급 예정인 정기지출 회차(아직 매입 청구서 미생성) — 매입 대금청구서 '지급 예정'에 계약 지급일정과 함께
+  // 지급 예정인 정기지출 회차(아직 매입 청구서 미생성) — 매입 대금청구서 '지급 예정'에 주문 지급일정과 함께
   async getPendingRecurringExpenses() {
     try { return await req('/recurring-expenses/pending') } catch { return [] }
   },
@@ -942,7 +956,7 @@ export const api = {
     } catch (e) { return { ok: false, count: 0, error: e.message } }
   },
 
-  // ─── 계약 ─────────────────────────────────────────────────────
+  // ─── 주문 ─────────────────────────────────────────────────────
   async getContracts({ status } = {}) {
     try {
       const params = status ? `?status=${status}` : ''
@@ -954,7 +968,7 @@ export const api = {
     try { return await req(`/contracts/${id}`) } catch { return null }
   },
 
-  // 기성 청구 발행 — 기성형(progress) 계약에서 품목별 수량으로 청구서 1건 + 품목 내역 생성.
+  // 기성 청구 발행 — 기성형(progress) 주문에서 품목별 수량으로 청구서 1건 + 품목 내역 생성.
   // body: { issued_at, due_at?, paid?, lines:[{ item_id, name, spec, unit, qty, unit_price, amount }] }
   async issueProgressInvoice(contractId, body) {
     try { const r = await req(`/contracts/${contractId}/progress-invoice`, { method: 'POST', body }); return { ok: true, ...r } }
@@ -1113,7 +1127,7 @@ export const api = {
 
   async updateContract(id, data) {
     try {
-      // 응답을 그대로 실어 보낸다 — 계약을 닫으며 정기 규칙 종료일을 맞췄는지(recurringClosed)를
+      // 응답을 그대로 실어 보낸다 — 주문을 닫으며 정기 규칙 종료일을 맞췄는지(recurringClosed)를
       // 화면이 알아야 결과를 알려줄 수 있다.
       const r = await req(`/contracts/${id}`, { method: 'PUT', body: data })
       return { ok: true, ...(r || {}) }
@@ -1164,7 +1178,7 @@ export const api = {
     catch (e) { return { ok: false, error: e.message } }
   },
 
-  /** 계약을 '완료'로 닫기 전 확인용 — 종료일이 비어 있는(=영원히 도는) 정기 규칙 */
+  /** 주문을 '완료'로 닫기 전 확인용 — 종료일이 비어 있는(=영원히 도는) 정기 규칙 */
   async getOpenEndedRecurring(id) {
     try { return await req(`/contracts/${id}/recurring/open-ended`) }
     catch { return { invoices: [], expenses: [], suggestedEndDate: '' } }
@@ -1174,7 +1188,7 @@ export const api = {
     catch (e) { return { ok: false, error: e.message } }
   },
 
-  // 계약 목록 엑셀 내려받기 (kind: 'sales'|'purchase'|'all').
+  // 주문 목록 엑셀 내려받기 (kind: 'sales'|'purchase'|'all').
   // 인증 헤더가 필요해서 <a href>로는 안 되고, blob으로 받아 저장한다.
   async exportContractsXlsx(kind = 'all') {
     try {
@@ -1184,7 +1198,7 @@ export const api = {
       })
       if (!res.ok) throw new Error('내보내기에 실패했어요')
       const blob = await res.blob()
-      const label = kind === 'purchase' ? '발주계약' : kind === 'sales' ? '수주계약' : '계약'
+      const label = kind === 'purchase' ? '발주' : kind === 'sales' ? '수주' : '주문'
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -1197,7 +1211,7 @@ export const api = {
     } catch (e) { return { ok: false, error: e.message } }
   },
 
-  // 갱신 관리: 통보기한에 들어왔거나 만료된 기간 계약 (for: 'sales'|'purchase')
+  // 갱신 관리: 통보기한에 들어왔거나 만료된 기간 주문 (for: 'sales'|'purchase')
   async getUpcomingRenewals(forKind) {
     try { return await req(`/contracts/renewals/upcoming${forKind ? `?for=${forKind}` : ''}`) } catch { return [] }
   },
@@ -1206,24 +1220,24 @@ export const api = {
     try { const r = await req(`/contracts/${id}/renew`, { method: 'POST', body: data }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
   },
-  // 정기형 계약 → 계약의 주기·금액·기간으로 정기청구 걸기
+  // 정기형 주문 → 주문의 주기·금액·기간으로 정기청구 걸기
   async addContractRecurring(id, accountId) {
     try { const r = await req(`/contracts/${id}/recurring`, { method: 'POST', body: { account_id: accountId || null } }); return { ok: true, id: r.id } }
     catch (e) { return { ok: false, error: e.message } }
   },
-  // 계약에 걸린 정기 반복(매출=정기청구 / 매입=정기지출)을 계약 조건에 다시 맞춘다.
-  // 계약이 원본이므로, 어긋나면 계약 쪽으로 되돌리는 게 맞다.
+  // 주문에 걸린 정기 반복(매출=정기청구 / 매입=정기지출)을 주문 조건에 다시 맞춘다.
+  // 주문이 원본이므로, 어긋나면 주문 쪽으로 되돌리는 게 맞다.
   async syncContractRecurring(id) {
     try { const r = await req(`/contracts/${id}/recurring/sync`, { method: 'PATCH' }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
   },
-  // 계약에 걸린 정기 반복 중지/재개 (매출·매입 모두 계약 화면에서)
+  // 주문에 걸린 정기 반복 중지/재개 (매출·매입 모두 주문 화면에서)
   async toggleContractRecurring(contractId, recId) {
     try { const r = await req(`/contracts/${contractId}/recurring/${recId}/toggle`, { method: 'PATCH' }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
   },
 
-  // 청구 예정인 정기청구 회차(아직 청구서 미생성) — 발행 예정 목록에 계약 청구일정과 함께 뜬다
+  // 청구 예정인 정기청구 회차(아직 청구서 미생성) — 발행 예정 목록에 주문 청구일정과 함께 뜬다
   async getPendingRecurring() {
     try { return await req('/recurring-invoices/pending') } catch { return [] }
   },
@@ -1513,7 +1527,7 @@ export const api = {
     catch { return { actions: {}, resources: {}, usernames: [] } }
   },
   // 변경 이력 엑셀 — 화면과 같은 필터로 그 기간 전체를 담는다.
-  // 인증 헤더가 필요해서 <a href>로는 안 되고, blob으로 받아 저장한다(계약 내보내기와 같은 방식).
+  // 인증 헤더가 필요해서 <a href>로는 안 되고, blob으로 받아 저장한다(주문 내보내기와 같은 방식).
   async exportAuditXlsx(params = {}) {
     try {
       const qs = new URLSearchParams(
@@ -1747,7 +1761,7 @@ export const api = {
     try { await req('/employ-types/' + id, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }
   },
 
-  // 근로·용역 계약
+  // 근로·용역 주문
   async getWorkContracts(params = {}) {
     const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== '')).toString()
     try { return await req('/work-contracts' + (qs ? `?${qs}` : '')) } catch { return [] }
@@ -1810,7 +1824,7 @@ export const api = {
     return [
       { id: "ar",  label: "미수금",            amount: arSum.total,  sub: `미입금 ${arSum.count}건`,    delta: 0 },
       { id: "ap",  label: "미지급금",          amount: apSum.total,  sub: `미지급 ${apSum.count}건`,    delta: 0 },
-      { id: "iex", label: "이번 달 입금 예정", amount: 0,            sub: "계약 등록 후 확인 가능",      delta: 0 },
+      { id: "iex", label: "이번 달 입금 예정", amount: 0,            sub: "주문 등록 후 확인 가능",      delta: 0 },
       { id: "oex", label: "이번 달 지급 예정", amount: monthOut,     sub: `예정 ${monthOutCount}건`,    delta: 0 },
     ]
   },
@@ -1912,7 +1926,7 @@ export const api = {
           title: `${r.vendor} 지급 예정`, sub: `${won(r.amount)} · ${r.scope}`, when: d === 0 ? '오늘' : `D-${d}` })
       }
     })
-    // 계약 갱신: 통보기한에 들어온 기간 계약 + 종료일이 지났는데 처리 안 된 계약
+    // 주문 갱신: 통보기한에 들어온 기간 주문 + 종료일이 지났는데 처리 안 된 주문
     let renewals = []
     try { renewals = await this.getUpcomingRenewals() } catch { /* noop */ }
     renewals.forEach(r => {
@@ -1921,11 +1935,11 @@ export const api = {
       const to = (r.gubu === 'A' || r.gubu === 'E') ? 'contract_purchase' : 'contract_sales'
       if (d < 0) {
         items.push({ tone: 'neg', icon: 'Warn', to, sortKey: 0,
-          title: `${r.vendor_name || '거래처'} 계약이 만료됐는데 ${auto ? '연장 입력이 안 됐습니다' : '갱신되지 않았습니다'}`,
+          title: `${r.vendor_name || '거래처'} 주문이 만료됐는데 ${auto ? '연장 입력이 안 됐습니다' : '갱신되지 않았습니다'}`,
           sub: `${r.name} · 종료일 ${r.end_date}`, when: `${-d}일 경과` })
       } else {
         items.push({ tone: d <= 14 ? 'neg' : 'warn', icon: 'Clock', to, sortKey: d <= 14 ? 1 : 2,
-          title: `${r.vendor_name || '거래처'} 계약 ${auto ? '자동갱신 예정' : '갱신 필요'}`,
+          title: `${r.vendor_name || '거래처'} 주문 ${auto ? '자동갱신 예정' : '갱신 필요'}`,
           sub: `${r.name} · 종료일 ${r.end_date}`, when: d === 0 ? '오늘 만료' : `D-${d}` })
       }
     })
@@ -1940,15 +1954,15 @@ export const api = {
     try { [vendors, contracts, invoices] = await Promise.all([this.getVendors(), this.getContracts(), this.getInvoices()]) } catch { /* noop */ }
     const cmds = []
     contracts.forEach(c => cmds.push({
-      kind: '계약', label: c.name || '(이름 없음)',
+      kind: '주문', label: c.name || '(이름 없음)',
       sub: [c.vendor_name, c.amount ? won(c.amount) : null].filter(Boolean).join(' · '),
       route: 'contract_detail', contractId: c.id, contractName: c.name,
     }))
     vendors.forEach(v => cmds.push({
       kind: '거래처', label: v.name,
       sub: [v.gubu === 'B' ? '발주처' : v.gubu === 'E' ? '기관' : '매입처', v.type].filter(Boolean).join(' · '),
-      // 거래처를 고르면 **거래처 화면**으로 간다. 예전엔 'contract'(계약)로 보내서,
-      // 거래처를 검색해 눌렀는데 엉뚱하게 계약 목록이 열렸다.
+      // 거래처를 고르면 **거래처 화면**으로 간다. 예전엔 'contract'(주문)로 보내서,
+      // 거래처를 검색해 눌렀는데 엉뚱하게 주문 목록이 열렸다.
       route: 'master_vendor',
     }))
     invoices.forEach(i => cmds.push({

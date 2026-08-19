@@ -38,30 +38,30 @@ const CRUMB_MAP = {
   ledger_expense:  ["거래내역", "지출"],
   ledger_ar:       ["거래내역", "미수금"],
   ledger_ap:       ["거래내역", "미지급금"],
-  income:          ["판매·매출", "입금"],
-  expense:         ["매입", "지출"],
-  ar:              ["판매·매출", "미수금"],
-  ap:              ["매입", "미지급금"],
-  billing:         ["판매·매출", "대금 청구서"],
-  billing_issued:  ["판매·매출", "대금 청구서"],
-  billing_received:["매입", "대금 청구서"],
-  contract:        ["계약"],
-  contract_sales:  ["판매·매출", "수주 계약"],
-  contract_purchase:["매입", "발주 계약"],
-  contract_detail: ["계약", null],
+  income:          ["판매·수주(매출)", "입금"],
+  expense:         ["구매·발주(매입)", "지출"],
+  ar:              ["판매·수주(매출)", "미수금"],
+  ap:              ["구매·발주(매입)", "미지급금"],
+  billing:         ["판매·수주(매출)", "대금 청구서"],
+  billing_issued:  ["판매·수주(매출)", "대금 청구서"],
+  billing_received:["구매·발주(매입)", "대금 청구서"],
+  contract:        ["주문"],
+  contract_sales:  ["판매·수주(매출)", "수주"],
+  contract_purchase:["구매·발주(매입)", "발주"],
+  contract_detail: ["주문", null],
   hr:              ["인사관리"],
   hr_labor_contract:["인사급여", "근로계약"],
   hr_outsourcing:  ["인사급여", "기타 용역·일용"],
   misc_pl:           ["경비", "일반 경비"],
   misc_income:       ["경비", "잡손익"],
-  recurring_expense: ["매입", "정기지출"],
-  recurring_invoice: ["판매·매출", "정기청구"],
+  recurring_expense: ["구매·발주(매입)", "정기지출"],
+  recurring_invoice: ["판매·수주(매출)", "정기청구"],
   mgmt_dash:       ["경영관리", "경영 대시보드"],
   mgmt_ask:        ["경영관리", "경영 도우미"],
   mgmt_biz:        ["경영관리"],
   report:          ["보고서"],
-  acct_sales:      ["일반회계", "판매·매출"],
-  acct_purchase:   ["일반회계", "매입"],
+  acct_sales:      ["일반회계", "판매·수주(매출)"],
+  acct_purchase:   ["일반회계", "구매·발주(매입)"],
   acct_expense:    ["일반회계", "경비"],
   acct_docs:       ["일반회계", "문서"],
   // acct_ledger 는 포털 페이지가 아니라 거래내역으로 바로 보내는 타일이 됐다(nav.js) → 크럼도 없앤다.
@@ -112,20 +112,20 @@ const HELP_MAP = {
     ]
   },
   contract: {
-    title: "계약 관리",
+    title: "주문 관리",
     items: [
-      "미수금·미지급금·계약목록 탭으로 구분해 조회하세요",
+      "미수금·미지급금·주문목록 탭으로 구분해 조회하세요",
       "기간·비목 필터로 원하는 기간의 데이터만 볼 수 있어요",
-      "담당자 필터로 PM별 계약을 구분해 조회할 수 있어요",
-      "행 클릭 시 계약 상세·결의서·증빙 이력을 확인할 수 있어요",
+      "담당자 필터로 PM별 주문을 구분해 조회할 수 있어요",
+      "행 클릭 시 주문 상세·결의서·증빙 이력을 확인할 수 있어요",
     ]
   },
   contract_detail: {
-    title: "계약 상세",
+    title: "주문 상세",
     items: [
-      "계약 상세에서 결의서와 증빙 이력을 한 번에 확인하세요",
-      "입금·지출 등록으로 해당 계약 거래내역을 바로 추가할 수 있어요",
-      "진행률 바는 계약금액 대비 입금 완료 비율이에요",
+      "주문 상세에서 결의서와 증빙 이력을 한 번에 확인하세요",
+      "입금·지출 등록으로 해당 주문 거래내역을 바로 추가할 수 있어요",
+      "진행률 바는 주문금액 대비 입금 완료 비율이에요",
       "파일 첨부로 계약서·발주서·검사성적서를 등록할 수 있어요",
     ]
   },
@@ -142,7 +142,7 @@ const HELP_MAP = {
     title: "보고서",
     items: [
       "각 보고서 카드를 클릭하면 상세 자료를 확인할 수 있어요",
-      "월별·계약별·발주처별로 나눠 세무사 전달 자료를 준비하세요",
+      "월별·주문별·발주처별로 나눠 세무사 전달 자료를 준비하세요",
       "보고서 화면에서 인쇄·PDF 저장을 바로 실행할 수 있어요",
       "기준 월은 화면 상단에 표시된 날짜를 기준으로 집계돼요",
     ]
@@ -150,10 +150,10 @@ const HELP_MAP = {
   billing: {
     title: "청구 관리",
     items: [
-      "판매·매출의 대금 청구서에서 미수금을, 매입의 대금 청구서에서 미지급금을 관리하세요",
+      "판매·수주(매출)의 대금 청구서에서 미수금을, 매입의 대금 청구서에서 미지급금을 관리하세요",
       "청구서와 실제 거래내역을 매칭하면 미수금이 자동으로 차감돼요",
       "기한 지남 항목을 클릭해 독촉 또는 재청구 처리를 할 수 있어요",
-      "청구서 발행 버튼으로 계약 청구 일정과 연동된 청구를 빠르게 등록해요",
+      "청구서 발행 버튼으로 주문 청구 일정과 연동된 청구를 빠르게 등록해요",
     ]
   },
   master: {
@@ -177,7 +177,7 @@ const HELP_MAP = {
   misc_pl: {
     title: "일반 경비 · 잡손익",
     items: [
-      "계약·품목에 붙지 않는 운영비(임차료·통신비·보험료 등)를 등록하는 화면이에요",
+      "주문·품목에 붙지 않는 운영비(임차료·통신비·보험료 등)를 등록하는 화면이에요",
       "매입(원가)과 달리 여기 지출은 판매관리비로 잡혀요",
       "행을 클릭하면 바로 수정하고, 오른쪽 삭제 버튼으로 지울 수 있어요",
       "매달 같은 날 나가는 지출은 매입의 '정기지출'에 걸어두세요",
@@ -187,7 +187,7 @@ const HELP_MAP = {
     title: "정기 반복",
     items: [
       "무엇을 · 언제 · 얼마씩 반복할지 조건을 설정하는 곳이에요",
-      "정기청구의 실제 발행은 판매·매출 → 대금 청구서의 '발행 예정'에서 해요",
+      "정기청구의 실제 발행은 판매·수주(매출) → 대금 청구서의 '발행 예정'에서 해요",
       "등록일 이전 회차는 소급 생성되지 않아요 (과거분은 직접 입력)",
       "비활성으로 돌리면 다음 회차부터 생성이 멈춰요",
     ]
@@ -550,7 +550,7 @@ function AppInner({ onLogout, user }) {
                                        openIncome={() => setTxnForm({ kind: "income" })}
                                        openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
       // 정기 반복은 기준정보(정적 참조)가 아니라 돈 흐름이다 → 성격에 맞는 회계처리 그룹에 둔다.
-      // 정기지출=경비(판관비), 정기청구=판매·매출. 패널은 Master의 것을 그대로 재사용.
+      // 정기지출=경비(판관비), 정기청구=판매·수주(매출). 패널은 Master의 것을 그대로 재사용.
       case "recurring_expense": return <RecurringExpensePanel page goRoute={go}/>;
       case "recurring_invoice": return <RecurringInvoicePanel page goRoute={go}/>;
       case "mgmt_dash":       return <MgmtDashScreen/>;
@@ -589,7 +589,7 @@ function AppInner({ onLogout, user }) {
   // 중간 라벨은 잎의 section을 쓴다(기준정보 잎은 "기준정보", 환경설정 잎은 "환경설정").
   let crumbs = CRUMB_MAP[route] || (LEAF_BY_ID[route] ? [LEAF_BY_ID[route].domain, LEAF_BY_ID[route].section, LEAF_BY_ID[route].label] : ["홈"]);
   if (route === "contract_detail") {
-    crumbs = ["계약", contractName || "계약 상세"];
+    crumbs = ["주문", contractName || "주문 상세"];
   }
 
   return (
@@ -733,7 +733,7 @@ function AppInner({ onLogout, user }) {
           </div>
           <button className="search" onClick={() => setCmdOpen(true)} style={{ border: 0, cursor: "pointer", textAlign: "left" }}>
             <Icon.Search size={14}/>
-            <span style={{ flex: 1 }}>거래처, 계약, 영수증 검색</span>
+            <span style={{ flex: 1 }}>거래처, 주문, 영수증 검색</span>
             <span className="kbd">{isMac ? "⌘K" : "Ctrl K"}</span>
           </button>
           <Popover align="right" width={360}
@@ -881,26 +881,26 @@ function AppInner({ onLogout, user }) {
 /* ══════════════════════════════════════════════
    FAQ 플로팅 패널
 ══════════════════════════════════════════════ */
-const FAQ_CATEGORIES = ["거래 등록", "미수금·미지급금", "계약 관리", "증빙·결의서", "인사·급여", "보고서·마감", "시스템·설정"];
+const FAQ_CATEGORIES = ["거래 등록", "미수금·미지급금", "주문 관리", "증빙·결의서", "인사·급여", "보고서·마감", "시스템·설정"];
 
 const FAQ_DATA = [
   // 거래 등록
   { id:"f01", cat:"거래 등록",       routes:["home","ledger"],              q:"입금을 어떻게 등록하나요?",                  a:"화면 우측 상단 '거래 등록 → 입금 등록'을 클릭하거나, 홈 화면 '오늘 할 일'에서 해당 입금 건을 직접 처리할 수 있어요.", action:null },
-  { id:"f02", cat:"거래 등록",       routes:["home","ledger"],              q:"지출을 어떻게 등록하나요?",                  a:"화면 우측 상단 '거래 등록 → 지출 등록'을 눌러 7단계로 입력하세요. 거래처·계약·비목·금액·결제수단·증빙·결의서 순이에요.", action:null },
+  { id:"f02", cat:"거래 등록",       routes:["home","ledger"],              q:"지출을 어떻게 등록하나요?",                  a:"화면 우측 상단 '거래 등록 → 지출 등록'을 눌러 7단계로 입력하세요. 거래처·주문·비목·금액·결제수단·증빙·결의서 순이에요.", action:null },
   { id:"f03", cat:"거래 등록",       routes:["ledger"],                     q:"여러 건을 한꺼번에 올리고 싶어요",            a:"엑셀 업로드 기능을 이용하면 여러 거래를 한 번에 등록할 수 있어요. '거래 등록 → 엑셀 업로드'에서 서식을 내려받아 작성한 뒤 업로드해 주세요.", action:{ label:"엑셀 업로드로", route:"excel_modal" } },
   { id:"f04", cat:"거래 등록",       routes:["ledger"],                     q:"거래 내용을 수정하거나 삭제하고 싶어요",      a:"거래내역 화면에서 해당 행을 클릭하면 상세 패널이 열려요. 패널 하단의 수정·삭제 버튼으로 처리할 수 있어요.", action:{ label:"거래내역으로", route:"ledger" } },
   { id:"f05", cat:"거래 등록",       routes:["ledger","home"],              q:"등록하려는 거래처가 목록에 없어요",           a:"거래처는 설정 화면에서 먼저 추가해야 해요. 설정 → 거래처 탭에서 새 거래처를 등록한 뒤 다시 시도해 보세요.", action:{ label:"설정으로", route:"master" } },
-  { id:"f06", cat:"거래 등록",       routes:["ledger","home","contract"],   q:"등록하려는 계약이 목록에 없어요",             a:"계약은 수주 계약·발주 계약 화면에서 '새 계약' 버튼으로 먼저 만들어야 해요. 계약이 없는 거래라면 거래 등록에서 계약 칸을 비워두면 됩니다(선택 입력이에요).", action:{ label:"수주 계약으로", route:"contract_sales" } },
+  { id:"f06", cat:"거래 등록",       routes:["ledger","home","contract"],   q:"등록하려는 주문이 목록에 없어요",             a:"주문은 수주·발주 화면에서 '신규 생성' 버튼으로 먼저 만들어야 해요. 주문이 없는 거래라면 거래 등록에서 주문 칸을 비워두면 됩니다(선택 입력이에요).", action:{ label:"수주로", route:"contract_sales" } },
   // 미수금·미지급금
-  { id:"f07", cat:"미수금·미지급금", routes:["contract","ledger"],          q:"미수금이 자동으로 생성되지 않아요",           a:"입금 등록 2단계에서 계약을 선택했는지 확인해 보세요. 계약을 연결해야 해당 계약의 미수금이 자동으로 차감돼요.", action:{ label:"거래내역으로", route:"ledger" } },
+  { id:"f07", cat:"미수금·미지급금", routes:["contract","ledger"],          q:"미수금이 자동으로 생성되지 않아요",           a:"입금 등록 2단계에서 주문을 선택했는지 확인해 보세요. 주문을 연결해야 해당 주문의 미수금이 자동으로 차감돼요.", action:{ label:"거래내역으로", route:"ledger" } },
   { id:"f08", cat:"미수금·미지급금", routes:["contract","home"],            q:"연체된 미수금은 어떻게 처리하나요?",          a:"미수금 화면의 '기한 지남' 탭에서 연체 건을 확인하세요. 행 우측 '독촉' 버튼으로 거래처에 메일을 보내고, 입금 확인 후 '입금 처리'를 누르면 돼요.", action:{ label:"미수금으로", route:"contract" } },
   { id:"f09", cat:"미수금·미지급금", routes:["contract"],                   q:"미지급금 이체를 어떻게 실행하나요?",          a:"미지급금 화면에서 이체할 건의 체크박스를 선택한 뒤 '선택 이체 실행'을 눌러요. 결의서 승인이 완료된 건만 이체가 가능해요.", action:{ label:"미지급금으로", route:"contract" } },
-  { id:"f10", cat:"미수금·미지급금", routes:["home","contract"],            q:"홈에 '연체 미수금' 알림이 뜨는데 어디서 처리하나요?", a:"홈 화면의 알림 카드를 직접 클릭하면 미수금 화면으로 바로 이동해요. 또는 계약 메뉴 → 미수금 탭에서 처리할 수 있어요.", action:{ label:"미수금으로", route:"contract" } },
-  // 계약 관리
-  { id:"f11", cat:"계약 관리",       routes:["contract","contract_detail"], q:"계약 담당자(PM)를 변경하고 싶어요",           a:"계약 상세 화면에서 담당자 항목을 클릭하면 수정할 수 있어요. 설정 → 직원 탭에서 PM으로 지정된 직원 중에서 선택할 수 있어요.", action:{ label:"계약 목록으로", route:"contract" } },
-  { id:"f12", cat:"계약 관리",       routes:["contract_detail"],            q:"계약과 연결된 거래를 추가하고 싶어요",        a:"계약 상세 화면 우측 상단의 '입금 등록' 또는 '지출 등록'을 누르면 해당 계약에 자동 연결된 거래로 등록돼요.", action:null },
-  { id:"f13", cat:"계약 관리",       routes:["contract_detail"],            q:"발주서나 계약서 파일을 첨부하고 싶어요",      a:"계약 상세 화면의 '증빙' 탭에서 파일을 드래그하거나 선택해 첨부할 수 있어요. PDF·이미지·엑셀 형식을 지원해요.", action:null },
-  { id:"f14", cat:"계약 관리",       routes:["contract"],                   q:"진행률 바는 어떻게 계산되나요?",              a:"계약금액 대비 현재까지 입금 처리된 금액의 비율이에요. 입금을 등록하고 계약과 연결하면 자동으로 반영돼요.", action:null },
+  { id:"f10", cat:"미수금·미지급금", routes:["home","contract"],            q:"홈에 '연체 미수금' 알림이 뜨는데 어디서 처리하나요?", a:"홈 화면의 알림 카드를 직접 클릭하면 미수금 화면으로 바로 이동해요. 또는 주문 메뉴 → 미수금 탭에서 처리할 수 있어요.", action:{ label:"미수금으로", route:"contract" } },
+  // 주문 관리
+  { id:"f11", cat:"주문 관리",       routes:["contract","contract_detail"], q:"주문 담당자(PM)를 변경하고 싶어요",           a:"주문 상세 화면에서 담당자 항목을 클릭하면 수정할 수 있어요. 설정 → 직원 탭에서 PM으로 지정된 직원 중에서 선택할 수 있어요.", action:{ label:"주문 목록으로", route:"contract" } },
+  { id:"f12", cat:"주문 관리",       routes:["contract_detail"],            q:"주문과 연결된 거래를 추가하고 싶어요",        a:"주문 상세 화면 우측 상단의 '입금 등록' 또는 '지출 등록'을 누르면 해당 주문에 자동 연결된 거래로 등록돼요.", action:null },
+  { id:"f13", cat:"주문 관리",       routes:["contract_detail"],            q:"발주서나 계약서 파일을 첨부하고 싶어요",      a:"주문 상세 화면의 '증빙' 탭에서 파일을 드래그하거나 선택해 첨부할 수 있어요. PDF·이미지·엑셀 형식을 지원해요.", action:null },
+  { id:"f14", cat:"주문 관리",       routes:["contract"],                   q:"진행률 바는 어떻게 계산되나요?",              a:"주문금액 대비 현재까지 입금 처리된 금액의 비율이에요. 입금을 등록하고 주문과 연결하면 자동으로 반영돼요.", action:null },
   // 증빙·결의서
   { id:"f15", cat:"증빙·결의서",     routes:["ledger"],                     q:"세금계산서를 어떻게 등록하나요?",              a:"거래를 등록할 때 증빙 첨부 단계에서 세금계산서 파일을 올리거나, 거래내역에서 해당 거래를 열어 증빙을 첨부하세요.", action:null },
   { id:"f16", cat:"증빙·결의서",     routes:["ledger"],                     q:"거래내역에 ⚠️ 표시는 무엇인가요?",            a:"세금계산서나 영수증이 연결되지 않은 거래에 표시돼요. 거래 상세를 열어 증빙을 첨부하면 사라져요.", action:null },
@@ -908,7 +908,7 @@ const FAQ_DATA = [
   { id:"f18", cat:"증빙·결의서",     routes:["doc"],                        q:"외주가공비 결의서를 새로 만들고 싶어요",      a:"지출 등록 마지막 단계에서 '결의서 자동 생성'을 켜두면 지출 등록과 동시에 결의서가 생성돼요. 또는 결의서 화면에서 '+ 결의서 작성'을 눌러도 돼요.", action:{ label:"결의서로", route:"doc" } },
   { id:"f19", cat:"증빙·결의서",     routes:["doc","contract"],             q:"결의서와 미지급금은 어떻게 연결되나요?",      a:"지출 등록 시 결의서가 생성되고, 결의서가 승인되면 해당 금액이 미지급금 목록에 자동으로 올라와요. 이체 실행 시 미지급금이 차감돼요.", action:null },
   // 인사·급여
-  { id:"f20", cat:"인사·급여",       routes:["hr","hr_labor_contract"],     q:"새 직원을 등록하려면 어떻게 하나요?",          a:"근로계약 메뉴에서 '직원 등록' 버튼을 눌러 인적 정보와 고용형태·급여 기준을 입력하세요. 등록한 계약을 바탕으로 급여대장이 만들어져요.", action:{ label:"근로계약으로", route:"hr_labor_contract" } },
+  { id:"f20", cat:"인사·급여",       routes:["hr","hr_labor_contract"],     q:"새 직원을 등록하려면 어떻게 하나요?",          a:"근로계약 메뉴에서 '직원 등록' 버튼을 눌러 인적 정보와 고용형태·급여 기준을 입력하세요. 등록한 주문을 바탕으로 급여대장이 만들어져요.", action:{ label:"근로계약으로", route:"hr_labor_contract" } },
   { id:"f21", cat:"인사·급여",       routes:["hr"],                         q:"급여 명세를 어떻게 만들고 고치나요?",           a:"인사관리 → 급여대장 탭에서 '급여대장 생성'을 누르면 근로계약 기준으로 명세가 만들어져요. 각 행의 '명세서'에서 항목·금액을 조정하고, '지급'으로 실제 이체를 연결하면 미지급·과지급이 자동 계산돼요.", action:{ label:"인사관리로", route:"hr" } },
   { id:"f22", cat:"인사·급여",       routes:["hr"],                         q:"급여를 지급 처리하려면 어떻게 하나요?",         a:"급여대장 각 직원 행의 '지급' 버튼에서 실지급액과 출금 계좌를 넣어 등록하면, 거래내역에 지출로 자동 기록되고 계좌 잔액에 반영돼요. 여러 번 나눠 지급해도 미지급 잔액이 추적돼요.", action:{ label:"인사관리로", route:"hr" } },
   { id:"f23", cat:"인사·급여",       routes:["hr","master"],                q:"4대보험·소득세는 어떻게 입력하나요?",          a:"자동 계산하지 않아요. 공단·세무서 고지 금액을 급여 명세서의 공제 항목에 직접 입력하면 실수령액에 반영돼요. 표준 급여 항목은 기준정보 → 급여 항목에서 관리해요.", action:{ label:"인사관리로", route:"hr" } },
@@ -1063,7 +1063,7 @@ const CommandPalette = ({ open, onClose, onPick }) => {
 
   const ql = q.trim().toLowerCase();
   // 권한 없는 화면으로 가는 항목은 검색에도 안 뜬다 — 뜨면 눌렀을 때 403만 본다.
-  // (거래처·계약 같은 데이터 항목은 서버가 이미 권한대로 걸러 내려준다)
+  // (거래처·주문 같은 데이터 항목은 서버가 이미 권한대로 걸러 내려준다)
   const allowed = index.filter(c => !c.route || canDo(c.route));
   /* keywords 는 화면에 안 보이는 검색 태그다(lib/nav.js LEAF_TAGS).
      '세금계산서'로 대금 청구서를, '통장'으로 계좌·카드를 찾게 해준다 —
@@ -1080,7 +1080,7 @@ const CommandPalette = ({ open, onClose, onPick }) => {
     : allowed
   ).slice(0, 50);
 
-  // 열릴 때 실데이터 인덱스 로드(거래처·계약·청구서 + 메뉴)
+  // 열릴 때 실데이터 인덱스 로드(거래처·주문·청구서 + 메뉴)
   useEffect(() => {
     if (!open) return
     let alive = true
@@ -1112,7 +1112,7 @@ const CommandPalette = ({ open, onClose, onPick }) => {
         <div className="row gap-10" style={{ padding: "14px 18px", borderBottom: "1px solid var(--line)" }}>
           <Icon.Search size={18} className="text-muted"/>
           <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)} onKeyDown={handleKeyDown}
-            placeholder="거래처·계약·결의서·증빙·메뉴 검색"
+            placeholder="거래처·주문·결의서·증빙·메뉴 검색"
             style={{ flex: 1, border: 0, outline: 0, fontSize: 15, fontFamily: "inherit", background: "transparent" }}/>
           <span className="kbd">ESC</span>
         </div>

@@ -3,15 +3,15 @@ import { Icon, fmtNum, useToast, Drawer, Loading, StatusBadge } from '../ui'
 import { DrawerHead, DrawerFooter } from './Drawer'
 import { api } from '../api'
 
-/* 계약에 거래를 붙인다 — "이미 처리된 입금·지출을 계약에서 골라 연결".
+/* 주문에 거래를 붙인다 — "이미 처리된 입금·지출을 주문에서 골라 연결".
  *
  * 청구서 '매칭'과 이름을 나눈 이유: 저쪽은 이 돈이 청구서를 **얼마나 갚았나**(금액 배분,
- * 부분 입금 가능)이고, 여기는 이 거래가 **어느 계약 건인가**(귀속, 부분 없음)이다.
+ * 부분 입금 가능)이고, 여기는 이 거래가 **어느 주문 건인가**(귀속, 부분 없음)이다.
  * 같은 말을 쓰면 부분 연결을 기대하게 된다.
  *
  * axis
- *   'contract' — 이 계약이 근거인 거래 (매출계약의 입금 / 매입계약의 지급)
- *   'cost'     — 이 지출이 원가로 붙는 매출 계약 (외주비 등)
+ *   'contract' — 이 주문이 근거인 거래 (매출주문의 입금 / 매입주문의 지급)
+ *   'cost'     — 이 지출이 원가로 붙는 매출 주문 (외주비 등)
  * 어느 탭에서 열렸느냐로 정해진다. 틀리면 돈이 엉뚱한 바구니에 조용히 들어간다.
  */
 export const LinkTxnDrawer = ({ open, onClose, contractId, contractName, kind, axis = 'contract', onLinked }) => {
@@ -45,18 +45,18 @@ export const LinkTxnDrawer = ({ open, onClose, contractId, contractName, kind, a
     const res = await api.linkTxnsToContract({ txnIds: checked, contractId, axis })
     setSaving(false)
     if (!res.ok) return toast.push(res.error || '연결에 실패했어요', { tone: 'warn' })
-    toast.push(`${res.count}건을 ${contractName || '계약'}에 연결했어요`)
+    toast.push(`${res.count}건을 ${contractName || '주문'}에 연결했어요`)
     onLinked?.(); onClose()
   }
 
-  const label = axis === 'cost' ? '원가로 귀속' : '계약에 연결'
+  const label = axis === 'cost' ? '원가로 귀속' : '주문에 연결'
 
   return (
     <Drawer open={open} onClose={onClose} width="min(720px, 100vw)" label="거래 연결">
       <DrawerHead
         title={`${kind === 'income' ? '입금' : '지출'} 거래 연결`}
         sub={<>{contractName}
-          {axis === 'cost' && <> · 이 계약의 <b>원가</b>로 잡습니다</>}</>}
+          {axis === 'cost' && <> · 이 주문의 <b>원가</b>로 잡습니다</>}</>}
         onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div className="search" style={{ margin: 0 }}>
@@ -96,7 +96,7 @@ export const LinkTxnDrawer = ({ open, onClose, contractId, contractName, kind, a
                     </td>
                     <td className="num-cell num-right fw-700">{fmtNum(r.amount)}</td>
                     <td>
-                      {/* 다른 계약에 붙어 있는 거래도 목록에 둔다 — 잘못 붙은 것을 옮기는 게
+                      {/* 다른 주문에 붙어 있는 거래도 목록에 둔다 — 잘못 붙은 것을 옮기는 게
                           이 화면의 주 용도라 안 보이면 옮길 수가 없다. 다만 옮긴다는 걸 알려야 한다. */}
                       {r.linked_contract_name
                         ? <span className="badge warn text-xs">{r.linked_contract_name}에서 옮김</span>

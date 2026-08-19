@@ -3,14 +3,14 @@ import { Icon, fmtNum, useToast, useConfirm, Drawer, Loading, StatusBadge } from
 import { DrawerHead } from './Drawer'
 import { api } from '../api'
 
-/* 계약 화면에서 연 거래 상세.
+/* 주문 화면에서 연 거래 상세.
  *
- * 고객 지적: "계약이랑 연결된 입금/지출 내역을 보고 그 자리에서 뭔가 잘못된 경우
+ * 고객 지적: "주문이랑 연결된 입금/지출 내역을 보고 그 자리에서 뭔가 잘못된 경우
  *            처리를 해야 하는데, 처리가 힘들어."
- * 예전엔 계약의 입출금 표가 읽기 전용이라, 잘못된 걸 봐도 전체 거래내역으로 나가
+ * 예전엔 주문의 입출금 표가 읽기 전용이라, 잘못된 걸 봐도 전체 거래내역으로 나가
  * 금액으로 더듬어 찾아야 했다.
  *
- * 여기서 하는 일은 둘이다 — **무엇인지 보여주기**와 **이 계약에서 떼기**.
+ * 여기서 하는 일은 둘이다 — **무엇인지 보여주기**와 **이 주문에서 떼기**.
  * 금액·날짜 같은 본격 수정은 거래내역의 편집 폼이 한다(같은 폼을 두 벌 두면 반드시 어긋난다).
  */
 export const TxnQuickDrawer = ({ txnId, onClose, contractId, onChanged }) => {
@@ -31,15 +31,15 @@ export const TxnQuickDrawer = ({ txnId, onClose, contractId, onChanged }) => {
   if (!txnId) return null
 
   /* 어느 축으로 붙어 있는지 보고 그 축을 뗀다.
-     근거 계약과 원가 귀속은 다른 컬럼이라, 보이는 대로 떼지 않으면 엉뚱한 쪽이 풀린다. */
+     근거 주문과 원가 귀속은 다른 컬럼이라, 보이는 대로 떼지 않으면 엉뚱한 쪽이 풀린다. */
   const axis = txn && txn.contractId === contractId ? 'contract'
     : txn && txn.cost_contract_id === contractId ? 'cost' : null
 
   const unlink = async () => {
     if (!axis) return
     const ok = await confirm({
-      title: '이 계약에서 뗄까요?',
-      body: <>거래는 그대로 남고 <b>이 계약과의 연결만</b> 끊어져요.
+      title: '이 주문에서 뗄까요?',
+      body: <>거래는 그대로 남고 <b>이 주문과의 연결만</b> 끊어져요.
         금액·날짜·계좌는 바뀌지 않습니다.</>,
       confirmLabel: '연결 떼기',
     })
@@ -48,7 +48,7 @@ export const TxnQuickDrawer = ({ txnId, onClose, contractId, onChanged }) => {
     const res = await api.linkTxnsToContract({ txnIds: [txnId], contractId: null, axis })
     setBusy(false)
     if (!res.ok) return toast.push(res.error || '떼지 못했어요', { tone: 'warn' })
-    toast.push('이 계약에서 뗐어요')
+    toast.push('이 주문에서 뗐어요')
     onChanged?.()
   }
 
@@ -88,7 +88,7 @@ export const TxnQuickDrawer = ({ txnId, onClose, contractId, onChanged }) => {
               </Row>
             )}
             <Row label="상태"><StatusBadge status={txn.status}/></Row>
-            <Row label="근거 계약">{txn.contract || <span className="text-muted2">없음</span>}</Row>
+            <Row label="근거 주문">{txn.contract || <span className="text-muted2">없음</span>}</Row>
             {txn.kind === 'expense' && (
               <Row label="원가 귀속">{txn.cost_contract_name || <span className="text-muted2">없음</span>}</Row>
             )}
@@ -96,9 +96,9 @@ export const TxnQuickDrawer = ({ txnId, onClose, contractId, onChanged }) => {
             <div className="col gap-8" style={{ marginTop: 18 }}>
               {axis && (
                 <button className="btn" style={{ color: 'var(--neg-ink)' }} onClick={unlink} disabled={busy}>
-                  <Icon.Close size={14}/> 이 계약에서 떼기
+                  <Icon.Close size={14}/> 이 주문에서 떼기
                   <span className="text-xs text-muted2" style={{ marginLeft: 6 }}>
-                    ({axis === 'cost' ? '원가 귀속' : '근거 계약'})
+                    ({axis === 'cost' ? '원가 귀속' : '근거 주문'})
                   </span>
                 </button>
               )}

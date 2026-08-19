@@ -38,7 +38,7 @@ export const MgmtDashScreen = () => {
       <PageHeader title="경영 대시보드"/>
 
       <div className="grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
-        <Card label="계약금액 합계" amount={contractTotal} tone="ink" sub={`${d.contracts.length}건`}/>
+        <Card label="주문금액 합계" amount={contractTotal} tone="ink" sub={`${d.contracts.length}건`}/>
         <Card label="미수금 총액" amount={arTotal} tone="warn-ink" sub={`${d.ar?.summary?.count || 0}건`}/>
         <Card label="미지급금 총액" amount={apTotal} tone="neg-ink" sub={`${d.ap?.summary?.count || 0}건`}/>
         <Card label={`${year} 부가세 ${vatPayable >= 0 ? '납부' : '환급'}세액`} amount={Math.abs(vatPayable)} tone={vatPayable >= 0 ? 'neg-ink' : 'brand'} sub="매출−매입세액"/>
@@ -47,14 +47,14 @@ export const MgmtDashScreen = () => {
 
       <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <div className="card card-pad">
-          <div className="section-title" style={{ marginBottom: 12 }}>진행중 계약 상위</div>
+          <div className="section-title" style={{ marginBottom: 12 }}>진행중 주문 상위</div>
           {d.contracts.filter(c => c.status === '진행중').slice(0, 6).map(c => (
             <div key={c.id} className="row" style={{ padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
               <span className="fw-600 text-sm">{c.name}</span>
               <span className="num ml-auto text-sm">{fmtNum(c.amount || 0)}원</span>
             </div>
           ))}
-          {d.contracts.length === 0 && <div className="text-sm text-muted2">계약이 없어요</div>}
+          {d.contracts.length === 0 && <div className="text-sm text-muted2">주문이 없어요</div>}
         </div>
         <div className="card card-pad">
           <div className="section-title" style={{ marginBottom: 12 }}>{year} 분기별 부가세</div>

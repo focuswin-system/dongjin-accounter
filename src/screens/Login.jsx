@@ -13,6 +13,12 @@ const KICKED = (() => {
   } catch { return null }
 })()
 
+/* 좌측 브랜드 패널의 색. 상호(도니도라 = 돈이 들어오다)에 맞춰 황금빛으로 간다.
+ *   'gold-dark'  — 짙은 먹빛 바탕 + 금빛 글씨·장식. 앱의 나머지 다크 톤과 이어진다.
+ *   'gold-light' — 금빛 바탕 + 먹빛 글씨. 인상은 세지만 혼자 튄다.
+ * 색은 index.css 의 .login-brand.<테마> 가 CSS 변수로 정한다 — 여기 한 줄만 바꾸면 갈린다. */
+const BRAND_THEME = 'gold-dark'
+
 export const LoginScreen = ({ onLogin }) => {
   // 회사코드는 마지막 로그인 값을 기억한다(같은 PC는 대개 같은 회사에서 쓴다).
   const [company, setCompany] = useState(() => localStorage.getItem('companyCode') || '');
@@ -66,40 +72,39 @@ export const LoginScreen = ({ onLogin }) => {
     <div style={{ display: 'flex', minHeight: '100vh', background: '#fff' }}>
 
       {/* 좌측 브랜드 패널 — 좁은 화면에선 CSS(.login-brand)가 숨긴다 */}
-      <div className="login-brand" style={{
-        background: 'var(--ink)',
+      <div className={`login-brand ${BRAND_THEME}`} style={{
         display: 'flex',
         flexDirection: 'column',
         padding: '48px 44px 32px',
         position: 'relative',
         overflow: 'hidden',
       }}>
-        {/* 배경 장식 */}
+        {/* 배경 장식 — 색은 .login-brand 테마가 정한다(CSS 변수) */}
         <div style={{
           position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden',
         }}>
           <div style={{
             position: 'absolute', width: 400, height: 400,
             borderRadius: '50%',
-            background: 'oklch(0.52 0.15 255 / 0.12)',
+            background: 'var(--brand-orb-1)',
             top: -120, right: -120,
           }}/>
           <div style={{
             position: 'absolute', width: 280, height: 280,
             borderRadius: '50%',
-            background: 'oklch(0.52 0.15 255 / 0.07)',
+            background: 'var(--brand-orb-2)',
             bottom: 80, left: -80,
           }}/>
           <div style={{
             position: 'absolute', width: 1, height: '60%',
-            background: 'rgba(255,255,255,0.05)',
+            background: 'var(--brand-rule)',
             right: 0, top: '20%',
           }}/>
         </div>
 
         {/* 로고 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 'auto' }}>
-          <span style={{ color: 'rgba(255,255,255,0.9)', fontWeight: 700, fontSize: 15, letterSpacing: '-0.02em' }}>
+          <span style={{ color: 'var(--brand-mark)', fontWeight: 700, fontSize: 15, letterSpacing: '-0.02em' }}>
             도니도라
           </span>
         </div>
@@ -107,22 +112,22 @@ export const LoginScreen = ({ onLogin }) => {
         {/* 메인 카피 */}
         <div style={{ marginBottom: 'auto' }}>
           <div style={{
-            fontSize: 46, fontWeight: 800, color: '#fff',
+            fontSize: 46, fontWeight: 800, color: 'var(--brand-title)',
             letterSpacing: '-0.04em', lineHeight: 1.1, marginBottom: 4,
           }}>
             도니도라
           </div>
           <div style={{
-            fontSize: 46, fontWeight: 800, color: '#fff',
+            fontSize: 46, fontWeight: 800, color: 'var(--brand-title-2)',
             letterSpacing: '-0.04em', lineHeight: 1.1, marginBottom: 24,
           }}>
             회계관리
           </div>
           <div style={{
-            fontSize: 18, fontWeight: 500, color: 'rgba(255,255,255,0.5)',
+            fontSize: 18, fontWeight: 500, color: 'var(--brand-sub)',
             letterSpacing: '-0.02em', lineHeight: 1.65,
           }}>
-            계약·입출금·증빙·인사까지<br/>
+            주문·입출금·증빙·인사까지<br/>
             하나의 플랫폼에서 관리하세요.
           </div>
         </div>
