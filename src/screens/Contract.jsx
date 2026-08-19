@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect, Drawer, Combobox, MoneyInput, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect, Drawer, Combobox, MoneyInput, localToday, DateInput } from '../lib/ui'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
@@ -354,14 +354,14 @@ const ContractTermFields = ({ form, set }) => {
       <div className="row gap-12">
         <div style={{ flex: 1 }}>
           <label className="label" style={{ marginBottom: 8 }}>계약 시작일</label>
-          <input className="input" type="date" value={form.start_date || ''}
+          <DateInput className="input" value={form.start_date || ''}
             onChange={e => set(f => ({ ...f, start_date: e.target.value }))}/>
         </div>
         <div style={{ flex: 1 }}>
           <label className="label" style={{ marginBottom: 8 }}>계약 종료일</label>
           {openEnded
             ? <div className="input" style={{ display: 'flex', alignItems: 'center', color: 'var(--muted-2)' }}>해지할 때까지</div>
-            : <input className="input" type="date" value={form.end_date || ''}
+            : <DateInput className="input" value={form.end_date || ''}
                 onChange={e => set(f => ({ ...f, end_date: e.target.value }))}/>}
         </div>
       </div>
@@ -797,7 +797,7 @@ function MilestoneEditDrawer({ open, onClose, contractId, contractAmount, initia
             <div className="row gap-8">
               <input className="input num" style={{ flex: 1 }} placeholder="비율 %" value={m.ratio} onChange={e => upd(i, 'ratio', e.target.value)}/>
               <MoneyInput className="input num" style={{ flex: 2 }} placeholder="금액" value={m.amount} onChange={raw => upd(i, 'amount', raw)}/>
-              <input className="input" type="date" style={{ flex: 2 }} value={m.due_date} onChange={e => upd(i, 'due_date', e.target.value)}/>
+              <DateInput className="input" style={{ flex: 2 }} value={m.due_date} onChange={e => upd(i, 'due_date', e.target.value)}/>
             </div>
           </div>
           )
@@ -920,7 +920,7 @@ function RenewDrawer({ open, onClose, contract, onSaved }) {
           <>
             <div>
               <label className="label" style={{ marginBottom: 8 }}>새 종료일 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-              <input className="input" type="date" value={form.new_end_date}
+              <DateInput className="input" value={form.new_end_date}
                 onChange={e => setForm(f => ({ ...f, new_end_date: e.target.value }))}/>
               <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
                 {contract.term_months || 12}개월 연장 기준으로 미리 채웠어요. 실제 계약서에 맞게 고치세요.
@@ -2049,11 +2049,11 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
             <div className="row gap-12">
               <div style={{ flex: 1 }}>
                 <label className="label" style={{ marginBottom: 8 }}>{isPurchase ? '청구일(매입)' : '청구일'}</label>
-                <input className="input" type="date" value={issuedAt} onChange={e => setIssuedAt(e.target.value)}/>
+                <DateInput className="input" value={issuedAt} onChange={e => setIssuedAt(e.target.value)}/>
               </div>
               <div style={{ flex: 1 }}>
                 <label className="label" style={{ marginBottom: 8 }}>{isPurchase ? '지급 예정일' : '입금 예정일'} <span className="text-muted2">· 선택</span></label>
-                <input className="input" type="date" value={dueAt} onChange={e => setDueAt(e.target.value)}/>
+                <DateInput className="input" value={dueAt} onChange={e => setDueAt(e.target.value)}/>
               </div>
             </div>
             <Spacer h={16}/>

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, Combobox, Drawer, localToday } from '../ui'
+import { Icon, fmtNum, useToast, Combobox, Drawer, localToday, DateInput } from '../ui'
 import { DrawerHead } from './Drawer'
 import { Kpi, KpiRow } from './Kpi'
 import { api } from '../api'
@@ -84,7 +84,7 @@ export const PayrollPayDrawer = ({ row, accounts, onClose, onSaved, label = '급
           <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             <div>
               <label className="label">지급일</label>
-              <input className="input num" type="date" value={date} max={localToday()} onChange={e => setDate(e.target.value)}/>
+              <DateInput className="input num" value={date} max={localToday()} onChange={e => setDate(e.target.value)}/>
             </div>
             <div>
               <label className="label">지급 수단</label>

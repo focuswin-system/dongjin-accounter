@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, StatusBadge, Drawer, Combobox, MoneyInput, Loading } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, StatusBadge, Drawer, Combobox, MoneyInput, Loading, DateInput } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
@@ -2054,12 +2054,12 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
         <div className="row gap-12">
           <div style={{ flex: 1 }}>
             <label className="label">시작일 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-            <input className="input" type="date" value={form.start_date} onChange={e => f("start_date", e.target.value)}/>
+            <DateInput className="input" value={form.start_date} onChange={e => f("start_date", e.target.value)}/>
             <FirstCycleHint startDate={form.start_date} dayOfMonth={form.day_of_month} period={form.period} verb="지출" editing={!!editing}/>
           </div>
           <div style={{ flex: 1 }}>
             <label className="label">종료일 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
-            <input className="input" type="date" value={form.end_date} onChange={e => f("end_date", e.target.value)}/>
+            <DateInput className="input" value={form.end_date} onChange={e => f("end_date", e.target.value)}/>
           </div>
         </div>
         <div>
@@ -2420,11 +2420,11 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
           {/* 시작일은 선택 — 무기한 계약은 "언제부터"가 모호한 경우가 흔하다(구두로 이어오던 유지보수 등).
               비우면 등록한 날부터 센다(서버 lib/recurrence.js 앵커 폴백). */}
           <div style={{ flex: 1 }}><label className="label">시작일 <span className="text-muted">(선택)</span></label>
-            <input className="input" type="date" value={form.startDate} onChange={e => f("startDate", e.target.value)}/>
+            <DateInput className="input" value={form.startDate} onChange={e => f("startDate", e.target.value)}/>
             <FirstCycleHint startDate={form.startDate} dayOfMonth={form.dayOfMonth} period={form.period} verb="청구" editing={!!editing}/>
           </div>
           <div style={{ flex: 1 }}><label className="label">종료일 <span className="text-muted">(선택)</span></label>
-            <input className="input" type="date" value={form.endDate} onChange={e => f("endDate", e.target.value)}/>
+            <DateInput className="input" value={form.endDate} onChange={e => f("endDate", e.target.value)}/>
           </div>
         </div>
         <div><label className="label">입금 계좌 <span className="text-muted">(선택)</span></label>
@@ -3127,11 +3127,11 @@ const AuditPanel = ({ embedded = false }) => {
         <div className="row gap-12" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div style={{ width: 150 }}>
             <label className="label" style={{ marginBottom: 8 }}>시작일</label>
-            <input className="input" type="date" value={filter.from} onChange={e => set('from', e.target.value)}/>
+            <DateInput className="input" value={filter.from} onChange={e => set('from', e.target.value)}/>
           </div>
           <div style={{ width: 150 }}>
             <label className="label" style={{ marginBottom: 8 }}>종료일</label>
-            <input className="input" type="date" value={filter.to} onChange={e => set('to', e.target.value)}/>
+            <DateInput className="input" value={filter.to} onChange={e => set('to', e.target.value)}/>
           </div>
           <div style={{ width: 170 }}>
             <label className="label" style={{ marginBottom: 8 }}>대상</label>

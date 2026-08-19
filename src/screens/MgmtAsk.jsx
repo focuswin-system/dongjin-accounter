@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, localToday, Spinner, Loading } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, localToday, Spinner, Loading, DateInput } from '../lib/ui'
 import { api } from '../lib/api'
 
 /* 경영 도우미 — 대화(세션)형 조회.
@@ -163,9 +163,9 @@ const Composer = ({ onAdd, busy }) => {
         {PERIODS.map(p => <Chip key={p.v} on={spec.period === p.v} onClick={() => set({ period: p.v })}>{p.label}</Chip>)}
         {spec.period === 'custom' && (
           <div className="row gap-6" style={{ alignItems: 'center', marginLeft: 4 }}>
-            <input type="date" className="input" max={localToday()} value={spec.from} onChange={e => set({ from: e.target.value })} style={{ height: 32, fontSize: 13, width: 150 }}/>
+            <DateInput className="input" max={localToday()} value={spec.from} onChange={e => set({ from: e.target.value })} style={{ height: 32, fontSize: 13, width: 150 }}/>
             <span className="text-muted2">~</span>
-            <input type="date" className="input" max={localToday()} value={spec.to} onChange={e => set({ to: e.target.value })} style={{ height: 32, fontSize: 13, width: 150 }}/>
+            <DateInput className="input" max={localToday()} value={spec.to} onChange={e => set({ to: e.target.value })} style={{ height: 32, fontSize: 13, width: 150 }}/>
           </div>
         )}
       </div>

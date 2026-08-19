@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Drawer, Icon, fmtNum, useToast, useConfirm, MoneyInput, localToday } from '../ui'
+import { Drawer, Icon, fmtNum, useToast, useConfirm, MoneyInput, localToday, DateInput } from '../ui'
 import { DrawerHead } from './Drawer'
 import { api } from '../api'
 
@@ -124,12 +124,12 @@ export const BackfillWizard = ({ open, onClose, rule, kind, onDone }) => {
         <div className="row gap-12" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 150 }}>
             <label className="label">언제부터 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-            <input className="input" type="date" value={from} max={to}
+            <DateInput className="input" value={from} max={to}
               onChange={e => { setFrom(e.target.value); reset() }}/>
           </div>
           <div style={{ flex: 1, minWidth: 150 }}>
             <label className="label">언제까지</label>
-            <input className="input" type="date" value={to} max={localToday()}
+            <DateInput className="input" value={to} max={localToday()}
               onChange={e => { setTo(e.target.value); reset() }}/>
           </div>
           <button className="btn primary" onClick={doPreview} disabled={busy}>

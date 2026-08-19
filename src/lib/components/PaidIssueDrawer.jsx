@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, Drawer, localToday } from '../ui'
+import { Icon, fmtNum, useToast, Drawer, localToday, DateInput } from '../ui'
 import { DrawerHead } from './Drawer'
 import { api } from '../api'
 
@@ -63,7 +63,7 @@ export const PaidIssueDrawer = ({ target, isIssued, onClose, onDone, onIssuePaid
         </div>
         <div>
           <label className="label">{isIssued ? "입금일" : "지급일"}</label>
-          <input className="input num" type="date" value={date} max={today} onChange={e => setDate(e.target.value)}/>
+          <DateInput className="input num" value={date} max={today} onChange={e => setDate(e.target.value)}/>
         </div>
       </div>
       <div className="drawer-foot">

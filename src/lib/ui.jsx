@@ -592,6 +592,24 @@ export const ToastProvider = ({ children }) => {
   );
 };
 
+/* ── DateInput ── 날짜 칸. `<input type="date">` 를 직접 쓰지 말고 이걸 쓴다.
+ *
+ * ── 왜 감쌌나 ──
+ * 브라우저의 연도 칸은 **네 자리에서 안 멈춘다.** 크롬이 허용하는 최대 연도가
+ * 275760년이라, '2026' 을 친 뒤에도 '20260' 이 될 수 있어 다음 칸으로 넘어가지 않는다.
+ * 그래서 키보드로 `20260722` 를 쭉 치면 `2026-07-22` 가 아니라 **`202607-02-02`** 가 된다.
+ * 마우스로 달력을 열어 고르는 사람은 평생 못 만나지만, 숫자를 연달아 치는 사람은 매번 만난다.
+ * 경리 업무는 후자다.
+ *
+ * 상한을 네 자리 연도로 두면 '2026' 다음 글자가 범위를 벗어나므로 브라우저가 스스로
+ * 월 칸으로 넘어간다. 그래서 min/max 를 **기본값으로** 준다.
+ * 업무 규칙상 더 좁혀야 하는 칸(미래 날짜 금지 등)은 max 를 넘겨 덮어쓰면 된다. */
+const DATE_MIN = "1900-01-01";
+const DATE_MAX = "2099-12-31";
+export const DateInput = ({ min = DATE_MIN, max = DATE_MAX, ...rest }) => (
+  <input type="date" min={min || DATE_MIN} max={max || DATE_MAX} {...rest} />
+);
+
 /* ── Combobox ── */
 /* portal — 목록을 body 로 띄운다.
  *
@@ -679,7 +697,21 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
       if (open) e.stopPropagation();
       setOpen(false); setQ("");
     }
-    else if (e.key === "Tab") { setOpen(false); setQ(""); }
+    else if (e.key === "Tab") {
+      /* Tab 은 '다음 칸으로'인 동시에 **'지금 적은 것을 확정'**이다.
+         여태는 q 를 그냥 버려서, 품목명을 치고 Tab 을 누르면 적은 게 소리 없이 사라졌다.
+         키보드로 표를 채워 나가는 사람에게는 이게 기본 이동키라 매 줄에서 당한다.
+         Enter 와 같은 규칙으로 확정한다 — 맞는 항목이 있으면 그것, 없으면 적은 그대로.
+
+         ⚠ 아무것도 안 친 상태(q 빈칸)에서는 **아무것도 고르지 않는다.**
+         Tab 으로 훑고 지나가는 것만으로 값이 바뀌면 안 된다.
+         preventDefault 는 하지 않는다 — 초점은 다음 칸으로 넘어가야 한다. */
+      if (q) {
+        if (filtered[hi]) pick(filtered[hi]);
+        else if (allowAdd) onAddNew?.(q);
+      }
+      setOpen(false); setQ("");
+    }
   };
 
   const freqOptions = frequent.map(v => options.find(o => o.value === v)).filter(Boolean);

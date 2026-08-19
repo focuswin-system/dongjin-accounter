@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Icon, fmtNum, useToast, Combobox, Drawer, MoneyInput, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, Combobox, Drawer, MoneyInput, localToday, DateInput } from '../lib/ui'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { quickAddCategory, quickAddRefItemWithId } from '../lib/quickAdd'
@@ -622,7 +622,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
             )}
 
             <FormField label={kind === "income" ? "입금일" : "지출일"} required>
-              <input className="input" type="date" max={localToday()} value={form.date} onChange={e => setForm({...form, date: e.target.value})}/>
+              <DateInput className="input" max={localToday()} value={form.date} onChange={e => setForm({...form, date: e.target.value})}/>
             </FormField>
 
             <div>

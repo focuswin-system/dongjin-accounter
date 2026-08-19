@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Icon, periodToRange } from '../ui'
+import { Icon, periodToRange, DateInput } from '../ui'
 
 // 표 상단 툴바 — 날짜 범위 + 검색 + 필터 패널. DataTable 위에 얹는다.
 //
@@ -30,11 +30,11 @@ export const TableToolbar = ({ date, search, filters, hasActiveFilter, onReset, 
         {date && (
           <div className="tbar-date">
             <Icon.Calendar size={14} className="text-muted2"/>
-            <input type="date" className="input num tbar-dateinput"
+            <DateInput className="input num tbar-dateinput"
               value={date.from || ''} max={date.to || undefined}
               onChange={e => date.onChange({ from: e.target.value, to: date.to })}/>
             <span className="text-muted fw-600">~</span>
-            <input type="date" className="input num tbar-dateinput"
+            <DateInput className="input num tbar-dateinput"
               value={date.to || ''} min={date.from || undefined}
               onChange={e => date.onChange({ from: date.from, to: e.target.value })}/>
             {/* 지금 걸린 범위와 같은 프리셋은 눌린 상태로 보여준다.

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, localToday } from '../lib/ui'
+import { Icon, fmtNum, localToday, DateInput } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { DataTable } from '../lib/components/DataTable'
@@ -66,7 +66,7 @@ export const CashReportScreen = ({ page = true }) => {
           sub={`${data.date} 기준 · 앞으로 ${days}일`}
           actions={
             <div className="row gap-8" style={{ alignItems: 'center' }}>
-              <input className="input" type="date" style={{ width: 150 }} value={date}
+              <DateInput className="input" style={{ width: 150 }} value={date}
                 max={localToday()} onChange={e => setDate(e.target.value)}/>
               <div className="row gap-4">
                 {RANGES.map(r => (
@@ -315,7 +315,7 @@ export const DailyTrialScreen = () => {
         actions={
           <div className="row gap-4" style={{ alignItems: 'center' }}>
             <button className="btn sm" onClick={() => shift(-1)}>◀</button>
-            <input className="input" type="date" style={{ width: 150 }} value={date}
+            <DateInput className="input" style={{ width: 150 }} value={date}
               onChange={e => setDate(e.target.value)}/>
             <button className="btn sm" onClick={() => shift(1)}>▶</button>
             <button className="btn sm" onClick={() => setDate(localToday())}>오늘</button>

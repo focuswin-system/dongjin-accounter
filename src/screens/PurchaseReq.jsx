@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, MoneyInput, Drawer } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, MoneyInput, Drawer, DateInput } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
@@ -304,7 +304,7 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
           </div>
           <div>
             <label className="label" style={{ marginBottom: 6, display: 'block' }}>지급 예정일</label>
-            <input className="input" type="date" value={payDue} onChange={e => setPayDue(e.target.value)}/>
+            <DateInput className="input" value={payDue} onChange={e => setPayDue(e.target.value)}/>
           </div>
           <div className="row gap-8" style={{ justifyContent: 'flex-end', marginTop: 4 }}>
             <button className="btn" onClick={() => setPayOpen(false)}>취소</button>

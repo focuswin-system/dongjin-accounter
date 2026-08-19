@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, localToday, DateInput } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { DataTable } from '../lib/components/DataTable'
@@ -401,7 +401,7 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
         <div className="row gap-8">
           <div style={{ flex: 1 }}>
             <label className="label">{guar ? '지급일 *' : '가입일 *'}</label>
-            <input className="input" type="date" value={f.start_date} onChange={e => set('start_date', e.target.value)}/>
+            <DateInput className="input" value={f.start_date} onChange={e => set('start_date', e.target.value)}/>
           </div>
           {f.kind === 'installment' && (
             <div style={{ flex: 1 }}>
@@ -513,7 +513,7 @@ const PayDrawer = ({ target, accounts, onClose, onPay }) => {
         </div>
         <div>
           <label className="label">납입일</label>
-          <input className="input" type="date" value={payDate} onChange={e => setPayDate(e.target.value)}/>
+          <DateInput className="input" value={payDate} onChange={e => setPayDate(e.target.value)}/>
         </div>
         <div>
           <label className="label">출금 계좌 *</label>
@@ -621,7 +621,7 @@ const MatureDrawer = ({ target, accounts, onClose, onDone }) => {
         )}
         <div>
           <label className="label">입금일</label>
-          <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)}/>
+          <DateInput className="input" value={date} onChange={e => setDate(e.target.value)}/>
         </div>
         <div>
           <label className="label">입금 계좌 *</label>

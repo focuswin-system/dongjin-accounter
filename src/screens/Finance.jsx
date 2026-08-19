@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, localToday, DateInput } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { DataTable } from '../lib/components/DataTable'
@@ -146,7 +146,7 @@ const LoanFormDrawer = ({ open, editing, onClose, onSave, vendors, accounts }) =
             </div>
           )}
           <div style={{ flex: 1 }}><label className="label">실행일 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-            <input className="input" type="date" value={form.start_date} onChange={e => f('start_date', e.target.value)}/>
+            <DateInput className="input" value={form.start_date} onChange={e => f('start_date', e.target.value)}/>
           </div>
           {!noSchedule(form.method) && (
             <div style={{ width: 110 }}><label className="label">상환일</label>
@@ -258,7 +258,7 @@ const DrawLoanDrawer = ({ loan, onClose, onDone, accounts }) => {
           </div>
         </div>
         <div><label className="label">인출일</label>
-          <input className="input num" type="date" value={date} max={today} onChange={e => setDate(e.target.value)}/>
+          <DateInput className="input num" value={date} max={today} onChange={e => setDate(e.target.value)}/>
         </div>
         <div><label className="label">메모 <span className="text-muted2">· 선택</span></label>
           <input className="input" value={memo} placeholder="예: 운전자금 추가" onChange={e => setMemo(e.target.value)}/>
@@ -345,7 +345,7 @@ const AdhocRepayDrawer = ({ loan, onClose, onDone, accounts }) => {
           </div>
         </div>
         <div><label className="label">상환일</label>
-          <input className="input num" type="date" value={date} max={today} onChange={e => setDate(e.target.value)}/>
+          <DateInput className="input num" value={date} max={today} onChange={e => setDate(e.target.value)}/>
         </div>
         {(p > 0 || i > 0) && (
           <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
@@ -420,7 +420,7 @@ const RepayDrawer = ({ loan, cycle, onClose, onDone, accounts }) => {
           </div>
         </div>
         <div><label className="label">상환일</label>
-          <input className="input num" type="date" value={date} max={today} onChange={e => setDate(e.target.value)}/>
+          <DateInput className="input num" value={date} max={today} onChange={e => setDate(e.target.value)}/>
           {cycle.due_date > today && (
             <div className="text-xs" style={{ marginTop: 4, color: 'var(--warn-ink)' }}>
               예정일({cycle.due_date})이 아직 오지 않았어요. 실제로 낸 날짜로 처리하세요.
@@ -860,7 +860,7 @@ const InvestFormDrawer = ({ open, onClose, onSave, vendors, accounts }) => {
             <MoneyInput value={form.amount} onChange={v => f('amount', v)}/>
           </div>
           <div style={{ flex: 1 }}><label className="label">일자 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-            <input className="input" type="date" value={form.invested_at} onChange={e => f('invested_at', e.target.value)}/>
+            <DateInput className="input" value={form.invested_at} onChange={e => f('invested_at', e.target.value)}/>
           </div>
         </div>
         {isIn && (

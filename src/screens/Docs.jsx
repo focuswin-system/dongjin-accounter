@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, Popover, Loading, periodToRange } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, Popover, Loading, periodToRange, DateInput } from '../lib/ui'
 // SAMPLE placeholder — Docs 화면은 실 API 연동 전까지 빈 데이터로 동작
 const SAMPLE = {
   docs: [], evidences: [], evidenceMissing: [], excelPreview: [],
@@ -183,7 +183,7 @@ const NewResolutionDrawer = ({ open, onClose, onCreated }) => {
           </div>
           <div style={{ flex: 1 }}>
             <label className="label" style={{ marginBottom: 8 }}>지급일</label>
-            <input className="input" type="date" value={form.pay_date} onChange={e => setForm(f => ({ ...f, pay_date: e.target.value }))}/>
+            <DateInput className="input" value={form.pay_date} onChange={e => setForm(f => ({ ...f, pay_date: e.target.value }))}/>
           </div>
         </div>
         <div>
@@ -311,7 +311,7 @@ const ProcessDrawer = ({ open, onClose, doc, onDone }) => {
             </div>
             <div>
               <label className="label" style={{ marginBottom: 8 }}>지출일</label>
-              <input className="input" type="date" max={localToday()} value={date} onChange={e => setDate(e.target.value)}/>
+              <DateInput className="input" max={localToday()} value={date} onChange={e => setDate(e.target.value)}/>
             </div>
             <AccountPick accounts={accounts} value={accountId} onChange={setAccountId}/>
             <div className="text-xs text-muted2">{doc.vendor_name || '거래처 미지정'} · {doc.pay_method || '계좌이체'}로 지출 거래가 생성됩니다.</div>
@@ -637,7 +637,7 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
               <th>지출방법</th>
               <td>{edit ? <input className="cell-input" value={form.pay_method || ''} onChange={e => setForm(f => ({ ...f, pay_method: e.target.value }))}/> : form.pay_method}</td>
               <th>지급일</th>
-              <td className="num">{edit ? <input className="cell-input" type="date" value={form.pay_date || ''} onChange={e => setForm(f => ({ ...f, pay_date: e.target.value }))}/> : (form.pay_date || '—')}</td>
+              <td className="num">{edit ? <DateInput className="cell-input" value={form.pay_date || ''} onChange={e => setForm(f => ({ ...f, pay_date: e.target.value }))}/> : (form.pay_date || '—')}</td>
             </tr>
           </tbody>
         </table>
@@ -1354,10 +1354,10 @@ const PeriodFilter = ({ value, onChange }) => {
   return (
     <div className="row gap-8 no-print" style={{ marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
       <span className="text-sm text-muted fw-600">기간</span>
-      <input type="date" className="input num" style={{ width: 150 }} value={r.from} max={r.to || undefined}
+      <DateInput className="input num" style={{ width: 150 }} value={r.from} max={r.to || undefined}
         onChange={e => onChange({ ...r, from: e.target.value })}/>
       <span className="text-muted fw-600">~</span>
-      <input type="date" className="input num" style={{ width: 150 }} value={r.to} min={r.from || undefined}
+      <DateInput className="input num" style={{ width: 150 }} value={r.to} min={r.from || undefined}
         onChange={e => onChange({ ...r, to: e.target.value })}/>
       {/* .tbar-presets 로 감싼다 — 고른 기간의 표시(.active) 스타일이 이 클래스 안에만 있어서,
           밖에 두면 클래스는 붙는데 아무 변화가 없다. 어느 기간을 보고 있는지 알 수 없었다.

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Icon, fmtNum, Combobox, MoneyInput } from '../ui'
+import { Icon, fmtNum, Combobox, MoneyInput, DateInput } from '../ui'
 import { computeLineAmount, num, BASIS_LABEL } from '../lineAmount'
 
 /* 거래명세서식 품목 입력 — 청구서 폼에서 쓴다.
@@ -168,7 +168,7 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
               {lines.map((l, i) => (
                 <tr key={i}>
                   <td>
-                    <input className="input num" type="date" value={l.delivery_date || ''}
+                    <DateInput className="input num" value={l.delivery_date || ''}
                       onChange={e => set(i, { delivery_date: e.target.value })}/>
                   </td>
                   <td>

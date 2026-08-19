@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, DateInput } from '../lib/ui'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DataTable } from '../lib/components/DataTable'
@@ -463,7 +463,7 @@ const SeveranceDrawer = ({ row, employees, onClose, onSaved }) => {
         </div>
         <div>
           <label className="label">지급 기한</label>
-          <input className="input" type="date" value={f.due_date} onChange={e => set('due_date', e.target.value)}/>
+          <DateInput className="input" value={f.due_date} onChange={e => set('due_date', e.target.value)}/>
           <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
             모르면 비워두세요. '기한 미정'으로 잡아 자금 현황에서 지금 나갈 돈처럼 보수적으로 셉니다.
           </div>
@@ -647,7 +647,7 @@ const PayslipEditorDrawer = ({ row, onClose, onSaved }) => {
 
         <div className="col gap-8" style={{ maxWidth: 280 }}>
           <label className="label">지급 예정일</label>
-          <input className="input num" type="date" value={payDate} onChange={e => setPayDate(e.target.value)}/>
+          <DateInput className="input num" value={payDate} onChange={e => setPayDate(e.target.value)}/>
         </div>
       </div>
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, Drawer, Combobox, MoneyInput, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, Drawer, Combobox, MoneyInput, localToday, DateInput } from '../lib/ui'
 import { api } from '../lib/api'
 import { quickAddCategory } from '../lib/quickAdd'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
@@ -130,7 +130,7 @@ const FilingDrawer = ({ target, year, onClose, onSaved }) => {
         )}
         <div>
           <label className="label" style={{ marginBottom: 8 }}>{isRefund ? '환급일' : '납부일'}</label>
-          <input className="input" type="date" max={localToday()} value={form.paid_date} onChange={e => f('paid_date', e.target.value)}/>
+          <DateInput className="input" max={localToday()} value={form.paid_date} onChange={e => f('paid_date', e.target.value)}/>
         </div>
         <div>
           <label className="label" style={{ marginBottom: 8 }}>적요 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 거래 내용</span></label>
@@ -309,7 +309,7 @@ const OtherTaxDrawer = ({ open, editing, onClose, onSaved }) => {
         </div>
         <div>
           <label className="label" style={{ marginBottom: 8 }}>{isRefund ? '환급일' : '납부일'}</label>
-          <input className="input" type="date" max={localToday()} value={form.paid_date} onChange={e => f('paid_date', e.target.value)}/>
+          <DateInput className="input" max={localToday()} value={form.paid_date} onChange={e => f('paid_date', e.target.value)}/>
         </div>
         {isDone && (
           <div>

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, StatusBadge, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, StatusBadge, localToday, DateInput } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
@@ -355,7 +355,7 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
                     onAddNew={async (name) => { const r = await api.addHrCode('pos', name); if (r.ok) { setPositions(await api.getHrCodes('pos')); setForm(f => ({ ...f, role: name })) } }} addNewLabel="직위로 추가"/>
                 </Field>
               </div>
-              <Field label="생년월일" hint="급여명세서 표기용"><input className="input num" type="date" value={form.birth_date} onChange={e => setForm(f => ({ ...f, birth_date: e.target.value }))}/></Field>
+              <Field label="생년월일" hint="급여명세서 표기용"><DateInput className="input num" value={form.birth_date} onChange={e => setForm(f => ({ ...f, birth_date: e.target.value }))}/></Field>
               {/* 주민등록번호는 저장하지 않는다 — 신고서 자동생성이 범위 밖이라 얻는 게 없고,
                   저장하는 순간 암호화·파기 의무가 붙는다. 급여이체 계좌만 둔다. */}
               <Field label="급여이체 계좌" hint="선택 · 급여 지급 시 참고"><input className="input" value={form.salary_account || ''}
@@ -371,7 +371,7 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
               options={employTypes.map(t => ({ value: t.id, label: t.label, sub: FORM_LABEL[t.pay_form] }))} placeholder="고용형태 선택"/>
           </Field>
           <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <Field label="계약 시작"><input className="input num" type="date" value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))}/></Field>
+            <Field label="계약 시작"><DateInput className="input num" value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))}/></Field>
             <Field label="종료 방식">
               <div className="row gap-4">
                 {Object.entries(TERM_LABEL).map(([k, lbl]) => chip(k, form.term_mode, () => setForm(f => ({ ...f, term_mode: k })), lbl))}
@@ -379,7 +379,7 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
             </Field>
           </div>
           {form.term_mode !== 'open' && (
-            <Field label="계약 종료"><input className="input num" type="date" value={form.end_date} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))}/></Field>
+            <Field label="계약 종료"><DateInput className="input num" value={form.end_date} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))}/></Field>
           )}
           <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             <Field label="소정근로시간" hint="예: 주 40시간"><input className="input" value={form.work_hours} onChange={e => setForm(f => ({ ...f, work_hours: e.target.value }))} placeholder="주 40시간 / 09:00~18:00"/></Field>
@@ -703,8 +703,8 @@ const OutsourcingDrawer = ({ info, onClose, onSaved }) => {
             </Field>
           </div>
           <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <Field label="계약 시작"><input className="input num" type="date" value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))}/></Field>
-            {form.term_mode !== 'open' && <Field label="계약 종료"><input className="input num" type="date" value={form.end_date} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))}/></Field>}
+            <Field label="계약 시작"><DateInput className="input num" value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))}/></Field>
+            {form.term_mode !== 'open' && <Field label="계약 종료"><DateInput className="input num" value={form.end_date} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))}/></Field>}
           </div>
           {form.kind === 'daily' && (
             <Field label="상용전환 경고 (개월)" hint="이 개월수 이상 계속 근로 시 알림 (건설 12)">
@@ -938,7 +938,7 @@ const ServicePayDrawer = ({ contract, onClose, onSaved }) => {
         </div>
 
         <div className="col gap-form">
-          <Field label="지급일"><input className="input num" type="date" value={date} max={today} onChange={e => setDate(e.target.value)}/></Field>
+          <Field label="지급일"><DateInput className="input num" value={date} max={today} onChange={e => setDate(e.target.value)}/></Field>
           <label className="row gap-8" style={{ cursor: 'pointer' }}>
             <input type="checkbox" checked={payNow} onChange={e => setPayNow(e.target.checked)}/>
             <span className="text-sm">지금 지급 처리 (거래내역에 지출로 자동 기록)</span>

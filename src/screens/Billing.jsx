@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday, Loading } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday, Loading, DateInput } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
@@ -375,7 +375,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                           {isIssued ? "입금일" : "지급일"} <span style={{ color: "var(--neg-ink)" }}>*</span>
                           <span className="text-muted2 fw-600" style={{ marginLeft: 6, fontWeight: 400 }}>· 기본값: 오늘</span>
                         </label>
-                        <input type="date" className="input" value={matchDate}
+                        <DateInput className="input" value={matchDate}
                           max={localDate()}
                           onChange={e => setMatchDate(e.target.value)}/>
 
@@ -874,7 +874,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
           </div>
           <div>
             <label className="label">지급 기한</label>
-            <input className="input" type="date" value={form.dueAt} onChange={e => f("dueAt", e.target.value)}/>
+            <DateInput className="input" value={form.dueAt} onChange={e => f("dueAt", e.target.value)}/>
           </div>
           <div>
             <label className="label">{form.kind === "issued" ? "수금 계좌" : "지급 계좌"}</label>
@@ -1592,7 +1592,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
 
                   <div className="row gap-6 ml-auto" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
                     <span className="text-xs text-muted2">처리일</span>
-                    <input type="date" className="input num" style={{ width: 148 }} value={bulkDate}
+                    <DateInput className="input num" style={{ width: 148 }} value={bulkDate}
                       max={localToday()} onChange={e => setBulkDate(e.target.value)}/>
                     {/* 계좌를 안 고르면 청구서에 적힌 계좌를 쓴다. 그것도 없으면 서버가 막는다 —
                         계좌 없는 정산은 어느 계좌 잔액에도 안 잡혀 조용히 새기 때문이다. */}
