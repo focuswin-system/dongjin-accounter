@@ -60,7 +60,7 @@ const API_RESOURCES = {
   '/api/vendors':             ['master_vendor'],
   '/api/account-subjects':    ['master_accountSubject'],
   '/api/categories':          ['master_category'],
-  '/api/accounts':            ['master_account', 'master_accountBalance'],
+  '/api/accounts':            ['master_account', 'master_card', 'master_accountBalance'],
   // 기준정보 범용(품목·자산·적요·보험·증빙유형) — 하나의 라우터가 여러 탭을 받는다
   '/api/ref-items':           ['master_item', 'master_fixed_asset', 'master_intangible_asset',
                                'master_jeokyo', 'master_insurance', 'master_evidence_type'],

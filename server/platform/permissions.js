@@ -70,7 +70,8 @@ const RESOURCES = [
   { id: 'master_item',             label: '품목',          group: '일반회계 · 기준정보' },
   { id: 'master_fixed_asset',      label: '고정자산',      group: '일반회계 · 기준정보' },
   { id: 'master_intangible_asset', label: '무형자산',      group: '일반회계 · 기준정보' },
-  { id: 'master_account',          label: '계좌/카드',     group: '일반회계 · 기준정보' },
+  { id: 'master_account',          label: '계좌',          group: '일반회계 · 기준정보' },
+  { id: 'master_card',             label: '카드',          group: '일반회계 · 기준정보' },
   { id: 'master_accountBalance',   label: '계좌 잔액',     group: '일반회계 · 기준정보' },
   { id: 'master_insurance',        label: '보험',          group: '일반회계 · 기준정보' },
 

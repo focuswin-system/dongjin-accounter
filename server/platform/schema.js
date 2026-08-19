@@ -285,6 +285,23 @@ async function migratePlatformSchema(c) {
     } catch (e) { console.warn('[platform] roles.description 추가 실패:', e.code || e.message) }
   }
 
+  /* 자원 분리 이관 — 한 화면을 둘로 쪼갤 때 **권한이 조용히 회수되지 않게** 한다.
+   *
+   * '계좌/카드' 한 화면을 '계좌'와 '카드'로 갈랐다. 새 자원(master_card)은 아무 역할에도
+   * 없으므로, 그냥 두면 어제까지 카드를 관리하던 사람이 오늘 카드 화면에서 튕긴다.
+   * 시스템 역할은 프리셋 보충(ensurePresetRoles)이 알아서 채우지만, 회사가 직접 만든
+   * 커스텀 역할은 프리셋을 타지 않아 영영 못 받는다 — 그래서 여기서 옮긴다.
+   *
+   * 규칙: 옛 자원에 있던 **행위 그대로** 새 자원에 복사한다(view 만 있으면 view 만).
+   * INSERT IGNORE 라 이미 손수 조정한 회사의 값은 건드리지 않고, 여러 번 돌아도 안전하다. */
+  const RESOURCE_SPLITS = [['master_account', 'master_card']]
+  for (const [from, to] of RESOURCE_SPLITS) {
+    const [r] = await c.execute(
+      `INSERT IGNORE INTO role_perms (role_id, resource, action)
+       SELECT role_id, ?, action FROM role_perms WHERE resource = ?`, [to, from])
+    if (r.affectedRows > 0) console.log(`[platform] 권한 이관 ${from} → ${to}: ${r.affectedRows}건`)
+  }
+
   /* 시스템 역할 이름 변경. 역할 id 를 그대로 두고 name 만 바꾸므로
      이미 배정된 사용자·권한 행(user_roles·role_perms)은 손대지 않는다.
      ⚠ (company_id, name) 유니크라, 옮길 이름이 이미 있으면 충돌한다 → 그 회사는 건너뛴다

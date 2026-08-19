@@ -98,7 +98,8 @@ const MASTER_TABS = [
   { id: "fixed_asset",     label: "고정자산", custom: true },
   { id: "intangible_asset",label: "무형자산", custom: true },
   // 재무 운영
-  { id: "account",         label: "계좌/카드", custom: true },
+  { id: "account",         label: "계좌", custom: true },
+  { id: "card",            label: "카드", custom: true },
   { id: "accountBalance",  label: "계좌 잔액", custom: true },
   { id: "recurringExpense",label: "정기 지출", custom: true },
   { id: "recurringInvoice",label: "정기 청구", custom: true },
@@ -130,7 +131,7 @@ const TAB_BY_ID = Object.fromEntries(MASTER_TABS.map(t => [t.id, t]));
  * 없는 탭도 전용 패널 경로로 보낸다 — 크래시보다는 빈 화면이 낫다.
  */
 const CUSTOM_PANEL_TABS = new Set([
-  "account", "accountBalance", "recurringExpense", "recurringInvoice", "payroll",
+  "account", "card", "accountBalance", "recurringExpense", "recurringInvoice", "payroll",
   "payrollItems", "employType", "accountSubject", "category", "vendor",
   "department", "position", "company", "user", "approval", "jeokyo", "item",
   "insurance", "fixed_asset", "intangible_asset", "evidence_type", "closing", "audit",
@@ -146,7 +147,8 @@ const MASTER_SECTIONS = {
       // 증빙유형: 목업이던 evidenceType 탭을 버리고 실제 CRUD(ref_items type='evidence_type')로 교체.
       { label: "거래 기준", tabs: ["vendor", "accountSubject", "category", "jeokyo", "evidence_type"] },
       { label: "품목·자산", tabs: ["item", "fixed_asset", "intangible_asset"] },
-      { label: "자금·결제", tabs: ["account", "accountBalance", "insurance"] },
+      // 계좌와 카드를 가른다 — 통장은 '얼마 있나', 카드는 '언제 빠져나가나'라 관리 축이 다르다.
+      { label: "자금·결제", tabs: ["account", "card", "accountBalance", "insurance"] },
       // 정기청구/정기지출은 기준정보(정적 참조)가 아니라 주문에서 파생되는 흐름이라 여기서 제거.
       // → 회계처리로 재배치 완료: 정기청구=판매·수주(매출)(route recurring_invoice), 정기지출=경비(route recurring_expense).
       //   패널은 이 파일에서 export해 App이 page 모드로 렌더한다.
@@ -1720,16 +1722,31 @@ const CompanyPanel = ({ embedded = false }) => {
 const ACCOUNT_KINDS = [{ value: 'bank', label: '계좌' }, { value: 'card', label: '카드' }]
 const BANK_TYPES = ['보통예금', '당좌예금', '정기예금']
 const CARD_TYPES = ['법인카드', '개인카드', '체크카드']
-const emptyAccountForm = () => ({ kind: 'bank', type: '보통예금', bank: '', number: '', name: '', purpose: '', initial_balance: '', owner: 'corp', card_pay_day: '', card_pay_account_id: '' })
+// kind 를 받아 그 화면에 맞는 빈 폼을 낸다 — 카드 화면에서 '새로 등록'을 누르면 카드로 시작해야 한다
+const emptyAccountForm = (kind = 'bank') => ({
+  kind, type: kind === 'card' ? '법인카드' : '보통예금',
+  bank: '', number: '', name: '', purpose: '', initial_balance: '', owner: 'corp',
+  card_pay_day: '', card_pay_account_id: '',
+})
 
-const AccountPanel = ({ embedded = false }) => {
+/* 계좌 / 카드 — **한 테이블(accounts)에 kind 로 나뉜 두 가지**를 각각의 화면으로 낸다.
+ *
+ * ── 왜 갈랐나 ──
+ * 통장과 법인카드는 성격이 다르다. 통장은 '지금 얼마 있나'(잔액)가 핵심이고,
+ * 카드는 '언제 얼마가 빠져나가나'(결제일·결제계좌)가 핵심이다. 한 표에 섞어 두니
+ * 카드 행의 잔액 칸이 늘 '—' 로 비어 있었고, 잔액 조정 화면에는 카드까지 딸려 들어갔다.
+ *
+ * ⚠ DB 는 그대로 한 테이블이다. 거래 등록의 '계좌' 선택은 카드로 결제한 지출도 잡아야 해서
+ * 여전히 둘을 합쳐 보여준다 — 가른 것은 **관리 화면**이지 데이터가 아니다. */
+const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [accounts, setAccounts] = useState([])
   const [q, setQ] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editing, setEditing] = useState(null)
-  const [form, setForm] = useState(emptyAccountForm())
+  const [form, setForm] = useState(emptyAccountForm(kind))
+  const isCardPanel = kind === 'card'
 
   const load = () => api.getAccounts().then(setAccounts)
   useEffect(() => { load() }, [])
@@ -1737,11 +1754,18 @@ const AccountPanel = ({ embedded = false }) => {
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
   const setKind = (kind) => setForm(p => ({ ...p, kind, type: kind === 'bank' ? '보통예금' : '법인카드' }))
 
-  const filtered = accounts.filter(a =>
+  const filtered = accounts.filter(a => (a.kind === 'card') === isCardPanel).filter(a =>
     !q || [a.name, a.bankName, a.number, a.purpose, a.type].some(s => s?.includes(q))
   )
 
-  const openNew = () => { setEditing(null); setForm(emptyAccountForm()); setDrawerOpen(true) }
+  const openNew = () => { setEditing(null); setForm(emptyAccountForm(kind)); setDrawerOpen(true) }
+
+  /* 건수는 **이 화면이 실제로 보여주는 것**만 센다. accounts.length(전체 9건)를 쓰면
+     카드 3장짜리 화면에 '총 9건'이 떠서, 표와 머리글이 서로 다른 말을 한다. */
+  const ownCount = accounts.filter(a => (a.kind === 'card') === isCardPanel).length
+  const headerSub = isCardPanel
+    ? `총 ${ownCount}장 · 결제수단으로 사용됩니다`
+    : `총 ${ownCount}개 · 입출금이 기록되는 통장이에요`
   const openEdit = (a) => {
     setEditing(a)
     setForm({
@@ -1794,41 +1818,41 @@ const AccountPanel = ({ embedded = false }) => {
     <div style={{ padding: 20 }}>
       <div className="row" style={{ marginBottom: 16, gap: 10, flexWrap: 'wrap' }}>
         {embedded ? (
-          <div className="section-sub" style={{ alignSelf: 'center' }}>총 {accounts.length}건 · 결제수단으로 사용됩니다</div>
+          <div className="section-sub" style={{ alignSelf: 'center' }}>{headerSub}</div>
         ) : (
           <div>
-            <div className="section-title">계좌 / 카드</div>
-            <div className="section-sub">총 {accounts.length}건 · 결제수단으로 사용됩니다</div>
+            <div className="section-title">{isCardPanel ? '카드' : '계좌'}</div>
+            <div className="section-sub">{headerSub}</div>
           </div>
         )}
         <div className="search" style={{ margin: 0, marginLeft: 'auto', width: 200, padding: '6px 10px' }}>
           <Icon.Search size={14}/>
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="별칭·은행·번호"/>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder={isCardPanel ? '별칭·카드사·번호' : '별칭·은행·번호'}/>
         </div>
-        <button className="btn primary" onClick={openNew}><Icon.Plus size={14}/> 계좌/카드 등록</button>
+        <button className="btn primary" onClick={openNew}><Icon.Plus size={14}/> {isCardPanel ? '카드' : '계좌'} 등록</button>
       </div>
 
       <div className="card" style={{ overflow: 'hidden' }}>
         <table className="table">
           <thead>
             <tr>
-              <th style={{ width: 64 }}>종류</th>
               <th>별칭</th>
               <th>세부유형</th>
-              <th>은행/카드사</th>
+              <th>{isCardPanel ? '카드사' : '은행'}</th>
               <th>번호</th>
               <th>용도</th>
-              <th className="num-right">잔액</th>
+              {isCardPanel
+                ? <><th>결제일</th><th>결제 계좌</th></>
+                : <th className="num-right">잔액</th>}
               <th style={{ width: 90 }}></th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={8} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)' }}>등록된 계좌/카드가 없어요</td></tr>
+              <tr><td colSpan={isCardPanel ? 8 : 7} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)' }}>등록된 {isCardPanel ? '카드' : '계좌'}가 없어요</td></tr>
             )}
             {filtered.map(a => (
               <tr key={a.id}>
-                <td><span className={`badge ${a.kind === 'card' ? 'warn' : 'brand'}`}>{a.kind === 'card' ? '카드' : '계좌'}</span></td>
                 <td className="fw-700">
                   {a.name}
                   {/* 개인 것만 표시한다 — 법인이 대부분이라 양쪽에 다 붙이면 표가 시끄럽다 */}
@@ -1840,7 +1864,14 @@ const AccountPanel = ({ embedded = false }) => {
                 <td className="text-sm">{a.bankName || '—'}</td>
                 <td className="text-sm num">{a.number || '—'}</td>
                 <td className="text-sm">{a.purpose || '—'}</td>
-                <td className="num-cell num-right">{a.kind === 'card' || a.currentBalance == null ? '—' : fmtNum(a.currentBalance)}</td>
+                {isCardPanel ? (
+                  <>
+                    <td className="text-sm num">{a.card_pay_day ? `매월 ${a.card_pay_day}일` : '—'}</td>
+                    <td className="text-sm">{accounts.find(x => x.id === a.card_pay_account_id)?.name || '—'}</td>
+                  </>
+                ) : (
+                  <td className="num-cell num-right">{a.currentBalance == null ? '—' : fmtNum(a.currentBalance)}</td>
+                )}
                 <td>
                   <div className="row gap-6">
                     <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => openEdit(a)}>수정</button>
@@ -1969,7 +2000,11 @@ const AccountBalancePanel = ({ embedded = false }) => {
   const [histTarget, setHistTarget] = useState(null)
 
   const load = async () => {
-    const accs = await api.getAccounts()
+    /* ⚠ 카드는 뺀다. 카드에는 '잔액'이 없다 — 결제수단이지 돈을 담아 두는 곳이 아니라
+       (cashReport 의 가용자금도 같은 이유로 카드를 뺀다), 목록의 잔액 칸이 늘 '—' 였고
+       조정 버튼까지 붙어 있었다. "카드 잔액을 통장에 맞춘다"는 말이 안 된다.
+       이 파일의 다른 계좌 목록들도 이미 같은 조건으로 카드를 거른다. */
+    const accs = (await api.getAccounts()).filter(a => a.kind !== 'card')
     const withAdj = await Promise.all(
       accs.map(async a => ({ ...a, adjustments: await api.getAdjustments(a.id) }))
     )
@@ -3478,7 +3513,8 @@ export const MasterScreen = ({ user, section = "base", forcedTab }) => {
   const renderCustomPanel = () => {
     if (REF_CONFIGS[activeTab])           return <RefMasterPanel key={activeTab} cfg={REF_CONFIGS[activeTab]} embedded={single}/>
     if (activeTab === "vendor")           return <VendorPanel embedded={single}/>
-    if (activeTab === "account")          return <AccountPanel embedded={single}/>
+    if (activeTab === "account")          return <AccountPanel embedded={single} kind="bank"/>
+    if (activeTab === "card")             return <AccountPanel embedded={single} kind="card"/>
     if (activeTab === "company")          return <CompanyPanel embedded={single}/>
     if (activeTab === "accountSubject")   return <AccountSubjectPanel embedded={single}/>
     if (activeTab === "category")         return <CategoryPanel embedded={single}/>

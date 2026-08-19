@@ -153,7 +153,8 @@ export const MASTER_GROUPS = [
     { id: "master_accountSubject",  label: "계정과목",   icon: Icon.Book },
   ]},
   { label: "자금·자산", items: [
-    { id: "master_account",         label: "계좌/카드",  icon: Icon.Card },
+    { id: "master_account",         label: "계좌",      icon: Icon.Bank },
+    { id: "master_card",            label: "카드",      icon: Icon.Card },
     { id: "master_accountBalance",  label: "계좌 잔액",  icon: Icon.Bank },
     { id: "master_fixed_asset",     label: "고정자산",   icon: Icon.Wallet },
     { id: "master_intangible_asset",label: "무형자산",   icon: Icon.File },
@@ -277,7 +278,8 @@ export const LEAF_TAGS = {
   master_item:          '품목 제품 부품 자재 도면 규격 단가',
   master_fixed_asset:   '자산 설비 기계 장비 차량 감가상각',
   master_intangible_asset:'무형 소프트웨어 라이선스 특허 상표',
-  master_account:       '통장 계좌 카드 은행 법인카드 결제수단',
+  master_account:       '통장 계좌 은행 예금 결제수단 계좌카드',
+  master_card:          '카드 법인카드 신용카드 체크카드 결제일 카드대금 계좌카드',
   master_accountBalance:'잔액 통장잔고 시재',
   master_insurance:     '보험 화재보험 배상책임 보험료 증권',
   // 인사급여
