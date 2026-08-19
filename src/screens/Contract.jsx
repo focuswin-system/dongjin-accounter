@@ -7,6 +7,9 @@ import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { LinkTxnDrawer } from '../lib/components/LinkTxnDrawer'
+/* 청구서 품목표와 **같은 컴포넌트**를 쓴다 — 칸 구성만 다르다(CONTRACT_COLUMNS).
+   따로 만들어 두니 청구서 쪽 개선(목록 잘림·칸 자동확장·Tab 확정)이 주문에는 하나도 안 왔다. */
+import { InvoiceLines, CONTRACT_COLUMNS, CONTRACT_PROGRESS_COLUMNS } from '../lib/components/InvoiceLines'
 import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
 import { BILLING_MODES, TERM_MODES, BILLING_PERIODS, billingLabel, termLabel, periodLabel, periodMonths,
          isRecurring, isProgress, isOpenEnded, hasTotal, amountLabel, renewalInfo, nextEndDate, recurringMismatch } from '../lib/renewal'
@@ -28,122 +31,37 @@ const itemsCost  = (rows) => (rows || []).filter(r => (r.name || '').trim()).red
 
 const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster, withQty = false, required = false, hint }) => {
   const rows = form.items || [];
-  const setRows = (fn) => set(f => ({ ...f, items: fn(f.items || []) }));
-  const add = () => setRows(rs => [...rs, { item_id: '', name: '', spec: '', unit: '', qty: '', weight: '', price_basis: 'qty', unit_price: '', cost_price: '' }]);
-  const upd = (i, patch) => setRows(rs => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r));
-  const del = (i) => setRows(rs => rs.filter((_, idx) => idx !== i));
-  /* 기준정보에서 품목을 고르면 규격·단위·출고가·매입가를 자동으로 채운다(주문별로 다시 수정 가능).
-   *
-   * ⚠ 고른 품목을 **id 로** 찾는다. 예전엔 이름으로 찾았는데(`find(x => x.name === name)`),
-   *   같은 이름에 규격만 다른 품목이 있으면 **항상 첫 번째가 걸렸다.**
-   *   항공부품처럼 도면 개정이 계속 생기는 곳에서는 이게 곧 돈이다 —
-   *   'RIB ASSY, WING / KAI-A50-2211-**2**'(512,000원)를 골라도
-   *   '…-**1**'(486,000원)의 규격·단가가 들어가 그 값으로 청구서가 나간다.
-   *   드롭다운은 규격까지 보여줘 사람은 제대로 골랐는데 시스템만 다른 걸 집었다.
-   */
-  const pick = (i, id) => {
-    const it = itemMaster.find(x => String(x.id) === String(id));
-    upd(i, it
-      ? { item_id: it.id, name: it.name, spec: it.spec || '', unit: it.unit || '',
-          // 중량·단가기준도 함께 — ㎏당 단가로 파는 자재는 이게 없으면 금액이 달라진다
-          weight: String(Number(it.weight) || ''), price_basis: it.price_basis === 'weight' ? 'weight' : 'qty',
-          unit_price: String(it.amount || ''), cost_price: String(it.purchase_price || '') }
-      : { item_id: '', name: id });   // 목록에 없으면 사용자가 친 문자열을 이름으로 둔다
-  };
-  // 목록에 없는 품목을 입력하면 기준정보에 새로 등록하고 이 행에 연결(거래처 인라인 추가와 같은 방식).
-  const addNew = async (i, name) => {
-    const nm = (name || '').trim(); if (!nm) return;
-    const res = await api.addRefItem({ type: 'item', name: nm });
+  const setRows = (next) => set(f => ({ ...f, items: next }));
+
+  /* 목록에 없는 품목은 **기준정보에 등록하고** 그 id 를 돌려준다.
+     청구서는 이름만 남기면 되지만(명세서에 찍히면 그만), 주문 품목표는 다음 주문에서도
+     같은 품목을 고를 수 있어야 한다. */
+  const addNewItem = async (name) => {
+    const res = await api.addRefItem({ type: 'item', name });
     await reloadMaster();
-    upd(i, { item_id: res.id || '', name: nm });
+    return res.id || '';
   };
-  const total = itemsTotal(rows), cost = itemsCost(rows);
 
   return (
     <div>
-      <label className="label" style={{ marginBottom: 8 }}>
-        품목 {required
+      <InvoiceLines
+        lines={rows}
+        onChange={setRows}
+        itemMaster={itemMaster}
+        columns={withQty ? CONTRACT_COLUMNS : CONTRACT_PROGRESS_COLUMNS}
+        label={<>품목 {required
           ? <span style={{ color: 'var(--neg-ink)' }}>*</span>
-          : <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span>}
-      </label>
-      <div className="text-xs text-muted2" style={{ marginBottom: 10 }}>{hint}</div>
-      <div className="col gap-8">
-        {rows.map((r, i) => (
-          <div key={i} className="col gap-6" style={{ padding: 10, border: '1px solid var(--line)', borderRadius: 10, background: 'var(--surface-2)' }}>
-            {/* 품목은 한 줄 전체 폭 — 좁은 드로어에서 검색 input이 눌리지 않게 */}
-            <div className="row gap-6" style={{ alignItems: 'center' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                {/* value 는 item_id 다. 이름을 값으로 쓰면 같은 이름의 개정판들이 한 값으로 뭉개져
-                    무엇을 골라도 첫 번째가 선택된다(옵션 key 도 중복된다). */}
-                <Combobox value={r.item_id || r.name}
-                  onChange={v => pick(i, v)}
-                  onAddNew={q => addNew(i, q)}
-                  options={itemMaster.map(it => ({ value: it.id, label: it.name,
-                    sub: [it.code, it.spec, it.unit, it.amount ? fmtNum(it.amount) + '원' : ''].filter(Boolean).join(' · ') }))}
-                  addNewLabel="새 품목 등록"
-                  placeholder="품목 선택·검색"/>
-              </div>
-              <button type="button" className="icon-btn" onClick={() => del(i)}><Icon.Close size={14}/></button>
-            </div>
-            <div className="row gap-6">
-              <input className="input" style={{ flex: 1, minWidth: 0 }} value={r.spec || ''} placeholder="규격"
-                onChange={e => upd(i, { spec: e.target.value })}/>
-              <input className="input" style={{ width: 72 }} value={r.unit || ''} placeholder="단위"
-                onChange={e => upd(i, { unit: e.target.value })}/>
-              {withQty && (
-                <input className="input num" style={{ width: 76 }} value={r.qty ?? ''} placeholder="수량"
-                  onChange={e => upd(i, { qty: numOnly(e.target.value) })}/>
-              )}
-            </div>
-            {/* 중량 · 단가 기준 — 기준정보에서 고르면 따라오고, 주문별로 고칠 수 있다.
-                금속·자재는 ㎏당 단가로 주문하는 일이 있어서, 무엇에 단가를 곱하는지가
-                금액의 근거다. 기본은 수량이라 대부분의 주문은 이 줄을 건드릴 일이 없다.
-
-                중량 칸은 주문이 금액을 확정하는 형태(총액형·정기형)에서만 낸다.
-                기성형은 회차마다 중량이 달라 발행 화면에서 받으므로, 여기 적어봐야 안 쓰인다 —
-                안 쓰이는 칸을 띄우면 적어놓고 왜 반영이 안 되냐는 물음이 생긴다. */}
-            <div className="row gap-6" style={{ alignItems: 'center' }}>
-              {withQty && (
-                <input className="input num" style={{ width: 92 }} inputMode="decimal" value={r.weight ?? ''}
-                  placeholder="중량" onChange={e => upd(i, { weight: e.target.value.replace(/[^0-9.]/g, '') })}/>
-              )}
-              <span className="text-xs text-muted2">단가 기준</span>
-              {['qty', 'weight'].map(b => (
-                <button key={b} type="button"
-                  className={`chip ${(r.price_basis || 'qty') === b ? 'active' : ''}`}
-                  style={{ fontSize: 11, padding: '2px 8px' }}
-                  onClick={() => upd(i, { price_basis: b })}>{b === 'qty' ? '수량' : '중량'}</button>
-              ))}
-            </div>
-            <div className="row gap-6">
-              <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-                <MoneyInput className="input num" style={{ paddingRight: 26 }} value={r.unit_price} placeholder="출고가"
-                  onChange={raw => upd(i, { unit_price: raw })}/>
-                <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 12 }}>원</span>
-              </div>
-              <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-                <MoneyInput className="input num" style={{ paddingRight: 26 }} value={r.cost_price} placeholder="매입가(원가)"
-                  onChange={raw => upd(i, { cost_price: raw })}/>
-                <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 12 }}>원</span>
-              </div>
-            </div>
-            {withQty && asNum(r.unit_price) > 0 && (
-              <div className="text-xs text-muted2 num" style={{ textAlign: 'right' }}>
-                {/* 무엇에 곱했는지 그대로 적는다 — 중량 기준인데 수량이 적혀 있으면 검산이 안 된다 */}
-                {basisQty(r)}{r.price_basis === 'weight' ? '(중량)' : ''} × {asNum(r.unit_price).toLocaleString()} = <b className="text-ink">{lineAmount(r).toLocaleString()}원</b>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-      <button type="button" className="btn ghost sm" style={{ marginTop: 10 }} onClick={add}>
-        <Icon.Plus size={13}/> 품목 추가
-      </button>
-      {total > 0 && (
-        <div className="text-xs text-muted" style={{ marginTop: 8 }}>
-          품목 합계 <b className="num text-ink">{total.toLocaleString()}원</b>
-          {cost > 0 && <> · 원가 <span className="num">{cost.toLocaleString()}원</span> · 마진 <b className="num" style={{ color: total - cost < 0 ? 'var(--neg-ink)' : undefined }}>{(total - cost).toLocaleString()}원</b></>}
-        </div>
+          : <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span>}</>}
+        labelHint={null}
+        addLabel="품목 추가"
+        emptyHint={hint}
+        onAddNewItem={addNewItem}
+        /* 합계 판정을 itemsTotal·itemsCost 와 **같은 규칙**으로 맞춘다(이름이 있어야 센다).
+           안 맞추면 합계는 뜨는데 저장은 "품목을 등록해주세요"로 거절된다. */
+        isUsableLine={(r) => !!String(r?.name || '').trim()}
+      />
+      {hint && rows.length > 0 && (
+        <div className="text-xs text-muted2" style={{ marginTop: 6 }}>{hint}</div>
       )}
     </div>
   );

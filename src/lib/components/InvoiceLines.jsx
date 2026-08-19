@@ -48,7 +48,39 @@ const growWidth = (lines, get, min, max) => {
   return Math.round(Math.max(min, Math.min(max, longest * 7.4 + 34)))
 }
 
-export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = '과세', kind = 'issued' }) => {
+/* 어떤 칸을 낼지 — 쓰는 화면마다 다르다.
+ *
+ * 청구서(invoice_lines)와 주문 품목표(contract_items)는 겹치는 게 많지만 같지 않다.
+ * 주문 품목표는 **단가표**다("이 주문으로 무엇을 얼마에 주고받나"). 수량·금액·세액은
+ * 청구할 때 정해지고, 대신 **매입가(원가)** 가 있다 — 계약별 손익의 근거다.
+ * 반대로 청구서에는 매입가가 없다. 스키마 자체가 그렇게 갈려 있다.
+ *
+ * ⚠ 없는 칸을 켜면 **저장되지 않는 칸이 화면에 뜬다.** 사람은 적었는데 서버가 버린다 —
+ * 정산내역서에서 한 번 겪은 사고다. 그래서 칸은 기본이 꺼짐이고, 쓰는 쪽이 켠다. */
+export const INVOICE_COLUMNS = {
+  deliveryDate: true, qty: true, weight: true, basis: true,
+  amount: true, vat: true, note: true, costPrice: false,
+}
+export const CONTRACT_COLUMNS = {
+  deliveryDate: false, qty: true, weight: true, basis: true,
+  amount: false, vat: false, note: false, costPrice: true,
+}
+/* 기성형 주문 — 수량은 주문 때 정하지 않는다(청구할 때 회차마다 넣는다).
+   칸을 남겨 두면 "여기 적은 수량은 뭐지?" 가 되고, 적어도 아무 데도 안 쓰인다. */
+export const CONTRACT_PROGRESS_COLUMNS = { ...CONTRACT_COLUMNS, qty: false }
+
+export const InvoiceLines = ({
+  lines = [], onChange, itemMaster = [], taxType = '과세', kind = 'issued',
+  columns = INVOICE_COLUMNS,
+  label = '품목 내역', labelHint = '(선택)', emptyHint, addLabel = '품목 추가',
+  onAddNewItem,
+  /* '쓰이는 줄'의 판정 — 합계줄이 이걸로 센다.
+     ⚠ **쓰는 화면의 저장 규칙과 같아야 한다.** 다르면 합계는 500,000원이라 하는데
+     저장은 "품목을 등록해주세요"로 거절하는 상태가 된다(주문 품목표에서 실제로 겪었다).
+     주문은 이름이 필수라(contract_items.name NOT NULL) 이름 없는 줄을 세면 안 된다. */
+  isUsableLine = isFilledLine,
+}) => {
+  const col = { ...INVOICE_COLUMNS, ...columns }
   /* 같은 날짜라도 부르는 이름이 다르다 — 우리가 내보내면 납품일, 우리가 받으면 입고일.
      칸(delivery_date)은 하나고 이름표만 바뀐다. 매입 청구서에 '납품일'이라고 쓰여 있으면
      "우리가 납품한 날인가?" 하고 한 번 멈추게 된다. */
@@ -104,7 +136,7 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
     const it = itemMaster.find(x => x.id === itemId)
     // 목록에서 고른 게 아니면(있을 수 없지만) 이름은 지키고 연결만 끊는다
     if (!it) return set(i, { item_id: '' })
-    // 기준정보 값은 **출발점**이다. 고른 뒤 이 청구서에서 고쳐도 기준정보는 안 바뀐다(스냅샷).
+    // 기준정보 값은 **출발점**이다. 고른 뒤 이 문서에서 고쳐도 기준정보는 안 바뀐다(스냅샷).
     set(i, {
       item_id: it.id,
       name: it.name || '',
@@ -113,34 +145,60 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
       unit_price: Number(it.amount) || 0,
       weight: Number(it.weight) || 0,
       price_basis: it.price_basis === 'weight' ? 'weight' : 'qty',
+      // 매입가는 그 칸을 쓰는 화면에서만 채운다 — 안 쓰는 화면에 넣으면 저장 때 버려질 값이다
+      ...(col.costPrice ? { cost_price: Number(it.purchase_price) || 0 } : {}),
     })
   }
 
-  const filled = lines.filter(isFilledLine)
+  /* 목록에 없는 이름을 친 경우.
+     청구서는 이름만 남기면 되지만(명세서에 찍히면 그만), 주문 품목표는 기준정보에 등록해
+     다음 주문에서도 고를 수 있어야 한다 — 그 동작은 화면이 onAddNewItem 으로 넘긴다. */
+  const addNew = async (i, q) => {
+    const name = String(q || '').trim()
+    if (!name) return
+    if (!onAddNewItem) return set(i, { item_id: '', name })
+    const id = await onAddNewItem(name)
+    set(i, { item_id: id || '', name })
+  }
+
+  const filled = lines.filter(isUsableLine)
   const supplyTotal = filled.reduce((s, l) => s + num(l.amount), 0)
   const vatTotal = filled.reduce((s, l) => s + shownVat(l), 0)
+  /* 금액 칸이 없는 화면용 합계 — 저장된 amount 가 아니라 단가×(수량|중량)으로 그때그때 낸다.
+     computeLineAmount 는 청구서·서버와 같은 규칙이라 주문 금액이 두 곳에서 갈리지 않는다. */
+  const calcTotal = filled.reduce((s, l) => s + computeLineAmount(l), 0)
+  const costTotal = filled.reduce((s, l) =>
+    s + (l.price_basis === 'weight' ? num(l.weight) : (num(l.qty) || 1)) * num(l.cost_price), 0)
 
   // 글자 칸만 내용에 따라 자란다. 숫자·날짜 칸은 들어갈 값의 길이가 정해져 있어 고정.
   const nameW = growWidth(lines, l => l.name, 170, 340)
   const specW = growWidth(lines, l => l.spec, 120, 280)
   // 최소폭은 placeholder('예: 14,500원/KG')가 안 잘리는 길이다 — 예시가 잘리면 예시가 아니다
   const noteW = growWidth(lines, l => l.note, 145, 260)
-  const tableW = 130 + nameW + specW + 70 + 84 + 88 + 92 + 112 + 124 + 108 + noteW + 58
+  // 켜진 칸만 더해 표 최소폭을 낸다 — 끈 칸 몫까지 더하면 쓸데없이 가로 스크롤이 생긴다
+  const tableW = 34 + nameW + specW + 70 + 112
+    + (col.deliveryDate ? 130 : 0) + (col.qty ? 84 : 0) + (col.weight ? 88 : 0)
+    + (col.basis ? 92 : 0) + (col.amount ? 124 : 0) + (col.vat ? 108 : 0)
+    + (col.note ? noteW : 0) + (col.costPrice ? 124 : 0) + 58
 
   return (
     <div>
       <div className="row" style={{ alignItems: 'center', marginBottom: 8 }}>
-        <label className="label" style={{ margin: 0 }}>품목 내역 <span className="text-muted2">(선택)</span></label>
+        <label className="label" style={{ margin: 0 }}>
+          {label} {labelHint && <span className="text-muted2">{labelHint}</span>}
+        </label>
         <button type="button" className="btn sm ml-auto" onClick={add}>
-          <Icon.Plus size={12}/> 품목 추가
+          <Icon.Plus size={12}/> {addLabel}
         </button>
       </div>
 
       {lines.length === 0 ? (
         <div className="text-xs text-muted2" style={{ padding: '10px 0' }}>
-          품목을 넣으면 거래명세서로 출력할 수 있고, 공급가액이 자동으로 합산돼요.
-          넣지 않으면 아래 공급가액만으로 청구서가 만들어집니다.
-          품목마다 <b>{dateLabel}</b>을 적어두면, {dateLabel}별로 청구서를 나눠서 발행할 수 있어요.
+          {emptyHint ?? (<>
+            품목을 넣으면 거래명세서로 출력할 수 있고, 공급가액이 자동으로 합산돼요.
+            넣지 않으면 아래 공급가액만으로 청구서가 만들어집니다.
+            품목마다 <b>{dateLabel}</b>을 적어두면, {dateLabel}별로 청구서를 나눠서 발행할 수 있어요.
+          </>)}
         </div>
       ) : (
         <div className="card" style={{ overflowX: 'auto', marginBottom: 8 }}>
@@ -150,27 +208,30 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
                 {/* 납품일(매입이면 입고일) — 한 장에 여러 날 납품분이 섞이는 게 실무의 보통 모습이다.
                     비워도 된다(단일 납품·용역). 채우면 거래명세서에 찍히고,
                     '날짜별로 나눠 발행'의 기준이 된다. */}
-                <th style={{ width: 130 }}>{dateLabel}</th>
+                {col.deliveryDate && <th style={{ width: 130 }}>{dateLabel}</th>}
                 <th style={{ width: nameW }}>품목</th>
                 <th style={{ width: specW }}>규격</th>
                 <th style={{ width: 70 }}>단위</th>
-                <th className="num-right" style={{ width: 84 }}>수량</th>
-                <th className="num-right" style={{ width: 88 }}>중량</th>
-                <th style={{ width: 92 }}>단가 기준</th>
-                <th className="num-right" style={{ width: 112 }}>단가</th>
-                <th className="num-right" style={{ width: 124 }}>금액</th>
-                <th className="num-right" style={{ width: 108 }}>부가세</th>
-                <th style={{ width: noteW }}>비고</th>
+                {col.qty && <th className="num-right" style={{ width: 84 }}>수량</th>}
+                {col.weight && <th className="num-right" style={{ width: 88 }}>중량</th>}
+                {col.basis && <th style={{ width: 92 }}>단가 기준</th>}
+                <th className="num-right" style={{ width: 112 }}>{col.costPrice ? '출고가' : '단가'}</th>
+                {col.costPrice && <th className="num-right" style={{ width: 124 }}>매입가(원가)</th>}
+                {col.amount && <th className="num-right" style={{ width: 124 }}>금액</th>}
+                {col.vat && <th className="num-right" style={{ width: 108 }}>부가세</th>}
+                {col.note && <th style={{ width: noteW }}>비고</th>}
                 <th style={{ width: 58 }}></th>
               </tr>
             </thead>
             <tbody>
               {lines.map((l, i) => (
                 <tr key={i}>
-                  <td>
-                    <DateInput className="input num" value={l.delivery_date || ''}
-                      onChange={e => set(i, { delivery_date: e.target.value })}/>
-                  </td>
+                  {col.deliveryDate && (
+                    <td>
+                      <DateInput className="input num" value={l.delivery_date || ''}
+                        onChange={e => set(i, { delivery_date: e.target.value })}/>
+                    </td>
+                  )}
                   <td>
                     {/* 기준정보에 없는 품목은 이름만 남는다 — 고르지 않아도 명세서는 나와야 한다.
                         목록에 없는 이름을 치면 아래 '직접 입력'으로 그대로 넣을 수 있다(거래처 칸과 동일). */}
@@ -178,7 +239,8 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
                         아랫부분('직접 입력')이 잘려 목록에 없는 품목을 넣을 길이 막힌다. */}
                     <Combobox value={shownItem(l)} onChange={v => pickItem(i, v)} options={itemOptions}
                       placeholder="품목 선택 · 직접 입력" portal
-                      onAddNew={q => set(i, { item_id: '', name: q })} addNewLabel="직접 입력"/>
+                      onAddNew={q => addNew(i, q)}
+                      addNewLabel={onAddNewItem ? '새 품목 등록' : '직접 입력'}/>
                   </td>
                   <td><input className="input" value={l.spec || ''}
                     onChange={e => set(i, { spec: e.target.value })}/></td>
@@ -186,23 +248,36 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
                       머리글이 이미 '단위'라 같은 말을 두 번 하는 셈이다 */}
                   <td><input className="input" value={l.unit || ''}
                     onChange={e => set(i, { unit: e.target.value })}/></td>
-                  <td><input className="input num" inputMode="decimal" value={l.qty ?? ''}
-                    onChange={e => set(i, { qty: e.target.value })}/></td>
-                  <td><input className="input num" inputMode="decimal" value={l.weight ?? ''}
-                    onChange={e => set(i, { weight: e.target.value })}/></td>
-                  <td>
-                    {/* 짧은 enum 이라 칩. 무엇에 단가를 곱하는지가 금액의 근거다 */}
-                    <div className="row gap-4">
-                      {['qty', 'weight'].map(b => (
-                        <button key={b} type="button"
-                          className={`chip ${(l.price_basis || 'qty') === b ? 'active' : ''}`}
-                          style={{ fontSize: 11, padding: '2px 8px' }}
-                          onClick={() => set(i, { price_basis: b })}>{BASIS_LABEL[b]}</button>
-                      ))}
-                    </div>
-                  </td>
+                  {col.qty && (
+                    <td><input className="input num" inputMode="decimal" value={l.qty ?? ''}
+                      onChange={e => set(i, { qty: e.target.value })}/></td>
+                  )}
+                  {col.weight && (
+                    <td><input className="input num" inputMode="decimal" value={l.weight ?? ''}
+                      onChange={e => set(i, { weight: e.target.value })}/></td>
+                  )}
+                  {col.basis && (
+                    <td>
+                      {/* 짧은 enum 이라 칩. 무엇에 단가를 곱하는지가 금액의 근거다 */}
+                      <div className="row gap-4">
+                        {['qty', 'weight'].map(b => (
+                          <button key={b} type="button"
+                            className={`chip ${(l.price_basis || 'qty') === b ? 'active' : ''}`}
+                            style={{ fontSize: 11, padding: '2px 8px' }}
+                            onClick={() => set(i, { price_basis: b })}>{BASIS_LABEL[b]}</button>
+                        ))}
+                      </div>
+                    </td>
+                  )}
                   <td><MoneyInput value={String(l.unit_price ?? '')}
                     onChange={(raw, v) => set(i, { unit_price: v })}/></td>
+                  {/* 매입가 — 주문 품목표에만 있다. 계약별 손익(수익 − 원가)의 근거라
+                      출고가 바로 옆에 두어 마진이 눈으로 비교되게 한다. */}
+                  {col.costPrice && (
+                    <td><MoneyInput value={String(l.cost_price ?? '')}
+                      onChange={(raw, v) => set(i, { cost_price: v })}/></td>
+                  )}
+                  {col.amount && (
                   <td>
                     <MoneyInput value={String(l.amount ?? '')}
                       onChange={(raw, v) => set(i, { amount: v, amountTouched: true })}/>
@@ -215,6 +290,8 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
                       </button>
                     )}
                   </td>
+                  )}
+                  {col.vat && (
                   <td>
                     {/* 비워두면 과세유형대로 자동. 면세 줄만 0 으로 고치면 된다 —
                         직접 넣은 값은 그 줄의 세액으로 굳는다(자동값과 구별해 표시). */}
@@ -230,8 +307,11 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
                       </button>
                     )}
                   </td>
-                  <td><input className="input" value={l.note || ''} placeholder="예: 14,500원/KG"
-                    onChange={e => set(i, { note: e.target.value })}/></td>
+                  )}
+                  {col.note && (
+                    <td><input className="input" value={l.note || ''} placeholder="예: 14,500원/KG"
+                      onChange={e => set(i, { note: e.target.value })}/></td>
+                  )}
                   <td>
                     <div className="row gap-4">
                       {/* 복사에 Plus 를 쓰면 위쪽 '품목 추가'와 같은 아이콘이라 '새 줄'로 읽힌다 */}
@@ -254,9 +334,28 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
       {filled.length > 0 && (
         <div className="row text-sm" style={{ justifyContent: 'flex-end', gap: 8 }}>
           <span className="text-muted">품목 {filled.length}줄</span>
-          <span className="text-muted">공급가</span><b className="num">{fmtNum(supplyTotal)}</b>
-          <span className="text-muted">세액</span><b className="num">{fmtNum(vatTotal)}</b>
-          <span className="text-muted">계</span><b className="num">{fmtNum(supplyTotal + vatTotal)}원</b>
+          {col.amount ? (
+            <>
+              <span className="text-muted">공급가</span><b className="num">{fmtNum(supplyTotal)}</b>
+              <span className="text-muted">세액</span><b className="num">{fmtNum(vatTotal)}</b>
+              <span className="text-muted">계</span><b className="num">{fmtNum(supplyTotal + vatTotal)}원</b>
+            </>
+          ) : (
+            /* 금액 칸이 없는 화면(주문 품목표) — 합계는 단가×수량(또는 중량)으로 낸다.
+               매입가가 있으면 마진까지 그 자리에서 보여준다. 계약별 손익을 여기서 정하기 때문. */
+            <>
+              <span className="text-muted">합계</span><b className="num">{fmtNum(calcTotal)}원</b>
+              {col.costPrice && costTotal > 0 && (
+                <>
+                  <span className="text-muted">원가</span><b className="num">{fmtNum(costTotal)}</b>
+                  <span className="text-muted">마진</span>
+                  <b className="num" style={{ color: calcTotal - costTotal < 0 ? 'var(--neg-ink)' : undefined }}>
+                    {fmtNum(calcTotal - costTotal)}원
+                  </b>
+                </>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -268,6 +367,7 @@ export const InvoiceLines = ({ lines = [], onChange, itemMaster = [], taxType = 
 export const blankLine = () => ({
   item_id: '', name: '', spec: '', unit: 'EA', qty: '', weight: '',
   price_basis: 'qty', unit_price: '', amount: '', vat: null, note: '', delivery_date: '',
+  cost_price: '',   // 주문 품목표용. 청구서 저장 경로는 이 필드를 보내지 않으므로 남아도 무해하다
 })
 
 /** 납품일별로 묶는다 — 서버 /invoices/split 과 **같은 규칙**이라야 미리보기와 결과가 같다.
