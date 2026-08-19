@@ -1,10 +1,10 @@
-/* 계약 목록 엑셀(.xlsx) 생성 — 서식·요약까지 갖춘 실제 업무용 파일.
+/* 주문 목록 엑셀(.xlsx) 생성 — 서식·요약까지 갖춘 실제 업무용 파일.
  * CSV는 열 너비도 숫자 서식도 없고 시트도 한 장뿐이라, 받아서 다시 손봐야 했다.
  *
  * 시트 3장:
- *   계약 목록  — 전체 계약 + 금액 지표. 상단에 요약(건수·계약금액·미수금·월 고정수입)
- *   갱신 관리  — 만료가 있는 계약만. 종료일 순 + D-day. 통보기한 지난 건이 위로.
- *   정기 계약  — 주기·주기당 금액·월 환산·초기 일시금·정기청구 연결 여부
+ *   주문 목록  — 전체 주문 + 금액 지표. 상단에 요약(건수·주문금액·미수금·월 고정수입)
+ *   갱신 관리  — 만료가 있는 주문만. 종료일 순 + D-day. 통보기한 지난 건이 위로.
+ *   정기 주문  — 주기·주기당 금액·월 환산·초기 일시금·정기청구 연결 여부
  */
 const ExcelJS = require('exceljs')
 
@@ -24,7 +24,7 @@ const daysLeft = (endDate, today) => {
   return Math.round((d - today) / 86400000)
 }
 
-// 갱신 개념이 있는 계약만 = 자동갱신이거나 정기형.
+// 갱신 개념이 있는 주문만 = 자동갱신이거나 정기형.
 // 총액형+기간만료(구축 프로젝트)는 끝나면 그냥 끝이라 '갱신 누락'이 아니다.
 const isRenewable = (c) => c.term_mode !== 'open' &&
   (c.term_mode === 'auto_renew' || c.billing_mode === 'recurring')
@@ -35,7 +35,7 @@ const renewalText = (c, today) => {
   if (c.status === '완료' || c.status === '보류') return '해당 없음'
   const d = daysLeft(c.end_date, today)
   if (d === null) return '종료일 없음'
-  if (!isRenewable(c)) return d < 0 ? `기간 종료 (${-d}일 경과 · 상태 정리 필요)` : '갱신 없는 단발 계약'
+  if (!isRenewable(c)) return d < 0 ? `기간 종료 (${-d}일 경과 · 상태 정리 필요)` : '갱신 없는 단발 주문'
   const notice = Number(c.notice_days) >= 0 ? Number(c.notice_days) : 60
   const auto = c.term_mode === 'auto_renew'
   if (d < 0) return auto ? `연장 미입력 (${-d}일 경과)` : `갱신 누락 (${-d}일 경과)`
@@ -89,25 +89,25 @@ async function buildContractWorkbook(contracts, { kind = 'all', today = new Date
   wb.creator = 'focus-accounter'
   wb.created = today
 
-  const kindLabel = kind === 'purchase' ? '발주 계약' : kind === 'sales' ? '수주 계약' : '계약'
+  const kindLabel = kind === 'purchase' ? '발주' : kind === 'sales' ? '수주' : '주문'
   const stamp = today.toISOString().slice(0, 10)
 
-  // ── 시트 1: 계약 목록 ─────────────────────────────────────────
-  const ws = wb.addWorksheet('계약 목록', { views: [{ state: 'frozen', ySplit: 6 }] })
+  // ── 시트 1: 주문 목록 ─────────────────────────────────────────
+  const ws = wb.addWorksheet('주문 목록', { views: [{ state: 'frozen', ySplit: 6 }] })
   const isPurchaseList = kind === 'purchase'
 
   const HEAD = [
-    '계약명', '계약번호', '거래처', '청구 방식', '종료 방식',
+    '주문명', '주문번호', '거래처', '청구 방식', '종료 방식',
     '주기당 금액', '주기', '초기 일시금',
     '시작일', '종료일', '갱신 상태',
-    isPurchaseList ? '계약금액' : '계약금액(이번 기간)',
+    isPurchaseList ? '주문금액' : '주문금액(이번 기간)',
     isPurchaseList ? '지급 완료' : '수금 완료',
     '남은 잔액', isPurchaseList ? '미지급금' : '미수금',
     ...(isPurchaseList ? [] : ['원가', '예상 손익']),
     '상태',
   ]
 
-  // 요약(상단) — 합계는 무기한 계약을 빼고 센다(총액이 없는 계약이라 더하면 거짓말이 된다)
+  // 요약(상단) — 합계는 무기한 주문을 빼고 센다(총액이 없는 주문이라 더하면 거짓말이 된다)
   const totalAmount = contracts
     .filter(c => !(c.billing_mode === 'recurring' && c.term_mode === 'open'))
     .reduce((s, c) => s + (Number(c.amount) || 0), 0)
@@ -118,7 +118,7 @@ async function buildContractWorkbook(contracts, { kind = 'all', today = new Date
 
   addTitle(ws, `${kindLabel} 목록`, `기준일 ${stamp} · 총 ${contracts.length}건 (진행중 ${contracts.filter(c => c.status === '진행중').length}건)`, HEAD.length)
 
-  ws.getCell(4, 1).value = '계약금액 합계'
+  ws.getCell(4, 1).value = '주문금액 합계'
   ws.getCell(4, 2).value = totalAmount
   ws.getCell(4, 3).value = isPurchaseList ? '미지급 잔액' : '남은 미수금'
   ws.getCell(4, 4).value = totalRemain
@@ -157,7 +157,7 @@ async function buildContractWorkbook(contracts, { kind = 'all', today = new Date
     34, 14, 20, 10, 11, 14, 6, 14, 12, 13, 18, 16, 14, 14, 14,
     ...(isPurchaseList ? [] : [14, 14]), 9,
   ])
-  ws.views = [{ state: 'frozen', ySplit: 6, xSplit: 1 }]   // 계약명 열도 고정
+  ws.views = [{ state: 'frozen', ySplit: 6, xSplit: 1 }]   // 주문명 열도 고정
 
   // ── 시트 2: 갱신 관리 ─────────────────────────────────────────
   const renewable = contracts
@@ -166,8 +166,8 @@ async function buildContractWorkbook(contracts, { kind = 'all', today = new Date
     .sort((a, b) => (a._d ?? 9e9) - (b._d ?? 9e9))
 
   const ws2 = wb.addWorksheet('갱신 관리')
-  addTitle(ws2, '갱신 관리', `기준일 ${stamp} · 갱신 개념이 있는 계약만(자동갱신·정기형) · 종료일이 가까운 순`, 9)
-  ws2.getRow(4).values = ['계약명', '거래처', '종료일', '남은 일수', '갱신 방식', '통보 기한(일)', '갱신 상태', '갱신 후 금액 기준', '갱신 횟수']
+  addTitle(ws2, '갱신 관리', `기준일 ${stamp} · 갱신 개념이 있는 주문만(자동갱신·정기형) · 종료일이 가까운 순`, 9)
+  ws2.getRow(4).values = ['주문명', '거래처', '종료일', '남은 일수', '갱신 방식', '통보 기한(일)', '갱신 상태', '갱신 후 금액 기준', '갱신 횟수']
   renewable.forEach(c => {
     const recurring = c.billing_mode === 'recurring'
     ws2.addRow([
@@ -195,11 +195,11 @@ async function buildContractWorkbook(contracts, { kind = 'all', today = new Date
     }
   }
 
-  // ── 시트 3: 정기 계약 ─────────────────────────────────────────
+  // ── 시트 3: 정기 주문 ─────────────────────────────────────────
   const recurrings = contracts.filter(c => c.billing_mode === 'recurring')
-  const ws3 = wb.addWorksheet('정기 계약')
-  addTitle(ws3, '정기 계약', `기준일 ${stamp} · ${recurrings.length}건 · 월 환산 합계 ${monthly.toLocaleString()}원`, 9)
-  ws3.getRow(4).values = ['계약명', '거래처', '주기', '주기당 금액', '월 환산', '초기 일시금', '청구일', '계약 기간', '정기청구 연결']
+  const ws3 = wb.addWorksheet('정기 주문')
+  addTitle(ws3, '정기 주문', `기준일 ${stamp} · ${recurrings.length}건 · 월 환산 합계 ${monthly.toLocaleString()}원`, 9)
+  ws3.getRow(4).values = ['주문명', '거래처', '주기', '주기당 금액', '월 환산', '초기 일시금', '청구일', '계약 기간', '정기청구 연결']
   recurrings.forEach(c => {
     const openEnded = c.term_mode === 'open'
     ws3.addRow([

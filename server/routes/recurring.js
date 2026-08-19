@@ -76,7 +76,7 @@ router.put('/:id', async (req, res, next) => {
  *  가리키던 규칙이 사라져도 금액·집계에는 영향이 없다.)
  *
  * 지금까지는 삭제 자체가 없어서, 잘못 만든 정기지출을 끄는 것 말고는 방법이 없었다.
- * 게다가 계약 삭제가 정기 건수를 세어 막는 탓에 계약도 못 지우는 막다른 골목이 됐다.
+ * 게다가 주문 삭제가 정기 건수를 세어 막는 탓에 주문도 못 지우는 막다른 골목이 됐다.
  */
 router.delete('/:id', async (req, res, next) => {
   try {
@@ -104,7 +104,7 @@ router.patch('/:id/toggle', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// 지급 예정 회차(아직 매입 청구서 미생성) — 매입 대금청구서 '지급 예정' 목록에 계약 지급일정과 함께 뜬다.
+// 지급 예정 회차(아직 매입 청구서 미생성) — 매입 대금청구서 '지급 예정' 목록에 주문 지급일정과 함께 뜬다.
 // 매출의 정기청구 pending과 완전 대칭. 경리가 매입 청구서 메뉴 한 곳에서 이번 달 낼 걸 다 본다.
 router.get('/pending', async (req, res, next) => {
   try {
@@ -137,7 +137,7 @@ router.get('/pending', async (req, res, next) => {
           item: r.category || '',
           amount: supply,
           vat,
-          // 계약 이름이 없으면 비목으로 대신 표시(계약 무관 정기지출)
+          // 주문 이름이 없으면 비목으로 대신 표시(주문 무관 정기지출)
           contract_name: r.contract_name || r.category || '',
         }))
       }
@@ -192,7 +192,7 @@ async function createExpenseInvoice(conn, r, target, { paid = false, accountId =
     const lerr = ledgerError({ kind: 'expense', account_id: acctId, status: '지급완료' })
     if (lerr) return { error: lerr }
     const txnId = randomUUID()
-    // 계약에 걸린 정기지출이면 그 계약(매입)에 귀속(contract_id)
+    // 주문에 걸린 정기지출이면 그 주문(매입)에 귀속(contract_id)
     await conn.execute(
       `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, account_code, category, amount, date, method, status, doc_no, invoice_id, memo)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -210,7 +210,7 @@ async function createExpenseInvoice(conn, r, target, { paid = false, accountId =
  * 놓친 회차 일괄 등록 — 예정일이 지났는데 청구서가 없는 회차를 모두 '지급 대기'로 만든다.
  *
  * 미래 회차는 대상이 아니고(미지급금 조기 부풀림 방지), 소급 범위는 등록일(setup_date)부터다 —
- * 2020년 시작 계약을 올해 등록해도 등록일 이전 회차는 만들어지지 않는다(dueDatesToGenerate의 하한).
+ * 2020년 시작 주문을 올해 등록해도 등록일 이전 회차는 만들어지지 않는다(dueDatesToGenerate의 하한).
  * 계좌는 건드리지 않는다(paid=false) — 실제 이체를 확인하지 않은 채 잔액을 움직이지 않기 위해.
  * 지급 처리는 회차별 '기지급 처리'에서 계좌·날짜를 정해 한다. (매출 /issue-missed와 대칭)
  */

@@ -49,7 +49,7 @@ test('월말 앵커(31일) — 짧은 달은 clamp 하되 드리프트가 누적
 })
 
 test('분기·연간 — period 를 무시하지 않는다', () => {
-  // 과거 버그: 지출 쪽이 period 를 무시해 분기/연 계약이 매달 생성됐다.
+  // 과거 버그: 지출 쪽이 period 를 무시해 분기/연 주문이 매달 생성됐다.
   const q = dueDatesToGenerate(
     { start_date: '2026-01-15', period: 'quarterly', day_of_month: 15 }, '2026-12-31')
   assert.deepStrictEqual(q, ['2026-01-15', '2026-04-15', '2026-07-15', '2026-10-15'])
@@ -67,7 +67,7 @@ test('last_generated 이하 회차는 다시 만들지 않는다', () => {
 })
 
 test('setup_date 이전 회차는 소급하지 않는다', () => {
-  // 실제 사고: 2003년 시작 무기한 계약이 등록 즉시 수백 건으로 쏟아졌다.
+  // 실제 사고: 2003년 시작 무기한 주문이 등록 즉시 수백 건으로 쏟아졌다.
   // 등록한 날부터만 청구해야 한다.
   const out = dueDatesToGenerate(
     { start_date: '2003-05-01', period: 'monthly', day_of_month: 1, setup_date: '2026-06-15' },
@@ -99,7 +99,7 @@ test('셀 기준이 아예 없으면(시작일·등록일 둘 다) 빈 배열', 
 })
 
 test('시작일이 없으면 등록일(setup_date)부터 센다', () => {
-  /* 무기한 계약은 "언제부터"가 모호한 경우가 흔하다. 예전엔 시작일이 비면 회차가
+  /* 무기한 주문은 "언제부터"가 모호한 경우가 흔하다. 예전엔 시작일이 비면 회차가
      영원히 0건이었고(경고도 없었다) 그 달 매출이 조용히 빠졌다.
      등록일을 앵커로 삼으면 등록한 달부터 정상적으로 청구된다. */
   const out = dueDatesToGenerate(
@@ -109,16 +109,16 @@ test('시작일이 없으면 등록일(setup_date)부터 센다', () => {
     '등록일(6/15) 이후 첫 앵커일(7/10)부터 나와야 한다')
 })
 
-test('시작일이 없어도 end_date 는 그대로 듣는다 (종료된 계약은 멈춘다)', () => {
+test('시작일이 없어도 end_date 는 그대로 듣는다 (종료된 주문은 멈춘다)', () => {
   const out = dueDatesToGenerate(
     { start_date: '', period: 'monthly', day_of_month: 1, setup_date: '2026-01-05', end_date: '2026-03-31' },
     '2026-12-31')
   assert.deepStrictEqual(out, ['2026-02-01', '2026-03-01'])
 })
 
-test('계약을 닫으며 종료일을 오늘로 맞춰도 과거 미발행 회차는 남는다', () => {
+test('주문을 닫으며 종료일을 오늘로 맞춰도 과거 미발행 회차는 남는다', () => {
   /* 이 성질이 '상태로 목록에서 잘라내기' 대신 '종료일 채우기'를 고른 이유다.
-     계약이 완료돼도 마지막 회차 청구는 남는 게 정상이고(8월 말 종료 → 8월분을 9월에 발행),
+     주문이 완료돼도 마지막 회차 청구는 남는 게 정상이고(8월 말 종료 → 8월분을 9월에 발행),
      그 회차가 사라지면 못 받은 돈이 조용히 없어진다. */
   const out = dueDatesToGenerate(
     { start_date: '2026-01-01', period: 'monthly', day_of_month: 1,
@@ -178,9 +178,9 @@ test('cycleState — 7일 밖은 upcoming', () => {
   assert.strictEqual(cycleState('2026-09-13', '2026-07-30'), 'upcoming')
 })
 
-test('pendingCycle — 계약 기반 여부(contract_id)를 빠뜨리지 않는다', () => {
+test('pendingCycle — 주문 기반 여부(contract_id)를 빠뜨리지 않는다', () => {
   // 두 라우트가 각자 객체를 만들던 탓에 한쪽에만 필드가 없던 적이 있다.
-  // 이 값이 없으면 화면에서 '계약 기반 / 일반'을 가를 수 없다.
+  // 이 값이 없으면 화면에서 '주문 기반 / 일반'을 가를 수 없다.
   const withContract = pendingCycle(
     { id: 'r1', vendor_id: 'v1', vendor_name: '(주)세이프넷', contract_id: 'c1', period: 'monthly' },
     '2026-08-13', '2026-07-30', { amount: 100000, vat: 10000 })
@@ -189,12 +189,12 @@ test('pendingCycle — 계약 기반 여부(contract_id)를 빠뜨리지 않는�
   assert.strictEqual(withContract.amount, 100000)
 
   const plain = pendingCycle({ id: 'r2', period: 'monthly' }, '2026-07-13', '2026-07-30', {})
-  assert.strictEqual(plain.contract_id, null, '계약 무관 정기는 null')
+  assert.strictEqual(plain.contract_id, null, '주문 무관 정기는 null')
   assert.strictEqual(plain.state, 'overdue')
 })
 
 test('일괄 등록 대상 — 등록일 이전 회차는 절대 포함되지 않는다', () => {
-  // 2020년 시작 계약을 2026-07-26에 등록한 경우.
+  // 2020년 시작 주문을 2026-07-26에 등록한 경우.
   // 일괄 등록은 horizon 없이 dueDatesToGenerate(오늘까지)를 쓰므로 이 목록이 곧 대상이다.
   const rec = { start_date: '2020-01-13', day_of_month: 13, period: 'monthly', setup_date: '2026-07-26' }
   const dues = dueDatesToGenerate(rec, '2026-10-05')
@@ -255,7 +255,7 @@ test('소급 — 등록일 하한을 무시하고 지정한 기간의 회차를 
     ['2026-03-01', '2026-04-01', '2026-05-01', '2026-06-01', '2026-07-01', '2026-08-01'])
 })
 
-test('소급 — 계약 시작일보다 앞선 기간을 열어도 시작일 전은 안 만든다', () => {
+test('소급 — 주문 시작일보다 앞선 기간을 열어도 시작일 전은 안 만든다', () => {
   const rec = { start_date: '2026-05-01', period: 'monthly', day_of_month: 1, setup_date: '2026-08-05' }
   assert.deepStrictEqual(
     backfillCycles(rec, '2026-01-01', '2026-08-05'),

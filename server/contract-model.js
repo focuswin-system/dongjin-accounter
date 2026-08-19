@@ -1,4 +1,4 @@
-/* 계약 모델 — 서버 단일 규칙. 라우트가 이걸 통해서만 계약 필드를 해석한다.
+/* 주문 모델 — 서버 단일 규칙. 라우트가 이걸 통해서만 주문 필드를 해석한다.
  *
  * 두 축:
  *   billing_mode  onetime   총액을 마일스톤으로 나눠 청구 (구축·납품)
@@ -8,7 +8,7 @@
  *                 open       무기한 — 해지할 때까지 계속 (종료일 없음)
  *
  * 금액:
- *   onetime   → amount(계약 총액)를 사용자가 입력
+ *   onetime   → amount(주문 총액)를 사용자가 입력
  *   recurring → unit_amount(주기당 금액)를 입력하고, amount는 '이번 텀 총액'으로 여기서 산출
  *               (open은 끝이 없으므로 총액 개념이 없다 → amount = 0)
  */
@@ -34,13 +34,13 @@ function isFirstTerm(c) {
   return c.current_term_start === c.start_date
 }
 
-/** 이번 텀(current_term_start ~ end_date)의 계약 총액.
+/** 이번 텀(current_term_start ~ end_date)의 주문 총액.
  *  recurring = 초기 일시금(첫 기간에만) + 주기금액 × 회차수
  *  progress  = 총액 개념 없음(품목 단가×수량으로 그때그때 청구) → 0 */
 function termTotal(c) {
   if (c.billing_mode === 'progress') return 0
   if (c.billing_mode !== 'recurring') return Number(c.amount) || 0
-  // 초기 구축비는 계약 시작 때 한 번만 받는 돈 → 갱신된 기간에는 더하지 않는다
+  // 초기 구축비는 주문 시작 때 한 번만 받는 돈 → 갱신된 기간에는 더하지 않는다
   const initial = isFirstTerm(c) ? (Number(c.initial_amount) || 0) : 0
   if (c.term_mode === 'open') return 0            // 끝이 없으면 '기간 총액'이 성립하지 않는다
   const unit = Number(c.unit_amount) || 0
@@ -62,7 +62,7 @@ function itemsTotal(items) {
   return sum
 }
 
-/** 요청 body → 계약 컬럼값. 유형에 안 맞는 필드는 비워서 모순된 상태가 저장되지 않게 한다. */
+/** 요청 body → 주문 컬럼값. 유형에 안 맞는 필드는 비워서 모순된 상태가 저장되지 않게 한다. */
 function normalize(body) {
   // 청구 방식 3종: onetime(총액) / recurring(주기 정액) / progress(품목 단가×수량 기성)
   const billing = ['recurring', 'progress'].includes(body.billing_mode) ? body.billing_mode : 'onetime'
@@ -75,9 +75,9 @@ function normalize(body) {
     // 부가세: 면세(exempt)면 청구서 발행 시 부가세 0, 아니면 과세(taxable, 공급가×10%)
     // 과세 / 면세 / 영세(수출·해외용역 — 세율 0%지만 과세거래)
     vat_mode: ['exempt', 'zero'].includes(body.vat_mode) ? body.vat_mode : 'taxable',
-    // 무기한 계약은 종료일이 없다
+    // 무기한 주문은 종료일이 없다
     end_date: isOpen ? null : (body.end_date || null),
-    // 만료가 있는 계약만 갱신 통보 기한·텀 길이가 의미 있음
+    // 만료가 있는 주문만 갱신 통보 기한·텀 길이가 의미 있음
     notice_days: isOpen ? null : (Number(body.notice_days) >= 0 ? Number(body.notice_days) : 60),
     term_months: isOpen ? null : (Number(body.term_months) > 0 ? Number(body.term_months) : 12),
     unit_amount: null,
@@ -88,7 +88,7 @@ function normalize(body) {
   }
 
   // 품목을 적었으면 그 합계가 곧 금액이다. 화면에서 계산한 값을 믿지 않고 여기서 다시 매겨,
-  // 품목표와 계약금액이 어긋난 채로 저장되는 일이 없게 한다. (품목 0줄이면 기존처럼 직접 입력)
+  // 품목표와 주문금액이 어긋난 채로 저장되는 일이 없게 한다. (품목 0줄이면 기존처럼 직접 입력)
   const lineTotal = itemsTotal(body.items)
 
   if (billing === 'recurring') {

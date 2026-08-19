@@ -64,7 +64,7 @@ router.put('/:id', async (req, res, next) => {
 // 삭제
 router.delete('/:id', async (req, res, next) => {
   try {
-    // 품목 기준정보는 거래·계약·청구서가 item_id 로 참조하는데 FK가 없다.
+    // 품목 기준정보는 거래·주문·청구서가 item_id 로 참조하는데 FK가 없다.
     // 그냥 지우면 이미 기록된 거래의 품목명이 조용히 빈칸이 된다(목록은 JOIN 으로 이름을 붙인다).
     // 과거 기록을 훼손하지 않도록, 쓰인 적 있는 항목은 지우지 못하게 막는다.
     const id = req.params.id
@@ -78,7 +78,7 @@ router.delete('/:id', async (req, res, next) => {
     )
     const parts = []
     if (Number(c.txns)   > 0) parts.push(`거래 ${c.txns}건`)
-    if (Number(c.citems) > 0) parts.push(`계약 품목 ${c.citems}건`)
+    if (Number(c.citems) > 0) parts.push(`주문 품목 ${c.citems}건`)
     if (Number(c.ilines) > 0) parts.push(`청구서 품목 ${c.ilines}건`)
     if (Number(c.witems) > 0) parts.push(`용역계약 품목 ${c.witems}건`)
     if (parts.length) {

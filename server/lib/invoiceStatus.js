@@ -51,7 +51,7 @@ const PAYABLE_STATUSES    = ['지급 대기', '지급 예정', '일부 지급', 
 
 /** SQL IN 절 조각 + 파라미터 — `WHERE kind='issued' AND ${pendingCond('issued').sql}`
  *
- * alias 를 주면 `i.status IN (...)` 처럼 테이블을 붙인다. 계약(contracts)처럼 status 컬럼을
+ * alias 를 주면 `i.status IN (...)` 처럼 테이블을 붙인다. 주문(contracts)처럼 status 컬럼을
  * 가진 테이블과 조인하면 붙이지 않은 status 는 "ambiguous" 로 질의가 통째로 실패한다. */
 const pendingCond = (kind, alias = '') => {
   const list = kind === 'issued' ? RECEIVABLE_STATUSES : PAYABLE_STATUSES

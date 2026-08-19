@@ -19,7 +19,7 @@ test('요금제가 준 것 + 회사별로 켠 것이 합쳐진다', () => {
   assert.deepStrictEqual([...f].sort(), ['report:a', 'report:b'])
 })
 
-test('enabled=0 은 요금제로 받은 것도 회수한다 — 사용 중지·계약 해지 자리', () => {
+test('enabled=0 은 요금제로 받은 것도 회수한다 — 사용 중지·주문 해지 자리', () => {
   const f = mergeFeatures(['report:a'], [{ feature_key: 'report:a', enabled: 0 }], TODAY)
   assert.strictEqual(f.has('report:a'), false)
 })
@@ -153,7 +153,7 @@ test('날짜가 없거나 이상하면 이름만 남긴다 — 지어내지 않�
   assert.strictEqual(itemLabel({ label: '미정 지출', date: '기한 미정' }), '미정 지출')
 })
 
-/* 회사가 스스로 끈 보고서(report_prefs) — **계약과 다른 축**이다.
+/* 회사가 스스로 끈 보고서(report_prefs) — **주문과 다른 축**이다.
    섞이면 두 방향 모두 사고다: 고객이 유료 기능을 스스로 켜거나, 우리가 끈 걸 고객이 되살린다. */
 test('회사가 끈 것은 우리가 열어줬어도 안 보인다', () => {
   const rows = visibleReports({
@@ -169,7 +169,7 @@ test('회사는 기본 제공도 끌 수 있다 — 안 쓰는 보고서를 치�
   assert.deepStrictEqual(rows.map(r => r.key), [])
 })
 
-test('회사가 켜 뒀어도 계약이 없으면 안 보인다 — 계약이 위다', () => {
+test('회사가 켜 뒀어도 주문이 없으면 안 보인다 — 주문이 위다', () => {
   const rows = visibleReports({ catalog: SAMPLE, features: new Set(), disabled: new Set() })
   assert.strictEqual(rows.some(r => r.key === 'e'), false)
 })

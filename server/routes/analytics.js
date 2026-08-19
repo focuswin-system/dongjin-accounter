@@ -15,7 +15,7 @@ const TOPIC_LABEL = { sales: '매출', purchase: '매입' }
 const GROUP = {
   none:     { col: null, label: null, join: '', ko: '합계', chart: 'bar' },
   vendor:   { col: 't.vendor_id',                  label: 'MAX(v.name)',   join: 'LEFT JOIN vendors v ON t.vendor_id = v.id',   ko: '거래처별', chart: 'bar' },
-  contract: { col: 't.contract_id',                label: 'MAX(c.name)',   join: 'LEFT JOIN contracts c ON t.contract_id = c.id', ko: '계약별', chart: 'bar' },
+  contract: { col: 't.contract_id',                label: 'MAX(c.name)',   join: 'LEFT JOIN contracts c ON t.contract_id = c.id', ko: '주문별', chart: 'bar' },
   category: { col: 't.category',                   label: 'MAX(t.category)', join: '',                                          ko: '비목별', chart: 'bar' },
   item:     { col: 't.item_id',                    label: 'MAX(ri.name)',  join: 'LEFT JOIN ref_items ri ON t.item_id = ri.id', ko: '품목별', chart: 'bar' },
   month:    { col: "DATE_FORMAT(t.date, '%Y-%m')", label: "DATE_FORMAT(t.date, '%Y-%m')", join: '',                            ko: '월별 추이', chart: 'line' },

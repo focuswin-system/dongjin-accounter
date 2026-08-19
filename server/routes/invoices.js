@@ -155,7 +155,7 @@ async function resolveItemId(db, idx, line, register) {
     if (byName === null && idx.byName.has(refKey(line.name))) return null   // 모호 → 연결 안 함
   }
   if (!register) return null
-  // 단가는 넣지 않는다 — 계산서 한 건의 값을 기준단가로 굳히면 나중 견적·계약이 그 값을 물려받는다.
+  // 단가는 넣지 않는다 — 계산서 한 건의 값을 기준단가로 굳히면 나중 견적·주문이 그 값을 물려받는다.
   const id = randomUUID()
   await db.execute(
     'INSERT INTO ref_items (id, type, name, spec, sort_order, memo) VALUES (?,?,?,?,?,?)',
@@ -550,7 +550,7 @@ router.post('/', async (req, res, next) => {
      *
      * 바로 아래 issued_at 주석이 같은 사고를 이미 한 번 적어뒀는데, 그때 그 필드만
      * 고치고 나머지는 보지 않았다. 이번엔 이 INSERT 가 요청 본문에서 받는 값을 전부 본다.
-     * (다른 청구서 INSERT 7곳은 계약·정기 규칙에서 내부 계산하므로 이 문제가 없다) */
+     * (다른 청구서 INSERT 7곳은 주문·정기 규칙에서 내부 계산하므로 이 문제가 없다) */
     { const e = invoiceCreateError({ kind, supply_amount, vat_amount })
       if (e) return res.status(400).json({ error: e }) }
     /* 발행일은 반드시 받는다. 없으면 DB의 NOT NULL 제약에 걸려 **500**이 났다 —
@@ -565,7 +565,7 @@ router.post('/', async (req, res, next) => {
     // (미래 발행일은 막지 않는다 — 정기청구의 미리 발행이 정당한 업무다)
     { const ce = await closedPeriodError(req.db, issued_at); if (ce) return res.status(409).json({ error: ce }) }
     // 과세유형: 화면이 정해 보내면 그대로, 아니면 세액 유무로 과세/면세를 가른다.
-    // (영세는 세액이 0이라 추론이 안 되므로 반드시 명시해야 한다 — 계약에서 발행하면 자동으로 채워진다)
+    // (영세는 세액이 0이라 추론이 안 되므로 반드시 명시해야 한다 — 주문에서 발행하면 자동으로 채워진다)
     const taxType = normalizeTaxType(tax_type || (Number(vat_amount) > 0 ? '과세' : '면세'))
     const id = randomUUID()
     // 친화적 청구번호 생성: 청구-2026-0001 / 매입-2026-0001 (최대 일련번호+1 — 삭제해도 재사용 안 됨)
@@ -740,7 +740,7 @@ router.put('/:id', async (req, res, next) => {
     if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     /* 품목 내역 — lines 를 **보낸 요청만** 갱신한다.
        청구서를 다루지 않는 화면(정산·상태 변경)의 저장이 기존 품목표를 지우면 안 된다
-       (계약 items·cost_budget 과 같은 부분 수정 보존 원칙). */
+       (주문 items·cost_budget 과 같은 부분 수정 보존 원칙). */
     await writeInvoiceLines(conn, req.params.id, req.body.lines)
     // 금액이 바뀌면 상태도 바뀐다(완납이 일부입금으로, 또는 그 반대). 정산 누계로 확정한다.
     const st = await recalcInvoiceStatus(conn, req.params.id)
@@ -841,7 +841,7 @@ router.post('/:id/matches', async (req, res, next) => {
     } else {
       // 정산은 실제로 돈이 오간 것이므로 status를 완료형으로 확정한다. 그런데 계좌가 비면
       // 그 돈은 어느 계좌 잔액에도 잡히지 않는다(accounts.js calcBalance는 account_id로 계좌를
-      // 특정해 합산). 정기청구·계약에서 자동 생성된 청구서는 account_id가 NULL이므로
+      // 특정해 합산). 정기청구·주문에서 자동 생성된 청구서는 account_id가 NULL이므로
       // 여기서 막지 않으면 입금이 통째로 잔액에서 누락된다 — 과거 F-02와 동일 유형.
       const acct = account_id || inv.account_id || null
       const lerr = ledgerError({ kind: isIssued ? 'income' : 'expense', account_id: acct, status: isIssued ? '입금완료' : '지급완료' })

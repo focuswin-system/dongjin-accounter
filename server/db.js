@@ -361,7 +361,7 @@ async function initDb(conn) {
         FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE CASCADE
       )
     `)
-    // 계약 갱신 이력: 갱신할 때마다 계약의 end_date를 연장하고 회차별 기간·금액 변동을 남긴다
+    // 주문 갱신 이력: 갱신할 때마다 주문의 end_date를 연장하고 회차별 기간·금액 변동을 남긴다
     await c.execute(`
       CREATE TABLE IF NOT EXISTS contract_renewals (
         id             VARCHAR(36) PRIMARY KEY,
@@ -601,9 +601,9 @@ async function initDb(conn) {
       )
     `)
 
-    // 기성형(progress) 계약의 품목 단가표. 계약별 품목·규격·단위·단가(계약별로 수정 가능).
+    // 기성형(progress) 주문의 품목 단가표. 주문별 품목·규격·단위·단가(주문별로 수정 가능).
     // item_id는 품목 기준정보(ref_items type='item') 참조 — 인라인 추가 시 ref_items에도 등록해 연결한다.
-    // name·spec·unit은 스냅샷(기준정보가 바뀌어도 계약 조건은 유지).
+    // name·spec·unit은 스냅샷(기준정보가 바뀌어도 주문 조건은 유지).
     await c.execute(`
       CREATE TABLE IF NOT EXISTS contract_items (
         id          VARCHAR(36) PRIMARY KEY,
@@ -640,7 +640,7 @@ async function initDb(conn) {
     // ── 인사급여: 근로·용역계약 ──
     // 고용형태 마스터. 사용자가 직접 유형을 만들고 기본값을 정한다.
     // '세법이 정하는 축(income_type)은 닫고, 회사가 정하는 축(고용형태)은 연다'는 원칙의 실체.
-    // 계약은 이 값을 스냅샷으로 복사하므로, 마스터를 나중에 고쳐도 기존 계약서와 어긋나지 않는다.
+    // 주문은 이 값을 스냅샷으로 복사하므로, 마스터를 나중에 고쳐도 기존 계약서와 어긋나지 않는다.
     await c.execute(`
       CREATE TABLE IF NOT EXISTS employ_types (
         id                VARCHAR(36) PRIMARY KEY,
@@ -921,7 +921,7 @@ async function initDb(conn) {
       await c.execute(`ALTER TABLE \`${table}\` MODIFY \`${col}\` ENUM(${list}) ${tail}`.trim())
     }
 
-    // (UNIQUE 인덱스는 아래쪽 ensureUniqueIndex 를 쓴다 — 계약번호·사번·청구번호와 같은 자리)
+    // (UNIQUE 인덱스는 아래쪽 ensureUniqueIndex 를 쓴다 — 주문번호·사번·청구번호와 같은 자리)
     // ── 1회성 데이터 마이그레이션 가드 ──
     // 데이터를 '변형'하는 마이그레이션은 부팅마다 재실행되면 안 된다(신규 입력 데이터를 오염시킴).
     // ensureColumn 같은 순수 스키마 추가는 멱등이라 가드 불필요 — 이건 데이터 UPDATE 전용.
@@ -933,7 +933,7 @@ async function initDb(conn) {
       await fn()
       await c.execute('INSERT INTO schema_migrations (id) VALUES (?)', [key])
     }
-    // 거래처 사용/미사용. 거래·청구서·계약이 붙은 거래처는 FK 때문에 삭제할 수 없고,
+    // 거래처 사용/미사용. 거래·청구서·주문이 붙은 거래처는 FK 때문에 삭제할 수 없고,
     // 삭제해서도 안 된다(과거 장부가 어긋난다). 미사용으로 두면 새 거래의 선택 목록에서만
     // 빠지고 기존 기록은 그대로 유지된다. 기존 행은 전부 사용중(1)으로 시작한다.
     await ensureColumn('vendors', 'active', "active TINYINT(1) NOT NULL DEFAULT 1")
@@ -986,13 +986,13 @@ async function initDb(conn) {
       WHERE acct_code IS NULL OR acct_code = ''`)
     if (acctFill.affectedRows > 0) console.log(`[db] 계좌 계정과목 ${acctFill.affectedRows}건 기본값 설정`)
     // ── 거래의 두 축 ──
-    // contract_id      이 돈이 나가고/들어오는 '근거 계약'. 수금=매출계약, 지급=매입계약(외주 계약 등)
-    // cost_contract_id 이 지출이 '어느 매출계약의 원가'인지. (외주비는 매입계약에 지급되면서 동시에 매출건의 원가다)
-    // 두 축이 따로 있어야 외주비 한 건이 매입계약 지급·매출계약 원가에 각각 정확히 잡힌다(이중계상 아님).
+    // contract_id      이 돈이 나가고/들어오는 '근거 주문'. 수금=매출주문, 지급=매입주문(외주 주문 등)
+    // cost_contract_id 이 지출이 '어느 매출주문의 원가'인지. (외주비는 매입주문에 지급되면서 동시에 매출건의 원가다)
+    // 두 축이 따로 있어야 외주비 한 건이 매입주문 지급·매출주문 원가에 각각 정확히 잡힌다(이중계상 아님).
     await ensureColumn('transactions', 'cost_contract_id', "cost_contract_id VARCHAR(36)")
-    // 기존 데이터 이관: 매출계약(gubu B/미상)에 직접 달려 있던 지출은 사실 '원가 귀속'이었다 → 원가축으로 옮긴다.
-    // 근거 계약(contract_id)은 비운다(그 외주에 대한 매입계약이 아직 없으므로 = 공통 지급).
-    // ⚠ 1회만 실행. 매 부팅마다 돌면 gubu가 NULL인 매입처에 새로 올바로 연결한 지출까지 재이관돼 계약에서 분리된다.
+    // 기존 데이터 이관: 매출주문(gubu B/미상)에 직접 달려 있던 지출은 사실 '원가 귀속'이었다 → 원가축으로 옮긴다.
+    // 근거 주문(contract_id)은 비운다(그 외주에 대한 매입주문이 아직 없으므로 = 공통 지급).
+    // ⚠ 1회만 실행. 매 부팅마다 돌면 gubu가 NULL인 매입처에 새로 올바로 연결한 지출까지 재이관돼 주문에서 분리된다.
     await runOnce('2026-06_expense_cost_axis', async () => {
       await c.execute(`
         UPDATE transactions t
@@ -1011,17 +1011,17 @@ async function initDb(conn) {
     await ensureColumn('ref_items', 'file_url',   "file_url VARCHAR(500)")
     await ensureColumn('ref_items', 'file_name',  "file_name VARCHAR(300)")
     // 품목 1급화: 매입가(원가)·품목유형·과세유형·분류. amount(단가)는 그대로 '출고가(판매단가)'다 —
-    // 계약 품목표·거래 금액 자동채움이 이미 amount를 읽으므로 sale_price를 따로 두지 않는다(같은 값 두 벌 = 드리프트).
+    // 주문 품목표·거래 금액 자동채움이 이미 amount를 읽으므로 sale_price를 따로 두지 않는다(같은 값 두 벌 = 드리프트).
     // 마진 = amount − purchase_price.
     await ensureColumn('ref_items', 'purchase_price', "purchase_price BIGINT DEFAULT 0")
     await ensureColumn('ref_items', 'item_kind',      "item_kind VARCHAR(20)")
     await ensureColumn('ref_items', 'tax_type',       "tax_type VARCHAR(10)")   // 과세·면세·영세 (비어 있으면 비목 기준 폴백)
     await ensureColumn('ref_items', 'item_group',     "item_group VARCHAR(50)")
-    // 계약·청구 라인의 매입원가 스냅샷. 발행 시점 품목 매입가를 복사한다(기준정보가 바뀌어도 계약 조건은 유지 —
-    // name·spec·unit·unit_price와 같은 스냅샷 원칙). 라인별 마진·계약별 원가 합계의 근거가 된다.
+    // 주문·청구 라인의 매입원가 스냅샷. 발행 시점 품목 매입가를 복사한다(기준정보가 바뀌어도 주문 조건은 유지 —
+    // name·spec·unit·unit_price와 같은 스냅샷 원칙). 라인별 마진·주문별 원가 합계의 근거가 된다.
     await ensureColumn('contract_items', 'cost_price', "cost_price BIGINT DEFAULT 0")
     await ensureColumn('invoice_lines',  'cost_price', "cost_price BIGINT DEFAULT 0")
-    // 총액형·정기형 계약의 품목 수량. 기성형은 계약 시점에 수량이 없고 청구할 때 넣으므로 0으로 둔다.
+    // 총액형·정기형 주문의 품목 수량. 기성형은 주문 시점에 수량이 없고 청구할 때 넣으므로 0으로 둔다.
     await ensureColumn('contract_items', 'qty',        "qty DECIMAL(14,2) DEFAULT 0")
     /* ── 중량 ──
      * 거래명세서에 품목·규격·수량·단위와 함께 중량이 들어가는 업종이 있다(금속·자재).
@@ -1387,11 +1387,11 @@ async function initDb(conn) {
     await ensureColumn('employees', 'birth_date',         "birth_date VARCHAR(20)")
     // 재직상태(재직·수습·휴직·퇴사). active(bool)만으론 수습·휴직을 표현 못 하고 퇴사↔재활성 버그가 났다 → 상태를 직접 저장.
     await ensureColumn('employees', 'status',             "status VARCHAR(20) DEFAULT '재직'")
-    // 사람 구분: 직원(근로계약) / 용역·일용 인력. 계약 kind로도 알 수 있지만
-    // '아직 계약이 없는 사람'이 있으므로 사람 자체에 둔다.
+    // 사람 구분: 직원(근로계약) / 용역·일용 인력. 주문 kind로도 알 수 있지만
+    // '아직 주문이 없는 사람'이 있으므로 사람 자체에 둔다.
     await ensureColumn('employees', 'person_kind',        "person_kind VARCHAR(20) DEFAULT 'employee'")
     await ensureColumn('employees', 'leave_date',         "leave_date VARCHAR(20)")
-    // 급여대장 행의 근거 계약 + 월 내 회차(근로=0, 용역·일용=1..N) + 용역 단가×수량 라인
+    // 급여대장 행의 근거 주문 + 월 내 회차(근로=0, 용역·일용=1..N) + 용역 단가×수량 라인
     await ensureColumn('payroll',   'work_contract_id',   "work_contract_id VARCHAR(36)")
     await ensureColumn('payroll',   'seq',                "seq INT DEFAULT 0")
     await ensureColumn('payroll',   'qty_lines',          "qty_lines TEXT")
@@ -1403,7 +1403,7 @@ async function initDb(conn) {
     // 계약서 첨부 파일(레거시 단일 파일)
     await ensureColumn('contracts', 'file_url',  "file_url VARCHAR(500)")
     await ensureColumn('contracts', 'file_name', "file_name VARCHAR(300)")
-    // 계약번호(계약서 번호) — 회사에 따라 계약을 번호로 식별
+    // 주문번호(계약서 번호) — 회사에 따라 주문을 번호로 식별
     await ensureColumn('contracts', 'contract_no', "contract_no VARCHAR(50)")
     // 지급결의서: 청구서(지급 예정) 단계에서도 만들 수 있게 invoice_id 연결.
     // 지급 전에 결재받는 게 실무 순서 → 거래(txn_id) 없이 청구서만으로도 결의서 생성.
@@ -1430,7 +1430,7 @@ async function initDb(conn) {
     await ensureColumn('purchase_req_items', 'actual_amount', "actual_amount BIGINT DEFAULT 0")
     // 구매품의서 → 미지급금(매입 청구서) 연결. 한 번만 등록되게 생성된 invoices.id 를 물고 있는다.
     await ensureColumn('purchase_reqs', 'invoice_id', "invoice_id VARCHAR(36)")
-    // ── 계약 모델: 독립된 두 축 ──
+    // ── 주문 모델: 독립된 두 축 ──
     // billing_mode : onetime(총액을 마일스톤으로 나눠 청구) / recurring(주기마다 정액 청구)
     // term_mode    : fixed(종료일에 만료 — 재계약해야 이어짐) / auto_renew(해지 통보 없으면 자동 연장) / open(무기한 — 해지 시까지)
     // 금액 : onetime → amount(총액)를 입력 / recurring → unit_amount(주기당)를 입력하고 amount는 '현재 텀 총액'으로 서버가 산출
@@ -1443,13 +1443,13 @@ async function initDb(conn) {
     await ensureColumn('contracts', 'term_months',        "term_months INT")
     await ensureColumn('contracts', 'notice_days',        "notice_days INT DEFAULT 60")
     await ensureColumn('contracts', 'current_term_start', "current_term_start VARCHAR(20)")
-    // 정기형 계약의 초기 일시금(구축비·설치비). 첫 기간에만 붙고 갱신 후에는 붙지 않는다.
+    // 정기형 주문의 초기 일시금(구축비·설치비). 첫 기간에만 붙고 갱신 후에는 붙지 않는다.
     await ensureColumn('contracts', 'initial_amount',     "initial_amount BIGINT")
     // 부가세 과세 여부. taxable(과세, 공급가×10%) / exempt(면세, 부가세 0). 청구서 발행·정기청구에 반영.
     await ensureColumn('contracts', 'vat_mode',           "vat_mode VARCHAR(10) DEFAULT 'taxable'")
-    // 계약 자유 메모(단일 필드). 계약 상세 '메모/히스토리' 탭에서 편집.
+    // 주문 자유 메모(단일 필드). 주문 상세 '메모/히스토리' 탭에서 편집.
     await ensureColumn('contracts', 'memo',               "memo TEXT")
-    // 이번 텀 시작일이 빈 계약은 계약 시작일로 채움(= 첫 텀)
+    // 이번 텀 시작일이 빈 주문은 주문 시작일로 채움(= 첫 텀)
     await c.execute("UPDATE contracts SET current_term_start = start_date WHERE (current_term_start IS NULL OR current_term_start='') AND start_date IS NOT NULL AND start_date <> ''")
     // 앞선 시안(contract_type/renewal_type/renew_months) 정리 — 값은 전부 기본값이라 손실 없음
     const dropColumn = async (table, col) => {
@@ -1463,10 +1463,10 @@ async function initDb(conn) {
     await dropColumn('contracts', 'contract_type')
     await dropColumn('contracts', 'renewal_type')
     await dropColumn('contracts', 'renew_months')
-    // 정기형 계약의 갱신은 '주기당 금액'이 바뀌는 게 본질 → 이력에도 남긴다
+    // 정기형 주문의 갱신은 '주기당 금액'이 바뀌는 게 본질 → 이력에도 남긴다
     await ensureColumn('contract_renewals', 'prev_unit_amount', "prev_unit_amount BIGINT")
     await ensureColumn('contract_renewals', 'new_unit_amount',  "new_unit_amount BIGINT")
-    // 계약번호 중복 방지(UNIQUE). MySQL은 NULL을 다중 허용 → 번호 미사용 계약은 공존.
+    // 주문번호 중복 방지(UNIQUE). MySQL은 NULL을 다중 허용 → 번호 미사용 주문은 공존.
     // 기존 중복 데이터가 있으면 인덱스 생성이 실패하므로 무시(수동 정리 후 재기동 시 적용).
     const ensureUniqueIndex = async (table, index, col) => {
       const [[{ cnt }]] = await c.execute(
@@ -1554,7 +1554,7 @@ async function initDb(conn) {
     await bumpRate('건강보험', 3.545, 3.595)
     await bumpRate('장기요양', 0.459, 0.472)
 
-    // 자동 생성 거래(청구서 정산·정기지출·급여)에 계약/공통 스코프가 비어 편집 시 공란이 되던 문제 보정.
+    // 자동 생성 거래(청구서 정산·정기지출·급여)에 주문/공통 스코프가 비어 편집 시 공란이 되던 문제 보정.
     // ⚠ 1회만 — 매 부팅마다 돌면 사용자가 일부러 비운 doc_no를 '공통'으로 되살린다.
     await runOnce('2026-07_backfill_doc_no_common', async () => {
       await c.execute("UPDATE transactions SET doc_no='공통' WHERE (doc_no IS NULL OR doc_no='') AND (contract_id IS NULL OR contract_id='') AND (invoice_id IS NOT NULL OR recurring_id IS NOT NULL OR payroll_id IS NOT NULL)")
@@ -1836,7 +1836,7 @@ async function initDb(conn) {
     }
 
     // 고용형태 마스터 시딩 (비어 있을 때만 — 사용자가 지운 유형이 재부팅 때 되살아나면 안 된다)
-    //   4대보험: 일용·단시간은 조건부(1개월 이상 + 월 8일/60시간 이상)라 기본값을 꺼두고 계약마다 정한다.
+    //   4대보험: 일용·단시간은 조건부(1개월 이상 + 월 8일/60시간 이상)라 기본값을 꺼두고 주문마다 정한다.
     //            프리랜서·일시용역은 사업/기타소득이라 급여 공제 대상이 아니다.
     //   conv_alert_months: 일용이 계속 고용되면 상용근로자로 전환해야 하는 기준(세법).
     //                      일반 3개월 / 건설공사 1년. 근로·용역은 해당 없음(0).
@@ -1864,7 +1864,7 @@ async function initDb(conn) {
     }
 
     // 기존 직원 → 최초 근로계약 자동 생성 (1회만).
-    // 급여 기준이 직원 컬럼에 흩어져 있던 것을 계약의 pay_items로 옮긴다.
+    // 급여 기준이 직원 컬럼에 흩어져 있던 것을 주문의 pay_items로 옮긴다.
     // 이 마이그레이션 전의 직원도 급여대장 생성이 끊기지 않게 하는 것이 목적
     // (payroll.js의 itemsFromMaster 폴백과 이중 안전장치).
     await runOnce('work_contracts_from_employees_v1', async () => {

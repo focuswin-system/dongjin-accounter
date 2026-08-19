@@ -46,18 +46,18 @@ function vatFields({ amount, supply_amount, vat_amount, tax_type, vat_deductible
   }
 }
 
-/* ── 계약의 과세유형 ──
+/* ── 주문의 과세유형 ──
  * contracts.vat_mode: taxable(과세) / exempt(면세) / zero(영세).
  * 청구서를 만드는 모든 지점이 이 두 함수만 쓰게 해서, 한 곳에서 0.1을 빠뜨리는 사고를 막는다. */
 const CONTRACT_VAT_MODES = ['taxable', 'exempt', 'zero']
 
-/** 계약 vat_mode → 부가세율. 면세·영세 모두 세액 0이지만 뜻이 다르다(과세표준 포함 여부). */
+/** 주문 vat_mode → 부가세율. 면세·영세 모두 세액 0이지만 뜻이 다르다(과세표준 포함 여부). */
 const vatRateOf = (vatMode) => (vatMode === 'exempt' || vatMode === 'zero' ? 0 : 0.1)
 
-/** 계약 vat_mode → 청구서에 남길 과세유형 라벨 */
+/** 주문 vat_mode → 청구서에 남길 과세유형 라벨 */
 const taxTypeOfMode = (vatMode) => (vatMode === 'exempt' ? '면세' : vatMode === 'zero' ? '영세' : '과세')
 
-/** 공급가액 → 세액 (계약 vat_mode 기준) */
+/** 공급가액 → 세액 (주문 vat_mode 기준) */
 const vatOf = (supply, vatMode) => Math.round((Number(supply) || 0) * vatRateOf(vatMode))
 
 /* ── 정기 반복(recurring_*)의 vat_mode ──

@@ -74,7 +74,7 @@ router.get('/', async (req, res, next) => {
               WHERE 1=1`
     const params = []
     if (kind)       { sql += ' AND t.kind = ?';        params.push(kind) }
-    // 계약으로 거를 땐 두 축을 모두 본다 (그 계약의 근거 거래 + 그 계약에 귀속된 원가)
+    // 주문으로 거를 땐 두 축을 모두 본다 (그 주문의 근거 거래 + 그 주문에 귀속된 원가)
     if (contractId) { sql += ' AND (t.contract_id = ? OR t.cost_contract_id = ?)'; params.push(contractId, contractId) }
     if (projectNo)  { sql += ' AND t.project_no = ?';  params.push(projectNo) }
     if (category)   { sql += ' AND t.category = ?';    params.push(category) }
@@ -103,17 +103,17 @@ router.get('/summary', async (req, res, next) => {
 /* ⚠ 아래 '/:id' 보다 **먼저** 서 있어야 한다.
    express 는 먼저 등록된 것부터 맞춰보므로, /:id 가 위에 있으면 'linkable' 이
    거래 id 로 잡혀 404 가 난다(실제로 그래서 후보 목록이 늘 비어 있었다). */
-/** 이 계약에 붙일 만한 거래 후보. 이미 이 계약에 붙어 있는 것은 뺀다. */
+/** 이 주문에 붙일 만한 거래 후보. 이미 이 주문에 붙어 있는 것은 뺀다. */
 router.get('/linkable', async (req, res, next) => {
   try {
     const col = LINK_AXIS[req.query.axis] || 'contract_id'
     const kind = req.query.kind === 'income' ? 'income' : 'expense'
     const contractId = req.query.contractId || null
-    if (!contractId) return res.status(400).json({ error: '계약을 지정해주세요' })
+    if (!contractId) return res.status(400).json({ error: '주문을 지정해주세요' })
     const q = String(req.query.q || '').trim()
 
-    /* 아직 아무 계약에도 안 붙은 거래를 먼저 세운다(ORDER BY 의 첫 키).
-       다른 계약에 붙은 것도 후보에 남기는 이유는 **잘못 붙은 것을 옮기는 일**이
+    /* 아직 아무 주문에도 안 붙은 거래를 먼저 세운다(ORDER BY 의 첫 키).
+       다른 주문에 붙은 것도 후보에 남기는 이유는 **잘못 붙은 것을 옮기는 일**이
        이 화면의 주 용도이기 때문이다 — 목록에 없으면 옮길 수가 없다. */
     const params = [kind, contractId]
     let where = `t.kind = ? AND (t.${col} IS NULL OR t.${col} <> ?)`
@@ -176,7 +176,7 @@ router.post('/', async (req, res, next) => {
     const lerr = ledgerError({ kind, account_id, status: st })
     if (lerr) return res.status(400).json({ error: lerr })
     const id = randomUUID()
-    // 원가 귀속(cost_contract_id)은 지출에만 의미가 있다 — 수금에 붙으면 매출계약 원가가 부풀어 오른다
+    // 원가 귀속(cost_contract_id)은 지출에만 의미가 있다 — 수금에 붙으면 매출주문 원가가 부풀어 오른다
     const costId = kind === 'expense' ? (cost_contract_id || null) : null
     const cp = await counterpartySnapshot(req.db, vendor_id, counterparty_account_id)
     await req.db.execute(`
@@ -517,7 +517,7 @@ router.post('/import/commit', async (req, res, next) => {
 router.get('/import/template', (req, res, next) => {
   try {
     const rows = [
-      ["거래일자", "거래처", "계약명", "구분", "비목", "금액", "메모"],
+      ["거래일자", "거래처", "주문명", "구분", "비목", "금액", "메모"],
       ["2026-06-01", "(주)한빛문구", "", "지출", "소모품", 80000, "사무용품"],
       ["2026-06-03", "정밀가공(주)", "홈페이지 유지보수", "지출", "외주가공비", 1500000, "6월 외주분"],
       ["2026-06-10", "(재)부산영재교육진흥원", "홈페이지 개선", "입금", "납품대금", 3500000, "선급금"],
@@ -530,7 +530,7 @@ router.get('/import/template', (req, res, next) => {
       [""],
       ["• 거래일자: YYYY-MM-DD 권장 (예: 2026-06-01). 2026.6.1 / 6/1/26 형식도 인식됩니다."],
       ["• 거래처: 비워도 됩니다. 목록에 없는 거래처는 업로드 시 자동 등록돼요 (입금=발주처 / 지출=매입처)."],
-      ["• 계약명: 연결할 계약이 있으면 정확히 입력, 없으면 비워두세요."],
+      ["• 주문명: 연결할 주문이 있으면 정확히 입력, 없으면 비워두세요."],
       ["• 구분: '입금' 또는 '지출' (수입·매출=입금 / 매입·출금=지출 도 인식)."],
       ["• 비목: 외주가공비·소모품·납품대금 등 자유롭게 입력하세요."],
       ["• 금액: 숫자만 입력(쉼표 가능). 부호 없이 양수로."],
@@ -551,24 +551,24 @@ router.get('/import/template', (req, res, next) => {
 })
 
 
-/* ── 계약 연결 ──────────────────────────────────────────────────
+/* ── 주문 연결 ──────────────────────────────────────────────────
  *
- * 고객 지적: "엑셀로 거래를 올린 뒤 계약과 맞추는 과정이 굉장히 번거롭다",
- *           "계약에 잘못 붙은 지출/입금을 전체 거래내역에서 찾느라 헤맸다".
+ * 고객 지적: "엑셀로 거래를 올린 뒤 주문과 맞추는 과정이 굉장히 번거롭다",
+ *           "주문에 잘못 붙은 지출/입금을 전체 거래내역에서 찾느라 헤맸다".
  *
- * 계약 연결은 청구서 '매칭'과 **성격이 다르다.**
+ * 주문 연결은 청구서 '매칭'과 **성격이 다르다.**
  *   청구서 매칭 — 이 돈이 저 청구서를 얼마나 갚았나(invoice_matches 에 금액 배분, 부분 입금 가능)
- *   계약 연결   — 이 거래가 어느 계약 건인가(transactions 의 컬럼 하나, 부분은 없다)
+ *   주문 연결   — 이 거래가 어느 주문 건인가(transactions 의 컬럼 하나, 부분은 없다)
  * 그래서 이름도 '연결'로 쓴다. 같은 말을 쓰면 부분 연결을 기대하게 된다.
  *
  * ⚠ 축이 둘이다. 틀리면 돈이 엉뚱한 바구니에 **조용히** 들어간다(원가율만 이상해진다).
- *   contract_id      — 이 계약이 근거인 거래 (매출계약의 입금 / 매입계약의 지급)
- *   cost_contract_id — 이 지출이 원가로 붙는 매출 계약 (외주비가 대표적)
- *   외주비는 외주 매입계약에 '지급'되면서 동시에 그 프로젝트 매출계약의 '원가'다.
+ *   contract_id      — 이 주문이 근거인 거래 (매출주문의 입금 / 매입주문의 지급)
+ *   cost_contract_id — 이 지출이 원가로 붙는 매출 주문 (외주비가 대표적)
+ *   외주비는 외주 매입주문에 '지급'되면서 동시에 그 프로젝트 매출주문의 '원가'다.
  */
 const LINK_AXIS = { contract: 'contract_id', cost: 'cost_contract_id' }
 
-/** 여러 거래를 계약에 붙이거나(contractId 지정) 뗀다(contractId 없음). */
+/** 여러 거래를 주문에 붙이거나(contractId 지정) 뗀다(contractId 없음). */
 router.post('/link-contract', async (req, res, next) => {
   const ids = Array.isArray(req.body.txnIds) ? req.body.txnIds.filter(Boolean) : []
   if (!ids.length) return res.status(400).json({ error: '연결할 거래를 선택해주세요' })
@@ -581,7 +581,7 @@ router.post('/link-contract', async (req, res, next) => {
     await conn.beginTransaction()
     if (contractId) {
       const [[c]] = await conn.execute('SELECT id FROM contracts WHERE id = ?', [contractId])
-      if (!c) { await rollbackQuietly(conn); return res.status(404).json({ error: '계약을 찾을 수 없어요' }) }
+      if (!c) { await rollbackQuietly(conn); return res.status(404).json({ error: '주문을 찾을 수 없어요' }) }
     }
     const ph = ids.map(() => '?').join(',')
     const [txns] = await conn.execute(
@@ -596,7 +596,7 @@ router.post('/link-contract', async (req, res, next) => {
       return res.status(400).json({ error: '원가 귀속은 지출 거래에만 붙일 수 있어요' })
     }
     /* 마감된 달의 거래는 못 건드린다 — 거래 수정(PUT)과 같은 규칙이다.
-       금액이 안 바뀌어도 계약 귀속이 바뀌면 그 달 원가·손익 보고가 달라진다.
+       금액이 안 바뀌어도 주문 귀속이 바뀌면 그 달 원가·손익 보고가 달라진다.
        하나라도 걸리면 전부 멈춘다 — 일부만 옮기면 어디까지 됐는지 되짚어야 한다. */
     for (const t of txns) {
       const ce = await closedPeriodError(conn, t.date)

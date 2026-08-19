@@ -12,16 +12,16 @@ const { closedPeriodError } = require('../lib/closing')
 
 const router = Router()
 
-/* 계약을 '완료'로 닫을 때, 거기 걸린 정기 규칙 중 **종료일이 빈 것**에 종료일을 채운다.
+/* 주문을 '완료'로 닫을 때, 거기 걸린 정기 규칙 중 **종료일이 빈 것**에 종료일을 채운다.
  *
  * 왜 '끄기'(active=0)가 아니라 '종료일 채우기'인가:
- *   · 계약이 완료돼도 **마지막 회차 청구는 남는 게 정상**이다(8월 말 종료 → 8월분을 9월에 발행).
+ *   · 주문이 완료돼도 **마지막 회차 청구는 남는 게 정상**이다(8월 말 종료 → 8월분을 9월에 발행).
  *     상태로 목록에서 잘라내면 그 회차가 사라져 못 받은 돈이 조용히 없어진다.
  *     종료일을 채우면 과거 미청구분은 '놓친 회차'로 남고 미래만 멈춘다.
  *   · 종료일은 정기청구·정기지출 화면에 보이고 고칠 수 있다. 잘못됐으면 날짜만 지우면 원복된다.
  *     active 토글은 껐다 켜는 사이 회차가 '놓친 회차'로 몰려 되돌리기가 지저분하다.
  *
- * 기한 있는 계약은 이미 종료일이 있어 자연히 멈추므로 대상이 아니다(빈 것만 고른다).
+ * 기한 있는 주문은 이미 종료일이 있어 자연히 멈추므로 대상이 아니다(빈 것만 고른다).
  * '보류'는 끝난 게 아니라 잠깐 멈춘 것이라 여기서 다루지 않는다.
  */
 async function findOpenEndedRecurring(db, contractId) {
@@ -34,9 +34,9 @@ async function findOpenEndedRecurring(db, contractId) {
   return { invoices, expenses }
 }
 
-/* 계약 조건 → 정기 규칙 반영. 계약이 원본이고 정기 규칙은 실행 장치다.
+/* 주문 조건 → 정기 규칙 반영. 주문이 원본이고 정기 규칙은 실행 장치다.
  *
- * ⚠ start_date 가 빠져 있었다. 그래서 계약 시작일을 고쳐도 규칙은 옛 날짜를 붙들었고,
+ * ⚠ start_date 가 빠져 있었다. 그래서 주문 시작일을 고쳐도 규칙은 옛 날짜를 붙들었고,
  *   화면의 어긋남 경고(recurringMismatch)에도 시작일이 없어 **아무도 알려주지 않았다.**
  *   방향에 따라 덜 청구(시작일 앞당김)도, 더 청구(시작일 미룸)도 난다.
  * 소급은 이걸로 열리지 않는다 — 등록일 하한(setup_date)은 그대로다. 정합성만 맞춘다.
@@ -55,7 +55,7 @@ async function syncRecurringToContract(db, c, isPurchase) {
 
 /* 청구 방식을 정기형에서 **바꿨을 때** 정기 규칙을 멈춘다.
  * closeOpenEndedRecurring 과 달리 종료일이 이미 있는 규칙도 대상이다 —
- * 계약이 더 이상 정기형이 아닌데 그 종료일까지 계속 청구되면 안 된다.
+ * 주문이 더 이상 정기형이 아닌데 그 종료일까지 계속 청구되면 안 된다.
  * 여기서도 '끄기'가 아니라 '종료일 채우기'다(과거 미청구분은 남기고 미래만 멈춘다). */
 async function stopRecurringOnModeChange(conn, contractId, endDate) {
   const [ri] = await conn.execute(
@@ -79,7 +79,7 @@ async function closeOpenEndedRecurring(conn, contractId, endDate) {
   return { invoices: ri.affectedRows, expenses: re.affectedRows }
 }
 
-// cost_budget(JSON)이 손상된 행 하나가 계약 목록/상세 응답 전체를 500으로 만들지 않도록 안전 파싱.
+// cost_budget(JSON)이 손상된 행 하나가 주문 목록/상세 응답 전체를 500으로 만들지 않도록 안전 파싱.
 const safeBudget = (raw, fallback = null) => { if (!raw) return fallback; try { return JSON.parse(raw) } catch { return fallback } }
 
 // 지출을 원가 4분류로 나눈다 — 원가예산 대비 실적용.
@@ -93,24 +93,24 @@ const costBucket = (categoryName, groupName) => {
   return 'overhead'
 }
 
-// 계약 한 건의 금액 지표. 화면마다 다르게 계산하다 어긋나지 않도록 여기서만 만든다.
+// 주문 한 건의 금액 지표. 화면마다 다르게 계산하다 어긋나지 않도록 여기서만 만든다.
 //
-// 매출 계약(gubu B)과 매입 계약(gubu A·E)은 보는 관점이 다르다.
-//   매출 계약 — 받을 돈이 본체. 여기에 그 일을 하느라 나간 원가(외주개발비 등)를 붙여 계약별 손익을 본다.
-//   매입 계약 — 나갈 돈만 있는 계약. '손익'도 '입금'도 성립하지 않는다 (nul로 내려서 화면이 안 그리게 한다).
+// 매출 주문(gubu B)과 매입 주문(gubu A·E)은 보는 관점이 다르다.
+//   매출 주문 — 받을 돈이 본체. 여기에 그 일을 하느라 나간 원가(외주개발비 등)를 붙여 주문별 손익을 본다.
+//   매입 주문 — 나갈 돈만 있는 주문. '손익'도 '입금'도 성립하지 않는다 (nul로 내려서 화면이 안 그리게 한다).
 //
-//   billed     이 계약으로 발행/수취한 청구서 합계(VAT 포함)
-//   collected  매출=받은 돈, 매입=지급한 돈  (계약 이행 대금)
-//   cost       매출 계약에 붙은 원가 지출 (매입 계약은 null — 지급액이 곧 collected라 중복)
+//   billed     이 주문으로 발행/수취한 청구서 합계(VAT 포함)
+//   collected  매출=받은 돈, 매입=지급한 돈  (주문 이행 대금)
+//   cost       매출 주문에 붙은 원가 지출 (매입 주문은 null — 지급액이 곧 collected라 중복)
 //   ar_remain  미수금(매입이면 미지급금) = 청구했는데 아직 정산 안 된 돈
-//   remain     남은 계약분 = 이번 텀 총액 − 받은(지급한) 돈 (무기한 정기계약은 총액이 없으므로 null)
-//   profit     매출 계약만. 매입 계약은 null
-// 정기 계약은 '이번 텀'(current_term_start 이후) 기준으로 봐야 갱신 후에도 진행률이 맞는다.
+//   remain     남은 주문분 = 이번 텀 총액 − 받은(지급한) 돈 (무기한 정기주문은 총액이 없으므로 null)
+//   profit     매출 주문만. 매입 주문은 null
+// 정기 주문은 '이번 텀'(current_term_start 이후) 기준으로 봐야 갱신 후에도 진행률이 맞는다.
 const metrics = (r) => {
   const isPurchase = r.gubu === 'A' || r.gubu === 'E'
   const in_done = Number(r.in_done || 0)
-  const out     = Number(r.out_total || 0)     // 이 계약이 근거인 지출 = 매입계약의 지급액
-  const cost    = Number(r.cost_total || 0)    // 이 매출계약에 귀속된 원가 (외주비 등)
+  const out     = Number(r.out_total || 0)     // 이 주문이 근거인 지출 = 매입주문의 지급액
+  const cost    = Number(r.cost_total || 0)    // 이 매출주문에 귀속된 원가 (외주비 등)
   const term_in_done = Number(r.term_in_done || 0)
   const term_out     = Number(r.term_out || 0)
   const collected      = isPurchase ? out : in_done
@@ -119,9 +119,9 @@ const metrics = (r) => {
   const term_billed = Number(r.term_billed || 0)
 
   const openEnded = r.billing_mode === 'recurring' && r.term_mode === 'open'
-  // 총액 개념이 없는 계약: 무기한 정기 + 기성형(품목 단가×수량으로 그때그때 청구).
+  // 총액 개념이 없는 주문: 무기한 정기 + 기성형(품목 단가×수량으로 그때그때 청구).
   const noTotal = openEnded || r.billing_mode === 'progress'
-  // amount는 정기형이면 '이번 텀 총액'(저장 시 서버가 산출), 총액형이면 계약 총액. 면세면 부가세 없음.
+  // amount는 정기형이면 '이번 텀 총액'(저장 시 서버가 산출), 총액형이면 주문 총액. 면세면 부가세 없음.
   const vatMul = 1 + vatRateOf(r.vat_mode)
   const termTotal = noTotal ? null : Math.round((Number(r.amount) || 0) * vatMul)
   const remain = termTotal == null ? null : Math.max(0, termTotal - term_collected)
@@ -132,8 +132,8 @@ const metrics = (r) => {
     is_purchase: isPurchase,
     in_done, out, billed, term_billed, term_collected, collected,
     term_total: termTotal, remain, ar_remain,
-    // 매입 계약에 원가·손익 개념을 붙이면 "나간 돈 = 손해"로 읽히는 거짓 숫자가 나온다.
-    // 매출 계약의 원가는 '이 계약에 귀속된 지출'(cost_contract_id)이지, 이 계약이 근거인 지출이 아니다.
+    // 매입 주문에 원가·손익 개념을 붙이면 "나간 돈 = 손해"로 읽히는 거짓 숫자가 나온다.
+    // 매출 주문의 원가는 '이 주문에 귀속된 지출'(cost_contract_id)이지, 이 주문이 근거인 지출이 아니다.
     cost:   isPurchase ? null : cost,
     /* 손익은 공급가액 기준 — 부가세는 회사 돈이 아니라 받아서 내는 돈이다.
      * VAT 포함 금액으로 계산하면 1.1S − 1.1C 이 되어 손익이 정확히 10% 부풀려진다. */
@@ -142,28 +142,28 @@ const metrics = (r) => {
   }
 }
 
-// 지표 집계용 서브쿼리. 거래는 두 축으로 계약에 붙는다:
-//   contract_id      = 이 계약이 근거인 돈 (매출계약의 수금 / 매입계약의 지급)
-//   cost_contract_id = 이 계약(매출)에 귀속된 원가 (외주비 등 — 그 돈은 외주 매입계약에 지급된 것이기도 하다)
+// 지표 집계용 서브쿼리. 거래는 두 축으로 주문에 붙는다:
+//   contract_id      = 이 주문이 근거인 돈 (매출주문의 수금 / 매입주문의 지급)
+//   cost_contract_id = 이 주문(매출)에 귀속된 원가 (외주비 등 — 그 돈은 외주 매입주문에 지급된 것이기도 하다)
 // 이번 텀 합계는 current_term_start 이후 거래만 센다.
 //
 // ⚠ 지출은 반드시 status='지급완료'만 센다 — 계좌 잔액 계산(accounts.js calcBalance)과
 // 같은 조건이어야 한다. 안 그러면 아직 나가지도 않은 '지급 대기'(정기지출 자동 생성분 등)가
-// '지급액'에 섞여, 매입계약의 미지급 잔액이 실제보다 적게 보이고 원가는 부풀려진다.
+// '지급액'에 섞여, 매입주문의 미지급 잔액이 실제보다 적게 보이고 원가는 부풀려진다.
 // (입금은 calcBalance도 status를 보지 않으므로 여기서도 동일하게 맞춘다)
 const PAID = "status='지급완료'"
 /* 수입도 완료된 것만 센다. 예전 주석은 'calcBalance 가 입금 status 를 안 본다'였는데
  * 그 뒤 calcBalance 가 SETTLED_INCOME 으로 막도록 바뀌었고 여기만 남았다 →
- * 아직 안 들어온 입금이 계약 수금액·손익에 섞여 손익이 부풀었다. */
+ * 아직 안 들어온 입금이 주문 수금액·손익에 섞여 손익이 부풀었다. */
 const RECV = "status='입금완료'"
 /* 손익은 **공급가액** 기준이다. 부가세는 회사 돈이 아니라 받아서 내는 돈이라,
  * 매출·원가를 VAT 포함 금액으로 계산하면 손익이 정확히 10% 부풀려진다(1.1S − 1.1C).
  * 부가세 컬럼이 없던 시절 거래는 supply_amount 가 NULL 이므로 amount 로 폴백한다
  * — 옛 데이터의 숫자를 갑자기 바꾸지 않으면서, 데이터가 채워질수록 정확해진다. */
 const SUPPLY = 'COALESCE(supply_amount, amount)'
-/* 계약 성격에 맞는 청구서 종류. 매입 계약(거래처 gubu A=외주/매입, E=기관)은 수취 청구서,
- * 매출 계약(B=발주처)은 발행 청구서. 판정 기준은 위 isPurchase 와 같아야 한다.
- * 이 필터가 없으면 외주비 매입 청구서를 매출 계약에 귀속시켰을 때 그 금액이 매출 계약의
+/* 주문 성격에 맞는 청구서 종류. 매입 주문(거래처 gubu A=외주/매입, E=기관)은 수취 청구서,
+ * 매출 주문(B=발주처)은 발행 청구서. 판정 기준은 위 isPurchase 와 같아야 한다.
+ * 이 필터가 없으면 외주비 매입 청구서를 매출 주문에 귀속시켰을 때 그 금액이 매출 주문의
  * '청구액'에 더해지고, 받을 돈이 아닌데 미수금(billed − collected)으로 뜬다. */
 const PURCHASE_KIND = "IF(v.gubu IN ('A','E'), 'received', 'issued')"
 const METRIC_COLS = `
@@ -178,12 +178,12 @@ const METRIC_COLS = `
             AND (c.current_term_start IS NULL OR date >= c.current_term_start)),0)  AS term_in_done,
   COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='expense' AND ${PAID}
             AND (c.current_term_start IS NULL OR date >= c.current_term_start)),0)  AS term_out,
-  /* ⚠ 계약의 성격에 맞는 청구서만 센다.
-   *   매출 계약(gubu='B')에는 발행 청구서(issued), 매입 계약에는 수취 청구서(received).
-   *   kind 필터가 없으면, 외주비 매입 청구서를 프로젝트(매출) 계약에 귀속시켰을 때
-   *   그 금액이 매출 계약의 '청구액'에 더해지고 collected 는 그대로라
+  /* ⚠ 주문의 성격에 맞는 청구서만 센다.
+   *   매출 주문(gubu='B')에는 발행 청구서(issued), 매입 주문에는 수취 청구서(received).
+   *   kind 필터가 없으면, 외주비 매입 청구서를 프로젝트(매출) 주문에 귀속시켰을 때
+   *   그 금액이 매출 주문의 '청구액'에 더해지고 collected 는 그대로라
    *   **받을 돈이 아닌데 미수금으로 뜬다**(ar_remain = billed − collected).
-   *   청구서 등록 폼은 매출·매입 구분 없이 모든 계약을 후보로 주므로 실제로 일어나는 입력이다. */
+   *   청구서 등록 폼은 매출·매입 구분 없이 모든 주문을 후보로 주므로 실제로 일어나는 입력이다. */
   COALESCE((SELECT SUM(total_amount) FROM invoices i WHERE i.contract_id=c.id
             AND i.kind = ${PURCHASE_KIND}),0) AS billed,
   COALESCE((SELECT SUM(total_amount) FROM invoices i WHERE i.contract_id=c.id
@@ -220,7 +220,7 @@ router.get('/schedule/pending', async (req, res, next) => {
     else if (forKind === 'sales') sql += " AND (v.gubu IS NULL OR v.gubu = 'B')"
     sql += ' ORDER BY m.due_date'
     const [rows] = await req.db.execute(sql)
-    // vat를 서버가 계약 vat_mode로 계산해 내려준다(면세=0). 화면이 0.1을 하드코딩하면 면세에 유령 VAT가 붙는다.
+    // vat를 서버가 주문 vat_mode로 계산해 내려준다(면세=0). 화면이 0.1을 하드코딩하면 면세에 유령 VAT가 붙는다.
     res.json(rows.map(r => {
       const amount = Number(r.amount)
       return { ...r, amount, vat: vatOf(amount, r.vat_mode) }
@@ -228,7 +228,7 @@ router.get('/schedule/pending', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// 계약 목록 엑셀(.xlsx) — 계약 목록 / 갱신 관리 / 정기 계약 3개 시트.
+// 주문 목록 엑셀(.xlsx) — 주문 목록 / 갱신 관리 / 정기 주문 3개 시트.
 // CSV로는 서식·요약·시트 분리가 안 돼서 서버에서 만들어 내려준다.
 router.get('/export.xlsx', async (req, res, next) => {
   try {
@@ -244,7 +244,7 @@ router.get('/export.xlsx', async (req, res, next) => {
     const contracts = rows.map(metrics)
 
     const wb = await buildContractWorkbook(contracts, { kind })
-    const label = kind === 'purchase' ? '매입계약' : kind === 'sales' ? '매출계약' : '계약'
+    const label = kind === 'purchase' ? '매입주문' : kind === 'sales' ? '매출주문' : '주문'
     const filename = `${label}_${kstToday()}.xlsx`
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     // 한글 파일명 — 구형 클라이언트용 ASCII fallback + RFC 5987
@@ -255,9 +255,9 @@ router.get('/export.xlsx', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// 갱신 관리 대상: 만료가 있는 계약(fixed·auto_renew) 중 진행중이고 종료일이 있는 건.
-// 통보기한(notice_days) 안에 들어왔거나 이미 만료된 계약을 종료일 순으로 반환.
-// 무기한(open) 계약은 만료가 없으므로 대상이 아니다.
+// 갱신 관리 대상: 만료가 있는 주문(fixed·auto_renew) 중 진행중이고 종료일이 있는 건.
+// 통보기한(notice_days) 안에 들어왔거나 이미 만료된 주문을 종료일 순으로 반환.
+// 무기한(open) 주문은 만료가 없으므로 대상이 아니다.
 // for=sales → 발주처(gubu B)+미지정 / for=purchase → 매입(A·E)
 router.get('/renewals/upcoming', async (req, res, next) => {
   try {
@@ -268,7 +268,7 @@ router.get('/renewals/upcoming', async (req, res, next) => {
                       DATEDIFF(c.end_date, CURDATE()) AS days_left
                FROM contracts c LEFT JOIN vendors v ON c.vendor_id = v.id
                WHERE c.term_mode IN ('fixed','auto_renew') AND c.status = '진행중'
-                 -- 갱신 개념이 있는 계약만: 자동갱신이거나 정기형(유지보수 등).
+                 -- 갱신 개념이 있는 주문만: 자동갱신이거나 정기형(유지보수 등).
                  -- 총액형+기간만료(구축 프로젝트)는 끝나면 그냥 끝이라 갱신 대상이 아니다.
                  AND (c.term_mode = 'auto_renew' OR c.billing_mode = 'recurring')
                  AND c.end_date IS NOT NULL AND c.end_date <> ''
@@ -285,7 +285,7 @@ router.get('/renewals/upcoming', async (req, res, next) => {
 //  renew → 이번 텀을 닫고 다음 텀으로 넘긴다: current_term_start = 기존 종료일 + 1일, end_date = 새 종료일.
 //          정기형이면 주기당 금액(new_unit_amount)을 받고 텀 총액(amount)은 서버가 다시 계산한다.
 //          연결된 정기청구의 종료일도 같이 밀어준다(안 하면 갱신했는데 청구가 끊긴다).
-//  close → 계약을 '완료'로 닫고 이력만 남긴다. 연결된 정기청구는 자동으로 끄지 않는다(돈 나가는 쪽이라 사람이 확인).
+//  close → 주문을 '완료'로 닫고 이력만 남긴다. 연결된 정기청구는 자동으로 끄지 않는다(돈 나가는 쪽이라 사람이 확인).
 // enum은 ASCII로 받는다 — 한글 문자열로 받으면 인코딩이 틀어질 때 조용히 오작동한다.
 router.post('/:id/renew', async (req, res, next) => {
   const { new_end_date, new_amount, new_unit_amount, memo, result, renewed_at } = req.body
@@ -293,13 +293,13 @@ router.post('/:id/renew', async (req, res, next) => {
   try {
     await conn.beginTransaction()
     const [[c]] = await conn.execute('SELECT * FROM contracts WHERE id = ? FOR UPDATE', [req.params.id])
-    if (!c) { await rollbackQuietly(conn); return res.status(404).json({ error: '계약을 찾을 수 없어요' }) }
+    if (!c) { await rollbackQuietly(conn); return res.status(404).json({ error: '주문을 찾을 수 없어요' }) }
 
     if (!['renew', 'close'].includes(result)) {
       await rollbackQuietly(conn); return res.status(400).json({ error: "result는 'renew' 또는 'close'여야 해요" })
     }
     if (c.term_mode === 'open') {
-      await rollbackQuietly(conn); return res.status(400).json({ error: '무기한 계약은 갱신 대상이 아니에요. 끝내려면 계약 상태를 완료로 바꾸세요.' })
+      await rollbackQuietly(conn); return res.status(400).json({ error: '무기한 주문은 갱신 대상이 아니에요. 끝내려면 주문 상태를 완료로 바꾸세요.' })
     }
     const isRenew = result === 'renew'
     if (isRenew && !new_end_date) {
@@ -314,9 +314,9 @@ router.post('/:id/renew', async (req, res, next) => {
     const nextUnit = recurring
       ? (new_unit_amount != null && new_unit_amount !== '' ? Number(new_unit_amount) : prevUnit)
       : null
-    // 다음 텀 시작일 = 기존 종료일 다음날 (첫 텀 시작일이 없으면 계약 시작일 유지)
+    // 다음 텀 시작일 = 기존 종료일 다음날 (첫 텀 시작일이 없으면 주문 시작일 유지)
     const nextTermStart = isRenew ? (model.dayAfter(c.end_date) || c.current_term_start || c.start_date) : null
-    // 정기형의 계약금액은 항상 파생값 — 새 텀 길이 × 주기당 금액
+    // 정기형의 주문금액은 항상 파생값 — 새 텀 길이 × 주기당 금액
     const nextAmount = !isRenew ? null
       : recurring
         ? model.termTotal({ ...c, unit_amount: nextUnit, end_date: new_end_date, current_term_start: nextTermStart })
@@ -341,7 +341,7 @@ router.post('/:id/renew', async (req, res, next) => {
         'UPDATE contracts SET end_date=?, amount=?, unit_amount=?, current_term_start=?, status=? WHERE id=?',
         [new_end_date, nextAmount, recurring ? nextUnit : null, nextTermStart, '진행중', req.params.id]
       )
-      // 계약에 걸린 정기 반복도 새 종료일까지 연장 + 단가 반영.
+      // 주문에 걸린 정기 반복도 새 종료일까지 연장 + 단가 반영.
       // 매출이면 정기청구, 매입이면 정기지출 — 안 하면 갱신했는데 청구/지출이 끊긴다.
       const [[vg]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [c.vendor_id || ''])
       const isPurchaseC = vg && (vg.gubu === 'A' || vg.gubu === 'E')
@@ -355,7 +355,7 @@ router.post('/:id/renew', async (req, res, next) => {
       await conn.execute("UPDATE contracts SET status = '완료' WHERE id = ?", [req.params.id])
       /* 미갱신 종료 — 종료일이 빈 정기 규칙은 여기서 닫아준다.
          갱신 쪽(위)은 종료일을 새 날짜로 밀어주는데 이쪽만 아무것도 안 해서,
-         무기한 계약을 닫아도 회차가 계속 후보로 떴다. 기준일은 계약 종료일(없으면 오늘). */
+         무기한 주문을 닫아도 회차가 계속 후보로 떴다. 기준일은 주문 종료일(없으면 오늘). */
       if (req.body.close_recurring) {
         const endDate = c.end_date || kstToday()
         recurringClosed = { ...(await closeOpenEndedRecurring(conn, req.params.id, endDate)), end_date: endDate }
@@ -398,7 +398,7 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
     const isPurchase = ms.gubu === 'A' || ms.gubu === 'E'
     const kind = isPurchase ? 'received' : 'issued'
     const supply = Number(ms.amount) || 0
-    // 면세 계약이면 부가세 0
+    // 면세 주문이면 부가세 0
     const vat = vatOf(supply, ms.vat_mode)
     const total = supply + vat
     const today = kstToday()   // UTC면 KST 00~09시에 하루 전(연초엔 전년도 채번)으로 찍힌다
@@ -432,7 +432,7 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
       'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [invId, invoice_no, kind, ms.vendor_id || null, ms.contract_id, supply, vat, total, today, dueAt, status, paid ? accountId : null, `${ms.contract_name} · ${ms.type}`, taxTypeOfMode(ms.vat_mode)]
     )
-    // 기입금: 실제 입/출금 거래 + 매칭 생성(장부·계좌·계약 수금에 반영)
+    // 기입금: 실제 입/출금 거래 + 매칭 생성(장부·계좌·주문 수금에 반영)
     if (paid) {
       // 완료 상태로 넣으므로 계좌가 없으면 잔액에 안 잡힌다(lib/ledger.js)
       const lerr = ledgerError({ kind: isPurchase ? 'expense' : 'income', account_id: accountId, status: isPurchase ? '지급완료' : '입금완료' })
@@ -461,7 +461,7 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
   finally { conn.release() }
 })
 
-// 기성 청구 발행 — 기성형(progress) 계약에서 품목별 수량을 받아 청구서 1건 + 품목 내역(invoice_lines)을 만든다.
+// 기성 청구 발행 — 기성형(progress) 주문에서 품목별 수량을 받아 청구서 1건 + 품목 내역(invoice_lines)을 만든다.
 // 총액형의 schedule/issue와 달리 마일스톤이 없고, 품목 line 합계가 곧 공급가액이다.
 // body: { issued_at, due_at?, paid?, lines:[{ item_id, name, spec, unit, qty, unit_price, amount }] }
 router.post('/:id/progress-invoice', async (req, res, next) => {
@@ -489,10 +489,10 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
       'SELECT c.*, v.gubu FROM contracts c LEFT JOIN vendors v ON c.vendor_id = v.id WHERE c.id = ? FOR UPDATE',
       [req.params.id]
     )
-    if (!c) { await rollbackQuietly(conn); return res.status(404).json({ error: '계약을 찾을 수 없어요' }) }
-    if (c.billing_mode !== 'progress') { await rollbackQuietly(conn); return res.status(400).json({ error: '기성형 계약이 아니에요' }) }
+    if (!c) { await rollbackQuietly(conn); return res.status(404).json({ error: '주문을 찾을 수 없어요' }) }
+    if (c.billing_mode !== 'progress') { await rollbackQuietly(conn); return res.status(400).json({ error: '기성형 주문이 아니에요' }) }
 
-    // 매입원가 스냅샷은 계약 품목표에서 가져온다(화면이 안 보내줘도 원가가 새는 일이 없게).
+    // 매입원가 스냅샷은 주문 품목표에서 가져온다(화면이 안 보내줘도 원가가 새는 일이 없게).
     const [ciRows] = await conn.execute(
       'SELECT item_id, name, cost_price FROM contract_items WHERE contract_id = ?', [req.params.id]
     )
@@ -560,7 +560,7 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
         [randomUUID(), invId, l.item_id, l.name, l.spec, l.unit, l.qty, l.weight, l.price_basis, l.unit_price, l.cost_price, l.amount, ++ord]
       )
     }
-    // 기입금: 실제 입/출금 거래 + 매칭 생성(장부·계좌·계약 수금에 반영)
+    // 기입금: 실제 입/출금 거래 + 매칭 생성(장부·계좌·주문 수금에 반영)
     if (paid) {
       const lerr = ledgerError({ kind: isPurchase ? 'expense' : 'income', account_id: accountId, status: isPurchase ? '지급완료' : '입금완료' })
       if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
@@ -606,8 +606,8 @@ router.get('/:id', async (req, res, next) => {
       [req.params.id]
     )
     // 지출 목록도 관점에 따라 다른 축을 본다.
-    //   매입 계약 → 이 계약이 근거인 지급 (contract_id)
-    //   매출 계약 → 이 계약에 귀속된 원가 (cost_contract_id) — 외주비는 외주 매입계약에 지급되지만 원가는 여기 붙는다
+    //   매입 주문 → 이 주문이 근거인 지급 (contract_id)
+    //   매출 주문 → 이 주문에 귀속된 원가 (cost_contract_id) — 외주비는 외주 매입주문에 지급되지만 원가는 여기 붙는다
     const isPurchaseC = c.vendor_gubu === 'A' || c.vendor_gubu === 'E'
     const [expenseRows] = await req.db.execute(
       `SELECT t.*, v.name AS vendor_name, pc.name AS paid_contract_name, cat.group_name AS category_group
@@ -621,7 +621,7 @@ router.get('/:id', async (req, res, next) => {
     // 상세 탭용 가공 데이터
     /* ⚠ id·거래처·적요를 반드시 함께 내려준다.
      *
-     * 예전엔 날짜·구분·금액·상태만 줬다. 그래서 "이 계약에 잘못 붙은 입금"을 발견해도
+     * 예전엔 날짜·구분·금액·상태만 줬다. 그래서 "이 주문에 잘못 붙은 입금"을 발견해도
      * 그게 **어느 거래인지** 화면에서 알 수 없어, 전체 거래내역으로 나가 금액으로
      * 더듬어 찾아야 했다. id 가 없으니 눌러서 열 수도 없었다. */
     const incomes = incomeRows.map(t => ({
@@ -635,7 +635,7 @@ router.get('/:id', async (req, res, next) => {
       date: t.date, vendor: t.vendor_name || '—', category: t.category || '—',
       memo: t.memo || t.doc_no || '',
       amount: Number(t.amount), doc: t.doc_no ? '작성 완료' : '미작성', pay: t.status,
-      // 매출계약 원가 목록에선 "이 돈이 어느 매입계약으로 나갔는지"를 같이 보여준다
+      // 매출주문 원가 목록에선 "이 돈이 어느 매입주문으로 나갔는지"를 같이 보여준다
       paidContract: t.paid_contract_name || null,
     }))
     const evidences = [...incomeRows, ...expenseRows]
@@ -650,14 +650,14 @@ router.get('/:id', async (req, res, next) => {
       date: t.date, amount: Number(t.amount), status: t.status,
     }))
 
-    // 원가 실적 집계 (지급완료만) — 비목 그룹으로 4분류. 계약 원가예산과 같은 축이다.
+    // 원가 실적 집계 (지급완료만) — 비목 그룹으로 4분류. 주문 원가예산과 같은 축이다.
     const cost_actual = { material: 0, outsource: 0, labor: 0, overhead: 0 }
     for (const t of expenseRows) {
       if (t.status !== '지급완료') continue
       cost_actual[costBucket(t.category, t.category_group)] += Number(t.amount)
     }
 
-    // 계약 첨부 서류(다중) + 레거시 단일 계약서(file_url) 병합
+    // 주문 첨부 서류(다중) + 레거시 단일 계약서(file_url) 병합
     const [attRows] = await req.db.execute(
       'SELECT id, url, name, doc_type, size, created_at FROM contract_docs WHERE contract_id = ? ORDER BY created_at',
       [req.params.id]
@@ -667,7 +667,7 @@ router.get('/:id', async (req, res, next) => {
       attachments.unshift({ id: null, url: c.file_url, name: c.file_name || '계약서', type: '계약서', size: 0, legacy: true })
     }
 
-    // 갱신 이력 + 이 계약에 걸린 정기청구(금액·기간이 계약과 어긋나는지 화면에서 대조)
+    // 갱신 이력 + 이 주문에 걸린 정기청구(금액·기간이 주문과 어긋나는지 화면에서 대조)
     const [renewals] = await req.db.execute(
       'SELECT * FROM contract_renewals WHERE contract_id = ? ORDER BY seq DESC', [req.params.id]
     )
@@ -682,9 +682,9 @@ router.get('/:id', async (req, res, next) => {
           [req.params.id])
     const recurrings = recRows.map(r => ({ ...r, supply_amount: Number(r.supply_amount), active: !!r.active }))
 
-    // 계약 품목표 + 품목별 누적 기성(이 계약의 청구서 line 합계 — 기성형에서만 채워진다)
+    // 주문 품목표 + 품목별 누적 기성(이 주문의 청구서 line 합계 — 기성형에서만 채워진다)
     const [itemRows] = await req.db.execute(
-      // weight·price_basis 가 빠져 있어서, 계약에 중량 기준으로 적어도 화면은 늘 수량 기준으로 봤다
+      // weight·price_basis 가 빠져 있어서, 주문에 중량 기준으로 적어도 화면은 늘 수량 기준으로 봤다
       'SELECT id, item_id, name, spec, unit, qty, weight, price_basis, unit_price, cost_price, sort_order FROM contract_items WHERE contract_id = ? ORDER BY sort_order, name',
       [req.params.id]
     )
@@ -704,7 +704,7 @@ router.get('/:id', async (req, res, next) => {
       item_id: r.item_id, name: r.name, spec: r.spec, unit: r.unit,
       qty_sum: Number(r.qty_sum), amount_sum: Number(r.amount_sum),
     }))
-    // 기성형: 이 계약으로 발행한 기성 청구서 목록(품목수 포함) — 상세 '기성 청구 내역' 탭용
+    // 기성형: 이 주문으로 발행한 기성 청구서 목록(품목수 포함) — 상세 '기성 청구 내역' 탭용
     const [progInvRows] = await req.db.execute(
       `SELECT i.id, i.invoice_no, i.kind, i.issued_at, i.due_at, i.total_amount, i.status,
               (SELECT COUNT(*) FROM invoice_lines il WHERE il.invoice_id = i.id) AS line_count
@@ -731,12 +731,12 @@ router.get('/:id', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// 계약의 품목표를 통째로 교체 저장한다(마일스톤 편집기와 같은 전체 교체 방식).
+// 주문의 품목표를 통째로 교체 저장한다(마일스톤 편집기와 같은 전체 교체 방식).
 // items: [{ item_id?, name, spec, unit, qty?, unit_price, cost_price? }]. 이름 없는 행은 건너뛴다.
 // 청구 방식과 무관하게 쓴다 — '무엇을 주고받나'(품목)와 '어떻게 청구하나'(billing_mode)는 별개 축이다.
-//   총액형·정기형: 수량×단가 합계 = 계약금액(정기형은 주기당 금액). 품목 0줄이면 금액 직접 입력.
+//   총액형·정기형: 수량×단가 합계 = 주문금액(정기형은 주기당 금액). 품목 0줄이면 금액 직접 입력.
 //   기성형: 수량은 청구할 때 넣으므로 여기선 0.
-// cost_price(매입원가)는 스냅샷 — 기준정보 매입가가 나중에 바뀌어도 이 계약의 원가는 그대로 남는다.
+// cost_price(매입원가)는 스냅샷 — 기준정보 매입가가 나중에 바뀌어도 이 주문의 원가는 그대로 남는다.
 async function replaceContractItems(conn, contractId, items) {
   await conn.execute('DELETE FROM contract_items WHERE contract_id = ?', [contractId])
   if (!Array.isArray(items)) return
@@ -747,7 +747,7 @@ async function replaceContractItems(conn, contractId, items) {
     const price = Number(String(it.unit_price ?? '').replace(/[^0-9]/g, '')) || 0
     const cost  = Number(String(it.cost_price ?? '').replace(/[^0-9]/g, '')) || 0
     const qty   = Number(String(it.qty ?? '').replace(/[^0-9.]/g, '')) || 0
-    /* 중량과 '단가를 무엇에 곱하는가'. ㎏당 단가로 계약하는 자재가 있어서, 이 두 값이
+    /* 중량과 '단가를 무엇에 곱하는가'. ㎏당 단가로 주문하는 자재가 있어서, 이 두 값이
        없으면 기성 발행 때 수량 기준으로 떨어져 금액이 조용히 달라진다.
        아는 값만 통과시킨다 — 엉뚱한 값이 들어오면 계산 기준이 흔들린다. */
     const weight = Number(String(it.weight ?? '').replace(/[^0-9.]/g, '')) || 0
@@ -784,7 +784,7 @@ router.post('/', async (req, res, next) => {
     }
     const isPurchase = gubu === 'A' || gubu === 'E'
 
-    // 계약을 등록하면 청구할 것이 자동으로 '발행 예정'에 뜨도록, 유형에 맞춰 일정/정기반복을 깔아준다.
+    // 주문을 등록하면 청구할 것이 자동으로 '발행 예정'에 뜨도록, 유형에 맞춰 일정/정기반복을 깔아준다.
     // (수동 설정을 깜빡해 청구가 누락되는 걸 막는다. 필요하면 청구 일정 탭·정기청구 탭에서 수정)
     if (f.billing_mode === 'recurring') {
       // 초기 일시금(구축비)은 1회성 청구 → 청구 일정 1건
@@ -796,16 +796,16 @@ router.post('/', async (req, res, next) => {
       }
       /* 월 정액은 정기청구(매출)/정기지출(매입)로 자동 세팅 → 회차가 도래하면 발행예정에 뜬다.
        *
-       * 예전엔 `&& start_date` 가 붙어 있어서 **시작일 없는 계약은 정기 규칙이 아예 안 만들어졌다.**
-       * 계약은 저장되고 월 정액도 적혀 있는데 청구만 조용히 빠지는 것이라, 사용자가 알 방법이
-       * 없었다(무기한 유지보수처럼 시작일이 모호한 계약에서 그대로 걸린다).
+       * 예전엔 `&& start_date` 가 붙어 있어서 **시작일 없는 주문은 정기 규칙이 아예 안 만들어졌다.**
+       * 주문은 저장되고 월 정액도 적혀 있는데 청구만 조용히 빠지는 것이라, 사용자가 알 방법이
+       * 없었다(무기한 유지보수처럼 시작일이 모호한 주문에서 그대로 걸린다).
        * 월 정액을 적었다는 건 청구·지급을 하겠다는 뜻이므로 규칙은 만들고, 언제부터 셀지는
        * 엔진이 등록일로 받아준다(lib/recurrence.js 앵커 폴백). */
       if (Number(f.unit_amount) > 0) {
         if (isPurchase) {
           /* ⚠ vat_mode 를 반드시 넣는다. 빠뜨리면 recurring.js 가 비목명으로 세액을 유추하는데,
-           * 여기서 category 에 넣는 값은 비목명이 아니라 **계약명**이라 조인이 절대 안 맞는다
-           * → modeFromCatVat(null) → 'none'(면세) → 과세 매입계약인데 매달 부가세 0으로 청구되어
+           * 여기서 category 에 넣는 값은 비목명이 아니라 **주문명**이라 조인이 절대 안 맞는다
+           * → modeFromCatVat(null) → 'none'(면세) → 과세 매입주문인데 매달 부가세 0으로 청구되어
            *   **매입세액이 매달 사라졌다.** 바로 아래 매출(recurring_invoices)은 원래 넣고 있었다. */
           await conn.execute(
             `INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id)
@@ -824,9 +824,9 @@ router.post('/', async (req, res, next) => {
         }
       }
     } else if (f.billing_mode === 'progress') {
-      // 기성형: 총액·마일스톤 없음. 청구는 계약 상세의 '기성 청구'에서 그때그때 발행한다.
+      // 기성형: 총액·마일스톤 없음. 청구는 주문 상세의 '기성 청구'에서 그때그때 발행한다.
     } else if (Number(f.amount) > 0) {
-      // 단건 계약: 계약금액 전체를 '예정' 청구 일정 1건으로 자동 생성 → 발행예정에 바로 뜬다.
+      // 단건 주문: 주문금액 전체를 '예정' 청구 일정 1건으로 자동 생성 → 발행예정에 바로 뜬다.
       // 선급/기성/잔금으로 쪼갤 거면 청구 일정 탭에서 편집하면 이 1건이 대체된다(편집기는 전체 교체 방식).
       // 타입 '일시'(일시불) — 청구 일정 편집기 유형 목록(MS_TYPES)에 있는 값이라 그대로 표시·수정된다.
       await conn.execute(
@@ -841,19 +841,19 @@ router.post('/', async (req, res, next) => {
     res.json({ id })
   } catch (e) {
     await rollbackQuietly(conn)
-    if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '이미 사용 중인 계약번호예요' })
+    if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '이미 사용 중인 주문번호예요' })
     next(e)
   } finally {
     conn.release()
   }
 })
 
-/* 계약을 '완료'로 바꾸기 전에 "무엇이 멈추는지"를 화면이 먼저 보여줄 수 있게 하는 조회.
-   무기한 계약은 종료일이 없어 끝난 뒤에도 회차가 영원히 후보로 뜬다 — 그걸 여기서 잡는다. */
+/* 주문을 '완료'로 바꾸기 전에 "무엇이 멈추는지"를 화면이 먼저 보여줄 수 있게 하는 조회.
+   무기한 주문은 종료일이 없어 끝난 뒤에도 회차가 영원히 후보로 뜬다 — 그걸 여기서 잡는다. */
 router.get('/:id/recurring/open-ended', async (req, res, next) => {
   try {
     const [[c]] = await req.db.execute('SELECT end_date FROM contracts WHERE id = ?', [req.params.id])
-    if (!c) return res.status(404).json({ error: '계약을 찾을 수 없어요' })
+    if (!c) return res.status(404).json({ error: '주문을 찾을 수 없어요' })
     const found = await findOpenEndedRecurring(req.db, req.params.id)
     res.json({ ...found, suggestedEndDate: c.end_date || kstToday() })
   } catch (e) { next(e) }
@@ -890,14 +890,14 @@ router.put('/:id', async (req, res, next) => {
 
     /* 청구 방식을 바꿔 저장했을 때 뒤따라야 할 정리 — 등록(POST)에만 있고 편집(PUT)엔 없었다.
      *
-     * 실제로 이런 일이 있었다(운영 fowin, 2026-08-05): 단건으로 만든 계약(계약금액 5만)을
+     * 실제로 이런 일이 있었다(운영 fowin, 2026-08-05): 단건으로 만든 주문(주문금액 5만)을
      * 정기형(월 5만)으로 고쳤더니
      *   · 옛 '일시' 청구 일정이 그대로 남아 대금 청구서 '발행 예정'에 216일 초과로 떠 있고
      *   · **정기청구 규칙은 만들어지지 않아 매달 청구가 아예 안 걸렸다.**
-     * 계약 화면만 보면 정기형으로 잘 바뀐 것처럼 보여서 알아채기 어렵다.
+     * 주문 화면만 보면 정기형으로 잘 바뀐 것처럼 보여서 알아채기 어렵다.
      */
     if (f.billing_mode === 'recurring' || f.billing_mode === 'progress') {
-      /* '일시'(계약금액 100% 1회)는 정기·기성과 양립할 수 없다. 아직 발행 안 된 것만 지운다 —
+      /* '일시'(주문금액 100% 1회)는 정기·기성과 양립할 수 없다. 아직 발행 안 된 것만 지운다 —
          이미 청구서가 나간 일정은 장부 근거라 건드리지 않는다.
          '초기 일시금'은 정기형과 함께 쓰라고 만든 유형이므로 대상이 아니다. */
       await conn.execute(
@@ -906,7 +906,7 @@ router.put('/:id', async (req, res, next) => {
            AND (invoice_id IS NULL OR invoice_id = '')`, [req.params.id])
     }
     /* 정기형 → 단건/기성으로 되돌린 경우. 등록(POST)의 반대 방향인데 아무 처리가 없어서
-       **계약은 단건인데 매달 청구가 계속 나가고**(과청구), 계약금액 청구는 안 떴다(미청구).
+       **주문은 단건인데 매달 청구가 계속 나가고**(과청구), 주문금액 청구는 안 떴다(미청구).
        청구를 멈추는 건 사용자가 모르면 안 되므로 화면이 동의를 받아 왔을 때만 한다. */
     let recurringStopped = null
     if (f.billing_mode !== 'recurring' && req.body.stop_recurring) {
@@ -924,7 +924,7 @@ router.put('/:id', async (req, res, next) => {
           [randomUUID(), req.params.id, '일시', 100, f.amount, start_date || null, '예정'])
       }
     }
-    /* 초기 일시금(구축비)을 편집으로 **나중에 넣는** 경우. POST 에만 있어서, 계약을 만든 뒤
+    /* 초기 일시금(구축비)을 편집으로 **나중에 넣는** 경우. POST 에만 있어서, 주문을 만든 뒤
        초기 일시금을 적어 넣으면 아무 일도 일어나지 않았다(청구 일정이 안 생김).
        중복 방지를 위해 같은 유형의 미발행 일정이 없을 때만 만든다. */
     if (f.billing_mode === 'recurring' && Number(f.initial_amount) > 0) {
@@ -940,15 +940,15 @@ router.put('/:id', async (req, res, next) => {
     }
     if (f.billing_mode === 'recurring' && Number(f.unit_amount) > 0) {
       /* 규칙이 **하나도 없을 때만** 만든다(active=0 도 '있는' 것으로 친다).
-         사용자가 일부러 꺼 둔 정기청구를, 계약을 저장했다는 이유로 되살리면 안 된다. */
+         사용자가 일부러 꺼 둔 정기청구를, 주문을 저장했다는 이유로 되살리면 안 된다. */
       const [[vg]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [vendor_id || ''])
       const isPurchaseC = vg && (vg.gubu === 'A' || vg.gubu === 'E')
       const table = isPurchaseC ? 'recurring_expenses' : 'recurring_invoices'
       const [[cnt]] = await conn.execute(`SELECT COUNT(*) AS n FROM ${table} WHERE contract_id = ?`, [req.params.id])
       if (Number(cnt.n) > 0) {
-        /* 이미 규칙이 있으면 계약 조건으로 맞춘다 — 계약이 원본이기 때문이다.
-           예전엔 계약을 고쳐도 규칙이 그대로여서, 시작일을 7/1로 당겨도 규칙은 8/5를 붙들었다.
-           (화면의 '계약 조건으로 맞추기' 버튼은 그대로 둔다 — 규칙이 다른 이유로 어긋났을 때 쓴다) */
+        /* 이미 규칙이 있으면 주문 조건으로 맞춘다 — 주문이 원본이기 때문이다.
+           예전엔 주문을 고쳐도 규칙이 그대로여서, 시작일을 7/1로 당겨도 규칙은 8/5를 붙들었다.
+           (화면의 '주문 조건으로 맞추기' 버튼은 그대로 둔다 — 규칙이 다른 이유로 어긋났을 때 쓴다) */
         await syncRecurringToContract(conn, {
           id: req.params.id, unit_amount: f.unit_amount, vat_mode: f.vat_mode,
           billing_period: f.billing_period, billing_day: f.billing_day,
@@ -983,14 +983,14 @@ router.put('/:id', async (req, res, next) => {
     res.json({ ok: true, recurringClosed, recurringStopped })
   } catch (e) {
     await rollbackQuietly(conn)
-    if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '이미 사용 중인 계약번호예요' })
+    if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '이미 사용 중인 주문번호예요' })
     next(e)
   } finally {
     conn.release()
   }
 })
 
-// 계약 삭제 — 돈 기록(청구서·거래·정기반복)이 하나라도 걸려 있으면 막는다.
+// 주문 삭제 — 돈 기록(청구서·거래·정기반복)이 하나라도 걸려 있으면 막는다.
 // 걸린 게 없을 때만 지우고, 그때 설정 성격(마일스톤·품목표·갱신이력·첨부)은 함께 지운다.
 // 거래처·거래 삭제와 같은 '안전 삭제' 방식 — 지우면 조용히 고아가 되거나 잔액이 틀어질 걸 미리 차단.
 router.delete('/:id', async (req, res, next) => {
@@ -999,7 +999,7 @@ router.delete('/:id', async (req, res, next) => {
   try {
     await conn.beginTransaction()
     const [[c]] = await conn.execute('SELECT id, name FROM contracts WHERE id = ? FOR UPDATE', [id])
-    if (!c) { await rollbackQuietly(conn); return res.status(404).json({ error: '계약을 찾을 수 없어요' }) }
+    if (!c) { await rollbackQuietly(conn); return res.status(404).json({ error: '주문을 찾을 수 없어요' }) }
 
     // 돈 기록 집계 — 거래는 두 축(근거 contract_id / 원가귀속 cost_contract_id)을 모두 본다
     const [[cnt]] = await conn.execute(`
@@ -1022,7 +1022,7 @@ router.delete('/:id', async (req, res, next) => {
         ? " 정기청구·정기지출은 기준정보 화면에서 삭제할 수 있어요."
         : ""
       return res.status(409).json({
-        error: `이 계약엔 ${parts.join(' · ')}이 연결돼 있어 지울 수 없어요. 먼저 그 기록을 정리하거나, 계약 상태를 '완료'·'보류'로 두세요.${where}`,
+        error: `이 주문엔 ${parts.join(' · ')}이 연결돼 있어 지울 수 없어요. 먼저 그 기록을 정리하거나, 주문 상태를 '완료'·'보류'로 두세요.${where}`,
       })
     }
 
@@ -1038,7 +1038,7 @@ router.delete('/:id', async (req, res, next) => {
     await conn.execute('DELETE FROM contract_docs      WHERE contract_id = ?', [id])
     await conn.execute('DELETE FROM contracts          WHERE id = ?', [id])
     await conn.commit()
-    // 커밋 후 파일 정리 — 실패해도 계약 삭제는 이미 끝났으므로 조용히 넘어간다(고아 파일만 남을 뿐)
+    // 커밋 후 파일 정리 — 실패해도 주문 삭제는 이미 끝났으므로 조용히 넘어간다(고아 파일만 남을 뿐)
     for (const u of fileUrls) { try { removeUploadedFile(u, req.user?.companyId) } catch {} }
     res.json({ ok: true })
   } catch (e) {
@@ -1049,10 +1049,10 @@ router.delete('/:id', async (req, res, next) => {
   }
 })
 
-// 계약의 정기 반복은 매출/매입에 따라 들어가는 곳이 다르다.
-//   매출 계약(gubu B·미상) → recurring_invoices (받을 돈: 정기청구)
-//   매입 계약(gubu A·E)    → recurring_expenses (나갈 돈: 정기지출)
-// 이걸 안 나누면 매입 계약에 건 반복이 '받을 돈(미수금)'으로 둔갑한다.
+// 주문의 정기 반복은 매출/매입에 따라 들어가는 곳이 다르다.
+//   매출 주문(gubu B·미상) → recurring_invoices (받을 돈: 정기청구)
+//   매입 주문(gubu A·E)    → recurring_expenses (나갈 돈: 정기지출)
+// 이걸 안 나누면 매입 주문에 건 반복이 '받을 돈(미수금)'으로 둔갑한다.
 const purchaseContract = (c) => c.gubu === 'A' || c.gubu === 'E'
 const loadContractWithGubu = async (db, id) => {
   const [[c]] = await db.execute(
@@ -1061,22 +1061,22 @@ const loadContractWithGubu = async (db, id) => {
   return c
 }
 
-// 정기형 계약 → 정기청구(매출) 또는 정기지출(매입) 걸기.
-// 계약의 주기·금액·기간·거래처를 그대로 가져간다 (계약이 원본, 반복은 실행 장치).
+// 정기형 주문 → 정기청구(매출) 또는 정기지출(매입) 걸기.
+// 주문의 주기·금액·기간·거래처를 그대로 가져간다 (주문이 원본, 반복은 실행 장치).
 router.post('/:id/recurring', async (req, res, next) => {
   try {
     const c = await loadContractWithGubu(req.db, req.params.id)
-    if (!c) return res.status(404).json({ error: '계약을 찾을 수 없어요' })
-    if (c.billing_mode !== 'recurring') return res.status(400).json({ error: '정기형 계약이 아니에요' })
+    if (!c) return res.status(404).json({ error: '주문을 찾을 수 없어요' })
+    if (c.billing_mode !== 'recurring') return res.status(400).json({ error: '정기형 주문이 아니에요' })
     if (!c.unit_amount)  return res.status(400).json({ error: '주기당 금액이 없어요' })
     // 시작일은 없어도 된다 — 없으면 등록일부터 센다(lib/recurrence.js 앵커 폴백).
-    // 예전엔 여기서 400으로 막아, 시작일이 모호한 무기한 계약은 정기청구를 걸 길이 없었다.
+    // 예전엔 여기서 400으로 막아, 시작일이 모호한 무기한 주문은 정기청구를 걸 길이 없었다.
 
     const isPurchase = purchaseContract(c)
     const table = isPurchase ? 'recurring_expenses' : 'recurring_invoices'
     const [[dup]] = await req.db.execute(`SELECT COUNT(*) AS n FROM ${table} WHERE contract_id=? AND active=1`, [req.params.id])
     if (Number(dup.n) > 0) {
-      return res.status(409).json({ error: `이미 이 계약에 걸린 ${isPurchase ? '정기지출' : '정기청구'}이 있어요` })
+      return res.status(409).json({ error: `이미 이 주문에 걸린 ${isPurchase ? '정기지출' : '정기청구'}이 있어요` })
     }
 
     const id = randomUUID()
@@ -1099,24 +1099,24 @@ router.post('/:id/recurring', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// 계약에 걸린 정기 반복을 계약 조건에 다시 맞춘다(금액·주기·청구일·종료일).
+// 주문에 걸린 정기 반복을 주문 조건에 다시 맞춘다(금액·주기·청구일·종료일).
 router.patch('/:id/recurring/sync', async (req, res, next) => {
   try {
     const c = await loadContractWithGubu(req.db, req.params.id)
-    if (!c) return res.status(404).json({ error: '계약을 찾을 수 없어요' })
-    if (c.billing_mode !== 'recurring') return res.status(400).json({ error: '정기형 계약이 아니에요' })
+    if (!c) return res.status(404).json({ error: '주문을 찾을 수 없어요' })
+    if (c.billing_mode !== 'recurring') return res.status(400).json({ error: '정기형 주문이 아니에요' })
     const isPurchase = purchaseContract(c)
-    // 매출 정기청구는 계약의 과세/면세(vat_mode)도 함께 맞춘다(계약을 과세↔면세로 바꾼 뒤 sync 시 반영).
+    // 매출 정기청구는 주문의 과세/면세(vat_mode)도 함께 맞춘다(주문을 과세↔면세로 바꾼 뒤 sync 시 반영).
     const r = await syncRecurringToContract(req.db, c, isPurchase)
     res.json({ ok: true, updated: r.affectedRows })
   } catch (e) { next(e) }
 })
 
-// 계약에 걸린 정기 반복 중지/재개 — 매출·매입 어느 쪽이든 계약 화면에서 처리한다
+// 주문에 걸린 정기 반복 중지/재개 — 매출·매입 어느 쪽이든 주문 화면에서 처리한다
 router.patch('/:id/recurring/:recId/toggle', async (req, res, next) => {
   try {
     const c = await loadContractWithGubu(req.db, req.params.id)
-    if (!c) return res.status(404).json({ error: '계약을 찾을 수 없어요' })
+    if (!c) return res.status(404).json({ error: '주문을 찾을 수 없어요' })
     const table = purchaseContract(c) ? 'recurring_expenses' : 'recurring_invoices'
     const [[row]] = await req.db.execute(`SELECT active FROM ${table} WHERE id=? AND contract_id=?`, [req.params.recId, req.params.id])
     if (!row) return res.status(404).json({ error: '정기 항목을 찾을 수 없어요' })
@@ -1165,9 +1165,9 @@ router.get('/:id/cost-analysis', async (req, res, next) => {
     if (!cRows[0]) return res.status(404).json({ error: 'Not found' })
     const c = cRows[0]
     const budget = safeBudget(c.cost_budget, { material: 0, outsource: 0, labor: 0, overhead: 0 })
-    // ⚠ 원가는 cost_contract_id 축이다. contract_id 는 '이 계약이 근거인 지출'(매입계약의
-    // 지급액)이라 매출계약에는 붙지 않아, 예전 코드는 항상 0을 반환했다(호출자가 없어
-    // 드러나지 않았을 뿐이다). 계약 상세가 쓰는 cost_total(METRIC_COLS)과 같은 축으로 맞춘다.
+    // ⚠ 원가는 cost_contract_id 축이다. contract_id 는 '이 주문이 근거인 지출'(매입주문의
+    // 지급액)이라 매출주문에는 붙지 않아, 예전 코드는 항상 0을 반환했다(호출자가 없어
+    // 드러나지 않았을 뿐이다). 주문 상세가 쓰는 cost_total(METRIC_COLS)과 같은 축으로 맞춘다.
     const [txns] = await req.db.execute(
       `SELECT t.category, cat.group_name AS category_group, SUM(t.amount) AS total
        FROM transactions t LEFT JOIN categories cat ON t.category = cat.name
@@ -1190,7 +1190,7 @@ router.get('/:id/cost-analysis', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// ── 계약 첨부 서류(다중) ──
+// ── 주문 첨부 서류(다중) ──
 router.post('/:id/docs', async (req, res, next) => {
   try {
     const { url, name, doc_type, size } = req.body
@@ -1214,7 +1214,7 @@ router.delete('/docs/:docId', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// 계약 메모 저장(단일 필드)
+// 주문 메모 저장(단일 필드)
 router.patch('/:id/memo', async (req, res, next) => {
   try {
     const [r] = await req.db.execute('UPDATE contracts SET memo = ? WHERE id = ?', [req.body.memo ?? null, req.params.id])

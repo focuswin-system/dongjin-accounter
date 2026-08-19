@@ -20,14 +20,14 @@ const payTermFor = (v, cur) => (v == null || v === '' ? (cur || 'net30') : payTe
 
 /* 정기청구로 발행하는 청구서의 과세유형.
    정기청구 규칙의 vat_mode는 exclusive/none 두 값뿐이라 면세와 영세를 구분하지 못한다
-   → 계약에 걸린 정기청구면 계약의 vat_mode(taxable/exempt/zero)를 따른다. */
+   → 주문에 걸린 정기청구면 주문의 vat_mode(taxable/exempt/zero)를 따른다. */
 const invTaxType = (r) => (r.contract_vat_mode
   ? taxTypeOfMode(r.contract_vat_mode)
   : recurVat(r.vat_mode).tax)   // exclusive→과세 / none→면세 / zero→영세
 
 /* 세액 계산에 쓸 vat_mode. 과세유형(invTaxType)과 '같은 소스'여야 한다.
-   예전엔 세액은 규칙 vat_mode로, 과세유형은 계약 vat_mode로 정해서
-   면세·영세 계약에 10% 세액이 붙은 청구서가 나갔다(고객 과청구 + 신고자료 불일치). */
+   예전엔 세액은 규칙 vat_mode로, 과세유형은 주문 vat_mode로 정해서
+   면세·영세 주문에 10% 세액이 붙은 청구서가 나갔다(고객 과청구 + 신고자료 불일치). */
 const effVatMode = (r) => (r.contract_vat_mode
   ? (r.contract_vat_mode === 'exempt' ? 'none' : r.contract_vat_mode === 'zero' ? 'zero' : 'exclusive')
   : r.vat_mode)
@@ -51,7 +51,7 @@ router.post('/', async (req, res, next) => {
     const id = randomUUID()
     /* start_date 는 NOT NULL 인데 아무 검사가 없었다 — 값이 안 오면 mysql2 가 던져 500이 났다
        (정기지출 쪽은 이미 400으로 막고 있었는데 여기만 빠져 있었다).
-       다만 여기서 400으로 거절하지는 않는다. 시작일이 모호한 무기한 계약이 흔하고,
+       다만 여기서 400으로 거절하지는 않는다. 시작일이 모호한 무기한 주문이 흔하고,
        비워 두면 **등록일부터** 세도록 엔진이 받아준다(lib/recurrence.js 앵커 폴백).
        빈 문자열은 '미지정'을 뜻한다. */
     await req.db.execute(
@@ -108,7 +108,7 @@ router.patch('/:id/toggle', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// 청구 예정 회차(아직 청구서가 안 만들어진 회차) — 대금청구 '발행 예정' 목록에 계약 청구일정과 함께 뜬다.
+// 청구 예정 회차(아직 청구서가 안 만들어진 회차) — 대금청구 '발행 예정' 목록에 주문 청구일정과 함께 뜬다.
 // 경리가 청구서 메뉴 한 곳만 열면 이번 달 청구할 게 다 보이게 하기 위함.
 router.get('/pending', async (req, res, next) => {
   try {
@@ -143,7 +143,7 @@ router.get('/pending', async (req, res, next) => {
           item: r.item || '',
           amount: supply,
           vat,
-          // 계약 이름이 없으면 항목으로 대신 표시(계약 무관 정기청구)
+          // 주문 이름이 없으면 항목으로 대신 표시(주문 무관 정기청구)
           contract_name: r.contract_name || r.item || '',
         }))
       }
@@ -191,7 +191,7 @@ router.post('/:id/issue', async (req, res, next) => {
       return res.status(409).json({ error: `앞선 회차(${dues[0]})부터 발행해주세요` })
     }
     // 미래 회차는 미수(입금 예정) 청구서로만 미리 발행 가능. 기입금(paid)은 실제 입금 거래가
-    // 생기므로 미래 일자 금지 — 다른 발행 경로(계약 청구일정·거래·세금)와 동일한 규칙.
+    // 생기므로 미래 일자 금지 — 다른 발행 경로(주문 청구일정·거래·세금)와 동일한 규칙.
     if (paid) {
       const de = futureDateError(target)
       if (de) { await rollbackQuietly(conn); return res.status(400).json({ error: de }) }
@@ -227,7 +227,7 @@ router.post('/:id/issue', async (req, res, next) => {
        target, cashDateOf(target, r.pay_term), paid ? '입금 완료' : '입금 예정', acctId, r.id,
        `정기청구 · ${r.item || ''}`.trim(), invTaxType(r)]
     )
-    // 기입금 처리: 실제 입금 거래 + 매칭까지 (계약 상세의 수금·미수금에 반영)
+    // 기입금 처리: 실제 입금 거래 + 매칭까지 (주문 상세의 수금·미수금에 반영)
     if (paid) {
       const lerr = ledgerError({ kind: 'income', account_id: acctId, status: '입금완료' })
       if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
@@ -253,7 +253,7 @@ router.post('/:id/issue', async (req, res, next) => {
  * 놓친 회차 일괄 발행 — 예정일이 지났는데 청구서가 없는 회차를 모두 '입금 예정'으로 만든다.
  *
  * 미래 회차는 대상이 아니고(미수금 조기 부풀림 방지), 소급 범위는 등록일(setup_date)부터다 —
- * 2020년 시작 계약을 올해 등록해도 등록일 이전 회차는 만들어지지 않는다.
+ * 2020년 시작 주문을 올해 등록해도 등록일 이전 회차는 만들어지지 않는다.
  * 계좌를 건드리지 않는다(입금 처리 아님) — 실제 입금 확인 없이 잔액을 움직이지 않기 위해.
  * (매입 정기지출 /issue-missed와 대칭)
  */
@@ -270,7 +270,7 @@ router.post('/issue-missed', async (req, res, next) => {
     for (const r of recs) {
       r.setup_date = kstDate(Number(r.created_epoch) * 1000)
       // 일괄 생성은 오늘까지 도래한 회차만 실제 청구서로 만든다(미래분 미수금 조기 부풀림 방지).
-      // 소급 범위는 setup_date(등록일)부터 — 과거 무기한 계약이 수백 건 쏟아지지 않게.
+      // 소급 범위는 setup_date(등록일)부터 — 과거 무기한 주문이 수백 건 쏟아지지 않게.
       const dues = dueDatesToGenerate(r, today)
       if (!dues.length) continue
 

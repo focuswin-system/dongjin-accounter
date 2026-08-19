@@ -39,7 +39,7 @@ const { moneyOf: intOf, numOf } = require('../lib/money')
 /** 기간이 1년을 넘으면 장기금융상품 — 회계 분류가 갈린다.
  *
  * ⚠ 보증금은 여기 태우면 안 된다. 만기가 없어 term_months 가 0이라 '1201 단기금융상품'
- *   으로 찍히는데, 보증금은 **당좌자산이 아니라 기타비유동자산**이다(계약이 끝나야
+ *   으로 찍히는데, 보증금은 **당좌자산이 아니라 기타비유동자산**이다(주문이 끝나야
  *   돌아오는 돈이라 1년 내 현금화되지 않는다). 재무상태표에서 자리가 통째로 틀린다. */
 const defaultAcctCode = (kind, termMonths) => (
   kind === 'guarantee' ? ACCT.guarantee
@@ -172,7 +172,7 @@ router.post('/', async (req, res, next) => {
     const fe = futureDateError(start_date)
     if (fe) return res.status(400).json({ error: fe })
 
-    /* 보증금(guarantee)은 만기가 없다 — 계약이 끝나야 돌아온다.
+    /* 보증금(guarantee)은 만기가 없다 — 주문이 끝나야 돌아온다.
        기간을 1개월로 두어도 되지만, 그러면 '만기 임박' 같은 안내가 엉뚱하게 뜬다.
        기간 검사는 만기가 있는 둘(예금·적금)에만 건다. */
     const term_months = kind === 'guarantee' ? 0 : intOf(b.term_months)
@@ -583,7 +583,7 @@ router.post('/:id/mature', async (req, res, next) => {
       return id
     }
     // 원금 = 금융상품 회수(자산↔자산, 손익 아님) / 이자 = 이자수익(손익)
-    // 보증금은 '만기'가 아니라 **계약이 끝나 돌려받는 것**이라 거래 이름을 달리 적는다
+    // 보증금은 '만기'가 아니라 **주문이 끝나 돌려받는 것**이라 거래 이름을 달리 적는다
     const back = s.kind === 'guarantee'
     const txnP = await mkTxn(principal, back ? '보증금 반환' : '예적금 만기',
       s.acct_code || ACCT.shortTerm, `${s.name} ${back ? '반환' : '만기 원금'}`)

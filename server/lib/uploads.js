@@ -42,7 +42,7 @@ function removeUploadedFile(url, companyId) {
     return true
   } catch (e) {
     // 파일명은 사용자가 올린 원본명을 담고 있어(예: '…_포커스윈_계약서.pdf') 로그에 남기지
-    // 않는다 — 거래처·계약명이 그대로 새는 자리다. 어느 회사에서 실패했는지와 원인만 남긴다.
+    // 않는다 — 거래처·주문명이 그대로 새는 자리다. 어느 회사에서 실패했는지와 원인만 남긴다.
     if (e.code !== 'ENOENT') console.error('[첨부 삭제 실패]', `회사 ${companyId}`, e.code || e.message)
     return false
   }

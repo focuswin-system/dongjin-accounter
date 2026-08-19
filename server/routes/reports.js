@@ -16,7 +16,7 @@ const router = Router()
  * ⚠ 회사 구분은 **req.user.companyId** 로만 한다. 경로·본문으로 회사 id 를 받지 않는다 —
  *   받는 순간, 검증을 한 곳만 빠뜨려도 남의 회사 것을 보게 된다. 이 코드베이스는
  *   DB-per-tenant 라 격리가 이미 미들웨어에서 끝나 있고, 여기서 더 할 일이 없다.
- *   (여기서 platformPool 을 쓰는 건 계약 정보라 회사 DB에 있으면 안 되기 때문이다 —
+ *   (여기서 platformPool 을 쓰는 건 주문 정보라 회사 DB에 있으면 안 되기 때문이다 —
  *    회계 업무 데이터는 여전히 req.db 로만 읽는다. lib/entitlements.js 머리말 참조)
  *
  * 응답은 **목록뿐**이고 회계 숫자는 없다. 각 보고서 화면은 지금처럼 기존 API로 데이터를
@@ -347,12 +347,12 @@ router.put('/manage/:key', async (req, res, next) => {
 
     const enabled = req.body?.enabled !== false
     if (enabled && spec.scope === 'entitled') {
-      /* 켤 때만 계약을 본다. 끄는 건 언제든 되어야 한다 —
-         계약이 끝나 안 보이는 양식을 '꺼짐'으로 정리하는 것까지 막을 이유가 없다. */
+      /* 켤 때만 주문을 본다. 끄는 건 언제든 되어야 한다 —
+         주문이 끝나 안 보이는 양식을 '꺼짐'으로 정리하는 것까지 막을 이유가 없다. */
       const features = await featuresOf(platformPool, req.user?.companyId, kstToday())
       if (!features.has(featureKeyOf(key))) {
         return res.status(409).json({
-          error: '이 보고서는 아직 사용 계약이 없어요. 도입을 원하시면 문의해주세요.',
+          error: '이 보고서는 아직 사용 주문이 없어요. 도입을 원하시면 문의해주세요.',
         })
       }
     }

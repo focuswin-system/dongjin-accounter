@@ -71,7 +71,7 @@ test('매입세액 불공제 플래그의 여러 표현을 모두 0으로 받는
   }
 })
 
-test('계약 vat_mode → 세율·유형', () => {
+test('주문 vat_mode → 세율·유형', () => {
   assert.strictEqual(vatRateOf('taxable'), 0.1)
   assert.strictEqual(vatRateOf('exempt'), 0)
   assert.strictEqual(vatRateOf('zero'), 0)

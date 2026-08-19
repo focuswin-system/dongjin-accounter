@@ -142,7 +142,7 @@ async function seedInto(c) {
     }
 
     console.log('\n✅ 기준정보 시딩 완료')
-    console.log('다음 단계: 계약·거래·청구서는 UI에서 직접 입력하세요.')
+    console.log('다음 단계: 주문·거래·청구서는 UI에서 직접 입력하세요.')
 
   }
   // 연결 정리는 withAdmin 이 담당한다(열었다 반드시 닫음).

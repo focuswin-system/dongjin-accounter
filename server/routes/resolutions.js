@@ -214,7 +214,7 @@ router.post('/:id/process', async (req, res, next) => {
 
     // 매입 청구서 연결 결의서인데 그 청구서가 이미 완납이면, 새 지출을 만들어봐야 매칭할 잔액이 없어
     // 지출만 붕 뜬다(이중 계상). 처리 자체를 막는다.
-    // 겸사겸사 청구서의 출금 계좌와 계약을 받아둔다 — 아래에서 지출 거래에 승계한다.
+    // 겸사겸사 청구서의 출금 계좌와 주문을 받아둔다 — 아래에서 지출 거래에 승계한다.
     let invAccountId = null
     let invContractId = null
     if (r.invoice_id) {
@@ -278,7 +278,7 @@ router.post('/:id/process', async (req, res, next) => {
       const lerrC = ledgerError({ kind: 'expense', account_id: acct, status: '지급완료' })
       if (lerrC) { await rollbackQuietly(conn); return res.status(400).json({ error: lerrC }) }
       const id = randomUUID()
-      // contract_id 를 청구서에서 승계한다. 안 넣으면 그 매입계약의 지급 내역·원가 실적에서
+      // contract_id 를 청구서에서 승계한다. 안 넣으면 그 매입주문의 지급 내역·원가 실적에서
       // 통째로 빠져, 같은 청구서를 결의서 없이 바로 '지급 처리'했을 때와 숫자가 달라진다.
       /* 부가세 필드를 채운다. 예전엔 INSERT 목록에 없어 전부 NULL 이었고,
        * 부가세 집계(routes/tax.js)가 `vat_amount IS NOT NULL` 만 세므로
@@ -301,7 +301,7 @@ router.post('/:id/process', async (req, res, next) => {
         [id, 'expense', r.vendor_id || null, invContractId, acct,
          r.invoice_id ? settleAcctCode('expense') : null,
          /* 비목(category)은 기준정보의 분류값이어야 한다. 결의서 제목(r.title)을 그대로
-          * 넣던 탓에 '5축 가공 외주 단가계약'·'AL7075 판재 7월분' 같은 자유 텍스트가
+          * 넣던 탓에 '5축 가공 외주 단가주문'·'AL7075 판재 7월분' 같은 자유 텍스트가
           * 비목 칸에 들어갔다 — 그런 비목은 기준정보에 없으므로 비목별 집계가 오염된다.
           * 청구서 기반 결의서는 청구서 정산과 같은 성격이므로 같은 값('대금 지급')을 쓴다.
           * 청구서 없는 소액경비는 고를 비목이 없어 제목을 그대로 두되, 결의서에 비목 칸을

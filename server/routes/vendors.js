@@ -33,7 +33,7 @@ router.get('/', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// 사용/미사용 전환. 미사용으로 둬도 기존 거래·청구서·계약은 그대로 남는다.
+// 사용/미사용 전환. 미사용으로 둬도 기존 거래·청구서·주문은 그대로 남는다.
 router.patch('/:id/active', async (req, res, next) => {
   try {
     const active = req.body.active ? 1 : 0
@@ -122,7 +122,7 @@ router.delete('/:id', async (req, res, next) => {
     await req.db.execute('DELETE FROM vendors WHERE id = ?', [req.params.id])
     res.json({ ok: true })
   } catch (e) {
-    // 거래·청구서·계약이 걸려 있으면 FK가 막는다. 그대로 두면 500 일반 오류가 나가고
+    // 거래·청구서·주문이 걸려 있으면 FK가 막는다. 그대로 두면 500 일반 오류가 나가고
     // 사용자는 무엇이 문제인지 알 수 없다 — 어디를 정리해야 하는지 알려준다.
     if (e.code === 'ER_ROW_IS_REFERENCED_2' || e.errno === 1451) {
       const [[c]] = await req.db.execute(`
@@ -134,7 +134,7 @@ router.delete('/:id', async (req, res, next) => {
       const parts = []
       if (Number(c.txns) > 0) parts.push(`거래 ${c.txns}건`)
       if (Number(c.invs) > 0) parts.push(`청구서 ${c.invs}건`)
-      if (Number(c.ctrs) > 0) parts.push(`계약 ${c.ctrs}건`)
+      if (Number(c.ctrs) > 0) parts.push(`주문 ${c.ctrs}건`)
       const detail = parts.length ? parts.join(' · ') : '연결된 자료'
       return res.status(409).json({
         error: `이 거래처에 ${detail}이 연결돼 있어 삭제할 수 없어요. 지난 기록을 지우면 장부가 어긋나요. 앞으로 안 쓰실 거면 '미사용'으로 바꿔주세요 — 선택 목록에서만 빠지고 기존 기록은 그대로 남아요.`,

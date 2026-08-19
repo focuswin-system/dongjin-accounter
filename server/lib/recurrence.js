@@ -30,7 +30,7 @@ const LOOKAHEAD_DAYS = 35
 // - day_of_month: 앵커 일자. 그 달 말일보다 크면 말일로 clamp(31일 앵커 → 2월 28/29, 4월 30).
 // - last_generated: 이 값(포함) 이하 회차는 이미 생성됨.
 // - setup_date: 정기청구를 등록한 날(created_at의 날짜). 이 날 이전 회차는 소급하지 않는다
-//   (2003년 시작 무기한 계약이 수백 건으로 쏟아지던 문제 방지 — 설정 시점부터만 청구).
+//   (2003년 시작 무기한 주문이 수백 건으로 쏟아지던 문제 방지 — 설정 시점부터만 청구).
 // - end_date: 있으면 초과 회차 중단.
 // - opts.horizonDays: 오늘 이후 며칠까지의 미래 회차도 포함(미리보기용). 기본 0(오늘까지만).
 // today: 'YYYY-MM-DD' 문자열(권장 — 호출부에서 kstToday()로 KST 기준 전달) 또는 Date.
@@ -39,7 +39,7 @@ const LOOKAHEAD_DAYS = 35
 function dueDatesToGenerate(rec, today = new Date(), opts = {}) {
   /* 앵커(회차를 세는 기준일) = 시작일, 없으면 **등록일**.
    *
-   * 무기한 정기 계약은 "언제부터"가 모호한 경우가 흔하다(구두로 이어오던 유지보수 같은 것).
+   * 무기한 정기 주문은 "언제부터"가 모호한 경우가 흔하다(구두로 이어오던 유지보수 같은 것).
    * 예전엔 start_date 가 비면 그냥 [] 를 돌려줬다 — 규칙은 만들어져 있고 활성이고 종료도
    * 안 됐는데 회차가 **영원히 0건**이었다. 아무 경고도 없어서 그 달 매출이 조용히 빠졌다.
    *
@@ -141,7 +141,7 @@ function pendingCycle(r, due, today, extra = {}) {
     state: cycleState(due, today),
     vendor_id: r.vendor_id || null,
     vendor_name: r.vendor_name || '',
-    // 계약 기반인지 일반 정기인지 — 화면에서 관리 경로를 나누는 기준
+    // 주문 기반인지 일반 정기인지 — 화면에서 관리 경로를 나누는 기준
     contract_id: r.contract_id || null,
     contract_name: r.contract_name || '',
     contract_no: r.contract_no || '',
