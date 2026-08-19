@@ -13,15 +13,47 @@ const KICKED = (() => {
   } catch { return null }
 })()
 
-/* 좌측 브랜드 패널의 색. 상호(도니도라 = 돈이 들어오다)에 맞춰 황금빛으로 간다.
- *   'gold-photo' — 받아 온 배경 이미지(금빛 물결·상승 차트). **현재 쓰는 것.**
- *   'gold-dark'  — 짙은 먹빛 바탕 + 금빛 글씨·장식. 이미지 없이 갈 때.
- *   'gold-light' — 금빛 바탕 + 먹빛 글씨. 인상은 세지만 혼자 튄다.
- * 색·배경은 index.css 의 .login-brand.<테마> 가 CSS 변수로 정한다 —
- * 여기 한 줄만 바꾸면 갈린다(JSX 는 var() 만 읽는다). */
-const BRAND_THEME = 'gold-fine'
+/* 로그인 화면의 겉모습. **이 한 줄만 바꾸면 갈린다**(JSX 는 var() 만 읽는다).
+ *
+ *   'photo-full' — 배경 이미지를 화면 전체에 깔고 폼은 흰 카드로 띄운다. **현재 쓰는 것.**
+ *                  ⚙ 이미지 밝기·채도·흐림 등 조절기는 index.css 의
+ *                    `.login-shell.photo-full` 맨 위 블록에 모여 있다.
+ *   'gold-noir'  — 어두운 먹빛 + 샴페인 골드 악센트. 이미지 없음
+ *   'gold-fine'  — 밝은 금빛, CSS 만. 이미지 없음
+ *   'gold-photo' — 이미지를 **좌측 패널에만** 깐다(2단 레이아웃 유지)
+ *   'gold-dark' / 'gold-light' — 초기 시안 두 개
+ */
+const BRAND_THEME = 'photo-full'
+
+/* 시안 비교용 전환기 — **고르고 나면 지운다.**
+ *
+ * 레이아웃 두 종류(타입)와 각 타입의 색상을 따로 고른다.
+ *   타입 A — 원래 화면. 좌우 2단, 왼쪽이 색 있는 패널
+ *   타입 B — 새 시안. 배경 이미지가 화면 전체, 폼은 흰 카드로 뜬다
+ *
+ * 고른 값은 그대로 className 이 된다(예: 'photo-full v-b') — 셸·브랜드 양쪽에 붙인다.
+ * 확정되면 아래 LOOKS·전환기 블록과 look state 를 지우고 BRAND_THEME 에 박으면 끝. */
+const LOOKS = [
+  { type: 'A', typeLabel: '타입 A · 2단 (원래)', items: [
+    { id: 'original',   label: '남색(원본)' },
+    { id: 'gold-dark',  label: '먹빛+금' },
+    { id: 'gold-noir',  label: '샴페인' },
+    { id: 'gold-fine',  label: '밝은 금' },
+    { id: 'gold-light', label: '금 바탕·검글씨' },
+    { id: 'gold-solid', label: '금 바탕·흰글씨' },
+  ]},
+  { type: 'B', typeLabel: '타입 B · 배경 전체 (새 시안)', items: [
+    { id: 'photo-full v-a', label: '아이보리' },
+    { id: 'photo-full v-b', label: '밝은 황금' },
+    { id: 'photo-full v-c', label: '깊은 금' },
+  ]},
+]
+const typeOf = (look) => (look.startsWith('photo-full') ? 'B' : 'A');
 
 export const LoginScreen = ({ onLogin }) => {
+  const [look, setLook] = useState(() => localStorage.getItem('loginLook') || BRAND_THEME);
+  const pickLook = (id) => { setLook(id); localStorage.setItem('loginLook', id); };
+  const activeType = typeOf(look);
   // 회사코드는 마지막 로그인 값을 기억한다(같은 PC는 대개 같은 회사에서 쓴다).
   const [company, setCompany] = useState(() => localStorage.getItem('companyCode') || '');
   const [id, setId] = useState('');
@@ -71,16 +103,15 @@ export const LoginScreen = ({ onLogin }) => {
   };
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: '#fff' }}>
+    /* login-shell — 배경 이미지를 **화면 전체**에 까는 자리(테마가 photo-full 일 때).
+       나머지 테마에서는 아무것도 안 하고 예전처럼 좌우 2단으로만 선다. */
+    <div className={`login-shell ${look}`}
+      style={{ display: 'flex', minHeight: '100vh', background: '#fff' }}>
 
       {/* 좌측 브랜드 패널 — 좁은 화면에선 CSS(.login-brand)가 숨긴다 */}
-      <div className={`login-brand ${BRAND_THEME}`} style={{
-        display: 'flex',
-        flexDirection: 'column',
-        padding: '48px 44px 32px',
-        position: 'relative',
-        overflow: 'hidden',
-      }}>
+      {/* ⚠ padding·display 를 인라인으로 두지 않는다 — 인라인은 CSS 를 이겨서
+          테마가 여백·배치를 못 바꾼다(photo-full 이 제목을 위로 올리지 못했다). */}
+      <div className={`login-brand ${look}`}>
         {/* 배경 장식 — 색은 .login-brand 테마가 정한다(CSS 변수) */}
         <div style={{
           position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden',
@@ -104,15 +135,15 @@ export const LoginScreen = ({ onLogin }) => {
           }}/>
         </div>
 
-        {/* 로고 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 'auto' }}>
+        {/* 로고 — photo-full 시안에는 없다(제목이 곧 로고 역할). CSS 로 숨긴다 */}
+        <div className="login-mark">
           <span style={{ color: 'var(--brand-mark)', fontWeight: 700, fontSize: 15, letterSpacing: '-0.02em' }}>
             도니도라
           </span>
         </div>
 
-        {/* 메인 카피 */}
-        <div style={{ marginBottom: 'auto' }}>
+        {/* 메인 카피 — margin-bottom:auto 가 저작권을 바닥으로 민다(CSS 에서 준다) */}
+        <div className="login-copy">
           <div className="login-title" style={{ color: 'var(--brand-title)', marginBottom: 4 }}>
             도니도라
           </div>
@@ -135,16 +166,17 @@ export const LoginScreen = ({ onLogin }) => {
         </div>
       </div>
 
-      {/* 우측 폼 영역 */}
-      <div style={{
+      {/* 우측 폼 영역 — photo-full 테마에서는 배경이 비치도록 흰 배경을 벗고,
+          폼만 흰 카드(.login-card)로 띄운다. 나머지 테마는 예전 그대로 흰 면. */}
+      <div className="login-formside" style={{
         flex: 1,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         padding: '48px 40px',
-        background: '#fff',
       }}>
-        <div style={{ width: '100%', maxWidth: 360 }}>
+        {/* 폭도 인라인으로 두지 않는다 — 테마가 카드 크기를 정해야 한다 */}
+        <div className="login-card">
 
           <div style={{ marginBottom: 36 }}>
             <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.03em', color: 'var(--ink)', marginBottom: 8 }}>
@@ -272,6 +304,29 @@ export const LoginScreen = ({ onLogin }) => {
             </div>
           </form>
         </div>
+      </div>
+
+      {/* ── 시안 전환기(임시) ─────────────────────────────────────
+          고르고 나면 이 블록과 위의 LOOKS·look state 를 지운다. */}
+      <div className="login-variants">
+        {LOOKS.map(group => (
+          <div key={group.type} className="login-variant-row">
+            <button type="button"
+              className={`login-variant-type ${activeType === group.type ? 'active' : ''}`}
+              onClick={() => pickLook(group.items[0].id)}>
+              {group.typeLabel}
+            </button>
+            <div className="login-variant-chips">
+              {group.items.map(it => (
+                <button key={it.id} type="button"
+                  className={`login-variant-btn ${look === it.id ? 'active' : ''}`}
+                  onClick={() => pickLook(it.id)}>
+                  {it.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
