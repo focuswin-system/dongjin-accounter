@@ -1719,7 +1719,6 @@ const CompanyPanel = ({ embedded = false }) => {
 }
 
 // ── 계좌 / 카드 등록 패널 ────────────────────────────────────────
-const ACCOUNT_KINDS = [{ value: 'bank', label: '계좌' }, { value: 'card', label: '카드' }]
 const BANK_TYPES = ['보통예금', '당좌예금', '정기예금']
 const CARD_TYPES = ['법인카드', '개인카드', '체크카드']
 // kind 를 받아 그 화면에 맞는 빈 폼을 낸다 — 카드 화면에서 '새로 등록'을 누르면 카드로 시작해야 한다
@@ -1752,7 +1751,6 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
   useEffect(() => { load() }, [])
 
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
-  const setKind = (kind) => setForm(p => ({ ...p, kind, type: kind === 'bank' ? '보통예금' : '법인카드' }))
 
   const filtered = accounts.filter(a => (a.kind === 'card') === isCardPanel).filter(a =>
     !q || [a.name, a.bankName, a.number, a.purpose, a.type].some(s => s?.includes(q))
@@ -1786,10 +1784,10 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
   const handleSave = async () => {
     if (!form.name) return toast.push('별칭을 입력하세요')
     const payload = {
-      name: form.name, bank: form.bank, type: form.type, kind: form.kind,
+      name: form.name, bank: form.bank, type: form.type, kind,
       number: form.number, purpose: form.purpose, owner: form.owner,
-      card_pay_day: form.kind === 'card' ? form.card_pay_day : 0,
-      card_pay_account_id: form.kind === 'card' ? (form.card_pay_account_id || null) : null,
+      card_pay_day: isCard ? form.card_pay_day : 0,
+      card_pay_account_id: isCard ? (form.card_pay_account_id || null) : null,
       initial_balance: form.kind === 'bank' ? (parseInt(String(form.initial_balance).replace(/[^0-9-]/g, '')) || 0) : 0,
     }
     const res = editing ? await api.updateAccount(editing.id, payload) : await api.addAccount(payload)
@@ -1811,7 +1809,10 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
     load()
   }
 
-  const isCard = form.kind === 'card'
+  /* 종류는 **화면이 정한다**(form 이 아니라). 카드 화면에서 '계좌'로 바꿔 저장하면
+     그 항목이 계좌 탭으로 넘어가 목록에서 사라진다 — 지운 것처럼 보인다.
+     그래서 드로어에서 종류 선택을 없애고 여기서 못 박는다. */
+  const isCard = isCardPanel
   const subTypes = isCard ? CARD_TYPES : BANK_TYPES
 
   return (
@@ -1885,19 +1886,11 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
       </div>
 
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
-        <DrawerHead title={editing ? '계좌/카드 수정' : '계좌/카드 등록'} onClose={() => setDrawerOpen(false)}/>
+        <DrawerHead
+          title={`${isCard ? '카드' : '계좌'} ${editing ? '수정' : '등록'}`}
+          onClose={() => setDrawerOpen(false)}/>
         <div className="drawer-body col gap-form">
-          <div>
-            <label className="label" style={{ marginBottom: 8 }}>종류 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-            <div className="row gap-6">
-              {ACCOUNT_KINDS.map(k => (
-                <button key={k.value} type="button" className={`chip ${form.kind === k.value ? 'active' : ''}`} onClick={() => setKind(k.value)}>
-                  {k.value === 'card' ? <Icon.Card size={12}/> : <Icon.Bank size={12}/>} {k.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
+          {/* 종류 선택은 없다 — 어느 화면에서 열었는지가 곧 종류다(위 isCard 주석 참고) */}
           <div>
             <label className="label" style={{ marginBottom: 8 }}>{isCard ? '카드 종류' : '예금 종류'}</label>
             <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
