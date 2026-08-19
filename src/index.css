@@ -127,7 +127,13 @@ a { color: inherit; text-decoration: none; }
 }
 .nav-item > span { white-space: nowrap; }
 .nav-item:hover { background: var(--surface-3); color: var(--ink); }
-.nav-item.active { background: var(--ink); color: #fff; }
+/* 선택된 메뉴 — 로그인 화면의 금빛과 같은 계열로 맞춘다.
+   먹빛(--ink)이던 것을 금색으로 바꾼다. 흰 글씨가 얹히므로 명도를 충분히 내려야 한다
+   (밝은 금 위의 흰 글씨는 대비가 2:1 아래로 떨어져 안 읽힌다) — L 0.58 은 4.5:1 을 넘긴다. */
+.nav-item.active {
+  background: linear-gradient(180deg, var(--nav-active-1, oklch(0.615 0.115 68)), var(--nav-active-2, oklch(0.555 0.115 64)));
+  color: #fff;
+}
 .nav-item.active .nav-ico { color: #fff; opacity: 1; }
 .nav-ico { width: 18px; height: 18px; opacity: 0.7; flex-shrink: 0; }
 .nav-count {
@@ -167,7 +173,8 @@ a { color: inherit; text-decoration: none; }
   transition: background .12s ease;
 }
 .nav-domain:hover { background: var(--surface-3); }
-.nav-domain.has-active { color: var(--brand-ink); }
+/* 안쪽에 선택된 잎이 있는 도메인 — 잎의 금색과 같은 계열로 짚어준다(파랑이면 따로 논다) */
+.nav-domain.has-active { color: var(--nav-active-ink, oklch(0.50 0.105 66)); }
 .nav-domain.has-active .nav-ico { opacity: 1; }
 .nav-domain .nav-chev {
   margin-left: auto;
@@ -631,6 +638,41 @@ a { color: inherit; text-decoration: none; }
   --login-copy:  oklch(1 0 0 / 0.58);
 }
 
+/* gold-light 의 **오른쪽 폼**을 왼쪽 금빛과 같은 온도로 맞춘다.
+ *
+ * 왼쪽이 금빛인데 오른쪽 버튼만 남색이면 두 면이 따로 논다 — 화면에서 제일 먼저 걸리는 지점이었다.
+ * 그래서 폼의 파랑 계열을 걷어내고 **거의 검정에 가까운 웜 브라운**으로 묶는다.
+ *
+ * ⚠ 버튼을 금색으로는 안 간다. 왼쪽 금색 면적이 이미 커서 버튼까지 금색이면
+ *   화장품·호텔 쪽 인상이 된다. 금색 + 짙은 웜 브라운이 업무용 화면에는 더 안정적이다.
+ * 레이아웃·크기는 건드리지 않는다 — 색만 바꾼다. */
+.login-shell.gold-light {
+  --login-form-title: #2B2115;   /* 거의 검정으로 보이는 웜 브라운 */
+  --login-form-label: #3D3020;
+  --login-form-sub:   #8A7963;
+}
+.login-shell.gold-light .btn.primary {
+  background: #3A2A18;
+  border-color: transparent;
+  color: #FFFFFF;
+}
+.login-shell.gold-light .btn.primary:hover:not(:disabled) { background: #4C3720; }
+/* 입력칸 포커스 — 기본값이 파랑이라 이 화면에서만 웜톤으로 돌린다 */
+.login-shell.gold-light .input:focus {
+  border-color: #8A7963;
+  box-shadow: 0 0 0 3px rgba(138, 121, 99, 0.18);
+}
+/* 크롬 자동완성의 파란 배경도 이 화면에서 끈다(다른 테마는 그대로) */
+.login-shell.gold-light .input:-webkit-autofill,
+.login-shell.gold-light .input:-webkit-autofill:hover,
+.login-shell.gold-light .input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #FFFDF9 inset !important;
+  box-shadow: 0 0 0 1000px #FFFDF9 inset !important;
+  -webkit-text-fill-color: #2B2115 !important;
+  caret-color: #2B2115;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
 /* gold-light — 금빛 바탕에 먹빛 글씨. 대비가 강해 인상은 세다.
    다만 우측 폼(흰색)·상단 헤더(먹빛)와 톤이 갈리므로 브랜드 전반을 같이 봐야 한다. */
 .login-brand.gold-light {
@@ -639,8 +681,10 @@ a { color: inherit; text-decoration: none; }
   --brand-orb-2: oklch(0.35 0.05 70 / 0.09);
   --brand-rule:  oklch(0.30 0.04 70 / 0.15);
   --brand-mark:  oklch(0.28 0.04 70 / 0.75);
-  --brand-title:   oklch(0.24 0.04 70);
-  --brand-title-2: oklch(0.24 0.04 70);
+  /* 완전한 검정 대신 웜 브라운 — 눈으로는 거의 검정인데 금빛 바탕에 더 녹아든다.
+     오른쪽 폼 제목(--login-form-title)과 **같은 값**이라 좌우가 한 톤으로 읽힌다. */
+  --brand-title:   #2B2115;
+  --brand-title-2: #2B2115;
   --brand-sub:   oklch(0.30 0.04 70 / 0.72);
   --login-copy:  oklch(0.28 0.04 70 / 0.62);
 }

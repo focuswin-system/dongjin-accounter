@@ -53,7 +53,7 @@ const typeOf = (look) => (look.startsWith('photo-full') ? 'B' : 'A');
 export const LoginScreen = ({ onLogin }) => {
   /* 기본값은 LOOKS 의 id 와 **정확히 같아야** 한다 — 'photo-full' 로 두면
      보이는 화면은 맞는데 어느 칩도 선택 표시가 안 된다(id 는 'photo-full v-a'). */
-  const [look, setLook] = useState(() => localStorage.getItem('loginLook') || 'photo-full v-a');
+  const [look, setLook] = useState(() => localStorage.getItem('loginLook') || 'gold-light');
   const pickLook = (id) => { setLook(id); localStorage.setItem('loginLook', id); };
   const activeType = typeOf(look);
   // 회사코드는 마지막 로그인 값을 기억한다(같은 PC는 대개 같은 회사에서 쓴다).
@@ -181,10 +181,10 @@ export const LoginScreen = ({ onLogin }) => {
         <div className="login-card">
 
           <div style={{ marginBottom: 36 }}>
-            <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.03em', color: 'var(--ink)', marginBottom: 8 }}>
+            <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.03em', color: 'var(--login-form-title, var(--ink))', marginBottom: 8 }}>
               로그인
             </div>
-            <div style={{ fontSize: 13.5, color: 'var(--muted)' }}>
+            <div style={{ fontSize: 13.5, color: 'var(--login-form-sub, var(--muted))' }}>
               계정 정보를 입력하세요
             </div>
           </div>
@@ -207,7 +207,7 @@ export const LoginScreen = ({ onLogin }) => {
 
               {/* 회사코드 */}
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 7 }}>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--login-form-label, var(--ink))', marginBottom: 7 }}>
                   회사코드
                 </label>
                 {/* placeholder에 실제 회사코드를 예시로 두지 않는다 — 타사 코드를 추측할 단서가 된다 */}
@@ -227,7 +227,7 @@ export const LoginScreen = ({ onLogin }) => {
 
               {/* 아이디 */}
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 7 }}>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--login-form-label, var(--ink))', marginBottom: 7 }}>
                   아이디
                 </label>
                 <input
@@ -244,7 +244,7 @@ export const LoginScreen = ({ onLogin }) => {
 
               {/* 비밀번호 */}
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 7 }}>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--login-form-label, var(--ink))', marginBottom: 7 }}>
                   비밀번호
                 </label>
                 <div style={{ position: 'relative' }}>
