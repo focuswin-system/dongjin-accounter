@@ -13,49 +13,15 @@ const KICKED = (() => {
   } catch { return null }
 })()
 
-/* 로그인 화면의 겉모습. **이 한 줄만 바꾸면 갈린다**(JSX 는 var() 만 읽는다).
+/* 로그인 화면의 겉모습 — 좌우 2단, 왼쪽은 금빛 바탕에 웜 브라운 글씨.
+ * 색은 index.css 의 `.login-brand.gold-light`(왼쪽)와 `.login-shell.gold-light`(오른쪽 폼)가
+ * CSS 변수로 정한다. JSX 는 var() 만 읽으므로 색을 바꿀 때 이 파일을 건드릴 일이 없다.
  *
- *   'photo-full' — 배경 이미지를 화면 전체에 깔고 폼은 흰 카드로 띄운다. **현재 쓰는 것.**
- *                  ⚙ 이미지 밝기·채도·흐림 등 조절기는 index.css 의
- *                    `.login-shell.photo-full` 맨 위 블록에 모여 있다.
- *   'gold-noir'  — 어두운 먹빛 + 샴페인 골드 악센트. 이미지 없음
- *   'gold-fine'  — 밝은 금빛, CSS 만. 이미지 없음
- *   'gold-photo' — 이미지를 **좌측 패널에만** 깐다(2단 레이아웃 유지)
- *   'gold-dark' / 'gold-light' — 초기 시안 두 개
- */
-const BRAND_THEME = 'photo-full'
-
-/* 시안 비교용 전환기 — **고르고 나면 지운다.**
- *
- * 레이아웃 두 종류(타입)와 각 타입의 색상을 따로 고른다.
- *   타입 A — 원래 화면. 좌우 2단, 왼쪽이 색 있는 패널
- *   타입 B — 새 시안. 배경 이미지가 화면 전체, 폼은 흰 카드로 뜬다
- *
- * 고른 값은 그대로 className 이 된다(예: 'photo-full v-b') — 셸·브랜드 양쪽에 붙인다.
- * 확정되면 아래 LOOKS·전환기 블록과 look state 를 지우고 BRAND_THEME 에 박으면 끝. */
-const LOOKS = [
-  { type: 'A', typeLabel: '타입 A · 2단 (원래)', items: [
-    { id: 'original',   label: '남색(원본)' },
-    { id: 'gold-dark',  label: '먹빛+금' },
-    { id: 'gold-noir',  label: '샴페인' },
-    { id: 'gold-fine',  label: '밝은 금' },
-    { id: 'gold-light', label: '금 바탕·검글씨' },
-    { id: 'gold-solid', label: '금 바탕·흰글씨' },
-  ]},
-  { type: 'B', typeLabel: '타입 B · 배경 전체 (새 시안)', items: [
-    { id: 'photo-full v-a', label: '아이보리' },
-    { id: 'photo-full v-b', label: '밝은 황금' },
-    { id: 'photo-full v-c', label: '깊은 금' },
-  ]},
-]
-const typeOf = (look) => (look.startsWith('photo-full') ? 'B' : 'A');
+ * 시안을 여럿 만들어 화면에서 갈아 보던 전환기는 확정 후 걷어냈다 —
+ * 다른 안(배경 이미지 전면·먹빛+금·샴페인 등)이 필요하면 git 이력에 남아 있다. */
+const BRAND_THEME = 'gold-light'
 
 export const LoginScreen = ({ onLogin }) => {
-  /* 기본값은 LOOKS 의 id 와 **정확히 같아야** 한다 — 'photo-full' 로 두면
-     보이는 화면은 맞는데 어느 칩도 선택 표시가 안 된다(id 는 'photo-full v-a'). */
-  const [look, setLook] = useState(() => localStorage.getItem('loginLook') || 'gold-light');
-  const pickLook = (id) => { setLook(id); localStorage.setItem('loginLook', id); };
-  const activeType = typeOf(look);
   // 회사코드는 마지막 로그인 값을 기억한다(같은 PC는 대개 같은 회사에서 쓴다).
   const [company, setCompany] = useState(() => localStorage.getItem('companyCode') || '');
   const [id, setId] = useState('');
@@ -107,13 +73,13 @@ export const LoginScreen = ({ onLogin }) => {
   return (
     /* login-shell — 배경 이미지를 **화면 전체**에 까는 자리(테마가 photo-full 일 때).
        나머지 테마에서는 아무것도 안 하고 예전처럼 좌우 2단으로만 선다. */
-    <div className={`login-shell ${look}`}
+    <div className={`login-shell ${BRAND_THEME}`}
       style={{ display: 'flex', minHeight: '100vh', background: '#fff' }}>
 
       {/* 좌측 브랜드 패널 — 좁은 화면에선 CSS(.login-brand)가 숨긴다 */}
       {/* ⚠ padding·display 를 인라인으로 두지 않는다 — 인라인은 CSS 를 이겨서
           테마가 여백·배치를 못 바꾼다(photo-full 이 제목을 위로 올리지 못했다). */}
-      <div className={`login-brand ${look}`}>
+      <div className={`login-brand ${BRAND_THEME}`}>
         {/* 배경 장식 — 색은 .login-brand 테마가 정한다(CSS 변수) */}
         <div style={{
           position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden',
@@ -306,29 +272,6 @@ export const LoginScreen = ({ onLogin }) => {
             </div>
           </form>
         </div>
-      </div>
-
-      {/* ── 시안 전환기(임시) ─────────────────────────────────────
-          고르고 나면 이 블록과 위의 LOOKS·look state 를 지운다. */}
-      <div className="login-variants">
-        {LOOKS.map(group => (
-          <div key={group.type} className="login-variant-row">
-            <button type="button"
-              className={`login-variant-type ${activeType === group.type ? 'active' : ''}`}
-              onClick={() => pickLook(group.items[0].id)}>
-              {group.typeLabel}
-            </button>
-            <div className="login-variant-chips">
-              {group.items.map(it => (
-                <button key={it.id} type="button"
-                  className={`login-variant-btn ${look === it.id ? 'active' : ''}`}
-                  onClick={() => pickLook(it.id)}>
-                  {it.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );
