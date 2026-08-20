@@ -1,7 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday, kstDate } = require('../db')
-const { dueDatesToGenerate, LOOKAHEAD_DAYS, pendingCycle, cashDateOf, PAY_TERMS } = require('../lib/recurrence')
+const { dueDatesToGenerate, LOOKAHEAD_DAYS, pendingCycle, cashDateOf, PAY_TERMS, PAY_TERMS_WITH_DAY } = require('../lib/recurrence')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError, amountError } = require('../lib/ledger')
 const { closedPeriodError } = require('../lib/closing')
@@ -16,6 +16,9 @@ const router = Router()
 
 /** 결제조건은 정해진 셋 중 하나만 받는다 — 모르는 값이 들어오면 날짜 계산이 조용히 어긋난다 */
 const payTermOf = (v) => (PAY_TERMS.includes(v) ? v : 'net30')
+/* 'N일'을 쓰는 조건에서만 값을 남긴다 — 조건을 바꿔도 옛 N 이 붙어 다니면
+   나중에 그 조건으로 되돌렸을 때 예전 날짜가 되살아난다. */
+const payDayFor = (term, v) => (PAY_TERMS_WITH_DAY.includes(term) ? Math.min(Math.max(parseInt(v, 10) || 1, 1), 31) : 0)
 /* 수정에서 pay_term 을 **안 보냈으면 기존 값을 유지**한다.
    payTermOf(undefined) 가 'net30' 이라, 부분 바디로 수정하면 저장해 둔 '당일 출금'이
    말없이 30일 뒤로 되돌아갔다 — 이 핸들러가 고치려던 결함과 같은 종류가 반대 방향으로 열려 있었다. */
@@ -46,8 +49,8 @@ router.post('/', async (req, res, next) => {
     if (!(Number(amount) > 0)) return res.status(400).json({ error: '금액을 입력해주세요' })
     const id = randomUUID()
     await req.db.execute(
-      'INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id, pay_term) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-      [id, vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, payTermOf(req.body.pay_term)]
+      'INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id, pay_term, pay_day) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [id, vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, payTermOf(req.body.pay_term), payDayFor(payTermOf(req.body.pay_term), req.body.pay_day)]
     )
     res.json({ id })
   } catch (e) { next(e) }
@@ -56,11 +59,12 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const { vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id } = req.body
-    const [[cur]] = await req.db.execute('SELECT pay_term FROM recurring_expenses WHERE id = ?', [req.params.id])
+    const [[cur]] = await req.db.execute('SELECT pay_term, pay_day FROM recurring_expenses WHERE id = ?', [req.params.id])
     if (!cur) return res.status(404).json({ error: 'Not found' })
     const [result] = await req.db.execute(
-      'UPDATE recurring_expenses SET vendor_id=?, contract_id=?, category=?, amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=?, pay_term=? WHERE id=?',
-      [vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, payTermFor(req.body.pay_term, cur.pay_term), req.params.id]
+      'UPDATE recurring_expenses SET vendor_id=?, contract_id=?, category=?, amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=?, pay_term=?, pay_day=? WHERE id=?',
+      [vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, payTermFor(req.body.pay_term, cur.pay_term),
+       payDayFor(payTermFor(req.body.pay_term, cur.pay_term), req.body.pay_day ?? cur.pay_day), req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
@@ -185,7 +189,7 @@ async function createExpenseInvoice(conn, r, target, { paid = false, accountId =
   await conn.execute(
     'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
     [invId, invoice_no, 'received', r.vendor_id || null, r.contract_id || null, supply, vat, total,
-     target, cashDateOf(target, r.pay_term), paid ? '지급 완료' : '지급 대기', acctId, r.id,
+     target, cashDateOf(target, r.pay_term, r.pay_day), paid ? '지급 완료' : '지급 대기', acctId, r.id,
      `정기지출 · ${r.category || ''}`.trim(), tax_type]
   )
   if (paid) {

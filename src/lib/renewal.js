@@ -171,3 +171,34 @@ export const cycleMonthsHint = (startDate, day, period, today) => {
   }
   return `${base}매월 ${d}일`;
 };
+
+/* ── 결제조건 ───────────────────────────────────────────────────
+ * 회차일(세금계산서를 끊는 날)과 **돈이 오가는 날**은 다르다.
+ * 국내 B2B 에서 제일 흔한 조건은 '30일 후'가 아니라 **익월 지정일**이다
+ * ("이번 달 것은 다음 달 10일에 넣어드립니다"). net30 으로 뭉뚱그리면
+ * 자금 현황의 예정일이 며칠씩 어긋난다 — 8/5 회차를 익월 10일로 받는 거래처면
+ * 실제는 9/10 인데 net30 은 9/4 로 잡는다.
+ * ⚠ 값(value)은 서버 lib/recurrence.js PAY_TERMS 와 **글자까지 같아야** 한다.
+ */
+export const PAY_TERM_OPTS = [
+  { value: 'immediate', label: '당일' },
+  { value: 'net30',     label: '30일 후' },
+  { value: 'dom',       label: '당월 N일', needsDay: true },
+  { value: 'eom',       label: '당월 말일' },
+  { value: 'nm_day',    label: '익월 N일', needsDay: true },
+  { value: 'nm_eom',    label: '익월 말일' },
+];
+export const payTermNeedsDay = (t) => !!PAY_TERM_OPTS.find(o => o.value === t)?.needsDay;
+
+/** 고른 조건을 한 문장으로. verb: '빠져요'(지출) | '들어와요'(청구) */
+export const payTermHint = (term, day, verb) => {
+  const d = Math.min(Math.max(Number(day) || 1, 1), 31);
+  switch (term) {
+    case 'immediate': return `회차일 당일에 ${verb}.`;
+    case 'dom':       return `회차가 있는 달 ${d}일에 ${verb}. (그 달에 없는 날짜면 말일)`;
+    case 'eom':       return `회차가 있는 달 말일에 ${verb}.`;
+    case 'nm_day':    return `회차 다음 달 ${d}일에 ${verb}. 국내 B2B에서 가장 흔한 조건이에요.`;
+    case 'nm_eom':    return `회차 다음 달 말일에 ${verb}.`;
+    default:          return `회차일부터 30일 뒤에 ${verb}.`;
+  }
+};

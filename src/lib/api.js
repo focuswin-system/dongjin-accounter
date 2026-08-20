@@ -797,6 +797,7 @@ export const api = {
         vatMode: r.vat_mode,
         // 결제조건 — 이게 빠져 있어서 수정 화면이 늘 '30일 후'로 되돌아갔다
         payTerm: r.pay_term || 'net30',
+        payDay: Number(r.pay_day) || 0,
         active: r.active === 1,
         lastGenerated: r.last_generated,
       }))
@@ -819,6 +820,7 @@ export const api = {
         end_date: data.end_date ?? data.endDate ?? null,
         account_id: data.account_id ?? data.accountId ?? null,
         pay_term: data.pay_term ?? data.payTerm,
+        pay_day: data.pay_day ?? data.payDay,
       }})
       return { ok: true, id: result.id }
     } catch (e) { return { ok: false, error: e.message } }
@@ -840,6 +842,7 @@ export const api = {
         end_date: data.end_date ?? data.endDate ?? null,
         account_id: data.account_id ?? data.accountId ?? null,
         pay_term: data.pay_term ?? data.payTerm,
+        pay_day: data.pay_day ?? data.payDay,
       }})
       return { ok: true }
     } catch (e) { return { ok: false, error: e.message } }
@@ -892,6 +895,7 @@ export const api = {
         accountId: r.account_id,
         // 회차일과 실제로 입금되는 날은 다르다 — 자금 예측이 이 값으로 날짜를 세운다
         payTerm: r.pay_term || 'net30',
+        payDay: Number(r.pay_day) || 0,
         active: r.active === 1,
         lastGenerated: r.last_generated,
       }))
@@ -912,6 +916,7 @@ export const api = {
         end_date: data.endDate,
         account_id: data.accountId,
         pay_term: data.payTerm,
+        pay_day: data.payDay,
       }})
       return { ok: true, id: result.id }
     } catch { return { ok: false } }
@@ -931,6 +936,7 @@ export const api = {
         end_date: data.endDate ?? data.end_date ?? null,
         account_id: data.accountId ?? data.account_id ?? null,
         pay_term: data.payTerm ?? data.pay_term,
+        pay_day: data.payDay ?? data.pay_day,
       }})
       return { ok: true }
     } catch (e) { return { ok: false, error: e.message } }

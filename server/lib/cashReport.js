@@ -243,7 +243,7 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
          발행 버튼을 눌렀는지에 따라 예측이 달라지면 문서를 못 믿는다.
          발행 경로와 같은 상수를 쓴다(lib/recurrence.js PAYMENT_TERM_DAYS). */
       for (const cycle of dueDatesToGenerate(r, from, { horizonDays })) {
-        const natural = cashDateOf(cycle, r.pay_term)
+        const natural = cashDateOf(cycle, r.pay_term, r.pay_day)
         /* 지난 회차를 그냥 버리면 안 된다.
          *
          * 예전엔 `due < from` 이면 continue 했다. 그런데 아직 청구서가 안 된 과거 회차는

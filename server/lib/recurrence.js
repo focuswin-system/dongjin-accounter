@@ -102,16 +102,47 @@ function dueDatesToGenerate(rec, today = new Date(), opts = {}) {
 const PAYMENT_TERM_DAYS = 30
 
 /** 결제조건 — 회차일에서 실제로 돈이 오가는 날을 구한다. 발행 경로와 예측이 함께 쓴다. */
-const PAY_TERMS = ['immediate', 'net30', 'eom']
-function cashDateOf(cycleDate, payTerm) {
+/* ⚠ 값을 지우지 말 것 — 저장된 recurring_expenses.pay_term / recurring_invoices.pay_term 이
+   이 문자열을 그대로 갖고 있다. 목록에서 빠지면 그 규칙은 조용히 net30 으로 떨어진다. */
+const PAY_TERMS = ['immediate', 'net30', 'dom', 'eom', 'nm_day', 'nm_eom']
+/* 'N일'을 받는 조건 — 서버·화면이 같은 판정을 써야 한 쪽만 날짜 칸을 내는 일이 없다 */
+const PAY_TERMS_WITH_DAY = ['dom', 'nm_day']
+/**
+ * 회차일 → **돈이 실제로 오가는 날**.
+ *
+ * ── 왜 조건이 여럿인가 ──
+ * 회차일(세금계산서를 끊는 날)과 결제일은 다르다. 그리고 국내 B2B 에서 제일 흔한 조건은
+ * '30일 후'가 아니라 **익월 지정일**이다("이번 달 것은 다음 달 10일에 넣어드립니다").
+ * 이걸 net30 으로 뭉뚱그리면 자금 현황의 출금 예정일이 며칠씩 어긋난다 —
+ * 8/5 회차를 익월 10일로 받는 거래처면 실제는 9/10 인데 net30 은 9/4 로 잡는다.
+ *
+ *   immediate  당일        자동이체처럼 그 날 바로
+ *   net30      30일 후     날짜 기준 30일(관례적 기본값)
+ *   dom        당월 N일    그 달 지정일
+ *   eom        당월 말일
+ *   nm_day     익월 N일    ← 국내 B2B 최다
+ *   nm_eom     익월 말일
+ *
+ * payDay 는 dom·nm_day 에서만 쓴다. 그 달 말일보다 크면 말일로 clamp 한다
+ * (31일 지정 → 2월은 28/29일). 값이 없으면 1일로 본다 — 날짜를 지어내는 것보다
+ * 그 달의 첫날로 확정하는 편이 예측 가능하다.
+ */
+function cashDateOf(cycleDate, payTerm, payDay) {
   const term = PAY_TERMS.includes(payTerm) ? payTerm : 'net30'
   if (term === 'immediate') return cycleDate
-  if (term === 'eom') {
-    const [y, m] = String(cycleDate).split('-').map(Number)
-    const last = new Date(y, m, 0).getDate()
-    return `${y}-${String(m).padStart(2, '0')}-${String(last).padStart(2, '0')}`
-  }
-  return addDays(cycleDate, PAYMENT_TERM_DAYS)
+  if (term === 'net30') return addDays(cycleDate, PAYMENT_TERM_DAYS)
+
+  const [y, m] = String(cycleDate).split('-').map(Number)
+  if (!y || !m) return addDays(cycleDate, PAYMENT_TERM_DAYS)
+  // 익월 계열은 달을 하나 민다(12월 → 다음 해 1월)
+  const next = term === 'nm_day' || term === 'nm_eom'
+  const ty = next && m === 12 ? y + 1 : y
+  const tm = next ? (m === 12 ? 1 : m + 1) : m
+  const last = new Date(ty, tm, 0).getDate()
+  const day = (term === 'eom' || term === 'nm_eom')
+    ? last
+    : Math.min(Math.max(Number(payDay) || 1, 1), last)
+  return `${ty}-${String(tm).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
 // '오늘·임박'으로 볼 범위(일). 화면의 구획과 서버 판정이 어긋나지 않게 여기 한 곳에서 정한다.
@@ -185,5 +216,5 @@ async function restoreLastGenerated(db, table, recurringId, removedDate) {
 
 module.exports = {
   dueDatesToGenerate, fmtDate, daysInMonth, addDays, LOOKAHEAD_DAYS, restoreLastGenerated,
-  SOON_DAYS, cycleState, pendingCycle, PAYMENT_TERM_DAYS, PAY_TERMS, cashDateOf,
+  SOON_DAYS, cycleState, pendingCycle, PAYMENT_TERM_DAYS, PAY_TERMS, PAY_TERMS_WITH_DAY, cashDateOf,
 }

@@ -9,7 +9,7 @@ import { RecurringCycles, useRecurringCycles, cycleSummaryByRule } from '../lib/
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { BackfillWizard } from '../lib/components/BackfillWizard'
 import { normBizNo, normVendorName } from '../lib/normalize'
-import { cycleDayLabel, cycleMonthsHint } from '../lib/renewal'
+import { cycleDayLabel, cycleMonthsHint, PAY_TERM_OPTS, payTermNeedsDay, payTermHint } from '../lib/renewal'
 import { bizTypeOptions, bizItemOptions } from '../lib/bizTypes'
 import { api, minuteOf } from '../lib/api'
 
@@ -2109,7 +2109,7 @@ const catVatToMode = (catVat) => (catVat === '10%' ? 'exclusive' : catVat === '�
 // reloadVendors: 부모가 거래처 목록을 다시 불러오게 하는 콜백(추가 후 새 id로 잡기 위함).
 // editing: 수정 대상(api.getRecurringExpenses 형태, camelCase). null이면 등록.
 const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], accounts = [], addGubu = 'A', reloadVendors }) => {
-  const empty = { vendor_id: "", category: "", amount: "", vat_mode: "exclusive", period: "monthly", day_of_month: "1", start_date: todayStr(), end_date: "", account_id: "", pay_term: "net30" }
+  const empty = { vendor_id: "", category: "", amount: "", vat_mode: "exclusive", period: "monthly", day_of_month: "1", start_date: todayStr(), end_date: "", account_id: "", pay_term: "net30", pay_day: 1 }
   const [form, setForm] = useState(empty)
   // 비목은 반드시 실제 비목 마스터에서 고른다. 예전엔 ["임차료","통신비"…]를 하드코딩해서,
   // 마스터 이름과 한 글자라도 다르면(예: 마스터는 '통신비(관리)') 회차를 청구서로 만들 때
@@ -2127,7 +2127,7 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
         amount: editing.amount ? String(editing.amount) : "",
         vat_mode: editing.vatMode || "exclusive",
         period: editing.period || "monthly", day_of_month: String(editing.dayOfMonth || 1),
-        pay_term: editing.payTerm || editing.pay_term || "net30",
+        pay_term: editing.payTerm || editing.pay_term || "net30", pay_day: editing.payDay || editing.pay_day || 1,
         start_date: editing.startDate || todayStr(), end_date: editing.endDate || "",
         account_id: editing.accountId || "",
       })
@@ -2148,6 +2148,7 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
       amount: parseInt(String(form.amount).replace(/[^0-9]/g, "")) || 0,
       day_of_month: parseInt(form.day_of_month) || 1,
       pay_term: form.pay_term || 'net30',
+      pay_day: parseInt(form.pay_day, 10) || 1,
       end_date: form.end_date || null,
     })
     onClose()
@@ -2219,15 +2220,21 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
         <div>
           <label className="label" style={{ marginBottom: 8 }}>결제조건</label>
           <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
-            {[['immediate', '당일 출금'], ['net30', '30일 후'], ['eom', '그 달 말일']].map(([v, l]) => (
-              <button key={v} type="button" className={`chip ${(form.pay_term || 'net30') === v ? 'active' : ''}`}
-                onClick={() => f('pay_term', v)}>{l}</button>
+            {PAY_TERM_OPTS.map(o => (
+              <button key={o.value} type="button" className={`chip ${(form.pay_term || 'net30') === o.value ? 'active' : ''}`}
+                onClick={() => f('pay_term', o.value)}>{o.label}</button>
             ))}
+            {/* 'N일' 조건에서만 날짜 칸을 낸다 — 안 쓰는 조건에 칸이 떠 있으면 저장 안 되는 값이 된다 */}
+            {payTermNeedsDay(form.pay_term) && (
+              <div className="row gap-6" style={{ alignItems: 'center' }}>
+                <input className="input num" type="number" min="1" max="31" style={{ width: 76 }}
+                  value={form.pay_day ?? 1} onChange={e => f('pay_day', e.target.value)}/>
+                <span className="text-sm text-muted">일</span>
+              </div>
+            )}
           </div>
           <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-            {form.pay_term === 'immediate' ? '자동이체처럼 그 날 바로 빠지는 돈이에요.'
-              : form.pay_term === 'eom' ? '그 달 말일에 한꺼번에 빠져요.'
-              : '세금계산서를 받고 30일 뒤에 결제해요.'}
+            {payTermHint(form.pay_term, form.pay_day, '빠져요')}
           </div>
         </div>
         <div className="row gap-12">
@@ -2475,7 +2482,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
 // ── 정기 청구(고정수입) 패널 ──────────────────────────────────────
 const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, contracts, accounts, reloadVendors }) => {
   const toast = useToast()
-  const empty = { vendorId: "", contractId: "", item: "", supply: "", vatMode: "exclusive", period: "monthly", dayOfMonth: "1", startDate: todayStr(), endDate: "", accountId: "", payTerm: "net30" }
+  const empty = { vendorId: "", contractId: "", item: "", supply: "", vatMode: "exclusive", period: "monthly", dayOfMonth: "1", startDate: todayStr(), endDate: "", accountId: "", payTerm: "net30", payDay: 1 }
   const [form, setForm] = useState(empty)
   useEffect(() => {
     if (!open) return
@@ -2485,7 +2492,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
       vatMode: editing.vatMode || "exclusive", period: editing.period || "monthly",
       dayOfMonth: String(editing.dayOfMonth || 1), startDate: editing.startDate || todayStr(),
       endDate: editing.endDate || "", accountId: editing.accountId || "",
-      payTerm: editing.payTerm || "net30",
+      payTerm: editing.payTerm || "net30", payDay: editing.payDay || 1,
     } : empty)
   }, [open, editing])
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
@@ -2522,6 +2529,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
       endDate: form.endDate || null,
       accountId: form.accountId || null,
       payTerm: form.payTerm || 'net30',
+      payDay: parseInt(form.payDay, 10) || 1,
     })
     onClose()
   }
@@ -2587,15 +2595,21 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
         <div>
           <label className="label" style={{ marginBottom: 8 }}>결제조건</label>
           <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
-            {[['immediate', '당일 입금'], ['net30', '30일 후'], ['eom', '그 달 말일']].map(([v, l]) => (
-              <button key={v} type="button" className={`chip ${(form.payTerm || 'net30') === v ? 'active' : ''}`}
-                onClick={() => f('payTerm', v)}>{l}</button>
+            {PAY_TERM_OPTS.map(o => (
+              <button key={o.value} type="button" className={`chip ${(form.payTerm || 'net30') === o.value ? 'active' : ''}`}
+                onClick={() => f('payTerm', o.value)}>{o.label}</button>
             ))}
+            {/* 'N일' 조건에서만 날짜 칸을 낸다 — 안 쓰는 조건에 칸이 떠 있으면 저장 안 되는 값이 된다 */}
+            {payTermNeedsDay(form.payTerm) && (
+              <div className="row gap-6" style={{ alignItems: 'center' }}>
+                <input className="input num" type="number" min="1" max="31" style={{ width: 76 }}
+                  value={form.payDay ?? 1} onChange={e => f('payDay', e.target.value)}/>
+                <span className="text-sm text-muted">일</span>
+              </div>
+            )}
           </div>
           <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-            {form.payTerm === 'immediate' ? '청구한 날 바로 들어오는 돈이에요.'
-              : form.payTerm === 'eom' ? '그 달 말일에 한꺼번에 들어와요.'
-              : '세금계산서를 보내고 30일 뒤에 받아요.'}
+            {payTermHint(form.payTerm, form.payDay, '들어와요')}
           </div>
         </div>
         <div className="row gap-12">

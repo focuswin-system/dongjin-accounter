@@ -1308,6 +1308,11 @@ async function initDb(conn) {
 
     await ensureColumn('recurring_expenses', 'pay_term', "pay_term VARCHAR(12) NOT NULL DEFAULT 'net30'")
     await ensureColumn('recurring_invoices', 'pay_term', "pay_term VARCHAR(12) NOT NULL DEFAULT 'net30'")
+    /* 결제조건이 '당월 N일'·'익월 N일'일 때의 N. 다른 조건에서는 안 쓴다(0).
+       조건 문자열에 'nm_day:10' 처럼 끼워 넣지 않는다 — 한 칸에 두 값을 담으면
+       조회·집계마다 파싱이 붙고, 잘못 저장된 문자열 하나가 조용히 net30 으로 떨어진다. */
+    await ensureColumn('recurring_expenses', 'pay_day', 'pay_day TINYINT NOT NULL DEFAULT 0')
+    await ensureColumn('recurring_invoices', 'pay_day', 'pay_day TINYINT NOT NULL DEFAULT 0')
 
     await ensureColumn('accounts', 'card_pay_day', 'card_pay_day TINYINT NOT NULL DEFAULT 0')
     await ensureColumn('accounts', 'card_pay_account_id', 'card_pay_account_id VARCHAR(36)')

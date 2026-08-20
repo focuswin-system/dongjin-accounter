@@ -1,7 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday, kstDate } = require('../db')
-const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS, pendingCycle , PAYMENT_TERM_DAYS, cashDateOf, PAY_TERMS } = require('../lib/recurrence')
+const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS, pendingCycle , PAYMENT_TERM_DAYS, cashDateOf, PAY_TERMS, PAY_TERMS_WITH_DAY } = require('../lib/recurrence')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError, amountError } = require('../lib/ledger')
 const { taxTypeOfMode, recurFromSupply, recurVat } = require('../lib/vat')
@@ -13,6 +13,7 @@ const router = Router()
 
 /** 결제조건은 정해진 셋 중 하나만 받는다(정기지출과 같은 규칙) */
 const payTermOf = (v) => (PAY_TERMS.includes(v) ? v : 'net30')
+const payDayFor = (term, v) => (PAY_TERMS_WITH_DAY.includes(term) ? Math.min(Math.max(parseInt(v, 10) || 1, 1), 31) : 0)
 /* 수정에서 pay_term 을 **안 보냈으면 기존 값을 유지**한다.
    payTermOf(undefined) 가 'net30' 이라, 부분 바디로 수정하면 저장해 둔 '당일 출금'이
    말없이 30일 뒤로 되돌아갔다 — 이 핸들러가 고치려던 결함과 같은 종류가 반대 방향으로 열려 있었다. */
@@ -55,8 +56,8 @@ router.post('/', async (req, res, next) => {
        비워 두면 **등록일부터** 세도록 엔진이 받아준다(lib/recurrence.js 앵커 폴백).
        빈 문자열은 '미지정'을 뜻한다. */
     await req.db.execute(
-      'INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id, pay_term) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-      [id, vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', period||'monthly', day_of_month||1, start_date||'', end_date||null, account_id||null, payTermOf(req.body.pay_term)]
+      'INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id, pay_term, pay_day) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [id, vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', period||'monthly', day_of_month||1, start_date||'', end_date||null, account_id||null, payTermOf(req.body.pay_term), payDayFor(payTermOf(req.body.pay_term), req.body.pay_day)]
     )
     res.json({ id })
   } catch (e) { next(e) }
@@ -66,11 +67,12 @@ router.put('/:id', async (req, res, next) => {
   try {
     const { vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id } = req.body
     // pay_term 이 빠져 있어서, 등록할 때 고른 결제조건을 수정 화면에서 바꿔도 저장되지 않았다
-    const [[cur]] = await req.db.execute('SELECT pay_term FROM recurring_invoices WHERE id = ?', [req.params.id])
+    const [[cur]] = await req.db.execute('SELECT pay_term, pay_day FROM recurring_invoices WHERE id = ?', [req.params.id])
     if (!cur) return res.status(404).json({ error: 'Not found' })
     const [result] = await req.db.execute(
-      'UPDATE recurring_invoices SET vendor_id=?, contract_id=?, item=?, supply_amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=?, pay_term=? WHERE id=?',
-      [vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, payTermFor(req.body.pay_term, cur.pay_term), req.params.id]
+      'UPDATE recurring_invoices SET vendor_id=?, contract_id=?, item=?, supply_amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=?, pay_term=?, pay_day=? WHERE id=?',
+      [vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, payTermFor(req.body.pay_term, cur.pay_term),
+       payDayFor(payTermFor(req.body.pay_term, cur.pay_term), req.body.pay_day ?? cur.pay_day), req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
@@ -224,7 +226,7 @@ router.post('/:id/issue', async (req, res, next) => {
     await conn.execute(
       'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, invoice_no, 'issued', r.vendor_id || null, r.contract_id || null, supply, vat, total,
-       target, cashDateOf(target, r.pay_term), paid ? '입금 완료' : '입금 예정', acctId, r.id,
+       target, cashDateOf(target, r.pay_term, r.pay_day), paid ? '입금 완료' : '입금 예정', acctId, r.id,
        `정기청구 · ${r.item || ''}`.trim(), invTaxType(r)]
     )
     // 기입금 처리: 실제 입금 거래 + 매칭까지 (주문 상세의 수금·미수금에 반영)
@@ -286,7 +288,7 @@ router.post('/issue-missed', async (req, res, next) => {
         const vat    = recurFromSupply(supply, effVatMode(r)).vat
         const total  = supply + vat
         // 결제조건을 따른다 — 건별 발행과 같은 함수여야 어느 버튼을 눌러도 날짜가 같다
-        const dueAt  = cashDateOf(dueStr, r.pay_term)
+        const dueAt  = cashDateOf(dueStr, r.pay_term, r.pay_day)
         const id = randomUUID()
         /* 마감된 달이 하나라도 섞이면 전체를 거절한다 — 회차 순서를 건너뛸 수 없으므로
          * 일부만 처리하면 남은 회차를 영영 못 넣는다(대출·적금 일괄과 같은 규칙). */
@@ -448,7 +450,7 @@ router.post('/:id/backfill', async (req, res, next) => {
                                issued_at, due_at, status, account_id, recurring_id, memo, tax_type, backfill_batch)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [id, invoice_no, 'issued', r.vendor_id || null, r.contract_id || null, supply, vat, total,
-         due, cashDateOf(due, r.pay_term), paid ? '입금 완료' : '입금 예정', acctId, r.id,
+         due, cashDateOf(due, r.pay_term, r.pay_day), paid ? '입금 완료' : '입금 예정', acctId, r.id,
          `소급 등록 · ${r.item || ''}`.trim(), invTaxType(r), batch])
 
       if (paid) {
