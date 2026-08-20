@@ -11,7 +11,7 @@ import { LinkTxnDrawer } from '../lib/components/LinkTxnDrawer'
    따로 만들어 두니 청구서 쪽 개선(목록 잘림·칸 자동확장·Tab 확정)이 주문에는 하나도 안 왔다. */
 import { InvoiceLines, CONTRACT_COLUMNS, CONTRACT_PROGRESS_COLUMNS } from '../lib/components/InvoiceLines'
 import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
-import { BILLING_MODES, TERM_MODES, BILLING_PERIODS, billingLabel, termLabel, periodLabel, periodMonths,
+import { BILLING_MODES, TERM_MODES, BILLING_PERIODS, billingLabel, termLabel, periodLabel, periodMonths, cycleMonthsHint,
          isRecurring, isProgress, isOpenEnded, hasTotal, amountLabel, renewalInfo, nextEndDate, recurringMismatch } from '../lib/renewal'
 
 const numOnly = (v) => String(v ?? '').replace(/[^0-9]/g, '');
@@ -189,6 +189,11 @@ const ContractTermFields = ({ form, set }) => {
                   onChange={e => set(f => ({ ...f, billing_day: numOnly(e.target.value).slice(0, 2) }))} placeholder="1"/>
                 <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>일</span>
               </div>
+            </div>
+            {/* 분기·년은 '몇 월'인지가 이 칸에 없다 — 월은 주문 시작일이 정한다(서버 recurrence.js).
+                적어 주지 않으면 '분기면 몇 월에 나가나'가 화면 어디에도 없다. */}
+            <div className="text-xs text-muted2" style={{ alignSelf: 'center', marginTop: 18 }}>
+              {cycleMonthsHint(form.start_date, form.billing_day, form.billing_period, localToday())}
             </div>
           </div>
           <ContractItemsEditor form={form} set={set} itemMaster={itemMaster} reloadMaster={reloadMaster} withQty
@@ -1209,7 +1214,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                 <div className="text-sm text-muted" style={{ marginTop: 4 }}>
                   {(c.recurrings || []).length === 0
                     ? `이 주문은 ${periodLabel(c.billing_period)}마다 ${fmtNum(c.unit_amount || 0)}원이 ${isPurchase ? '나가는' : '청구되는'} 주문인데, 아직 ${isPurchase ? '정기지출' : '정기청구'}이 걸려 있지 않아요. 지금은 ${isPurchase ? '지출이' : '청구서가'} 자동 생성되지 않습니다.`
-                    : `${periodLabel(c.billing_period)} ${fmtNum(c.unit_amount || 0)}원 · 매월 ${c.billing_day || 1}일${c.end_date ? ` · ${c.end_date}까지` : ' · 해지할 때까지'}`}
+                    : `${periodLabel(c.billing_period)} ${fmtNum(c.unit_amount || 0)}원 · ${cycleMonthsHint(c.start_date, c.billing_day, c.billing_period, localToday())}${c.end_date ? ` · ${c.end_date}까지` : ' · 해지할 때까지'}`}
                 </div>
                 {/* 정기청구는 주문에서 관리한다(기준정보에 두면 워크플로우가 끊긴다).
                     주문이 원본, 정기청구는 실행 장치 → 어긋나면 '주문 조건으로 맞추기'로 되돌린다. */}

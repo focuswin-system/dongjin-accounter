@@ -9,6 +9,7 @@ import { RecurringCycles, useRecurringCycles, cycleSummaryByRule } from '../lib/
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { BackfillWizard } from '../lib/components/BackfillWizard'
 import { normBizNo, normVendorName } from '../lib/normalize'
+import { cycleDayLabel, cycleMonthsHint } from '../lib/renewal'
 import { bizTypeOptions, bizItemOptions } from '../lib/bizTypes'
 import { api, minuteOf } from '../lib/api'
 
@@ -2204,8 +2205,12 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
             </div>
           </div>
           <div style={{ flex: 1 }}>
-            <label className="label">생성 일 (매월 N일)</label>
+            <label className="label">생성 일 ({cycleDayLabel(form.period)})</label>
             <input className="input" type="number" min="1" max="31" value={form.day_of_month} onChange={e => f("day_of_month", e.target.value)}/>
+            {/* 분기·년은 '몇 월'인지가 이 칸에 없다 — 월은 시작일이 정한다. 그걸 적어 준다. */}
+            <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+              {cycleMonthsHint(form.start_date, form.day_of_month, form.period, todayStr())}
+            </div>
           </div>
         </div>
         {/* 결제조건 — 회차일과 **돈이 빠지는 날**이 다르다.
@@ -2570,8 +2575,11 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
             </div>
           </div>
           <div style={{ flex: 1 }}>
-            <label className="label">청구일 (매월 N일)</label>
+            <label className="label">청구일 ({cycleDayLabel(form.period)})</label>
             <input className="input" type="number" min="1" max="31" value={form.dayOfMonth} onChange={e => f("dayOfMonth", e.target.value)}/>
+            <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+              {cycleMonthsHint(form.startDate, form.dayOfMonth, form.period, todayStr())}
+            </div>
           </div>
         </div>
         {/* 결제조건 — 청구일과 **돈이 들어오는 날**은 다르다. 자금 예측이 이 값으로 입금일을 세운다.

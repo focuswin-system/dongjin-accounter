@@ -140,3 +140,34 @@ export const recurringMismatch = (c, rec) => {
   }
   return out;
 };
+
+/* ── 회차가 '몇 월 며칠'인지 ────────────────────────────────────────
+ *
+ * 주기(월·분기·년)와 일자(day_of_month/billing_day)만 화면에 있으면
+ * **분기·년이 몇 월인지 알 수 없다.** 실제 규칙은 서버(lib/recurrence.js)에 있다:
+ *   달  = 시작일이 속한 달에서 3개월(분기)·12개월(년)씩
+ *   일  = day_of_month (그 달 말일보다 크면 말일로 clamp)
+ * 즉 **월은 시작일이 정한다.** 화면이 그걸 말해주지 않아 "분기는 몇 월인가"가 물음으로 남았다.
+ */
+
+/** 일자 인풋 라벨. '매월 N일'을 주기와 무관하게 쓰면 분기·년에서 거짓말이 된다. */
+export const cycleDayLabel = (period) =>
+  period === 'yearly' ? '매년 N일' : period === 'quarterly' ? '분기마다 N일' : '매월 N일';
+
+/**
+ * 회차가 놓이는 달을 사람 말로. 예) '2·5·8·11월 25일'
+ * startDate 가 없으면 등록일(오늘)이 앵커가 되므로 그렇게 알려준다.
+ */
+export const cycleMonthsHint = (startDate, day, period, today) => {
+  const d = Math.min(Math.max(Number(day) || 1, 1), 31);
+  const src = String(startDate || today || '');
+  const sm = Number(src.split('-')[1]);
+  if (!sm) return null;
+  const base = startDate ? '' : '시작일을 비우면 등록일 기준 — ';
+  if (period === 'yearly')    return `${base}매년 ${sm}월 ${d}일`;
+  if (period === 'quarterly') {
+    const ms = [0, 3, 6, 9].map(k => ((sm - 1 + k) % 12) + 1).sort((a, b) => a - b);
+    return `${base}${ms.join('·')}월 ${d}일`;
+  }
+  return `${base}매월 ${d}일`;
+};
