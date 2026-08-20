@@ -853,8 +853,8 @@ async function initDb(conn) {
         name           VARCHAR(200) NOT NULL,
         bank           VARCHAR(200),
         vendor_id      VARCHAR(36),
-        kind           ENUM('installment','deposit','guarantee') NOT NULL DEFAULT 'installment',
-        principal      BIGINT DEFAULT 0,          -- 예금: 예치 원금 / 적금: 0(납입으로 쌓인다)
+        kind           ENUM('installment','deposit','guarantee','pension') NOT NULL DEFAULT 'installment',
+        principal      BIGINT DEFAULT 0,          -- 예금·보증금·퇴직연금: 원금 / 적금: 0(납입으로 쌓인다)
         monthly_amount BIGINT DEFAULT 0,          -- 적금 월 납입액
         annual_rate    DECIMAL(6,3) DEFAULT 0,
         term_months    INT NOT NULL DEFAULT 12,
@@ -1292,11 +1292,29 @@ async function initDb(conn) {
      * 모자라는 날을 못 짚는다("지출 날짜를 못 지키면 신용 문제").
      *   immediate 회차일 당일   net30 회차일 +30일(기존값)   eom 그 달 말일
      * 기존 규칙은 전부 net30 으로 시작한다 — 지금 숫자가 바뀌지 않는다. */
-    /* savings.kind 에 'guarantee'(보증금)를 더한다. ENUM 은 CREATE TABLE IF NOT EXISTS 로는
-       안 바뀌므로 기존 DB에는 ALTER 가 필요하다. 값을 **넓히기만** 하는 변경이라 안전하고,
-       이미 넓혀져 있으면 같은 결과라 매번 돌아도 된다. */
-    await ensureEnum('savings', 'kind', ['installment', 'deposit', 'guarantee'],
+    /* savings.kind 에 'guarantee'(보증금)·'pension'(DB형 퇴직연금)을 더한다. ENUM 은
+       CREATE TABLE IF NOT EXISTS 로는 안 바뀌므로 기존 DB에는 ALTER 가 필요하다. 값을
+       **넓히기만** 하는 변경이라 안전하고, 이미 넓혀져 있으면 같은 결과라 매번 돌아도 된다. */
+    await ensureEnum('savings', 'kind', ['installment', 'deposit', 'guarantee', 'pension'],
       "NOT NULL DEFAULT 'installment'")
+
+    /* 1505 퇴직연금운용자산 — DB형 퇴직연금 적립금이 앉을 계정과목.
+     *
+     * data/account-subjects.json 에도 넣었지만 그 시딩은 **테이블이 비었을 때만** 돈다.
+     * 이미 쓰고 있는 회사는 계정과목이 채워져 있어 시딩을 건너뛰므로, 새 코드를 쓰려면
+     * 여기서 따로 넣어야 한다(넣지 않으면 일계표가 이름을 못 찾아 원문 코드로 찍힌다 —
+     * 예전에 'INC-204' 를 넣었다가 겪은 것과 같은 증상이다).
+     * 코드로 존재를 확인하고 없을 때만 넣는다 — 여러 번 돌아도 같다. */
+    {
+      const [[{ cnt }]] = await c.execute(
+        "SELECT COUNT(*) AS cnt FROM account_subjects WHERE code = '1505'")
+      if (cnt === 0) {
+        await c.execute(
+          `INSERT INTO account_subjects (acct_type, category, name, code, postable, note, sort_order)
+           VALUES ('자산', '투자자산', '퇴직연금운용자산', '1505', 1, ?, 24)`,
+          ['확정급여형(DB) 퇴직연금 적립금. 퇴직급여충당부채(2304)의 차감 형식으로 표시한다'])
+      }
+    }
 
     /* loans.method 에 'none'(상환 일정 없음)을 더한다.
      *

@@ -22,11 +22,29 @@
 const { dueDateOf } = require('./loan')
 
 /* 적금(매월 납입) / 예금(목돈 예치) / 보증금(임대차·관리비 — 주문이 끝나야 돌아온다)
+ *                                  / 퇴직연금(DB형 적립금 — 직원이 퇴직해야 나간다)
  *
  * 보증금을 넣는 이유: 받은 자금관리 엑셀의 '저축 현황'에 로봇랜드재단 임대료보증금
  * 5,100,000 · 관리비보증금 1,011,000 이 예적금과 나란히 서 있다. 성격도 같다 —
- * 회사 재산이지만 지금 쓸 수 없는 돈. 다만 **만기도 이자도 없어서** 회차·이자 계산은 하지 않는다. */
-const KINDS = ['installment', 'deposit', 'guarantee']
+ * 회사 재산이지만 지금 쓸 수 없는 돈. 다만 **만기도 이자도 없어서** 회차·이자 계산은 하지 않는다.
+ *
+ * ── 퇴직연금(pension)을 왜 따로 두나 ──
+ * fowin 은 이걸 accounts 에 '정기예금' 계좌로 넣어 두고 savings 에도 같은 금액을 넣어,
+ * 904,870 원이 **가용 잔액과 묶인 돈 양쪽에** 잡혀 있었다. 계좌로 두면 결제수단
+ * 드롭다운에도 서서 "퇴직연금 통장에서 외주비 지급"이 가능해진다 — 그래서 계좌가 아니다.
+ *
+ * ⚠ **DB형(확정급여)만** 여기 온다. 적립금이 회사 자산이고, 짝이 되는 퇴직급여충당부채
+ *   (2304)가 따로 선다. DC형은 납입하는 순간 회사 손을 떠나 근로자 것이 되므로 자산이
+ *   아니다 — 정기지출로 '퇴직급여(5202)' 비용 거래를 찍어야 하고, 여기 넣으면 이미
+ *   남의 돈이 된 금액이 회사 재산으로 계속 남는다.
+ *
+ * 보증금과 같이 **만기도 이자도 없다**. 만기가 있는 둘(예금·적금)과 갈리는 자리마다
+ * noMaturity() 로 묶어 둔다 — 한 곳만 빠뜨리면 '만기 D-30' 같은 안내가 엉뚱하게 뜬다. */
+const KINDS = ['installment', 'deposit', 'guarantee', 'pension']
+
+/** 만기·이자가 없는 종류 — 보증금과 퇴직연금.
+ *  회차 계산·기간 검사·만기 안내를 전부 이 기준으로 가른다. */
+const noMaturity = (kind) => kind === 'guarantee' || kind === 'pension'
 
 /** 이자소득세율(원천징수) — 소득세 14% + 지방소득세 1.4% */
 const TAX_RATE = 0.154
@@ -117,6 +135,9 @@ function monthsBetween(from, to) {
  * @param asOf     수령일(중도해지면 그 날). 없으면 만기일.
  */
 function accruedInterest(s, payments = [], asOf) {
+  // 보증금·퇴직연금은 이자를 계산하지 않는다. 이율이 잘못 채워져 들어와도 여기서 끊는다
+  // (안 끊으면 회차가 없는데 적금 분기로 떨어져, 규칙이 바뀔 때 조용히 이상한 값이 된다).
+  if (noMaturity(s.kind)) return 0
   const r = (Number(s.annual_rate) || 0) / 100
   if (r <= 0) return 0
   const end = asOf || maturityDateOf(s)
@@ -176,7 +197,7 @@ function maturityDateOf(s) {
 }
 
 module.exports = {
-  KINDS, TAX_RATE,
+  KINDS, TAX_RATE, noMaturity,
   installmentInterest, depositInterest, accruedInterest, monthsBetween,
   paymentSchedule, unpaidPayments, paidPrincipal,
   maturitySummary, maturityDateOf,

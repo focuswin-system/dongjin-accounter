@@ -1729,7 +1729,16 @@ const CompanyPanel = ({ embedded = false }) => {
 }
 
 // ── 계좌 / 카드 등록 패널 ────────────────────────────────────────
-const BANK_TYPES = ['보통예금', '당좌예금', '정기예금']
+/* 계좌 유형 — **결제수단**만 여기 선다.
+ *
+ * '정기예금'을 뺐다. accounts 는 거래 등록·급여이체·청구서 정산 등 11곳에서 결제수단
+ * 드롭다운으로 쓰이고, 잔액은 자금 예측의 '쓸 수 있는 돈'에 그대로 합산된다(balancesAsOf).
+ * 정기예금을 여기 두면 (1) 묶인 돈이 가용 잔액으로 잡히고 (2) "정기예금 통장에서 외주비
+ * 지급"이 조용히 만들어진다. 실제로 fowin 이 퇴직연금 신탁을 정기예금 계좌로 등록해 두고
+ * 예금·적금 화면에도 같은 금액을 넣어, 904,870원이 **가용 잔액과 묶인 돈 양쪽에** 잡혀 있었다.
+ *
+ * 정기예금·적금·보증금·퇴직연금은 전부 예금·적금·보증금 화면(savings)에서 관리한다. */
+const BANK_TYPES = ['보통예금', '당좌예금']
 const CARD_TYPES = ['법인카드', '개인카드', '체크카드']
 // kind 를 받아 그 화면에 맞는 빈 폼을 낸다 — 카드 화면에서 '새로 등록'을 누르면 카드로 시작해야 한다
 const emptyAccountForm = (kind = 'bank') => ({
@@ -1823,7 +1832,11 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
      그 항목이 계좌 탭으로 넘어가 목록에서 사라진다 — 지운 것처럼 보인다.
      그래서 드로어에서 종류 선택을 없애고 여기서 못 박는다. */
   const isCard = isCardPanel
-  const subTypes = isCard ? CARD_TYPES : BANK_TYPES
+  /* 목록에 없는 옛 값(예: '정기예금')을 쓰는 계좌가 남아 있으면 그 값도 칩으로 세운다.
+     안 그러면 수정 화면에서 아무 칩도 안 눌린 채로 떠서 "종류가 비었네"로 읽힌다 —
+     실제로는 form.type 에 그대로 들어 있어 저장해도 안 바뀐다. 보이는 것과 다른 상태다. */
+  const baseTypes = isCard ? CARD_TYPES : BANK_TYPES
+  const subTypes = form.type && !baseTypes.includes(form.type) ? [...baseTypes, form.type] : baseTypes
 
   return (
     <div style={{ padding: 20 }}>

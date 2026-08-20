@@ -7,6 +7,7 @@ const assert = require('node:assert')
 const {
   installmentInterest, depositInterest, paymentSchedule, unpaidPayments,
   paidPrincipal, maturitySummary, maturityDateOf, TAX_RATE, accruedInterest, monthsBetween,
+  KINDS, noMaturity,
 } = require('../lib/savings')
 
 test('적금 이자 — 예치 기간이 회차마다 다르다', () => {
@@ -146,4 +147,45 @@ test('개월 수는 날짜가 차야 센다', () => {
   assert.equal(monthsBetween('2026-01-31', '2026-02-28'), 0)   // 하루 모자람
   assert.equal(monthsBetween('2026-01-01', '2026-02-01'), 1)
   assert.equal(monthsBetween('2026-01-01', '2025-12-01'), 0)   // 역순은 0
+})
+
+/* ── 보증금·퇴직연금: 만기도 이자도 없는 둘 ──────────────────────────
+ * fowin 은 퇴직연금 신탁을 '정기예금' 계좌로도, savings 로도 등록해 같은 904,870원이
+ * 가용 잔액과 묶인 돈 양쪽에 잡혀 있었다. 계좌 쪽을 걷어내고 여기로 일원화했으니,
+ * 이 둘이 만기·이자 계산에서 확실히 빠지는지 잠가 둔다. */
+
+test('구분에 퇴직연금이 있다', () => {
+  assert.ok(KINDS.includes('pension'))
+  assert.ok(KINDS.includes('guarantee'))
+})
+
+test('보증금·퇴직연금은 만기가 없는 종류로 판정된다', () => {
+  assert.equal(noMaturity('guarantee'), true)
+  assert.equal(noMaturity('pension'), true)
+  assert.equal(noMaturity('deposit'), false)
+  assert.equal(noMaturity('installment'), false)
+})
+
+test('퇴직연금은 이율이 들어와도 이자를 계산하지 않는다', () => {
+  // 이율이 잘못 채워져 들어와도(임포트·수기 입력) 0이어야 한다 —
+  // 안 그러면 회차가 없는데 적금 분기로 떨어져 조용히 이상한 값이 된다.
+  const s = { kind: 'pension', principal: 904_870, term_months: 0, annual_rate: 3, start_date: '2026-08-01' }
+  assert.equal(accruedInterest(s, [], '2027-08-01'), 0)
+  const g = { kind: 'guarantee', principal: 5_100_000, term_months: 0, annual_rate: 3, start_date: '2026-08-01' }
+  assert.equal(accruedInterest(g, [], '2027-08-01'), 0)
+})
+
+test('퇴직연금은 회차도 만기일도 없다', () => {
+  const s = { kind: 'pension', principal: 904_870, term_months: 0, annual_rate: 0,
+              start_date: '2026-08-01', pay_day: 1 }
+  assert.deepEqual(paymentSchedule(s), [])
+  assert.equal(maturityDateOf(s), null)
+  assert.equal(maturitySummary(s).interest, 0)
+  assert.equal(maturitySummary(s).maturityDate, null)
+})
+
+test('퇴직연금 적립금은 묶인 돈에 원금 그대로 잡힌다', () => {
+  // 회차 합계(=0)로 떨어지면 자금현황의 '묶인 자금'에서 통째로 사라진다.
+  const s = { kind: 'pension', principal: 904_870, term_months: 0 }
+  assert.equal(paidPrincipal(s, []), 904_870)
 })

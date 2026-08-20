@@ -5,7 +5,7 @@ const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError, amountError } = require('../lib/ledger')
 const {
-  KINDS, paymentSchedule, unpaidPayments, paidPrincipal, maturitySummary, maturityDateOf,
+  KINDS, noMaturity, paymentSchedule, unpaidPayments, paidPrincipal, maturitySummary, maturityDateOf,
   accruedInterest,
 } = require('../lib/savings')
 
@@ -32,17 +32,21 @@ const ACCT = {
   //   대분류 빈 칸으로 찍혔다. 손익 판정은 우연히 맞아 조용히 틀렸다.
   interest:  '4201',   // 이자수익(수익·영업외수익)
   guarantee: '1801',   // 보증금(기타비유동자산) — "전세권, 임차보증금, 영업보증금 등"
+  pension:   '1505',   // 퇴직연금운용자산(투자자산) — DB형 적립금
 }
 
 const { moneyOf: intOf, numOf } = require('../lib/money')
 
 /** 기간이 1년을 넘으면 장기금융상품 — 회계 분류가 갈린다.
  *
- * ⚠ 보증금은 여기 태우면 안 된다. 만기가 없어 term_months 가 0이라 '1201 단기금융상품'
- *   으로 찍히는데, 보증금은 **당좌자산이 아니라 기타비유동자산**이다(주문이 끝나야
- *   돌아오는 돈이라 1년 내 현금화되지 않는다). 재무상태표에서 자리가 통째로 틀린다. */
+ * ⚠ 보증금·퇴직연금은 여기 태우면 안 된다. 만기가 없어 term_months 가 0이라
+ *   '1201 단기금융상품'으로 찍히는데, 둘 다 **당좌자산이 아니다**:
+ *     보증금   기타비유동자산(1801) — 주문이 끝나야 돌아오는 돈
+ *     퇴직연금 투자자산(1505)      — 직원이 퇴직해야 나가는 돈
+ *   어느 쪽이든 1년 내 현금화되지 않아, 재무상태표에서 자리가 통째로 틀린다. */
 const defaultAcctCode = (kind, termMonths) => (
   kind === 'guarantee' ? ACCT.guarantee
+    : kind === 'pension' ? ACCT.pension
     : Number(termMonths) > 12 ? ACCT.longTerm
     : ACCT.shortTerm)
 
@@ -172,18 +176,19 @@ router.post('/', async (req, res, next) => {
     const fe = futureDateError(start_date)
     if (fe) return res.status(400).json({ error: fe })
 
-    /* 보증금(guarantee)은 만기가 없다 — 주문이 끝나야 돌아온다.
+    /* 보증금·퇴직연금은 만기가 없다 — 주문이 끝나야, 직원이 퇴직해야 돌아온다.
        기간을 1개월로 두어도 되지만, 그러면 '만기 임박' 같은 안내가 엉뚱하게 뜬다.
        기간 검사는 만기가 있는 둘(예금·적금)에만 건다. */
-    const term_months = kind === 'guarantee' ? 0 : intOf(b.term_months)
-    if (kind !== 'guarantee' && term_months <= 0) {
+    const term_months = noMaturity(kind) ? 0 : intOf(b.term_months)
+    if (!noMaturity(kind) && term_months <= 0) {
       return res.status(400).json({ error: '기간(개월)을 1 이상으로 입력해주세요' })
     }
-    // 보증금도 목돈이라 principal 을 쓴다(예금과 같은 자리). 적금만 월 납입액이다.
+    // 보증금·퇴직연금도 목돈이라 principal 을 쓴다(예금과 같은 자리). 적금만 월 납입액이다.
     const principal = kind === 'installment' ? 0 : intOf(b.principal)
     const monthly_amount = kind === 'installment' ? intOf(b.monthly_amount) : 0
     if (kind === 'deposit' && principal <= 0) return res.status(400).json({ error: '예치 금액을 입력해주세요' })
     if (kind === 'guarantee' && principal <= 0) return res.status(400).json({ error: '보증금 금액을 입력해주세요' })
+    if (kind === 'pension' && principal <= 0) return res.status(400).json({ error: '적립금 잔액을 입력해주세요' })
     if (kind === 'installment' && monthly_amount <= 0) return res.status(400).json({ error: '월 납입액을 입력해주세요' })
     /* 자릿수 상한 — 거래 등록과 같은 규칙(1조원). 없으면 BIGINT 를 넘는 값이 500 이 된다. */
     { const e = amountError(kind === 'installment' ? monthly_amount : principal, { allowZero: true })
@@ -193,9 +198,12 @@ router.post('/', async (req, res, next) => {
      *   예금  — 목돈이 그 자리에서 나간다(기본 O)
      *   적금  — 가입만으로는 안 나간다(1회차는 /pay)
      *   보증금 — 대개 **몇 년 전에 이미 낸 것**을 뒤늦게 등록한다. 기본으로 거래를 만들면
-     *            그때 이미 찍힌 출금과 겹쳐 계좌 잔액이 두 번 빠진다 → 켤 때만 만든다. */
+     *            그때 이미 찍힌 출금과 겹쳐 계좌 잔액이 두 번 빠진다 → 켤 때만 만든다.
+     *   퇴직연금 — 보증금과 같다. 등록하는 값은 대개 **여태 쌓인 적립금 잔액**이지
+     *            오늘 나가는 돈이 아니다. 기본으로 거래를 만들면 과거 몇 년치 납입이
+     *            오늘 하루에 통째로 빠져나간 것처럼 찍힌다 → 켤 때만 만든다. */
     const recorded = kind === 'deposit' ? b.recorded !== false
-      : kind === 'guarantee' ? b.recorded === true
+      : noMaturity(kind) ? b.recorded === true
       : false
     const account_id = b.account_id || null
     if (recorded) {
@@ -206,11 +214,11 @@ router.post('/', async (req, res, next) => {
      * 1회차 예정일이 그 달이 되어 납입이 영구히 거절된다(회차를 건너뛸 수 없다).
      * 되돌릴 수 없는 상태의 적금이 남는다.
      *
-     * ⚠ 보증금은 예외다. 회차가 없고, '이미 낸 보증금'이면 거래도 안 만든다 —
-     *   마감된 달을 건드리지 않는다. 그런데 무조건 걸어 두어서, 화면이 유도하는
-     *   기본 시나리오(몇 년 전에 낸 보증금을 지급일과 함께 뒤늦게 등록)가 통째로 막혔다.
+     * ⚠ 보증금·퇴직연금은 예외다. 회차가 없고, 거래를 안 만드는 쪽을 고르면 마감된 달을
+     *   전혀 건드리지 않는다. 그런데 무조건 걸어 두어서, 화면이 유도하는 기본 시나리오
+     *   (몇 년 전에 낸 보증금을 지급일과 함께 뒤늦게 등록)가 통째로 막혔다.
      *   화면에는 마감 안내가 한 줄도 없어 "왜 안 되지"로 끝났다. */
-    if (!(kind === 'guarantee' && !recorded)) {
+    if (!(noMaturity(kind) && !recorded)) {
       const ce = await closedPeriodError(conn, start_date)
       if (ce) return res.status(400).json({ error: ce })
     }
@@ -229,8 +237,9 @@ router.post('/', async (req, res, next) => {
         `INSERT INTO transactions (id, kind, vendor_id, account_id, category, amount, date, method, status, doc_no, memo, account_code, savings_id)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [txn_id, 'expense', b.vendor_id || null, account_id,
-         kind === 'guarantee' ? '보증금 예치' : '예금 예치', principal, start_date,
-         '계좌이체', '지급완료', '공통', `${name} ${kind === 'guarantee' ? '지급' : '가입'}`, acct_code, id])
+         kind === 'guarantee' ? '보증금 예치' : kind === 'pension' ? '퇴직연금 납입' : '예금 예치',
+         principal, start_date, '계좌이체', '지급완료', '공통',
+         `${name} ${kind === 'guarantee' ? '지급' : kind === 'pension' ? '납입' : '가입'}`, acct_code, id])
     }
     await conn.execute(
       `INSERT INTO savings (id, name, bank, vendor_id, kind, principal, monthly_amount, annual_rate,
@@ -262,9 +271,9 @@ router.put('/:id', async (req, res, next) => {
     // 이미 납입 실적이 있으면 금액·기간을 바꿀 수 없다 — 바꾸면 지난 회차와 어긋난다
     const [[{ cnt }]] = await req.db.execute(
       'SELECT COUNT(*) AS cnt FROM savings_payments WHERE savings_id = ? AND paid_date IS NOT NULL', [req.params.id])
-    /* 보증금은 기간을 0으로 못 박는다. 폼이 기본값 12를 같이 보내는데 그대로 받으면
-       만기일이 생겨 '만기 D-30' 같은 안내가 뜬다 — 보증금에 만기는 없다. */
-    const term_months = cur.kind === 'guarantee' ? 0 : (intOf(b.term_months) || cur.term_months)
+    /* 보증금·퇴직연금은 기간을 0으로 못 박는다. 폼이 기본값 12를 같이 보내는데 그대로 받으면
+       만기일이 생겨 '만기 D-30' 같은 안내가 뜬다 — 이 둘에 만기는 없다. */
+    const term_months = noMaturity(cur.kind) ? 0 : (intOf(b.term_months) || cur.term_months)
     const monthly_amount = intOf(b.monthly_amount) || cur.monthly_amount
     /* 가입일도 잠근다 — 회차 예정일이 전부 가입일에서 계산된다. 실적이 있는데 가입일을
        옮기면 이미 낸 3회차의 예정일이 딴 날로 바뀌어 '놓친 납입'으로 되살아난다. */
@@ -287,10 +296,11 @@ router.put('/:id', async (req, res, next) => {
      * ("수정했어요"는 뜨는데 금액은 그대로). 가입 출금 거래도 함께 맞춰야 잔액이 안 어긋난다.
      * 보증금도 목돈이라 같은 자리를 쓴다 — 여기서 적금과 한 덩어리로 묶으면 수정할 때마다
      * 보증금 금액이 0으로 지워진다. */
-    const lumpSum = cur.kind !== 'installment'          // 예금·보증금 = 목돈 / 적금 = 월 납입
+    const lumpSum = cur.kind !== 'installment'          // 예금·보증금·퇴직연금 = 목돈 / 적금 = 월 납입
     const principal = lumpSum ? (intOf(b.principal) || Number(cur.principal)) : 0
     if (lumpSum && principal <= 0) {
-      return res.status(400).json({ error: cur.kind === 'guarantee' ? '보증금 금액을 입력해주세요' : '예치 금액을 입력해주세요' })
+      return res.status(400).json({ error: cur.kind === 'guarantee' ? '보증금 금액을 입력해주세요'
+        : cur.kind === 'pension' ? '적립금 잔액을 입력해주세요' : '예치 금액을 입력해주세요' })
     }
     /* 자릿수 상한 — 거래 등록과 같은 규칙(1조원). 없으면 '1e20' 같은 값이 BIGINT 를 넘어
        500(서버 오류)으로 떨어졌다. 사용자에게는 원인이 안 보이는 실패다. */
@@ -538,6 +548,21 @@ router.post('/:id/mature', async (req, res, next) => {
     const [[s]] = await conn.execute('SELECT * FROM savings WHERE id = ? FOR UPDATE', [req.params.id])
     if (!s) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     if (s.status !== 'active') { await rollbackQuietly(conn); return res.status(409).json({ error: '이미 처리된 상품이에요' }) }
+
+    /* ⚠ 퇴직연금(DB형)은 여기 오면 안 된다 — 돈의 방향이 반대다.
+     *
+     * 이 라우트는 원금·이자를 **입금(income)** 거래로 찍는다. 예금·적금·보증금은 실제로
+     * 회사 통장으로 돌아오니까 맞다. 그런데 퇴직연금 적립금은 퇴직자에게 나가고,
+     * 대개 신탁이 **직접** 지급해 회사 통장을 거치지 않는다. 그대로 태우면 있지도 않은
+     * 입금이 찍혀 계좌 잔액이 적립금만큼 부푼다 — 자금 예측이 통째로 낙관 쪽으로 틀린다.
+     *
+     * 제대로 하려면 퇴직급여충당부채(2304)와 짝을 맞춰 상계해야 하는데 지금 그 관리가
+     * 없다. 그래서 막아 두고, 적립금이 줄면 잔액을 고쳐 적도록 안내한다. */
+    if (s.kind === 'pension') {
+      await rollbackQuietly(conn)
+      return res.status(409).json({
+        error: '퇴직연금은 만기 수령이 없어요. 적립금이 줄었다면 금액을 수정해주세요.' })
+    }
 
     const recvDate = req.body.received_date || kstToday()
     const acct = req.body.account_id || s.account_id
