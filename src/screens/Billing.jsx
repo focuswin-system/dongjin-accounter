@@ -7,7 +7,7 @@ import { TableToolbar } from '../lib/components/TableToolbar'
 import { useTableFilter, monthRange, activeMonthOf } from '../lib/tableFilter'
 import { ImportWizard } from '../lib/components/ImportWizard'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
-import { InvoiceLines, groupLinesByDelivery, lineVat, blankLine, isFilledLine } from '../lib/components/InvoiceLines'
+import { InvoiceLines, lineVat, blankLine, isFilledLine } from '../lib/components/InvoiceLines'
 import { StatementDoc } from '../lib/components/StatementDoc'
 import { computeLineAmount } from '../lib/lineAmount'
 import { accountLabels, accountIdByLabel } from '../lib/accountLabel'
@@ -597,8 +597,13 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   const [contracts, setContracts] = useState([])
   // 거래명세서식 품목 내역(선택) — 있으면 합계가 공급가액이 된다
   const [lines, setLines] = useState([])
+  /* 납품일은 **청구서 한 장에 하나**다(선택 입력).
+     예전엔 품목 줄마다 따로 적게 했는데, 실무에서 한 장에 여러 날이 섞이는 일은 드물고
+     칸만 12개로 늘려 놓았다. 날짜가 다르면 청구서를 나눠 끊는 게 맞다.
+     ⚠ 옛 청구서 중에는 줄마다 날짜가 다른 것이 있다 — 그건 건드리지 않는다(아래 mixedDelivery). */
+  const [deliveryDate, setDeliveryDate] = useState('')
+  const [mixedDelivery, setMixedDelivery] = useState(false)
   // 납품일별로 나눠 발행할지 — 새로 발행할 때만(수정 중인 청구서를 쪼갤 수는 없다)
-  const [splitByDelivery, setSplitByDelivery] = useState(false)
   const [itemMaster, setItemMaster] = useState([])
   // 첨부 파일 — 발행 전이라 청구서 id가 없으므로 먼저 업로드해 두고, 저장 후 청구서에 연결(지연 첨부)
   const [docs, setDocs] = useState([])
@@ -626,6 +631,14 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     setLines(editInvoice?.lines?.length
       ? editInvoice.lines.map(l => ({ ...l, amountTouched: Number(l.amount) !== computeLineAmount(l) }))
       : [blankLine()])
+    /* 납품일 한 칸으로 되돌린다. 줄마다 값이 다른 옛 청구서는 **하나로 뭉개지 않는다** —
+       빈칸으로 두고 그 사실을 알린다. 사용자가 날짜를 적으면 그때 전 줄에 덮어쓴다. */
+    {
+      const ds = [...new Set((editInvoice?.lines || [])
+        .map(l => String(l.delivery_date || '').trim()).filter(Boolean))]
+      setMixedDelivery(ds.length > 1)
+      setDeliveryDate(ds.length === 1 ? ds[0] : '')
+    }
     if (editInvoice) {
       setForm({
         kind: editInvoice.kind,
@@ -693,14 +706,8 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     value: c.name, label: c.name, sub: `${c.vendor_name || ''} · ${c.status || ''}`,
   }))
 
-  /* 납품일별 묶음 — 미리보기와 서버가 **같은 함수**로 묶는다(InvoiceLines.groupLinesByDelivery).
-     따로 묶으면 "미리보기엔 3장인데 2장이 발행됐다"가 난다. */
-  const deliveryGroups = useMemo(() => groupLinesByDelivery(lines), [lines])
   // 품목표와 같은 이름표를 쓴다 — 표에는 '입고일', 나눠 발행 안내에는 '납품일'이면 같은 칸이 아닌 줄 안다
   const deliveryLabel = form.kind === "received" ? "입고일" : "납품일"
-  const canSplit = !editInvoice && deliveryGroups.length > 1
-  // 나눌 수 없게 되면(줄을 지워 날짜가 하나가 됨) 켜둔 스위치도 함께 내린다
-  useEffect(() => { if (!canSplit && splitByDelivery) setSplitByDelivery(false) }, [canSplit, splitByDelivery])
 
   const handleSave = () => {
     if (!form.vendor) { toast.push("거래처를 선택하세요", { tone: "warn" }); return }
@@ -708,7 +715,6 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     const vendorObj = vendors.find(v => v.name === form.vendor)
     const contractObj = contracts.find(c => c.name === form.contract)
     onSave({
-      _split: splitByDelivery && canSplit,
       id: editInvoice?.id,
       kind: form.kind,
       vendor_id: vendorObj?.id || null,
@@ -732,6 +738,10 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
         // null 은 '자동'(서버가 그대로 NULL 로 둔다), 숫자는 이 줄에 굳힌 세액
         vat: (l.vat === null || l.vat === undefined || l.vat === '') ? null : Number(String(l.vat).replace(/[^0-9.-]/g, '')) || 0,
         note: l.note || '',
+        /* 납품일은 폼의 한 칸이 전 줄을 정한다. 비워 두면 줄에 남아 있던 값을 지키는데,
+           옛 청구서(줄마다 다른 날짜)를 날짜 한 번 안 건드리고 저장했을 때
+           그 값들이 통째로 날아가지 않게 하려는 것이다. */
+        delivery_date: deliveryDate || l.delivery_date || '',
       })),
       _docs: docs,   // 저장 후 청구서에 연결할 첨부(부모 handleSave가 처리)
     })
@@ -785,6 +795,20 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
               주문 없이 발행·수취하는 청구서는 비워두세요.
             </div>
           </div>
+          {/* 납품일 — 청구서 한 장에 하나. 품목표에서 줄마다 받던 것을 여기로 올렸다. */}
+          <div>
+            <label className="label">
+              {deliveryLabel} <span className="text-muted2">(선택)</span>
+            </label>
+            <DateInput className="input num" value={deliveryDate}
+              onChange={e => { setDeliveryDate(e.target.value); setMixedDelivery(false) }}/>
+            <div className="text-sm text-muted2" style={{ marginTop: 4 }}>
+              {/* 납품일/입고일 둘 다 받침이 있어 조사는 '이' 다 — '가'로 쓰면 '납품일가'가 된다 */}
+              {mixedDelivery
+                ? `이 청구서는 품목마다 ${deliveryLabel}이 다릅니다(예전 방식). 여기에 날짜를 적으면 전 품목이 그 날짜로 바뀌어요.`
+                : `거래명세서에 찍힙니다. ${deliveryLabel}이 다른 건은 청구서를 나눠서 끊어주세요.`}
+            </div>
+          </div>
           <div>
             <label className="label">과세유형</label>
             <div className="row gap-6" style={{ flexWrap: "wrap" }}>
@@ -795,59 +819,9 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
           </div>
           {/* 거래명세서식 품목 입력 — 여기서 넣은 합계가 아래 공급가액이 된다 */}
           <InvoiceLines lines={lines} onChange={setLines} itemMaster={itemMaster}
-            taxType={form.taxType} kind={form.kind}/>
-
-          {/* 납품일(입고일)이 여러 개면 나눠 발행할 수 있다고 **그 자리에서** 알려준다.
-              메뉴 어딘가에 숨겨두면, 품목을 다 적고 나서야 필요해지는 기능을 못 찾는다. */}
-          {canSplit && (
-            <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
-              <label className="row gap-8" style={{ cursor: 'pointer', alignItems: 'flex-start' }}>
-                <input type="checkbox" style={{ marginTop: 3 }} checked={splitByDelivery}
-                  onChange={e => setSplitByDelivery(e.target.checked)}/>
-                <span>
-                  <b>{deliveryLabel}별로 나눠서 발행</b>
-                  <div className="text-xs text-muted2" style={{ marginTop: 2 }}>
-                    {deliveryLabel}이 {deliveryGroups.length}가지예요. 나누면 <b>청구서 {deliveryGroups.length}장</b>이 만들어집니다
-                    (거래처·발행일은 같고, 청구번호는 각각 따로).
-                  </div>
-                </span>
-              </label>
-
-              {splitByDelivery && (
-                <div style={{ marginTop: 10 }}>
-                  <div className="table-scroll">
-                    <table className="table">
-                      <thead><tr>
-                        <th>{deliveryLabel}</th><th className="num-right">품목</th>
-                        <th className="num-right">공급가</th><th className="num-right">세액</th><th className="num-right">합계</th>
-                      </tr></thead>
-                      <tbody>
-                        {deliveryGroups.map(g => {
-                          const sup = g.lines.reduce((a, l) => a + (Number(String(l.amount).replace(/[^0-9.-]/g, '')) || 0), 0)
-                          /* 세액은 **줄마다** 정해 더한다(직접 적었으면 그 값, 아니면 자동).
-                             나뉜 뒤에는 각 장이 독립된 세금계산서라, 원본 한 장의 세액을 비율로
-                             쪼개면 끝수의 근거가 사라진다. 서버(/invoices/split)도 같은 규칙이다. */
-                          const v = g.lines.reduce((a, l) => a + lineVat(l, form.taxType), 0)
-                          return (
-                            <tr key={g.delivery_date || '(없음)'}>
-                              <td className="num">{g.delivery_date || <span className="text-muted2">{deliveryLabel} 미기재</span>}</td>
-                              <td className="num-right text-muted">{g.lines.length}줄</td>
-                              <td className="num-right num">{fmtNum(sup)}</td>
-                              <td className="num-right num">{fmtNum(v)}</td>
-                              <td className="num-right num fw-700">{fmtNum(sup + v)}</td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-                    한 장이라도 막히면 아무것도 만들어지지 않아요 — 절반만 발행되는 일은 없습니다.
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+            taxType={form.taxType} kind={form.kind}
+            /* 납품일은 위 한 칸이 정한다 — 줄마다 받던 칸은 끈다 */
+            columns={{ deliveryDate: false }}/>
 
           <div>
             <label className="label">
@@ -906,7 +880,6 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
         </div>
         <DrawerFooter onCancel={onClose} onSave={handleSave}
           saveLabel={editInvoice ? "저장"
-            : (splitByDelivery && canSplit) ? `${deliveryGroups.length}장 발행`
             : "등록"}/>
     </Drawer>
   )
