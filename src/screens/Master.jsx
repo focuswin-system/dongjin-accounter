@@ -2154,8 +2154,11 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
     onClose()
   }
   const toast = useToast()
+  /* 드로어를 기본 폭(480px)보다 넓게 — 결제조건 칩이 여섯 개인데다 '당월/익월 N일'을
+     고르면 날짜 칸이 하나 더 붙는다. 480 에서는 칩이 세 줄로 접혀 조건 하나를 고르는 데
+     눈이 세 번 내려간다. 정기청구 폼도 같은 폭이다(둘은 같은 값을 다루는 쌍이다). */
   return (
-    <Drawer open={open} onClose={onClose}>
+    <Drawer open={open} onClose={onClose} width="min(600px,100vw)" label="정기 지출">
       <DrawerHead title={editing ? "정기 지출 수정" : "정기 지출 등록"} onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div><label className="label">거래처 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
@@ -2535,7 +2538,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
   }
 
   return (
-    <Drawer open={open} onClose={onClose}>
+    <Drawer open={open} onClose={onClose} width="min(600px,100vw)" label="정기 청구">
       <DrawerHead title={editing ? "정기 청구 수정" : "정기 청구 등록"} onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div><label className="label">주문 연결 <span className="text-muted">(선택)</span></label>
