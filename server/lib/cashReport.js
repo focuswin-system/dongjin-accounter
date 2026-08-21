@@ -18,6 +18,8 @@ const { pendingCond } = require('./invoiceStatus')
 const { paymentSchedule, unpaidPayments, paidPrincipal } = require('./savings')
 const { repaymentSchedule } = require('./loan')
 const { dueDatesToGenerate, cashDateOf } = require('./recurrence')
+// 청구서 발행 분개는 전표 규칙과 한 벌이어야 한다 — 두 벌이면 전표와 일계표가 다른 말을 한다
+const { invoiceVoucher } = require('./voucher')
 const { recurFromSupply } = require('./vat')
 const { kstDate } = require('../db')
 
@@ -445,7 +447,7 @@ function project(startBalance, flows, { from, to }) {
  * 그래서 **차변 합계와 대변 합계는 반드시 같다**. 다르면 계좌나 계정과목이 빠진 거래가 있다는
  * 뜻이라, 그 사실을 그대로 보여준다(조용히 맞추면 틀린 장부를 맞는 것처럼 보이게 만든다).
  */
-async function dailyTrial(db, date) {
+async function dailyTrial(db, date, { includeIssuance = true } = {}) {
   const [rows] = await db.execute(`
     SELECT t.id, t.kind, t.amount, t.account_code, t.category, t.memo,
            a.acct_code AS bank_code, a.name AS account_name
@@ -493,11 +495,56 @@ async function dailyTrial(db, date) {
     }
   }
 
+  /* 청구서 발행 분개.
+   *
+   * ── 왜 넣나 ──
+   * 결제 거래만 세면 `1204 외상매출금` 이 **대변으로 사라지기만 하고 차변으로 생긴 적이 없고**,
+   * 매출 계정(4101·4102)은 평생 한 번도 찍히지 않는다. 하루치만 보면 차·대변이 맞아 보이지만
+   * 누적하면 장부가 성립하지 않는다 — 이 앱으로 시산표·재무제표를 만들 수 없던 진짜 이유다.
+   *
+   * ── 왜 끌 수 있게 하나 ──
+   * 실무에서 "은행 기준으로 돈이 오갈 때만 전표를 끊는다"는 회사가 많다(현금주의).
+   * 그런 회사에는 발행 분개가 섞이면 오히려 낯설다. 회계적으로 옳은 쪽을 기본으로 두되,
+   * 회사 설정에서 끌 수 있게 한다(report_prefs 'voucher_issuance').
+   */
+  let issuedCount = 0
+  const pendingInvoices = []   // 비목이 없어 아직 전표를 세울 수 없는 청구서
+  if (includeIssuance) {
+    const [invs] = await db.execute(`
+      SELECT id, invoice_no, kind, supply_amount, vat_amount, total_amount, issued_at, account_code
+        FROM invoices WHERE issued_at = ?`, [date])
+    for (const inv of invs) {
+      const v = invoiceVoucher(inv)
+      /* 짝이 안 맞는 전표는 **합계에 넣지 않는다.**
+       *
+       * 매입 청구서는 비목이 없으면 차변(비용)이 통째로 비어 한 다리로만 선다. 그 한 다리를
+       * 그대로 더하면 그날 차·대변 합계가 어긋나, 멀쩡한 거래까지 틀린 것처럼 보인다.
+       * 청구서를 자동 발행하는 경로(정기지출·마일스톤·임포트)는 비목을 모르는 경우가 많아
+       * 이 상태가 드물지 않다 — 그럼 일계표가 늘 빨간 경고를 달고 있게 되고, 그러면 아무도
+       * 경고를 안 본다. 아직 **전표를 세우지 못한 청구서**로 따로 세어 알린다. */
+      if (!v.balanced) {
+        pendingInvoices.push({
+          id: inv.id, amount: num(inv.total_amount), kind: inv.kind,
+          invoice_no: inv.invoice_no || '',
+          missing: v.missing || '계정과목이 없어요',
+        })
+        continue
+      }
+      for (const l of v.lines) bump(l.code, l.side, l.amount)
+      issuedCount++
+    }
+  }
+
   const lines = [...acc.values()].sort((a, b) => (a.code < b.code ? -1 : 1))
   const debitTotal = lines.reduce((s, l) => s + l.debit, 0)
   const creditTotal = lines.reduce((s, l) => s + l.credit, 0)
   return {
     date, lines,
+    // 청구서 발행분을 함께 셌는지 — 화면이 숫자가 왜 달라졌는지 말해줄 수 있어야 한다
+    includeIssuance, issuedCount,
+    /* 전표를 세우지 못한 청구서. 합계에는 안 들어갔으므로 차·대변은 여전히 맞는다 —
+     * "장부가 틀렸다"가 아니라 "아직 안 적었다"이므로 경고 톤도 달라야 한다. */
+    pendingInvoices,
     debitTotal, creditTotal,
     /* 합계가 같은 것만으로는 '맞다'고 할 수 없다.
      * 한쪽 다리가 빠진 거래 둘의 금액이 같으면(입금 100만 계좌 미지정 + 지출 100만 계정과목 없음)

@@ -14,10 +14,36 @@ const { recalcInvoiceStatus, paidAmountOf } = require('../lib/invoiceStatus')
 // 품목 라인 금액 규칙 — 프런트 src/lib/lineAmount.js 와 같은 규칙(중량 단가 포함)
 const { computeLineAmount, normBasis } = require('../lib/lineAmount')
 
+const { isFundAccount, acctCodeByCategoryName } = require('../lib/categoryAccount')
+const { invoiceVoucher, withNames } = require('../lib/voucher')
+
 const router = Router()
 
 const RECEIVABLE_STATUSES = new Set(['입금 예정', '일부 입금', '기한 지남', '장기 미수'])
 const PAYABLE_STATUSES    = new Set(['지급 대기', '지급 예정', '일부 지급', '기한 지남'])
+
+/* 자금 계정은 청구서 계정과목이 될 수 없다.
+ *
+ * 청구서 발행은 **자금이 움직이지 않는** 사건이다. 예금·현금이 발행 분개에 나오면
+ * 그 시점부터 장부가 틀린다. 거래 등록(routes/transactions.js)·비목 저장(routes/categories.js)과
+ * **같은 규칙을 같은 방식으로** 말한다 — 조용히 무시하면 사용자가 지정한 것과 다른 계정으로
+ * 저장된 청구서를 성공 응답과 함께 갖게 된다. */
+const fundAccountError = (code) =>
+  isFundAccount(code)
+    ? '청구서 계정과목에 현금·예금은 고를 수 없어요. 청구서를 발행하는 시점엔 아직 돈이 오가지 않습니다.'
+    : null
+
+/**
+ * 청구서의 계정과목 — 사용자가 고른 값이 우선, 없으면 비목에 달린 값.
+ *
+ * 발행 분개의 한쪽이 이 값이다. 매출은 없으면 제품매출로 갈음할 수 있지만(lib/voucher.js),
+ * **매입은 갈음할 수 없다** — 외주가공비인지 통신비인지는 정해줘야 알 수 있다.
+ * (자금 계정 검증은 라우트 입구에서 fundAccountError 로 먼저 막는다)
+ */
+async function resolveInvoiceAcctCode(db, accountCode, categoryName, kind) {
+  if (accountCode) return accountCode
+  return acctCodeByCategoryName(db, categoryName, kind)
+}
 
 async function attachMatches(db, invoice) {
   const [matches] = await db.execute('SELECT * FROM invoice_matches WHERE invoice_id = ?', [invoice.id])
@@ -504,6 +530,22 @@ router.get('/:id', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/* 청구서 발행 전표.
+ *
+ * 결제 전표(거래)와 **다른 전표**다. 발행 때 채권·채무가 생기고, 결제 때 그것이 사라진다.
+ * 자금이 움직이지 않으므로 항상 대체전표이고, 공급가액과 부가세가 나뉘어 줄이 셋이 된다. */
+router.get('/:id/voucher', async (req, res, next) => {
+  try {
+    const [[inv]] = await req.db.execute(`
+      SELECT i.id, i.invoice_no, i.kind, i.supply_amount, i.vat_amount, i.total_amount,
+             i.issued_at, i.category, i.account_code, v.name AS vendor_name
+        FROM invoices i LEFT JOIN vendors v ON v.id = i.vendor_id
+       WHERE i.id = ?`, [req.params.id])
+    if (!inv) return res.status(404).json({ error: 'Not found' })
+    res.json(await withNames(req.db, invoiceVoucher(inv), { category: inv.category || null }))
+  } catch (e) { next(e) }
+})
+
 /** 매출/매입 구분 — 이 둘 말고는 어느 목록에도 안 잡혀 '보이지 않는 청구서'가 된다 */
 const INVOICE_KINDS = new Set(['issued', 'received'])
 
@@ -530,7 +572,8 @@ function invoiceCreateError({ kind, supply_amount, vat_amount }) {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { kind, vendor_id, contract_id, issued_at, due_at, status, account_id, memo, tax_type } = req.body
+    const { kind, vendor_id, contract_id, issued_at, due_at, status, account_id, memo, tax_type,
+            category, account_code } = req.body
     /* 품목 내역이 있으면 **그 합계가 공급가액이다.** 화면도 그렇게 동작하지만(공급가액 칸이 잠긴다)
        서버에서도 확정한다 — 두 숫자를 각자 보내면 명세서와 청구서가 다른 말을 하는 청구서가
        저장될 수 있고, 그건 나중에 어느 쪽이 맞는지 알 방법이 없다. */
@@ -576,9 +619,15 @@ router.post('/', async (req, res, next) => {
       [kind, `${prefix}-${year}-%`]
     )
     const invoice_no = `${prefix}-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
+    /* 비목과 계정과목을 받아 둔다 — 발행 시점 분개에 필요하다.
+     * 매입 청구서는 그 돈이 외주가공비인지 원재료비인지 청구서만 봐서는 알 수 없다.
+     * 계정과목은 비목에서 끌어오고, 저장된 값은 **스냅샷**이다(비목 연결이 나중에 바뀌어도
+     * 이미 발행한 청구서의 전표는 그대로 남아야 한다). */
+    { const fe = fundAccountError(account_code); if (fe) return res.status(400).json({ error: fe }) }
+    const invAcctCode = await resolveInvoiceAcctCode(req.db, account_code, category, kind)
     await req.db.execute(
-      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [id, invoice_no, kind, vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, status||(kind==='issued' ? '입금 예정' : '지급 대기'), account_id||null, memo||'', taxType]
+      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type, category, account_code) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [id, invoice_no, kind, vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, status||(kind==='issued' ? '입금 예정' : '지급 대기'), account_id||null, memo||'', taxType, category||null, invAcctCode]
     )
     // 거래명세서식 품목 내역(선택) — 없으면 총액만 있는 기존 청구서 그대로다
     const lineCount = await writeInvoiceLines(req.db, id, req.body.lines)
@@ -621,7 +670,8 @@ router.post('/', async (req, res, next) => {
  */
 router.post('/split', async (req, res, next) => {
   try {
-    const { kind, vendor_id, contract_id, issued_at, due_at, status, account_id, memo, tax_type } = req.body
+    const { kind, vendor_id, contract_id, issued_at, due_at, status, account_id, memo, tax_type,
+            category, account_code } = req.body
     const lines = Array.isArray(req.body.lines) ? req.body.lines : []
     if (!lines.length) return res.status(400).json({ error: '나눌 품목이 없어요. 품목을 먼저 입력해주세요.' })
     if (!issued_at) return res.status(400).json({ error: '발행일을 선택해주세요' })
@@ -629,6 +679,8 @@ router.post('/split', async (req, res, next) => {
       return res.status(400).json({ error: '발행일 형식이 올바르지 않아요 (YYYY-MM-DD)' })
     }
     const taxType = normalizeTaxType(tax_type || '과세')
+    { const fe = fundAccountError(account_code); if (fe) return res.status(400).json({ error: fe }) }
+    const splitAcctCode = await resolveInvoiceAcctCode(req.db, account_code, category, kind)
 
     /* 납품일로 묶는다. 빈 값은 '' 한 칸에 모은다(날짜 없는 줄끼리 한 장).
        Map 은 넣은 순서를 지키므로, 화면에서 본 줄 순서가 청구서 순서로 이어진다. */
@@ -689,11 +741,13 @@ router.post('/split', async (req, res, next) => {
            여러 장이 나란히 서면 어느 장이 어느 납품분인지 구분할 단서가 필요하다. */
         const noteBase = String(memo || '').trim()
         const noteDate = deliveryDate ? `납품 ${deliveryDate}` : '납품일 미기재'
+        // 나눠 발행해도 비목은 같다 — 안 물려주면 쪼갠 장들만 발행 전표를 못 세운다
         await conn.execute(
-          'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+          'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type, category, account_code) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
           [id, invoice_no, kind, vendor_id || null, contract_id || null, supply, vat, total, issued_at,
            due_at || null, status || (kind === 'issued' ? '입금 예정' : '지급 대기'),
-           account_id || null, noteBase ? `${noteBase} · ${noteDate}` : noteDate, taxType])
+           account_id || null, noteBase ? `${noteBase} · ${noteDate}` : noteDate, taxType,
+           category || null, splitAcctCode])
         await writeInvoiceLines(conn, id, groupLines)
         created.push({ id, invoice_no, delivery_date: deliveryDate || null, supply, vat, total, lines: groupLines.length })
       }
@@ -707,7 +761,8 @@ router.post('/split', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
-    const { vendor_id, contract_id, issued_at, due_at, account_id, memo, tax_type } = req.body
+    const { vendor_id, contract_id, issued_at, due_at, account_id, memo, tax_type,
+            category, account_code } = req.body
     // 등록과 같은 규칙 — 품목이 있으면 그 합계가 공급가액이다
     const { supply_amount, vat_amount, total_amount } = amountsFromLines(req.body)
     await conn.beginTransaction()
@@ -733,9 +788,25 @@ router.put('/:id', async (req, res, next) => {
     }
 
     const taxType = normalizeTaxType(tax_type || (Number(vat_amount) > 0 ? '과세' : '면세'))
+    /* 비목을 **보낸 요청만** 갱신한다. 청구서 폼이 아닌 화면(정산·상태 변경)이 저장할 때
+     * 빈 값으로 덮으면 발행 전표의 계정과목이 한 번에 사라진다
+     * (정산내역서에서 겪은 '화면에서 뺀 필드가 저장 한 번에 소멸' 과 같은 유형). */
+    const touchCategory = category !== undefined || account_code !== undefined
+    let invAcctCode = null
+    if (touchCategory) {
+      // 등록·분할과 같은 규칙 — 한 입구만 막으면 다른 입구로 우회된다
+      const fe = fundAccountError(account_code)
+      if (fe) { await rollbackQuietly(conn); return res.status(400).json({ error: fe }) }
+      const [[kindRow]] = await conn.execute('SELECT kind FROM invoices WHERE id = ?', [req.params.id])
+      invAcctCode = await resolveInvoiceAcctCode(conn, account_code, category, kindRow?.kind)
+    }
     const [result] = await conn.execute(
-      'UPDATE invoices SET vendor_id=?, contract_id=?, supply_amount=?, vat_amount=?, total_amount=?, issued_at=?, due_at=?, account_id=?, memo=?, tax_type=? WHERE id=?',
-      [vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, account_id||null, memo||'', taxType, req.params.id]
+      `UPDATE invoices SET vendor_id=?, contract_id=?, supply_amount=?, vat_amount=?, total_amount=?, issued_at=?, due_at=?, account_id=?, memo=?, tax_type=?
+         ${touchCategory ? ', category=?, account_code=?' : ''}
+       WHERE id=?`,
+      touchCategory
+        ? [vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, account_id||null, memo||'', taxType, category||null, invAcctCode, req.params.id]
+        : [vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, account_id||null, memo||'', taxType, req.params.id]
     )
     if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     /* 품목 내역 — lines 를 **보낸 요청만** 갱신한다.

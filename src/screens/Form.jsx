@@ -8,6 +8,10 @@ import { quickAddCategory, quickAddRefItemWithId } from '../lib/quickAdd'
 // 면세와 값을 나눠 두지 않으면 신고서에서 둘을 구분할 수 없다. 서버 lib/vat.js와 같은 값집합.
 const TAX_TYPES = ["과세", "면세", "영세"];
 
+/* 자금 계정 — 계정과목 후보에서 제외한다. 서버 lib/categoryAccount.js FUND_CODES 와 같은 값집합.
+ * 계좌를 이미 고르는 화면이라, 상대 계정에까지 예금·현금이 오면 분개가 성립하지 않는다. */
+const FUND_CODES = ["1101", "1102", "1103"];
+
 /** 금액 한 값에서 공급가·세액·합계를 한 번에 맞춘다.
  *  bySupply=true 면 입력값이 공급가액(세금계산서 기준), false 면 VAT 포함 총액. */
 const applyTax = (f, value, bySupply) => {
@@ -100,7 +104,12 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     api.getRefItems('item').then(setItems);
     api.getRefItems('jeokyo').then(setJeokyos);
     api.getRefItems('evidence_type').then(setEvidenceTypes);
-    api.getAccountSubjects({ postableOnly: true }).then(setAcctSubjects);
+    /* 자금 계정(현금·당좌·보통예금)은 후보에서 뺀다.
+     * 이 칸은 **계좌의 상대 계정**이라, 여기에 예금·현금이 오면 분개가
+     * `보통예금 / 보통예금` 이 되어 매출도 비용도 장부에 잡히지 않는다.
+     * (2026-08 실데이터 조사에서 이 유형 결함 15건 — '현금 = 돈'으로 오해해 1101을 골랐다) */
+    api.getAccountSubjects({ postableOnly: true })
+      .then(rows => setAcctSubjects(rows.filter(a => !FUND_CODES.includes(String(a.code)))));
   }, []);
 
   useEffect(() => {
@@ -183,6 +192,17 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     const g = categories.find(c => c.name === form.category)?.group_name || '';
     setForm(f => f.acctGroup === g ? f : { ...f, acctGroup: g });
   }, [form.category, categories]);
+
+  /* 비목이 정해 둔 계정과목 이름 — 계정과목 칸을 비워 두면 무엇이 들어갈지 미리 보여준다.
+   * 값을 폼에 밀어 넣지는 않는다. 넣으면 사용자가 고른 것과 자동으로 정해진 것을
+   * 구분할 수 없어져, 나중에 비목을 바꿔도 옛 계정과목이 그대로 남는다(서버가 정한다). */
+  const autoAcctName = useMemo(() => {
+    if (form.accountCode || !form.category) return '';
+    const code = categories.find(c => c.name === form.category)?.account_code;
+    if (!code) return '';
+    const s = acctSubjects.find(a => String(a.code) === String(code));
+    return s ? `${s.code} ${s.name}` : '';
+  }, [form.accountCode, form.category, categories, acctSubjects]);
 
 
   useEffect(() => {
@@ -363,12 +383,14 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
               </FormField>
             )}
 
-            {/* 계정과목(선택) → 비목(필수) → 적요(필수) 순. 계정과목은 표준 분류라 기본 노출. */}
-            <FormField label="계정과목" hint="선택 · 표준 계정과목(K-GAAP)">
+            {/* 계정과목(선택) → 비목(필수) → 적요(필수) 순. 계정과목은 표준 분류라 기본 노출.
+                비워 두면 서버가 비목에 달린 계정과목을 넣는다(routes/transactions.js resolveAcctCode) —
+                그래서 '선택'이지만 실제로는 대부분 채워진다. 다르게 잡아야 할 때만 직접 고르면 된다. */}
+            <FormField label="계정과목" hint="비워두면 비목에 맞춰 자동으로 정해집니다">
               <Combobox value={form.accountCode}
                 onChange={(v) => setForm(f => ({ ...f, accountCode: v }))}
                 options={acctSubjects.map(a => ({ value: a.code, label: a.name, sub: `${a.code} · ${a.category}`, keywords: a.note || "" }))}
-                placeholder="계정과목 선택 (선택)"
+                placeholder={autoAcctName ? `자동: ${autoAcctName}` : "비목에 따라 자동 (직접 고를 수도 있어요)"}
                 allowAdd={false}/>
             </FormField>
 

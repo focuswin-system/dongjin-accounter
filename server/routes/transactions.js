@@ -10,8 +10,37 @@ const { removeUploadedFile } = require('../lib/uploads')
 const { vatFields } = require('../lib/vat')
 const { closedPeriodError } = require('../lib/closing')
 const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
+const { isFundAccount } = require('../lib/categoryAccount')
+const { transactionVoucher, withNames } = require('../lib/voucher')
 
 const router = Router()
+
+/* 상대 계정과목에 자금 계정(현금·당좌·보통예금)이 오면 분개가 성립하지 않는다.
+ *
+ * 거래는 이미 `account_id`(계좌)로 한쪽 다리를 갖는다. 상대 계정까지 예금·현금이면
+ * `보통예금 / 보통예금` 이 되어 **매출도 비용도 장부에 잡히지 않는다.** 일계표 합계는
+ * 맞아 보이므로 더 위험하다 — 틀린 장부가 맞는 것처럼 보인다.
+ *
+ * 2026-08-20 fowin 전수 조사에서 이 유형 결함이 15건 나왔다. 사용자가 '현금 = 돈'으로
+ * 이해해 계정과목에서 1101 현금을 고른 것이다. 자금 계정끼리의 이동은 '계좌 간 이체'인데
+ * 이 앱에는 그 기능이 없으므로, 지금 이 조합은 항상 입력 실수다.
+ * (계좌 이체를 도입하면 전용 경로에서 처리하고 이 가드를 그 경로만 우회시켜야 한다) */
+const fundAccountError = (code) =>
+  isFundAccount(code)
+    ? '계정과목에 현금·예금은 고를 수 없어요. 그 자리는 이미 계좌가 차지하고 있어, 그대로 두면 매출·비용이 장부에 잡히지 않습니다.'
+    : null
+
+/* 비목이 정해 둔 계정과목을 기본값으로 쓴다.
+ * 사용자가 고른 값이 있으면 그것이 이긴다 — 같은 비목이라도 건별로 달라질 수 있다. */
+const resolveAcctCode = async (db, accountCode, categoryName, kind) => {
+  if (accountCode) return accountCode
+  if (!categoryName) return null
+  const [[row]] = await db.execute(
+    'SELECT account_code FROM categories WHERE name = ? AND id LIKE ? LIMIT 1',
+    [categoryName, kind === 'income' ? 'INC-%' : 'EXP-%']
+  )
+  return row?.account_code || null
+}
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
 
 // 청구서 상태 재계산은 lib/invoiceStatus.js 공용
@@ -154,6 +183,23 @@ router.get('/:id', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/* 거래 전표 — 이 거래가 장부에 어떻게 오르는지 차변·대변 줄로 보여준다.
+ * 계정과목 이름은 서버에서 붙인다. 코드만 내보내면 화면이 다시 조회해야 하고,
+ * 인쇄본에서 코드만 찍히면 사람이 읽을 수 없다. */
+router.get('/:id/voucher', async (req, res, next) => {
+  try {
+    const [[t]] = await req.db.execute(`
+      SELECT t.id, t.kind, t.amount, t.date, t.category, t.memo, t.account_code,
+             a.acct_code AS bank_code, a.name AS account_name, v.name AS vendor_name
+        FROM transactions t
+        LEFT JOIN accounts a ON a.id = t.account_id
+        LEFT JOIN vendors  v ON v.id = t.vendor_id
+       WHERE t.id = ?`, [req.params.id])
+    if (!t) return res.status(404).json({ error: 'Not found' })
+    res.json(await withNames(req.db, transactionVoucher(t), { account_name: t.account_name }))
+  } catch (e) { next(e) }
+})
+
 router.post('/', async (req, res, next) => {
   try {
     const {
@@ -175,6 +221,9 @@ router.post('/', async (req, res, next) => {
     const st = normalizeStatus(status || defaultSettledStatus(kind))
     const lerr = ledgerError({ kind, account_id, status: st })
     if (lerr) return res.status(400).json({ error: lerr })
+    { const fe = fundAccountError(account_code); if (fe) return res.status(400).json({ error: fe }) }
+    // 계정과목을 안 고르면 비목이 정해 둔 값을 쓴다 — 비면 일계표에서 상대 계정이 빈다
+    const acctCode = await resolveAcctCode(req.db, account_code, category, kind)
     const id = randomUUID()
     // 원가 귀속(cost_contract_id)은 지출에만 의미가 있다 — 수금에 붙으면 매출주문 원가가 부풀어 오른다
     const costId = kind === 'expense' ? (cost_contract_id || null) : null
@@ -189,7 +238,7 @@ router.post('/', async (req, res, next) => {
     `, [id, kind, vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
         amount, date, method||'', st, project_no||'', site||'',
         invoice_id||null, recurring_id||null, doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'',
-        item_id||null, account_code||null,
+        item_id||null, acctCode,
         vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible,
         cp.id, cp.bank, cp.account, cp.holder])
     res.json({ id })
@@ -243,6 +292,9 @@ router.put('/:id', async (req, res, next) => {
     const st = normalizeStatus(status || defaultSettledStatus(cur.kind))
     const lerr = ledgerError({ kind: cur.kind, account_id, status: st })
     if (lerr) return res.status(400).json({ error: lerr })
+    // 등록과 같은 가드·기본값을 수정에도 건다 — 한쪽만 막으면 수정으로 우회된다
+    { const fe = fundAccountError(account_code); if (fe) return res.status(400).json({ error: fe }) }
+    const acctCode = await resolveAcctCode(req.db, account_code, category, cur.kind)
     const costId = cur.kind === 'expense' ? (cost_contract_id || null) : null
     const cp = await counterpartySnapshot(req.db, vendor_id, counterparty_account_id)
     // 금액이 바뀌면 청구서 매칭액도 따라가야 한다. 거래 수정과 매칭 갱신이 갈라지면
@@ -259,7 +311,7 @@ router.put('/:id', async (req, res, next) => {
         WHERE id=?
       `, [vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
           amount, date, method||'', st, project_no||'', site||'',
-          doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'', item_id||null, account_code||null,
+          doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'', item_id||null, acctCode,
           vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible,
           cp.id, cp.bank, cp.account, cp.holder, req.params.id])
       if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }

@@ -1675,6 +1675,108 @@ async function initDb(conn) {
       }
     }
 
+    /* 표준 계정과목 증분 동기화.
+     *
+     * 위 시딩은 **테이블이 비어 있을 때만** 돈다. 그래서 이미 쓰고 있는 회사는 나중에 늘어난
+     * 계정과목(부가세·제조원가 등)을 영영 못 받는다 — 그 회사만 조용히 옛 표를 쓰게 된다.
+     * code 기준으로 **없는 것만** 넣고, 정렬은 표를 따라 다시 맞춘다.
+     * 이름·설명은 건드리지 않는다(사용자가 못 고치는 고정 마스터라 코드 존재 여부면 충분하다). */
+    {
+      const chart = require('./data/account-subjects.json')
+      const [have] = await c.execute('SELECT code, sort_order FROM account_subjects WHERE code IS NOT NULL')
+      const haveSort = new Map(have.map(r => [String(r.code), Number(r.sort_order)]))
+      let added = 0
+      for (const a of chart) {
+        if (a.code == null || haveSort.has(String(a.code))) continue
+        await c.execute(
+          'INSERT INTO account_subjects (acct_type, category, name, code, postable, note, sort_order) VALUES (?,?,?,?,?,?,?)',
+          [a.type, a.category, a.name, String(a.code), a.postable ? 1 : 0, a.note || '', a.sort || 0]
+        )
+        added++
+      }
+      /* 끼워 넣은 항목 때문에 기존 행의 정렬이 어긋난다 — 표의 sort 로 되돌린다.
+       * **다른 것만** 쓴다. 147행을 매번 UPDATE 하면 테넌트 수만큼 부팅이 느려진다
+       * (회사가 늘수록 선형으로 늘어난다). */
+      let resorted = 0
+      for (const a of chart) {
+        if (a.code == null) continue
+        const cur = haveSort.get(String(a.code))
+        if (cur === undefined || cur === (a.sort || 0)) continue
+        await c.execute('UPDATE account_subjects SET sort_order = ? WHERE code = ?', [a.sort || 0, String(a.code)])
+        resorted++
+      }
+      if (added > 0 || resorted > 0) console.log(`[db] 계정과목 ${added}건 추가 · ${resorted}건 정렬 (총 ${chart.length})`)
+    }
+
+    /* 비목 → 계정과목 연결.
+     *
+     * 거래 등록 화면의 계정과목은 '선택'이라 비워둘 수 있고, 비면 일계표에서 상대 계정이
+     * 없어 차·대변이 안 맞는다. 비목은 필수이므로 비목에 계정과목을 달아 두면 사용자가
+     * 아무것도 더 하지 않아도 분개가 완결된다(server/lib/categoryAccount.js).
+     *
+     * 값은 **비어 있을 때만** 채운다 — 사용자가 고쳐 둔 연결을 부팅마다 되돌리면 안 된다. */
+    await ensureColumn('categories', 'account_code', "account_code VARCHAR(10)")
+
+    /* 청구서의 비목·계정과목 — 발행 시점 분개에 필요하다.
+     *
+     * 매출 청구서는 상대가 매출 계정이라 기본값으로 갈음할 수 있지만, **매입 청구서는
+     * 그 돈이 외주가공비인지 원재료비인지 통신비인지 청구서만 봐서는 알 수 없다.**
+     * 그래서 받는 시점에 비목을 받아 둔다. 정산 거래도 이 값을 물려받으므로 입력이 오히려 준다.
+     *
+     * account_code 는 **스냅샷**이다. 비목의 연결이 나중에 바뀌어도 이미 발행한 청구서의
+     * 전표는 그대로 남아야 한다(거래의 account_code 와 같은 원칙). */
+    await ensureColumn('invoices', 'category',     "category VARCHAR(100)")
+    await ensureColumn('invoices', 'account_code', "account_code VARCHAR(10)")
+    {
+      const { CATEGORY_ACCOUNT, EXTRA_CATEGORIES } = require('./lib/categoryAccount')
+
+      /* 빠진 비목을 더한다. 기존 53개는 **이름을 바꾸지 않는다** —
+       * transactions.category 가 ID 가 아니라 이름 문자열이라, 개칭하면 이미 쌓인 거래가
+       * 옛 이름을 든 채 남아 비목별 집계가 조용히 둘로 쪼개진다. */
+      const [[{ maxOrd }]] = await c.execute('SELECT COALESCE(MAX(sort_order),0) AS maxOrd FROM categories')
+      let ord = Number(maxOrd)
+      let newCats = 0
+      for (const [id, name, group_name, vat, pay_method] of EXTRA_CATEGORIES) {
+        const [[exists]] = await c.execute('SELECT id FROM categories WHERE id = ?', [id])
+        if (exists) continue
+        await c.execute(
+          'INSERT INTO categories (id, name, group_name, vat, pay_method, sort_order) VALUES (?,?,?,?,?,?)',
+          [id, name, group_name, vat, pay_method, ++ord]
+        )
+        newCats++
+      }
+      if (newCats > 0) console.log(`[db] 비목 ${newCats}건 추가`)
+
+      /* 청구서 발행 분개는 **꺼진 채로 시작한다.**
+       *
+       * 회계적으로는 켜는 쪽이 옳지만(발행 때 생긴 채권이 결제 때 사라져야 장부가 성립한다),
+       * 켜는 순간 두 가지가 드러난다:
+       *   · 자동 발행 경로(정기지출·마일스톤·임포트)가 만든 청구서는 비목이 없어 전표를 못 세운다.
+       *   · 청구서와 거래를 정산으로 **연결하지 않은** 건은 매출이 두 번 잡힌다
+       *     (발행에서 한 번, 매출 계정으로 찍은 거래에서 또 한 번).
+       * 둘 다 데이터를 정리해야 풀리는 문제라, 회사가 준비를 마치고 **직접 켜게** 한다.
+       *
+       * runOnce 로 감싸는 이유: INSERT IGNORE 로 두면 사용자가 켠(=행을 지운) 다음 부팅에
+       * 다시 꺼진다. 초기값은 한 번만 정한다. */
+      await runOnce('2026-08_voucher_issuance_default_off', async () => {
+        await c.execute(
+          "INSERT INTO report_prefs (key_name, enabled) VALUES ('voucher_issuance', 0) ON DUPLICATE KEY UPDATE enabled = enabled")
+      })
+
+      /* 비어 있는 것만 채운다 — 사용자가 고쳐 둔 연결을 부팅마다 되돌리면 안 된다.
+       * 대상을 먼저 골라서 필요한 만큼만 UPDATE 한다(전건 UPDATE 는 부팅을 느리게 한다). */
+      const [blank] = await c.execute(
+        "SELECT id FROM categories WHERE account_code IS NULL OR account_code = ''")
+      let linked = 0
+      for (const { id: catId } of blank) {
+        const code = CATEGORY_ACCOUNT[catId]
+        if (!code) continue
+        await c.execute('UPDATE categories SET account_code = ? WHERE id = ?', [code, catId])
+        linked++
+      }
+      if (linked > 0) console.log(`[db] 비목 계정과목 ${linked}건 연결`)
+    }
+
     // 적요(자주 쓰는 거래 내용) 예시 시딩 (jeokyo 항목이 하나도 없을 때만)
     const [[{ jcnt }]] = await c.execute("SELECT COUNT(*) AS jcnt FROM ref_items WHERE type='jeokyo'")
     if (jcnt === 0) {

@@ -1798,9 +1798,16 @@ const CompanyPanel = ({ embedded = false }) => {
             {acctPrefs.voucher_issuance
               ? <>켜짐 · 청구서를 <b>발행한 날</b>에 받을 돈(외상매출금)이 생기고, 입금될 때 사라지는 것으로 봐요.
                   두 시점이 다 잡혀야 장부가 맞습니다.</>
-              : <>꺼짐 · <b>돈이 실제로 오간 거래만</b> 셉니다. 은행 기준으로 전표를 끊는 방식이에요.
-                  청구서 발행 분개는 일계표에 나오지 않습니다.</>}
+              : <>꺼짐(기본) · <b>돈이 실제로 오간 거래만</b> 셉니다. 은행 기준으로 전표를 끊는 방식이에요.</>}
           </div>
+          {/* 켜기 전에 무엇을 정리해야 하는지 먼저 알린다 — 모르고 켜면 매출이 두 번 잡힌다 */}
+          {!acctPrefs.voucher_issuance && (
+            <div className="text-xs text-muted2" style={{ marginTop: 8, lineHeight: 1.7, paddingLeft: 10, borderLeft: '2px solid var(--line)' }}>
+              켜시기 전에 두 가지를 확인해주세요.<br/>
+              · <b>매입 청구서에 비목</b>이 들어 있어야 해요. 없으면 그 청구서는 장부에 못 올라갑니다(일계표가 알려줘요).<br/>
+              · 청구서와 입금 거래를 <b>정산으로 연결</b>해두셔야 해요. 따로 두면 매출이 두 번 잡힙니다.
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1941,6 +1948,10 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
     const res = await api.deleteAccount(a.id)
     if (!res.ok) return toast.push(res.error || '연결된 거래가 있어 삭제할 수 없어요')
     toast.push('삭제됐어요')
+    /* 드로어를 닫는다. 상세(view)에서도 삭제할 수 있게 된 뒤로, 안 닫으면 지워진 계좌가
+     * 그대로 떠 있다 — detail 은 `accounts.find(...) || editing` 이라 목록에서 사라진 뒤엔
+     * **낡은 사본**으로 떨어진다. 거기서 수정을 누르면 없는 계좌를 저장하려다 404가 난다. */
+    setDrawerOpen(false)
     load()
   }
 

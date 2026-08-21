@@ -357,12 +357,43 @@ export const DailyTrialScreen = () => {
             </div>
           )}
 
+          {/* 전표를 아직 못 세운 청구서 — 합계에는 안 들어갔으므로 "장부가 틀렸다"가 아니다.
+              톤을 불일치 경고와 구분한다: 이건 고칠 수 있는 빈칸이지 오류가 아니다. */}
+          {data.pendingInvoices?.length > 0 && (
+            <div className="card card-pad" style={{ marginBottom: 16 }}>
+              <div className="fw-700 text-sm" style={{ marginBottom: 4 }}>
+                전표를 세우지 못한 청구서 {data.pendingInvoices.length}건
+              </div>
+              <div className="text-sm text-muted" style={{ lineHeight: 1.7, marginBottom: 10 }}>
+                비목이 없어 어떤 계정으로 올릴지 정해지지 않았어요. 아래 합계에는 <b>넣지 않았습니다</b> —
+                차·대변은 그대로 맞아요. 청구서를 열어 비목을 골라주시면 장부에 올라갑니다.
+              </div>
+              <DataTable
+                rows={data.pendingInvoices}
+                rowKey={p => p.id}
+                columns={[
+                  { key: 'invoice_no', header: '청구서', className: 'text-sm',
+                    render: p => p.invoice_no || '(번호 없음)' },
+                  { key: 'kind', header: '구분', width: 70, className: 'text-xs text-muted2',
+                    render: p => (p.kind === 'issued' ? '매출' : '매입') },
+                  { key: 'missing', header: '빠진 것', width: 220, className: 'text-xs text-muted2',
+                    render: p => p.missing },
+                  { key: 'amount', header: '금액', width: 120, align: 'right', className: 'num-cell text-sm',
+                    render: p => fmtNum(p.amount) },
+                ]}/>
+            </div>
+          )}
+
           {/* 일계표는 T자다 — 차변 | 계정과목 | 대변 이 가운데로 모여야 읽힌다.
               넓은 화면에서 폭을 다 쓰면 가운데가 텅 비어 좌우 숫자를 눈으로 잇기 어렵다. */}
           <div className="card" style={{ overflow: 'hidden' }}>
             <div className="row" style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', gap: 10 }}>
               <span className="fw-700 text-sm">{data.date}</span>
               <span className="text-xs text-muted2">거래 {data.txnCount}건</span>
+              {/* 발행분을 함께 세는지 밝힌다 — 숫자가 왜 달라 보이는지 알 수 있어야 한다 */}
+              {data.includeIssuance && data.issuedCount > 0 && (
+                <span className="text-xs text-muted2">· 청구서 발행 {data.issuedCount}건</span>
+              )}
               {data.balanced && data.txnCount > 0 && (
                 <span className="badge pos ml-auto"><Icon.Check size={12}/> 차·대변 일치</span>
               )}
@@ -398,6 +429,10 @@ export const DailyTrialScreen = () => {
             · 거래 하나가 <b>두 줄</b>로 나뉩니다. 입금이면 통장이 차변(늘어남)·상대 계정이 대변,
             지출이면 반대예요. 그래서 차변 합계와 대변 합계는 <b>항상 같아야</b> 합니다.<br/>
             · 완료된 거래만 셉니다(지급 대기·입금 예정은 아직 장부에 오르지 않은 돈이에요).<br/>
+            {data.includeIssuance
+              ? <>· <b>청구서를 발행한 날</b>의 분개도 함께 셉니다 — 그때 받을 돈(외상매출금)이 생기고,
+                  입금될 때 사라져요. 두 시점이 다 있어야 장부가 맞습니다.<br/></>
+              : <>· 청구서 발행 분개는 세지 않습니다(회사 설정). 돈이 실제로 오간 거래만 봅니다.<br/></>}
             · 자금 흐름과 앞으로의 예정은 <b>자금일보</b>에서 보세요. 일계표는 그날 분개를 맞추는 문서예요.
           </div>
         </>

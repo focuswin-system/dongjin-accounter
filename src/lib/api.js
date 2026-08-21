@@ -574,6 +574,18 @@ export const api = {
     } catch (e) { return { ok: false, error: e.message } }
   },
 
+  /* 회계 처리 방식 — 회사가 정하는 장부 규약.
+   * 실패하면 기본값(켜짐)으로 본다 — 설정을 못 읽었다고 장부 규칙이 바뀌면 안 된다. */
+  async getAccountingPrefs() {
+    try { return await req('/company/accounting-prefs') } catch { return { voucher_issuance: true } }
+  },
+  async setAccountingPref(key, enabled) {
+    try {
+      await req(`/company/accounting-prefs/${key}`, { method: 'PUT', body: { enabled } })
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
+
   // ─── 청구서 ───────────────────────────────────────────────────
   async getInvoices({ kind, status, from, to } = {}) {
     try {
@@ -644,6 +656,16 @@ export const api = {
 
   async getMatchable(invoiceId) {
     try { return await req(`/invoices/${invoiceId}/matchable`) } catch { return [] }
+  },
+
+  /* 전표 — 이 건이 장부에 어떻게 오르는지 차변·대변 줄로.
+   * 거래(결제)와 청구서(발행)는 **서로 다른 전표**다. 발행 때 생긴 채권·채무가 결제 때 사라진다.
+   * 실패해도 화면이 깨지면 안 되므로 null 을 준다(전표는 부가 정보다). */
+  async getTransactionVoucher(id) {
+    try { return await req(`/transactions/${id}/voucher`) } catch { return null }
+  },
+  async getInvoiceVoucher(id) {
+    try { return await req(`/invoices/${id}/voucher`) } catch { return null }
   },
 
   // account_code = 계정과목 코드, account_id = 입출금 계좌. 서로 다른 값이니 섞지 말 것.

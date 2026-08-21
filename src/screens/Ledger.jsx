@@ -3,6 +3,7 @@ import { Icon, fmtNum, useToast, useConfirm, Popover, PopItem, StatusBadge, peri
 import { PageHeader } from '../lib/components/PageHeader'
 import { DataTable } from '../lib/components/DataTable'
 import { TableToolbar } from '../lib/components/TableToolbar'
+import { VoucherView } from '../lib/components/VoucherView'
 import { useTableFilter } from '../lib/tableFilter'
 import { api } from '../lib/api'
 import { downloadCsv } from '../lib/export'
@@ -427,9 +428,11 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
   const [resolution, setResolution] = useState(null);   // 이 지출에 연결된 지급결의서
   const [company, setCompany] = useState(null);
   const [resView, setResView] = useState(false);        // 결의서 열람 모달
+  const [voucherOpen, setVoucherOpen] = useState(false); // 전표 열람(차변·대변)
   useEffect(() => {
     if (!txn) return;
-    setTab("개요"); setDocs(txn.docs || []); setResolution(null); setResView(false);
+    // 겹쳐 띄우는 것들도 함께 되돌린다 — 안 그러면 다음 거래를 열 때 전표가 저절로 펼쳐진 채 뜬다
+    setTab("개요"); setDocs(txn.docs || []); setResolution(null); setResView(false); setVoucherOpen(false);
     if (txn.kind === "expense") {
       api.getResolutionByTxn(txn.id).then(setResolution);
       api.getCompany().then(setCompany);
@@ -555,6 +558,8 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
             }
           }}><Icon.Trash size={14}/> 삭제</button>
           <div className="ml-auto row gap-8">
+            {/* 이 거래가 장부에 어떻게 오르는지 — 경리가 분개를 확인하고 인쇄하는 자리 */}
+            <button className="btn" onClick={() => setVoucherOpen(true)}><Icon.Book size={14}/> 전표</button>
             <button className="btn" onClick={() => { onClose(); openEdit?.(txn); }}><Icon.Pencil size={14}/> 편집</button>
             {txn.kind === "income" && ["입금 예정", "일부 입금", "장기 미수"].includes(txn.status) && (
               <button className="btn primary" onClick={async () => {
@@ -588,6 +593,9 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
             </div>
           </div>
         )}
+
+        {/* 전표 — 이 거래의 차변·대변. 드로어 위에 겹쳐 뜬다(Drawer 스택이 순서를 관리한다) */}
+        <VoucherView open={voucherOpen} onClose={() => setVoucherOpen(false)} source="transaction" id={txn.id}/>
     </Drawer>
   );
 };

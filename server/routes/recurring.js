@@ -10,6 +10,7 @@ const { recurFromTotal, modeFromCatVat } = require('../lib/vat')
    호출은 조건부(paid 일 때만)라 평소 경로에서는 드러나지 않았다. 같은 실수가
    recurring-invoices.js 에도 있었다. 재발 방지는 scripts/check-isolation.js [13]. */
 const { settleAcctCode } = require('../lib/acctCode')
+const { acctCodeByCategoryName } = require('../lib/categoryAccount')
 const { backfillCycles, tooManyError, addSkip, removeSkip, issuedInvoiceAt } = require('../lib/backfill')
 
 const router = Router()
@@ -186,11 +187,15 @@ async function createExpenseInvoice(conn, r, target, { paid = false, accountId =
     acctId = defBank ? defBank.id : null
   }
   const invId = randomUUID()
+  /* 비목을 청구서에 함께 남긴다. 정기지출은 비목을 이미 알고 있는데(r.category) 안 넘기면
+   * 그 매입 청구서의 발행 전표가 차변(비용) 없이 서서 일계표에 오르지 못한다.
+   * 매달 자동으로 찍히는 청구서라, 빠뜨리면 매달 '전표 못 세운 청구서'가 쌓인다. */
+  const invAcctCode = await acctCodeByCategoryName(conn, r.category, 'received')
   await conn.execute(
-    'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type, category, account_code) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
     [invId, invoice_no, 'received', r.vendor_id || null, r.contract_id || null, supply, vat, total,
      target, cashDateOf(target, r.pay_term, r.pay_day), paid ? '지급 완료' : '지급 대기', acctId, r.id,
-     `정기지출 · ${r.category || ''}`.trim(), tax_type]
+     `정기지출 · ${r.category || ''}`.trim(), tax_type, r.category || null, invAcctCode]
   )
   if (paid) {
     const lerr = ledgerError({ kind: 'expense', account_id: acctId, status: '지급완료' })

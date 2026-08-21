@@ -6,6 +6,7 @@ import { DataTable } from '../lib/components/DataTable'
 import { TableToolbar } from '../lib/components/TableToolbar'
 import { useTableFilter, monthRange, activeMonthOf } from '../lib/tableFilter'
 import { ImportWizard } from '../lib/components/ImportWizard'
+import { VoucherView } from '../lib/components/VoucherView'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { InvoiceLines, lineVat, blankLine, isFilledLine } from '../lib/components/InvoiceLines'
 import { StatementDoc } from '../lib/components/StatementDoc'
@@ -88,6 +89,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
   const [matchAmt, setMatchAmt] = useState("")
   const [matchDate, setMatchDate] = useState(localDate())
   const [innerTab, setInnerTab] = useState("match")
+  const [voucherOpen, setVoucherOpen] = useState(false)   // 발행 시점 전표(차변·대변)
   /* 거래명세서 — 이 청구서의 품목을 서류로 뽑는다.
      회사·거래처 정보(사업자번호·대표·주소)는 명세서를 열 때만 받아온다.
      상세 드로어는 자주 열리는데 대부분 명세서를 안 뽑으므로, 열 때마다 두 번 더
@@ -128,6 +130,8 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
     setShowAll(false)
   }, [invoice?.id, invoice?.remainAmount])
   useEffect(() => { setDocs(invoice?.docs || []) }, [invoice?.id])
+  // 겹쳐 띄운 전표는 청구서가 바뀌면 닫는다 — 안 닫으면 다음 청구서에 저절로 펼쳐진 채 뜬다
+  useEffect(() => { setVoucherOpen(false) }, [invoice?.id])
   // 청구서에 계좌가 지정돼 있으면 그걸, 없으면 은행계좌를 기본값으로 (정기청구 자동 생성분은 계좌가 비어 있다)
   useEffect(() => {
     api.getAccounts().then(list => {
@@ -518,6 +522,9 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
 
         <div className="drawer-foot">
           <button className="btn" onClick={onClose}>닫기</button>
+          {/* 발행 시점 전표 — 대금이 오갈 때 생기는 거래 전표와는 별개다
+              (발행 때 생긴 채권·채무가 결제 때 사라진다) */}
+          <button className="btn" onClick={() => setVoucherOpen(true)}><Icon.Book size={14}/> 전표</button>
           {/* 매입 미지급금은 우리가 낼 돈이라 독촉 대상이 아님 → 지급결의서 발행.
               (제거) 매출 미수금의 '독촉 발송' — 누르면 "독촉 메일을 발송했어요"라고 알렸지만
               서버에 메일 발송 경로가 **아예 없다**(독촉·메일 관련 코드 0건). 아무것도 안 나가는데
@@ -538,6 +545,9 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                 </button>
               )}
         </div>
+
+        {/* 발행 전표 — 이 청구서를 끊은 시점의 분개. 결제 전표는 거래내역 쪽에 따로 있다. */}
+        <VoucherView open={voucherOpen} onClose={() => setVoucherOpen(false)} source="invoice" id={invoice.id}/>
 
         {/* 거래명세서 — 상세 위에 한 겹 더 띄운다. 인쇄는 이 종이(#statement-print)만 나간다.
             드로어 안에서 바로 뽑는 이유: 명세서는 '이 청구서'의 서류라 목록으로 돌아가
@@ -605,10 +615,13 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   const [mixedDelivery, setMixedDelivery] = useState(false)
   // 납품일별로 나눠 발행할지 — 새로 발행할 때만(수정 중인 청구서를 쪼갤 수는 없다)
   const [itemMaster, setItemMaster] = useState([])
+  // 비목 — 발행 시점 전표의 계정과목이 여기서 나온다(server/lib/voucher.js)
+  const [categories, setCategories] = useState([])
   // 첨부 파일 — 발행 전이라 청구서 id가 없으므로 먼저 업로드해 두고, 저장 후 청구서에 연결(지연 첨부)
   const [docs, setDocs] = useState([])
 
   useEffect(() => {
+    api.getCategories().then(setCategories)
     api.getVendors().then(setVendors)
     api.getAccounts().then(list => {
       setAccounts(list)
@@ -652,9 +665,11 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
         dueAt: editInvoice.dueAt || "",
         memo: editInvoice.memoRaw || "",
         accountId: editInvoice.accountId || accounts[0]?.id || "",
+        // 비목을 안 실으면 저장 한 번에 발행 전표의 계정과목이 통째로 사라진다
+        category: editInvoice.category || "",
       })
     } else {
-      setForm({ kind: defaultKind, vendor: "", contract: "", supplyAmount: "", vatAmount: "", taxType: "과세", dueAt: "", memo: "", accountId: accounts[0]?.id || "" })
+      setForm({ kind: defaultKind, vendor: "", contract: "", supplyAmount: "", vatAmount: "", taxType: "과세", dueAt: "", memo: "", accountId: accounts[0]?.id || "", category: "" })
     }
   }, [open, defaultKind, editInvoice])
 
@@ -725,6 +740,10 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
       due_at: form.dueAt || null,
       status: editInvoice ? editInvoice.status : (form.kind === "issued" ? "입금 예정" : "지급 예정"),
       account_id: form.accountId || null, memo: form.memo || "",
+      /* 비목 — 발행 시점 전표의 계정과목이 여기서 나온다.
+         매출은 없으면 제품매출로 갈음되지만, **매입은 갈음할 수 없다** —
+         외주가공비인지 통신비인지는 받는 사람이 정해줘야 안다. */
+      category: form.category || null,
       /* 품목 내역. 손대지 않은 빈 줄은 여기서 걸러낸다 — 표가 빈 줄로 시작하므로
          그냥 보내면 이름도 금액도 없는 줄이 거래명세서·지급결의서에 그대로 찍힌다.
          화면에서 쓰는 보조 필드(amountTouched)도 빼고 보낸다 —
@@ -738,10 +757,15 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
         // null 은 '자동'(서버가 그대로 NULL 로 둔다), 숫자는 이 줄에 굳힌 세액
         vat: (l.vat === null || l.vat === undefined || l.vat === '') ? null : Number(String(l.vat).replace(/[^0-9.-]/g, '')) || 0,
         note: l.note || '',
-        /* 납품일은 폼의 한 칸이 전 줄을 정한다. 비워 두면 줄에 남아 있던 값을 지키는데,
-           옛 청구서(줄마다 다른 날짜)를 날짜 한 번 안 건드리고 저장했을 때
-           그 값들이 통째로 날아가지 않게 하려는 것이다. */
-        delivery_date: deliveryDate || l.delivery_date || '',
+        /* 납품일은 폼의 한 칸이 전 줄을 정한다.
+         *
+         * 줄마다 날짜가 다른 옛 청구서(mixedDelivery)만 예외다 — 그건 이 칸이 비어 있는 것이
+         * '안 건드림'을 뜻하므로 줄에 남은 값을 지킨다. 날짜를 적으면 전 줄이 그 날로 바뀐다.
+         *
+         * 보통 청구서에서는 **이 칸이 곧 답이다.** 비운 것도 답이라 그대로 비운다 —
+         * 예전엔 여기서도 줄의 옛 값으로 되돌려서, 잘못 넣은 납품일을 **지울 방법이 없었다**
+         * (지우고 저장하면 그 날짜가 되살아나 거래명세서에 계속 찍혔다). */
+        delivery_date: mixedDelivery ? (deliveryDate || l.delivery_date || '') : deliveryDate,
       })),
       _docs: docs,   // 저장 후 청구서에 연결할 첨부(부모 handleSave가 처리)
     })
@@ -815,6 +839,27 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
               {["과세", "면세", "영세"].map(t => (
                 <button key={t} type="button" className={`chip ${form.taxType === t ? "active" : ""}`} onClick={() => f("taxType", t)}>{t}</button>
               ))}
+            </div>
+          </div>
+
+          {/* 비목 — 이 청구서가 장부에 어떤 계정으로 오르는지 정한다.
+              매입은 특히 중요하다: 외주가공비인지 원재료비인지 통신비인지는 청구서만 봐서는
+              알 수 없어서, 안 고르면 발행 전표의 차변이 통째로 빈다. */}
+          <div>
+            <label className="label">
+              비목 <span className="text-muted2">{form.kind === "issued" ? "(선택)" : "· 어떤 비용인가요?"}</span>
+            </label>
+            <Combobox value={form.category || ""}
+              onChange={v => f("category", v)}
+              options={categories
+                .filter(c => c.id?.startsWith(form.kind === "issued" ? "INC-" : "EXP-"))
+                .map(c => ({ value: c.name, label: c.name, sub: c.group_name || "" }))}
+              placeholder={form.kind === "issued" ? "매출 유형 (비우면 제품매출)" : "비목 선택"}
+              allowAdd={false}/>
+            <div className="text-sm text-muted2" style={{ marginTop: 4 }}>
+              {form.kind === "issued"
+                ? "발행 전표에 매출 계정으로 올라갑니다. 비우면 제품매출로 잡혀요."
+                : "발행 전표에 비용 계정으로 올라갑니다. 비우면 어떤 비용인지 정해지지 않아요."}
             </div>
           </div>
           {/* 거래명세서식 품목 입력 — 여기서 넣은 합계가 아래 공급가액이 된다 */}

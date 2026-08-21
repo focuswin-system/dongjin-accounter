@@ -117,10 +117,17 @@ router.get('/cash-report', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-/** 일계표 — 하루치 거래를 계정과목별 차변/대변으로 */
+/** 일계표 — 하루치 거래를 계정과목별 차변/대변으로.
+ *
+ * 청구서 발행 분개를 함께 셀지는 회사가 정한다(report_prefs 'voucher_issuance').
+ * 기본은 **켜짐** — 발행분이 빠지면 외상매출금이 생긴 적 없이 사라지고 매출 계정이
+ * 한 번도 안 찍혀 장부가 성립하지 않는다. 다만 "은행 기준으로만 전표를 끊는" 회사는
+ * 발행분이 섞이면 낯설어서, 끌 수 있게 둔다(report_prefs 규약대로 행이 없으면 켜짐). */
 router.get('/daily-trial', async (req, res, next) => {
   try {
-    res.json(await dailyTrial(req.db, req.query.date || kstToday()))
+    const [[off]] = await req.db.execute(
+      "SELECT key_name FROM report_prefs WHERE key_name = 'voucher_issuance' AND enabled = 0")
+    res.json(await dailyTrial(req.db, req.query.date || kstToday(), { includeIssuance: !off }))
   } catch (e) { next(e) }
 })
 
