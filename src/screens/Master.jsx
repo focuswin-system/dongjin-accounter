@@ -2589,7 +2589,7 @@ const RuleListHeader = ({ title, rows, all, amountOf, q, setQ, ruleFilter, setRu
         활성 {rows.filter(r => r.active).length}건 · 월 환산 <span className="num">{fmtNum(monthlyEquivalent(rows, amountOf))}</span>원
       </div>
     </div>
-    <div className="search" style={{ margin: 0, marginLeft: 'auto', width: 190, padding: '6px 10px' }}>
+    <div className="search rule-search" style={{ marginLeft: 'auto' }}>
       <Icon.Search size={14}/>
       <input value={q} onChange={e => setQ(e.target.value)} placeholder={placeholder}/>
     </div>

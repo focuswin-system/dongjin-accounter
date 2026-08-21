@@ -122,8 +122,12 @@ async function loanReport(db, { status = 'active', loanId = null } = {}) {
         total: num(r.principal) + num(r.interest),
       }
     })
+    /* 납부일 → 차입금명 → 회차. 이름 비교에서 **1 을 빠뜨리면 안 된다** —
+       빠뜨리면 이름이 큰 쪽에서 seq 차이로 흘러, 같은 날 갚은 두 계좌의 순서가
+       비교 순서에 따라 달라진다(정렬이 불안정해져 엑셀 행 순서가 그때그때 바뀐다). */
     .sort((a, b) => (a.paidDate < b.paidDate ? -1 : a.paidDate > b.paidDate ? 1
-                     : a.loanName < b.loanName ? -1 : a.seq - b.seq))
+                     : a.loanName < b.loanName ? -1 : a.loanName > b.loanName ? 1
+                     : a.seq - b.seq))
 
   const totals = {
     count: out.length,

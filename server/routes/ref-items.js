@@ -22,7 +22,7 @@ const pick = (body) => FIELDS.map(f => {
   if (DEC_FIELDS.has(f)) return parseFloat(String(body[f] ?? '').replace(/[^0-9.-]/g, '')) || 0
   // 아는 값만 통과시킨다 — 엉뚱한 값이 들어오면 금액 계산 기준이 흔들린다
   if (f === 'price_basis') return body[f] === 'weight' ? 'weight' : 'qty'
-  if (f === 'made_at') return normPartialDate(body[f])
+  if (f === 'made_at') return normPartialDate(body[f]) ?? null
   return body[f] ?? null
 })
 
@@ -33,8 +33,18 @@ const pick = (body) => FIELDS.map(f => {
 const normPartialDate = (v) => {
   const s = String(v ?? '').trim()
   if (!s) return null
-  return /^\d{4}-\d{2}(-\d{2})?$/.test(s) ? s : null
+  /* 흔한 구분자는 받아준다. 화면이 <input type="month"> 를 쓰는데 Firefox·Safari 데스크톱은
+     그걸 구현하지 않아 **그냥 텍스트 칸으로 떨어진다** — 거기에 "2011.06" 이나 "2011/06" 을
+     치는 게 자연스럽다. 예전엔 그런 값을 null 로 버리고 화면은 "수정됐어요"를 띄워서,
+     다시 열면 칸이 비어 있었다(입력이 사라진 걸 알 방법이 없었다). */
+  const t = s.replace(/[./]/g, '-').replace(/-+/g, '-')
+  return /^\d{4}-\d{2}(-\d{2})?$/.test(t) ? t : undefined   // undefined = 못 읽은 값
 }
+
+/** 제조일자가 '있는데 못 읽는' 값인가 — 있으면 그대로 알린다(조용히 버리지 않는다) */
+const madeAtError = (v) => (normPartialDate(v) === undefined
+  ? '제조일자는 2011-06 또는 2011-06-15 형식으로 입력해주세요'
+  : null)
 
 // 목록 (type별)
 router.get('/', async (req, res, next) => {
@@ -52,6 +62,7 @@ router.post('/', async (req, res, next) => {
   try {
     const { type, name } = req.body
     if (!type || !name) return res.status(400).json({ error: 'type·name 필수' })
+    { const e = madeAtError(req.body.made_at); if (e) return res.status(400).json({ error: e }) }
     const [[{ maxOrder }]] = await req.db.execute('SELECT COALESCE(MAX(sort_order),0) AS maxOrder FROM ref_items WHERE type=?', [type])
     const id = randomUUID()
     await req.db.execute(
@@ -66,6 +77,7 @@ router.post('/', async (req, res, next) => {
 // 수정
 router.put('/:id', async (req, res, next) => {
   try {
+    { const e = madeAtError(req.body.made_at); if (e) return res.status(400).json({ error: e }) }
     const [result] = await req.db.execute(
       `UPDATE ref_items SET ${FIELDS.map(f => `${f}=?`).join(', ')} WHERE id=?`,
       [...pick(req.body), req.params.id]

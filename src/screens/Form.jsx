@@ -60,6 +60,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   const [jeokyos, setJeokyos] = useState([]);        // 적요
   const [evidenceTypes, setEvidenceTypes] = useState([]);  // 적격증빙 유형(매입세액 공제 판정)
   const [acctSubjects, setAcctSubjects] = useState([]); // 계정과목(선택)
+  // 옛 거래에서 비워낸 자금 계정 코드 — 왜 비었는지 칸 아래에 설명하려고 기억해 둔다
+  const [staleFundCode, setStaleFundCode] = useState('');
   const [contracts, setContracts] = useState([]);
   const [employees, setEmployees] = useState([]);
 
@@ -115,6 +117,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   useEffect(() => {
     if (open) {
       setKind(initialKind);
+      setStaleFundCode('');
       setForm({ ...initialFormFor(initialKind, initialContract, accounts[0]?.name || "", initialCostContract),
         vendor: initialVendor || "",
         category: initialCategory || "",   // 환불·환입처럼 비목을 미리 지정하고 여는 경우
@@ -129,6 +132,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     if (!open || !editTxn) return;
     setKind(editTxn.kind);
     setShowMore(!!(editTxn.evid_url || editTxn.account_code || editTxn.project_no || editTxn.site));
+    /* 자금 계정을 비웠으면 그 사실을 알린다 — 조용히 비우면 사용자가 모르는 채로 저장한다.
+       showMore 도 켜서 계정과목 칸이 접혀 있지 않게 한다(안 보이면 안내도 안 읽힌다). */
+    const stale = FUND_CODES.includes(String(editTxn.account_code || '')) ? String(editTxn.account_code) : '';
+    setStaleFundCode(stale);
+    if (stale) setShowMore(true);
     setForm({
       vendor:    editTxn.vendor   || '',
       /* 주문이 비어 있으면 비운 채로 둔다. 예전엔 '공통'을 지어내 채웠는데(주문이 필수였으니까),
@@ -140,7 +148,14 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       category:  editTxn.category === '—' ? '' : (editTxn.category || ''),
       item:      editTxn.item_name || '',
       itemId:    editTxn.item_id   || '',
-      accountCode: editTxn.account_code || '',
+      /* 옛 거래가 자금 계정(1101 등)을 상대 계정으로 들고 있으면 **비운다.**
+       *
+       * 그 코드는 후보 목록에서 빠졌으므로 Combobox 가 라벨을 못 찾아 "1101" 이라는
+       * 코드만 덩그러니 보이고, 저장을 누르면 서버가 400 으로 막는다(fundAccountError).
+       * 사용자는 어느 칸이 문제인지 알 방법이 없어 거래를 영영 못 고친다.
+       * 비워 두면 서버가 비목에 맞는 계정과목을 넣어 주므로 저장이 되고, 아래 안내로
+       * 무엇이 바뀌었는지 알린다. (2026-08 조사에서 fowin 15건이 이 상태였다) */
+      accountCode: FUND_CODES.includes(String(editTxn.account_code || '')) ? '' : (editTxn.account_code || ''),
       amount:    editTxn.amount   || 0,
       account:   editTxn.account  || accounts[0]?.name || '',
       method:    editTxn.method   || '계좌이체',
@@ -386,7 +401,10 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
             {/* 계정과목(선택) → 비목(필수) → 적요(필수) 순. 계정과목은 표준 분류라 기본 노출.
                 비워 두면 서버가 비목에 달린 계정과목을 넣는다(routes/transactions.js resolveAcctCode) —
                 그래서 '선택'이지만 실제로는 대부분 채워진다. 다르게 잡아야 할 때만 직접 고르면 된다. */}
-            <FormField label="계정과목" hint="비워두면 비목에 맞춰 자동으로 정해집니다">
+            <FormField label="계정과목"
+              hint={staleFundCode
+                ? `이 거래에 '${staleFundCode}' 가 상대 계정으로 들어 있었어요. 그러면 장부에 매출·비용이 잡히지 않아 비웠습니다 — 비목에 맞춰 다시 정해집니다.`
+                : "비워두면 비목에 맞춰 자동으로 정해집니다"}>
               <Combobox value={form.accountCode}
                 onChange={(v) => setForm(f => ({ ...f, accountCode: v }))}
                 options={acctSubjects.map(a => ({ value: a.code, label: a.name, sub: `${a.code} · ${a.category}`, keywords: a.note || "" }))}

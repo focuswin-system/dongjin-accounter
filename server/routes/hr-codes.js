@@ -47,16 +47,44 @@ router.put('/reorder', async (req, res, next) => {
   finally { conn.release() }
 })
 
-/* 이름 수정 — 지금까지는 없었다. 오타 하나를 고치려면 지우고 다시 만들어야 했는데,
- * 그러면 새 id 가 생겨 이 직위를 가리키던 결재선이 끊긴다. */
+/* 이름 수정 — 오타 하나를 고치려면 지우고 다시 만들어야 했다.
+ *
+ * ⚠ **직원 정보까지 함께 고친다.** hr_codes 는 id 로 참조되지 않는다 —
+ * employees.department / employees.role 이 **이름 문자열**을 그대로 들고 있다
+ * (VARCHAR 컬럼이고, 화면도 Combobox 에서 고른 name 을 저장한다).
+ * 그래서 마스터 행만 고치면 '차자장'으로 저장된 직원들은 그대로 남고, 목록에 없는
+ * 직위가 되어 인사 명부에 직위가 둘로 갈린다(부서면 부서별 집계가 쪼개진다).
+ *
+ * 한 트랜잭션으로 묶는다. 중간에 끊기면 마스터와 직원이 서로 다른 이름을 들게 된다.
+ * (transactions.category 를 이름으로 저장해 개칭을 막아둔 것과 같은 유형의 문제인데,
+ *  여기는 대상이 employees 두 칸뿐이라 따라 고치는 쪽이 가능하다.) */
 router.put('/:id', async (req, res, next) => {
+  const conn = await req.db.getConnection()
   try {
     const name = String(req.body.name ?? '').trim()
-    if (!name) return res.status(400).json({ error: '이름을 입력해주세요' })
-    const [r] = await req.db.execute('UPDATE hr_codes SET name=? WHERE id=?', [name, req.params.id])
-    if (r.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
-    res.json({ ok: true })
-  } catch (e) { next(e) }
+    if (!name) { conn.release(); return res.status(400).json({ error: '이름을 입력해주세요' }) }
+
+    await conn.beginTransaction()
+    const [[cur]] = await conn.execute('SELECT type, name FROM hr_codes WHERE id=? FOR UPDATE', [req.params.id])
+    if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+
+    await conn.execute('UPDATE hr_codes SET name=? WHERE id=?', [name, req.params.id])
+
+    /* 이름이 실제로 바뀐 경우에만 직원을 훑는다. 같은 이름으로 저장을 눌렀을 때
+       멀쩡한 행을 건드려 봐야 얻는 게 없다. */
+    let moved = 0
+    if (cur.name !== name) {
+      const col = cur.type === 'dept' ? 'department' : cur.type === 'pos' ? 'role' : null
+      if (col) {
+        const [r] = await conn.execute(
+          `UPDATE employees SET \`${col}\` = ? WHERE \`${col}\` = ?`, [name, cur.name])
+        moved = r.affectedRows || 0
+      }
+    }
+    await conn.commit()
+    res.json({ ok: true, renamedEmployees: moved })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
 })
 
 router.delete('/:id', async (req, res, next) => {

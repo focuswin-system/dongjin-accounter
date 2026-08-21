@@ -1738,20 +1738,69 @@ async function initDb(conn) {
 
       /* 빠진 비목을 더한다. 기존 53개는 **이름을 바꾸지 않는다** —
        * transactions.category 가 ID 가 아니라 이름 문자열이라, 개칭하면 이미 쌓인 거래가
-       * 옛 이름을 든 채 남아 비목별 집계가 조용히 둘로 쪼개진다. */
+       * 옛 이름을 든 채 남아 비목별 집계가 조용히 둘로 쪼개진다.
+       *
+       * ⚠ **번호만 보고 판단하지 않는다.**
+       *
+       * 사용자가 만드는 비목은 `MAX(번호)+1` 로 채번된다(routes/categories.js). 최초 시드가
+       * EXP-904 에서 끝나므로 **사용자가 처음 만든 지출 비목이 EXP-905** 였다. 그런데 여기
+       * EXTRA_CATEGORIES 가 EXP-905~915 를 번호로 못 박아 쓴다 — 같은 번호를 두고 다투는 것이다.
+       *
+       * 예전 코드는 `WHERE id = ?` 로 존재만 보고 건너뛰었다. 그러면 사용자의 '차량 리스료'
+       * (EXP-905)가 있는 회사에서 표준 '감가상각비'는 영영 안 생기고, 아래 연결 루프가
+       * CATEGORY_ACCOUNT['EXP-905'] = '5209' 를 그 차량 리스료에 발라 버린다. 그 뒤로 차량
+       * 리스료로 찍은 모든 거래가 감가상각비로 분개된다 — 에러도 로그도 없이.
+       *
+       * 그래서 판단 기준을 **이름**으로 옮긴다:
+       *   1) 같은 이름이 이미 있으면 개념 중복이므로 만들지 않는다(번호가 달라도).
+       *   2) 번호만 선점돼 있으면 **비켜서 빈 번호로** 넣는다. 표준 비목이 사라지지 않는다.
+       * (재발 방지로 사용자 채번은 예약 구간 밖에서 시작한다 — routes/categories.js 참조) */
       const [[{ maxOrd }]] = await c.execute('SELECT COALESCE(MAX(sort_order),0) AS maxOrd FROM categories')
       let ord = Number(maxOrd)
       let newCats = 0
+      let moved = 0
+
+      /* 비켜 갈 번호는 **모든 기존 번호 위**에서 뽑는다.
+       *
+       * 매번 MAX+1 을 다시 계산하면 도미노가 난다 — 감가상각비가 905→906 으로 비키면서
+       * 원래 906 이던 교육훈련비를 밀고, 그게 다시 907 을 밀어 전부 한 칸씩 밀린다.
+       * 시작점을 한 번만 잡고 거기서 올려 쓰면 한 건만 움직인다. */
+      const spare = {}
+      const nextFreeCatId = async (prefix) => {
+        if (spare[prefix] === undefined) {
+          const [[{ maxno }]] = await c.execute(
+            "SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(id,'-',-1) AS UNSIGNED)),0) AS maxno FROM categories WHERE id LIKE ?",
+            [`${prefix}-%`])
+          // 표준 목록이 쓰는 최대 번호도 넘겨야 뒤에 올 표준 비목과 다시 안 부딪힌다
+          const claimed = EXTRA_CATEGORIES
+            .filter(([cid]) => String(cid).startsWith(`${prefix}-`))
+            .map(([cid]) => Number(String(cid).split('-').pop()) || 0)
+          spare[prefix] = Math.max(Number(maxno), ...claimed, 0)
+        }
+        return `${prefix}-${++spare[prefix]}`
+      }
+
       for (const [id, name, group_name, vat, pay_method] of EXTRA_CATEGORIES) {
-        const [[exists]] = await c.execute('SELECT id FROM categories WHERE id = ?', [id])
-        if (exists) continue
+        // 이름이 먼저다 — 사용자가 같은 개념을 다른 번호로 이미 만들어 뒀을 수 있다
+        const [[byName]] = await c.execute('SELECT id FROM categories WHERE name = ?', [name])
+        if (byName) continue
+
+        let useId = id
+        const [[byId]] = await c.execute('SELECT id, name FROM categories WHERE id = ?', [id])
+        if (byId) {
+          useId = await nextFreeCatId(String(id).split('-')[0])
+          moved++
+          console.warn(`[db] 비목 번호 충돌: ${id}('${byId.name}')가 이미 있어 '${name}'을 ${useId} 로 넣습니다`)
+        }
+        /* 계정과목을 **여기서 함께** 박는다. 번호를 비켜 갔으면 아래 연결 루프의
+           CATEGORY_ACCOUNT[useId] 가 비어 영영 안 붙는다 — 원래 번호의 값을 그대로 쓴다. */
         await c.execute(
-          'INSERT INTO categories (id, name, group_name, vat, pay_method, sort_order) VALUES (?,?,?,?,?,?)',
-          [id, name, group_name, vat, pay_method, ++ord]
+          'INSERT INTO categories (id, name, group_name, vat, pay_method, sort_order, account_code) VALUES (?,?,?,?,?,?,?)',
+          [useId, name, group_name, vat, pay_method, ++ord, CATEGORY_ACCOUNT[id] || null]
         )
         newCats++
       }
-      if (newCats > 0) console.log(`[db] 비목 ${newCats}건 추가`)
+      if (newCats > 0) console.log(`[db] 비목 ${newCats}건 추가${moved ? ` (번호 충돌 ${moved}건 비켜감)` : ''}`)
 
       /* 청구서 발행 분개는 **꺼진 채로 시작한다.**
        *
@@ -1770,17 +1819,30 @@ async function initDb(conn) {
       })
 
       /* 비어 있는 것만 채운다 — 사용자가 고쳐 둔 연결을 부팅마다 되돌리면 안 된다.
-       * 대상을 먼저 골라서 필요한 만큼만 UPDATE 한다(전건 UPDATE 는 부팅을 느리게 한다). */
+       * 대상을 먼저 골라서 필요한 만큼만 UPDATE 한다(전건 UPDATE 는 부팅을 느리게 한다).
+       *
+       * ⚠ 여기서도 **번호만 믿지 않는다.** 위와 같은 이유다 — 사용자가 EXP-905 를 선점했다면
+       *   그 행은 우리 '감가상각비'가 아니므로 5209 를 발라선 안 된다. 이름이 다르면 건너뛴다.
+       *   (최초 시드 53개는 EXP-904·INC-204 까지라 사용자 채번과 겹치지 않는다. 겹칠 수 있는
+       *    것은 EXTRA_CATEGORIES 가 쓰는 번호뿐이라, 그 범위만 이름을 확인한다.) */
+      const EXTRA_NAME_BY_ID = new Map(EXTRA_CATEGORIES.map(([cid, cname]) => [cid, cname]))
       const [blank] = await c.execute(
-        "SELECT id FROM categories WHERE account_code IS NULL OR account_code = ''")
+        "SELECT id, name FROM categories WHERE account_code IS NULL OR account_code = ''")
       let linked = 0
-      for (const { id: catId } of blank) {
+      let skipped = 0
+      for (const { id: catId, name: catName } of blank) {
         const code = CATEGORY_ACCOUNT[catId]
         if (!code) continue
+        const expected = EXTRA_NAME_BY_ID.get(catId)
+        if (expected && expected !== catName) {
+          skipped++
+          console.warn(`[db] 비목 ${catId}('${catName}')는 표준 '${expected}'가 아니라 계정과목을 연결하지 않습니다`)
+          continue
+        }
         await c.execute('UPDATE categories SET account_code = ? WHERE id = ?', [code, catId])
         linked++
       }
-      if (linked > 0) console.log(`[db] 비목 계정과목 ${linked}건 연결`)
+      if (linked > 0) console.log(`[db] 비목 계정과목 ${linked}건 연결${skipped ? ` (이름 불일치 ${skipped}건 건너뜀)` : ''}`)
     }
 
     // 적요(자주 쓰는 거래 내용) 예시 시딩 (jeokyo 항목이 하나도 없을 때만)

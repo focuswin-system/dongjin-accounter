@@ -791,22 +791,43 @@ router.put('/:id', async (req, res, next) => {
     /* 비목을 **보낸 요청만** 갱신한다. 청구서 폼이 아닌 화면(정산·상태 변경)이 저장할 때
      * 빈 값으로 덮으면 발행 전표의 계정과목이 한 번에 사라진다
      * (정산내역서에서 겪은 '화면에서 뺀 필드가 저장 한 번에 소멸' 과 같은 유형). */
-    const touchCategory = category !== undefined || account_code !== undefined
-    let invAcctCode = null
-    if (touchCategory) {
+    /* ⚠ 두 칸을 **따로** 갱신한다. 예전엔 둘 중 하나만 보내도 둘 다 썼다.
+     *
+     * 청구서 폼은 category 만 보낸다(Billing.jsx). 그래서 만기일 한 칸만 고쳐 저장해도
+     * account_code 가 **현재 비목 매핑으로 다시 계산**됐다 — 이 파일 머리말이 "스냅샷이라
+     * 나중에 비목 연결이 바뀌어도 발행 전표는 그대로 남는다"고 약속한 것과 반대다.
+     * 반대로 account_code 만 보내면 category 가 NULL 로 지워졌다.
+     *
+     * 규칙:
+     *   account_code 를 보냈다        → 그대로 쓴다(명시적 지정)
+     *   비목이 실제로 **바뀌었다**     → 계정과목도 따라 바꾼다(안 바꾸면 옛 계정이 남는다)
+     *   비목을 보냈지만 그대로다       → account_code 를 건드리지 않는다(스냅샷 보존)
+     */
+    const sets = []
+    const vals = []
+    let curInv = null
+    if (category !== undefined || account_code !== undefined) {
       // 등록·분할과 같은 규칙 — 한 입구만 막으면 다른 입구로 우회된다
       const fe = fundAccountError(account_code)
       if (fe) { await rollbackQuietly(conn); return res.status(400).json({ error: fe }) }
-      const [[kindRow]] = await conn.execute('SELECT kind FROM invoices WHERE id = ?', [req.params.id])
-      invAcctCode = await resolveInvoiceAcctCode(conn, account_code, category, kindRow?.kind)
+      const [[row]] = await conn.execute(
+        'SELECT kind, category, account_code FROM invoices WHERE id = ?', [req.params.id])
+      curInv = row || null
     }
+    if (category !== undefined) { sets.push('category=?'); vals.push(category || null) }
+    if (account_code !== undefined) {
+      sets.push('account_code=?')
+      vals.push(await resolveInvoiceAcctCode(conn, account_code, category, curInv?.kind))
+    } else if (category !== undefined && String(category || '') !== String(curInv?.category || '')) {
+      sets.push('account_code=?')
+      vals.push(await resolveInvoiceAcctCode(conn, null, category, curInv?.kind))
+    }
+
     const [result] = await conn.execute(
       `UPDATE invoices SET vendor_id=?, contract_id=?, supply_amount=?, vat_amount=?, total_amount=?, issued_at=?, due_at=?, account_id=?, memo=?, tax_type=?
-         ${touchCategory ? ', category=?, account_code=?' : ''}
+         ${sets.length ? ', ' + sets.join(', ') : ''}
        WHERE id=?`,
-      touchCategory
-        ? [vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, account_id||null, memo||'', taxType, category||null, invAcctCode, req.params.id]
-        : [vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, account_id||null, memo||'', taxType, req.params.id]
+      [vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, account_id||null, memo||'', taxType, ...vals, req.params.id]
     )
     if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     /* 품목 내역 — lines 를 **보낸 요청만** 갱신한다.
