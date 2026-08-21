@@ -155,7 +155,11 @@ export const MASTER_GROUPS = [
   { label: "자금·자산", items: [
     { id: "master_account",         label: "계좌",      icon: Icon.Bank },
     { id: "master_card",            label: "카드",      icon: Icon.Card },
-    { id: "master_accountBalance",  label: "계좌 잔액",  icon: Icon.Bank },
+    /* (제거) '계좌 잔액' — 계좌 화면과 **같은 것을 두 곳에서** 다루고 있었다.
+     * 목록에 이미 잔액 칸이 있는데 잔액을 고치려면 다른 메뉴로 가야 했고,
+     * "계좌에서 볼까 계좌 잔액에서 볼까"가 매번 갈렸다.
+     * 현재 잔액·초기잔액·조정 이력·잔액 조정을 전부 계좌 상세 안으로 넣었다.
+     * 라우트·권한 자원은 살려 둔다(HIDDEN_LEAVES) — 옛 링크가 계좌 화면으로 들어온다. */
     { id: "master_fixed_asset",     label: "고정자산",   icon: Icon.Wallet },
     { id: "master_intangible_asset",label: "무형자산",   icon: Icon.File },
     { id: "master_insurance",       label: "보험",       icon: Icon.Doc },
@@ -198,6 +202,11 @@ export const HIDDEN_LEAVES = [
      청구서 화면이 '미정산' 필터로 열린다. 권한 자원(ar·ap)도 그대로 유지된다. */
   { id: "ar", label: "미수금 (대금 청구서)",   icon: Icon.Recv, domain: "일반회계", section: "판매·수주(매출)" },
   { id: "ap", label: "미지급금 (대금 청구서)", icon: Icon.Pay,  domain: "일반회계", section: "매입" },
+  /* 계좌 잔액 — 계좌 상세 안으로 들어갔지만 라우트는 살아 있다(계좌 화면을 띄운다).
+     '잔액'·'통장잔고'로 찾는 사람이 실제로 있어서 Ctrl+K 에서 걸려야 하고,
+     권한 자원(master_accountBalance)은 잔액 조회 게이트가 아직 참조한다
+     (server/routes/accounts.js canSeeBalance). */
+  { id: "master_accountBalance", label: "계좌 잔액 (계좌)", icon: Icon.Bank, domain: "기준정보", section: "자금·자산" },
 ]
 
 // 잎 id → 소속 도메인 id (활성 도메인 자동 펼침용)

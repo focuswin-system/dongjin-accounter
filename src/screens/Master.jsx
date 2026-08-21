@@ -121,6 +121,10 @@ const MASTER_TABS = [
 
 const TAB_BY_ID = Object.fromEntries(MASTER_TABS.map(t => [t.id, t]));
 
+/* 메뉴에서 내린 탭 → 그 일을 이어받은 탭.
+   '계좌 잔액'은 계좌 상세 안으로 들어갔다(현재 잔액·초기잔액·조정 이력·잔액 조정). */
+const RETIRED_TABS = { accountBalance: "account" };
+
 /**
  * 전용 패널로 그리는 탭 — MasterScreen 의 renderCustomPanel() 과 짝이다.
  *
@@ -149,7 +153,8 @@ const MASTER_SECTIONS = {
       { label: "거래 기준", tabs: ["vendor", "accountSubject", "category", "jeokyo", "evidence_type"] },
       { label: "품목·자산", tabs: ["item", "fixed_asset", "intangible_asset"] },
       // 계좌와 카드를 가른다 — 통장은 '얼마 있나', 카드는 '언제 빠져나가나'라 관리 축이 다르다.
-      { label: "자금·결제", tabs: ["account", "card", "accountBalance", "insurance"] },
+      // 잔액은 계좌 상세 안으로 들어갔다 — '계좌 잔액' 탭은 뺀다(라우트는 계좌 화면을 띄운다)
+      { label: "자금·결제", tabs: ["account", "card", "insurance"] },
       // 정기청구/정기지출은 기준정보(정적 참조)가 아니라 주문에서 파생되는 흐름이라 여기서 제거.
       // → 회계처리로 재배치 완료: 정기청구=판매·수주(매출)(route recurring_invoice), 정기지출=경비(route recurring_expense).
       //   패널은 이 파일에서 export해 App이 page 모드로 렌더한다.
@@ -1243,17 +1248,30 @@ const PAY_OPTS = ["계좌이체", "법인카드", "현금", "—"]
 
 const kindOf = (c) => (c.id?.startsWith('INC-') ? 'inc' : 'exp')
 
+/* 자금 계정 — 비목의 계정과목이 될 수 없다. 서버 lib/categoryAccount.js FUND_CODES 와 같은 값집합.
+ * 거래는 계좌로 이미 한쪽 다리를 갖기 때문에, 상대 계정까지 예금·현금이면
+ * `보통예금 / 보통예금` 이 되어 매출도 비용도 장부에 잡히지 않는다. */
+const FUND_CODES = ["1101", "1102", "1103"]
+
 const CategoryPanel = ({ embedded = false }) => {
   const toast = useToast()
   const [cats, setCats] = useState([])
+  const [acctSubjects, setAcctSubjects] = useState([])
   const [q, setQ] = useState("")
   const [filterKind, setFilterKind] = useState("") // '' | 'exp' | 'inc'
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editing, setEditing] = useState(null) // null = new
-  const [form, setForm] = useState({ kind: "exp", name: "", vat: "10%", pay_method: "계좌이체" })
+  const [form, setForm] = useState({ kind: "exp", name: "", vat: "10%", pay_method: "계좌이체", account_code: "" })
 
   const load = () => api.getCategories().then(setCats)
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    api.getAccountSubjects({ postableOnly: true })
+      .then(rows => setAcctSubjects(rows.filter(a => !FUND_CODES.includes(String(a.code)))))
+  }, [])
+
+  const acctNameOf = (code) =>
+    acctSubjects.find(a => String(a.code) === String(code))?.name || ''
 
   const filtered = cats.filter(c =>
     (!filterKind || kindOf(c) === filterKind) &&
@@ -1262,23 +1280,26 @@ const CategoryPanel = ({ embedded = false }) => {
 
   const openNew = () => {
     setEditing(null)
-    setForm({ kind: filterKind === "inc" ? "inc" : "exp", name: "", vat: "10%", pay_method: "계좌이체" })
+    setForm({ kind: filterKind === "inc" ? "inc" : "exp", name: "", vat: "10%", pay_method: "계좌이체", account_code: "" })
     setDrawerOpen(true)
   }
   const openEdit = (c) => {
     setEditing(c)
     // vat_deductible을 안 실으면 칩이 항상 '공제 가능'으로 보이고, 저장 시 서버가 1로 되돌린다
+    // account_code도 같다 — 안 실으면 저장 한 번에 연결이 통째로 지워진다
     setForm({ kind: kindOf(c), name: c.name, vat: c.vat, pay_method: c.pay_method,
-              vat_deductible: c.vat_deductible == null ? 1 : Number(c.vat_deductible) })
+              vat_deductible: c.vat_deductible == null ? 1 : Number(c.vat_deductible),
+              account_code: c.account_code || "" })
     setDrawerOpen(true)
   }
   const handleSave = async () => {
     if (!form.name.trim()) return toast.push("비목명을 입력하세요")
     // 매입세액 불공제(접대비 등)는 반드시 payload에 넣는다 — 빠지면 서버가 1(공제가능)로 강제한다
     const vatDeductible = (form.vat_deductible ?? 1) === 0 ? 0 : 1
+    const acctCode = form.account_code || null
     const res = editing
-      ? await api.updateCategory(editing.id, { name: form.name, group_name: editing.group_name || '', vat: form.vat, pay_method: form.pay_method, vat_deductible: vatDeductible })
-      : await api.addCategory({ kind: form.kind, name: form.name, vat: form.vat, pay_method: form.pay_method, vat_deductible: vatDeductible })
+      ? await api.updateCategory(editing.id, { name: form.name, group_name: editing.group_name || '', vat: form.vat, pay_method: form.pay_method, vat_deductible: vatDeductible, account_code: acctCode })
+      : await api.addCategory({ kind: form.kind, name: form.name, vat: form.vat, pay_method: form.pay_method, vat_deductible: vatDeductible, account_code: acctCode })
     if (!res.ok) return toast.push(res.error || "저장 실패", { tone: 'warn' })
     toast.push(editing ? "수정됐어요" : "등록됐어요")
     setDrawerOpen(false)
@@ -1319,6 +1340,8 @@ const CategoryPanel = ({ embedded = false }) => {
             <tr>
               <th style={{ width: 70 }}>구분</th>
               <th>비목명</th>
+              {/* 이 비목으로 등록한 거래가 장부에 어떤 계정으로 오르는지 — 경리가 분개를 맞출 때 본다 */}
+              <th style={{ width: 180 }}>계정과목</th>
               <th style={{ width: 70 }}>부가세</th>
               <th style={{ width: 100 }}>결제수단</th>
               <th style={{ width: 100 }}></th>
@@ -1326,12 +1349,17 @@ const CategoryPanel = ({ embedded = false }) => {
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={5} style={{ textAlign: "center", padding: 32, color: "var(--muted-2)" }}>비목이 없어요. 위에서 추가하세요.</td></tr>
+              <tr><td colSpan={6} style={{ textAlign: "center", padding: 32, color: "var(--muted-2)" }}>비목이 없어요. 위에서 추가하세요.</td></tr>
             )}
             {filtered.map(c => (
               <tr key={c.id}>
                 <td><span className={`badge ${kindOf(c) === "inc" ? "pos" : "warn"}`}>{kindOf(c) === "inc" ? "수입" : "지출"}</span></td>
                 <td className="fw-600">{c.name}</td>
+                <td className="text-sm">
+                  {c.account_code
+                    ? <span><span className="num text-xs text-muted2">{c.account_code}</span> {acctNameOf(c.account_code)}</span>
+                    : <span className="text-xs" style={{ color: "var(--neg-ink)" }}>연결 안 됨</span>}
+                </td>
                 <td className="text-sm">{c.vat}</td>
                 <td className="text-sm">{c.pay_method}</td>
                 <td>
@@ -1365,6 +1393,22 @@ const CategoryPanel = ({ embedded = false }) => {
             <label className="label">비목명 <span style={{ color: "var(--neg-ink)" }}>*</span></label>
             <input className="input" placeholder="예: 도금 외주"
               value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}/>
+          </div>
+          {/* 이 비목으로 등록한 거래가 장부에 어떤 계정으로 오르는지. 비워 두면 그 거래는
+              상대 계정이 없어 일계표에서 차·대변 짝을 잃는다 — 그래서 표에도 '연결 안 됨'으로 세운다. */}
+          <div>
+            <label className="label">계정과목</label>
+            <Combobox value={form.account_code || ""}
+              onChange={v => setForm(p => ({ ...p, account_code: v }))}
+              options={acctSubjects
+                .filter(a => kindOf(form) === 'inc' ? a.acct_type === '수익' : a.acct_type !== '수익')
+                .map(a => ({ value: String(a.code), label: a.name, sub: `${a.code} · ${a.category}`, keywords: a.note || "" }))}
+              placeholder="계정과목 선택"
+              allowAdd={false}/>
+            <div className="text-xs text-muted" style={{ marginTop: 4 }}>
+              거래를 등록할 때 계정과목을 비워두면 여기 값이 자동으로 들어가요.
+              현금·예금은 계좌가 맡는 자리라 고를 수 없어요.
+            </div>
           </div>
           <div>
             <label className="label">부가세</label>
@@ -1585,6 +1629,8 @@ const CompanyPanel = ({ embedded = false }) => {
   const toast = useToast()
   const [form, setForm] = useState({ name:'', biz_no:'', ceo:'', biz_type:'', biz_item:'', address:'', phone:'', fax:'', email:'', main_account:'', closing_day: 0, week_start_day: 1 })
   const [accounts, setAccounts] = useState([])
+  // 회계 처리 방식 — 저장 버튼과 무관하게 토글 즉시 반영된다(장부 규약이라 되돌리기 쉬워야 한다)
+  const [acctPrefs, setAcctPrefs] = useState({ voucher_issuance: true })
 
   useEffect(() => {
     api.getCompany().then(c => {
@@ -1596,6 +1642,7 @@ const CompanyPanel = ({ embedded = false }) => {
       })
     })
     api.getAccounts().then(list => setAccounts(list.filter(a => a.kind !== 'card')))
+    api.getAccountingPrefs().then(setAcctPrefs)
   }, [])
 
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
@@ -1723,6 +1770,38 @@ const CompanyPanel = ({ embedded = false }) => {
             </div>
           </div>
         </div>
+
+        <div style={{ height: 1, background: 'var(--line)' }}/>
+
+        {/* 회계 처리 방식 — 일계표가 무엇을 세는지 정한다.
+            저장 버튼을 거치지 않고 토글 즉시 반영한다(되돌리기 쉬워야 하는 장부 규약). */}
+        <div>
+          <label className="label" style={{ marginBottom: 8 }}>회계 처리 방식</label>
+          <div className="row gap-10" style={{ alignItems: 'flex-start' }}>
+            <button type="button"
+              className={`chip ${acctPrefs.voucher_issuance ? 'active' : ''}`}
+              onClick={async () => {
+                const next = !acctPrefs.voucher_issuance
+                setAcctPrefs(p => ({ ...p, voucher_issuance: next }))
+                const res = await api.setAccountingPref('voucher_issuance', next)
+                if (!res.ok) {
+                  setAcctPrefs(p => ({ ...p, voucher_issuance: !next }))   // 실패하면 되돌린다
+                  toast.push(res.error || '바꾸지 못했어요', { tone: 'warn' })
+                } else {
+                  toast.push(next ? '청구서 발행분도 일계표에 셉니다' : '돈이 오간 거래만 셉니다')
+                }
+              }}>
+              청구서 발행 시점도 장부에 올리기
+            </button>
+          </div>
+          <div className="text-xs text-muted2" style={{ marginTop: 6, lineHeight: 1.7 }}>
+            {acctPrefs.voucher_issuance
+              ? <>켜짐 · 청구서를 <b>발행한 날</b>에 받을 돈(외상매출금)이 생기고, 입금될 때 사라지는 것으로 봐요.
+                  두 시점이 다 잡혀야 장부가 맞습니다.</>
+              : <>꺼짐 · <b>돈이 실제로 오간 거래만</b> 셉니다. 은행 기준으로 전표를 끊는 방식이에요.
+                  청구서 발행 분개는 일계표에 나오지 않습니다.</>}
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -1765,17 +1844,51 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState(emptyAccountForm(kind))
   const isCardPanel = kind === 'card'
+  /* 드로어는 **보는 것이 먼저**다. 예전엔 계좌 하나를 들여다볼 방법이 수정 폼을 여는 것뿐이라,
+     계좌번호만 확인하려 해도 편집 가능한 칸 한가운데에 서 있어야 했다. */
+  const [mode, setMode] = useState('view')       // 'view' | 'edit'
+  const [adjustTarget, setAdjustTarget] = useState(null)
+  const [histTarget, setHistTarget] = useState(null)
+  const [adjustments, setAdjustments] = useState(null)   // null = 아직 못 읽음
 
   const load = () => api.getAccounts().then(setAccounts)
   useEffect(() => { load() }, [])
 
+  /* 상세를 열 때 그 계좌의 조정 이력만 읽는다(목록 전체를 미리 읽지 않는다).
+     카드는 잔액이 없으니 부르지 않는다 — 없는 것을 조회하면 빈 이력이 '조정 0건'으로 보인다. */
+  useEffect(() => {
+    if (!drawerOpen || !editing || isCardPanel) { setAdjustments(null); return }
+    let alive = true
+    api.getAdjustments(editing.id).then(list => { if (alive) setAdjustments(list || []) }).catch(() => {})
+    return () => { alive = false }
+  }, [drawerOpen, editing?.id, isCardPanel])
+
+  const reloadDetail = async () => {
+    await load()
+    if (editing && !isCardPanel) api.getAdjustments(editing.id).then(setAdjustments).catch(() => {})
+  }
+
+  const handleAdjust = async (accountId, data) => {
+    // 결과를 안 보고 성공 문구를 띄우면, 마감된 달이라 거절돼도 등록된 줄 안다
+    const res = await api.addAdjustment(accountId, data)
+    if (!res.ok) { toast.push(res.error || '잔액 조정에 실패했어요', { tone: 'warn' }); return }
+    toast.push('잔액 조정이 등록됐어요')
+    reloadDetail()
+  }
+
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
+
+  /* 드로어가 들고 있는 editing 은 열 때 떠 온 사본이라 잔액을 조정해도 그대로다.
+     화면에 쓸 값은 늘 방금 다시 읽은 목록에서 집는다 — 조정하고 나서 옛 잔액이 남아 있으면
+     "조정이 안 먹었나" 싶어 한 번 더 조정하게 된다. */
+  const detail = editing ? (accounts.find(a => a.id === editing.id) || editing) : null
 
   const filtered = accounts.filter(a => (a.kind === 'card') === isCardPanel).filter(a =>
     !q || [a.name, a.bankName, a.number, a.purpose, a.type].some(s => s?.includes(q))
   )
 
-  const openNew = () => { setEditing(null); setForm(emptyAccountForm(kind)); setDrawerOpen(true) }
+  // 새로 만들 때는 볼 것이 없으니 곧장 입력 모드로 연다
+  const openNew = () => { setEditing(null); setForm(emptyAccountForm(kind)); setMode('edit'); setDrawerOpen(true) }
 
   /* 건수는 **이 화면이 실제로 보여주는 것**만 센다. accounts.length(전체 9건)를 쓰면
      카드 3장짜리 화면에 '총 9건'이 떠서, 표와 머리글이 서로 다른 말을 한다. */
@@ -1783,7 +1896,9 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
   const headerSub = isCardPanel
     ? `총 ${ownCount}장 · 결제수단으로 사용됩니다`
     : `총 ${ownCount}개 · 입출금이 기록되는 통장이에요`
-  const openEdit = (a) => {
+  const openDetail = (a) => { fillForm(a); setMode('view'); setDrawerOpen(true) }
+
+  const fillForm = (a) => {
     setEditing(a)
     setForm({
       kind: a.kind || 'bank',
@@ -1812,7 +1927,8 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
     const res = editing ? await api.updateAccount(editing.id, payload) : await api.addAccount(payload)
     if (!res.ok) return toast.push(res.error || '저장 실패', { tone: 'warn' })
     toast.push(editing ? '수정됐어요' : '등록됐어요')
-    setDrawerOpen(false)
+    // 고친 뒤엔 상세로 돌아간다 — 무엇이 바뀌었는지 그 자리에서 보이는 게 확인이다
+    if (editing) setMode('view'); else setDrawerOpen(false)
     load()
   }
 
@@ -1898,7 +2014,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
                 )}
                 <td>
                   <div className="row gap-6">
-                    <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => openEdit(a)}>수정</button>
+                    <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => openDetail(a)}>상세</button>
                     <button className="btn" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--neg)' }} onClick={() => handleDelete(a)}>삭제</button>
                   </div>
                 </td>
@@ -1908,10 +2024,58 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
         </table>
       </div>
 
-      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
+      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} confirmClose={mode === 'edit'}>
         <DrawerHead
-          title={`${isCard ? '카드' : '계좌'} ${editing ? '수정' : '등록'}`}
+          title={editing ? detail?.name : `${isCard ? '카드' : '계좌'} 등록`}
+          sub={editing ? (mode === 'view' ? [detail?.bankName, detail?.type].filter(Boolean).join(' · ') : '수정 중') : null}
           onClose={() => setDrawerOpen(false)}/>
+
+        {mode === 'view' && detail ? (
+          <div className="drawer-body col gap-16">
+            {/* 잔액 — 통장에만 있다. 카드는 결제수단이라 담아 두는 돈이 없다. */}
+            {!isCard && (
+              <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
+                <div className="row">
+                  <div className="text-sm text-muted">현재 잔액</div>
+                  <div className="num fw-700 ml-auto" style={{ fontSize: 24, letterSpacing: '-0.02em' }}>
+                    {detail.currentBalance == null ? '—' : fmtNum(detail.currentBalance)}
+                  </div>
+                </div>
+                {/* 잔액이 어떻게 나온 숫자인지 보여준다 — 근거 없이 뜬 금액은 못 믿는다 */}
+                <div className="row text-xs text-muted2" style={{ marginTop: 6, gap: 10 }}>
+                  <span>초기잔액 <span className="num">{fmtNum(detail.initialBalance)}</span></span>
+                  <span>·</span>
+                  <span>거래 집계 반영됨</span>
+                  <span>·</span>
+                  <span style={{ color: adjustments?.length ? 'var(--warn-ink)' : undefined }}>
+                    조정 {adjustments == null ? '…' : adjustments.length ? `${adjustments.length}건` : '없음'}
+                  </span>
+                </div>
+                <div className="row gap-8" style={{ marginTop: 14 }}>
+                  <button className="btn primary" style={{ fontSize: 12 }} onClick={() => setAdjustTarget(detail)}>
+                    <Icon.Plus size={12}/> 잔액 조정
+                  </button>
+                  <button className="btn" style={{ fontSize: 12 }} disabled={!adjustments?.length}
+                    onClick={() => setHistTarget(detail)}>
+                    <Icon.Clock size={12}/> 조정 이력
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <dl className="detail-list">
+              <dt>{isCard ? '카드 종류' : '예금 종류'}</dt><dd>{detail.type || '—'}</dd>
+              <dt>{isCard ? '카드사' : '은행'}</dt><dd>{detail.bankName || '—'}</dd>
+              <dt>{isCard ? '카드번호' : '계좌번호'}</dt><dd className="num">{detail.number || '—'}</dd>
+              <dt>용도</dt><dd>{detail.purpose || '—'}</dd>
+              <dt>소유</dt><dd>{detail.owner === 'personal' ? '대표 개인' : '법인'}</dd>
+              {isCard && <>
+                <dt>결제일</dt><dd>{detail.cardPayDay ? `매월 ${detail.cardPayDay}일` : '설정 안 함'}</dd>
+                <dt>결제 계좌</dt><dd>{accounts.find(x => x.id === detail.cardPayAccountId)?.name || '—'}</dd>
+              </>}
+            </dl>
+          </div>
+        ) : (
         <div className="drawer-body col gap-form">
           {/* 종류 선택은 없다 — 어느 화면에서 열었는지가 곧 종류다(위 isCard 주석 참고) */}
           <div>
@@ -1998,99 +2162,42 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
               <div style={{ flex: 1 }}>
                 <label className="label" style={{ marginBottom: 8 }}>초기 잔액</label>
                 <MoneyInput allowNegative value={form.initial_balance} onChange={raw => f('initial_balance', raw)}/>
-                <div className="text-xs text-muted2" style={{ marginTop: 6 }}>등록 시점 통장 잔액. 이후 거래로 자동 증감돼요.</div>
+                {/* 초기 잔액과 잔액 조정은 둘 다 잔액을 움직이지만 성격이 다르다.
+                    여기는 '출발점'이고, 조정은 그 뒤에 생긴 차이를 사유와 함께 남기는 기록이다. */}
+                <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+                  등록 시점 통장 잔액이에요. 이후 생긴 차이는 상세의 <b>잔액 조정</b>으로 맞추세요.
+                </div>
               </div>
             )}
           </div>
         </div>
-        <DrawerFooter onCancel={() => setDrawerOpen(false)} onSave={handleSave}/>
-      </Drawer>
-    </div>
-  )
-}
+        )}
 
-const AccountBalancePanel = ({ embedded = false }) => {
-  const toast = useToast()
-  const [accounts, setAccounts] = useState([])
-  const [adjustTarget, setAdjustTarget] = useState(null)
-  const [histTarget, setHistTarget] = useState(null)
-
-  const load = async () => {
-    /* ⚠ 카드는 뺀다. 카드에는 '잔액'이 없다 — 결제수단이지 돈을 담아 두는 곳이 아니라
-       (cashReport 의 가용자금도 같은 이유로 카드를 뺀다), 목록의 잔액 칸이 늘 '—' 였고
-       조정 버튼까지 붙어 있었다. "카드 잔액을 통장에 맞춘다"는 말이 안 된다.
-       이 파일의 다른 계좌 목록들도 이미 같은 조건으로 카드를 거른다. */
-    const accs = (await api.getAccounts()).filter(a => a.kind !== 'card')
-    const withAdj = await Promise.all(
-      accs.map(async a => ({ ...a, adjustments: await api.getAdjustments(a.id) }))
-    )
-    setAccounts(withAdj)
-  }
-  useEffect(() => { load() }, [])
-
-  const handleAdjust = async (accountId, data) => {
-    // 결과를 안 보고 성공 문구를 띄우면, 마감된 달이라 거절돼도 등록된 줄 안다
-    const res = await api.addAdjustment(accountId, data)
-    if (!res.ok) { toast.push(res.error || "잔액 조정에 실패했어요", { tone: "warn" }); return }
-    toast.push("잔액 조정이 등록됐어요")
-    load()
-  }
-
-  return (
-    <div style={{ padding: 20 }}>
-      <div className="row" style={{ marginBottom: 16 }}>
-        {!embedded && <div className="section-title">계좌별 잔액</div>}
-        <div className="text-sm text-muted ml-auto">거래내역 기반 자동 집계 + 수동 조정</div>
-      </div>
-      <div className="col gap-12">
-        {accounts.map(acc => (
-          <div key={acc.id} className="card" style={{ padding: 18, border: "1px solid var(--line)" }}>
-            <div className="row" style={{ marginBottom: 10 }}>
-              <div>
-                <div className="fw-700" style={{ fontSize: 15 }}>{acc.name}</div>
-                {/* 계좌번호까지 보여준다 — 같은 은행에 통장이 여러 개면 별칭만으로는
-                    어느 통장인지 확정할 수 없다. 통장을 옆에 놓고 맞추는 화면이라 번호가 근거다. */}
-                <div className="text-xs text-muted">{acc.bankName} · {acc.type}</div>
-                {acc.number && (
-                  <div className="text-xs text-muted2 num" style={{ marginTop: 2 }}>{acc.number}</div>
-                )}
-              </div>
-              <div className="num fw-700 ml-auto" style={{ fontSize: 22, letterSpacing: "-0.02em" }}>
-                {acc.currentBalance == null ? "—" : fmtNum(acc.currentBalance)}
-              </div>
-            </div>
-            <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: "4px 12px", fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
-              <span>초기잔액</span><span>거래 집계</span><span>수동 조정</span>
-              <span className="num fw-600" style={{ color: "var(--ink)" }}>{fmtNum(acc.initialBalance)}</span>
-              <span className="num fw-600" style={{ color: "var(--ink)" }}>계산됨</span>
-              <span className="num fw-600" style={{ color: acc.adjustments.length > 0 ? "var(--warn-ink)" : "var(--muted)" }}>
-                {acc.adjustments.length > 0 ? `${acc.adjustments.length}건` : "없음"}
-              </span>
-            </div>
-            <div className="row gap-8">
-              <button className="btn" style={{ fontSize: 12 }} onClick={() => setHistTarget(acc)}>
-                <Icon.Clock size={12}/> 조정 이력
-              </button>
-              <button className="btn primary" style={{ fontSize: 12 }} onClick={() => setAdjustTarget(acc)}>
-                <Icon.Plus size={12}/> 잔액 조정
-              </button>
-            </div>
+        {mode === 'view' && detail ? (
+          <div className="drawer-foot">
+            <button className="btn" style={{ color: 'var(--neg)' }} onClick={() => handleDelete(detail)}>삭제</button>
+            <button className="btn ml-auto" onClick={() => setDrawerOpen(false)}>닫기</button>
+            <button className="btn primary" onClick={() => { fillForm(detail); setMode('edit') }}>수정</button>
           </div>
-        ))}
-      </div>
+        ) : (
+          <DrawerFooter
+            onCancel={() => (editing ? setMode('view') : setDrawerOpen(false))}
+            onSave={handleSave}/>
+        )}
+      </Drawer>
 
-      {/* 조정 이력 */}
+      {/* 조정 이력 — 계좌 상세 위에 겹쳐 뜬다(Drawer 스택이 Esc 를 맨 위 것부터 닫는다) */}
       <Drawer open={!!histTarget} onClose={() => setHistTarget(null)}>
-        <DrawerHead title={<>조정 이력 — {histTarget?.name}</>} onClose={() => setHistTarget(null)}/>
+        <DrawerHead title="조정 이력" sub={histTarget?.name} onClose={() => setHistTarget(null)}/>
         <div className="drawer-body">
-          {histTarget?.adjustments?.length === 0 ? (
-            <div className="text-muted text-sm" style={{ padding: "20px 0" }}>조정 이력이 없습니다</div>
-          ) : histTarget?.adjustments?.map((a, i) => (
-            <div key={i} style={{ padding: "12px 0", borderBottom: "1px solid var(--line)" }}>
+          {!adjustments?.length ? (
+            <div className="text-muted text-sm" style={{ padding: '20px 0' }}>조정 이력이 없습니다</div>
+          ) : adjustments.map((a, i) => (
+            <div key={a.id || i} style={{ padding: '12px 0', borderBottom: '1px solid var(--line)' }}>
               <div className="row">
                 <span className="text-sm text-muted">{a.date}</span>
-                <span className="num fw-700 ml-auto" style={{ color: a.amount < 0 ? "var(--neg-ink)" : "var(--pos)" }}>
-                  {a.amount > 0 ? "+" : ""}{fmtNum(a.amount)}
+                <span className="num fw-700 ml-auto" style={{ color: a.amount < 0 ? 'var(--neg-ink)' : 'var(--pos)' }}>
+                  {a.amount > 0 ? '+' : ''}{fmtNum(a.amount)}
                 </span>
               </div>
               <div className="text-sm" style={{ marginTop: 4 }}>{a.reason}</div>
@@ -3533,7 +3640,10 @@ export const MasterScreen = ({ user, section = "base", forcedTab }) => {
   // forcedTab(사이드바 서브메뉴로 진입)이면 그 탭 고정 + 내부 서브내브 숨김 + 전체폭.
   // 없으면 기존 탭 방식(내부 서브내브). 라우트 변경으로 탭이 이 섹션에 없으면 첫 탭 폴백.
   // 잘못된 forcedTab(오타 라우트·구버전 해시)은 이 섹션 탭이 아니면 무시 — data.label 등에서 화면 전체가 크래시하지 않게.
-  const forced = forcedTab && allowedTabs.includes(forcedTab) ? forcedTab : null;
+  /* 은퇴한 탭은 지금 그 일을 하는 탭으로 넘긴다. 그냥 두면 allowedTabs 에 없어서
+     첫 탭(거래처)으로 떨어지는데, 옛 북마크를 누른 사람 눈에는 엉뚱한 화면이 뜬 것이다. */
+  const wantedTab = RETIRED_TABS[forcedTab] || forcedTab;
+  const forced = wantedTab && allowedTabs.includes(wantedTab) ? wantedTab : null;
   const activeTab = forced || (allowedTabs.includes(tab) ? tab : allowedTabs[0]);
   const single = !!forced;
   const [q, setQ] = useState("");
@@ -3558,12 +3668,14 @@ export const MasterScreen = ({ user, section = "base", forcedTab }) => {
   const renderCustomPanel = () => {
     if (REF_CONFIGS[activeTab])           return <RefMasterPanel key={activeTab} cfg={REF_CONFIGS[activeTab]} embedded={single}/>
     if (activeTab === "vendor")           return <VendorPanel embedded={single}/>
-    if (activeTab === "account")          return <AccountPanel embedded={single} kind="bank"/>
-    if (activeTab === "card")             return <AccountPanel embedded={single} kind="card"/>
+    /* ⚠ key 를 준다. 계좌와 카드는 **같은 컴포넌트**라, key 가 없으면 React 가 한 인스턴스를
+       재사용해 상태가 그대로 넘어간다 — 계좌 상세를 열어 둔 채 카드로 옮기면 카드 목록 위에
+       통장 상세가 떠 있고, 거기서 저장하면 kind='card' 로 저장돼 **통장이 카드가 된다.** */
+    if (activeTab === "account")          return <AccountPanel key="bank" embedded={single} kind="bank"/>
+    if (activeTab === "card")             return <AccountPanel key="card" embedded={single} kind="card"/>
     if (activeTab === "company")          return <CompanyPanel embedded={single}/>
     if (activeTab === "accountSubject")   return <AccountSubjectPanel embedded={single}/>
     if (activeTab === "category")         return <CategoryPanel embedded={single}/>
-    if (activeTab === "accountBalance")   return <AccountBalancePanel embedded={single}/>
     if (activeTab === "recurringExpense") return <RecurringExpensePanel/>
     if (activeTab === "recurringInvoice") return <RecurringInvoicePanel/>
     if (activeTab === "payrollItems")     return <PayrollItemPanel embedded={single}/>
