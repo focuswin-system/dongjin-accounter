@@ -221,6 +221,21 @@ for (const l of HIDDEN_LEAVES) ALL_LEAVES.push(l)
 
 export const LEAF_BY_ID = Object.fromEntries(ALL_LEAVES.map(l => [l.id, l]))
 
+/* 잎 id → 브레드크럼에 세울 자리 = **사이드바에서 그 화면이 있는 길**.
+ * 크럼을 손으로 적어두면 메뉴를 옮길 때마다 어긋난다(실제로 21개가 어긋나 있었다).
+ * 트리가 하나뿐인 원본이 되게 여기서 뽑는다.
+ *
+ * 섹션에 잎이 하나뿐이면 섹션 이름은 뺀다 — 한 칸이 늘 뿐 길을 알려주지 않는다.
+ *   '인사급여 › 인사·급여 › 인사관리' → '인사급여 › 인사관리'
+ *   '재무관리 › 현황 › 재무 현황'      → '재무관리 › 재무 현황' */
+export const NAV_PATH_OF = {}
+for (const node of NAV_TREE) {
+  if (node.type !== "domain") continue
+  for (const s of node.sections) for (const it of s.items) {
+    NAV_PATH_OF[it.id] = s.items.length > 1 ? [node.label, s.label, it.label] : [node.label, it.label]
+  }
+}
+
 /**
  * 메뉴 검색 태그 — **사용자가 쓰는 말**로 메뉴를 찾게 한다.
  *
@@ -321,7 +336,9 @@ export const PORTAL = [
       { id: 'acct_sales', label: '판매·수주(매출)', icon: Icon.Recv, desc: '수주·청구·수금', groups: [
         { label: '', items: ['contract_sales', 'billing_issued', 'recurring_invoice'] },
       ]},
-      { id: 'acct_purchase', label: '매입', icon: Icon.Pay, desc: '발주·청구·지급', groups: [
+      // 라벨은 사이드바(NAV_TREE)와 같은 말을 쓴다 — 크럼에서 '구매·발주(매입)'을 눌렀는데
+      // 도착한 페이지 제목이 '매입'이면 다른 데로 온 것처럼 읽힌다.
+      { id: 'acct_purchase', label: '구매·발주(매입)', icon: Icon.Pay, desc: '발주·청구·지급', groups: [
         { label: '', items: ['contract_purchase', 'billing_received', 'recurring_expense'] },
       ]},
       { id: 'acct_expense', label: '경비', icon: Icon.Wallet, desc: '일반 경비·잡손익', groups: [

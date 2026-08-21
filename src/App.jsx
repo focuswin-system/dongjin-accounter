@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, Fragment, Component } from 'react
 import logoSymbol from './assets/company/favicon.svg'
 import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider } from './lib/ui'
 import { api, setApiFailureHandler } from './lib/api'
-import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID, MASTER_LEAVES, PORTAL_PAGE_OF_LEAF } from './lib/nav'
+import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID, MASTER_LEAVES, PORTAL_PAGE_OF_LEAF, NAV_PATH_OF } from './lib/nav'
 import { PermCtx, usePerms, visibleNav, visiblePortalNode, withoutMasterOnly } from './lib/perms'
 import { sessionAlive, clearSession } from './lib/session'
 import { UpdateBanner } from './lib/components/UpdateBanner'
@@ -31,35 +31,28 @@ import { MgmtDashScreen } from './screens/Mgmt'
 import { MgmtAskScreen } from './screens/MgmtAsk'
 import { PortalScreen } from './screens/Portal'
 
+/* 브레드크럼에 세울 말.
+ *
+ * ⚠ **사이드바에 있는 화면은 여기 적지 않는다** — nav.js NAV_PATH_OF 가 트리에서 바로 뽑는다.
+ *   여기에 손으로 적어두면 메뉴를 옮길 때마다 어긋난다(실제로 21개가 어긋나 있었다:
+ *   사이드바는 '인사급여 › 근로·용역 › 근로계약'인데 크럼은 '인사급여 › 근로계약'이었다).
+ *
+ * 남은 것은 **사이드바에 없는 라우트**뿐이다 — 필터만 걸린 하위 화면(ledger_*),
+ * 메뉴에서 감춘 화면(ar·ap·contract), 포털 페이지, 모달 화면. */
 const CRUMB_MAP = {
   home:            ["홈"],
-  ledger:          ["거래내역"],
-  ledger_income:   ["거래내역", "입금"],
-  ledger_expense:  ["거래내역", "지출"],
-  ledger_ar:       ["거래내역", "미수금"],
-  ledger_ap:       ["거래내역", "미지급금"],
-  income:          ["판매·수주(매출)", "입금"],
-  expense:         ["구매·발주(매입)", "지출"],
-  ar:              ["판매·수주(매출)", "미수금"],
-  ap:              ["구매·발주(매입)", "미지급금"],
-  billing:         ["판매·수주(매출)", "대금 청구서"],
-  billing_issued:  ["판매·수주(매출)", "대금 청구서"],
-  billing_received:["구매·발주(매입)", "대금 청구서"],
-  contract:        ["주문"],
-  contract_sales:  ["판매·수주(매출)", "수주"],
-  contract_purchase:["구매·발주(매입)", "발주"],
+  ledger_income:   ["일반회계", "전체 거래내역", "입금"],
+  ledger_expense:  ["일반회계", "전체 거래내역", "지출"],
+  ledger_ar:       ["일반회계", "전체 거래내역", "미수금"],
+  ledger_ap:       ["일반회계", "전체 거래내역", "미지급금"],
+  income:          ["일반회계", "판매·수주(매출)", "입금"],
+  expense:         ["일반회계", "구매·발주(매입)", "지출"],
+  ar:              ["일반회계", "판매·수주(매출)", "미수금"],
+  ap:              ["일반회계", "구매·발주(매입)", "미지급금"],
+  billing:         ["일반회계", "판매·수주(매출)", "대금 청구서"],
+  contract:        ["일반회계", "장부", "주문 전체"],
   contract_detail: ["주문", null],
-  hr:              ["인사관리"],
-  hr_labor_contract:["인사급여", "근로계약"],
-  hr_outsourcing:  ["인사급여", "기타 용역·일용"],
-  misc_pl:           ["경비", "일반 경비"],
-  misc_income:       ["경비", "잡손익"],
-  recurring_expense: ["구매·발주(매입)", "정기지출"],
-  recurring_invoice: ["판매·수주(매출)", "정기청구"],
-  mgmt_dash:       ["경영관리", "경영 대시보드"],
-  mgmt_ask:        ["경영관리", "경영 도우미"],
-  mgmt_biz:        ["경영관리"],
-  report:          ["보고서"],
+  // 포털 페이지(타일 화면) — 도메인 아래 한 칸
   acct_sales:      ["일반회계", "판매·수주(매출)"],
   acct_purchase:   ["일반회계", "구매·발주(매입)"],
   acct_expense:    ["일반회계", "경비"],
@@ -67,15 +60,10 @@ const CRUMB_MAP = {
   // acct_ledger 는 포털 페이지가 아니라 거래내역으로 바로 보내는 타일이 됐다(nav.js) → 크럼도 없앤다.
   acct_tax:        ["일반회계", "세무관리"],
   hr_labor:        ["인사급여", "근로·용역"],
-  tax_vat:         ["세무관리", "부가세"],
-  tax_etc:         ["세무관리", "기타세액"],
+  mgmt_biz:        ["경영관리"],
   master:          ["기준정보"],   // 일반회계 하위가 아니라 독립 영역(인사 기준정보까지 모은다)
   settings:        ["환경설정"],
   hr_base:         ["인사급여", "기준정보"],
-  doc:             ["문서", "지급결의서"],
-  settlement:      ["문서", "정산내역서"],
-  purchase_req:    ["문서", "구매품의서"],
-  quote_req:       ["문서", "견적요청서"],
   evidence:        ["증빙 관리"],
   excel:           ["엑셀 업로드"],
   excel_modal:     ["엑셀 업로드"],
@@ -90,28 +78,17 @@ const CRUMB_MAP = {
  *   '거래내역'·'주문'처럼 화면 이름 → 그 화면
  * 여기 없는 라우트는 nav 잎 정보(도메인·섹션)로 자동 계산한다 — 아래 crumbTargets 참고. */
 const CRUMB_TO = {
-  ledger_income:    ["ledger"],
-  ledger_expense:   ["ledger"],
-  ledger_ar:        ["ledger"],
-  ledger_ap:        ["ledger"],
-  income:           ["acct_sales"],
-  expense:          ["acct_purchase"],
-  ar:               ["acct_sales"],
-  ap:               ["acct_purchase"],
-  billing:          ["acct_sales"],
-  billing_issued:   ["acct_sales"],
-  billing_received: ["acct_purchase"],
-  contract_sales:   ["acct_sales"],
-  contract_purchase:["acct_purchase"],
+  ledger_income:    ["home", "ledger"],
+  ledger_expense:   ["home", "ledger"],
+  ledger_ar:        ["home", "ledger"],
+  ledger_ap:        ["home", "ledger"],
+  income:           ["home", "acct_sales"],
+  expense:          ["home", "acct_purchase"],
+  ar:               ["home", "acct_sales"],
+  ap:               ["home", "acct_purchase"],
+  billing:          ["home", "acct_sales"],
+  contract:         ["home", null],
   contract_detail:  ["contract"],
-  hr_labor_contract:["home"],
-  hr_outsourcing:   ["home"],
-  misc_pl:          ["acct_expense"],
-  misc_income:      ["acct_expense"],
-  recurring_expense:["acct_purchase"],
-  recurring_invoice:["acct_sales"],
-  mgmt_dash:        ["mgmt_biz"],
-  mgmt_ask:         ["mgmt_biz"],
   acct_sales:       ["home"],
   acct_purchase:    ["home"],
   acct_expense:     ["home"],
@@ -119,12 +96,6 @@ const CRUMB_TO = {
   acct_tax:         ["home"],
   hr_labor:         ["home"],
   hr_base:          ["home"],
-  tax_vat:          ["acct_tax"],
-  tax_etc:          ["acct_tax"],
-  doc:              ["acct_docs"],
-  settlement:       ["acct_docs"],
-  purchase_req:     ["acct_docs"],
-  quote_req:        ["acct_docs"],
 };
 
 /* 크럼 각 마디의 목적지 배열을 만든다(길이는 crumbs와 같고, 링크가 없으면 null).
@@ -647,13 +618,18 @@ function AppInner({ onLogout, user }) {
 
   // 기준정보·환경설정 서브메뉴(master_/settings_<탭>)는 CRUMB_MAP에 없으니 nav 잎 정보로 구성.
   // 중간 라벨은 잎의 section을 쓴다(기준정보 잎은 "기준정보", 환경설정 잎은 "환경설정").
-  let crumbs = CRUMB_MAP[route] || (LEAF_BY_ID[route] ? [LEAF_BY_ID[route].domain, LEAF_BY_ID[route].section, LEAF_BY_ID[route].label] : ["홈"]);
+  // 사이드바에 있는 화면은 트리에서 뽑은 길(NAV_PATH_OF)을 그대로 쓴다 — 크럼과 사이드바가 어긋나지 않게.
+  let crumbs = CRUMB_MAP[route] || NAV_PATH_OF[route]
+    || (LEAF_BY_ID[route] ? [LEAF_BY_ID[route].domain, LEAF_BY_ID[route].section, LEAF_BY_ID[route].label] : ["홈"]);
   if (route === "contract_detail") {
     crumbs = ["주문", contractName || "주문 상세"];
   }
-  // 도메인·섹션이 비어 있는 잎(빈 마디)과 '환경설정 › 환경설정'처럼 같은 말이 잇달아 나오는 자리를 걷어낸다
-  crumbs = crumbs.filter((c, i, a) => c && c !== a[i - 1]);
   const crumbTo = crumbTargets(route, crumbs);
+  /* 빈 마디와 '경영관리 › 경영관리'처럼 같은 말이 잇달아 나오는 자리를 걷어낸다.
+     겹칠 땐 뒤쪽(더 가까운 상위)을 남긴다 — 링크가 한 단계만 올라가야 쓸모 있다. */
+  const trail = crumbs
+    .map((label, i) => ({ label, to: i === crumbs.length - 1 ? null : crumbTo[i] }))
+    .filter((c, i, a) => c.label && c.label !== a[i + 1]?.label);
 
   return (
     <div className="app">
@@ -784,16 +760,16 @@ function AppInner({ onLogout, user }) {
             <Icon.Menu size={18}/>
           </button>
           <div className="crumb">
-            {crumbs.map((c, i, arr) => {
+            {trail.map((c, i, arr) => {
               // 지금 화면으로 가는 마디는 링크로 만들지 않는다 — 눌러도 제자리라 고장으로 읽힌다
-              const to = crumbTo[i] && crumbTo[i] !== route ? crumbTo[i] : null;
+              const to = c.to && c.to !== route ? c.to : null;
               return (
                 <Fragment key={i}>
                   {i === arr.length - 1
-                    ? <b>{c}</b>
+                    ? <b>{c.label}</b>
                     : to
-                      ? <button type="button" className="crumb-link" onClick={() => go(to)}>{c}</button>
-                      : <span>{c}</span>}
+                      ? <button type="button" className="crumb-link" onClick={() => go(to)}>{c.label}</button>
+                      : <span>{c.label}</span>}
                   {i < arr.length - 1 && <span style={{ margin: "0 8px", color: "var(--subtle)" }}>›</span>}
                 </Fragment>
               );
