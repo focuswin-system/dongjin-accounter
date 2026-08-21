@@ -2254,8 +2254,12 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
           {tabs.map(t => (
             <button key={t} className={`chip ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t}</button>
           ))}
-          <div className="ml-auto row gap-8" style={{ flexWrap: "wrap" }}>
-            <div className="search" style={{ margin: 0, width: "min(220px, 100%)", padding: "6px 10px" }}>
+          {/* 검색 + 필터는 **한 덩어리**다. flex 기본값(0 1 auto)이면 줄이 빡빡할 때 이 묶음이
+              먼저 쪼그라들고, 묶음 자신도 wrap 이라 **안에서** 세로로 쌓인다 —
+              검색칸 위, 필터 버튼 아래로 두 줄이 된다(.search 의 min(220px,100%) 이
+              쪼그라든 부모를 따라가 더 좁아진다). 줄이 모자라면 묶음째 다음 줄로 내려가야 한다. */}
+          <div className="ml-auto tbar-right">
+            <div className="search tbar-search" style={{ padding: "6px 10px" }}>
               <Icon.Search size={14}/>
               <input value={q} onChange={e => setQ(e.target.value)} placeholder="주문/거래처 검색"/>
             </div>

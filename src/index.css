@@ -768,8 +768,17 @@ a { color: inherit; text-decoration: none; }
 }
 .subtotal-chips .btn.active .text-muted2 { color: rgba(255, 255, 255, 0.7); }
 
-.tbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
-.tbar-search { margin: 0; width: 240px; padding: 7px 10px; }
+/* 검색·필터는 한 덩어리로 움직인다.
+   flex 기본값(0 1 auto)이면 줄이 빡빡할 때 이 묶음이 먼저 쪼그라들고, 자신도 wrap 이라
+   **안에서** 세로로 쌓인다 — 검색칸 위, 필터 버튼 아래. 자리가 모자라면 쪼개지 말고
+   묶음째 다음 줄로 내려가는 것이 맞다(주문 목록 툴바에서 실제로 두 줄이 됐다). */
+.tbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: nowrap; flex-shrink: 0; }
+.tbar-search { margin: 0; width: 240px; flex-shrink: 0; padding: 7px 10px; }
+/* 아주 좁은 화면에서는 묶음이 상자보다 넓어질 수 있다 — 그때만 안에서 접고 폭을 푼다 */
+@media (max-width: 520px) {
+  .tbar-right { flex-wrap: wrap; }
+  .tbar-search { width: 100%; }
+}
 .tbar-dot { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }
 .tbar-panel {
   display: flex; flex-direction: column; gap: 10px;
