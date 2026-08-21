@@ -400,6 +400,20 @@ PORTAL_CAT_BY_ID['master'] = {
   groups: MASTER_GROUPS.map(g => ({ label: g.label, items: g.items.map(it => it.id) })),
 }
 
+/* 잎 id → 그 잎이 놓여 있는 포털 페이지 id.
+   브레드크럼에서 한 단계 위로 올라갈 때 쓴다(예: 계좌 잔액 → 기준정보).
+   route 하나만 가리키는 카테고리(자금일보처럼 타일=화면인 것)는 넣지 않는다 —
+   올라갈 곳이 자기 자신이라 눌러도 제자리다. */
+export const PORTAL_PAGE_OF_LEAF = {}
+for (const d of PORTAL) for (const c of d.categories) {
+  if (c.groups) for (const g of c.groups) for (const id of g.items) PORTAL_PAGE_OF_LEAF[id] = c.id
+}
+for (const g of MASTER_GROUPS) for (const it of g.items) PORTAL_PAGE_OF_LEAF[it.id] = 'master'
+for (const l of SETTINGS_LEAVES) PORTAL_PAGE_OF_LEAF[l.id] = 'settings'
+
+// 도메인(일반회계·인사급여·재무관리·경영관리)에는 전용 화면이 없다 — 도메인 마디는 홈 포털로 보낸다
+export const DOMAIN_LABELS = new Set(PORTAL.map(d => d.label))
+
 // 포털 카테고리 라우트도 소속 도메인으로 매핑(사이드바 도메인 자동 펼침)
 DOMAIN_OF['acct_sales'] = 'acct'
 DOMAIN_OF['acct_purchase'] = 'acct'

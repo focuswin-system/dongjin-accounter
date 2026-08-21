@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, Fragment, Component } from 'react
 import logoSymbol from './assets/company/favicon.svg'
 import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider } from './lib/ui'
 import { api, setApiFailureHandler } from './lib/api'
-import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID, MASTER_LEAVES } from './lib/nav'
+import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID, MASTER_LEAVES, PORTAL_PAGE_OF_LEAF } from './lib/nav'
 import { PermCtx, usePerms, visibleNav, visiblePortalNode, withoutMasterOnly } from './lib/perms'
 import { sessionAlive, clearSession } from './lib/session'
 import { UpdateBanner } from './lib/components/UpdateBanner'
@@ -79,6 +79,66 @@ const CRUMB_MAP = {
   evidence:        ["증빙 관리"],
   excel:           ["엑셀 업로드"],
   excel_modal:     ["엑셀 업로드"],
+};
+
+/* 브레드크럼 마디를 누르면 갈 곳 — CRUMB_MAP과 같은 자리 순서로, 앞쪽(누를 수 있는) 마디만 적는다.
+ * 마지막 마디는 지금 보고 있는 화면이라 링크가 아니다.
+ *
+ * 규칙은 하나다: **그 마디의 이름이 가리키는 화면으로 보낸다.**
+ *   '판매·수주(매출)'·'문서'·'세무관리' 같은 포털 카테고리 이름 → 그 포털 페이지
+ *   '일반회계'·'인사급여' 같은 도메인 이름 → 홈(도메인은 전용 화면이 없고 홈에 도메인 줄로 서 있다)
+ *   '거래내역'·'주문'처럼 화면 이름 → 그 화면
+ * 여기 없는 라우트는 nav 잎 정보(도메인·섹션)로 자동 계산한다 — 아래 crumbTargets 참고. */
+const CRUMB_TO = {
+  ledger_income:    ["ledger"],
+  ledger_expense:   ["ledger"],
+  ledger_ar:        ["ledger"],
+  ledger_ap:        ["ledger"],
+  income:           ["acct_sales"],
+  expense:          ["acct_purchase"],
+  ar:               ["acct_sales"],
+  ap:               ["acct_purchase"],
+  billing:          ["acct_sales"],
+  billing_issued:   ["acct_sales"],
+  billing_received: ["acct_purchase"],
+  contract_sales:   ["acct_sales"],
+  contract_purchase:["acct_purchase"],
+  contract_detail:  ["contract"],
+  hr_labor_contract:["home"],
+  hr_outsourcing:   ["home"],
+  misc_pl:          ["acct_expense"],
+  misc_income:      ["acct_expense"],
+  recurring_expense:["acct_purchase"],
+  recurring_invoice:["acct_sales"],
+  mgmt_dash:        ["mgmt_biz"],
+  mgmt_ask:         ["mgmt_biz"],
+  acct_sales:       ["home"],
+  acct_purchase:    ["home"],
+  acct_expense:     ["home"],
+  acct_docs:        ["home"],
+  acct_tax:         ["home"],
+  hr_labor:         ["home"],
+  hr_base:          ["home"],
+  tax_vat:          ["acct_tax"],
+  tax_etc:          ["acct_tax"],
+  doc:              ["acct_docs"],
+  settlement:       ["acct_docs"],
+  purchase_req:     ["acct_docs"],
+  quote_req:        ["acct_docs"],
+};
+
+/* 크럼 각 마디의 목적지 배열을 만든다(길이는 crumbs와 같고, 링크가 없으면 null).
+ * CRUMB_MAP에 없는 라우트는 크럼이 [도메인, 섹션, 화면] 꼴이라 구조에서 상위를 뽑아낼 수 있다. */
+const crumbTargets = (route, crumbs) => {
+  const last = crumbs.length - 1;
+  const explicit = CRUMB_TO[route];
+  if (explicit) return crumbs.map((_, i) => (i === last ? null : explicit[i] || null));
+  const leaf = LEAF_BY_ID[route];
+  if (!leaf) return crumbs.map(() => null);
+  // 기준정보·환경설정은 도메인이 아니라 그 자체가 타일 페이지다
+  const top = leaf.domain === "기준정보" ? "master" : leaf.domain === "환경설정" ? "settings" : "home";
+  const page = PORTAL_PAGE_OF_LEAF[route] || null;
+  return crumbs.map((_, i) => (i === last ? null : i === 0 ? top : page));
 };
 
 // 알림 아이콘(tone/icon 이름 → 컴포넌트)
@@ -591,6 +651,9 @@ function AppInner({ onLogout, user }) {
   if (route === "contract_detail") {
     crumbs = ["주문", contractName || "주문 상세"];
   }
+  // 도메인·섹션이 비어 있는 잎(빈 마디)과 '환경설정 › 환경설정'처럼 같은 말이 잇달아 나오는 자리를 걷어낸다
+  crumbs = crumbs.filter((c, i, a) => c && c !== a[i - 1]);
+  const crumbTo = crumbTargets(route, crumbs);
 
   return (
     <div className="app">
@@ -721,15 +784,20 @@ function AppInner({ onLogout, user }) {
             <Icon.Menu size={18}/>
           </button>
           <div className="crumb">
-            {crumbs.map((c, i, arr) => (
-              <Fragment key={i}>
-                {i === arr.length - 1
-                  ? <b>{c}</b>
-                  : <span style={{ cursor: i === 0 && route === "contract_detail" ? "pointer" : "default" }}
-                      onClick={() => i === 0 && route === "contract_detail" && go("contract")}>{c}</span>}
-                {i < arr.length - 1 && <span style={{ margin: "0 8px", color: "var(--subtle)" }}>›</span>}
-              </Fragment>
-            ))}
+            {crumbs.map((c, i, arr) => {
+              // 지금 화면으로 가는 마디는 링크로 만들지 않는다 — 눌러도 제자리라 고장으로 읽힌다
+              const to = crumbTo[i] && crumbTo[i] !== route ? crumbTo[i] : null;
+              return (
+                <Fragment key={i}>
+                  {i === arr.length - 1
+                    ? <b>{c}</b>
+                    : to
+                      ? <button type="button" className="crumb-link" onClick={() => go(to)}>{c}</button>
+                      : <span>{c}</span>}
+                  {i < arr.length - 1 && <span style={{ margin: "0 8px", color: "var(--subtle)" }}>›</span>}
+                </Fragment>
+              );
+            })}
           </div>
           <button className="search" onClick={() => setCmdOpen(true)} style={{ border: 0, cursor: "pointer", textAlign: "left" }}>
             <Icon.Search size={14}/>
