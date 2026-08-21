@@ -1512,11 +1512,15 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       <div className="row gap-8" style={{ marginBottom: 16, flexWrap: "wrap" }}>
         {!collect && (
           <>
+            {/* 칩의 숫자는 **그 탭이 실제로 보여줄 건수**다.
+                예전엔 필터 전 원본을 셌다 — 기간을 이번 달로 좁혀 표에 3건이 남아도 칩은 47을
+                달고 있었고, 어느 쪽이 맞는지 알 수 없었다. 각 탭은 자기 필터를 따로 들고 있으므로
+                (발행 예정=pendF / 발행됨=listF+상태칩) 각자 걸러진 수를 센다. */}
             <button className={`chip ${view === "pending" ? "active" : ""}`} onClick={() => setView("pending")}>
-              {isIssued ? "발행 예정" : "지급 예정"}{pending.length > 0 && <span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{pending.length}</span>}
+              {isIssued ? "발행 예정" : "지급 예정"}{pendingFiltered.length > 0 && <span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{pendingFiltered.length}</span>}
             </button>
             <button className={`chip ${view === "list" ? "active" : ""}`} onClick={() => setView("list")}>
-              {isIssued ? "발행됨" : "등록됨"}<span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{kindRows.length}</span>
+              {isIssued ? "발행됨" : "등록됨"}<span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{filtered.length}</span>
             </button>
           </>
         )}

@@ -2453,6 +2453,47 @@ const filterRules = (rows, f) =>
   : f === 'contract' ? rows.filter(r => !!r.contractId)
   : rows
 
+/* 규칙 검색 — 거래처·항목/비목·주문명으로 찾는다.
+   규칙이 스무 개를 넘으면 눈으로 훑어서는 못 찾는다("이 고객 유지보수 얼마였더라"). */
+const matchRule = (r, q) => {
+  const s = String(q || '').trim().toLowerCase()
+  if (!s) return true
+  return [r.vendor, r.vendor_name, r.item, r.category, r.contractName]
+    .some(v => String(v || '').toLowerCase().includes(s))
+}
+
+/* 활성 규칙을 한 달치로 환산한 합계(분기 ÷3, 년 ÷12).
+   주기가 섞여 있으면 금액을 그냥 더한 수는 아무 뜻이 없다 —
+   "매달 얼마가 꼬박꼬박 오가나"가 이 화면에서 알고 싶은 것이다. */
+const monthlyEquivalent = (rows, amountOf) => Math.round(rows
+  .filter(r => r.active)
+  .reduce((s, r) => s + amountOf(r) / (r.period === 'yearly' ? 12 : r.period === 'quarterly' ? 3 : 1), 0))
+
+// 규칙 목록 머리 — 건수·월 환산·검색·필터 칩. 정기청구와 정기지출이 같이 쓴다(둘은 대칭이다).
+const RuleListHeader = ({ title, rows, all, amountOf, q, setQ, ruleFilter, setRuleFilter, placeholder }) => (
+  <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+    <div>
+      <div className="section-title" style={{ fontSize: 13 }}>
+        {title} {rows.length}건
+        {rows.length !== all.length && <span className="text-muted2 fw-400"> / 전체 {all.length}건</span>}
+      </div>
+      <div className="text-xs text-muted2" style={{ marginTop: 2 }}>
+        활성 {rows.filter(r => r.active).length}건 · 월 환산 <span className="num">{fmtNum(monthlyEquivalent(rows, amountOf))}</span>원
+      </div>
+    </div>
+    <div className="search" style={{ margin: 0, marginLeft: 'auto', width: 190, padding: '6px 10px' }}>
+      <Icon.Search size={14}/>
+      <input value={q} onChange={e => setQ(e.target.value)} placeholder={placeholder}/>
+    </div>
+    <div className="row gap-6">
+      {RULE_FILTERS.map(f => (
+        <button key={f.value} className={`chip ${ruleFilter === f.value ? 'active' : ''}`}
+          onClick={() => setRuleFilter(f.value)}>{f.label}</button>
+      ))}
+    </div>
+  </div>
+)
+
 // 정기지출 = 판관비(경비) 쪽 정기 반복. 회계처리 '경비' 그룹의 독립 화면으로도, 기준정보 탭으로도 쓴다.
 export const RecurringExpensePanel = ({ page = false, goRoute }) => {
   const toast = useToast()
@@ -2464,6 +2505,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
   const [vendors, setVendors] = useState([])
   const [accounts, setAccounts] = useState([])
   const [ruleFilter, setRuleFilter] = useState('all')   // all | plain | contract
+  const [q, setQ] = useState('')
 
   const load = async () => setRows(await api.getRecurringExpenses())
   // 회차 이행 현황(놓친/임박/예정) — 정기청구와 공용 훅. 회차가 바뀌면 규칙의 '다음 예정'도 달라진다.
@@ -2507,7 +2549,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
 
   const openNew = () => { setEditing(null); setFormOpen(true) }
   const openEdit = (r) => { setEditing(r); setFormOpen(true) }
-  const ruleRows = filterRules(rows, ruleFilter)
+  const ruleRows = filterRules(rows, ruleFilter).filter(r => matchRule(r, q))
   const cycSummary = cycleSummaryByRule(cyc.cycles)
   const addBtn = (
     <button className="btn primary" onClick={openNew}>
@@ -2534,15 +2576,9 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
         onSkip={cyc.skip} onUnskip={cyc.unskip}
         onOpenContract={() => goRoute?.('contract_purchase')}/>
 
-      <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <div className="section-title" style={{ fontSize: 13 }}>정기 지출 규칙 {ruleRows.length}건</div>
-        <div className="row gap-6 ml-auto">
-          {RULE_FILTERS.map(f => (
-            <button key={f.value} className={`chip ${ruleFilter === f.value ? 'active' : ''}`}
-              onClick={() => setRuleFilter(f.value)}>{f.label}</button>
-          ))}
-        </div>
-      </div>
+      <RuleListHeader title="정기 지출 규칙" rows={ruleRows} all={rows} amountOf={r => Number(r.amount) || 0}
+        q={q} setQ={setQ} ruleFilter={ruleFilter} setRuleFilter={setRuleFilter}
+        placeholder="거래처·비목·발주"/>
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
           <thead>
@@ -2552,6 +2588,14 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
             </tr>
           </thead>
           <tbody>
+            {/* 빈 상태가 없으면 검색에 안 걸렸을 때 표가 통째로 사라져 고장으로 읽힌다 */}
+            {ruleRows.length === 0 && (
+              <tr><td colSpan={7} className="text-sm text-muted" style={{ textAlign: "center", padding: 24 }}>
+                {rows.length === 0
+                  ? "등록된 정기 지출이 없어요. 임차료·통신비 등 매달 나가는 건을 등록해보세요."
+                  : "이 조건에 맞는 정기 지출이 없어요."}
+              </td></tr>
+            )}
             {ruleRows.map(r => {
               const s = cycSummary.get(r.id)
               return (
@@ -2780,6 +2824,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState(null)
   const [ruleFilter, setRuleFilter] = useState('all')
+  const [q, setQ] = useState('')
 
   const load = async () => setRows(await api.getRecurringInvoices())
   // 정기지출과 완전히 같은 훅 — 회차 이행(놓친/임박/예정)과 일괄 발행
@@ -2826,7 +2871,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
 
   const openNew = () => { setEditing(null); setFormOpen(true) }
   const openEdit = (r) => { setEditing(r); setFormOpen(true) }
-  const ruleRows = filterRules(rows, ruleFilter)
+  const ruleRows = filterRules(rows, ruleFilter).filter(r => matchRule(r, q))
   const cycSummary = cycleSummaryByRule(cyc.cycles)
   const recActions = (
     <button className="btn primary" onClick={openNew}>
@@ -2859,15 +2904,9 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
         onSkip={cyc.skip} onUnskip={cyc.unskip}
         onOpenContract={() => goRoute?.('contract_sales')}/>
 
-      <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <div className="section-title" style={{ fontSize: 13 }}>정기 청구 규칙 {ruleRows.length}건</div>
-        <div className="row gap-6 ml-auto">
-          {RULE_FILTERS.map(f => (
-            <button key={f.value} className={`chip ${ruleFilter === f.value ? 'active' : ''}`}
-              onClick={() => setRuleFilter(f.value)}>{f.label}</button>
-          ))}
-        </div>
-      </div>
+      <RuleListHeader title="정기 청구 규칙" rows={ruleRows} all={rows} amountOf={totalOf}
+        q={q} setQ={setQ} ruleFilter={ruleFilter} setRuleFilter={setRuleFilter}
+        placeholder="고객사·항목·주문"/>
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
           <thead>
