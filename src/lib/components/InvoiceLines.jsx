@@ -65,9 +65,13 @@ export const CONTRACT_COLUMNS = {
   deliveryDate: false, qty: true, weight: true, basis: true,
   amount: false, vat: false, note: false, costPrice: true,
 }
-/* 기성형 주문 — 수량은 주문 때 정하지 않는다(청구할 때 회차마다 넣는다).
-   칸을 남겨 두면 "여기 적은 수량은 뭐지?" 가 되고, 적어도 아무 데도 안 쓰인다. */
-export const CONTRACT_PROGRESS_COLUMNS = { ...CONTRACT_COLUMNS, qty: false }
+/* 기성형 주문 — 수량도 중량도 주문 때 정하지 않는다(청구할 때 회차마다 넣는다).
+   칸을 남겨 두면 "여기 적은 수량은 뭐지?" 가 되고, 적어도 아무 데도 안 쓰인다.
+   ⚠ weight 를 함께 끄지 않으면 CONTRACT_COLUMNS 의 `weight: true` 를 물려받아
+     중량 칸이 되살아난다(교체 전 편집기는 이 칸을 기성형에서 감췄었다).
+     단가기준(basis)은 남긴다 — "㎏당 단가"라는 사실 자체는 주문 조건이고,
+     그 중량은 발행 화면에서 회차마다 받는다. */
+export const CONTRACT_PROGRESS_COLUMNS = { ...CONTRACT_COLUMNS, qty: false, weight: false }
 
 export const InvoiceLines = ({
   lines = [], onChange, itemMaster = [], taxType = '과세', kind = 'issued',
@@ -165,10 +169,15 @@ export const InvoiceLines = ({
   const supplyTotal = filled.reduce((s, l) => s + num(l.amount), 0)
   const vatTotal = filled.reduce((s, l) => s + shownVat(l), 0)
   /* 금액 칸이 없는 화면용 합계 — 저장된 amount 가 아니라 단가×(수량|중량)으로 그때그때 낸다.
-     computeLineAmount 는 청구서·서버와 같은 규칙이라 주문 금액이 두 곳에서 갈리지 않는다. */
-  const calcTotal = filled.reduce((s, l) => s + computeLineAmount(l), 0)
-  const costTotal = filled.reduce((s, l) =>
-    s + (l.price_basis === 'weight' ? num(l.weight) : (num(l.qty) || 1)) * num(l.cost_price), 0)
+   *
+   * ⚠ **수량이 비면 1로 본다.** computeLineAmount 는 빈 수량을 0으로 보는데, 이 합계를 쓰는
+   * 주문 화면은 `qty || 1` 로 주문 금액을 정한다(Contract.jsx itemsTotal). 규칙이 갈리면
+   * 표 아래에는 "합계 0원 · 마진 −원가"(빨강)가 뜨는데 저장은 단가 합계로 되는,
+   * **보이는 숫자와 저장되는 숫자가 다른** 상태가 된다. 기성형 주문은 수량 칸 자체가 없어
+   * 늘 그랬다. 여기서는 쓰는 화면의 규칙을 따른다. */
+  const basisQty = (l) => (l.price_basis === 'weight' ? num(l.weight) : (num(l.qty) || 1))
+  const calcTotal = filled.reduce((s, l) => s + Math.round(basisQty(l) * num(l.unit_price)), 0)
+  const costTotal = filled.reduce((s, l) => s + Math.round(basisQty(l) * num(l.cost_price)), 0)
 
   // 글자 칸만 내용에 따라 자란다. 숫자·날짜 칸은 들어갈 값의 길이가 정해져 있어 고정.
   const nameW = growWidth(lines, l => l.name, 170, 340)

@@ -1613,15 +1613,16 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
         })()}
 
         {tab === "입금 내역" && (
-          <>
+          <div style={{ padding: 20 }}>
             {/* 이미 처리된 입금을 이 주문에 붙인다 — 엑셀로 올린 거래를 주문과 맞출 때 쓴다.
                 주문을 보고 있을 때가 대사하기 가장 자연스러운 자리다. */}
-            <div className="row" style={{ marginBottom: 10 }}>
+            <div className="row" style={{ marginBottom: 14 }}>
               <span className="text-xs text-muted2">행을 누르면 그 거래를 열어 고치거나 연결을 뗄 수 있어요.</span>
               <button className="btn sm ml-auto" onClick={() => setLinkOpen({ kind: 'income', axis: 'contract' })}>
                 <Icon.Link size={13}/> 거래 연결
               </button>
             </div>
+            <div className="card" style={{ overflow: "hidden" }}>
             <table className="table">
               {/* 거래처·적요가 없으면 "어느 거래인지" 알 수가 없다 — 잘못 붙은 걸 찾으려고
                   전체 거래내역을 헤매게 된 이유가 이것이었다. */}
@@ -1650,18 +1651,19 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                 ))}
               </tbody>
             </table>
-          </>
+            </div>
+          </div>
         )}
 
         {/* 매출 주문 → 이 주문에 귀속된 '원가'. 그 돈이 어느 매입주문으로 나갔는지도 함께 보여준다.
             매입 주문 → 이 주문이 근거인 '지급'. */}
         {tab === "지출 내역" && (
-          <>
+          <div style={{ padding: 20 }}>
             {/* ⚠ 축이 다르다. 매입 주문은 '이 주문이 근거인 지급'(contract_id),
                 매출 주문은 '이 주문에 귀속된 원가'(cost_contract_id)다.
                 외주비는 외주 매입주문에 지급되면서 동시에 프로젝트 매출주문의 원가라
                 여기서 축을 틀리면 돈이 조용히 엉뚱한 바구니로 간다. */}
-            <div className="row" style={{ marginBottom: 10 }}>
+            <div className="row" style={{ marginBottom: 14 }}>
               <span className="text-xs text-muted2">
                 {isPurchase ? '행을 누르면 그 지급 거래를 열 수 있어요.' : '행을 누르면 그 지출 거래를 열 수 있어요.'}
               </span>
@@ -1670,6 +1672,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                 <Icon.Link size={13}/> {isPurchase ? '지급 거래 연결' : '원가 거래 연결'}
               </button>
             </div>
+            <div className="card" style={{ overflow: "hidden" }}>
             <table className="table">
               <thead>
                 <tr>
@@ -1706,7 +1709,8 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                 ))}
               </tbody>
             </table>
-          </>
+            </div>
+          </div>
         )}
 
         {tab === "증빙" && (
@@ -1727,6 +1731,8 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
         )}
 
         {tab === "결의서" && (
+          <div style={{ padding: 20 }}>
+          <div className="card" style={{ overflow: "hidden" }}>
           <table className="table">
             <thead><tr><th>문서번호</th><th>제목</th><th>작성일</th><th className="num-right">금액</th><th>상태</th><th></th></tr></thead>
             <tbody>
@@ -1745,6 +1751,8 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
               ))}
             </tbody>
           </table>
+          </div>
+          </div>
         )}
 
         {tab === "메모/히스토리" && (
@@ -2083,6 +2091,11 @@ const contractPayload = (form, vendorId) => ({
   items:          (form.items || []).map(it => ({
     item_id: it.item_id || null, name: it.name, spec: it.spec || '', unit: it.unit || '',
     qty: asNum(it.qty), unit_price: asNum(it.unit_price), cost_price: asNum(it.cost_price),
+    /* 중량·단가기준을 반드시 함께 보낸다.
+     * 서버(routes/contracts.js)는 이 두 값을 저장하고 기성 발행이 그걸로 금액을 낸다.
+     * 안 보내면 서버가 weight=0 · basis='qty' 로 되돌려서, ㎏당 단가로 적어 둔 주문이
+     * **저장할 때마다 수량 기준으로 초기화**된다(화면에서 입력은 되는데 다시 열면 사라진다). */
+    weight: asNum(it.weight), price_basis: it.price_basis === 'weight' ? 'weight' : 'qty',
   })),
   // 원가예산은 상세의 '예산 수정'이 주 편집기다. 여기선 값이 있을 때만 실어 보낸다
   // (안 실으면 서버가 손대지 않는다 → 주문 편집 저장이 예산을 지우는 사고를 막는다).
