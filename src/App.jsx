@@ -549,8 +549,10 @@ function AppInner({ onLogout, user }) {
     switch (route) {
       case "home":            return <HomeScreen go={go} user={user} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
       case "billing":         return <BillingScreen/>;
-      case "billing_issued":  return <BillingScreen initialTab="issued"/>;
-      case "billing_received":return <BillingScreen initialTab="received"/>;
+      /* focusInvoiceId 를 넘긴다 — Ctrl+K 에서 청구서를 골랐는데 목록만 열리면
+         찾은 것을 다시 찾아야 한다(BillingScreen 은 이미 이 값을 받아 그 건을 연다). */
+      case "billing_issued":  return <BillingScreen initialTab="issued"   focusInvoiceId={focusInvoiceId}/>;
+      case "billing_received":return <BillingScreen initialTab="received" focusInvoiceId={focusInvoiceId}/>;
       case "contract":        return <ContractListScreen kind="all" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
       case "contract_sales":  return <ContractListScreen kind="sales" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
       case "contract_purchase": return <ContractListScreen kind="purchase" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
@@ -875,7 +877,14 @@ function AppInner({ onLogout, user }) {
 
       <TransactionForm open={txnForm !== null} kind={txnForm?.kind || "expense"} initialContract={txnForm?.contract} initialCostContract={txnForm?.costContract || null} initialVendor={txnForm?.vendor || null} initialCategory={txnForm?.category || null} initialMemo={txnForm?.memo || null} editTxn={txnForm?.txn || null} onClose={() => setTxnForm(null)} onSave={() => setTxnVersion(v => v + 1)}/>
       <EvidenceAttachDrawer item={evidenceAttach} onClose={() => setEvidenceAttach(null)}/>
-      <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onPick={(c) => { setCmdOpen(false); go(c.route, c.contractId ? { contractId: c.contractId, contractName: c.contractName } : {}); }}/>
+      <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onPick={(c) => {
+        setCmdOpen(false);
+        // 고른 것이 무엇이냐에 따라 열 대상을 함께 넘긴다 — 주문은 그 상세, 청구서는 그 건
+        go(c.route, {
+          ...(c.contractId ? { contractId: c.contractId, contractName: c.contractName } : {}),
+          ...(c.invoiceId ? { invoiceId: c.invoiceId } : {}),
+        });
+      }}/>
 
       {/* FAQ 유휴 nudge + 플로팅 버튼 */}
       {idlePhase !== "hidden" && !faqOpen && (
@@ -1117,10 +1126,17 @@ const CommandPalette = ({ open, onClose, onPick }) => {
     || (c.sub || "").toLowerCase().includes(ql)
     || (c.keywords || "").toLowerCase().includes(ql)
     || c.kind.includes(q.trim());
-  /* 메뉴를 위로 올린다. 거래처가 수십·수백 건이면 메뉴가 목록 밑으로 밀려
-     '보험'을 쳐도 보험 거래처만 잔뜩 나오고 정작 보험 화면은 안 보인다. */
+  /* 줄 세우는 순서 — 위에서부터 이렇게 읽힌다.
+   *   0 메뉴        : 거래처가 수백 건이면 메뉴가 밑으로 밀려, '보험'을 쳐도
+   *                   보험 거래처만 잔뜩 나오고 정작 보험 화면은 안 보인다.
+   *   1 아직 안 끝난 것 : 정산 안 된 청구서, 살아 있는 정기 규칙(rank=1).
+   *                   거래처를 검색하는 이유는 대개 "받을 게 남았나"다.
+   *   2 그 밖의 데이터  : 주문·거래처(rank 없음 → 2)
+   *   3 끝난 것        : 정산 완료 청구서, 중지된 규칙
+   * 같은 층 안에서는 원래 순서를 지킨다(정렬이 안정적이라 목록이 튀지 않는다). */
+  const tier = (c) => (c.kind === '메뉴' ? 0 : (c.rank ?? 2));
   const results = (ql
-    ? allowed.filter(match).sort((a, b) => (a.kind === '메뉴' ? 0 : 1) - (b.kind === '메뉴' ? 0 : 1))
+    ? allowed.filter(match).sort((a, b) => tier(a) - tier(b))
     : allowed
   ).slice(0, 50);
 
@@ -1156,7 +1172,7 @@ const CommandPalette = ({ open, onClose, onPick }) => {
         <div className="row gap-10" style={{ padding: "14px 18px", borderBottom: "1px solid var(--line)" }}>
           <Icon.Search size={18} className="text-muted"/>
           <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)} onKeyDown={handleKeyDown}
-            placeholder="거래처·주문·결의서·증빙·메뉴 검색"
+            placeholder="거래처·주문·청구서·정기 규칙·메뉴 검색"
             style={{ flex: 1, border: 0, outline: 0, fontSize: 15, fontFamily: "inherit", background: "transparent" }}/>
           <span className="kbd">ESC</span>
         </div>

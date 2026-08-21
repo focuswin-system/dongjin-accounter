@@ -2013,8 +2013,13 @@ export const api = {
   // ─── Ctrl+K 명령 팔레트: 실데이터 검색 인덱스 ──────────────────
   async getCommandIndex() {
     const won = (n) => (Number(n) || 0).toLocaleString('ko-KR') + '원'
-    let vendors = [], contracts = [], invoices = []
-    try { [vendors, contracts, invoices] = await Promise.all([this.getVendors(), this.getContracts(), this.getInvoices()]) } catch { /* noop */ }
+    let vendors = [], contracts = [], invoices = [], recInv = [], recExp = []
+    try {
+      [vendors, contracts, invoices, recInv, recExp] = await Promise.all([
+        this.getVendors(), this.getContracts(), this.getInvoices(),
+        this.getRecurringInvoices(), this.getRecurringExpenses(),
+      ])
+    } catch { /* noop */ }
     const cmds = []
     contracts.forEach(c => cmds.push({
       kind: '주문', label: c.name || '(이름 없음)',
@@ -2028,10 +2033,39 @@ export const api = {
       // 거래처를 검색해 눌렀는데 엉뚱하게 주문 목록이 열렸다.
       route: 'master_vendor',
     }))
-    invoices.forEach(i => cmds.push({
-      kind: i.kind === 'issued' ? '청구서' : '매입',
-      label: i.invoiceNo, sub: [i.vendor, won(i.totalAmount)].filter(Boolean).join(' · '),
-      route: i.kind === 'issued' ? 'billing_issued' : 'billing_received',
+    /* 청구서 — 거래처 이름으로 찾았을 때 **아직 안 끝난 건이 먼저** 보여야 한다.
+     * 경리가 거래처를 검색하는 이유는 대개 "이 회사한테 받을 게 남았나"라서,
+     * 다 받은 청구서가 섞여 위에 뜨면 목록을 다시 훑어야 한다.
+     * 상태를 sub 에 실어 눈으로도 가려지게 하고, 정산 안 끝난 것에 rank 를 준다.
+     * invoiceId 를 함께 넘겨 고르면 그 청구서가 열린다(목록만 열리면 또 찾아야 한다). */
+    const OPEN_STATUS = new Set(['입금 예정', '일부 입금', '기한 지남', '장기 미수',
+      '지급 대기', '지급 예정', '일부 지급'])
+    invoices.forEach(i => {
+      const open = OPEN_STATUS.has(i.status)
+      cmds.push({
+        kind: i.kind === 'issued' ? '청구서' : '매입',
+        label: i.invoiceNo,
+        sub: [i.vendor, won(i.totalAmount), i.status].filter(Boolean).join(' · '),
+        route: i.kind === 'issued' ? 'billing_issued' : 'billing_received',
+        invoiceId: i.id,
+        rank: open ? 1 : 3,
+      })
+    })
+    /* 정기청구·정기지출 규칙 — 거래처를 검색하면 "이 회사와 매달 오가는 게 있나"가
+     * 같이 나와야 한다. 규칙은 청구서가 만들어지기 **전**의 것이라 위 목록엔 안 잡힌다. */
+    recInv.forEach(r => cmds.push({
+      kind: '정기청구', label: r.item || r.contractName || r.vendor,
+      sub: [r.vendor, r.period === 'yearly' ? '매년' : r.period === 'quarterly' ? '분기' : '매월',
+        won(r.supplyAmount), r.active ? null : '중지됨'].filter(Boolean).join(' · '),
+      keywords: [r.vendor, r.contractName].filter(Boolean).join(' '),
+      route: 'recurring_invoice', rank: r.active ? 1 : 3,
+    }))
+    recExp.forEach(r => cmds.push({
+      kind: '정기지출', label: r.item || r.category || r.vendor,
+      sub: [r.vendor, r.period === 'yearly' ? '매년' : r.period === 'quarterly' ? '분기' : '매월',
+        won(r.amount), r.active ? null : '중지됨'].filter(Boolean).join(' · '),
+      keywords: [r.vendor, r.category, r.contractName].filter(Boolean).join(' '),
+      route: 'recurring_expense', rank: r.active ? 1 : 3,
     }))
     /* 메뉴 전체를 색인한다.
      *
