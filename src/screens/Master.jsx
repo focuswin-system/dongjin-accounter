@@ -328,7 +328,11 @@ const PartDateInput = ({ value = '', onChange }) => {
   const v = String(value || '')
   const monthOnly = /^\d{4}-\d{2}$/.test(v)
   const [mode, setMode] = useState(monthOnly ? 'month' : 'day')
-  useEffect(() => { setMode(/^\d{4}-\d{2}$/.test(String(value || '')) ? 'month' : 'day') }, [value === '' ? '' : 'set'])
+  /* 값이 바뀌면 그 값의 생김새에 모드를 맞춘다.
+     아래 pick 이 단위를 바꿀 때 값도 그 단위로 맞춰 두므로, 이 effect 가 사용자의 선택을
+     되돌리지 않는다. (예전엔 값이 비었나 아닌가만 보고 있어서, 드로어를 다시 쓰는 구조로
+     바뀌면 '2020-03-14'를 월 칸에 넣으려다 빈칸으로 보이게 될 자리였다.) */
+  useEffect(() => { setMode(monthOnly ? 'month' : 'day') }, [v])
 
   const pick = (m) => {
     setMode(m)
@@ -2561,7 +2565,8 @@ const filterRules = (rows, f) =>
 const matchRule = (r, q) => {
   const s = String(q || '').trim().toLowerCase()
   if (!s) return true
-  return [r.vendor, r.vendor_name, r.item, r.category, r.contractName]
+  // api 가 내려주는 키만 본다 — vendor_name 은 매핑에 없어서(vendor 로 온다) 늘 빈 값이었다
+  return [r.vendor, r.item, r.category, r.contractName]
     .some(v => String(v || '').toLowerCase().includes(s))
 }
 

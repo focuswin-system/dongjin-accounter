@@ -33,9 +33,13 @@ const expenseVat = (total, vatMode, catVat) =>
 router.get('/', async (req, res, next) => {
   try {
     const [rows] = await req.db.execute(`
-      SELECT r.*, v.name AS vendor_name
+      /* 주문(발주)도 함께 붙인다 — 화면이 발주 기반 규칙에 배지를 다는데(Master.jsx
+         ContractBadge) 이름을 안 내려줘서 '주문'이라고만 뜨고 어느 발주인지 알 수 없었다.
+         정기청구 쪽 목록 쿼리는 처음부터 이 JOIN 이 있었다(routes/recurring-invoices.js). */
+      SELECT r.*, v.name AS vendor_name, c.name AS contract_name
       FROM recurring_expenses r
       LEFT JOIN vendors v ON r.vendor_id = v.id
+      LEFT JOIN contracts c ON r.contract_id = c.id
       ORDER BY r.day_of_month
     `)
     res.json(rows)

@@ -851,6 +851,8 @@ export const api = {
         vendor: r.vendor_name || '(미확인)',
         vendorId: r.vendor_id,
         contractId: r.contract_id,   // 수정 시 주문 연결을 잃지 않도록 함께 싣는다
+        // 화면의 주문 배지·검색이 쓰는 이름. 안 실으면 배지가 '주문'이라고만 뜬다(정기청구와 대칭)
+        contractName: r.contract_name || '',
         category: r.category,
         amount: r.amount,
         period: r.period,
