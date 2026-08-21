@@ -773,11 +773,22 @@ a { color: inherit; text-decoration: none; }
    **안에서** 세로로 쌓인다 — 검색칸 위, 필터 버튼 아래. 자리가 모자라면 쪼개지 말고
    묶음째 다음 줄로 내려가는 것이 맞다(주문 목록 툴바에서 실제로 두 줄이 됐다). */
 .tbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: nowrap; flex-shrink: 0; }
-.tbar-search { margin: 0; width: 240px; flex-shrink: 0; padding: 7px 10px; }
-/* 아주 좁은 화면에서는 묶음이 상자보다 넓어질 수 있다 — 그때만 안에서 접고 폭을 푼다 */
+
+/* ⚠ 클래스 **둘**로 붙인다(.search.tbar-search).
+ *
+ * 전역 상단바 검색(.search)에는 아래쪽에 반응형 규칙이 세 개 더 있다 —
+ * ≤1024 200px / ≤768 160px / ≤480 display:none. 한 클래스짜리라 특이성이 같고,
+ * 소스에서 뒤에 있어서 `.tbar-search` 를 그냥 두면 **표 툴바 검색까지 그 규칙을 맞는다.**
+ * 특히 ≤480 에서는 표 검색칸이 통째로 사라진다 — 상단바 검색을 접으려던 규칙인데,
+ * 표에서 줄을 찾는 유일한 수단까지 같이 없앤다. 그래서 여기서 폭을 직접 관리한다. */
+.search.tbar-search { margin: 0; width: 240px; flex-shrink: 0; padding: 7px 10px; }
+@media (max-width: 1024px) { .search.tbar-search { width: 200px; } }
+@media (max-width: 768px)  { .search.tbar-search { width: 160px; } }
+/* 아주 좁은 화면에서만 묶음을 안에서 접고 검색칸을 한 줄로 편다.
+   display 를 되살리는 것은 위 ≤480 규칙을 되돌리기 위한 것이다. */
 @media (max-width: 520px) {
   .tbar-right { flex-wrap: wrap; }
-  .tbar-search { width: 100%; }
+  .search.tbar-search { width: 100%; display: flex; }
 }
 .tbar-dot { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }
 .tbar-panel {
