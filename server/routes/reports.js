@@ -6,6 +6,8 @@ const { kstToday } = require('../db')
 const xlsx = require('xlsx')
 const { taxofficePack, SHEETS } = require('../lib/taxofficePack')
 const { fundSheet } = require('../lib/fundSheet')
+const { loanReport } = require('../lib/loanReport')
+const { buildLoanWorkbook } = require('../lib/loanWorkbook')
 const { canSeeLaborDetail } = require('../lib/fundStatus')
 
 const router = Router()
@@ -299,6 +301,63 @@ router.get('/fund-sheet.xlsx', async (req, res, next) => {
     res.setHeader('Content-Disposition',
       `attachment; filename="fund_sheet.xlsx"; filename*=UTF-8''${encodeURIComponent(`자금관리표_${d.range.label}.xlsx`)}`)
     res.send(buf)
+  } catch (e) { next(e) }
+})
+
+/* ── 차입금 현황 ────────────────────────────────────────────────────────
+ *
+ * 재무관리 > 차입금 화면에는 출력이 없었다. 대표·세무사에게 넘길 때마다 화면을 보고
+ * 손으로 옮겨 적었다는 뜻이다 — 그 과정에서 숫자가 틀리면 아무도 모른다.
+ *
+ * 화면(JSON)과 엑셀이 **같은 lib/loanReport.js** 를 쓴다. 집계를 두 벌로 두면
+ * 화면에서 본 잔액과 내려받은 파일의 잔액이 달라진다.
+ *
+ * status=all 이면 상환 완료분까지 낸다(기본은 진행 중만) — 결산 때 "올해 갚은 것"을
+ * 봐야 하는데, 다 갚은 차입금이 목록에서 사라져 있으면 그 표를 만들 수 없다.
+ */
+router.get('/loans', async (req, res, next) => {
+  try {
+    if (!(await requireFeature(req, res, 'loan'))) return
+    res.json(await loanReport(req.db, {
+      status: req.query.status === 'all' ? 'all' : 'active',
+      loanId: req.query.loan_id || null,
+    }))
+  } catch (e) { next(e) }
+})
+
+/* 엑셀 — 서식 있는 통합문서(lib/loanWorkbook.js).
+ *
+ * loan_id 를 주면 그 계좌 한 건만 담는다. 전체를 받을지 한 계좌만 받을지는
+ * 화면에서 고르고, 고른 그대로 파일이 나온다 — 화면과 파일이 다르면 둘 다 못 믿는다. */
+router.get('/loans.xlsx', async (req, res, next) => {
+  try {
+    if (!(await requireFeature(req, res, 'loan'))) return
+    const status = req.query.status === 'all' ? 'all' : 'active'
+    const loanId = req.query.loan_id || null
+    const d = await loanReport(req.db, { status, loanId })
+    const today = kstToday()
+
+    /* 고른 계좌가 이 회사에 없으면 빈 파일이 나간다 — "왜 비었지"로 끝나므로 먼저 끊는다.
+       (남의 회사 것을 볼 위험은 없다. req.db 가 이미 이 회사 DB다.) */
+    if (loanId && !d.loans.length) {
+      return res.status(404).json({ error: '그 차입금을 찾을 수 없어요' })
+    }
+
+    const loanName = loanId ? d.loans[0].name : null
+    const wb = buildLoanWorkbook(d, {
+      today,
+      scope: status === 'all' ? '상환 완료 포함' : '진행 중',
+      loanName,
+    })
+
+    const filename = loanName
+      ? `차입금현황_${loanName.replace(/[\/:*?"<>|]/g, ' ')}_${today}.xlsx`
+      : `차입금현황_전체_${today}.xlsx`
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader('Content-Disposition',
+      `attachment; filename="loans.xlsx"; filename*=UTF-8''${encodeURIComponent(filename)}`)
+    await wb.xlsx.write(res)
+    res.end()
   } catch (e) { next(e) }
 })
 

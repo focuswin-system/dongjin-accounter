@@ -522,26 +522,40 @@ export const api = {
     } catch (e) { return { ok: false, error: e.message } }
   },
 
-  /* 차입금 현황 — 차입처별 잔액과 상환 내역. 화면과 엑셀이 서버의 같은 집계를 쓴다. */
-  async getLoanReport(status = 'active') {
-    try { return await req(`/reports/loans?status=${encodeURIComponent(status)}`) } catch { return null }
+  /* 차입금 현황 — 계좌별 잔액과 상환 내역. 화면과 엑셀이 서버의 같은 집계를 쓴다.
+     loanId 를 주면 그 계좌 한 건만. 화면에서 고른 것이 그대로 파일에도 담긴다. */
+  async getLoanReport({ status = 'active', loanId = '' } = {}) {
+    const qs = new URLSearchParams({ status })
+    if (loanId) qs.set('loan_id', loanId)
+    try { return await req(`/reports/loans?${qs}`) } catch { return null }
   },
 
-  async downloadLoanReportXlsx(status = 'active') {
+  async downloadLoanReportXlsx({ status = 'active', loanId = '' } = {}) {
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`${BASE}/reports/loans.xlsx?status=${encodeURIComponent(status)}`, {
+      const qs = new URLSearchParams({ status })
+      if (loanId) qs.set('loan_id', loanId)
+      const res = await fetch(`${BASE}/reports/loans.xlsx?${qs}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
         throw new Error(d.error || '내려받기에 실패했어요')
       }
+      /* 파일명 — 서버가 Content-Disposition 에 적어 보낸다(고른 계좌 이름이 들어간다).
+         a.download 를 채우면 그 값이 헤더를 **이깁니다.** 그래서 헤더를 직접 읽어 쓴다 —
+         안 그러면 계좌를 골라 받아도 파일 이름이 전부 같아 폴더에서 구별이 안 된다. */
+      const cd = res.headers.get('content-disposition') || ''
+      const star = /filename\*=UTF-8''([^;]+)/i.exec(cd)
+      const plain = /filename="([^"]+)"/i.exec(cd)
+      let name = ''
+      try { name = star ? decodeURIComponent(star[1]) : (plain ? plain[1] : '') } catch { name = '' }
+
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `차입금현황_${new Date().toISOString().slice(0, 10)}.xlsx`
+      a.download = name || `차입금현황_${new Date().toISOString().slice(0, 10)}.xlsx`
       // Firefox는 anchor가 DOM에 있어야 하고, 같은 tick에 revoke하면 다운로드가 취소된다(위와 같은 이유).
       document.body.appendChild(a)
       a.click()

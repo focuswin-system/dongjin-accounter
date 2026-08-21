@@ -97,10 +97,31 @@ test('all 은 아무것도 안 켜도 보인다', () => {
 
 /* ── 실제 카탈로그 ── */
 
-test('화면 변화 0 — 아무것도 안 켠 회사는 기존 7개뿐이다', () => {
+/* 아무것도 안 켠 회사가 보는 목록 = scope 'all' 인 것 **전부, 그리고 그것뿐**.
+ *
+ * 원래는 기본 7개를 그대로 적어 두었다(entitlement 도입이 화면을 안 바꾼다는 걸 잠그려고).
+ * 그런데 기본 제공 양식을 새로 만들면 그 목록도 같이 늘어난다 — 값을 적어 두면 진짜 지켜야 할
+ * 것(**entitled·hidden 이 안 새어나온다**)과 그냥 늘어난 것을 구별할 수 없다.
+ * 그래서 카탈로그에서 기대값을 뽑아 비교하고, 새는지는 따로 못 박는다. */
+test('아무것도 안 켠 회사는 기본 제공 양식만 본다', () => {
   const rows = visibleReports({ features: new Set() })
-  assert.deepStrictEqual(rows.map(r => r.key),
-    ['monthly', 'tax4', 'category', 'vendor', 'ar', 'subcontract', 'vat'])
+  const expected = BUILTIN_REPORTS
+    .filter(r => r.scope === 'all')
+    .sort((a, b) => (a.sort || 999) - (b.sort || 999))
+    .map(r => r.key)
+  assert.deepStrictEqual(rows.map(r => r.key), expected)
+  // 기본 제공이 통째로 사라지는 실수도 잡는다(필터가 잘못되면 빈 배열끼리 같아져 통과해버린다)
+  assert.ok(expected.length >= 7, `기본 제공이 ${expected.length}개뿐이다 — 카탈로그를 확인하세요`)
+})
+
+test('안 켠 회사에게 entitled·hidden 은 하나도 안 보인다', () => {
+  const rows = visibleReports({ features: new Set() })
+  const shown = new Set(rows.map(r => r.key))
+  for (const r of BUILTIN_REPORTS) {
+    if (r.scope !== 'all') {
+      assert.ok(!shown.has(r.key), `${r.key}(${r.scope}) 가 안 켠 회사에게 보인다`)
+    }
+  }
 })
 
 test('켜 주면 그 양식만 늘어난다 — 같은 entitled 라도 나머지는 닫혀 있다', () => {

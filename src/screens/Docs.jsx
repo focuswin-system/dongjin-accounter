@@ -2586,11 +2586,258 @@ const ReportFundSheet = ({ toast }) => {
   )
 }
 
+/* ── 차입금 현황 ─────────────────────────────────────────────────
+ *
+ * 재무관리 > 차입금 화면에는 출력이 없어서, 대표·세무사에게 넘길 때마다 화면을 보고
+ * 손으로 옮겨 적어야 했다. 여기 두면 보고서 껍데기가 주는 인쇄(→PDF)와
+ * 표 CSV 내보내기를 그대로 얻는다.
+ *
+ * 그 위에 **서식 있는 엑셀**을 따로 둔다(lib/loanWorkbook.js) — CSV는 표 하나뿐이라
+ * 요약·목록·상환내역을 한 파일로 넘길 수 없고, 금액에 자릿점도 안 붙는다.
+ *
+ * 상환 내역은 **계좌(차입금 건)별로 묶는다.** 날짜순 한 줄로 내면 여섯 계좌의 회차가
+ * 뒤섞여 "이 계좌에 얼마 갚았나"를 눈으로 골라내야 한다. 차입금 이름에 계좌번호가
+ * 붙어 있는 것("경남은행 64 (23.1218~28.1218)-9304")도 실무가 계좌 단위라는 뜻이다.
+ *
+ * 숫자는 전부 서버(lib/loanReport.js)가 낸다. 화면에서 다시 더하지 않는다 —
+ * 그러면 화면 합계와 엑셀 합계가 어긋날 수 있다. */
+const ReportLoan = ({ toast }) => {
+  const [status, setStatus] = useState('active')
+  const [loanId, setLoanId] = useState('')      // '' = 전체 계좌
+  const [d, setD] = useState(null)
+  const [busy, setBusy] = useState(false)
+  // 계좌 선택 목록은 **전체 기준**으로 따로 받는다. 한 계좌를 고른 응답에는 그 하나만 들어 있어,
+  // 같은 데이터로 목록을 만들면 고른 순간 드롭다운에 그 계좌만 남아 되돌아올 수 없다.
+  const [choices, setChoices] = useState([])
+
+  useEffect(() => {
+    let alive = true
+    api.getLoanReport({ status }).then(x => { if (alive && x) setChoices(x.loans || []) })
+    return () => { alive = false }
+  }, [status])
+
+  useEffect(() => {
+    let alive = true
+    setD(null)
+    api.getLoanReport({ status, loanId }).then(x => { if (alive) setD(x) })
+    return () => { alive = false }
+  }, [status, loanId])
+
+  const download = async () => {
+    setBusy(true)
+    const r = await api.downloadLoanReportXlsx({ status, loanId })
+    setBusy(false)
+    if (!r.ok) toast.push(r.error || '내려받기에 실패했어요', { tone: 'warn' })
+    else toast.push(loanId ? '고른 계좌만 내려받았어요' : '전체 계좌를 내려받았어요')
+  }
+
+  const picked = choices.find(l => l.id === loanId)
+
+  const controls = (
+    <div className="row gap-8 no-print" style={{ marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* 범위는 값이 둘뿐이라 칩. 계좌는 열넷이라 Combobox — 목록이 길면 칩이 줄을 먹는다 */}
+      {[['active', '진행 중'], ['all', '상환 완료 포함']].map(([v, l]) => (
+        <button key={v} type="button" className={`chip ${status === v ? 'active' : ''}`}
+          onClick={() => { setStatus(v); setLoanId('') }}>{l}</button>
+      ))}
+      <div style={{ width: 300 }}>
+        <Combobox value={loanId} onChange={setLoanId}
+          options={[{ value: '', label: '전체 계좌', sub: `${choices.length}건` },
+            ...choices.map(l => ({ value: l.id, label: l.name, sub: l.lender }))]}
+          placeholder="계좌 선택"/>
+      </div>
+      <button className="btn primary ml-auto" onClick={download} disabled={busy || !d}>
+        <Icon.Excel size={14}/> {busy ? '만드는 중…' : loanId ? '이 계좌만 엑셀로' : '전체 엑셀로 내려받기'}
+      </button>
+    </div>
+  )
+
+  if (!d) return <div>{controls}<Loading label="차입금을 불러오는 중…"/></div>
+
+  const T = d.totals
+  if (!d.loans.length) {
+    return (
+      <div>
+        {controls}
+        <div className="text-sm text-muted2" style={{ padding: 24, textAlign: 'center' }}>
+          {status === 'active' ? '진행 중인 차입금이 없어요.' : '등록된 차입금이 없어요.'}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {controls}
+      {/* 한 계좌만 볼 때는 무엇을 보고 있는지 인쇄물에도 남아야 한다 */}
+      {picked && (
+        <div className="text-sm text-muted" style={{ marginBottom: 12 }}>
+          <b>{picked.name}</b> · {picked.lender}
+          {picked.accountName ? ` · 상환계좌 ${picked.accountName}` : ''}
+        </div>
+      )}
+
+      <KpiRow cols={4} style={{ marginBottom: 24 }}>
+        <Kpi label="차입원금" value={T.principal} badge={`${T.count}건`}/>
+        <Kpi label="상환한 원금" value={T.repaidPrincipal} tone="pos"/>
+        <Kpi label="남은 원금" value={T.remaining} tone="neg" hint="차입원금 − 상환원금"/>
+        <Kpi label="지급한 이자" value={T.repaidInterest} hint="이미 나간 비용 — 남은 원금에 안 더해요"/>
+      </KpiRow>
+
+      {/* 1. 차입처별 — 전체를 볼 때만 뜻이 있다(한 계좌를 고르면 한 줄짜리 표가 된다) */}
+      {!loanId && (
+        <div className="card" style={{ overflow: 'hidden', marginBottom: 20 }}>
+          <div className="card-pad fw-700" style={{ paddingBottom: 10 }}>차입처별 요약</div>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>차입처</th>
+                <th style={{ width: 70 }} className="num-right">건수</th>
+                <th className="num-right">차입원금</th>
+                <th className="num-right">상환원금</th>
+                <th className="num-right">남은원금</th>
+                <th className="num-right">지급이자</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.byLender.map(g => (
+                <tr key={g.lender}>
+                  <td className="fw-700">{g.lender}</td>
+                  <td className="num-cell num-right">{g.count}</td>
+                  <td className="num-cell num-right">{fmtNum(g.principal)}</td>
+                  <td className="num-cell num-right" style={{ color: 'var(--pos)' }}>
+                    {g.repaidPrincipal ? fmtNum(g.repaidPrincipal) : '—'}</td>
+                  <td className="num-cell num-right fw-700">{fmtNum(g.remaining)}</td>
+                  <td className="num-cell num-right text-muted">
+                    {g.repaidInterest ? fmtNum(g.repaidInterest) : '—'}</td>
+                </tr>
+              ))}
+              <tr>
+                <td className="fw-700">합계</td>
+                <td className="num-cell num-right fw-700">{T.count}</td>
+                <td className="num-cell num-right fw-700">{fmtNum(T.principal)}</td>
+                <td className="num-cell num-right fw-700">{fmtNum(T.repaidPrincipal)}</td>
+                <td className="num-cell num-right fw-700">{fmtNum(T.remaining)}</td>
+                <td className="num-cell num-right fw-700">{fmtNum(T.repaidInterest)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* 2. 계좌별 현황 */}
+      <div className="card" style={{ overflow: 'hidden', marginBottom: 20 }}>
+        <div className="card-pad fw-700" style={{ paddingBottom: 10 }}>계좌별 현황</div>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>차입처</th><th>차입금명(계좌)</th><th>차입일</th>
+              <th className="num-right">차입원금</th>
+              <th className="num-right">상환원금</th>
+              <th className="num-right">남은원금</th>
+              <th style={{ width: 80 }} className="num-right">연이율</th>
+              <th style={{ width: 90 }}>상환방식</th>
+              <th>상환계좌</th>
+            </tr>
+          </thead>
+          <tbody>
+            {d.loans.map(l => (
+              <tr key={l.id}>
+                <td className="text-sm">{l.lender}</td>
+                <td className="fw-700">{l.name}</td>
+                <td className="text-sm num">{l.startDate}</td>
+                <td className="num-cell num-right">{fmtNum(l.principal)}</td>
+                <td className="num-cell num-right" style={{ color: 'var(--pos)' }}>
+                  {l.repaidPrincipal ? fmtNum(l.repaidPrincipal) : '—'}</td>
+                <td className="num-cell num-right fw-700">{fmtNum(l.remaining)}</td>
+                {/* 이율 0은 '0%'로 찍지 않는다 — 무이자로 읽힌다(임포트분은 아직 안 채웠다) */}
+                <td className="num-cell num-right text-sm">
+                  {l.annualRate ? `${l.annualRate}%` : <span className="text-muted2">—</span>}</td>
+                <td className="text-sm text-muted">{LOAN_METHOD_LABEL[l.method] || l.method}</td>
+                <td className="text-sm text-muted">{l.accountName || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* 3. 계좌별 상환 내역 — 계좌마다 표 하나 + 소계 */}
+      <div className="fw-700" style={{ margin: '24px 0 12px', fontSize: 15 }}>
+        계좌별 상환 내역 <span className="text-sm text-muted fw-400">{d.repayments.length}건</span>
+      </div>
+      {(d.byLoan || []).map(g => (
+        <div key={g.loanId} className="card" style={{ overflow: 'hidden', marginBottom: 14 }}>
+          <div className="row card-pad" style={{ paddingBottom: 10, gap: 8, alignItems: 'baseline' }}>
+            <span className="text-sm text-muted">{g.lender}</span>
+            <span className="fw-700">{g.loanName}</span>
+            <span className="text-sm text-muted ml-auto">
+              남은원금 <b className="num">{fmtNum(g.remaining)}</b>원
+            </span>
+          </div>
+          {g.rows.length === 0 ? (
+            <div className="text-sm text-muted2" style={{ padding: '10px 18px 18px' }}>
+              상환 처리한 회차가 없어요.
+            </div>
+          ) : (
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>납부일</th>
+                  <th style={{ width: 60 }} className="num-right">회차</th>
+                  <th>예정일</th>
+                  <th className="num-right">원금</th>
+                  <th className="num-right">이자</th>
+                  <th className="num-right">합계</th>
+                </tr>
+              </thead>
+              <tbody>
+                {g.rows.map(r => (
+                  <tr key={`${r.loanId}-${r.seq}`}>
+                    <td className="text-sm num">{r.paidDate}</td>
+                    <td className="num-cell num-right text-sm">{r.seq}</td>
+                    <td className="text-sm num text-muted">{r.dueDate}</td>
+                    {/* 이자만 낸 회차는 원금이 0이다. '0'으로 찍으면 0을 —로 두는 다른 열과 어긋난다 */}
+                    <td className="num-cell num-right">{r.principal ? fmtNum(r.principal) : '—'}</td>
+                    <td className="num-cell num-right text-muted">{r.interest ? fmtNum(r.interest) : '—'}</td>
+                    <td className="num-cell num-right fw-700">{fmtNum(r.total)}</td>
+                  </tr>
+                ))}
+                <tr>
+                  <td className="fw-700">소계</td>
+                  <td className="num-cell num-right fw-700">{g.subtotal.count}</td>
+                  <td/>
+                  <td className="num-cell num-right fw-700">{fmtNum(g.subtotal.principal)}</td>
+                  <td className="num-cell num-right fw-700">{fmtNum(g.subtotal.interest)}</td>
+                  <td className="num-cell num-right fw-700">{fmtNum(g.subtotal.total)}</td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+        </div>
+      ))}
+
+      <div className="text-xs text-muted2" style={{ marginTop: 14, lineHeight: 1.7 }}>
+        · <b>남은원금 = 차입원금 − 상환원금</b>이에요. 지급한 이자는 이미 나간 비용이라
+        남은원금에 더하지 않아요 — 더하면 "앞으로 갚을 돈"이 실제보다 커집니다.<br/>
+        · 상환 내역은 <b>실제로 처리한 회차</b>만 담아요. 앞으로 나갈 상환 예정은 자금 현황에서 봅니다.<br/>
+        · 엑셀은 지금 고른 그대로 나옵니다 — 계좌를 고르면 그 계좌만, 전체면 전체가 담겨요.
+      </div>
+    </div>
+  )
+}
+
+/** 상환방식 표기 — 서버 lib/loanReport.js 의 METHOD_LABEL 과 같은 말을 써야 한다 */
+const LOAN_METHOD_LABEL = {
+  equal_payment: '원리금균등', equal_principal: '원금균등',
+  bullet: '만기일시', none: '일정 없음',
+}
+
 const REPORT_VIEWS = {
   monthly: ReportMonthly, tax4: ReportTax4, contract: ReportContract,
   category: ReportCategory, vendor: ReportVendor, ar: ReportAR,
   subcontract: ReportSubcontract, defense: ReportDefense,
   taxoffice: ReportTaxOffice, vat: ReportVAT, fundsheet: ReportFundSheet,
+  loan: ReportLoan,
 }
 
 export const ReportsScreen = () => {
