@@ -1,128 +1,182 @@
 import { Icon } from './ui'
 
-// 포털형 2뎁스 네비게이션 트리 (도메인 → 업무 섹션 → 잎 메뉴)
-// App 사이드바와 홈 포털이 이 트리를 공유한다. 환경설정(settings)은 별도 취급.
+/* 포털형 2뎁스 네비게이션 트리 (도메인 → 업무 섹션 → 잎 메뉴)
+ * App 사이드바와 홈 포털이 이 트리를 공유한다. 환경설정(settings)은 별도 취급.
+ *
+ * ── 2026-08 재편: 회계 언어에서 업무 언어로 ──────────────────────────
+ *
+ * 예전 축은 '판매·수주(매출) / 구매·발주(매입) / 경비'였다. 회계 계정 성격과 같은 축이라
+ * 손익 보고서까지 그대로 이어지는 장점이 있었지만, **그 축은 만든 사람의 축**이었다.
+ * 대표(공급자) 관점에서 계약을 추적하고 원가를 계산하려고 세운 구조다.
+ *
+ * 실제 고객사에 납품해 보니 일하는 방식이 달랐다. 이분들은 큰 계약 틀에서 내려오지 않고
+ * **손에 들어온 서류**(세금계산서·거래명세서·카드전표)를 보고 받아적는다. 그리고 회사마다
+ * 정기청구만 하거나 정기지출만 하는 식으로 **한쪽 리듬에 치우쳐** 있다.
+ *
+ * 그래서 축을 둘로 바꿨다.
+ *   1) **돈의 방향** — "돈 나간 거 어디 기록하지? 들어온 거 어디 기록하지?"에 바로 답한다.
+ *      회계를 모르는 사람도 방향은 안다. 매출/매입은 알아야 고를 수 있는 말이었다.
+ *   2) **정기 / 수시** — 둘은 다루는 리듬이 다르다. 정기는 "이번 달 회차 돌았나"(이행 관리),
+ *      수시는 "이거 청구서 끊자"(발행 작업)다. 예전엔 정기청구가 판매 밑, 정기지출이 구매
+ *      밑에 흩어져 **"이번 달 정기 건들"을 한 번에 볼 수 없었다.**
+ *
+ * ⚠ 이번 단계는 **배치와 라벨만** 바꾼다. 라우트 id·권한 자원은 하나도 안 건드렸다.
+ *   즐겨찾기(homeFavorites)·북마크·FAQ 링크가 그대로 살아 있고, 되돌리기도 쉽다.
+ *   화면 병합과 API 경로 분리는 다음 단계다 — 아래 각 자리의 ⓵⓶ 주석 참조.
+ */
 export const NAV_TREE = [
   { type: "leaf", id: "home", label: "홈", icon: Icon.Home },
+
+  /* 계약관리 — 수주와 발주를 **한 도메인**에 둔다.
+   *
+   * ⓶ 다음 단계: 한 화면으로 합치는 것은 아직 하지 않는다.
+   *   서버가 요청 본문의 kind 를 신뢰할 수 없어 '매출만 주고 매입은 막기'를 **화면이 갈려
+   *   있다는 사실에 기대어** 구현하고 있다(platform/apiPerms.js 머리말). 화면을 합치면
+   *   한 화면 = 한 자원이 되어 그 구분이 무너진다. 합치려면 API 를 경로로 갈라야 한다
+   *   (/api/contracts/sales · /purchase). 그때까지는 도메인만 모으고 화면은 둘로 둔다.
+   *
+   * 계약의 비중은 줄인다 — 고객사는 계약에서 내려오지 않는다. 다만 없애지는 않는다.
+   * 추후 MES 의 수주·발주 데이터와 이어붙일 자리이자 원가 계산의 근거다. */
   {
-    type: "domain", id: "acct", label: "일반회계", icon: Icon.Book,
+    type: "domain", id: "contract_dom", label: "계약관리", icon: Icon.Briefcase,
     sections: [
-      // 돈 흐름의 '성격'으로 나눈다 — 회계 계정 성격과 같은 축이라 보고서(손익)까지 그대로 이어진다.
-      //   판매·수주(매출) = 수익 / 매입 = 매출원가(직접비) / 경비 = 판관비(운영비) / 장부 = 조회 전용
-      // 메뉴 순서 = 실제 일하는 순서. 주문 → 청구 → 회수.
-      // '입금'·'지출'은 거래내역 화면에 필터만 건 같은 뷰라 메뉴에서 뺐다(거래내역에서 본다).
-      // 판매·수주(매출)과 매입은 같은 순서로 읽힌다: 주문 → 청구서 → 정기 → 미회수/미지급.
-      // 정기청구(매출)와 정기지출(매입)이 서로 마주보는 자리에 있어야 흐름이 대칭으로 보인다.
-      //
-      // ⚠ 용어를 단계별로 나눠 쓴다 — 전면 통일하지 않는다.
-      //   영업 단계(주문)   → **수주 / 발주**. 실무가 쓰는 말이다("수주계약서"). '매출 주문'은 어색했다.
-      //   회계 단계(청구서·미수금·미지급금·부가세) → **매출 / 매입 유지**.
-      //     홈택스·세금계산서·부가세 신고서와 **글자가 같아야 대조가 된다**
-      //     (매출세금계산서·매출세액은 서식 용어이고, 미수금·미지급금은 계정과목이다).
-      //   그래서 '수주 → 대금 청구서(매출) → 미수금'처럼 한 줄에 두 용어가 같이 선다. 의도된 것이다.
-      /* (제거) '미수금'·'미지급금' — 바로 위 '대금 청구서'와 **같은 화면**이었다.
-       * 같은 BillingScreen 에 role='collect' 만 달라서, 표도 데이터도 같고 제목·기본 필터만 달랐다.
-       * 메뉴 4개가 화면 2개였던 셈이다.
-       * 대신 청구서 화면의 상태 칩 맨 앞에 '미정산'을 항상 두어 같은 일을 하게 했다(Billing.jsx).
-       * ⚠ 라우트·권한 자원·검색어는 살려 둔다(HIDDEN_LEAVES) — 홈 화면·알림·거래내역 KPI가
-       *   #ar/#ap 로 들어오고, '미수금'은 경리가 실제로 찾는 말이자 계정과목이다. */
-      { label: "판매·수주(매출)", items: [
-        { id: "contract_sales",    label: "수주",   icon: Icon.Briefcase },
-        { id: "billing_issued",    label: "대금 청구서", icon: Icon.Receipt },
-        { id: "recurring_invoice", label: "정기청구",    icon: Icon.Clock },
+      { label: "계약", items: [
+        { id: "contract_sales",    label: "수주", icon: Icon.Briefcase },
+        { id: "contract_purchase", label: "발주", icon: Icon.Briefcase },
       ]},
-      { label: "구매·발주(매입)", items: [
-        { id: "contract_purchase", label: "발주",   icon: Icon.Briefcase },
-        { id: "billing_received",  label: "대금 청구서", icon: Icon.Receipt },
-        { id: "recurring_expense", label: "정기지출",    icon: Icon.Clock },
+    ],
+  },
+
+  /* 입금관리 — 들어오는 돈. 정기와 수시를 나란히 둔다. */
+  {
+    type: "domain", id: "income_dom", label: "입금관리", icon: Icon.Recv,
+    sections: [
+      { label: "입금", items: [
+        { id: "recurring_invoice", label: "정기입금", icon: Icon.Clock },
+        { id: "billing_issued",    label: "수시입금", icon: Icon.Receipt },
       ]},
-      // 판관비 — 주문·품목에 붙지 않는 운영비(임차·통신·보험 등). 잡손익은 영업외라 따로 둔다.
-      { label: "경비", items: [
-        { id: "misc_pl",     label: "일반 경비", icon: Icon.Wallet },
-        { id: "misc_income", label: "잡손익",    icon: Icon.Trend },
+    ],
+  },
+
+  /* 지급처리 — 나가는 돈.
+   *
+   * ⓶ '경비'가 아직 잎으로 남아 있다. 다음 단계에서 **수시지급 안의 입력 폼 분기**로 흡수한다.
+   *   경비(성격)와 정기/수시(리듬)는 서로 직교해서, 경비를 메뉴로 세우면 정기 경비(임차료·
+   *   서버비)가 갈 곳이 애매해지고 정기/수시 안에 넣으면 경비가 두 군데로 흩어진다.
+   *   답은 "메뉴는 하나, 폼은 둘"이다 — 등록할 때 **받은 서류가 뭔지**만 물으면
+   *   세금계산서면 청구서 폼, 카드전표·영수증이면 가벼운 경비 폼으로 갈린다.
+   *   (식대 8,000원을 거래처·품목·공급가·부가세 폼으로 받는 건 과하다.)
+   *
+   * 급여·임금이 여기 있는 이유: hr 화면은 급여대장·용역/일용 대장·미지급 퇴직금으로,
+   * **전부 나가는 돈**이다. 반면 근로계약·고용형태 같은 인사 데이터는 성격이 달라
+   * 아래 인사관리에 남는다 — 지급 메뉴에서 직원을 등록하게 두면 안 된다. */
+  {
+    type: "domain", id: "payment_dom", label: "지급처리", icon: Icon.Pay,
+    sections: [
+      { label: "지급", items: [
+        { id: "recurring_expense", label: "정기지급", icon: Icon.Clock },
+        { id: "billing_received",  label: "수시지급", icon: Icon.Receipt },
+        { id: "misc_pl",           label: "경비",     icon: Icon.Wallet },
       ]},
-      // 결재·정산 문서 모음. 결의서는 매입·경비 양쪽에서 올라오고, 정산내역서는 자금 집행 정산이라
-      // 어느 한쪽에 두지 않고 독립 '문서' 섹션에 둔다. 새 회사 양식은 여기에 전용 문서로 계속 추가.
-      { label: "문서", items: [
-        { id: "doc", label: "지급결의서", icon: Icon.Sign },
-        { id: "settlement", label: "정산내역서", icon: Icon.Doc },
-        { id: "quote_req", label: "견적요청서", icon: Icon.Doc },
-        { id: "purchase_req", label: "구매품의서", icon: Icon.Receipt },
-        // 매달 매입처에 일괄이체할 명단. 지금은 엑셀로 손으로 만들던 서류다.
-        { id: "payment_run", label: "매입 결제내역", icon: Icon.Bank },
-        /* 품목 단위로 기간을 가로지르는 표. 실물은 "주별 총 매입 현황(매월 25일 마감)".
-           한 화면에서 매입·매출을 토글하므로 이름도 둘을 다 담는다 — '매입 현황'이라 두면
-           매출로 바꿨을 때 왼쪽 메뉴와 화면 제목이 어긋난다. */
-        { id: "purchase_status", label: "매입·매출 현황", icon: Icon.Chart },
+      { label: "급여", items: [
+        { id: "hr", label: "급여·임금", icon: Icon.Building },
       ]},
-      { label: "장부", items: [
-        { id: "ledger",   label: "전체 거래내역", icon: Icon.Wallet },
-        /* (제거) 'contract' 주문 통합 목록 —
-         * 같은 ContractListScreen 을 kind="all" 로 연 것뿐이라, 사이드바에 주문이 세 번 서 있었다
-         * (수주·발주·주문). 게다가 위 둘을 수주/발주로 바꾸고 나면 이 항목만 라벨이
-         * 궁색해진다 — "주문"이라 부르면 위 둘은 주문이 아닌 게 되니까.
-         * 라우트·권한 자원은 살려 둔다(HIDDEN_LEAVES). 주문 상세의 브레드크럼이 여기로 돌아오고,
-         * Ctrl+K 로는 '주문 전체'로 여전히 찾을 수 있다. */
-        // '증빙 관리'는 아직 목업(SAMPLE 데이터·실동작 없음)이라 메뉴에서 숨김.
-        // 추후 여유 있을 때 거래 evid_url 집계 + 증빙 누락 관리로 실구현 예정.
-      ]},
-      { label: "세무관리", items: [
+    ],
+  },
+
+  /* 세무관리 — 지급처리 밑에 넣지 않는다.
+   *   · 부가세는 지급만이 아니다. **환급이면 입금**이라 지급 메뉴에 두면 갈 곳이 없다.
+   *   · 이 화면이 하는 일은 '신고 자료 준비'고 납부는 그 결과일 뿐이다.
+   *   · 원천세·4대보험은 급여에 딸린 것이고 법인세는 또 별건이라, 한 덩어리로 묶으면 섞인다.
+   * "낼 세금이 지급 예정에 떠야 한다"는 요구는 맞지만 그건 자금 현황이 할 일이지
+   * 메뉴 위치 문제가 아니다. */
+  {
+    type: "domain", id: "tax_dom", label: "세무관리", icon: Icon.Doc,
+    sections: [
+      { label: "신고", items: [
         { id: "tax_vat", label: "부가세",   icon: Icon.Doc },
         { id: "tax_etc", label: "기타세액", icon: Icon.Doc },
       ]},
     ],
   },
+
+  /* 인사관리 — 사람을 관리하는 일. 급여 '지급'은 위 지급처리로 갔다.
+   * 부서·직위·급여항목·고용형태는 처음 세팅하고 거의 안 건드리므로 기준정보에 있다. */
   {
-    type: "domain", id: "hr_dom", label: "인사급여", icon: Icon.Building,
+    type: "domain", id: "hr_dom", label: "인사관리", icon: Icon.Building,
     sections: [
-      { label: "인사·급여", items: [
-        { id: "hr", label: "인사관리", icon: Icon.Building },
-      ]},
       { label: "근로·용역", items: [
         { id: "hr_labor_contract", label: "근로계약",      icon: Icon.Sign },
         { id: "hr_outsourcing",    label: "기타 용역·일용", icon: Icon.Briefcase },
       ]},
     ],
   },
+
+  /* 거래내역 — **조회 전용**이라 도메인 없이 잎으로 세운다.
+   * 등록은 입금관리·지급처리에서 하고, 여기서는 오간 돈을 본다. */
+  { type: "leaf", id: "ledger", label: "거래내역", icon: Icon.Wallet },
+
+  /* 사무업무 — 만들어서 넘기는 것들.
+   *
+   * 매입 결제내역·매입/매출 현황은 예전에 '문서' 밑에 있었는데 **그건 문서가 아니라 보고서**다.
+   * 자금일보·일계표도 여기로 모은다 — 흩어져 있으면 "이 숫자 어디서 보지"가 매번 갈린다.
+   *
+   * ⚠ 자금일보는 매일 아침 제일 먼저 여는 화면이라, 보고서 안에 묻으면 매일 3클릭이 되고
+   *   그러면 안 본다. 홈에 그날 숫자가 카드로 떠 있어 그 우려를 덜지만, 실사용에서
+   *   "찾기 어렵다"가 나오면 다시 잎으로 올린다. */
   {
-    /* 재무관리 — 성과(손익)와 재무(대차)는 성격이 다르다. 일반회계 안에 섞으면 헛갈린다.
+    type: "domain", id: "office_dom", label: "사무업무", icon: Icon.Doc,
+    sections: [
+      { label: "보고서", items: [
+        { id: "report",          label: "보고서",         icon: Icon.Chart },
+        { id: "report_daily",    label: "일계표",         icon: Icon.Book },
+        { id: "cash_report",     label: "자금일보",       icon: Icon.Bank },
+        { id: "payment_run",     label: "매입 결제내역",   icon: Icon.Bank },
+        { id: "purchase_status", label: "매입·매출 현황",  icon: Icon.Chart },
+      ]},
+      /* 회사마다 쓰는 양식이 다르다. 보고서가 이미 회사별로 켜고 끄는 구조(scope)를
+         갖고 있으므로, 문서도 같은 방식으로 넓힐 자리다(⓶ 다음 단계). */
+      { label: "문서", items: [
+        { id: "doc",          label: "지급결의서", icon: Icon.Sign },
+        { id: "settlement",   label: "정산내역서", icon: Icon.Doc },
+        { id: "quote_req",    label: "견적요청서", icon: Icon.Doc },
+        { id: "purchase_req", label: "구매품의서", icon: Icon.Receipt },
+      ]},
+    ],
+  },
+
+  {
+    /* 재무관리 — 성과(손익)와 재무(대차)는 성격이 다르다. 일반 거래와 섞으면 헛갈린다.
      * 대출 원금·투자금은 손익이 아니라 부채·자본이다(server/lib/pnl.js). */
     type: "domain", id: "finance", label: "재무관리", icon: Icon.Bank,
     sections: [
       { label: "자금 조달", items: [
-        { id: "finance_loan",       label: "차입금",   icon: Icon.Wallet },
-        { id: "finance_investment", label: "투자",     icon: Icon.Trend },
+        { id: "finance_loan",       label: "차입금", icon: Icon.Wallet },
+        { id: "finance_investment", label: "투자",   icon: Icon.Trend },
       ]},
       /* 조달과 운용은 한 쌍이다. 적금은 대출의 거울상이라(매월 넣고 만기에 받는다)
        * 같은 도메인에서 마주보게 둔다. 보통예금·카드 같은 '결제수단'은 기준정보에 남는다 —
        * 예적금은 묶여 있어 당장 못 쓰는 돈이라 성격이 다르다. */
       { label: "자금 운용", items: [
-        { id: "finance_savings",    label: "예금·적금·보증금", icon: Icon.Bank },
+        { id: "finance_savings", label: "예금·적금·보증금", icon: Icon.Bank },
       ]},
       { label: "현황", items: [
-        { id: "finance_dash",       label: "재무 현황", icon: Icon.Chart },
+        { id: "finance_dash", label: "재무 현황", icon: Icon.Chart },
       ]},
     ],
   },
+
   {
     type: "domain", id: "mgmt", label: "경영관리", icon: Icon.Trend,
     sections: [
-      /* 자금일보는 매일 아침 제일 먼저 여는 화면이다. 보고서(월 1~2회 보는 과거 집계) 안에
-       * 묻으면 매일 3클릭이 되고, 그러면 안 본다. 그래서 잎으로 세운다.
-       * 일계표는 반대다 — 그날 분개를 맞추는 과거 집계라 보고서 안이 맞다. */
       { label: "자금", items: [
-        { id: "cash_report", label: "자금일보", icon: Icon.Bank },
         /* 자금일보와 같은 데이터, 다른 축 — 자금일보는 오늘부터 N일 롤링(매일 아침 보는 것),
            자금 현황은 주·월·분기·년 구간(대표가 "이 달에 도나"를 보는 것). */
         { id: "fund_status", label: "자금 현황", icon: Icon.Chart },
       ]},
-      { label: "장부관리", items: [
-        { id: "report", label: "보고서", icon: Icon.Chart },
-        { id: "report_daily", label: "일계표", icon: Icon.Book },
-      ]},
-      { label: "경영관리", items: [
+      { label: "경영", items: [
         { id: "mgmt_dash", label: "경영 대시보드", icon: Icon.Trend },
-        { id: "mgmt_ask", label: "경영 도우미", icon: Icon.Sparkle },
+        { id: "mgmt_ask",  label: "경영 도우미",   icon: Icon.Sparkle },
       ]},
     ],
   },
@@ -207,6 +261,11 @@ export const HIDDEN_LEAVES = [
      권한 자원(master_accountBalance)은 잔액 조회 게이트가 아직 참조한다
      (server/routes/accounts.js canSeeBalance). */
   { id: "master_accountBalance", label: "계좌 잔액 (계좌)", icon: Icon.Bank, domain: "기준정보", section: "자금·자산" },
+  /* 잡손익 — 2026-08 재편에서 메뉴에서 뺐다. 영업외 수익(잡수익·환급금·이자)이라 건수가
+     아주 적고, 그 몇 건 때문에 상시 메뉴 한 칸을 쓰는 게 맞지 않았다. 거래 등록에서
+     비목으로 고르면 되고, 조회는 거래내역에서 한다.
+     라우트·권한 자원은 살려 둔다 — 옛 링크와 Ctrl+K('잡수익')가 여전히 들어온다. */
+  { id: "misc_income", label: "잡손익", icon: Icon.Trend, domain: "지급처리", section: "지급" },
 ]
 
 // 잎 id → 소속 도메인 id (활성 도메인 자동 펼침용)
@@ -268,16 +327,18 @@ export const LEAF_TAGS = {
   contract_sales:   '매출주문 매출 수주 납품주문 오더 주문 발주처 계약 수주계약 매출계약',
   /* 미수금 메뉴를 청구서로 합치면서 그 검색어를 여기로 옮겼다 —
      경리는 '미수금·받을돈·연체'로 찾지 '대금 청구서'로 찾지 않는다. */
-  billing_issued:   '세금계산서 계산서 청구 발행 매출 인보이스 수금 미수금 받을돈 채권 외상매출금 미수 연체 독촉 회수 미정산',
-  recurring_invoice:'정기 매달 월정액 자동청구 구독',
+  billing_issued:   '세금계산서 계산서 청구 발행 매출 인보이스 수금 미수금 받을돈 채권 외상매출금 미수 연체 독촉 회수 미정산 대금청구서 수시입금 수시청구',
+  /* 라벨이 '정기청구' → '정기입금'이 됐다. 옛 이름으로 못 찾으면 이름이 바뀐 게 아니라
+     기능이 사라진 걸로 읽힌다(수주·미수금과 같은 이유). */
+  recurring_invoice:'정기 매달 월정액 자동청구 구독 정기청구 정기입금 정기수금',
   ar:               '받을돈 채권 외상매출금 미수 연체 독촉 회수',
   // 매입
   contract_purchase:'매입주문 매입 발주 외주주문 하도급 구매주문 주문 계약 발주계약 매입계약',
-  billing_received: '매입세금계산서 수취 매입계산서 청구받은 미지급금 줄돈 채무 외상매입금 미지급 결제 지급처리 미정산',
-  recurring_expense:'정기지출 고정비 임차료 월세 리스 자동이체',
+  billing_received: '매입세금계산서 수취 매입계산서 청구받은 미지급금 줄돈 채무 외상매입금 미지급 결제 지급처리 미정산 대금청구서 수시지급 수시결제',
+  recurring_expense:'정기지출 고정비 임차료 월세 리스 자동이체 정기지급 정기결제',
   ap:               '줄돈 채무 외상매입금 미지급 결제 지급처리',
   // 경비
-  misc_pl:          '경비 비용 지출 소액 카드값 잡비',
+  misc_pl:          '경비 비용 지출 소액 카드값 잡비 영수증 카드전표',
   misc_income:      '잡수익 기타수익 이자수익 환급',
   // 문서
   doc:              '결의서 지출결의 품의 결재 승인',
@@ -307,7 +368,9 @@ export const LEAF_TAGS = {
   master_accountBalance:'잔액 통장잔고 시재',
   master_insurance:     '보험 화재보험 배상책임 보험료 증권',
   // 인사급여
-  hr:               '인사 급여 급여대장 월급 인건비 직원 사원',
+  /* 라벨이 '인사관리' → '급여·임금'이 됐다(지급처리로 이동). 옛 이름을 남겨 둔다 —
+     이 화면을 '인사관리'로 기억하는 사람이 아직 있다. 직원·근로계약은 인사관리 도메인이다. */
+  hr:               '인사 급여 급여대장 월급 인건비 직원 사원 인사관리 급여임금 임금 상여 퇴직금',
   hr_labor_contract:'근로계약 정규직 채용 입사 퇴사 4대보험',
   hr_outsourcing:   '용역 프리랜서 일용직 외주인력 사업소득 기타소득',
   hrbase_department:'부서 조직 팀',
@@ -337,70 +400,72 @@ export const LEAF_TAGS = {
 // ── 홈택스식 다단계 포털 구조 (도메인 → 카테고리 → 그룹 → 화면) ──
 // 카테고리: route(바로 화면) 또는 groups(하위 라인 → 화면 버튼들, 포털 페이지)
 export const PORTAL = [
+  /* NAV_TREE 와 **같은 구조로 맞춘다.** 둘이 어긋나면 홈과 사이드바가 다른 말을 하고,
+     실제로 예전에 재무관리가 사이드바에만 있어 홈에서는 들어갈 길이 없던 적이 있다. */
   {
-    id: 'acct', label: '일반회계', icon: Icon.Book,
-    // 홈은 이 카테고리들이 '깔끔한 카드' 한 벌로 보인다(하위메뉴 나열 X). 각 카드를 누르면
-    // 그 영역 포털(또는 단일 화면)로 들어간다. 늘어난 업무(경비·지출승인·장부)를 각 카드로 세운다.
+    id: 'contract_dom', label: '계약관리', icon: Icon.Briefcase,
     categories: [
-      { id: 'acct_sales', label: '판매·수주(매출)', icon: Icon.Recv, desc: '수주·청구·수금', groups: [
-        { label: '', items: ['contract_sales', 'billing_issued', 'recurring_invoice'] },
-      ]},
-      // 라벨은 사이드바(NAV_TREE)와 같은 말을 쓴다 — 크럼에서 '구매·발주(매입)'을 눌렀는데
-      // 도착한 페이지 제목이 '매입'이면 다른 데로 온 것처럼 읽힌다.
-      { id: 'acct_purchase', label: '구매·발주(매입)', icon: Icon.Pay, desc: '발주·청구·지급', groups: [
-        { label: '', items: ['contract_purchase', 'billing_received', 'recurring_expense'] },
-      ]},
-      { id: 'acct_expense', label: '경비', icon: Icon.Wallet, desc: '일반 경비·잡손익', groups: [
-        { label: '', items: ['misc_pl', 'misc_income'] },
-      ]},
-      { id: 'acct_docs', label: '문서', icon: Icon.Sign, desc: '지급결의서·정산내역서·견적요청서·구매품의서', groups: [
-        { label: '', items: ['doc', 'settlement', 'quote_req', 'purchase_req', 'payment_run', 'purchase_status'] },
-      ]},
-      /* 주문 통합 목록을 빼고 나니 남은 게 '전체 거래내역' 하나다 → 타일 안에 버튼 하나짜리
-       * 포털 페이지를 두지 않고 바로 거래내역으로 보낸다(인사관리·자금 운용 타일과 같은 방식).
-       * '증빙 관리'는 목업이라 숨김(추후 실구현 예정). */
-      { id: 'acct_ledger', label: '장부', icon: Icon.Book, desc: '전체 거래내역', route: 'ledger' },
-      { id: 'acct_tax', label: '세무관리', icon: Icon.Doc, desc: '부가세·기타세액 신고', groups: [
+      { id: 'contract_sales_c',    label: '수주', icon: Icon.Briefcase, desc: '받은 주문', route: 'contract_sales' },
+      { id: 'contract_purchase_c', label: '발주', icon: Icon.Briefcase, desc: '보낸 주문', route: 'contract_purchase' },
+    ],
+  },
+  {
+    id: 'income_dom', label: '입금관리', icon: Icon.Recv,
+    categories: [
+      { id: 'income_recurring', label: '정기입금', icon: Icon.Clock,   desc: '매달 같은 곳에 청구하는 돈', route: 'recurring_invoice' },
+      { id: 'income_onetime',   label: '수시입금', icon: Icon.Receipt, desc: '건별 청구서 발행·수금',      route: 'billing_issued' },
+    ],
+  },
+  {
+    id: 'payment_dom', label: '지급처리', icon: Icon.Pay,
+    categories: [
+      { id: 'payment_recurring', label: '정기지급', icon: Icon.Clock,    desc: '매달 나가는 돈',        route: 'recurring_expense' },
+      { id: 'payment_onetime',   label: '수시지급', icon: Icon.Receipt,  desc: '건별 청구서 수취·지급', route: 'billing_received' },
+      { id: 'payment_expense',   label: '경비',     icon: Icon.Wallet,   desc: '영수증·카드전표로 나간 돈', route: 'misc_pl' },
+      { id: 'payment_payroll',   label: '급여·임금', icon: Icon.Building, desc: '급여대장·용역·퇴직금',   route: 'hr' },
+    ],
+  },
+  {
+    id: 'tax_dom', label: '세무관리', icon: Icon.Doc,
+    categories: [
+      { id: 'tax_all', label: '신고', icon: Icon.Doc, desc: '부가세·기타세액 신고', groups: [
         { label: '', items: ['tax_vat', 'tax_etc'] },
       ]},
     ],
   },
   {
-    id: 'hr_dom', label: '인사급여', icon: Icon.Building,
+    id: 'hr_dom', label: '인사관리', icon: Icon.Building,
     categories: [
-      { id: 'hr', label: '인사관리', icon: Icon.Building, desc: '급여대장·직원 관리', route: 'hr' },
       { id: 'hr_labor', label: '근로·용역', icon: Icon.Sign, desc: '근로계약·용역·일용', groups: [
         { label: '', items: ['hr_labor_contract', 'hr_outsourcing'] },
       ]},
-      /* (제거) 'hr_base' 기준정보 카테고리 — 부서·직위·급여항목·고용형태.
-       *
-       * 기준정보를 독립 영역으로 모으면서 사이드바에서는 인사급여 안의 4개를 빼냈는데,
-       * **홈 포털에는 그대로 남아** 같은 화면으로 가는 길이 두 갈래가 됐다
-       * (홈에 '기준정보' 타일이 두 번 나왔다). 모으기로 한 이상 입구도 하나여야 한다.
-       * 이 4개는 아래 MASTER_GROUPS 의 '인사' 묶음에 그대로 있다.
-       * 라우트 'hr_base'(인사 기준정보 화면) 자체는 남겨둔다 — 구 링크·브레드크럼이 쓴다. */
     ],
   },
   {
-    /* 재무관리는 사이드바에만 있고 홈 포털에서 빠져 있었다 — 홈에서는 들어갈 길이 없었다는 뜻이다.
-     * (nav.js NAV_TREE 와 PORTAL 이 어긋나 있던 자리) */
+    id: 'office_dom', label: '사무업무', icon: Icon.Doc,
+    categories: [
+      { id: 'office_report', label: '보고서', icon: Icon.Chart, desc: '보고서·일계표·자금일보·매입 현황', groups: [
+        { label: '', items: ['report', 'report_daily', 'cash_report', 'payment_run', 'purchase_status'] },
+      ]},
+      { id: 'office_docs', label: '문서', icon: Icon.Sign, desc: '지급결의서·정산내역서·견적요청서·구매품의서', groups: [
+        { label: '', items: ['doc', 'settlement', 'quote_req', 'purchase_req'] },
+      ]},
+    ],
+  },
+  {
     id: 'finance', label: '재무관리', icon: Icon.Bank,
     categories: [
       { id: 'finance_fund', label: '자금 조달', icon: Icon.Wallet, desc: '차입금·투자', groups: [
         { label: '', items: ['finance_loan', 'finance_investment'] },
       ]},
-      { id: 'finance_ops', label: '자금 운용', icon: Icon.Bank, desc: '예금·적금·보증금', route: 'finance_savings' },
-      { id: 'finance_status', label: '재무 현황', icon: Icon.Chart, desc: '차입·투자 현황', route: 'finance_dash' },
+      { id: 'finance_ops',    label: '자금 운용', icon: Icon.Bank,  desc: '예금·적금·보증금', route: 'finance_savings' },
+      { id: 'finance_status', label: '재무 현황', icon: Icon.Chart, desc: '차입·투자 현황',   route: 'finance_dash' },
     ],
   },
   {
     id: 'mgmt', label: '경영관리', icon: Icon.Trend,
-    // 좌측 사이드바 섹션과 맞춘다: 장부관리(보고서) / 경영관리(경영 대시보드·경영 도우미)
     categories: [
-      { id: 'mgmt_cash', label: '자금일보', icon: Icon.Bank, desc: '오늘 잔액과 앞으로 들어올·나갈 돈', route: 'cash_report' },
-      { id: 'mgmt_report', label: '장부관리', icon: Icon.Chart, desc: '보고서·일계표', groups: [
-        { label: '', items: ['report', 'report_daily'] },
-      ]},
+      { id: 'mgmt_fund', label: '자금 현황', icon: Icon.Chart, desc: '주·월·분기 자금 계획', route: 'fund_status' },
       { id: 'mgmt_biz', label: '경영관리', icon: Icon.Trend, desc: '경영 대시보드·도우미', groups: [
         { label: '', items: ['mgmt_dash', 'mgmt_ask'] },
       ]},

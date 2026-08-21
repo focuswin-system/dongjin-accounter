@@ -91,21 +91,30 @@ try {
     throw { skip: true }
   }
   const navSrc = fs.readFileSync(navPath, 'utf8')
-  // nav.js의 잎 id 추출 — { id: "xxx", label: ... } 형태만 대상(도메인 노드 제외는 label 유무로 판별 불가하므로 전부 모아 비교)
+
+  /* 잎 id 만 모은다 — 묶음(도메인·포털 카테고리) id 는 화면이 아니라 권한 자원도 아니다.
+   *
+   * 예전엔 묶음 이름을 **하드코딩 목록**으로 지워냈다. 그래서 메뉴 구조를 손볼 때마다
+   * 이 검사가 "권한 카탈로그에 없음"으로 터졌다 — 진짜 누락과 묶음 이름이 섞여 나와,
+   * 정작 잡아야 할 '화면은 있는데 권한을 못 주는 상태'가 노이즈에 묻혔다.
+   * 이제 **구조로 판별한다**:
+   *   · PORTAL 블록 안의 `id:` 는 전부 묶음이다. 실제 화면은 `route: 'x'` 나
+   *     `items: ['a','b']` 로 가리키므로 이 정규식에 걸리지 않는다.
+   *   · NAV_TREE 의 `type: "domain"` 노드도 묶음이다.
+   *   · MASTER_LEAF('기준정보')는 잎처럼 생겼지만 타일 묶음이다 — settings 와 같은 취급.
+   * 구조가 바뀌어도 목록을 따라 고칠 일이 없다. */
+  const portalAt = navSrc.indexOf('export const PORTAL = [')
+  const beforePortal = portalAt >= 0 ? navSrc.slice(0, portalAt) : navSrc
+
   const navIds = new Set()
   const re = /\{\s*(?:type:\s*"leaf",\s*)?id:\s*["']([a-zA-Z_][\w]*)["']/g
   let m
-  while ((m = re.exec(navSrc))) navIds.add(m[1])
-  // 도메인·포털 카테고리 컨테이너 id는 '화면'이 아니라 묶음이라 권한 자원이 아니다.
-  // (route를 가진 hr·report·mgmt_dash는 실제 화면이므로 제외하지 않는다)
-  const CONTAINERS = ['acct', 'hr_dom', 'mgmt', 'finance',
-    'acct_sales', 'acct_purchase', 'acct_expense', 'acct_docs', 'acct_ledger', 'acct_tax', 'master',
-    'hr_labor', 'hr_base', 'mgmt_report', 'mgmt_biz',
-    // 재무관리 포털 카테고리 — route를 가진 것도 잎(finance_savings 등)으로 넘기는 묶음일 뿐이다
-    'finance_fund', 'finance_ops', 'finance_status',
-    // 자금일보 포털 타일(route=cash_report 로 넘긴다). 실제 자원은 cash_report.
-    'mgmt_cash']
-  for (const d of CONTAINERS) navIds.delete(d)
+  while ((m = re.exec(beforePortal))) navIds.add(m[1])
+
+  // NAV_TREE 도메인 노드 제거
+  const domRe = /type:\s*"domain",\s*id:\s*["']([a-zA-Z_][\w]*)["']/g
+  while ((m = domRe.exec(beforePortal))) navIds.delete(m[1])
+  navIds.delete('master')
 
   // settings_<tab>(회사정보·사용자·결재선·월마감)은 단일 자원 'settings'가 통째로 관장한다
   // (모두 admin 전용 화면). 개별 권한 자원으로 쪼개지 않으므로 카탈로그 대조에서 제외.

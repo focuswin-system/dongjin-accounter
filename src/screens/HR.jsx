@@ -179,7 +179,10 @@ export const HRScreen = () => {
   return (
     <>
       <div className="fade-up">
-        <PageHeader title="인사관리"/>
+        {/* 제목은 메뉴 이름과 같아야 한다 — 이 화면이 다루는 건 급여대장·용역/일용 대장·
+            미지급 퇴직금으로 **전부 나가는 돈**이라, 2026-08 재편에서 지급처리로 옮기며
+            '인사관리'에서 '급여·임금'으로 바꿨다. 직원·근로계약은 인사관리 도메인에 있다. */}
+        <PageHeader title="급여·임금" sub="급여대장 · 용역·일용 · 미지급 퇴직금"/>
 
         <div className="card" style={{ overflow: "hidden" }}>
           <div className="tab-bar" style={{ padding: "0 12px" }}>
