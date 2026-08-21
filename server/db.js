@@ -1017,6 +1017,12 @@ async function initDb(conn) {
     await ensureColumn('ref_items', 'item_kind',      "item_kind VARCHAR(20)")
     await ensureColumn('ref_items', 'tax_type',       "tax_type VARCHAR(10)")   // 과세·면세·영세 (비어 있으면 비목 기준 폴백)
     await ensureColumn('ref_items', 'item_group',     "item_group VARCHAR(50)")
+    // 설비 대장 — 제조사와 제조일자. 규격은 기존 spec 을 쓴다.
+    await ensureColumn('ref_items', 'maker',          "maker VARCHAR(120)")
+    /* ⚠ DATE 가 아니라 VARCHAR 다. 오래된 설비는 명판에 연월까지만 찍혀 있어
+       'YYYY-MM' 만 아는 경우가 흔한데, DATE 컬럼은 없는 '1일'을 지어내야 저장된다.
+       아는 만큼만 담고, 사전순 정렬이 곧 날짜순이라 정렬도 그대로 된다. */
+    await ensureColumn('ref_items', 'made_at',        "made_at VARCHAR(10)")
     // 주문·청구 라인의 매입원가 스냅샷. 발행 시점 품목 매입가를 복사한다(기준정보가 바뀌어도 주문 조건은 유지 —
     // name·spec·unit·unit_price와 같은 스냅샷 원칙). 라인별 마진·주문별 원가 합계의 근거가 된다.
     await ensureColumn('contract_items', 'cost_price', "cost_price BIGINT DEFAULT 0")

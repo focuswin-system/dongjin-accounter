@@ -522,6 +522,34 @@ export const api = {
     } catch (e) { return { ok: false, error: e.message } }
   },
 
+  /* 차입금 현황 — 차입처별 잔액과 상환 내역. 화면과 엑셀이 서버의 같은 집계를 쓴다. */
+  async getLoanReport(status = 'active') {
+    try { return await req(`/reports/loans?status=${encodeURIComponent(status)}`) } catch { return null }
+  },
+
+  async downloadLoanReportXlsx(status = 'active') {
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch(`${BASE}/reports/loans.xlsx?status=${encodeURIComponent(status)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.error || '내려받기에 실패했어요')
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `차입금현황_${new Date().toISOString().slice(0, 10)}.xlsx`
+      // Firefox는 anchor가 DOM에 있어야 하고, 같은 tick에 revoke하면 다운로드가 취소된다(위와 같은 이유).
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => { a.remove(); URL.revokeObjectURL(url) }, 0)
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
+
   /* 보고서 카탈로그 — **회사마다 다를 수 있다.**
    *
    * 예전엔 목록이 화면 파일에 하드코딩돼 있었다. 그래서 회사별로 다른 양식을 줄 수 없었고,
@@ -1510,6 +1538,13 @@ export const api = {
   },
   async addHrCode(type, name) {
     try { return await req('/hr-codes', { method: 'POST', body: { type, name } }) } catch { return { ok: false } }
+  },
+  async updateHrCode(id, name) {
+    try { await req(`/hr-codes/${id}`, { method: 'PUT', body: { name } }); return { ok: true } } catch (e) { return { ok: false, error: e.message } }
+  },
+  // ids 를 보낸 순서가 곧 표시 순서가 된다
+  async reorderHrCodes(type, ids) {
+    try { await req('/hr-codes/reorder', { method: 'PUT', body: { type, ids } }); return { ok: true } } catch (e) { return { ok: false, error: e.message } }
   },
   async deleteHrCode(id) {
     try { await req(`/hr-codes/${id}`, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }

@@ -190,6 +190,8 @@ const HrCodePanel = ({ type, label, embedded = false }) => {
   const toast = useToast()
   const [items, setItems] = useState([])
   const [newName, setNewName] = useState("")
+  const [editId, setEditId] = useState(null)
+  const [editName, setEditName] = useState("")
 
   const load = () => api.getHrCodes(type).then(setItems)
   useEffect(() => { load() }, [type])
@@ -209,15 +211,40 @@ const HrCodePanel = ({ type, label, embedded = false }) => {
     load()
   }
 
+  /* 수정 — 지금까지 없어서, 오타 하나를 고치려면 지우고 다시 만들어야 했다.
+     그러면 새 id 가 생겨 이 직위를 가리키던 결재선이 끊긴다. */
+  const startEdit = (item) => { setEditId(item.id); setEditName(item.name) }
+  const saveEdit = async () => {
+    const name = editName.trim()
+    if (!name) return toast.push(`${label}명을 입력하세요`)
+    if (items.some(i => i.id !== editId && i.name === name)) return toast.push("이미 있는 항목이에요")
+    const res = await api.updateHrCode(editId, name)
+    if (!res.ok) return toast.push(res.error || "저장 실패", { tone: 'warn' })
+    setEditId(null); load(); toast.push("수정됐어요")
+  }
+
+  /* 순서 옮기기 — 이름순은 뜻이 없다(가나다로 세우면 '과장·대리·부장·사원'이 된다).
+     화면에서 먼저 바꿔 보여주고 서버에 굳힌다. 실패하면 서버 값으로 되돌린다 —
+     안 그러면 새로고침했을 때 순서가 슬그머니 제자리로 가 있다. */
+  const move = async (idx, dir) => {
+    const to = idx + dir
+    if (to < 0 || to >= items.length) return
+    const next = [...items]
+    ;[next[idx], next[to]] = [next[to], next[idx]]
+    setItems(next)
+    const res = await api.reorderHrCodes(type, next.map(i => i.id))
+    if (!res.ok) { toast.push(res.error || "순서를 저장하지 못했어요", { tone: 'warn' }); load() }
+  }
+
   return (
     <div style={{ padding: 20 }}>
       <div className="row" style={{ marginBottom: 16 }}>
         {embedded ? (
-          <div className="section-sub" style={{ alignSelf: 'center' }}>총 {items.length}개</div>
+          <div className="section-sub" style={{ alignSelf: 'center' }}>총 {items.length}개 · 화살표로 순서를 바꿔요</div>
         ) : (
           <div>
             <div className="section-title">{label} 관리</div>
-            <div className="section-sub">총 {items.length}개</div>
+            <div className="section-sub">총 {items.length}개 · 화살표로 순서를 바꿔요</div>
           </div>
         )}
       </div>
@@ -234,27 +261,94 @@ const HrCodePanel = ({ type, label, embedded = false }) => {
         <table className="table">
           <thead>
             <tr>
+              <th style={{ width: 52 }}>순서</th>
               <th>{label}명</th>
-              <th style={{ width: 80 }}></th>
+              <th style={{ width: 150 }}></th>
             </tr>
           </thead>
           <tbody>
             {items.length === 0 && (
-              <tr><td colSpan={2} style={{ textAlign: "center", padding: 32, color: "var(--muted-2)", fontSize: 13 }}>
+              <tr><td colSpan={3} style={{ textAlign: "center", padding: 32, color: "var(--muted-2)", fontSize: 13 }}>
                 등록된 {label}이 없어요. 위에서 추가하세요.
               </td></tr>
             )}
-            {items.map(item => (
+            {items.map((item, i) => (
               <tr key={item.id}>
-                <td className="fw-600">{item.name}</td>
                 <td>
-                  <button className="btn" style={{ fontSize: 11, padding: "2px 8px", color: "var(--neg)" }}
-                    onClick={() => handleDelete(item)}>삭제</button>
+                  <div className="row gap-6" style={{ alignItems: 'center' }}>
+                    <span className="num text-xs text-muted2" style={{ width: 14 }}>{i + 1}</span>
+                    <div className="col" style={{ gap: 1 }}>
+                      <button className="ord-btn" disabled={i === 0} title="위로"
+                        onClick={() => move(i, -1)}>▲</button>
+                      <button className="ord-btn" disabled={i === items.length - 1} title="아래로"
+                        onClick={() => move(i, 1)}>▼</button>
+                    </div>
+                  </div>
+                </td>
+                <td className="fw-600">
+                  {editId === item.id ? (
+                    <input className="input" autoFocus value={editName} style={{ maxWidth: 260 }}
+                      onChange={e => setEditName(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditId(null) }}/>
+                  ) : item.name}
+                </td>
+                <td>
+                  <div className="row gap-6">
+                    {editId === item.id ? (
+                      <>
+                        <button className="btn primary" style={{ fontSize: 11, padding: "2px 8px" }} onClick={saveEdit}>저장</button>
+                        <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => setEditId(null)}>취소</button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => startEdit(item)}>수정</button>
+                        <button className="btn" style={{ fontSize: 11, padding: "2px 8px", color: "var(--neg)" }}
+                          onClick={() => handleDelete(item)}>삭제</button>
+                      </>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  )
+}
+
+/* 연월일까지 적을 수도, 연월까지만 적을 수도 있는 날짜 칸.
+ *
+ * 오래된 설비는 명판에 '2011-06'처럼 연월까지만 찍혀 있는 일이 흔하다. 그렇다고 자유 입력으로
+ * 두면 '2011.6'·'11년 6월'·'2011/06' 이 섞여 들어와 정렬이 깨진다. 그래서 **어느 단위로
+ * 적을지 먼저 고르게 하고**, 그 단위에 맞는 달력 칸을 낸다. 저장은 'YYYY-MM-DD' 또는 'YYYY-MM'.
+ *
+ * min·max 를 준다 — 크롬의 연도 칸은 275760년까지 받아서, 안 주면 '20260'이 만들어진다. */
+const PartDateInput = ({ value = '', onChange }) => {
+  const v = String(value || '')
+  const monthOnly = /^\d{4}-\d{2}$/.test(v)
+  const [mode, setMode] = useState(monthOnly ? 'month' : 'day')
+  useEffect(() => { setMode(/^\d{4}-\d{2}$/.test(String(value || '')) ? 'month' : 'day') }, [value === '' ? '' : 'set'])
+
+  const pick = (m) => {
+    setMode(m)
+    if (!v) return
+    // 연월일 → 연월은 잘라서 살리고, 연월 → 연월일은 없는 '일'을 지어낼 수 없으니 비운다
+    onChange(m === 'month' ? v.slice(0, 7) : (v.length === 7 ? '' : v))
+  }
+
+  return (
+    <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+      <input className="input num" style={{ maxWidth: 180 }}
+        type={mode === 'month' ? 'month' : 'date'}
+        min={mode === 'month' ? '1900-01' : '1900-01-01'}
+        max={mode === 'month' ? '2099-12' : '2099-12-31'}
+        value={v} onChange={e => onChange(e.target.value)}/>
+      <div className="row gap-6">
+        {[['day', '연월일'], ['month', '연월만']].map(([m, l]) => (
+          <button key={m} type="button" className={`chip ${mode === m ? 'active' : ''}`}
+            onClick={() => pick(m)} style={{ fontSize: 12 }}>{l}</button>
+        ))}
       </div>
     </div>
   )
@@ -339,11 +433,18 @@ export const REF_CONFIGS = {
   },
   fixed_asset: {
     type: 'fixed_asset', label: '고정자산',
-    sub: '유형 고정자산(자산번호·취득가액·취득일)을 관리합니다.',
+    sub: '유형 고정자산(자산번호·제조사·규격·취득일)을 관리합니다.',
     fields: [
       { key: 'code', label: '자산번호', kind: 'text', w: 120 },
       { key: 'name', label: '자산명', kind: 'text', req: true },
+      // 설비 대장에 필요한 것들 — 같은 이름의 기계도 제조사·규격이 다르면 다른 자산이다.
+      { key: 'maker', label: '제조사', kind: 'text', w: 120 },
+      { key: 'spec', label: '규격', kind: 'text', w: 150, hint: '모델명·용량·치수 등' },
       { key: 'amount', label: '취득가액', kind: 'num', w: 130 },
+      /* 제조일자는 연월까지만 아는 경우가 흔하다(오래된 설비는 명판에 연월만 찍혀 있다).
+         취득일과 달리 감가상각에 안 쓰이므로, 아는 만큼만 적게 둔다. */
+      { key: 'made_at', label: '제조일자', kind: 'partdate', w: 130,
+        hint: '연월일(2020-03-14) 또는 연월(2020-03)까지만 적어도 돼요' },
       { key: 'start_date', label: '취득일', kind: 'date', w: 130 },
       { key: 'memo', label: '비고', kind: 'text' },
     ],
@@ -592,6 +693,8 @@ export const RefMasterPanel = ({ cfg, page = false, embedded = false }) => {
                 <Combobox value={form[fd.key]} onChange={v => f(fd.key, v)} allowAdd={false}
                   options={[{ value: '', label: '선택 안 함' }, ...accounts.map(a => ({ value: a.id, label: a.name }))]}
                   placeholder="자동이체 계좌 선택"/>
+              ) : fd.kind === 'partdate' ? (
+                <PartDateInput value={form[fd.key]} onChange={v => f(fd.key, v)}/>
               ) : fd.kind === 'file' ? (
                 <RefFileField url={form.file_url} name={form.file_name} uploading={uploading}
                   onUpload={handleUpload} onRemove={() => setForm(p => ({ ...p, file_url: '', file_name: '' }))}/>

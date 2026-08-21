@@ -11,7 +11,9 @@ const FIELDS = ['name', 'code', 'spec', 'unit', 'party', 'amount', 'start_date',
   'purchase_price', 'item_kind', 'tax_type', 'item_group', 'deductible',
   // 중량과 '단가를 무엇에 곱하는가'. 거래명세서에 중량이 들어가는 업종(금속·자재)이 있고,
   // ㎏당 단가로 파는 품목은 금액 = 중량 × 단가다(lib/lineAmount.js).
-  'weight', 'price_basis']
+  'weight', 'price_basis',
+  // 설비 대장에 필요한 것들 — 제조사와 제조일자. 규격(spec)은 이미 있다.
+  'maker', 'made_at']
 const NUM_FIELDS = new Set(['amount', 'pay_day', 'purchase_price', 'deductible'])
 /* 중량은 소수를 쓴다(㎏에 g 단위). parseInt 로 넣으면 12.5 가 12 가 되어 조용히 틀린다. */
 const DEC_FIELDS = new Set(['weight'])
@@ -20,8 +22,19 @@ const pick = (body) => FIELDS.map(f => {
   if (DEC_FIELDS.has(f)) return parseFloat(String(body[f] ?? '').replace(/[^0-9.-]/g, '')) || 0
   // 아는 값만 통과시킨다 — 엉뚱한 값이 들어오면 금액 계산 기준이 흔들린다
   if (f === 'price_basis') return body[f] === 'weight' ? 'weight' : 'qty'
+  if (f === 'made_at') return normPartialDate(body[f])
   return body[f] ?? null
 })
+
+/* 제조일자는 'YYYY-MM-DD' 와 'YYYY-MM' 을 **둘 다** 받는다.
+ * 오래된 설비는 명판에 연월까지만 찍혀 있는 일이 흔하다. DATE 컬럼에 넣으면 없는 '1일'이
+ * 지어져 "몇 일에 만들어졌다"가 기록으로 남으므로, 문자열로 아는 만큼만 저장한다.
+ * (사전순 정렬이 곧 날짜순이라 정렬도 그대로 된다. 감가상각을 굴리는 건 취득일이지 제조일이 아니다.) */
+const normPartialDate = (v) => {
+  const s = String(v ?? '').trim()
+  if (!s) return null
+  return /^\d{4}-\d{2}(-\d{2})?$/.test(s) ? s : null
+}
 
 // 목록 (type별)
 router.get('/', async (req, res, next) => {
@@ -42,7 +55,8 @@ router.post('/', async (req, res, next) => {
     const [[{ maxOrder }]] = await req.db.execute('SELECT COALESCE(MAX(sort_order),0) AS maxOrder FROM ref_items WHERE type=?', [type])
     const id = randomUUID()
     await req.db.execute(
-      'INSERT INTO ref_items (id, type, name, code, spec, unit, party, amount, start_date, end_date, memo, period, pay_day, account_id, file_url, file_name, purchase_price, item_kind, tax_type, item_group, deductible, weight, price_basis, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      `INSERT INTO ref_items (id, type, ${FIELDS.join(', ')}, sort_order)
+       VALUES (?,?,${FIELDS.map(() => '?').join(',')},?)`,
       [id, type, ...pick(req.body), maxOrder + 1]
     )
     res.json({ ok: true, id })
@@ -53,7 +67,7 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const [result] = await req.db.execute(
-      'UPDATE ref_items SET name=?, code=?, spec=?, unit=?, party=?, amount=?, start_date=?, end_date=?, memo=?, period=?, pay_day=?, account_id=?, file_url=?, file_name=?, purchase_price=?, item_kind=?, tax_type=?, item_group=?, deductible=?, weight=?, price_basis=? WHERE id=?',
+      `UPDATE ref_items SET ${FIELDS.map(f => `${f}=?`).join(', ')} WHERE id=?`,
       [...pick(req.body), req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
