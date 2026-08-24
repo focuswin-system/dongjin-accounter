@@ -1642,46 +1642,56 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           right={<span className="text-xs text-muted2">{view === "plain" ? "거래일 기준" : "발행일 기준"}</span>}/>
       )}
 
-      {/* 탭: 발행 모드는 청구할 것|발행됨|미발행. 회수 모드는 상태 필터만. */}
+      {/* 이 줄에는 성격이 다른 두 묶음이 선다.
+            왼쪽  **무엇을 볼지** 고르는 탭 (청구할 것 / 발행내역 / 입금내역) — 서로 배타적
+            오른쪽 그 목록을 **걸러내는** 상태 필터 — 발행내역에만 뜻이 있다
+          예전엔 둘 다 똑같은 둥근 칩이라 한 줄로 뭉개져 보였다. 사이에 선을 하나 더 그어도
+          '또 하나의 형제 경계'로 읽힐 뿐이다(왼쪽 묶음 안에 이미 축 경계선이 있다).
+          그래서 왼쪽을 한 덩어리(SegTabs)로 담았다 — 경계가 모양으로 드러나면 선이 필요 없고,
+          "이 중 하나를 고르는 것"이라는 성격도 같이 말해 준다. */}
       <div className="row gap-8" style={{ marginTop: 12, marginBottom: 16, flexWrap: "wrap" }}>
         {/* ⚠ 탭 묶음은 **'청구할 것'이 없어도** 떠야 한다.
             예전엔 pending 이 비면 이 블록 전체가 사라져서, '청구서 없이' 탭에 들어간 순간
             돌아올 탭이 하나도 없었다(막다른 길). '청구할 것' 칩만 조건부로 감춘다. */}
         {!collect && (
-          <>
-            {/* 칩의 숫자는 **그 탭이 실제로 보여줄 건수**다.
+          <div className="seg" role="tablist">
+            {/* 숫자는 **그 탭이 실제로 보여줄 건수**다.
                 예전엔 필터 전 원본을 셌다 — 기간을 이번 달로 좁혀 표에 3건이 남아도 칩은 47을
                 달고 있었고, 어느 쪽이 맞는지 알 수 없었다. 각 탭은 자기 필터를 따로 들고 있으므로
-                (발행 예정=pendF / 발행됨=listF+상태칩) 각자 걸러진 수를 센다. */}
+                (청구할 것=pendF / 발행내역=listF+상태칩) 각자 걸러진 수를 센다. */}
             {pending.length > 0 && (
-              <button className={`chip ${view === "pending" ? "active" : ""}`} onClick={() => setView("pending")}>
-                {isIssued ? "청구할 것" : "지급할 것"}{pendingFiltered.length > 0 && <span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{pendingFiltered.length}</span>}
+              <button role="tab" aria-selected={view === "pending"}
+                className={`seg-btn ${view === "pending" ? "active" : ""}`} onClick={() => setView("pending")}>
+                {isIssued ? "청구할 것" : "지급할 것"}
+                {pendingFiltered.length > 0 && <span className="seg-count">{pendingFiltered.length}</span>}
               </button>
             )}
-            <button className={`chip ${view === "list" ? "active" : ""}`} onClick={() => setView("list")}>
-              {isIssued ? "발행내역" : "등록내역"}<span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{filtered.length}</span>
+            <button role="tab" aria-selected={view === "list"}
+              className={`seg-btn ${view === "list" ? "active" : ""}`} onClick={() => setView("list")}>
+              {isIssued ? "발행내역" : "등록내역"}<span className="seg-count">{filtered.length}</span>
             </button>
-          </>
-        )}
-        {/* 입금내역은 **늘 세운다.** 청구서가 있든 없든 돈은 오가므로 이 축은 항상 뜻이 있다
-           (예전의 '계산서 없는 입금'은 있을 때만 떴다 — 그건 남은 것을 모은 목록이라 그랬다).
-           앞에 세로선을 둔다: 왼쪽은 **청구서**를 보는 축이고 이건 **돈**을 보는 축이다. */}
-        {!collect && (
-          <>
-          <span aria-hidden="true" style={{ width: 1, height: 16, background: 'var(--line)', margin: '0 2px' }}/>
-          <button className={`chip ${view === "plain" ? "active" : ""}`} onClick={() => setView("plain")}>
-            {isIssued ? "입금내역" : "지급내역"}<span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{plainFiltered.length}</span>
-          </button>
-          </>
+            {/* 입금내역은 **늘 세운다.** 청구서가 있든 없든 돈은 오가므로 이 축은 항상 뜻이 있다
+                (예전의 '계산서 없는 입금'은 있을 때만 떴다 — 그건 남은 것을 모은 목록이라 그랬다).
+                앞에 선을 둔다: 왼쪽은 **청구서**를 보는 축이고 이건 **돈**을 보는 축이다. */}
+            <span aria-hidden="true" className="seg-div"/>
+            <button role="tab" aria-selected={view === "plain"}
+              className={`seg-btn ${view === "plain" ? "active" : ""}`} onClick={() => setView("plain")}>
+              {isIssued ? "입금내역" : "지급내역"}<span className="seg-count">{plainFiltered.length}</span>
+            </button>
+          </div>
         )}
         {(collect || view === "list") && (
-          <div className={`row gap-6 ${collect || !pending.length ? "" : "ml-auto"}`} style={{ flexWrap: "wrap" }}>
+          /* 늘 오른쪽 끝으로 밀어 둔다. 예전엔 '청구할 것'이 없을 때만 ml-auto 를 뗐는데,
+             그러면 어떤 회사에서는 탭 바로 옆에 붙고 어떤 회사에서는 멀리 떨어져 —
+             같은 화면이 회사마다 다른 구조로 보인다. */
+          <div className="row gap-6 ml-auto" style={{ flexWrap: "wrap" }}>
+            {/* 이 일곱 개가 무엇인지 말해 주는 이름표. 탭 묶음과 다른 묶음이라는 표시도 된다
+                (사용자가 "위에 미정산·전체·입금예정…은 각각 뭐야?"를 물었던 자리다). */}
+            <span className="text-xs text-muted2" style={{ marginRight: 2 }}>상태</span>
             {STATUS_OPTIONS.map(s => (
               <span key={s} className="row gap-6" style={{ alignItems: 'center' }}>
                 {/* 층이 바뀌는 자리에만 세로선 — 어디까지가 '미수금의 내역'인지 눈으로 보이게 */}
-                {STATUS_DIVIDERS.has(s) && (
-                  <span aria-hidden="true" style={{ width: 1, height: 14, background: 'var(--line)' }}/>
-                )}
+                {STATUS_DIVIDERS.has(s) && <span aria-hidden="true" className="chip-div"/>}
                 <button className={`chip ${statusFilter === s ? "active" : ""}`}
                   onClick={() => setStatusFilter(s)} style={{ fontSize: 12 }}>{s}</button>
               </span>

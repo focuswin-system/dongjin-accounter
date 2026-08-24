@@ -562,9 +562,16 @@ function AppInner({ onLogout, user }) {
          찾은 것을 다시 찾아야 한다(BillingScreen 은 이미 이 값을 받아 그 건을 연다). */
       /* 등록 입구가 '받은 서류'를 먼저 묻고, 계산서가 아니면 거래 드로어로 넘긴다
          (Billing.jsx DocTypeChooser). 그래서 두 화면에 열기 함수를 내려준다. */
-      case "billing_issued":  return <BillingScreen initialTab="issued"   focusInvoiceId={focusInvoiceId}
+      /* ⚠ key 로 **다시 마운트**시킨다. 같은 컴포넌트를 두 라우트가 쓰므로 key 가 없으면
+         React 가 인스턴스를 재사용하고, 화면 안의 상태가 그대로 건너간다:
+           · 수시입금에서 '입금내역'을 보다 수시지급으로 가면 '지급내역'이 골라진 채로 뜬다
+           · 더 나쁜 건 상태 필터다. 매출에만 있는 '장기 미수'를 걸어 두고 매입으로 가면
+             그 쪽 칩 목록에는 없는 값이 남아 **아무 칩도 안 눌린 빈 표**가 된다
+             ("왜 아무것도 없지" — 필터가 걸린 흔적조차 화면에 없다).
+         기간·거래처 필터도 같은 경로로 새어 나간다. 두 화면은 서로 다른 장부다. */
+      case "billing_issued":  return <BillingScreen key="billing_issued" initialTab="issued" focusInvoiceId={focusInvoiceId}
                                        openIncome={() => setTxnForm({ kind: "income" })}/>;
-      case "billing_received":return <BillingScreen initialTab="received" focusInvoiceId={focusInvoiceId}
+      case "billing_received":return <BillingScreen key="billing_received" initialTab="received" focusInvoiceId={focusInvoiceId}
                                        openExpense={() => setTxnForm({ kind: "expense", compact: true })}/>;
       case "contract":        return <ContractListScreen kind="all" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
       case "contract_sales":  return <ContractListScreen kind="sales" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;

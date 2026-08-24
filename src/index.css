@@ -1533,3 +1533,39 @@ body:has([data-modal-open]) {
 .row-actions-item:disabled { opacity: .4; cursor: default; }
 .row-actions-item.neg { color: var(--neg-ink); }
 .row-actions-sep { height: 1px; background: var(--line); margin: 4px 2px; }
+
+/* 화면 안에서 '무엇을 볼지' 고르는 묶음(SegTabs) — 발행내역 / 입금내역처럼 서로 배타적인 축.
+ *
+ * 왜 칩이 아니라 별도 모양인가: 이 줄에는 성격이 다른 두 묶음이 선다. 왼쪽은 **보는 대상을
+ * 바꾸는 탭**이고 오른쪽은 **그 목록을 걸러내는 상태 필터**다. 둘을 똑같은 둥근 칩으로 두면
+ * 사이에 선을 하나 더 그어도 "또 하나의 형제 경계"로 읽힌다 — 실제로 그랬다.
+ * 한 덩어리에 담아 배경을 깔면 경계가 모양으로 드러나서 선이 필요 없다.
+ */
+.seg {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 3px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--line);
+}
+.seg-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 13px; border-radius: 999px; border: 1px solid transparent;
+  background: transparent; color: var(--muted);
+  font-family: inherit; font-size: 12.5px; font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+  transition: background .12s ease, color .12s ease;
+}
+.seg-btn:hover:not(.active) { color: var(--ink); }
+/* 고른 것만 바탕에서 떠오른다 — 안 고른 것에 표식을 달지 않는다 */
+.seg-btn.active {
+  background: #fff; color: var(--ink);
+  border-color: var(--line-strong);
+  box-shadow: 0 1px 2px rgba(0,0,0,.05);
+}
+.seg-btn .seg-count { opacity: .65; font-weight: 700; }
+/* 묶음 안의 축 경계(청구서를 보는 축 | 돈을 보는 축) — 바깥 경계보다 약하게 */
+.seg-div { width: 1px; height: 14px; background: var(--line-strong); margin: 0 4px; flex: none; }
+
+/* 칩 줄 안에서 층이 바뀌는 자리(상태 필터: 전체 | 미정산 묶음 | 그 내역).
+   ⚠ --line 으로 그으면 흰 바탕에서 **아예 안 보인다** — 실제로 그렇게 두고 있었고,
+     "층이 바뀐다"고 말하려던 선이 죽은 픽셀이었다. 안 보이는 선은 없는 선보다 나쁘다. */
+.chip-div { width: 1px; height: 16px; background: var(--line-strong); margin: 0 2px; flex: none; }
