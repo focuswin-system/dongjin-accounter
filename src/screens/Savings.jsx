@@ -6,7 +6,7 @@ import { DataTable } from '../lib/components/DataTable'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { api } from '../lib/api'
 
-/* 예금·적금·보증금 — 자금 '운용'. 차입금(자금 조달)의 거울상이다.
+/* 적금·정기예금·보증금 — 자금 '운용'. 차입금(자금 조달)의 거울상이다.
  *
  * 화면에서 계속 드러내는 것 두 가지:
  *   1. 납입은 **비용이 아니다.** 돈이 통장에서 나가지만 회사 재산은 그대로다.
@@ -108,7 +108,7 @@ export const SavingsScreen = () => {
 
   return (
     <div className="fade-up">
-      <PageHeader title="예금·적금·보증금"
+      <PageHeader title="적금·정기예금·보증금"
         sub={overdue.length > 0 ? `납입일이 지난 회차 ${overdue.length}건이 있어요` : '자금 운용 — 여기 있는 돈은 당장 쓸 수 없어요'}
         actions={<button className="btn primary" onClick={() => { setEditing(null); setFormOpen(true) }}>
           <Icon.Plus size={14}/> 등록
@@ -163,7 +163,7 @@ export const SavingsScreen = () => {
       <div className="card" style={{ overflow: 'hidden' }}>
         <DataTable
           rows={rows}
-          empty="등록된 예금·적금·보증금이 없어요. 위에서 추가하세요."
+          empty="등록된 적금·정기예금·보증금이 없어요. 위에서 추가하세요."
           renderExpanded={s => (expanded === s.id ? <SavingsDetail s={s}/> : null)}
           columns={[
             { key: 'name', header: '상품', sortable: true, className: 'fw-700', render: s => (

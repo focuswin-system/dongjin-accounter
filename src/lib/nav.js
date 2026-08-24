@@ -127,20 +127,24 @@ export const NAV_TREE = [
   {
     type: "domain", id: "office_dom", label: "사무업무", icon: Icon.Doc,
     sections: [
-      { label: "보고서", items: [
-        { id: "report",          label: "보고서",         icon: Icon.Chart },
-        { id: "report_daily",    label: "일계표",         icon: Icon.Book },
-        { id: "cash_report",     label: "자금일보",       icon: Icon.Bank },
-        { id: "payment_run",     label: "매입 결제내역",   icon: Icon.Bank },
-        { id: "purchase_status", label: "매입·매출 현황",  icon: Icon.Chart },
-      ]},
-      /* 회사마다 쓰는 양식이 다르다. 보고서가 이미 회사별로 켜고 끄는 구조(scope)를
+      /* 문서가 먼저다. 이 도메인에 들어오는 이유는 대개 **만들어서 넘길 것**이 있어서다
+         (결의서를 끊는다, 정산내역서를 보낸다, 견적을 요청한다) — 손이 가는 일이라
+         그날 안에 끝내야 한다. 보고서는 숫자를 확인하러 오는 것이라 급하지 않고,
+         홈과 경영관리에도 같은 숫자가 카드로 떠 있다.
+         회사마다 쓰는 양식이 다르다. 보고서가 이미 회사별로 켜고 끄는 구조(scope)를
          갖고 있으므로, 문서도 같은 방식으로 넓힐 자리다(⓶ 다음 단계). */
       { label: "문서", items: [
         { id: "doc",          label: "지급결의서", icon: Icon.Sign },
         { id: "settlement",   label: "정산내역서", icon: Icon.Doc },
         { id: "quote_req",    label: "견적요청서", icon: Icon.Doc },
         { id: "purchase_req", label: "구매품의서", icon: Icon.Receipt },
+      ]},
+      { label: "보고서", items: [
+        { id: "report",          label: "보고서",         icon: Icon.Chart },
+        { id: "report_daily",    label: "일계표",         icon: Icon.Book },
+        { id: "cash_report",     label: "자금일보",       icon: Icon.Bank },
+        { id: "payment_run",     label: "매입 결제내역",   icon: Icon.Bank },
+        { id: "purchase_status", label: "매입·매출 현황",  icon: Icon.Chart },
       ]},
     ],
   },
@@ -158,7 +162,7 @@ export const NAV_TREE = [
        * 같은 도메인에서 마주보게 둔다. 보통예금·카드 같은 '결제수단'은 기준정보에 남는다 —
        * 예적금은 묶여 있어 당장 못 쓰는 돈이라 성격이 다르다. */
       { label: "자금 운용", items: [
-        { id: "finance_savings", label: "예금·적금·보증금", icon: Icon.Bank },
+        { id: "finance_savings", label: "적금·정기예금·보증금", icon: Icon.Bank },
       ]},
       { label: "현황", items: [
         { id: "finance_dash", label: "재무 현황", icon: Icon.Chart },
@@ -467,7 +471,7 @@ export const PORTAL = [
       { id: 'finance_fund', label: '자금 조달', icon: Icon.Wallet, desc: '차입금·투자', groups: [
         { label: '', items: ['finance_loan', 'finance_investment'] },
       ]},
-      { id: 'finance_ops',    label: '자금 운용', icon: Icon.Bank,  desc: '예금·적금·보증금', route: 'finance_savings' },
+      { id: 'finance_ops',    label: '자금 운용', icon: Icon.Bank,  desc: '적금·정기예금·보증금', route: 'finance_savings' },
       { id: 'finance_status', label: '재무 현황', icon: Icon.Chart, desc: '차입·투자 현황',   route: 'finance_dash' },
     ],
   },
