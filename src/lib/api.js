@@ -889,6 +889,11 @@ export const api = {
         account_id: data.account_id ?? data.accountId ?? null,
         pay_term: data.pay_term ?? data.payTerm,
         pay_day: data.pay_day ?? data.payDay,
+        /* ⚠ 이 본문은 **화이트리스트**다 — 여기 안 적은 필드는 폼이 보내도 조용히 버려진다.
+           증빙 요구가 빠져 있어서, 규칙 폼에서 '서류를 챙겨야 함'을 골라 저장해도 서버에는
+           안 갔고(POST 는 기본 0, PUT 은 undefined 라 기존 값 유지) 다시 열면 늘 '필요 없음'
+           이었다. 기능 전체가 화면에서 죽어 있었다. 필드를 더할 때 여기도 같이 봐야 한다. */
+        evidence_required: data.evidence_required ?? data.evidenceRequired ?? false,
       }})
       return { ok: true, id: result.id }
     } catch (e) { return { ok: false, error: e.message } }
@@ -911,6 +916,11 @@ export const api = {
         account_id: data.account_id ?? data.accountId ?? null,
         pay_term: data.pay_term ?? data.payTerm,
         pay_day: data.pay_day ?? data.payDay,
+        /* ⚠ 이 본문은 **화이트리스트**다 — 여기 안 적은 필드는 폼이 보내도 조용히 버려진다.
+           증빙 요구가 빠져 있어서, 규칙 폼에서 '서류를 챙겨야 함'을 골라 저장해도 서버에는
+           안 갔고(POST 는 기본 0, PUT 은 undefined 라 기존 값 유지) 다시 열면 늘 '필요 없음'
+           이었다. 기능 전체가 화면에서 죽어 있었다. 필드를 더할 때 여기도 같이 봐야 한다. */
+        evidence_required: data.evidence_required ?? data.evidenceRequired ?? false,
       }})
       return { ok: true }
     } catch (e) { return { ok: false, error: e.message } }
@@ -987,6 +997,8 @@ export const api = {
         account_id: data.accountId,
         pay_term: data.payTerm,
         pay_day: data.payDay,
+        // 화이트리스트라 여기 없으면 폼이 보내도 버려진다(정기지출 쪽 주석 참조)
+        evidence_required: data.evidence_required ?? data.evidenceRequired ?? false,
       }})
       return { ok: true, id: result.id }
     } catch { return { ok: false } }
@@ -1007,6 +1019,7 @@ export const api = {
         account_id: data.accountId ?? data.account_id ?? null,
         pay_term: data.payTerm ?? data.pay_term,
         pay_day: data.payDay ?? data.pay_day,
+        evidence_required: data.evidence_required ?? data.evidenceRequired ?? false,
       }})
       return { ok: true }
     } catch (e) { return { ok: false, error: e.message } }

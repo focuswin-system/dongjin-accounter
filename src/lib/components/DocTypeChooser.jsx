@@ -66,17 +66,27 @@ const RECEIVE_OPTIONS = [
 ]
 
 /**
- * @param open    열림 여부
- * @param kind    'pay'(지급) | 'receive'(입금)
- * @param onPick  (id) => void — 'invoice' | 'expense' | 'plain'
- * @param onClose 닫기
+ * @param open      열림 여부
+ * @param kind      'pay'(지급) | 'receive'(입금)
+ * @param onPick    (id) => void — 'invoice' | 'expense' | 'plain'
+ * @param onClose   닫기
+ * @param canPlain  청구서 아닌 경로(경비·단순 지출)를 쓸 수 있는가
  */
-export const DocTypeChooser = ({ open, kind = 'pay', onPick, onClose }) => {
+export const DocTypeChooser = ({ open, kind = 'pay', onPick, onClose, canPlain = true }) => {
   const pay = kind !== 'receive'
-  const options = pay ? PAY_OPTIONS : RECEIVE_OPTIONS
+  /* ⚠ 쓸 수 없는 경로는 **감춘다.** 예전엔 눌러도 청구서 폼으로 떨어뜨렸는데, 그건
+     선택지가 약속한 것과 정반대로 동작하는 것이다 — "미수금·부가세에 잡히지 않아요"를
+     읽고 고른 사용자에게 바로 그 미수금을 만드는 폼을 여는 셈이다.
+     엉뚱한 회계 문서를 만드는 것보다 그 선택지가 없는 편이 낫다. */
+  const options = (pay ? PAY_OPTIONS : RECEIVE_OPTIONS).filter(o => canPlain || o.id === 'invoice')
 
+  /* confirmClose={false} — 입력 칸이 없는 '고르기' 화면이다. 기본값이면 Esc 를 눌렀을 때
+     "쓰던 내용은 저장되지 않아요"가 뜨는데, 쓴 내용이 없는데 물으면 사용자는 자기가 뭘
+     잃는지 몰라 멈칫한다. (VoucherView·TxnQuickDrawer 등 보기 전용 드로어와 같은 처리)
+     label 은 드로어의 접근성 이름이다. */
   return (
-    <Drawer open={open} onClose={onClose}>
+    <Drawer open={open} onClose={onClose} confirmClose={false}
+      label={pay ? '지급 등록 — 서류 선택' : '입금 등록 — 서류 선택'}>
       <DrawerHead
         title={pay ? '지급 등록' : '입금 등록'}
         sub={pay ? '받으신 서류가 무엇인가요?' : '세금계산서를 발행하는 건인가요?'}

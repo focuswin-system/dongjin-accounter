@@ -1473,7 +1473,10 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   return (
     <div className="fade-up">
       <PageHeader
-        title={collect ? (isIssued ? "미수금" : "미지급금") : "대금 청구서"}
+        /* 제목은 메뉴 이름과 같아야 한다 — 메뉴가 수시입금/수시지급으로 바뀌었는데
+           제목만 '대금 청구서'로 남아 있으면 다른 화면에 온 것처럼 읽힌다
+           (HR 화면을 '급여·임금'으로 맞춘 것과 같은 이유). */
+        title={collect ? (isIssued ? "미수금" : "미지급금") : (isIssued ? "수시입금" : "수시지급")}
         actions={collect
           ? <button className="btn" onClick={isIssued ? openRefund : openReturn}>
               <Icon.Plus size={14}/> {isIssued ? "환불 등록" : "환입 등록"}
@@ -1677,13 +1680,15 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       <DocTypeChooser
         open={chooserOpen}
         kind={isIssued ? 'receive' : 'pay'}
+        /* 거래 등록 드로어는 App 이 소유한다. 그 함수를 안 받은 라우트(#billing 등)에서는
+           청구서 말고는 열 수 없으므로 그 선택지를 아예 안 보여준다 — 폴백으로 청구서를
+           열면 "미수금에 안 잡혀요"를 보고 고른 사람에게 미수금을 만들어 준다. */
+        canPlain={isIssued ? !!openIncome : !!openExpense}
         onClose={() => setChooserOpen(false)}
         onPick={(pick) => {
           setChooserOpen(false)
-          if (pick === 'invoice' || (isIssued ? !openIncome : !openExpense)) {
-            setEditInvoice(null); setFormOpen(true); return
-          }
-          isIssued ? openIncome() : openExpense()
+          if (pick === 'invoice') { setEditInvoice(null); setFormOpen(true); return }
+          isIssued ? openIncome?.() : openExpense?.()
         }}/>
     </div>
   )

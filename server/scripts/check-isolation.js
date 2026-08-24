@@ -103,18 +103,25 @@ try {
    *   · NAV_TREE 의 `type: "domain"` 노드도 묶음이다.
    *   · MASTER_LEAF('기준정보')는 잎처럼 생겼지만 타일 묶음이다 — settings 와 같은 취급.
    * 구조가 바뀌어도 목록을 따라 고칠 일이 없다. */
-  const portalAt = navSrc.indexOf('export const PORTAL = [')
-  const beforePortal = portalAt >= 0 ? navSrc.slice(0, portalAt) : navSrc
+  /* PORTAL 블록만 잘라낸다 — **파일 앞부분만 보지 않는다.**
+   * 처음엔 PORTAL 앞까지만 훑었는데, 그러면 PORTAL 뒤에 잎 목록을 하나라도 더 적는 순간
+   * 그 잎이 검사에서 통째로 빠진다 — 이 검사가 막으려는 '화면은 있는데 권한을 못 주는
+   * 상태'가 조용히 통과한다. 지금은 앞뒤를 다 보고 PORTAL 구간만 도려낸다. */
+  const PORTAL_START = 'export const PORTAL = ['
+  const PORTAL_END = '\n]'                       // 줄 맨 앞의 ']' = 배열이 닫히는 자리
+  const portalAt = navSrc.indexOf(PORTAL_START)
+  const portalEnd = portalAt >= 0 ? navSrc.indexOf(PORTAL_END, portalAt) : -1
+  const navOnly = portalAt >= 0 && portalEnd >= 0
+    ? navSrc.slice(0, portalAt) + navSrc.slice(portalEnd)
+    : navSrc
 
+  /* 잎 id 를 모은다. 도메인 노드는 `type: "domain",` 가 앞에 붙으므로 이 정규식이
+     애초에 잡지 않는다(leaf 만 선택적으로 허용한다) — 따로 지울 필요가 없다. */
   const navIds = new Set()
   const re = /\{\s*(?:type:\s*"leaf",\s*)?id:\s*["']([a-zA-Z_][\w]*)["']/g
   let m
-  while ((m = re.exec(beforePortal))) navIds.add(m[1])
-
-  // NAV_TREE 도메인 노드 제거
-  const domRe = /type:\s*"domain",\s*id:\s*["']([a-zA-Z_][\w]*)["']/g
-  while ((m = domRe.exec(beforePortal))) navIds.delete(m[1])
-  navIds.delete('master')
+  while ((m = re.exec(navOnly))) navIds.add(m[1])
+  navIds.delete('master')   // 기준정보는 잎처럼 생겼지만 타일 묶음이다(settings 와 같은 취급)
 
   // settings_<tab>(회사정보·사용자·결재선·월마감)은 단일 자원 'settings'가 통째로 관장한다
   // (모두 admin 전용 화면). 개별 권한 자원으로 쪼개지 않으므로 카탈로그 대조에서 제외.

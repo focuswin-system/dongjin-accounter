@@ -250,12 +250,12 @@ export const SETTINGS_LEAVES = [
  *   · 자주 쓰진 않아도 '수주+발주를 한 표에서' 보고 싶을 때가 있다(Ctrl+K)
  * 그래서 없애지 않고 감춘다. 기준정보·환경설정 잎을 다루는 방식과 같다. */
 export const HIDDEN_LEAVES = [
-  { id: "contract", label: "주문 전체", icon: Icon.Briefcase, domain: "일반회계", section: "장부" },
+  { id: "contract", label: "주문 전체", icon: Icon.Briefcase, domain: "계약관리", section: "계약" },
   /* 미수금·미지급금 — 대금 청구서와 같은 화면이라 트리에서 뺐지만 살아 있다.
      홈 화면·알림·거래내역 KPI가 이 라우트로 들어오고, Ctrl+K 에서 '미수금'으로 찾으면
      청구서 화면이 '미정산' 필터로 열린다. 권한 자원(ar·ap)도 그대로 유지된다. */
-  { id: "ar", label: "미수금 (대금 청구서)",   icon: Icon.Recv, domain: "일반회계", section: "판매·수주(매출)" },
-  { id: "ap", label: "미지급금 (대금 청구서)", icon: Icon.Pay,  domain: "일반회계", section: "매입" },
+  { id: "ar", label: "미수금 (수시입금)",   icon: Icon.Recv, domain: "입금관리", section: "입금" },
+  { id: "ap", label: "미지급금 (수시지급)", icon: Icon.Pay,  domain: "지급처리", section: "지급" },
   /* 계좌 잔액 — 계좌 상세 안으로 들어갔지만 라우트는 살아 있다(계좌 화면을 띄운다).
      '잔액'·'통장잔고'로 찾는 사람이 실제로 있어서 Ctrl+K 에서 걸려야 하고,
      권한 자원(master_accountBalance)은 잔액 조회 게이트가 아직 참조한다
@@ -441,6 +441,15 @@ export const PORTAL = [
       ]},
     ],
   },
+  /* 거래내역은 NAV_TREE 에서 최상위 잎으로 올렸는데 포털 타일을 안 만들어,
+     홈에서는 들어갈 길이 없었다 — 이 파일이 경계하는 NAV_TREE↔PORTAL 어긋남이
+     바로 다시 났다(재무관리가 사이드바에만 있던 그 일). 타일로 세운다. */
+  {
+    id: 'ledger_dom', label: '거래내역', icon: Icon.Wallet,
+    categories: [
+      { id: 'ledger_all', label: '전체 거래내역', icon: Icon.Wallet, desc: '오간 돈을 모아 봅니다 (조회 전용)', route: 'ledger' },
+    ],
+  },
   {
     id: 'office_dom', label: '사무업무', icon: Icon.Doc,
     categories: [
@@ -505,13 +514,19 @@ for (const l of SETTINGS_LEAVES) PORTAL_PAGE_OF_LEAF[l.id] = 'settings'
 // 도메인(일반회계·인사급여·재무관리·경영관리)에는 전용 화면이 없다 — 도메인 마디는 홈 포털로 보낸다
 export const DOMAIN_LABELS = new Set(PORTAL.map(d => d.label))
 
-// 포털 카테고리 라우트도 소속 도메인으로 매핑(사이드바 도메인 자동 펼침)
-DOMAIN_OF['acct_sales'] = 'acct'
-DOMAIN_OF['acct_purchase'] = 'acct'
-DOMAIN_OF['acct_expense'] = 'acct'
-DOMAIN_OF['acct_docs'] = 'acct'
-DOMAIN_OF['acct_ledger'] = 'acct'
-DOMAIN_OF['acct_tax'] = 'acct'
+/* 포털 카테고리 라우트도 소속 도메인으로 매핑(사이드바 도메인 자동 펼침).
+ *
+ * ⚠ **손으로 적지 않는다.** 예전엔 acct_sales·acct_docs… 를 하나씩 박아 뒀는데,
+ *   2026-08 재편으로 그것들이 사라지고 새 카테고리(office_report·office_docs·tax_all)가
+ *   생겼는데도 목록은 그대로였다. 그 타일에 들어가면 사이드바가 안 펼쳐지고
+ *   브레드크럼도 '홈' 하나로 떨어졌다. PORTAL 을 훑어 자동으로 만든다 —
+ *   타일을 더하거나 지워도 따라온다. */
+for (const d of PORTAL) {
+  for (const c of d.categories) {
+    // groups 를 가진 것은 포털 페이지(그 자체가 라우트), route 만 있는 것은 잎으로 넘기는 타일
+    if (c.groups) DOMAIN_OF[c.id] = d.id
+  }
+}
 /* 기준정보(master)는 **일부러 DOMAIN_OF 에 넣지 않는다.**
    일반회계 안에 있다가 독립 영역으로 빠져나온 항목이라(인사 기준정보까지 모은다),
    여기에 'acct' 로 매핑해두면 기준정보에 들어갈 때마다 일반회계 도메인이 펼쳐진다 —

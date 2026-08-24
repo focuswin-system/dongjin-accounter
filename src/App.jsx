@@ -41,25 +41,25 @@ import { PortalScreen } from './screens/Portal'
  * 메뉴에서 감춘 화면(ar·ap·contract), 포털 페이지, 모달 화면. */
 const CRUMB_MAP = {
   home:            ["홈"],
-  ledger_income:   ["일반회계", "전체 거래내역", "입금"],
-  ledger_expense:  ["일반회계", "전체 거래내역", "지출"],
-  ledger_ar:       ["일반회계", "전체 거래내역", "미수금"],
-  ledger_ap:       ["일반회계", "전체 거래내역", "미지급금"],
-  income:          ["일반회계", "판매·수주(매출)", "입금"],
-  expense:         ["일반회계", "구매·발주(매입)", "지출"],
-  ar:              ["일반회계", "판매·수주(매출)", "미수금"],
-  ap:              ["일반회계", "구매·발주(매입)", "미지급금"],
-  billing:         ["일반회계", "판매·수주(매출)", "대금 청구서"],
-  contract:        ["일반회계", "장부", "주문 전체"],
+  ledger_income:   ["거래내역", "입금"],
+  ledger_expense:  ["거래내역", "지출"],
+  ledger_ar:       ["거래내역", "미수금"],
+  ledger_ap:       ["거래내역", "미지급금"],
+  income:          ["입금관리", "수시입금", "입금"],
+  expense:         ["지급처리", "수시지급", "지출"],
+  ar:              ["입금관리", "수시입금", "미수금"],
+  ap:              ["지급처리", "수시지급", "미지급금"],
+  billing:         ["입금관리", "수시입금"],
+  contract:        ["계약관리", "주문 전체"],
   contract_detail: ["주문", null],
   // 포털 페이지(타일 화면) — 도메인 아래 한 칸
-  acct_sales:      ["일반회계", "판매·수주(매출)"],
-  acct_purchase:   ["일반회계", "구매·발주(매입)"],
-  acct_expense:    ["일반회계", "경비"],
-  acct_docs:       ["일반회계", "문서"],
-  // acct_ledger 는 포털 페이지가 아니라 거래내역으로 바로 보내는 타일이 됐다(nav.js) → 크럼도 없앤다.
-  acct_tax:        ["일반회계", "세무관리"],
-  hr_labor:        ["인사급여", "근로·용역"],
+  /* 포털 페이지(타일 화면) — 도메인 아래 한 칸.
+     2026-08 재편으로 acct_* 카테고리가 사라지고 아래 셋이 새로 생겼다.
+     여기 빠지면 그 타일에서 크럼이 "홈" 하나로 떨어진다(App.jsx 아래 fallback). */
+  tax_all:         ["세무관리", "신고"],
+  office_report:   ["사무업무", "보고서"],
+  office_docs:     ["사무업무", "문서"],
+  hr_labor:        ["인사관리", "근로·용역"],
   mgmt_biz:        ["경영관리"],
   master:          ["기준정보"],   // 일반회계 하위가 아니라 독립 영역(인사 기준정보까지 모은다)
   settings:        ["환경설정"],
@@ -78,15 +78,18 @@ const CRUMB_MAP = {
  *   '거래내역'·'주문'처럼 화면 이름 → 그 화면
  * 여기 없는 라우트는 nav 잎 정보(도메인·섹션)로 자동 계산한다 — 아래 crumbTargets 참고. */
 const CRUMB_TO = {
-  ledger_income:    ["home", "ledger"],
-  ledger_expense:   ["home", "ledger"],
-  ledger_ar:        ["home", "ledger"],
-  ledger_ap:        ["home", "ledger"],
-  income:           ["home", "acct_sales"],
-  expense:          ["home", "acct_purchase"],
-  ar:               ["home", "acct_sales"],
-  ap:               ["home", "acct_purchase"],
-  billing:          ["home", "acct_sales"],
+  ledger_income:    ["ledger"],
+  ledger_expense:   ["ledger"],
+  ledger_ar:        ["ledger"],
+  ledger_ap:        ["ledger"],
+  /* 지워진 포털(acct_sales·acct_purchase)로 보내고 있었다. 그 해시는 CRUMB_MAP 에 남아
+     '아는 라우트'로 통과한 뒤 switch 를 지나쳐 홈이 그려졌다 — 주소는 #acct_sales 인데
+     화면은 홈이고 사이드바는 아무것도 안 켜진 상태였다. 이제 실제 화면으로 보낸다. */
+  income:           ["home", "billing_issued"],
+  expense:          ["home", "billing_received"],
+  ar:               ["home", "billing_issued"],
+  ap:               ["home", "billing_received"],
+  billing:          ["home"],
   contract:         ["home", null],
   contract_detail:  ["contract"],
   acct_sales:       ["home"],
@@ -475,9 +478,15 @@ function AppInner({ onLogout, user }) {
     }
   }, [idlePhase, nudgeMode]);
 
-  // 사이드바 도메인 펼침 상태 (일반회계 기본 펼침) + 활성 라우트의 도메인 자동 펼침
+  /* 사이드바 도메인 펼침 상태 + 활성 라우트의 도메인 자동 펼침.
+   *
+   * ⚠ 기본값을 **트리에서 뽑는다.** 예전엔 "acct"(일반회계)를 적어 뒀는데 2026-08 재편에서
+   *   그 도메인이 사라졌다. 홈(#home)은 DOMAIN_OF 에 없어 자동 펼침도 안 걸리므로,
+   *   **모든 도메인이 접힌 채로** 첫 화면이 떴다 — 메뉴가 통째로 안 보였다.
+   *   이름을 박아 두면 트리를 고칠 때마다 같은 일이 난다. */
   const activeId = leafIdOf(route);
-  const [openDomains, setOpenDomains] = useState(["acct"]);
+  const [openDomains, setOpenDomains] = useState(
+    () => NAV_TREE.filter(n => n.type === "domain").slice(0, 1).map(n => n.id));
   useEffect(() => {
     const d = DOMAIN_OF[activeId];
     setOpenDomains(prev => (d && !prev.includes(d)) ? [...prev, d] : prev);
