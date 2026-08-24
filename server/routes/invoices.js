@@ -60,7 +60,9 @@ async function attachMatches(db, invoice) {
 router.get('/', async (req, res, next) => {
   try {
     const { kind, status, vendorId, from, to } = req.query
-    let sql = 'SELECT i.*, v.name AS vendor_name, c.name AS contract_name FROM invoices i LEFT JOIN vendors v ON i.vendor_id = v.id LEFT JOIN contracts c ON i.contract_id = c.id WHERE 1=1'
+    /* 계좌명을 함께 준다 — 화면에서 "어느 통장으로 들어올/들어온 돈인가"를 보여주려면
+       필요한데, 여태 account_id 만 내려가 목록에서는 알 수가 없었다(건마다 열어야 했다). */
+    let sql = 'SELECT i.*, v.name AS vendor_name, c.name AS contract_name, a.name AS account_name FROM invoices i LEFT JOIN vendors v ON i.vendor_id = v.id LEFT JOIN contracts c ON i.contract_id = c.id LEFT JOIN accounts a ON i.account_id = a.id WHERE 1=1'
     const params = []
     if (kind)     { sql += ' AND i.kind = ?';       params.push(kind) }
     if (status)   { sql += ' AND i.status = ?';     params.push(status) }

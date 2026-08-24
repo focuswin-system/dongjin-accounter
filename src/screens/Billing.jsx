@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday, Loading, DateInput } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday, Loading, DateInput, periodToRange } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
@@ -987,6 +987,10 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", select }) => (
             {inv.dueAt && inv.remainAmount > 0 &&
               <span className={`badge ${ddayTone(inv.dueAt)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(inv.dueAt)}</span>}</>
         ) },
+        /* 어느 통장으로 들어올/들어온 돈인가. 아직 정산 전이면 '예정 계좌'이고,
+           정산이 끝났으면 실제로 오간 계좌다 — 통장을 맞춰볼 때 이 칸이 없으면 건마다 열어야 한다. */
+        { key: 'account', header: '계좌',
+          render: inv => <span className="text-sm text-muted">{inv.account || "—"}</span> },
         { key: 'invoiceNo', header: '청구번호', sortable: true,
           render: inv => <span className="text-xs text-muted2 num">{inv.invoiceNo}</span> },
         { key: 'status', header: '상태', render: inv => <StatusBadge status={effStatus(inv)}/> },
@@ -1218,7 +1222,10 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
      기준 날짜는 **발행일(issuedAt)** 이다 — 지급 기한으로 거르면 기한 없는 청구서가 통째로
      사라진다(기한은 선택 입력이다). */
   const listF = useTableFilter({
-    date: { field: 'issuedAt' },
+    /* 기본은 **이번 달**이다. 전체로 열면 몇 년치가 한 번에 떠서 이번 달 일을 하려는
+       사람이 매번 기간부터 좁혀야 한다(거래내역이 같은 이유로 이미 이번 달로 연다).
+       기간이 걸려 있다는 건 툴바의 기간 버튼에 그대로 보인다. */
+    date: { field: 'issuedAt', initial: periodToRange("month") },
     search: { fields: ['invoiceNo', 'vendor', 'contract', 'memo'], placeholder: "청구번호·거래처·주문·메모 검색" },
     // 거래처는 매일 쓰는 축이라 ⚙ 뒤가 아니라 바에 직접 세운다(inline)
     filters: [{ key: 'vendor', label: "거래처", field: 'vendor', inline: true,
@@ -1227,6 +1234,18 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const vendorFilter = listF.values.vendor ?? null
   const setVendorFilter = (v) => listF.setValue('vendor', v)
   const filtered = useMemo(() => listF.apply(byStatus), [byStatus, listF.apply])
+
+  /* 미발행 건도 **같은 기간·거래처**로 거른다.
+     툴바가 탭 위에 있어 '이 화면 전체의 범위'로 읽히는데, 한 탭만 그 범위를 무시하면
+     "이번 달로 좁혔는데 저기만 왜 다 나오지"가 된다. 날짜 칸 이름만 다르다(date vs issuedAt). */
+  const plainFiltered = useMemo(() => {
+    const { from, to } = listF.range
+    const v = listF.values.vendor ?? null
+    return plainTxns.filter(t =>
+      (!from || (t.date || '') >= from) &&
+      (!to   || (t.date || '') <= to) &&
+      (!v    || t.vendor === v))
+  }, [plainTxns, listF.range, listF.values.vendor])
 
   /* 일괄 처리 대상 판정 — 이미 정산이 끝난 건은 **체크 자체가 안 된다.**
      골라놓고 나중에 "3건 중 1건만 됐어요"라고 말하는 것보다, 애초에 못 고르게 하고
@@ -1574,8 +1593,18 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
         )}
       </div>
 
-      {/* 탭: 발행 모드는 발행 예정|발행됨. 회수 모드는 상태 필터만(발행 예정 없음). */}
-      <div className="row gap-8" style={{ marginBottom: 16, flexWrap: "wrap" }}>
+      {/* 기간·거래처는 **탭보다 위**에 둔다.
+          아래에 있으면 "지금 고른 탭에만 걸리는 것"처럼 읽히는데, 실제로는 이 화면 전체의
+          범위다(목록·미발행 둘 다 이 범위로 걸린다). 위에 두면 순서가 곧 뜻이 된다 —
+          먼저 기간을 정하고, 그 안에서 무엇을 볼지 탭으로 고른다.
+          '청구할 것'은 아직 청구서가 아니라 자기 툴바(예정일 기준)를 따로 쓴다. */}
+      {(collect || view === "list" || view === "plain") && (
+        <TableToolbar {...listF.toolbarProps} periodPicker
+          right={<span className="text-xs text-muted2">{view === "plain" ? "거래일 기준" : "발행일 기준"}</span>}/>
+      )}
+
+      {/* 탭: 발행 모드는 청구할 것|발행됨|미발행. 회수 모드는 상태 필터만. */}
+      <div className="row gap-8" style={{ marginTop: 12, marginBottom: 16, flexWrap: "wrap" }}>
         {/* ⚠ 탭 묶음은 **'청구할 것'이 없어도** 떠야 한다.
             예전엔 pending 이 비면 이 블록 전체가 사라져서, '청구서 없이' 탭에 들어간 순간
             돌아올 탭이 하나도 없었다(막다른 길). '청구할 것' 칩만 조건부로 감춘다. */}
@@ -1595,11 +1624,16 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
             </button>
           </>
         )}
-        {/* 청구서 없이 오간 건 — 있을 때만 탭으로 선다(빈 구획은 안 그린다는 이 화면의 규칙). */}
-        {!collect && plainTxns.length > 0 && (
+        {/* 청구서 없이 오간 건 — 있을 때만 탭으로 선다(빈 구획은 안 그린다는 이 화면의 규칙).
+            앞에 세로선을 둔다: 왼쪽 둘은 **청구서의 단계**(끊을 것 → 끊은 것)인데
+            이건 청구서가 아예 없는 건이라 같은 줄에 나란히 두면 단계처럼 읽힌다. */}
+        {!collect && plainFiltered.length > 0 && (
+          <>
+          <span aria-hidden="true" style={{ width: 1, height: 16, background: 'var(--line)', margin: '0 2px' }}/>
           <button className={`chip ${view === "plain" ? "active" : ""}`} onClick={() => setView("plain")}>
-            청구서 없이<span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{plainTxns.length}</span>
+            {isIssued ? "미발행 입금" : "미등록 지급"}<span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{plainFiltered.length}</span>
           </button>
+          </>
         )}
         {(collect || view === "list") && (
           <div className={`row gap-6 ${collect || !pending.length ? "" : "ml-auto"}`} style={{ flexWrap: "wrap" }}>
@@ -1616,13 +1650,6 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           </div>
         )}
       </div>
-
-      {/* 기간·거래처·검색 — 목록 탭에서만. '발행 예정'은 아직 청구서가 아니라 이 필터의 대상이 아니다.
-          거래내역과 같은 툴바를 쓴다(화면마다 다른 필터를 배우게 하지 않는다). */}
-      {(collect || view === "list") && (
-        <TableToolbar {...listF.toolbarProps} periodPicker
-          right={<span className="text-xs text-muted2">발행일 기준</span>}/>
-      )}
 
       {/* 거래처별 소계 — 필터를 걸면 "그래서 이 거래처에 얼마"가 다음 질문이다.
           한 거래처만 골랐으면 표 아래 합계와 같은 말이라 안 보여준다. */}
@@ -1732,8 +1759,8 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           이 건들은 없어서, 한 표에 넣으면 절반이 빈 칸인 행이 된다. */}
       {!collect && view === "plain" && (
         <DataTable
-          rows={plainTxns}
-          empty={`청구서 없이 ${isIssued ? '들어온' : '나간'} 건이 없어요.`}
+          rows={plainFiltered}
+          empty={isIssued ? "세금계산서 없이 들어온 입금이 없어요." : "계산서 없이 나간 지급이 없어요."}
           columns={[
             { key: 'date', header: '날짜', sortable: true,
               render: t => <span className="text-sm num">{t.date}</span> },

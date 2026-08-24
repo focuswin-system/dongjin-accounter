@@ -238,6 +238,8 @@ function adaptInvoice(row) {
     dueAt: row.due_at || null,
     status: row.status,
     accountId: row.account_id,
+    // 어느 통장으로 들어올/들어온 돈인가 — 목록에서 보여주려면 이름이 필요하다
+    account: row.account_name || '',
     // id 는 정산 취소에 필요하다(없으면 화면에서 어느 매칭인지 지목할 수 없다)
     matches: (row.matches || []).map(m => ({ id: m.id, txnId: m.txn_id, amount: m.amount, matchedAt: dayOf(m.matched_at) })),
     docs: (row.docs || []).map(d => ({ id: d.id, url: d.url, name: d.name, type: d.doc_type || '기타', size: d.size || 0 })),
