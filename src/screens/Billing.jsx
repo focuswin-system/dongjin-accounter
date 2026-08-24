@@ -1687,7 +1687,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           <div className="row gap-6 ml-auto" style={{ flexWrap: "wrap" }}>
             {/* 이 일곱 개가 무엇인지 말해 주는 이름표. 탭 묶음과 다른 묶음이라는 표시도 된다
                 (사용자가 "위에 미정산·전체·입금예정…은 각각 뭐야?"를 물었던 자리다). */}
-            <span className="text-xs text-muted2" style={{ marginRight: 2 }}>상태</span>
+            <span className="text-xs text-muted2 filter-label">상태</span>
             {STATUS_OPTIONS.map(s => (
               <span key={s} className="row gap-6" style={{ alignItems: 'center' }}>
                 {/* 층이 바뀌는 자리에만 세로선 — 어디까지가 '미수금의 내역'인지 눈으로 보이게 */}
