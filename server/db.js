@@ -1,5 +1,6 @@
 require('dotenv').config()
 const mysql = require('mysql2/promise')
+const { PERIODS } = require('./lib/recurPeriod')   // 반복 주기 값 목록(ENUM 과 같은 문자열)
 const { randomUUID } = require('crypto')
 
 const DB_NAME = process.env.DB_NAME || 'dongjin_erp'
@@ -213,7 +214,7 @@ async function initDb(conn) {
         contract_id    VARCHAR(36),
         category       VARCHAR(100),
         amount         BIGINT NOT NULL,
-        period         ENUM('monthly','quarterly','yearly'),
+        period         ENUM('monthly','bimonthly','quarterly','yearly'),
         day_of_month   INT,
         start_date     VARCHAR(20) NOT NULL,
         end_date       VARCHAR(20),
@@ -234,7 +235,7 @@ async function initDb(conn) {
         item           VARCHAR(255),
         supply_amount  BIGINT NOT NULL,
         vat_mode       ENUM('exclusive','none') DEFAULT 'exclusive',
-        period         ENUM('monthly','quarterly','yearly'),
+        period         ENUM('monthly','bimonthly','quarterly','yearly'),
         day_of_month   INT,
         start_date     VARCHAR(20) NOT NULL,
         end_date       VARCHAR(20),
@@ -1303,6 +1304,13 @@ async function initDb(conn) {
        **넓히기만** 하는 변경이라 안전하고, 이미 넓혀져 있으면 같은 결과라 매번 돌아도 된다. */
     await ensureEnum('savings', 'kind', ['installment', 'deposit', 'guarantee', 'pension'],
       "NOT NULL DEFAULT 'installment'")
+
+    /* 반복 주기에 '격월'을 더한다. 2개월마다 청구·지급하는 계약이 실제로 흔한데
+       (격월 정기점검·유지보수), 매월로 넣으면 회차가 두 배로 돌고 분기로 넣으면 한 달 밀린다.
+       ⚠ 값 목록은 lib/period.js 가 유일한 정의다 — 여기서 손으로 나열하면 둘이 갈린다. */
+    for (const t of ['recurring_invoices', 'recurring_expenses']) {
+      await ensureEnum(t, 'period', PERIODS)
+    }
 
     /* 1505 퇴직연금운용자산 — DB형 퇴직연금 적립금이 앉을 계정과목.
      *

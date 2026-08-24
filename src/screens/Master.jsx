@@ -10,7 +10,8 @@ import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { BackfillWizard } from '../lib/components/BackfillWizard'
 import { RowActions } from '../lib/components/RowActions'
 import { normBizNo, normVendorName } from '../lib/normalize'
-import { cycleDayLabel, cycleMonthsHint, PAY_TERM_OPTS, payTermNeedsDay, payTermHint } from '../lib/renewal'
+import { cycleDayLabel, cycleMonthsHint, PAY_TERM_OPTS, payTermNeedsDay, payTermHint,
+         BILLING_PERIODS, periodMonths, periodLong } from '../lib/renewal'
 import { bizTypeOptions, bizItemOptions } from '../lib/bizTypes'
 import { api, minuteOf } from '../lib/api'
 
@@ -34,7 +35,7 @@ const firstCycleDate = (startDate, dayOfMonth, period) => {
   const [sy, sm] = String(startDate || '').split('-').map(Number)
   if (!sy || !sm) return null
   const anchor = Number(dayOfMonth) || 1
-  const step = period === 'yearly' ? 12 : period === 'quarterly' ? 3 : 1
+  const step = periodMonths(period)   // 주기 표는 lib/renewal.js 한 곳(서버 lib/period.js 와 같은 값)
   const floor = todayStr()   // 등록일 하한 — 오늘 등록하므로 오늘이 하한
   for (let i = 0; i < 600; i++) {
     const abs = (sm - 1) + i * step
@@ -2458,8 +2459,11 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
           <div style={{ flex: 1 }}>
             <label className="label">반복 주기</label>
             <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
-              {[["monthly","매월"],["quarterly","매분기"],["yearly","매년"]].map(([v, l]) => (
-                <button key={v} type="button" className={`chip ${form.period === v ? 'active' : ''}`} onClick={() => f("period", v)}>{l}</button>
+              {/* 목록을 여기 손으로 적지 않는다 — 주기를 하나 더할 때 이런 자리가 빠지면
+                  DB·계산은 아는데 **고를 수가 없다**(격월을 넣으며 실제로 겪는 자리다). */}
+              {BILLING_PERIODS.map(o => (
+                <button key={o.value} type="button" className={`chip ${form.period === o.value ? 'active' : ''}`}
+                  onClick={() => f("period", o.value)}>{o.long}</button>
               ))}
             </div>
           </div>
@@ -2470,6 +2474,22 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
             <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
               {cycleMonthsHint(form.start_date, form.day_of_month, form.period, todayStr())}
             </div>
+          </div>
+        </div>
+        {/* 시작일·종료일은 **주기 바로 아래**다.
+            예전엔 결제조건·증빙 두 구획 건너에 있었다. 그런데 위 일자 칸의 안내
+            ("2·4·6·8·10·12월 25일")는 **시작일이 정하는 값**이다 — 몇 월에 도는지는
+            시작일이 결정한다. 읽는 순간 근거가 되는 칸이 화면 밖에 있으면 못 믿을 말이 된다.
+            "얼마나 자주 · 며칠에 · 언제부터 언제까지"를 한 덩어리로 둔다. */}
+        <div className="row gap-12">
+          <div style={{ flex: 1 }}>
+            <label className="label">시작일 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+            <DateInput className="input" value={form.start_date} onChange={e => f("start_date", e.target.value)}/>
+            <FirstCycleHint startDate={form.start_date} dayOfMonth={form.day_of_month} period={form.period} verb="지출" editing={!!editing}/>
+          </div>
+          <div style={{ flex: 1 }}>
+            <label className="label">종료일 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+            <DateInput className="input" value={form.end_date} onChange={e => f("end_date", e.target.value)}/>
           </div>
         </div>
         {/* 결제조건 — 회차일과 **돈이 빠지는 날**이 다르다.
@@ -2514,17 +2534,6 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
               : '증빙을 따로 챙기지 않는 건이에요. 미비 목록에 뜨지 않습니다.'}
           </div>
         </div>
-        <div className="row gap-12">
-          <div style={{ flex: 1 }}>
-            <label className="label">시작일 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-            <DateInput className="input" value={form.start_date} onChange={e => f("start_date", e.target.value)}/>
-            <FirstCycleHint startDate={form.start_date} dayOfMonth={form.day_of_month} period={form.period} verb="지출" editing={!!editing}/>
-          </div>
-          <div style={{ flex: 1 }}>
-            <label className="label">종료일 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
-            <DateInput className="input" value={form.end_date} onChange={e => f("end_date", e.target.value)}/>
-          </div>
-        </div>
         <div>
           <label className="label">출금 계좌 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
           <Combobox value={form.account_id} onChange={v => f("account_id", v)} allowAdd={false}
@@ -2538,7 +2547,6 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
   )
 }
 
-const PERIOD_LABEL = { monthly: "매월", quarterly: "매분기", yearly: "매년" }
 
 /* 규칙 한 줄 이름 — 소급 드로어 제목처럼 "무슨 규칙인지" 한 줄로 말해야 하는 자리에 쓴다.
    ⚠ `r.vendor_name` 을 읽으면 안 된다. 어댑터가 내려주는 이름은 **`vendor`** 다
@@ -2624,7 +2632,7 @@ const matchRule = (r, q) => {
    "매달 얼마가 꼬박꼬박 오가나"가 이 화면에서 알고 싶은 것이다. */
 const monthlyEquivalent = (rows, amountOf) => Math.round(rows
   .filter(r => r.active)
-  .reduce((s, r) => s + amountOf(r) / (r.period === 'yearly' ? 12 : r.period === 'quarterly' ? 3 : 1), 0))
+  .reduce((s, r) => s + amountOf(r) / periodMonths(r.period), 0))
 
 // 규칙 목록 머리 — 건수·월 환산·검색·필터 칩. 정기청구와 정기지출이 같이 쓴다(둘은 대칭이다).
 const RuleListHeader = ({ title, rows, all, amountOf, q, setQ, ruleFilter, setRuleFilter, placeholder, side = 'sales' }) => (
@@ -2774,7 +2782,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
                 </td>
                 <td className="text-sm text-muted">{r.category}</td>
                 <td className="num-cell num-right">{fmtNum(r.amount)}</td>
-                <td className="text-sm">{PERIOD_LABEL[r.period]} {r.dayOfMonth}일</td>
+                <td className="text-sm">{periodLong(r.period)} {r.dayOfMonth}일</td>
                 {/* 서버가 계산한 회차를 쓴다 — 화면에서 다시 계산하면 놓친 회차가 감춰진다 */}
                 {/* 다음 예정은 **서버 계산값**(nextDue)이다. 예전엔 이행 현황(pending)에서
                     주워 썼는데 그 목록은 35일 미리보기라, 매분기·매년 규칙은 늘 '—'로 떴다 —
@@ -2925,8 +2933,11 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
           <div style={{ flex: 1 }}>
             <label className="label">반복 주기</label>
             <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
-              {[["monthly","매월"],["quarterly","매분기"],["yearly","매년"]].map(([v, l]) => (
-                <button key={v} type="button" className={`chip ${form.period === v ? 'active' : ''}`} onClick={() => f("period", v)}>{l}</button>
+              {/* 목록을 여기 손으로 적지 않는다 — 주기를 하나 더할 때 이런 자리가 빠지면
+                  DB·계산은 아는데 **고를 수가 없다**(격월을 넣으며 실제로 겪는 자리다). */}
+              {BILLING_PERIODS.map(o => (
+                <button key={o.value} type="button" className={`chip ${form.period === o.value ? 'active' : ''}`}
+                  onClick={() => f("period", o.value)}>{o.long}</button>
               ))}
             </div>
           </div>
@@ -2936,6 +2947,22 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
             <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
               {cycleMonthsHint(form.startDate, form.dayOfMonth, form.period, todayStr())}
             </div>
+          </div>
+        </div>
+        {/* 시작일·종료일은 **주기 바로 아래**다.
+            예전엔 결제조건·증빙 두 구획 건너에 있었다. 그런데 위 일자 칸의 안내
+            ("2·4·6·8·10·12월 25일")는 **시작일이 정하는 값**이다 — 몇 월에 도는지는
+            시작일이 결정한다. 읽는 순간 근거가 되는 칸이 화면 밖에 있으면 못 믿을 말이 된다.
+            "얼마나 자주 · 며칠에 · 언제부터 언제까지"를 한 덩어리로 둔다. */}
+        <div className="row gap-12">
+          {/* 시작일은 선택 — 무기한 주문은 "언제부터"가 모호한 경우가 흔하다(구두로 이어오던 유지보수 등).
+              비우면 등록한 날부터 센다(서버 lib/recurrence.js 앵커 폴백). */}
+          <div style={{ flex: 1 }}><label className="label">시작일 <span className="text-muted">(선택)</span></label>
+            <DateInput className="input" value={form.startDate} onChange={e => f("startDate", e.target.value)}/>
+            <FirstCycleHint startDate={form.startDate} dayOfMonth={form.dayOfMonth} period={form.period} verb="청구" editing={!!editing}/>
+          </div>
+          <div style={{ flex: 1 }}><label className="label">종료일 <span className="text-muted">(선택)</span></label>
+            <DateInput className="input" value={form.endDate} onChange={e => f("endDate", e.target.value)}/>
           </div>
         </div>
         {/* 결제조건 — 청구일과 **돈이 들어오는 날**은 다르다. 자금 예측이 이 값으로 입금일을 세운다.
@@ -2975,17 +3002,6 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
             {form.evidenceRequired
               ? '회차마다 증빙을 받았는지 확인합니다. 파일을 붙이거나 «확인» 표시로 닫을 수 있어요.'
               : '증빙을 따로 챙기지 않는 건이에요. 미비 목록에 뜨지 않습니다.'}
-          </div>
-        </div>
-        <div className="row gap-12">
-          {/* 시작일은 선택 — 무기한 주문은 "언제부터"가 모호한 경우가 흔하다(구두로 이어오던 유지보수 등).
-              비우면 등록한 날부터 센다(서버 lib/recurrence.js 앵커 폴백). */}
-          <div style={{ flex: 1 }}><label className="label">시작일 <span className="text-muted">(선택)</span></label>
-            <DateInput className="input" value={form.startDate} onChange={e => f("startDate", e.target.value)}/>
-            <FirstCycleHint startDate={form.startDate} dayOfMonth={form.dayOfMonth} period={form.period} verb="청구" editing={!!editing}/>
-          </div>
-          <div style={{ flex: 1 }}><label className="label">종료일 <span className="text-muted">(선택)</span></label>
-            <DateInput className="input" value={form.endDate} onChange={e => f("endDate", e.target.value)}/>
           </div>
         </div>
         <div><label className="label">입금 계좌 <span className="text-muted">(선택)</span></label>
@@ -3125,7 +3141,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
                   {r.contractName && <div className="text-xs text-muted">수주: {r.contractName}</div>}
                 </td>
                 <td className="num-cell num-right">{fmtNum(totalOf(r))}</td>
-                <td className="text-sm">{PERIOD_LABEL[r.period]} {r.dayOfMonth}일</td>
+                <td className="text-sm">{periodLong(r.period)} {r.dayOfMonth}일</td>
                 {/* 다음 예정은 **서버 계산값**(nextDue)이다. 예전엔 이행 현황(pending)에서
                     주워 썼는데 그 목록은 35일 미리보기라, 매분기·매년 규칙은 늘 '—'로 떴다 —
                     활성인데 예정이 없으니 규칙이 안 도는 것처럼 읽힌다. */}

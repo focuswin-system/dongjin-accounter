@@ -2,6 +2,8 @@
 // 과거엔 두 라우트가 각자 구현해 (1) 지출은 period를 무시해 분기/연이 매달 생성됐고,
 // (2) 청구는 월말일(≥29) 앵커에서 오버플로가 누적돼 회차가 밀리고 누락됐다. 여기로 단일화한다.
 
+const { periodMonths } = require('./recurPeriod')   // 주기 → 몇 달마다. 표는 period.js 한 곳에만.
+
 // 로컬 캘린더 기준 yyyy-mm-dd (toISOString의 UTC 변환을 쓰지 않는다 — KST 경계 오차 방지)
 function fmtDate(d) {
   const y = d.getFullYear()
@@ -49,7 +51,7 @@ function dueDatesToGenerate(rec, today = new Date(), opts = {}) {
    * 둘 다 없으면 셀 기준이 없으므로 그때는 [] 가 맞다. */
   const anchor = rec.start_date || rec.setup_date
   if (!anchor) return []
-  const step = rec.period === 'yearly' ? 12 : rec.period === 'quarterly' ? 3 : 1
+  const step = periodMonths(rec.period)   // 월 1 · 격월 2 · 분기 3 · 년 12 (lib/period.js 가 유일한 정의)
   const [sy, sm] = String(anchor).split('-').map(Number) // sm: 1-indexed
   if (!sy || !sm) return []
   const anchorDay = Number(rec.day_of_month) || Number(String(anchor).split('-')[2]) || 1

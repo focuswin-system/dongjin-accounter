@@ -10,8 +10,8 @@ const ExcelJS = require('exceljs')
 
 const BILLING = { onetime: '총액형', recurring: '정기형' }
 const TERM = { fixed: '기간 만료', auto_renew: '자동갱신', open: '무기한' }
-const PERIOD = { monthly: '월', quarterly: '분기', yearly: '년' }
-const PERIOD_MONTHS = { monthly: 1, quarterly: 3, yearly: 12 }
+const PERIOD = { monthly: '월', bimonthly: '격월', quarterly: '분기', yearly: '년' }
+const { PERIOD_MONTHS } = require('./lib/recurPeriod')   // 주기 표는 lib/period.js 한 곳
 
 const MONEY = '#,##0'
 const HEADER_FILL = 'FFF1F3F5'

@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday, kstDate } = require('../db')
 const { dueDatesToGenerate, LOOKAHEAD_DAYS, pendingCycle, cashDateOf, PAY_TERMS, PAY_TERMS_WITH_DAY } = require('../lib/recurrence')
+const { normPeriod } = require('../lib/recurPeriod')   // 목록에 없는 주기는 '매월'로 — ENUM 에 못 넣는 값이 오면 500 이 난다
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError, amountError } = require('../lib/ledger')
 const { closedPeriodError } = require('../lib/closing')
@@ -91,7 +92,7 @@ router.post('/', async (req, res, next) => {
     const id = randomUUID()
     await req.db.execute(
       'INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id, pay_term, pay_day, evidence_required) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [id, vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, payTermOf(req.body.pay_term), payDayFor(payTermOf(req.body.pay_term), req.body.pay_day), evidFlag(req.body.evidence_required)]
+      [id, vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, normPeriod(period), day_of_month||1, start_date, end_date||null, account_id||null, payTermOf(req.body.pay_term), payDayFor(payTermOf(req.body.pay_term), req.body.pay_day), evidFlag(req.body.evidence_required)]
     )
     res.json({ id })
   } catch (e) { next(e) }
@@ -109,7 +110,7 @@ router.put('/:id', async (req, res, next) => {
       ? (cur.evidence_required ? 1 : 0) : evidFlag(req.body.evidence_required)
     const [result] = await req.db.execute(
       'UPDATE recurring_expenses SET vendor_id=?, contract_id=?, category=?, amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=?, pay_term=?, pay_day=?, evidence_required=? WHERE id=?',
-      [vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, payTermFor(req.body.pay_term, cur.pay_term),
+      [vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, normPeriod(period), day_of_month||1, start_date, end_date||null, account_id||null, payTermFor(req.body.pay_term, cur.pay_term),
        payDayFor(payTermFor(req.body.pay_term, cur.pay_term), req.body.pay_day ?? cur.pay_day),
        evidenceRequired, req.params.id]
     )

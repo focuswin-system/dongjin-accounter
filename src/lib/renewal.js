@@ -22,11 +22,21 @@ export const TERM_MODES = [
   { value: 'open',       label: '무기한',     hint: '종료일 없이 해지할 때까지 계속' },
 ];
 
+/* 반복 주기 — **화면 쪽의 유일한 정의.**
+ * ⚠ value 는 서버 server/lib/period.js 및 DB ENUM 과 **글자까지 같아야** 한다.
+ * 격월(2개월마다)이 있는 이유: 격월 정기점검·유지보수가 실제로 흔한데, 매월로 넣으면
+ * 회차가 두 배로 돌고 분기로 넣으면 한 달씩 밀린다. */
 export const BILLING_PERIODS = [
-  { value: 'monthly',   label: '월', months: 1 },
-  { value: 'quarterly', label: '분기', months: 3 },
-  { value: 'yearly',    label: '년', months: 12 },
+  { value: 'monthly',   label: '월',   long: '매월',   months: 1 },
+  { value: 'bimonthly', label: '격월', long: '격월',   months: 2 },
+  { value: 'quarterly', label: '분기', long: '매분기', months: 3 },
+  { value: 'yearly',    label: '년',   long: '매년',   months: 12 },
 ];
+
+/* 긴 이름('매월·격월·매분기·매년') — 규칙 목록·명령팔레트처럼 문장 안에 들어가는 자리.
+   이 표가 없던 시절에는 화면마다 `p === 'yearly' ? '매년' : ...` 삼항식을 따로 썼고,
+   그래서 주기를 하나 더하면 **손 안 댄 곳만 조용히 '매월'로 떨어졌다.** */
+export const periodLong = (p) => BILLING_PERIODS.find(x => x.value === p)?.long || '매월';
 
 export const billingLabel = (c) => BILLING_MODES.find(x => x.value === c?.billing_mode)?.label || '총액형';
 export const termLabel    = (c) => TERM_MODES.find(x => x.value === c?.term_mode)?.label || '기간 만료';
@@ -150,9 +160,11 @@ export const recurringMismatch = (c, rec) => {
  * 즉 **월은 시작일이 정한다.** 화면이 그걸 말해주지 않아 "분기는 몇 월인가"가 물음으로 남았다.
  */
 
-/** 일자 인풋 라벨. '매월 N일'을 주기와 무관하게 쓰면 분기·년에서 거짓말이 된다. */
-export const cycleDayLabel = (period) =>
-  period === 'yearly' ? '매년 N일' : period === 'quarterly' ? '분기마다 N일' : '매월 N일';
+/** 일자 인풋 라벨. '매월 N일'을 주기와 무관하게 쓰면 격월·분기·년에서 거짓말이 된다. */
+const DAY_LABEL = {
+  monthly: '매월 N일', bimonthly: '두 달마다 N일', quarterly: '분기마다 N일', yearly: '매년 N일',
+};
+export const cycleDayLabel = (period) => DAY_LABEL[period] || DAY_LABEL.monthly;
 
 /**
  * 회차가 놓이는 달을 사람 말로. 예) '2·5·8·11월 25일'
@@ -164,9 +176,13 @@ export const cycleMonthsHint = (startDate, day, period, today) => {
   const sm = Number(src.split('-')[1]);
   if (!sm) return null;
   const base = startDate ? '' : '시작일을 비우면 등록일 기준 — ';
-  if (period === 'yearly')    return `${base}매년 ${sm}월 ${d}일`;
-  if (period === 'quarterly') {
-    const ms = [0, 3, 6, 9].map(k => ((sm - 1 + k) % 12) + 1).sort((a, b) => a - b);
+  if (period === 'yearly') return `${base}매년 ${sm}월 ${d}일`;
+  /* 격월·분기는 **몇 월인지가 화면 어디에도 없다** — 월은 시작일이 정하기 때문이다.
+     그 달들을 그대로 적어 준다. 격월이면 6개(1·3·5·7·9·11월), 분기면 4개. */
+  const step = periodMonths(period);
+  if (step > 1) {
+    const ms = Array.from({ length: 12 / step }, (_, i) => ((sm - 1 + i * step) % 12) + 1)
+      .sort((a, b) => a - b);
     return `${base}${ms.join('·')}월 ${d}일`;
   }
   return `${base}매월 ${d}일`;

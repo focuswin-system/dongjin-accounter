@@ -8,6 +8,7 @@
  */
 // 메뉴 색인·검색 태그 — 명령팔레트(Ctrl+K)가 화면 전체를 찾을 수 있게 한다
 import { ALL_LEAVES, LEAF_TAGS } from './nav'
+import { periodLong } from './renewal'   // 주기 이름은 한 표에서만 (격월 추가 때 여기가 빠지면 '매월'로 뜬다)
 
 
 const BASE = '/api'
@@ -2106,14 +2107,14 @@ export const api = {
      * 같이 나와야 한다. 규칙은 청구서가 만들어지기 **전**의 것이라 위 목록엔 안 잡힌다. */
     recInv.forEach(r => cmds.push({
       kind: '정기청구', label: r.item || r.contractName || r.vendor,
-      sub: [r.vendor, r.period === 'yearly' ? '매년' : r.period === 'quarterly' ? '분기' : '매월',
+      sub: [r.vendor, periodLong(r.period),
         won(r.supplyAmount), r.active ? null : '중지됨'].filter(Boolean).join(' · '),
       keywords: [r.vendor, r.contractName].filter(Boolean).join(' '),
       route: 'recurring_invoice', rank: r.active ? 1 : 3,
     }))
     recExp.forEach(r => cmds.push({
       kind: '정기지출', label: r.item || r.category || r.vendor,
-      sub: [r.vendor, r.period === 'yearly' ? '매년' : r.period === 'quarterly' ? '분기' : '매월',
+      sub: [r.vendor, periodLong(r.period),
         won(r.amount), r.active ? null : '중지됨'].filter(Boolean).join(' · '),
       keywords: [r.vendor, r.category, r.contractName].filter(Boolean).join(' '),
       route: 'recurring_expense', rank: r.active ? 1 : 3,

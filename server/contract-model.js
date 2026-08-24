@@ -13,9 +13,7 @@
  *               (open은 끝이 없으므로 총액 개념이 없다 → amount = 0)
  */
 
-const PERIOD_MONTHS = { monthly: 1, quarterly: 3, yearly: 12 }
-
-const periodMonths = (p) => PERIOD_MONTHS[p] || 1
+const { PERIOD_MONTHS, periodMonths } = require('./lib/recurPeriod')   // 주기 표는 lib/period.js 한 곳
 
 /** start~end 사이에 billing_period가 몇 회차 들어가는지 (양끝 포함, 최소 1회) */
 function billingCycles(start, end, period) {
