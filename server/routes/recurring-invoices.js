@@ -69,10 +69,13 @@ router.get('/', async (req, res, next) => {
   try {
     const [rows] = await req.db.execute(`
       SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch,
-             v.name AS vendor_name, c.name AS contract_name
+             v.name AS vendor_name, c.name AS contract_name,
+             acc.name AS account_name
       FROM recurring_invoices r
       LEFT JOIN vendors v   ON r.vendor_id = v.id
       LEFT JOIN contracts c ON r.contract_id = c.id
+      /* 계좌 이름도 붙인다 — 규칙에 지정해 둔 통장을 목록에서 확인할 수 있게(id 로는 못 쓴다) */
+      LEFT JOIN accounts acc ON r.account_id = acc.id
       ORDER BY r.day_of_month
     `)
     res.json(await attachNextDue(req.db, rows, 'invoice'))

@@ -69,10 +69,13 @@ router.get('/', async (req, res, next) => {
          ContractBadge) 이름을 안 내려줘서 '주문'이라고만 뜨고 어느 발주인지 알 수 없었다.
          정기청구 쪽 목록 쿼리는 처음부터 이 JOIN 이 있었다(routes/recurring-invoices.js). */
       SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch,
-             v.name AS vendor_name, c.name AS contract_name
+             v.name AS vendor_name, c.name AS contract_name,
+             acc.name AS account_name
       FROM recurring_expenses r
       LEFT JOIN vendors v ON r.vendor_id = v.id
       LEFT JOIN contracts c ON r.contract_id = c.id
+      /* 계좌 이름도 붙인다 — 규칙에 지정해 둔 통장을 목록에서 확인할 수 있게(id 로는 못 쓴다) */
+      LEFT JOIN accounts acc ON r.account_id = acc.id
       ORDER BY r.day_of_month
     `)
     res.json(await attachNextDue(req.db, rows, 'expense'))

@@ -878,6 +878,8 @@ export const api = {
            매분기·매년 규칙이 영원히 '—'로 뜬다. 프런트에서 다시 세지도 않는다 —
            서버가 실제로 발행하는 회차와 어긋나면 화면이 거짓말을 한다. */
         nextDue: r.next_due || '',
+        // 어느 통장으로 들어올/나갈 돈인가 — 규칙에 지정해 두는데 목록에 안 보이면 확인할 길이 없다
+        accountName: r.account_name || '',
         active: r.active === 1,
         lastGenerated: r.last_generated,
       }))
@@ -990,6 +992,8 @@ export const api = {
         evidenceRequired: r.evidence_required === 1 || r.evidence_required === true,
         // 다음 회차 — 서버 계산값(정기지출 어댑터의 주석 참조)
         nextDue: r.next_due || '',
+        // 어느 통장으로 들어올/나갈 돈인가 — 규칙에 지정해 두는데 목록에 안 보이면 확인할 길이 없다
+        accountName: r.account_name || '',
         active: r.active === 1,
         lastGenerated: r.last_generated,
       }))

@@ -8,6 +8,7 @@ import { VendorSubList, ACCOUNT_FIELDS, CONTACT_FIELDS } from '../lib/components
 import { RecurringCycles, useRecurringCycles, cycleSummaryByRule } from '../lib/components/RecurringCycles'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { BackfillWizard } from '../lib/components/BackfillWizard'
+import { RowActions } from '../lib/components/RowActions'
 import { normBizNo, normVendorName } from '../lib/normalize'
 import { cycleDayLabel, cycleMonthsHint, PAY_TERM_OPTS, payTermNeedsDay, payTermHint } from '../lib/renewal'
 import { bizTypeOptions, bizItemOptions } from '../lib/bizTypes'
@@ -2404,8 +2405,8 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
      고르면 날짜 칸이 하나 더 붙는다. 480 에서는 칩이 세 줄로 접혀 조건 하나를 고르는 데
      눈이 세 번 내려간다. 정기청구 폼도 같은 폭이다(둘은 같은 값을 다루는 쌍이다). */
   return (
-    <Drawer open={open} onClose={onClose} width="min(600px,100vw)" label="정기 지출">
-      <DrawerHead title={editing ? "정기 지출 수정" : "정기 지출 등록"} onClose={onClose}/>
+    <Drawer open={open} onClose={onClose} width="min(600px,100vw)" label="정기지급">
+      <DrawerHead title={editing ? "정기지급 수정" : "정기지급 등록"} onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div><label className="label">거래처 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
           <Combobox value={form.vendor_id} onChange={v => f("vendor_id", v)}
@@ -2683,7 +2684,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
 
   const handleToggle = async (id) => {
     const res = await api.toggleRecurringExpense(id)
-    toast.push(res.active ? "정기 지출이 활성화됐어요" : "정기 지출이 비활성화됐어요")
+    toast.push(res.active ? "정기지급을 다시 시작했어요" : "정기지급을 멈췄어요")
     load(); cyc.reload()   // 중지/재개는 예정 회차 목록을 바꾼다
   }
 
@@ -2692,8 +2693,8 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
   const handleDelete = async (r) => {
     const ok = await confirm({
       tone: "neg", icon: <Icon.Warn size={22}/>,
-      title: "정기 지출 삭제",
-      body: `${r.vendor} · ${r.category}의 정기 지출을 삭제합니다. 앞으로 자동 생성되지 않아요.`,
+      title: "정기지급 삭제",
+      body: `${r.vendor} · ${r.category}의 정기지급을 삭제합니다. 앞으로 자동 생성되지 않아요.`,
       detail: "이미 만들어진 청구서와 거래는 그대로 남습니다. 잠시 멈추기만 하려면 '중지'를 쓰세요.",
       confirmLabel: "삭제",
     })
@@ -2701,7 +2702,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
     const res = await api.deleteRecurringExpense(r.id)
     if (!res.ok) { toast.push(res.error || "삭제에 실패했어요", { tone: "warn" }); return }
     const kept = (res.keptInvoices || 0) + (res.keptTxns || 0)
-    toast.push(kept ? `정기 지출을 삭제했어요 (기존 기록 ${kept}건은 유지)` : "정기 지출을 삭제했어요")
+    toast.push(kept ? `정기지급을 삭제했어요 (기존 기록 ${kept}건은 유지)` : "정기지급을 삭제했어요")
     load(); cyc.reload()
   }
 
@@ -2743,9 +2744,13 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
           <thead>
+            {/* '상태' 열이 있었지만 값의 대부분이 초록 '활성'이었다 — 정상인 것에 표식을 달면
+                표식이 뜻을 잃는다. 비활성만 알리면 되고, 그건 행 자체를 흐리게 해서 이미 말한다.
+                대신 **계좌**를 세운다. 규칙에 통장을 지정해 두는데 목록에 안 보여서
+                "어느 통장으로 들어올 돈인지" 확인할 길이 없었다(수시입금에서 같은 지적을 받았다). */}
             <tr>
               <th>거래처</th><th>비목</th><th className="num-right">금액</th>
-              <th>주기</th><th>다음 예정</th><th style={{ width: 60 }}>상태</th><th style={{ width: 110 }}></th>
+              <th>주기</th><th>다음 예정</th><th>계좌</th><th style={{ width: 96 }}></th>
             </tr>
           </thead>
           <tbody>
@@ -2753,8 +2758,8 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
             {ruleRows.length === 0 && (
               <tr><td colSpan={7} className="text-sm text-muted" style={{ textAlign: "center", padding: 24 }}>
                 {rows.length === 0
-                  ? "등록된 정기 지출이 없어요. 임차료·통신비 등 매달 나가는 건을 등록해보세요."
-                  : "이 조건에 맞는 정기 지출이 없어요."}
+                  ? "등록된 정기지급이 없어요. 임차료·통신비 등 매달 나가는 건을 등록해보세요."
+                  : "이 조건에 맞는 정기지급이 없어요."}
               </td></tr>
             )}
             {ruleRows.map(r => {
@@ -2780,21 +2785,19 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
                     <span className="badge neg" style={{ marginLeft: 6, fontSize: 10 }}>미처리 {s.overdue}</span>
                   )}
                 </td>
+                <td className="text-sm text-muted">{r.accountName || "—"}</td>
                 <td>
-                  <span className={`badge ${r.active ? "pos" : "outline"}`}>{r.active ? "활성" : "비활성"}</span>
-                </td>
-                <td>
-                  <div className="row gap-6">
-                    <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => openEdit(r)}>수정</button>
-                    {/* 등록일 이전 회차는 평소 경로로 안 만들어진다 → 기간을 열어 넣는 입구 */}
-                    <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }}
-                      onClick={() => setBackfill({ id: r.id, label: ruleLabel(r) })}>지난 회차 넣기</button>
-                    <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => handleToggle(r.id)}>
-                      {r.active ? "중지" : "재개"}
-                    </button>
-                    <button className="btn" style={{ fontSize: 11, padding: "3px 8px", color: "var(--neg-ink)" }}
-                      onClick={() => handleDelete(r)}>삭제</button>
-                  </div>
+                  {/* 평소 쓰는 '수정'만 밖에. 삭제를 '중지' 옆에 붙여 두면 잠시 멈추려던 손이
+                      한 칸 빗나가 규칙을 지운다 — 되돌릴 수 없는 것은 ⋯ 안, 선 아래에 둔다. */}
+                  <RowActions
+                    primary={{ label: '수정', onClick: () => openEdit(r) }}
+                    items={[
+                      { label: r.active ? '중지' : '재개', onClick: () => handleToggle(r.id),
+                        hint: r.active ? '자동 생성 멈춤' : undefined },
+                      // 등록일 이전 회차는 평소 경로로 안 만들어진다 → 기간을 열어 넣는 입구
+                      { label: '지난 회차 넣기', onClick: () => setBackfill({ id: r.id, label: ruleLabel(r) }) },
+                      { label: '삭제', tone: 'neg', onClick: () => handleDelete(r) },
+                    ]}/>
                 </td>
               </tr>
               )
@@ -2807,7 +2810,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
         onSave={async (data) => {
           // 결과를 보지 않고 성공 문구를 띄우면, 저장이 실패해도 등록된 줄 알게 된다
           const res = editing ? await api.updateRecurringExpense(editing.id, data) : await api.addRecurringExpense(data)
-          toast.push(res?.ok === false ? (res.error || "저장에 실패했어요") : (editing ? "정기 지출을 수정했어요" : "정기 지출이 등록됐어요"),
+          toast.push(res?.ok === false ? (res.error || "저장에 실패했어요") : (editing ? "정기지급을 수정했어요" : "정기지급을 등록했어요"),
                      res?.ok === false ? { tone: "warn" } : undefined)
           load(); cyc.reload()
         }}/>
@@ -2879,8 +2882,8 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
   }
 
   return (
-    <Drawer open={open} onClose={onClose} width="min(600px,100vw)" label="정기 청구">
-      <DrawerHead title={editing ? "정기 청구 수정" : "정기 청구 등록"} onClose={onClose}/>
+    <Drawer open={open} onClose={onClose} width="min(600px,100vw)" label="정기입금">
+      <DrawerHead title={editing ? "정기입금 수정" : "정기입금 등록"} onClose={onClose}/>
       <div className="drawer-body col gap-form">
         {/* 들어오는 돈이라 **수주**다. '주문'이라 두면 발주와 구별이 안 된다. */}
         <div><label className="label">수주 연결 <span className="text-muted">(선택)</span></label>
@@ -3027,7 +3030,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
 
   const handleToggle = async (id) => {
     const res = await api.toggleRecurringInvoice(id)
-    toast.push(res.active ? "정기 청구가 활성화됐어요" : "정기 청구가 비활성화됐어요")
+    toast.push(res.active ? "정기입금을 다시 시작했어요" : "정기입금을 멈췄어요")
     load(); cyc.reload()
   }
 
@@ -3035,8 +3038,8 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
   const handleDelete = async (r) => {
     const ok = await confirm({
       tone: "neg", icon: <Icon.Warn size={22}/>,
-      title: "정기 청구 삭제",
-      body: `${r.vendor} · ${r.item || r.contractName || ""}의 정기 청구를 삭제합니다. 앞으로 자동 발행되지 않아요.`.replace(/ · \./, "."),
+      title: "정기입금 삭제",
+      body: `${r.vendor} · ${r.item || r.contractName || ""}의 정기입금을 삭제합니다. 앞으로 자동 발행되지 않아요.`.replace(/ · \./, "."),
       detail: "이미 발행된 청구서와 거래는 그대로 남습니다. 잠시 멈추기만 하려면 '중지'를 쓰세요.",
       confirmLabel: "삭제",
     })
@@ -3044,7 +3047,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
     const res = await api.deleteRecurringInvoice(r.id)
     if (!res.ok) { toast.push(res.error || "삭제에 실패했어요", { tone: "warn" }); return }
     const kept = (res.keptInvoices || 0) + (res.keptTxns || 0)
-    toast.push(kept ? `정기 청구를 삭제했어요 (기존 기록 ${kept}건은 유지)` : "정기 청구를 삭제했어요")
+    toast.push(kept ? `정기입금을 삭제했어요 (기존 기록 ${kept}건은 유지)` : "정기입금을 삭제했어요")
     load(); cyc.reload()
   }
   // '밀린 회차 일괄 생성' 버튼은 이행 현황의 '놓친 회차 일괄 발행'으로 흡수했다
@@ -3095,17 +3098,18 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
           <thead>
+            {/* 계좌를 세우고 '상태' 열을 뺀 이유는 정기지급 표의 주석 참조 */}
             <tr>
               <th>고객사</th><th>항목 / 수주</th><th className="num-right">청구액(VAT 포함)</th>
-              <th>주기</th><th>다음 예정</th><th style={{ width: 60 }}>상태</th><th style={{ width: 110 }}></th>
+              <th>주기</th><th>다음 예정</th><th>계좌</th><th style={{ width: 96 }}></th>
             </tr>
           </thead>
           <tbody>
             {ruleRows.length === 0 && (
               <tr><td colSpan={7} className="text-sm text-muted" style={{ textAlign: "center", padding: 24 }}>
                 {rows.length === 0
-                  ? "등록된 정기 청구가 없어요. 유지보수·호스팅 등 매달 청구하는 건을 등록해보세요."
-                  : "이 조건에 맞는 정기 청구가 없어요."}
+                  ? "등록된 정기입금이 없어요. 유지보수·호스팅 등 매달 청구하는 건을 등록해보세요."
+                  : "이 조건에 맞는 정기입금이 없어요."}
               </td></tr>
             )}
             {ruleRows.map(r => {
@@ -3131,19 +3135,19 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
                     <span className="badge neg" style={{ marginLeft: 6, fontSize: 10 }}>미처리 {s.overdue}</span>
                   )}
                 </td>
-                <td><span className={`badge ${r.active ? "pos" : "outline"}`}>{r.active ? "활성" : "비활성"}</span></td>
+                <td className="text-sm text-muted">{r.accountName || "—"}</td>
                 <td>
-                  <div className="row gap-6">
-                    <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => openEdit(r)}>수정</button>
-                    {/* 등록일 이전 회차는 평소 경로로 안 만들어진다 → 기간을 열어 넣는 입구 */}
-                    <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }}
-                      onClick={() => setBackfill({ id: r.id, label: ruleLabel(r) })}>지난 회차 넣기</button>
-                    <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => handleToggle(r.id)}>
-                      {r.active ? "중지" : "재개"}
-                    </button>
-                    <button className="btn" style={{ fontSize: 11, padding: "3px 8px", color: "var(--neg-ink)" }}
-                      onClick={() => handleDelete(r)}>삭제</button>
-                  </div>
+                  {/* 평소 쓰는 '수정'만 밖에. 삭제를 '중지' 옆에 붙여 두면 잠시 멈추려던 손이
+                      한 칸 빗나가 규칙을 지운다 — 되돌릴 수 없는 것은 ⋯ 안, 선 아래에 둔다. */}
+                  <RowActions
+                    primary={{ label: '수정', onClick: () => openEdit(r) }}
+                    items={[
+                      { label: r.active ? '중지' : '재개', onClick: () => handleToggle(r.id),
+                        hint: r.active ? '자동 생성 멈춤' : undefined },
+                      // 등록일 이전 회차는 평소 경로로 안 만들어진다 → 기간을 열어 넣는 입구
+                      { label: '지난 회차 넣기', onClick: () => setBackfill({ id: r.id, label: ruleLabel(r) }) },
+                      { label: '삭제', tone: 'neg', onClick: () => handleDelete(r) },
+                    ]}/>
                 </td>
               </tr>
               )
@@ -3155,7 +3159,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
         vendors={vendors} contracts={contracts} accounts={accounts} reloadVendors={reloadVendors}
         onSave={async (data) => {
           const res = editing ? await api.updateRecurringInvoice(editing.id, data) : await api.addRecurringInvoice(data)
-          toast.push(res?.ok === false ? (res.error || "저장에 실패했어요") : (editing ? "정기 청구를 수정했어요" : "정기 청구가 등록됐어요"),
+          toast.push(res?.ok === false ? (res.error || "저장에 실패했어요") : (editing ? "정기입금을 수정했어요" : "정기입금을 등록했어요"),
                      res?.ok === false ? { tone: "warn" } : undefined)
           load(); cyc.reload()
         }}/>

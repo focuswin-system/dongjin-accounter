@@ -1511,3 +1511,25 @@ body:has([data-modal-open]) {
 
   .page-shell { padding: 0 12px 48px; }
 }
+
+/* 표 한 행의 동작(RowActions) — 평소 쓰는 하나만 밖에, 나머지는 ⋯ 안에.
+   행 높이를 늘리지 않으려고 팝업은 absolute 로 띄운다(표 셀 안이라 오른쪽에 붙인다). */
+.row-actions { position: relative; display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+/* body 로 내보내 띄운다(포털) — 표 카드의 overflow: hidden 에 잘리지 않게.
+   좌표는 컴포넌트가 재서 인라인으로 넣는다. */
+.row-actions-pop {
+  position: fixed; z-index: 200;
+  padding: 4px; border-radius: 10px;
+  background: var(--card-bg, #fff); border: 1px solid var(--line);
+  box-shadow: 0 10px 30px rgba(0,0,0,.12);
+  display: flex; flex-direction: column;
+}
+.row-actions-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 7px 10px; border-radius: 7px; font-size: 13px; text-align: left;
+  background: transparent; border: 0; color: var(--ink); cursor: pointer; white-space: nowrap;
+}
+.row-actions-item:hover:not(:disabled) { background: var(--hover-bg, rgba(0,0,0,.04)); }
+.row-actions-item:disabled { opacity: .4; cursor: default; }
+.row-actions-item.neg { color: var(--neg-ink); }
+.row-actions-sep { height: 1px; background: var(--line); margin: 4px 2px; }
