@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Icon, periodToRange, DateInput } from '../ui'
+import { PeriodPicker } from './PeriodPicker'
 
 // 표 상단 툴바 — 날짜 범위 + 검색 + 필터 패널. DataTable 위에 얹는다.
 //
@@ -20,14 +21,20 @@ const DATE_PRESETS = [
   { id: 'year',    label: '올해' },
 ]
 
-export const TableToolbar = ({ date, search, filters, hasActiveFilter, onReset, right }) => {
+/* periodPicker: true 면 날짜 인풋 두 개 + 프리셋 다섯 대신 **드릴다운 선택기** 하나를 쓴다.
+   한 화면(수시입금)에서 먼저 써 보고 괜찮으면 전체로 올린다 — 날짜 필터는 매일 쓰는
+   물건이라 한 번에 전부 바꾸면 되돌리기가 번거롭다. */
+export const TableToolbar = ({ date, search, filters, hasActiveFilter, onReset, right, periodPicker = false }) => {
   const [open, setOpen] = useState(false)
   const hasFilters = filters?.length > 0
 
   return (
     <div className="tbar">
       <div className="tbar-bar">
-        {date && (
+        {date && periodPicker && (
+          <PeriodPicker from={date.from} to={date.to} onChange={date.onChange}/>
+        )}
+        {date && !periodPicker && (
           <div className="tbar-date">
             <Icon.Calendar size={14} className="text-muted2"/>
             <DateInput className="input num tbar-dateinput"

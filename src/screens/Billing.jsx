@@ -1100,7 +1100,8 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   /* 등록 입구 — 청구서 폼을 바로 열지 않고 **받은 서류부터 묻는다**(DocTypeChooser 머리말).
      고른 값을 상태로 남기지 않는 이유: 다음 건은 다른 서류일 수 있어서 매번 물어야 한다. */
   const [chooserOpen, setChooserOpen] = useState(false)
-  const [statusFilter, setStatusFilter] = useState(collect ? "미정산" : "전체")
+  // 회수 모드는 '못 받은 것'을 보러 오는 화면이라 그 필터로 연다(아래 UNSETTLED 와 같은 값)
+  const [statusFilter, setStatusFilter] = useState(collect ? (initialTab === "issued" ? "미수금" : "미지급금") : "전체")
   /* 기간은 **비워서 시작한다**(전체). 거래내역은 '이번 달'로 시작하는데, 청구서는 성격이 다르다 —
      미수금은 몇 달 전 것이 대부분이라 이번 달로 좁히면 정작 받을 돈이 안 보인다. */
 
@@ -1178,15 +1179,28 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const PENDING_STATUS = isIssued
     ? ["입금 예정", "일부 입금", "기한 지남", "장기 미수"]
     : ["지급 대기", "지급 예정", "일부 지급", "기한 지남"]
-  /* '미정산'은 **항상** 첫 칩이다.
-   * 예전엔 회수 모드(role='collect', 미수금·미지급금 메뉴)에서만 나왔다. 그런데 그 메뉴는
-   * 이 화면과 같은 화면이라 사이드바에서 합쳤고(nav.js), 칩이 회수 모드에만 있으면
-   * "못 받은 것만 보기"가 통째로 사라진다. 미수금·미지급금은 경리가 매일 보는 축이다. */
+  /* 칩 순서 = **층위**다.
+   *
+   * 예전 순서는 층이 섞여 있었다: `미정산 전체 입금예정 일부입금 기한지남 장기미수 입금완료`.
+   * 여기서 '입금 완료'는 '미정산'과 **형제**(둘로 나뉜다)인데 미정산의 자식들 뒤에 가 있어,
+   * 어디까지가 미정산의 내역인지 읽히지 않았다.
+   *
+   *   전체 │ 미수금  입금 완료 │ 입금 예정  일부 입금  기한 지남  장기 미수
+   *   root      두 갈래              미수금의 내역
+   *
+   * 미수금을 완료보다 앞에 둔다 — 경리가 매일 쫓는 건 **못 받은 돈**이고, 완료는 확인용이라
+   * 자주 안 누른다.
+   *
+   * 이름도 '미정산' → '미수금/미지급금'으로 바꿨다. 바로 위 요약 카드가 '미수금 합계'인데
+   * 칩만 '미정산'이라 같은 것을 두 이름으로 부르고 있었다. */
+  const UNSETTLED = isIssued ? "미수금" : "미지급금"
   const STATUS_OPTIONS = isIssued
-    ? ["미정산", "전체", "입금 예정", "일부 입금", "기한 지남", "장기 미수", "입금 완료"]
-    : ["미정산", "전체", "지급 대기", "지급 예정", "일부 지급", "기한 지남", "지급 완료"]
+    ? ["전체", UNSETTLED, "입금 완료", "입금 예정", "일부 입금", "기한 지남", "장기 미수"]
+    : ["전체", UNSETTLED, "지급 완료", "지급 대기", "지급 예정", "일부 지급", "기한 지남"]
+  // 층이 바뀌는 자리 — 칩 사이에 옅은 구분선을 넣어 '내역'임을 보이게 한다
+  const STATUS_DIVIDERS = new Set([UNSETTLED, isIssued ? "입금 예정" : "지급 대기"])
   // 필터도 표시 상태(effStatus) 기준 — 뱃지에 '기한 지남'으로 뜨는 건이 '기한 지남' 필터에도 잡히게.
-  const byStatus = statusFilter === "미정산"
+  const byStatus = statusFilter === UNSETTLED
     ? kindRows.filter(inv => PENDING_STATUS.includes(effStatus(inv)))
     : kindRows.filter(inv => statusFilter === "전체" || effStatus(inv) === statusFilter)
 
@@ -1530,7 +1544,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
             {!collect && pending.length > 0 && <SummaryCard label="청구할 것" amount={pendingTotal} count={pending.length} accent="brand"
               onClick={() => setView("pending")} hint="계약 일정에서 도래한 건 보기"/>}
             <SummaryCard label={collect ? "받을 미수금" : "미수금 합계"} amount={recSummary?.total ?? 0} count={recSummary?.count ?? 0} accent="blue"
-              onClick={() => { setView("list"); setStatusFilter("미정산") }} hint="못 받은 청구서 보기"/>
+              onClick={() => { setView("list"); setStatusFilter(UNSETTLED) }} hint="못 받은 청구서 보기"/>
             <SummaryCard label="연체 미수금" amount={recSummary?.overdueAmount ?? 0} count={recSummary?.overdueCount ?? 0} accent="neg" warn
               onClick={() => { setView("list"); setStatusFilter("기한 지남") }} hint="기한 지난 것만 보기"/>
           </>
@@ -1543,7 +1557,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
             {!collect && pending.length > 0 && <SummaryCard label="지급할 것" amount={pendingTotal} count={pending.length} accent="brand"
               onClick={() => setView("pending")} hint="계약 일정에서 도래한 건 보기"/>}
             <SummaryCard label={collect ? "줄 미지급금" : "미지급금 합계"} amount={paySum?.total ?? 0} count={paySum?.count ?? 0} accent="warn"
-              onClick={() => { setView("list"); setStatusFilter("미정산") }} hint="안 낸 청구서 보기"/>
+              onClick={() => { setView("list"); setStatusFilter(UNSETTLED) }} hint="안 낸 청구서 보기"/>
             <SummaryCard label="연체 미지급금" amount={paySum?.overdueAmount ?? 0} count={paySum?.overdueCount ?? 0} accent="neg" warn
               onClick={() => { setView("list"); setStatusFilter("기한 지남") }} hint="기한 지난 것만 보기"/>
           </>
@@ -1569,7 +1583,14 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
         {(collect || view === "list") && (
           <div className={`row gap-6 ${collect || !pending.length ? "" : "ml-auto"}`} style={{ flexWrap: "wrap" }}>
             {STATUS_OPTIONS.map(s => (
-              <button key={s} className={`chip ${statusFilter === s ? "active" : ""}`} onClick={() => setStatusFilter(s)} style={{ fontSize: 12 }}>{s}</button>
+              <span key={s} className="row gap-6" style={{ alignItems: 'center' }}>
+                {/* 층이 바뀌는 자리에만 세로선 — 어디까지가 '미수금의 내역'인지 눈으로 보이게 */}
+                {STATUS_DIVIDERS.has(s) && (
+                  <span aria-hidden="true" style={{ width: 1, height: 14, background: 'var(--line)' }}/>
+                )}
+                <button className={`chip ${statusFilter === s ? "active" : ""}`}
+                  onClick={() => setStatusFilter(s)} style={{ fontSize: 12 }}>{s}</button>
+              </span>
             ))}
           </div>
         )}
@@ -1578,7 +1599,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       {/* 기간·거래처·검색 — 목록 탭에서만. '발행 예정'은 아직 청구서가 아니라 이 필터의 대상이 아니다.
           거래내역과 같은 툴바를 쓴다(화면마다 다른 필터를 배우게 하지 않는다). */}
       {(collect || view === "list") && (
-        <TableToolbar {...listF.toolbarProps}
+        <TableToolbar {...listF.toolbarProps} periodPicker
           right={<span className="text-xs text-muted2">발행일 기준</span>}/>
       )}
 
@@ -1596,7 +1617,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       {!collect && view === "pending"
         ? <>
             {/* 기간(예정일)·거래처·검색 — 목록 탭과 같은 툴바. 다른 건 기준 날짜뿐이다. */}
-            <TableToolbar {...pendF.toolbarProps}
+            <TableToolbar {...pendF.toolbarProps} periodPicker
               right={<span className="text-xs text-muted2">
                 예정일 기준 · {pendingFiltered.length}건 {fmtNum(pendingFiltered.reduce((s, p) => s + pendingGross(p), 0))}원
               </span>}/>
