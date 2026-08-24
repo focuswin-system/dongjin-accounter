@@ -963,7 +963,14 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", select }) => (
       select={select}
       empty="해당 청구서가 없습니다"
       columns={[
-        { key: 'invoiceNo', header: '청구번호', sortable: true, render: inv => <span className="text-sm text-muted num">{inv.invoiceNo}</span> },
+        /* 발행일이 맨 앞이다.
+         *
+         * 여태 이 열이 **아예 없었다.** 툴바는 '발행일 기준'으로 기간을 거르는데 정작 그 날짜가
+         * 표에 없어서, 걸러 놓고도 "이게 몇 월 것인지"를 청구번호(청구-2026-0001)에서
+         * 짐작해야 했다. 사람이 찾는 축은 날짜지 시스템이 채번한 번호가 아니다.
+         * 청구번호는 뒤로 물린다 — 대조할 때만 쓰는 값이다. */
+        { key: 'issuedAt', header: '발행일', sortable: true,
+          render: inv => <span className="text-sm num">{inv.issuedAt || "—"}</span> },
         { key: 'vendor', header: '거래처', sortable: true, render: inv => <span className="fw-700">{inv.vendor}</span> },
         { key: 'contract', header: '주문', render: inv => <span className="text-sm text-muted">{inv.contract || "—"}</span> },
         { key: 'totalAmount', header: '청구금액', align: 'right', sortable: true, render: inv => <span className="num-cell">{fmtNum(inv.totalAmount)}</span> },
@@ -980,6 +987,8 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", select }) => (
             {inv.dueAt && inv.remainAmount > 0 &&
               <span className={`badge ${ddayTone(inv.dueAt)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(inv.dueAt)}</span>}</>
         ) },
+        { key: 'invoiceNo', header: '청구번호', sortable: true,
+          render: inv => <span className="text-xs text-muted2 num">{inv.invoiceNo}</span> },
         { key: 'status', header: '상태', render: inv => <StatusBadge status={effStatus(inv)}/> },
         // 아직 안 받은/안 낸 청구서는 목록에서 바로 처리 버튼. 누르면 상세의 매칭 탭이 열린다.
         { key: 'action', header: '', align: 'right', render: inv => (
@@ -1567,19 +1576,30 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
 
       {/* 탭: 발행 모드는 발행 예정|발행됨. 회수 모드는 상태 필터만(발행 예정 없음). */}
       <div className="row gap-8" style={{ marginBottom: 16, flexWrap: "wrap" }}>
-        {!collect && pending.length > 0 && (
+        {/* ⚠ 탭 묶음은 **'청구할 것'이 없어도** 떠야 한다.
+            예전엔 pending 이 비면 이 블록 전체가 사라져서, '청구서 없이' 탭에 들어간 순간
+            돌아올 탭이 하나도 없었다(막다른 길). '청구할 것' 칩만 조건부로 감춘다. */}
+        {!collect && (
           <>
             {/* 칩의 숫자는 **그 탭이 실제로 보여줄 건수**다.
                 예전엔 필터 전 원본을 셌다 — 기간을 이번 달로 좁혀 표에 3건이 남아도 칩은 47을
                 달고 있었고, 어느 쪽이 맞는지 알 수 없었다. 각 탭은 자기 필터를 따로 들고 있으므로
                 (발행 예정=pendF / 발행됨=listF+상태칩) 각자 걸러진 수를 센다. */}
-            <button className={`chip ${view === "pending" ? "active" : ""}`} onClick={() => setView("pending")}>
-              {isIssued ? "청구할 것" : "지급할 것"}{pendingFiltered.length > 0 && <span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{pendingFiltered.length}</span>}
-            </button>
+            {pending.length > 0 && (
+              <button className={`chip ${view === "pending" ? "active" : ""}`} onClick={() => setView("pending")}>
+                {isIssued ? "청구할 것" : "지급할 것"}{pendingFiltered.length > 0 && <span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{pendingFiltered.length}</span>}
+              </button>
+            )}
             <button className={`chip ${view === "list" ? "active" : ""}`} onClick={() => setView("list")}>
               {isIssued ? "발행됨" : "등록됨"}<span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{filtered.length}</span>
             </button>
           </>
+        )}
+        {/* 청구서 없이 오간 건 — 있을 때만 탭으로 선다(빈 구획은 안 그린다는 이 화면의 규칙). */}
+        {!collect && plainTxns.length > 0 && (
+          <button className={`chip ${view === "plain" ? "active" : ""}`} onClick={() => setView("plain")}>
+            청구서 없이<span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{plainTxns.length}</span>
+          </button>
         )}
         {(collect || view === "list") && (
           <div className={`row gap-6 ${collect || !pending.length ? "" : "ml-auto"}`} style={{ flexWrap: "wrap" }}>
@@ -1615,6 +1635,8 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           moreHint="검색으로 찾으세요"/>
       )}
 
+      {/* 탭이 셋이 되면서 삼항으로는 안 갈린다 — 'plain' 일 때 청구서 표가 같이 떴다.
+          청구서 표는 회수 모드이거나 'list' 탭일 때만 그린다. */}
       {!collect && view === "pending"
         ? <>
             {/* 기간(예정일)·거래처·검색 — 목록 탭과 같은 툴바. 다른 건 기준 날짜뿐이다. */}
@@ -1664,7 +1686,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
               onIssue={(p) => issueSchedule(p, false)} onPaid={(p) => issueSchedule(p, true)}
               select={{ ids: pendChecked, onChange: setPendChecked }}/>
           </>
-        : <>
+        : (collect || view === "list") ? <>
             {/* 선택 바 — 고른 게 있을 때만 나타난다. 늘 떠 있으면 표를 밀어내고,
                 아무것도 못 하는 버튼만 보여주는 셈이 된다. */}
             {checkedIds.length > 0 && (
@@ -1700,53 +1722,38 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
                 isSelectable: settleable,
                 disabledHint: () => '정산이 끝난 청구서라 일괄 처리 대상이 아니에요',
               }}/>
-          </>}
+          </> : null}
 
-      {/* 청구서 없이 오간 건 — 표를 섞지 않고 아래에 따로 세운다.
-          청구서는 번호·만기·정산 상태를 갖지만 이 건들은 없다. 한 표에 억지로 넣으면
-          절반이 빈 칸인 행이 생기고, 그러면 둘 다 읽기 어려워진다.
-          비어 있으면 그리지 않는다(이 화면의 다른 구획과 같은 규칙). */}
-      {!collect && view === "list" && plainTxns.length > 0 && (
-        <div style={{ marginTop: 28 }}>
-          <div className="row" style={{ gap: 8, alignItems: 'baseline', marginBottom: 10 }}>
-            <span className="fw-700" style={{ fontSize: 14 }}>
-              청구서 없이 {isIssued ? '들어온' : '나간'} 돈
-            </span>
-            <span className="text-sm text-muted">{plainTxns.length}건</span>
-            <span className="text-xs text-muted2 ml-auto">
-              영수증·통장 거래처럼 계산서가 없는 건이에요. {isIssued ? '미수금' : '미지급금'}·부가세에는 잡히지 않아요.
-            </span>
-          </div>
-          <div className="card" style={{ overflow: 'hidden' }}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th style={{ width: 110 }}>날짜</th>
-                  <th>거래처</th>
-                  <th>내용</th>
-                  <th style={{ width: 120 }}>비목</th>
-                  <th className="num-right" style={{ width: 130 }}>금액</th>
-                </tr>
-              </thead>
-              <tbody>
-                {plainTxns.slice(0, 20).map(t => (
-                  <tr key={t.id}>
-                    <td className="text-sm num">{t.date}</td>
-                    <td className="text-sm">{t.vendor || '—'}</td>
-                    <td className="text-sm">{t.memo || t.item || '—'}</td>
-                    <td className="text-sm text-muted">{t.category || '—'}</td>
-                    <td className="num-cell num-right fw-700">{fmtNum(t.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {plainTxns.length > 20 && (
-            <div className="text-xs text-muted2" style={{ marginTop: 8 }}>
-              최근 20건만 보여드려요. 전체는 거래내역에서 볼 수 있어요.
-            </div>
-          )}
-        </div>
+      {/* 청구서 없이 오간 건 — **탭으로 세운다.**
+          처음엔 목록 아래에 쌓았는데, 청구서가 쌓이면 스크롤을 한참 내려야 보였다.
+          이 화면은 이미 탭으로 갈리므로(청구할 것 / 발행됨) 세 번째 형제로 두는 게 맞고,
+          탭에 건수가 붙어 있으면 열지 않아도 있다는 걸 안다.
+          표를 섞지 않은 이유는 그대로다 — 청구서는 번호·만기·정산 상태를 갖지만
+          이 건들은 없어서, 한 표에 넣으면 절반이 빈 칸인 행이 된다. */}
+      {!collect && view === "plain" && (
+        <DataTable
+          rows={plainTxns}
+          empty={`청구서 없이 ${isIssued ? '들어온' : '나간'} 건이 없어요.`}
+          columns={[
+            { key: 'date', header: '날짜', sortable: true,
+              render: t => <span className="text-sm num">{t.date}</span> },
+            { key: 'vendor', header: '거래처', sortable: true,
+              render: t => <span className="fw-700">{t.vendor || '—'}</span> },
+            { key: 'scope', header: '내용',
+              render: t => <span className="text-sm">{t.memo || t.item_name || '—'}</span> },
+            { key: 'category', header: '비목',
+              render: t => <span className="text-sm text-muted">{t.category || '—'}</span> },
+            /* 어느 통장으로 오갔는지 — 청구서와 달리 이 건들은 **이미 돈이 움직인 기록**이라
+               계좌가 곧 대사(對査) 기준이다. 통장을 맞춰볼 때 이 칸이 없으면 건마다 열어야 한다. */
+            { key: 'account', header: '계좌',
+              render: t => <span className="text-sm text-muted">{t.account || '—'}</span> },
+            { key: 'evid', header: '증빙', align: 'center',
+              render: t => (t.evid
+                ? <span className="badge pos" style={{ fontSize: 10 }}>있음</span>
+                : <span className="text-muted2 text-xs">—</span>) },
+            { key: 'amount', header: '금액', align: 'right', sortable: true,
+              render: t => <span className="num-cell fw-700">{fmtNum(t.amount)}</span> },
+          ]}/>
       )}
 
       <InvoiceDetailDrawer
