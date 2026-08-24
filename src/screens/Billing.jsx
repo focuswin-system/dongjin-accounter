@@ -8,6 +8,7 @@ import { useTableFilter, monthRange, activeMonthOf } from '../lib/tableFilter'
 import { ImportWizard } from '../lib/components/ImportWizard'
 import { VoucherView } from '../lib/components/VoucherView'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
+import { DocTypeChooser } from '../lib/components/DocTypeChooser'
 import { InvoiceLines, lineVat, blankLine, isFilledLine } from '../lib/components/InvoiceLines'
 import { StatementDoc } from '../lib/components/StatementDoc'
 import { computeLineAmount } from '../lib/lineAmount'
@@ -1069,7 +1070,10 @@ const PendingScheduleTable = ({ rows, onIssue, onPaid, isIssued = true, select }
 
 // ── 메인 BillingScreen ───────────────────────────────────────────
 // role='issue'(발행 청구서: 발행 중심) | 'collect'(입금·환불/지급·환입: 청구서 기준 회수 중심)
-export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefund, openReturn, focusInvoiceId }) => {
+export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefund, openReturn, focusInvoiceId,
+  /* 서류 선택에서 '계산서 아님'을 고르면 거래 등록 드로어로 넘긴다.
+     그 드로어는 App 이 소유하므로(여러 화면이 공유) 함수로 받아 호출만 한다. */
+  openExpense, openIncome }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const kind = initialTab              // 'issued'(대금청구) | 'received'(수취)
@@ -1083,6 +1087,9 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const [selected, setSelected] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
   const [editInvoice, setEditInvoice] = useState(null)
+  /* 등록 입구 — 청구서 폼을 바로 열지 않고 **받은 서류부터 묻는다**(DocTypeChooser 머리말).
+     고른 값을 상태로 남기지 않는 이유: 다음 건은 다른 서류일 수 있어서 매번 물어야 한다. */
+  const [chooserOpen, setChooserOpen] = useState(false)
   const [statusFilter, setStatusFilter] = useState(collect ? "미정산" : "전체")
   /* 기간은 **비워서 시작한다**(전체). 거래내역은 '이번 달'로 시작하는데, 청구서는 성격이 다르다 —
      미수금은 몇 달 전 것이 대부분이라 이번 달로 좁히면 정작 받을 돈이 안 보인다. */
@@ -1475,8 +1482,8 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
               <button className="btn" onClick={() => setImporting(true)}>
                 <Icon.Excel size={14}/> 홈택스 업로드
               </button>
-              <button className="btn primary" onClick={() => { setEditInvoice(null); setFormOpen(true) }}>
-                <Icon.Plus size={14}/> 청구서 {isIssued ? "발행" : "등록"}
+              <button className="btn primary" onClick={() => setChooserOpen(true)}>
+                <Icon.Plus size={14}/> {isIssued ? "입금" : "지급"} 등록
               </button>
             </>}
       />
@@ -1661,6 +1668,23 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
         onIssuePaid={(p) => issuePending(p, true)}
         onClose={() => setPaidTarget(null)}
         onDone={() => { setPaidTarget(null); load() }}/>
+
+      {/* 받은 서류로 갈리는 등록 입구.
+          · invoice → 이 화면의 청구서 폼 (미수금·미지급금 + 부가세에 잡힌다)
+          · expense/plain → 거래 등록 드로어 (청구서를 만들지 않는다)
+          거래 드로어는 App 이 소유하므로 함수가 없으면 청구서 폼으로 떨어뜨린다 —
+          입구가 죽는 것보다는 낫다(라우트마다 배선이 다를 수 있다). */}
+      <DocTypeChooser
+        open={chooserOpen}
+        kind={isIssued ? 'receive' : 'pay'}
+        onClose={() => setChooserOpen(false)}
+        onPick={(pick) => {
+          setChooserOpen(false)
+          if (pick === 'invoice' || (isIssued ? !openIncome : !openExpense)) {
+            setEditInvoice(null); setFormOpen(true); return
+          }
+          isIssued ? openIncome() : openExpense()
+        }}/>
     </div>
   )
 }

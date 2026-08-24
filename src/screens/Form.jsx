@@ -42,7 +42,14 @@ const FormField = ({ label, required, hint, children }) => (
 
 const TAX_INVOICE_GROUPS = ["재료비", "외주가공비", "시험·인증비"];
 
-export const TransactionForm = ({ open, kind: initialKind = "expense", initialContract, initialCostContract, initialVendor, initialCategory, initialMemo, editTxn, onClose, onSave }) => {
+export const TransactionForm = ({ open, kind: initialKind = "expense", initialContract, initialCostContract, initialVendor, initialCategory, initialMemo,
+  /* 경비 모드 — 영수증·카드전표로 나간 자잘한 돈을 적을 때. 주문 관련 칸(발주·원가 귀속)을 접는다.
+   *
+   * 왜 접나: 식대 8,000원을 적는데 '발주'와 '원가 귀속'을 지나쳐야 하면, 칸이 많아서가 아니라
+   * **읽고 판단해야 해서** 느려진다("이건 발주가 있나?"). 경비는 정의상 주문에 안 붙는 돈이라
+   * 그 판단이 늘 '아니오'다. 필요하면 '주문에 붙이기'로 펼 수 있게 두어 기능은 잃지 않는다. */
+  compact = false,
+  editTxn, onClose, onSave }) => {
   const toast = useToast();
   const [kind, setKind] = useState(initialKind);
   const [form, setForm] = useState(initialFormFor(initialKind, initialContract, "", initialCostContract));
@@ -62,6 +69,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   const [acctSubjects, setAcctSubjects] = useState([]); // 계정과목(선택)
   // 옛 거래에서 비워낸 자금 계정 코드 — 왜 비었는지 칸 아래에 설명하려고 기억해 둔다
   const [staleFundCode, setStaleFundCode] = useState('');
+  // 경비 모드에서 접어 둔 주문 칸을 사용자가 폈는가
+  const [showOrderFields, setShowOrderFields] = useState(false);
   const [contracts, setContracts] = useState([]);
   const [employees, setEmployees] = useState([]);
 
@@ -118,6 +127,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     if (open) {
       setKind(initialKind);
       setStaleFundCode('');
+      setShowOrderFields(false);
       setForm({ ...initialFormFor(initialKind, initialContract, accounts[0]?.name || "", initialCostContract),
         vendor: initialVendor || "",
         category: initialCategory || "",   // 환불·환입처럼 비목을 미리 지정하고 여는 경우
@@ -366,6 +376,15 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                 addNewLabel="거래처로 추가"/>
             </FormField>
 
+            {/* 경비 모드에서는 주문 두 칸을 접어 둔다. 수정 중이거나 이미 값이 있으면 편다 —
+                접어서 보이지 않는 칸에 값이 들어 있으면 "왜 이 주문에 붙었지"를 알 수 없다. */}
+            {compact && !showOrderFields && !form.contract && !form.costContract && (
+              <button type="button" className="btn ghost sm" style={{ alignSelf: 'flex-start' }}
+                onClick={() => setShowOrderFields(true)}>
+                <Icon.Plus size={12}/> 주문에 붙이기 (발주·원가 귀속)
+              </button>
+            )}
+            {(!compact || showOrderFields || form.contract || form.costContract) && <>
             <FormField label={kind === "income" ? "수주 (선택)" : "발주 (선택)"}
               hint={kind === "expense"
                 ? "이 돈이 나가는 근거 주문(외주·구매)이 있을 때만 고르세요. 경비·공과금처럼 주문 없이 쓰는 돈은 비워둡니다."
@@ -397,6 +416,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                   placeholder="귀속할 수주 (없으면 비워두세요)"/>
               </FormField>
             )}
+            </>}
 
             {/* 계정과목(선택) → 비목(필수) → 적요(필수) 순. 계정과목은 표준 분류라 기본 노출.
                 비워 두면 서버가 비목에 달린 계정과목을 넣는다(routes/transactions.js resolveAcctCode) —

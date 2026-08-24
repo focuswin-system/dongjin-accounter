@@ -551,8 +551,12 @@ function AppInner({ onLogout, user }) {
       case "billing":         return <BillingScreen/>;
       /* focusInvoiceId 를 넘긴다 — Ctrl+K 에서 청구서를 골랐는데 목록만 열리면
          찾은 것을 다시 찾아야 한다(BillingScreen 은 이미 이 값을 받아 그 건을 연다). */
-      case "billing_issued":  return <BillingScreen initialTab="issued"   focusInvoiceId={focusInvoiceId}/>;
-      case "billing_received":return <BillingScreen initialTab="received" focusInvoiceId={focusInvoiceId}/>;
+      /* 등록 입구가 '받은 서류'를 먼저 묻고, 계산서가 아니면 거래 드로어로 넘긴다
+         (Billing.jsx DocTypeChooser). 그래서 두 화면에 열기 함수를 내려준다. */
+      case "billing_issued":  return <BillingScreen initialTab="issued"   focusInvoiceId={focusInvoiceId}
+                                       openIncome={() => setTxnForm({ kind: "income" })}/>;
+      case "billing_received":return <BillingScreen initialTab="received" focusInvoiceId={focusInvoiceId}
+                                       openExpense={() => setTxnForm({ kind: "expense", compact: true })}/>;
       case "contract":        return <ContractListScreen kind="all" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
       case "contract_sales":  return <ContractListScreen kind="sales" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
       case "contract_purchase": return <ContractListScreen kind="purchase" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
@@ -875,7 +879,7 @@ function AppInner({ onLogout, user }) {
         </div>
       </main>
 
-      <TransactionForm open={txnForm !== null} kind={txnForm?.kind || "expense"} initialContract={txnForm?.contract} initialCostContract={txnForm?.costContract || null} initialVendor={txnForm?.vendor || null} initialCategory={txnForm?.category || null} initialMemo={txnForm?.memo || null} editTxn={txnForm?.txn || null} onClose={() => setTxnForm(null)} onSave={() => setTxnVersion(v => v + 1)}/>
+      <TransactionForm open={txnForm !== null} kind={txnForm?.kind || "expense"} initialContract={txnForm?.contract} initialCostContract={txnForm?.costContract || null} initialVendor={txnForm?.vendor || null} initialCategory={txnForm?.category || null} initialMemo={txnForm?.memo || null} compact={!!txnForm?.compact} editTxn={txnForm?.txn || null} onClose={() => setTxnForm(null)} onSave={() => setTxnVersion(v => v + 1)}/>
       <EvidenceAttachDrawer item={evidenceAttach} onClose={() => setEvidenceAttach(null)}/>
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onPick={(c) => {
         setCmdOpen(false);

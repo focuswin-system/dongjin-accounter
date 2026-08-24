@@ -791,6 +791,21 @@ a { color: inherit; text-decoration: none; }
   .search.tbar-search { width: 100%; display: flex; }
 }
 
+/* 등록 입구의 '서류 선택' 카드 — 누르는 것이 곧 다음 폼을 정한다.
+   카드처럼 보이되 button 이라 키보드 접근이 그대로 되고, 눌리는 곳임을 hover 로 알린다. */
+.doctype-pick {
+  width: 100%; text-align: left; cursor: pointer; padding: 14px 16px;
+  background: var(--card-bg, #fff); border: 1px solid var(--line);
+  transition: border-color .12s ease, background .12s ease;
+}
+.doctype-pick:hover { border-color: var(--brand); background: var(--hover-bg, rgba(0,0,0,.02)); }
+.doctype-pick:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.doctype-ico {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;
+  background: var(--brand-weak, rgba(0,0,0,.04)); color: var(--brand);
+}
+
 /* 정기청구·정기지출 '규칙' 목록 머리의 검색칸.
  * .search 만 붙이면 위 ≤480 규칙(.search { display:none })에 걸려 폰에서 **통째로 사라진다** —
  * 표 툴바 검색이 같은 이유로 안 보이던 것을 .search.tbar-search 로 고친 것과 같은 문제다.
