@@ -2346,14 +2346,20 @@ const catVatToMode = (catVat) => (catVat === '10%' ? 'exclusive' : catVat === '�
 // addGubu: 인라인으로 새 거래처를 만들 때 부여할 구분. 정기지출은 매입처(A).
 // reloadVendors: 부모가 거래처 목록을 다시 불러오게 하는 콜백(추가 후 새 id로 잡기 위함).
 // editing: 수정 대상(api.getRecurringExpenses 형태, camelCase). null이면 등록.
-const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], accounts = [], addGubu = 'A', reloadVendors }) => {
-  const empty = { vendor_id: "", category: "", amount: "", vat_mode: "exclusive", period: "monthly", day_of_month: "1", start_date: todayStr(), end_date: "", account_id: "", pay_term: "net30", pay_day: 1, evidence_required: false }
+const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], accounts = [], contracts = [], addGubu = 'A', reloadVendors }) => {
+  const empty = { vendor_id: "", contract_id: null, category: "", amount: "", vat_mode: "exclusive", period: "monthly", day_of_month: "1", start_date: todayStr(), end_date: "", account_id: "", pay_term: "net30", pay_day: 1, evidence_required: false }
   const [form, setForm] = useState(empty)
   // 비목은 반드시 실제 비목 마스터에서 고른다. 예전엔 ["임차료","통신비"…]를 하드코딩해서,
   // 마스터 이름과 한 글자라도 다르면(예: 마스터는 '통신비(관리)') 회차를 청구서로 만들 때
   // 비목을 못 찾아 부가세가 면세로 떨어졌다. 이름이 곧 조인 키다(recurring_expenses.category = categories.name).
   const [cats, setCats] = useState([])
   useEffect(() => { if (open) api.getCategories({ type: 'exp' }).then(setCats) }, [open])
+  /* 발주만 고르게 한다 — 나가는 돈에 수주를 걸면 원가가 엉뚱한 건에 붙는다.
+     방향 판정은 거래처 구분(A 외주·매입 / E 기관)이다(Contract.jsx isPurchase 와 같은 규칙).
+     ⚠ 목록 API 는 `gubu`, 상세 API 는 `vendor_gubu` 로 같은 값을 내려준다 —
+        한쪽만 보면 목록에서 온 계약이 통째로 걸러져 "등록된 발주가 없어요"가 된다. */
+  const purchaseGubu = (c) => c.vendor_gubu ?? c.gubu
+  const purchaseContracts = contracts.filter(c => ['A', 'E'].includes(purchaseGubu(c)))
   useEffect(() => {
     if (!open) return
     if (editing) {
@@ -2415,6 +2421,14 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
               toast.push(`"${nm}" 거래처가 등록됐어요`)
             }}
             addNewLabel="거래처로 추가"/>
+        </div>
+        {/* 나가는 돈이라 **발주**다. 정기청구의 '수주 연결'과 마주보는 자리다.
+            예전엔 이 칸이 아예 없어서, 발주에서 만든 정기지출을 여기서 열면 연결이 보이지도
+            않았다(값은 들고만 다녔다). 실제로 어느 발주 건인지가 원가 귀속의 근거다. */}
+        <div><label className="label">발주 연결 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+          <Combobox value={form.contract_id || ""} onChange={v => f("contract_id", v || null)} allowAdd={false}
+            options={purchaseContracts.map(c => ({ value: c.id, label: c.name, sub: c.vendor_name }))}
+            placeholder={purchaseContracts.length ? "발주 선택 (없으면 비워두기)" : "등록된 발주가 없어요"}/>
         </div>
         <div><label className="label">비목 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
           <Combobox value={form.category}
@@ -2560,21 +2574,27 @@ const FirstCycleHint = ({ startDate, dayOfMonth, period, verb, editing = false }
   )
 }
 
-/* 주문 기반 표시 — 이동 수단(onGo)이 있으면 버튼, 없으면 표시만.
-   눌러도 아무 일이 없는 버튼은 고장으로 읽힌다. */
-const ContractBadge = ({ name, onGo }) => (
-  onGo
-    ? <button className="badge brand" style={{ marginLeft: 6, fontSize: 10, cursor: 'pointer', border: 0 }}
-        title={`${name || '주문'} — 주문에서 관리`} onClick={onGo}><Icon.Link size={10}/> 주문</button>
-    : <span className="badge brand" style={{ marginLeft: 6, fontSize: 10 }}
-        title={`${name || '주문'} — 주문에서 관리`}>주문</span>
-)
+/* 계약 연결 표시 — 이동 수단(onGo)이 있으면 버튼, 없으면 표시만.
+   눌러도 아무 일이 없는 버튼은 고장으로 읽힌다.
 
-// 규칙 목록 필터 — 주문 기반은 금액·종료 시점의 출처가 주문이라 관리 경로가 다르다.
-const RULE_FILTERS = [
+   ⚠ '주문'이라 뭉뚱그리지 않는다. 들어오는 돈은 **수주**에서, 나가는 돈은 **발주**에서 온다 —
+   화면이 이미 contract_sales / contract_purchase 로 갈라 보내고 있는데 라벨만 같은 말이라
+   "어느 주문이지"를 눌러 봐야 알 수 있었다. 용어 결정도 영업 단계는 수주/발주다
+   (회계 단계인 청구서·미수금·부가세만 매출/매입을 유지한다). */
+const ContractBadge = ({ name, onGo, side = 'sales' }) => {
+  const word = side === 'purchase' ? '발주' : '수주'
+  const tip = `${name || word} — ${word}에서 관리`
+  return onGo
+    ? <button className="badge brand" style={{ marginLeft: 6, fontSize: 10, cursor: 'pointer', border: 0 }}
+        title={tip} onClick={onGo}><Icon.Link size={10}/> {word}</button>
+    : <span className="badge brand" style={{ marginLeft: 6, fontSize: 10 }} title={tip}>{word}</span>
+}
+
+// 규칙 목록 필터 — 계약 기반은 금액·종료 시점의 출처가 그 계약이라 관리 경로가 다르다.
+const ruleFilters = (side) => [
   { value: 'all', label: '전체' },
   { value: 'plain', label: '일반' },
-  { value: 'contract', label: '주문 기반' },
+  { value: 'contract', label: side === 'purchase' ? '발주 기반' : '수주 기반' },
 ]
 const filterRules = (rows, f) =>
   f === 'plain' ? rows.filter(r => !r.contractId)
@@ -2599,7 +2619,7 @@ const monthlyEquivalent = (rows, amountOf) => Math.round(rows
   .reduce((s, r) => s + amountOf(r) / (r.period === 'yearly' ? 12 : r.period === 'quarterly' ? 3 : 1), 0))
 
 // 규칙 목록 머리 — 건수·월 환산·검색·필터 칩. 정기청구와 정기지출이 같이 쓴다(둘은 대칭이다).
-const RuleListHeader = ({ title, rows, all, amountOf, q, setQ, ruleFilter, setRuleFilter, placeholder }) => (
+const RuleListHeader = ({ title, rows, all, amountOf, q, setQ, ruleFilter, setRuleFilter, placeholder, side = 'sales' }) => (
   <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
     <div>
       <div className="section-title" style={{ fontSize: 13 }}>
@@ -2615,7 +2635,7 @@ const RuleListHeader = ({ title, rows, all, amountOf, q, setQ, ruleFilter, setRu
       <input value={q} onChange={e => setQ(e.target.value)} placeholder={placeholder}/>
     </div>
     <div className="row gap-6">
-      {RULE_FILTERS.map(f => (
+      {ruleFilters(side).map(f => (
         <button key={f.value} className={`chip ${ruleFilter === f.value ? 'active' : ''}`}
           onClick={() => setRuleFilter(f.value)}>{f.label}</button>
       ))}
@@ -2633,6 +2653,8 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
   const [editing, setEditing] = useState(null)   // 수정 대상(없으면 등록)
   const [vendors, setVendors] = useState([])
   const [accounts, setAccounts] = useState([])
+  // 발주 연결 칸에 쓴다 — 폼에서 거르므로 여기서는 전부 받는다(정기청구 패널과 같은 방식)
+  const [contracts, setContracts] = useState([])
   const [ruleFilter, setRuleFilter] = useState('all')   // all | plain | contract
   const [q, setQ] = useState('')
 
@@ -2649,6 +2671,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
   useEffect(() => {
     reloadVendors()
     api.getAccounts().then(setAccounts)
+    api.getContracts().then(setContracts)
   }, [])
 
   const handleToggle = async (id) => {
@@ -2705,7 +2728,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
         onSkip={cyc.skip} onUnskip={cyc.unskip}
         onOpenContract={() => goRoute?.('contract_purchase')}/>
 
-      <RuleListHeader title="정기 지출 규칙" rows={ruleRows} all={rows} amountOf={r => Number(r.amount) || 0}
+      <RuleListHeader title="정기 지출 규칙" side="purchase" rows={ruleRows} all={rows} amountOf={r => Number(r.amount) || 0}
         q={q} setQ={setQ} ruleFilter={ruleFilter} setRuleFilter={setRuleFilter}
         placeholder="거래처·비목·발주"/>
       <div className="card" style={{ overflow: "hidden" }}>
@@ -2733,7 +2756,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
                   {r.vendor}
                   {/* 주문 기반은 금액·종료 시점의 출처가 주문이다 → 수정은 주문에서.
                       goRoute가 없는 자리(기준정보 탭)에서는 눌러도 아무 일이 없으니 표시만 한다 */}
-                  {r.contractId && <ContractBadge name={r.contractName} onGo={goRoute && (() => goRoute('contract_purchase'))}/>}
+                  {r.contractId && <ContractBadge name={r.contractName} side="purchase" onGo={goRoute && (() => goRoute('contract_purchase'))}/>}
                 </td>
                 <td className="text-sm text-muted">{r.category}</td>
                 <td className="num-cell num-right">{fmtNum(r.amount)}</td>
@@ -2768,7 +2791,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
         </table>
       </div>
       <RecurringFormDrawer open={formOpen} editing={editing} onClose={() => setFormOpen(false)} vendors={vendors} accounts={accounts}
-        addGubu="A" reloadVendors={reloadVendors}
+        contracts={contracts} addGubu="A" reloadVendors={reloadVendors}
         onSave={async (data) => {
           // 결과를 보지 않고 성공 문구를 띄우면, 저장이 실패해도 등록된 줄 알게 된다
           const res = editing ? await api.updateRecurringExpense(editing.id, data) : await api.addRecurringExpense(data)
@@ -2847,10 +2870,11 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
     <Drawer open={open} onClose={onClose} width="min(600px,100vw)" label="정기 청구">
       <DrawerHead title={editing ? "정기 청구 수정" : "정기 청구 등록"} onClose={onClose}/>
       <div className="drawer-body col gap-form">
-        <div><label className="label">주문 연결 <span className="text-muted">(선택)</span></label>
+        {/* 들어오는 돈이라 **수주**다. '주문'이라 두면 발주와 구별이 안 된다. */}
+        <div><label className="label">수주 연결 <span className="text-muted">(선택)</span></label>
           <Combobox value={form.contractId} onChange={pickContract} allowAdd={false}
             options={contracts.map(c => ({ value: c.id, label: c.name, sub: c.vendor_name }))}
-            placeholder="주문 선택 (없으면 비워두기)"/>
+            placeholder="수주 선택 (없으면 비워두기)"/>
         </div>
         <div><label className="label">고객사 (발주처)</label>
           <Combobox value={form.vendorId} onChange={v => f("vendorId", v)}
@@ -3052,14 +3076,14 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
         onSkip={cyc.skip} onUnskip={cyc.unskip}
         onOpenContract={() => goRoute?.('contract_sales')}/>
 
-      <RuleListHeader title="정기 청구 규칙" rows={ruleRows} all={rows} amountOf={totalOf}
+      <RuleListHeader title="정기 청구 규칙" side="sales" rows={ruleRows} all={rows} amountOf={totalOf}
         q={q} setQ={setQ} ruleFilter={ruleFilter} setRuleFilter={setRuleFilter}
-        placeholder="고객사·항목·주문"/>
+        placeholder="고객사·항목·수주"/>
       <div className="card" style={{ overflow: "hidden" }}>
         <table className="table">
           <thead>
             <tr>
-              <th>고객사</th><th>항목 / 주문</th><th className="num-right">청구액(VAT 포함)</th>
+              <th>고객사</th><th>항목 / 수주</th><th className="num-right">청구액(VAT 포함)</th>
               <th>주기</th><th>다음 예정</th><th style={{ width: 60 }}>상태</th><th style={{ width: 110 }}></th>
             </tr>
           </thead>
@@ -3077,11 +3101,11 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
               <tr key={r.id} style={{ opacity: r.active ? 1 : 0.45 }}>
                 <td className="fw-700">
                   {r.vendor}
-                  {r.contractId && <ContractBadge name={r.contractName} onGo={goRoute && (() => goRoute('contract_sales'))}/>}
+                  {r.contractId && <ContractBadge name={r.contractName} side="sales" onGo={goRoute && (() => goRoute('contract_sales'))}/>}
                 </td>
                 <td className="text-sm">
                   {r.item || "—"}
-                  {r.contractName && <div className="text-xs text-muted">주문: {r.contractName}</div>}
+                  {r.contractName && <div className="text-xs text-muted">수주: {r.contractName}</div>}
                 </td>
                 <td className="num-cell num-right">{fmtNum(totalOf(r))}</td>
                 <td className="text-sm">{PERIOD_LABEL[r.period]} {r.dayOfMonth}일</td>
