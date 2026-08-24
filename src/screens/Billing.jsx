@@ -1113,6 +1113,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   /* 등록 입구 — 청구서 폼을 바로 열지 않고 **받은 서류부터 묻는다**(DocTypeChooser 머리말).
      고른 값을 상태로 남기지 않는 이유: 다음 건은 다른 서류일 수 있어서 매번 물어야 한다. */
   const [chooserOpen, setChooserOpen] = useState(false)
+
   // 회수 모드는 '못 받은 것'을 보러 오는 화면이라 그 필터로 연다(아래 UNSETTLED 와 같은 값)
   const [statusFilter, setStatusFilter] = useState(collect ? (initialTab === "issued" ? "미수금" : "미지급금") : "전체")
   /* 기간은 **비워서 시작한다**(전체). 거래내역은 '이번 달'로 시작하는데, 청구서는 성격이 다르다 —
@@ -1233,6 +1234,19 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   })
   const vendorFilter = listF.values.vendor ?? null
   const setVendorFilter = (v) => listF.setValue('vendor', v)
+  /* 요약 카드를 누르면 **기간까지 전체로 풀어준다.**
+   *
+   * 카드의 숫자는 서버가 전 기간으로 센 값인데(GET /invoices/summary/receivables),
+   * 목록은 기본이 이번 달이다. 그래서 '미수금 3,300,000'을 눌러도 지난달 청구서면
+   * 표가 비어 "없는 것처럼" 보였다 — 카드가 있다고 말하는 것을 목록이 부정하는 셈이다.
+   * 게다가 그 미수금이 **언제 것인지 알 방법도 없었다**(기간을 하나씩 넓혀 봐야 했다).
+   * 카드는 "이 숫자의 내역을 보여줘"라는 뜻이므로, 그 숫자와 같은 범위로 열어야 한다. */
+  const showAllOf = (status) => {
+    setView("list")
+    setStatusFilter(status)
+    listF.setRange({ from: '', to: '' })
+  }
+
   const filtered = useMemo(() => listF.apply(byStatus), [byStatus, listF.apply])
 
   /* 미발행 건도 **같은 기간·거래처**로 거른다.
@@ -1573,9 +1587,9 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
             {!collect && pending.length > 0 && <SummaryCard label="청구할 것" amount={pendingTotal} count={pending.length} accent="brand"
               onClick={() => setView("pending")} hint="계약 일정에서 도래한 건 보기"/>}
             <SummaryCard label={collect ? "받을 미수금" : "미수금 합계"} amount={recSummary?.total ?? 0} count={recSummary?.count ?? 0} accent="blue"
-              onClick={() => { setView("list"); setStatusFilter(UNSETTLED) }} hint="못 받은 청구서 보기"/>
+              onClick={() => showAllOf(UNSETTLED)} hint="전체 기간에서 못 받은 청구서 보기"/>
             <SummaryCard label="연체 미수금" amount={recSummary?.overdueAmount ?? 0} count={recSummary?.overdueCount ?? 0} accent="neg" warn
-              onClick={() => { setView("list"); setStatusFilter("기한 지남") }} hint="기한 지난 것만 보기"/>
+              onClick={() => showAllOf("기한 지남")} hint="전체 기간에서 기한 지난 것만 보기"/>
           </>
         ) : (
           <>
@@ -1586,9 +1600,9 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
             {!collect && pending.length > 0 && <SummaryCard label="지급할 것" amount={pendingTotal} count={pending.length} accent="brand"
               onClick={() => setView("pending")} hint="계약 일정에서 도래한 건 보기"/>}
             <SummaryCard label={collect ? "줄 미지급금" : "미지급금 합계"} amount={paySum?.total ?? 0} count={paySum?.count ?? 0} accent="warn"
-              onClick={() => { setView("list"); setStatusFilter(UNSETTLED) }} hint="안 낸 청구서 보기"/>
+              onClick={() => showAllOf(UNSETTLED)} hint="전체 기간에서 안 낸 청구서 보기"/>
             <SummaryCard label="연체 미지급금" amount={paySum?.overdueAmount ?? 0} count={paySum?.overdueCount ?? 0} accent="neg" warn
-              onClick={() => { setView("list"); setStatusFilter("기한 지남") }} hint="기한 지난 것만 보기"/>
+              onClick={() => showAllOf("기한 지남")} hint="전체 기간에서 기한 지난 것만 보기"/>
           </>
         )}
       </div>
@@ -1631,7 +1645,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           <>
           <span aria-hidden="true" style={{ width: 1, height: 16, background: 'var(--line)', margin: '0 2px' }}/>
           <button className={`chip ${view === "plain" ? "active" : ""}`} onClick={() => setView("plain")}>
-            {isIssued ? "미발행 입금" : "미등록 지급"}<span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{plainFiltered.length}</span>
+            {isIssued ? "계산서 없는 입금" : "계산서 없는 지급"}<span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{plainFiltered.length}</span>
           </button>
           </>
         )}
