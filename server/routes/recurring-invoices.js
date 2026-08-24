@@ -19,6 +19,9 @@ const payDayFor = (term, v) => (PAY_TERMS_WITH_DAY.includes(term) ? Math.min(Mat
    말없이 30일 뒤로 되돌아갔다 — 이 핸들러가 고치려던 결함과 같은 종류가 반대 방향으로 열려 있었다. */
 const payTermFor = (v, cur) => (v == null || v === '' ? (cur || 'net30') : payTermOf(v))
 
+/** 증빙 요구 플래그 — 체크박스가 true/1/'1' 어느 모양으로 와도 같은 값으로 굳힌다 */
+const evidFlag = (v) => (v === true || v === 1 || v === '1' ? 1 : 0)
+
 /* 정기청구로 발행하는 청구서의 과세유형.
    정기청구 규칙의 vat_mode는 exclusive/none 두 값뿐이라 면세와 영세를 구분하지 못한다
    → 주문에 걸린 정기청구면 주문의 vat_mode(taxable/exempt/zero)를 따른다. */
@@ -56,8 +59,8 @@ router.post('/', async (req, res, next) => {
        비워 두면 **등록일부터** 세도록 엔진이 받아준다(lib/recurrence.js 앵커 폴백).
        빈 문자열은 '미지정'을 뜻한다. */
     await req.db.execute(
-      'INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id, pay_term, pay_day) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [id, vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', period||'monthly', day_of_month||1, start_date||'', end_date||null, account_id||null, payTermOf(req.body.pay_term), payDayFor(payTermOf(req.body.pay_term), req.body.pay_day)]
+      'INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id, pay_term, pay_day, evidence_required) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [id, vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', period||'monthly', day_of_month||1, start_date||'', end_date||null, account_id||null, payTermOf(req.body.pay_term), payDayFor(payTermOf(req.body.pay_term), req.body.pay_day), evidFlag(req.body.evidence_required)]
     )
     res.json({ id })
   } catch (e) { next(e) }
@@ -67,12 +70,16 @@ router.put('/:id', async (req, res, next) => {
   try {
     const { vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id } = req.body
     // pay_term 이 빠져 있어서, 등록할 때 고른 결제조건을 수정 화면에서 바꿔도 저장되지 않았다
-    const [[cur]] = await req.db.execute('SELECT pay_term, pay_day FROM recurring_invoices WHERE id = ?', [req.params.id])
+    const [[cur]] = await req.db.execute('SELECT pay_term, pay_day, evidence_required FROM recurring_invoices WHERE id = ?', [req.params.id])
     if (!cur) return res.status(404).json({ error: 'Not found' })
+    // 안 보냈으면 기존 값 유지 — 부분 바디 저장에 켜 둔 값이 꺼지지 않게(정기지출과 같은 규칙)
+    const evidenceRequired = req.body.evidence_required === undefined
+      ? (cur.evidence_required ? 1 : 0) : evidFlag(req.body.evidence_required)
     const [result] = await req.db.execute(
-      'UPDATE recurring_invoices SET vendor_id=?, contract_id=?, item=?, supply_amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=?, pay_term=?, pay_day=? WHERE id=?',
+      'UPDATE recurring_invoices SET vendor_id=?, contract_id=?, item=?, supply_amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=?, pay_term=?, pay_day=?, evidence_required=? WHERE id=?',
       [vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, payTermFor(req.body.pay_term, cur.pay_term),
-       payDayFor(payTermFor(req.body.pay_term, cur.pay_term), req.body.pay_day ?? cur.pay_day), req.params.id]
+       payDayFor(payTermFor(req.body.pay_term, cur.pay_term), req.body.pay_day ?? cur.pay_day),
+       evidenceRequired, req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })

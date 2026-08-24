@@ -1330,6 +1330,25 @@ async function initDb(conn) {
     await ensureEnum('loans', 'method', ['equal_payment', 'equal_principal', 'bullet', 'none'],
       "NOT NULL DEFAULT 'equal_payment'")
 
+    /* 증빙 추적 — "이 건은 증빙이 필요한가" 와 "그 증빙을 받았나"는 **다른 질문**이다.
+     *
+     * 필요 여부는 **규칙**에 붙는다(매달 같은 성격이니까). 서버 사용료처럼 카드로 나가고
+     * 세금계산서가 오는 건은 매달 증빙을 챙겨야 하고, 대표 가수금 상환처럼 서류가 없는 건은
+     * 매달 챙길 게 없다. 규칙에 적어 두면 회차마다 다시 판단하지 않아도 된다.
+     *
+     * 받았는지는 **회차**에 붙는다. 그리고 두 가지 방식을 다 받는다:
+     *   · 파일을 붙였다        → 그 자체로 증빙이 있는 것
+     *   · 파일은 없지만 확인했다 → 체크로 닫는다(원본이 종이로 오는 곳이 아직 많다)
+     * 파일 유무만으로 판정하면 종이 증빙을 쓰는 회사는 영원히 '미비'로 남는다.
+     *
+     * 기본값 0(필요 없음)으로 시작한다 — 켜는 순간 기존 건이 전부 '증빙 미비'로 뜨면
+     * 그 목록은 아무도 안 본다. 필요한 규칙만 켜서 쓰게 한다. */
+    await ensureColumn('recurring_invoices', 'evidence_required', "evidence_required TINYINT NOT NULL DEFAULT 0")
+    await ensureColumn('recurring_expenses', 'evidence_required', "evidence_required TINYINT NOT NULL DEFAULT 0")
+    // 회차 쪽 — 파일이 없어도 '확인함'으로 닫을 수 있는 칸
+    await ensureColumn('invoices',     'evidence_ok', "evidence_ok TINYINT NOT NULL DEFAULT 0")
+    await ensureColumn('transactions', 'evid_ok',     "evid_ok TINYINT NOT NULL DEFAULT 0")
+
     await ensureColumn('recurring_expenses', 'pay_term', "pay_term VARCHAR(12) NOT NULL DEFAULT 'net30'")
     await ensureColumn('recurring_invoices', 'pay_term', "pay_term VARCHAR(12) NOT NULL DEFAULT 'net30'")
     /* 결제조건이 '당월 N일'·'익월 N일'일 때의 N. 다른 조건에서는 안 쓴다(0).

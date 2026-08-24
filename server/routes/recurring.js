@@ -25,6 +25,9 @@ const payDayFor = (term, v) => (PAY_TERMS_WITH_DAY.includes(term) ? Math.min(Mat
    말없이 30일 뒤로 되돌아갔다 — 이 핸들러가 고치려던 결함과 같은 종류가 반대 방향으로 열려 있었다. */
 const payTermFor = (v, cur) => (v == null || v === '' ? (cur || 'net30') : payTermOf(v))
 
+/** 증빙 요구 플래그 — 체크박스가 true/1/'1' 어느 모양으로 와도 같은 값으로 굳힌다 */
+const evidFlag = (v) => (v === true || v === 1 || v === '1' ? 1 : 0)
+
 /* 정기지출의 부가세: amount(합계 = VAT 포함)에서 세액을 뺀다.
    vat_mode가 저장돼 있으면(폼에서 직접 선택) 그걸 쓰고, 없으면(옛 데이터) 비목 categories.vat를 따른다. */
 const expenseVat = (total, vatMode, catVat) =>
@@ -54,8 +57,8 @@ router.post('/', async (req, res, next) => {
     if (!(Number(amount) > 0)) return res.status(400).json({ error: '금액을 입력해주세요' })
     const id = randomUUID()
     await req.db.execute(
-      'INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id, pay_term, pay_day) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [id, vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, payTermOf(req.body.pay_term), payDayFor(payTermOf(req.body.pay_term), req.body.pay_day)]
+      'INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id, pay_term, pay_day, evidence_required) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [id, vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, payTermOf(req.body.pay_term), payDayFor(payTermOf(req.body.pay_term), req.body.pay_day), evidFlag(req.body.evidence_required)]
     )
     res.json({ id })
   } catch (e) { next(e) }
@@ -64,12 +67,18 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const { vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id } = req.body
-    const [[cur]] = await req.db.execute('SELECT pay_term, pay_day FROM recurring_expenses WHERE id = ?', [req.params.id])
+    const [[cur]] = await req.db.execute('SELECT pay_term, pay_day, evidence_required FROM recurring_expenses WHERE id = ?', [req.params.id])
     if (!cur) return res.status(404).json({ error: 'Not found' })
+    /* 안 보냈으면 기존 값 유지 — pay_term 과 같은 규칙이다. 부분 바디로 저장하는 화면이
+       있어서, 0 으로 떨어뜨리면 켜 둔 증빙 요구가 말없이 꺼진다.
+       값 배열 안에서 삼항으로 쓰면 자리 수를 눈으로 못 세니 밖에서 정한다. */
+    const evidenceRequired = req.body.evidence_required === undefined
+      ? (cur.evidence_required ? 1 : 0) : evidFlag(req.body.evidence_required)
     const [result] = await req.db.execute(
-      'UPDATE recurring_expenses SET vendor_id=?, contract_id=?, category=?, amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=?, pay_term=?, pay_day=? WHERE id=?',
+      'UPDATE recurring_expenses SET vendor_id=?, contract_id=?, category=?, amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=?, pay_term=?, pay_day=?, evidence_required=? WHERE id=?',
       [vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, period||'monthly', day_of_month||1, start_date, end_date||null, account_id||null, payTermFor(req.body.pay_term, cur.pay_term),
-       payDayFor(payTermFor(req.body.pay_term, cur.pay_term), req.body.pay_day ?? cur.pay_day), req.params.id]
+       payDayFor(payTermFor(req.body.pay_term, cur.pay_term), req.body.pay_day ?? cur.pay_day),
+       evidenceRequired, req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })

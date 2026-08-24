@@ -758,6 +758,19 @@ router.post('/split', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/* 증빙 확인 — 청구서에 붙은 파일(invoice_docs)이 없어도 '확인함'으로 닫을 수 있게 한다.
+ * 왜 체크가 필요한지는 lib/evidence.js 머리말 참조(종이 원본만 오는 곳이 있다).
+ * 다른 칸은 건드리지 않는다 — 이 라우트는 오직 이 한 칸을 위한 것이다. */
+router.patch('/:id/evidence', async (req, res, next) => {
+  try {
+    if (req.body.evidence_ok === undefined) return res.status(400).json({ error: '바꿀 값이 없어요' })
+    const [result] = await req.db.execute(
+      'UPDATE invoices SET evidence_ok=? WHERE id=?', [req.body.evidence_ok ? 1 : 0, req.params.id])
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
 router.put('/:id', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {

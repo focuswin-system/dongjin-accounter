@@ -363,14 +363,24 @@ router.patch('/:id/status', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// 증빙(레거시 단일)만 갱신 — 다른 필드 보존
+/* 증빙만 갱신 — 다른 필드 보존.
+ *
+ * evid_ok 는 **파일이 없을 때 쓰는 문**이다. 원본이 종이로만 오는 곳이 아직 많아서,
+ * 파일 유무로만 판정하면 그런 회사는 영원히 '증빙 미비'로 남고 그 목록을 아무도 안 본다.
+ * (판정 규칙은 lib/evidence.js 한 곳에 있다 — 화면마다 다르게 세면 둘 다 못 믿는다.)
+ *
+ * ⚠ **보낸 칸만 쓴다.** 예전엔 셋을 무조건 덮어써서, 확인 체크만 보내면 붙여 둔 파일 주소가
+ *   빈 문자열로 지워졌다(청구서 PUT·비목 PUT 에서 고친 것과 같은 유형). */
 router.patch('/:id/evidence', async (req, res, next) => {
   try {
-    const { evid_url, evid_type } = req.body
+    const { evid_url, evid_type, evid_ok } = req.body
+    const sets = [], vals = []
+    if (evid_url  !== undefined) { sets.push('evid_url=?');  vals.push(evid_url || '') }
+    if (evid_type !== undefined) { sets.push('evid_type=?'); vals.push(evid_type || '') }
+    if (evid_ok   !== undefined) { sets.push('evid_ok=?');   vals.push(evid_ok ? 1 : 0) }
+    if (!sets.length) return res.status(400).json({ error: '바꿀 값이 없어요' })
     const [result] = await req.db.execute(
-      'UPDATE transactions SET evid_url=?, evid_type=? WHERE id=?',
-      [evid_url||'', evid_type||'', req.params.id]
-    )
+      `UPDATE transactions SET ${sets.join(', ')} WHERE id=?`, [...vals, req.params.id])
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
   } catch (e) { next(e) }

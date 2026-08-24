@@ -2347,7 +2347,7 @@ const catVatToMode = (catVat) => (catVat === '10%' ? 'exclusive' : catVat === '�
 // reloadVendors: 부모가 거래처 목록을 다시 불러오게 하는 콜백(추가 후 새 id로 잡기 위함).
 // editing: 수정 대상(api.getRecurringExpenses 형태, camelCase). null이면 등록.
 const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], accounts = [], addGubu = 'A', reloadVendors }) => {
-  const empty = { vendor_id: "", category: "", amount: "", vat_mode: "exclusive", period: "monthly", day_of_month: "1", start_date: todayStr(), end_date: "", account_id: "", pay_term: "net30", pay_day: 1 }
+  const empty = { vendor_id: "", category: "", amount: "", vat_mode: "exclusive", period: "monthly", day_of_month: "1", start_date: todayStr(), end_date: "", account_id: "", pay_term: "net30", pay_day: 1, evidence_required: false }
   const [form, setForm] = useState(empty)
   // 비목은 반드시 실제 비목 마스터에서 고른다. 예전엔 ["임차료","통신비"…]를 하드코딩해서,
   // 마스터 이름과 한 글자라도 다르면(예: 마스터는 '통신비(관리)') 회차를 청구서로 만들 때
@@ -2366,6 +2366,7 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
         vat_mode: editing.vatMode || "exclusive",
         period: editing.period || "monthly", day_of_month: String(editing.dayOfMonth || 1),
         pay_term: editing.payTerm || editing.pay_term || "net30", pay_day: editing.payDay || editing.pay_day || 1,
+        evidence_required: !!(editing.evidence_required ?? editing.evidenceRequired),
         start_date: editing.startDate || todayStr(), end_date: editing.endDate || "",
         account_id: editing.accountId || "",
       })
@@ -2386,6 +2387,7 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
       amount: parseInt(String(form.amount).replace(/[^0-9]/g, "")) || 0,
       day_of_month: parseInt(form.day_of_month) || 1,
       pay_term: form.pay_term || 'net30',
+      evidence_required: !!form.evidence_required,
       pay_day: parseInt(form.pay_day, 10) || 1,
       end_date: form.end_date || null,
     })
@@ -2476,6 +2478,25 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
           </div>
           <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
             {payTermHint(form.pay_term, form.pay_day, '빠져요')}
+          </div>
+        </div>
+        {/* 증빙 요구 — **규칙**에 붙는다. 매달 같은 성격이라 회차마다 다시 판단할 이유가 없다.
+            서버 사용료처럼 세금계산서가 오는 건은 매달 챙겨야 하고, 대표 가수금 상환처럼
+            서류가 없는 건은 챙길 게 없다. 켠 규칙에서 나온 회차만 '증빙 미비'로 센다 —
+            전부 켜 두면 미비 목록이 길어져 아무도 안 본다. */}
+        <div>
+          <label className="label">증빙</label>
+          <div className="row gap-4">
+            {[[false, '필요 없음'], [true, '서류를 챙겨야 함']].map(([v, l]) => (
+              <button key={String(v)} type="button"
+                className={`chip ${!!form.evidence_required === v ? 'active' : ''}`}
+                onClick={() => f('evidence_required', v)}>{l}</button>
+            ))}
+          </div>
+          <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
+            {form.evidence_required
+              ? '회차마다 증빙을 받았는지 확인합니다. 파일을 붙이거나 «확인» 표시로 닫을 수 있어요.'
+              : '증빙을 따로 챙기지 않는 건이에요. 미비 목록에 뜨지 않습니다.'}
           </div>
         </div>
         <div className="row gap-12">
@@ -2768,7 +2789,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
 // ── 정기 청구(고정수입) 패널 ──────────────────────────────────────
 const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, contracts, accounts, reloadVendors }) => {
   const toast = useToast()
-  const empty = { vendorId: "", contractId: "", item: "", supply: "", vatMode: "exclusive", period: "monthly", dayOfMonth: "1", startDate: todayStr(), endDate: "", accountId: "", payTerm: "net30", payDay: 1 }
+  const empty = { vendorId: "", contractId: "", item: "", supply: "", vatMode: "exclusive", period: "monthly", dayOfMonth: "1", startDate: todayStr(), endDate: "", accountId: "", payTerm: "net30", payDay: 1, evidenceRequired: false }
   const [form, setForm] = useState(empty)
   useEffect(() => {
     if (!open) return
@@ -2779,6 +2800,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
       dayOfMonth: String(editing.dayOfMonth || 1), startDate: editing.startDate || todayStr(),
       endDate: editing.endDate || "", accountId: editing.accountId || "",
       payTerm: editing.payTerm || "net30", payDay: editing.payDay || 1,
+      evidenceRequired: !!(editing.evidenceRequired ?? editing.evidence_required),
     } : empty)
   }, [open, editing])
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
@@ -2815,6 +2837,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
       endDate: form.endDate || null,
       accountId: form.accountId || null,
       payTerm: form.payTerm || 'net30',
+      evidence_required: !!form.evidenceRequired,
       payDay: parseInt(form.payDay, 10) || 1,
     })
     onClose()
@@ -2896,6 +2919,23 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
           </div>
           <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
             {payTermHint(form.payTerm, form.payDay, '들어와요')}
+          </div>
+        </div>
+        {/* 증빙 요구 — 정기지출 폼과 같은 값·같은 문구(둘은 대칭이다).
+            매출 쪽은 '우리가 발행한 계산서 사본'이나 검수확인서처럼 챙겨야 할 서류가 있는 건에 켠다. */}
+        <div>
+          <label className="label">증빙</label>
+          <div className="row gap-4">
+            {[[false, '필요 없음'], [true, '서류를 챙겨야 함']].map(([v, l]) => (
+              <button key={String(v)} type="button"
+                className={`chip ${!!form.evidenceRequired === v ? 'active' : ''}`}
+                onClick={() => f('evidenceRequired', v)}>{l}</button>
+            ))}
+          </div>
+          <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
+            {form.evidenceRequired
+              ? '회차마다 증빙을 받았는지 확인합니다. 파일을 붙이거나 «확인» 표시로 닫을 수 있어요.'
+              : '증빙을 따로 챙기지 않는 건이에요. 미비 목록에 뜨지 않습니다.'}
           </div>
         </div>
         <div className="row gap-12">

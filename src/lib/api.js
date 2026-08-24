@@ -864,6 +864,8 @@ export const api = {
         // 결제조건 — 이게 빠져 있어서 수정 화면이 늘 '30일 후'로 되돌아갔다
         payTerm: r.pay_term || 'net30',
         payDay: Number(r.pay_day) || 0,
+        // 이 규칙에서 나온 회차가 증빙을 챙겨야 하는가 — 미비 집계의 기준
+        evidenceRequired: r.evidence_required === 1 || r.evidence_required === true,
         active: r.active === 1,
         lastGenerated: r.last_generated,
       }))
@@ -962,6 +964,8 @@ export const api = {
         // 회차일과 실제로 입금되는 날은 다르다 — 자금 예측이 이 값으로 날짜를 세운다
         payTerm: r.pay_term || 'net30',
         payDay: Number(r.pay_day) || 0,
+        // 이 규칙에서 나온 회차가 증빙을 챙겨야 하는가 — 미비 집계의 기준
+        evidenceRequired: r.evidence_required === 1 || r.evidence_required === true,
         active: r.active === 1,
         lastGenerated: r.last_generated,
       }))
