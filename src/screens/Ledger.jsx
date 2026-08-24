@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Popover, PopItem, StatusBadge, periodToRange, FilterSelect, Drawer, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, StatusBadge, periodToRange, FilterSelect, Drawer, localToday } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DataTable } from '../lib/components/DataTable'
 import { TableToolbar } from '../lib/components/TableToolbar'
@@ -11,7 +11,9 @@ import { ResolutionDocument } from './Docs'
 
 // CSV 저장은 보고서 내보내기와 같은 것을 쓴다 → lib/export.js
 
-export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, openEdit, openExcel, openInvoice, refreshTrigger }) => {
+/* 거래내역 — **조회 화면**. openIncome/openExpense 를 더 받지 않는다(등록 입구는 여기 없다).
+   화면에서 뺀 것은 배선까지 은퇴시킨다 — 남겨 두면 다음 사람이 "쓰는 줄 알고" 다시 버튼을 단다. */
+export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openInvoice, refreshTrigger }) => {
   const toast = useToast();
   const { confirm } = useConfirm();
   const [filter, setFilter] = useState(initialFilter);
@@ -186,10 +188,23 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
   ];
 
   const titleMap = { all: "거래내역", income: "거래내역 · 입금", expense: "거래내역 · 지출" };
+  /* 이 화면은 **조회하는 곳**이다.
+   *
+   * 여기 있는 모든 줄은 다른 화면에서 만들어진다 — 입금은 수시입금·정기입금에서,
+   * 지급은 수시지급·정기지급·경비에서, 급여는 인사급여에서. 거래내역은 그 전부가
+   * 한 자리에 모여 "그래서 통장에 무슨 일이 있었나"를 보는 곳이다.
+   *
+   * 그래서 문구가 **등록을 시키면 안 된다.** 예전엔 "…등록하고 처리하세요"라고 적어 두고
+   * 상단에 '거래 등록' 버튼까지 세워 뒀는데, 그러면 같은 거래를 만드는 입구가 두 벌이 된다 —
+   * 회계 분류를 먼저 묻지 않는 이 입구로 들어오면 서류 선택(DocTypeChooser)이 걸러 주던
+   * 것들을 그냥 지나친다. 보다가 이상한 줄을 찾으면 그 줄을 열어 고치면 된다. 그건 됐다.
+   * 다만 **권하지는 않는다.** */
+  /* ⚠ 이 표는 오랫동안 **정의만 돼 있고 화면에 안 붙어 있었다.** 등록 버튼을 뺀 지금은
+     이 줄이 있어야 한다 — "그럼 등록은 어디서 하지"에 그 자리에서 답해 줘야 하기 때문이다. */
   const subMap = {
-    all:     "실제로 오간 모든 입금·지출 기록이에요. 미수금·미지급금은 판매·수주(매출)의 '미수금', 매입의 '미지급금'에서 관리해요.",
-    income:  "발주처에서 들어온 돈을 등록하고 처리하세요.",
-    expense: "외주가공·자재·운영비를 등록하고 결의·이체로 처리하세요.",
+    all:     "실제로 오간 모든 입금·지출을 한자리에서 봅니다. 이상한 줄이 있으면 눌러서 확인하세요. 등록은 입금관리·지급처리에서 해요.",
+    income:  "들어온 돈을 모아 봅니다. 등록은 입금관리에서 해요.",
+    expense: "나간 돈을 모아 봅니다. 등록은 지급처리에서 해요.",
   };
 
   return (
@@ -197,16 +212,13 @@ export const LedgerScreen = ({ initialFilter = "all", openIncome, openExpense, o
       <div className="fade-up">
         <PageHeader
           title={titleMap[filter]}
+          sub={subMap[filter]}
+          /* '거래 등록'을 여기서 뺐다 — 등록 입구는 입금관리·지급처리 쪽 하나로 모은다.
+             남은 둘은 조회의 연장이다(엑셀로 한꺼번에 들여오기 / 본 것을 내보내기).
+             둘 다 primary 가 아니다 — 이 화면에서 제일 하고 싶은 일이 아니다. */
           actions={<>
             <button className="btn excel" onClick={openExcel}><Icon.Excel/> <span className="btn-label-hide">엑셀 업로드</span></button>
             <button className="btn" onClick={exportCsv}><Icon.Download/> <span className="btn-label-hide">내보내기</span></button>
-            <Popover align="right" width={220}
-              trigger={<button className="btn primary"><Icon.Plus/> {filter === "ar" ? "입금·환불" : filter === "ap" ? "지급·환입" : "거래 등록"} <Icon.Down size={12} style={{ marginLeft: 2 }}/></button>}>
-              <div style={{ padding: 6 }}>
-                <PopItem icon={<Icon.In size={16}/>}  label="입금 등록" onClick={openIncome}/>
-                <PopItem icon={<Icon.Out size={16}/>} label="지출 등록" onClick={openExpense}/>
-              </div>
-            </Popover>
           </>}
         />
 
@@ -399,18 +411,23 @@ const TxnActions = ({ txn, toast, confirm, onAction }) => {
     }
   };
 
+  /* ⚠ 이 버튼들은 **primary 가 아니다.**
+     조회하러 온 화면에서 도래한 줄마다 채운 버튼이 서 있으면 "여기서 처리하는 게 보통"으로
+     읽힌다. 입금·지급 처리는 자기 화면(수시입금·수시지급)이 따로 있고, 거기에는 정산 계좌·
+     날짜를 받는 절차가 붙어 있다. 여기서는 보다가 눈에 띈 것을 **할 수 있게만** 둔다.
+     capability 는 그대로, 권유만 뺀다. */
   if (txn.kind === "income" && ["입금 예정", "일부 입금"].includes(txn.status))
-    return <button className="btn primary sm" onClick={doIncome}>입금 처리</button>;
+    return <button className="btn sm" onClick={doIncome}>입금 처리</button>;
 
   /* 장기 미수도 할 수 있는 건 '입금 처리'뿐이다.
      (제거) '독촉' 버튼 — 눌러도 "준비 중이에요" 토스트만 떴다. 정직하긴 했지만 누를 수 있는
      버튼이 있으면 기대가 생기고, 장기 미수 행마다 매번 그 실망을 반복하게 된다.
      메일 발송을 실제로 붙일 때 청구서 상세의 독촉과 함께 되살린다. */
   if (txn.kind === "income" && txn.status === "장기 미수")
-    return <button className="btn primary sm" onClick={doIncome}>입금 처리</button>;
+    return <button className="btn sm" onClick={doIncome}>입금 처리</button>;
 
   if (txn.kind === "expense" && ["지급 예정", "지급 대기", "기한 지남"].includes(txn.status))
-    return <button className="btn primary sm" onClick={doExpense}>이체 실행</button>;
+    return <button className="btn sm" onClick={doExpense}>이체 실행</button>;
 
   return <span className="text-xs text-muted2">—</span>;
 };
@@ -547,7 +564,10 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
 
         <div className="drawer-foot">
           <button className="btn" onClick={onClose}>닫기</button>
-          <button className="btn" style={{ color: "var(--neg-ink)", borderColor: "var(--neg)", background: "var(--neg-soft)" }} onClick={async () => {
+          {/* 삭제는 **눈에 덜 띄게** 둔다. 조회하러 온 화면에서 붉게 채운 버튼이 늘 왼쪽에
+              서 있으면 "여기서 지우는 게 보통"으로 읽힌다. 지울 수는 있어야 하니 남기되,
+              바탕을 빼고 글자만 붉게 둔다. */}
+          <button className="btn" style={{ color: "var(--neg-ink)" }} onClick={async () => {
             const ok = await confirm({ tone: "neg", icon: <Icon.Warn size={22}/>, title: "거래 삭제", body: `${txn.vendor} · ${fmtNum(txn.amount)}원 거래를 삭제합니다. 복구할 수 없어요.`, confirmLabel: "삭제" });
             if (ok) {
               const res = await api.deleteTransaction(txn.id);
@@ -562,13 +582,13 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
             <button className="btn" onClick={() => setVoucherOpen(true)}><Icon.Book size={14}/> 전표</button>
             <button className="btn" onClick={() => { onClose(); openEdit?.(txn); }}><Icon.Pencil size={14}/> 편집</button>
             {txn.kind === "income" && ["입금 예정", "일부 입금", "장기 미수"].includes(txn.status) && (
-              <button className="btn primary" onClick={async () => {
+              <button className="btn" onClick={async () => {
                 const ok = await confirm({ tone: "brand", icon: <Icon.In size={22}/>, title: "입금 처리", body: `${fmtNum(txn.amount)}원을 입금 완료로 처리합니다.`, confirmLabel: "입금 처리" });
                 if (ok) { const res = await api.updateTransactionStatus(txn.id, "입금완료"); if (res.ok) { toast.push("입금이 처리됐어요"); onClose(); onAction?.(); } else toast.push(res.error || "처리에 실패했어요", { tone: "warn" }); }
               }}><Icon.Check size={14}/> 입금 처리</button>
             )}
             {txn.kind === "expense" && ["지급 예정", "지급 대기", "기한 지남"].includes(txn.status) && (
-              <button className="btn primary" onClick={async () => {
+              <button className="btn" onClick={async () => {
                 const ok = await confirm({ tone: "neg", icon: <Icon.Bank size={22}/>, title: "이체 실행", body: `${fmtNum(txn.amount)}원을 지급완료로 처리합니다.`, confirmLabel: "이체 실행" });
                 if (ok) { const res = await api.updateTransactionStatus(txn.id, "지급완료"); if (res.ok) { toast.push("이체가 완료됐어요"); onClose(); onAction?.(); } else toast.push(res.error || "처리에 실패했어요", { tone: "warn" }); }
               }}><Icon.Bank size={14}/> 이체 실행</button>

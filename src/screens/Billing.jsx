@@ -1057,7 +1057,7 @@ const SubtotalChips = ({ title, note, rows, onPick, activeKey, limit = 12, moreH
   )
 }
 
-// ── 발행 예정(대기) 청구 일정 테이블 ─────────────────────────────
+// ── 발행예정(대기) 청구 일정 테이블 ─────────────────────────────
 // 주문에 깔아둔 청구/지급 일정 → 아직 청구서가 안 만들어진 건. 매출은 '발행', 매입은 '등록' 관점.
 const PendingScheduleTable = ({ rows, onIssue, onPaid, isIssued = true, select }) => (
   <div className="card" style={{ overflow: "hidden" }}>
@@ -1144,7 +1144,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const [importing, setImporting] = useState(false)    // 홈택스 세금계산서 엑셀 업로드 화면
   const [ourBizNo, setOurBizNo] = useState('')         // 우리 회사 사업자번호 — 매출/매입 자동 판정용
 
-  /* '청구할 것' — 계약에 적어둔 일정(마일스톤: 선급·기성·잔금) 중 **도래한 것**만.
+  /* '발행예정' — 계약에 적어둔 일정(마일스톤: 선급·기성·잔금) 중 **도래한 것**만.
    *
    * 예전엔 여기에 정기 회차도 합쳤다("한 곳만 열면 이번 달 청구할 게 다 보이도록"). 의도는
    * 좋았지만 결과는 **같은 회차를 두 곳에서 처리할 수 있는** 상태였다 — 정기 화면에도
@@ -1192,7 +1192,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     setSelected(prev => prev ? (rows.find(r => r.id === prev.id) || null) : prev)
   }
   useEffect(() => { load() }, [])
-  /* 청구할 것이 있으면 처음 한 번 그 화면으로 연다. 사용자가 탭을 바꾼 뒤에는 건드리지 않는다 —
+  /* 발행예정이 있으면 처음 한 번 그 화면으로 연다. 사용자가 탭을 바꾼 뒤에는 건드리지 않는다 —
      목록을 보려고 옮겼는데 새로고침 때마다 되돌아가면 화면이 사용자와 싸운다. */
   const autoOpened = useRef(false)
   useEffect(() => {
@@ -1602,14 +1602,14 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
             </>}
       />
 
-      {/* 요약 카드 — 회수 모드는 미수/미지급 2칸(발행 예정 없음), 발행 모드는 3칸 */}
+      {/* 요약 카드 — 회수 모드는 미수/미지급 2칸(발행예정 없음), 발행 모드는 3칸 */}
       {/* 비어 있는 구획은 그리지 않는다 — 이 코드베이스가 정기 회차에서 이미 정한 규칙이다
           ("'놓친 회차 없음' 빈 카드를 매번 보여주면 진짜 경고가 묻힌다"). 여기도 같다:
-          계약을 안 쓰는 회사에 '청구할 것 0건' 카드가 늘 서 있으면 그 자리를 안 보게 된다. */}
+          계약을 안 쓰는 회사에 '발행예정 0건' 카드가 늘 서 있으면 그 자리를 안 보게 된다. */}
       <div className="grid grid-3-to-1" style={{ gridTemplateColumns: `repeat(${collect || !pending.length ? 2 : 3}, 1fr)`, gap: 16, marginBottom: 24 }}>
         {isIssued ? (
           <>
-            {!collect && pending.length > 0 && <SummaryCard label="청구할 것" amount={pendingTotal} count={pending.length} accent="brand"
+            {!collect && pending.length > 0 && <SummaryCard label="발행예정" amount={pendingTotal} count={pending.length} accent="brand"
               onClick={() => setView("pending")} hint="계약 일정에서 도래한 건 보기"/>}
             <SummaryCard label={collect ? "받을 미수금" : "미수금 합계"} amount={recSummary?.total ?? 0} count={recSummary?.count ?? 0} accent="blue"
               onClick={() => showAllOf(UNSETTLED)} hint="전체 기간에서 못 받은 청구서 보기"/>
@@ -1621,8 +1621,8 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
             {/* pending 은 '아직 청구서가 안 만들어진 회차'다(정기지출·주문 지급일정).
                 '지급 예정(대기)'라고 부르니 옆의 '미지급금 합계'와 구분이 안 됐다 —
                 둘 다 "3건"으로 떠서 같은 3건처럼 보인다. 실제로는 겹치지 않는 별개다.
-                매출 쪽 '발행 예정'과 대칭이 되게 '등록 예정'으로 부른다. */}
-            {!collect && pending.length > 0 && <SummaryCard label="지급할 것" amount={pendingTotal} count={pending.length} accent="brand"
+                매출 쪽 '발행예정'과 대칭이 되게 '등록예정'으로 부른다. */}
+            {!collect && pending.length > 0 && <SummaryCard label="등록예정" amount={pendingTotal} count={pending.length} accent="brand"
               onClick={() => setView("pending")} hint="계약 일정에서 도래한 건 보기"/>}
             <SummaryCard label={collect ? "줄 미지급금" : "미지급금 합계"} amount={paySum?.total ?? 0} count={paySum?.count ?? 0} accent="warn"
               onClick={() => showAllOf(UNSETTLED)} hint="전체 기간에서 안 낸 청구서 보기"/>
@@ -1632,37 +1632,45 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
         )}
       </div>
 
-      {/* 기간·거래처는 **탭보다 위**에 둔다.
-          아래에 있으면 "지금 고른 탭에만 걸리는 것"처럼 읽히는데, 실제로는 이 화면 전체의
-          범위다(목록·미발행 둘 다 이 범위로 걸린다). 위에 두면 순서가 곧 뜻이 된다 —
+      {/* 기간·거래처는 **탭보다 위**, 그리고 **어느 탭에서나 같은 자리**에 둔다.
+          아래에 있으면 "지금 고른 탭에만 걸리는 것"처럼 읽히는데, 위에 두면 순서가 곧 뜻이 된다 —
           먼저 기간을 정하고, 그 안에서 무엇을 볼지 탭으로 고른다.
-          '청구할 것'은 아직 청구서가 아니라 자기 툴바(예정일 기준)를 따로 쓴다. */}
-      {(collect || view === "list" || view === "plain") && (
+
+          ⚠ 예전엔 '발행예정' 탭만 자기 툴바를 **탭 아래**에 따로 그렸다(기준 날짜가 예정일이라
+            필터 상태를 따로 들기 때문이다). 그런데 사용자에게는 같은 화면에서 탭 하나 눌렀다고
+            기간·거래처 칸이 위아래로 뛰는 것으로 보인다 — 찾던 칸이 사라진 것과 같다.
+            들고 있는 필터는 탭마다 달라도, **서 있는 자리는 하나여야 한다.** */}
+      {!collect && view === "pending" ? (
+        <TableToolbar {...pendF.toolbarProps} periodPicker
+          right={<span className="text-xs text-muted2">
+            예정일 기준 · {pendingFiltered.length}건 {fmtNum(pendingFiltered.reduce((s, p) => s + pendingGross(p), 0))}원
+          </span>}/>
+      ) : (
         <TableToolbar {...listF.toolbarProps} periodPicker
           right={<span className="text-xs text-muted2">{view === "plain" ? "거래일 기준" : "발행일 기준"}</span>}/>
       )}
 
       {/* 이 줄에는 성격이 다른 두 묶음이 선다.
-            왼쪽  **무엇을 볼지** 고르는 탭 (청구할 것 / 발행내역 / 입금내역) — 서로 배타적
+            왼쪽  **무엇을 볼지** 고르는 탭 (발행예정 / 발행내역 / 입금내역) — 서로 배타적
             오른쪽 그 목록을 **걸러내는** 상태 필터 — 발행내역에만 뜻이 있다
           예전엔 둘 다 똑같은 둥근 칩이라 한 줄로 뭉개져 보였다. 사이에 선을 하나 더 그어도
           '또 하나의 형제 경계'로 읽힐 뿐이다(왼쪽 묶음 안에 이미 축 경계선이 있다).
           그래서 왼쪽을 한 덩어리(SegTabs)로 담았다 — 경계가 모양으로 드러나면 선이 필요 없고,
           "이 중 하나를 고르는 것"이라는 성격도 같이 말해 준다. */}
       <div className="row gap-8" style={{ marginTop: 12, marginBottom: 16, flexWrap: "wrap" }}>
-        {/* ⚠ 탭 묶음은 **'청구할 것'이 없어도** 떠야 한다.
+        {/* ⚠ 탭 묶음은 **'발행예정'이 없어도** 떠야 한다.
             예전엔 pending 이 비면 이 블록 전체가 사라져서, '청구서 없이' 탭에 들어간 순간
-            돌아올 탭이 하나도 없었다(막다른 길). '청구할 것' 칩만 조건부로 감춘다. */}
+            돌아올 탭이 하나도 없었다(막다른 길). '발행예정' 칩만 조건부로 감춘다. */}
         {!collect && (
           <div className="seg" role="tablist">
             {/* 숫자는 **그 탭이 실제로 보여줄 건수**다.
                 예전엔 필터 전 원본을 셌다 — 기간을 이번 달로 좁혀 표에 3건이 남아도 칩은 47을
                 달고 있었고, 어느 쪽이 맞는지 알 수 없었다. 각 탭은 자기 필터를 따로 들고 있으므로
-                (청구할 것=pendF / 발행내역=listF+상태칩) 각자 걸러진 수를 센다. */}
+                (발행예정=pendF / 발행내역=listF+상태칩) 각자 걸러진 수를 센다. */}
             {pending.length > 0 && (
               <button role="tab" aria-selected={view === "pending"}
                 className={`seg-btn ${view === "pending" ? "active" : ""}`} onClick={() => setView("pending")}>
-                {isIssued ? "청구할 것" : "지급할 것"}
+                {isIssued ? "발행예정" : "등록예정"}
                 {pendingFiltered.length > 0 && <span className="seg-count">{pendingFiltered.length}</span>}
               </button>
             )}
@@ -1681,7 +1689,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           </div>
         )}
         {(collect || view === "list") && (
-          /* 늘 오른쪽 끝으로 밀어 둔다. 예전엔 '청구할 것'이 없을 때만 ml-auto 를 뗐는데,
+          /* 늘 오른쪽 끝으로 밀어 둔다. 예전엔 '발행예정'이 없을 때만 ml-auto 를 뗐는데,
              그러면 어떤 회사에서는 탭 바로 옆에 붙고 어떤 회사에서는 멀리 떨어져 —
              같은 화면이 회사마다 다른 구조로 보인다. */
           <div className="row gap-6 ml-auto" style={{ flexWrap: "wrap" }}>
@@ -1715,16 +1723,10 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           청구서 표는 회수 모드이거나 'list' 탭일 때만 그린다. */}
       {!collect && view === "pending"
         ? <>
-            {/* 기간(예정일)·거래처·검색 — 목록 탭과 같은 툴바. 다른 건 기준 날짜뿐이다. */}
-            <TableToolbar {...pendF.toolbarProps} periodPicker
-              right={<span className="text-xs text-muted2">
-                예정일 기준 · {pendingFiltered.length}건 {fmtNum(pendingFiltered.reduce((s, p) => s + pendingGross(p), 0))}원
-              </span>}/>
-
             {/* 달별 — "이번 달에 뭘 발행해야 하나"가 이 탭의 첫 질문이다. 누르면 그 달만 남는다. */}
             {pendingByMonth.length > 1 && (
               <SubtotalChips
-                title={`달별 ${isIssued ? "발행 예정" : "등록 예정"}`}
+                title={`달별 ${isIssued ? "발행예정" : "등록예정"}`}
                 note="예정일 기준 · 누르면 그 달만 봅니다"
                 rows={pendingByMonth} activeKey={activeMonth} limit={18}
                 onPick={(r) => pickMonth(r.key)}/>
@@ -1733,7 +1735,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
             {/* 거래처별 — 한 거래처만 고른 뒤엔 표 합계와 같은 말이라 감춘다. */}
             {!pendVendor && pendingByVendor.length > 1 && (
               <SubtotalChips
-                title={`거래처별 ${isIssued ? "발행 예정" : "등록 예정"}`}
+                title={`거래처별 ${isIssued ? "발행예정" : "등록예정"}`}
                 note={`${pendingByVendor.reduce((s, v) => s + v.count, 0)}건 · ${pendingByVendor.length}개 거래처`}
                 rows={pendingByVendor}
                 onPick={(r) => setPendVendor(r.key)}
@@ -1803,7 +1805,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
 
       {/* 청구서 없이 오간 건 — **탭으로 세운다.**
           처음엔 목록 아래에 쌓았는데, 청구서가 쌓이면 스크롤을 한참 내려야 보였다.
-          이 화면은 이미 탭으로 갈리므로(청구할 것 / 발행됨) 세 번째 형제로 두는 게 맞고,
+          이 화면은 이미 탭으로 갈리므로(발행예정 / 발행내역) 세 번째 형제로 두는 게 맞고,
           탭에 건수가 붙어 있으면 열지 않아도 있다는 걸 안다.
           표를 섞지 않은 이유는 그대로다 — 청구서는 번호·만기·정산 상태를 갖지만
           이 건들은 없어서, 한 표에 넣으면 절반이 빈 칸인 행이 된다. */}

@@ -3085,7 +3085,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
   return (
     <div className={page ? 'fade-up' : undefined} style={page ? undefined : { padding: 20 }}>
       {/* 상단은 '이번에 청구할 것'(이행), 아래는 '무엇을 언제 얼마씩 청구할지'(규칙).
-          같은 회차를 수시입금의 '청구할 것'에서도 처리할 수 있다 — 같은 API·같은 컴포넌트를 쓴다. */}
+          같은 회차를 수시입금의 '발행예정'에서도 처리할 수 있다 — 같은 API·같은 컴포넌트를 쓴다. */}
       {page ? (
         /* 제목은 메뉴 이름과 같아야 한다 — 위 정기지급과 같은 규칙 */
         <PageHeader title="정기입금"
@@ -3098,7 +3098,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
             <div className="ml-auto">{recActions}</div>
           </div>
           <div className="text-sm text-muted" style={{ marginBottom: 16 }}>
-            청구 조건을 설정하는 곳이에요. 도래한 회차는 아래에서 바로 발행할 수 있고, <b>입금관리 → 수시입금</b>의 '청구할 것'에서 수주 청구일정과 함께 처리해도 됩니다.
+            청구 조건을 설정하는 곳이에요. 도래한 회차는 아래에서 바로 발행할 수 있고, <b>입금관리 → 수시입금</b>의 '발행예정'에서 수주 청구일정과 함께 처리해도 됩니다.
           </div>
         </>
       )}

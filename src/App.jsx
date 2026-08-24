@@ -541,7 +541,7 @@ function AppInner({ onLogout, user }) {
       /* 거래내역의 '예정' 행(미수금·미지급금)에서 해당 청구서로 보낸다.
          해시에 ?invoiceId= 를 붙이면 안 된다 — 이 앱의 해시 라우터는 질의문자열을 모르고,
          알려진 라우트가 아니라며 아무 데도 안 간다. 청구서 지정은 go(…, {invoiceId}) 소관. */
-      return <LedgerScreen initialFilter={filter} refreshTrigger={txnVersion} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}
+      return <LedgerScreen initialFilter={filter} refreshTrigger={txnVersion} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}
         openInvoice={(kind, invoiceId) => go(kind === "income" ? "ar" : "ap", { invoiceId })}/>;
     }
     if (PORTAL_CAT_BY_ID[route]) {
@@ -609,8 +609,8 @@ function AppInner({ onLogout, user }) {
       case "mgmt_dash":       return <MgmtDashScreen/>;
       case "mgmt_ask":        return <MgmtAskScreen/>;
       case "excel_modal":     return <ExcelScreen/>;
-      case "income":          return <LedgerScreen initialFilter="income" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
-      case "expense":         return <LedgerScreen initialFilter="expense" openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
+      case "income":          return <LedgerScreen initialFilter="income" openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
+      case "expense":         return <LedgerScreen initialFilter="expense" openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
       // 미수금/미지급금은 청구서 기준 → 발행 청구서와 같은 BillingScreen을 '회수 모드'로 재사용
       case "ar":              return <BillingScreen initialTab="issued"  role="collect" focusInvoiceId={focusInvoiceId} openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
       case "ap":              return <BillingScreen initialTab="received" role="collect" focusInvoiceId={focusInvoiceId} openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
@@ -958,12 +958,12 @@ const FAQ_CATEGORIES = ["거래 등록", "미수금·미지급금", "주문 관�
 
 const FAQ_DATA = [
   // 거래 등록
-  { id:"f01", cat:"거래 등록",       routes:["home","ledger"],              q:"입금을 어떻게 등록하나요?",                  a:"화면 우측 상단 '거래 등록 → 입금 등록'을 클릭하거나, 홈 화면 '오늘 할 일'에서 해당 입금 건을 직접 처리할 수 있어요.", action:null },
-  { id:"f02", cat:"거래 등록",       routes:["home","ledger"],              q:"지출을 어떻게 등록하나요?",                  a:"화면 우측 상단 '거래 등록 → 지출 등록'을 눌러 7단계로 입력하세요. 거래처·주문·비목·금액·결제수단·증빙·결의서 순이에요.", action:null },
-  { id:"f03", cat:"거래 등록",       routes:["ledger"],                     q:"여러 건을 한꺼번에 올리고 싶어요",            a:"엑셀 업로드 기능을 이용하면 여러 거래를 한 번에 등록할 수 있어요. '거래 등록 → 엑셀 업로드'에서 서식을 내려받아 작성한 뒤 업로드해 주세요.", action:{ label:"엑셀 업로드로", route:"excel_modal" } },
-  { id:"f04", cat:"거래 등록",       routes:["ledger"],                     q:"거래 내용을 수정하거나 삭제하고 싶어요",      a:"거래내역 화면에서 해당 행을 클릭하면 상세 패널이 열려요. 패널 하단의 수정·삭제 버튼으로 처리할 수 있어요.", action:{ label:"거래내역으로", route:"ledger" } },
+  { id:"f01", cat:"거래 등록",       routes:["home","ledger"],              q:"입금을 어떻게 등록하나요?",                  a:"입금관리 → 수시입금에서 '입금 등록'을 누르면 받으신 서류(세금계산서인지 아닌지)를 먼저 묻고, 그에 맞는 폼으로 안내해요. 매달 같은 곳에서 들어오는 돈은 정기입금에 규칙으로 걸어 두면 회차가 알아서 떠요.", action:{ label:"수시입금으로", route:"billing_issued" } },
+  { id:"f02", cat:"거래 등록",       routes:["home","ledger"],              q:"지출을 어떻게 등록하나요?",                  a:"지급처리 → 수시지급에서 '지급 등록'을 누르세요. 받으신 서류(세금계산서 / 카드전표·영수증 / 없음)를 먼저 고르면 그에 맞는 폼이 열려요. 매달 나가는 고정비는 정기지급에 걸어 두면 됩니다.", action:{ label:"수시지급으로", route:"billing_received" } },
+  { id:"f03", cat:"거래 등록",       routes:["ledger"],                     q:"여러 건을 한꺼번에 올리고 싶어요",            a:"엑셀 업로드 기능을 이용하면 여러 거래를 한 번에 등록할 수 있어요. 거래내역 오른쪽 위 '엑셀 업로드'에서 서식을 내려받아 작성한 뒤 올려 주세요.", action:{ label:"엑셀 업로드로", route:"excel_modal" } },
+  { id:"f04", cat:"거래 등록",       routes:["ledger"],                     q:"거래 내용을 수정하거나 삭제하고 싶어요",      a:"거래내역에서 그 줄을 누르면 상세가 열려요. 아래쪽 '편집'으로 고치고, '삭제'로 지울 수 있어요. 거래내역은 보는 곳이라 평소에는 여기서 고칠 일이 많지 않아요 — 잘못 들어간 게 보일 때만 쓰면 됩니다.", action:{ label:"거래내역으로", route:"ledger" } },
   { id:"f05", cat:"거래 등록",       routes:["ledger","home"],              q:"등록하려는 거래처가 목록에 없어요",           a:"거래처는 설정 화면에서 먼저 추가해야 해요. 설정 → 거래처 탭에서 새 거래처를 등록한 뒤 다시 시도해 보세요.", action:{ label:"설정으로", route:"master" } },
-  { id:"f06", cat:"거래 등록",       routes:["ledger","home","contract"],   q:"등록하려는 주문이 목록에 없어요",             a:"주문은 수주·발주 화면에서 '신규 생성' 버튼으로 먼저 만들어야 해요. 주문이 없는 거래라면 거래 등록에서 주문 칸을 비워두면 됩니다(선택 입력이에요).", action:{ label:"수주로", route:"contract_sales" } },
+  { id:"f06", cat:"거래 등록",       routes:["ledger","home","contract"],   q:"등록하려는 주문이 목록에 없어요",             a:"주문은 수주·발주 화면에서 '신규 생성' 버튼으로 먼저 만들어야 해요. 주문이 없는 거래라면 등록 폼에서 주문 칸을 비워두면 됩니다(선택 입력이에요).", action:{ label:"수주로", route:"contract_sales" } },
   // 미수금·미지급금
   { id:"f07", cat:"미수금·미지급금", routes:["contract","ledger"],          q:"미수금이 자동으로 생성되지 않아요",           a:"입금 등록 2단계에서 주문을 선택했는지 확인해 보세요. 주문을 연결해야 해당 주문의 미수금이 자동으로 차감돼요.", action:{ label:"거래내역으로", route:"ledger" } },
   { id:"f08", cat:"미수금·미지급금", routes:["contract","home"],            q:"연체된 미수금은 어떻게 처리하나요?",          a:"미수금 화면의 '기한 지남' 탭에서 연체 건을 확인하세요. 행 우측 '독촉' 버튼으로 거래처에 메일을 보내고, 입금 확인 후 '입금 처리'를 누르면 돼요.", action:{ label:"미수금으로", route:"contract" } },
