@@ -955,7 +955,7 @@ const SummaryCard = ({ label, amount, count, accent = "blue", warn, onClick, hin
 }
 
 // ── 청구서 테이블 ────────────────────────────────────────────────
-const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", select }) => (
+const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", paidLabel = "정산", select }) => (
   <div className="card" style={{ overflow: "hidden" }}>
     <DataTable
       rows={rows}
@@ -974,6 +974,17 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", select }) => (
         { key: 'vendor', header: '거래처', sortable: true, render: inv => <span className="fw-700">{inv.vendor}</span> },
         { key: 'contract', header: '주문', render: inv => <span className="text-sm text-muted">{inv.contract || "—"}</span> },
         { key: 'totalAmount', header: '청구금액', align: 'right', sortable: true, render: inv => <span className="num-cell">{fmtNum(inv.totalAmount)}</span> },
+        /* 입금(지급) 흔적 — **양방향 흔적**의 다른 쪽.
+           미수금 칸은 '아직 남은 것'을 말하는데, 그것만으로는 "한 번도 안 들어왔나 /
+           일부 들어왔나"가 안 갈린다(둘 다 잔액이 남는다). 정산 건수와 금액을 적어
+           입금내역과 이어진 것을 그 자리에서 보이게 한다. */
+        { key: 'paidAmount', header: paidLabel, align: 'right', sortable: true,
+          render: inv => (inv.paidAmount > 0
+            ? <span className="num-cell" style={{ color: 'var(--pos-ink)' }}>
+                {fmtNum(inv.paidAmount)}
+                {inv.matches?.length > 1 && <span className="text-xs text-muted2"> ·{inv.matches.length}건</span>}
+              </span>
+            : <span className="text-muted2 text-xs">—</span>) },
         { key: 'remainAmount', header: remainLabel, align: 'right', sortable: true, render: inv => (
           inv.remainAmount > 0
             ? <span style={{ color: "var(--warn-ink)", fontWeight: 700 }}>{fmtNum(inv.remainAmount)}</span>
@@ -1154,10 +1165,24 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       api.getPendingSchedules(isIssued ? "sales" : "purchase"),
       api.getTransactions({ kind: isIssued ? 'income' : 'expense' }),
     ])
-    /* 청구서에 안 붙은 것만. 급여와 재무 거래(대출 실행·상환·예적금)는 뺀다 —
-       각자의 화면이 있고, 여기 섞이면 "수시로 오간 돈"이라는 뜻이 흐려진다
-       (일반 경비 화면이 같은 이유로 같은 것들을 걸러낸다). */
-    setPlainTxns((txns || []).filter(t => !t.invoiceId && !t.payrollId && t.isPnl !== false))
+    /* 입금내역 — **실제로 오간 돈** 전부. 청구서에 붙은 것도 안 붙은 것도 함께 온다.
+     *
+     * 예전엔 '청구서 없는 것'만 골라 별도 목록으로 뒀다. 그런데 그건 "청구서가 있나 없나"
+     * 라는 **시스템의 축**으로 가른 것이다. 실무의 두 사건은 다르다 —
+     *   발행내역  청구서를 끊었다 (부가세 신고가 보는 축)
+     *   입금내역  돈이 들어왔다  (통장 대사가 보는 축)
+     * 모든 입금은 입금내역에 있고, 그중 일부에 청구서가 붙는다. 그 흔적은 행에 적는다.
+     *
+     * 빼는 것: 급여·재무 거래(대출·예적금)는 각자의 화면이 있고, **정기 규칙에서 나온 건**은
+     * 정기입금 화면이 맡는다(수시 화면에 섞으면 방금 갈라놓은 축이 다시 뭉개진다).
+     *
+     * ⚠ 청구서에 붙은 거래는 `isPnl` 로 걸러지지 않게 **먼저 통과시킨다.** 정산 거래는
+     *   is_pnl=0 으로 들어온다 — 매출은 청구서 발행 시점에 이미 인식했으니 입금까지 손익에
+     *   넣으면 두 번 잡히기 때문이다(맞는 처리다). 그런데 재무 거래를 빼려고 그 플래그로
+     *   거르면 **정산 입금이 통째로 사라진다** — 방금 만든 양방향 흔적의 한쪽이 빈다.
+     *   재무 거래는 청구서가 없으므로 invoiceId 로 갈린다. */
+    setPlainTxns((txns || []).filter(t =>
+      !t.payrollId && !t.recurringId && (t.invoiceId || t.isPnl !== false)))
     const merged = sched.map(s => ({ ...s, source: 'milestone' }))
       .sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')))
     setInvoices(rows); setRecSummary(rec); setPaySum(pay); setPending(merged)
@@ -1634,18 +1659,18 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
               </button>
             )}
             <button className={`chip ${view === "list" ? "active" : ""}`} onClick={() => setView("list")}>
-              {isIssued ? "발행됨" : "등록됨"}<span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{filtered.length}</span>
+              {isIssued ? "발행내역" : "등록내역"}<span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{filtered.length}</span>
             </button>
           </>
         )}
-        {/* 청구서 없이 오간 건 — 있을 때만 탭으로 선다(빈 구획은 안 그린다는 이 화면의 규칙).
-            앞에 세로선을 둔다: 왼쪽 둘은 **청구서의 단계**(끊을 것 → 끊은 것)인데
-            이건 청구서가 아예 없는 건이라 같은 줄에 나란히 두면 단계처럼 읽힌다. */}
-        {!collect && plainFiltered.length > 0 && (
+        {/* 입금내역은 **늘 세운다.** 청구서가 있든 없든 돈은 오가므로 이 축은 항상 뜻이 있다
+           (예전의 '계산서 없는 입금'은 있을 때만 떴다 — 그건 남은 것을 모은 목록이라 그랬다).
+           앞에 세로선을 둔다: 왼쪽은 **청구서**를 보는 축이고 이건 **돈**을 보는 축이다. */}
+        {!collect && (
           <>
           <span aria-hidden="true" style={{ width: 1, height: 16, background: 'var(--line)', margin: '0 2px' }}/>
           <button className={`chip ${view === "plain" ? "active" : ""}`} onClick={() => setView("plain")}>
-            {isIssued ? "계산서 없는 입금" : "계산서 없는 지급"}<span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{plainFiltered.length}</span>
+            {isIssued ? "입금내역" : "지급내역"}<span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{plainFiltered.length}</span>
           </button>
           </>
         )}
@@ -1758,6 +1783,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
               </div>
             )}
             <InvoiceTable rows={filtered} onSelect={setSelected} remainLabel={isIssued ? "미수금" : "미지급금"}
+              paidLabel={isIssued ? "입금" : "지급"}
               select={{
                 ids: checkedIds, onChange: setCheckedIds,
                 isSelectable: settleable,
@@ -1774,7 +1800,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       {!collect && view === "plain" && (
         <DataTable
           rows={plainFiltered}
-          empty={isIssued ? "세금계산서 없이 들어온 입금이 없어요." : "계산서 없이 나간 지급이 없어요."}
+          empty={isIssued ? "이 기간에 들어온 입금이 없어요." : "이 기간에 나간 지급이 없어요."}
           columns={[
             { key: 'date', header: '날짜', sortable: true,
               render: t => <span className="text-sm num">{t.date}</span> },
@@ -1788,6 +1814,13 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
                계좌가 곧 대사(對査) 기준이다. 통장을 맞춰볼 때 이 칸이 없으면 건마다 열어야 한다. */
             { key: 'account', header: '계좌',
               render: t => <span className="text-sm text-muted">{t.account || '—'}</span> },
+            /* 어느 청구서에서 온 입금인가 — **양방향 흔적**의 한쪽이다.
+               번호가 있으면 그 청구서와 이어진 것이고, 없으면 계산서 없이 들어온 돈이다.
+               이 칸이 없으면 "이 입금이 청구서에 반영됐나"를 청구서 쪽에서 거꾸로 뒤져야 한다. */
+            { key: 'invoiceNo', header: isIssued ? '청구서' : '계산서',
+              render: t => (t.invoiceNo
+                ? <span className="text-xs num" style={{ color: 'var(--brand-ink)' }}>{t.invoiceNo}</span>
+                : <span className="text-xs text-muted2">없음</span>) },
             { key: 'evid', header: '증빙', align: 'center',
               render: t => (t.evid
                 ? <span className="badge pos" style={{ fontSize: 10 }}>있음</span>

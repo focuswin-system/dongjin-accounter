@@ -89,6 +89,9 @@ router.get('/', async (req, res, next) => {
     let sql = `SELECT t.*, v.name AS vendor_name, c.name AS contract_name, a.name AS account_name,
                       e.name AS employee_name, ri.name AS item_name,
                       cc.name AS cost_contract_name,
+                      /* 어느 청구서와 이어진 입금·지급인지 — 화면이 '입금내역'에서 그 흔적을
+                         보여주려면 번호가 필요하다(id 만으로는 사람이 읽을 수 없다). */
+                      inv.invoice_no AS invoice_no,
                       (t.account_code IS NULL OR t.account_code = '' OR NOT EXISTS (
                          SELECT 1 FROM account_subjects s
                           WHERE s.code = t.account_code AND s.acct_type IN ('자산','부채','자본')
@@ -100,6 +103,7 @@ router.get('/', async (req, res, next) => {
               LEFT JOIN accounts a ON t.account_id = a.id
               LEFT JOIN employees e ON t.employee_id = e.id
               LEFT JOIN ref_items ri ON t.item_id = ri.id
+              LEFT JOIN invoices inv ON t.invoice_id = inv.id
               WHERE 1=1`
     const params = []
     if (kind)       { sql += ' AND t.kind = ?';        params.push(kind) }
