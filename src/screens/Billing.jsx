@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday, Loading, DateInput } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
@@ -1041,9 +1041,9 @@ const PendingScheduleTable = ({ rows, onIssue, onPaid, isIssued = true, select }
       rows={rows}
       rowKey={pendingKey}
       select={select}
-      empty={isIssued
-        ? "발행 예정인 청구 일정이 없어요. 주문 상세의 '청구 일정'에서 청구할 금액·시점을 등록하세요."
-        : "예정된 지급 일정이 없어요. 발주 상세의 '청구 일정'에서 지급할 금액·시점을 등록하세요."}
+      /* 목록이 비면 이 탭 자체가 안 뜨므로(위 pending.length 가드) 여기는 거의 안 보인다.
+         보게 되는 건 '보는 사이에 마지막 건을 처리한' 순간뿐이라 짧게만 적는다. */
+      empty={isIssued ? "지금 청구할 게 없어요." : "지금 지급할 게 없어요."}
       columns={[
         { key: 'due_date', header: '예정일', sortable: true, render: p => (
           <span className="num text-sm">{p.due_date || "—"}
@@ -1079,8 +1079,18 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const kind = initialTab              // 'issued'(대금청구) | 'received'(수취)
   const isIssued = kind === "issued"
   const collect = role === "collect"   // 회수 모드: 미정산 청구서 + 입금/지급 처리 + 환불/환입
-  const [view, setView] = useState(collect ? "list" : "pending")   // issued: pending|list
+  /* 기본 화면.
+   *
+   * 예전엔 발행 모드면 무조건 'pending'으로 열었다. 그래서 **계약을 안 쓰는 회사**는
+   * 수시입금을 열 때마다 빈 화면과 "주문 상세의 '청구 일정'에서 등록하세요"를 먼저 봤다 —
+   * 안 쓰기로 한 기능으로 매번 안내하고, 정작 하려던 청구서 끊기는 한 번 더 눌러야 했다.
+   * 이제 청구할 게 실제로 있을 때만 그쪽으로 연다(아래 effect). */
+  const [view, setView] = useState("list")   // issued: pending|list
   const [invoices, setInvoices] = useState([])
+  /* 청구서 없이 오간 건 — 서류 선택에서 '계산서 아님'을 고른 것들이 여기로 온다.
+     이 화면 이름이 '수시입금/수시지급'인데 청구서만 보여주면, 여기서 등록한 건의 절반이
+     보이지 않는다("등록은 여기서 했는데 어디 갔지"). 메뉴 이름이 약속한 것을 보여준다. */
+  const [plainTxns, setPlainTxns] = useState([])
   const [pending, setPending]   = useState([])
   const [recSummary, setRecSummary] = useState(null)
   const [paySum, setPaySum]     = useState(null)
@@ -1108,22 +1118,33 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const [importing, setImporting] = useState(false)    // 홈택스 세금계산서 엑셀 업로드 화면
   const [ourBizNo, setOurBizNo] = useState('')         // 우리 회사 사업자번호 — 매출/매입 자동 판정용
 
-  // 청구할 것은 두 갈래로 생긴다: 주문의 청구 일정(마일스톤)과 정기청구 회차(유지보수 등).
-  // 경리가 청구서 메뉴 한 곳만 열면 이번 달 청구할 게 다 보이도록 '발행 예정'에서 합친다.
-  // (정기청구는 매출 전용 — 매입의 정기지출은 별도 흐름)
+  /* '청구할 것' — 계약에 적어둔 일정(마일스톤: 선급·기성·잔금) 중 **도래한 것**만.
+   *
+   * 예전엔 여기에 정기 회차도 합쳤다("한 곳만 열면 이번 달 청구할 게 다 보이도록"). 의도는
+   * 좋았지만 결과는 **같은 회차를 두 곳에서 처리할 수 있는** 상태였다 — 정기 화면에도
+   * 회차 이행(놓친/임박/예정)이 있기 때문이다. 한쪽에서 발행한 뒤 다른 쪽을 보면 사라져
+   * 있어서 "내가 한 게 맞나"가 된다.
+   *
+   * 그래서 축을 하나로 정리했다:
+   *   정기 회차 → **정기입금·정기지급 화면**이 단독으로 맡는다(놓친 회차는 사이드바 뱃지가 알린다)
+   *   마일스톤  → 여기. 계약이 일정을 만들고, 회계는 도래한 것만 받는다
+   *
+   * 둘은 성격이 다르다 — 정기 회차는 시계가 만들고(판단 없음), 마일스톤은 사람이 끊는다
+   * (현장이 그만큼 진행됐나를 판단). 한 목록에 두면 매번 "그냥 눌러도 되나"를 가려야 한다. */
   const load = async () => {
-    // 정기 반복은 성격에 맞는 쪽에만 뜬다: 매출=정기청구 / 매입=정기지출 (완전 대칭)
-    const [rows, rec, pay, sched, recurring] = await Promise.all([
+    const [rows, rec, pay, sched, txns] = await Promise.all([
       api.getInvoices(),
       api.getReceivablesSummary(),
       api.getPayablesSummary(),
       api.getPendingSchedules(isIssued ? "sales" : "purchase"),
-      isIssued ? api.getPendingRecurring() : api.getPendingRecurringExpenses(),
+      api.getTransactions({ kind: isIssued ? 'income' : 'expense' }),
     ])
-    const merged = [
-      ...sched.map(s => ({ ...s, source: 'milestone' })),
-      ...recurring,
-    ].sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')))
+    /* 청구서에 안 붙은 것만. 급여와 재무 거래(대출 실행·상환·예적금)는 뺀다 —
+       각자의 화면이 있고, 여기 섞이면 "수시로 오간 돈"이라는 뜻이 흐려진다
+       (일반 경비 화면이 같은 이유로 같은 것들을 걸러낸다). */
+    setPlainTxns((txns || []).filter(t => !t.invoiceId && !t.payrollId && t.isPnl !== false))
+    const merged = sched.map(s => ({ ...s, source: 'milestone' }))
+      .sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')))
     setInvoices(rows); setRecSummary(rec); setPaySum(pay); setPending(merged)
     /* 상세를 열어둔 채 정산·취소를 하면 목록만 새로고침되고 열린 상세는 옛 값 그대로였다
        — 입금을 등록해도 이력·미수금이 그대로라 한 번 더 넣게 된다. 같은 건을 다시 물려준다.
@@ -1131,6 +1152,14 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     setSelected(prev => prev ? (rows.find(r => r.id === prev.id) || null) : prev)
   }
   useEffect(() => { load() }, [])
+  /* 청구할 것이 있으면 처음 한 번 그 화면으로 연다. 사용자가 탭을 바꾼 뒤에는 건드리지 않는다 —
+     목록을 보려고 옮겼는데 새로고침 때마다 되돌아가면 화면이 사용자와 싸운다. */
+  const autoOpened = useRef(false)
+  useEffect(() => {
+    if (collect || autoOpened.current || pending.length === 0) return
+    autoOpened.current = true
+    setView("pending")
+  }, [collect, pending.length])
   // 세금계산서 업로드의 매출/매입 판정 기준. 환경설정 › 회사 정보에 사업자번호가 있어야 자동으로 갈린다.
   useEffect(() => { api.getCompany().then(c => setOurBizNo(c?.biz_no || '')) }, [])
   // 어댑터는 옵션이 바뀔 때만 새로 만든다 — 매 렌더 새 객체면 마법사가 중복 판정을 통째로 다시 계산한다.
@@ -1492,11 +1521,14 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       />
 
       {/* 요약 카드 — 회수 모드는 미수/미지급 2칸(발행 예정 없음), 발행 모드는 3칸 */}
-      <div className="grid grid-3-to-1" style={{ gridTemplateColumns: `repeat(${collect ? 2 : 3}, 1fr)`, gap: 16, marginBottom: 24 }}>
+      {/* 비어 있는 구획은 그리지 않는다 — 이 코드베이스가 정기 회차에서 이미 정한 규칙이다
+          ("'놓친 회차 없음' 빈 카드를 매번 보여주면 진짜 경고가 묻힌다"). 여기도 같다:
+          계약을 안 쓰는 회사에 '청구할 것 0건' 카드가 늘 서 있으면 그 자리를 안 보게 된다. */}
+      <div className="grid grid-3-to-1" style={{ gridTemplateColumns: `repeat(${collect || !pending.length ? 2 : 3}, 1fr)`, gap: 16, marginBottom: 24 }}>
         {isIssued ? (
           <>
-            {!collect && <SummaryCard label="발행 예정(대기)" amount={pendingTotal} count={pending.length} accent="brand"
-              onClick={() => setView("pending")} hint="발행 예정 보기"/>}
+            {!collect && pending.length > 0 && <SummaryCard label="청구할 것" amount={pendingTotal} count={pending.length} accent="brand"
+              onClick={() => setView("pending")} hint="계약 일정에서 도래한 건 보기"/>}
             <SummaryCard label={collect ? "받을 미수금" : "미수금 합계"} amount={recSummary?.total ?? 0} count={recSummary?.count ?? 0} accent="blue"
               onClick={() => { setView("list"); setStatusFilter("미정산") }} hint="못 받은 청구서 보기"/>
             <SummaryCard label="연체 미수금" amount={recSummary?.overdueAmount ?? 0} count={recSummary?.overdueCount ?? 0} accent="neg" warn
@@ -1508,8 +1540,8 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
                 '지급 예정(대기)'라고 부르니 옆의 '미지급금 합계'와 구분이 안 됐다 —
                 둘 다 "3건"으로 떠서 같은 3건처럼 보인다. 실제로는 겹치지 않는 별개다.
                 매출 쪽 '발행 예정'과 대칭이 되게 '등록 예정'으로 부른다. */}
-            {!collect && <SummaryCard label="등록 예정(청구서 전)" amount={pendingTotal} count={pending.length} accent="brand"
-              onClick={() => setView("pending")} hint="등록 예정 보기"/>}
+            {!collect && pending.length > 0 && <SummaryCard label="지급할 것" amount={pendingTotal} count={pending.length} accent="brand"
+              onClick={() => setView("pending")} hint="계약 일정에서 도래한 건 보기"/>}
             <SummaryCard label={collect ? "줄 미지급금" : "미지급금 합계"} amount={paySum?.total ?? 0} count={paySum?.count ?? 0} accent="warn"
               onClick={() => { setView("list"); setStatusFilter("미정산") }} hint="안 낸 청구서 보기"/>
             <SummaryCard label="연체 미지급금" amount={paySum?.overdueAmount ?? 0} count={paySum?.overdueCount ?? 0} accent="neg" warn
@@ -1520,14 +1552,14 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
 
       {/* 탭: 발행 모드는 발행 예정|발행됨. 회수 모드는 상태 필터만(발행 예정 없음). */}
       <div className="row gap-8" style={{ marginBottom: 16, flexWrap: "wrap" }}>
-        {!collect && (
+        {!collect && pending.length > 0 && (
           <>
             {/* 칩의 숫자는 **그 탭이 실제로 보여줄 건수**다.
                 예전엔 필터 전 원본을 셌다 — 기간을 이번 달로 좁혀 표에 3건이 남아도 칩은 47을
                 달고 있었고, 어느 쪽이 맞는지 알 수 없었다. 각 탭은 자기 필터를 따로 들고 있으므로
                 (발행 예정=pendF / 발행됨=listF+상태칩) 각자 걸러진 수를 센다. */}
             <button className={`chip ${view === "pending" ? "active" : ""}`} onClick={() => setView("pending")}>
-              {isIssued ? "발행 예정" : "지급 예정"}{pendingFiltered.length > 0 && <span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{pendingFiltered.length}</span>}
+              {isIssued ? "청구할 것" : "지급할 것"}{pendingFiltered.length > 0 && <span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{pendingFiltered.length}</span>}
             </button>
             <button className={`chip ${view === "list" ? "active" : ""}`} onClick={() => setView("list")}>
               {isIssued ? "발행됨" : "등록됨"}<span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 700 }}>{filtered.length}</span>
@@ -1535,7 +1567,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           </>
         )}
         {(collect || view === "list") && (
-          <div className={`row gap-6 ${collect ? "" : "ml-auto"}`} style={{ flexWrap: "wrap" }}>
+          <div className={`row gap-6 ${collect || !pending.length ? "" : "ml-auto"}`} style={{ flexWrap: "wrap" }}>
             {STATUS_OPTIONS.map(s => (
               <button key={s} className={`chip ${statusFilter === s ? "active" : ""}`} onClick={() => setStatusFilter(s)} style={{ fontSize: 12 }}>{s}</button>
             ))}
@@ -1647,6 +1679,53 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
                 disabledHint: () => '정산이 끝난 청구서라 일괄 처리 대상이 아니에요',
               }}/>
           </>}
+
+      {/* 청구서 없이 오간 건 — 표를 섞지 않고 아래에 따로 세운다.
+          청구서는 번호·만기·정산 상태를 갖지만 이 건들은 없다. 한 표에 억지로 넣으면
+          절반이 빈 칸인 행이 생기고, 그러면 둘 다 읽기 어려워진다.
+          비어 있으면 그리지 않는다(이 화면의 다른 구획과 같은 규칙). */}
+      {!collect && view === "list" && plainTxns.length > 0 && (
+        <div style={{ marginTop: 28 }}>
+          <div className="row" style={{ gap: 8, alignItems: 'baseline', marginBottom: 10 }}>
+            <span className="fw-700" style={{ fontSize: 14 }}>
+              청구서 없이 {isIssued ? '들어온' : '나간'} 돈
+            </span>
+            <span className="text-sm text-muted">{plainTxns.length}건</span>
+            <span className="text-xs text-muted2 ml-auto">
+              영수증·통장 거래처럼 계산서가 없는 건이에요. {isIssued ? '미수금' : '미지급금'}·부가세에는 잡히지 않아요.
+            </span>
+          </div>
+          <div className="card" style={{ overflow: 'hidden' }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th style={{ width: 110 }}>날짜</th>
+                  <th>거래처</th>
+                  <th>내용</th>
+                  <th style={{ width: 120 }}>비목</th>
+                  <th className="num-right" style={{ width: 130 }}>금액</th>
+                </tr>
+              </thead>
+              <tbody>
+                {plainTxns.slice(0, 20).map(t => (
+                  <tr key={t.id}>
+                    <td className="text-sm num">{t.date}</td>
+                    <td className="text-sm">{t.vendor || '—'}</td>
+                    <td className="text-sm">{t.memo || t.item || '—'}</td>
+                    <td className="text-sm text-muted">{t.category || '—'}</td>
+                    <td className="num-cell num-right fw-700">{fmtNum(t.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {plainTxns.length > 20 && (
+            <div className="text-xs text-muted2" style={{ marginTop: 8 }}>
+              최근 20건만 보여드려요. 전체는 거래내역에서 볼 수 있어요.
+            </div>
+          )}
+        </div>
+      )}
 
       <InvoiceDetailDrawer
         invoice={selected}
