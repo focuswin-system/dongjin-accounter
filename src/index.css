@@ -791,6 +791,11 @@ a { color: inherit; text-decoration: none; }
   .search.tbar-search { width: 100%; display: flex; }
 }
 
+/* 툴바 바에 직접 선 필터(inline) — 자주 쓰는 축은 ⚙ 뒤에 숨기지 않는다.
+   폭을 고정해 두 개 이상 서도 줄이 흔들리지 않게 한다. */
+.tbar-inline-filter { min-width: 150px; max-width: 200px; flex-shrink: 0; }
+@media (max-width: 640px) { .tbar-inline-filter { min-width: 120px; } }
+
 /* 기간 선택기(PeriodPicker) — 달/분기/년 드릴다운.
    프리셋 버튼 다섯 개를 늘어놓는 대신 한 버튼에서 파고든다. 자리도 덜 먹는다. */
 .period-picker { position: relative; }

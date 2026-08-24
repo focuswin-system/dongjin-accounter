@@ -26,7 +26,10 @@ const DATE_PRESETS = [
    물건이라 한 번에 전부 바꾸면 되돌리기가 번거롭다. */
 export const TableToolbar = ({ date, search, filters, hasActiveFilter, onReset, right, periodPicker = false }) => {
   const [open, setOpen] = useState(false)
-  const hasFilters = filters?.length > 0
+  // inline 로 표시한 필터는 바에 직접 세우고, 나머지만 ⚙ 패널로 보낸다
+  const inlineFilters = (filters || []).filter(f => f.inline)
+  const panelFilters = (filters || []).filter(f => !f.inline)
+  const hasFilters = panelFilters.length > 0
 
   return (
     <div className="tbar">
@@ -34,6 +37,9 @@ export const TableToolbar = ({ date, search, filters, hasActiveFilter, onReset, 
         {date && periodPicker && (
           <PeriodPicker from={date.from} to={date.to} onChange={date.onChange}/>
         )}
+        {inlineFilters.map((f, i) => (
+          <div key={i} className="tbar-inline-filter">{f.node}</div>
+        ))}
         {date && !periodPicker && (
           <div className="tbar-date">
             <Icon.Calendar size={14} className="text-muted2"/>
@@ -84,7 +90,7 @@ export const TableToolbar = ({ date, search, filters, hasActiveFilter, onReset, 
 
       {open && hasFilters && (
         <div className="tbar-panel">
-          {filters.map((f, i) => (
+          {panelFilters.map((f, i) => (
             <div key={i} className="tbar-frow">
               <span className="tbar-flabel">{f.label}</span>
               <div className="tbar-fcontrol">{f.node}</div>

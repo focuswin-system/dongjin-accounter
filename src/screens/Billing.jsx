@@ -1211,7 +1211,8 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const listF = useTableFilter({
     date: { field: 'issuedAt' },
     search: { fields: ['invoiceNo', 'vendor', 'contract', 'memo'], placeholder: "청구번호·거래처·주문·메모 검색" },
-    filters: [{ key: 'vendor', label: "거래처", field: 'vendor',
+    // 거래처는 매일 쓰는 축이라 ⚙ 뒤가 아니라 바에 직접 세운다(inline)
+    filters: [{ key: 'vendor', label: "거래처", field: 'vendor', inline: true,
       options: [...new Set(kindRows.map(i => i.vendor).filter(Boolean))].sort() }],
   })
   const vendorFilter = listF.values.vendor ?? null
@@ -1317,7 +1318,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     search: { fields: ['vendor_name', 'contract_name', 'contract_no', 'type'], placeholder: "거래처·주문·유형 검색" },
     /* '(거래처 미지정)' 은 값이 아니라 **빈 거래처를 가리키는 이름표**다. field 매칭으로는
        잡히지 않아(vendor_name 이 '' 이거나 null) 소계 칩을 눌러도 거를 수가 없었다. */
-    filters: [{ key: 'vendor', label: "거래처",
+    filters: [{ key: 'vendor', label: "거래처", inline: true,
       options: [...new Set(pending.map(p => p.vendor_name).filter(Boolean))].sort(),
       match: (p, v) => (v === NO_VENDOR ? !p.vendor_name : p.vendor_name === v) }],
   })

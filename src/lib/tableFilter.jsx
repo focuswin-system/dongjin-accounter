@@ -49,6 +49,9 @@ export const useTableFilter = ({ date, search, filters = [] } = {}) => {
 
   const active = filters.filter(f => values[f.key] != null)
   const hasActiveFilter = active.length > 0
+  /* ⚙ 버튼의 활성 점은 **패널 안의** 필터만 센다. 인라인 필터는 바에 값이 그대로 보이므로,
+     그것 때문에 점이 켜지면 "뭐가 더 걸려 있나" 하고 패널을 열게 된다(열면 비어 있다). */
+  const hasActivePanelFilter = active.some(f => !f.inline)
 
   const reset = useCallback(() => {
     setValues({})
@@ -91,14 +94,18 @@ export const useTableFilter = ({ date, search, filters = [] } = {}) => {
   const toolbarProps = {
     date: date ? { from: range.from || '', to: range.to || '', onChange: setRange } : undefined,
     search: search ? { value: q, onChange: setQ, placeholder: search.placeholder || '검색' } : undefined,
+    /* inline: true 인 필터는 **패널이 아니라 툴바 바에** 선다.
+       자주 쓰는 축(거래처처럼)이 ⚙ 뒤에 숨어 있으면 매번 두 번을 눌러야 하고,
+       무엇으로 걸러져 있는지도 패널을 열기 전엔 안 보인다. */
     filters: filters.map(f => ({
       label: f.label,
+      inline: !!f.inline,
       node: f.node
         ? f.node(values[f.key] ?? null, (v) => setValue(f.key, v))
         : <FilterSelect value={values[f.key] ?? null} onChange={(v) => setValue(f.key, v)}
             options={f.options || []} placeholder={f.placeholder || '전체'}/>,
     })),
-    hasActiveFilter,
+    hasActiveFilter: hasActivePanelFilter,
     onReset: reset,
   }
 
