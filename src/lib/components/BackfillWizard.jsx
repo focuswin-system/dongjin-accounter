@@ -137,7 +137,7 @@ export const BackfillWizard = ({ open, onClose, rule, kind, onDone }) => {
           </button>
         </div>
         <div className="text-xs text-muted2">
-          미래 회차는 소급 대상이 아니에요 — 그건 ‘발행 예정’에서 그대로 처리합니다.
+          아직 오지 않은 회차는 여기서 넣지 않아요 — 그건 위 ‘예정’ 목록에서 그대로 처리합니다.
         </div>
 
         {/* 2) 미리보기 결과 */}

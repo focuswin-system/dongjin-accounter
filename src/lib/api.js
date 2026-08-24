@@ -873,6 +873,11 @@ export const api = {
         payDay: Number(r.pay_day) || 0,
         // 이 규칙에서 나온 회차가 증빙을 챙겨야 하는가 — 미비 집계의 기준
         evidenceRequired: r.evidence_required === 1 || r.evidence_required === true,
+        /* 다음 회차 — **서버가 계산해 준 값만 쓴다.**
+           이 값을 이행 현황(pending)에서 주워 쓰면 미리보기 창(35일, 월간 기준) 밖에 있는
+           매분기·매년 규칙이 영원히 '—'로 뜬다. 프런트에서 다시 세지도 않는다 —
+           서버가 실제로 발행하는 회차와 어긋나면 화면이 거짓말을 한다. */
+        nextDue: r.next_due || '',
         active: r.active === 1,
         lastGenerated: r.last_generated,
       }))
@@ -983,6 +988,8 @@ export const api = {
         payDay: Number(r.pay_day) || 0,
         // 이 규칙에서 나온 회차가 증빙을 챙겨야 하는가 — 미비 집계의 기준
         evidenceRequired: r.evidence_required === 1 || r.evidence_required === true,
+        // 다음 회차 — 서버 계산값(정기지출 어댑터의 주석 참조)
+        nextDue: r.next_due || '',
         active: r.active === 1,
         lastGenerated: r.last_generated,
       }))

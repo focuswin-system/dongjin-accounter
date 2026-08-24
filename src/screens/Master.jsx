@@ -102,8 +102,8 @@ const MASTER_TABS = [
   { id: "account",         label: "계좌", custom: true },
   { id: "card",            label: "카드", custom: true },
   { id: "accountBalance",  label: "계좌 잔액", custom: true },
-  { id: "recurringExpense",label: "정기 지출", custom: true },
-  { id: "recurringInvoice",label: "정기 청구", custom: true },
+  { id: "recurringExpense",label: "정기지급", custom: true },
+  { id: "recurringInvoice",label: "정기입금", custom: true },
   // 조직
   { id: "department",      label: "부서", custom: true },
   { id: "position",        label: "직위", custom: true },
@@ -2539,6 +2539,13 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
 
 const PERIOD_LABEL = { monthly: "매월", quarterly: "매분기", yearly: "매년" }
 
+/* 규칙 한 줄 이름 — 소급 드로어 제목처럼 "무슨 규칙인지" 한 줄로 말해야 하는 자리에 쓴다.
+   ⚠ `r.vendor_name` 을 읽으면 안 된다. 어댑터가 내려주는 이름은 **`vendor`** 다
+     (api.js getRecurringInvoices / getRecurringExpenses). 그래서 소급 드로어 제목이
+     "연간 라이선스 · " 처럼 가운뎃점만 남고 거래처가 비어 있었다.
+   한쪽이 비면 가운뎃점도 안 찍는다 — 구분자만 남으면 값이 사라진 것처럼 보인다. */
+const ruleLabel = (r) => [r.item || r.category || '', r.vendor || ''].filter(Boolean).join(' · ')
+
 /* 첫 회차 예정일 안내 — 등록 폼의 시작일 아래.
  * "이 날짜 이전으로는 소급되지 않아요"라는 규칙 설명만으로는, 시작일에 2020년을 넣은 사람이
  * 무슨 일이 벌어질지 알 수 없다. 결과(첫 회차 날짜)를 그 자리에서 보여준다. */
@@ -2713,12 +2720,14 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
     <div className={page ? 'fade-up' : undefined} style={page ? undefined : { padding: 20 }}>
       {/* 독립 화면일 땐 공용 PageHeader를 쓴다 — 다른 화면과 상단 여백·sticky 동작을 맞추기 위해 */}
       {page ? (
-        <PageHeader title="정기 지출"
+        /* 제목은 메뉴 이름과 같아야 한다 — 메뉴가 정기지급인데 제목만 '정기 지출'이면
+           다른 화면에 온 것처럼 읽힌다(수시입금/수시지급에서 맞춘 것과 같은 규칙). */
+        <PageHeader title="정기지급"
           sub={cyc.overdueCount > 0 ? `놓친 회차 ${cyc.overdueCount}건이 있어요` : undefined}
           actions={addBtn}/>
       ) : (
         <div className="row" style={{ marginBottom: 16 }}>
-          <div className="section-title">정기 지출</div>
+          <div className="section-title">정기지급</div>
           <div className="ml-auto">{addBtn}</div>
         </div>
       )}
@@ -2728,7 +2737,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
         onSkip={cyc.skip} onUnskip={cyc.unskip}
         onOpenContract={() => goRoute?.('contract_purchase')}/>
 
-      <RuleListHeader title="정기 지출 규칙" side="purchase" rows={ruleRows} all={rows} amountOf={r => Number(r.amount) || 0}
+      <RuleListHeader title="정기지급 규칙" side="purchase" rows={ruleRows} all={rows} amountOf={r => Number(r.amount) || 0}
         q={q} setQ={setQ} ruleFilter={ruleFilter} setRuleFilter={setRuleFilter}
         placeholder="거래처·비목·발주"/>
       <div className="card" style={{ overflow: "hidden" }}>
@@ -2762,8 +2771,11 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
                 <td className="num-cell num-right">{fmtNum(r.amount)}</td>
                 <td className="text-sm">{PERIOD_LABEL[r.period]} {r.dayOfMonth}일</td>
                 {/* 서버가 계산한 회차를 쓴다 — 화면에서 다시 계산하면 놓친 회차가 감춰진다 */}
+                {/* 다음 예정은 **서버 계산값**(nextDue)이다. 예전엔 이행 현황(pending)에서
+                    주워 썼는데 그 목록은 35일 미리보기라, 매분기·매년 규칙은 늘 '—'로 떴다 —
+                    활성인데 예정이 없으니 규칙이 안 도는 것처럼 읽힌다. */}
                 <td className="text-sm">
-                  {r.active ? (s?.next || "—") : "—"}
+                  {r.active ? (r.nextDue || s?.next || "—") : "—"}
                   {s?.overdue > 0 && (
                     <span className="badge neg" style={{ marginLeft: 6, fontSize: 10 }}>미처리 {s.overdue}</span>
                   )}
@@ -2776,7 +2788,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
                     <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => openEdit(r)}>수정</button>
                     {/* 등록일 이전 회차는 평소 경로로 안 만들어진다 → 기간을 열어 넣는 입구 */}
                     <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }}
-                      onClick={() => setBackfill({ id: r.id, label: `${r.item || r.category || ''} · ${r.vendor_name || ''}` })}>소급 등록</button>
+                      onClick={() => setBackfill({ id: r.id, label: ruleLabel(r) })}>지난 회차 넣기</button>
                     <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => handleToggle(r.id)}>
                       {r.active ? "중지" : "재개"}
                     </button>
@@ -3054,19 +3066,20 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
   return (
     <div className={page ? 'fade-up' : undefined} style={page ? undefined : { padding: 20 }}>
       {/* 상단은 '이번에 청구할 것'(이행), 아래는 '무엇을 언제 얼마씩 청구할지'(규칙).
-          같은 회차를 대금 청구서의 '발행 예정'에서도 처리할 수 있다 — 같은 API·같은 컴포넌트를 쓴다. */}
+          같은 회차를 수시입금의 '청구할 것'에서도 처리할 수 있다 — 같은 API·같은 컴포넌트를 쓴다. */}
       {page ? (
-        <PageHeader title="정기 청구"
+        /* 제목은 메뉴 이름과 같아야 한다 — 위 정기지급과 같은 규칙 */
+        <PageHeader title="정기입금"
           sub={cyc.overdueCount > 0 ? `놓친 회차 ${cyc.overdueCount}건이 있어요` : undefined}
           actions={recActions}/>
       ) : (
         <>
           <div className="row" style={{ marginBottom: 6 }}>
-            <div className="section-title">정기 청구</div>
+            <div className="section-title">정기입금</div>
             <div className="ml-auto">{recActions}</div>
           </div>
           <div className="text-sm text-muted" style={{ marginBottom: 16 }}>
-            청구 조건을 설정하는 곳이에요. 도래한 회차는 아래에서 바로 발행할 수 있고, <b>판매·수주(매출) → 대금 청구서</b>의 '발행 예정'에서 주문 청구일정과 함께 처리해도 됩니다.
+            청구 조건을 설정하는 곳이에요. 도래한 회차는 아래에서 바로 발행할 수 있고, <b>입금관리 → 수시입금</b>의 '청구할 것'에서 수주 청구일정과 함께 처리해도 됩니다.
           </div>
         </>
       )}
@@ -3076,7 +3089,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
         onSkip={cyc.skip} onUnskip={cyc.unskip}
         onOpenContract={() => goRoute?.('contract_sales')}/>
 
-      <RuleListHeader title="정기 청구 규칙" side="sales" rows={ruleRows} all={rows} amountOf={totalOf}
+      <RuleListHeader title="정기입금 규칙" side="sales" rows={ruleRows} all={rows} amountOf={totalOf}
         q={q} setQ={setQ} ruleFilter={ruleFilter} setRuleFilter={setRuleFilter}
         placeholder="고객사·항목·수주"/>
       <div className="card" style={{ overflow: "hidden" }}>
@@ -3109,8 +3122,11 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
                 </td>
                 <td className="num-cell num-right">{fmtNum(totalOf(r))}</td>
                 <td className="text-sm">{PERIOD_LABEL[r.period]} {r.dayOfMonth}일</td>
+                {/* 다음 예정은 **서버 계산값**(nextDue)이다. 예전엔 이행 현황(pending)에서
+                    주워 썼는데 그 목록은 35일 미리보기라, 매분기·매년 규칙은 늘 '—'로 떴다 —
+                    활성인데 예정이 없으니 규칙이 안 도는 것처럼 읽힌다. */}
                 <td className="text-sm">
-                  {r.active ? (s?.next || "—") : "—"}
+                  {r.active ? (r.nextDue || s?.next || "—") : "—"}
                   {s?.overdue > 0 && (
                     <span className="badge neg" style={{ marginLeft: 6, fontSize: 10 }}>미처리 {s.overdue}</span>
                   )}
@@ -3121,7 +3137,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
                     <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => openEdit(r)}>수정</button>
                     {/* 등록일 이전 회차는 평소 경로로 안 만들어진다 → 기간을 열어 넣는 입구 */}
                     <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }}
-                      onClick={() => setBackfill({ id: r.id, label: `${r.item || r.category || ''} · ${r.vendor_name || ''}` })}>소급 등록</button>
+                      onClick={() => setBackfill({ id: r.id, label: ruleLabel(r) })}>지난 회차 넣기</button>
                     <button className="btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => handleToggle(r.id)}>
                       {r.active ? "중지" : "재개"}
                     </button>

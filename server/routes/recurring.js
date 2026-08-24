@@ -33,19 +33,49 @@ const evidFlag = (v) => (v === true || v === 1 || v === '1' ? 1 : 0)
 const expenseVat = (total, vatMode, catVat) =>
   recurFromTotal(total, vatMode || modeFromCatVat(catVat))
 
+/* 규칙별 '다음 회차' — 목록의 '다음 예정' 열이 쓴다.
+ *
+ * 여태 이 값을 **이행 현황(pending)에서 주워 썼다.** 그건 미리보기 창(LOOKAHEAD_DAYS=35일)
+ * 안의 회차만 담는데, 그 창은 **월간 기준**으로 잡은 값이다. 그래서 매분기·매년 규칙은
+ * 다음 회차가 늘 창 밖에 있어 '다음 예정'이 영원히 '—'로 떴다 — 활성인데 예정이 없으니
+ * 규칙이 죽은 것처럼 읽힌다("등록은 했는데 안 도나?").
+ *
+ * 창을 1년 넘게 잡아 규칙 자신의 주기로 계산한다. 계산은 recurrence.js 한 곳에서만 한다
+ * (프런트에서 다시 세면 서버가 실제로 발행하는 회차와 어긋난다).
+ * 건너뛴 회차는 건너뛴다 — 처리 대상이 아닌 날짜를 '다음 예정'으로 보여줄 이유가 없다. */
+const NEXT_DUE_HORIZON = 400   // 연 1회 규칙도 다음 회차가 잡히도록(365 + 여유)
+async function attachNextDue(db, rows, kind) {
+  const [skipRows] = await db.execute(
+    'SELECT recurring_id, due_date FROM recurring_skips WHERE kind = ?', [kind])
+  const skipped = new Set(skipRows.map(s => `${s.recurring_id}|${String(s.due_date).slice(0, 10)}`))
+  const today = kstToday()
+  for (const r of rows) {
+    /* ⚠ setup_date(등록일)를 **반드시 함께 넘긴다.** 이게 없으면 소급 하한이 풀려서
+       start_date 앵커부터 세고, 이미 지난 회차가 '다음 예정'으로 올라온다
+       (시작일 2026-08-01·5일 규칙이 8월 24일에 '2026-08-05'을 다음 예정으로 내놓았다).
+       엔진의 하한 이름과 값 만드는 법은 pending 라우트와 같아야 한다 — 다르면 목록의
+       '다음 예정'과 이행 현황의 회차가 어긋난다. */
+    r.setup_date = r.created_epoch != null ? kstDate(Number(r.created_epoch) * 1000) : r.setup_date
+    r.next_due = dueDatesToGenerate(r, today, { horizonDays: NEXT_DUE_HORIZON })
+      .find(d => !skipped.has(`${r.id}|${d}`)) || null
+  }
+  return rows
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const [rows] = await req.db.execute(`
       /* 주문(발주)도 함께 붙인다 — 화면이 발주 기반 규칙에 배지를 다는데(Master.jsx
          ContractBadge) 이름을 안 내려줘서 '주문'이라고만 뜨고 어느 발주인지 알 수 없었다.
          정기청구 쪽 목록 쿼리는 처음부터 이 JOIN 이 있었다(routes/recurring-invoices.js). */
-      SELECT r.*, v.name AS vendor_name, c.name AS contract_name
+      SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch,
+             v.name AS vendor_name, c.name AS contract_name
       FROM recurring_expenses r
       LEFT JOIN vendors v ON r.vendor_id = v.id
       LEFT JOIN contracts c ON r.contract_id = c.id
       ORDER BY r.day_of_month
     `)
-    res.json(rows)
+    res.json(await attachNextDue(req.db, rows, 'expense'))
   } catch (e) { next(e) }
 })
 
