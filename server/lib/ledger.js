@@ -53,10 +53,21 @@ function isSettled(status) {
  *
  * @param {{kind:string, account_id:any, status:any}} txn
  */
-function ledgerError({ kind, account_id, status }) {
+function ledgerError({ kind, account_id, status, method }) {
   const settled = isSettled(status)
   // 아직 오가지 않은 돈('지급 대기' 등)은 계좌가 없어도 된다 — 잔액에 잡히지 않는 게 맞다.
   if (!settled) return null
+  /* ⚠ **현금은 계좌 없이도 통과한다.**
+   *
+   * 금고 시재를 관리하는 회사는 종류 '현금'인 계정(1101)을 만들어 거기서 빼면 되고,
+   * 안 세는 회사(대표 지갑에서 그냥 나가는 소액)는 계정을 안 만든다. 후자에 계좌를
+   * 요구하면 **현금 지출을 아예 등록할 수 없다** — 실제로 그 상태였고, 실무자가
+   * 결제수단만 '현금'으로 바꾼 채 직전에 고른 카드가 남아 저장되는 사고로 이어졌다
+   * (운영에서 현금 3건이 법인카드에 달려 있었다).
+   *
+   * 계좌가 없으면 잔액은 안 움직이고 비용만 잡힌다. 회계적으로는 헐렁하지만,
+   * **틀린 계좌에 다는 것보다 낫다.** */
+  if (method === '현금') return null
   if (!account_id) {
     return kind === 'income'
       ? '입금 계좌를 선택해주세요. 계좌를 지정해야 잔액에 반영됩니다.'

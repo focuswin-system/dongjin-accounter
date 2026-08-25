@@ -76,6 +76,22 @@ router.get('/:id', async (req, res, next) => {
    그대로 두면 자금일보가 "그 날 한꺼번에 빠질 돈"으로 한 번 더 세운다(이미 빠진 돈인데). */
 const cardTypeOf = (v) => (v === 'check' ? 'check' : 'credit')
 
+/* 현금(금고 시재)은 **회사에 하나만** 둔다.
+ *
+ * 회계의 현금 계정(1101)이 회사에 하나이기 때문이다. 여러 개를 만들 수 있게 하면
+ * "어느 금고에서 뺐나"가 되고, 그러면 시재가 영영 안 맞는다. 본사·지점처럼 물리적으로
+ * 갈리는 규모가 아니면 나눌 이유가 없다.
+ * @returns 문제가 있으면 사용자에게 보여줄 한국어 메시지, 없으면 null
+ */
+async function cashDuplicateError(db, type, exceptId = null) {
+  if (String(type || '').trim() !== '현금') return null
+  const sql = 'SELECT id FROM accounts WHERE type = ? AND kind <> ?' + (exceptId ? ' AND id <> ?' : '')
+  const params = exceptId ? ['현금', 'card', exceptId] : ['현금', 'card']
+  const [rows] = await db.execute(sql, params)
+  if (!rows.length) return null
+  return '현금은 하나만 둘 수 있어요. 이미 등록된 현금 계정을 쓰거나 이름을 바꿔주세요.'
+}
+
 router.post('/', async (req, res, next) => {
   try {
     const { name, bank, type, initial_balance, kind, number, purpose } = req.body
@@ -86,6 +102,7 @@ router.post('/', async (req, res, next) => {
     const cardPayDay = cardType === 'check' ? 0
       : Math.min(28, Math.max(0, parseInt(req.body.card_pay_day, 10) || 0))
     const cardPayAcct = cardType === 'check' ? null : (req.body.card_pay_account_id || null)
+    { const ce = await cashDuplicateError(req.db, type); if (ce) return res.status(409).json({ error: ce }) }
     const id = randomUUID()
     // acct_code 를 빠뜨리면 이 계좌의 거래는 일계표에서 **한쪽 다리가 없어** 차대변이 안 맞는다.
     // (실제로 여기가 비어 있어서 새로 만든 계좌의 거래가 전부 짝을 잃었다)
@@ -108,6 +125,7 @@ router.put('/:id', async (req, res, next) => {
     const cardPayDay = cardType === 'check' ? 0
       : Math.min(28, Math.max(0, parseInt(req.body.card_pay_day, 10) || 0))
     const cardPayAcct = cardType === 'check' ? null : (req.body.card_pay_account_id || null)
+    { const ce = await cashDuplicateError(req.db, type, req.params.id); if (ce) return res.status(409).json({ error: ce }) }
     // 종류(보통예금↔당좌예금↔현금)가 바뀌면 계정과목도 따라가야 한다 — 안 그러면 일계표가 어긋난다
     const [result] = await req.db.execute(
       'UPDATE accounts SET name=?, bank=?, type=?, initial_balance=?, kind=?, `number`=?, purpose=?, acct_code=?, owner=?, card_pay_day=?, card_pay_account_id=?, card_type=? WHERE id=?',

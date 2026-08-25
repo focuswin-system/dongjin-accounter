@@ -40,6 +40,32 @@ const FormField = ({ label, required, hint, children }) => (
   </div>
 );
 
+/* 결제수단에 맞는 계좌만 남긴다.
+ *
+ * ⚠ **조용히 틀린 데이터를 만들던 자리다.** 결제수단을 바꿔도 form.account 가 그대로
+ *   남아 있었다. 법인카드를 고르고 계좌를 지정한 뒤 '현금'으로 바꾸면 칩은 사라지는데
+ *   뒤에서는 그 카드가 살아 있다가 그대로 저장된다 — 화면에는 아무것도 안 골라진 것으로
+ *   보이니 사용자는 알 수가 없다.
+ *   운영(태영엔지니어링)에서 현금 지출 3건이 법인카드 '공장장(4851)'에 달려 있었다.
+ *   현금으로 낸 돈이 카드 미결제로 잡혀 카드 대금 예측이 6만원 부풀어 있었다.
+ *
+ * 수단이 바뀌면 그 수단이 쓸 수 없는 계좌는 놓는다. 같은 갈래면 그대로 둔다
+ * (법인카드 ↔ 개인카드처럼 둘 다 카드인 경우에는 다시 고르게 하지 않는다).
+ */
+const accountKindFor = (method) =>
+  method === '현금' ? 'cash' : (method === '법인카드' || method === '개인카드') ? 'card' : 'bank'
+
+const keepAccount = (current, method, accounts = []) => {
+  if (!current) return ''
+  const a = accounts.find(x => x.name === current)
+  if (!a) return ''
+  const want = accountKindFor(method)
+  // 현금 시재는 kind='cash'. 옛 데이터가 보통예금 계좌에 type='현금'으로 있을 수도 있어 둘 다 본다.
+  const isCash = a.kind === 'cash' || a.type === '현금'
+  const has = isCash ? 'cash' : a.kind === 'card' ? 'card' : 'bank'
+  return has === want ? current : ''
+}
+
 const TAX_INVOICE_GROUPS = ["재료비", "외주가공비", "시험·인증비"];
 
 export const TransactionForm = ({ open, kind: initialKind = "expense", initialContract, initialCostContract, initialVendor, initialCategory, initialMemo,
@@ -62,6 +88,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   const [vendors, setVendors] = useState([]);
   const [vendorAccounts, setVendorAccounts] = useState([]);   // 고른 거래처의 계좌들(여럿일 수 있다)
   const [accounts, setAccounts] = useState([]);
+  /* 계좌를 세 갈래로 나눠 쓴다 — 결제수단마다 고를 수 있는 것이 다르다.
+     현금(금고 시재)을 통장 칩에 섞어 두면 "이체로 현금을 냈다"는 말이 안 되는 기록이 생긴다. */
+  const isCashAcct = (a) => a.kind !== 'card' && a.type === '현금'
+  const bankAccounts = accounts.filter(a => a.kind !== 'card' && !isCashAcct(a))
+  const cashAccounts = accounts.filter(isCashAcct)
   const [categories, setCategories] = useState([]);
   const [items, setItems] = useState([]);            // 품목(선택)
   const [jeokyos, setJeokyos] = useState([]);        // 적요
@@ -620,7 +651,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                 <div className="row gap-6" style={{ flexWrap: "wrap" }}>
                   {["계좌이체", "법인카드", "개인카드", "현금"].map(v => (
                     <button key={v} type="button" className={`chip ${form.method === v ? "active" : ""}`}
-                      onClick={() => setForm({...form, method: v})}>
+                      onClick={() => setForm({ ...form, method: v, account: keepAccount(form.account, v, accounts) })}>
                       {v === "계좌이체" && <Icon.Bank size={12}/>}
                       {(v === "법인카드" || v === "개인카드") && <Icon.Card size={12}/>}
                       {v === "현금" && <Icon.Wallet size={12}/>}
@@ -630,12 +661,21 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                 </div>
                 {form.method === "계좌이체" && (
                   <div className="row gap-6" style={{ flexWrap: "wrap", marginTop: 8 }}>
-                    {accounts.filter(a => a.kind !== "card").map(a => (
+                    {bankAccounts.map(a => (
                       <button key={a.id} type="button" className={`chip ${form.account === a.name ? "active" : ""}`}
                         onClick={() => setForm({...form, account: a.name})}>
                         <Icon.Bank size={12}/>{a.name}
                       </button>
                     ))}
+                  </div>
+                )}
+                {/* 개인카드로 회사 돈을 쓰면 그 카드 계정에 미결제가 쌓인다. 나중에 갚을 때
+                    어디서 처리하는지 그 자리에서 알려준다 — 안 알려주면 "그래서 이건 언제
+                    통장에서 나가나"가 남는다(실무자가 실제로 그렇게 물었다). */}
+                {form.method === "개인카드" && (
+                  <div className="text-xs text-muted2" style={{ marginTop: 8, lineHeight: 1.7 }}>
+                    이 카드에 미결제로 쌓여요. 나중에 갚을 때 <b>지급처리 › 계좌 이체</b>에서
+                    통장 → 카드로 처리하시면 됩니다.
                   </div>
                 )}
                 {(form.method === "법인카드" || form.method === "개인카드") && (
@@ -649,6 +689,30 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                       </button>
                     ))}
                   </div>
+                )}
+                {/* 현금 — **금고 시재**에서 나간다. 기준정보에서 종류 '현금'인 계정을 만들어 두면
+                    여기서 고를 수 있고, 그러면 시재 잔액이 관리된다(회계의 현금 계정 1101).
+                    ⚠ 시재를 안 세는 회사도 있다. 그런 회사는 계정을 안 만들면 되고,
+                      계좌 없이 비용만 잡힌다(서버도 현금은 계좌 없이 통과시킨다). */}
+                {form.method === "현금" && (
+                  cashAccounts.length === 0 ? (
+                    <div className="text-xs text-muted2" style={{ marginTop: 8, lineHeight: 1.7 }}>
+                      금고 시재를 관리하시면 <b>기준정보 › 계좌</b>에서 종류를 <b>현금</b>으로 계정을
+                      하나 만들어 주세요. 그러면 여기서 골라 시재 잔액이 관리됩니다.<br/>
+                      안 만드셔도 됩니다 — 그때는 비용만 잡히고 통장 잔액은 움직이지 않아요.
+                    </div>
+                  ) : (
+                    <div className="row gap-6" style={{ flexWrap: "wrap", marginTop: 8 }}>
+                      {cashAccounts.map(a => (
+                        <button key={a.id} type="button" className={`chip ${form.account === a.name ? "active" : ""}`}
+                          onClick={() => setForm({...form, account: a.name})}>
+                          <Icon.Wallet size={12}/>{a.name}
+                        </button>
+                      ))}
+                      <button type="button" className={`chip ${!form.account ? "active" : ""}`}
+                        onClick={() => setForm({...form, account: ""})}>지정 안 함</button>
+                    </div>
+                  )
                 )}
                 {form.method === "계좌이체" && counterpartyPicker("어디로 보냈나요?")}
               </FormField>
@@ -666,8 +730,13 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
               </FormField>
             )}
 
+            {/* ⚠ 예전 hint 는 "월말 정산을 위해 지정하세요"였다. 그런데 **월말 정산은 없는
+                기능**이다 — employee_id 를 저장만 하고 정산하는 코드가 어디에도 없다.
+                화면이 있지도 않은 절차를 약속하면 사용자는 "지정해 뒀으니 나중에 정산되겠지"
+                하고 넘어간다. 미구현보다 나쁘다. 하는 일을 그대로 적는다.
+                직원이 사비로 쓴 돈은 갚을 때 그 지출을 등록하면 된다(따로 정산 절차가 없다). */}
             {kind === "expense" && (form.method === "개인카드" || form.method === "현금") && (
-              <FormField label="사용 직원" hint="월말 정산을 위해 지정하세요 (선택)">
+              <FormField label="사용 직원" hint="누가 썼는지 기록해 둡니다 (선택)">
                 <div className="row gap-6" style={{ flexWrap: "wrap" }}>
                   <button type="button" className={`chip ${!form.employee ? "active" : ""}`}
                     onClick={() => setForm({...form, employee: ""})}>없음</button>

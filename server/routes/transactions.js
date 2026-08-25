@@ -318,7 +318,7 @@ router.post('/', async (req, res, next) => {
     // 완료 상태인데 계좌가 없으면 잔액에 잡히지 않는다(lib/ledger.js 참고)
     // 기본 상태는 종류별로 — 수입에 '지급완료'가 박히면 '입금완료'만 세는 집계에서 빠진다
     const st = normalizeStatus(status || defaultSettledStatus(kind))
-    const lerr = ledgerError({ kind, account_id, status: st })
+    const lerr = ledgerError({ kind, account_id, status: st, method })
     if (lerr) return res.status(400).json({ error: lerr })
     { const fe = fundAccountError(account_code); if (fe) return res.status(400).json({ error: fe }) }
     // 계정과목을 안 고르면 비목이 정해 둔 값을 쓴다 — 비면 일계표에서 상대 계정이 빈다
@@ -389,7 +389,7 @@ router.put('/:id', async (req, res, next) => {
     // 여기가 비어 있어서, 완료 상태 지출을 계좌 없이 저장하면 거래는 남고 계좌 잔액에서만
     // 조용히 빠지는 상태가 만들어졌다(F-02 계열). 상태는 표준형으로 정규화한 뒤 검사한다.
     const st = normalizeStatus(status || defaultSettledStatus(cur.kind))
-    const lerr = ledgerError({ kind: cur.kind, account_id, status: st })
+    const lerr = ledgerError({ kind: cur.kind, account_id, status: st, method })
     if (lerr) return res.status(400).json({ error: lerr })
     // 등록과 같은 가드·기본값을 수정에도 건다 — 한쪽만 막으면 수정으로 우회된다
     { const fe = fundAccountError(account_code); if (fe) return res.status(400).json({ error: fe }) }
@@ -443,7 +443,7 @@ router.patch('/:id/status', async (req, res, next) => {
     // 세므로 '지급 완료'(공백)로 들어오면 누락된다(F-02 계열 방지).
     const status = normalizeStatus(req.body.status)
     if (!status) return res.status(400).json({ error: 'status 필수' })
-    const [[cur]] = await req.db.execute('SELECT kind, account_id, date FROM transactions WHERE id = ?', [req.params.id])
+    const [[cur]] = await req.db.execute('SELECT kind, account_id, date, method FROM transactions WHERE id = ?', [req.params.id])
     if (!cur) return res.status(404).json({ error: 'Not found' })
     // 상태를 바꾸면 계좌 잔액이 움직인다('지급 대기'↔'지급완료'). 마감된 달이면 막는다 —
     // POST·PUT·DELETE는 모두 검사하는데 여기만 빠져 있어서, 거래내역의 '이체 실행' 버튼 하나로
@@ -453,7 +453,7 @@ router.patch('/:id/status', async (req, res, next) => {
     // '지급 대기'로 생성될 수 있어(recurring.js), 거래내역의 '이체 실행'이 이 경로를 탄다.
     // 요청이 계좌를 함께 보냈으면 그걸로 채우고, 그래도 없으면 막는다.
     const acct = cur.account_id || account_id || null
-    const err = ledgerError({ kind: cur.kind, account_id: acct, status })
+    const err = ledgerError({ kind: cur.kind, account_id: acct, status, method: cur.method })
     if (err) return res.status(400).json({ error: err })
     const [result] = await req.db.execute(
       'UPDATE transactions SET status = ?, account_id = ? WHERE id = ?', [status, acct, req.params.id])
