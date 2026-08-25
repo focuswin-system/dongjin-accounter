@@ -747,6 +747,15 @@ const normGubu = (v) => {
 
 const guessVendorTarget = (h) => {
   const s = String(h).replace(/\s/g, '')
+  /* ⚠ **순서가 규칙이다.** 위에서부터 먼저 걸린 것이 이긴다.
+   *   · '예금주'는 '대표'보다 **먼저** 봐야 한다 — 둘 다 사람 이름이라 헷갈리기 쉽고,
+   *     아래에 두면 '예금주명'이 /대표/ 에 안 걸려 통과할 뿐 순서를 믿을 수 없다.
+   *   · '계좌번호'는 '사업자등록번호'보다 먼저 — 둘 다 '번호'가 들어간다.
+   *   · '은행'은 '거래은행' 같은 머리글이 흔한데 /거래처/ 규칙에 먼저 걸리면 상호명이 된다.
+   *     그래서 상호명 규칙보다 위에 둔다. */
+  if (/예금주|수취인|holder/i.test(s)) return "예금주"
+  if (/계좌|account(?!.*holder)|번호.*계좌/i.test(s)) return "계좌번호"
+  if (/은행|bank/i.test(s)) return "은행"
   if (/사업자|등록번호|biz/i.test(s)) return "사업자번호"
   if (/구분|gubu/i.test(s)) return "거래구분"
   if (/유형|업종|type|category/i.test(s)) return "거래유형"
@@ -789,10 +798,18 @@ const vendorImportAdapter = {
     </div>
   ),
 
+  /* ⚠ **은행·계좌번호·예금주가 여기서 빠져 있었다.**
+   *
+   * targets 에는 세 칸이 있어 사용자가 매핑까지 하는데, 정작 행을 만들 때 안 담았다.
+   * 서버(routes/vendors.js import/commit)는 그 셋을 저장할 준비가 되어 있었으므로
+   * **화면이 조용히 버린 것**이다 — "업로드 됐어요"라고 말하고 계좌번호만 사라졌다.
+   * 매입처 결제내역(월별 일괄이체 명단)이 이 셋을 각각 요구해서, 빠지면 이체를 못 만든다.
+   */
   mapRow: (g, opts) => ({
     name: g('상호명'), gubu: normGubu(g('거래구분')) || opts.defaultGubu,
     biz_no: g('사업자번호'), type: g('거래유형'), ceo: g('대표자'),
     contact: g('담당자'), phone: g('전화'), fax: g('팩스'), email: g('이메일'), address: g('주소'),
+    bank_name: g('은행'), bank_account: g('계좌번호'), account_holder: g('예금주'),
   }),
   isValid: (d) => !!String(d.name || '').trim(),
   matchKey: (d) => normBizNo(d.biz_no) || normVendorName(d.name),
