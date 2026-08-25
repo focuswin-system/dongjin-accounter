@@ -819,10 +819,23 @@ router.get('/investments', async (req, res, next) => {
       SELECT i.*, v.name AS vendor_name FROM investments i
       LEFT JOIN vendors v ON i.vendor_id = v.id
       ORDER BY i.invested_at DESC`)
-    res.json(rows.map(r => ({
-      ...r, amount: Number(r.amount),
-      capital_amount: Number(r.capital_amount), premium_amount: Number(r.premium_amount),
-    })))
+    /* 회수 누계를 함께 싣는다 — 목록에서 "얼마 중 얼마가 남았나"를 알 수 있어야
+       회수를 누를지 판단할 수 있다. 상세를 열어야 알면 목록이 반쪽이다. */
+    const [reds] = await req.db.execute(
+      'SELECT investment_id, COALESCE(SUM(amount),0) AS amt, COALESCE(SUM(gain),0) AS gain, COUNT(*) AS cnt FROM investment_redemptions GROUP BY investment_id')
+    const byInv = new Map(reds.map(r => [r.investment_id, r]))
+    res.json(rows.map(r => {
+      const red = byInv.get(r.id)
+      const redeemed = Number(red?.amt || 0)
+      return {
+        ...r, amount: Number(r.amount),
+        capital_amount: Number(r.capital_amount), premium_amount: Number(r.premium_amount),
+        redeemed_amount: redeemed,
+        redeemed_gain: Number(red?.gain || 0),
+        redeemed_count: Number(red?.cnt || 0),
+        remain_amount: Math.max(0, Number(r.amount) - redeemed),
+      }
+    }))
   } catch (e) { next(e) }
 })
 
@@ -885,12 +898,127 @@ router.post('/investments', async (req, res, next) => {
   finally { conn.release() }
 })
 
+/* 투자 회수 — 받은 투자를 돌려주거나, 한 투자를 돌려받는다.
+ *
+ * ⚠ 방향에 따라 **돈의 방향도 손익도 다르다.**
+ *   in  받은 투자를 돌려준다 → **출금**, 자본 감소. 처분손익이 없다(감자이지 매매가 아니다)
+ *   out 한 투자를 돌려받는다 → **입금**, 투자자산 감소.
+ *       원금보다 더/덜 받은 차액만 투자자산처분이익(4208)·손실(5311)로 잡는다
+ *
+ * ⚠ 원금과 손익을 **나눠 기록한다.** 회수액 전부를 수익으로 넣으면 원금까지 이익이 되어
+ *   손익이 통째로 부푼다(대여금 회수·예적금 만기와 같은 규칙).
+ */
+router.post('/investments/:id/redeem', async (req, res, next) => {
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [[inv]] = await conn.execute('SELECT * FROM investments WHERE id = ? FOR UPDATE', [req.params.id])
+    if (!inv) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+
+    const b = req.body || {}
+    const amount = intOf(b.amount)
+    const gain = inv.direction === 'out' ? intOf(b.gain) : 0   // 자본 환급에는 처분손익이 없다
+    if (amount <= 0) { await rollbackQuietly(conn); return res.status(400).json({ error: '회수 금액을 입력해주세요' }) }
+
+    /* 투자한 것보다 많이 회수했다고 기록할 수는 없다. 잘라서 기록하면 통장에 오간 돈과
+       장부가 조용히 어긋난다(청구서 정산·대여금 회수와 같은 규칙).
+       더 받은 몫은 **손익**이지 원금 회수가 아니다 — gain 으로 넣어야 한다. */
+    const [[{ done }]] = await conn.execute(
+      'SELECT COALESCE(SUM(amount),0) AS done FROM investment_redemptions WHERE investment_id = ?', [req.params.id])
+    const remain = Number(inv.amount) - Number(done)
+    if (amount > remain) {
+      await rollbackQuietly(conn)
+      return res.status(409).json({
+        error: '남은 투자 원금은 ' + remain.toLocaleString('ko-KR') + '원이에요('
+             + amount.toLocaleString('ko-KR') + '원 입력).'
+             + (inv.direction === 'out' ? ' 원금보다 더 받은 몫은 «손익» 칸에 넣어주세요.' : '') })
+    }
+
+    const date = b.redeemed_at || kstToday()
+    { const de = futureDateError(date); if (de) { await rollbackQuietly(conn); return res.status(400).json({ error: de }) } }
+    { const ce = await closedPeriodError(conn, date); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
+    const acct = b.account_id || inv.account_id || null
+    // 회수는 실제로 돈이 오간다 — 받은 투자를 돌려주면 출금, 한 투자를 돌려받으면 입금
+    const kind = inv.direction === 'in' ? 'expense' : 'income'
+    const status = inv.direction === 'in' ? '지급완료' : '입금완료'
+    { const le = ledgerError({ kind, account_id: acct, status }); if (le) { await rollbackQuietly(conn); return res.status(400).json({ error: le }) } }
+
+    const mkTxn = async (amt, k, category, acctCode, memo) => {
+      if (amt <= 0) return null
+      const id = randomUUID()
+      await conn.execute(
+        'INSERT INTO transactions (id, kind, vendor_id, account_id, category, amount, date, method, status, doc_no, memo, account_code, investment_id)'
+        + ' VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        [id, k, inv.vendor_id || null, acct, category, amt, date, '계좌이체',
+         k === 'income' ? '입금완료' : '지급완료', '공통', memo, acctCode, inv.id])
+      return id
+    }
+    const label = inv.counterparty + ' 투자 ' + (inv.direction === 'in' ? '환급' : '회수')
+    // 원금 — 자본(3101) 또는 투자자산(1502). 어느 쪽이든 손익이 아니다.
+    const txnId = await mkTxn(amount, kind, inv.direction === 'in' ? '투자 환급' : '투자 회수',
+      inv.acct_code || (inv.direction === 'in' ? ACCT.capital : ACCT.investOut), label)
+    // 손익 — 더 받았으면 처분이익(입금), 덜 받았으면 처분손실(비용)
+    let txnGainId = null
+    if (gain > 0) txnGainId = await mkTxn(gain, 'income', '투자자산처분이익', '4208', label + ' 처분이익')
+    else if (gain < 0) txnGainId = await mkTxn(-gain, 'expense', '투자자산처분손실', '5311', label + ' 처분손실')
+
+    await conn.execute(
+      'INSERT INTO investment_redemptions (id, investment_id, amount, gain, redeemed_at, account_id, txn_id, txn_gain_id, memo)'
+      + ' VALUES (?,?,?,?,?,?,?,?,?)',
+      [randomUUID(), inv.id, amount, gain, date, acct, txnId, txnGainId, b.memo || null])
+    await conn.commit()
+    res.json({ ok: true, amount, gain })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
+})
+
+/* 회수 취소 — 그때 만든 거래까지 함께 지운다.
+   거래만 남기면 "회수 표시는 없는데 통장에는 오간" 상태가 되어 잔액이 안 맞는다. */
+router.delete('/investments/:id/redeem/:redId', async (req, res, next) => {
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [[r]] = await conn.execute(
+      'SELECT * FROM investment_redemptions WHERE id = ? AND investment_id = ? FOR UPDATE',
+      [req.params.redId, req.params.id])
+    if (!r) { await rollbackQuietly(conn); return res.status(404).json({ error: '그 회수 기록을 찾을 수 없어요' }) }
+    const ce = await closedPeriodError(conn, r.redeemed_at)
+    if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
+    for (const t of [r.txn_id, r.txn_gain_id]) {
+      if (t) await conn.execute('DELETE FROM transactions WHERE id = ?', [t])
+    }
+    await conn.execute('DELETE FROM investment_redemptions WHERE id = ?', [r.id])
+    await conn.commit()
+    res.json({ ok: true })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
+})
+
+/** 회수 이력 — 상세에서 "언제 얼마를 돌려줬나/받았나"를 되짚는다 */
+router.get('/investments/:id/redemptions', async (req, res, next) => {
+  try {
+    const [rows] = await req.db.execute(
+      'SELECT * FROM investment_redemptions WHERE investment_id = ? ORDER BY redeemed_at, created_at', [req.params.id])
+    res.json(rows.map(r => ({ ...r, amount: Number(r.amount), gain: Number(r.gain) })))
+  } catch (e) { next(e) }
+})
+
 router.delete('/investments/:id', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[inv]] = await conn.execute('SELECT txn_id FROM investments WHERE id = ?', [req.params.id])
     if (!inv) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    /* 회수 이력이 있으면 막는다 — 지우면 그 입출금이 어디서 온 돈인지 사라진다
+       (대여금·근로계약 삭제와 같은 규칙). 되돌리려면 회수 취소를 먼저 한다. */
+    const [[{ rcnt }]] = await conn.execute(
+      'SELECT COUNT(*) AS rcnt FROM investment_redemptions WHERE investment_id = ?', [req.params.id])
+    if (rcnt > 0) {
+      await rollbackQuietly(conn)
+      return res.status(409).json({
+        error: '회수 기록이 ' + rcnt + '건 있어요. 지우면 그 입출금이 어디서 온 돈인지 알 수 없게 됩니다.'
+             + ' 회수를 되돌리려면 회수 취소를 먼저 해주세요.' })
+    }
     if (inv.txn_id) await conn.execute('DELETE FROM transactions WHERE id = ?', [inv.txn_id])
     await conn.execute('DELETE FROM investments WHERE id = ?', [req.params.id])
     await conn.commit()

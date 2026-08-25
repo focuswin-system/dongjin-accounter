@@ -1605,6 +1605,20 @@ export const api = {
     try { const r = await req('/finance/investments', { method: 'POST', body: data }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
   },
+  /* 투자 회수 — 받은 투자를 돌려주거나(출금·자본 감소), 한 투자를 돌려받는다(입금·자산 감소).
+     사유를 삼키지 않는다 — 남은 원금 초과·마감은 서버가 사유와 함께 막는다. */
+  async redeemInvestment(id, body) {
+    try { const r = await req(`/finance/investments/${id}/redeem`, { method: 'POST', body }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e?.message || '회수 처리에 실패했어요' } }
+  },
+  async cancelInvestmentRedeem(id, redId) {
+    try { await req(`/finance/investments/${id}/redeem/${redId}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e?.message || '취소에 실패했어요' } }
+  },
+  async getInvestmentRedemptions(id) {
+    try { return await req(`/finance/investments/${id}/redemptions`) } catch { return [] }
+  },
+
   async deleteInvestment(id) {
     try { await req(`/finance/investments/${id}`, { method: 'DELETE' }); return { ok: true } }
     catch (e) { return { ok: false, error: e.message } }

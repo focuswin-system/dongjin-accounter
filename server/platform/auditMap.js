@@ -117,6 +117,15 @@ const AUDIT_RULES = [
   { m: 'DELETE', re: /^\/api\/finance\/loans\/([^/]+)\/draw\/[^/]+$/,   res: 'loan', action: 'draw_cancel',   target: 1 },
   { m: 'DELETE', re: /^\/api\/finance\/loans\/([^/]+)$/,                res: 'loan', action: 'delete',        target: 1 },
   { m: 'DELETE', re: /^\/api\/finance\/investments\/([^/]+)$/,          res: 'investment', action: 'delete',  target: 1 },
+  /* 투자 회수 취소 — 거래 두 건(원금·처분손익)이 함께 지워진다. 남기지 않으면
+     "그 환급 누가 되돌렸지"에 답할 수 없다. */
+  { m: 'DELETE', re: /^\/api\/finance\/investments\/([^/]+)\/redeem\/([^/]+)$/, res: 'investment', action: 'redeem-cancel', target: 1 },
+
+  /* ── 대여금(빌려준 돈) ── 거래를 만들고 지우는 장부 API 다.
+     ⚠ 이 자리가 통째로 비어 있었다 — check-isolation 의 LEDGER_PREFIXES 에
+       '/api/lendings' 가 없어서 검사조차 안 됐다. 함께 넣는다. */
+  { m: 'DELETE', re: /^\/api\/lendings\/([^/]+)$/,                    res: 'lending', action: 'delete',         target: 1 },
+  { m: 'DELETE', re: /^\/api\/lendings\/([^/]+)\/collect\/([^/]+)$/, res: 'lending', action: 'collect-cancel', target: 1 },
 
   // ── 적금 ── 납입·만기도 계좌를 움직인다
   { m: 'POST',   re: /^\/api\/savings\/([^/]+)\/pay-missed$/,           res: 'savings', action: 'pay_missed', target: 1 },
@@ -158,6 +167,8 @@ const ACTION_LABELS = {
   pay: '지급', pay_cancel: '지급 취소', pay_missed: '놓친 회차 납입',
   process: '결의서 처리', mature: '만기 처리',
   repay: '상환', repay_missed: '놓친 회차 상환', repay_cancel: '상환 취소',
+  // 대여금·투자 회수 — 차입금 상환의 거울상
+  'collect-cancel': '회수 취소', 'redeem-cancel': '회수 취소',
   draw: '추가 차입', draw_cancel: '추가 차입 취소',
   unprocess: '처리 취소', issue_split: '나눠 발행',
   // 계정 (routes/auth.js)
@@ -174,7 +185,7 @@ const RESOURCE_LABELS = {
   recurring_invoice: '정기청구', recurring_expense: '정기지출',
   payroll: '급여', work_contract: '근로·용역계약',
   resolution: '지급결의서', settlement: '정산내역서',
-  loan: '차입금', investment: '투자', savings: '예금·적금', unpaid_labor: '미지급 퇴직금',
+  loan: '차입금', lending: '대여금', investment: '투자', savings: '예금·적금', unpaid_labor: '미지급 퇴직금',
   account: '계좌/카드', vendor: '거래처', ref_item: '기준정보', user: '사용자',
   feature: '유료 기능',
 }

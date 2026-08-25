@@ -417,6 +417,9 @@ try {
     '/api/transactions', '/api/invoices', '/api/contracts', '/api/payroll',
     '/api/work-contracts', '/api/resolutions', '/api/settlements',
     '/api/finance', '/api/savings', '/api/closings', '/api/accounts',
+    /* 대여금 — 빌려준 돈. 실행·회수가 전부 거래를 만든다. 새로 들어왔는데 이 목록에
+       안 넣으면 삭제 API 가 **검사조차 안 된다**(실제로 그렇게 빠질 뻔했다). */
+    '/api/lendings',
     /* 정기 라우터가 빠져 있었다 — 이름이 '기준정보처럼' 생겼지만 여기서 청구서·거래가
        만들어지고 지워진다(발행·놓친회차 일괄·소급 등록/되돌리기). 실제로 소급 되돌리기가
        최대 60건을 감사 기록 없이 지울 뻔했다. */

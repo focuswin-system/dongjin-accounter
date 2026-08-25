@@ -813,6 +813,113 @@ const LoanSchedule = ({ loan: l, onRepay, onCancel, onCancelDraw }) => (
   </div>
 )
 
+/* 투자 회수 — 받은 투자를 돌려주거나, 한 투자를 돌려받는다.
+ *
+ * 여태 회수를 적을 길이 **삭제밖에 없었다.** 지우면 "받았다가 돌려줬다"는 사실이 통째로
+ * 사라져서, 그 해에 자본이 얼마나 들어오고 나갔는지를 되짚을 수 없다.
+ *
+ * ⚠ 방향에 따라 화면이 묻는 것이 다르다.
+ *   받은 돈(in)  돌려주는 것 → 처분손익이 없다(감자다). 손익 칸을 아예 안 낸다.
+ *   한 돈(out)   돌려받는 것 → 원금보다 더/덜 받은 차액이 처분손익이다. 그 칸을 낸다.
+ *   안 쓰는 칸을 세워 두면 "여기 뭘 넣지"가 되고, 잘못 넣으면 손익이 틀어진다.
+ */
+const RedeemDrawer = ({ inv, accounts, onClose, onDone }) => {
+  const toast = useToast()
+  const [amount, setAmount] = useState('')
+  const [gain, setGain] = useState('')
+  const [date, setDate] = useState(localToday())
+  const [accountId, setAccountId] = useState(inv?.account_id || '')
+  const [rows, setRows] = useState([])
+  const [busy, setBusy] = useState(false)
+  const isIn = inv?.direction === 'in'
+
+  const load = async () => setRows(await api.getInvestmentRedemptions(inv.id))
+  useEffect(() => { if (inv) { setAmount(''); setGain(''); setDate(localToday()); load() } }, [inv?.id])
+  if (!inv) return null
+
+  const submit = async () => {
+    setBusy(true)
+    const res = await api.redeemInvestment(inv.id, {
+      amount, gain: isIn ? 0 : gain, redeemed_at: date, account_id: accountId })
+    setBusy(false)
+    if (!res.ok) return toast.push(res.error, { tone: 'warn' })
+    toast.push(isIn ? '환급을 기록했어요' : '회수를 기록했어요')
+    onDone()
+  }
+  const cancel = async (r) => {
+    const res = await api.cancelInvestmentRedeem(inv.id, r.id)
+    if (!res.ok) return toast.push(res.error, { tone: 'warn' })
+    toast.push('취소했어요'); load(); onDone(true)
+  }
+
+  return (
+    <>
+      <DrawerHead title={isIn ? '투자 환급' : '투자 회수'}
+        sub={`${inv.counterparty} · 투자 ${fmtNum(inv.amount)}원 · 남은 원금 ${fmtNum(inv.remain_amount ?? inv.amount)}원`}
+        onClose={onClose}/>
+      <div className="drawer-body col gap-form">
+        <div>
+          <label className="label">{isIn ? '돌려준 금액' : '돌려받은 원금'} <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+          <MoneyInput value={amount} onChange={setAmount}/>
+          <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+            {isIn
+              ? '자본이 그만큼 줄어요. 손익에는 잡히지 않습니다.'
+              : '투자자산이 그만큼 줄어요. 원금이라 손익에는 잡히지 않습니다.'}
+          </div>
+        </div>
+
+        {/* 처분손익은 '한 돈'에만 있다 — 자본 환급은 매매가 아니라 감자다 */}
+        {!isIn && (
+          <div>
+            <label className="label">손익 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+            <MoneyInput value={gain} onChange={setGain} allowNegative/>
+            <div className="text-xs text-muted2" style={{ marginTop: 6, lineHeight: 1.7 }}>
+              원금보다 <b>더</b> 받았으면 그 차액을 양수로 넣으세요 → 투자자산처분이익.<br/>
+              <b>덜</b> 받았으면 음수로 넣으세요 → 투자자산처분손실. 원금 칸에 합쳐 넣으면 안 돼요.
+            </div>
+          </div>
+        )}
+
+        <div className="row gap-12">
+          <div style={{ flex: 1 }}><label className="label">{isIn ? '돌려준 날' : '받은 날'}</label>
+            <DateInput className="input" value={date} max={localToday()} onChange={e => setDate(e.target.value)}/>
+          </div>
+          <div style={{ flex: 1 }}><label className="label">{isIn ? '출금 계좌' : '입금 계좌'}</label>
+            <Combobox value={accountId} allowAdd={false} onChange={setAccountId}
+              options={accounts.filter(a => a.kind !== 'card').map(a => ({ value: a.id, label: a.name }))}
+              placeholder="계좌 선택"/>
+          </div>
+        </div>
+
+        {/* 이력 — 비어 있으면 안 그린다(이 앱의 규칙) */}
+        {rows.length > 0 && (
+          <div>
+            <div className="label" style={{ marginBottom: 8 }}>지금까지</div>
+            <table className="table">
+              <thead><tr><th>날짜</th><th className="num-right">원금</th><th className="num-right">손익</th><th style={{ width: 70 }}></th></tr></thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.id}>
+                    <td className="num text-sm">{r.redeemed_at}</td>
+                    <td className="num-cell num-right">{fmtNum(r.amount)}</td>
+                    <td className="num-cell num-right" style={{ color: r.gain > 0 ? 'var(--pos-ink)' : r.gain < 0 ? 'var(--neg-ink)' : undefined }}>
+                      {r.gain ? fmtNum(r.gain) : '—'}
+                    </td>
+                    <td>
+                      <button className="btn sm" style={{ color: 'var(--neg-ink)' }} onClick={() => cancel(r)}>취소</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      <DrawerFooter onCancel={onClose} onSave={submit} saveLabel={isIn ? '환급 기록' : '회수 기록'} busy={busy}/>
+    </>
+  )
+}
+
 /* ── 투자 화면 ───────────────────────────────────────────────── */
 const InvestFormDrawer = ({ open, onClose, onSave, vendors, accounts }) => {
   const toast = useToast()
@@ -907,6 +1014,7 @@ export const InvestmentScreen = () => {
   const [vendors, setVendors] = useState([])
   const [accounts, setAccounts] = useState([])
   const [formOpen, setFormOpen] = useState(false)
+  const [redeem, setRedeem] = useState(null)   // 회수/환급 대상 투자
   const [dir, setDir] = useState('all')
 
   const load = async () => setRows(await api.getInvestments())
@@ -972,12 +1080,30 @@ export const InvestmentScreen = () => {
             { key: 'detail', header: '내역', className: 'text-sm text-muted', render: r => (r.direction === 'in'
               ? <>자본금 {fmtNum(r.capital_amount)}{r.premium_amount > 0 && ` · 주식발행초과금 ${fmtNum(r.premium_amount)}`}</>
               : (r.memo || '투자자산')) },
-            { key: 'act', header: '', width: 70, render: r => (
-              <button className="btn" style={{ fontSize: 11, padding: '3px 8px', color: 'var(--neg-ink)' }}
-                onClick={() => handleDelete(r)}>삭제</button>
+            /* 회수 — 여태 이 자리가 비어 있어서 "돌려줬다/돌려받았다"를 적을 길이
+               삭제밖에 없었다. 다 회수한 것은 그대로 남겨 이력이 보이게 한다. */
+            { key: 'remain', header: '남은 원금', align: 'right', className: 'num-cell',
+              render: r => (r.redeemed_count
+                ? (r.remain_amount > 0
+                    ? <span style={{ color: 'var(--warn-ink)', fontWeight: 700 }}>{fmtNum(r.remain_amount)}</span>
+                    : <span className="badge outline" style={{ fontSize: 10 }}>전액 회수</span>)
+                : <span className="text-muted2 text-xs">—</span>) },
+            { key: 'act', header: '', width: 140, render: r => (
+              <div className="row gap-6" style={{ justifyContent: 'flex-end' }}>
+                <button className="btn" style={{ fontSize: 11, padding: '3px 8px' }}
+                  onClick={() => setRedeem(r)}>{r.direction === 'in' ? '환급' : '회수'}</button>
+                <button className="btn" style={{ fontSize: 11, padding: '3px 8px', color: 'var(--neg-ink)' }}
+                  onClick={() => handleDelete(r)}>삭제</button>
+              </div>
             )},
           ]}/>
       </div>
+
+      <Drawer open={!!redeem} onClose={() => setRedeem(null)} width="min(480px,100vw)" label="투자 회수">
+        <RedeemDrawer inv={redeem} accounts={accounts}
+          onClose={() => setRedeem(null)}
+          onDone={(keepOpen) => { load(); if (!keepOpen) setRedeem(null) }}/>
+      </Drawer>
 
       <InvestFormDrawer open={formOpen} vendors={vendors} accounts={accounts}
         onClose={() => setFormOpen(false)}

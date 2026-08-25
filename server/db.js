@@ -890,6 +890,37 @@ async function initDb(conn) {
         FOREIGN KEY (vendor_id) REFERENCES vendors(id)
       )
     `)
+    /* ⚠ 이 표는 **investments 뒤에** 있어야 한다. FK 는 참조 대상이 먼저 있어야
+       만들어진다 — 앞에 두었더니 새 테넌트 생성이 errno 150 으로 통째로 실패했다
+       (기존 테넌트는 investments 가 이미 있어서 안 걸린다 — 새 회사에서만 터진다). */
+    /* 투자 회수 — 받은 투자를 돌려주거나, 한 투자를 돌려받은 이력.
+     *
+     * 여태 회수를 적을 길이 **삭제밖에 없었다.** 지우면 "받았다가 돌려줬다"는 사실이
+     * 통째로 사라져서, 그 해에 자본이 얼마나 들어오고 나갔는지를 되짚을 수 없다.
+     *
+     * ⚠ 방향에 따라 뜻이 다르다.
+     *   direction='in'  받은 투자를 **돌려준다** → 출금, 자본 감소. **처분손익이 없다**(감자다)
+     *   direction='out' 한 투자를 **돌려받는다** → 입금, 투자자산 감소.
+     *                   원금보다 더/덜 받으면 그 차액이 **투자자산처분이익(4208)·손실(5311)** 이다
+     *
+     * 부분 회수가 가능하므로 별도 표로 쌓는다 — investments 에 누계 칸을 두면
+     * 한 번 어긋났을 때 되돌릴 근거가 없다. */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS investment_redemptions (
+        id            VARCHAR(36) PRIMARY KEY,
+        investment_id VARCHAR(36) NOT NULL,
+        amount        BIGINT NOT NULL DEFAULT 0,
+        gain          BIGINT NOT NULL DEFAULT 0,
+        redeemed_at   VARCHAR(20) NOT NULL,
+        account_id    VARCHAR(36),
+        txn_id        VARCHAR(36),
+        txn_gain_id   VARCHAR(36),
+        memo          TEXT,
+        created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (investment_id) REFERENCES investments(id) ON DELETE CASCADE
+      )
+    `)
+
 
     /* 예금·적금 — 자금 '운용'. 차입금(자금 조달)의 거울상이다.
      *
