@@ -1040,10 +1040,17 @@ router.get('/summary', async (req, res, next) => {
       if (left[0]) monthlyDue += left[0].total
       overdue += left.filter(c => c.due_date < today).length
     }
+    /* ⚠ 돌려준·돌려받은 몫을 **뺀다.** 유치·집행 금액을 그대로 더하면 회수한 뒤에도
+       자본과 투자자산이 그대로 남는다 — 회수 기능을 넣기 전에는 둘이 늘 같아서 안 틀렸다.
+       투자 화면 KPI(Finance.jsx)와 같은 규칙이어야 한다. 두 화면이 다른 숫자를 내면
+       어느 쪽이 맞는지 알 길이 없다. */
     const [[inv]] = await req.db.execute(`
-      SELECT COALESCE(SUM(CASE WHEN direction='in'  THEN amount ELSE 0 END), 0) AS invested_in,
-             COALESCE(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END), 0) AS invested_out
-      FROM investments`)
+      SELECT COALESCE(SUM(CASE WHEN i.direction='in'  THEN i.amount - COALESCE(x.done, 0) ELSE 0 END), 0) AS invested_in,
+             COALESCE(SUM(CASE WHEN i.direction='out' THEN i.amount - COALESCE(x.done, 0) ELSE 0 END), 0) AS invested_out
+        FROM investments i
+        LEFT JOIN (SELECT investment_id, SUM(amount) AS done
+                     FROM investment_redemptions GROUP BY investment_id) x
+               ON x.investment_id = i.id`)
     res.json({
       loan_count: loans.length,
       loan_principal: loans.reduce((s, l) => s + Number(l.principal), 0),

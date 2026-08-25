@@ -1038,8 +1038,16 @@ export const InvestmentScreen = () => {
   }
 
   const shown = dir === 'all' ? rows : rows.filter(r => r.direction === dir)
-  const sumIn = rows.filter(r => r.direction === 'in').reduce((s, r) => s + r.amount, 0)
-  const sumOut = rows.filter(r => r.direction === 'out').reduce((s, r) => s + r.amount, 0)
+  /* ⚠ **남은 원금**을 더한다. 유치·집행 금액을 그대로 더하면 돌려준 돈이 자본에 그대로
+     남는다 — 회수/환급을 넣기 전에는 둘이 늘 같아서 문제가 없었다.
+     자본과 투자자산은 재무상태 숫자라, 부풀면 바로 아래 표의 '남은 원금'과 모순된다. */
+  const remainOf = (r) => Number(r.remain_amount ?? r.amount) || 0
+  const inRows = rows.filter(r => r.direction === 'in')
+  const outRows = rows.filter(r => r.direction === 'out')
+  const sumIn = inRows.reduce((s, r) => s + remainOf(r), 0)
+  const sumOut = outRows.reduce((s, r) => s + remainOf(r), 0)
+  const rawIn = inRows.reduce((s, r) => s + (Number(r.amount) || 0), 0)
+  const rawOut = outRows.reduce((s, r) => s + (Number(r.amount) || 0), 0)
 
   return (
     <div className="fade-up">
@@ -1049,8 +1057,14 @@ export const InvestmentScreen = () => {
         </button>}/>
 
       <KpiRow cols={2} style={{ marginBottom: 20 }}>
-        <Kpi label="투자받은 돈 · 자본" value={sumIn} hint="수익이 아니라 자본으로 잡혀요"/>
-        <Kpi label="투자한 돈 · 투자자산" value={sumOut} hint="비용이 아니라 자산으로 잡혀요"/>
+        <Kpi label="투자받은 돈 · 자본" value={sumIn}
+          hint={rawIn > sumIn
+            ? `유치 ${fmtNum(rawIn)}원 중 ${fmtNum(rawIn - sumIn)}원 환급했어요`
+            : '수익이 아니라 자본으로 잡혀요'}/>
+        <Kpi label="투자한 돈 · 투자자산" value={sumOut}
+          hint={rawOut > sumOut
+            ? `집행 ${fmtNum(rawOut)}원 중 ${fmtNum(rawOut - sumOut)}원 회수했어요`
+            : '비용이 아니라 자산으로 잡혀요'}/>
       </KpiRow>
 
       <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>

@@ -45,6 +45,9 @@ export const LendingScreen = () => {
   const [accounts, setAccounts] = useState([])
   const [form, setForm] = useState(null)      // 등록/수정 폼
   const [detail, setDetail] = useState(null)  // 상세(회차)
+  /* 다음에 받을 회차 — 서버가 순서를 강제하므로(routes/lending.js:250~) 화면도 그 회차에만
+     버튼을 낸다. 저장된 회차가 곧 받은 회차라 아직 안 받은 첫 회차가 다음 차례다. */
+  const nextSeq = detail?.schedule?.find(c => !c.paid_date)?.seq
   const [preview, setPreview] = useState(null)
   const [busy, setBusy] = useState(false)
 
@@ -190,6 +193,9 @@ export const LendingScreen = () => {
               <div><div className="text-xs text-muted2">받은 이자</div><div className="num fw-700" style={{ color: 'var(--pos-ink)' }}>{fmtNum(detail.collected_interest)}</div></div>
             </div>
 
+            {/* 서버는 **순서대로만** 회수를 받는다(건너뛰면 남은 원금 누계가 어긋난다).
+                그래서 버튼도 다음 회차에만 낸다 — 모든 행에 내면 눌러 봐야 "1회차부터
+                처리해주세요" 만 돌아온다. 차입금 상환 화면과 같은 규칙(Finance.jsx:805~). */}
             {detail.schedule?.length > 0 ? (
               <table className="table">
                 <thead><tr>
@@ -214,7 +220,9 @@ export const LendingScreen = () => {
                       <td>
                         {c.paid_date
                           ? <button className="btn sm" style={{ color: 'var(--neg-ink)' }} onClick={() => doCancel(detail, c)}>취소</button>
-                          : <button className="btn sm" onClick={() => doCollect(detail, c)}>회수 처리</button>}
+                          : nextSeq === c.seq
+                            ? <button className="btn sm primary" onClick={() => doCollect(detail, c)}>회수 처리</button>
+                            : <span className="text-xs text-muted2">앞선 회차부터</span>}
                       </td>
                     </tr>
                   ))}
