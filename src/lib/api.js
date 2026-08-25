@@ -899,6 +899,10 @@ export const api = {
            매분기·매년 규칙이 영원히 '—'로 뜬다. 프런트에서 다시 세지도 않는다 —
            서버가 실제로 발행하는 회차와 어긋나면 화면이 거짓말을 한다. */
         nextDue: r.next_due || '',
+        /* 금액이 확정인가(fixed) 매번 다른가(variable).
+           변동형은 규칙의 금액이 **예상액**이고, 회차를 발행할 때 실제 금액을 받는다.
+           놓친 회차 일괄에서도 빠진다 — 같은 금액으로 여러 달을 한꺼번에 찍으면 전부 틀린다. */
+        amountMode: r.amount_mode === 'variable' ? 'variable' : 'fixed',
         // 어느 통장으로 들어올/나갈 돈인가 — 규칙에 지정해 두는데 목록에 안 보이면 확인할 길이 없다
         accountName: r.account_name || '',
         active: r.active === 1,
@@ -929,6 +933,8 @@ export const api = {
            안 갔고(POST 는 기본 0, PUT 은 undefined 라 기존 값 유지) 다시 열면 늘 '필요 없음'
            이었다. 기능 전체가 화면에서 죽어 있었다. 필드를 더할 때 여기도 같이 봐야 한다. */
         evidence_required: data.evidence_required ?? data.evidenceRequired ?? false,
+        // 화이트리스트라 여기 없으면 폼이 보내도 버려진다
+        amount_mode: data.amount_mode ?? data.amountMode,
       }})
       return { ok: true, id: result.id }
     } catch (e) { return { ok: false, error: e.message } }
@@ -956,6 +962,8 @@ export const api = {
            안 갔고(POST 는 기본 0, PUT 은 undefined 라 기존 값 유지) 다시 열면 늘 '필요 없음'
            이었다. 기능 전체가 화면에서 죽어 있었다. 필드를 더할 때 여기도 같이 봐야 한다. */
         evidence_required: data.evidence_required ?? data.evidenceRequired ?? false,
+        // 화이트리스트라 여기 없으면 폼이 보내도 버려진다
+        amount_mode: data.amount_mode ?? data.amountMode,
       }})
       return { ok: true }
     } catch (e) { return { ok: false, error: e.message } }
@@ -976,8 +984,10 @@ export const api = {
     try { return await req('/recurring-expenses/pending') } catch { return [] }
   },
   // 정기지출 회차 1건을 매입 청구서(미지급금)로 등록. paid=true면 지급 처리까지
-  async issueRecurringExpense(recurringId, { due, paid = false, account_id } = {}) {
-    try { const r = await req(`/recurring-expenses/${recurringId}/issue`, { method: 'POST', body: { due, paid, account_id } }); return { ok: true, ...r } }
+  /* amount — 변동형 규칙에서 **이번 회차 실제 금액**. 규칙의 금액은 예상액이라 그대로 쓰면
+     틀린 금액이 미지급금으로 잡힌다. 정액형에서도 보내면 그것이 이긴다(그 달만 다를 때). */
+  async issueRecurringExpense(recurringId, { due, paid = false, account_id, amount } = {}) {
+    try { const r = await req(`/recurring-expenses/${recurringId}/issue`, { method: 'POST', body: { due, paid, account_id, amount } }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
   },
   // 놓친 회차 일괄 등록 — 예정일이 지난 미등록 회차를 모두 '지급 대기' 청구서로.
@@ -1013,6 +1023,10 @@ export const api = {
         evidenceRequired: r.evidence_required === 1 || r.evidence_required === true,
         // 다음 회차 — 서버 계산값(정기지출 어댑터의 주석 참조)
         nextDue: r.next_due || '',
+        /* 금액이 확정인가(fixed) 매번 다른가(variable).
+           변동형은 규칙의 금액이 **예상액**이고, 회차를 발행할 때 실제 금액을 받는다.
+           놓친 회차 일괄에서도 빠진다 — 같은 금액으로 여러 달을 한꺼번에 찍으면 전부 틀린다. */
+        amountMode: r.amount_mode === 'variable' ? 'variable' : 'fixed',
         // 어느 통장으로 들어올/나갈 돈인가 — 규칙에 지정해 두는데 목록에 안 보이면 확인할 길이 없다
         accountName: r.account_name || '',
         active: r.active === 1,
@@ -1038,6 +1052,8 @@ export const api = {
         pay_day: data.payDay,
         // 화이트리스트라 여기 없으면 폼이 보내도 버려진다(정기지출 쪽 주석 참조)
         evidence_required: data.evidence_required ?? data.evidenceRequired ?? false,
+        // 화이트리스트라 여기 없으면 폼이 보내도 버려진다
+        amount_mode: data.amount_mode ?? data.amountMode,
       }})
       return { ok: true, id: result.id }
     } catch { return { ok: false } }
@@ -1059,6 +1075,8 @@ export const api = {
         pay_term: data.payTerm ?? data.pay_term,
         pay_day: data.payDay ?? data.pay_day,
         evidence_required: data.evidence_required ?? data.evidenceRequired ?? false,
+        // 화이트리스트라 여기 없으면 폼이 보내도 버려진다
+        amount_mode: data.amount_mode ?? data.amountMode,
       }})
       return { ok: true }
     } catch (e) { return { ok: false, error: e.message } }
@@ -1370,8 +1388,10 @@ export const api = {
     try { return await req('/recurring-invoices/pending') } catch { return [] }
   },
   // 정기청구 회차 1건 발행 (paid=true면 기입금 처리까지)
-  async issueRecurring(recurringId, { due, paid = false, account_id } = {}) {
-    try { const r = await req(`/recurring-invoices/${recurringId}/issue`, { method: 'POST', body: { due, paid, account_id } }); return { ok: true, ...r } }
+  /* supply_amount — 변동형 규칙에서 이번 회차 **공급가액**(부가세는 서버가 붙인다).
+     정기지출 issueRecurringExpense 의 amount 와 같은 뜻이다. */
+  async issueRecurring(recurringId, { due, paid = false, account_id, supply_amount } = {}) {
+    try { const r = await req(`/recurring-invoices/${recurringId}/issue`, { method: 'POST', body: { due, paid, account_id, supply_amount } }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
   },
 

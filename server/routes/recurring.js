@@ -91,8 +91,8 @@ router.post('/', async (req, res, next) => {
     if (!(Number(amount) > 0)) return res.status(400).json({ error: '금액을 입력해주세요' })
     const id = randomUUID()
     await req.db.execute(
-      'INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id, pay_term, pay_day, evidence_required) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [id, vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, normPeriod(period), day_of_month||1, start_date, end_date||null, account_id||null, payTermOf(req.body.pay_term), payDayFor(payTermOf(req.body.pay_term), req.body.pay_day), evidFlag(req.body.evidence_required)]
+      'INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id, pay_term, pay_day, evidence_required, amount_mode) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [id, vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, normPeriod(period), day_of_month||1, start_date, end_date||null, account_id||null, payTermOf(req.body.pay_term), payDayFor(payTermOf(req.body.pay_term), req.body.pay_day), evidFlag(req.body.evidence_required), amountModeOf(req.body.amount_mode)]
     )
     res.json({ id })
   } catch (e) { next(e) }
@@ -109,10 +109,10 @@ router.put('/:id', async (req, res, next) => {
     const evidenceRequired = req.body.evidence_required === undefined
       ? (cur.evidence_required ? 1 : 0) : evidFlag(req.body.evidence_required)
     const [result] = await req.db.execute(
-      'UPDATE recurring_expenses SET vendor_id=?, contract_id=?, category=?, amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=?, pay_term=?, pay_day=?, evidence_required=? WHERE id=?',
+      'UPDATE recurring_expenses SET vendor_id=?, contract_id=?, category=?, amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=?, pay_term=?, pay_day=?, evidence_required=?, amount_mode=? WHERE id=?',
       [vendor_id||null, contract_id||null, category||'', amount, vat_mode||null, normPeriod(period), day_of_month||1, start_date, end_date||null, account_id||null, payTermFor(req.body.pay_term, cur.pay_term),
        payDayFor(payTermFor(req.body.pay_term, cur.pay_term), req.body.pay_day ?? cur.pay_day),
-       evidenceRequired, req.params.id]
+       evidenceRequired, amountModeFor(req.body.amount_mode, cur.amount_mode), req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
@@ -186,6 +186,8 @@ router.get('/pending', async (req, res, next) => {
         out.push(pendingCycle(r, due, today, {
           source: 'recurring-expense',
           type: '정기지출',
+          // 금액이 매번 다른가 — 화면이 등록 버튼을 '금액 입력'으로 바꾼다
+          amount_mode: r.amount_mode || 'fixed',
           item: r.category || '',
           amount: supply,
           vat,
@@ -211,14 +213,22 @@ router.get('/pending', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/* 금액 성격 — 목록에 없으면 '정액형'(옛 데이터·빈 값 방어) */
+const amountModeOf = (v) => (v === 'variable' ? 'variable' : 'fixed')
+/** 수정에서 안 보냈으면 기존 값 유지 — 부분 바디로 고칠 때 말없이 정액형이 되지 않게 */
+const amountModeFor = (v, cur) => (v == null || v === '' ? (cur || 'fixed') : amountModeOf(v))
+
 /**
  * 정기지출 회차 1건 → 매입 청구서(+ paid면 지급 거래·매칭).
  * 건별 등록(/:id/issue)과 일괄 등록(/issue-missed)이 같은 코드를 쓰게 떼어냈다 —
  * 두 벌로 두면 한쪽만 고쳐져서 금액·상태가 조용히 달라진다.
  * 호출 전 검사(회차 순서·미래일자·마감)는 라우트가 한다.
  */
-async function createExpenseInvoice(conn, r, target, { paid = false, accountId = null } = {}) {
-  const { supply, vat, tax_type } = expenseVat(r.amount, r.vat_mode, r.cat_vat)
+async function createExpenseInvoice(conn, r, target, { paid = false, accountId = null, amount = null } = {}) {
+  /* 변동형은 **등록할 때 실제 금액을 받는다**(amount). 규칙의 금액은 예상액일 뿐이라
+     그대로 쓰면 틀린 금액이 미지급금으로 잡힌다. 정액형에서도 보내면 그것이 이긴다. */
+  const base = (amount != null && amount !== '') ? Math.round(Number(amount) || 0) : r.amount
+  const { supply, vat, tax_type } = expenseVat(base, r.vat_mode, r.cat_vat)
   const total = supply + vat
   // 금액 없는 정기지출이 매달 0원 매입 청구서를 찍어내면 '지급 대기'만 쌓인다.
   // (호출부는 { error } 를 받아 그대로 사용자에게 돌려준다)
@@ -280,7 +290,7 @@ router.post('/issue-missed', async (req, res, next) => {
     const [recs] = await conn.execute(
       `SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch, cat.vat AS cat_vat
        FROM recurring_expenses r LEFT JOIN categories cat ON r.category = cat.name
-       WHERE r.active = 1 FOR UPDATE`)
+       WHERE r.active = 1 AND r.amount_mode <> 'variable' FOR UPDATE`)
     const generated = []
     for (const r of recs) {
       r.setup_date = kstDate(Number(r.created_epoch) * 1000)
@@ -328,7 +338,12 @@ router.post('/:id/issue', async (req, res, next) => {
       const ce = await closedPeriodError(conn, target); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
     }
 
-    const made = await createExpenseInvoice(conn, r, target, { paid, accountId: account_id })
+    /* 변동형은 이번 회차 금액을 반드시 받는다 — 규칙 금액은 예상액일 뿐이다 */
+    if (r.amount_mode === 'variable' && (req.body.amount == null || req.body.amount === '')) {
+      await rollbackQuietly(conn)
+      return res.status(400).json({ error: '금액이 매번 다른 정기지급이에요. 이번 회차 금액을 입력해주세요.' })
+    }
+    const made = await createExpenseInvoice(conn, r, target, { paid, accountId: account_id, amount: req.body.amount })
     if (made.error) { await rollbackQuietly(conn); return res.status(400).json({ error: made.error }) }
     await conn.commit()
     res.json({ ok: true, id: made.invId, invoice_no: made.invoice_no })

@@ -5,7 +5,7 @@ import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { ImportWizard } from '../lib/components/ImportWizard'
 import { VendorSubList, ACCOUNT_FIELDS, CONTACT_FIELDS } from '../lib/components/VendorSubList'
-import { RecurringCycles, useRecurringCycles, cycleSummaryByRule } from '../lib/components/RecurringCycles'
+import { RecurringCycles, useRecurringCycles, cycleSummaryByRule, CycleAmountDrawer } from '../lib/components/RecurringCycles'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { BackfillWizard } from '../lib/components/BackfillWizard'
 import { RowActions } from '../lib/components/RowActions'
@@ -2374,7 +2374,7 @@ const catVatToMode = (catVat) => (catVat === '10%' ? 'exclusive' : catVat === '�
 // reloadVendors: 부모가 거래처 목록을 다시 불러오게 하는 콜백(추가 후 새 id로 잡기 위함).
 // editing: 수정 대상(api.getRecurringExpenses 형태, camelCase). null이면 등록.
 const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], accounts = [], contracts = [], addGubu = 'A', reloadVendors }) => {
-  const empty = { vendor_id: "", contract_id: null, category: "", amount: "", vat_mode: "exclusive", period: "monthly", day_of_month: "1", start_date: todayStr(), end_date: "", account_id: "", pay_term: "net30", pay_day: 1, evidence_required: false }
+  const empty = { vendor_id: "", contract_id: null, category: "", amount: "", vat_mode: "exclusive", period: "monthly", day_of_month: "1", start_date: todayStr(), end_date: "", account_id: "", pay_term: "net30", pay_day: 1, evidence_required: false, amount_mode: "fixed" }
   const [form, setForm] = useState(empty)
   // 비목은 반드시 실제 비목 마스터에서 고른다. 예전엔 ["임차료","통신비"…]를 하드코딩해서,
   // 마스터 이름과 한 글자라도 다르면(예: 마스터는 '통신비(관리)') 회차를 청구서로 만들 때
@@ -2400,6 +2400,7 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
         period: editing.period || "monthly", day_of_month: String(editing.dayOfMonth || 1),
         pay_term: editing.payTerm || editing.pay_term || "net30", pay_day: editing.payDay || editing.pay_day || 1,
         evidence_required: !!(editing.evidence_required ?? editing.evidenceRequired),
+        amount_mode: editing.amountMode || editing.amount_mode || 'fixed',
         start_date: editing.startDate || todayStr(), end_date: editing.endDate || "",
         account_id: editing.accountId || "",
       })
@@ -2421,6 +2422,7 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
       day_of_month: parseInt(form.day_of_month) || 1,
       pay_term: form.pay_term || 'net30',
       evidence_required: !!form.evidence_required,
+      amount_mode: form.amount_mode || 'fixed',
       pay_day: parseInt(form.pay_day, 10) || 1,
       end_date: form.end_date || null,
     })
@@ -2470,6 +2472,24 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
             placeholder="비목 선택 (선택)"/>
         </div>
         <div><label className="label">금액 <span style={{ color: 'var(--neg-ink)' }}>*</span> <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· VAT 포함 합계</span></label><MoneyInput value={form.amount} onChange={raw => f("amount", raw)}/></div>
+        {/* 정액형 / 변동형 — **금액 칸 바로 아래**여야 뜻이 통한다.
+            전기·수도·통신·클라우드처럼 **날짜는 같고 금액만 다른** 건이 흔한데, 여태는
+            규칙의 금액이 확정값이라 회차를 발행하면 그 금액이 그대로 나갔다.
+            사용량을 계산하지는 않는다 — 필요한 건 "이번 달 얼마였고 냈나" 뿐이다. */}
+        <div>
+          <label className="label">금액 성격</label>
+          <div className="row gap-6">
+            {[['fixed', '정액형'], ['variable', '변동형']].map(([v, l]) => (
+              <button key={v} type="button" className={`chip ${(form.amount_mode || 'fixed') === v ? 'active' : ''}`}
+                onClick={() => f('amount_mode', v)}>{l}</button>
+            ))}
+          </div>
+          <div className="text-xs text-muted2" style={{ marginTop: 6, lineHeight: 1.7 }}>
+            {(form.amount_mode || 'fixed') === 'variable'
+              ? '위 금액은 예상액이에요. 회차를 처리할 때마다 실제 금액을 물어봅니다. 놓친 회차 일괄 처리에서는 빠져요 — 같은 금액으로 여러 달을 한꺼번에 만들면 전부 틀리니까요.'
+              : '매번 같은 금액이에요. 회차가 도래하면 위 금액 그대로 처리됩니다.'}
+          </div>
+        </div>
         <div><label className="label">부가세</label>
           <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
             {RECUR_VAT_OPTS.map(([v, l]) => (
@@ -2806,7 +2826,11 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
                   {r.contractId && <ContractBadge name={r.contractName} side="purchase" onGo={goRoute && (() => goRoute('contract_purchase'))}/>}
                 </td>
                 <td className="text-sm text-muted">{r.category}</td>
-                <td className="num-cell num-right">{fmtNum(r.amount)}</td>
+                <td className="num-cell num-right">
+                  {fmtNum(r.amount)}
+                  {/* 변동형은 이 숫자가 **예상액**이다. 표시가 없으면 확정 금액으로 읽힌다. */}
+                  {r.amountMode === 'variable' && <div className="text-xs text-muted2">예상</div>}
+                </td>
                 <td className="text-sm">{periodLong(r.period)} {r.dayOfMonth}일</td>
                 {/* 서버가 계산한 회차를 쓴다 — 화면에서 다시 계산하면 놓친 회차가 감춰진다 */}
                 {/* 다음 예정은 **서버 계산값**(nextDue)이다. 예전엔 이행 현황(pending)에서
@@ -2850,6 +2874,8 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
       {/* 기지급 처리 — 계좌·날짜를 받는다. 대금청구서 화면과 같은 공용 드로어 */}
       <PaidIssueDrawer target={cyc.paidTarget} isIssued={false}
         onIssuePaid={cyc.issuePaid} onClose={cyc.closePaid} onDone={cyc.donePaid}/>
+      {/* 변동형 회차의 금액 입력 — 규칙 금액은 예상액이라 발행 전에 실제 금액을 받는다 */}
+      <CycleAmountDrawer {...cyc.amountProps}/>
       {/* 도입 이전 회차 넣기 — 등록일 하한 때문에 평소 경로로는 안 만들어진다 */}
       <BackfillWizard open={!!backfill} rule={backfill} kind="purchase"
         onClose={() => setBackfill(null)} onDone={() => { load(); cyc.reload() }}/>
@@ -2860,7 +2886,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
 // ── 정기 청구(고정수입) 패널 ──────────────────────────────────────
 const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, contracts, accounts, reloadVendors }) => {
   const toast = useToast()
-  const empty = { vendorId: "", contractId: "", item: "", supply: "", vatMode: "exclusive", period: "monthly", dayOfMonth: "1", startDate: todayStr(), endDate: "", accountId: "", payTerm: "net30", payDay: 1, evidenceRequired: false }
+  const empty = { vendorId: "", contractId: "", item: "", supply: "", vatMode: "exclusive", period: "monthly", dayOfMonth: "1", startDate: todayStr(), endDate: "", accountId: "", payTerm: "net30", payDay: 1, evidenceRequired: false, amountMode: "fixed" }
   const [form, setForm] = useState(empty)
   useEffect(() => {
     if (!open) return
@@ -2868,6 +2894,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
       vendorId: editing.vendorId || "", contractId: editing.contractId || "", item: editing.item || "",
       supply: editing.supplyAmount ? String(editing.supplyAmount) : "",
       vatMode: editing.vatMode || "exclusive", period: editing.period || "monthly",
+      amountMode: editing.amountMode || "fixed",
       dayOfMonth: String(editing.dayOfMonth || 1), startDate: editing.startDate || todayStr(),
       endDate: editing.endDate || "", accountId: editing.accountId || "",
       payTerm: editing.payTerm || "net30", payDay: editing.payDay || 1,
@@ -2902,6 +2929,7 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
       item: form.item,
       supplyAmount: parseInt(String(form.supply).replace(/[^0-9]/g, "")) || 0,
       vatMode: form.vatMode,
+      amount_mode: form.amountMode || 'fixed',
       period: form.period,
       dayOfMonth: parseInt(form.dayOfMonth) || 1,
       startDate: form.startDate,
@@ -2952,6 +2980,22 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
                 <button key={v} type="button" className={`chip ${form.vatMode === v ? 'active' : ''}`} onClick={() => f("vatMode", v)}>{l}</button>
               ))}
             </div>
+          </div>
+        </div>
+        {/* 정액형 / 변동형 — 정기지급 폼과 같은 규칙(둘은 대칭이다).
+            사용량에 따라 금액이 달라지는 유지보수가 여기 해당한다. */}
+        <div>
+          <label className="label">금액 성격</label>
+          <div className="row gap-6">
+            {[['fixed', '정액형'], ['variable', '변동형']].map(([v, l]) => (
+              <button key={v} type="button" className={`chip ${(form.amountMode || 'fixed') === v ? 'active' : ''}`}
+                onClick={() => f('amountMode', v)}>{l}</button>
+            ))}
+          </div>
+          <div className="text-xs text-muted2" style={{ marginTop: 6, lineHeight: 1.7 }}>
+            {(form.amountMode || 'fixed') === 'variable'
+              ? '위 공급가액은 예상액이에요. 회차를 발행할 때마다 실제 금액을 물어봅니다. 놓친 회차 일괄 발행에서는 빠져요 — 같은 금액으로 여러 달치 세금계산서를 한꺼번에 끊으면 전부 틀리니까요.'
+              : '매번 같은 금액이에요. 회차가 도래하면 위 금액 그대로 발행됩니다.'}
           </div>
         </div>
         <div className="row gap-12">
@@ -3165,7 +3209,11 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
                   {r.item || "—"}
                   {r.contractName && <div className="text-xs text-muted">수주: {r.contractName}</div>}
                 </td>
-                <td className="num-cell num-right">{fmtNum(totalOf(r))}</td>
+                <td className="num-cell num-right">
+                  {fmtNum(totalOf(r))}
+                  {/* 변동형은 이 숫자가 **예상액**이다. 표시가 없으면 확정 금액으로 읽힌다. */}
+                  {r.amountMode === 'variable' && <div className="text-xs text-muted2">예상</div>}
+                </td>
                 <td className="text-sm">{periodLong(r.period)} {r.dayOfMonth}일</td>
                 {/* 다음 예정은 **서버 계산값**(nextDue)이다. 예전엔 이행 현황(pending)에서
                     주워 썼는데 그 목록은 35일 미리보기라, 매분기·매년 규칙은 늘 '—'로 떴다 —
@@ -3207,6 +3255,8 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
       {/* 기입금 처리 — 정기지출과 같은 공용 드로어(계좌·날짜 필수) */}
       <PaidIssueDrawer target={cyc.paidTarget} isIssued
         onIssuePaid={cyc.issuePaid} onClose={cyc.closePaid} onDone={cyc.donePaid}/>
+      {/* 변동형 회차의 금액 입력 — 규칙 금액은 예상액이라 발행 전에 실제 금액을 받는다 */}
+      <CycleAmountDrawer {...cyc.amountProps}/>
       {/* 도입 이전 회차 넣기 — 등록일 하한 때문에 평소 경로로는 안 만들어진다 */}
       <BackfillWizard open={!!backfill} rule={backfill} kind="sales"
         onClose={() => setBackfill(null)} onDone={() => { load(); cyc.reload() }}/>

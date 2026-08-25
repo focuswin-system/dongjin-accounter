@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, localToday } from '../ui'
+import { Icon, fmtNum, useToast, useConfirm, localToday, Drawer, MoneyInput } from '../ui'
+import { DrawerHead, DrawerFooter } from './Drawer'
 import { api } from '../api'
 
 /* ── 정기 회차 이행 현황 (정기청구·정기지출 공용) ──────────────────
@@ -256,13 +257,29 @@ export const useRecurringCycles = (kind, { onChanged } = {}) => {
   const after = async () => { await reload(); await onChanged?.() }
 
   // 회차 1건 → 청구서(미수/미지급). 계좌는 건드리지 않는다.
-  const issue = async (c) => {
+  /* 변동형이면 **금액을 먼저 묻는다.**
+   * 규칙의 금액은 예상액일 뿐이라 그대로 발행하면 틀린 금액의 세금계산서가 나간다.
+   * 기본값은 그 회차에 실린 예상액 — 실제와 같은 달이 많아 그대로 확인만 하면 된다.
+   * 서버도 같은 규칙을 갖고 있다(금액 없이 오면 400) — 화면만 믿지 않는다. */
+  const [amountAsk, setAmountAsk] = useState(null)   // { cycle, value }
+
+  const doIssue = async (c, amount) => {
     setBusy(true)
-    const res = await A.issue.call(api, c.recurring_id, { due: c.due_date })
+    const extra = amount == null ? {}
+      : (sales ? { supply_amount: amount } : { amount })
+    const res = await A.issue.call(api, c.recurring_id, { due: c.due_date, ...extra })
     setBusy(false)
     if (!res.ok) return toast.push(res.error || '처리에 실패했어요', { tone: 'warn' })
     toast.push(sales ? '청구서를 발행했어요' : '매입 청구서를 등록했어요')
     after()
+  }
+
+  const issue = async (c) => {
+    if (c.amount_mode === 'variable') {
+      setAmountAsk({ cycle: c, value: String(c.amount ?? '') })
+      return
+    }
+    await doIssue(c, null)
   }
 
   // 기입금/기지급은 계좌·날짜를 받아야 하므로 드로어를 띄운다(PaidIssueDrawer 공용)
@@ -328,8 +345,51 @@ export const useRecurringCycles = (kind, { onChanged } = {}) => {
   const donePaid = () => { setPaidTarget(null); after() }
 
   const overdueCount = cycles.filter(c => c.state === 'overdue').length
-  return { cycles, busy, reload, issue, openPaid, issuePaid, bulk, skip, unskip, paidTarget, closePaid, donePaid, overdueCount, sales }
+  return { cycles, busy, reload, issue, openPaid, issuePaid, bulk, skip, unskip, paidTarget, closePaid, donePaid, overdueCount, sales,
+    // 변동형 금액 묻기 — 화면은 <CycleAmountDrawer {...cyc.amountProps}/> 한 줄만 그리면 된다
+    amountProps: {
+      ask: amountAsk, sales,
+      onChange: (v) => setAmountAsk(a => (a ? { ...a, value: v } : a)),
+      onClose: () => setAmountAsk(null),
+      onConfirm: async () => {
+        const amt = Math.round(Number(String(amountAsk.value).replace(/[^0-9-]/g, '')) || 0)
+        if (amt <= 0) return toast.push('금액을 입력해주세요', { tone: 'warn' })
+        setAmountAsk(null)
+        await doIssue(amountAsk.cycle, amt)
+      },
+      busy,
+    } }
 }
+
+/**
+ * 변동형 회차의 금액 입력 — 전기·수도·통신처럼 **날짜는 같고 금액만 다른** 건에 쓴다.
+ *
+ * 사용량을 계산하지 않는다. 고지서를 보고 그 금액을 넣는 것뿐이다 —
+ * 단가·사용량·검침일까지 들면 그건 청구 시스템이 아니라 과금 시스템이다.
+ * 기본값은 규칙의 예상액이라, 같은 달이면 확인만 하고 넘어가면 된다.
+ */
+export const CycleAmountDrawer = ({ ask, sales, onChange, onClose, onConfirm, busy }) => (
+  <Drawer open={!!ask} onClose={onClose} width="min(420px,100vw)" label="회차 금액 입력">
+    <DrawerHead title={sales ? '이번 회차 청구 금액' : '이번 회차 금액'}
+      sub={ask ? `${ask.cycle.vendor_name || ''} · ${ask.cycle.due_date}` : ''} onClose={onClose}/>
+    {ask && (
+      <div className="drawer-body col gap-form">
+        <div>
+          <label className="label">공급가액 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+          <MoneyInput value={ask.value} onChange={onChange}/>
+          <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+            부가세는 규칙의 설정대로 자동으로 붙어요. 고지서 금액이 부가세 포함이면 공급가액으로 나눠 넣으세요.
+          </div>
+        </div>
+        <div className="text-xs text-muted2" style={{ lineHeight: 1.7 }}>
+          · 금액이 매번 다른 규칙이라 회차마다 물어봅니다.<br/>
+          · 규칙에 적힌 금액은 <b>예상액</b>이에요 — 여기서 넣은 값이 실제로 기록됩니다.
+        </div>
+      </div>
+    )}
+    <DrawerFooter onCancel={onClose} onSave={onConfirm} saveLabel={sales ? '발행' : '등록'} busy={busy}/>
+  </Drawer>
+)
 
 /** 규칙 id → 그 규칙의 다음 예정일·미처리 건수 (규칙 목록 컬럼용) */
 export const cycleSummaryByRule = (cycles) => {

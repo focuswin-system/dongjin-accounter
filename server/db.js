@@ -1389,6 +1389,21 @@ async function initDb(conn) {
      * "그 날 한꺼번에 빠질 돈"이 허수로 잡혔다(이미 빠진 돈인데). */
     await ensureColumn('accounts', 'card_type', "card_type VARCHAR(10) NOT NULL DEFAULT 'credit'")
 
+    /* ── 정액형 / 변동형 ────────────────────────────────────────
+     * 매달 같은 날 청구·지급하는데 **금액만 다른** 건이 흔하다(전기·수도·통신·클라우드,
+     * 사용량 유지보수, 주기가 있는 보험료). 여태는 규칙의 금액이 확정값이라, 회차를 발행하면
+     * 그 금액이 그대로 세금계산서가 됐다 — 다르면 발행 후 청구서를 다시 열어 고쳐야 했고
+     * 그 사이 **틀린 금액이 나갈 수 있었다.**
+     *
+     * 사용량을 계산하지는 않는다. 단가·사용량·검침일까지 들면 그건 과금 시스템이다.
+     * 필요한 건 "이번 달 얼마였고 냈나" 뿐이라, 규칙에 **성격만** 적어 둔다.
+     *   fixed     금액이 확정 — 지금까지와 같다
+     *   variable  금액이 매번 다름 — 규칙의 금액은 **예상액**이고, 발행할 때 실제 금액을 받는다
+     */
+    for (const t of ['recurring_invoices', 'recurring_expenses']) {
+      await ensureColumn(t, 'amount_mode', "amount_mode VARCHAR(10) NOT NULL DEFAULT 'fixed'")
+    }
+
     await ensureColumn('recurring_expenses', 'pay_term', "pay_term VARCHAR(12) NOT NULL DEFAULT 'net30'")
     await ensureColumn('recurring_invoices', 'pay_term', "pay_term VARCHAR(12) NOT NULL DEFAULT 'net30'")
     /* 결제조건이 '당월 N일'·'익월 N일'일 때의 N. 다른 조건에서는 안 쓴다(0).

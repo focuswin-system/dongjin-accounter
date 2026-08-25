@@ -20,6 +20,11 @@ const payDayFor = (term, v) => (PAY_TERMS_WITH_DAY.includes(term) ? Math.min(Mat
    말없이 30일 뒤로 되돌아갔다 — 이 핸들러가 고치려던 결함과 같은 종류가 반대 방향으로 열려 있었다. */
 const payTermFor = (v, cur) => (v == null || v === '' ? (cur || 'net30') : payTermOf(v))
 
+/* 금액 성격 — 목록에 없으면 '정액형'. 옛 데이터·빈 값 방어(결제조건 payTermOf 와 같은 방식). */
+const amountModeOf = (v) => (v === 'variable' ? 'variable' : 'fixed')
+/** 수정에서 안 보냈으면 기존 값을 유지한다 — 부분 바디로 고칠 때 말없이 정액형으로 되돌아가지 않게 */
+const amountModeFor = (v, cur) => (v == null || v === '' ? (cur || 'fixed') : amountModeOf(v))
+
 /** 증빙 요구 플래그 — 체크박스가 true/1/'1' 어느 모양으로 와도 같은 값으로 굳힌다 */
 const evidFlag = (v) => (v === true || v === 1 || v === '1' ? 1 : 0)
 
@@ -93,8 +98,8 @@ router.post('/', async (req, res, next) => {
        비워 두면 **등록일부터** 세도록 엔진이 받아준다(lib/recurrence.js 앵커 폴백).
        빈 문자열은 '미지정'을 뜻한다. */
     await req.db.execute(
-      'INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id, pay_term, pay_day, evidence_required) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [id, vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', normPeriod(period), day_of_month||1, start_date||'', end_date||null, account_id||null, payTermOf(req.body.pay_term), payDayFor(payTermOf(req.body.pay_term), req.body.pay_day), evidFlag(req.body.evidence_required)]
+      'INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id, pay_term, pay_day, evidence_required, amount_mode) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [id, vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', normPeriod(period), day_of_month||1, start_date||'', end_date||null, account_id||null, payTermOf(req.body.pay_term), payDayFor(payTermOf(req.body.pay_term), req.body.pay_day), evidFlag(req.body.evidence_required), amountModeOf(req.body.amount_mode)]
     )
     res.json({ id })
   } catch (e) { next(e) }
@@ -110,10 +115,10 @@ router.put('/:id', async (req, res, next) => {
     const evidenceRequired = req.body.evidence_required === undefined
       ? (cur.evidence_required ? 1 : 0) : evidFlag(req.body.evidence_required)
     const [result] = await req.db.execute(
-      'UPDATE recurring_invoices SET vendor_id=?, contract_id=?, item=?, supply_amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=?, pay_term=?, pay_day=?, evidence_required=? WHERE id=?',
+      'UPDATE recurring_invoices SET vendor_id=?, contract_id=?, item=?, supply_amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=?, account_id=?, pay_term=?, pay_day=?, evidence_required=?, amount_mode=? WHERE id=?',
       [vendor_id||null, contract_id||null, item||'', supply_amount, vat_mode||'exclusive', normPeriod(period), day_of_month||1, start_date, end_date||null, account_id||null, payTermFor(req.body.pay_term, cur.pay_term),
        payDayFor(payTermFor(req.body.pay_term, cur.pay_term), req.body.pay_day ?? cur.pay_day),
-       evidenceRequired, req.params.id]
+       evidenceRequired, amountModeFor(req.body.amount_mode, cur.amount_mode), req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
@@ -183,6 +188,8 @@ router.get('/pending', async (req, res, next) => {
         out.push(pendingCycle(r, due, today, {
           source: 'recurring',
           type: '정기청구',
+          // 금액이 매번 다른가 — 화면이 발행 버튼을 '금액 입력'으로 바꾼다
+          amount_mode: r.amount_mode || 'fixed',
           item: r.item || '',
           amount: supply,
           vat,
@@ -249,7 +256,18 @@ router.post('/:id/issue', async (req, res, next) => {
       [`청구-${year}-%`]
     )
     const invoice_no = `청구-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
-    const supply = Number(r.supply_amount)
+    /* 변동형은 **발행할 때 실제 금액을 받는다.** 규칙의 금액은 예상액일 뿐이라
+       그대로 세금계산서로 나가면 틀린 금액이 나간다.
+       정액형에서도 금액을 보내면 그것이 이긴다 — 그 달만 다른 경우가 있고,
+       발행 뒤에 청구서를 다시 열어 고치는 것보다 낫다. */
+    const bodySupply = req.body.supply_amount
+    const supply = (bodySupply != null && bodySupply !== '')
+      ? Math.round(Number(bodySupply) || 0)
+      : Number(r.supply_amount)
+    if (r.amount_mode === 'variable' && (bodySupply == null || bodySupply === '')) {
+      await rollbackQuietly(conn)
+      return res.status(400).json({ error: '금액이 매번 다른 정기입금이에요. 이번 회차 금액을 입력해주세요.' })
+    }
     const vat    = recurFromSupply(supply, effVatMode(r)).vat
     const total  = supply + vat
     // 발행 즉시 정산(기입금) 시 반영할 계좌: 사용자가 고른 계좌 > 정기청구 규칙 계좌 > 주거래(첫 은행).
@@ -307,7 +325,12 @@ router.post('/issue-missed', async (req, res, next) => {
     await conn.beginTransaction()
     // FOR UPDATE — 일괄이 두 번 겹쳐 돌면 같은 last_generated를 읽어 같은 회차를 두 벌 발행한다.
     // (FOR UPDATE OF r 로 좁히지 않는다 — MariaDB 버전에 따라 지원이 갈린다. 짧은 트랜잭션이라 무해)
-    const [recs] = await conn.execute("SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch, c.vat_mode AS contract_vat_mode FROM recurring_invoices r LEFT JOIN contracts c ON r.contract_id = c.id WHERE r.active = 1 FOR UPDATE")
+    /* ⚠ **변동형은 일괄에서 뺀다.**
+     * 일괄은 규칙의 supply_amount 를 회차마다 그대로 찍는다. 금액이 매번 다른 규칙에
+     * 이게 돌면 석 달치가 **전부 같은, 그것도 틀린 금액**으로 만들어진다 —
+     * 그리고 그건 세금계산서라 되돌리기가 번거롭다.
+     * 변동형은 회차를 하나씩, 금액을 보면서 처리하는 것이 맞다. */
+    const [recs] = await conn.execute("SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch, c.vat_mode AS contract_vat_mode FROM recurring_invoices r LEFT JOIN contracts c ON r.contract_id = c.id WHERE r.active = 1 AND r.amount_mode <> 'variable' FOR UPDATE")
     const generated = []
 
     for (const r of recs) {
