@@ -1051,6 +1051,16 @@ export const api = {
   },
 
   // ─── 정기청구(고정수입) ───────────────────────────────────────
+  /* 정기 회차 이력 — 지난 회차(실제 만들어진 것) + 건너뛴 회차(사유) + 앞으로 올 회차.
+     서버가 세 갈래를 한 줄기로 합쳐 준다(lib/recurHistory.js). 화면에서 다시 섞지 않는다. */
+  async getRecurringInvoiceHistory(id) {
+    try { return await req(`/recurring-invoices/${id}/history`) } catch { return null }
+  },
+
+  async getRecurringExpenseHistory(id) {
+    try { return await req(`/recurring-expenses/${id}/history`) } catch { return null }
+  },
+
   async getRecurringInvoices() {
     try {
       return (await req('/recurring-invoices')).map(r => ({

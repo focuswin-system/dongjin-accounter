@@ -1645,3 +1645,14 @@ body:has([data-modal-open]) {
    ⚠ --line 으로 그으면 흰 바탕에서 **아예 안 보인다** — 실제로 그렇게 두고 있었고,
      "층이 바뀐다"고 말하려던 선이 죽은 픽셀이었다. 안 보이는 선은 없는 선보다 나쁘다. */
 .chip-div { width: 1px; height: 16px; background: var(--line-strong); margin: 0 2px; flex: none; }
+
+/* 표의 이름 칸을 눌러 상세를 여는 자리(정기입금·정기지급의 거래처).
+   ⚠ button 이라 브라우저 기본 껍데기(배경·테두리·폰트)를 벗겨야 옆 칸과 같은 글로 읽힌다.
+     평소엔 본문과 똑같이 두고 hover 에서만 밑줄로 "눌린다"를 말한다 —
+     늘 파란 링크로 두면 표 한 열만 색이 튀어 무엇이 중요한지 흐려진다. */
+.link-cell {
+  background: none; border: 0; padding: 0; margin: 0;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.link-cell:hover { text-decoration: underline; text-underline-offset: 3px; }
+.link-cell:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 3px; }

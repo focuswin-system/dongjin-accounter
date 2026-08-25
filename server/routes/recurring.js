@@ -11,6 +11,7 @@ const { recurFromTotal, modeFromCatVat } = require('../lib/vat')
    호출은 조건부(paid 일 때만)라 평소 경로에서는 드러나지 않았다. 같은 실수가
    recurring-invoices.js 에도 있었다. 재발 방지는 scripts/check-isolation.js [13]. */
 const { settleAcctCode } = require('../lib/acctCode')
+const { recurHistory } = require('../lib/recurHistory')
 const { acctCodeByCategoryName } = require('../lib/categoryAccount')
 const { backfillCycles, tooManyError, addSkip, removeSkip, issuedInvoiceAt } = require('../lib/backfill')
 
@@ -280,6 +281,30 @@ async function createExpenseInvoice(conn, r, target, { paid = false, accountId =
  * 계좌는 건드리지 않는다(paid=false) — 실제 이체를 확인하지 않은 채 잔액을 움직이지 않기 위해.
  * 지급 처리는 회차별 '기지급 처리'에서 계좌·날짜를 정해 한다. (매출 /issue-missed와 대칭)
  */
+
+/* 회차 이력 — 이 규칙이 지금까지 어떻게 흘러왔나.
+ *
+ * 목록에서 행을 누르면 수정 폼만 열렸다. 그래서 "여태 얼마가 나갔나", "변동형 금액이
+ * 어떻게 움직였나", "왜 그 달만 없나"를 어디서도 볼 수 없었다.
+ * 특히 건너뛴 회차는 **사유까지 저장하면서 읽는 화면이 없었다.**
+ *
+ * 집계는 lib/recurHistory.js 한 곳 — 매출·매입이 거울이라 두 벌로 두면 반드시 어긋난다.
+ */
+router.get('/:id/history', async (req, res, next) => {
+  try {
+    const [[r]] = await req.db.execute(
+      `SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch,
+             v.name AS vendor_name
+         FROM recurring_expenses r
+         LEFT JOIN vendors v ON r.vendor_id = v.id
+        WHERE r.id = ?`, [req.params.id])
+    if (!r) return res.status(404).json({ error: '없는 규칙이에요' })
+    // setup_date(등록일) 가 없으면 시작일 없는 규칙의 회차가 통째로 0건이 된다(recurrence.js:52)
+    r.setup_date = r.created_epoch != null ? kstDate(Number(r.created_epoch) * 1000) : r.setup_date
+    res.json(await recurHistory(req.db, 'expense', r, kstToday()))
+  } catch (e) { next(e) }
+})
+
 router.post('/issue-missed', async (req, res, next) => {
   const today = kstToday()
   const conn = await req.db.getConnection()

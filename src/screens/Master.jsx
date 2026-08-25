@@ -9,6 +9,7 @@ import { RecurringCycles, useRecurringCycles, cycleSummaryByRule, CycleAmountDra
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { BackfillWizard } from '../lib/components/BackfillWizard'
 import { RowActions } from '../lib/components/RowActions'
+import { RecurHistoryDrawer } from '../lib/components/RecurHistoryDrawer'
 import { normBizNo, normVendorName } from '../lib/normalize'
 import { cycleMonthsLabel, PAY_TERM_OPTS, payTermNeedsDay, payTermHint,
          BILLING_PERIODS, periodMonths, periodLong } from '../lib/renewal'
@@ -2730,6 +2731,8 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [backfill, setBackfill] = useState(null)   // 소급 등록 마법사 대상 규칙
+  // 회차 이력 — 보는 것과 고치는 것을 가른다(예전엔 이 표에서 갈 수 있는 곳이 수정 폼뿐이었다)
+  const [history, setHistory] = useState(null)
   const [rows, setRows] = useState([])
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState(null)   // 수정 대상(없으면 등록)
@@ -2840,8 +2843,10 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
               const s = cycSummary.get(r.id)
               return (
               <tr key={r.id} style={{ opacity: r.active ? 1 : 0.45 }}>
+                {/* 이름을 누르면 **이력**이 열린다(매출 쪽과 같은 규칙) */}
                 <td className="fw-700">
-                  {r.vendor}
+                  <button type="button" className="link-cell"
+                    onClick={() => setHistory({ id: r.id, label: r.vendor, sub: ruleLabel(r) })}>{r.vendor}</button>
                   {/* 주문 기반은 금액·종료 시점의 출처가 주문이다 → 수정은 주문에서.
                       goRoute가 없는 자리(기준정보 탭)에서는 눌러도 아무 일이 없으니 표시만 한다 */}
                   {r.contractId && <ContractBadge name={r.contractName} side="purchase" onGo={goRoute && (() => goRoute('contract_purchase'))}/>}
@@ -2870,6 +2875,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
                   <RowActions
                     primary={{ label: '수정', onClick: () => openEdit(r) }}
                     items={[
+                      { label: '회차 이력', onClick: () => setHistory({ id: r.id, label: r.vendor, sub: ruleLabel(r) }) },
                       { label: r.active ? '중지' : '재개', onClick: () => handleToggle(r.id),
                         hint: r.active ? '자동 생성 멈춤' : undefined },
                       // 등록일 이전 회차는 평소 경로로 안 만들어진다 → 기간을 열어 넣는 입구
@@ -2900,6 +2906,10 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
       {/* 도입 이전 회차 넣기 — 등록일 하한 때문에 평소 경로로는 안 만들어진다 */}
       <BackfillWizard open={!!backfill} rule={backfill} kind="purchase"
         onClose={() => setBackfill(null)} onDone={() => { load(); cyc.reload() }}/>
+      {/* 회차 이력 — 수정은 이 안에서 한 번 더 짚고 들어간다(보려다 고치는 일을 막는다) */}
+      <RecurHistoryDrawer open={!!history} rule={history} kind="purchase"
+        onClose={() => setHistory(null)}
+        onEdit={(h) => { const r = rows.find(x => x.id === h.id); setHistory(null); if (r) openEdit(r) }}/>
     </div>
   )
 }
@@ -3108,6 +3118,8 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [backfill, setBackfill] = useState(null)   // 소급 등록 마법사 대상 규칙
+  // 회차 이력 — 보는 것과 고치는 것을 가른다(예전엔 이 표에서 갈 수 있는 곳이 수정 폼뿐이었다)
+  const [history, setHistory] = useState(null)
   const [rows, setRows] = useState([])
   const [vendors, setVendors] = useState([])
   const [contracts, setContracts] = useState([])
@@ -3220,8 +3232,11 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
               const s = cycSummary.get(r.id)
               return (
               <tr key={r.id} style={{ opacity: r.active ? 1 : 0.45 }}>
+                {/* 이름을 누르면 **이력**이 열린다. 예전엔 이 표에서 갈 수 있는 곳이
+                    수정 폼뿐이라 "여태 얼마 나갔나"를 볼 데가 없었다. */}
                 <td className="fw-700">
-                  {r.vendor}
+                  <button type="button" className="link-cell"
+                    onClick={() => setHistory({ id: r.id, label: r.vendor, sub: ruleLabel(r) })}>{r.vendor}</button>
                   {r.contractId && <ContractBadge name={r.contractName} side="sales" onGo={goRoute && (() => goRoute('contract_sales'))}/>}
                 </td>
                 <td className="text-sm">
@@ -3250,6 +3265,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
                   <RowActions
                     primary={{ label: '수정', onClick: () => openEdit(r) }}
                     items={[
+                      { label: '회차 이력', onClick: () => setHistory({ id: r.id, label: r.vendor, sub: ruleLabel(r) }) },
                       { label: r.active ? '중지' : '재개', onClick: () => handleToggle(r.id),
                         hint: r.active ? '자동 생성 멈춤' : undefined },
                       // 등록일 이전 회차는 평소 경로로 안 만들어진다 → 기간을 열어 넣는 입구
@@ -3279,6 +3295,10 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
       {/* 도입 이전 회차 넣기 — 등록일 하한 때문에 평소 경로로는 안 만들어진다 */}
       <BackfillWizard open={!!backfill} rule={backfill} kind="sales"
         onClose={() => setBackfill(null)} onDone={() => { load(); cyc.reload() }}/>
+      {/* 회차 이력 — 수정은 이 안에서 한 번 더 짚고 들어간다(보려다 고치는 일을 막는다) */}
+      <RecurHistoryDrawer open={!!history} rule={history} kind="sales"
+        onClose={() => setHistory(null)}
+        onEdit={(h) => { const r = rows.find(x => x.id === h.id); setHistory(null); if (r) openEdit(r) }}/>
     </div>
   )
 }
