@@ -775,6 +775,58 @@ async function initDb(conn) {
         FOREIGN KEY (vendor_id) REFERENCES vendors(id)
       )
     `)
+    /* ── 대여금 — 우리가 **빌려준** 돈 (차입금의 거울상) ──────────────
+     *
+     * ⚠ 차입금(loans)과 **한 테이블에 두지 않는다.** `direction` 컬럼 하나로 가르면
+     *   조회·집계마다 그 필터를 붙여야 하는데, **한 곳만 빠져도 부채가 자산으로 뒤집힌다.**
+     *   차입금은 갚아야 할 돈(2201·2302), 대여금은 받을 돈(1301·1503)이라 재무상태표의
+     *   반대편이다. 자금일보·자금현황·보고서·대시보드가 전부 loans 를 읽고 있어서,
+     *   빠뜨릴 자리가 너무 많다. 테이블을 가르면 그 실수 자체가 불가능해진다.
+     *
+     * 대신 **계산은 그대로 재사용한다** — 원리금 일정은 lib/loan.js repaymentSchedule 이
+     * 순수 함수라 방향과 무관하다. 공식을 두 벌로 두면 한쪽만 고쳐져 숫자가 갈린다.
+     *
+     * 기본 상환방식이 차입금과 다르다(bullet). 개인·거래처 대여는 "언제까지 갚아라"가
+     * 대부분이라 만기일시가 흔하고, 원리금균등은 금융권 쪽 형태다. */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS lendings (
+        id            VARCHAR(36) PRIMARY KEY,
+        name          VARCHAR(200) NOT NULL,
+        borrower      VARCHAR(200),
+        vendor_id     VARCHAR(36),
+        principal     BIGINT NOT NULL,
+        annual_rate   DECIMAL(6,3) DEFAULT 0,
+        method        ENUM('equal_payment','equal_principal','bullet','none') NOT NULL DEFAULT 'bullet',
+        term_months   INT NOT NULL DEFAULT 12,
+        start_date    VARCHAR(20) NOT NULL,
+        pay_day       INT DEFAULT 1,
+        end_date      VARCHAR(20),
+        account_id    VARCHAR(36),
+        acct_code_principal VARCHAR(10),
+        acct_code_interest  VARCHAR(10),
+        status        ENUM('active','closed') NOT NULL DEFAULT 'active',
+        memo          TEXT,
+        txn_id        VARCHAR(36),
+        created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (vendor_id) REFERENCES vendors(id)
+      )
+    `)
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS lending_repayments (
+        id          VARCHAR(36) PRIMARY KEY,
+        lending_id  VARCHAR(36) NOT NULL,
+        seq         INT NOT NULL,
+        due_date    VARCHAR(20) NOT NULL,
+        principal   BIGINT NOT NULL DEFAULT 0,
+        interest    BIGINT NOT NULL DEFAULT 0,
+        paid_date   VARCHAR(20),
+        txn_principal_id VARCHAR(36),
+        txn_interest_id  VARCHAR(36),
+        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_lending_seq (lending_id, seq),
+        FOREIGN KEY (lending_id) REFERENCES lendings(id) ON DELETE CASCADE
+      )
+    `)
     await c.execute(`
       CREATE TABLE IF NOT EXISTS loan_repayments (
         id          VARCHAR(36) PRIMARY KEY,

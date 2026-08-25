@@ -15,6 +15,7 @@ import { DocsScreen, EvidenceScreen, EvidenceAttachDrawer, ExcelScreen, ReportsS
 import { SettlementScreen } from './screens/Settlement'
 import { PaymentRunScreen } from './screens/PaymentRun'
 import { TransferScreen } from './screens/Transfer'
+import { LendingScreen } from './screens/Lending'
 import { PurchaseStatusScreen } from './screens/PurchaseStatus'
 import { FundStatusScreen } from './screens/FundStatus'
 import { PurchaseReqScreen } from './screens/PurchaseReq'
@@ -598,6 +599,7 @@ function AppInner({ onLogout, user }) {
       case "hr_outsourcing":  return <OutsourcingScreen/>;
       // 일반 경비 / 잡손익 — 화면은 하나를 공유하고 진입 메뉴가 초기 탭을 정한다
       case "transfer":       return <TransferScreen/>;
+      case "finance_lending": return <LendingScreen/>;
       case "misc_pl":
       case "misc_income":     return <MiscPLScreen initialTab={route === "misc_income" ? "income" : "expense"}
                                        refreshTrigger={txnVersion}

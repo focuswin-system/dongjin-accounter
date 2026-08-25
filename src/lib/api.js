@@ -758,6 +758,45 @@ export const api = {
   /* 계좌 간 이체 — 거래 **두 줄**(보내는 계좌의 지출 + 받는 계좌의 입금)로 남는다.
      서버가 한 트랜잭션에서 두 줄을 만들고 transfer_id 로 잇는다. 화면에서 지출·입금을
      따로 두 번 넣게 하면 안 된다 — 한쪽만 저장되는 순간 돈이 사라지거나 생겨난다. */
+  /* ── 대여금(빌려준 돈) — 차입금의 거울상 ────────────────────────
+     실패 사유를 **삼키지 않는다.** 순서 어긋남·마감·남은 원금 초과는 전부 서버가
+     사유와 함께 막는데, catch 로 뭉개면 화면에 "실패했어요" 만 떠서 다음에 뭘 해야
+     할지 알 수 없다(근로계약 삭제에서 같은 실수를 했다). */
+  async getLendings() {
+    try { return await req('/lendings') } catch { return [] }
+  },
+  async getLending(id) {
+    try { return await req(`/lendings/${id}`) } catch { return null }
+  },
+  async previewLending(data) {
+    try { return await req('/lendings/preview', { method: 'POST', body: data }) }
+    catch { return { schedule: [], totals: { principal: 0, interest: 0 } } }
+  },
+  async addLending(data) {
+    try { const r = await req('/lendings', { method: 'POST', body: data }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e?.message || '등록에 실패했어요' } }
+  },
+  async updateLending(id, data) {
+    try { await req(`/lendings/${id}`, { method: 'PUT', body: data }); return { ok: true } }
+    catch (e) { return { ok: false, error: e?.message || '수정에 실패했어요' } }
+  },
+  async collectLending(id, body) {
+    try { const r = await req(`/lendings/${id}/collect`, { method: 'POST', body }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e?.message || '회수 처리에 실패했어요' } }
+  },
+  async collectLendingAdhoc(id, body) {
+    try { const r = await req(`/lendings/${id}/collect-adhoc`, { method: 'POST', body }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e?.message || '회수 처리에 실패했어요' } }
+  },
+  async cancelLendingCollect(id, seq) {
+    try { await req(`/lendings/${id}/collect/${seq}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e?.message || '취소에 실패했어요' } }
+  },
+  async deleteLending(id) {
+    try { await req(`/lendings/${id}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e?.message || '삭제에 실패했어요' } }
+  },
+
   async transfer({ fromAccountId, toAccountId, amount, date, memo }) {
     try {
       const r = await req('/transactions/transfer', { method: 'POST', body: {

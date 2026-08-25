@@ -169,6 +169,9 @@ export const NAV_TREE = [
        * 예적금은 묶여 있어 당장 못 쓰는 돈이라 성격이 다르다. */
       { label: "자금 운용", items: [
         { id: "finance_savings", label: "적금·정기예금·보증금", icon: Icon.Bank },
+        /* 대여금 — 빌려준 돈. 차입금(자금 조달)과 마주보는 자리라 '자금 운용'에 둔다.
+           빌려준 돈은 안 적으면 잊힌다 — 적을 자리가 아예 없던 항목이다. */
+        { id: "finance_lending", label: "대여금", icon: Icon.Wallet },
       ]},
       { label: "현황", items: [
         { id: "finance_dash", label: "재무 현황", icon: Icon.Chart },
@@ -392,6 +395,7 @@ export const LEAF_TAGS = {
   finance_loan:     '대출 차입 융자 상환 이자 원리금',
   finance_investment:'투자 출자 증자 유치 가수금',
   finance_savings:  '예금 적금 정기예금 만기 예치 보증금 임차보증금 관리비보증금',
+  finance_lending:  '대여금 빌려준돈 채권 채권명부 대여 회수 원리금 이자수익',
   finance_dash:     '재무 부채 자본 차입현황',
   // 경영
   cash_report:      '자금 자금계획 현금흐름 잔액예측 자금수지',

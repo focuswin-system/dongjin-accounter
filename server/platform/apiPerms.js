@@ -53,6 +53,7 @@ const API_RESOURCES = {
   '/api/tax':                 ['tax_vat', 'tax_etc'],
   '/api/finance':             ['finance_loan', 'finance_investment', 'finance_dash'],
   '/api/savings':             ['finance_savings'],
+  '/api/lendings':            ['finance_lending'],
   /* 보고서 카탈로그. 양식 하나하나를 자원으로 만들지 않는다 —
      권한 매트릭스가 양식 수만큼 부풀어 회사 마스터가 감당하지 못한다.
      "어떤 양식을 쓸 수 있나"는 권한이 아니라 계약(entitlement)의 일이다. */
