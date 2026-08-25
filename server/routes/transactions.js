@@ -87,7 +87,7 @@ router.get('/', async (req, res, next) => {
      * **대출 실행을 매출로, 원금 상환·예적금 납입을 경비로** 집계했다.
      * 서버가 한 번에 판정해 내려준다 — 규칙이 두 벌이 되지 않게. */
     let sql = `SELECT t.*, v.name AS vendor_name, c.name AS contract_name, a.name AS account_name,
-                      e.name AS employee_name, ri.name AS item_name,
+                      COALESCE(e.name, t.employee_name) AS employee_name, ri.name AS item_name,
                       cc.name AS cost_contract_name,
                       /* 어느 청구서와 이어진 입금·지급인지 — 화면이 '입금내역'에서 그 흔적을
                          보여주려면 번호가 필요하다(id 만으로는 사람이 읽을 수 없다). */
@@ -172,7 +172,7 @@ router.get('/:id', async (req, res, next) => {
   try {
     const [rows] = await req.db.execute(`
       SELECT t.*, v.name AS vendor_name, c.name AS contract_name, a.name AS account_name,
-             e.name AS employee_name, ri.name AS item_name, cc.name AS cost_contract_name
+             COALESCE(e.name, t.employee_name) AS employee_name, ri.name AS item_name, cc.name AS cost_contract_name
       FROM transactions t
       LEFT JOIN vendors v ON t.vendor_id = v.id
       LEFT JOIN contracts c ON t.contract_id = c.id
@@ -304,7 +304,7 @@ router.post('/', async (req, res, next) => {
     const {
       kind, vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
       amount, date, method, status, project_no, site,
-      invoice_id, recurring_id, doc_no, employee_id, evid_type, evid_url, memo,
+      invoice_id, recurring_id, doc_no, employee_id, employee_name, evid_type, evid_url, memo,
       item_id, account_code, supply_amount, vat_amount, tax_type, vat_deductible,
       counterparty_account_id
     } = req.body
@@ -330,13 +330,13 @@ router.post('/', async (req, res, next) => {
     await req.db.execute(`
       INSERT INTO transactions (id, kind, vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
         amount, date, method, status, project_no, site,
-        invoice_id, recurring_id, doc_no, employee_id, evid_type, evid_url, memo, item_id, account_code,
+        invoice_id, recurring_id, doc_no, employee_id, employee_name, evid_type, evid_url, memo, item_id, account_code,
         supply_amount, vat_amount, tax_type, vat_deductible,
         counterparty_account_id, counterparty_bank, counterparty_account, counterparty_holder)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `, [id, kind, vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
         amount, date, method||'', st, project_no||'', site||'',
-        invoice_id||null, recurring_id||null, doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'',
+        invoice_id||null, recurring_id||null, doc_no||'', employee_id||null, employee_name||null, evid_type||'', evid_url||'', memo||'',
         item_id||null, acctCode,
         vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible,
         cp.id, cp.bank, cp.account, cp.holder])
@@ -349,7 +349,7 @@ router.put('/:id', async (req, res, next) => {
     const {
       vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
       amount, date, method, status, project_no, site,
-      doc_no, employee_id, evid_type, evid_url, memo, item_id, account_code,
+      doc_no, employee_id, employee_name, evid_type, evid_url, memo, item_id, account_code,
       supply_amount, vat_amount, tax_type, vat_deductible, counterparty_account_id
     } = req.body
     const dateErr = futureDateError(date)
@@ -404,13 +404,13 @@ router.put('/:id', async (req, res, next) => {
       const [result] = await conn.execute(`
         UPDATE transactions SET vendor_id=?, contract_id=?, cost_contract_id=?, account_id=?, category=?, sub_category=?,
           amount=?, date=?, method=?, status=?, project_no=?, site=?,
-          doc_no=?, employee_id=?, evid_type=?, evid_url=?, memo=?, item_id=?, account_code=?,
+          doc_no=?, employee_id=?, employee_name=?, evid_type=?, evid_url=?, memo=?, item_id=?, account_code=?,
           supply_amount=?, vat_amount=?, tax_type=?, vat_deductible=?,
           counterparty_account_id=?, counterparty_bank=?, counterparty_account=?, counterparty_holder=?
         WHERE id=?
       `, [vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
           amount, date, method||'', st, project_no||'', site||'',
-          doc_no||'', employee_id||null, evid_type||'', evid_url||'', memo||'', item_id||null, acctCode,
+          doc_no||'', employee_id||null, employee_name||null, evid_type||'', evid_url||'', memo||'', item_id||null, acctCode,
           vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible,
           cp.id, cp.bank, cp.account, cp.holder, req.params.id])
       if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }

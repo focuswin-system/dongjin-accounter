@@ -294,7 +294,10 @@ async function migratePlatformSchema(c) {
    *
    * 규칙: 옛 자원에 있던 **행위 그대로** 새 자원에 복사한다(view 만 있으면 view 만).
    * INSERT IGNORE 라 이미 손수 조정한 회사의 값은 건드리지 않고, 여러 번 돌아도 안전하다. */
-  const RESOURCE_SPLITS = [['master_account', 'master_card']]
+  /* 화면 하나를 둘로 가를 때, 원래 화면 권한을 가진 사람이 새 화면도 그대로 보게 한다.
+     안 하면 어제까지 하던 일을 오늘 못 하게 되고, 사용자는 기능이 사라진 줄 안다.
+     ['계좌 이체' → '카드 대금 지급'] — 카드값 처리는 원래 그 화면 안에 있던 기능이다. */
+  const RESOURCE_SPLITS = [['master_account', 'master_card'], ['transfer', 'card_payment']]
   for (const [from, to] of RESOURCE_SPLITS) {
     const [r] = await c.execute(
       `INSERT IGNORE INTO role_perms (role_id, resource, action)

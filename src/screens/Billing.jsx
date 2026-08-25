@@ -1170,7 +1170,11 @@ const PendingScheduleTable = ({ rows, onIssue, onPaid, isIssued = true, select }
 export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefund, openReturn, focusInvoiceId,
   /* 서류 선택에서 '계산서 아님'을 고르면 거래 등록 드로어로 넘긴다.
      그 드로어는 App 이 소유하므로(여러 화면이 공유) 함수로 받아 호출만 한다. */
-  openExpense, openIncome }) => {
+  openExpense, openIncome,
+  /* 카드 대금으로 넘어가는 줄에서 쓴다 — 화면을 옮기는 일은 App 이 한다.
+     목록을 섞지 않고 길만 낸다: 카드 대금은 청구서가 아니라 여기 목록에 들어올 수 없다
+     (카드사는 세금계산서를 주지 않고, 개별 사용분은 이미 거래로 매입세액에 잡혀 있다). */
+  goRoute }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const kind = initialTab              // 'issued'(대금청구) | 'received'(수취)
@@ -1217,6 +1221,15 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
      화면에서는 못 쓴다(실제로 `accounts is not defined` 로 화면이 통째로 깨졌다). */
   const [accounts, setAccounts] = useState([])
   useEffect(() => { api.getAccounts().then(list => setAccounts(list || [])) }, [])
+
+  /* 갚아야 할 카드 — 넘어가는 줄에 쓸 숫자만 센다. 셈법은 카드 대금 지급 화면과 같다:
+     '이번 구간 사용액'이 아니라 카드 계좌 잔액(음수)이라, 이미 갚은 만큼은 자동으로 빠지고
+     지난달 미납분까지 함께 잡힌다. 결제일을 안 정한 카드는 언제 나갈지 몰라 세지 않는다. */
+  const cardDue = useMemo(() => {
+    const due = accounts.filter(a => a.kind === 'card' && a.cardType === 'credit'
+      && a.cardPayDay > 0 && -(a.currentBalance ?? 0) > 0)
+    return { count: due.length, total: due.reduce((s, a) => s + (-(a.currentBalance ?? 0)), 0) }
+  }, [accounts])
   const [paidTarget, setPaidTarget] = useState(null)   // 기입금/기지급 처리 대상(계좌·날짜 드로어)
   const [importing, setImporting] = useState(false)    // 홈택스 세금계산서 엑셀 업로드 화면
   const [ourBizNo, setOurBizNo] = useState('')         // 우리 회사 사업자번호 — 매출/매입 자동 판정용
@@ -1681,6 +1694,21 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
               </button>
             </>}
       />
+
+      {/* 카드 대금으로 넘어가는 줄 — 지급 업무를 하러 온 김에 카드값도 챙기게 한다.
+          목록에 섞지는 않는다: 청구서와 카드는 행도 컬럼도 상태 흐름도 다르다
+          (계좌·카드를 화면으로 가른 것과 같은 이유). 갚을 게 없으면 그리지 않는다. */}
+      {!isIssued && !collect && cardDue.count > 0 && (
+        <button className="card card-pad" onClick={() => goRoute?.('card_payment')}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
+            marginBottom: 16, cursor: 'pointer', border: '1px solid var(--line)' }}>
+          <Icon.Card size={16} className="text-warn"/>
+          <span className="text-sm">
+            이번에 갚을 카드 <b>{cardDue.count}장</b> · <span className="num fw-700">{fmtNum(cardDue.total)}</span>원
+          </span>
+          <span className="text-xs text-muted2 ml-auto">카드 대금 지급으로 →</span>
+        </button>
+      )}
 
       {/* 요약 카드 — 회수 모드는 미수/미지급 2칸(발행예정 없음), 발행 모드는 3칸 */}
       {/* 비어 있는 구획은 그리지 않는다 — 이 코드베이스가 정기 회차에서 이미 정한 규칙이다

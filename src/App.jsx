@@ -15,6 +15,7 @@ import { DocsScreen, EvidenceScreen, EvidenceAttachDrawer, ExcelScreen, ReportsS
 import { SettlementScreen } from './screens/Settlement'
 import { PaymentRunScreen } from './screens/PaymentRun'
 import { TransferScreen } from './screens/Transfer'
+import { CardPaymentScreen } from './screens/CardPayment'
 import { LendingScreen } from './screens/Lending'
 import { PurchaseStatusScreen } from './screens/PurchaseStatus'
 import { FundStatusScreen } from './screens/FundStatus'
@@ -574,6 +575,7 @@ function AppInner({ onLogout, user }) {
       case "billing_issued":  return <BillingScreen key="billing_issued" initialTab="issued" focusInvoiceId={focusInvoiceId}
                                        openIncome={() => setTxnForm({ kind: "income" })}/>;
       case "billing_received":return <BillingScreen key="billing_received" initialTab="received" focusInvoiceId={focusInvoiceId}
+                                       goRoute={go}
                                        openExpense={() => setTxnForm({ kind: "expense", compact: true })}/>;
       case "contract":        return <ContractListScreen kind="all" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
       case "contract_sales":  return <ContractListScreen kind="sales" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
@@ -598,6 +600,7 @@ function AppInner({ onLogout, user }) {
       case "hr_labor_contract": return <LaborContractScreen/>;
       case "hr_outsourcing":  return <OutsourcingScreen/>;
       // 일반 경비 / 잡손익 — 화면은 하나를 공유하고 진입 메뉴가 초기 탭을 정한다
+      case "card_payment":   return <CardPaymentScreen/>;
       case "transfer":       return <TransferScreen/>;
       case "finance_lending": return <LendingScreen/>;
       case "misc_pl":

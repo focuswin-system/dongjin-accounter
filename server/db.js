@@ -1480,6 +1480,11 @@ async function initDb(conn) {
      * transfer_id 는 그 두 줄을 잇는다. 하나를 지우면 짝도 함께 지운다 —
      * 한쪽만 남으면 **돈이 사라지거나 생겨난다.** */
     await ensureColumn('transactions', 'transfer_id', "transfer_id VARCHAR(36)")
+    /* 카드를 쓴 사람 이름. employee_id(FK)와 **함께** 둔다.
+       · 명부에 있는 직원 → 둘 다 채운다(id 로 조회, 이름은 그때 이름 그대로 남는 스냅샷)
+       · 명부에 없는 사람(퇴사자·알바·대표 가족) → 이름만 채운다
+       FK 하나로는 명부 밖 사람을 못 적는데, 법인카드는 실제로 그런 사람이 쓴다. */
+    await ensureColumn('transactions', 'employee_name', "employee_name VARCHAR(60)")
     await ensureIndex('transactions', 'idx_txn_transfer', 'transfer_id')
 
     /* 카드 종류 — 신용/체크. 결제 방식이 정반대라 한 덩어리로 두면 자금일보가 어긋난다.

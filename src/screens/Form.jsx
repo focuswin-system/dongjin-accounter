@@ -355,7 +355,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       account_id:   accountObj?.id  || null,
       // 상대 계좌 — id 만 보낸다. 은행·계좌번호는 서버가 그 줄을 다시 읽어 베낀다.
       counterparty_account_id: form.cpAccountId || null,
-      employee_id:  employeeObj?.id || null,
+      /* 직원은 **id 와 이름을 함께** 보낸다.
+         명부에 있으면 둘 다, 명부에 없는 사람(퇴사자·알바·대표 가족)이면 이름만 남는다 —
+         법인카드는 실제로 그런 사람이 쓴다. id 만 보내면 그 경우 기록이 통째로 사라진다. */
+      employee_id:   employeeObj?.id || null,
+      employee_name: form.employee || null,
       category:     form.category,
       sub_category: "",
       item_id:      form.itemId || null,
@@ -778,18 +782,24 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                 화면이 있지도 않은 절차를 약속하면 사용자는 "지정해 뒀으니 나중에 정산되겠지"
                 하고 넘어간다. 미구현보다 나쁘다. 하는 일을 그대로 적는다.
                 직원이 사비로 쓴 돈은 갚을 때 그 지출을 등록하면 된다(따로 정산 절차가 없다). */}
-            {kind === "expense" && (form.method === "개인카드" || form.method === "현금") && (
-              <FormField label="사용 직원" hint="누가 썼는지 기록해 둡니다 (선택)">
-                <div className="row gap-6" style={{ flexWrap: "wrap" }}>
-                  <button type="button" className={`chip ${!form.employee ? "active" : ""}`}
-                    onClick={() => setForm({...form, employee: ""})}>없음</button>
-                  {employees.filter(e => e.status === "재직" || e.status === "수습").map(e => (
-                    <button key={e.id} type="button" className={`chip ${form.employee === e.name ? "active" : ""}`}
-                      onClick={() => setForm({...form, employee: e.name})}>
-                      {e.name}<span className="text-muted2" style={{ fontWeight: 400, marginLeft: 2 }}>· {e.dept}</span>
-                    </button>
-                  ))}
-                </div>
+            {/* ⚠ **법인카드가 빠져 있었다.** 개인카드·현금만 물어봤는데, 그건 방향이 거꾸로다.
+                개인카드·현금은 직원이 사비로 쓴 것이라 갚아주면 끝난다. 법인카드는 **회사 돈을
+                직원이 직접 쓰는 것**이라 누가 썼는지가 통제의 핵심인데, 정작 그때 안 물었다.
+                (카드 대금 지급 화면의 사용 내역 표가 이 값을 보여준다.)
+
+                칩이 아니라 Combobox 다 — 직원이 스무 명을 넘으면 칩이 화면을 덮는다.
+                allowAdd 로 명부에 없는 사람도 적는다(퇴사자·알바·대표 가족이 실제로 쓴다). */}
+            {kind === "expense" && ["법인카드", "개인카드", "현금"].includes(form.method) && (
+              <FormField label="사용 직원"
+                hint={form.method === "법인카드" ? "이 카드를 누가 썼는지 기록해 둡니다 (선택)" : "누가 썼는지 기록해 둡니다 (선택)"}>
+                <Combobox
+                  value={form.employee}
+                  onChange={v => setForm({ ...form, employee: v })}
+                  onAddNew={v => setForm({ ...form, employee: v })}
+                  options={employees
+                    .filter(e => e.status === "재직" || e.status === "수습")
+                    .map(e => ({ value: e.name, label: e.name, sub: e.dept }))}
+                  placeholder="직원 선택 · 직접 입력"/>
               </FormField>
             )}
 
