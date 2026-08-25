@@ -716,15 +716,25 @@ a { color: inherit; text-decoration: none; }
    가로 폭의 3할 가까이를 여백이 먹는다. 정작 품목명·규격은 여덟 자만 보이고 잘려서,
    무엇을 청구하는지 표만 보고는 검산이 안 됐다. 여백을 줄여 그만큼을 칸에 준다. */
 .table.line-table thead th { padding: 9px 6px; }
-.table.line-table tbody td { padding: 8px 6px; vertical-align: top; }
+/* ⚠ 예전엔 `vertical-align: top` 이었다. 입력창끼리는 줄이 맞았지만 **키가 작은 것**
+   (복사·삭제 버튼, 단가 기준 칩)은 전부 위로 붙어 혼자 떠 보였다 — 칩은 margin-top 으로
+   억지로 내려 맞추고 있었고 버튼은 그것도 없었다.
+   가운데 정렬로 바꾸면 키가 다른 것들이 **저절로** 한 줄로 읽힌다. 억지 여백도 없앤다. */
+.table.line-table tbody td { padding: 8px 6px; vertical-align: middle; }
 .table.line-table tbody td:first-child,
 .table.line-table thead th:first-child { padding-left: 12px; }
 .table.line-table tbody td:last-child,
 .table.line-table thead th:last-child { padding-right: 12px; }
 .table.line-table .input { padding: 9px 10px; }
-/* 위 정렬이라 입력창은 줄이 맞는데, 칩(단가 기준)은 키가 작아 혼자 떠 보인다.
-   입력창 높이(패딩 9 + 글자)의 한가운데로 내려 같은 줄로 읽히게 한다. */
-.table.line-table tbody td .chip { margin-top: 4px; }
+
+/* 세로 구분선 — 이 표는 칸마다 **입력창**이 서 있어서, 가로줄만으로는 어느 입력이 어느
+   열인지 눈으로 못 따라간다(품목·규격·단위·수량·단가·금액·부가세가 한 줄에 늘어선다).
+   보통 표에는 세로줄을 넣지 않지만(선이 겹치면 지저분하다), 입력표는 다르다 —
+   **머리글과 입력을 잇는 선**이 있어야 "이 칸이 그 칸"이 된다. 아주 옅게 긋는다. */
+.table.line-table tbody td + td,
+.table.line-table thead th + th { border-left: 1px solid var(--line); }
+/* 머리글을 조금 더 또렷하게 — 어느 칸인지 찾는 눈이 먼저 닿는 곳이다 */
+.table.line-table thead th { color: var(--ink); font-weight: 600; background: var(--surface-2); }
 .num-cell { font-family: "JetBrains Mono", ui-monospace, monospace; font-feature-settings: "tnum" 1; letter-spacing: -0.02em; }
 .num-right { text-align: right; }
 .text-center { text-align: center; }

@@ -811,10 +811,14 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
             <label className="label">주문 <span className="text-muted2">(선택)</span></label>
             {/* '직접 입력'도 뺐다 — 목록에 없는 이름을 타이핑하면 저장 때 버려져(위 주석)
                 입력한 사람만 연결됐다고 믿게 된다. 주문은 주문 화면에서 먼저 만든다. */}
+            {/* ⚠ allowAdd={false} — 위 주석대로 '직접 입력'을 뺐는데 **이 속성을 안 걸어서**
+                목록에 없는 이름을 치면 "Enter로 새로 등록할 수 있어요"가 떴다(ui.jsx:774).
+                눌러도 아무 일이 없다 — 안내문이 거짓말을 하고 있었다. */}
             <Combobox
               value={form.contract}
               onChange={v => f("contract", v)}
               options={contractOptions}
+              allowAdd={false}
               placeholder={contractOptions.length ? "해당 주문이 있으면 선택하세요" : "등록된 주문이 없어요"}/>
             <div className="text-sm text-muted2" style={{ marginTop: 4 }}>
               주문 없이 발행·수취하는 청구서는 비워두세요.
