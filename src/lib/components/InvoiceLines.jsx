@@ -100,16 +100,53 @@ export const InvoiceLines = ({
     sub: [it.spec, it.unit, it.amount ? `${fmtNum(it.amount)}원` : null].filter(Boolean).join(' · '),
   })), [itemMaster])
 
+  /* 줄 하나의 '기준' — 단가와 금액 중 **무엇이 무엇을 정하는가.**
+   *
+   * 단가 기준(기본)  단가 × 수량(중량) = 금액.   수량을 고치면 금액이 따라온다.
+   * 금액 기준        금액 ÷ 수량(중량) = 단가.   총액이 먼저 정해진 건에 쓴다
+   *                  ("이 줄은 통틀어 50만원" — 거래처가 그렇게 주는 일이 흔하다).
+   *
+   * 예전엔 금액을 직접 고치면 그 줄이 **얼어붙기만** 했다(amountTouched). 수량을 바꿔도
+   * 금액도 단가도 안 움직여서, 사용자가 단가를 손으로 나눠 넣어야 했다.
+   * 이제 금액 기준이면 수량이 바뀔 때 **단가를 다시 뽑는다** — 어느 쪽이 근거인지만 고르면
+   * 나머지는 따라온다.
+   *
+   * ⚠ 수량이 0이면 나눌 수 없다. 그때는 단가를 건드리지 않는다(0으로 지워 버리면
+   *   사용자가 적어 둔 단가가 소리 없이 사라진다).
+   */
   const set = (i, patch) => {
     const next = lines.map((l, idx) => {
       if (idx !== i) return l
       const merged = { ...l, ...patch }
-      /* 금액 자동 계산 — 사용자가 금액을 직접 건드린 줄(amountTouched)은 건너뛴다.
-         '금액' 칸을 고친 것 자체가 patch 로 오면 그때 표식을 세운다. */
-      if (!('amount' in patch) && !merged.amountTouched) merged.amount = computeLineAmount(merged)
+      const byAmount = merged.amountTouched
+      if (byAmount) {
+        // 금액 기준 — 금액이나 수량이 바뀌면 단가를 역산한다
+        if ('amount' in patch || 'qty' in patch || 'weight' in patch || 'price_basis' in patch) {
+          const div = merged.price_basis === 'weight' ? Number(merged.weight) : Number(merged.qty)
+          const amt = Number(merged.amount)
+          if (div > 0 && amt >= 0) merged.unit_price = Math.round(amt / div)
+        }
+      } else if (!('amount' in patch)) {
+        // 단가 기준 — 지금까지와 같다
+        merged.amount = computeLineAmount(merged)
+      }
       return merged
     })
     onChange(next)
+  }
+
+  /* 기준 바꾸기 — 바꾸는 순간 **그 기준으로 한 번 맞춰 준다.**
+     안 맞춰 주면 "기준만 바뀌고 숫자는 그대로"라 무엇이 달라졌는지 안 보인다. */
+  const setBasis = (i, byAmount) => {
+    const l = lines[i]
+    const div = l.price_basis === 'weight' ? Number(l.weight) : Number(l.qty)
+    const patch = { amountTouched: byAmount }
+    if (byAmount) {
+      if (div > 0 && Number(l.amount) >= 0) patch.unit_price = Math.round(Number(l.amount) / div)
+    } else {
+      patch.amount = computeLineAmount(l)
+    }
+    onChange(lines.map((x, idx) => (idx === i ? { ...x, ...patch } : x)))
   }
 
   const add = () => onChange([...lines, blankLine()])
@@ -290,14 +327,19 @@ export const InvoiceLines = ({
                   <td>
                     <MoneyInput value={String(l.amount ?? '')}
                       onChange={(raw, v) => set(i, { amount: v, amountTouched: true })}/>
-                    {l.amountTouched && (
-                      <button type="button" className="text-xs text-muted2"
-                        style={{ border: 0, background: 'none', cursor: 'pointer', padding: '2px 0' }}
-                        title="수량·단가로 다시 계산"
-                        onClick={() => set(i, { amountTouched: false, amount: computeLineAmount(l) })}>
-                        자동 계산으로
-                      </button>
-                    )}
+                    {/* 이 줄의 기준을 여기서 고른다. 꼬리표는 칸 안에 **겹쳐** 띄워
+                        행 높이를 안 밀게 한다(.cell-tag) — 예전엔 입력 아래에 붙어
+                        그 줄만 키가 커지고 격자가 어긋났다. */}
+                    <button type="button" className="cell-tag"
+                      /* ⚠ '단가 기준' 이라고 쓰지 않는다 — 왼쪽에 **같은 이름의 열**이 이미 있다
+                         (수량/중량 = 단가를 무엇에 곱하나). 여기는 무엇이 무엇을 정하는가라
+                         뜻이 다르다. 화살표로 방향을 보여주면 겹치지 않는다. */
+                      title={l.amountTouched
+                        ? '금액이 근거예요 — 수량을 바꾸면 단가를 다시 계산합니다. 누르면 반대로 바꿔요.'
+                        : '단가가 근거예요 — 수량을 바꾸면 금액을 다시 계산합니다. 누르면 반대로 바꿔요.'}
+                      onClick={() => setBasis(i, !l.amountTouched)}>
+                      {l.amountTouched ? '금액→단가' : '단가→금액'}
+                    </button>
                   </td>
                   )}
                   {col.vat && (

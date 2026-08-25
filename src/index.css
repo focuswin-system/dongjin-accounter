@@ -727,21 +727,26 @@ a { color: inherit; text-decoration: none; }
  * 스프레드시트가 이 문제를 그렇게 푼다. 지금 어느 칸에 있는지는 **안쪽 테두리**로 알린다.
  */
 .table.line-table { border-collapse: separate; border-spacing: 0; }
+/* ⚠ 격자는 **--line-strong** 으로 긋는다. 처음엔 --line(#ECEEF2)을 썼는데 흰 바탕에서
+   거의 안 보여 "다 하얀 곳에 널브러져 있다"는 말을 들었다. 표의 격자는 장식이 아니라
+   **칸의 경계**라, 보통 표의 가로줄보다 진해야 한다.
+   머리글은 한 단계 더 진하게 — 어느 칸인지 찾는 눈이 먼저 닿는 줄이다. */
 .table.line-table thead th {
   padding: 8px 10px;
   background: var(--surface-2);
   color: var(--ink);
   font-weight: 600;
-  border-bottom: 1px solid var(--line-strong);
+  border-bottom: 2px solid var(--line-strong);
 }
-/* 격자 — 모든 칸에 왼쪽 선, 첫 칸만 뺀다(표 바깥 테두리는 카드가 그린다) */
 .table.line-table thead th + th,
-.table.line-table tbody td + td { border-left: 1px solid var(--line); }
+.table.line-table tbody td + td { border-left: 1px solid var(--line-strong); }
 .table.line-table tbody td {
   padding: 0;                       /* 여백은 입력창이 갖는다 — 칸과 입력이 어긋나지 않게 */
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-strong);
   vertical-align: middle;
 }
+/* 마지막 줄의 아래선도 남긴다 — 기본 .table 규칙이 지워서 표가 아래로 열려 보였다 */
+.table.line-table tbody tr:last-child td { border-bottom: 1px solid var(--line-strong); }
 /* 입력창이 곧 칸이다 */
 .table.line-table .input {
   border: 0;
@@ -773,10 +778,14 @@ a { color: inherit; text-decoration: none; }
    다음 행 경계에 걸쳐 보인다. 칸 안 오른쪽 아래에 겹쳐 띄운다(자리를 안 차지한다). */
 .table.line-table tbody td { position: relative; }
 .table.line-table .cell-tag {
-  position: absolute; right: 10px; bottom: 3px;
-  font-size: 10px; line-height: 1; color: var(--muted-2);
-  background: none; border: 0; padding: 0; cursor: inherit;
+  position: absolute; right: 8px; bottom: 2px;
+  font-size: 10px; line-height: 1.4; color: var(--muted-2);
+  background: none; border: 0; padding: 0 2px; cursor: inherit;
+  border-radius: 4px;
 }
+/* 누를 수 있는 꼬리표는 눌러도 되는 것처럼 보여야 한다 */
+button.cell-tag { cursor: pointer; }
+button.cell-tag:hover { color: var(--ink); background: var(--surface-2); }
 
 .num-cell { font-family: "JetBrains Mono", ui-monospace, monospace; font-feature-settings: "tnum" 1; letter-spacing: -0.02em; }
 .num-right { text-align: right; }
