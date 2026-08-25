@@ -51,13 +51,20 @@ const ContractRow = ({ c, showIssues }) => (
         {c.name}
       </span>
       {c.vendor && <span className="text-xs text-muted2">{c.vendor}</span>}
+      {/* ⚠ **청구액과 견준다.** 주문금액과 견주면 축이 어긋난다 — 주문금액은 공급가액인데
+          받은 돈은 VAT 포함이라 전액 받은 주문이 110%로 뜬다(운영 데이터에서 그랬다).
+          주문 규모는 아랫줄에 따로 적는다. */}
       <span className="num text-sm ml-auto" style={{ flexShrink: 0 }}>
-        {fmtNum(c.collected)} <span className="text-muted2">/ {fmtNum(c.amount)}</span>
+        {fmtNum(c.collected)} <span className="text-muted2">/ {fmtNum(c.billed)}</span>
       </span>
     </div>
     <RateBar rate={c.rate} tone={rateTone(c)}/>
     <div className="row text-xs text-muted2" style={{ gap: 8, marginTop: 5, flexWrap: 'wrap' }}>
-      {c.rate != null && <span>회수 {c.rate}%</span>}
+      {c.rate != null && <span>청구액 중 {c.rate}% 회수</span>}
+      {/* 주문 대비 청구 진행 — 단가 기성형은 총액이 없어 이 개념이 없다(billRate=null) */}
+      {c.billRate != null && (
+        <span>주문 {fmtNum(c.amount)}원 중 {c.billRate}% 청구</span>
+      )}
       {/* 아직 청구도 못 한 몫 — '못 받은 돈'과 원인이 달라 따로 적는다 */}
       {c.unbilled > 0 && <span>미청구 {fmtNum(c.unbilled)}원</span>}
       {c.remain > 0 && <span style={{ color: 'var(--warn-ink)' }}>못 받은 돈 {fmtNum(c.remain)}원</span>}
@@ -100,13 +107,17 @@ export const MgmtDashScreen = () => {
       <PageHeader title="경영 대시보드"/>
 
       <KpiRow cols={4} style={{ marginBottom: 20 }}>
-        <Kpi label="진행중 주문금액" value={t.amount} badge={`${t.liveCount}건`}/>
+        {/* 단가 기성형 주문은 총액이 0이라 이 합계에 안 들어온다 — 그 사실을 힌트로 밝힌다 */}
+        <Kpi label="진행중 주문금액" value={t.amount} badge={`${t.liveCount}건`}
+          hint={t.amount === 0 ? '총액이 정해진 주문이 없어요(단가 기성형)' : undefined}/>
         <Kpi label="들어온 돈" value={t.collected} tone="pos"
-          hint={t.amount > 0 ? `주문금액의 ${Math.round(t.collected / t.amount * 1000) / 10}%` : undefined}/>
+          hint={t.billed > 0 ? `청구액의 ${Math.round(t.collected / t.billed * 1000) / 10}%` : undefined}/>
         {/* 두 숫자를 갈라 둔다 — 원인이 다르다. 앞은 "청구했는데 안 들어온다",
             뒤는 "아직 청구를 못 했다". 합치면 무엇을 해야 할지 알 수 없다. */}
         <Kpi label="못 받은 돈" value={t.remain} tone="neg-ink" hint="청구했는데 안 들어온 돈"/>
-        <Kpi label="아직 청구 안 한 돈" value={t.unbilled} hint="주문금액 − 청구액"/>
+        {/* 총액이 있는 주문만 센다 — 단가 기성형은 '주문금액 대비'가 성립하지 않는다 */}
+        <Kpi label="아직 청구 안 한 돈" value={t.unbilled}
+          hint={t.unbilledBase > 0 ? `총액이 있는 주문 ${fmtNum(t.unbilledBase)}원 기준` : '총액이 정해진 주문이 없어요'}/>
       </KpiRow>
 
       {/* 손봐야 할 주문 — 이 화면의 결론. 없으면 그리지 않는다 */}

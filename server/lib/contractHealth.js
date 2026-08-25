@@ -54,6 +54,13 @@ async function contractHealth(db, today) {
            v.name AS vendor_name,
            COALESCE((SELECT SUM(i.total_amount) FROM invoices i
                       WHERE i.contract_id = c.id AND i.kind = 'issued'), 0) AS billed,
+           /* ⚠ **공급가액 합계를 따로 센다.** contracts.amount 는 공급가액인데 청구서
+              total_amount 는 VAT 포함이다. 섞어서 나누면 과세 주문의 회수율이 10% 부풀고,
+              전액 받은 주문이 110%로 뜬다. 운영 데이터에서 주문 34,000,000 · 청구
+              37,400,000(정확히 ×1.1)로 실제로 그렇게 나왔다.
+              routes/contracts.js 가 손익을 낼 때 같은 이유로 SUPPLY 를 따로 두고 있다. */
+           COALESCE((SELECT SUM(i.supply_amount) FROM invoices i
+                      WHERE i.contract_id = c.id AND i.kind = 'issued'), 0) AS billed_supply,
            COALESCE((SELECT SUM(m.amount) FROM invoice_matches m
                        JOIN invoices i2 ON i2.id = m.invoice_id
                       WHERE i2.contract_id = c.id AND i2.kind = 'issued'), 0) AS collected
@@ -94,7 +101,8 @@ async function contractHealth(db, today) {
 
   const contracts = rows.map(c => {
     const amount = num(c.amount)
-    const billed = num(c.billed)
+    const billed = num(c.billed)              // 총액(VAT 포함) — 정산과 같은 축
+    const billedSupply = num(c.billed_supply) // 공급가액 — 주문금액과 같은 축
     const collected = num(c.collected)
     const opens = openBy.get(c.id) || []
 
@@ -130,11 +138,18 @@ async function contractHealth(db, today) {
       billed,                                  // 청구한 금액
       collected,                               // 실제로 들어온 금액
       remain: Math.max(0, billed - collected), // 청구했는데 못 받은 돈
-      /* 아직 청구도 못 한 몫. 음수가 나올 수 있다(주문금액보다 더 청구한 경우 — 증액을
-         주문에 반영 안 했을 때 흔하다). 0으로 자르면 그 사실이 사라지므로 그대로 둔다. */
-      unbilled: amount - billed,
-      // 주문금액 대비 회수율. 주문금액이 0이면 비율이 성립하지 않는다(—로 표시한다)
-      rate: amount > 0 ? Math.round((collected / amount) * 1000) / 10 : null,
+      billed_supply: billedSupply,
+      /* 아직 청구 안 한 몫 — **공급가액끼리** 뺀다.
+         ⚠ 단가 기성형(progress) 주문은 총액이 없어(amount = 0) 이 개념이 성립하지 않는다.
+           품목별 단가×수량으로 그때그때 청구하는 방식이라 '주문금액 대비'가 없다.
+           0 으로 두면 "다 청구했다"로 읽히고, 그냥 빼면 −1억 같은 수가 뜬다(운영에서 그랬다).
+           그래서 **null** 로 두고 화면이 안 그리게 한다. */
+      unbilled: amount > 0 ? amount - billedSupply : null,
+      // 주문 대비 얼마나 청구했나(공급가액 축)
+      billRate: amount > 0 ? Math.round((billedSupply / amount) * 1000) / 10 : null,
+      /* 회수율 = **청구한 것 중 받은 비율**(총액 축). 주문금액으로 나누지 않는다 —
+         축이 달라 10% 부풀고, 총액 없는 주문에서는 아예 성립하지 않는다. */
+      rate: billed > 0 ? Math.round((collected / billed) * 1000) / 10 : null,
       overdueDays,
       uncertain,                               // 그중 기약 없는 몫(lib/certainty.js 기준)
       openCount: opens.length,
@@ -155,7 +170,9 @@ async function contractHealth(db, today) {
       billed: sum(live, c => c.billed),
       collected: sum(live, c => c.collected),
       remain: sum(live, c => c.remain),
-      unbilled: sum(live, c => c.unbilled),
+      // 총액이 있는 주문만 — 단가 기성형은 '주문금액 대비'가 성립하지 않는다
+      unbilled: sum(live.filter(c => c.unbilled != null), c => c.unbilled),
+      unbilledBase: sum(live.filter(c => c.unbilled != null), c => c.amount),
       uncertain: sum(contracts, c => c.uncertain),
       riskCount: contracts.filter(c => c.health === 'risk').length,
       watchCount: contracts.filter(c => c.health === 'watch').length,
