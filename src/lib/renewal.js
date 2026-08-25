@@ -167,8 +167,34 @@ const DAY_LABEL = {
 export const cycleDayLabel = (period) => DAY_LABEL[period] || DAY_LABEL.monthly;
 
 /**
+ * 회차가 놓이는 달만 짧게. 예) '2·5·8·11월 25일'
+ *
+ * 라벨 괄호 안에 넣으려고 뗀 것이다. 예전엔 일자 칸 라벨이 `생성 일 (매월 N일)` 이고
+ * 그 **아래에 또** `매월 25일` 이 연한 글씨로 붙어 있었다 — 괄호는 **틀**만 말하고
+ * 아래 줄이 **실제 답**이라, 같은 말이 두 번 있는 데다 줄 높이까지 어긋났다.
+ * 실제 답을 괄호로 올리고 아래 줄은 없앤다.
+ *
+ * ⚠ '시작일을 비우면 등록일 기준' 안내는 여기서 뺀다 — 바로 아래 FirstCycleHint 가
+ *   "비워두면 오늘(등록일)부터 시작해요" 로 이미 말한다. 두 곳에서 말하면 또 중복이다.
+ */
+export const cycleMonthsLabel = (startDate, day, period, today) => {
+  const d = Math.min(Math.max(Number(day) || 1, 1), 31);
+  const sm = Number(String(startDate || today || '').split('-')[1]);
+  if (!sm) return cycleDayLabel(period);          // 날짜를 못 읽으면 틀이라도 보여준다
+  if (period === 'yearly') return `매년 ${sm}월 ${d}일`;
+  const step = periodMonths(period);
+  if (step > 1) {
+    const ms = Array.from({ length: 12 / step }, (_, i) => ((sm - 1 + i * step) % 12) + 1)
+      .sort((a, b) => a - b);
+    return `${ms.join('·')}월 ${d}일`;
+  }
+  return `매월 ${d}일`;
+};
+
+/**
  * 회차가 놓이는 달을 사람 말로. 예) '2·5·8·11월 25일'
  * startDate 가 없으면 등록일(오늘)이 앵커가 되므로 그렇게 알려준다.
+ * (주문 화면에서 쓴다 — 정기 규칙 폼은 위 cycleMonthsLabel 을 라벨 괄호에 쓴다)
  */
 export const cycleMonthsHint = (startDate, day, period, today) => {
   const d = Math.min(Math.max(Number(day) || 1, 1), 31);

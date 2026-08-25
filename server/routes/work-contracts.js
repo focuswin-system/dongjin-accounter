@@ -318,13 +318,26 @@ router.post('/:id/duplicate', async (req, res, next) => {
   } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
 })
 
+/* 계약 삭제 — **잘못 등록한 것을 지우는 길**이다. 퇴사·만료와는 다른 일이다.
+ *
+ * ⚠ 급여대장이 한 번이라도 나온 계약은 **막는다.**
+ *   예전엔 `UPDATE payroll SET work_contract_id = NULL` 로 연결만 끊고 지웠다. 장부는 남지만
+ *   그 급여가 **어느 계약에서 나온 것인지가 사라진다** — 나중에 "이 사람 그때 얼마였지"를
+ *   되짚을 수 없고, 계약별 인건비 집계도 그만큼 비게 된다. 되돌릴 방법도 없다.
+ *   실수로 등록한 계약은 급여가 나가기 전이므로 이 가드에 걸리지 않는다.
+ *   이미 급여가 나갔다면 그건 실수가 아니라 **끝난 계약**이다 → 퇴사 처리·만료를 쓴다. */
 router.delete('/:id', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
-    // 지급된 회차(payroll)의 거래는 보존하고 연결만 해제 → 계약 삭제해도 장부는 남는다.
-    // 두 문을 한 트랜잭션으로 묶어 unlink만 되고 계약이 남는 어긋난 상태를 막는다.
-    await conn.execute('UPDATE payroll SET work_contract_id = NULL WHERE work_contract_id = ?', [req.params.id])
+    const [[{ cnt }]] = await conn.execute(
+      'SELECT COUNT(*) AS cnt FROM payroll WHERE work_contract_id = ?', [req.params.id])
+    if (cnt > 0) {
+      await rollbackQuietly(conn)
+      return res.status(409).json({
+        error: `이 계약으로 만든 급여대장이 ${cnt}건 있어요. 지우면 그 급여가 어느 계약에서 나왔는지 알 수 없게 됩니다.`
+             + ` 계약이 끝난 것이라면 '퇴사 처리'나 만료로 정리해주세요.` })
+    }
     await conn.execute('DELETE FROM work_contracts WHERE id = ?', [req.params.id])  // items·docs는 CASCADE
     await conn.commit()
     res.json({ ok: true })

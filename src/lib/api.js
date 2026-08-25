@@ -1932,7 +1932,11 @@ export const api = {
     try { return await req(`/work-contracts/${id}/duplicate`, { method: 'POST', body: data }) } catch (e) { return { ok: false, error: e.message } }
   },
   async deleteWorkContract(id) {
-    try { await req('/work-contracts/' + id, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }
+    /* ⚠ 서버가 준 사유를 **버리지 않는다.** 급여대장이 있는 계약은 409 로 막히는데,
+       `catch { return { ok: false } }` 로 삼키면 화면에는 "삭제에 실패했어요" 만 뜬다 —
+       왜 안 되는지, 대신 무엇을 해야 하는지를 사용자가 알 수 없다. */
+    try { await req('/work-contracts/' + id, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e?.message || '삭제에 실패했어요' } }
   },
   async payWorkContract(id, data) {
     // code 도 같이 넘긴다 — 중복 지급('duplicate')이면 화면이 확인을 받고 force 로 다시 부른다.

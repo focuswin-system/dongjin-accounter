@@ -10,7 +10,7 @@ import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { BackfillWizard } from '../lib/components/BackfillWizard'
 import { RowActions } from '../lib/components/RowActions'
 import { normBizNo, normVendorName } from '../lib/normalize'
-import { cycleDayLabel, cycleMonthsHint, PAY_TERM_OPTS, payTermNeedsDay, payTermHint,
+import { cycleMonthsLabel, PAY_TERM_OPTS, payTermNeedsDay, payTermHint,
          BILLING_PERIODS, periodMonths, periodLong } from '../lib/renewal'
 import { bizTypeOptions, bizItemOptions } from '../lib/bizTypes'
 import { api, minuteOf } from '../lib/api'
@@ -2535,12 +2535,10 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
             </div>
           </div>
           <div style={{ flex: 1 }}>
-            <label className="label">생성 일 ({cycleDayLabel(form.period)})</label>
+            {/* 괄호 안이 **실제 답**이다 — 예전엔 괄호가 틀('매월 N일')이고 아래 줄이 답이라
+                같은 말이 두 번 있었고 줄 높이도 어긋났다. 몇 월에 도는지는 시작일이 정한다. */}
+            <label className="label">생성 일 ({cycleMonthsLabel(form.start_date, form.day_of_month, form.period, todayStr())})</label>
             <input className="input" type="number" min="1" max="31" value={form.day_of_month} onChange={e => f("day_of_month", e.target.value)}/>
-            {/* 분기·년은 '몇 월'인지가 이 칸에 없다 — 월은 시작일이 정한다. 그걸 적어 준다. */}
-            <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-              {cycleMonthsHint(form.start_date, form.day_of_month, form.period, todayStr())}
-            </div>
           </div>
         </div>
         {/* 시작일·종료일은 **주기 바로 아래**다.
@@ -3033,11 +3031,9 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
             </div>
           </div>
           <div style={{ flex: 1 }}>
-            <label className="label">청구일 ({cycleDayLabel(form.period)})</label>
+            {/* 위 정기지급 폼과 같은 규칙 — 괄호 안이 실제 답이다 */}
+            <label className="label">청구일 ({cycleMonthsLabel(form.startDate, form.dayOfMonth, form.period, todayStr())})</label>
             <input className="input" type="number" min="1" max="31" value={form.dayOfMonth} onChange={e => f("dayOfMonth", e.target.value)}/>
-            <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-              {cycleMonthsHint(form.startDate, form.dayOfMonth, form.period, todayStr())}
-            </div>
           </div>
         </div>
         {/* 시작일·종료일은 **주기 바로 아래**다.

@@ -441,6 +441,19 @@ const LaborDetailDrawer = ({ id, onClose, onChanged, onNewContract }) => {
     toast.push('퇴사 처리했어요'); onChanged?.(); onClose()
   }
 
+  const doDelete = async () => {
+    const ok = await confirm({
+      tone: 'neg', icon: <Icon.Warn size={22}/>, title: '근로계약 삭제',
+      body: `${c.employee_name}의 «${c.title || '계약'}» 을 지웁니다.`,
+      detail: '잘못 등록한 계약을 지우는 기능이에요. 계약이 실제로 끝난 것이라면 «퇴사 처리»나 만료를 쓰세요 — 기록이 남습니다.',
+      confirmLabel: '삭제',
+    })
+    if (!ok) return
+    const res = await api.deleteWorkContract(c.id)
+    if (!res?.ok) { toast.push(res?.error || '삭제에 실패했어요', { tone: 'warn' }); return }
+    toast.push('계약을 지웠어요'); onChanged?.(); onClose()
+  }
+
   return (
     <Drawer open={true} onClose={onClose} width="min(680px, 100vw)">
       <DrawerHead
@@ -498,6 +511,16 @@ const LaborDetailDrawer = ({ id, onClose, onChanged, onNewContract }) => {
 
       <div className="drawer-foot">
         {c.emp_status !== '퇴사' && <button className="btn" style={{ color: 'var(--neg-ink)' }} onClick={doLeave}>퇴사 처리</button>}
+        {/* 삭제 — **잘못 등록한 계약을 지우는 길**이다. 퇴사·만료와는 다른 일이라 따로 둔다.
+            여태 서버에는 라우트가 있는데 화면에만 없어서, 실수로 만든 계약을 지울 방법이 없었다.
+            급여가 한 번이라도 나갔으면 서버가 막는다(그 급여의 출처가 사라지므로) — 그 경우
+            버튼도 흐리게 두고 이유를 알려준다. 눌러 보고 나서 알게 하면 늦다. */}
+        <button className="btn" style={{ color: 'var(--neg-ink)' }}
+          disabled={(c.pay_count || 0) > 0}
+          title={(c.pay_count || 0) > 0
+            ? `급여대장 ${c.pay_count}건이 이 계약으로 만들어졌어요. 끝난 계약이면 '퇴사 처리'나 만료로 정리하세요.`
+            : undefined}
+          onClick={doDelete}>삭제</button>
         <div className="ml-auto row gap-8">
           <button className="btn" onClick={() => onNewContract(c.employee_id)}><Icon.Plus size={13}/> 새 계약(연봉 인상)</button>
         </div>
