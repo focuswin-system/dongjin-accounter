@@ -66,11 +66,23 @@ export const useTableFilter = ({ date, search, filters = [] } = {}) => {
     if (!Array.isArray(rows)) return []
     return rows.filter(row => {
       if (date) {
-        const d = get(row, date.field || 'date') || ''
-        /* 날짜가 **없는** 행은 기간을 걸었을 때 뺀다. 남겨두면 "8월"로 좁혀놨는데
-           날짜 미상 행이 계속 따라와, 그 표의 합계를 8월 숫자로 믿을 수 없게 된다. */
-        if (range.from && (!d || d < range.from)) return false
-        if (range.to && (!d || d > range.to)) return false
+        const d = get(row, date.field || 'date')
+        /* 값이 **범위**인 행도 있다 — 청구서의 납품일이 그렇다.
+           품목 줄마다 날짜가 달라(8/5·8/12·8/27 을 8월분 한 장으로 묶는다) 하나로 정해지지
+           않는다. 그래서 [시작, 끝] 배열이면 **겹치는지**로 본다. 시작일만 보면
+           8/20~8/31 로 좁혔을 때 8/27 납품분이 든 청구서가 통째로 빠진다. */
+        if (Array.isArray(d)) {
+          const [ds, de] = [d[0] || '', d[1] || d[0] || '']
+          if (!ds) return false                                   // 날짜를 안 적은 행
+          if (range.from && de < range.from) return false
+          if (range.to && ds > range.to) return false
+        } else {
+          const v = d || ''
+          /* 날짜가 **없는** 행은 기간을 걸었을 때 뺀다. 남겨두면 "8월"로 좁혀놨는데
+             날짜 미상 행이 계속 따라와, 그 표의 합계를 8월 숫자로 믿을 수 없게 된다. */
+          if (range.from && (!v || v < range.from)) return false
+          if (range.to && (!v || v > range.to)) return false
+        }
       }
       for (const f of filters) {
         const v = values[f.key]

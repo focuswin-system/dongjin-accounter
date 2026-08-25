@@ -21,6 +21,9 @@ export const PurchaseStatusScreen = ({ go }) => {
   const toast = useToast()
   const [month, setMonth] = useState(() => localToday().slice(0, 7))
   const [kind, setKind] = useState('received')     // 기본 매입 — 실제로 만들던 표가 그것이다
+  /* 기준 날짜 — 발행일(청구서를 끊은 날) / 납품일(물건이 오간 날).
+     제조·유통은 후자로 이 표를 본다. 여태 발행일 하나로 못 박혀 있었다. */
+  const [dateAxis, setDateAxis] = useState('issued')
   const [data, setData] = useState(null)
   const [company, setCompany] = useState(null)
 
@@ -28,9 +31,9 @@ export const PurchaseStatusScreen = ({ go }) => {
   useEffect(() => {
     let alive = true
     setData(null)
-    api.getPurchaseStatus(month, kind).then(d => { if (alive) setData(d) })
+    api.getPurchaseStatus(month, kind, dateAxis).then(d => { if (alive) setData(d) })
     return () => { alive = false }
-  }, [month, kind])
+  }, [month, kind, dateAxis])
 
   const label = kind === 'received' ? '매입' : '매출'
 
@@ -74,6 +77,16 @@ export const PurchaseStatusScreen = ({ go }) => {
               <button key={k} className={`chip ${kind === k ? 'active' : ''}`} onClick={() => setKind(k)}>{t}</button>
             ))}
           </div>
+          {/* 기준 날짜 — 제조·유통은 물건이 오간 날로 이 표를 본다.
+              ⚠ 납품일을 안 적은 줄은 그 기준에서 빠진다(걸 날짜가 없다). 아래에서 알린다. */}
+          <span className="chip-div"/>
+          <span className="text-sm text-muted fw-600">기준</span>
+          <div className="row gap-6">
+            {[['issued', '발행일'], ['delivery', '납품일']].map(([k, t]) => (
+              <button key={k} className={`chip ${dateAxis === k ? 'active' : ''}`}
+                onClick={() => setDateAxis(k)}>{t}</button>
+            ))}
+          </div>
           {/* 회계 월이 달력월과 다를 수 있다 — 어느 기간을 세고 있는지 늘 적어둔다 */}
           {data && (
             <span className="text-xs text-muted2 ml-auto">
@@ -91,7 +104,12 @@ export const PurchaseStatusScreen = ({ go }) => {
         <div className="card card-pad" style={{ textAlign: 'center', padding: 48, color: 'var(--muted-2)' }}>
           {data.from} ~ {data.to} 사이에 품목이 적힌 {label} 청구서가 없어요.
           <div className="text-xs" style={{ marginTop: 8 }}>
-            청구서를 등록할 때 <b>품목 내역</b>을 채우면 여기에 모입니다.
+            {/* 납품일 기준으로 비었을 때 "청구서를 등록하라"고만 하면 헛다리를 짚게 된다 —
+                청구서는 있는데 납품일을 안 적었을 뿐일 수 있다. */}
+            {dateAxis === 'delivery'
+              ? <>납품일 기준이에요. 품목에 <b>납품일</b>을 적지 않은 청구서는 여기 안 나옵니다 —
+                  발행일 기준으로 바꿔 보세요.</>
+              : <>청구서를 등록할 때 <b>품목 내역</b>을 채우면 여기에 모입니다.</>}
           </div>
         </div>
       ) : (

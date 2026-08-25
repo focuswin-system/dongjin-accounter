@@ -56,6 +56,25 @@ const effStatus = (inv) =>
     : inv.status
 
 // ── 청구서 상세 Drawer ────────────────────────────────────────────
+/* 기간 필터의 기준 날짜 축.
+ *
+ * ⚠ 납품일은 **청구서가 아니라 품목 줄**에 있다(invoice_lines.delivery_date).
+ *   8/5·8/12·8/27 납품분을 8월분 한 장으로 묶는 게 실무의 보통 모습이라(월합계 세금계산서)
+ *   청구서의 납품일이 하나로 안 정해진다. 그래서 **[시작, 끝] 범위**로 넘기고
+ *   useTableFilter 가 겹치는지로 판정한다 — 시작일만 보면 8/20~8/31 로 좁혔을 때
+ *   8/27 납품분이 든 청구서가 통째로 빠진다.
+ */
+const AXES = [
+  { id: 'issued',   label: '발행일',   hint: '청구서를 끊은 날' },
+  { id: 'delivery', label: '납품일',   hint: '물건이 오간 날' },
+  { id: 'due',      label: '결제기한', hint: '돈이 오갈 날' },
+]
+const AXIS_FIELD = {
+  issued:   'issuedAt',
+  due:      'dueAt',
+  delivery: (row) => [row.deliveryFrom, row.deliveryTo],
+}
+
 const MOCK_DOCS = {
   "INV-2026-001": [
     { name: "세금계산서_한화에어로스페이스_KF21_3차.pdf", type: "세금계산서", size: "142KB", date: "2026-05-15" },
@@ -434,6 +453,16 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                 <span className="text-muted">청구금액</span>
                 <span className="num fw-700" style={{ fontSize: 15 }}>{fmtNum(invoice.totalAmount)}</span>
                 <span className="text-muted">발행일</span><span>{invoice.issuedAt}</span>
+                {/* 납품일 — 품목 줄에 있는 값이라 범위다. 적힌 게 있을 때만 낸다
+                    (용역·월정액은 납품일을 안 쓴다 — 빈 줄을 세워 두면 "안 적었나" 하고 찾게 된다) */}
+                {invoice.deliveryFrom && (<>
+                  <span className="text-muted">납품일</span>
+                  <span className="num">
+                    {invoice.deliveryFrom}
+                    {invoice.deliveryTo && invoice.deliveryTo !== invoice.deliveryFrom
+                      && ` ~ ${invoice.deliveryTo}`}
+                  </span>
+                </>)}
                 <span className="text-muted">지급기한</span>
                 <span className="fw-600"
                   style={{ color: ["기한 지남","장기 미수"].includes(invoice.status) ? "var(--neg-ink)" : undefined }}>
@@ -975,6 +1004,27 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", paidLabel = "정
          * 청구번호는 뒤로 물린다 — 대조할 때만 쓰는 값이다. */
         { key: 'issuedAt', header: '발행일', sortable: true,
           render: inv => <span className="text-sm num">{inv.issuedAt || "—"}</span> },
+        /* 납품일(입고일) — **입력만 받고 어디에도 안 보이던 값**이다.
+         *
+         * invoice_lines.delivery_date 는 편집 그리드와 거래명세서 출력에만 쓰였다.
+         * 목록에 없으니 "이게 언제 나간 물건인지"를 건마다 열어 봐야 했고, 그 날짜로
+         * 일하는 회사(제조·유통)는 이 화면을 쓸 수가 없었다.
+         *
+         * ⚠ 값이 **하나가 아니다.** 품목 줄마다 날짜가 달라(8/5·8/12·8/27 을 8월분 한 장으로
+         *   묶는 게 월합계 세금계산서다) 범위로 보여준다. 한 줄이면 그 날짜만. */
+        { key: 'deliveryFrom', header: '납품일', sortable: true,
+          render: inv => {
+            if (!inv.deliveryFrom) return <span className="text-sm text-muted2">—</span>
+            const same = !inv.deliveryTo || inv.deliveryTo === inv.deliveryFrom
+            return same
+              ? <span className="text-sm num">{inv.deliveryFrom}</span>
+              : (
+                <span className="text-sm num" title={`${inv.deliveryFrom} ~ ${inv.deliveryTo}`}>
+                  {inv.deliveryFrom}
+                  <span className="text-muted2"> ~ {String(inv.deliveryTo).slice(5)}</span>
+                </span>
+              )
+          } },
         { key: 'vendor', header: '거래처', sortable: true, render: inv => <span className="fw-700">{inv.vendor}</span> },
         { key: 'contract', header: '주문', render: inv => <span className="text-sm text-muted">{inv.contract || "—"}</span> },
         { key: 'totalAmount', header: '청구금액', align: 'right', sortable: true, render: inv => <span className="num-cell">{fmtNum(inv.totalAmount)}</span> },
@@ -1131,6 +1181,10 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
 
   // 회수 모드는 '못 받은 것'을 보러 오는 화면이라 그 필터로 연다(아래 UNSETTLED 와 같은 값)
   const [statusFilter, setStatusFilter] = useState(collect ? (initialTab === "issued" ? "미수금" : "미지급금") : "전체")
+  /* 기간을 **어느 날짜로** 걸를 것인가. 회사마다 업무의 축이 다르다 —
+     제조·유통은 물건이 오간 날, 용역은 발행일, 자금 담당은 돈이 오갈 날이 축이다.
+     여태 발행일 하나로 못 박혀 있어서 "입고일 기준으로 봐야 하는데" 하는 회사가 막혔다. */
+  const [dateAxis, setDateAxis] = useState('issued')
   /* 기간은 **비워서 시작한다**(전체). 거래내역은 '이번 달'로 시작하는데, 청구서는 성격이 다르다 —
      미수금은 몇 달 전 것이 대부분이라 이번 달로 좁히면 정작 받을 돈이 안 보인다. */
 
@@ -1254,8 +1308,9 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const listF = useTableFilter({
     /* 기본은 **이번 달**이다. 전체로 열면 몇 년치가 한 번에 떠서 이번 달 일을 하려는
        사람이 매번 기간부터 좁혀야 한다(거래내역이 같은 이유로 이미 이번 달로 연다).
-       기간이 걸려 있다는 건 툴바의 기간 버튼에 그대로 보인다. */
-    date: { field: 'issuedAt', initial: periodToRange("month") },
+       기간이 걸려 있다는 건 툴바의 기간 버튼에 그대로 보인다.
+       기준 날짜는 **사용자가 고른다**(dateAxis) — 아래 AXES 주석 참조. */
+    date: { field: AXIS_FIELD[dateAxis], initial: periodToRange("month") },
     search: { fields: ['invoiceNo', 'vendor', 'contract', 'memo'], placeholder: "청구번호·거래처·주문·메모 검색" },
     // 거래처는 매일 쓰는 축이라 ⚙ 뒤가 아니라 바에 직접 세운다(inline)
     filters: [{ key: 'vendor', label: "거래처", field: 'vendor', inline: true,
@@ -1276,7 +1331,9 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     listF.setRange({ from: '', to: '' })
   }
 
-  const filtered = useMemo(() => listF.apply(byStatus), [byStatus, listF.apply])
+  /* ⚠ dateAxis 를 의존성에 넣어야 한다. useTableFilter 의 apply 는 설정을 ref 로 읽어서
+     축이 바뀌어도 **함수 신원이 그대로**다 — 빼면 축을 바꿔도 목록이 안 바뀐다. */
+  const filtered = useMemo(() => listF.apply(byStatus), [byStatus, listF.apply, dateAxis])
 
   /* 미발행 건도 **같은 기간·거래처**로 거른다.
      툴바가 탭 위에 있어 '이 화면 전체의 범위'로 읽히는데, 한 탭만 그 범위를 무시하면
@@ -1651,7 +1708,28 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           </span>}/>
       ) : (
         <TableToolbar {...listF.toolbarProps} periodPicker
-          right={<span className="text-xs text-muted2">{view === "plain" ? "거래일 기준" : "발행일 기준"}</span>}/>
+          right={view === "plain"
+            ? <span className="text-xs text-muted2">거래일 기준</span>
+            : (
+              /* 기준 날짜 축 — 회사마다 업무의 축이 다르다. 값이 셋뿐이라 칩.
+                 "○○ 기준"이라고 말만 하던 자리를 **고를 수 있게** 바꿨다. */
+              <div className="row gap-6" style={{ alignItems: 'center' }}>
+                <span className="text-xs text-muted2">기준</span>
+                {AXES.map(a => (
+                  <button key={a.id} type="button" title={a.hint}
+                    className={`chip ${dateAxis === a.id ? 'active' : ''}`}
+                    onClick={() => setDateAxis(a.id)}>{a.label}</button>
+                ))}
+              </div>
+            )}/>
+      )}
+
+      {/* ⚠ 납품일 축은 **날짜를 안 적은 청구서를 뺀다.** 걸 날짜가 없으니 맞는 처리지만,
+          말해주지 않으면 "왜 갑자기 줄었지"가 된다(용역 청구서엔 납품일이 없는 게 보통이다). */}
+      {view === "list" && dateAxis === 'delivery' && (listF.range.from || listF.range.to) && (
+        <div className="text-xs text-muted2" style={{ marginTop: 10 }}>
+          납품일을 적지 않은 청구서는 이 기준에서 빠져요(용역·월정액처럼 납품일을 안 쓰는 건).
+        </div>
       )}
 
       {/* 이 줄에는 성격이 다른 두 묶음이 선다.

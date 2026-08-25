@@ -241,6 +241,11 @@ function adaptInvoice(row) {
     ntsConfirmNo: row.nts_confirm_no || '',   // 홈택스 승인번호 — 세금계산서 임포트의 중복 판정 키
     issuedAt: row.issued_at,
     dueAt: row.due_at || null,
+    /* 납품일(입고일) 범위 — **품목 줄에 있는 값**이라 하나로 정해지지 않는다.
+       8/5·8/12·8/27 납품분을 한 장으로 묶는 게 실무의 보통 모습이라 범위로 다룬다.
+       둘 다 없으면 납품일을 안 적은 청구서(용역 등)다. */
+    deliveryFrom: row.delivery_from || null,
+    deliveryTo: row.delivery_to || null,
     status: row.status,
     accountId: row.account_id,
     // 어느 통장으로 들어올/들어온 돈인가 — 목록에서 보여주려면 이름이 필요하다
@@ -626,8 +631,11 @@ export const api = {
   },
 
   /* 주별 총 매입/매출 현황 — 청구서 품목을 기간으로 모은다(조회 전용). */
-  async getPurchaseStatus(month, kind = 'received') {
-    try { return await req(`/purchase-status?month=${month}&kind=${kind}`) }
+  /* dateAxis — 'issued'(발행일·기본) | 'delivery'(납품일).
+     제조·유통은 물건이 오간 날로 이 표를 본다. */
+  async getPurchaseStatus(month, kind = 'received', dateAxis = 'issued') {
+    const ax = dateAxis === 'delivery' ? '&date_axis=delivery' : ''
+    try { return await req(`/purchase-status?month=${month}&kind=${kind}${ax}`) }
     catch { return { month, kind, weeks: [], amount: 0, vat: 0, total: 0, count: 0, from: '', to: '', closingDay: 0 } }
   },
 
@@ -663,13 +671,17 @@ export const api = {
   },
 
   // ─── 청구서 ───────────────────────────────────────────────────
-  async getInvoices({ kind, status, from, to } = {}) {
+  /* dateAxis — 기간을 어느 날짜로 걸를 것인가.
+     'issued'(발행일·기본) | 'delivery'(납품일) | 'due'(결제기한).
+     회사마다 업무의 축이 다르다 — 제조·유통은 물건이 오간 날, 자금은 돈이 오갈 날이다. */
+  async getInvoices({ kind, status, from, to, dateAxis } = {}) {
     try {
       const params = new URLSearchParams()
       if (kind)   params.set('kind', kind)
       if (status) params.set('status', status)
       if (from) params.set('from', from)   // 기본 전체 기간(연말 넘긴 미수금이 사라지지 않도록)
       if (to) params.set('to', to)
+      if (dateAxis && dateAxis !== 'issued') params.set('date_axis', dateAxis)
       return (await req(`/invoices?${params}`)).map(adaptInvoice)
     } catch { return [] }
   },

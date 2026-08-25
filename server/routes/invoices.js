@@ -57,19 +57,69 @@ async function attachMatches(db, invoice) {
   return { ...invoice, matches, docs, lines, paidAmount: paid, remainAmount: Number(invoice.total_amount) - paid }
 }
 
+/* 기간을 **어느 날짜로 걸를 것인가.**
+ *
+ * 여태 발행일 하나로 못 박혀 있었다. 그런데 회사마다 업무의 축이 다르다 —
+ * 제조·유통은 물건이 오간 날(납품일)이 축이고, 용역은 발행일이 축이고,
+ * 자금 담당은 돈이 오갈 날(결제기한)이 축이다.
+ * 실사용 문의: "발행일자가 아닌 입고일자 등으로 정렬이 필요할 수 있음. 실제 물품이
+ * 오간/오갈 날, 청구서를 발행한 날, 돈이 오간/오갈 날이 있다면 사용자가 중요한 정보를
+ * 선택해서 조회하게 맞는 게 아닐까."
+ *
+ * ⚠ 납품일은 **청구서가 아니라 품목 줄**에 있다(invoice_lines.delivery_date).
+ *   8/5·8/12·8/27 납품분을 8월분 한 장으로 묶는 게 실무의 보통 모습이라(월합계 세금계산서)
+ *   청구서의 납품일이 하나로 정해지지 않는다. 그래서 **줄들의 범위**로 다룬다 —
+ *   기간에 걸치는지는 "그 줄 중 하나라도 기간 안에 있으면"으로 본다.
+ */
+const DATE_AXES = {
+  issued:   'i.issued_at',   // 청구서를 발행(등록)한 날
+  due:      'i.due_at',      // 돈이 오갈 날(결제기한)
+  delivery: null,            // 물건이 오간 날 — 품목 줄에 있어 서브쿼리로 건다
+}
+const axisOf = (v) => (Object.prototype.hasOwnProperty.call(DATE_AXES, v) ? v : 'issued')
+
 router.get('/', async (req, res, next) => {
   try {
     const { kind, status, vendorId, from, to } = req.query
+    const axis = axisOf(req.query.date_axis)
     /* 계좌명을 함께 준다 — 화면에서 "어느 통장으로 들어올/들어온 돈인가"를 보여주려면
-       필요한데, 여태 account_id 만 내려가 목록에서는 알 수가 없었다(건마다 열어야 했다). */
-    let sql = 'SELECT i.*, v.name AS vendor_name, c.name AS contract_name, a.name AS account_name FROM invoices i LEFT JOIN vendors v ON i.vendor_id = v.id LEFT JOIN contracts c ON i.contract_id = c.id LEFT JOIN accounts a ON i.account_id = a.id WHERE 1=1'
+       필요한데, 여태 account_id 만 내려가 목록에서는 알 수가 없었다(건마다 열어야 했다).
+       납품일 범위도 함께 — 목록에 "이 청구서가 언제 나간 물건인지"가 안 보였다.
+       한 줄이면 그 날짜, 여러 줄이면 8/5~8/27 처럼 범위로 보여준다. */
+    let sql = `SELECT i.*, v.name AS vendor_name, c.name AS contract_name, a.name AS account_name,
+        (SELECT MIN(l.delivery_date) FROM invoice_lines l
+          WHERE l.invoice_id = i.id AND l.delivery_date IS NOT NULL AND l.delivery_date <> '') AS delivery_from,
+        (SELECT MAX(l.delivery_date) FROM invoice_lines l
+          WHERE l.invoice_id = i.id AND l.delivery_date IS NOT NULL AND l.delivery_date <> '') AS delivery_to
+      FROM invoices i
+      LEFT JOIN vendors v ON i.vendor_id = v.id
+      LEFT JOIN contracts c ON i.contract_id = c.id
+      LEFT JOIN accounts a ON i.account_id = a.id WHERE 1=1`
     const params = []
     if (kind)     { sql += ' AND i.kind = ?';       params.push(kind) }
     if (status)   { sql += ' AND i.status = ?';     params.push(status) }
     if (vendorId) { sql += ' AND i.vendor_id = ?';  params.push(vendorId) }
-    if (from)     { sql += ' AND i.issued_at >= ?'; params.push(from) }
-    if (to)       { sql += ' AND i.issued_at <= ?'; params.push(to) }
-    sql += ' ORDER BY i.issued_at DESC'
+    if (from || to) {
+      if (axis === 'delivery') {
+        /* 줄 중 하나라도 기간에 걸치면 그 청구서를 낸다.
+           ⚠ 납품일이 안 적힌 청구서(용역 등)는 이 축에서 빠진다 — 걸 날짜가 없으니 맞다.
+             화면이 그 사실을 안내한다. */
+        sql += ` AND EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = i.id
+                   AND l.delivery_date IS NOT NULL AND l.delivery_date <> ''`
+        if (from) { sql += ' AND l.delivery_date >= ?'; params.push(from) }
+        if (to)   { sql += ' AND l.delivery_date <= ?'; params.push(to) }
+        sql += ')'
+      } else {
+        const col = DATE_AXES[axis]
+        if (from) { sql += ` AND ${col} >= ?`; params.push(from) }
+        if (to)   { sql += ` AND ${col} <= ?`; params.push(to) }
+      }
+    }
+    /* 정렬도 고른 축을 따른다 — 납품일로 걸러 놓고 발행일 순으로 늘어놓으면
+       "언제 들어온 물건" 순서로 못 본다. 납품일은 시작일(MIN) 기준. */
+    sql += axis === 'delivery'
+      ? ' ORDER BY delivery_from DESC, i.issued_at DESC'
+      : ` ORDER BY ${DATE_AXES[axis]} DESC`
     const [rows] = await req.db.execute(sql, params)
     res.json(await Promise.all(rows.map(r => attachMatches(req.db, r))))
   } catch (e) { next(e) }
