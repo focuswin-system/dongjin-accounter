@@ -726,27 +726,36 @@ a { color: inherit; text-decoration: none; }
  * 입력창의 테두리·둥근 모서리를 걷고 칸을 꽉 채우면, 남는 선은 표의 격자 하나뿐이다.
  * 스프레드시트가 이 문제를 그렇게 푼다. 지금 어느 칸에 있는지는 **안쪽 테두리**로 알린다.
  */
-.table.line-table { border-collapse: separate; border-spacing: 0; }
-/* ⚠ 격자는 **--line-strong** 으로 긋는다. 처음엔 --line(#ECEEF2)을 썼는데 흰 바탕에서
-   거의 안 보여 "다 하얀 곳에 널브러져 있다"는 말을 들었다. 표의 격자는 장식이 아니라
-   **칸의 경계**라, 보통 표의 가로줄보다 진해야 한다.
-   머리글은 한 단계 더 진하게 — 어느 칸인지 찾는 눈이 먼저 닿는 줄이다. */
+/* ── 격자의 굵기·색은 **위에서 아래로 옅어진다** ────────────────
+ * 정석적인 표가 그렇게 생겼다. 제목행이 가장 진하고, 본문 줄은 그보다 옅고,
+ * 칸을 가르는 세로선은 가장 옅다. 굵기가 같으면 어디가 머리인지 눈이 못 잡는다.
+ *
+ * ⚠ --line(#ECEEF2)·--line-strong(#DEE2E9) 둘 다 흰 바탕에서는 거의 안 보인다.
+ *   보통 표의 가로줄은 그 정도로 충분하지만, **입력표의 격자는 칸의 경계**라 더 진해야 한다.
+ *   그래서 여기서만 쓰는 값을 따로 둔다(전역 토큰을 건드리면 다른 표가 다 진해진다).
+ */
+.table.line-table {
+  border-collapse: separate; border-spacing: 0;
+  --grid-head: #A8B0BE;   /* 제목행 아래 — 가장 진하게 */
+  --grid-row:  #CDD4DE;   /* 본문 가로줄 */
+  --grid-col:  #E1E5EB;   /* 칸 사이 세로줄 — 가장 옅게 */
+}
 .table.line-table thead th {
   padding: 8px 10px;
   background: var(--surface-2);
   color: var(--ink);
   font-weight: 600;
-  border-bottom: 2px solid var(--line-strong);
+  border-bottom: 2px solid var(--grid-head);
 }
-.table.line-table thead th + th,
-.table.line-table tbody td + td { border-left: 1px solid var(--line-strong); }
+.table.line-table thead th + th { border-left: 1px solid var(--grid-row); }
+.table.line-table tbody td + td { border-left: 1px solid var(--grid-col); }
 .table.line-table tbody td {
   padding: 0;                       /* 여백은 입력창이 갖는다 — 칸과 입력이 어긋나지 않게 */
-  border-bottom: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--grid-row);
   vertical-align: middle;
 }
 /* 마지막 줄의 아래선도 남긴다 — 기본 .table 규칙이 지워서 표가 아래로 열려 보였다 */
-.table.line-table tbody tr:last-child td { border-bottom: 1px solid var(--line-strong); }
+.table.line-table tbody tr:last-child td { border-bottom: 1px solid var(--grid-row); }
 /* 입력창이 곧 칸이다 */
 .table.line-table .input {
   border: 0;

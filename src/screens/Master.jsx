@@ -396,7 +396,8 @@ export const REF_CONFIGS = {
       { key: 'weight', label: '중량', kind: 'dec', w: 90, hint: '단위당 중량 (소수 입력 가능)' },
       /* 표에는 기본값('수량')을 안 적는다 — 품목 166건이 전부 '수량'이라 그 글자가 벽처럼
          늘어서고, 정작 눈에 띄어야 할 '중량'이 그 안에 묻힌다(정상에는 표식을 붙이지 않는다). */
-      { key: 'price_basis', label: '단가 기준', kind: 'select', options: [['qty', '수량'], ['weight', '중량']],
+      // '단가 단위' — 단가를 무엇에 곱하나(개당/㎏당). 품목표의 같은 칸과 이름을 맞춘다
+      { key: 'price_basis', label: '단가 단위', kind: 'select', options: [['qty', '수량'], ['weight', '중량']],
         w: 92, required: true, def: 'qty', mutedDefault: 'qty',
         hint: '금액을 무엇에 곱해 낼지 — 기본은 수량 × 단가' },
       { key: 'tax_type', label: '과세', kind: 'select', options: TAX_TYPES, w: 76,

@@ -13,7 +13,7 @@ import { computeLineAmount, num, BASIS_LABEL } from '../lineAmount'
  * ── 설계 ──
  * · 금액은 자동 계산이 기본이지만 **사람이 덮어쓸 수 있다**(할인·끝수 조정이 흔하다).
  *   손댄 줄은 수량·단가를 바꿔도 다시 덮지 않는다 — 고친 값이 소리 없이 사라지면 신뢰를 잃는다.
- * · 단가 기준(수량/중량)은 줄마다 다르다. 같은 청구서에 개당 파는 품목과 ㎏당 파는 자재가 섞인다.
+ * · 단가 단위(수량/중량)는 줄마다 다르다. 같은 청구서에 개당 파는 품목과 ㎏당 파는 자재가 섞인다.
  * · 기준정보 품목을 고르면 규격·단위·단가·중량을 채워 준다. 없으면 직접 입력해도 된다.
  */
 /** 줄 하나의 세액 — 직접 적었으면 그 값, 안 적었으면 과세유형대로 자동.
@@ -260,7 +260,10 @@ export const InvoiceLines = ({
                 <th style={{ width: 70 }}>단위</th>
                 {col.qty && <th className="num-right" style={{ width: 84 }}>수량</th>}
                 {col.weight && <th className="num-right" style={{ width: 88 }}>중량</th>}
-                {col.basis && <th style={{ width: 92 }}>단가 기준</th>}
+                {/* '단가 기준'이 아니라 '단가 단위'다 — 이 칩이 정하는 것은 **단가를 무엇에
+                    곱하나**(개당인가 ㎏당인가)이지, 무엇이 근거인가가 아니다.
+                    금액 칸의 '단가 기준/금액 기준'과 이름이 겹쳐 둘 다 못 읽혔다. */}
+                {col.basis && <th style={{ width: 92 }}>단가 단위</th>}
                 <th className="num-right" style={{ width: 112 }}>{col.costPrice ? '출고가' : '단가'}</th>
                 {col.costPrice && <th className="num-right" style={{ width: 124 }}>매입가(원가)</th>}
                 {col.amount && <th className="num-right" style={{ width: 124 }}>금액</th>}
@@ -331,14 +334,13 @@ export const InvoiceLines = ({
                         행 높이를 안 밀게 한다(.cell-tag) — 예전엔 입력 아래에 붙어
                         그 줄만 키가 커지고 격자가 어긋났다. */}
                     <button type="button" className="cell-tag"
-                      /* ⚠ '단가 기준' 이라고 쓰지 않는다 — 왼쪽에 **같은 이름의 열**이 이미 있다
-                         (수량/중량 = 단가를 무엇에 곱하나). 여기는 무엇이 무엇을 정하는가라
-                         뜻이 다르다. 화살표로 방향을 보여주면 겹치지 않는다. */
+                      /* 왼쪽 열은 '단가 단위'(수량/중량)로 이름을 바꿨다 — 이제 여기서
+                         '기준'이라는 말을 겹치지 않게 쓸 수 있다. */
                       title={l.amountTouched
-                        ? '금액이 근거예요 — 수량을 바꾸면 단가를 다시 계산합니다. 누르면 반대로 바꿔요.'
-                        : '단가가 근거예요 — 수량을 바꾸면 금액을 다시 계산합니다. 누르면 반대로 바꿔요.'}
+                        ? '금액이 근거예요 — 수량을 바꾸면 단가를 다시 계산합니다. 누르면 단가 기준으로 바꿔요.'
+                        : '단가가 근거예요 — 수량을 바꾸면 금액을 다시 계산합니다. 누르면 금액 기준으로 바꿔요.'}
                       onClick={() => setBasis(i, !l.amountTouched)}>
-                      {l.amountTouched ? '금액→단가' : '단가→금액'}
+                      {l.amountTouched ? '금액 기준' : '단가 기준'}
                     </button>
                   </td>
                   )}
