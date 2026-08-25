@@ -279,9 +279,14 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
    *   빠진 건은 그 출금 거래가 이미 잔액에 반영돼 있으므로 다시 세면 두 번 빠진다.
    *   한 달치 사용액(지난 결제일 다음날 ~ 이번 결제일)만 본다.
    */
+  /* ⚠ **신용카드만** 센다.
+   * 체크카드는 쓴 즉시 통장에서 빠진다 — 그 출금은 이미 잔액에 반영돼 있는데
+   * 결제일에 한 번 더 세우면 **있지도 않은 출금**이 그 날 잡혀 잔고가 실제보다 적게 보인다.
+   * "그 날 돈이 모자란다"는 경고가 헛되이 떠서, 진짜 모자란 날의 경고까지 무뎌진다.
+   * card_type 이 없던 시절 데이터는 'credit' 으로 기본값이 박힌다(db.js) — 종전과 같다. */
   const [cards] = await db.execute(
     `SELECT id, name, card_pay_day, card_pay_account_id FROM accounts
-      WHERE kind = 'card' AND card_pay_day > 0`)
+      WHERE kind = 'card' AND card_type = 'credit' AND card_pay_day > 0`)
   for (const c of cards) {
     const payDay = Number(c.card_pay_day)
     // from 이후로 오는 결제일들을 훑는다(구간이 여러 달이면 여러 번 온다)

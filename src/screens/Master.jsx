@@ -1939,7 +1939,7 @@ const CARD_TYPES = ['법인카드', '개인카드', '체크카드']
 const emptyAccountForm = (kind = 'bank') => ({
   kind, type: kind === 'card' ? '법인카드' : '보통예금',
   bank: '', number: '', name: '', purpose: '', initial_balance: '', owner: 'corp',
-  card_pay_day: '', card_pay_account_id: '',
+  card_pay_day: '', card_pay_account_id: '', card_type: 'credit',
 })
 
 /* 계좌 / 카드 — **한 테이블(accounts)에 kind 로 나뉜 두 가지**를 각각의 화면으로 낸다.
@@ -2026,6 +2026,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
       owner: a.owner === 'personal' ? 'personal' : 'corp',
       card_pay_day: a.cardPayDay || '',
       card_pay_account_id: a.cardPayAccountId || '',
+      card_type: a.cardType || 'credit',
       initial_balance: a.initialBalance ?? '',
     })
     setDrawerOpen(true)
@@ -2036,6 +2037,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
     const payload = {
       name: form.name, bank: form.bank, type: form.type, kind,
       number: form.number, purpose: form.purpose, owner: form.owner,
+      card_type: isCard ? (form.card_type || 'credit') : 'credit',
       card_pay_day: isCard ? form.card_pay_day : 0,
       card_pay_account_id: isCard ? (form.card_pay_account_id || null) : null,
       initial_balance: form.kind === 'bank' ? (parseInt(String(form.initial_balance).replace(/[^0-9-]/g, '')) || 0) : 0,
@@ -2207,10 +2209,32 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
             </div>
           </div>
 
-          {/* 카드 결제일 — 카드는 쓰는 날과 돈이 빠지는 날이 다르다.
+          {/* 신용 / 체크 — **결제 방식이 정반대**라 먼저 갈라야 한다.
+                신용  사용액이 쌓였다가 결제일에 통장에서 한꺼번에 빠진다 → 결제일·결제계좌가 필요
+                체크  쓴 **즉시** 통장에서 빠진다 → 결제일이 없고 옮길 돈도 없다
+              구분이 없던 시절엔 체크카드에도 결제일이 붙어, 이미 빠진 돈을 자금일보가
+              "그 날 한꺼번에 빠질 돈"으로 한 번 더 세웠다(있지도 않은 출금). */}
+          {isCard && (
+            <div>
+              <label className="label" style={{ marginBottom: 8 }}>카드 종류</label>
+              <div className="row gap-6">
+                {[['credit', '신용카드'], ['check', '체크카드']].map(([v, l]) => (
+                  <button key={v} type="button" className={`chip ${(form.card_type || 'credit') === v ? 'active' : ''}`}
+                    onClick={() => f('card_type', v)}>{l}</button>
+                ))}
+              </div>
+              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+                {(form.card_type || 'credit') === 'check'
+                  ? '쓴 즉시 통장에서 빠져요. 결제일이 없어 자금 예측에 따로 잡지 않습니다.'
+                  : '결제일에 통장에서 한꺼번에 빠져요. 그 날짜와 통장을 아래에 적어주세요.'}
+              </div>
+            </div>
+          )}
+
+          {/* 카드 결제일 — 신용카드만. 쓰는 날과 돈이 빠지는 날이 다르다.
               이게 없으면 이번 달 카드값이 며칠에 어느 통장에서 빠지는지 자금 예측이 모른다.
               비워두면 예측하지 않는다 — 모르는 날짜를 지어내면 그 날 잔고가 틀린다. */}
-          {isCard && (
+          {isCard && (form.card_type || 'credit') === 'credit' && (
             <div className="row gap-16" style={{ alignItems: 'flex-start' }}>
               <div style={{ flex: 1 }}>
                 <label className="label" style={{ marginBottom: 8 }}>결제일</label>
@@ -2230,9 +2254,10 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
               </div>
             </div>
           )}
-          {isCard && (
+          {isCard && (form.card_type || 'credit') === 'credit' && (
             <div className="text-xs text-muted2" style={{ marginTop: -8 }}>
               결제일을 넣으면 이번 달 사용액이 그 날 이 통장에서 빠지는 것으로 자금 현황에 잡혀요.
+              실제 결제는 <b>지급처리 → 계좌 이체</b>에서 한 번에 처리할 수 있어요.
             </div>
           )}
 

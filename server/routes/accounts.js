@@ -71,20 +71,28 @@ router.get('/:id', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/* 카드 종류 — 신용/체크. 결제 방식이 정반대라 섞으면 자금일보가 어긋난다.
+   체크카드는 쓴 즉시 통장에서 빠지므로 **결제일이 없다** → 결제일·결제계좌도 함께 비운다.
+   그대로 두면 자금일보가 "그 날 한꺼번에 빠질 돈"으로 한 번 더 세운다(이미 빠진 돈인데). */
+const cardTypeOf = (v) => (v === 'check' ? 'check' : 'credit')
+
 router.post('/', async (req, res, next) => {
   try {
     const { name, bank, type, initial_balance, kind, number, purpose } = req.body
     const owner = req.body.owner === 'personal' ? 'personal' : 'corp'
     // 카드만 의미가 있다. 1~28 밖은 미설정으로 본다(29~31 은 짧은 달에 없는 날짜다)
-    const cardPayDay = Math.min(28, Math.max(0, parseInt(req.body.card_pay_day, 10) || 0))
-    const cardPayAcct = req.body.card_pay_account_id || null
+    const cardType = cardTypeOf(req.body.card_type)
+    // 체크카드는 결제일이 없다 — 값이 와도 버린다(남겨 두면 예측이 허수를 만든다)
+    const cardPayDay = cardType === 'check' ? 0
+      : Math.min(28, Math.max(0, parseInt(req.body.card_pay_day, 10) || 0))
+    const cardPayAcct = cardType === 'check' ? null : (req.body.card_pay_account_id || null)
     const id = randomUUID()
     // acct_code 를 빠뜨리면 이 계좌의 거래는 일계표에서 **한쪽 다리가 없어** 차대변이 안 맞는다.
     // (실제로 여기가 비어 있어서 새로 만든 계좌의 거래가 전부 짝을 잃었다)
     await req.db.execute(
-      'INSERT INTO accounts (id, name, bank, type, initial_balance, kind, `number`, purpose, acct_code, owner, card_pay_day, card_pay_account_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO accounts (id, name, bank, type, initial_balance, kind, `number`, purpose, acct_code, owner, card_pay_day, card_pay_account_id, card_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, name, bank||'', type||'보통예금', initial_balance||0, kind||'bank', number||'', purpose||'',
-       bankAcctCode(type), owner, cardPayDay, cardPayAcct]
+       bankAcctCode(type), owner, cardPayDay, cardPayAcct, cardType]
     )
     res.json({ id })
   } catch (e) { next(e) }
@@ -95,13 +103,16 @@ router.put('/:id', async (req, res, next) => {
     const { name, bank, type, initial_balance, kind, number, purpose } = req.body
     const owner = req.body.owner === 'personal' ? 'personal' : 'corp'
     // 카드만 의미가 있다. 1~28 밖은 미설정으로 본다(29~31 은 짧은 달에 없는 날짜다)
-    const cardPayDay = Math.min(28, Math.max(0, parseInt(req.body.card_pay_day, 10) || 0))
-    const cardPayAcct = req.body.card_pay_account_id || null
+    const cardType = cardTypeOf(req.body.card_type)
+    // 체크카드는 결제일이 없다 — 값이 와도 버린다(남겨 두면 예측이 허수를 만든다)
+    const cardPayDay = cardType === 'check' ? 0
+      : Math.min(28, Math.max(0, parseInt(req.body.card_pay_day, 10) || 0))
+    const cardPayAcct = cardType === 'check' ? null : (req.body.card_pay_account_id || null)
     // 종류(보통예금↔당좌예금↔현금)가 바뀌면 계정과목도 따라가야 한다 — 안 그러면 일계표가 어긋난다
     const [result] = await req.db.execute(
-      'UPDATE accounts SET name=?, bank=?, type=?, initial_balance=?, kind=?, `number`=?, purpose=?, acct_code=?, owner=?, card_pay_day=?, card_pay_account_id=? WHERE id=?',
+      'UPDATE accounts SET name=?, bank=?, type=?, initial_balance=?, kind=?, `number`=?, purpose=?, acct_code=?, owner=?, card_pay_day=?, card_pay_account_id=?, card_type=? WHERE id=?',
       [name, bank||'', type||'보통예금', initial_balance||0, kind||'bank', number||'', purpose||'',
-       bankAcctCode(type), owner, cardPayDay, cardPayAcct, req.params.id]
+       bankAcctCode(type), owner, cardPayDay, cardPayAcct, cardType, req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })

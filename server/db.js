@@ -922,6 +922,20 @@ async function initDb(conn) {
       await c.execute(`ALTER TABLE \`${table}\` MODIFY \`${col}\` ENUM(${list}) ${tail}`.trim())
     }
 
+    /* 비고유 인덱스. ⚠ 이체 짝(transfer_id)처럼 **같은 값이 둘씩** 있는 열에는
+       ensureUniqueIndex 를 쓰면 안 된다 — 두 번째 줄을 넣는 순간 중복키로 막힌다. */
+    const ensureIndex = async (table, index, col) => {
+      const [[{ cnt }]] = await c.execute(
+        `SELECT COUNT(*) AS cnt FROM information_schema.statistics
+         WHERE table_schema = ? AND table_name = ? AND index_name = ?`,
+        [schemaName, table, index]
+      )
+      if (cnt === 0) {
+        try { await c.execute(`ALTER TABLE \`${table}\` ADD INDEX \`${index}\` (${col})`) }
+        catch (e) { console.warn(`[migration] ${index} 생성 실패: ${e.message}`) }
+      }
+    }
+
     // (UNIQUE 인덱스는 아래쪽 ensureUniqueIndex 를 쓴다 — 주문번호·사번·청구번호와 같은 자리)
     // ── 1회성 데이터 마이그레이션 가드 ──
     // 데이터를 '변형'하는 마이그레이션은 부팅마다 재실행되면 안 된다(신규 입력 데이터를 오염시킴).
@@ -1356,6 +1370,24 @@ async function initDb(conn) {
     // 회차 쪽 — 파일이 없어도 '확인함'으로 닫을 수 있는 칸
     await ensureColumn('invoices',     'evidence_ok', "evidence_ok TINYINT NOT NULL DEFAULT 0")
     await ensureColumn('transactions', 'evid_ok',     "evid_ok TINYINT NOT NULL DEFAULT 0")
+
+    /* ── 계좌 간 이체 ──────────────────────────────────────────
+     * 이체는 **거래 두 줄**로 남는다(출금계좌의 지출 + 입금계좌의 입금).
+     * 한 줄에 from/to 를 담지 않는 이유: 계좌 잔액이 `기초 + 입금 − 지출` 로 계산되므로
+     * (routes/accounts.js), 두 줄로 두면 **잔액 로직을 한 글자도 안 고치고** 양쪽이 맞는다.
+     * 한 줄짜리로 만들면 잔액·일계표·자금일보를 전부 이체 전용으로 다시 짜야 한다.
+     *
+     * transfer_id 는 그 두 줄을 잇는다. 하나를 지우면 짝도 함께 지운다 —
+     * 한쪽만 남으면 **돈이 사라지거나 생겨난다.** */
+    await ensureColumn('transactions', 'transfer_id', "transfer_id VARCHAR(36)")
+    await ensureIndex('transactions', 'idx_txn_transfer', 'transfer_id')
+
+    /* 카드 종류 — 신용/체크. 결제 방식이 정반대라 한 덩어리로 두면 자금일보가 어긋난다.
+     *   credit  사용액이 카드에 쌓이고 **결제일에 통장에서 한꺼번에** 빠진다 → 이체가 필요
+     *   check   쓴 **즉시** 통장에서 빠진다 → 결제일이 없고 이체도 없다
+     * 예전엔 구분이 없어서, 체크카드를 카드 계좌로 잡아 두면 결제일 예측이 붙어
+     * "그 날 한꺼번에 빠질 돈"이 허수로 잡혔다(이미 빠진 돈인데). */
+    await ensureColumn('accounts', 'card_type', "card_type VARCHAR(10) NOT NULL DEFAULT 'credit'")
 
     await ensureColumn('recurring_expenses', 'pay_term', "pay_term VARCHAR(12) NOT NULL DEFAULT 'net30'")
     await ensureColumn('recurring_invoices', 'pay_term', "pay_term VARCHAR(12) NOT NULL DEFAULT 'net30'")

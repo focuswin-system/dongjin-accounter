@@ -45,6 +45,7 @@ const RESOURCES = [
   { id: 'ap',                      label: '미지급금(청구서)', group: '일반회계 · 구매·발주(매입)' },
 
   { id: 'misc_pl',                 label: '일반 경비',      group: '일반회계 · 경비' },
+  { id: 'transfer',                label: '계좌 이체',      group: '일반회계 · 경비' },
   { id: 'misc_income',             label: '잡손익',         group: '일반회계 · 경비' },
 
   // 결의서·정산내역서는 매입·경비 양쪽에서 올라온다 → 독립 '문서' 그룹

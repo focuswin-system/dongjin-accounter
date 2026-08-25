@@ -196,6 +196,10 @@ function adaptAccount(row) {
     // 카드는 쓰는 날과 돈이 빠지는 날이 다르다 — 결제일·결제계좌가 있어야 자금 예측이 선다
     cardPayDay: Number(row.card_pay_day) || 0,
     cardPayAccountId: row.card_pay_account_id || '',
+    /* 신용 / 체크 — 결제 방식이 정반대다.
+       신용은 결제일에 통장에서 한꺼번에 빠지고(그래서 이체가 필요),
+       체크는 쓴 즉시 빠진다(그래서 결제일도 이체도 없다). */
+    cardType: row.card_type === 'check' ? 'check' : 'credit',
   }
 }
 
@@ -291,6 +295,9 @@ function adaptTransaction(row) {
     /* 상대 계좌 — 어디로/어디서 돈이 오갔나. 거래처가 계좌를 여럿 가지면
        '이번엔 어느 계좌로'가 여기 남아야만 알 수 있다(등록 시점 스냅샷). */
     counterpartyAccountId: row.counterparty_account_id || '',
+    /* 계좌 간 이체의 짝을 잇는 값. 있으면 이 거래는 **이체의 한쪽 다리**다 —
+       수입·지출로 세면 안 되고(벌지도 쓰지도 않았다), 지울 때도 짝과 함께 지워진다. */
+    transferId: row.transfer_id || '',
     counterpartyBank: row.counterparty_bank || '',
     counterpartyAccount: row.counterparty_account || '',
     counterpartyHolder: row.counterparty_holder || '',
@@ -746,6 +753,19 @@ export const api = {
       if (to)        params.set('to', to)
       return (await req(`/transactions?${params}`)).map(adaptTransaction)
     } catch { return [] }
+  },
+
+  /* 계좌 간 이체 — 거래 **두 줄**(보내는 계좌의 지출 + 받는 계좌의 입금)로 남는다.
+     서버가 한 트랜잭션에서 두 줄을 만들고 transfer_id 로 잇는다. 화면에서 지출·입금을
+     따로 두 번 넣게 하면 안 된다 — 한쪽만 저장되는 순간 돈이 사라지거나 생겨난다. */
+  async transfer({ fromAccountId, toAccountId, amount, date, memo }) {
+    try {
+      const r = await req('/transactions/transfer', { method: 'POST', body: {
+        from_account_id: fromAccountId, to_account_id: toAccountId,
+        amount, date, memo,
+      }})
+      return { ok: true, ...r }
+    } catch (e) { return { ok: false, error: e?.message || '이체에 실패했어요' } }
   },
 
   async addTransaction(data) {

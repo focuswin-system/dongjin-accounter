@@ -77,6 +77,12 @@ export const NAV_TREE = [
         { id: "recurring_expense", label: "정기지급", icon: Icon.Clock },
         { id: "billing_received",  label: "수시지급", icon: Icon.Receipt },
         { id: "misc_pl",           label: "경비",     icon: Icon.Wallet },
+        /* 계좌 이체 — 내 통장에서 내 카드·다른 통장으로 옮기는 돈.
+           **벌지도 쓰지도 않은 돈**이라 수입도 지출도 아니다. 그런데 여태 적을 자리가 없어서
+           신용카드 대금을 지출로 한 번 더 넣었고, 그러면 같은 돈이 비용으로 두 번 잡혔다.
+           지급처리에 두는 이유: 사용자가 이 일을 하는 순간은 "카드값 나갔다"이고,
+           그때 여는 메뉴가 지급처리다(재무관리는 차입·투자·예적금이라 결이 다르다). */
+        { id: "transfer",          label: "계좌 이체", icon: Icon.Bank },
       ]},
       { label: "급여", items: [
         { id: "hr", label: "급여·임금", icon: Icon.Building },
@@ -350,6 +356,7 @@ export const LEAF_TAGS = {
   quote_req:        '견적 RFQ 단가문의',
   purchase_req:     '품의 구매요청 발주요청 稟議',
   payment_run:      '결제내역 이체 일괄이체 송금 지급명단 매입처결제',
+  transfer:         '이체 계좌이체 카드대금 카드결제 통장이체 자금이동 옮기기',
   purchase_status:  '매입현황 주별 품목별 자재 구매현황 매출현황',
   fund_status:      '자금현황 자금수지 자금계획 월별 분기 주별 예정 잔고 현금흐름',
   // 장부

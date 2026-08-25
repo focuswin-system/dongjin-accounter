@@ -204,6 +204,97 @@ router.get('/:id/voucher', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/* ── 계좌 간 이체 ───────────────────────────────────────────────
+ *
+ * ── 왜 전용 경로가 필요한가 ──
+ * 이 앱에는 이체가 없었다. 그래서 신용카드 대금처럼 **통장에서 카드로 옮기는 돈**을
+ * 적을 방법이 지출밖에 없었고, 그러면 이렇게 된다:
+ *   · 카드로 산 소모품 → 지출 1건 (비용)
+ *   · 결제일 통장 출금 → 지출 1건 (또 비용)  ← **같은 돈이 비용으로 두 번**
+ * 안 적으면 반대로 통장 잔액이 실제보다 많다. 소모품·비품을 카드로 사는 건 매일 있는
+ * 일이라 **틀린 금액이 계속 쌓인다.**
+ *
+ * ── 왜 두 줄인가 ──
+ * 계좌 잔액은 `기초 + 입금 − 지출` 로 계산된다(routes/accounts.js). 이체를 **두 줄**
+ * (출금계좌의 지출 + 입금계좌의 입금)로 남기면 **잔액 로직을 한 글자도 안 고치고**
+ * 양쪽이 맞는다. 한 줄에 from/to 를 담으면 잔액·일계표·자금일보를 전부 이체 전용으로
+ * 다시 짜야 하고, 그 중 하나만 빠뜨려도 조용히 틀린다.
+ * 두 줄은 `transfer_id` 로 잇는다 — 하나만 지우면 돈이 사라지거나 생겨난다.
+ *
+ * ── 왜 손익이 아닌가 ──
+ * 내 통장에서 내 카드로 옮긴 것은 벌지도 쓰지도 않은 것이다. 손익 판정은 계정과목
+ * 대분류가 한다(lib/pnl.js) → 양쪽 다 **상대 계좌의 계정과목**(자산·부채)을 달아
+ * 손익 집계에서 자동으로 빠지게 한다. 상대 계좌에 계정과목이 없으면 1103 보통예금.
+ *
+ * ⚠ 자금 계정 가드(fundAccountError)를 **이 경로만** 우회한다.
+ *   그 가드는 "계정과목에 현금·예금이 오면 분개가 성립하지 않는다"는 규칙인데,
+ *   이체는 **바로 그 자금 계정끼리의 이동**이라 유일한 정당한 예외다.
+ *   가드 주석에도 그렇게 하라고 적혀 있다(transactions.js 상단).
+ */
+router.post('/transfer', async (req, res, next) => {
+  const { from_account_id, to_account_id, amount, date, memo } = req.body
+  const conn = await req.db.getConnection()
+  try {
+    const amt = Math.round(Number(amount) || 0)
+    if (!from_account_id || !to_account_id) {
+      return res.status(400).json({ error: '보내는 계좌와 받는 계좌를 모두 골라주세요' })
+    }
+    if (from_account_id === to_account_id) {
+      return res.status(400).json({ error: '같은 계좌로는 옮길 수 없어요' })
+    }
+    const ae = amountError(amt)
+    if (ae) return res.status(400).json({ error: ae })
+    const fe = futureDateError(date)
+    if (fe) return res.status(400).json({ error: fe })
+
+    await conn.beginTransaction()
+    /* 마감된 달이면 막는다. 이체도 실제로 잔액을 움직이는 거래라, 신고를 끝낸 달의
+       숫자를 뒤에서 바꾸면 이미 낸 신고서와 장부가 갈린다(다른 경로와 같은 규칙). */
+    const ce = await closedPeriodError(conn, date)
+    if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
+
+    const [accts] = await conn.execute(
+      'SELECT id, name, kind, acct_code FROM accounts WHERE id IN (?, ?)',
+      [from_account_id, to_account_id])
+    const from = accts.find(a => a.id === from_account_id)
+    const to   = accts.find(a => a.id === to_account_id)
+    if (!from || !to) { await rollbackQuietly(conn); return res.status(404).json({ error: '계좌를 찾을 수 없어요' }) }
+
+    /* 상대 계좌의 계정과목을 단다 — 이 거래가 손익에 안 잡히게 하는 장치다(위 설명).
+     *
+     * ⚠ 카드는 **2202 미지급금**이다. 계좌 테이블의 acct_code 는 예금 종류로만 정해져서
+     *   (lib/acctCode.js bankAcctCode) 카드도 1103 보통예금을 받는다. 그대로 쓰면
+     *   통장→카드 이체의 분개가 `보통예금 / 보통예금` 이 되어 일계표에서 뜻을 잃는다.
+     *   신용카드 잔액은 회계적으로 '아직 안 갚은 돈'이므로 미지급금이 맞다.
+     * 그 밖에는 계좌의 계정과목, 비어 있으면 1103. 어느 쪽이든 자산·부채라
+     * lib/pnl.js 가 손익에서 빼 준다. */
+    const CARD_CODE = '2202'   // 미지급금
+    const codeOf = (a) => (a.kind === 'card' ? CARD_CODE : (String(a.acct_code || '').trim() || '1103'))
+    const transferId = randomUUID()
+    const note = (memo || '').trim() || `${from.name} → ${to.name} 이체`
+
+    const mk = async (kind, accountId, counterCode) => {
+      const id = randomUUID()
+      await conn.execute(
+        `INSERT INTO transactions
+           (id, kind, account_id, account_code, category, amount, date, method, status,
+            doc_no, memo, transfer_id, counterparty_account_id)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [id, kind, accountId, counterCode, '계좌 이체', amt, date,
+         '계좌이체', kind === 'income' ? '입금완료' : '지급완료', '공통', note,
+         transferId, kind === 'expense' ? to_account_id : from_account_id])
+      return id
+    }
+    // 보내는 쪽은 지출, 받는 쪽은 입금 — 두 줄이 같은 transfer_id 를 갖는다
+    const outId = await mk('expense', from_account_id, codeOf(to))
+    const inId  = await mk('income',  to_account_id,   codeOf(from))
+
+    await conn.commit()
+    res.json({ ok: true, transfer_id: transferId, out_id: outId, in_id: inId })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
+})
+
 router.post('/', async (req, res, next) => {
   try {
     const {
@@ -477,8 +568,17 @@ router.delete('/:id', async (req, res, next) => {
     await conn.execute('DELETE FROM invoice_matches WHERE txn_id = ?', [req.params.id])
     for (const m of matches) await recalcInvoiceStatus(conn, m.invoice_id)
     // 정기지출에서 자동 생성된 거래면 last_generated 를 되돌려 그 회차가 다시 생성되게 한다.
-    const [[cur]] = await conn.execute('SELECT recurring_id, date FROM transactions WHERE id = ?', [req.params.id])
-    await conn.execute('DELETE FROM transactions WHERE id = ?', [req.params.id])
+    const [[cur]] = await conn.execute('SELECT recurring_id, date, transfer_id FROM transactions WHERE id = ?', [req.params.id])
+    /* ⚠ 이체는 **짝과 함께** 지운다.
+     * 이체는 거래 두 줄(보내는 계좌의 지출 + 받는 계좌의 입금)로 남는다. 한 줄만 지우면
+     * 나머지 한 줄이 짝 없이 남아 **돈이 사라지거나 생겨난다** — 통장에서는 나갔는데
+     * 카드에는 들어온 기록만 남는 식이다. 잔액도 장부도 그때부터 틀린다.
+     * 그래서 transfer_id 가 같은 줄을 통째로 지운다(자기 자신 포함). */
+    if (cur?.transfer_id) {
+      await conn.execute('DELETE FROM transactions WHERE transfer_id = ?', [cur.transfer_id])
+    } else {
+      await conn.execute('DELETE FROM transactions WHERE id = ?', [req.params.id])
+    }
     const rec = cur?.recurring_id
       ? await restoreLastGenerated(conn, 'recurring_expenses', cur.recurring_id, cur.date)
       : { restored: false, note: null }
