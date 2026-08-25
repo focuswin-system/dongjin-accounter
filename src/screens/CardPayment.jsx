@@ -18,9 +18,15 @@ import { api } from '../lib/api'
  *
  * ── 이 화면이 하는 일 ──
  *   1. 갚을 카드 목록 — 카드별 미결제 잔액과 다음 결제일.
- *   2. **명세서 대조** — 이번 구간에 우리 장부가 잡고 있는 사용액과 미결제 잔액을 나란히
- *      놓고 차액을 보여준다. 경리가 실제로 하는 일이 "카드사 명세서와 장부가 맞나"라서다.
- *      차액이 있으면 대개 아직 안 올린 전표가 있다는 뜻이다.
+ *   2. **명세서 대조용 숫자** — 이번 사용 구간과 그 구간에 장부가 잡고 있는 사용액.
+ *      경리가 실제로 하는 일이 "카드사 명세서와 장부가 맞나"라서, 종이와 견줄 숫자를 낸다.
+ *
+ *      ⚠ **차액은 앱이 계산해 주지 않는다.** 계산하려면 카드사가 청구한 금액을 알아야 하는데
+ *        그건 시스템에 없다(종이에만 있다). 우리 거래끼리 빼면 언제나 '이번 구간에 이미 갚은
+ *        금액'이 나올 뿐이고, 정작 찾으려던 **'안 올린 전표'는 원리적으로 못 잡는다** —
+ *        전표가 없으면 잔액도 그만큼 안 늘어나기 때문이다.
+ *        처음엔 차액을 띄웠는데, 선결제만 해도 "장부가 더 많아요"라는 틀린 경고가 떴다.
+ *        숫자를 내주고 판단은 사람이 한다. 없는 것을 아는 척하지 않는다.
  *   3. 결제 처리 — 어느 통장에서 얼마를 갚을지.
  *
  * ⚠ 건별로 골라 갚는 기능은 **일부러 만들지 않는다.** 카드사에 "이 건만 갚을게요"는
@@ -36,7 +42,22 @@ const payDateOf = (y, m, day) => {
   return `${y}-${String(m).padStart(2, '0')}-${String(Math.min(day, last)).padStart(2, '0')}`
 }
 
-/** 이번 결제일과 그 결제일이 덮는 사용 구간(지난 결제일 다음날 ~ 이번 결제일) */
+/** 하루 뒤 — 'YYYY-MM-DD' 문자열끼리만 다룬다(이 앱의 다른 날짜 계산과 같은 눈금) */
+const nextDay = (d) => {
+  const [y, m, dd] = d.split('-').map(Number)
+  const t = new Date(y, m - 1, dd + 1)
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
+}
+
+/** 이번 결제일과 그 결제일이 덮는 사용 구간(지난 결제일 다음날 ~ 이번 결제일)
+ *
+ * ⚠ from 은 **지난 결제일의 다음날**이다. 지난 결제일 당일에 쓴 것은 그 결제일에 이미
+ *   청구된 몫이라 이번 구간이 아니다.
+ *   예전엔 지난 결제일 자체를 from 으로 두고 집계만 `date > from` 으로 하루 밀었다.
+ *   숫자는 맞았지만 **화면에 적히는 구간이 하루 어긋났다** — '7/25 ~ 8/25'라고 써 놓고
+ *   7/25 사용분은 빼고 셌다. 대조하러 온 사람이 그 하루를 찾느라 헤맨다.
+ *   여기서 다음날로 만들고, 집계는 경계를 포함(>=)하게 맞춘다.
+ */
 function billingWindow(today, payDay) {
   const [y, m] = today.split('-').map(Number)
   let py = y, pm = m
@@ -44,8 +65,8 @@ function billingWindow(today, payDay) {
   if (today > payDateOf(y, m, payDay)) { pm += 1; if (pm > 12) { pm = 1; py += 1 } }
   const payDate = payDateOf(py, pm, payDay)
   const prev = new Date(py, pm - 2, 1)
-  const from = payDateOf(prev.getFullYear(), prev.getMonth() + 1, payDay)
-  return { payDate, from, to: payDate }
+  const prevPay = payDateOf(prev.getFullYear(), prev.getMonth() + 1, payDay)
+  return { payDate, from: nextDay(prevPay), to: payDate }
 }
 
 export const CardPaymentScreen = () => {
@@ -53,6 +74,7 @@ export const CardPaymentScreen = () => {
   const { confirm } = useConfirm()
   const [accounts, setAccounts] = useState([])
   const [uses, setUses] = useState([])      // 카드로 쓴 지출(대조용)
+  const [paid, setPaid] = useState([])      // 카드에 들어온 결제(이체의 받는 쪽) — 이월 계산용
   const [rows, setRows] = useState([])      // 결제 이력
   const [form, setForm] = useState(null)
   const [openCard, setOpenCard] = useState(null)   // 사용 내역을 펼친 카드
@@ -61,12 +83,16 @@ export const CardPaymentScreen = () => {
   const today = localToday()
 
   const load = async () => {
-    const [accs, expense] = await Promise.all([
-      api.getAccounts(), api.getTransactions({ kind: 'expense' }),
+    /* ⚠ **입금도 받아야 한다.** 카드 대금 결제는 두 줄로 남는데(통장 출금 + 카드 입금),
+       "이 카드에 얼마를 갚았나"는 **카드 쪽 입금**에만 있다. 지출만 보면 이월을 못 센다. */
+    const [accs, expense, income] = await Promise.all([
+      api.getAccounts(), api.getTransactions({ kind: 'expense' }), api.getTransactions({ kind: 'income' }),
     ])
     setAccounts(accs)
     // 카드로 결제한 지출 = 대조 대상. 이체로 만들어진 줄은 사용이 아니므로 뺀다.
     setUses((expense || []).filter(t => !t.transferId))
+    // 카드에 들어온 결제(이체의 받는 쪽 다리) — 이월 계산에 쓴다
+    setPaid((income || []).filter(t => t.transferId))
     // 결제 이력은 보내는 쪽(지출)만 세운다 — 둘 다 세우면 한 번 결제가 두 줄로 보인다
     setRows((expense || []).filter(t => t.transferId).sort((a, b) => String(b.date).localeCompare(String(a.date))))
   }
@@ -88,16 +114,29 @@ export const CardPaymentScreen = () => {
     .filter(a => a.kind === 'card' && a.cardType === 'credit' && a.cardPayDay > 0)
     .map(a => {
       const w = billingWindow(today, a.cardPayDay)
-      const inWindow = uses.filter(t => t.accountId === a.id && t.date > w.from && t.date <= w.to)
+      const inWindow = uses.filter(t => t.accountId === a.id && t.date >= w.from && t.date <= w.to)
       const booked = inWindow.reduce((s, t) => s + (Number(t.amount) || 0), 0)
       const unpaid = Math.max(0, -(a.currentBalance ?? 0))
+      /* 이월분 — 지난 구간에서 못 갚고 넘어온 몫.
+       *
+       * unpaid(카드 잔액)는 전체 기간 누계라 이월이 섞여 있다. 그 사실을 화면에 적지 않으면
+       * "이번 구간에 143,000 썼는데 왜 263,000을 갚으라 하지"가 된다.
+       *   이월분 = 구간 시작 전까지의 사용 − 그때까지의 결제 */
+      const before = uses.filter(t => t.accountId === a.id && t.date < w.from)
+        .reduce((s, t) => s + (Number(t.amount) || 0), 0)
+      const paidBefore = paid.filter(t => t.accountId === a.id && t.date < w.from)
+        .reduce((s, t) => s + (Number(t.amount) || 0), 0)
+      // 이번 구간에 이미 갚은 몫 — 잔액이 왜 사용액보다 적은지를 설명한다
+      const paidInWindow = paid.filter(t => t.accountId === a.id && t.date >= w.from && t.date <= w.to)
+        .reduce((s, t) => s + (Number(t.amount) || 0), 0)
+      const carry = Math.max(0, before - paidBefore)
       return {
-        card: a, ...w, inWindow, booked, unpaid,
+        card: a, ...w, inWindow, booked, unpaid, carry, paidInWindow,
         payAcct: byId.get(a.cardPayAccountId) || null,
       }
     })
     .filter(b => b.unpaid > 0)
-    .sort((a, b) => a.payDate.localeCompare(b.payDate)), [accounts, uses, byId, today])
+    .sort((a, b) => a.payDate.localeCompare(b.payDate)), [accounts, uses, paid, byId, today])
 
   const totalUnpaid = bills.reduce((s, b) => s + b.unpaid, 0)
 
@@ -168,7 +207,7 @@ export const CardPaymentScreen = () => {
       ) : (
         <div className="col gap-12">
           {bills.map(b => {
-            const diff = b.unpaid - b.booked
+
             const open = openCard === b.card.id
             return (
               <div key={b.card.id} className="card" style={{ overflow: 'hidden' }}>
@@ -191,8 +230,8 @@ export const CardPaymentScreen = () => {
                     onClick={() => openPay(b)} style={{ alignSelf: 'center' }}>지급 처리</button>
                 </div>
 
-                {/* 명세서 대조 — 카드사가 청구할 금액과 우리 장부가 잡고 있는 금액을 나란히.
-                    차액이 곧 "아직 안 올린 전표"다. 이걸 못 보면 결제만 하고 비용을 빠뜨린다. */}
+                {/* 명세서와 견줄 숫자 — 사용 구간과 그 구간 장부 사용액.
+                    종이 명세서를 옆에 놓고 이 숫자와 맞춰 보는 자리다. */}
                 <div className="row" style={{ padding: '10px 18px', gap: 12, borderTop: '1px solid var(--line)',
                   background: 'var(--surface-2)', flexWrap: 'wrap' }}>
                   <span className="text-xs text-muted2">
@@ -203,9 +242,21 @@ export const CardPaymentScreen = () => {
                     장부에 있는 사용액 <span className="num fw-600">{fmtNum(b.booked)}</span>
                     <span className="text-muted2"> ({b.inWindow.length}건)</span>
                   </span>
-                  {Math.abs(diff) > 0 && (
-                    <span className="badge warn" style={{ fontSize: 10 }}>
-                      차액 {fmtNum(Math.abs(diff))} — {diff > 0 ? '아직 안 올린 전표가 있는지 확인하세요' : '장부가 더 많아요'}
+                  {/* ⚠ **차액을 앱이 계산해 주지 않는다.** 계산하려면 카드사가 청구한 금액을
+                      알아야 하는데 그건 시스템에 없다 — 종이 명세서에만 있다.
+                      우리 거래끼리 빼면 언제나 '이번 구간에 이미 갚은 금액'이 나올 뿐이고,
+                      **정작 찾으려던 '안 올린 전표'는 원리적으로 못 잡는다**(전표가 없으면
+                      잔액도 그만큼 안 늘어난다). 실제로 선결제만 해도 "장부가 더 많아요"라는
+                      틀린 경고가 떴다.
+                      그래서 **대조할 숫자를 내주고 판단은 사람이 한다.** 없는 것을 아는 척하지 않는다. */}
+                  {b.carry > 0 && (
+                    <span className="text-xs text-muted2">
+                      · 지난 구간 이월 <span className="num">{fmtNum(b.carry)}</span>
+                    </span>
+                  )}
+                  {b.paidInWindow > 0 && (
+                    <span className="text-xs text-muted2">
+                      · 이번 구간에 이미 갚음 <span className="num">{fmtNum(b.paidInWindow)}</span>
                     </span>
                   )}
                   <button className="btn sm ml-auto" onClick={() => setOpenCard(open ? null : b.card.id)}>
