@@ -140,6 +140,19 @@ export const CardPaymentScreen = () => {
 
   const totalUnpaid = bills.reduce((s, b) => s + b.unpaid, 0)
 
+  /* ⚠ **결제일을 안 정한 신용카드에도 갚을 돈이 있다.**
+   *
+   * 위 목록은 결제일이 있어야 세운다(언제 빠지는지 모르면 "지금 갚으라"고 말할 수 없다).
+   * 그런데 그 카드를 그냥 감추면 화면이 "갚을 카드값이 없어요"라고 **거짓말을 한다** —
+   * 운영 실데이터에서 신용카드 6장 중 3장이 결제일 0이었고, 그중에 미결제 100만원이
+   * 넘는 카드가 있었다.
+   * 목록에는 안 세우되(날짜를 모르니 줄을 세울 수 없다) **얼마가 걸려 있는지는 말한다.** */
+  const noPayDay = useMemo(() => accounts
+    .filter(a => a.kind === 'card' && a.cardType === 'credit' && !(a.cardPayDay > 0))
+    .map(a => ({ card: a, unpaid: Math.max(0, -(a.currentBalance ?? 0)) }))
+    .filter(x => x.unpaid > 0), [accounts])
+  const noPayDayTotal = noPayDay.reduce((s, x) => s + x.unpaid, 0)
+
   const openPay = (b) => setForm({
     card: b.card, fromAccountId: b.payAcct?.id || '', amount: String(b.unpaid),
     unpaid: b.unpaid,
@@ -196,10 +209,27 @@ export const CardPaymentScreen = () => {
           ? `갚을 카드 ${bills.length}장 · ${fmtNum(totalUnpaid)}원`
           : '쌓인 카드값을 통장에서 갚습니다. 수입도 지출도 아니라 손익에는 잡히지 않아요.'}/>
 
+      {/* 결제일을 안 정한 카드의 미결제 — 목록에 못 세우니 여기서 알린다.
+          "갚을 카드값이 없어요"라고 말해 놓고 100만원이 걸려 있으면 그건 거짓말이다. */}
+      {noPayDay.length > 0 && (
+        <div className="card card-pad" style={{ marginBottom: 12, borderColor: 'var(--warn)' }}>
+          <div className="text-sm fw-700" style={{ marginBottom: 4 }}>
+            결제일을 안 정한 카드에 {fmtNum(noPayDayTotal)}원이 남아 있어요
+          </div>
+          <div className="text-sm text-muted" style={{ lineHeight: 1.7 }}>
+            {noPayDay.map(x => `${x.card.name} ${fmtNum(x.unpaid)}원`).join(' · ')}<br/>
+            <b>기준정보 › 카드</b>에서 결제일을 정하면 위 목록에 올라와 갚을 수 있어요.
+            언제 빠지는지 모르면 자금 예측에도 안 잡힙니다.
+          </div>
+        </div>
+      )}
+
       {bills.length === 0 ? (
         <div className="card card-pad" style={{ display: 'flex', gap: 10, alignItems: 'center', color: 'var(--muted)' }}>
           <Icon.Check size={16} className="text-pos"/>
-          <span className="text-sm fw-600" style={{ color: 'var(--ink)' }}>갚을 카드값이 없어요.</span>
+          <span className="text-sm fw-600" style={{ color: 'var(--ink)' }}>
+            {noPayDay.length > 0 ? '결제일이 정해진 카드 중에는 갚을 것이 없어요.' : '갚을 카드값이 없어요.'}
+          </span>
           <span className="text-xs text-muted2">
             결제일을 정해 둔 신용카드만 여기 나와요 (기준정보 › 카드).
           </span>
