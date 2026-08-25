@@ -715,26 +715,69 @@ a { color: inherit; text-decoration: none; }
    기본 표 패딩(16px 14px)은 **읽는** 표 기준이라, 열두 칸이 나란히 선 이 표에서는
    가로 폭의 3할 가까이를 여백이 먹는다. 정작 품목명·규격은 여덟 자만 보이고 잘려서,
    무엇을 청구하는지 표만 보고는 검산이 안 됐다. 여백을 줄여 그만큼을 칸에 준다. */
-.table.line-table thead th { padding: 9px 6px; }
-/* ⚠ 예전엔 `vertical-align: top` 이었다. 입력창끼리는 줄이 맞았지만 **키가 작은 것**
-   (복사·삭제 버튼, 단가 기준 칩)은 전부 위로 붙어 혼자 떠 보였다 — 칩은 margin-top 으로
-   억지로 내려 맞추고 있었고 버튼은 그것도 없었다.
-   가운데 정렬로 바꾸면 키가 다른 것들이 **저절로** 한 줄로 읽힌다. 억지 여백도 없앤다. */
-.table.line-table tbody td { padding: 8px 6px; vertical-align: middle; }
-.table.line-table tbody td:first-child,
-.table.line-table thead th:first-child { padding-left: 12px; }
-.table.line-table tbody td:last-child,
-.table.line-table thead th:last-child { padding-right: 12px; }
-.table.line-table .input { padding: 9px 10px; }
+/* ── 품목 입력표 — **스프레드시트처럼** ─────────────────────────
+ *
+ * 이 표는 칸마다 입력창이 서 있다(품목·규격·단위·수량·중량·단가·금액·부가세·비고 — 아홉 칸).
+ * 처음엔 보통 표처럼 두고 칸 사이에 옅은 세로선만 그었는데, **더 헷갈렸다**:
+ * 둥근 테두리의 입력창이 칸 안에 떠 있고 그 옆에 또 칸 경계선이 있어서 **선이 두 겹**이 됐다.
+ * 어느 선이 칸의 경계인지 눈이 못 고른다.
+ *
+ * 그래서 반대로 간다 — **칸 자체를 입력창으로** 만든다.
+ * 입력창의 테두리·둥근 모서리를 걷고 칸을 꽉 채우면, 남는 선은 표의 격자 하나뿐이다.
+ * 스프레드시트가 이 문제를 그렇게 푼다. 지금 어느 칸에 있는지는 **안쪽 테두리**로 알린다.
+ */
+.table.line-table { border-collapse: separate; border-spacing: 0; }
+.table.line-table thead th {
+  padding: 8px 10px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom: 1px solid var(--line-strong);
+}
+/* 격자 — 모든 칸에 왼쪽 선, 첫 칸만 뺀다(표 바깥 테두리는 카드가 그린다) */
+.table.line-table thead th + th,
+.table.line-table tbody td + td { border-left: 1px solid var(--line); }
+.table.line-table tbody td {
+  padding: 0;                       /* 여백은 입력창이 갖는다 — 칸과 입력이 어긋나지 않게 */
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+/* 입력창이 곧 칸이다 */
+.table.line-table .input {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  width: 100%;
+  padding: 9px 10px;
+  box-shadow: none;
+}
+/* 지금 어느 칸에 있나 — 바깥으로 번지는 그림자는 격자를 가린다. 안쪽에 그린다. */
+.table.line-table .input:focus,
+.table.line-table .input:focus-within {
+  outline: 0;
+  box-shadow: inset 0 0 0 2px var(--brand);
+  background: var(--card-bg, #fff);
+}
+.table.line-table .input:disabled,
+.table.line-table .input[disabled] { background: var(--surface-2); color: var(--muted); }
+/* 숫자 칸은 **오른쪽 정렬**. 머리글(.num-right)은 오른쪽인데 값만 왼쪽에 서 있어서
+   열 하나를 눈으로 두 번 훑게 됐다 — 자릿수를 비교하려면 끝이 맞아야 한다. */
+.table.line-table .input.num { text-align: right; }
 
-/* 세로 구분선 — 이 표는 칸마다 **입력창**이 서 있어서, 가로줄만으로는 어느 입력이 어느
-   열인지 눈으로 못 따라간다(품목·규격·단위·수량·단가·금액·부가세가 한 줄에 늘어선다).
-   보통 표에는 세로줄을 넣지 않지만(선이 겹치면 지저분하다), 입력표는 다르다 —
-   **머리글과 입력을 잇는 선**이 있어야 "이 칸이 그 칸"이 된다. 아주 옅게 긋는다. */
-.table.line-table tbody td + td,
-.table.line-table thead th + th { border-left: 1px solid var(--line); }
-/* 머리글을 조금 더 또렷하게 — 어느 칸인지 찾는 눈이 먼저 닿는 곳이다 */
-.table.line-table thead th { color: var(--ink); font-weight: 600; background: var(--surface-2); }
+/* 칩·버튼처럼 입력이 아닌 것은 칸 안에서 숨 쉴 자리가 필요하다(td 패딩이 0이라 직접 준다) */
+.table.line-table tbody td > .row,
+.table.line-table tbody td > .chip { padding: 6px 8px; }
+.table.line-table tbody td > .row { justify-content: inherit; }
+
+/* '자동' 같은 꼬리표 — 입력 아래에 그냥 두면 **행 높이를 밀어** 옆 칸들과 줄이 어긋나고
+   다음 행 경계에 걸쳐 보인다. 칸 안 오른쪽 아래에 겹쳐 띄운다(자리를 안 차지한다). */
+.table.line-table tbody td { position: relative; }
+.table.line-table .cell-tag {
+  position: absolute; right: 10px; bottom: 3px;
+  font-size: 10px; line-height: 1; color: var(--muted-2);
+  background: none; border: 0; padding: 0; cursor: inherit;
+}
+
 .num-cell { font-family: "JetBrains Mono", ui-monospace, monospace; font-feature-settings: "tnum" 1; letter-spacing: -0.02em; }
 .num-right { text-align: right; }
 .text-center { text-align: center; }

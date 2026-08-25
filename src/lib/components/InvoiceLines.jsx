@@ -306,13 +306,14 @@ export const InvoiceLines = ({
                         직접 넣은 값은 그 줄의 세액으로 굳는다(자동값과 구별해 표시). */}
                     <MoneyInput value={String(shownVat(l))}
                       onChange={(raw, v) => set(i, { vat: v })}/>
+                    {/* 꼬리표는 칸 안에 **겹쳐** 띄운다 — 입력 아래에 두면 행 높이를 밀어
+                        같은 줄의 다른 칸들과 줄이 어긋난다(.cell-tag) */}
                     {(l.vat === null || l.vat === undefined || l.vat === '') ? (
-                      <div className="text-xs text-muted2" style={{ padding: '2px 0' }}>자동</div>
+                      <span className="cell-tag">자동</span>
                     ) : (
-                      <button type="button" className="text-xs text-muted2"
-                        style={{ border: 0, background: 'none', cursor: 'pointer', padding: '2px 0' }}
+                      <button type="button" className="cell-tag" style={{ cursor: 'pointer' }}
                         title="과세유형대로 다시 계산" onClick={() => set(i, { vat: null })}>
-                        자동으로
+                        되돌리기
                       </button>
                     )}
                   </td>
