@@ -547,6 +547,13 @@ export const api = {
 
   /* 카드 사용내역 — 기간은 빈 값이면 전체다. 빈 값을 안 보내야 서버도 전체로 읽는다
      (''를 실어 보내면 쿼리에 from= 이 붙어 뜻이 흐려진다). */
+  /* 경영 대시보드 — 주문별 회수 현황과 건강 판정.
+     판정은 전부 서버(lib/contractHealth.js)가 낸다. 화면에서 다시 세면
+     같은 계약이 화면마다 다르게 뜬다. */
+  async getMgmtDash() {
+    try { return await req('/dashboard/mgmt') } catch { return null }
+  },
+
   async getCardReport({ from = '', to = '', owner = 'all', cardType = 'all', cardId = '' } = {}) {
     const qs = new URLSearchParams()
     if (from) qs.set('from', from)

@@ -2,6 +2,8 @@ const { Router } = require('express')
 const { kstDate, kstToday } = require('../db')
 const { pendingCond } = require('../lib/invoiceStatus')
 const { balancesAsOf, upcomingFlows, project, projectByAccount, dailyTrial } = require('../lib/cashReport')
+const { contractHealth } = require('../lib/contractHealth')
+const { periodMonths } = require('../lib/recurPeriod')
 const { paidPrincipal } = require('../lib/savings')
 const { remainingPrincipal } = require('../lib/loan')
 
@@ -114,6 +116,38 @@ router.get('/cash-report', async (req, res, next) => {
       availablePersonal,
       canSeePersonal,
     })
+  } catch (e) { next(e) }
+})
+
+/* 경영 대시보드 — "얼마 중에 얼마가 들어왔고 얼마나 기한이 지났나".
+ *
+ * 예전 화면은 '진행중 주문 상위' 라며 `slice(0, 6)` 을 뿌렸다. 정렬도 판정도 없어
+ * **목록 앞 여섯 개**였고, 몇 달째 돈이 안 들어오는 계약과 어제 시작한 계약이
+ * 같은 모양으로 나란히 섰다.
+ *
+ * ⚠ 판정은 lib/contractHealth.js 한 곳. 화면마다 따로 세면 같은 계약이 여기서는 정상,
+ *   주문 목록에서는 이상으로 뜬다. 회수 판정은 자금 쪽(lib/certainty.js)을 재사용한다 —
+ *   두 벌로 두면 자금일보에서 '기약 없다'고 한 돈이 여기서는 멀쩡한 미수로 잡힌다.
+ */
+router.get('/mgmt', async (req, res, next) => {
+  try {
+    const today = kstToday()
+    const health = await contractHealth(req.db, today)
+
+    /* 주기적으로 오가는 돈 — 대표님이 계약과 함께 보고 싶어 한 축이다.
+       주기가 섞여 있으면 금액을 그냥 더한 수는 아무 뜻이 없어 **월 환산**한다
+       (분기 ÷3, 년 ÷12 — 화면의 monthlyEquivalent 와 같은 산식). */
+    const monthly = async (table, col) => {
+      const [rows] = await req.db.execute(
+        `SELECT ${col} AS amount, period FROM ${table} WHERE active = 1`)
+      return Math.round(rows.reduce((s, r) => s + (Number(r.amount) || 0) / periodMonths(r.period), 0))
+    }
+    const [recurIn, recurOut] = await Promise.all([
+      monthly('recurring_invoices', 'supply_amount'),
+      monthly('recurring_expenses', 'amount'),
+    ])
+
+    res.json({ today, ...health, recurring: { monthlyIn: recurIn, monthlyOut: recurOut } })
   } catch (e) { next(e) }
 })
 
