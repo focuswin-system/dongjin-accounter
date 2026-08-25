@@ -91,10 +91,19 @@ export const CardPaymentScreen = () => {
     setAccounts(accs)
     // 카드로 결제한 지출 = 대조 대상. 이체로 만들어진 줄은 사용이 아니므로 뺀다.
     setUses((expense || []).filter(t => !t.transferId))
+    /* ⚠ **상대가 카드인 이체만** 여기 것이다.
+     *
+     * transferId 만 보면 통장 간 이체(급여계좌 보충 같은 것)까지 딸려 온다 —
+     * 실제로 '하나은행 급여 5,000,000'이 카드 지급 이력에 섞여 있었다.
+     * 내부 계좌 이체 화면은 카드 줄을 빼고 있는데(Transfer.jsx) 이쪽은 그 반대를 안 했다.
+     * 두 화면이 같은 줄을 나눠 갖지 못하면 어느 쪽에서 취소해야 하는지도 갈린다. */
+    const cardIds = new Set((accs || []).filter(a => a.kind === 'card').map(a => a.id))
     // 카드에 들어온 결제(이체의 받는 쪽 다리) — 이월 계산에 쓴다
-    setPaid((income || []).filter(t => t.transferId))
+    setPaid((income || []).filter(t => t.transferId && cardIds.has(t.accountId)))
     // 결제 이력은 보내는 쪽(지출)만 세운다 — 둘 다 세우면 한 번 결제가 두 줄로 보인다
-    setRows((expense || []).filter(t => t.transferId).sort((a, b) => String(b.date).localeCompare(String(a.date))))
+    setRows((expense || [])
+      .filter(t => t.transferId && cardIds.has(t.counterpartyAccountId))
+      .sort((a, b) => String(b.date).localeCompare(String(a.date))))
   }
   useEffect(() => { load() }, [])
 
