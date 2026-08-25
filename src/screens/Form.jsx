@@ -194,7 +194,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
         memo: initialMemo || "" });
       setShowMore(false);
     }
-  }, [open, initialKind, initialContract, initialCostContract, initialVendor, initialCategory, initialMemo, accounts, company]);
+    /* ⚠ **accounts·company 를 의존성에 넣지 않는다.** 넣었다가 되돌렸다 —
+       이 효과는 setForm 으로 폼을 통째로 갈아엎는다. 목록이 늦게 도착하면 그때 다시 돌아
+       **사용자가 입력 중이던 내용을 지운다.** 열릴 때 한 번만 도는 게 맞다.
+       처음 마운트 직후라 목록이 비어 있는 경우는 아래 로더가 `f.account ||` 로 채운다. */
+  }, [open, initialKind, initialContract, initialCostContract, initialVendor, initialCategory, initialMemo]);
 
   // 편집 모드: 기존 데이터 프리필 — 열 때 1회. 참조목록(categories·items) 로드와 무관하게
   // editTxn에서 직접 복원(품목명·직원명은 서버 조인으로 옴) → 늦은 로드가 입력 중 폼을 리셋하지 않게 함
