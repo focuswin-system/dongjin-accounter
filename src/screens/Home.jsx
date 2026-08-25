@@ -67,16 +67,18 @@ const CashSummary = ({ go }) => {
     /* sub 는 '이번 주'가 아니라 **전체 미수금·미지급금**이다. 예전엔 '받을 돈'·'나갈 돈'이라고만
        적어서, 위 라벨('이번 주 나갈 돈')과 거의 같은 말에 다른 숫자가 붙었다 —
        57,363,900 옆에 57,918,900 이 붙어 있으면 어느 쪽이 이번 주인지 알 수 없다. */
-    /* 기한 없는 청구서는 기준일에 몰려 '이번 주'에 통째로 섞인다. 그걸 그대로 두면
-       기약 없는 돈을 이번 주 자금으로 계획하게 된다 — 자금일보는 '기한 미정'으로 구분해 주는데
-       홈만 단정하고 있었다. 그런 금액이 있으면 그 사실을 먼저 알린다. */
+    /* ⚠ 들어올 돈과 나갈 돈에서 **기약 없는 돈의 뜻이 다르다.**
+       · 들어올 돈: 장기 미수·기한 미정·오래 밀린 것은 weekIn 에서 **빠져 있다**(없는 셈).
+         그래서 "따로 ○○원이 걸려 있다"고 말한다 — 더한 값이 아니다.
+       · 나갈 돈: 기한을 몰라도 weekOut 에 **들어 있다**(있는 셈). 그래서 "그중 ○○원"이다.
+       같은 말을 쓰면 한쪽은 반드시 오해된다. */
     { label: '이번 주 들어올 돈', value: d.weekIn, tone: 'pos',
-      sub: d.noDueIn > 0
-        ? `그중 ${fmtNum(d.noDueIn)}원은 기한 미정`
+      sub: d.uncertainIn > 0
+        ? `기약 없는 돈 ${fmtNum(d.uncertainIn)}원은 뺐어요`
         : `미수금 전체 ${fmtNum(d.receivable.total)}원` },
     { label: '이번 주 나갈 돈', value: d.weekOut, tone: 'neg-ink',
-      sub: d.noDueOut > 0
-        ? `그중 ${fmtNum(d.noDueOut)}원은 기한 미정`
+      sub: d.uncertainOut > 0
+        ? `그중 ${fmtNum(d.uncertainOut)}원은 기한 미정`
         : `미지급금 전체 ${fmtNum(d.payable.total)}원` },
     { label: '이번 주 최저 잔액', value: d.lowest?.balance ?? d.available,
       sub: d.lowest?.date === d.date ? '오늘이 가장 낮아요' : d.lowest?.date || '', tone: short ? 'neg-ink' : undefined },

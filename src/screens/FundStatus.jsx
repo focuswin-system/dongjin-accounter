@@ -439,6 +439,12 @@ export const FundStatusScreen = ({ go }) => {
                     기한이 없거나 이미 지난 돈이에요(밀린 급여·퇴직금, 기한 없는 청구서).
                     아래 표는 <b>며칠에 어느 통장이 비나</b>를 보는 자리라, 이 돈을 오늘 칸에 몰면
                     그 뒤 잔액이 통째로 가려져서 따로 뺐어요.
+                    {/* 아래 '기약 없는 돈' 카드와 숫자가 다를 수 있다 — 여기는 표에서 뺀 것,
+                        거기는 예측에서 뺀 것이라 뜻이 다르다. 관계를 그 자리에서 밝힌다. */}
+                    {un.uncertainIn > 0 && un.uncertainIn !== un.in && (<>
+                      {' '}이 중 <b className="num">{fmtNum(un.uncertainIn)}원</b>은 기한이 오래 지나
+                      <b> 예측에서도 뺐어요</b>(아래 '기약 없는 돈').
+                    </>)}
                   </div>
                   {openBuckets.has('__undated') && (
                     <div style={{ marginTop: 8 }}>
@@ -619,6 +625,25 @@ export const FundStatusScreen = ({ go }) => {
               </div>
             </div>
           </div>
+
+          {/* 기약 없는 돈 — **계산에서 뺀 몫을 감추지 않는다.**
+              ⚠ 들어올 돈과 나갈 돈에서 처리가 서로 반대다. 같은 말로 적으면 한쪽은 오해된다.
+                 자금일보·홈과 같은 판정을 쓴다(server/lib/certainty.js). */}
+          {(data.totals.uncertainIn > 0 || data.totals.uncertainOut > 0) && (
+            <div className="card card-pad" style={{ marginBottom: 16 }}>
+              <div className="text-sm fw-700" style={{ marginBottom: 6 }}>기약 없는 돈</div>
+              <div className="text-sm text-muted" style={{ lineHeight: 1.8 }}>
+                {data.totals.uncertainIn > 0 && (<>
+                  들어올 돈 <b className="num" style={{ color: 'var(--pos-ink)' }}>{fmtNum(data.totals.uncertainIn)}원</b>
+                  {' '}— 기한 미정·오래 밀린 미수금이에요. <b>위 '들어올'에서 뺐습니다.</b><br/>
+                </>)}
+                {data.totals.uncertainOut > 0 && (<>
+                  나갈 돈 <b className="num" style={{ color: 'var(--neg-ink)' }}>{fmtNum(data.totals.uncertainOut)}원</b>
+                  {' '}— 기한을 모르는 미지급·퇴직금이에요. <b>위 '나갈'에 그대로 넣었습니다.</b>
+                </>)}
+              </div>
+            </div>
+          )}
 
           {/* 대표 자금표 맨 아래 요약 행 그대로 — 보통계좌·저축·부채·지급예정·미지급 인건비.
               '현금 과부족'이 그 표의 결론이라 맨 오른쪽에 크게 둔다. */}

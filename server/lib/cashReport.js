@@ -18,6 +18,7 @@ const { pendingCond } = require('./invoiceStatus')
 const { paymentSchedule, unpaidPayments, paidPrincipal } = require('./savings')
 const { repaymentSchedule } = require('./loan')
 const { dueDatesToGenerate, cashDateOf } = require('./recurrence')
+const { inflowCertainty, outflowCertainty } = require('./certainty')
 // 청구서 발행 분개는 전표 규칙과 한 벌이어야 한다 — 두 벌이면 전표와 일계표가 다른 말을 한다
 const { invoiceVoucher } = require('./voucher')
 const { recurFromSupply } = require('./vat')
@@ -115,7 +116,7 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
      * 것처럼 계산된다 — 이 문서의 결론이 **낙관 쪽으로 틀린다.**
      * 기한을 모르는 돈은 '언제 나갈지 모르니 지금 있는 것으로' 보는 편이 안전하다. */
     const [rows] = await db.execute(`
-      SELECT i.id, i.invoice_no, i.due_at, i.total_amount, i.account_id, v.name AS vendor_name,
+      SELECT i.id, i.invoice_no, i.due_at, i.total_amount, i.account_id, i.status, v.name AS vendor_name,
              COALESCE((SELECT SUM(amount) FROM invoice_matches WHERE invoice_id = i.id), 0) AS matched
         FROM invoices i
         LEFT JOIN vendors v ON v.id = i.vendor_id
@@ -130,6 +131,11 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
       // 기한 이전·미정인 것은 기준일에 몰아 표시한다(언제일지 모르니 가장 앞에 세운다).
       const date = place(due, noDue)
       if (date === null || date > to) continue
+      /* 확실/불확실 — 안전한 방향이 들어올 돈과 나갈 돈에서 서로 반대다(lib/certainty.js).
+         들어올 돈이 불확실하면 잔고 계산에서 빠지고, 나갈 돈은 불확실해도 그대로 남는다. */
+      const cert = kind === 'issued'
+        ? inflowCertainty({ status: r.status, due, today: from })
+        : outflowCertainty({ due, today: from })
       out.push({
         date, kind: kind === 'issued' ? 'in' : 'out', amount: remain,
         label: `${r.vendor_name || '거래처'} ${r.invoice_no || ''}`.trim(),
@@ -137,6 +143,7 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
         account_id: r.account_id || null,
         overdue: !noDue && due < from,
         noDue,                       // 화면에서 '기한 미정'으로 표시한다
+        certain: cert.certain, uncertainReason: cert.reason,
       })
     }
   }
@@ -380,11 +387,14 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
     const due = p.pay_date || `${p.month}-25`
     const date = place(due)
     if (date === null || date > to) continue
+    // 여러 달 밀린 급여는 '이번에 나간다'고 셈하지 않는다 — 다만 나갈 돈에는 그대로 남는다
+    const pc = outflowCertainty({ due, today: from, kind: 'payroll' })
     out.push({
       date, kind: 'out', amount: remain,
       label: `${p.emp_name || '직원'} ${p.month}분 급여`,
       source: '미지급 급여', account_id: null,
       overdue: due < from, planned: true,
+      certain: pc.certain, uncertainReason: pc.reason,
     })
   }
 
@@ -404,11 +414,14 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
     const noDue = !u.due_date
     const date = place(u.due_date || '', noDue)
     if (date === null || date > to) continue
+    // 퇴직금은 기한 미정이 대부분이다 — 불확실로 잡히되 나갈 돈에는 그대로 남는다
+    const uc = outflowCertainty({ due: u.due_date || '', today: from })
     out.push({
       date, kind: 'out', amount: remain,
       label: `${u.name} 퇴직금`,
       source: '미지급 퇴직금', account_id: null,
       overdue: !noDue && u.due_date < from, noDue, planned: true,
+      certain: uc.certain, uncertainReason: uc.reason,
     })
   }
 
@@ -426,29 +439,57 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
  * 날짜별로 접어 잔액 추이를 만든다.
  * **최저 잔액과 그 날짜**가 이 문서의 결론이다 — "며칠에 얼마까지 떨어지나".
  */
+/* 잔고 예측.
+ *
+ * ⚠ **불확실한 유입은 잔고에서 뺀다.** 장기 미수·기한 미정·오래 밀린 미수금을 '들어올 돈'으로
+ *   세면 최저 예상 잔액이 실제보다 높게 나오고, 그 숫자를 보고 지급 일정을 잡으면 통장이 빈다.
+ *   반대로 **불확실한 지출은 그대로 남긴다** — 언제 나갈지 모르는 돈은 있는 것으로 보는 편이
+ *   안전하다. 두 방향에 같은 규칙을 쓰면 한쪽은 반드시 틀린다(lib/certainty.js).
+ *
+ * ⚠ 감추지는 않는다. 계산에서만 빼고 금액·건수는 uncertainIn 으로 함께 내려보내
+ *   화면이 "그중 얼마는 기약이 없다"를 말할 수 있게 한다.
+ *
+ * certain 이 없는 흐름(정기 회차·대출 상환처럼 날짜가 확정된 것)은 확실로 본다 —
+ * 판정을 안 붙였다는 것은 의심할 거리가 없다는 뜻이다. */
+const isUncertain = (f) => f.certain === false
+
 function project(startBalance, flows, { from, to }) {
   const byDate = new Map()
+  let uncertainIn = 0, uncertainInCount = 0, uncertainOut = 0, uncertainOutCount = 0
   for (const f of flows) {
+    if (isUncertain(f)) {
+      if (f.kind === 'in') { uncertainIn += f.amount; uncertainInCount++ }
+      else { uncertainOut += f.amount; uncertainOutCount++ }
+    }
     if (!byDate.has(f.date)) byDate.set(f.date, { date: f.date, in: 0, out: 0, items: [] })
     const d = byDate.get(f.date)
     d[f.kind] += f.amount
+    // 잔고에 반영되는 몫 — 유입은 확실한 것만, 지출은 전부
+    if (!(f.kind === 'in' && isUncertain(f))) d[`${f.kind}Sure`] = (d[`${f.kind}Sure`] || 0) + f.amount
     d.items.push(f)
   }
   const days = [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : 1))
   let bal = startBalance
   let low = { date: from, balance: startBalance }
   for (const d of days) {
-    bal = bal + d.in - d.out
+    d.inSure = d.inSure || 0
+    d.outSure = d.outSure || 0
+    bal = bal + d.inSure - d.outSure
     d.balance = bal
-    d.net = d.in - d.out
+    d.net = d.inSure - d.outSure
     if (bal < low.balance) low = { date: d.date, balance: bal }
   }
   return {
     days,
     endBalance: bal,
     lowest: low,
-    totalIn: days.reduce((a, d) => a + d.in, 0),
-    totalOut: days.reduce((a, d) => a + d.out, 0),
+    // 확실히 들어올 돈 — 잔고 예측에 쓰인 그 숫자다
+    totalIn: days.reduce((a, d) => a + d.inSure, 0),
+    totalOut: days.reduce((a, d) => a + d.outSure, 0),
+    /* 기약 없는 몫 — 계산에는 안 들어갔지만 화면에는 적는다.
+       빼 버리면 "그 돈은 어디 갔나"가 된다. */
+    uncertainIn, uncertainInCount,
+    uncertainOut, uncertainOutCount,
     range: { from, to },
   }
 }
@@ -610,8 +651,12 @@ function projectByAccount(accounts, flows, { from, to }) {
   for (const f of flows) {
     const bucket = f.account_id && byId.has(f.account_id) ? byId.get(f.account_id) : unassigned
     bucket[f.kind] += f.amount
+    // 불확실한 유입은 이 계좌 잔액 예측에서도 뺀다 — project() 와 같은 규칙이어야
+    // "합계는 마이너스인데 계좌별로는 다 플러스" 같은 모순이 안 생긴다
+    if (f.kind === 'in' && isUncertain(f)) bucket.uncertainIn = (bucket.uncertainIn || 0) + f.amount
     bucket.items.push(f)
     if (bucket === unassigned) continue
+    if (f.kind === 'in' && isUncertain(f)) continue
     if (!perDay.has(bucket.id)) perDay.set(bucket.id, new Map())
     const m = perDay.get(bucket.id)
     if (!m.has(f.date)) m.set(f.date, { in: 0, out: 0 })

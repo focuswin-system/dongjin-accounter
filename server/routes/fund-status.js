@@ -65,16 +65,26 @@ router.get('/', async (req, res, next) => {
     const flows = range.to < today ? []
       : (await upcomingFlows(req.db, { from: planFrom, to: range.to, anchorPast: !future }))
 
+    /* ⚠ 확실/불확실을 자금일보와 **같은 규칙**으로 가른다(lib/certainty.js).
+     *   들어올 돈이 불확실하면 예상 잔액에서 빼고, 나갈 돈은 불확실해도 넣는다.
+     *   여기만 안 가르면 같은 회사 숫자가 자금일보와 자금현황에서 달라진다 —
+     *   그러면 어느 쪽이 맞는지 알 방법이 없다. */
     const flowBy = new Map()
-    let planIn = 0, planOut = 0
+    let planIn = 0, planOut = 0, uncertainIn = 0, uncertainOut = 0
     for (const f of flows) {
       const key = f.account_id || ''
       // 실적과 같은 모집단이어야 KPI 와 계좌표 합계가 맞는다(카드·비관리자 개인 계좌 제외)
       if (key && !mine.has(key)) continue
-      if (!flowBy.has(key)) flowBy.set(key, { in: 0, out: 0, items: [] })
+      if (!flowBy.has(key)) flowBy.set(key, { in: 0, out: 0, items: [], uncertainIn: 0 })
       const b = flowBy.get(key)
-      if (f.kind === 'in') { b.in += f.amount; planIn += f.amount } else { b.out += f.amount; planOut += f.amount }
       b.items.push(f)
+      if (f.kind === 'in') {
+        if (f.certain === false) { b.uncertainIn += f.amount; uncertainIn += f.amount; continue }
+        b.in += f.amount; planIn += f.amount
+      } else {
+        if (f.certain === false) uncertainOut += f.amount
+        b.out += f.amount; planOut += f.amount
+      }
     }
 
     /* 미래 구간의 '예상 잔액'은 **오늘~구간 시작 사이에 나갈 돈**도 빼야 한다.
@@ -87,6 +97,8 @@ router.get('/', async (req, res, next) => {
       for (const f of pre) {
         const k = f.account_id || ''
         if (k && !mine.has(k)) continue
+        // 다리 구간에서도 불확실한 유입은 안 센다 — 본 구간과 기준이 달라지면 안 된다
+        if (f.kind === 'in' && f.certain === false) continue
         bridge.set(k, (bridge.get(k) || 0) + (f.kind === 'in' ? f.amount : -f.amount))
       }
     }
@@ -98,7 +110,7 @@ router.get('/', async (req, res, next) => {
         id: a.id, name: a.name, bank: a.bank, owner: a.owner, number: a.number,
         balance: a.balance,                       // 구간 끝 시점 잔액(실적 기준)
         actualIn: act.in, actualOut: act.out,
-        planIn: pl.in, planOut: pl.out,
+        planIn: pl.in, planOut: pl.out, uncertainIn: pl.uncertainIn || 0,
         // 예정까지 반영한 예상 잔액. 미래 구간이면 오늘~구간 시작 사이 예정(pre)도 뺀다.
         expected: a.balance + pre + pl.in - pl.out,
         items: pl.items,
@@ -119,6 +131,7 @@ router.get('/', async (req, res, next) => {
         balance: sum(list, a => a.balance),
         actualIn: sum(list, a => a.actualIn), actualOut: sum(list, a => a.actualOut),
         planIn: sum(list, a => a.planIn), planOut: sum(list, a => a.planOut),
+        uncertainIn: sum(list, a => a.uncertainIn),
         expected: sum(list, a => a.expected),
       }
     }
@@ -146,6 +159,9 @@ router.get('/', async (req, res, next) => {
       totals: {
         actualIn: actual.in, actualOut: actual.out,
         planIn, planOut,
+        /* 기약 없는 몫 — 계산에서 뺀 것을 감추지 않는다.
+           planIn 은 확실한 것만이라, 화면이 "그 밖에 얼마가 걸려 있다"를 말할 수 있어야 한다. */
+        uncertainIn, uncertainOut,
         net: (actual.in - actual.out) + (planIn - planOut),
       },
     })
@@ -229,12 +245,21 @@ router.get('/timeline', async (req, res, next) => {
     const offAxis = (e) => e.noDue || e.overdue
     const dated = events.filter(e => !offAxis(e))
     const undatedItems = events.filter(offAxis)
+    /* ⚠ 이 버킷과 '기약 없는 돈'은 **뜻이 다르다.**
+     *   여기: 날짜축에 못 올린 것 전부(며칠 밀린 것도 포함) — 표 레이아웃 때문에 뺀 것
+     *   저기: 90일 넘게 밀렸거나 기한이 없는 것 — 판정 때문에 예측에서 뺀 것
+     * 둘 다 "뺐다"고 말하는데 뺀 곳이 달라서, 숫자가 나란히 뜨면 "왜 다르지"가 된다.
+     * 그래서 이 안에서 판정 몫이 얼마인지도 함께 낸다 — 두 숫자의 관계를 그 자리에서 밝힌다. */
     const undated = {
       in: undatedItems.filter(e => e.kind === 'in').reduce((s, e) => s + e.amount, 0),
       out: undatedItems.filter(e => e.kind === 'out').reduce((s, e) => s + e.amount, 0),
+      uncertainIn: undatedItems.filter(e => e.kind === 'in' && e.certain === false)
+        .reduce((s, e) => s + e.amount, 0),
       items: undatedItems.map(e => ({
         kind: e.kind, amount: e.amount, label: e.label, source: e.source,
         overdue: !!e.overdue, noDue: !!e.noDue,
+        // 왜 기약이 없는지 — 목록을 펼쳤을 때 그 줄에 적는다
+        certain: e.certain !== false, uncertainReason: e.uncertainReason || '',
         account_id: e.account_id, account_name: e.account_id ? (acctName.get(e.account_id) || null) : null,
       })),
     }
@@ -394,19 +419,28 @@ router.get('/series', async (req, res, next) => {
         if (id && !mine(id)) continue
         actualIn += v.in; actualOut += v.out
       }
-      let planIn = 0, planOut = 0
+      /* ⚠ 여기도 확실/불확실을 가른다. 안 가르면 **같은 화면 안에서 모순**이 난다 —
+         구간 비교는 '들어올 1,200만'인데 그 아래 요약은 '들어올 100만'으로 찍혔다.
+         판정은 위 목록·자금일보·홈과 같은 곳(lib/certainty.js)을 쓴다. */
+      let planIn = 0, planOut = 0, uncertainIn = 0, uncertainOut = 0
       if (p.to >= today) {
         const future = p.from > today
         const flows = await upcomingFlows(req.db, {
           from: future ? p.from : today, to: p.to, anchorPast: !future })
         for (const f of flows) {
           if (f.account_id && !mine(f.account_id)) continue
-          if (f.kind === 'in') planIn += f.amount; else planOut += f.amount
+          if (f.kind === 'in') {
+            if (f.certain === false) { uncertainIn += f.amount; continue }
+            planIn += f.amount
+          } else {
+            if (f.certain === false) uncertainOut += f.amount
+            planOut += f.amount
+          }
         }
       }
       out.push({
         ...p, state,
-        actualIn, actualOut, planIn, planOut,
+        actualIn, actualOut, planIn, planOut, uncertainIn, uncertainOut,
         in: actualIn + planIn, out: actualOut + planOut,
         net: (actualIn + planIn) - (actualOut + planOut),
       })

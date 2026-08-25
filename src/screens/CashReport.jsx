@@ -132,6 +132,30 @@ export const CashReportScreen = ({ page = true }) => {
           badge={`${data.payable.count}건`}/>
       </KpiRow>
 
+      {/* 기약 없는 돈 — **계산에서 뺀 몫을 감추지 않는다.**
+          빼 놓고 화면에도 안 적으면 "그 돈은 어디 갔나"가 된다.
+          ⚠ 들어올 돈과 나갈 돈에서 처리가 서로 반대라, 그 사실을 문장으로 밝힌다.
+             같은 말로 적으면 한쪽은 반드시 오해된다. */}
+      {(f.uncertainIn > 0 || f.uncertainOut > 0) && (
+        <div className="card card-pad" style={{ marginBottom: 20 }}>
+          <div className="text-sm fw-700" style={{ marginBottom: 8 }}>기약 없는 돈</div>
+          <div className="text-sm text-muted" style={{ lineHeight: 1.8 }}>
+            {f.uncertainIn > 0 && (<>
+              들어올 돈 <b className="num" style={{ color: 'var(--pos-ink)' }}>{fmtNum(f.uncertainIn)}원</b>
+              <span className="text-muted2"> ({f.uncertainInCount}건)</span>
+              {' '}— 장기 미수·기한 미정·오래 밀린 건이에요.
+              <b> 위 예측에서 뺐습니다</b> (없는 셈 쳐야 안전해요).<br/>
+            </>)}
+            {f.uncertainOut > 0 && (<>
+              나갈 돈 <b className="num" style={{ color: 'var(--neg-ink)' }}>{fmtNum(f.uncertainOut)}원</b>
+              <span className="text-muted2"> ({f.uncertainOutCount}건)</span>
+              {' '}— 기한을 모르는 미지급·퇴직금이에요.
+              <b> 위 예측에 그대로 넣었습니다</b> (있는 셈 쳐야 안전해요).
+            </>)}
+          </div>
+        </div>
+      )}
+
       <div className="cols-2">
         {/* 계좌별 잔액 */}
         <div className="card" style={{ overflow: 'hidden' }}>
@@ -240,8 +264,18 @@ export const CashReportScreen = ({ page = true }) => {
                     }}>
                       <span className="text-sm" style={{ flex: 1, minWidth: 0 }}>
                         {it.label || '—'}
-                        {it.overdue && <span className="badge neg" style={{ marginLeft: 6, fontSize: 10 }}>기한 지남</span>}
-                        {it.noDue && <span className="badge warn" style={{ marginLeft: 6, fontSize: 10 }}>기한 미정</span>}
+                        {/* 불확실 배지가 더 무거운 말이라 '기한 지남'을 포함한다.
+                            둘 다 붙이면 '기한 지남 · 146일 밀림'처럼 같은 말이 두 번 보인다. */}
+                        {it.overdue && it.certain !== false && (
+                          <span className="badge neg" style={{ marginLeft: 6, fontSize: 10 }}>기한 지남</span>
+                        )}
+                        {/* 왜 기약이 없는지를 그 줄에 적는다 — '기한 미정'만으로는
+                            장기 미수와 오래 밀린 건을 구분할 수 없다 */}
+                        {it.certain === false && (
+                          <span className="badge warn" style={{ marginLeft: 6, fontSize: 10 }}>
+                            {it.uncertainReason || '기한 미정'}
+                          </span>
+                        )}
                       </span>
                       <span className="text-xs text-muted2" style={{ flexShrink: 0 }}>{it.source}</span>
                       <span className="num-cell text-sm" style={{
