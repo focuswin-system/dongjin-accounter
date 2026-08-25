@@ -2154,7 +2154,13 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} confirmClose={mode === 'edit'}>
         <DrawerHead
           title={editing ? detail?.name : `${isCard ? '카드' : '계좌'} 등록`}
-          sub={editing ? (mode === 'view' ? [detail?.bankName, detail?.type].filter(Boolean).join(' · ') : '수정 중') : null}
+          /* 카드는 옛 type(법인카드/체크카드…) 대신 소유·결제방식으로 적는다 —
+             목록·상세와 같은 말이어야 한다(폼에서 그 칩을 걷어낸 이유와 같다). */
+          sub={editing ? (mode === 'view'
+            ? [detail?.bankName, isCard
+                ? [detail?.owner === 'personal' ? '대표 개인' : '법인', detail?.cardType === 'check' ? '체크' : '신용'].join(' · ')
+                : detail?.type].filter(Boolean).join(' · ')
+            : '수정 중') : null}
           onClose={() => setDrawerOpen(false)}/>
 
         {mode === 'view' && detail ? (
