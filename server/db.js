@@ -1240,6 +1240,23 @@ async function initDb(conn) {
      * 0=일 … 1=월(기본). 마감일 0 은 '달력월 그대로'라는 뜻이다. */
     await ensureColumn('company_info', 'closing_day',    "closing_day TINYINT NOT NULL DEFAULT 0")
     await ensureColumn('company_info', 'week_start_day', "week_start_day TINYINT NOT NULL DEFAULT 1")
+    /* 주거래 계좌·카드 — "업무마다 늘 쓰는 그것"을 앞에 세우기 위한 값.
+     *
+     * ⚠ 기존 main_account 와 **다른 것**이다. 그건 VARCHAR(계좌 **이름**)이고 쓰임도 하나뿐
+     *   — 세금계산서·청구서에 찍는 수금 계좌 문구다. 이름을 바꾸면 연결이 끊기고, 화면의
+     *   계좌 선택과는 아무 상관이 없다. 그래서 은퇴시키지 않고 그대로 둔다(문서 표기용).
+     *   여기 셋은 **accounts.id** 라 이름이 바뀌어도 안 끊긴다.
+     *
+     * 실사용 문의: "회사의 주입금/주지출 계좌·카드를 회사정보에서 지정하고, 업무에 따라
+     * 바로바로 그 계좌가 앞에 정렬되고 선택되는 기능이 필요함."
+     *
+     * ⚠ **앞에 세우기만 한다. 자동 선택은 안 한다.** 미리 골라 두면 사용자가 확인 없이
+     *   지나가고, 다른 통장에서 나간 돈이 주거래로 기록된다 — 방금 현금/카드에서 그런
+     *   사고를 겪었다(결제수단을 바꿔도 계좌가 남아 카드에 달렸다). 순서만 바꾸는 것은
+     *   틀린 기록을 만들지 않는다. */
+    await ensureColumn('company_info', 'main_in_account_id',  'main_in_account_id VARCHAR(36)')
+    await ensureColumn('company_info', 'main_out_account_id', 'main_out_account_id VARCHAR(36)')
+    await ensureColumn('company_info', 'main_card_id',        'main_card_id VARCHAR(36)')
     await ensureColumn('vendors',   'bank_name',      "bank_name VARCHAR(60)")
     await ensureColumn('vendors',   'bank_account',   "bank_account VARCHAR(60)")
     await ensureColumn('vendors',   'account_holder', "account_holder VARCHAR(100)")

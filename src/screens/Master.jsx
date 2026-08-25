@@ -1738,7 +1738,8 @@ const AdjustDrawer = ({ account, onClose, onSave }) => {
 // ── 회사 정보 패널 (자사 기준정보, 단일 레코드) ────────────────────
 const CompanyPanel = ({ embedded = false }) => {
   const toast = useToast()
-  const [form, setForm] = useState({ name:'', biz_no:'', ceo:'', biz_type:'', biz_item:'', address:'', phone:'', fax:'', email:'', main_account:'', closing_day: 0, week_start_day: 1 })
+  const [form, setForm] = useState({ name:'', biz_no:'', ceo:'', biz_type:'', biz_item:'', address:'', phone:'', fax:'', email:'', main_account:'', closing_day: 0, week_start_day: 1,
+    main_in_account_id: '', main_out_account_id: '', main_card_id: '' })
   const [accounts, setAccounts] = useState([])
   // 회계 처리 방식 — 저장 버튼과 무관하게 토글 즉시 반영된다(장부 규약이라 되돌리기 쉬워야 한다)
   const [acctPrefs, setAcctPrefs] = useState({ voucher_issuance: true })
@@ -1749,6 +1750,9 @@ const CompanyPanel = ({ embedded = false }) => {
         name: c.name||'', biz_no: c.biz_no||'', ceo: c.ceo||'', biz_type: c.biz_type||'',
         biz_item: c.biz_item||'', address: c.address||'', phone: c.phone||'', fax: c.fax||'',
         email: c.email||'', main_account: c.main_account||'',
+        main_in_account_id: c.main_in_account_id || '',
+        main_out_account_id: c.main_out_account_id || '',
+        main_card_id: c.main_card_id || '',
         closing_day: Number(c.closing_day) || 0, week_start_day: Number(c.week_start_day ?? 1),
       })
     })
@@ -1842,6 +1846,36 @@ const CompanyPanel = ({ embedded = false }) => {
             options={[{ value: '', label: '선택 안 함' }, ...accounts.map(a => ({ value: a.name, label: a.name }))]}
             placeholder="대표 입금계좌 선택"/>
           <div className="text-xs text-muted2" style={{ marginTop: 6 }}>세금계산서·청구서에 표기할 기본 수금 계좌예요.</div>
+        </div>
+
+        <div style={{ height: 1, background:'var(--line)' }}/>
+
+        {/* 주거래 계좌·카드 — 업무마다 늘 쓰는 그것을 계좌 선택에서 **앞에 세운다.**
+            ⚠ 미리 고르지는 않는다. 자동 선택은 사용자가 확인 없이 지나가게 만들고,
+              그러면 다른 통장에서 나간 돈이 주거래로 기록된다(현금/카드에서 실제로 겪었다).
+              순서를 바꾸는 것은 틀린 기록을 만들지 않지만, 미리 고르는 것은 만든다. */}
+        <div>
+          <div className="fw-600" style={{ marginBottom: 4 }}>주거래 계좌·카드</div>
+          <div className="text-xs text-muted2" style={{ marginBottom: 12 }}>
+            업무마다 늘 쓰는 계좌를 지정하면 <b>계좌 고르는 자리에서 맨 앞에</b> 나와요.
+            자동으로 골라지지는 않아요 — 확인 없이 지나가면 엉뚱한 통장에 기록될 수 있어서요.
+          </div>
+          <div className="row gap-16" style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            {[
+              ['main_in_account_id',  '주입금 계좌', '돈이 들어오는 일 — 청구서 입금·수시입금', a => a.kind !== 'card'],
+              ['main_out_account_id', '주지출 계좌', '돈이 나가는 일 — 지급·경비·이체',       a => a.kind !== 'card'],
+              ['main_card_id',        '주카드',     '카드로 쓰는 일',                        a => a.kind === 'card'],
+            ].map(([key, label, hint, pick]) => (
+              <div key={key} style={{ flex: 1, minWidth: 220 }}>
+                <label className="label" style={{ marginBottom: 8 }}>{label}</label>
+                <Combobox value={form[key] || ''} onChange={v => f(key, v)} allowAdd={false}
+                  options={[{ value: '', label: '지정 안 함' },
+                    ...accounts.filter(pick).map(a => ({ value: a.id, label: a.name, sub: a.bank || undefined }))]}
+                  placeholder={`${label} 선택`}/>
+                <div className="text-xs text-muted2" style={{ marginTop: 6 }}>{hint}</div>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div style={{ height: 1, background:'var(--line)' }}/>

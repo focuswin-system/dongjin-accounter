@@ -13,6 +13,7 @@ import { InvoiceLines, lineVat, blankLine, isFilledLine } from '../lib/component
 import { StatementDoc } from '../lib/components/StatementDoc'
 import { computeLineAmount } from '../lib/lineAmount'
 import { accountLabels, accountIdByLabel } from '../lib/accountLabel'
+import { withMainFirst, isMainAccount, MAIN_BADGE } from '../lib/mainAccount'
 import { taxInvoiceImportAdapter } from '../lib/taxInvoiceImport'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
@@ -634,6 +635,8 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   })
   const [vendors, setVendors] = useState([])
   const [accounts, setAccounts] = useState([])
+  // 회사 정보 — 주거래 계좌를 앞에 세우는 데 쓴다(lib/mainAccount.js)
+  const [company, setCompany] = useState(null)
   const [contracts, setContracts] = useState([])
   // 거래명세서식 품목 내역(선택) — 있으면 합계가 공급가액이 된다
   const [lines, setLines] = useState([])
@@ -653,9 +656,18 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   useEffect(() => {
     api.getCategories().then(setCategories)
     api.getVendors().then(setVendors)
-    api.getAccounts().then(list => {
+    /* ⚠ 기본 계좌가 이미 자동으로 골라지고 있었다(`list[0]`) — **가나다순 첫 줄**이라
+       카드가 걸릴 수도 있었다. 주거래가 지정돼 있으면 그것을, 없으면 통장 첫 줄을 쓴다.
+       발행은 돈이 들어오는 일(주입금), 수취는 나가는 일(주지출)이다. */
+    Promise.all([api.getAccounts(), api.getCompany()]).then(([list, co]) => {
       setAccounts(list)
-      setForm(f => ({ ...f, accountId: f.accountId || list[0]?.id || "" }))
+      setCompany(co)
+      setForm(f => {
+        if (f.accountId) return f
+        const wantId = co?.[f.kind === 'issued' ? 'main_in_account_id' : 'main_out_account_id']
+        const pick = list.find(a => a.id === wantId) || list.find(a => a.kind !== 'card') || list[0]
+        return { ...f, accountId: pick?.id || "" }
+      })
     })
     api.getContracts().then(setContracts)
     api.getRefItems('item').then(setItemMaster)   // 품목 내역에서 고를 기준정보
@@ -934,11 +946,18 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
             <div className="row gap-6" style={{ flexWrap: "wrap" }}>
               {/* 이름이 겹치는 계좌에만 은행·끝자리가 붙는다 — 같은 이름의 공용 카드가
                   두 장 있으면 칩만 보고는 어느 쪽인지 고를 수 없다(lib/accountLabel.js) */}
-              {accountLabels(accounts).map(acc => (
+              {/* 주거래를 맨 앞으로 — 매일 쓰는 통장이 가나다순 뒤에 있으면 매번 눈으로 찾는다.
+                  ⚠ 앞에 세우기만 하고 미리 고르지는 않는다(lib/mainAccount.js 주석 참조).
+                  발행 청구서는 돈이 들어오는 일이라 'in', 수취는 나가는 일이라 'out' 축이다. */}
+              {withMainFirst(accountLabels(accounts), company,
+                             form.kind === "issued" ? 'in' : 'out').map(acc => (
                 <button key={acc.id} type="button"
                   className={`chip ${form.accountId === acc.id ? "active" : ""}`}
                   onClick={() => f("accountId", acc.id)}>
                   <Icon.Bank size={12}/>{acc.label}
+                  {isMainAccount(acc, company, form.kind === "issued" ? 'in' : 'out') && (
+                    <span className="text-muted2" style={{ fontSize: 10, marginLeft: 3 }}>{MAIN_BADGE}</span>
+                  )}
                 </button>
               ))}
             </div>

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { Icon, fmtNum, useToast, Combobox, Drawer, MoneyInput, localToday, DateInput } from '../lib/ui'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
+import { withMainFirst, isMainAccount, MAIN_BADGE } from '../lib/mainAccount'
 import { quickAddCategory, quickAddRefItemWithId } from '../lib/quickAdd'
 
 // 과세유형 3종. 영세 = 세율 0%인 과세거래(수출·해외용역) — 세액은 0이지만 과세표준엔 들어간다.
@@ -88,10 +89,27 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   const [vendors, setVendors] = useState([]);
   const [vendorAccounts, setVendorAccounts] = useState([]);   // 고른 거래처의 계좌들(여럿일 수 있다)
   const [accounts, setAccounts] = useState([]);
+  // 회사 정보 — 주거래 계좌·카드를 앞에 세우는 데 쓴다(lib/mainAccount.js)
+  const [company, setCompany] = useState(null);
+  /* 기본으로 골라 둘 계좌 — 주거래가 있으면 그것, 없으면 통장 첫 줄.
+     ⚠ 이 자리는 **원래도 자동 선택**하던 곳이다(accounts[0]). 새로 위험을 만드는 게 아니라
+       더 맞는 것으로 바꾸는 것이다. 칩 목록은 여전히 앞에 세우기만 하고 미리 고르지 않는다. */
+  const defaultAccountName = () => {
+    const wantId = company?.[initialKind === 'income' ? 'main_in_account_id' : 'main_out_account_id']
+    const pick = accounts.find(a => a.id === wantId) || accounts.find(a => a.kind !== 'card') || accounts[0]
+    return pick?.name || ''
+  };
   /* 계좌를 세 갈래로 나눠 쓴다 — 결제수단마다 고를 수 있는 것이 다르다.
      현금(금고 시재)을 통장 칩에 섞어 두면 "이체로 현금을 냈다"는 말이 안 되는 기록이 생긴다. */
   const isCashAcct = (a) => a.kind !== 'card' && a.type === '현금'
-  const bankAccounts = accounts.filter(a => a.kind !== 'card' && !isCashAcct(a))
+  /* 주거래를 맨 앞으로 — 매일 쓰는 통장이 가나다순 일곱 번째에 있으면 매번 눈으로 찾는다.
+     ⚠ **앞에 세우기만 한다.** 미리 골라 두면 확인 없이 지나가 엉뚱한 통장에 기록된다
+       (결제수단을 바꿔도 계좌가 남아 현금이 카드에 달린 사고를 방금 겪었다).
+     지출 폼이라 'out' 축이다 — 수입이면 'in'. */
+  const use = kind === 'income' ? 'in' : 'out'
+  const bankAccounts = withMainFirst(
+    accounts.filter(a => a.kind !== 'card' && !isCashAcct(a)), company, use)
+  const cardAccounts = withMainFirst(accounts.filter(a => a.kind === 'card'), company, 'card')
   const cashAccounts = accounts.filter(isCashAcct)
   const [categories, setCategories] = useState([]);
   const [items, setItems] = useState([]);            // 품목(선택)
@@ -135,9 +153,17 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
 
   useEffect(() => {
     api.getVendors().then(setVendors);
-    api.getAccounts().then(list => {
+    /* ⚠ 기본 계좌는 이미 자동으로 골라지고 있었다(`list[0]`). 그런데 그건 **가나다순 첫 줄**이라
+       카드가 걸릴 수도 있었다 — 기본 결제수단이 계좌이체인데 카드가 골라져 있는 셈이다.
+       주거래 계좌가 지정돼 있으면 그것을, 없으면 통장 중 첫 줄을 쓴다.
+       (이미 고르고 있던 자리라 새로 위험을 만드는 게 아니다 — 더 맞는 것으로 바꾸는 것이다.
+        칩 목록은 여전히 앞에 세우기만 하고 미리 고르지 않는다.) */
+    Promise.all([api.getAccounts(), api.getCompany()]).then(([list, co]) => {
       setAccounts(list);
-      if (list.length > 0) setForm(f => ({ ...f, account: f.account || list[0].name }));
+      setCompany(co);
+      const wantId = co?.[kind === 'income' ? 'main_in_account_id' : 'main_out_account_id']
+      const pick = list.find(a => a.id === wantId) || list.find(a => a.kind !== 'card') || list[0]
+      if (pick) setForm(f => ({ ...f, account: f.account || pick.name }));
     });
     api.getContracts().then(list => setContracts(list));
     // 고르기만 하면 되므로 최소 목록 — 전체 목록은 급여까지 담고 있어 인사 권한이 필요하다
@@ -159,13 +185,16 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       setKind(initialKind);
       setStaleFundCode('');
       setShowOrderFields(false);
-      setForm({ ...initialFormFor(initialKind, initialContract, accounts[0]?.name || "", initialCostContract),
+      /* ⚠ 기본 계좌는 `accounts[0]` — **가나다순 첫 줄**이었다. 카드가 걸릴 수도 있고,
+         주거래를 지정해 뒀는데 엉뚱한 통장이 골라져 있으면 "왜 이게 선택돼 있지"가 된다.
+         주거래 → 통장 첫 줄 순으로 고른다(로더와 같은 규칙). */
+      setForm({ ...initialFormFor(initialKind, initialContract, defaultAccountName(), initialCostContract),
         vendor: initialVendor || "",
         category: initialCategory || "",   // 환불·환입처럼 비목을 미리 지정하고 여는 경우
         memo: initialMemo || "" });
       setShowMore(false);
     }
-  }, [open, initialKind, initialContract, initialCostContract, initialVendor, initialCategory, initialMemo]);
+  }, [open, initialKind, initialContract, initialCostContract, initialVendor, initialCategory, initialMemo, accounts, company]);
 
   // 편집 모드: 기존 데이터 프리필 — 열 때 1회. 참조목록(categories·items) 로드와 무관하게
   // editTxn에서 직접 복원(품목명·직원명은 서버 조인으로 옴) → 늦은 로드가 입력 중 폼을 리셋하지 않게 함
@@ -665,6 +694,9 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                       <button key={a.id} type="button" className={`chip ${form.account === a.name ? "active" : ""}`}
                         onClick={() => setForm({...form, account: a.name})}>
                         <Icon.Bank size={12}/>{a.name}
+                        {isMainAccount(a, company, use) && (
+                          <span className="text-muted2" style={{ fontSize: 10, marginLeft: 3 }}>{MAIN_BADGE}</span>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -680,12 +712,16 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                 )}
                 {(form.method === "법인카드" || form.method === "개인카드") && (
                   <div className="row gap-6" style={{ flexWrap: "wrap", marginTop: 8 }}>
-                    {accounts.filter(a => a.kind === "card").length === 0 ? (
+                    {cardAccounts.length === 0 ? (
                       <span className="text-xs text-muted2">등록된 카드가 없어요. 설정 → 계좌/카드에서 추가하세요.</span>
-                    ) : accounts.filter(a => a.kind === "card").map(a => (
+                    ) : cardAccounts.map(a => (
                       <button key={a.id} type="button" className={`chip ${form.account === a.name ? "active" : ""}`}
                         onClick={() => setForm({...form, account: a.name})}>
                         <Icon.Card size={12}/>{a.name}
+                        {/* 왜 맨 앞인지 말해주지 않으면 "왜 순서가 이렇지"가 된다 */}
+                        {isMainAccount(a, company, 'card') && (
+                          <span className="text-muted2" style={{ fontSize: 10, marginLeft: 3 }}>{MAIN_BADGE}</span>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -719,10 +755,13 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
             ) : (
               <FormField label="입금 계좌" required>
                 <div className="row gap-6" style={{ flexWrap: "wrap" }}>
-                  {accounts.filter(a => a.kind !== "card").map(a => (
+                  {bankAccounts.map(a => (
                     <button key={a.id} type="button" className={`chip ${form.account === a.name ? "active" : ""}`}
                       onClick={() => setForm({...form, account: a.name})}>
                       <Icon.Bank size={12}/>{a.name}
+                      {isMainAccount(a, company, use) && (
+                        <span className="text-muted2" style={{ fontSize: 10, marginLeft: 3 }}>{MAIN_BADGE}</span>
+                      )}
                     </button>
                   ))}
                 </div>
