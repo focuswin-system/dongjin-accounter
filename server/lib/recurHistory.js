@@ -73,9 +73,14 @@ async function recurHistory(db, kind, rule, today) {
   const [skipRows] = await db.execute(
     'SELECT due_date, reason, created_at FROM recurring_skips WHERE kind = ? AND recurring_id = ? ORDER BY due_date',
     [kind, rule.id])
-  const skipped = skipRows.map(s => ({
-    state: 'skipped', date: day(s.due_date), reason: s.reason || '',
-  }))
+  /* ⚠ 같은 날짜에 청구서도 있고 건너뜀 기록도 있을 수 있다. 소급 등록은 건너뛴 달을
+     걸러내지 않아서(routes 의 preview 가 r.skips 를 안 채운다), 건너뛴 뒤 그 기간을
+     소급하면 둘이 겹친다. **청구서가 이겼다** — 돈이 실제로 오간 쪽이 진실이고,
+     건너뜀 기록은 그 순간 효력을 잃은 것이다. 두 줄로 내면 같은 달이 두 번 나온다. */
+  const doneDays = new Set(done.map(c => c.date))
+  const skipped = skipRows
+    .map(s => ({ state: 'skipped', date: day(s.due_date), reason: s.reason || '' }))
+    .filter(s => !doneDays.has(s.date))
 
   /* 3. 앞으로 올 회차 — 규칙에서 계산한다(아직 실물이 없으니 여기밖에 근거가 없다).
        건너뛴 날은 dueDatesToGenerate 가 rule.skips 로 걸러낸다. */
@@ -95,7 +100,7 @@ async function recurHistory(db, kind, rule, today) {
    *   실제로 회차가 하나 만들어진 뒤부터가 "이 규칙이 돌고 있던 기간"이라고 말할 수 있다. */
   const missing = []
   if (done.length) {
-    const known = new Set([...done.map(c => c.date), ...skipped.map(c => c.date)])
+    const known = new Set([...doneDays, ...skipped.map(c => c.date)])
     for (const d of backfillCycles(rule, done[0].date, today)) {
       const ds = day(d)
       if (!known.has(ds)) missing.push({ state: 'missing', date: ds })
