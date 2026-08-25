@@ -1389,6 +1389,23 @@ async function initDb(conn) {
      * "그 날 한꺼번에 빠질 돈"이 허수로 잡혔다(이미 빠진 돈인데). */
     await ensureColumn('accounts', 'card_type', "card_type VARCHAR(10) NOT NULL DEFAULT 'credit'")
 
+    /* 옛 `type` 값을 새 두 칸으로 옮긴다 — **한 번만.**
+     *
+     * 카드의 `type` 은 `법인카드 / 개인카드 / 체크카드` 였는데 이건 두 축을 한 칸에 섞은 것이다:
+     * 법인·개인은 **소유**(owner), 체크는 **결제 방식**(card_type). 그래서 새 칸을 만들 때
+     * 옛 값을 안 읽으면 **실제 체크카드가 전부 '신용'으로 박힌다** — 태영엔지니어링에
+     * 체크카드 2장이 그렇게 들어갔다(자금 예측이 그 카드를 결제일에 다시 세울 뻔했다).
+     *
+     * ⚠ 데이터를 **변형**하므로 runOnce 로 감싼다. 매 부팅마다 돌면 사용자가 나중에
+     *   '신용'으로 고쳐 둔 것을 다시 '체크'로 되돌려 버린다.
+     * 덮어쓰지 않는다 — 이미 값이 갈라진 행(누가 손으로 고쳐 둔 것)은 건드리지 않는다. */
+    await runOnce('card_type_from_legacy_type_20260825', async () => {
+      await c.execute(
+        "UPDATE accounts SET card_type = 'check' WHERE kind = 'card' AND type = '체크카드' AND card_type = 'credit'")
+      await c.execute(
+        "UPDATE accounts SET owner = 'personal' WHERE kind = 'card' AND type = '개인카드' AND owner = 'corp'")
+    })
+
     /* ── 정액형 / 변동형 ────────────────────────────────────────
      * 매달 같은 날 청구·지급하는데 **금액만 다른** 건이 흔하다(전기·수도·통신·클라우드,
      * 사용량 유지보수, 주기가 있는 보험료). 여태는 규칙의 금액이 확정값이라, 회차를 발행하면

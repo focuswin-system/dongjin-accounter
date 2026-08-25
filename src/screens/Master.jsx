@@ -2122,7 +2122,12 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
                     <span className="badge" style={{ marginLeft: 6, fontSize: 10 }}>개인</span>
                   )}
                 </td>
-                <td className="text-sm text-muted">{a.type || '—'}</td>
+                {/* 카드는 소유·결제방식이 곧 종류다(위 폼 주석 참조). type 은 옛 값이라 안 쓴다. */}
+                <td className="text-sm text-muted">
+                  {isCard
+                    ? [a.owner === 'personal' ? '대표 개인' : '법인', a.cardType === 'check' ? '체크' : '신용'].join(' · ')
+                    : (a.type || '—')}
+                </td>
                 <td className="text-sm">{a.bankName || '—'}</td>
                 <td className="text-sm num">{a.number || '—'}</td>
                 <td className="text-sm">{a.purpose || '—'}</td>
@@ -2186,7 +2191,10 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
             )}
 
             <dl className="detail-list">
-              <dt>{isCard ? '카드 종류' : '예금 종류'}</dt><dd>{detail.type || '—'}</dd>
+              <dt>{isCard ? '카드 종류' : '예금 종류'}</dt>
+              <dd>{isCard
+                ? [detail.owner === 'personal' ? '대표 개인' : '법인', detail.cardType === 'check' ? '체크' : '신용'].join(' · ')
+                : (detail.type || '—')}</dd>
               <dt>{isCard ? '카드사' : '은행'}</dt><dd>{detail.bankName || '—'}</dd>
               <dt>{isCard ? '카드번호' : '계좌번호'}</dt><dd className="num">{detail.number || '—'}</dd>
               <dt>용도</dt><dd>{detail.purpose || '—'}</dd>
@@ -2199,15 +2207,23 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
           </div>
         ) : (
         <div className="drawer-body col gap-form">
-          {/* 종류 선택은 없다 — 어느 화면에서 열었는지가 곧 종류다(위 isCard 주석 참고) */}
-          <div>
-            <label className="label" style={{ marginBottom: 8 }}>{isCard ? '카드 종류' : '예금 종류'}</label>
-            <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
-              {subTypes.map(t => (
-                <button key={t} type="button" className={`chip ${form.type === t ? 'active' : ''}`} onClick={() => f('type', t)}>{t}</button>
-              ))}
+          {/* 예금 종류는 통장에만 낸다.
+              ⚠ 카드에서 걷어낸 이유: 옛 목록이 `법인카드 / 개인카드 / 체크카드` 였는데
+                이건 **두 축을 한 칸에 섞은 것**이다 — 법인/개인은 '소유', 체크는 '결제 방식'.
+                그런데 이 폼에는 소유(owner)와 결제 방식(card_type)이 각각 따로 있다.
+                셋을 두면 서로 모순될 수 있다(종류=개인카드인데 소유=법인, 종류=체크카드인데
+                결제방식=신용). 실제로 운영 데이터에 카드인데 종류가 '보통예금'인 것도 있었다.
+                → 소유는 owner, 결제 방식은 card_type 하나씩만 쓴다. */}
+          {!isCard && (
+            <div>
+              <label className="label" style={{ marginBottom: 8 }}>예금 종류</label>
+              <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+                {subTypes.map(t => (
+                  <button key={t} type="button" className={`chip ${form.type === t ? 'active' : ''}`} onClick={() => f('type', t)}>{t}</button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* 신용 / 체크 — **결제 방식이 정반대**라 먼저 갈라야 한다.
                 신용  사용액이 쌓였다가 결제일에 통장에서 한꺼번에 빠진다 → 결제일·결제계좌가 필요
