@@ -306,7 +306,17 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
         `SELECT COALESCE(SUM(amount), 0) AS used FROM transactions
           WHERE account_id = ? AND kind = 'expense' AND date > ? AND date <= ?`,
         [c.id, prevPay, payDate])
-      const used = num(u.used)
+      /* ⚠ 그 사이 **이미 결제한 금액**을 뺀다.
+       * 계좌 간 이체가 생기면서 사용자가 결제일보다 **먼저** 카드값을 낼 수 있게 됐다.
+       * 그러면 실제 출금은 이미 잔액에 반영돼 있는데 예측은 결제일에 같은 금액을 또
+       * 세운다 — 그 날 잔고가 실제보다 낮게 보이고, **헛된 부족 경고**가 뜬다.
+       * 카드로 들어온 이체(income + transfer_id)가 곧 결제액이다. */
+      const [[p]] = await db.execute(
+        `SELECT COALESCE(SUM(amount), 0) AS paid FROM transactions
+          WHERE account_id = ? AND kind = 'income' AND transfer_id IS NOT NULL
+            AND date > ? AND date <= ?`,
+        [c.id, prevPay, payDate])
+      const used = num(u.used) - num(p.paid)
       if (used <= 0) continue
       out.push({
         date: payDate, kind: 'out', amount: used,

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, Drawer, localToday, DateInput } from '../ui'
+import { Icon, fmtNum, useToast, Drawer, localToday, DateInput, MoneyInput } from '../ui'
 import { DrawerHead } from './Drawer'
 import { api } from '../api'
 
@@ -23,20 +23,37 @@ export const PaidIssueDrawer = ({ target, isIssued, onClose, onDone, onIssuePaid
   const [accounts, setAccounts] = useState([])
   const [accountId, setAccountId] = useState("")
   const [date, setDate] = useState(today)
+  const [amount, setAmount] = useState('')
   const [busy, setBusy] = useState(false)
   useEffect(() => {
     if (!target) return
     setDate(localToday())
+    // 예상액을 채워 둔다 — 매출은 공급가액, 매입은 VAT 포함 합계
+    setAmount(String((isIssued ? (target.amount ?? 0) : (target.amount || 0) + (target.vat || 0)) || ''))
     api.getAccounts().then(a => { setAccounts(a); const bank = a.find(x => x.kind === 'bank'); setAccountId(bank ? bank.id : "") })
   }, [target])
   if (!target) return null
-  const supply = target.amount || 0
-  const vat = target.vat != null ? target.vat : Math.round(supply * 0.1)
+  /* 변동형이면 금액을 **여기서 고칠 수 있어야 한다.**
+   * 전기·통신처럼 자동이체로 이미 빠진 뒤 고지서를 보고 기록하는 것이 변동형의 주 경로다.
+   * 그런데 이 드로어는 금액을 **보여주기만** 했고 issuePaid 도 금액을 안 보내서,
+   * 변동형 회차는 기입금/기지급 처리가 **서버 400 으로 막혔다**(실제로 그렇게 만들었다).
+   * 정액형은 종전대로 금액 칸을 내지 않는다 — 고칠 일이 없는 칸을 세우면 실수만 는다. */
+  const variable = target.amount_mode === 'variable'
+  /* ⚠ 매출은 **공급가액**, 매입은 **VAT 포함 합계**를 서버로 보낸다(각 라우트의 바디 이름과
+     계산이 다르다 — routes/recurring.js expenseVat 는 총액에서 세액을 빼낸다).
+     한쪽으로 통일하면 반대쪽이 10% 어긋난 금액으로 기록된다. */
+  const typed = Number(String(amount).replace(/[^0-9-]/g, '')) || 0
+  const supply = !variable ? (target.amount || 0)
+    : (isIssued ? typed : Math.round(typed / 1.1))
+  const vat = (!variable && target.vat != null) ? target.vat
+    : (isIssued ? Math.round(supply * 0.1) : typed - supply)
   const total = supply + vat
   const submit = async () => {
     if (date > today) return toast.push("미래 날짜로는 처리할 수 없어요")
     setBusy(true)
-    const res = await onIssuePaid({ ...target, _accountId: accountId || null, _date: date })
+    if (variable && typed <= 0) { setBusy(false); return toast.push('금액을 입력해주세요', { tone: 'warn' }) }
+    // 매출은 공급가액, 매입은 총액을 그대로 보낸다(위 주석 참조)
+    const res = await onIssuePaid({ ...target, _accountId: accountId || null, _date: date, _amount: variable ? typed : null })
     setBusy(false)
     if (!res.ok) { toast.push(res.error || "처리에 실패했어요", { tone: "warn" }); return }
     toast.push(isIssued ? "기입금 처리했어요" : "기지급 처리했어요")
@@ -53,6 +70,18 @@ export const PaidIssueDrawer = ({ target, isIssued, onClose, onDone, onIssuePaid
           <Icon.Sparkle/>
           <div className="text-sm">청구서를 발행하고 <b>{fmtNum(total)}원</b>을 {isIssued ? "입금" : "지급"} 완료로 함께 기록해요. {isIssued ? "입금받은" : "출금한"} 계좌를 선택하세요.</div>
         </div>
+        {variable && (
+          <div>
+            <label className="label">
+              {isIssued ? '공급가액' : '금액'} <span style={{ color: 'var(--neg-ink)' }}>*</span>
+              {!isIssued && <span className="text-muted2 fw-600" style={{ fontSize: 11 }}> · VAT 포함 합계</span>}
+            </label>
+            <MoneyInput value={amount} onChange={setAmount}/>
+            <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+              금액이 매번 다른 규칙이에요. 규칙에 적힌 값은 예상액이라, 실제 금액을 넣어주세요.
+            </div>
+          </div>
+        )}
         <div>
           <label className="label">{isIssued ? "입금 계좌" : "출금 계좌"}</label>
           <div className="row gap-6" style={{ flexWrap: "wrap" }}>

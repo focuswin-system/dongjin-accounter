@@ -276,7 +276,10 @@ export const useRecurringCycles = (kind, { onChanged } = {}) => {
 
   const issue = async (c) => {
     if (c.amount_mode === 'variable') {
-      setAmountAsk({ cycle: c, value: String(c.amount ?? '') })
+      /* 기본값(예상액)도 위와 같은 뜻으로 채운다 — 매출은 공급가액, 매입은 VAT 포함 합계.
+         pending 은 둘 다 amount=공급가·vat=세액으로 주므로 매입만 합쳐야 한다. */
+      const preset = sales ? (c.amount ?? '') : ((c.amount || 0) + (c.vat || 0))
+      setAmountAsk({ cycle: c, value: String(preset || '') })
       return
     }
     await doIssue(c, null)
@@ -284,7 +287,13 @@ export const useRecurringCycles = (kind, { onChanged } = {}) => {
 
   // 기입금/기지급은 계좌·날짜를 받아야 하므로 드로어를 띄운다(PaidIssueDrawer 공용)
   const openPaid = (c) => setPaidTarget(c)
-  const issuePaid = (t) => A.issue.call(api, t.recurring_id, { due: t.due_date, paid: true, account_id: t._accountId })
+  /* 드로어가 넘긴 _amount(변동형에서만 채워진다)를 서버로 실어 보낸다.
+     빼먹으면 변동형 회차는 기입금/기지급이 서버 400 으로 막힌다 — 실제로 그랬다.
+     매출은 supply_amount, 매입은 amount 로 이름이 갈린다(각 라우트의 바디 이름). */
+  const issuePaid = (t) => A.issue.call(api, t.recurring_id, {
+    due: t.due_date, paid: true, account_id: t._accountId,
+    ...(t._amount != null ? (sales ? { supply_amount: t._amount } : { amount: t._amount }) : {}),
+  })
 
   /* 놓친 회차 일괄 — 무엇이 만들어지는지 전부 보여주고 확인받는다(되돌리는 비용이 큰 동작).
    * 대상은 화면의 'overdue' 구획이 아니라 **서버가 실제로 처리하는 범위**(오늘까지 도래한 회차)다.
@@ -374,11 +383,21 @@ export const CycleAmountDrawer = ({ ask, sales, onChange, onClose, onConfirm, bu
       sub={ask ? `${ask.cycle.vendor_name || ''} · ${ask.cycle.due_date}` : ''} onClose={onClose}/>
     {ask && (
       <div className="drawer-body col gap-form">
+        {/* ⚠ 매출과 매입이 **받는 금액의 뜻이 다르다.**
+              매출(정기입금) 발행은 `supply_amount`(공급가액)를 받아 서버가 부가세를 붙이고,
+              매입(정기지급) 등록은 `amount`(VAT 포함 합계)를 받아 서버가 세액을 빼낸다
+              (routes/recurring.js expenseVat = recurFromTotal).
+              라벨을 한쪽으로 통일하면 반대쪽이 **10% 어긋난 금액**으로 기록된다. */}
         <div>
-          <label className="label">공급가액 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+          <label className="label">
+            {sales ? '공급가액' : '금액'} <span style={{ color: 'var(--neg-ink)' }}>*</span>
+            {!sales && <span className="text-muted2 fw-600" style={{ fontSize: 11 }}> · VAT 포함 합계</span>}
+          </label>
           <MoneyInput value={ask.value} onChange={onChange}/>
           <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-            부가세는 규칙의 설정대로 자동으로 붙어요. 고지서 금액이 부가세 포함이면 공급가액으로 나눠 넣으세요.
+            {sales
+              ? '부가세는 규칙의 설정대로 자동으로 붙어요. 고지서 금액이 부가세 포함이면 공급가액으로 나눠 넣으세요.'
+              : '고지서에 찍힌 금액을 그대로 넣으세요. 부가세는 규칙 설정에 따라 서버가 나눕니다.'}
           </div>
         </div>
         <div className="text-xs text-muted2" style={{ lineHeight: 1.7 }}>

@@ -244,6 +244,10 @@ router.post('/transfer', async (req, res, next) => {
     }
     const ae = amountError(amt)
     if (ae) return res.status(400).json({ error: ae })
+    /* ⚠ 날짜가 비었는지 **직접** 본다. futureDateError 는 `date &&` 로 시작해서
+       빈 값을 그냥 통과시킨다(미래가 아니니까). 그대로 INSERT 하면 NOT NULL 로
+       500 이 나고, 사용자는 왜 안 되는지 모른다. */
+    if (!date) return res.status(400).json({ error: '날짜를 입력해주세요' })
     const fe = futureDateError(date)
     if (fe) return res.status(400).json({ error: fe })
 
