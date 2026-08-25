@@ -2826,6 +2826,257 @@ const ReportLoan = ({ toast }) => {
   )
 }
 
+/* 카드 사용내역 — 카드별로 **쓴 돈과 갚은 돈**을 한 장에.
+ *
+ * 데이터는 여태 다 있었다(카드 계좌에 달린 지출이 곧 사용 기록이다). 없던 것은 **넘길 문서**다.
+ * 감사·세무사가 "이 카드 이번 분기 내역 주세요" 하면 거래내역을 계좌로 걸러 화면을 보고
+ * 손으로 옮겨 적었다. 차입금 현황을 여기 둔 이유와 같다.
+ *
+ * ⚠ '법인카드 사용 기록부'로 짓지 않는다. 중소기업은 **대표 개인 명의 카드로 회사 돈을 쓰는
+ *   일이 흔하다**(그래서 accounts.owner 가 있다). 법인만 다루면 개인 명의 사용분은 여전히
+ *   낼 문서가 없다. 전부 담고 소유로 거른다 — 법인만 뽑으면 그게 곧 법인카드 기록부다.
+ *
+ * ⚠ 쓴 돈 옆에 **갚은 돈**을 같이 놓는다. 사용액만 있으면 "그래서 통장에서 얼마 나갔나"를
+ *   알 수 없다. 신용카드는 쓴 달과 나가는 달이 다르기 때문이다.
+ *
+ * 숫자는 전부 서버(lib/cardReport.js)가 낸다. 화면에서 다시 더하지 않는다. */
+const ReportCard = ({ toast }) => {
+  const [period, setPeriod] = useState(() => periodToRange('month'))
+  const [owner, setOwner] = useState('all')
+  const [cardType, setCardType] = useState('all')
+  const [cardId, setCardId] = useState('')
+  const [d, setD] = useState(null)
+  // 카드 목록은 **한 장을 고르기 전 기준**으로 따로 받는다. 고른 응답으로 목록을 만들면
+  // 고르는 순간 드롭다운에 그 카드만 남아 전체로 되돌아올 수 없다(차입금 보고서와 같은 함정).
+  const [choices, setChoices] = useState([])
+
+  const q = { from: period.from, to: period.to, owner, cardType }
+
+  useEffect(() => {
+    let alive = true
+    api.getCardReport(q).then(x => { if (alive && x) setChoices(x.cards || []) })
+    return () => { alive = false }
+  }, [period.from, period.to, owner, cardType])
+
+  useEffect(() => {
+    let alive = true
+    setD(null)
+    api.getCardReport({ ...q, cardId }).then(x => { if (alive) setD(x) })
+    return () => { alive = false }
+  }, [period.from, period.to, owner, cardType, cardId])
+
+  // 고른 카드가 필터 밖으로 나가면(소유·종류를 바꿨을 때) 손에 든 선택을 놓는다.
+  useEffect(() => {
+    if (cardId && choices.length && !choices.some(c => c.id === cardId)) setCardId('')
+  }, [choices, cardId])
+
+  const controls = (
+    <div className="no-print">
+      <PeriodFilter value={period} onChange={setPeriod}/>
+      <div className="row gap-8" style={{ marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+        {/* 값이 셋뿐이라 칩. 카드는 회사마다 열 장 넘게 있어 Combobox */}
+        <span className="text-sm text-muted fw-600">소유</span>
+        {[['all', '전체'], ['corp', '법인'], ['personal', '대표 개인']].map(([v, l]) => (
+          <button key={v} type="button" className={`chip ${owner === v ? 'active' : ''}`}
+            onClick={() => setOwner(v)}>{l}</button>
+        ))}
+        <span className="chip-div"/>
+        <span className="text-sm text-muted fw-600">종류</span>
+        {[['all', '전체'], ['credit', '신용'], ['check', '체크']].map(([v, l]) => (
+          <button key={v} type="button" className={`chip ${cardType === v ? 'active' : ''}`}
+            onClick={() => setCardType(v)}>{l}</button>
+        ))}
+        <div style={{ width: 260 }}>
+          <Combobox value={cardId} onChange={setCardId} allowAdd={false}
+            options={[{ value: '', label: '전체 카드', sub: `${choices.length}장` },
+              ...choices.map(c => ({ value: c.id, label: c.name, sub: `${c.owner_label} · ${c.type_label}` }))]}
+            placeholder="카드 선택"/>
+        </div>
+      </div>
+    </div>
+  )
+
+  if (!d) return <div>{controls}<Loading label="카드 내역을 불러오는 중…"/></div>
+
+  const T = d.totals
+  if (!d.cards.length) {
+    return (
+      <div>
+        {controls}
+        <div className="text-sm text-muted2" style={{ padding: 24, textAlign: 'center' }}>
+          {owner === 'all' && cardType === 'all'
+            ? '등록된 카드가 없어요. 기준정보 › 계좌·카드에서 먼저 등록해주세요.'
+            : '조건에 맞는 카드가 없어요.'}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {controls}
+      <PeriodNote period={period}/>
+      {/* 무엇으로 걸러 본 것인지 인쇄물에도 남아야 한다 — 안 적히면 나중에 근거가 못 된다 */}
+      {(owner !== 'all' || cardType !== 'all') && (
+        <div className="text-sm text-muted" style={{ marginBottom: 12 }}>
+          범위: {owner === 'corp' ? '법인 명의' : owner === 'personal' ? '대표 개인 명의' : '전체 소유'}
+          {cardType !== 'all' ? ` · ${cardType === 'check' ? '체크카드' : '신용카드'}` : ''}
+        </div>
+      )}
+
+      <KpiRow cols={T.no_evidence ? 4 : 3} style={{ marginBottom: 24 }}>
+        <Kpi label="사용액" value={T.used} badge={`${T.count}건`}/>
+        <Kpi label="카드대금 결제" value={T.paid} tone="pos" hint="이 기간에 통장에서 카드로 나간 돈"/>
+        <Kpi label="카드" value={d.cards.length} unit="장"/>
+        {/* 증빙 미첨부는 **있을 때만** 낸다. 0건을 세워 두면 정상에 표식을 다는 꼴이다 */}
+        {!!T.no_evidence && <Kpi label="증빙 미첨부" value={T.no_evidence} unit="건" tone="neg"/>}
+      </KpiRow>
+
+      {/* 1. 카드별 요약 — 한 장만 볼 때는 한 줄짜리 표가 되니 그리지 않는다 */}
+      {!cardId && (
+        <div className="card" style={{ overflow: 'hidden', marginBottom: 20 }}>
+          <div className="card-pad fw-700" style={{ paddingBottom: 10 }}>카드별 요약</div>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>카드</th><th style={{ width: 80 }}>소유</th><th style={{ width: 70 }}>종류</th>
+                <th style={{ width: 70 }} className="num-right">건수</th>
+                <th className="num-right">사용액</th>
+                <th className="num-right">결제액</th>
+                <th style={{ width: 80 }}>결제일</th>
+                <th>결제계좌</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.cards.map(c => (
+                <tr key={c.id}>
+                  <td className="fw-700">{c.name}</td>
+                  <td className="text-sm text-muted">{c.owner_label}</td>
+                  <td className="text-sm text-muted">{c.type_label}</td>
+                  <td className="num-cell num-right">{c.count || '—'}</td>
+                  <td className="num-cell num-right fw-700">{c.used_total ? fmtNum(c.used_total) : '—'}</td>
+                  <td className="num-cell num-right" style={{ color: c.paid_total ? 'var(--pos)' : undefined }}>
+                    {c.paid_total ? fmtNum(c.paid_total) : '—'}</td>
+                  {/* 체크카드는 결제일이 없다 — 쓴 즉시 통장에서 빠진다 */}
+                  <td className="text-sm text-muted num">{c.pay_day ? `${c.pay_day}일` : '—'}</td>
+                  <td className="text-sm text-muted">{c.pay_account || '—'}</td>
+                </tr>
+              ))}
+              <tr>
+                <td className="fw-700">합계</td><td/><td/>
+                <td className="num-cell num-right fw-700">{T.count}</td>
+                <td className="num-cell num-right fw-700">{fmtNum(T.used)}</td>
+                <td className="num-cell num-right fw-700">{fmtNum(T.paid)}</td>
+                <td/><td/>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* 2. 카드별 사용 내역 */}
+      <div className="fw-700" style={{ margin: '24px 0 12px', fontSize: 15 }}>
+        카드별 사용 내역 <span className="text-sm text-muted fw-400">{T.count}건</span>
+      </div>
+      {d.cards.map(c => (
+        <div key={c.id} className="card" style={{ overflow: 'hidden', marginBottom: 14 }}>
+          <div className="row card-pad" style={{ paddingBottom: 10, gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+            <span className="fw-700">{c.name}</span>
+            <span className="text-sm text-muted">{c.owner_label} · {c.type_label}</span>
+            {c.number && <span className="text-sm text-muted2 num">{c.number}</span>}
+            <span className="text-sm text-muted ml-auto">
+              사용 <b className="num">{fmtNum(c.used_total)}</b>원
+              {c.paid_total ? <> · 결제 <b className="num">{fmtNum(c.paid_total)}</b>원</> : null}
+            </span>
+          </div>
+
+          {c.lines.length === 0 ? (
+            <div className="text-sm text-muted2" style={{ padding: '10px 18px 18px' }}>
+              이 기간에 사용 내역이 없어요.
+            </div>
+          ) : (
+            <table className="table">
+              <thead>
+                <tr>
+                  <th style={{ width: 110 }}>날짜</th>
+                  <th>거래처</th>
+                  <th style={{ width: 140 }}>비목</th>
+                  <th>내용</th>
+                  <th style={{ width: 110 }}>증빙</th>
+                  <th className="num-right" style={{ width: 130 }}>금액</th>
+                </tr>
+              </thead>
+              <tbody>
+                {c.lines.map(l => (
+                  <tr key={l.id}>
+                    <td className="text-sm num">{l.date}</td>
+                    <td className="text-sm">{l.vendor || '—'}</td>
+                    <td className="text-sm text-muted">{l.category || '—'}</td>
+                    <td className="text-sm text-muted">{l.memo || '—'}</td>
+                    {/* 챙긴 건에는 표식을 달지 않는다 — 눈에 띄어야 하는 건 빠진 쪽이다 */}
+                    <td className="text-sm">
+                      {l.evidence ? <span className="text-muted2">—</span>
+                        : <span style={{ color: 'var(--neg-ink)' }}>미첨부</span>}
+                    </td>
+                    <td className="num-cell num-right fw-700">{fmtNum(l.amount)}</td>
+                  </tr>
+                ))}
+                <tr>
+                  <td className="fw-700">소계</td><td/><td/><td/>
+                  {/* 미첨부 건수는 한 줄로 — 감기면 소계 줄만 키가 커져 표가 들쭉날쭉해진다 */}
+                  <td className="num-cell num-right text-muted" style={{ whiteSpace: 'nowrap' }}>
+                    {c.no_evidence ? `미첨부 ${c.no_evidence}건` : ''}</td>
+                  <td className="num-cell num-right fw-700">{fmtNum(c.used_total)}</td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+
+          {/* 3. 그 기간의 카드대금 결제 — 없으면 구획을 아예 그리지 않는다 */}
+          {c.payments.length > 0 && (
+            <>
+              <div className="card-pad text-sm fw-700" style={{ paddingTop: 14, paddingBottom: 8 }}>
+                카드대금 결제
+              </div>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 110 }}>결제일</th>
+                    <th>출금 계좌</th>
+                    <th>내용</th>
+                    <th className="num-right" style={{ width: 130 }}>결제액</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {c.payments.map(p => (
+                    <tr key={p.id}>
+                      <td className="text-sm num">{p.date}</td>
+                      <td className="text-sm">{p.from || '—'}</td>
+                      <td className="text-sm text-muted">{p.memo || '—'}</td>
+                      <td className="num-cell num-right" style={{ color: 'var(--pos)' }}>{fmtNum(p.amount)}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td className="fw-700">소계</td><td/><td/>
+                    <td className="num-cell num-right fw-700">{fmtNum(c.paid_total)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+      ))}
+
+      <div className="text-xs text-muted2" style={{ marginTop: 14, lineHeight: 1.7 }}>
+        · <b>사용액과 결제액은 서로 맞지 않는 것이 정상</b>이에요. 신용카드는 쓴 달과
+        통장에서 나가는 달이 다릅니다. 체크카드는 쓸 때 바로 빠져서 결제 줄이 없어요.<br/>
+        · 소유를 <b>법인</b>으로 두고 인쇄하면 그것이 법인카드 사용 기록부예요.<br/>
+        · 카드대금 결제는 <b>지급처리 › 계좌 이체</b>로 기록한 것만 담겨요.
+      </div>
+    </div>
+  )
+}
+
 /** 상환방식 표기 — 서버 lib/loanReport.js 의 METHOD_LABEL 과 같은 말을 써야 한다 */
 const LOAN_METHOD_LABEL = {
   equal_payment: '원리금균등', equal_principal: '원금균등',
@@ -2837,7 +3088,7 @@ const REPORT_VIEWS = {
   category: ReportCategory, vendor: ReportVendor, ar: ReportAR,
   subcontract: ReportSubcontract, defense: ReportDefense,
   taxoffice: ReportTaxOffice, vat: ReportVAT, fundsheet: ReportFundSheet,
-  loan: ReportLoan,
+  loan: ReportLoan, card: ReportCard,
 }
 
 export const ReportsScreen = () => {

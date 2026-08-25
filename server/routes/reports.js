@@ -7,6 +7,7 @@ const xlsx = require('xlsx')
 const { taxofficePack, SHEETS } = require('../lib/taxofficePack')
 const { fundSheet } = require('../lib/fundSheet')
 const { loanReport } = require('../lib/loanReport')
+const { cardReport } = require('../lib/cardReport')
 const { buildLoanWorkbook } = require('../lib/loanWorkbook')
 const { canSeeLaborDetail } = require('../lib/fundStatus')
 
@@ -321,6 +322,26 @@ router.get('/loans', async (req, res, next) => {
     res.json(await loanReport(req.db, {
       status: req.query.status === 'all' ? 'all' : 'active',
       loanId: req.query.loan_id || null,
+    }))
+  } catch (e) { next(e) }
+})
+
+/* 카드 사용내역 — 카드별로 **쓴 돈과 갚은 돈**을 한 장에.
+ *
+ * 거르는 축을 쿼리로 받는다: owner(법인/개인) · card_type(신용/체크) · card_id · 기간.
+ * 법인만 걸러 뽑으면 그것이 '법인카드 사용 기록부'다 — 별도 양식을 만들지 않는다.
+ * 집계는 lib/cardReport.js 한 곳(화면과 엑셀이 같은 숫자를 봐야 한다).
+ */
+router.get('/cards', async (req, res, next) => {
+  try {
+    if (!(await requireFeature(req, res, 'card'))) return
+    // 기간은 빈 값이면 전체다 — 화면의 '전체' 프리셋과 뜻이 같아야 한다
+    res.json(await cardReport(req.db, {
+      from: req.query.from || '',
+      to: req.query.to || '',
+      owner: req.query.owner || 'all',
+      cardType: req.query.card_type || 'all',
+      cardId: req.query.card_id || null,
     }))
   } catch (e) { next(e) }
 })

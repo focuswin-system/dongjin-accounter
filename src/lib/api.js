@@ -545,6 +545,18 @@ export const api = {
     try { return await req(`/reports/loans?${qs}`) } catch { return null }
   },
 
+  /* 카드 사용내역 — 기간은 빈 값이면 전체다. 빈 값을 안 보내야 서버도 전체로 읽는다
+     (''를 실어 보내면 쿼리에 from= 이 붙어 뜻이 흐려진다). */
+  async getCardReport({ from = '', to = '', owner = 'all', cardType = 'all', cardId = '' } = {}) {
+    const qs = new URLSearchParams()
+    if (from) qs.set('from', from)
+    if (to) qs.set('to', to)
+    if (owner && owner !== 'all') qs.set('owner', owner)
+    if (cardType && cardType !== 'all') qs.set('card_type', cardType)
+    if (cardId) qs.set('card_id', cardId)
+    try { return await req(`/reports/cards?${qs}`) } catch { return null }
+  },
+
   async downloadLoanReportXlsx({ status = 'active', loanId = '' } = {}) {
     try {
       const token = localStorage.getItem('token')
