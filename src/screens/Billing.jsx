@@ -1191,7 +1191,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   /* 카드 대금으로 넘어가는 줄에서 쓴다 — 화면을 옮기는 일은 App 이 한다.
      목록을 섞지 않고 길만 낸다: 카드 대금은 청구서가 아니라 여기 목록에 들어올 수 없다
      (카드사는 세금계산서를 주지 않고, 개별 사용분은 이미 거래로 매입세액에 잡혀 있다). */
-  goRoute }) => {
+  goRoute, openEdit }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const kind = initialTab              // 'issued'(대금청구) | 'received'(수취)
@@ -1995,7 +1995,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       )}
 
       {txnOpen && (
-        <TxnQuickDrawer txnId={txnOpen} onClose={() => setTxnOpen(null)} onChanged={load} goRoute={goRoute}/>
+        <TxnQuickDrawer txnId={txnOpen} onClose={() => setTxnOpen(null)} onChanged={load} goRoute={goRoute} openEdit={openEdit}/>
       )}
 
       <InvoiceDetailDrawer

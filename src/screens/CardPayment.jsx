@@ -70,7 +70,7 @@ function billingWindow(today, payDay) {
   return { payDate, from: nextDay(prevPay), to: payDate }
 }
 
-export const CardPaymentScreen = () => {
+export const CardPaymentScreen = ({ openEdit }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [accounts, setAccounts] = useState([])
@@ -369,7 +369,7 @@ export const CardPaymentScreen = () => {
         </div>
       </div>
 
-      {txnOpen && <TxnQuickDrawer txnId={txnOpen} onClose={() => setTxnOpen(null)} onChanged={load}/>}
+      {txnOpen && <TxnQuickDrawer txnId={txnOpen} onClose={() => setTxnOpen(null)} onChanged={load} openEdit={openEdit}/>}
 
       {/* 결제 폼 — 카드 말투로 묻는다. '보내는 계좌 → 받는 계좌'가 아니라
           '어느 통장에서 얼마를 갚나'다. 사용자 머릿속의 말과 같아야 한다. */}

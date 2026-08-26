@@ -494,8 +494,8 @@ function AppInner({ onLogout, user }) {
     if (guardId && !canDo(guardId)) return <NoPermission title={LEAF_BY_ID[guardId]?.label}/>;
 
     // 미수금/미지급금(구 ledger_ar/ledger_ap)은 청구서 기준 회수 화면으로 이관됨
-    if (route === "ledger_ar") return <BillingScreen initialTab="issued"  role="collect" goRoute={go} openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
-    if (route === "ledger_ap") return <BillingScreen initialTab="received" role="collect" goRoute={go} openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
+    if (route === "ledger_ar") return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} initialTab="issued"  role="collect" goRoute={go} openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
+    if (route === "ledger_ap") return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} initialTab="received" role="collect" goRoute={go} openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
     if (route.startsWith("ledger")) {
       const filter = route === "ledger_income" ? "income"
                    : route === "ledger_expense" ? "expense"
@@ -520,7 +520,7 @@ function AppInner({ onLogout, user }) {
     if (route.startsWith("settings_")) return <MasterScreen user={user} section="settings" forcedTab={route.slice(9)}/>;
     switch (route) {
       case "home":            return <HomeScreen go={go} user={user} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
-      case "billing":         return <BillingScreen goRoute={go}/>;
+      case "billing":         return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} goRoute={go}/>;
       /* focusInvoiceId 를 넘긴다 — Ctrl+K 에서 청구서를 골랐는데 목록만 열리면
          찾은 것을 다시 찾아야 한다(BillingScreen 은 이미 이 값을 받아 그 건을 연다). */
       /* 등록 입구가 '받은 서류'를 먼저 묻고, 계산서가 아니면 거래 드로어로 넘긴다
@@ -532,9 +532,9 @@ function AppInner({ onLogout, user }) {
              그 쪽 칩 목록에는 없는 값이 남아 **아무 칩도 안 눌린 빈 표**가 된다
              ("왜 아무것도 없지" — 필터가 걸린 흔적조차 화면에 없다).
          기간·거래처 필터도 같은 경로로 새어 나간다. 두 화면은 서로 다른 장부다. */
-      case "billing_issued":  return <BillingScreen key="billing_issued" initialTab="issued" focusInvoiceId={focusInvoiceId} goRoute={go}
+      case "billing_issued":  return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} key="billing_issued" initialTab="issued" focusInvoiceId={focusInvoiceId} goRoute={go}
                                        openIncome={() => setTxnForm({ kind: "income" })}/>;
-      case "billing_received":return <BillingScreen key="billing_received" initialTab="received" focusInvoiceId={focusInvoiceId}
+      case "billing_received":return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} key="billing_received" initialTab="received" focusInvoiceId={focusInvoiceId}
                                        goRoute={go}
                                        openExpense={() => setTxnForm({ kind: "expense", compact: true })}/>;
       case "contract":        return <ContractListScreen kind="all" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
@@ -560,9 +560,9 @@ function AppInner({ onLogout, user }) {
       case "hr_labor_contract": return <LaborContractScreen/>;
       case "hr_outsourcing":  return <OutsourcingScreen/>;
       // 일반 경비 / 잡손익 — 화면은 하나를 공유하고 진입 메뉴가 초기 탭을 정한다
-      case "card_payment":   return <CardPaymentScreen/>;
+      case "card_payment":   return <CardPaymentScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
       case "voucher_book":   return <VoucherBookScreen/>;
-      case "transfer":       return <TransferScreen/>;
+      case "transfer":       return <TransferScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
       case "finance_lending": return <LendingScreen/>;
       case "misc_pl":
       case "misc_income":     return <MiscPLScreen initialTab={route === "misc_income" ? "income" : "expense"}
@@ -580,8 +580,8 @@ function AppInner({ onLogout, user }) {
       case "income":          return <LedgerScreen initialFilter="income" openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
       case "expense":         return <LedgerScreen initialFilter="expense" openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
       // 미수금/미지급금은 청구서 기준 → 발행 청구서와 같은 BillingScreen을 '회수 모드'로 재사용
-      case "ar":              return <BillingScreen initialTab="issued"  role="collect" focusInvoiceId={focusInvoiceId} goRoute={go} openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
-      case "ap":              return <BillingScreen initialTab="received" role="collect" focusInvoiceId={focusInvoiceId} goRoute={go} openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
+      case "ar":              return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} initialTab="issued"  role="collect" focusInvoiceId={focusInvoiceId} goRoute={go} openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
+      case "ap":              return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} initialTab="received" role="collect" focusInvoiceId={focusInvoiceId} goRoute={go} openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
       case "doc":             return <DocsScreen/>;
       case "settlement":      return <SettlementScreen/>;
       case "payment_run":     return <PaymentRunScreen go={go}/>;

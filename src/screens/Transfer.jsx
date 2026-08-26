@@ -23,7 +23,7 @@ import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
  *   체크카드는 쓴 즉시 통장에서 빠져 갚을 것이 없다 — 체크카드로 이체하면
  *   있지도 않은 잔액이 생긴다.
  */
-export const TransferScreen = () => {
+export const TransferScreen = ({ openEdit }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [accounts, setAccounts] = useState([])
@@ -127,7 +127,7 @@ export const TransferScreen = () => {
           ]}/>
       </div>
 
-      {txnOpen && <TxnQuickDrawer txnId={txnOpen} onClose={() => setTxnOpen(null)} onChanged={load}/>}
+      {txnOpen && <TxnQuickDrawer txnId={txnOpen} onClose={() => setTxnOpen(null)} onChanged={load} openEdit={openEdit}/>}
 
       {/* 폼은 Drawer 로 낸다 — 이 앱의 모든 폼이 그렇다(CLAUDE.md). 여기만 모달을 쓰면
           닫기 동작·확인창·모바일 폭이 다른 화면과 어긋난다. */}

@@ -13,7 +13,10 @@ import { api } from '../api'
  * 여기서 하는 일은 둘이다 — **무엇인지 보여주기**와 **이 주문에서 떼기**.
  * 금액·날짜 같은 본격 수정은 거래내역의 편집 폼이 한다(같은 폼을 두 벌 두면 반드시 어긋난다).
  */
-export const TxnQuickDrawer = ({ txnId, onClose, contractId, onChanged, goRoute }) => {
+export const TxnQuickDrawer = ({ txnId, onClose, contractId, onChanged, goRoute,
+  /* 그 자리에서 고치기. 거래내역과 **같은 폼**(TransactionForm)을 연다 —
+     폼을 두 벌 두면 반드시 어긋나므로, 화면을 옮기지 않고 폼만 가져온다. */
+  openEdit }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [txn, setTxn] = useState(null)
@@ -94,6 +97,13 @@ export const TxnQuickDrawer = ({ txnId, onClose, contractId, onChanged, goRoute 
             )}
 
             <div className="col gap-8" style={{ marginTop: 18 }}>
+              {/* 수정이 첫 자리다. 여기까지 온 이유가 대개 "뭔가 잘못됐다"라서,
+                  고칠 수단이 없으면 거래내역으로 나갔다 돌아오는 왕복이 생긴다. */}
+              {openEdit && (
+                <button className="btn primary" onClick={() => { openEdit(txn); onClose() }}>
+                  <Icon.Pencil size={14}/> 이 거래 수정
+                </button>
+              )}
               {axis && (
                 <button className="btn" style={{ color: 'var(--neg-ink)' }} onClick={unlink} disabled={busy}>
                   <Icon.Close size={14}/> 이 주문에서 떼기
@@ -106,10 +116,14 @@ export const TxnQuickDrawer = ({ txnId, onClose, contractId, onChanged, goRoute 
                   ⚠ 예전엔 해시만 바꿔 거래내역 첫 화면으로 보냈다. 방금 보고 있던 건을
                      거기서 **다시 찾아야 했다**(수백 줄에서 금액으로 더듬는다).
                      goRoute 를 받은 자리에서는 그 거래를 짚어서 연다. */}
-              <button className="btn"
-                onClick={() => { goRoute ? goRoute('ledger', { txnId }) : (window.location.hash = 'ledger'); onClose() }}>
-                <Icon.Right size={14}/> 거래내역에서 열기
-              </button>
+              {/* 여기서 고칠 수 있으면 굳이 화면을 옮길 이유가 없다. 수정 수단이 없는
+                  자리(주문 화면 등)에서만 거래내역으로 보낸다. */}
+              {!openEdit && (
+                <button className="btn"
+                  onClick={() => { goRoute ? goRoute('ledger', { txnId }) : (window.location.hash = 'ledger'); onClose() }}>
+                  <Icon.Right size={14}/> 거래내역에서 열기
+                </button>
+              )}
             </div>
           </>
         )}

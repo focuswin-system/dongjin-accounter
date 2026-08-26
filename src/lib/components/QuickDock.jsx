@@ -23,6 +23,7 @@ import { ALL_LEAVES, LEAF_BY_ID } from '../nav'
 const KEY = 'quickLinks'
 const POS_KEY = 'quickDockPos'     // { corner, dx, dy } — 화면 어디에 서 있나
 const HIDE_KEY = 'quickDockHidden' // '1' 이면 안 그린다
+const DIR_KEY = 'quickDockDir'     // 'column'(세로) | 'row'(가로)
 
 /* 위치는 **모서리 + 그 모서리에서의 거리**로 저장한다.
    절대 좌표(left/top)로 두면 창 크기를 줄였을 때 화면 밖으로 나가 영영 못 잡는다. */
@@ -74,10 +75,13 @@ export const QuickDock = ({ go, route, canDo, onOpenFaq }) => {
   const [q, setQ] = useState('')
   const [pos, setPos] = useState(loadPos)
   const [hidden, setHidden] = useState(() => localStorage.getItem(HIDE_KEY) === '1')
+  const [styling, setStyling] = useState(null)   // 아이콘·색을 펼쳐 둔 항목(한 번에 하나만)
+  const [dir, setDir] = useState(() => (localStorage.getItem(DIR_KEY) === 'row' ? 'row' : 'column'))
 
   useEffect(() => { localStorage.setItem(KEY, JSON.stringify(links)) }, [links])
   useEffect(() => { localStorage.setItem(POS_KEY, JSON.stringify(pos)) }, [pos])
   useEffect(() => { localStorage.setItem(HIDE_KEY, hidden ? '1' : '0') }, [hidden])
+  useEffect(() => { localStorage.setItem(DIR_KEY, dir) }, [dir])
   // 밖(상단 도움말)에서 다시 켤 수 있어야 한다 — 숨긴 뒤 되돌릴 길이 없으면 안 된다
   useEffect(() => {
     const on = () => setHidden(false)
@@ -153,10 +157,18 @@ export const QuickDock = ({ go, route, canDo, onOpenFaq }) => {
   }
 
   // 모서리에 따라 어느 변에서 띄울지 정한다
+  /* 목록이 뻗는 방향은 **모서리와 함께** 정해진다.
+     세로면 위/아래로, 가로면 왼/오른쪽으로 — 화면 밖으로 뻗으면 안 되니까
+     아래 모서리에선 위로, 오른쪽 모서리에선 왼쪽으로 뒤집는다. */
+  const vertical = dir === 'column'
   const anchor = {
     position: 'fixed', zIndex: 60, display: 'flex', gap: 10,
-    flexDirection: pos.corner[0] === 'b' ? 'column' : 'column-reverse',
-    alignItems: pos.corner[1] === 'r' ? 'flex-end' : 'flex-start',
+    flexDirection: vertical
+      ? (pos.corner[0] === 'b' ? 'column' : 'column-reverse')
+      : (pos.corner[1] === 'r' ? 'row' : 'row-reverse'),
+    alignItems: vertical
+      ? (pos.corner[1] === 'r' ? 'flex-end' : 'flex-start')
+      : 'center',
     [pos.corner[0] === 'b' ? 'bottom' : 'top']: pos.dy,
     [pos.corner[1] === 'r' ? 'right' : 'left']: pos.dx,
   }
@@ -176,23 +188,26 @@ export const QuickDock = ({ go, route, canDo, onOpenFaq }) => {
 
         {/* 펼친 바로가기들 — 위로 쌓인다(아래는 여는 버튼이 차지한다) */}
         {open && (
-          <div className="col gap-8" style={{ alignItems: 'flex-end' }}>
+          <div style={{ display: 'flex', gap: 8,
+            flexDirection: vertical ? 'column' : (pos.corner[1] === 'r' ? 'row-reverse' : 'row'),
+            alignItems: vertical ? (pos.corner[1] === 'r' ? 'flex-end' : 'flex-start') : 'center' }}>
             {shown.length === 0 && (
-              <div className="card card-pad text-xs text-muted" style={{ maxWidth: 200 }}>
-                아직 담은 화면이 없어요. 아래 <b>편집</b>에서 자주 가는 화면을 담아보세요.
-              </div>
+              <span className="qd-label text-muted" style={{ fontWeight: 500 }}>
+                편집에서 자주 가는 화면을 담아보세요
+              </span>
             )}
             {shown.map(l => {
               const leaf = LEAF_BY_ID[l.id]
               const Ic = IconOf(l.icon)
               return (
-                <button key={l.id} className="qd-item" onClick={() => { go(l.id); setOpen(false) }}>
+                <button key={l.id} className={`qd-item ${vertical ? '' : 'qd-item-v'}`}
+                  onClick={() => { go(l.id); setOpen(false) }}>
                   <span className="qd-label">{leaf.label}</span>
                   <span className="qd-dot" style={{ background: bgOf(l.color) }}><Ic size={17}/></span>
                 </button>
               )
             })}
-            <button className="qd-item" onClick={() => { setEditOpen(true); setOpen(false) }}>
+            <button className={`qd-item ${vertical ? '' : 'qd-item-v'}`} onClick={() => { setEditOpen(true); setOpen(false) }}>
               <span className="qd-label">편집</span>
               <span className="qd-dot" style={{ background: 'var(--surface-3)', color: 'var(--muted)' }}>
                 <Icon.Pencil size={15}/>
@@ -231,34 +246,59 @@ export const QuickDock = ({ go, route, canDo, onOpenFaq }) => {
                 {links.map((l, i) => {
                   const leaf = LEAF_BY_ID[l.id]
                   const Ic = IconOf(l.icon)
+                  const open = styling === l.id
                   return (
-                    <div key={l.id} className="card card-pad col gap-8">
-                      <div className="row gap-8">
-                        <span className="qd-dot" style={{ background: bgOf(l.color), width: 30, height: 30 }}><Ic size={15}/></span>
-                        <span className="fw-600 text-sm">{leaf?.label || l.id}</span>
-                        <span className="text-xs text-muted2">{[leaf?.domain, leaf?.section].filter(Boolean).join(' › ')}</span>
-                        <div className="row gap-6 ml-auto">
-                          <button className="ord-btn" disabled={i === 0} title="위로" onClick={() => move(i, -1)}>▲</button>
-                          <button className="ord-btn" disabled={i === links.length - 1} title="아래로" onClick={() => move(i, 1)}>▼</button>
+                    /* 한 줄이 기본이다. 예전엔 항목마다 아이콘 24개 + 색 6개를 **늘 펼쳐** 두어
+                       카드 하나가 세로로 화면 절반을 먹었다 — 세 개만 담아도 스크롤 지옥이었고,
+                       회색 네모가 잔뜩 깔려 무엇이 골라진 건지도 안 보였다.
+                       지금 모습(동그라미)을 보여주고, 바꾸고 싶을 때만 펼친다. */
+                    <div key={l.id} className="card" style={{ overflow: 'hidden' }}>
+                      <div className="row gap-8" style={{ padding: '10px 12px' }}>
+                        <button type="button" className="qd-dot qd-dot-sm" title="아이콘·색 바꾸기"
+                          style={{ background: bgOf(l.color) }}
+                          onClick={() => setStyling(open ? null : l.id)}><Ic size={15}/></button>
+                        <div style={{ minWidth: 0 }}>
+                          <div className="fw-600 text-sm">{leaf?.label || l.id}</div>
+                          <div className="text-xs text-muted2">{[leaf?.domain, leaf?.section].filter(Boolean).join(' › ')}</div>
+                        </div>
+                        <div className="row gap-6 ml-auto" style={{ alignItems: 'center' }}>
+                          <div className="col" style={{ gap: 1 }}>
+                            <button className="ord-btn" disabled={i === 0} title="위로" onClick={() => move(i, -1)}>▲</button>
+                            <button className="ord-btn" disabled={i === links.length - 1} title="아래로" onClick={() => move(i, 1)}>▼</button>
+                          </div>
+                          <button className="btn sm" onClick={() => setStyling(open ? null : l.id)}>
+                            {open ? '접기' : '꾸미기'}
+                          </button>
                           <button className="btn sm" style={{ color: 'var(--neg-ink)' }} onClick={() => remove(l.id)}>빼기</button>
                         </div>
                       </div>
-                      <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
-                        {DOCK_ICONS.map(n => {
-                          const I = Icon[n]
-                          return (
-                            <button key={n} type="button" className={`qd-pick ${l.icon === n ? 'on' : ''}`}
-                              title={n} onClick={() => patch(l.id, { icon: n })}><I size={14}/></button>
-                          )
-                        })}
-                      </div>
-                      <div className="row gap-6">
-                        {DOCK_COLORS.map(c => (
-                          <button key={c.key} type="button" title={c.label}
-                            className={`qd-color ${l.color === c.key ? 'on' : ''}`}
-                            style={{ background: c.bg }} onClick={() => patch(l.id, { color: c.key })}/>
-                        ))}
-                      </div>
+
+                      {open && (
+                        <div className="col gap-10" style={{ padding: '12px', borderTop: '1px solid var(--line)', background: 'var(--surface-2)' }}>
+                          <div>
+                            <div className="text-xs text-muted2" style={{ marginBottom: 6 }}>아이콘</div>
+                            <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+                              {DOCK_ICONS.map(n => {
+                                const I = Icon[n]
+                                return (
+                                  <button key={n} type="button" className={`qd-pick ${l.icon === n ? 'on' : ''}`}
+                                    title={n} onClick={() => patch(l.id, { icon: n })}><I size={14}/></button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-muted2" style={{ marginBottom: 6 }}>색</div>
+                            <div className="row gap-6">
+                              {DOCK_COLORS.map(c => (
+                                <button key={c.key} type="button" title={c.label}
+                                  className={`qd-color ${l.color === c.key ? 'on' : ''}`}
+                                  style={{ background: c.bg }} onClick={() => patch(l.id, { color: c.key })}/>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )
                 })}
@@ -288,6 +328,19 @@ export const QuickDock = ({ go, route, canDo, onOpenFaq }) => {
 
           {/* 자리와 숨기기 — 화면을 가린다는 말이 나올 자리라 조작을 눈에 보이게 둔다.
               끌어서 옮길 수도 있지만, 끌 수 있다는 걸 모르는 사람을 위해 버튼도 낸다. */}
+          <div>
+            <label className="label">펼치는 방향</label>
+            <div className="row gap-6">
+              {[['column', '세로', '↑'], ['row', '가로', '←']].map(([v, label, arrow]) => (
+                <button key={v} type="button" className={`chip ${dir === v ? 'active' : ''}`}
+                  onClick={() => setDir(v)}>{arrow} {label}</button>
+              ))}
+            </div>
+            <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+              가로로 펼치면 이름이 아이콘 아래에 붙어요 — 옆에 붙이면 줄이 화면을 가로지릅니다.
+            </div>
+          </div>
+
           <div>
             <label className="label">독 자리</label>
             <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
