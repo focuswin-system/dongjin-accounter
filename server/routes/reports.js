@@ -322,12 +322,21 @@ router.get('/fund-sheet.xlsx', async (req, res, next) => {
  * status=all 이면 상환 완료분까지 낸다(기본은 진행 중만) — 결산 때 "올해 갚은 것"을
  * 봐야 하는데, 다 갚은 차입금이 목록에서 사라져 있으면 그 표를 만들 수 없다.
  */
+/** 여러 id — 'a,b,c' 도 loan_ids=a&loan_ids=b 도 받는다(화면이 어느 쪽으로 보내든 같은 답). */
+const idList = (v) => (Array.isArray(v) ? v : String(v ?? '').split(','))
+  .map(x => String(x).trim()).filter(Boolean)
+
+/** 기간 — 'YYYY-MM-DD' 만 통과시킨다. 모양이 틀리면 없는 것으로 친다(조용히 전 기간). */
+const dateOrNull = (v) => (/^d{4}-d{2}-d{2}$/.test(String(v ?? '')) ? String(v) : null)
+
 router.get('/loans', async (req, res, next) => {
   try {
     if (!(await requireFeature(req, res, 'loan'))) return
     res.json(await loanReport(req.db, {
       status: req.query.status === 'all' ? 'all' : 'active',
-      loanId: req.query.loan_id || null,
+      loanIds: idList(req.query.loan_ids ?? req.query.loan_id),
+      from: dateOrNull(req.query.from),
+      to: dateOrNull(req.query.to),
     }))
   } catch (e) { next(e) }
 })
@@ -360,21 +369,27 @@ router.get('/loans.xlsx', async (req, res, next) => {
   try {
     if (!(await requireFeature(req, res, 'loan'))) return
     const status = req.query.status === 'all' ? 'all' : 'active'
-    const loanId = req.query.loan_id || null
-    const d = await loanReport(req.db, { status, loanId })
+    const loanIds = idList(req.query.loan_ids ?? req.query.loan_id)
+    const from = dateOrNull(req.query.from)
+    const to = dateOrNull(req.query.to)
+    const d = await loanReport(req.db, { status, loanIds, from, to })
     const today = kstToday()
 
     /* 고른 계좌가 이 회사에 없으면 빈 파일이 나간다 — "왜 비었지"로 끝나므로 먼저 끊는다.
        (남의 회사 것을 볼 위험은 없다. req.db 가 이미 이 회사 DB다.) */
-    if (loanId && !d.loans.length) {
-      return res.status(404).json({ error: '그 차입금을 찾을 수 없어요' })
+    if (loanIds.length && !d.loans.length) {
+      return res.status(404).json({ error: '고른 차입금을 찾을 수 없어요' })
     }
 
-    const loanName = loanId ? d.loans[0].name : null
+    /* 파일 이름·표지에 쓸 범위 이름. 한 건이면 그 이름, 여럿이면 '3건', 전체면 비운다 —
+       'A외2건' 같은 이름은 나중에 무엇을 뽑았는지 알려주지 못한다. */
+    const loanName = d.loans.length === 1 && loanIds.length ? d.loans[0].name
+      : (loanIds.length > 1 ? `${d.loans.length}건 선택` : null)
     const wb = buildLoanWorkbook(d, {
       today,
       scope: status === 'all' ? '상환 완료 포함' : '진행 중',
       loanName,
+      period: { from, to },
     })
 
     const filename = loanName

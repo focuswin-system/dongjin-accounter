@@ -2601,13 +2601,17 @@ const ReportFundSheet = ({ toast }) => {
  *
  * 숫자는 전부 서버(lib/loanReport.js)가 낸다. 화면에서 다시 더하지 않는다 —
  * 그러면 화면 합계와 엑셀 합계가 어긋날 수 있다. */
-const ReportLoan = ({ toast }) => {
+const ReportLoan = ({ toast, registerExport }) => {
   const [status, setStatus] = useState('active')
-  const [loanId, setLoanId] = useState('')      // '' = 전체 계좌
+  /* 고른 계좌들. **빈 배열 = 전체**다.
+     칩은 기본이 '전부 선택'인데, 그 상태를 id 열넷을 담아 표현하면 계좌가 하나 늘 때마다
+     "새 계좌는 왜 안 골라져 있지"가 된다. '아무것도 안 골랐다 = 전부'로 두면 늘 최신이다. */
+  const [picks, setPicks] = useState([])
+  const [range, setRange] = useState({ from: '', to: '' })   // 상환 내역 구간(빈 값 = 전 기간)
   const [d, setD] = useState(null)
   const [busy, setBusy] = useState(false)
-  // 계좌 선택 목록은 **전체 기준**으로 따로 받는다. 한 계좌를 고른 응답에는 그 하나만 들어 있어,
-  // 같은 데이터로 목록을 만들면 고른 순간 드롭다운에 그 계좌만 남아 되돌아올 수 없다.
+  // 계좌 선택 목록은 **전체 기준**으로 따로 받는다. 고른 응답에는 고른 것만 들어 있어,
+  // 같은 데이터로 목록을 만들면 고른 순간 칩이 사라져 되돌아올 수 없다.
   const [choices, setChoices] = useState([])
 
   useEffect(() => {
@@ -2619,36 +2623,69 @@ const ReportLoan = ({ toast }) => {
   useEffect(() => {
     let alive = true
     setD(null)
-    api.getLoanReport({ status, loanId }).then(x => { if (alive) setD(x) })
+    api.getLoanReport({ status, loanIds: picks, from: range.from, to: range.to })
+      .then(x => { if (alive) setD(x) })
     return () => { alive = false }
-  }, [status, loanId])
+  }, [status, picks, range.from, range.to])
 
   const download = async () => {
     setBusy(true)
-    const r = await api.downloadLoanReportXlsx({ status, loanId })
+    const r = await api.downloadLoanReportXlsx({ status, loanIds: picks, from: range.from, to: range.to })
     setBusy(false)
     if (!r.ok) toast.push(r.error || '내려받기에 실패했어요', { tone: 'warn' })
-    else toast.push(loanId ? '고른 계좌만 내려받았어요' : '전체 계좌를 내려받았어요')
+    else toast.push(picks.length ? `고른 ${picks.length}개 계좌를 내려받았어요` : '전체 계좌를 내려받았어요')
   }
 
-  const picked = choices.find(l => l.id === loanId)
+  /* 껍데기의 '엑셀' 버튼이 이 함수를 쓰게 넘긴다.
+     예전엔 껍데기의 '엑셀'(화면 표를 CSV로)과 이 화면의 '전체 엑셀로 내려받기'가
+     나란히 서 있었다. 둘 다 '엑셀'이라 부르는데 나오는 파일이 달라서,
+     어느 걸 눌러야 하는지 매번 갈렸다. 제대로 만든 쪽 하나로 모은다. */
+  useEffect(() => {
+    registerExport?.(download)
+    return () => registerExport?.(null)
+  }, [registerExport, status, picks, range.from, range.to])
+
+  const toggle = (id) => setPicks(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]))
+  const picked = picks.length === 1 ? choices.find(l => l.id === picks[0]) : null
 
   const controls = (
-    <div className="row gap-8 no-print" style={{ marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
-      {/* 범위는 값이 둘뿐이라 칩. 계좌는 열넷이라 Combobox — 목록이 길면 칩이 줄을 먹는다 */}
-      {[['active', '진행 중'], ['all', '상환 완료 포함']].map(([v, l]) => (
-        <button key={v} type="button" className={`chip ${status === v ? 'active' : ''}`}
-          onClick={() => { setStatus(v); setLoanId('') }}>{l}</button>
-      ))}
-      <div style={{ width: 300 }}>
-        <Combobox value={loanId} onChange={setLoanId}
-          options={[{ value: '', label: '전체 계좌', sub: `${choices.length}건` },
-            ...choices.map(l => ({ value: l.id, label: l.name, sub: l.lender }))]}
-          placeholder="계좌 선택"/>
+    <div className="col gap-10 no-print" style={{ marginBottom: 20 }}>
+      <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* 범위는 값이 둘뿐이라 칩 */}
+        {[['active', '진행 중'], ['all', '상환 완료 포함']].map(([v, l]) => (
+          <button key={v} type="button" className={`chip ${status === v ? 'active' : ''}`}
+            onClick={() => { setStatus(v); setPicks([]) }}>{l}</button>
+        ))}
+        <span className="text-muted2" style={{ margin: '0 4px' }}>·</span>
+        {/* 상환 내역 구간. 차입금 목록은 안 잘린다는 것을 아래 문구로 못 박는다 */}
+        <span className="text-xs text-muted2">상환 내역 기간</span>
+        <DateInput className="input" style={{ width: 140 }} value={range.from}
+          onChange={e => setRange(r => ({ ...r, from: e.target.value }))}/>
+        <span className="text-muted2">~</span>
+        <DateInput className="input" style={{ width: 140 }} value={range.to}
+          onChange={e => setRange(r => ({ ...r, to: e.target.value }))}/>
+        {(range.from || range.to) && (
+          <button className="btn sm" onClick={() => setRange({ from: '', to: '' })}>기간 해제</button>
+        )}
       </div>
-      <button className="btn primary ml-auto" onClick={download} disabled={busy || !d}>
-        <Icon.Excel size={14}/> {busy ? '만드는 중…' : loanId ? '이 계좌만 엑셀로' : '전체 엑셀로 내려받기'}
-      </button>
+
+      {/* 계좌 — 칩 다중 선택. 아무것도 안 고르면 전체다(그 상태를 '전체' 칩으로 보여준다) */}
+      {choices.length > 0 && (
+        <div className="row gap-6" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+          <button type="button" className={`chip ${picks.length === 0 ? 'active' : ''}`}
+            onClick={() => setPicks([])}>전체 {choices.length}건</button>
+          {choices.map(l => (
+            <button key={l.id} type="button"
+              className={`chip ${picks.includes(l.id) ? 'active' : ''}`}
+              onClick={() => toggle(l.id)} title={l.lender}>{l.name}</button>
+          ))}
+        </div>
+      )}
+
+      <div className="text-xs text-muted2">
+        기간은 <b>상환 내역만</b> 자릅니다 — 그 기간에 상환이 없어도 차입금과 잔액은 그대로 나와요.
+        내려받기는 위 <b>엑셀</b> 버튼을 쓰세요.
+      </div>
     </div>
   )
 
@@ -2684,8 +2721,10 @@ const ReportLoan = ({ toast }) => {
         <Kpi label="지급한 이자" value={T.repaidInterest} hint="이미 나간 비용 — 남은 원금에 안 더해요"/>
       </KpiRow>
 
-      {/* 1. 차입처별 — 전체를 볼 때만 뜻이 있다(한 계좌를 고르면 한 줄짜리 표가 된다) */}
-      {!loanId && (
+      {/* 1. 차입처별 — **두 건 이상일 때만** 뜻이 있다. 한 건이면 한 줄짜리 표라
+             아래 목록과 같은 말을 두 번 하는 셈이다(칩 다중 선택이 되면서 '전체냐 아니냐'가
+             아니라 '몇 건이 보이느냐'가 기준이 됐다). */}
+      {d.loans.length > 1 && (
         <div className="card" style={{ overflow: 'hidden', marginBottom: 20 }}>
           <div className="card-pad fw-700" style={{ paddingBottom: 10 }}>차입처별 요약</div>
           <table className="table">
@@ -3107,6 +3146,11 @@ export const ReportsScreen = () => {
      서버는 이미 '볼 수 있는 것'만 주므로 여기서 권한을 다시 따지지 않는다. */
   const list = (items || []).filter(r => REPORT_VIEWS[r.key])
   const report = list.find(r => r.key === active)
+  /* 보고서가 스스로 등록한 내려받기 함수. ref 인 이유 — 등록 때문에 껍데기가 다시 그려지면
+     그 보고서도 다시 그려지고, 그 안의 effect 가 또 등록해 끝없이 돈다. */
+  const customExport = useRef(null)
+  // 보고서를 바꾸면 앞 보고서의 등록은 버린다 — 안 그러면 차입금 엑셀이 다른 보고서에서 나온다
+  useEffect(() => { customExport.current = null }, [active])
 
   /* 예전엔 두 버튼이 토스트만 띄웠다("PDF로 내려받았어요"). 파일은 안 받아지는데 받았다고 말하니
      세무 신고철에 자료를 챙겼다고 믿고 넘어갈 수 있었다. 둘 다 실제로 동작하게 바꾼다.
@@ -3114,7 +3158,12 @@ export const ReportsScreen = () => {
        'PDF로 저장'을 고르면 PDF가 된다. 그래서 버튼 이름도 실제 동작인 '인쇄'로 적는다.
      · 엑셀 — 화면에 그려진 표를 그대로 CSV로 뽑는다(lib/export.js). 보고서마다 집계를 다시 짜지
        않으므로 보이는 것과 받는 것이 어긋날 수 없다. */
+  /* 보고서가 **제대로 만든 엑셀**을 갖고 있으면 그것을 쓴다(registerExport 로 등록).
+     없으면 화면 표를 CSV 로 뽑는 기본 동작.
+     예전엔 이 버튼(CSV)과 보고서 안의 전용 엑셀 버튼이 나란히 서 있었다 —
+     둘 다 '엑셀'인데 나오는 파일이 달라 어느 걸 눌러야 하는지 매번 갈렸다. */
   const doExport = () => {
+    if (customExport.current) return customExport.current()
     const ok = downloadVisibleTables(printRef.current, `${report.title}_${localToday()}.csv`)
     if (!ok) toast.push("내보낼 표가 없어요", { tone: 'warn' })
   }
@@ -3134,7 +3183,7 @@ export const ReportsScreen = () => {
         <div className="report-print" ref={printRef}>
           <div className="page-title" style={{ marginBottom: 4 }}>{report.title}</div>
           <div className="page-sub" style={{ marginBottom: 24 }}>{localToday()} 조회 기준</div>
-          <View toast={toast}/>
+          <View toast={toast} registerExport={(fn) => { customExport.current = fn }}/>
         </div>
       </div>
     )

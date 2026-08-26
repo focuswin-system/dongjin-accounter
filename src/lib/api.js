@@ -544,9 +544,14 @@ export const api = {
 
   /* 차입금 현황 — 계좌별 잔액과 상환 내역. 화면과 엑셀이 서버의 같은 집계를 쓴다.
      loanId 를 주면 그 계좌 한 건만. 화면에서 고른 것이 그대로 파일에도 담긴다. */
-  async getLoanReport({ status = 'active', loanId = '' } = {}) {
+  /* @param loanIds 고른 차입금들. **비면 전체**다(칩 다중 선택 — 기본이 전체 선택이므로
+       화면은 "전부 골랐으면 아무것도 안 보낸다"로 줄여 보낸다).
+     @param from,to 상환 내역을 자를 구간. 차입금 목록은 안 잘린다(서버 lib/loanReport.js). */
+  async getLoanReport({ status = 'active', loanIds = [], from = '', to = '' } = {}) {
     const qs = new URLSearchParams({ status })
-    if (loanId) qs.set('loan_id', loanId)
+    if (loanIds.length) qs.set('loan_ids', loanIds.join(','))
+    if (from) qs.set('from', from)
+    if (to) qs.set('to', to)
     try { return await req(`/reports/loans?${qs}`) } catch { return null }
   },
 
@@ -569,11 +574,13 @@ export const api = {
     try { return await req(`/reports/cards?${qs}`) } catch { return null }
   },
 
-  async downloadLoanReportXlsx({ status = 'active', loanId = '' } = {}) {
+  async downloadLoanReportXlsx({ status = 'active', loanIds = [], from = '', to = '' } = {}) {
     try {
       const token = localStorage.getItem('token')
       const qs = new URLSearchParams({ status })
-      if (loanId) qs.set('loan_id', loanId)
+      if (loanIds.length) qs.set('loan_ids', loanIds.join(','))
+      if (from) qs.set('from', from)
+      if (to) qs.set('to', to)
       const res = await fetch(`${BASE}/reports/loans.xlsx?${qs}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })

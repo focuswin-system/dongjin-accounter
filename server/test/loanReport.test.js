@@ -175,7 +175,7 @@ test('계좌 하나만 고르면 그 건만 나온다', async () => {
   assert.equal(d.loanId, 'B')
   assert.equal(d.loans.length, 1)
   assert.equal(d.loans[0].name, '기업은행 185')
-  assert.ok(/WHERE l\.id = \?/.test(calls[0][0]), '한 건만 고르는 조건이 SQL 에 있어야 한다')
+  assert.ok(/WHERE l\.id IN \(\?\)/.test(calls[0][0]), '고른 건만 뽑는 조건이 SQL 에 있어야 한다')
 })
 
 test('계좌를 고르면 진행중 필터를 무시한다 — 다 갚은 건을 골라도 보여야 한다', async () => {
@@ -191,4 +191,40 @@ test('계좌를 고르면 진행중 필터를 무시한다 — 다 갚은 건을
   const d = await loanReport(db, { status: 'active', loanId: 'B' })
   assert.equal(d.loans.length, 1)
   assert.equal(d.loans[0].status, 'closed')
+})
+
+test('여러 건을 고르면 그 건들만 나온다 — 칩 다중 선택', async () => {
+  const calls = []
+  const db = {
+    async execute(sql, params) {
+      calls.push([sql, params])
+      if (/FROM loans/.test(sql)) {
+        assert.deepEqual(params, ['A', 'C'], '고른 id 가 그대로 조건에 들어가야 한다')
+        return [[{ ...LOAN, id: 'A' }, { ...LOAN, id: 'C' }]]
+      }
+      return [[]]
+    },
+  }
+  const d = await loanReport(db, { loanIds: ['A', 'C'] })
+  assert.equal(d.loans.length, 2)
+  assert.ok(/WHERE l\.id IN \(\?,\?\)/.test(calls[0][0]))
+})
+
+test('기간은 상환 내역만 자른다 — 차입금 목록은 그대로', async () => {
+  /* 구간에 상환이 없다고 그 차입금이 사라지면 안 된다. 잔액은 그대로 남아 있는데
+     목록에서 빠지면 **부채가 없어진 것처럼** 보인다. */
+  const db = {
+    async execute(sql) {
+      if (/FROM loans/.test(sql)) return [[{ ...LOAN, id: 'A' }]]
+      if (/FROM loan_repayments/.test(sql)) return [[
+        { loan_id: 'A', seq: 1, due_date: '2026-01-10', paid_date: '2026-01-10', principal: 100, interest: 10 },
+        { loan_id: 'A', seq: 2, due_date: '2026-06-10', paid_date: '2026-06-10', principal: 100, interest: 10 },
+      ]]
+      return [[]]
+    },
+  }
+  const d = await loanReport(db, { from: '2026-05-01', to: '2026-12-31' })
+  assert.equal(d.loans.length, 1, '기간 밖이어도 차입금은 남아야 한다')
+  assert.equal(d.repayments.length, 1, '상환 내역만 구간으로 잘린다')
+  assert.equal(d.repayments[0].seq, 2)
 })

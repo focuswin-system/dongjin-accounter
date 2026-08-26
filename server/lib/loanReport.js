@@ -33,21 +33,33 @@ const lenderOf = (l) => (l.lender || '').trim() || (l.vendor_name || '').trim() 
  * @param opts.loanId 한 건만 볼 때 그 차입금 id. 없으면 전부
  * @returns {{ loans, byLender, repayments, byLoan, totals, status, loanId }}
  */
-async function loanReport(db, { status = 'active', loanId = null } = {}) {
+/**
+ * @param opts.loanIds 고른 차입금 id 들. **비면 전체**다.
+ *   (예전엔 loanId 하나만 받았다. 화면이 칩 다중 선택이 되면서 배열로 넓혔다 —
+ *    단건도 원소 하나짜리 배열로 온다.)
+ * @param opts.from,to 상환 내역을 자를 구간(납부일 기준). 비면 전 기간.
+ *   ⚠ **차입금 목록은 안 자른다.** 구간에 상환이 없다고 그 차입금이 없는 게 아니다 —
+ *     잔액은 그대로 남아 있다. 자르면 부채가 사라진 것처럼 보인다.
+ */
+async function loanReport(db, { status = 'active', loanId = null, loanIds = null, from = null, to = null } = {}) {
   const onlyActive = status !== 'all'
-  /* 한 건만 뽑을 때는 status 를 무시한다 — 이미 다 갚은 차입금 하나를 골랐는데
+  // 옛 호출(loanId 하나)도 그대로 받는다 — 배열로 접어 넣는다
+  const picked = (loanIds && loanIds.length) ? loanIds : (loanId ? [loanId] : [])
+  /* 고른 것이 있으면 status 를 무시한다 — 이미 다 갚은 차입금을 골랐는데
      '진행 중' 필터에 걸려 빈 표가 나오면 "왜 안 나오지"로 끝난다. 고른 것이 곧 의도다. */
-  const where = loanId ? 'WHERE l.id = ?' : (onlyActive ? "WHERE l.status = 'active'" : '')
+  const where = picked.length
+    ? `WHERE l.id IN (${picked.map(() => '?').join(',')})`
+    : (onlyActive ? "WHERE l.status = 'active'" : '')
   const [loans] = await db.execute(`
     SELECT l.*, v.name AS vendor_name, a.name AS account_name
       FROM loans l
       LEFT JOIN vendors  v ON v.id = l.vendor_id
       LEFT JOIN accounts a ON a.id = l.account_id
      ${where}
-     ORDER BY l.status, l.start_date, l.name`, loanId ? [loanId] : [])
+     ORDER BY l.status, l.start_date, l.name`, picked)
 
   if (!loans.length) {
-    return { status, loanId, loans: [], byLender: [], repayments: [], byLoan: [],
+    return { status, loanId, loanIds: picked, from, to, loans: [], byLender: [], repayments: [], byLoan: [],
              totals: { count: 0, principal: 0, repaidPrincipal: 0, repaidInterest: 0, remaining: 0 } }
   }
 
@@ -111,8 +123,10 @@ async function loanReport(db, { status = 'active', loanId = null } = {}) {
   /* 상환 내역 — 갚은 회차만, 납부일 순. 예정 회차는 '상환 내역'이 아니다.
      (다음에 나갈 돈은 자금 예측이 답하는 질문이고, 이 표는 지나간 기록이다.) */
   const nameById = new Map(out.map(l => [l.id, l]))
+  const inRange = (d) => (!from || String(d) >= from) && (!to || String(d) <= to)
   const repayments = repRows
-    .filter(r => r.paid_date && nameById.has(r.loan_id))
+    // 구간은 **상환 내역에만** 건다(위 주석 참고 — 차입금 목록을 자르면 부채가 사라져 보인다)
+    .filter(r => r.paid_date && nameById.has(r.loan_id) && inRange(r.paid_date))
     .map(r => {
       const l = nameById.get(r.loan_id)
       return {
@@ -161,7 +175,7 @@ async function loanReport(db, { status = 'active', loanId = null } = {}) {
     }
   })
 
-  return { status, loanId, loans: out, byLender, repayments, byLoan, totals }
+  return { status, loanId, loanIds: picked, from, to, loans: out, byLender, repayments, byLoan, totals }
 }
 
 /** 상환방식 한글 이름 — 화면·엑셀이 같은 말을 쓰게 한 곳에 둔다 */

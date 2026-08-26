@@ -83,15 +83,22 @@ function moneyCols(ws, cols, fromRow) {
  * @param d      lib/loanReport.js 의 결과
  * @param opts.today   기준일 문자열
  * @param opts.scope   '진행 중' 같은 범위 이름
- * @param opts.loanName 한 건만 뽑았을 때 그 이름(없으면 전체)
+ * @param opts.loanName 고른 범위 이름(한 건이면 그 이름, 여럿이면 'N건 선택', 전체면 null)
+ * @param opts.period   상환 내역을 자른 구간 {from,to}. 파일만 받아 본 사람이
+ *                      "왜 3월 상환이 없지"를 묻지 않게, 자른 사실을 표지에 남긴다
  */
-function buildLoanWorkbook(d, { today, scope, loanName = null }) {
+function buildLoanWorkbook(d, { today, scope, loanName = null, period = null }) {
   const wb = new ExcelJS.Workbook()
   wb.creator = '도니도라'
   wb.created = new Date(`${today}T00:00:00Z`)
 
+  /* 구간을 적을 때 **'상환 내역 구간'이라고 못 박는다.** 그냥 날짜만 적으면
+     차입금 목록까지 그 기간 것이라고 읽는다 — 목록은 자르지 않는다(lib/loanReport.js). */
+  const periodText = period && (period.from || period.to)
+    ? `상환 내역 ${period.from || '처음'} ~ ${period.to || '오늘'}`
+    : null
   const subOf = (extra) =>
-    [`기준일 ${today}`, `범위 ${scope}`, loanName ? `계좌 ${loanName}` : null, extra]
+    [`기준일 ${today}`, `범위 ${scope}`, loanName ? `계좌 ${loanName}` : null, periodText, extra]
       .filter(Boolean).join('   ·   ')
 
   /* ── 1. 차입처별 요약 ── */
