@@ -177,7 +177,7 @@ export const BackfillWizard = ({ open, onClose, rule, kind, onDone }) => {
                   </button>
                   <button className="btn sm" onClick={() => setRows(rs => rs.map(r => ({ ...r, checked: false })))}>전체 해제</button>
                   <button className="btn sm" onClick={() => setRows(rs => rs.map(r => ({ ...r, paid: true })))}>
-                    전부 {sales ? '기입금' : '기지급'}
+                    전부 {sales ? '입금' : '지급'} 처리
                   </button>
                   <button className="btn sm" onClick={() => setRows(rs => rs.map(r => ({ ...r, paid: false })))}>
                     전부 미정산

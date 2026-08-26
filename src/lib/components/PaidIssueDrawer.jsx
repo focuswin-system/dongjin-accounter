@@ -56,13 +56,13 @@ export const PaidIssueDrawer = ({ target, isIssued, onClose, onDone, onIssuePaid
     const res = await onIssuePaid({ ...target, _accountId: accountId || null, _date: date, _amount: variable ? typed : null })
     setBusy(false)
     if (!res.ok) { toast.push(res.error || "처리에 실패했어요", { tone: "warn" }); return }
-    toast.push(isIssued ? "기입금 처리했어요" : "기지급 처리했어요")
+    toast.push(isIssued ? "입금 처리했어요" : "지급 처리했어요")
     onDone()
   }
   return (
     <Drawer open onClose={onClose} width="min(460px, 100vw)">
       <DrawerHead
-        title={isIssued ? "기입금 처리" : "기지급 처리"}
+        title={isIssued ? "입금 처리" : "지급 처리"}
         sub={<>{target.vendor_name} · {target.type} · {fmtNum(total)}원</>}
         onClose={onClose}/>
       <div className="drawer-body col gap-form">
@@ -99,7 +99,7 @@ export const PaidIssueDrawer = ({ target, isIssued, onClose, onDone, onIssuePaid
         <div className="ml-auto row gap-8">
           <button className="btn" onClick={onClose}>취소</button>
           <button className="btn primary" disabled={busy} onClick={submit}>
-            <Icon.Check size={14}/> {busy ? "처리 중..." : (isIssued ? "기입금 처리" : "기지급 처리")}
+            <Icon.Check size={14}/> {busy ? "처리 중..." : (isIssued ? "입금 처리" : "지급 처리")}
           </button>
         </div>
       </div>

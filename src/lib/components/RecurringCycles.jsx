@@ -25,8 +25,8 @@ const SECTION = {
     // 놓친 회차는 이미 돈이 오갔을 가능성이 높다 → 기정산 처리를 primary로
     primary: 'paid',
     hint: (sales) => sales
-      ? '예정일이 지났는데 청구서가 없어요. 이미 입금됐다면 기입금 처리하세요.'
-      : '예정일이 지났는데 청구서가 없어요. 이미 결제됐다면 기지급 처리하세요.',
+      ? '예정일이 지났는데 청구서가 없어요. 이미 받은 돈이면 입금 처리하세요.'
+      : '예정일이 지났는데 청구서가 없어요. 이미 낸 돈이면 지급 처리하세요.',
   },
   soon: {
     label: '오늘·임박', tone: 'warn', icon: <Icon.Clock size={13}/>,
@@ -69,7 +69,7 @@ export const cycleTotal = (c) => (c.amount || 0) + (c.vat != null ? c.vat : Math
 
 const Row = ({ c, sales, primary, onIssue, onPaid, onOpenContract, onSkip, onUnskip, skipped, busy, blockedBy }) => {
   const issueLabel = sales ? '청구서 발행' : '청구서 등록'
-  const paidLabel = sales ? '기입금 처리' : '기지급 처리'
+  const paidLabel = sales ? '입금 처리' : '지급 처리'
   // 서버는 그 규칙의 '가장 이른 미처리 회차'만 허용한다(앞선 회차를 건너뛰면 그 앞이 영영 안 뜬다).
   // 그 규칙을 화면에서 미리 보여주지 않으면, 눌러본 뒤 409 에러로만 알게 된다.
   const btn = (kind) => (
@@ -440,7 +440,7 @@ export const bulkDetail = (cycles, sales) => (
     </div>
     <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
       {cycles[0]?.due_date} 회차부터 순서대로 처리돼요. {sales ? '입금 예정(미수금)' : '지급 대기(미지급금)'}으로 등록되고,
-      계좌 잔액은 움직이지 않아요 — 실제 {sales ? '입금' : '지급'}은 회차별 {sales ? '기입금' : '기지급'} 처리에서 하세요.
+      계좌 잔액은 움직이지 않아요 — 실제 {sales ? '입금' : '지급'}은 회차별 {sales ? '입금' : '지급'} 처리에서 하세요.
     </div>
   </div>
 )

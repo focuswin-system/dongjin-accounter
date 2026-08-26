@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Drawer, Loading, StatusBadge } from '../ui'
 import { DrawerHead } from './Drawer'
 import { api } from '../api'
+import { VoucherView } from './VoucherView'
 
 /* 주문 화면에서 연 거래 상세.
  *
@@ -21,6 +22,7 @@ export const TxnQuickDrawer = ({ txnId, onClose, contractId, onChanged, goRoute,
   const { confirm } = useConfirm()
   const [txn, setTxn] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [voucherOpen, setVoucherOpen] = useState(false)   // 이 거래의 분개(차변·대변)
 
   useEffect(() => {
     if (!txnId) { setTxn(null); return }
@@ -116,6 +118,12 @@ export const TxnQuickDrawer = ({ txnId, onClose, contractId, onChanged, goRoute,
                   ⚠ 예전엔 해시만 바꿔 거래내역 첫 화면으로 보냈다. 방금 보고 있던 건을
                      거기서 **다시 찾아야 했다**(수백 줄에서 금액으로 더듬는다).
                      goRoute 를 받은 자리에서는 그 거래를 짚어서 연다. */}
+              {/* 전표 — 이 거래가 장부에 어떻게 앉는지(차변·대변).
+                  거래내역·청구서 상세엔 이미 있는데 여기만 없어서, 분개를 보려고
+                  또 화면을 옮겨야 했다. 같은 부품(VoucherView)을 그대로 쓴다. */}
+              <button className="btn" onClick={() => setVoucherOpen(true)}>
+                <Icon.Book size={14}/> 전표 보기
+              </button>
               {/* 여기서 고칠 수 있으면 굳이 화면을 옮길 이유가 없다. 수정 수단이 없는
                   자리(주문 화면 등)에서만 거래내역으로 보낸다. */}
               {!openEdit && (
@@ -128,6 +136,9 @@ export const TxnQuickDrawer = ({ txnId, onClose, contractId, onChanged, goRoute,
           </>
         )}
       </div>
+
+      {/* 전표는 이 드로어 위에 겹쳐 뜬다(Drawer 스택이 Esc 를 맨 위부터 닫는다) */}
+      <VoucherView open={voucherOpen} onClose={() => setVoucherOpen(false)} source="transaction" id={txnId}/>
     </Drawer>
   )
 }

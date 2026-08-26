@@ -1174,7 +1174,7 @@ const PendingScheduleTable = ({ rows, onIssue, onPaid, isIssued = true, select }
             <button className="btn primary sm" onClick={() => onIssue(p)}>
               <Icon.Receipt size={12}/> {isIssued ? "발행 처리" : "청구서 등록"}
             </button>
-            <button className="btn sm" onClick={() => onPaid(p)}>{isIssued ? "기입금 처리" : "기지급 처리"}</button>
+            <button className="btn sm" onClick={() => onPaid(p)}>{isIssued ? "입금 처리" : "지급 처리"}</button>
           </div>
         ) },
       ]}
