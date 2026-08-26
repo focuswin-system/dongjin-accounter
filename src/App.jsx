@@ -34,6 +34,7 @@ import { MgmtDashScreen } from './screens/Mgmt'
 import { MgmtAskScreen } from './screens/MgmtAsk'
 import { PortalScreen } from './screens/Portal'
 import { QuickDock } from './lib/components/QuickDock'
+import { VoucherBookScreen } from './screens/VoucherBook'
 
 /* 브레드크럼에 세울 말.
  *
@@ -560,6 +561,7 @@ function AppInner({ onLogout, user }) {
       case "hr_outsourcing":  return <OutsourcingScreen/>;
       // 일반 경비 / 잡손익 — 화면은 하나를 공유하고 진입 메뉴가 초기 탭을 정한다
       case "card_payment":   return <CardPaymentScreen/>;
+      case "voucher_book":   return <VoucherBookScreen/>;
       case "transfer":       return <TransferScreen/>;
       case "finance_lending": return <LendingScreen/>;
       case "misc_pl":

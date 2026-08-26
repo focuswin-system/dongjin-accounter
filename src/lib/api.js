@@ -838,6 +838,29 @@ export const api = {
     } catch (e) { return { ok: false, error: e?.message || '이체에 실패했어요' } }
   },
 
+  /* 전표 목록(분개장) — 기간 전체를 차변·대변 줄로. 분개는 서버 lib/voucher.js 한 곳에서만
+     만든다(화면에서 다시 만들면 같은 거래가 두 가지 분개로 나온다). */
+  async getVoucherBook({ from, to, kind = 'all' }) {
+    try { return await req(`/transactions/vouchers?from=${from}&to=${to}&kind=${kind}`) } catch { return [] }
+  },
+  async downloadVoucherBookXlsx({ from, to, kind = 'all' }) {
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch(`${BASE}/transactions/vouchers.xlsx?from=${from}&to=${to}&kind=${kind}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || '내려받기에 실패했어요') }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = `전표목록_${from}_${to}.xlsx`
+      // Firefox 는 anchor 가 DOM 에 있어야 하고, 같은 tick 에 revoke 하면 다운로드가 취소된다
+      document.body.appendChild(a); a.click()
+      setTimeout(() => { a.remove(); URL.revokeObjectURL(url) }, 0)
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
+
   async addTransaction(data) {
     try {
       const result = await req('/transactions', { method: 'POST', body: data })

@@ -37,7 +37,8 @@ const METHOD_ACTION = {
 const API_RESOURCES = {
   '/api/invoices':            ['billing_issued', 'billing_received', 'ar', 'ap'],
   '/api/contracts':           ['contract_sales', 'contract_purchase', 'contract'],
-  '/api/transactions':        ['ledger', 'misc_pl', 'misc_income'],
+  // 전표 목록(분개장)도 이 경로를 쓴다 — /transactions/vouchers
+  '/api/transactions':        ['ledger', 'misc_pl', 'misc_income', 'voucher_book'],
   '/api/recurring-invoices':  ['recurring_invoice'],
   '/api/recurring-expenses':  ['recurring_expense'],
   '/api/resolutions':         ['doc'],

@@ -165,6 +165,10 @@ export const NAV_TREE = [
       { label: "보고서", items: [
         { id: "report",          label: "보고서",         icon: Icon.Chart },
         { id: "report_daily",    label: "일계표",         icon: Icon.Book },
+        /* 전표 목록(분개장) — 일계표가 '하루치 집계'라면 이건 '기간 전체를 전표 줄로'.
+           신고철에 세무사에게 넘기거나 회계 프로그램에 올릴 때 쓴다. 그때까지는
+           거래내역 CSV 를 받아 손으로 분개를 만들어야 했다. */
+        { id: "voucher_book",    label: "전표 목록",       icon: Icon.Doc },
         { id: "cash_report",     label: "자금일보",       icon: Icon.Bank },
         { id: "payment_run",     label: "매입 결제내역",   icon: Icon.Bank },
         { id: "purchase_status", label: "매입·매출 현황",  icon: Icon.Chart },
@@ -421,6 +425,7 @@ export const LEAF_TAGS = {
   cash_report:      '자금 자금계획 현금흐름 잔액예측 자금수지',
   report:           '보고서 리포트 통계 분석 현황',
   report_daily:     '일계표 일보 분개 차대변 시산표',
+  voucher_book:     '전표 분개장 분개 차변 대변 신고 세무사 회계프로그램 이관 원장',
   mgmt_dash:        '경영 대시보드 지표 KPI 현황판',
   mgmt_ask:         '질의 도우미 물어보기',
   // 환경설정

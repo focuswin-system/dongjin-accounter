@@ -12,6 +12,8 @@ const { closedPeriodError } = require('../lib/closing')
 const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
 const { isFundAccount } = require('../lib/categoryAccount')
 const { transactionVoucher, withNames } = require('../lib/voucher')
+const { listVouchers, toRows, COLUMNS: VOUCHER_COLUMNS, GUIDE: VOUCHER_GUIDE } = require('../lib/voucherBook')
+const { newBook, sheet, guideSheet, sendBook } = require('../lib/xlsxBook')
 
 const router = Router()
 
@@ -165,6 +167,42 @@ router.get('/linkable', async (req, res, next) => {
         ORDER BY (t.${col} IS NULL) DESC, t.date DESC
         LIMIT 100`, params)
     res.json(rows.map(r => ({ ...r, amount: Number(r.amount) })))
+  } catch (e) { next(e) }
+})
+
+/* 전표 목록(분개장) — 기간 전체를 차변·대변으로 펼친다. 신고철에 세무사에게 넘기는 형태다.
+   ⚠ '/:id' 보다 위에 있어야 한다 — 아래면 'vouchers'가 id 로 잡힌다. */
+router.get('/vouchers', async (req, res, next) => {
+  try {
+    const { from, to, kind } = req.query
+    if (!from || !to) return res.status(400).json({ error: '기간을 지정해주세요' })
+    res.json(await listVouchers(req.db, { from, to, kind }))
+  } catch (e) { next(e) }
+})
+
+router.get('/vouchers.xlsx', async (req, res, next) => {
+  try {
+    const { from, to, kind } = req.query
+    if (!from || !to) return res.status(400).json({ error: '기간을 지정해주세요' })
+    const vouchers = await listVouchers(req.db, { from, to, kind })
+    const rows = toRows(vouchers)
+    const debit = vouchers.reduce((s, v) => s + v.debitTotal, 0)
+    const credit = vouchers.reduce((s, v) => s + v.creditTotal, 0)
+    const bad = vouchers.filter(v => !v.balanced).length
+
+    const wb = newBook()
+    sheet(wb, '전표 목록', {
+      title: '전표 목록 (분개장)',
+      sub: `${from} ~ ${to} · 전표 ${vouchers.length}건 · ${rows.length}줄`
+        + (bad > 0 ? ` · 확인 필요 ${bad}건` : ''),
+      columns: VOUCHER_COLUMNS,
+      rows,
+      // 합계는 차·대 두 칸에만 — 나머지 칸에 값을 넣으면 필터를 걸 때 합계가 데이터로 딸려 온다
+      totals: ['합계', '', '', '', '', debit, credit, '', '', ''],
+      freezeCols: 2,   // 일자·전표번호는 오른쪽으로 넘겨도 계속 보여야 한다
+    })
+    guideSheet(wb, VOUCHER_GUIDE)
+    await sendBook(res, wb, `전표목록_${from}_${to}.xlsx`)
   } catch (e) { next(e) }
 })
 

@@ -93,6 +93,7 @@ const RESOURCES = [
   { id: 'finance_dash',            label: '재무 현황',      group: '재무관리' },
   { id: 'fund_status',             label: '자금 현황',      group: '경영관리' },
   { id: 'cash_report',             label: '자금일보',       group: '경영관리' },
+  { id: 'voucher_book',            label: '전표 목록',      group: '사무업무 · 보고서' },
   { id: 'report_daily',            label: '일계표',        group: '경영관리' },
 
   { id: 'report',                  label: '보고서',        group: '경영관리' },
