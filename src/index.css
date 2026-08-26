@@ -1434,13 +1434,17 @@ body:has([data-modal-open]) {
  *     어디부터 데이터인지 매번 눈으로 찾게 된다
  */
 .vb-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+/* ⚠ 머리글이 본문보다 **연하면 안 된다.** 처음엔 --muted(#5B6473) 11.5px 로 뒀는데,
+   아래 데이터가 --ink(#0B1220)라 위계가 뒤집혔다 — 위쪽 KPI 숫자로 눈이 간 뒤에는
+   머리글이 통째로 묻혔다. 머리글은 본문만큼 진하게, 대신 작고 자간을 벌려
+   '이름표'로 읽히게 한다(크기로 눌러쓰지 않는다). */
 .vb-table thead th {
   position: sticky; top: 0; z-index: 1;
   background: var(--surface-3);
-  color: var(--muted);
-  font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em;
-  text-align: left; padding: 11px 14px; white-space: nowrap;
-  border-bottom: 1.5px solid var(--line-strong);
+  color: var(--ink-2);
+  font-size: 12px; font-weight: 700; letter-spacing: 0.03em;
+  text-align: left; padding: 12px 14px; white-space: nowrap;
+  border-bottom: 2px solid var(--ink-2);
 }
 .vb-table thead th.num-right { text-align: right; }
 .vb-table tbody td {
