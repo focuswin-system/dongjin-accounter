@@ -39,11 +39,12 @@ Express + MariaDB 백엔드 + React/Vite SPA. **멀티테넌트 운영 중**(202
 
 ## 기술 스택
 
-- **프레임워크**: React 18, Vite
-- **라우팅**: Hash 라우팅 (`#home`, `#ledger`, `#billing`, `#contract`, `#hr`, `#docs`, `#master`)
-- **UI 컴포넌트**: `src/lib/ui.jsx` (자체 컴포넌트 라이브러리)
+- **프런트**: React 18 + Vite. 해시 라우팅(`#<잎 id>` — 메뉴 구조는 `src/lib/nav.js` 한 곳이 원본)
+- **UI 컴포넌트**: `src/lib/ui.jsx` + `src/lib/components/*` (Drawer·DataTable·TableToolbar·Kpi 등)
 - **상태 관리**: 컴포넌트 로컬 state + prop drilling (전역 상태 없음)
-- **백엔드**: 없음 (목 데이터, 추후 bkend.ai BaaS 연동 예정)
+- **백엔드**: Express + MariaDB. **DB-per-tenant 멀티테넌트 운영 중**(`server/`)
+- **엑셀 출력**: 새 출력은 `server/lib/xlsxBook.js`(exceljs, 서식 있음). 옛 출력 일부는
+  아직 `xlsx`(SheetJS) — 서식이 없다. 옮기는 중이다.
 
 ---
 
@@ -52,28 +53,27 @@ Express + MariaDB 백엔드 + React/Vite SPA. **멀티테넌트 운영 중**(202
 ```
 src/
 ├── lib/
-│   ├── data.js      ← 목 데이터 단일 소스 (VENDORS, INVOICES, ACCOUNTS_BALANCE 등)
-│   ├── api.js       ← API 레이어 (현재 data.js 참조, 실서버 연결 시 이 파일만 교체)
-│   └── ui.jsx       ← 공통 컴포넌트 (Icon, StatusBadge, Combobox, useToast 등)
-└── screens/
-    ├── Home.jsx     ← 대시보드
-    ├── Ledger.jsx   ← 거래내역 (원장)
-    ├── Form.jsx     ← 거래 등록 Drawer (Ledger에서 사용)
-    ├── Billing.jsx  ← 청구서 관리 (미수금/미지급금)
-    ├── Contract.jsx ← 계약, 미수금 목록, 미지급금 목록
-    ├── Docs.jsx     ← 보고서, 결의서
-    ├── Hr.jsx       ← 인사/급여
-    └── Master.jsx   ← 설정 (업체, 계정과목, 계좌, 임직원, 정기지출)
+│   ├── nav.js       ← **메뉴 구조의 원본.** 사이드바·홈 포털·브레드크럼·Ctrl+K 가 공유
+│   ├── api.js       ← 서버 API 레이어(실서버). snake_case ↔ camelCase 변환도 여기서
+│   ├── ui.jsx       ← 공통 부품 (Icon, StatusBadge, Combobox, Drawer, useToast …)
+│   └── components/  ← DataTable·TableToolbar·Kpi·InvoiceLines·QuickDock·VoucherView …
+└── screens/         ← 화면. 라우트 id ↔ 화면은 App.jsx 의 switch 가 잇는다
+server/
+├── routes/          ← API. ⚠ 새 라우트는 platform/apiPerms.js 에 자원 매핑 필수
+├── lib/             ← 규칙이 사는 곳(voucher·recurrence·vat·ledger·closing·xlsxBook …)
+└── platform/        ← 테넌트·권한·스키마 (permissions.js RESOURCES 는 nav 잎과 1:1)
 ```
+
+> ⚠ **계산 규칙은 서버 `lib/` 한 곳에만 둔다.** 분개(voucher)·부가세(vat)·정기 회차(recurrence)를
+> 화면에서 다시 계산하면 같은 거래가 두 가지 답을 갖게 된다.
 
 ---
 
 ## 데이터 규칙
 
 ### 단일 데이터 소스 원칙
-- 미수금/미지급금은 **`INVOICES`** 가 유일한 소스
-- `SAMPLE.receivables`, `SAMPLE.payables` 사용 금지 (레거시 — 제거 예정)
-- 미수금 화면 → `api.getReceivables()` / 미지급금 화면 → `api.getPayables()` 경유
+- 미수금/미지급금은 **청구서(invoices)** 가 유일한 소스
+- 목 데이터(`SAMPLE.*`)는 **증빙 관리 화면(미구현)에만** 남아 있다. 새 코드에서 쓰지 말 것
 
 ### VENDORS.gubu 코드
 - `"B"` = 발주처 (매출처) — 청구서 issued 시 업체 필터
@@ -126,12 +126,21 @@ import { Combobox } from '../lib/ui'
 
 ## 알려진 미구현 항목
 
-- `Docs.jsx` / `Ledger.jsx` — 아직 `SAMPLE.receivables`/`SAMPLE.expenses` 직접 참조 중 (api 전환 필요)
-- 계약 마일스톤 탭, 원가예산 탭 (Contract.jsx)
-- 부가세 탭 (Docs.jsx)
-- 홈 대시보드 계좌잔액 카드 (일부 하드코딩)
-- **증빙유형 (Master.jsx `MASTER_DATA.evidenceType`)** — 목업. 저장/백엔드 없음. 현재 기준정보 nav에서 숨김 처리(`MASTER_SECTIONS.base`에서 제외). 추후 적격증빙 분류(세금계산서·카드전표·현금영수증·간이영수증·거래명세서 + 부가세 공제가능 여부)로 구현 예정 → ref_items `type='evidence_type'` CRUD + 거래 증빙첨부 드롭다운 + 부가세 매입세액 집계 연동
-- **증빙 관리 화면 (`Docs.jsx` `EvidenceScreen` / route `evidence`)** — 목업. `SAMPLE.evidences`·`SAMPLE.evidenceMissing`만 표시하고 업로드/다운로드/알림 버튼은 토스트만. API 없음. **2026-07 nav에서 숨김**(`nav.js` 사이드바+명령팔레트에서 `evidence` 제외, FAQ f15·f16의 evidence 링크 제거). route/화면 코드는 남겨둠. 추후 여유 있을 때 실구현 예정 → 거래 `evid_url` 집계 + 증빙 누락(evid 없는 지출) 관리 + 파일 업로드→거래 연결. (실제 증빙 첨부는 거래 등록 폼 `EvidUploader`/계약 상세 증빙 탭에서 이미 동작)
+> 2026-08-26 전수 확인. 여기 적힌 것만 남았다 — 예전 목록의 계약 마일스톤·원가예산 탭,
+> 부가세 탭, 홈 계좌잔액 하드코딩, 증빙유형 목업은 **전부 구현·해소됐다.**
+
+- **증빙 관리 화면 (route `evidence`)** — 유일하게 남은 목업이다. 지금은 `ComingSoon`으로
+  막아 두었고 `Docs.jsx`의 `EvidenceScreen`(+`SAMPLE.evidences`)은 죽은 코드로 남아 있다.
+  실구현 방향: 거래 `evid_url` 집계 + 증빙 누락(증빙 없는 지출) 관리 + 파일 업로드→거래 연결.
+  (실제 증빙 **첨부**는 거래 등록 폼·계약 상세 증빙 탭에서 이미 동작한다 — 없는 건 '한눈에 보는 화면'뿐)
+
+- **옛 엑셀 출력의 서식** — 보고서·거래처·주문·기준정보 양식 등은 아직 `xlsx`(SheetJS)라
+  서식이 없다(금액이 `1165939932`로 찍힌다). `server/lib/xlsxBook.js`로 옮기면 된다.
+  겸사겸사 SheetJS 취약점 노출면도 줄어든다.
+
+- **`xlsx`(SheetJS) 취약점** — high 2건, npm 에 수정본이 없다. 임포트(업로드 파싱) 경로가
+  아직 이걸 쓴다. 인증 뒤에 있어 즉시 위험은 아니지만 방치할 성격은 아니다.
+
 
 ---
 
