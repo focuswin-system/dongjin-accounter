@@ -2341,7 +2341,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
           {isCard && (form.card_type || 'credit') === 'credit' && (
             <div className="text-xs text-muted2" style={{ marginTop: -8 }}>
               결제일을 넣으면 이번 달 사용액이 그 날 이 통장에서 빠지는 것으로 자금 현황에 잡혀요.
-              실제 결제는 <b>지급처리 → 계좌 이체</b>에서 한 번에 처리할 수 있어요.
+              실제 결제는 <b>지급처리 → 카드 대금 지급</b>에서 한 번에 처리할 수 있어요.
             </div>
           )}
 
