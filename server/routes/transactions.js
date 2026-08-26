@@ -13,7 +13,7 @@ const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
 const { isFundAccount } = require('../lib/categoryAccount')
 const { transactionVoucher, withNames } = require('../lib/voucher')
 const { listVouchers, toRows, COLUMNS: VOUCHER_COLUMNS, GUIDE: VOUCHER_GUIDE } = require('../lib/voucherBook')
-const { newBook, sheet, guideSheet, sendBook } = require('../lib/xlsxBook')
+const { newBook, sheet, templateSheet, guideSheet, sendBook } = require('../lib/xlsxBook')
 
 const router = Router()
 
@@ -722,7 +722,7 @@ router.post('/import/commit', async (req, res, next) => {
 })
 
 // ── 엑셀 임포트: 양식 다운로드(.xlsx) ──
-router.get('/import/template', (req, res, next) => {
+router.get('/import/template', async (req, res, next) => {
   try {
     const rows = [
       ["거래일자", "거래처", "주문명", "구분", "비목", "금액", "메모"],
@@ -730,8 +730,12 @@ router.get('/import/template', (req, res, next) => {
       ["2026-06-03", "정밀가공(주)", "홈페이지 유지보수", "지출", "외주가공비", 1500000, "6월 외주분"],
       ["2026-06-10", "(재)부산영재교육진흥원", "홈페이지 개선", "입금", "납품대금", 3500000, "선급금"],
     ]
-    const ws = xlsx.utils.aoa_to_sheet(rows)
-    ws['!cols'] = [{ wch: 12 }, { wch: 22 }, { wch: 24 }, { wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 20 }]
+    const COLS = [
+      { header: '거래일자', width: 12, required: true }, { header: '거래처', width: 22 },
+      { header: '주문명', width: 24 }, { header: '구분', width: 8, required: true },
+      { header: '비목', width: 14 }, { header: '금액', width: 12, required: true },
+      { header: '메모', width: 20 },
+    ]
 
     const guide = [
       ["거래내역 일괄 업로드 — 작성 안내"],
@@ -744,17 +748,10 @@ router.get('/import/template', (req, res, next) => {
       ["• 금액: 숫자만 입력(쉼표 가능). 부호 없이 양수로."],
       ["• 첫 행(머리글)은 그대로 두고, 둘째 행부터 데이터를 입력하세요."],
     ]
-    const wsGuide = xlsx.utils.aoa_to_sheet(guide)
-    wsGuide['!cols'] = [{ wch: 72 }]
-
-    const wb = xlsx.utils.book_new()
-    xlsx.utils.book_append_sheet(wb, ws, "거래내역")
-    xlsx.utils.book_append_sheet(wb, wsGuide, "작성안내")
-    const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' })
-
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    res.setHeader('Content-Disposition', `attachment; filename="transaction_import_template.xlsx"; filename*=UTF-8''${encodeURIComponent('거래내역_업로드_양식.xlsx')}`)
-    res.send(buf)
+    const wb = newBook()
+    templateSheet(wb, '거래내역', { columns: COLS, samples: rows.slice(1) })
+    guideSheet(wb, guide.map(g => g[0], '작성안내', { hasRequired: true }))
+    await sendBook(res, wb, '거래내역_업로드_양식.xlsx')
   } catch (e) { next(e) }
 })
 

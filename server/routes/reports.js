@@ -5,6 +5,7 @@ const { BUILTIN_REPORTS, visibleReports, featureKeyOf } = require('../platform/r
 const { kstToday } = require('../db')
 const xlsx = require('xlsx')
 const { taxofficePack, SHEETS } = require('../lib/taxofficePack')
+const { newBook, sheet, guideSheet, sendBook } = require('../lib/xlsxBook')
 const { fundSheet } = require('../lib/fundSheet')
 const { loanReport } = require('../lib/loanReport')
 const { cardReport } = require('../lib/cardReport')
@@ -118,43 +119,48 @@ router.get('/taxoffice.xlsx', async (req, res, next) => {
     const month = monthOf(req.query.month)
     const pack = await taxofficePack(req.db, month, await closingDayOf(req.db))
 
-    const wb = xlsx.utils.book_new()
+    const wb = newBook()
+
     /* 첫 장은 목차다 — 시트가 7개라 무엇이 몇 건인지 한눈에 봐야 한다.
        구간(from~to)을 적는 이유: 마감일이 있는 회사는 '7월분'이 6/26~7/25 라
        받는 쪽이 달력월로 오해하면 대조가 안 맞는다. */
-    const guide = [
-      ['세무사 전달용 자료'],
-      ['월분', month],
-      ['집계 구간', `${pack.from} ~ ${pack.to}`],
-      [],
-      ['항목', '건수', '비고'],
-      ...pack.sections.map(s => [s.label, `${s.count}${s.unit}`, s.ready ? '' : '확인 필요']),
-      [],
-      ['· 입출금은 완료된 거래만 담았습니다(예정 제외).'],
-      ['· 급여대장은 월분 기준이라 위 집계 구간과 다를 수 있습니다.'],
-      ['· 원천징수이행상황신고서 서식은 포함하지 않습니다 — 대상 급여 명단만 담았습니다.'],
-    ]
-    const wsGuide = xlsx.utils.aoa_to_sheet(guide)
-    wsGuide['!cols'] = [{ wch: 24 }, { wch: 14 }, { wch: 12 }]
-    xlsx.utils.book_append_sheet(wb, wsGuide, '목차')
+    sheet(wb, '목차', {
+      title: '세무사 전달용 자료',
+      sub: `${month} 월분 · 집계 구간 ${pack.from} ~ ${pack.to}`,
+      columns: [{ header: '항목', width: 26 }, { header: '건수', width: 14, align: 'center' },
+                { header: '비고', width: 16 }],
+      rows: pack.sections.map(sec => [sec.label, `${sec.count}${sec.unit}`, sec.ready ? '' : '확인 필요']),
+    })
 
     for (const sec of pack.sections) {
       const spec = SHEETS[sec.key]
       if (!spec) continue
-      const rows = pack.data[sec.key] || []
-      const aoa = [spec.head, ...rows.map(spec.row)]
-      const ws = xlsx.utils.aoa_to_sheet(aoa)
-      ws['!cols'] = spec.head.map(h => ({ wch: Math.max(10, String(h).length * 2 + 4) }))
-      /* 시트 이름은 31자 제한이고 : \ / ? * [ ] 를 못 쓴다. 우리 이름들은 짧고 안전하지만
+      const rows = (pack.data[sec.key] || []).map(spec.row)
+      /* 시트 이름은 31자 제한이고 :  / ? * [ ] 를 못 쓴다. 우리 이름들은 짧고 안전하지만
          라벨을 고칠 때 조용히 깨지지 않게 여기서 자른다. */
-      xlsx.utils.book_append_sheet(wb, ws, sec.label.replace(/[:\\/?*[\]]/g, ' ').slice(0, 31))
+      const name = sec.label.replace(/[:\/?*[]]/g, ' ').slice(0, 31)
+      sheet(wb, name, {
+        title: sec.label,
+        sub: `${month} 월분 · ${pack.from} ~ ${pack.to} · ${sec.count}${sec.unit}`,
+        columns: spec.cols,
+        rows,
+        // 빈 시트에 합계 줄만 서면 '0원'이 사실처럼 보인다 — 줄이 있을 때만 낸다
+        totals: rows.length && spec.total ? spec.total(pack.data[sec.key] || []) : null,
+        freezeCols: 1,
+      })
     }
 
-    const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' })
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    res.setHeader('Content-Disposition',
-      `attachment; filename="taxoffice_${month}.xlsx"; filename*=UTF-8''${encodeURIComponent(`세무사전달_${month}.xlsx`)}`)
-    res.send(buf)
+    guideSheet(wb, [
+      '세무사 전달용 자료 — 읽는 법',
+      '',
+      '• 입출금은 완료된 거래만 담았습니다(예정 제외).',
+      '• 급여대장은 월분 기준이라 위 집계 구간과 다를 수 있습니다.',
+      '• 원천징수이행상황신고서 서식은 포함하지 않습니다 — 대상 급여 명단만 담았습니다.',
+      '• 목차의 "확인 필요"는 그 항목에 아직 정리가 덜 된 건이 있다는 뜻입니다.',
+      '• 금액의 "-" 는 0원이라는 뜻입니다.',
+    ])
+
+    await sendBook(res, wb, `세무사전달_${month}.xlsx`)
   } catch (e) { next(e) }
 })
 

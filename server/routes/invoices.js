@@ -16,6 +16,7 @@ const { computeLineAmount, normBasis } = require('../lib/lineAmount')
 
 const { isFundAccount, acctCodeByCategoryName } = require('../lib/categoryAccount')
 const { invoiceVoucher, withNames } = require('../lib/voucher')
+const { newBook, templateSheet, guideSheet, sendBook } = require('../lib/xlsxBook')
 
 const router = Router()
 
@@ -516,7 +517,7 @@ router.post('/import/commit', async (req, res, next) => {
 })
 
 // 양식 다운로드 — 홈택스 '전자세금계산서 목록조회 → 엑셀받기'와 같은 머리글로 만든다.
-router.get('/import/template', (req, res, next) => {
+router.get('/import/template', async (req, res, next) => {
   try {
     // 품목 상세 포함 형식으로 만든다 — 첫 두 행은 같은 승인번호(= 품목 2줄짜리 계산서 1건)다.
     const cols = ['작성일자', '승인번호', '공급자 사업자등록번호', '공급자 상호',
@@ -534,10 +535,10 @@ router.get('/import/template', (req, res, next) => {
         '000-00-00000', '(주)포커스윈', 1650000, 1500000, 150000, '일반',
         'CNC 가공', 'AL6061', 30, 50000, 1500000, '외주'],
     ]
-    const ws = xlsx.utils.aoa_to_sheet(rows)
-    ws['!cols'] = [{ wch: 12 }, { wch: 28 }, { wch: 18 }, { wch: 20 },
-      { wch: 20 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 8 },
-      { wch: 22 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 16 }]
+    const WIDTHS = [12, 28, 18, 20, 20, 20, 14, 14, 12, 8, 22, 12, 10, 12, 14, 16]
+    /* 필수는 작성일자·승인번호뿐이다. 나머지는 홈택스 파일에 있으면 쓰고 없으면 비운다 —
+       머리글에 별을 남발하면 별이 뜻을 잃는다. */
+    const REQUIRED = new Set(['작성일자', '승인번호'])
 
     const guide = [
       ['홈택스 세금계산서 업로드 — 작성 안내'],
@@ -560,17 +561,13 @@ router.get('/import/template', (req, res, next) => {
       ['• 등록 결과: 매출은 미수금(입금 예정), 매입은 미지급금(지급 대기)으로 잡히고 부가세 집계에 바로 반영됩니다.'],
       ['  실제 입금·지급 처리는 청구서를 열어 정산(매칭)에서 하세요.'],
     ]
-    const wsGuide = xlsx.utils.aoa_to_sheet(guide)
-    wsGuide['!cols'] = [{ wch: 100 }]
-
-    const wb = xlsx.utils.book_new()
-    xlsx.utils.book_append_sheet(wb, ws, '세금계산서')
-    xlsx.utils.book_append_sheet(wb, wsGuide, '작성안내')
-    const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' })
-
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    res.setHeader('Content-Disposition', `attachment; filename="tax_invoice_import_template.xlsx"; filename*=UTF-8''${encodeURIComponent('세금계산서_업로드_양식.xlsx')}`)
-    res.send(buf)
+    const wb = newBook()
+    templateSheet(wb, '세금계산서', {
+      columns: cols.map((header, i) => ({ header, width: WIDTHS[i] || 16, required: REQUIRED.has(header) })),
+      samples: rows.slice(1),
+    })
+    guideSheet(wb, guide.map(g => g[0], '작성안내', { hasRequired: true }))
+    await sendBook(res, wb, '세금계산서_업로드_양식.xlsx')
   } catch (e) { next(e) }
 })
 

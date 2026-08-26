@@ -119,41 +119,97 @@ async function taxofficePack(db, month, closingDay = 0) {
   }
 }
 
-/** 엑셀 시트로 낼 때의 머리글·행 변환. 화면 표와 같은 열을 쓴다(보이는 것과 받는 것이 같아야 한다). */
+/** 엑셀 시트로 낼 때의 열·행 변환. 화면 표와 같은 열을 쓴다(보이는 것과 받는 것이 같아야 한다).
+ *
+ * cols 에 **폭과 금액 여부**를 함께 적는다 — 서식 있는 통합문서(lib/xlsxBook.js)가 이 정보로
+ * 천단위 구분·오른쪽 정렬을 건다. 예전엔 머리글 글자 수로 폭을 짐작해서, 날짜가 '#####' 로
+ * 나오거나 적요 칸이 잘렸다.
+ */
+const sum = (rows, get) => rows.reduce((a, r) => a + num(get(r)), 0)
+
 const SHEETS = {
   txns: {
-    head: ['일자', '구분', '거래처', '계정', '공급가액', '부가세', '금액', '계좌', '적요'],
+    cols: [
+      { header: '일자', width: 12 }, { header: '구분', width: 8, align: 'center' },
+      { header: '거래처', width: 22 }, { header: '계정', width: 16 },
+      { header: '공급가액', width: 14, money: true }, { header: '부가세', width: 12, money: true },
+      { header: '금액', width: 14, money: true }, { header: '계좌', width: 18 },
+      { header: '적요', width: 30 },
+    ],
     row: (r) => [r.date, r.kind === 'income' ? '입금' : '출금', r.vendor_name || '', r.category || '',
-      r.supply_amount == null ? '' : num(r.supply_amount), r.vat_amount == null ? '' : num(r.vat_amount),
+      r.supply_amount == null ? null : num(r.supply_amount), r.vat_amount == null ? null : num(r.vat_amount),
       num(r.amount), r.account_name || '', r.memo || ''],
+    // 합계는 금액 열만 — 다른 칸에 값이 있으면 필터를 걸 때 합계가 데이터로 딸려 온다
+    total: (rows) => ['합계', '', '', '',
+      sum(rows, r => r.supply_amount), sum(rows, r => r.vat_amount), sum(rows, r => r.amount), '', ''],
   },
   resolutions: {
-    head: ['문서번호', '지급일', '거래처', '건명', '금액', '지급방법', '기안자'],
+    cols: [
+      { header: '문서번호', width: 16 }, { header: '지급일', width: 12 },
+      { header: '거래처', width: 22 }, { header: '건명', width: 28 },
+      { header: '금액', width: 14, money: true }, { header: '지급방법', width: 12 },
+      { header: '기안자', width: 12 },
+    ],
     row: (r) => [r.doc_no, r.pay_date || '', r.vendor_name || '', r.title || '', num(r.amount),
       r.pay_method || '', r.applicant || ''],
+    total: (rows) => ['합계', '', '', '', sum(rows, r => r.amount), '', ''],
   },
   salesTax: {
-    head: ['발행일', '청구번호', '거래처', '공급가액', '세액', '합계', '상태'],
+    cols: [
+      { header: '발행일', width: 12 }, { header: '청구번호', width: 18 },
+      { header: '거래처', width: 22 }, { header: '공급가액', width: 14, money: true },
+      { header: '세액', width: 12, money: true }, { header: '합계', width: 14, money: true },
+      { header: '상태', width: 12, align: 'center' },
+    ],
     row: (r) => [r.issued_at, r.invoice_no || '', r.vendor_name || '',
       num(r.supply_amount), num(r.vat_amount), num(r.total_amount), r.status || ''],
+    total: (rows) => ['합계', '', '',
+      sum(rows, r => r.supply_amount), sum(rows, r => r.vat_amount), sum(rows, r => r.total_amount), ''],
   },
   purchaseTax: {
-    head: ['수취일', '청구번호', '거래처', '공급가액', '세액', '합계', '상태'],
+    cols: [
+      { header: '수취일', width: 12 }, { header: '청구번호', width: 18 },
+      { header: '거래처', width: 22 }, { header: '공급가액', width: 14, money: true },
+      { header: '세액', width: 12, money: true }, { header: '합계', width: 14, money: true },
+      { header: '상태', width: 12, align: 'center' },
+    ],
     row: (r) => [r.issued_at, r.invoice_no || '', r.vendor_name || '',
       num(r.supply_amount), num(r.vat_amount), num(r.total_amount), r.status || ''],
+    total: (rows) => ['합계', '', '',
+      sum(rows, r => r.supply_amount), sum(rows, r => r.vat_amount), sum(rows, r => r.total_amount), ''],
   },
   payroll: {
-    head: ['성명', '직위', '부서', '월분', '기본급', '수당', '공제', '실지급', '상태'],
+    cols: [
+      { header: '성명', width: 12 }, { header: '직위', width: 10 }, { header: '부서', width: 12 },
+      { header: '월분', width: 10, align: 'center' },
+      { header: '기본급', width: 14, money: true }, { header: '수당', width: 12, money: true },
+      { header: '공제', width: 12, money: true }, { header: '실지급', width: 14, money: true },
+      { header: '상태', width: 10, align: 'center' },
+    ],
     row: (r) => [r.name || '', r.role || '', r.department || '', r.month, num(r.base_salary),
       num(r.allowance), num(r.deduction), num(r.net_salary), r.status || ''],
+    total: (rows) => ['합계', '', '', '', sum(rows, r => r.base_salary), sum(rows, r => r.allowance),
+      sum(rows, r => r.deduction), sum(rows, r => r.net_salary), ''],
   },
   withholding: {
-    head: ['성명', '월분', '지급총액', '공제액', '실지급'],
+    cols: [
+      { header: '성명', width: 12 }, { header: '월분', width: 10, align: 'center' },
+      { header: '지급총액', width: 14, money: true }, { header: '공제액', width: 12, money: true },
+      { header: '실지급', width: 14, money: true },
+    ],
     row: (r) => [r.name || '', r.month, num(r.base_salary) + num(r.allowance), num(r.deduction), num(r.net_salary)],
+    total: (rows) => ['합계', '',
+      rows.reduce((a, r) => a + num(r.base_salary) + num(r.allowance), 0),
+      sum(rows, r => r.deduction), sum(rows, r => r.net_salary)],
   },
   noEvidence: {
-    head: ['일자', '거래처', '계정', '금액', '적요'],
+    cols: [
+      { header: '일자', width: 12 }, { header: '거래처', width: 22 },
+      { header: '계정', width: 16 }, { header: '금액', width: 14, money: true },
+      { header: '적요', width: 30 },
+    ],
     row: (r) => [r.date, r.vendor_name || '', r.category || '', num(r.amount), r.memo || ''],
+    total: (rows) => ['합계', '', '', sum(rows, r => r.amount), ''],
   },
 }
 

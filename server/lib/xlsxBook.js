@@ -123,8 +123,61 @@ function sheet(wb, name, { title, sub, columns, rows, totals = null, freezeCols 
   return ws
 }
 
-/** 안내 시트 — 무엇을 어떻게 읽는 파일인지. 받은 사람이 우리에게 되묻지 않게 한다. */
-function guideSheet(wb, lines, name = '작성안내') {
+/**
+ * 업로드 양식 시트 — **채워서 다시 올릴** 파일이다. 읽는 문서와 요구가 다르다.
+ *
+ *   · 예시 행은 **지워야 할 것**임이 보여야 한다. 그냥 두면 예시를 그대로 올린다
+ *     (실제로 'SW-001 그룹웨어 구축'이 품목으로 등록된 적이 있다) → 기울임 + 회색
+ *   · 필수 칸은 갈려야 한다 → **색으로만** 표시한다(아래 ⚠ 참고)
+ *   · 제목·부제 줄을 넣지 않는다. 위에 뭐가 붙어 있으면 **파싱 시작 행이 밀린다** —
+ *     읽는 쪽(lib/xlsx-import.js)은 첫 행을 머리글로 본다
+ *
+ * ⚠ **머리글 글자를 건드리지 않는다.** '상호명 *' 처럼 별표를 붙이면 왕복이 깨진다 —
+ *   받아서 채워 올릴 때 화면의 자동 매칭(`guess(h)`)이 공백을 지우고 이름으로 맞추는데,
+ *   '상호명*' 은 '상호명' 과 다른 글자가 된다. 사용자는 열세 칸을 손으로 다시 이어야 한다.
+ *   양식은 **그대로 돌아올 파일**이라, 사람에게 보이는 표시는 값이 아니라 서식으로만 준다.
+ *
+ * @param opts.columns [{ header, width, required? }]
+ * @param opts.samples 예시 행(값 배열). 비워도 된다
+ */
+function templateSheet(wb, name, { columns, samples = [] }) {
+  const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1 }] })
+  ws.columns = columns.map(c => ({ width: c.width || 16 }))
+
+  const head = ws.getRow(1)
+  columns.forEach((c, i) => {
+    const cell = head.getCell(i + 1)
+    cell.value = c.header                      // ⚠ 글자는 그대로. 위 주석 참고
+    cell.font = { bold: true, color: { argb: c.required ? 'FFFFFFFF' : INK }, size: 10 }
+    cell.fill = { type: 'pattern', pattern: 'solid',
+      fgColor: { argb: c.required ? 'FFB42318' : HEAD_BG } }   // 필수는 바탕을 뒤집는다
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
+    cell.border = { bottom: { style: 'thin', color: { argb: LINE } } }
+  })
+  head.height = 22
+
+  samples.forEach((r, ri) => {
+    const row = ws.getRow(2 + ri)
+    r.forEach((v, ci) => {
+      const cell = row.getCell(ci + 1)
+      cell.value = v
+      cell.font = { italic: true, color: { argb: 'FF98A2B3' }, size: 10 }
+    })
+    row.height = 18
+  })
+  return ws
+}
+
+/** 안내 시트 — 무엇을 어떻게 읽는 파일인지. 받은 사람이 우리에게 되묻지 않게 한다.
+ *  @param opts.hasRequired 업로드 양식이면 true — 필수 칸 표시를 읽는 법을 맨 앞에 얹는다
+ *         (머리글에 별표를 못 붙이므로 색의 뜻을 어딘가에서 알려야 한다) */
+function guideSheet(wb, lines, name = '작성안내', { hasRequired = false } = {}) {
+  if (hasRequired) {
+    lines = [lines[0], '',
+      '• 머리글이 빨간 칸은 필수입니다 — 비우면 그 줄은 등록되지 않습니다.',
+      '• 회색 기울임으로 적힌 예시 줄은 지우고 쓰세요. 그대로 두면 예시가 등록됩니다.',
+      ...lines.slice(1)]
+  }
   const ws = wb.addWorksheet(name)
   ws.columns = [{ width: 96 }]
   lines.forEach((line, i) => {
@@ -152,4 +205,4 @@ async function sendBook(res, wb, filename) {
   res.send(Buffer.from(buf))
 }
 
-module.exports = { newBook, sheet, guideSheet, sendBook, titleBlock, putHeader, totalStyle, MONEY, INT }
+module.exports = { newBook, sheet, templateSheet, guideSheet, sendBook, titleBlock, putHeader, totalStyle, MONEY, INT }

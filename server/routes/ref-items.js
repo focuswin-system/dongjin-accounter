@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto')
 const xlsx = require('xlsx')
 const { rollbackQuietly } = require('../lib/tx')
 const { uploadMem, parseSheet } = require('../lib/xlsx-import')
+const { newBook, templateSheet, guideSheet, sendBook } = require('../lib/xlsxBook')
 
 const router = Router()
 
@@ -193,6 +194,7 @@ const TEMPLATES = {
     file: '품목_업로드_양식.xlsx',
     sheet: '품목',
     cols: ["품목코드", "품명", "유형", "분류", "규격", "단위", "매입가", "출고가", "과세"],
+    required: "품명",
     widths: [12, 28, 10, 14, 20, 8, 12, 12, 8],
     samples: [
       ["SW-001", "그룹웨어 구축", "서비스", "웹서비스", "1식", "식", "0", "12000000", "과세"],
@@ -211,6 +213,7 @@ const TEMPLATES = {
     file: '고정자산_업로드_양식.xlsx',
     sheet: '고정자산',
     cols: ["자산번호", "자산명", "취득가액", "취득일", "비고"],
+    required: "자산명",
     widths: [14, 28, 14, 14, 30],
     samples: [
       ["FA-001", "CNC 머시닝센터", "48000000", "2025-03-14", "1공장"],
@@ -227,6 +230,7 @@ const TEMPLATES = {
     file: '무형자산_업로드_양식.xlsx',
     sheet: '무형자산',
     cols: ["자산번호", "자산명", "취득가액", "취득일", "비고"],
+    required: "자산명",
     widths: [14, 28, 14, 14, 30],
     samples: [
       ["IA-001", "회계 소프트웨어 라이선스", "6000000", "2025-11-20", "5년 상각"],
@@ -242,6 +246,7 @@ const TEMPLATES = {
     file: '적요_업로드_양식.xlsx',
     sheet: '적요',
     cols: ["적요", "비고"],
+    required: "적요",
     widths: [40, 30],
     samples: [
       ["4대보험료 납부", "매월 10일"],
@@ -253,32 +258,30 @@ const TEMPLATES = {
   },
 }
 
-router.get('/import/template', (req, res, next) => {
+router.get('/import/template', async (req, res, next) => {
   try {
     const t = TEMPLATES[String(req.query.type ?? '')]
     if (!t) return res.status(400).json({ error: '양식이 없는 기준정보예요' })
 
-    const ws = xlsx.utils.aoa_to_sheet([t.cols, ...t.samples])
-    ws['!cols'] = t.widths.map(wch => ({ wch }))
-
-    const wsGuide = xlsx.utils.aoa_to_sheet([
+    const guideLines = ([
       [`${t.sheet} 일괄 업로드 — 작성 안내`], [""],
       ...t.guide.map(line => [line[0]]),
       [""],
       ["• 첫 행(머리글)은 그대로 두고, 둘째 행부터 데이터를 입력하세요. 예시 2행은 지우고 쓰세요."],
       ["• 이미 등록된 항목은 업로드 화면에서 '건너뛰기 / 덮어쓰기'를 고를 수 있어요."],
       ["• 덮어쓰기는 엑셀에 값이 있는 칸만 바꿉니다 — 빈 칸으로 기존 정보가 지워지지 않아요."],
-    ])
-    wsGuide['!cols'] = [{ wch: 92 }]
+    ]).map(l => (Array.isArray(l) ? l[0] : l))
 
-    const wb = xlsx.utils.book_new()
-    xlsx.utils.book_append_sheet(wb, ws, t.sheet)
-    xlsx.utils.book_append_sheet(wb, wsGuide, "작성안내")
-    const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' })
-
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    res.setHeader('Content-Disposition', `attachment; filename="ref_import_template.xlsx"; filename*=UTF-8''${encodeURIComponent(t.file)}`)
-    res.send(buf)
+    const wb = newBook()
+    /* 필수 칸은 **양식마다 이름으로 적어 둔다**(TEMPLATES.required). 자리로 짐작하면 틀린다 —
+       품목·자산은 둘째 칸이 필수지만 적요는 첫째 칸이다. 머리글에서 갈라 보여야
+       빈 칸으로 올리고 나서 거절당하는 일이 줄어든다. */
+    templateSheet(wb, t.sheet, {
+      columns: t.cols.map((header, i) => ({ header, width: t.widths[i] || 16, required: header === t.required })),
+      samples: t.samples,
+    })
+    guideSheet(wb, guideLines, '작성안내', { hasRequired: true })
+    await sendBook(res, wb, t.file)
   } catch (e) { next(e) }
 })
 

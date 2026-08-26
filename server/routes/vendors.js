@@ -1,4 +1,5 @@
 const { Router } = require('express')
+const { newBook, templateSheet, guideSheet, sendBook } = require('../lib/xlsxBook')
 const { randomUUID } = require('crypto')
 const xlsx = require('xlsx')
 const { rollbackQuietly } = require('../lib/tx')
@@ -204,7 +205,7 @@ router.post('/import/commit', async (req, res, next) => {
 })
 
 // ── 거래처 엑셀 임포트: 양식 다운로드(.xlsx) ──
-router.get('/import/template', (req, res, next) => {
+router.get('/import/template', async (req, res, next) => {
   try {
     const rows = [
       ["상호명", "거래구분", "거래유형", "사업자번호", "대표자", "담당자", "전화", "팩스", "이메일", "주소", "은행", "계좌번호", "예금주"],
@@ -213,8 +214,14 @@ router.get('/import/template', (req, res, next) => {
       ["정밀가공(주)", "매입처", "외주가공", "111-11-11111", "이대표", "박담당", "051-000-0000", "", "cnc@partner.com", "부산광역시 ...", "기업", "123-456789-01-011", "이대표정밀가공"],
       ["기업은행", "기관", "금융", "", "", "", "1588-0000", "", "", "", "", "", ""],
     ]
-    const ws = xlsx.utils.aoa_to_sheet(rows)
-    ws['!cols'] = [{ wch: 22 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 22 }, { wch: 30 }, { wch: 10 }, { wch: 20 }, { wch: 16 }]
+    const COLS = [
+      { header: '상호명', width: 22, required: true }, { header: '거래구분', width: 10 },
+      { header: '거래유형', width: 12 }, { header: '사업자번호', width: 14 },
+      { header: '대표자', width: 10 }, { header: '담당자', width: 10 },
+      { header: '전화', width: 14 }, { header: '팩스', width: 14 },
+      { header: '이메일', width: 22 }, { header: '주소', width: 30 },
+      { header: '은행', width: 10 }, { header: '계좌번호', width: 20 }, { header: '예금주', width: 16 },
+    ]
 
     const guide = [
       ["거래처 일괄 업로드 — 작성 안내"],
@@ -226,17 +233,11 @@ router.get('/import/template', (req, res, next) => {
       ["• 중복: 이미 등록된 거래처(사업자번호 또는 상호명 일치)는 업로드 화면에서 '건너뛰기/덮어쓰기'를 선택할 수 있어요."],
       ["• 첫 행(머리글)은 그대로 두고, 둘째 행부터 데이터를 입력하세요."],
     ]
-    const wsGuide = xlsx.utils.aoa_to_sheet(guide)
-    wsGuide['!cols'] = [{ wch: 84 }]
-
-    const wb = xlsx.utils.book_new()
-    xlsx.utils.book_append_sheet(wb, ws, "거래처")
-    xlsx.utils.book_append_sheet(wb, wsGuide, "작성안내")
-    const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' })
-
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    res.setHeader('Content-Disposition', `attachment; filename="vendor_import_template.xlsx"; filename*=UTF-8''${encodeURIComponent('거래처_업로드_양식.xlsx')}`)
-    res.send(buf)
+    const wb = newBook()
+    // rows[0] 은 머리글이라 예시에서 뺀다 — 머리글은 COLS 가 만든다
+    templateSheet(wb, '거래처', { columns: COLS, samples: rows.slice(1) })
+    guideSheet(wb, guide.map(g => g[0], '작성안내', { hasRequired: true }))
+    await sendBook(res, wb, '거래처_업로드_양식.xlsx')
   } catch (e) { next(e) }
 })
 
