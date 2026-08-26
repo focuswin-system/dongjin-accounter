@@ -168,6 +168,70 @@ function templateSheet(wb, name, { columns, samples = [] }) {
   return ws
 }
 
+/**
+ * 구획이 섞인 시트 — 자금관리표처럼 **한 장 안에 표가 여럿**인 문서.
+ *
+ * 위 `sheet()` 는 '머리글 한 줄 + 데이터'인 표를 그린다. 그런데 대표가 보던 엑셀 양식은
+ * 구획 제목·머리글·데이터·합계·주석이 한 장에 번갈아 선다. 그 모양을 바꾸지 않고
+ * (양식을 그대로 쓰는 게 이 문서의 값어치다) 서식만 입힌다.
+ *
+ * ⚠ 역할을 **명시해서** 받는다. '첫 칸이 합계면 합계 줄'처럼 짐작하면 반드시 틀린다 —
+ *   '합계'라는 거래처가 있을 수도 있고, 구획 제목이 한 칸짜리가 아닐 수도 있다.
+ *
+ * @param opts.rows [{ kind, cells, money }] — kind: section|head|data|total|note|blank
+ *        줄에 `money` 를 적으면 그 줄에만 쓰는 금액 열 번호가 된다(시트 기본값을 덮는다)
+ * @param opts.widths 열 폭 배열
+ * @param opts.money  금액인 열 번호(0-based) 배열. data·total 줄에만 건다
+ */
+function blockSheet(wb, name, { title, sub, rows, widths = [], money = [] }) {
+  const span = Math.max(widths.length, ...rows.map(r => (r.cells || []).length), 1)
+  const ws = wb.addWorksheet(name.replace(/[:\\/?*[\]]/g, ' ').slice(0, 31), {
+    pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+  })
+  ws.columns = Array.from({ length: span }, (_, i) => ({ width: widths[i] || 14 }))
+
+  let rowNo = titleBlock(ws, { title, sub, span })
+  const moneySet = new Set(money)
+
+  for (const r of rows) {
+    const row = ws.getRow(rowNo++)
+    if (r.kind === 'blank') { row.height = 8; continue }
+    ;(r.cells || []).forEach((v, i) => { row.getCell(i + 1).value = v })
+
+    if (r.kind === 'section') {
+      // 구획 제목 — 이 장이 어디서 갈리는지. 위에 숨 쉴 자리를 주고 굵게.
+      row.getCell(1).font = { bold: true, size: 11, color: { argb: INK } }
+      row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8EBF0' } }
+      row.height = 22
+    } else if (r.kind === 'head') {
+      row.eachCell({ includeEmpty: false }, headerStyle)
+      row.height = 20
+    } else if (r.kind === 'total') {
+      totalStyle(row)
+      row.height = 19
+    } else if (r.kind === 'note') {
+      row.getCell(1).font = { size: 9, italic: true, color: { argb: SUB } }
+      row.height = 16
+    } else {
+      row.height = 18
+    }
+
+    /* 금액 서식은 줄 단위로 — 열 단위로 걸면 구획마다 열의 뜻이 달라 엉뚱한 칸이 잡힌다.
+       실제로 자금관리표에서 다섯째 칸이 계좌 구획에선 '나갈 건수', 요약 구획에선 '나갈 돈'이었다.
+       금액이 아닌 숫자(건수)도 천단위는 넣는다 — 서식이 없으면 왼쪽에 붙어 표가 어긋난다. */
+    if (r.kind === 'data' || r.kind === 'total') {
+      const cols = r.money ? new Set(r.money) : moneySet
+      ;(r.cells || []).forEach((v, i) => {
+        if (typeof v !== 'number') return
+        const c = row.getCell(i + 1)
+        c.numFmt = cols.has(i) ? MONEY : INT
+        c.alignment = { horizontal: 'right' }
+      })
+    }
+  }
+  return ws
+}
+
 /** 안내 시트 — 무엇을 어떻게 읽는 파일인지. 받은 사람이 우리에게 되묻지 않게 한다.
  *  @param opts.hasRequired 업로드 양식이면 true — 필수 칸 표시를 읽는 법을 맨 앞에 얹는다
  *         (머리글에 별표를 못 붙이므로 색의 뜻을 어딘가에서 알려야 한다) */
@@ -205,4 +269,4 @@ async function sendBook(res, wb, filename) {
   res.send(Buffer.from(buf))
 }
 
-module.exports = { newBook, sheet, templateSheet, guideSheet, sendBook, titleBlock, putHeader, totalStyle, MONEY, INT }
+module.exports = { newBook, sheet, blockSheet, templateSheet, guideSheet, sendBook, titleBlock, putHeader, totalStyle, MONEY, INT }

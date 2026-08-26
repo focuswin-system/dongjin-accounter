@@ -199,7 +199,14 @@ function dayBefore(date) {
   return ymd(d)
 }
 
+/** 바깥에서 들어온 날짜 문자열을 받아들일지 정한다 — `YYYY-MM-DD` 만 통과, 아니면 null.
+ *  쿼리스트링을 그대로 조회 조건으로 넘기지 않기 위한 문지기다.
+ *  ⚠ 정규식의 역슬래시를 잃으면(`/^d{4}-d{2}-d{2}$/`) **무엇을 넣어도 null** 이 되어,
+ *    사용자가 기간을 골라도 조용히 무시된다. 실제로 차입금 엑셀이 그렇게 새어 나갔다 —
+ *    화면은 멀쩡해 보이고 파일만 전 기간으로 나왔다. period.test.js 가 이 자리를 지킨다. */
+const dateOrNull = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v ?? '')) ? String(v) : null)
+
 module.exports = {
   monthRange, weeksOf, periodRange, periodLabel, periodSeries, UNITS, fiscalMonthOf,
-  bucketsOf, dayBefore, BUCKET_OF,
+  bucketsOf, dayBefore, BUCKET_OF, dateOrNull,
 }

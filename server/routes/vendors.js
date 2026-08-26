@@ -1,7 +1,6 @@
 const { Router } = require('express')
 const { newBook, templateSheet, guideSheet, sendBook } = require('../lib/xlsxBook')
 const { randomUUID } = require('crypto')
-const xlsx = require('xlsx')
 const { rollbackQuietly } = require('../lib/tx')
 const { uploadMem, parseSheet } = require('../lib/xlsx-import')
 

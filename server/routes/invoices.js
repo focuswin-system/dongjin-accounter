@@ -1,6 +1,5 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const xlsx = require('xlsx')
 const { uploadMem, parseSheet } = require('../lib/xlsx-import')
 const { futureDateError, kstToday } = require('../db')
 const { closedPeriodError } = require('../lib/closing')

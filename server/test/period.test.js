@@ -108,3 +108,18 @@ test('구간 목록 — 빈틈없이 이어지고 겹치지 않는다', () => {
     assert.strictEqual(s.find(x => x.offset === 0) !== undefined, true, `${unit}: 기준 구간 포함`)
   }
 })
+
+/* 바깥에서 들어온 날짜 문지기.
+   정규식의 역슬래시가 날아가면(`/^d{4}-d{2}-d{2}$/`) 무엇을 넣어도 null 이 되어
+   "기간을 골랐는데 전 기간이 나오는" 조용한 고장이 된다. 눈으로는 못 잡는 자리라 여기서 막는다. */
+const { dateOrNull } = require('../lib/period')
+
+test('dateOrNull — 제대로 된 날짜는 그대로 통과한다', () => {
+  assert.equal(dateOrNull('2026-08-01'), '2026-08-01')
+  assert.equal(dateOrNull('1999-12-31'), '1999-12-31')
+})
+
+test('dateOrNull — 모양이 다르면 받지 않는다', () => {
+  for (const bad of ['2026-8-1', '26-08-01', '2026/08/01', '2026-08-01 09:00', 'dddd-dd-dd', '', null, undefined, {}])
+    assert.equal(dateOrNull(bad), null, `${JSON.stringify(bad)} 를 통과시켰다`)
+})

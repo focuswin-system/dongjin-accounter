@@ -3,9 +3,8 @@ const { platformPool } = require('../platform/db')
 const { featuresOf } = require('../lib/entitlements')
 const { BUILTIN_REPORTS, visibleReports, featureKeyOf } = require('../platform/reportCatalog')
 const { kstToday } = require('../db')
-const xlsx = require('xlsx')
 const { taxofficePack, SHEETS } = require('../lib/taxofficePack')
-const { newBook, sheet, guideSheet, sendBook } = require('../lib/xlsxBook')
+const { newBook, sheet, blockSheet, guideSheet, sendBook } = require('../lib/xlsxBook')
 const { fundSheet } = require('../lib/fundSheet')
 const { loanReport } = require('../lib/loanReport')
 const { cardReport } = require('../lib/cardReport')
@@ -203,77 +202,103 @@ router.get('/fund-sheet.xlsx', async (req, res, next) => {
     if (!(await requireFeature(req, res, 'fundsheet'))) return
     const d = await fundSheetOf(req)
     const money = (n) => (Number(n) || 0)
-    const wb = xlsx.utils.book_new()
-    const addSheet = (name, aoa, cols) => {
-      const ws = xlsx.utils.aoa_to_sheet(aoa)
-      if (cols) ws['!cols'] = cols
-      xlsx.utils.book_append_sheet(wb, ws, name.replace(/[:\\/?*[\]]/g, ' ').slice(0, 31))
+    const wb = newBook()
+    /* 줄의 **역할을 적어서** 넘긴다(lib/xlsxBook.js blockSheet).
+       '첫 칸이 합계면 합계 줄'처럼 짐작하면 틀린다 — '합계'라는 거래처가 있을 수도 있다. */
+    const S  = (...cells) => ({ kind: 'section', cells })
+    const H  = (...cells) => ({ kind: 'head',    cells })
+    const D  = (...cells) => ({ kind: 'data',    cells })
+    const TT = (...cells) => ({ kind: 'total',   cells })
+    /* 계좌 구획만 다섯째 칸이 '나갈 건수'다 — 나머지 구획은 거기가 금액이다.
+       그래서 이 구획의 줄에만 금액 열을 따로 적는다(건수는 천단위 정수로 나간다). */
+    const ACCT_MONEY = [1, 2, 3, 5, 6, 7]
+    const AD = (...cells) => ({ kind: 'data',  cells, money: ACCT_MONEY })
+    const AT = (...cells) => ({ kind: 'total', cells, money: ACCT_MONEY })
+    const N  = (text)     => ({ kind: 'note',    cells: [text] })
+    const B  = ()         => ({ kind: 'blank' })
+
+    /** 표 하나짜리 시트(2~4장) — 머리글 + 데이터 + 합계.
+     *  합계 줄은 **넘겨받는다.** '첫 칸이 합계면 합계 줄'로 짚으면 '합계'라는 이름의
+     *  거래처·기관이 생기는 날 조용히 굵어진다. */
+    const addSheet = (name, { head, body, total, widths, money: moneyCols = [] }) => {
+      blockSheet(wb, name, {
+        title: name, sub: `기준 ${d.range.from} ~ ${d.range.to}`,
+        widths, money: moneyCols,
+        rows: [H(...head), ...body.map(r => D(...r)), ...(total ? [TT(...total)] : [])],
+      })
     }
 
     /* ── 1장: 자금관리표 ── */
+    // 제목·구간은 blockSheet 의 표지가 맡는다 — 표 안에 또 적으면 두 번 말하게 된다
     const main = []
-    main.push([`자금관리표  ${d.range.label}`])
-    main.push(['집계 구간', `${d.range.from} ~ ${d.range.to}`])
-    main.push(['※ 나갈 항목 명세는 [나갈 항목] 시트에 있습니다.'])
-    main.push([])
+    main.push(N('※ 나갈 항목 명세는 [나갈 항목] 시트에 있습니다.'))
+    main.push(B())
 
     const acctBlock = (title, g) => {
-      main.push([title])
-      main.push(['계좌', '잔액', '들어온 돈', '나간 돈', '나갈 건수', '나갈 합계', '들어올 합계', '차액'])
+      main.push(S(title))
+      main.push(H('계좌', '잔액', '들어온 돈', '나간 돈', '나갈 건수', '나갈 합계', '들어올 합계', '차액'))
       for (const r of g.rows) {
-        main.push([r.name, money(r.balance), money(r.actualIn), money(r.actualOut),
-          r.outItems.length, money(r.outTotal), money(r.inTotal), money(r.after)])
+        main.push(AD(r.name, money(r.balance), money(r.actualIn), money(r.actualOut),
+          r.outItems.length, money(r.outTotal), money(r.inTotal), money(r.after)))
       }
       const t = g.total
-      main.push(['합계', money(t.balance), money(t.actualIn), money(t.actualOut),
-        g.rows.reduce((a, r) => a + r.outItems.length, 0), money(t.outTotal), money(t.inTotal), money(t.after)])
-      main.push([])
+      main.push(AT('합계', money(t.balance), money(t.actualIn), money(t.actualOut),
+        g.rows.reduce((a, r) => a + r.outItems.length, 0), money(t.outTotal), money(t.inTotal), money(t.after)))
+      main.push(B())
     }
     acctBlock('<법인>', d.corp)
     acctBlock('<개인>', d.personal)
 
-    main.push(['<요약>'])
-    main.push(['구분', '보통계좌', '저축·보증금', '부채', '나갈 돈(예정)', '미지급 인건비', '들어온 돈', '들어올 돈', '현금 과부족'])
-    main.push(['법인', money(d.summary.corp.cash), '', '', money(d.summary.corp.plan), '', '', '', money(d.summary.corp.shortfall)])
-    main.push(['개인', money(d.summary.personal.cash), '', '', money(d.summary.personal.plan), '', '', '', money(d.summary.personal.shortfall)])
-    main.push(['합계', money(d.summary.all.cash), money(d.summary.all.savings), money(d.summary.all.debt),
+    main.push(S('<요약>'))
+    main.push(H('구분', '보통계좌', '저축·보증금', '부채', '나갈 돈(예정)', '미지급 인건비', '들어온 돈', '들어올 돈', '현금 과부족'))
+    main.push(D('법인', money(d.summary.corp.cash), '', '', money(d.summary.corp.plan), '', '', '', money(d.summary.corp.shortfall)))
+    main.push(D('개인', money(d.summary.personal.cash), '', '', money(d.summary.personal.plan), '', '', '', money(d.summary.personal.shortfall)))
+    main.push(TT('합계', money(d.summary.all.cash), money(d.summary.all.savings), money(d.summary.all.debt),
       money(d.summary.all.plan), money(d.summary.all.labor),
-      money(d.summary.all.actualIn), money(d.summary.all.planIn), money(d.summary.all.shortfall)])
+      money(d.summary.all.actualIn), money(d.summary.all.planIn), money(d.summary.all.shortfall)))
     // 저축·부채는 법인/개인 구분이 데이터에 없다 — 빈 칸으로 두고 이유를 적는다(지어내지 않는다)
-    main.push(['※ 저축·부채는 법인/개인 구분이 데이터에 없어 합계로만 냅니다.'])
-    main.push([])
+    main.push(N('※ 저축·부채는 법인/개인 구분이 데이터에 없어 합계로만 냅니다.'))
+    main.push(B())
 
-    main.push(['<들어올 돈>'])
-    main.push(['일자', '출처', '내용', '입금 계좌', '금액'])
+    main.push(S('<들어올 돈>'))
+    main.push(H('일자', '출처', '내용', '입금 계좌', '금액'))
     for (const it of d.incoming) {
-      main.push([it.noDue ? '기한 미정' : (it.overdue ? `${it.date} (기한 지남)` : it.date),
-        it.source, it.label, it.account, money(it.amount)])
+      main.push(D(it.noDue ? '기한 미정' : (it.overdue ? `${it.date} (기한 지남)` : it.date),
+        it.source, it.label, it.account, money(it.amount)))
     }
-    main.push(['합계', '', '', '', d.incoming.reduce((a, x) => a + money(x.amount), 0)])
-    main.push([])
+    main.push(TT('합계', '', '', '', d.incoming.reduce((a, x) => a + money(x.amount), 0)))
+    main.push(B())
     /* '들어온 돈'은 원본 엑셀에 없던 항목이다 — 원본은 예정만 있어서
        "이번 달에 얼마나 들어왔나"를 통장을 따로 열어 봐야 했다. */
-    main.push(['<들어온 돈>', money(d.summary.all.actualIn)])
-    main.push(['※ 원본 양식에 없던 항목입니다 — 이 구간에 실제로 입금이 끝난 금액입니다.'])
-    main.push([])
+    main.push(S('<들어온 돈>'))
+    main.push(D('이 구간에 입금이 끝난 금액', money(d.summary.all.actualIn)))
+    main.push(N('※ 원본 양식에 없던 항목입니다 — 원본은 예정만 있어 통장을 따로 열어 봐야 했습니다.'))
+    main.push(B())
 
-    main.push(['<미지급 인건비>'])
+    main.push(S('<미지급 인건비>'))
     if ((d.labor.items || []).length) {
-      main.push(['구분', '이름', '항목', '월분', '금액'])
+      main.push(H('구분', '이름', '항목', '월분', '금액'))
       for (const it of d.labor.items) {
-        main.push([it.status === 'retired' ? '퇴직자' : '현직원', it.name,
-          it.kind === 'severance' ? '퇴직금' : '급여', it.period || '', money(it.remain)])
+        main.push(D(it.status === 'retired' ? '퇴직자' : '현직원', it.name,
+          it.kind === 'severance' ? '퇴직금' : '급여', it.period || '', money(it.remain)))
       }
     } else {
-      main.push(['(이름별 명세는 인사 권한이 있어야 보입니다)'])
+      main.push(N('(이름별 명세는 인사 권한이 있어야 보입니다)'))
     }
-    main.push(['합계', '', '', '', money(d.labor.total)])
+    main.push(TT('합계', '', '', '', money(d.labor.total)))
 
-    addSheet(d.range.label, main,
-      [{ wch: 24 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 16 }])
+    /* 기본은 '첫 칸 빼고 다 금액' — 요약·들어올 돈·미지급 인건비가 여기 해당한다.
+       예외는 계좌 구획뿐이라 그 줄들만 위에서 따로 적었다(AD/AT). */
+    blockSheet(wb, d.range.label, {
+      title: `자금관리표  ${d.range.label}`,
+      sub: `집계 구간 ${d.range.from} ~ ${d.range.to}`,
+      widths: [24, 16, 14, 14, 12, 16, 14, 16, 16],
+      money: [1, 2, 3, 4, 5, 6, 7, 8],
+      rows: main,
+    })
 
     /* ── 2장: 나갈 항목 명세 ── 아무것도 자르지 않는다 */
-    const outs = [['계좌', '구분', '일자', '출처', '내용', '금액']]
+    const outs = []
     for (const [label, g] of [['법인', d.corp], ['개인', d.personal]]) {
       for (const r of g.rows) {
         for (const it of r.outItems) outs.push([r.name, label, it.date || '', it.source || '', it.label, money(it.amount)])
@@ -283,31 +308,39 @@ router.get('/fund-sheet.xlsx', async (req, res, next) => {
     for (const it of (d.unassigned.items || []).filter(x => x.kind === 'out')) {
       outs.push(['(계좌 미지정)', '', it.date || '', it.source || '', it.label, money(it.amount)])
     }
-    outs.push(['합계', '', '', '', '', outs.slice(1).reduce((a, r) => a + money(r[5]), 0)])
-    addSheet('나갈 항목', outs, [{ wch: 20 }, { wch: 8 }, { wch: 13 }, { wch: 14 }, { wch: 34 }, { wch: 16 }])
+    addSheet('나갈 항목', {
+      head: ['계좌', '구분', '일자', '출처', '내용', '금액'],
+      body: outs,
+      total: ['합계', '', '', '', '', outs.reduce((a, r) => a + money(r[5]), 0)],
+      widths: [20, 8, 13, 14, 34, 16], money: [5],
+    })
 
     /* ── 3장: 부채 현황 ── */
-    const debt = [['기관', '건명', '원금', '남은 원금']]
+    const debt = []
     for (const g of d.debts.groups || []) {
       for (const it of g.items) debt.push([g.lender, it.name, money(it.principal), money(it.remaining)])
     }
-    debt.push(['합계', '', '', money(d.debts.total)])
-    addSheet('부채 현황', debt, [{ wch: 20 }, { wch: 30 }, { wch: 16 }, { wch: 16 }])
+    addSheet('부채 현황', {
+      head: ['기관', '건명', '원금', '남은 원금'],
+      body: debt,
+      total: ['합계', '', '', money(d.debts.total)],
+      widths: [20, 30, 16, 16], money: [2, 3],
+    })
 
     /* ── 4장: 저축·보증금 현황 ── */
-    const sav = [['상품', '기관', '구분', '금액']]
+    const sav = []
     for (const it of d.savings.items || []) {
       sav.push([it.name, it.bank || '',
         it.kind === 'guarantee' ? '보증금' : it.kind === 'deposit' ? '예금' : '적금', money(it.amount)])
     }
-    sav.push(['합계', '', '', money(d.savings.total)])
-    addSheet('저축·보증금 현황', sav, [{ wch: 26 }, { wch: 16 }, { wch: 10 }, { wch: 16 }])
+    addSheet('저축·보증금 현황', {
+      head: ['상품', '기관', '구분', '금액'],
+      body: sav,
+      total: ['합계', '', '', money(d.savings.total)],
+      widths: [26, 16, 10, 16], money: [3],
+    })
 
-    const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' })
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    res.setHeader('Content-Disposition',
-      `attachment; filename="fund_sheet.xlsx"; filename*=UTF-8''${encodeURIComponent(`자금관리표_${d.range.label}.xlsx`)}`)
-    res.send(buf)
+    await sendBook(res, wb, `자금관리표_${d.range.label}.xlsx`)
   } catch (e) { next(e) }
 })
 
@@ -327,7 +360,8 @@ const idList = (v) => (Array.isArray(v) ? v : String(v ?? '').split(','))
   .map(x => String(x).trim()).filter(Boolean)
 
 /** 기간 — 'YYYY-MM-DD' 만 통과시킨다. 모양이 틀리면 없는 것으로 친다(조용히 전 기간). */
-const dateOrNull = (v) => (/^d{4}-d{2}-d{2}$/.test(String(v ?? '')) ? String(v) : null)
+// 날짜 문지기는 lib/period.js 한 곳에만 둔다 — 테스트가 그 자리를 지킨다
+const { dateOrNull } = require('../lib/period')
 
 router.get('/loans', async (req, res, next) => {
   try {
@@ -392,9 +426,12 @@ router.get('/loans.xlsx', async (req, res, next) => {
       period: { from, to },
     })
 
+    /* 기간을 정했으면 이름에도 적는다 — 구간만 바꿔 두 번 받으면 이름이 같아,
+       바탕화면에 남은 파일만 보고는 어느 기간 것인지 알 수 없다. */
+    const span = (from || to) ? `${from || '처음'}~${to || '오늘'}` : today
     const filename = loanName
-      ? `차입금현황_${loanName.replace(/[\/:*?"<>|]/g, ' ')}_${today}.xlsx`
-      : `차입금현황_전체_${today}.xlsx`
+      ? `차입금현황_${loanName.replace(/[\/:*?"<>|]/g, ' ')}_${span}.xlsx`
+      : `차입금현황_전체_${span}.xlsx`
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     res.setHeader('Content-Disposition',
       `attachment; filename="loans.xlsx"; filename*=UTF-8''${encodeURIComponent(filename)}`)

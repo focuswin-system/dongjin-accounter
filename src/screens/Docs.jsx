@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, Popover, Loading, periodToRange, DateInput } from '../lib/ui'
 // SAMPLE placeholder — Docs 화면은 실 API 연동 전까지 빈 데이터로 동작
 const SAMPLE = {
@@ -2075,7 +2075,7 @@ const ReportDefense = ({ toast }) => {
  * 달 구간은 **회계 마감일**을 따른다(25일 마감이면 7월분 = 6/26~7/25). 그래서 구간을 화면에 적는다 —
  * 받는 쪽이 달력월로 오해하면 대조가 안 맞는다.
  */
-const ReportTaxOffice = ({ toast }) => {
+const ReportTaxOffice = ({ toast, registerExport }) => {
   const [month, setMonth] = useState(() => localToday().slice(0, 7))
   const [pack, setPack] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -2095,6 +2095,13 @@ const ReportTaxOffice = ({ toast }) => {
     else toast.push(`${monthLabel(month)} 자료를 엑셀로 내려받았어요`)
   }
 
+  /* 껍데기의 '엑셀' 버튼이 이 함수를 쓴다 — 같은 화면에 '엑셀'이 둘이면
+     어느 걸 눌러야 하는지 매번 갈린다(차입금에서 같은 문제를 고쳤다). */
+  useEffect(() => {
+    registerExport?.(download)
+    return () => registerExport?.(null)
+  }, [registerExport, month])
+
   const notReady = (pack?.sections || []).filter(s => !s.ready)
 
   return (
@@ -2107,9 +2114,8 @@ const ReportTaxOffice = ({ toast }) => {
         {pack && (
           <span className="text-sm text-muted">집계 구간 {pack.from} ~ {pack.to}</span>
         )}
-        <button className="btn primary ml-auto" onClick={download} disabled={!pack || busy}>
-          <Icon.Excel size={14}/> {busy ? '만드는 중…' : '엑셀로 내려받기'}
-        </button>
+        {/* 내려받기는 위 '엑셀' 버튼 하나로 모았다(registerExport) */}
+        {busy && <span className="text-sm text-muted ml-auto">엑셀을 만드는 중…</span>}
       </div>
 
       {!pack ? <Loading label="자료를 세는 중…"/> : (
@@ -2409,7 +2415,7 @@ const FundSheetAccounts = ({ title, g }) => {
   )
 }
 
-const ReportFundSheet = ({ toast }) => {
+const ReportFundSheet = ({ toast, registerExport }) => {
   const [month, setMonth] = useState(() => localToday().slice(0, 7))
   const [d, setD] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -2428,6 +2434,12 @@ const ReportFundSheet = ({ toast }) => {
     if (!r.ok) toast.push(r.error || '내려받기에 실패했어요', { tone: 'warn' })
     else toast.push(`${monthLabel(month)} 자금관리표를 내려받았어요`)
   }
+  /* 껍데기의 '엑셀' 버튼이 이 함수를 쓴다 — 같은 화면에 '엑셀'이 둘이면
+     어느 걸 눌러야 하는지 매번 갈린다(차입금에서 같은 문제를 고쳤다). */
+  useEffect(() => {
+    registerExport?.(download)
+    return () => registerExport?.(null)
+  }, [registerExport, month])
 
   if (!d) {
     return (
@@ -2451,9 +2463,8 @@ const ReportFundSheet = ({ toast }) => {
         <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, 1))}><Icon.Right size={14}/></button>
         {/* 마감일이 있는 회사는 '8월분'이 7/26~8/25 다 — 구간을 적어야 대조할 수 있다 */}
         <span className="text-sm text-muted">집계 구간 {d.range.from} ~ {d.range.to}</span>
-        <button className="btn primary ml-auto" onClick={download} disabled={busy}>
-          <Icon.Excel size={14}/> {busy ? '만드는 중…' : '엑셀로 내려받기'}
-        </button>
+        {/* 내려받기는 위 '엑셀' 버튼 하나로 모았다(registerExport) */}
+        {busy && <span className="text-sm text-muted ml-auto">엑셀을 만드는 중…</span>}
       </div>
 
       <KpiRow cols={4} style={{ marginBottom: 20 }}>
@@ -3149,8 +3160,12 @@ export const ReportsScreen = () => {
   /* 보고서가 스스로 등록한 내려받기 함수. ref 인 이유 — 등록 때문에 껍데기가 다시 그려지면
      그 보고서도 다시 그려지고, 그 안의 effect 가 또 등록해 끝없이 돈다. */
   const customExport = useRef(null)
-  // 보고서를 바꾸면 앞 보고서의 등록은 버린다 — 안 그러면 차입금 엑셀이 다른 보고서에서 나온다
-  useEffect(() => { customExport.current = null }, [active])
+  /* 등록도 해제도 **보고서 쪽 effect 한 곳**에서만 한다.
+     껍데기가 active 를 보고 지우면, effect 는 자식→부모 순이라 자식이 등록한 **뒤에** 지워진다.
+     그러면 등록이 통째로 날아가 화면 표 CSV 가 대신 나온다(지금은 우연히 살아 있을 뿐이다).
+     보고서를 바꾸면 앞 보고서가 언마운트되며 스스로 null 을 넣으므로 남는 등록도 없다.
+     함수 정체를 고정(useCallback)하는 이유 — 매 렌더 새 함수면 자식 effect 가 계속 다시 돈다. */
+  const registerExport = useCallback((fn) => { customExport.current = fn }, [])
 
   /* 예전엔 두 버튼이 토스트만 띄웠다("PDF로 내려받았어요"). 파일은 안 받아지는데 받았다고 말하니
      세무 신고철에 자료를 챙겼다고 믿고 넘어갈 수 있었다. 둘 다 실제로 동작하게 바꾼다.
@@ -3183,7 +3198,7 @@ export const ReportsScreen = () => {
         <div className="report-print" ref={printRef}>
           <div className="page-title" style={{ marginBottom: 4 }}>{report.title}</div>
           <div className="page-sub" style={{ marginBottom: 24 }}>{localToday()} 조회 기준</div>
-          <View toast={toast} registerExport={(fn) => { customExport.current = fn }}/>
+          <View toast={toast} registerExport={registerExport}/>
         </div>
       </div>
     )
