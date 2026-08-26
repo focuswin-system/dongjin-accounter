@@ -305,7 +305,9 @@ function AppInner({ onLogout, user }) {
   const masterVisible = useMemo(() => MASTER_LEAVES.some(l => canDo(l.id)), [perms]);
   const [route, setRoute] = useState("home");
   const [contractId, setContractId] = useState("CT-2026-101");
-  const [focusInvoiceId, setFocusInvoiceId] = useState(null);   // 홈 할 일 → 청구서 바로 열기
+  const [focusInvoiceId, setFocusInvoiceId] = useState(null);
+  // 청구서 이력·주문 상세에서 "이 거래를 거래내역에서 열어줘"로 넘겨준 id
+  const [focusTxnId, setFocusTxnId] = useState(null);
   const [contractName, setContractName] = useState("");
   const [txnForm, setTxnForm] = useState(null); // null | { kind, contract? }
   const [txnVersion, setTxnVersion] = useState(0);
@@ -519,6 +521,7 @@ function AppInner({ onLogout, user }) {
     if (opts.contractName != null) setContractName(opts.contractName);
     // 홈 '할 일'에서 특정 청구서를 바로 열 때 사용 (없으면 목록만 보여준다)
     setFocusInvoiceId(opts.invoiceId || null);
+    setFocusTxnId(opts.txnId || null);
     setRoute(id);
     window.location.hash = id;
     setSidebarOpen(false);
@@ -535,8 +538,8 @@ function AppInner({ onLogout, user }) {
     if (guardId && !canDo(guardId)) return <NoPermission title={LEAF_BY_ID[guardId]?.label}/>;
 
     // 미수금/미지급금(구 ledger_ar/ledger_ap)은 청구서 기준 회수 화면으로 이관됨
-    if (route === "ledger_ar") return <BillingScreen initialTab="issued"  role="collect" openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
-    if (route === "ledger_ap") return <BillingScreen initialTab="received" role="collect" openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
+    if (route === "ledger_ar") return <BillingScreen initialTab="issued"  role="collect" goRoute={go} openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
+    if (route === "ledger_ap") return <BillingScreen initialTab="received" role="collect" goRoute={go} openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
     if (route.startsWith("ledger")) {
       const filter = route === "ledger_income" ? "income"
                    : route === "ledger_expense" ? "expense"
@@ -544,7 +547,8 @@ function AppInner({ onLogout, user }) {
       /* 거래내역의 '예정' 행(미수금·미지급금)에서 해당 청구서로 보낸다.
          해시에 ?invoiceId= 를 붙이면 안 된다 — 이 앱의 해시 라우터는 질의문자열을 모르고,
          알려진 라우트가 아니라며 아무 데도 안 간다. 청구서 지정은 go(…, {invoiceId}) 소관. */
-      return <LedgerScreen initialFilter={filter} refreshTrigger={txnVersion} openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}
+      return <LedgerScreen initialFilter={filter} refreshTrigger={txnVersion} focusTxnId={focusTxnId}
+        openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}
         openInvoice={(kind, invoiceId) => go(kind === "income" ? "ar" : "ap", { invoiceId })}/>;
     }
     if (PORTAL_CAT_BY_ID[route]) {
@@ -560,7 +564,7 @@ function AppInner({ onLogout, user }) {
     if (route.startsWith("settings_")) return <MasterScreen user={user} section="settings" forcedTab={route.slice(9)}/>;
     switch (route) {
       case "home":            return <HomeScreen go={go} user={user} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
-      case "billing":         return <BillingScreen/>;
+      case "billing":         return <BillingScreen goRoute={go}/>;
       /* focusInvoiceId 를 넘긴다 — Ctrl+K 에서 청구서를 골랐는데 목록만 열리면
          찾은 것을 다시 찾아야 한다(BillingScreen 은 이미 이 값을 받아 그 건을 연다). */
       /* 등록 입구가 '받은 서류'를 먼저 묻고, 계산서가 아니면 거래 드로어로 넘긴다
@@ -572,7 +576,7 @@ function AppInner({ onLogout, user }) {
              그 쪽 칩 목록에는 없는 값이 남아 **아무 칩도 안 눌린 빈 표**가 된다
              ("왜 아무것도 없지" — 필터가 걸린 흔적조차 화면에 없다).
          기간·거래처 필터도 같은 경로로 새어 나간다. 두 화면은 서로 다른 장부다. */
-      case "billing_issued":  return <BillingScreen key="billing_issued" initialTab="issued" focusInvoiceId={focusInvoiceId}
+      case "billing_issued":  return <BillingScreen key="billing_issued" initialTab="issued" focusInvoiceId={focusInvoiceId} goRoute={go}
                                        openIncome={() => setTxnForm({ kind: "income" })}/>;
       case "billing_received":return <BillingScreen key="billing_received" initialTab="received" focusInvoiceId={focusInvoiceId}
                                        goRoute={go}
@@ -619,8 +623,8 @@ function AppInner({ onLogout, user }) {
       case "income":          return <LedgerScreen initialFilter="income" openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
       case "expense":         return <LedgerScreen initialFilter="expense" openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
       // 미수금/미지급금은 청구서 기준 → 발행 청구서와 같은 BillingScreen을 '회수 모드'로 재사용
-      case "ar":              return <BillingScreen initialTab="issued"  role="collect" focusInvoiceId={focusInvoiceId} openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
-      case "ap":              return <BillingScreen initialTab="received" role="collect" focusInvoiceId={focusInvoiceId} openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
+      case "ar":              return <BillingScreen initialTab="issued"  role="collect" focusInvoiceId={focusInvoiceId} goRoute={go} openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
+      case "ap":              return <BillingScreen initialTab="received" role="collect" focusInvoiceId={focusInvoiceId} goRoute={go} openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
       case "doc":             return <DocsScreen/>;
       case "settlement":      return <SettlementScreen/>;
       case "payment_run":     return <PaymentRunScreen go={go}/>;
@@ -634,7 +638,7 @@ function AppInner({ onLogout, user }) {
       case "excel":           return <ExcelScreen/>;
       default:                return <HomeScreen go={go} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
     }
-  }, [route, contractId, txnVersion, focusInvoiceId, perms]);
+  }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, perms]);
 
   const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger"
                 : route.startsWith("billing") ? "billing"

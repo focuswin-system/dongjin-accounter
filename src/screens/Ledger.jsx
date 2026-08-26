@@ -13,7 +13,10 @@ import { ResolutionDocument } from './Docs'
 
 /* 거래내역 — **조회 화면**. openIncome/openExpense 를 더 받지 않는다(등록 입구는 여기 없다).
    화면에서 뺀 것은 배선까지 은퇴시킨다 — 남겨 두면 다음 사람이 "쓰는 줄 알고" 다시 버튼을 단다. */
-export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openInvoice, refreshTrigger }) => {
+export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openInvoice, refreshTrigger,
+  /* 다른 화면에서 "이 거래를 거래내역에서 열어줘"라고 넘겨준 id.
+     없으면 평소처럼 목록만 연다(청구서의 focusInvoiceId 와 같은 방식). */
+  focusTxnId }) => {
   const toast = useToast();
   const { confirm } = useConfirm();
   const [filter, setFilter] = useState(initialFilter);
@@ -99,6 +102,16 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
        그러다 주문 필터가 빠져서 주문으로 좁혀도 예정분은 전 주문이 떠 있었다. */
     return tf.apply(rows);
   }, [showPlanned, openInvoices, tf.apply]);
+
+  /* 짚어 열기 — 청구서·주문에서 "이 거래를 거래내역에서 열어줘"로 넘어온 경우.
+     ⚠ **필터를 안 거친 원본(txns)에서 찾는다.** 기본 기간이 이번 달이라, 지난달 거래를
+     넘겨받으면 filtered 에는 없어서 아무 일도 안 일어난다 — 넘어왔는데 안 열리면
+     기능이 고장난 것으로 읽힌다. */
+  useEffect(() => {
+    if (!focusTxnId || !txns.length) return
+    const hit = txns.find(t => t.id === focusTxnId)
+    if (hit) setSel(hit)
+  }, [focusTxnId, txns]);
 
   // 표에 실제로 그려지는 행 = 범위 + 탭 (+ 켰으면 예정분)
   const filtered = useMemo(() => {

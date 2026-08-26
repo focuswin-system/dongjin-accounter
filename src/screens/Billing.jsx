@@ -7,6 +7,7 @@ import { TableToolbar } from '../lib/components/TableToolbar'
 import { useTableFilter, monthRange, activeMonthOf } from '../lib/tableFilter'
 import { ImportWizard } from '../lib/components/ImportWizard'
 import { VoucherView } from '../lib/components/VoucherView'
+import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { DocTypeChooser } from '../lib/components/DocTypeChooser'
 import { InvoiceLines, lineVat, blankLine, isFilledLine } from '../lib/components/InvoiceLines'
@@ -103,7 +104,7 @@ const localDate = () => {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 }
 
-const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onChanged, toast }) => {
+const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onChanged, toast, goRoute }) => {
   const { confirm } = useConfirm()
   // 취소 중인 매칭 id — 같은 줄을 두 번 눌러 이미 지운 매칭을 또 지우려 하는 걸 막는다
   const [unmatching, setUnmatching] = useState(null)
@@ -111,6 +112,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
   const [matchDate, setMatchDate] = useState(localDate())
   const [innerTab, setInnerTab] = useState("match")
   const [voucherOpen, setVoucherOpen] = useState(false)   // 발행 시점 전표(차변·대변)
+  const [txnOpen, setTxnOpen] = useState(null)            // 이력 행에서 연 거래 상세
   /* 거래명세서 — 이 청구서의 품목을 서류로 뽑는다.
      회사·거래처 정보(사업자번호·대표·주소)는 명세서를 열 때만 받아온다.
      상세 드로어는 자주 열리는데 대부분 명세서를 안 뽑으므로, 열 때마다 두 번 더
@@ -307,17 +309,25 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                 </div>
                 {(invoice.matches?.length ?? 0) > 0 ? (
                   <div className="col gap-6" style={{ marginBottom: 12 }}>
+                    {/* 행을 누르면 그 거래가 열린다.
+                        예전엔 날짜·금액·취소 버튼뿐이라, 어느 통장으로 들어왔는지·적요가 뭔지
+                        볼 수가 없었다. 잘못 들어온 걸 봐도 거래내역으로 나가 금액으로 더듬어
+                        찾아야 했다. matches 는 txnId 를 이미 들고 있었다(api.js). */}
                     {(invoice.matches || []).map((m, i) => (
                       <div key={m.id || i} className="row gap-10"
-                        style={{ padding: "8px 12px", borderRadius: 8, background: "var(--surface-2)", fontSize: 13 }}>
+                        onClick={() => m.txnId && setTxnOpen(m.txnId)}
+                        title={m.txnId ? "이 거래 열기" : undefined}
+                        style={{ padding: "8px 12px", borderRadius: 8, background: "var(--surface-2)", fontSize: 13,
+                          cursor: m.txnId ? "pointer" : undefined }}>
                         <Icon.Check size={14} style={{ color: "var(--pos)" }}/>
                         <span className="text-muted">{m.matchedAt}</span>
                         <span className="num fw-700 ml-auto">{fmtNum(m.amount)}</span>
                         {/* 정산 취소 — 서버엔 있었는데 부르는 화면이 없어서, 금액이나 상대를 잘못 넣은
                             입금은 되돌릴 방법이 없었다(청구서를 통째로 지우는 수밖에). */}
+                        {/* 취소는 행 클릭과 다른 일이다 — 전파를 끊지 않으면 거래 드로어가 같이 열린다 */}
                         <button className="icon-btn" title={`${isIssued ? "입금" : "지급"} 정산 취소`}
                           disabled={unmatching === m.id || !m.id}
-                          onClick={() => cancelMatch(m)}>
+                          onClick={(e) => { e.stopPropagation(); cancelMatch(m) }}>
                           <Icon.Close size={14}/>
                         </button>
                       </div>
@@ -622,6 +632,13 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
               ) : <Loading label="회사·거래처 정보를 불러오는 중…"/>}
             </div>
           </Drawer>
+        )}
+
+        {/* 이력 행에서 연 거래 상세 — 청구서 드로어 위에 겹쳐 뜬다(Drawer 스택이 Esc 를 맨 위부터 닫는다).
+            contractId 를 안 넘긴다: 여기서 뗄 대상은 주문이 아니라 청구서 정산이고,
+            그건 위의 취소(×) 버튼이 한다. */}
+        {txnOpen && (
+          <TxnQuickDrawer txnId={txnOpen} onClose={() => setTxnOpen(null)} onChanged={onChanged} goRoute={goRoute}/>
         )}
     </Drawer>
   )
@@ -1973,6 +1990,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
 
       <InvoiceDetailDrawer
         invoice={selected}
+        goRoute={goRoute}
         onClose={() => setSelected(null)}
         onMatch={handleMatch}
         onDelete={async (id) => { const r = await api.deleteInvoice(id); toast.push(r.ok ? "청구서가 삭제됐어요" : (r.error || "삭제에 실패했어요")); load() }}

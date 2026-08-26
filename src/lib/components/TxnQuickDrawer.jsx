@@ -13,7 +13,7 @@ import { api } from '../api'
  * 여기서 하는 일은 둘이다 — **무엇인지 보여주기**와 **이 주문에서 떼기**.
  * 금액·날짜 같은 본격 수정은 거래내역의 편집 폼이 한다(같은 폼을 두 벌 두면 반드시 어긋난다).
  */
-export const TxnQuickDrawer = ({ txnId, onClose, contractId, onChanged }) => {
+export const TxnQuickDrawer = ({ txnId, onClose, contractId, onChanged, goRoute }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [txn, setTxn] = useState(null)
@@ -102,8 +102,12 @@ export const TxnQuickDrawer = ({ txnId, onClose, contractId, onChanged }) => {
                   </span>
                 </button>
               )}
-              {/* 금액·날짜 수정은 거래내역의 편집 폼이 맡는다 — 같은 폼을 두 벌 두면 어긋난다 */}
-              <button className="btn" onClick={() => { window.location.hash = 'ledger'; onClose() }}>
+              {/* 금액·날짜 수정은 거래내역의 편집 폼이 맡는다 — 같은 폼을 두 벌 두면 어긋난다.
+                  ⚠ 예전엔 해시만 바꿔 거래내역 첫 화면으로 보냈다. 방금 보고 있던 건을
+                     거기서 **다시 찾아야 했다**(수백 줄에서 금액으로 더듬는다).
+                     goRoute 를 받은 자리에서는 그 거래를 짚어서 연다. */}
+              <button className="btn"
+                onClick={() => { goRoute ? goRoute('ledger', { txnId }) : (window.location.hash = 'ledger'); onClose() }}>
                 <Icon.Right size={14}/> 거래내역에서 열기
               </button>
             </div>
