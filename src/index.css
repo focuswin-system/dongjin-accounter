@@ -1424,6 +1424,40 @@ body:has([data-modal-open]) {
 .drawer.open { transform: none; }
 /* 상세(조회) 항목 — 이름은 흐리게 왼쪽, 값은 진하게 오른쪽. 줄마다 선을 긋지 않는다:
    값이 여섯 줄이면 선도 여섯 줄이라 표처럼 시끄러워진다. 간격만으로 갈린다. */
+/* ── 전표 목록(분개장) ─────────────────────────────────────────
+ *
+ * 보통 표와 규칙이 다르다. **한 전표가 여러 줄**이라, 줄마다 선을 긋고 줄마다 색을
+ * 바꾸면 어디서 전표가 갈리는지 눈으로 못 찾는다. 묶음을 보이게 하는 것이 이 표의 일이다.
+ *   · 줄무늬는 **행이 아니라 전표 단위**로 — 한 전표는 통째로 같은 바탕이다
+ *   · 가로선은 **전표 사이에만** — 전표 안의 줄 사이에는 긋지 않는다
+ *   · 머리글은 확실히 갈라 세운다(옅은 바탕 + 진한 아래선). 흰 바탕에 흰 머리글이면
+ *     어디부터 데이터인지 매번 눈으로 찾게 된다
+ */
+.vb-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.vb-table thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--surface-3);
+  color: var(--muted);
+  font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em;
+  text-align: left; padding: 11px 14px; white-space: nowrap;
+  border-bottom: 1.5px solid var(--line-strong);
+}
+.vb-table thead th.num-right { text-align: right; }
+.vb-table tbody td {
+  padding: 9px 14px; font-size: 13px; vertical-align: middle;
+  border-bottom: 0;                      /* 줄 사이엔 선을 긋지 않는다 */
+}
+/* 전표가 바뀌는 자리에만 선 — 여기가 묶음의 경계다 */
+.vb-table tbody tr.vb-top > td { border-top: 1px solid var(--line-strong); }
+.vb-table tbody tr:first-child > td { border-top: 0; }
+/* 짝수 전표만 옅게 — 한 전표는 몇 줄이든 같은 바탕이라 묶음이 통째로 읽힌다.
+   ⚠ --surface-2(#FAFAFB)로는 **안 보인다.** 흰색과 명도 차이가 1% 남짓이라
+   줄무늬를 넣고도 안 넣은 것과 같았다. 눈에 들어오는 최소치까지 내린다. */
+.vb-table tbody tr.vb-alt > td { background: #F4F6F9; }
+.vb-table tbody tr:hover > td { background: var(--brand-soft); }
+/* 날짜·금액은 접히면 안 된다 — 접히는 순간 행 높이가 세 배가 되고 표가 성글어진다 */
+.vb-table .vb-nowrap { white-space: nowrap; }
+
 /* ── 바로가기 독 ────────────────────────────────────────────── */
 .qd-fab {
   width: 50px; height: 50px; border-radius: 50%;
