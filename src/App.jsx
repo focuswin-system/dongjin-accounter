@@ -837,9 +837,15 @@ function AppInner({ onLogout, user }) {
               {/* FAQ 입구 — 예전엔 떠다니는 말풍선으로만 열렸다. 그 자리를 바로가기 독에
                   내주면서 여기로 옮긴다. '말걸기 설정'(자동·항상·끄기)은 말을 걸 것이
                   없어졌으니 함께 뺀다 — 아무 일도 안 하는 설정이 남으면 더 헷갈린다. */}
-              <div style={{ padding: "10px 14px", borderTop: "1px solid var(--line)" }}>
+              <div className="col gap-8" style={{ padding: "10px 14px", borderTop: "1px solid var(--line)" }}>
                 <button className="btn" style={{ width: "100%" }} onClick={() => setFaqOpen(true)}>
                   <Icon.Help size={14}/> 자주 묻는 질문
+                </button>
+                {/* 바로가기 독을 숨긴 사람이 되돌릴 수 있는 유일한 길이다.
+                    숨기기만 두고 켜는 길을 안 두면 영영 못 되살린다. */}
+                <button className="btn" style={{ width: "100%" }}
+                  onClick={() => window.dispatchEvent(new Event('quickdock:show'))}>
+                  <Icon.Eye size={14}/> 바로가기 독 보이기
                 </button>
               </div>
             </div>

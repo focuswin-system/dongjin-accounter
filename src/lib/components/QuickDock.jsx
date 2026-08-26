@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Icon, Drawer } from '../ui'
 import { DrawerHead } from './Drawer'
 import { ALL_LEAVES, LEAF_BY_ID } from '../nav'
@@ -21,6 +21,23 @@ import { ALL_LEAVES, LEAF_BY_ID } from '../nav'
  */
 
 const KEY = 'quickLinks'
+const POS_KEY = 'quickDockPos'     // { corner, dx, dy } — 화면 어디에 서 있나
+const HIDE_KEY = 'quickDockHidden' // '1' 이면 안 그린다
+
+/* 위치는 **모서리 + 그 모서리에서의 거리**로 저장한다.
+   절대 좌표(left/top)로 두면 창 크기를 줄였을 때 화면 밖으로 나가 영영 못 잡는다. */
+const CORNERS = [
+  { key: 'br', label: '오른쪽 아래' },
+  { key: 'bl', label: '왼쪽 아래' },
+  { key: 'tr', label: '오른쪽 위' },
+  { key: 'tl', label: '왼쪽 위' },
+]
+const loadPos = () => {
+  try {
+    const p = JSON.parse(localStorage.getItem(POS_KEY))
+    return p && CORNERS.some(c => c.key === p.corner) ? p : { corner: 'br', dx: 24, dy: 24 }
+  } catch { return { corner: 'br', dx: 24, dy: 24 } }
+}
 
 /* 바로가기로 쓸 만한 아이콘만 추린다. 48개를 다 내놓으면 Close·Menu·Down 같은
    '기능 아이콘'까지 섞여, 고르는 사람이 무엇을 뜻하는지 알 수 없다. */
@@ -55,8 +72,18 @@ export const QuickDock = ({ go, route, canDo, onOpenFaq }) => {
   const [editOpen, setEditOpen] = useState(false)
   const [links, setLinks] = useState(load)
   const [q, setQ] = useState('')
+  const [pos, setPos] = useState(loadPos)
+  const [hidden, setHidden] = useState(() => localStorage.getItem(HIDE_KEY) === '1')
 
   useEffect(() => { localStorage.setItem(KEY, JSON.stringify(links)) }, [links])
+  useEffect(() => { localStorage.setItem(POS_KEY, JSON.stringify(pos)) }, [pos])
+  useEffect(() => { localStorage.setItem(HIDE_KEY, hidden ? '1' : '0') }, [hidden])
+  // 밖(상단 도움말)에서 다시 켤 수 있어야 한다 — 숨긴 뒤 되돌릴 길이 없으면 안 된다
+  useEffect(() => {
+    const on = () => setHidden(false)
+    window.addEventListener('quickdock:show', on)
+    return () => window.removeEventListener('quickdock:show', on)
+  }, [])
 
   /* 권한 없는 화면은 독에서도 감춘다 — 눌렀을 때 403 만 보게 하지 않는다.
      담아 둔 기록은 지우지 않는다: 권한이 다시 생기면 그대로 돌아온다. */
@@ -93,10 +120,59 @@ export const QuickDock = ({ go, route, canDo, onOpenFaq }) => {
 
   const canAddCurrent = !!LEAF_BY_ID[route] && !already.has(route)
 
+  /* 끌어서 옮기기.
+   *
+   * 같은 버튼이 '누르면 펼치기'와 '끌면 이동'을 겸한다. 8px 을 문턱으로 둔다 —
+   * 손이 조금 흔들려도 클릭으로 읽히고, 옮길 뜻이 있으면 그보다는 크게 움직인다.
+   * 놓을 때 **가장 가까운 모서리**로 붙인다. 자유 좌표로 두면 창 크기가 바뀌었을 때
+   * 화면 밖으로 나가 다시 잡을 수 없다. */
+  const drag = useRef(null)
+  const onPointerDown = (e) => {
+    drag.current = { x: e.clientX, y: e.clientY, moved: false }
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+  }
+  const onPointerMove = (e) => {
+    const d = drag.current
+    if (!d) return
+    if (!d.moved && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 8) return
+    d.moved = true
+    setOpen(false)                      // 옮기는 중엔 목록을 접는다(따라다니면 어지럽다)
+    const w = window.innerWidth, h = window.innerHeight
+    const right = e.clientX > w / 2, bottom = e.clientY > h / 2
+    setPos({
+      corner: (bottom ? 'b' : 't') + (right ? 'r' : 'l'),
+      dx: Math.max(12, Math.min(w - 74, right ? w - e.clientX - 25 : e.clientX - 25)),
+      dy: Math.max(12, Math.min(h - 74, bottom ? h - e.clientY - 25 : e.clientY - 25)),
+    })
+  }
+  const onPointerUp = (e) => {
+    const d = drag.current
+    drag.current = null
+    e.currentTarget.releasePointerCapture?.(e.pointerId)
+    if (!d?.moved) setOpen(o => !o)     // 안 움직였으면 평소대로 펼치기/접기
+  }
+
+  // 모서리에 따라 어느 변에서 띄울지 정한다
+  const anchor = {
+    position: 'fixed', zIndex: 60, display: 'flex', gap: 10,
+    flexDirection: pos.corner[0] === 'b' ? 'column' : 'column-reverse',
+    alignItems: pos.corner[1] === 'r' ? 'flex-end' : 'flex-start',
+    [pos.corner[0] === 'b' ? 'bottom' : 'top']: pos.dy,
+    [pos.corner[1] === 'r' ? 'right' : 'left']: pos.dx,
+  }
+
+  if (hidden) return (
+    <Drawer open={editOpen} onClose={() => setEditOpen(false)} width="min(460px,100vw)" label="바로가기 편집" confirmClose={false}>
+      <DrawerHead title="바로가기" sub="지금은 숨겨져 있어요" onClose={() => setEditOpen(false)}/>
+      <div className="drawer-body">
+        <button className="btn primary" onClick={() => setHidden(false)}>다시 보이기</button>
+      </div>
+    </Drawer>
+  )
+
   return (
     <>
-      <div style={{ position: 'fixed', right: 24, bottom: 24, zIndex: 60,
-        display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
+      <div style={anchor}>
 
         {/* 펼친 바로가기들 — 위로 쌓인다(아래는 여는 버튼이 차지한다) */}
         {open && (
@@ -125,8 +201,9 @@ export const QuickDock = ({ go, route, canDo, onOpenFaq }) => {
           </div>
         )}
 
-        <button className="qd-fab" onClick={() => setOpen(o => !o)}
-          title={open ? '닫기' : '바로가기'} aria-expanded={open}>
+        <button className="qd-fab"
+          onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
+          title={open ? '닫기' : '바로가기 (끌어서 옮길 수 있어요)'} aria-expanded={open}>
           {open ? <Icon.Close size={20}/> : <Icon.Sparkle size={20}/>}
         </button>
       </div>
@@ -206,6 +283,32 @@ export const QuickDock = ({ go, route, canDo, onOpenFaq }) => {
                   <span className="text-xs text-muted2 ml-auto">{[l.domain, l.section].filter(Boolean).join(' › ')}</span>
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* 자리와 숨기기 — 화면을 가린다는 말이 나올 자리라 조작을 눈에 보이게 둔다.
+              끌어서 옮길 수도 있지만, 끌 수 있다는 걸 모르는 사람을 위해 버튼도 낸다. */}
+          <div>
+            <label className="label">독 자리</label>
+            <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+              {CORNERS.map(c => (
+                <button key={c.key} type="button"
+                  className={`chip ${pos.corner === c.key ? 'active' : ''}`}
+                  onClick={() => setPos(p => ({ ...p, corner: c.key }))}>{c.label}</button>
+              ))}
+            </div>
+            <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+              독 버튼을 <b>끌어서</b> 옮길 수도 있어요. 놓으면 가장 가까운 모서리에 붙습니다.
+            </div>
+          </div>
+
+          <div>
+            <button className="btn" style={{ width: '100%' }}
+              onClick={() => { setHidden(true); setEditOpen(false) }}>
+              <Icon.EyeOff size={14}/> 독 숨기기
+            </button>
+            <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+              숨겨도 사라지지 않아요 — 상단 <b>도움말(?)</b>에서 다시 켤 수 있습니다.
             </div>
           </div>
 

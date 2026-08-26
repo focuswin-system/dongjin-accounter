@@ -4,6 +4,7 @@ import { PageHeader } from '../lib/components/PageHeader'
 import { Drawer } from '../lib/ui'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { api } from '../lib/api'
+import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
 
 /**
  * 카드 대금 지급 — 쌓인 카드값을 통장에서 갚는다.
@@ -79,6 +80,8 @@ export const CardPaymentScreen = () => {
   const [form, setForm] = useState(null)
   const [openCard, setOpenCard] = useState(null)   // 사용 내역을 펼친 카드
   const [busy, setBusy] = useState(false)
+  // 지급 이력 행에서 연 거래 상세 — 거래내역과 같은 드로어를 쓴다
+  const [txnOpen, setTxnOpen] = useState(null)
 
   const today = localToday()
 
@@ -349,19 +352,24 @@ export const CardPaymentScreen = () => {
                 </td></tr>
               )}
               {rows.map(t => (
-                <tr key={t.id}>
+                /* 행을 누르면 그 거래가 열린다. 잘못 갚은 건을 봤을 때 그 자리에서
+                   확인·수정할 수 있어야 한다(취소는 오른쪽 버튼이 따로 한다). */
+                <tr key={t.id} style={{ cursor: 'pointer' }} onClick={() => setTxnOpen(t.id)}>
                   <td className="num-cell text-sm">{t.date}</td>
                   <td className="fw-700 text-sm">{byId.get(t.accountId)?.name || '—'}</td>
                   <td className="text-sm">{byId.get(t.counterpartyAccountId)?.name || '—'}</td>
                   <td className="text-sm text-muted">{t.memo || '—'}</td>
                   <td className="num-cell num-right fw-700">{fmtNum(t.amount)}</td>
-                  <td><button className="btn sm" style={{ color: 'var(--neg-ink)' }} onClick={() => remove(t)}>취소</button></td>
+                  <td><button className="btn sm" style={{ color: 'var(--neg-ink)' }}
+                    onClick={(e) => { e.stopPropagation(); remove(t) }}>취소</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {txnOpen && <TxnQuickDrawer txnId={txnOpen} onClose={() => setTxnOpen(null)} onChanged={load}/>}
 
       {/* 결제 폼 — 카드 말투로 묻는다. '보내는 계좌 → 받는 계좌'가 아니라
           '어느 통장에서 얼마를 갚나'다. 사용자 머릿속의 말과 같아야 한다. */}

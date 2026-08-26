@@ -1213,6 +1213,8 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const [recSummary, setRecSummary] = useState(null)
   const [paySum, setPaySum]     = useState(null)
   const [selected, setSelected] = useState(null)
+  // 입금내역·지급내역 탭에서 연 거래 상세(거래내역과 같은 드로어를 쓴다)
+  const [txnOpen, setTxnOpen] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
   const [editInvoice, setEditInvoice] = useState(null)
   /* 등록 입구 — 청구서 폼을 바로 열지 않고 **받은 서류부터 묻는다**(DocTypeChooser 머리말).
@@ -1958,6 +1960,10 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       {!collect && view === "plain" && (
         <DataTable
           rows={plainFiltered}
+          /* 행을 누르면 그 거래가 열린다 — 거래내역과 같이. 이 표의 줄은 **이미 오간 돈**이라
+             잘못된 걸 봤을 때 그 자리에서 고칠 수 있어야 한다. 예전엔 읽기만 돼서
+             거래내역으로 나가 금액으로 더듬어 찾아야 했다. */
+          onRowClick={t => setTxnOpen(t.id)}
           empty={isIssued ? "이 기간에 들어온 입금이 없어요." : "이 기간에 나간 지급이 없어요."}
           columns={[
             { key: 'date', header: '날짜', sortable: true,
@@ -1986,6 +1992,10 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
             { key: 'amount', header: '금액', align: 'right', sortable: true,
               render: t => <span className="num-cell fw-700">{fmtNum(t.amount)}</span> },
           ]}/>
+      )}
+
+      {txnOpen && (
+        <TxnQuickDrawer txnId={txnOpen} onClose={() => setTxnOpen(null)} onChanged={load} goRoute={goRoute}/>
       )}
 
       <InvoiceDetailDrawer

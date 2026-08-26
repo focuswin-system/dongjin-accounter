@@ -5,6 +5,7 @@ import { Drawer } from '../lib/ui'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { api } from '../lib/api'
+import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
 
 /**
  * 내부 계좌 이체 — 우리 통장에서 우리 다른 통장으로 옮기는 돈.
@@ -29,6 +30,7 @@ export const TransferScreen = () => {
   const [rows, setRows] = useState([])
   const [form, setForm] = useState(null)   // null 이면 폼이 닫힌 상태
   const [busy, setBusy] = useState(false)
+  const [txnOpen, setTxnOpen] = useState(null)   // 이체 내역 행에서 연 거래 상세
 
   const today = localToday()
 
@@ -106,6 +108,8 @@ export const TransferScreen = () => {
       <div className="card" style={{ overflow: 'hidden' }}>
         <DataTable
           rows={rows}
+          // 행을 누르면 그 거래가 열린다 — 다른 목록과 같은 규칙
+          onRowClick={t => setTxnOpen(t.id)}
           empty="이체 내역이 없어요. 급여계좌 보충·시재통장 채우기 같은 통장 간 이동을 여기에 기록하세요."
           columns={[
             { key: 'date', header: '날짜', sortable: true,
@@ -118,9 +122,12 @@ export const TransferScreen = () => {
             { key: 'amount', header: '금액', align: 'right', sortable: true,
               render: t => <span className="num-cell">{fmtNum(t.amount)}</span> },
             { key: 'act', header: '', align: 'right',
-              render: t => <button className="btn sm" style={{ color: 'var(--neg-ink)' }} onClick={() => remove(t)}>취소</button> },
+              render: t => <button className="btn sm" style={{ color: 'var(--neg-ink)' }}
+                onClick={(e) => { e.stopPropagation(); remove(t) }}>취소</button> },
           ]}/>
       </div>
+
+      {txnOpen && <TxnQuickDrawer txnId={txnOpen} onClose={() => setTxnOpen(null)} onChanged={load}/>}
 
       {/* 폼은 Drawer 로 낸다 — 이 앱의 모든 폼이 그렇다(CLAUDE.md). 여기만 모달을 쓰면
           닫기 동작·확인창·모바일 폭이 다른 화면과 어긋난다. */}
