@@ -33,6 +33,7 @@ import { MiscPLScreen } from './screens/MiscPL'
 import { MgmtDashScreen } from './screens/Mgmt'
 import { MgmtAskScreen } from './screens/MgmtAsk'
 import { PortalScreen } from './screens/Portal'
+import { QuickDock } from './lib/components/QuickDock'
 
 /* 브레드크럼에 세울 말.
  *
@@ -319,9 +320,6 @@ function AppInner({ onLogout, user }) {
   const [notifRead, setNotifRead] = useState(false);
   const [notifs, setNotifs] = useState([]);
   const [faqOpen, setFaqOpen] = useState(false);
-  const [idlePhase, setIdlePhase] = useState("hidden"); // "hidden" | "showing" | "dismissing"
-  const [nudgeMode, setNudgeMode] = useState(() => localStorage.getItem("nudgeMode") || "always");
-  const idleRef = useRef(null);
   const contentRef = useRef(null);   // 데스크톱 내부 스크롤 컨테이너(.content) — 라우트 전환 시 맨 위로
   const toast = useToast();
   const { confirm } = useConfirm();
@@ -439,49 +437,6 @@ function AppInner({ onLogout, user }) {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [cmdOpen, faqOpen, sidebarOpen]);
 
-  // nudgeMode → localStorage 저장
-  useEffect(() => { localStorage.setItem("nudgeMode", nudgeMode); }, [nudgeMode]);
-
-  // 유휴 감지 → nudgeMode에 따라 동작
-  useEffect(() => {
-    if (faqOpen || nudgeMode === "off") { setIdlePhase("hidden"); return; }
-    if (nudgeMode === "always")         { setIdlePhase("showing"); return; }
-
-    // "auto" 모드: 60초 미활동 시 nudge 표시
-    const startTimer = () => {
-      clearTimeout(idleRef.current);
-      idleRef.current = setTimeout(() => setIdlePhase("showing"), 60000);
-    };
-    // 마우스 이동은 타이머만 리셋 (nudge는 건드리지 않음 — 버튼 클릭 가능하도록)
-    const onMove   = () => startTimer();
-    // 클릭·키·스크롤은 타이머 리셋 + nudge 닫기
-    const onAction = () => {
-      setIdlePhase(prev => prev === "showing" ? "dismissing" : prev);
-      startTimer();
-    };
-    const moveEvents   = ["mousemove", "touchmove"];
-    const actionEvents = ["click", "keydown", "touchstart"];
-    moveEvents.forEach(e   => window.addEventListener(e, onMove,   { passive: true }));
-    actionEvents.forEach(e => window.addEventListener(e, onAction, { passive: true }));
-    // 스크롤은 캡처 단계로 — 데스크톱은 body가 아니라 .content 내부에서 스크롤되므로
-    // (스크롤 이벤트는 버블링하지 않아) window 캡처로 받아야 유휴 타이머가 리셋된다.
-    window.addEventListener("scroll", onAction, { passive: true, capture: true });
-    startTimer();
-    return () => {
-      moveEvents.forEach(e   => window.removeEventListener(e, onMove));
-      actionEvents.forEach(e => window.removeEventListener(e, onAction));
-      window.removeEventListener("scroll", onAction, { capture: true });
-      clearTimeout(idleRef.current);
-    };
-  }, [faqOpen, nudgeMode]);
-
-  // "dismissing" → 0.4초 뒤 "hidden" (always 모드 제외)
-  useEffect(() => {
-    if (idlePhase === "dismissing" && nudgeMode !== "always") {
-      const t = setTimeout(() => setIdlePhase("hidden"), 400);
-      return () => clearTimeout(t);
-    }
-  }, [idlePhase, nudgeMode]);
 
   /* 사이드바 도메인 펼침 상태 + 활성 라우트의 도메인 자동 펼침.
    *
@@ -877,21 +832,13 @@ function AppInner({ onLogout, user }) {
                   </div>
                 ))}
               </div>
-              <div style={{ padding: "12px 14px", borderTop: "1px solid var(--line)" }}>
-                <div className="text-xs fw-700" style={{ color: "var(--muted-2)", marginBottom: 8, letterSpacing: "0.02em" }}>도움말 말걸기</div>
-                <div style={{ display: "flex", width: "100%", background: "var(--surface-2)", borderRadius: 8, padding: 3, gap: 2 }}>
-                  {[["auto", "자동"], ["always", "항상 표시"], ["off", "끄기"]].map(([v, label]) => (
-                    <button key={v} onClick={() => setNudgeMode(v)}
-                      style={{ flex: 1, padding: "5px 0", border: 0, borderRadius: 6, cursor: "pointer",
-                        fontSize: 11, fontWeight: 600, fontFamily: "inherit",
-                        background: nudgeMode === v ? "#fff" : "transparent",
-                        color: nudgeMode === v ? "var(--ink)" : "var(--muted-2)",
-                        boxShadow: nudgeMode === v ? "0 1px 4px rgba(0,0,0,0.08)" : "none",
-                        transition: "all .15s" }}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
+              {/* FAQ 입구 — 예전엔 떠다니는 말풍선으로만 열렸다. 그 자리를 바로가기 독에
+                  내주면서 여기로 옮긴다. '말걸기 설정'(자동·항상·끄기)은 말을 걸 것이
+                  없어졌으니 함께 뺀다 — 아무 일도 안 하는 설정이 남으면 더 헷갈린다. */}
+              <div style={{ padding: "10px 14px", borderTop: "1px solid var(--line)" }}>
+                <button className="btn" style={{ width: "100%" }} onClick={() => setFaqOpen(true)}>
+                  <Icon.Help size={14}/> 자주 묻는 질문
+                </button>
               </div>
             </div>
           </Popover>
@@ -917,45 +864,8 @@ function AppInner({ onLogout, user }) {
         });
       }}/>
 
-      {/* FAQ 유휴 nudge + 플로팅 버튼 */}
-      {idlePhase !== "hidden" && !faqOpen && (
-        <div style={{
-          position:"fixed", right:24, bottom:24, zIndex:60,
-          display:"flex", alignItems:"flex-end", gap:10,
-          opacity: idlePhase === "dismissing" ? 0 : 1,
-          transition:"opacity .35s ease",
-          pointerEvents: idlePhase === "dismissing" ? "none" : "auto",
-        }}>
-          {/* 말풍선 */}
-          <div style={{
-            background:"#fff", borderRadius:14, padding:"12px 16px",
-            boxShadow:"0 4px 20px rgba(15,23,42,0.12)", border:"1px solid var(--line)",
-            maxWidth:190, marginBottom:4,
-            ...(idlePhase === "showing" ? { animation:"nudgeBubble .3s ease both .25s" } : {}),
-          }}>
-            <div className="fw-700" style={{ fontSize:13, marginBottom:3, color:"var(--ink)" }}>도움이 필요하세요?</div>
-            <div className="text-xs text-muted" style={{ lineHeight:1.55 }}>자주 묻는 질문을 확인해 보세요.</div>
-          </div>
-
-          {/* 로봇 버튼 */}
-          <button onClick={() => setFaqOpen(true)} title="자주 묻는 질문"
-            style={{
-              width:50, height:50, borderRadius:"50%",
-              background:"var(--brand)", color:"#fff",
-              border:0, cursor:"pointer", display:"grid", placeItems:"center",
-              boxShadow:"0 4px 18px rgba(37,99,235,0.35)", flexShrink:0,
-              ...(idlePhase === "showing" ? { animation:"nudgePop .4s cubic-bezier(.34,1.56,.64,1) both" } : {}),
-            }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="11" width="18" height="10" rx="2"/>
-              <path d="M9 11V7a3 3 0 0 1 6 0v4"/>
-              <circle cx="9" cy="16" r="1" fill="currentColor" stroke="none"/>
-              <circle cx="15" cy="16" r="1" fill="currentColor" stroke="none"/>
-              <path d="M12 3v1M8 3h8"/>
-            </svg>
-          </button>
-        </div>
-      )}
+      {/* 바로가기 독 — 이 자리에 있던 FAQ 말풍선을 걷어내고 자주 가는 화면을 담는다 */}
+      <QuickDock go={go} route={route} canDo={canDo} onOpenFaq={() => setFaqOpen(true)}/>
       <FaqPanel open={faqOpen} onClose={() => setFaqOpen(false)} route={route}
         go={(r) => { go(r); setFaqOpen(false); }}/>
     </div>
