@@ -1750,3 +1750,8 @@ body:has([data-modal-open]) {
 }
 .link-cell:hover { text-decoration: underline; text-underline-offset: 3px; }
 .link-cell:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 3px; }
+
+/* 머리글 없는 섹션 — '거래내역'처럼 한 겹이 헛도는 자리라 라벨을 비웠다(nav.js).
+   그런데 라벨만 지우면 **위 섹션의 마지막 항목처럼 보인다**(들여쓰기가 같다).
+   실제로 '출금 › 거래내역'으로 읽혔다. 가는 선 하나로 묶음이 갈렸음을 알린다. */
+.nav-section-plain { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }

@@ -719,7 +719,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                       안내대로 갔다가 막힌다. 화면 이름을 바꾸면 가리키는 글도 함께 옮겨야 한다. */}
                 {(form.method === "법인카드" || form.method === "개인카드") && (
                   <div className="text-xs text-muted2" style={{ marginTop: 8, lineHeight: 1.7 }}>
-                    이 카드에 미결제로 쌓여요. 나중에 갚을 때 <b>지급처리 › 카드 대금 지급</b>에서
+                    이 카드에 미결제로 쌓여요. 나중에 갚을 때 <b>입출금 › 출금 › 카드 대금 지급</b>에서
                     통장 → 카드로 처리하시면 됩니다.
                   </div>
                 )}

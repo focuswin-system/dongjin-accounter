@@ -47,35 +47,36 @@ export const NAV_TREE = [
     ],
   },
 
-  /* 입금관리 — 들어오는 돈. 정기와 수시를 나란히 둔다. */
-  {
-    type: "domain", id: "income_dom", label: "입금관리", icon: Icon.Recv,
-    sections: [
-      { label: "입금", items: [
-        { id: "recurring_invoice", label: "정기입금", icon: Icon.Clock },
-        { id: "billing_issued",    label: "수시입금", icon: Icon.Receipt },
-      ]},
-    ],
-  },
-
-  /* 지급처리 — 나가는 돈.
+  /* 입출금 — 들어온 돈과 나간 돈, 그리고 그 결과를 보는 거래내역까지 **한 도메인**.
+   *
+   * 예전엔 입금관리·지급처리·거래내역이 최상위 셋으로 갈려 있었다. 축은 하나(돈의 방향)인데
+   * 최상위가 셋이라 사이드바 위쪽이 그만큼 무거웠고, 등록하고 확인하러 가는 흐름
+   * (수시입금 → 거래내역)이 도메인을 건너뛰어야 했다.
+   *
+   * 섹션 라벨을 '입금/출금'으로 두고 잎 이름을 사이드바에서만 '정기/수시'로 줄인다.
+   * ⚠ 줄이는 것은 **사이드바 표시뿐**이다(`short`). Ctrl+K·바로가기 독·브레드크럼은
+   *   부모가 안 보이므로 '정기입금/정기지급' 전체 이름을 그대로 쓴다 —
+   *   거기서 '정기'가 둘이면 어느 쪽인지 가릴 수 없다.
+   *
+   * 급여·임금이 여기 있는 이유: hr 화면은 급여대장·용역/일용 대장·미지급 퇴직금으로
+   * **전부 나가는 돈**이다. 반면 근로계약·고용형태 같은 인사 데이터는 성격이 달라
+   * 아래 인사관리에 남는다 — 지급 메뉴에서 직원을 등록하게 두면 안 된다.
    *
    * ⓶ '경비'가 아직 잎으로 남아 있다. 다음 단계에서 **수시지급 안의 입력 폼 분기**로 흡수한다.
    *   경비(성격)와 정기/수시(리듬)는 서로 직교해서, 경비를 메뉴로 세우면 정기 경비(임차료·
    *   서버비)가 갈 곳이 애매해지고 정기/수시 안에 넣으면 경비가 두 군데로 흩어진다.
    *   답은 "메뉴는 하나, 폼은 둘"이다 — 등록할 때 **받은 서류가 뭔지**만 물으면
-   *   세금계산서면 청구서 폼, 카드전표·영수증이면 가벼운 경비 폼으로 갈린다.
-   *   (식대 8,000원을 거래처·품목·공급가·부가세 폼으로 받는 건 과하다.)
-   *
-   * 급여·임금이 여기 있는 이유: hr 화면은 급여대장·용역/일용 대장·미지급 퇴직금으로,
-   * **전부 나가는 돈**이다. 반면 근로계약·고용형태 같은 인사 데이터는 성격이 달라
-   * 아래 인사관리에 남는다 — 지급 메뉴에서 직원을 등록하게 두면 안 된다. */
+   *   세금계산서면 청구서 폼, 카드전표·영수증이면 가벼운 경비 폼으로 갈린다. */
   {
-    type: "domain", id: "payment_dom", label: "지급처리", icon: Icon.Pay,
+    type: "domain", id: "cash_dom", label: "입출금", icon: Icon.Recv,
     sections: [
-      { label: "지급", items: [
-        { id: "recurring_expense", label: "정기지급", icon: Icon.Clock },
-        { id: "billing_received",  label: "수시지급", icon: Icon.Receipt },
+      { label: "입금", items: [
+        { id: "recurring_invoice", label: "정기입금", short: "정기", icon: Icon.Clock },
+        { id: "billing_issued",    label: "수시입금", short: "수시", icon: Icon.Receipt },
+      ]},
+      { label: "출금", items: [
+        { id: "recurring_expense", label: "정기지급", short: "정기", icon: Icon.Clock },
+        { id: "billing_received",  label: "수시지급", short: "수시", icon: Icon.Receipt },
         { id: "misc_pl",           label: "경비",     icon: Icon.Wallet },
         /* 카드 대금 지급 / 내부 계좌 이체 — 둘 다 **벌지도 쓰지도 않은 돈**이라
          * 수입도 지출도 아니다(저장은 양쪽 모두 두 줄 대체 거래, api.transfer 하나를 쓴다).
@@ -86,30 +87,33 @@ export const NAV_TREE = [
          *   내부 계좌 이체 : 예금 A ↓ + 예금 B ↑ — 자산 안에서 옮긴다(총액 불변).
          *                    화면 본체가 **폼 하나**다.
          *
-         * 한 화면에 두면 반드시 한쪽이 곁다리가 된다. 실제로 그랬다 — 훨씬 자주 하는
-         * 카드값 처리가 '계좌 이체' 화면 안의 보조 표로 얹혀 있었고, 화면 제목은
-         * 어쩌다 하는 통장 이동이 달고 있었다.
-         *
          * ⚠ 수시지급(매입 청구서) 안에 넣지 않는다. 카드사는 세금계산서를 주지 않고,
          *   개별 카드 사용분은 이미 거래로 매입세액에 잡혀 있다(routes/tax.js).
-         *   카드 대금을 청구서로 또 등록하면 **매입세액이 두 번 잡힌다.**
-         *   대신 수시지급 화면 위에 이리로 넘어오는 줄을 둔다. */
-        { id: "card_payment",      label: "카드 대금 지급", icon: Icon.Card },
-        { id: "transfer",          label: "내부 계좌 이체", icon: Icon.Bank },
+         *   카드 대금을 청구서로 또 등록하면 **매입세액이 두 번 잡힌다.** */
+        { id: "card_payment",      label: "카드 대금 지급", short: "카드 대금", icon: Icon.Card },
+        { id: "transfer",          label: "내부 계좌 이체", short: "내부 이체", icon: Icon.Bank },
+        { id: "hr",                label: "급여·임금", icon: Icon.Building },
       ]},
-      { label: "급여", items: [
-        { id: "hr", label: "급여·임금", icon: Icon.Building },
+      /* 거래내역 — **조회 전용**. 등록은 위 입금·출금에서 하고 여기서는 오간 돈을 본다.
+       * 섹션 라벨을 비워 둔다 — '거래내역 › 거래내역'은 한 겹이 헛돈다.
+       * (라벨이 비면 사이드바가 그 줄을 안 그린다. 브레드크럼은 NAV_PATH_OF 가 이미 접는다.) */
+      { label: "", items: [
+        { id: "ledger", label: "거래내역", icon: Icon.Wallet },
       ]},
     ],
   },
 
-  /* 거래내역 — **조회 전용**이라 도메인 없이 잎으로 세운다.
-   * 등록은 입금관리·지급처리에서 하고, 여기서는 오간 돈을 본다.
-   *
-   * 자리는 **돈이 오간 메뉴(입금·지급) 바로 뒤**다. 등록하고 나서 "제대로 들어갔나"를
-   * 보러 오는 화면이라 그 흐름의 끝에 있어야 한다. 세무·인사 아래에 있을 때는
-   * 매일 보는 화면을 어쩌다 보는 것들 밑에서 찾아야 했다. */
-  { type: "leaf", id: "ledger", label: "거래내역", icon: Icon.Wallet },
+  /* 인사관리 — 사람을 관리하는 일. 급여 '지급'은 위 지급처리로 갔다.
+   * 부서·직위·급여항목·고용형태는 처음 세팅하고 거의 안 건드리므로 기준정보에 있다. */
+  {
+    type: "domain", id: "hr_dom", label: "인사관리", icon: Icon.Building,
+    sections: [
+      { label: "근로·용역", items: [
+        { id: "hr_labor_contract", label: "근로계약",      icon: Icon.Sign },
+        { id: "hr_outsourcing",    label: "기타 용역·일용", icon: Icon.Briefcase },
+      ]},
+    ],
+  },
 
   /* 세무관리 — 지급처리 밑에 넣지 않는다.
    *   · 부가세는 지급만이 아니다. **환급이면 입금**이라 지급 메뉴에 두면 갈 곳이 없다.
@@ -127,28 +131,18 @@ export const NAV_TREE = [
     ],
   },
 
-  /* 인사관리 — 사람을 관리하는 일. 급여 '지급'은 위 지급처리로 갔다.
-   * 부서·직위·급여항목·고용형태는 처음 세팅하고 거의 안 건드리므로 기준정보에 있다. */
-  {
-    type: "domain", id: "hr_dom", label: "인사관리", icon: Icon.Building,
-    sections: [
-      { label: "근로·용역", items: [
-        { id: "hr_labor_contract", label: "근로계약",      icon: Icon.Sign },
-        { id: "hr_outsourcing",    label: "기타 용역·일용", icon: Icon.Briefcase },
-      ]},
-    ],
-  },
-
-  /* 사무업무 — 만들어서 넘기는 것들.
+  /* 문서업무 — **만들어서 넘기는 것들**만 남는다.
    *
-   * 매입 결제내역·매입/매출 현황은 예전에 '문서' 밑에 있었는데 **그건 문서가 아니라 보고서**다.
-   * 자금일보·일계표도 여기로 모은다 — 흩어져 있으면 "이 숫자 어디서 보지"가 매번 갈린다.
+   * 예전 이름은 '사무업무'였고 문서와 보고서를 함께 담고 있었다. 보고서를 경영관리로
+   * 올리면서(대표가 직접 보는 자리) 여기엔 문서만 남았으므로 이름도 그에 맞춘다.
    *
-   * ⚠ 자금일보는 매일 아침 제일 먼저 여는 화면이라, 보고서 안에 묻으면 매일 3클릭이 되고
-   *   그러면 안 본다. 홈에 그날 숫자가 카드로 떠 있어 그 우려를 덜지만, 실사용에서
-   *   "찾기 어렵다"가 나오면 다시 잎으로 올린다. */
+   * 이 도메인에 들어오는 이유는 대개 손이 가는 일이 있어서다 — 결의서를 끊는다,
+   * 정산내역서를 보낸다, 견적을 요청한다. 그날 안에 끝내야 하는 것들이다.
+   *
+   * ⚠ 자금일보는 매일 아침 제일 먼저 여는 화면인데 이제 경영관리 밑이다. 홈에 그날 숫자가
+   *   카드로 떠 있어 그 우려를 덜지만, 실사용에서 "찾기 어렵다"가 나오면 다시 올린다. */
   {
-    type: "domain", id: "office_dom", label: "사무업무", icon: Icon.Doc,
+    type: "domain", id: "office_dom", label: "문서업무", icon: Icon.Doc,
     sections: [
       /* 문서가 먼저다. 이 도메인에 들어오는 이유는 대개 **만들어서 넘길 것**이 있어서다
          (결의서를 끊는다, 정산내역서를 보낸다, 견적을 요청한다) — 손이 가는 일이라
@@ -161,17 +155,6 @@ export const NAV_TREE = [
         { id: "settlement",   label: "정산내역서", icon: Icon.Doc },
         { id: "quote_req",    label: "견적요청서", icon: Icon.Doc },
         { id: "purchase_req", label: "구매품의서", icon: Icon.Receipt },
-      ]},
-      { label: "보고서", items: [
-        { id: "report",          label: "보고서",         icon: Icon.Chart },
-        { id: "report_daily",    label: "일계표",         icon: Icon.Book },
-        /* 전표 목록(분개장) — 일계표가 '하루치 집계'라면 이건 '기간 전체를 전표 줄로'.
-           신고철에 세무사에게 넘기거나 회계 프로그램에 올릴 때 쓴다. 그때까지는
-           거래내역 CSV 를 받아 손으로 분개를 만들어야 했다. */
-        { id: "voucher_book",    label: "전표 목록",       icon: Icon.Doc },
-        { id: "cash_report",     label: "자금일보",       icon: Icon.Bank },
-        { id: "payment_run",     label: "매입 결제내역",   icon: Icon.Bank },
-        { id: "purchase_status", label: "매입·매출 현황",  icon: Icon.Chart },
       ]},
     ],
   },
@@ -202,15 +185,35 @@ export const NAV_TREE = [
 
   {
     type: "domain", id: "mgmt", label: "경영관리", icon: Icon.Trend,
+    /* 보고서를 여기로 올린다.
+     * 원래는 경리가 뽑아 대표에게 넘기는 자료라 사무업무에 있었다. 그런데 **대표가 직접
+     * 보라고 만든 자리가 경영관리**다. 보고서를 사무업무에 두면 대표는 못 찾고, 경리가
+     * 뽑아 넘기는 일을 계속하게 된다 — 경영관리를 만든 이유와 어긋난다.
+     * 위치를 옮겨도 경리가 잃는 것은 없다. 접근을 막는 것은 메뉴가 아니라 권한이다
+     * (platform/permissions.js RESOURCES + 회사별 scope).
+     *
+     * ⓷ 다음 단계: 아래 잎 여섯을 **보고서 카탈로그로 흡수**해 '보고서' 잎 하나로 만든다.
+     *   분류 축은 '누가 보는가' — 대표가 보는 것(자금 현황·매입매출)과 경리가 쓰는 것
+     *   (일계표·전표 목록)은 한 목록에 평평하게 두면 대표 쪽 자리의 뜻이 옅어진다.
+     *   ⚠ 그때 이름도 다시 본다 — 일계표·전표 목록은 엄밀히 '보고서'가 아니라 장부다. */
     sections: [
-      { label: "자금", items: [
+      { label: "보고서", items: [
+        { id: "report",          label: "보고서",         icon: Icon.Chart },
+        { id: "report_daily",    label: "일계표",         icon: Icon.Book },
+        /* 전표 목록(분개장) — 일계표가 '하루치 집계'라면 이건 '기간 전체를 전표 줄로'.
+           신고철에 세무사에게 넘기거나 회계 프로그램에 올릴 때 쓴다. 그때까지는
+           거래내역 CSV 를 받아 손으로 분개를 만들어야 했다. */
+        { id: "voucher_book",    label: "전표 목록",       icon: Icon.Doc },
+        { id: "cash_report",     label: "자금일보",       icon: Icon.Bank },
+        { id: "payment_run",     label: "매입 결제내역",   icon: Icon.Bank },
+        { id: "purchase_status", label: "매입·매출 현황",  icon: Icon.Chart },
         /* 자금일보와 같은 데이터, 다른 축 — 자금일보는 오늘부터 N일 롤링(매일 아침 보는 것),
            자금 현황은 주·월·분기·년 구간(대표가 "이 달에 도나"를 보는 것). */
-        { id: "fund_status", label: "자금 현황", icon: Icon.Chart },
+        { id: "fund_status",     label: "자금 현황",       icon: Icon.Chart },
       ]},
-      { label: "경영", items: [
-        { id: "mgmt_dash", label: "경영 대시보드", icon: Icon.Trend },
-        { id: "mgmt_ask",  label: "경영 도우미",   icon: Icon.Sparkle },
+      { label: "현황", items: [
+        { id: "mgmt_dash", label: "대시보드",   icon: Icon.Trend },
+        { id: "mgmt_ask",  label: "어시스턴트", icon: Icon.Sparkle },
       ]},
     ],
   },
@@ -450,19 +453,17 @@ export const PORTAL = [
     ],
   },
   {
-    id: 'income_dom', label: '입금관리', icon: Icon.Recv,
+    /* NAV_TREE 의 입출금과 같은 모양. 트리와 포털이 어긋나면 홈과 사이드바가 다른 말을 한다
+       (거래내역이 트리에만 있고 타일이 없어 홈에서 못 들어가던 적이 실제로 있다). */
+    id: 'cash_dom', label: '입출금', icon: Icon.Recv,
     categories: [
-      { id: 'income_recurring', label: '정기입금', icon: Icon.Clock,   desc: '매달 같은 곳에 청구하는 돈', route: 'recurring_invoice' },
-      { id: 'income_onetime',   label: '수시입금', icon: Icon.Receipt, desc: '건별 청구서 발행·수금',      route: 'billing_issued' },
-    ],
-  },
-  {
-    id: 'payment_dom', label: '지급처리', icon: Icon.Pay,
-    categories: [
-      { id: 'payment_recurring', label: '정기지급', icon: Icon.Clock,    desc: '매달 나가는 돈',        route: 'recurring_expense' },
-      { id: 'payment_onetime',   label: '수시지급', icon: Icon.Receipt,  desc: '건별 청구서 수취·지급', route: 'billing_received' },
-      { id: 'payment_expense',   label: '경비',     icon: Icon.Wallet,   desc: '영수증·카드전표로 나간 돈', route: 'misc_pl' },
-      { id: 'payment_payroll',   label: '급여·임금', icon: Icon.Building, desc: '급여대장·용역·퇴직금',   route: 'hr' },
+      { id: 'cash_in', label: '입금', icon: Icon.Recv, desc: '정기·수시 청구와 수금', groups: [
+        { label: '', items: ['recurring_invoice', 'billing_issued'] },
+      ]},
+      { id: 'cash_out', label: '출금', icon: Icon.Pay, desc: '정기·수시 지급, 경비·카드·이체·급여', groups: [
+        { label: '', items: ['recurring_expense', 'billing_received', 'misc_pl', 'card_payment', 'transfer', 'hr'] },
+      ]},
+      { id: 'ledger_all', label: '거래내역', icon: Icon.Wallet, desc: '오간 돈을 모아 봅니다 (조회 전용)', route: 'ledger' },
     ],
   },
   {
@@ -481,21 +482,9 @@ export const PORTAL = [
       ]},
     ],
   },
-  /* 거래내역은 NAV_TREE 에서 최상위 잎으로 올렸는데 포털 타일을 안 만들어,
-     홈에서는 들어갈 길이 없었다 — 이 파일이 경계하는 NAV_TREE↔PORTAL 어긋남이
-     바로 다시 났다(재무관리가 사이드바에만 있던 그 일). 타일로 세운다. */
   {
-    id: 'ledger_dom', label: '거래내역', icon: Icon.Wallet,
+    id: 'office_dom', label: '문서업무', icon: Icon.Doc,
     categories: [
-      { id: 'ledger_all', label: '전체 거래내역', icon: Icon.Wallet, desc: '오간 돈을 모아 봅니다 (조회 전용)', route: 'ledger' },
-    ],
-  },
-  {
-    id: 'office_dom', label: '사무업무', icon: Icon.Doc,
-    categories: [
-      { id: 'office_report', label: '보고서', icon: Icon.Chart, desc: '보고서·일계표·자금일보·매입 현황', groups: [
-        { label: '', items: ['report', 'report_daily', 'cash_report', 'payment_run', 'purchase_status'] },
-      ]},
       { id: 'office_docs', label: '문서', icon: Icon.Sign, desc: '지급결의서·정산내역서·견적요청서·구매품의서', groups: [
         { label: '', items: ['doc', 'settlement', 'quote_req', 'purchase_req'] },
       ]},
@@ -514,8 +503,10 @@ export const PORTAL = [
   {
     id: 'mgmt', label: '경영관리', icon: Icon.Trend,
     categories: [
-      { id: 'mgmt_fund', label: '자금 현황', icon: Icon.Chart, desc: '주·월·분기 자금 계획', route: 'fund_status' },
-      { id: 'mgmt_biz', label: '경영관리', icon: Icon.Trend, desc: '경영 대시보드·도우미', groups: [
+      { id: 'mgmt_report', label: '보고서', icon: Icon.Chart, desc: '보고서·일계표·전표 목록·자금일보·자금 현황·매입 현황', groups: [
+        { label: '', items: ['report', 'report_daily', 'voucher_book', 'cash_report', 'payment_run', 'purchase_status', 'fund_status'] },
+      ]},
+      { id: 'mgmt_biz', label: '현황', icon: Icon.Trend, desc: '대시보드·어시스턴트', groups: [
         { label: '', items: ['mgmt_dash', 'mgmt_ask'] },
       ]},
     ],
@@ -525,6 +516,19 @@ export const PORTAL = [
 // 포털 페이지(그룹 보유) 카테고리만 id로 조회 — App 라우팅에서 PortalScreen 렌더
 export const PORTAL_CAT_BY_ID = {}
 for (const d of PORTAL) for (const c of d.categories) if (c.groups) PORTAL_CAT_BY_ID[c.id] = { ...c, domainLabel: d.label }
+
+/* 옛 라우트 → 새 라우트. **메뉴를 옮길 때 여기만 적는다.**
+ *
+ * 잎 id 는 절대 바꾸지 않으므로(권한 자원이자 사용자가 담아둔 바로가기의 이름이다)
+ * 여기 실리는 건 **포털 페이지 id** 뿐이다. 그것도 라우트라, 옮기면 옛 주소가 죽는다 —
+ * 담아둔 바로가기·북마크·FAQ 링크가 조용히 '홈'으로 떨어진다.
+ *   office_report → mgmt_report : 보고서를 사무업무에서 경영관리로 올렸다(2026-08-27) */
+export const ROUTE_ALIAS = {
+  office_report: 'mgmt_report',
+}
+for (const [from, to] of Object.entries(ROUTE_ALIAS)) {
+  if (PORTAL_CAT_BY_ID[to]) PORTAL_CAT_BY_ID[from] = PORTAL_CAT_BY_ID[to]
+}
 
 // 환경설정도 포털 타일 페이지로(기준정보와 같은 방식) — 'settings' 루트가 타일을 보여주고,
 // 각 타일은 settings_<tab> forcedTab 화면으로 들어간다.
