@@ -110,16 +110,18 @@ const MASTER_TABS = [
   // 조직
   { id: "department",      label: "부서", custom: true },
   { id: "position",        label: "직위", custom: true },
-  { id: "user",            label: "사용자" },
-  { id: "approval",        label: "결재선", custom: true },
+  /* 환경설정 항목의 이름은 **nav.js SETTINGS_LEAVES 와 같아야 한다** —
+     여기 label 이 화면 제목이 되므로, 다르면 메뉴와 제목이 어긋난다. */
+  { id: "user",            label: "사용자 관리" },
+  { id: "approval",        label: "결재선 등록", custom: true },
   // 기준 설정
   { id: "payrollItems",    label: "급여 항목", custom: true },
   { id: "employType",      label: "고용형태", custom: true },
   { id: "company",         label: "회사 정보", custom: true },
   { id: "template",        label: "문서 양식" },
-  { id: "reports",         label: "보고서", custom: true },
-  { id: "closing",         label: "월 마감", custom: true },
-  { id: "audit",           label: "변경 이력", custom: true },
+  { id: "reports",         label: "보고서 관리", custom: true },
+  { id: "closing",         label: "월 마감 설정", custom: true },
+  { id: "audit",           label: "변경 이력 조회", custom: true },
 ];
 
 const TAB_BY_ID = Object.fromEntries(MASTER_TABS.map(t => [t.id, t]));
@@ -4025,7 +4027,7 @@ export const ReportPrefPanel = ({ embedded }) => {
   const on = rows.filter(r => r.visible).length
   return (
     <div className={embedded ? '' : 'fade-up'}>
-      {!embedded && <PageHeader title="보고서 사용 설정"/>}
+      {!embedded && <PageHeader title="보고서 관리"/>}
       <div className="card" style={{ overflow: 'hidden' }}>
         <div className="row card-pad" style={{ paddingBottom: 10, alignItems: 'baseline' }}>
           <div className="fw-700">보고서</div>

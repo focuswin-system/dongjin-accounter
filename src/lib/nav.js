@@ -273,14 +273,18 @@ export const SETTINGS_LEAF = { id: "settings", label: "환경설정", icon: Icon
 
 // 환경설정 하위 화면 — 기준정보처럼 각 항목을 forcedTab 잎으로(내부 서브내브 없이 전체폭, 공용 레이아웃).
 // '문서 양식'(template)은 목업이라 제외. 클릭 시 route=settings_<tab> → MasterScreen forcedTab.
+/* 이름에 **무엇을 하는 자리인지**를 붙인다 — '사용자'가 아니라 '사용자 관리',
+   '보고서'가 아니라 '보고서 관리'. 환경설정 안의 항목은 화면 이름만으로는
+   보러 가는 곳인지 고치러 가는 곳인지 갈리지 않는다.
+   특히 '보고서'는 경영관리의 보고서 화면과 이름이 같아, 그대로 두면 같은 것으로 읽힌다. */
 export const SETTINGS_LEAVES = [
-  { id: "settings_company",  label: "회사 정보", icon: Icon.Building },
-  { id: "settings_user",     label: "사용자",    icon: Icon.Sign },
-  { id: "settings_approval", label: "결재선",    icon: Icon.Doc },
-  { id: "settings_reports",  label: "보고서",    icon: Icon.Chart },
-  { id: "settings_closing",  label: "월 마감",   icon: Icon.Bank },
+  { id: "settings_company",  label: "회사 정보",     icon: Icon.Building },
+  { id: "settings_user",     label: "사용자 관리",   icon: Icon.Sign },
+  { id: "settings_approval", label: "결재선 등록",   icon: Icon.Doc },
+  { id: "settings_reports",  label: "보고서 관리",   icon: Icon.Chart },
+  { id: "settings_closing",  label: "월 마감 설정",  icon: Icon.Bank },
   // 변경 이력 — 회사 마스터만 열린다(서버가 막고, 화면도 마스터가 아니면 타일을 감춘다)
-  { id: "settings_audit",    label: "변경 이력", icon: Icon.Doc },
+  { id: "settings_audit",    label: "변경 이력 조회", icon: Icon.Doc },
 ]
 
 /* 사이드바·포털에서는 뺐지만 **살아 있는 화면** — 라우트·권한 자원·검색은 그대로 둔다.
