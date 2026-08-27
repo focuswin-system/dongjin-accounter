@@ -4,6 +4,7 @@ const multer = require('multer')
 const xlsx = require('xlsx')
 const { futureDateError } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
+const { dateOrNull } = require('../lib/period')
 const { normalizeStatus, ledgerError, defaultSettledStatus, amountError } = require('../lib/ledger')
 const { restoreLastGenerated } = require('../lib/recurrence')
 const { removeUploadedFile } = require('../lib/uploads')
@@ -138,6 +139,73 @@ router.get('/summary', async (req, res, next) => {
 /* ⚠ 아래 '/:id' 보다 **먼저** 서 있어야 한다.
    express 는 먼저 등록된 것부터 맞춰보므로, /:id 가 위에 있으면 'linkable' 이
    거래 id 로 잡혀 404 가 난다(실제로 그래서 후보 목록이 늘 비어 있었다). */
+/**
+ * 거래를 등록하기 **전에** 알려줄 것들 — "이거 여기서 넣는 게 맞나요?"
+ *
+ * ── 왜 필요한가 ──
+ * 실사용 회사에서 같은 입금이 여러 벌로 쌓였다. 경로가 셋인데 화면이 서로를 모른다.
+ *   · 정기청구가 회차를 만들어 청구서를 발행하고
+ *   · 소급 마법사가 지난 회차를 만들고
+ *   · 담당자가 수시입금에서 손으로 또 넣는다
+ * 셋 다 "돈이 들어왔다"를 적으므로, 앞의 둘을 모른 채 손으로 넣으면 매출이 두 번 잡힌다.
+ * 실제로 55건이 완전 중복이었고, 날짜만 다른 이중 계상이 18건 더 있었다.
+ *
+ * 막지는 않는다 — 같은 날 같은 금액이 정말 두 번 들어오는 일이 있다. **알려주고 고르게 한다.**
+ *   ① 같은 거래가 이미 있어요        → 중복일 수 있다
+ *   ② 이 거래처에 안 받은 청구서가 있어요 → 거기에 입금 처리하면 미수금이 정리된다
+ *   ③ 이 거래처는 정기 규칙이 있어요   → 그쪽에서 처리하면 청구서까지 함께 만들어진다
+ */
+router.get('/entry-hints', async (req, res, next) => {
+  try {
+    const kind = req.query.kind === 'income' ? 'income' : 'expense'
+    const vendorId = req.query.vendor_id || null
+    const date = dateOrNull(req.query.date)
+    const amount = Math.round(Number(req.query.amount) || 0)
+    if (!vendorId) return res.json({ duplicates: [], openInvoices: [], recurring: [] })
+
+    // ① 같은 거래처·금액이 **가까운 날짜**에 이미 있나. 날짜가 하루이틀 어긋난 이중 계상이
+    //    실제로 가장 많았으므로(소급은 1일, 실제 입금은 15일) 앞뒤 열흘을 본다.
+    const duplicates = amount > 0 && date ? (await req.db.execute(
+      `SELECT t.id, t.date, t.amount, t.memo, t.category,
+              (t.invoice_id IS NOT NULL) AS has_invoice, i.invoice_no
+         FROM transactions t LEFT JOIN invoices i ON t.invoice_id = i.id
+        WHERE t.vendor_id = ? AND t.kind = ? AND t.amount = ?
+          AND ABS(DATEDIFF(t.date, ?)) <= 10
+        ORDER BY ABS(DATEDIFF(t.date, ?)) LIMIT 5`,
+      [vendorId, kind, amount, date, date]))[0] : []
+
+    // ② 아직 안 받은(안 낸) 청구서 — 여기에 붙이면 미수금·미지급금이 정리된다
+    const invKind = kind === 'income' ? 'issued' : 'received'
+    const [openInvoices] = await req.db.execute(
+      `SELECT i.id, i.invoice_no, i.issued_at, i.due_at, i.total_amount, i.status,
+              i.total_amount - IFNULL((SELECT SUM(m.amount) FROM invoice_matches m
+                                        WHERE m.invoice_id = i.id), 0) AS remaining
+         FROM invoices i
+        WHERE i.vendor_id = ? AND i.kind = ? AND i.status <> ?
+        ORDER BY i.issued_at DESC LIMIT 5`,
+      [vendorId, invKind, kind === 'income' ? '입금 완료' : '지급 완료'])
+
+    /* ③ 정기 규칙 — 단, **그 달 회차를 아직 처리하지 않았을 때만** 알린다.
+     *
+     * 활성 규칙만 보고 무조건 띄우면 매달 나가는 거래처마다 매번 뜬다. 매번 뜨는 안내는
+     * 읽히지 않고, 읽히지 않는 안내는 없는 것과 같다 — 정작 위험한 순간에도 넘긴다.
+     * 그 달 것이 이미 처리됐다면 이 입력은 별개일 가능성이 높으므로 잠자코 있는다. */
+    const recTable = kind === 'income' ? 'recurring_invoices' : 'recurring_expenses'
+    const amountCol = kind === 'income' ? 'supply_amount' : 'amount'
+    const itemCol = kind === 'income' ? 'item' : 'category'
+    const ym = date ? date.slice(0, 7) : null
+    const [recurring] = ym ? (await req.db.execute(
+      `SELECT r.id, r.${itemCol} AS item, r.${amountCol} AS amount, r.day_of_month
+         FROM ${recTable} r
+        WHERE r.vendor_id = ? AND r.active = 1
+          AND NOT EXISTS (SELECT 1 FROM transactions t
+                           WHERE t.recurring_id = r.id AND LEFT(t.date, 7) = ?)
+        LIMIT 5`, [vendorId, ym])) : [[]]
+
+    res.json({ duplicates, openInvoices, recurring })
+  } catch (e) { next(e) }
+})
+
 /** 이 주문에 붙일 만한 거래 후보. 이미 이 주문에 붙어 있는 것은 뺀다. */
 router.get('/linkable', async (req, res, next) => {
   try {

@@ -1806,3 +1806,18 @@ body:has([data-modal-open]) {
    ⚠ 셀 전체가 아니라 **텍스트 줄**에 건다 — 거래처+적요처럼 일부러 두 줄로 쌓은
      칸까지 뭉개면 안 된다. */
 .clip { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 거래 등록 전 안내 — 막지 않고 알려주는 자리.
+   경고색으로 도배하지 않는다. 대부분은 '더 나은 자리가 있어요'라는 안내지 잘못이 아니다.
+   진짜 중복 의심(.warn)만 색을 준다. */
+/* 안내 셋이 한꺼번에 뜨면 폼 본문을 다 밀어낸다 — 안내가 본문을 잡아먹지 않게 높이를 묶는다.
+   (작은 노트북 화면에서 특히 그렇다) */
+.entry-hints { display: flex; flex-direction: column; gap: 8px;
+  padding: 12px 20px 14px; border-top: 1px solid var(--line);
+  max-height: 42vh; overflow-y: auto; }
+.entry-hint { display: flex; gap: 8px; align-items: flex-start;
+  padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13px; }
+.entry-hint > svg { flex: 0 0 auto; margin-top: 2px; color: var(--muted); }
+.entry-hint.warn { background: var(--warn-bg, #fff7ed); }
+.entry-hint.warn > svg { color: var(--warn, #c2410c); }
+.entry-hints > .btn.sm.ghost { align-self: flex-start; }

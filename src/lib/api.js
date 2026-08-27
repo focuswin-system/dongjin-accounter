@@ -449,6 +449,14 @@ export const api = {
 
   /* 주문에 붙일 만한 거래 후보. axis: 'contract'(근거 주문) | 'cost'(원가 귀속)
      — 두 축은 서로 다른 컬럼이라 후보도 다르다. */
+  /* 거래를 넣기 **전에** 물어보는 곳 — 중복이거나, 청구서·정기 규칙 쪽 일이면 알려준다.
+     실패해도 등록을 막지 않는다(안내일 뿐이다). */
+  async getEntryHints({ vendorId, kind, date, amount }) {
+    if (!vendorId) return { duplicates: [], openInvoices: [], recurring: [] }
+    const p = new URLSearchParams({ vendor_id: vendorId, kind, date: date || '', amount: String(amount || 0) })
+    try { return await req(`/transactions/entry-hints?${p}`) }
+    catch { return { duplicates: [], openInvoices: [], recurring: [] } }
+  },
   async getLinkableTxns({ contractId, kind, axis = 'contract', q = '' }) {
     const p = new URLSearchParams({ contractId, kind, axis })
     if (q) p.set('q', q)

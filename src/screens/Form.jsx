@@ -81,6 +81,10 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   const [kind, setKind] = useState(initialKind);
   const [form, setForm] = useState(initialFormFor(initialKind, initialContract, "", initialCostContract));
   const [showMore, setShowMore] = useState(false);
+  /* 등록 전 안내 — 중복이거나 청구서·정기 규칙 쪽 일이면 알려준다.
+     hintsOff 는 사용자가 '알아요, 그냥 넣을게요'를 누른 상태. */
+  const [hints, setHints] = useState(null);
+  const [hintsOff, setHintsOff] = useState(false);
   // Ctrl+Enter 단축키까지 있어 두 번 눌리기 쉽다 — 같은 거래가 2건 등록되는 걸 막는다
   const [busy, setBusy] = useState(false);
   const [supplyMode, setSupplyMode] = useState(false);
@@ -300,6 +304,27 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     return () => { alive = false }
   }, [form.vendor, vendors]);
 
+  /* 거래처·금액·날짜가 채워지면 서버에 물어본다 — "이거 여기서 넣는 게 맞나요?"
+   *
+   * 같은 돈이 세 경로(정기 자동발행·소급 마법사·손입력)로 들어올 수 있어, 앞의 둘을
+   * 모른 채 손으로 넣으면 매출이 두 번 잡힌다. 실사용 회사에서 실제로 그렇게 쌓였다.
+   * 편집 중에는 묻지 않는다 — 이미 있는 거래가 제 자신과 중복이라고 나올 뿐이다. */
+  useEffect(() => {
+    if (editTxn) { setHints(null); return }
+    const v = vendors.filter(x => x.name === form.vendor)
+    const amount = Number(String(form.amount ?? '').replace(/[^0-9]/g, '')) || 0
+    if (v.length !== 1 || !amount || !form.date) { setHints(null); return }
+    let alive = true
+    const t = setTimeout(() => {
+      api.getEntryHints({ vendorId: v[0].id, kind, date: form.date, amount })
+        .then(h => { if (alive) setHints(h) })
+    }, 350)   // 금액은 타자 중에 바뀐다 — 멈춘 뒤에 묻는다
+    return () => { alive = false; clearTimeout(t) }
+  }, [form.vendor, form.amount, form.date, kind, vendors, editTxn]);
+
+  // 거래처가 바뀌면 '알아요'는 없던 일로 — 다른 거래처의 판단이었다
+  useEffect(() => { setHintsOff(false) }, [form.vendor, kind]);
+
   // 비목의 계정과목 그룹(세금계산서 안내 배너용) 파생 — 폼 리셋 없이 acctGroup만 갱신
   useEffect(() => {
     if (!form.category) return;
@@ -348,6 +373,25 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       </div>
     </div>
   );
+
+  /* 안내에서 고른 청구서에 바로 정산한다.
+     거래를 따로 만들고 나중에 잇는 게 아니라, 청구서 정산으로 **한 번에** 만든다 —
+     두 벌로 만들면 그게 바로 우리가 막으려던 중복이다. */
+  const settleOnInvoice = async (iv) => {
+    const amount = Number(String(form.amount ?? '').replace(/[^0-9]/g, '')) || 0
+    const acc = accounts.filter(a => a.name === form.account)
+    if (acc.length !== 1) { toast.push('계좌를 먼저 하나만 고른 뒤에 처리해 주세요'); return }
+    setBusy(true)
+    const r = await api.matchInvoice(iv.id, {
+      txnId: null, amount, date: form.date, account_id: acc[0].id,
+      memo: (form.memo || '').trim() || `${iv.invoice_no} ${kind === 'income' ? '입금' : '지급'}`,
+    })
+    setBusy(false)
+    if (!r.ok) { toast.push(r.error || '청구서 정산에 실패했어요'); return }
+    toast.push(`${iv.invoice_no}에 ${fmtNum(amount)}원을 ${kind === 'income' ? '입금' : '지급'} 처리했어요`)
+    onSave?.()
+    onClose?.()
+  }
 
   const handleSave = async () => {
     if (busy) return;
@@ -901,6 +945,81 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
             </div>
           </div>
         </div>
+
+        {/* ── 등록 전 안내 ──
+            막지 않는다. 같은 날 같은 금액이 정말 두 번 들어오기도 한다.
+            대신 **더 나은 자리**가 있으면 그 자리로 보내 준다 — 청구서에 붙이면
+            미수금이 정리되고, 정기 규칙 쪽에서 처리하면 청구서까지 함께 만들어진다. */}
+        {!hintsOff && hints && (hints.duplicates?.length > 0 || hints.openInvoices?.length > 0 || hints.recurring?.length > 0) && (
+          <div className="entry-hints">
+            {hints.duplicates?.length > 0 && (
+              <div className="entry-hint warn">
+                <Icon.Warn size={14}/>
+                <div>
+                  <b>같은 거래가 이미 있어요.</b>
+                  <div className="text-xs text-muted2" style={{ marginTop: 3 }}>
+                    {hints.duplicates.map(d => (
+                      <div key={d.id}>
+                        {d.date} · {fmtNum(Number(d.amount))}원
+                        {d.invoice_no ? ` · 청구서 ${d.invoice_no} 정산분` : d.memo ? ` · ${d.memo}` : ''}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
+                    같은 돈을 두 번 적으면 매출·비용이 두 배로 잡혀요. 정말 별개 건인지 확인해 주세요.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {hints.openInvoices?.length > 0 && (
+              <div className="entry-hint">
+                <Icon.Doc size={14}/>
+                <div style={{ flex: 1 }}>
+                  <b>이 거래처에 아직 {kind === 'income' ? '못 받은' : '안 낸'} 청구서가 있어요.</b>
+                  <div className="text-xs text-muted2" style={{ marginTop: 3 }}>
+                    거기에 {kind === 'income' ? '입금' : '지급'} 처리하면 미{kind === 'income' ? '수' : '지급'}금이 함께 정리돼요.
+                  </div>
+                  <div className="row gap-6" style={{ flexWrap: 'wrap', marginTop: 6 }}>
+                    {hints.openInvoices.map(iv => (
+                      <button key={iv.id} type="button" className="btn sm" disabled={busy}
+                        onClick={() => settleOnInvoice(iv)}>
+                        {iv.invoice_no} · 남은 {fmtNum(Number(iv.remaining))}원에 처리
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {hints.recurring?.length > 0 && (
+              <div className="entry-hint">
+                <Icon.Clock size={14}/>
+                <div style={{ flex: 1 }}>
+                  <b>이 거래처는 정기 {kind === 'income' ? '입금' : '출금'} 규칙이 있어요.</b>
+                  <div className="text-xs text-muted2" style={{ marginTop: 3 }}>
+                    {hints.recurring.map(r => (
+                      <div key={r.id}>{r.item || '(항목 없음)'} · 매달 {r.day_of_month}일 · {fmtNum(Number(r.amount))}원</div>
+                    ))}
+                  </div>
+                  <div className="text-xs text-muted2" style={{ marginTop: 3 }}>
+                    {kind === 'income'
+                      ? '이번 달 회차가 아직이에요. 그 화면에서 처리하면 청구서까지 함께 만들어져요.'
+                      : '이번 달 회차가 아직이에요. 그 화면에서 처리하면 회차 이력에 남아 두 번 나가지 않아요.'}
+                  </div>
+                  <button type="button" className="btn sm" style={{ marginTop: 6 }}
+                    onClick={() => { onClose?.(); location.hash = kind === 'income' ? '#recurring_invoice' : '#recurring_expense' }}>
+                    정기 {kind === 'income' ? '입금' : '출금'} 화면으로
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <button type="button" className="btn sm ghost" onClick={() => setHintsOff(true)}>
+              알아요 — 그대로 등록할게요
+            </button>
+          </div>
+        )}
 
         <div className="drawer-foot">
           <button className="btn" onClick={onClose}>취소</button>
