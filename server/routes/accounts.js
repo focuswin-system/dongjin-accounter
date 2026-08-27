@@ -92,6 +92,22 @@ async function cashDuplicateError(db, type, exceptId = null) {
   return '현금은 하나만 둘 수 있어요. 이미 등록된 현금 계정을 쓰거나 이름을 바꿔주세요.'
 }
 
+/* 계좌 이름은 **유일해야 한다.**
+ *
+ * 거래 폼·이체·결제내역 어디서나 계좌는 **이름으로** 골라진다(칩 목록이 이름을 보여준다).
+ * 이름이 같은 계좌가 둘이면 화면에서 구분할 방법이 없고, 고른 것과 다른 통장에 돈이
+ * 잡혀도 아무도 모른다. 실제로 같은 이름의 카드가 둘 있었다.
+ * (주문·거래처는 다르다 — 거래처가 다른 같은 이름의 주문은 정당하다. 그래서 그쪽은
+ *  막지 않고 id 로 식별하게 고쳤다.) */
+async function nameDuplicateError(db, name, exceptId = null) {
+  const nm = String(name || '').trim()
+  if (!nm) return null
+  const sql = 'SELECT id FROM accounts WHERE TRIM(name) = ?' + (exceptId ? ' AND id <> ?' : '')
+  const [rows] = await db.execute(sql, exceptId ? [nm, exceptId] : [nm])
+  if (!rows.length) return null
+  return `"${nm}" 이름의 계좌가 이미 있어요. 이름이 같으면 거래를 등록할 때 어느 쪽인지 가릴 수 없어요.`
+}
+
 router.post('/', async (req, res, next) => {
   try {
     const { name, bank, type, initial_balance, kind, number, purpose } = req.body
@@ -103,6 +119,7 @@ router.post('/', async (req, res, next) => {
       : Math.min(28, Math.max(0, parseInt(req.body.card_pay_day, 10) || 0))
     const cardPayAcct = cardType === 'check' ? null : (req.body.card_pay_account_id || null)
     { const ce = await cashDuplicateError(req.db, type); if (ce) return res.status(409).json({ error: ce }) }
+    { const ne = await nameDuplicateError(req.db, name); if (ne) return res.status(409).json({ error: ne }) }
     const id = randomUUID()
     // acct_code 를 빠뜨리면 이 계좌의 거래는 일계표에서 **한쪽 다리가 없어** 차대변이 안 맞는다.
     // (실제로 여기가 비어 있어서 새로 만든 계좌의 거래가 전부 짝을 잃었다)
@@ -126,6 +143,7 @@ router.put('/:id', async (req, res, next) => {
       : Math.min(28, Math.max(0, parseInt(req.body.card_pay_day, 10) || 0))
     const cardPayAcct = cardType === 'check' ? null : (req.body.card_pay_account_id || null)
     { const ce = await cashDuplicateError(req.db, type, req.params.id); if (ce) return res.status(409).json({ error: ce }) }
+    { const ne = await nameDuplicateError(req.db, req.body.name, req.params.id); if (ne) return res.status(409).json({ error: ne }) }
     // 종류(보통예금↔당좌예금↔현금)가 바뀌면 계정과목도 따라가야 한다 — 안 그러면 일계표가 어긋난다
     const [result] = await req.db.execute(
       'UPDATE accounts SET name=?, bank=?, type=?, initial_balance=?, kind=?, `number`=?, purpose=?, acct_code=?, owner=?, card_pay_day=?, card_pay_account_id=?, card_type=? WHERE id=?',

@@ -660,10 +660,25 @@ router.post('/import/commit', async (req, res, next) => {
     if (!accountId && items.some(it => !it.account_id)) {
       return res.status(400).json({ error: '입출금 계좌를 선택해주세요. 계좌를 지정해야 잔액에 반영됩니다.' })
     }
+    /* 이름 → id 지도.
+     *
+     * ⚠ **이름은 유일하지 않다.** 예전엔 `map[name] = id` 로 그냥 덮어써서, 같은 이름이
+     *   여럿이면 마지막 하나만 남고 그 행들이 전부 거기로 붙었다. 실제 회사에서
+     *   거래처만 다른 '홈페이지 유지보수' 주문이 여덟 개였고, 다른 거래처의 입금
+     *   19건이 엉뚱한 주문에 붙었다. 게다가 DB 이름 끝에 공백이 있으면
+     *   (`홈페이지 유지보수 `) trim 한 엑셀 값과 안 맞아 **아무 데도 안 붙었다.**
+     *
+     * 그래서 (1) 키를 trim 해 맞추고 (2) 같은 이름이 여럿이면 **붙이지 않는다.**
+     *   아무거나 집는 것보다 비워 두는 편이 낫다 — 비면 사람이 알아채지만,
+     *   엉뚱한 데 붙으면 아무도 모른 채 계약 수익이 틀어진다.
+     * 주문은 **거래처가 같은 것 하나**로 좁혀 볼 수 있으면 그것으로 잇는다. */
     const [vs] = await conn.execute('SELECT id, name FROM vendors')
-    const vendorMap = {}; for (const v of vs) vendorMap[v.name] = v.id
-    const [cs] = await conn.execute('SELECT id, name FROM contracts')
-    const contractMap = {}; for (const c of cs) contractMap[c.name] = c.id
+    const vendorByName = {}
+    for (const v of vs) (vendorByName[String(v.name || '').trim()] ||= []).push(v.id)
+    const [cs] = await conn.execute('SELECT id, name, vendor_id FROM contracts')
+    const contractByName = {}
+    for (const c of cs) (contractByName[String(c.name || '').trim()] ||= []).push(c)
+    const ambiguous = []   // 이름이 겹쳐 못 이은 것 — 응답으로 알려준다
 
     await conn.beginTransaction()
     let inserted = 0, skippedFuture = 0, skippedClosed = 0, skippedAmount = 0; const createdVendors = []
@@ -675,16 +690,28 @@ router.post('/import/commit', async (req, res, next) => {
       let vendorId = null
       const vname = String(it.vendor || '').trim()
       if (vname) {
-        if (vendorMap[vname]) vendorId = vendorMap[vname]
+        const hit = vendorByName[vname] || []
+        if (hit.length === 1) vendorId = hit[0]
+        else if (hit.length > 1) ambiguous.push(`거래처 "${vname}"`)   // 여럿이면 안 잇는다
         else {
           vendorId = randomUUID()
           await conn.execute('INSERT INTO vendors (id, name, gubu) VALUES (?,?,?)',
             [vendorId, vname, it.kind === 'income' ? 'B' : 'A'])
-          vendorMap[vname] = vendorId; createdVendors.push(vname)
+          vendorByName[vname] = [vendorId]; createdVendors.push(vname)
         }
       }
       const cname = String(it.contract || '').trim()
-      const contractId = (cname && contractMap[cname]) ? contractMap[cname] : null
+      let contractId = null
+      if (cname) {
+        const hits = contractByName[cname] || []
+        if (hits.length === 1) contractId = hits[0].id
+        else if (hits.length > 1) {
+          // 같은 이름이 여럿 — 거래처로 좁혀 하나로 정해지면 그것으로 잇는다
+          const same = vendorId ? hits.filter(c => c.vendor_id === vendorId) : []
+          if (same.length === 1) contractId = same[0].id
+          else ambiguous.push(`주문 "${cname}"`)
+        }
+      }
       // account_id 를 반드시 넣는다. 빠지면 위 주석대로 '완료 상태'로만 들어가고
       // 계좌 잔액에는 영원히 안 잡혀, 대량 등록 직후부터 통장과 장부가 어긋난다.
       /* 부가세 필드를 반드시 채운다.
@@ -716,7 +743,10 @@ router.post('/import/commit', async (req, res, next) => {
       inserted++
     }
     await conn.commit()
-    res.json({ inserted, createdVendors, skippedFuture, skippedClosed, skippedAmount })
+    /* ambiguous — 이름이 겹쳐 **일부러 안 이은** 것. 조용히 비우면 "왜 주문이 안 붙었지"가
+       한참 뒤 계약 수익을 볼 때에야 드러난다. 올린 자리에서 바로 알린다. */
+    res.json({ inserted, createdVendors, skippedFuture, skippedClosed, skippedAmount,
+      ambiguous: [...new Set(ambiguous)] })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })

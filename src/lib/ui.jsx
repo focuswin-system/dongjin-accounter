@@ -130,7 +130,16 @@ export const FilterSelect = ({ value, onChange, options, placeholder = "전체" 
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  const matched = q ? options.filter(o => o.toLowerCase().includes(q.toLowerCase())) : options;
+  /* 항목은 **글자 또는 {value,label}** 둘 다 받는다.
+     이름이 유일하지 않은 자료(주문·거래처·계좌)를 고를 때 글자만 쓰면, 고른 것을
+     이름으로 되찾다가 동명 중 엉뚱한 것을 집는다 — 실제로 그렇게 돈이 다른 주문에 붙었다.
+     그런 자리는 value 에 id 를, label 에 사람이 읽을 이름을 담아 넘긴다. */
+  const norm = (o) => (o && typeof o === 'object') ? o : { value: o, label: o };
+  const opts = (options || []).map(norm);
+  const matched = q
+    ? opts.filter(o => String(o.label ?? '').toLowerCase().includes(q.toLowerCase()))
+    : opts;
+  const selectedLabel = opts.find(o => o.value === value)?.label ?? value;
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
@@ -139,7 +148,7 @@ export const FilterSelect = ({ value, onChange, options, placeholder = "전체" 
         onClick={() => setOpen(s => !s)}
         style={{ minWidth: 130, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 }}>
-          {value || placeholder}
+          {selectedLabel || placeholder}
         </span>
         <I d={<><polyline points="6 9 12 15 18 9"/></>} size={12} style={{ flexShrink: 0 }}/>
       </button>
@@ -160,14 +169,15 @@ export const FilterSelect = ({ value, onChange, options, placeholder = "전체" 
                 cursor: "pointer", fontFamily: "inherit", fontSize: 13,
                 fontWeight: 600, color: "var(--muted)" }}>전체</button>
             {matched.map(o => (
-              <button key={o} onClick={() => { onChange(o); setOpen(false); }}
-                onMouseEnter={e => { if (value !== o) e.currentTarget.style.background = "var(--surface-2)"; }}
-                onMouseLeave={e => { if (value !== o) e.currentTarget.style.background = "transparent"; }}
+              <button key={o.value} onClick={() => { onChange(o.value); setOpen(false); }}
+                onMouseEnter={e => { if (value !== o.value) e.currentTarget.style.background = "var(--surface-2)"; }}
+                onMouseLeave={e => { if (value !== o.value) e.currentTarget.style.background = "transparent"; }}
                 style={{ width: "100%", textAlign: "left", padding: "8px 14px", border: 0,
-                  background: value === o ? "var(--surface-2)" : "transparent",
+                  background: value === o.value ? "var(--surface-2)" : "transparent",
                   cursor: "pointer", fontFamily: "inherit", fontSize: 13,
-                  fontWeight: value === o ? 700 : 400, color: "var(--ink)" }}>
-                {o}
+                  fontWeight: value === o.value ? 700 : 400, color: "var(--ink)" }}>
+                {o.label}
+                {o.sub && <span className="text-xs text-muted2" style={{ marginLeft: 6 }}>{o.sub}</span>}
               </button>
             ))}
             {matched.length === 0 && (

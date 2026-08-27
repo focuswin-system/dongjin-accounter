@@ -126,11 +126,29 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   // 거래는 주문에 두 축으로 붙는다.
   //   근거 주문  — 이 돈이 오간 약정. 입금=수주 / 지출=발주(외주·구매). **없으면 비운다(선택 입력)**
   //   원가 귀속  — (지출만) 이 돈이 어느 매출건의 원가인지. 외주비는 외주주문에 '지급'되면서 그 프로젝트의 '원가'가 된다.
+  /* 주문 칸에 담긴 값이 **id 인지 사람이 친 글자인지** 가른다.
+     주문을 고르면 id 가, '이 이름으로 적어두기'를 쓰면 글자가 담긴다. */
+  const isUuid = (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v || ''))
+
+  /* ⚠ 값은 **id** 다. 이름이면 안 된다.
+   *
+   * 예전엔 `value: c.name` 이었고 저장할 때 `contracts.find(c => c.name === form.contract)` 로
+   * 되찾았다. 그런데 주문 이름은 **유일하지 않다** — 실제 회사에서 거래처만 다른
+   * '홈페이지 유지보수' 가 여덟 개였다. 그러면 화면에서 무엇을 골랐든 find 는 목록의
+   * 첫 번째(= created_at DESC 라 가장 최근에 만든 것)를 집는다.
+   * 결과: 회원2구역 입금이 마산시니어클럽 주문에 붙었고, 정작 회원2구역 주문의
+   * 입금 내역은 비어 보였다. 담당자는 "안 들어갔나" 하고 같은 건을 여덟 번 넣었다.
+   * (같은 이름이 여럿이면 라벨에 거래처를 붙여 고를 때도 갈리게 한다.) */
   const contractOpts = useMemo(() => {
-    const opts = contracts
-      .filter(c => kind === 'income' ? !c.is_purchase : c.is_purchase)   // 입금=수주 / 지출=발주
+    const pool = contracts.filter(c => kind === 'income' ? !c.is_purchase : c.is_purchase)
+    const dupName = new Set(
+      pool.map(c => (c.name || '').trim())
+          .filter((n, i, arr) => arr.indexOf(n) !== i))
+    const opts = pool
       .map(c => ({
-        value: c.name, label: c.name,
+        value: c.id,
+        label: dupName.has((c.name || '').trim()) && c.vendor_name
+          ? `${c.name} · ${c.vendor_name}` : c.name,
         sub: [c.vendor_name, c.status].filter(Boolean).join(' · '),
       }));
     /* 예전엔 지출에 '공통(원자재)'·'공통(생산소모)'·'공통(인건비)'·'공통' 네 개를 붙였다.
@@ -143,13 +161,21 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   }, [contracts, kind]);
 
   // 원가 귀속 후보 = 수주만
-  const costContractOpts = useMemo(() => ([
-    { value: "", label: "귀속 없음", sub: "특정 수주건의 원가가 아님 (일반 경비)" },
-    ...contracts.filter(c => !c.is_purchase).map(c => ({
-      value: c.name, label: c.name,
-      sub: [c.vendor_name, c.status].filter(Boolean).join(' · '),
-    })),
-  ]), [contracts]);
+  // 원가 귀속도 같은 이유로 **id** 로 고른다(위 주석 참조)
+  const costContractOpts = useMemo(() => {
+    const pool = contracts.filter(c => !c.is_purchase)
+    const dupName = new Set(
+      pool.map(c => (c.name || '').trim()).filter((n, i, arr) => arr.indexOf(n) !== i))
+    return [
+      { value: "", label: "귀속 없음", sub: "특정 수주건의 원가가 아님 (일반 경비)" },
+      ...pool.map(c => ({
+        value: c.id,
+        label: dupName.has((c.name || '').trim()) && c.vendor_name
+          ? `${c.name} · ${c.vendor_name}` : c.name,
+        sub: [c.vendor_name, c.status].filter(Boolean).join(' · '),
+      })),
+    ]
+  }, [contracts]);
 
   useEffect(() => {
     api.getVendors().then(setVendors);
@@ -216,8 +242,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       /* 주문이 비어 있으면 비운 채로 둔다. 예전엔 '공통'을 지어내 채웠는데(주문이 필수였으니까),
          주문 없이 만들어진 자동 생성 거래(청구서 정산·정기지출·급여)를 한 번만 열어도
          '공통'이 doc_no 에 박혔다. 없는 것은 없는 채로 보여준다. */
-      contract:  editTxn.contract || '',
-      costContract: editTxn.cost_contract_name || '',
+      /* id 로 채운다 — 이름으로 채우면 동명 주문이 있을 때 Combobox 가 엉뚱한 줄을
+         고른 것처럼 보이고, 저장하면 정말 엉뚱한 주문으로 옮겨간다.
+         id 가 없는 옛 거래(주문 없이 doc_no 에 글자만 적어둔 것)는 그 글자를 그대로 둔다. */
+      contract:  editTxn.contractId || editTxn.contract || '',
+      costContract: editTxn.cost_contract_id || editTxn.cost_contract_name || '',
       acctGroup: '',                                   // 아래 파생 effect에서 채움
       category:  editTxn.category === '—' ? '' : (editTxn.category || ''),
       item:      editTxn.item_name || '',
@@ -335,16 +364,33 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     if (!form.date || !/^\d{4}-\d{2}-\d{2}$/.test(form.date)) { toast.push("날짜를 올바른 형식으로 입력해주세요"); return; }
     if (form.date > localToday()) { toast.push(`미래 날짜로는 ${kind === "income" ? "입금" : "지출"}을 등록할 수 없어요 (오늘까지만 가능)`); return; }
 
-    const vendorObj   = vendors.find(v => v.name === form.vendor)
-    const contractObj = contracts.find(c => c.name === form.contract)
-    const accountObj  = accounts.find(a => a.name === form.account)
-    const employeeObj = employees.find(e => e.name === form.employee)
+    /* 거래처·계좌·직원은 아직 **이름으로** 고른다(칸이 이름을 그대로 보여주는 자리다).
+       이름이 겹치면 어느 것인지 알 수 없다 — 실제로 같은 이름의 거래처가 넷,
+       같은 이름의 카드가 둘 있었다. 그때 **아무거나 집지 않고 비운다.**
+       예전엔 배열 첫 번째가 조용히 붙어, 돈이 엉뚱한 거래처·통장에 잡혔다.
+       (붙지 않으면 화면에서 비어 보이므로 사람이 알아채고 고칠 수 있다.) */
+    const uniqueByName = (list, name) => {
+      const hit = list.filter(x => (x.name || '').trim() === String(name || '').trim())
+      if (hit.length === 1) return hit[0]
+      if (hit.length > 1) toast.push(`이름이 같은 항목이 여럿이라 자동으로 잇지 않았어요 — "${name}"`, { tone: 'warn' })
+      return null
+    }
+    const vendorObj   = uniqueByName(vendors, form.vendor)
+    const contractObj = contracts.find(c => c.id === form.contract)
+    const employeeObj = uniqueByName(employees, form.employee)
+    /* 계좌는 **필수**다. 비운 채로 저장하면 거래는 '완료'인데 계좌 잔액에는 영영 안 잡혀
+       통장과 장부가 그날부터 어긋난다. 그래서 여기서는 비우지 않고 **저장을 막는다.** */
+    const accountObj  = uniqueByName(accounts, form.account)
+    if (form.account && !accountObj) {
+      toast.push(`"${form.account}" 이름의 계좌가 둘 이상이에요. 기준정보에서 이름을 구분해 주세요.`, { tone: 'warn' })
+      return
+    }
 
     const amount = typeof form.amount === "string"
       ? parseInt(form.amount.replace(/[^0-9]/g, ""), 10)
       : form.amount
 
-    const costContractObj = contracts.find(c => c.name === form.costContract)
+    const costContractObj = contracts.find(c => c.id === form.costContract)
 
     const txnData = {
       kind,
@@ -378,7 +424,9 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       site:         form.site || "",
       // 목록에 없는 이름을 '주문 없이 이 이름으로 적어두기'로 넣은 경우에만 doc_no 에 남는다.
       // (기존 데이터의 '공통…' 값도 이 경로로 그대로 보존된다 — 열었다고 지우지 않는다)
-      doc_no:       contractObj ? '' : (form.contract || ''),
+      // ⚠ 이제 form.contract 는 보통 **id** 다. 그 주문이 지워졌으면 contractObj 가 없는데,
+      //   그때 id 문자열이 doc_no 에 박히면 화면에 uuid 가 적힌 주문처럼 보인다. 걸러 낸다.
+      doc_no:       contractObj ? '' : (isUuid(form.contract) ? '' : (form.contract || '')),
       memo:         form.memo || "",
       evid_type:    form.evid_type || "",
       evid_url:     form.evid_url  || "",

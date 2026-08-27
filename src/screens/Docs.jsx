@@ -1131,6 +1131,22 @@ export const ExcelScreen = () => {
               </div>
             </div>
           )}
+          {/* 이름이 겹쳐 **일부러 안 이은** 것. 조용히 비우면 "왜 주문이 안 붙었지"가
+              한참 뒤 계약 수익을 볼 때에야 드러난다. 올린 자리에서 바로 알린다.
+              (아무거나 잇지 않는 이유 — 엉뚱한 주문에 붙으면 아무도 모른다.) */}
+          {result.ambiguous?.length > 0 && (
+            <div className="card card-pad" style={{ marginBottom: 16, textAlign: 'left', background: 'var(--surface-2)' }}>
+              <div className="fw-700 text-sm" style={{ marginBottom: 4 }}>
+                이름이 겹쳐 연결하지 못한 항목이 있어요
+              </div>
+              <div className="text-sm text-muted" style={{ lineHeight: 1.7 }}>
+                {result.ambiguous.slice(0, 6).join(' · ')}{result.ambiguous.length > 6 ? ' 외' : ''}<br/>
+                같은 이름이 여럿이라 어느 것인지 정할 수 없었어요. 거래는 등록됐지만
+                <b> 거래처·주문 연결은 비어 있습니다.</b> 기준정보에서 이름을 구분해 주시거나,
+                거래내역에서 해당 건을 열어 직접 이어주세요.
+              </div>
+            </div>
+          )}
           <button className="btn primary" onClick={reset}>새 파일 업로드</button>
         </div>
       ) : !file ? (

@@ -714,8 +714,10 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     if (editInvoice) {
       setForm({
         kind: editInvoice.kind,
-        vendor: editInvoice.vendor || "",
-        contract: editInvoice.contract || "",
+        // id 로 채운다 — 이름으로 채우면 동명 중 엉뚱한 줄이 골라진 것처럼 보이고,
+        // 저장하면 정말 그쪽으로 옮겨간다(거래 폼과 같은 이유).
+        vendor: editInvoice.vendorId || editInvoice.vendor || "",
+        contract: editInvoice.contractId || editInvoice.contract || "",
         supplyAmount: String(editInvoice.supplyAmount || ""),
         // 세액 0(면세·영세)이 String(0||'')로 ''가 되어 자동 10%로 되살아나던 버그 → null만 빈칸.
         vatAmount: editInvoice.vatAmount != null ? String(editInvoice.vatAmount) : "",
@@ -767,7 +769,14 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   const vendorOptions = (form.kind === "issued"
     ? vendors.filter(v => v.gubu === "B")
     : vendors.filter(v => ["A", "E"].includes(v.gubu))
-  ).map(v => ({ value: v.name, label: v.name, sub: v.type }))
+  /* ⚠ 값은 **id** 다. 거래처 이름도 유일하지 않다(실제로 같은 이름이 넷 있었다).
+     이름으로 되찾으면 동명 중 배열 첫 번째가 붙어 청구서가 엉뚱한 거래처로 간다. */
+  ).map((v, _i, arr) => ({
+    value: v.id,
+    label: arr.filter(x => (x.name || '').trim() === (v.name || '').trim()).length > 1 && v.biz_no
+      ? `${v.name} · ${v.biz_no}` : v.name,
+    sub: v.type,
+  }))
 
   /* 주문은 **선택 입력**이다. 청구서는 주문 없이도 성립한다(contract_id 는 nullable).
    *
@@ -776,8 +785,12 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
    * handleSave 가 `contracts.find(name)` 으로만 id 를 찾으므로 '공통…'은 contract_id=null 이 되고
    * 이름을 남길 자리도 없다(거래 폼과 달리 청구서엔 doc_no 보존 경로가 없다).
    * 고른 사람은 분류한 줄 알지만 아무 데도 안 남는다 → 빈칸과 결과가 같으면서 거짓말만 한다. 뺀다. */
+  // 값은 **id**(위 거래처와 같은 이유). 이름이 겹치면 라벨에 거래처를 붙여 갈리게 한다.
   const contractOptions = contracts.map(c => ({
-    value: c.name, label: c.name, sub: `${c.vendor_name || ''} · ${c.status || ''}`,
+    value: c.id,
+    label: contracts.filter(x => (x.name || '').trim() === (c.name || '').trim()).length > 1 && c.vendor_name
+      ? `${c.name} · ${c.vendor_name}` : c.name,
+    sub: `${c.vendor_name || ''} · ${c.status || ''}`,
   }))
 
   // 품목표와 같은 이름표를 쓴다 — 표에는 '입고일', 나눠 발행 안내에는 '납품일'이면 같은 칸이 아닌 줄 안다
@@ -786,8 +799,17 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   const handleSave = () => {
     if (!form.vendor) { toast.push("거래처를 선택하세요", { tone: "warn" }); return }
     if (!supply) { toast.push("공급가액을 입력하세요", { tone: "warn" }); return }
-    const vendorObj = vendors.find(v => v.name === form.vendor)
-    const contractObj = contracts.find(c => c.name === form.contract)
+    /* 값은 보통 **id** 지만, 거래처 칸은 '직접 입력'으로 글자가 들어올 수도 있다.
+       그때는 이름으로 한 번 더 찾아 준다 — 다만 **같은 이름이 하나뿐일 때만**.
+       여럿이면 어느 것인지 알 수 없으므로 붙이지 않는다(예전처럼 아무거나 집지 않는다). */
+    const byIdOrUniqueName = (list, v) => {
+      const hit = list.find(x => x.id === v)
+      if (hit) return hit
+      const named = list.filter(x => (x.name || '').trim() === String(v || '').trim())
+      return named.length === 1 ? named[0] : null
+    }
+    const vendorObj = byIdOrUniqueName(vendors, form.vendor)
+    const contractObj = byIdOrUniqueName(contracts, form.contract)
     onSave({
       id: editInvoice?.id,
       kind: form.kind,

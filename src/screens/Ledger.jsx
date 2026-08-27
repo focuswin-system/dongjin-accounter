@@ -159,7 +159,10 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
   const doBulkLink = async (unlink) => {
     const rows = filtered.filter(t => checkedIds.includes(t.id) && !t.planned);
     if (!rows.length) return;
-    const target = unlink ? null : allContracts.find(c => c.name === bulkContract);
+    /* ⚠ **id 로 찾는다.** 예전엔 이름으로 찾았는데 주문 이름은 유일하지 않다 —
+       실제 회사에 거래처만 다른 '홈페이지 유지보수' 가 여덟 개 있었고, 그때 find 는
+       목록의 첫 번째를 집었다. 여기는 **한 번에 수십 건**을 붙이는 자리라 피해가 크다. */
+    const target = unlink ? null : allContracts.find(c => c.id === bulkContract);
     if (!unlink && !target) return toast.push('주문을 골라주세요', { tone: 'warn' });
 
     const isPurchaseC = target && (target.gubu === 'A' || target.gubu === 'E' || target.is_purchase);
@@ -184,7 +187,7 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
       done += res.count;
     }
     if (!done) return toast.push('연결된 주문이 없는 거래예요');
-    toast.push(unlink ? `${done}건의 주문 연결을 뗐어요` : `${done}건을 ${bulkContract}에 연결했어요`);
+    toast.push(unlink ? `${done}건의 주문 연결을 뗐어요` : `${done}건을 ${target?.name || '주문'}에 연결했어요`);
     setCheckedIds([]); setBulkContract(null); reload();
   };
 
@@ -288,7 +291,11 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
                 <div className="row gap-6 ml-auto" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
                   <span className="text-xs text-muted2">주문</span>
                   <FilterSelect value={bulkContract} onChange={setBulkContract}
-                    options={allContracts.map(c => c.name)} placeholder="주문 선택"/>
+                    /* 이름이 겹치는 주문은 거래처를 붙여 갈리게 한다(값은 id). */
+                    options={allContracts.map(c => {
+                      const dup = allContracts.filter(x => (x.name || '').trim() === (c.name || '').trim()).length > 1
+                      return { value: c.id, label: dup && c.vendor_name ? `${c.name} · ${c.vendor_name}` : c.name }
+                    })} placeholder="주문 선택"/>
                   <button className="btn primary" onClick={() => doBulkLink(false)} disabled={!bulkContract}>
                     <Icon.Link size={14}/> 연결
                   </button>
