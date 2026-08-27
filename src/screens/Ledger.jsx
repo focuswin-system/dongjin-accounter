@@ -292,10 +292,10 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
                   <span className="text-xs text-muted2">주문</span>
                   <FilterSelect value={bulkContract} onChange={setBulkContract}
                     /* 이름이 겹치는 주문은 거래처를 붙여 갈리게 한다(값은 id). */
-                    options={allContracts.map(c => {
-                      const dup = allContracts.filter(x => (x.name || '').trim() === (c.name || '').trim()).length > 1
-                      return { value: c.id, label: dup && c.vendor_name ? `${c.name} · ${c.vendor_name}` : c.name }
-                    })} placeholder="주문 선택"/>
+                    options={allContracts.map(c => ({
+                      value: c.id,
+                      label: c.vendor_name ? `${c.vendor_name} · ${c.name}` : c.name,
+                    }))} placeholder="주문 선택"/>
                   <button className="btn primary" onClick={() => doBulkLink(false)} disabled={!bulkContract}>
                     <Icon.Link size={14}/> 연결
                   </button>

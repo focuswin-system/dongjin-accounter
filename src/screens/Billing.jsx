@@ -786,11 +786,11 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
    * 이름을 남길 자리도 없다(거래 폼과 달리 청구서엔 doc_no 보존 경로가 없다).
    * 고른 사람은 분류한 줄 알지만 아무 데도 안 남는다 → 빈칸과 결과가 같으면서 거짓말만 한다. 뺀다. */
   // 값은 **id**(위 거래처와 같은 이유). 이름이 겹치면 라벨에 거래처를 붙여 갈리게 한다.
+  // 거래처를 이름 앞에 늘 붙인다 — 고른 뒤에도 어느 회사 주문인지 보여야 한다(거래 폼과 같은 규칙)
   const contractOptions = contracts.map(c => ({
     value: c.id,
-    label: contracts.filter(x => (x.name || '').trim() === (c.name || '').trim()).length > 1 && c.vendor_name
-      ? `${c.name} · ${c.vendor_name}` : c.name,
-    sub: `${c.vendor_name || ''} · ${c.status || ''}`,
+    label: c.vendor_name ? `${c.vendor_name} · ${c.name}` : c.name,
+    sub: c.status || '',
   }))
 
   // 품목표와 같은 이름표를 쓴다 — 표에는 '입고일', 나눠 발행 안내에는 '납품일'이면 같은 칸이 아닌 줄 안다

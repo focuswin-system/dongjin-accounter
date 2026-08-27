@@ -141,15 +141,14 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
    * (같은 이름이 여럿이면 라벨에 거래처를 붙여 고를 때도 갈리게 한다.) */
   const contractOpts = useMemo(() => {
     const pool = contracts.filter(c => kind === 'income' ? !c.is_purchase : c.is_purchase)
-    const dupName = new Set(
-      pool.map(c => (c.name || '').trim())
-          .filter((n, i, arr) => arr.indexOf(n) !== i))
+    /* 이름 앞에 **거래처를 붙여 늘 함께 보여준다.**
+       고른 뒤에는 라벨만 남는데, 거기에 계약명만 있으면 어느 회사 것인지 알 수 없다.
+       겹칠 때만 붙이는 방식도 써 봤지만, 겹치는 줄 모르는 사람에겐 여전히 같은 이름이다. */
     const opts = pool
       .map(c => ({
         value: c.id,
-        label: dupName.has((c.name || '').trim()) && c.vendor_name
-          ? `${c.name} · ${c.vendor_name}` : c.name,
-        sub: [c.vendor_name, c.status].filter(Boolean).join(' · '),
+        label: c.vendor_name ? `${c.vendor_name} · ${c.name}` : c.name,
+        sub: c.status || '',
       }));
     /* 예전엔 지출에 '공통(원자재)'·'공통(생산소모)'·'공통(인건비)'·'공통' 네 개를 붙였다.
      * 주문이 필수 입력이라 주문 없는 지출을 넣을 길이 없었기 때문인데, 두 가지가 잘못됐다.
@@ -164,15 +163,12 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   // 원가 귀속도 같은 이유로 **id** 로 고른다(위 주석 참조)
   const costContractOpts = useMemo(() => {
     const pool = contracts.filter(c => !c.is_purchase)
-    const dupName = new Set(
-      pool.map(c => (c.name || '').trim()).filter((n, i, arr) => arr.indexOf(n) !== i))
     return [
       { value: "", label: "귀속 없음", sub: "특정 수주건의 원가가 아님 (일반 경비)" },
       ...pool.map(c => ({
         value: c.id,
-        label: dupName.has((c.name || '').trim()) && c.vendor_name
-          ? `${c.name} · ${c.vendor_name}` : c.name,
-        sub: [c.vendor_name, c.status].filter(Boolean).join(' · '),
+        label: c.vendor_name ? `${c.vendor_name} · ${c.name}` : c.name,
+        sub: c.status || '',
       })),
     ]
   }, [contracts]);

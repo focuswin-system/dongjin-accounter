@@ -53,6 +53,20 @@ const SECTION = {
       ? '청구서는 발행됐는데 입금 처리가 안 됐어요. 이미 받은 돈이면 여기서 처리하세요.'
       : '청구서는 등록됐는데 지급 처리가 안 됐어요. 이미 낸 돈이면 여기서 처리하세요.',
   },
+  /* 발행일이 아직 안 온 청구서 — **미리 끊어 둔 것**.
+   *
+   * 미래 날짜로 미리 발행하는 일이 실제로 있다(9/1 자를 8월에 끊어 둔다). 그런데 그 청구서는
+   * 어디에서도 안 보였다 — 수시입금 목록은 기본이 이번 달이라 9월 건이 안 뜨고,
+   * 회차 목록은 청구서가 생기면 사라진다. 그래서 "9월 것 어디 갔지" 하고 찾다가
+   * **8월 것을 그것인 줄 알고 지운 사고**가 났다(입금까지 끝난 건이었다).
+   * 안 보이는 것을 만들지 않는다 — 보이게 두고 '아직 발행일 전'이라고 적는다. */
+  ahead: {
+    label: '앞서 발행함', tone: 'brand', icon: <Icon.Clock size={13}/>,
+    primary: null,
+    hint: (sales) => sales
+      ? '발행일이 아직 오지 않은 청구서예요. 미리 끊어 둔 것이니 그대로 두면 됩니다.'
+      : '등록일이 아직 오지 않은 청구서예요. 미리 잡아 둔 것이니 그대로 두면 됩니다.',
+  },
   /* 건너뛴 회차 — 감추기만 하면 되돌릴 방법이 없어진다. 접어서 맨 아래에 둔다
      ("왜 이 달만 없지"를 여기서 확인하고 되살릴 수 있어야 한다). */
   skipped: {
@@ -82,7 +96,7 @@ const ddayTone = (due) => {
 /** 회차 금액(VAT 포함) — pending은 공급가(amount)와 세액(vat)을 따로 준다 */
 export const cycleTotal = (c) => (c.amount || 0) + (c.vat != null ? c.vat : Math.round((c.amount || 0) * 0.1))
 
-const Row = ({ c, sales, primary, onIssue, onPaid, onOpenContract, onSkip, onUnskip, onOpenInvoice, skipped, unpaid, busy, blockedBy }) => {
+const Row = ({ c, sales, primary, onIssue, onPaid, onOpenContract, onSkip, onUnskip, onOpenInvoice, skipped, unpaid, ahead, busy, blockedBy }) => {
   const issueLabel = sales ? '청구서 발행' : '청구서 등록'
   const paidLabel = sales ? '입금 처리' : '지급 처리'
   // 서버는 그 규칙의 '가장 이른 미처리 회차'만 허용한다(앞선 회차를 건너뛰면 그 앞이 영영 안 뜬다).
@@ -122,7 +136,16 @@ const Row = ({ c, sales, primary, onIssue, onPaid, onOpenContract, onSkip, onUns
         <div className="row gap-6" style={{ justifyContent: 'flex-end', alignItems: 'center' }}>
           {/* 발행함·미입금 — 이미 청구서가 있다. 새로 발행하면 중복이므로 그 버튼을 안 준다.
               '앞선 회차부터' 규칙도 여기엔 안 건다(발행이 아니라 정산이라 순서가 상관없다). */}
-          {unpaid ? (
+          {/* 앞서 발행함 — 아직 할 일이 없다. 무엇인지 확인만 할 수 있게 둔다.
+              여기에 '입금 처리'를 주면 받지도 않은 돈을 받았다고 적게 된다. */}
+          {ahead ? (
+            <>
+              <span className="badge outline" style={{ fontSize: 10 }}>{c.invoice_no}</span>
+              {onOpenInvoice && (
+                <button className="btn sm" disabled={busy} onClick={() => onOpenInvoice(c)}>청구서 열기</button>
+              )}
+            </>
+          ) : unpaid ? (
             <>
               <span className="badge outline" style={{ fontSize: 10 }}>{c.invoice_no}</span>
               <button className="btn sm primary" disabled={busy} onClick={() => onPaid(c)}>
@@ -199,7 +222,7 @@ const Section = ({ state, cycles, sales, onIssue, onPaid, onOpenContract, onBulk
                 return (
                   <Row key={`${c.recurring_id}-${c.due_date}`} c={c} sales={sales} primary={meta.primary}
                     blockedBy={first && first !== c.due_date ? first : null}
-                    skipped={state === 'skipped'} unpaid={state === 'unpaid'}
+                    skipped={state === 'skipped'} unpaid={state === 'unpaid'} ahead={state === 'ahead'}
                     onSkip={onSkip} onUnskip={onUnskip} onOpenInvoice={onOpenInvoice}
                     onIssue={onIssue} onPaid={onPaid} onOpenContract={onOpenContract} busy={busy}/>
                 )
@@ -222,14 +245,14 @@ const Section = ({ state, cycles, sales, onIssue, onPaid, onOpenContract, onBulk
 export const RecurringCycles = ({ cycles = [], kind = 'purchase', onIssue, onPaid, onBulk, onOpenContract, onSkip, onUnskip, onOpenInvoice, busy }) => {
   const sales = kind === 'sales'
   const by = (s) => cycles.filter(c => c.state === s)
-  const overdue = by('overdue'), soon = by('soon'), upcoming = by('upcoming'), skipped = by('skipped'), unpaid = by('unpaid')
+  const overdue = by('overdue'), soon = by('soon'), upcoming = by('upcoming'), skipped = by('skipped'), unpaid = by('unpaid'), ahead = by('ahead')
   /* 규칙별 '가장 이른 미처리 회차' — 서버가 개별 처리를 허용하는 유일한 회차다.
      구획을 나눠 보여주므로 전체 cycles에서 구해야 한다(놓친 회차가 있으면 임박 회차도 아직 못 누른다).
      ⚠ 건너뛴 회차는 빼야 한다 — 넣으면 "앞선 회차(건너뛴 날)부터 처리하세요"가 떠서
        정작 처리해야 할 회차가 영영 안 눌린다(건너뛴 건 처리할 대상이 아니다). */
   const earliest = new Map()
   for (const c of cycles) {
-    if (c.state === 'skipped' || c.state === 'unpaid') continue
+    if (c.state === 'skipped' || c.state === 'unpaid' || c.state === 'ahead') continue
     const cur = earliest.get(c.recurring_id)
     if (!cur || c.due_date < cur) earliest.set(c.recurring_id, c.due_date)
   }
@@ -249,6 +272,12 @@ export const RecurringCycles = ({ cycles = [], kind = 'purchase', onIssue, onPai
       {soon.length > 0 && (
         <Section state="soon" cycles={soon} sales={sales} earliest={earliest}
           onIssue={onIssue} onPaid={onPaid} onOpenContract={onOpenContract} onSkip={onSkip} busy={busy}/>
+      )}
+      {/* '예정'(아직 발행 안 함) 바로 앞 — 둘 다 앞으로의 일인데, 이건 이미 끊어 둔 것이다.
+          접어 두지 않는다. 접으면 또 안 보이고, 안 보여서 난 사고가 이것이다. */}
+      {ahead.length > 0 && (
+        <Section state="ahead" cycles={ahead} sales={sales} earliest={earliest}
+          onOpenContract={onOpenContract} onOpenInvoice={onOpenInvoice} busy={busy}/>
       )}
       {upcoming.length > 0 && (
         <Section state="upcoming" cycles={upcoming} sales={sales} earliest={earliest} collapsible

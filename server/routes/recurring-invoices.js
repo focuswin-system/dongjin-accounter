@@ -235,14 +235,20 @@ router.get('/pending', async (req, res, next) => {
         LEFT JOIN vendors v   ON r.vendor_id = v.id
         LEFT JOIN contracts c ON r.contract_id = c.id
        WHERE i.kind = 'issued' AND i.status <> '입금 완료'
-         AND i.issued_at <= ?
-       ORDER BY i.issued_at`, [today])
+       ORDER BY i.issued_at`)
     for (const u of unpaidRows) {
       const due = String(u.issued_at).slice(0, 10)
+      /* 발행일이 **아직 안 온** 청구서는 'ahead'(앞서 발행함)로 따로 세운다.
+       *
+       * 미래 날짜로 미리 발행해 두는 일이 실제로 있다(9/1 자를 8월에 끊어 둔다).
+       * 그런데 그 청구서는 **어디에서도 안 보였다** — 수시입금 목록은 기본이 이번 달이라
+       * 9월 건이 안 뜨고, 회차 목록은 청구서가 생기면 사라진다.
+       * 그래서 "9월 것 어디 갔지" 하고 찾다가 **8월 것을 그것인 줄 알고 지운 사고**가 났다.
+       * 안 보이는 것을 만들지 않는다 — 보이게 두고 '아직 발행일 전'이라고 적는다. */
       out.push({
         recurring_id: u.recurring_id,
         due_date: due,
-        state: 'unpaid',
+        state: due > today ? 'ahead' : 'unpaid',
         invoice_id: u.invoice_id,
         invoice_no: u.invoice_no,
         invoice_status: u.status,
