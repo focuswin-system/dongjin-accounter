@@ -68,7 +68,16 @@ export const PaidIssueDrawer = ({ target, isIssued, onClose, onDone, onIssuePaid
       <div className="drawer-body col gap-form">
         <div className="alert-row" style={{ background: "var(--surface-2)", borderColor: "var(--line)" }}>
           <Icon.Sparkle/>
-          <div className="text-sm">청구서를 발행하고 <b>{fmtNum(total)}원</b>을 {isIssued ? "입금" : "지급"} 완료로 함께 기록해요. {isIssued ? "입금받은" : "출금한"} 계좌를 선택하세요.</div>
+          {/* 두 경우를 같은 드로어가 맡는다 — 문장이 달라야 한다.
+              회차(미발행)  : 청구서를 **만들면서** 정산까지
+              발행함·미입금 : 청구서가 **이미 있다.** 정산만 붙인다.
+              한 문장으로 뭉뚱그리면 "청구서를 또 발행하나?" 하고 손이 멈춘다. */}
+          <div className="text-sm">
+            {target?.state === 'unpaid'
+              ? <>이미 발행된 청구서{target.invoice_no ? <> <b>{target.invoice_no}</b></> : ''}에 <b>{fmtNum(total)}원</b> {isIssued ? "입금" : "지급"}을 기록해요. 청구서를 새로 만들지 않아요.</>
+              : <>청구서를 발행하고 <b>{fmtNum(total)}원</b>을 {isIssued ? "입금" : "지급"} 완료로 함께 기록해요.</>}
+            {' '}{isIssued ? "입금받은" : "출금한"} 계좌를 선택하세요.
+          </div>
         </div>
         {variable && (
           <div>

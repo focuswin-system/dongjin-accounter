@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, localToday, Drawer, MoneyInput } from '../ui'
+import { Icon, fmtNum, useToast, useConfirm, localToday, Drawer, MoneyInput , fmtDateShort } from '../ui'
 import { DrawerHead, DrawerFooter } from './Drawer'
 import { api } from '../api'
 
@@ -38,6 +38,21 @@ const SECTION = {
     primary: 'issue',
     hint: () => '미리 발행해 둘 수 있어요.',
   },
+  /* 발행은 했는데 **입금이 안 된** 회차.
+   *
+   * 회차 목록은 원래 '청구서가 아직 없는 것'만 담는다. 청구서가 생기면 목록에서 사라진다.
+   * 그래서 소급으로 청구서만 만들고 입금 처리를 안 하면 여기서 다시 볼 수 없었고,
+   * 그 돈을 받으려면 수시입금으로 가서 달을 1월·2월… 로 바꿔가며 찾아야 했다.
+   * 소급을 많이 쓰는 회사에서 1~9월에 흩어진 17건이 그렇게 방치돼 있었다.
+   *
+   * ⚠ 다른 구획과 달리 이건 **이미 있는 청구서**다. '발행'이 아니라 '입금 붙이기'만 한다. */
+  unpaid: {
+    label: '발행함 · 미입금', tone: 'warn', icon: <Icon.Warn size={13}/>,
+    primary: 'paid',
+    hint: (sales) => sales
+      ? '청구서는 발행됐는데 입금 처리가 안 됐어요. 이미 받은 돈이면 여기서 처리하세요.'
+      : '청구서는 등록됐는데 지급 처리가 안 됐어요. 이미 낸 돈이면 여기서 처리하세요.',
+  },
   /* 건너뛴 회차 — 감추기만 하면 되돌릴 방법이 없어진다. 접어서 맨 아래에 둔다
      ("왜 이 달만 없지"를 여기서 확인하고 되살릴 수 있어야 한다). */
   skipped: {
@@ -67,7 +82,7 @@ const ddayTone = (due) => {
 /** 회차 금액(VAT 포함) — pending은 공급가(amount)와 세액(vat)을 따로 준다 */
 export const cycleTotal = (c) => (c.amount || 0) + (c.vat != null ? c.vat : Math.round((c.amount || 0) * 0.1))
 
-const Row = ({ c, sales, primary, onIssue, onPaid, onOpenContract, onSkip, onUnskip, skipped, busy, blockedBy }) => {
+const Row = ({ c, sales, primary, onIssue, onPaid, onOpenContract, onSkip, onUnskip, onOpenInvoice, skipped, unpaid, busy, blockedBy }) => {
   const issueLabel = sales ? '청구서 발행' : '청구서 등록'
   const paidLabel = sales ? '입금 처리' : '지급 처리'
   // 서버는 그 규칙의 '가장 이른 미처리 회차'만 허용한다(앞선 회차를 건너뛰면 그 앞이 영영 안 뜬다).
@@ -83,11 +98,15 @@ const Row = ({ c, sales, primary, onIssue, onPaid, onOpenContract, onSkip, onUns
   )
   return (
     <tr>
-      <td className="num text-sm" style={{ whiteSpace: 'nowrap' }}>
-        {c.due_date}
+      <td className="num text-sm" style={{ whiteSpace: 'nowrap' }} title={c.due_date}>
+        {/* 노트북 폭에서 이 칸이 두 줄로 접혔다 — 연도 두 자리를 줄인다(원값은 title) */}
+        {fmtDateShort(c.due_date)}
         <span className={`badge ${ddayTone(c.due_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(c.due_date)}</span>
       </td>
-      <td className="fw-700">{c.vendor_name || '(거래처 미지정)'}</td>
+      {/* 긴 거래처명이 두세 줄로 접히던 자리 — 한 줄로 자르고 hover 로 온전히 보여준다 */}
+      <td className="fw-700" style={{ maxWidth: 200 }}>
+        <span className="clip" title={c.vendor_name || ''}>{c.vendor_name || '(거래처 미지정)'}</span>
+      </td>
       <td className="text-sm text-muted">
         {c.item || c.contract_name || '—'}
         {/* 주문 기반이면 금액·종료 시점의 출처가 주문이다 → 그쪽으로 보낸다.
@@ -101,8 +120,19 @@ const Row = ({ c, sales, primary, onIssue, onPaid, onOpenContract, onSkip, onUns
       <td className="num-cell num-right fw-700">{fmtNum(cycleTotal(c))}</td>
       <td>
         <div className="row gap-6" style={{ justifyContent: 'flex-end', alignItems: 'center' }}>
-          {/* 건너뛴 회차 구획에서는 되돌리기만 있으면 된다 */}
-          {skipped ? (
+          {/* 발행함·미입금 — 이미 청구서가 있다. 새로 발행하면 중복이므로 그 버튼을 안 준다.
+              '앞선 회차부터' 규칙도 여기엔 안 건다(발행이 아니라 정산이라 순서가 상관없다). */}
+          {unpaid ? (
+            <>
+              <span className="badge outline" style={{ fontSize: 10 }}>{c.invoice_no}</span>
+              <button className="btn sm primary" disabled={busy} onClick={() => onPaid(c)}>
+                {sales ? '입금 처리' : '지급 처리'}
+              </button>
+              {onOpenInvoice && (
+                <button className="btn sm" disabled={busy} onClick={() => onOpenInvoice(c)}>청구서 열기</button>
+              )}
+            </>
+          ) : skipped ? (
             <>
               {c.skip_reason && <span className="text-xs text-muted2">{c.skip_reason}</span>}
               <button className="btn sm" disabled={busy} onClick={() => onUnskip(c)}>되살리기</button>
@@ -125,7 +155,7 @@ const Row = ({ c, sales, primary, onIssue, onPaid, onOpenContract, onSkip, onUns
   )
 }
 
-const Section = ({ state, cycles, sales, onIssue, onPaid, onOpenContract, onBulk, onSkip, onUnskip, busy, collapsible, earliest }) => {
+const Section = ({ state, cycles, sales, onIssue, onPaid, onOpenContract, onBulk, onSkip, onUnskip, onOpenInvoice, busy, collapsible, earliest }) => {
   const [open, setOpen] = useState(!collapsible)
   const meta = SECTION[state]
   const sum = cycles.reduce((s, c) => s + cycleTotal(c), 0)
@@ -169,7 +199,8 @@ const Section = ({ state, cycles, sales, onIssue, onPaid, onOpenContract, onBulk
                 return (
                   <Row key={`${c.recurring_id}-${c.due_date}`} c={c} sales={sales} primary={meta.primary}
                     blockedBy={first && first !== c.due_date ? first : null}
-                    skipped={state === 'skipped'} onSkip={onSkip} onUnskip={onUnskip}
+                    skipped={state === 'skipped'} unpaid={state === 'unpaid'}
+                    onSkip={onSkip} onUnskip={onUnskip} onOpenInvoice={onOpenInvoice}
                     onIssue={onIssue} onPaid={onPaid} onOpenContract={onOpenContract} busy={busy}/>
                 )
               })}
@@ -188,17 +219,17 @@ const Section = ({ state, cycles, sales, onIssue, onPaid, onOpenContract, onBulk
  * @param onBulk          놓친 회차 일괄 처리
  * @param onOpenContract  주문 배지 클릭
  */
-export const RecurringCycles = ({ cycles = [], kind = 'purchase', onIssue, onPaid, onBulk, onOpenContract, onSkip, onUnskip, busy }) => {
+export const RecurringCycles = ({ cycles = [], kind = 'purchase', onIssue, onPaid, onBulk, onOpenContract, onSkip, onUnskip, onOpenInvoice, busy }) => {
   const sales = kind === 'sales'
   const by = (s) => cycles.filter(c => c.state === s)
-  const overdue = by('overdue'), soon = by('soon'), upcoming = by('upcoming'), skipped = by('skipped')
+  const overdue = by('overdue'), soon = by('soon'), upcoming = by('upcoming'), skipped = by('skipped'), unpaid = by('unpaid')
   /* 규칙별 '가장 이른 미처리 회차' — 서버가 개별 처리를 허용하는 유일한 회차다.
      구획을 나눠 보여주므로 전체 cycles에서 구해야 한다(놓친 회차가 있으면 임박 회차도 아직 못 누른다).
      ⚠ 건너뛴 회차는 빼야 한다 — 넣으면 "앞선 회차(건너뛴 날)부터 처리하세요"가 떠서
        정작 처리해야 할 회차가 영영 안 눌린다(건너뛴 건 처리할 대상이 아니다). */
   const earliest = new Map()
   for (const c of cycles) {
-    if (c.state === 'skipped') continue
+    if (c.state === 'skipped' || c.state === 'unpaid') continue
     const cur = earliest.get(c.recurring_id)
     if (!cur || c.due_date < cur) earliest.set(c.recurring_id, c.due_date)
   }
@@ -209,6 +240,11 @@ export const RecurringCycles = ({ cycles = [], kind = 'purchase', onIssue, onPai
         <Section state="overdue" cycles={overdue} sales={sales} earliest={earliest}
           onIssue={onIssue} onPaid={onPaid} onBulk={onBulk} onOpenContract={onOpenContract}
           onSkip={onSkip} busy={busy}/>
+      )}
+      {/* 놓친 회차 바로 다음 — 둘 다 "이미 지난 일인데 안 끝난 것"이라 급한 순서가 같다. */}
+      {unpaid.length > 0 && (
+        <Section state="unpaid" cycles={unpaid} sales={sales} earliest={earliest}
+          onPaid={onPaid} onOpenContract={onOpenContract} onOpenInvoice={onOpenInvoice} busy={busy}/>
       )}
       {soon.length > 0 && (
         <Section state="soon" cycles={soon} sales={sales} earliest={earliest}
@@ -290,10 +326,26 @@ export const useRecurringCycles = (kind, { onChanged } = {}) => {
   /* 드로어가 넘긴 _amount(변동형에서만 채워진다)를 서버로 실어 보낸다.
      빼먹으면 변동형 회차는 기입금/기지급이 서버 400 으로 막힌다 — 실제로 그랬다.
      매출은 supply_amount, 매입은 amount 로 이름이 갈린다(각 라우트의 바디 이름). */
-  const issuePaid = (t) => A.issue.call(api, t.recurring_id, {
-    due: t.due_date, paid: true, account_id: t._accountId,
-    ...(t._amount != null ? (sales ? { supply_amount: t._amount } : { amount: t._amount }) : {}),
-  })
+  const issuePaid = (t) => {
+    /* ⚠ 두 갈래다.
+     *   회차(미발행)  → 청구서를 **새로 만들면서** 입금까지 처리한다.
+     *   발행함·미입금 → 청구서가 **이미 있다.** 여기서 또 발행하면 같은 달 청구서가 둘이 된다.
+     *                   있는 청구서에 입금을 붙인다(matchInvoice — 수시입금 화면과 같은 경로).
+     * 한 버튼(입금 처리)이 두 가지 일을 하는 셈이라, 갈림길을 여기 한 곳에 둔다. */
+    if (t.state === 'unpaid' && t.invoice_id) {
+      return api.matchInvoice(t.invoice_id, {
+        txnId: null,                      // 붙일 거래가 없으니 새로 만든다(서버가 만든다)
+        amount: t._amount != null ? t._amount : (t.total_amount ?? cycleTotal(t)),
+        date: t._date || t.due_date,
+        account_id: t._accountId,         // ⚠ 스네이크다(api.matchInvoice 시그니처)
+        memo: `${t.contract_name || t.item || '정기'} ${t.invoice_no || ''} 정산`.trim(),
+      })
+    }
+    return A.issue.call(api, t.recurring_id, {
+      due: t.due_date, paid: true, account_id: t._accountId,
+      ...(t._amount != null ? (sales ? { supply_amount: t._amount } : { amount: t._amount }) : {}),
+    })
+  }
 
   /* 놓친 회차 일괄 — 무엇이 만들어지는지 전부 보여주고 확인받는다(되돌리는 비용이 큰 동작).
    * 대상은 화면의 'overdue' 구획이 아니라 **서버가 실제로 처리하는 범위**(오늘까지 도래한 회차)다.

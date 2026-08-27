@@ -1785,3 +1785,24 @@ body:has([data-modal-open]) {
 @media (hover: none) {
   .tile-fav { opacity: 1; }
 }
+
+/* ── 표 한 행의 ⋯ 버튼 ─────────────────────────────────────────────
+   기본 .icon-btn 은 테두리도 글자도 옅다(--line / --muted). 옆에 선 '수정' 버튼과
+   나란히 두면 점 세 개가 배경에 묻혀, **거기 뭔가 있다는 것 자체가 안 보인다.**
+   실제로 '지난 회차 넣기'·'회차 이력'을 못 찾는다는 말을 들었다.
+   글자색을 본문 쪽으로 당기고 옆 버튼과 같은 테두리를 준다 — 크기는 그대로 둔다
+   (커지면 '수정'보다 세 보여, 자주 쓰는 것이 뒤로 밀린다). */
+.row-actions .icon-btn {
+  width: 30px; height: 30px; border-radius: 8px;
+  border-color: var(--line-strong);
+  color: var(--ink-2);
+}
+.row-actions .icon-btn:hover { background: var(--surface-3); border-color: var(--muted-2); }
+.row-actions .icon-btn[aria-expanded="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
+
+/* ── 한 줄로 자르기 ───────────────────────────────────────────────
+   작은 화면(노트북)에서 긴 이름이 두세 줄로 접혀 표의 행 높이가 들쭉날쭉해진다.
+   자르고 …을 붙이되, **잘린 글자는 hover 로 볼 수 있어야 한다**(title 속성).
+   ⚠ 셀 전체가 아니라 **텍스트 줄**에 건다 — 거래처+적요처럼 일부러 두 줄로 쌓은
+     칸까지 뭉개면 안 된다. */
+.clip { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -214,6 +214,51 @@ router.get('/pending', async (req, res, next) => {
         })
       }
     }
+    /* ── 발행은 했는데 **입금이 안 된** 회차 ──────────────────────────────
+     *
+     * 여태 이 목록은 '아직 청구서가 없는 회차'만 담았다. 청구서가 생기는 순간 회차가
+     * 목록에서 사라진다. 그래서 소급으로 청구서만 만들고 입금 처리를 안 하면
+     * **여기서는 다시 볼 수도, 처리할 수도 없었다.**
+     * 그 돈을 받으려면 수시입금으로 가서 달을 1월·2월… 로 바꿔가며 찾아야 했다
+     * (실제로 1~9월에 흩어진 17건이 그렇게 방치돼 있었다).
+     *
+     * 그래서 같은 화면에 함께 싣는다. state='unpaid' — 화면이 별도 구획으로 그린다.
+     * ⚠ 회차(미발행)와 달리 이건 **이미 있는 청구서**다. 그래서 invoice_id 를 함께 준다 —
+     *   화면은 새로 발행하는 게 아니라 그 청구서에 입금을 붙여야 한다. */
+    const [unpaidRows] = await req.db.execute(`
+      SELECT i.id AS invoice_id, i.invoice_no, i.issued_at, i.due_at, i.total_amount,
+             i.supply_amount, i.vat_amount, i.status, i.recurring_id,
+             r.item, r.vendor_id, r.contract_id, r.period,
+             v.name AS vendor_name, c.name AS contract_name, c.contract_no
+        FROM invoices i
+        JOIN recurring_invoices r ON i.recurring_id = r.id
+        LEFT JOIN vendors v   ON r.vendor_id = v.id
+        LEFT JOIN contracts c ON r.contract_id = c.id
+       WHERE i.kind = 'issued' AND i.status <> '입금 완료'
+         AND i.issued_at <= ?
+       ORDER BY i.issued_at`, [today])
+    for (const u of unpaidRows) {
+      const due = String(u.issued_at).slice(0, 10)
+      out.push({
+        recurring_id: u.recurring_id,
+        due_date: due,
+        state: 'unpaid',
+        invoice_id: u.invoice_id,
+        invoice_no: u.invoice_no,
+        invoice_status: u.status,
+        vendor_id: u.vendor_id || null,
+        vendor_name: u.vendor_name || '',
+        contract_id: u.contract_id || null,
+        contract_name: u.contract_name || u.item || '',
+        contract_no: u.contract_no || '',
+        period: u.period,
+        source: 'recurring', type: '정기청구', item: u.item || '',
+        amount: Number(u.supply_amount), vat: Number(u.vat_amount),
+        total_amount: Number(u.total_amount),
+        pay_due: u.due_at ? String(u.due_at).slice(0, 10) : null,
+      })
+    }
+
     out.sort((a, b) => a.due_date.localeCompare(b.due_date))
     res.json(out)
   } catch (e) { next(e) }

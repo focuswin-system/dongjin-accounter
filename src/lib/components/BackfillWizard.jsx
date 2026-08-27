@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Drawer, Icon, fmtNum, useToast, useConfirm, MoneyInput, localToday, DateInput } from '../ui'
+import { Drawer, Icon, fmtNum, fmtDateShort, useToast, useConfirm, MoneyInput, localToday, DateInput } from '../ui'
 import { DrawerHead } from './Drawer'
 import { api } from '../api'
 
@@ -206,7 +206,9 @@ export const BackfillWizard = ({ open, onClose, rule, kind, onDone }) => {
                               <input type="checkbox" checked={r.checked} disabled={disabled}
                                 onChange={e => upd(i, { checked: e.target.checked })}/>
                             </td>
-                            <td>{r.due_date}</td>
+                            {/* 회차일은 줄여 적는다(26.08.07) — 노트북 폭에서 이 칸이
+                                두 줄로 접혀 표 전체가 들쭉날쭉해졌다. 원값은 title 로 남긴다. */}
+                            <td className="num" title={r.due_date} style={{ whiteSpace: 'nowrap' }}>{fmtDateShort(r.due_date)}</td>
                             <td className="num" style={{ maxWidth: 140 }}>
                               {/* 회차별 금액 수정 — 임차료 인상처럼 달마다 금액이 달랐던 경우가 반드시 있다 */}
                               <MoneyInput value={String(r.supply)} disabled={disabled}
