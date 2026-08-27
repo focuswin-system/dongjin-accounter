@@ -1158,7 +1158,8 @@ const PendingScheduleTable = ({ rows, onIssue, onPaid, onOpenOrder, onDeleteSche
         없는 탭을 가리키면 안내가 오히려 사람을 헤매게 한다. */}
     <div className="text-xs text-muted2" style={{ padding: "12px 16px 0", lineHeight: 1.6 }}>
       아직 <b>청구서가 아니에요</b> — 주문에 깔아둔 청구 일정입니다.
-      {isIssued ? " 발행 처리" : " 청구서 등록"}을 눌러야 청구서가 만들어지고, 그 뒤
+      {/* 조사를 붙여서 쓴다 — '처리을'이 되지 않게(받침 유무가 달라 하나로 못 쓴다) */}
+      {isIssued ? " 발행 처리를" : " 청구서 등록을"} 눌러야 청구서가 만들어지고, 그 뒤
       <b>{isIssued ? " 발행내역" : " 등록내역"}</b> 탭에서 열어 보거나 지울 수 있어요.
     </div>
     <DataTable
