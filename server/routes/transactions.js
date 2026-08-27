@@ -8,7 +8,7 @@ const { dateOrNull } = require('../lib/period')
 const { normalizeStatus, ledgerError, defaultSettledStatus, amountError } = require('../lib/ledger')
 const { restoreLastGenerated, dueDatesToGenerate, LOOKAHEAD_DAYS } = require('../lib/recurrence')
 const { removeUploadedFile } = require('../lib/uploads')
-const { vatFields, recurFromSupply } = require('../lib/vat')
+const { vatFields, recurFromSupply, effRecurVatMode } = require('../lib/vat')
 const { closedPeriodError } = require('../lib/closing')
 const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
 const { isFundAccount } = require('../lib/categoryAccount')
@@ -243,6 +243,7 @@ router.get('/entry-hints', async (req, res, next) => {
     const skipKind = kind === 'income' ? 'invoice' : 'expense'
     const [recRows] = await req.db.execute(
       `SELECT r.*, r.${itemCol} AS item, c.name AS contract_name,
+              c.vat_mode AS contract_vat_mode,
               UNIX_TIMESTAMP(r.created_at) AS created_epoch
          FROM ${recTable} r
          LEFT JOIN contracts c ON r.contract_id = c.id
@@ -264,7 +265,7 @@ router.get('/entry-hints', async (req, res, next) => {
       r.skips = skipBy.get(r.id) || []
       // 정기청구는 공급가액이 저장돼 있다 — 거래에 적히는 건 부가세 포함 총액이다
       const total = kind === 'income'
-        ? Number(r.supply_amount) + recurFromSupply(Number(r.supply_amount), r.vat_mode || 'exclusive').vat
+        ? Number(r.supply_amount) + recurFromSupply(Number(r.supply_amount), effRecurVatMode(r)).vat
         : Number(r.amount)
       const variable = (r.amount_mode || 'fixed') === 'variable'
       // 부가세 계산의 원 단위 반올림 차이까지 '다른 금액'으로 보지는 않는다

@@ -86,10 +86,20 @@ function recurFromTotal(total, vatMode) {
   return { supply, vat: t - supply, tax_type: tax }
 }
 
+/** 정기청구 규칙의 **실효** vat_mode — 주문의 과세유형이 규칙보다 세다.
+ *
+ * 주문이 면세면 그 주문의 청구서는 규칙에 뭐라 적혀 있든 세액이 0이다. 그래서 회차 금액을
+ * 계산하는 쪽은 모두 이 함수를 거쳐야 한다. 예전엔 발행 경로만 주문을 봤고 안내 경로는
+ * 규칙만 봐서, 면세 주문의 금액이 10% 어긋난 채로 비교됐다.
+ * r 은 recurring_invoices 행 + contracts.vat_mode 를 contract_vat_mode 로 실은 것. */
+const effRecurVatMode = (r) => (r.contract_vat_mode
+  ? (r.contract_vat_mode === 'exempt' ? 'none' : r.contract_vat_mode === 'zero' ? 'zero' : 'exclusive')
+  : (r.vat_mode || 'exclusive'))
+
 /** 비목 vat('10%'/'면세'/'영세'/'—') → 정기 vat_mode */
 const modeFromCatVat = (catVat) => (catVat === '10%' ? 'exclusive' : catVat === '영세' ? 'zero' : 'none')
 
 module.exports = {
   TAX_TYPES, normalizeTaxType, vatFields, CONTRACT_VAT_MODES, vatRateOf, taxTypeOfMode, vatOf,
-  recurVat, recurFromSupply, recurFromTotal, modeFromCatVat,
+  recurVat, recurFromSupply, recurFromTotal, modeFromCatVat, effRecurVatMode,
 }

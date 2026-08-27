@@ -364,7 +364,10 @@ export const useRecurringCycles = (kind, { onChanged } = {}) => {
     if (t.state === 'unpaid' && t.invoice_id) {
       return api.matchInvoice(t.invoice_id, {
         txnId: null,                      // 붙일 거래가 없으니 새로 만든다(서버가 만든다)
-        amount: t._amount != null ? t._amount : (t.total_amount ?? cycleTotal(t)),
+        /* ⚠ `_amount` 를 쓰면 안 된다. 그건 **회차** 금액이고(매출이면 공급가액이라
+           부가세만큼 모자란다), 여기서 필요한 건 **그 청구서의 남은 금액**이다.
+           일부 입금된 청구서도 이 목록에 있으므로 총액도 답이 아니다. */
+        amount: t.remaining ?? t.total_amount ?? cycleTotal(t),
         date: t._date || t.due_date,
         account_id: t._accountId,         // ⚠ 스네이크다(api.matchInvoice 시그니처)
         memo: `${t.contract_name || t.item || '정기'} ${t.invoice_no || ''} 정산`.trim(),

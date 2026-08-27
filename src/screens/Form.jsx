@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Icon, fmtNum, fmtDateShort, useToast, Combobox, Drawer, MoneyInput, localToday, DateInput } from '../lib/ui'
+import { Icon, fmtNum, fmtDateShort, vendorLabel, useToast, Combobox, Drawer, MoneyInput, localToday, DateInput } from '../lib/ui'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { withMainFirst, isMainAccount, MAIN_BADGE } from '../lib/mainAccount'
@@ -245,6 +245,9 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       /* id 로 채운다 — 이름으로 채우면 동명 주문이 있을 때 Combobox 가 엉뚱한 줄을
          고른 것처럼 보이고, 저장하면 정말 엉뚱한 주문으로 옮겨간다.
          id 가 없는 옛 거래(주문 없이 doc_no 에 글자만 적어둔 것)는 그 글자를 그대로 둔다. */
+      /* 거래처도 주문과 같이 **id** 로 담는다. 이름을 담으면 동명 중 첫 줄이 고른 것처럼
+         보이고, 저장하면 정말 그쪽으로 옮겨간다. */
+      vendor:    editTxn.vendorId || '',
       contract:  editTxn.contractId || editTxn.contract || '',
       costContract: editTxn.cost_contract_id || editTxn.cost_contract_name || '',
       acctGroup: '',                                   // 아래 파생 effect에서 채움
@@ -284,7 +287,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   /* 고른 거래처의 계좌 목록. 거래처가 바뀌면 다시 읽고, 이전 선택은 버린다 —
      A사 계좌를 고른 채 거래처만 B사로 바꾸면 남의 계좌가 붙는다. */
   useEffect(() => {
-    const v = vendors.find(x => x.name === form.vendor)
+    const v = vendors.find(x => x.id === form.vendor)
     if (!v) { setVendorAccounts([]); return }
     let alive = true
     api.getVendor(v.id).then(d => {
@@ -311,12 +314,12 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
    * 편집 중에는 묻지 않는다 — 이미 있는 거래가 제 자신과 중복이라고 나올 뿐이다. */
   useEffect(() => {
     if (editTxn) { setHints(null); return }
-    const v = vendors.filter(x => x.name === form.vendor)
+    const v = vendors.find(x => x.id === form.vendor)
     const amount = Number(String(form.amount ?? '').replace(/[^0-9]/g, '')) || 0
-    if (v.length !== 1 || !amount || !form.date) { setHints(null); return }
+    if (!v || !amount || !form.date) { setHints(null); return }
     let alive = true
     const t = setTimeout(() => {
-      api.getEntryHints({ vendorId: v[0].id, kind, date: form.date, amount, contractId: isUuid(form.contract) ? form.contract : null })
+      api.getEntryHints({ vendorId: v.id, kind, date: form.date, amount, contractId: isUuid(form.contract) ? form.contract : null })
         .then(h => { if (alive) setHints(h) })
     }, 350)   // 금액은 타자 중에 바뀐다 — 멈춘 뒤에 묻는다
     return () => { alive = false; clearTimeout(t) }
@@ -324,6 +327,31 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
 
   // 거래처가 바뀌면 '알아요'는 없던 일로 — 다른 거래처의 판단이었다
   useEffect(() => { setHintsOff(false) }, [form.vendor, kind]);
+
+  /* 폼을 열어 주는 쪽이 **이름**을 넘겼을 때의 대비.
+   *
+   * 이 폼은 이제 거래처·주문을 id 로 담는다. 그런데 여는 쪽이 이름을 넘기면 목록의 어느
+   * 줄과도 안 맞아, 화면엔 이름이 그대로 보이는데 저장하면 안 붙는다 — 붙은 줄 알기에
+   * 제일 나쁜 실패다. 이름이 **하나로 확정될 때만** 조용히 id 로 바꿔 담는다.
+   * (여럿이면 손대지 않는다 — 아무거나 집는 것이 원래 문제였다.)
+   *
+   * ⚠ 폼을 통째로 갈아엎지 않는다. 목록이 늦게 도착해도 사용자가 입력 중이던 다른 칸은
+   *   그대로 둬야 한다(위 리셋 효과가 accounts 를 의존성에서 뺀 것과 같은 이유). */
+  const idForName = (list, v) => {
+    if (!v || list.some(x => x.id === v)) return null
+    const hit = list.filter(x => (x.name || '').trim() === String(v).trim())
+    return hit.length === 1 ? hit[0].id : null
+  }
+  useEffect(() => {
+    if (!open) return
+    setForm(f => {
+      const vid = idForName(vendors, f.vendor)
+      const cid = idForName(contracts, f.contract)
+      const kid = idForName(contracts, f.costContract)
+      if (!vid && !cid && !kid) return f
+      return { ...f, ...(vid ? { vendor: vid } : {}), ...(cid ? { contract: cid } : {}), ...(kid ? { costContract: kid } : {}) }
+    })
+  }, [open, vendors, contracts]);
 
   // 비목의 계정과목 그룹(세금계산서 안내 배너용) 파생 — 폼 리셋 없이 acctGroup만 갱신
   useEffect(() => {
@@ -359,7 +387,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   const counterpartyPicker = (ask) => vendorAccounts.length > 1 && (
     <div style={{ marginTop: 10 }}>
       <div className="text-xs text-muted2" style={{ marginBottom: 6 }}>
-        {form.vendor} 계좌가 {vendorAccounts.length}개예요. {ask}
+        {vendors.find(v => v.id === form.vendor)?.name || '이 거래처'} 계좌가 {vendorAccounts.length}개예요. {ask}
       </div>
       <div className="row gap-6" style={{ flexWrap: "wrap" }}>
         {vendorAccounts.map(a => (
@@ -384,11 +412,31 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     setBusy(true)
     const r = await api.matchInvoice(iv.id, {
       txnId: null, amount, date: form.date, account_id: acc[0].id,
+      // 고른 수금 유형을 넘긴다 — 안 넘기면 서버 기본값이 박혀, 필수로 받아 놓고 버리는 꼴이 된다
+      category: form.category || undefined,
       memo: (form.memo || '').trim() || `${iv.invoice_no} ${kind === 'income' ? '입금' : '지급'}`,
     })
+    if (!r.ok) { setBusy(false); toast.push(r.error || '청구서 정산에 실패했어요'); return }
+
+    /* 붙여 둔 증빙을 정산 거래로 옮긴다.
+       FileAttach 는 고른 즉시 서버로 올리므로, 여기서 버리면 파일은 남고 연결만 사라진다 —
+       사용자는 붙인 줄 알고, 그 거래에는 증빙이 없다. */
+    const docs = form.docs || []
+    let docFail = 0
+    if (docs.length && r.txnId) {
+      for (const d of docs) {
+        const dr = await api.addTransactionDoc(r.txnId, d)
+        if (!dr.ok) docFail++
+      }
+    } else if (docs.length) {
+      docFail = docs.length   // 거래 id 를 못 받았으면 붙일 자리가 없다
+    }
     setBusy(false)
-    if (!r.ok) { toast.push(r.error || '청구서 정산에 실패했어요'); return }
-    toast.push(`${iv.invoice_no}에 ${fmtNum(amount)}원을 ${kind === 'income' ? '입금' : '지급'} 처리했어요`)
+    toast.push(
+      `${iv.invoice_no}에 ${fmtNum(amount)}원을 ${kind === 'income' ? '입금' : '지급'} 처리했어요`
+      + (docs.length && !docFail ? ` (증빙 ${docs.length}건 함께)` : ''),
+    )
+    if (docFail) toast.push(`증빙 ${docFail}건은 붙이지 못했어요 — 거래내역에서 다시 올려주세요`, { tone: 'warn' })
     onSave?.()
     onClose?.()
   }
@@ -415,7 +463,14 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       if (hit.length > 1) toast.push(`이름이 같은 항목이 여럿이라 자동으로 잇지 않았어요 — "${name}"`, { tone: 'warn' })
       return null
     }
-    const vendorObj   = uniqueByName(vendors, form.vendor)
+    /* 거래처는 필수다. 예전엔 못 찾으면 경고만 하고 `vendor_id: null` 로 저장했는데,
+       그러면 필수로 받아 놓고 빈 값을 넣는 셈이라 그 거래가 거래처별 집계에서 통째로
+       빠진다. 계좌와 같이 **저장을 막는다.** */
+    const vendorObj   = vendors.find(v => v.id === form.vendor) || uniqueByName(vendors, form.vendor)
+    if (!vendorObj) {
+      toast.push('거래처를 목록에서 다시 골라주세요 — 어느 거래처인지 확정되지 않았어요', { tone: 'warn' })
+      return
+    }
     const contractObj = contracts.find(c => c.id === form.contract)
     const employeeObj = uniqueByName(employees, form.employee)
     /* 계좌는 **필수**다. 비운 채로 저장하면 거래는 '완료'인데 계좌 잔액에는 영영 안 잡혀
@@ -512,10 +567,20 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
           <div className="col gap-form">
             <FormField label="거래처" required>
               <Combobox value={form.vendor} onChange={v => setForm({...form, vendor: v})}
-                options={(kind === "income"
-                  ? vendors.filter(v => v.gubu === "B")
-                  : vendors.filter(v => ["A", "E"].includes(v.gubu))
-                ).map(v => ({ value: v.name, label: v.name, sub: `${v.type || ''} · ${v.phone || ''}` }))}
+                /* value 는 **id**. 이름으로 고르면 동명 중 배열 첫 번째가 조용히 붙어
+                   돈이 엉뚱한 거래처에 잡힌다(실제로 그렇게 쌓였다).
+                   같은 상호가 둘 이상일 때만 사업자번호를 붙여 가릴 수 있게 한다 —
+                   늘 붙이면 목록이 읽기 어려워진다. */
+                options={(() => {
+                  const pool = kind === "income"
+                    ? vendors.filter(v => v.gubu === "B")
+                    : vendors.filter(v => ["A", "E"].includes(v.gubu))
+                  return pool.map(v => ({
+                    value: v.id,
+                    label: vendorLabel(v, pool),
+                    sub: [v.type, v.phone].filter(Boolean).join(' · '),
+                  }))
+                })()}
                 placeholder={kind === "income" ? "발주처를 검색하거나 선택하세요" : "거래처를 검색하거나 선택하세요"}
                 onAddNew={async (q) => {
                   const gubu = kind === "income" ? "B" : "A"
@@ -523,7 +588,9 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                   if (res.ok) {
                     const updated = await api.getVendors()
                     setVendors(updated)
-                    setForm(f => ({ ...f, vendor: q }))
+                    // 방금 만든 줄의 **id** 를 담는다(이름을 담으면 동명일 때 다시 헷갈린다)
+                    const made = res.id || updated.find(v => (v.name || '').trim() === q.trim())?.id || ''
+                    setForm(f => ({ ...f, vendor: made }))
                     toast.push(`"${q}" 거래처가 등록됐어요`)
                   } else {
                     toast.push("거래처 등록에 실패했어요", { tone: 'warn' })

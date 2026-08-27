@@ -775,8 +775,10 @@ export const api = {
   // account_code = 계정과목 코드, account_id = 입출금 계좌. 서로 다른 값이니 섞지 말 것.
   async matchInvoice(invoiceId, { txnId, amount, date, category, memo, account_code, account_id }) {
     try {
-      await req(`/invoices/${invoiceId}/matches`, { method: 'POST', body: { txn_id: txnId, amount, date, category, memo, account_code, account_id } })
-      return { ok: true }
+      /* 응답의 txn_id 를 흘려보내지 않는다 — 정산이 만든 거래에 증빙을 이어 붙이려면
+         그 id 가 필요하다(안내에서 바로 정산할 때 쓴다). */
+      const r = await req(`/invoices/${invoiceId}/matches`, { method: 'POST', body: { txn_id: txnId, amount, date, category, memo, account_code, account_id } })
+      return { ok: true, txnId: r?.txn_id || null }
     } catch (e) { return { ok: false, error: e.message } }   // 실패 사유를 화면까지 전달한다
   },
 

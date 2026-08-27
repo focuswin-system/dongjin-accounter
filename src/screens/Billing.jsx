@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday, Loading, DateInput, periodToRange, Popover, PopItem } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday, Loading, DateInput, periodToRange, Popover, PopItem, vendorLabel } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
@@ -771,12 +771,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     : vendors.filter(v => ["A", "E"].includes(v.gubu))
   /* ⚠ 값은 **id** 다. 거래처 이름도 유일하지 않다(실제로 같은 이름이 넷 있었다).
      이름으로 되찾으면 동명 중 배열 첫 번째가 붙어 청구서가 엉뚱한 거래처로 간다. */
-  ).map((v, _i, arr) => ({
-    value: v.id,
-    label: arr.filter(x => (x.name || '').trim() === (v.name || '').trim()).length > 1 && v.biz_no
-      ? `${v.name} · ${v.biz_no}` : v.name,
-    sub: v.type,
-  }))
+  ).map((v, _i, arr) => ({ value: v.id, label: vendorLabel(v, arr), sub: v.type }))
 
   /* 주문은 **선택 입력**이다. 청구서는 주문 없이도 성립한다(contract_id 는 nullable).
    *

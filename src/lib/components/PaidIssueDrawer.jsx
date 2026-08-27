@@ -47,7 +47,12 @@ export const PaidIssueDrawer = ({ target, isIssued, onClose, onDone, onIssuePaid
     : (isIssued ? typed : Math.round(typed / 1.1))
   const vat = (!variable && target.vat != null) ? target.vat
     : (isIssued ? Math.round(supply * 0.1) : typed - supply)
-  const total = supply + vat
+  /* 발행함·미입금은 **이미 있는 청구서**라, 회차 금액이 아니라 그 청구서의 남은 금액을
+     기록한다(일부 입금된 것도 이 목록에 있다). 보여주는 숫자와 실제로 기록하는 숫자가
+     다르면, 그게 바로 우리가 잡으려던 종류의 사고다. */
+  const total = (target?.state === 'unpaid' && target.remaining != null)
+    ? Number(target.remaining)
+    : supply + vat
   const submit = async () => {
     if (date > today) return toast.push("미래 날짜로는 처리할 수 없어요")
     setBusy(true)

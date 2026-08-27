@@ -5,7 +5,7 @@ const { dueDatesToGenerate, addDays, LOOKAHEAD_DAYS, pendingCycle , PAYMENT_TERM
 const { normPeriod } = require('../lib/recurPeriod')   // 목록에 없는 주기는 '매월'로 — ENUM 에 못 넣는 값이 오면 500 이 난다
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError, amountError } = require('../lib/ledger')
-const { taxTypeOfMode, recurFromSupply, recurVat } = require('../lib/vat')
+const { taxTypeOfMode, recurFromSupply, recurVat, effRecurVatMode } = require('../lib/vat')
 const { closedPeriodError } = require('../lib/closing')
 const { backfillCycles, tooManyError, addSkip, removeSkip, issuedInvoiceAt } = require('../lib/backfill')
 const { settleAcctCode } = require('../lib/acctCode')
@@ -39,9 +39,7 @@ const invTaxType = (r) => (r.contract_vat_mode
 /* 세액 계산에 쓸 vat_mode. 과세유형(invTaxType)과 '같은 소스'여야 한다.
    예전엔 세액은 규칙 vat_mode로, 과세유형은 주문 vat_mode로 정해서
    면세·영세 주문에 10% 세액이 붙은 청구서가 나갔다(고객 과청구 + 신고자료 불일치). */
-const effVatMode = (r) => (r.contract_vat_mode
-  ? (r.contract_vat_mode === 'exempt' ? 'none' : r.contract_vat_mode === 'zero' ? 'zero' : 'exclusive')
-  : r.vat_mode)
+const effVatMode = effRecurVatMode   // 규칙은 lib/vat.js 한 곳에만 둔다
 
 /* 규칙별 '다음 회차' — 목록의 '다음 예정' 열이 쓴다.
  *
@@ -228,6 +226,10 @@ router.get('/pending', async (req, res, next) => {
     const [unpaidRows] = await req.db.execute(`
       SELECT i.id AS invoice_id, i.invoice_no, i.issued_at, i.due_at, i.total_amount,
              i.supply_amount, i.vat_amount, i.status, i.recurring_id,
+             /* 남은 금액 — 일부 입금된 청구서도 이 목록에 담긴다(status <> '입금 완료').
+                총액을 보내면 서버가 잔여 초과로 막아 '입금 처리'가 늘 실패한다. */
+             i.total_amount - IFNULL((SELECT SUM(m.amount) FROM invoice_matches m
+                                       WHERE m.invoice_id = i.id), 0) AS remaining,
              r.item, r.vendor_id, r.contract_id, r.period,
              v.name AS vendor_name, c.name AS contract_name, c.contract_no
         FROM invoices i
@@ -261,6 +263,7 @@ router.get('/pending', async (req, res, next) => {
         source: 'recurring', type: '정기청구', item: u.item || '',
         amount: Number(u.supply_amount), vat: Number(u.vat_amount),
         total_amount: Number(u.total_amount),
+        remaining: Number(u.remaining),
         pay_due: u.due_at ? String(u.due_at).slice(0, 10) : null,
       })
     }

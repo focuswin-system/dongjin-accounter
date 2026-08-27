@@ -1151,11 +1151,14 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           {/* 매출 주문 = 수금 + 그 일에 들어간 원가(외주비 등) → 둘 다 등록.
               매입 주문 = 나가는 돈만 → 입금은 붙을 자리가 없다. */}
           {isPurchase ? (
-            <button className="btn primary" onClick={() => openExpense(c.name, vendor)}><Icon.Plus/> 지급 등록</button>
+            <button className="btn primary" onClick={() => openExpense(c.id, c.vendor_id)}><Icon.Plus/> 지급 등록</button>
           ) : (
             <>
-              <button className="btn" onClick={() => openExpense(c.name, vendor, { asCost: true })}><Icon.Plus/> 원가 등록</button>
-              <button className="btn primary" onClick={() => openIncome(c.name, vendor)}><Icon.Plus/> 입금 등록</button>
+              {/* 원가는 이 주문의 **발주처**가 아니라 외주업체에게 나간다 — 거래처를 미리 채우지
+                  않는다. 채우면 고객사가 매입처 자리에 앉고, 그 폼의 거래처 목록(매입처)에는
+                  없는 값이라 화면엔 비어 보이면서 저장은 그 값으로 된다. */}
+              <button className="btn" onClick={() => openExpense(c.id, null, { asCost: true })}><Icon.Plus/> 원가 등록</button>
+              <button className="btn primary" onClick={() => openIncome(c.id, c.vendor_id)}><Icon.Plus/> 입금 등록</button>
             </>
           )}
         </div>

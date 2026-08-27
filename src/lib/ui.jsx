@@ -22,6 +22,16 @@ export const fmtDate = (s) => s;
  *   `26.08.07` 을 되읽어 날짜로 쓰면 세기(1926? 2026?)를 알 수 없다.
  * ⚠ 다른 해가 섞여 보이는 자리(계약 기간·이력)에는 그대로 두는 편이 낫다.
  */
+/* 같은 이름이 둘 이상일 때만 구분 표시를 붙인다 — 늘 붙이면 목록이 읽기 어려워진다.
+   사업자번호가 제일 확실하고, 없으면 대표자·전화로 가린다. 셋 다 비어 있으면 가릴 근거가
+   없으므로 이름만 둔다(고르는 값은 id 라 저장은 정확하다 — 사람이 못 가릴 뿐이다). */
+export const vendorLabel = (v, pool) => {
+  const nm = (x) => (x.name || '').trim()
+  if (pool.filter(x => nm(x) === nm(v)).length < 2) return v.name
+  const mark = v.biz_no || v.ceo || v.phone
+  return mark ? `${v.name} · ${mark}` : v.name
+}
+
 export const fmtDateShort = (s) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ''));
   return m ? `${m[1].slice(2)}.${m[2]}.${m[3]}` : (s || '');
