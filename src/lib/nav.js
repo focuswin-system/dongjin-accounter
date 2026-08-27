@@ -214,8 +214,8 @@ export const NAV_TREE = [
         { id: "fund_status",     label: "자금 현황",       icon: Icon.Chart },
       ]},
       { label: "현황", items: [
-        { id: "mgmt_dash", label: "대시보드",   icon: Icon.Trend },
-        { id: "mgmt_ask",  label: "어시스턴트", icon: Icon.Sparkle },
+        { id: "mgmt_dash", label: "경영 대시보드", icon: Icon.Trend },
+        { id: "mgmt_ask",  label: "경영 도우미", icon: Icon.Sparkle },
       ]},
     ],
   },
@@ -508,7 +508,7 @@ export const PORTAL = [
       { id: 'mgmt_report', label: '보고서', icon: Icon.Chart, desc: '보고서·일계표·전표 목록·자금일보·자금 현황·매입 현황', groups: [
         { label: '', items: ['report', 'report_daily', 'voucher_book', 'cash_report', 'payment_run', 'purchase_status', 'fund_status'] },
       ]},
-      { id: 'mgmt_biz', label: '현황', icon: Icon.Trend, desc: '대시보드·어시스턴트', groups: [
+      { id: 'mgmt_biz', label: '현황', icon: Icon.Trend, desc: '경영 대시보드·경영 도우미', groups: [
         { label: '', items: ['mgmt_dash', 'mgmt_ask'] },
       ]},
     ],

@@ -3,6 +3,7 @@ import { Icon, Spacer } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
 import { LEAF_BY_ID } from '../lib/nav'
+import { TileBoard } from '../lib/components/TileBoard'
 
 const TODO_META = {
   ar: { icon: <Icon.In size={15}/>,   soft: 'var(--brand-soft)', color: 'var(--brand)' },
@@ -52,25 +53,17 @@ export const PortalScreen = ({ node, go, openIncome, openExpense }) => {
         </div>
       )}
 
-      {/* 그룹별 화면 타일 */}
-      {node.groups.map((g, gi) => (
-        <div key={g.label || gi} className="portal-group">
-          {g.label && <div className="portal-group-label">{g.label}</div>}
-          <div className="tile-row">
-            {g.items.map(id => {
-              const leaf = LEAF_BY_ID[id]
-              if (!leaf) return null
-              const Ic = leaf.icon
-              return (
-                <button key={id} className="leaf-tile" onClick={() => go(id)}>
-                  <div className="l-ico"><Ic size={20}/></div>
-                  <div className="l-label">{leaf.label}</div>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      ))}
+      {/* 화면 타일 — 즐겨찾기·분류 탭·정렬은 TileBoard 가 맡는다(보고서 화면과 같은 부품).
+          예전엔 그룹을 세로로 죽 쌓아 놓기만 했다. 기준정보처럼 15개가 깔리면
+          매번 눈으로 훑어 찾게 되고, 자주 쓰는 두어 개를 앞에 둘 방법이 없었다. */}
+      <TileBoard
+        storageKey={node.id}
+        groups={node.groups.map(g => ({
+          label: g.label,
+          items: (g.items || []).map(id => LEAF_BY_ID[id]).filter(Boolean)
+            .map(l => ({ id: l.id, title: l.label, icon: l.icon })),
+        }))}
+        onPick={go}/>
     </div>
   )
 }

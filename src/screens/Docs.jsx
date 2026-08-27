@@ -10,6 +10,7 @@ import { computeItems, shiftMonth, monthLabel } from './HR'
 import { api } from '../lib/api'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
+import { TileBoard } from '../lib/components/TileBoard'
 import { downloadVisibleTables } from '../lib/export'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
@@ -3214,24 +3215,14 @@ export const ReportsScreen = () => {
           볼 수 있는 보고서가 없어요. 관리자에게 문의하세요.
         </div>
       ) : (
-      <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
-        {list.map(r => (
-          <button key={r.key} className="card card-pad"
-            onClick={() => setActive(r.key)}
-            style={{ cursor: "pointer", textAlign: "left", fontFamily: "inherit", border: "1px solid var(--line)", transition: "border-color .12s, background .12s" }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--line-strong)"; e.currentTarget.style.background = "var(--surface-2)" }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--line)"; e.currentTarget.style.background = "" }}>
-            <div className="row" style={{ marginBottom: 14 }}>
-              <div style={{ width: 32, height: 32, borderRadius: 10, background: "var(--brand-soft)", color: "var(--brand)", display: "grid", placeItems: "center" }}>
-                <Icon.Chart size={16}/>
-              </div>
-              <span className="ml-auto text-muted2"><Icon.Right size={14}/></span>
-            </div>
-            <div className="fw-700" style={{ marginBottom: 4 }}>{r.title}</div>
-            <div className="text-sm text-muted">{r.descr}</div>
-          </button>
-        ))}
-      </div>
+        /* 기준정보·환경설정과 **같은 부품**을 쓴다(TileBoard). 즐겨찾기·정렬이 붙는다.
+           ⓷ 다음 단계에서 카탈로그에 분류를 넣으면 여기 groups 가 여럿이 되고
+              분류 탭이 저절로 선다 — 지금은 묶음이 하나라 탭을 안 만든다. */
+        <TileBoard
+          storageKey="report"
+          groups={[{ label: '', items: list.map(r => ({ id: r.key, title: r.title, desc: r.descr, icon: Icon.Chart })) }]}
+          onPick={(key) => setActive(key)}
+          empty="볼 수 있는 보고서가 없어요. 관리자에게 문의하세요."/>
       )}
     </div>
   )
