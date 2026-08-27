@@ -451,9 +451,10 @@ export const api = {
      — 두 축은 서로 다른 컬럼이라 후보도 다르다. */
   /* 거래를 넣기 **전에** 물어보는 곳 — 중복이거나, 청구서·정기 규칙 쪽 일이면 알려준다.
      실패해도 등록을 막지 않는다(안내일 뿐이다). */
-  async getEntryHints({ vendorId, kind, date, amount }) {
+  async getEntryHints({ vendorId, kind, date, amount, contractId }) {
     if (!vendorId) return { duplicates: [], openInvoices: [], recurring: [] }
     const p = new URLSearchParams({ vendor_id: vendorId, kind, date: date || '', amount: String(amount || 0) })
+    if (contractId) p.set('contract_id', contractId)
     try { return await req(`/transactions/entry-hints?${p}`) }
     catch { return { duplicates: [], openInvoices: [], recurring: [] } }
   },

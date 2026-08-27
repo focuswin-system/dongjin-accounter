@@ -2,13 +2,13 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const multer = require('multer')
 const xlsx = require('xlsx')
-const { futureDateError } = require('../db')
+const { futureDateError, kstToday, kstDate } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
 const { dateOrNull } = require('../lib/period')
 const { normalizeStatus, ledgerError, defaultSettledStatus, amountError } = require('../lib/ledger')
-const { restoreLastGenerated } = require('../lib/recurrence')
+const { restoreLastGenerated, dueDatesToGenerate, LOOKAHEAD_DAYS } = require('../lib/recurrence')
 const { removeUploadedFile } = require('../lib/uploads')
-const { vatFields } = require('../lib/vat')
+const { vatFields, recurFromSupply } = require('../lib/vat')
 const { closedPeriodError } = require('../lib/closing')
 const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
 const { isFundAccount } = require('../lib/categoryAccount')
@@ -150,57 +150,143 @@ router.get('/summary', async (req, res, next) => {
  * 셋 다 "돈이 들어왔다"를 적으므로, 앞의 둘을 모른 채 손으로 넣으면 매출이 두 번 잡힌다.
  * 실제로 55건이 완전 중복이었고, 날짜만 다른 이중 계상이 18건 더 있었다.
  *
+ * ── 무엇으로 짚는가 ──
+ * 거래처만 보면 안 된다. 한 거래처에 정기 규칙이 여럿이고(임차료·관리비) 미수 청구서도
+ * 여럿이다. 관계없는 것까지 딸려 나오면 매번 뜨는 안내가 되고, **매번 뜨는 안내는 읽히지
+ * 않는다** — 정작 위험한 순간에도 넘긴다. 그래서 거래처에 더해
+ *   · 주문(contract) — 폼에서 골랐다면 **다른 주문의 것은 뺀다.** 주문이 안 붙은 것은
+ *                      남긴다 — 계약이 비어 있는 청구서가 애초에 문제의 출발점이었다
+ *   · 금액           — 청구서는 남은 금액과, 정기는 회차 금액과 맞춰 본다
+ *   · 회차 날짜      — 정기는 그 규칙의 **미처리 회차**가 입력 날짜 근처일 때만
+ * 를 함께 본다.
+ *
  * 막지는 않는다 — 같은 날 같은 금액이 정말 두 번 들어오는 일이 있다. **알려주고 고르게 한다.**
- *   ① 같은 거래가 이미 있어요        → 중복일 수 있다
- *   ② 이 거래처에 안 받은 청구서가 있어요 → 거기에 입금 처리하면 미수금이 정리된다
- *   ③ 이 거래처는 정기 규칙이 있어요   → 그쪽에서 처리하면 청구서까지 함께 만들어진다
  */
+const HINT_DAYS = 10        // 날짜가 어긋난 이중 계상을 잡는 창(소급은 1일, 실제 입금은 15일)
+
 router.get('/entry-hints', async (req, res, next) => {
   try {
     const kind = req.query.kind === 'income' ? 'income' : 'expense'
     const vendorId = req.query.vendor_id || null
+    const contractId = req.query.contract_id || null
     const date = dateOrNull(req.query.date)
     const amount = Math.round(Number(req.query.amount) || 0)
-    if (!vendorId) return res.json({ duplicates: [], openInvoices: [], recurring: [] })
+    const empty = { duplicates: [], openInvoices: [], recurring: [] }
+    if (!vendorId || !date || amount <= 0) return res.json(empty)
 
-    // ① 같은 거래처·금액이 **가까운 날짜**에 이미 있나. 날짜가 하루이틀 어긋난 이중 계상이
-    //    실제로 가장 많았으므로(소급은 1일, 실제 입금은 15일) 앞뒤 열흘을 본다.
-    const duplicates = amount > 0 && date ? (await req.db.execute(
+    /* ① 같은 거래처·금액이 가까운 날짜에 이미 있나.
+     *   주문으로 좁히지 않는다 — 중복으로 들어간 거래는 애초에 주문을 안 붙인 경우가 많아,
+     *   좁히면 정작 잡아야 할 것을 놓친다. */
+    const [duplicates] = await req.db.execute(
       `SELECT t.id, t.date, t.amount, t.memo, t.category,
               (t.invoice_id IS NOT NULL) AS has_invoice, i.invoice_no
          FROM transactions t LEFT JOIN invoices i ON t.invoice_id = i.id
         WHERE t.vendor_id = ? AND t.kind = ? AND t.amount = ?
-          AND ABS(DATEDIFF(t.date, ?)) <= 10
+          AND ABS(DATEDIFF(t.date, ?)) <= ?
         ORDER BY ABS(DATEDIFF(t.date, ?)) LIMIT 5`,
-      [vendorId, kind, amount, date, date]))[0] : []
+      [vendorId, kind, amount, date, HINT_DAYS, date])
 
-    // ② 아직 안 받은(안 낸) 청구서 — 여기에 붙이면 미수금·미지급금이 정리된다
+    /* ② 아직 안 받은(안 낸) 청구서 — 여기에 붙이면 미수금·미지급금이 정리된다.
+     *
+     * 남은 금액과의 관계를 셋으로 나눈다. 관계에 따라 **할 수 있는 일이 다르기 때문**이다.
+     *   exact   남은 금액과 딱 맞음    → 여기서 바로 정산한다
+     *   partial 입력액이 남은 금액보다 적음 → 부분 입금으로 정산한다
+     *   over    입력액이 남은 금액보다 많음 → 청구서 여러 건을 한꺼번에 받은 것이다.
+     *                                        여기서 붙이면 과입금이 되므로 알리기만 한다.
+     *
+     * over 를 통째로 걸러내는 게 깔끔해 보이지만 그러면 합산 입금 때 **아무 안내도 안 뜬다** —
+     * 그게 바로 떠 있는 거래가 생기는 경로다. 짚어는 주고, 처리는 청구서 화면으로 보낸다.
+     *
+     * 딱 맞는 것이 있으면 그것만 보여준다. 가장 확실한 답이 있는데 옆에 다른 후보를
+     * 늘어놓으면 고르는 일이 오히려 어려워진다. */
     const invKind = kind === 'income' ? 'issued' : 'received'
-    const [openInvoices] = await req.db.execute(
-      `SELECT i.id, i.invoice_no, i.issued_at, i.due_at, i.total_amount, i.status,
+    const doneStatus = kind === 'income' ? '입금 완료' : '지급 완료'
+    const [invRows] = await req.db.execute(
+      `SELECT i.id, i.invoice_no, i.issued_at, i.due_at, i.total_amount, i.status, i.contract_id,
+              c.name AS contract_name,
               i.total_amount - IFNULL((SELECT SUM(m.amount) FROM invoice_matches m
                                         WHERE m.invoice_id = i.id), 0) AS remaining
          FROM invoices i
+         LEFT JOIN contracts c ON i.contract_id = c.id
         WHERE i.vendor_id = ? AND i.kind = ? AND i.status <> ?
-        ORDER BY i.issued_at DESC LIMIT 5`,
-      [vendorId, invKind, kind === 'income' ? '입금 완료' : '지급 완료'])
+          AND (? IS NULL OR i.contract_id IS NULL OR i.contract_id = ?)
+        ORDER BY i.due_at IS NULL, i.due_at, i.issued_at
+        LIMIT 20`,
+      [vendorId, invKind, doneStatus, contractId, contractId])
+    const tagged = invRows
+      .map(r => {
+        const remaining = Number(r.remaining)
+        return { ...r, remaining, match: remaining === amount ? 'exact' : remaining > amount ? 'partial' : 'over' }
+      })
+      .filter(r => r.remaining > 0)
+    const pick = ['exact', 'partial', 'over'].map(m => tagged.filter(r => r.match === m)).find(a => a.length) || []
+    const openInvoices = pick.slice(0, 3)
 
-    /* ③ 정기 규칙 — 단, **그 달 회차를 아직 처리하지 않았을 때만** 알린다.
+    /* ③ 정기 규칙 — 짚을 근거가 분명할 때만.
      *
-     * 활성 규칙만 보고 무조건 띄우면 매달 나가는 거래처마다 매번 뜬다. 매번 뜨는 안내는
-     * 읽히지 않고, 읽히지 않는 안내는 없는 것과 같다 — 정작 위험한 순간에도 넘긴다.
-     * 그 달 것이 이미 처리됐다면 이 입력은 별개일 가능성이 높으므로 잠자코 있는다. */
+     * 판정은 두 겹이다.
+     *   (가) 그 규칙에 **아직 처리 안 된 회차가 있어야** 한다. 다 처리된 규칙은 지금 할 일이
+     *        없으므로 짚어 봐야 "이미 했는데?"가 된다.
+     *   (나) 그 위에 — 금액이 고정인 규칙은 **금액이 맞아야** 하고, 금액이 매번 다른 규칙
+     *        (amount_mode='variable', 전기료 같은 것)은 금액으로 맞출 수 없으니 **회차가
+     *        입력 날짜 근처**여야 한다.
+     *
+     * 날짜만으로 판정하면 안 된다. 월 규칙은 어느 날짜에서든 열흘 안에 회차가 걸려서
+     * 사실상 매번 뜬다 — 실제로 그렇게 만들어 보니 금액이 전혀 다른 입력에도 규칙 둘이
+     * 그대로 떴다. **매번 뜨는 안내는 읽히지 않는다.**
+     *
+     * 회차 계산은 손으로 하지 않고 lib/recurrence.js 의 dueDatesToGenerate 를 쓴다 —
+     * 주기(월·분기·연)·월말 clamp·건너뛴 회차·소급 하한이 전부 거기 있고, 여기서 다시 세면
+     * 두 곳이 다른 답을 갖게 된다. */
     const recTable = kind === 'income' ? 'recurring_invoices' : 'recurring_expenses'
-    const amountCol = kind === 'income' ? 'supply_amount' : 'amount'
     const itemCol = kind === 'income' ? 'item' : 'category'
-    const ym = date ? date.slice(0, 7) : null
-    const [recurring] = ym ? (await req.db.execute(
-      `SELECT r.id, r.${itemCol} AS item, r.${amountCol} AS amount, r.day_of_month
+    const skipKind = kind === 'income' ? 'invoice' : 'expense'
+    const [recRows] = await req.db.execute(
+      `SELECT r.*, r.${itemCol} AS item, c.name AS contract_name,
+              UNIX_TIMESTAMP(r.created_at) AS created_epoch
          FROM ${recTable} r
+         LEFT JOIN contracts c ON r.contract_id = c.id
         WHERE r.vendor_id = ? AND r.active = 1
-          AND NOT EXISTS (SELECT 1 FROM transactions t
-                           WHERE t.recurring_id = r.id AND LEFT(t.date, 7) = ?)
-        LIMIT 5`, [vendorId, ym])) : [[]]
+          AND (? IS NULL OR r.contract_id IS NULL OR r.contract_id = ?)`,
+      [vendorId, contractId, contractId])
+    const [skipRows] = await req.db.execute(
+      'SELECT recurring_id, due_date FROM recurring_skips WHERE kind = ?', [skipKind])
+    const skipBy = new Map()
+    for (const s of skipRows) {
+      if (!skipBy.has(s.recurring_id)) skipBy.set(s.recurring_id, [])
+      skipBy.get(s.recurring_id).push(String(s.due_date).slice(0, 10))
+    }
+
+    const today = kstToday()
+    const recurring = []
+    for (const r of recRows) {
+      r.setup_date = kstDate(Number(r.created_epoch) * 1000)
+      r.skips = skipBy.get(r.id) || []
+      // 정기청구는 공급가액이 저장돼 있다 — 거래에 적히는 건 부가세 포함 총액이다
+      const total = kind === 'income'
+        ? Number(r.supply_amount) + recurFromSupply(Number(r.supply_amount), r.vat_mode || 'exclusive').vat
+        : Number(r.amount)
+      const variable = (r.amount_mode || 'fixed') === 'variable'
+      // 부가세 계산의 원 단위 반올림 차이까지 '다른 금액'으로 보지는 않는다
+      const amountMatch = !variable && Math.abs(total - amount) <= 10
+      // 아직 처리 안 된 회차 중 입력 날짜와 가장 가까운 것
+      const dues = dueDatesToGenerate(r, today, { horizonDays: LOOKAHEAD_DAYS })
+      if (!dues.length) continue                // (가) 할 일이 남은 규칙만
+      let nearDue = null, best = Infinity
+      for (const d of dues) {
+        const gap = Math.abs((new Date(d) - new Date(date)) / 86400000)
+        if (gap < best) { best = gap; nearDue = d }
+      }
+      const dueNear = best <= HINT_DAYS
+      if (!(variable ? dueNear : amountMatch)) continue   // (나) 근거가 없으면 잠자코 있는다
+      recurring.push({
+        id: r.id, item: r.item || '', amount: total, day_of_month: r.day_of_month,
+        contract_name: r.contract_name || null, variable,
+        due: nearDue, due_near: dueNear, amount_match: amountMatch,
+        why: dueNear && amountMatch ? 'both' : dueNear ? 'due' : 'amount',
+      })
+      if (recurring.length >= 3) break
+    }
 
     res.json({ duplicates, openInvoices, recurring })
   } catch (e) { next(e) }

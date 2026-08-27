@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Icon, fmtNum, useToast, Combobox, Drawer, MoneyInput, localToday, DateInput } from '../lib/ui'
+import { Icon, fmtNum, fmtDateShort, useToast, Combobox, Drawer, MoneyInput, localToday, DateInput } from '../lib/ui'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { withMainFirst, isMainAccount, MAIN_BADGE } from '../lib/mainAccount'
@@ -316,11 +316,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     if (v.length !== 1 || !amount || !form.date) { setHints(null); return }
     let alive = true
     const t = setTimeout(() => {
-      api.getEntryHints({ vendorId: v[0].id, kind, date: form.date, amount })
+      api.getEntryHints({ vendorId: v[0].id, kind, date: form.date, amount, contractId: isUuid(form.contract) ? form.contract : null })
         .then(h => { if (alive) setHints(h) })
     }, 350)   // 금액은 타자 중에 바뀐다 — 멈춘 뒤에 묻는다
     return () => { alive = false; clearTimeout(t) }
-  }, [form.vendor, form.amount, form.date, kind, vendors, editTxn]);
+  }, [form.vendor, form.amount, form.date, form.contract, kind, vendors, editTxn]);
 
   // 거래처가 바뀌면 '알아요'는 없던 일로 — 다른 거래처의 판단이었다
   useEffect(() => { setHintsOff(false) }, [form.vendor, kind]);
@@ -972,40 +972,77 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
               </div>
             )}
 
-            {hints.openInvoices?.length > 0 && (
-              <div className="entry-hint">
-                <Icon.Doc size={14}/>
-                <div style={{ flex: 1 }}>
-                  <b>이 거래처에 아직 {kind === 'income' ? '못 받은' : '안 낸'} 청구서가 있어요.</b>
-                  <div className="text-xs text-muted2" style={{ marginTop: 3 }}>
-                    거기에 {kind === 'income' ? '입금' : '지급'} 처리하면 미{kind === 'income' ? '수' : '지급'}금이 함께 정리돼요.
-                  </div>
-                  <div className="row gap-6" style={{ flexWrap: 'wrap', marginTop: 6 }}>
-                    {hints.openInvoices.map(iv => (
-                      <button key={iv.id} type="button" className="btn sm" disabled={busy}
-                        onClick={() => settleOnInvoice(iv)}>
-                        {iv.invoice_no} · 남은 {fmtNum(Number(iv.remaining))}원에 처리
+            {hints.openInvoices?.length > 0 && (() => {
+              /* 금액 관계는 서버가 셋 중 하나로 판정해 준다(같은 종류만 내려온다).
+                 over = 청구서 잔액보다 많이 들어온 것 — 여기서 붙이면 과입금이 되므로
+                 버튼을 주지 않고 청구서 화면으로 보낸다. */
+              const m = hints.openInvoices[0].match
+              const io = kind === 'income' ? '입금' : '지급'
+              return (
+                <div className="entry-hint">
+                  <Icon.Doc size={14}/>
+                  <div style={{ flex: 1 }}>
+                    <b>{m === 'exact'
+                      ? `금액이 딱 맞는 ${kind === 'income' ? '미수' : '미지급'} 청구서가 있어요.`
+                      : m === 'partial'
+                        ? `이 거래처에 아직 ${kind === 'income' ? '못 받은' : '안 낸'} 청구서가 있어요.`
+                        : `청구서 잔액보다 많이 ${kind === 'income' ? '들어왔어요' : '나갔어요'}.`}</b>
+                    <div className="text-xs text-muted2" style={{ marginTop: 3 }}>
+                      {m === 'over'
+                        ? `청구서 여러 건을 한꺼번에 ${io}한 것 같아요. 청구서 화면에서 나눠 처리하면 미${kind === 'income' ? '수' : '지급'}금이 정확히 맞습니다.`
+                        : `거기에 ${io} 처리하면 미${kind === 'income' ? '수' : '지급'}금이 함께 정리돼요.${m === 'partial' ? ' (부분 ' + io + '으로 들어갑니다)' : ''}`}
+                    </div>
+                    <div className="row gap-6" style={{ flexWrap: 'wrap', marginTop: 6 }}>
+                      {hints.openInvoices.map(iv => m === 'over' ? (
+                        <span key={iv.id} className="text-xs text-muted2">
+                          {iv.invoice_no} · 남은 {fmtNum(Number(iv.remaining))}원
+                          {iv.contract_name ? ` · ${iv.contract_name}` : ''}
+                        </span>
+                      ) : (
+                        <button key={iv.id} type="button" className="btn sm" disabled={busy}
+                          onClick={() => settleOnInvoice(iv)}>
+                          {iv.invoice_no} · {m === 'exact' ? '' : '남은 ' + fmtNum(Number(iv.remaining)) + '원 중 '}
+                          {fmtNum(Number(String(form.amount ?? '').replace(/[^0-9]/g, '')) || 0)}원 처리
+                        </button>
+                      ))}
+                    </div>
+                    {m === 'over' && (
+                      <button type="button" className="btn sm" style={{ marginTop: 6 }}
+                        onClick={() => { onClose?.(); location.hash = kind === 'income' ? '#billing_issued' : '#billing_received' }}>
+                        청구서 화면으로
                       </button>
-                    ))}
+                    )}
                   </div>
                 </div>
-              </div>
-            )}
+              )
+            })()}
 
             {hints.recurring?.length > 0 && (
               <div className="entry-hint">
                 <Icon.Clock size={14}/>
                 <div style={{ flex: 1 }}>
-                  <b>이 거래처는 정기 {kind === 'income' ? '입금' : '출금'} 규칙이 있어요.</b>
+                  <b>정기 {kind === 'income' ? '입금' : '출금'}에서 처리할 건 같아요.</b>
+                  {/* 무엇 때문에 짚었는지 밝힌다 — 근거를 안 보여주면 사용자는 판단할 수 없고,
+                      판단할 수 없는 안내는 그냥 넘기게 된다. */}
                   <div className="text-xs text-muted2" style={{ marginTop: 3 }}>
                     {hints.recurring.map(r => (
-                      <div key={r.id}>{r.item || '(항목 없음)'} · 매달 {r.day_of_month}일 · {fmtNum(Number(r.amount))}원</div>
+                      <div key={r.id}>
+                        {r.item || '(항목 없음)'}
+                        {r.contract_name ? ` · ${r.contract_name}` : ''}
+                        {r.variable ? ' · 금액 매번 다름' : ` · ${fmtNum(Number(r.amount))}원`}
+                        {r.due ? ` · 아직 처리 안 된 회차 ${fmtDateShort(r.due)}` : ''}
+                        <span style={{ marginLeft: 4 }}>
+                          ({r.why === 'both' ? '금액도 회차 날짜도 맞아요'
+                            : r.why === 'amount' ? '금액이 같아요'
+                            : '회차가 이 날짜 즈음이에요'})
+                        </span>
+                      </div>
                     ))}
                   </div>
                   <div className="text-xs text-muted2" style={{ marginTop: 3 }}>
                     {kind === 'income'
-                      ? '이번 달 회차가 아직이에요. 그 화면에서 처리하면 청구서까지 함께 만들어져요.'
-                      : '이번 달 회차가 아직이에요. 그 화면에서 처리하면 회차 이력에 남아 두 번 나가지 않아요.'}
+                      ? '그 화면에서 회차로 처리하면 청구서까지 함께 만들어져요.'
+                      : '그 화면에서 회차로 처리하면 회차 이력에 남아 두 번 나가지 않아요.'}
                   </div>
                   <button type="button" className="btn sm" style={{ marginTop: 6 }}
                     onClick={() => { onClose?.(); location.hash = kind === 'income' ? '#recurring_invoice' : '#recurring_expense' }}>
