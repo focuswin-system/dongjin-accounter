@@ -105,8 +105,8 @@ const MASTER_TABS = [
   { id: "account",         label: "계좌", custom: true },
   { id: "card",            label: "카드", custom: true },
   { id: "accountBalance",  label: "계좌 잔액", custom: true },
-  { id: "recurringExpense",label: "정기지급", custom: true },
-  { id: "recurringInvoice",label: "정기입금", custom: true },
+  { id: "recurringExpense",label: "정기 출금", custom: true },
+  { id: "recurringInvoice",label: "정기 입금", custom: true },
   // 조직
   { id: "department",      label: "부서", custom: true },
   { id: "position",        label: "직위", custom: true },
@@ -2860,7 +2860,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
       {page ? (
         /* 제목은 메뉴 이름과 같아야 한다 — 메뉴가 정기지급인데 제목만 '정기 지출'이면
            다른 화면에 온 것처럼 읽힌다(수시입금/수시지급에서 맞춘 것과 같은 규칙). */
-        <PageHeader title="정기지급"
+        <PageHeader title="정기 출금"
           sub={cyc.overdueCount > 0 ? `놓친 회차 ${cyc.overdueCount}건이 있어요` : undefined}
           actions={addBtn}/>
       ) : (
@@ -3248,7 +3248,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
           같은 회차를 수시입금의 '발행예정'에서도 처리할 수 있다 — 같은 API·같은 컴포넌트를 쓴다. */}
       {page ? (
         /* 제목은 메뉴 이름과 같아야 한다 — 위 정기지급과 같은 규칙 */
-        <PageHeader title="정기입금"
+        <PageHeader title="정기 입금"
           sub={cyc.overdueCount > 0 ? `놓친 회차 ${cyc.overdueCount}건이 있어요` : undefined}
           actions={recActions}/>
       ) : (

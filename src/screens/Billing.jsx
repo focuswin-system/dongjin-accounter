@@ -1224,13 +1224,13 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   /* 기본 화면.
    *
    * 예전엔 발행 모드면 무조건 'pending'으로 열었다. 그래서 **계약을 안 쓰는 회사**는
-   * 수시입금을 열 때마다 빈 화면과 "주문 상세의 '청구 일정'에서 등록하세요"를 먼저 봤다 —
+   * 수시 입금을 열 때마다 빈 화면과 "주문 상세의 '청구 일정'에서 등록하세요"를 먼저 봤다 —
    * 안 쓰기로 한 기능으로 매번 안내하고, 정작 하려던 청구서 끊기는 한 번 더 눌러야 했다.
    * 이제 청구할 게 실제로 있을 때만 그쪽으로 연다(아래 effect). */
   const [view, setView] = useState("list")   // issued: pending|list
   const [invoices, setInvoices] = useState([])
   /* 청구서 없이 오간 건 — 서류 선택에서 '계산서 아님'을 고른 것들이 여기로 온다.
-     이 화면 이름이 '수시입금/수시지급'인데 청구서만 보여주면, 여기서 등록한 건의 절반이
+     이 화면 이름이 '수시 입금/수시 출금'인데 청구서만 보여주면, 여기서 등록한 건의 절반이
      보이지 않는다("등록은 여기서 했는데 어디 갔지"). 메뉴 이름이 약속한 것을 보여준다. */
   const [plainTxns, setPlainTxns] = useState([])
   const [pending, setPending]   = useState([])
@@ -1738,10 +1738,10 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   return (
     <div className="fade-up">
       <PageHeader
-        /* 제목은 메뉴 이름과 같아야 한다 — 메뉴가 수시입금/수시지급으로 바뀌었는데
+        /* 제목은 메뉴 이름과 같아야 한다 — 메뉴가 수시 입금/수시 출금으로 바뀌었는데
            제목만 '대금 청구서'로 남아 있으면 다른 화면에 온 것처럼 읽힌다
            (HR 화면을 '급여·임금'으로 맞춘 것과 같은 이유). */
-        title={collect ? (isIssued ? "미수금" : "미지급금") : (isIssued ? "수시입금" : "수시지급")}
+        title={collect ? (isIssued ? "미수금" : "미지급금") : (isIssued ? "수시 입금" : "수시 출금")}
         actions={collect
           ? <button className="btn" onClick={isIssued ? openRefund : openReturn}>
               <Icon.Plus size={14}/> {isIssued ? "환불 등록" : "환입 등록"}

@@ -77,7 +77,11 @@ export const MiscPLScreen = ({ initialTab = 'expense', refreshTrigger, openExpen
 
   return (
     <div className="fade-up">
-      <PageHeader title={cur.title} actions={addBtn}/>
+      {/* 제목은 **메뉴 이름**이다 — 메뉴가 '경비 처리'인데 제목이 탭 이름('일반 경비')이면
+          같은 화면이 두 이름을 갖는다(nav.js·Billing.jsx 가 같은 규칙을 지킨다).
+          탭이 무엇인지는 바로 아래 칩과 이 설명줄이 말한다 —
+          `sub` 는 여태 TABS 에 적혀만 있고 화면에 안 나오던 값이다. */}
+      <PageHeader title="경비 처리" sub={cur.sub} actions={addBtn}/>
       <div className="card">
         <div className="row gap-8" style={{ padding: '16px 16px', borderBottom: '1px solid var(--line)' }}>
           {TABS.map(t => (

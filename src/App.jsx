@@ -50,11 +50,11 @@ const CRUMB_MAP = {
   ledger_expense:  ["거래내역", "지출"],
   ledger_ar:       ["거래내역", "미수금"],
   ledger_ap:       ["거래내역", "미지급금"],
-  income:          ["입출금", "입금", "수시입금", "입금"],
-  expense:         ["입출금", "출금", "수시지급", "지출"],
-  ar:              ["입출금", "입금", "수시입금", "미수금"],
-  ap:              ["입출금", "출금", "수시지급", "미지급금"],
-  billing:         ["입출금", "입금", "수시입금"],
+  income:          ["입출금", "입금", "수시 입금", "입금"],
+  expense:         ["입출금", "출금", "수시 출금", "지출"],
+  ar:              ["입출금", "입금", "수시 입금", "미수금"],
+  ap:              ["입출금", "출금", "수시 출금", "미지급금"],
+  billing:         ["입출금", "입금", "수시 입금"],
   contract:        ["계약관리", "주문 전체"],
   contract_detail: ["주문", null],
   // 포털 페이지(타일 화면) — 도메인 아래 한 칸
@@ -679,19 +679,16 @@ function AppInner({ onLogout, user }) {
                           <div key={it.id} className="nav-item nav-sub disabled" title="준비 중인 메뉴예요"
                             onClick={() => toast.push(`${it.label}은(는) 준비 중이에요`)}>
                             <Lic className="nav-ico"/>
-                            <span>{it.short || it.label}</span>
+                            <span>{it.label}</span>
                             <span className="nav-count" style={{ background: "var(--surface-3)", color: "var(--muted-2)" }}>준비중</span>
                           </div>
                         );
                       }
                       const overdue = overdueCycles[it.id] || 0;
                       return (
-                        <div key={it.id} className={`nav-item nav-sub${activeId === it.id ? " active" : ""}`} onClick={() => go(it.id)}
-                          title={it.short ? it.label : undefined}>
+                        <div key={it.id} className={`nav-item nav-sub${activeId === it.id ? " active" : ""}`} onClick={() => go(it.id)}>
                           <Lic className="nav-ico"/>
-                          {/* 사이드바에서만 짧은 이름 — 부모 섹션(입금/출금)이 뜻을 채워 준다.
-                              Ctrl+K·바로가기 독·브레드크럼은 부모가 안 보이므로 전체 이름을 쓴다. */}
-                          <span>{it.short || it.label}</span>
+                          <span>{it.label}</span>
                           {/* 놓친 회차 — '해야 하는데 안 된 것'이라 개수만 조용히 놓지 않고 눈에 걸리게 */}
                           {overdue > 0 && (
                             <span className="nav-count neg" title={`처리가 밀린 회차 ${overdue}건`}>{overdue}</span>
@@ -899,8 +896,8 @@ const FAQ_CATEGORIES = ["거래 등록", "미수금·미지급금", "주문 관�
 
 const FAQ_DATA = [
   // 거래 등록
-  { id:"f01", cat:"거래 등록",       routes:["home","ledger"],              q:"입금을 어떻게 등록하나요?",                  a:"입출금 → 입금 → 수시입금에서 '입금 등록'을 누르면 받으신 서류(세금계산서인지 아닌지)를 먼저 묻고, 그에 맞는 폼으로 안내해요. 매달 같은 곳에서 들어오는 돈은 정기입금에 규칙으로 걸어 두면 회차가 알아서 떠요.", action:{ label:"수시입금으로", route:"billing_issued" } },
-  { id:"f02", cat:"거래 등록",       routes:["home","ledger"],              q:"지출을 어떻게 등록하나요?",                  a:"입출금 → 출금 → 수시지급에서 '지급 등록'을 누르세요. 받으신 서류(세금계산서 / 카드전표·영수증 / 없음)를 먼저 고르면 그에 맞는 폼이 열려요. 매달 나가는 고정비는 정기지급에 걸어 두면 됩니다.", action:{ label:"수시지급으로", route:"billing_received" } },
+  { id:"f01", cat:"거래 등록",       routes:["home","ledger"],              q:"입금을 어떻게 등록하나요?",                  a:"입출금 → 입금 → 수시 입금에서 '입금 등록'을 누르면 받으신 서류(세금계산서인지 아닌지)를 먼저 묻고, 그에 맞는 폼으로 안내해요. 매달 같은 곳에서 들어오는 돈은 정기입금에 규칙으로 걸어 두면 회차가 알아서 떠요.", action:{ label:"수시입금으로", route:"billing_issued" } },
+  { id:"f02", cat:"거래 등록",       routes:["home","ledger"],              q:"지출을 어떻게 등록하나요?",                  a:"입출금 → 출금 → 수시 출금에서 '지급 등록'을 누르세요. 받으신 서류(세금계산서 / 카드전표·영수증 / 없음)를 먼저 고르면 그에 맞는 폼이 열려요. 매달 나가는 고정비는 정기지급에 걸어 두면 됩니다.", action:{ label:"수시지급으로", route:"billing_received" } },
   { id:"f03", cat:"거래 등록",       routes:["ledger"],                     q:"여러 건을 한꺼번에 올리고 싶어요",            a:"엑셀 업로드 기능을 이용하면 여러 거래를 한 번에 등록할 수 있어요. 거래내역 오른쪽 위 '엑셀 업로드'에서 서식을 내려받아 작성한 뒤 올려 주세요.", action:{ label:"엑셀 업로드로", route:"excel_modal" } },
   { id:"f04", cat:"거래 등록",       routes:["ledger"],                     q:"거래 내용을 수정하거나 삭제하고 싶어요",      a:"거래내역에서 그 줄을 누르면 상세가 열려요. 아래쪽 '편집'으로 고치고, '삭제'로 지울 수 있어요. 거래내역은 보는 곳이라 평소에는 여기서 고칠 일이 많지 않아요 — 잘못 들어간 게 보일 때만 쓰면 됩니다.", action:{ label:"거래내역으로", route:"ledger" } },
   { id:"f05", cat:"거래 등록",       routes:["ledger","home"],              q:"등록하려는 거래처가 목록에 없어요",           a:"거래처는 설정 화면에서 먼저 추가해야 해요. 설정 → 거래처 탭에서 새 거래처를 등록한 뒤 다시 시도해 보세요.", action:{ label:"설정으로", route:"master" } },

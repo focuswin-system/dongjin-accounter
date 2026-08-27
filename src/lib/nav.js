@@ -53,10 +53,12 @@ export const NAV_TREE = [
    * 최상위가 셋이라 사이드바 위쪽이 그만큼 무거웠고, 등록하고 확인하러 가는 흐름
    * (수시입금 → 거래내역)이 도메인을 건너뛰어야 했다.
    *
-   * 섹션 라벨을 '입금/출금'으로 두고 잎 이름을 사이드바에서만 '정기/수시'로 줄인다.
-   * ⚠ 줄이는 것은 **사이드바 표시뿐**이다(`short`). Ctrl+K·바로가기 독·브레드크럼은
-   *   부모가 안 보이므로 '정기입금/정기지급' 전체 이름을 그대로 쓴다 —
-   *   거기서 '정기'가 둘이면 어느 쪽인지 가릴 수 없다.
+   * 잎 이름은 **네 글자로 맞춘다** — 정기 입금 / 수시 입금 / 정기 출금 / 수시 출금 /
+   * 경비 처리 / 카드 대금 / 내부 이체 / 급여·임금. 길이가 들쭉날쭉하면 목록이 어지럽다.
+   * ⚠ 이름은 **한 곳으로만 둔다.** 사이드바에서만 줄이는 방식(short)을 잠깐 썼는데,
+   *   그러면 메뉴는 '정기'인데 화면 제목은 '정기지급'이 되어 같은 화면이 두 이름을 갖는다.
+   *   이 파일이 계속 경계하는 어긋남이다(Master.jsx 2861 주석도 같은 말을 한다).
+   * ⚠ 옛 이름(정기지급·수시입금…)으로 찾는 사람이 있다. LEAF_TAGS 에 그대로 남겨 둔다.
    *
    * 급여·임금이 여기 있는 이유: hr 화면은 급여대장·용역/일용 대장·미지급 퇴직금으로
    * **전부 나가는 돈**이다. 반면 근로계약·고용형태 같은 인사 데이터는 성격이 달라
@@ -71,13 +73,13 @@ export const NAV_TREE = [
     type: "domain", id: "cash_dom", label: "입출금", icon: Icon.Recv,
     sections: [
       { label: "입금", items: [
-        { id: "recurring_invoice", label: "정기입금", short: "정기", icon: Icon.Clock },
-        { id: "billing_issued",    label: "수시입금", short: "수시", icon: Icon.Receipt },
+        { id: "recurring_invoice", label: "정기 입금", icon: Icon.Clock },
+        { id: "billing_issued",    label: "수시 입금", icon: Icon.Receipt },
       ]},
       { label: "출금", items: [
-        { id: "recurring_expense", label: "정기지급", short: "정기", icon: Icon.Clock },
-        { id: "billing_received",  label: "수시지급", short: "수시", icon: Icon.Receipt },
-        { id: "misc_pl",           label: "경비",     icon: Icon.Wallet },
+        { id: "recurring_expense", label: "정기 출금", icon: Icon.Clock },
+        { id: "billing_received",  label: "수시 출금", icon: Icon.Receipt },
+        { id: "misc_pl",           label: "경비 처리", icon: Icon.Wallet },
         /* 카드 대금 지급 / 내부 계좌 이체 — 둘 다 **벌지도 쓰지도 않은 돈**이라
          * 수입도 지출도 아니다(저장은 양쪽 모두 두 줄 대체 거래, api.transfer 하나를 쓴다).
          * 그런데도 **화면을 가른다.** 회계로도 화면 뼈대로도 다른 일이기 때문이다.
@@ -90,8 +92,8 @@ export const NAV_TREE = [
          * ⚠ 수시지급(매입 청구서) 안에 넣지 않는다. 카드사는 세금계산서를 주지 않고,
          *   개별 카드 사용분은 이미 거래로 매입세액에 잡혀 있다(routes/tax.js).
          *   카드 대금을 청구서로 또 등록하면 **매입세액이 두 번 잡힌다.** */
-        { id: "card_payment",      label: "카드 대금 지급", short: "카드 대금", icon: Icon.Card },
-        { id: "transfer",          label: "내부 계좌 이체", short: "내부 이체", icon: Icon.Bank },
+        { id: "card_payment",      label: "카드 대금", icon: Icon.Card },
+        { id: "transfer",          label: "내부 이체", icon: Icon.Bank },
         { id: "hr",                label: "급여·임금", icon: Icon.Building },
       ]},
       /* 거래내역 — **조회 전용**. 등록은 위 입금·출금에서 하고 여기서는 오간 돈을 본다.
