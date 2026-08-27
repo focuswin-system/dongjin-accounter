@@ -1026,7 +1026,10 @@ const VendorPanel = ({ embedded = false }) => {
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
   const filtered = vendors.filter(v => {
-    const matchQ = !q || [v.name, v.biz_no, v.ceo, v.contact, v.phone, v.email].some(s => s?.includes(q))
+    /* 계좌번호·예금주도 검색에 건다 — 통장 내역의 예금주 이름만 들고
+       "이게 어느 거래처지"를 찾는 일이 실제로 있다. */
+    const matchQ = !q || [v.name, v.biz_no, v.ceo, v.contact, v.phone, v.email,
+      v.bank_account, v.account_holder].some(s => s?.includes(q))
     const matchG = !filterGubu || v.gubu === filterGubu
     const matchA = showInactive || v.active !== 0
     return matchQ && matchG && matchA
@@ -1111,7 +1114,7 @@ const VendorPanel = ({ embedded = false }) => {
         )}
         <div className="search" style={{ margin: 0, width: 200, padding: '6px 10px' }}>
           <Icon.Search size={14}/>
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="상호·담당자·연락처"/>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="상호·담당자·연락처·계좌"/>
         </div>
         <button className="btn excel" onClick={() => setImporting(true)}><Icon.Excel/> 엑셀 업로드</button>
         <button className="btn primary" onClick={openNew}><Icon.Plus size={14}/> 거래처 등록</button>
@@ -1128,7 +1131,13 @@ const VendorPanel = ({ embedded = false }) => {
               <th>대표자</th>
               <th>담당자</th>
               <th>전화</th>
-              <th>이메일</th>
+              {/* 이메일이 아니라 **계좌**를 보여준다.
+                  이메일은 이 목록과 검색·폼에만 있고 실제로 쓰이는 데가 없다. 계좌는 다르다 —
+                  매입 결제내역(월별 일괄이체 명단)이 은행·계좌번호·예금주를 그대로 요구하고,
+                  비어 있으면 거기서 빨간 '계좌 없음'이 뜬다. 그런데 정작 거래처를 관리하는
+                  이 목록에서는 뭐가 비었는지 볼 수 없었다 — 이체 직전에야 알게 된다.
+                  (이메일은 상세·수정 폼에 그대로 있고 검색으로도 걸린다.) */}
+              <th>계좌</th>
               <th style={{ width: 70 }}>상태</th>
               <th style={{ width: 150 }}></th>
             </tr>
@@ -1146,7 +1155,20 @@ const VendorPanel = ({ embedded = false }) => {
                 <td className="text-sm">{v.ceo || '—'}</td>
                 <td className="text-sm">{v.contact || '—'}</td>
                 <td className="text-sm">{v.phone || '—'}</td>
-                <td className="text-sm">{v.email || '—'}</td>
+                <td className="text-sm">
+                  {v.bank_account ? (
+                    <>
+                      <div className="num" style={{ fontSize: 12 }}>
+                        {v.bank_name ? `${v.bank_name} ` : ''}{v.bank_account}
+                      </div>
+                      {/* 예금주가 상호와 다르면 적는다(개인 명의 계좌가 흔하다).
+                          이 어긋남이 이체 사고의 흔한 원인이라, 같을 때는 굳이 안 적는다. */}
+                      {v.account_holder && v.account_holder !== v.name && (
+                        <div className="text-xs text-muted2">예금주 {v.account_holder}</div>
+                      )}
+                    </>
+                  ) : <span className="text-muted2">—</span>}
+                </td>
                 <td>
                   {v.active === 0
                     ? <span className="badge outline">미사용</span>
