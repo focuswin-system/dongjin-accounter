@@ -58,6 +58,9 @@ const AUDIT_RULES = [
   // ── 주문 ── 기성·마일스톤 발행은 청구서를 만든다
   { m: 'POST',   re: /^\/api\/contracts\/([^/]+)\/progress-invoice$/,   res: 'invoice',  action: 'issue',  target: 1 },
   { m: 'POST',   re: /^\/api\/contracts\/schedule\/([^/]+)\/issue$/,    res: 'invoice',  action: 'issue',  target: 1 },
+  /* 청구 일정 삭제 — 앞으로 받을 돈이 목록에서 사라지는 일이라 기록이 남아야 한다.
+     ⚠ `/:id` 규칙보다 **위**에 둔다. 아래에 두면 'milestones' 를 계약 id 로 읽는다. */
+  { m: 'DELETE', re: /^\/api\/contracts\/milestones\/([^/]+)$/,         res: 'contract', action: 'schedule_delete', target: 1 },
   { m: 'DELETE', re: /^\/api\/contracts\/([^/]+)$/,                     res: 'contract', action: 'delete', target: 1 },
 
   // ── 정기 발행 ── 놓친 회차 일괄 발행은 한 번에 여러 건을 만든다
@@ -131,6 +134,9 @@ const AUDIT_RULES = [
   { m: 'POST',   re: /^\/api\/savings\/([^/]+)\/pay-missed$/,           res: 'savings', action: 'pay_missed', target: 1 },
   { m: 'POST',   re: /^\/api\/savings\/([^/]+)\/pay$/,                  res: 'savings', action: 'pay',        target: 1 },
   { m: 'POST',   re: /^\/api\/savings\/([^/]+)\/mature$/,               res: 'savings', action: 'mature',     target: 1 },
+  /* 납입 취소 — 회차를 예정으로 되돌리고 그 지출 거래를 지운다. 돈이 오간 기록을
+     없애는 일이라 "그 납입 누가 되돌렸지"에 답할 수 있어야 한다(차입금 상환 취소와 같다). */
+  { m: 'DELETE', re: /^\/api\/savings\/([^/]+)\/pay\/([^/]+)$/,         res: 'savings', action: 'unpay',      target: 1 },
   { m: 'DELETE', re: /^\/api\/savings\/([^/]+)$/,                       res: 'savings', action: 'delete',     target: 1 },
 
   /* ── 미지급 퇴직금 ── 여기 적힌 금액은 자금 예측이 '언젠가 나갈 돈'으로 세는 실제 자금이다
@@ -164,7 +170,8 @@ const ACTION_LABELS = {
   link_contract: '거래 주문 연결·해제',
   // 입금·지급
   match: '입금 연결', match_cancel: '입금 연결 해제',
-  pay: '지급', pay_cancel: '지급 취소', pay_missed: '놓친 회차 납입',
+  pay: '지급', pay_cancel: '지급 취소', pay_missed: '놓친 회차 납입', unpay: '납입 취소',
+  schedule_delete: '청구 일정 삭제',
   process: '결의서 처리', mature: '만기 처리',
   repay: '상환', repay_missed: '놓친 회차 상환', repay_cancel: '상환 취소',
   // 대여금·투자 회수 — 차입금 상환의 거울상

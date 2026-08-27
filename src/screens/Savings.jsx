@@ -89,6 +89,21 @@ export const SavingsScreen = () => {
     setBulkTarget(null); load()
   }
 
+  /* 납입 취소 — 되돌리면 그 지출 거래도 함께 지워진다. 통장에서 나간 것으로 잡혀 있던
+     돈이 되돌아오므로, 무슨 일이 벌어지는지 확인 문구에 그대로 적는다. */
+  const doUnpay = async (s, cycle) => {
+    const ok = await confirm({
+      tone: 'neg', icon: <Icon.Warn size={22}/>,
+      title: `${cycle.seq}회차 납입 취소`,
+      body: `${s.name} ${cycle.seq}회차 ${fmtNum(cycle.amount)}원을 예정으로 되돌립니다. 함께 만들어진 지출 거래도 지워져요.`,
+      confirmLabel: '납입 취소',
+    })
+    if (!ok) return
+    const r = await api.unpaySavings(s.id, cycle.seq)
+    if (!r.ok) return toast.push(r.error || '취소에 실패했어요', { tone: 'warn' })
+    toast.push(`${cycle.seq}회차를 예정으로 되돌렸어요`); load()
+  }
+
   const doDelete = async (s) => {
     const ok = await confirm({
       tone: 'neg', icon: <Icon.Warn size={22}/>, title: `"${s.name}" 삭제`,
@@ -164,7 +179,7 @@ export const SavingsScreen = () => {
         <DataTable
           rows={rows}
           empty="등록된 적금·정기예금·보증금이 없어요. 위에서 추가하세요."
-          renderExpanded={s => (expanded === s.id ? <SavingsDetail s={s}/> : null)}
+          renderExpanded={s => (expanded === s.id ? <SavingsDetail s={s} onUnpay={doUnpay}/> : null)}
           columns={[
             { key: 'name', header: '상품', sortable: true, className: 'fw-700', render: s => (
               <span style={{ cursor: 'pointer' }} onClick={() => setExpanded(expanded === s.id ? null : s.id)}>
@@ -234,9 +249,13 @@ export const SavingsScreen = () => {
 }
 
 /** 펼침 — 납입 스케줄과 실적 */
-const SavingsDetail = ({ s }) => {
+const SavingsDetail = ({ s, onUnpay }) => {
   const paidSeq = new Set((s.payments || []).map(p => Number(p.seq)))
   const sched = s.schedule || []
+  /* 취소는 **마지막으로 납입한 회차에만** 붙인다(서버도 그 순서로만 받는다).
+     중간 회차에도 버튼을 두면 눌러보고 거절당하는 게 정상 동작이 된다 —
+     못 하는 일은 막는 게 아니라 **보여주지 않는** 편이 낫다. */
+  const lastPaid = paidSeq.size ? Math.max(...paidSeq) : null
   if (isGuarantee(s)) {
     return (
       <div style={{ padding: '14px 18px' }} className="text-sm">
@@ -306,6 +325,13 @@ const SavingsDetail = ({ s }) => {
             { key: 'state', header: '상태', width: 90, render: c => (paidSeq.has(c.seq)
               ? <span className="badge pos">납입</span>
               : <span className={`badge ${ddayTone(c.due_date)}`}>{dday(c.due_date)}</span>) },
+            /* 잘못 누른 납입을 되돌리는 유일한 길. 여태 취소가 없어서, 회차를 한 번 잘못
+               처리하면 그 지출이 장부에 영구히 남았다(거래 삭제도 상품 삭제도 막힌다). */
+            { key: 'undo', header: '', width: 78, align: 'right', render: c => (
+              c.seq === lastPaid
+                ? <button className="btn ghost sm" style={{ color: 'var(--neg-ink)' }}
+                    onClick={() => onUnpay?.(s, c)}>납입 취소</button>
+                : null) },
           ]}/>
       </div>
     </div>

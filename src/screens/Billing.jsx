@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday, Loading, DateInput, periodToRange } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday, Loading, DateInput, periodToRange, Popover, PopItem } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
@@ -1149,8 +1149,18 @@ const SubtotalChips = ({ title, note, rows, onPick, activeKey, limit = 12, moreH
 
 // ── 발행예정(대기) 청구 일정 테이블 ─────────────────────────────
 // 주문에 깔아둔 청구/지급 일정 → 아직 청구서가 안 만들어진 건. 매출은 '발행', 매입은 '등록' 관점.
-const PendingScheduleTable = ({ rows, onIssue, onPaid, isIssued = true, select }) => (
+const PendingScheduleTable = ({ rows, onIssue, onPaid, onOpenOrder, onDeleteSchedule, isIssued = true, select }) => (
   <div className="card" style={{ overflow: "hidden" }}>
+    {/* 이 줄들이 아직 청구서가 **아니라는 것**을 적어 둔다.
+        옆 탭(발행내역)은 행을 누르면 청구서 상세가 열려서, 여기서도 눌러보고
+        아무 일도 안 일어나 "고장 났나" 하는 일이 실제로 있었다. */}
+    {/* ⚠ 탭 이름을 그대로 적는다. 매입 쪽 탭은 '수취내역'이 아니라 **등록내역**이다 —
+        없는 탭을 가리키면 안내가 오히려 사람을 헤매게 한다. */}
+    <div className="text-xs text-muted2" style={{ padding: "12px 16px 0", lineHeight: 1.6 }}>
+      아직 <b>청구서가 아니에요</b> — 주문에 깔아둔 청구 일정입니다.
+      {isIssued ? " 발행 처리" : " 청구서 등록"}을 눌러야 청구서가 만들어지고, 그 뒤
+      <b>{isIssued ? " 발행내역" : " 등록내역"}</b> 탭에서 열어 보거나 지울 수 있어요.
+    </div>
     <DataTable
       rows={rows}
       rowKey={pendingKey}
@@ -1169,12 +1179,25 @@ const PendingScheduleTable = ({ rows, onIssue, onPaid, isIssued = true, select }
         { key: 'total', header: `${isIssued ? "청구금액" : "지급금액"}(VAT 포함)`, align: 'right', sortable: true,
           sortValue: pendingGross,
           render: p => <span className="num-cell fw-700">{fmtNum(pendingGross(p))}</span> },
-        { key: 'action', header: '', width: 210, render: p => (
+        { key: 'action', header: '', width: 248, render: p => (
           <div className="row gap-6">
             <button className="btn primary sm" onClick={() => onIssue(p)}>
               <Icon.Receipt size={12}/> {isIssued ? "발행 처리" : "청구서 등록"}
             </button>
             <button className="btn sm" onClick={() => onPaid(p)}>{isIssued ? "입금 처리" : "지급 처리"}</button>
+            {/* 잘못 깔아둔 일정을 **보이는 자리에서** 치우게 한다. 여태는 주문 편집으로
+                들어가 그 줄을 찾아 빼는 수밖에 없었다.
+                ⚠ 정기 회차(source='recurring…')는 여기서 지우지 않는다 — 규칙이 만들어 낸
+                   회차라 지워도 다음에 다시 선다. 그건 정기 화면의 '건너뛰기'가 할 일이다. */}
+            {p.source === 'milestone' && (
+              <Popover align="right" width={210}
+                trigger={<button className="icon-btn sm" title="더보기"><Icon.More size={15}/></button>}>
+                <PopItem icon={<Icon.Doc size={14}/>} label="주문 열기"
+                  onClick={() => onOpenOrder?.(p)}/>
+                <PopItem danger icon={<Icon.Trash size={14}/>} label="이 일정 삭제"
+                  onClick={() => onDeleteSchedule?.(p)}/>
+              </Popover>
+            )}
           </div>
         ) },
       ]}
@@ -1606,6 +1629,24 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     return api.issueSchedule(p.milestone_id, { date: p._date || p.due_date, ...opts })
   }
 
+  /* 그 일정이 어느 주문에서 왔는지 보러 간다 — 금액·일정을 통째로 손보려면 거기여야 한다. */
+  const openOrder = (p) => goRoute?.(isIssued ? 'contract_sales' : 'contract_purchase', { contractId: p.contract_id })
+
+  /* 잘못 깔아둔 청구 일정 삭제. 청구서가 이미 나간 일정은 서버가 막고,
+     왜 막혔는지(청구서를 먼저 지우면 된다)를 문장으로 돌려준다. */
+  const deleteSchedule = async (p) => {
+    const ok = await confirm({
+      tone: 'neg', icon: <Icon.Warn size={22}/>, title: '청구 일정 삭제',
+      body: `${p.vendor_name || '거래처 미지정'} · ${p.type} ${fmtNum(pendingGross(p))}원(${p.due_date || '예정일 없음'}) 일정을 지웁니다.`,
+      detail: '주문에 깔아둔 예정을 지우는 것이라 청구서·거래는 건드리지 않아요. 잘못 넣은 일정일 때만 쓰세요.',
+      confirmLabel: '일정 삭제',
+    })
+    if (!ok) return
+    const r = await api.deleteMilestone(p.milestone_id)
+    if (!r.ok) return toast.push(r.error || '삭제에 실패했어요', { tone: 'warn' })
+    toast.push('청구 일정을 지웠어요'); load()
+  }
+
   const issueSchedule = async (p, paid) => {
     // 기입금/기지급은 "돈이 어느 계좌로 오갔나"가 핵심이라, 계좌·날짜를 받는 드로어로 넘긴다.
     if (paid) { setPaidTarget(p); return }
@@ -1910,6 +1951,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
 
             <PendingScheduleTable rows={pendingFiltered} isIssued={isIssued}
               onIssue={(p) => issueSchedule(p, false)} onPaid={(p) => issueSchedule(p, true)}
+              onOpenOrder={openOrder} onDeleteSchedule={deleteSchedule}
               select={{ ids: pendChecked, onChange: setPendChecked }}/>
           </>
         : (collect || view === "list") ? <>

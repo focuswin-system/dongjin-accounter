@@ -1514,6 +1514,11 @@ export const api = {
     try { const r = await req(`/contracts/schedule/${milestoneId}/issue`, { method: 'POST', body: { paid, date, account_id } }); return { ok: true, id: r.id, invoice_no: r.invoice_no } }
     catch (e) { return { ok: false, error: e.message } }
   },
+  /** 잘못 깔아둔 청구 일정 한 줄 삭제. 청구서가 이미 나간 일정은 서버가 막는다. */
+  async deleteMilestone(id) {
+    try { await req(`/contracts/milestones/${id}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
   async updateMilestoneStatus(id, status) {
     try { await req(`/contracts/milestones/${id}/status`, { method: 'PATCH', body: { status } }); return { ok: true } } catch (e) { return { ok: false, error: e.message } }
   },
@@ -1730,6 +1735,12 @@ export const api = {
     try { const r = await req(`/savings/${id}/pay-missed`, { method: 'POST', body }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
   },
+  /** 납입 취소 — 잘못 누른 회차를 예정으로 되돌리고 그 지출 거래도 지운다.
+   *  마지막으로 처리한 회차부터만 된다(서버가 막는다). 차입금 상환 취소와 같은 규칙. */
+  async unpaySavings(id, seq) {
+    try { await req(`/savings/${id}/pay/${seq}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
   async matureSavings(id, body) {
     try { const r = await req(`/savings/${id}/mature`, { method: 'POST', body }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
@@ -1865,8 +1876,11 @@ export const api = {
   async addEmployee(data) {
     try { return await req('/employees', { method: 'POST', body: data }) } catch { return { ok: false } }
   },
+  /* 서버는 왜 안 되는지를 문장으로 준다("급여·계약·거래 이력이 있는 직원은…").
+     그걸 삼키면 화면엔 '실패했어요'만 남아, 사용자가 다음에 뭘 해야 할지 모른다. */
   async deleteEmployee(id) {
-    try { await req(`/employees/${id}`, { method: 'DELETE' }); return { ok: true } } catch { return { ok: false } }
+    try { await req(`/employees/${id}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
   },
 
   async updateEmployee(id, data) {

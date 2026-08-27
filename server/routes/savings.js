@@ -499,6 +499,59 @@ router.post('/:id/pay', async (req, res, next) => {
 })
 
 /**
+ * 회차 납입 취소 — 잘못 누른 납입을 되돌린다.
+ *
+ * ── 왜 필요한가 ──
+ * 여태 납입은 **되돌릴 길이 하나도 없었다.** 취소 API 가 없고, 그 지출 거래는
+ * 거래내역에서 삭제가 막히고(routes/transactions.js FIN_REFS — savings_payments.txn_id),
+ * 상품 자체도 "납입 실적이 있어 삭제할 수 없어요"로 막힌다. 세 길이 다 막혀,
+ * 회차를 한 번 잘못 누르면 그 돈이 장부에 영구히 남았다.
+ *
+ * 규칙은 차입금 상환 취소(routes/finance.js)와 같게 맞춘다 — 같은 성격의 일이
+ * 화면마다 다르게 굴면 사용자가 매번 다시 배운다.
+ *   · **마지막으로 납입한 회차부터** 취소한다(중간을 비우면 누계가 어긋난다)
+ *   · 마감된 달은 막는다(신고를 끝낸 달의 지출이 사라지면 장부와 신고서가 갈린다)
+ *   · 만기·해지된 상품은 막는다(만기 정산의 근거가 납입 누계다 — 먼저 만기를 되돌려야 한다)
+ *   · 회차 행은 **지우지 않고 예정으로 되돌린다.** 지우면 그 회차가 통째로 사라져
+ *     자금 예측에서 앞으로 나갈 돈이 빠진다(예정도 같은 표에 산다).
+ */
+router.delete('/:id/pay/:seq', async (req, res, next) => {
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [[s]] = await conn.execute('SELECT * FROM savings WHERE id = ? FOR UPDATE', [req.params.id])
+    if (!s) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    if (s.status !== 'active') {
+      await rollbackQuietly(conn)
+      return res.status(409).json({ error: '만기·해지된 상품이에요. 만기를 먼저 되돌린 뒤 납입을 취소해주세요.' })
+    }
+    const [[row]] = await conn.execute(
+      'SELECT * FROM savings_payments WHERE savings_id = ? AND seq = ? FOR UPDATE',
+      [req.params.id, req.params.seq])
+    if (!row) { await rollbackQuietly(conn); return res.status(404).json({ error: '그 회차를 찾을 수 없어요' }) }
+    if (!row.paid_date) { await rollbackQuietly(conn); return res.status(409).json({ error: '아직 납입하지 않은 회차예요' }) }
+
+    const [[{ maxSeq }]] = await conn.execute(
+      'SELECT MAX(seq) AS maxSeq FROM savings_payments WHERE savings_id = ? AND paid_date IS NOT NULL',
+      [req.params.id])
+    if (Number(maxSeq) !== Number(req.params.seq)) {
+      await rollbackQuietly(conn)
+      return res.status(409).json({ error: `마지막으로 처리한 회차(${maxSeq}회차)부터 취소해주세요` })
+    }
+    const ce = await closedPeriodError(conn, row.paid_date)
+    if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
+
+    if (row.txn_id) await conn.execute('DELETE FROM transactions WHERE id = ?', [row.txn_id])
+    await conn.execute(
+      'UPDATE savings_payments SET paid_date = NULL, txn_id = NULL WHERE savings_id = ? AND seq = ?',
+      [req.params.id, req.params.seq])
+    await conn.commit()
+    res.json({ ok: true, seq: Number(req.params.seq) })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
+})
+
+/**
  * 놓친 납입 일괄 처리 — 예정일이 지났는데 처리하지 않은 회차를 순서대로 모두 반영한다.
  * 마감된 달이 하나라도 섞이면 **전체를 거절한다**(대출과 같은 규칙).
  * 순서를 건너뛸 수 없으므로 일부만 처리하면 남은 회차를 영영 못 넣게 된다.

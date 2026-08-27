@@ -376,6 +376,34 @@ router.patch('/milestones/:id/status', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/**
+ * 청구 일정 한 줄 삭제 — 잘못 깔아둔 일정을 지운다.
+ *
+ * 여태 일정을 지우려면 **주문(계약)을 수정**해 그 줄을 빼는 수밖에 없었다. 그런데 일정이
+ * 눈에 띄는 곳은 '발행예정' 목록이라, 거기서 잘못된 줄을 보고도 계약 편집으로 들어가
+ * 다시 찾아야 했다. 잘못이 보이는 자리에서 지울 수 있어야 한다.
+ *
+ * ⚠ 이미 청구서가 나간 일정은 막는다. 지우면 청구서 쪽 `milestone` 연결이 끊겨
+ *   "이 청구서가 어느 일정 것인지"를 잃고, 청구서를 지워도 일정이 '예정'으로
+ *   돌아올 자리가 없어진다(routes/invoices.js 가 그 복구를 한다).
+ * 마감 검사는 걸지 않는다 — 일정은 예정일 뿐 돈이 오간 기록이 아니라서
+ * 지워도 신고를 끝낸 달의 숫자가 변하지 않는다.
+ */
+router.delete('/milestones/:id', async (req, res, next) => {
+  try {
+    const [[m]] = await req.db.execute(
+      'SELECT id, invoice_id, status, type, due_date FROM milestones WHERE id = ?', [req.params.id])
+    if (!m) return res.status(404).json({ error: '그 일정을 찾을 수 없어요' })
+    if (m.invoice_id) {
+      return res.status(409).json({
+        error: `이미 청구서가 발행된 일정이에요(${m.type}${m.due_date ? ` · ${m.due_date}` : ''}). 청구서를 먼저 지우면 이 일정이 '예정'으로 돌아옵니다.`,
+      })
+    }
+    await req.db.execute('DELETE FROM milestones WHERE id = ?', [req.params.id])
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
 // 청구 일정 → 청구서 발행 (+선택적 기입금). 원자적: 청구서·(기입금 시)거래·매칭·일정 상태를 한 트랜잭션에서 처리.
 // 거래처 gubu로 매출(issued)/매입(received) 자동 판별. 이미 발행된 일정은 409로 거부(중복 방지).
 router.post('/schedule/:milestoneId/issue', async (req, res, next) => {

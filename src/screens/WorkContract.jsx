@@ -451,7 +451,32 @@ const LaborDetailDrawer = ({ id, onClose, onChanged, onNewContract }) => {
     if (!ok) return
     const res = await api.deleteWorkContract(c.id)
     if (!res?.ok) { toast.push(res?.error || '삭제에 실패했어요', { tone: 'warn' }); return }
-    toast.push('계약을 지웠어요'); onChanged?.(); onClose()
+    toast.push('계약을 지웠어요')
+
+    /* 계약을 지워도 **직원은 남는다.** 직원은 이 화면에서 계약을 만들 때 함께 생기는데
+       직원만 지우는 화면이 어디에도 없어서, 이름을 잘못 친 사람이 급여대장 대상·거래
+       등록의 직원 선택·법인카드 사용자 목록에 영영 남아 있었다.
+       그래서 **마지막 계약이 사라진 그 자리에서** 정리할지 묻는다 — 실수가 드러나는
+       순간이 치우기 가장 쉬운 때다. 급여·거래 이력이 있으면 서버(FK)가 막는다. */
+    /* ⚠ `history` 를 아직 못 읽었으면(빈 배열) 묻지 않는다. 안 그러면 계약이 더 있는 사람에게도
+       "남은 계약이 없어요"라고 말하게 된다 — 삭제는 서버가 막아 주지만, 틀린 말을 먼저 하는 셈이다.
+       이 목록은 열려 있는 계약 자신을 반드시 포함하므로, 비어 있으면 '아직 못 읽음'이다. */
+    const remaining = history.filter(x => x.id !== c.id)
+    if (history.length > 0 && remaining.length === 0) {
+      const alsoEmp = await confirm({
+        tone: 'neg', icon: <Icon.Warn size={22}/>,
+        title: `«${c.employee_name}» 직원 명단에서도 지울까요?`,
+        body: '남은 계약이 없어요. 이름을 잘못 등록한 경우라면 명단에서도 지우는 게 깔끔합니다.',
+        detail: '급여·거래 이력이 있으면 지워지지 않아요(그때는 퇴사 처리를 쓰세요). 실제로 일했던 사람이라면 명단에 두세요.',
+        confirmLabel: '직원도 삭제',
+      })
+      if (alsoEmp) {
+        const r2 = await api.deleteEmployee(c.employee_id)
+        if (r2?.ok) toast.push('직원 명단에서도 지웠어요')
+        else toast.push(r2?.error || '직원은 지우지 못했어요', { tone: 'warn' })
+      }
+    }
+    onChanged?.(); onClose()
   }
 
   return (
