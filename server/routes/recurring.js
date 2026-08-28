@@ -12,6 +12,7 @@ const { recurFromTotal, modeFromCatVat } = require('../lib/vat')
    recurring-invoices.js 에도 있었다. 재발 방지는 scripts/check-isolation.js [13]. */
 const { settleAcctCode } = require('../lib/acctCode')
 const { recurHistory } = require('../lib/recurHistory')
+const { auditRecurRules } = require('../lib/recurAudit')
 const { acctCodeByCategoryName } = require('../lib/categoryAccount')
 const { backfillCycles, tooManyError, addSkip, removeSkip, issuedInvoiceAt } = require('../lib/backfill')
 /* 기지급 처리는 '거래를 만드는 일'이 아니라 '이미 나간 지급을 찾아 붙이는 일'이 먼저다.
@@ -162,6 +163,25 @@ router.patch('/:id/toggle', async (req, res, next) => {
 
 // 지급 예정 회차(아직 매입 청구서 미생성) — 매입 대금청구서 '지급 예정' 목록에 주문 지급일정과 함께 뜬다.
 // 매출의 정기청구 pending과 완전 대칭. 경리가 매입 청구서 메뉴 한 곳에서 이번 달 낼 걸 다 본다.
+/* 정기 점검 — 매출 쪽과 같은 규칙(lib/recurAudit.js).
+   ⚠ '/:id' 보다 **앞에** 둔다 — 뒤에 두면 audit 이 id 로 먹힌다. */
+router.get('/audit', async (req, res, next) => {
+  try {
+    const [rules] = await req.db.execute(`
+      SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch,
+             v.name AS vendor_name, c.name AS contract_name
+        FROM recurring_expenses r
+        LEFT JOIN vendors v ON r.vendor_id = v.id
+        LEFT JOIN contracts c ON r.contract_id = c.id
+       ORDER BY r.day_of_month`)
+    const today = kstToday()
+    for (const r of rules) {
+      r.setup_date = r.created_epoch != null ? kstDate(Number(r.created_epoch) * 1000) : r.setup_date
+    }
+    res.json(await auditRecurRules(req.db, 'expense', rules, today))
+  } catch (e) { next(e) }
+})
+
 router.get('/pending', async (req, res, next) => {
   try {
     const [recs] = await req.db.execute(`

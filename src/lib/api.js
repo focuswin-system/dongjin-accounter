@@ -1429,7 +1429,20 @@ export const api = {
   /* ─── 정기 회차 소급 등록 ───────────────────────────────────
      등록일 이전 회차는 평소 경로로는 만들어지지 않는다(소급 홍수 방지).
      사용자가 기간을 명시적으로 열었을 때만, 미리보기 → 선택 → 일괄 생성. kind: 'invoice' | 'expense' */
-  _backfillBase(kind) { return kind === 'expense' ? '/recurring-expenses' : '/recurring-invoices' },
+  /* ⚠ 화면이 넘기는 값은 'purchase'/'sales' 다(BackfillWizard·RecurHistoryDrawer 가 그 말을 쓴다).
+     여기서 'expense' 만 보고 있어서 **매입 소급이 매출 라우터로 갔다** — 규칙 id 가
+     recurring_invoices 에 없으니 '정기청구를 찾을 수 없어요' 로 떨어진다.
+     두 이름 다 받는다. 화면 말(purchase)과 서버 말(expense)이 다른 게 원인이라,
+     한쪽만 고치면 나중에 반대편에서 같은 실수가 난다. */
+  _backfillBase(kind) {
+    return (kind === 'expense' || kind === 'purchase') ? '/recurring-expenses' : '/recurring-invoices'
+  },
+
+  /** 정기 점검 — 전 규칙을 한 번에 훑어 이상만 돌려준다(하나씩 열어 보지 않아도 되게) */
+  async recurAudit(kind) {
+    try { return { ok: true, ...(await req(`${this._backfillBase(kind)}/audit`)) } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
 
   async backfillPreview(kind, id, { from, to }) {
     try { return { ok: true, ...(await req(`${this._backfillBase(kind)}/${id}/backfill/preview`, { method: 'POST', body: { from, to } })) } }

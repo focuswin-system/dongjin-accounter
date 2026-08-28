@@ -10,6 +10,7 @@ const { closedPeriodError } = require('../lib/closing')
 const { backfillCycles, tooManyError, addSkip, removeSkip, issuedInvoiceAt } = require('../lib/backfill')
 const { settleAcctCode } = require('../lib/acctCode')
 const { recurHistory } = require('../lib/recurHistory')
+const { auditRecurRules } = require('../lib/recurAudit')
 /* 기입금 처리는 '거래를 만드는 일'이 아니라 '이미 있는 입금을 찾아 붙이는 일'이 먼저다.
    규칙은 lib/settleTxn.js 한 곳에만 둔다(발행·소급·매입이 같은 규칙을 쓴다). */
 const { openTxnCandidates, settleInvoiceTxn } = require('../lib/settleTxn')
@@ -160,6 +161,25 @@ router.patch('/:id/toggle', async (req, res, next) => {
 
 // 청구 예정 회차(아직 청구서가 안 만들어진 회차) — 대금청구 '발행 예정' 목록에 주문 청구일정과 함께 뜬다.
 // 경리가 청구서 메뉴 한 곳만 열면 이번 달 청구할 게 다 보이게 하기 위함.
+/* 정기 점검 — 전 규칙을 한 번에 훑어 이상만 남긴다.
+   ⚠ '/:id' 보다 **앞에** 둔다(뒤에 두면 audit 이 id 로 먹힌다 — check:isolation [14]). */
+router.get('/audit', async (req, res, next) => {
+  try {
+    const [rules] = await req.db.execute(`
+      SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch,
+             v.name AS vendor_name, c.name AS contract_name
+        FROM recurring_invoices r
+        LEFT JOIN vendors v ON r.vendor_id = v.id
+        LEFT JOIN contracts c ON r.contract_id = c.id
+       ORDER BY r.day_of_month`)
+    const today = kstToday()
+    for (const r of rules) {
+      r.setup_date = r.created_epoch != null ? kstDate(Number(r.created_epoch) * 1000) : r.setup_date
+    }
+    res.json(await auditRecurRules(req.db, 'invoice', rules, today))
+  } catch (e) { next(e) }
+})
+
 router.get('/pending', async (req, res, next) => {
   try {
     const [recs] = await req.db.execute(`

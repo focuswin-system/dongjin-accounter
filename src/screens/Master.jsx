@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, StatusBadge, Drawer, Combobox, MoneyInput, Loading, DateInput } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
+import { RecurAuditDrawer } from '../lib/components/RecurAuditDrawer'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { ImportWizard } from '../lib/components/ImportWizard'
@@ -2815,6 +2816,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [backfill, setBackfill] = useState(null)   // 소급 등록 마법사 대상 규칙
+  const [auditOpen, setAuditOpen] = useState(false) // 정기 점검 — 전 규칙 한 번에 훑기
   // 회차 이력 — 보는 것과 고치는 것을 가른다(예전엔 이 표에서 갈 수 있는 곳이 수정 폼뿐이었다)
   const [history, setHistory] = useState(null)
   const [rows, setRows] = useState([])
@@ -2873,9 +2875,11 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
   const ruleRows = filterRules(rows, ruleFilter).filter(r => matchRule(r, q))
   const cycSummary = cycleSummaryByRule(cyc.cycles)
   const addBtn = (
-    <button className="btn primary" onClick={openNew}>
-      <Icon.Plus size={14}/> 등록
-    </button>
+    <div className="row gap-8">
+      {/* 규칙을 하나씩 열어 확인하던 일을 한 번에 — 이상만 모아 보여준다 */}
+      <button className="btn" onClick={() => setAuditOpen(true)}><Icon.Check size={14}/> 점검</button>
+      <button className="btn primary" onClick={openNew}><Icon.Plus size={14}/> 등록</button>
+    </div>
   )
 
   return (
@@ -2988,6 +2992,9 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
       {/* 변동형 회차의 금액 입력 — 규칙 금액은 예상액이라 발행 전에 실제 금액을 받는다 */}
       <CycleAmountDrawer {...cyc.amountProps}/>
       {/* 도입 이전 회차 넣기 — 등록일 하한 때문에 평소 경로로는 안 만들어진다 */}
+      <RecurAuditDrawer open={auditOpen} kind="purchase" onClose={() => setAuditOpen(false)}
+        onFix={id => { const r = rows.find(x => x.id === id); setAuditOpen(false); if (r) setBackfill({ id: r.id, label: ruleLabel(r) }) }}
+        onHistory={id => { const r = rows.find(x => x.id === id); setAuditOpen(false); if (r) setHistory({ id: r.id, label: r.vendor, sub: ruleLabel(r) }) }}/>
       <BackfillWizard open={!!backfill} rule={backfill} kind="purchase"
         onClose={() => setBackfill(null)} onDone={() => { load(); cyc.reload() }}/>
       {/* 회차 이력 — 수정은 이 안에서 한 번 더 짚고 들어간다(보려다 고치는 일을 막는다) */}
@@ -3202,6 +3209,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [backfill, setBackfill] = useState(null)   // 소급 등록 마법사 대상 규칙
+  const [auditOpen, setAuditOpen] = useState(false) // 정기 점검 — 전 규칙 한 번에 훑기
   // 회차 이력 — 보는 것과 고치는 것을 가른다(예전엔 이 표에서 갈 수 있는 곳이 수정 폼뿐이었다)
   const [history, setHistory] = useState(null)
   const [rows, setRows] = useState([])
@@ -3261,9 +3269,10 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
   const ruleRows = filterRules(rows, ruleFilter).filter(r => matchRule(r, q))
   const cycSummary = cycleSummaryByRule(cyc.cycles)
   const recActions = (
-    <button className="btn primary" onClick={openNew}>
-      <Icon.Plus size={14}/> 등록
-    </button>
+    <div className="row gap-8">
+      <button className="btn" onClick={() => setAuditOpen(true)}><Icon.Check size={14}/> 점검</button>
+      <button className="btn primary" onClick={openNew}><Icon.Plus size={14}/> 등록</button>
+    </div>
   )
 
   return (
@@ -3377,6 +3386,9 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
       {/* 변동형 회차의 금액 입력 — 규칙 금액은 예상액이라 발행 전에 실제 금액을 받는다 */}
       <CycleAmountDrawer {...cyc.amountProps}/>
       {/* 도입 이전 회차 넣기 — 등록일 하한 때문에 평소 경로로는 안 만들어진다 */}
+      <RecurAuditDrawer open={auditOpen} kind="sales" onClose={() => setAuditOpen(false)}
+        onFix={id => { const r = rows.find(x => x.id === id); setAuditOpen(false); if (r) setBackfill({ id: r.id, label: ruleLabel(r) }) }}
+        onHistory={id => { const r = rows.find(x => x.id === id); setAuditOpen(false); if (r) setHistory({ id: r.id, label: r.vendor, sub: ruleLabel(r) }) }}/>
       <BackfillWizard open={!!backfill} rule={backfill} kind="sales"
         onClose={() => setBackfill(null)} onDone={() => { load(); cyc.reload() }}/>
       {/* 회차 이력 — 수정은 이 안에서 한 번 더 짚고 들어간다(보려다 고치는 일을 막는다) */}
