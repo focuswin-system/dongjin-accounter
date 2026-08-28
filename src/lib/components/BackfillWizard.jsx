@@ -34,12 +34,15 @@ export const BackfillWizard = ({ open, onClose, rule, kind, onDone }) => {
     setPreview(res)
     /* 기본값: 만들 수 있는 것만 켠다(이미 있거나 마감된 달은 끔).
        과거 회차는 대부분 이미 돈이 오갔으므로 '기정산'도 기본으로 켠다 — 계획서의 규칙. */
+    /* 통장에서 이미 올라온 거래가 딱 하나면 그것을 기본으로 고른다. 여럿이면 고르지 않는다 —
+       어느 달 것인지는 사람이 안다. 아무것도 안 고르고 저장하면 서버가 멈춰 세운다. */
     setRows(res.cycles.map(c => ({
       ...c,
       checked: !c.exists && !c.closed,
       paid: true,
       supply: c.supply_amount,
       vat: c.vat_amount,
+      txnId: (c.open_txns || []).length === 1 ? c.open_txns[0].id : '',
     })))
     setResult(null)
   }
@@ -64,6 +67,7 @@ export const BackfillWizard = ({ open, onClose, rule, kind, onDone }) => {
   const doCommit = async () => {
     if (picked.length === 0) return toast.push('만들 회차를 선택해주세요', { tone: 'warn' })
     const paidN = picked.filter(r => r.paid).length
+    const reuseN = picked.filter(r => r.paid && r.txnId).length   // 새로 만들지 않고 붙는 회차
     const ok = await confirm({
       title: `${picked.length}건을 만들까요?`,
       body: (
@@ -73,8 +77,21 @@ export const BackfillWizard = ({ open, onClose, rule, kind, onDone }) => {
           </div>
           <div>
             {sales ? '청구서' : '매입 청구서'} {picked.length}건이 만들어지고,
-            그중 <b>{paidN}건</b>은 {sales ? '입금' : '지급'}까지 처리돼 계좌 잔액에 반영됩니다.
+            그중 <b>{paidN}건</b>은 {sales ? '입금' : '지급'}까지 처리됩니다.
           </div>
+          {/* 새 거래를 만드는 것과 이미 있는 거래에 붙는 것은 계좌 잔액에 미치는 영향이 다르다.
+              붙는 건 잔액이 그대로고(이미 반영돼 있다), 만드는 건 그만큼 움직인다. */}
+          {reuseN > 0 && (
+            <div style={{ marginTop: 4 }}>
+              이 중 <b>{reuseN}건</b>은 이미 장부에 있는 {sales ? '입금' : '지급'}에 <b>붙습니다</b> —
+              거래를 새로 만들지 않아요(잔액은 그대로).
+            </div>
+          )}
+          {paidN - reuseN > 0 && (
+            <div style={{ marginTop: 4 }}>
+              나머지 <b>{paidN - reuseN}건</b>은 {sales ? '입금' : '지급'} 거래를 새로 만들어 계좌 잔액에 반영합니다.
+            </div>
+          )}
           <div style={{ marginTop: 6 }}>만든 뒤 이 화면에서 한 번에 되돌릴 수 있어요.</div>
         </>
       ),
@@ -88,6 +105,8 @@ export const BackfillWizard = ({ open, onClose, rule, kind, onDone }) => {
       vat_amount: Number(r.vat) || 0,
       total_amount: (Number(r.supply) || 0) + (Number(r.vat) || 0),
       paid: !!r.paid,
+      txn_id: r.paid ? (r.txnId || null) : null,   // 이미 있는 거래에 붙일 때만 보낸다
+      make_new: !!(r.paid && !r.txnId && r.makeNew),  // 후보를 보고도 새로 만들기를 고른 경우
     })))
     setBusy(false)
     if (!res.ok) return toast.push(res.error || '등록에 실패했어요', { tone: 'warn' })
@@ -100,7 +119,8 @@ export const BackfillWizard = ({ open, onClose, rule, kind, onDone }) => {
     const ok = await confirm({
       tone: 'neg',
       title: '방금 만든 것을 되돌릴까요?',
-      body: `${result.count}건의 ${sales ? '청구서' : '매입 청구서'}와 함께 만들어진 거래가 지워집니다. 복구할 수 없어요.`,
+      body: `${result.count}건의 ${sales ? '청구서' : '매입 청구서'}와 여기서 만든 거래가 지워집니다.`
+        + ` 원래 장부에 있던 ${sales ? '입금' : '지급'}은 지우지 않고 연결만 풀어요. 복구할 수 없어요.`,
       confirmLabel: '되돌리기',
     })
     if (!ok) return
@@ -227,7 +247,31 @@ export const BackfillWizard = ({ open, onClose, rule, kind, onDone }) => {
                               </label>
                             </td>
                             <td className="text-xs text-muted2">
-                              {r.closed ? '마감된 달' : r.exists ? `이미 있음 ${r.existing_no || ''}` : ''}
+                              {r.closed ? '마감된 달'
+                                : r.exists ? `이미 있음 ${r.existing_no || ''}`
+                                : !r.paid || (r.open_txns || []).length === 0 ? ''
+                                /* 통장에서 이미 올라온 거래가 있으면 새로 만들지 않고 그것에 붙인다.
+                                   하나면 그대로 알려주고, 여럿이면 어느 것인지 사람이 고른다. */
+                                : (r.open_txns || []).length === 1 ? (
+                                  <span style={{ color: 'var(--pos-ink)' }}>
+                                    이미 있는 {sales ? '입금' : '지급'} {fmtDateShort(r.open_txns[0].date)}에 붙여요
+                                  </span>
+                                ) : (
+                                  <div className="col gap-4">
+                                    <span>같은 금액 {r.open_txns.length}건 중 고르세요</span>
+                                    <div className="row gap-4" style={{ flexWrap: 'wrap' }}>
+                                      {r.open_txns.map(t => (
+                                        <button key={t.id} type="button"
+                                          className={`chip${r.txnId === t.id ? ' active' : ''}`}
+                                          onClick={() => upd(i, { txnId: t.id, makeNew: false })}>
+                                          {fmtDateShort(t.date)}
+                                        </button>
+                                      ))}
+                                      <button type="button" className={`chip${!r.txnId && r.makeNew ? ' active' : ''}`}
+                                        onClick={() => upd(i, { txnId: '', makeNew: true })}>새로 만들기</button>
+                                    </div>
+                                  </div>
+                                )}
                             </td>
                           </tr>
                         )

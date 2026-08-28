@@ -14,6 +14,9 @@ const { settleAcctCode } = require('../lib/acctCode')
 const { recurHistory } = require('../lib/recurHistory')
 const { acctCodeByCategoryName } = require('../lib/categoryAccount')
 const { backfillCycles, tooManyError, addSkip, removeSkip, issuedInvoiceAt } = require('../lib/backfill')
+/* 기지급 처리는 '거래를 만드는 일'이 아니라 '이미 나간 지급을 찾아 붙이는 일'이 먼저다.
+   규칙은 lib/settleTxn.js 한 곳 — 매출(recurring-invoices.js)과 같은 규칙을 쓴다. */
+const { openTxnCandidates, settleInvoiceTxn } = require('../lib/settleTxn')
 
 const router = Router()
 
@@ -225,7 +228,7 @@ const amountModeFor = (v, cur) => (v == null || v === '' ? (cur || 'fixed') : am
  * 두 벌로 두면 한쪽만 고쳐져서 금액·상태가 조용히 달라진다.
  * 호출 전 검사(회차 순서·미래일자·마감)는 라우트가 한다.
  */
-async function createExpenseInvoice(conn, r, target, { paid = false, accountId = null, amount = null } = {}) {
+async function createExpenseInvoice(conn, r, target, { paid = false, accountId = null, amount = null, txnId: pickedTxnId = null } = {}) {
   /* 변동형은 **등록할 때 실제 금액을 받는다**(amount). 규칙의 금액은 예상액일 뿐이라
      그대로 쓰면 틀린 금액이 미지급금으로 잡힌다. 정액형에서도 보내면 그것이 이긴다. */
   const base = (amount != null && amount !== '') ? Math.round(Number(amount) || 0) : r.amount
@@ -255,22 +258,21 @@ async function createExpenseInvoice(conn, r, target, { paid = false, accountId =
      target, cashDateOf(target, r.pay_term, r.pay_day), paid ? '지급 완료' : '지급 대기', acctId, r.id,
      `정기지출 · ${r.category || ''}`.trim(), tax_type, r.category || null, invAcctCode]
   )
+  /* 기지급 처리: 통장에서 이미 나간 지급이 있으면 **그것에 붙인다.** 없을 때만 만든다.
+     예전엔 무조건 만들어서, 임포트한 출금과 나란히 서 같은 돈이 두 번 잡혔다. */
+  let settled = null
   if (paid) {
-    const lerr = ledgerError({ kind: 'expense', account_id: acctId, status: '지급완료' })
-    if (lerr) return { error: lerr }
-    const txnId = randomUUID()
-    // 주문에 걸린 정기지출이면 그 주문(매입)에 귀속(contract_id)
-    await conn.execute(
-      `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, account_code, category, amount, date, method, status, doc_no, invoice_id, memo)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [txnId, 'expense', r.vendor_id || null, r.contract_id || null, acctId,
-       settleAcctCode('expense'),   // 외상매입금 — 없으면 일계표 차·대변이 안 맞는다
-       r.category || '대금 지급', total, target, '계좌이체', '지급완료', '', invId, `청구서 ${invoice_no} 정산`])
-    await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,1)',
-      [randomUUID(), invId, txnId, total])
+    settled = await settleInvoiceTxn(conn, {
+      invoiceId: invId, invoiceNo: invoice_no, kind: 'expense',
+      vendorId: r.vendor_id, contractId: r.contract_id,   // 주문에 걸린 정기지출이면 그 주문(매입)에 귀속
+      amount: total, date: target, acctId,
+      acctCode: settleAcctCode('expense'),   // 외상매입금 — 없으면 일계표 차·대변이 안 맞는다
+      category: r.category || '대금 지급', txnId: pickedTxnId, forceNew,
+    })
+    if (settled.error) return { error: settled.error, candidates: settled.candidates }
   }
   await conn.execute('UPDATE recurring_expenses SET last_generated = ? WHERE id = ?', [target, r.id])
-  return { invId, invoice_no, total }
+  return { invId, invoice_no, total, txnId: settled ? settled.txnId : null, reused: !!(settled && settled.reused) }
 }
 
 /**
@@ -368,10 +370,15 @@ router.post('/:id/issue', async (req, res, next) => {
       await rollbackQuietly(conn)
       return res.status(400).json({ error: '금액이 매번 다른 정기지급이에요. 이번 회차 금액을 입력해주세요.' })
     }
-    const made = await createExpenseInvoice(conn, r, target, { paid, accountId: account_id, amount: req.body.amount })
-    if (made.error) { await rollbackQuietly(conn); return res.status(400).json({ error: made.error }) }
+    const made = await createExpenseInvoice(conn, r, target,
+      { paid, accountId: account_id, amount: req.body.amount, txnId: req.body.txn_id || null })
+    if (made.error) {
+      await rollbackQuietly(conn)
+      // 후보가 여럿이라 못 고른 경우는 400 이 아니라 409 — 사용자가 골라 다시 보내야 한다
+      return res.status(made.candidates ? 409 : 400).json({ error: made.error, candidates: made.candidates })
+    }
     await conn.commit()
-    res.json({ ok: true, id: made.invId, invoice_no: made.invoice_no })
+    res.json({ ok: true, id: made.invId, invoice_no: made.invoice_no, reused_txn: !!made.reused })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
@@ -431,10 +438,14 @@ router.post('/:id/backfill/preview', async (req, res, next) => {
       const [[dup]] = await req.db.execute(
         'SELECT id, invoice_no FROM invoices WHERE recurring_id = ? AND issued_at = ? LIMIT 1', [r.id, due])
       const closed = await closedPeriodError(req.db, due)
+      /* 이 회차의 돈이 통장에서 이미 나갔는가. 있으면 새 거래를 만들지 않고 붙인다. */
+      const openTxns = (dup || closed) ? [] : await openTxnCandidates(req.db, {
+        kind: 'expense', vendorId: r.vendor_id, amount: supply + vat, date: due })
       cycles.push({
         due_date: due, supply_amount: supply, vat_amount: vat, total_amount: supply + vat,
         exists: !!dup, existing_no: dup ? dup.invoice_no : null,
         closed: !!closed, closed_reason: closed || null,
+        open_txns: openTxns.map(t => ({ id: t.id, date: String(t.date).slice(0, 10), amount: Number(t.amount), memo: t.memo || '' })),
       })
     }
     res.json({
@@ -475,13 +486,20 @@ router.post('/:id/backfill', async (req, res, next) => {
          만들기 때문에 여기서는 amount 를 갈아끼운 사본을 넘긴다. */
       const rowAmount = Number(c.total_amount) > 0 ? Number(c.total_amount) : Number(r.amount)
       const made = await createExpenseInvoice(conn, { ...r, amount: rowAmount }, due,
-        { paid: !!c.paid, accountId: c.account_id || null })
-      if (made.error) { await rollbackQuietly(conn); return res.status(400).json({ error: `${due} 회차 — ${made.error}` }) }
+        { paid: !!c.paid, accountId: c.account_id || null, txnId: c.txn_id || null })
+      if (made.error) {
+        await rollbackQuietly(conn)
+        return res.status(409).json({ error: `${due} 회차 — ${made.error} 아무것도 만들지 않았어요.`, candidates: made.candidates })
+      }
       // 배치 표식 — 되돌리기가 이 값으로 묶는다
       await conn.execute('UPDATE invoices SET backfill_batch = ?, memo = ? WHERE id = ?',
         [batch, `소급 등록 · ${r.category || ''}`.trim(), made.invId])
-      await conn.execute('UPDATE transactions SET backfill_batch = ? WHERE invoice_id = ?', [batch, made.invId])
-      created.push({ id: made.invId, invoice_no: made.invoice_no, due_date: due, total: made.total, paid: !!c.paid })
+      /* ⚠ 표식은 **이 소급이 만든 거래에만** 찍는다. 예전처럼 invoice_id 로 싸잡으면,
+         통장에서 올라온 진짜 지급에 배치가 찍혀 되돌리기가 그것까지 지운다. */
+      if (made.txnId && !made.reused) {
+        await conn.execute('UPDATE transactions SET backfill_batch = ? WHERE id = ?', [batch, made.txnId])
+      }
+      created.push({ id: made.invId, invoice_no: made.invoice_no, due_date: due, total: made.total, paid: !!c.paid, reused: !!made.reused })
     }
 
     /* createExpenseInvoice 가 회차마다 last_generated 를 그 날짜로 덮는다. 소급은 과거를
@@ -512,6 +530,12 @@ router.delete('/backfill/:batch', async (req, res, next) => {
     const recurringId = rows.find(r => r.recurring_id)?.recurring_id || null
     const ids = rows.map(r => r.id)
     const ph = ids.map(() => '?').join(',')
+    /* 소급이 **붙여 쓴 진짜 거래**(통장에서 나간 것)는 지우지 않는다 — 청구서 연결만 푼다.
+       지우면 계좌 잔액이 틀어진다(매출 쪽·정산 취소와 같은 규칙). */
+    await conn.execute(
+      `UPDATE transactions SET invoice_id = NULL
+        WHERE invoice_id IN (${ph}) AND (backfill_batch IS NULL OR backfill_batch <> ?)`,
+      [...ids, req.params.batch])
     await conn.execute(`DELETE FROM invoice_matches WHERE invoice_id IN (${ph})`, ids)
     await conn.execute('DELETE FROM transactions WHERE backfill_batch = ?', [req.params.batch])
     await conn.execute(`DELETE FROM invoices WHERE id IN (${ph})`, ids)

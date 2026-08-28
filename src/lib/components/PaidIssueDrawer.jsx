@@ -61,7 +61,11 @@ export const PaidIssueDrawer = ({ target, isIssued, onClose, onDone, onIssuePaid
     const res = await onIssuePaid({ ...target, _accountId: accountId || null, _date: date, _amount: variable ? typed : null })
     setBusy(false)
     if (!res.ok) { toast.push(res.error || "처리에 실패했어요", { tone: "warn" }); return }
-    toast.push(isIssued ? "입금 처리했어요" : "지급 처리했어요")
+    /* 거래를 새로 만들었는지, 이미 장부에 있던 것에 붙였는지는 사용자에게 다른 일이다 —
+       붙인 경우 계좌 잔액이 안 움직이는데 아무 말이 없으면 "반영이 안 됐나" 가 된다. */
+    toast.push(res.reused_txn
+      ? (isIssued ? "이미 있던 입금에 붙였어요 (거래를 새로 만들지 않았어요)" : "이미 있던 지급에 붙였어요 (거래를 새로 만들지 않았어요)")
+      : (isIssued ? "입금 처리했어요" : "지급 처리했어요"))
     onDone()
   }
   return (

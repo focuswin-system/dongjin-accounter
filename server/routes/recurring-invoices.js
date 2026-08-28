@@ -10,6 +10,9 @@ const { closedPeriodError } = require('../lib/closing')
 const { backfillCycles, tooManyError, addSkip, removeSkip, issuedInvoiceAt } = require('../lib/backfill')
 const { settleAcctCode } = require('../lib/acctCode')
 const { recurHistory } = require('../lib/recurHistory')
+/* 기입금 처리는 '거래를 만드는 일'이 아니라 '이미 있는 입금을 찾아 붙이는 일'이 먼저다.
+   규칙은 lib/settleTxn.js 한 곳에만 둔다(발행·소급·매입이 같은 규칙을 쓴다). */
+const { openTxnCandidates, settleInvoiceTxn } = require('../lib/settleTxn')
 
 const router = Router()
 
@@ -357,6 +360,7 @@ router.post('/:id/issue', async (req, res, next) => {
       acctId = defBank ? defBank.id : null
     }
     const id = randomUUID()
+    let reusedTxn = false   // 새로 만들지 않고 이미 있던 입금에 붙였는가 — 화면이 그대로 알려준다
     /* 마감된 달로는 청구서를 발행할 수 없다. 예전엔 paid 일 때만 검사해서, 마감·신고를 끝낸
      * 달로 청구서만 새로 꽂을 수 있었다 → 그 분기 부가세 집계가 신고 후에 바뀐다. */
     { const ce = await closedPeriodError(conn, target); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
@@ -368,24 +372,21 @@ router.post('/:id/issue', async (req, res, next) => {
        target, cashDateOf(target, r.pay_term, r.pay_day), paid ? '입금 완료' : '입금 예정', acctId, r.id,
        `정기청구 · ${r.item || ''}`.trim(), invTaxType(r)]
     )
-    // 기입금 처리: 실제 입금 거래 + 매칭까지 (주문 상세의 수금·미수금에 반영)
+    /* 기입금 처리: 통장에서 이미 올라온 입금이 있으면 **그것에 붙인다.** 없을 때만 만든다.
+       예전엔 무조건 만들어서, 임포트한 입금과 나란히 서 같은 돈이 두 번 잡혔다. */
     if (paid) {
-      const lerr = ledgerError({ kind: 'income', account_id: acctId, status: '입금완료' })
-      if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
-      const txnId = randomUUID()
-      await conn.execute(
-        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, account_code, category, amount, date, method, status, doc_no, invoice_id, memo)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [txnId, 'income', r.vendor_id || null, r.contract_id || null, acctId,
-         settleAcctCode('income'),   // 외상매출금 — 없으면 일계표 차·대변이 안 맞는다
-         '수금', total, target, '계좌이체', '입금완료', '', id, `청구서 ${invoice_no} 정산`]
-      )
-      await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,1)',
-        [randomUUID(), id, txnId, total])
+      const st = await settleInvoiceTxn(conn, {
+        invoiceId: id, invoiceNo: invoice_no, kind: 'income',
+        vendorId: r.vendor_id, contractId: r.contract_id, amount: total, date: target,
+        acctId, acctCode: settleAcctCode('income'), category: '수금',
+        txnId: req.body.txn_id || null, forceNew: !!req.body.make_new,
+      })
+      if (st.error) { await rollbackQuietly(conn); return res.status(409).json({ error: st.error, candidates: st.candidates }) }
+      reusedTxn = st.reused
     }
     await conn.execute('UPDATE recurring_invoices SET last_generated = ? WHERE id = ?', [target, r.id])
     await conn.commit()
-    res.json({ ok: true, id, invoice_no })
+    res.json({ ok: true, id, invoice_no, reused_txn: reusedTxn })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
@@ -523,10 +524,15 @@ router.post('/:id/backfill/preview', async (req, res, next) => {
         'SELECT id, invoice_no FROM invoices WHERE recurring_id = ? AND issued_at = ? LIMIT 1', [r.id, due])
       // 마감된 달인가 — 소급은 대개 신고가 끝난 기간에 꽂는 일이라 이게 핵심 가드다
       const closed = await closedPeriodError(req.db, due)
+      /* 이 회차의 돈이 통장에서 이미 올라와 있는가. 있으면 새 거래를 만드는 대신 붙일 것이다 —
+         화면이 그 사실을 미리 보여줘야 사용자가 "왜 안 만들어졌지"를 겪지 않는다. */
+      const openTxns = (dup || closed) ? [] : await openTxnCandidates(req.db, {
+        kind: 'income', vendorId: r.vendor_id, amount: supply + vat, date: due })
       cycles.push({
         due_date: due, supply_amount: supply, vat_amount: vat, total_amount: supply + vat,
         exists: !!dup, existing_no: dup ? dup.invoice_no : null,
         closed: !!closed, closed_reason: closed || null,
+        open_txns: openTxns.map(t => ({ id: t.id, date: String(t.date).slice(0, 10), amount: Number(t.amount), memo: t.memo || '' })),
       })
     }
     res.json({
@@ -597,19 +603,24 @@ router.post('/:id/backfill', async (req, res, next) => {
          due, cashDateOf(due, r.pay_term, r.pay_day), paid ? '입금 완료' : '입금 예정', acctId, r.id,
          `소급 등록 · ${r.item || ''}`.trim(), invTaxType(r), batch])
 
+      let reused = false
       if (paid) {
-        const lerr = ledgerError({ kind: 'income', account_id: acctId, status: '입금완료' })
-        if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: `${due} 회차 — ${lerr}` }) }
-        const txnId = randomUUID()
-        await conn.execute(
-          `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, account_code, category, amount, date, method, status, doc_no, invoice_id, memo, backfill_batch)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-          [txnId, 'income', r.vendor_id || null, r.contract_id || null, acctId, settleAcctCode('income'),
-           '수금', total, due, '계좌이체', '입금완료', '', id, `청구서 ${invoice_no} 정산 (소급)`, batch])
-        await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,1)',
-          [randomUUID(), id, txnId, total])
+        /* 통장에서 이미 올라온 입금이 있으면 그것에 붙인다 — 소급이 같은 돈을 한 번 더
+           만들어 내던 자리다. 후보가 둘 이상이면 만들지도 붙이지도 않고 전부 멈춘다. */
+        const st = await settleInvoiceTxn(conn, {
+          invoiceId: id, invoiceNo: invoice_no, kind: 'income',
+          vendorId: r.vendor_id, contractId: r.contract_id, amount: total, date: due,
+          acctId, acctCode: settleAcctCode('income'), category: '수금',
+          memo: `청구서 ${invoice_no} 정산 (소급)`, backfillBatch: batch,
+          txnId: c.txn_id || null, forceNew: !!c.make_new,
+        })
+        if (st.error) {
+          await rollbackQuietly(conn)
+          return res.status(409).json({ error: `${due} 회차 — ${st.error} 아무것도 만들지 않았어요.`, candidates: st.candidates })
+        }
+        reused = st.reused
       }
-      created.push({ id, invoice_no, due_date: due, total, paid })
+      created.push({ id, invoice_no, due_date: due, total, paid, reused })
     }
 
     /* last_generated 는 '이 값 이하 회차는 이미 생성됨' 하한이다. 소급으로 만든 회차가
@@ -643,6 +654,12 @@ router.delete('/backfill/:batch', async (req, res, next) => {
 
     const ids = rows.map(r => r.id)
     const ph = ids.map(() => '?').join(',')
+    /* 소급이 **붙여 쓴 진짜 거래**(통장에서 올라온 것)는 지우지 않는다 — 청구서 연결만 푼다.
+       지우면 계좌 잔액이 틀어진다. 정산 취소(invoices.js)가 txn_created=0 을 다루는 방식과 같다. */
+    await conn.execute(
+      `UPDATE transactions SET invoice_id = NULL
+        WHERE invoice_id IN (${ph}) AND (backfill_batch IS NULL OR backfill_batch <> ?)`,
+      [...ids, req.params.batch])
     // 매칭 → 거래 → 청구서 순. 이 배치가 만든 거래만 지운다(backfill_batch 로 한정).
     await conn.execute(`DELETE FROM invoice_matches WHERE invoice_id IN (${ph})`, ids)
     await conn.execute('DELETE FROM transactions WHERE backfill_batch = ?', [req.params.batch])
