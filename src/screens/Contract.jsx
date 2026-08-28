@@ -4,6 +4,7 @@ import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
+import { ArLinesDrawer } from '../lib/components/ArLinesDrawer'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { LinkTxnDrawer } from '../lib/components/LinkTxnDrawer'
@@ -614,9 +615,21 @@ export const BigSummaryCard = ({ label, amount, sub, accent = "blue", warn = fal
   </div>
 );
 
-export const SummaryTile = ({ label, amount, pct, tone, big = false }) => (
-  <div className="card" style={{ padding: "18px 18px", display: "flex", flexDirection: "column", gap: 8, background: big ? "var(--ink)" : "#fff", color: big ? "#fff" : "var(--ink)", borderColor: big ? "var(--ink)" : "var(--line)" }}>
-    <div style={{ fontSize: 12.5, fontWeight: 600, color: big ? "rgba(255,255,255,0.7)" : "var(--muted)" }}>{label}</div>
+/* onOpen 을 주면 눌러서 근거를 펼 수 있는 타일이 된다.
+   숫자만 있고 내역이 없으면 사용자는 검산도, 틀린 곳을 짚지도 못한다
+   ("176,000원이 어디서 나왔는지 볼 수가 없다"). */
+export const SummaryTile = ({ label, amount, pct, tone, big = false, onOpen, openLabel = '내역' }) => (
+  <div className="card" style={{ padding: "18px 18px", display: "flex", flexDirection: "column", gap: 8, background: big ? "var(--ink)" : "#fff", color: big ? "#fff" : "var(--ink)", borderColor: big ? "var(--ink)" : "var(--line)", cursor: onOpen ? 'pointer' : undefined }}
+    onClick={onOpen} role={onOpen ? 'button' : undefined} tabIndex={onOpen ? 0 : undefined}
+    onKeyDown={onOpen ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } } : undefined}>
+    <div className="row" style={{ alignItems: 'center', gap: 6 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: big ? "rgba(255,255,255,0.7)" : "var(--muted)" }}>{label}</div>
+      {onOpen && (
+        <div className="text-xs" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 2, color: big ? "rgba(255,255,255,0.7)" : "var(--muted-2)" }}>
+          {openLabel}<Icon.Right size={12}/>
+        </div>
+      )}
+    </div>
     <div className="num fw-700" style={{ fontSize: big ? 26 : 22, letterSpacing: "-0.02em" }}>
       {amount >= 0 ? "" : "-"}{fmtNum(Math.abs(amount))}<span style={{ fontSize: 13, fontWeight: 600, opacity: 0.65, marginLeft: 3 }}>원</span>
     </div>
@@ -906,6 +919,8 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [renewOpen, setRenewOpen] = useState(false);
   const [progressOpen, setProgressOpen] = useState(false);
+  // 미수금 근거 — 숫자만 있고 내역이 없어 검산도 못 하던 자리
+  const [arOpen, setArOpen] = useState(false);
   /* 거래 연결 — 이미 등록된 입금·지출을 이 주문에 붙인다.
      { kind, axis } 로 연다. axis 는 탭이 정한다(근거 주문 / 원가 귀속). */
   const [linkOpen, setLinkOpen] = useState(null);
@@ -1176,7 +1191,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
         <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
           <SummaryTile label={isPurchase ? "누적 기성(청구)" : "누적 청구(기성)"} amount={c.billed || 0}/>
           <SummaryTile label={`누적 ${doneLabel}`} amount={doneAll}/>
-          <SummaryTile label={isPurchase ? "미지급금" : "미수금"} amount={arRemain} big/>
+          <SummaryTile label={isPurchase ? "미지급금" : "미수금"} amount={arRemain} big onOpen={arRemain ? () => setArOpen(true) : undefined} openLabel="근거 보기"/>
         </div>
       ) : (
       <div className="grid" style={{ gridTemplateColumns: `repeat(${isPurchase ? 4 : 5}, 1fr)`, gap: 12 }}>
@@ -1191,10 +1206,11 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           pct={openEnded ? undefined : donePct}/>
         <SummaryTile
           label={openEnded ? (isPurchase ? "미지급금" : "미수금") : remainLabel}
-          amount={openEnded ? arRemain : remainAmt}/>
+          amount={openEnded ? arRemain : remainAmt}
+          onOpen={openEnded && arRemain ? () => setArOpen(true) : undefined} openLabel="근거 보기"/>
         {isPurchase ? (
           // 매입: 청구받은 것 중 아직 안 나간 돈
-          <SummaryTile label="미지급금" amount={arRemain} big/>
+          <SummaryTile label="미지급금" amount={arRemain} big onOpen={arRemain ? () => setArOpen(true) : undefined} openLabel="근거 보기"/>
         ) : (
           <>
             {/* 손익이 빼는 값과 같은 축이어야 한다 — out 을 쓰면 원가 0 · 손익 +323,000 처럼
@@ -1973,6 +1989,8 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
         initial={c.cost_budget} onSaved={reload}/>
       <RenewDrawer open={renewOpen} onClose={() => setRenewOpen(false)} contract={c} onSaved={reload}/>
       <ProgressInvoiceDrawer open={progressOpen} onClose={() => setProgressOpen(false)} contract={c} onSaved={reload}/>
+      <ArLinesDrawer open={arOpen} onClose={() => setArOpen(false)}
+        lines={c.ar_lines || []} isPurchase={isPurchase} contractVendor={vendor}/>
 
       {/* 이미 등록된 거래를 이 주문에 붙인다 */}
       <LinkTxnDrawer open={!!linkOpen} onClose={() => setLinkOpen(null)}

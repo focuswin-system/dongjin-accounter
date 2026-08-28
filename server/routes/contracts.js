@@ -776,6 +776,30 @@ router.get('/:id', async (req, res, next) => {
     )
     const progress_invoices = progInvRows.map(r => ({ ...r, total_amount: Number(r.total_amount), line_count: Number(r.line_count) }))
 
+    /* 미수금(미지급금)의 **근거**. 숫자만 보여주고 내역이 없으면 사용자는 그 값을 검산할 수도,
+     * 틀렸을 때 어디가 틀렸는지 짚을 수도 없다 — 실제로 "176,000원이 어디서 나왔는지 볼 수가
+     * 없다"는 말이 나왔다. 그 176,000원은 **다른 거래처 청구서 2건이 이 주문에 붙어 있어서**
+     * 생긴 값이었다(이름으로 주문을 고르던 시절의 오연결). 화면에 줄로 깔면 그 자리에서 보인다.
+     *
+     * ⚠ 청구서의 거래처가 주문의 거래처와 다르면 표시해서 내려보낸다. 미수금 계산은
+     *   '이 주문에 붙은 청구서 합 − 이 주문에 붙은 입금 합'이라, 남의 청구서가 하나 붙으면
+     *   그 금액이 그대로 미수로 남는다. 사람이 볼 수 있어야 고칠 수 있다. */
+    const [arRows] = await req.db.execute(`
+      SELECT i.id, i.invoice_no, i.issued_at, i.due_at, i.total_amount, i.status,
+             i.vendor_id, v.name AS vendor_name,
+             COALESCE((SELECT SUM(m.amount) FROM invoice_matches m WHERE m.invoice_id = i.id), 0) AS paid
+        FROM invoices i LEFT JOIN vendors v ON v.id = i.vendor_id
+       WHERE i.contract_id = ? ORDER BY i.issued_at, i.invoice_no`, [req.params.id])
+    const ar_lines = arRows.map(r => ({
+      id: r.id, invoice_no: r.invoice_no,
+      issued_at: String(r.issued_at || '').slice(0, 10), due_at: String(r.due_at || '').slice(0, 10),
+      total_amount: Number(r.total_amount), paid: Number(r.paid),
+      remain: Number(r.total_amount) - Number(r.paid),
+      status: r.status || '', vendor_name: r.vendor_name || '',
+      // 이 주문의 거래처가 아닌 청구서 — 오연결일 가능성이 높다
+      foreign_vendor: !!(c.vendor_id && r.vendor_id && r.vendor_id !== c.vendor_id),
+    }))
+
     /* 정기 주문의 이행률 — 분모는 청구액이 아니라 '오늘까지 도래했어야 할 돈'.
        기성형에는 이 개념이 없어 계산하지 않는다(위 recurProgress 주석 참고). */
     const recur_progress = c.billing_mode === 'recurring'
@@ -793,6 +817,7 @@ router.get('/:id', async (req, res, next) => {
       })),
       recurrings,
       recurring_active: recurrings.filter(r => r.active).length,
+      ar_lines,
       milestones,
       incomes, expenses, evidences, docs, attachments, history: [],
       cost_actual,
