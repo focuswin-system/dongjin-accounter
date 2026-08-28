@@ -160,7 +160,9 @@ const metrics = (r) => {
   const vatMul = 1 + vatRateOf(r.vat_mode)
   const termTotal = noTotal ? null : Math.round((Number(r.amount) || 0) * vatMul)
   const remain = termTotal == null ? null : Math.max(0, termTotal - term_collected)
-  const ar_remain = Math.max(0, billed - collected)
+  /* 미수금은 SQL 이 청구서 잔액으로 셌다(ar_open). billed − collected 로 다시 세지 않는다 —
+     그 식은 정산 거래에 주문이 안 붙으면 유령 미수금을 만든다(METRIC_COLS 주석 참고). */
+  const ar_remain = Math.max(0, Number(r.ar_open || 0))
 
   return {
     ...r,
@@ -223,7 +225,22 @@ const METRIC_COLS = `
             AND i.kind = ${PURCHASE_KIND}),0) AS billed,
   COALESCE((SELECT SUM(total_amount) FROM invoices i WHERE i.contract_id=c.id
             AND i.kind = ${PURCHASE_KIND}
-            AND (c.current_term_start IS NULL OR i.issued_at >= c.current_term_start)),0) AS term_billed`
+            AND (c.current_term_start IS NULL OR i.issued_at >= c.current_term_start)),0) AS term_billed,
+  /* 미수금(미지급금) — **청구서 잔액의 합**이다.
+   *
+   * 예전엔 `billed − collected`(청구서 합 − 거래 합)로 셌다. 두 집합이 서로 대응하지 않아서
+   * 틀린다: 정산 거래에 contract_id 가 안 붙어 있으면 collected 에서만 빠져 **유령 미수금**이
+   * 생긴다. fowin 마산시니어클럽이 그랬다 — 청구서 10건이 전부 '입금 완료'인데 타일은
+   * 176,000원을 띄웠고, 근거를 펼치면 0건이었다(타일과 내역이 서로 다른 말을 했다).
+   *
+   * 잔액은 청구서 한 장 안에서 닫힌 계산이다(총액 − 그 청구서에 붙은 정산액).
+   * lib/invoiceStatus.js 가 상태를 정하는 방식과 같은 정의이고, 화면의 근거 목록과도 같다. */
+  GREATEST(0,
+    COALESCE((SELECT SUM(i.total_amount) FROM invoices i
+               WHERE i.contract_id=c.id AND i.kind = ${PURCHASE_KIND}),0)
+  - COALESCE((SELECT SUM(m.amount) FROM invoice_matches m
+               JOIN invoices i2 ON i2.id = m.invoice_id
+              WHERE i2.contract_id=c.id AND i2.kind = ${PURCHASE_KIND}),0)) AS ar_open`
 
 router.get('/', async (req, res, next) => {
   try {
