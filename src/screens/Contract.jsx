@@ -1118,7 +1118,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
      기성형은 총액이 없어 openEnded 로 잡히는데, 종료일이 있는 단가주문을
      '해지할 때까지'로 보여주면 갱신 시점을 놓친다(목록도 같은 원인으로 틀렸다). */
   const period  = (isOpenEnded(c) || !c.end_date)
-    ? `${c.start_date || '—'} ~ 해지할 때까지`
+    ? `${c.start_date || '—'} ~`
     : [c.start_date, c.end_date].filter(Boolean).join(' ~ ') || '—';
   const rn = renewalInfo(c);
 
@@ -2211,6 +2211,8 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
   const [q, setQ] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [filterPM, setFilterPM] = useState(null);
+  const [filterMode, setFilterMode] = useState(null);      // 청구방식 — 정기/일시/기성
+  const [filterVendor, setFilterVendor] = useState("");    // 거래처 id
   const [allContracts, setAllContracts] = useState([]);
   const [newOpen, setNewOpen] = useState(false);
   const [newForm, setNewForm] = useState(NEW_CONTRACT_FORM);
@@ -2269,7 +2271,24 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
   const rows = scoped
     .filter(matchTab)
     .filter(r => !q || (r.name || "").includes(q) || (r.vendor_name || r.vendor || "").includes(q))
-    .filter(r => !filterPM || r.pm === filterPM);
+    .filter(r => !filterPM || r.pm === filterPM)
+    /* 청구방식·거래처 — "이 회사 건만" "매달 도는 것만" 이 목록을 보는 두 가지 실제 질문이다.
+       상태 탭(진행중·갱신 필요…)만으로는 둘 다 answer 가 안 된다. */
+    .filter(r => !filterMode || (r.billing_mode || 'onetime') === filterMode)
+    .filter(r => !filterVendor || r.vendor_id === filterVendor);
+
+  /* 거래처는 칩으로 세우면 수십 개가 깔린다 — 긴 목록은 Combobox(프로젝트 규칙).
+     이 화면에 실제로 주문이 있는 거래처만 담는다(기준정보 전체를 훑게 하지 않는다). */
+  const vendorOpts = useMemo(() => {
+    const seen = new Map();
+    for (const c of scoped) if (c.vendor_id && !seen.has(c.vendor_id)) seen.set(c.vendor_id, c.vendor_name || c.vendor || '(이름 없음)');
+    return [...seen].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'ko'));
+  }, [scoped]);
+  const BILLING_MODES = [
+    { value: 'recurring', label: '정기' },
+    { value: 'onetime',   label: '일시' },
+    { value: 'progress',  label: '기성' },
+  ];
 
   const renewDue     = scoped.filter(r => renewalInfo(r).stage === "due").length;
   const renewExpired = scoped.filter(r => renewalInfo(r).stage === "expired").length;
@@ -2350,21 +2369,45 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
             </div>
             <button className="btn" onClick={() => setFilterOpen(s => !s)} style={{ position: "relative" }}>
               <Icon.Filter/> 필터
-              {filterPM && <span style={{ position: "absolute", top: 6, right: 6, width: 6, height: 6, borderRadius: "50%", background: "var(--brand)" }}/>}
+              {(filterPM || filterMode || filterVendor) && <span style={{ position: "absolute", top: 6, right: 6, width: 6, height: 6, borderRadius: "50%", background: "var(--brand)" }}/>}
             </button>
           </div>
         </div>
         {filterOpen && (
           <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", background: "var(--surface-2)", display: "flex", flexDirection: "column", gap: 10 }}>
+            {/* 청구방식 — 값이 셋뿐이라 칩. 매달 도는 것만 보고 싶다는 요구가 이 줄이다. */}
             <div className="row gap-8" style={{ flexWrap: "wrap", alignItems: "center" }}>
-              <span className="text-xs fw-600 text-muted" style={{ width: 36, flexShrink: 0 }}>담당자</span>
-              <button className={`chip ${!filterPM ? "active" : ""}`} onClick={() => setFilterPM(null)}>전체</button>
-              {pms.map(pm => (
-                <button key={pm} className={`chip ${filterPM === pm ? "active" : ""}`} onClick={() => setFilterPM(pm)}>{pm}</button>
+              <span className="text-xs fw-600 text-muted" style={{ width: 48, flexShrink: 0 }}>청구방식</span>
+              <button className={`chip ${!filterMode ? "active" : ""}`} onClick={() => setFilterMode(null)}>전체</button>
+              {BILLING_MODES.map(m => (
+                <button key={m.value} className={`chip ${filterMode === m.value ? "active" : ""}`}
+                  onClick={() => setFilterMode(filterMode === m.value ? null : m.value)}>{m.label}</button>
               ))}
             </div>
-            {filterPM && (
-              <div><button className="btn ghost sm" onClick={() => setFilterPM(null)}><Icon.Close size={12}/> 필터 초기화</button></div>
+            {/* 거래처 — 수십 개라 칩이 아니라 Combobox */}
+            <div className="row gap-8" style={{ flexWrap: "wrap", alignItems: "center" }}>
+              <span className="text-xs fw-600 text-muted" style={{ width: 48, flexShrink: 0 }}>거래처</span>
+              <div style={{ flex: 1, minWidth: 200, maxWidth: 320 }}>
+                <Combobox value={filterVendor} onChange={setFilterVendor} options={vendorOpts}
+                  placeholder="전체 거래처"/>
+              </div>
+              {filterVendor && (
+                <button className="btn ghost sm" onClick={() => setFilterVendor("")}><Icon.Close size={12}/> 해제</button>
+              )}
+            </div>
+            {pms.length > 0 && (
+              <div className="row gap-8" style={{ flexWrap: "wrap", alignItems: "center" }}>
+                <span className="text-xs fw-600 text-muted" style={{ width: 48, flexShrink: 0 }}>담당자</span>
+                <button className={`chip ${!filterPM ? "active" : ""}`} onClick={() => setFilterPM(null)}>전체</button>
+                {pms.map(pm => (
+                  <button key={pm} className={`chip ${filterPM === pm ? "active" : ""}`} onClick={() => setFilterPM(pm)}>{pm}</button>
+                ))}
+              </div>
+            )}
+            {(filterPM || filterMode || filterVendor) && (
+              <div><button className="btn ghost sm"
+                onClick={() => { setFilterPM(null); setFilterMode(null); setFilterVendor(""); }}>
+                <Icon.Close size={12}/> 필터 초기화</button></div>
             )}
           </div>
         )}
@@ -2408,7 +2451,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
                     총액 개념이 없어 hasTotal=false 라서 종료일을 넣어도 늘 '해지 시까지'로 떴다
                     (2026-12-31 까지인 단가주문이 무기한처럼 보였다 — 갱신 시점을 놓친다).
                     기간은 종료일이 있느냐, 무기한(term_mode=open)이냐로만 정한다. */}
-                {isOpenEnded(r) || !r.end_date ? `${r.start_date || '—'} ~ 해지 시까지` : [r.start_date, r.end_date].filter(Boolean).join(' ~ ')}
+                {isOpenEnded(r) || !r.end_date ? `${r.start_date || '—'} ~` : [r.start_date, r.end_date].filter(Boolean).join(' ~ ')}
               </div>
               {renewalInfo(r).managed && <div style={{ marginTop: 6 }}><RenewalBadge contract={r}/></div>}
             </> },
