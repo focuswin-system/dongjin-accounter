@@ -9,8 +9,43 @@ const { settleAcctCode } = require('../lib/acctCode')
 const { removeUploadedFile } = require('../lib/uploads')
 const { vatOf, vatRateOf, taxTypeOfMode } = require('../lib/vat')
 const { closedPeriodError } = require('../lib/closing')
+const { recurHistory } = require('../lib/recurHistory')
+const { kstDate } = require('../db')
 
 const router = Router()
+
+/* 정기 주문의 이행률은 **청구액을 분모로 쓰면 안 된다.**
+ *
+ * 청구를 안 한 달은 분모에서도 통째로 빠져서, 한 회차를 통째로 빠뜨려도 막대가 100%로 보인다
+ * (창원YWCA 8월이 정확히 그렇게 사라졌다). 정기 주문은 규칙이 곧 스케줄이니
+ * **'오늘까지 도래했어야 할 돈'** 을 셀 수 있다 — 그게 진짜 분모다.
+ *
+ * 기성형에는 이 개념이 없다. 실제 작업량대로 그때그때 청구하는 것이라
+ * '나왔어야 할 돈'을 규칙으로 정할 수 없다 — 거기선 청구액이 분모가 맞다.
+ *
+ * @returns {{ due:number, billed:number, paid:number, missing:number }|null}
+ *          걸린 정기 규칙이 없으면 null (화면이 이 막대를 안 그린다)
+ */
+async function recurProgress(db, contractId, isPurchase, today) {
+  const table = isPurchase ? 'recurring_expenses' : 'recurring_invoices'
+  const kind  = isPurchase ? 'expense' : 'invoice'
+  const [rules] = await db.execute(
+    `SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch FROM ${table} r WHERE r.contract_id = ?`,
+    [contractId])
+  if (!rules.length) return null
+  const out = { due: 0, billed: 0, paid: 0, missing: 0 }
+  for (const rule of rules) {
+    // 등록일 하한 — 다른 라우트와 같은 방식으로 채운다(안 채우면 지난 회차가 예정으로 샌다)
+    rule.setup_date = rule.created_epoch != null ? kstDate(Number(rule.created_epoch) * 1000) : rule.setup_date
+    const h = await recurHistory(db, kind, rule, today)
+    out.due     += h.totals.due_amount
+    out.paid    += h.totals.paid_amount
+    // 청구한 돈 = 도래액에서 '만들지도 건너뛰지도 않은 달'을 뺀 것
+    out.billed  += h.totals.due_amount - h.totals.missing_amount
+    out.missing += h.totals.missing
+  }
+  return out
+}
 
 /* 주문을 '완료'로 닫을 때, 거기 걸린 정기 규칙 중 **종료일이 빈 것**에 종료일을 채운다.
  *
@@ -741,8 +776,15 @@ router.get('/:id', async (req, res, next) => {
     )
     const progress_invoices = progInvRows.map(r => ({ ...r, total_amount: Number(r.total_amount), line_count: Number(r.line_count) }))
 
+    /* 정기 주문의 이행률 — 분모는 청구액이 아니라 '오늘까지 도래했어야 할 돈'.
+       기성형에는 이 개념이 없어 계산하지 않는다(위 recurProgress 주석 참고). */
+    const recur_progress = c.billing_mode === 'recurring'
+      ? await recurProgress(req.db, req.params.id, m.is_purchase, kstToday())
+      : null
+
     res.json({
       ...m,
+      recur_progress,
       contract_items, item_progress, progress_invoices,
       renewals: renewals.map(r => ({
         ...r,

@@ -1110,6 +1110,9 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   const remainAmt  = c.remain ?? 0;              // 남은 주문분
   const arRemain   = c.ar_remain ?? 0;           // 미수금(청구했는데 안 들어온 돈)
   const donePct    = termTotal > 0 ? Math.min(100, Math.round((done / termTotal) * 100)) : 0;
+  /* 정기 주문의 이행률 — 서버가 규칙에서 계산한 '오늘까지 도래액'. 기성형은 null 이다.
+     화면에서 다시 세지 않는다(회차 계산은 서버 lib 한 곳에만 둔다). */
+  const rp = c.recur_progress || null;
   const vendor  = c.vendor_name || c.vendor || '—';
   /* 기간 표시는 openEnded(=총액 개념 없음)가 아니라 **실제 종료일 유무**로 정한다.
      기성형은 총액이 없어 openEnded 로 잡히는데, 종료일이 있는 단가주문을
@@ -1429,7 +1432,51 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           그래서 "일시형에만 막대가 보인다"가 됐고, 매달 도는 주문이야말로 한 회차가
           빠져도 표가 안 났다. 총액이 없으면 눈금을 **'지금까지 청구한 돈'**으로 바꾼다 —
           끝을 향한 진행률이 아니라 '청구한 만큼 들어왔나'다. 둘은 다른 질문이라 제목도 다르다. */}
-      {openEnded && (c.billed || 0) > 0 && (() => {
+      {/* 정기 주문 — 분모는 **도래액**이다. 청구액을 분모로 쓰면 청구를 안 한 달이
+          분모에서도 빠져서, 한 회차를 통째로 빠뜨려도 막대가 100%로 보인다.
+          그래서 세 눈금을 겹쳐 그린다: 도래(바탕) / 청구(중간) / 받음(진하게). */}
+      {openEnded && rp && rp.due > 0 && (() => {
+        const billedPct = Math.min(100, Math.round((rp.billed / rp.due) * 100))
+        const paidPct   = Math.min(100, Math.round((rp.paid / rp.due) * 100))
+        const notBilled = Math.max(0, rp.due - rp.billed)
+        return (
+          <>
+            <div className="card card-pad">
+              <div className="row" style={{ marginBottom: 10 }}>
+                <div className="section-title">지금까지 {doneLabel}됐어야 할 돈</div>
+                <div className="ml-auto text-sm text-muted">
+                  도래 {fmtNum(rp.due)}원 중 <span className="num fw-700" style={{ color: "var(--ink)" }}>{fmtNum(rp.paid)}원</span> {doneLabel}됨
+                </div>
+              </div>
+              <div style={{ position: 'relative', height: 14, borderRadius: 999, overflow: 'hidden', background: "var(--surface-3)" }}>
+                {/* 청구까지 간 몫 — 옅게. 그 위에 받은 몫을 진하게 겹친다 */}
+                <div style={{ position: 'absolute', inset: 0, width: `${billedPct}%`, background: "var(--line-strong)" }}/>
+                <div style={{ position: 'absolute', inset: 0, width: `${paidPct}%`, background: "var(--ink)" }}/>
+              </div>
+              <div className="row gap-12" style={{ marginTop: 10, fontSize: 11.5, color: "var(--muted-2)", flexWrap: 'wrap' }}>
+                <div><span style={{ display: "inline-block", width: 8, height: 8, background: "var(--ink)", borderRadius: 2, marginRight: 6 }}/>{doneLabel} {fmtNum(rp.paid)}원</div>
+                <div><span style={{ display: "inline-block", width: 8, height: 8, background: "var(--line-strong)", borderRadius: 2, marginRight: 6 }}/>청구 {fmtNum(rp.billed)}원</div>
+                <div className="ml-auto"><span style={{ display: "inline-block", width: 8, height: 8, background: "var(--surface-3)", border: "1px solid var(--line-strong)", borderRadius: 2, marginRight: 6 }}/>도래 {fmtNum(rp.due)}원</div>
+              </div>
+              {/* 청구조차 안 한 달이 있으면 그게 이 막대의 요점이다 — 가장 눈에 띄게 적는다 */}
+              {rp.missing > 0 && (
+                <div className="text-sm" style={{ marginTop: 10, color: 'var(--neg-ink)' }}>
+                  도래했는데 <b>청구서를 안 만든 회차가 {rp.missing}회</b> 있어요 (약 {fmtNum(notBilled)}원).
+                  정기 규칙의 <b>지난 회차 넣기</b>로 채울 수 있어요.
+                </div>
+              )}
+              <div className="text-xs text-muted2" style={{ marginTop: 10 }}>
+                해지할 때까지 도는 주문이라 채울 총액이 없어요. <b>오늘까지 도래한 회차</b>를 100으로 봅니다
+                {' '}— 건너뛴 달은 빼고요.
+              </div>
+            </div>
+            <Spacer h={20}/>
+          </>
+        )
+      })()}
+
+      {/* 기성형은 도래 개념이 없다 — 실제 작업량대로 그때그때 청구하므로 분모는 청구액이 맞다. */}
+      {openEnded && !rp && (c.billed || 0) > 0 && (() => {
         const billed = c.billed || 0
         const pct = Math.min(100, Math.round((doneAll / billed) * 100))
         return (
@@ -2333,10 +2380,12 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
               // 총액은 서버 metrics의 term_total 사용(vat_mode 반영). 화면에서 ×1.1 재계산 금지.
               const total = r.term_total ?? 0;
               const pct = openEnded || total <= 0 ? null : Math.min(100, Math.round(((r.term_collected ?? 0) / total) * 100));
-              /* 무기한 주문도 눈금을 바꾸면 막대를 그릴 수 있다 — 총액이 아니라
-                 '오늘까지 청구한 돈'이 100이다. 숫자만 두 개 적어 두면 두 수를 사람이
-                 머릿속에서 나눠야 해서, 목록을 훑을 때 아무것도 안 읽힌다. */
-              const billedPct = (!openEnded || !(r.billed > 0)) ? null
+              /* 기성형은 총액이 없어도 '청구한 돈'을 100으로 보면 막대를 그릴 수 있다.
+                 ⚠ **정기형에는 이 눈금을 쓰지 않는다.** 청구를 안 한 달은 분모에서도
+                 빠져서, 회차를 통째로 빠뜨린 주문이 100%로 보인다 — 가장 위험한 착시다.
+                 정기형의 도래액은 규칙을 회차별로 세어야 나오는데(주문 상세가 그렇게 한다),
+                 목록의 행마다 그걸 돌리면 질의가 행 수만큼 늘어난다. 여기선 숫자만 적는다. */
+              const billedPct = (r.billing_mode !== 'progress' || !(r.billed > 0)) ? null
                 : Math.min(100, Math.round(((r.collected ?? 0) / r.billed) * 100));
               return <>
                 <div className="fw-600">{r.name}</div>
