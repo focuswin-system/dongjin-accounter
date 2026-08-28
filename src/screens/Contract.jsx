@@ -912,6 +912,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   const [tab, setTab] = useState("청구 일정");
   const [memo, setMemo] = useState("");
   const [c, setC] = useState(null);
+  const [loadErr, setLoadErr] = useState(null);   // 불러오기 실패 사유 — 없으면 로딩 중
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState({});
   const [vendors, setVendors] = useState([]);
@@ -926,7 +927,12 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   const [linkOpen, setLinkOpen] = useState(null);
   const [txnOpen, setTxnOpen] = useState(null);   // 주문 화면에서 연 거래 상세
 
-  const reload = () => api.getContract(contractId).then(data => { if (data) setC(data); });
+  /* 실패하면 실패했다고 말한다. 예전엔 데이터가 없으면 그냥 안 넣어서 화면이
+     '불러오는 중…'에 영원히 머물렀다 — 주소에 주문 id 가 없던 시절 새로고침하면
+     늘 이 상태가 됐고, 사용자는 화면이 멈춘 줄만 안다. */
+  const reload = () => api.getContract(contractId)
+    .then(data => { if (data) { setC(data); setLoadErr(null) } else setLoadErr('notfound') })
+    .catch(() => setLoadErr('error'));
 
   useEffect(() => {
     if (!contractId) return;
@@ -1104,7 +1110,18 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     else toast.push(res.error || "저장 실패", { tone: 'warn' });
   };
 
-  if (!c) return <div style={{ padding: 40, textAlign: "center", color: "var(--muted-2)" }}>불러오는 중...</div>;
+  if (!c) return (
+    <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted-2)' }}>
+      {loadErr ? (
+        <>
+          <div style={{ marginBottom: 12 }}>
+            {loadErr === 'notfound' ? '이 주문을 찾을 수 없어요. 지워졌거나 주소가 잘못됐어요.' : '주문을 불러오지 못했어요.'}
+          </div>
+          <button className="btn" onClick={goList}>주문 목록으로</button>
+        </>
+      ) : '불러오는 중...'}
+    </div>
+  );
 
   const inDone  = c.in_done  || 0;
   const out     = c.out      || 0;   // 이 주문이 근거인 지출(매입주문의 지급액)

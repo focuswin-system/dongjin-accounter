@@ -311,7 +311,9 @@ function AppInner({ onLogout, user }) {
      하나도 못 보는 사람에게 빈 페이지로 가는 메뉴를 보여줄 이유가 없다. */
   const masterVisible = useMemo(() => MASTER_LEAVES.some(l => canDo(l.id)), [perms]);
   const [route, setRoute] = useState("home");
-  const [contractId, setContractId] = useState("CT-2026-101");
+  // 주소(#contract_detail/<id>)에서 복원한다. 옛 데모 id 를 기본값으로 두면
+  // 주소에 id 가 없을 때 없는 주문을 부르고 화면이 멈춘다.
+  const [contractId, setContractId] = useState("");
   const [focusInvoiceId, setFocusInvoiceId] = useState(null);
   // 청구서 이력·주문 상세에서 "이 거래를 거래내역에서 열어줘"로 넘겨준 id
   const [focusTxnId, setFocusTxnId] = useState(null);
@@ -408,12 +410,20 @@ function AppInner({ onLogout, user }) {
 
   useEffect(() => {
     const apply = () => {
-      const h = window.location.hash.replace("#", "");
+      const raw = window.location.hash.replace("#", "");
+      /* '라우트/파라미터' 형태를 받는다 — 지금은 주문 상세만 쓴다(contract_detail/<id>).
+         파라미터를 안 읽으면 새로고침 때 어느 주문이었는지 잃어버려 화면이 멈춘다. */
+      const slash = raw.indexOf("/");
+      const h = slash >= 0 ? raw.slice(0, slash) : raw;
+      const param = slash >= 0 ? raw.slice(slash + 1) : "";
       // 알려진 라우트면 반영한다. CRUMB_MAP에만 의존하면 기준정보·인사기준·환경설정 하위탭
       // (master_/hrbase_/settings_)과 포털 카테고리가 빠져, 새로고침·뒤로가기 시 홈으로 튕겼다.
       const known = CRUMB_MAP[h] || LEAF_BY_ID[h] || PORTAL_CAT_BY_ID[h]
         || /^(master_|hrbase_|settings_)/.test(h);
-      if (h && known) setRoute(h);
+      if (h && known) {
+        if (h === "contract_detail" && param) setContractId(param);
+        setRoute(h);
+      }
     };
     apply();
     window.addEventListener("hashchange", apply);
@@ -484,7 +494,11 @@ function AppInner({ onLogout, user }) {
     setFocusInvoiceId(opts.invoiceId || null);
     setFocusTxnId(opts.txnId || null);
     setRoute(id);
-    window.location.hash = id;
+    /* 주문 상세는 **어느 주문인지까지 주소에 담는다.**
+       예전엔 라우트 id 만 담아서, 새로고침하면 contractId 가 초기값으로 돌아가
+       없는 주문을 부르고 화면이 '불러오는 중…'에서 멈췄다(북마크·뒤로가기도 같았다). */
+    window.location.hash = (id === 'contract_detail' && (opts.contractId || contractId))
+      ? `${id}/${opts.contractId || contractId}` : id;
     setSidebarOpen(false);
     // 스크롤 리셋은 route 변경 effect에서(데스크톱은 .content, 모바일은 window) 처리한다.
   };
