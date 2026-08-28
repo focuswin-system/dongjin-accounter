@@ -28,6 +28,33 @@ const day = (v) => String(v || '').slice(0, 10)
 /** 앞으로 볼 기간 — 목록의 '예정'과 같은 눈금이어야 두 화면이 어긋나지 않는다 */
 const HISTORY_HORIZON_DAYS = 90
 
+/* 이행률 — "지금까지 얼마를 받았어야 하는데 얼마를 받았나".
+ *
+ * 주문(청구일정)은 총액이 정해져 있어 진행률이 자연스럽게 나오는데, 정기 규칙은 끝이 없어서
+ * 그런 눈금이 없었다. 그래서 **한 회차가 통째로 빠져도 화면 어디에도 표가 안 났다**
+ * (창원YWCA 8월이 정확히 그렇게 사라졌다).
+ *
+ * 기산점은 **첫 회차가 실제로 만들어진 날**이다 — 규칙의 시작일이 아니다.
+ * 시작일로 세면 몇 년 전 날짜로 등록한 규칙이 "수천만원 미이행"으로 뜬다.
+ * 건너뛴 회차는 분모에서 뺀다. "이 달은 청구 안 함"은 못 받은 게 아니다.
+ * 빠진 회차는 실물이 없으니 규칙의 현재 금액으로 어림한다(그래서 estimated 로 표시한다).
+ */
+function dueVsPaid(done, missing, rule, today) {
+  const past = done.filter(c => c.date <= today)
+  /* 빠진 회차의 금액은 **실제로 만들어진 마지막 회차**에서 가져온다.
+     규칙의 supply_amount 로 세면 매출은 세액만큼 모자라고, 금액이 바뀐 규칙은 옛 값이 나온다.
+     (missing 은 done 이 하나라도 있을 때만 생기므로 여기서 done 은 비지 않는다.) */
+  const guess = past.length ? past[past.length - 1].total_amount : 0
+  const missingAmount = missing.length * guess
+  return {
+    due_amount: past.reduce((s, c) => s + c.total_amount, 0) + missingAmount,
+    paid_amount: past.reduce((s, c) => s + num(c.paid_amount), 0),
+    missing_amount: missingAmount,
+    // 빠진 회차 금액은 규칙 금액으로 어림한 값 — 화면이 그렇게 말해야 한다
+    missing_estimated: missing.length > 0,
+  }
+}
+
 /**
  * @param db    req.db (테넌트 풀)
  * @param kind  'invoice'(정기입금·매출) | 'expense'(정기지급·매입)
@@ -107,6 +134,17 @@ async function recurHistory(db, kind, rule, today) {
     }
   }
 
+  /* 회차별 실제 정산액 — 상태값(입금 완료)만 보면 **일부 입금이 통째로 0 또는 100 이 된다.**
+     이행률은 금액으로 말해야 뜻이 통한다("8회 중 7회"가 아니라 "440,000 중 385,000"). */
+  if (done.length) {
+    const ph = done.map(() => '?').join(',')
+    const [paidRows] = await db.execute(
+      `SELECT invoice_id, COALESCE(SUM(amount),0) AS paid FROM invoice_matches
+        WHERE invoice_id IN (${ph}) GROUP BY invoice_id`, done.map(c => c.id))
+    const paidBy = new Map(paidRows.map(r => [r.invoice_id, num(r.paid)]))
+    for (const c of done) c.paid_amount = paidBy.get(c.id) || 0
+  }
+
   const cycles = [...done, ...skipped, ...missing, ...upcoming]
     .sort((a, b) => a.date.localeCompare(b.date) || a.state.localeCompare(b.state))
 
@@ -130,6 +168,7 @@ async function recurHistory(db, kind, rule, today) {
       upcoming: upcoming.length,
       // 받았나/줬나 — 만들기만 하고 정산이 안 된 회차가 몇 건인지가 실무의 관심사다
       settled: done.filter(c => paidStates.includes(c.status)).length,
+      ...dueVsPaid(done, missing, rule, today),
     },
   }
 }

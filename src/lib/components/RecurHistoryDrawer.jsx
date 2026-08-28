@@ -60,6 +60,37 @@ export const RecurHistoryDrawer = ({ open, rule, kind, onClose, onEdit }) => {
               </div>
             </div>
 
+            {/* 지금까지 얼마를 받았어야 하는데 얼마를 받았나.
+                주문(청구일정)에는 총액이 있어 진행률이 나오는데 정기 규칙은 끝이 없어서
+                이 눈금이 없었다 — 한 회차가 통째로 빠져도 표가 안 났다.
+                기산점은 첫 회차가 실제로 만들어진 날, 건너뛴 달은 분모에서 뺀다. */}
+            {d.totals.due_amount > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div className="row" style={{ alignItems: 'baseline', marginBottom: 6 }}>
+                  <div className="text-xs text-muted2">
+                    지금까지 {isSales ? '받았어야 할 돈' : '냈어야 할 돈'}
+                  </div>
+                  <div className="num text-sm" style={{ marginLeft: 'auto' }}>
+                    <b>{fmtNum(d.totals.paid_amount)}</b>
+                    <span className="text-muted2"> / {fmtNum(d.totals.due_amount)}원</span>
+                  </div>
+                </div>
+                <div style={{ height: 8, borderRadius: 999, background: 'var(--surface-2)', overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%', borderRadius: 999,
+                    width: `${Math.min(100, Math.round(d.totals.paid_amount / d.totals.due_amount * 100))}%`,
+                    background: d.totals.paid_amount >= d.totals.due_amount ? 'var(--pos-ink)' : 'var(--brand)',
+                  }}/>
+                </div>
+                {d.totals.due_amount > d.totals.paid_amount && (
+                  <div className="text-xs" style={{ marginTop: 5, color: 'var(--muted-2)' }}>
+                    {fmtNum(d.totals.due_amount - d.totals.paid_amount)}원이 아직 {isSales ? '안 들어왔어요' : '안 나갔어요'}
+                    {d.totals.missing_estimated && ' (만들지 않은 달은 최근 회차 금액으로 어림했어요)'}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* 건너뛴 게 있을 때만 알린다 — 없는 걸 0으로 세워 두면 정상에 표식을 다는 꼴이다 */}
             {d.totals.skipped > 0 && (
               <div className="text-sm text-muted" style={{ marginBottom: 12 }}>
