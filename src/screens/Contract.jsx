@@ -1425,6 +1425,41 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
         </>
       )}
 
+      {/* 무기한 주문(정기·기성형)에는 채울 총액이 없어 **막대를 아예 안 그렸다.**
+          그래서 "일시형에만 막대가 보인다"가 됐고, 매달 도는 주문이야말로 한 회차가
+          빠져도 표가 안 났다. 총액이 없으면 눈금을 **'지금까지 청구한 돈'**으로 바꾼다 —
+          끝을 향한 진행률이 아니라 '청구한 만큼 들어왔나'다. 둘은 다른 질문이라 제목도 다르다. */}
+      {openEnded && (c.billed || 0) > 0 && (() => {
+        const billed = c.billed || 0
+        const pct = Math.min(100, Math.round((doneAll / billed) * 100))
+        return (
+          <>
+            <div className="card card-pad">
+              <div className="row" style={{ marginBottom: 10 }}>
+                <div className="section-title">지금까지 청구한 만큼 {doneLabel}됐나</div>
+                <div className="ml-auto text-sm text-muted">
+                  청구 {fmtNum(billed)}원의 {pct}% {doneLabel}됨 · {remainLabel}{' '}
+                  <span className="num fw-700" style={{ color: "var(--ink)" }}>{fmtNum(arRemain)}원</span>
+                </div>
+              </div>
+              <div style={{ display: "flex", height: 14, borderRadius: 999, overflow: "hidden", background: "var(--surface-3)" }}>
+                <div style={{ width: `${pct}%`, background: "var(--ink)" }}/>
+                <div style={{ width: `${100 - pct}%`, background: "transparent", borderLeft: "1px dashed rgba(0,0,0,0.1)" }}/>
+              </div>
+              <div className="row" style={{ marginTop: 10, fontSize: 11.5, color: "var(--muted-2)" }}>
+                <div><span style={{ display: "inline-block", width: 8, height: 8, background: "var(--ink)", borderRadius: 2, marginRight: 6 }}/>{doneLabel} 완료 {fmtNum(doneAll)}원</div>
+                <div className="ml-auto"><span style={{ display: "inline-block", width: 8, height: 8, background: "var(--surface-3)", border: "1px solid var(--line-strong)", borderRadius: 2, marginRight: 6 }}/>{remainLabel} {fmtNum(arRemain)}원</div>
+              </div>
+              <div className="text-xs text-muted2" style={{ marginTop: 10 }}>
+                해지할 때까지 도는 주문이라 채울 총액이 없어요. <b>오늘까지 청구한 돈</b>을 100으로 봅니다
+                {recurring && ' — 회차가 통째로 빠졌는지는 정기 규칙의 회차 이력에서 볼 수 있어요.'}
+              </div>
+            </div>
+            <Spacer h={20}/>
+          </>
+        )
+      })()}
+
       {/* 진행률은 '끝이 있는 주문'에만 의미가 있다. 무기한 주문엔 채워야 할 총액이 없다. */}
       {!openEnded && (
         <>
@@ -2298,12 +2333,20 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
               // 총액은 서버 metrics의 term_total 사용(vat_mode 반영). 화면에서 ×1.1 재계산 금지.
               const total = r.term_total ?? 0;
               const pct = openEnded || total <= 0 ? null : Math.min(100, Math.round(((r.term_collected ?? 0) / total) * 100));
+              /* 무기한 주문도 눈금을 바꾸면 막대를 그릴 수 있다 — 총액이 아니라
+                 '오늘까지 청구한 돈'이 100이다. 숫자만 두 개 적어 두면 두 수를 사람이
+                 머릿속에서 나눠야 해서, 목록을 훑을 때 아무것도 안 읽힌다. */
+              const billedPct = (!openEnded || !(r.billed > 0)) ? null
+                : Math.min(100, Math.round(((r.collected ?? 0) / r.billed) * 100));
               return <>
                 <div className="fw-600">{r.name}</div>
                 <div className="row gap-8" style={{ marginTop: 8 }}>
-                  {pct == null
+                  {pct == null && billedPct == null
                     ? <span className="text-xs text-muted2">청구 {r.billed ? fmtNum(r.billed) : 0}원 · 수금 {fmtNum(r.collected ?? 0)}원</span>
-                    : <><div className="bar-track" style={{ width: 120 }}><div className="bar-fill" style={{ width: `${pct}%` }}/></div><span className="text-xs text-muted2 num">{pct}%</span></>}
+                    : pct == null
+                      // 무기한 — 총액 기준 진행률과 헷갈리지 않게 '청구분' 이라고 밝힌다
+                      ? <><div className="bar-track" style={{ width: 120 }}><div className="bar-fill" style={{ width: `${billedPct}%` }}/></div><span className="text-xs text-muted2 num">청구분 {billedPct}%</span></>
+                      : <><div className="bar-track" style={{ width: 120 }}><div className="bar-fill" style={{ width: `${pct}%` }}/></div><span className="text-xs text-muted2 num">{pct}%</span></>}
                   <span className="text-xs text-muted2">· {billingLabel(r)}/{termLabel(r)}</span>
                 </div>
               </>
