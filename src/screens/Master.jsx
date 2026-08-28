@@ -1034,7 +1034,11 @@ const VendorPanel = ({ embedded = false }) => {
     const matchQ = !q || [v.name, v.biz_no, v.ceo, v.contact, v.phone, v.email,
       v.bank_account, v.account_holder].some(s => s?.includes(q))
     const matchG = !filterGubu || v.gubu === filterGubu
-    const matchA = showInactive || v.active !== 0
+    /* 이 칩은 옆의 전체/발주처/매입처/기관과 **같은 줄에 선 필터**다. 그런데 예전엔
+       '미사용도 포함'이라는 뜻이어서, 켜도 목록 중간에 한 줄이 슬쩍 끼어들 뿐이었다 —
+       거래처가 146개인 회사에서는 **아무 변화가 없어 보인다**("켜도 아무것도 안 보인다").
+       위치와 이름이 필터라고 말하고 있으니 필터로 동작해야 한다. */
+    const matchA = showInactive ? v.active === 0 : v.active !== 0
     return matchQ && matchG && matchA
   })
   const inactiveCount = vendors.filter(v => v.active === 0).length
@@ -1043,9 +1047,21 @@ const VendorPanel = ({ embedded = false }) => {
     const next = v.active === 0
     const res = await api.setVendorActive(v.id, next)
     if (!res.ok) return toast.push(res.error || '변경에 실패했어요', { tone: 'warn' })
+    /* 끈 뒤에도 **일이 남아 있으면 반드시 말한다.** 정기청구는 그대로 돌아 청구서를 만드는데
+       거래처는 선택 목록에서 사라져, 들어온 돈을 붙일 곳이 없어진다(마산시니어클럽이 그랬다). */
+    const p = res.pending
+    const left = p && [
+      p.contracts ? `진행중 주문 ${p.contracts}건` : null,
+      p.recur_in ? `정기 입금 ${p.recur_in}건` : null,
+      p.recur_out ? `정기 출금 ${p.recur_out}건` : null,
+      p.open_invoices ? `미정산 청구서 ${p.open_invoices}건` : null,
+    ].filter(Boolean).join(' · ')
     toast.push(next
       ? `${v.name} 다시 사용해요`
-      : `${v.name} 미사용으로 바꿨어요. 새 거래의 거래처 목록에서 빠지고, 기존 기록은 그대로 남아요`)
+      : p
+        ? `${v.name} 미사용으로 바꿨어요 — 그런데 ${left}이 아직 돌아요. 그건 따로 정리해주세요.`
+        : `${v.name} 미사용으로 바꿨어요. 새 거래의 거래처 목록에서 빠지고, 기존 기록은 그대로 남아요`,
+      (!next && p) ? { tone: 'warn' } : undefined)
     load()
   }
 
@@ -1105,7 +1121,8 @@ const VendorPanel = ({ embedded = false }) => {
         )}
         <div className="row gap-6" style={{ marginLeft: 'auto' }}>
           {['', 'B', 'A', 'E'].map(g => (
-            <button key={g} className={`chip ${filterGubu === g ? 'active' : ''}`} onClick={() => setFilterGubu(g)}>
+            <button key={g} className={`chip ${!showInactive && filterGubu === g ? 'active' : ''}`}
+              onClick={() => { setFilterGubu(g); setShowInactive(false) }}>
               {g === '' ? '전체' : GUBU_LABEL[g]}
             </button>
           ))}

@@ -178,7 +178,10 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   }, [contracts]);
 
   useEffect(() => {
-    api.getVendors().then(setVendors);
+    /* 미사용 거래처까지 받는다(all). 아래 옵션에서 **뒤로 밀고 '미사용'이라 적어** 둔다.
+       빼 버리면 과거 거래에 거래처를 붙이려는 사람이 '아무리 검색해도 안 나오는' 상태가 된다 —
+       왜 없는지 화면이 말해주지 않으니 거래처가 지워진 줄 안다(실제로 그렇게 막혔다). */
+    api.getVendors({ all: true }).then(setVendors);
     /* ⚠ 기본 계좌는 이미 자동으로 골라지고 있었다(`list[0]`). 그런데 그건 **가나다순 첫 줄**이라
        카드가 걸릴 수도 있었다 — 기본 결제수단이 계좌이체인데 카드가 골라져 있는 셈이다.
        주거래 계좌가 지정돼 있으면 그것을, 없으면 통장 중 첫 줄을 쓴다.
@@ -575,10 +578,13 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                   const pool = kind === "income"
                     ? vendors.filter(v => v.gubu === "B")
                     : vendors.filter(v => ["A", "E"].includes(v.gubu))
-                  return pool.map(v => ({
+                  /* 쓰는 거래처가 먼저, 미사용은 뒤로. 미사용을 아예 빼면 '검색해도 안 나온다'가
+                     되고, 섞어 두면 목록이 지저분해진다 — 뒤로 밀고 이유를 적는 게 답이다. */
+                  const rank = (v) => (v.active === 0 ? 1 : 0)
+                  return [...pool].sort((x, y) => rank(x) - rank(y)).map(v => ({
                     value: v.id,
                     label: vendorLabel(v, pool),
-                    sub: [v.type, v.phone].filter(Boolean).join(' · '),
+                    sub: [v.active === 0 ? '미사용' : null, v.type, v.phone].filter(Boolean).join(' · '),
                   }))
                 })()}
                 placeholder={kind === "income" ? "발주처를 검색하거나 선택하세요" : "거래처를 검색하거나 선택하세요"}

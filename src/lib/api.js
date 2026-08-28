@@ -1575,8 +1575,9 @@ export const api = {
 
   async setVendorActive(id, active) {
     try {
-      await req(`/vendors/${id}/active`, { method: 'PATCH', body: { active } })
-      return { ok: true }
+      const r = await req(`/vendors/${id}/active`, { method: 'PATCH', body: { active } })
+      // pending — 끈 뒤에도 남아 도는 일(진행중 주문·활성 정기·미정산 청구서). 화면이 알린다
+      return { ok: true, pending: r?.pending || null }
     } catch (e) { return { ok: false, error: e.message } }
   },
 

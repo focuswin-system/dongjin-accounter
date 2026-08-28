@@ -33,13 +33,32 @@ router.get('/', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// 사용/미사용 전환. 미사용으로 둬도 기존 거래·청구서·주문은 그대로 남는다.
+/* 사용/미사용 전환. 미사용으로 둬도 기존 거래·청구서·주문은 그대로 남는다.
+ *
+ * ⚠ **아직 일이 남은 거래처를 끄면 조용히 어긋난다.** 정기청구는 그대로 돌아 청구서를
+ *   만들어 내는데, 정작 그 거래처는 거래 등록의 선택 목록에서 사라진다 — 들어온 돈을
+ *   붙일 곳이 없어진다(fowin 마산시니어클럽: 진행중 주문 1·활성 정기입금 1을 달고 꺼져 있었고,
+ *   8/25 입금 99,000원이 거래처 없이 떠 있었다).
+ *   막지는 않는다. 끄는 게 맞는 경우도 있다 — 다만 **무엇이 남는지는 말해준다.** */
 router.patch('/:id/active', async (req, res, next) => {
   try {
     const active = req.body.active ? 1 : 0
     const [r] = await req.db.execute('UPDATE vendors SET active = ? WHERE id = ?', [active, req.params.id])
     if (r.affectedRows === 0) return res.status(404).json({ error: '거래처를 찾을 수 없어요' })
-    res.json({ ok: true, active })
+
+    let pending = null
+    if (!active) {
+      const [[c]] = await req.db.execute(`
+        SELECT (SELECT COUNT(*) FROM contracts WHERE vendor_id = ? AND status = '진행중') AS contracts,
+               (SELECT COUNT(*) FROM recurring_invoices WHERE vendor_id = ? AND active = 1) AS recur_in,
+               (SELECT COUNT(*) FROM recurring_expenses WHERE vendor_id = ? AND active = 1) AS recur_out,
+               (SELECT COUNT(*) FROM invoices WHERE vendor_id = ?
+                  AND status IN ('입금 예정','일부 입금','기한 지남','장기 미수','지급 대기','지급 예정','일부 지급')) AS open_invoices`,
+        [req.params.id, req.params.id, req.params.id, req.params.id])
+      const n = Number(c.contracts) + Number(c.recur_in) + Number(c.recur_out) + Number(c.open_invoices)
+      if (n > 0) pending = { ...c, total: n }
+    }
+    res.json({ ok: true, active, pending })
   } catch (e) { next(e) }
 })
 
