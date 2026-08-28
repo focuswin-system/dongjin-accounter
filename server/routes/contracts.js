@@ -228,7 +228,8 @@ const METRIC_COLS = `
             AND (c.current_term_start IS NULL OR i.issued_at >= c.current_term_start)),0) AS term_billed,
   /* 미수금(미지급금) — **청구서 잔액의 합**이다.
    *
-   * 예전엔 `billed − collected`(청구서 합 − 거래 합)로 셌다. 두 집합이 서로 대응하지 않아서
+   * ⚠ 이 주석은 템플릿 리터럴 안에 있다 — 백틱을 쓰면 문자열이 끊겨 서버가 안 뜬다(실제로 그랬다).
+   * 예전엔 'billed − collected'(청구서 합 − 거래 합)로 셌다. 두 집합이 서로 대응하지 않아서
    * 틀린다: 정산 거래에 contract_id 가 안 붙어 있으면 collected 에서만 빠져 **유령 미수금**이
    * 생긴다. fowin 마산시니어클럽이 그랬다 — 청구서 10건이 전부 '입금 완료'인데 타일은
    * 176,000원을 띄웠고, 근거를 펼치면 0건이었다(타일과 내역이 서로 다른 말을 했다).
