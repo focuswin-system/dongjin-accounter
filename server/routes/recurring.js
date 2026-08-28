@@ -228,7 +228,7 @@ const amountModeFor = (v, cur) => (v == null || v === '' ? (cur || 'fixed') : am
  * 두 벌로 두면 한쪽만 고쳐져서 금액·상태가 조용히 달라진다.
  * 호출 전 검사(회차 순서·미래일자·마감)는 라우트가 한다.
  */
-async function createExpenseInvoice(conn, r, target, { paid = false, accountId = null, amount = null, txnId: pickedTxnId = null } = {}) {
+async function createExpenseInvoice(conn, r, target, { paid = false, accountId = null, amount = null, txnId: pickedTxnId = null, forceNew = false } = {}) {
   /* 변동형은 **등록할 때 실제 금액을 받는다**(amount). 규칙의 금액은 예상액일 뿐이라
      그대로 쓰면 틀린 금액이 미지급금으로 잡힌다. 정액형에서도 보내면 그것이 이긴다. */
   const base = (amount != null && amount !== '') ? Math.round(Number(amount) || 0) : r.amount
@@ -371,7 +371,7 @@ router.post('/:id/issue', async (req, res, next) => {
       return res.status(400).json({ error: '금액이 매번 다른 정기지급이에요. 이번 회차 금액을 입력해주세요.' })
     }
     const made = await createExpenseInvoice(conn, r, target,
-      { paid, accountId: account_id, amount: req.body.amount, txnId: req.body.txn_id || null })
+      { paid, accountId: account_id, amount: req.body.amount, txnId: req.body.txn_id || null, forceNew: !!req.body.make_new })
     if (made.error) {
       await rollbackQuietly(conn)
       // 후보가 여럿이라 못 고른 경우는 400 이 아니라 409 — 사용자가 골라 다시 보내야 한다
@@ -486,7 +486,7 @@ router.post('/:id/backfill', async (req, res, next) => {
          만들기 때문에 여기서는 amount 를 갈아끼운 사본을 넘긴다. */
       const rowAmount = Number(c.total_amount) > 0 ? Number(c.total_amount) : Number(r.amount)
       const made = await createExpenseInvoice(conn, { ...r, amount: rowAmount }, due,
-        { paid: !!c.paid, accountId: c.account_id || null, txnId: c.txn_id || null })
+        { paid: !!c.paid, accountId: c.account_id || null, txnId: c.txn_id || null, forceNew: !!c.make_new })
       if (made.error) {
         await rollbackQuietly(conn)
         return res.status(409).json({ error: `${due} 회차 — ${made.error} 아무것도 만들지 않았어요.`, candidates: made.candidates })
