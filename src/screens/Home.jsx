@@ -246,9 +246,11 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
                 {domain.categories.map(cat => {
                   const Cic = cat.icon
                   return (
-                    <button key={cat.id} className="menu-chip" title={cat.desc || ''}
+                    <button key={cat.id} className="menu-tile" title={cat.desc || ''}
                       onClick={() => go(cat.route || cat.id)}>
-                      <Cic size={14}/> <span>{cat.label}</span>
+                      <span className="mt-ico"><Cic size={18}/></span>
+                      <span className="mt-label">{cat.label}</span>
+                      {cat.desc && <span className="mt-desc">{cat.desc}</span>}
                     </button>
                   )
                 })}
@@ -268,13 +270,17 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
           <div className="menu-line-head"><Icon.Folder size={13}/> 기준정보 · 환경설정</div>
           <div className="menu-chips">
             {masterVisible && (
-              <button className="menu-chip" title="거래처·품목·계정과목·계좌·부서 등" onClick={() => go("master")}>
-                <Icon.Folder size={14}/> <span>기준정보</span>
+              <button className="menu-tile" title="거래처·품목·계정과목·계좌·부서 등" onClick={() => go("master")}>
+                <span className="mt-ico"><Icon.Folder size={18}/></span>
+                <span className="mt-label">기준정보</span>
+                <span className="mt-desc">거래처·품목·계정과목·계좌</span>
               </button>
             )}
             {canDo("settings") && (
-              <button className="menu-chip" title="회사 정보·사용자·결재선·월 마감·변경 이력" onClick={() => go("settings")}>
-                <Icon.Cog size={14}/> <span>환경설정</span>
+              <button className="menu-tile" title="회사 정보·사용자·결재선·월 마감·변경 이력" onClick={() => go("settings")}>
+                <span className="mt-ico"><Icon.Cog size={18}/></span>
+                <span className="mt-label">환경설정</span>
+                <span className="mt-desc">회사 정보·사용자·결재선·마감</span>
               </button>
             )}
           </div>

@@ -22,6 +22,15 @@ import { api } from '../api'
 const WEEKS = 6
 const DAYS = WEEKS * 7
 
+const md = (s) => { const [, m, d] = String(s).split('-'); return `${Number(m)}/${Number(d)}` }
+/** 억/만 단위로 줄여 읽는다 — 축 옆에 314,194,945 를 적으면 숫자를 읽느라 모양을 못 본다 */
+const short = (n) => {
+  const v = Math.abs(n)
+  if (v >= 100000000) return `${(n / 100000000).toFixed(1)}억`
+  if (v >= 10000) return `${Math.round(n / 10000).toLocaleString('ko-KR')}만`
+  return n.toLocaleString('ko-KR')
+}
+
 /** 예측선 — 흐름이 있는 날만 점이 된다(계산이 그렇게 되어 있다). 그 사이는 잔액이 그대로다. */
 const Sparkline = ({ from, start, days, height = 96 }) => {
   const pts = [{ date: from, balance: start }, ...days.map(d => ({ date: d.date, balance: d.balance }))]
@@ -54,28 +63,50 @@ const Sparkline = ({ from, start, days, height = 96 }) => {
   const zeroY = py(0)
   const negative = dataLo < 0
 
+  /* 눈금과 라벨이 없으면 **무슨 선인지 알 수 없다**(실제로 "뭔 의미인지 모르겠다"는 말이 나왔다).
+     축 텍스트는 SVG 밖 HTML 로 그린다 — preserveAspectRatio="none" 로 가로를 늘리면
+     SVG 안의 글자도 함께 늘어나 찌그러진다. */
+  const lowPct = (px(xs[lowIdx]) / W) * 100
+
   return (
-    <svg viewBox={`0 0 ${W} ${height}`} preserveAspectRatio="none"
-      style={{ width: '100%', height, display: 'block', overflow: 'visible' }}>
-      <defs>
-        <linearGradient id="cashFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--ink)" stopOpacity="0.14"/>
-          <stop offset="100%" stopColor="var(--ink)" stopOpacity="0"/>
-        </linearGradient>
-      </defs>
-      {/* 0 선 — 아래로 내려가면 돈이 마른다는 뜻이라 다른 눈금과 구분한다 */}
-      {negative && (
-        <line x1="0" y1={zeroY} x2={W} y2={zeroY}
-          stroke="var(--neg)" strokeWidth="0.6" strokeDasharray="2 2" vectorEffect="non-scaling-stroke"/>
-      )}
-      <path d={area} fill="url(#cashFill)"/>
-      <path d={d} fill="none" stroke="var(--ink)" strokeWidth="1.6"
-        strokeLinejoin="round" vectorEffect="non-scaling-stroke"/>
-      {/* 가장 낮은 지점 — 이 화면에서 유일하게 표시할 값이다 */}
-      <circle cx={px(xs[lowIdx])} cy={py(vals[lowIdx])} r="3"
-        fill="#fff" stroke={vals[lowIdx] < 0 ? 'var(--neg)' : 'var(--ink)'} strokeWidth="1.6"
-        vectorEffect="non-scaling-stroke"/>
-    </svg>
+    <div>
+      <div style={{ position: 'relative' }}>
+        <svg viewBox={`0 0 ${W} ${height}`} preserveAspectRatio="none"
+          style={{ width: '100%', height, display: 'block' }}>
+          <defs>
+            <linearGradient id="cashFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--ink)" stopOpacity="0.12"/>
+              <stop offset="100%" stopColor="var(--ink)" stopOpacity="0"/>
+            </linearGradient>
+          </defs>
+          {/* 가장 낮은 값의 가로선 — 점 하나만 찍어두면 그 점이 무슨 높이인지 알 수 없다 */}
+          <line x1="0" y1={py(dataLo)} x2={W} y2={py(dataLo)}
+            stroke="var(--line-strong)" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke"/>
+          {/* 0 선 — 아래로 내려가면 돈이 마른다는 뜻이라 다른 눈금과 구분한다 */}
+          {negative && (
+            <line x1="0" y1={zeroY} x2={W} y2={zeroY}
+              stroke="var(--neg)" strokeWidth="1" strokeDasharray="2 2" vectorEffect="non-scaling-stroke"/>
+          )}
+          <path d={area} fill="url(#cashFill)"/>
+          <path d={d} fill="none" stroke="var(--ink)" strokeWidth="1.8"
+            strokeLinejoin="round" vectorEffect="non-scaling-stroke"/>
+          <circle cx={px(xs[0])} cy={py(vals[0])} r="3" fill="var(--ink)" vectorEffect="non-scaling-stroke"/>
+          <circle cx={px(xs[lowIdx])} cy={py(vals[lowIdx])} r="3.5"
+            fill="#fff" stroke={vals[lowIdx] < 0 ? 'var(--neg)' : 'var(--ink)'} strokeWidth="2"
+            vectorEffect="non-scaling-stroke"/>
+        </svg>
+        {/* 가장 낮은 지점 라벨 — 선 위에 올려 어느 날 얼마인지 바로 읽히게 */}
+        <div className="cash-lowtag" style={{
+          left: `${Math.min(88, Math.max(4, lowPct))}%`,
+          top: `${(py(dataLo) / height) * 100}%`,
+        }}>{short(dataLo)}</div>
+      </div>
+      {/* 가로축 — 오늘부터 언제까지인지 */}
+      <div className="cash-axis">
+        <span>오늘 {md(from)}</span>
+        <span>{md(pts[pts.length - 1].date)}</span>
+      </div>
+    </div>
   )
 }
 
@@ -86,7 +117,7 @@ export const CashPanel = ({ go }) => {
 
   const f = d.forecast || {}
   const low = f.lowest || { date: d.date, balance: d.available }
-  const short = low.balance < 0
+  const negative = low.balance < 0
   const lowIsToday = low.date === d.date
 
   return (
@@ -126,11 +157,12 @@ export const CashPanel = ({ go }) => {
         </div>
 
         <div className="cash-chart">
-          {/* 두 줄로 둔다 — 한 줄에 넣으면 좁은 폭에서 '앞으로 6주 잔액'과 최저값이
-              서로 밀며 겹친다(실제로 그랬다). */}
+          {/* 그림이 무엇인지 **먼저** 말한다. 선만 그려두면 무슨 뜻인지 알 수 없다. */}
           <div style={{ marginBottom: 8 }}>
-            <div className="text-xs text-muted2">앞으로 {WEEKS}주 잔액</div>
-            <div className="text-sm" style={{ marginTop: 2, color: short ? 'var(--neg-ink)' : 'var(--ink)' }}>
+            <div className="text-xs text-muted2">
+              앞으로 {WEEKS}주, 통장 잔액이 이렇게 움직입니다
+            </div>
+            <div className="text-sm" style={{ marginTop: 2, color: negative ? 'var(--neg-ink)' : 'var(--ink)' }}>
               {lowIsToday
                 ? '오늘이 가장 낮아요'
                 : <>가장 낮은 날 <b className="num">{low.date}</b> · <b className="num">{fmtNum(low.balance)}원</b></>}
@@ -138,7 +170,7 @@ export const CashPanel = ({ go }) => {
           </div>
           <Sparkline from={d.date} start={d.available} days={f.days || []}/>
           {/* 마이너스로 내려가는 건 이 화면이 잡아야 할 유일한 경고다 */}
-          {short && (
+          {negative && (
             <div className="text-sm" style={{ color: 'var(--neg-ink)', marginTop: 8 }}>
               이대로면 <b>{low.date}</b>에 잔액이 마이너스가 됩니다.
             </div>
