@@ -2096,3 +2096,12 @@ body:has([data-modal-open]) {
 }
 .mtab:hover { background: var(--surface-2); color: var(--ink); }
 .mtab.active { background: var(--ink); color: #fff; }
+
+/* 바로가기 '추가' 타일 — 늘 끝에 선다. 담은 게 아니라 담는 자리라 점선으로 구분한다. */
+.quick-add .qt-ico {
+  background: transparent; color: var(--muted-2);
+  border: 1.5px dashed var(--line-strong);
+}
+.quick-add .qt-label { color: var(--muted-2); }
+.quick-add:hover .qt-ico { background: var(--surface-3); color: var(--ink); border-color: var(--muted-2); }
+.quick-add:hover .qt-label { color: var(--ink); }

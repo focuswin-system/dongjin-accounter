@@ -42,12 +42,13 @@ export const QuickTiles = ({ go, canDo }) => {
         </button>
       </div>
 
-      {shown.length === 0 ? (
-        <button className="card quick-empty" onClick={() => window.dispatchEvent(new Event('quickdock:edit'))}>
-          <Icon.Plus size={16}/>
-          <span>자주 여는 화면을 담아두세요. 여기와 떠 있는 바로가기에 함께 나타납니다.</span>
-        </button>
-      ) : (
+      {/* 비어 있어도 격자를 그린다 — '추가' 타일이 늘 그 자리에 있어야 담는 법이 보인다 */}
+      <>
+        {shown.length === 0 && (
+          <div className="text-xs text-muted2" style={{ marginBottom: 8 }}>
+            자주 여는 화면을 담아두세요. 여기와 떠 있는 바로가기에 함께 나타납니다.
+          </div>
+        )}
         <div className="quick-tiles">
           {shown.map(l => {
             const leaf = LEAF_BY_ID[l.id]
@@ -59,8 +60,14 @@ export const QuickTiles = ({ go, canDo }) => {
               </button>
             )
           })}
+          {/* '추가'는 **늘 끝에 있다.** 위 '편집'만 두면 담는 길이 제목 줄에 숨어,
+              담아본 적 없는 사람은 이 자리가 늘어난다는 걸 모른다. */}
+          <button className="quick-tile quick-add" onClick={() => window.dispatchEvent(new Event('quickdock:edit'))}>
+            <span className="qt-ico"><Icon.Plus size={22}/></span>
+            <span className="qt-label">추가</span>
+          </button>
         </div>
-      )}
+      </>
     </div>
   )
 }
