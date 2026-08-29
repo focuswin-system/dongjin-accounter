@@ -160,6 +160,14 @@ export const WelcomeWizard = ({ open, userName, onClose, onSave }) => {
         {step === STEP.PICK && (
           <button className="btn" onClick={() => setStep(STEP.INTRO)} disabled={busy}>이전</button>
         )}
+        {/* 빠져나갈 길 — 저장이 실패하거나 지금 정하기 싫은 사람이 갇히면 안 된다.
+            건너뛰면 전부 켜진 채로 시작하고, 환경설정 → 메뉴 관리에서 언제든 정리한다. */}
+        {step !== STEP.DONE && (
+          <button className="btn ghost sm" onClick={async () => {
+            await onSave({ onboarded_at: new Date().toISOString() })
+            onClose()
+          }} disabled={busy}>나중에 할게요</button>
+        )}
         <div style={{ marginLeft: 'auto' }}>
           {step === STEP.INTRO && (
             <button className="btn primary" onClick={() => setStep(STEP.PICK)}>

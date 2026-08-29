@@ -304,15 +304,14 @@ function NoPermission({ title }) {
   );
 }
 
-function AppInner({ onLogout, user }) {
+function AppInner({ onLogout, user, prefs, setPrefs }) {
   // 권한 없는 메뉴는 아예 그리지 않는다. 눌러서 403을 받는 것보다 없는 게 낫다.
   const { perms, can: canDo } = usePerms();
   /* 개인 설정 — '보고 싶나'(내 화면 정리). 권한('볼 수 있나')과 다른 축이라 따로 든다.
      user.prefs 는 /api/auth/me 가 함께 내려준다(따로 부르면 메뉴가 한 번 다 보였다가 접힌다). */
-  const [prefs, setPrefs] = useState(() => user?.prefs || {});
   const navHidden = useMemo(() => {
     try { return JSON.parse(prefs.nav_hidden || '[]') } catch { return [] }
-  }, [prefs.nav_hidden]);
+  }, [prefs?.nav_hidden]);
   const navTree = useMemo(() => foldNav(visibleNav(perms), navHidden), [perms, navHidden]);
   const savePrefs = async (patch) => {
     const res = await api.saveMyPrefs(patch);
@@ -916,8 +915,8 @@ function AppInner({ onLogout, user }) {
       <EvidenceAttachDrawer item={evidenceAttach} onClose={() => setEvidenceAttach(null)}/>
       {/* 첫 로그인 안내 — 딱 한 번. onboarded_at 이 찍히면 다시 뜨지 않는다.
           권한이 아니라 '내 화면 정리'라, 저장도 사람 단위다(회사 단위 아님). */}
-      <WelcomeWizard open={!prefs.onboarded_at} userName={user?.displayName}
-        onSave={savePrefs} onClose={() => {}}/>
+      <WelcomeWizard open={prefs != null && !prefs.onboarded_at} userName={user?.displayName}
+        onSave={savePrefs} onClose={() => setPrefs(p => ({ ...(p || {}), onboarded_at: p?.onboarded_at || "skipped" }))}/>
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onPick={(c) => {
         setCmdOpen(false);
         // 고른 것이 무엇이냐에 따라 열 대상을 함께 넘긴다 — 주문은 그 상세, 청구서는 그 건
@@ -1226,11 +1225,19 @@ export default function App() {
   // null = 아직 못 읽음 → 그 동안은 제한 없이 보여준다(빈 사이드바가 잠깐 번쩍이는 게 더 나쁘다).
   // 어차피 서버가 막으므로 이 짧은 구간에 권한 없는 화면을 눌러도 데이터는 안 나온다.
   const [perms, setPerms] = useState(null);
+  /* 개인 설정도 **여기서** 받는다.
+     user 는 로그인 응답을 localStorage 에 굳혀 둔 것이라 설정이 들어 있지 않다
+     (설정은 나중에 바뀌는 값이라 그 스냅샷에 실을 수도 없다). 서버가 진실인 값은
+     권한과 똑같이 새로고침마다 다시 읽어야 한다 — 안 그러면 저장은 됐는데 화면만
+     원래대로 돌아가고, 첫 안내 마법사가 매번 다시 뜬다(실제로 그랬다).
+     null = 아직 못 읽음. 그 동안은 마법사를 띄우지 않는다 — 이미 마친 사람에게
+     한 번 번쩍였다 사라지는 게 가장 나쁘다. */
+  const [prefs, setPrefs] = useState(null);
   useEffect(() => {
-    if (!loggedIn) { setPerms(null); return; }
+    if (!loggedIn) { setPerms(null); setPrefs(null); return; }
     let alive = true;
     api.me()
-      .then(me => { if (alive) setPerms(me?.perms || {}); })
+      .then(me => { if (alive) { setPerms(me?.perms || {}); setPrefs(me?.prefs || {}); } })
       .catch(() => { /* 실패 시 제한 없음 유지 — 서버 게이트가 최종 판정 */ });
     return () => { alive = false; };
   }, [loggedIn]);
@@ -1264,7 +1271,7 @@ export default function App() {
             ? <LoginScreen onLogin={handleLogin}/>
             : user?.mustChangePw
               ? <ForcePasswordChange user={user} onDone={clearMustChange} onLogout={handleLogout}/>
-              : <AppInner onLogout={handleLogout} user={user}/>}
+              : <AppInner onLogout={handleLogout} user={user} prefs={prefs} setPrefs={setPrefs}/>}
           {/* 배포로 새 버전이 올라왔을 때만 뜬다. 로그인 화면에서도 보여야 한다 —
               옛 번들이 옛 인증 흐름을 타면 로그인 자체가 이상하게 동작할 수 있다. */}
           <UpdateBanner/>
