@@ -174,7 +174,10 @@ const MASTER_SECTIONS = {
     groups: [
       // '문서 양식'(template)은 목업이라 제외. 실동작 항목만.
       { label: "회사", tabs: ["company"] },
-      { label: "시스템", tabs: ["user", "approval", "reports"] },
+      /* '메뉴 관리'는 시스템 묶음에 두되 **성격이 다르다** — 사용자·결재선·보고서는 회사가
+         정하는 것이고, 이건 **내 화면**을 정리하는 것이다. 그래서 화면 안에서 "나에게만
+         적용됩니다"라고 밝힌다. 묶음을 하나 더 세우기엔 항목이 하나뿐이라 과분류다. */
+      { label: "시스템", tabs: ["user", "approval", "reports", "menu"] },
       { label: "장부 마감", tabs: ["closing"] },
       { label: "기록", tabs: ["audit"] },
     ],
