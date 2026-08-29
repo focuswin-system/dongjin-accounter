@@ -2197,17 +2197,31 @@ function vatPeriodOf(quarter, year) {
   return M[quarter] || M.Q1
 }
 
-const ReportVAT = ({ toast }) => {
+const ReportVAT = ({ toast, registerExport }) => {
   const [quarter, setQuarter] = useState("Q2")
   const [vatData, setVatData] = useState(null)
   // getVatSummary 가 올해 기준으로 조회한다 — 기간 표시도 같은 해를 쓴다
-  const vatPeriod = vatPeriodOf(quarter, new Date().getFullYear())
+  const year = new Date().getFullYear()
+  const vatPeriod = vatPeriodOf(quarter, year)
 
   useEffect(() => {
     import('../lib/api').then(({ api }) => {
       api.getVatSummary(quarter).then(setVatData)
     })
   }, [quarter])
+
+  /* 위 '엑셀' 버튼이 **서버가 만든 신고 자료**를 내려주게 한다.
+     등록하지 않으면 화면 표를 긁어 CSV 로 뱉는 공용 경로로 흘러간다(lib/export.js) —
+     서식도 합계도 없고 신고서 순서로 서 있지도 않아, 받는 사람이 결국 손으로 다시 만든다. */
+  useEffect(() => {
+    const download = async () => {
+      const res = await api.downloadVatXlsx(quarter, year)
+      if (!res.ok) toast?.push(res.error || '내려받기에 실패했어요', { tone: 'warn' })
+      return true   // 공용 CSV 경로로 넘어가지 않게 '처리했다'를 알린다
+    }
+    registerExport?.(download)
+    return () => registerExport?.(null)
+  }, [registerExport, quarter, year])
 
   if (!vatData) return <div className="text-muted text-sm" style={{ padding: 24 }}>불러오는 중...</div>
 

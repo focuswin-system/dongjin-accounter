@@ -513,6 +513,32 @@ export const api = {
     } catch (e) { return { ok: false, error: e.message } }
   },
 
+  /* 부가세 신고 자료 — 신고서 칸 순서로 선 엑셀 한 권.
+     예전엔 화면 표를 긁어 CSV 로 뱉었다(서식도 합계도 없었다). */
+  async downloadVatXlsx(quarter, year) {
+    try {
+      const token = localStorage.getItem('token')
+      const qs = new URLSearchParams({ quarter, ...(year ? { year: String(year) } : {}) })
+      const res = await fetch(`${BASE}/reports/vat.xlsx?${qs}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.error || '내려받기에 실패했어요')
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `부가세신고자료_${year || ''}_${quarter}.xlsx`
+      // Firefox는 anchor가 DOM에 있어야 하고, 같은 tick에 revoke하면 진행 중 다운로드가 취소된다
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => { a.remove(); URL.revokeObjectURL(url) }, 0)
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
+
   /* 회사가 자기 보고서를 켜고 끈다(환경설정 > 보고서).
    * 우리가 열어준 것 중에서 고르는 것이지, 안 열린 걸 여는 게 아니다 — 서버가 409로 막는다. */
   async getReportPrefs() {
