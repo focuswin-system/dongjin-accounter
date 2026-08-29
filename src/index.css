@@ -1971,12 +1971,12 @@ body:has([data-modal-open]) {
    테두리를 두르지 않는다. 칸마다 상자를 그리면 격자가 표처럼 보여서
    '고르는 아이콘'이 아니라 '읽는 목록'이 된다. 경계는 hover 때만 나타난다. */
 .quick-tiles {
-  display: grid; gap: 4px;
+  display: grid; gap: 8px;
   grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
 }
 .quick-tile {
-  display: flex; flex-direction: column; align-items: center; gap: 8px;
-  padding: 14px 8px 12px; border-radius: 14px;
+  display: flex; flex-direction: column; align-items: center; gap: 11px;
+  padding: 16px 8px 14px; border-radius: 14px;
   border: 1px solid transparent; background: transparent;
   cursor: pointer; font-family: inherit; text-align: center;
   transition: background .12s, border-color .12s;
@@ -2067,3 +2067,12 @@ body:has([data-modal-open]) {
   display: flex; justify-content: space-between;
   margin-top: 6px; font-size: 11px; color: var(--muted-2);
 }
+
+/* 메뉴 탭 안의 아이콘 격자 — 위 바로가기와 같은 타일을 쓰되 색은 안 쓴다.
+   색은 사용자가 직접 고른 바로가기의 몫이고, 여기까지 색을 쓰면 화면이 알록달록해진다. */
+.menu-icons {
+  display: grid; gap: 8px; padding: 16px 12px;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+}
+.qt-ico.qt-ico-soft { background: var(--surface-2); color: var(--muted); }
+.quick-tile:hover .qt-ico-soft { background: var(--ink); color: #fff; }

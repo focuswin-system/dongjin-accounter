@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Icon, Popover, PopItem, fmtNum } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
@@ -130,6 +130,25 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
      있어서, 홈에서 같은 것을 한 번 더 세우면 자금 카드와 무게를 나눠 가진다.
      ⚠ 데이터도 함께 뺀다 — 화면만 지우고 호출을 남기면 홈을 열 때마다 쓰지 않을 조회가 돈다. */
 
+  /* 메뉴 탭 — 도메인 하나가 탭 하나. 기준정보·환경설정은 성격이 달라 마지막 탭으로 묶는다.
+     권한이 없어 볼 게 없는 탭은 아예 세우지 않는다(눌러서 빈 화면을 보게 하지 않는다). */
+  const menuTabs = useMemo(() => {
+    const tabs = portal
+      .filter(d => d.categories.length > 0)
+      .map(d => ({ id: d.id, label: d.label, items: d.categories }))
+    const base = []
+    if (masterVisible) base.push({ id: 'master', label: '기준정보', icon: Icon.Folder, desc: '거래처·품목·계정과목·계좌·부서 등' })
+    if (canDo('settings')) base.push({ id: 'settings', label: '환경설정', icon: Icon.Cog, desc: '회사 정보·사용자·결재선·월 마감' })
+    if (base.length) tabs.push({ id: '__base', label: '기준 자료', items: base })
+    return tabs
+  }, [portal, masterVisible])
+  const [menuTab, setMenuTab] = useState(null)
+  // 첫 탭을 기본으로. 권한이 바뀌어 그 탭이 사라지면 다시 첫 탭으로 되돌린다.
+  useEffect(() => {
+    if (!menuTabs.length) return
+    if (!menuTab || !menuTabs.some(t => t.id === menuTab)) setMenuTab(menuTabs[0].id)
+  }, [menuTabs, menuTab])
+
 
   return (
     <>
@@ -173,63 +192,37 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
 
       <SetupWizard open={setupOpen} onClose={() => setSetupOpen(false)} onGo={go}/>
 
-      {/* 도메인 라인 → 통일된 카테고리 카드(하위메뉴 나열 없이 깔끔하게, 클릭 시 해당 영역으로)
+      {/* 메뉴 — **탭 하나에 도메인 하나**, 그 안은 큰 아이콘.
        *
-       * ⚠ 여기는 **원래 모양 그대로 둔다.** 한 번 칩으로 줄였다가, 평평한 격자로 깔았다가,
-       *   도메인 카드로 묶었다가 — 셋 다 원래보다 나빴다. 248px 고정폭 큰 타일에
-       *   설명 한 줄이 붙은 이 모양이 이 자리에서 가장 잘 읽힌다. */}
-      {portal.map(domain => {
-        const Dic = domain.icon
-        return (
-          <div key={domain.id} className="domain-line">
-            <div className="domain-line-head">
-              <div className="d-ico"><Dic size={15}/></div>
-              <div className="d-label">{domain.label}</div>
-            </div>
-            <div className="tile-row">
-              {domain.categories.map(cat => {
-                const Cic = cat.icon
-                return (
-                  <button key={cat.id} className="cat-tile" onClick={() => go(cat.route || cat.id)}>
-                    <div className="c-ico"><Cic size={20}/></div>
-                    <div className="c-label">{cat.label}</div>
-                    {cat.desc && <div className="c-desc">{cat.desc}</div>}
-                    <div className="c-go">바로가기 <Icon.Right size={11}/></div>
-                  </button>
-                )
-              })}
-            </div>
+       * 예전엔 도메인 일곱이 세로로 줄줄이 쌓여 홈이 그만큼 길었다(각 줄에 248px 타일들).
+       * 탭으로 접으면 한 화면에 들어오고, 찾는 사람은 어차피 한 덩어리만 본다.
+       * 아이콘 모양은 위 바로가기와 같게 둔다 — 같은 '고르는 자리'가 두 가지 모양이면
+       * 눈이 두 번 배워야 한다. 대신 색은 안 쓴다(색은 사용자가 고른 바로가기의 몫).
+       *
+       * 탭 줄은 좁아지면 가로로 스크롤된다(.tab-bar 가 이미 그렇게 되어 있다) —
+       * 모바일에서 탭이 줄바꿈되며 두세 줄로 부풀지 않는다. */}
+      <div style={{ marginBottom: 24 }}>
+        <div className="text-xs fw-700" style={{ color: 'var(--muted-2)', letterSpacing: '0.02em', marginBottom: 10, padding: '0 2px' }}>메뉴</div>
+        <div className="card" style={{ overflow: 'hidden' }}>
+          <div className="tab-bar" style={{ padding: '0 8px' }}>
+            {menuTabs.map(t => (
+              <button key={t.id} className={`tab${menuTab === t.id ? ' active' : ''}`}
+                onClick={() => setMenuTab(t.id)}>{t.label}</button>
+            ))}
           </div>
-        )
-      })}
-
-      {/* 기준정보·환경설정 — 매일 쓰는 업무 메뉴와 성격이 달라 아래에 따로 세운다(사이드바와 같은 묶음). */}
-      {(masterVisible || canDo("settings")) && (
-        <div className="domain-line" style={{ marginBottom: 0 }}>
-          <div className="domain-line-head">
-            <div className="d-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Folder size={15}/></div>
-            <div className="d-label">기준정보 · 환경설정</div>
-          </div>
-          <div className="tile-row">
-            {masterVisible && (
-              <button className="cat-tile" onClick={() => go("master")}>
-                <div className="c-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Folder size={20}/></div>
-                <div className="c-label">기준정보</div>
-                <div className="c-desc">거래처·품목·계정과목·계좌·부서 등</div>
-                <div className="c-go">바로가기 <Icon.Right size={11}/></div>
-              </button>
-            )}
-            {canDo("settings") && (
-              <button className="cat-tile" onClick={() => go("settings")}>
-                <div className="c-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Cog size={20}/></div>
-                <div className="c-label">환경설정</div>
-                <div className="c-desc">회사 정보·사용자·결재선·월 마감·변경 이력</div>
-                <div className="c-go">바로가기 <Icon.Right size={11}/></div>
-              </button>
-            )}
+          <div className="menu-icons">
+            {(menuTabs.find(t => t.id === menuTab)?.items || []).map(it => {
+              const Ic = it.icon
+              return (
+                <button key={it.id} className="quick-tile" title={it.desc || ''} onClick={() => go(it.route || it.id)}>
+                  <span className="qt-ico qt-ico-soft"><Ic size={24}/></span>
+                  <span className="qt-label">{it.label}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
-      )}
+      </div>
     </div>
     </>
   )
