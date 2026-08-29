@@ -1948,8 +1948,12 @@ const CompanyPanel = ({ embedded = false }) => {
             25일 마감이면 7월분은 6/26~7/25 다 — 달력월로 세면 매입현황 표가 실물과 영영 안 맞는다. */}
         <div>
           <div className="fw-600" style={{ marginBottom: 4 }}>집계 기간</div>
+          {/* ⚠ **어디에 걸리는지**를 적는다. 이름이 '집계 기간'이라 앱 전체에 걸린다고 읽히는데,
+              실제로는 자금 쪽 넷뿐이다(자금 현황·매입매출 현황·자금관리표·세무사 전달용).
+              거래내역·부가세가 달력월인 건 신고 자료와 어긋나면 안 되기 때문이다. */}
           <div className="text-xs text-muted2" style={{ marginBottom: 12 }}>
-            매입·매출 현황을 어느 구간으로 묶을지 정해요. 장부 마감(월 마감)과는 다른 설정이에요.
+            <b>자금 현황·매입·매출 현황</b>과 자금 관련 엑셀에만 적용돼요.
+            거래내역·부가세는 달력월 그대로예요.
           </div>
 
           <div className="row gap-16" style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}>
