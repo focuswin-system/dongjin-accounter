@@ -31,10 +31,15 @@ const Sparkline = ({ from, start, days, height = 96 }) => {
   const x0 = xs[0], x1 = xs[xs.length - 1] || x0 + 1
   const span = Math.max(1, x1 - x0)
   const vals = pts.map(p => p.balance)
-  /* 0 을 반드시 눈금에 넣는다 — 잔액 그래프에서 0 선은 '넘으면 안 되는 선'이라
-     화면 밖에 있으면 위험이 안 보인다. */
-  const hi = Math.max(...vals, 0)
-  const lo = Math.min(...vals, 0)
+  /* 눈금은 **데이터 범위**에 맞춘다.
+     한때 0 을 무조건 눈금에 넣었는데("0 은 넘으면 안 되는 선"), 잔액이 3억이면 0 이 너무 멀어
+     선이 맨 위에 딱 붙어 **아무 변화도 안 보였다**. 위험선이 필요한 경우는 실제로 0 아래로
+     내려갈 때뿐이고, 그때는 0 이 범위 안에 저절로 들어온다. */
+  const dataHi = Math.max(...vals)
+  const dataLo = Math.min(...vals)
+  const padV = Math.max(1, (dataHi - dataLo) * 0.18)   // 위아래 여백 — 선이 테두리에 닿지 않게
+  const hi = dataHi + padV
+  const lo = Math.min(dataLo - padV, dataLo < 0 ? 0 : dataLo - padV)
   const range = Math.max(1, hi - lo)
   const W = 100, pad = 4
   const px = (t) => ((t - x0) / span) * W
@@ -45,9 +50,9 @@ const Sparkline = ({ from, start, days, height = 96 }) => {
   for (let i = 1; i < pts.length; i++) d += ` L ${px(xs[i])} ${py(vals[i - 1])} L ${px(xs[i])} ${py(vals[i])}`
   const area = `${d} L ${px(xs[xs.length - 1])} ${py(lo)} L ${px(xs[0])} ${py(lo)} Z`
 
-  const lowIdx = vals.indexOf(Math.min(...vals))
+  const lowIdx = vals.indexOf(dataLo)
   const zeroY = py(0)
-  const negative = lo < 0
+  const negative = dataLo < 0
 
   return (
     <svg viewBox={`0 0 ${W} ${height}`} preserveAspectRatio="none"
@@ -121,9 +126,11 @@ export const CashPanel = ({ go }) => {
         </div>
 
         <div className="cash-chart">
-          <div className="row" style={{ alignItems: 'baseline', marginBottom: 6 }}>
+          {/* 두 줄로 둔다 — 한 줄에 넣으면 좁은 폭에서 '앞으로 6주 잔액'과 최저값이
+              서로 밀며 겹친다(실제로 그랬다). */}
+          <div style={{ marginBottom: 8 }}>
             <div className="text-xs text-muted2">앞으로 {WEEKS}주 잔액</div>
-            <div className="text-xs ml-auto" style={{ color: short ? 'var(--neg-ink)' : 'var(--muted-2)' }}>
+            <div className="text-sm" style={{ marginTop: 2, color: short ? 'var(--neg-ink)' : 'var(--ink)' }}>
               {lowIsToday
                 ? '오늘이 가장 낮아요'
                 : <>가장 낮은 날 <b className="num">{low.date}</b> · <b className="num">{fmtNum(low.balance)}원</b></>}
