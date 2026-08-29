@@ -199,19 +199,15 @@ export const NAV_TREE = [
      *   (일계표·전표 목록)은 한 목록에 평평하게 두면 대표 쪽 자리의 뜻이 옅어진다.
      *   ⚠ 그때 이름도 다시 본다 — 일계표·전표 목록은 엄밀히 '보고서'가 아니라 장부다. */
     sections: [
+      /* ⓷ 완료 — 잎 여섯(일계표·전표 목록·자금일보·매입 결제내역·매입매출 현황·자금 현황)을
+       * **보고서 카탈로그로 흡수**했다(server/platform/reportCatalog.js, route 항목).
+       * 사이드바는 '보고서' 한 줄이고, 그 안에서 분류 탭으로 갈린다.
+       *
+       * ⚠ 화면과 잎 id 는 그대로 살아 있다 — HIDDEN_LEAVES 로 옮겨 **메뉴에서만** 감춘다.
+       *   그 id 는 권한 자원(RESOURCES)이자 주소·Ctrl+K·바로가기에 담긴 이름이다.
+       *   지우면 사용자가 담아 둔 바로가기와 옛 링크가 통째로 끊긴다. */
       { label: "보고서", items: [
         { id: "report",          label: "보고서",         icon: Icon.Chart },
-        { id: "report_daily",    label: "일계표",         icon: Icon.Book },
-        /* 전표 목록(분개장) — 일계표가 '하루치 집계'라면 이건 '기간 전체를 전표 줄로'.
-           신고철에 세무사에게 넘기거나 회계 프로그램에 올릴 때 쓴다. 그때까지는
-           거래내역 CSV 를 받아 손으로 분개를 만들어야 했다. */
-        { id: "voucher_book",    label: "전표 목록",       icon: Icon.Doc },
-        { id: "cash_report",     label: "자금일보",       icon: Icon.Bank },
-        { id: "payment_run",     label: "매입 결제내역",   icon: Icon.Bank },
-        { id: "purchase_status", label: "매입·매출 현황",  icon: Icon.Chart },
-        /* 자금일보와 같은 데이터, 다른 축 — 자금일보는 오늘부터 N일 롤링(매일 아침 보는 것),
-           자금 현황은 주·월·분기·년 구간(대표가 "이 달에 도나"를 보는 것). */
-        { id: "fund_status",     label: "자금 현황",       icon: Icon.Chart },
       ]},
       { label: "현황", items: [
         { id: "mgmt_dash", label: "경영 대시보드", icon: Icon.Trend },
@@ -347,6 +343,16 @@ export const HIDDEN_LEAVES = [
      비목으로 고르면 되고, 조회는 거래내역에서 한다.
      라우트·권한 자원은 살려 둔다 — 옛 링크와 Ctrl+K('잡수익')가 여전히 들어온다. */
   { id: "misc_income", label: "잡손익", icon: Icon.Trend, domain: "지급처리", section: "지급" },
+
+  /* 보고서 카탈로그로 흡수한 여섯 — 화면·라우트·권한 자원은 그대로다.
+   * 사이드바에서만 뺐고, 경영관리 › 보고서 안에서 분류 탭으로 열린다.
+   * Ctrl+K 로 '일계표'를 찾으면 여전히 바로 열리고, 담아 둔 바로가기도 살아 있다. */
+  { id: "report_daily",    label: "일계표",        icon: Icon.Book,  domain: "경영관리", section: "보고서" },
+  { id: "voucher_book",    label: "전표 목록",      icon: Icon.Doc,   domain: "경영관리", section: "보고서" },
+  { id: "cash_report",     label: "자금일보",      icon: Icon.Bank,  domain: "경영관리", section: "보고서" },
+  { id: "payment_run",     label: "매입 결제내역",  icon: Icon.Bank,  domain: "경영관리", section: "보고서" },
+  { id: "purchase_status", label: "매입·매출 현황", icon: Icon.Chart, domain: "경영관리", section: "보고서" },
+  { id: "fund_status",     label: "자금 현황",      icon: Icon.Chart, domain: "경영관리", section: "보고서" },
 ]
 
 // 잎 id → 소속 도메인 id (활성 도메인 자동 펼침용)
@@ -547,9 +553,11 @@ export const PORTAL = [
   {
     id: 'mgmt', label: '경영관리', icon: Icon.Trend,
     categories: [
-      { id: 'mgmt_report', label: '보고서', icon: Icon.Chart, desc: '보고서·일계표·전표 목록·자금일보·자금 현황·매입 현황', groups: [
-        { label: '', items: ['report', 'report_daily', 'voucher_book', 'cash_report', 'payment_run', 'purchase_status', 'fund_status'] },
-      ]},
+      /* ⓷ 여섯을 보고서 카탈로그로 흡수한 뒤라, 여기도 '보고서' 한 자리로 줄인다.
+         사이드바와 홈이 다른 말을 하면 안 된다 — 홈에만 남으면 "메뉴엔 없는데 홈엔 있다"가 된다.
+         잎들은 살아 있으므로 route: 'report' 로 그 화면을 열고, 안에서 분류 탭으로 찾는다. */
+      { id: 'mgmt_report', label: '보고서', icon: Icon.Chart,
+        desc: '경영 보고·장부(일계표·전표 목록·자금일보)·신고 자료', route: 'report' },
       { id: 'mgmt_biz', label: '현황', icon: Icon.Trend, desc: '경영 대시보드·경영 도우미', groups: [
         { label: '', items: ['mgmt_dash', 'mgmt_ask'] },
       ]},

@@ -632,7 +632,10 @@ try {
   const m = /const REPORT_VIEWS\s*=\s*\{([\s\S]*?)\}/.exec(src)
   if (!m) throw new Error('Docs.jsx 에서 REPORT_VIEWS 를 찾지 못했습니다')
   const viewKeys = new Set([...m[1].matchAll(/([a-zA-Z_][\w]*)\s*:/g)].map(x => x[1]))
-  const catKeys = BUILTIN_REPORTS.map(r => r.key)
+  /* route 를 가진 항목은 **화면이 따로 있다**(이미 잎으로 존재하던 일계표·전표 목록 등).
+     카탈로그에는 목록·분류·회사별 켜고 끄기를 위해 올리지만 REPORT_VIEWS 짝은 없다.
+     화면을 그리로 옮기면 잎 id 가 끊긴다 — 그 id 는 권한 자원이자 주소·검색·바로가기의 이름이다. */
+  const catKeys = BUILTIN_REPORTS.filter(r => !r.route).map(r => r.key)
 
   const noView = catKeys.filter(k => !viewKeys.has(k))
   const noCatalog = [...viewKeys].filter(k => !catKeys.includes(k))

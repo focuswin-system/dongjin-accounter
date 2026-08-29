@@ -601,7 +601,7 @@ function AppInner({ onLogout, user, prefs, setPrefs }) {
       case "cash_report":     return <CashReportScreen/>;
       case "fund_status":     return <FundStatusScreen go={go}/>;
       case "report_daily":    return <DailyTrialScreen/>;
-      case "report":          return <ReportsScreen/>;
+      case "report":          return <ReportsScreen go={go}/>;
       case "tax_vat":         return <TaxVatScreen/>;
       case "tax_etc":         return <OtherTaxScreen/>;
       case "master":          return <MasterScreen user={user} section="base"/>;

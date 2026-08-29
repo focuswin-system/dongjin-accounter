@@ -11,6 +11,7 @@ import { api } from '../lib/api'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
 import { TileBoard } from '../lib/components/TileBoard'
+import { usePerms } from '../lib/perms'
 import { downloadVisibleTables } from '../lib/export'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
@@ -3158,7 +3159,13 @@ const REPORT_VIEWS = {
   loan: ReportLoan, card: ReportCard,
 }
 
-export const ReportsScreen = () => {
+/* 분류를 세우는 순서 — 카탈로그가 주는 이름을 이 순서대로 놓는다.
+   축은 '누가 보는가'다: 대표가 여는 것 → 경리가 매일 쓰는 것 → 밖으로 나가는 것.
+   목록에 없는 이름은 마지막에 '기타'로 붙는다(카탈로그가 늘어도 화면이 안 깨진다). */
+const GROUP_ORDER = ['경영 보고', '장부', '신고·제출', '기타']
+
+export const ReportsScreen = ({ go }) => {
+  const { can: canDo } = usePerms()
   const toast = useToast()
   const [active, setActive] = useState(null)
   const [items, setItems] = useState(null)     // null = 아직 안 불러옴
@@ -3171,8 +3178,13 @@ export const ReportsScreen = () => {
   }, [])
 
   /* 화면이 있는 것만 그린다 — 서버가 먼저 배포돼 아직 없는 key 를 줘도 깨지지 않는다.
-     서버는 이미 '볼 수 있는 것'만 주므로 여기서 권한을 다시 따지지 않는다. */
-  const list = (items || []).filter(r => REPORT_VIEWS[r.key])
+     ⚠ route 를 가진 항목은 **화면이 따로 있으므로**(일계표·전표 목록 등) 여기서 빼면 안 된다.
+       REPORT_VIEWS 만 보고 거르면 흡수한 여섯이 통째로 사라진다. */
+  const list = (items || []).filter(r => r.route || REPORT_VIEWS[r.key])
+  /* 서버는 '이 회사가 살 수 있고 켜 둔 것'만 준다 — 그건 회사 축이다.
+     route 항목은 **사람 축**(권한)도 있다. 그 화면을 못 보는 사람에게 타일을 세우면
+     눌러서 403 을 보게 된다. 잎 id 가 곧 권한 자원이라 그대로 물어보면 된다. */
+  const visibleList = list.filter(r => !r.route || canDo(r.route))
   const report = list.find(r => r.key === active)
   /* 보고서가 스스로 등록한 내려받기 함수. ref 인 이유 — 등록 때문에 껍데기가 다시 그려지면
      그 보고서도 다시 그려지고, 그 안의 effect 가 또 등록해 끝없이 돈다. */
@@ -3232,12 +3244,28 @@ export const ReportsScreen = () => {
         </div>
       ) : (
         /* 기준정보·환경설정과 **같은 부품**을 쓴다(TileBoard). 즐겨찾기·정렬이 붙는다.
-           ⓷ 다음 단계에서 카탈로그에 분류를 넣으면 여기 groups 가 여럿이 되고
-              분류 탭이 저절로 선다 — 지금은 묶음이 하나라 탭을 안 만든다. */
+         *
+         * ⓷ 카탈로그가 분류(group)를 주므로 여기 groups 가 여럿이 되고 분류 탭이 저절로 선다.
+         *   축은 **'누가 보는가'** 다 — 대표가 여는 '경영 보고'와 경리가 매일 쓰는 '장부'를
+         *   평평하게 두면 대표 자리의 뜻이 옅어진다.
+         *
+         * ⚠ route 가 있는 항목은 **화면이 따로 있다**(일계표·전표 목록 등). 여기서 그리지
+         *   않고 그 라우트로 보낸다 — 화면을 REPORT_VIEWS 로 옮기면 잎 id 가 끊기고,
+         *   그 id 는 권한 자원이자 주소·검색·바로가기의 이름이다. */
         <TileBoard
           storageKey="report"
-          groups={[{ label: '', items: list.map(r => ({ id: r.key, title: r.title, desc: r.descr, icon: Icon.Chart })) }]}
-          onPick={(key) => setActive(key)}
+          groups={GROUP_ORDER
+            .map(label => ({ label, items: visibleList.filter(r => (r.group || '기타') === label) }))
+            .filter(g => g.items.length > 0)
+            .map(g => ({
+              label: g.label,
+              items: g.items.map(r => ({ id: r.key, title: r.title, desc: r.descr, icon: r.route ? Icon.Book : Icon.Chart })),
+            }))}
+          onPick={(key) => {
+            const item = list.find(r => r.key === key)
+            if (item?.route) return go ? go(item.route) : undefined
+            setActive(key)
+          }}
           empty="볼 수 있는 보고서가 없어요. 관리자에게 문의하세요."/>
       )}
     </div>
