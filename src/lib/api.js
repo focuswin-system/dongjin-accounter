@@ -1950,6 +1950,15 @@ export const api = {
     } catch(e) { return { ok: false } }
   },
 
+  /** 내 개인 설정 저장 — 감춘 메뉴·첫 안내 완료 시각. 권한이 아니라 '내 화면 정리'다. */
+  async getMyPrefs() {
+    try { return await req('/auth/me/prefs') } catch { return {} }
+  },
+  async saveMyPrefs(patch) {
+    try { const r = await req('/auth/me/prefs', { method: 'PUT', body: patch }); return { ok: true, prefs: r.prefs } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
   async getUsers() {
     try { return await req('/auth/users') } catch { return [] }
   },

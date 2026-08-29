@@ -152,7 +152,53 @@ router.get('/me', authMiddleware, async (req, res, next) => {
     // 화면 가리기는 편의이고 강제는 서버가 한다.
     const { roles, perms } = toClientShape(
       await loadUserPerms(platformPool, { companyId: req.user.companyId, userId: req.user.id }))
-    res.json({ ...rows[0], roles, perms })
+    /* 개인 설정도 함께 — 화면이 첫 그리기 전에 알아야 하는 값이다.
+       따로 부르면 메뉴가 한 번 다 보였다가 접히는 깜빡임이 생긴다. */
+    res.json({ ...rows[0], roles, perms, prefs: await prefsOf(req.user.id) })
+  } catch (e) { next(e) }
+})
+
+/* ── 개인 설정 ─────────────────────────────────────────────────────
+ *
+ * ⚠ 권한과 다른 축이다. 권한은 '볼 수 있나'(관리자가 정하는 통제), 여기는 '보고 싶나'다.
+ *   그래서 여기서 감춘 메뉴도 주소·Ctrl+K 로는 들어갈 수 있고 서버도 막지 않는다 —
+ *   막는 건 권한의 일이다. 이건 화면 정리일 뿐이라 데이터가 사라지는 게 아니다.
+ *
+ * 값은 문자열로 오간다. 화면이 JSON 을 넣으면 그대로 돌려준다(파싱은 화면이 한다) —
+ * 서버가 뜻을 해석하기 시작하면 설정 하나 늘 때마다 서버를 고쳐야 한다.
+ */
+const PREF_KEYS = ['nav_hidden', 'onboarded_at']
+
+async function prefsOf(userId) {
+  const [rows] = await platformPool.execute(
+    'SELECT pref_key, pref_value FROM user_prefs WHERE user_id = ?', [userId])
+  const out = {}
+  for (const r of rows) out[r.pref_key] = r.pref_value
+  return out
+}
+
+router.get('/me/prefs', authMiddleware, async (req, res, next) => {
+  try { res.json(await prefsOf(req.user.id)) } catch (e) { next(e) }
+})
+
+router.put('/me/prefs', authMiddleware, async (req, res, next) => {
+  try {
+    const body = req.body || {}
+    const keys = Object.keys(body).filter(k => PREF_KEYS.includes(k))
+    // 모르는 키는 조용히 버리지 않고 알려준다 — 오타 하나로 설정이 안 먹으면 원인을 못 찾는다
+    const unknown = Object.keys(body).filter(k => !PREF_KEYS.includes(k))
+    if (unknown.length) return res.status(400).json({ error: `알 수 없는 설정: ${unknown.join(', ')}` })
+    for (const k of keys) {
+      const v = body[k] == null ? null : String(typeof body[k] === 'string' ? body[k] : JSON.stringify(body[k]))
+      if (v == null) {
+        await platformPool.execute('DELETE FROM user_prefs WHERE user_id = ? AND pref_key = ?', [req.user.id, k])
+      } else {
+        await platformPool.execute(
+          'INSERT INTO user_prefs (user_id, pref_key, pref_value) VALUES (?,?,?) ON DUPLICATE KEY UPDATE pref_value = VALUES(pref_value)',
+          [req.user.id, k, v])
+      }
+    }
+    res.json({ ok: true, prefs: await prefsOf(req.user.id) })
   } catch (e) { next(e) }
 })
 

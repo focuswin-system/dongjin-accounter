@@ -234,6 +234,40 @@ export const NAV_TREE = [
  *
  * ⚠ 각 항목의 id(=권한 자원)는 그대로 둔다. 위치만 옮기는 것이고 권한 체계는 손대지 않는다.
  */
+/* ── 사람마다 접을 수 있는 대메뉴 ───────────────────────────────────
+ *
+ * ⚠ 권한과 **다른 축**이다. 권한은 '볼 수 있나'(관리자가 정하는 통제),
+ *   이건 '보고 싶나'(내 화면 정리)다. 한 회사에서 회계담당자·영업담당자·대표가
+ *   같이 쓰면 셋이 보는 메뉴가 다르다 — 회사 단위로 감추면 아무도 만족하지 못한다.
+ *
+ * ⚠ 감춰도 **데이터·권한·주소는 그대로다.** 메뉴에서만 빠지고 Ctrl+K·주소로는 들어간다.
+ *   지운 게 아니라 접은 것이라, 되살리는 길(환경설정 → 메뉴 관리)이 늘 있어야 한다.
+ *
+ * 입출금은 목록에 없다 — 이 서비스의 본체라 접을 수 있게 두면 빈 화면이 남는다.
+ * why 는 첫 안내 마법사가 그대로 읽는다: '이걸 켜면 뭐가 좋아지나'를 말한다.
+ */
+export const FOLDABLE_DOMAINS = [
+  { id: "contract_dom", label: "계약관리",
+    why: "수주·발주를 걸어두면 청구서와 입금이 그 주문에 모여 '이 건으로 얼마 받았나'가 바로 보여요." },
+  { id: "hr_dom", label: "인사관리",
+    why: "근로·용역 계약과 급여대장. 급여 지급이 계좌 잔액과 장부에 함께 잡혀요." },
+  { id: "tax_dom", label: "세무관리",
+    why: "부가세 신고 자료를 장부에서 바로 뽑아요. 따로 정리하지 않아도 됩니다." },
+  { id: "office_dom", label: "문서업무",
+    why: "지급결의서·정산내역서·견적요청서 같은 서류를 장부 숫자로 채워서 출력해요." },
+  { id: "finance", label: "재무관리",
+    why: "차입금·투자·예금. 원금과 이자를 나눠 적고 상환 일정까지 따라갑니다." },
+  { id: "mgmt", label: "경영관리",
+    why: "보고서와 경영 현황. 대표가 직접 열어 보는 자리예요." },
+]
+
+/** 감춘 대메뉴를 걷어낸 트리. 감춘 게 없으면 원본을 그대로 돌려준다(불필요한 새 배열 금지). */
+export const foldNav = (tree, hidden) => {
+  if (!hidden || hidden.length === 0) return tree
+  const skip = new Set(hidden)
+  return tree.filter(n => !(n.type === "domain" && skip.has(n.id)))
+}
+
 export const MASTER_LEAF = { id: "master", label: "기준정보", icon: Icon.Folder }
 
 export const MASTER_GROUPS = [
@@ -282,6 +316,10 @@ export const SETTINGS_LEAVES = [
   { id: "settings_user",     label: "사용자 관리",   icon: Icon.Sign },
   { id: "settings_approval", label: "결재선 등록",   icon: Icon.Doc },
   { id: "settings_reports",  label: "보고서 관리",   icon: Icon.Chart },
+  /* 메뉴 관리 — 첫 안내에서 접은 대메뉴를 되살리는 자리. 접는 길만 두고 켜는 길을 안 두면
+     영영 못 되살린다(바로가기 독이 같은 이유로 도움말에 '보이기'를 둔다).
+     ⚠ 이건 **개인 설정**이다 — 권한(관리자가 정하는 통제)과 섞지 않는다. */
+  { id: "settings_menu",     label: "메뉴 관리",     icon: Icon.Menu },
   { id: "settings_closing",  label: "월 마감 설정",  icon: Icon.Bank },
   // 변경 이력 — 회사 마스터만 열린다(서버가 막고, 화면도 마스터가 아니면 타일을 감춘다)
   { id: "settings_audit",    label: "변경 이력 조회", icon: Icon.Doc },

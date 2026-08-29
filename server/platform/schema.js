@@ -12,7 +12,7 @@ const { randomUUID } = require('crypto')
 const PLATFORM_TABLES = [
   'companies', 'users', 'roles', 'user_roles', 'role_perms',
   'platform_admins', 'audit_logs', 'error_logs', 'tenant_migrations',
-  'company_features', 'report_templates',
+  'company_features', 'report_templates', 'user_prefs',
 ]
 
 /**
@@ -50,6 +50,29 @@ async function createPlatformSchema(c) {
       created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       UNIQUE KEY uq_company_user (company_id, username),
       FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+    )
+  `)
+
+  /* ── 사용자 개인 설정 ──
+   *
+   * ⚠ 권한과 **다른 축**이다. 권한은 '볼 수 있나'(관리자가 정하는 통제),
+   *   여기는 '보고 싶나'(내 화면 정리)다. 한 회사에서 회계담당자·영업담당자·대표가
+   *   같이 쓰면 셋의 쓰는 메뉴가 다르다 — 회사 단위로 감추면 아무도 만족하지 못한다.
+   *
+   * ⚠ 기기(localStorage)가 아니라 **서버**에 둔다. 기기에 두면 사무실 PC 와 폰에서
+   *   서로 다른 메뉴가 보인다.
+   *
+   * 값은 문자열(JSON)로 둔다 — 설정마다 컬럼을 늘리면 설정 하나 추가에 스키마가 바뀐다.
+   * 지금 쓰는 키: nav_hidden(감춘 대메뉴 id 배열) · onboarded_at(첫 안내를 마친 시각)
+   */
+  await c.execute(`
+    CREATE TABLE IF NOT EXISTS user_prefs (
+      user_id    VARCHAR(36) NOT NULL,
+      pref_key   VARCHAR(60) NOT NULL,
+      pref_value TEXT,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, pref_key),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `)
 

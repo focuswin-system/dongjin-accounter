@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useRef, Fragment, Component } from 'react
 import logoSymbol from './assets/company/favicon.svg'
 import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider } from './lib/ui'
 import { api, setApiFailureHandler } from './lib/api'
-import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID, MASTER_LEAVES, PORTAL_PAGE_OF_LEAF, NAV_PATH_OF } from './lib/nav'
+import { WelcomeWizard } from './lib/components/WelcomeWizard'
+import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID, MASTER_LEAVES, PORTAL_PAGE_OF_LEAF, NAV_PATH_OF, FOLDABLE_DOMAINS, foldNav } from './lib/nav'
 import { PermCtx, usePerms, visibleNav, visiblePortalNode, withoutMasterOnly } from './lib/perms'
 import { sessionAlive, clearSession } from './lib/session'
 import { UpdateBanner } from './lib/components/UpdateBanner'
@@ -306,7 +307,25 @@ function NoPermission({ title }) {
 function AppInner({ onLogout, user }) {
   // 권한 없는 메뉴는 아예 그리지 않는다. 눌러서 403을 받는 것보다 없는 게 낫다.
   const { perms, can: canDo } = usePerms();
-  const navTree = useMemo(() => visibleNav(perms), [perms]);
+  /* 개인 설정 — '보고 싶나'(내 화면 정리). 권한('볼 수 있나')과 다른 축이라 따로 든다.
+     user.prefs 는 /api/auth/me 가 함께 내려준다(따로 부르면 메뉴가 한 번 다 보였다가 접힌다). */
+  const [prefs, setPrefs] = useState(() => user?.prefs || {});
+  const navHidden = useMemo(() => {
+    try { return JSON.parse(prefs.nav_hidden || '[]') } catch { return [] }
+  }, [prefs.nav_hidden]);
+  const navTree = useMemo(() => foldNav(visibleNav(perms), navHidden), [perms, navHidden]);
+  const savePrefs = async (patch) => {
+    const res = await api.saveMyPrefs(patch);
+    if (res.ok) setPrefs(res.prefs || {});
+    return res;
+  };
+  /* 환경설정 → 메뉴 관리에서 켜고 끈 결과가 **왼쪽 메뉴에 바로** 보여야 한다.
+     저장만 하고 새로고침해야 보이면 사용자는 안 먹은 줄 안다. */
+  useEffect(() => {
+    const on = (e) => setPrefs(p => ({ ...p, nav_hidden: JSON.stringify(e.detail?.nav_hidden || []) }));
+    window.addEventListener('navprefs:changed', on);
+    return () => window.removeEventListener('navprefs:changed', on);
+  }, []);
   /* 기준정보는 15개 화면의 묶음이라, 그중 하나라도 볼 수 있으면 메뉴를 세운다.
      하나도 못 보는 사람에게 빈 페이지로 가는 메뉴를 보여줄 이유가 없다. */
   const masterVisible = useMemo(() => MASTER_LEAVES.some(l => canDo(l.id)), [perms]);
@@ -895,6 +914,10 @@ function AppInner({ onLogout, user }) {
 
       <TransactionForm open={txnForm !== null} kind={txnForm?.kind || "expense"} initialContract={txnForm?.contract} initialCostContract={txnForm?.costContract || null} initialVendor={txnForm?.vendor || null} initialCategory={txnForm?.category || null} initialMemo={txnForm?.memo || null} compact={!!txnForm?.compact} editTxn={txnForm?.txn || null} onClose={() => setTxnForm(null)} onSave={() => setTxnVersion(v => v + 1)}/>
       <EvidenceAttachDrawer item={evidenceAttach} onClose={() => setEvidenceAttach(null)}/>
+      {/* 첫 로그인 안내 — 딱 한 번. onboarded_at 이 찍히면 다시 뜨지 않는다.
+          권한이 아니라 '내 화면 정리'라, 저장도 사람 단위다(회사 단위 아님). */}
+      <WelcomeWizard open={!prefs.onboarded_at} userName={user?.displayName}
+        onSave={savePrefs} onClose={() => {}}/>
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onPick={(c) => {
         setCmdOpen(false);
         // 고른 것이 무엇이냐에 따라 열 대상을 함께 넘긴다 — 주문은 그 상세, 청구서는 그 건

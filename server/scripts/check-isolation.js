@@ -123,6 +123,15 @@ try {
   while ((m = re.exec(navOnly))) navIds.add(m[1])
   navIds.delete('master')   // 기준정보는 잎처럼 생겼지만 타일 묶음이다(settings 와 같은 취급)
 
+  /* 도메인(대메뉴) id 는 **화면이 아니라 묶음**이라 권한 자원이 아니다.
+     NAV_TREE 안에서는 `type: "domain"` 이 붙어 위 정규식이 애초에 안 잡지만,
+     같은 id 를 다른 곳에서 목록으로 다시 적으면(FOLDABLE_DOMAINS — 사람마다 접을 수 있는
+     대메뉴) 잎처럼 걸린다. 목록을 하드코딩해 지우는 대신 **트리에서 도메인 id 를 모아
+     빼낸다** — 도메인이 늘거나 이름이 바뀌어도 이 검사를 따라 고칠 일이 없다. */
+  const domRe = /type:\s*"domain",\s*id:\s*["']([a-zA-Z_][\w]*)["']/g
+  let dm
+  while ((dm = domRe.exec(navSrc))) navIds.delete(dm[1])
+
   // settings_<tab>(회사정보·사용자·결재선·월마감)은 단일 자원 'settings'가 통째로 관장한다
   // (모두 admin 전용 화면). 개별 권한 자원으로 쪼개지 않으므로 카탈로그 대조에서 제외.
   for (const id of [...navIds]) if (id.startsWith('settings_')) navIds.delete(id)

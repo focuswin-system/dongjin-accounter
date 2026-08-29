@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, StatusBadge, Drawer, Combobox, MoneyInput, Loading, DateInput } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
+import { FOLDABLE_DOMAINS } from '../lib/nav'
 import { RecurAuditDrawer } from '../lib/components/RecurAuditDrawer'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
@@ -121,6 +122,7 @@ const MASTER_TABS = [
   { id: "company",         label: "회사 정보", custom: true },
   { id: "template",        label: "문서 양식" },
   { id: "reports",         label: "보고서 관리", custom: true },
+  { id: "menu",            label: "메뉴 관리", custom: true },
   { id: "closing",         label: "월 마감 설정", custom: true },
   { id: "audit",           label: "변경 이력 조회", custom: true },
 ];
@@ -146,7 +148,7 @@ const CUSTOM_PANEL_TABS = new Set([
   "payrollItems", "employType", "accountSubject", "category", "vendor",
   "department", "position", "company", "user", "approval", "jeokyo", "item",
   "insurance", "fixed_asset", "intangible_asset", "evidence_type", "closing", "audit",
-  "reports",
+  "reports", "menu",
 ]);
 
 // 도메인별 기준정보 섹션 (App 라우트: master=base / settings / hr_base=hr)
@@ -4034,6 +4036,78 @@ const AuditPanel = ({ embedded = false }) => {
  * 그래서 주문이 없는 양식은 켤 수 없다(서버가 409). 대신 **끄는 건 무엇이든 된다** —
  * 안 쓰는 보고서를 목록에서 치우는 건 그 회사가 정할 일이고, 목록이 짧아야 쓰는 사람이 찾는다.
  */
+/* 메뉴 관리 — 첫 안내에서 접은 대메뉴를 되살리는 자리.
+ *
+ * ⚠ 권한과 **다른 축**이다. 권한은 '볼 수 있나'(관리자가 정하는 통제),
+ *   여기는 '보고 싶나'(내 화면 정리)다. 그래서 **사람마다 따로 저장**된다 —
+ *   한 회사에서 회계담당자·영업담당자·대표가 같이 쓰면 셋이 보는 메뉴가 다르다.
+ *
+ * ⚠ 꺼도 자료·권한·주소는 그대로다. 메뉴에서만 빠지고 Ctrl+K 로는 그대로 찾아진다.
+ *   그 사실을 화면이 말해야 한다 — 지워지는 줄 알면 아무도 못 끈다.
+ */
+export const MenuPrefPanel = ({ embedded }) => {
+  const toast = useToast()
+  const [hidden, setHidden] = useState(null)   // null = 불러오는 중
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    api.getMyPrefs().then(p => {
+      try { setHidden(JSON.parse(p?.nav_hidden || '[]')) } catch { setHidden([]) }
+    })
+  }, [])
+
+  const toggle = async (id) => {
+    const next = hidden.includes(id) ? hidden.filter(x => x !== id) : [...hidden, id]
+    setBusy(true)
+    const res = await api.saveMyPrefs({ nav_hidden: next })
+    setBusy(false)
+    if (!res.ok) return toast.push(res.error || '저장에 실패했어요', { tone: 'warn' })
+    setHidden(next)
+    /* 켜고 끈 결과가 **왼쪽 메뉴에 바로** 보여야 한다. 저장만 하고 새로고침해야 보이면
+       사용자는 안 먹은 줄 안다 — App 이 이 신호를 받아 트리를 다시 만든다. */
+    window.dispatchEvent(new CustomEvent('navprefs:changed', { detail: { nav_hidden: next } }))
+    toast.push(next.includes(id) ? '메뉴에서 접었어요' : '메뉴에 다시 켰어요')
+  }
+
+  if (hidden === null) return <Loading/>
+
+  return (
+    <div className={embedded ? undefined : 'fade-up'}>
+      {!embedded && <PageHeader title="메뉴 관리"/>}
+      <div className="text-sm text-muted" style={{ marginBottom: 16 }}>
+        안 쓰는 대메뉴는 접어두면 화면이 단순해져요.
+        <b> 접어도 자료는 그대로</b>이고, 검색(Ctrl+K)으로는 계속 찾을 수 있어요.
+        이 설정은 <b>나에게만</b> 적용됩니다.
+      </div>
+      <div className="col gap-8">
+        {/* 늘 켜지는 것을 먼저 — '무엇이 기본인가'를 알려준다 */}
+        <div className="card card-pad row gap-10" style={{ alignItems: 'center', background: 'var(--surface-2)' }}>
+          <Icon.Check size={16} style={{ color: 'var(--pos-ink)', flexShrink: 0 }}/>
+          <div>
+            <div className="fw-700 text-sm">입출금 · 기준정보 · 환경설정</div>
+            <div className="text-xs text-muted2">늘 켜져 있어요. 돈을 적는 자리와 그 바탕이 되는 자료예요.</div>
+          </div>
+        </div>
+        {FOLDABLE_DOMAINS.map(d => {
+          const on = !hidden.includes(d.id)
+          return (
+            <div key={d.id} className="card card-pad row gap-10" style={{ alignItems: 'flex-start' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="fw-700">{d.label}</div>
+                <div className="text-sm text-muted" style={{ marginTop: 2 }}>{d.why}</div>
+              </div>
+              <button className={`btn sm${on ? '' : ' primary'}`} disabled={busy}
+                onClick={() => toggle(d.id)} style={{ flexShrink: 0 }}>
+                {on ? '접기' : '켜기'}
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export const ReportPrefPanel = ({ embedded }) => {
   const toast = useToast()
   const [rows, setRows] = useState(null)
@@ -4168,6 +4242,7 @@ export const MasterScreen = ({ user, section = "base", forcedTab }) => {
     if (activeTab === "user")             return <UserPanel currentUser={user} embedded={single}/>
     if (activeTab === "approval")         return <ApprovalPanel embedded={single}/>
     if (activeTab === "reports")          return <ReportPrefPanel embedded={single}/>
+    if (activeTab === "menu")             return <MenuPrefPanel embedded={single}/>
     if (activeTab === "closing")          return <ClosingPanel embedded={single}/>
     if (activeTab === "audit")            return <AuditPanel embedded={single}/>
     if (activeTab === "department")       return <HrCodePanel type="dept" label="부서" embedded={single}/>
