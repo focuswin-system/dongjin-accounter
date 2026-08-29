@@ -1846,7 +1846,14 @@ const CompanyPanel = ({ embedded = false }) => {
         <button className="btn primary ml-auto" onClick={handleSave}><Icon.Check size={14}/> 저장</button>
       </div>
 
-      <div className="card card-pad col" style={{ gap: 22, maxWidth: 760 }}>
+      {/* 구획을 **카드로 쪼갠다.** 예전엔 카드 하나에 필드를 쭉 잇고 1px 선 다섯 개로만
+          나눴다 — 선 위아래가 무슨 묶음인지 알 수 없고, 필드 라벨과 구획 이름이 거의 같은
+          크기·색이라 위계가 안 섰다.
+          maxWidth 760 도 걷어낸다. 화면이 넓어도 거기서 끊겨 오른쪽이 통째로 비었다.
+          넓으면 두 열, 좁으면 한 열(auto-fit). */}
+      <div className="co-grid">
+        <div className="card card-pad col co-sec" style={{ gap: 18 }}>
+          <div className="co-head">사업자 정보</div>
         <div className="row gap-16" style={{ alignItems:'flex-start' }}>
           <div style={{ flex: 2 }}>
             <label className="label" style={{ marginBottom: 8 }}>상호(법인명) <span style={{ color:'var(--neg-ink)' }}>*</span></label>
@@ -1880,8 +1887,10 @@ const CompanyPanel = ({ embedded = false }) => {
           </div>
         </div>
 
-        <div style={{ height: 1, background:'var(--line)' }}/>
+        </div>
 
+        <div className="card card-pad col co-sec" style={{ gap: 18 }}>
+          <div className="co-head">연락처 · 주소</div>
         <div>
           <label className="label" style={{ marginBottom: 8 }}>사업장 주소</label>
           <input className="input" value={form.address} onChange={e => f('address', e.target.value)} placeholder="경기도 안산시 ..."/>
@@ -1902,8 +1911,10 @@ const CompanyPanel = ({ embedded = false }) => {
           </div>
         </div>
 
-        <div style={{ height: 1, background:'var(--line)' }}/>
+        </div>
 
+        <div className="card card-pad col co-sec" style={{ gap: 18 }}>
+          <div className="co-head">계좌 · 카드</div>
         <div>
           <label className="label" style={{ marginBottom: 8 }}>대표 입금계좌</label>
           <Combobox value={form.main_account} onChange={v => f('main_account', v)} allowAdd={false}
@@ -1911,8 +1922,6 @@ const CompanyPanel = ({ embedded = false }) => {
             placeholder="대표 입금계좌 선택"/>
           <div className="text-xs text-muted2" style={{ marginTop: 6 }}>세금계산서·청구서에 표기할 기본 수금 계좌예요.</div>
         </div>
-
-        <div style={{ height: 1, background:'var(--line)' }}/>
 
         {/* 주거래 계좌·카드 — 업무마다 늘 쓰는 그것을 계좌 선택에서 **앞에 세운다.**
             ⚠ 미리 고르지는 않는다. 자동 선택은 사용자가 확인 없이 지나가게 만들고,
@@ -1942,8 +1951,10 @@ const CompanyPanel = ({ embedded = false }) => {
           </div>
         </div>
 
-        <div style={{ height: 1, background:'var(--line)' }}/>
+        </div>
 
+        <div className="card card-pad col co-sec" style={{ gap: 18 }}>
+          <div className="co-head">집계 · 회계 방식</div>
         {/* 회사가 세는 '한 달'과 '한 주'.
             25일 마감이면 7월분은 6/26~7/25 다 — 달력월로 세면 매입현황 표가 실물과 영영 안 맞는다. */}
         <div>
@@ -1984,10 +1995,8 @@ const CompanyPanel = ({ embedded = false }) => {
           </div>
         </div>
 
-        <div style={{ height: 1, background: 'var(--line)' }}/>
-
         {/* 회계 처리 방식 — 일계표가 무엇을 세는지 정한다.
-            저장 버튼을 거치지 않고 토글 즉시 반영한다(되돌리기 쉬워야 하는 장부 규약). */}
+            저장 버튼을 거치지 않고 즉시 반영한다(되돌리기 쉬워야 하는 장부 규약). */}
         {/* ⚠ **회계 용어를 쓴다.** 켜기/끄기로 두면 무엇을 고르는 건지 알 수 없다 —
             이건 장부의 인식 시점을 정하는 일이고, 그 선택지에는 원래 이름이 있다.
             ⚠ 예전엔 꺼짐 쪽에 '(기본)'이 붙어 있었는데 틀린 표기다. report_prefs 는
@@ -2027,6 +2036,7 @@ const CompanyPanel = ({ embedded = false }) => {
               확인해주세요. 안 되어 있으면 매출이 두 번 잡힙니다.
             </div>
           )}
+        </div>
         </div>
       </div>
     </div>
