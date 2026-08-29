@@ -61,12 +61,23 @@ export const DOCK_COLORS = [
 const bgOf = (c) => (DOCK_COLORS.find(x => x.key === c) || DOCK_COLORS[0]).bg
 const IconOf = (name) => Icon[name] || Icon.Right
 
-const load = () => {
+/* 바로가기 목록은 **한 벌**이다.
+   예전엔 홈의 '자주 찾는 메뉴'(homeFavorites)와 이 독(quickLinks)이 서로 다른 저장소를 써서,
+   독에 담은 것이 홈에 없고 홈에 담은 것이 독에 없었다. 같은 것을 두 곳에서 관리한 셈이다.
+   이제 홈이 이 목록을 그대로 그린다 — 저장은 여기 한 곳. */
+export const QUICK_KEY = KEY
+export const loadQuickLinks = () => {
   try {
     const s = JSON.parse(localStorage.getItem(KEY))
+    if (Array.isArray(s) && s.length) return s
+    /* 옛 홈 즐겨찾기를 한 번 옮겨온다 — 담아 둔 것이 사라지면 '지워졌다'로 읽힌다.
+       모양이 다르다(문자열 id 배열 → { id } 배열). */
+    const old = JSON.parse(localStorage.getItem('homeFavorites'))
+    if (Array.isArray(old) && old.length) return old.filter(x => typeof x === 'string').map(id => ({ id }))
     return Array.isArray(s) ? s : []
   } catch { return [] }
 }
+const load = loadQuickLinks
 
 export const QuickDock = ({ go, route, canDo, onOpenFaq }) => {
   const [open, setOpen] = useState(false)
@@ -78,7 +89,11 @@ export const QuickDock = ({ go, route, canDo, onOpenFaq }) => {
   const [styling, setStyling] = useState(null)   // 아이콘·색을 펼쳐 둔 항목(한 번에 하나만)
   const [dir, setDir] = useState(() => (localStorage.getItem(DIR_KEY) === 'row' ? 'row' : 'column'))
 
-  useEffect(() => { localStorage.setItem(KEY, JSON.stringify(links)) }, [links])
+  useEffect(() => {
+    localStorage.setItem(KEY, JSON.stringify(links))
+    // 홈도 같은 목록을 그린다 — 저장만 하고 알리지 않으면 새로고침해야 반영된다
+    window.dispatchEvent(new CustomEvent('quicklinks:changed', { detail: links }))
+  }, [links])
   useEffect(() => { localStorage.setItem(POS_KEY, JSON.stringify(pos)) }, [pos])
   useEffect(() => { localStorage.setItem(HIDE_KEY, hidden ? '1' : '0') }, [hidden])
   useEffect(() => { localStorage.setItem(DIR_KEY, dir) }, [dir])
@@ -86,7 +101,13 @@ export const QuickDock = ({ go, route, canDo, onOpenFaq }) => {
   useEffect(() => {
     const on = () => setHidden(false)
     window.addEventListener('quickdock:show', on)
-    return () => window.removeEventListener('quickdock:show', on)
+    // 홈의 '바로가기 편집'이 여는 문 — 편집 폼을 두 벌 만들지 않는다
+    const onEdit = () => { setHidden(false); localStorage.removeItem(HIDE_KEY); setEditOpen(true) }
+    window.addEventListener('quickdock:edit', onEdit)
+    return () => {
+      window.removeEventListener('quickdock:show', on)
+      window.removeEventListener('quickdock:edit', onEdit)
+    }
   }, [])
 
   /* 권한 없는 화면은 독에서도 감춘다 — 눌렀을 때 403 만 보게 하지 않는다.

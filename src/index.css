@@ -1965,3 +1965,33 @@ body:has([data-modal-open]) {
   .cash-chart { padding-left: 0; border-left: 0; padding-top: 18px; border-top: 1px solid var(--line); }
   .cash-big { font-size: 27px; }
 }
+
+/* ── 홈 바로가기 타일 ────────────────────────────────────────────────
+   떠 있는 독과 **같은 목록**을 크게 그린다. 홈 맨 위라 아이콘이 글자보다 먼저 읽혀야 한다. */
+.quick-tiles {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+}
+.quick-tile {
+  display: flex; flex-direction: column; gap: 3px; align-items: flex-start;
+  padding: 14px; border-radius: 14px; border: 1px solid var(--line);
+  background: #fff; cursor: pointer; font-family: inherit; text-align: left;
+  transition: border-color .12s, transform .12s, box-shadow .12s;
+}
+.quick-tile:hover {
+  border-color: var(--line-strong); transform: translateY(-1px);
+  box-shadow: 0 6px 18px -12px rgba(11,18,32,0.4);
+}
+.qt-ico {
+  width: 38px; height: 38px; border-radius: 11px; margin-bottom: 6px;
+  display: grid; place-items: center; color: #fff; flex-shrink: 0;
+}
+.qt-label { font-size: 13.5px; font-weight: 700; }
+.qt-sub { font-size: 11px; color: var(--muted-2); }
+.quick-empty {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 16px 18px; cursor: pointer; font-family: inherit;
+  color: var(--muted); font-size: 13px; text-align: left;
+  border-style: dashed;
+}
+.quick-empty:hover { border-color: var(--line-strong); color: var(--ink); }

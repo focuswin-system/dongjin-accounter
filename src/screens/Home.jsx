@@ -6,6 +6,7 @@ import { LEAF_BY_ID, MASTER_LEAVES } from '../lib/nav'
 import { usePerms, visiblePortal, visibleLeaves, isMasterOnly } from '../lib/perms'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { CashPanel } from '../lib/components/CashPanel'
+import { QuickTiles } from '../lib/components/QuickTiles'
 import { SetupWizard, useSetupStatus, setupProgress } from '../lib/components/SetupWizard'
 
 const WEEK_KO = ["일", "월", "화", "수", "목", "금", "토"]
@@ -22,7 +23,6 @@ const TODO_KIND_META = {
   ap:       { icon: <Icon.Bank size={15}/>,    toneColor: 'var(--neg-ink)',  soft: 'var(--neg-soft)' },
 }
 
-const DEFAULT_FAVS = ['income', 'expense', 'billing_issued', 'contract', 'tax_vat']
 
 /* 자금 요약 — 홈에서 매일 보는 네 숫자.
  *
@@ -129,17 +129,11 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
   const portal = visiblePortal(perms)
   // 마스터 전용 화면(변경 이력)은 자원 권한과 별개라 여기서 한 번 더 거른다 —
   // 즐겨찾기·자주 찾는 메뉴에 눌러도 못 들어가는 항목이 뜨면 안 된다.
-  const leaves = visibleLeaves(perms).filter(l => !isMasterOnly(l.id) || user?.role === 'admin')
   // 기준정보는 15개 화면의 묶음이라, 그중 하나라도 볼 수 있으면 타일을 세운다(App 사이드바와 같은 규칙).
   const masterVisible = MASTER_LEAVES.some(l => canDo(l.id))
   const [setupOpen, setSetupOpen] = useState(false)
   const [todos, setTodos] = useState([])
-  const [favorites, setFavorites] = useState(() => {
-    try { const s = JSON.parse(localStorage.getItem('homeFavorites')); return Array.isArray(s) ? s : DEFAULT_FAVS } catch { return DEFAULT_FAVS }
-  })
-
   useEffect(() => { api.getHomeTodos().then(setTodos).catch(() => {}) }, [])
-  useEffect(() => { localStorage.setItem('homeFavorites', JSON.stringify(favorites)) }, [favorites])
 
   // 할 일은 청구서 상태에서 파생된다 — 정산하면 다음 조회에서 자연히 빠지므로 별도 완료표시가 없다
   // 갈 수 없는 화면의 할 일은 보여주지 않는다 — 눌러도 못 가는 항목은 할 일이 아니다
@@ -156,8 +150,6 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
     else if (t.kind === "ap") go("ap", { invoiceId: t.invoiceId })
   }
 
-  const addFav = (id) => setFavorites(f => f.includes(id) ? f : [...f, id])
-  const removeFav = (id) => setFavorites(f => f.filter(x => x !== id))
 
 
   return (
@@ -192,6 +184,9 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
           다 채워지면 조용히 사라진다(끝난 일을 계속 보여주면 그게 잔소리가 된다).
           '자금 현황'보다 위에 두는 이유: 세팅 전에는 자금 숫자가 다 0이라 볼 게 없다. */}
       <SetupCard onOpen={() => setSetupOpen(true)}/>
+
+      {/* 바로가기 — 떠 있는 독과 같은 목록. 자주 여는 화면이 홈 맨 위에 있어야 한다. */}
+      <QuickTiles go={go} canDo={canDo}/>
 
       {/* 자금 현황 — 아침에 제일 먼저 보는 숫자. 자세한 건 자금일보로 들어간다.
           여기 있는 게 도움말(App.jsx)이 말하던 '자금 현황 카드'다 — 문구만 있고 구현이 없었다. */}
@@ -233,46 +228,6 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
             )}
           </div>
         )}
-      </div>
-
-      {/* 자주 찾는 메뉴 */}
-      <div style={{ marginBottom: 26 }}>
-        <div className="text-xs fw-700" style={{ color: "var(--muted-2)", letterSpacing: "0.02em", marginBottom: 10, padding: "0 2px" }}>자주 찾는 메뉴</div>
-        <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
-          {favorites.map(id => {
-            const l = LEAF_BY_ID[id]
-            // 즐겨찾기는 localStorage에 남아 있다 — 권한을 잃은 화면은 조용히 뺀다
-            if (!l || !canDo(id.startsWith("settings") ? "settings" : id)) return null
-            const Ic = l.icon
-            return (
-              <div key={id} className="fav-chip" onClick={() => go(id)}>
-                <Ic className="nav-ico" style={{ width: 15, height: 15, opacity: 0.7 }}/>
-                <span>{l.label}</span>
-                <span className="fav-x" onClick={(e) => { e.stopPropagation(); removeFav(id) }} title="제거"><Icon.Close size={13}/></span>
-              </div>
-            )
-          })}
-          <Popover align="left" width={260}
-            trigger={<button className="fav-chip" style={{ borderStyle: "dashed", color: "var(--muted)" }}><Icon.Plus size={14}/> 추가</button>}>
-            <div style={{ maxHeight: 320, overflowY: "auto", padding: 6 }}>
-              {leaves.map(l => {
-                const active = favorites.includes(l.id)
-                const Ic = l.icon
-                return (
-                  <button key={l.id} data-pop-item onClick={() => active ? removeFav(l.id) : addFav(l.id)}
-                    className="row gap-8" style={{ width: "100%", padding: "8px 10px", border: 0, background: "transparent", cursor: "pointer", fontFamily: "inherit", textAlign: "left", borderRadius: 8 }}
-                    onMouseEnter={e => e.currentTarget.style.background = "var(--surface-2)"}
-                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                    <Ic className="nav-ico" style={{ width: 15, height: 15, opacity: 0.7, flexShrink: 0 }}/>
-                    <span className="text-sm fw-600" style={{ flex: 1 }}>{l.label}</span>
-                    <span className="text-xs text-muted2">{l.domain || ""}</span>
-                    {active && <Icon.Check size={14} style={{ color: "var(--brand)" }}/>}
-                  </button>
-                )
-              })}
-            </div>
-          </Popover>
-        </div>
       </div>
 
       {/* 도메인 라인 → 통일된 카테고리 카드(하위메뉴 나열 없이 깔끔하게, 클릭 시 해당 영역으로) */}
