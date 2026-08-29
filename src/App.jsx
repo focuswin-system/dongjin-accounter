@@ -324,6 +324,12 @@ function AppInner({ onLogout, user, prefs, setPrefs }) {
      닫는 것은 사용자가 정한다. */
   const [wizardOpen, setWizardOpen] = useState(false);
   useEffect(() => { if (prefs != null && !prefs.onboarded_at) setWizardOpen(true) }, [prefs]);
+  // 환경설정 → 메뉴 관리에서도 다시 열 수 있다(도움말과 같은 '다시 보이기')
+  useEffect(() => {
+    const on = () => setWizardOpen(true);
+    window.addEventListener('welcome:show', on);
+    return () => window.removeEventListener('welcome:show', on);
+  }, []);
 
   /* 환경설정 → 메뉴 관리에서 켜고 끈 결과가 **왼쪽 메뉴에 바로** 보여야 한다.
      저장만 하고 새로고침해야 보이면 사용자는 안 먹은 줄 안다. */
@@ -868,6 +874,12 @@ function AppInner({ onLogout, user, prefs, setPrefs }) {
                   onClick={() => window.dispatchEvent(new Event('quickdock:show'))}>
                   <Icon.Eye size={14}/> 바로가기 독 보이기
                 </button>
+                {/* 처음 안내 — 한 번 보고 지나가면 다시 볼 길이 없었다.
+                    '다시 보이기'가 모이는 자리가 여기라 함께 둔다. */}
+                <button className="btn" style={{ width: "100%" }}
+                  onClick={() => setWizardOpen(true)}>
+                  <Icon.Sparkle size={14}/> 처음 안내 다시 보기
+                </button>
               </div>
             </div>
           </Popover>
@@ -922,7 +934,7 @@ function AppInner({ onLogout, user, prefs, setPrefs }) {
       <EvidenceAttachDrawer item={evidenceAttach} onClose={() => setEvidenceAttach(null)}/>
       {/* 첫 로그인 안내 — 딱 한 번. onboarded_at 이 찍히면 다시 뜨지 않는다.
           권한이 아니라 '내 화면 정리'라, 저장도 사람 단위다(회사 단위 아님). */}
-      <WelcomeWizard open={wizardOpen} userName={user?.displayName}
+      <WelcomeWizard open={wizardOpen} userName={user?.displayName} initialOff={navHidden} replay={!!prefs?.onboarded_at}
         onSave={savePrefs} onClose={() => setWizardOpen(false)}/>
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onPick={(c) => {
         setCmdOpen(false);

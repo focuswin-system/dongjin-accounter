@@ -28,11 +28,19 @@ const INTRO_POINTS = [
     desc: '계약·인사·세무·문서·재무·경영은 회사마다 쓰는 범위가 다릅니다. 다음 단계에서 고릅니다.' },
 ]
 
-export const WelcomeWizard = ({ open, userName, onClose, onSave }) => {
+export const WelcomeWizard = ({ open, userName, initialOff, replay, onClose, onSave }) => {
   const toast = useToast()
   const [step, setStep] = useState(STEP.INTRO)
   const [off, setOff] = useState([])
   const [busy, setBusy] = useState(false)
+
+  /* 열릴 때마다 처음부터. 다시 보기로 연 경우 이전에 고른 상태가 남아 있으면
+     지금 화면과 다른 말을 한다 — **지금 접혀 있는 그대로**를 보여주고 시작한다. */
+  useEffect(() => {
+    if (!open) return
+    setStep(STEP.INTRO)
+    setOff(Array.isArray(initialOff) ? initialOff : [])
+  }, [open])
 
   /* 열려 있는 동안 뒤 화면이 스크롤되면 안 된다 — 전면 화면인데 뒤가 움직이면
      덮은 게 아니라 떠 있는 것처럼 보인다. */
@@ -56,7 +64,10 @@ export const WelcomeWizard = ({ open, userName, onClose, onSave }) => {
     setStep(STEP.DONE)
   }
 
+  /* 첫 실행에서는 '나중에' 를 눌러도 끝난 것으로 표시한다 — 안 그러면 다음 로그인에 또 뜬다.
+     다시 보기로 연 경우에는 이미 끝난 것이라 그냥 닫는다(표시를 새로 쓸 이유가 없다). */
   const skip = async () => {
+    if (replay) return onClose()
     setBusy(true)
     await onSave({ onboarded_at: new Date().toISOString() })
     setBusy(false)
@@ -157,7 +168,7 @@ export const WelcomeWizard = ({ open, userName, onClose, onSave }) => {
             <button className="btn" onClick={() => setStep(STEP.INTRO)} disabled={busy}>이전</button>
           )}
           {step !== STEP.DONE && (
-            <button className="btn ghost" onClick={skip} disabled={busy}>나중에 하기</button>
+            <button className="btn ghost" onClick={skip} disabled={busy}>{replay ? '닫기' : '나중에 하기'}</button>
           )}
           <div style={{ marginLeft: 'auto' }}>
             {step === STEP.INTRO && (

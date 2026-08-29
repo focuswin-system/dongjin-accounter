@@ -4107,6 +4107,17 @@ export const MenuPrefPanel = ({ embedded }) => {
           )
         })}
       </div>
+      {/* 처음 안내를 다시 보는 길. 한 번 보고 지나가면 무엇을 고른 건지, 왜 접었는지
+          되짚을 방법이 없었다 — DB 를 손대는 것 말고는 다시 볼 수가 없었다. */}
+      <div className="row" style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--line)' }}>
+        <div className="text-sm text-muted">
+          처음 로그인할 때 나오는 안내를 다시 볼 수 있어요.
+        </div>
+        <button className="btn sm ml-auto"
+          onClick={() => window.dispatchEvent(new Event('welcome:show'))}>
+          <Icon.Sparkle size={14}/> 처음 안내 다시 보기
+        </button>
+      </div>
     </div>
   )
 }
