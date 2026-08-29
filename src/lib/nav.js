@@ -248,17 +248,17 @@ export const NAV_TREE = [
  */
 export const FOLDABLE_DOMAINS = [
   { id: "contract_dom", label: "계약관리", icon: Icon.Briefcase,
-    why: "수주·발주를 걸어두면 청구서와 입금이 그 주문에 모여 '이 건으로 얼마 받았나'가 바로 보여요." },
+    why: "수주·발주 단위로 청구와 입금을 묶어 건별 수익을 확인합니다." },
   { id: "hr_dom", label: "인사관리", icon: Icon.Building,
-    why: "근로·용역 계약과 급여대장. 급여 지급이 계좌 잔액과 장부에 함께 잡혀요." },
+    why: "근로·용역 계약과 급여대장. 급여 지급이 계좌 잔액과 장부에 반영됩니다." },
   { id: "tax_dom", label: "세무관리", icon: Icon.Doc,
-    why: "부가세 신고 자료를 장부에서 바로 뽑아요. 따로 정리하지 않아도 됩니다." },
-  { id: "office_dom", label: "문서업무", icon: Icon.Doc,
-    why: "지급결의서·정산내역서·견적요청서 같은 서류를 장부 숫자로 채워서 출력해요." },
+    why: "부가세 신고 자료를 장부에서 바로 산출합니다." },
+  { id: "office_dom", label: "문서업무", icon: Icon.Sign,
+    why: "지급결의서·정산내역서·견적요청서를 장부 데이터로 작성·출력합니다." },
   { id: "finance", label: "재무관리", icon: Icon.Bank,
-    why: "차입금·투자·예금. 원금과 이자를 나눠 적고 상환 일정까지 따라갑니다." },
+    why: "차입금·투자·예금. 원금과 이자를 구분해 기록하고 상환 일정을 관리합니다." },
   { id: "mgmt", label: "경영관리", icon: Icon.Trend,
-    why: "보고서와 경영 현황. 대표가 직접 열어 보는 자리예요." },
+    why: "보고서와 경영 현황을 한자리에서 봅니다." },
 ]
 
 /** 감춘 대메뉴를 걷어낸 트리. 감춘 게 없으면 원본을 그대로 돌려준다(불필요한 새 배열 금지). */
