@@ -2105,3 +2105,15 @@ body:has([data-modal-open]) {
 .quick-add .qt-label { color: var(--muted-2); }
 .quick-add:hover .qt-ico { background: var(--surface-3); color: var(--ink); border-color: var(--muted-2); }
 .quick-add:hover .qt-label { color: var(--ink); }
+
+/* 회계 처리 방식 — 켜기/끄기가 아니라 **둘 중 하나를 고르는** 자리다.
+   나란히 세워야 무엇과 무엇 사이에서 고르는 건지 보이고, 기본이 어느 쪽인지도 읽힌다. */
+.acct-basis { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.acct-opt {
+  display: flex; flex-direction: column; gap: 3px; align-items: flex-start;
+  padding: 12px 14px; border-radius: 12px; border: 1.5px solid var(--line);
+  background: #fff; cursor: pointer; font-family: inherit; text-align: left;
+  transition: border-color .12s, background .12s;
+}
+.acct-opt:hover { border-color: var(--line-strong); }
+.acct-opt.on { border-color: var(--ink); background: var(--surface-2); }

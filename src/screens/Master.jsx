@@ -1988,37 +1988,43 @@ const CompanyPanel = ({ embedded = false }) => {
 
         {/* 회계 처리 방식 — 일계표가 무엇을 세는지 정한다.
             저장 버튼을 거치지 않고 토글 즉시 반영한다(되돌리기 쉬워야 하는 장부 규약). */}
+        {/* ⚠ **회계 용어를 쓴다.** 켜기/끄기로 두면 무엇을 고르는 건지 알 수 없다 —
+            이건 장부의 인식 시점을 정하는 일이고, 그 선택지에는 원래 이름이 있다.
+            ⚠ 예전엔 꺼짐 쪽에 '(기본)'이 붙어 있었는데 틀린 표기다. report_prefs 는
+            **행이 없으면 켜짐**이 규약이라 시스템 기본은 발생주의다(routes/company.js). */}
         <div>
           <label className="label" style={{ marginBottom: 8 }}>회계 처리 방식</label>
-          <div className="row gap-10" style={{ alignItems: 'flex-start' }}>
-            <button type="button"
-              className={`chip ${acctPrefs.voucher_issuance ? 'active' : ''}`}
-              onClick={async () => {
-                const next = !acctPrefs.voucher_issuance
-                setAcctPrefs(p => ({ ...p, voucher_issuance: next }))
-                const res = await api.setAccountingPref('voucher_issuance', next)
-                if (!res.ok) {
-                  setAcctPrefs(p => ({ ...p, voucher_issuance: !next }))   // 실패하면 되돌린다
-                  toast.push(res.error || '바꾸지 못했어요', { tone: 'warn' })
-                } else {
-                  toast.push(next ? '청구서 발행분도 일계표에 셉니다' : '돈이 오간 거래만 셉니다')
-                }
-              }}>
-              청구서 발행 시점도 장부에 올리기
-            </button>
+          <div className="acct-basis">
+            {[
+              { on: true,  name: '발생주의', sub: '세금계산서를 끊은 날 매출·매입으로 잡아요', std: true },
+              { on: false, name: '현금주의', sub: '통장에 돈이 오간 날에만 잡아요' },
+            ].map(o => (
+              <button key={o.name} type="button"
+                className={`acct-opt${acctPrefs.voucher_issuance === o.on ? ' on' : ''}`}
+                onClick={async () => {
+                  if (acctPrefs.voucher_issuance === o.on) return
+                  setAcctPrefs(p => ({ ...p, voucher_issuance: o.on }))
+                  const res = await api.setAccountingPref('voucher_issuance', o.on)
+                  if (!res.ok) {
+                    setAcctPrefs(p => ({ ...p, voucher_issuance: !o.on }))   // 실패하면 되돌린다
+                    toast.push(res.error || '바꾸지 못했어요', { tone: 'warn' })
+                  } else {
+                    toast.push(`${o.name}로 바꿨어요`)
+                  }
+                }}>
+                <span className="row gap-6" style={{ alignItems: 'center' }}>
+                  <b>{o.name}</b>
+                  {o.std && <span className="badge outline" style={{ fontSize: 10 }}>기본</span>}
+                </span>
+                <span className="text-xs text-muted2">{o.sub}</span>
+              </button>
+            ))}
           </div>
-          <div className="text-xs text-muted2" style={{ marginTop: 6, lineHeight: 1.7 }}>
-            {acctPrefs.voucher_issuance
-              ? <>켜짐 · 청구서를 <b>발행한 날</b>에 받을 돈(외상매출금)이 생기고, 입금될 때 사라지는 것으로 봐요.
-                  두 시점이 다 잡혀야 장부가 맞습니다.</>
-              : <>꺼짐(기본) · <b>돈이 실제로 오간 거래만</b> 셉니다. 은행 기준으로 전표를 끊는 방식이에요.</>}
-          </div>
-          {/* 켜기 전에 무엇을 정리해야 하는지 먼저 알린다 — 모르고 켜면 매출이 두 번 잡힌다 */}
+          {/* 바꾸기 전에 무엇을 정리해야 하는지 — 모르고 바꾸면 매출이 두 번 잡힌다 */}
           {!acctPrefs.voucher_issuance && (
-            <div className="text-xs text-muted2" style={{ marginTop: 8, lineHeight: 1.7, paddingLeft: 10, borderLeft: '2px solid var(--line)' }}>
-              켜시기 전에 두 가지를 확인해주세요.<br/>
-              · <b>매입 청구서에 비목</b>이 들어 있어야 해요. 없으면 그 청구서는 장부에 못 올라갑니다(일계표가 알려줘요).<br/>
-              · 청구서와 입금 거래를 <b>정산으로 연결</b>해두셔야 해요. 따로 두면 매출이 두 번 잡힙니다.
+            <div className="text-xs text-muted2" style={{ marginTop: 8, lineHeight: 1.6 }}>
+              발생주의로 바꾸기 전에 <b>매입 청구서의 비목</b>과 <b>청구서–입금 정산 연결</b>을
+              확인해주세요. 안 되어 있으면 매출이 두 번 잡힙니다.
             </div>
           )}
         </div>
