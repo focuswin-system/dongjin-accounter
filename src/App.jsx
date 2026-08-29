@@ -318,6 +318,13 @@ function AppInner({ onLogout, user, prefs, setPrefs }) {
     if (res.ok) setPrefs(res.prefs || {});
     return res;
   };
+  /* 첫 안내는 **한 번 열리면 끝까지 간다.**
+     여는 조건을 prefs 로 직접 걸면, 저장하는 순간 onboarded_at 이 찍혀 조건이 꺼지고
+     마지막 '완료' 단계가 통째로 건너뛰어진다(실제로 그랬다). 여는 것만 prefs 가 정하고
+     닫는 것은 사용자가 정한다. */
+  const [wizardOpen, setWizardOpen] = useState(false);
+  useEffect(() => { if (prefs != null && !prefs.onboarded_at) setWizardOpen(true) }, [prefs]);
+
   /* 환경설정 → 메뉴 관리에서 켜고 끈 결과가 **왼쪽 메뉴에 바로** 보여야 한다.
      저장만 하고 새로고침해야 보이면 사용자는 안 먹은 줄 안다. */
   useEffect(() => {
@@ -915,8 +922,8 @@ function AppInner({ onLogout, user, prefs, setPrefs }) {
       <EvidenceAttachDrawer item={evidenceAttach} onClose={() => setEvidenceAttach(null)}/>
       {/* 첫 로그인 안내 — 딱 한 번. onboarded_at 이 찍히면 다시 뜨지 않는다.
           권한이 아니라 '내 화면 정리'라, 저장도 사람 단위다(회사 단위 아님). */}
-      <WelcomeWizard open={prefs != null && !prefs.onboarded_at} userName={user?.displayName}
-        onSave={savePrefs} onClose={() => setPrefs(p => ({ ...(p || {}), onboarded_at: p?.onboarded_at || "skipped" }))}/>
+      <WelcomeWizard open={wizardOpen} userName={user?.displayName}
+        onSave={savePrefs} onClose={() => setWizardOpen(false)}/>
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onPick={(c) => {
         setCmdOpen(false);
         // 고른 것이 무엇이냐에 따라 열 대상을 함께 넘긴다 — 주문은 그 상세, 청구서는 그 건
