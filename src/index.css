@@ -1985,7 +1985,10 @@ body:has([data-modal-open]) {
 .qt-ico {
   width: 52px; height: 52px; border-radius: 16px;
   display: grid; place-items: center; color: #fff; flex-shrink: 0;
+  /* 전환이 없으면 hover 에 배경이 툭 바뀐다 — 색이 크게 뛰는 자리라 더 눈에 띈다 */
+  transition: background .18s ease, color .18s ease, transform .18s ease;
 }
+.quick-tile:hover .qt-ico { transform: translateY(-1px); }
 .qt-label {
   font-size: 13px; font-weight: 600; line-height: 1.3; color: var(--ink);
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
@@ -2076,3 +2079,20 @@ body:has([data-modal-open]) {
 }
 .qt-ico.qt-ico-soft { background: var(--surface-2); color: var(--muted); }
 .quick-tile:hover .qt-ico-soft { background: var(--ink); color: #fff; }
+
+/* 홈 메뉴 탭 — 알약형. 전역 .tab(밑줄형)은 다른 화면이 전부 쓰므로 건드리지 않는다.
+   여기서는 '지금 어느 묶음을 보고 있나'가 한눈에 들어와야 해서 밑줄로는 약하다. */
+.mtabs {
+  display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none;
+  padding: 12px 12px 12px; border-bottom: 1px solid var(--line);
+}
+.mtabs::-webkit-scrollbar { display: none; }
+.mtab {
+  padding: 8px 14px; border-radius: 999px; border: 1px solid transparent;
+  background: transparent; color: var(--muted);
+  font-family: inherit; font-size: 13px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  transition: background .14s ease, color .14s ease, border-color .14s ease;
+}
+.mtab:hover { background: var(--surface-2); color: var(--ink); }
+.mtab.active { background: var(--ink); color: #fff; }

@@ -204,9 +204,11 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
       <div style={{ marginBottom: 24 }}>
         <div className="text-xs fw-700" style={{ color: 'var(--muted-2)', letterSpacing: '0.02em', marginBottom: 10, padding: '0 2px' }}>메뉴</div>
         <div className="card" style={{ overflow: 'hidden' }}>
-          <div className="tab-bar" style={{ padding: '0 8px' }}>
+          {/* 전역 .tab(밑줄형)은 다른 화면이 전부 쓰므로 건드리지 않고 전용 알약형을 쓴다.
+              여기서는 '지금 어느 묶음을 보고 있나'가 한눈에 들어와야 해서 밑줄로는 약하다. */}
+          <div className="mtabs">
             {menuTabs.map(t => (
-              <button key={t.id} className={`tab${menuTab === t.id ? ' active' : ''}`}
+              <button key={t.id} className={`mtab${menuTab === t.id ? ' active' : ''}`}
                 onClick={() => setMenuTab(t.id)}>{t.label}</button>
             ))}
           </div>
