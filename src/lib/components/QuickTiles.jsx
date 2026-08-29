@@ -54,9 +54,8 @@ export const QuickTiles = ({ go, canDo }) => {
             const Ic = Icon[l.icon] || leaf.icon || Icon.Right
             return (
               <button key={l.id} className="quick-tile" onClick={() => go(l.id)}>
-                <span className="qt-ico" style={{ background: bgOf(l.color) }}><Ic size={19}/></span>
+                <span className="qt-ico" style={{ background: bgOf(l.color) }}><Ic size={24}/></span>
                 <span className="qt-label">{leaf.label}</span>
-                <span className="qt-sub">{leaf.domain || ''}</span>
               </button>
             )
           })}
