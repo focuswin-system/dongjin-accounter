@@ -2124,7 +2124,9 @@ body:has([data-modal-open]) {
    maxWidth 도 걷어냈다 — 화면이 넓어도 760px 에서 끊겨 오른쪽이 통째로 비었다. */
 .co-grid {
   display: grid; gap: 14px; align-items: start;
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  /* 한 칸 안에 입력칸 두 개가 나란히 서야 한다(업태·종목) — 480 아래로 내려가면
+     칸이 눌리므로 그 전에 한 열로 떨어뜨린다 */
+  grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
 }
 .co-sec { min-width: 0; }
 .co-head {

@@ -1854,35 +1854,39 @@ const CompanyPanel = ({ embedded = false }) => {
       <div className="co-grid">
         <div className="card card-pad col co-sec" style={{ gap: 18 }}>
           <div className="co-head">사업자 정보</div>
-        <div className="row gap-16" style={{ alignItems:'flex-start' }}>
-          <div style={{ flex: 2 }}>
+        <div className="row gap-16" style={{ alignItems:'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ flex: 2, minWidth: 240 }}>
             <label className="label" style={{ marginBottom: 8 }}>상호(법인명) <span style={{ color:'var(--neg-ink)' }}>*</span></label>
             <input className="input" value={form.name} onChange={e => f('name', e.target.value)} placeholder="도니도라 주식회사"/>
           </div>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 160 }}>
             <label className="label" style={{ marginBottom: 8 }}>대표자</label>
             <input className="input" value={form.ceo} onChange={e => f('ceo', e.target.value)} placeholder="홍길동"/>
           </div>
         </div>
 
-        <div className="row gap-16" style={{ alignItems:'flex-start' }}>
-          <div style={{ flex: 1 }}>
-            <label className="label" style={{ marginBottom: 8 }}>사업자등록번호</label>
-            <input className="input num" value={form.biz_no} onChange={e => f('biz_no', e.target.value)} placeholder="000-00-00000"/>
-          </div>
-          {/* 업태·종목은 사업자등록증에 적힌 문구를 그대로 옮기는 칸이다. 자유 입력이라
-              같은 뜻을 여러 표기로 쓰게 되므로(소프트웨어개발/소프트웨어 개발/SW개발)
-              표준 목록에서 고르게 하되, 목록에 없으면 직접 입력도 된다. */}
-          <div style={{ flex: 1 }}>
+        {/* ⚠ 칸마다 **필요한 폭이 다르다.** 사업자등록번호는 자릿수가 고정이라 짧고,
+            업태·종목은 자유 입력이라 길다. 셋을 한 줄에 3등분하면 긴 칸이 눌려
+            안내 글자가 두 줄로 접힌다 — 줄을 갈라 각자에게 필요한 만큼 준다. */}
+        <div style={{ maxWidth: 260 }}>
+          <label className="label" style={{ marginBottom: 8 }}>사업자등록번호</label>
+          <input className="input num" value={form.biz_no} onChange={e => f('biz_no', e.target.value)} placeholder="000-00-00000"/>
+        </div>
+
+        {/* 업태·종목은 사업자등록증에 적힌 문구를 그대로 옮기는 칸이다. 자유 입력이라
+            같은 뜻을 여러 표기로 쓰게 되므로(소프트웨어개발/소프트웨어 개발/SW개발)
+            표준 목록에서 고르게 하되, 목록에 없으면 직접 입력도 된다. */}
+        <div className="row gap-16" style={{ alignItems:'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 240 }}>
             <label className="label" style={{ marginBottom: 8 }}>업태</label>
             <Combobox value={form.biz_type} onChange={v => f('biz_type', v)}
-              options={bizTypeOptions()} placeholder="업태 선택 또는 직접 입력"
+              options={bizTypeOptions()} placeholder="선택 또는 직접 입력"
               onAddNew={q => f('biz_type', q)} addNewLabel="직접 입력"/>
           </div>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 240 }}>
             <label className="label" style={{ marginBottom: 8 }}>종목</label>
             <Combobox value={form.biz_item} onChange={v => f('biz_item', v)}
-              options={bizItemOptions(form.biz_type)} placeholder="종목 선택 또는 직접 입력"
+              options={bizItemOptions(form.biz_type)} placeholder="선택 또는 직접 입력"
               onAddNew={q => f('biz_item', q)} addNewLabel="직접 입력"/>
           </div>
         </div>
@@ -1896,19 +1900,21 @@ const CompanyPanel = ({ embedded = false }) => {
           <input className="input" value={form.address} onChange={e => f('address', e.target.value)} placeholder="경기도 안산시 ..."/>
         </div>
 
-        <div className="row gap-16" style={{ alignItems:'flex-start' }}>
-          <div style={{ flex: 1 }}>
+        {/* 전화·팩스는 자릿수가 정해져 있어 짧고, 이메일은 길다 — 셋을 3등분하지 않는다 */}
+        <div className="row gap-16" style={{ alignItems:'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 200 }}>
             <label className="label" style={{ marginBottom: 8 }}>대표 전화</label>
             <input className="input" value={form.phone} onChange={e => f('phone', e.target.value)} placeholder="031-000-0000"/>
           </div>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 200 }}>
             <label className="label" style={{ marginBottom: 8 }}>팩스</label>
             <input className="input" value={form.fax} onChange={e => f('fax', e.target.value)} placeholder="031-000-0001"/>
           </div>
-          <div style={{ flex: 1 }}>
-            <label className="label" style={{ marginBottom: 8 }}>이메일</label>
-            <input className="input" value={form.email} onChange={e => f('email', e.target.value)} placeholder="info@dongjin.co.kr"/>
-          </div>
+        </div>
+
+        <div>
+          <label className="label" style={{ marginBottom: 8 }}>이메일</label>
+          <input className="input" value={form.email} onChange={e => f('email', e.target.value)} placeholder="info@dongjin.co.kr"/>
         </div>
 
         </div>
