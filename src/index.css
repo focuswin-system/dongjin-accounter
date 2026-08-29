@@ -1841,3 +1841,98 @@ body:has([data-modal-open]) {
   .topbar-user-name { display: none; }
   .topbar-user { padding: 4px; border-color: transparent; }
 }
+
+/* ── 첫 로그인 안내(전면) ────────────────────────────────────────────
+   드로어가 아니다. 옆에서 슬쩍 나오는 서랍은 '하던 일에 곁들이는 것'의 모양인데,
+   이건 서비스의 첫인상이라 화면 전체를 쓰고 한 번에 한 가지만 묻는다. */
+.wz {
+  position: fixed; inset: 0; z-index: 60;
+  background: #fff;
+  overflow-y: auto;
+  animation: fadeUp .2s ease both;
+}
+.wz-inner {
+  max-width: 760px; margin: 0 auto;
+  min-height: 100%; padding: 40px 24px 24px;
+  display: flex; flex-direction: column;
+}
+.wz-dots { display: flex; gap: 6px; justify-content: center; margin-bottom: 36px; }
+.wz-dot {
+  width: 6px; height: 6px; border-radius: 999px; background: var(--line-strong);
+  transition: width .22s ease, background .22s ease;
+}
+.wz-dot.done { background: var(--ink); }
+.wz-dot.on { width: 20px; background: var(--ink); }
+
+.wz-stage { flex: 1; display: flex; flex-direction: column; gap: 28px; }
+.wz-stage-center { align-items: center; text-align: center; }
+.wz-head { display: flex; flex-direction: column; gap: 8px; animation: wzUp .34s ease both; }
+.wz-title { font-size: 27px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.3; color: var(--ink); }
+.wz-sub { font-size: 14.5px; color: var(--muted); line-height: 1.6; }
+
+/* 한 줄씩 올라오게 — 한꺼번에 나타나면 읽는 순서가 정해지지 않는다 */
+@keyframes wzUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.wz-stagger > * { animation: wzUp .34s ease both; }
+.wz-stagger > *:nth-child(1) { animation-delay: .06s; }
+.wz-stagger > *:nth-child(2) { animation-delay: .12s; }
+.wz-stagger > *:nth-child(3) { animation-delay: .18s; }
+.wz-stagger > *:nth-child(4) { animation-delay: .24s; }
+.wz-stagger > *:nth-child(5) { animation-delay: .30s; }
+.wz-stagger > *:nth-child(6) { animation-delay: .36s; }
+
+.wz-points { display: flex; flex-direction: column; gap: 20px; }
+.wz-point { display: flex; gap: 14px; align-items: flex-start; text-align: left; }
+.wz-point-ico {
+  width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
+  background: var(--surface-2); color: var(--ink);
+  display: grid; place-items: center;
+}
+.wz-point-title { font-size: 15px; font-weight: 700; margin-bottom: 3px; }
+.wz-point-desc { font-size: 13.5px; color: var(--muted); line-height: 1.6; }
+
+/* 고르는 카드 — 아이콘을 크게 세워 '무엇에 대한 선택인지'가 글보다 먼저 읽히게 */
+.wz-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.wz-card {
+  position: relative; text-align: left; font-family: inherit; cursor: pointer;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 18px 16px; border-radius: 14px;
+  border: 1.5px solid var(--line); background: #fff;
+  transition: border-color .14s, box-shadow .14s, opacity .14s;
+}
+.wz-card:hover { border-color: var(--line-strong); }
+.wz-card.on { border-color: var(--ink); box-shadow: 0 1px 0 var(--ink) inset; }
+.wz-card:not(.on) { opacity: 0.5; }
+.wz-card-ico {
+  width: 44px; height: 44px; border-radius: 12px; margin-bottom: 4px;
+  background: var(--surface-2); color: var(--muted);
+  display: grid; place-items: center; transition: background .14s, color .14s;
+}
+.wz-card.on .wz-card-ico { background: var(--ink); color: #fff; }
+.wz-card-title { font-size: 15.5px; font-weight: 700; }
+.wz-card-desc { font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+.wz-card-check {
+  position: absolute; top: 14px; right: 14px;
+  width: 20px; height: 20px; border-radius: 999px;
+  border: 1.5px solid var(--line-strong); background: #fff;
+  display: grid; place-items: center; color: #fff;
+}
+.wz-card.on .wz-card-check { background: var(--ink); border-color: var(--ink); }
+
+.wz-note { font-size: 12.5px; color: var(--muted-2); }
+.wz-done-mark {
+  width: 64px; height: 64px; border-radius: 999px;
+  background: var(--pos-soft); color: var(--pos-ink);
+  display: grid; place-items: center;
+  animation: nudgePop .3s ease both;
+}
+.wz-foot {
+  display: flex; align-items: center; gap: 8px;
+  padding-top: 28px; margin-top: 28px; border-top: 1px solid var(--line);
+}
+.wz-cta { padding: 11px 20px; font-size: 14.5px; }
+
+@media (max-width: 640px) {
+  .wz-inner { padding: 28px 18px 18px; }
+  .wz-title { font-size: 22px; }
+  .wz-grid { grid-template-columns: 1fr; }
+}

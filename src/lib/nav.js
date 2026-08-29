@@ -247,17 +247,17 @@ export const NAV_TREE = [
  * why 는 첫 안내 마법사가 그대로 읽는다: '이걸 켜면 뭐가 좋아지나'를 말한다.
  */
 export const FOLDABLE_DOMAINS = [
-  { id: "contract_dom", label: "계약관리",
+  { id: "contract_dom", label: "계약관리", icon: Icon.Briefcase,
     why: "수주·발주를 걸어두면 청구서와 입금이 그 주문에 모여 '이 건으로 얼마 받았나'가 바로 보여요." },
-  { id: "hr_dom", label: "인사관리",
+  { id: "hr_dom", label: "인사관리", icon: Icon.Building,
     why: "근로·용역 계약과 급여대장. 급여 지급이 계좌 잔액과 장부에 함께 잡혀요." },
-  { id: "tax_dom", label: "세무관리",
+  { id: "tax_dom", label: "세무관리", icon: Icon.Doc,
     why: "부가세 신고 자료를 장부에서 바로 뽑아요. 따로 정리하지 않아도 됩니다." },
-  { id: "office_dom", label: "문서업무",
+  { id: "office_dom", label: "문서업무", icon: Icon.Doc,
     why: "지급결의서·정산내역서·견적요청서 같은 서류를 장부 숫자로 채워서 출력해요." },
-  { id: "finance", label: "재무관리",
+  { id: "finance", label: "재무관리", icon: Icon.Bank,
     why: "차입금·투자·예금. 원금과 이자를 나눠 적고 상환 일정까지 따라갑니다." },
-  { id: "mgmt", label: "경영관리",
+  { id: "mgmt", label: "경영관리", icon: Icon.Trend,
     why: "보고서와 경영 현황. 대표가 직접 열어 보는 자리예요." },
 ]
 
