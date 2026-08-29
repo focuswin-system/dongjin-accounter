@@ -173,53 +173,63 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
 
       <SetupWizard open={setupOpen} onClose={() => setSetupOpen(false)} onGo={go}/>
 
-      {/* 메뉴 바로가기 — **도메인을 카드로 묶고, 그 안에 링크를 줄로.**
+      {/* 도메인 라인 → 통일된 카테고리 카드(하위메뉴 나열 없이 깔끔하게, 클릭 시 해당 영역으로)
        *
-       * 두 번 헛짚었다.
-       *   ① 도메인마다 가로 줄을 나눴더니 항목이 하나뿐인 도메인(세무·인사·문서)에서
-       *      오른쪽이 통째로 비었다.
-       *   ② 그래서 평평한 한 격자에 다 깔았더니 열넷이 나란히 서서 정신없었다 — 묶음이
-       *      사라지니 무엇이 무엇의 하위인지 읽히지 않는다.
-       * 카드로 묶으면 둘 다 풀린다. 짧은 도메인은 작은 카드로 남아 빈칸을 만들지 않고,
-       * 묶음이 눈에 보여 훑을 때 덩어리로 읽힌다. */}
-      <div style={{ marginBottom: 24 }}>
-        <div className="text-xs fw-700" style={{ color: 'var(--muted-2)', letterSpacing: '0.02em', marginBottom: 10, padding: '0 2px' }}>메뉴 바로가기</div>
-        <div className="menu-grid">
-          {portal.map(domain => {
-            const Dic = domain.icon
-            return (
-              <div key={domain.id} className="menu-card">
-                <div className="mc-head"><span className="mc-ico"><Dic size={15}/></span>{domain.label}</div>
-                {domain.categories.map(cat => {
-                  const Cic = cat.icon
-                  return (
-                    <button key={cat.id} className="mc-item" title={cat.desc || ''}
-                      onClick={() => go(cat.route || cat.id)}>
-                      <Cic size={15}/><span>{cat.label}</span><Icon.Right size={12} className="mc-go"/>
-                    </button>
-                  )
-                })}
-              </div>
-            )
-          })}
-          {/* 기준정보·환경설정 — 매일 쓰는 업무 메뉴와 성격이 달라 한 카드로 따로 묶는다 */}
-          {(masterVisible || canDo("settings")) && (
-            <div className="menu-card">
-              <div className="mc-head"><span className="mc-ico"><Icon.Folder size={15}/></span>기준 자료</div>
-              {masterVisible && (
-                <button className="mc-item" title="거래처·품목·계정과목·계좌·부서 등" onClick={() => go("master")}>
-                  <Icon.Folder size={15}/><span>기준정보</span><Icon.Right size={12} className="mc-go"/>
-                </button>
-              )}
-              {canDo("settings") && (
-                <button className="mc-item" title="회사 정보·사용자·결재선·월 마감·변경 이력" onClick={() => go("settings")}>
-                  <Icon.Cog size={15}/><span>환경설정</span><Icon.Right size={12} className="mc-go"/>
-                </button>
-              )}
+       * ⚠ 여기는 **원래 모양 그대로 둔다.** 한 번 칩으로 줄였다가, 평평한 격자로 깔았다가,
+       *   도메인 카드로 묶었다가 — 셋 다 원래보다 나빴다. 248px 고정폭 큰 타일에
+       *   설명 한 줄이 붙은 이 모양이 이 자리에서 가장 잘 읽힌다. */}
+      {portal.map(domain => {
+        const Dic = domain.icon
+        return (
+          <div key={domain.id} className="domain-line">
+            <div className="domain-line-head">
+              <div className="d-ico"><Dic size={15}/></div>
+              <div className="d-label">{domain.label}</div>
             </div>
-          )}
+            <div className="tile-row">
+              {domain.categories.map(cat => {
+                const Cic = cat.icon
+                return (
+                  <button key={cat.id} className="cat-tile" onClick={() => go(cat.route || cat.id)}>
+                    <div className="c-ico"><Cic size={20}/></div>
+                    <div className="c-label">{cat.label}</div>
+                    {cat.desc && <div className="c-desc">{cat.desc}</div>}
+                    <div className="c-go">바로가기 <Icon.Right size={11}/></div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
+
+      {/* 기준정보·환경설정 — 매일 쓰는 업무 메뉴와 성격이 달라 아래에 따로 세운다(사이드바와 같은 묶음). */}
+      {(masterVisible || canDo("settings")) && (
+        <div className="domain-line" style={{ marginBottom: 0 }}>
+          <div className="domain-line-head">
+            <div className="d-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Folder size={15}/></div>
+            <div className="d-label">기준정보 · 환경설정</div>
+          </div>
+          <div className="tile-row">
+            {masterVisible && (
+              <button className="cat-tile" onClick={() => go("master")}>
+                <div className="c-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Folder size={20}/></div>
+                <div className="c-label">기준정보</div>
+                <div className="c-desc">거래처·품목·계정과목·계좌·부서 등</div>
+                <div className="c-go">바로가기 <Icon.Right size={11}/></div>
+              </button>
+            )}
+            {canDo("settings") && (
+              <button className="cat-tile" onClick={() => go("settings")}>
+                <div className="c-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Cog size={20}/></div>
+                <div className="c-label">환경설정</div>
+                <div className="c-desc">회사 정보·사용자·결재선·월 마감·변경 이력</div>
+                <div className="c-go">바로가기 <Icon.Right size={11}/></div>
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
     </>
   )
