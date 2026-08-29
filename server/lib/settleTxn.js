@@ -47,23 +47,38 @@ async function settleInvoiceTxn(conn, {
   const doneStatus = income ? '입금완료' : '지급완료'
   const total = Number(amount) || 0
 
+  /* 붙일 거래를 **잠그고** 다시 확인한다.
+   *
+   * invoice_matches.txn_id 에는 유일 제약이 없다. 잠그지 않고 "안 붙었나?"만 읽으면,
+   * 두 사람이 동시에 정산할 때 **같은 입금이 두 청구서에 붙는다** — 받은 돈이 두 배로
+   * 잡히고, 화면 어디에도 경고가 없다(이 저장소가 상환·정산에서 이미 겪은 유형).
+   * 후보를 고르는 쪽(openTxnCandidates)은 미리보기에서도 쓰이므로 잠그지 않는다.
+   * 실제로 쓰기 직전인 여기서만 잠근다. */
+  const lockPickable = async (id) => {
+    const [[t]] = await conn.execute(
+      `SELECT t.id, t.account_id FROM transactions t
+         LEFT JOIN invoice_matches m ON m.txn_id = t.id
+        WHERE t.id = ? AND t.kind = ? AND t.amount = ? AND t.invoice_id IS NULL AND m.id IS NULL
+        FOR UPDATE`,
+      [id, kind, total])
+    return t || null
+  }
+
   let reuse = null
   if (txnId) {
     /* 화면이 고른 거래 — 여기서 다시 확인한다. 미리보기와 저장 사이에 다른 사람이
        그 거래를 가져갔을 수 있고, 그때 조용히 새 거래를 만들면 또 이중이 된다. */
-    const [[t]] = await conn.execute(
-      `SELECT t.id, t.account_id FROM transactions t
-         LEFT JOIN invoice_matches m ON m.txn_id = t.id
-        WHERE t.id = ? AND t.kind = ? AND t.amount = ? AND t.invoice_id IS NULL AND m.id IS NULL`,
-      [txnId, kind, total])
-    if (!t) return { error: `${date} 회차에 붙이려던 거래를 쓸 수 없어요. 그 사이 다른 청구서에 붙었는지 확인하고 미리보기를 다시 해주세요.` }
-    reuse = t
+    reuse = await lockPickable(txnId)
+    if (!reuse) return { error: `${date} 회차에 붙이려던 거래를 쓸 수 없어요. 그 사이 다른 청구서에 붙었는지 확인하고 미리보기를 다시 해주세요.` }
   } else if (!forceNew) {
     /* forceNew — 화면에서 후보를 보고도 '새로 만들기'를 고른 경우다. 사람이 보고 정했으면
        그대로 따른다(별건 입금이 같은 금액으로 찍히는 일은 실제로 있다). */
     const cands = await openTxnCandidates(conn, { kind, vendorId, amount: total, date })
-    if (cands.length === 1) reuse = cands[0]
-    else if (cands.length > 1) {
+    if (cands.length === 1) {
+      // 고른 뒤에도 잠그고 다시 본다 — 읽은 순간과 쓰는 순간 사이에 누가 가져갈 수 있다
+      reuse = await lockPickable(cands[0].id)
+      if (!reuse) return { error: `${date} 회차에 붙이려던 거래를 그 사이 다른 청구서가 가져갔어요. 다시 시도해주세요.` }
+    } else if (cands.length > 1) {
       return {
         candidates: cands,
         /* 고르는 자리가 없는 화면(회차 '기입금 처리')에서도 다음 수가 보이게 적는다 —

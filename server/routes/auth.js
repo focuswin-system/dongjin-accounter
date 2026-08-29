@@ -168,6 +168,7 @@ router.get('/me', authMiddleware, async (req, res, next) => {
  * 서버가 뜻을 해석하기 시작하면 설정 하나 늘 때마다 서버를 고쳐야 한다.
  */
 const PREF_KEYS = ['nav_hidden', 'onboarded_at']
+const PREF_MAX_LEN = 4000
 
 async function prefsOf(userId) {
   const [rows] = await platformPool.execute(
@@ -189,7 +190,15 @@ router.put('/me/prefs', authMiddleware, async (req, res, next) => {
     const unknown = Object.keys(body).filter(k => !PREF_KEYS.includes(k))
     if (unknown.length) return res.status(400).json({ error: `알 수 없는 설정: ${unknown.join(', ')}` })
     for (const k of keys) {
-      const v = body[k] == null ? null : String(typeof body[k] === 'string' ? body[k] : JSON.stringify(body[k]))
+      let v
+      try {
+        v = body[k] == null ? null : String(typeof body[k] === 'string' ? body[k] : JSON.stringify(body[k]))
+      } catch { return res.status(400).json({ error: `${k} 값을 읽을 수 없어요` }) }
+      /* 길이를 막는다. TEXT 라 64KB 를 넘으면 조용히 잘리거나 저장이 터지는데,
+         여기 담기는 건 감춘 메뉴 몇 개·시각 문자열이라 이 한도를 넘을 이유가 없다. */
+      if (v != null && v.length > PREF_MAX_LEN) {
+        return res.status(400).json({ error: `${k} 값이 너무 길어요` })
+      }
       if (v == null) {
         await platformPool.execute('DELETE FROM user_prefs WHERE user_id = ? AND pref_key = ?', [req.user.id, k])
       } else {

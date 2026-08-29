@@ -13,15 +13,22 @@ const assert = require('node:assert')
 
 const { settleInvoiceTxn } = require('../lib/settleTxn')
 
-/** SQL 조각으로 무엇을 묻는지 가려내는 가짜 커넥션 */
-const fakeConn = ({ candidates = [], pickable = null }) => {
+/** SQL 조각으로 무엇을 묻는지 가려내는 가짜 커넥션
+ *
+ * ⚠ 쓰기 직전의 확인 질의는 **FOR UPDATE 로 행을 잠근다**(같은 입금이 두 청구서에
+ *   붙는 경합을 막는다). 그래서 그 질의는 후보 찾기와 따로 답해야 한다.
+ *   pickable 을 안 주면 '자동으로 고른 그 후보'가 그대로 잠긴 것으로 본다. */
+const fakeConn = ({ candidates = [], pickable, lockFails = false }) => {
   const calls = []
   return {
     calls,
     async execute(sql, params) {
       calls.push({ sql: sql.replace(/\s+/g, ' ').trim(), params })
-      if (sql.includes('FROM transactions t') && sql.includes('WHERE t.id = ?')) {
-        return [pickable ? [pickable] : []]          // 화면이 고른 거래를 다시 확인하는 질의
+      if (sql.includes('FOR UPDATE')) {
+        if (lockFails) return [[]]
+        if (pickable !== undefined) return [pickable ? [pickable] : []]
+        // 잠그려는 id 와 같은 후보를 돌려준다 — 실제 DB 도 그렇게 답한다
+        return [candidates.filter(c => c.id === params[0])]
       }
       if (sql.includes('FROM transactions t')) return [candidates]   // 후보 찾기
       return [{ affectedRows: 1 }]
@@ -82,6 +89,22 @@ test('사람이 보고 새로 만들기를 고르면(forceNew) 후보가 있어�
   const r = await settleInvoiceTxn(conn, { ...base, amount: 77000, date: '2026-07-25', forceNew: true })
   assert.equal(r.reused, false)
   assert.ok(conn.calls.some(c => c.sql.startsWith('INSERT INTO transactions')))
+})
+
+test('붙일 거래는 잠그고 쓴다 — 안 그러면 같은 입금이 두 청구서에 붙는다', async () => {
+  const conn = fakeConn({ candidates: [{ id: 'txn-real', date: '2026-03-03', amount: 132000, account_id: 'acc-9' }] })
+  await settleInvoiceTxn(conn, base)
+  const lock = conn.calls.find(c => c.sql.includes('FOR UPDATE'))
+  assert.ok(lock, 'invoice_matches.txn_id 에 유일 제약이 없다 — 행을 잠그지 않으면 경합에 뚫린다')
+  assert.equal(lock.params[0], 'txn-real')
+})
+
+test('고른 뒤 그 사이 누가 가져갔으면 새로 만들지 않고 멈춘다', async () => {
+  // 후보는 보였는데 잠글 때는 이미 없어진 경우 — 조용히 새 거래를 만들면 또 이중이 된다
+  const conn = fakeConn({ candidates: [{ id: 'txn-real', date: '2026-03-03', amount: 132000, account_id: 'acc-9' }], lockFails: true })
+  const r = await settleInvoiceTxn(conn, base)
+  assert.ok(r.error)
+  assert.ok(!conn.calls.some(c => c.sql.startsWith('INSERT INTO')))
 })
 
 test('화면이 고른 거래가 그 사이 다른 청구서에 붙었으면 만들지 않고 멈춘다', async () => {
