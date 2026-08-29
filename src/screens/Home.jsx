@@ -231,30 +231,32 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
       </div>
 
       {/* 도메인 라인 → 통일된 카테고리 카드(하위메뉴 나열 없이 깔끔하게, 클릭 시 해당 영역으로) */}
-      {portal.map(domain => {
-        const Dic = domain.icon
-        return (
-          <div key={domain.id} className="domain-line">
-            <div className="domain-line-head">
-              <div className="d-ico"><Dic size={15}/></div>
-              <div className="d-label">{domain.label}</div>
+      {/* 메뉴 바로가기 — **압축한다.**
+          예전엔 도메인 제목이 16px/800 에 타일마다 설명과 '바로가기 ›'가 붙어, 홈에서 가장
+          무거운 덩어리였다. 그러면 정작 주인공인 자금이 묻힌다. 여기는 '어디로 갈까'를
+          고르는 자리지 설명을 읽는 자리가 아니다 — 설명은 첫 안내와 사이드바가 맡는다. */}
+      <div style={{ marginBottom: 24 }}>
+        <div className="text-xs fw-700" style={{ color: 'var(--muted-2)', letterSpacing: '0.02em', marginBottom: 10, padding: '0 2px' }}>메뉴 바로가기</div>
+        {portal.map(domain => {
+          const Dic = domain.icon
+          return (
+            <div key={domain.id} className="menu-line">
+              <div className="menu-line-head"><Dic size={13}/> {domain.label}</div>
+              <div className="menu-chips">
+                {domain.categories.map(cat => {
+                  const Cic = cat.icon
+                  return (
+                    <button key={cat.id} className="menu-chip" title={cat.desc || ''}
+                      onClick={() => go(cat.route || cat.id)}>
+                      <Cic size={14}/> <span>{cat.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
-            <div className="tile-row">
-              {domain.categories.map(cat => {
-                const Cic = cat.icon
-                return (
-                  <button key={cat.id} className="cat-tile" onClick={() => go(cat.route || cat.id)}>
-                    <div className="c-ico"><Cic size={20}/></div>
-                    <div className="c-label">{cat.label}</div>
-                    {cat.desc && <div className="c-desc">{cat.desc}</div>}
-                    <div className="c-go">바로가기 <Icon.Right size={11}/></div>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        )
-      })}
+          )
+        })}
+      </div>
 
       {/* 기준정보·환경설정 — 매일 쓰는 업무 메뉴와 성격이 달라 아래에 따로 세운다(사이드바와 같은 묶음).
        *
@@ -262,27 +264,17 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
        * 사이드바에만 세우고 **홈에는 자리를 안 만들어 두었었다** — 메뉴엔 있는데 홈에선
        * 들어갈 길이 없는 상태였다. nav.js visiblePortal 주석이 경계하는 것의 정반대 경우다. */}
       {(masterVisible || canDo("settings")) && (
-        <div className="domain-line" style={{ marginBottom: 0 }}>
-          <div className="domain-line-head">
-            <div className="d-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Folder size={15}/></div>
-            <div className="d-label">기준정보 · 환경설정</div>
-          </div>
-          <div className="tile-row">
-            {/* 기준정보는 15개 화면의 묶음이라, 그중 하나라도 볼 수 있으면 타일을 세운다(사이드바와 같은 규칙) */}
+        <div className="menu-line" style={{ marginBottom: 0 }}>
+          <div className="menu-line-head"><Icon.Folder size={13}/> 기준정보 · 환경설정</div>
+          <div className="menu-chips">
             {masterVisible && (
-              <button className="cat-tile" onClick={() => go("master")}>
-                <div className="c-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Folder size={20}/></div>
-                <div className="c-label">기준정보</div>
-                <div className="c-desc">거래처·품목·계정과목·계좌·부서 등</div>
-                <div className="c-go">바로가기 <Icon.Right size={11}/></div>
+              <button className="menu-chip" title="거래처·품목·계정과목·계좌·부서 등" onClick={() => go("master")}>
+                <Icon.Folder size={14}/> <span>기준정보</span>
               </button>
             )}
             {canDo("settings") && (
-              <button className="cat-tile" onClick={() => go("settings")}>
-                <div className="c-ico" style={{ background: "var(--surface-3)", color: "var(--muted)" }}><Icon.Cog size={20}/></div>
-                <div className="c-label">환경설정</div>
-                <div className="c-desc">회사 정보·사용자·결재선·월 마감·변경 이력</div>
-                <div className="c-go">바로가기 <Icon.Right size={11}/></div>
+              <button className="menu-chip" title="회사 정보·사용자·결재선·월 마감·변경 이력" onClick={() => go("settings")}>
+                <Icon.Cog size={14}/> <span>환경설정</span>
               </button>
             )}
           </div>

@@ -1995,3 +1995,26 @@ body:has([data-modal-open]) {
   border-style: dashed;
 }
 .quick-empty:hover { border-color: var(--line-strong); color: var(--ink); }
+
+/* ── 홈 메뉴 바로가기(압축) ──────────────────────────────────────────
+   예전엔 도메인 제목이 16px/800, 타일마다 설명과 '바로가기 ›'가 붙어 홈에서 가장 무거웠다.
+   그러면 정작 주인공인 자금이 묻힌다. 여기는 '어디로 갈까'를 고르는 자리다. */
+.menu-line { display: flex; gap: 14px; align-items: baseline; margin-bottom: 12px; flex-wrap: wrap; }
+.menu-line-head {
+  display: flex; align-items: center; gap: 5px; flex: 0 0 108px;
+  font-size: 12.5px; font-weight: 700; color: var(--muted);
+}
+.menu-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
+.menu-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; border-radius: 999px;
+  border: 1px solid var(--line); background: #fff;
+  font-family: inherit; font-size: 12.5px; font-weight: 600; color: var(--ink);
+  cursor: pointer; transition: border-color .12s, background .12s;
+}
+.menu-chip:hover { background: var(--surface-2); border-color: var(--line-strong); }
+.menu-chip svg { color: var(--muted-2); flex-shrink: 0; }
+@media (max-width: 640px) {
+  .menu-line { gap: 6px; }
+  .menu-line-head { flex: 0 0 100%; }
+}
