@@ -1821,3 +1821,23 @@ body:has([data-modal-open]) {
 .entry-hint.warn { background: var(--warn-bg, #fff7ed); }
 .entry-hint.warn > svg { color: var(--warn, #c2410c); }
 .entry-hints > .btn.sm.ghost { align-self: flex-start; }
+
+/* 헤더 오른쪽 끝의 사용자 — 사이드바 맨 아래에 있던 것을 옮겨왔다.
+   메뉴가 길어져 스크롤이 생기면 접힌 자리로 밀려 "로그아웃이 어디 갔지"가 됐다.
+   계정은 화면 어디에 있든 늘 같은 자리여야 한다. */
+.topbar-user {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px 5px 5px; border: 1px solid var(--line); border-radius: 999px;
+  background: #fff; cursor: pointer; font-family: inherit; flex-shrink: 0;
+  transition: background .12s, border-color .12s;
+}
+.topbar-user:hover { background: var(--surface-2); border-color: var(--line-strong); }
+.topbar-user .avatar { width: 26px; height: 26px; font-size: 12px; flex-shrink: 0; }
+.topbar-user-name { min-width: 0; text-align: left; line-height: 1.25; }
+.topbar-user .who { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.topbar-user .who-sub { font-size: 10.5px; color: var(--muted-2); white-space: nowrap; }
+/* 좁은 화면에서는 이름을 접고 아바타만 — 검색칸이 먼저 살아야 한다(팝오버 안에 이름이 있다) */
+@media (max-width: 900px) {
+  .topbar-user-name { display: none; }
+  .topbar-user { padding: 4px; border-color: transparent; }
+}

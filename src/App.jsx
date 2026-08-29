@@ -715,10 +715,10 @@ function AppInner({ onLogout, user }) {
               </div>
             );
           })}
-        </div>
-
-        {/* 기준정보·환경설정 — 매일 쓰는 업무 메뉴와 성격이 달라 아래에 따로 세운다.
-            둘 다 '한 번 세팅하고 가끔 손보는' 것들이라 위쪽 흐름을 차지하지 않는다. */}
+        {/* 기준정보·환경설정 — 성격은 업무 메뉴와 다르지만 **같은 스크롤 안에** 둔다.
+            예전엔 스크롤 밖에 고정해 뒀는데, 메뉴가 길어져 스크롤이 생기면
+            '아래에 뭔가 더 있다'는 신호가 사라져 **사라진 줄 아는 사람이 있었다.**
+            구분선은 그대로 둬서 성격이 다르다는 것만 표시한다. */}
         {(masterVisible || canDo("settings")) && (
           <div style={{ paddingTop: 8, marginTop: 8, borderTop: "1px solid var(--line)" }}>
             {masterVisible && (
@@ -735,35 +735,8 @@ function AppInner({ onLogout, user }) {
             )}
           </div>
         )}
+        </div>
 
-        <Popover align="left" width={200} direction="up"
-          trigger={
-            <div className="sidebar-footer" style={{ cursor: "pointer", borderRadius: 10, transition: "background .12s" }}
-              onMouseEnter={e => e.currentTarget.style.background = "var(--surface-3)"}
-              onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-              <div className="avatar">{(user?.displayName || "관")[0]}</div>
-              <div style={{ minWidth: 0 }}>
-                <div className="who">{user?.displayName || "관리자"}</div>
-                <div className="who-sub" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user?.role || ""}</div>
-              </div>
-              <Icon.Down size={14} style={{ marginLeft: "auto", flexShrink: 0, color: "var(--muted-2)" }}/>
-            </div>
-          }>
-          <div style={{ padding: 6 }}>
-            <PopItem icon={<Icon.Cog size={14}/>} label="프로필 설정" onClick={() => toast.push("프로필 설정은 준비 중이에요")}/>
-            <div style={{ height: 1, background: "var(--line)", margin: "4px 0" }}/>
-            <PopItem icon={<Icon.Out size={14}/>} label="로그아웃" onClick={async () => {
-              const ok = await confirm({
-                tone: "info",
-                icon: <Icon.Out size={22}/>,
-                title: "로그아웃 하시겠습니까?",
-                body: "현재 세션이 종료됩니다. 저장되지 않은 작업이 있다면 먼저 저장해주세요.",
-                confirmLabel: "로그아웃",
-              });
-              if (ok) onLogout();
-            }}/>
-          </div>
-        </Popover>
       </aside>
 
       {/* Main */}
@@ -871,6 +844,42 @@ function AppInner({ onLogout, user }) {
                   <Icon.Eye size={14}/> 바로가기 독 보이기
                 </button>
               </div>
+            </div>
+          </Popover>
+
+          {/* 사용자 — 예전엔 사이드바 맨 아래에 있었다. 메뉴가 길어져 스크롤이 생기면
+              접힌 자리로 밀려 '로그아웃이 어디 갔지'가 됐다. 계정은 화면 어디에 있든
+              늘 같은 자리에 있어야 하는 것이라 헤더 오른쪽 끝으로 옮긴다. */}
+          <Popover align="right" width={200}
+            trigger={
+              <button className="topbar-user" title={user?.displayName || "관리자"}>
+                <div className="avatar">{(user?.displayName || "관")[0]}</div>
+                <div className="topbar-user-name">
+                  <div className="who">{user?.displayName || "관리자"}</div>
+                  <div className="who-sub">{user?.role || ""}</div>
+                </div>
+                <Icon.Down size={13} style={{ flexShrink: 0, color: "var(--muted-2)" }}/>
+              </button>
+            }>
+            <div style={{ padding: 6 }}>
+              {/* 좁은 화면에서는 이름이 접히므로 여기서 한 번 더 보여준다 */}
+              <div style={{ padding: "6px 10px 8px" }}>
+                <div className="text-sm fw-700">{user?.displayName || "관리자"}</div>
+                <div className="text-xs text-muted2">{user?.role || ""}</div>
+              </div>
+              <div style={{ height: 1, background: "var(--line)", margin: "0 0 4px" }}/>
+              <PopItem icon={<Icon.Cog size={14}/>} label="프로필 설정" onClick={() => toast.push("프로필 설정은 준비 중이에요")}/>
+              <div style={{ height: 1, background: "var(--line)", margin: "4px 0" }}/>
+              <PopItem icon={<Icon.Out size={14}/>} label="로그아웃" onClick={async () => {
+                const ok = await confirm({
+                  tone: "info",
+                  icon: <Icon.Out size={22}/>,
+                  title: "로그아웃 하시겠습니까?",
+                  body: "현재 세션이 종료됩니다. 저장되지 않은 작업이 있다면 먼저 저장해주세요.",
+                  confirmLabel: "로그아웃",
+                });
+                if (ok) onLogout();
+              }}/>
             </div>
           </Popover>
         </div>
