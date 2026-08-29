@@ -120,9 +120,17 @@ const crumbTargets = (route, crumbs) => {
   if (explicit) return crumbs.map((_, i) => (i === last ? null : explicit[i] || null));
   const leaf = LEAF_BY_ID[route];
   if (!leaf) return crumbs.map(() => null);
-  // 기준정보·환경설정은 도메인이 아니라 그 자체가 타일 페이지다
-  const top = leaf.domain === "기준정보" ? "master" : leaf.domain === "환경설정" ? "settings" : "home";
-  const page = PORTAL_PAGE_OF_LEAF[route] || null;
+  /* 첫 마디(도메인) — 기준정보·환경설정만 갈 곳이 있다. 그 둘은 도메인이 아니라 그 자체가
+     타일 페이지이기 때문이다.
+     ⚠ 나머지 도메인은 **링크로 만들지 않는다.** 예전엔 홈으로 보냈는데, '경영관리'를 눌렀더니
+     홈이 나오면 사용자는 고장으로 읽는다. 도메인만 모아 보는 화면은 없으므로 갈 곳이 없는 게
+     맞고, 갈 곳이 없으면 링크가 아니어야 한다(눌리지 않는 마디는 회색 글자로 그려진다). */
+  const top = leaf.domain === "기준정보" ? "master" : leaf.domain === "환경설정" ? "settings" : null;
+  /* 가운데 마디(섹션) — 포털 페이지가 있으면 그리로.
+     ⚠ 보고서로 흡수한 잎들(일계표·전표 목록 등)은 포털 페이지가 아니라 **보고서 화면** 안에
+     산다. 그래서 그 화면으로 보낸다 — 안 그러면 '보고서'가 눌리지 않아, 목록으로 돌아갈
+     길이 브라우저 뒤로가기밖에 없다. */
+  const page = PORTAL_PAGE_OF_LEAF[route] || (leaf.section === "보고서" ? "report" : null);
   return crumbs.map((_, i) => (i === last ? null : i === 0 ? top : page));
 };
 
