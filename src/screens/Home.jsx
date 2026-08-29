@@ -173,39 +173,50 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
 
       <SetupWizard open={setupOpen} onClose={() => setSetupOpen(false)} onGo={go}/>
 
-      {/* 메뉴 바로가기 — **도메인마다 줄을 나누지 않는다.**
-          나눠 두면 항목이 하나뿐인 도메인(세무·인사·문서)에서 오른쪽이 통째로 비어
-          화면이 듬성듬성해진다. 한 격자에 모아 채우고, 소속은 타일 안에 적는다
-          (바로가기 타일이 이미 같은 방식이다 — 두 구획이 같은 모양이면 눈이 덜 피로하다). */}
+      {/* 메뉴 바로가기 — **도메인을 카드로 묶고, 그 안에 링크를 줄로.**
+       *
+       * 두 번 헛짚었다.
+       *   ① 도메인마다 가로 줄을 나눴더니 항목이 하나뿐인 도메인(세무·인사·문서)에서
+       *      오른쪽이 통째로 비었다.
+       *   ② 그래서 평평한 한 격자에 다 깔았더니 열넷이 나란히 서서 정신없었다 — 묶음이
+       *      사라지니 무엇이 무엇의 하위인지 읽히지 않는다.
+       * 카드로 묶으면 둘 다 풀린다. 짧은 도메인은 작은 카드로 남아 빈칸을 만들지 않고,
+       * 묶음이 눈에 보여 훑을 때 덩어리로 읽힌다. */}
       <div style={{ marginBottom: 24 }}>
         <div className="text-xs fw-700" style={{ color: 'var(--muted-2)', letterSpacing: '0.02em', marginBottom: 10, padding: '0 2px' }}>메뉴 바로가기</div>
         <div className="menu-grid">
-          {portal.flatMap(domain => domain.categories.map(cat => {
-            const Cic = cat.icon
+          {portal.map(domain => {
+            const Dic = domain.icon
             return (
-              <button key={`${domain.id}-${cat.id}`} className="menu-tile" title={cat.desc || ''}
-                onClick={() => go(cat.route || cat.id)}>
-                <span className="mt-ico"><Cic size={18}/></span>
-                <span className="mt-label">{cat.label}</span>
-                <span className="mt-dom">{domain.label}</span>
-              </button>
+              <div key={domain.id} className="menu-card">
+                <div className="mc-head"><span className="mc-ico"><Dic size={15}/></span>{domain.label}</div>
+                {domain.categories.map(cat => {
+                  const Cic = cat.icon
+                  return (
+                    <button key={cat.id} className="mc-item" title={cat.desc || ''}
+                      onClick={() => go(cat.route || cat.id)}>
+                      <Cic size={15}/><span>{cat.label}</span><Icon.Right size={12} className="mc-go"/>
+                    </button>
+                  )
+                })}
+              </div>
             )
-          }))}
-          {/* 기준정보·환경설정도 같은 격자에 — 매일 쓰는 메뉴와 성격은 다르지만,
-              따로 줄을 세우면 그 줄도 오른쪽이 빈다. 소속 이름으로 구분되면 충분하다. */}
-          {masterVisible && (
-            <button className="menu-tile" title="거래처·품목·계정과목·계좌·부서 등" onClick={() => go("master")}>
-              <span className="mt-ico"><Icon.Folder size={18}/></span>
-              <span className="mt-label">기준정보</span>
-              <span className="mt-dom">기준 자료</span>
-            </button>
-          )}
-          {canDo("settings") && (
-            <button className="menu-tile" title="회사 정보·사용자·결재선·월 마감·변경 이력" onClick={() => go("settings")}>
-              <span className="mt-ico"><Icon.Cog size={18}/></span>
-              <span className="mt-label">환경설정</span>
-              <span className="mt-dom">기준 자료</span>
-            </button>
+          })}
+          {/* 기준정보·환경설정 — 매일 쓰는 업무 메뉴와 성격이 달라 한 카드로 따로 묶는다 */}
+          {(masterVisible || canDo("settings")) && (
+            <div className="menu-card">
+              <div className="mc-head"><span className="mc-ico"><Icon.Folder size={15}/></span>기준 자료</div>
+              {masterVisible && (
+                <button className="mc-item" title="거래처·품목·계정과목·계좌·부서 등" onClick={() => go("master")}>
+                  <Icon.Folder size={15}/><span>기준정보</span><Icon.Right size={12} className="mc-go"/>
+                </button>
+              )}
+              {canDo("settings") && (
+                <button className="mc-item" title="회사 정보·사용자·결재선·월 마감·변경 이력" onClick={() => go("settings")}>
+                  <Icon.Cog size={15}/><span>환경설정</span><Icon.Right size={12} className="mc-go"/>
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>

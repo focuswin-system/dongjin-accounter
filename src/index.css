@@ -1997,30 +1997,40 @@ body:has([data-modal-open]) {
 .quick-empty:hover { border-color: var(--line-strong); color: var(--ink); }
 
 /* ── 홈 메뉴 바로가기 ────────────────────────────────────────────────
-   한 번 칩으로 줄였다가 되돌렸다 — 너무 작아 한눈에 안 들어왔다. 이 자리의 의도는
-   '큼지막한 버튼'이다. 다만 도메인마다 줄을 나누지 않는다. 나누면 항목이 하나뿐인
-   도메인에서 오른쪽이 통째로 비어 화면이 듬성듬성해진다 — 한 격자에 모아 채운다. */
-.menu-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
-.menu-tile {
-  display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
-  padding: 14px 16px; border-radius: 14px; border: 1px solid var(--line);
-  background: #fff; cursor: pointer; font-family: inherit; text-align: left;
-  transition: border-color .12s, transform .12s, box-shadow .12s;
+   두 번 헛짚고 온 모양이다. 도메인마다 가로 줄을 나누면 항목이 하나뿐인 도메인에서
+   오른쪽이 통째로 비고, 평평한 한 격자에 다 깔면 열넷이 나란히 서서 정신없다.
+   카드로 묶으면 둘 다 풀린다 — 짧은 도메인은 작은 카드로 남고, 묶음이 눈에 보인다. */
+.menu-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  align-items: start;
 }
-.menu-tile:hover {
-  border-color: var(--line-strong); transform: translateY(-1px);
-  box-shadow: 0 6px 18px -12px rgba(11,18,32,0.4);
+.menu-card {
+  border: 1px solid var(--line); border-radius: 14px; background: #fff;
+  padding: 12px 10px 10px; display: flex; flex-direction: column; gap: 1px;
 }
-.menu-tile .mt-ico {
-  width: 36px; height: 36px; border-radius: 11px; margin-bottom: 6px;
+.mc-head {
+  display: flex; align-items: center; gap: 7px;
+  padding: 0 6px 8px; margin-bottom: 3px;
+  font-size: 13px; font-weight: 700; color: var(--ink);
+  border-bottom: 1px solid var(--line);
+}
+.mc-ico {
+  width: 26px; height: 26px; border-radius: 8px; flex-shrink: 0;
   background: var(--surface-2); color: var(--muted); display: grid; place-items: center;
 }
-.menu-tile:hover .mt-ico { background: var(--ink); color: #fff; }
-.menu-tile .mt-label { font-size: 14.5px; font-weight: 700; }
-.menu-tile .mt-dom { font-size: 11px; color: var(--muted-2); }
-@media (max-width: 640px) {
-  .menu-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+.mc-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 9px 8px; border: 0; border-radius: 9px; background: transparent;
+  font-family: inherit; font-size: 13.5px; font-weight: 600; color: var(--ink);
+  cursor: pointer; text-align: left; transition: background .12s;
 }
+.mc-item:hover { background: var(--surface-2); }
+.mc-item > svg:first-child { color: var(--muted-2); flex-shrink: 0; }
+.mc-item > span { flex: 1; min-width: 0; }
+/* 화살표는 평소엔 숨긴다 — 줄마다 붙어 있으면 목록이 시끄럽다 */
+.mc-item .mc-go { color: var(--subtle); opacity: 0; transition: opacity .12s; }
+.mc-item:hover .mc-go { opacity: 1; }
 
 /* ── 주별 자금 융통(막대) ────────────────────────────────────────────
    선 하나에 점 찍는 스파크라인을 걷어낸 자리다. 자금은 기간별 들어옴/나감을
