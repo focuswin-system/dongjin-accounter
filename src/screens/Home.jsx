@@ -16,12 +16,6 @@ const todayLabel = () => {
 }
 
 // 할 일 종류별 아이콘/색 (클라이언트 표시 전용)
-const TODO_KIND_META = {
-  ar:       { icon: <Icon.In size={15}/>,      toneColor: 'var(--brand)',    soft: 'var(--brand-soft)' },
-  doc:      { icon: <Icon.Sign size={15}/>,    toneColor: 'var(--warn-ink)', soft: 'var(--warn-soft)' },
-  evidence: { icon: <Icon.Receipt size={15}/>, toneColor: 'var(--warn-ink)', soft: 'var(--warn-soft)' },
-  ap:       { icon: <Icon.Bank size={15}/>,    toneColor: 'var(--neg-ink)',  soft: 'var(--neg-soft)' },
-}
 
 
 /* 자금 요약 — 홈에서 매일 보는 네 숫자.
@@ -132,24 +126,9 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
   // 기준정보는 15개 화면의 묶음이라, 그중 하나라도 볼 수 있으면 타일을 세운다(App 사이드바와 같은 규칙).
   const masterVisible = MASTER_LEAVES.some(l => canDo(l.id))
   const [setupOpen, setSetupOpen] = useState(false)
-  const [todos, setTodos] = useState([])
-  useEffect(() => { api.getHomeTodos().then(setTodos).catch(() => {}) }, [])
-
-  // 할 일은 청구서 상태에서 파생된다 — 정산하면 다음 조회에서 자연히 빠지므로 별도 완료표시가 없다
-  // 갈 수 없는 화면의 할 일은 보여주지 않는다 — 눌러도 못 가는 항목은 할 일이 아니다
-  const pendingTodos = todos
-    .filter(t => canDo(t.kind === "ap" ? "ap" : "ar"))
-    .map(t => ({ ...t, ...TODO_KIND_META[t.kind] }))
-
-  // 예전에는 여기서 모달을 띄우고 '입금이 처리되었어요'를 보여줬지만, 실제로는 아무 거래도
-  // 만들지 않는 빈 호출이었다(api.completeTodo 는 {ok:true}만 돌려주는 스텁). 사용자는 돈이
-  // 기록된 줄 알았지만 장부에는 아무것도 남지 않았다.
-  // 정산은 청구서 상세의 정상 경로(계좌 선택·매칭·잔액 반영)에서만 이뤄져야 하므로 그리로 보낸다.
-  const handleTodoAction = (t) => {
-    if (t.kind === "ar")      go("ar", { invoiceId: t.invoiceId })
-    else if (t.kind === "ap") go("ap", { invoiceId: t.invoiceId })
-  }
-
+  /* '지금 해야 할 일' 구획은 뺐다. 미수·미지급 독촉은 알림(헤더 종)과 각 화면이 이미 맡고
+     있어서, 홈에서 같은 것을 한 번 더 세우면 자금 카드와 무게를 나눠 가진다.
+     ⚠ 데이터도 함께 뺀다 — 화면만 지우고 호출을 남기면 홈을 열 때마다 쓰지 않을 조회가 돈다. */
 
 
   return (
@@ -194,98 +173,42 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
 
       <SetupWizard open={setupOpen} onClose={() => setSetupOpen(false)} onGo={go}/>
 
-      {/* 지금 해야 할 일 */}
-      <div style={{ marginBottom: 24 }}>
-        <div className="text-xs fw-700" style={{ color: "var(--muted-2)", letterSpacing: "0.02em", marginBottom: 10, padding: "0 2px" }}>
-          지금 해야 할 일 <span className="num" style={{ color: "var(--brand-ink)", marginLeft: 4 }}>{pendingTodos.length}</span>
-        </div>
-        {pendingTodos.length === 0 ? (
-          <div className="card" style={{ padding: "18px 20px", display: "flex", alignItems: "center", gap: 10, color: "var(--muted)" }}>
-            <Icon.Check size={18} className="text-pos"/>
-            <span className="text-sm fw-600" style={{ color: "var(--ink)" }}>지금 처리할 일이 없어요.</span>
-          </div>
-        ) : (
-          <div className="todo-grid">
-            {pendingTodos.slice(0, 4).map(t => (
-              <button key={t.id} type="button" className="todo-card" onClick={() => handleTodoAction(t)}>
-                <span className="todo-ico" style={{ background: t.soft, color: t.toneColor }}>{t.icon}</span>
-                <span className="todo-main">
-                  <span className="todo-tag" style={{ color: t.toneColor }}>{t.tag}</span>
-                  <span className="todo-title">{t.title}</span>
-                  {t.sub && <span className="todo-sub">{t.sub}</span>}
-                </span>
-                <span className="todo-go">{t.action} <Icon.Right size={12}/></span>
-              </button>
-            ))}
-            {pendingTodos.length > 4 && (
-              <button type="button" className="todo-card todo-more" onClick={() => go("ar")}>
-                <span className="todo-main">
-                  <span className="todo-title">+{pendingTodos.length - 4}건 더</span>
-                  <span className="todo-sub">미수금·미지급금에서 전체 보기</span>
-                </span>
-                <Icon.Right size={14}/>
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* 도메인 라인 → 통일된 카테고리 카드(하위메뉴 나열 없이 깔끔하게, 클릭 시 해당 영역으로) */}
-      {/* 메뉴 바로가기 — **압축한다.**
-          예전엔 도메인 제목이 16px/800 에 타일마다 설명과 '바로가기 ›'가 붙어, 홈에서 가장
-          무거운 덩어리였다. 그러면 정작 주인공인 자금이 묻힌다. 여기는 '어디로 갈까'를
-          고르는 자리지 설명을 읽는 자리가 아니다 — 설명은 첫 안내와 사이드바가 맡는다. */}
+      {/* 메뉴 바로가기 — **도메인마다 줄을 나누지 않는다.**
+          나눠 두면 항목이 하나뿐인 도메인(세무·인사·문서)에서 오른쪽이 통째로 비어
+          화면이 듬성듬성해진다. 한 격자에 모아 채우고, 소속은 타일 안에 적는다
+          (바로가기 타일이 이미 같은 방식이다 — 두 구획이 같은 모양이면 눈이 덜 피로하다). */}
       <div style={{ marginBottom: 24 }}>
         <div className="text-xs fw-700" style={{ color: 'var(--muted-2)', letterSpacing: '0.02em', marginBottom: 10, padding: '0 2px' }}>메뉴 바로가기</div>
-        {portal.map(domain => {
-          const Dic = domain.icon
-          return (
-            <div key={domain.id} className="menu-line">
-              <div className="menu-line-head"><Dic size={13}/> {domain.label}</div>
-              <div className="menu-chips">
-                {domain.categories.map(cat => {
-                  const Cic = cat.icon
-                  return (
-                    <button key={cat.id} className="menu-tile" title={cat.desc || ''}
-                      onClick={() => go(cat.route || cat.id)}>
-                      <span className="mt-ico"><Cic size={18}/></span>
-                      <span className="mt-label">{cat.label}</span>
-                      {cat.desc && <span className="mt-desc">{cat.desc}</span>}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* 기준정보·환경설정 — 매일 쓰는 업무 메뉴와 성격이 달라 아래에 따로 세운다(사이드바와 같은 묶음).
-       *
-       * ⚠ 기준정보는 일반회계 안에 있다가 독립 영역으로 빠져나왔는데(인사 기준정보까지 모으므로),
-       * 사이드바에만 세우고 **홈에는 자리를 안 만들어 두었었다** — 메뉴엔 있는데 홈에선
-       * 들어갈 길이 없는 상태였다. nav.js visiblePortal 주석이 경계하는 것의 정반대 경우다. */}
-      {(masterVisible || canDo("settings")) && (
-        <div className="menu-line" style={{ marginBottom: 0 }}>
-          <div className="menu-line-head"><Icon.Folder size={13}/> 기준정보 · 환경설정</div>
-          <div className="menu-chips">
-            {masterVisible && (
-              <button className="menu-tile" title="거래처·품목·계정과목·계좌·부서 등" onClick={() => go("master")}>
-                <span className="mt-ico"><Icon.Folder size={18}/></span>
-                <span className="mt-label">기준정보</span>
-                <span className="mt-desc">거래처·품목·계정과목·계좌</span>
+        <div className="menu-grid">
+          {portal.flatMap(domain => domain.categories.map(cat => {
+            const Cic = cat.icon
+            return (
+              <button key={`${domain.id}-${cat.id}`} className="menu-tile" title={cat.desc || ''}
+                onClick={() => go(cat.route || cat.id)}>
+                <span className="mt-ico"><Cic size={18}/></span>
+                <span className="mt-label">{cat.label}</span>
+                <span className="mt-dom">{domain.label}</span>
               </button>
-            )}
-            {canDo("settings") && (
-              <button className="menu-tile" title="회사 정보·사용자·결재선·월 마감·변경 이력" onClick={() => go("settings")}>
-                <span className="mt-ico"><Icon.Cog size={18}/></span>
-                <span className="mt-label">환경설정</span>
-                <span className="mt-desc">회사 정보·사용자·결재선·마감</span>
-              </button>
-            )}
-          </div>
+            )
+          }))}
+          {/* 기준정보·환경설정도 같은 격자에 — 매일 쓰는 메뉴와 성격은 다르지만,
+              따로 줄을 세우면 그 줄도 오른쪽이 빈다. 소속 이름으로 구분되면 충분하다. */}
+          {masterVisible && (
+            <button className="menu-tile" title="거래처·품목·계정과목·계좌·부서 등" onClick={() => go("master")}>
+              <span className="mt-ico"><Icon.Folder size={18}/></span>
+              <span className="mt-label">기준정보</span>
+              <span className="mt-dom">기준 자료</span>
+            </button>
+          )}
+          {canDo("settings") && (
+            <button className="menu-tile" title="회사 정보·사용자·결재선·월 마감·변경 이력" onClick={() => go("settings")}>
+              <span className="mt-ico"><Icon.Cog size={18}/></span>
+              <span className="mt-label">환경설정</span>
+              <span className="mt-dom">기준 자료</span>
+            </button>
+          )}
         </div>
-      )}
+      </div>
     </div>
     </>
   )
