@@ -3164,6 +3164,17 @@ const REPORT_VIEWS = {
    목록에 없는 이름은 마지막에 '기타'로 붙는다(카탈로그가 늘어도 화면이 안 깨진다). */
 const GROUP_ORDER = ['경영 보고', '장부', '신고·제출', '기타']
 
+/* 분류마다 아이콘을 정한다. 예전엔 '화면이 따로 있나'(route 유무)로 아이콘을 갈랐는데,
+   그건 **구현 사정**이지 보는 사람에게는 아무 뜻이 없다 — 같은 '장부' 안에서 카드 사용내역만
+   다른 아이콘이 되는 식이었다. 타일을 훑을 때 아이콘이 먼저 눈에 들어오므로,
+   아이콘은 '이게 어떤 성격의 자료인가'를 말해야 한다. */
+const GROUP_ICON = {
+  '경영 보고': Icon.Trend,   // 흐름·추세를 보는 것 — 대표가 여는 자리
+  '장부': Icon.Book,         // 매일 적고 뽑는 것 — 경리의 자리
+  '신고·제출': Icon.Sign,    // 밖으로 나가는 서류
+  '기타': Icon.Chart,
+}
+
 export const ReportsScreen = ({ go }) => {
   const { can: canDo } = usePerms()
   const toast = useToast()
@@ -3259,7 +3270,10 @@ export const ReportsScreen = ({ go }) => {
             .filter(g => g.items.length > 0)
             .map(g => ({
               label: g.label,
-              items: g.items.map(r => ({ id: r.key, title: r.title, desc: r.descr, icon: r.route ? Icon.Book : Icon.Chart })),
+              items: g.items.map(r => ({
+                id: r.key, title: r.title, desc: r.descr,
+                icon: GROUP_ICON[g.label] || GROUP_ICON['기타'],
+              })),
             }))}
           onPick={(key) => {
             const item = list.find(r => r.key === key)

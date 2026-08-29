@@ -119,7 +119,8 @@ export const TileBoard = ({ storageKey, groups = [], onPick, empty = '볼 수 �
               onClick={() => setTab(g.label)}>{g.label}</button>
           ))}
           <div className="ml-auto row gap-4" style={{ alignItems: 'center' }}>
-            <span className="text-xs text-muted2">정렬</span>
+            {/* 라벨은 칩들과 한 덩어리로 읽히면 안 된다 — 붙여 두면 '정렬'이 첫 번째 칩처럼 보인다 */}
+            <span className="text-xs text-muted2" style={{ marginRight: 4 }}>정렬</span>
             {SORTS.map(s => (
               <button key={s.id} className={`chip sm ${sort === s.id ? 'active' : ''}`}
                 onClick={() => setSort(s.id)}>{s.label}</button>
