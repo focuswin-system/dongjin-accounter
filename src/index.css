@@ -1936,3 +1936,32 @@ body:has([data-modal-open]) {
   .wz-title { font-size: 22px; }
   .wz-grid { grid-template-columns: 1fr; }
 }
+
+/* ── 홈 자금 패널 ────────────────────────────────────────────────────
+   숫자 넷을 나란히 두는 대신 '지금(왼쪽) → 앞으로(오른쪽)'로 시선을 흐르게 한다.
+   홈에서 가장 큰 덩어리다 — 나머지 구획은 이보다 작아야 위계가 선다. */
+.cash-panel {
+  display: grid; grid-template-columns: minmax(240px, 340px) 1fr;
+  gap: 28px; padding: 22px 24px; align-items: stretch;
+}
+.cash-now { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cash-big {
+  font-size: 32px; font-weight: 700; letter-spacing: -0.03em;
+  line-height: 1.15; margin: 2px 0 4px; white-space: nowrap;
+}
+.cash-won { font-size: 15px; font-weight: 600; opacity: 0.6; margin-left: 3px; }
+.cash-flows {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  margin-top: auto; padding-top: 16px; border-top: 1px solid var(--line);
+}
+.cash-flows .num { font-size: 16px; margin-top: 2px; }
+.cash-chart {
+  min-width: 0; display: flex; flex-direction: column;
+  padding-left: 28px; border-left: 1px solid var(--line);
+}
+
+@media (max-width: 900px) {
+  .cash-panel { grid-template-columns: 1fr; gap: 20px; }
+  .cash-chart { padding-left: 0; border-left: 0; padding-top: 18px; border-top: 1px solid var(--line); }
+  .cash-big { font-size: 27px; }
+}

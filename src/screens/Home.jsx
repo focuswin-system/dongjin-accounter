@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import { LEAF_BY_ID, MASTER_LEAVES } from '../lib/nav'
 import { usePerms, visiblePortal, visibleLeaves, isMasterOnly } from '../lib/perms'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
+import { CashPanel } from '../lib/components/CashPanel'
 import { SetupWizard, useSetupStatus, setupProgress } from '../lib/components/SetupWizard'
 
 const WEEK_KO = ["일", "월", "화", "수", "목", "금", "토"]
@@ -194,7 +195,7 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
 
       {/* 자금 현황 — 아침에 제일 먼저 보는 숫자. 자세한 건 자금일보로 들어간다.
           여기 있는 게 도움말(App.jsx)이 말하던 '자금 현황 카드'다 — 문구만 있고 구현이 없었다. */}
-      {canDo("cash_report") && <CashSummary go={go}/>}
+      {canDo("cash_report") && <CashPanel go={go}/>}
 
       <SetupWizard open={setupOpen} onClose={() => setSetupOpen(false)} onGo={go}/>
 
