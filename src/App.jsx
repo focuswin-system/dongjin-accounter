@@ -569,7 +569,7 @@ function AppInner({ onLogout, user, prefs, setPrefs }) {
     if (route.startsWith("hrbase_")) return <MasterScreen user={user} section="hr" forcedTab={route.slice(7)}/>;
     if (route.startsWith("settings_")) return <MasterScreen user={user} section="settings" forcedTab={route.slice(9)}/>;
     switch (route) {
-      case "home":            return <HomeScreen go={go} user={user} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
+      case "home":            return <HomeScreen go={go} user={user} navHidden={navHidden} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
       case "billing":         return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} goRoute={go}/>;
       /* focusInvoiceId 를 넘긴다 — Ctrl+K 에서 청구서를 골랐는데 목록만 열리면
          찾은 것을 다시 찾아야 한다(BillingScreen 은 이미 이 값을 받아 그 건을 연다). */
@@ -643,7 +643,7 @@ function AppInner({ onLogout, user, prefs, setPrefs }) {
       // (화면 코드 EvidenceScreen 은 그대로 둔다 — 추후 실구현 시 여기만 되돌리면 된다)
       case "evidence":        return <ComingSoon title="증빙 관리"/>;
       case "excel":           return <ExcelScreen/>;
-      default:                return <HomeScreen go={go} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
+      default:                return <HomeScreen go={go} navHidden={navHidden} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
     }
   }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, perms]);
 

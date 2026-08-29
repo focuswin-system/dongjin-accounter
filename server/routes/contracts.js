@@ -802,12 +802,17 @@ router.get('/:id', async (req, res, next) => {
      * ⚠ 청구서의 거래처가 주문의 거래처와 다르면 표시해서 내려보낸다. 미수금 계산은
      *   '이 주문에 붙은 청구서 합 − 이 주문에 붙은 입금 합'이라, 남의 청구서가 하나 붙으면
      *   그 금액이 그대로 미수로 남는다. 사람이 볼 수 있어야 고칠 수 있다. */
+    /* ⚠ 금액(ar_open)과 **같은 조건**으로 고른다. 저기는 주문 성격에 맞는 청구서만 세는데
+       (매출 주문엔 발행, 매입 주문엔 수취) 여기서 전부 긁어오면, 성격이 안 맞는 청구서가
+       금액에는 안 들어가고 목록에는 뜬다 — 이 화면이 없애려던 '타일과 내역이 다른 말'이
+       바로 그 모양이다. */
     const [arRows] = await req.db.execute(`
       SELECT i.id, i.invoice_no, i.issued_at, i.due_at, i.total_amount, i.status,
              i.vendor_id, v.name AS vendor_name,
              COALESCE((SELECT SUM(m.amount) FROM invoice_matches m WHERE m.invoice_id = i.id), 0) AS paid
         FROM invoices i LEFT JOIN vendors v ON v.id = i.vendor_id
-       WHERE i.contract_id = ? ORDER BY i.issued_at, i.invoice_no`, [req.params.id])
+       WHERE i.contract_id = ? AND i.kind = ?
+       ORDER BY i.issued_at, i.invoice_no`, [req.params.id, m.is_purchase ? 'received' : 'issued'])
     const ar_lines = arRows.map(r => ({
       id: r.id, invoice_no: r.invoice_no,
       issued_at: String(r.issued_at || '').slice(0, 10), due_at: String(r.due_at || '').slice(0, 10),

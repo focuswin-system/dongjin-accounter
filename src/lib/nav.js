@@ -253,7 +253,7 @@ export const FOLDABLE_DOMAINS = [
     why: "근로·용역 계약과 급여대장. 급여 지급이 계좌 잔액과 장부에 반영됩니다." },
   { id: "tax_dom", label: "세무관리", icon: Icon.Doc,
     why: "부가세 신고 자료를 장부에서 바로 산출합니다." },
-  { id: "office_dom", label: "문서업무", icon: Icon.Sign,
+  { id: "office_dom", label: "문서업무", icon: Icon.Doc,
     why: "지급결의서·정산내역서·견적요청서를 장부 데이터로 작성·출력합니다." },
   { id: "finance", label: "재무관리", icon: Icon.Bank,
     why: "차입금·투자·예금. 원금과 이자를 구분해 기록하고 상환 일정을 관리합니다." },

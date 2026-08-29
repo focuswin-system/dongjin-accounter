@@ -935,7 +935,10 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     .catch(() => setLoadErr('error'));
 
   useEffect(() => {
-    if (!contractId) return;
+    /* 주소에 주문 id 가 없는 경우 — 옛 북마크·기록의 '#contract_detail' 로 들어오면 그렇다.
+       그냥 돌아가면 c 도 loadErr 도 null 이라 화면이 '불러오는 중…'에 영영 머문다.
+       주소를 고친 뒤에도 이 길은 남아 있으므로 여기서 못 찾았다고 말해야 한다. */
+    if (!contractId) { setLoadErr('notfound'); return; }
     reload();
     api.getVendors().then(setVendors);
     // 주문이 바뀌면 탭을 기본으로 리셋 — 이전 주문의 탭 키가 남으면(예: 총액형에서 '원가 예산' 보다가

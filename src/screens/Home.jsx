@@ -1,10 +1,9 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, Popover, PopItem, fmtNum } from '../lib/ui'
+import { Icon, Popover, PopItem } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
-import { LEAF_BY_ID, MASTER_LEAVES } from '../lib/nav'
-import { usePerms, visiblePortal, visibleLeaves, isMasterOnly } from '../lib/perms'
-import { Kpi, KpiRow } from '../lib/components/Kpi'
+import { MASTER_LEAVES } from '../lib/nav'
+import { usePerms, visiblePortal } from '../lib/perms'
 import { CashPanel } from '../lib/components/CashPanel'
 import { QuickTiles } from '../lib/components/QuickTiles'
 import { SetupWizard, useSetupStatus, setupProgress } from '../lib/components/SetupWizard'
@@ -14,9 +13,6 @@ const todayLabel = () => {
   const d = new Date()
   return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 ${WEEK_KO[d.getDay()]}요일`
 }
-
-// 할 일 종류별 아이콘/색 (클라이언트 표시 전용)
-
 
 /* 자금 요약 — 홈에서 매일 보는 네 숫자.
  *
@@ -51,72 +47,7 @@ const SetupCard = ({ onOpen }) => {
   )
 }
 
-const CashSummary = ({ go }) => {
-  const [d, setD] = useState(null)
-  useEffect(() => { api.getCashSummary().then(setD).catch(() => {}) }, [])
-  if (!d) return null
-
-  const short = d.lowest && d.lowest.balance < 0
-  const cards = [
-    { label: '지금 쓸 수 있는 돈', value: d.available, sub: `통장 ${d.accountCount}개` },
-    /* sub 는 '이번 주'가 아니라 **전체 미수금·미지급금**이다. 예전엔 '받을 돈'·'나갈 돈'이라고만
-       적어서, 위 라벨('이번 주 나갈 돈')과 거의 같은 말에 다른 숫자가 붙었다 —
-       57,363,900 옆에 57,918,900 이 붙어 있으면 어느 쪽이 이번 주인지 알 수 없다. */
-    /* ⚠ 들어올 돈과 나갈 돈에서 **기약 없는 돈의 뜻이 다르다.**
-       · 들어올 돈: 장기 미수·기한 미정·오래 밀린 것은 weekIn 에서 **빠져 있다**(없는 셈).
-         그래서 "따로 ○○원이 걸려 있다"고 말한다 — 더한 값이 아니다.
-       · 나갈 돈: 기한을 몰라도 weekOut 에 **들어 있다**(있는 셈). 그래서 "그중 ○○원"이다.
-       같은 말을 쓰면 한쪽은 반드시 오해된다. */
-    { label: '이번 주 들어올 돈', value: d.weekIn, tone: 'pos',
-      sub: d.uncertainIn > 0
-        ? `기약 없는 돈 ${fmtNum(d.uncertainIn)}원은 뺐어요`
-        : `미수금 전체 ${fmtNum(d.receivable.total)}원` },
-    { label: '이번 주 나갈 돈', value: d.weekOut, tone: 'neg-ink',
-      sub: d.uncertainOut > 0
-        ? `그중 ${fmtNum(d.uncertainOut)}원은 기한 미정`
-        : `미지급금 전체 ${fmtNum(d.payable.total)}원` },
-    { label: '이번 주 최저 잔액', value: d.lowest?.balance ?? d.available,
-      sub: d.lowest?.date === d.date ? '오늘이 가장 낮아요' : d.lowest?.date || '', tone: short ? 'neg-ink' : undefined },
-  ]
-
-  return (
-    <div style={{ marginBottom: 24 }}>
-      <div className="row" style={{ marginBottom: 10, padding: '0 2px', alignItems: 'center' }}>
-        <div className="text-xs fw-700" style={{ color: 'var(--muted-2)', letterSpacing: '0.02em' }}>자금 현황</div>
-        <button className="btn ghost sm ml-auto" onClick={() => go('cash_report')}>
-          자금일보 <Icon.Right size={11}/>
-        </button>
-      </div>
-      {short && (
-        <div className="card card-pad" style={{ marginBottom: 10, borderColor: 'var(--neg)', background: 'rgba(220,38,38,0.04)' }}>
-          <div className="text-sm fw-700" style={{ color: 'var(--neg-ink)' }}>
-            이번 주 {d.lowest.date}에 잔액이 {fmtNum(d.lowest.balance)}원까지 떨어져요
-          </div>
-          <div className="text-sm text-muted" style={{ marginTop: 2 }}>
-            미수금을 앞당겨 받거나 지급 일정을 조정해야 할 수 있어요.
-          </div>
-        </div>
-      )}
-      {/* 카드 전체를 누르면 자금일보로 — 감싸는 div 에 클릭을 걸어 Kpi 를 그대로 쓴다 */}
-      {/* 래퍼에 minWidth:0 이 필요하다 — Kpi 는 카드에 그걸 걸어 nowrap 금액이 그리드 트랙을
-          밀지 않게 한다. 래퍼를 씌우면 래퍼가 그리드 아이템이 되어 그 방어가 사라진다. */}
-      <KpiRow cols={4}>
-        {cards.map(c => (
-          <div key={c.label} onClick={() => go('cash_report')} style={{ cursor: 'pointer', minWidth: 0 }}>
-            <Kpi label={c.label} value={c.value} tone={c.tone} hint={c.sub}/>
-          </div>
-        ))}
-      </KpiRow>
-      {d.overdueCount > 0 && (
-        <div className="text-xs" style={{ marginTop: 8, color: 'var(--neg-ink)' }}>
-          기한이 지난 입출금 {d.overdueCount}건이 예정에 섞여 있어요 — 실제로는 더 늦게 들어올 수 있습니다.
-        </div>
-      )}
-    </div>
-  )
-}
-
-export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
+export const HomeScreen = ({ go, user, navHidden, openIncome, openExpense }) => {
   // 홈 타일·즐겨찾기도 사이드바와 같은 규칙으로 가린다.
   // (홈에는 보이는데 메뉴엔 없으면 사용자는 어디서 들어가는 화면인지 알 수 없다)
   const { perms, can: canDo } = usePerms()
@@ -133,15 +64,19 @@ export const HomeScreen = ({ go, user, openIncome, openExpense }) => {
   /* 메뉴 탭 — 도메인 하나가 탭 하나. 기준정보·환경설정은 성격이 달라 마지막 탭으로 묶는다.
      권한이 없어 볼 게 없는 탭은 아예 세우지 않는다(눌러서 빈 화면을 보게 하지 않는다). */
   const menuTabs = useMemo(() => {
+    /* ⚠ 접어 둔 대메뉴(navHidden)는 여기서도 뺀다. 사이드바에서만 걸러 두면 첫 안내에서
+       '안 쓴다'고 고른 도메인이 홈에는 탭으로 그대로 남는다 — 두 화면이 다른 말을 한다.
+       ※ 포털 도메인 id 는 nav 도메인 id 와 같은 값을 쓴다(nav.js DOMAIN_OF). */
+    const hidden = new Set(navHidden || [])
     const tabs = portal
-      .filter(d => d.categories.length > 0)
+      .filter(d => d.categories.length > 0 && !hidden.has(d.id))
       .map(d => ({ id: d.id, label: d.label, items: d.categories }))
     const base = []
     if (masterVisible) base.push({ id: 'master', label: '기준정보', icon: Icon.Folder, desc: '거래처·품목·계정과목·계좌·부서 등' })
     if (canDo('settings')) base.push({ id: 'settings', label: '환경설정', icon: Icon.Cog, desc: '회사 정보·사용자·결재선·월 마감' })
     if (base.length) tabs.push({ id: '__base', label: '기준 자료', items: base })
     return tabs
-  }, [portal, masterVisible])
+  }, [portal, masterVisible, navHidden])
   const [menuTab, setMenuTab] = useState(null)
   // 첫 탭을 기본으로. 권한이 바뀌어 그 탭이 사라지면 다시 첫 탭으로 되돌린다.
   useEffect(() => {

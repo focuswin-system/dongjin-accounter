@@ -21,15 +21,20 @@ const MATCH_WINDOW_DAYS = 20
 async function openTxnCandidates(db, { kind, vendorId, amount, date, windowDays = MATCH_WINDOW_DAYS }) {
   if (!db) throw new Error('openTxnCandidates: 테넌트 연결(db)이 필요합니다')
   if (!vendorId || !date || !(Number(amount) > 0)) return []
+  /* ⚠ **실제로 오간 돈만 후보다.** 거래에는 아직 안 나간 것도 있다('지급 대기').
+     그걸 후보로 삼으면 기지급 처리가 그 줄을 완료로 뒤집어 버린다 —
+     나가지도 않은 돈이 잔액에서 빠지고, 나중에 진짜로 나갈 때 붙일 자리가 없다.
+     붙이기는 '이미 오간 돈에 청구서를 잇는 일'이지 상태를 바꾸는 일이 아니다. */
+  const settled = kind === 'income' ? '입금완료' : '지급완료'
   const [rows] = await db.execute(
     `SELECT t.id, t.date, t.amount, t.account_id, t.memo, t.status
        FROM transactions t
        LEFT JOIN invoice_matches m ON m.txn_id = t.id
-      WHERE t.kind = ? AND t.vendor_id = ? AND t.amount = ?
+      WHERE t.kind = ? AND t.vendor_id = ? AND t.amount = ? AND t.status = ?
         AND t.invoice_id IS NULL AND m.id IS NULL
         AND ABS(DATEDIFF(t.date, ?)) <= ?
       ORDER BY ABS(DATEDIFF(t.date, ?)), t.date`,
-    [kind, vendorId, Number(amount), date, windowDays, date])
+    [kind, vendorId, Number(amount), settled, date, windowDays, date])
   return rows
 }
 
@@ -58,9 +63,10 @@ async function settleInvoiceTxn(conn, {
     const [[t]] = await conn.execute(
       `SELECT t.id, t.account_id FROM transactions t
          LEFT JOIN invoice_matches m ON m.txn_id = t.id
-        WHERE t.id = ? AND t.kind = ? AND t.amount = ? AND t.invoice_id IS NULL AND m.id IS NULL
+        WHERE t.id = ? AND t.kind = ? AND t.amount = ? AND t.status = ?
+          AND t.invoice_id IS NULL AND m.id IS NULL
         FOR UPDATE`,
-      [id, kind, total])
+      [id, kind, total, doneStatus])
     return t || null
   }
 
@@ -97,9 +103,18 @@ async function settleInvoiceTxn(conn, {
     const acct = reuse.account_id || acctId || null
     const lerr = ledgerError({ kind, account_id: acct, status: doneStatus })
     if (lerr) return { error: lerr }
+    /* ⚠ **주문·거래처도 채운다.** 예전(새로 만들던 코드)은 거래에 contract_id 를 넣고 있었다.
+       붙여 쓰면서 그걸 빠뜨리면, 주문 지표가 거래에서 돈을 세는 탓에(METRIC_COLS in_done)
+       그 주문의 '누적 수금'과 손익에서 이 돈이 조용히 빠진다 — 미수금은 청구서로 세니 맞는데
+       수금만 비어, 화면 두 곳이 다시 다른 말을 하게 된다.
+       이미 값이 있으면 건드리지 않는다. 통장에서 온 값이 우리 짐작보다 정확하다. */
     await conn.execute(
-      'UPDATE transactions SET invoice_id = ?, status = ?, account_id = ? WHERE id = ?',
-      [invoiceId, doneStatus, acct, reuse.id])
+      `UPDATE transactions
+          SET invoice_id = ?, status = ?, account_id = ?,
+              contract_id = COALESCE(contract_id, ?),
+              vendor_id   = COALESCE(vendor_id, ?)
+        WHERE id = ?`,
+      [invoiceId, doneStatus, acct, contractId || null, vendorId || null, reuse.id])
     /* txn_created=0 — 이 거래는 우리가 만든 게 아니다. 되돌리기가 지우면 안 된다. */
     await conn.execute(
       'INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,0)',

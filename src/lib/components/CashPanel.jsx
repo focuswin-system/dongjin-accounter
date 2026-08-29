@@ -105,7 +105,10 @@ export const CashPanel = ({ go }) => {
           <div className="cash-big num">
             {fmtNum(d.available)}<span className="cash-won">원</span>
           </div>
-          <div className="text-xs text-muted2">통장 {d.accounts?.filter(a => a.kind !== 'card').length ?? 0}개</div>
+          {/* ⚠ 금액(available)과 **같은 집합**을 센다. available 은 개인 계좌를 빼는데
+              건수만 다 세면 "통장 5개"인데 그중 셋만 더해진 숫자가 된다.
+              서버가 available 을 만든 기준을 그대로 쓴다(accountCount). */}
+          <div className="text-xs text-muted2">통장 {d.accountCount ?? 0}개</div>
 
           <div className="cash-flows">
             <div>

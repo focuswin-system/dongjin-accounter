@@ -68,13 +68,19 @@ const IconOf = (name) => Icon[name] || Icon.Right
 export const QUICK_KEY = KEY
 export const loadQuickLinks = () => {
   try {
-    const s = JSON.parse(localStorage.getItem(KEY))
-    if (Array.isArray(s) && s.length) return s
-    /* 옛 홈 즐겨찾기를 한 번 옮겨온다 — 담아 둔 것이 사라지면 '지워졌다'로 읽힌다.
-       모양이 다르다(문자열 id 배열 → { id } 배열). */
+    const raw = localStorage.getItem(KEY)
+    /* ⚠ 옛 즐겨찾기는 **이 키가 아예 없을 때만** 옮겨온다.
+       '비었으면 옮긴다'로 두면, 사용자가 바로가기를 전부 지운 순간 목록이 [] 가 되고
+       다음에 열 때 옛 즐겨찾기가 되살아난다 — 지운 게 계속 돌아온다.
+       옛 홈 화면은 기본값까지 넣어 이 키를 늘 써 두었으므로 거의 모든 사용자가 겪는다. */
+    if (raw !== null) {
+      const s = JSON.parse(raw)
+      return Array.isArray(s) ? s : []
+    }
+    // 모양이 다르다(문자열 id 배열 → { id } 배열)
     const old = JSON.parse(localStorage.getItem('homeFavorites'))
     if (Array.isArray(old) && old.length) return old.filter(x => typeof x === 'string').map(id => ({ id }))
-    return Array.isArray(s) ? s : []
+    return []
   } catch { return [] }
 }
 const load = loadQuickLinks

@@ -100,6 +100,10 @@ router.get('/cash-report', async (req, res, next) => {
       date, days, to,
       accounts,
       available,                    // 지금 쓸 수 있는 돈
+      /* 그 돈이 몇 개의 통장에서 나온 건가 — **available 과 같은 집합**을 센다.
+         화면이 accounts 를 그대로 세면 카드·개인 계좌까지 들어가, "통장 5개"인데
+         그중 셋만 더해진 숫자가 붙는다. 기준은 여기 한 곳에서 정한다. */
+      accountCount: cash.filter(a => a.owner === 'corp').length,
       locked: locked.total,         // 예적금에 묶인 돈
       lockedItems: locked.items,
       totalAssets: available + locked.total,
