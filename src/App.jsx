@@ -906,9 +906,11 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
             trigger={
               <button className="topbar-user" title={user?.displayName || "관리자"}>
                 <div className="avatar">{(user?.displayName || "관")[0]}</div>
+                {/* 이름 한 줄만. 예전엔 아래에 role 을 그대로 깔았는데 'admin' 이라는
+                    영문 코드였고, 그 한 줄 때문에 정작 이름이 작아졌다.
+                    역할은 눌러서 여는 팝오버에 한국어로 있다 — 늘 볼 값이 아니다. */}
                 <div className="topbar-user-name">
                   <div className="who">{user?.displayName || "관리자"}</div>
-                  <div className="who-sub">{user?.role || ""}</div>
                 </div>
                 <Icon.Down size={13} style={{ flexShrink: 0, color: "var(--muted-2)" }}/>
               </button>
@@ -917,7 +919,10 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
               {/* 좁은 화면에서는 이름이 접히므로 여기서 한 번 더 보여준다 */}
               <div style={{ padding: "6px 10px 8px" }}>
                 <div className="text-sm fw-700">{user?.displayName || "관리자"}</div>
-                <div className="text-xs text-muted2">{user?.role || ""}</div>
+                {/* 역할은 여기서만 보여주고 **한국어로** 적는다(Master.jsx 사용자 목록과 같은 말) */}
+                <div className="text-xs text-muted2">
+                  {user?.role === 'admin' ? '관리자' : '일반 사용자'}
+                </div>
               </div>
               <div style={{ height: 1, background: "var(--line)", margin: "0 0 4px" }}/>
               <PopItem icon={<Icon.Cog size={14}/>} label="프로필 설정" onClick={() => toast.push("프로필 설정은 준비 중이에요")}/>

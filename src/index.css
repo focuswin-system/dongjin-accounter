@@ -1857,8 +1857,8 @@ body:has([data-modal-open]) {
 .topbar-user:hover { background: var(--surface-2); border-color: var(--line-strong); }
 .topbar-user .avatar { width: 26px; height: 26px; font-size: 12px; flex-shrink: 0; }
 .topbar-user-name { min-width: 0; text-align: left; line-height: 1.25; }
-.topbar-user .who { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
-.topbar-user .who-sub { font-size: 10.5px; color: var(--muted-2); white-space: nowrap; }
+/* 한 줄만 서므로 이름을 키운다 — 두 줄로 나눠 담을 때는 이만큼 줄 수가 없었다 */
+.topbar-user .who { font-size: 13.5px; font-weight: 600; white-space: nowrap; }
 /* 좁은 화면에서는 이름을 접고 아바타만 — 검색칸이 먼저 살아야 한다(팝오버 안에 이름이 있다) */
 @media (max-width: 900px) {
   .topbar-user-name { display: none; }
