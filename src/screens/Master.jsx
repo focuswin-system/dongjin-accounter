@@ -4073,7 +4073,7 @@ export const MenuPrefPanel = ({ embedded }) => {
   if (hidden === null) return <Loading/>
 
   return (
-    <div className={embedded ? undefined : 'fade-up'}>
+    <div className={embedded ? 'panel-pad' : 'fade-up'}>
       {!embedded && <PageHeader title="메뉴 관리"/>}
       <div className="text-sm text-muted" style={{ marginBottom: 16 }}>
         안 쓰는 대메뉴는 접어두면 화면이 단순해져요.

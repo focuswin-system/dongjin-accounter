@@ -167,11 +167,11 @@ router.get('/me', authMiddleware, async (req, res, next) => {
  * 값은 문자열로 오간다. 화면이 JSON 을 넣으면 그대로 돌려준다(파싱은 화면이 한다) —
  * 서버가 뜻을 해석하기 시작하면 설정 하나 늘 때마다 서버를 고쳐야 한다.
  */
-/* 화면 설정(theme_*) — 밝기·강조색·셸 톤. 사람에 붙는 값이라 PC 를 바꿔도 따라와야 한다.
+/* 화면 설정(theme_*) — 밝기·강조색·메뉴 표시 방식. 사람에 붙는 값이라 PC 를 바꿔도 따라와야 한다.
    ⚠ 값의 뜻은 여기서 안 따진다(위 머리말). 화면이 못 읽는 값이 들어와도
      src/lib/theme.js normalize 가 기본값으로 되돌린다 — 그 한 곳이 판정한다. */
 const PREF_KEYS = ['nav_hidden', 'onboarded_at',
-  'theme_mode', 'theme_accent', 'theme_nav', 'theme_header']
+  'theme_mode', 'theme_accent', 'theme_nav_mode']
 const PREF_MAX_LEN = 4000
 
 async function prefsOf(userId) {

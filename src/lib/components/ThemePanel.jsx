@@ -2,10 +2,10 @@ import { useState, useEffect } from 'react'
 import { Icon, useToast, Loading } from '../ui'
 import { api } from '../api'
 import { PageHeader } from './PageHeader'
-import { MODES, ACCENTS, TONES, fromPrefs, toPrefs, applyTheme, writeLocal, normalize } from '../theme'
+import { MODES, ACCENTS, NAV_MODES, fromPrefs, toPrefs, applyTheme, writeLocal, normalize } from '../theme'
 
 /**
- * 화면 설정 — 밝기·색·셸 톤.
+ * 화면 설정 — 밝기·강조색·왼쪽 메뉴 표시 방식.
  *
  * ⚠ **개인 설정이다.** 메뉴 관리와 같은 축이고, 권한(관리자가 정하는 통제)과 섞지 않는다.
  *   회사가 정할 일이 아니라 그 사람 눈이 정할 일이다.
@@ -16,6 +16,7 @@ import { MODES, ACCENTS, TONES, fromPrefs, toPrefs, applyTheme, writeLocal, norm
  */
 
 const MODE_ICON = { light: Icon.Sun, dark: Icon.Moon, system: Icon.Screen }
+const NAVMODE_ICON = { fixed: Icon.Menu, rail: Icon.Right, toggle: Icon.More }
 
 const MODE_WHY = {
   light:  '기본. 밝은 사무실에서 가장 또렷해요.',
@@ -62,10 +63,10 @@ export const ThemePanel = ({ embedded }) => {
 
   if (theme === null) return <Loading/>
 
-  const darkOn = theme.mode === 'dark'
-
   return (
-    <div className={embedded ? undefined : 'fade-up'}>
+    /* ⚠ embedded 일 때 여백은 **패널이 낸다.** 감싸는 카드는 overflow:hidden 이고
+         패딩이 0이라, 글자를 모서리에 붙여 두면 첫 글자의 왼쪽이 잘려 나간다. */
+    <div className={embedded ? 'panel-pad' : 'fade-up'}>
       {!embedded && <PageHeader title="화면 설정"/>}
       <div className="text-sm text-muted" style={{ marginBottom: 16 }}>
         이 설정은 <b>나에게만</b> 적용돼요. 다른 PC 로 로그인해도 따라옵니다.
@@ -109,23 +110,25 @@ export const ThemePanel = ({ embedded }) => {
           </div>
         </Section>
 
-        <Section title="메뉴와 헤더"
-          desc={darkOn
-            ? '어둡게를 쓰는 동안에는 메뉴와 헤더도 함께 어두워요.'
-            : '왼쪽 메뉴와 위쪽 헤더만 어둡게 둘 수 있어요. 본문과 확실히 갈립니다.'}>
-          <div className="col gap-10" style={{ opacity: darkOn ? 0.45 : 1, pointerEvents: darkOn ? 'none' : undefined }}>
-            {[['nav', '왼쪽 메뉴'], ['header', '위쪽 헤더']].map(([key, label]) => (
-              <div key={key} className="row gap-10" style={{ alignItems: 'center' }}>
-                <div className="text-sm fw-600" style={{ width: 90, flexShrink: 0 }}>{label}</div>
-                <div className="row gap-6">
-                  {TONES.map(t => (
-                    <button key={t.id} type="button"
-                      className={`chip${theme[key] === t.id ? ' active' : ''}`}
-                      onClick={() => set({ [key]: t.id })}>{t.label}</button>
-                  ))}
-                </div>
-              </div>
-            ))}
+        <Section title="왼쪽 메뉴"
+          desc="색은 밝기 설정을 따라가요. 여기서는 메뉴를 얼마나 펼쳐 둘지 고릅니다.">
+          <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
+            {NAV_MODES.map(n => {
+              const Ic = NAVMODE_ICON[n.id] || Icon.Menu
+              return (
+                <PickCard key={n.id} on={theme.navMode === n.id} onClick={() => set({ navMode: n.id })}>
+                  <div className="col gap-6" style={{ alignItems: 'flex-start' }}>
+                    <Ic size={18}/>
+                    <div className="fw-700 text-sm">{n.label}</div>
+                    <div className="text-xs text-muted2" style={{ lineHeight: 1.5 }}>{n.desc}</div>
+                  </div>
+                </PickCard>
+              )
+            })}
+          </div>
+          {/* 좁은 화면에서는 못 지키는 약속이라 미리 말해 둔다 */}
+          <div className="text-xs text-muted2">
+            화면이 좁으면(태블릿·폰) 이 설정과 상관없이 ☰ 로 열려요.
           </div>
         </Section>
       </div>

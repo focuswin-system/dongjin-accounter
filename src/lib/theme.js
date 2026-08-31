@@ -1,5 +1,5 @@
 /**
- * 화면 설정 — 모드(라이트/다크)·액센트·셸 톤.
+ * 화면 설정 — 밝기(라이트/다크)·강조색·왼쪽 메뉴 표시 방식.
  *
  * ── 값이 사는 곳이 둘인 이유 ──
  * 최종 원본은 **서버(user_prefs)** 다. 사람에 붙는 설정이라 PC 를 바꿔도 따라와야 한다.
@@ -37,12 +37,20 @@ export const ACCENTS = [
   { id: 'teal',   label: '청록',   swatch: '#3C8C9B' },
 ]
 
-export const TONES = [
-  { id: 'light', label: '밝게' },
-  { id: 'dark',  label: '어둡게' },
+/**
+ * 왼쪽 메뉴를 어떻게 세워 둘까.
+ *
+ * ⚠ 밝기(모드)와 **다른 축**이다. 색이 아니라 **자리를 얼마나 내주느냐**의 문제다 —
+ *   메뉴를 늘 펴 두면 길을 잃지 않고, 접어 두면 표가 넓어진다. 넓은 표를 보는 사람과
+ *   메뉴를 자주 오가는 사람이 원하는 게 다르다.
+ */
+export const NAV_MODES = [
+  { id: 'fixed',  label: '항상 펼침', desc: '왼쪽에 늘 서 있어요. 길을 잃지 않아요.' },
+  { id: 'rail',   label: '마우스 올리면 펼침', desc: '평소엔 아이콘만. 가져다 대면 펼쳐져요.' },
+  { id: 'toggle', label: '버튼으로 열기', desc: '숨겨 두고 ☰ 를 눌러 열어요. 화면이 가장 넓어요.' },
 ]
 
-export const DEFAULTS = { mode: 'light', accent: 'gold', nav: 'light', header: 'light' }
+export const DEFAULTS = { mode: 'light', accent: 'gold', navMode: 'fixed' }
 
 const oneOf = (list, v, fallback) => (list.some(x => x.id === v) ? v : fallback)
 
@@ -50,10 +58,9 @@ const oneOf = (list, v, fallback) => (list.some(x => x.id === v) ? v : fallback)
 export const normalize = (raw) => {
   const t = raw && typeof raw === 'object' ? raw : {}
   return {
-    mode:   oneOf(MODES,   t.mode,   DEFAULTS.mode),
-    accent: oneOf(ACCENTS, t.accent, DEFAULTS.accent),
-    nav:    oneOf(TONES,   t.nav,    DEFAULTS.nav),
-    header: oneOf(TONES,   t.header, DEFAULTS.header),
+    mode:    oneOf(MODES,     t.mode,    DEFAULTS.mode),
+    accent:  oneOf(ACCENTS,   t.accent,  DEFAULTS.accent),
+    navMode: oneOf(NAV_MODES, t.navMode, DEFAULTS.navMode),
   }
 }
 
@@ -68,10 +75,9 @@ const resolveMode = (mode) => {
 /**
  * <html> 에 값을 붙인다 — CSS 가 읽는 유일한 자리.
  *
- * ⚠ 다크 모드에서는 셸 톤 속성을 **떼어 낸다.** 다크의 셸 색이 이미 정해져 있는데
- *   [data-nav="light"] 가 남아 있으면 사이드바만 흰 채로 남아, 다크에서 눈이 찔린다.
- *   ('밝게'를 골라 둔 사람이 다크로 바꾸면 그 선택은 **기억은 하되 적용은 안 한다** —
- *    라이트로 돌아오면 다시 살아난다.)
+ * ⚠ 메뉴·헤더의 **색은 따로 고르지 않는다.** 밝기(모드)를 따라간다 —
+ *   한때 셸 톤을 별도 축으로 뒀는데, 고를 것만 늘고 "이건 왜 따로지?"가 남았다.
+ *   메뉴에서 정말 다른 사람마다 다른 것은 색이 아니라 **자리**였다(navMode).
  */
 export const applyTheme = (raw) => {
   const t = normalize(raw)
@@ -80,13 +86,7 @@ export const applyTheme = (raw) => {
 
   el.setAttribute('data-theme', mode)
   el.setAttribute('data-accent', t.accent)
-  if (mode === 'dark') {
-    el.removeAttribute('data-nav')
-    el.removeAttribute('data-header')
-  } else {
-    el.setAttribute('data-nav', t.nav)
-    el.setAttribute('data-header', t.header)
-  }
+  el.setAttribute('data-navmode', t.navMode)
   return t
 }
 
@@ -102,15 +102,14 @@ export const writeLocal = (t) => {
 /* 서버 prefs 는 칸이 납작하다(pref_key 하나에 값 하나). 그 모양과 여기 모양을 잇는다 —
    이 변환을 화면마다 적으면 키 이름이 조용히 갈린다. */
 export const fromPrefs = (prefs) => normalize({
-  mode:   prefs?.theme_mode,
-  accent: prefs?.theme_accent,
-  nav:    prefs?.theme_nav,
-  header: prefs?.theme_header,
+  mode:    prefs?.theme_mode,
+  accent:  prefs?.theme_accent,
+  navMode: prefs?.theme_nav_mode,
 })
 
 export const toPrefs = (t) => {
   const n = normalize(t)
-  return { theme_mode: n.mode, theme_accent: n.accent, theme_nav: n.nav, theme_header: n.header }
+  return { theme_mode: n.mode, theme_accent: n.accent, theme_nav_mode: n.navMode }
 }
 
 /* 'system' 을 고른 사람은 OS 가 밤에 바뀔 때 같이 바뀌어야 한다. 안 그러면
