@@ -6,6 +6,7 @@ import { WelcomeWizard } from './lib/components/WelcomeWizard'
 import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID, MASTER_LEAVES, PORTAL_PAGE_OF_LEAF, NAV_PATH_OF, FOLDABLE_DOMAINS, foldNav, filterDocs, filterPortalDocs } from './lib/nav'
 import { PermCtx, usePerms, visibleNav, visiblePortalNode, withoutMasterOnly } from './lib/perms'
 import { sessionAlive, clearSession } from './lib/session'
+import { applyTheme, fromPrefs, writeLocal, readLocal, watchSystem } from './lib/theme'
 import { UpdateBanner } from './lib/components/UpdateBanner'
 import { LoginScreen } from './screens/Login'
 import { HomeScreen } from './screens/Home'
@@ -1064,7 +1065,7 @@ function FaqPanel({ open, onClose, route, go }) {
       <div onClick={onClose}
         style={{ position:"absolute", inset:0, background:"rgba(11,18,32,0.18)", backdropFilter:"blur(1px)" }}/>
       <div style={{ position:"absolute", top:0, right:0, bottom:0,
-        width:"min(380px,100vw)", background:"#fff", display:"flex", flexDirection:"column",
+        width:"min(380px,100vw)", background:"var(--surface)", display:"flex", flexDirection:"column",
         boxShadow:"-8px 0 40px rgba(15,23,42,0.13)", animation:"slideInRight .18s ease both" }}>
 
         {/* Header */}
@@ -1213,7 +1214,7 @@ const CommandPalette = ({ open, onClose, onPick }) => {
 
   return (
     <div onClick={onClose} data-modal-open style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(11,18,32,0.36)", display: "grid", placeItems: "start center", paddingTop: 96, backdropFilter: "blur(2px)" }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: "min(560px, calc(100vw - 32px))", background: "#fff", borderRadius: 16, overflow: "hidden", boxShadow: "0 30px 80px -20px rgba(15,23,42,0.35)", animation: "fadeUp .16s ease" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "min(560px, calc(100vw - 32px))", background: "var(--surface)", borderRadius: 16, overflow: "hidden", boxShadow: "0 30px 80px -20px rgba(15,23,42,0.35)", animation: "fadeUp .16s ease" }}>
         <div className="row gap-10" style={{ padding: "14px 18px", borderBottom: "1px solid var(--line)" }}>
           <Icon.Search size={18} className="text-muted"/>
           <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)} onKeyDown={handleKeyDown}
@@ -1283,7 +1284,16 @@ export default function App() {
     if (!loggedIn) { setPerms(null); setPrefs(null); setDocKeys(null); return; }
     let alive = true;
     api.me()
-      .then(me => { if (alive) { setPerms(me?.perms || {}); setPrefs(me?.prefs || {}); } })
+      .then(me => {
+        if (!alive) return;
+        setPerms(me?.perms || {});
+        setPrefs(me?.prefs || {});
+        /* 화면 설정의 진실은 서버다. 첫 페인트는 index.html 이 기기 사본으로 이미
+           그렸으니, 여기서는 **다른 PC 에서 바꾼 것**을 따라잡는 일만 한다.
+           기기 사본도 같이 고쳐 둬야 다음 새로고침의 첫 페인트가 맞다. */
+        const t = fromPrefs(me?.prefs);
+        applyTheme(t); writeLocal(t);
+      })
       .catch(() => { /* 실패 시 제한 없음 유지 — 서버 게이트가 최종 판정 */ });
     const loadDocs = () => api.getDocCatalog()
       .then(items => { if (alive && items) setDocKeys(items.map(d => d.key)); });
@@ -1291,7 +1301,19 @@ export default function App() {
     /* 환경설정 > 문서 관리에서 켜고 끄면 **바로** 메뉴가 따라온다.
        새로고침해야 반영되면 사용자는 저장이 안 된 줄 안다. */
     window.addEventListener('doccatalog:changed', loadDocs);
-    return () => { alive = false; window.removeEventListener('doccatalog:changed', loadDocs); };
+    /* 환경설정 > 화면 설정에서 고르면 그 자리에서 바뀐다(저장은 그쪽이 한다).
+       여기서 다시 붙이는 이유는 **로그아웃 뒤 다른 사람이 로그인**할 때 앞사람의
+       설정이 남지 않게 하기 위해서다 — me() 가 오면 위에서 덮인다. */
+    const onTheme = (e) => applyTheme(e.detail);
+    window.addEventListener('theme:changed', onTheme);
+    /* '시스템 설정'을 고른 사람은 OS 가 밤에 바뀔 때 같이 바뀌어야 한다 */
+    const stopWatch = watchSystem(readLocal);
+    return () => {
+      alive = false;
+      window.removeEventListener('doccatalog:changed', loadDocs);
+      window.removeEventListener('theme:changed', onTheme);
+      stopWatch();
+    };
   }, [loggedIn]);
 
   const handleLogin = (u) => {
@@ -1350,7 +1372,7 @@ function ForcePasswordChange({ user, onDone, onLogout }) {
     onDone();
   };
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#fff', padding: 20 }}>
+    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--surface)', padding: 20 }}>
       <form onSubmit={submit} style={{ width: '100%', maxWidth: 360 }}>
         <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.03em', marginBottom: 6 }}>비밀번호 변경</div>
         <div style={{ fontSize: 13.5, color: 'var(--muted)', marginBottom: 24 }}>

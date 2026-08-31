@@ -56,7 +56,7 @@ export const FileAttach = ({
     <div className="col gap-8">
       {docs.map((d, i) => (
         <div key={d.id || d.url || i} className="row gap-10"
-          style={{ border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px', background: '#fff' }}>
+          style={{ border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px', background: 'var(--surface)' }}>
           <div style={{ width: 34, height: 40, background: 'var(--surface-3)', border: '1px solid var(--line)', borderRadius: 6, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
             {isImg(d.name) ? <Icon.Image size={18}/> : <Icon.File size={18}/>}
           </div>

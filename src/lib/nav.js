@@ -388,6 +388,10 @@ export const SETTINGS_GROUPS = [
        영영 못 되살린다(바로가기 독이 같은 이유로 도움말에 '보이기'를 둔다).
        ⚠ 이건 **개인 설정**이다 — 권한(관리자가 정하는 통제)과 섞지 않는다. */
     { id: "settings_menu",     label: "메뉴 관리",     icon: Icon.Menu },
+    /* 화면 설정 — 밝기·색·셸 톤. 메뉴 관리와 같이 **개인 설정**이다(사람에 붙는다).
+       ⚠ 권한 자원(permissions.js RESOURCES)에도 같은 id 로 있어야 한다 —
+         check:isolation [5] 가 nav 잎과 1:1 을 강제한다. */
+    { id: "settings_theme",    label: "화면 설정",     icon: Icon.Sun },
   ]},
 ]
 

@@ -187,7 +187,7 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
         {[{ n: 1, t: '파일 업로드' }, { n: 2, t: '컬럼 매핑 · 중복 검토' }, { n: 3, t: '일괄 등록' }].map((s, i2, arr) => (
           <Fragment key={s.n}>
             <div className="row gap-8" style={{ opacity: stage >= s.n ? 1 : 0.4 }}>
-              <div style={{ width: 28, height: 28, borderRadius: '50%', background: stage >= s.n ? 'var(--ink)' : '#fff', color: stage >= s.n ? '#fff' : 'var(--muted)', border: '1px solid var(--line-strong)', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 12 }}>
+              <div style={{ width: 28, height: 28, borderRadius: '50%', background: stage >= s.n ? 'var(--ink)' : 'var(--surface)', color: stage >= s.n ? 'var(--surface)' : 'var(--muted)', border: '1px solid var(--line-strong)', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 12 }}>
                 {stage > s.n ? <Icon.Check size={14}/> : s.n}
               </div>
               <div className={`text-sm ${stage >= s.n ? 'fw-700' : 'text-muted'}`}>{s.t}</div>
@@ -226,7 +226,7 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
         <div className="col gap-16">
             <div className="card card-pad">
               <div className="row gap-12">
-                <div style={{ width: 44, height: 44, borderRadius: 10, background: '#E7F4ED', color: 'var(--pos)', display: 'grid', placeItems: 'center' }}><Icon.Excel size={22}/></div>
+                <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--pos-soft)', color: 'var(--pos)', display: 'grid', placeItems: 'center' }}><Icon.Excel size={22}/></div>
                 <div style={{ minWidth: 0 }}>
                   <div className="fw-700" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</div>
                   <div className="text-xs text-muted2">

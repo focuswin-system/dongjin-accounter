@@ -303,7 +303,7 @@ export const MgmtAskScreen = () => {
                   <div key={it.id} className="col" style={{ gap: 8 }}>
                     {/* 내 질문(우측 버블) */}
                     <div className="row" style={{ justifyContent: 'flex-end' }}>
-                      <div style={{ background: 'var(--brand)', color: '#fff', padding: '8px 14px', borderRadius: '14px 14px 3px 14px', fontSize: 13.5, fontWeight: 600, maxWidth: 520 }}>{it.title}</div>
+                      <div style={{ background: 'var(--brand)', color: 'var(--on-brand)', padding: '8px 14px', borderRadius: '14px 14px 3px 14px', fontSize: 13.5, fontWeight: 600, maxWidth: 520 }}>{it.title}</div>
                     </div>
                     {/* 도우미 답변(좌측 AI 카드) */}
                     <AnswerCard item={it} onRefresh={refreshItem} onDelete={delItem}/>

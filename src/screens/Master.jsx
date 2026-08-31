@@ -11,6 +11,7 @@ import { RecurringCycles, useRecurringCycles, cycleSummaryByRule, CycleAmountDra
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { BackfillWizard } from '../lib/components/BackfillWizard'
 import { TemplateRequestBox } from '../lib/components/TemplateRequestBox'
+import { ThemePanel } from '../lib/components/ThemePanel'
 import { RowActions } from '../lib/components/RowActions'
 import { RecurHistoryDrawer } from '../lib/components/RecurHistoryDrawer'
 import { normBizNo, normVendorName } from '../lib/normalize'
@@ -125,6 +126,7 @@ const MASTER_TABS = [
   { id: "reports",         label: "보고서 관리", custom: true },
   { id: "docs",            label: "문서 관리", custom: true },
   { id: "menu",            label: "메뉴 관리", custom: true },
+  { id: "theme",           label: "화면 설정", custom: true },
   { id: "closing",         label: "월 마감 설정", custom: true },
   { id: "audit",           label: "변경 이력 조회", custom: true },
 ];
@@ -150,7 +152,7 @@ const CUSTOM_PANEL_TABS = new Set([
   "payrollItems", "employType", "accountSubject", "category", "vendor",
   "department", "position", "company", "user", "approval", "jeokyo", "item",
   "insurance", "fixed_asset", "intangible_asset", "evidence_type", "closing", "audit", "docs",
-  "reports", "menu",
+  "reports", "menu", "theme",
 ]);
 
 // 도메인별 기준정보 섹션 (App 라우트: master=base / settings / hr_base=hr)
@@ -179,7 +181,7 @@ const MASTER_SECTIONS = {
       /* '메뉴 관리'는 시스템 묶음에 두되 **성격이 다르다** — 사용자·결재선·보고서는 회사가
          정하는 것이고, 이건 **내 화면**을 정리하는 것이다. 그래서 화면 안에서 "나에게만
          적용됩니다"라고 밝힌다. 묶음을 하나 더 세우기엔 항목이 하나뿐이라 과분류다. */
-      { label: "시스템", tabs: ["user", "approval", "reports", "docs", "menu"] },
+      { label: "시스템", tabs: ["user", "approval", "reports", "docs", "menu", "theme"] },
       { label: "장부 마감", tabs: ["closing"] },
       { label: "기록", tabs: ["audit"] },
     ],
@@ -4350,6 +4352,7 @@ export const MasterScreen = ({ user, section = "base", forcedTab }) => {
     if (activeTab === "reports")          return <ReportPrefPanel embedded={single}/>
     if (activeTab === "docs")             return <DocPrefPanel embedded={single}/>
     if (activeTab === "menu")             return <MenuPrefPanel embedded={single}/>
+    if (activeTab === "theme")            return <ThemePanel embedded={single}/>
     if (activeTab === "closing")          return <ClosingPanel embedded={single}/>
     if (activeTab === "audit")            return <AuditPanel embedded={single}/>
     if (activeTab === "department")       return <HrCodePanel type="dept" label="부서" embedded={single}/>
@@ -4530,7 +4533,7 @@ const GroupedTable = ({ data, q, collapsed, toggleGroup, onEdit, onDelete }) => 
                 style={{
                   width: "100%", textAlign: "left",
                   padding: "16px 18px",
-                  background: top === "수익" ? "#F0F8F3" : "#FFF8EE",
+                  background: top === "수익" ? "var(--pos-soft)" : "var(--warn-soft)",
                   borderBottom: "1px solid var(--line)", borderTop: "1px solid var(--line)",
                   cursor: "pointer", display: "flex", alignItems: "center", gap: 12,
                   fontFamily: "inherit",
@@ -4569,8 +4572,8 @@ const GroupedTable = ({ data, q, collapsed, toggleGroup, onEdit, onDelete }) => 
                       <table className="table" style={{ borderBottom: "1px solid var(--line)" }}>
                         <thead>
                           <tr>
-                            {data.columns.map(c => <th key={c} style={{ background: "#fff", paddingLeft: c === data.columns[0] ? 66 : undefined }}>{c}</th>)}
-                            <th style={{ width: 80, background: "#fff" }}></th>
+                            {data.columns.map(c => <th key={c} style={{ background: "var(--surface)", paddingLeft: c === data.columns[0] ? 66 : undefined }}>{c}</th>)}
+                            <th style={{ width: 80, background: "var(--surface)" }}></th>
                           </tr>
                         </thead>
                         <tbody>
@@ -4636,8 +4639,8 @@ const GroupedTable = ({ data, q, collapsed, toggleGroup, onEdit, onDelete }) => 
               <table className="table">
                 <thead>
                   <tr>
-                    {data.columns.map(c => <th key={c} style={{ background: "#fff" }}>{c}</th>)}
-                    <th style={{ width: 80, background: "#fff" }}></th>
+                    {data.columns.map(c => <th key={c} style={{ background: "var(--surface)" }}>{c}</th>)}
+                    <th style={{ width: 80, background: "var(--surface)" }}></th>
                   </tr>
                 </thead>
                 <tbody>

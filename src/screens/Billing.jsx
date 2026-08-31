@@ -350,7 +350,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                       {[["new", "새 거래로 등록"], ["link", `거래내역에서 연결${(relatedCands.length || candidates.length) ? ` (${relatedCands.length || candidates.length})` : ""}`]].map(([v, l]) => (
                         <button key={v} onClick={() => setMatchMode(v)}
                           style={{ flex: 1, padding: "7px 0", border: 0, borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit",
-                            background: matchMode === v ? "#fff" : "transparent", color: matchMode === v ? "var(--ink)" : "var(--muted-2)",
+                            background: matchMode === v ? "var(--surface)" : "transparent", color: matchMode === v ? "var(--ink)" : "var(--muted-2)",
                             boxShadow: matchMode === v ? "0 1px 4px rgba(0,0,0,0.08)" : "none" }}>
                           {l}
                         </button>

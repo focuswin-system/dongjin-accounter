@@ -558,7 +558,7 @@ const ProcessDrawer = ({ open, onClose, doc, onDone }) => {
                 {candidates.map(t => (
                   <button key={t.id} type="button" onClick={() => setPickedTxn(t.id)}
                     style={{ textAlign: 'left', padding: '10px 12px', border: `1px solid ${pickedTxn === t.id ? 'var(--brand)' : 'var(--line)'}`,
-                             borderRadius: 8, background: pickedTxn === t.id ? 'var(--brand-soft)' : '#fff', cursor: 'pointer' }}>
+                             borderRadius: 8, background: pickedTxn === t.id ? 'var(--brand-soft)' : 'var(--surface)', cursor: 'pointer' }}>
                     <div className="row gap-8">
                       <span className="fw-600 text-sm">{t.vendor_name || '거래처 미상'}</span>
                       {t.related && <span className="badge outline" style={{ fontSize: 10 }}>같은 거래처</span>}
@@ -1120,7 +1120,7 @@ export const EvidenceAttachDrawer = ({ item, onClose }) => {
                 { name: "법인카드_0511_명세.csv", type: "카드영수증", size: "12KB" },
               ].map(f => (
                 <button key={f.name} className="row gap-10"
-                  style={{ padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 10, background: "#fff", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
+                  style={{ padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 10, background: "var(--surface)", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
                   <Icon.Image size={16}/>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="text-sm fw-600" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.name}</div>
@@ -1326,7 +1326,7 @@ export const ExcelScreen = () => {
         {[{ n: 1, t: "파일 업로드" }, { n: 2, t: "데이터 유형" }, { n: 3, t: "컬럼 매핑 · 미리보기" }, { n: 4, t: "일괄 등록" }].map((s, i, arr) => (
           <Fragment key={s.n}>
             <div className="row gap-8" style={{ opacity: stage >= s.n ? 1 : 0.4 }}>
-              <div style={{ width: 28, height: 28, borderRadius: "50%", background: stage >= s.n ? "var(--ink)" : "#fff", color: stage >= s.n ? "#fff" : "var(--muted)", border: "1px solid var(--line-strong)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: 12 }}>
+              <div style={{ width: 28, height: 28, borderRadius: "50%", background: stage >= s.n ? "var(--ink)" : "var(--surface)", color: stage >= s.n ? "var(--surface)" : "var(--muted)", border: "1px solid var(--line-strong)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: 12 }}>
                 {stage > s.n ? <Icon.Check size={14}/> : s.n}
               </div>
               <div className={`text-sm ${stage >= s.n ? "fw-700" : "text-muted"}`}>{s.t}</div>
@@ -1393,7 +1393,7 @@ export const ExcelScreen = () => {
         <div className="col gap-16">
             <div className="card card-pad">
               <div className="row gap-12">
-                <div style={{ width: 44, height: 44, borderRadius: 10, background: "#E7F4ED", color: "var(--pos)", display: "grid", placeItems: "center" }}><Icon.Excel size={22}/></div>
+                <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--pos-soft)", color: "var(--pos)", display: "grid", placeItems: "center" }}><Icon.Excel size={22}/></div>
                 <div style={{ minWidth: 0 }}>
                   <div className="fw-700" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</div>
                   <div className="text-xs text-muted2">{Math.round(file.size / 1024)}KB · {rawRows.length}행 인식됨</div>

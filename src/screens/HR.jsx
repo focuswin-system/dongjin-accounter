@@ -587,7 +587,7 @@ const PayslipEditorDrawer = ({ row, onClose, onSaved }) => {
             {[["fixed", "원"], ["percent", "%"]].map(([m, lbl]) => (
               <button key={m} type="button" onClick={() => update(idx, { mode: m })}
                 style={{ padding: "5px 10px", border: 0, borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit",
-                  background: it.mode === m ? "#fff" : "transparent", color: it.mode === m ? "var(--ink)" : "var(--muted-2)",
+                  background: it.mode === m ? "var(--surface)" : "transparent", color: it.mode === m ? "var(--ink)" : "var(--muted-2)",
                   boxShadow: it.mode === m ? "0 1px 3px rgba(0,0,0,0.1)" : "none" }}>{lbl}</button>
             ))}
           </div>

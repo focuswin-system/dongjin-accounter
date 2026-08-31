@@ -181,7 +181,7 @@ export const FilterSelect = ({ value, onChange, options, placeholder = "전체" 
       {open && (
         <div style={{
           position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 200,
-          background: "#fff", border: "1px solid var(--line)", borderRadius: 10,
+          background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 10,
           boxShadow: "0 4px 20px rgba(0,0,0,0.09)", minWidth: 190, overflow: "hidden",
         }}>
           <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--line)" }}>
@@ -244,7 +244,7 @@ export const HelpPopover = ({ title, items }) => {
       {open && (
         <div style={{
           position: "absolute", right: 0, top: "calc(100% + 8px)", zIndex: 300,
-          background: "#fff", border: "1px solid var(--line)", borderRadius: 12,
+          background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12,
           boxShadow: "0 6px 24px rgba(0,0,0,0.09)", width: 292, padding: "16px 18px",
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
@@ -336,6 +336,10 @@ export const Icon = {
   Menu:    (p) => <I {...p} d={<><path d="M3 6h18M3 12h18M3 18h18"/></>} />,
   Refresh: (p) => <I {...p} d={<><path d="M20 11a8 8 0 1 0-.9 4.5"/><path d="M20 5v6h-6"/></>} />,
   Help:    (p) => <I {...p} d={<><circle cx="12" cy="12" r="9"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none"/></>} />,
+  /* 화면 설정 — 해/달/모니터. 모드 셋을 글자 없이도 구분하게 하는 관용 기호다. */
+  Sun:     (p) => <I {...p} d={<><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></>} />,
+  Moon:    (p) => <I {...p} d={<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a7 7 0 1 0 10.5 10.5z"/>} />,
+  Screen:  (p) => <I {...p} d={<><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/></>} />,
 };
 
 /* ── StatusBadge ── */
@@ -510,7 +514,7 @@ export const Popover = ({ trigger, children, align = "right", width = 240, direc
             ...(direction === "up" ? { bottom: "calc(100% + 6px)" } : { top: "calc(100% + 6px)" }),
             [align]: 0,
             width,
-            background: "#fff",
+            background: "var(--surface)",
             border: "1px solid var(--line)",
             borderRadius: 12,
             boxShadow: "0 16px 40px -12px rgba(15,23,42,0.18), 0 1px 0 rgba(15,23,42,0.04)",
@@ -544,10 +548,10 @@ export const PopItem = ({ icon, label, sub, onClick, danger }) => (
 
 /* ── ConfirmDialog ── */
 const CONFIRM_TONES = {
-  info: { bg: "var(--brand-soft)", color: "var(--brand-ink)", btnBg: "var(--brand)",    btnColor: "#fff" },
-  warn: { bg: "var(--warn-soft)",  color: "var(--warn-ink)",  btnBg: "var(--warn-ink)", btnColor: "#fff" },
-  neg:  { bg: "var(--neg-soft)",   color: "var(--neg-ink)",   btnBg: "var(--neg)",      btnColor: "#fff" },
-  pos:  { bg: "var(--pos-soft)",   color: "var(--pos)",       btnBg: "var(--pos)",      btnColor: "#fff" },
+  info: { bg: "var(--brand-soft)", color: "var(--brand-ink)", btnBg: "var(--brand)",    btnColor: "var(--on-brand)" },
+  warn: { bg: "var(--warn-soft)",  color: "var(--warn-ink)",  btnBg: "var(--warn-ink)", btnColor: "var(--on-brand)" },
+  neg:  { bg: "var(--neg-soft)",   color: "var(--neg-ink)",   btnBg: "var(--neg)",      btnColor: "var(--on-brand)" },
+  pos:  { bg: "var(--pos-soft)",   color: "var(--pos)",       btnBg: "var(--pos)",      btnColor: "var(--on-brand)" },
 };
 
 const ConfirmCtx = createContext({ confirm: () => {} });
@@ -567,7 +571,7 @@ export const ConfirmProvider = ({ children }) => {
         <div data-modal-open onClick={() => close(false)}
           style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(11,18,32,0.35)", display: "grid", placeItems: "center", backdropFilter: "blur(2px)" }}>
           <div onClick={e => e.stopPropagation()}
-            style={{ background: "#fff", borderRadius: 16, width: "min(440px, calc(100vw - 32px))", padding: 28, boxShadow: "0 30px 60px -20px rgba(15,23,42,0.3)", animation: "fadeUp .18s ease" }}>
+            style={{ background: "var(--surface)", borderRadius: 16, width: "min(440px, calc(100vw - 32px))", padding: 28, boxShadow: "0 30px 60px -20px rgba(15,23,42,0.3)", animation: "fadeUp .18s ease" }}>
 
             {/* 아이콘 + 제목 */}
             <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 14 }}>
@@ -797,7 +801,7 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
               // 드로어(z-index 높음) 위에 떠야 하므로 z 를 넉넉히 준다
               ? { position: "fixed", zIndex: 1200, ...(anchor || { left: -9999, top: -9999 }) }
               : { position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50, maxHeight: 320 }),
-            background: "#fff", border: "1px solid var(--line)", borderRadius: 12,
+            background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12,
             boxShadow: "0 16px 40px -12px rgba(15,23,42,0.18), 0 1px 0 rgba(15,23,42,0.04)",
             overflow: "hidden",
             display: "flex", flexDirection: "column", animation: "fadeUp .14s ease" }}>

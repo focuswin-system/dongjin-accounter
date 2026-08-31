@@ -59,7 +59,7 @@ export const VoucherView = ({ open, onClose, source, id }) => {
         {v && (
           /* .voucher-print 는 인쇄 화이트리스트(index.css @media print)에 있어야
              Ctrl+P 가 백지로 나오지 않는다. 드로어 안에서 인쇄되므로 전용 드로어 규칙도 함께 있다. */
-          <div className="voucher-print" style={{ background: '#fff', padding: '8px 4px' }}>
+          <div className="voucher-print" style={{ background: 'var(--surface)', padding: '8px 4px' }}>
             <div style={{ textAlign: 'center', marginBottom: 18 }}>
               <div className="fw-700" style={{ fontSize: 20, letterSpacing: '0.3em', paddingLeft: '0.3em' }}>
                 {v.type}

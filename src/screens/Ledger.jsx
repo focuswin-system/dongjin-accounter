@@ -391,9 +391,11 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
 };
 
 const LedgerCard = ({ label, amount, tone, active, onClick, note }) => {
+  /* ⚠ 색을 박아 두면 안 된다 — 어두운 화면에서 이 카드만 흰 채로 남아 숫자가 안 읽혔다.
+     고른 상태의 옅은 바탕은 상태 토큰(--*-soft)이 테마마다 알아서 낸다. */
   const bg = active
-    ? (tone === "pos" ? "#E8F5EE" : tone === "neg" ? "#FBE9E9" : tone === "brand" ? "#E7EFFB" : "#FBEFD9")
-    : "#fff";
+    ? (tone === "pos" ? "var(--pos-soft)" : tone === "neg" ? "var(--neg-soft)" : tone === "brand" ? "var(--brand-soft)" : "var(--warn-soft)")
+    : "var(--surface)";
   const border = active
     ? (tone === "pos" ? "var(--pos)" : tone === "neg" ? "var(--neg)" : tone === "brand" ? "var(--brand)" : "var(--warn)")
     : "var(--line)";
@@ -543,7 +545,7 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
               {/* 이 지출에 연결된 지급결의서 — 별도 파일 없이 여기서 열람·인쇄 */}
               {resolution && (
                 <div className="row gap-12" style={{ padding: 14, border: "1px solid var(--brand)", borderRadius: 12, background: "var(--brand-soft)" }}>
-                  <div style={{ width: 40, height: 48, background: "#fff", border: "1px solid var(--line)", borderRadius: 6, display: "grid", placeItems: "center" }}><Icon.Sign size={20}/></div>
+                  <div style={{ width: 40, height: 48, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 6, display: "grid", placeItems: "center" }}><Icon.Sign size={20}/></div>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div className="fw-600">지급결의서 {resolution.doc_no}</div>
                     <div className="text-xs text-muted2">{resolution.title} · {fmtNum(resolution.amount)}원</div>
@@ -558,7 +560,7 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
                 </div>
               )}
               {docs.map((d, i) => (
-                <div key={d.id || i} className="row gap-12" style={{ padding: 14, border: "1px solid var(--line)", borderRadius: 12, background: "#fff" }}>
+                <div key={d.id || i} className="row gap-12" style={{ padding: 14, border: "1px solid var(--line)", borderRadius: 12, background: "var(--surface)" }}>
                   <div style={{ width: 40, height: 48, background: "var(--surface-3)", border: "1px solid var(--line)", borderRadius: 6, display: "grid", placeItems: "center" }}><Icon.File size={20}/></div>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div className="fw-600" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name || '첨부 파일'}</div>

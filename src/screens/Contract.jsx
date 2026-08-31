@@ -393,7 +393,7 @@ export const IncomeDrawer = ({ open, onClose }) => {
               <div className="col gap-8">
                 {["MES 유지보수", "도면관리 구축", "QMS 라이선스", "ERP 커스터마이징", "(주문 없음)"].map(v => (
                   <button key={v} className="row gap-10" onClick={() => setForm({...form, contract: v})}
-                    style={{ padding: "12px 14px", border: "1px solid var(--line)", borderRadius: 12, background: form.contract === v ? "var(--surface-3)" : "#fff", textAlign: "left", cursor: "pointer" }}>
+                    style={{ padding: "12px 14px", border: "1px solid var(--line)", borderRadius: 12, background: form.contract === v ? "var(--surface-3)" : "var(--surface)", textAlign: "left", cursor: "pointer" }}>
                     <div style={{ width: 20, height: 20, borderRadius: "50%", border: "2px solid", borderColor: form.contract === v ? "var(--ink)" : "var(--line-strong)", display: "grid", placeItems: "center" }}>
                       {form.contract === v && <div style={{ width: 8, height: 8, background: "var(--ink)", borderRadius: "50%" }}/>}
                     </div>
@@ -440,7 +440,7 @@ export const IncomeDrawer = ({ open, onClose }) => {
                   { v: "국민은행 *789", sub: "예비" },
                 ].map(o => (
                   <button key={o.v} className="row gap-10" onClick={() => setForm({...form, account: o.v})}
-                    style={{ padding: "12px 14px", border: "1px solid var(--line)", borderRadius: 12, background: form.account === o.v ? "var(--surface-3)" : "#fff", textAlign: "left", cursor: "pointer" }}>
+                    style={{ padding: "12px 14px", border: "1px solid var(--line)", borderRadius: 12, background: form.account === o.v ? "var(--surface-3)" : "var(--surface)", textAlign: "left", cursor: "pointer" }}>
                     <Icon.Bank size={18}/>
                     <div>
                       <div className="fw-600">{o.v}</div>
@@ -619,7 +619,7 @@ export const BigSummaryCard = ({ label, amount, sub, accent = "blue", warn = fal
    숫자만 있고 내역이 없으면 사용자는 검산도, 틀린 곳을 짚지도 못한다
    ("176,000원이 어디서 나왔는지 볼 수가 없다"). */
 export const SummaryTile = ({ label, amount, pct, tone, big = false, onOpen, openLabel = '내역' }) => (
-  <div className="card" style={{ padding: "18px 18px", display: "flex", flexDirection: "column", gap: 8, background: big ? "var(--ink)" : "#fff", color: big ? "#fff" : "var(--ink)", borderColor: big ? "var(--ink)" : "var(--line)", cursor: onOpen ? 'pointer' : undefined }}
+  <div className="card" style={{ padding: "18px 18px", display: "flex", flexDirection: "column", gap: 8, background: big ? "var(--ink)" : "var(--surface)", color: big ? "var(--surface)" : "var(--ink)", borderColor: big ? "var(--ink)" : "var(--line)", cursor: onOpen ? 'pointer' : undefined }}
     onClick={onOpen} role={onOpen ? 'button' : undefined} tabIndex={onOpen ? 0 : undefined}
     onKeyDown={onOpen ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } } : undefined}>
     <div className="row" style={{ alignItems: 'center', gap: 6 }}>
