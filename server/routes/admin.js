@@ -11,6 +11,9 @@ const { BUILTIN_REPORTS, featureKeyOf } = require('../platform/reportCatalog')
 const { BUILTIN_DOCS, featureKeyOf: docFeatureKeyOf, prefKeyOf: docPrefKeyOf } = require('../platform/docCatalog')
 const { invalidate, dateOf } = require('../lib/entitlements')
 const { kstToday } = require('../db')
+const { STATUS_IDS, fileNameOf } = require('../platform/templateRequests')
+const path = require('path')
+const fs = require('fs')
 
 const router = express.Router()
 
@@ -113,7 +116,19 @@ router.get('/overview', async (req, res, next) => {
       `SELECT COUNT(*) AS orphan FROM error_logs
         WHERE company_id IS NULL AND created_at >= NOW() - INTERVAL 7 DAY`)
 
-    res.json({ companies, orphanErrors7d: orphan, server: req.app.get('deployInfo') || null })
+    /* 아직 손대지 않은 양식 신청 — 콘솔 탭에 배지로 띄운다.
+       안 띄우면 신청이 며칠씩 묵는다(고객은 보낸 줄 알고 기다린다).
+       ⚠ 표가 아직 없을 수 있다(setup:db 전에 서버만 올라간 경우). 그때 여기서 던지면
+         **콘솔 첫 화면이 통째로 안 뜬다** — 곁다리 숫자 하나 때문에 현황·오류까지 못 본다. */
+    let pending = 0
+    try {
+      const [[row]] = await platformPool.execute(
+        `SELECT COUNT(*) AS pending FROM template_requests WHERE status = 'received'`)
+      pending = row.pending
+    } catch { /* 표가 없으면 0 */ }
+
+    res.json({ companies, orphanErrors7d: orphan, pendingRequests: pending,
+               server: req.app.get('deployInfo') || null })
   } catch (e) { next(e) }
 })
 
@@ -546,6 +561,99 @@ router.put('/companies/:id/features/:key', async (req, res, next) => {
        콘솔과 고객 API 는 같은 프로세스라 이 호출이 그대로 먹는다. */
     invalidate(company.id)
     res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
+
+/* ── 양식 신청함 ────────────────────────────────────────────────────────
+ *
+ * 고객사가 "이런 보고서·문서를 쓰고 싶다"고 보낸 것을 받는 자리.
+ *
+ * ⚠ **신청은 계약이 아니다.** 여기서 '완료'로 바꿔도 아무것도 안 열린다.
+ *   여는 것은 기능 탭에서 company_features 를 켜는 별도의 손이다. 자동으로
+ *   이어붙이면 "고객이 스스로 유료 기능을 못 켠다"는 설계가 무너진다.
+ */
+router.get('/requests', async (req, res, next) => {
+  try {
+    const status = String(req.query.status || '')
+    const where = STATUS_IDS.includes(status) ? 'WHERE r.status = ?' : ''
+    const [rows] = await platformPool.execute(
+      `SELECT r.id, r.company_id, r.kind, r.title, r.descr, r.files, r.status,
+              r.ops_reply, r.ops_memo, r.requester, r.created_at, r.updated_at,
+              c.code AS company_code, c.name AS company_name
+         FROM template_requests r
+         LEFT JOIN companies c ON c.id = r.company_id
+         ${where}
+        ORDER BY FIELD(r.status, 'received', 'reviewing', 'building', 'hold', 'done'),
+                 r.created_at DESC
+        LIMIT ${MAX_ROWS}`,
+      where ? [status] : [])
+    res.json({
+      items: rows.map(r => ({
+        ...r,
+        files: Array.isArray(r.files) ? r.files : (r.files ? JSON.parse(r.files) : []),
+      })),
+    })
+  } catch (e) { next(e) }
+})
+
+router.patch('/requests/:id', async (req, res, next) => {
+  try {
+    const [[row]] = await platformPool.execute(
+      'SELECT id, company_id, title, status FROM template_requests WHERE id = ?', [req.params.id])
+    if (!row) return res.status(404).json({ error: '없는 신청입니다' })
+
+    const status = STATUS_IDS.includes(req.body?.status) ? req.body.status : row.status
+    /* 답변은 **고객 화면에 그대로 뜬다.** 메모는 우리끼리만 본다 —
+       한 칸으로 두면 내부 판단("이건 돈 안 됨")이 고객에게 나간다. */
+    const reply = req.body?.ops_reply === undefined ? null : String(req.body.ops_reply).slice(0, 4000)
+    const memo  = req.body?.ops_memo  === undefined ? null : String(req.body.ops_memo).slice(0, 300)
+
+    await withTx(platformPool, async (conn) => {
+      await conn.execute(
+        `UPDATE template_requests
+            SET status = ?,
+                ops_reply = COALESCE(?, ops_reply),
+                ops_memo  = COALESCE(?, ops_memo)
+          WHERE id = ?`,
+        [status, reply, memo, row.id])
+      await auditAsOpsTx(conn, req, {
+        companyId: row.company_id, resource: 'feature', action: 'request_update',
+        targetId: row.id.slice(0, 64),
+        detail: [row.title, `${row.status} → ${status}`].filter(Boolean).join(' · ').slice(0, 300),
+      })
+    })
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
+/**
+ * 신청에 붙은 파일 내려받기.
+ *
+ * ⚠ **콘솔이 회사 폴더를 읽는 유일한 자리다.** 원칙적으로 콘솔은 고객 데이터를 보지 않는데
+ *   (routes/admin.js 머리말), 이 파일만은 고객이 **우리한테 보내려고** 올린 것이라 성격이 다르다.
+ *   그래도 문은 좁게 연다:
+ *     1) 신청 레코드에 적힌 url 만 쓴다. 요청이 준 경로는 쓰지 않는다.
+ *     2) 그 url 이 **그 신청을 낸 회사 폴더** 안의 파일 하나인지 다시 확인한다
+ *        (fileNameOf — 저장할 때 이미 걸렀지만, 읽을 때 또 거른다).
+ *     3) 그렇게 얻은 이름만 uploads 경로에 붙인다.
+ *   1~3 중 하나만 빠져도 남의 회사 파일을 읽는 길이 된다.
+ */
+router.get('/requests/:id/file/:idx', async (req, res, next) => {
+  try {
+    const [[row]] = await platformPool.execute(
+      'SELECT company_id, files FROM template_requests WHERE id = ?', [req.params.id])
+    if (!row) return res.status(404).json({ error: '없는 신청입니다' })
+    const files = Array.isArray(row.files) ? row.files : (row.files ? JSON.parse(row.files) : [])
+    const f = files[Number(req.params.idx)]
+    if (!f) return res.status(404).json({ error: '없는 첨부입니다' })
+
+    const name = fileNameOf(f.url, row.company_id)
+    if (!name) return res.status(400).json({ error: '첨부 경로가 올바르지 않습니다' })
+
+    const full = path.join(__dirname, '..', 'uploads', row.company_id, name)
+    if (!fs.existsSync(full)) return res.status(404).json({ error: '파일이 없습니다(삭제되었을 수 있습니다)' })
+    res.download(full, f.name || name)
   } catch (e) { next(e) }
 })
 

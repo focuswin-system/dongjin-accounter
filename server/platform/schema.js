@@ -12,7 +12,7 @@ const { randomUUID } = require('crypto')
 const PLATFORM_TABLES = [
   'companies', 'users', 'roles', 'user_roles', 'role_perms',
   'platform_admins', 'audit_logs', 'error_logs', 'tenant_migrations',
-  'company_features', 'report_templates', 'user_prefs',
+  'company_features', 'report_templates', 'user_prefs', 'template_requests',
 ]
 
 /**
@@ -222,6 +222,40 @@ async function createPlatformSchema(c) {
       created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       UNIQUE KEY uq_company_feature (company_id, feature_key),
       KEY idx_cf_company (company_id)
+    )
+  `)
+
+  /* 양식 신청함 — 고객사가 "이런 보고서·문서를 쓰고 싶다"고 보내는 자리.
+   *
+   * ⚠ **회사 DB가 아니라 여기 있다.** 받는 사람이 우리(공급자)이기 때문이다.
+   *   회사 DB에 두면 운영 콘솔이 테넌트를 하나하나 열어봐야 신청이 왔는지 알 수 있다.
+   *
+   * ⚠ **신청은 계약이 아니다.** 여기 행이 생겨도 아무것도 안 열린다 —
+   *   여는 것은 사람이 콘솔에서 company_features 를 켜는 별도의 손이다.
+   *   자동으로 이어붙이면 "고객이 스스로 유료 기능을 못 켠다"는 설계가 무너진다.
+   *
+   * files  [{ url, name, size }] — 파일 실체는 회사 폴더(uploads/{companyId}/)에 있고
+   *        여기엔 경로만 적는다. 파일 규칙(회사별 격리)을 신청함이라고 바꾸지 않는다.
+   *        콘솔이 그 경로를 읽는 길은 routes/admin.js 가 따로 연다(경로 검증 포함).
+   * requester  이름 스냅샷. 계정이 지워져도 누가 냈는지는 남아야 한다.
+   */
+  await c.execute(`
+    CREATE TABLE IF NOT EXISTS template_requests (
+      id           VARCHAR(36) PRIMARY KEY,
+      company_id   VARCHAR(36) NOT NULL,
+      kind         VARCHAR(20) NOT NULL DEFAULT 'report',    -- report | doc
+      title        VARCHAR(160) NOT NULL,
+      descr        TEXT,
+      files        JSON,
+      status       VARCHAR(20) NOT NULL DEFAULT 'received',  -- received|reviewing|building|done|hold
+      ops_reply    TEXT,                                     -- 고객에게 보이는 답변
+      ops_memo     VARCHAR(300),                             -- 우리끼리 보는 메모(고객에게 안 나간다)
+      requested_by VARCHAR(36),
+      requester    VARCHAR(80),
+      created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_tr_company (company_id, created_at),
+      KEY idx_tr_status (status)
     )
   `)
 

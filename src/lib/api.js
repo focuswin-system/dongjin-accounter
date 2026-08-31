@@ -398,6 +398,21 @@ export const api = {
   async getDocPrefs() {
     try { return (await req('/doc-catalog/manage'))?.items || [] } catch { return [] }
   },
+  /* 양식 신청 — "이런 보고서·문서를 쓰고 싶다"를 우리(공급자)에게 보낸다.
+   * ⚠ 신청은 계약이 아니다. 보낸다고 아무것도 안 열린다 — 우리가 콘솔에서 연다. */
+  async getTemplateRequests(kind) {
+    try { return (await req(`/template-requests${kind ? `?kind=${kind}` : ''}`))?.items || [] }
+    catch { return [] }
+  },
+  async createTemplateRequest(body) {
+    try { return { ok: true, ...(await req('/template-requests', { method: 'POST', body })) } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async cancelTemplateRequest(id) {
+    try { await req(`/template-requests/${id}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
   async setDocPref(key, enabled) {
     try { await req(`/doc-catalog/manage/${encodeURIComponent(key)}`, { method: 'PUT', body: { enabled } }); return { ok: true } }
     catch (e) { return { ok: false, error: e.message } }

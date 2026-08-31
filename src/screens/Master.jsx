@@ -10,6 +10,7 @@ import { VendorSubList, ACCOUNT_FIELDS, CONTACT_FIELDS } from '../lib/components
 import { RecurringCycles, useRecurringCycles, cycleSummaryByRule, CycleAmountDrawer } from '../lib/components/RecurringCycles'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { BackfillWizard } from '../lib/components/BackfillWizard'
+import { TemplateRequestBox } from '../lib/components/TemplateRequestBox'
 import { RowActions } from '../lib/components/RowActions'
 import { RecurHistoryDrawer } from '../lib/components/RecurHistoryDrawer'
 import { normBizNo, normVendorName } from '../lib/normalize'
@@ -4207,6 +4208,7 @@ export const DocPrefPanel = ({ embedded }) => {
           · 여기 설정은 <b>회사 전체</b>에 적용됩니다. 사람별로 가리는 건 환경설정 &gt; 사용자의 역할에서 정합니다.
         </div>
       </div>
+      <TemplateRequestBox kind="doc"/>
     </div>
   )
 }
@@ -4290,6 +4292,7 @@ export const ReportPrefPanel = ({ embedded }) => {
           · 여기 설정은 <b>회사 전체</b>에 적용됩니다. 사람별로 가리는 건 환경설정 &gt; 사용자의 역할에서 정합니다.
         </div>
       </div>
+      <TemplateRequestBox kind="report"/>
     </div>
   )
 }

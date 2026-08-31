@@ -369,6 +369,7 @@ const TABS = [
   { id: 'security', label: '로그인 실패' },
   { id: 'accounts', label: '계정' },
   { id: 'features', label: '기능' },
+  { id: 'requests', label: '신청' },
 ]
 const state = { tab: 'overview', company: null }
 
@@ -409,7 +410,8 @@ async function renderApp(tab) {
 
   const err7 = ov.companies.reduce((a, c) => a + Number(c.errors_7d || 0), 0) + Number(ov.orphanErrors7d || 0)
   const fail1 = ov.companies.reduce((a, c) => a + Number(c.login_fails_1d || 0), 0)
-  const badge = { errors: err7, security: fail1 }
+  // 아직 손대지 않은 신청은 배지로 알린다 — 안 보이면 며칠씩 묵는다
+  const badge = { errors: err7, security: fail1, requests: ov.pendingRequests || 0 }
   const tabs = root.querySelector('#tabs')
   for (const t of TABS) {
     // 배지는 '볼 일이 있을 때만' 붙는다. 0을 달아두면 늘 붙어 있어 신호가 되지 못한다.
@@ -419,7 +421,7 @@ async function renderApp(tab) {
     tabs.appendChild(b)
   }
 
-  const views = { overview: viewOverview, usage: viewUsage, errors: viewErrors, security: viewSecurity, accounts: viewAccounts, features: viewFeatures }
+  const views = { overview: viewOverview, usage: viewUsage, errors: viewErrors, security: viewSecurity, accounts: viewAccounts, features: viewFeatures, requests: viewRequests }
   main.innerHTML = ''
   await views[state.tab](main, ov)
 }
@@ -775,6 +777,123 @@ async function viewAccounts(main, ov) {
  *   판매 가능  여기서 켜고 끈다
  *   준비 중    화면은 있지만 아직 안 판다. 켜도 고객에게 안 나간다(서버가 막는다)
  */
+
+/* ── 양식 신청 ─────────────────────────────────────────────────────────
+ *
+ * 고객사가 "이런 보고서·문서를 쓰고 싶다"고 보낸 것.
+ *
+ * ⚠ **여기서 '완료'로 바꿔도 아무것도 안 열린다.** 여는 것은 기능 탭에서
+ *   company_features 를 켜는 별도의 손이다. 자동으로 이어붙이면
+ *   "고객이 스스로 유료 기능을 못 켠다"는 설계가 무너진다.
+ *   대신 행마다 '기능 탭으로' 를 둬서 손이 끊기지 않게 한다.
+ */
+const REQ_STATUS = {
+  received:  { label: '접수됨',    chip: 'amber' },
+  reviewing: { label: '검토 중',   chip: 'blue'  },
+  building:  { label: '만드는 중', chip: 'blue'  },
+  done:      { label: '완료',      chip: ''      },
+  hold:      { label: '보류',      chip: ''      },
+}
+const REQ_KIND = { report: '보고서', doc: '문서' }
+
+async function viewRequests(main, ov) {
+  const box = el('<div class="card"><div class="empty">불러오는 중</div></div>')
+  main.appendChild(box)
+  let d
+  try { d = await api('/requests') }
+  catch (e) { box.innerHTML = `<div class="empty red">${esc(e.message)}</div>`; return }
+
+  if (!d.items.length) {
+    box.innerHTML = '<div class="empty">아직 들어온 신청이 없습니다.</div>'
+    return
+  }
+
+  /* 첨부는 **버튼**이다. 링크로 두면 토큰을 주소에 실어야 하는데(헤더를 못 붙인다),
+     주소에 실린 토큰은 접속 기록·브라우저 기록에 그대로 남는다. */
+  const fileLinks = (r) => (r.files || []).map((f, i) =>
+    `<button class="btn sm" style="margin-right:6px" data-act="dl"
+             data-id="${esc(r.id)}" data-i="${i}" data-n="${esc(f.name)}">${esc(f.name)}</button>`
+  ).join('') || '<span class="g5">첨부 없음</span>'
+
+  const rows = d.items.map(r => {
+    const st = REQ_STATUS[r.status] || REQ_STATUS.received
+    return `<tr>
+      <td>
+        <span style="font-weight:600">${esc(r.title)}</span>
+        <div class="sub-l">${esc(r.company_code || '')} · ${esc(r.company_name || '')} · ${esc(r.requester || '')}</div>
+        ${r.descr ? `<div class="g6" style="font-size:13px;margin-top:6px;white-space:pre-wrap">${esc(r.descr)}</div>` : ''}
+        <div style="margin-top:8px">${fileLinks(r)}</div>
+        ${r.ops_reply ? `<div class="g5" style="font-size:12.5px;margin-top:8px">답변: ${esc(r.ops_reply)}</div>` : ''}
+      </td>
+      <td>${REQ_KIND[r.kind] || esc(r.kind)}</td>
+      <td>${st.chip ? `<span class="chip ${st.chip}">${st.label}</span>` : `<span class="g5">${st.label}</span>`}</td>
+      <td class="num g6">${esc(String(r.created_at || '').slice(0, 10))}</td>
+      <td class="r">
+        <button class="btn sm" data-act="edit" data-id="${esc(r.id)}">처리</button>
+        <button class="btn sm" data-act="feat" data-c="${esc(r.company_id)}">기능 탭으로</button>
+      </td>
+    </tr>`
+  }).join('')
+
+  box.innerHTML = `<div class="pad row" style="padding:18px 22px">
+      <div style="font-weight:600">양식 신청</div>
+      <div class="g5" style="font-size:13px;margin-left:10px">
+        여기서 상태를 바꿔도 기능이 열리지는 않습니다 — 여는 것은 기능 탭입니다
+      </div>
+    </div>
+    <div class="tw"><table><thead><tr>
+      <th>신청</th><th style="width:80px">종류</th><th style="width:110px">상태</th>
+      <th style="width:110px">받은 날</th><th style="width:180px"></th>
+    </tr></thead><tbody>${rows}</tbody></table></div>`
+
+  box.querySelectorAll('button[data-act="dl"]').forEach(b => {
+    b.onclick = async () => {
+      try {
+        const res = await fetch(`/api/admin/requests/${b.dataset.id}/file/${b.dataset.i}`,
+          { headers: { Authorization: 'Bearer ' + token } })
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || '내려받지 못했습니다')
+        const url = URL.createObjectURL(await res.blob())
+        const a = document.createElement('a')
+        a.href = url; a.download = b.dataset.n; a.click()
+        URL.revokeObjectURL(url)
+      } catch (e) { toast(e.message, 'bad') }
+    }
+  })
+  box.querySelectorAll('button[data-act="feat"]').forEach(b => {
+    b.onclick = () => { state.company = b.dataset.c; renderApp('features') }
+  })
+  box.querySelectorAll('button[data-act="edit"]').forEach(b => {
+    b.onclick = async () => {
+      const r = d.items.find(x => x.id === b.dataset.id)
+      const opts = Object.entries(REQ_STATUS).map(([k, v]) =>
+        `<option value="${k}" ${k === r.status ? 'selected' : ''}>${v.label}</option>`).join('')
+      const m = el(`<div class="modal"><div class="box">
+        <h3>신청 처리</h3>
+        <p class="g6" style="font-size:13.5px">${esc(r.title)}</p>
+        <label>상태</label><select id="s">${opts}</select>
+        <label style="margin-top:12px">답변 <span class="g5">· 고객 화면에 그대로 보입니다</span></label>
+        <textarea id="rp" rows="3">${esc(r.ops_reply || '')}</textarea>
+        <label style="margin-top:12px">메모 <span class="g5">· 우리끼리만 봅니다</span></label>
+        <input id="mm" value="${esc(r.ops_memo || '')}">
+        <div class="row r" style="margin-top:18px;gap:8px">
+          <button class="btn" id="c">취소</button><button class="btn pri" id="k">저장</button>
+        </div></div></div>`)
+      document.body.appendChild(m)
+      m.querySelector('#c').onclick = () => m.remove()
+      m.querySelector('#k').onclick = async () => {
+        try {
+          await api(`/requests/${r.id}`, { method: 'PATCH', body: {
+            status: m.querySelector('#s').value,
+            ops_reply: m.querySelector('#rp').value,
+            ops_memo: m.querySelector('#mm').value,
+          } })
+          m.remove(); toast('저장했습니다'); renderApp('requests')
+        } catch (e) { toast(e.message, 'bad') }
+      }
+    }
+  })
+}
+
 async function viewFeatures(main, ov) {
   const cid = state.company || (ov.companies[0] && ov.companies[0].id)
   if (!cid) { main.appendChild(el('<div class="card"><div class="empty">회사가 없습니다.</div></div>')); return }

@@ -85,6 +85,9 @@ const API_RESOURCES = {
   '/api/audit':               ['settings'],
   '/api/company':             ['settings'],
   '/api/approval-presets':    ['settings'],
+  /* 양식 신청 — 보고서·문서 관리 화면(환경설정 하위)에서만 쓴다.
+     라우트가 회사 마스터인지 한 번 더 본다. */
+  '/api/template-requests':   ['settings'],
   // 첨부 업로드/다운로드는 어느 화면에서든 쓴다 → 자원으로 가르지 않고 아래 ANY_AUTHENTICATED 로 둔다
 }
 
