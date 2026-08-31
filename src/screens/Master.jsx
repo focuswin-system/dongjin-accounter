@@ -1800,6 +1800,19 @@ const AdjustDrawer = ({ account, onClose, onSave }) => {
 }
 
 // ── 회사 정보 패널 (자사 기준정보, 단일 레코드) ────────────────────
+/* 회사 정보의 한 줄 — 이름 열 + 값 열.
+   ⚠ CompanyPanel **안**에서 정의하면 안 된다. 렌더마다 새 컴포넌트 타입이 되어
+     input 이 통째로 다시 붙고, 한 글자 칠 때마다 포커스가 날아간다. */
+const CoRow = ({ label, req, hint, children }) => (
+  <div className="co-row">
+    <div className="co-key">{label}{req && <span style={{ color: 'var(--neg-ink)' }}> *</span>}</div>
+    <div style={{ minWidth: 0 }}>
+      {children}
+      {hint && <div className="co-hint">{hint}</div>}
+    </div>
+  </div>
+)
+
 const CompanyPanel = ({ embedded = false }) => {
   const toast = useToast()
   const [form, setForm] = useState({ name:'', biz_no:'', ceo:'', biz_type:'', biz_item:'', address:'', phone:'', fax:'', email:'', main_account:'', closing_day: 0, week_start_day: 1,
@@ -1820,7 +1833,10 @@ const CompanyPanel = ({ embedded = false }) => {
         closing_day: Number(c.closing_day) || 0, week_start_day: Number(c.week_start_day ?? 1),
       })
     })
-    api.getAccounts().then(list => setAccounts(list.filter(a => a.kind !== 'card')))
+    /* ⚠ 카드까지 **다** 담는다. 예전엔 여기서 card 를 걸러 놓고 아래 '주카드' 칸이
+       `kind === 'card'` 로 다시 골라, 그 칸은 늘 비어 있었다(고를 수가 없었다).
+       거르는 일은 쓰는 자리에서 한다 — 대표 입금계좌만 카드를 뺀다. */
+    api.getAccounts().then(setAccounts)
     api.getAccountingPrefs().then(setAcctPrefs)
   }, [])
 
@@ -1846,169 +1862,122 @@ const CompanyPanel = ({ embedded = false }) => {
         <button className="btn primary ml-auto" onClick={handleSave}><Icon.Check size={14}/> 저장</button>
       </div>
 
-      {/* 구획을 **카드로 쪼갠다.** 예전엔 카드 하나에 필드를 쭉 잇고 1px 선 다섯 개로만
-          나눴다 — 선 위아래가 무슨 묶음인지 알 수 없고, 필드 라벨과 구획 이름이 거의 같은
-          크기·색이라 위계가 안 섰다.
-          maxWidth 760 도 걷어낸다. 화면이 넓어도 거기서 끊겨 오른쪽이 통째로 비었다.
-          넓으면 두 열, 좁으면 한 열(auto-fit). */}
+      {/* 구획을 카드로 쪼개고, 카드 안은 **한 줄에 한 칸**으로 통일한다.
+          예전엔 한 줄에 두세 칸을 나란히 두고 칸마다 폭이 달라, 세로 정렬선이 줄마다
+          어긋났다 — 그게 '정돈 안 된' 느낌의 정체다. 이름 열을 고정하면 카드가 달라도
+          값이 시작하는 선이 같아, 눈이 세로 두 줄만 따라가면 된다. */}
       <div className="co-grid">
-        <div className="card card-pad col co-sec" style={{ gap: 18 }}>
+
+        <div className="card card-pad col co-sec" style={{ gap: 14 }}>
           <div className="co-head">사업자 정보</div>
-        <div className="row gap-16" style={{ alignItems:'flex-start', flexWrap: 'wrap' }}>
-          <div style={{ flex: 2, minWidth: 240 }}>
-            <label className="label" style={{ marginBottom: 8 }}>상호(법인명) <span style={{ color:'var(--neg-ink)' }}>*</span></label>
+          <CoRow label="상호(법인명)" req>
             <input className="input" value={form.name} onChange={e => f('name', e.target.value)} placeholder="도니도라 주식회사"/>
-          </div>
-          <div style={{ flex: 1, minWidth: 160 }}>
-            <label className="label" style={{ marginBottom: 8 }}>대표자</label>
+          </CoRow>
+          <CoRow label="대표자">
             <input className="input" value={form.ceo} onChange={e => f('ceo', e.target.value)} placeholder="홍길동"/>
-          </div>
-        </div>
-
-        {/* ⚠ 칸마다 **필요한 폭이 다르다.** 사업자등록번호는 자릿수가 고정이라 짧고,
-            업태·종목은 자유 입력이라 길다. 셋을 한 줄에 3등분하면 긴 칸이 눌려
-            안내 글자가 두 줄로 접힌다 — 줄을 갈라 각자에게 필요한 만큼 준다. */}
-        <div style={{ maxWidth: 260 }}>
-          <label className="label" style={{ marginBottom: 8 }}>사업자등록번호</label>
-          <input className="input num" value={form.biz_no} onChange={e => f('biz_no', e.target.value)} placeholder="000-00-00000"/>
-        </div>
-
-        {/* 업태·종목은 사업자등록증에 적힌 문구를 그대로 옮기는 칸이다. 자유 입력이라
-            같은 뜻을 여러 표기로 쓰게 되므로(소프트웨어개발/소프트웨어 개발/SW개발)
-            표준 목록에서 고르게 하되, 목록에 없으면 직접 입력도 된다. */}
-        <div className="row gap-16" style={{ alignItems:'flex-start', flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 240 }}>
-            <label className="label" style={{ marginBottom: 8 }}>업태</label>
+          </CoRow>
+          <CoRow label="사업자등록번호">
+            <input className="input num" value={form.biz_no} onChange={e => f('biz_no', e.target.value)} placeholder="000-00-00000"/>
+          </CoRow>
+          {/* 업태·종목은 사업자등록증에 적힌 문구를 그대로 옮기는 칸이다. 자유 입력이라
+              같은 뜻을 여러 표기로 쓰게 되므로(소프트웨어개발/소프트웨어 개발/SW개발)
+              표준 목록에서 고르게 하되, 목록에 없으면 직접 입력도 된다. */}
+          <CoRow label="업태">
             <Combobox value={form.biz_type} onChange={v => f('biz_type', v)}
               options={bizTypeOptions()} placeholder="선택 또는 직접 입력"
               onAddNew={q => f('biz_type', q)} addNewLabel="직접 입력"/>
-          </div>
-          <div style={{ flex: 1, minWidth: 240 }}>
-            <label className="label" style={{ marginBottom: 8 }}>종목</label>
+          </CoRow>
+          <CoRow label="종목">
             <Combobox value={form.biz_item} onChange={v => f('biz_item', v)}
               options={bizItemOptions(form.biz_type)} placeholder="선택 또는 직접 입력"
               onAddNew={q => f('biz_item', q)} addNewLabel="직접 입력"/>
-          </div>
+          </CoRow>
         </div>
 
-        </div>
-
-        <div className="card card-pad col co-sec" style={{ gap: 18 }}>
+        <div className="card card-pad col co-sec" style={{ gap: 14 }}>
           <div className="co-head">연락처 · 주소</div>
-        <div>
-          <label className="label" style={{ marginBottom: 8 }}>사업장 주소</label>
-          <input className="input" value={form.address} onChange={e => f('address', e.target.value)} placeholder="경기도 안산시 ..."/>
-        </div>
-
-        {/* 전화·팩스는 자릿수가 정해져 있어 짧고, 이메일은 길다 — 셋을 3등분하지 않는다 */}
-        <div className="row gap-16" style={{ alignItems:'flex-start', flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <label className="label" style={{ marginBottom: 8 }}>대표 전화</label>
+          <CoRow label="사업장 주소">
+            <input className="input" value={form.address} onChange={e => f('address', e.target.value)} placeholder="경기도 안산시 ..."/>
+          </CoRow>
+          <CoRow label="대표 전화">
             <input className="input" value={form.phone} onChange={e => f('phone', e.target.value)} placeholder="031-000-0000"/>
-          </div>
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <label className="label" style={{ marginBottom: 8 }}>팩스</label>
+          </CoRow>
+          <CoRow label="팩스">
             <input className="input" value={form.fax} onChange={e => f('fax', e.target.value)} placeholder="031-000-0001"/>
-          </div>
+          </CoRow>
+          <CoRow label="이메일">
+            <input className="input" value={form.email} onChange={e => f('email', e.target.value)} placeholder="info@dongjin.co.kr"/>
+          </CoRow>
         </div>
 
-        <div>
-          <label className="label" style={{ marginBottom: 8 }}>이메일</label>
-          <input className="input" value={form.email} onChange={e => f('email', e.target.value)} placeholder="info@dongjin.co.kr"/>
-        </div>
-
-        </div>
-
-        <div className="card card-pad col co-sec" style={{ gap: 18 }}>
+        <div className="card card-pad col co-sec" style={{ gap: 14 }}>
           <div className="co-head">계좌 · 카드</div>
-        <div>
-          <label className="label" style={{ marginBottom: 8 }}>대표 입금계좌</label>
-          <Combobox value={form.main_account} onChange={v => f('main_account', v)} allowAdd={false}
-            options={[{ value: '', label: '선택 안 함' }, ...accounts.map(a => ({ value: a.name, label: a.name }))]}
-            placeholder="대표 입금계좌 선택"/>
-          <div className="text-xs text-muted2" style={{ marginTop: 6 }}>세금계산서·청구서에 표기할 기본 수금 계좌예요.</div>
-        </div>
-
-        {/* 주거래 계좌·카드 — 업무마다 늘 쓰는 그것을 계좌 선택에서 **앞에 세운다.**
-            ⚠ 미리 고르지는 않는다. 자동 선택은 사용자가 확인 없이 지나가게 만들고,
-              그러면 다른 통장에서 나간 돈이 주거래로 기록된다(현금/카드에서 실제로 겪었다).
-              순서를 바꾸는 것은 틀린 기록을 만들지 않지만, 미리 고르는 것은 만든다. */}
-        <div>
-          <div className="fw-600" style={{ marginBottom: 4 }}>주거래 계좌·카드</div>
-          <div className="text-xs text-muted2" style={{ marginBottom: 12 }}>
-            업무마다 늘 쓰는 계좌를 지정하면 <b>계좌 고르는 자리에서 맨 앞에</b> 나와요.
-            자동으로 골라지지는 않아요 — 확인 없이 지나가면 엉뚱한 통장에 기록될 수 있어서요.
-          </div>
-          <div className="row gap-16" style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}>
-            {[
-              ['main_in_account_id',  '주입금 계좌', '돈이 들어오는 일 — 청구서 입금·수시입금', a => a.kind !== 'card'],
-              ['main_out_account_id', '주지출 계좌', '돈이 나가는 일 — 지급·경비·이체',       a => a.kind !== 'card'],
-              ['main_card_id',        '주카드',     '카드로 쓰는 일',                        a => a.kind === 'card'],
-            ].map(([key, label, hint, pick]) => (
-              <div key={key} style={{ flex: 1, minWidth: 220 }}>
-                <label className="label" style={{ marginBottom: 8 }}>{label}</label>
-                <Combobox value={form[key] || ''} onChange={v => f(key, v)} allowAdd={false}
-                  options={[{ value: '', label: '지정 안 함' },
-                    ...accounts.filter(pick).map(a => ({ value: a.id, label: a.name, sub: a.bank || undefined }))]}
-                  placeholder={`${label} 선택`}/>
-                <div className="text-xs text-muted2" style={{ marginTop: 6 }}>{hint}</div>
-              </div>
-            ))}
+          <CoRow label="대표 입금계좌" hint="세금계산서·청구서에 표기할 기본 수금 계좌예요">
+            <Combobox value={form.main_account} onChange={v => f('main_account', v)} allowAdd={false}
+              options={[{ value: '', label: '선택 안 함' },
+                ...accounts.filter(a => a.kind !== 'card').map(a => ({ value: a.name, label: a.name }))]}
+              placeholder="대표 입금계좌 선택"/>
+          </CoRow>
+          {/* 주거래 계좌·카드 — 업무마다 늘 쓰는 그것을 계좌 선택에서 **앞에 세운다.**
+              ⚠ 미리 고르지는 않는다. 자동 선택은 사용자가 확인 없이 지나가게 만들고,
+                그러면 다른 통장에서 나간 돈이 주거래로 기록된다(현금/카드에서 실제로 겪었다).
+                순서를 바꾸는 것은 틀린 기록을 만들지 않지만, 미리 고르는 것은 만든다. */}
+          {[
+            ['main_in_account_id',  '주입금 계좌', '청구서 입금·수시입금', a => a.kind !== 'card'],
+            ['main_out_account_id', '주지출 계좌', '지급·경비·이체',       a => a.kind !== 'card'],
+            ['main_card_id',        '주카드',      '카드로 쓰는 일',       a => a.kind === 'card'],
+          ].map(([key, label, hint, pick]) => (
+            <CoRow key={key} label={label} hint={hint}>
+              <Combobox value={form[key] || ''} onChange={v => f(key, v)} allowAdd={false}
+                options={[{ value: '', label: '지정 안 함' },
+                  ...accounts.filter(pick).map(a => ({ value: a.id, label: a.name, sub: a.bank || undefined }))]}
+                placeholder="지정 안 함"/>
+            </CoRow>
+          ))}
+          <div className="co-row">
+            <div/>
+            <div className="co-note">지정하면 계좌 고르는 자리에서 <b>맨 앞</b>에 나와요. 자동으로 골라지진 않아요.</div>
           </div>
         </div>
 
-        </div>
-
-        <div className="card card-pad col co-sec" style={{ gap: 18 }}>
-          <div className="co-head">집계 · 회계 방식</div>
         {/* 회사가 세는 '한 달'과 '한 주'.
             25일 마감이면 7월분은 6/26~7/25 다 — 달력월로 세면 매입현황 표가 실물과 영영 안 맞는다. */}
-        <div>
-          <div className="fw-600" style={{ marginBottom: 4 }}>집계 기간</div>
+        <div className="card card-pad col co-sec" style={{ gap: 14 }}>
+          <div className="co-head">집계 기간</div>
           {/* ⚠ **어디에 걸리는지**를 적는다. 이름이 '집계 기간'이라 앱 전체에 걸린다고 읽히는데,
               실제로는 자금 쪽 넷뿐이다(자금 현황·매입매출 현황·자금관리표·세무사 전달용).
               거래내역·부가세가 달력월인 건 신고 자료와 어긋나면 안 되기 때문이다. */}
-          <div className="text-xs text-muted2" style={{ marginBottom: 12 }}>
-            <b>자금 현황·매입·매출 현황</b>과 자금 관련 엑셀에만 적용돼요.
-            거래내역·부가세는 달력월 그대로예요.
+          <div className="co-note">
+            <b>자금 현황·매입·매출 현황</b>과 자금 관련 엑셀에만 적용돼요. 거래내역·부가세는 달력월 그대로예요.
           </div>
-
-          <div className="row gap-16" style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: 220 }}>
-              <label className="label" style={{ marginBottom: 8 }}>마감일</label>
-              <Combobox value={String(form.closing_day)} onChange={v => f('closing_day', Number(v) || 0)} allowAdd={false}
-                options={[{ value: '0', label: '달력월 그대로 (1일~말일)' },
-                  ...Array.from({ length: 28 }, (_, i) => ({ value: String(i + 1), label: `매월 ${i + 1}일 마감` }))]}
-                placeholder="마감일 선택"/>
-              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-                {form.closing_day > 0
-                  ? `7월분은 6월 ${form.closing_day + 1}일 ~ 7월 ${form.closing_day}일로 집계돼요.`
-                  : '7월분은 7월 1일 ~ 7월 31일로 집계돼요.'}
-                {/* 29~31 은 2월에 없는 날짜라 그 달만 조용히 어긋난다 — 아예 고를 수 없게 뒀다 */}
-              </div>
+          <CoRow label="마감일"
+            hint={form.closing_day > 0
+              ? `7월분은 6월 ${form.closing_day + 1}일 ~ 7월 ${form.closing_day}일로 집계돼요.`
+              : '7월분은 7월 1일 ~ 7월 31일로 집계돼요.'}>
+            {/* 29~31 은 2월에 없는 날짜라 그 달만 조용히 어긋난다 — 아예 고를 수 없게 뒀다 */}
+            <Combobox value={String(form.closing_day)} onChange={v => f('closing_day', Number(v) || 0)} allowAdd={false}
+              options={[{ value: '0', label: '달력월 그대로 (1일~말일)' },
+                ...Array.from({ length: 28 }, (_, i) => ({ value: String(i + 1), label: `매월 ${i + 1}일 마감` }))]}
+              placeholder="마감일 선택"/>
+          </CoRow>
+          <CoRow label="주 시작 요일" hint="주별 소계를 이 요일부터 끊어요.">
+            <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+              {['일', '월', '화', '수', '목', '금', '토'].map((d, i) => (
+                <button key={i} className={`chip ${form.week_start_day === i ? 'active' : ''}`}
+                  onClick={() => f('week_start_day', i)}>{d}</button>
+              ))}
             </div>
-
-            <div style={{ flex: 1, minWidth: 220 }}>
-              <label className="label" style={{ marginBottom: 8 }}>주 시작 요일</label>
-              <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
-                {['일', '월', '화', '수', '목', '금', '토'].map((d, i) => (
-                  <button key={i} className={`chip ${form.week_start_day === i ? 'active' : ''}`}
-                    onClick={() => f('week_start_day', i)}>{d}</button>
-                ))}
-              </div>
-              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>주별 소계를 이 요일부터 끊어요.</div>
-            </div>
-          </div>
+          </CoRow>
         </div>
 
         {/* 회계 처리 방식 — 일계표가 무엇을 세는지 정한다.
-            저장 버튼을 거치지 않고 즉시 반영한다(되돌리기 쉬워야 하는 장부 규약). */}
-        {/* ⚠ **회계 용어를 쓴다.** 켜기/끄기로 두면 무엇을 고르는 건지 알 수 없다 —
-            이건 장부의 인식 시점을 정하는 일이고, 그 선택지에는 원래 이름이 있다.
+            저장 버튼을 거치지 않고 즉시 반영한다(되돌리기 쉬워야 하는 장부 규약).
+            ⚠ **회계 용어를 쓴다.** 켜기/끄기로 두면 무엇을 고르는 건지 알 수 없다 —
+              이건 장부의 인식 시점을 정하는 일이고, 그 선택지에는 원래 이름이 있다.
             ⚠ 예전엔 꺼짐 쪽에 '(기본)'이 붙어 있었는데 틀린 표기다. report_prefs 는
-            **행이 없으면 켜짐**이 규약이라 시스템 기본은 발생주의다(routes/company.js). */}
-        <div>
-          <label className="label" style={{ marginBottom: 8 }}>회계 처리 방식</label>
+              **행이 없으면 켜짐**이 규약이라 시스템 기본은 발생주의다(routes/company.js). */}
+        <div className="card card-pad col co-sec co-wide" style={{ gap: 14 }}>
+          <div className="co-head">회계 처리 방식</div>
           <div className="acct-basis">
             {[
               { on: true,  name: '발생주의', sub: '세금계산서를 끊은 날 매출·매입으로 잡아요', std: true },
@@ -2037,12 +2006,11 @@ const CompanyPanel = ({ embedded = false }) => {
           </div>
           {/* 바꾸기 전에 무엇을 정리해야 하는지 — 모르고 바꾸면 매출이 두 번 잡힌다 */}
           {!acctPrefs.voucher_issuance && (
-            <div className="text-xs text-muted2" style={{ marginTop: 8, lineHeight: 1.6 }}>
+            <div className="co-note">
               발생주의로 바꾸기 전에 <b>매입 청구서의 비목</b>과 <b>청구서–입금 정산 연결</b>을
               확인해주세요. 안 되어 있으면 매출이 두 번 잡힙니다.
             </div>
           )}
-        </div>
         </div>
       </div>
     </div>
