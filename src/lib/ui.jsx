@@ -308,6 +308,9 @@ export const Icon = {
   More:    (p) => <I {...p} d={<><circle cx="5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.2" fill="currentColor" stroke="none"/></>} />,
   Link:    (p) => <I {...p} d={<><path d="M9 15l6-6"/><path d="M10 5l1-1a4 4 0 0 1 6 6l-1 1"/><path d="M14 19l-1 1a4 4 0 0 1-6-6l1-1"/></>} />,
   Building:(p) => <I {...p} d={<><rect x="4" y="4" width="14" height="17" rx="1.5"/><path d="M8 8h2M8 12h2M8 16h2M14 8h-1M14 12h-1M14 16h-1"/><path d="M18 9h2v12h-2"/></>} />,
+  /* 사람 — 계정·사용자 자리에 쓴다. 없어서 그 자리들이 Building(건물)이나 Sign(서명)을
+     빌려 쓰고 있었는데, 둘 다 옆 항목과 겹쳐 아이콘이 구분을 못 해 줬다. */
+  User:    (p) => <I {...p} d={<><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></>} />,
   Briefcase:(p) => <I {...p} d={<><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M3 13h18"/></>} />,
   Wallet:  (p) => <I {...p} d={<><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 13h3"/><path d="M3 10h18"/></>} />,
   Folder:  (p) => <I {...p} d={<><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></>} />,

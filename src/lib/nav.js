@@ -317,20 +317,38 @@ export const SETTINGS_LEAF = { id: "settings", label: "환경설정", icon: Icon
    보러 가는 곳인지 고치러 가는 곳인지 갈리지 않는다.
    특히 '보고서'는 경영관리의 보고서 화면과 이름이 같아, 그대로 두면 같은 것으로 읽힌다. */
 /* ⚠ 한 화면에 **같은 아이콘을 두 항목이 쓰지 않는다.** 결재선·변경 이력이 둘 다 Doc 이라
-   타일을 훑을 때 아이콘이 아무것도 구분해 주지 못했다(기준정보와 같은 규약). */
-export const SETTINGS_LEAVES = [
-  { id: "settings_company",  label: "회사 정보",     icon: Icon.Bank },
-  { id: "settings_user",     label: "사용자 관리",   icon: Icon.Building },
-  { id: "settings_approval", label: "결재선 등록",   icon: Icon.Sign },
-  { id: "settings_reports",  label: "보고서 관리",   icon: Icon.Chart },
-  /* 메뉴 관리 — 첫 안내에서 접은 대메뉴를 되살리는 자리. 접는 길만 두고 켜는 길을 안 두면
-     영영 못 되살린다(바로가기 독이 같은 이유로 도움말에 '보이기'를 둔다).
-     ⚠ 이건 **개인 설정**이다 — 권한(관리자가 정하는 통제)과 섞지 않는다. */
-  { id: "settings_menu",     label: "메뉴 관리",     icon: Icon.Menu },
-  { id: "settings_closing",  label: "월 마감 설정",  icon: Icon.Calendar },
-  // 변경 이력 — 회사 마스터만 열린다(서버가 막고, 화면도 마스터가 아니면 타일을 감춘다)
-  { id: "settings_audit",    label: "변경 이력 조회", icon: Icon.Clock },
+   타일을 훑을 때 아이콘이 아무것도 구분해 주지 못했다(기준정보와 같은 규약).
+
+   묶음은 **무엇을 손대는가**로 가른다.
+     회사        — 장부 전체에 걸리는 규약. 한 번 정하면 오래 간다.
+     사용자·권한 — 누가 들어오고, 누가 결재하고, 누가 무엇을 고쳤나.
+     화면        — 이 회사에게 무엇을 보여 줄지.
+   ⚠ 변경 이력을 '사용자·권한'에 둔다. 기록이라기보다 **누가 고쳤나**를 보는 자리라,
+     계정을 다루다 바로 이어진다. */
+export const SETTINGS_GROUPS = [
+  { label: "회사", icon: Icon.Bank, tone: "brand", items: [
+    { id: "settings_company",  label: "회사 정보",     icon: Icon.Building },
+    { id: "settings_closing",  label: "월 마감 설정",  icon: Icon.Calendar },
+  ]},
+  { label: "사용자·권한", icon: Icon.User, tone: "pos", items: [
+    { id: "settings_user",     label: "사용자 관리",   icon: Icon.User },
+    { id: "settings_approval", label: "결재선 등록",   icon: Icon.Sign },
+    // 변경 이력 — 회사 마스터만 열린다(서버가 막고, 화면도 마스터가 아니면 타일을 감춘다)
+    { id: "settings_audit",    label: "변경 이력 조회", icon: Icon.Clock },
+  ]},
+  { label: "화면", icon: Icon.Menu, tone: "warn", items: [
+    { id: "settings_reports",  label: "보고서 관리",   icon: Icon.Chart },
+    /* 메뉴 관리 — 첫 안내에서 접은 대메뉴를 되살리는 자리. 접는 길만 두고 켜는 길을 안 두면
+       영영 못 되살린다(바로가기 독이 같은 이유로 도움말에 '보이기'를 둔다).
+       ⚠ 이건 **개인 설정**이다 — 권한(관리자가 정하는 통제)과 섞지 않는다. */
+    { id: "settings_menu",     label: "메뉴 관리",     icon: Icon.Menu },
+  ]},
 ]
+
+/* 평탄화 목록 — 권한(perms.js)·검색(Ctrl+K)·브레드크럼이 쓴다.
+   ⚠ 순서는 SETTINGS_GROUPS 를 따른다 — 두 곳을 따로 적어 두면 타일 순서와
+     검색 순서가 엇갈리고, 그건 누가 봐도 버그로 읽힌다. */
+export const SETTINGS_LEAVES = SETTINGS_GROUPS.flatMap(g => g.items)
 
 /* 사이드바·포털에서는 뺐지만 **살아 있는 화면** — 라우트·권한 자원·검색은 그대로 둔다.
  * 'contract'(주문 전체 목록)는 수주/발주 두 메뉴와 같은 화면이라 트리에서 뺐지만,
@@ -597,7 +615,7 @@ for (const [from, to] of Object.entries(ROUTE_ALIAS)) {
 // 각 타일은 settings_<tab> forcedTab 화면으로 들어간다.
 PORTAL_CAT_BY_ID['settings'] = {
   id: 'settings', label: '환경설정', icon: Icon.Cog, domainLabel: '환경설정',
-  groups: [{ label: '', items: SETTINGS_LEAVES.map(l => l.id) }],
+  groups: SETTINGS_GROUPS.map(g => ({ label: g.label, icon: g.icon, tone: g.tone, items: g.items.map(it => it.id) })),
 }
 
 /* 기준정보도 같은 방식의 포털 페이지. 일반회계 도메인 안에 있던 것을 꺼내
