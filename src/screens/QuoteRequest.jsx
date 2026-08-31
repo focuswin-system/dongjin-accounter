@@ -3,6 +3,8 @@ import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday } from '../lib
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
+import { SourceChooser } from '../lib/components/SourceChooser'
+import { PickListDrawer } from '../lib/components/PickListDrawer'
 
 const numOf = (v) => (typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, ''), 10) || 0 : Number(v) || 0)
 const ROWS = 15
@@ -245,8 +247,30 @@ const QuoteRequestPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSave
   )
 }
 
+/* 견적요청서를 어디서 만들까 — 살 것을 여러 줄 적어 단가를 물어보는 문서다.
+   품목은 기준정보에 이미 있는데, 행마다 하나씩 골라 넣고 있었다(한 번에 여러 개를 못 담았다). */
+const QUOTE_SOURCES = [
+  {
+    id: 'item', icon: Icon.Copy,
+    label: '품목에서 골라서',
+    desc: '기준정보에 등록된 품목을 여러 개 담아요',
+    effect: '자재코드·규격·단위·매입단가가 그대로 채워져요. 수량만 적으면 돼요.',
+  },
+  {
+    id: 'blank', icon: Icon.Pencil,
+    label: '직접 작성',
+    desc: '빈 양식에서 시작해요',
+    effect: '품목을 하나씩 적어요. 행에서 기준정보를 골라 넣을 수도 있어요.',
+  },
+]
+
 export const QuoteRequestScreen = () => {
   const toast = useToast()
+  const [srcOpen, setSrcOpen] = useState(false)
+  const [pickOpen, setPickOpen] = useState(false)
+  const [items, setItems] = useState(null)
+  /* 새 문서에 미리 채워 넣을 품목 줄 (Settlement.jsx 와 같은 방식) */
+  const [seed, setSeed] = useState([])
   const [list, setList] = useState([])
   const [company, setCompany] = useState(null)
   const [vendors, setVendors] = useState([])
@@ -275,12 +299,52 @@ export const QuoteRequestScreen = () => {
     toast.push(res.error || '거래처 등록에 실패했어요', { tone: 'warn' }); return ''
   }
 
-  const blankDoc = { id: '__new', req_date: localToday(), items: [] }
+  const blankDoc = { id: '__new', req_date: localToday(), items: seed }
 
   return (
     <div className="fade-up">
       <PageHeader title="견적요청서"
-        actions={<button className="btn primary" onClick={() => setCreating(true)}><Icon.Plus size={14}/> 새 견적요청서</button>}/>
+        actions={<button className="btn primary" onClick={() => setSrcOpen(true)}><Icon.Plus size={14}/> 새 견적요청서</button>}/>
+
+      <SourceChooser
+        open={srcOpen} onClose={() => setSrcOpen(false)}
+        title="새 견적요청서" sub="어디서 만들까요?"
+        options={QUOTE_SOURCES}
+        onPick={(id) => {
+          setSrcOpen(false)
+          if (id === 'blank') { setSeed([]); setCreating(true); return }
+          setItems(null); setPickOpen(true)
+          api.getRefItems('item').then(r => setItems(r || []))
+        }}/>
+
+      <PickListDrawer
+        open={pickOpen} onClose={() => setPickOpen(false)}
+        title="품목에서 골라서" sub="견적을 받을 품목을 고르세요"
+        placeholder="품명·자재코드·규격 검색"
+        rows={items}
+        match={(m, q) => [m.name, m.code, m.spec].filter(Boolean)
+          .some(v => String(v).toLowerCase().includes(q.toLowerCase()))}
+        render={(m) => ({
+          title: m.spec ? `${m.name} ${m.spec}` : m.name,
+          sub: [m.code, m.unit].filter(Boolean).join(' · ') || null,
+          right: m.purchase_price ? Number(m.purchase_price) : '단가 없음',
+        })}
+        empty="등록된 품목이 없어요. 기준정보 > 품목에서 먼저 등록하세요."
+        onDone={(rows) => {
+          /* ⚠ 행에서 하나씩 고를 때(pickItem)와 **같은 규칙**으로 채운다 —
+             품명은 '이름 규격', 단가는 매입단가. 두 경로가 다르면 같은 품목이
+             어디서 담았느냐에 따라 다르게 적힌다. */
+          setSeed(rows.map(m => ({
+            code: m.code || '',
+            name: m.spec ? `${m.name} ${m.spec}` : m.name,
+            unit: m.unit || '',
+            qty: '',                     // 수량은 사람이 정한다 — 짐작해 넣으면 확인 없이 지나간다
+            unit_price: m.purchase_price ? String(m.purchase_price) : '',
+            amount: '',
+            memo: '',
+          })))
+          setPickOpen(false); setCreating(true)
+        }}/>
       <DocWorkspace>
         <DocSide>
           {list.length === 0

@@ -935,6 +935,13 @@ button.cell-tag:hover { color: var(--ink); background: var(--surface-2); }
 }
 .doctype-pick:hover { border-color: var(--brand); background: var(--hover-bg, rgba(0,0,0,.02)); }
 .doctype-pick:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+/* 여러 건 고르기 — 고른 줄만 표식을 단다. 안 고른 줄에 빈 네모를 깔면 목록이 시끄럽다 */
+.doctype-pick.on { border-color: var(--brand); background: var(--brand-soft); }
+.pick-mark {
+  width: 18px; height: 18px; border-radius: 6px; flex-shrink: 0;
+  display: grid; place-items: center; color: #fff; background: transparent;
+}
+.doctype-pick.on .pick-mark { background: var(--brand); }
 .doctype-ico {
   display: inline-flex; align-items: center; justify-content: center;
   width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;

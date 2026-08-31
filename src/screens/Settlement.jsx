@@ -3,6 +3,8 @@ import { Icon, fmtNum, useToast, useConfirm, localToday } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
+import { SourceChooser } from '../lib/components/SourceChooser'
+import { PickListDrawer } from '../lib/components/PickListDrawer'
 
 // 定算內譯書 — 항목은 고정 분류(도로비·교통비…) 없이 쓰는 사람이 필요한 줄만 추가한다.
 // 옛 양식의 좌측 고정 슬롯·출장 항번호(①②③…) 주석은 2026-08 고객 요청으로 걷어냈다.
@@ -218,7 +220,30 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
 }
 
 // ── 화면 ─────────────────────────────────────────────────────────
+/* 정산내역서를 어디서 만들까 — 이 문서는 **쓴 돈을 항목별로 정리해 넘기는** 것이라
+   줄이 여럿이다. 그 줄이 이미 거래내역에 있는데 손으로 옮겨 적고 있었다. */
+const SETTLE_SOURCES = [
+  {
+    id: 'txn', icon: Icon.Bank,
+    label: '거래내역에서 골라서',
+    desc: '이미 기록한 지출을 여러 건 가져와요',
+    effect: '고른 지출이 항목 줄로 채워져요. 금액·날짜·거래처가 그대로 와요.',
+  },
+  {
+    id: 'blank', icon: Icon.Pencil,
+    label: '직접 작성',
+    desc: '빈 양식에서 시작해요',
+    effect: '항목을 하나씩 적어요.',
+  },
+]
+
 export const SettlementScreen = () => {
+  const [srcOpen, setSrcOpen] = useState(false)
+  const [pickOpen, setPickOpen] = useState(false)
+  const [txns, setTxns] = useState(null)
+  /* 새 문서에 미리 채워 넣을 줄. blankDoc 이 상수라 여기에 담아 둔다 —
+     creating 이 false→true 로 갈 때 미리보기가 새로 마운트되면서 이 값을 읽는다. */
+  const [seed, setSeed] = useState([])
   const [list, setList] = useState([])
   const [company, setCompany] = useState(null)
   const [selId, setSelId] = useState(null)
@@ -240,12 +265,48 @@ export const SettlementScreen = () => {
     api.getSettlement(selId).then(setSel)
   }, [selId, creating])
 
-  const blankDoc = { id: '__new', settle_date: localToday(), lines: [], approval: [] }
+  const blankDoc = { id: '__new', settle_date: localToday(), lines: seed, approval: [] }
 
   return (
     <div className="fade-up">
       <PageHeader title="정산내역서"
-        actions={<button className="btn primary" onClick={() => { setCreating(true) }}><Icon.Plus size={14}/> 새 정산내역서</button>}/>
+        actions={<button className="btn primary" onClick={() => setSrcOpen(true)}><Icon.Plus size={14}/> 새 정산내역서</button>}/>
+
+      <SourceChooser
+        open={srcOpen} onClose={() => setSrcOpen(false)}
+        title="새 정산내역서" sub="어디서 만들까요?"
+        options={SETTLE_SOURCES}
+        onPick={(id) => {
+          setSrcOpen(false)
+          if (id === 'blank') { setSeed([]); setCreating(true); return }
+          setTxns(null); setPickOpen(true)
+          // 지출 전체를 받아 화면에서 거른다 — 정산은 보통 최근 몇 달치를 훑어 고른다
+          api.getTransactions({ kind: 'expense' }).then(setTxns)
+        }}/>
+
+      <PickListDrawer
+        open={pickOpen} onClose={() => setPickOpen(false)}
+        title="거래내역에서 골라서" sub="정산에 넣을 지출을 고르세요"
+        placeholder="거래처·비목·적요 검색"
+        rows={txns}
+        match={(t, q) => [t.vendor, t.category, t.memo].filter(Boolean)
+          .some(v => String(v).toLowerCase().includes(q.toLowerCase()))}
+        render={(t) => ({
+          title: t.vendor && t.vendor !== '(미확인)' ? t.vendor : (t.category || '지출'),
+          sub: [t.date, t.category, t.memo].filter(Boolean).join(' · '),
+          right: Number(t.amount) || 0,
+        })}
+        empty="가져올 지출이 없어요."
+        onDone={(rows) => {
+          /* 거래 → 정산 줄. 제목은 **무슨 지출인지**(비목·적요), 비고에는 날짜·거래처를
+             남긴다 — 정산내역서를 받는 사람이 근거를 되짚을 수 있어야 한다. */
+          setSeed(rows.map(t => ({
+            title: t.category && t.category !== '—' ? t.category : (t.memo || '지출'),
+            amount: Number(t.amount) || 0,
+            memo: [t.date, t.vendor !== '(미확인)' ? t.vendor : null].filter(Boolean).join(' · '),
+          })))
+          setPickOpen(false); setCreating(true)
+        }}/>
 
       <DocWorkspace>
         <DocSide>
