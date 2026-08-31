@@ -59,6 +59,10 @@ const API_RESOURCES = {
      권한 매트릭스가 양식 수만큼 부풀어 회사 마스터가 감당하지 못한다.
      "어떤 양식을 쓸 수 있나"는 권한이 아니라 계약(entitlement)의 일이다. */
   '/api/reports':             ['report'],
+  /* 문서 카탈로그. 목록(GET /)은 **사이드바를 그리려고 모든 사용자**가 부른다 —
+     그래서 문서 자원 넷을 함께 둔다(자원군 OR 판정). 켜고 끄기(/manage)는 그 위에서
+     라우트가 회사 마스터인지 한 번 더 본다. */
+  '/api/doc-catalog':         ['doc', 'settlement', 'quote_req', 'purchase_req', 'settings'],
   '/api/vendors':             ['master_vendor'],
   '/api/account-subjects':    ['master_accountSubject'],
   '/api/categories':          ['master_category'],

@@ -13,6 +13,7 @@
 | 파일을 `uploads/` 바로 아래 저장 | `uploads/{companyId}/` |
 | 앱 코드에서 `CREATE`/`ALTER` | 배포 시점 `npm run setup:db` |
 | 화면(nav) 추가 후 그냥 두기 | `server/platform/permissions.js` `RESOURCES`에도 등록 |
+| 문서업무 잎만 추가하기 | `server/platform/docCatalog.js`에도 같은 key 로 등록 (안 하면 회사별로 못 끈다) |
 
 **작업 후 필수**: `cd server && npm run check:isolation`
 

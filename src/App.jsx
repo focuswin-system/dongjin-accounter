@@ -3,7 +3,7 @@ import logoSymbol from './assets/company/favicon.svg'
 import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider } from './lib/ui'
 import { api, setApiFailureHandler } from './lib/api'
 import { WelcomeWizard } from './lib/components/WelcomeWizard'
-import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID, MASTER_LEAVES, PORTAL_PAGE_OF_LEAF, NAV_PATH_OF, FOLDABLE_DOMAINS, foldNav } from './lib/nav'
+import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID, MASTER_LEAVES, PORTAL_PAGE_OF_LEAF, NAV_PATH_OF, FOLDABLE_DOMAINS, foldNav, filterDocs, filterPortalDocs } from './lib/nav'
 import { PermCtx, usePerms, visibleNav, visiblePortalNode, withoutMasterOnly } from './lib/perms'
 import { sessionAlive, clearSession } from './lib/session'
 import { UpdateBanner } from './lib/components/UpdateBanner'
@@ -312,7 +312,7 @@ function NoPermission({ title }) {
   );
 }
 
-function AppInner({ onLogout, user, prefs, setPrefs }) {
+function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
   // 권한 없는 메뉴는 아예 그리지 않는다. 눌러서 403을 받는 것보다 없는 게 낫다.
   const { perms, can: canDo } = usePerms();
   /* 개인 설정 — '보고 싶나'(내 화면 정리). 권한('볼 수 있나')과 다른 축이라 따로 든다.
@@ -320,7 +320,11 @@ function AppInner({ onLogout, user, prefs, setPrefs }) {
   const navHidden = useMemo(() => {
     try { return JSON.parse(prefs.nav_hidden || '[]') } catch { return [] }
   }, [prefs?.nav_hidden]);
-  const navTree = useMemo(() => foldNav(visibleNav(perms), navHidden), [perms, navHidden]);
+  /* 문서는 회사마다 쓰는 것이 다르다 — 안 쓰는 문서를 메뉴에서 뺀다.
+     docKeys 가 null 이면 아직 못 읽은 것이라 하나도 안 가린다(filterDocs 주석). */
+  const navTree = useMemo(
+    () => filterDocs(foldNav(visibleNav(perms), navHidden), docKeys),
+    [perms, navHidden, docKeys]);
   const savePrefs = async (patch) => {
     const res = await api.saveMyPrefs(patch);
     if (res.ok) setPrefs(res.prefs || {});
@@ -569,7 +573,10 @@ function AppInner({ onLogout, user, prefs, setPrefs }) {
       // 포털 타일도 권한대로 걸러 그린다. 남는 게 없으면 들어갈 데가 없다는 뜻.
       // 마스터 전용 화면(변경 이력)은 자원 권한과 별개 축이라 한 번 더 거른다 —
       // 안 그러면 실무 역할에게 눌러도 403 나는 타일이 남는다.
-      const node = withoutMasterOnly(visiblePortalNode(perms, PORTAL_CAT_BY_ID[route]), user?.role === 'admin');
+      // 회사가 안 쓰는 문서도 타일에서 뺀다 — 사이드바와 같은 말을 해야 한다
+      const node = withoutMasterOnly(
+        filterPortalDocs(visiblePortalNode(perms, PORTAL_CAT_BY_ID[route]), docKeys),
+        user?.role === 'admin');
       return node ? <PortalScreen node={node} go={go}/> : <NoPermission title={PORTAL_CAT_BY_ID[route].label}/>;
     }
     // 기준정보 서브메뉴: 내부 서브내브 없이 해당 탭만 전체폭으로. (일반회계 master_ / 인사급여 hrbase_)
@@ -577,7 +584,7 @@ function AppInner({ onLogout, user, prefs, setPrefs }) {
     if (route.startsWith("hrbase_")) return <MasterScreen user={user} section="hr" forcedTab={route.slice(7)}/>;
     if (route.startsWith("settings_")) return <MasterScreen user={user} section="settings" forcedTab={route.slice(9)}/>;
     switch (route) {
-      case "home":            return <HomeScreen go={go} user={user} navHidden={navHidden} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
+      case "home":            return <HomeScreen go={go} user={user} navHidden={navHidden} docKeys={docKeys} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
       case "billing":         return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} goRoute={go}/>;
       /* focusInvoiceId 를 넘긴다 — Ctrl+K 에서 청구서를 골랐는데 목록만 열리면
          찾은 것을 다시 찾아야 한다(BillingScreen 은 이미 이 값을 받아 그 건을 연다). */
@@ -651,7 +658,7 @@ function AppInner({ onLogout, user, prefs, setPrefs }) {
       // (화면 코드 EvidenceScreen 은 그대로 둔다 — 추후 실구현 시 여기만 되돌리면 된다)
       case "evidence":        return <ComingSoon title="증빙 관리"/>;
       case "excel":           return <ExcelScreen/>;
-      default:                return <HomeScreen go={go} navHidden={navHidden} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
+      default:                return <HomeScreen go={go} navHidden={navHidden} docKeys={docKeys} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
     }
   }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, perms]);
 
@@ -1260,13 +1267,23 @@ export default function App() {
      null = 아직 못 읽음. 그 동안은 마법사를 띄우지 않는다 — 이미 마친 사람에게
      한 번 번쩍였다 사라지는 게 가장 나쁘다. */
   const [prefs, setPrefs] = useState(null);
+  /* 이 회사가 쓰는 문서 양식 — 사이드바를 그리기 전에 알아야 한다.
+     null = 아직 못 읽음 → **하나도 안 가린다.** 카탈로그를 못 읽었다고 메뉴가 사라지면
+     서버가 잠깐 흔들린 것이 고객에게는 '기능이 없어졌다'로 보인다(권한과 같은 판단). */
+  const [docKeys, setDocKeys] = useState(null);
   useEffect(() => {
-    if (!loggedIn) { setPerms(null); setPrefs(null); return; }
+    if (!loggedIn) { setPerms(null); setPrefs(null); setDocKeys(null); return; }
     let alive = true;
     api.me()
       .then(me => { if (alive) { setPerms(me?.perms || {}); setPrefs(me?.prefs || {}); } })
       .catch(() => { /* 실패 시 제한 없음 유지 — 서버 게이트가 최종 판정 */ });
-    return () => { alive = false; };
+    const loadDocs = () => api.getDocCatalog()
+      .then(items => { if (alive && items) setDocKeys(items.map(d => d.key)); });
+    loadDocs();
+    /* 환경설정 > 문서 관리에서 켜고 끄면 **바로** 메뉴가 따라온다.
+       새로고침해야 반영되면 사용자는 저장이 안 된 줄 안다. */
+    window.addEventListener('doccatalog:changed', loadDocs);
+    return () => { alive = false; window.removeEventListener('doccatalog:changed', loadDocs); };
   }, [loggedIn]);
 
   const handleLogin = (u) => {
@@ -1298,7 +1315,7 @@ export default function App() {
             ? <LoginScreen onLogin={handleLogin}/>
             : user?.mustChangePw
               ? <ForcePasswordChange user={user} onDone={clearMustChange} onLogout={handleLogout}/>
-              : <AppInner onLogout={handleLogout} user={user} prefs={prefs} setPrefs={setPrefs}/>}
+              : <AppInner onLogout={handleLogout} user={user} prefs={prefs} setPrefs={setPrefs} docKeys={docKeys}/>}
           {/* 배포로 새 버전이 올라왔을 때만 뜬다. 로그인 화면에서도 보여야 한다 —
               옛 번들이 옛 인증 흐름을 타면 로그인 자체가 이상하게 동작할 수 있다. */}
           <UpdateBanner/>

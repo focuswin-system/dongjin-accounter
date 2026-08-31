@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { Icon, Popover, PopItem } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
-import { MASTER_LEAVES } from '../lib/nav'
+import { MASTER_LEAVES, filterPortalDocs } from '../lib/nav'
 import { usePerms, visiblePortal } from '../lib/perms'
 import { CashPanel } from '../lib/components/CashPanel'
 import { QuickTiles } from '../lib/components/QuickTiles'
@@ -47,7 +47,7 @@ const SetupCard = ({ onOpen }) => {
   )
 }
 
-export const HomeScreen = ({ go, user, navHidden, openIncome, openExpense }) => {
+export const HomeScreen = ({ go, user, navHidden, docKeys, openIncome, openExpense }) => {
   // 홈 타일·즐겨찾기도 사이드바와 같은 규칙으로 가린다.
   // (홈에는 보이는데 메뉴엔 없으면 사용자는 어디서 들어가는 화면인지 알 수 없다)
   const { perms, can: canDo } = usePerms()
@@ -69,6 +69,9 @@ export const HomeScreen = ({ go, user, navHidden, openIncome, openExpense }) => 
        ※ 포털 도메인 id 는 nav 도메인 id 와 같은 값을 쓴다(nav.js DOMAIN_OF). */
     const hidden = new Set(navHidden || [])
     const tabs = portal
+      /* 회사가 안 쓰는 문서도 뺀다. 넷 다 껐으면 '문서' 타일 자체가 사라진다 —
+         눌러서 빈 판을 보게 하지 않는다(사이드바와 같은 규칙). */
+      .map(d => ({ ...d, categories: d.categories.map(c => filterPortalDocs(c, docKeys)).filter(Boolean) }))
       .filter(d => d.categories.length > 0 && !hidden.has(d.id))
       .map(d => ({ id: d.id, label: d.label, items: d.categories }))
     const base = []
@@ -76,7 +79,7 @@ export const HomeScreen = ({ go, user, navHidden, openIncome, openExpense }) => 
     if (canDo('settings')) base.push({ id: 'settings', label: '환경설정', icon: Icon.Cog, desc: '회사 정보·사용자·결재선·월 마감' })
     if (base.length) tabs.push({ id: '__base', label: '기준 자료', items: base })
     return tabs
-  }, [portal, masterVisible, navHidden])
+  }, [portal, masterVisible, navHidden, docKeys])
   const [menuTab, setMenuTab] = useState(null)
   // 첫 탭을 기본으로. 권한이 바뀌어 그 탭이 사라지면 다시 첫 탭으로 되돌린다.
   useEffect(() => {

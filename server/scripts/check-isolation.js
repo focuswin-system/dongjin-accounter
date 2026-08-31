@@ -652,6 +652,55 @@ try {
   if (!e.skip) fail(`보고서 카탈로그 검사 실패: ${e.message}`)
 }
 
+// ── [16] 문서 카탈로그 ↔ 잎 메뉴 ↔ 권한 자원 동기화 ──
+//
+// 문서는 보고서와 달리 **사이드바에 잎으로 서 있다.** 그래서 셋이 같은 문자열이어야 한다:
+//   카탈로그 key  =  nav.js 잎 id  =  permissions.js 자원 id
+// 어긋나면 조용히 망가진다:
+//   자원에 없음     → 권한 매트릭스에서 그 문서가 사라진다
+//   잎에 없음       → 카탈로그에만 있고 아무도 못 연다(보고서가 겪은 '미아 화면')
+//   카탈로그에 없음 → 잎은 있는데 **회사별로 끌 수가 없다** — 이 단계가 만들려던 바로 그것
+console.log('\n[16] 문서 카탈로그 ↔ 잎 메뉴 ↔ 권한 자원')
+try {
+  const { BUILTIN_DOCS } = require('../platform/docCatalog')
+  const { RESOURCE_IDS } = require('../platform/permissions')
+  const catKeys = BUILTIN_DOCS.map(d => d.key)
+
+  const noRes = catKeys.filter(k => !RESOURCE_IDS.includes(k))
+  if (noRes.length) {
+    fail('카탈로그에 있으나 권한 자원이 없음: ' + noRes.join(', ') +
+         '\n      → platform/permissions.js RESOURCES 에 같은 id 로 등록하세요.')
+  }
+
+  const navPath = path.join(__dirname, '..', '..', 'src', 'lib', 'nav.js')
+  if (!fs.existsSync(navPath)) {
+    if (!noRes.length) ok(`문서 ${catKeys.length}개 — 권한 자원 확인(프런트 소스 없음: 잎 대조 건너뜀)`)
+  } else {
+    /* 문서업무 도메인 블록만 떼어 낸다. 정규식으로 훑지 않는 이유는 nav.js 에
+       주석이 많아 '{ id:' 가 문서 아닌 자리에도 널려 있기 때문이다. */
+    const src = fs.readFileSync(navPath, 'utf8')
+    const from = src.indexOf('id: "office_dom"')
+    if (from < 0) throw new Error('nav.js 에서 office_dom 을 찾지 못했습니다')
+    const to = src.indexOf('\n  },', from)
+    const block = src.slice(from, to < 0 ? src.length : to)
+    const leafIds = [...block.matchAll(/\{\s*id:\s*"([\w]+)"/g)].map(m => m[1])
+
+    const noLeaf = catKeys.filter(k => !leafIds.includes(k))
+    const noCatalog = leafIds.filter(k => !catKeys.includes(k))
+    if (noLeaf.length) {
+      fail('카탈로그에 있으나 잎 메뉴가 없음: ' + noLeaf.join(', ') +
+           '\n      → src/lib/nav.js 문서업무(office_dom)에 같은 id 로 추가하거나 카탈로그에서 빼세요.')
+    }
+    if (noCatalog.length) {
+      fail('잎은 있으나 카탈로그에 없음(회사별로 끌 수 없습니다): ' + noCatalog.join(', ') +
+           '\n      → platform/docCatalog.js 에 등록하세요.')
+    }
+    if (!noRes.length && !noLeaf.length && !noCatalog.length) ok(`문서 ${catKeys.length}개 동기화 확인`)
+  }
+} catch (e) {
+  fail(`문서 카탈로그 검사 실패: ${e.message}`)
+}
+
 console.log('\n' + '━'.repeat(64))
 if (failures === 0) {
   console.log(' ✅ 격리 검사 통과')

@@ -8,6 +8,7 @@ const { withTx, httpError } = require('../lib/withTx')
 const platformAuth = require('../middleware/platformAuth')
 const { getPool } = require('../db/poolManager')
 const { BUILTIN_REPORTS, featureKeyOf } = require('../platform/reportCatalog')
+const { BUILTIN_DOCS, featureKeyOf: docFeatureKeyOf, prefKeyOf: docPrefKeyOf } = require('../platform/docCatalog')
 const { invalidate, dateOf } = require('../lib/entitlements')
 const { kstToday } = require('../db')
 
@@ -417,15 +418,30 @@ router.post('/companies/:id/users/:userId/unlock', async (req, res, next) => {
  * 설계: docs/02-design/features/company-report-templates.design.md §8 P1
  */
 
-/** 켤 수 있는 것의 목록 — 지금은 보고서 양식뿐이다. 나중에 다른 선택 기능도 여기 모인다. */
+/**
+ * 켤 수 있는 것의 목록 — 보고서 양식과 문서 양식.
+ *
+ * ⚠ 지금 문서는 넷 다 scope:'all'(기본 제공)이라 **켜고 끌 것이 없다.** 그래도 싣는다 —
+ *   콘솔이 "우리가 가진 양식이 전부 무엇인가"를 보여주는 자리이기 때문이다. 목록에서
+ *   빠져 있으면 새 문서를 팔기로 한 날 콘솔부터 고쳐야 한다는 걸 아무도 기억 못 한다.
+ *
+ * pref  회사가 스스로 끈 것을 담는 키 — 표(report_prefs) 안에서의 이름이다.
+ *       보고서는 접두사 없이 raw key, 문서는 'doc:<key>'. 두 체계가 한 표에 섞여 있어
+ *       여기서 명시해 두지 않으면 아래 companyOff 판정이 조용히 어긋난다.
+ */
 function sellableCatalog() {
-  return BUILTIN_REPORTS.map(r => ({
-    key: featureKeyOf(r.key),
-    label: r.title,
-    descr: r.descr || '',
-    group: '보고서',
-    scope: r.scope,          // all(기본 제공) | entitled(팔 수 있음) | hidden(아직 안 팖)
-  }))
+  return [
+    ...BUILTIN_REPORTS.map(r => ({
+      key: featureKeyOf(r.key), pref: r.key,
+      label: r.title, descr: r.descr || '', group: '보고서',
+      scope: r.scope,          // all(기본 제공) | entitled(팔 수 있음) | hidden(아직 안 팖)
+    })),
+    ...BUILTIN_DOCS.map(d => ({
+      key: docFeatureKeyOf(d.key), pref: docPrefKeyOf(d.key),
+      label: d.title, descr: d.descr || '', group: '문서',
+      scope: d.scope,
+    })),
+  ]
 }
 
 // 현재 상태 — 카탈로그 전체에 회사의 현재 설정을 얹어서 준다
@@ -460,14 +476,13 @@ router.get('/companies/:id/features', async (req, res, next) => {
       const active = !!row && !!Number(row.enabled)
         && (!row.starts_on || today >= dateOf(row.starts_on))
         && (!row.expires_on || today <= dateOf(row.expires_on))
-      // 보고서 기능 키는 'report:<보고서key>' 다 — 회사 설정과 맞춰 보려면 뒤쪽만 쓴다
-      const reportKey = c.key.startsWith('report:') ? c.key.slice(7) : null
       return {
         ...c,
         on: !!row && !!Number(row.enabled),
         active,
-        // 회사가 자기 화면에서 껐나 — 우리가 켰는데 안 보이는 이유가 여기 있을 수 있다
-        companyOff: !!reportKey && disabled.has(reportKey),
+        // 회사가 자기 화면에서 껐나 — 우리가 켰는데 안 보이는 이유가 여기 있을 수 있다.
+        // 표 안에서의 이름은 카탈로그가 알려준다(c.pref) — 보고서와 문서가 규칙이 다르다.
+        companyOff: !!c.pref && disabled.has(c.pref),
         starts_on: row ? dateOf(row.starts_on) : null,
         expires_on: row ? dateOf(row.expires_on) : null,
         memo: row ? row.memo : null,
@@ -501,7 +516,7 @@ router.put('/companies/:id/features/:key', async (req, res, next) => {
       return res.status(409).json({
         error: spec.scope === 'all'
           ? '기본 제공 기능이라 켜고 끌 수 없습니다'
-          : '아직 열 수 없는 양식입니다. 열려면 reportCatalog.js 에서 scope 를 entitled 로 올려야 합니다',
+          : '아직 열 수 없는 양식입니다. 열려면 카탈로그(reportCatalog.js · docCatalog.js)에서 scope 를 entitled 로 올려야 합니다',
       })
     }
 

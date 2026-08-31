@@ -122,6 +122,7 @@ const MASTER_TABS = [
   { id: "company",         label: "회사 정보", custom: true },
   { id: "template",        label: "문서 양식" },
   { id: "reports",         label: "보고서 관리", custom: true },
+  { id: "docs",            label: "문서 관리", custom: true },
   { id: "menu",            label: "메뉴 관리", custom: true },
   { id: "closing",         label: "월 마감 설정", custom: true },
   { id: "audit",           label: "변경 이력 조회", custom: true },
@@ -147,7 +148,7 @@ const CUSTOM_PANEL_TABS = new Set([
   "account", "card", "accountBalance", "recurringExpense", "recurringInvoice", "payroll",
   "payrollItems", "employType", "accountSubject", "category", "vendor",
   "department", "position", "company", "user", "approval", "jeokyo", "item",
-  "insurance", "fixed_asset", "intangible_asset", "evidence_type", "closing", "audit",
+  "insurance", "fixed_asset", "intangible_asset", "evidence_type", "closing", "audit", "docs",
   "reports", "menu",
 ]);
 
@@ -177,7 +178,7 @@ const MASTER_SECTIONS = {
       /* '메뉴 관리'는 시스템 묶음에 두되 **성격이 다르다** — 사용자·결재선·보고서는 회사가
          정하는 것이고, 이건 **내 화면**을 정리하는 것이다. 그래서 화면 안에서 "나에게만
          적용됩니다"라고 밝힌다. 묶음을 하나 더 세우기엔 항목이 하나뿐이라 과분류다. */
-      { label: "시스템", tabs: ["user", "approval", "reports", "menu"] },
+      { label: "시스템", tabs: ["user", "approval", "reports", "docs", "menu"] },
       { label: "장부 마감", tabs: ["closing"] },
       { label: "기록", tabs: ["audit"] },
     ],
@@ -4116,6 +4117,100 @@ export const MenuPrefPanel = ({ embedded }) => {
   )
 }
 
+/**
+ * 문서 관리 — 보고서 관리(ReportPrefPanel)와 **같은 짜임**이다.
+ *
+ * 다른 점 하나: 문서는 사이드바에 잎으로 서 있어서, 끄면 **메뉴에서 사라진다.**
+ * 보고서는 보고서 화면 안의 목록에서만 빠진다. 그래서 안내 문구가 다르다.
+ *
+ * ⚠ 이건 권한이 아니다. 끈 문서도 주소로는 들어가지고 서버도 안 막는다 —
+ *   사람별로 막는 것은 환경설정 > 사용자의 역할이 할 일이다.
+ */
+export const DocPrefPanel = ({ embedded }) => {
+  const toast = useToast()
+  const [rows, setRows] = useState(null)
+  const [busy, setBusy] = useState('')
+
+  const load = async () => setRows(await api.getDocPrefs())
+  useEffect(() => { load() }, [])
+
+  const toggle = async (r) => {
+    setBusy(r.key)
+    const res = await api.setDocPref(r.key, !r.enabled)
+    setBusy('')
+    if (!res.ok) return toast.push(res.error || '바꾸지 못했어요', { tone: 'warn' })
+    toast.push(`${r.title} 을(를) ${r.enabled ? '끔' : '켬'}`)
+    load()
+    /* 메뉴가 바로 따라오게 한다 — 껐는데 사이드바에 그대로 남아 있으면
+       저장이 안 된 것으로 읽힌다(새로고침해야 반영되던 상태). */
+    window.dispatchEvent(new Event('doccatalog:changed'))
+  }
+
+  if (rows === null) return <Loading label="문서 설정을 불러오는 중…"/>
+
+  const on = rows.filter(r => r.visible).length
+  return (
+    <div className={embedded ? '' : 'fade-up'}>
+      {!embedded && <PageHeader title="문서 관리"/>}
+      <div className="card" style={{ overflow: 'hidden' }}>
+        <div className="row card-pad" style={{ paddingBottom: 10, alignItems: 'baseline' }}>
+          <div className="fw-700">문서</div>
+          <div className="text-sm text-muted" style={{ marginLeft: 10 }}>
+            문서업무 메뉴에 무엇을 세울지 고릅니다 · 사용 중 {on}개
+          </div>
+        </div>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>문서</th>
+              <th style={{ width: 120 }}>구분</th>
+              <th style={{ width: 110 }}>상태</th>
+              <th style={{ width: 120 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.key}>
+                <td>
+                  <span className="fw-600">{r.title}</span>
+                  <div className="text-sm text-muted">{r.descr}</div>
+                </td>
+                <td className="text-sm">
+                  {r.basic
+                    ? <span className="text-muted">기본 제공</span>
+                    : <span className="badge" style={{ fontSize: 11 }}>선택 제공</span>}
+                </td>
+                <td>
+                  {/* 정상(사용 중)에는 표식을 달지 않는다 — 전부 배지가 붙으면 정작 꺼진 게 안 보인다 */}
+                  {r.visible ? <span className="text-sm text-muted2">사용 중</span>
+                    : !r.entitled ? <span className="badge" style={{ fontSize: 11 }}>미주문</span>
+                    : <span className="badge warn" style={{ fontSize: 11 }}>꺼짐</span>}
+                </td>
+                <td>
+                  {!r.entitled && r.enabled
+                    ? <span className="text-xs text-muted2">문의 후 사용</span>
+                    : (
+                      <button className={`btn sm ${r.enabled ? '' : 'primary'}`}
+                        disabled={busy === r.key}
+                        onClick={() => toggle(r)}>
+                        {busy === r.key ? '…' : r.enabled ? '끄기' : '켜기'}
+                      </button>
+                    )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="card-pad text-xs text-muted" style={{ paddingTop: 0, lineHeight: 1.7 }}>
+          · 끄면 <b>문서업무 메뉴에서 빠집니다.</b> 이미 만든 문서는 지워지지 않고, 언제든 다시 켤 수 있어요.<br/>
+          · <b>선택 제공</b>은 사용 주문이 있어야 켜집니다 — 도입을 원하시면 문의해주세요.<br/>
+          · 여기 설정은 <b>회사 전체</b>에 적용됩니다. 사람별로 가리는 건 환경설정 &gt; 사용자의 역할에서 정합니다.
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export const ReportPrefPanel = ({ embedded }) => {
   const toast = useToast()
   const [rows, setRows] = useState(null)
@@ -4250,6 +4345,7 @@ export const MasterScreen = ({ user, section = "base", forcedTab }) => {
     if (activeTab === "user")             return <UserPanel currentUser={user} embedded={single}/>
     if (activeTab === "approval")         return <ApprovalPanel embedded={single}/>
     if (activeTab === "reports")          return <ReportPrefPanel embedded={single}/>
+    if (activeTab === "docs")             return <DocPrefPanel embedded={single}/>
     if (activeTab === "menu")             return <MenuPrefPanel embedded={single}/>
     if (activeTab === "closing")          return <ClosingPanel embedded={single}/>
     if (activeTab === "audit")            return <AuditPanel embedded={single}/>

@@ -264,6 +264,49 @@ export const foldNav = (tree, hidden) => {
   return tree.filter(n => !(n.type === "domain" && skip.has(n.id)))
 }
 
+/** 문서업무 잎 id — server/platform/docCatalog.js 의 key 와 **같은 문자열**이다.
+    (검사 [16] 이 셋(카탈로그·잎·권한 자원)이 어긋나지 않는지 지켜본다) */
+export const DOC_LEAF_IDS = (NAV_TREE.find(n => n.id === "office_dom")?.sections || [])
+  .flatMap(s => s.items.map(it => it.id))
+
+/**
+ * 회사가 쓰지 않는 문서를 트리에서 뺀다.
+ *
+ * ⚠ `visibleKeys` 가 **null 이면 아무것도 안 가린다.** 아직 카탈로그를 못 읽었거나
+ *   서버가 흔들린 상황인데, 그때 메뉴가 사라지면 고객에게는 '기능이 없어졌다'로 보인다.
+ *   권한(perms)이 null 일 때 전부 보여주는 것과 같은 판단이다(App.jsx).
+ * ⚠ 이건 **권한이 아니다.** 주소·Ctrl+K 로는 그대로 들어갈 수 있고 서버도 안 막는다 —
+ *   막는 건 권한의 일이고, 이건 그 회사가 안 쓰는 문서를 메뉴에서 치우는 것뿐이다.
+ */
+export const filterDocs = (tree, visibleKeys) => {
+  if (!visibleKeys) return tree
+  const on = new Set(visibleKeys)
+  const isDoc = (id) => DOC_LEAF_IDS.includes(id)
+  return tree.map(n => {
+    if (n.type !== "domain" || n.id !== "office_dom") return n
+    const sections = n.sections
+      .map(s => ({ ...s, items: s.items.filter(it => !isDoc(it.id) || on.has(it.id)) }))
+      .filter(s => s.items.length)
+    return sections.length ? { ...n, sections } : null
+  }).filter(Boolean)
+}
+
+/**
+ * 포털 카테고리(타일 페이지)에서도 안 쓰는 문서를 뺀다. 남는 게 없으면 null.
+ *
+ * ⚠ 사이드바만 거르면 **홈 타일에는 그대로 남는다.** 그러면 홈에서는 들어가지는데
+ *   메뉴에는 없는 화면이 생기고, 사용자는 그게 어디 있는 화면인지 알 수 없다
+ *   (perms.js visiblePortal 이 권한에 대해 같은 말을 한다).
+ */
+export const filterPortalDocs = (node, visibleKeys) => {
+  if (!visibleKeys || !node || !node.groups) return node
+  const on = new Set(visibleKeys)
+  const groups = node.groups
+    .map(g => ({ ...g, items: g.items.filter(id => !DOC_LEAF_IDS.includes(id) || on.has(id)) }))
+    .filter(g => g.items.length)
+  return groups.length ? { ...node, groups } : null
+}
+
 export const MASTER_LEAF = { id: "master", label: "기준정보", icon: Icon.Folder }
 
 /* 분류마다 **아이콘과 색**을 준다.
@@ -338,6 +381,9 @@ export const SETTINGS_GROUPS = [
   ]},
   { label: "화면", icon: Icon.Menu, tone: "warn", items: [
     { id: "settings_reports",  label: "보고서 관리",   icon: Icon.Chart },
+    /* 문서 관리 — 보고서 관리와 **같은 자리**다. 안 쓰는 문서를 메뉴에서 치운다.
+       ⚠ 권한과 섞지 않는다. 여기서 끈 문서도 주소로는 들어가지고 서버도 안 막는다. */
+    { id: "settings_docs",     label: "문서 관리",     icon: Icon.Doc },
     /* 메뉴 관리 — 첫 안내에서 접은 대메뉴를 되살리는 자리. 접는 길만 두고 켜는 길을 안 두면
        영영 못 되살린다(바로가기 독이 같은 이유로 도움말에 '보이기'를 둔다).
        ⚠ 이건 **개인 설정**이다 — 권한(관리자가 정하는 통제)과 섞지 않는다. */

@@ -386,6 +386,23 @@ export const api = {
   // 작업 중이던 사람이 아무것도 안 눌렀는데 로그인 화면으로 튕긴다.
   async me() { return req('/auth/me', { softAuth: true }) },
 
+  /* 문서 카탈로그 — 이 회사에서 보이는 문서 양식.
+   *
+   * ⚠ 실패하면 **null** 을 준다(빈 배열이 아니다). 화면은 null 을 '아직 모름'으로 읽고
+   *   문서를 하나도 안 가린다 — 서버가 잠깐 흔들린 것이 고객에게 '메뉴가 사라졌다'로
+   *   보이면 안 된다. 권한과 같은 원칙이다(App.jsx perms 주석). */
+  async getDocCatalog() {
+    try { return (await req('/doc-catalog'))?.items || [] } catch { return null }
+  },
+  /* 회사가 자기 문서를 켜고 끈다(환경설정 > 문서 관리). 보고서와 같은 짜임. */
+  async getDocPrefs() {
+    try { return (await req('/doc-catalog/manage'))?.items || [] } catch { return [] }
+  },
+  async setDocPref(key, enabled) {
+    try { await req(`/doc-catalog/manage/${encodeURIComponent(key)}`, { method: 'PUT', body: { enabled } }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
   // ─── 계좌 ─────────────────────────────────────────────────────
   async getAccounts() {
     try { return (await req('/accounts')).map(adaptAccount) } catch { return [] }

@@ -21,7 +21,7 @@
  */
 
 /** 기능 키 이름 규칙 — '<영역>:<이름>'. 보고서 말고 다른 유료 기능도 같은 표를 쓴다. */
-const FEATURE_NS = ['report']
+const FEATURE_NS = ['report', 'doc']
 
 const PLANS = {
   basic: { label: '기본', features: [] },
