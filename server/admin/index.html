@@ -824,6 +824,7 @@ async function viewRequests(main, ov) {
         ${r.descr ? `<div class="g6" style="font-size:13px;margin-top:6px;white-space:pre-wrap">${esc(r.descr)}</div>` : ''}
         <div style="margin-top:8px">${fileLinks(r)}</div>
         ${r.ops_reply ? `<div class="g5" style="font-size:12.5px;margin-top:8px">답변: ${esc(r.ops_reply)}</div>` : ''}
+        ${r.ops_memo ? `<div class="g5" style="font-size:12.5px;margin-top:4px">메모: ${esc(r.ops_memo)}</div>` : ''}
       </td>
       <td>${REQ_KIND[r.kind] || esc(r.kind)}</td>
       <td>${st.chip ? `<span class="chip ${st.chip}">${st.label}</span>` : `<span class="g5">${st.label}</span>`}</td>
@@ -944,6 +945,7 @@ async function viewFeatures(main, ov) {
     return `<tr>
       <td><span style="font-weight:600">${esc(f.label)}</span>
           <div class="sub-l">${esc(f.descr)}</div></td>
+      <td class="g6" style="font-size:13px">${esc(f.group || '')}</td>
       <td>${statusCell(f)}</td>
       <td class="num g6">${f.expires_on ? esc(f.expires_on) + ' 까지' : (f.scope === 'entitled' && f.on ? '무기한' : '')}</td>
       <td class="g5" style="font-size:13px">${esc(f.memo || '')}</td>
@@ -954,10 +956,16 @@ async function viewFeatures(main, ov) {
     </tr>`
   }
 
-  /* 구분별로 묶는다. 선택 제공을 맨 위에 둔다 — 여기서 할 일이 있는 건 그것뿐이다. */
+  /* 구분별로 묶는다. 선택 제공을 맨 위에 둔다 — 여기서 할 일이 있는 건 그것뿐이다.
+     묶음 **안에서는 종류(보고서/문서)끼리 붙여 세운다** — 섞여 있으면 문서 신청을
+     처리하다 목록에서 그 문서를 찾지 못한다(보고서 12개 사이에 문서 4개가 흩어진다). */
   const ORDER = ['entitled', 'all', 'hidden']
+  const KIND_ORDER = ['보고서', '문서']
+  const byKind = (a, b) =>
+    (KIND_ORDER.indexOf(a.group) - KIND_ORDER.indexOf(b.group))
+    || String(a.label).localeCompare(String(b.label), 'ko')
   const groups = ORDER
-    .map(k => ({ k, sc: SCOPE[k], list: d.items.filter(f => f.scope === k) }))
+    .map(k => ({ k, sc: SCOPE[k], list: d.items.filter(f => f.scope === k).sort(byKind) }))
     .filter(g => g.list.length)
 
   const onCount = d.items.filter(f => f.scope === 'entitled' && f.active && !f.companyOff).length
@@ -965,15 +973,15 @@ async function viewFeatures(main, ov) {
 
   box.innerHTML = `<h2>${esc(d.company.name)}<span class="sub">${esc(d.company.code)} · 선택 제공 ${onCount}/${sellable} 사용 중</span></h2>
     <div class="tw"><table><thead><tr>
-      <th>기능</th><th style="width:120px">상태</th><th style="width:150px">기간</th><th style="width:200px">메모</th><th style="width:120px"></th>
+      <th>기능</th><th style="width:80px">구분</th><th style="width:120px">상태</th><th style="width:150px">기간</th><th style="width:200px">메모</th><th style="width:120px"></th>
     </tr></thead><tbody>${groups.map(g => `
-      <tr><td colspan="5" style="background:var(--bg2,#F7F8FA);font-weight:600;font-size:13px;padding:8px 14px">
+      <tr><td colspan="6" style="background:var(--bg2,#F7F8FA);font-weight:600;font-size:13px;padding:8px 14px">
         ${esc(g.sc.label)} <span class="g5" style="font-weight:400">· ${esc(g.sc.note)}</span>
       </td></tr>
       ${g.list.map(rowHtml).join('')}`).join('')}</tbody></table></div>
     <div class="pad g5" style="font-size:13px;padding-top:0">
       기능을 켜면 그 회사 사용자에게 바로 보입니다. 끄면 다시 보이지 않습니다.<br>
-      <b>회사에서 끔</b>은 우리가 켜 줬지만 그 회사가 자기 설정(환경설정 &gt; 보고서)에서 껐다는 뜻입니다 — 그건 그 회사가 정할 일이라 여기서 대신 켜지 않습니다.<br>
+      <b>회사에서 끔</b>은 우리가 켜 줬지만 그 회사가 자기 설정(환경설정 &gt; 보고서 관리 · 문서 관리)에서 껐다는 뜻입니다 — 그건 그 회사가 정할 일이라 여기서 대신 켜지 않습니다.<br>
       회계 내용은 이 화면에서 다루지 않습니다.
     </div>`
 
