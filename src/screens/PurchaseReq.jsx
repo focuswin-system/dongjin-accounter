@@ -3,6 +3,8 @@ import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, MoneyInput, D
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
+import { SourceChooser } from '../lib/components/SourceChooser'
+import { PickListDrawer } from '../lib/components/PickListDrawer'
 
 const numOf = (v) => (typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, ''), 10) || 0 : Number(v) || 0)
 const ROWS = 15
@@ -316,8 +318,37 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
   )
 }
 
+/* 구매품의서를 어디서 만들까 — "무엇을 얼마에 살지" 결재를 받는 문서다.
+   그 답은 대개 **이미 받아 둔 견적**에 있다. 견적요청서를 끊어 놓고 품의서에는
+   같은 품목을 손으로 다시 적고 있었다. */
+const PREQ_SOURCES = [
+  {
+    id: 'quote', icon: Icon.Receipt,
+    label: '견적요청서에서',
+    desc: '견적을 요청해 둔 건을 그대로 품의로 올려요',
+    effect: '거래처와 품목·단가가 그대로 옮겨져요. 받은 단가가 다르면 그 자리에서 고치면 돼요.',
+  },
+  {
+    id: 'item', icon: Icon.Copy,
+    label: '품목에서 골라서',
+    desc: '기준정보에 등록된 품목을 여러 개 담아요',
+    effect: '규격·단위·매입단가가 채워져요. 수량만 적으면 돼요.',
+  },
+  {
+    id: 'blank', icon: Icon.Pencil,
+    label: '직접 작성',
+    desc: '빈 양식에서 시작해요',
+    effect: '품목을 하나씩 적어요.',
+  },
+]
+
 export const PurchaseReqScreen = () => {
   const toast = useToast()
+  const [srcOpen, setSrcOpen] = useState(false)
+  const [pick, setPick] = useState(null)      // 'quote' | 'item' | null
+  const [rows, setRows] = useState(null)
+  /* 새 문서에 미리 채워 넣을 값 (Settlement·QuoteRequest 와 같은 방식) */
+  const [seed, setSeed] = useState({ items: [] })
   const [list, setList] = useState([])
   const [company, setCompany] = useState(null)
   const [vendors, setVendors] = useState([])
@@ -347,12 +378,90 @@ export const PurchaseReqScreen = () => {
     toast.push(res.error || '거래처 등록에 실패했어요', { tone: 'warn' }); return ''
   }
 
-  const blankDoc = { id: '__new', req_date: localToday(), items: [], approval: [] }
+  /* ⚠ seed 를 펼쳐 넣는다 — 견적에서 오면 품목뿐 아니라 거래처·건명도 함께 온다.
+     items 만 채우면 사용자가 거래처를 다시 고르게 되어 '가져온' 느낌이 안 난다. */
+  const blankDoc = { id: '__new', req_date: localToday(), approval: [], items: [], ...seed }
 
   return (
     <div className="fade-up">
       <PageHeader title="구매품의서"
-        actions={<button className="btn primary" onClick={() => setCreating(true)}><Icon.Plus size={14}/> 새 구매품의서</button>}/>
+        actions={<button className="btn primary" onClick={() => setSrcOpen(true)}><Icon.Plus size={14}/> 새 구매품의서</button>}/>
+
+      <SourceChooser
+        open={srcOpen} onClose={() => setSrcOpen(false)}
+        title="새 구매품의서" sub="어디서 만들까요?"
+        options={PREQ_SOURCES}
+        onPick={(id) => {
+          setSrcOpen(false)
+          if (id === 'blank') { setSeed({ items: [] }); setCreating(true); return }
+          setRows(null); setPick(id)
+          if (id === 'quote') api.getQuoteReqs().then(r => setRows(r || []))
+          else api.getRefItems('item').then(r => setRows(r || []))
+        }}/>
+
+      {/* 견적요청서에서 — 한 건만 고른다(견적 하나 = 품의 하나). 목록에는 품목이 없어
+          고른 뒤에 상세를 한 번 더 읽는다. */}
+      <PickListDrawer
+        single
+        open={pick === 'quote'} onClose={() => setPick(null)}
+        title="견적요청서에서" sub="어느 견적을 품의로 올릴까요?"
+        placeholder="거래처·문서번호 검색"
+        rows={rows}
+        match={(r, q) => [r.vendor_name, r.doc_no, r.order_source].filter(Boolean)
+          .some(v => String(v).toLowerCase().includes(q.toLowerCase()))}
+        render={(r) => ({
+          title: r.vendor_name || '거래처 없음',
+          sub: [r.doc_no, r.req_date, r.order_source].filter(Boolean).join(' · '),
+          right: Number(r.total_amount) || null,
+        })}
+        empty="견적요청서가 없어요. 먼저 견적을 요청하세요."
+        onDone={async ([r]) => {
+          const full = await api.getQuoteReq(r.id)
+          if (!full) { setPick(null); return toast.push('견적을 불러오지 못했어요', { tone: 'warn' }) }
+          setSeed({
+            vendor_name: full.vendor_name || '',
+            order_source: full.order_source || '',
+            ship_no: full.ship_no || '',
+            /* 어느 견적에서 왔는지 남긴다 — 품의서를 결재하는 사람이 근거를 되짚을 수 있어야 한다 */
+            summary: full.doc_no ? `견적요청서 ${full.doc_no}` : '',
+            /* ⚠ 구매품의서 품목에는 자재코드 칸이 없다(견적요청서에만 있다).
+               실단가·실금액은 비워 둔다 — 아직 안 산 것이고, 짐작해 넣으면
+               "받은 단가"와 "실제 산 단가"가 같은 값으로 굳는다. */
+            items: (full.items || []).map(it => ({
+              name: it.name || '', unit: it.unit || '',
+              qty: it.qty ? String(it.qty) : '',
+              unit_price: it.unit_price ? String(it.unit_price) : '',
+              amount: it.amount ? String(it.amount) : '',
+              actual_price: '', actual_amount: '', memo: it.memo || '',
+            })),
+          })
+          setPick(null); setCreating(true)
+        }}/>
+
+      {/* 품목에서 — 견적요청서와 같은 규칙으로 채운다 */}
+      <PickListDrawer
+        open={pick === 'item'} onClose={() => setPick(null)}
+        title="품목에서 골라서" sub="살 품목을 고르세요"
+        placeholder="품명·자재코드·규격 검색"
+        rows={rows}
+        match={(m, q) => [m.name, m.code, m.spec].filter(Boolean)
+          .some(v => String(v).toLowerCase().includes(q.toLowerCase()))}
+        render={(m) => ({
+          title: m.spec ? `${m.name} ${m.spec}` : m.name,
+          sub: [m.code, m.unit].filter(Boolean).join(' · ') || null,
+          right: m.purchase_price ? Number(m.purchase_price) : '단가 없음',
+        })}
+        empty="등록된 품목이 없어요. 기준정보 > 품목에서 먼저 등록하세요."
+        onDone={(picked) => {
+          setSeed({ items: picked.map(m => ({
+            name: m.spec ? `${m.name} ${m.spec}` : m.name,
+            unit: m.unit || '',
+            qty: '',                     // 수량은 사람이 정한다
+            unit_price: m.purchase_price ? String(m.purchase_price) : '',
+            amount: '', actual_price: '', actual_amount: '', memo: '',
+          })) })
+          setPick(null); setCreating(true)
+        }}/>
       <DocWorkspace>
         <DocSide>
           {list.length === 0

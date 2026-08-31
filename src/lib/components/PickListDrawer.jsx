@@ -17,9 +17,11 @@ import { DrawerHead } from './Drawer'
  * @param onDone   (선택한 rows) => void
  * @param search   (q) => void  검색어가 바뀔 때(서버 검색이면 여기서 다시 부른다). 없으면 화면에서 거른다
  * @param match    (row, q) => boolean  화면에서 거를 때 쓰는 판정
+ * @param single   한 건만 고르는 자리. 누르면 바로 onDone([row]) — 담아 두었다가
+ *                 다시 누르는 단계를 만들지 않는다(고를 것이 하나면 그 단계가 헛돈다)
  */
 export const PickListDrawer = ({
-  open, onClose, title, sub, rows, render, onDone,
+  open, onClose, title, sub, rows, render, onDone, single = false,
   search, match, placeholder = '검색', doneLabel = '가져오기', empty = '고를 것이 없어요.',
 }) => {
   const [q, setQ] = useState('')
@@ -34,8 +36,10 @@ export const PickListDrawer = ({
   }, [rows, q, search, match])
 
   const pickedSet = useMemo(() => new Set(picked.map(p => p.id)), [picked])
-  const toggle = (row) => setPicked(p =>
-    p.some(x => x.id === row.id) ? p.filter(x => x.id !== row.id) : [...p, row])
+  const toggle = (row) => {
+    if (single) return onDone([row])
+    setPicked(p => (p.some(x => x.id === row.id) ? p.filter(x => x.id !== row.id) : [...p, row]))
+  }
 
   const onQ = (v) => { setQ(v); search?.(v) }
 
@@ -49,7 +53,7 @@ export const PickListDrawer = ({
         </div>
 
         {/* 고른 것 — 목록 위에 둔다. 아래에 두면 스크롤에 밀려 안 보인다 */}
-        {picked.length > 0 && (
+        {!single && picked.length > 0 && (
           <div className="col gap-6">
             <div className="text-xs text-muted2">고른 것 {picked.length}</div>
             <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
@@ -76,7 +80,7 @@ export const PickListDrawer = ({
                       className={`card doctype-pick${on ? ' on' : ''}`} onClick={() => toggle(row)}>
                       <div className="row" style={{ gap: 12, alignItems: 'center' }}>
                         {/* 고른 것에만 표식. 안 고른 것에 빈 네모를 깔면 목록이 시끄럽다 */}
-                        <span className="pick-mark">{on ? <Icon.Check size={13}/> : null}</span>
+                        {!single && <span className="pick-mark">{on ? <Icon.Check size={13}/> : null}</span>}
                         <span style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
                           <span className="fw-700" style={{ display: 'block' }}>{r.title}</span>
                           {r.sub && <span className="text-sm text-muted" style={{ display: 'block', marginTop: 2 }}>{r.sub}</span>}
@@ -92,13 +96,16 @@ export const PickListDrawer = ({
                 })}
               </div>}
       </div>
-      <div className="drawer-foot">
-        <button className="btn" onClick={onClose}>취소</button>
-        <button className="btn primary ml-auto" disabled={!picked.length}
-          onClick={() => onDone(picked)}>
-          {picked.length ? `${picked.length}건 ${doneLabel}` : doneLabel}
-        </button>
-      </div>
+      {/* 한 건만 고르는 자리는 발판이 필요 없다 — 누르는 순간 끝난다 */}
+      {!single && (
+        <div className="drawer-foot">
+          <button className="btn" onClick={onClose}>취소</button>
+          <button className="btn primary ml-auto" disabled={!picked.length}
+            onClick={() => onDone(picked)}>
+            {picked.length ? `${picked.length}건 ${doneLabel}` : doneLabel}
+          </button>
+        </div>
+      )}
     </Drawer>
   )
 }
