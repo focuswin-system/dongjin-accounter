@@ -3188,6 +3188,14 @@ const GROUP_ICON = {
   '신고·제출': Icon.Sign,    // 밖으로 나가는 서류
   '기타': Icon.Chart,
 }
+/* 색도 분류를 따라간다(기준정보와 같은 규약) — 아이콘이 같은 묶음 안에서는
+   색까지 같아야 '이건 저것과 한 갈래'가 눈에 먼저 들어온다. */
+const GROUP_TONE = {
+  '경영 보고': 'brand',
+  '장부': 'pos',
+  '신고·제출': 'warn',
+  '기타': '',
+}
 
 export const ReportsScreen = ({ go }) => {
   const { can: canDo } = usePerms()
@@ -3284,6 +3292,8 @@ export const ReportsScreen = ({ go }) => {
             .filter(g => g.items.length > 0)
             .map(g => ({
               label: g.label,
+              icon: GROUP_ICON[g.label] || GROUP_ICON['기타'],
+              tone: GROUP_TONE[g.label] || '',
               items: g.items.map(r => ({
                 id: r.key, title: r.title, desc: r.descr,
                 icon: GROUP_ICON[g.label] || GROUP_ICON['기타'],

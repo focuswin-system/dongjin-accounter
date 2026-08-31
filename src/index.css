@@ -386,6 +386,29 @@ a { color: inherit; text-decoration: none; }
 .leaf-tile .l-ico { width: 40px; height: 40px; border-radius: 11px; background: var(--surface-2); color: var(--ink); display: grid; place-items: center; }
 .leaf-tile .l-label { font-size: 14px; font-weight: 600; }
 
+/* 분류 색 — 같은 갈래의 카드는 아이콘 색이 같다.
+   모양이 아니라 **색이 묶음을 말한다**: 카드가 열다섯이면 모양은 다 눈에 안 들어오지만
+   색 덩어리는 들어온다. 배경은 아주 옅게 — 카드가 알록달록해지면 그것대로 시끄럽다. */
+.l-ico.tone-brand { background: var(--brand-soft); color: var(--brand-ink); }
+.l-ico.tone-pos   { background: var(--pos-soft);   color: var(--pos-ink); }
+.l-ico.tone-warn  { background: var(--warn-soft);  color: var(--warn-ink); }
+.l-ico.tone-neg   { background: var(--neg-soft);   color: var(--neg-ink); }
+
+/* 분류 구획 — '전체'에서도 묶음별로 갈라 세운다 */
+.tile-sec-wrap + .tile-sec-wrap { margin-top: 26px; }
+.tile-sec { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.tile-sec-ico {
+  width: 22px; height: 22px; border-radius: 7px; flex-shrink: 0;
+  display: grid; place-items: center;
+  background: var(--surface-3); color: var(--muted);
+}
+.tile-sec-ico.tone-brand { background: var(--brand-soft); color: var(--brand-ink); }
+.tile-sec-ico.tone-pos   { background: var(--pos-soft);   color: var(--pos-ink); }
+.tile-sec-ico.tone-warn  { background: var(--warn-soft);  color: var(--warn-ink); }
+.tile-sec-ico.tone-neg   { background: var(--neg-soft);   color: var(--neg-ink); }
+.tile-sec-label { font-size: 13px; font-weight: 700; color: var(--ink); }
+.tile-sec-count { font-size: 12px; color: var(--muted-2); }
+
 /* 홈 '지금 해야 할 일' 카드 — 태그·거래처·금액·액션을 한 카드에 */
 .todo-grid { display: flex; flex-wrap: wrap; gap: 12px; }
 .todo-card {

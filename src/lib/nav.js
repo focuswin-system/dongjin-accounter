@@ -266,16 +266,25 @@ export const foldNav = (tree, hidden) => {
 
 export const MASTER_LEAF = { id: "master", label: "기준정보", icon: Icon.Folder }
 
+/* 분류마다 **아이콘과 색**을 준다.
+   · 색(tone) 은 묶음을 말한다 — 같은 분류의 카드는 아이콘 색이 같아, 15개가 깔려도
+     어느 갈래인지 훑는 눈에 먼저 들어온다.
+   · 아이콘 모양은 항목마다 다르게 둔다. 색만으로는 '거래처'와 '적요'가 구분이 안 된다.
+   ⚠ 한 화면에 **같은 아이콘을 두 항목이 쓰지 않는다.** 예전엔 품목·증빙유형이 둘 다
+     Receipt, 적요·보험이 둘 다 Doc, 고정자산·급여항목이 둘 다 Wallet 이라
+     아이콘이 아무것도 구분해 주지 못했다. */
 export const MASTER_GROUPS = [
-  { label: "거래·품목", items: [
+  { label: "거래·품목", icon: Icon.Receipt, tone: "brand", items: [
     { id: "master_vendor",          label: "거래처",     icon: Icon.Building },
-    { id: "master_item",            label: "품목",       icon: Icon.Receipt },
-    { id: "master_category",        label: "비목",       icon: Icon.Folder },
-    { id: "master_jeokyo",          label: "적요",       icon: Icon.Doc },
-    { id: "master_evidence_type",   label: "증빙유형",   icon: Icon.Receipt },
+    { id: "master_item",            label: "품목",       icon: Icon.Copy },
+    { id: "master_category",        label: "비목",       icon: Icon.Filter },
+    { id: "master_jeokyo",          label: "적요",       icon: Icon.Pencil },
+    /* Receipt(영수증)가 뜻은 더 맞지만 바로 옆 '계정과목'(Book)과 20px 에서 거의 같은
+       모양이라 둘 다 '줄 그어진 종이'로 보인다. 증빙은 실제로 찍어 올리는 것이니 Image 로. */
+    { id: "master_evidence_type",   label: "증빙유형",   icon: Icon.Image },
     { id: "master_accountSubject",  label: "계정과목",   icon: Icon.Book },
   ]},
-  { label: "자금·자산", items: [
+  { label: "자금·자산", icon: Icon.Bank, tone: "pos", items: [
     { id: "master_account",         label: "계좌",      icon: Icon.Bank },
     { id: "master_card",            label: "카드",      icon: Icon.Card },
     /* (제거) '계좌 잔액' — 계좌 화면과 **같은 것을 두 곳에서** 다루고 있었다.
@@ -283,15 +292,15 @@ export const MASTER_GROUPS = [
      * "계좌에서 볼까 계좌 잔액에서 볼까"가 매번 갈렸다.
      * 현재 잔액·초기잔액·조정 이력·잔액 조정을 전부 계좌 상세 안으로 넣었다.
      * 라우트·권한 자원은 살려 둔다(HIDDEN_LEAVES) — 옛 링크가 계좌 화면으로 들어온다. */
-    { id: "master_fixed_asset",     label: "고정자산",   icon: Icon.Wallet },
-    { id: "master_intangible_asset",label: "무형자산",   icon: Icon.File },
+    { id: "master_fixed_asset",     label: "고정자산",   icon: Icon.Home },
+    { id: "master_intangible_asset",label: "무형자산",   icon: Icon.Sparkle },
     { id: "master_insurance",       label: "보험",       icon: Icon.Doc },
   ]},
-  { label: "인사", items: [
-    { id: "hrbase_department",   label: "부서",     icon: Icon.Building },
+  { label: "인사", icon: Icon.Briefcase, tone: "warn", items: [
+    { id: "hrbase_department",   label: "부서",     icon: Icon.Folder },
     { id: "hrbase_position",     label: "직위",     icon: Icon.Sign },
     { id: "hrbase_payrollItems", label: "급여 항목", icon: Icon.Wallet },
-    { id: "hrbase_employType",   label: "고용형태",  icon: Icon.Briefcase },
+    { id: "hrbase_employType",   label: "고용형태",  icon: Icon.Clock },
   ]},
 ]
 
@@ -307,18 +316,20 @@ export const SETTINGS_LEAF = { id: "settings", label: "환경설정", icon: Icon
    '보고서'가 아니라 '보고서 관리'. 환경설정 안의 항목은 화면 이름만으로는
    보러 가는 곳인지 고치러 가는 곳인지 갈리지 않는다.
    특히 '보고서'는 경영관리의 보고서 화면과 이름이 같아, 그대로 두면 같은 것으로 읽힌다. */
+/* ⚠ 한 화면에 **같은 아이콘을 두 항목이 쓰지 않는다.** 결재선·변경 이력이 둘 다 Doc 이라
+   타일을 훑을 때 아이콘이 아무것도 구분해 주지 못했다(기준정보와 같은 규약). */
 export const SETTINGS_LEAVES = [
-  { id: "settings_company",  label: "회사 정보",     icon: Icon.Building },
-  { id: "settings_user",     label: "사용자 관리",   icon: Icon.Sign },
-  { id: "settings_approval", label: "결재선 등록",   icon: Icon.Doc },
+  { id: "settings_company",  label: "회사 정보",     icon: Icon.Bank },
+  { id: "settings_user",     label: "사용자 관리",   icon: Icon.Building },
+  { id: "settings_approval", label: "결재선 등록",   icon: Icon.Sign },
   { id: "settings_reports",  label: "보고서 관리",   icon: Icon.Chart },
   /* 메뉴 관리 — 첫 안내에서 접은 대메뉴를 되살리는 자리. 접는 길만 두고 켜는 길을 안 두면
      영영 못 되살린다(바로가기 독이 같은 이유로 도움말에 '보이기'를 둔다).
      ⚠ 이건 **개인 설정**이다 — 권한(관리자가 정하는 통제)과 섞지 않는다. */
   { id: "settings_menu",     label: "메뉴 관리",     icon: Icon.Menu },
-  { id: "settings_closing",  label: "월 마감 설정",  icon: Icon.Bank },
+  { id: "settings_closing",  label: "월 마감 설정",  icon: Icon.Calendar },
   // 변경 이력 — 회사 마스터만 열린다(서버가 막고, 화면도 마스터가 아니면 타일을 감춘다)
-  { id: "settings_audit",    label: "변경 이력 조회", icon: Icon.Doc },
+  { id: "settings_audit",    label: "변경 이력 조회", icon: Icon.Clock },
 ]
 
 /* 사이드바·포털에서는 뺐지만 **살아 있는 화면** — 라우트·권한 자원·검색은 그대로 둔다.
@@ -593,7 +604,7 @@ PORTAL_CAT_BY_ID['settings'] = {
    독립 타일로 세운다 — 일반회계뿐 아니라 인사 기준정보까지 한 곳에 모으기 때문이다. */
 PORTAL_CAT_BY_ID['master'] = {
   id: 'master', label: '기준정보', icon: Icon.Folder, domainLabel: '기준정보',
-  groups: MASTER_GROUPS.map(g => ({ label: g.label, items: g.items.map(it => it.id) })),
+  groups: MASTER_GROUPS.map(g => ({ label: g.label, icon: g.icon, tone: g.tone, items: g.items.map(it => it.id) })),
 }
 
 /* 잎 id → 그 잎이 놓여 있는 포털 페이지 id.

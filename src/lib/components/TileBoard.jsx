@@ -9,10 +9,22 @@ import { Icon } from '../ui'
  * 그런데 각자 따로 그리고 있어서, 한쪽에 즐겨찾기를 붙이면 나머지 둘은 안 붙는다.
  * 카드가 늘수록(기준정보 15개, 보고서 13개) 매번 눈으로 훑어 찾게 된다.
  *
- * 붙이는 것 셋:
+ * 붙이는 것 넷:
  *   · 즐겨찾기 — 자주 여는 것을 맨 앞으로. 별을 누르면 담긴다.
  *   · 분류 탭  — 묶음이 여럿이면 그 묶음만 본다.
+ *   · 분류 구획 — '전체'에서도 묶음별로 갈라 보여준다(아래 참고).
  *   · 정렬     — 기본(정의 순) / 이름순 / 자주 여는 순.
+ *
+ * ── 분류가 있는데 '전체'는 왜 한 덩어리였나 ──
+ * 탭으로 갈라 볼 수는 있었지만, 처음 들어와서 보는 '전체'가 15개 한 덩어리였다.
+ * 분류를 만들어 놓고 정작 기본 화면에서는 안 쓴 셈이라 한눈에 안 들어왔다.
+ * 이제 '전체 + 기본 정렬'이면 **분류마다 소제목을 두고 구획을 나눈다.**
+ * ⚠ 이름순·자주 여는 순에서는 나누지 않는다 — 그 둘은 분류를 **일부러 섞어**
+ *   보는 순서라, 구획을 치면 정작 보려던 순서가 안 보인다.
+ *
+ * ── 색 ──
+ * 묶음에 `tone` 을 주면 그 묶음 카드의 아이콘이 같은 색을 쓴다. 아이콘 모양은
+ * 항목마다 다르게 두되(무엇인지 알아야 하니까) **색이 묶음을 말한다.**
  *
  * ── 저장 ──
  * 화면별로 `storageKey` 를 받아 localStorage 에 따로 담는다. 서버에 두지 않는 이유는
@@ -21,7 +33,8 @@ import { Icon } from '../ui'
  *   id 를 바꾸는 개편을 하게 되면 nav.js ROUTE_ALIAS 와 함께 여기도 옮겨줘야 한다.
  *
  * @param storageKey 화면 구분(예: 'master' · 'settings' · 'report')
- * @param groups [{ label, items: [{ id, title, desc, icon }] }]  label 이 비면 분류 탭을 안 만든다
+ * @param groups [{ label, icon, tone, items: [{ id, title, desc, icon }] }]
+ *               label 이 비면 분류 탭·구획을 안 만든다. icon·tone 은 없어도 된다.
  * @param onPick (id) => void
  * @param empty  볼 것이 하나도 없을 때 보여줄 문구
  */
@@ -59,7 +72,9 @@ export const TileBoard = ({ storageKey, groups = [], onPick, empty = '볼 수 �
   const showTabs = named.length > 1
 
   const all = useMemo(
-    () => groups.flatMap((g, gi) => (g.items || []).map((it, ii) => ({ ...it, _group: g.label || '', _ord: gi * 1000 + ii }))),
+    () => groups.flatMap((g, gi) => (g.items || []).map((it, ii) => ({
+      ...it, _group: g.label || '', _tone: g.tone || '', _ord: gi * 1000 + ii,
+    }))),
     [groups])
 
   const favSet = useMemo(() => new Set(favs), [favs])
@@ -85,6 +100,20 @@ export const TileBoard = ({ storageKey, groups = [], onPick, empty = '볼 수 �
     return rows
   }, [all, tab, sort, favSet, hasFav, uses])
 
+  /* 구획으로 나눠 그릴지 — '전체'이고 '기본' 정렬이고 분류가 있을 때만.
+     즐겨찾기는 맨 위 구획으로 따로 세운다(분류 안에 또 넣으면 두 번 나온다). */
+  const sections = useMemo(() => {
+    if (!(tab === 'all' && sort === 'default' && showTabs)) return null
+    const out = []
+    const favRows = shown.filter(it => favSet.has(it.id))
+    if (favRows.length) out.push({ key: '_fav', label: '즐겨찾기', icon: Icon.Star, tone: '', items: favRows })
+    for (const g of named) {
+      const items = shown.filter(it => it._group === g.label && !favSet.has(it.id))
+      if (items.length) out.push({ key: g.label, label: g.label, icon: g.icon, tone: g.tone || '', items })
+    }
+    return out
+  }, [tab, sort, showTabs, shown, named, favSet])
+
   const toggleFav = useCallback((e, id) => {
     e.stopPropagation()          // 별을 눌렀는데 화면까지 열리면 안 된다
     setFavs(f => (f.includes(id) ? f.filter(x => x !== id) : [...f, id]))
@@ -93,6 +122,27 @@ export const TileBoard = ({ storageKey, groups = [], onPick, empty = '볼 수 �
   const pick = (id) => {
     setUses(u => ({ ...u, [id]: (u[id] || 0) + 1 }))
     onPick?.(id)
+  }
+
+  /* 카드 하나. 컴포넌트가 아니라 **부르는 함수**다 — 컴포넌트로 만들면
+     렌더마다 새 타입이 되어 카드가 통째로 다시 붙는다. */
+  const tile = (it) => {
+    const Ic = it.icon || Icon.Doc
+    const on = favSet.has(it.id)
+    return (
+      <button key={it.id} className={`leaf-tile tile-fav-host${it.desc ? ' has-desc' : ''}`} onClick={() => pick(it.id)}>
+        {/* 별 — 담긴 것은 늘 보이고, 안 담긴 것은 카드에 손이 갔을 때만 보인다.
+            안 그러면 카드마다 회색 별이 박혀 목록이 어수선해진다. */}
+        <span className={`tile-fav${on ? ' on' : ''}`} role="button" tabIndex={-1}
+          title={on ? '즐겨찾기에서 빼기' : '즐겨찾기에 담기'}
+          onClick={(e) => toggleFav(e, it.id)}>
+          <Icon.Star size={15} filled={on}/>
+        </span>
+        <div className={`l-ico${it._tone ? ` tone-${it._tone}` : ''}`}><Ic size={20}/></div>
+        <div className="l-label">{it.title}</div>
+        {it.desc && <div className="l-desc">{it.desc}</div>}
+      </button>
+    )
   }
 
   if (all.length === 0) {
@@ -111,13 +161,20 @@ export const TileBoard = ({ storageKey, groups = [], onPick, empty = '볼 수 �
           )}
           {hasFav && (
             <button className={`chip ${tab === 'fav' ? 'active' : ''}`} onClick={() => setTab('fav')}>
-              즐겨찾기 {favs.length}
+              <Icon.Star size={13} filled/> 즐겨찾기 {favs.length}
             </button>
           )}
-          {showTabs && named.map(g => (
-            <button key={g.label} className={`chip ${tab === g.label ? 'active' : ''}`}
-              onClick={() => setTab(g.label)}>{g.label}</button>
-          ))}
+          {/* 칩에도 그 분류의 아이콘을 세운다 — 아래 구획 제목과 같은 아이콘이라
+              탭과 구획이 같은 것을 가리킨다는 게 눈으로 이어진다. */}
+          {showTabs && named.map(g => {
+            const GIc = g.icon
+            return (
+              <button key={g.label} className={`chip ${tab === g.label ? 'active' : ''}`}
+                onClick={() => setTab(g.label)}>
+                {GIc && <GIc size={13}/>} {g.label}
+              </button>
+            )
+          })}
           <div className="ml-auto row gap-4" style={{ alignItems: 'center' }}>
             {/* 라벨은 칩들과 한 덩어리로 읽히면 안 된다 — 붙여 두면 '정렬'이 첫 번째 칩처럼 보인다 */}
             <span className="text-xs text-muted2" style={{ marginRight: 4 }}>정렬</span>
@@ -133,27 +190,24 @@ export const TileBoard = ({ storageKey, groups = [], onPick, empty = '볼 수 �
         <div className="card card-pad text-sm text-muted" style={{ textAlign: 'center', padding: 32 }}>
           이 분류에는 아직 없어요.
         </div>
-      ) : (
-        <div className="tile-row">
-          {shown.map(it => {
-            const Ic = it.icon || Icon.Doc
-            const on = favSet.has(it.id)
-            return (
-              <button key={it.id} className={`leaf-tile tile-fav-host${it.desc ? ' has-desc' : ''}`} onClick={() => pick(it.id)}>
-                {/* 별 — 담긴 것은 늘 보이고, 안 담긴 것은 카드에 손이 갔을 때만 보인다.
-                    안 그러면 카드마다 회색 별이 박혀 목록이 어수선해진다. */}
-                <span className={`tile-fav${on ? ' on' : ''}`} role="button" tabIndex={-1}
-                  title={on ? '즐겨찾기에서 빼기' : '즐겨찾기에 담기'}
-                  onClick={(e) => toggleFav(e, it.id)}>
-                  <Icon.Star size={15} filled={on}/>
+      ) : sections ? (
+        sections.map(sec => {
+          const SIc = sec.icon
+          return (
+            <div key={sec.key} className="tile-sec-wrap">
+              <div className="tile-sec">
+                <span className={`tile-sec-ico${sec.tone ? ` tone-${sec.tone}` : ''}`}>
+                  {SIc ? <SIc size={13}/> : null}
                 </span>
-                <div className="l-ico"><Ic size={20}/></div>
-                <div className="l-label">{it.title}</div>
-                {it.desc && <div className="l-desc">{it.desc}</div>}
-              </button>
-            )
-          })}
-        </div>
+                <span className="tile-sec-label">{sec.label}</span>
+                <span className="tile-sec-count">{sec.items.length}</span>
+              </div>
+              <div className="tile-row">{sec.items.map(tile)}</div>
+            </div>
+          )
+        })
+      ) : (
+        <div className="tile-row">{shown.map(tile)}</div>
       )}
     </div>
   )

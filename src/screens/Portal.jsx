@@ -59,7 +59,7 @@ export const PortalScreen = ({ node, go, openIncome, openExpense }) => {
       <TileBoard
         storageKey={node.id}
         groups={node.groups.map(g => ({
-          label: g.label,
+          label: g.label, icon: g.icon, tone: g.tone,
           items: (g.items || []).map(id => LEAF_BY_ID[id]).filter(Boolean)
             .map(l => ({ id: l.id, title: l.label, icon: l.icon })),
         }))}
