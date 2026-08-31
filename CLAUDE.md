@@ -14,6 +14,8 @@
 | 앱 코드에서 `CREATE`/`ALTER` | 배포 시점 `npm run setup:db` |
 | 화면(nav) 추가 후 그냥 두기 | `server/platform/permissions.js` `RESOURCES`에도 등록 |
 | 문서업무 잎만 추가하기 | `server/platform/docCatalog.js`에도 같은 key 로 등록 (안 하면 회사별로 못 끈다) |
+| 새 인쇄 화면에 클래스만 붙이기 | `index.css` `@media print` **화이트리스트 4곳**에 등록 (안 하면 Ctrl+P 가 백지) |
+| 색을 코드에 박기 | CSS 변수만 쓴다 — 다크 모드에서 흰 배경에 흰 글씨가 된다 |
 
 **작업 후 필수**: `cd server && npm run check:isolation`
 
@@ -46,6 +48,13 @@ Express + MariaDB 백엔드 + React/Vite SPA. **멀티테넌트 운영 중**(202
 - **백엔드**: Express + MariaDB. **DB-per-tenant 멀티테넌트 운영 중**(`server/`)
 - **엑셀 출력**: 새 출력은 `server/lib/xlsxBook.js`(exceljs, 서식 있음). 옛 출력 일부는
   아직 `xlsx`(SheetJS) — 서식이 없다. 옮기는 중이다.
+- **테마**: `src/lib/theme.js` 가 `<html>` 의 `data-theme`·`data-accent`·`data-navmode` 만 바꾸고,
+  CSS 변수가 따라온다. **화면 코드는 테마를 모른다** — 색을 토큰으로만 쓰면 저절로 맞는다.
+  ⚠ 상태색(pos/warn/neg)은 액센트로 안 바꾼다(취향이 아니라 뜻이다).
+  ⚠ 인쇄물(`.doc-paper`·`.res-viewer`·`.manual-print`)은 다크에서도 **흰 종이**로 고정한다.
+- **사용 설명서**: `src/lib/manual.js`(내용) + `src/screens/Manual.jsx`(화면), 라우트 `manual`.
+  화면 위치는 `path: '잎 id'` 로만 적는다 — nav 에서 뽑으므로 메뉴를 옮겨도 안 어긋난다.
+  ⚠ **지금 동작하는 것만** 적는다. 화면을 고치면 해당 장도 같이 본다.
 
 ---
 
