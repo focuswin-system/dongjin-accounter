@@ -15,6 +15,7 @@ import { usePerms } from '../lib/perms'
 import { downloadVisibleTables } from '../lib/export'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
+import { SourceChooser } from '../lib/components/SourceChooser'
 
 const todayStr = () => localToday()   // UTC 금지 — KST 새벽에 하루 전으로 찍힌다
 
@@ -35,7 +36,11 @@ export const DocsScreen = () => {
   const [company, setCompany] = useState(null);
   const [selId, setSelId] = useState(null);
   const [q, setQ] = useState("");
-  const [newOpen, setNewOpen] = useState(false);
+  /* srcOpen 출처 고르기가 열려 있나 · src 고른 출처('invoice'|'txn'|'blank')
+     둘을 나눈다 — 하나로 두면 출처를 고르는 순간 고르기 화면이 닫히면서
+     이어질 화면의 열림 조건까지 함께 꺼진다(첫 안내 마법사에서 겪은 것과 같다). */
+  const [srcOpen, setSrcOpen] = useState(false);
+  const [src, setSrc] = useState(null);
   const [showDone, setShowDone] = useState(false);   // 처리된 결의서까지 볼지
 
   const load = async () => {
@@ -64,10 +69,26 @@ export const DocsScreen = () => {
     <div className="fade-up">
       <PageHeader
         title="지급결의서"
-        actions={<button className="btn primary" onClick={() => setNewOpen(true)}><Icon.Plus/> 새 결의서</button>}
+        actions={<button className="btn primary" onClick={() => setSrcOpen(true)}><Icon.Plus/> 새 결의서</button>}
       />
 
-      <NewResolutionDrawer open={newOpen} onClose={() => setNewOpen(false)} onCreated={(id) => { setNewOpen(false); load().then(() => setSelId(id)); }}/>
+      {/* 출처를 먼저 묻는다 — 빈 폼을 열면 장부에 이미 있는 값을 손으로 옮겨 적게 된다 */}
+      <SourceChooser
+        open={srcOpen} onClose={() => setSrcOpen(false)}
+        title="새 지급결의서" sub="어디서 만들까요?"
+        options={RESOLUTION_SOURCES}
+        onPick={(id) => { setSrcOpen(false); setSrc(id); }}
+        footer={<>· 어느 쪽으로 만들어도 <b>결의서 목록에는 함께</b> 모입니다.</>}/>
+
+      <InvoicePickDrawer open={src === 'invoice'} onClose={() => setSrc(null)}
+        onPicked={(id) => { setSrc(null); load().then(() => setSelId(id)); }}/>
+      {/* ⚠ 이 경로로 만든 결의서는 **곧바로 완료**가 된다(이미 나간 돈이라 붙이는 즉시 처리된다).
+          그래서 '처리 대기' 탭에는 없다 — 그대로 두면 만들고 나서 화면이 텅 비어 보여
+          "만들었는데 실패했나" 가 된다. 만든 것을 보여주려면 탭도 함께 옮겨야 한다. */}
+      <TxnPickDrawer open={src === 'txn'} onClose={() => setSrc(null)}
+        onPicked={(id) => { setSrc(null); setShowDone(true); load().then(() => setSelId(id)); }}/>
+      <NewResolutionDrawer open={src === 'blank'} onClose={() => setSrc(null)}
+        onCreated={(id) => { setSrc(null); load().then(() => setSelId(id)); }}/>
 
       <DocWorkspace>
         <DocSide top={<>
@@ -83,7 +104,7 @@ export const DocsScreen = () => {
           </div>
         </>}>
           {list.length === 0
-            ? <DocSideEmpty>{showDone ? "결의서가 없어요." : "처리 대기 중인 결의서가 없어요."}<br/>'새 결의서'로 만들거나 매입의 대금 청구서에서 발행하세요.</DocSideEmpty>
+            ? <DocSideEmpty>{showDone ? "결의서가 없어요." : "처리 대기 중인 결의서가 없어요."}<br/>'새 결의서'를 누르면 받은 청구서·이미 나간 돈에서 만들 수 있어요.</DocSideEmpty>
             : list.map(d => (
               <DocListRow key={d.id} active={d.id === selId} onClick={() => setSelId(d.id)}
                 docNo={d.doc_no} right={<StatusBadge status={d.status}/>}
@@ -97,6 +118,197 @@ export const DocsScreen = () => {
         </DocMain>
       </DocWorkspace>
     </div>
+  );
+};
+
+/* ── 결의서를 어디서 만들까 ───────────────────────────────────────────────
+ *
+ * 예전엔 '새 결의서'가 곧장 빈 폼이었다. 그래서 거래처·금액·날짜·품목을 **손으로 옮겨
+ * 적었다** — 그 값이 이미 장부에 있는데도. 옮겨 적으면 오타가 나고, 오타가 나면
+ * 결의서와 장부가 다른 말을 한다.
+ *
+ * 이제 출처를 먼저 묻는다(DocTypeChooser 가 "받으신 서류가 뭔가요"를 먼저 묻는 것과 같다).
+ *   invoice  받은 청구서에서 — 품목 줄과 부가세까지 그대로 온다
+ *   txn      이미 나간 돈에서 — 통장에서 빠진 지출에 **사후로** 결재 근거를 붙인다
+ *   blank    직접 작성 — 근거 서류가 없는 소액
+ */
+const RESOLUTION_SOURCES = [
+  {
+    id: 'invoice', icon: Icon.Receipt,
+    label: '받은 청구서에서',
+    desc: '세금계산서는 받았고 아직 지급 전이에요',
+    effect: '품목·금액·부가세가 그대로 옮겨져요. 지급하면 그 청구서의 미지급금이 줄어요.',
+  },
+  {
+    id: 'txn', icon: Icon.Bank,
+    label: '이미 나간 돈에서',
+    desc: '통장에서 빠져나간 지출에 결재 근거를 붙여요',
+    effect: '고른 지출에 연결되고 바로 처리 완료가 돼요. 돈이 또 나가지는 않아요.',
+  },
+  {
+    id: 'blank', icon: Icon.Pencil,
+    label: '직접 작성',
+    desc: '근거 서류가 없는 소액 지출',
+    effect: '빈 양식으로 시작해요. 지급은 만든 뒤 따로 처리해요.',
+  },
+]
+
+/** 아직 결의서가 없는 매입 청구서 고르기 */
+const InvoicePickDrawer = ({ open, onClose, onPicked }) => {
+  const toast = useToast();
+  const [rows, setRows] = useState(null);
+  const [q, setQ] = useState('');
+  const [busy, setBusy] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setQ('');
+    /* 매입 청구서 중 **아직 다 안 낸 것**만. 완납 건은 골라 봐야 서버가 막는다
+       (routes/resolutions.js — 매칭할 잔액이 없으면 지출만 붕 뜬다).
+       ⚠ 이름은 **어댑터가 준 것**을 쓴다(api.js adaptInvoice: remainAmount·vendor·invoiceNo).
+         서버 원본 이름(total_amount 등)으로 읽으면 전부 undefined 가 되어 조용히 0건이 된다. */
+    api.getInvoices({ kind: 'received' }).then(list =>
+      setRows((list || []).filter(i => (Number(i.remainAmount) || 0) > 0)));
+  }, [open]);
+
+  const shown = (rows || []).filter(r => {
+    const s = q.trim().toLowerCase();
+    if (!s) return true;
+    return [r.vendor, r.invoiceNo, r.memo]
+      .filter(Boolean).some(v => String(v).toLowerCase().includes(s));
+  });
+
+  const pick = async (inv) => {
+    setBusy(inv.id);
+    const res = await api.createResolutionFromInvoice(inv.id);
+    setBusy('');
+    if (!res.ok) return toast.push(res.error || '만들지 못했어요', { tone: 'warn' });
+    toast.push(res.resolution.reused ? '이미 만든 결의서를 엽니다' : `지급결의서 ${res.resolution.doc_no}를 만들었어요`);
+    onPicked(res.resolution.id);
+  };
+
+  return (
+    <Drawer open={open} onClose={onClose} width="min(640px,100vw)" confirmClose={false} label="받은 청구서에서 결의서 만들기">
+      <DrawerHead title="받은 청구서에서" sub="어느 청구서를 지급 결재할까요?" onClose={onClose}/>
+      <div className="drawer-body col gap-form">
+        <div className="search" style={{ margin: 0, padding: '6px 10px' }}>
+          <Icon.Search size={14}/>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="거래처·계산서번호 검색"/>
+        </div>
+        {rows === null ? <Loading label="청구서를 불러오는 중…"/>
+          : shown.length === 0
+            ? <div className="text-sm text-muted" style={{ padding: 24, textAlign: 'center' }}>
+                지급할 매입 청구서가 없어요.
+              </div>
+            : <div className="col gap-6">
+                {shown.map(inv => (
+                  <button key={inv.id} type="button" className="card doctype-pick"
+                    disabled={busy === inv.id} onClick={() => pick(inv)}>
+                    <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+                      <span style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
+                        <span className="fw-700" style={{ display: 'block' }}>
+                          {inv.vendor || '거래처 없음'}
+                        </span>
+                        <span className="text-sm text-muted" style={{ display: 'block', marginTop: 2 }}>
+                          {inv.issuedAt || '—'} · {inv.invoiceNo || '번호 없음'}
+                          {inv.memo ? ` · ${inv.memo}` : ''}
+                        </span>
+                      </span>
+                      {/* 남은 금액을 보여준다 — 일부만 낸 건은 총액보다 이쪽이 결재할 금액이다 */}
+                      <span className="num fw-700" style={{ whiteSpace: 'nowrap' }}>
+                        {fmtNum(inv.remainAmount)}원
+                      </span>
+                      <Icon.Right size={16}/>
+                    </div>
+                  </button>
+                ))}
+              </div>}
+      </div>
+    </Drawer>
+  );
+};
+
+/** 이미 나간 지출 거래 고르기 → 결의서를 만들고 곧바로 그 거래에 연결 */
+const TxnPickDrawer = ({ open, onClose, onPicked }) => {
+  const toast = useToast();
+  const [rows, setRows] = useState(null);
+  const [q, setQ] = useState('');
+  const [busy, setBusy] = useState('');
+
+  const load = (term) => api.getResolutionCandidates(term).then(setRows);
+  useEffect(() => { if (open) { setQ(''); setRows(null); load(''); } }, [open]);
+
+  const pick = async (t) => {
+    setBusy(t.id);
+    /* ⚠ **만들기와 연결을 나눠 부른다.** 연결(process)에는 마감 검사·잔액 규칙·이중계상
+       가드가 들어 있고(routes/resolutions.js 165줄), 그건 이미 검증된 경로다. 여기서
+       질러 넣으면 그 가드를 통째로 우회하게 된다. */
+    const title = t.category || t.memo || '지출';
+    const made = await api.createResolution({
+      vendor_id: t.vendor_id || undefined,
+      vendor_name: t.vendor_name || '',
+      title,
+      // 거래에는 품목 줄이 없다(transactions 스키마) — 한 줄로 뭉친다.
+      // 여러 줄로 나누려면 만든 뒤 상세에서 편집한다.
+      items: [{ name: title, unit: '식', qty: 1, price: t.amount, amount: t.amount, note: t.memo || '' }],
+      pay_method: '계좌이체',
+      pay_date: t.date,
+    });
+    if (!made.ok) { setBusy(''); return toast.push(made.error || '만들지 못했어요', { tone: 'warn' }); }
+
+    const linked = await api.processResolution(made.resolution.id, { mode: 'link', txn_id: t.id });
+    setBusy('');
+    if (!linked.ok) {
+      /* 만들기는 됐는데 연결이 막힌 경우(마감된 달의 거래 등). 결의서는 남겨 둔다 —
+         지우면 사용자가 쓴 것이 사라지고, 남기면 그 화면에서 바로 처리하거나 지울 수 있다. */
+      toast.push(`${linked.error || '연결하지 못했어요'} — 결의서는 만들어 두었어요`, { tone: 'warn' });
+      return onPicked(made.resolution.id);
+    }
+    toast.push(`지급결의서 ${made.resolution.doc_no}를 만들고 그 지출에 연결했어요`);
+    onPicked(made.resolution.id);
+  };
+
+  const runSearch = (v) => { setQ(v); load(v); };
+
+  return (
+    <Drawer open={open} onClose={onClose} width="min(640px,100vw)" confirmClose={false} label="이미 나간 돈에서 결의서 만들기">
+      <DrawerHead title="이미 나간 돈에서" sub="어느 지출에 결재 근거를 붙일까요?" onClose={onClose}/>
+      <div className="drawer-body col gap-form">
+        <div className="search" style={{ margin: 0, padding: '6px 10px' }}>
+          <Icon.Search size={14}/>
+          <input value={q} onChange={e => runSearch(e.target.value)} placeholder="거래처·비목·적요 검색"/>
+        </div>
+        {rows === null ? <Loading label="지출을 불러오는 중…"/>
+          : rows.length === 0
+            ? <div className="text-sm text-muted" style={{ padding: 24, textAlign: 'center' }}>
+                결의서를 붙일 지출이 없어요.
+              </div>
+            : <div className="col gap-6">
+                {rows.map(t => (
+                  <button key={t.id} type="button" className="card doctype-pick"
+                    disabled={busy === t.id} onClick={() => pick(t)}>
+                    <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+                      <span style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
+                        <span className="fw-700" style={{ display: 'block' }}>
+                          {t.vendor_name || t.category || '지출'}
+                        </span>
+                        <span className="text-sm text-muted" style={{ display: 'block', marginTop: 2 }}>
+                          {t.date} · {t.category || '비목 없음'}
+                          {t.account_name ? ` · ${t.account_name}` : ''}
+                          {t.memo ? ` · ${t.memo}` : ''}
+                        </span>
+                      </span>
+                      <span className="num fw-700" style={{ whiteSpace: 'nowrap' }}>{fmtNum(t.amount)}원</span>
+                      <Icon.Right size={16}/>
+                    </div>
+                  </button>
+                ))}
+              </div>}
+        <div className="text-xs text-muted2" style={{ lineHeight: 1.7 }}>
+          이미 나간 돈이라 <b>돈이 또 나가지 않아요.</b> 고른 지출에 결의서가 붙고 바로 처리 완료가 됩니다.
+        </div>
+      </div>
+    </Drawer>
   );
 };
 

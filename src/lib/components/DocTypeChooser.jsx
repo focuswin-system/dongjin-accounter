@@ -1,5 +1,5 @@
-import { Drawer, Icon } from '../ui'
-import { DrawerHead } from './Drawer'
+import { Icon } from '../ui'
+import { SourceChooser } from './SourceChooser'
 
 /**
  * "받으신 서류가 뭔가요?" — 등록 입구에서 **처음 묻는 한 가지**.
@@ -80,39 +80,14 @@ export const DocTypeChooser = ({ open, kind = 'pay', onPick, onClose, canPlain =
      엉뚱한 회계 문서를 만드는 것보다 그 선택지가 없는 편이 낫다. */
   const options = (pay ? PAY_OPTIONS : RECEIVE_OPTIONS).filter(o => canPlain || o.id === 'invoice')
 
-  /* confirmClose={false} — 입력 칸이 없는 '고르기' 화면이다. 기본값이면 Esc 를 눌렀을 때
-     "쓰던 내용은 저장되지 않아요"가 뜨는데, 쓴 내용이 없는데 물으면 사용자는 자기가 뭘
-     잃는지 몰라 멈칫한다. (VoucherView·TxnQuickDrawer 등 보기 전용 드로어와 같은 처리)
-     label 은 드로어의 접근성 이름이다. */
+  /* 그리는 일은 SourceChooser 가 한다 — 결의서의 '어디서 만들까요'와 **같은 모양**이어야
+     사용자가 같은 질문을 두 가지로 배우지 않는다. */
   return (
-    <Drawer open={open} onClose={onClose} confirmClose={false}
-      label={pay ? '지급 등록 — 서류 선택' : '입금 등록 — 서류 선택'}>
-      <DrawerHead
-        title={pay ? '지급 등록' : '입금 등록'}
-        sub={pay ? '받으신 서류가 무엇인가요?' : '세금계산서를 발행하는 건인가요?'}
-        onClose={onClose}/>
-      <div className="drawer-body col" style={{ gap: 10 }}>
-        {options.map(o => (
-          <button key={o.id} type="button" className="card doctype-pick"
-            onClick={() => onPick(o.id)}>
-            <div className="row" style={{ gap: 12, alignItems: 'flex-start' }}>
-              <span className="doctype-ico"><o.icon size={18}/></span>
-              <span style={{ flex: 1, textAlign: 'left' }}>
-                <span className="fw-700" style={{ display: 'block' }}>{o.label}</span>
-                <span className="text-sm text-muted" style={{ display: 'block', marginTop: 2 }}>{o.desc}</span>
-                {/* 회계 결과를 미리 적는다 — 고르고 나서야 알면 되돌리려고 다시 열어야 한다 */}
-                <span className="text-xs text-muted2" style={{ display: 'block', marginTop: 6, lineHeight: 1.6 }}>
-                  {o.effect}
-                </span>
-              </span>
-              <Icon.Right size={16}/>
-            </div>
-          </button>
-        ))}
-        <div className="text-xs text-muted2" style={{ marginTop: 6, lineHeight: 1.7 }}>
-          · 어느 쪽으로 넣어도 <b>거래내역에는 함께</b> 모입니다. 나중에 바꿔야 하면 그 건을 열어 고치면 돼요.
-        </div>
-      </div>
-    </Drawer>
+    <SourceChooser
+      open={open} onClose={onClose} onPick={onPick} options={options}
+      label={pay ? '지급 등록 — 서류 선택' : '입금 등록 — 서류 선택'}
+      title={pay ? '지급 등록' : '입금 등록'}
+      sub={pay ? '받으신 서류가 무엇인가요?' : '세금계산서를 발행하는 건인가요?'}
+      footer={<>· 어느 쪽으로 넣어도 <b>거래내역에는 함께</b> 모입니다. 나중에 바꿔야 하면 그 건을 열어 고치면 돼요.</>}/>
   )
 }

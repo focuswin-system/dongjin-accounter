@@ -1337,6 +1337,12 @@ export const api = {
     try { const r = await req('/resolutions', { method: 'POST', body: data }); return { ok: true, resolution: r } }
     catch (e) { return { ok: false, error: e.message } }
   },
+  /* 결의서를 붙일 수 있는 지출 거래 — **만들기 전에** 고르는 목록.
+   * (/:id/matchable 은 결의서가 이미 있을 때 쓴다 — 그 결의서 기준으로 가까운 걸 올린다) */
+  async getResolutionCandidates(q) {
+    try { return await req(`/resolutions/candidates${q ? `?q=${encodeURIComponent(q)}` : ''}`) }
+    catch { return [] }
+  },
   // 매입 청구서 1건 → 결의서 생성(지급 전 결재용, 이미 있으면 그 결의서 반환)
   async createResolutionFromInvoice(invoiceId) {
     try { const r = await req(`/resolutions/from-invoice/${invoiceId}`, { method: 'POST' }); return { ok: true, resolution: r } }

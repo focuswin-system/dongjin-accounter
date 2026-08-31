@@ -85,6 +85,36 @@ router.get('/by-txn/:txnId', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/**
+ * 결의서를 붙일 수 있는 지출 거래 — **결의서를 만들기 전에** 고르는 목록.
+ *
+ * ⚠ /:id/matchable 과 하는 일이 비슷하지만 그건 **결의서가 이미 있을 때** 쓴다
+ *   (그 결의서의 거래처·금액에 가까운 것을 위로 올린다). 여기는 아직 결의서가 없어서
+ *   기준으로 삼을 값이 없다 — 최근 것부터 준다.
+ *
+ * 왜 필요한가: 통장에서 이미 나간 돈에 **사후로 결재 근거를 붙이는** 흐름이다.
+ * 예전엔 빈 폼을 열어 거래처·금액·날짜를 손으로 옮겨 적었다 — 그 값이 장부에 이미 있는데도.
+ */
+router.get('/candidates', async (req, res, next) => {
+  try {
+    const q = String(req.query.q || '').trim()
+    const like = `%${q}%`
+    const [rows] = await req.db.execute(
+      `SELECT t.id, t.date, t.amount, t.category, t.sub_category, t.memo, t.status,
+              t.account_id, t.vendor_id, t.contract_id, v.name AS vendor_name, a.name AS account_name
+         FROM transactions t
+         LEFT JOIN vendors  v ON t.vendor_id  = v.id
+         LEFT JOIN accounts a ON t.account_id = a.id
+        WHERE t.kind = 'expense'
+          AND t.id NOT IN (SELECT txn_id FROM expense_resolutions WHERE txn_id IS NOT NULL)
+          ${q ? 'AND (v.name LIKE ? OR t.category LIKE ? OR t.memo LIKE ?)' : ''}
+        ORDER BY t.date DESC, t.created_at DESC
+        LIMIT 50`,
+      q ? [like, like, like] : [])
+    res.json(rows.map(t => ({ ...t, amount: Number(t.amount) })))
+  } catch (e) { next(e) }
+})
+
 router.get('/:id', async (req, res, next) => {
   try {
     const [[r]] = await req.db.execute('SELECT * FROM expense_resolutions WHERE id = ?', [req.params.id])
