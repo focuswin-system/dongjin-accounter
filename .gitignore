@@ -30,3 +30,14 @@ dev-dist/
 
 # 배포 provenance — deploy.sh 가 서버에 직접 기록한다(커밋 대상 아님)
 server/deploy-info.json
+
+# 검증용 스크린샷 — Playwright 로 화면을 확인하며 루트에 쌓인다.
+# 작업 흔적이지 소스가 아니다. (의도해 두는 그림은 src/assets/ 나 public/ 에 둔다)
+/*.png
+
+# 로그인 세션 핸드오프 — **유효한 JWT 와 테넌트 DB 이름이 들어 있다.**
+# 실수로 한 번만 커밋돼도 공개 저장소에 토큰이 남는다.
+session-handoff.json
+
+# 도구 상태
+.claude/
