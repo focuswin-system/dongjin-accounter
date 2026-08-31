@@ -106,6 +106,13 @@ router.get('/candidates', async (req, res, next) => {
          LEFT JOIN vendors  v ON t.vendor_id  = v.id
          LEFT JOIN accounts a ON t.account_id = a.id
         WHERE t.kind = 'expense'
+          /* ⚠ **이미 나간 돈만.** 화면이 "통장에서 빠져나간 지출"이라고 약속하고,
+             연결(process)은 대상 거래를 '지급완료'로 바꾼다 — 아직 안 나간 건을 넣어 주면
+             나가지도 않은 돈이 계좌 잔액에서 빠진다. 계좌 잔액은 이 조합만 센다
+             (routes/accounts.js calcBalance: kind='expense' AND status='지급완료').
+             계좌가 없는 건도 뺀다 — 골라 봐야 ledgerError 로 막히는 선택지다. */
+          AND t.status = '지급완료'
+          AND t.account_id IS NOT NULL
           AND t.id NOT IN (SELECT txn_id FROM expense_resolutions WHERE txn_id IS NOT NULL)
           ${q ? 'AND (v.name LIKE ? OR t.category LIKE ? OR t.memo LIKE ?)' : ''}
         ORDER BY t.date DESC, t.created_at DESC

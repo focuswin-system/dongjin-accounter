@@ -235,8 +235,13 @@ const TxnPickDrawer = ({ open, onClose, onPicked }) => {
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState('');
 
+  /* 검색은 서버가 한다(50건만 내려오므로 화면에서 거르면 그 밖은 영영 안 보인다).
+     ⚠ 한 글자마다 부르지는 않는다 — '삼우열처리'를 치면 여섯 번 조회가 돈다.
+     타이핑이 멎으면 한 번만 부른다. */
+  const timer = useRef(null);
   const load = (term) => api.getResolutionCandidates(term).then(setRows);
   useEffect(() => { if (open) { setQ(''); setRows(null); load(''); } }, [open]);
+  useEffect(() => () => clearTimeout(timer.current), []);
 
   const pick = async (t) => {
     setBusy(t.id);
@@ -268,7 +273,11 @@ const TxnPickDrawer = ({ open, onClose, onPicked }) => {
     onPicked(made.resolution.id);
   };
 
-  const runSearch = (v) => { setQ(v); load(v); };
+  const runSearch = (v) => {
+    setQ(v);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => load(v), 250);
+  };
 
   return (
     <Drawer open={open} onClose={onClose} width="min(640px,100vw)" confirmClose={false} label="이미 나간 돈에서 결의서 만들기">
