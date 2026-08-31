@@ -7,8 +7,10 @@ import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID, MASTER_LEA
 import { PermCtx, usePerms, visibleNav, visiblePortalNode, withoutMasterOnly } from './lib/perms'
 import { sessionAlive, clearSession } from './lib/session'
 import { applyTheme, fromPrefs, writeLocal, readLocal, watchSystem } from './lib/theme'
+import { MANUAL_FOR_ROUTE } from './lib/manual'
 import { UpdateBanner } from './lib/components/UpdateBanner'
 import { LoginScreen } from './screens/Login'
+import { ManualScreen } from './screens/Manual'
 import { HomeScreen } from './screens/Home'
 import { LedgerScreen } from './screens/Ledger'
 import { TransactionForm } from './screens/Form'
@@ -48,6 +50,8 @@ import { VoucherBookScreen } from './screens/VoucherBook'
  * 메뉴에서 감춘 화면(ar·ap·contract), 포털 페이지, 모달 화면. */
 const CRUMB_MAP = {
   home:            ["홈"],
+  // 설명서는 메뉴에 없는 화면이라 트리에서 길을 못 뽑는다 — 여기서 준다
+  manual:          ["도움말", "사용 설명서"],
   ledger_income:   ["거래내역", "입금"],
   ledger_expense:  ["거래내역", "지출"],
   ledger_ar:       ["거래내역", "미수금"],
@@ -372,6 +376,9 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
   const [notifRead, setNotifRead] = useState(false);
   const [notifs, setNotifs] = useState([]);
   const [faqOpen, setFaqOpen] = useState(false);
+  /* 설명서를 어느 장부터 열까 — ? 를 누른 화면에 따라 다르다.
+     null 이면 목차 첫 장부터. */
+  const [manualChapter, setManualChapter] = useState(null);
   const contentRef = useRef(null);   // 데스크톱 내부 스크롤 컨테이너(.content) — 라우트 전환 시 맨 위로
   const toast = useToast();
   const { confirm } = useConfirm();
@@ -659,12 +666,16 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
       // (화면 코드 EvidenceScreen 은 그대로 둔다 — 추후 실구현 시 여기만 되돌리면 된다)
       case "evidence":        return <ComingSoon title="증빙 관리"/>;
       case "excel":           return <ExcelScreen/>;
+      /* 사용 설명서 — 메뉴에 세우지 않는다. 헤더의 ? 에서 열고, 그때 **보고 있던 화면에
+         맞는 장**으로 연다. 메뉴 잎으로 만들면 권한 자원이 하나 늘어나는데,
+         설명서는 권한으로 가릴 것이 아니다(못 보게 할 이유가 없다). */
+      case "manual":          return <ManualScreen go={go} focusChapter={manualChapter}/>;
       default:                return <HomeScreen go={go} navHidden={navHidden} docKeys={docKeys} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
     }
     /* ⚠ docKeys·navHidden 도 의존성이다. 이 memo 안에서 홈·포털에 넘기는 값인데
        빼 두면 **늦게 온 문서 카탈로그가 반영되지 않는다** — 사이드바(위 navTree memo)는
        따라오고 홈 타일만 안 따라와서, 같은 화면이 두 가지 말을 하게 된다. */
-  }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, perms, docKeys, navHidden]);
+  }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, perms, docKeys, navHidden, manualChapter]);
 
   const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger"
                 : route.startsWith("billing") ? "billing"
@@ -884,6 +895,12 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
                   내주면서 여기로 옮긴다. '말걸기 설정'(자동·항상·끄기)은 말을 걸 것이
                   없어졌으니 함께 뺀다 — 아무 일도 안 하는 설정이 남으면 더 헷갈린다. */}
               <div className="col gap-8" style={{ padding: "10px 14px", borderTop: "1px solid var(--line)" }}>
+                {/* 설명서와 FAQ 는 읽는 상황이 다르다 — 배울 때 / 막혔을 때.
+                    설명서를 먼저 둔다. 처음 오는 사람이 눌러야 하는 쪽이다. */}
+                <button className="btn primary" style={{ width: "100%" }}
+                  onClick={() => { setManualChapter(MANUAL_FOR_ROUTE[route] || null); go("manual"); }}>
+                  <Icon.Book size={14}/> 사용 설명서
+                </button>
                 <button className="btn" style={{ width: "100%" }} onClick={() => setFaqOpen(true)}>
                   <Icon.Help size={14}/> 자주 묻는 질문
                 </button>
