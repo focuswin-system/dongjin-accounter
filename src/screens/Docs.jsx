@@ -239,7 +239,12 @@ const TxnPickDrawer = ({ open, onClose, onPicked }) => {
      ⚠ 한 글자마다 부르지는 않는다 — '삼우열처리'를 치면 여섯 번 조회가 돈다.
      타이핑이 멎으면 한 번만 부른다. */
   const timer = useRef(null);
-  const load = (term) => api.getResolutionCandidates(term).then(setRows);
+  const seq = useRef(0);
+  const load = (term) => {
+    const my = ++seq.current;
+    return api.getResolutionCandidates(term)
+      .then(r => { if (my === seq.current) setRows(r); });
+  };
   useEffect(() => { if (open) { setQ(''); setRows(null); load(''); } }, [open]);
   useEffect(() => () => clearTimeout(timer.current), []);
 
@@ -278,6 +283,8 @@ const TxnPickDrawer = ({ open, onClose, onPicked }) => {
     clearTimeout(timer.current);
     timer.current = setTimeout(() => load(v), 250);
   };
+  /* 위 load 는 seq 로 늦게 온 응답을 버린다 — 안 그러면 '삼우' 조회가 '삼우열처리'
+     조회보다 늦게 도착했을 때 옛 결과가 새 결과를 덮어, 검색창과 목록이 다른 말을 한다. */
 
   return (
     <Drawer open={open} onClose={onClose} width="min(640px,100vw)" confirmClose={false} label="이미 나간 돈에서 결의서 만들기">

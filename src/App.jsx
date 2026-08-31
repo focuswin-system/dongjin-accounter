@@ -660,7 +660,10 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
       case "excel":           return <ExcelScreen/>;
       default:                return <HomeScreen go={go} navHidden={navHidden} docKeys={docKeys} openIncome={() => setTxnForm({ kind: "income" })} openExpense={() => setTxnForm({ kind: "expense" })}/>;
     }
-  }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, perms]);
+    /* ⚠ docKeys·navHidden 도 의존성이다. 이 memo 안에서 홈·포털에 넘기는 값인데
+       빼 두면 **늦게 온 문서 카탈로그가 반영되지 않는다** — 사이드바(위 navTree memo)는
+       따라오고 홈 타일만 안 따라와서, 같은 화면이 두 가지 말을 하게 된다. */
+  }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, perms, docKeys, navHidden]);
 
   const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger"
                 : route.startsWith("billing") ? "billing"
