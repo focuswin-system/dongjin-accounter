@@ -75,12 +75,18 @@ export const NotesScreen = () => {
 
   const list = useMemo(() => (rows || []).filter(n => n.kind === (tab || 'receivable')), [rows, tab])
   const held = list.filter(n => n.status === 'held')
-  const 만기임박 = held.filter(n => { const d = daysTo(n.dueOn, today); return d != null && d <= 7 })
+  /* ⚠ **지난 것과 임박한 것을 가른다.**
+     한 칸에 묶었더니 "7일 안에 만기"에 이미 지난 어음이 섞여, 가장 급한 것이 묻혔다.
+     만기가 지났는데 안 들어온 어음은 **부도 신호**다 — 임박한 것과 급한 정도가 다르다. */
+  const 지남 = held.filter(n => { const d = daysTo(n.dueOn, today); return d != null && d < 0 })
+  const 임박 = held.filter(n => { const d = daysTo(n.dueOn, today); return d != null && d >= 0 && d <= 7 })
+  const 부도 = list.filter(n => n.status === 'dishonored')
   const sum = (a) => a.reduce((s, n) => s + (n.amount || 0), 0)
 
   if (rows === null || tab === null) return <Loading/>
 
   const K = KIND[tab] || KIND.receivable
+  const isRecv = (tab || 'receivable') === 'receivable'
 
   return (
     <div className="fade-up">
@@ -100,13 +106,16 @@ export const NotesScreen = () => {
         ))}
       </div>
 
-      <KpiRow cols={3}>
+      {/* 급한 순서대로 — 지난 것 · 곧 올 것 · 전체 · 부도 */}
+      <KpiRow cols={4}>
+        <Kpi label="만기 지남" value={sum(지남)} badge={`${지남.length}건`}
+             hint={지남.length ? (isRecv ? '안 들어왔어요 · 부도 신호일 수 있어요' : '아직 안 냈어요') : undefined}
+             tone={지남.length ? 'neg' : undefined}/>
+        <Kpi label="7일 안에 만기" value={sum(임박)} badge={`${임박.length}건`}
+             tone={임박.length ? 'warn' : undefined}/>
         <Kpi label={`보유 중 ${K.money}`} value={sum(held)} badge={`${held.length}건`}/>
-        <Kpi label="7일 안에 만기" value={sum(만기임박)} badge={`${만기임박.length}건`}
-             tone={만기임박.length ? 'warn' : undefined}/>
-        <Kpi label="부도" value={sum(list.filter(n => n.status === 'dishonored'))}
-             badge={`${list.filter(n => n.status === 'dishonored').length}건`}
-             tone={list.some(n => n.status === 'dishonored') ? 'neg' : undefined}/>
+        <Kpi label="부도" value={sum(부도)} badge={`${부도.length}건`}
+             tone={부도.length ? 'neg' : undefined}/>
       </KpiRow>
 
       <div className="card" style={{ overflow: 'hidden', marginTop: 16 }}>
