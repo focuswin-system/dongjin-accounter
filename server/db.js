@@ -989,6 +989,10 @@ async function initDb(conn) {
         txn_id      VARCHAR(36),               -- 만기 결제로 만들어진 거래
         invoice_id  VARCHAR(36),               -- 어느 청구서에서 왔나(선택)
         match_id    VARCHAR(36),               -- 그때 남긴 invoice_matches 행 (부도 때 되돌린다)
+        /* 거래 등록 폼에서 '어음'으로 적은 경우 그 거래.
+           ⚠ 만기 결제 때 **새 거래를 만들지 않고 이 거래를 완료로 바꾼다** —
+             또 만들면 같은 돈이 두 번 잡힌다. txn_id(만기 거래)와 다른 칸이다. */
+        origin_txn_id VARCHAR(36),
         memo        TEXT,
         created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         KEY idx_notes_due (status, due_on),
@@ -1073,6 +1077,8 @@ async function initDb(conn) {
     // 거래처 사용/미사용. 거래·청구서·주문이 붙은 거래처는 FK 때문에 삭제할 수 없고,
     // 삭제해서도 안 된다(과거 장부가 어긋난다). 미사용으로 두면 새 거래의 선택 목록에서만
     // 빠지고 기존 기록은 그대로 유지된다. 기존 행은 전부 사용중(1)으로 시작한다.
+    // 어음이 '거래 등록 폼'에서도 만들어진다 — 이미 notes 가 있는 DB 를 위해
+    await ensureColumn('notes', 'origin_txn_id', 'origin_txn_id VARCHAR(36)')
     await ensureColumn('vendors', 'active', "active TINYINT(1) NOT NULL DEFAULT 1")
     // 정기청구 → 청구서 역참조. 청구서를 지우면 그 회차의 last_generated 를 되돌려야
     // '발행 예정'에 다시 뜬다. 이 링크가 없으면 그 달 매출이 조용히 미청구로 사라진다.

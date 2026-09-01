@@ -52,7 +52,7 @@ const rowOut = (r) => ({
   amount: Number(r.amount) || 0,
   issuedOn: r.issued_on, dueOn: r.due_on, status: r.status,
   accountId: r.account_id, accountName: r.account_name || '',
-  settledOn: r.settled_on, txnId: r.txn_id,
+  settledOn: r.settled_on, txnId: r.txn_id, originTxnId: r.origin_txn_id,
   invoiceId: r.invoice_id, invoiceNo: r.invoice_no || '',
   memo: r.memo || '', createdAt: r.created_at,
 })
@@ -98,7 +98,7 @@ router.get('/:id', async (req, res, next) => {
  */
 router.post('/', async (req, res, next) => {
   try {
-    const { kind, note_no, vendor_id, amount, issued_on, due_on, invoice_id, memo } = req.body
+    const { kind, note_no, vendor_id, amount, issued_on, due_on, invoice_id, origin_txn_id, memo } = req.body
     if (!KINDS.has(kind)) return res.status(400).json({ error: '받을어음인지 지급어음인지 골라주세요' })
     { const e = dateError(issued_on, '발행일'); if (e) return res.status(400).json({ error: e }) }
     { const e = dateError(due_on, '만기일');   if (e) return res.status(400).json({ error: e }) }
@@ -150,10 +150,10 @@ router.post('/', async (req, res, next) => {
 
       const id = randomUUID()
       await conn.execute(
-        `INSERT INTO notes (id, kind, note_no, vendor_id, amount, issued_on, due_on, status, invoice_id, match_id, memo)
-         VALUES (?,?,?,?,?,?,?, 'held', ?,?,?)`,
+        `INSERT INTO notes (id, kind, note_no, vendor_id, amount, issued_on, due_on, status, invoice_id, match_id, origin_txn_id, memo)
+         VALUES (?,?,?,?,?,?,?, 'held', ?,?,?,?)`,
         [id, kind, String(note_no || '').trim(), vendor_id, amt, issued_on, due_on,
-         invoice_id || null, matchId, String(memo || '').trim()])
+         invoice_id || null, matchId, origin_txn_id || null, String(memo || '').trim()])
 
       await conn.commit()
       res.json({ ok: true, id })
@@ -194,19 +194,34 @@ router.post('/:id/settle', async (req, res, next) => {
       { const e = ledgerError({ kind: txnKind, account_id, status, method: '계좌이체' })
         if (e) { await rollbackQuietly(conn); return res.status(400).json({ error: e }) } }
 
-      const txnId = randomUUID()
       const [[v]] = await conn.execute('SELECT name FROM vendors WHERE id = ?', [n.vendor_id])
       const label = `${recv ? '받을어음' : '지급어음'} ${n.note_no || ''} 만기`.replace(/\s+/g, ' ').trim()
-      await conn.execute(
-        `INSERT INTO transactions (id, kind, vendor_id, account_id, category, amount, date, method, status, memo, account_code)
-         VALUES (?,?,?,?,?,?,?, '계좌이체', ?,?,?)`,
-        [txnId, txnKind, n.vendor_id || null, account_id || null,
-         recv ? '수금' : '대금 지급', Number(n.amount) || 0, on, status,
-         String(memo || '').trim() || `${v?.name || ''} ${label}`.trim(),
-         /* ⚠ 상대 계정은 **받을어음/지급어음**이다(외상매출금이 아니다).
-              그 채권·채무는 어음을 받을 때 이미 어음으로 바뀌었다. 여기서 또 외상으로
-              적으면 같은 채권이 두 번 사라진다. */
-         recv ? ACCT.receivable : ACCT.payable])
+
+      /* ⚠ **거래가 이미 있으면 새로 만들지 않는다.**
+       *   거래 등록 폼에서 결제수단 '어음'으로 적은 건은 그때 거래가 만들어졌다
+       *   (예정 상태라 잔액엔 안 잡혀 있다). 만기에 또 만들면 같은 돈이 두 번 잡힌다.
+       *   있는 거래를 **완료로 바꾸고 계좌를 채워** 그때 비로소 잔액이 움직이게 한다. */
+      let txnId = n.origin_txn_id || null
+      if (txnId) {
+        const [r] = await conn.execute(
+          `UPDATE transactions SET status = ?, account_id = ?, date = ?, account_code = ? WHERE id = ?`,
+          [status, account_id || null, on, recv ? ACCT.receivable : ACCT.payable, txnId])
+        // 그 거래가 지워졌으면(사용자가 거래내역에서 삭제) 새로 만든다 — 만기 기록이 사라지면 안 된다
+        if (!r.affectedRows) txnId = null
+      }
+      if (!txnId) {
+        txnId = randomUUID()
+        await conn.execute(
+          `INSERT INTO transactions (id, kind, vendor_id, account_id, category, amount, date, method, status, memo, account_code)
+           VALUES (?,?,?,?,?,?,?, '계좌이체', ?,?,?)`,
+          [txnId, txnKind, n.vendor_id || null, account_id || null,
+           recv ? '수금' : '대금 지급', Number(n.amount) || 0, on, status,
+           String(memo || '').trim() || `${v?.name || ''} ${label}`.trim(),
+           /* ⚠ 상대 계정은 **받을어음/지급어음**이다(외상매출금이 아니다).
+                그 채권·채무는 어음을 받을 때 이미 어음으로 바뀌었다. 여기서 또 외상으로
+                적으면 같은 채권이 두 번 사라진다. */
+           recv ? ACCT.receivable : ACCT.payable])
+      }
 
       await conn.execute(
         `UPDATE notes SET status = 'settled', settled_on = ?, account_id = ?, txn_id = ? WHERE id = ?`,
@@ -270,7 +285,15 @@ router.post('/:id/unsettle', async (req, res, next) => {
         const e = await closedPeriodError(conn, n.settled_on)
         if (e) { await rollbackQuietly(conn); return res.status(409).json({ error: e }) }
       }
-      if (n.txn_id) await conn.execute('DELETE FROM transactions WHERE id = ?', [n.txn_id])
+      /* ⚠ 거래 등록 폼에서 온 어음이면 그 거래는 **지우지 않는다** — 그건 어음을 준
+           사실 자체를 적은 것이라, 지우면 비용까지 사라진다. 예정 상태로만 되돌린다. */
+      if (n.txn_id && n.txn_id === n.origin_txn_id) {
+        await conn.execute(
+          `UPDATE transactions SET status = ?, account_id = NULL WHERE id = ?`,
+          [isRecv(n.kind) ? '입금 예정' : '지급 예정', n.txn_id])
+      } else if (n.txn_id) {
+        await conn.execute('DELETE FROM transactions WHERE id = ?', [n.txn_id])
+      }
       await conn.execute(
         `UPDATE notes SET status = 'held', settled_on = NULL, txn_id = NULL WHERE id = ?`, [n.id])
       await conn.commit()

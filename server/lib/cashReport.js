@@ -425,6 +425,42 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
     })
   }
 
+  /* 10. 어음 — 만기일에 현금이 된다.
+   *
+   * ⚠ 이걸 빼면 **어음이 자금 계획에서 통째로 사라진다.** 어음으로 받은 청구서는
+   *   이미 정산 처리돼 위 1번(미수금)에서 빠져 있기 때문이다. 받을 권리는 그대로인데
+   *   예측에서만 없어지면, 있는 돈을 없다고 보고 계획을 세우게 된다.
+   *
+   * ⚠ 보유 중인 것만 센다. 결제된 어음은 이미 거래로 잡혔고(중복), 부도난 어음은
+   *   들어올 돈이 아니다.
+   * ⚠ 만기가 지났는데 아직 보유 중이면 **연체**다 — 미수금과 같은 규칙으로 다룬다
+   *   (place 가 기준일로 끌어올린다). 만기가 지난 어음은 부도 신호일 수 있어
+   *   조용히 빼면 안 된다. */
+  const [notes] = await db.execute(
+    `SELECT n.id, n.kind, n.note_no, n.amount, n.due_on, v.name AS vendor_name
+       FROM notes n LEFT JOIN vendors v ON v.id = n.vendor_id
+      WHERE n.status = 'held' ORDER BY n.due_on`).catch(() => [[]])
+  for (const r of notes) {
+    const amt = num(r.amount)
+    if (amt <= 0) continue
+    const date = place(r.due_on)
+    if (date === null || date > to) continue
+    const recv = r.kind === 'receivable'
+    const overdue = !!r.due_on && r.due_on < from
+    out.push({
+      date, kind: recv ? 'in' : 'out', amount: amt,
+      label: `${r.vendor_name || '거래처'} ${r.note_no || ''}`.trim(),
+      source: recv ? '받을어음' : '지급어음',
+      account_id: null,          // 만기에 어느 통장으로 받을지는 그때 정한다
+      overdue, noDue: false,
+      /* 확실성 — 어음은 증서가 있어 외상보다 확실하다. 다만 **만기가 지났는데도
+         안 들어온 어음**은 부도 신호라 확실하다고 볼 수 없다.
+         나갈 돈(지급어음)은 늘 확실로 둔다 — 안전한 방향이 반대다(lib/certainty.js). */
+      certain: recv ? !overdue : true,
+      uncertainReason: recv && overdue ? '만기가 지났는데 아직 안 들어왔어요' : undefined,
+    })
+  }
+
   /* 날짜가 같은 항목들의 순서가 **새로고침마다 달랐다.**
    * 10개 출처를 각각 조회해 이어 붙이는데 대부분 ORDER BY 가 없어, MariaDB 가 돌려주는
    * 순서가 계획에 따라 바뀐다. 그러면 같은 날 상세를 열 때마다 줄 차례가 뒤바뀌어

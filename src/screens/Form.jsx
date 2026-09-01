@@ -53,6 +53,44 @@ const FormField = ({ label, required, hint, children }) => (
  * 수단이 바뀌면 그 수단이 쓸 수 없는 계좌는 놓는다. 같은 갈래면 그대로 둔다
  * (법인카드 ↔ 개인카드처럼 둘 다 카드인 경우에는 다시 고르게 하지 않는다).
  */
+/**
+ * 어음 입력 칸 — 결제수단이 '어음'일 때만 뜬다.
+ *
+ * ⚠ 계좌를 묻지 않는다. 어음은 통장을 거치지 않기 때문이다 —
+ *   계좌를 받으면 그 계좌 잔액이 움직일 것처럼 보인다(실제로는 안 움직인다).
+ *   만기에 어느 통장으로 받을지는 **그때** 정한다(재무관리 › 어음).
+ */
+const NoteFields = ({ form, setForm, kind }) => {
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  return (
+    <div className="col gap-form" style={{ marginTop: 4 }}>
+      <div className="man-note" style={{ margin: 0 }}>
+        <Icon.Help size={15}/>
+        <div>
+          {kind === 'income' ? '받은' : '준'} 어음은 <b>만기가 와야 현금</b>이 됩니다.
+          이 거래는 <b>{kind === 'income' ? '입금' : '지급'} 예정</b>으로 남고 통장 잔액은 그대로예요.
+          만기 처리는 <b>재무관리 › 어음</b>에서 합니다.
+        </div>
+      </div>
+      <div className="row gap-12">
+        <div style={{ flex: 1 }}>
+          <label className="label">어음번호</label>
+          <input className="input num" value={form.noteNo || ''} onChange={e => set('noteNo', e.target.value)}
+            placeholder="예: 자가12345678"/>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className="label">
+            만기일 <span style={{ color: 'var(--neg-ink)' }}>*</span>
+            <span className="text-muted2 fw-600" style={{ marginLeft: 6, fontWeight: 400 }}>· 현금이 되는 날</span>
+          </label>
+          <DateInput className="input num" value={form.noteDueOn || ''}
+            onChange={e => set('noteDueOn', e.target.value)}/>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const accountKindFor = (method) =>
   method === '현금' ? 'cash' : (method === '법인카드' || method === '개인카드') ? 'card' : 'bank'
 
@@ -516,7 +554,13 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       vat_deductible: form.vatDeductible === false ? 0 : 1,
       date:         form.date,
       method:       form.method || "계좌이체",
-      status:       editTxn?.status || (kind === "income" ? "입금완료" : "지급완료"),
+      /* ⚠ 어음은 **완료가 아니다.** 돈이 아직 안 오갔으므로 예정으로 둔다 —
+           계좌 잔액은 '입금완료'/'지급완료'만 세므로 이 거래는 잔액을 안 건드린다.
+           비용·수익은 거래가 있으니 그대로 잡힌다(어음으로 사도 비용은 발생한다).
+           만기에 어음 화면에서 결제하면 이 거래가 완료로 바뀐다. */
+      status:       form.method === "어음"
+                      ? (kind === "income" ? "입금 예정" : "지급 예정")
+                      : (editTxn?.status || (kind === "income" ? "입금완료" : "지급완료")),
       // 업종중립 선택 입력 — 조선=호선번호, 천막=설치현장, 선반=작업지시번호, SW=프로젝트코드
       project_no:   form.project_no || "",
       site:         form.site || "",
@@ -539,6 +583,25 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     if (res.ok) {
       // 폼에서 올린 증빙(여러 개)을 거래에 연결
       const txnId = editTxn ? editTxn.id : res.id
+
+      /* 어음이면 대장에도 올린다 — origin_txn_id 로 이 거래를 기억해 둔다.
+         ⚠ 만기 결제 때 서버가 **새 거래를 만들지 않고 이 거래를 완료로 바꾼다**
+           (routes/notes.js settle). 안 이어 두면 같은 돈이 두 번 잡힌다.
+         ⚠ 수정(editTxn)일 때는 만들지 않는다 — 이미 어음이 붙어 있고,
+           또 만들면 한 거래에 어음이 둘이 된다. */
+      if (!editTxn && form.method === '어음' && txnId) {
+        const made = await api.addNote({
+          kind: kind === 'income' ? 'receivable' : 'payable',
+          note_no: form.noteNo || '', vendor_id: vendorObj?.id || null,
+          amount, issued_on: form.date, due_on: form.noteDueOn,
+          origin_txn_id: txnId, memo: form.memo || '',
+        })
+        if (!made.ok) {
+          /* 거래는 이미 저장됐다. 어음만 실패했으니 지우지 않고 알린다 —
+             지우면 사용자가 적은 것이 통째로 사라진다. 어음은 어음 화면에서 마저 등록하면 된다. */
+          toast.push(`거래는 저장했는데 어음 대장에 못 올렸어요: ${made.error || ''} 재무관리 › 어음에서 등록해주세요.`, { tone: 'warn' })
+        }
+      }
       if (txnId && (form.docs || []).length) {
         for (const d of form.docs) await api.addTransactionDoc(txnId, { url: d.url, name: d.name, doc_type: '기타', size: d.size || 0 })
       }
@@ -847,12 +910,17 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
             {kind === "expense" ? (
               <FormField label="결제수단" required>
                 <div className="row gap-6" style={{ flexWrap: "wrap" }}>
-                  {["계좌이체", "법인카드", "개인카드", "현금"].map(v => (
+                  {/* 어음 — **돈이 아직 안 나갔는데 비용은 잡히는** 유일한 결제수단이다.
+                      고르면 계좌 대신 어음번호·만기일을 묻고, 저장할 때 이 거래는
+                      '지급 예정'으로 남는다(계좌 잔액은 status='지급완료'만 세므로 안 움직인다).
+                      만기가 오면 재무관리 › 어음에서 결제 → 그때 이 거래가 완료로 바뀐다. */}
+                  {["계좌이체", "법인카드", "개인카드", "현금", "어음"].map(v => (
                     <button key={v} type="button" className={`chip ${form.method === v ? "active" : ""}`}
                       onClick={() => setForm({ ...form, method: v, account: keepAccount(form.account, v, accounts) })}>
                       {v === "계좌이체" && <Icon.Bank size={12}/>}
                       {(v === "법인카드" || v === "개인카드") && <Icon.Card size={12}/>}
                       {v === "현금" && <Icon.Wallet size={12}/>}
+                      {v === "어음" && <Icon.Receipt size={12}/>}
                       {v}
                     </button>
                   ))}
@@ -925,21 +993,40 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                   )
                 )}
                 {form.method === "계좌이체" && counterpartyPicker("어디로 보냈나요?")}
+                {form.method === "어음" && <NoteFields form={form} setForm={setForm} kind="expense"/>}
               </FormField>
             ) : (
-              <FormField label="입금 계좌" required>
-                <div className="row gap-6" style={{ flexWrap: "wrap" }}>
-                  {bankAccounts.map(a => (
-                    <button key={a.id} type="button" className={`chip ${form.account === a.name ? "active" : ""}`}
-                      onClick={() => setForm({...form, account: a.name})}>
-                      <Icon.Bank size={12}/>{a.name}
-                      {isMainAccount(a, company, use) && (
-                        <span className="text-muted2" style={{ fontSize: 10, marginLeft: 3 }}>{MAIN_BADGE}</span>
-                      )}
-                    </button>
-                  ))}
+              <FormField label={form.method === "어음" ? "어떻게 받았나요?" : "입금 계좌"} required>
+                {/* 받을어음 — 통장으로 받은 게 아니라 **어음을 받은** 경우.
+                    지출 쪽 결제수단과 같은 규칙이다(위 주석). */}
+                <div className="row gap-6" style={{ flexWrap: "wrap", marginBottom: 8 }}>
+                  <button type="button" className={`chip ${form.method !== "어음" ? "active" : ""}`}
+                    onClick={() => setForm({ ...form, method: "계좌이체" })}>
+                    <Icon.Bank size={12}/>통장으로
+                  </button>
+                  <button type="button" className={`chip ${form.method === "어음" ? "active" : ""}`}
+                    onClick={() => setForm({ ...form, method: "어음", account: "" })}>
+                    <Icon.Receipt size={12}/>어음으로
+                  </button>
                 </div>
-                {counterpartyPicker("어디서 들어왔나요?")}
+                {form.method === "어음" ? (
+                  <NoteFields form={form} setForm={setForm} kind="income"/>
+                ) : (
+                  <>
+                    <div className="row gap-6" style={{ flexWrap: "wrap" }}>
+                      {bankAccounts.map(a => (
+                        <button key={a.id} type="button" className={`chip ${form.account === a.name ? "active" : ""}`}
+                          onClick={() => setForm({...form, account: a.name})}>
+                          <Icon.Bank size={12}/>{a.name}
+                          {isMainAccount(a, company, use) && (
+                            <span className="text-muted2" style={{ fontSize: 10, marginLeft: 3 }}>{MAIN_BADGE}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                    {counterpartyPicker("어디서 들어왔나요?")}
+                  </>
+                )}
               </FormField>
             )}
 
