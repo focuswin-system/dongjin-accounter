@@ -69,7 +69,7 @@ const NoteFields = ({ form, setForm, kind }) => {
         <div>
           {kind === 'income' ? '받은' : '준'} 어음은 <b>만기가 와야 현금</b>이 됩니다.
           이 거래는 <b>{kind === 'income' ? '입금' : '지급'} 예정</b>으로 남고 통장 잔액은 그대로예요.
-          만기 처리는 <b>재무관리 › 어음</b>에서 합니다.
+          만기 처리는 <b>어음</b> 화면에서 합니다.
         </div>
       </div>
       <div className="row gap-12">
