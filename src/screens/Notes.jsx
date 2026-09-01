@@ -43,7 +43,22 @@ const dueLabel = (n, today) => {
   return { text: `D-${d}`, tone: '' }
 }
 
-export const NotesScreen = () => {
+/**
+ * 어음 화면.
+ *
+ * 같은 화면이 세 군데에 걸린다 — 재무관리의 '어음'(양쪽을 한눈에)과,
+ * 입출금의 '받을어음'·'지급어음'(한쪽만).
+ *
+ * 나눠 다는 이유: 어음은 자금 운용이기도 하지만, 경리에게는 **입금·출금 업무**다.
+ * 받을어음을 확인하러 재무관리로 건너가야 하면 정기 입금 → 수시 입금 → 받을어음으로
+ * 이어지는 흐름이 끊긴다. 재무관리를 아예 안 쓰는 회사도 어음은 쓴다.
+ *
+ * ⚠ 화면을 복제하지 않는다. kind 를 고정해 여는 것뿐이다 —
+ *   복제하면 만기·부도 규칙이 두 벌이 되어 언젠가 어긋난다(routes/notes.js 와 같은 이유).
+ *
+ * @param fixedKind 'receivable' | 'payable' — 주면 그쪽만 열고 탭을 감춘다.
+ */
+export const NotesScreen = ({ fixedKind = null }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [rows, setRows] = useState(null)
@@ -52,7 +67,12 @@ export const NotesScreen = () => {
   /* 기본 탭 — **있는 쪽**을 먼저 연다.
      받을어음을 기본으로 두었더니, 지급어음만 있는 회사가 들어오면 빈 화면을 보고
      "등록했는데 없네?" 하게 됐다(실제로 검증 중에 그랬다). 회사마다 한쪽만 쓰는 일이 흔하다. */
-  const [tab, setTab] = useState(null)
+  /* ⚠ fixedKind 를 useState 초기값으로 두면 안 된다 — 초기값은 첫 렌더에만 쓰여서,
+     받을어음 → 지급어음으로 **메뉴를 갈아타도** 같은 컴포넌트가 살아남아 화면이 안 바뀐다
+     (브레드크럼만 바뀌고 내용은 그대로였다). 고정 쪽은 state 를 거치지 않고 파생시킨다. */
+  const [tabState, setTabState] = useState(null)
+  const tab = fixedKind || tabState
+  const setTab = setTabState
   const [formOpen, setFormOpen] = useState(false)
   const [edit, setEdit] = useState(null)
   const [settleTarget, setSettleTarget] = useState(null)
@@ -67,11 +87,11 @@ export const NotesScreen = () => {
 
   /* 처음 한 번만 — 사용자가 탭을 고른 뒤에는 그 선택을 존중한다(빈 쪽을 봐도 튕기지 않게). */
   useEffect(() => {
-    if (tab !== null || rows === null) return
+    if (fixedKind || tabState !== null || rows === null) return
     const held = rows.filter(n => n.status === 'held')
     const hasRecv = held.some(n => n.kind === 'receivable')
     setTab(hasRecv || !held.length ? 'receivable' : 'payable')
-  }, [rows, tab])
+  }, [rows, tabState, fixedKind])
 
   const list = useMemo(() => (rows || []).filter(n => n.kind === (tab || 'receivable')), [rows, tab])
   const held = list.filter(n => n.status === 'held')
@@ -90,21 +110,23 @@ export const NotesScreen = () => {
 
   return (
     <div className="fade-up">
-      <PageHeader title="어음"
-        sub="어음은 만기가 와야 현금이 됩니다. 여기 있는 돈은 아직 통장에 없어요."
+      <PageHeader title={fixedKind ? K.label : '어음'}
+        sub={`어음은 만기가 와야 현금이 됩니다. ${isRecv ? '여기 있는 돈은 아직 통장에 없어요.' : '여기 있는 돈은 아직 통장에서 안 나갔어요.'}`}
         actions={
           <button className="btn primary" onClick={() => { setEdit(null); setFormOpen(true) }}>
             <Icon.Plus size={14}/> 어음 등록
           </button>
         }/>
 
-      <div className="row gap-8" style={{ marginBottom: 16 }}>
+      {/* 한쪽만 여는 화면에서는 탭을 감춘다 — 메뉴로 이미 고른 것을 또 고르게 하지 않는다.
+          ⚠ hidden 속성은 .row 의 display:flex 에 져서 그대로 보인다. 아예 안 그린다. */}
+      {!fixedKind && <div className="row gap-8" style={{ marginBottom: 16 }}>
         {Object.entries(KIND).map(([k, v]) => (
           <button key={k} className={`chip ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>
             {v.label} {(rows || []).filter(n => n.kind === k && n.status === 'held').length || ''}
           </button>
         ))}
-      </div>
+      </div>}
 
       {/* 급한 순서대로 — 지난 것 · 곧 올 것 · 전체 · 부도 */}
       <KpiRow cols={4}>

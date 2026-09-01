@@ -38,11 +38,16 @@ const RESOURCES = [
   { id: 'recurring_invoice',       label: '정기청구',       group: '일반회계 · 판매·수주(매출)' },
   // 대금 청구서와 같은 화면(메뉴 통합). 이 자원은 #ar 라우트 진입을 가른다.
   { id: 'ar',                      label: '미수금(청구서)', group: '일반회계 · 판매·수주(매출)' },
+  /* 받을어음·지급어음 — 재무관리의 'finance_note'와 **같은 화면**을 한쪽만 열어 준다.
+     자원을 따로 세우는 이유: 재무관리를 안 쓰는 회사도 어음은 쓴다. 하나로 묶으면
+     어음을 켜려고 재무관리 전체를 열어야 한다. */
+  { id: 'note_receivable',         label: '받을어음',       group: '일반회계 · 판매·수주(매출)' },
 
   { id: 'contract_purchase',       label: '발주',          group: '일반회계 · 구매·발주(매입)' },
   { id: 'billing_received',        label: '대금 청구서(매입)', group: '일반회계 · 구매·발주(매입)' },
   { id: 'recurring_expense',       label: '정기지출',       group: '일반회계 · 구매·발주(매입)' },
   { id: 'ap',                      label: '미지급금(청구서)', group: '일반회계 · 구매·발주(매입)' },
+  { id: 'note_payable',            label: '지급어음',       group: '일반회계 · 구매·발주(매입)' },
 
   { id: 'misc_pl',                 label: '일반 경비',      group: '일반회계 · 경비' },
   { id: 'card_payment',            label: '카드 대금 지급',  group: '일반회계 · 경비' },

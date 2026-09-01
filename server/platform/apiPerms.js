@@ -54,7 +54,9 @@ const API_RESOURCES = {
   '/api/tax':                 ['tax_vat', 'tax_etc'],
   '/api/finance':             ['finance_loan', 'finance_investment', 'finance_dash'],
   '/api/savings':             ['finance_savings'],
-  '/api/notes':               ['finance_note'],
+  /* 어음은 잎이 셋이다(재무관리의 '어음' + 입출금의 받을어음·지급어음).
+     ⚠ 하나라도 빠뜨리면 그 메뉴만 켠 회사에서 화면은 보이는데 API 가 403 이 된다. */
+  '/api/notes':               ['finance_note', 'note_receivable', 'note_payable'],
   '/api/lendings':            ['finance_lending'],
   /* 보고서 카탈로그. 양식 하나하나를 자원으로 만들지 않는다 —
      권한 매트릭스가 양식 수만큼 부풀어 회사 마스터가 감당하지 못한다.

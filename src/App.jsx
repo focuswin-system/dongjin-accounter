@@ -639,6 +639,9 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
       case "transfer":       return <TransferScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
       case "finance_lending": return <LendingScreen/>;
       case "finance_note":    return <NotesScreen/>;
+      // 같은 화면을 한쪽만 열어 준다 — 입출금 쪽 메뉴(받을어음·지급어음)
+      case "note_receivable": return <NotesScreen fixedKind="receivable"/>;
+      case "note_payable":    return <NotesScreen fixedKind="payable"/>;
       case "misc_pl":
       case "misc_income":     return <MiscPLScreen initialTab={route === "misc_income" ? "income" : "expense"}
                                        refreshTrigger={txnVersion}

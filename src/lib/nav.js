@@ -75,6 +75,12 @@ export const NAV_TREE = [
       { label: "입금", items: [
         { id: "recurring_invoice", label: "정기 입금", icon: Icon.Clock },
         { id: "billing_issued",    label: "수시 입금", icon: Icon.Receipt },
+        /* 받을어음 — 재무관리의 '어음'과 **같은 화면**이다(kind 만 고정해서 연다).
+         * 어음은 자금 운용이면서 동시에 경리의 입금 업무라, 확인하러 재무관리로
+         * 건너가야 하면 정기 입금 → 수시 입금 → 받을어음 흐름이 끊긴다.
+         * 재무관리를 아예 안 쓰는 회사도 어음은 쓴다.
+         * ⚠ 화면을 복제하지 않는다 — 만기·부도 규칙이 두 벌이 되면 언젠가 어긋난다. */
+        { id: "note_receivable",   label: "받을어음", icon: Icon.Sign },
       ]},
       { label: "출금", items: [
         { id: "recurring_expense", label: "정기 출금", icon: Icon.Clock },
@@ -93,6 +99,8 @@ export const NAV_TREE = [
          *   개별 카드 사용분은 이미 거래로 매입세액에 잡혀 있다(routes/tax.js).
          *   카드 대금을 청구서로 또 등록하면 **매입세액이 두 번 잡힌다.** */
         { id: "card_payment",      label: "카드 대금", icon: Icon.Card },
+        // 지급어음 — 카드 대금 옆에 둔다. 둘 다 '나중에 나갈 돈'을 미리 관리하는 일이다.
+        { id: "note_payable",      label: "지급어음", icon: Icon.Sign },
         { id: "transfer",          label: "내부 이체", icon: Icon.Bank },
         { id: "hr",                label: "급여·임금", icon: Icon.Building },
       ]},
@@ -181,7 +189,8 @@ export const NAV_TREE = [
         /* 어음 — 받을어음(채권)과 지급어음(채무)을 **한 화면에** 담는다.
            방향만 반대고 만기·부도 규칙이 같아, 갈라 두면 같은 규칙을 두 벌 유지하게 된다.
            ⚠ 어음은 '아직 현금이 아닌 것'이라 예적금·대여금과 성격이 같다(묶여 있는 돈). */
-        { id: "finance_note", label: "어음", icon: Icon.Receipt },
+        // 어음 아이콘은 세 잎이 같다 — 같은 화면이라는 표시다(수시 입금·출금의 Receipt 와도 갈린다)
+        { id: "finance_note", label: "어음", icon: Icon.Sign },
       ]},
       { label: "현황", items: [
         { id: "finance_dash", label: "재무 현황", icon: Icon.Chart },
@@ -556,6 +565,8 @@ export const LEAF_TAGS = {
   finance_investment:'투자 출자 증자 유치 가수금',
   finance_savings:  '예금 적금 정기예금 만기 예치 보증금 임차보증금 관리비보증금',
   finance_note:     '어음 받을어음 지급어음 약속어음 만기 부도 진성어음',
+  note_receivable:  '받을어음 어음 약속어음 만기 부도 수취 어음내역',
+  note_payable:     '지급어음 어음 약속어음 만기 부도 발행 어음내역',
   finance_lending:  '대여금 빌려준돈 채권 채권명부 대여 회수 원리금 이자수익',
   finance_dash:     '재무 부채 자본 차입현황',
   // 경영
