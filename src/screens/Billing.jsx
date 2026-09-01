@@ -108,6 +108,10 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
   const { confirm } = useConfirm()
   // 취소 중인 매칭 id — 같은 줄을 두 번 눌러 이미 지운 매칭을 또 지우려 하는 걸 막는다
   const [unmatching, setUnmatching] = useState(null)
+  /* ⚠ 남은 금액을 **값으로** 채운다. 예전엔 placeholder 로만 보여줬는데,
+     placeholder 는 회색 글씨라 "이미 적혀 있는 것"처럼 보이면서 실제로는 빈 칸이다 —
+     그대로 누르면 "금액을 입력하세요"가 뜬다. 대부분은 남은 금액 전액을 처리하므로
+     채워 두고, 일부만 받았을 때 고치게 한다(고치는 쪽이 드물다). */
   const [matchAmt, setMatchAmt] = useState("")
   const [matchDate, setMatchDate] = useState(localDate())
   const [innerTab, setInnerTab] = useState("match")
@@ -119,6 +123,10 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
      부르는 건 낭비다. */
   const [stmtOpen, setStmtOpen] = useState(false)
   const [stmtParties, setStmtParties] = useState(null)
+  /* 청구서가 바뀌거나 일부 정산으로 잔액이 줄면 다시 채운다.
+     한 번만 채우면, 100만원 중 30만원을 넣은 뒤 남은 70만원을 처리할 때 옛 값이 남는다. */
+  useEffect(() => { setMatchAmt(invoice?.remainAmount ? String(invoice.remainAmount) : '') },
+    [invoice?.id, invoice?.remainAmount])
   useEffect(() => {
     if (!stmtOpen || stmtParties) return
     let alive = true
@@ -399,12 +407,11 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                     ) : (
                       <>
                         <label className="label">{isIssued ? "입금" : "지급"} 금액</label>
-                        <MoneyInput placeholder={fmtNum(invoice.remainAmount)} value={matchAmt}
-                          onChange={raw => setMatchAmt(raw)}/>
-                        <div className="row gap-6" style={{ flexWrap: "wrap" }}>
-                          {[invoice.remainAmount, Math.round(invoice.remainAmount / 2)].filter(Boolean).map(a => (
-                            <button key={a} className="chip" onClick={() => setMatchAmt(String(a))}>{fmtNum(a)}원</button>
-                          ))}
+                        <MoneyInput value={matchAmt} onChange={raw => setMatchAmt(raw)}/>
+                        {/* 추천 금액 칩(전액·절반)은 걷어냈다 — 칸이 이미 전액으로 채워져 있으니
+                            '전액' 칩은 아무 일도 안 하고, '절반'은 근거 없는 숫자였다. */}
+                        <div className="text-xs text-muted2">
+                          남은 금액 전액이에요. 일부만 {isIssued ? '받았으면' : '냈으면'} 고쳐주세요.
                         </div>
                         <label className="label" style={{ marginTop: 4 }}>
                           {isIssued ? "입금일" : "지급일"} <span style={{ color: "var(--neg-ink)" }}>*</span>
@@ -647,7 +654,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
 // ── 청구서 발행 Drawer ────────────────────────────────────────────
 const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSave, editInvoice }) => {
   const [form, setForm] = useState({
-    kind: defaultKind, vendor: "", contract: "", supplyAmount: "", vatAmount: "", dueAt: "", memo: "",
+    kind: defaultKind, vendor: "", contract: "", supplyAmount: "", vatAmount: "", issuedAt: "", dueAt: "", memo: "",
     accountId: "",
   })
   const [vendors, setVendors] = useState([])
@@ -723,6 +730,9 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
         vatAmount: editInvoice.vatAmount != null ? String(editInvoice.vatAmount) : "",
         // 과세유형: 저장값이 있으면 그대로, 없으면(옛 청구서) 세액 유무로 추론
         taxType: editInvoice.taxType || (Number(editInvoice.vatAmount) > 0 ? "과세" : "면세"),
+        // 발행일 — 여태 폼에 칸이 없어 **고칠 방법이 아예 없었다**(신규는 오늘로 박히고,
+        // 수정은 기존 값을 그대로 되돌려 보냈다). 정기 회차에서 나온 청구서도 마찬가지였다.
+        issuedAt: editInvoice.issuedAt || localDate(),
         dueAt: editInvoice.dueAt || "",
         memo: editInvoice.memoRaw || "",
         accountId: editInvoice.accountId || accounts[0]?.id || "",
@@ -730,7 +740,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
         category: editInvoice.category || "",
       })
     } else {
-      setForm({ kind: defaultKind, vendor: "", contract: "", supplyAmount: "", vatAmount: "", taxType: "과세", dueAt: "", memo: "", accountId: accounts[0]?.id || "", category: "" })
+      setForm({ kind: defaultKind, vendor: "", contract: "", supplyAmount: "", vatAmount: "", taxType: "과세", issuedAt: localDate(), dueAt: "", memo: "", accountId: accounts[0]?.id || "", category: "" })
     }
   }, [open, defaultKind, editInvoice])
 
@@ -812,7 +822,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
       contract_id: contractObj?.id || null,
       supply_amount: supply, vat_amount: vat, total_amount: total,
       tax_type: form.taxType || "과세",
-      issued_at: editInvoice ? editInvoice.issuedAt : localDate(),
+      issued_at: form.issuedAt || localDate(),
       due_at: form.dueAt || null,
       status: editInvoice ? editInvoice.status : (form.kind === "issued" ? "입금 예정" : "지급 예정"),
       account_id: form.accountId || null, memo: form.memo || "",
@@ -879,8 +889,26 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
               onChange={v => f("vendor", v)}
               options={vendorOptions}
               placeholder={form.kind === "issued" ? "발주처 선택" : "협력사·기관 선택"}
-              onAddNew={q => { f("vendor", q); toast.push(`"${q}" 거래처를 직접 입력했어요`) }}
-              addNewLabel="직접 입력"/>
+              /* ⚠ 예전엔 **이름만 담고 끝났다.** 그런데 이 칸의 값은 id 다(위 vendorOptions
+                 주석) — 저장할 때 byIdOrUniqueName 이 그 이름을 못 찾아 vendor_id 가 null 로
+                 들어갔다. 사용자는 "Enter 로 등록했다"고 믿는데 청구서에는 거래처가 없다.
+                 바로 아래 '주문' 칸이 같은 함정을 이미 적어 뒀는데 거래처만 그대로였다.
+                 → 실제로 등록하고 **id** 를 담는다(거래 등록 폼 Form.jsx 와 같은 방식). */
+              onAddNew={async (q) => {
+                const nm = String(q || '').trim()
+                if (!nm) return
+                /* 구분(gubu)을 지금 고른 방향에서 정한다 — 안 넣으면 목록 필터
+                   (issued=B / received=A·E)에 안 걸려, 등록은 됐는데 다시 안 보인다. */
+                const gubu = form.kind === "issued" ? "B" : "A"
+                const res = await api.addVendor({ name: nm, gubu })
+                if (!res.ok) return toast.push(res.error || "거래처를 등록하지 못했어요", { tone: 'warn' })
+                const updated = await api.getVendors()   // 682행 초기 로드와 같은 조건으로 (미사용 거래처가 섞이지 않게)
+                setVendors(updated)
+                const made = res.id || updated.find(v => (v.name || '').trim() === nm)?.id || ''
+                f("vendor", made)
+                toast.push(`"${nm}" 거래처를 등록했어요`)
+              }}
+              addNewLabel="거래처로 등록"/>
           </div>
           <div>
             <label className="label">주문 <span className="text-muted2">(선택)</span></label>
@@ -971,9 +999,22 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
               </div>
             </div>
           </div>
-          <div>
-            <label className="label">지급 기한</label>
-            <DateInput className="input" value={form.dueAt} onChange={e => f("dueAt", e.target.value)}/>
+          <div className="row gap-12">
+            <div style={{ flex: 1 }}>
+              {/* ⚠ 미래 날짜를 막지 않는다. 다음 달 자를 미리 끊어 두는 일이 실제로 있고
+                  (정기 화면의 '앞서 발행함' 구획이 그것이다), 지난 날짜도 막지 않는다 —
+                  바로 처리하지 못하고 며칠 뒤에 적는 일이 흔하다.
+                  마감된 달은 서버가 막는다(closedPeriodError). */}
+              <label className="label">
+                발행일 <span style={{ color: "var(--neg-ink)" }}>*</span>
+                <span className="text-muted2 fw-600" style={{ marginLeft: 6, fontWeight: 400 }}>· 청구서를 끊은 날</span>
+              </label>
+              <DateInput className="input num" value={form.issuedAt} onChange={e => f("issuedAt", e.target.value)}/>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="label">지급 기한</label>
+              <DateInput className="input" value={form.dueAt} onChange={e => f("dueAt", e.target.value)}/>
+            </div>
           </div>
           <div>
             <label className="label">{form.kind === "issued" ? "수금 계좌" : "지급 계좌"}</label>

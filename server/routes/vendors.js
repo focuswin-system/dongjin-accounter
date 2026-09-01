@@ -106,10 +106,18 @@ async function replaceVendorList(db, table, vendorId, rows, cols) {
 const ACCOUNT_COLS = ['bank_name', 'account_no', 'holder']
 const CONTACT_COLS = ['name', 'role', 'phone', 'mobile', 'email']
 
+/* 이름 없는 거래처는 만들 수 없다.
+ * ⚠ 여태 서버가 아무 검사도 안 해서 빈 이름이 그대로 INSERT 됐다 — 운영(dongjin 테넌트)에
+ *   2026-08-13 에 14초 사이로 3건이 그렇게 생겼다. 이름 없는 거래처는 목록에서 빈 줄로 보이고,
+ *   거기 붙은 돈은 "누구와 오간 돈"인지 영영 알 수 없다.
+ *   화면이 막더라도 서버가 최종 판정이다 — 임포트·다른 화면·API 직접 호출이 다 여기를 지난다. */
+const nameError = (name) => (String(name ?? '').trim() ? null : '거래처 이름을 입력해주세요')
+
 router.post('/', async (req, res, next) => {
   try {
     const { name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email, biz_type, biz_item, pay_account,
             bank_name, bank_account, account_holder } = req.body
+    { const e = nameError(name); if (e) return res.status(400).json({ error: e }) }
     const id = randomUUID()
     await req.db.execute(
       'INSERT INTO vendors (id, name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email, biz_type, biz_item, pay_account, bank_name, bank_account, account_holder) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -125,6 +133,8 @@ router.put('/:id', async (req, res, next) => {
   try {
     const { name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email, biz_type, biz_item, pay_account,
             bank_name, bank_account, account_holder } = req.body
+    // 수정으로도 이름을 비울 수 없다 — 만들 때만 막으면 지우는 길이 남는다
+    { const e = nameError(name); if (e) return res.status(400).json({ error: e }) }
     const [result] = await req.db.execute(
       'UPDATE vendors SET name=?, biz_no=?, ceo=?, address=?, phone=?, gubu=?, type=?, service_type=?, contact=?, fax=?, email=?, biz_type=?, biz_item=?, pay_account=?, bank_name=?, bank_account=?, account_holder=? WHERE id=?',
       [name, biz_no||'', ceo||'', address||'', phone||'', gubu||'A', type||'', service_type||'', contact||'', fax||'', email||'', biz_type||'', biz_item||'', pay_account||'', bank_name||'', bank_account||'', account_holder||'', req.params.id]
