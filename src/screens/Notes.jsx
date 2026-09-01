@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useTableFilter } from '../lib/tableFilter'
 import { TableToolbar } from '../lib/components/TableToolbar'
+import { SummaryCard, SummaryRow } from '../lib/components/Kpi'
 import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, DateInput,
          localToday, Loading, StatusBadge, vendorLabel } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead } from '../lib/components/Drawer'
-import { Kpi, KpiRow } from '../lib/components/Kpi'
 
 /**
  * 어음 — 받을어음 · 지급어음.
@@ -93,18 +93,21 @@ export const NoteKpis = ({ rows, kind, today = localToday() }) => {
   /* 부도 카드는 **있을 때만** 세운다. 늘 '0건'으로 서 있으면 그 자리를 안 보게 되고
      (이 화면들이 '발행예정' 카드에 대해 이미 같은 판단을 했다), 카드가 셋이 되어
      품은 화면의 청구서 카드 줄과 폭도 맞는다. */
-  const cols = 부도.length ? 4 : 3
   return (
-    <KpiRow cols={cols}>
-      <Kpi label="만기 지남" value={sum(지남)} badge={`${지남.length}건`}
-           hint={지남.length ? (isRecv ? '안 들어왔어요 · 부도 신호일 수 있어요' : '아직 안 냈어요') : undefined}
-           tone={지남.length ? 'neg' : undefined}/>
-      <Kpi label="7일 안에 만기" value={sum(임박)} badge={`${임박.length}건`}
-           tone={임박.length ? 'warn' : undefined}/>
-      <Kpi label={`보유 중 ${K.money}`} value={sum(held)} badge={`${held.length}건`}
-           hint={(지남.length || 임박.length) ? '만기 지남·임박도 포함한 전체예요' : undefined}/>
-      {부도.length > 0 && <Kpi label="부도" value={sum(부도)} badge={`${부도.length}건`} tone="neg"/>}
-    </KpiRow>
+    <SummaryRow cols={부도.length ? 4 : 3}>
+      <SummaryCard label="만기 지남" amount={sum(지남)} count={지남.length}
+        accent={지남.length ? 'neg' : 'blue'} warn={!!지남.length}
+        hint={지남.length ? (isRecv ? '안 들어왔어요 · 부도 신호일 수 있어요' : '아직 안 냈어요') : '지난 어음이 없어요'}/>
+      <SummaryCard label="7일 안에 만기" amount={sum(임박)} count={임박.length}
+        accent={임박.length ? 'warn' : 'blue'}
+        hint={임박.length ? '곧 현금이 돼요' : '임박한 어음이 없어요'}/>
+      <SummaryCard label={`보유 중 ${K.money}`} amount={sum(held)} count={held.length} accent="blue"
+        hint="만기 지남·임박도 포함한 전체예요"/>
+      {부도.length > 0 && (
+        <SummaryCard label="부도" amount={sum(부도)} count={부도.length} accent="neg" warn
+          hint="안 들어와서 되돌린 어음이에요"/>
+      )}
+    </SummaryRow>
   )
 }
 

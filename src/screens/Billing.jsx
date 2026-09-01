@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { NotesScreen, NoteKpis, NoteStatusChips } from './Notes'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday, Loading, DateInput, periodToRange, Popover, PopItem, vendorLabel } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
+import { SummaryCard, SummaryRow } from '../lib/components/Kpi'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { TableToolbar } from '../lib/components/TableToolbar'
@@ -1164,29 +1165,6 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   )
 }
 
-// ── 요약 카드 ────────────────────────────────────────────────────
-/* onClick 이 있으면 누를 수 있는 카드가 된다.
- * 미수금·미지급금 메뉴를 이 화면으로 합치면서, 그 목록을 보려면 '발행됨' 탭 → '미정산' 칩으로
- * 두 번을 눌러야 했다(상태 칩은 목록 탭에서만 나온다). 예전 메뉴는 한 번이었다.
- * 사용자가 쫓는 숫자가 이미 이 카드에 떠 있으므로, 그 카드를 누르면 바로 그 목록으로 간다. */
-const SummaryCard = ({ label, amount, count, accent = "blue", warn, onClick, hint }) => {
-  const Tag = onClick ? 'button' : 'div'
-  return (
-    <Tag className="card" onClick={onClick} type={onClick ? 'button' : undefined}
-      style={{ padding: "16px 18px", textAlign: 'left', width: '100%',
-               cursor: onClick ? 'pointer' : undefined }}>
-      <div className="row" style={{ marginBottom: 6 }}>
-        <span className="text-sm text-muted fw-600">{label}</span>
-        <span className={`badge ${accent} ml-auto`}>{count}건</span>
-      </div>
-      <div className="num fw-700" style={{ fontSize: 22, color: warn ? "var(--neg-ink)" : undefined }}>
-        {fmtNum(amount)}
-      </div>
-      {onClick && <div className="text-xs text-muted2" style={{ marginTop: 4 }}>{hint || '눌러서 보기'}</div>}
-    </Tag>
-  )
-}
-
 // ── 청구서 테이블 ────────────────────────────────────────────────
 const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", paidLabel = "정산", select }) => (
   <div className="card" style={{ overflow: "hidden" }}>
@@ -1997,8 +1975,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           청구서 카드와 나란히 두지 않는 이유는 그대로다: 축이 달라 숫자가 섞인다. */}
       {view === "note" ? (
         <NoteKpis rows={notes} kind={isIssued ? 'receivable' : 'payable'}/>
-      ) : <div className="grid grid-3-to-1"
-           style={{ gridTemplateColumns: `repeat(${collect || !pending.length ? 2 : 3}, 1fr)`, gap: 16, marginBottom: 24 }}>
+      ) : <SummaryRow cols={collect || !pending.length ? 2 : 3}>
         {isIssued ? (
           <>
             {!collect && pending.length > 0 && <SummaryCard label="발행예정" amount={pendingTotal} count={pending.length} accent="brand"
@@ -2022,7 +1999,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
               onClick={() => showAllOf("기한 지남")} hint="전체 기간에서 기한 지난 것만 보기"/>
           </>
         )}
-      </div>}
+      </SummaryRow>}
 
       {/* 기간·거래처는 **탭보다 위**, 그리고 **어느 탭에서나 같은 자리**에 둔다.
           아래에 있으면 "지금 고른 탭에만 걸리는 것"처럼 읽히는데, 위에 두면 순서가 곧 뜻이 된다 —

@@ -45,3 +45,42 @@ export const KpiRow = ({ cols = 4, gap = 12, children, style }) => (
     {children}
   </div>
 )
+
+/**
+ * 요약 카드 — 건수 뱃지 + 금액 + 보조 문구. onClick 이 있으면 누를 수 있는 카드가 된다.
+ *
+ * ⚠ 원래 Billing.jsx 안에만 있었다. 그래서 어음 카드는 Kpi 로 그렸는데, 두 카드가
+ *   높이도 아래 여백도 달라 **같은 화면에서 탭만 옮겼는데 줄이 어긋나 보였다.**
+ *   (이 파일이 위에서 경계하는 '정의가 여러 벌'과 같은 사고다.)
+ *   금액·건수를 세는 카드는 이제 여기 하나만 쓴다.
+ *
+ * props: label · amount · count · accent(뱃지 색) · warn(금액을 빨강으로) · onClick · hint
+ */
+export const SummaryCard = ({ label, amount, count, accent = "blue", warn, onClick, hint }) => {
+  const Tag = onClick ? 'button' : 'div'
+  return (
+    <Tag className="card" onClick={onClick} type={onClick ? 'button' : undefined}
+      style={{ padding: "16px 18px", textAlign: 'left', width: '100%',
+               cursor: onClick ? 'pointer' : undefined }}>
+      <div className="row" style={{ marginBottom: 6 }}>
+        <span className="text-sm text-muted fw-600">{label}</span>
+        <span className={`badge ${accent} ml-auto`}>{count}건</span>
+      </div>
+      <div className="num fw-700" style={{ fontSize: 22, color: warn ? "var(--neg-ink)" : undefined }}>
+        {fmtNum(amount)}
+      </div>
+      {(onClick || hint) && <div className="text-xs text-muted2" style={{ marginTop: 4 }}>{hint || '눌러서 보기'}</div>}
+    </Tag>
+  )
+}
+
+/**
+ * 요약 카드 줄 — 카드 개수에 맞춰 칸을 나눈다.
+ * ⚠ 아래 여백(24)까지 여기 둔다. 화면마다 손으로 주면 어긋난다(실제로 어긋났다).
+ */
+export const SummaryRow = ({ cols, children }) => (
+  <div className="grid grid-3-to-1"
+       style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 16, marginBottom: 24 }}>
+    {children}
+  </div>
+)
