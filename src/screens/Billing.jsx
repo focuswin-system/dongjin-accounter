@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { NotesScreen } from './Notes'
+import { NotesScreen, NoteKpis, NoteStatusChips } from './Notes'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday, Loading, DateInput, periodToRange, Popover, PopItem, vendorLabel } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
@@ -1412,9 +1412,21 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
    * 안 쓰기로 한 기능으로 매번 안내하고, 정작 하려던 청구서 끊기는 한 번 더 눌러야 했다.
    * 이제 청구할 게 실제로 있을 때만 그쪽으로 연다(아래 effect). */
   const [view, setView] = useState("list")   // issued: pending|list|plain|note
-  /* 어음 탭의 건수. 다른 탭이 모두 건수를 달고 있어서, 이 탭만 없으면 비어 보인다.
-     목록 자체는 NotesScreen 이 스스로 불러온다 — 여기서는 숫자만 센다. */
-  const [noteCount, setNoteCount] = useState(0)
+  /* 어음. 탭 건수와 **카드 줄**이 같은 자료를 본다 — 목록은 NotesScreen 이 스스로
+     불러오고, 읽을 때마다 onLoaded 로 여기에도 넘겨 준다. */
+  const [notes, setNotes] = useState([])
+  const [noteAddSignal, setNoteAddSignal] = useState(0)
+  const [noteStatus, setNoteStatus] = useState('held')
+  /* 어음 탭의 기간·검색. **여기서** 만들어 툴바를 청구서와 같은 자리에 세운다 —
+     NotesScreen 이 자기 안에서 그리면 툴바가 탭 줄 아래로 내려가 줄이 통째로 밀린다.
+     ⚠ 기간은 만기일에 건다(어음에서 찾는 날짜는 발행일이 아니라 만기일이다). */
+  const noteF = useTableFilter({
+    date: { field: 'dueOn', initial: { from: '', to: '' } },
+    search: { fields: ['noteNo', 'vendorName', 'invoiceNo', 'memo'], placeholder: '어음번호·거래처·청구번호 검색' },
+    filters: [{ key: 'vendorName', label: '거래처', field: 'vendorName', inline: true,
+      options: [...new Set(notes.map(n => n.vendorName).filter(Boolean))].sort() }],
+  })
+  const noteCount = countHeldNotes(notes, kind === "issued")
   const [invoices, setInvoices] = useState([])
   /* 청구서 없이 오간 건 — 서류 선택에서 '계산서 아님'을 고른 것들이 여기로 온다.
      이 화면 이름이 '수시 입금/수시 출금'인데 청구서만 보여주면, 여기서 등록한 건의 절반이
@@ -1455,7 +1467,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
      여기만 비면 "어음은 없나 보다" 하고 안 누른다. 만기 지난 어음이 있으면 오히려
      눈에 띄어야 한다. 탭을 열면 NotesScreen 이 onLoaded 로 다시 알려준다. */
   useEffect(() => {
-    api.getNotes().then(rows => setNoteCount(countHeldNotes(rows, isIssued))).catch(() => {})
+    api.getNotes().then(rows => setNotes(rows || [])).catch(() => {})
   }, [isIssued])
 
   /* 갚아야 할 카드 — 넘어가는 줄에 쓸 숫자만 센다. 셈법은 카드 대금 지급 화면과 같다:
@@ -1973,10 +1985,13 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       {/* 비어 있는 구획은 그리지 않는다 — 이 코드베이스가 정기 회차에서 이미 정한 규칙이다
           ("'놓친 회차 없음' 빈 카드를 매번 보여주면 진짜 경고가 묻힌다"). 여기도 같다:
           계약을 안 쓰는 회사에 '발행예정 0건' 카드가 늘 서 있으면 그 자리를 안 보게 된다. */}
-      {/* ⚠ 어음 탭에서는 감춘다 — 이 카드들은 **청구서 축** 요약이라, 어음 KPI 와 나란히 서면
-          숫자 여덟 개가 한 화면에 쌓여 어느 것이 지금 보는 것의 숫자인지 흐려진다.
-          ⚠ hidden 속성은 display:grid 에 져서 그대로 보인다 — 조건부로 안 그린다. */}
-      {view !== "note" && <div className="grid grid-3-to-1"
+      {/* ⚠ 어음 탭에서는 **이 자리에 어음 카드를 세운다.** 감추기만 하면 탭 하나 눌렀다고
+          카드 줄이 통째로 사라졌다가 아래에서 다른 게 나타나 화면이 재구성된 것처럼 보인다
+          (이 파일이 툴바에 대해 경계하는 것과 같은 일이다 — 자리는 하나여야 한다).
+          청구서 카드와 나란히 두지 않는 이유는 그대로다: 축이 달라 숫자가 섞인다. */}
+      {view === "note" ? (
+        <NoteKpis rows={notes} kind={isIssued ? 'receivable' : 'payable'}/>
+      ) : <div className="grid grid-3-to-1"
            style={{ gridTemplateColumns: `repeat(${collect || !pending.length ? 2 : 3}, 1fr)`, gap: 16, marginBottom: 24 }}>
         {isIssued ? (
           <>
@@ -2011,9 +2026,14 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
             필터 상태를 따로 들기 때문이다). 그런데 사용자에게는 같은 화면에서 탭 하나 눌렀다고
             기간·거래처 칸이 위아래로 뛰는 것으로 보인다 — 찾던 칸이 사라진 것과 같다.
             들고 있는 필터는 탭마다 달라도, **서 있는 자리는 하나여야 한다.** */}
-      {/* ⚠ 어음 탭에는 이 툴바를 안 세운다 — 기간·거래처·기준 축은 **청구서에 거는 것**이라
-          어음 목록에는 아무것도 안 걸린다. 있으면 눌러도 안 바뀌는 칸이 된다. */}
-      {view === "note" ? null : !collect && view === "pending" ? (
+      {/* ⚠ 어음 탭의 툴바·필터는 **NotesScreen 이 자기 것을 세운다**(만기일 기준 기간,
+          어음번호 검색, 상태 칩). 청구서 툴바를 여기 그대로 세우면 눌러도 안 바뀌는 칸이 되고,
+          그렇다고 비우면 탭 줄이 위로 뛴다 — 뼈대(카드 → 기간·검색 → 필터 → 표)는 같게 두고
+          거는 대상만 바꾼 것이다. */}
+      {view === "note" ? (
+        <TableToolbar {...noteF.toolbarProps} periodPicker
+          right={<span className="text-xs text-muted2">만기일 기준</span>}/>
+      ) : !collect && view === "pending" ? (
         <TableToolbar {...pendF.toolbarProps} periodPicker
           right={<span className="text-xs text-muted2">
             예정일 기준 · {pendingFiltered.length}건 {fmtNum(pendingFiltered.reduce((s, p) => s + pendingGross(p), 0))}원
@@ -2086,6 +2106,17 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
             <button role="tab" aria-selected={view === "note"}
               className={`seg-btn ${view === "note" ? "active" : ""}`} onClick={() => setView("note")}>
               어음{noteCount > 0 && <span className="seg-count">{noteCount}</span>}
+            </button>
+          </div>
+        )}
+        {/* 어음 탭의 상태 칩 — 청구서 상태 필터가 서는 **그 자리**다(탭 줄 오른쪽). */}
+        {view === "note" && (
+          <div className="row gap-6" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+            <NoteStatusChips rows={notes.filter(n => n.kind === (isIssued ? 'receivable' : 'payable'))}
+                             value={noteStatus} onChange={setNoteStatus}/>
+            <button className="btn primary sm" style={{ marginLeft: 4 }}
+                    onClick={() => setNoteAddSignal(n => n + 1)}>
+              <Icon.Plus size={14}/> 어음 등록
             </button>
           </div>
         )}
@@ -2209,7 +2240,8 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           복제하면 만기·부도 규칙이 두 벌이 되어 언젠가 어긋난다. */}
       {!collect && view === "note" && (
         <NotesScreen embedded fixedKind={isIssued ? 'receivable' : 'payable'}
-                     onLoaded={rows => setNoteCount(countHeldNotes(rows, isIssued))}/>
+                     onLoaded={rows => setNotes(rows || [])} openAddSignal={noteAddSignal}
+                     filter={noteF} statusFilter={noteStatus} onStatusChange={setNoteStatus}/>
       )}
 
       {/* 청구서 없이 오간 건 — **탭으로 세운다.**

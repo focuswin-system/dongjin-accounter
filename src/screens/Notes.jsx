@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useTableFilter } from '../lib/tableFilter'
+import { TableToolbar } from '../lib/components/TableToolbar'
 import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, DateInput,
          localToday, Loading, StatusBadge, vendorLabel } from '../lib/ui'
 import { api } from '../lib/api'
@@ -20,6 +22,33 @@ const KIND = {
   receivable: { label: '받을어음', desc: '거래처가 우리에게 준 어음', tone: 'pos',  money: '들어올 돈' },
   payable:    { label: '지급어음', desc: '우리가 거래처에 준 어음', tone: 'warn', money: '나갈 돈' },
 }
+/** 어음 화면의 한 줄 설명. 재무관리의 어음 화면과 수시 입금·출금의 어음 탭이 같이 쓴다. */
+export const NOTE_INTRO = (isRecv) =>
+  `어음은 만기가 와야 현금이 됩니다. ${isRecv ? '여기 있는 돈은 아직 통장에 없어요.' : '여기 있는 돈은 아직 통장에서 안 나갔어요.'}`
+
+/* 상태 칩 — '보유 중'이 기본이다. 할 일이 있는 것만 먼저 세운다. */
+const STATUS_CHIPS = [
+  { id: 'held',       label: '보유 중' },
+  { id: 'settled',    label: '결제됨' },
+  { id: 'dishonored', label: '부도' },
+  { id: 'all',        label: '전체' },
+]
+
+/** 상태 칩 한 벌. 어음 화면과 수시 입금·출금의 어음 탭이 **같은 모양**으로 쓴다. */
+export const NoteStatusChips = ({ rows, value, onChange }) => (
+  <>
+    {STATUS_CHIPS.map(c => {
+      const n = c.id === 'all' ? (rows || []).length : (rows || []).filter(r => r.status === c.id).length
+      return (
+        <button key={c.id} type="button" className={`chip ${value === c.id ? 'active' : ''}`}
+          onClick={() => onChange(c.id)}>
+          {c.label}{n > 0 && <span className="text-muted2" style={{ marginLeft: 4 }}>{n}</span>}
+        </button>
+      )
+    })}
+  </>
+)
+
 const STATUS = {
   held:       { label: '보유 중', tone: 'brand' },
   settled:    { label: '결제됨',  tone: 'pos' },
@@ -44,6 +73,42 @@ const dueLabel = (n, today) => {
 }
 
 /**
+ * 어음 KPI — 목록과 떼어 둔다.
+ *
+ * 수시 입금·출금 안에서는 이 카드가 **그 화면의 카드 줄 자리**에 서야 한다.
+ * 탭 아래에 따로 그리면 탭 하나 눌렀다고 카드 줄이 사라졌다 다른 게 나타나면서
+ * 화면이 통째로 재구성된 것처럼 보인다(Billing.jsx 가 툴바에 대해 경계하는 것과 같다).
+ *
+ * ⚠ 계산은 여기 한 곳에만 둔다 — 품은 화면이 자기 힘으로 다시 세면 규칙이 두 벌이 된다.
+ */
+export const NoteKpis = ({ rows, kind, today = localToday() }) => {
+  const list = (rows || []).filter(n => n.kind === kind)
+  const held = list.filter(n => n.status === 'held')
+  const 지남 = held.filter(n => { const d = daysTo(n.dueOn, today); return d != null && d < 0 })
+  const 임박 = held.filter(n => { const d = daysTo(n.dueOn, today); return d != null && d >= 0 && d <= 7 })
+  const 부도 = list.filter(n => n.status === 'dishonored')
+  const sum = (a) => a.reduce((s, n) => s + (n.amount || 0), 0)
+  const isRecv = kind === 'receivable'
+  const K = KIND[kind] || KIND.receivable
+  /* 부도 카드는 **있을 때만** 세운다. 늘 '0건'으로 서 있으면 그 자리를 안 보게 되고
+     (이 화면들이 '발행예정' 카드에 대해 이미 같은 판단을 했다), 카드가 셋이 되어
+     품은 화면의 청구서 카드 줄과 폭도 맞는다. */
+  const cols = 부도.length ? 4 : 3
+  return (
+    <KpiRow cols={cols}>
+      <Kpi label="만기 지남" value={sum(지남)} badge={`${지남.length}건`}
+           hint={지남.length ? (isRecv ? '안 들어왔어요 · 부도 신호일 수 있어요' : '아직 안 냈어요') : undefined}
+           tone={지남.length ? 'neg' : undefined}/>
+      <Kpi label="7일 안에 만기" value={sum(임박)} badge={`${임박.length}건`}
+           tone={임박.length ? 'warn' : undefined}/>
+      <Kpi label={`보유 중 ${K.money}`} value={sum(held)} badge={`${held.length}건`}
+           hint={(지남.length || 임박.length) ? '만기 지남·임박도 포함한 전체예요' : undefined}/>
+      {부도.length > 0 && <Kpi label="부도" value={sum(부도)} badge={`${부도.length}건`} tone="neg"/>}
+    </KpiRow>
+  )
+}
+
+/**
  * 어음 화면.
  *
  * 두 자리에 선다 — 재무관리의 '어음'(양쪽을 한눈에)과,
@@ -60,8 +125,16 @@ const dueLabel = (n, today) => {
  * @param fixedKind 'receivable' | 'payable' — 주면 그쪽만 열고 탭을 감춘다.
  * @param embedded  다른 화면의 탭 안에 들어갈 때. 제목·설명을 끈다(그 화면이 이미 머리를 갖고 있다).
  * @param onLoaded  목록을 읽을 때마다 부른다 — 품은 화면이 탭 건수를 자기 힘으로 다시 세지 않게.
+ * @param openAddSignal 숫자가 바뀌면 등록 폼을 연다.
+ * @param filter    품은 화면이 만든 useTableFilter 결과. 주면 툴바를 **그 화면 자리에** 두고
+ *        여기서는 안 그린다 — 뼈대(카드 → 기간·검색 → 필터 → 표)를 어느 탭에서나 같게 하려면
+ *        툴바가 탭 줄 위에 서야 한다. 여기서 그리면 탭 아래로 내려가 줄이 통째로 밀린다.
+ * @param statusFilter/onStatusChange 상태 칩도 같은 이유로 밖에서 받을 수 있다.
  */
-export const NotesScreen = ({ fixedKind = null, embedded = false, onLoaded = null }) => {
+export const NotesScreen = ({
+  fixedKind = null, embedded = false, onLoaded = null, openAddSignal = 0,
+  filter = null, statusFilter = null, onStatusChange = null,
+}) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [rows, setRows] = useState(null)
@@ -92,6 +165,9 @@ export const NotesScreen = ({ fixedKind = null, embedded = false, onLoaded = nul
     api.getAccounts().then(a => setAccounts(a.filter(x => x.kind === 'bank')))
   }, [])
 
+  // 품은 화면의 '어음 등록' 버튼 — 숫자가 오를 때만 연다(첫 렌더의 0 은 무시)
+  useEffect(() => { if (openAddSignal > 0) { setEdit(null); setFormOpen(true) } }, [openAddSignal])
+
   /* 처음 한 번만 — 사용자가 탭을 고른 뒤에는 그 선택을 존중한다(빈 쪽을 봐도 튕기지 않게). */
   useEffect(() => {
     if (fixedKind || tabState !== null || rows === null) return
@@ -100,15 +176,31 @@ export const NotesScreen = ({ fixedKind = null, embedded = false, onLoaded = nul
     setTab(hasRecv || !held.length ? 'receivable' : 'payable')
   }, [rows, tabState, fixedKind])
 
-  const list = useMemo(() => (rows || []).filter(n => n.kind === (tab || 'receivable')), [rows, tab])
-  const held = list.filter(n => n.status === 'held')
-  /* ⚠ **지난 것과 임박한 것을 가른다.**
-     한 칸에 묶었더니 "7일 안에 만기"에 이미 지난 어음이 섞여, 가장 급한 것이 묻혔다.
-     만기가 지났는데 안 들어온 어음은 **부도 신호**다 — 임박한 것과 급한 정도가 다르다. */
-  const 지남 = held.filter(n => { const d = daysTo(n.dueOn, today); return d != null && d < 0 })
-  const 임박 = held.filter(n => { const d = daysTo(n.dueOn, today); return d != null && d >= 0 && d <= 7 })
-  const 부도 = list.filter(n => n.status === 'dishonored')
-  const sum = (a) => a.reduce((s, n) => s + (n.amount || 0), 0)
+  /* 청구서 탭과 **같은 뼈대**를 쓴다: 카드 → 기간·검색 → 필터 → 표.
+     어음만 필터가 없으면 탭을 옮길 때마다 화면 구조가 바뀐 것처럼 보이고,
+     어음이 수십 건 쌓이면 찾을 길도 없다.
+     ⚠ 기간은 **만기일**에 건다 — 어음에서 사람이 찾는 날짜는 발행일이 아니라 만기일이다.
+       기본은 전체다(청구서와 다르다): 어음은 건수가 적고, 만기가 몇 달 뒤라 이번 달로
+       열면 정작 보유 중인 어음이 하나도 안 보인다. */
+  const ownFlt = useTableFilter({
+    date: { field: 'dueOn', initial: { from: '', to: '' } },
+    search: { fields: ['noteNo', 'vendorName', 'invoiceNo', 'memo'], placeholder: '어음번호·거래처·청구번호 검색' },
+    filters: [{ key: 'vendorName', label: '거래처', field: 'vendorName', inline: true,
+      options: [...new Set((rows || []).map(n => n.vendorName).filter(Boolean))].sort() }],
+  })
+  const flt = filter || ownFlt
+  /* 상태 칩 — 기본은 '보유 중'이다. 할 일이 있는 것만 먼저 보여준다(결제·부도는 끝난 일).
+     '전체'로 열면 몇 년치 결제된 어음이 쌓여 정작 만기 임박한 것이 묻힌다. */
+  const [ownStatusF, setOwnStatusF] = useState('held')
+  const statusF = statusFilter ?? ownStatusF
+  const setStatusF = onStatusChange || setOwnStatusF
+  const kindRows = useMemo(() => (rows || []).filter(n => n.kind === (tab || 'receivable')), [rows, tab])
+  const list = useMemo(() => {
+    const byStatus = statusF === 'all' ? kindRows : kindRows.filter(n => n.status === statusF)
+    return flt.apply(byStatus)
+  }, [kindRows, statusF, flt.apply])
+  /* ⚠ 지남·임박·부도 계산은 **NoteKpis 안에만** 둔다(위). 여기서 또 세면 규칙이 두 벌이 되어
+     같은 어음이 화면 위아래에서 다른 건수로 나온다. */
 
   if (rows === null || tab === null) return <Loading/>
 
@@ -117,21 +209,12 @@ export const NotesScreen = ({ fixedKind = null, embedded = false, onLoaded = nul
 
   return (
     <div className="fade-up">
-      {/* 탭 안에서는 머리를 끈다 — 그 화면이 이미 제목·기간 필터를 갖고 있어서,
-          제목이 둘이면 어느 쪽이 지금 보고 있는 화면인지 흐려진다.
-          대신 '어음 등록' 버튼은 남긴다(탭 안에서도 등록은 해야 한다). */}
-      {embedded ? (
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <span className="text-sm text-muted">
-            어음은 만기가 와야 현금이 됩니다. {isRecv ? '여기 있는 돈은 아직 통장에 없어요.' : '여기 있는 돈은 아직 통장에서 안 나갔어요.'}
-          </span>
-          <button className="btn primary sm" onClick={() => { setEdit(null); setFormOpen(true) }}>
-            <Icon.Plus size={14}/> 어음 등록
-          </button>
-        </div>
-      ) : (
+      {/* 탭 안에서는 머리를 통째로 끈다 — 제목·설명·등록 버튼은 품은 화면이 **자기 자리에**
+          그린다(NOTE_INTRO 를 같이 쓴다). 여기서 또 그리면 제목이 둘이 되고, 무엇보다
+          탭 아래에 줄이 하나 더 생겨 탭을 누를 때마다 표가 아래위로 뛴다. */}
+      {embedded ? null : (
         <PageHeader title="어음"
-          sub={`어음은 만기가 와야 현금이 됩니다. ${isRecv ? '여기 있는 돈은 아직 통장에 없어요.' : '여기 있는 돈은 아직 통장에서 안 나갔어요.'}`}
+          sub={NOTE_INTRO(isRecv)}
           actions={
             <button className="btn primary" onClick={() => { setEdit(null); setFormOpen(true) }}>
               <Icon.Plus size={14}/> 어음 등록
@@ -149,25 +232,29 @@ export const NotesScreen = ({ fixedKind = null, embedded = false, onLoaded = nul
         ))}
       </div>}
 
-      {/* 급한 순서대로 — 지난 것 · 곧 올 것 · 전체 · 부도 */}
-      <KpiRow cols={4}>
-        <Kpi label="만기 지남" value={sum(지남)} badge={`${지남.length}건`}
-             hint={지남.length ? (isRecv ? '안 들어왔어요 · 부도 신호일 수 있어요' : '아직 안 냈어요') : undefined}
-             tone={지남.length ? 'neg' : undefined}/>
-        <Kpi label="7일 안에 만기" value={sum(임박)} badge={`${임박.length}건`}
-             tone={임박.length ? 'warn' : undefined}/>
-        {/* 이 칸은 보유 중 **전체**다 — 앞 두 칸(지남·임박)을 품고 있다.
-            나란히 놓으면 더해서 읽기 쉬워서, 총계라는 걸 한 줄로 밝혀 둔다. */}
-        <Kpi label={`보유 중 ${K.money}`} value={sum(held)} badge={`${held.length}건`}
-             hint={(지남.length || 임박.length) ? '만기 지남·임박도 포함한 전체예요' : undefined}/>
-        <Kpi label="부도" value={sum(부도)} badge={`${부도.length}건`}
-             tone={부도.length ? 'neg' : undefined}/>
-      </KpiRow>
+      {/* 급한 순서대로 — 지난 것 · 곧 올 것 · 전체 · (있으면) 부도.
+          탭 안에서는 안 그린다 — 품은 화면이 **자기 카드 줄 자리**에 세운다. */}
+      {!embedded && <NoteKpis rows={rows} kind={tab}/>}
 
-      <div className="card" style={{ overflow: 'hidden', marginTop: 16 }}>
+      {/* 카드 → 기간·검색 → 필터 → 표. 청구서 화면과 **같은 뼈대**다 —
+          탭을 옮겼다고 뼈대가 달라지면 같은 화면이 아닌 것처럼 읽힌다.
+          주입받았으면(탭 안) 이 둘은 품은 화면이 자기 자리에 그린다. */}
+      {!filter && (
+        <>
+          <TableToolbar {...flt.toolbarProps} periodPicker
+            right={<span className="text-xs text-muted2">만기일 기준</span>}/>
+          <div className="row gap-8" style={{ marginTop: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+            <NoteStatusChips rows={kindRows} value={statusF} onChange={setStatusF}/>
+          </div>
+        </>
+      )}
+
+      <div className="card" style={{ overflow: 'hidden' }}>
         {list.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center' }} className="text-sm text-muted">
-            {K.label}이 없어요. {K.desc}을 여기에 적어두면 만기일이 자금 계획에 잡힙니다.
+            {flt.isFiltered || statusF !== 'all'
+              ? '조건에 맞는 어음이 없어요. 기간이나 상태를 넓혀 보세요.'
+              : `${K.label}이 없어요. ${K.desc}을 여기에 적어두면 만기일이 자금 계획에 잡힙니다.`}
           </div>
         ) : (
           <table className="table">
