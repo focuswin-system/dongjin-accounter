@@ -376,7 +376,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
         </div>
 
         <div className="drawer-body col gap-form">
-          {/* 탭: 입금/지급 매칭 */}
+          {/* 탭: 입금/지급 처리 */}
           {innerTab === "match" && (
             <>
               <div className="card" style={{ padding: "12px 16px", background: "var(--surface-2)" }}>
@@ -1859,8 +1859,14 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
 
   const handleMatch = async (invoiceId, amount, date, txnId, extra) => {
     const r = await api.matchInvoice(invoiceId, { txnId: txnId || null, amount, date, ...extra })
-    // 결과를 보지 않고 성공 문구를 띄우면, 계좌 누락 같은 400을 사용자가 모른 채 넘어간다
-    toast.push(r.ok ? "매칭 처리가 완료됐어요" : (r.error || "매칭 처리에 실패했어요"), r.ok ? undefined : { tone: "warn" })
+    /* 결과를 보지 않고 성공 문구를 띄우면, 계좌 누락 같은 400을 사용자가 모른 채 넘어간다.
+       ⚠ 한 일을 그대로 말한다 — 두 경로가 다르다. 새로 등록한 것인지(거래가 생김)
+         이미 있던 거래를 이은 것인지(거래는 그대로)에 따라 다음에 할 일이 달라진다. */
+    const 돈 = isIssued ? "입금" : "지급"
+    toast.push(
+      r.ok ? (txnId ? `이 청구서에 ${돈}을 연결했어요` : `${돈}을 등록하고 이 청구서에 연결했어요`)
+           : (r.error || "연결하지 못했어요"),
+      r.ok ? undefined : { tone: "warn" })
     load()
   }
 

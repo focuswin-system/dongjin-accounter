@@ -1018,7 +1018,7 @@ export const EvidenceScreen = ({ onAttach }) => {
           <div className="drop" style={{ marginBottom: 16 }}>
             <Icon.Upload size={22}/>
             <div className="fw-600" style={{ marginTop: 8 }}>파일을 끌어다 놓아서 한 번에 업로드</div>
-            <div className="text-xs text-muted2" style={{ marginTop: 4 }}>여러 개를 한 번에 올리면 자동으로 거래내역과 매칭해드려요.</div>
+            <div className="text-xs text-muted2" style={{ marginTop: 4 }}>여러 개를 한 번에 올리면 자동으로 거래내역에 연결해드려요.</div>
           </div>
           <div className="grid" style={{ gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
             {rows.map((r, i) => {
