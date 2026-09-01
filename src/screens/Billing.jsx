@@ -143,7 +143,7 @@ const NoteSettle = ({ invoice, isIssued, toast, onDone }) => {
         <Icon.Help size={15}/>
         <div>
           이 청구서는 <b>정산된 것으로 처리</b>되지만 <b>통장 잔액은 그대로</b>예요.
-          어음은 만기가 와야 현금이 되니까요. 만기 입금은 <b>재무관리 › 어음</b>에서 처리합니다.
+          어음은 만기가 와야 현금이 되니까요. 만기 입금은 <b>어음</b> 탭에서 처리합니다.
         </div>
       </div>
       <div className="row gap-12">

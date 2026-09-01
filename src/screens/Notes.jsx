@@ -492,7 +492,9 @@ const NoteForm = ({ open, note, defaultKind, vendors, onClose, onSaved }) => {
       <div className="drawer-foot">
         <button className="btn" onClick={onClose}>취소</button>
         <button className="btn primary ml-auto" disabled={busy} onClick={save}>
-          <Icon.Check size={14}/> {busy ? '저장 중…' : '저장'}
+          {/* 새로 적는 것과 고치는 것은 말이 다르다 — 제목이 '어음 등록'인데 버튼만 '저장'이면
+              무엇을 하는 화면인지 두 번 읽게 된다(다른 화면들도 신규는 '등록'이다). */}
+          <Icon.Check size={14}/> {busy ? (note ? '저장 중…' : '등록 중…') : (note ? '저장' : '등록')}
         </button>
       </div>
     </Drawer>

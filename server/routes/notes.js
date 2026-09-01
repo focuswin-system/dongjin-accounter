@@ -126,15 +126,19 @@ router.get('/:id', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const { kind, note_no, vendor_id, amount, issued_on, due_on, invoice_id, origin_txn_id, memo } = req.body
+    /* ⚠ 검증 순서는 **폼에 놓인 순서**를 따른다(어느 쪽 어음 → 거래처 → 금액 → 발행일 → 만기일).
+         예전엔 날짜부터 봤더니, 빈 폼으로 저장하면 거래처·금액을 놔두고 "만기일을
+         선택해주세요"부터 떴다. 사람은 위에서부터 채우는데 지적은 아래에서 올라와,
+         고치고 저장할 때마다 새 항목이 하나씩 튀어나온다. */
     if (!KINDS.has(kind)) return res.status(400).json({ error: '받을어음인지 지급어음인지 골라주세요' })
+    if (!vendor_id) return res.status(400).json({ error: '거래처를 선택해주세요' })
+    const amt = intOf(amount)
+    { const e = amountError(amt); if (e) return res.status(400).json({ error: e }) }
     { const e = dateError(issued_on, '발행일'); if (e) return res.status(400).json({ error: e }) }
     { const e = dateError(due_on, '만기일');   if (e) return res.status(400).json({ error: e }) }
     /* ⚠ 만기가 발행보다 앞설 수 없다. 거꾸로 넣으면 자금 예측에서 이미 지난 날로
          잡혀 "받을 돈"이 조용히 사라진다. */
     if (due_on < issued_on) return res.status(400).json({ error: '만기일이 발행일보다 빠를 수 없어요' })
-    const amt = intOf(amount)
-    { const e = amountError(amt); if (e) return res.status(400).json({ error: e }) }
-    if (!vendor_id) return res.status(400).json({ error: '거래처를 선택해주세요' })
     /* 발행일이 마감된 달이면 막는다 — 어음 수취는 그 달의 채권을 바꾸는 일이다 */
     { const e = await closedPeriodError(req.db, issued_on); if (e) return res.status(409).json({ error: e }) }
     /* 같은 어음을 두 번 적는 것을 막는다. 통과시키면 없는 채권이 하나 더 생긴다. */
