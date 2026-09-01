@@ -5,7 +5,7 @@ const xlsx = require('xlsx')
 const { futureDateError, kstToday, kstDate } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
 const { dateOrNull } = require('../lib/period')
-const { normalizeStatus, ledgerError, defaultSettledStatus, amountError } = require('../lib/ledger')
+const { normalizeStatus, ledgerError, defaultSettledStatus, amountError, isSettled } = require('../lib/ledger')
 const { restoreLastGenerated, dueDatesToGenerate, LOOKAHEAD_DAYS } = require('../lib/recurrence')
 const { removeUploadedFile } = require('../lib/uploads')
 const { vatFields, recurFromSupply, effRecurVatMode } = require('../lib/vat')
@@ -669,6 +669,26 @@ router.patch('/:id/status', async (req, res, next) => {
     const acct = cur.account_id || account_id || null
     const err = ledgerError({ kind: cur.kind, account_id: acct, status, method: cur.method })
     if (err) return res.status(400).json({ error: err })
+
+    /* 어음으로 적은 거래는 **여기서 완료로 바꿀 수 없다.**
+     *
+     * 거래내역의 '이체 실행'은 상태만 완료로 바꾼다. 그러면 통장에서는 돈이 나갔는데
+     * 어음은 여전히 '보유 중'으로 남아, 만기에 또 결제하면 **같은 돈이 두 번 나간다.**
+     * 어음의 만기는 어음 화면이 맡는다 — 거기서 결제하면 이 거래가 완료로 바뀐다
+     * (routes/notes.js settle 이 origin_txn_id 로 이 거래를 찾아 고친다).
+     *
+     * ⚠ method 만 보고 막지 않는다. 어음 대장에서 이미 떨어져 나온 거래(어음을 지웠거나
+     *   부도 처리한 뒤 남은 것)는 평범한 예정 거래이므로 여기서 처리할 수 있어야 한다. */
+    if (isSettled(status)) {
+      const [[note]] = await req.db.execute(
+        "SELECT n.id, n.note_no FROM transactions t JOIN notes n ON n.origin_txn_id = t.id AND n.status = 'held' WHERE t.id = ?",
+        [req.params.id])
+      if (note) {
+        return res.status(409).json({
+          error: `어음으로 적은 거래예요. 재무관리 › 어음에서 ${note.note_no ? note.note_no + ' ' : ''}만기 결제를 하면 이 거래도 함께 완료됩니다.`,
+        })
+      }
+    }
     const [result] = await req.db.execute(
       'UPDATE transactions SET status = ?, account_id = ? WHERE id = ?', [status, acct, req.params.id])
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })

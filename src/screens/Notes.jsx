@@ -49,7 +49,10 @@ export const NotesScreen = () => {
   const [rows, setRows] = useState(null)
   const [vendors, setVendors] = useState([])
   const [accounts, setAccounts] = useState([])
-  const [tab, setTab] = useState('receivable')
+  /* 기본 탭 — **있는 쪽**을 먼저 연다.
+     받을어음을 기본으로 두었더니, 지급어음만 있는 회사가 들어오면 빈 화면을 보고
+     "등록했는데 없네?" 하게 됐다(실제로 검증 중에 그랬다). 회사마다 한쪽만 쓰는 일이 흔하다. */
+  const [tab, setTab] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
   const [edit, setEdit] = useState(null)
   const [settleTarget, setSettleTarget] = useState(null)
@@ -62,14 +65,22 @@ export const NotesScreen = () => {
     api.getAccounts().then(a => setAccounts(a.filter(x => x.kind === 'bank')))
   }, [])
 
-  const list = useMemo(() => (rows || []).filter(n => n.kind === tab), [rows, tab])
+  /* 처음 한 번만 — 사용자가 탭을 고른 뒤에는 그 선택을 존중한다(빈 쪽을 봐도 튕기지 않게). */
+  useEffect(() => {
+    if (tab !== null || rows === null) return
+    const held = rows.filter(n => n.status === 'held')
+    const hasRecv = held.some(n => n.kind === 'receivable')
+    setTab(hasRecv || !held.length ? 'receivable' : 'payable')
+  }, [rows, tab])
+
+  const list = useMemo(() => (rows || []).filter(n => n.kind === (tab || 'receivable')), [rows, tab])
   const held = list.filter(n => n.status === 'held')
   const 만기임박 = held.filter(n => { const d = daysTo(n.dueOn, today); return d != null && d <= 7 })
   const sum = (a) => a.reduce((s, n) => s + (n.amount || 0), 0)
 
-  if (rows === null) return <Loading/>
+  if (rows === null || tab === null) return <Loading/>
 
-  const K = KIND[tab]
+  const K = KIND[tab] || KIND.receivable
 
   return (
     <div className="fade-up">
