@@ -298,7 +298,7 @@ const ContractTermFields = ({ form, set }) => {
               <label className="label" style={{ marginBottom: 8 }}>갱신 시 연장 기간</label>
               <div style={{ position: 'relative' }}>
                 <input className="input num" style={{ paddingRight: 44 }} value={form.term_months ?? ''}
-                  onChange={e => set(f => ({ ...f, term_months: numOnly(e.target.value) }))} placeholder="12"/>
+                  onChange={e => set(f => ({ ...f, term_months: numOnly(e.target.value) }))} placeholder="예: 12"/>
                 <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>개월</span>
               </div>
             </div>
@@ -306,7 +306,7 @@ const ContractTermFields = ({ form, set }) => {
               <label className="label" style={{ marginBottom: 8 }}>갱신 통보 기한</label>
               <div style={{ position: 'relative' }}>
                 <input className="input num" style={{ paddingRight: 60 }} value={form.notice_days ?? ''}
-                  onChange={e => set(f => ({ ...f, notice_days: numOnly(e.target.value) }))} placeholder="60"/>
+                  onChange={e => set(f => ({ ...f, notice_days: numOnly(e.target.value) }))} placeholder="예: 60"/>
                 <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>일 전</span>
               </div>
             </div>

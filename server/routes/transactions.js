@@ -586,6 +586,27 @@ router.put('/:id', async (req, res, next) => {
     if (lerr) return res.status(400).json({ error: lerr })
     // 등록과 같은 가드·기본값을 수정에도 건다 — 한쪽만 막으면 수정으로 우회된다
     { const fe = fundAccountError(account_code); if (fe) return res.status(400).json({ error: fe }) }
+
+    /* 청구서에 연결된 거래는 **여기서 거래처를 바꿀 수 없다.**
+     *
+     * 청구서와 그 정산 거래는 한 건이고, 상대는 청구서가 정한다(routes/invoices.js PUT 이
+     * 청구서를 고치면 이 거래까지 따라오게 한다). 여기서 거래처만 바꾸면 그 방향이 뒤집혀
+     * 둘이 갈리고, 거래처별 집계에서 같은 돈이 두 상대에게 나뉘어 잡힌다.
+     *
+     * ⚠ 막기만 하고 끝내지 않는다 — **어디서 고치면 되는지**를 함께 알려준다.
+     *   길을 안 알려주고 막으면 사용자는 방법이 없다고 생각한다. */
+    if (vendor_id !== undefined) {
+      const [[link]] = await req.db.execute(
+        `SELECT i.invoice_no, i.vendor_id
+           FROM transactions t JOIN invoices i ON t.invoice_id = i.id
+          WHERE t.id = ?`, [req.params.id])
+      if (link && String(link.vendor_id || '') !== String(vendor_id || '')) {
+        return res.status(409).json({
+          error: `이 거래는 청구서 ${link.invoice_no} 정산이라 거래처를 여기서 못 바꿔요. `
+               + `청구서에서 거래처를 고치면 이 거래도 함께 바뀝니다.`,
+        })
+      }
+    }
     const acctCode = await resolveAcctCode(req.db, account_code, category, cur.kind)
     const costId = cur.kind === 'expense' ? (cost_contract_id || null) : null
     const cp = await counterpartySnapshot(req.db, vendor_id, counterparty_account_id)

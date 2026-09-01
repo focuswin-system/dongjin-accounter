@@ -1223,7 +1223,7 @@ const VendorPanel = ({ embedded = false }) => {
         <div className="drawer-body col gap-form">
           <div>
             <label className="label" style={{ marginBottom: 8 }}>상호명 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-            <input className="input" value={form.name} onChange={e => f('name', e.target.value)} placeholder="(주)한화오션"/>
+            <input className="input" value={form.name} onChange={e => f('name', e.target.value)} placeholder="예: (주)한화오션"/>
           </div>
 
           <div style={{ height: 1, background: 'var(--line)' }}/>
@@ -1240,7 +1240,7 @@ const VendorPanel = ({ embedded = false }) => {
 
           <div>
             <label className="label" style={{ marginBottom: 8 }}>거래 유형</label>
-            <input className="input" value={form.type} onChange={e => f('type', e.target.value)} placeholder="발주처 / 외주가공 / 원자재"/>
+            <input className="input" value={form.type} onChange={e => f('type', e.target.value)} placeholder="예: 발주처 / 외주가공 / 원자재"/>
           </div>
 
           <div style={{ height: 1, background: 'var(--line)' }}/>
@@ -1248,11 +1248,11 @@ const VendorPanel = ({ embedded = false }) => {
           <div className="row gap-16" style={{ alignItems: 'flex-start' }}>
             <div style={{ flex: 1 }}>
               <label className="label" style={{ marginBottom: 8 }}>사업자번호</label>
-              <input className="input" value={form.biz_no} onChange={e => f('biz_no', e.target.value)} placeholder="000-00-00000"/>
+              <input className="input" value={form.biz_no} onChange={e => f('biz_no', e.target.value)} placeholder="예: 000-00-00000"/>
             </div>
             <div style={{ flex: 1 }}>
               <label className="label" style={{ marginBottom: 8 }}>대표자</label>
-              <input className="input" value={form.ceo} onChange={e => f('ceo', e.target.value)} placeholder="홍길동"/>
+              <input className="input" value={form.ceo} onChange={e => f('ceo', e.target.value)} placeholder="예: 홍길동"/>
             </div>
           </div>
 
@@ -1297,18 +1297,18 @@ const VendorPanel = ({ embedded = false }) => {
           <div className="row gap-16" style={{ alignItems: 'flex-start' }}>
             <div style={{ flex: 1 }}>
               <label className="label" style={{ marginBottom: 8 }}>담당자</label>
-              <input className="input" value={form.contact} onChange={e => f('contact', e.target.value)} placeholder="김담당"/>
+              <input className="input" value={form.contact} onChange={e => f('contact', e.target.value)} placeholder="예: 김담당"/>
             </div>
             <div style={{ flex: 1 }}>
               <label className="label" style={{ marginBottom: 8 }}>전화번호</label>
-              <input className="input" value={form.phone} onChange={e => f('phone', e.target.value)} placeholder="031-000-0000"/>
+              <input className="input" value={form.phone} onChange={e => f('phone', e.target.value)} placeholder="예: 031-000-0000"/>
             </div>
           </div>
 
           <div className="row gap-16" style={{ alignItems: 'flex-start' }}>
             <div style={{ flex: 1 }}>
               <label className="label" style={{ marginBottom: 8 }}>팩스번호</label>
-              <input className="input" value={form.fax} onChange={e => f('fax', e.target.value)} placeholder="031-000-0001"/>
+              <input className="input" value={form.fax} onChange={e => f('fax', e.target.value)} placeholder="예: 031-000-0001"/>
             </div>
             <div style={{ flex: 1 }}>
               <label className="label" style={{ marginBottom: 8 }}>이메일</label>
@@ -1878,10 +1878,10 @@ const CompanyPanel = ({ embedded = false }) => {
             <input className="input" value={form.name} onChange={e => f('name', e.target.value)} placeholder="도니도라 주식회사"/>
           </CoRow>
           <CoRow label="대표자">
-            <input className="input" value={form.ceo} onChange={e => f('ceo', e.target.value)} placeholder="홍길동"/>
+            <input className="input" value={form.ceo} onChange={e => f('ceo', e.target.value)} placeholder="예: 홍길동"/>
           </CoRow>
           <CoRow label="사업자등록번호">
-            <input className="input num" value={form.biz_no} onChange={e => f('biz_no', e.target.value)} placeholder="000-00-00000"/>
+            <input className="input num" value={form.biz_no} onChange={e => f('biz_no', e.target.value)} placeholder="예: 000-00-00000"/>
           </CoRow>
           {/* 업태·종목은 사업자등록증에 적힌 문구를 그대로 옮기는 칸이다. 자유 입력이라
               같은 뜻을 여러 표기로 쓰게 되므로(소프트웨어개발/소프트웨어 개발/SW개발)
@@ -1904,10 +1904,10 @@ const CompanyPanel = ({ embedded = false }) => {
             <input className="input" value={form.address} onChange={e => f('address', e.target.value)} placeholder="경기도 안산시 ..."/>
           </CoRow>
           <CoRow label="대표 전화">
-            <input className="input" value={form.phone} onChange={e => f('phone', e.target.value)} placeholder="031-000-0000"/>
+            <input className="input" value={form.phone} onChange={e => f('phone', e.target.value)} placeholder="예: 031-000-0000"/>
           </CoRow>
           <CoRow label="팩스">
-            <input className="input" value={form.fax} onChange={e => f('fax', e.target.value)} placeholder="031-000-0001"/>
+            <input className="input" value={form.fax} onChange={e => f('fax', e.target.value)} placeholder="예: 031-000-0001"/>
           </CoRow>
           <CoRow label="이메일">
             <input className="input" value={form.email} onChange={e => f('email', e.target.value)} placeholder="info@dongjin.co.kr"/>

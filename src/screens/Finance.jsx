@@ -108,7 +108,7 @@ const LoanFormDrawer = ({ open, editing, onClose, onSave, vendors, accounts }) =
         </div>
         <div className="row gap-12">
           <div style={{ flex: 1 }}><label className="label">금융기관·대여자</label>
-            <input className="input" value={form.lender} onChange={e => f('lender', e.target.value)} placeholder="기업은행"/>
+            <input className="input" value={form.lender} onChange={e => f('lender', e.target.value)} placeholder="예: 기업은행"/>
           </div>
           <div style={{ flex: 1 }}><label className="label">거래처 연결 <span className="text-muted2">· 선택</span></label>
             <Combobox value={form.vendor_id} onChange={v => f('vendor_id', v)} allowAdd={false}

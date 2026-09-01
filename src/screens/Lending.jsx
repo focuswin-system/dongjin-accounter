@@ -261,7 +261,7 @@ export const LendingScreen = () => {
             onClose={() => { setForm(null); setPreview(null) }}/>
           <div className="drawer-body col gap-form">
             <div><label className="label">대여 이름 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-              <input className="input" value={form.name} placeholder="예) 김대표 개인 대여"
+              <input className="input" value={form.name} placeholder="예: 김대표 개인 대여"
                 onChange={e => f('name', e.target.value)}/>
             </div>
             <div className="row gap-12">

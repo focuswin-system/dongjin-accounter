@@ -73,7 +73,7 @@ export const taxInvoiceImportAdapter = ({ ourBizNo = '', defaultKind = 'issued' 
           <div className="text-xs text-muted2">이 번호로 매출·매입을 가릅니다</div>
         </div>
         <input className="input" style={{ width: 160 }} value={opts.ourBizNo || ''}
-          placeholder="000-00-00000"
+          placeholder="예: 000-00-00000"
           onChange={e => patch({ ourBizNo: e.target.value })}/>
         {/* 이 값의 출처를 밝힌다 — 그냥 빈 칸이면 "왜 안 채워졌지"를 알 수 없다.
             원래 자리는 환경설정 › 회사 정보이고, 여기 입력은 이번 업로드에만 쓰는 임시값이다. */}

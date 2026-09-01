@@ -443,7 +443,7 @@ const SeveranceDrawer = ({ row, employees, onClose, onSaved }) => {
         </div>
         <div>
           <label className="label">성명 *</label>
-          <input className="input" value={f.name} onChange={e => set('name', e.target.value)} placeholder="예) 홍길동"/>
+          <input className="input" value={f.name} onChange={e => set('name', e.target.value)} placeholder="예: 홍길동"/>
         </div>
         <div>
           <label className="label">구분</label>
@@ -473,7 +473,7 @@ const SeveranceDrawer = ({ row, employees, onClose, onSaved }) => {
         </div>
         <div>
           <label className="label">메모</label>
-          <input className="input" value={f.memo} onChange={e => set('memo', e.target.value)} placeholder="예) 2024년 퇴사, 분할 지급 협의"/>
+          <input className="input" value={f.memo} onChange={e => set('memo', e.target.value)} placeholder="예: 2024년 퇴사, 분할 지급 협의"/>
         </div>
       </div>
       <DrawerFooter onCancel={onClose} onSave={save} saveDisabled={busy}

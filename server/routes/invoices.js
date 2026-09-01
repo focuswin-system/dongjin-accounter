@@ -891,6 +891,21 @@ router.put('/:id', async (req, res, next) => {
       [vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, account_id||null, memo||'', taxType, ...vals, req.params.id]
     )
     if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+
+    /* 거래처·주문이 바뀌면 **이 청구서로 만들어진 정산 거래도 따라온다.**
+     *
+     * 청구서와 그 정산 거래는 한 건이다 — 청구서는 "받을 돈", 거래는 "받은 돈"이고
+     * 상대는 같다. 여태 청구서만 고치면 거래는 옛 거래처로 남아, 거래처별 집계에서
+     * 같은 돈이 두 상대에게 갈려 잡혔다(로컬 1건·운영 dongjin 1건이 실제로 그랬다).
+     *
+     * ⚠ **청구서가 원본이다.** 거래를 고쳐 청구서를 바꾸지는 않는다 —
+     *   청구서가 먼저 있고 거래는 그 정산이라, 방향을 뒤집으면 무엇이 맞는지 알 수 없다.
+     * ⚠ invoice_id 로 걸린 것만 건드린다. 사용자가 손으로 만든 뒤 연결만 한 거래도
+     *   같은 건이므로 함께 맞춘다 — 갈려 있는 것이 문제이지 누가 만들었나는 상관없다. */
+    await conn.execute(
+      'UPDATE transactions SET vendor_id = ?, contract_id = ? WHERE invoice_id = ?',
+      [vendor_id || null, contract_id || null, req.params.id])
+
     /* 품목 내역 — lines 를 **보낸 요청만** 갱신한다.
        청구서를 다루지 않는 화면(정산·상태 변경)의 저장이 기존 품목표를 지우면 안 된다
        (주문 items·cost_budget 과 같은 부분 수정 보존 원칙). */

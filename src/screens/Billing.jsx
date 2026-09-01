@@ -1039,7 +1039,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
           </div>
           <div>
             <label className="label">메모 (선택)</label>
-            <input className="input" placeholder="기성고 3차, 잔금 등" value={form.memo} onChange={e => f("memo", e.target.value)}/>
+            <input className="input" placeholder="예: 기성고 3차, 잔금" value={form.memo} onChange={e => f("memo", e.target.value)}/>
           </div>
 
           <div>

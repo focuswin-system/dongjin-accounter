@@ -342,7 +342,7 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
           <>
             <div className="text-xs text-muted2 fw-600" style={{ marginBottom: 12 }}>인적 정보</div>
             <div className="col gap-form" style={{ marginBottom: 24 }}>
-              <Field label="이름" required><input className="input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="홍길동"/></Field>
+              <Field label="이름" required><input className="input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="예: 홍길동"/></Field>
               <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 <Field label="부서">
                   <Combobox value={form.department} onChange={v => setForm(f => ({ ...f, department: v }))}
