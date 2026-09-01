@@ -282,9 +282,9 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
     if (!matchBankId) { toast.push(`${isIssued ? "입금" : "출금"} 계좌를 선택해주세요`, { tone: "warn" }); return }
     const ok = await confirm({
       tone: "brand", icon: <Icon.Check size={22}/>,
-      title: `${isIssued ? "입금" : "지급"} 매칭 처리`,
-      body: `${fmtNum(amount)}원을 매칭 처리합니다.`,
-      confirmLabel: "매칭 처리",
+      title: `이 청구서에 ${isIssued ? "입금" : "지급"}을 연결할까요?`,
+      body: `${fmtNum(amount)}원을 이 청구서에 연결합니다. 그만큼 ${isIssued ? "미수금" : "미지급금"}이 줄어요.`,
+      confirmLabel: "연결",
     })
     if (ok) { onMatch(invoice.id, amount, matchDate, null, { category: matchCategory, memo: matchMemo, account_code: matchAcct, account_id: matchBankId }); onClose() }
   }
@@ -355,7 +355,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
         {/* 탭 */}
         <div className="row gap-0" style={{ borderBottom: "1px solid var(--line)", padding: "0 22px" }}>
           {[
-            { id: "match", label: isIssued ? "입금 매칭" : "지급 매칭" },
+            { id: "match", label: isIssued ? "입금 처리" : "지급 처리" },
             { id: "info",  label: "청구 정보" },
             { id: "docs",  label: `첨부 서류${docs.length ? ` (${docs.length})` : ""}` },
           ].map(t => (
@@ -447,7 +447,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                     </div>
                   </div>
                 ) : (
-                  <div className="text-sm text-muted" style={{ marginBottom: 12 }}>매칭된 거래 없음</div>
+                  <div className="text-sm text-muted" style={{ marginBottom: 12 }}>{isIssued ? "연결된 입금이 없어요" : "연결된 지급이 없어요"}</div>
                 )}
 
                 {invoice.remainAmount > 0 && (
@@ -475,13 +475,13 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                     ) : matchMode === "link" ? (
                       candidates.length === 0 ? (
                         <div className="text-sm text-muted" style={{ padding: "10px 0", textAlign: "center", lineHeight: 1.6 }}>
-                          연결할 미매칭 {isIssued ? "입금" : "지출"} 거래가 없어요.<br/>'새 거래로 등록'을 쓰거나, 거래내역·엑셀로 먼저 등록하세요.
+                          연결할 {isIssued ? "입금" : "지출"} 거래가 없어요.<br/>'새 거래로 등록'을 쓰거나, 거래내역·엑셀로 먼저 등록하세요.
                         </div>
                       ) : (
                         <div className="col gap-6">
                           <div className="row" style={{ alignItems: "center", gap: 8 }}>
                             <div className="text-xs text-muted2" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {showAll ? "전체 미매칭 거래" : "추천 거래 (거래처·금액 일치)"}
+                              {showAll ? "아직 어디에도 연결 안 된 거래" : "추천 거래 (거래처·금액 일치)"}
                             </div>
                             {hasOther && (
                               <button className="btn ghost sm ml-auto" style={{ fontSize: 11, flexShrink: 0 }} onClick={() => setShowAll(s => !s)}>
@@ -490,7 +490,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                             )}
                           </div>
                           {shownCands.length === 0 ? (
-                            <div className="text-sm text-muted" style={{ padding: "10px 0", textAlign: "center" }}>이 거래처의 미매칭 거래가 없어요.</div>
+                            <div className="text-sm text-muted" style={{ padding: "10px 0", textAlign: "center" }}>이 거래처에 연결할 거래가 없어요.</div>
                           ) : shownCands.map(t => (
                             <div key={t.id} className="row gap-10" style={{ padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 10, fontSize: 13, alignItems: "center" }}>
                               <div style={{ minWidth: 0, flex: 1 }}>

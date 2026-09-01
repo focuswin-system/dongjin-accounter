@@ -334,9 +334,17 @@ export const NotesScreen = ({
                         )}
                         {n.status !== 'settled' && (
                           <button className="btn sm" onClick={async () => {
+                            /* 어음을 지우는 일은 드물다 — 잘못 적었을 때뿐이다.
+                               그래서 **무엇이 남는지**를 어음이 어디서 왔느냐에 따라 말해 준다.
+                               ⚠ 거래에서 온 어음은 지워도 **그 거래가 남는다**(결제방법이 어음인 채로).
+                                 이 말이 없으면 "지웠는데 지출이 그대로네"가 된다. */
                             const ok = await confirm({
                               tone: 'neg', title: '어음을 지울까요?',
-                              body: n.invoiceNo ? `청구서 ${n.invoiceNo}에 붙여 둔 정산도 함께 걷습니다.` : '',
+                              body: n.originTxnId
+                                ? '어음 대장에서만 지웁니다. 그 거래는 결제방법이 어음인 채로 남아요. 잘못 적은 것이라면 거래를 열어 실제로 낸 방법(계좌이체·카드 등)으로 고쳐주세요.'
+                                : n.invoiceNo
+                                  ? `청구서 ${n.invoiceNo}에 붙여 둔 정산도 함께 걷습니다. 그 청구서는 다시 미수로 돌아가요.`
+                                  : '어음 대장에서 지웁니다. 되돌릴 수 없어요.',
                               confirmLabel: '지우기',
                             })
                             if (!ok) return
