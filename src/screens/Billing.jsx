@@ -1960,9 +1960,15 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
               <button className="btn" onClick={() => setImporting(true)}>
                 <Icon.Excel size={14}/> 홈택스 업로드
               </button>
-              <button className="btn primary" onClick={() => setChooserOpen(true)}>
-                <Icon.Plus size={14}/> {isIssued ? "입금" : "지급"} 등록
-              </button>
+              {/* 어음 탭에서는 '어음 등록'이 여기 선다 — 등록 버튼은 한자리에 모아 둔다.
+                  필터 줄에 끼워 넣었더니 상태 칩과 나란히 붙어 칩처럼 보였다. */}
+              {view === "note"
+                ? <button className="btn primary" onClick={() => setNoteAddSignal(n => n + 1)}>
+                    <Icon.Plus size={14}/> 어음 등록
+                  </button>
+                : <button className="btn primary" onClick={() => setChooserOpen(true)}>
+                    <Icon.Plus size={14}/> {isIssued ? "입금" : "지급"} 등록
+                  </button>}
             </>}
       />
 
@@ -2109,15 +2115,15 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
             </button>
           </div>
         )}
-        {/* 어음 탭의 상태 칩 — 청구서 상태 필터가 서는 **그 자리**다(탭 줄 오른쪽). */}
+        {/* 어음 탭의 상태 칩 — 청구서 상태 필터가 서는 **그 자리**다.
+            ⚠ ml-auto·'상태' 이름표까지 같이 간다. 칩 컴포넌트만 공유하고 감싸는 줄을
+              안 맞췄더니 청구서 탭에서는 오른쪽 끝, 어음 탭에서는 왼쪽에 붙어
+              같은 화면이 탭마다 다른 구조로 보였다. */}
         {view === "note" && (
-          <div className="row gap-6" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+          <div className="row gap-6 ml-auto" style={{ flexWrap: "wrap" }}>
+            <span className="text-xs text-muted2 filter-label">상태</span>
             <NoteStatusChips rows={notes.filter(n => n.kind === (isIssued ? 'receivable' : 'payable'))}
                              value={noteStatus} onChange={setNoteStatus}/>
-            <button className="btn primary sm" style={{ marginLeft: 4 }}
-                    onClick={() => setNoteAddSignal(n => n + 1)}>
-              <Icon.Plus size={14}/> 어음 등록
-            </button>
           </div>
         )}
         {(collect || view === "list") && (

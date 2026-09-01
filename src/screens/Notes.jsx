@@ -222,29 +222,38 @@ export const NotesScreen = ({
           }/>
       )}
 
-      {/* 한쪽만 여는 화면에서는 탭을 감춘다 — 메뉴로 이미 고른 것을 또 고르게 하지 않는다.
-          ⚠ hidden 속성은 .row 의 display:flex 에 져서 그대로 보인다. 아예 안 그린다. */}
-      {!fixedKind && <div className="row gap-8" style={{ marginBottom: 16 }}>
-        {Object.entries(KIND).map(([k, v]) => (
-          <button key={k} className={`chip ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>
-            {v.label} {(rows || []).filter(n => n.kind === k && n.status === 'held').length || ''}
-          </button>
-        ))}
-      </div>}
-
       {/* 급한 순서대로 — 지난 것 · 곧 올 것 · 전체 · (있으면) 부도.
           탭 안에서는 안 그린다 — 품은 화면이 **자기 카드 줄 자리**에 세운다. */}
       {!embedded && <NoteKpis rows={rows} kind={tab}/>}
 
-      {/* 카드 → 기간·검색 → 필터 → 표. 청구서 화면과 **같은 뼈대**다 —
-          탭을 옮겼다고 뼈대가 달라지면 같은 화면이 아닌 것처럼 읽힌다.
-          주입받았으면(탭 안) 이 둘은 품은 화면이 자기 자리에 그린다. */}
+      {/* 카드 → 기간·검색 → 탭+필터 → 표. 수시 입금·출금 화면과 **같은 뼈대·같은 정렬**이다.
+          주입받았으면(탭 안) 이 줄들은 품은 화면이 자기 자리에 그린다. */}
       {!filter && (
         <>
           <TableToolbar {...flt.toolbarProps} periodPicker
             right={<span className="text-xs text-muted2">만기일 기준</span>}/>
+
           <div className="row gap-8" style={{ marginTop: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-            <NoteStatusChips rows={kindRows} value={statusF} onChange={setStatusF}/>
+            {/* 왼쪽은 **무엇을 볼지** 고르는 탭(받을/지급), 오른쪽 끝은 그것을 **걸러내는** 상태.
+                수시 입금·출금의 탭 줄과 같은 짜임이다 — 한쪽만 여는 화면에서는 탭을 감춘다
+                (메뉴로 이미 고른 것을 또 고르게 하지 않는다). */}
+            {!fixedKind && (
+              <div className="seg" role="tablist">
+                {Object.entries(KIND).map(([k, v]) => {
+                  const n = (rows || []).filter(x => x.kind === k && x.status === 'held').length
+                  return (
+                    <button key={k} role="tab" aria-selected={tab === k}
+                      className={`seg-btn ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>
+                      {v.label}{n > 0 && <span className="seg-count">{n}</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+            <div className="row gap-6 ml-auto" style={{ flexWrap: 'wrap' }}>
+              <span className="text-xs text-muted2 filter-label">상태</span>
+              <NoteStatusChips rows={kindRows} value={statusF} onChange={setStatusF}/>
+            </div>
           </div>
         </>
       )}
