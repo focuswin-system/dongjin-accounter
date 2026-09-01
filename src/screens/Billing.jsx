@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { NotesScreen } from './Notes'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday, Loading, DateInput, periodToRange, Popover, PopItem, vendorLabel } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
@@ -1387,6 +1388,10 @@ const PendingScheduleTable = ({ rows, onIssue, onPaid, onOpenOrder, onDeleteSche
 
 // ── 메인 BillingScreen ───────────────────────────────────────────
 // role='issue'(발행 청구서: 발행 중심) | 'collect'(입금·환불/지급·환입: 청구서 기준 회수 중심)
+/** 보유 중(만기 전) 어음만 센다 — 결제·부도난 것은 할 일이 없어 탭 숫자로 뜻이 없다. */
+const countHeldNotes = (rows, isIssued) =>
+  (rows || []).filter(n => n.status === 'held' && n.kind === (isIssued ? 'receivable' : 'payable')).length
+
 export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefund, openReturn, focusInvoiceId,
   /* 서류 선택에서 '계산서 아님'을 고르면 거래 등록 드로어로 넘긴다.
      그 드로어는 App 이 소유하므로(여러 화면이 공유) 함수로 받아 호출만 한다. */
@@ -1406,7 +1411,10 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
    * 수시 입금을 열 때마다 빈 화면과 "주문 상세의 '청구 일정'에서 등록하세요"를 먼저 봤다 —
    * 안 쓰기로 한 기능으로 매번 안내하고, 정작 하려던 청구서 끊기는 한 번 더 눌러야 했다.
    * 이제 청구할 게 실제로 있을 때만 그쪽으로 연다(아래 effect). */
-  const [view, setView] = useState("list")   // issued: pending|list
+  const [view, setView] = useState("list")   // issued: pending|list|plain|note
+  /* 어음 탭의 건수. 다른 탭이 모두 건수를 달고 있어서, 이 탭만 없으면 비어 보인다.
+     목록 자체는 NotesScreen 이 스스로 불러온다 — 여기서는 숫자만 센다. */
+  const [noteCount, setNoteCount] = useState(0)
   const [invoices, setInvoices] = useState([])
   /* 청구서 없이 오간 건 — 서류 선택에서 '계산서 아님'을 고른 것들이 여기로 온다.
      이 화면 이름이 '수시 입금/수시 출금'인데 청구서만 보여주면, 여기서 등록한 건의 절반이
@@ -1443,6 +1451,12 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
      화면에서는 못 쓴다(실제로 `accounts is not defined` 로 화면이 통째로 깨졌다). */
   const [accounts, setAccounts] = useState([])
   useEffect(() => { api.getAccounts().then(list => setAccounts(list || [])) }, [])
+  /* 어음 탭 건수는 **탭을 열기 전에도** 떠야 한다 — 옆 탭들이 모두 건수를 달고 있어서,
+     여기만 비면 "어음은 없나 보다" 하고 안 누른다. 만기 지난 어음이 있으면 오히려
+     눈에 띄어야 한다. 탭을 열면 NotesScreen 이 onLoaded 로 다시 알려준다. */
+  useEffect(() => {
+    api.getNotes().then(rows => setNoteCount(countHeldNotes(rows, isIssued))).catch(() => {})
+  }, [isIssued])
 
   /* 갚아야 할 카드 — 넘어가는 줄에 쓸 숫자만 센다. 셈법은 카드 대금 지급 화면과 같다:
      '이번 구간 사용액'이 아니라 카드 계좌 잔액(음수)이라, 이미 갚은 만큼은 자동으로 빠지고
@@ -1492,9 +1506,14 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
      *   is_pnl=0 으로 들어온다 — 매출은 청구서 발행 시점에 이미 인식했으니 입금까지 손익에
      *   넣으면 두 번 잡히기 때문이다(맞는 처리다). 그런데 재무 거래를 빼려고 그 플래그로
      *   거르면 **정산 입금이 통째로 사라진다** — 방금 만든 양방향 흔적의 한쪽이 빈다.
-     *   재무 거래는 청구서가 없으므로 invoiceId 로 갈린다. */
+     *   재무 거래는 청구서가 없으므로 invoiceId 로 갈린다.
+     * ⚠ **어음 만기 결제도 같은 이유로 먼저 통과시킨다.** 그 거래도 is_pnl=0 이다
+     *   (비용은 어음을 끊을 때 이미 인식했고, 만기 결제는 부채를 갚는 것이라 맞다).
+     *   그런데 통장에서는 실제로 돈이 나갔다 — 빠뜨리면 통장 대사를 하는 사람이
+     *   "낸 기억은 있는데 목록에 없다"가 된다. 청구서가 없는 어음이라 invoiceId 로도
+     *   안 걸린다. */
     setPlainTxns((txns || []).filter(t =>
-      !t.payrollId && !t.recurringId && (t.invoiceId || t.isPnl !== false)))
+      !t.payrollId && !t.recurringId && (t.invoiceId || t.noteId || t.isPnl !== false)))
     const merged = sched.map(s => ({ ...s, source: 'milestone' }))
       .sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')))
     setInvoices(rows); setRecSummary(rec); setPaySum(pay); setPending(merged)
@@ -1954,7 +1973,11 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       {/* 비어 있는 구획은 그리지 않는다 — 이 코드베이스가 정기 회차에서 이미 정한 규칙이다
           ("'놓친 회차 없음' 빈 카드를 매번 보여주면 진짜 경고가 묻힌다"). 여기도 같다:
           계약을 안 쓰는 회사에 '발행예정 0건' 카드가 늘 서 있으면 그 자리를 안 보게 된다. */}
-      <div className="grid grid-3-to-1" style={{ gridTemplateColumns: `repeat(${collect || !pending.length ? 2 : 3}, 1fr)`, gap: 16, marginBottom: 24 }}>
+      {/* ⚠ 어음 탭에서는 감춘다 — 이 카드들은 **청구서 축** 요약이라, 어음 KPI 와 나란히 서면
+          숫자 여덟 개가 한 화면에 쌓여 어느 것이 지금 보는 것의 숫자인지 흐려진다.
+          ⚠ hidden 속성은 display:grid 에 져서 그대로 보인다 — 조건부로 안 그린다. */}
+      {view !== "note" && <div className="grid grid-3-to-1"
+           style={{ gridTemplateColumns: `repeat(${collect || !pending.length ? 2 : 3}, 1fr)`, gap: 16, marginBottom: 24 }}>
         {isIssued ? (
           <>
             {!collect && pending.length > 0 && <SummaryCard label="발행예정" amount={pendingTotal} count={pending.length} accent="brand"
@@ -1978,7 +2001,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
               onClick={() => showAllOf("기한 지남")} hint="전체 기간에서 기한 지난 것만 보기"/>
           </>
         )}
-      </div>
+      </div>}
 
       {/* 기간·거래처는 **탭보다 위**, 그리고 **어느 탭에서나 같은 자리**에 둔다.
           아래에 있으면 "지금 고른 탭에만 걸리는 것"처럼 읽히는데, 위에 두면 순서가 곧 뜻이 된다 —
@@ -1988,7 +2011,9 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
             필터 상태를 따로 들기 때문이다). 그런데 사용자에게는 같은 화면에서 탭 하나 눌렀다고
             기간·거래처 칸이 위아래로 뛰는 것으로 보인다 — 찾던 칸이 사라진 것과 같다.
             들고 있는 필터는 탭마다 달라도, **서 있는 자리는 하나여야 한다.** */}
-      {!collect && view === "pending" ? (
+      {/* ⚠ 어음 탭에는 이 툴바를 안 세운다 — 기간·거래처·기준 축은 **청구서에 거는 것**이라
+          어음 목록에는 아무것도 안 걸린다. 있으면 눌러도 안 바뀌는 칸이 된다. */}
+      {view === "note" ? null : !collect && view === "pending" ? (
         <TableToolbar {...pendF.toolbarProps} periodPicker
           right={<span className="text-xs text-muted2">
             예정일 기준 · {pendingFiltered.length}건 {fmtNum(pendingFiltered.reduce((s, p) => s + pendingGross(p), 0))}원
@@ -2054,6 +2079,13 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
             <button role="tab" aria-selected={view === "plain"}
               className={`seg-btn ${view === "plain" ? "active" : ""}`} onClick={() => setView("plain")}>
               {isIssued ? "입금내역" : "지급내역"}<span className="seg-count">{plainFiltered.length}</span>
+            </button>
+            {/* 어음 — 돈 축 묶음의 마지막이다. 입금내역이 '들어온 돈'이라면 이건
+                **아직 돈이 아닌 것**이라, 같은 묶음 안에서 이어 읽히는 자리가 맞다.
+                건수는 보유 중인 것만 센다 — 결제·부도난 어음은 할 일이 없다. */}
+            <button role="tab" aria-selected={view === "note"}
+              className={`seg-btn ${view === "note" ? "active" : ""}`} onClick={() => setView("note")}>
+              어음{noteCount > 0 && <span className="seg-count">{noteCount}</span>}
             </button>
           </div>
         )}
@@ -2172,6 +2204,13 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
                 disabledHint: () => '정산이 끝난 청구서라 일괄 처리 대상이 아니에요',
               }}/>
           </> : null}
+
+      {/* 어음 — 화면을 복제하지 않고 어음 화면을 그대로 세운다(kind 만 고정, 머리는 끈다).
+          복제하면 만기·부도 규칙이 두 벌이 되어 언젠가 어긋난다. */}
+      {!collect && view === "note" && (
+        <NotesScreen embedded fixedKind={isIssued ? 'receivable' : 'payable'}
+                     onLoaded={rows => setNoteCount(countHeldNotes(rows, isIssued))}/>
+      )}
 
       {/* 청구서 없이 오간 건 — **탭으로 세운다.**
           처음엔 목록 아래에 쌓았는데, 청구서가 쌓이면 스크롤을 한참 내려야 보였다.

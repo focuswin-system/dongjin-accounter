@@ -95,6 +95,13 @@ router.get('/', async (req, res, next) => {
                       /* 어느 청구서와 이어진 입금·지급인지 — 화면이 '입금내역'에서 그 흔적을
                          보여주려면 번호가 필요하다(id 만으로는 사람이 읽을 수 없다). */
                       inv.invoice_no AS invoice_no,
+                      /* 어음 만기 결제로 생긴 거래인가. 이 거래는 is_pnl=0 이다 —
+                         비용은 어음을 끊을 때 이미 인식했고 만기 결제는 부채를 갚는 것이라
+                         맞는 처리다. 그런데 **통장에서는 실제로 돈이 나갔다.**
+                         이 표시가 없으면 '입금내역·지급내역'(통장 대사가 보는 축)이
+                         is_pnl 로 거르면서 그 거래를 통째로 떨어뜨린다.
+                         (청구서 정산 거래를 invoice_id 로 통과시킨 것과 같은 이유다.) */
+                      nt.id AS note_id, nt.note_no AS note_no,
                       (t.account_code IS NULL OR t.account_code = '' OR NOT EXISTS (
                          SELECT 1 FROM account_subjects s
                           WHERE s.code = t.account_code AND s.acct_type IN ('자산','부채','자본')
@@ -107,6 +114,7 @@ router.get('/', async (req, res, next) => {
               LEFT JOIN employees e ON t.employee_id = e.id
               LEFT JOIN ref_items ri ON t.item_id = ri.id
               LEFT JOIN invoices inv ON t.invoice_id = inv.id
+              LEFT JOIN notes nt ON nt.txn_id = t.id
               WHERE 1=1`
     const params = []
     if (kind)       { sql += ' AND t.kind = ?';        params.push(kind) }

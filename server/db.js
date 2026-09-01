@@ -999,6 +999,8 @@ async function initDb(conn) {
         memo        TEXT,
         created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         KEY idx_notes_due (status, due_on),
+        /* 거래 목록이 '이 거래가 어음 결제인가'를 물으며 매번 조인한다 */
+        KEY idx_notes_txn (txn_id),
         KEY idx_notes_vendor (vendor_id),
         FOREIGN KEY (vendor_id) REFERENCES vendors(id)
       )
@@ -1540,6 +1542,8 @@ async function initDb(conn) {
        FK 하나로는 명부 밖 사람을 못 적는데, 법인카드는 실제로 그런 사람이 쓴다. */
     await ensureColumn('transactions', 'employee_name', "employee_name VARCHAR(60)")
     await ensureIndex('transactions', 'idx_txn_transfer', 'transfer_id')
+    // 거래 목록이 '이 거래가 어음 결제인가'를 매번 조인해 묻는다(이미 notes 가 있는 DB 를 위해)
+    await ensureIndex('notes', 'idx_notes_txn', 'txn_id')
 
     /* 카드 종류 — 신용/체크. 결제 방식이 정반대라 한 덩어리로 두면 자금일보가 어긋난다.
      *   credit  사용액이 카드에 쌓이고 **결제일에 통장에서 한꺼번에** 빠진다 → 이체가 필요

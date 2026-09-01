@@ -46,19 +46,22 @@ const dueLabel = (n, today) => {
 /**
  * 어음 화면.
  *
- * 같은 화면이 세 군데에 걸린다 — 재무관리의 '어음'(양쪽을 한눈에)과,
- * 입출금의 '받을어음'·'지급어음'(한쪽만).
+ * 두 자리에 선다 — 재무관리의 '어음'(양쪽을 한눈에)과,
+ * **수시 입금·수시 출금 안의 '어음' 탭**(그 화면에 맞는 한쪽만).
  *
- * 나눠 다는 이유: 어음은 자금 운용이기도 하지만, 경리에게는 **입금·출금 업무**다.
- * 받을어음을 확인하러 재무관리로 건너가야 하면 정기 입금 → 수시 입금 → 받을어음으로
- * 이어지는 흐름이 끊긴다. 재무관리를 아예 안 쓰는 회사도 어음은 쓴다.
+ * 탭으로 들어가는 이유: 그 화면의 탭은 이미 '청구서를 보는 축'과 '돈을 보는 축'으로
+ * 갈려 있다(발행내역 │ 입금내역). 어음은 **아직 돈이 아닌 것**이라 돈 축 바로 옆자리가
+ * 제 자리다. 메뉴를 따로 세우면 청구서 → 입금 → 어음으로 이어지는 한 흐름이
+ * 사이드바를 건너뛰어야 하는 세 곳으로 흩어진다.
  *
- * ⚠ 화면을 복제하지 않는다. kind 를 고정해 여는 것뿐이다 —
+ * ⚠ 화면을 복제하지 않는다. kind 를 고정하고 머리를 끄는 것뿐이다 —
  *   복제하면 만기·부도 규칙이 두 벌이 되어 언젠가 어긋난다(routes/notes.js 와 같은 이유).
  *
  * @param fixedKind 'receivable' | 'payable' — 주면 그쪽만 열고 탭을 감춘다.
+ * @param embedded  다른 화면의 탭 안에 들어갈 때. 제목·설명을 끈다(그 화면이 이미 머리를 갖고 있다).
+ * @param onLoaded  목록을 읽을 때마다 부른다 — 품은 화면이 탭 건수를 자기 힘으로 다시 세지 않게.
  */
-export const NotesScreen = ({ fixedKind = null }) => {
+export const NotesScreen = ({ fixedKind = null, embedded = false, onLoaded = null }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [rows, setRows] = useState(null)
@@ -78,7 +81,11 @@ export const NotesScreen = ({ fixedKind = null }) => {
   const [settleTarget, setSettleTarget] = useState(null)
   const today = localToday()
 
-  const load = async () => setRows(await api.getNotes())
+  const load = async () => {
+    const r = await api.getNotes()
+    setRows(r)
+    onLoaded?.(r)          // 등록·결제·부도 뒤에도 품은 화면의 탭 건수가 따라온다
+  }
   useEffect(() => {
     load()
     api.getVendors().then(setVendors)
@@ -110,13 +117,27 @@ export const NotesScreen = ({ fixedKind = null }) => {
 
   return (
     <div className="fade-up">
-      <PageHeader title={fixedKind ? K.label : '어음'}
-        sub={`어음은 만기가 와야 현금이 됩니다. ${isRecv ? '여기 있는 돈은 아직 통장에 없어요.' : '여기 있는 돈은 아직 통장에서 안 나갔어요.'}`}
-        actions={
-          <button className="btn primary" onClick={() => { setEdit(null); setFormOpen(true) }}>
+      {/* 탭 안에서는 머리를 끈다 — 그 화면이 이미 제목·기간 필터를 갖고 있어서,
+          제목이 둘이면 어느 쪽이 지금 보고 있는 화면인지 흐려진다.
+          대신 '어음 등록' 버튼은 남긴다(탭 안에서도 등록은 해야 한다). */}
+      {embedded ? (
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <span className="text-sm text-muted">
+            어음은 만기가 와야 현금이 됩니다. {isRecv ? '여기 있는 돈은 아직 통장에 없어요.' : '여기 있는 돈은 아직 통장에서 안 나갔어요.'}
+          </span>
+          <button className="btn primary sm" onClick={() => { setEdit(null); setFormOpen(true) }}>
             <Icon.Plus size={14}/> 어음 등록
           </button>
-        }/>
+        </div>
+      ) : (
+        <PageHeader title="어음"
+          sub={`어음은 만기가 와야 현금이 됩니다. ${isRecv ? '여기 있는 돈은 아직 통장에 없어요.' : '여기 있는 돈은 아직 통장에서 안 나갔어요.'}`}
+          actions={
+            <button className="btn primary" onClick={() => { setEdit(null); setFormOpen(true) }}>
+              <Icon.Plus size={14}/> 어음 등록
+            </button>
+          }/>
+      )}
 
       {/* 한쪽만 여는 화면에서는 탭을 감춘다 — 메뉴로 이미 고른 것을 또 고르게 하지 않는다.
           ⚠ hidden 속성은 .row 의 display:flex 에 져서 그대로 보인다. 아예 안 그린다. */}
