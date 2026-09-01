@@ -993,6 +993,9 @@ async function initDb(conn) {
            ⚠ 만기 결제 때 **새 거래를 만들지 않고 이 거래를 완료로 바꾼다** —
              또 만들면 같은 돈이 두 번 잡힌다. txn_id(만기 거래)와 다른 칸이다. */
         origin_txn_id VARCHAR(36),
+        /* 부도난 날. 부도 전표(수취 분개의 반대)를 이 날짜로 세운다 —
+           날짜가 없으면 부도난 어음이 받을어음 잔액에 영원히 남는다. */
+        dishonored_on VARCHAR(20),
         memo        TEXT,
         created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         KEY idx_notes_due (status, due_on),
@@ -1079,6 +1082,12 @@ async function initDb(conn) {
     // 빠지고 기존 기록은 그대로 유지된다. 기존 행은 전부 사용중(1)으로 시작한다.
     // 어음이 '거래 등록 폼'에서도 만들어진다 — 이미 notes 가 있는 DB 를 위해
     await ensureColumn('notes', 'origin_txn_id', 'origin_txn_id VARCHAR(36)')
+    /* 부도일. 예전에는 메모에 글로만 남겨서 전표를 세울 날짜가 없었다.
+       이미 부도로 적힌 어음은 만기일로 채운다 — 부도는 만기에 판명되므로 가장 가깝고,
+       비워 두면 그 어음의 반대 분개가 영영 안 선다. */
+    await ensureColumn('notes', 'dishonored_on', 'dishonored_on VARCHAR(20)')
+    await c.execute(
+      "UPDATE notes SET dishonored_on = due_on WHERE status = 'dishonored' AND dishonored_on IS NULL")
     await ensureColumn('vendors', 'active', "active TINYINT(1) NOT NULL DEFAULT 1")
     // 정기청구 → 청구서 역참조. 청구서를 지우면 그 회차의 last_generated 를 되돌려야
     // '발행 예정'에 다시 뜬다. 이 링크가 없으면 그 달 매출이 조용히 미청구로 사라진다.

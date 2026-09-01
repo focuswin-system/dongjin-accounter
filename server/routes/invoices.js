@@ -46,7 +46,20 @@ async function resolveInvoiceAcctCode(db, accountCode, categoryName, kind) {
 }
 
 async function attachMatches(db, invoice) {
-  const [matches] = await db.execute('SELECT * FROM invoice_matches WHERE invoice_id = ?', [invoice.id])
+  /* ⚠ **어음 정산을 구분할 수 있어야 한다.**
+   *   어음으로 정산한 행은 txn_id 가 없다(거래를 안 만든다 — routes/notes.js).
+   *   그 사실을 안 내려보내면 화면에는 그냥 '입금 완료'로 보여서, **통장에 없는 돈을
+   *   받은 것으로 착각한다.** 이 기능이 막으려던 바로 그 착각이 청구서 화면에서 되살아난다.
+   *   그래서 그 행에 어음(번호·만기·상태)을 붙여 내려보낸다. */
+  const [matches] = await db.execute(
+    `SELECT m.*, n.id AS note_id, n.note_no, n.due_on AS note_due_on,
+            n.status AS note_status, n.kind AS note_kind, n.issued_on AS note_issued_on
+       FROM invoice_matches m
+       LEFT JOIN notes n ON n.match_id = m.id
+      WHERE m.invoice_id = ?`, [invoice.id]).catch(async () => {
+    // notes 표가 아직 없는 DB(설치 직후)에서도 청구서는 열려야 한다
+    return db.execute('SELECT * FROM invoice_matches WHERE invoice_id = ?', [invoice.id])
+  })
   const [docs] = await db.execute('SELECT id, url, name, doc_type, size, created_at FROM invoice_docs WHERE invoice_id = ? ORDER BY created_at', [invoice.id])
   /* 품목 내역(거래명세서) — 폼에서 수정하려면 읽을 수 있어야 한다.
      라인이 없는 청구서(총액만)는 빈 배열이라 화면이 기존처럼 총액 입력으로 동작한다. */

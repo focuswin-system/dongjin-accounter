@@ -188,6 +188,38 @@ function noteVoucher(note, originTxn = null) {
 }
 
 /**
+ * 어음 부도 전표 — 발행 전표를 **날짜만 바꿔 뒤집는다.**
+ *
+ * 부도가 나면 받을어음은 없어지고 원래의 채권(외상매출금)이 되살아난다.
+ * 앱도 그렇게 움직인다 — 부도 처리는 매칭을 지워 청구서를 미수로 되돌린다.
+ * 그런데 장부에는 수취 전표(차 받을어음 / 대 외상매출금)만 남아 있어서,
+ * 되살아난 외상매출금과 **받을어음이 동시에** 자산으로 잡혔다.
+ * 부도난 어음은 영원히 받을어음 잔액에 남고, 같은 돈이 두 군데서 세어졌다.
+ *
+ * 지우지 않고 반대 분개를 세우는 이유: 어음을 받았다가 부도난 사실 자체가 장부에
+ * 남아야 한다. 수취 전표를 없애면 그 이력이 통째로 사라진다.
+ *
+ * @param note      notes 행. dishonored_on 이 전표 날짜다.
+ * @param originTxn 발행 전표와 **같은** 상대 계정을 쓰기 위해 그대로 넘긴다.
+ */
+function noteDishonorVoucher(note, originTxn = null) {
+  const src = noteVoucher(note, originTxn)
+  const recv = note.kind === 'receivable'
+  const v = build(TYPE.TRANSFER, {
+    source: 'note',
+    id: note.id,
+    date: note.dishonored_on || note.due_on,
+    summary: `${recv ? '받을어음' : '지급어음'} ${note.note_no || ''} 부도`.replace(/\s+/g, ' ').trim(),
+    counterparty: note.vendor_name || '',
+  }, src.lines
+    .map(l => line(l.side === 'debit' ? 'credit' : 'debit', l.code, l.amount))
+    // 뒤집으면 대변이 앞에 온다 — 전표는 차변을 먼저 읽는 것이 관례다
+    .sort((a, b) => (a.side === b.side ? 0 : a.side === 'debit' ? -1 : 1)))
+  if (src.missing) v.missing = src.missing
+  return v
+}
+
+/**
  * 전표 줄에 계정과목 이름을 붙인다.
  *
  * 코드만 내보내면 화면이 계정과목표를 다시 조회해야 하고, 인쇄본에는 숫자만 남아
@@ -217,5 +249,5 @@ async function withNames(db, voucher, extra = {}) {
 module.exports = {
   TYPE, CASH, AR, AP, VAT_RECEIVABLE, VAT_PAYABLE, DEFAULT_SALES,
   NOTE_RECEIVABLE, NOTE_PAYABLE,
-  transactionVoucher, invoiceVoucher, noteVoucher, withNames,
+  transactionVoucher, invoiceVoucher, noteVoucher, noteDishonorVoucher, withNames,
 }

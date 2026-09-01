@@ -20,7 +20,7 @@ const { repaymentSchedule } = require('./loan')
 const { dueDatesToGenerate, cashDateOf } = require('./recurrence')
 const { inflowCertainty, outflowCertainty } = require('./certainty')
 // 청구서 발행 분개는 전표 규칙과 한 벌이어야 한다 — 두 벌이면 전표와 일계표가 다른 말을 한다
-const { invoiceVoucher, noteVoucher } = require('./voucher')
+const { invoiceVoucher, noteVoucher, noteDishonorVoucher } = require('./voucher')
 const { recurFromSupply } = require('./vat')
 const { kstDate } = require('../db')
 
@@ -643,13 +643,21 @@ async function dailyTrial(db, date, { includeIssuance = true } = {}) {
   const pendingNotes = []
   const [notes] = await db.execute(`
     SELECT n.id, n.kind, n.amount, n.issued_on, n.note_no, n.invoice_id, n.origin_txn_id,
+           n.status, n.due_on, n.dishonored_on,
            v.name AS vendor_name, t.account_code AS origin_acct_code
       FROM notes n
       LEFT JOIN vendors v ON v.id = n.vendor_id
       LEFT JOIN transactions t ON t.id = n.origin_txn_id
-     WHERE n.issued_on = ?`, [date]).catch(() => [[]])
+     WHERE n.issued_on = ?
+        OR (n.status = 'dishonored' AND COALESCE(n.dishonored_on, n.due_on) = ?)`,
+    [date, date]).catch(() => [[]])
   for (const nt of notes) {
-    const v = noteVoucher(nt, nt.origin_txn_id ? { account_code: nt.origin_acct_code } : null)
+    /* 부도일에는 **반대 분개**가 선다. 같은 날 발행까지 겹치는 일은 사실상 없지만,
+       발행일과 부도일을 각각 보고 그 날에 맞는 전표를 고른다. */
+    const isDishonorDay = nt.status === 'dishonored' && (nt.dishonored_on || nt.due_on) === date
+    const v = isDishonorDay
+      ? noteDishonorVoucher(nt, nt.origin_txn_id ? { account_code: nt.origin_acct_code } : null)
+      : noteVoucher(nt, nt.origin_txn_id ? { account_code: nt.origin_acct_code } : null)
     if (!v.balanced) {
       pendingNotes.push({
         id: nt.id, amount: num(nt.amount), kind: nt.kind,

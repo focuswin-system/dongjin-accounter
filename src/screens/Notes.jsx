@@ -113,7 +113,10 @@ export const NotesScreen = () => {
              tone={지남.length ? 'neg' : undefined}/>
         <Kpi label="7일 안에 만기" value={sum(임박)} badge={`${임박.length}건`}
              tone={임박.length ? 'warn' : undefined}/>
-        <Kpi label={`보유 중 ${K.money}`} value={sum(held)} badge={`${held.length}건`}/>
+        {/* 이 칸은 보유 중 **전체**다 — 앞 두 칸(지남·임박)을 품고 있다.
+            나란히 놓으면 더해서 읽기 쉬워서, 총계라는 걸 한 줄로 밝혀 둔다. */}
+        <Kpi label={`보유 중 ${K.money}`} value={sum(held)} badge={`${held.length}건`}
+             hint={(지남.length || 임박.length) ? '만기 지남·임박도 포함한 전체예요' : undefined}/>
         <Kpi label="부도" value={sum(부도)} badge={`${부도.length}건`}
              tone={부도.length ? 'neg' : undefined}/>
       </KpiRow>

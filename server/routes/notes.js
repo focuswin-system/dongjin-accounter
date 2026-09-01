@@ -52,7 +52,7 @@ const rowOut = (r) => ({
   amount: Number(r.amount) || 0,
   issuedOn: r.issued_on, dueOn: r.due_on, status: r.status,
   accountId: r.account_id, accountName: r.account_name || '',
-  settledOn: r.settled_on, txnId: r.txn_id, originTxnId: r.origin_txn_id,
+  settledOn: r.settled_on, dishonoredOn: r.dishonored_on, txnId: r.txn_id, originTxnId: r.origin_txn_id,
   invoiceId: r.invoice_id, invoiceNo: r.invoice_no || '',
   memo: r.memo || '', createdAt: r.created_at,
 })
@@ -258,9 +258,13 @@ router.post('/:id/dishonor', async (req, res, next) => {
         await conn.execute('DELETE FROM invoice_matches WHERE id = ?', [n.match_id])
         if (n.invoice_id) await recalcInvoiceStatus(conn, n.invoice_id)
       }
+      /* ⚠ 부도일은 **컬럼에** 남긴다. 메모에만 적으면 부도 전표(수취 분개의 반대)를
+           세울 날짜가 없어, 부도난 어음이 받을어음 잔액에 영원히 남는다.
+           날짜를 따로 주지 않으면 만기일로 본다 — 부도는 만기에 판명된다. */
+      const on = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.on || '')) ? req.body.on : (n.due_on || kstToday())
       await conn.execute(
-        `UPDATE notes SET status = 'dishonored', match_id = NULL, memo = ? WHERE id = ?`,
-        [`${n.memo || ''}${n.memo ? ' · ' : ''}부도 ${kstToday()}`.trim(), n.id])
+        `UPDATE notes SET status = 'dishonored', match_id = NULL, dishonored_on = ?, memo = ? WHERE id = ?`,
+        [on, `${n.memo || ''}${n.memo ? ' · ' : ''}부도 ${on}`.trim(), n.id])
 
       await conn.commit()
       res.json({ ok: true, restored: !!n.match_id })

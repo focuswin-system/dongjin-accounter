@@ -13,7 +13,7 @@
  *   그대로 세우고 '확인 필요'로 표시해, 받는 사람이 물어볼 수 있게 한다.
  */
 
-const { transactionVoucher, noteVoucher, withNames } = require('./voucher')
+const { transactionVoucher, noteVoucher, noteDishonorVoucher, withNames } = require('./voucher')
 
 /**
  * 기간 안의 거래를 전표로 만든다.
@@ -42,12 +42,15 @@ async function listVouchers(db, { from, to, kind = 'all' }) {
    * ⚠ kind 필터는 어음에도 건다 — 받을어음은 income 쪽, 지급어음은 expense 쪽으로 본다.
    *   '입금만' 뽑았는데 지급어음이 섞이면 받는 쪽이 그 파일을 못 믿는다.
    * ⚠ 부도난 어음도 뺀 적 없다(발행일 기준). 되돌리는 것은 부도일의 반대 분개다. */
-  const noteWhere = ['n.issued_on >= ?', 'n.issued_on <= ?']
-  const noteArgs = [from, to]
+  /* 발행일이든 부도일이든 기간에 걸리면 가져온다 — 부도 전표는 부도일에 서기 때문에,
+     발행일만 보면 지난 분기에 받은 어음의 이번 분기 부도가 통째로 빠진다. */
+  const noteWhere = ['((n.issued_on >= ? AND n.issued_on <= ?) OR (n.dishonored_on >= ? AND n.dishonored_on <= ?))']
+  const noteArgs = [from, to, from, to]
   if (kind === 'income')  noteWhere.push("n.kind = 'receivable'")
   if (kind === 'expense') noteWhere.push("n.kind = 'payable'")
   const [noteRows] = await db.execute(`
     SELECT n.id, n.kind, n.amount, n.issued_on, n.note_no, n.origin_txn_id,
+           n.status, n.due_on, n.dishonored_on, n.invoice_id,
            v.name AS vendor_name, t.account_code AS origin_acct_code
       FROM notes n
       LEFT JOIN vendors v ON v.id = n.vendor_id
@@ -55,9 +58,25 @@ async function listVouchers(db, { from, to, kind = 'all' }) {
      WHERE ${noteWhere.join(' AND ')}
      ORDER BY n.issued_on, n.id`, noteArgs).catch(() => [[]])
 
+  /* ⚠ **아직 결제되지 않은 어음이 붙어 있는 원거래는 여기서 뺀다.**
+   * 거래 폼에서 결제방법을 '어음'으로 고르면 거래는 '지급 예정'으로 남고, 그 발생분개
+   * (차 비용 / 대 지급어음)는 바로 위에서 만든 **어음 전표가 이미 그린다.**
+   * 빼지 않으면 같은 비용이 하루에 두 번 차변에 서서 비용이 두 배가 되고,
+   * 원거래 쪽은 대변 다리가 없어 '확인 필요'로도 남는다.
+   *
+   * 만기 결제된 어음(settled)은 예외다 — 그때 원거래는 account_code 가 어음 계정으로
+   * 바뀌어 결제 분개(차 지급어음 / 대 보통예금)가 되므로, 그대로 둬야 짝이 맞는다.
+   * 부도(dishonored)는 결제가 아니므로 held 와 같이 뺀다. */
+  let coveredTxnIds = new Set()
+  try {
+    const [ns] = await db.execute(
+      "SELECT origin_txn_id FROM notes WHERE origin_txn_id IS NOT NULL AND status <> 'settled'")
+    coveredTxnIds = new Set(ns.map(n => n.origin_txn_id))
+  } catch { /* notes 테이블이 없는 DB — 어음을 안 쓰는 것이니 뺄 것도 없다 */ }
+
   /* 계정과목 이름은 한 번에 붙인다. 전표마다 withNames 를 부르면 거래 수만큼
      같은 조회가 반복돼, 한 분기(수백 건)를 뽑을 때 눈에 띄게 느려진다. */
-  const vouchers = rows.map(t => ({
+  const vouchers = rows.filter(t => !coveredTxnIds.has(t.id)).map(t => ({
     ...transactionVoucher(t),
     kind: t.kind,
     amount: Number(t.amount) || 0,
@@ -66,7 +85,23 @@ async function listVouchers(db, { from, to, kind = 'all' }) {
     memo: t.memo || '',
     category: t.category || '',
   }))
+  const inRange = (d) => !!d && d >= from && d <= to
   for (const nt of noteRows) {
+    /* 부도난 어음은 전표가 **둘**이다 — 발행일의 수취 분개와, 부도일의 그 반대.
+       반대 분개가 없으면 청구서가 미수로 되살아난 뒤에도 받을어음이 남아
+       같은 돈이 두 군데 자산으로 잡힌다. */
+    if (nt.status === 'dishonored' && inRange(nt.dishonored_on || nt.due_on)) {
+      vouchers.push({
+        ...noteDishonorVoucher(nt, nt.origin_txn_id ? { account_code: nt.origin_acct_code } : null),
+        kind: nt.kind === 'receivable' ? 'income' : 'expense',
+        amount: Number(nt.amount) || 0,
+        vendor_name: nt.vendor_name || '',
+        account_name: '',
+        memo: `어음 ${nt.note_no || ''} 부도`.trim(),
+        category: '',
+      })
+    }
+    if (!inRange(nt.issued_on)) continue
     vouchers.push({
       ...noteVoucher(nt, nt.origin_txn_id ? { account_code: nt.origin_acct_code } : null),
       kind: nt.kind === 'receivable' ? 'income' : 'expense',

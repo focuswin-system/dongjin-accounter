@@ -397,14 +397,33 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                         예전엔 날짜·금액·취소 버튼뿐이라, 어느 통장으로 들어왔는지·적요가 뭔지
                         볼 수가 없었다. 잘못 들어온 걸 봐도 거래내역으로 나가 금액으로 더듬어
                         찾아야 했다. matches 는 txnId 를 이미 들고 있었다(api.js). */}
-                    {(invoice.matches || []).map((m, i) => (
+                    {(invoice.matches || []).map((m, i) => {
+                      /* ⚠ **어음으로 정산한 행은 돈이 안 들어온 것이다.**
+                         구분해 주지 않으면 '입금 완료'로 보여서, 통장에 없는 돈을 받은 것으로
+                         착각한다 — 어음 기능이 막으려던 바로 그 착각이다. */
+                      const isNote = !!m.noteId
+                      return (
                       <div key={m.id || i} className="row gap-10"
                         onClick={() => m.txnId && setTxnOpen(m.txnId)}
                         title={m.txnId ? "이 거래 열기" : undefined}
-                        style={{ padding: "8px 12px", borderRadius: 8, background: "var(--surface-2)", fontSize: 13,
+                        style={{ padding: "8px 12px", borderRadius: 8,
+                          background: isNote ? "var(--warn-soft)" : "var(--surface-2)", fontSize: 13,
                           cursor: m.txnId ? "pointer" : undefined }}>
-                        <Icon.Check size={14} style={{ color: "var(--pos)" }}/>
-                        <span className="text-muted">{m.matchedAt}</span>
+                        {isNote
+                          ? <Icon.Receipt size={14} style={{ color: "var(--warn-ink)" }}/>
+                          : <Icon.Check size={14} style={{ color: "var(--pos)" }}/>}
+                        {isNote ? (
+                          <span className="text-sm">
+                            <b>어음</b>{m.noteNo ? ` ${m.noteNo}` : ''}
+                            <span className="text-muted2" style={{ marginLeft: 6 }}>
+                              만기 {m.noteDueOn}
+                              {m.noteStatus === 'settled' ? ' · 입금됨'
+                                : m.noteStatus === 'dishonored' ? ' · 부도' : ' · 아직 통장에 없어요'}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="text-muted">{m.matchedAt}</span>
+                        )}
                         <span className="num fw-700 ml-auto">{fmtNum(m.amount)}</span>
                         {/* 정산 취소 — 서버엔 있었는데 부르는 화면이 없어서, 금액이나 상대를 잘못 넣은
                             입금은 되돌릴 방법이 없었다(청구서를 통째로 지우는 수밖에). */}
@@ -415,7 +434,8 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                           <Icon.Close size={14}/>
                         </button>
                       </div>
-                    ))}
+                      )
+                    })}
                     <div className="row" style={{ paddingTop: 8, borderTop: "1px solid var(--line)", fontSize: 13 }}>
                       <span className="text-muted">{isIssued ? "미수금" : "미지급금"}</span>
                       <span className="num fw-700 ml-auto"
@@ -1237,7 +1257,23 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", paidLabel = "정
           render: inv => <span className="text-sm text-muted">{inv.account || "—"}</span> },
         { key: 'invoiceNo', header: '청구번호', sortable: true,
           render: inv => <span className="text-xs text-muted2 num">{inv.invoiceNo}</span> },
-        { key: 'status', header: '상태', render: inv => <StatusBadge status={effStatus(inv)}/> },
+        /* ⚠ 어음으로 정산한 건은 상태만 보면 '입금 완료'다 — 회계로는 맞지만(외상매출금이
+           받을어음으로 바뀐 것) **통장에는 아직 돈이 없다.** 배지가 없으면 목록에서 이미
+           받은 돈으로 읽힌다. 아직 만기 전인 어음이 걸려 있으면 그 사실을 여기서 알린다. */
+        { key: 'status', header: '상태', render: inv => {
+          const held = (inv.matches || []).filter(m => m.noteId && m.noteStatus === 'held')
+          const due = held.map(m => m.noteDueOn).filter(Boolean).sort()[0]
+          return (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <StatusBadge status={effStatus(inv)}/>
+              {held.length > 0 &&
+                <span className="badge warn" style={{ fontSize: 10 }}
+                      title={`어음으로 받았어요. 만기 ${due} 에 통장으로 들어옵니다.`}>
+                  어음{due ? ` ${due.slice(5).replace('-', '/')}` : ''}
+                </span>}
+            </span>
+          )
+        } },
         // 아직 안 받은/안 낸 청구서는 목록에서 바로 처리 버튼. 누르면 상세의 매칭 탭이 열린다.
         { key: 'action', header: '', align: 'right', render: inv => (
           inv.remainAmount > 0 && (

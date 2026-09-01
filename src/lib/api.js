@@ -256,7 +256,14 @@ function adaptInvoice(row) {
     // 어느 통장으로 들어올/들어온 돈인가 — 목록에서 보여주려면 이름이 필요하다
     account: row.account_name || '',
     // id 는 정산 취소에 필요하다(없으면 화면에서 어느 매칭인지 지목할 수 없다)
-    matches: (row.matches || []).map(m => ({ id: m.id, txnId: m.txn_id, amount: m.amount, matchedAt: dayOf(m.matched_at) })),
+    /* ⚠ 어음 정보를 함께 넘긴다. 어음으로 정산한 행은 txn_id 가 없어서, 이 필드가 없으면
+       화면이 그냥 '입금 완료'로 그린다 — **통장에 없는 돈을 받은 것으로 착각한다.**
+       (필드를 넷만 넘기던 탓에 서버가 내려준 어음 정보가 여기서 통째로 버려지고 있었다.) */
+    matches: (row.matches || []).map(m => ({
+      id: m.id, txnId: m.txn_id, amount: m.amount, matchedAt: dayOf(m.matched_at),
+      noteId: m.note_id || null, noteNo: m.note_no || '',
+      noteDueOn: m.note_due_on || '', noteStatus: m.note_status || '',
+    })),
     docs: (row.docs || []).map(d => ({ id: d.id, url: d.url, name: d.name, type: d.doc_type || '기타', size: d.size || 0 })),
     /* 거래명세서식 품목 내역. 없으면 빈 배열 = 총액만 있는 청구서(기존 방식).
        숫자는 mysql2가 DECIMAL을 문자열로 주기도 해서 여기서 숫자로 맞춰 둔다 —
