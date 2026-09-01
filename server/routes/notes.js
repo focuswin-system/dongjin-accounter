@@ -41,6 +41,33 @@ const ACCT = {
 const KINDS = new Set(['receivable', 'payable'])
 const isRecv = (k) => k === 'receivable'
 
+/**
+ * 같은 어음이 이미 있나.
+ *
+ * 어음번호는 **실물 용지에 인쇄된 번호**라 시스템이 채번하지 않는다(그래서 UNIQUE 도 아니다).
+ * 그런데 그 탓에 같은 어음을 두 번 등록해도 조용히 통과했다 — 없는 채권이 하나 더 생기고,
+ * 만기일에 들어올 돈이 그만큼 부풀어 자금 예측이 틀어진다. 되돌리려면 어느 쪽이 진짜인지
+ * 사람이 종이를 보고 골라야 한다.
+ *
+ * 번호만으로 판정하지 않는다 — 은행·지점이 다르면 번호가 겹칠 수 있다.
+ * **거래처 + 어음번호 + 방향**이 같을 때만 같은 어음으로 본다.
+ * 번호가 비어 있으면 판정하지 않는다(빈 번호끼리 묶으면 서로 다른 어음이 막힌다).
+ *
+ * @param excludeId 수정할 때 자기 자신은 뺀다
+ */
+const duplicateNote = async (db, { kind, note_no, vendor_id }, excludeId = null) => {
+  const no = String(note_no || '').trim()
+  if (!no || !vendor_id) return null
+  const [[dup]] = await db.execute(
+    `SELECT n.id, n.status, n.amount, n.due_on, v.name AS vendor_name
+       FROM notes n LEFT JOIN vendors v ON v.id = n.vendor_id
+      WHERE n.kind = ? AND n.vendor_id = ? AND TRIM(n.note_no) = ?
+        ${excludeId ? 'AND n.id <> ?' : ''}
+      LIMIT 1`,
+    excludeId ? [kind, vendor_id, no, excludeId] : [kind, vendor_id, no])
+  return dup || null
+}
+
 const dateError = (v, label) => {
   if (!v) return `${label}을 선택해주세요`
   return /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? null : `${label} 형식이 올바르지 않아요`
@@ -110,6 +137,18 @@ router.post('/', async (req, res, next) => {
     if (!vendor_id) return res.status(400).json({ error: '거래처를 선택해주세요' })
     /* 발행일이 마감된 달이면 막는다 — 어음 수취는 그 달의 채권을 바꾸는 일이다 */
     { const e = await closedPeriodError(req.db, issued_on); if (e) return res.status(409).json({ error: e }) }
+    /* 같은 어음을 두 번 적는 것을 막는다. 통과시키면 없는 채권이 하나 더 생긴다. */
+    {
+      const dup = await duplicateNote(req.db, { kind, note_no, vendor_id })
+      if (dup) {
+        const st = dup.status === 'settled' ? '결제됨' : dup.status === 'dishonored' ? '부도' : '보유 중'
+        return res.status(409).json({
+          error: `이미 등록된 어음이에요 — ${dup.vendor_name || '거래처'} ${String(note_no).trim()} `
+               + `(${Number(dup.amount).toLocaleString('ko-KR')}원 · 만기 ${dup.due_on} · ${st}). `
+               + '다른 어음이면 어음번호를 확인해주세요.',
+        })
+      }
+    }
 
     const conn = await req.db.getConnection()
     try {
@@ -316,8 +355,19 @@ router.put('/:id', async (req, res, next) => {
     const amt = intOf(amount)
     { const e = amountError(amt); if (e) return res.status(400).json({ error: e }) }
 
-    const [[n]] = await req.db.execute('SELECT status, match_id FROM notes WHERE id = ?', [req.params.id])
+    const [[n]] = await req.db.execute('SELECT kind, status, match_id FROM notes WHERE id = ?', [req.params.id])
     if (!n) return res.status(404).json({ error: '없는 어음이에요' })
+    /* 수정으로도 같은 어음이 둘 되면 안 된다 — 등록만 막으면 번호를 고쳐서 겹칠 수 있다.
+       kind 는 수정 폼에 없으므로 저장된 값을 쓴다. */
+    {
+      const dup = await duplicateNote(req.db, { kind: n.kind, note_no, vendor_id }, req.params.id)
+      if (dup) {
+        return res.status(409).json({
+          error: `그 번호는 이미 다른 어음이 쓰고 있어요 — ${dup.vendor_name || '거래처'} `
+               + `${Number(dup.amount).toLocaleString('ko-KR')}원 · 만기 ${dup.due_on}.`,
+        })
+      }
+    }
     /* ⚠ 금액은 청구서 정산액과 묶여 있다 — 결제·정산이 걸린 뒤에는 못 바꾼다.
          바꾸면 청구서의 미수금이 어음 금액과 어긋난다. */
     if (n.status !== 'held') return res.status(409).json({ error: '결제·부도된 어음은 고칠 수 없어요' })
