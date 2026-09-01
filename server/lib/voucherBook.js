@@ -51,10 +51,12 @@ async function listVouchers(db, { from, to, kind = 'all' }) {
   const [noteRows] = await db.execute(`
     SELECT n.id, n.kind, n.amount, n.issued_on, n.note_no, n.origin_txn_id,
            n.status, n.due_on, n.dishonored_on, n.invoice_id,
-           v.name AS vendor_name, t.account_code AS origin_acct_code
+           v.name AS vendor_name,
+           /* ⚠ 거래를 다시 읽지 않는다 — 만기 결제가 그 거래의 account_code 를
+              어음 계정으로 덮어쓰기 때문이다. 발행 시점에 굳혀 둔 값을 쓴다. */
+           n.origin_acct_code
       FROM notes n
       LEFT JOIN vendors v ON v.id = n.vendor_id
-      LEFT JOIN transactions t ON t.id = n.origin_txn_id
      WHERE ${noteWhere.join(' AND ')}
      ORDER BY n.issued_on, n.id`, noteArgs).catch(() => [[]])
 

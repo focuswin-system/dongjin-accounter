@@ -79,7 +79,8 @@ const rowOut = (r) => ({
   amount: Number(r.amount) || 0,
   issuedOn: r.issued_on, dueOn: r.due_on, status: r.status,
   accountId: r.account_id, accountName: r.account_name || '',
-  settledOn: r.settled_on, dishonoredOn: r.dishonored_on, txnId: r.txn_id, originTxnId: r.origin_txn_id,
+  settledOn: r.settled_on, dishonoredOn: r.dishonored_on, txnId: r.txn_id,
+  originTxnId: r.origin_txn_id, originAcctCode: r.origin_acct_code,
   invoiceId: r.invoice_id, invoiceNo: r.invoice_no || '',
   memo: r.memo || '', createdAt: r.created_at,
 })
@@ -191,12 +192,24 @@ router.post('/', async (req, res, next) => {
         await recalcInvoiceStatus(conn, invoice_id)
       }
 
+      /* ⚠ 원거래의 계정과목을 **지금 굳혀 둔다.**
+           만기 결제 때 그 거래는 결제 분개로 바뀌며 account_code 가 어음 계정으로
+           덮어써진다. 전표를 그릴 때 거래를 다시 읽으면 발행 분개가
+           '차 2102 / 대 2102'가 되어 비용·매출이 장부에서 사라진다
+           (차·대변 합계는 맞아 경고도 안 뜬다). */
+      let originAcct = null
+      if (origin_txn_id) {
+        const [[ot]] = await conn.execute(
+          'SELECT account_code FROM transactions WHERE id = ?', [origin_txn_id])
+        originAcct = ot?.account_code || null
+      }
+
       const id = randomUUID()
       await conn.execute(
-        `INSERT INTO notes (id, kind, note_no, vendor_id, amount, issued_on, due_on, status, invoice_id, match_id, origin_txn_id, memo)
-         VALUES (?,?,?,?,?,?,?, 'held', ?,?,?,?)`,
+        `INSERT INTO notes (id, kind, note_no, vendor_id, amount, issued_on, due_on, status, invoice_id, match_id, origin_txn_id, origin_acct_code, memo)
+         VALUES (?,?,?,?,?,?,?, 'held', ?,?,?,?,?)`,
         [id, kind, String(note_no || '').trim(), vendor_id, amt, issued_on, due_on,
-         invoice_id || null, matchId, origin_txn_id || null, String(memo || '').trim()])
+         invoice_id || null, matchId, origin_txn_id || null, originAcct, String(memo || '').trim()])
 
       await conn.commit()
       res.json({ ok: true, id })

@@ -644,10 +644,11 @@ async function dailyTrial(db, date, { includeIssuance = true } = {}) {
   const [notes] = await db.execute(`
     SELECT n.id, n.kind, n.amount, n.issued_on, n.note_no, n.invoice_id, n.origin_txn_id,
            n.status, n.due_on, n.dishonored_on,
-           v.name AS vendor_name, t.account_code AS origin_acct_code
+           v.name AS vendor_name,
+           /* ⚠ 위와 같은 이유 — 굳혀 둔 값을 쓴다(voucherBook.js 주석 참조) */
+           n.origin_acct_code
       FROM notes n
       LEFT JOIN vendors v ON v.id = n.vendor_id
-      LEFT JOIN transactions t ON t.id = n.origin_txn_id
      WHERE n.issued_on = ?
         OR (n.status = 'dishonored' AND COALESCE(n.dishonored_on, n.due_on) = ?)`,
     [date, date]).catch(() => [[]])

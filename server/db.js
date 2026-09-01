@@ -996,6 +996,13 @@ async function initDb(conn) {
         /* 부도난 날. 부도 전표(수취 분개의 반대)를 이 날짜로 세운다 —
            날짜가 없으면 부도난 어음이 받을어음 잔액에 영원히 남는다. */
         dishonored_on VARCHAR(20),
+        /* ⚠ 발행 시점 원거래의 계정과목 **스냅샷**.
+           어음 수취·발행 전표의 상대 계정이다(차 비용 / 대 지급어음의 '비용' 자리).
+           만기 결제 때 그 거래는 결제 분개(차 지급어음 / 대 예금)로 바뀌면서
+           account_code 가 어음 계정으로 덮어써진다 — 거래를 그때 다시 읽으면
+           발행 전표가 '차 2102 / 대 2102'가 되어 **비용이 장부에서 사라진다.**
+           차·대변 합계는 맞아서 경고도 안 뜬다. 그래서 그때의 값을 여기 굳혀 둔다. */
+        origin_acct_code VARCHAR(20),
         memo        TEXT,
         created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         KEY idx_notes_due (status, due_on),
@@ -1088,6 +1095,14 @@ async function initDb(conn) {
        이미 부도로 적힌 어음은 만기일로 채운다 — 부도는 만기에 판명되므로 가장 가깝고,
        비워 두면 그 어음의 반대 분개가 영영 안 선다. */
     await ensureColumn('notes', 'dishonored_on', 'dishonored_on VARCHAR(20)')
+    /* 발행 시점 원거래 계정과목 스냅샷. 이미 결제된 어음은 원거래가 어음 계정으로
+       덮어써져 되살릴 값이 없다 — 비워 둔다(전표가 '확인 필요'로 선다). */
+    await ensureColumn('notes', 'origin_acct_code', 'origin_acct_code VARCHAR(20)')
+    await c.execute(
+      `UPDATE notes n JOIN transactions t ON t.id = n.origin_txn_id
+          SET n.origin_acct_code = t.account_code
+        WHERE n.origin_txn_id IS NOT NULL AND n.origin_acct_code IS NULL
+          AND n.status = 'held' AND t.account_code IS NOT NULL`)
     await c.execute(
       "UPDATE notes SET dishonored_on = due_on WHERE status = 'dishonored' AND dishonored_on IS NULL")
     await ensureColumn('vendors', 'active', "active TINYINT(1) NOT NULL DEFAULT 1")
