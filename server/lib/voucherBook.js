@@ -13,7 +13,7 @@
  *   그대로 세우고 '확인 필요'로 표시해, 받는 사람이 물어볼 수 있게 한다.
  */
 
-const { transactionVoucher, withNames } = require('./voucher')
+const { transactionVoucher, noteVoucher, withNames } = require('./voucher')
 
 /**
  * 기간 안의 거래를 전표로 만든다.
@@ -35,6 +35,26 @@ async function listVouchers(db, { from, to, kind = 'all' }) {
      WHERE ${where.join(' AND ')}
      ORDER BY t.date, t.id`, args)
 
+  /* 어음 수취·발행도 전표다 — **거래가 아니라서 위 조회에 안 걸린다.**
+   * 빼면 만기 결제 전표의 상대 계정(1205·2102)이 이 파일 안에서 대변에만 나타나,
+   * 받는 사람(세무사·회계 프로그램)이 어디서 생긴 계정인지 알 수 없다.
+   *
+   * ⚠ kind 필터는 어음에도 건다 — 받을어음은 income 쪽, 지급어음은 expense 쪽으로 본다.
+   *   '입금만' 뽑았는데 지급어음이 섞이면 받는 쪽이 그 파일을 못 믿는다.
+   * ⚠ 부도난 어음도 뺀 적 없다(발행일 기준). 되돌리는 것은 부도일의 반대 분개다. */
+  const noteWhere = ['n.issued_on >= ?', 'n.issued_on <= ?']
+  const noteArgs = [from, to]
+  if (kind === 'income')  noteWhere.push("n.kind = 'receivable'")
+  if (kind === 'expense') noteWhere.push("n.kind = 'payable'")
+  const [noteRows] = await db.execute(`
+    SELECT n.id, n.kind, n.amount, n.issued_on, n.note_no, n.origin_txn_id,
+           v.name AS vendor_name, t.account_code AS origin_acct_code
+      FROM notes n
+      LEFT JOIN vendors v ON v.id = n.vendor_id
+      LEFT JOIN transactions t ON t.id = n.origin_txn_id
+     WHERE ${noteWhere.join(' AND ')}
+     ORDER BY n.issued_on, n.id`, noteArgs).catch(() => [[]])
+
   /* 계정과목 이름은 한 번에 붙인다. 전표마다 withNames 를 부르면 거래 수만큼
      같은 조회가 반복돼, 한 분기(수백 건)를 뽑을 때 눈에 띄게 느려진다. */
   const vouchers = rows.map(t => ({
@@ -46,6 +66,20 @@ async function listVouchers(db, { from, to, kind = 'all' }) {
     memo: t.memo || '',
     category: t.category || '',
   }))
+  for (const nt of noteRows) {
+    vouchers.push({
+      ...noteVoucher(nt, nt.origin_txn_id ? { account_code: nt.origin_acct_code } : null),
+      kind: nt.kind === 'receivable' ? 'income' : 'expense',
+      amount: Number(nt.amount) || 0,
+      vendor_name: nt.vendor_name || '',
+      account_name: '',            // 어음은 통장을 안 거친다
+      memo: `어음 ${nt.note_no || ''}`.trim(),
+      category: nt.kind === 'receivable' ? '받을어음' : '지급어음',
+    })
+  }
+  // 날짜 순으로 다시 세운다 — 어음을 뒤에 붙였으므로 그대로 두면 파일 끝에 몰린다
+  vouchers.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.id < b.id ? -1 : 1)))
+
   const codes = [...new Set(vouchers.flatMap(v => v.lines.map(l => String(l.code))))]
   if (codes.length === 0) return vouchers
   const [subs] = await db.execute(

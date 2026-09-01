@@ -20,7 +20,7 @@ const { repaymentSchedule } = require('./loan')
 const { dueDatesToGenerate, cashDateOf } = require('./recurrence')
 const { inflowCertainty, outflowCertainty } = require('./certainty')
 // 청구서 발행 분개는 전표 규칙과 한 벌이어야 한다 — 두 벌이면 전표와 일계표가 다른 말을 한다
-const { invoiceVoucher } = require('./voucher')
+const { invoiceVoucher, noteVoucher } = require('./voucher')
 const { recurFromSupply } = require('./vat')
 const { kstDate } = require('../db')
 
@@ -627,6 +627,40 @@ async function dailyTrial(db, date, { includeIssuance = true } = {}) {
     }
   }
 
+  /* 어음 수취·발행 분개.
+   *
+   * ── 왜 넣나 ──
+   * 어음 수취는 **거래를 만들지 않는다**(routes/notes.js). 그래서 위 두 소스(완료 거래·
+   * 청구서 발행) 어디에도 안 걸린다. 그런데 만기 결제 거래의 상대 계정은 1205 받을어음이다
+   * — 즉 **차변에 선 적 없는 계정이 대변에서 사라진다.** 바로 위 청구서 발행 분개가
+   * 외상매출금에 대해 경고한 것과 똑같은 사고이고, 누적하면 받을어음이 마이너스로 남는다.
+   *
+   * ⚠ 부도난 어음도 그날 분개가 서 있어야 한다 — 되돌리는 것은 부도일의 반대 분개이지
+   *   수취일의 기록을 지우는 게 아니다. 그래서 status 로 거르지 않고 **발행일이 그날인
+   *   어음 전부**를 센다.
+   * ⚠ 거래에서 온 어음은 그 거래의 계정과목이 상대다 — 함께 읽어 넘긴다. */
+  let noteCount = 0
+  const pendingNotes = []
+  const [notes] = await db.execute(`
+    SELECT n.id, n.kind, n.amount, n.issued_on, n.note_no, n.invoice_id, n.origin_txn_id,
+           v.name AS vendor_name, t.account_code AS origin_acct_code
+      FROM notes n
+      LEFT JOIN vendors v ON v.id = n.vendor_id
+      LEFT JOIN transactions t ON t.id = n.origin_txn_id
+     WHERE n.issued_on = ?`, [date]).catch(() => [[]])
+  for (const nt of notes) {
+    const v = noteVoucher(nt, nt.origin_txn_id ? { account_code: nt.origin_acct_code } : null)
+    if (!v.balanced) {
+      pendingNotes.push({
+        id: nt.id, amount: num(nt.amount), kind: nt.kind,
+        note_no: nt.note_no || '', missing: v.missing || '계정과목이 없어요',
+      })
+      continue
+    }
+    for (const l of v.lines) bump(l.code, l.side, l.amount)
+    noteCount++
+  }
+
   const lines = [...acc.values()].sort((a, b) => (a.code < b.code ? -1 : 1))
   const debitTotal = lines.reduce((s, l) => s + l.debit, 0)
   const creditTotal = lines.reduce((s, l) => s + l.credit, 0)
@@ -637,6 +671,8 @@ async function dailyTrial(db, date, { includeIssuance = true } = {}) {
     /* 전표를 세우지 못한 청구서. 합계에는 안 들어갔으므로 차·대변은 여전히 맞는다 —
      * "장부가 틀렸다"가 아니라 "아직 안 적었다"이므로 경고 톤도 달라야 한다. */
     pendingInvoices,
+    // 어음도 같은 규칙 — 센 건수와 아직 못 세운 것을 따로 알린다
+    noteCount, pendingNotes,
     debitTotal, creditTotal,
     /* 합계가 같은 것만으로는 '맞다'고 할 수 없다.
      * 한쪽 다리가 빠진 거래 둘의 금액이 같으면(입금 100만 계좌 미지정 + 지출 100만 계정과목 없음)

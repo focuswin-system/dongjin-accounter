@@ -34,6 +34,8 @@ const AP   = '2101'                    // 외상매입금
 const VAT_RECEIVABLE = '1306'          // 부가세대급금 (매입세액)
 const VAT_PAYABLE    = '2208'          // 부가세예수금 (매출세액)
 const DEFAULT_SALES  = '4102'          // 제품매출 — 매출 청구서에 비목이 없을 때의 기본값
+const NOTE_RECEIVABLE = '1205'         // 받을어음
+const NOTE_PAYABLE    = '2102'         // 지급어음
 
 const TYPE = { IN: '입금전표', OUT: '출금전표', TRANSFER: '대체전표' }
 
@@ -134,6 +136,58 @@ function invoiceVoucher(inv) {
 }
 
 /**
+ * 어음 수취·발행 → 전표.
+ *
+ * ⚠ **이게 없으면 장부가 성립하지 않는다.**
+ *   어음 수취는 거래(transactions)를 만들지 않으므로 일계표가 세지 않았다. 그런데 만기
+ *   결제 거래는 상대 계정이 1205(받을어음)다 — 즉 **차변에 선 적 없는 계정이 대변에서
+ *   사라진다.** 이 파일 머리말이 외상매출금에 대해 경고한 것과 같은 사고다.
+ *   누적하면 받을어음이 마이너스로 남고 시산표가 안 맞는다.
+ *
+ * 자금이 움직이지 않으므로 **항상 대체전표**다.
+ *
+ *   받을어음   차변 1205 받을어음 / 대변 (상대)
+ *   지급어음   차변 (상대)        / 대변 2102 지급어음
+ *
+ * 상대 계정은 어음이 어디서 왔느냐로 갈린다.
+ *   청구서에서   그 채권·채무가 어음으로 바뀐 것 → 외상매출금 1204 / 외상매입금 2101
+ *   거래에서     비용·수익이 그때 발생한 것      → 그 거래의 계정과목
+ *   맨손으로     상대를 알 수 없다               → 외상매출금·외상매입금으로 본다(가장 흔하다)
+ *
+ * @param note        notes 행 (kind·amount·issued_on·note_no·invoice_id·origin_txn_id)
+ * @param originTxn   origin_txn_id 가 가리키는 거래(있으면). account_code 만 쓴다.
+ */
+function noteVoucher(note, originTxn = null) {
+  const amount = num(note.amount)
+  const recv = note.kind === 'receivable'
+  /* 거래에서 온 어음이면 그 거래의 계정과목이 상대다. 없으면 외상 계정으로 본다.
+     ⚠ 거래의 account_code 가 비어 있으면(비목 미지정) 외상으로 갈음하지 않는다 —
+       그러면 비용이 통째로 사라진다. 빈 채로 두어 build 가 'missing' 을 달게 한다. */
+  const other = originTxn
+    ? (originTxn.account_code || null)
+    : (recv ? AR : AP)
+
+  const lines = recv
+    ? [line('debit', NOTE_RECEIVABLE, amount), line('credit', other, amount)]
+    : [line('debit', other, amount), line('credit', NOTE_PAYABLE, amount)]
+
+  const v = build(TYPE.TRANSFER, {
+    source: 'note',
+    id: note.id,
+    date: note.issued_on,
+    summary: `${recv ? '받을어음' : '지급어음'} ${note.note_no || ''} ${recv ? '수취' : '발행'}`.replace(/\s+/g, ' ').trim(),
+    counterparty: note.vendor_name || '',
+  }, lines)
+
+  if (!other) {
+    v.missing = originTxn
+      ? '어음으로 적은 거래에 비목이 없어 상대 계정이 정해지지 않았어요'
+      : '어음의 상대 계정을 알 수 없어요'
+  }
+  return v
+}
+
+/**
  * 전표 줄에 계정과목 이름을 붙인다.
  *
  * 코드만 내보내면 화면이 계정과목표를 다시 조회해야 하고, 인쇄본에는 숫자만 남아
@@ -162,5 +216,6 @@ async function withNames(db, voucher, extra = {}) {
 
 module.exports = {
   TYPE, CASH, AR, AP, VAT_RECEIVABLE, VAT_PAYABLE, DEFAULT_SALES,
-  transactionVoucher, invoiceVoucher, withNames,
+  NOTE_RECEIVABLE, NOTE_PAYABLE,
+  transactionVoucher, invoiceVoucher, noteVoucher, withNames,
 }
