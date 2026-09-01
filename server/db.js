@@ -958,6 +958,45 @@ async function initDb(conn) {
         FOREIGN KEY (vendor_id) REFERENCES vendors(id)
       )
     `)
+    /* ── 어음 ────────────────────────────────────────────────────────
+     * 거래처가 어음으로 주거나(받을어음), 우리가 어음을 끊어 주는(지급어음) 경우.
+     *
+     * ⚠ **어음을 받은 건 돈을 받은 게 아니다.** 만기가 와야 현금이 된다.
+     *   그래서 수취 시점에는 **거래를 만들지 않는다** — 청구서 정산(invoice_matches)에만
+     *   txn_id 없이 기록한다(그 칸은 nullable 이다). 그러면
+     *     · 청구서는 정산돼 미수금에서 빠지고
+     *     · 계좌 잔액은 안 움직인다(잔액은 status='입금완료' 만 센다)
+     *   회계로는 외상매출금 1204 ↓ / 받을어음 1205 ↑ 이다.
+     *
+     *   만기 결제 때 비로소 거래를 만든다(입금완료 + 계좌) → 예금 ↑ / 받을어음 ↓.
+     *   부도면 그 invoice_matches 행을 지운다 → 청구서가 **다시 미수로 돌아온다.**
+     *
+     * ⚠ 지급어음은 방향만 반대다(외상매입금 2101 ↓ / 지급어음 2102 ↑).
+     *   같은 표에 kind 로 담는다 — 갈라 두면 만기·부도 규칙이 두 벌이 되어 어긋난다.
+     */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS notes (
+        id          VARCHAR(36) PRIMARY KEY,
+        kind        ENUM('receivable','payable') NOT NULL,
+        note_no     VARCHAR(60),               -- 어음번호(실물에 적힌 번호)
+        vendor_id   VARCHAR(36),               -- 받을어음: 발행인 / 지급어음: 받는 곳
+        amount      BIGINT NOT NULL DEFAULT 0,
+        issued_on   VARCHAR(20) NOT NULL,      -- 발행일
+        due_on      VARCHAR(20) NOT NULL,      -- 만기일 — 자금 예측의 축이다
+        status      ENUM('held','settled','dishonored') NOT NULL DEFAULT 'held',
+        account_id  VARCHAR(36),               -- 만기에 드나들 계좌(결제할 때 확정)
+        settled_on  VARCHAR(20),
+        txn_id      VARCHAR(36),               -- 만기 결제로 만들어진 거래
+        invoice_id  VARCHAR(36),               -- 어느 청구서에서 왔나(선택)
+        match_id    VARCHAR(36),               -- 그때 남긴 invoice_matches 행 (부도 때 되돌린다)
+        memo        TEXT,
+        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_notes_due (status, due_on),
+        KEY idx_notes_vendor (vendor_id),
+        FOREIGN KEY (vendor_id) REFERENCES vendors(id)
+      )
+    `)
+
     await c.execute(`
       CREATE TABLE IF NOT EXISTS savings_payments (
         id          VARCHAR(36) PRIMARY KEY,

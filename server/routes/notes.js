@@ -1,0 +1,335 @@
+const { Router } = require('express')
+const { randomUUID } = require('crypto')
+const { kstToday } = require('../db')
+const { closedPeriodError } = require('../lib/closing')
+const { rollbackQuietly } = require('../lib/tx')
+const { ledgerError, amountError, SETTLED_INCOME, SETTLED_EXPENSE } = require('../lib/ledger')
+const { moneyOf: intOf } = require('../lib/money')
+const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
+
+const router = Router()
+
+/**
+ * 어음 — 받을어음(거래처가 우리에게) · 지급어음(우리가 거래처에).
+ *
+ * ── 최우선 규칙: 어음을 받은 건 돈을 받은 게 아니다 ──
+ * 만기가 와야 현금이 된다. 그래서 **수취 시점에는 거래(transactions)를 만들지 않는다.**
+ * 대신 청구서 정산(invoice_matches)에 txn_id 없이 기록한다(그 칸은 nullable 이다).
+ *
+ *   수취   청구서는 정산돼 미수금에서 빠지고, 계좌 잔액은 안 움직인다.
+ *          (잔액은 status='입금완료'/'지급완료' 인 거래만 센다 — routes/accounts.js)
+ *          회계로는 외상매출금 1204 ↓ / 받을어음 1205 ↑.
+ *   만기   그때 비로소 거래를 만든다(완료 + 계좌) → 예금 ↑ / 받을어음 ↓.
+ *   부도   그 invoice_matches 행을 지운다 → **청구서가 다시 미수로 돌아온다.**
+ *          어음은 dishonored 로 남겨 이력을 지운 것처럼 보이지 않게 한다.
+ *
+ * ⚠ 만약 수취 때 '입금완료' 거래를 만들면 **통장에 없는 돈이 잔액에 잡힌다.**
+ *   이 앱에서 가장 크게 틀어지는 종류의 사고다 — 그래서 일부러 안 만든다.
+ *
+ * ⚠ 지급어음은 방향만 반대다(외상매입금 2101 ↓ / 지급어음 2102 ↑).
+ *   한 라우터에 담는다 — 갈라 두면 만기·부도 규칙이 두 벌이 되어 언젠가 어긋난다.
+ *
+ * ⚠ 멀티테넌트 — 전역 풀 금지. req.db 로만 질의한다.
+ */
+
+// 계정과목 — 표준 시딩에 이미 있는 코드다(account_subjects).
+const ACCT = {
+  receivable: '1205',   // 받을어음 (자산·당좌자산)
+  payable:    '2102',   // 지급어음 (부채·유동부채)
+}
+
+const KINDS = new Set(['receivable', 'payable'])
+const isRecv = (k) => k === 'receivable'
+
+const dateError = (v, label) => {
+  if (!v) return `${label}을 선택해주세요`
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? null : `${label} 형식이 올바르지 않아요`
+}
+
+const rowOut = (r) => ({
+  id: r.id, kind: r.kind, noteNo: r.note_no || '',
+  vendorId: r.vendor_id, vendorName: r.vendor_name || '',
+  amount: Number(r.amount) || 0,
+  issuedOn: r.issued_on, dueOn: r.due_on, status: r.status,
+  accountId: r.account_id, accountName: r.account_name || '',
+  settledOn: r.settled_on, txnId: r.txn_id,
+  invoiceId: r.invoice_id, invoiceNo: r.invoice_no || '',
+  memo: r.memo || '', createdAt: r.created_at,
+})
+
+const SELECT = `
+  SELECT n.*, v.name AS vendor_name, a.name AS account_name, i.invoice_no
+    FROM notes n
+    LEFT JOIN vendors  v ON v.id = n.vendor_id
+    LEFT JOIN accounts a ON a.id = n.account_id
+    LEFT JOIN invoices i ON i.id = n.invoice_id`
+
+/* 목록 — 만기가 가까운 것부터. 보유 중인 것이 먼저 서고, 끝난 것(결제·부도)은 뒤로 간다.
+   "무엇을 아직 못 받았나"가 이 화면을 여는 이유이기 때문이다. */
+router.get('/', async (req, res, next) => {
+  try {
+    const where = []
+    const params = []
+    if (KINDS.has(req.query.kind)) { where.push('n.kind = ?'); params.push(req.query.kind) }
+    if (['held', 'settled', 'dishonored'].includes(req.query.status)) {
+      where.push('n.status = ?'); params.push(req.query.status)
+    }
+    const [rows] = await req.db.execute(
+      `${SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+        ORDER BY FIELD(n.status, 'held', 'dishonored', 'settled'), n.due_on ASC
+        LIMIT 500`, params)
+    res.json(rows.map(rowOut))
+  } catch (e) { next(e) }
+})
+
+router.get('/:id', async (req, res, next) => {
+  try {
+    const [[r]] = await req.db.execute(`${SELECT} WHERE n.id = ?`, [req.params.id])
+    if (!r) return res.status(404).json({ error: '없는 어음이에요' })
+    res.json(rowOut(r))
+  } catch (e) { next(e) }
+})
+
+/**
+ * 어음 등록.
+ *
+ * invoice_id 를 주면 **그 청구서를 어음으로 정산한다** — 거래는 안 만들고
+ * invoice_matches 에만 남긴다(위 머리말). 안 주면 어음만 대장에 올린다.
+ */
+router.post('/', async (req, res, next) => {
+  try {
+    const { kind, note_no, vendor_id, amount, issued_on, due_on, invoice_id, memo } = req.body
+    if (!KINDS.has(kind)) return res.status(400).json({ error: '받을어음인지 지급어음인지 골라주세요' })
+    { const e = dateError(issued_on, '발행일'); if (e) return res.status(400).json({ error: e }) }
+    { const e = dateError(due_on, '만기일');   if (e) return res.status(400).json({ error: e }) }
+    /* ⚠ 만기가 발행보다 앞설 수 없다. 거꾸로 넣으면 자금 예측에서 이미 지난 날로
+         잡혀 "받을 돈"이 조용히 사라진다. */
+    if (due_on < issued_on) return res.status(400).json({ error: '만기일이 발행일보다 빠를 수 없어요' })
+    const amt = intOf(amount)
+    { const e = amountError(amt); if (e) return res.status(400).json({ error: e }) }
+    if (!vendor_id) return res.status(400).json({ error: '거래처를 선택해주세요' })
+    /* 발행일이 마감된 달이면 막는다 — 어음 수취는 그 달의 채권을 바꾸는 일이다 */
+    { const e = await closedPeriodError(req.db, issued_on); if (e) return res.status(409).json({ error: e }) }
+
+    const conn = await req.db.getConnection()
+    try {
+      await conn.beginTransaction()
+
+      let matchId = null
+      if (invoice_id) {
+        const [[inv]] = await conn.execute(
+          `SELECT id, kind, invoice_no, total_amount,
+                  COALESCE((SELECT SUM(amount) FROM invoice_matches WHERE invoice_id = ?), 0) AS matched
+             FROM invoices WHERE id = ?`, [invoice_id, invoice_id])
+        if (!inv) { await rollbackQuietly(conn); return res.status(404).json({ error: '없는 청구서예요' }) }
+        /* 방향이 맞아야 한다 — 받을어음은 매출 청구서(issued), 지급어음은 매입(received).
+           섞이면 남의 채권을 우리 채무로 지운 것이 된다. */
+        const want = isRecv(kind) ? 'issued' : 'received'
+        if (inv.kind !== want) {
+          await rollbackQuietly(conn)
+          return res.status(400).json({
+            error: isRecv(kind) ? '받을어음은 우리가 발행한 청구서에만 붙일 수 있어요'
+                                : '지급어음은 우리가 받은 청구서에만 붙일 수 있어요',
+          })
+        }
+        const remain = (Number(inv.total_amount) || 0) - (Number(inv.matched) || 0)
+        if (amt > remain) {
+          await rollbackQuietly(conn)
+          return res.status(400).json({
+            error: `청구서 ${inv.invoice_no}의 남은 금액(${remain.toLocaleString('ko-KR')}원)보다 클 수 없어요`,
+          })
+        }
+        /* ⚠ txn_id 를 **비운다.** 이것이 이 기능의 핵심이다 —
+             거래가 없으므로 계좌 잔액은 그대로이고, 청구서만 정산된다. */
+        matchId = randomUUID()
+        await conn.execute(
+          'INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,0)',
+          [matchId, invoice_id, null, amt])
+        await recalcInvoiceStatus(conn, invoice_id)
+      }
+
+      const id = randomUUID()
+      await conn.execute(
+        `INSERT INTO notes (id, kind, note_no, vendor_id, amount, issued_on, due_on, status, invoice_id, match_id, memo)
+         VALUES (?,?,?,?,?,?,?, 'held', ?,?,?)`,
+        [id, kind, String(note_no || '').trim(), vendor_id, amt, issued_on, due_on,
+         invoice_id || null, matchId, String(memo || '').trim()])
+
+      await conn.commit()
+      res.json({ ok: true, id })
+    } catch (e) { await rollbackQuietly(conn); throw e }
+    finally { conn.release() }
+  } catch (e) { next(e) }
+})
+
+/**
+ * 만기 결제 — 이때 **처음으로** 거래를 만든다.
+ *
+ * 받을어음이면 입금(예금 ↑ / 받을어음 ↓), 지급어음이면 출금(지급어음 ↓ / 예금 ↓).
+ */
+router.post('/:id/settle', async (req, res, next) => {
+  try {
+    const { account_id, date, memo } = req.body
+    const on = date || kstToday()
+    { const e = dateError(on, '결제일'); if (e) return res.status(400).json({ error: e }) }
+    { const e = await closedPeriodError(req.db, on); if (e) return res.status(409).json({ error: e }) }
+
+    const conn = await req.db.getConnection()
+    try {
+      await conn.beginTransaction()
+      /* FOR UPDATE — 같은 어음을 두 번 결제해 거래가 둘 생기는 것을 막는다
+         (차입금 상환·적금 만기와 같은 이유). */
+      const [[n]] = await conn.execute('SELECT * FROM notes WHERE id = ? FOR UPDATE', [req.params.id])
+      if (!n) { await rollbackQuietly(conn); return res.status(404).json({ error: '없는 어음이에요' }) }
+      if (n.status !== 'held') {
+        await rollbackQuietly(conn)
+        return res.status(409).json({
+          error: n.status === 'settled' ? '이미 결제된 어음이에요' : '부도 처리된 어음이에요. 먼저 되돌려주세요.',
+        })
+      }
+
+      const recv = isRecv(n.kind)
+      const txnKind = recv ? 'income' : 'expense'
+      const status  = recv ? SETTLED_INCOME : SETTLED_EXPENSE
+      { const e = ledgerError({ kind: txnKind, account_id, status, method: '계좌이체' })
+        if (e) { await rollbackQuietly(conn); return res.status(400).json({ error: e }) } }
+
+      const txnId = randomUUID()
+      const [[v]] = await conn.execute('SELECT name FROM vendors WHERE id = ?', [n.vendor_id])
+      const label = `${recv ? '받을어음' : '지급어음'} ${n.note_no || ''} 만기`.replace(/\s+/g, ' ').trim()
+      await conn.execute(
+        `INSERT INTO transactions (id, kind, vendor_id, account_id, category, amount, date, method, status, memo, account_code)
+         VALUES (?,?,?,?,?,?,?, '계좌이체', ?,?,?)`,
+        [txnId, txnKind, n.vendor_id || null, account_id || null,
+         recv ? '수금' : '대금 지급', Number(n.amount) || 0, on, status,
+         String(memo || '').trim() || `${v?.name || ''} ${label}`.trim(),
+         /* ⚠ 상대 계정은 **받을어음/지급어음**이다(외상매출금이 아니다).
+              그 채권·채무는 어음을 받을 때 이미 어음으로 바뀌었다. 여기서 또 외상으로
+              적으면 같은 채권이 두 번 사라진다. */
+         recv ? ACCT.receivable : ACCT.payable])
+
+      await conn.execute(
+        `UPDATE notes SET status = 'settled', settled_on = ?, account_id = ?, txn_id = ? WHERE id = ?`,
+        [on, account_id || null, txnId, n.id])
+
+      await conn.commit()
+      res.json({ ok: true, txnId })
+    } catch (e) { await rollbackQuietly(conn); throw e }
+    finally { conn.release() }
+  } catch (e) { next(e) }
+})
+
+/**
+ * 부도 — 못 받았다(또는 우리가 못 갚았다).
+ *
+ * ⚠ **청구서를 미수로 되돌린다.** 어음으로 정산 처리했던 invoice_matches 행을 지운다.
+ *   안 지우면 받지도 못한 돈이 '받은 것'으로 남아 미수금이 실제보다 작아진다 —
+ *   그 상태로 결산하면 못 받을 돈이 장부에서 사라진다.
+ */
+router.post('/:id/dishonor', async (req, res, next) => {
+  try {
+    const conn = await req.db.getConnection()
+    try {
+      await conn.beginTransaction()
+      const [[n]] = await conn.execute('SELECT * FROM notes WHERE id = ? FOR UPDATE', [req.params.id])
+      if (!n) { await rollbackQuietly(conn); return res.status(404).json({ error: '없는 어음이에요' }) }
+      if (n.status === 'settled') {
+        await rollbackQuietly(conn)
+        return res.status(409).json({ error: '이미 결제된 어음이에요. 결제를 먼저 되돌려주세요.' })
+      }
+      if (n.status === 'dishonored') { await rollbackQuietly(conn); return res.json({ ok: true }) }
+
+      if (n.match_id) {
+        await conn.execute('DELETE FROM invoice_matches WHERE id = ?', [n.match_id])
+        if (n.invoice_id) await recalcInvoiceStatus(conn, n.invoice_id)
+      }
+      await conn.execute(
+        `UPDATE notes SET status = 'dishonored', match_id = NULL, memo = ? WHERE id = ?`,
+        [`${n.memo || ''}${n.memo ? ' · ' : ''}부도 ${kstToday()}`.trim(), n.id])
+
+      await conn.commit()
+      res.json({ ok: true, restored: !!n.match_id })
+    } catch (e) { await rollbackQuietly(conn); throw e }
+    finally { conn.release() }
+  } catch (e) { next(e) }
+})
+
+/* 되돌리기 — 결제·부도를 취소하고 '보유'로 되돌린다.
+   ⚠ 결제를 되돌리면 그때 만든 거래도 함께 지운다. 안 지우면 통장에 없는 입금이 남는다.
+   ⚠ 부도를 되돌리는 길은 두지 않는다 — 청구서를 이미 미수로 돌려놨으므로,
+     다시 어음으로 받으려면 어음을 새로 등록하는 편이 흐름이 분명하다. */
+router.post('/:id/unsettle', async (req, res, next) => {
+  try {
+    const conn = await req.db.getConnection()
+    try {
+      await conn.beginTransaction()
+      const [[n]] = await conn.execute('SELECT * FROM notes WHERE id = ? FOR UPDATE', [req.params.id])
+      if (!n) { await rollbackQuietly(conn); return res.status(404).json({ error: '없는 어음이에요' }) }
+      if (n.status !== 'settled') { await rollbackQuietly(conn); return res.status(409).json({ error: '결제된 어음이 아니에요' }) }
+      if (n.settled_on) {
+        const e = await closedPeriodError(conn, n.settled_on)
+        if (e) { await rollbackQuietly(conn); return res.status(409).json({ error: e }) }
+      }
+      if (n.txn_id) await conn.execute('DELETE FROM transactions WHERE id = ?', [n.txn_id])
+      await conn.execute(
+        `UPDATE notes SET status = 'held', settled_on = NULL, txn_id = NULL WHERE id = ?`, [n.id])
+      await conn.commit()
+      res.json({ ok: true })
+    } catch (e) { await rollbackQuietly(conn); throw e }
+    finally { conn.release() }
+  } catch (e) { next(e) }
+})
+
+router.put('/:id', async (req, res, next) => {
+  try {
+    const { note_no, vendor_id, amount, issued_on, due_on, memo } = req.body
+    { const e = dateError(issued_on, '발행일'); if (e) return res.status(400).json({ error: e }) }
+    { const e = dateError(due_on, '만기일');   if (e) return res.status(400).json({ error: e }) }
+    if (due_on < issued_on) return res.status(400).json({ error: '만기일이 발행일보다 빠를 수 없어요' })
+    const amt = intOf(amount)
+    { const e = amountError(amt); if (e) return res.status(400).json({ error: e }) }
+
+    const [[n]] = await req.db.execute('SELECT status, match_id FROM notes WHERE id = ?', [req.params.id])
+    if (!n) return res.status(404).json({ error: '없는 어음이에요' })
+    /* ⚠ 금액은 청구서 정산액과 묶여 있다 — 결제·정산이 걸린 뒤에는 못 바꾼다.
+         바꾸면 청구서의 미수금이 어음 금액과 어긋난다. */
+    if (n.status !== 'held') return res.status(409).json({ error: '결제·부도된 어음은 고칠 수 없어요' })
+    if (n.match_id) {
+      const [[m]] = await req.db.execute('SELECT amount FROM invoice_matches WHERE id = ?', [n.match_id])
+      if (m && Number(m.amount) !== amt) {
+        return res.status(409).json({ error: '청구서에 붙은 어음은 금액을 바꿀 수 없어요. 지우고 다시 등록해주세요.' })
+      }
+    }
+    await req.db.execute(
+      `UPDATE notes SET note_no=?, vendor_id=?, amount=?, issued_on=?, due_on=?, memo=? WHERE id=?`,
+      [String(note_no || '').trim(), vendor_id || null, amt, issued_on, due_on,
+       String(memo || '').trim(), req.params.id])
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const conn = await req.db.getConnection()
+    try {
+      await conn.beginTransaction()
+      const [[n]] = await conn.execute('SELECT * FROM notes WHERE id = ? FOR UPDATE', [req.params.id])
+      if (!n) { await rollbackQuietly(conn); return res.status(404).json({ error: '없는 어음이에요' }) }
+      if (n.status === 'settled') {
+        await rollbackQuietly(conn)
+        return res.status(409).json({ error: '결제된 어음은 지울 수 없어요. 결제를 먼저 되돌려주세요.' })
+      }
+      // 청구서에 붙여 둔 정산도 함께 걷는다 — 남기면 받지도 않은 돈이 정산으로 남는다
+      if (n.match_id) {
+        await conn.execute('DELETE FROM invoice_matches WHERE id = ?', [n.match_id])
+        if (n.invoice_id) await recalcInvoiceStatus(conn, n.invoice_id)
+      }
+      await conn.execute('DELETE FROM notes WHERE id = ?', [n.id])
+      await conn.commit()
+      res.json({ ok: true })
+    } catch (e) { await rollbackQuietly(conn); throw e }
+    finally { conn.release() }
+  } catch (e) { next(e) }
+})
+
+module.exports = router

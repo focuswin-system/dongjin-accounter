@@ -178,6 +178,10 @@ export const NAV_TREE = [
         /* 대여금 — 빌려준 돈. 차입금(자금 조달)과 마주보는 자리라 '자금 운용'에 둔다.
            빌려준 돈은 안 적으면 잊힌다 — 적을 자리가 아예 없던 항목이다. */
         { id: "finance_lending", label: "대여금", icon: Icon.Wallet },
+        /* 어음 — 받을어음(채권)과 지급어음(채무)을 **한 화면에** 담는다.
+           방향만 반대고 만기·부도 규칙이 같아, 갈라 두면 같은 규칙을 두 벌 유지하게 된다.
+           ⚠ 어음은 '아직 현금이 아닌 것'이라 예적금·대여금과 성격이 같다(묶여 있는 돈). */
+        { id: "finance_note", label: "어음", icon: Icon.Receipt },
       ]},
       { label: "현황", items: [
         { id: "finance_dash", label: "재무 현황", icon: Icon.Chart },
@@ -551,6 +555,7 @@ export const LEAF_TAGS = {
   finance_loan:     '대출 차입 융자 상환 이자 원리금',
   finance_investment:'투자 출자 증자 유치 가수금',
   finance_savings:  '예금 적금 정기예금 만기 예치 보증금 임차보증금 관리비보증금',
+  finance_note:     '어음 받을어음 지급어음 약속어음 만기 부도 진성어음',
   finance_lending:  '대여금 빌려준돈 채권 채권명부 대여 회수 원리금 이자수익',
   finance_dash:     '재무 부채 자본 차입현황',
   // 경영

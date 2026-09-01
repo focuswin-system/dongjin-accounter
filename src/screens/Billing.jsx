@@ -104,6 +104,82 @@ const localDate = () => {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 }
 
+/**
+ * 청구서를 **어음으로** 정산한다.
+ *
+ * ⚠ 이 경로만 거래(transactions)를 만들지 않는다. 어음은 만기가 와야 현금이 되므로,
+ *   여기서 거래를 만들면 **통장에 없는 돈이 잔액에 잡힌다.**
+ *   서버(routes/notes.js)가 invoice_matches 에 txn_id 없이 기록해 청구서만 정산한다.
+ *
+ * 만기·부도는 재무관리 › 어음 화면에서 잇는다 — 여기서는 '받았다/줬다'까지만.
+ */
+const NoteSettle = ({ invoice, isIssued, toast, onDone }) => {
+  const [f, setF] = useState({ noteNo: '', amount: '', issuedOn: localDate(), dueOn: '', memo: '' })
+  const [busy, setBusy] = useState(false)
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }))
+  /* 남은 금액을 채워 둔다 — 어음 한 장으로 전액을 받는 경우가 대부분이다.
+     나눠 받으면 고치면 된다(금액 칸 규칙은 위 입금 금액과 같다). */
+  useEffect(() => { set('amount', invoice?.remainAmount ? String(invoice.remainAmount) : '') },
+    [invoice?.id, invoice?.remainAmount])
+
+  const save = async () => {
+    setBusy(true)
+    const res = await api.addNote({
+      kind: isIssued ? 'receivable' : 'payable',
+      note_no: f.noteNo, vendor_id: invoice.vendorId, amount: f.amount,
+      issued_on: f.issuedOn, due_on: f.dueOn, invoice_id: invoice.id, memo: f.memo,
+    })
+    setBusy(false)
+    if (!res.ok) return toast.push(res.error || '어음을 등록하지 못했어요', { tone: 'warn' })
+    toast.push(isIssued ? '어음으로 받은 것으로 처리했어요' : '어음으로 지급한 것으로 처리했어요')
+    onDone()
+  }
+
+  return (
+    <div className="col gap-form">
+      <div className="man-note" style={{ margin: 0 }}>
+        <Icon.Help size={15}/>
+        <div>
+          이 청구서는 <b>정산된 것으로 처리</b>되지만 <b>통장 잔액은 그대로</b>예요.
+          어음은 만기가 와야 현금이 되니까요. 만기 입금은 <b>재무관리 › 어음</b>에서 처리합니다.
+        </div>
+      </div>
+      <div className="row gap-12">
+        <div style={{ flex: 1 }}>
+          <label className="label">어음번호</label>
+          <input className="input num" value={f.noteNo} onChange={e => set('noteNo', e.target.value)}
+            placeholder="예: 자가12345678"/>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className="label">{isIssued ? '받은' : '준'} 금액 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+          <MoneyInput value={f.amount} onChange={raw => set('amount', raw)}/>
+        </div>
+      </div>
+      <div className="row gap-12">
+        <div style={{ flex: 1 }}>
+          <label className="label">발행일 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+          <DateInput className="input num" value={f.issuedOn} onChange={e => set('issuedOn', e.target.value)}/>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className="label">
+            만기일 <span style={{ color: 'var(--neg-ink)' }}>*</span>
+            <span className="text-muted2 fw-600" style={{ marginLeft: 6, fontWeight: 400 }}>· 현금이 되는 날</span>
+          </label>
+          <DateInput className="input num" value={f.dueOn} onChange={e => set('dueOn', e.target.value)}/>
+        </div>
+      </div>
+      <div>
+        <label className="label">메모 <span className="text-muted2">(선택)</span></label>
+        <input className="input" value={f.memo} onChange={e => set('memo', e.target.value)}
+          placeholder="예: 3개월 만기"/>
+      </div>
+      <button className="btn primary" disabled={busy} onClick={save}>
+        <Icon.Check size={14}/> {busy ? '처리 중…' : (isIssued ? '어음으로 받음' : '어음으로 지급')}
+      </button>
+    </div>
+  )
+}
+
 const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onChanged, toast, goRoute }) => {
   const { confirm } = useConfirm()
   // 취소 중인 매칭 id — 같은 줄을 두 번 눌러 이미 지운 매칭을 또 지우려 하는 걸 막는다
@@ -355,7 +431,13 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                 {invoice.remainAmount > 0 && (
                   <div className="col gap-10">
                     <div style={{ display: "flex", background: "var(--surface-2)", borderRadius: 8, padding: 3, gap: 2 }}>
-                      {[["new", "새 거래로 등록"], ["link", `거래내역에서 연결${(relatedCands.length || candidates.length) ? ` (${relatedCands.length || candidates.length})` : ""}`]].map(([v, l]) => (
+                      {[["new", "새 거래로 등록"],
+                        ["link", `거래내역에서 연결${(relatedCands.length || candidates.length) ? ` (${relatedCands.length || candidates.length})` : ""}`],
+                        /* 어음 — **돈이 아직 안 왔는데 청구서는 정산되는** 유일한 경로다.
+                           어음 화면에서만 등록하게 두었더니 "지급하려는데 어음이 없다"가 됐다 —
+                           실무 동선은 청구서를 보다가 "이건 어음으로 받았다"이지,
+                           어음 화면을 먼저 여는 게 아니다. */
+                        ["note", "어음으로"]].map(([v, l]) => (
                         <button key={v} onClick={() => setMatchMode(v)}
                           style={{ flex: 1, padding: "7px 0", border: 0, borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit",
                             background: matchMode === v ? "var(--surface)" : "transparent", color: matchMode === v ? "var(--ink)" : "var(--muted-2)",
@@ -365,7 +447,10 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                       ))}
                     </div>
 
-                    {matchMode === "link" ? (
+                    {matchMode === "note" ? (
+                      <NoteSettle invoice={invoice} isIssued={isIssued} toast={toast}
+                        onDone={() => { setMatchMode("new"); onChanged?.() }}/>
+                    ) : matchMode === "link" ? (
                       candidates.length === 0 ? (
                         <div className="text-sm text-muted" style={{ padding: "10px 0", textAlign: "center", lineHeight: 1.6 }}>
                           연결할 미매칭 {isIssued ? "입금" : "지출"} 거래가 없어요.<br/>'새 거래로 등록'을 쓰거나, 거래내역·엑셀로 먼저 등록하세요.

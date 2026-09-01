@@ -232,6 +232,11 @@ function adaptInvoice(row) {
     invoiceNo: row.invoice_no || row.id,
     kind: row.kind,
     vendor: row.vendor_name || '',
+    /* ⚠ **id 도 함께 넘긴다.** 여태 이름만 있어서, 이 청구서의 거래처를 다시 쓰려는 화면은
+       이름을 id 로 되찾아야 했다(byIdOrUniqueName). 이름은 유일하지 않다 —
+       이 저장소가 한 번 크게 겪은 함정이다(ae20cce "이름으로 고르고 이름으로 되찾던 자리").
+       어음 정산은 거래처 id 가 꼭 필요한데 그게 없어 '거래처를 선택해주세요'로 막혔다. */
+    vendorId: row.vendor_id || null,
     contractId: row.contract_id,
     contract: row.contract_name || '',
     supplyAmount: row.supply_amount,
@@ -1793,6 +1798,43 @@ export const api = {
   },
 
   // ─── 예금·적금 (자금 운용) ────────────────────────────────────
+  /* ── 어음 ──
+     ⚠ 어음 등록은 **거래를 만들지 않는다**(서버 routes/notes.js 머리말).
+        만기 결제(settleNote)에서 비로소 거래가 생긴다. */
+  async getNotes(params = {}) {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== '' && v != null)).toString()
+    try { return await req(`/notes${qs ? '?' + qs : ''}`) } catch { return [] }
+  },
+  async getNote(id) {
+    try { return await req(`/notes/${id}`) } catch { return null }
+  },
+  async addNote(body) {
+    try { const r = await req('/notes', { method: 'POST', body }); return { ok: true, id: r.id } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async updateNote(id, body) {
+    try { await req(`/notes/${id}`, { method: 'PUT', body }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  /** 만기 결제 — 이때 거래가 생기고 계좌 잔액이 움직인다 */
+  async settleNote(id, body) {
+    try { const r = await req(`/notes/${id}/settle`, { method: 'POST', body }); return { ok: true, txnId: r.txnId } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  /** 부도 — 청구서가 **다시 미수로 돌아온다**(붙여 뒀던 정산을 걷는다) */
+  async dishonorNote(id) {
+    try { const r = await req(`/notes/${id}/dishonor`, { method: 'POST' }); return { ok: true, restored: r.restored } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async unsettleNote(id) {
+    try { await req(`/notes/${id}/unsettle`, { method: 'POST' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async deleteNote(id) {
+    try { await req(`/notes/${id}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
   async getSavings() {
     try { return await req('/savings') } catch { return [] }
   },

@@ -21,6 +21,7 @@ import { PaymentRunScreen } from './screens/PaymentRun'
 import { TransferScreen } from './screens/Transfer'
 import { CardPaymentScreen } from './screens/CardPayment'
 import { LendingScreen } from './screens/Lending'
+import { NotesScreen } from './screens/Notes'
 import { PurchaseStatusScreen } from './screens/PurchaseStatus'
 import { FundStatusScreen } from './screens/FundStatus'
 import { PurchaseReqScreen } from './screens/PurchaseReq'
@@ -637,6 +638,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
       case "voucher_book":   return <VoucherBookScreen/>;
       case "transfer":       return <TransferScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
       case "finance_lending": return <LendingScreen/>;
+      case "finance_note":    return <NotesScreen/>;
       case "misc_pl":
       case "misc_income":     return <MiscPLScreen initialTab={route === "misc_income" ? "income" : "expense"}
                                        refreshTrigger={txnVersion}
