@@ -1008,6 +1008,11 @@ async function initDb(conn) {
         KEY idx_notes_due (status, due_on),
         /* 거래 목록이 '이 거래가 어음 결제인가'를 물으며 매번 조인한다 */
         KEY idx_notes_txn (txn_id),
+        /* 같은 어음을 두 번 적는 것을 **DB 가** 막는다. 라우트의 중복 검사는 트랜잭션
+           밖이라 동시에 두 번 보내면 둘 다 통과할 수 있다(TOCTOU).
+           ⚠ note_no 가 NULL 인 행은 이 제약에 걸리지 않는다(MySQL 규칙) — 번호를
+             안 적은 어음끼리는 서로 막지 않아야 하므로 그게 맞다. */
+        UNIQUE KEY uniq_notes_no (kind, vendor_id, note_no),
         KEY idx_notes_vendor (vendor_id),
         FOREIGN KEY (vendor_id) REFERENCES vendors(id)
       )
@@ -1560,6 +1565,7 @@ async function initDb(conn) {
     // 거래 목록이 '이 거래가 어음 결제인가'를 매번 조인해 묻는다(이미 notes 가 있는 DB 를 위해)
     await ensureIndex('notes', 'idx_notes_txn', 'txn_id')
 
+
     /* 카드 종류 — 신용/체크. 결제 방식이 정반대라 한 덩어리로 두면 자금일보가 어긋난다.
      *   credit  사용액이 카드에 쌓이고 **결제일에 통장에서 한꺼번에** 빠진다 → 이체가 필요
      *   check   쓴 **즉시** 통장에서 빠진다 → 결제일이 없고 이체도 없다
@@ -1778,6 +1784,10 @@ async function initDb(conn) {
       }
     }
     await ensureUniqueIndex('contracts', 'uq_contracts_contract_no', 'contract_no')
+    /* 어음 중복 방지 — 라우트의 검사는 트랜잭션 밖이라 동시에 두 번 보내면 둘 다
+       통과할 수 있다(TOCTOU). 번호가 NULL 인 행은 MySQL 규칙상 이 제약에 안 걸리는데,
+       번호를 안 적은 어음끼리는 서로 막지 않아야 하므로 그게 맞다. */
+    await ensureUniqueIndex('notes', 'uniq_notes_no', 'kind, vendor_id, note_no')
     // 홈택스 승인번호는 국세청이 부여한 유일값 → 같은 번호의 청구서가 둘 존재하는 것은 항상 잘못이다.
     // 임포트가 앱에서도 "조회 후 없으면 삽입"으로 막지만, 그 사이의 틈(동시 요청)은 인덱스만 닫는다.
     // NULL 다중 허용이라 승인번호 없는 수기 청구서는 공존한다.

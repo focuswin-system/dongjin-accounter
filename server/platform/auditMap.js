@@ -130,6 +130,16 @@ const AUDIT_RULES = [
   { m: 'DELETE', re: /^\/api\/lendings\/([^/]+)$/,                    res: 'lending', action: 'delete',         target: 1 },
   { m: 'DELETE', re: /^\/api\/lendings\/([^/]+)\/collect\/([^/]+)$/, res: 'lending', action: 'collect-cancel', target: 1 },
 
+  /* ── 어음 ── 종이 한 장이 채권·채무이고, 만기·부도가 **거래를 만들고 지운다.**
+     ⚠ 규칙이 0건이었다. unsettle 은 결제 거래를 DELETE 하고, dishonor·delete 는
+       invoice_matches 를 지워 미수금을 되살린다 — 전부 무기록이었다.
+       (대여금·정기 라우터가 똑같이 빠졌던 사고의 세 번째 반복이다.) */
+  { m: 'POST',   re: /^\/api\/notes\/([^/]+)\/settle$/,    res: 'note', action: 'settle',    target: 1 },
+  { m: 'POST',   re: /^\/api\/notes\/([^/]+)\/dishonor$/,  res: 'note', action: 'dishonor',  target: 1 },
+  { m: 'POST',   re: /^\/api\/notes\/([^/]+)\/unsettle$/,  res: 'note', action: 'unsettle',  target: 1 },
+  { m: 'PUT',    re: /^\/api\/notes\/([^/]+)$/,             res: 'note', action: 'edit',      target: 1 },
+  { m: 'DELETE', re: /^\/api\/notes\/([^/]+)$/,             res: 'note', action: 'delete',    target: 1 },
+
   // ── 적금 ── 납입·만기도 계좌를 움직인다
   { m: 'POST',   re: /^\/api\/savings\/([^/]+)\/pay-missed$/,           res: 'savings', action: 'pay_missed', target: 1 },
   { m: 'POST',   re: /^\/api\/savings\/([^/]+)\/pay$/,                  res: 'savings', action: 'pay',        target: 1 },

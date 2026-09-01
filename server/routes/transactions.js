@@ -577,6 +577,12 @@ router.put('/:id', async (req, res, next) => {
       ['savings', 'txn_id', '예금 가입', '재무관리 > 예금·적금'],
       ['savings_payments', 'txn_id', '적금 납입', '재무관리 > 예금·적금'],
       ['investments', 'txn_id', '투자', '재무관리 > 투자'],
+      /* ⚠ 어음. PATCH(상태변경)만 막고 있었는데, 수정 폼은 status·amount·method 를
+         전부 받는다 — 같은 일을 PUT 으로 할 수 있었다.
+         · 완료로 바꾸면 일계표가 거래와 어음 전표를 **둘 다** 세어 비용이 두 배가 되고
+         · 금액을 바꾸면 notes.amount 와 어긋나 자금예측·전표는 옛 금액, 통장은 새 금액이 된다. */
+      ['notes', 'origin_txn_id', '어음으로 적은', '어음'],
+      ['notes', 'txn_id', '어음 만기 결제', '어음'],
     ]
     for (const [table, col, label, where] of OWNED) {
       const [[hit]] = await req.db.execute(`SELECT 1 AS x FROM ${table} WHERE ${col} = ? LIMIT 1`, [req.params.id])
@@ -797,6 +803,11 @@ router.delete('/:id', async (req, res, next) => {
       ['savings', 'txn_interest_id', '예적금 만기(이자)'],
       ['savings_payments', 'txn_id', '적금 납입'],
       ['investments', 'txn_id', '투자'],
+      /* ⚠ 어음 만기 결제로 만들어진 거래. FK 가 없어서 지워도 아무 말이 없었고,
+         어음은 settled 인데 입금은 사라져 **받을어음이 영구히 부풀어** 있었다.
+         (origin_txn_id 는 여기 넣지 않는다 — 그쪽은 지워져도 어음이 새 거래를
+          만들어 만기 기록을 살린다. routes/notes.js 가 의도적으로 감내한다.) */
+      ['notes', 'txn_id', '어음 만기 결제'],
     ]
     for (const [table, col, label] of FIN_REFS) {
       const [[hit]] = await conn.execute(`SELECT 1 AS x FROM ${table} WHERE ${col} = ? LIMIT 1`, [req.params.id])

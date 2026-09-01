@@ -309,6 +309,13 @@ router.post('/:id/dishonor', async (req, res, next) => {
         return res.status(409).json({ error: '이미 결제된 어음이에요. 결제를 먼저 되돌려주세요.' })
       }
       if (n.status === 'dishonored') { await rollbackQuietly(conn); return res.json({ ok: true }) }
+      /* 마감된 달에 부도를 찍을 수 없다 — 부도는 그 달의 채권을 되살리는 일이다
+         (POST·settle·unsettle 에는 있는데 여기만 빠져 있었다). */
+      {
+        const on = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.on || '')) ? req.body.on : (n.due_on || kstToday())
+        const e = await closedPeriodError(req.db, on)
+        if (e) { await rollbackQuietly(conn); return res.status(409).json({ error: e }) }
+      }
 
       if (n.match_id) {
         await conn.execute('DELETE FROM invoice_matches WHERE id = ?', [n.match_id])
@@ -372,10 +379,18 @@ router.put('/:id', async (req, res, next) => {
     const amt = intOf(amount)
     { const e = amountError(amt); if (e) return res.status(400).json({ error: e }) }
 
-    const [[n]] = await req.db.execute('SELECT kind, status, match_id FROM notes WHERE id = ?', [req.params.id])
+    const [[n]] = await req.db.execute(
+      'SELECT kind, status, match_id, issued_on FROM notes WHERE id = ?', [req.params.id])
     if (!n) return res.status(404).json({ error: '없는 어음이에요' })
-    /* 수정으로도 같은 어음이 둘 되면 안 된다 — 등록만 막으면 번호를 고쳐서 겹칠 수 있다.
-       kind 는 수정 폼에 없으므로 저장된 값을 쓴다. */
+    /* ⚠ 금액은 청구서 정산액과 묶여 있다 — 결제·정산이 걸린 뒤에는 못 바꾼다.
+         바꾸면 청구서의 미수금이 어음 금액과 어긋난다. */
+    if (n.status !== 'held') return res.status(409).json({ error: '결제·부도된 어음은 고칠 수 없어요' })
+    /* 마감된 달은 손대지 않는다 — 옮기는 쪽·떠나는 쪽 **둘 다** 본다.
+       (transactions.js 가 POST·PUT·DELETE 를 모두 검사하는 것과 같은 규칙이다.) */
+    { const e = await closedPeriodError(req.db, n.issued_on); if (e) return res.status(409).json({ error: e }) }
+    { const e = await closedPeriodError(req.db, issued_on);   if (e) return res.status(409).json({ error: e }) }
+    /* ⚠ 중복 검사는 **상태·마감 검사 뒤에** 온다. 앞에 두었더니 결제된 어음을 고치려 할 때
+         "번호를 이미 다른 어음이 쓰고 있어요"가 먼저 떠서, 정작 못 고치는 이유를 못 알렸다. */
     {
       const dup = await duplicateNote(req.db, { kind: n.kind, note_no, vendor_id }, req.params.id)
       if (dup) {
@@ -385,9 +400,6 @@ router.put('/:id', async (req, res, next) => {
         })
       }
     }
-    /* ⚠ 금액은 청구서 정산액과 묶여 있다 — 결제·정산이 걸린 뒤에는 못 바꾼다.
-         바꾸면 청구서의 미수금이 어음 금액과 어긋난다. */
-    if (n.status !== 'held') return res.status(409).json({ error: '결제·부도된 어음은 고칠 수 없어요' })
     if (n.match_id) {
       const [[m]] = await req.db.execute('SELECT amount FROM invoice_matches WHERE id = ?', [n.match_id])
       if (m && Number(m.amount) !== amt) {
@@ -412,6 +424,11 @@ router.delete('/:id', async (req, res, next) => {
       if (n.status === 'settled') {
         await rollbackQuietly(conn)
         return res.status(409).json({ error: '결제된 어음은 지울 수 없어요. 결제를 먼저 되돌려주세요.' })
+      }
+      /* 마감된 달의 어음은 지울 수 없다 — 지우면 그 달의 채권·채무가 바뀐다 */
+      {
+        const e = await closedPeriodError(req.db, n.issued_on)
+        if (e) { await rollbackQuietly(conn); return res.status(409).json({ error: e }) }
       }
       // 청구서에 붙여 둔 정산도 함께 걷는다 — 남기면 받지도 않은 돈이 정산으로 남는다
       if (n.match_id) {

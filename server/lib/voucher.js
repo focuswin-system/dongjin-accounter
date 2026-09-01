@@ -188,35 +188,35 @@ function noteVoucher(note, originTxn = null) {
 }
 
 /**
- * 어음 부도 전표 — 발행 전표를 **날짜만 바꿔 뒤집는다.**
+ * 어음 부도 전표.
  *
- * 부도가 나면 받을어음은 없어지고 원래의 채권(외상매출금)이 되살아난다.
- * 앱도 그렇게 움직인다 — 부도 처리는 매칭을 지워 청구서를 미수로 되돌린다.
- * 그런데 장부에는 수취 전표(차 받을어음 / 대 외상매출금)만 남아 있어서,
- * 되살아난 외상매출금과 **받을어음이 동시에** 자산으로 잡혔다.
- * 부도난 어음은 영원히 받을어음 잔액에 남고, 같은 돈이 두 군데서 세어졌다.
+ * 부도가 나면 어음은 없어지고 **원래의 채권·채무가 되살아난다.**
+ *   받을어음 부도 : 차 외상매출금 1204 / 대 받을어음 1205
+ *   지급어음 부도 : 차 지급어음 2102 / 대 외상매입금 2101
+ *
+ * ⚠ 발행 전표를 그냥 뒤집으면 안 된다. 거래에서 온 어음은 발행 전표의 상대가
+ *   **비용·매출 계정**이라(차 외주비 / 대 지급어음), 뒤집으면 '대 외주비'가 되어
+ *   **매입 사실이 장부에서 사라진다.** 부도는 못 갚았다는 뜻이지 안 샀다는 뜻이 아니다.
+ *   그래서 상대는 어음의 출처와 무관하게 늘 외상 계정이다.
  *
  * 지우지 않고 반대 분개를 세우는 이유: 어음을 받았다가 부도난 사실 자체가 장부에
  * 남아야 한다. 수취 전표를 없애면 그 이력이 통째로 사라진다.
  *
- * @param note      notes 행. dishonored_on 이 전표 날짜다.
- * @param originTxn 발행 전표와 **같은** 상대 계정을 쓰기 위해 그대로 넘긴다.
+ * @param note notes 행. dishonored_on 이 전표 날짜다(없으면 만기일).
  */
-function noteDishonorVoucher(note, originTxn = null) {
-  const src = noteVoucher(note, originTxn)
+function noteDishonorVoucher(note) {
+  const amount = num(note.amount)
   const recv = note.kind === 'receivable'
-  const v = build(TYPE.TRANSFER, {
+  const lines = recv
+    ? [line('debit', AR, amount), line('credit', NOTE_RECEIVABLE, amount)]
+    : [line('debit', NOTE_PAYABLE, amount), line('credit', AP, amount)]
+  return build(TYPE.TRANSFER, {
     source: 'note',
     id: note.id,
     date: note.dishonored_on || note.due_on,
     summary: `${recv ? '받을어음' : '지급어음'} ${note.note_no || ''} 부도`.replace(/\s+/g, ' ').trim(),
     counterparty: note.vendor_name || '',
-  }, src.lines
-    .map(l => line(l.side === 'debit' ? 'credit' : 'debit', l.code, l.amount))
-    // 뒤집으면 대변이 앞에 온다 — 전표는 차변을 먼저 읽는 것이 관례다
-    .sort((a, b) => (a.side === b.side ? 0 : a.side === 'debit' ? -1 : 1)))
-  if (src.missing) v.missing = src.missing
-  return v
+  }, lines)
 }
 
 /**

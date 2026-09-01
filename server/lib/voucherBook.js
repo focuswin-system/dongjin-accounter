@@ -13,7 +13,7 @@
  *   그대로 세우고 '확인 필요'로 표시해, 받는 사람이 물어볼 수 있게 한다.
  */
 
-const { transactionVoucher, noteVoucher, noteDishonorVoucher, withNames } = require('./voucher')
+const { transactionVoucher, noteVoucher, noteDishonorVoucher } = require('./voucher')
 
 /**
  * 기간 안의 거래를 전표로 만든다.
@@ -44,7 +44,10 @@ async function listVouchers(db, { from, to, kind = 'all' }) {
    * ⚠ 부도난 어음도 뺀 적 없다(발행일 기준). 되돌리는 것은 부도일의 반대 분개다. */
   /* 발행일이든 부도일이든 기간에 걸리면 가져온다 — 부도 전표는 부도일에 서기 때문에,
      발행일만 보면 지난 분기에 받은 어음의 이번 분기 부도가 통째로 빠진다. */
-  const noteWhere = ['((n.issued_on >= ? AND n.issued_on <= ?) OR (n.dishonored_on >= ? AND n.dishonored_on <= ?))']
+  /* ⚠ 부도일은 COALESCE 로 본다 — dishonored_on 이 없는 옛 행은 만기일을 부도일로
+     친다(아래 전표 생성부와 같은 규칙). 여기만 dishonored_on 을 보면 그 행의 부도
+     전표가 일계표에는 서고 분개장에는 안 서서 두 장부가 다른 말을 한다. */
+  const noteWhere = ['((n.issued_on >= ? AND n.issued_on <= ?) OR (COALESCE(n.dishonored_on, n.due_on) >= ? AND COALESCE(n.dishonored_on, n.due_on) <= ?))']
   const noteArgs = [from, to, from, to]
   if (kind === 'income')  noteWhere.push("n.kind = 'receivable'")
   if (kind === 'expense') noteWhere.push("n.kind = 'payable'")
@@ -94,7 +97,7 @@ async function listVouchers(db, { from, to, kind = 'all' }) {
        같은 돈이 두 군데 자산으로 잡힌다. */
     if (nt.status === 'dishonored' && inRange(nt.dishonored_on || nt.due_on)) {
       vouchers.push({
-        ...noteDishonorVoucher(nt, nt.origin_txn_id ? { account_code: nt.origin_acct_code } : null),
+        ...noteDishonorVoucher(nt),
         kind: nt.kind === 'receivable' ? 'income' : 'expense',
         amount: Number(nt.amount) || 0,
         vendor_name: nt.vendor_name || '',

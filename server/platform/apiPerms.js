@@ -180,6 +180,13 @@ const ACTION_OVERRIDES = [
      있는 거래의 귀속을 바꾸는 '수정'이라, 거래를 고칠 권한이 있어야 한다.
      'create'로 두면 등록 권한만 있는 사람이 남의 주문 원가를 옮길 수 있다. */
   { re: /\/link-contract$/, action: 'edit' },
+  /* 어음 되돌리기 — POST 지만 하는 일은 **결제 거래를 DELETE 하는 것**이다.
+     'create'로 두면 어음 등록 권한만 있는 사람이 통장에 잡힌 거래를 지울 수 있다
+     (위 /bulk/delete 와 같은 구멍이다). */
+  { re: /^\/api\/notes\/[^/]+\/unsettle$/, action: 'delete' },
+  /* 부도·만기 결제 — 새 어음을 만드는 게 아니라 있는 어음의 상태를 바꾼다.
+     부도는 청구서 정산까지 걷어 미수금을 되살리므로 '수정' 권한이 필요하다. */
+  { re: /^\/api\/notes\/[^/]+\/(dishonor|settle)$/, action: 'edit' },
 ]
 
 /** 요청 → 필요한 행위 */

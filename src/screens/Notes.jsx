@@ -324,7 +324,12 @@ export const NotesScreen = ({
                           <button className="btn sm" onClick={async () => {
                             const ok = await confirm({
                               tone: 'warn', title: '결제를 되돌릴까요?',
-                              body: '그때 만든 입출금 거래도 함께 지워집니다.', confirmLabel: '되돌리기',
+                              /* 두 경로가 다르다 — 거래 폼에서 온 어음은 그 거래를 **안 지운다**
+                                 (예정으로 되돌릴 뿐이다). 한 문구로 뭉뚱그리면 거짓말이 된다. */
+                              body: n.originTxnId
+                                ? '그 거래가 다시 예정으로 돌아가고 통장 잔액에서 빠집니다. 거래 자체는 남아요.'
+                                : '그때 만든 입출금 거래도 함께 지워집니다.',
+                              confirmLabel: '되돌리기',
                             })
                             if (!ok) return
                             const res = await api.unsettleNote(n.id)

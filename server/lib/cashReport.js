@@ -657,7 +657,7 @@ async function dailyTrial(db, date, { includeIssuance = true } = {}) {
        발행일과 부도일을 각각 보고 그 날에 맞는 전표를 고른다. */
     const isDishonorDay = nt.status === 'dishonored' && (nt.dishonored_on || nt.due_on) === date
     const v = isDishonorDay
-      ? noteDishonorVoucher(nt, nt.origin_txn_id ? { account_code: nt.origin_acct_code } : null)
+      ? noteDishonorVoucher(nt)
       : noteVoucher(nt, nt.origin_txn_id ? { account_code: nt.origin_acct_code } : null)
     if (!v.balanced) {
       pendingNotes.push({

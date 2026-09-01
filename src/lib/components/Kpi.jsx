@@ -79,8 +79,10 @@ export const SummaryCard = ({ label, amount, count, accent = "blue", warn, onCli
  * ⚠ 아래 여백(24)까지 여기 둔다. 화면마다 손으로 주면 어긋난다(실제로 어긋났다).
  */
 export const SummaryRow = ({ cols, children }) => (
-  <div className="grid grid-3-to-1"
-       style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 16, marginBottom: 24 }}>
+  /* ⚠ 칸 수를 인라인으로 박으면 **좁은 폭에서 안 접힌다.** .grid-3-to-1 의 접기 규칙은
+     768px 아래에서만 !important 로 이기므로, 그 위 구간에서는 4칸이 그대로 서서
+     22px 금액이 잘렸다. kpi-row 처럼 data-cols 로 넘겨 CSS 가 폭에 따라 접게 한다. */
+  <div className="kpi-row" data-cols={cols} style={{ gap: 16, marginBottom: 24 }}>
     {children}
   </div>
 )
