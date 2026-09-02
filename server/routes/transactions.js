@@ -595,6 +595,23 @@ router.put('/:id', async (req, res, next) => {
       ['notes', 'origin_txn_id', '어음으로 적은', '재무관리 > 어음', "status = 'held'"],
       ['notes', 'txn_id', '어음 만기 결제', '재무관리 > 어음', null],
     ]
+    /* ⚠ 이체는 **두 줄이 짝**이다(출금+입금, transfer_id 로 묶임).
+     * POST /transfer 는 둘을 함께 만들고 DELETE 는 둘을 함께 지우는데, **수정만 가드가
+     * 없었다.** 한쪽 다리의 금액만 고치면 돈이 생기거나 사라진다. 게다가 이 폼은
+     * 자금 계정(1103)을 비워 보내므로 서버가 비목 '계좌 이체'로 계정과목을 못 찾아
+     * account_code 가 NULL 이 되고, 그러면 is_pnl=1 이 되어 **내부 이체가 손익에
+     * 매출·비용으로 잡힌다**(lib/pnl.js 가 막으려던 바로 그 사고).
+     * 되돌릴 곳은 이체를 만든 화면이다 — 취소하고 다시 등록하면 짝이 함께 정리된다. */
+    {
+      const [[tr]] = await req.db.execute(
+        'SELECT transfer_id FROM transactions WHERE id = ? AND transfer_id IS NOT NULL', [req.params.id])
+      if (tr) {
+        return res.status(409).json({
+          error: '계좌 이체·카드 대금 거래는 여기서 고칠 수 없어요. '
+               + '두 줄이 짝이라 한쪽만 바뀌면 잔액이 어긋납니다 — 그 화면에서 취소한 뒤 다시 등록해주세요.',
+        })
+      }
+    }
     for (const [table, col, label, where, cond] of OWNED) {
       const [[hit]] = await req.db.execute(
         `SELECT 1 AS x FROM ${table} WHERE ${col} = ?${cond ? ' AND ' + cond : ''} LIMIT 1`, [req.params.id])

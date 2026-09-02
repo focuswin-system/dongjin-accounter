@@ -304,7 +304,12 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
        * 무엇이 바뀌었는지 알린다. (2026-08 조사에서 fowin 15건이 이 상태였다) */
       accountCode: FUND_CODES.includes(String(editTxn.account_code || '')) ? '' : (editTxn.account_code || ''),
       amount:    editTxn.amount   || 0,
-      account:   editTxn.account  || accounts[0]?.name || '',
+      /* ⚠ **폴백을 두지 않는다.** 이 폼은 App 에서 늘 마운트돼 있어 accounts 가 이미 차 있고,
+           그래서 폴백이 반드시 발동한다. 계좌 없이 정상 저장된 거래(현금 지출 — ledger.js 가
+           "틀린 계좌에 다는 것보다 낫다"며 일부러 통과시킨다)를 열어 메모 한 줄만 고쳐도
+           가나다순 첫 통장 잔액이 그만큼 줄었다. 결제수단이 현금이면 화면엔 그 칩이 안 그려져
+           **사용자가 알아챌 방법조차 없다.** (이 파일 44~55행이 경계한 사고의 편집판이다) */
+      account:   editTxn.account  || '',
       method:    editTxn.method   || '계좌이체',
       date:      editTxn.date     || localToday(),
       memo:      editTxn.memo     || '',
