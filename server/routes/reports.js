@@ -206,6 +206,10 @@ async function fundSheetOf(req) {
     month, today: kstToday(), closingDay: await closingDayOf(req.db),
     // 이름별 미지급 인건비는 인사 권한이 있어야 본다(자금 판단에는 합계면 된다)
     canSeeLabor: canSeeLaborDetail(req),
+    /* 개인 계좌는 마스터만 — routes/fund-status.js·dashboard.js 와 같은 규칙.
+       인건비는 가리면서 계좌만 뚫려 있어, report:view 권한만 있으면 자금 현황
+       화면에서는 안 보이는 대표 개인 계좌를 이 엑셀로 받아 갈 수 있었다. */
+    canSeePersonal: req.user?.role === 'admin',
   })
 }
 

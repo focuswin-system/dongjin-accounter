@@ -46,8 +46,12 @@ const itemLabel = (it) => {
  * @param opt.today   'YYYY-MM-DD'
  * @param opt.closingDay 회계 마감일
  * @param opt.canSeeLabor 인사 권한 — 없으면 이름별 명세를 지운다(합계는 남긴다)
+ * @param opt.canSeePersonal 개인 계좌를 볼 수 있는가(마스터만) — routes/fund-status.js·
+ *        dashboard.js 와 **같은 규칙**이다. 없으면 개인 계좌의 이름·잔액을 지운다.
+ *        ⚠ 인건비 명세는 가리면서 계좌만 뚫려 있었다 — report:view 권한만 있으면
+ *          자금 현황 화면에서는 안 보이는 대표 개인 계좌를 엑셀로 받아 갈 수 있었다.
  */
-async function fundSheet(db, { month, today, closingDay = 0, canSeeLabor = true }) {
+async function fundSheet(db, { month, today, closingDay = 0, canSeeLabor = true, canSeePersonal = true }) {
   /* 구간은 **회계월**이다. 25일 마감 회사면 8월분 = 7/26~8/25 —
      엑셀 시트 이름도 그 회사의 '월분'이지 달력월이 아니다. */
   const range = month
@@ -107,7 +111,11 @@ async function fundSheet(db, { month, today, closingDay = 0, canSeeLabor = true 
   }
 
   const corp = group('corp')
-  const personal = group('personal')
+  const personalAll = group('personal')
+  /* 권한이 없으면 **개인 계좌를 통째로 비운다.** 합계에서도 뺀다 —
+     "전체 − 법인"으로 역산되면 가린 뜻이 없어진다. */
+  const EMPTY_TOTAL = { balance: 0, outTotal: 0, inTotal: 0, actualIn: 0, actualOut: 0, after: 0, expected: 0 }
+  const personal = canSeePersonal ? personalAll : { rows: [], total: EMPTY_TOTAL }
   const both = (f) => f(corp.total) + f(personal.total)
 
   /* 부채·저축은 법인/개인으로 갈라야 요약표가 원본과 같아진다.
