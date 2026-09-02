@@ -14,6 +14,8 @@
  */
 
 const { PERIOD_MONTHS, periodMonths } = require('./lib/recurPeriod')   // 주기 표는 lib/period.js 한 곳
+// 라인 금액 규칙(수량/중량 × 단가)은 lib/lineAmount.js 한 곳 — 기성 발행·품목 저장도 같은 것을 쓴다
+const { num, computeLineAmount, normBasis } = require('./lib/lineAmount')
 
 /** start~end 사이에 billing_period가 몇 회차 들어가는지 (양끝 포함, 최소 1회) */
 function billingCycles(start, end, period) {
@@ -46,15 +48,25 @@ function termTotal(c) {
   return initial + unit * billingCycles(start, c.end_date, c.billing_period)
 }
 
-/** 품목 라인 합계 = Σ(수량 × 단가).
- *  수량을 안 적은 라인은 1로 본다("웹사이트 구축 500만원" 같은 단일 라인을 수량 없이 쓰는 게 자연스럽다). */
+/** 품목 라인 합계 = Σ(기준값 × 단가).
+ *
+ *  ⚠ 기준값은 **price_basis 가 정한다** — qty(수량) 또는 weight(중량).
+ *    ㎏당 단가로 파는 자재는 수량 칸을 비우고 중량만 적는데, 예전엔 여기서 수량만 봐서
+ *    비어 있으면 1로 갈음했다. 1,200㎏ × 14,500원/㎏ 을 적으면 화면은 17,400,000원이라고
+ *    띄우는데 저장되는 주문금액은 **14,500원**이 됐다. 그 금액이 청구 일정·미수금·손익까지
+ *    그대로 흘러갔다. 규칙은 lib/lineAmount.js 한 곳에 있다(기성 발행·품목 저장이 이미 쓴다).
+ *
+ *  수량 기준에서 수량을 안 적은 라인만 1로 본다
+ *  ("웹사이트 구축 500만원" 같은 단일 라인을 수량 없이 쓰는 게 자연스럽다).
+ *  중량 기준은 그 폴백을 쓰지 않는다 — 중량을 안 적었으면 금액을 지어내지 않는다. */
 function itemsTotal(items) {
   if (!Array.isArray(items)) return 0
   let sum = 0
   for (const it of items) {
     if (!it || String(it.name ?? '').trim() === '') continue
-    const price = Number(String(it.unit_price ?? '').replace(/[^0-9]/g, '')) || 0
-    const qty = Number(String(it.qty ?? '').replace(/[^0-9.]/g, '')) || 0
+    const price = num(it.unit_price)
+    if (normBasis(it.price_basis) === 'weight') { sum += computeLineAmount(it); continue }
+    const qty = num(it.qty)
     sum += Math.round((qty || 1) * price)
   }
   return sum
