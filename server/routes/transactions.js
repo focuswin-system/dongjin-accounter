@@ -3,6 +3,15 @@ const { randomUUID } = require('crypto')
 const multer = require('multer')
 const xlsx = require('xlsx')
 const { futureDateError, kstToday, kstDate } = require('../db')
+const { pnlOnly, NON_PNL_TYPES } = require('../lib/pnl')
+/* SELECT 절 안이라 바인딩(?)을 쓸 수 없어 값을 미리 박는다.
+   ⚠ NON_PNL_TYPES 를 shift 로 소비하면 **모듈 상수가 비어** 다른 호출자가 조용히 망가진다.
+     복사본에서 인덱스로 꺼낸다. 대분류 이름은 코드에 고정된 값이라 주입 위험은 없다. */
+const PNL_ONLY = (() => {
+  const types = [...NON_PNL_TYPES]
+  let i = 0
+  return pnlOnly('t').replace(/\?/g, () => `'${types[i++]}'`)
+})()
 const { rollbackQuietly } = require('../lib/tx')
 const { dateOrNull } = require('../lib/period')
 const { normalizeStatus, ledgerError, defaultSettledStatus, amountError, isSettled } = require('../lib/ledger')
@@ -102,10 +111,9 @@ router.get('/', async (req, res, next) => {
                          is_pnl 로 거르면서 그 거래를 통째로 떨어뜨린다.
                          (청구서 정산 거래를 invoice_id 로 통과시킨 것과 같은 이유다.) */
                       nt.id AS note_id, nt.note_no AS note_no,
-                      (t.account_code IS NULL OR t.account_code = '' OR NOT EXISTS (
-                         SELECT 1 FROM account_subjects s
-                          WHERE s.code = t.account_code AND s.acct_type IN ('자산','부채','자본')
-                      )) AS is_pnl
+                      /* ⚠ 손익 판정은 **lib/pnl.js 한 곳**에서 온다. 여기서 같은 조건을 손으로
+                         적어 두었더니 규칙이 바뀔 때 한쪽만 고쳐졌다(경영 도우미 매출 누락). */
+                      (${PNL_ONLY}) AS is_pnl
               FROM transactions t
               LEFT JOIN vendors v ON t.vendor_id = v.id
               LEFT JOIN contracts c ON t.contract_id = c.id

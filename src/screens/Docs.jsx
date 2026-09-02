@@ -8,6 +8,7 @@ const SAMPLE = {
 }
 import { computeItems, shiftMonth, monthLabel } from './HR'
 import { api } from '../lib/api'
+import { isCountable, notCountable } from '../lib/txnScope'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
 import { TileBoard } from '../lib/components/TileBoard'
@@ -1563,11 +1564,11 @@ const useLedger = () => {
        * 이 필터가 걸러내려던 것은 대출 실행·원금 상환·예적금 납입·투자 같은 **재무거래**다
        * (3억 대출이 실현 매출로 잡히던 문제). 그것들은 청구서와 무관하므로 invoiceId 가 없다.
        * 그래서 '손익이거나, 청구서 정산이거나'로 판정한다. */
-      const list = all.filter(r => r.isPnl !== false || r.invoiceId)
+      const list = all.filter(isCountable)
       /* 걸러낸 것도 알려준다. 안 그러면 통장에서 돈이 나갔는데 보고서 그 달 지출이 '0원'이다.
          ((주)포커스윈 실자료: 4월에 재고 매입 331,240원이 나갔는데 월별 현황엔 −0 으로 보였다.
           숫자가 틀린 건 아니지만, 화면이 무엇을 뺐는지 말해주지 않으면 사용자는 누락으로 읽는다.) */
-      const cut = all.filter(r => !(r.isPnl !== false || r.invoiceId))
+      const cut = all.filter(notCountable)
       const sum = (a, k) => a.filter(r => r.kind === k).reduce((s, r) => s + (Number(r.amount) || 0), 0)
       setData({
         incomes:  list.filter(r => r.kind === 'income'),

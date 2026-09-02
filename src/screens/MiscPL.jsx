@@ -3,6 +3,7 @@ import { Icon, fmtNum, useToast, useConfirm, StatusBadge } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DataTable } from '../lib/components/DataTable'
 import { api } from '../lib/api'
+import { isCountable } from '../lib/txnScope'
 
 // 같은 '주문 없는 돈'이지만 메뉴가 둘로 갈린다:
 //   일반 경비 = 판관비 지출(임차료·통신비·수수료 등)  ← 대부분의 건
@@ -49,8 +50,12 @@ export const MiscPLScreen = ({ initialTab = 'expense', refreshTrigger, openExpen
      * 급여 20건(6,208만)·정산 2건(1,452만)이 들어와, 합계의 대부분이 급여였다
      * — 경비를 보려고 연 화면에서 경비가 안 보인다.
      * 둘 다 각자의 화면(인사급여·대금청구서)에서 관리하는 건이라 여기서 셀 이유가 없다. */
+    /* ⚠ isCountable 을 쓰되 **청구서 정산은 따로 뺀다.** 위 주석대로 청구서 건은 자기
+       화면이 있어 여기서 셀 이유가 없다. 반면 어음으로 산 경비는 만기 결제 뒤 계정과목이
+       지급어음으로 바뀌어 isPnl 만 보면 사라진다 — 그건 경비가 없어진 게 아니라
+       결제 방법이 어음이었을 뿐이라 남겨야 한다. */
     setRows(list.filter(r =>
-      !r.contractId && !r.cost_contract_id && r.isPnl !== false && !r.payrollId && !r.invoiceId))
+      !r.contractId && !r.cost_contract_id && isCountable(r) && !r.payrollId && !r.invoiceId))
   }
   useEffect(() => { load() }, [tab, refreshTrigger])
 
