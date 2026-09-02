@@ -274,6 +274,23 @@ const ACTION_LABELS = {
   'collect-cancel': '회수 취소', 'redeem-cancel': '회수 취소',
   draw: '추가 차입', draw_cancel: '추가 차입 취소',
   unprocess: '처리 취소', issue_split: '나눠 발행',
+  /* ── 어음 ── 만기에 실제로 돈이 오가거나(결제) 안 오간다(부도) */
+  settle: '어음 만기 결제', unsettle: '어음 결제 취소', dishonor: '어음 부도 처리',
+  // ── 세금 ──
+  file_vat: '부가세 신고 확정',
+  // ── 거래 ── 이체는 두 줄을 만들고, 상태 뒤집기는 통장에서 돈이 나간 것으로 만든다
+  transfer: '계좌 이체', status: '상태 변경', evidence: '증빙 첨부·해제',
+  // ── 계좌 ──
+  adjust: '잔액 조정',
+  // ── 회차가 있는 것(차입금·예적금·정기) ──
+  edit_cycle: '회차 수정', toggle: '사용 켜기·끄기',
+  repay_adhoc: '수시 상환', collect: '회수', collect_adhoc: '수시 회수', redeem: '회수',
+  // ── 주문 ──
+  renew: '갱신', save_milestones: '청구 일정 저장', edit_budget: '원가 예산 수정',
+  add_recurring: '정기 규칙 추가', sync_recurring: '정기 규칙 맞춤',
+  toggle_recurring: '정기 규칙 켜기·끄기',
+  // ── 문서 ──
+  reload_lines: '집행 내역 다시 불러오기', duplicate: '복제',
   // 계정 (routes/auth.js)
   login: '로그인', login_fail: '로그인 실패', create: '등록',
   password_change: '비밀번호 변경', password_reset: '비밀번호 초기화',
@@ -291,6 +308,7 @@ const RESOURCE_LABELS = {
   loan: '차입금', lending: '대여금', investment: '투자', savings: '예금·적금', unpaid_labor: '미지급 퇴직금',
   account: '계좌/카드', vendor: '거래처', ref_item: '기준정보', user: '사용자',
   feature: '유료 기능',
+  note: '어음', tax: '세금', purchase_req: '구매품의서',
 }
 
 /** 대상 ID 길이 상한 (audit_logs.target_id VARCHAR(64)) */
