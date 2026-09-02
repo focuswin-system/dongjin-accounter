@@ -3,7 +3,7 @@ const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
 const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
-const { ledgerError } = require('../lib/ledger')
+const { ledgerError, amountError } = require('../lib/ledger')
 
 const router = Router()
 
@@ -56,6 +56,11 @@ function taxLedgerError({ isDone, isRefund, amount, accountId }) {
   if (isDone && !amount) {
     return `${isRefund ? '환급' : '납부'}액을 입력해주세요. 취소하려면 상태를 대기로 바꿔주세요.`
   }
+  /* ⚠ 음수·초대형 금액을 막는다. 서버는 [^0-9-] 로 파싱해 음수가 통과했고,
+       그러면 syncTaxTxn 이 음수 지출을 만들어 **계좌 잔액이 늘어난다.**
+       lib/ledger.js 의 amountError 가 정확히 이걸 막으려고 있는데 이 파일만 안 썼다
+       ("프런트만 믿는 구조가 F-02 의 뿌리" — 같은 파일 주석). */
+  { const e = amountError(amount); if (amount && e) return e }
   if (!isDone || !amount) return null
   return ledgerError({
     kind: isRefund ? 'income' : 'expense',

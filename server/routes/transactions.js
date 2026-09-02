@@ -122,7 +122,11 @@ router.get('/', async (req, res, next) => {
               LEFT JOIN employees e ON t.employee_id = e.id
               LEFT JOIN ref_items ri ON t.item_id = ri.id
               LEFT JOIN invoices inv ON t.invoice_id = inv.id
-              LEFT JOIN notes nt ON nt.txn_id = t.id
+              /* ⚠ origin_txn_id 도 본다 — 서버 countableOnly 와 **같은 범위**여야 한다.
+                 txn_id 만 보면 부도난 어음의 원거래에 note_id 가 안 붙어(부도는 txn_id 를
+                 비운다), 화면 isCountable 이 false 가 되어 그 경비가 월별 현황·잡손익에서
+                 사라진다. 서버 집계에는 뜨는데 화면에서만 빠지면 두 숫자가 갈린다. */
+              LEFT JOIN notes nt ON (nt.txn_id = t.id OR nt.origin_txn_id = t.id)
               WHERE 1=1`
     const params = []
     if (kind)       { sql += ' AND t.kind = ?';        params.push(kind) }

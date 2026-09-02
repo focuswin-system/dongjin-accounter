@@ -14,6 +14,8 @@ import { InvoiceLines, CONTRACT_COLUMNS, CONTRACT_PROGRESS_COLUMNS } from '../li
 import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
 import { BILLING_MODES, TERM_MODES, BILLING_PERIODS, billingLabel, termLabel, periodLabel, periodMonths, cycleMonthsHint,
          isRecurring, isProgress, isOpenEnded, hasTotal, amountLabel, renewalInfo, nextEndDate, recurringMismatch } from '../lib/renewal'
+// 라인 금액 규칙 — 서버 server/lib/lineAmount.js 와 한 벌(소수점을 살린다)
+import { num, basisValue, computeLineAmount } from '../lib/lineAmount'
 
 const numOnly = (v) => String(v ?? '').replace(/[^0-9]/g, '');
 const asNum   = (v) => parseInt(numOnly(v), 10) || 0;
@@ -24,11 +26,15 @@ const asNum   = (v) => parseInt(numOnly(v), 10) || 0;
    품목은 기준정보(ref_items type='item')에서 고르거나 인라인 추가. 단가·매입가는 기준정보값이 기본이고
    주문별로 수정 가능하며, 저장 시 스냅샷으로 남는다(기준정보를 나중에 고쳐도 이 주문 조건은 그대로). */
 /* 단가를 무엇에 곱하는가 — 수량(기본) 또는 중량. 서버·청구서와 같은 규칙(lib/lineAmount.js).
-   중량 기준인데 수량으로 곱하면 주문 금액이 조용히 달라진다. */
-const basisQty = (r) => (r?.price_basis === 'weight' ? asNum(r.weight) : (asNum(r.qty) || 1));
-const lineAmount = (r) => basisQty(r) * asNum(r.unit_price);
+   중량 기준인데 수량으로 곱하면 주문 금액이 조용히 달라진다.
+
+   ⚠ **asNum 을 쓰면 안 된다.** 그건 `[^0-9]` 로 지우고 parseInt 하는 함수라 소수점을 먹는다 —
+     1200.5㎏ 이 12,005 가 되어 미리보기만 10배가 됐다(품목표 합계·저장값은 소수를 살린다).
+     중량은 소수가 흔하다. 그래서 판정도 곱셈도 lib/lineAmount.js 것을 그대로 쓴다. */
+const basisQty = (r) => (r?.price_basis === 'weight' ? basisValue(r) : (basisValue(r) || 1));
+const lineAmount = (r) => computeLineAmount(r);
 const itemsTotal = (rows) => (rows || []).filter(r => (r.name || '').trim()).reduce((s, r) => s + lineAmount(r), 0);
-const itemsCost  = (rows) => (rows || []).filter(r => (r.name || '').trim()).reduce((s, r) => s + basisQty(r) * asNum(r.cost_price), 0);
+const itemsCost  = (rows) => (rows || []).filter(r => (r.name || '').trim()).reduce((s, r) => s + Math.round(basisQty(r) * num(r.cost_price)), 0);
 
 const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster, withQty = false, required = false, hint }) => {
   const rows = form.items || [];

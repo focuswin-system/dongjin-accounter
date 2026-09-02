@@ -7,7 +7,7 @@ import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { TableToolbar } from '../lib/components/TableToolbar'
 import { useTableFilter, monthRange, activeMonthOf } from '../lib/tableFilter'
-import { cashMoved } from '../lib/txnScope'
+import { isCountable } from '../lib/txnScope'
 import { ImportWizard } from '../lib/components/ImportWizard'
 import { VoucherView } from '../lib/components/VoucherView'
 import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
@@ -1520,7 +1520,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
      *   "낸 기억은 있는데 목록에 없다"가 된다. 청구서가 없는 어음이라 invoiceId 로도
      *   안 걸린다. */
     setPlainTxns((txns || []).filter(t =>
-      !t.payrollId && !t.recurringId && cashMoved(t)))
+      !t.payrollId && !t.recurringId && isCountable(t)))
     const merged = sched.map(s => ({ ...s, source: 'milestone' }))
       .sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')))
     setInvoices(rows); setRecSummary(rec); setPaySum(pay); setPending(merged)

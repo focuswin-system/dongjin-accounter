@@ -1564,6 +1564,9 @@ async function initDb(conn) {
     await ensureIndex('transactions', 'idx_txn_transfer', 'transfer_id')
     // 거래 목록이 '이 거래가 어음 결제인가'를 매번 조인해 묻는다(이미 notes 가 있는 DB 를 위해)
     await ensureIndex('notes', 'idx_notes_txn', 'txn_id')
+    /* 거래 목록·집계가 'origin_txn_id = ?' 로도 찾는다(부도 어음의 원거래).
+       인덱스가 없으면 두 열 OR 이라 notes 를 풀스캔한다 — 지금은 작지만 쌓이면 느려진다. */
+    await ensureIndex('notes', 'idx_notes_origin_txn', 'origin_txn_id')
 
 
     /* 카드 종류 — 신용/체크. 결제 방식이 정반대라 한 덩어리로 두면 자금일보가 어긋난다.
