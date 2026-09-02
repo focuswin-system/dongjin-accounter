@@ -17,7 +17,7 @@ import { Icon } from '../ui'
 //   className,      td className
 //   headClassName,  th className
 // }]
-// rows: 배열 / onRowClick(row): 행 클릭 / empty: 빈 상태(문자열·노드)
+// rows: 배열 / onRowClick(row): 행 클릭 / empty: 빈 상태(문자열·노드) / minWidth: 표 최소 폭(px) / maxHeight: 세로 스크롤 상한(px)
 // footer: <tfoot> 내용(합계 행 등, 옵션) / rowKey(row): key 추출(기본 row.id ?? index)
 // renderExpanded(row): 펼침 내용. 값을 돌려주는 행만 아래에 전폭 행이 하나 더 붙는다.
 //   (차입금 상환 스케줄·예적금 납입 스케줄처럼 '행 안의 표'가 필요한 화면이 여럿이라 여기 둔다.
@@ -31,7 +31,7 @@ import { Icon } from '../ui'
  * 아닌 행**은 체크 자체가 안 돼야 한다. 눌러놓고 나중에 "3건 중 1건만 됐어요"라고
  * 말하는 것보다, 애초에 못 고르게 하고 이유를 붙이는 편이 낫다.
  */
-export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용이 없어요', footer, rowKey, renderExpanded, select, rowClass }) => {
+export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용이 없어요', footer, rowKey, renderExpanded, select, rowClass, minWidth, maxHeight }) => {
   const [sort, setSort] = useState(null)   // { key, dir: 'asc' | 'desc' } | null
 
   const sorted = useMemo(() => {
@@ -90,8 +90,10 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
   const colCount = columns.length + (select ? 1 : 0)
 
   return (
-    <div className="table-scroll">
-      <table className="table">
+    <div className="table-scroll" style={maxHeight ? { maxHeight } : undefined}>
+      {/* minWidth: 열이 많아 좁은 화면에서 짓눌리는 표(자금관리표 등)가 쓴다.
+          인쇄에서는 index.css 가 min-width 를 0으로 되돌린다 — 종이는 안 밀린다. */}
+      <table className="table" style={minWidth ? { minWidth } : undefined}>
         <thead>
           <tr>
             {select && (

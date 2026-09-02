@@ -1265,6 +1265,14 @@ export const ExcelScreen = () => {
   const active = preview.filter(r => !excluded.has(r.idx))
   const okRows = active.filter(r => r.errs.length === 0)
   const errRows = active.filter(r => r.errs.length > 0)
+  /* 표에 그릴 행 — 앞 100행 + **그 뒤에 있는 오류 행 전부**.
+     여태 앞 100행만 그려서, 300행짜리 파일의 250번째 오류는 "오류 3건"이라고
+     세어 놓고 정작 어느 행인지 볼 수가 없었다(고치려면 엑셀을 따로 열어야 했다). */
+  const PREVIEW_N = 100
+  const shown = [
+    ...preview.slice(0, PREVIEW_N),
+    ...preview.slice(PREVIEW_N).filter(r => r.errs.length > 0),
+  ]
   const stage = result ? 4 : (file ? 3 : 1)
 
   const buckets = [
@@ -1474,39 +1482,51 @@ export const ExcelScreen = () => {
                 </div>
               )}
 
-              <div className="table-scroll" style={{ maxHeight: 420 }}>
-                <table className="table">
-                  <thead><tr><th style={{ width: 40 }}>행</th><th>날짜</th><th>거래처</th><th>주문</th><th>구분</th><th>비목</th><th className="num-right">금액</th>{colFor("계좌") != null && <th>계좌</th>}<th>상태</th></tr></thead>
-                  <tbody>
-                    {preview.slice(0, 100).map((r) => {
-                      const ex = excluded.has(r.idx)
-                      return (
-                        <tr key={r.idx} style={{ background: ex ? "var(--surface-2)" : r.errs.length ? "rgba(255,80,80,0.04)" : undefined, opacity: ex ? 0.5 : 1 }}>
-                          <td className="num text-muted2">{r.idx + 2}</td>
-                          <td className="num text-sm">{r.date || <span className="text-neg">—</span>}</td>
-                          <td className="fw-600">{r.vendor || "—"}</td>
-                          <td className="text-muted text-sm">{r.contract || "—"}</td>
-                          <td>{r.kind ? <span className="badge outline">{r.kind === "income" ? "입금" : "지출"}</span> : <span className="text-neg text-xs">?</span>}</td>
-                          <td className="text-sm">{r.category || "—"}</td>
-                          <td className="num-cell num-right">{r.amount != null ? fmtNum(r.amount) : <span className="text-neg">—</span>}</td>
-                          {colFor("계좌") != null && (
-                            <td className="text-sm">
-                              {!r.acctName ? <span className="text-muted2">일괄</span>
-                                : r.account_id ? r.acctName
-                                : <span className="text-neg">{r.acctName}</span>}
-                            </td>
-                          )}
-                          <td>
-                            {ex ? <span className="badge outline">제외</span>
-                              : r.errs.length === 0 ? <span className="badge pos"><Icon.Check size={11}/> 정상</span>
-                              : <span className="badge neg"><Icon.Warn size={11}/> {r.errs.join('·')} 오류</span>}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                rows={shown}
+                rowKey={r => r.idx}
+                maxHeight={420}
+                empty="읽을 행이 없어요."
+                rowClass={r => (excluded.has(r.idx) ? 'imp-ex' : r.errs.length ? 'imp-err' : undefined)}
+                columns={[
+                  { key: 'idx', header: '행', width: 40, sortable: true,
+                    sortValue: r => r.idx,
+                    render: r => <span className="num text-muted2">{r.idx + 2}</span> },
+                  { key: 'date', header: '날짜', sortable: true,
+                    render: r => <span className="num text-sm">{r.date || <span className="text-neg">—</span>}</span> },
+                  { key: 'vendor', header: '거래처', sortable: true,
+                    render: r => <span className="fw-600">{r.vendor || "—"}</span> },
+                  { key: 'contract', header: '주문', sortable: true,
+                    render: r => <span className="text-muted text-sm">{r.contract || "—"}</span> },
+                  { key: 'kind', header: '구분', sortable: true,
+                    render: r => (r.kind
+                      ? <span className="badge outline">{r.kind === "income" ? "입금" : "지출"}</span>
+                      : <span className="text-neg text-xs">?</span>) },
+                  { key: 'category', header: '비목', sortable: true,
+                    render: r => <span className="text-sm">{r.category || "—"}</span> },
+                  { key: 'amount', header: '금액', align: 'right', sortable: true,
+                    sortValue: r => (r.amount == null ? null : Number(r.amount)),
+                    render: r => <span className="num-cell">{r.amount != null ? fmtNum(r.amount) : <span className="text-neg">—</span>}</span> },
+                  ...(colFor("계좌") != null ? [{
+                    key: 'acctName', header: '계좌', sortable: true,
+                    render: r => (
+                      <span className="text-sm">
+                        {!r.acctName ? <span className="text-muted2">일괄</span>
+                          : r.account_id ? r.acctName
+                          : <span className="text-neg">{r.acctName}</span>}
+                      </span>
+                    ),
+                  }] : []),
+                  /* 상태 정렬은 **오류를 위로** 올린다(0=오류) — 이 열을 누르는 이유가 그거다 */
+                  { key: 'state', header: '상태', sortable: true,
+                    sortValue: r => (excluded.has(r.idx) ? 2 : r.errs.length ? 0 : 1),
+                    render: r => (excluded.has(r.idx)
+                      ? <span className="badge outline">제외</span>
+                      : r.errs.length === 0
+                        ? <span className="badge pos"><Icon.Check size={11}/> 정상</span>
+                        : <span className="badge neg"><Icon.Warn size={11}/> {r.errs.join('·')} 오류</span>) },
+                ]}
+              />
               <div className="row" style={{ padding: 16, borderTop: "1px solid var(--line)", flexWrap: "wrap", gap: 12 }}>
                 <div style={{ minWidth: 260 }}>
                   <label className="label" style={{ marginBottom: 6 }}>
@@ -1521,7 +1541,7 @@ export const ExcelScreen = () => {
                       : "이 거래들이 오간 계좌예요. 지정해야 계좌 잔액에 반영됩니다. 엑셀에 계좌 열이 있으면 '계좌'로 매핑하세요."}
                   </div>
                 </div>
-                <span className="text-sm text-muted">{preview.length > 100 ? `상위 100행 표시 · 전체 ${preview.length}행` : `전체 ${preview.length}행`}</span>
+                <span className="text-sm text-muted">{preview.length > shown.length ? `상위 ${PREVIEW_N}행 + 오류 행 표시 · 전체 ${preview.length}행` : `전체 ${preview.length}행`}</span>
                 <div className="ml-auto row gap-8">
                   <button className="btn" onClick={reset}>취소</button>
                   <button className="btn primary" disabled={busy || !okRows.length || (!importAccountId && okRows.some(r => !r.account_id))} style={{ opacity: (busy || !okRows.length || (!importAccountId && okRows.some(r => !r.account_id))) ? 0.5 : 1 }} onClick={onCommit}>
@@ -1714,41 +1734,42 @@ const ReportMonthly = ({ toast }) => {
         <Kpi label="순차액" value={totalIn - totalOut} tone={totalIn >= totalOut ? "pos" : "neg"}/>
       </KpiRow>
       <div className="card" style={{ overflow: "hidden" }}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>월</th>
-              <th className="num-right">입금</th>
-              <th className="num-right">지출</th>
-              <th className="num-right">차액</th>
-              <th style={{ width: 200 }}>비교</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td className="fw-600">{r.m}</td>
-                <td className="num-cell num-right" style={{ color: "var(--pos)" }}>+{fmtNum(r.income)}</td>
-                <td className="num-cell num-right">−{fmtNum(r.expense)}</td>
-                <td className="num-cell num-right fw-700" style={{ color: r.net >= 0 ? "var(--pos)" : "var(--neg)" }}>
+        <DataTable
+          rows={rows}
+          rowKey={(r, i) => i}
+          empty="이 기간에 완료된 손익 거래가 없어요."
+          columns={[
+            { key: 'm', header: '월', sortable: true, className: 'fw-600' },
+            { key: 'income', header: '입금', align: 'right', sortable: true,
+              sortValue: r => Number(r.income || 0),
+              render: r => <span className="num-cell" style={{ color: "var(--pos)" }}>+{fmtNum(r.income)}</span> },
+            { key: 'expense', header: '지출', align: 'right', sortable: true,
+              sortValue: r => Number(r.expense || 0),
+              render: r => <span className="num-cell">−{fmtNum(r.expense)}</span> },
+            /* 차액은 부호가 있다 — 표시는 '−1,000' 이지만 정렬은 음수로 해야
+               '가장 많이 밑진 달'이 맨 앞에 선다 */
+            { key: 'net', header: '차액', align: 'right', sortable: true,
+              sortValue: r => Number(r.net || 0),
+              render: r => (
+                <span className="num-cell fw-700" style={{ color: r.net >= 0 ? "var(--pos)" : "var(--neg)" }}>
                   {r.net >= 0 ? "+" : "−"}{fmtNum(Math.abs(r.net))}
-                </td>
-                <td>
-                  <div className="col gap-4">
-                    <div className="row gap-6" style={{ alignItems: "center" }}>
-                      <span style={{ width: 14, fontSize: 10, color: "var(--pos)" }}>입</span>
-                      <RBar pct={(r.income / maxVal) * 100} tone="pos"/>
-                    </div>
-                    <div className="row gap-6" style={{ alignItems: "center" }}>
-                      <span style={{ width: 14, fontSize: 10, color: "var(--muted)" }}>지</span>
-                      <RBar pct={(r.expense / maxVal) * 100} tone="neg"/>
-                    </div>
+                </span>
+              ) },
+            { key: 'bar', header: '비교', width: 200,
+              render: r => (
+                <div className="col gap-4">
+                  <div className="row gap-6" style={{ alignItems: "center" }}>
+                    <span style={{ width: 14, fontSize: 10, color: "var(--pos)" }}>입</span>
+                    <RBar pct={(r.income / maxVal) * 100} tone="pos"/>
                   </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  <div className="row gap-6" style={{ alignItems: "center" }}>
+                    <span style={{ width: 14, fontSize: 10, color: "var(--muted)" }}>지</span>
+                    <RBar pct={(r.expense / maxVal) * 100} tone="neg"/>
+                  </div>
+                </div>
+              ) },
+          ]}
+        />
       </div>
       {led.excluded?.n > 0 && (
         <div className="text-xs text-muted2" style={{ marginTop: 10, lineHeight: 1.7 }}>
@@ -1809,33 +1830,38 @@ const ReportTax4 = ({ toast }) => {
             <Kpi label="실지급액" value={sumNet}/>
           </KpiRow>
           <div className="card" style={{ overflow: "hidden" }}>
-            <table className="table">
-              <thead>
+            {/* 공제 열은 그 달 급여대장에 실제로 있는 항목만 선다 — 열 목록을 펼쳐 넣는다 */}
+            <DataTable
+              rows={data}
+              rowKey={(d, i) => i}
+              columns={[
+                { key: 'name', header: '성명', sortable: true,
+                  sortValue: d => d.row.name,
+                  render: d => <span className="fw-700">{d.row.name}</span> },
+                { key: 'role', header: '직위', sortable: true,
+                  sortValue: d => d.row.role || '',
+                  render: d => <span className="text-sm text-muted">{d.row.role || "—"}</span> },
+                { key: 'gross', header: '급여총액', align: 'right', sortable: true,
+                  sortValue: d => Number(d.gross || 0),
+                  render: d => <span className="num-cell">{fmtNum(d.gross)}</span> },
+                ...dedLabels.map(l => ({
+                  key: `ded:${l}`, header: l, align: 'right', sortable: true,
+                  sortValue: d => Number(amountOf(d, l) || 0),
+                  render: d => <span className="num-cell" style={{ color: "var(--warn-ink)" }}>{fmtNum(amountOf(d, l))}</span>,
+                })),
+                { key: 'net', header: '실지급액', align: 'right', sortable: true,
+                  sortValue: d => Number(d.net || 0),
+                  render: d => <span className="num-cell fw-700">{fmtNum(d.net)}</span> },
+              ]}
+              footer={(
                 <tr>
-                  <th>성명</th><th>직위</th>
-                  <th className="num-right">급여총액</th>
-                  {dedLabels.map(l => <th key={l} className="num-right">{l}</th>)}
-                  <th className="num-right">실지급액</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.map((d, i) => (
-                  <tr key={i}>
-                    <td className="fw-700">{d.row.name}</td>
-                    <td className="text-sm text-muted">{d.row.role || "—"}</td>
-                    <td className="num-cell num-right">{fmtNum(d.gross)}</td>
-                    {dedLabels.map(l => <td key={l} className="num-cell num-right" style={{ color: "var(--warn-ink)" }}>{fmtNum(amountOf(d, l))}</td>)}
-                    <td className="num-cell num-right fw-700">{fmtNum(d.net)}</td>
-                  </tr>
-                ))}
-                <tr style={{ background: "var(--surface-2)" }}>
                   <td colSpan={2} className="fw-700">합계 {data.length}명</td>
-                  <td className="num-cell num-right fw-700">{fmtNum(sumGross)}</td>
-                  {dedLabels.map(l => <td key={l} className="num-cell num-right fw-700" style={{ color: "var(--warn-ink)" }}>{fmtNum(sumLabel(l))}</td>)}
-                  <td className="num-cell num-right fw-700">{fmtNum(sumNet)}</td>
+                  <td className="num-cell num-right">{fmtNum(sumGross)}</td>
+                  {dedLabels.map(l => <td key={l} className="num-cell num-right" style={{ color: "var(--warn-ink)" }}>{fmtNum(sumLabel(l))}</td>)}
+                  <td className="num-cell num-right">{fmtNum(sumNet)}</td>
                 </tr>
-              </tbody>
-            </table>
+              )}
+            />
           </div>
         </>
       )}
@@ -1995,6 +2021,7 @@ const ReportCategory = ({ toast }) => {
   const rows = Object.entries(bucket)
     .sort(([, a], [, b]) => b - a)
     .map(([cat, amt]) => ({ cat, amt, pct: total > 0 ? (amt / total) * 100 : 0 }))
+  const topAmt = rows[0]?.amt   // 붉은 막대의 기준 — 표를 다시 정렬해도 '최다 비목'은 그대로다
 
   return (
     <div>
@@ -2006,26 +2033,24 @@ const ReportCategory = ({ toast }) => {
         <Kpi label="최다 비목" value={rows[0]?.cat} unit=""/>
       </KpiRow>
       <div className="card" style={{ overflow: "hidden" }}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>비목</th>
-              <th className="num-right">금액</th>
-              <th className="num-right" style={{ width: 70 }}>비중</th>
-              <th style={{ width: 200 }}>비율</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td><span className="badge outline">{r.cat}</span></td>
-                <td className="num-cell num-right fw-700">{fmtNum(r.amt)}</td>
-                <td className="num-right text-muted">{r.pct.toFixed(1)}%</td>
-                <td><RBar pct={r.pct} tone={i === 0 ? "neg" : "warn"}/></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable
+          rows={rows}
+          rowKey={(r, i) => i}
+          empty="이 기간에 지출이 없어요."
+          columns={[
+            { key: 'cat', header: '비목', sortable: true,
+              render: r => <span className="badge outline">{r.cat}</span> },
+            { key: 'amt', header: '금액', align: 'right', sortable: true,
+              sortValue: r => Number(r.amt || 0),
+              render: r => <span className="num-cell fw-700">{fmtNum(r.amt)}</span> },
+            { key: 'pct', header: '비중', width: 70, align: 'right', sortable: true,
+              render: r => <span className="text-muted">{r.pct.toFixed(1)}%</span> },
+            /* 붉은 막대는 **가장 큰 비목** 하나다. 정렬 순서(i===0)로 칠하면
+               오름차순으로 뒤집었을 때 가장 작은 비목이 붉어진다. 값으로 판단한다. */
+            { key: 'bar', header: '비율', width: 200,
+              render: r => <RBar pct={r.pct} tone={r.amt === topAmt ? "neg" : "warn"}/> },
+          ]}
+        />
       </div>
     </div>
   )
@@ -2053,6 +2078,8 @@ const ReportVendor = ({ toast }) => {
   const totalRealized = rows.reduce((a, r) => a + r.realized, 0)
   const totalPending  = rows.reduce((a, r) => a + r.pending, 0)
   const grandTotal    = totalRealized + totalPending
+  // 전부 0원인 기간이면 grandTotal 이 0이라 NaN% 가 찍힌다
+  const pctOf = (v) => (grandTotal ? (v / grandTotal) * 100 : 0)
 
   return (
     <div>
@@ -2065,32 +2092,31 @@ const ReportVendor = ({ toast }) => {
         <Kpi label="미입금 잔액"  value={totalPending}  tone="warn"/>
       </KpiRow>
       <div className="card" style={{ overflow: "hidden" }}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>발주처</th>
-              <th className="num-right">실현 매출</th>
-              <th className="num-right">미입금</th>
-              <th className="num-right" style={{ width: 60 }}>건수</th>
-              <th className="num-right" style={{ width: 70 }}>비중</th>
-              <th style={{ width: 180 }}>비율</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td className="fw-700">{r.vendor}</td>
-                <td className="num-cell num-right" style={{ color: "var(--pos)" }}>{r.realized ? fmtNum(r.realized) : "—"}</td>
-                <td className="num-cell num-right" style={{ color: r.pending ? "var(--warn)" : "var(--muted)" }}>
+        <DataTable
+          rows={rows}
+          rowKey={(r, i) => i}
+          empty="이 기간에 매출 거래가 없어요."
+          columns={[
+            { key: 'vendor', header: '발주처', sortable: true, className: 'fw-700' },
+            { key: 'realized', header: '실현 매출', align: 'right', sortable: true,
+              sortValue: r => Number(r.realized || 0),
+              render: r => <span className="num-cell" style={{ color: "var(--pos)" }}>{r.realized ? fmtNum(r.realized) : "—"}</span> },
+            { key: 'pending', header: '미입금', align: 'right', sortable: true,
+              sortValue: r => Number(r.pending || 0),
+              render: r => (
+                <span className="num-cell" style={{ color: r.pending ? "var(--warn)" : "var(--muted)" }}>
                   {r.pending ? fmtNum(r.pending) : "—"}
-                </td>
-                <td className="num-right text-muted">{r.count}건</td>
-                <td className="num-right text-muted">{(r.total / grandTotal * 100).toFixed(1)}%</td>
-                <td><RBar pct={(r.total / grandTotal) * 100} tone="brand"/></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </span>
+              ) },
+            { key: 'count', header: '건수', width: 60, align: 'right', sortable: true,
+              sortValue: r => Number(r.count || 0),
+              render: r => <span className="text-muted">{r.count}건</span> },
+            { key: 'share', header: '비중', width: 70, align: 'right', sortable: true,
+              sortValue: r => Number(r.total || 0),
+              render: r => <span className="text-muted">{pctOf(r.total).toFixed(1)}%</span> },
+            { key: 'bar', header: '비율', width: 180, render: r => <RBar pct={pctOf(r.total)} tone="brand"/> },
+          ]}
+        />
       </div>
     </div>
   )
@@ -2113,41 +2139,36 @@ const ReportAR = ({ toast }) => {
         <Kpi label="기한 초과"         value={summary.overdue}   tone="neg"/>
         <Kpi label="장기 미수"         value={summary.longOverdue} tone="neg"/>
       </KpiRow>
-      {rows.length === 0 && (
-        <div className="text-sm text-muted2" style={{ padding: 24, textAlign: "center" }}>
-          미수금이 없어요. 발행한 청구서가 모두 입금 완료 상태입니다.
-        </div>
-      )}
+      {/* 빈 상태는 표 안에서 말한다 — 표 위에 따로 띄우면 빈 표가 그 아래 또 남는다 */}
       <div className="card" style={{ overflow: "hidden" }}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>거래처</th><th>주문</th>
-              <th className="num-right">청구금액</th>
-              <th className="num-right">입금</th>
-              <th className="num-right">잔액</th>
-              <th>만기일</th>
-              <th style={{ width: 70 }}>연체</th>
-              <th>상태</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td className="fw-700">{r.vendor}</td>
-                <td className="text-sm text-muted">{r.contract}</td>
-                <td className="num-cell num-right">{fmtNum(r.billed)}</td>
-                <td className="num-cell num-right" style={{ color: "var(--pos)" }}>{r.paid ? fmtNum(r.paid) : "—"}</td>
-                <td className="num-cell num-right fw-700">{fmtNum(r.remain)}</td>
-                <td className="text-sm">{r.due}</td>
-                <td className="num-cell num-right">
-                  {r.delay > 0 ? <span className="badge neg">{r.delay}일</span> : <span className="text-muted">—</span>}
-                </td>
-                <td><StatusBadge status={r.status}/></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable
+          rows={rows}
+          rowKey={(r, i) => i}
+          empty="미수금이 없어요. 발행한 청구서가 모두 입금 완료 상태입니다."
+          columns={[
+            { key: 'vendor', header: '거래처', sortable: true, className: 'fw-700' },
+            { key: 'contract', header: '주문', sortable: true,
+              render: r => <span className="text-sm text-muted">{r.contract}</span> },
+            { key: 'billed', header: '청구금액', align: 'right', sortable: true,
+              sortValue: r => Number(r.billed || 0),
+              render: r => <span className="num-cell">{fmtNum(r.billed)}</span> },
+            { key: 'paid', header: '입금', align: 'right', sortable: true,
+              sortValue: r => Number(r.paid || 0),
+              render: r => <span className="num-cell" style={{ color: "var(--pos)" }}>{r.paid ? fmtNum(r.paid) : "—"}</span> },
+            { key: 'remain', header: '잔액', align: 'right', sortable: true,
+              sortValue: r => Number(r.remain || 0),
+              render: r => <span className="num-cell fw-700">{fmtNum(r.remain)}</span> },
+            { key: 'due', header: '만기일', sortable: true,
+              render: r => <span className="text-sm">{r.due}</span> },
+            /* 연체일은 '오래 밀린 것부터' 보려고 정렬한다 — 이 표에서 제일 자주 쓸 순서다 */
+            { key: 'delay', header: '연체', width: 70, align: 'right', sortable: true,
+              sortValue: r => Number(r.delay || 0),
+              render: r => (r.delay > 0
+                ? <span className="badge neg">{r.delay}일</span>
+                : <span className="text-muted">—</span>) },
+            { key: 'status', header: '상태', render: r => <StatusBadge status={r.status}/> },
+          ]}
+        />
       </div>
     </div>
   )
@@ -2174,6 +2195,7 @@ const ReportSubcontract = ({ toast }) => {
     .map(([vendor, v]) => ({ vendor, ...v, total: v.paid + v.pending }))
   const total    = rows.reduce((a, r) => a + r.total, 0)
   const totalPending = rows.reduce((a, r) => a + r.pending, 0)
+  const share = (v) => (total > 0 ? (v / total) * 100 : 0)
   const totalExp = filterByPeriod(led.expenses, period).reduce((a, r) => a + (Number(r.amount) || 0), 0)
 
   return (
@@ -2187,32 +2209,31 @@ const ReportSubcontract = ({ toast }) => {
         <Kpi label="총 지출 대비"   value={totalExp > 0 ? parseFloat((total / totalExp * 100).toFixed(1)) : 0} unit="%"/>
       </KpiRow>
       <div className="card" style={{ overflow: "hidden" }}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>협력사</th>
-              <th className="num-right">지급 완료</th>
-              <th className="num-right">미지급</th>
-              <th className="num-right" style={{ width: 60 }}>건수</th>
-              <th className="num-right" style={{ width: 70 }}>비중</th>
-              <th style={{ width: 180 }}>비율</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td className="fw-700">{r.vendor}</td>
-                <td className="num-cell num-right" style={{ color: "var(--pos)" }}>{r.paid ? fmtNum(r.paid) : "—"}</td>
-                <td className="num-cell num-right" style={{ color: r.pending ? "var(--warn)" : "var(--muted)" }}>
+        <DataTable
+          rows={rows}
+          rowKey={(r, i) => i}
+          empty="이 기간에 외주가공비가 없어요."
+          columns={[
+            { key: 'vendor', header: '협력사', sortable: true, className: 'fw-700' },
+            { key: 'paid', header: '지급 완료', align: 'right', sortable: true,
+              sortValue: r => Number(r.paid || 0),
+              render: r => <span className="num-cell" style={{ color: "var(--pos)" }}>{r.paid ? fmtNum(r.paid) : "—"}</span> },
+            { key: 'pending', header: '미지급', align: 'right', sortable: true,
+              sortValue: r => Number(r.pending || 0),
+              render: r => (
+                <span className="num-cell" style={{ color: r.pending ? "var(--warn)" : "var(--muted)" }}>
                   {r.pending ? fmtNum(r.pending) : "—"}
-                </td>
-                <td className="num-right text-muted">{r.count}건</td>
-                <td className="num-right text-muted">{total > 0 ? (r.total / total * 100).toFixed(1) : 0}%</td>
-                <td><RBar pct={total > 0 ? (r.total / total) * 100 : 0} tone="warn"/></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </span>
+              ) },
+            { key: 'count', header: '건수', width: 60, align: 'right', sortable: true,
+              sortValue: r => Number(r.count || 0),
+              render: r => <span className="text-muted">{r.count}건</span> },
+            { key: 'share', header: '비중', width: 70, align: 'right', sortable: true,
+              sortValue: r => Number(r.total || 0),
+              render: r => <span className="text-muted">{share(r.total).toFixed(1)}%</span> },
+            { key: 'bar', header: '비율', width: 180, render: r => <RBar pct={share(r.total)} tone="warn"/> },
+          ]}
+        />
       </div>
     </div>
   )
@@ -2363,22 +2384,24 @@ const ReportTaxOffice = ({ toast, registerExport }) => {
       {!pack ? <Loading label="자료를 세는 중…"/> : (
         <>
           <div className="card" style={{ overflow: "hidden", marginBottom: 16 }}>
-            <table className="table">
-              <thead><tr><th>항목</th><th className="num-right" style={{ width: 120 }}>건수</th><th style={{ width: 130 }}>상태</th></tr></thead>
-              <tbody>
-                {pack.sections.map(s => (
-                  <tr key={s.key}>
-                    <td className="fw-600 text-sm">{s.label}</td>
-                    <td className="num-cell num-right">{fmtNum(s.count)}{s.unit}</td>
-                    <td>
-                      {/* 정상이면 표식을 달지 않는다 — 전부 초록 체크가 붙으면 정작 문제가 안 보인다 */}
-                      {s.ready ? <span className="text-sm text-muted2">—</span>
-                        : <span className="badge warn" style={{ fontSize: 11 }}>확인 필요</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {/* 기본 순서는 **넘기는 순서**(체크리스트)라 그대로 둔다.
+                건수만 정렬을 연다 — 0건인 항목을 찾는 게 이 표의 주 용도다. */}
+            <DataTable
+              rows={pack.sections}
+              rowKey={r => r.key}
+              empty="집계할 항목이 없어요."
+              columns={[
+                { key: 'label', header: '항목', render: r => <span className="fw-600 text-sm">{r.label}</span> },
+                { key: 'count', header: '건수', width: 120, align: 'right', sortable: true,
+                  sortValue: r => Number(r.count || 0),
+                  render: r => <span className="num-cell">{fmtNum(r.count)}{r.unit}</span> },
+                /* 정상이면 표식을 달지 않는다 — 전부 초록 체크가 붙으면 정작 문제가 안 보인다 */
+                { key: 'ready', header: '상태', width: 130,
+                  render: r => (r.ready
+                    ? <span className="text-sm text-muted2">—</span>
+                    : <span className="badge warn" style={{ fontSize: 11 }}>확인 필요</span>) },
+              ]}
+            />
           </div>
 
           {notReady.length > 0 && (
@@ -2520,21 +2543,21 @@ const ReportVAT = ({ toast, registerExport }) => {
             <div className="section-title" style={{ fontSize: 14 }}>매출 (세금계산서 발행)</div>
             <span className="badge pos ml-auto">{fmtNum(salesTotal)}원</span>
           </div>
-          <table className="table">
-            <thead><tr><th>거래처</th><th className="num-right">공급가액</th><th className="num-right">산출세액*</th></tr></thead>
-            <tbody>
-              {salesInvoices.map((r, i) => (
-                <tr key={i}>
-                  <td className="fw-600 text-sm">{r.vendor}</td>
-                  <td className="num-cell num-right text-sm">{fmtNum(r.supplyAmount)}</td>
-                  <td className="num-cell num-right text-sm" style={{ color: "var(--pos)" }}>{fmtNum(r.vatAmount)}</td>
-                </tr>
-              ))}
-              {salesInvoices.length === 0 && (
-                <tr><td colSpan={3} className="text-muted text-sm" style={{ textAlign: "center", padding: 16 }}>해당 분기 매출 세금계산서 없음</td></tr>
-              )}
-            </tbody>
-          </table>
+          <DataTable
+            rows={salesInvoices}
+            rowKey={(r, i) => i}
+            empty="해당 분기 매출 세금계산서 없음"
+            columns={[
+              { key: 'vendor', header: '거래처', sortable: true,
+                render: r => <span className="fw-600 text-sm">{r.vendor}</span> },
+              { key: 'supplyAmount', header: '공급가액', align: 'right', sortable: true,
+                sortValue: r => Number(r.supplyAmount || 0),
+                render: r => <span className="num-cell text-sm">{fmtNum(r.supplyAmount)}</span> },
+              { key: 'vatAmount', header: '산출세액*', align: 'right', sortable: true,
+                sortValue: r => Number(r.vatAmount || 0),
+                render: r => <span className="num-cell text-sm" style={{ color: "var(--pos)" }}>{fmtNum(r.vatAmount)}</span> },
+            ]}
+          />
         </div>
 
         {/* 매입 */}
@@ -2543,21 +2566,21 @@ const ReportVAT = ({ toast, registerExport }) => {
             <div className="section-title" style={{ fontSize: 14 }}>매입 (세금계산서 수취)</div>
             <span className="badge warn ml-auto">{fmtNum(purchaseTotal)}원</span>
           </div>
-          <table className="table">
-            <thead><tr><th>거래처</th><th className="num-right">공급가액</th><th className="num-right">산출세액*</th></tr></thead>
-            <tbody>
-              {purchaseInvoices.map((r, i) => (
-                <tr key={i}>
-                  <td className="fw-600 text-sm">{r.vendor}</td>
-                  <td className="num-cell num-right text-sm">{fmtNum(r.supplyAmount)}</td>
-                  <td className="num-cell num-right text-sm" style={{ color: "var(--neg)" }}>{fmtNum(r.vatAmount)}</td>
-                </tr>
-              ))}
-              {purchaseInvoices.length === 0 && (
-                <tr><td colSpan={3} className="text-muted text-sm" style={{ textAlign: "center", padding: 16 }}>해당 분기 매입 세금계산서 없음</td></tr>
-              )}
-            </tbody>
-          </table>
+          <DataTable
+            rows={purchaseInvoices}
+            rowKey={(r, i) => i}
+            empty="해당 분기 매입 세금계산서 없음"
+            columns={[
+              { key: 'vendor', header: '거래처', sortable: true,
+                render: r => <span className="fw-600 text-sm">{r.vendor}</span> },
+              { key: 'supplyAmount', header: '공급가액', align: 'right', sortable: true,
+                sortValue: r => Number(r.supplyAmount || 0),
+                render: r => <span className="num-cell text-sm">{fmtNum(r.supplyAmount)}</span> },
+              { key: 'vatAmount', header: '산출세액*', align: 'right', sortable: true,
+                sortValue: r => Number(r.vatAmount || 0),
+                render: r => <span className="num-cell text-sm" style={{ color: "var(--neg)" }}>{fmtNum(r.vatAmount)}</span> },
+            ]}
+          />
         </div>
       </div>
 
@@ -2626,47 +2649,45 @@ const FundSheetAccounts = ({ title, g }) => {
         <div className="fw-700">{title}</div>
         <div className="ml-auto text-sm text-muted">계좌 {g.rows.length}개</div>
       </div>
-      <div className="table-scroll" style={{ overflowX: 'auto' }}>
-        <table className="table" style={{ minWidth: 1000 }}>
-          <thead>
-            <tr>
-              <th style={{ minWidth: 150 }}>계좌</th>
-              <th className="num-right" style={{ width: 130 }}>잔액</th>
-              <th className="num-right" style={{ width: 120, borderLeft: '1px solid var(--line)' }}>들어온 돈</th>
-              <th className="num-right" style={{ width: 120 }}>나간 돈</th>
-              <th style={{ borderLeft: '1px solid var(--line)' }}>나갈 항목</th>
-              <th className="num-right" style={{ width: 130 }}>나갈 합계</th>
-              <th className="num-right" style={{ width: 130 }}>차액</th>
-            </tr>
-          </thead>
-          <tbody>
-            {g.rows.map(r => (
-              <tr key={r.id}>
-                <td className="fw-600">{r.name}</td>
-                <td className="num-cell num-right">{fsNum(r.balance)}</td>
-                {/* 실적 두 칸 — 원본 엑셀에 없던 열이다 */}
-                <td className="num-cell num-right text-muted" style={{ borderLeft: '1px solid var(--line)' }}>
-                  {r.actualIn ? fmtNum(r.actualIn) : ''}</td>
-                <td className="num-cell num-right text-muted">{r.actualOut ? fmtNum(r.actualOut) : ''}</td>
-                <td className="text-sm" style={{ borderLeft: '1px solid var(--line)' }}>
-                  <FundSheetOutItems items={r.outItems}/>
-                </td>
-                <td className="num-cell num-right">{r.outTotal ? fmtNum(r.outTotal) : ''}</td>
-                <td className="num-cell num-right fw-700">{fsNum(r.after)}</td>
-              </tr>
-            ))}
-            <tr style={{ background: 'var(--surface-2)' }}>
-              <td className="fw-700">합계</td>
-              <td className="num-cell num-right fw-700">{fsNum(g.total.balance)}</td>
-              <td className="num-cell num-right" style={{ borderLeft: '1px solid var(--line)' }}>{fmtNum(g.total.actualIn)}</td>
-              <td className="num-cell num-right">{fmtNum(g.total.actualOut)}</td>
-              <td style={{ borderLeft: '1px solid var(--line)' }}/>
-              <td className="num-cell num-right fw-700">{fmtNum(g.total.outTotal)}</td>
-              <td className="num-cell num-right fw-700">{fsNum(g.total.after)}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      {/* 합계는 tfoot 으로 뺀다 — tbody 안에 두면 정렬이 합계 행까지 섞어 버린다 */}
+      <DataTable
+        rows={g.rows}
+        minWidth={1000}
+        empty="계좌가 없어요."
+        columns={[
+          { key: 'name', header: '계좌', width: 150, className: 'fw-600' },
+          { key: 'balance', header: '잔액', width: 130, align: 'right', sortable: true,
+            sortValue: r => Number(r.balance || 0),
+            render: r => <span className="num-cell">{fsNum(r.balance)}</span> },
+          /* 실적 두 칸 — 원본 엑셀에 없던 열이다 */
+          { key: 'actualIn', header: '들어온 돈', width: 120, align: 'right', sortable: true,
+            headClassName: 'fs-sep', className: 'fs-sep',
+            sortValue: r => Number(r.actualIn || 0),
+            render: r => <span className="num-cell text-muted">{r.actualIn ? fmtNum(r.actualIn) : ''}</span> },
+          { key: 'actualOut', header: '나간 돈', width: 120, align: 'right', sortable: true,
+            sortValue: r => Number(r.actualOut || 0),
+            render: r => <span className="num-cell text-muted">{r.actualOut ? fmtNum(r.actualOut) : ''}</span> },
+          { key: 'outItems', header: '나갈 항목', headClassName: 'fs-sep', className: 'fs-sep text-sm',
+            render: r => <FundSheetOutItems items={r.outItems}/> },
+          { key: 'outTotal', header: '나갈 합계', width: 130, align: 'right', sortable: true,
+            sortValue: r => Number(r.outTotal || 0),
+            render: r => <span className="num-cell">{r.outTotal ? fmtNum(r.outTotal) : ''}</span> },
+          { key: 'after', header: '차액', width: 130, align: 'right', sortable: true,
+            sortValue: r => Number(r.after || 0),
+            render: r => <span className="num-cell fw-700">{fsNum(r.after)}</span> },
+        ]}
+        footer={(
+          <tr>
+            <td className="fw-700">합계</td>
+            <td className="num-cell num-right fw-700">{fsNum(g.total.balance)}</td>
+            <td className="num-cell num-right fs-sep">{fmtNum(g.total.actualIn)}</td>
+            <td className="num-cell num-right">{fmtNum(g.total.actualOut)}</td>
+            <td className="fs-sep"/>
+            <td className="num-cell num-right fw-700">{fmtNum(g.total.outTotal)}</td>
+            <td className="num-cell num-right fw-700">{fsNum(g.total.after)}</td>
+          </tr>
+        )}
+      />
     </div>
   )
 }
@@ -2791,28 +2812,31 @@ const ReportFundSheet = ({ toast, registerExport }) => {
           <div className="fw-700">들어올 돈</div>
           <div className="ml-auto num fw-700">{fmtNum(d.incoming.reduce((s, x) => s + x.amount, 0))}원</div>
         </div>
-        <table className="table">
-          <thead><tr><th style={{ width: 130 }}>일자</th><th style={{ width: 110 }}>출처</th><th>내용</th><th>입금 계좌</th><th className="num-right" style={{ width: 140 }}>금액</th></tr></thead>
-          <tbody>
-            {d.incoming.map((it, i) => (
-              <tr key={`${it.label}-${it.date}-${i}`}>
-                <td className="num text-sm">
+        <DataTable
+          rows={d.incoming}
+          rowKey={(it, i) => `${it.label}-${it.date}-${i}`}
+          empty="이 구간에 들어올 돈이 없어요."
+          columns={[
+            /* 기한 미정은 날짜가 없다 — sortValue 를 비우면 DataTable 이 방향과 무관하게 뒤로 보낸다 */
+            { key: 'date', header: '일자', width: 130, sortable: true,
+              sortValue: it => (it.noDue ? null : it.date),
+              render: it => (
+                <span className="num text-sm">
                   {it.noDue ? <span className="text-muted2">기한 미정</span> : it.date}
                   {it.overdue && <span className="badge warn" style={{ marginLeft: 6, fontSize: 10 }}>기한 지남</span>}
-                </td>
-                <td><span className="badge" style={{ fontSize: 10 }}>{it.source}</span></td>
-                <td className="text-sm">{it.label}</td>
-                <td className="text-sm text-muted">{it.account || '통장 미정'}</td>
-                <td className="num-cell num-right fw-600">{fmtNum(it.amount)}</td>
-              </tr>
-            ))}
-            {d.incoming.length === 0 && (
-              <tr><td colSpan={5} className="text-muted text-sm" style={{ textAlign: 'center', padding: 20 }}>
-                이 구간에 들어올 돈이 없어요.
-              </td></tr>
-            )}
-          </tbody>
-        </table>
+                </span>
+              ) },
+            { key: 'source', header: '출처', width: 110, sortable: true,
+              render: it => <span className="badge" style={{ fontSize: 10 }}>{it.source}</span> },
+            { key: 'label', header: '내용', sortable: true,
+              render: it => <span className="text-sm">{it.label}</span> },
+            { key: 'account', header: '입금 계좌', sortable: true,
+              render: it => <span className="text-sm text-muted">{it.account || '통장 미정'}</span> },
+            { key: 'amount', header: '금액', width: 140, align: 'right', sortable: true,
+              sortValue: it => Number(it.amount || 0),
+              render: it => <span className="num-cell fw-600">{fmtNum(it.amount)}</span> },
+          ]}
+        />
       </div>
 
       {/* 미지급 인건비 — 원본의 <퇴직자 미지급분> · <현직원 미지급 급여> */}
@@ -2822,20 +2846,23 @@ const ReportFundSheet = ({ toast, registerExport }) => {
           <div className="ml-auto num fw-700">{fmtNum(d.labor.total)}원</div>
         </div>
         {d.labor.items?.length ? (
-          <table className="table">
-            <thead><tr><th style={{ width: 90 }}>구분</th><th>이름</th><th style={{ width: 90 }}>항목</th><th style={{ width: 110 }}>월분</th><th className="num-right" style={{ width: 140 }}>금액</th></tr></thead>
-            <tbody>
-              {d.labor.items.map((it, i) => (
-                <tr key={`${it.name}-${it.kind}-${it.period || ''}-${i}`}>
-                  <td className="text-sm">{it.status === 'retired' ? '퇴직자' : '현직원'}</td>
-                  <td className="fw-600 text-sm">{it.name}</td>
-                  <td className="text-sm">{it.kind === 'severance' ? '퇴직금' : '급여'}</td>
-                  <td className="num text-sm text-muted">{it.period || ''}</td>
-                  <td className="num-cell num-right">{fmtNum(it.remain)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            rows={d.labor.items}
+            rowKey={(it, i) => `${it.name}-${it.kind}-${it.period || ''}-${i}`}
+            columns={[
+              { key: 'status', header: '구분', width: 90, sortable: true,
+                render: it => <span className="text-sm">{it.status === 'retired' ? '퇴직자' : '현직원'}</span> },
+              { key: 'name', header: '이름', sortable: true,
+                render: it => <span className="fw-600 text-sm">{it.name}</span> },
+              { key: 'kind', header: '항목', width: 90, sortable: true,
+                render: it => <span className="text-sm">{it.kind === 'severance' ? '퇴직금' : '급여'}</span> },
+              { key: 'period', header: '월분', width: 110, sortable: true,
+                render: it => <span className="num text-sm text-muted">{it.period || ''}</span> },
+              { key: 'remain', header: '금액', width: 140, align: 'right', sortable: true,
+                sortValue: it => Number(it.remain || 0),
+                render: it => <span className="num-cell">{fmtNum(it.remain)}</span> },
+            ]}
+          />
         ) : (
           <div className="card-pad text-sm text-muted" style={{ paddingTop: 0 }}>
             이름별 명세는 인사 권한이 있어야 보여요. 합계는 위에 있습니다.
@@ -2994,77 +3021,79 @@ const ReportLoan = ({ toast, registerExport }) => {
       {d.loans.length > 1 && (
         <div className="card" style={{ overflow: 'hidden', marginBottom: 20 }}>
           <div className="card-pad fw-700" style={{ paddingBottom: 10 }}>차입처별 요약</div>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>차입처</th>
-                <th style={{ width: 70 }} className="num-right">건수</th>
-                <th className="num-right">차입원금</th>
-                <th className="num-right">상환원금</th>
-                <th className="num-right">남은원금</th>
-                <th className="num-right">지급이자</th>
-              </tr>
-            </thead>
-            <tbody>
-              {d.byLender.map(g => (
-                <tr key={g.lender}>
-                  <td className="fw-700">{g.lender}</td>
-                  <td className="num-cell num-right">{g.count}</td>
-                  <td className="num-cell num-right">{fmtNum(g.principal)}</td>
-                  <td className="num-cell num-right" style={{ color: 'var(--pos)' }}>
-                    {g.repaidPrincipal ? fmtNum(g.repaidPrincipal) : '—'}</td>
-                  <td className="num-cell num-right fw-700">{fmtNum(g.remaining)}</td>
-                  <td className="num-cell num-right text-muted">
-                    {g.repaidInterest ? fmtNum(g.repaidInterest) : '—'}</td>
-                </tr>
-              ))}
+          <DataTable
+            rows={d.byLender}
+            rowKey={g => g.lender}
+            columns={[
+              { key: 'lender', header: '차입처', sortable: true, className: 'fw-700' },
+              { key: 'count', header: '건수', width: 70, align: 'right', sortable: true,
+                sortValue: g => Number(g.count || 0),
+                render: g => <span className="num-cell">{g.count}</span> },
+              { key: 'principal', header: '차입원금', align: 'right', sortable: true,
+                sortValue: g => Number(g.principal || 0),
+                render: g => <span className="num-cell">{fmtNum(g.principal)}</span> },
+              { key: 'repaidPrincipal', header: '상환원금', align: 'right', sortable: true,
+                sortValue: g => Number(g.repaidPrincipal || 0),
+                render: g => <span className="num-cell" style={{ color: 'var(--pos)' }}>{g.repaidPrincipal ? fmtNum(g.repaidPrincipal) : '—'}</span> },
+              { key: 'remaining', header: '남은원금', align: 'right', sortable: true,
+                sortValue: g => Number(g.remaining || 0),
+                render: g => <span className="num-cell fw-700">{fmtNum(g.remaining)}</span> },
+              { key: 'repaidInterest', header: '지급이자', align: 'right', sortable: true,
+                sortValue: g => Number(g.repaidInterest || 0),
+                render: g => <span className="num-cell text-muted">{g.repaidInterest ? fmtNum(g.repaidInterest) : '—'}</span> },
+            ]}
+            footer={(
               <tr>
                 <td className="fw-700">합계</td>
-                <td className="num-cell num-right fw-700">{T.count}</td>
-                <td className="num-cell num-right fw-700">{fmtNum(T.principal)}</td>
-                <td className="num-cell num-right fw-700">{fmtNum(T.repaidPrincipal)}</td>
-                <td className="num-cell num-right fw-700">{fmtNum(T.remaining)}</td>
-                <td className="num-cell num-right fw-700">{fmtNum(T.repaidInterest)}</td>
+                <td className="num-cell num-right">{T.count}</td>
+                <td className="num-cell num-right">{fmtNum(T.principal)}</td>
+                <td className="num-cell num-right">{fmtNum(T.repaidPrincipal)}</td>
+                <td className="num-cell num-right">{fmtNum(T.remaining)}</td>
+                <td className="num-cell num-right">{fmtNum(T.repaidInterest)}</td>
               </tr>
-            </tbody>
-          </table>
+            )}
+          />
         </div>
       )}
 
       {/* 2. 계좌별 현황 */}
       <div className="card" style={{ overflow: 'hidden', marginBottom: 20 }}>
         <div className="card-pad fw-700" style={{ paddingBottom: 10 }}>계좌별 현황</div>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>차입처</th><th>차입금명(계좌)</th><th>차입일</th>
-              <th className="num-right">차입원금</th>
-              <th className="num-right">상환원금</th>
-              <th className="num-right">남은원금</th>
-              <th style={{ width: 80 }} className="num-right">연이율</th>
-              <th style={{ width: 90 }}>상환방식</th>
-              <th>상환계좌</th>
-            </tr>
-          </thead>
-          <tbody>
-            {d.loans.map(l => (
-              <tr key={l.id}>
-                <td className="text-sm">{l.lender}</td>
-                <td className="fw-700">{l.name}</td>
-                <td className="text-sm num">{l.startDate}</td>
-                <td className="num-cell num-right">{fmtNum(l.principal)}</td>
-                <td className="num-cell num-right" style={{ color: 'var(--pos)' }}>
-                  {l.repaidPrincipal ? fmtNum(l.repaidPrincipal) : '—'}</td>
-                <td className="num-cell num-right fw-700">{fmtNum(l.remaining)}</td>
-                {/* 이율 0은 '0%'로 찍지 않는다 — 무이자로 읽힌다(임포트분은 아직 안 채웠다) */}
-                <td className="num-cell num-right text-sm">
-                  {l.annualRate ? `${l.annualRate}%` : <span className="text-muted2">—</span>}</td>
-                <td className="text-sm text-muted">{LOAN_METHOD_LABEL[l.method] || l.method}</td>
-                <td className="text-sm text-muted">{l.accountName || '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable
+          rows={d.loans}
+          rowKey={l => l.id}
+          empty="차입금이 없어요."
+          columns={[
+            { key: 'lender', header: '차입처', sortable: true,
+              render: l => <span className="text-sm">{l.lender}</span> },
+            { key: 'name', header: '차입금명(계좌)', sortable: true, className: 'fw-700' },
+            { key: 'startDate', header: '차입일', sortable: true,
+              render: l => <span className="text-sm num">{l.startDate}</span> },
+            { key: 'principal', header: '차입원금', align: 'right', sortable: true,
+              sortValue: l => Number(l.principal || 0),
+              render: l => <span className="num-cell">{fmtNum(l.principal)}</span> },
+            { key: 'repaidPrincipal', header: '상환원금', align: 'right', sortable: true,
+              sortValue: l => Number(l.repaidPrincipal || 0),
+              render: l => <span className="num-cell" style={{ color: 'var(--pos)' }}>{l.repaidPrincipal ? fmtNum(l.repaidPrincipal) : '—'}</span> },
+            { key: 'remaining', header: '남은원금', align: 'right', sortable: true,
+              sortValue: l => Number(l.remaining || 0),
+              render: l => <span className="num-cell fw-700">{fmtNum(l.remaining)}</span> },
+            /* 이율 0은 '0%'로 찍지 않는다 — 무이자로 읽힌다(임포트분은 아직 안 채웠다).
+               정렬도 0이 아니라 빈 값으로 둔다 — 안 채운 걸 '가장 싼 차입'으로 세우면 안 된다. */
+            { key: 'annualRate', header: '연이율', width: 80, align: 'right', sortable: true,
+              sortValue: l => (l.annualRate ? Number(l.annualRate) : null),
+              render: l => (
+                <span className="num-cell text-sm">
+                  {l.annualRate ? `${l.annualRate}%` : <span className="text-muted2">—</span>}
+                </span>
+              ) },
+            { key: 'method', header: '상환방식', width: 90, sortable: true,
+              sortValue: l => LOAN_METHOD_LABEL[l.method] || l.method,
+              render: l => <span className="text-sm text-muted">{LOAN_METHOD_LABEL[l.method] || l.method}</span> },
+            { key: 'accountName', header: '상환계좌', sortable: true,
+              render: l => <span className="text-sm text-muted">{l.accountName || '—'}</span> },
+          ]}
+        />
       </div>
 
       {/* 3. 계좌별 상환 내역 — 계좌마다 표 하나 + 소계 */}
@@ -3085,39 +3114,39 @@ const ReportLoan = ({ toast, registerExport }) => {
               상환 처리한 회차가 없어요.
             </div>
           ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>납부일</th>
-                  <th style={{ width: 60 }} className="num-right">회차</th>
-                  <th>예정일</th>
-                  <th className="num-right">원금</th>
-                  <th className="num-right">이자</th>
-                  <th className="num-right">합계</th>
-                </tr>
-              </thead>
-              <tbody>
-                {g.rows.map(r => (
-                  <tr key={`${r.loanId}-${r.seq}`}>
-                    <td className="text-sm num">{r.paidDate}</td>
-                    <td className="num-cell num-right text-sm">{r.seq}</td>
-                    <td className="text-sm num text-muted">{r.dueDate}</td>
-                    {/* 이자만 낸 회차는 원금이 0이다. '0'으로 찍으면 0을 —로 두는 다른 열과 어긋난다 */}
-                    <td className="num-cell num-right">{r.principal ? fmtNum(r.principal) : '—'}</td>
-                    <td className="num-cell num-right text-muted">{r.interest ? fmtNum(r.interest) : '—'}</td>
-                    <td className="num-cell num-right fw-700">{fmtNum(r.total)}</td>
-                  </tr>
-                ))}
+            <DataTable
+              rows={g.rows}
+              rowKey={r => `${r.loanId}-${r.seq}`}
+              columns={[
+                { key: 'paidDate', header: '납부일', sortable: true,
+                  render: r => <span className="text-sm num">{r.paidDate}</span> },
+                { key: 'seq', header: '회차', width: 60, align: 'right', sortable: true,
+                  sortValue: r => Number(r.seq || 0),
+                  render: r => <span className="num-cell text-sm">{r.seq}</span> },
+                { key: 'dueDate', header: '예정일', sortable: true,
+                  render: r => <span className="text-sm num text-muted">{r.dueDate}</span> },
+                /* 이자만 낸 회차는 원금이 0이다. '0'으로 찍으면 0을 —로 두는 다른 열과 어긋난다 */
+                { key: 'principal', header: '원금', align: 'right', sortable: true,
+                  sortValue: r => Number(r.principal || 0),
+                  render: r => <span className="num-cell">{r.principal ? fmtNum(r.principal) : '—'}</span> },
+                { key: 'interest', header: '이자', align: 'right', sortable: true,
+                  sortValue: r => Number(r.interest || 0),
+                  render: r => <span className="num-cell text-muted">{r.interest ? fmtNum(r.interest) : '—'}</span> },
+                { key: 'total', header: '합계', align: 'right', sortable: true,
+                  sortValue: r => Number(r.total || 0),
+                  render: r => <span className="num-cell fw-700">{fmtNum(r.total)}</span> },
+              ]}
+              footer={(
                 <tr>
                   <td className="fw-700">소계</td>
-                  <td className="num-cell num-right fw-700">{g.subtotal.count}</td>
+                  <td className="num-cell num-right">{g.subtotal.count}</td>
                   <td/>
-                  <td className="num-cell num-right fw-700">{fmtNum(g.subtotal.principal)}</td>
-                  <td className="num-cell num-right fw-700">{fmtNum(g.subtotal.interest)}</td>
-                  <td className="num-cell num-right fw-700">{fmtNum(g.subtotal.total)}</td>
+                  <td className="num-cell num-right">{fmtNum(g.subtotal.principal)}</td>
+                  <td className="num-cell num-right">{fmtNum(g.subtotal.interest)}</td>
+                  <td className="num-cell num-right">{fmtNum(g.subtotal.total)}</td>
                 </tr>
-              </tbody>
-            </table>
+              )}
+            />
           )}
         </div>
       ))}
@@ -3242,41 +3271,43 @@ const ReportCard = ({ toast }) => {
       {!cardId && (
         <div className="card" style={{ overflow: 'hidden', marginBottom: 20 }}>
           <div className="card-pad fw-700" style={{ paddingBottom: 10 }}>카드별 요약</div>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>카드</th><th style={{ width: 80 }}>소유</th><th style={{ width: 70 }}>종류</th>
-                <th style={{ width: 70 }} className="num-right">건수</th>
-                <th className="num-right">사용액</th>
-                <th className="num-right">결제액</th>
-                <th style={{ width: 80 }}>결제일</th>
-                <th>결제계좌</th>
-              </tr>
-            </thead>
-            <tbody>
-              {d.cards.map(c => (
-                <tr key={c.id}>
-                  <td className="fw-700">{c.name}</td>
-                  <td className="text-sm text-muted">{c.owner_label}</td>
-                  <td className="text-sm text-muted">{c.type_label}</td>
-                  <td className="num-cell num-right">{c.count || '—'}</td>
-                  <td className="num-cell num-right fw-700">{c.used_total ? fmtNum(c.used_total) : '—'}</td>
-                  <td className="num-cell num-right" style={{ color: c.paid_total ? 'var(--pos)' : undefined }}>
-                    {c.paid_total ? fmtNum(c.paid_total) : '—'}</td>
-                  {/* 체크카드는 결제일이 없다 — 쓴 즉시 통장에서 빠진다 */}
-                  <td className="text-sm text-muted num">{c.pay_day ? `${c.pay_day}일` : '—'}</td>
-                  <td className="text-sm text-muted">{c.pay_account || '—'}</td>
-                </tr>
-              ))}
+          <DataTable
+            rows={d.cards}
+            rowKey={c => c.id}
+            empty="카드가 없어요."
+            columns={[
+              { key: 'name', header: '카드', sortable: true, className: 'fw-700' },
+              { key: 'owner_label', header: '소유', width: 80, sortable: true,
+                render: c => <span className="text-sm text-muted">{c.owner_label}</span> },
+              { key: 'type_label', header: '종류', width: 70, sortable: true,
+                render: c => <span className="text-sm text-muted">{c.type_label}</span> },
+              { key: 'count', header: '건수', width: 70, align: 'right', sortable: true,
+                sortValue: c => Number(c.count || 0),
+                render: c => <span className="num-cell">{c.count || '—'}</span> },
+              { key: 'used_total', header: '사용액', align: 'right', sortable: true,
+                sortValue: c => Number(c.used_total || 0),
+                render: c => <span className="num-cell fw-700">{c.used_total ? fmtNum(c.used_total) : '—'}</span> },
+              { key: 'paid_total', header: '결제액', align: 'right', sortable: true,
+                sortValue: c => Number(c.paid_total || 0),
+                render: c => <span className="num-cell" style={{ color: c.paid_total ? 'var(--pos)' : undefined }}>{c.paid_total ? fmtNum(c.paid_total) : '—'}</span> },
+              /* 체크카드는 결제일이 없다 — 쓴 즉시 통장에서 빠진다.
+                 정렬에서도 0일이 아니라 빈 값이다(1일 결제 카드보다 앞에 서면 안 된다). */
+              { key: 'pay_day', header: '결제일', width: 80, sortable: true,
+                sortValue: c => (c.pay_day ? Number(c.pay_day) : null),
+                render: c => <span className="text-sm text-muted num">{c.pay_day ? `${c.pay_day}일` : '—'}</span> },
+              { key: 'pay_account', header: '결제계좌', sortable: true,
+                render: c => <span className="text-sm text-muted">{c.pay_account || '—'}</span> },
+            ]}
+            footer={(
               <tr>
                 <td className="fw-700">합계</td><td/><td/>
-                <td className="num-cell num-right fw-700">{T.count}</td>
-                <td className="num-cell num-right fw-700">{fmtNum(T.used)}</td>
-                <td className="num-cell num-right fw-700">{fmtNum(T.paid)}</td>
+                <td className="num-cell num-right">{T.count}</td>
+                <td className="num-cell num-right">{fmtNum(T.used)}</td>
+                <td className="num-cell num-right">{fmtNum(T.paid)}</td>
                 <td/><td/>
               </tr>
-            </tbody>
-          </table>
+            )}
+          />
         </div>
       )}
 
@@ -3301,41 +3332,42 @@ const ReportCard = ({ toast }) => {
               이 기간에 사용 내역이 없어요.
             </div>
           ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th style={{ width: 110 }}>날짜</th>
-                  <th>거래처</th>
-                  <th style={{ width: 140 }}>비목</th>
-                  <th>내용</th>
-                  <th style={{ width: 110 }}>증빙</th>
-                  <th className="num-right" style={{ width: 130 }}>금액</th>
-                </tr>
-              </thead>
-              <tbody>
-                {c.lines.map(l => (
-                  <tr key={l.id}>
-                    <td className="text-sm num">{l.date}</td>
-                    <td className="text-sm">{l.vendor || '—'}</td>
-                    <td className="text-sm text-muted">{l.category || '—'}</td>
-                    <td className="text-sm text-muted">{l.memo || '—'}</td>
-                    {/* 챙긴 건에는 표식을 달지 않는다 — 눈에 띄어야 하는 건 빠진 쪽이다 */}
-                    <td className="text-sm">
+            <DataTable
+              rows={c.lines}
+              rowKey={l => l.id}
+              columns={[
+                { key: 'date', header: '날짜', width: 110, sortable: true,
+                  render: l => <span className="text-sm num">{l.date}</span> },
+                { key: 'vendor', header: '거래처', sortable: true,
+                  render: l => <span className="text-sm">{l.vendor || '—'}</span> },
+                { key: 'category', header: '비목', width: 140, sortable: true,
+                  render: l => <span className="text-sm text-muted">{l.category || '—'}</span> },
+                { key: 'memo', header: '내용', sortable: true,
+                  render: l => <span className="text-sm text-muted">{l.memo || '—'}</span> },
+                /* 챙긴 건에는 표식을 달지 않는다 — 눈에 띄어야 하는 건 빠진 쪽이다.
+                   정렬은 **미첨부가 먼저** 오게 둔다(0=미첨부) — 이 열을 누르는 이유가 그거다. */
+                { key: 'evidence', header: '증빙', width: 110, sortable: true,
+                  sortValue: l => (l.evidence ? 1 : 0),
+                  render: l => (
+                    <span className="text-sm">
                       {l.evidence ? <span className="text-muted2">—</span>
                         : <span style={{ color: 'var(--neg-ink)' }}>미첨부</span>}
-                    </td>
-                    <td className="num-cell num-right fw-700">{fmtNum(l.amount)}</td>
-                  </tr>
-                ))}
+                    </span>
+                  ) },
+                { key: 'amount', header: '금액', width: 130, align: 'right', sortable: true,
+                  sortValue: l => Number(l.amount || 0),
+                  render: l => <span className="num-cell fw-700">{fmtNum(l.amount)}</span> },
+              ]}
+              footer={(
                 <tr>
                   <td className="fw-700">소계</td><td/><td/><td/>
                   {/* 미첨부 건수는 한 줄로 — 감기면 소계 줄만 키가 커져 표가 들쭉날쭉해진다 */}
                   <td className="num-cell num-right text-muted" style={{ whiteSpace: 'nowrap' }}>
                     {c.no_evidence ? `미첨부 ${c.no_evidence}건` : ''}</td>
-                  <td className="num-cell num-right fw-700">{fmtNum(c.used_total)}</td>
+                  <td className="num-cell num-right">{fmtNum(c.used_total)}</td>
                 </tr>
-              </tbody>
-            </table>
+              )}
+            />
           )}
 
           {/* 3. 그 기간의 카드대금 결제 — 없으면 구획을 아예 그리지 않는다 */}
@@ -3344,30 +3376,27 @@ const ReportCard = ({ toast }) => {
               <div className="card-pad text-sm fw-700" style={{ paddingTop: 14, paddingBottom: 8 }}>
                 카드대금 결제
               </div>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th style={{ width: 110 }}>결제일</th>
-                    <th>출금 계좌</th>
-                    <th>내용</th>
-                    <th className="num-right" style={{ width: 130 }}>결제액</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {c.payments.map(p => (
-                    <tr key={p.id}>
-                      <td className="text-sm num">{p.date}</td>
-                      <td className="text-sm">{p.from || '—'}</td>
-                      <td className="text-sm text-muted">{p.memo || '—'}</td>
-                      <td className="num-cell num-right" style={{ color: 'var(--pos)' }}>{fmtNum(p.amount)}</td>
-                    </tr>
-                  ))}
+              <DataTable
+                rows={c.payments}
+                rowKey={p => p.id}
+                columns={[
+                  { key: 'date', header: '결제일', width: 110, sortable: true,
+                    render: p => <span className="text-sm num">{p.date}</span> },
+                  { key: 'from', header: '출금 계좌', sortable: true,
+                    render: p => <span className="text-sm">{p.from || '—'}</span> },
+                  { key: 'memo', header: '내용', sortable: true,
+                    render: p => <span className="text-sm text-muted">{p.memo || '—'}</span> },
+                  { key: 'amount', header: '결제액', width: 130, align: 'right', sortable: true,
+                    sortValue: p => Number(p.amount || 0),
+                    render: p => <span className="num-cell" style={{ color: 'var(--pos)' }}>{fmtNum(p.amount)}</span> },
+                ]}
+                footer={(
                   <tr>
                     <td className="fw-700">소계</td><td/><td/>
-                    <td className="num-cell num-right fw-700">{fmtNum(c.paid_total)}</td>
+                    <td className="num-cell num-right">{fmtNum(c.paid_total)}</td>
                   </tr>
-                </tbody>
-              </table>
+                )}
+              />
             </>
           )}
         </div>
