@@ -14,7 +14,7 @@
 | 앱 코드에서 `CREATE`/`ALTER` | 배포 시점 `npm run setup:db` |
 | 화면(nav) 추가 후 그냥 두기 | `server/platform/permissions.js` `RESOURCES`에도 등록 |
 | 문서업무 잎만 추가하기 | `server/platform/docCatalog.js`에도 같은 key 로 등록 (안 하면 회사별로 못 끈다) |
-| 새 인쇄 화면에 클래스만 붙이기 | `index.css` `@media print` **화이트리스트 4곳**에 등록 (안 하면 Ctrl+P 가 백지) |
+| 새 인쇄 화면에 클래스만 붙이기 | `index.css` `@media print` **화이트리스트 5곳** + **흰 종이 목록**에 등록 (안 하면 Ctrl+P 가 백지거나 다크에서 검은 종이) |
 | 색을 코드에 박기 | CSS 변수만 쓴다 — 다크 모드에서 흰 배경에 흰 글씨가 된다 |
 
 **작업 후 필수**: `cd server && npm run check:isolation`

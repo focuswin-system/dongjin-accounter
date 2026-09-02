@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Icon, localToday } from '../ui'
+import { Icon, localToday, DateInput } from '../ui'
 
 /**
  * 기간 선택기 — **드릴다운**. "달을 누르면 달이, 년을 누르면 년이 나온다."
@@ -160,10 +160,14 @@ export const PeriodPicker = ({ from, to, onChange }) => {
           {/* 그 밖의 기간은 직접 찍는다. 자주 쓰는 길이 아니라 아래에 작게 둔다. */}
           <div className="period-custom">
             <span className="text-xs text-muted2">직접 지정</span>
-            <input type="date" className="input num" value={from || ''} max={to || undefined}
+            {/* ⚠ 원시 <input type="date"> 를 쓰지 않는다. ui.jsx 의 DateInput 주석이
+                "20260722 를 치면 202607-02-02 가 된다. 마우스로 고르는 사람은 평생 못
+                만나지만 숫자를 연달아 치는 사람은 매번 만난다 — **경리 업무는 후자다**"
+                라며 만든 부품인데, 정작 그 부품을 쓰는 툴바 옆에서 원시 입력이 남아 있었다. */}
+            <DateInput className="input num" value={from || ''} max={to || undefined}
               onChange={e => onChange({ from: e.target.value, to })}/>
             <span className="text-muted">~</span>
-            <input type="date" className="input num" value={to || ''} min={from || undefined}
+            <DateInput className="input num" value={to || ''} min={from || undefined}
               onChange={e => onChange({ from, to: e.target.value })}/>
           </div>
         </div>
