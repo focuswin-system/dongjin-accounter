@@ -345,13 +345,21 @@ router.get('/linkable', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/* 발행 전표를 셀지 — **일계표와 같은 설정**을 본다(report_prefs 'voucher_issuance').
+   한쪽만 끄면 같은 회사의 분개장과 일계표가 다른 말을 한다. */
+async function issuanceOn(db) {
+  const [[off]] = await db.execute(
+    "SELECT key_name FROM report_prefs WHERE key_name = 'voucher_issuance' AND enabled = 0")
+  return !off
+}
+
 /* 전표 목록(분개장) — 기간 전체를 차변·대변으로 펼친다. 신고철에 세무사에게 넘기는 형태다.
    ⚠ '/:id' 보다 위에 있어야 한다 — 아래면 'vouchers'가 id 로 잡힌다. */
 router.get('/vouchers', async (req, res, next) => {
   try {
     const { from, to, kind } = req.query
     if (!from || !to) return res.status(400).json({ error: '기간을 지정해주세요' })
-    res.json(await listVouchers(req.db, { from, to, kind }))
+    res.json(await listVouchers(req.db, { from, to, kind, includeIssuance: await issuanceOn(req.db) }))
   } catch (e) { next(e) }
 })
 
@@ -359,7 +367,7 @@ router.get('/vouchers.xlsx', async (req, res, next) => {
   try {
     const { from, to, kind } = req.query
     if (!from || !to) return res.status(400).json({ error: '기간을 지정해주세요' })
-    const vouchers = await listVouchers(req.db, { from, to, kind })
+    const vouchers = await listVouchers(req.db, { from, to, kind, includeIssuance: await issuanceOn(req.db) })
     const rows = toRows(vouchers)
     const debit = vouchers.reduce((s, v) => s + v.debitTotal, 0)
     const credit = vouchers.reduce((s, v) => s + v.creditTotal, 0)

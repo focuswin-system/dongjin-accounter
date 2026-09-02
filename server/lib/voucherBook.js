@@ -13,7 +13,7 @@
  *   그대로 세우고 '확인 필요'로 표시해, 받는 사람이 물어볼 수 있게 한다.
  */
 
-const { transactionVoucher, noteVoucher, noteDishonorVoucher } = require('./voucher')
+const { transactionVoucher, invoiceVoucher, noteVoucher, noteDishonorVoucher } = require('./voucher')
 
 /**
  * 기간 안의 거래를 전표로 만든다.
@@ -21,7 +21,7 @@ const { transactionVoucher, noteVoucher, noteDishonorVoucher } = require('./vouc
  * @param from,to 'YYYY-MM-DD'
  * @param kind    'all' | 'income' | 'expense'
  */
-async function listVouchers(db, { from, to, kind = 'all' }) {
+async function listVouchers(db, { from, to, kind = 'all', includeIssuance = true }) {
   const where = ['t.date >= ?', 't.date <= ?']
   const args = [from, to]
   if (kind === 'income' || kind === 'expense') { where.push('t.kind = ?'); args.push(kind) }
@@ -122,7 +122,45 @@ async function listVouchers(db, { from, to, kind = 'all' }) {
       category: nt.kind === 'receivable' ? '받을어음' : '지급어음',
     })
   }
-  // 날짜 순으로 다시 세운다 — 어음을 뒤에 붙였으므로 그대로 두면 파일 끝에 몰린다
+  /* ⚠ **청구서 발행도 전표다.** 여기 없어서 이 파일에는 매출 계정(4102)·부가세예수금이
+   *   한 줄도 안 나왔다 — 세무사에게 넘기는 파일인데 매출이 없고, 외상매출금은 정산 거래의
+   *   대변으로만 나타나 어디서 생긴 채권인지 알 수 없었다. voucher.js 머리말이
+   *   "매출 계정은 평생 한 번도 찍히지 않는다. 누적하면 장부가 성립하지 않는다"고
+   *   경고한 상태 그대로였다. 일계표(cashReport.dailyTrial)는 이미 세고 있어 두 장부가
+   *   다른 말을 했다.
+   *
+   * ⚠ 회사 설정(report_prefs 'voucher_issuance')을 **일계표와 똑같이** 따른다.
+   *   "은행 기준으로 돈이 오갈 때만 전표를 끊는다"는 회사(현금주의)에는 발행 분개가
+   *   낯설다. 한쪽만 끄면 같은 회사의 두 장부가 또 갈린다. */
+  if (includeIssuance) {
+    const invWhere = ['i.issued_at >= ?', 'i.issued_at <= ?']
+    const invArgs = [from, to]
+    // 매출 청구서는 income 쪽, 매입은 expense 쪽으로 본다(어음 필터와 같은 규칙)
+    if (kind === 'income')  invWhere.push("i.kind = 'issued'")
+    if (kind === 'expense') invWhere.push("i.kind = 'received'")
+    const [invs] = await db.execute(`
+      SELECT i.id, i.invoice_no, i.kind, i.supply_amount, i.vat_amount, i.total_amount,
+             i.issued_at, i.account_code, v.name AS vendor_name
+        FROM invoices i
+        LEFT JOIN vendors v ON v.id = i.vendor_id
+       WHERE ${invWhere.join(' AND ')}`, invArgs)
+    for (const inv of invs) {
+      /* 짝이 안 맞는 것도 **감추지 않는다**(이 파일의 원칙). 비목이 없는 매입 청구서는
+         차변이 비어 한 다리로 서는데, 빼면 합계는 맞아 보이지만 그 청구서가 장부에서
+         사라진다. 그대로 세우고 '확인 필요'로 표시해 받는 사람이 물어볼 수 있게 한다. */
+      vouchers.push({
+        ...invoiceVoucher(inv),
+        kind: inv.kind === 'issued' ? 'income' : 'expense',
+        amount: Number(inv.total_amount) || 0,
+        vendor_name: inv.vendor_name || '',
+        account_name: '',            // 발행 시점엔 통장을 안 거친다
+        memo: `${inv.invoice_no || ''} 발행`.trim(),
+        category: '',
+      })
+    }
+  }
+
+  // 날짜 순으로 다시 세운다 — 어음·청구서를 뒤에 붙였으므로 그대로 두면 파일 끝에 몰린다
   vouchers.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.id < b.id ? -1 : 1)))
 
   const codes = [...new Set(vouchers.flatMap(v => v.lines.map(l => String(l.code))))]
