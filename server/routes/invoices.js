@@ -3,9 +3,11 @@ const { randomUUID } = require('crypto')
 const { uploadMem, parseSheet } = require('../lib/xlsx-import')
 const { futureDateError, kstToday } = require('../db')
 const { closedPeriodError } = require('../lib/closing')
+// 부가세 집계는 lib/vatAgg.js 한 곳 — 화면·보고서·엑셀이 같은 값을 본다
 const { rollbackQuietly } = require('../lib/tx')
 const { restoreLastGenerated } = require('../lib/recurrence')
 const { ledgerError, amountError } = require('../lib/ledger')
+const { vatOfQuarter } = require('../lib/vatAgg')
 const { settleAcctCode } = require('../lib/acctCode')
 const { removeUploadedFile } = require('../lib/uploads')
 const { normalizeTaxType } = require('../lib/vat')
@@ -188,9 +190,20 @@ router.get('/summary/vat', async (req, res, next) => {
        WHERE (${placeholders})`,
       params
     )
-    const salesVat    = all.filter(r => r.kind === 'issued').reduce((s, r) => s + Number(r.vat_amount), 0)
-    const purchaseVat = all.filter(r => r.kind === 'received').reduce((s, r) => s + Number(r.vat_amount), 0)
-    res.json({ salesVat, purchaseVat, netVat: salesVat - purchaseVat, rows: all })
+    /* ⚠ 세액은 **lib/vatAgg.js** 에서 온다 — 청구서만 세면 카드·현금 매입세액이 통째로
+     *   빠진다. 세무관리 화면은 그걸 고쳤는데 **정작 세무사에게 넘기고 홈택스에 옮겨
+     *   적는 이 보고서가 안 고쳐진 쪽**이었다. 아래 rows 는 청구서 명세라 그대로 둔다
+     *   (직접 입력 거래는 청구서가 없어 목록에 세울 행이 없다 — 합계에만 들어간다). */
+    const vat = await vatOfQuarter(req.db, y, { Q1: 1, Q2: 2, Q3: 3, Q4: 4 }[quarter])
+    res.json({
+      salesVat: vat.salesVat, purchaseVat: vat.purchaseVat,
+      netVat: vat.salesVat - vat.purchaseVat,
+      // 출처별 — 화면이 "청구서엔 없는데 세액이 왜 이렇지?"에 답할 수 있게
+      salesVatInvoice: vat.salesInvoice, salesVatDirect: vat.salesDirect,
+      purchaseVatInvoice: vat.purchaseInvoice, purchaseVatDirect: vat.purchaseDirect,
+      nonDeductibleVat: vat.nonDeductible,
+      rows: all,
+    })
   } catch (e) { next(e) }
 })
 

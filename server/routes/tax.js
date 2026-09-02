@@ -4,6 +4,7 @@ const { futureDateError, kstToday } = require('../db')
 const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError, amountError } = require('../lib/ledger')
+const { vatByQuarter } = require('../lib/vatAgg')
 
 const router = Router()
 
@@ -73,36 +74,10 @@ function taxLedgerError({ isDone, isRefund, amount, accountId }) {
 router.get('/vat', async (req, res, next) => {
   try {
     const year = parseInt(req.query.year, 10) || Number(kstToday().slice(0, 4))
-    const [agg] = await req.db.execute(
-      `SELECT QUARTER(issued_at) AS q,
-              SUM(CASE WHEN kind='issued'   THEN vat_amount ELSE 0 END) AS sales_vat,
-              SUM(CASE WHEN kind='received' THEN vat_amount ELSE 0 END) AS purchase_vat
-       FROM invoices
-       WHERE YEAR(issued_at) = ?
-       GROUP BY QUARTER(issued_at)`,
-      [year]
-    )
-    // 청구서를 거치지 않은 직접 입력 거래의 세액. 이게 빠져 있어서 카드·현금 매입세액이 통째로 누락됐다.
-    //   invoice_id IS NOT NULL 인 거래는 청구서 정산분이라 위 집계에 이미 들어 있다 → 반드시 제외(이중계상).
-    //   vat_amount IS NULL 은 이 기능 이전에 쌓인 거래 → 세액을 모르므로 집계하지 않는다.
-    //   매입은 불공제(vat_deductible=0)를 빼야 실제 공제세액이 된다.
-    //   증빙유형이 불공제(간이영수증·거래명세서 등)면 거래의 vat_deductible과 무관하게 공제 대상이 아니다.
-    //   증빙유형을 안 적은 거래는 종전대로 공제로 본다(과거 데이터를 갑자기 불공제로 만들지 않는다).
-    const [txnAgg] = await req.db.execute(
-      `SELECT QUARTER(t.date) AS q,
-              SUM(CASE WHEN t.kind='income'  THEN t.vat_amount ELSE 0 END) AS sales_vat,
-              SUM(CASE WHEN t.kind='expense' AND t.vat_deductible = 1 AND COALESCE(ev.deductible, 1) = 1
-                       THEN t.vat_amount ELSE 0 END) AS purchase_vat,
-              SUM(CASE WHEN t.kind='expense' AND (t.vat_deductible = 0 OR COALESCE(ev.deductible, 1) = 0)
-                       THEN t.vat_amount ELSE 0 END) AS non_deductible_vat
-       FROM transactions t
-       LEFT JOIN (
-         SELECT name, MIN(deductible) AS deductible FROM ref_items WHERE type = 'evidence_type' GROUP BY name
-       ) ev ON ev.name = t.evid_type
-       WHERE YEAR(t.date) = ? AND t.invoice_id IS NULL AND t.vat_amount IS NOT NULL
-       GROUP BY QUARTER(t.date)`,
-      [year]
-    )
+    /* 세액 집계는 lib/vatAgg.js 한 곳 — 보고서·엑셀도 같은 것을 쓴다.
+       (여기서 손으로 적어 두었더니 화면만 고쳐지고 세무사 제출용은 청구서만 세고 있었다.) */
+    const vatQ = await vatByQuarter(req.db, year)
+
     /* 이중 계상 의심 건 — 같은 돈이 청구서와 거래 양쪽에서 세어지는 경우.
      *
      * 세금계산서를 임포트해 매입 청구서를 만들고, 통장 출금도 따로 거래로 등록한 뒤
@@ -126,16 +101,13 @@ router.get('/vat', async (req, res, next) => {
     )
     const dupBy = Object.fromEntries(dupAgg.map(r => [Number(r.q), r]))
     const [filings] = await req.db.execute('SELECT * FROM vat_filings WHERE year = ?', [year])
-    const aggBy = Object.fromEntries(agg.map(r => [Number(r.q), r]))
-    const txnBy = Object.fromEntries(txnAgg.map(r => [Number(r.q), r]))
     const fileBy = Object.fromEntries(filings.map(r => [Number(r.quarter), r]))
 
     const quarters = [1, 2, 3, 4].map(q => {
-      const a = aggBy[q] || {}
-      const t = txnBy[q] || {}
+      const v = vatQ[q]
       const f = fileBy[q] || {}
-      const sales_vat = Number(a.sales_vat || 0) + Number(t.sales_vat || 0)
-      const purchase_vat = Number(a.purchase_vat || 0) + Number(t.purchase_vat || 0)
+      const sales_vat = v.salesVat
+      const purchase_vat = v.purchaseVat
       const estimate = sales_vat - purchase_vat            // 청구서 + 직접거래 자동집계(예상)
       const filed = f.filed_amount == null ? null : Number(f.filed_amount)  // 실제 신고세액(입력 전이면 null)
       return {
@@ -143,11 +115,11 @@ router.get('/vat', async (req, res, next) => {
         sales_vat,
         purchase_vat,
         // 출처별 내역 — "청구서엔 없는데 세액이 왜 이렇지?"를 화면에서 설명할 수 있게 나눠 준다
-        sales_vat_invoice: Number(a.sales_vat || 0),
-        sales_vat_direct: Number(t.sales_vat || 0),
-        purchase_vat_invoice: Number(a.purchase_vat || 0),
-        purchase_vat_direct: Number(t.purchase_vat || 0),
-        non_deductible_vat: Number(t.non_deductible_vat || 0),   // 불공제로 빠진 매입세액
+        sales_vat_invoice: v.salesInvoice,
+        sales_vat_direct: v.salesDirect,
+        purchase_vat_invoice: v.purchaseInvoice,
+        purchase_vat_direct: v.purchaseDirect,
+        non_deductible_vat: v.nonDeductible,   // 불공제로 빠진 매입세액
         // 이중 계상 의심 — 정산되지 않은 매입 청구서와 거래처·금액이 같은 직접 거래
         dup_suspect_count: Number((dupBy[q] || {}).cnt || 0),
         dup_suspect_vat:   Number((dupBy[q] || {}).vat || 0),

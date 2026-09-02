@@ -11,6 +11,7 @@ const { cardReport } = require('../lib/cardReport')
 const { buildLoanWorkbook } = require('../lib/loanWorkbook')
 const { canSeeLaborDetail } = require('../lib/fundStatus')
 const { vatPack, buildVatWorkbook } = require('../lib/vatWorkbook')
+const { vatOfQuarter } = require('../lib/vatAgg')
 const { QUARTERS, MONTHS } = require('../lib/vatPeriod')
 
 const router = Router()
@@ -107,8 +108,9 @@ async function disabledOf(db) {
  * 이 보고서만 전용 출력이 없어서 화면 표를 긁어 CSV 로 나갔다. 세무사에게 넘기거나
  * 홈택스에 옮겨 적는 문서인데 서식도 합계도 없으니 결국 손으로 다시 만들게 된다.
  *
- * 집계는 화면과 **같은 소스**(invoices)를 쓴다 — 화면 숫자와 파일 숫자가 다르면
- * 어느 쪽을 믿어야 할지 알 수 없다. */
+ * 집계는 화면과 **같은 계산**(lib/vatAgg.js)을 쓴다 — 화면 숫자와 파일 숫자가 다르면
+ * 어느 쪽을 믿어야 할지 알 수 없다. 예전엔 여기만 invoices 만 세어, 카드·현금
+ * 매입세액이 통째로 빠진 파일이 세무사에게 갔다. */
 router.get('/vat.xlsx', async (req, res, next) => {
   try {
     const quarter = QUARTERS.includes(req.query.quarter) ? req.query.quarter : 'Q1'
@@ -119,7 +121,10 @@ router.get('/vat.xlsx', async (req, res, next) => {
          LEFT JOIN vendors v ON i.vendor_id = v.id
         WHERE ${months.map(() => 'i.issued_at LIKE ?').join(' OR ')}`,
       months.map(m => `${year}-${m}%`))
-    const pack = vatPack(rows, { quarter, year })
+    /* 직접 입력 거래의 세액을 함께 넘긴다 — 화면(세무관리)과 같은 값이 되도록.
+       lib/vatAgg.js 한 곳에서 계산한다. */
+    const direct = await vatOfQuarter(req.db, year, { Q1: 1, Q2: 2, Q3: 3, Q4: 4 }[quarter])
+    const pack = vatPack(rows, { quarter, year, direct })
     await sendBook(res, buildVatWorkbook(pack, { quarter, year }), `부가세신고자료_${year}_${quarter}.xlsx`)
   } catch (e) { next(e) }
 })

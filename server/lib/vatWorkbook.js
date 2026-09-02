@@ -30,7 +30,16 @@ const taxTypeOf = (r) => {
  * @param rows  invoices 행(+ vendor_name) — routes/invoices.js summary/vat 와 같은 소스
  * @param opt   { quarter, year }
  */
-function vatPack(rows, { quarter, year }) {
+/**
+ * @param direct 청구서를 거치지 않은 **직접 입력 거래**의 세액
+ *   `{ salesDirect, purchaseDirect }` — lib/vatAgg.js 가 준다.
+ *   ⚠ 이걸 안 더하면 카드·현금 매입세액이 통째로 빠진다. 세무관리 화면은 이미 세는데
+ *     **세무사에게 넘기고 홈택스에 옮겨 적는 이 파일이 안 세고 있었다**(같은 분기의
+ *     매입세액이 화면보다 305,000원 적게 나왔다).
+ *   명세 시트에는 세울 행이 없다(청구서가 없으므로) — 합계에만 들어가고, 그 사실을
+ *   신고서 시트에 한 줄로 밝힌다.
+ */
+function vatPack(rows, { quarter, year, direct = {} }) {
   const period = vatPeriodOf(quarter, year)
   const of = (kind) => rows.filter(r => r.kind === kind)
 
@@ -49,10 +58,15 @@ function vatPack(rows, { quarter, year }) {
   const purchase = bucket(of('received'))
   /* 납부세액 = 매출세액 − 매입세액. 면세는 신고 대상이 아니므로 세액 계산에서 빠진다
      (면세 청구서에는 세액이 0이라 더해도 값은 같지만, 뜻이 다르니 명세에서 구분해 보여준다). */
-  const salesVat = sales.과세.vat + sales.영세.vat
-  const purchaseVat = purchase.과세.vat + purchase.영세.vat
+  const salesInv = sales.과세.vat + sales.영세.vat
+  const purchaseInv = purchase.과세.vat + purchase.영세.vat
+  const salesDirect = Number(direct.salesDirect || 0)
+  const purchaseDirect = Number(direct.purchaseDirect || 0)
+  const salesVat = salesInv + salesDirect
+  const purchaseVat = purchaseInv + purchaseDirect
 
-  return { period, sales, purchase, salesVat, purchaseVat, netVat: salesVat - purchaseVat, rows }
+  return { period, sales, purchase, salesVat, purchaseVat, netVat: salesVat - purchaseVat, rows,
+           salesInv, purchaseInv, salesDirect, purchaseDirect }
 }
 
 /** 명세 시트의 열 — 화면 표와 같은 순서로 둔다(보이는 것과 받는 것이 다르면 대조가 안 된다) */
@@ -84,7 +98,8 @@ const detailRows = (list) => list
 const sumCol = (rows, i) => rows.reduce((s, r) => s + (Number(r[i]) || 0), 0)
 
 function buildVatWorkbook(pack, { quarter, year }) {
-  const { period, sales, purchase, salesVat, purchaseVat, netVat } = pack
+  const { period, sales, purchase, salesVat, purchaseVat, netVat,
+          salesDirect = 0, purchaseDirect = 0 } = pack
   const wb = newBook()
 
   const S = (...cells) => ({ kind: 'section', cells })
@@ -108,12 +123,17 @@ function buildVatWorkbook(pack, { quarter, year }) {
       H('구분', '매수', '공급가액', '세액'),
       line('과세 (세금계산서 발급분)', sales.과세),
       line('영세율', sales.영세),
+      /* 청구서를 안 거친 직접 입력분 — 명세 시트에는 세울 행이 없어(청구서가 없다)
+         합계에만 들어간다. 줄을 세우지 않으면 "명세를 더해도 합계가 안 맞는다"가 된다. */
+      ...(salesDirect ? [D('그 밖의 매출(직접 입력)', '', '', salesDirect)] : []),
       T('매출 합계', sales.과세.n + sales.영세.n, sales.과세.supply + sales.영세.supply, salesVat),
       B(),
       S('2. 매입세액'),
       H('구분', '매수', '공급가액', '세액'),
       line('과세 (세금계산서 수취분)', purchase.과세),
       line('영세율', purchase.영세),
+      // 카드·현금영수증 등 청구서 없이 적은 매입 — 이게 빠져 화면보다 세액이 적게 나왔다
+      ...(purchaseDirect ? [D('그 밖의 공제매입(카드·현금영수증 등)', '', '', purchaseDirect)] : []),
       T('매입 합계', purchase.과세.n + purchase.영세.n, purchase.과세.supply + purchase.영세.supply, purchaseVat),
       B(),
       S('3. 납부(환급)할 세액'),
