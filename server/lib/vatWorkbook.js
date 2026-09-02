@@ -62,11 +62,17 @@ function vatPack(rows, { quarter, year, direct = {} }) {
   const purchaseInv = purchase.과세.vat + purchase.영세.vat
   const salesDirect = Number(direct.salesDirect || 0)
   const purchaseDirect = Number(direct.purchaseDirect || 0)
+  /* 과세표준도 함께 받는다 — 홈택스의 '그 밖의 매출'·'그 밖의 공제매입세액' 칸은
+     과세표준과 세액을 **둘 다** 요구한다. 세액만 더하면 합계 행에서
+     공급가액 × 10% ≠ 세액 이 되어, 옮겨 적을 때 과세표준이 그만큼 적게 신고된다. */
+  const salesSupplyDirect = Number(direct.salesSupplyDirect || 0)
+  const purchaseSupplyDirect = Number(direct.purchaseSupplyDirect || 0)
   const salesVat = salesInv + salesDirect
   const purchaseVat = purchaseInv + purchaseDirect
 
   return { period, sales, purchase, salesVat, purchaseVat, netVat: salesVat - purchaseVat, rows,
-           salesInv, purchaseInv, salesDirect, purchaseDirect }
+           salesInv, purchaseInv, salesDirect, purchaseDirect,
+           salesSupplyDirect, purchaseSupplyDirect }
 }
 
 /** 명세 시트의 열 — 화면 표와 같은 순서로 둔다(보이는 것과 받는 것이 다르면 대조가 안 된다) */
@@ -99,7 +105,8 @@ const sumCol = (rows, i) => rows.reduce((s, r) => s + (Number(r[i]) || 0), 0)
 
 function buildVatWorkbook(pack, { quarter, year }) {
   const { period, sales, purchase, salesVat, purchaseVat, netVat,
-          salesDirect = 0, purchaseDirect = 0 } = pack
+          salesDirect = 0, purchaseDirect = 0,
+          salesSupplyDirect = 0, purchaseSupplyDirect = 0 } = pack
   const wb = newBook()
 
   const S = (...cells) => ({ kind: 'section', cells })
@@ -125,16 +132,18 @@ function buildVatWorkbook(pack, { quarter, year }) {
       line('영세율', sales.영세),
       /* 청구서를 안 거친 직접 입력분 — 명세 시트에는 세울 행이 없어(청구서가 없다)
          합계에만 들어간다. 줄을 세우지 않으면 "명세를 더해도 합계가 안 맞는다"가 된다. */
-      ...(salesDirect ? [D('그 밖의 매출(직접 입력)', '', '', salesDirect)] : []),
-      T('매출 합계', sales.과세.n + sales.영세.n, sales.과세.supply + sales.영세.supply, salesVat),
+      ...(salesDirect ? [D('그 밖의 매출(직접 입력)', '', salesSupplyDirect, salesDirect)] : []),
+      T('매출 합계', sales.과세.n + sales.영세.n,
+        sales.과세.supply + sales.영세.supply + salesSupplyDirect, salesVat),
       B(),
       S('2. 매입세액'),
       H('구분', '매수', '공급가액', '세액'),
       line('과세 (세금계산서 수취분)', purchase.과세),
       line('영세율', purchase.영세),
       // 카드·현금영수증 등 청구서 없이 적은 매입 — 이게 빠져 화면보다 세액이 적게 나왔다
-      ...(purchaseDirect ? [D('그 밖의 공제매입(카드·현금영수증 등)', '', '', purchaseDirect)] : []),
-      T('매입 합계', purchase.과세.n + purchase.영세.n, purchase.과세.supply + purchase.영세.supply, purchaseVat),
+      ...(purchaseDirect ? [D('그 밖의 공제매입(카드·현금영수증 등)', '', purchaseSupplyDirect, purchaseDirect)] : []),
+      T('매입 합계', purchase.과세.n + purchase.영세.n,
+        purchase.과세.supply + purchase.영세.supply + purchaseSupplyDirect, purchaseVat),
       B(),
       S('3. 납부(환급)할 세액'),
       H('구분', '', '', '세액'),

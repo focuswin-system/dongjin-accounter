@@ -81,9 +81,16 @@ function apiError(message, { status = 0, kind = 'http', code = '' } = {}) {
 let infraFailureHandler = null
 export function setApiFailureHandler(fn) { infraFailureHandler = fn }
 
-function notifyInfra(err) {
+function notifyInfra(err, method = 'GET') {
   const infra = err.kind === 'network' || err.kind === 'ratelimit' || err.status >= 500
-  if (!infra || !infraFailureHandler) return err
+  /* ⚠ **조회의 403·404 도 알린다.**
+   * 400/409 는 호출부가 사유를 띄우지만(마감·계좌 미선택), 조회에서 나는 403(권한 없음)·
+   * 404(경로 없음)는 아무도 안 띄운다 — `catch { return [] }` 에 삼켜져 화면이 그냥
+   * "데이터가 없어요"가 된다. 권한이 없는 것과 자료가 0건인 것이 똑같아 보이면
+   * 사용자는 "왜 비었지"를 영영 알 수 없다. 화면 코드가 어찌할 수 없는 것이므로
+   * 여기서 알린다(쓰기 요청의 403 은 호출부가 응답을 보고 처리한다). */
+  const readDenied = method === 'GET' && (err.status === 403 || err.status === 404)
+  if ((!infra && !readDenied) || !infraFailureHandler) return err
   err.notified = true   // 전역 핸들러가 같은 오류를 두 번 띄우지 않도록
   try { infraFailureHandler(err) } catch { /* 알림 실패가 요청을 막지 않는다 */ }
   return err
@@ -104,7 +111,7 @@ async function req(path, opts = {}) {
   } catch {
     // fetch 자체가 실패 = 서버가 내려갔거나 네트워크가 끊겼다.
     // 기본 메시지("Failed to fetch")는 사용자에게 아무 의미가 없다.
-    throw notifyInfra(apiError('서버에 연결할 수 없어요. 잠시 후 다시 시도해주세요.', { kind: 'network' }))
+    throw notifyInfra(apiError('서버에 연결할 수 없어요. 잠시 후 다시 시도해주세요.', { kind: 'network' }), opts.method || 'GET')
   }
   // 슬라이딩 세션 — 서버가 만료 임박을 감지하면 새 토큰을 실어 보낸다.
   // 조용히 갈아끼운다(사용자에게 알릴 일이 아니다). 이게 있어야 일하는 도중에 안 튕긴다.
@@ -156,7 +163,7 @@ async function req(path, opts = {}) {
     try { const body = await res.json(); if (body?.error) msg = body.error; code = body?.code || '' } catch { /* 본문 없음 */ }
     // 429는 서버가 이유와 대기 시간을 문구에 담아 보낸다(시도 제한·요청 한도).
     // 이걸 삼키면 사용자는 왜 막혔는지 모른 채 빈 화면만 본다.
-    throw notifyInfra(apiError(msg, { status: res.status, kind: res.status === 429 ? 'ratelimit' : 'http', code }))
+    throw notifyInfra(apiError(msg, { status: res.status, kind: res.status === 429 ? 'ratelimit' : 'http', code }), opts.method || 'GET')
   }
   return res.json()
 }

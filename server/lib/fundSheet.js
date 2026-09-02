@@ -68,11 +68,19 @@ async function fundSheet(db, { month, today, closingDay = 0, canSeeLabor = true,
     laborStatus(db),
   ])
 
-  const mine = new Set(open.map(a => a.id))
+  /* ⚠ 개인 계좌는 **여기서, 원천에서** 뺀다.
+   * 집계한 뒤에 빼면 세 군데로 샌다 —
+   *   ① <들어올 돈> 블록의 '입금 계좌' 칸에 개인 통장 **이름**이 그대로 찍히고
+   *   ② 합계의 actualIn/actualOut 에 개인 실적이 섞여 "전체 − 법인"으로 역산되고
+   *   ③ 카드 계좌까지 mine 에 들어가 사용액이 두 번 잡힌다
+   *     (fundStatus.js 가 "같은 돈이 두 번 잡혔다"고 기록한 그 사고).
+   * routes/fund-status.js:53 이 계좌 목록 단계에서 거르는 것과 **같은 자리**다. */
+  const visible = open.filter(a => (canSeePersonal || a.owner !== 'personal') && a.kind !== 'card')
+  const mine = new Set(visible.map(a => a.id))
   const actual = await actualsIn(db, range.from, range.to, mine)
 
   // 계좌별로 나갈·들어올 항목을 담는다
-  const byAcct = new Map(open.map(a => [a.id, { ...a, out: [], in: [] }]))
+  const byAcct = new Map(visible.map(a => [a.id, { ...a, out: [], in: [] }]))
   const unassigned = { in: 0, out: 0, items: [] }
   for (const f of flows) {
     const a = f.account_id && byAcct.get(f.account_id)
@@ -98,7 +106,7 @@ async function fundSheet(db, { month, today, closingDay = 0, canSeeLabor = true,
   }
 
   const group = (owner) => {
-    const rows = [...byAcct.values()].filter(a => a.owner === owner && a.kind !== 'card').map(line)
+    const rows = [...byAcct.values()].filter(a => a.owner === owner).map(line)   // 카드·개인은 위에서 이미 걸렀다
     const sum = (f) => rows.reduce((s, r) => s + f(r), 0)
     return {
       rows,
@@ -111,11 +119,8 @@ async function fundSheet(db, { month, today, closingDay = 0, canSeeLabor = true,
   }
 
   const corp = group('corp')
-  const personalAll = group('personal')
-  /* 권한이 없으면 **개인 계좌를 통째로 비운다.** 합계에서도 뺀다 —
-     "전체 − 법인"으로 역산되면 가린 뜻이 없어진다. */
-  const EMPTY_TOTAL = { balance: 0, outTotal: 0, inTotal: 0, actualIn: 0, actualOut: 0, after: 0, expected: 0 }
-  const personal = canSeePersonal ? personalAll : { rows: [], total: EMPTY_TOTAL }
+  // 권한이 없으면 visible 에서 이미 빠졌으므로 여기는 자연히 빈 묶음이 된다
+  const personal = group('personal')
   const both = (f) => f(corp.total) + f(personal.total)
 
   /* 부채·저축은 법인/개인으로 갈라야 요약표가 원본과 같아진다.

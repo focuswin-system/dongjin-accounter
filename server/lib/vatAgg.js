@@ -45,7 +45,15 @@ async function directVat(db, year) {
             SUM(CASE WHEN t.kind='expense' AND t.vat_deductible = 1 AND COALESCE(ev.deductible, 1) = 1
                      THEN t.vat_amount ELSE 0 END) AS purchase_vat,
             SUM(CASE WHEN t.kind='expense' AND (t.vat_deductible = 0 OR COALESCE(ev.deductible, 1) = 0)
-                     THEN t.vat_amount ELSE 0 END) AS non_deductible_vat
+                     THEN t.vat_amount ELSE 0 END) AS non_deductible_vat,
+            /* ⚠ **과세표준(공급가액)도 센다.** 홈택스의 '그 밖의 매출'·'그 밖의 공제매입세액'
+               칸은 과세표준과 세액을 **둘 다** 요구한다. 세액만 주면 엑셀 합계 행에서
+               공급가액 × 10% ≠ 세액 이 되고, 그걸 보고 옮겨 적으면 과세표준이
+               직접거래분만큼 적게 신고된다. 세액이 없는 옛 거래는 애초에 안 세므로
+               (vat_amount IS NOT NULL) 여기서도 짝이 맞는다. */
+            SUM(CASE WHEN t.kind='income'  THEN COALESCE(t.supply_amount, t.amount - t.vat_amount) ELSE 0 END) AS sales_supply,
+            SUM(CASE WHEN t.kind='expense' AND t.vat_deductible = 1 AND COALESCE(ev.deductible, 1) = 1
+                     THEN COALESCE(t.supply_amount, t.amount - t.vat_amount) ELSE 0 END) AS purchase_supply
        FROM transactions t
        LEFT JOIN (
          SELECT name, MIN(deductible) AS deductible FROM ref_items WHERE type = 'evidence_type' GROUP BY name
@@ -75,6 +83,8 @@ async function vatByQuarter(db, year) {
       purchaseInvoice: Number(a.purchase_vat || 0),
       purchaseDirect:  Number(t.purchase_vat || 0),
       nonDeductible:   Number(t.non_deductible_vat || 0),
+      salesSupplyDirect:    Number(t.sales_supply || 0),
+      purchaseSupplyDirect: Number(t.purchase_supply || 0),
     }
   }
   return out
@@ -89,6 +99,7 @@ async function vatOfQuarter(db, year, quarter) {
   return all[Number(quarter)] || {
     salesVat: 0, purchaseVat: 0, salesInvoice: 0, salesDirect: 0,
     purchaseInvoice: 0, purchaseDirect: 0, nonDeductible: 0,
+    salesSupplyDirect: 0, purchaseSupplyDirect: 0,
   }
 }
 

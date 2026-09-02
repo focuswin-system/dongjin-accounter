@@ -81,7 +81,18 @@ const WeekFlow = ({ from, start, days, weeks }) => {
 
 export const CashPanel = ({ go }) => {
   const [d, setD] = useState(null)
-  useEffect(() => { api.getCashReport({ days: DAYS }).then(setD).catch(() => {}) }, [])
+  const [failed, setFailed] = useState(false)
+  const load = () => { setFailed(false); api.getCashReport({ days: DAYS }).then(setD).catch(() => setFailed(true)) }
+  useEffect(() => { load() }, [])
+  /* ⚠ 실패했을 때 **패널이 통째로 사라지면 안 된다.** 홈에서 자금 카드가 흔적 없이
+     없어져, 사용자는 그런 기능이 있는 줄도 모른 채 넘어간다(원래 `catch {}` + null 이었다). */
+  if (failed) return (
+    <div className="card card-pad row" style={{ alignItems: 'center', gap: 10 }}>
+      <Icon.Warn size={16} style={{ color: 'var(--warn-ink)' }}/>
+      <span className="text-sm text-muted">자금 현황을 불러오지 못했어요.</span>
+      <button className="btn ghost sm ml-auto" onClick={load}>다시 시도</button>
+    </div>
+  )
   if (!d) return null
 
   const f = d.forecast || {}

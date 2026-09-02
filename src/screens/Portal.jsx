@@ -14,7 +14,10 @@ const TODO_META = {
 export const PortalScreen = ({ node, go, openIncome, openExpense }) => {
   const [todos, setTodos] = useState([])
   useEffect(() => {
-    if (node.todos) api.getHomeTodos().then(setTodos).catch(() => {})
+    /* ⚠ 실패를 통째로 삼키면 안 된다 — 서버가 죽어도 "처리할 일이 없어요"가 되어
+         홈 첫 화면이 평온해 보인다. api.js 가 인프라 실패·조회 권한 오류를 토스트로
+         알리므로 여기서는 **상태를 갈라 둔다**(빈 것과 못 읽은 것). */
+    if (node.todos) api.getHomeTodos().then(setTodos).catch(() => setTodos(null))
     else setTodos([])
   }, [node.id])
 
@@ -26,9 +29,19 @@ export const PortalScreen = ({ node, go, openIncome, openExpense }) => {
       {node.todos && (
         <div style={{ marginBottom: 24 }}>
           <div className="text-xs fw-700" style={{ color: 'var(--muted-2)', letterSpacing: '0.02em', marginBottom: 10, padding: '0 2px' }}>
-            해야 할 일 <span className="num" style={{ color: 'var(--brand-ink)', marginLeft: 4 }}>{todos.length}</span>
+            해야 할 일 {todos && <span className="num" style={{ color: 'var(--brand-ink)', marginLeft: 4 }}>{todos.length}</span>}
           </div>
-          {todos.length === 0 ? (
+          {/* ⚠ **못 읽은 것과 없는 것을 가른다.** 실패를 빈 배열로 바꾸면 서버가 죽어도
+              "처리할 일이 없어요"가 되어 홈 첫 화면이 평온해 보인다. */}
+          {todos === null ? (
+            <div className="card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Icon.Warn size={16} style={{ color: 'var(--warn-ink)' }}/>
+              <span className="text-sm" style={{ color: 'var(--muted)' }}>해야 할 일을 불러오지 못했어요.</span>
+              <button className="btn ghost sm ml-auto" onClick={() => api.getHomeTodos().then(setTodos).catch(() => setTodos(null))}>
+                다시 시도
+              </button>
+            </div>
+          ) : todos.length === 0 ? (
             <div className="card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 10, color: 'var(--muted)' }}>
               <Icon.Check size={16} className="text-pos"/>
               <span className="text-sm fw-600" style={{ color: 'var(--ink)' }}>처리할 일이 없어요.</span>
