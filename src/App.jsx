@@ -559,9 +559,13 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
     // 주소창·북마크·옛 링크로 권한 없는 화면에 들어오는 경우. 메뉴에서 숨겨도 이 길은 열려 있다.
     // (막지 않아도 서버가 403을 주지만, 이유를 보여주는 편이 낫다)
     // settings_* 하위 탭은 'settings' 자원 하나가 관장한다(서버 apiPerms와 같은 규칙).
-    const guardId = route.startsWith("settings") ? "settings"
-                  : PORTAL_CAT_BY_ID[route] ? null      // 포털은 내용물이 걸러지므로 통째로 막지 않는다
-                  : LEAF_BY_ID[route] ? route : null;
+    /* ⚠ 잎 id 를 **그대로** 넘긴다. 예전엔 settings_* 를 자원 이름 'settings' 로 미리
+       바꿔 넘겼는데, 그러면 마스터 축을 잃는다 — settings_audit(변경 이력)은 마스터
+       전용인데 'settings' 는 아니라서, settings 권한을 받은 실무 계정이 주소로
+       #settings_audit 을 치면 화면이 열렸다(2026-09-02 실측).
+       자원 이름 변환은 can() 안의 resourceOf 가 이미 한다 — 여기서 미리 할 일이 아니다. */
+    const guardId = PORTAL_CAT_BY_ID[route] ? null   // 포털은 내용물이 걸러지므로 통째로 막지 않는다
+                  : (route.startsWith("settings") || LEAF_BY_ID[route]) ? route : null;
     if (guardId && !canDo(guardId)) return <NoPermission title={LEAF_BY_ID[guardId]?.label}/>;
 
     // 미수금/미지급금(구 ledger_ar/ledger_ap)은 청구서 기준 회수 화면으로 이관됨
@@ -1287,6 +1291,14 @@ export default function App() {
   // null = 아직 못 읽음 → 그 동안은 제한 없이 보여준다(빈 사이드바가 잠깐 번쩍이는 게 더 나쁘다).
   // 어차피 서버가 막으므로 이 짧은 구간에 권한 없는 화면을 눌러도 데이터는 안 나온다.
   const [perms, setPerms] = useState(null);
+  /* 권한 컨텍스트 값 — **자원 권한 + 마스터 여부** 두 축을 함께 싣는다.
+     마스터 전용 화면(변경 이력)은 자원 권한으로는 못 가린다: '실무' 역할이
+     settings 자원을 통째로 갖고, settings_audit 의 자원 이름도 'settings' 라서
+     can() 만 보면 통과한다. 판정은 usePerms 안에 있고, 여기서는 재료만 준다.
+     ⚠ 객체를 매 렌더 새로 만들면 context 소비자 전부가 다시 그려진다 → useMemo. */
+  const permCtxValue = useMemo(
+    () => ({ perms, isMaster: user?.role === 'admin' }),
+    [perms, user?.role]);
   /* 개인 설정도 **여기서** 받는다.
      user 는 로그인 응답을 localStorage 에 굳혀 둔 것이라 설정이 들어 있지 않다
      (설정은 나중에 바뀌는 값이라 그 스냅샷에 실을 수도 없다). 서버가 진실인 값은
@@ -1359,7 +1371,8 @@ export default function App() {
   return (
     <ToastProvider>
       <ConfirmProvider>
-        <PermCtx.Provider value={perms}>
+        {/* ⚠ perms 맵만 넣으면 안 된다 — usePerms 가 마스터 축(변경 이력)을 못 본다 */}
+        <PermCtx.Provider value={permCtxValue}>
           {!loggedIn
             ? <LoginScreen onLogin={handleLogin}/>
             : user?.mustChangePw

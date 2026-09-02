@@ -34,10 +34,6 @@ export function can(perms, resource, action = 'access') {
   return Array.isArray(list) && list.includes(action)
 }
 
-/** 여러 자원 중 하나라도 되면 통과 (한 화면이 여러 자원을 걸치는 경우) */
-export const canAny = (perms, resources, action = 'access') =>
-  unrestricted(perms) || resources.some(r => can(perms, r, action))
-
 /**
  * 권한에 맞게 걸러낸 NAV_TREE.
  * · 잎: access 없으면 뺀다
@@ -105,24 +101,42 @@ export function withoutMasterOnly(node, isMaster) {
 
 // ── React 배선 ────────────────────────────────────────────────
 // prop drilling으로 화면 40여 개에 perms를 흘리는 건 현실적이지 않다 → context 하나.
+//
+// ⚠ 값은 **{ perms, isMaster }** 다. perms 맵만 넣으면 안 된다 —
+//   마스터 전용 화면(변경 이력)은 자원 권한과 **다른 축**이라 perms 만으로는 못 가린다.
 export const PermCtx = createContext(null)
 
-/** 화면에서 쓰는 훅. `const p = usePerms(); p.can('master_vendor','create')` */
+/**
+ * 화면에서 쓰는 훅. `const p = usePerms(); p.can('master_vendor','create')`
+ *
+ * ⚠ `can` 은 자원 권한 **위에 마스터 축을 한 번 더 얹는다.**
+ *   '실무' 역할은 settings 자원을 통째로 갖는데(access·view·create·edit·delete),
+ *   변경 이력 잎(settings_audit)의 자원 이름도 resourceOf 로 'settings' 가 된다.
+ *   그래서 can() 만 보면 **비마스터에게 true** 가 나왔다 — 사이드바·홈 포털은
+ *   withoutMasterOnly 로 따로 걸렀지만 Ctrl+K·바로가기 후보·라우트 가드는 안 걸러서,
+ *   실무 계정이 '변경 이력 조회'를 검색해 들어갈 수 있었다(2026-09-02 실측).
+ *   서버가 데이터를 안 주니 새는 건 없지만, 열리는 빈 화면은 고장으로 보인다.
+ *   판정을 여기 한 곳에 둬서 호출부가 각자 기억하지 않아도 되게 한다.
+ */
 export function usePerms() {
-  const perms = useContext(PermCtx)
+  const ctx = useContext(PermCtx)
+  const perms = ctx?.perms ?? null
+  const isMaster = !!ctx?.isMaster
+  const allow = (resource, action = 'access') =>
+    can(perms, resource, action) && (isMaster || !isMasterOnly(resource))
   return {
     perms,
-    can: (resource, action = 'access') => can(perms, resource, action),
-    canAny: (resources, action = 'access') => canAny(perms, resources, action),
+    isMaster,
+    can: allow,
     /** 이 화면에서 쓰이는 흔한 판정 묶음 — 버튼 숨기기에 바로 쓴다 */
     of: (resource) => ({
-      view:     can(perms, resource, 'view'),
-      create:   can(perms, resource, 'create'),
-      edit:     can(perms, resource, 'edit'),
-      remove:   can(perms, resource, 'delete'),
-      upload:   can(perms, resource, 'upload'),
-      download: can(perms, resource, 'download'),
-      export:   can(perms, resource, 'export'),
+      view:     allow(resource, 'view'),
+      create:   allow(resource, 'create'),
+      edit:     allow(resource, 'edit'),
+      remove:   allow(resource, 'delete'),
+      upload:   allow(resource, 'upload'),
+      download: allow(resource, 'download'),
+      export:   allow(resource, 'export'),
     }),
   }
 }
