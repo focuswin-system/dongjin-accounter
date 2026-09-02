@@ -1219,7 +1219,13 @@ router.get('/:id/matchable', async (req, res, next) => {
       LEFT JOIN vendors v ON t.vendor_id = v.id
       WHERE t.kind = ?
         AND (t.invoice_id IS NULL OR t.invoice_id = '')
-        AND t.id NOT IN (SELECT txn_id FROM invoice_matches)
+        /* ⚠ NULL 을 반드시 걸러낸다. 어음 정산은 txn_id 를 **비운 채** invoice_matches 에
+             들어간다(routes/notes.js — 거래 없이 청구서만 정산하는 것이 그 기능의 핵심).
+             NOT IN 은 목록에 NULL 이 하나만 섞여도 술어가 UNKNOWN 이 되어 **모든 행이 탈락**한다.
+             즉 어음으로 정산한 청구서가 하나 생기는 순간, 그 회사의 모든 청구서에서
+             '거래내역에서 연결' 후보가 사라지고 사용자는 '새 거래로 등록'을 눌러
+             **같은 돈을 두 번** 만들게 된다. (lib/settleTxn.js 는 LEFT JOIN 으로 올바르게 푼다.) */
+        AND t.id NOT IN (SELECT txn_id FROM invoice_matches WHERE txn_id IS NOT NULL)
       ORDER BY t.date DESC
       LIMIT 100
     `, [txnKind])
