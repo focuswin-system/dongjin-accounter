@@ -1,3 +1,6 @@
+/* ⚠ 확장자를 적는다 — 이 파일은 server/test/hometax.test.js 가
+   노드로 **직접** import 한다(번들러를 안 거친다). ESM 은 확장자를 생략 못 한다. */
+import { vatOf } from './vatRate.js'
 /* 홈택스 전자세금계산서 엑셀 한 행 → 청구서 한 건. 순수 함수만 둔다(테스트 대상).
  *
  * 여기서 틀리면 화면은 멀쩡하고 숫자만 조용히 틀어진다. 특히 위험한 두 가지:
@@ -263,7 +266,7 @@ export const hometaxRowWarns = (d, opts = {}) => {
     w.push('합계금액이 공급가액＋세액과 달라요 — 엑셀 값을 확인하세요')
   }
   // 과세인데 세액이 공급가의 10%가 아니면 컬럼이 밀렸을 가능성이 크다(1원 반올림은 허용)
-  if (d.tax_type === '과세' && Math.abs(Math.round(d.supply_amount * 0.1) - d.vat_amount) > 1) {
+  if (d.tax_type === '과세' && Math.abs(vatOf(d.supply_amount) - d.vat_amount) > 1) {
     w.push('세액이 공급가액의 10%와 달라요 — 컬럼 매핑을 확인하세요')
   }
   // 품목 합계가 공급가액과 다르면 행이 덜 묶였거나 품목 컬럼이 잘못 연결된 것이다.

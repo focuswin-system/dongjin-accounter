@@ -2409,28 +2409,16 @@ const ReportTaxOffice = ({ toast, registerExport }) => {
 }
 
 // ── 10. 부가세 신고 자료 ─────────────────────────────────────
-/* 분기 → 부가세 과세기간·신고기한.
- * 부가세는 반기(1기 1~6월 / 2기 7~12월)를 다시 예정·확정으로 나눈다. 분기와 '기'가 1:1이 아니다.
- *   1~3월  = 1기 예정 (기한 4/25)      4~6월  = 1기 확정 (기한 7/25)
- *   7~9월  = 2기 예정 (기한 10/25)     10~12월 = 2기 확정 (기한 다음해 1/25)
- * ⚠ 예전 화면은 4~6월을 '2기 예정신고'라고 적어 두었는데 틀린 표기다(1기 확정이다).
- *   신고 기한을 잘못 알려주면 가산세로 이어지므로 여기서 바로잡는다. */
-function vatPeriodOf(quarter, year) {
-  const M = {
-    Q1: { from: `${year}.01.01`, to: `${year}.03.31`, label: '1기 예정신고', due: `${year}년 4월 25일` },
-    Q2: { from: `${year}.04.01`, to: `${year}.06.30`, label: '1기 확정신고', due: `${year}년 7월 25일` },
-    Q3: { from: `${year}.07.01`, to: `${year}.09.30`, label: '2기 예정신고', due: `${year}년 10월 25일` },
-    Q4: { from: `${year}.10.01`, to: `${year}.12.31`, label: '2기 확정신고', due: `${year + 1}년 1월 25일` },
-  }
-  return M[quarter] || M.Q1
-}
+/* 과세기간·신고기한 표는 **여기 없다** — server/lib/vatPeriod.js 하나가 원본이고
+ * 서버가 응답에 실어 보낸다(GET /invoices/summary/vat 의 period).
+ * 예전엔 이 파일에도 같은 표가 있었다. 내용은 같았지만 한쪽만 고치면 갈리고,
+ * 신고 기한이 어긋나면 가산세로 이어진다 — 화면과 엑셀이 다른 날을 말하면 안 된다. */
 
 const ReportVAT = ({ toast, registerExport }) => {
   const [quarter, setQuarter] = useState("Q2")
   const [vatData, setVatData] = useState(null)
   // getVatSummary 가 올해 기준으로 조회한다 — 기간 표시도 같은 해를 쓴다
   const year = new Date().getFullYear()
-  const vatPeriod = vatPeriodOf(quarter, year)
 
   useEffect(() => {
     import('../lib/api').then(({ api }) => {
@@ -2453,7 +2441,7 @@ const ReportVAT = ({ toast, registerExport }) => {
 
   if (!vatData) return <div className="text-muted text-sm" style={{ padding: 24 }}>불러오는 중...</div>
 
-  const { salesVat, purchaseVat, netVat, salesInvoices, purchaseInvoices } = vatData
+  const { salesVat, purchaseVat, netVat, salesInvoices, purchaseInvoices, period: vatPeriod } = vatData
   const QUARTER_LABEL = { Q1: "1분기 (1~3월)", Q2: "2분기 (4~6월)", Q3: "3분기 (7~9월)", Q4: "4분기 (10~12월)" }
   const salesTotal = salesInvoices.reduce((a, r) => a + r.supplyAmount, 0)
   const purchaseTotal = purchaseInvoices.reduce((a, r) => a + r.supplyAmount, 0)
@@ -2475,13 +2463,17 @@ const ReportVAT = ({ toast, registerExport }) => {
       {/* 신고 기간 — 고른 분기에서 계산한다.
           예전엔 "2026.04.01 ~ 2026.06.30 (2기 예정신고) · 기한 2026년 7월 25일"이 **글자로 박혀** 있어서
           1·3·4분기를 골라도 2분기 날짜가 그대로 남았다. 신고 기한을 잘못 알려주는 건 그냥 틀린 정보다. */}
-      <div className="card card-pad" style={{ background: "var(--brand-soft)", borderColor: "transparent", marginBottom: 12 }}>
-        <div className="row gap-8" style={{ flexWrap: "wrap" }}>
-          <Icon.Bell size={14}/>
-          <span className="text-sm fw-600">신고 기간: {vatPeriod.from} ~ {vatPeriod.to} ({vatPeriod.label})</span>
-          <span className="text-xs text-muted" style={{ marginLeft: 4 }}>신고 기한: {vatPeriod.due}</span>
+      {/* 서버가 period 를 못 주면(조회 실패) 이 줄을 그리지 않는다 —
+          기한은 틀리게 적느니 안 적는 편이 낫다 */}
+      {vatPeriod && (
+        <div className="card card-pad" style={{ background: "var(--brand-soft)", borderColor: "transparent", marginBottom: 12 }}>
+          <div className="row gap-8" style={{ flexWrap: "wrap" }}>
+            <Icon.Bell size={14}/>
+            <span className="text-sm fw-600">신고 기간: {vatPeriod.from} ~ {vatPeriod.to} ({vatPeriod.label})</span>
+            <span className="text-xs text-muted" style={{ marginLeft: 4 }}>신고 기한: {vatPeriod.due}</span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 영세율 안내 — **영세율 청구서가 실제로 있을 때만** 뜬다.
        *

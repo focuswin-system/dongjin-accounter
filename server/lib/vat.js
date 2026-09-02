@@ -10,6 +10,16 @@
  */
 
 const TAX_TYPES = ['과세', '면세', '영세']
+
+/**
+ * 부가세율 — **여기 하나만 고치면 된다.**
+ * 이 파일 안에서만도 `0.1` 이 세 군데(vatRateOf · RECUR_VAT · 합계 역산) 있었고,
+ * 바깥으로도 서버 2곳·화면 9곳에 흩어져 있었다. 세율이 바뀌는 일은 드물지만
+ * 흩어져 있으면 바뀔 때 한두 곳을 반드시 빠뜨리고, 빠뜨린 곳은 조용히 틀린 세액을 낸다.
+ * ⚠ 화면 쪽 짝은 src/lib/vatRate.js 다(빌드 경계가 달라 한 파일을 못 나눠 쓴다).
+ *   둘 중 하나를 고치면 나머지도 같이 고친다.
+ */
+const VAT_RATE = 0.1
 const num = (v) => Number(String(v ?? '').replace(/[^0-9-]/g, '')) || 0
 
 /** 과세유형 정규화. 모르는 값·빈 값은 '과세'로 본다(종전 동작과 같다). */
@@ -31,7 +41,7 @@ function vatFields({ amount, supply_amount, vat_amount, tax_type, vat_deductible
     supply = num(supply_amount)
     vat = vat_amount != null && vat_amount !== '' ? num(vat_amount) : total - supply
   } else if (type === '과세') {
-    supply = Math.round(total / 1.1)   // 합계 = 공급가 × 1.1
+    supply = Math.round(total / (1 + VAT_RATE))   // 합계 = 공급가 × (1 + 세율)
     vat = total - supply
   } else {
     supply = total                      // 면세·영세는 세액이 없다
@@ -52,7 +62,7 @@ function vatFields({ amount, supply_amount, vat_amount, tax_type, vat_deductible
 const CONTRACT_VAT_MODES = ['taxable', 'exempt', 'zero']
 
 /** 주문 vat_mode → 부가세율. 면세·영세 모두 세액 0이지만 뜻이 다르다(과세표준 포함 여부). */
-const vatRateOf = (vatMode) => (vatMode === 'exempt' || vatMode === 'zero' ? 0 : 0.1)
+const vatRateOf = (vatMode) => (vatMode === 'exempt' || vatMode === 'zero' ? 0 : VAT_RATE)
 
 /** 주문 vat_mode → 청구서에 남길 과세유형 라벨 */
 const taxTypeOfMode = (vatMode) => (vatMode === 'exempt' ? '면세' : vatMode === 'zero' ? '영세' : '과세')
@@ -64,7 +74,7 @@ const vatOf = (supply, vatMode) => Math.round((Number(supply) || 0) * vatRateOf(
  * exclusive(과세, 10%) / none(면세) / zero(영세). 정기청구는 이 값을 직접 저장하고,
  * 정기지출은 이 값이 있으면 그걸, 없으면 비목(categories.vat)을 따른다. */
 const RECUR_VAT = {
-  exclusive: { rate: 0.1, tax: '과세' },
+  exclusive: { rate: VAT_RATE, tax: '과세' },
   none:      { rate: 0,   tax: '면세' },
   zero:      { rate: 0,   tax: '영세' },
 }
@@ -101,5 +111,4 @@ const modeFromCatVat = (catVat) => (catVat === '10%' ? 'exclusive' : catVat === 
 
 module.exports = {
   TAX_TYPES, normalizeTaxType, vatFields, CONTRACT_VAT_MODES, vatRateOf, taxTypeOfMode, vatOf,
-  recurVat, recurFromSupply, recurFromTotal, modeFromCatVat, effRecurVatMode,
-}
+  recurVat, recurFromSupply, recurFromTotal, modeFromCatVat, effRecurVatMode, VAT_RATE }

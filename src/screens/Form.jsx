@@ -4,6 +4,7 @@ import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { withMainFirst, isMainAccount, MAIN_BADGE } from '../lib/mainAccount'
 import { quickAddCategory, quickAddRefItemWithId } from '../lib/quickAdd'
+import { vatOf, supplyOf } from '../lib/vatRate'
 
 // 과세유형 3종. 영세 = 세율 0%인 과세거래(수출·해외용역) — 세액은 0이지만 과세표준엔 들어간다.
 // 면세와 값을 나눠 두지 않으면 신고서에서 둘을 구분할 수 없다. 서버 lib/vat.js와 같은 값집합.
@@ -18,8 +19,8 @@ const FUND_CODES = ["1101", "1102", "1103"];
 const applyTax = (f, value, bySupply) => {
   const v = Number(value) || 0;
   if (f.taxType !== "과세") return { ...f, amount: v, supply: v, vat: 0 };
-  if (bySupply) { const vat = Math.round(v * 0.1); return { ...f, supply: v, vat, amount: v + vat }; }
-  const supply = Math.round(v / 1.1);
+  if (bySupply) { const vat = vatOf(v); return { ...f, supply: v, vat, amount: v + vat }; }
+  const supply = supplyOf(v);
   return { ...f, amount: v, supply, vat: v - supply };
 };
 

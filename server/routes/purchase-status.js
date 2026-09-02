@@ -1,5 +1,6 @@
 const { Router } = require('express')
 const { monthRange, weeksOf } = require('../lib/period')
+const { VAT_RATE } = require('../lib/vat')
 
 const router = Router()
 
@@ -67,7 +68,7 @@ router.get('/', async (req, res, next) => {
     const lines = rows.map(r => {
       const amount = Number(r.amount) || 0
       const vat = r.vat === null || r.vat === undefined
-        ? ((r.tax_type || '과세') === '과세' ? Math.round(amount * 0.1) : 0)
+        ? ((r.tax_type || '과세') === '과세' ? Math.round(amount * VAT_RATE) : 0)
         : Number(r.vat) || 0
       return {
         // 표의 '날짜'는 고른 축을 따른다 — 납품일로 보는데 발행일이 찍히면 축이 어긋난다

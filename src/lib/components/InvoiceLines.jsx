@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Icon, fmtNum, Combobox, MoneyInput, DateInput } from '../ui'
 import { computeLineAmount, num, BASIS_LABEL } from '../lineAmount'
+import { vatOf } from '../vatRate'
 
 /* 거래명세서식 품목 입력 — 청구서 폼에서 쓴다.
  *
@@ -21,7 +22,7 @@ import { computeLineAmount, num, BASIS_LABEL } from '../lineAmount'
  *  한 군데라도 다르면 화면에서 본 세액과 저장된 세액이 갈린다. */
 export const lineVat = (l, taxType = '과세') => (
   (l.vat === null || l.vat === undefined || l.vat === '')
-    ? (taxType === '과세' ? Math.round(num(l.amount) * 0.1) : 0)
+    ? (taxType === '과세' ? vatOf(l.amount) : 0)
     : num(l.vat)
 )
 

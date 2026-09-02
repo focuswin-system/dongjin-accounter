@@ -807,10 +807,12 @@ export const api = {
         salesVat: data.salesVat,
         purchaseVat: data.purchaseVat,
         netVat: data.netVat,
+        // 과세기간·신고기한은 서버가 정한다(server/lib/vatPeriod.js) — 화면은 받아 적기만
+        period: data.period || null,
         salesInvoices: data.rows.filter(r => r.kind === 'issued').map(adaptInvoice),
         purchaseInvoices: data.rows.filter(r => r.kind === 'received').map(adaptInvoice),
       }
-    } catch { return { quarter, salesVat: 0, purchaseVat: 0, netVat: 0, salesInvoices: [], purchaseInvoices: [] } }
+    } catch { return { quarter, salesVat: 0, purchaseVat: 0, netVat: 0, period: null, salesInvoices: [], purchaseInvoices: [] } }
   },
 
   async addInvoice(data) {

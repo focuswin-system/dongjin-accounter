@@ -10,7 +10,7 @@ const { ledgerError, amountError } = require('../lib/ledger')
 const { vatOfQuarter } = require('../lib/vatAgg')
 const { settleAcctCode } = require('../lib/acctCode')
 const { removeUploadedFile } = require('../lib/uploads')
-const { normalizeTaxType } = require('../lib/vat')
+const { normalizeTaxType, VAT_RATE } = require('../lib/vat')
 const { recalcInvoiceStatus, paidAmountOf } = require('../lib/invoiceStatus')
 // 품목 라인 금액 규칙 — 프런트 src/lib/lineAmount.js 와 같은 규칙(중량 단가 포함)
 const { computeLineAmount, normBasis } = require('../lib/lineAmount')
@@ -18,6 +18,7 @@ const { computeLineAmount, normBasis } = require('../lib/lineAmount')
 const { isFundAccount, acctCodeByCategoryName } = require('../lib/categoryAccount')
 const { invoiceVoucher, withNames } = require('../lib/voucher')
 const { newBook, templateSheet, guideSheet, sendBook } = require('../lib/xlsxBook')
+const { MONTHS, vatPeriodOf } = require('../lib/vatPeriod')
 
 const router = Router()
 
@@ -180,8 +181,11 @@ router.get('/summary/vat', async (req, res, next) => {
   try {
     const { quarter, year } = req.query
     const y = year || Number(kstToday().slice(0, 4))
-    const months = { Q1: ['01','02','03'], Q2: ['04','05','06'], Q3: ['07','08','09'], Q4: ['10','11','12'] }[quarter] || []
-    if (!months.length) return res.json({ salesVat: 0, purchaseVat: 0, netVat: 0, rows: [] })
+    /* ⚠ 분기별 월 표를 여기 다시 적지 않는다 — lib/vatPeriod.js 가 원본이다.
+       그 파일 머리가 "같은 표가 두 벌이 될 뻔했다"고 적어 뒀는데 정작 여기와
+       화면(Docs.jsx)에 각각 한 벌씩 더 있었다. 신고 기한이 어긋나면 가산세다. */
+    const months = MONTHS[quarter] || []
+    if (!months.length) return res.json({ salesVat: 0, purchaseVat: 0, netVat: 0, rows: [], period: null })
     const placeholders = months.map(() => 'i.issued_at LIKE ?').join(' OR ')
     const params = months.map(m => `${y}-${m}%`)
     const [all] = await req.db.execute(
@@ -198,6 +202,10 @@ router.get('/summary/vat', async (req, res, next) => {
     res.json({
       salesVat: vat.salesVat, purchaseVat: vat.purchaseVat,
       netVat: vat.salesVat - vat.purchaseVat,
+      /* 과세기간·신고기한은 **서버가 정해서 내려준다.** 화면이 스스로 계산하면
+         엑셀(lib/vatWorkbook.js)과 다른 기한을 말할 수 있다 — 같은 분기를 두고
+         화면은 7월 25일, 엑셀은 다른 날을 적는 일이 있어선 안 된다. */
+      period: vatPeriodOf(quarter, y),
       // 출처별 — 화면이 "청구서엔 없는데 세액이 왜 이렇지?"에 답할 수 있게
       salesVatInvoice: vat.salesInvoice, salesVatDirect: vat.salesDirect,
       purchaseVatInvoice: vat.purchaseInvoice, purchaseVatDirect: vat.purchaseDirect,
@@ -313,7 +321,7 @@ const normDeliveryDate = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? S
  *  사용자가 표에서 본 숫자와 저장되는 숫자가 같다. */
 const lineVatOf = (l, taxType) => (
   (l.vat === undefined || l.vat === null || l.vat === '')
-    ? (taxType === '과세' ? Math.round(intOf(l.amount) * 0.1) : 0)
+    ? (taxType === '과세' ? Math.round(intOf(l.amount) * VAT_RATE) : 0)
     : intOf(l.vat)
 )
 

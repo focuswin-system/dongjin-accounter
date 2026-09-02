@@ -20,6 +20,7 @@ import { cycleMonthsLabel, PAY_TERM_OPTS, payTermNeedsDay, payTermHint,
          BILLING_PERIODS, periodMonths, periodLong } from '../lib/renewal'
 import { bizTypeOptions, bizItemOptions } from '../lib/bizTypes'
 import { api, minuteOf } from '../lib/api'
+import { vatOf } from '../lib/vatRate'
 
 /* ⚠ 한 건을 고치는 버튼은 **'수정'** 이다.
  * 예전엔 이 파일 안에서 표마다 '수정'과 '편집'이 갈렸다. 그런데 눌러서 열린 드로어
@@ -3298,7 +3299,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
   // (같은 동작이 두 자리에 있으면 어느 쪽이 무엇을 만드는지 알 수 없다).
 
   // 영세(zero)도 세액 0 — 'none만 0'으로 보면 영세 청구액이 10% 부풀어 보인다
-  const totalOf = (r) => r.supplyAmount + (r.vatMode === 'exclusive' ? Math.round(r.supplyAmount * 0.1) : 0)
+  const totalOf = (r) => r.supplyAmount + (r.vatMode === 'exclusive' ? vatOf(r.supplyAmount) : 0)
 
   const openNew = () => { setEditing(null); setFormOpen(true) }
   const openEdit = (r) => { setEditing(r); setFormOpen(true) }

@@ -1,4 +1,5 @@
 import { fmtNum } from '../ui'
+import { vatOf } from '../vatRate'
 
 /* 거래명세서 — 청구서의 품목 내역을 실제로 주고받는 서류로 뽑는다.
  *
@@ -27,7 +28,7 @@ export const StatementDoc = ({ invoice, company, vendor, printId = 'statement-pr
      lineVat 은 '이 줄에 적을 세액' — null 이면 청구서 과세유형대로 자동 계산한다. */
   const taxable = (invoice?.taxType || '과세') === '과세'
   const lineVat = (l) => (l.vat === null || l.vat === undefined
-    ? (taxable ? Math.round((Number(l.amount) || 0) * 0.1) : 0)
+    ? (taxable ? vatOf(l.amount) : 0)
     : Number(l.vat) || 0)
   const lineVatSum = lines.reduce((s, l) => s + lineVat(l), 0)
   const vat = lines.length ? lineVatSum : (Number(invoice?.vatAmount) || 0)

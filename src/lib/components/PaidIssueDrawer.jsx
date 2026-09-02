@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, Drawer, localToday, DateInput, MoneyInput } from '../ui'
 import { DrawerHead } from './Drawer'
 import { api } from '../api'
+import { vatOf, supplyOf } from '../vatRate'
 
 /* 기입금/기지급 처리 — 청구서 발행 + 즉시 정산을 한 번에.
  *
@@ -44,9 +45,9 @@ export const PaidIssueDrawer = ({ target, isIssued, onClose, onDone, onIssuePaid
      한쪽으로 통일하면 반대쪽이 10% 어긋난 금액으로 기록된다. */
   const typed = Number(String(amount).replace(/[^0-9-]/g, '')) || 0
   const supply = !variable ? (target.amount || 0)
-    : (isIssued ? typed : Math.round(typed / 1.1))
+    : (isIssued ? typed : supplyOf(typed))
   const vat = (!variable && target.vat != null) ? target.vat
-    : (isIssued ? Math.round(supply * 0.1) : typed - supply)
+    : (isIssued ? vatOf(supply) : typed - supply)
   /* 발행함·미입금은 **이미 있는 청구서**라, 회차 금액이 아니라 그 청구서의 남은 금액을
      기록한다(일부 입금된 것도 이 목록에 있다). 보여주는 숫자와 실제로 기록하는 숫자가
      다르면, 그게 바로 우리가 잡으려던 종류의 사고다. */

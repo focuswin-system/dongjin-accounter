@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, localToday, Drawer, MoneyInput , fmtDateShort } from '../ui'
 import { DrawerHead, DrawerFooter } from './Drawer'
 import { api } from '../api'
+import { vatOf } from '../vatRate'
 
 /* ── 정기 회차 이행 현황 (정기청구·정기지출 공용) ──────────────────
  *
@@ -94,7 +95,7 @@ const ddayTone = (due) => {
 }
 
 /** 회차 금액(VAT 포함) — pending은 공급가(amount)와 세액(vat)을 따로 준다 */
-export const cycleTotal = (c) => (c.amount || 0) + (c.vat != null ? c.vat : Math.round((c.amount || 0) * 0.1))
+export const cycleTotal = (c) => (c.amount || 0) + (c.vat != null ? c.vat : vatOf(c.amount))
 
 const Row = ({ c, sales, primary, onIssue, onPaid, onOpenContract, onSkip, onUnskip, onOpenInvoice, skipped, unpaid, ahead, busy, blockedBy }) => {
   const issueLabel = sales ? '청구서 발행' : '청구서 등록'

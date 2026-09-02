@@ -22,6 +22,7 @@ import { taxInvoiceImportAdapter } from '../lib/taxInvoiceImport'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { quickAddCategory } from '../lib/quickAdd'
+import { vatOf } from '../lib/vatRate'
 
 const STATUS_TONE = {
   "입금 완료": "pos",  "지급 완료": "pos",
@@ -867,12 +868,12 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     // 과세일 때만 공급가 변경 시 세액을 10%로 자동 채운다. 면세·영세는 세액 0을 유지한다.
     if (k === "supplyAmount") {
       const n = parseInt(v.replace(/[^0-9]/g, "")) || 0
-      next.vatAmount = next.taxType === "과세" ? String(Math.round(n * 0.1)) : "0"
+      next.vatAmount = next.taxType === "과세" ? String(vatOf(n)) : "0"
       next.supplyAmount = v
     }
     if (k === "taxType") {
       const n = parseInt(String(next.supplyAmount).replace(/[^0-9]/g, "")) || 0
-      next.vatAmount = v === "과세" ? String(Math.round(n * 0.1)) : "0"
+      next.vatAmount = v === "과세" ? String(vatOf(n)) : "0"
     }
     if (k === "vendor") next.contract = ""
     setForm(next)
@@ -882,7 +883,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   const supply = hasLines ? Math.round(linesTotal) : (parseInt(form.supplyAmount.replace(/[^0-9]/g, "")) || 0)
   const vatRaw = String(form.vatAmount).replace(/[^0-9]/g, "")
   // 과세면 빈칸일 때 자동 10%, 값 있으면 그대로. 면세·영세는 항상 0.
-  const vat    = !taxable ? 0 : (vatRaw === "" ? Math.round(supply * 0.1) : parseInt(vatRaw))
+  const vat    = !taxable ? 0 : (vatRaw === "" ? vatOf(supply) : parseInt(vatRaw))
   const total  = supply + vat
 
   const vendorOptions = (form.kind === "issued"
@@ -1276,7 +1277,7 @@ export const pendingKey = (p) => p.recurring_id ? `r-${p.recurring_id}-${p.due_d
 /** 거래처가 비어 있는 줄을 가리키는 이름표. 실제 거래처명과 겹치지 않게 괄호를 붙인다. */
 const NO_VENDOR = '(거래처 미지정)'
 // VAT 포함 금액. vat 가 없는 회차는 10% 로 본다(표·소계·합계가 모두 이 값을 쓴다).
-const pendingGross = (p) => (p.amount || 0) + (p.vat != null ? p.vat : Math.round((p.amount || 0) * 0.1))
+const pendingGross = (p) => (p.amount || 0) + (p.vat != null ? p.vat : vatOf(p.amount))
 
 /* 소계 칩 — "그래서 어디에(언제) 얼마"를 한 줄로 보여주고, 누르면 그것만 거른다.
    목록의 거래처별 소계와 예정 탭의 달별·거래처별 소계가 같은 모양을 쓴다.
@@ -1844,7 +1845,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     // 기입금/기지급은 "돈이 어느 계좌로 오갔나"가 핵심이라, 계좌·날짜를 받는 드로어로 넘긴다.
     if (paid) { setPaidTarget(p); return }
     const supply = p.amount || 0
-    const vat = p.vat != null ? p.vat : Math.round(supply * 0.1)
+    const vat = p.vat != null ? p.vat : vatOf(supply)
     const isRecurring = p.source === 'recurring'
     const ok = await confirm({
       tone: "brand", icon: <Icon.Receipt size={22}/>,

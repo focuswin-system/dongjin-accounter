@@ -16,6 +16,7 @@ import { BILLING_MODES, TERM_MODES, BILLING_PERIODS, billingLabel, termLabel, pe
          isRecurring, isProgress, isOpenEnded, hasTotal, amountLabel, renewalInfo, nextEndDate, recurringMismatch } from '../lib/renewal'
 // 라인 금액 규칙 — 서버 server/lib/lineAmount.js 와 한 벌(소수점을 살린다)
 import { num, basisValue, computeLineAmount } from '../lib/lineAmount'
+import { vatOf } from '../lib/vatRate'
 
 const numOnly = (v) => String(v ?? '').replace(/[^0-9]/g, '');
 const asNum   = (v) => parseInt(numOnly(v), 10) || 0;
@@ -671,7 +672,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     const supply = ms.amount || 0;
     // 면세 주문이면 부가세 0 — 확인창 금액이 서버 계산과 어긋나지 않게(면세인데 VAT 포함으로 오표시 방지).
     const exempt = c.vat_mode === 'exempt' || c.vat_mode === 'zero';   // 면세·영세 모두 세액 0
-    const vat = exempt ? 0 : Math.round(supply * 0.1);
+    const vat = exempt ? 0 : vatOf(supply);
     const ok = await confirm({
       tone: "brand", icon: <Icon.Receipt size={22}/>,
       title: `${ms.type} 청구서 발행`,
@@ -1781,7 +1782,7 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
 
   const lines = rows.filter(r => (Number(r.amount) || 0) > 0);
   const supply = lines.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-  const vat = exempt ? 0 : Math.round(supply * 0.1);
+  const vat = exempt ? 0 : vatOf(supply);
   const total = supply + vat;
 
   const submit = async () => {

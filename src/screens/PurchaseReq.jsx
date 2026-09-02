@@ -5,6 +5,7 @@ import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 import { SourceChooser } from '../lib/components/SourceChooser'
 import { PickListDrawer } from '../lib/components/PickListDrawer'
+import { vatOf } from '../lib/vatRate'
 
 const numOf = (v) => (typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, ''), 10) || 0 : Number(v) || 0)
 const ROWS = 15
@@ -139,7 +140,7 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
     setPaySupply(String(total)); setPayVat('과세'); setPayDue(due30()); setPayOpen(true)
   }
   const paySupplyN = numOf(paySupply)
-  const payVatAmt = payVat === '과세' ? Math.round(paySupplyN * 0.1) : 0
+  const payVatAmt = payVat === '과세' ? vatOf(paySupplyN) : 0
   const submitPayable = async () => {
     if (!paySupplyN) return toast.push('공급가를 입력해주세요')
     const res = await api.issuePurchaseReqPayable(doc.id, { supply_amount: paySupplyN, vat_mode: payVat, due: payDue || null })
