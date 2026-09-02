@@ -1267,6 +1267,28 @@ router.delete('/:id/matches/:matchId', async (req, res, next) => {
         })
       }
     }
+    /* ⚠ 어음으로 정산한 건도 여기서 못 끊는다.
+     * 어음은 이 매칭 행을 자기 것으로 붙들고 있다(notes.match_id). 연결만 끊으면
+     * 청구서는 미수로 부활하는데 **어음은 '보유 중'으로 그 청구번호를 단 채 남는다.**
+     * 만기에 입금 처리하면 입금 거래가 생기고 청구서는 여전히 미수라 같은 돈이 두 몫이 된다.
+     * 되돌릴 곳은 어음이다 — 지우거나 부도 처리하면 이 매칭도 함께 걷힌다.
+     * (바로 위 지급결의서 가드와 같은 이유·같은 모양이다.) */
+    {
+      const [[note]] = await conn.execute(
+        /* ⚠ req.params.matchId 를 쓴다 — 위 SELECT 가 id 를 안 가져와서
+             match.id 는 undefined 다. 그대로 두면 이 가드가 **조용히 통과한다.** */
+        'SELECT note_no, kind FROM notes WHERE match_id = ? LIMIT 1', [req.params.matchId]
+      ).catch(() => [[]])
+      if (note) {
+        await rollbackQuietly(conn)
+        const 이름 = note.kind === 'payable' ? '지급어음' : '받을어음'
+        return res.status(409).json({
+          error: `${이름} ${note.note_no || ''}으로 정산한 건이에요. `.replace('  ', ' ')
+               + '재무관리 › 어음에서 그 어음을 지우거나 부도 처리하면 이 정산도 함께 취소됩니다.',
+        })
+      }
+    }
+
     let removedTxn = null
     if (match.txn_id) {
       if (Number(match.txn_created) === 1) {

@@ -2344,8 +2344,9 @@ export const api = {
       const d = new Date(due); d.setHours(0, 0, 0, 0)
       return Math.round((d - today) / 86400000)
     }
-    let rec = { rows: [] }, pay = { rows: [] }
+    let rec = { rows: [] }, pay = { rows: [] }, notes = []
     try { [rec, pay] = await Promise.all([this.getReceivables(), this.getPayables()]) } catch { /* noop */ }
+    try { notes = await this.getNotes() } catch { /* noop */ }
     const PAY_PENDING = new Set(['지급 대기', '지급 예정', '일부 지급', '기한 지남'])
     const items = []
     // 미수금: 마감일이 지났으면(상태 라벨 무관) 연체, 7일 내면 임박, 그 외 일부입금은 잔액 회수
@@ -2363,6 +2364,27 @@ export const api = {
           title: `${r.vendor} 일부 입금 — 잔액 회수 필요`, sub: `잔액 ${won(r.remain)}`, when: '' })
       }
     })
+    /* ⚠ 어음 만기 — **여기 없으면 아무도 안 알려준다.**
+     * 어음으로 정산한 청구서는 미수금에서 빠지므로 위의 연체 알림에도 안 잡힌다.
+     * 종이 어음은 만기에 은행에 넣지 않으면 그냥 지나간다 — 경리가 어음 화면을
+     * 스스로 열지 않으면 놓치는 구조였다. */
+    notes.filter(n => n.status === 'held').forEach(n => {
+      const d = dleft(n.dueOn)
+      if (d === null) return
+      const recv = n.kind === 'receivable'
+      const 이름 = `${n.vendorName || '거래처'} ${n.noteNo || ''}`.trim()
+      if (d < 0) {
+        items.push({ tone: 'neg', icon: 'Warn', to: 'finance_note', sortKey: 0,
+          title: recv ? `${이름} 어음 만기가 ${-d}일 지났어요` : `${이름} 어음을 아직 안 냈어요`,
+          sub: `${won(n.amount)}${recv ? ' · 안 들어왔으면 부도일 수 있어요' : ''}`,
+          when: `${-d}일 지남` })
+      } else if (d <= 7) {
+        items.push({ tone: 'warn', icon: 'Clock', to: 'finance_note', sortKey: 1,
+          title: recv ? `${이름} 어음 만기가 다가와요` : `${이름} 어음을 낼 날이 다가와요`,
+          sub: won(n.amount), when: d === 0 ? '오늘 만기' : `D-${d}` })
+      }
+    })
+
     // 미지급금: 마감일이 지났으면 지급 지연, 7일 내면 지급 예정 임박
     pay.rows.filter(r => PAY_PENDING.has(r.pay)).forEach(r => {
       const d = dleft(r.due)

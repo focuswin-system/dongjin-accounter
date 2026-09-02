@@ -74,8 +74,13 @@ async function listVouchers(db, { from, to, kind = 'all' }) {
    * 부도(dishonored)는 결제가 아니므로 held 와 같이 뺀다. */
   let coveredTxnIds = new Set()
   try {
+    /* ⚠ **보유 중(held)** 어음만 원거래를 가린다.
+     * settled : 그 거래는 결제 분개(차 어음 / 대 예금)로 바뀌었으니 그대로 세운다.
+     * dishonored : 부도 처리가 그 거래의 계정을 외상으로 옮겨 놓았다. 나중에 현금으로
+     *   갚으면 '차 외상매입금 / 대 예금'이 되어 부도 전표와 짝이 맞는다 — 가리면
+     *   그 지급이 분개장에서 통째로 사라진다(일계표에는 서므로 두 장부가 어긋난다). */
     const [ns] = await db.execute(
-      "SELECT origin_txn_id FROM notes WHERE origin_txn_id IS NOT NULL AND status <> 'settled'")
+      "SELECT origin_txn_id FROM notes WHERE origin_txn_id IS NOT NULL AND status = 'held'")
     coveredTxnIds = new Set(ns.map(n => n.origin_txn_id))
   } catch { /* notes 테이블이 없는 DB — 어음을 안 쓰는 것이니 뺄 것도 없다 */ }
 

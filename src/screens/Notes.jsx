@@ -19,8 +19,12 @@ import { DrawerHead } from '../lib/components/Drawer'
  */
 
 const KIND = {
-  receivable: { label: '받을어음', desc: '거래처가 우리에게 준 어음', tone: 'pos',  money: '들어올 돈' },
-  payable:    { label: '지급어음', desc: '우리가 거래처에 준 어음', tone: 'warn', money: '나갈 돈' },
+  /* held 라벨을 방향별로 나눈다 — 우리가 끊어 준 어음을 우리가 '보유'하지는 않는다.
+     KPI 도 '보유 중 나갈 돈'이면 두 번 읽게 되어 그냥 '나갈 돈'으로 둔다. */
+  receivable: { label: '받을어음', desc: '거래처가 우리에게 준 어음', tone: 'pos',  money: '들어올 돈',
+                heldLabel: '보유 중', kpi: '보유 중 들어올 돈', vendorHint: '어음을 준 곳' },
+  payable:    { label: '지급어음', desc: '우리가 거래처에 준 어음', tone: 'warn', money: '나갈 돈',
+                heldLabel: '미결제',  kpi: '아직 안 낸 돈',   vendorHint: '어음을 받은 곳' },
 }
 /** 어음 화면의 한 줄 설명. 재무관리의 어음 화면과 수시 입금·출금의 어음 탭이 같이 쓴다. */
 export const NOTE_INTRO = (isRecv) =>
@@ -50,9 +54,15 @@ export const NoteStatusChips = ({ rows, value, onChange }) => (
 )
 
 const STATUS = {
-  held:       { label: '보유 중', tone: 'brand' },
+  held:       { label: '보유 중', tone: 'brand' },   // 지급어음은 '미결제'로 바꿔 쓴다(statusOf)
   settled:    { label: '결제됨',  tone: 'pos' },
   dishonored: { label: '부도',    tone: 'neg' },
+}
+/** 상태 라벨 — held 는 방향에 따라 말이 다르다(우리가 준 어음을 우리가 '보유'하지는 않는다) */
+const statusOf = (n) => {
+  const base = STATUS[n.status] || STATUS.held
+  if (n.status !== 'held') return base
+  return { ...base, label: (KIND[n.kind] || KIND.receivable).heldLabel }
 }
 
 /** 만기까지 며칠 — 지난 것은 음수. 보유 중인 것에만 뜻이 있다. */
@@ -101,7 +111,7 @@ export const NoteKpis = ({ rows, kind, today = localToday() }) => {
       <SummaryCard label="7일 안에 만기" amount={sum(임박)} count={임박.length}
         accent={임박.length ? 'warn' : 'blue'}
         hint={임박.length ? '곧 현금이 돼요' : '임박한 어음이 없어요'}/>
-      <SummaryCard label={`보유 중 ${K.money}`} amount={sum(held)} count={held.length} accent="blue"
+      <SummaryCard label={K.kpi} amount={sum(held)} count={held.length} accent="blue"
         hint="만기 지남·임박도 포함한 전체예요"/>
       {부도.length > 0 && (
         <SummaryCard label="부도" amount={sum(부도)} count={부도.length} accent="neg" warn
@@ -285,17 +295,26 @@ export const NotesScreen = ({
             <tbody>
               {list.map(n => {
                 const d = dueLabel(n, today)
+                /* 끝난 어음(결제·부도)은 D-day 가 없어 이 칸이 통째로 비었다.
+                   서버가 내려주는 날짜를 대신 세운다 — "언제 들어온 돈인지"를 못 보면
+                   '결제됨'으로 걸러도 쓸모가 없다. */
+                const done = n.status === 'settled' ? (n.settledOn ? `${n.settledOn} 결제` : null)
+                           : n.status === 'dishonored' ? (n.dishonoredOn ? `${n.dishonoredOn} 부도` : null)
+                           : null
                 return (
                   <tr key={n.id}>
                     <td className="num">{n.dueOn}</td>
-                    <td>{d && <span className={`badge ${d.tone}`} style={{ fontSize: 11 }}>{d.text}</span>}</td>
+                    <td>
+                      {d && <span className={`badge ${d.tone}`} style={{ fontSize: 11 }}>{d.text}</span>}
+                      {done && <span className="text-xs text-muted2 num">{done}</span>}
+                    </td>
                     <td className="fw-600">{n.vendorName || '—'}
                       {n.invoiceNo && <span className="text-xs text-muted2" style={{ marginLeft: 6 }}>{n.invoiceNo}</span>}
                     </td>
                     <td className="text-sm num">{n.noteNo || '—'}</td>
                     <td className="num text-sm text-muted">{n.issuedOn}</td>
                     <td className="num fw-700" style={{ textAlign: 'right' }}>{fmtNum(n.amount)}</td>
-                    <td><StatusBadge status={STATUS[n.status]?.label || n.status} tone={STATUS[n.status]?.tone}/></td>
+                    <td><StatusBadge status={statusOf(n).label} tone={statusOf(n).tone}/></td>
                     <td>
                       <div className="row gap-6" style={{ justifyContent: 'flex-end' }}>
                         {n.status === 'held' && (
@@ -306,9 +325,12 @@ export const NotesScreen = ({
                             <button className="btn sm" onClick={async () => {
                               const ok = await confirm({
                                 tone: 'warn', title: '부도 처리할까요?',
-                                body: n.invoiceNo
+                                /* 되돌릴 길이 없다(설계상). 확인창이 그 말을 해야 한다 —
+                                   되돌리기·삭제 확인창은 각각 후과를 말하는데 부도만 안 했다. */
+                                body: (n.invoiceNo
                                   ? `청구서 ${n.invoiceNo}가 다시 미수로 돌아갑니다. 못 받은 돈이 장부에서 사라지지 않게요.`
-                                  : '이 어음을 부도로 표시합니다.',
+                                  : '이 어음을 부도로 표시합니다.')
+                                  + ' 되돌릴 수 없어요 — 다시 어음으로 받으면 새로 등록합니다.',
                                 confirmLabel: '부도 처리',
                               })
                               if (!ok) return
@@ -368,7 +390,7 @@ export const NotesScreen = ({
         )}
       </div>
 
-      <NoteForm open={formOpen} note={edit} defaultKind={tab} vendors={vendors}
+      <NoteForm open={formOpen} note={edit} defaultKind={tab} lockKind={!!fixedKind} vendors={vendors}
         onClose={() => { setFormOpen(false); setEdit(null) }}
         onSaved={() => { setFormOpen(false); setEdit(null); load() }}/>
 
@@ -381,7 +403,7 @@ export const NotesScreen = ({
 
 /* 등록·수정 — 청구서에 붙이는 것은 **등록할 때만**. 이미 붙은 어음의 금액을 바꾸면
    청구서 정산액과 어긋나므로 서버가 막는다(routes/notes.js PUT). */
-const NoteForm = ({ open, note, defaultKind, vendors, onClose, onSaved }) => {
+const NoteForm = ({ open, note, defaultKind, lockKind = false, vendors, onClose, onSaved }) => {
   const toast = useToast()
   const [f, setF] = useState({})
   const [invoices, setInvoices] = useState([])
@@ -434,12 +456,18 @@ const NoteForm = ({ open, note, defaultKind, vendors, onClose, onSaved }) => {
         {!note && (
           <div>
             <label className="label">어느 쪽 어음인가요? <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-            <div className="row gap-6">
-              {Object.entries(KIND).map(([k, v]) => (
-                <button key={k} type="button" className={`chip ${f.kind === k ? 'active' : ''}`}
-                  onClick={() => set('kind', k)}>{v.label}</button>
-              ))}
-            </div>
+            {/* ⚠ 한쪽만 보는 화면(수시 입금·출금의 어음 탭)에서는 **고르게 두지 않는다.**
+                반대쪽을 고르면 저장은 되는데 그 탭에는 안 보여 "등록했는데 사라졌다"가 된다. */}
+            {lockKind ? (
+              <div className="chip active" style={{ display: 'inline-block' }}>{K.label}</div>
+            ) : (
+              <div className="row gap-6">
+                {Object.entries(KIND).map(([k, v]) => (
+                  <button key={k} type="button" className={`chip ${f.kind === k ? 'active' : ''}`}
+                    onClick={() => set('kind', k)}>{v.label}</button>
+                ))}
+              </div>
+            )}
             <div className="text-xs text-muted2" style={{ marginTop: 6 }}>{K.desc}</div>
           </div>
         )}
@@ -448,7 +476,7 @@ const NoteForm = ({ open, note, defaultKind, vendors, onClose, onSaved }) => {
           <label className="label">거래처 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
           <Combobox value={f.vendorId} onChange={v => set('vendorId', v)} allowAdd={false}
             options={vendors.map((v, _i, arr) => ({ value: v.id, label: vendorLabel(v, arr), sub: v.type }))}
-            placeholder={f.kind === 'receivable' ? '어음을 준 곳' : '어음을 준 상대'}/>
+            placeholder={(KIND[f.kind] || KIND.receivable).vendorHint}/>
         </div>
 
         <div className="row gap-12">
@@ -456,6 +484,10 @@ const NoteForm = ({ open, note, defaultKind, vendors, onClose, onSaved }) => {
             <label className="label">어음번호</label>
             <input className="input num" value={f.noteNo || ''} onChange={e => set('noteNo', e.target.value)}
               placeholder="예: 자가12345678"/>
+            {/* 비워도 되지만 그러면 중복 판정이 꺼진다 — 그 사실을 알려야 고를 수 있다 */}
+            <div className="text-xs text-muted2" style={{ marginTop: 4 }}>
+              비워도 되지만, 같은 어음을 두 번 적는 걸 막지 못해요.
+            </div>
           </div>
           <div style={{ flex: 1 }}>
             <label className="label">금액 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
@@ -533,7 +565,11 @@ const SettleDrawer = ({ target, accounts, onClose, onDone }) => {
   return (
     <Drawer open={!!target} onClose={onClose} width="min(520px,100vw)" label="어음 결제">
       <DrawerHead title={recv ? '어음 입금 처리' : '어음 지급 처리'}
-        sub={`${target.vendorName || ''} · ${fmtNum(target.amount)}원`} onClose={onClose}/>
+        /* 어음번호·만기일까지 적는다 — 같은 거래처에서 여러 장 받는 일이 흔해서,
+           거래처·금액만으로는 어느 장을 누른 건지 확인할 길이 없었다. */
+        sub={[target.vendorName, target.noteNo, `${fmtNum(target.amount)}원`,
+              target.dueOn ? `만기 ${target.dueOn}` : null].filter(Boolean).join(' · ')}
+        onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div className="man-note" style={{ margin: 0 }}>
           <Icon.Help size={15}/>

@@ -1787,6 +1787,10 @@ async function initDb(conn) {
     /* 어음 중복 방지 — 라우트의 검사는 트랜잭션 밖이라 동시에 두 번 보내면 둘 다
        통과할 수 있다(TOCTOU). 번호가 NULL 인 행은 MySQL 규칙상 이 제약에 안 걸리는데,
        번호를 안 적은 어음끼리는 서로 막지 않아야 하므로 그게 맞다. */
+    /* ⚠ 인덱스를 걸기 **전에** 빈 문자열을 NULL 로 바꾼다.
+       MySQL 은 NULL 만 다중 허용한다 — ''(빈 문자열)은 값이라 제약에 걸려,
+       번호를 안 적은 어음을 같은 거래처에 두 장 넣으면 두 번째가 500 이 났다. */
+    await c.execute("UPDATE notes SET note_no = NULL WHERE note_no = ''")
     await ensureUniqueIndex('notes', 'uniq_notes_no', 'kind, vendor_id, note_no')
     // 홈택스 승인번호는 국세청이 부여한 유일값 → 같은 번호의 청구서가 둘 존재하는 것은 항상 잘못이다.
     // 임포트가 앱에서도 "조회 후 없으면 삽입"으로 막지만, 그 사이의 틈(동시 요청)은 인덱스만 닫는다.

@@ -134,6 +134,10 @@ const AUDIT_RULES = [
      ⚠ 규칙이 0건이었다. unsettle 은 결제 거래를 DELETE 하고, dishonor·delete 는
        invoice_matches 를 지워 미수금을 되살린다 — 전부 무기록이었다.
        (대여금·정기 라우터가 똑같이 빠졌던 사고의 세 번째 반복이다.) */
+  /* 등록도 기록한다 — invoice_id 를 주면 이 경로가 invoice_matches 를 넣어
+     **미수금을 지운다**(같은 일을 하는 POST /invoices/:id/matches 는 이미 기록된다).
+     자동 검사는 DELETE 만 보므로 문지기에 안 걸린다. */
+  { m: 'POST',   re: /^\/api\/notes$/,                       res: 'note', action: 'create',    target: 0 },
   { m: 'POST',   re: /^\/api\/notes\/([^/]+)\/settle$/,    res: 'note', action: 'settle',    target: 1 },
   { m: 'POST',   re: /^\/api\/notes\/([^/]+)\/dishonor$/,  res: 'note', action: 'dishonor',  target: 1 },
   { m: 'POST',   re: /^\/api\/notes\/([^/]+)\/unsettle$/,  res: 'note', action: 'unsettle',  target: 1 },

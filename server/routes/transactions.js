@@ -581,15 +581,23 @@ router.put('/:id', async (req, res, next) => {
          전부 받는다 — 같은 일을 PUT 으로 할 수 있었다.
          · 완료로 바꾸면 일계표가 거래와 어음 전표를 **둘 다** 세어 비용이 두 배가 되고
          · 금액을 바꾸면 notes.amount 와 어긋나 자금예측·전표는 옛 금액, 통장은 새 금액이 된다. */
-      ['notes', 'origin_txn_id', '어음으로 적은', '어음'],
-      ['notes', 'txn_id', '어음 만기 결제', '어음'],
+      /* ⚠ **보유 중**인 어음만 막는다. 부도난 어음의 잔여 거래는 평범한 예정 거래라
+         고칠 수 있어야 한다(PATCH 가드도 같은 방침이다). 어음을 지운 뒤 남은 거래도
+         여기 안 걸린다 — notes 행이 없으므로. */
+      ['notes', 'origin_txn_id', '어음으로 적은', '재무관리 > 어음', "status = 'held'"],
+      ['notes', 'txn_id', '어음 만기 결제', '재무관리 > 어음', null],
     ]
-    for (const [table, col, label, where] of OWNED) {
-      const [[hit]] = await req.db.execute(`SELECT 1 AS x FROM ${table} WHERE ${col} = ? LIMIT 1`, [req.params.id])
+    for (const [table, col, label, where, cond] of OWNED) {
+      const [[hit]] = await req.db.execute(
+        `SELECT 1 AS x FROM ${table} WHERE ${col} = ?${cond ? ' AND ' + cond : ''} LIMIT 1`, [req.params.id])
       if (hit) {
-        return res.status(409).json({
-          error: `${label} 거래는 여기서 고칠 수 없어요. ${where} 화면에서 되돌린 뒤 다시 등록해주세요.`,
-        })
+        /* ⚠ 어음은 '되돌리기'가 아니라 '지우기'다 — 만기 전 어음에는 되돌릴 것이 없고
+             (되돌리기 버튼은 결제된 어음에만 뜬다), 실제 길은 어음을 지우고 이 거래를
+             고치는 것이다. 안내가 없는 곳으로 보내면 사용자가 헤맨다. */
+        const 길 = table === 'notes'
+          ? `${where} 에서 그 어음을 지운 뒤 고쳐주세요.`
+          : `${where} 화면에서 되돌린 뒤 다시 등록해주세요.`
+        return res.status(409).json({ error: `${label} 거래는 여기서 고칠 수 없어요. ${길}` })
       }
     }
     // 장부 불변식은 등록(POST)·상태변경(PATCH)과 똑같이 수정에도 걸어야 한다.

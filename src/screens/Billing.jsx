@@ -419,8 +419,11 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                             <b>어음</b>{m.noteNo ? ` ${m.noteNo}` : ''}
                             <span className="text-muted2" style={{ marginLeft: 6 }}>
                               만기 {m.noteDueOn}
-                              {m.noteStatus === 'settled' ? ' · 입금됨'
-                                : m.noteStatus === 'dishonored' ? ' · 부도' : ' · 아직 통장에 없어요'}
+                              {/* ⚠ 이 줄은 수시 입금·출금 상세가 **함께** 쓴다. 방향을 안 가르면
+                                  매입 청구서에서 지급어음을 결제해도 '입금됨'이라 뜬다. */}
+                              {m.noteStatus === 'settled' ? (isIssued ? ' · 입금됨' : ' · 지급됨')
+                                : m.noteStatus === 'dishonored' ? ' · 부도'
+                                : (isIssued ? ' · 아직 통장에 없어요' : ' · 아직 통장에서 안 나갔어요')}
                             </span>
                           </span>
                         ) : (
@@ -430,11 +433,22 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                         {/* 정산 취소 — 서버엔 있었는데 부르는 화면이 없어서, 금액이나 상대를 잘못 넣은
                             입금은 되돌릴 방법이 없었다(청구서를 통째로 지우는 수밖에). */}
                         {/* 취소는 행 클릭과 다른 일이다 — 전파를 끊지 않으면 거래 드로어가 같이 열린다 */}
-                        <button className="icon-btn" title={`${isIssued ? "입금" : "지급"} 정산 취소`}
-                          disabled={unmatching === m.id || !m.id}
-                          onClick={(e) => { e.stopPropagation(); cancelMatch(m) }}>
-                          <Icon.Close size={14}/>
-                        </button>
+                        {/* ⚠ 어음으로 정산한 줄에는 취소 버튼을 안 그린다 — 여기서 끊으면
+                            청구서만 미수로 돌아오고 어음은 그 청구번호를 단 채 남아,
+                            만기에 입금하면 같은 돈이 두 몫이 된다. 서버도 409 로 막지만
+                            누를 수 있게 두면 "왜 안 되지"를 눌러보고 나서 알게 된다.
+                            되돌릴 곳은 어음 화면이다. */}
+                        {isNote ? (
+                          <span className="text-xs text-muted2" title="어음 화면에서 지우거나 부도 처리하면 이 정산도 함께 취소됩니다">
+                            어음에서 취소
+                          </span>
+                        ) : (
+                          <button className="icon-btn" title={`${isIssued ? "입금" : "지급"} 정산 취소`}
+                            disabled={unmatching === m.id || !m.id}
+                            onClick={(e) => { e.stopPropagation(); cancelMatch(m) }}>
+                            <Icon.Close size={14}/>
+                          </button>
+                        )}
                       </div>
                       )
                     })}
@@ -1247,7 +1261,9 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", paidLabel = "정
               <StatusBadge status={effStatus(inv)}/>
               {held.length > 0 &&
                 <span className="badge warn" style={{ fontSize: 10 }}
-                      title={`어음으로 받았어요. 만기 ${due} 에 통장으로 들어옵니다.`}>
+                      title={isIssued
+                        ? `어음으로 받았어요. 만기 ${due} 에 통장으로 들어옵니다.`
+                        : `어음으로 줬어요. 만기 ${due} 에 통장에서 나갑니다.`}>
                   어음{due ? ` ${due.slice(5).replace('-', '/')}` : ''}
                 </span>}
             </span>

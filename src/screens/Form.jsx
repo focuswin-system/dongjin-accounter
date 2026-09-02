@@ -492,6 +492,15 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     if (!form.amount)   { toast.push("금액을 입력해주세요"); return; }
     if (!form.date || !/^\d{4}-\d{2}-\d{2}$/.test(form.date)) { toast.push("날짜를 올바른 형식으로 입력해주세요"); return; }
     if (form.date > localToday()) { toast.push(`미래 날짜로는 ${kind === "income" ? "입금" : "지출"}을 등록할 수 없어요 (오늘까지만 가능)`); return; }
+    /* ⚠ 어음은 만기일이 있어야 한다. 여기서 안 막으면 거래만 저장되고 어음 등록이
+         실패하는데, 그 뒤 어음 화면에서 따로 등록하면 그 어음은 이 거래를 모른다 —
+         만기 결제 때 거래가 하나 더 생겨 **같은 지출이 두 번** 잡힌다. */
+    if (!editTxn && form.method === '어음' && !/^\d{4}-\d{2}-\d{2}$/.test(form.noteDueOn || '')) {
+      toast.push('어음 만기일을 선택해주세요'); return;
+    }
+    if (!editTxn && form.method === '어음' && form.noteDueOn < form.date) {
+      toast.push('어음 만기일이 발행일보다 빠를 수 없어요'); return;
+    }
 
     /* 거래처·계좌·직원은 아직 **이름으로** 고른다(칸이 이름을 그대로 보여주는 자리다).
        이름이 겹치면 어느 것인지 알 수 없다 — 실제로 같은 이름의 거래처가 넷,
@@ -599,7 +608,12 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
         if (!made.ok) {
           /* 거래는 이미 저장됐다. 어음만 실패했으니 지우지 않고 알린다 —
              지우면 사용자가 적은 것이 통째로 사라진다. 어음은 어음 화면에서 마저 등록하면 된다. */
-          toast.push(`거래는 저장했는데 어음 대장에 못 올렸어요: ${made.error || ''} 재무관리 › 어음에서 등록해주세요.`, { tone: 'warn' })
+          /* ⚠ "어음 화면에서 등록하라"고 보내면 안 된다 — 그렇게 만든 어음은 이 거래를
+               모르고, 만기 결제 때 거래가 하나 더 생겨 같은 지출이 두 번 잡힌다.
+               고칠 자리는 **이 거래**다. */
+          toast.push(`거래는 저장했는데 어음 대장에 못 올렸어요: ${made.error || ''} `
+                   + '이 거래를 열어 다시 저장해주세요(어음 화면에서 따로 등록하면 지출이 두 번 잡혀요).',
+            { tone: 'warn' })
         }
       }
       if (txnId && (form.docs || []).length) {

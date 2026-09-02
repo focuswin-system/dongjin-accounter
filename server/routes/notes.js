@@ -4,6 +4,7 @@ const { kstToday } = require('../db')
 const { closedPeriodError } = require('../lib/closing')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError, amountError, SETTLED_INCOME, SETTLED_EXPENSE } = require('../lib/ledger')
+const { futureDateError } = require('../db')
 const { moneyOf: intOf } = require('../lib/money')
 const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
 
@@ -37,6 +38,18 @@ const ACCT = {
   receivable: '1205',   // 받을어음 (자산·당좌자산)
   payable:    '2102',   // 지급어음 (부채·유동부채)
 }
+
+/* 외상 계정 — 부도가 나면 어음은 없어지고 이 채권·채무가 되살아난다(lib/voucher.js 와 같은 값) */
+const ACCT_TRADE = {
+  receivable: '1204',   // 외상매출금
+  payable:    '2101',   // 외상매입금
+}
+
+/** 부도일 — 안 주면 **오늘**이다.
+ *  만기일로 고정했더니, 3월 만기 어음이 안 들어와 4월에 부도 처리하려는데 3월이
+ *  마감돼 있으면 **부도 자체가 막혔다.** 부도는 알게 된 날 적는 것이 실제에 가깝다. */
+const dishonorDate = (given, note) =>
+  /^\d{4}-\d{2}-\d{2}$/.test(String(given || '')) ? given : kstToday()
 
 const KINDS = new Set(['receivable', 'payable'])
 const isRecv = (k) => k === 'receivable'
@@ -208,7 +221,10 @@ router.post('/', async (req, res, next) => {
       await conn.execute(
         `INSERT INTO notes (id, kind, note_no, vendor_id, amount, issued_on, due_on, status, invoice_id, match_id, origin_txn_id, origin_acct_code, memo)
          VALUES (?,?,?,?,?,?,?, 'held', ?,?,?,?,?)`,
-        [id, kind, String(note_no || '').trim(), vendor_id, amt, issued_on, due_on,
+        /* ⚠ 번호가 비면 **NULL** 로 넣는다. 빈 문자열은 값이라 UNIQUE(kind,vendor_id,note_no)에
+             걸려, 같은 거래처에 번호 없는 어음을 두 장 넣으면 두 번째가 500 이 난다.
+             (거래 폼 경로에서는 거래만 저장되고 어음이 빠져 유령 거래가 된다.) */
+        [id, kind, String(note_no || '').trim() || null, vendor_id, amt, issued_on, due_on,
          invoice_id || null, matchId, origin_txn_id || null, originAcct, String(memo || '').trim()])
 
       await conn.commit()
@@ -228,6 +244,11 @@ router.post('/:id/settle', async (req, res, next) => {
     const { account_id, date, memo } = req.body
     const on = date || kstToday()
     { const e = dateError(on, '결제일'); if (e) return res.status(400).json({ error: e }) }
+    /* ⚠ 아직 오지 않은 날로 결제할 수 없다. 만기가 다음 달인 어음을 미리 처리하면서
+         날짜를 그 만기일로 적으면 **안 들어온 돈이 완료 거래로 잔액에 잡힌다** —
+         이 기능이 막으려던 바로 그 사고다. 거래 등록 폼은 같은 일을 이미 막고 있고,
+         lib/fundStatus.js 는 "거래는 미래 날짜로 등록할 수 없다"를 전제로 계산한다. */
+    { const e = futureDateError(on); if (e) return res.status(400).json({ error: e }) }
     { const e = await closedPeriodError(req.db, on); if (e) return res.status(409).json({ error: e }) }
 
     const conn = await req.db.getConnection()
@@ -259,6 +280,15 @@ router.post('/:id/settle', async (req, res, next) => {
        *   있는 거래를 **완료로 바꾸고 계좌를 채워** 그때 비로소 잔액이 움직이게 한다. */
       let txnId = n.origin_txn_id || null
       if (txnId) {
+        /* ⚠ 이 거래는 결제일로 **옮겨진다**. 떠나는 달도 마감 검사를 해야 한다 —
+             부가세 집계(routes/tax.js)는 t.date 로 분기를 가르고 상태를 안 보므로,
+             3월 발행 어음을 5월에 결제하면 이미 신고한 1기 매입세액이 조용히 2기로 간다.
+             (PUT 이 '옮기는 쪽·떠나는 쪽 둘 다 본다'고 못 박은 규칙이 여기만 빠져 있었다.) */
+        const [[ot0]] = await conn.execute('SELECT date FROM transactions WHERE id = ?', [txnId])
+        if (ot0) {
+          const e = await closedPeriodError(conn, ot0.date)
+          if (e) { await rollbackQuietly(conn); return res.status(409).json({ error: e }) }
+        }
         const [r] = await conn.execute(
           `UPDATE transactions SET status = ?, account_id = ?, date = ?, account_code = ? WHERE id = ?`,
           [status, account_id || null, on, recv ? ACCT.receivable : ACCT.payable, txnId])
@@ -312,7 +342,7 @@ router.post('/:id/dishonor', async (req, res, next) => {
       /* 마감된 달에 부도를 찍을 수 없다 — 부도는 그 달의 채권을 되살리는 일이다
          (POST·settle·unsettle 에는 있는데 여기만 빠져 있었다). */
       {
-        const on = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.on || '')) ? req.body.on : (n.due_on || kstToday())
+        const on = dishonorDate(req.body?.on, n)
         const e = await closedPeriodError(req.db, on)
         if (e) { await rollbackQuietly(conn); return res.status(409).json({ error: e }) }
       }
@@ -324,7 +354,17 @@ router.post('/:id/dishonor', async (req, res, next) => {
       /* ⚠ 부도일은 **컬럼에** 남긴다. 메모에만 적으면 부도 전표(수취 분개의 반대)를
            세울 날짜가 없어, 부도난 어음이 받을어음 잔액에 영원히 남는다.
            날짜를 따로 주지 않으면 만기일로 본다 — 부도는 만기에 판명된다. */
-      const on = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.on || '')) ? req.body.on : (n.due_on || kstToday())
+      const on = dishonorDate(req.body?.on, n)
+      /* ⚠ 부도난 어음의 원거래도 **어음 계정을 떠나야 한다.**
+           안 그러면 나중에 그 돈을 현금으로 갚을 때(드문 일이 아니다) 거래가 원래 비목
+           그대로 완료되어 **비용이 두 번** 잡힌다 — 부도 전표(차 2102 / 대 2101)가 이미
+           채무로 옮겨 놓았기 때문이다. 결제가 2102 로 바꾸는 것과 같은 규칙으로,
+           부도는 외상 계정으로 바꾼다. 날짜는 건드리지 않는다(발생일 그대로). */
+      if (n.origin_txn_id) {
+        await conn.execute(
+          `UPDATE transactions SET account_code = ? WHERE id = ?`,
+          [isRecv(n.kind) ? ACCT_TRADE.receivable : ACCT_TRADE.payable, n.origin_txn_id])
+      }
       await conn.execute(
         `UPDATE notes SET status = 'dishonored', match_id = NULL, dishonored_on = ?, memo = ? WHERE id = ?`,
         [on, `${n.memo || ''}${n.memo ? ' · ' : ''}부도 ${on}`.trim(), n.id])
@@ -355,9 +395,13 @@ router.post('/:id/unsettle', async (req, res, next) => {
       /* ⚠ 거래 등록 폼에서 온 어음이면 그 거래는 **지우지 않는다** — 그건 어음을 준
            사실 자체를 적은 것이라, 지우면 비용까지 사라진다. 예정 상태로만 되돌린다. */
       if (n.txn_id && n.txn_id === n.origin_txn_id) {
+        /* ⚠ 날짜·계정과목까지 **함께 되돌린다.** 결제가 그 둘을 결제일·어음계정으로
+             바꿔 놓았기 때문이다. 상태만 되돌리면 그 거래는 계정과목이 '지급어음',
+             날짜가 결제일인 채로 남고, 어음을 지우는 순간 원래 비목이 복구 불가가 된다.
+             (스냅샷은 등록 때 굳혀 둔 origin_acct_code 다.) */
         await conn.execute(
-          `UPDATE transactions SET status = ?, account_id = NULL WHERE id = ?`,
-          [isRecv(n.kind) ? '입금 예정' : '지급 예정', n.txn_id])
+          `UPDATE transactions SET status = ?, account_id = NULL, date = ?, account_code = ? WHERE id = ?`,
+          [isRecv(n.kind) ? '입금 예정' : '지급 예정', n.issued_on, n.origin_acct_code || null, n.txn_id])
       } else if (n.txn_id) {
         await conn.execute('DELETE FROM transactions WHERE id = ?', [n.txn_id])
       }
@@ -380,7 +424,7 @@ router.put('/:id', async (req, res, next) => {
     { const e = amountError(amt); if (e) return res.status(400).json({ error: e }) }
 
     const [[n]] = await req.db.execute(
-      'SELECT kind, status, match_id, issued_on FROM notes WHERE id = ?', [req.params.id])
+      'SELECT kind, status, match_id, issued_on, origin_txn_id FROM notes WHERE id = ?', [req.params.id])
     if (!n) return res.status(404).json({ error: '없는 어음이에요' })
     /* ⚠ 금액은 청구서 정산액과 묶여 있다 — 결제·정산이 걸린 뒤에는 못 바꾼다.
          바꾸면 청구서의 미수금이 어음 금액과 어긋난다. */
@@ -406,9 +450,22 @@ router.put('/:id', async (req, res, next) => {
         return res.status(409).json({ error: '청구서에 붙은 어음은 금액을 바꿀 수 없어요. 지우고 다시 등록해주세요.' })
       }
     }
+    /* ⚠ 거래에서 온 어음도 마찬가지다. 여기서 notes.amount 만 고치면 어음 대장·자금예측·
+         전표는 새 금액인데 **통장에서 나가는 건 옛 금액**이 된다(만기 결제는 거래의
+         amount 를 건드리지 않는다). 어느 화면에도 경고가 안 뜨는 종류라 아예 막는다. */
+    if (n.origin_txn_id) {
+      const [[ot]] = await req.db.execute(
+        'SELECT amount FROM transactions WHERE id = ?', [n.origin_txn_id])
+      if (ot && Number(ot.amount) !== amt) {
+        return res.status(409).json({
+          error: '거래에서 적은 어음은 금액을 여기서 바꿀 수 없어요. '
+               + '그 거래를 고치면 어음도 함께 맞춰집니다 — 어음을 지우고 거래를 고친 뒤 다시 등록해주세요.',
+        })
+      }
+    }
     await req.db.execute(
       `UPDATE notes SET note_no=?, vendor_id=?, amount=?, issued_on=?, due_on=?, memo=? WHERE id=?`,
-      [String(note_no || '').trim(), vendor_id || null, amt, issued_on, due_on,
+      [String(note_no || '').trim() || null, vendor_id || null, amt, issued_on, due_on,
        String(memo || '').trim(), req.params.id])
     res.json({ ok: true })
   } catch (e) { next(e) }
