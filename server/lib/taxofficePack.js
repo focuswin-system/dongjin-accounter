@@ -20,6 +20,7 @@
 
 const { SETTLED_INCOME, SETTLED_EXPENSE } = require('./ledger')
 const { monthRange } = require('./period')
+const { pnlOnly, pnlParams } = require('./pnl')
 
 /* 항목 정의. label 은 화면·엑셀 시트 이름으로 그대로 쓴다(둘이 갈리면 대조가 안 된다).
  * required=true 인 항목이 0건이면 화면이 '확인 필요'로 표시한다 —
@@ -80,11 +81,16 @@ async function taxofficePack(db, month, closingDay = 0) {
 
   /* 5. 급여대장 — 월분(payroll.month)은 **달력월 문자열**이라 회계 기간과 축이 다르다.
         여기서만 달력월로 세는 게 맞다: 급여는 '7월분'이라는 이름으로 신고되지
-        '6/26~7/25분'으로 신고되지 않는다. */
+        '6/26~7/25분'으로 신고되지 않는다.
+
+     ⚠ `seq = 0` — **근로소득(급여대장)만**이다. seq >= 1 은 용역·일용 회차라
+        원천세 신고 구분이 다르다(routes/payroll.js 의 scope=labor 와 같은 기준).
+        여태 조건이 없어 둘이 섞였는데, 단위가 '명'이라 **용역 한 사람이 그달에
+        세 번 받았으면 3명으로 세어졌다.** 세무사에게 넘기는 인원이 부풀려진다. */
   const [payroll] = await db.execute(`
     SELECT e.name, e.role, e.department, p.month, p.base_salary, p.allowance, p.deduction, p.net_salary, p.status
       FROM payroll p LEFT JOIN employees e ON e.id = p.employee_id
-     WHERE p.month = ?
+     WHERE p.month = ? AND p.seq = 0
      ORDER BY e.name`, [month])
 
   /* 6. 원천징수 대상 — 급여 중 공제가 있는 건. 원천징수이행상황신고서의 인원·금액 근거다.
@@ -93,7 +99,15 @@ async function taxofficePack(db, month, closingDay = 0) {
 
   /* 7. 증빙 누락 — 완료된 지출 중 증빙이 없는 것. 세무사에게 넘기기 전에 채워야 할 목록이다.
         급여·이체처럼 원래 증빙이 없는 건은 뺀다 — 안 빼면 매달 수십 건이 '누락'으로 떠서
-        정작 진짜 누락이 묻힌다. */
+        정작 진짜 누락이 묻힌다.
+
+     ⚠ **비용인 것만** 센다(pnlOnly). 여태 payroll·loan·savings 만 뺐는데,
+        내부이체와 카드대금 지급이 그대로 남아 있었다. 둘은 지출 줄로 적히지만
+        (통장에서 돈이 나가니까) **번 것도 쓴 것도 아니다** — 내 통장에서 내 카드로
+        옮긴 것뿐이라 애초에 증빙이 있을 수 없다. 카드 결제일마다 한 건씩 쌓이니
+        매달 수십 건이 '누락'으로 떠서 정작 채워야 할 것이 묻혔다.
+        판정은 계정과목 대분류가 한다 — 이체 두 줄은 상대 계좌의 계정과목(자산·부채)을
+        달고 있어 pnlOnly 에서 저절로 빠진다(routes/transactions.js 이체 경로). */
   const [noEvidence] = await db.execute(`
     SELECT t.date, t.category, t.amount, t.memo, v.name AS vendor_name
       FROM transactions t LEFT JOIN vendors v ON v.id = t.vendor_id
@@ -103,7 +117,8 @@ async function taxofficePack(db, month, closingDay = 0) {
        AND (t.evid_type IS NULL OR t.evid_type = '')
        AND t.payroll_id IS NULL
        AND t.loan_id IS NULL AND t.savings_id IS NULL
-     ORDER BY t.date`, [SETTLED_EXPENSE, from, to])
+       AND ${pnlOnly('t')}
+     ORDER BY t.date`, [SETTLED_EXPENSE, from, to, ...pnlParams()])
 
   const data = { txns, resolutions, salesTax, purchaseTax, payroll, withholding, noEvidence }
 
