@@ -4,7 +4,7 @@ import { Icon } from '../ui'
 // 그 안의 반복되는 머리(제목+부제+닫기)·발(취소/저장)만 여기서 뽑는다.
 // 예전엔 30여 개 드로어가 아래 마크업을 각자 복붙했다:
 //   <div className="drawer-head"><div className="fw-700" style={{fontSize:16}}>제목</div>
-//     <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close/></button></div>
+//     <button className="icon-btn ml-auto" title="닫기" onClick={onClose}><Icon.Close/></button></div>
 //   <div className="drawer-foot"><button className="btn">취소</button>
 //     <button className="btn primary ml-auto"><Icon.Check/> 저장</button></div>
 
@@ -20,7 +20,7 @@ export const DrawerHead = ({ title, sub, onClose, right }) => (
       {sub && <div className="text-xs text-muted">{sub}</div>}
     </div>
     {right}
-    <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
+    <button className="icon-btn ml-auto" title="닫기" onClick={onClose}><Icon.Close size={16}/></button>
   </div>
 )
 

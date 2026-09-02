@@ -337,7 +337,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
               }}>
               삭제
             </button>
-            <button className="icon-btn" onClick={onClose}><Icon.Close size={16}/></button>
+            <button className="icon-btn" title="닫기" onClick={onClose}><Icon.Close size={16}/></button>
           </div>
         </div>
 
@@ -724,7 +724,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                 <button className="btn primary" style={{ fontSize: 12 }} onClick={() => window.print()}>
                   <Icon.Print size={13}/> 인쇄
                 </button>
-                <button className="icon-btn" onClick={() => setStmtOpen(false)}><Icon.Close size={16}/></button>
+                <button className="icon-btn" title="닫기" onClick={() => setStmtOpen(false)}><Icon.Close size={16}/></button>
               </div>
             </div>
             <div className="drawer-body" style={{ background: 'var(--surface-2)' }}>

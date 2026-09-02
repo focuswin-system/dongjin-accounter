@@ -908,7 +908,7 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
                 <td className="num" style={{ textAlign: 'right' }}>{edit ? <MoneyInput className="cell-input num" style={{ textAlign: 'right' }} placeholder="" value={it.price || ''} onChange={raw => setItemNum(i, 'price', raw)}/> : fmtNum(it.price || 0)}</td>
                 <td className="num fw-600" style={{ textAlign: 'right' }}>{fmtNum(it.amount || 0)}</td>
                 <td>{edit ? <input className="cell-input" value={it.note || ''} onChange={e => setItem(i, 'note', e.target.value)}/> : it.note}</td>
-                {edit && <td className="no-print" style={{ textAlign: 'center' }}><button className="icon-btn" onClick={() => removeItem(i)}><Icon.Close size={13}/></button></td>}
+                {edit && <td className="no-print" style={{ textAlign: 'center' }}><button className="icon-btn" title="이 줄 지우기" onClick={() => removeItem(i)}><Icon.Close size={13}/></button></td>}
               </tr>
             ))}
             {/* 빈 줄 채우기(양식 느낌) — 화면 편집 중엔 생략 */}

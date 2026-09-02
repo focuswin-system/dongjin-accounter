@@ -471,7 +471,7 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
             <div className="fw-700" style={{ fontSize: 16, marginTop: 6 }}>{txn.vendor}</div>
             <div className="text-xs text-muted">{txn.scope} · {txn.category} · {txn.date}</div>
           </div>
-          <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
+          <button className="icon-btn ml-auto" title="닫기" onClick={onClose}><Icon.Close size={16}/></button>
         </div>
 
         <div style={{ borderBottom: "1px solid var(--line)", padding: "0 22px" }}>
@@ -608,7 +608,7 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
                 <span className="fw-700">지급결의서 {resolution.doc_no}</span>
                 <div className="ml-auto row gap-6">
                   <button className="btn" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
-                  <button className="icon-btn" onClick={() => setResView(false)}><Icon.Close size={16}/></button>
+                  <button className="icon-btn" title="닫기" onClick={() => setResView(false)}><Icon.Close size={16}/></button>
                 </div>
               </div>
               <div style={{ padding: 20, overflow: "auto" }}>

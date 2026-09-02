@@ -521,7 +521,7 @@ const RefFileField = ({ url, name, uploading, onUpload, onRemove }) => {
     <div className="row gap-10" style={{ padding: '10px 14px', border: '1px solid var(--line)', borderRadius: 10, background: 'var(--surface-2)' }}>
       <Icon.Receipt size={16} style={{ color: 'var(--brand)', flexShrink: 0 }}/>
       <span className="text-sm fw-600" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name || url}</span>
-      <button type="button" className="icon-btn" onClick={onRemove}><Icon.Close size={14}/></button>
+      <button type="button" className="icon-btn" title="지우기" onClick={onRemove}><Icon.Close size={14}/></button>
     </div>
   )
   return (
@@ -3530,7 +3530,7 @@ const ApprovalPanel = ({ embedded = false }) => {
                         placeholder="직위 (선택/직접입력)"
                         onAddNew={(q) => setStep(i, 'position', q)} addNewLabel="이 직위로 입력"/>
                     </div>
-                    <button className="icon-btn" onClick={() => removeStep(i)}><Icon.Close size={13}/></button>
+                    <button className="icon-btn" title="이 결재 단계 지우기" onClick={() => removeStep(i)}><Icon.Close size={13}/></button>
                   </div>
                 ))}
               </div>

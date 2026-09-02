@@ -59,7 +59,7 @@ const PayItemsEditor = ({ items, setItems, masters }) => {
           <div className="num text-sm text-muted" style={{ width: 88, textAlign: 'right' }}>
             {kind === 'deduct' ? '-' : ''}{fmtNum(calc[idx]?.amount || 0)}
           </div>
-          <button className="icon-btn" style={{ width: 28, height: 28 }} onClick={() => removeItem(idx)}><Icon.Close size={13}/></button>
+          <button className="icon-btn" title="이 줄 지우기" style={{ width: 28, height: 28 }} onClick={() => removeItem(idx)}><Icon.Close size={13}/></button>
         </div>
       ))}
       <button className="btn ghost sm" style={{ alignSelf: 'flex-start' }} onClick={() => addItem(kind)}><Icon.Plus size={12}/> {kind === 'earn' ? '지급 항목 추가' : '공제 항목 추가'}</button>
@@ -126,7 +126,7 @@ const RateItemsEditor = ({ items, setItems, itemMaster, reloadMaster, defaultUni
                   options={itemMaster.map(it => ({ value: it.id, label: it.name, sub: [it.spec, it.unit, it.amount ? fmtNum(it.amount) + '원' : ''].filter(Boolean).join(' · ') }))}
                   addNewLabel="새 업무·품목 등록" placeholder="업무 선택·검색"/>
               </div>
-              <button type="button" className="icon-btn" onClick={() => del(i)}><Icon.Close size={14}/></button>
+              <button type="button" className="icon-btn" title="이 줄 지우기" onClick={() => del(i)}><Icon.Close size={14}/></button>
             </div>
             <div className="row gap-6">
               <input className="input" style={{ flex: 1, minWidth: 0 }} value={r.spec || ''} placeholder="비고"
@@ -978,7 +978,7 @@ const ServicePayDrawer = ({ contract, onClose, onSaved }) => {
                 <input className="input num fw-700" style={{ paddingRight: 26 }} value={fmtNum(asNum(d.value))} onChange={e => updDed(i, { value: asNum(e.target.value) })}/>
                 <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 12 }}>원</span>
               </div>
-              <button className="icon-btn" onClick={() => setDeductions(deductions.filter((_, idx) => idx !== i))}><Icon.Close size={13}/></button>
+              <button className="icon-btn" title="이 공제 항목 지우기" onClick={() => setDeductions(deductions.filter((_, idx) => idx !== i))}><Icon.Close size={13}/></button>
             </div>
           ))}
           <button className="btn ghost sm" style={{ alignSelf: 'flex-start' }} onClick={() => setDeductions([...deductions, { label: '', value: 0 }])}><Icon.Plus size={12}/> 공제 추가</button>

@@ -646,7 +646,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
             </span>
             <span className="fw-700" style={{ fontSize: 15 }}>{editTxn ? "거래 수정" : "거래 등록"}</span>
           </div>
-          <button className="icon-btn ml-auto" onClick={onClose}><Icon.Close size={16}/></button>
+          <button className="icon-btn ml-auto" title="닫기" onClick={onClose}><Icon.Close size={16}/></button>
         </div>
 
         <div className="drawer-body" style={{ paddingTop: 8 }}>
@@ -1111,7 +1111,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                         <Icon.Receipt size={15} style={{ color: 'var(--brand)', flexShrink: 0 }}/>
                         <span className="text-sm fw-600" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(form.evid_url).split('/').pop() || '기존 증빙'}</span>
                         <a className="btn ghost sm" href={form.evid_url} target="_blank" rel="noreferrer"><Icon.Eye size={13}/></a>
-                        <button type="button" className="icon-btn" onClick={() => setForm(f => ({ ...f, evidFile: null, evid_url: '', evid_type: '' }))}><Icon.Close size={14}/></button>
+                        <button type="button" className="icon-btn" title="증빙 지우기" onClick={() => setForm(f => ({ ...f, evidFile: null, evid_url: '', evid_type: '' }))}><Icon.Close size={14}/></button>
                       </div>
                     )}
                     <FileAttach

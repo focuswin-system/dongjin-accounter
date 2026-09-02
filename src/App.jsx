@@ -1094,7 +1094,7 @@ function FaqPanel({ open, onClose, route, go }) {
         {/* Header */}
         <div style={{ padding:"15px 18px", borderBottom:"1px solid var(--line)", flexShrink:0, display:"flex", gap:10, alignItems:"center" }}>
           {sel
-            ? <button className="icon-btn" onClick={() => setSelId(null)} style={{ marginLeft:-4 }}><Icon.Left size={16}/></button>
+            ? <button className="icon-btn" title="뒤로" onClick={() => setSelId(null)} style={{ marginLeft:-4 }}><Icon.Left size={16}/></button>
             : <div style={{ width:28, height:28, borderRadius:8, background:"var(--brand-soft)", color:"var(--brand)", display:"grid", placeItems:"center", flexShrink:0 }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="9"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
@@ -1103,7 +1103,7 @@ function FaqPanel({ open, onClose, route, go }) {
               </div>
           }
           <span className="fw-700" style={{ fontSize:14, flex:1 }}>자주 묻는 질문</span>
-          <button className="icon-btn" onClick={onClose}><Icon.Close size={16}/></button>
+          <button className="icon-btn" title="닫기" onClick={onClose}><Icon.Close size={16}/></button>
         </div>
 
         {sel ? (
@@ -1127,7 +1127,7 @@ function FaqPanel({ open, onClose, route, go }) {
                 <input ref={inputRef} value={search} onChange={e => { setSearch(e.target.value); setCat(null); }}
                   placeholder="궁금한 것을 검색해보세요"
                   style={{ flex:1, border:0, outline:0, fontSize:13, background:"transparent", fontFamily:"inherit" }}/>
-                {search && <button className="icon-btn" style={{ width:18, height:18 }} onClick={() => setSearch("")}><Icon.Close size={12}/></button>}
+                {search && <button className="icon-btn" title="검색어 지우기" style={{ width:18, height:18 }} onClick={() => setSearch("")}><Icon.Close size={12}/></button>}
               </div>
             </div>
 

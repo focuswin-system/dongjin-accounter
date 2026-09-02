@@ -1698,7 +1698,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                   <Icon.File size={15} style={{ color: 'var(--brand)', flexShrink: 0 }}/>
                   <span className="text-sm fw-600" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{editForm.file_name || '기존 계약서'}</span>
                   <a className="btn ghost sm" href={editForm.file_url} target="_blank" rel="noreferrer"><Icon.Eye size={13}/></a>
-                  <button type="button" className="icon-btn" onClick={() => setEditForm(f => ({ ...f, file_url: '', file_name: '' }))}><Icon.Close size={14}/></button>
+                  <button type="button" className="icon-btn" title="첨부 지우기" onClick={() => setEditForm(f => ({ ...f, file_url: '', file_name: '' }))}><Icon.Close size={14}/></button>
                 </div>
               )}
               <FileAttach
