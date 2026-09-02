@@ -10,6 +10,7 @@ import { computeItems, shiftMonth, monthLabel } from './HR'
 import { api } from '../lib/api'
 import { isCountable, notCountable } from '../lib/txnScope'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
+import { DataTable } from '../lib/components/DataTable'
 import { PageHeader } from '../lib/components/PageHeader'
 import { TileBoard } from '../lib/components/TileBoard'
 import { usePerms } from '../lib/perms'
@@ -1912,65 +1913,59 @@ const ReportContract = ({ toast }) => {
       </KpiRow>
 
       <div className="card" style={{ overflow: "hidden" }}>
-        <div className="table-scroll" style={{ overflowX: 'auto' }}>
-          <table className="table" style={{ minWidth: 900 }}>
-            <thead>
-              <tr>
-                <th>주문</th>
-                <th>거래처</th>
-                <th className="num-right">수주금액</th>
-                <th className="num-right">청구액</th>
-                <th className="num-right">받은 매출</th>
-                <th className="num-right">투입 원가</th>
-                <th className="num-right">손익</th>
-                <th style={{ width: 130 }}>이익률</th>
-                <th className="num-right">미수금</th>
-                <th>상태</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sales.map(r => (
-                <tr key={r.id}>
-                  <td className="fw-700">{r.name}</td>
-                  <td className="text-sm text-muted">{r.vendor_name || ''}</td>
-                  <td className="num-cell num-right">{fmtNum(Number(r.amount || 0))}</td>
-                  <td className="num-cell num-right text-muted">{fmtNum(Number(r.billed || 0))}</td>
-                  <td className="num-cell num-right">{fmtNum(r.revenue)}</td>
-                  <td className="num-cell num-right">{fmtNum(r.cost)}</td>
-                  <td className="num-cell num-right fw-700"
-                    style={{ color: r.profit < 0 ? "var(--neg)" : r.profit > 0 ? "var(--pos)" : undefined }}>
-                    {r.profit < 0 ? '−' : r.profit > 0 ? '+' : ''}{fmtNum(Math.abs(r.profit))}
-                  </td>
-                  <td>
-                    {/* 매출이 아직 없는 주문은 이익률 칸을 비운다 — 0%로 적으면 '본전'으로 읽힌다 */}
-                    {r.margin == null
-                      ? <span className="text-sm text-muted2">—</span>
-                      : (
-                        <div className="row gap-6" style={{ alignItems: "center" }}>
-                          <span className="num text-sm fw-600"
-                            style={{ color: r.margin < 0 ? "var(--neg)" : "var(--pos)", width: 44 }}>
-                            {r.margin.toFixed(0)}%
-                          </span>
-                          {/* 손실이면 막대를 그리지 않는다 — 길이가 0이라 빈 막대가 되고,
-                              그건 '적자'가 아니라 '데이터 없음'으로 읽힌다. 붉은 숫자가 이미 말한다. */}
-                          {r.margin > 0 && <RBar pct={Math.min(100, r.margin)} tone="pos"/>}
-                        </div>
-                      )}
-                  </td>
-                  <td className="num-cell num-right text-sm">
-                    {Number(r.ar_remain || 0) > 0 ? fmtNum(Number(r.ar_remain)) : ''}
-                  </td>
-                  <td><StatusBadge status={r.status}/></td>
-                </tr>
-              ))}
-              {sales.length === 0 && (
-                <tr><td colSpan={10} className="text-muted text-sm" style={{ textAlign: "center", padding: 24 }}>
-                  매출 주문이 없어요.
-                </td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        {/* 공용 표 — 손수 짠 <table> 을 걷어냈다. 머리글 클릭 정렬이 생기고
+            빈 상태·가로 스크롤이 다른 화면과 같은 규칙을 따른다.
+            (숫자 칸은 sortValue 로 **문자열이 아니라 수로** 정렬한다 —
+             그냥 두면 1,000,000 이 900,000 보다 앞에 선다.) */}
+        <DataTable
+          rows={sales}
+          rowKey={r => r.id}
+          empty="매출 주문이 없어요."
+          columns={[
+            { key: 'name', header: '주문', sortable: true, render: r => <span className="fw-700">{r.name}</span> },
+            { key: 'vendor_name', header: '거래처', sortable: true,
+              render: r => <span className="text-sm text-muted">{r.vendor_name || ''}</span> },
+            { key: 'amount', header: '수주금액', align: 'right', sortable: true, sortValue: r => Number(r.amount || 0),
+              render: r => <span className="num-cell">{fmtNum(Number(r.amount || 0))}</span> },
+            { key: 'billed', header: '청구액', align: 'right', sortable: true, sortValue: r => Number(r.billed || 0),
+              render: r => <span className="num-cell text-muted">{fmtNum(Number(r.billed || 0))}</span> },
+            { key: 'revenue', header: '받은 매출', align: 'right', sortable: true, sortValue: r => Number(r.revenue || 0),
+              render: r => <span className="num-cell">{fmtNum(r.revenue)}</span> },
+            { key: 'cost', header: '투입 원가', align: 'right', sortable: true, sortValue: r => Number(r.cost || 0),
+              render: r => <span className="num-cell">{fmtNum(r.cost)}</span> },
+            { key: 'profit', header: '손익', align: 'right', sortable: true, sortValue: r => Number(r.profit || 0),
+              render: r => (
+                <span className="num-cell fw-700"
+                  style={{ color: r.profit < 0 ? 'var(--neg)' : r.profit > 0 ? 'var(--pos)' : undefined }}>
+                  {r.profit < 0 ? '\u2212' : r.profit > 0 ? '+' : ''}{fmtNum(Math.abs(r.profit))}
+                </span>
+              ) },
+            { key: 'margin', header: '이익률', sortable: true, sortValue: r => (r.margin == null ? null : r.margin),
+              render: r => (
+                /* 매출이 아직 없는 주문은 이익률 칸을 비운다 — 0%로 적으면 '본전'으로 읽힌다 */
+                r.margin == null
+                  ? <span className="text-sm text-muted2">\u2014</span>
+                  : (
+                    <div className="row gap-6" style={{ alignItems: 'center' }}>
+                      <span className="num text-sm fw-600"
+                        style={{ color: r.margin < 0 ? 'var(--neg)' : 'var(--pos)', width: 44 }}>
+                        {r.margin.toFixed(0)}%
+                      </span>
+                      {/* 손실이면 막대를 그리지 않는다 — 길이가 0이라 빈 막대가 되고,
+                          그건 '적자'가 아니라 '데이터 없음'으로 읽힌다. 붉은 숫자가 이미 말한다. */}
+                      {r.margin > 0 && <RBar pct={Math.min(100, r.margin)} tone="pos"/>}
+                    </div>
+                  )
+              ) },
+            { key: 'ar_remain', header: '미수금', align: 'right', sortable: true, sortValue: r => Number(r.ar_remain || 0),
+              render: r => (
+                <span className="num-cell text-sm">
+                  {Number(r.ar_remain || 0) > 0 ? fmtNum(Number(r.ar_remain)) : ''}
+                </span>
+              ) },
+            { key: 'status', header: '상태', render: r => <StatusBadge status={r.status}/> },
+          ]}
+        />
       </div>
 
       <div className="text-xs text-muted" style={{ marginTop: 12, lineHeight: 1.7 }}>
