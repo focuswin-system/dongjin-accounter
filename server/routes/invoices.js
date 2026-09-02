@@ -73,6 +73,65 @@ async function attachMatches(db, invoice) {
   return { ...invoice, matches, docs, lines, paidAmount: paid, remainAmount: Number(invoice.total_amount) - paid }
 }
 
+/**
+ * 목록용 — 여러 청구서의 정산·첨부·품목을 **한 번에** 읽는다.
+ *
+ * attachMatches 는 청구서 **한 건마다 3쿼리**를 돈다. 목록이 그걸 행마다 부르면
+ * 500장짜리 목록 한 번에 1,500 쿼리가 나간다 — 커넥션 풀이 그 시간 동안 묶이고,
+ * 청구서가 쌓일수록 목록이 선형으로 느려진다.
+ * 여기서는 IN 절로 세 번만 읽고 자바스크립트에서 묶는다(500장이든 3쿼리).
+ *
+ * ⚠ 결과 모양은 attachMatches 와 **한 글자도 다르면 안 된다** — 화면이 두 경로를
+ *   구분하지 않는다. 그래서 필드 목록과 정렬을 같은 것으로 맞춘다.
+ */
+const CHUNK = 500
+
+async function attachMatchesBulk(db, invoices) {
+  if (!invoices.length) return []
+  const byId = (rows, key = 'invoice_id') => {
+    const m = new Map()
+    for (const r of rows) {
+      if (!m.has(r[key])) m.set(r[key], [])
+      m.get(r[key]).push(r)
+    }
+    return m
+  }
+  const ids = invoices.map(i => i.id)
+  const all = { matches: [], docs: [], lines: [] }
+  /* IN 절이 지나치게 길어지면 파서가 느려지고 max_allowed_packet 에도 걸린다.
+     끊어서 읽되, 끊는 단위는 화면이 모르는 구현 사정이다. */
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const part = ids.slice(i, i + CHUNK)
+    const ph = part.map(() => '?').join(',')
+    /* notes 표가 아직 없는 DB(설치 직후)에서도 목록은 열려야 한다 — 단건 경로와 같은 방어 */
+    const [ms] = await db.execute(
+      `SELECT m.*, n.id AS note_id, n.note_no, n.due_on AS note_due_on,
+              n.status AS note_status, n.kind AS note_kind, n.issued_on AS note_issued_on
+         FROM invoice_matches m
+         LEFT JOIN notes n ON n.match_id = m.id
+        WHERE m.invoice_id IN (${ph})`, part).catch(
+      async () => db.execute(`SELECT * FROM invoice_matches WHERE invoice_id IN (${ph})`, part))
+    const [ds] = await db.execute(
+      `SELECT id, invoice_id, url, name, doc_type, size, created_at
+         FROM invoice_docs WHERE invoice_id IN (${ph}) ORDER BY created_at`, part)
+    const [ls] = await db.execute(
+      `SELECT id, invoice_id, item_id, name, spec, unit, qty, weight, price_basis,
+              unit_price, amount, vat, note, delivery_date, sort_order, created_at
+         FROM invoice_lines WHERE invoice_id IN (${ph}) ORDER BY sort_order, created_at`, part)
+    all.matches.push(...ms); all.docs.push(...ds); all.lines.push(...ls)
+  }
+  const M = byId(all.matches), D = byId(all.docs), L = byId(all.lines)
+  return invoices.map(inv => {
+    const matches = M.get(inv.id) || []
+    /* 단건 경로가 안 내려보내는 열은 여기서도 뺀다 — 목록만 필드가 더 오면
+       "어느 화면에서 열었느냐"에 따라 모양이 달라진다. */
+    const docs = (D.get(inv.id) || []).map(({ invoice_id, ...r }) => r)
+    const lines = (L.get(inv.id) || []).map(({ invoice_id, sort_order, created_at, ...r }) => r)
+    const paid = matches.reduce((s, m) => s + Number(m.amount), 0)
+    return { ...inv, matches, docs, lines, paidAmount: paid, remainAmount: Number(inv.total_amount) - paid }
+  })
+}
+
 /* 기간을 **어느 날짜로 걸를 것인가.**
  *
  * 여태 발행일 하나로 못 박혀 있었다. 그런데 회사마다 업무의 축이 다르다 —
@@ -137,7 +196,7 @@ router.get('/', async (req, res, next) => {
       ? ' ORDER BY delivery_from DESC, i.issued_at DESC'
       : ` ORDER BY ${DATE_AXES[axis]} DESC`
     const [rows] = await req.db.execute(sql, params)
-    res.json(await Promise.all(rows.map(r => attachMatches(req.db, r))))
+    res.json(await attachMatchesBulk(req.db, rows))
   } catch (e) { next(e) }
 })
 
@@ -145,7 +204,7 @@ router.get('/summary/receivables', async (req, res, next) => {
   try {
     const [rows] = await req.db.execute("SELECT * FROM invoices WHERE kind='issued'")
     const active = rows.filter(r => RECEIVABLE_STATUSES.has(r.status))
-    const withMatches = await Promise.all(active.map(r => attachMatches(req.db, r)))
+    const withMatches = await attachMatchesBulk(req.db, active)
     const today = kstToday()
     const overdueRows = withMatches.filter(r => r.remainAmount > 0 && r.due_at && r.due_at < today)
     const summary = {
@@ -162,7 +221,7 @@ router.get('/summary/receivables', async (req, res, next) => {
 router.get('/summary/payables', async (req, res, next) => {
   try {
     const [rows] = await req.db.execute("SELECT * FROM invoices WHERE kind='received'")
-    const withMatches = await Promise.all(rows.map(r => attachMatches(req.db, r)))
+    const withMatches = await attachMatchesBulk(req.db, rows)
     const pending = withMatches.filter(r => PAYABLE_STATUSES.has(r.status))
     const today = kstToday()
     const overdueRows = pending.filter(r => r.remainAmount > 0 && r.due_at && r.due_at < today)
