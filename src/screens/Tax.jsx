@@ -48,6 +48,14 @@ const FilingDrawer = ({ target, year, onClose, onSaved }) => {
 
   const save = async () => {
     if (isDone && !form.account_id) return toast.push(`${isRefund ? '환급' : '납부'} 계좌를 선택해주세요`)
+    /* ⚠ 완료인데 금액이 0이면 서버가 **그때 만든 거래를 지운다**(syncTaxTxn).
+         전에는 이 검사가 없어서, 이미 납부 완료였던 분기의 금액 칸을 지우고 저장하면
+         거래내역의 지출 1건이 사라지고 계좌 잔액이 늘어나는데 토스트는
+         "납부 처리하고 거래내역에 반영했어요"라고 말했다. 미납 KPI 에서도 빠졌다. */
+    {
+      const amt = parseInt(String(form.paid_amount).replace(/[^0-9]/g, ''), 10) || 0
+      if (isDone && amt <= 0) return toast.push(`${isRefund ? '환급' : '납부'}액을 입력해주세요`, { tone: 'warn' })
+    }
     const res = await api.saveVatFiling({
       year, quarter: target.quarter,
       status: form.status,
@@ -265,6 +273,11 @@ const OtherTaxDrawer = ({ open, editing, onClose, onSaved }) => {
   const save = async () => {
     if (!form.name.trim()) return toast.push('세목을 입력하세요')
     if (isDone && !form.account_id) return toast.push(`${isRefund ? '환급' : '납부'} 계좌를 선택해주세요`)
+    // ⚠ 위 부가세와 같은 이유 — 완료인데 금액이 0이면 서버가 그때 만든 거래를 지운다
+    {
+      const amt = parseInt(String(form.paid_amount).replace(/[^0-9]/g, ''), 10) || 0
+      if (isDone && amt <= 0) return toast.push(`${isRefund ? '환급' : '납부'}액을 입력해주세요`, { tone: 'warn' })
+    }
     const payload = {
       ...form,
       tax_amount: parseInt(String(form.tax_amount).replace(/[^0-9]/g, ''), 10) || 0,

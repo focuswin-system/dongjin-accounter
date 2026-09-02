@@ -105,6 +105,11 @@ async function savingsDetail(db, s) {
     // 지금까지 실제로 들어간 돈. 자금일보의 '묶인 자금'이 이 값을 쓴다.
     balance: paidPrincipal(s, paid),
     maturity: maturitySummary(s),
+    /* ⚠ **실제로 넣은 돈에 붙은 이자.** maturity.interest 는 "약속대로 끝까지 넣었을 때"라,
+       화면이 그 값을 만기 폼 기본값으로 쓰면 1회만 낸 적금에 12회분 이자가 들어간다.
+       서버 만기 처리(POST /:id/mature)가 이미 이 값을 기본값으로 쓰는데, 화면이 늘
+       interest 를 실어 보내 그 기본값이 한 번도 안 돌았다 — 그래서 여기서 내려준다. */
+    accrued_interest: accruedInterest(s, paid, today),
     next_payment: unpaid[0] || null,
     // 예정일이 지났는데 아직 안 낸 회차 — 자동이체가 실패했거나 잔액이 모자랐던 경우
     overdue_payments: unpaid.filter(c => c.due_date <= today),

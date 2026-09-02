@@ -48,6 +48,14 @@ async function syncTaxTxn({ existingTxnId, isDone, isRefund, amount, accountId, 
  * 라우트가 저장 직전에 부른다 — syncTaxTxn 안에서 던지면 트랜잭션 중간에 끊긴다.
  */
 function taxLedgerError({ isDone, isRefund, amount, accountId }) {
+  /* ⚠ 완료인데 금액이 0이면 **막는다.** 예전엔 여기서 그냥 통과시켰는데, 그러면
+       syncTaxTxn 이 "완료가 아니거나 금액이 0"으로 보고 **그때 만든 거래를 지운다.**
+       이미 납부 완료였던 분기의 금액을 지우고 저장하면 지출 1건이 사라지고 계좌 잔액이
+       늘어나는데, 화면은 "납부 처리하고 거래내역에 반영했어요"라고 말했다.
+       납부를 취소하려면 상태를 '대기'로 내리는 길이 따로 있다. */
+  if (isDone && !amount) {
+    return `${isRefund ? '환급' : '납부'}액을 입력해주세요. 취소하려면 상태를 대기로 바꿔주세요.`
+  }
   if (!isDone || !amount) return null
   return ledgerError({
     kind: isRefund ? 'income' : 'expense',

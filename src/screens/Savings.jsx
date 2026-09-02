@@ -641,7 +641,11 @@ const MatureDrawer = ({ target, accounts, onClose, onDone }) => {
     if (!target) return
     setDate(localToday())
     setAcct(target.account_id || '')
-    setInterest(String(target.maturity?.interest || 0))
+    /* ⚠ maturity.interest 는 "약속대로 끝까지 넣었을 때"의 이자다. 그걸 기본값으로 쓰면
+         1회만 낸 적금을 만기 처리할 때 12회분 이자가 이자수익·계좌잔액에 들어간다.
+         서버가 실제 납입분 기준으로 계산해 내려주는 accrued_interest 를 쓴다
+         (lib/savings.js 가 이 사고를 이름까지 붙여 적어 둔 그 값이다). */
+    setInterest(String(target.accrued_interest ?? target.maturity?.interest ?? 0))
   }, [target])
   if (!target) return null
   const principal = Number(target.balance || 0)
