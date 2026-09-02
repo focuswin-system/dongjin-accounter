@@ -160,6 +160,88 @@ const AUDIT_RULES = [
 
   // ── 계좌 삭제 ── 잔액이 붙어 있는 자원이다
   { m: 'DELETE', re: /^\/api\/accounts\/([^/]+)$/,                      res: 'account', action: 'delete',     target: 1 },
+
+  /* ── 문지기 확장으로 드러난 공백 (2026-09) ──────────────────────────────
+   * 감사 누락이 네 번 반복됐다(대여금 → 정기 → 어음 → 세금). 빠진 것은 늘
+   * **돈을 만들거나 지우는 POST/PATCH/PUT** 이었는데 문지기가 DELETE 만 봤다.
+   * 검사를 넓히자 39건이 한꺼번에 드러났다. 아래는 그중 **장부가 실제로 바뀌는** 것들이다.
+   * (조회·미리보기·첨부는 문지기가 알아서 뺀다.) */
+
+  // ── 세금 ── 납부·환급이 지출·입금 거래를 만들고 지운다. 규칙이 0건이었다.
+  { m: 'PUT',    re: /^\/api\/tax\/vat$/,                              res: 'tax', action: 'file_vat' },
+  { m: 'POST',   re: /^\/api\/tax\/others$/,                           res: 'tax', action: 'create' },
+  { m: 'PUT',    re: /^\/api\/tax\/others\/([^/]+)$/,                  res: 'tax', action: 'edit',   target: 1 },
+  { m: 'DELETE', re: /^\/api\/tax\/others\/([^/]+)$/,                  res: 'tax', action: 'delete', target: 1 },
+
+  // ── 거래 ── 이체는 두 줄을 만들고, 상태 뒤집기는 통장에서 돈이 나간 것으로 만든다
+  { m: 'POST',   re: /^\/api\/transactions\/transfer$/,                res: 'transaction', action: 'transfer' },
+  { m: 'PUT',    re: /^\/api\/transactions\/([^/]+)$/,                 res: 'transaction', action: 'edit',   target: 1 },
+  { m: 'PATCH',  re: /^\/api\/transactions\/([^/]+)\/status$/,         res: 'transaction', action: 'status', target: 1 },
+
+  // ── 청구서 ── 금액·상태를 바꾸면 미수금이 따라 움직인다
+  { m: 'PUT',    re: /^\/api\/invoices\/([^/]+)$/,                     res: 'invoice', action: 'edit', target: 1 },
+
+  // ── 계좌 ── 잔액 조정은 되돌릴 길이 좁다(project_undelete_gaps 참조)
+  { m: 'PUT',    re: /^\/api\/accounts\/([^/]+)$/,                     res: 'account', action: 'edit',   target: 1 },
+  { m: 'POST',   re: /^\/api\/accounts\/([^/]+)\/adjustments$/,        res: 'account', action: 'adjust', target: 1 },
+
+  /* ── 차입금·투자 ── 상환·회수는 거래 2건(원금+이자)을 만든다.
+     ⚠ `/repay$` 규칙은 있었는데 `-adhoc` 이 정규식에 안 걸려 수시 상환만 무기록이었다. */
+  { m: 'POST',   re: /^\/api\/finance\/loans$/,                              res: 'loan',       action: 'create' },
+  { m: 'PUT',    re: /^\/api\/finance\/loans\/([^/]+)$/,                     res: 'loan',       action: 'edit',        target: 1 },
+  { m: 'PATCH',  re: /^\/api\/finance\/loans\/([^/]+)\/cycles\/[^/]+$/,      res: 'loan',       action: 'edit_cycle',  target: 1 },
+  { m: 'POST',   re: /^\/api\/finance\/loans\/([^/]+)\/repay-adhoc$/,        res: 'loan',       action: 'repay_adhoc', target: 1 },
+  { m: 'POST',   re: /^\/api\/finance\/investments$/,                        res: 'investment', action: 'create' },
+  { m: 'POST',   re: /^\/api\/finance\/investments\/([^/]+)\/redeem$/,       res: 'investment', action: 'redeem',      target: 1 },
+
+  // ── 대여금 ── 회수도 거래 2건. 취소(DELETE)만 기록되고 회수는 무기록이었다.
+  { m: 'PUT',    re: /^\/api\/lendings\/([^/]+)$/,                     res: 'lending', action: 'edit',           target: 1 },
+  { m: 'POST',   re: /^\/api\/lendings\/([^/]+)\/collect$/,            res: 'lending', action: 'collect',        target: 1 },
+  { m: 'POST',   re: /^\/api\/lendings\/([^/]+)\/collect-adhoc$/,      res: 'lending', action: 'collect_adhoc',  target: 1 },
+
+  // ── 예적금 ── 수정이 가입 출금 거래를 따라 고친다
+  { m: 'PUT',    re: /^\/api\/savings\/([^/]+)$/,                      res: 'savings', action: 'edit',       target: 1 },
+  { m: 'PATCH',  re: /^\/api\/savings\/([^/]+)\/cycles\/[^/]+$/,       res: 'savings', action: 'edit_cycle', target: 1 },
+
+  /* ── 주문 ── 금액·청구 일정이 바뀌면 앞으로 받을 돈이 바뀐다.
+     ⚠ `PATCH /milestones/:id/status` 는 가드가 하나도 없어 청구서 없이 '입금 완료'로
+       만들 수 있는 통로다(호출자 0 — 정리 대상이지만 살아 있는 동안은 기록한다). */
+  { m: 'PUT',    re: /^\/api\/contracts\/([^/]+)$/,                        res: 'contract', action: 'edit',            target: 1 },
+  { m: 'POST',   re: /^\/api\/contracts\/([^/]+)\/renew$/,                 res: 'contract', action: 'renew',           target: 1 },
+  { m: 'POST',   re: /^\/api\/contracts\/([^/]+)\/milestones$/,            res: 'contract', action: 'save_milestones', target: 1 },
+  { m: 'PATCH',  re: /^\/api\/contracts\/milestones\/([^/]+)\/status$/,    res: 'contract', action: 'milestone_status', target: 1 },
+  { m: 'POST',   re: /^\/api\/contracts\/([^/]+)\/recurring$/,             res: 'contract', action: 'add_recurring',   target: 1 },
+  { m: 'PATCH',  re: /^\/api\/contracts\/([^/]+)\/recurring\/sync$/,       res: 'contract', action: 'sync_recurring',  target: 1 },
+  { m: 'PATCH',  re: /^\/api\/contracts\/([^/]+)\/recurring\/[^/]+\/toggle$/, res: 'contract', action: 'toggle_recurring', target: 1 },
+  { m: 'PUT',    re: /^\/api\/contracts\/([^/]+)\/cost-budget$/,           res: 'contract', action: 'edit_budget',     target: 1 },
+
+  // ── 정기 규칙 ── 금액·주기를 바꾸면 앞으로 자동 발행될 청구서가 바뀐다
+  { m: 'PUT',    re: /^\/api\/recurring-expenses\/([^/]+)$/,           res: 'recurring_expense', action: 'edit',   target: 1 },
+  { m: 'PATCH',  re: /^\/api\/recurring-expenses\/([^/]+)\/toggle$/,   res: 'recurring_expense', action: 'toggle', target: 1 },
+  { m: 'PUT',    re: /^\/api\/recurring-invoices\/([^/]+)$/,           res: 'recurring_invoice', action: 'edit',   target: 1 },
+  { m: 'PATCH',  re: /^\/api\/recurring-invoices\/([^/]+)\/toggle$/,   res: 'recurring_invoice', action: 'toggle', target: 1 },
+
+  // ── 문서 ── 결의서·정산내역서 수정은 집행 금액과 짝이 맞아야 한다
+  { m: 'PUT',    re: /^\/api\/resolutions\/([^/]+)$/,                  res: 'resolution', action: 'edit',         target: 1 },
+  { m: 'POST',   re: /^\/api\/resolutions\/([^/]+)\/reload-lines$/,    res: 'resolution', action: 'reload_lines', target: 1 },
+  { m: 'PUT',    re: /^\/api\/settlements\/([^/]+)$/,                  res: 'settlement', action: 'edit',         target: 1 },
+  /* 구매품의서 → 미지급금 발행. `/api/purchase-reqs` 가 LEDGER_PREFIXES 에 없어
+     검사조차 안 됐다(주문·결의서와 달리 문지기 밖에 있었다). */
+  { m: 'POST',   re: /^\/api\/purchase-reqs\/([^/]+)\/issue-payable$/, res: 'invoice', action: 'issue', target: 1 },
+  { m: 'PUT',    re: /^\/api\/purchase-reqs\/([^/]+)$/,               res: 'purchase_req', action: 'edit',   target: 1 },
+  /* 삭제 — 이미 미지급금을 발행한 품의서를 지우면 그 청구서가 고아가 된다(되돌릴 손잡이가
+     사라진다). 주문·결의서는 이 상황을 막거나 cascade 하는데 여기만 없다. 기록이라도 남긴다. */
+  { m: 'DELETE', re: /^\/api\/purchase-reqs\/([^/]+)$/,               res: 'purchase_req', action: 'delete', target: 1 },
+
+  // ── 근로·용역계약 ── 계약 조건이 급여·용역대장의 근거다
+  { m: 'PUT',    re: /^\/api\/work-contracts\/([^/]+)$/,               res: 'work_contract', action: 'edit',      target: 1 },
+  { m: 'POST',   re: /^\/api\/work-contracts\/([^/]+)\/duplicate$/,    res: 'work_contract', action: 'duplicate', target: 1 },
+
+  /* 증빙 첨부 — 장부 금액은 안 바뀌지만 **부가세 공제 판정**이 바뀐다
+     (증빙유형이 불공제면 매입세액에서 빠진다 — lib/vatAgg.js). */
+  { m: 'PATCH',  re: /^\/api\/transactions\/([^/]+)\/evidence$/,       res: 'transaction', action: 'evidence', target: 1 },
+  { m: 'PATCH',  re: /^\/api\/invoices\/([^/]+)\/evidence$/,           res: 'invoice',     action: 'evidence', target: 1 },
+
 ]
 
 /**

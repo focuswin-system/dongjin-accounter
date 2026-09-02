@@ -432,6 +432,11 @@ try {
     /* 어음 — 만기 결제가 거래를 만들고 되돌리기가 그 거래를 지운다.
        빠져 있어서 삭제 API 가 검사조차 안 됐다(대여금과 같은 사고). */
     '/api/notes',
+    /* 구매품의서 — issue-payable 이 매입 청구서를 만든다(미지급금·매입세액).
+       주문·결의서와 달리 문지기 밖에 있어 검사조차 안 됐다. */
+    '/api/purchase-reqs',
+    // 세금 — 납부·환급이 지출·입금 거래를 만들고 지운다. 규칙이 0건이었다.
+    '/api/tax',
     /* 정기 라우터가 빠져 있었다 — 이름이 '기준정보처럼' 생겼지만 여기서 청구서·거래가
        만들어지고 지워진다(발행·놓친회차 일괄·소급 등록/되돌리기). 실제로 소급 되돌리기가
        최대 60건을 감사 기록 없이 지울 뻔했다. */
@@ -447,21 +452,43 @@ try {
   let mm
   while ((mm = mre.exec(idxSrc))) mounts.push({ prefix: mm[1], file: mm[2] + '.js' })
 
+  /* ⚠ **DELETE 만 보면 안 된다.**
+   * 감사 누락이 네 번 반복됐다(대여금 → 정기 → 어음 → /api/tax). 매번 사람이 알아채고
+   * 손으로 채웠는데, 빠진 것은 늘 **돈을 만들거나 지우는 POST/PATCH** 였다 —
+   * 이체 등록(두 줄 생성), 상태 뒤집기(통장에서 돈이 나간 것으로), 상환·회수(거래 2건),
+   * 되돌리기(거래 DELETE). 문지기가 DELETE 만 보는 한 다섯 번째가 온다.
+   *
+   * 그래서 장부 라우터의 **모든 쓰기**를 본다. 다만 단순 등록(POST /)까지 요구하면
+   * 규칙이 수백 개가 되어 아무도 안 본다 — **행위형 엔드포인트**(경로 끝이 동사)와
+   * PATCH·PUT 만 요구한다. 그것들이 이미 있는 장부를 바꾸는 것들이다. */
   const missing = []
+  /* 장부가 아닌 것 — 첨부·엑셀·미리보기, 그리고 메모·첨부 해제.
+     memo / clear-file 은 금액도 상태도 안 바꾼다(글과 파일 링크뿐). */
+  const SKIP = /\/(docs|import|export|template|preview|print|pdf|memo|clear-file)\b/
   for (const { prefix, file } of mounts) {
     if (!LEDGER_PREFIXES.has(prefix)) continue
     const src = fs.readFileSync(path.join(ROUTES_DIR, file), 'utf8')
-    const rre = /router\.delete\(\s*['"]([^'"]+)['"]/g
+    const rre = /router\.(delete|post|patch|put)\(\s*['"]([^'"]+)['"]/g
     let rm
     while ((rm = rre.exec(src))) {
-      // 첨부 삭제는 장부가 아니다 — 의도적으로 감사 대상에서 뺀다
-      if (rm[1].includes('/docs/')) continue
-      const full = (prefix + rm[1].replace(/:[A-Za-z0-9_]+/g, 'X')).replace(/\/$/, '')
-      if (!auditRuleFor('DELETE', full)) missing.push(`${file} DELETE ${rm[1]}`)
+      const method = rm[1].toUpperCase()
+      const route = rm[2]
+      // 첨부·엑셀·미리보기는 장부가 아니다 — 의도적으로 감사 대상에서 뺀다
+      if (SKIP.test(route)) continue
+      /* POST 는 **행위형만** 본다(`/:id/settle`, `/:id/repay` …).
+         `POST /` 나 `POST /:id` 같은 단순 등록은 제외 — 그건 생성 기록이지 장부 조작이
+         아니고, 전부 요구하면 규칙이 부풀어 정작 중요한 것이 묻힌다. */
+      if (method === 'POST') {
+        const seg = route.split('/').filter(Boolean)
+        const last = seg[seg.length - 1] || ''
+        if (!last || last.startsWith(':')) continue
+      }
+      const full = (prefix + route.replace(/:[A-Za-z0-9_]+/g, 'X')).replace(/\/$/, '')
+      if (!auditRuleFor(method, full)) missing.push(`${file} ${method} ${route}`)
     }
   }
   if (missing.length) {
-    fail(`감사 로그에 등록되지 않은 삭제 API:\n      · ${missing.join('\n      · ')}\n` +
+    fail(`감사 로그에 등록되지 않은 장부 변경 API:\n      · ${missing.join('\n      · ')}\n` +
          '      → platform/auditMap.js AUDIT_RULES 에 규칙을 추가하세요.')
   }
 
@@ -480,7 +507,7 @@ try {
   }
 
   if (!missing.length && !deadRules.length) {
-    ok(`장부 삭제 API 전부 등록됨 (감사 규칙 ${AUDIT_RULES.length}개)`)
+    ok(`장부 변경 API 전부 등록됨 (감사 규칙 ${AUDIT_RULES.length}개)`)
   }
 } catch (e) {
   fail(`감사 로그 검사 실패: ${e.message}`)
