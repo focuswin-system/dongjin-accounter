@@ -9,6 +9,7 @@ import { api } from '../lib/api'
 import { computeItems, monthLabel } from './HR'
 // 지급 등록 Drawer — 급여대장과 같은 컴포넌트(같은 API POST /payroll/:id/pay)
 import { PayrollPayDrawer } from '../lib/components/PayrollPayDrawer'
+import { escHtml, printHtmlDocument } from '../lib/printHtml'
 
 /* 근로·용역·일용 계약 화면.
  * 근로계약(hr_labor_contract)과 기타 용역·일용(hr_outsourcing)이 같은 work_contracts를 쓰되
@@ -157,7 +158,7 @@ export function printWorkPayslip(p, contract, company = '') {
   const income = contract.income_type || '사업'
   const title = income === '일용' ? '일용근로 지급명세서' : income === '기타' ? '기타소득 지급명세서' : '용역비 지급명세서'
   // 이름·업무명에 <, &, " 등이 들어가도 인쇄 레이아웃이 깨지지 않게 이스케이프한다.
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+  const esc = escHtml
   const row = (label, amt, neg) => `<tr><td>${esc(label)}</td><td class="num">${neg ? '-' : ''}${fmtNum(amt)}</td></tr>`
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
     <style>
@@ -187,19 +188,7 @@ export function printWorkPayslip(p, contract, company = '') {
       <tbody>${deds.map(i => row(i.label, i.amount, true)).join('')}</tbody></table>` : ''}
     <table><tr><th class="total">차인지급액</th><td class="num total">${fmtNum(p.net_salary)}</td></tr></table>
     </body></html>`
-  const iframe = document.createElement('iframe')
-  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
-  iframe.srcdoc = html
-  const cleanup = () => { if (iframe.parentNode) iframe.parentNode.removeChild(iframe) }
-  iframe.onload = () => {
-    try {
-      const w = iframe.contentWindow
-      w.onafterprint = cleanup
-      w.focus(); w.print()
-    } catch (e) {}
-  }
-  document.body.appendChild(iframe)
-  setTimeout(cleanup, 60000)   // onafterprint를 못 받는 브라우저 대비 백스톱
+  printHtmlDocument(html)
 }
 
 /* ═══════════════ 근로계약 화면 ═══════════════ */
