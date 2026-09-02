@@ -591,7 +591,7 @@ router.get('/import/template', async (req, res, next) => {
       columns: cols.map((header, i) => ({ header, width: WIDTHS[i] || 16, required: REQUIRED.has(header) })),
       samples: rows.slice(1),
     })
-    guideSheet(wb, guide.map(g => g[0], '작성안내', { hasRequired: true }))
+    guideSheet(wb, guide.map(g => g[0]), '작성안내', { hasRequired: true })
     await sendBook(res, wb, '세금계산서_업로드_양식.xlsx')
   } catch (e) { next(e) }
 })

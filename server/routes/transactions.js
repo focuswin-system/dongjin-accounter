@@ -1040,7 +1040,7 @@ router.get('/import/template', async (req, res, next) => {
     ]
     const wb = newBook()
     templateSheet(wb, '거래내역', { columns: COLS, samples: rows.slice(1) })
-    guideSheet(wb, guide.map(g => g[0], '작성안내', { hasRequired: true }))
+    guideSheet(wb, guide.map(g => g[0]), '작성안내', { hasRequired: true })
     await sendBook(res, wb, '거래내역_업로드_양식.xlsx')
   } catch (e) { next(e) }
 })
