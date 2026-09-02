@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, StatusBadge, Drawer, Combobox, MoneyInput, Loading, DateInput } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
+import { TableToolbar } from '../lib/components/TableToolbar'
 import { FOLDABLE_DOMAINS } from '../lib/nav'
 import { RecurAuditDrawer } from '../lib/components/RecurAuditDrawer'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
@@ -2807,28 +2808,37 @@ const monthlyEquivalent = (rows, amountOf) => Math.round(rows
   .reduce((s, r) => s + amountOf(r) / periodMonths(r.period), 0))
 
 // 규칙 목록 머리 — 건수·월 환산·검색·필터 칩. 정기청구와 정기지출이 같이 쓴다(둘은 대칭이다).
+/* 정기 규칙 목록의 머리 — **공용 툴바(TableToolbar)를 쓴다.**
+ *
+ * 예전엔 검색칸과 칩을 손으로 짜서, 같은 자리인데 거래내역·청구서 툴바와 생김새도
+ * 간격도 달랐다. 이 컴포넌트 하나가 정기지출·정기청구 **두 화면**을 그리므로
+ * 여기만 바꾸면 둘이 함께 표준이 된다(툴바 이관의 첫 도미노).
+ *
+ * ⚠ 기간 필터는 없다 — 정기 규칙은 '언제'가 아니라 '무엇을 얼마나 자주'라서
+ *   날짜 축이 걸리지 않는다. date 를 안 넘기면 툴바가 그 자리를 안 그린다.
+ */
 const RuleListHeader = ({ title, rows, all, amountOf, q, setQ, ruleFilter, setRuleFilter, placeholder, side = 'sales' }) => (
-  <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-    <div>
-      <div className="section-title" style={{ fontSize: 13 }}>
-        {title} {rows.length}건
-        {rows.length !== all.length && <span className="text-muted2 fw-400"> / 전체 {all.length}건</span>}
+  <TableToolbar
+    search={{ value: q, onChange: setQ, placeholder }}
+    filters={[{ inline: true, node: (
+      <div className="row gap-6">
+        {ruleFilters(side).map(f => (
+          <button key={f.value} className={`chip ${ruleFilter === f.value ? 'active' : ''}`}
+            onClick={() => setRuleFilter(f.value)}>{f.label}</button>
+        ))}
       </div>
-      <div className="text-xs text-muted2" style={{ marginTop: 2 }}>
-        활성 {rows.filter(r => r.active).length}건 · 월 환산 <span className="num">{fmtNum(monthlyEquivalent(rows, amountOf))}</span>원
+    ) }]}
+    right={
+      <div style={{ textAlign: 'right' }}>
+        <div className="text-sm fw-600">
+          {title} {rows.length}건
+          {rows.length !== all.length && <span className="text-muted2 fw-400"> / 전체 {all.length}건</span>}
+        </div>
+        <div className="text-xs text-muted2">
+          활성 {rows.filter(r => r.active).length}건 · 월 환산 <span className="num">{fmtNum(monthlyEquivalent(rows, amountOf))}</span>원
+        </div>
       </div>
-    </div>
-    <div className="search rule-search" style={{ marginLeft: 'auto' }}>
-      <Icon.Search size={14}/>
-      <input value={q} onChange={e => setQ(e.target.value)} placeholder={placeholder}/>
-    </div>
-    <div className="row gap-6">
-      {ruleFilters(side).map(f => (
-        <button key={f.value} className={`chip ${ruleFilter === f.value ? 'active' : ''}`}
-          onClick={() => setRuleFilter(f.value)}>{f.label}</button>
-      ))}
-    </div>
-  </div>
+    }/>
 )
 
 // 정기지출 = 판관비(경비) 쪽 정기 반복. 회계처리 '경비' 그룹의 독립 화면으로도, 기준정보 탭으로도 쓴다.
