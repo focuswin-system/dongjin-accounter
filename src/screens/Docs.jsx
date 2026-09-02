@@ -1707,13 +1707,15 @@ const ReportMonthly = ({ toast }) => {
 
   return (
     <div>
-      <PeriodFilter value={period} onChange={setPeriod}/>
-      <PeriodNote period={period}/>
       <KpiRow cols={3} style={{ marginBottom: 24 }}>
         <Kpi label="총 입금" value={totalIn} tone="pos"/>
         <Kpi label="총 지출" value={totalOut}/>
         <Kpi label="순차액" value={totalIn - totalOut} tone={totalIn >= totalOut ? "pos" : "neg"}/>
       </KpiRow>
+      {/* 골격: **KPI → 기간 → 필터 → 목록**. 화면마다 순서가 다르면 옮겨 다닐 때
+                눈이 매번 다시 적응해야 한다(앱 규약 — 어음·거래내역과 같은 순서다). */}
+      <PeriodFilter value={period} onChange={setPeriod}/>
+      <PeriodNote period={period}/>
       <div className="card" style={{ overflow: "hidden" }}>
         <DataTable
           rows={rows}
@@ -2006,13 +2008,15 @@ const ReportCategory = ({ toast }) => {
 
   return (
     <div>
-      <PeriodFilter value={period} onChange={setPeriod}/>
-      <PeriodNote period={period}/>
       <KpiRow cols={3} style={{ marginBottom: 24 }}>
         <Kpi label="총 지출"  value={total}/>
         <Kpi label="비목 수"  value={`${rows.length}개`} unit=""/>
         <Kpi label="최다 비목" value={rows[0]?.cat} unit=""/>
       </KpiRow>
+      {/* 골격: **KPI → 기간 → 필터 → 목록**. 화면마다 순서가 다르면 옮겨 다닐 때
+                눈이 매번 다시 적응해야 한다(앱 규약 — 어음·거래내역과 같은 순서다). */}
+      <PeriodFilter value={period} onChange={setPeriod}/>
+      <PeriodNote period={period}/>
       <div className="card" style={{ overflow: "hidden" }}>
         <DataTable
           rows={rows}
@@ -2064,14 +2068,16 @@ const ReportVendor = ({ toast }) => {
 
   return (
     <div>
-      <PeriodFilter value={period} onChange={setPeriod}/>
-      <PeriodNote period={period}/>
       <KpiRow cols={4} style={{ marginBottom: 24 }}>
         <Kpi label="발주처 수"    value={`${rows.length}개사`} unit=""/>
         <Kpi label="청구 합계"    value={grandTotal}/>
         <Kpi label="실현 매출"    value={totalRealized} tone="pos"/>
         <Kpi label="미입금 잔액"  value={totalPending}  tone="warn"/>
       </KpiRow>
+      {/* 골격: **KPI → 기간 → 필터 → 목록**. 화면마다 순서가 다르면 옮겨 다닐 때
+                눈이 매번 다시 적응해야 한다(앱 규약 — 어음·거래내역과 같은 순서다). */}
+      <PeriodFilter value={period} onChange={setPeriod}/>
+      <PeriodNote period={period}/>
       <div className="card" style={{ overflow: "hidden" }}>
         <DataTable
           rows={rows}
@@ -2181,14 +2187,16 @@ const ReportSubcontract = ({ toast }) => {
 
   return (
     <div>
-      <PeriodFilter value={period} onChange={setPeriod}/>
-      <PeriodNote period={period}/>
       <KpiRow cols={4} style={{ marginBottom: 24 }}>
         <Kpi label="협력사 수"      value={`${rows.length}개사`} unit=""/>
         <Kpi label="외주가공비 합계" value={total}/>
         <Kpi label="미지급 잔액"    value={totalPending} tone="warn"/>
         <Kpi label="총 지출 대비"   value={totalExp > 0 ? parseFloat((total / totalExp * 100).toFixed(1)) : 0} unit="%"/>
       </KpiRow>
+      {/* 골격: **KPI → 기간 → 필터 → 목록**. 화면마다 순서가 다르면 옮겨 다닐 때
+                눈이 매번 다시 적응해야 한다(앱 규약 — 어음·거래내역과 같은 순서다). */}
+      <PeriodFilter value={period} onChange={setPeriod}/>
+      <PeriodNote period={period}/>
       <div className="card" style={{ overflow: "hidden" }}>
         <DataTable
           rows={rows}
@@ -2972,6 +2980,14 @@ const ReportLoan = ({ toast, registerExport }) => {
 
   return (
     <div>
+      {/* 골격: **KPI → 기간 → 필터 → 목록**. 화면마다 순서가 다르면 옮겨 다닐 때
+          눈이 매번 다시 적응해야 한다(앱 규약 — 어음·거래내역과 같은 순서다). */}
+      <KpiRow cols={4} style={{ marginBottom: 24 }}>
+        <Kpi label="차입원금" value={T.principal} badge={`${T.count}건`}/>
+        <Kpi label="상환한 원금" value={T.repaidPrincipal} tone="pos"/>
+        <Kpi label="남은 원금" value={T.remaining} tone="neg" hint="차입원금 − 상환원금"/>
+        <Kpi label="지급한 이자" value={T.repaidInterest} hint="이미 나간 비용 — 남은 원금에 안 더해요"/>
+      </KpiRow>
       {controls}
       {/* 한 계좌만 볼 때는 무엇을 보고 있는지 인쇄물에도 남아야 한다 */}
       {picked && (
@@ -2980,13 +2996,6 @@ const ReportLoan = ({ toast, registerExport }) => {
           {picked.accountName ? ` · 상환계좌 ${picked.accountName}` : ''}
         </div>
       )}
-
-      <KpiRow cols={4} style={{ marginBottom: 24 }}>
-        <Kpi label="차입원금" value={T.principal} badge={`${T.count}건`}/>
-        <Kpi label="상환한 원금" value={T.repaidPrincipal} tone="pos"/>
-        <Kpi label="남은 원금" value={T.remaining} tone="neg" hint="차입원금 − 상환원금"/>
-        <Kpi label="지급한 이자" value={T.repaidInterest} hint="이미 나간 비용 — 남은 원금에 안 더해요"/>
-      </KpiRow>
 
       {/* 1. 차입처별 — **두 건 이상일 때만** 뜻이 있다. 한 건이면 한 줄짜리 표라
              아래 목록과 같은 말을 두 번 하는 셈이다(칩 다중 선택이 되면서 '전체냐 아니냐'가
@@ -3222,6 +3231,15 @@ const ReportCard = ({ toast }) => {
 
   return (
     <div>
+      {/* 골격: **KPI → 기간 → 필터 → 목록**. 화면마다 순서가 다르면 옮겨 다닐 때
+          눈이 매번 다시 적응해야 한다(앱 규약 — 어음·거래내역과 같은 순서다). */}
+      <KpiRow cols={T.no_evidence ? 4 : 3} style={{ marginBottom: 24 }}>
+        <Kpi label="사용액" value={T.used} badge={`${T.count}건`}/>
+        <Kpi label="카드대금 결제" value={T.paid} tone="pos" hint="이 기간에 통장에서 카드로 나간 돈"/>
+        <Kpi label="카드" value={d.cards.length} unit="장"/>
+        {/* 증빙 미첨부는 **있을 때만** 낸다. 0건을 세워 두면 정상에 표식을 다는 꼴이다 */}
+        {!!T.no_evidence && <Kpi label="증빙 미첨부" value={T.no_evidence} unit="건" tone="neg"/>}
+      </KpiRow>
       {controls}
       <PeriodNote period={period}/>
       {/* 무엇으로 걸러 본 것인지 인쇄물에도 남아야 한다 — 안 적히면 나중에 근거가 못 된다 */}
@@ -3231,14 +3249,6 @@ const ReportCard = ({ toast }) => {
           {cardType !== 'all' ? ` · ${cardType === 'check' ? '체크카드' : '신용카드'}` : ''}
         </div>
       )}
-
-      <KpiRow cols={T.no_evidence ? 4 : 3} style={{ marginBottom: 24 }}>
-        <Kpi label="사용액" value={T.used} badge={`${T.count}건`}/>
-        <Kpi label="카드대금 결제" value={T.paid} tone="pos" hint="이 기간에 통장에서 카드로 나간 돈"/>
-        <Kpi label="카드" value={d.cards.length} unit="장"/>
-        {/* 증빙 미첨부는 **있을 때만** 낸다. 0건을 세워 두면 정상에 표식을 다는 꼴이다 */}
-        {!!T.no_evidence && <Kpi label="증빙 미첨부" value={T.no_evidence} unit="건" tone="neg"/>}
-      </KpiRow>
 
       {/* 1. 카드별 요약 — 한 장만 볼 때는 한 줄짜리 표가 되니 그리지 않는다 */}
       {!cardId && (
