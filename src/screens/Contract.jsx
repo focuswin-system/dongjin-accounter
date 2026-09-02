@@ -2031,11 +2031,9 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
     for (const c of scoped) if (c.vendor_id && !seen.has(c.vendor_id)) seen.set(c.vendor_id, c.vendor_name || c.vendor || '(이름 없음)');
     return [...seen].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'ko'));
   }, [scoped]);
-  const BILLING_MODES = [
-    { value: 'recurring', label: '정기' },
-    { value: 'onetime',   label: '일시' },
-    { value: 'progress',  label: '기성' },
-  ];
+  /* 청구 방식 이름은 lib/renewal.js 하나만 쓴다.
+     여기서 같은 이름으로 다시 선언해 두는 바람에, 위에서 import 한 것이 가려져
+     **주문 폼은 '총액형'·목록 필터는 '일시'** 로 같은 값을 다르게 불렀다. */
 
   const renewDue     = scoped.filter(r => renewalInfo(r).stage === "due").length;
   const renewExpired = scoped.filter(r => renewalInfo(r).stage === "expired").length;

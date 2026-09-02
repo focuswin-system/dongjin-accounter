@@ -451,7 +451,7 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
             </div>
             <div style={{ flex: 1 }}>
               <label className="label">기간 (개월) *</label>
-              <input className="input" value={f.term_months} onChange={e => set('term_months', e.target.value)} placeholder="12"/>
+              <input className="input" value={f.term_months} onChange={e => set('term_months', e.target.value)} placeholder="예: 12"/>
             </div>
           </div>
         )}

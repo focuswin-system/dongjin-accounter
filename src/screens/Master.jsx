@@ -21,6 +21,12 @@ import { cycleMonthsLabel, PAY_TERM_OPTS, payTermNeedsDay, payTermHint,
 import { bizTypeOptions, bizItemOptions } from '../lib/bizTypes'
 import { api, minuteOf } from '../lib/api'
 
+/* ⚠ 한 건을 고치는 버튼은 **'수정'** 이다.
+ * 예전엔 이 파일 안에서 표마다 '수정'과 '편집'이 갈렸다. 그런데 눌러서 열린 드로어
+ * 제목과 끝나고 뜨는 토스트는 둘 다 '수정'이라('비목 수정' · '수정됐어요'),
+ * **누른 말과 뜬 말이 달랐다.**
+ * '편집'은 여러 줄을 한꺼번에 짜는 자리에만 쓴다(결재선 편집 · 바로가기 편집). */
+
 const fmtDateLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const todayStr = () => fmtDateLocal(new Date())
 
@@ -1313,7 +1319,7 @@ const VendorPanel = ({ embedded = false }) => {
             </div>
             <div style={{ flex: 1 }}>
               <label className="label" style={{ marginBottom: 8 }}>이메일</label>
-              <input className="input" value={form.email} onChange={e => f('email', e.target.value)} placeholder="contact@company.com"/>
+              <input className="input" value={form.email} onChange={e => f('email', e.target.value)} placeholder="예: contact@company.com"/>
             </div>
           </div>
 
@@ -1321,7 +1327,7 @@ const VendorPanel = ({ embedded = false }) => {
 
           <div>
             <label className="label" style={{ marginBottom: 8 }}>주소</label>
-            <input className="input" value={form.address} onChange={e => f('address', e.target.value)} placeholder="경기도 안산시 ..."/>
+            <input className="input" value={form.address} onChange={e => f('address', e.target.value)} placeholder="예: 경기도 안산시 ..."/>
           </div>
         </div>
         <DrawerFooter onCancel={() => setDrawerOpen(false)} onSave={handleSave}/>
@@ -1876,7 +1882,7 @@ const CompanyPanel = ({ embedded = false }) => {
         <div className="card card-pad col co-sec" style={{ gap: 14 }}>
           <div className="co-head">사업자 정보</div>
           <CoRow label="상호(법인명)" req>
-            <input className="input" value={form.name} onChange={e => f('name', e.target.value)} placeholder="도니도라 주식회사"/>
+            <input className="input" value={form.name} onChange={e => f('name', e.target.value)} placeholder="예: 도니도라 주식회사"/>
           </CoRow>
           <CoRow label="대표자">
             <input className="input" value={form.ceo} onChange={e => f('ceo', e.target.value)} placeholder="예: 홍길동"/>
@@ -1902,7 +1908,7 @@ const CompanyPanel = ({ embedded = false }) => {
         <div className="card card-pad col co-sec" style={{ gap: 14 }}>
           <div className="co-head">연락처 · 주소</div>
           <CoRow label="사업장 주소">
-            <input className="input" value={form.address} onChange={e => f('address', e.target.value)} placeholder="경기도 안산시 ..."/>
+            <input className="input" value={form.address} onChange={e => f('address', e.target.value)} placeholder="예: 경기도 안산시 ..."/>
           </CoRow>
           <CoRow label="대표 전화">
             <input className="input" value={form.phone} onChange={e => f('phone', e.target.value)} placeholder="예: 031-000-0000"/>
@@ -1911,7 +1917,7 @@ const CompanyPanel = ({ embedded = false }) => {
             <input className="input" value={form.fax} onChange={e => f('fax', e.target.value)} placeholder="예: 031-000-0001"/>
           </CoRow>
           <CoRow label="이메일">
-            <input className="input" value={form.email} onChange={e => f('email', e.target.value)} placeholder="info@dongjin.co.kr"/>
+            <input className="input" value={form.email} onChange={e => f('email', e.target.value)} placeholder="예: info@company.co.kr"/>
           </CoRow>
         </div>
 
@@ -4500,7 +4506,7 @@ const FlatTable = ({ data, rows, onEdit, onDelete }) => (
           })}
           <td>
             <div className="row gap-4">
-              <button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); onEdit(i); }}>편집</button>
+              <button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); onEdit(i); }}>수정</button>
               <button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); onDelete(r[0]); }}><Icon.Close size={14}/></button>
             </div>
           </td>
@@ -4602,7 +4608,7 @@ const GroupedTable = ({ data, q, collapsed, toggleGroup, onEdit, onDelete }) => 
                                 })}
                                 <td>
                                   <div className="row gap-4">
-                                    <button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); onEdit(g, idx); }}>편집</button>
+                                    <button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); onEdit(g, idx); }}>수정</button>
                                     <button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); onDelete(r[0]); }}><Icon.Close size={14}/></button>
                                   </div>
                                 </td>
@@ -4671,7 +4677,7 @@ const GroupedTable = ({ data, q, collapsed, toggleGroup, onEdit, onDelete }) => 
                         })}
                         <td>
                           <div className="row gap-4">
-                            <button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); onEdit(g, idx); }}>편집</button>
+                            <button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); onEdit(g, idx); }}>수정</button>
                             <button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); onDelete(r[0]); }}><Icon.Close size={14}/></button>
                           </div>
                         </td>
@@ -4855,7 +4861,7 @@ const PayrollItemPanel = ({ embedded = false }) => {
                   <td className="num-cell num-right">{fmtVal(it)}</td>
                   <td>
                     <div className="row gap-4">
-                      <button className="btn ghost sm" onClick={() => edit(it)}>편집</button>
+                      <button className="btn ghost sm" onClick={() => edit(it)}>수정</button>
                       <button className="btn ghost sm" style={{ color: "var(--neg)" }} onClick={() => del(it)}>삭제</button>
                     </div>
                   </td>
@@ -5059,7 +5065,7 @@ const EmployTypePanel = ({ embedded = false }) => {
                   <td className="text-sm text-muted">{Number(t.conv_alert_months) > 0 ? `${t.conv_alert_months}개월` : "—"}</td>
                   <td>
                     <div className="row gap-4">
-                      <button className="btn ghost sm" onClick={() => edit(t)}>편집</button>
+                      <button className="btn ghost sm" onClick={() => edit(t)}>수정</button>
                       <button className="btn ghost sm" style={{ color: "var(--neg)" }} onClick={() => del(t)}>삭제</button>
                     </div>
                   </td>
