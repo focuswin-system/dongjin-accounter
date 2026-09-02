@@ -1,7 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { kstToday } = require('../db')
-const { pnlOnly, pnlParams } = require('../lib/pnl')
+const { countableOnly, countableParams } = require('../lib/pnl')
 
 const router = Router()
 
@@ -80,10 +80,15 @@ async function runAggregate(db, spec) {
    * 부가세 컬럼이 없던 시절 거래는 supply_amount 가 NULL 이라 amount 로 폴백한다. */
   const AGG = s.measure === 'count' ? 'COUNT(*)' : 'COALESCE(SUM(COALESCE(t.supply_amount, t.amount)), 0)'
 
-  // 재무 거래(차입금 원금·자본금·투자자산)는 매출/매입이 아니다 → 손익 거래만 집계한다.
-  // 대출 수령을 income으로 넣는 순간 이 조건이 없으면 그대로 '매출'로 잡힌다(lib/pnl.js).
-  const where = ['t.kind = ?', 't.date BETWEEN ? AND ?', pnlOnly('t')]
-  const params = [kind, from, to, ...pnlParams()]
+  /* 재무 거래(차입금 원금·자본금·투자자산)는 매출/매입이 아니다 → 집계에서 뺀다.
+   * 대출 수령을 income 으로 넣는 순간 이 조건이 없으면 그대로 '매출'로 잡힌다.
+   *
+   * ⚠ pnlOnly 가 아니라 **countableOnly** 다. 청구서 정산·어음 결제는 계정과목이
+   *   외상매출금·지급어음(자산·부채)이라 pnlOnly 에서 탈락하는데, 이 앱은 미수금의
+   *   유일한 소스가 청구서다 — 빼면 **청구서를 쓰는 회사의 매출이 통째로 사라진다.**
+   *   월별 현황이 같은 이유로 '2억이 들어왔는데 총 입금 0원'이 됐던 그 사고다(lib/pnl.js). */
+  const where = ['t.kind = ?', 't.date BETWEEN ? AND ?', countableOnly('t')]
+  const params = [kind, from, to, ...countableParams()]
   const filter = s.filter || {}
   for (const [k, col] of Object.entries(FILTER_COLS)) if (filter[k]) { where.push(`${col} = ?`); params.push(filter[k]) }
   const whereSql = where.join(' AND ') + statusCond
