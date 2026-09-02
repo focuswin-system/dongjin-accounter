@@ -30,8 +30,4 @@ export function computeLineAmount(line) {
 }
 
 /** 라인 배열의 공급가액 합계 */
-export function linesSupplyTotal(lines) {
-  return (lines || []).reduce((s, l) => s + num(l.amount), 0)
-}
-
 export const BASIS_LABEL = { qty: '수량', weight: '중량' }

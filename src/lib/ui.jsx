@@ -2,14 +2,7 @@ import { useState, useEffect, useMemo, useRef, createContext, useContext, cloneE
 import { createPortal } from 'react-dom'
 
 /* ── Formatters ── */
-export const fmtKRW = (n, opts = {}) => {
-  if (n == null || isNaN(n)) return "-";
-  const sign = n < 0 ? "-" : "";
-  const v = Math.abs(n).toLocaleString("ko-KR");
-  return sign + v + (opts.suffix ?? "원");
-};
 export const fmtNum = (n) => (n ?? 0).toLocaleString("ko-KR");
-export const fmtDate = (s) => s;
 
 /* 표 안의 날짜 — `2026-08-07` → `26.08.07`.
  *

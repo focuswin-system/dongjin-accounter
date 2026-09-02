@@ -173,32 +173,4 @@ router.get('/daily-trial', async (req, res, next) => {
  * 홈 요약 — 자금일보의 앞부분만. 홈에서 매일 보는 숫자라 가볍게 유지한다.
  * 자세한 건 자금일보로 들어간다.
  */
-router.get('/', async (req, res, next) => {
-  try {
-    const date = kstToday()
-    const to = kstDate(Date.now() + 7 * 86400000)
-    const accounts = await balancesAsOf(req.db, date)
-    const available = accounts.filter(a => a.kind !== 'card').reduce((s, a) => s + a.balance, 0)
-    const [ar, ap, flows] = await Promise.all([
-      openInvoiceTotal(req.db, 'issued'),
-      openInvoiceTotal(req.db, 'received'),
-      upcomingFlows(req.db, { from: date, to }),
-    ])
-    const f = project(available, flows, { from: date, to })
-    res.json({
-      date, available, accountCount: accounts.filter(a => a.kind !== 'card').length,
-      receivable: ar, payable: ap,
-      weekIn: f.totalIn, weekOut: f.totalOut,
-      lowest: f.lowest,
-      overdueCount: flows.filter(x => x.overdue).length,
-      /* 기약 없는 돈 — 예전엔 '기한 미정'만 셌다(noDue). 이제는 **장기 미수·오래 밀린 것**까지
-         한 판정으로 묶는다(lib/certainty.js). weekIn 은 이미 확실한 몫만 담고 있으므로,
-         이 숫자는 "그 밖에 기약 없이 걸려 있는 돈"이다.
-         ⚠ 감추지 않으려고 내려보낸다. 계산에서 빼고 화면에도 안 적으면 "그 돈은 어디 갔나"가 된다. */
-      uncertainIn: f.uncertainIn, uncertainInCount: f.uncertainInCount,
-      uncertainOut: f.uncertainOut, uncertainOutCount: f.uncertainOutCount,
-    })
-  } catch (e) { next(e) }
-})
-
 module.exports = router

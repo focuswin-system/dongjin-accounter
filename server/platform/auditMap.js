@@ -204,12 +204,12 @@ const AUDIT_RULES = [
   { m: 'PATCH',  re: /^\/api\/savings\/([^/]+)\/cycles\/[^/]+$/,       res: 'savings', action: 'edit_cycle', target: 1 },
 
   /* ── 주문 ── 금액·청구 일정이 바뀌면 앞으로 받을 돈이 바뀐다.
-     ⚠ `PATCH /milestones/:id/status` 는 가드가 하나도 없어 청구서 없이 '입금 완료'로
-       만들 수 있는 통로다(호출자 0 — 정리 대상이지만 살아 있는 동안은 기록한다). */
+     ※ `PATCH /milestones/:id/status` 는 2026-09-02 에 **라우트째 지웠다** — 가드가
+       하나도 없어 청구서 없이 '입금 완료'로 만들 수 있는 통로였고 호출자도 0이었다.
+       상태는 청구서 발행·정산이 움직인다(routes/invoices.js). */
   { m: 'PUT',    re: /^\/api\/contracts\/([^/]+)$/,                        res: 'contract', action: 'edit',            target: 1 },
   { m: 'POST',   re: /^\/api\/contracts\/([^/]+)\/renew$/,                 res: 'contract', action: 'renew',           target: 1 },
   { m: 'POST',   re: /^\/api\/contracts\/([^/]+)\/milestones$/,            res: 'contract', action: 'save_milestones', target: 1 },
-  { m: 'PATCH',  re: /^\/api\/contracts\/milestones\/([^/]+)\/status$/,    res: 'contract', action: 'milestone_status', target: 1 },
   { m: 'POST',   re: /^\/api\/contracts\/([^/]+)\/recurring$/,             res: 'contract', action: 'add_recurring',   target: 1 },
   { m: 'PATCH',  re: /^\/api\/contracts\/([^/]+)\/recurring\/sync$/,       res: 'contract', action: 'sync_recurring',  target: 1 },
   { m: 'PATCH',  re: /^\/api\/contracts\/([^/]+)\/recurring\/[^/]+\/toggle$/, res: 'contract', action: 'toggle_recurring', target: 1 },

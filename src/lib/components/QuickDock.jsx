@@ -65,7 +65,6 @@ const IconOf = (name) => Icon[name] || Icon.Right
    예전엔 홈의 '자주 찾는 메뉴'(homeFavorites)와 이 독(quickLinks)이 서로 다른 저장소를 써서,
    독에 담은 것이 홈에 없고 홈에 담은 것이 독에 없었다. 같은 것을 두 곳에서 관리한 셈이다.
    이제 홈이 이 목록을 그대로 그린다 — 저장은 여기 한 곳. */
-export const QUICK_KEY = KEY
 export const loadQuickLinks = () => {
   try {
     const raw = localStorage.getItem(KEY)

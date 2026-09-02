@@ -57,10 +57,6 @@ export function visibleNav(perms) {
   return out
 }
 
-/** 환경설정 잎 — 하위 탭 전부가 단일 자원 'settings' 소관이다(서버 매핑과 동일) */
-export const visibleSettingsLeaves = (perms) =>
-  can(perms, 'settings') ? SETTINGS_LEAVES : []
-
 /** 포털 카테고리 안의 화면 목록도 같은 규칙으로 거른다 */
 export function visiblePortalNode(perms, node) {
   if (unrestricted(perms) || !node) return node
@@ -85,10 +81,6 @@ export function visiblePortal(perms) {
   }
   return out
 }
-
-/** '자주 찾는 메뉴' 후보·즐겨찾기 표시 목록도 같은 규칙으로 거른다 */
-export const visibleLeaves = (perms) =>
-  unrestricted(perms) ? ALL_LEAVES : ALL_LEAVES.filter(l => can(perms, l.id))   // can()이 settings_* → settings 로 변환
 
 /**
  * 회사 마스터만 들어갈 수 있는 화면.

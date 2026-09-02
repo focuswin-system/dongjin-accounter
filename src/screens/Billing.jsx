@@ -80,19 +80,6 @@ const AXIS_FIELD = {
   delivery: (row) => [row.deliveryFrom, row.deliveryTo],
 }
 
-const MOCK_DOCS = {
-  "INV-2026-001": [
-    { name: "세금계산서_한화에어로스페이스_KF21_3차.pdf", type: "세금계산서", size: "142KB", date: "2026-05-15" },
-    { name: "납품확인서_KF21동체_3차.pdf",               type: "납품확인서", size: "88KB",  date: "2026-05-15" },
-  ],
-  "INV-2026-002": [
-    { name: "세금계산서_LIG넥스원_유도무기_5월.pdf", type: "세금계산서", size: "118KB", date: "2026-05-10" },
-  ],
-  "INV-2026-101": [
-    { name: "세금계산서_한울정밀_CNC외주_5월.pdf", type: "세금계산서", size: "96KB",  date: "2026-05-10" },
-    { name: "거래명세서_한울정밀.jpg",             type: "거래명세서", size: "620KB", date: "2026-05-10" },
-  ],
-}
 
 const DOC_TYPE_ICON = {
   "세금계산서": <Icon.File size={16}/>,

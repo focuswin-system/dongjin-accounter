@@ -963,25 +963,6 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
 // 이전 DocPreview 이름 호환(다른 곳에서 참조 시)
 export const DocPreview = ResolutionPreview;
 
-export const Stamp = ({ name, tone = "neg" }) => {
-  const color = tone === "neg" ? "var(--neg)" : "var(--ink)";
-  return (
-    <div style={{
-      width: 48, height: 48, borderRadius: "50%", border: `2px solid ${color}`, color,
-      fontFamily: '"Noto Serif KR", serif', fontWeight: 700,
-      fontSize: name.length >= 3 ? 11 : 13,
-      letterSpacing: name.length >= 3 ? "-0.04em" : "-0.02em",
-      display: "grid", placeItems: "center", margin: "auto",
-      transform: "rotate(-8deg)", lineHeight: 1,
-      background: "rgba(255,255,255,0.6)",
-      boxShadow: `inset 0 0 0 2px rgba(255,255,255,0.4)`,
-      writingMode: name.length >= 3 ? "vertical-rl" : "horizontal-tb",
-    }}>
-      {name.length === 3 ? <span style={{ writingMode: "vertical-rl", letterSpacing: "0.1em" }}>{name}</span> : name}
-    </div>
-  );
-};
-
 /* ============ 증빙 관리 ============ */
 export const EvidenceScreen = ({ onAttach }) => {
   const toast = useToast();

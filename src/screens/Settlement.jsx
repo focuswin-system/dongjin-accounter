@@ -334,7 +334,3 @@ export const SettlementScreen = () => {
   )
 }
 
-// 인쇄용 문서 컴포넌트(다른 화면에서 참조 가능) — 미리보기와 동일 렌더를 읽기전용으로
-export const SettlementDocument = ({ doc, company }) => (
-  <SettlementPreview doc={doc} company={company} onSaved={() => {}} onDeleted={() => {}}/>
-)

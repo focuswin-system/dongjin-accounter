@@ -421,14 +421,6 @@ router.post('/:id/renew', async (req, res, next) => {
 })
 
 // 청구 일정 단건 상태 변경(레거시 — 필요 시)
-router.patch('/milestones/:id/status', async (req, res, next) => {
-  try {
-    const [result] = await req.db.execute('UPDATE milestones SET status=? WHERE id=?', [req.body.status || '예정', req.params.id])
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
-    res.json({ ok: true })
-  } catch (e) { next(e) }
-})
-
 /**
  * 청구 일정 한 줄 삭제 — 잘못 깔아둔 일정을 지운다.
  *

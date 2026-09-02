@@ -1631,9 +1631,6 @@ export const api = {
     try { await req(`/contracts/milestones/${id}`, { method: 'DELETE' }); return { ok: true } }
     catch (e) { return { ok: false, error: e.message } }
   },
-  async updateMilestoneStatus(id, status) {
-    try { await req(`/contracts/milestones/${id}/status`, { method: 'PATCH', body: { status } }); return { ok: true } } catch (e) { return { ok: false, error: e.message } }
-  },
 
   async addMilestones(id, milestones) {
     try {
@@ -1900,10 +1897,6 @@ export const api = {
   async getCashReport({ date, days } = {}) {
     const qs = new URLSearchParams(Object.entries({ date, days }).filter(([, v]) => v)).toString()
     try { return await req('/dashboard/cash-report' + (qs ? `?${qs}` : '')) } catch { return null }
-  },
-  /** 홈 요약 — 자금일보의 앞부분만 가볍게 */
-  async getCashSummary() {
-    try { return await req('/dashboard') } catch { return null }
   },
   async getDailyTrial(date) {
     try { return await req('/dashboard/daily-trial' + (date ? `?date=${date}` : '')) } catch { return null }

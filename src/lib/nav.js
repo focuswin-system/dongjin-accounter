@@ -312,7 +312,6 @@ export const filterPortalDocs = (node, visibleKeys) => {
   return groups.length ? { ...node, groups } : null
 }
 
-export const MASTER_LEAF = { id: "master", label: "기준정보", icon: Icon.Folder }
 
 /* 분류마다 **아이콘과 색**을 준다.
    · 색(tone) 은 묶음을 말한다 — 같은 분류의 카드는 아이콘 색이 같아, 15개가 깔려도
@@ -356,7 +355,6 @@ export const MASTER_LEAVES = MASTER_GROUPS.flatMap(g =>
   g.items.map(it => ({ ...it, domain: "기준정보", section: g.label })))
 
 // 환경설정(사이드바 하단·포털 별도 타일)
-export const SETTINGS_LEAF = { id: "settings", label: "환경설정", icon: Icon.Cog }
 
 // 환경설정 하위 화면 — 기준정보처럼 각 항목을 forcedTab 잎으로(내부 서브내브 없이 전체폭, 공용 레이아웃).
 // '문서 양식'(template)은 목업이라 제외. 클릭 시 route=settings_<tab> → MasterScreen forcedTab.
@@ -693,7 +691,6 @@ for (const g of MASTER_GROUPS) for (const it of g.items) PORTAL_PAGE_OF_LEAF[it.
 for (const l of SETTINGS_LEAVES) PORTAL_PAGE_OF_LEAF[l.id] = 'settings'
 
 // 도메인(일반회계·인사급여·재무관리·경영관리)에는 전용 화면이 없다 — 도메인 마디는 홈 포털로 보낸다
-export const DOMAIN_LABELS = new Set(PORTAL.map(d => d.label))
 
 /* 포털 카테고리 라우트도 소속 도메인으로 매핑(사이드바 도메인 자동 펼침).
  *
