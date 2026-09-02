@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, StatusBadge, periodToRange, FilterSelect, Drawer, localToday } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
+import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { DataTable } from '../lib/components/DataTable'
 import { TableToolbar } from '../lib/components/TableToolbar'
 import { VoucherView } from '../lib/components/VoucherView'
@@ -239,12 +240,16 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
         />
 
         {/* 미수금/미지급금은 청구서 기준(요약만 표시). 카드 클릭 시 회수 화면으로 이동. */}
-        <div className="grid grid-4-to-2" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 }}>
-          <LedgerCard label="입금 합계"  amount={inSum}  tone="pos"   active={filter === "income"} onClick={() => setFilter("income")}/>
-          <LedgerCard label="지출 합계"  amount={outSum} tone="neg"   active={filter === "expense"} onClick={() => setFilter("expense")}/>
-          <LedgerCard label="미수금"        amount={recSummary?.total ?? 0}  tone="brand" note="미수금 화면으로" onClick={() => { window.location.hash = "ar"; }}/>
-          <LedgerCard label="미지급금"      amount={paySummary?.total ?? 0}  tone="warn"  note="미지급금 화면으로" onClick={() => { window.location.hash = "ap"; }}/>
-        </div>
+        {/* KpiRow 를 쓴다 — 손수 gridTemplateColumns 를 주면 좁은 화면에서 접히는
+            규칙(index.css .kpi-row[data-cols])을 덮어써서 금액이 잘린다 */}
+        <KpiRow cols={4} style={{ marginBottom: 20 }}>
+          {/* 앞 둘은 **필터**다(누르면 그 종류만 남는다) — active 가 고른 상태를 낸다.
+              뒤 둘은 다른 화면으로 가는 길이라 뱃지로 어디로 가는지 적는다. */}
+          <Kpi label="입금 합계" value={inSum} tone="pos" active={filter === "income"} onClick={() => setFilter("income")}/>
+          <Kpi label="지출 합계" value={outSum} tone="neg" active={filter === "expense"} onClick={() => setFilter("expense")}/>
+          <Kpi label="미수금"   value={recSummary?.total ?? 0} badge="미수금 화면으로"   badgeTone="brand" onClick={() => { window.location.hash = "ar"; }}/>
+          <Kpi label="미지급금" value={paySummary?.total ?? 0} badge="미지급금 화면으로" badgeTone="warn"  onClick={() => { window.location.hash = "ap"; }}/>
+        </KpiRow>
 
         <div className="card" style={{ overflow: "hidden" }}>
           {/* 탭(전체 거래/입금/지출) — 상단 KPI 카드 클릭과 연동. 툴바와 별개로 유지. */}
@@ -387,29 +392,6 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
 
       <TransactionDetailDrawer txn={sel} onClose={() => setSel(null)} toast={toast} confirm={confirm} openEdit={openEdit} onAction={reload}/>
     </>
-  );
-};
-
-const LedgerCard = ({ label, amount, tone, active, onClick, note }) => {
-  /* ⚠ 색을 박아 두면 안 된다 — 어두운 화면에서 이 카드만 흰 채로 남아 숫자가 안 읽혔다.
-     고른 상태의 옅은 바탕은 상태 토큰(--*-soft)이 테마마다 알아서 낸다. */
-  const bg = active
-    ? (tone === "pos" ? "var(--pos-soft)" : tone === "neg" ? "var(--neg-soft)" : tone === "brand" ? "var(--brand-soft)" : "var(--warn-soft)")
-    : "var(--surface)";
-  const border = active
-    ? (tone === "pos" ? "var(--pos)" : tone === "neg" ? "var(--neg)" : tone === "brand" ? "var(--brand)" : "var(--warn)")
-    : "var(--line)";
-  return (
-    <button onClick={onClick} className="card"
-      style={{ padding: "16px 18px", border: `1px solid ${border}`, background: bg, textAlign: "left", cursor: "pointer", fontFamily: "inherit", transition: "background .12s, border-color .12s" }}>
-      <div className="row gap-8" style={{ marginBottom: 6 }}>
-        <span className="text-sm text-muted fw-600" style={{ whiteSpace: "nowrap" }}>{label}</span>
-        {note && <span className={`badge ${tone}`} style={{ marginLeft: "auto" }}>{note}</span>}
-      </div>
-      <div className="num fw-700" style={{ fontSize: 22, letterSpacing: "-0.02em", whiteSpace: "nowrap" }}>
-        {fmtNum(amount)}<span className="text-muted" style={{ fontWeight: 400, fontSize: 14, marginLeft: 3 }}>원</span>
-      </div>
-    </button>
   );
 };
 

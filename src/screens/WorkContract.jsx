@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, StatusBadge, localToday, DateInput } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
+import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { FileAttach } from '../lib/FileAttach'
@@ -805,11 +806,15 @@ const OutsourcingDetailDrawer = ({ id, onClose, onChanged, onEdit }) => {
           sub={<>{INCOME_LABEL[c.income_type]} · {c.title || '—'}</>}
           onClose={onClose}/>
 
-        <div className="row" style={{ padding: '12px 18px 0', gap: 12 }}>
-          <Tile label="누적 지급" value={won(c.paid_sum || 0)} tone="brand"/>
-          <Tile label="누적 발생" value={won(c.net_sum || 0)} tone="ink"/>
-          <Tile label="미지급" value={won(c.unpaid || 0)} tone={c.unpaid > 0 ? 'warn' : 'ink'}/>
-        </div>
+        {/* 예전 Tile 은 flex:1 로 셋이 폭을 나눠 가졌다. KpiRow 가 같은 일을 하고,
+            좁은 화면에서 접히는 규칙까지 들고 온다. */}
+        <KpiRow cols={3} style={{ padding: '12px 18px 0' }}>
+          {/* 금액은 **수로** 넘긴다 — won() 으로 문자열을 만들어 주면 Kpi 가 숫자로 못 알아보고
+              자릿수 고정 글꼴(num)을 빼 버려, 이 셋만 다른 글씨체로 찍힌다 */}
+          <Kpi size="sm" label="누적 지급" value={Number(c.paid_sum || 0)} tone="brand-ink"/>
+          <Kpi size="sm" label="누적 발생" value={Number(c.net_sum || 0)}/>
+          <Kpi size="sm" label="미지급" value={Number(c.unpaid || 0)} tone={c.unpaid > 0 ? 'warn-ink' : undefined}/>
+        </KpiRow>
 
         <div className="tab-bar" style={{ padding: '0 18px' }}>
           {TABS.map(t => <button key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{t}</button>)}
@@ -1022,11 +1027,5 @@ const InfoRow = ({ label, value }) => (
   <div className="row" style={{ padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
     <span className="text-sm text-muted2" style={{ width: 120 }}>{label}</span>
     <span className="text-sm fw-600">{value}</span>
-  </div>
-)
-const Tile = ({ label, value, tone }) => (
-  <div className="card" style={{ flex: 1, padding: '10px 12px' }}>
-    <div className="text-xs text-muted2">{label}</div>
-    <div className="num fw-700" style={{ fontSize: 16, color: tone === 'warn' ? 'var(--warn-ink)' : tone === 'brand' ? 'var(--brand-ink)' : undefined }}>{value}</div>
   </div>
 )

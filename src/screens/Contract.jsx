@@ -621,30 +621,6 @@ export const BigSummaryCard = ({ label, amount, sub, accent = "blue", warn = fal
   </div>
 );
 
-/* onOpen 을 주면 눌러서 근거를 펼 수 있는 타일이 된다.
-   숫자만 있고 내역이 없으면 사용자는 검산도, 틀린 곳을 짚지도 못한다
-   ("176,000원이 어디서 나왔는지 볼 수가 없다"). */
-export const SummaryTile = ({ label, amount, pct, tone, big = false, onOpen, openLabel = '내역' }) => (
-  <div className="card" style={{ padding: "18px 18px", display: "flex", flexDirection: "column", gap: 8, background: big ? "var(--ink)" : "var(--surface)", color: big ? "var(--surface)" : "var(--ink)", borderColor: big ? "var(--ink)" : "var(--line)", cursor: onOpen ? 'pointer' : undefined }}
-    onClick={onOpen} role={onOpen ? 'button' : undefined} tabIndex={onOpen ? 0 : undefined}
-    onKeyDown={onOpen ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } } : undefined}>
-    <div className="row" style={{ alignItems: 'center', gap: 6 }}>
-      <div style={{ fontSize: 12.5, fontWeight: 600, color: big ? "rgba(255,255,255,0.7)" : "var(--muted)" }}>{label}</div>
-      {onOpen && (
-        <div className="text-xs" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 2, color: big ? "rgba(255,255,255,0.7)" : "var(--muted-2)" }}>
-          {openLabel}<Icon.Right size={12}/>
-        </div>
-      )}
-    </div>
-    <div className="num fw-700" style={{ fontSize: big ? 26 : 22, letterSpacing: "-0.02em" }}>
-      {amount >= 0 ? "" : "-"}{fmtNum(Math.abs(amount))}<span style={{ fontSize: 13, fontWeight: 600, opacity: 0.65, marginLeft: 3 }}>원</span>
-    </div>
-    {pct != null && (
-      <div className="text-xs" style={{ color: big ? "rgba(255,255,255,0.7)" : "var(--muted-2)" }}>전체의 {pct}%</div>
-    )}
-  </div>
-);
-
 /* ============ CSV 내보내기 헬퍼 ============ */
 const downloadCsv = (filename, headers, rows) => {
   const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`
@@ -1215,34 +1191,35 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       {progress ? (
         // 기성형은 총액·월 정액·진행률 개념이 없다 → 실제로 의미 있는 세 숫자만: 누적 기성 청구 / 누적 수금(지급) / 미수(미지급).
         <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-          <SummaryTile label={isPurchase ? "누적 기성(청구)" : "누적 청구(기성)"} amount={c.billed || 0}/>
-          <SummaryTile label={`누적 ${doneLabel}`} amount={doneAll}/>
-          <SummaryTile label={isPurchase ? "미지급금" : "미수금"} amount={arRemain} big onOpen={arRemain ? () => setArOpen(true) : undefined} openLabel="근거 보기"/>
+          <Kpi label={isPurchase ? "누적 기성(청구)" : "누적 청구(기성)"} value={c.billed || 0}/>
+          <Kpi label={`누적 ${doneLabel}`} value={doneAll}/>
+          <Kpi label={isPurchase ? "미지급금" : "미수금"} value={arRemain} emphasis onClick={arRemain ? () => setArOpen(true) : undefined} actionLabel={arRemain ? "근거 보기" : undefined}/>
         </div>
       ) : (
       <div className="grid" style={{ gridTemplateColumns: `repeat(${isPurchase ? 4 : 5}, 1fr)`, gap: 12 }}>
         {/* 옆 타일(수금·미수금·원가)이 모두 부가세 포함 금액이라 여기도 기준을 맞춘다.
             공급가만 보여주면 '주문 840만 · 수금 924만'처럼 앞뒤가 안 맞아 보인다. */}
-        <SummaryTile
+        <Kpi
           label={openEnded ? `${periodLabel(c.billing_period)} ${isPurchase ? '지급' : '청구'}금액` : recurring ? "이번 계약기간 총액" : "주문금액"}
-          amount={openEnded ? (c.unit_amount || 0) : (c.term_total ?? c.amount)}/>
-        <SummaryTile
+          value={openEnded ? (c.unit_amount || 0) : (c.term_total ?? c.amount)}/>
+        <Kpi
           label={openEnded ? `누적 ${doneLabel}` : `${doneLabel} 완료`}
-          amount={openEnded ? doneAll : done}
-          pct={openEnded ? undefined : donePct}/>
-        <SummaryTile
+          value={openEnded ? doneAll : done}
+          hint={openEnded ? undefined : `전체의 ${donePct}%`}/>
+        <Kpi
           label={openEnded ? (isPurchase ? "미지급금" : "미수금") : remainLabel}
-          amount={openEnded ? arRemain : remainAmt}
-          onOpen={openEnded && arRemain ? () => setArOpen(true) : undefined} openLabel="근거 보기"/>
+          value={openEnded ? arRemain : remainAmt}
+          onClick={openEnded && arRemain ? () => setArOpen(true) : undefined}
+          actionLabel={openEnded && arRemain ? "근거 보기" : undefined}/>
         {isPurchase ? (
           // 매입: 청구받은 것 중 아직 안 나간 돈
-          <SummaryTile label="미지급금" amount={arRemain} big onOpen={arRemain ? () => setArOpen(true) : undefined} openLabel="근거 보기"/>
+          <Kpi label="미지급금" value={arRemain} emphasis onClick={arRemain ? () => setArOpen(true) : undefined} actionLabel={arRemain ? "근거 보기" : undefined}/>
         ) : (
           <>
             {/* 손익이 빼는 값과 같은 축이어야 한다 — out 을 쓰면 원가 0 · 손익 +323,000 처럼
                 타일끼리 뺄셈이 안 맞는다(목록 '원가' 열과 같은 원인). */}
-            <SummaryTile label="이 주문 원가" amount={cost}/>
-            <SummaryTile label={openEnded ? "누적 손익" : "예상 손익"} amount={profit ?? 0} big/>
+            <Kpi label="이 주문 원가" value={cost}/>
+            <Kpi label={openEnded ? "누적 손익" : "예상 손익"} value={profit ?? 0} emphasis/>
           </>
         )}
       </div>

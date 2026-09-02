@@ -1,4 +1,4 @@
-import { fmtNum } from '../ui'
+import { fmtNum, Icon } from '../ui'
 
 // 화면 상단 지표 카드(KPI) 단일 정의.
 //
@@ -14,26 +14,64 @@ import { fmtNum } from '../ui'
 //   badge     오른쪽 위 뱃지 문구(보조 설명·건수). 없으면 뱃지 자체를 그리지 않는다
 //   badgeTone 뱃지 색 (brand·pos·warn·neg·ink). 기본 ink 는 외곽선 뱃지
 //   hint      값 아래 작은 보조 문구
-export const Kpi = ({ label, value, unit = '원', tone, badge, badgeTone = 'ink', hint }) => {
+//
+// ── 아래 넷은 화면들이 저마다 만들어 쓰던 것을 들여온 것이다 ─────────────
+// 이 파일 첫머리가 "정의가 3벌이라 복사하면 빈 칸이 렌더됐다"고 경고해 두었는데,
+// 그 뒤에 **또 3벌**이 생겼다(Contract.SummaryTile / Ledger.LedgerCard /
+// WorkContract.Tile). 셋이 원한 것은 결국 아래 네 가지뿐이라, 여기로 들여온다.
+//   size        'sm' 이면 드로어 안에 들어가는 작은 타일(값 16px)
+//   emphasis    잉크 반전 강조 카드 — 그 화면에서 제일 중요한 한 칸
+//   active      고른 상태(필터 구실을 하는 카드). tone 의 옅은 바탕 + 진한 테두리
+//   onClick     누를 수 있는 카드가 된다. actionLabel 을 주면 라벨 옆에 '내역 ›' 이 붙는다
+export const Kpi = ({ label, value, unit = '원', tone, badge, badgeTone = 'ink', hint,
+                      size = 'md', emphasis, active, onClick, actionLabel }) => {
   const isNum = typeof value === 'number'
+  const sm = size === 'sm'
+  const Tag = onClick ? 'button' : 'div'
+  /* ⚠ 강조 카드의 글자를 흰색으로 박으면 안 된다. --ink 는 다크 모드에서 **밝은 색**이라
+     흰 글씨가 흰 바탕에 얹힌다(예전 SummaryTile 이 그랬다 — 라벨이 안 보였다).
+     바탕이 --ink 면 글자는 --surface 다. 둘은 테마마다 같이 뒤집힌다. */
+  const onInk = emphasis ? 'var(--surface)' : undefined
   return (
-    <div className="card card-pad" style={{ minWidth: 0 }}>
-      <div className="row gap-8" style={{ marginBottom: 6 }}>
-        <span className="text-sm text-muted fw-600" style={{ whiteSpace: 'nowrap' }}>{label}</span>
+    <Tag className={sm ? 'card' : 'card card-pad'} onClick={onClick} type={onClick ? 'button' : undefined}
+      style={{
+        minWidth: 0,
+        textAlign: 'left', fontFamily: 'inherit', width: onClick ? '100%' : undefined,
+        cursor: onClick ? 'pointer' : undefined,
+        transition: onClick ? 'background .12s, border-color .12s' : undefined,
+        ...(sm ? { padding: '10px 12px' } : null),
+        ...(emphasis ? { background: 'var(--ink)', color: 'var(--surface)', borderColor: 'var(--ink)' } : null),
+        ...(active ? { background: `var(--${tone || 'brand'}-soft)`, borderColor: `var(--${tone || 'brand'})` } : null),
+      }}>
+      <div className="row gap-8" style={{ marginBottom: sm ? 2 : 6, alignItems: 'center' }}>
+        <span className={sm ? 'text-xs' : 'text-sm text-muted fw-600'}
+          style={{ whiteSpace: 'nowrap', color: onInk, opacity: emphasis ? 0.7 : undefined,
+                   ...(sm && !emphasis ? { color: 'var(--muted-2)' } : null) }}>{label}</span>
         {badge && (
           <span className={`badge ${badgeTone === 'ink' ? 'outline' : badgeTone}`} style={{ marginLeft: 'auto' }}>{badge}</span>
         )}
+        {actionLabel && !badge && (
+          <span className="text-xs" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 2,
+                                             color: onInk || 'var(--muted-2)', opacity: emphasis ? 0.7 : undefined }}>
+            {actionLabel}<Icon.Right size={12}/>
+          </span>
+        )}
       </div>
       <div className={`${isNum ? 'num ' : ''}fw-700`}
-        style={{ fontSize: 22, letterSpacing: '-0.02em', whiteSpace: 'nowrap', color: tone ? `var(--${tone})` : undefined }}>
+        style={{ fontSize: sm ? 16 : emphasis ? 26 : 22, letterSpacing: '-0.02em', whiteSpace: 'nowrap',
+                 color: onInk || (tone ? `var(--${tone})` : undefined) }}>
         {/* 음수는 하이픈(-)이 아니라 진짜 빼기표(−)로 — 숫자 폰트에서 하이픈은 너무 짧아 잘 안 보인다 */}
         {isNum ? (value < 0 ? '−' + fmtNum(Math.abs(value)) : fmtNum(value)) : value}
         {isNum && unit && (
-          <span className="text-muted" style={{ fontSize: 13, fontWeight: 400, marginLeft: 3 }}>{unit}</span>
+          <span style={{ fontSize: sm ? 11 : 13, fontWeight: 400, marginLeft: 3,
+                         color: onInk, opacity: emphasis ? 0.65 : undefined,
+                         ...(emphasis ? null : { color: 'var(--muted)' }) }}>{unit}</span>
         )}
       </div>
-      {hint && <div className="text-xs text-muted2" style={{ marginTop: 6 }}>{hint}</div>}
-    </div>
+      {hint && (
+        <div className="text-xs" style={{ marginTop: 6, color: onInk || 'var(--muted-2)', opacity: emphasis ? 0.7 : undefined }}>{hint}</div>
+      )}
+    </Tag>
   )
 }
 
