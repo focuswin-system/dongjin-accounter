@@ -55,7 +55,7 @@ const FormNote = ({ children }) => (
 /** 조작 줄 — 다섯 양식이 같은 줄을 쓴다. 상자를 여럿으로 쪼개지 않는다(듬성해 보인다).
     second: 아래에 한 줄 더 붙일 때(매출장의 마감일자·담당자). */
 const MonthBar = ({ month, setMonth, children, note, second }) => (
-  <div className="card card-pad no-print" style={{ marginBottom: 16 }}>
+  <div className="card card-pad no-print">
     <div className="row gap-12" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
       <span className="text-sm fw-600">기준월</span>
       <input className="input" type="month" style={{ width: 150 }}
@@ -121,7 +121,7 @@ export const ReportSalesMonth = () => {
         note={d ? `${d.from} ~ ${d.to}${d.closingDay > 0 ? ` · 매월 ${d.closingDay}일 마감` : ''}` : ''}/>
       {err ? <FormError error={err}/> : !d ? <Loading label="매출을 모으는 중…"/> : (
         <>
-          <FormPaper style={{ marginBottom: 20 }}>
+          <FormPaper>
             <FormHead title={`${ym(month)}분 매출내역`}
               sub={`${d.from} ~ ${d.to}`} right={<ApprovalBox/>}/>
             <div className="table-scroll">
@@ -234,7 +234,7 @@ export const ReportSalesYear = () => {
 
   return (
     <div>
-      <div className="card card-pad no-print" style={{ marginBottom: 16 }}>
+      <div className="card card-pad no-print">
         <div className="row gap-12" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
           <span className="text-sm fw-600">연도</span>
           <button className="icon-btn" title="이전 해" onClick={() => setYear(y => y - 1)}><Icon.Left size={14}/></button>

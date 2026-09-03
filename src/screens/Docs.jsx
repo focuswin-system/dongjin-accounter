@@ -1645,7 +1645,7 @@ const ReportEmpty = ({ title, hint }) => (
 )
 
 const ReportBar = ({ children }) => (
-  <div className="card card-pad no-print" style={{ marginBottom: 16 }}>
+  <div className="card card-pad no-print">
     <div className="col gap-10">{children}</div>
   </div>
 )
@@ -1687,7 +1687,7 @@ const PeriodFilter = ({ value, onChange, children }) => {
 /* 인쇄·엑셀에는 "언제 기준인지"가 남아야 한다. 컨트롤은 no-print 라 안 찍히므로
    기간 문구를 따로 둔다 — 기간이 안 적힌 보고서는 나중에 아무 근거가 되지 못한다. */
 const PeriodNote = ({ period }) => (
-  <div className="text-sm text-muted" style={{ marginBottom: 12 }}>기간: {periodLabelOf(period)}</div>
+  <div className="text-sm text-muted">기간: {periodLabelOf(period)}</div>
 )
 
 /** 기간(범위)으로 거른다. 범위가 비면 전체. 날짜가 없는 행은 기간을 걸었을 때 제외한다. */
@@ -1764,7 +1764,7 @@ const ReportMonthly = ({ toast }) => {
 
   return (
     <div>
-      <KpiRow cols={3} style={{ marginBottom: 24 }}>
+      <KpiRow cols={3}>
         <Kpi label="총 입금" value={totalIn} tone="pos"/>
         <Kpi label="총 지출" value={totalOut}/>
         <Kpi label="순차액" value={totalIn - totalOut} tone={totalIn >= totalOut ? "pos" : "neg"}/>
@@ -1865,7 +1865,7 @@ const ReportTax4 = ({ toast }) => {
           hint="이 자료는 급여대장에서 만듭니다. 인사관리 → 급여대장에서 그 달을 먼저 작성해주세요."/>
       ) : (
         <>
-          <KpiRow cols={3} style={{ marginBottom: 24 }}>
+          <KpiRow cols={3}>
             <Kpi label="급여 총액" value={sumGross}/>
             <Kpi label="공제 합계" value={sumDed} tone="warn"/>
             <Kpi label="실지급액" value={sumNet}/>
@@ -1962,6 +1962,14 @@ const ReportContract = ({ toast }) => {
 
   return (
     <div>
+      <KpiRow cols={4}>
+        <Kpi label="총 수주금액" value={totalAmount} hint="계약서 금액(부가세 별도)"/>
+        <Kpi label="받은 매출"   value={totalRevenue} hint="입금 완료분 · 공급가액"/>
+        <Kpi label="투입 원가"   value={totalCost} tone="neg" hint="이 주문에 귀속된 지출"/>
+        <Kpi label="손익"        value={totalProfit} tone={totalProfit < 0 ? 'neg' : 'pos'}
+          badge={totalMargin == null ? undefined : `${totalMargin.toFixed(1)}%`}
+          hint="받은 매출 − 투입 원가"/>
+      </KpiRow>
       <ReportBar>
         <div className="row gap-8" style={{ alignItems: 'center' }}>
           <button className={`chip ${!onlyOpen ? 'active' : ''}`} onClick={() => setOnlyOpen(false)}>전체</button>
@@ -1970,14 +1978,7 @@ const ReportContract = ({ toast }) => {
         </div>
       </ReportBar>
 
-      <KpiRow cols={4} style={{ marginBottom: 24 }}>
-        <Kpi label="총 수주금액" value={totalAmount} hint="계약서 금액(부가세 별도)"/>
-        <Kpi label="받은 매출"   value={totalRevenue} hint="입금 완료분 · 공급가액"/>
-        <Kpi label="투입 원가"   value={totalCost} tone="neg" hint="이 주문에 귀속된 지출"/>
-        <Kpi label="손익"        value={totalProfit} tone={totalProfit < 0 ? 'neg' : 'pos'}
-          badge={totalMargin == null ? undefined : `${totalMargin.toFixed(1)}%`}
-          hint="받은 매출 − 투입 원가"/>
-      </KpiRow>
+
 
       <div className="card" style={{ overflow: "hidden" }}>
         {/* 공용 표 — 손수 짠 <table> 을 걷어냈다. 머리글 클릭 정렬이 생기고
@@ -2066,7 +2067,7 @@ const ReportCategory = ({ toast }) => {
 
   return (
     <div>
-      <KpiRow cols={3} style={{ marginBottom: 24 }}>
+      <KpiRow cols={3}>
         <Kpi label="총 지출"  value={total}/>
         <Kpi label="비목 수"  value={`${rows.length}개`} unit=""/>
         <Kpi label="최다 비목" value={rows[0]?.cat} unit=""/>
@@ -2126,7 +2127,7 @@ const ReportVendor = ({ toast }) => {
 
   return (
     <div>
-      <KpiRow cols={4} style={{ marginBottom: 24 }}>
+      <KpiRow cols={4}>
         <Kpi label="발주처 수"    value={`${rows.length}개사`} unit=""/>
         <Kpi label="청구 합계"    value={grandTotal}/>
         <Kpi label="실현 매출"    value={totalRealized} tone="pos"/>
@@ -2178,7 +2179,7 @@ const ReportAR = ({ toast }) => {
   const { summary = {}, rows = [] } = data
   return (
     <div>
-      <KpiRow cols={4} style={{ marginBottom: 24 }}>
+      <KpiRow cols={4}>
         <Kpi label="미수금 합계"      value={summary.total}/>
         <Kpi label="이번 달 회수 예정" value={summary.thisMonth} tone="brand"/>
         <Kpi label="기한 초과"         value={summary.overdue}   tone="neg"/>
@@ -2245,7 +2246,7 @@ const ReportSubcontract = ({ toast }) => {
 
   return (
     <div>
-      <KpiRow cols={4} style={{ marginBottom: 24 }}>
+      <KpiRow cols={4}>
         <Kpi label="협력사 수"      value={`${rows.length}개사`} unit=""/>
         <Kpi label="외주가공비 합계" value={total}/>
         <Kpi label="미지급 잔액"    value={totalPending} tone="warn"/>
@@ -2302,7 +2303,7 @@ const ReportDefense = ({ toast }) => {
         </div>
         <RBar pct={(totalDone / totalAmount) * 100} tone="pos"/>
       </div>
-      <KpiRow cols={3} style={{ marginBottom: 24 }}>
+      <KpiRow cols={3}>
         <Kpi label="총 수주금액"   value={totalAmount}/>
         <Kpi label="납품 완료금액" value={totalDone} tone="pos"/>
         <Kpi label="잔여금액"      value={totalAmount - totalDone}/>
@@ -2520,6 +2521,12 @@ const ReportVAT = ({ toast, registerExport }) => {
 
   return (
     <div>
+      {/* 요약 카드 */}
+      <KpiRow cols={3}>
+        <Kpi label="매출세액 (참고)" value={salesVat}                            tone="pos"/>
+        <Kpi label="매입세액 (참고)" value={purchaseVat}                         tone="neg"/>
+        <Kpi label="납부세액 (참고)" value={netVat} tone={netVat > 0 ? "neg" : "pos"}/>
+      </KpiRow>
       {/* 분기 선택 */}
       <ReportBar>
         <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
@@ -2538,7 +2545,7 @@ const ReportVAT = ({ toast, registerExport }) => {
       {/* 서버가 period 를 못 주면(조회 실패) 이 줄을 그리지 않는다 —
           기한은 틀리게 적느니 안 적는 편이 낫다 */}
       {vatPeriod && (
-        <div className="card card-pad" style={{ background: "var(--brand-soft)", borderColor: "transparent", marginBottom: 12 }}>
+        <div className="card card-pad" style={{ background: "var(--brand-soft)", borderColor: "transparent" }}>
           <div className="row gap-8" style={{ flexWrap: "wrap" }}>
             <Icon.Bell size={14}/>
             <span className="text-sm fw-600">신고 기간: {vatPeriod.from} ~ {vatPeriod.to} ({vatPeriod.label})</span>
@@ -2574,14 +2581,11 @@ const ReportVAT = ({ toast, registerExport }) => {
         </div>
       )}
 
-      {/* 요약 카드 */}
-      <KpiRow cols={3} style={{ marginBottom: 24 }}>
-        <Kpi label="매출세액 (참고)" value={salesVat}                            tone="pos"/>
-        <Kpi label="매입세액 (참고)" value={purchaseVat}                         tone="neg"/>
-        <Kpi label="납부세액 (참고)" value={netVat} tone={netVat > 0 ? "neg" : "pos"}/>
-      </KpiRow>
 
-      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+
+      {/* alignItems:start — 안 주면 줄 수가 적은 쪽(대개 매입)이 반대쪽 높이에 맞춰 늘어나
+          아래가 텅 빈 흰 상자가 된다. 표는 제 내용만큼만 높으면 된다. */}
+      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: 'start' }}>
         {/* 매출 */}
         <div className="card" style={{ overflow: "hidden" }}>
           <div className="row" style={{ padding: "14px 18px", borderBottom: "1px solid var(--line)" }}>
@@ -2793,7 +2797,7 @@ const ReportFundSheet = ({ toast, registerExport }) => {
         </div>
       </ReportBar>
 
-      <KpiRow cols={4} style={{ marginBottom: 20 }}>
+      <KpiRow cols={4}>
         <Kpi label="들어온 돈" value={S.all.actualIn} tone="pos" hint="이 구간에 입금 완료된 돈"/>
         <Kpi label="들어올 돈" value={S.all.planIn} hint="미수금·정기청구 등 예정"/>
         <Kpi label="나갈 돈"   value={S.all.plan} tone="neg" hint="이 구간에 남은 지출 예정"/>
@@ -3053,7 +3057,7 @@ const ReportLoan = ({ toast, registerExport }) => {
     <div>
       {/* 골격: **KPI → 기간 → 필터 → 목록**. 화면마다 순서가 다르면 옮겨 다닐 때
           눈이 매번 다시 적응해야 한다(앱 규약 — 어음·거래내역과 같은 순서다). */}
-      <KpiRow cols={4} style={{ marginBottom: 24 }}>
+      <KpiRow cols={4}>
         <Kpi label="차입원금" value={T.principal} badge={`${T.count}건`}/>
         <Kpi label="상환한 원금" value={T.repaidPrincipal} tone="pos"/>
         <Kpi label="남은 원금" value={T.remaining} tone="neg" hint="차입원금 − 상환원금"/>
@@ -3062,7 +3066,7 @@ const ReportLoan = ({ toast, registerExport }) => {
       {controls}
       {/* 한 계좌만 볼 때는 무엇을 보고 있는지 인쇄물에도 남아야 한다 */}
       {picked && (
-        <div className="text-sm text-muted" style={{ marginBottom: 12 }}>
+        <div className="text-sm text-muted">
           <b>{picked.name}</b> · {picked.lender}
           {picked.accountName ? ` · 상환계좌 ${picked.accountName}` : ''}
         </div>
@@ -3072,7 +3076,7 @@ const ReportLoan = ({ toast, registerExport }) => {
              아래 목록과 같은 말을 두 번 하는 셈이다(칩 다중 선택이 되면서 '전체냐 아니냐'가
              아니라 '몇 건이 보이느냐'가 기준이 됐다). */}
       {d.loans.length > 1 && (
-        <div className="card" style={{ overflow: 'hidden', marginBottom: 20 }}>
+        <div className="card" style={{ overflow: 'hidden' }}>
           <div className="card-pad fw-700" style={{ paddingBottom: 10 }}>차입처별 요약</div>
           <DataTable
             rows={d.byLender}
@@ -3110,7 +3114,7 @@ const ReportLoan = ({ toast, registerExport }) => {
       )}
 
       {/* 2. 계좌별 현황 */}
-      <div className="card" style={{ overflow: 'hidden', marginBottom: 20 }}>
+      <div className="card" style={{ overflow: 'hidden' }}>
         <div className="card-pad fw-700" style={{ paddingBottom: 10 }}>계좌별 현황</div>
         <DataTable
           rows={d.loans}
@@ -3304,7 +3308,7 @@ const ReportCard = ({ toast }) => {
     <div>
       {/* 골격: **KPI → 기간 → 필터 → 목록**. 화면마다 순서가 다르면 옮겨 다닐 때
           눈이 매번 다시 적응해야 한다(앱 규약 — 어음·거래내역과 같은 순서다). */}
-      <KpiRow cols={T.no_evidence ? 4 : 3} style={{ marginBottom: 24 }}>
+      <KpiRow cols={T.no_evidence ? 4 : 3}>
         <Kpi label="사용액" value={T.used} badge={`${T.count}건`}/>
         <Kpi label="카드대금 결제" value={T.paid} tone="pos" hint="이 기간에 통장에서 카드로 나간 돈"/>
         <Kpi label="카드" value={d.cards.length} unit="장"/>
@@ -3315,7 +3319,7 @@ const ReportCard = ({ toast }) => {
       <PeriodNote period={period}/>
       {/* 무엇으로 걸러 본 것인지 인쇄물에도 남아야 한다 — 안 적히면 나중에 근거가 못 된다 */}
       {(owner !== 'all' || cardType !== 'all') && (
-        <div className="text-sm text-muted" style={{ marginBottom: 12 }}>
+        <div className="text-sm text-muted">
           범위: {owner === 'corp' ? '법인 명의' : owner === 'personal' ? '대표 개인 명의' : '전체 소유'}
           {cardType !== 'all' ? ` · ${cardType === 'check' ? '체크카드' : '신용카드'}` : ''}
         </div>
@@ -3323,7 +3327,7 @@ const ReportCard = ({ toast }) => {
 
       {/* 1. 카드별 요약 — 한 장만 볼 때는 한 줄짜리 표가 되니 그리지 않는다 */}
       {!cardId && (
-        <div className="card" style={{ overflow: 'hidden', marginBottom: 20 }}>
+        <div className="card" style={{ overflow: 'hidden' }}>
           <div className="card-pad fw-700" style={{ paddingBottom: 10 }}>카드별 요약</div>
           <DataTable
             rows={d.cards}
@@ -3366,11 +3370,12 @@ const ReportCard = ({ toast }) => {
       )}
 
       {/* 2. 카드별 사용 내역 */}
-      <div className="fw-700" style={{ margin: '24px 0 12px', fontSize: 15 }}>
+      {/* 섹션 제목 — 위 여백만 조금 더 준다(블록 간격은 .report-body 가 정한다) */}
+      <div className="fw-700" style={{ marginTop: 8, fontSize: 15 }}>
         카드별 사용 내역 <span className="text-sm text-muted fw-400">{T.count}건</span>
       </div>
       {d.cards.map(c => (
-        <div key={c.id} className="card" style={{ overflow: 'hidden', marginBottom: 14 }}>
+        <div key={c.id} className="card" style={{ overflow: 'hidden' }}>
           <div className="row card-pad" style={{ paddingBottom: 10, gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
             <span className="fw-700">{c.name}</span>
             <span className="text-sm text-muted">{c.owner_label} · {c.type_label}</span>
@@ -3590,7 +3595,7 @@ export const ReportsScreen = ({ go, openKey = null, onTitle }) => {
             <button className="btn excel" onClick={doExport}><Icon.Excel size={14}/> 엑셀</button>
           </>}/>
         {/* report-print — index.css 의 인쇄 whitelist. 이 클래스가 없으면 인쇄가 백지로 나온다. */}
-        <div className="report-print" ref={printRef}>
+        <div className="report-print report-body" ref={printRef}>
           {/* 종이에는 이름이 남아야 한다 — PageHeader 는 화면 것이라 인쇄에서 빠진다 */}
           <div className="rep-print-head">
             <div className="page-title" style={{ marginBottom: 4 }}>{report.title}</div>
