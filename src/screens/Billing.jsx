@@ -1479,6 +1479,9 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   }, [accounts])
   const [paidTarget, setPaidTarget] = useState(null)   // 기입금/기지급 처리 대상(계좌·날짜 드로어)
   const [importing, setImporting] = useState(false)    // 홈택스 세금계산서 엑셀 업로드 화면
+  /* 신호가 켜져 있으면 연다 — 다른 화면에서 '계산서 업로드로' 를 눌러 들어온 경우다.
+     ⚠ 신호를 내리는 일은 App 이 한다(다른 데로 가거나 주소로 오가면 0 으로). 안 내리면
+       이 화면에 다시 들어올 때마다 아무것도 안 눌렀는데 업로드 화면이 열린다. */
   useEffect(() => { if (openImportSignal) setImporting(true) }, [openImportSignal])
   const [ourBizNo, setOurBizNo] = useState('')         // 우리 회사 사업자번호 — 매출/매입 자동 판정용
 

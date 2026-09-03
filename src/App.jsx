@@ -484,6 +484,8 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
         || /^(master_|hrbase_|settings_)/.test(h);
       if (h && known) {
         if (h === "contract_detail" && param) setContractId(param);
+        // 주소로 오간 것은 '계산서 업로드로' 를 누른 것이 아니다 — 신호를 내린다
+        setTaxImportSignal(0);
         setRoute(h);
       }
     };
@@ -555,7 +557,9 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
     // 홈 '할 일'에서 특정 청구서를 바로 열 때 사용 (없으면 목록만 보여준다)
     setFocusInvoiceId(opts.invoiceId || null);
     setFocusTxnId(opts.txnId || null);
-    if (opts.taxImport) setTaxImportSignal(n => n + 1);
+    /* 신호는 **켠 그 이동에만** 유효하다. 안 내리면 나중에 이 화면에 다시 들어올 때
+       아무것도 안 눌렀는데 업로드 화면이 열린다(고장으로 읽힌다). */
+    setTaxImportSignal(n => (opts.taxImport ? n + 1 : 0));
     setRoute(id);
     /* 주문 상세는 **어느 주문인지까지 주소에 담는다.**
        예전엔 라우트 id 만 담아서, 새로고침하면 contractId 가 초기값으로 돌아가
