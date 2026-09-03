@@ -334,6 +334,14 @@ const PREQ_SOURCES = [
     desc: '견적을 요청해 둔 건을 그대로 품의로 올려요',
     effect: '거래처와 품목·단가가 그대로 옮겨져요. 받은 단가가 다르면 그 자리에서 고치면 돼요.',
   },
+  /* 이미 산 것을 품의로 — 급하게 먼저 사고 결재를 나중에 올리는 일이 실무에 흔하다.
+     그때 거래내역에 이미 적어 둔 것을 손으로 다시 옮겨 적고 있었다. */
+  {
+    id: 'txn', icon: Icon.Bank,
+    label: '거래내역에서 골라서',
+    desc: '이미 기록한 지출을 여러 건 가져와요',
+    effect: '고른 지출이 품목 줄로 채워져요. 거래처·금액이 그대로 오고, 수량은 1로 둡니다.',
+  },
   {
     id: 'item', icon: Icon.Copy,
     label: '품목에서 골라서',
@@ -402,6 +410,8 @@ export const PurchaseReqScreen = () => {
           if (id === 'blank') { setSeed({ items: [] }); setCreating(true); return }
           setRows(null); setPick(id)
           if (id === 'quote') api.getQuoteReqs().then(r => setRows(r || []))
+          // 지출 전체를 받아 화면에서 거른다 — 품의는 보통 최근 몇 달치를 훑어 고른다(정산내역서와 같은 방식)
+          else if (id === 'txn') api.getTransactions({ kind: 'expense' }).then(r => setRows(r || []))
           else api.getRefItems('item').then(r => setRows(r || []))
         }}/>
 
@@ -445,6 +455,78 @@ export const PurchaseReqScreen = () => {
         }}/>
 
       {/* 품목에서 — 견적요청서와 같은 규칙으로 채운다 */}
+      {/* 거래내역에서 — 여러 건을 담는다. 이미 나간 돈이라 금액이 확정이고,
+          그래서 수량 1 · 단가=금액으로 둔다(수량을 비워 두면 합계가 0이 된다). */}
+      <PickListDrawer
+        open={pick === 'txn'} onClose={() => setPick(null)}
+        title="거래내역에서 골라서" sub="품의에 넣을 지출을 고르세요"
+        placeholder="거래처·비목·적요 검색"
+        rows={rows}
+        match={(t, q) => [t.vendor, t.category, t.memo].filter(Boolean)
+          .some(v => String(v).toLowerCase().includes(q.toLowerCase()))}
+        render={(t) => ({
+          title: t.category && t.category !== '—' ? t.category : (t.memo || '지출'),
+          sub: [t.date, t.vendor !== '(미확인)' ? t.vendor : null, t.memo].filter(Boolean).join(' · '),
+          right: Number(t.amount) || 0,
+        })}
+        empty="가져올 지출이 없어요."
+        onDone={async (picked) => {
+          /* ⚠ **무엇을 샀는지는 품목에 있다.** 거래 한 줄에는 비목·금액뿐이고,
+             품명·규격·수량·단가는 그 거래가 정산한 **청구서의 품목 줄**(invoice_lines)에 있다.
+             그걸 안 보고 비목만 옮기면 품의서에 "소모품 1식 80,000" 한 줄이 서고,
+             결재자는 무엇을 사는지 알 수 없다 — 품의서의 존재 이유가 사라진다.
+             그래서 청구서가 딸린 건은 상세를 한 번 더 읽어 품목을 그대로 가져온다
+             (견적요청서에서 가져올 때와 같은 방식). */
+          const withInv = picked.filter(t => t.invoiceId || t.invoice_id)
+          const details = await Promise.all(withInv.map(t => api.getInvoice(t.invoiceId || t.invoice_id).catch(() => null)))
+          const linesOf = new Map()
+          withInv.forEach((t, i) => {
+            const ls = details[i]?.lines || []
+            if (ls.length) linesOf.set(t.id, ls)
+          })
+
+          /* 거래처는 **고른 것들이 한 곳일 때만** 채운다. 여러 곳이 섞였는데 첫 건으로
+             정해 버리면 나머지가 그 거래처에서 산 것처럼 보인다 — 품의서는 결재를 받는
+             문서라 거래처가 틀리면 그대로 승인이 난다. */
+          const names = [...new Set(picked.map(t => t.vendor).filter(v => v && v !== '(미확인)'))]
+          const many = names.length > 1
+          const items = []
+          for (const t of picked) {
+            const from = [t.date, many && t.vendor && t.vendor !== '(미확인)' ? t.vendor : null].filter(Boolean).join(' ')
+            const ls = linesOf.get(t.id)
+            if (ls) {
+              /* 품목이 있으면 그 줄을 그대로. 규격은 품명 뒤에 붙인다(품의서 양식엔 '품명 및 규격' 한 칸이다).
+                 단위·수량이 비어 있을 수 있다 — 그때는 비운 채 둔다. 1식으로 지어내면
+                 실제로 몇 개를 사는지 모르는 채 결재가 난다. */
+              for (const l of ls) {
+                const qty = Number(l.qty) || 0
+                items.push({
+                  name: [l.name, l.spec].filter(Boolean).join(' '),
+                  unit: l.unit || '',
+                  qty: qty ? String(qty) : '',
+                  unit_price: l.unit_price ? String(l.unit_price) : '',
+                  amount: l.amount ? String(l.amount) : '',
+                  actual_price: '', actual_amount: '',
+                  memo: from,
+                })
+              }
+            } else {
+              // 품목이 없는 거래 — 비목·적요로 한 줄. 금액은 확정이라 수량 1·단가=금액.
+              items.push({
+                name: [t.category && t.category !== '—' ? t.category : null, t.memo].filter(Boolean).join(' · ') || '지출',
+                unit: '식',
+                qty: '1',
+                unit_price: String(Number(t.amount) || 0),
+                amount: String(Number(t.amount) || 0),
+                actual_price: '', actual_amount: '',
+                memo: from,
+              })
+            }
+          }
+          setSeed({ ...(names.length === 1 ? { vendor_name: names[0] } : {}), items })
+          setPick(null); setCreating(true)
+        }}/>
+
       <PickListDrawer
         open={pick === 'item'} onClose={() => setPick(null)}
         title="품목에서 골라서" sub="살 품목을 고르세요"

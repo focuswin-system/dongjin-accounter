@@ -852,6 +852,11 @@ export const api = {
   async getTransactionVoucher(id) {
     try { return await req(`/transactions/${id}/voucher`) } catch { return null }
   },
+  /** 청구서 한 건 — 품목 줄(lines)까지 함께 온다(서버 attachMatches) */
+  async getInvoice(id) {
+    try { return adaptInvoice(await req(`/invoices/${id}`)) } catch { return null }
+  },
+
   async getInvoiceVoucher(id) {
     try { return await req(`/invoices/${id}/voucher`) } catch { return null }
   },
