@@ -208,7 +208,9 @@ export const ProfileDrawer = ({ open, onClose, user, onSaved }) => {
         )}
 
         {/* 화면 설정은 **같은 부품**을 그대로 쓴다 — 환경설정 화면과 두 벌이 되면 안 된다 */}
-        {tab === '화면 설정' && <ThemePanel embedded/>}
+        {/* pad={false} — 드로어 본문이 이미 여백을 준다. 안 끄면 왼쪽이 두 겹이 되어
+            다른 탭보다 안쪽으로 밀린다. */}
+        {tab === '화면 설정' && <ThemePanel embedded pad={false}/>}
       </div>
 
       {/* 화면 설정·접속 이력은 누르는 즉시 반영·조회라 저장 버튼이 없다 */}

@@ -42,7 +42,15 @@ const Section = ({ title, desc, children }) => (
   </div>
 )
 
-export const ThemePanel = ({ embedded }) => {
+/**
+ * @param embedded 화면 제목(PageHeader)을 빼고 남의 자리 안에 들어간다
+ * @param pad      여백을 **패널이 낼지**. 감싸는 쪽이 이미 여백을 주면 false.
+ *
+ * ⚠ 이 둘은 **다른 축**이다. 예전엔 embedded 하나가 둘 다 뜻했는데,
+ *   드로어처럼 감싸는 쪽이 이미 패딩을 주는 자리에서는 여백이 **두 겹**이 됐다
+ *   (프로필 설정에서 화면 설정 탭만 왼쪽이 44px, 다른 탭은 22px).
+ */
+export const ThemePanel = ({ embedded, pad = true }) => {
   const toast = useToast()
   const [theme, setTheme] = useState(null)   // null = 불러오는 중
   const [busy, setBusy] = useState(false)
@@ -64,9 +72,10 @@ export const ThemePanel = ({ embedded }) => {
   if (theme === null) return <Loading/>
 
   return (
-    /* ⚠ embedded 일 때 여백은 **패널이 낸다.** 감싸는 카드는 overflow:hidden 이고
-         패딩이 0이라, 글자를 모서리에 붙여 두면 첫 글자의 왼쪽이 잘려 나간다. */
-    <div className={embedded ? 'panel-pad' : 'fade-up'}>
+    /* ⚠ 환경설정 카드 안(pad)에서는 여백을 **패널이 낸다.** 그 카드는 overflow:hidden 이고
+         패딩이 0이라, 글자를 모서리에 붙여 두면 첫 글자의 왼쪽이 잘려 나간다.
+         반대로 드로어(pad={false})는 본문이 이미 패딩을 준다 — 여기서 또 주면 두 겹이다. */
+    <div className={embedded ? (pad ? 'panel-pad' : '') : 'fade-up'}>
       {!embedded && <PageHeader title="화면 설정"/>}
       <div className="text-sm text-muted" style={{ marginBottom: 16 }}>
         이 설정은 <b>나에게만</b> 적용돼요. 다른 PC 로 로그인해도 따라옵니다.
