@@ -5,6 +5,7 @@ import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 import { SourceChooser } from '../lib/components/SourceChooser'
 import { PickListDrawer } from '../lib/components/PickListDrawer'
+import { makeGridKeyHandler } from '../lib/gridKeys'
 
 const numOf = (v) => (typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, ''), 10) || 0 : Number(v) || 0)
 const ROWS = 15
@@ -51,6 +52,9 @@ const QuoteRequestPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSave
     items[i] = it
     return { ...f, items }
   })
+  /* 마지막 줄에서 Enter → 줄 추가(구매품의서와 같은 규칙) */
+  const gridKeys = makeGridKeyHandler(() => setForm(f => ({ ...f, items: [...f.items, emptyItem()] })))
+
   // 품목 기준정보에서 고르면 자재코드·품명(＋규격)·단위·단가를 자동으로 채운다(주문·구매품의서와 동일 방식).
   const pickItem = (i, name) => setForm(f => {
     const items = [...f.items]
@@ -188,7 +192,8 @@ const QuoteRequestPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSave
           </table>
 
           {/* 품목 — NO·자재코드·품명/규격·단위·수량·단가·금액·비고 */}
-          <table className="res-table res-items pr-items">
+          {/* 키보드로 다닌다 — 구매품의서·정산내역서와 같은 규칙(lib/gridKeys.js) */}
+          <table className="res-table res-items pr-items" onKeyDown={gridKeys}>
             <thead>
               <tr>
                 <th style={{ width: 30 }}>NO</th>

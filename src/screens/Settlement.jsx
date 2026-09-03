@@ -5,6 +5,7 @@ import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 import { SourceChooser } from '../lib/components/SourceChooser'
 import { PickListDrawer } from '../lib/components/PickListDrawer'
+import { makeGridKeyHandler } from '../lib/gridKeys'
 
 // 定算內譯書 — 항목은 고정 분류(도로비·교통비…) 없이 쓰는 사람이 필요한 줄만 추가한다.
 // 옛 양식의 좌측 고정 슬롯·출장 항번호(①②③…) 주석은 2026-08 고객 요청으로 걷어냈다.
@@ -52,6 +53,7 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
     return { ...f, lines }
   })
   const addLine = () => setForm(f => ({ ...f, lines: [...f.lines, emptyLine()] }))
+  const gridKeys = makeGridKeyHandler(addLine)
   const delLine = (i) => setForm(f => ({ ...f, lines: f.lines.filter((_, j) => j !== i) }))
 
   const total = edit
@@ -149,7 +151,8 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
             </tbody>
           </table>
 
-          <table className="res-table settle-grid">
+          {/* 키보드로 다닌다 — 구매품의서·견적요청서와 같은 규칙(lib/gridKeys.js) */}
+          <table className="res-table settle-grid" onKeyDown={gridKeys}>
             <colgroup>
               <col/><col style={{ width: 160 }}/>{edit ? <col style={{ width: 34 }}/> : null}
             </colgroup>

@@ -6,6 +6,7 @@ import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, D
 import { SourceChooser } from '../lib/components/SourceChooser'
 import { PickListDrawer } from '../lib/components/PickListDrawer'
 import { vatOf } from '../lib/vatRate'
+import { makeGridKeyHandler } from '../lib/gridKeys'
 
 const numOf = (v) => (typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, ''), 10) || 0 : Number(v) || 0)
 const ROWS = 15
@@ -62,6 +63,10 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
     items[i] = it
     return { ...f, items }
   })
+  /* 마지막 줄에서 Enter → 줄 추가. setItem 이 이미 "i === items.length 면 한 줄 민다"를
+     하고 있어, 빈 줄을 하나 더해 두면 다음 입력이 그 자리에 들어간다. */
+  const gridKeys = makeGridKeyHandler(() => setForm(f => ({ ...f, items: [...f.items, emptyItem()] })))
+
   // 품목 기준정보에서 고르면 품명(＋규격)·단위·견적단가(매입가)를 자동으로 채운다.
   // 매 키 입력마다 호출되며, 입력값이 품목명과 정확히 일치할 때만 자동채움(주문 화면과 동일 방식).
   const pickItem = (i, name) => setForm(f => {
@@ -212,7 +217,9 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
           <div className="res-note-line">아래 내역과 같이 購買코자 하오니 稟議하오며 決裁하여 주시기 바랍니다.</div>
 
           {/* 품목 — 이중 단가(공급업체 견적 / 실적가) */}
-          <table className="res-table res-items pr-items">
+          {/* 키보드로 다닌다 — Enter 로 아래 줄(마지막이면 줄이 하나 더 생긴다), ↑↓ 로 위아래.
+              품목이 열 줄이면 칸이 팔십 개다. 손이 자판을 떠나면 속도가 절반이 된다. */}
+          <table className="res-table res-items pr-items" onKeyDown={gridKeys}>
             <thead>
               <tr>
                 <th rowSpan={2} style={{ width: 30 }}>NO</th>
