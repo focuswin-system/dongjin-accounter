@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Icon, fmtNum, Combobox, MoneyInput, DateInput } from '../ui'
 import { computeLineAmount, num, BASIS_LABEL } from '../lineAmount'
+import { makeGridKeyHandler } from '../gridKeys'
 import { vatOf } from '../vatRate'
 
 /* 거래명세서식 품목 입력 — 청구서 폼에서 쓴다.
@@ -151,6 +152,10 @@ export const InvoiceLines = ({
   }
 
   const add = () => onChange([...lines, blankLine()])
+  /* 키보드로 다닌다 — Enter 로 아래 줄(마지막이면 줄이 하나 더 생긴다), ↑↓ 로 위아래.
+     문서 품목표(구매품의서·견적요청서·정산내역서)와 **같은 규칙**을 쓴다(lib/gridKeys.js) —
+     화면마다 키가 다르면 그게 더 헷갈린다. */
+  const gridKeys = makeGridKeyHandler(add)
   const remove = (i) => onChange(lines.filter((_, idx) => idx !== i))
   /* 복사 — 같은 품목의 규격·단가만 다른 줄이 줄줄이 나오는 게 명세서의 보통 모습이다.
      처음부터 다시 고르게 하면 그 자체가 이 기능을 안 쓰는 이유가 된다. */
@@ -249,7 +254,7 @@ export const InvoiceLines = ({
         </div>
       ) : (
         <div className="card" style={{ overflowX: 'auto', marginBottom: 8 }}>
-          <table className="table line-table" style={{ minWidth: tableW }}>
+          <table className="table line-table" style={{ minWidth: tableW }} onKeyDown={gridKeys}>
             <thead>
               <tr>
                 {/* 납품일(매입이면 입고일) — 한 장에 여러 날 납품분이 섞이는 게 실무의 보통 모습이다.

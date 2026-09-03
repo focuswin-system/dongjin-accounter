@@ -662,6 +662,12 @@ export const DateInput = ({ min = DATE_MIN, max = DATE_MAX, ...rest }) => (
 export const Combobox = ({ value, onChange, options, frequent = [], placeholder, onAddNew, allowAdd = true, addNewLabel = "새 항목 등록", portal = false }) => {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  /* 열 때 **지금 값을 입력칸에 담아 둔다.** 여태는 값이 placeholder 로만 보여서,
+     '알루미늄 하우징'을 '알루미늄 하우징 2차'로 고치려면 전부 다시 쳐야 했다(실사용 지적).
+     ⚠ 그런데 담아 둔 글자를 '사람이 친 검색어'로 취급하면 안 된다 —
+       Tab 으로 훑고 지나가기만 해도 값이 확정되고, 목록도 그 한 줄만 남는다.
+       그래서 **사람이 실제로 친 뒤에만**(dirty) 검색어로 쓴다. */
+  const [dirty, setDirty] = useState(false);
   const [hi, setHi] = useState(0);
   const [anchor, setAnchor] = useState(null);   // portal 일 때의 화면 좌표
   const inputRef = useRef(null);
@@ -675,7 +681,7 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
          닫히면서 클릭이 사라져 항목이 안 골라진다. 목록도 함께 확인한다. */
       if (rootRef.current?.contains(e.target)) return;
       if (popRef.current?.contains(e.target)) return;
-      setOpen(false); setQ("");
+      setOpen(false); setQ(""); setDirty(false);
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -705,15 +711,17 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
     };
   }, [portal, open]);
 
+  /* 검색·확정에 쓰는 말 — 사람이 친 것만. 열면서 담아 둔 현재 값은 여기 안 들어온다. */
+  const term = dirty ? q : "";
   const filtered = useMemo(() => {
-    if (!q) return options;
-    const lc = q.toLowerCase();
+    if (!term) return options;
+    const lc = term.toLowerCase();
     // keywords: 화면엔 안 보이지만 검색에는 걸리는 텍스트(예: 계정과목 설명)
     return options.filter(o =>
       o.label.toLowerCase().includes(lc)
       || (o.sub || "").toLowerCase().includes(lc)
       || (o.keywords || "").toLowerCase().includes(lc));
-  }, [q, options]);
+  }, [term, options]);
 
   const selected = options.find(o => o.value === value);
   // 목록에 없는 자유입력 값(적요·직접 입력 주문·거래처 등)은 원문 그대로 표시.
@@ -723,7 +731,17 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
   const freeInput = allowAdd && !!onAddNew;
   const display = selected?.label || ((options.length || freeInput) ? value : "") || "";
 
-  const pick = (opt) => { onChange(opt.value); setOpen(false); setQ(""); };
+  const pick = (opt) => { onChange(opt.value); setOpen(false); setQ(""); setDirty(false); };
+
+  /* 열면서 지금 값을 담고 **통째로 선택**한다.
+     그래서 이어 치면 갈아치우고(종전과 같다), 커서를 옮기거나 지우면 고칠 수 있다. */
+  const openWithValue = () => {
+    setOpen(true);
+    setQ(display || "");
+    setDirty(false);
+    setHi(0);
+    setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select(); }, 10);
+  };
 
   const onKeyDown = (e) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setHi(h => Math.min(filtered.length - 1, h + 1)); }
@@ -731,12 +749,12 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
     else if (e.key === "Enter") {
       e.preventDefault();
       if (filtered[hi]) pick(filtered[hi]);
-      else if (q && allowAdd) { onAddNew?.(q); setOpen(false); setQ(""); }
+      else if (term && allowAdd) { onAddNew?.(term); setOpen(false); setQ(""); setDirty(false); }
     } else if (e.key === "Escape") {
       /* 드롭다운이 열려 있을 때의 Esc 는 **여기서 끝난다.** 위로 흘려보내면
          드롭다운만 닫으려던 Esc 가 드로어의 "정말 닫을까요?"까지 띄운다. */
       if (open) e.stopPropagation();
-      setOpen(false); setQ("");
+      setOpen(false); setQ(""); setDirty(false);
     }
     else if (e.key === "Tab") {
       /* Tab 은 '다음 칸으로'인 동시에 **'지금 적은 것을 확정'**이다.
@@ -747,11 +765,11 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
          ⚠ 아무것도 안 친 상태(q 빈칸)에서는 **아무것도 고르지 않는다.**
          Tab 으로 훑고 지나가는 것만으로 값이 바뀌면 안 된다.
          preventDefault 는 하지 않는다 — 초점은 다음 칸으로 넘어가야 한다. */
-      if (q) {
+      if (term) {
         if (filtered[hi]) pick(filtered[hi]);
-        else if (allowAdd) onAddNew?.(q);
+        else if (allowAdd) onAddNew?.(term);
       }
-      setOpen(false); setQ("");
+      setOpen(false); setQ(""); setDirty(false);
     }
   };
 
@@ -763,11 +781,11 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
     <div ref={rootRef} style={{ position: "relative" }}>
       <div
         tabIndex={0}
-        onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 10); }}
-        onFocus={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 10); }}
+        onClick={() => openWithValue()}
+        onFocus={() => openWithValue()}
         onKeyDown={!open ? (e) => {
           if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
-            e.preventDefault(); setOpen(true); setTimeout(() => inputRef.current?.focus(), 10);
+            e.preventDefault(); openWithValue();
           }
         } : undefined}
         className="input"
@@ -776,7 +794,7 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
           borderColor: open ? "var(--brand)" : undefined,
           boxShadow: open ? "0 0 0 3px var(--brand-soft)" : undefined }}>
         {open ? (
-          <input ref={inputRef} value={q} onChange={e => { setQ(e.target.value); setHi(0); }}
+          <input ref={inputRef} value={q} onChange={e => { setQ(e.target.value); setDirty(true); setHi(0); }}
             onKeyDown={onKeyDown} placeholder={display || placeholder || "검색"}
             style={{ flex: 1, border: 0, outline: 0, background: "transparent", fontFamily: "inherit", fontSize: 13.5, color: "var(--ink)", padding: 0 }}/>
         ) : (
@@ -798,7 +816,7 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
             boxShadow: "0 16px 40px -12px rgba(15,23,42,0.18), 0 1px 0 rgba(15,23,42,0.04)",
             overflow: "hidden",
             display: "flex", flexDirection: "column", animation: "fadeUp .14s ease" }}>
-          {!q && freqOptions.length > 0 && (
+          {!term && freqOptions.length > 0 && (
             <div style={{ padding: "10px 12px 8px", borderBottom: "1px solid var(--line)" }}>
               <div className="text-xs text-muted2 fw-600" style={{ letterSpacing: "0.02em", marginBottom: 6 }}>자주 쓰는 항목</div>
               <div className="row gap-6" style={{ flexWrap: "wrap" }}>
@@ -812,7 +830,7 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
           <div style={{ overflowY: "auto", flex: 1 }}>
             {filtered.length === 0 && (
               <div style={{ padding: "16px 14px", color: "var(--muted-2)", fontSize: 13, textAlign: "center" }}>
-                검색 결과가 없어요{allowAdd && q ? ". Enter로 새로 등록할 수 있어요." : "."}
+                검색 결과가 없어요{allowAdd && term ? ". Enter로 새로 등록할 수 있어요." : "."}
               </div>
             )}
             {filtered.map((o, i) => (
@@ -832,7 +850,7 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
           {allowAdd && onAddNew && (
             <div style={{ borderTop: "1px solid var(--line)" }}>
               <button type="button"
-                onClick={() => { onAddNew(q); setOpen(false); setQ(""); }}
+                onClick={() => { onAddNew(q); setOpen(false); setQ(""); setDirty(false); }}
                 style={{ width: "100%", textAlign: "left", padding: "10px 14px", border: 0,
                   background: "transparent", cursor: "pointer", fontFamily: "inherit",
                   display: "flex", alignItems: "center", gap: 8, color: "var(--brand-ink)", fontWeight: 600, fontSize: 13 }}>

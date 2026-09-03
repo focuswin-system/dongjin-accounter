@@ -85,10 +85,17 @@ export function makeGridKeyHandler(onAddRow) {
       onAddRow()
       /* 새 줄은 다음 그리기에서 생긴다 — 그 뒤에 옮겨야 한다.
          requestAnimationFrame 두 번이면 React 가 붙인 DOM 을 확실히 본다. */
-      requestAnimationFrame(() => requestAnimationFrame(() => {
+      /* ⚠ 새 줄이 언제 그려질지는 **화면마다 다르다.** 줄 상태를 위로 올려 보내는 폼
+         (청구서 품목표)은 부모가 다시 그릴 때까지 두 프레임으로는 모자랐다 —
+         줄만 생기고 커서는 제자리에 남았다(실측). 생길 때까지 몇 프레임 지켜본다.
+         그래도 안 생기면 조용히 멈춘다(무한히 기다리지 않는다). */
+      let tries = 0
+      const jump = () => {
         const after = [...tbody.children].filter(r => r.querySelector('input, select, textarea'))
-        goto(after[at + 1])
-      }))
+        if (after.length > rows.length) { goto(after[at + 1]); return }
+        if (++tries < 12) requestAnimationFrame(jump)
+      }
+      requestAnimationFrame(jump)
     }
   }
 }
