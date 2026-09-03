@@ -1385,7 +1385,11 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   /* 카드 대금으로 넘어가는 줄에서 쓴다 — 화면을 옮기는 일은 App 이 한다.
      목록을 섞지 않고 길만 낸다: 카드 대금은 청구서가 아니라 여기 목록에 들어올 수 없다
      (카드사는 세금계산서를 주지 않고, 개별 사용분은 이미 거래로 매입세액에 잡혀 있다). */
-  goRoute, openEdit }) => {
+  goRoute,
+  /* 다른 화면(홈 '거래 등록', 거래내역 엑셀 업로드)에서 '계산서 업로드'로 바로 들어오는 길.
+     숫자를 하나 올려 보낸다 — boolean 이면 한 번 닫은 뒤 다시 누를 때 값이 안 바뀌어 안 열린다. */
+  openImportSignal = 0,
+  openEdit }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const kind = initialTab              // 'issued'(대금청구) | 'received'(수취)
@@ -1466,6 +1470,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   }, [accounts])
   const [paidTarget, setPaidTarget] = useState(null)   // 기입금/기지급 처리 대상(계좌·날짜 드로어)
   const [importing, setImporting] = useState(false)    // 홈택스 세금계산서 엑셀 업로드 화면
+  useEffect(() => { if (openImportSignal) setImporting(true) }, [openImportSignal])
   const [ourBizNo, setOurBizNo] = useState('')         // 우리 회사 사업자번호 — 매출/매입 자동 판정용
 
   /* '발행예정' — 계약에 적어둔 일정(마일스톤: 선급·기성·잔금) 중 **도래한 것**만.
@@ -1959,8 +1964,11 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
               <Icon.Plus size={14}/> {isIssued ? "환불 등록" : "환입 등록"}
             </button>
           : <>
-              <button className="btn" onClick={() => setImporting(true)}>
-                <Icon.Excel size={14}/> 홈택스 업로드
+              {/* '홈택스 업로드'라고만 적어 두니 무엇을 올리는 자리인지 안 읽혔다 —
+                  세금계산서를 거래내역 엑셀 업로드에 올리는 일이 실제로 있었다.
+                  홈택스는 받아 오는 곳이고, 올리는 것은 계산서다. */}
+              <button className="btn" onClick={() => setImporting(true)} title="홈택스에서 내려받은 전자세금계산서 엑셀">
+                <Icon.Excel size={14}/> 계산서 업로드
               </button>
               {/* 어음 탭에서는 '어음 등록'이 여기 선다 — 등록 버튼은 한자리에 모아 둔다.
                   필터 줄에 끼워 넣었더니 상태 칩과 나란히 붙어 칩처럼 보였다. */}

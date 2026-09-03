@@ -110,7 +110,9 @@ export const HomeScreen = ({ go, user, navHidden, docKeys, openIncome, openExpen
               <PopItem icon={<Icon.Excel size={16}/>} label="거래내역"  sub="입출금 여러 건"   onClick={() => go("excel_modal")}/>
               <PopItem icon={<Icon.Excel size={16}/>} label="거래처"    sub="매출처·매입처"   onClick={() => go("master_vendor")}/>
               <PopItem icon={<Icon.Excel size={16}/>} label="품목"      sub="단가표"          onClick={() => go("master_item")}/>
-              <PopItem icon={<Icon.Excel size={16}/>} label="세금계산서" sub="홈택스 내려받기" onClick={() => go("billing_issued")}/>
+              {/* 목록만 열어 주고 끝나서, 정작 업로드 자리를 다시 찾아야 했다 — 바로 연다.
+                  매출·매입은 사업자번호로 갈리므로 어느 쪽 화면에서 올리든 결과는 같다. */}
+              <PopItem icon={<Icon.Excel size={16}/>} label="세금계산서" sub="홈택스에서 내려받은 것" onClick={() => go("billing_issued", { taxImport: true })}/>
             </div>
           </Popover>
         </>}

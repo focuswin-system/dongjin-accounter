@@ -371,6 +371,9 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
   // 주소에 id 가 없을 때 없는 주문을 부르고 화면이 멈춘다.
   const [contractId, setContractId] = useState("");
   const [focusInvoiceId, setFocusInvoiceId] = useState(null);
+  /* '계산서 업로드'를 다른 화면에서 열 때 쓰는 신호. 그 화면(BillingScreen)이 소유한
+     상태라 밖에서 직접 못 켠다 — 숫자를 올려 보내면 화면이 열어 준다. */
+  const [taxImportSignal, setTaxImportSignal] = useState(0);
   // 청구서 이력·주문 상세에서 "이 거래를 거래내역에서 열어줘"로 넘겨준 id
   const [focusTxnId, setFocusTxnId] = useState(null);
   const [contractName, setContractName] = useState("");
@@ -552,6 +555,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
     // 홈 '할 일'에서 특정 청구서를 바로 열 때 사용 (없으면 목록만 보여준다)
     setFocusInvoiceId(opts.invoiceId || null);
     setFocusTxnId(opts.txnId || null);
+    if (opts.taxImport) setTaxImportSignal(n => n + 1);
     setRoute(id);
     /* 주문 상세는 **어느 주문인지까지 주소에 담는다.**
        예전엔 라우트 id 만 담아서, 새로고침하면 contractId 가 초기값으로 돌아가
@@ -617,9 +621,9 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
              그 쪽 칩 목록에는 없는 값이 남아 **아무 칩도 안 눌린 빈 표**가 된다
              ("왜 아무것도 없지" — 필터가 걸린 흔적조차 화면에 없다).
          기간·거래처 필터도 같은 경로로 새어 나간다. 두 화면은 서로 다른 장부다. */
-      case "billing_issued":  return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} key="billing_issued" initialTab="issued" focusInvoiceId={focusInvoiceId} goRoute={go}
+      case "billing_issued":  return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} key="billing_issued" openImportSignal={taxImportSignal} initialTab="issued" focusInvoiceId={focusInvoiceId} goRoute={go}
                                        openIncome={() => setTxnForm({ kind: "income" })}/>;
-      case "billing_received":return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} key="billing_received" initialTab="received" focusInvoiceId={focusInvoiceId}
+      case "billing_received":return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} key="billing_received" openImportSignal={taxImportSignal} initialTab="received" focusInvoiceId={focusInvoiceId}
                                        goRoute={go}
                                        openExpense={() => setTxnForm({ kind: "expense", compact: true })}/>;
       case "contract":        return <ContractListScreen kind="all" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
@@ -662,7 +666,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
       case "recurring_invoice": return <RecurringInvoicePanel page goRoute={go}/>;
       case "mgmt_dash":       return <MgmtDashScreen/>;
       case "mgmt_ask":        return <MgmtAskScreen/>;
-      case "excel_modal":     return <ExcelScreen/>;
+      case "excel_modal":     return <ExcelScreen goRoute={go}/>;
       case "income":          return <LedgerScreen initialFilter="income" openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
       case "expense":         return <LedgerScreen initialFilter="expense" openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
       // 미수금/미지급금은 청구서 기준 → 발행 청구서와 같은 BillingScreen을 '회수 모드'로 재사용
@@ -688,7 +692,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
     /* ⚠ docKeys·navHidden 도 의존성이다. 이 memo 안에서 홈·포털에 넘기는 값인데
        빼 두면 **늦게 온 문서 카탈로그가 반영되지 않는다** — 사이드바(위 navTree memo)는
        따라오고 홈 타일만 안 따라와서, 같은 화면이 두 가지 말을 하게 된다. */
-  }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, perms, docKeys, navHidden, manualChapter]);
+  }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, taxImportSignal, perms, docKeys, navHidden, manualChapter]);
 
   const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger"
                 : route.startsWith("billing") ? "billing"

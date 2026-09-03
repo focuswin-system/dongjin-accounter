@@ -18,6 +18,7 @@ import { downloadVisibleTables } from '../lib/export'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 import { SourceChooser } from '../lib/components/SourceChooser'
+import { looksLikeTaxInvoice } from '../lib/hometax'
 
 const todayStr = () => localToday()   // UTC 금지 — KST 새벽에 하루 전으로 찍힌다
 
@@ -1169,7 +1170,7 @@ const normKind = (v) => {
   return null
 }
 
-export const ExcelScreen = () => {
+export const ExcelScreen = ({ goRoute }) => {
   const toast = useToast()
   const fileRef = useRef(null)
   const [file, setFile] = useState(null)
@@ -1179,6 +1180,8 @@ export const ExcelScreen = () => {
   const [excluded, setExcluded] = useState(() => new Set())
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
+  // 올린 파일이 세금계산서 목록으로 보이나 — 맞으면 다른 자리를 알려 준다(막지는 않는다)
+  const [taxLike, setTaxLike] = useState(false)
   // 대량 등록분이 어느 계좌에서 오간 것인지 — 없으면 잔액에 반영되지 않는다
   const [importAccounts, setImportAccounts] = useState([])
   const [importAccountId, setImportAccountId] = useState("")
@@ -1199,11 +1202,12 @@ export const ExcelScreen = () => {
       setRawRows(rows)
       setMapping(headers.map(h => ({ excelCol: h, target: guessTarget(h) })))
       setExcluded(new Set())
+      setTaxLike(looksLikeTaxInvoice(headers))
     } catch (e) { toast.push(e.message || "파싱 실패", { tone: 'warn' }) }
     setBusy(false)
   }
 
-  const reset = () => { setFile(null); setRawRows([]); setMapping([]); setExcluded(new Set()); setResult(null) }
+  const reset = () => { setFile(null); setRawRows([]); setMapping([]); setExcluded(new Set()); setResult(null); setTaxLike(false) }
   const colFor = (t) => mapping.find(m => m.target === t)?.excelCol
   const setMap = (i, k, v) => setMapping(ms => ms.map((m, idx) => idx === i ? { ...m, [k]: v } : m))
 
@@ -1382,6 +1386,25 @@ export const ExcelScreen = () => {
         </div>
       ) : (
         <div className="col gap-16">
+            {/* 세금계산서를 여기 올리는 일이 실제로 있었다. 오류 하나 없이 통과하고,
+                있지도 않은 입출금이 수백 건 생기면서 미수금·미지급금은 하나도 안 잡힌다.
+                막지는 않는다 — 통장 거래를 계산서 서식으로 정리해 둔 곳도 있다. */}
+            {taxLike && (
+              <div className="card card-pad row gap-12" style={{ alignItems: 'center', background: 'var(--warn-soft, var(--surface-2))' }}>
+                <Icon.Warn size={18} className="text-warn"/>
+                <div style={{ minWidth: 0 }}>
+                  <div className="fw-700 text-sm">세금계산서 목록으로 보여요</div>
+                  <div className="text-sm text-muted">
+                    여기서 올리면 <b>입출금 거래</b>가 됩니다. 계산서는 <b>계산서 업로드</b>로 올려야
+                    미수금·미지급금과 부가세에 잡혀요.
+                  </div>
+                </div>
+                <button className="btn primary sm ml-auto" style={{ flexShrink: 0 }}
+                  onClick={() => goRoute?.('billing_issued', { taxImport: true })}>
+                  계산서 업로드로
+                </button>
+              </div>
+            )}
             <div className="card card-pad">
               <div className="row gap-12">
                 <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--pos-soft)", color: "var(--pos)", display: "grid", placeItems: "center" }}><Icon.Excel size={22}/></div>

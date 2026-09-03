@@ -347,3 +347,17 @@ test('금액 파싱이 서버 lib/money.js 와 같은 규칙이어야 한다', a
   // 100배 사고가 재발하지 않는지 못 박는다
   assert.equal(M.intOf('1,100,000.00'), 1_100_000)
 })
+
+test('세금계산서 파일을 거래내역 업로드에 올리면 알아챈다', async () => {
+  const M = await loading
+  // 홈택스에서 내려받은 실제 머리글 모양
+  assert.equal(M.looksLikeTaxInvoice(
+    ['작성일자', '승인번호', '공급자 사업자등록번호', '공급자 상호', '공급받는자 상호', '합계금액']), true)
+  // 승인번호가 없어도 공급자·공급받는자가 함께 있으면 계산서다
+  assert.equal(M.looksLikeTaxInvoice(['작성일자', '공급자 상호', '공급받는자 상호', '공급가액']), true)
+  // ⚠ 거래내역 양식을 계산서로 오인하면 안 된다 — 멀쩡한 업로드에 경고가 뜬다
+  assert.equal(M.looksLikeTaxInvoice(
+    ['날짜', '거래처', '금액', '비목', '계정과목', '공급가액', '부가세', '메모', '계좌']), false)
+  assert.equal(M.looksLikeTaxInvoice([]), false)
+  assert.equal(M.looksLikeTaxInvoice(null), false)
+})

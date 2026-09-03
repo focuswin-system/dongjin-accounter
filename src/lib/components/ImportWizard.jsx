@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, Fragment } from 'react'
+import { useState, useRef, useMemo, useEffect, Fragment } from 'react'
 import { Icon, Spacer, Combobox, Popover, useToast } from '../ui'
 
 // ── 엑셀·CSV 일괄 업로드 공용 마법사 ──────────────────────────────
@@ -39,6 +39,16 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
   const [truncated, setTruncated] = useState(null)   // { total, shown } — 행이 잘렸을 때만
   const [mapping, setMapping] = useState([])
   const [opts, setOpts] = useState(adapter.initialOpts ?? {})
+  /* ⚠ 어댑터의 기본값이 **늦게 올 수 있다.** 세금계산서 업로드의 '우리 회사 사업자번호'는
+     회사 정보를 서버에서 받아 채우는데, 그 전에 마법사가 열리면(다른 화면에서 바로 들어온
+     경우) 첫 렌더의 빈 값이 그대로 굳는다. 그러면 매출/매입을 못 가려 전부 '기본 구분'으로
+     들어간다 — 매입 계산서가 매출로 등록되는 사고다.
+     사람이 손댄 뒤에는 따라가지 않는다(고쳐 놓은 값을 되돌리면 그게 더 나쁘다). */
+  const optsTouched = useRef(false)
+  useEffect(() => {
+    if (optsTouched.current) return
+    setOpts(adapter.initialOpts ?? {})
+  }, [adapter])
   const [overrides, setOverrides] = useState({})     // idx -> 'insert' | 'skip' | 'update:<id>'
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
@@ -252,7 +262,7 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
               {adapter.renderOpts && (
                 <>
                   <div style={{ height: 1, background: 'var(--line)', margin: '14px 0' }}/>
-                  {adapter.renderOpts(opts, (patch) => setOpts(o => ({ ...o, ...patch })))}
+                  {adapter.renderOpts(opts, (patch) => { optsTouched.current = true; setOpts(o => ({ ...o, ...patch })) })}
                 </>
               )}
             </div>
