@@ -20,8 +20,10 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
   const toast = useToast()
   const { confirm } = useConfirm()
   const [edit, setEdit] = useState(!!isNew)
+  /* applicant(담당자) — 새로 만들 때는 비워 둔다. 서버가 비면 로그인한 사람 이름을 넣는다
+     (routes/purchase-reqs.js). 그래서 기본값을 여기서 또 정하지 않는다 — 두 곳이 정하면 갈린다. */
   const empty = () => ({ req_date: localToday(), vendor_name: '', order_source: '', ship_no: '', summary: '',
-    arrival_date: '', order_amount: '', pay_terms: '', man_hours: '', note: '', items: [emptyItem()], approval: [] })
+    arrival_date: '', order_amount: '', pay_terms: '', man_hours: '', applicant: '', note: '', items: [emptyItem()], approval: [] })
   const [form, setForm] = useState(empty())
   const [presets, setPresets] = useState([])
   const [itemMaster, setItemMaster] = useState([])   // 품목 기준정보 — 행에서 골라 규격·단위·매입단가 자동채움
@@ -39,7 +41,7 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
       req_date: doc.req_date || localToday(), vendor_name: doc.vendor_name || '', order_source: doc.order_source || '',
       ship_no: doc.ship_no || '', summary: doc.summary || '', arrival_date: doc.arrival_date || '',
       order_amount: doc.order_amount ? String(doc.order_amount) : '', pay_terms: doc.pay_terms || '', man_hours: doc.man_hours || '',
-      note: doc.note || '',
+      applicant: doc.applicant || '', note: doc.note || '',
       items: (doc.items && doc.items.length ? doc.items : []).map(it => ({
         name: it.name || '', unit: it.unit || '', qty: it.qty ? String(it.qty) : '',
         unit_price: it.unit_price ? String(it.unit_price) : '', amount: it.amount ? String(it.amount) : '',
@@ -110,7 +112,8 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
       req_date: form.req_date || null, vendor_id: vendorObj?.id || null, vendor_name: form.vendor_name.trim(),
       order_source: form.order_source.trim(), ship_no: form.ship_no.trim(), summary: form.summary.trim(),
       arrival_date: form.arrival_date || null, order_amount: numOf(form.order_amount),
-      pay_terms: form.pay_terms.trim(), man_hours: form.man_hours.trim(), note: form.note.trim(), items,
+      pay_terms: form.pay_terms.trim(), man_hours: form.man_hours.trim(),
+      applicant: form.applicant.trim(), note: form.note.trim(), items,
       approval,   // 화면에 보이는 결재선(form.approval 없으면 defApproval)을 그대로 저장 — WYSIWYG
     }
     const res = isNew ? await api.createPurchaseReq(payload) : await api.updatePurchaseReq(doc.id, payload)
@@ -199,7 +202,9 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
                 <td className="num" style={{ textAlign: 'right' }}>{amt(total)}</td>
                 <td>{edit ? <CellIn value={form.pay_terms} onChange={v => setH('pay_terms', v)}/> : form.pay_terms}</td>
                 <td>{edit ? <CellIn value={form.man_hours} onChange={v => setH('man_hours', v)}/> : form.man_hours}</td>
-                <td>{doc?.applicant || ''}</td>
+                {/* 담당자 — 옆 칸들과 같이 고칠 수 있어야 한다. 문서를 대신 쓰거나
+                    담당이 바뀌는 일이 흔한데 여기만 읽기 전용이었다(견적요청서는 이미 편집된다). */}
+                <td>{edit ? <CellIn value={form.applicant} onChange={v => setH('applicant', v)}/> : (form.applicant || doc?.applicant || '')}</td>
               </tr>
             </tbody>
           </table>
