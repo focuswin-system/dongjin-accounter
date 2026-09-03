@@ -734,12 +734,18 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
   const pick = (opt) => { onChange(opt.value); setOpen(false); setQ(""); setDirty(false); };
 
   /* 열면서 지금 값을 담고 **통째로 선택**한다.
-     그래서 이어 치면 갈아치우고(종전과 같다), 커서를 옮기거나 지우면 고칠 수 있다. */
+     그래서 이어 치면 갈아치우고(종전과 같다), 커서를 옮기거나 지우면 고칠 수 있다.
+     ⚠ **이미 열려 있으면 아무것도 하지 않는다.** 입력칸이 이 상자 **안**에 있어서,
+       치던 중에 칸을 한 번 누르면(또는 초점이 다시 오면) 여기로 흘러들어와
+       적고 있던 글자를 지금 값으로 덮어써 버린다.
+     ⚠ hi 는 -1 로 둔다(아무것도 안 짚은 상태). 0 이면 **아무것도 안 친 채 Enter** 만 눌러도
+       목록 첫 줄이 골라진다 — 이제 칸에 지금 값이 보이므로 Enter 가 '이대로 두기'로 읽힌다. */
   const openWithValue = () => {
+    if (open) return;
     setOpen(true);
     setQ(display || "");
     setDirty(false);
-    setHi(0);
+    setHi(-1);
     setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select(); }, 10);
   };
 
@@ -750,6 +756,8 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
       e.preventDefault();
       if (filtered[hi]) pick(filtered[hi]);
       else if (term && allowAdd) { onAddNew?.(term); setOpen(false); setQ(""); setDirty(false); }
+      // 아무것도 안 치고 안 짚었으면 '이대로 두기'다 — 값을 건드리지 않고 닫는다
+      else { setOpen(false); setQ(""); setDirty(false); }
     } else if (e.key === "Escape") {
       /* 드롭다운이 열려 있을 때의 Esc 는 **여기서 끝난다.** 위로 흘려보내면
          드롭다운만 닫으려던 Esc 가 드로어의 "정말 닫을까요?"까지 띄운다. */
