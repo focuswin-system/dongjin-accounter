@@ -1,5 +1,5 @@
-import { useState, useMemo, Fragment } from 'react'
-import { Icon } from '../ui'
+import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
+import { Icon, Popover } from '../ui'
 
 // 표 코어 — 앱 전역 표(약 49개)의 공통 뼈대.
 // 헤더/필터 바(기간·검색·필터패널)는 별도 TableToolbar가 맡고, 여기선 표 본문만 담당한다.
@@ -31,12 +31,63 @@ import { Icon } from '../ui'
  * 아닌 행**은 체크 자체가 안 돼야 한다. 눌러놓고 나중에 "3건 중 1건만 됐어요"라고
  * 말하는 것보다, 애초에 못 고르게 하고 이유를 붙이는 편이 낫다.
  */
-export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용이 없어요', footer, rowKey, renderExpanded, select, rowClass, minWidth, maxHeight }) => {
+/* ── 열 개인화 (tableKey 를 준 표만) ────────────────────────────────
+ *
+ * 같은 표라도 보는 사람이 다르다. 경리는 청구금액과 입금만 보면 되지만, 신고 자료를
+ * 맞추는 사람은 공급가액과 부가세를 봐야 한다. 그렇다고 열을 다 세워 두면 표가
+ * 가로로 밀려 아무도 못 읽는다 — 그래서 **접어 두고, 필요한 사람이 편다.**
+ *
+ * 저장은 이 브라우저에만 한다(서버에 두면 같은 계정을 여럿이 쓰는 곳에서 서로 화면을
+ * 바꿔 버린다). 못 읽거나 못 쓰면 조용히 기본값으로 간다 — 표는 늘 그려져야 한다.
+ *
+ * ⚠ `tableKey` 는 표마다 달라야 한다. 같은 키를 쓰면 한 표에서 숨긴 열이 다른 표에서도 사라진다.
+ */
+const prefKey = (k) => `dt:${k}`
+const readPrefs = (k) => {
+  if (!k) return null
+  try { return JSON.parse(localStorage.getItem(prefKey(k)) || 'null') } catch { return null }
+}
+const writePrefs = (k, v) => {
+  if (!k) return
+  try { localStorage.setItem(prefKey(k), JSON.stringify(v)) } catch { /* 사생활 보호 모드 */ }
+}
+/** 설정 목록에 보일 이름 — header 가 노드(아이콘·배지)거나 아예 비었으면(버튼 칸) 대신 쓸 이름. */
+const colLabel = (c) =>
+  c.label || (typeof c.header === 'string' && c.header.trim() ? c.header : null) || c.key || '이름 없는 열'
+
+export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용이 없어요', footer, rowKey, renderExpanded, select, rowClass, minWidth, maxHeight,
+  /* tableKey: 주면 '열' 버튼이 생긴다 — 열 접기·순서·너비를 이 브라우저에 기억한다.
+     열 정의에 붙일 수 있는 것:
+       optional: true       접을 수 있는 열(안 주면 늘 보인다)
+       defaultHidden: true  처음엔 접혀 있는 열(공급가액·부가세처럼 필요한 사람만 펴는 것)
+       label                설정 목록에 보일 이름(header 가 아이콘·노드일 때) */
+  tableKey }) => {
   const [sort, setSort] = useState(null)   // { key, dir: 'asc' | 'desc' } | null
+  const [prefs, setPrefs] = useState(() => readPrefs(tableKey))
+  /* 표가 다른 화면으로 재사용될 때(같은 컴포넌트, 다른 tableKey) 앞 표의 설정이 남지 않게 한다 */
+  useEffect(() => { setPrefs(readPrefs(tableKey)) }, [tableKey])
+  const savePrefs = (next) => { setPrefs(next); writePrefs(tableKey, next) }
+
+  /* 실제로 그릴 열 — 순서 → 숨김 → 너비 순으로 반영한다.
+     ⚠ 저장된 순서에 없는 열은 **뒤에 붙인다**. 새 열이 생겼는데 저장된 순서만 따르면
+       그 열이 통째로 사라진다(설정을 한 번 만진 사람만 못 보는, 찾기 어려운 버그다). */
+  const shownColumns = useMemo(() => {
+    if (!tableKey) return columns
+    const order = prefs?.order || []
+    const rank = new Map(order.map((k, i) => [k, i]))
+    const ordered = [...columns].sort((a, b) =>
+      (rank.has(a.key) ? rank.get(a.key) : 1e6 + columns.indexOf(a)) -
+      (rank.has(b.key) ? rank.get(b.key) : 1e6 + columns.indexOf(b)))
+    const hidden = new Set(prefs?.hidden || columns.filter(c => c.defaultHidden).map(c => c.key))
+    const widths = prefs?.width || {}
+    return ordered
+      .filter(c => !(c.optional || c.defaultHidden) || !hidden.has(c.key))
+      .map(c => (widths[c.key] ? { ...c, width: widths[c.key] } : c))
+  }, [columns, prefs, tableKey])
 
   const sorted = useMemo(() => {
     if (!sort) return rows
-    const col = columns.find(c => c.key === sort.key)
+    const col = shownColumns.find(c => c.key === sort.key)
     if (!col) return rows
     const val = (r) => (col.sortValue ? col.sortValue(r) : r[col.key])
     // 방향은 '값 비교'에만 적용한다. reverse()로 뒤집으면 빈 값(뒤에 있던 것)이 맨 앞으로 와
@@ -52,7 +103,7 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
         : String(x).localeCompare(String(y), 'ko')
       return c * dir
     })
-  }, [rows, sort, columns])
+  }, [rows, sort, shownColumns])
 
   const clickSort = (col) => {
     if (!col.sortable) return
@@ -87,13 +138,150 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
     const on = selectedSet.has(id)
     select.onChange(on ? (select.ids || []).filter(x => x !== id) : [...(select.ids || []), id])
   }
-  const colCount = columns.length + (select ? 1 : 0)
+  const colCount = shownColumns.length + (select ? 1 : 0)
+
+  /* ── 열 설정 조작 ──
+     hidden 은 '지금 접힌 열'을 통째로 담는다. 저장된 값이 없으면 defaultHidden 이 기본이다. */
+  const hiddenNow = prefs?.hidden || columns.filter(c => c.defaultHidden).map(c => c.key)
+  const orderedAll = useMemo(() => {
+    const order = prefs?.order || []
+    const rank = new Map(order.map((k, i) => [k, i]))
+    return [...columns].sort((a, b) =>
+      (rank.has(a.key) ? rank.get(a.key) : 1e6 + columns.indexOf(a)) -
+      (rank.has(b.key) ? rank.get(b.key) : 1e6 + columns.indexOf(b)))
+  }, [columns, prefs])
+
+  const toggleCol = (key) => {
+    const on = hiddenNow.includes(key)
+    const hidden = on ? hiddenNow.filter(k => k !== key) : [...hiddenNow, key]
+    /* 정렬 기준이던 열을 접으면 정렬도 푼다 — 안 그러면 보이지도 않는 열 기준으로
+       줄이 서 있어 "왜 이 순서지"를 알 길이 없다. */
+    if (!on && sort?.key === key) setSort(null)
+    savePrefs({ ...(prefs || {}), hidden })
+  }
+  const moveCol = (key, delta) => {
+    const keys = orderedAll.map(c => c.key)
+    const i = keys.indexOf(key)
+    const j = i + delta
+    if (i < 0 || j < 0 || j >= keys.length) return
+    keys.splice(j, 0, keys.splice(i, 1)[0])
+    savePrefs({ ...(prefs || {}), order: keys })
+  }
+  const resetCols = () => { savePrefs({}); setSort(null) }
+
+  /* 너비 끌기 — 머리글 오른쪽 모서리를 잡고 민다.
+     ⚠ 표 안의 클릭(정렬)과 겹치지 않게 손잡이에서 클릭을 멈춘다. */
+  const drag = useRef(null)
+  useEffect(() => {
+    if (!tableKey) return
+    const onMove = (e) => {
+      if (!drag.current) return
+      const { key, startX, startW } = drag.current
+      const w = Math.max(48, Math.round(startW + (e.clientX - startX)))
+      drag.current.w = w
+      const th = document.querySelector(`[data-dt-th="${key}"]`)
+      if (th) th.style.width = `${w}px`      // 끄는 동안은 DOM 만 — 매 픽셀 저장하면 화면이 통째로 다시 그려진다
+    }
+    const onUp = () => {
+      if (!drag.current) return
+      const drag0 = drag.current
+      const { key, w } = drag0
+      drag.current = null
+      document.body.style.cursor = ''
+      if (w) savePrefs({ ...(prefs || {}), width: { ...(drag0.snapshot || {}), [key]: w } })
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+  }, [tableKey, prefs])
+
+  /* ⚠ 끌기를 시작할 때 **모든 열의 지금 너비를 함께 적어 둔다.**
+     기본 레이아웃(table-layout:auto)에서는 지정한 width 가 '희망 사항'이라, 남는 폭을
+     브라우저가 다시 나눠 갖는다 — 246px 로 끌어도 화면은 166px 그대로였다(실측).
+     너비를 지키려면 fixed 레이아웃으로 가야 하는데, 그러면 **적어 두지 않은 열**은
+     제 폭을 잃는다. 그래서 지금 보이는 모습을 그대로 굳힌 뒤 하나만 바꾼다. */
+  const startResize = (e, c) => {
+    e.preventDefault(); e.stopPropagation()
+    const th = e.currentTarget.parentElement
+    const row = th.parentElement
+    /* ⚠ offsetWidth 는 **내림한 정수**다. 열마다 1px 씩 깎이면 열두 열에서 십여 px 이 사라져,
+       굳히는 순간 금액이 두 줄로 접힌다(실측). 소수까지 재서 올림한다. */
+    const wOf = (el) => Math.ceil(el.getBoundingClientRect().width)
+    const snapshot = { ...(prefs?.width || {}) }
+    for (const el of row.children) {
+      const k = el.getAttribute('data-dt-th')
+      if (k && !snapshot[k]) snapshot[k] = wOf(el)
+    }
+    drag.current = { key: c.key, startX: e.clientX, startW: wOf(th), snapshot }
+    document.body.style.cursor = 'col-resize'
+  }
+
+  const changed = !!(prefs && (prefs.hidden?.length || prefs.order?.length || Object.keys(prefs.width || {}).length))
+
+  /* 너비를 손본 표만 fixed 로 간다 — 안 만진 표는 여태 모습 그대로여야 한다.
+     폭을 합계로 못박는 이유: width:100% 인 채로 fixed 면 남는 폭을 열들이 나눠 가져
+     끌어 놓은 값과 어긋난다. 합계가 화면보다 좁으면 오른쪽이 비고, 넓으면 가로로 스크롤된다. */
+  const fixedWidth = useMemo(() => {
+    const w = prefs?.width
+    if (!tableKey || !w || !Object.keys(w).length) return null
+    const cols = shownColumns.filter(c => w[c.key])
+    if (cols.length !== shownColumns.length) return null   // 새 열이 생겼으면 굳히지 않는다
+    return cols.reduce((a, c) => a + Number(w[c.key] || 0), 0) + (select ? 40 : 0)
+  }, [prefs, shownColumns, select, tableKey])
+
+  const colBar = tableKey ? (
+    /* 표 위 오른쪽 — 늘 있지만 조용하다(ghost). 여기 있는 줄 모르면 아무도 안 쓰므로
+       숨기지는 않는다. 인쇄에는 안 나온다. */
+    <div className="dt-colbar no-print">
+      <Popover align="right" width={264}
+        trigger={<button className="btn ghost sm" title="보여줄 열·순서·너비를 고쳐요">
+          <Icon.Filter size={12}/> 열{changed ? ' ·' : ''}
+        </button>}>
+        <div style={{ padding: 8 }}>
+          <div className="row" style={{ padding: '2px 6px 8px' }}>
+            <span className="text-xs text-muted2">보여줄 열과 순서</span>
+            {changed && <button className="btn ghost sm ml-auto" onClick={resetCols}>기본값</button>}
+          </div>
+          {/* 열이 열댓 개인 표도 있다 — 목록이 화면 밖으로 넘치면 아래쪽 열은 손도 못 댄다 */}
+          <div style={{ maxHeight: '46vh', overflowY: 'auto' }}>
+          {orderedAll.map((c, i) => {
+            const canHide = !!(c.optional || c.defaultHidden)
+            const on = !hiddenNow.includes(c.key)
+            return (
+              <div key={c.key} className="row gap-6" style={{ padding: '4px 6px', alignItems: 'center' }}>
+                {/* 못 접는 열도 목록에 둔다 — 순서는 바꿀 수 있고, 없으면 목록이 표와 안 맞아 보인다 */}
+                <input type="checkbox" checked={canHide ? on : true} disabled={!canHide}
+                  onChange={() => toggleCol(c.key)}
+                  title={canHide ? undefined : '이 열은 접을 수 없어요'}/>
+                <span className={`text-sm ${canHide && !on ? 'text-muted2' : ''}`}
+                  style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {colLabel(c)}
+                </span>
+                <button className="icon-btn sm" title="위로" disabled={i === 0}
+                  onClick={() => moveCol(c.key, -1)}><Icon.Up size={12}/></button>
+                <button className="icon-btn sm" title="아래로" disabled={i === orderedAll.length - 1}
+                  onClick={() => moveCol(c.key, 1)}><Icon.Down size={12}/></button>
+              </div>
+            )
+          })}
+          </div>
+          <div className="text-xs text-muted2" style={{ padding: '8px 6px 2px', lineHeight: 1.6 }}>
+            머리글 오른쪽 끝을 끌면 너비가 바뀌어요. 이 브라우저에만 기억합니다.
+          </div>
+        </div>
+      </Popover>
+    </div>
+  ) : null
 
   return (
+    <>
+    {colBar}
     <div className="table-scroll" style={maxHeight ? { maxHeight } : undefined}>
       {/* minWidth: 열이 많아 좁은 화면에서 짓눌리는 표(자금관리표 등)가 쓴다.
           인쇄에서는 index.css 가 min-width 를 0으로 되돌린다 — 종이는 안 밀린다. */}
-      <table className="table" style={minWidth ? { minWidth } : undefined}>
+      <table className="table"
+        style={fixedWidth ? { tableLayout: 'fixed', width: fixedWidth, minWidth: fixedWidth }
+                          : (minWidth ? { minWidth } : undefined)}>
         <thead>
           <tr>
             {select && (
@@ -104,18 +292,24 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
                   onChange={toggleAll} title="보이는 것 전체 선택"/>
               </th>
             )}
-            {columns.map((c, i) => {
+            {shownColumns.map((c, i) => {
               const active = sort?.key === c.key
               return (
-                <th key={c.key ?? i}
+                <th key={c.key ?? i} data-dt-th={c.key}
                   className={`${alignClass(c.align)} ${c.headClassName || ''}`.trim()}
-                  style={{ width: c.width, cursor: c.sortable ? 'pointer' : undefined }}
+                  style={{ width: c.width, cursor: c.sortable ? 'pointer' : undefined,
+                           position: tableKey ? 'relative' : undefined }}
                   onClick={() => clickSort(c)}>
                   <span className="dt-th" style={{ justifyContent: c.align === 'right' ? 'flex-end' : c.align === 'center' ? 'center' : 'flex-start' }}>
                     {c.header}
                     {/* data-dir 은 Icon 이 svg로 전달하지 않으므로 감싸는 span 이 지닌다 */}
                     {c.sortable && <span className="dt-sort" data-dir={active ? sort.dir : 'none'}><Icon.Down size={12}/></span>}
                   </span>
+                  {/* 너비 손잡이 — 마지막 열에는 두지 않는다(늘려 봐야 표 밖이다) */}
+                  {tableKey && i < shownColumns.length - 1 && (
+                    <span className="dt-resize no-print" onMouseDown={e => startResize(e, c)}
+                      onClick={e => e.stopPropagation()} title="끌어서 너비 조절"/>
+                  )}
                 </th>
               )
             })}
@@ -143,7 +337,7 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
                         onChange={() => toggleOne(key)}/>
                     </td>
                   )}
-                  {columns.map((c, ci) => (
+                  {shownColumns.map((c, ci) => (
                     <td key={c.key ?? ci} className={`${alignClass(c.align)} ${c.className || ''}`.trim()}>
                       {c.render ? c.render(row, i) : row[c.key]}
                     </td>
@@ -161,5 +355,6 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
         {footer && <tfoot>{footer}</tfoot>}
       </table>
     </div>
+    </>
   )
 }
