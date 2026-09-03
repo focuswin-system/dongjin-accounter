@@ -125,7 +125,10 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
   /* 행 키는 **정렬된 목록 기준으로 한 번만** 매긴다.
      rowKey 도 row.id 도 없을 때의 대체값이 배열 인덱스라서, 걸러낸 배열(selectable)에서 다시
      매기면 같은 행이 다른 키를 갖는다 — 고른 것과 그려진 것이 어긋난다. */
-  const keyOf = (row, i) => (rowKey ? rowKey(row) : (row.id ?? i))
+  /* ⚠ rowKey 에 **줄 번호도 넘긴다.** 안 넘기면 `rowKey={(r, i) => i}` 처럼 번호로 키를 만드는
+     화면(부가세·주문별 수익 등 일곱 곳)에서 i 가 undefined 라 **키가 통째로 빈다** —
+     React 가 경고를 내고, 줄이 신원을 잃어 정렬·필터 때 엉뚱한 줄이 재사용된다. */
+  const keyOf = (row, i) => (rowKey ? rowKey(row, i) : (row.id ?? i))
   const keyByRow = new Map(sorted.map((r, i) => [r, keyOf(r, i)]))
   const canSelect = (row) => !select?.isSelectable || select.isSelectable(row)
   const selectable = select ? sorted.filter(canSelect) : []
