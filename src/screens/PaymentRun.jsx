@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef} from 'react'
 import { Icon, fmtNum, useToast, FilterSelect, Loading, localToday } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
 import { downloadCsv } from '../lib/export'
+import { PrintEditButton } from '../lib/components/PrintEditButton'
+import { usePrintEdit } from '../lib/printEdit'
 
 /* 매입처 결제 내역 — 매달 은행에 넣을 일괄이체 명단.
  *
@@ -52,12 +54,16 @@ export const PaymentRunScreen = ({ go }) => {
       { textCols: [3] })
   }
 
+  /* 인쇄 전 손보기 — 글자 칸만, 저장 안 함(lib/printEdit.js). 보고서마다 다르게 만들지 않는다 */
+  const printRef = useRef(null)
+  const pe = usePrintEdit(printRef, data ? data.count : 0)
   return (
-    <div className="fade-up">
+    <div className="fade-up" ref={printRef} onKeyDown={pe.onKeyDown}>
       <PageHeader
         title="매입 결제내역"
         sub="이번 달 매입처에 보낼 대금을 한 장으로 모읍니다. 은행 이체 명단으로 그대로 쓰세요."
         actions={<>
+          <PrintEditButton on={pe.on} toggle={pe.toggle} count={pe.count}/>
           <button className="btn" onClick={exportCsv}><Icon.Download/> <span className="btn-label-hide">내보내기</span></button>
           <button className="btn primary" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
         </>}

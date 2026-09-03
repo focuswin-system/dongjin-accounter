@@ -1,7 +1,9 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef} from 'react'
 import { Icon, fmtNum, useToast, DateInput, Loading, periodToRange } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
+import { PrintEditButton } from '../lib/components/PrintEditButton'
+import { usePrintEdit } from '../lib/printEdit'
 
 /**
  * 전표 목록(분개장) — 기간 안의 거래를 차변·대변 줄로 펼친다.
@@ -50,15 +52,19 @@ export const VoucherBookScreen = () => {
     if (!res.ok) toast.push(res.error || '내려받기에 실패했어요', { tone: 'warn' })
   }
 
+  /* 인쇄 전 손보기 — 글자 칸만, 저장 안 함(lib/printEdit.js) */
+  const printRef = useRef(null)
+  const pe = usePrintEdit(printRef, rows ? rows.length : 0)
   return (
-    <div className="fade-up">
+    <div className="fade-up" ref={printRef} onKeyDown={pe.onKeyDown}>
       <PageHeader title="전표 목록"
         sub="기간 안의 거래를 차변·대변으로 펼칩니다. 세무사에게 넘기거나 회계 프로그램에 올릴 때 쓰세요."
-        actions={
+        actions={<>
+          <PrintEditButton on={pe.on} toggle={pe.toggle} count={pe.count}/>
           <button className="btn primary" onClick={download} disabled={busy || rows.length === 0}>
             <Icon.Excel size={14}/> 엑셀 내려받기
           </button>
-        }/>
+        </>}/>
 
       <div className="card card-pad row" style={{ gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
         <DateInput className="input" style={{ width: 150 }} value={from} onChange={e => setFrom(e.target.value)}/>

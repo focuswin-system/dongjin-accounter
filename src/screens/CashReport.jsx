@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef} from 'react'
 import { Icon, fmtNum, localToday, DateInput } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { DataTable } from '../lib/components/DataTable'
 import { api } from '../lib/api'
+import { PrintEditButton } from '../lib/components/PrintEditButton'
+import { usePrintEdit } from '../lib/printEdit'
 
 /* 자금일보 — "지금 돈이 어디 얼마 있고, 앞으로 언제 들어오고 나가는가".
  *
@@ -39,6 +41,12 @@ export const CashReportScreen = ({ page = true }) => {
     return () => { alive = false }
   }, [date, days])
 
+  /* 인쇄 전 손보기 — 글자 칸만, 저장 안 함(lib/printEdit.js).
+     ⚠ **아래의 조건부 return 보다 위**에 있어야 한다. 아래 두면 자료를 못 불러온 렌더에서
+       훅 수가 달라져 화면이 통째로 무너진다(Rendered more hooks than during the previous render). */
+  const printRef = useRef(null)
+  const pe = usePrintEdit(printRef, data ? 1 : 0)
+
   if (loading && !data) return <div className="text-sm text-muted" style={{ padding: 40, textAlign: 'center' }}>불러오는 중…</div>
   if (!data) return <div className="text-sm text-muted" style={{ padding: 40, textAlign: 'center' }}>자금 현황을 불러오지 못했어요.</div>
 
@@ -60,12 +68,13 @@ export const CashReportScreen = ({ page = true }) => {
     .sort((x, y) => y.lowest.balance - x.lowest.balance)[0] || null
 
   return (
-    <div className="fade-up">
+    <div className="fade-up" ref={printRef} onKeyDown={pe.onKeyDown}>
       {page && (
         <PageHeader title="자금일보"
           sub={`${data.date} 기준 · 앞으로 ${days}일`}
           actions={
             <div className="row gap-8" style={{ alignItems: 'center' }}>
+              <PrintEditButton on={pe.on} toggle={pe.toggle} count={pe.count}/>
               <DateInput className="input" style={{ width: 150 }} value={date}
                 max={localToday()} onChange={e => setDate(e.target.value)}/>
               <div className="row gap-4">
@@ -338,16 +347,20 @@ export const DailyTrialScreen = () => {
     setDate(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`)
   }
 
+  /* 인쇄 전 손보기 — 글자 칸만, 저장 안 함(lib/printEdit.js) */
+  const dtRef = useRef(null)
+  const dtPe = usePrintEdit(dtRef, data ? 1 : 0)
   return (
     /* 표가 T자라 폭을 860으로 묶었다. 제목·날짜 이동까지 같은 폭 안에 둬야
        머리글과 표가 한 덩어리로 읽힌다(제목만 왼쪽 끝에 떨어져 있으면 어긋나 보인다). */
     /* margin 축약형을 쓰면 React가 marginTop 같은 개별 속성과 섞였다고 경고한다
        (같은 자리에 다른 화면이 들어왔다 나가면서 스타일이 교체될 때). 개별 속성으로 적는다. */
-    <div className="fade-up" style={{ maxWidth: 860, marginLeft: 'auto', marginRight: 'auto' }}>
+    <div className="fade-up" ref={dtRef} onKeyDown={dtPe.onKeyDown} style={{ maxWidth: 860, marginLeft: 'auto', marginRight: 'auto' }}>
       <PageHeader title="일계표"
         sub="하루치 거래를 계정과목별로 차변·대변에 나눠 봅니다"
         actions={
           <div className="row gap-4" style={{ alignItems: 'center' }}>
+            <PrintEditButton on={dtPe.on} toggle={dtPe.toggle} count={dtPe.count}/>
             <button className="btn sm" onClick={() => shift(-1)}>◀</button>
             <DateInput className="input" style={{ width: 150 }} value={date}
               onChange={e => setDate(e.target.value)}/>

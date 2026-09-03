@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef} from 'react'
 import { Icon, fmtNum, Loading } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
+import { PrintEditButton } from '../lib/components/PrintEditButton'
+import { usePrintEdit } from '../lib/printEdit'
 
 /* 자금 현황 — "이 기간에 돈이 얼마 들어오고 나가서, 얼마 남나".
  *
@@ -298,13 +300,17 @@ export const FundStatusScreen = ({ go }) => {
 
   const st = data ? (STATE[data.state] || STATE.current) : null
 
+  /* 인쇄 전 손보기 — 글자 칸만, 저장 안 함(lib/printEdit.js) */
+  const printRef = useRef(null)
+  const pe = usePrintEdit(printRef, data ? 1 : 0)
   return (
     /* fund-print — 인쇄 whitelist. 이게 없으면 Ctrl+P 가 백지로 나온다
        (인쇄 CSS 가 body * 를 다 숨기고 지정된 것만 되살리는 방식이다).
        기간 고르는 칩 줄에는 no-print 가 붙어 종이에서는 빠진다. */
-    <div className="fade-up fund-print">
+    <div className="fade-up fund-print" ref={printRef} onKeyDown={pe.onKeyDown}>
       <PageHeader title="자금 현황"
-        sub="기간을 골라 들어온·나간 돈과 들어올·나갈 돈을 봅니다. 계좌를 누르면 항목과 날짜가 펼쳐져요."/>
+        sub="기간을 골라 들어온·나간 돈과 들어올·나갈 돈을 봅니다. 계좌를 누르면 항목과 날짜가 펼쳐져요."
+        actions={<PrintEditButton on={pe.on} toggle={pe.toggle} count={pe.count}/>}/>
 
       {/* 기간 단위 — 달이 특별한 게 아니라 단위 중 하나다 */}
       <div className="card card-pad no-print" style={{ marginBottom: 16 }}>

@@ -20,6 +20,8 @@ import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, D
 import { SourceChooser } from '../lib/components/SourceChooser'
 import { looksLikeTaxInvoice } from '../lib/hometax'
 import { PrintButton } from '../lib/components/PrintButton'
+import { PrintEditButton } from '../lib/components/PrintEditButton'
+import { usePrintEdit } from '../lib/printEdit'
 /* 고객사 양식 다섯 — 파일을 나눈다. 이 파일은 이미 삼천 줄이 넘고,
    저 다섯은 서로만 쓰는 부품(결재란·제목줄·기준월 줄)을 공유한다. */
 import { ReportSalesMonth, ReportSalesYear, ReportPurchaseMonth, ReportVendorLedger, ReportSalesBook } from './SalesForms'
@@ -3531,6 +3533,9 @@ export const ReportsScreen = ({ go, openKey = null, onTitle }) => {
   const active = openKey
   const [items, setItems] = useState(null)     // null = 아직 안 불러옴
   const printRef = useRef(null)
+  /* 인쇄 전 손보기 — 글자 칸만, 저장 안 함. 표 종류를 가리지 않게 DOM 을 훑는 방식이라
+     보고서 열여덟 개가 한 번에 같은 동작을 얻는다(화면마다 붙이면 또 빠지는 곳이 생긴다). */
+  const pe = usePrintEdit(printRef, `${openKey || ''}|${items ? items.length : ''}`)
 
   useEffect(() => {
     let alive = true
@@ -3589,13 +3594,14 @@ export const ReportsScreen = ({ go, openKey = null, onTitle }) => {
           title={report.title}
           sub={`${localToday()} 조회 기준`}
           actions={<>
+            <PrintEditButton on={pe.on} toggle={pe.toggle} count={pe.count}/>
             {/* 보고서마다 방향을 따로 기억한다 — 매입매출장은 가로, 계약별 수익은 세로 식이다 */}
             <PrintButton storeKey={`report:${active}`}
               defaultOrientation={REPORT_LANDSCAPE.has(active) ? 'landscape' : 'portrait'}/>
             <button className="btn excel" onClick={doExport}><Icon.Excel size={14}/> 엑셀</button>
           </>}/>
         {/* report-print — index.css 의 인쇄 whitelist. 이 클래스가 없으면 인쇄가 백지로 나온다. */}
-        <div className="report-print report-body" ref={printRef}>
+        <div className="report-print report-body" ref={printRef} onKeyDown={pe.onKeyDown}>
           {/* 종이에는 이름이 남아야 한다 — PageHeader 는 화면 것이라 인쇄에서 빠진다 */}
           <div className="rep-print-head">
             <div className="page-title" style={{ marginBottom: 4 }}>{report.title}</div>
