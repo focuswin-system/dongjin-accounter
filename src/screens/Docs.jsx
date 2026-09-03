@@ -2011,7 +2011,7 @@ const ReportContract = ({ toast }) => {
               render: r => (
                 /* 매출이 아직 없는 주문은 이익률 칸을 비운다 — 0%로 적으면 '본전'으로 읽힌다 */
                 r.margin == null
-                  ? <span className="text-sm text-muted2">\u2014</span>
+                  ? <span className="text-sm text-muted2">—</span>
                   : (
                     <div className="row gap-6" style={{ alignItems: 'center' }}>
                       <span className="num text-sm fw-600"
@@ -2447,7 +2447,9 @@ const ReportTaxOffice = ({ toast, registerExport }) => {
                 /* 정상이면 표식을 달지 않는다 — 전부 초록 체크가 붙으면 정작 문제가 안 보인다 */
                 { key: 'ready', header: '상태', width: 130,
                   render: r => (r.ready
-                    ? <span className="text-sm text-muted2">—</span>
+                    /* ⚠ JSX 본문에서는 — 가 이스케이프가 아니라 **글자 그대로** 나온다
+                     (이스케이프는 문자열 리터럴 안에서만 먹는다). 실제로 표에 '—' 가 찍혀 있었다. */
+                  ? <span className="text-sm text-muted2">—</span>
                     : <span className="badge warn" style={{ fontSize: 11 }}>확인 필요</span>) },
               ]}
             />
@@ -3573,20 +3575,27 @@ export const ReportsScreen = ({ go, openKey = null, onTitle }) => {
     const View = REPORT_VIEWS[active]
     return (
       <div className="fade-up">
-        {/* '보고서 목록' 버튼은 두지 않는다 — 빵부스러기의 '보고서'가 그 일을 하고,
-            독립 화면인 보고서들에는 애초에 그 버튼이 없다. 둘을 같은 모양으로 둔다. */}
-        <div className="row no-print" style={{ paddingTop: 30, marginBottom: 20 }}>
-          <div className="ml-auto row gap-8">
+        {/* ⚠ 머리는 **공용 PageHeader** 를 쓴다.
+            여태 액션(인쇄·엑셀)만 위에 따로 떠 있고 제목이 그 아래 왼쪽에 있어서,
+            제목 줄과 동작 줄이 59px 어긋나 있었다(실측). 다른 화면은 전부 한 줄이다 —
+            독립 화면인 보고서(매입·매출 현황)도 PageHeader 를 쓴다. 골격을 맞춘다.
+            '보고서 목록' 버튼은 두지 않는다 — 빵부스러기의 '보고서'가 그 일을 한다. */}
+        <PageHeader
+          title={report.title}
+          sub={`${localToday()} 조회 기준`}
+          actions={<>
             {/* 보고서마다 방향을 따로 기억한다 — 매입매출장은 가로, 계약별 수익은 세로 식이다 */}
             <PrintButton storeKey={`report:${active}`}
               defaultOrientation={REPORT_LANDSCAPE.has(active) ? 'landscape' : 'portrait'}/>
             <button className="btn excel" onClick={doExport}><Icon.Excel size={14}/> 엑셀</button>
-          </div>
-        </div>
+          </>}/>
         {/* report-print — index.css 의 인쇄 whitelist. 이 클래스가 없으면 인쇄가 백지로 나온다. */}
         <div className="report-print" ref={printRef}>
-          <div className="page-title" style={{ marginBottom: 4 }}>{report.title}</div>
-          <div className="page-sub" style={{ marginBottom: 24 }}>{localToday()} 조회 기준</div>
+          {/* 종이에는 이름이 남아야 한다 — PageHeader 는 화면 것이라 인쇄에서 빠진다 */}
+          <div className="rep-print-head">
+            <div className="page-title" style={{ marginBottom: 4 }}>{report.title}</div>
+            <div className="page-sub">{localToday()} 조회 기준</div>
+          </div>
           <View toast={toast} registerExport={registerExport}/>
         </div>
       </div>

@@ -1023,6 +1023,8 @@ button.cell-tag:hover { color: var(--ink); background: var(--surface-2); }
 
 /* 열 설정 — 표 위 오른쪽. 표와 붙어 있어야 '이 표의 설정'으로 읽힌다. */
 /* 오른쪽 여백을 준다 — 카드 모서리에 딱 붙으면 버튼이 잘려 보인다 */
+/* 보고서 이름은 화면에선 PageHeader 가 이미 내고 있다 — 종이에서만 쓴다 */
+.rep-print-head { display: none; }
 .dt-colbar { display: flex; justify-content: flex-end; padding: 6px 10px 0; margin-bottom: -4px; position: relative; z-index: 2; }
 /* 손댄 표라는 점 하나 — 글자 옆에 두면 잘린 글자로 읽혀서 동그라미로 그린다 */
 .dt-coldot {
@@ -1525,6 +1527,9 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
     overflow: visible; padding: 0; background: var(--surface) !important;
   }
   .no-print, .dt-colmenu { display: none !important; }
+  /* 보고서 이름 — 화면에서는 PageHeader 가 맡고, 종이에서는 이 줄이 맡는다
+     (PageHeader 는 sticky·액션이 있는 화면 부품이라 인쇄물에 그대로 쓸 수 없다) */
+  .rep-print-head { display: block !important; margin-bottom: 20px; }
   @page { size: A4; margin: 16mm; }
 
   /* 화면용 회색 바탕(--bg)은 body·html 에 있다. '배경 그래픽' 켜고 인쇄하면
