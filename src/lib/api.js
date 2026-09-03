@@ -665,6 +665,18 @@ export const api = {
     try { return await req(`/reports/cards?${qs}`) } catch { return null }
   },
 
+  /* 고객사 양식 다섯 — 집계는 서버 lib/salesForms.js 한 곳이다.
+     ⚠ 실패를 null 로 삼키지 않는다. 이 양식들은 '켜 준 회사만'(403) 이라, 빈 표로 보이면
+       "자료가 없다"와 "살 수 있는 양식이 아니다"가 구별되지 않는다. */
+  async getSalesMonthForm(month) { return req(`/reports/forms/sales-month?month=${encodeURIComponent(month)}`) },
+  async getSalesYearForm(year, basis = 'supply') { return req(`/reports/forms/sales-year?year=${year}&basis=${basis}`) },
+  async getPurchaseMonthForm(month) { return req(`/reports/forms/purchase-month?month=${encodeURIComponent(month)}`) },
+  async getVendorLinesForm({ month, vendorId = '', kind = 'issued', form = 'vendor_ledger' }) {
+    const qs = new URLSearchParams({ month, kind, form })
+    if (vendorId) qs.set('vendorId', vendorId)
+    return req(`/reports/forms/vendor-lines?${qs}`)
+  },
+
   async downloadLoanReportXlsx({ status = 'active', loanIds = [], from = '', to = '' } = {}) {
     try {
       const token = localStorage.getItem('token')

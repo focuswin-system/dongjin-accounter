@@ -13,6 +13,7 @@ const { canSeeLaborDetail } = require('../lib/fundStatus')
 const { vatPack, buildVatWorkbook } = require('../lib/vatWorkbook')
 const { vatOfQuarter } = require('../lib/vatAgg')
 const { QUARTERS, MONTHS } = require('../lib/vatPeriod')
+const { salesMonthForm, salesYearForm, purchaseMonthForm, vendorLinesForm } = require('../lib/salesForms')
 
 const router = Router()
 
@@ -536,6 +537,56 @@ router.put('/manage/:key', async (req, res, next) => {
          ON DUPLICATE KEY UPDATE enabled = 0`, [key])
     }
     res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
+/* ── 고객사 양식 다섯 ─────────────────────────────────────────────────────
+ * 집계는 lib/salesForms.js 한 곳에 있다. 여기서는 입력을 검사하고 그 회사가 살 수 있는
+ * 양식인지만 본다(requireFeature — 화면을 가리는 것만으로는 주소로 들어오는 길이 남는다).
+ * ⚠ 회사 구분은 req.db 가 이미 끝냈다. 경로·질의로 회사 id 를 받지 않는다. */
+const monthArg = (v) => (/^\d{4}-\d{2}$/.test(v || '') ? v : null)
+
+router.get('/forms/sales-month', async (req, res, next) => {
+  try {
+    if (!(await requireFeature(req, res, 'sales_month'))) return
+    const month = monthArg(req.query.month)
+    if (!month) return res.status(400).json({ error: '기준월을 YYYY-MM 으로 지정해주세요' })
+    res.json(await salesMonthForm(req.db, month))
+  } catch (e) { next(e) }
+})
+
+router.get('/forms/sales-year', async (req, res, next) => {
+  try {
+    if (!(await requireFeature(req, res, 'sales_year'))) return
+    const year = Number(req.query.year)
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      return res.status(400).json({ error: '연도를 확인해주세요' })
+    }
+    // 매출액을 공급가액으로 볼지 부가세까지 포함해 볼지 — 회사마다 다르다
+    const basis = req.query.basis === 'total' ? 'total' : 'supply'
+    res.json(await salesYearForm(req.db, year, basis))
+  } catch (e) { next(e) }
+})
+
+router.get('/forms/purchase-month', async (req, res, next) => {
+  try {
+    if (!(await requireFeature(req, res, 'purchase_month'))) return
+    const month = monthArg(req.query.month)
+    if (!month) return res.status(400).json({ error: '기준월을 YYYY-MM 으로 지정해주세요' })
+    res.json(await purchaseMonthForm(req.db, month))
+  } catch (e) { next(e) }
+})
+
+/* 7-4(거래처 거래내역)와 7-5(매출장)가 같은 집계를 쓴다 — 그리는 모양만 다르다.
+   어느 양식으로 들어왔는지는 form 으로 받는다(살 수 있는지 판정이 양식마다 다르므로). */
+router.get('/forms/vendor-lines', async (req, res, next) => {
+  try {
+    const form = req.query.form === 'sales_book' ? 'sales_book' : 'vendor_ledger'
+    if (!(await requireFeature(req, res, form))) return
+    const month = monthArg(req.query.month)
+    if (!month) return res.status(400).json({ error: '기준월을 YYYY-MM 으로 지정해주세요' })
+    const kind = req.query.kind === 'received' ? 'received' : 'issued'
+    res.json(await vendorLinesForm(req.db, { month, vendorId: req.query.vendorId || null, kind }))
   } catch (e) { next(e) }
 })
 

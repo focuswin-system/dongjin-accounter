@@ -60,6 +60,16 @@ const BUILTIN_REPORTS = [
      같은 숫자라도 자리가 바뀌면 못 읽는다. */
   { key: 'fundsheet',   title: '자금관리표',              descr: '계좌별 잔액·나갈 돈·들어올 돈을 대표 보고 양식 그대로 봅니다.', scope: 'entitled', sort: 110, group: '경영 보고' },
 
+  /* ── 고객사가 쓰던 종이의 칸 배치를 그대로 옮긴 다섯 ──────────────────────────
+   * 숫자는 기존 보고서와 같고 **모양이 다르다**. 몇 년째 그 자리로 봐 온 문서라
+   * 같은 숫자라도 자리가 바뀌면 못 읽는다(자금관리표를 그렇게 만든 것과 같은 이유).
+   * 한 회사의 양식이므로 entitled — 켜 준 회사에만 보인다. 안 켜면 오늘과 똑같다. */
+  { key: 'sales_month',    title: '월 매출내역',        descr: '그 달에 무엇을 얼마에 팔았는지 + 올해 업체별 누계를 한 장에.', scope: 'entitled', sort: 120, group: '장부' },
+  { key: 'sales_year',     title: '연 매출액(업체별)',   descr: '한 해 매출을 업체 × 12개월 표로 봅니다.',              scope: 'entitled', sort: 122, group: '경영 보고' },
+  { key: 'purchase_month', title: '월 매입내역',        descr: '업체별 전월이월·이 달 매입·결제·잔액을 한 줄로.',       scope: 'entitled', sort: 124, group: '장부' },
+  { key: 'vendor_ledger',  title: '거래처 거래내역',     descr: '한 거래처의 한 달 납품 내역(납품일·주문·품번·수량·단가).', scope: 'entitled', sort: 126, group: '장부' },
+  { key: 'sales_book',     title: '매출장',             descr: '한 거래처에 보내는 월 매출장 — 마감일·담당자까지.',      scope: 'entitled', sort: 128, group: '장부' },
+
   /* ⚠ 방산 원가 보고서는 아직 **켤 수 없다**(hidden).
    *   SAMPLE.contractSummary(=[]) 를 읽어 늘 빈 표이고, 0으로 나눠 이행률이 'NaN%' 로 찍힌다.
    *   주문별 수익 현황과 같은 집계에 마일스톤 진행률을 얹으면 되지만 아직 안 했다.
