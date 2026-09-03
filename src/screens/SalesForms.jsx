@@ -125,7 +125,7 @@ export const ReportSalesMonth = () => {
             <FormHead title={`${ym(month)}분 매출내역`}
               sub={`${d.from} ~ ${d.to}`} right={<ApprovalBox/>}/>
             <div className="table-scroll">
-              <table className="table grid-lines" style={{ minWidth: 880 }}>
+              <table className="table" style={{ minWidth: 880 }}>
                 <thead>
                   <tr>
                     <th style={{ width: 48 }}>NO</th>
@@ -181,7 +181,7 @@ export const ReportSalesMonth = () => {
             <FormHead title={`${month.slice(0, 4)}년 현재 매출액 합계`}
               sub={`${d.yearFrom} ~ ${d.to} · 청구서 기준`}/>
             <div className="table-scroll">
-              <table className="table grid-lines" style={{ minWidth: 720 }}>
+              <table className="table" style={{ minWidth: 720 }}>
                 <thead>
                   <tr>
                     <th style={{ width: 48 }}>NO</th>
@@ -254,7 +254,7 @@ export const ReportSalesYear = () => {
             right={<ApprovalBox/>}/>
           <div className="table-scroll">
             {/* 열이 열넷이라 좁은 화면에서는 접힌다 — 접느니 가로로 밀어 보게 한다 */}
-            <table className="table grid-lines" style={{ minWidth: 1180 }}>
+            <table className="table" style={{ minWidth: 1180 }}>
               <thead>
                 <tr>
                   <th style={{ width: 44 }}>NO</th>
@@ -309,7 +309,7 @@ export const ReportPurchaseMonth = () => {
         <FormPaper>
           <FormHead title={`${ym(month)}분 매입내역`} sub={`${d.from} ~ ${d.to}`} right={<ApprovalBox/>}/>
           <div className="table-scroll">
-            <table className="table grid-lines" style={{ minWidth: 1080 }}>
+            <table className="table" style={{ minWidth: 1080 }}>
               <thead>
                 <tr>
                   <th style={{ width: 44 }}>순번</th>
@@ -423,7 +423,7 @@ export const ReportVendorLedger = () => {
         <FormPaper>
           <FormHead title={`${ym(month)} ${d.vendor} 거래내역`} sub={`${d.from} ~ ${d.to}`} right={<ApprovalBox/>}/>
           <div className="table-scroll">
-            <table className="table grid-lines" style={{ minWidth: 980 }}>
+            <table className="table" style={{ minWidth: 980 }}>
               <thead>
                 <tr>
                   <th style={{ width: 100 }}>납품 일자</th>
@@ -524,7 +524,7 @@ export const ReportSalesBook = () => {
             sub={[d.vendor, closeNote && `마감 ${closeNote}`, staff].filter(Boolean).join(' · ')}
             right={<ApprovalBox cols={['담 당', '승 인']}/>}/>
           <div className="table-scroll">
-            <table className="table grid-lines" style={{ minWidth: 940 }}>
+            <table className="table" style={{ minWidth: 940 }}>
               <thead>
                 <tr>
                   <th style={{ width: 100 }}>{month.slice(0, 4)}년</th>

@@ -812,7 +812,7 @@ a { color: inherit; text-decoration: none; }
   color: var(--muted-2);
   font-weight: 600;
   padding: 12px 14px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-strong);
   background: var(--surface-2);
   letter-spacing: 0.01em;
 }
@@ -907,14 +907,19 @@ a { color: inherit; text-decoration: none; }
    한 곳이 빠지면 선이 중간에 끊긴다. */
 .table th.fs-sep, .table td.fs-sep { border-left: 1px solid var(--line); }
 
-/* 칸이 많은 종이형 표(월별 12칸·매입내역 10칸…) — 세로선을 긋는다.
-   열두 칸을 선 없이 두면 "이 숫자가 8월인지 9월인지"를 머리글까지 눈으로 되짚어야 한다.
-   보통 목록에는 안 붙인다 — 칸이 적을 때 세로선은 촘촘하기만 하다. */
-.table.grid-lines thead th + th,
-.table.grid-lines tbody td + td,
-.table.grid-lines tfoot td + td,
-.table.grid-lines tfoot th + td { border-left: 1px solid var(--line); }
-.table.grid-lines thead th { border-bottom: 1px solid var(--line-strong); }
+/* 열 구분선 — **표 전체의 기본**이다.
+ *
+ * 처음엔 칸 많은 표에만 붙였다(.grid-lines). 그런데 열이 예닐곱만 돼도 "이 숫자가 어느
+ * 열인지"를 머리글까지 눈으로 되짚게 된다 — 회계 표는 숫자가 줄줄이라 특히 그렇다.
+ * 화면마다 붙였다 말았다 하면 그것 자체가 어수선하다. 기본으로 두고 예외를 만들지 않는다.
+ * (선은 --line 으로 아주 옅다. 격자를 그리려는 게 아니라 눈이 미끄러지지 않게 하는 것이다.)
+ *
+ * ⚠ 첫 칸 왼쪽에는 선이 없다(td + td) — 표 바깥 테두리를 그리는 게 아니다.
+ * (한때 .grid-lines 로 화면마다 붙였다 — 기본이 됐으니 그 표기는 걷어냈다.) */
+.table thead th + th,
+.table tbody td + td,
+.table tfoot td + td,
+.table tfoot th + td { border-left: 1px solid var(--line); }
 /* 엑셀 임포트 미리보기 — 오류 행/제외 행.
    inline style 로 두면 :hover 가 먹지 않아, 어느 줄에 커서가 있는지 알 수 없었다. */
 .table tbody tr.imp-err { background: var(--neg-soft); }
