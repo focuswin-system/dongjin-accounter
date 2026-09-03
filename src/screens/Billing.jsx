@@ -1549,9 +1549,14 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   }, [collect, pending.length])
   // 세금계산서 업로드의 매출/매입 판정 기준. 환경설정 › 회사 정보에 사업자번호가 있어야 자동으로 갈린다.
   useEffect(() => { api.getCompany().then(c => setOurBizNo(c?.biz_no || '')) }, [])
+  /* 비목 목록 — 업로드에서 '이번 파일은 전부 이 비목'을 고를 수 있게 한다.
+     매입은 비목이 없으면 발행 전표의 비용 계정이 빈 채로 남는다. */
+  const [importCategories, setImportCategories] = useState([])
+  useEffect(() => { api.getCategories().then(rows => setImportCategories(rows || [])).catch(() => {}) }, [])
   // 어댑터는 옵션이 바뀔 때만 새로 만든다 — 매 렌더 새 객체면 마법사가 중복 판정을 통째로 다시 계산한다.
   const importAdapter = useMemo(
-    () => taxInvoiceImportAdapter({ ourBizNo, defaultKind: kind }), [ourBizNo, kind])
+    () => taxInvoiceImportAdapter({ ourBizNo, defaultKind: kind, categories: importCategories }),
+    [ourBizNo, kind, importCategories])
 
   // 홈 '할 일'에서 특정 청구서를 지목해 들어오면 그 상세를 바로 연다.
   useEffect(() => {
@@ -2293,6 +2298,8 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       {!collect && view === "plain" && (
         <DataTable
           rows={plainFiltered}
+          /* 열을 고를 수 있다 — 입금내역·지급내역은 보는 열이 달라 설정도 따로 기억한다 */
+          tableKey={isIssued ? 'plain-income' : 'plain-expense'}
           /* 행을 누르면 그 거래가 열린다 — 거래내역과 같이. 이 표의 줄은 **이미 오간 돈**이라
              잘못된 걸 봤을 때 그 자리에서 고칠 수 있어야 한다. 예전엔 읽기만 돼서
              거래내역으로 나가 금액으로 더듬어 찾아야 했다. */

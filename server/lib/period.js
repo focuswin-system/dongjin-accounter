@@ -206,7 +206,29 @@ function dayBefore(date) {
  *    화면은 멀쩡해 보이고 파일만 전 기간으로 나왔다. period.test.js 가 이 자리를 지킨다. */
 const dateOrNull = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v ?? '')) ? String(v) : null)
 
+/**
+ * 양 끝의 **토막 주**를 옆 주에 붙인다.
+ *
+ * 마감일이 25일인 회사의 8월은 7/26~8/25 다. 여기에 주(월~일)를 그으면 첫 주가 하루(7/26),
+ * 끝 주가 이틀(8/24~8/25)짜리로 남는다. 그대로 두면 '1주차 = 하루' 인 소계 줄이 생겨
+ * "8월 1주차가 왜 하루지"를 매번 묻게 된다 — 사람이 말하는 주차와 어긋난다.
+ *
+ * ⚠ 기간을 빈틈없이 덮는 성질은 그대로다(붙이기만 한다). 주가 하나뿐이면 아무것도 안 한다.
+ */
+function mergeStubWeeks(weeks, minDays = 3) {
+  if (!Array.isArray(weeks) || weeks.length < 2) return weeks || []
+  const days = (w) => Math.round(
+    (new Date(`${w.to}T00:00:00`) - new Date(`${w.from}T00:00:00`)) / 86400000) + 1
+  const out = weeks.map(w => ({ ...w }))
+  if (days(out[0]) < minDays) { out[1].from = out[0].from; out.shift() }
+  if (out.length > 1) {
+    const last = out.length - 1
+    if (days(out[last]) < minDays) { out[last - 1].to = out[last].to; out.pop() }
+  }
+  return out
+}
+
 module.exports = {
-  monthRange, weeksOf, periodRange, periodLabel, periodSeries, UNITS, fiscalMonthOf,
+  monthRange, weeksOf, mergeStubWeeks, periodRange, periodLabel, periodSeries, UNITS, fiscalMonthOf,
   bucketsOf, dayBefore, BUCKET_OF, dateOrNull,
 }

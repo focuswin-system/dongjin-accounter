@@ -123,3 +123,28 @@ test('dateOrNull — 모양이 다르면 받지 않는다', () => {
   for (const bad of ['2026-8-1', '26-08-01', '2026/08/01', '2026-08-01 09:00', 'dddd-dd-dd', '', null, undefined, {}])
     assert.equal(dateOrNull(bad), null, `${JSON.stringify(bad)} 를 통과시켰다`)
 })
+
+test('양 끝 토막 주는 옆 주에 붙인다 — 1주차가 하루짜리가 되지 않게', () => {
+  const { mergeStubWeeks } = require('../lib/period')
+  // 마감 25일 회사의 8월: 7/26(일) 하루 + … + 8/24~8/25 이틀
+  const { from, to } = monthRange('2026-08', 25)
+  const raw = weeksOf(from, to, 1)
+  assert.strictEqual(raw[0].from, raw[0].to, '첫 주가 하루짜리인 상황이어야 이 테스트가 뜻이 있다')
+  const w = mergeStubWeeks(raw)
+  assert.ok(w.length < raw.length, '토막이 붙어 주 수가 줄어야 한다')
+  // 기간을 그대로 덮고, 겹치지도 비지도 않는다
+  assert.strictEqual(w[0].from, from)
+  assert.strictEqual(w[w.length - 1].to, to)
+  for (let i = 1; i < w.length; i++) {
+    const prevEnd = new Date(`${w[i - 1].to}T00:00:00`)
+    const curStart = new Date(`${w[i].from}T00:00:00`)
+    assert.strictEqual((curStart - prevEnd) / 86400000, 1)
+  }
+  // 이제 하루·이틀짜리 주가 없다
+  for (const x of w) {
+    const d = Math.round((new Date(`${x.to}T00:00:00`) - new Date(`${x.from}T00:00:00`)) / 86400000) + 1
+    assert.ok(d >= 3, `${x.from}~${x.to} 가 ${d}일짜리다`)
+  }
+  // 주가 하나뿐이면 아무것도 안 한다
+  assert.deepStrictEqual(mergeStubWeeks([{ from: 'a', to: 'b' }]), [{ from: 'a', to: 'b' }])
+})

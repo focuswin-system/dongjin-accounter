@@ -79,6 +79,8 @@ export const T = {
   vat:     '세액',
   docKind: '종류',
   memo:    '비고',
+  // 홈택스 엑셀엔 없는 칸이다. 사람이 열을 더해 적어 넣거나, 업로드 화면에서 한 번에 정한다.
+  category: '비목',
   // 품목 상세 — 홈택스 엑셀을 품목까지 포함해 받으면 계산서 1건이 품목 수만큼 여러 행으로 온다.
   itemName:   '품목명',
   itemSpec:   '품목 규격',
@@ -89,7 +91,7 @@ export const T = {
 
 export const HOMETAX_TARGETS = [
   T.date, T.confirm, T.supBiz, T.supName, T.buyBiz, T.buyName,
-  T.total, T.supply, T.vat, T.docKind, T.memo,
+  T.total, T.supply, T.vat, T.docKind, T.memo, T.category,
   T.itemName, T.itemSpec, T.itemQty, T.itemPrice, T.itemAmount,
 ]
 
@@ -127,6 +129,9 @@ export const guessHometaxColumn = (h) => {
     if (/상호|법인명|업체명|회사명/.test(s)) return T.supName
     return '사용 안함'
   }
+  // '비목'은 품목 규칙보다 먼저 본다 — 뒤에 두면 '비목'의 '목'이 품목 규칙에 안 걸리긴 하지만,
+  // '품목 비목' 같은 머리글에서 순서가 곧 판정이 된다.
+  if (/^비목$|계정과목|비용과목/.test(s)) return T.category
   // 품목 칸을 계산서 합계보다 먼저 본다 — '품목공급가액'이 '공급가액'(계산서 합계)으로 잡히면
   // 품목 하나짜리 계산서에선 티가 안 나고 여러 품목일 때만 금액이 틀어진다.
   if (/품목/.test(s)) {
@@ -253,6 +258,11 @@ export const mapHometaxRow = (g, opts = {}, row = null) => {
     tax_type: taxType,
     nts_confirm_no: String(g(T.confirm) || '').trim(),
     memo: String(g(T.memo) || '').trim(),
+    /* 비목 — 엑셀에 있으면 그 값, 없으면 업로드 화면에서 고른 기본 비목.
+       ⚠ 매입은 비목이 없으면 발행 전표의 **차변 비용 줄이 통째로 빠져 차·대변이 안 맞는다**
+         (server/lib/voucher.js invoiceVoucher). 여태 임포트가 이 칸을 안 채워서, 계산서로
+         올린 매입은 전부 그 상태였다. */
+    category: String(g(T.category) || '').trim() || String(opts.defaultCategory || '').trim(),
   }
 }
 

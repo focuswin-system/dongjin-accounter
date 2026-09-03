@@ -1,4 +1,4 @@
-import { Icon, fmtNum } from './ui'
+import { Icon, fmtNum, Combobox } from './ui'
 import { api } from './api'
 import { normBizNo, normVendorName } from './normalize'
 import {
@@ -18,7 +18,7 @@ import {
 
 const KIND_LABEL = { issued: '매출', received: '매입' }
 
-export const taxInvoiceImportAdapter = ({ ourBizNo = '', defaultKind = 'issued' } = {}) => ({
+export const taxInvoiceImportAdapter = ({ ourBizNo = '', defaultKind = 'issued', categories = [] } = {}) => ({
   label: '세금계산서',
   title: '홈택스 세금계산서 업로드',
   sub: '홈택스에서 내려받은 전자세금계산서 목록을 청구서로 한 번에 등록해요. 매출은 미수금, 매입은 미지급금으로 잡히고 부가세 집계에 바로 반영됩니다. 품목 상세를 포함해 받았다면 품목 내역까지 함께 들어갑니다.',
@@ -64,7 +64,7 @@ export const taxInvoiceImportAdapter = ({ ourBizNo = '', defaultKind = 'issued' 
 
   // 우리 회사 사업자번호는 회사정보에서 채워 넣지만, 종사업장 등으로 다를 수 있어 여기서 고칠 수 있게 둔다.
   // registerItems는 기본 꺼짐 — 켜면 기준정보 품목이 늘어나므로 사람이 정하게 둔다.
-  initialOpts: { ourBizNo, defaultKind, dueDays: 30, registerItems: false },
+  initialOpts: { ourBizNo, defaultKind, dueDays: 30, registerItems: false, defaultCategory: '' },
   renderOpts: (opts, patch) => (
     <div className="col gap-12">
       <div className="row gap-10" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
@@ -105,6 +105,29 @@ export const taxInvoiceImportAdapter = ({ ourBizNo = '', defaultKind = 'issued' 
               onClick={() => patch({ defaultKind: k })}>{KIND_LABEL[k]}</button>
           ))}
         </div>
+      </div>
+      {/* 비목 — 홈택스 엑셀에 없는 칸이다. 매입은 이게 없으면 발행 전표의 비용 계정이 비어
+          일계표·분개장에서 차·대변이 안 맞는다. 엑셀에 '비목' 열을 만들어 연결해도 되고,
+          여기서 한 번에 정해도 된다(엑셀 값이 있으면 그쪽이 이긴다). */}
+      <div className="row gap-10" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 190 }}>
+          <div className="text-sm fw-600">비목</div>
+          <div className="text-xs text-muted2">엑셀에 비목 열이 없을 때 한 번에 적용</div>
+        </div>
+        <div style={{ width: 240 }}>
+          <Combobox value={opts.defaultCategory || ''} onChange={v => patch({ defaultCategory: v })}
+            allowAdd={false}
+            options={[{ value: '', label: '비워 둠', sub: '나중에 청구서에서 채우기' },
+              ...categories
+                .filter(c => c.id?.startsWith(opts.defaultKind === 'issued' ? 'INC-' : 'EXP-'))
+                .map(c => ({ value: c.name, label: c.name, sub: c.group_name || '' }))]}
+            placeholder="비목 선택"/>
+        </div>
+        {opts.defaultKind !== 'issued' && !String(opts.defaultCategory || '').trim() && (
+          <span className="text-xs" style={{ color: 'var(--warn-ink)' }}>
+            매입은 비목이 없으면 전표의 비용 계정이 빈 채로 남아요 — 나중에 청구서에서 채워야 합니다
+          </span>
+        )}
       </div>
       <div className="row gap-10" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
         <div style={{ minWidth: 190 }}>

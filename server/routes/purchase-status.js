@@ -1,5 +1,5 @@
 const { Router } = require('express')
-const { monthRange, weeksOf } = require('../lib/period')
+const { monthRange, weeksOf, mergeStubWeeks } = require('../lib/period')
 const { VAT_RATE } = require('../lib/vat')
 
 const router = Router()
@@ -86,7 +86,9 @@ router.get('/', async (req, res, next) => {
     })
 
     // 주별로 담는다. 빈 주도 남긴다 — 빠진 주가 있으면 "왜 없지"부터 묻게 된다.
-    const weeks = weeksOf(from, to, weekStart).map(w => {
+    /* 마감일이 있는 달은 양 끝이 잘려 하루·이틀짜리 주가 남는다 — 옆 주에 붙인다.
+       (붙이지 않으면 '1주차 = 하루' 인 소계 줄이 생겨 사람이 말하는 주차와 어긋난다) */
+    const weeks = mergeStubWeeks(weeksOf(from, to, weekStart)).map(w => {
       const items = lines.filter(l => l.date >= w.from && l.date <= w.to)
       return {
         ...w, items,

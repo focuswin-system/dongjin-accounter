@@ -38,8 +38,9 @@ const FormHead = ({ title, sub, right }) => (
   </div>
 )
 
-/** 기준월 고르기 — 다섯 양식이 같은 줄을 쓴다. */
-const MonthBar = ({ month, setMonth, children, note }) => (
+/** 조작 줄 — 다섯 양식이 같은 줄을 쓴다. 상자를 여럿으로 쪼개지 않는다(듬성해 보인다).
+    second: 아래에 한 줄 더 붙일 때(매출장의 마감일자·담당자). */
+const MonthBar = ({ month, setMonth, children, note, second }) => (
   <div className="card card-pad no-print" style={{ marginBottom: 16 }}>
     <div className="row gap-12" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
       <span className="text-sm fw-600">기준월</span>
@@ -48,16 +49,37 @@ const MonthBar = ({ month, setMonth, children, note }) => (
       {children}
       {note && <span className="text-xs text-muted2 ml-auto">{note}</span>}
     </div>
+    {second && (
+      <>
+        <div style={{ height: 1, background: 'var(--line)', margin: '14px 0' }}/>
+        {second}
+      </>
+    )}
   </div>
 )
 
-/* 살 수 없는 양식(403)·오류를 빈 표로 보여주지 않는다 — "자료가 없다"로 읽히면
-   고객이 없는 자료를 찾아 헤맨다. */
-const FormError = ({ error }) => (
-  <div className="card card-pad" style={{ textAlign: 'center', padding: 40, color: 'var(--muted-2)' }}>
-    {error}
+/* 빈 상태·오류.
+ *
+ * ⚠ 흰 상자에 회색 한 줄만 두지 않는다 — "대충 만들다 만 화면"으로 읽힌다(실사용 지적).
+ *   무엇이 없는지(제목)와 어떻게 하면 되는지(한 줄)를 같이 준다. 아이콘은 눈이 멈출 자리다.
+ * 살 수 없는 양식(403)도 여기로 온다 — 빈 표로 보여주면 "자료가 없다"로 읽혀,
+ * 고객이 없는 자료를 찾아 헤맨다. */
+const FormEmpty = ({ title, hint, tone = 'muted' }) => (
+  <div className="card card-pad" style={{ textAlign: 'center', padding: '56px 24px' }}>
+    <div style={{
+      width: 44, height: 44, borderRadius: 12, margin: '0 auto 14px',
+      display: 'grid', placeItems: 'center',
+      background: tone === 'warn' ? 'var(--warn-soft, var(--surface-2))' : 'var(--surface-2)',
+      color: tone === 'warn' ? 'var(--warn-ink)' : 'var(--muted-2)',
+    }}>
+      {tone === 'warn' ? <Icon.Warn size={20}/> : <Icon.Doc size={20}/>}
+    </div>
+    <div className="fw-700" style={{ fontSize: 15, marginBottom: 6 }}>{title}</div>
+    {hint && <div className="text-sm text-muted" style={{ lineHeight: 1.7, maxWidth: 460, margin: '0 auto' }}>{hint}</div>}
   </div>
 )
+
+const FormError = ({ error }) => <FormEmpty title="이 보고서를 열 수 없어요" hint={error} tone="warn"/>
 
 const useForm = (load, deps) => {
   const [d, setD] = useState(null)
@@ -104,7 +126,10 @@ export const ReportSalesMonth = () => {
                 </thead>
                 <tbody>
                   {d.rows.length === 0 && (
-                    <tr><td colSpan={7} className="dt-empty">이 달에 품목이 적힌 매출 청구서가 없어요.</td></tr>
+                    <tr><td colSpan={7} className="dt-empty">
+                      이 달에 품목이 적힌 매출 청구서가 없어요.
+                      {d.headless.count > 0 && <><br/>총액만 끊은 청구서 {d.headless.count}건은 아래 연 누계에 있어요.</>}
+                    </td></tr>
                   )}
                   {d.rows.map(r => (
                     <tr key={r.no}>
@@ -375,7 +400,11 @@ export const ReportVendorLedger = () => {
         {d && <VendorPick choices={d.choices} vendorId={vendorId} setVendorId={setVendorId}/>}
       </MonthBar>
       {err ? <FormError error={err}/> : !d ? <Loading label="거래를 모으는 중…"/> : !vendorId ? (
-        <FormError error={d.choices.length ? '거래처를 고르면 그 달 거래내역이 나와요.' : '이 달에 품목이 적힌 청구서가 없어요.'}/>
+        d.choices.length
+          ? <FormEmpty title="거래처를 고르세요"
+              hint={`${ym(month)}에 거래가 있는 곳 ${d.choices.length}곳이 위 목록에 있어요. 고르면 그 달 거래내역이 나옵니다.`}/>
+          : <FormEmpty title={`${ym(month)}에 품목이 적힌 청구서가 없어요`}
+              hint="이 표는 청구서에 적은 품목으로 만듭니다. 기준월을 바꿔 보시거나, 청구서를 등록할 때 품목 내역을 채워주세요."/>
       ) : (
         <div className="card" style={{ padding: 24 }}>
           <FormHead title={`${ym(month)} ${d.vendor} 거래내역`} sub={`${d.from} ~ ${d.to}`} right={<ApprovalBox/>}/>
@@ -452,22 +481,29 @@ export const ReportSalesBook = () => {
 
   return (
     <div>
-      <MonthBar month={month} setMonth={setMonth} note={d ? `${d.from} ~ ${d.to}` : ''}>
+      <MonthBar month={month} setMonth={setMonth} note={d ? `${d.from} ~ ${d.to}` : ''}
+        second={
+          <div className="col gap-8">
+            <div className="row gap-12" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+              <span className="text-sm fw-600" style={{ minWidth: 56 }}>마감일자</span>
+              <input className="input" style={{ width: 220 }} value={closeNote}
+                onChange={e => setCloseNote(e.target.value)} placeholder="예: 15일 / 말일 2회 마감"/>
+              <span className="text-sm fw-600" style={{ minWidth: 46 }}>담당자</span>
+              {/* 부서-파트-이름-전화가 한 줄로 들어간다 — 300px 이면 끝이 잘려 보인다 */}
+              <input className="input" style={{ flex: 1, minWidth: 320 }} value={staff}
+                onChange={e => setStaff(e.target.value)} placeholder="예: 부품사업부-파트-홍길동 사원 010-0000-0000"/>
+            </div>
+            <div className="text-xs text-muted2">적어 두면 인쇄물 머리말에 그대로 나와요. 비워 두면 그 줄은 안 나옵니다.</div>
+          </div>
+        }>
         {d && <VendorPick choices={d.choices} vendorId={vendorId} setVendorId={setVendorId}/>}
       </MonthBar>
-      <div className="card card-pad no-print" style={{ marginBottom: 16 }}>
-        <div className="row gap-12" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
-          <span className="text-sm fw-600">마감일자</span>
-          <input className="input" style={{ width: 220 }} value={closeNote}
-            onChange={e => setCloseNote(e.target.value)} placeholder="예: 15일 / 말일 2회 마감"/>
-          <span className="text-sm fw-600">담당자</span>
-          <input className="input" style={{ width: 300 }} value={staff}
-            onChange={e => setStaff(e.target.value)} placeholder="예: 부품사업부-파트-홍길동 사원 010-0000-0000"/>
-          <span className="text-xs text-muted2">적어 두면 인쇄물 머리말에 그대로 나와요</span>
-        </div>
-      </div>
       {err ? <FormError error={err}/> : !d ? <Loading label="매출장을 모으는 중…"/> : !vendorId ? (
-        <FormError error={d.choices.length ? '거래처를 고르면 그 달 매출장이 나와요.' : '이 달에 품목이 적힌 매출 청구서가 없어요.'}/>
+        d.choices.length
+          ? <FormEmpty title="거래처를 고르세요"
+              hint={`${ym(month)}에 매출이 있는 곳 ${d.choices.length}곳이 위 목록에 있어요. 고르면 그 거래처에 보낼 매출장이 나옵니다.`}/>
+          : <FormEmpty title={`${ym(month)}에 품목이 적힌 매출 청구서가 없어요`}
+              hint="매출장은 청구서에 적은 품목으로 만듭니다. 기준월을 바꿔 보시거나, 청구서를 등록할 때 품목 내역을 채워주세요."/>
       ) : (
         <div className="card" style={{ padding: 24 }}>
           <FormHead title={`${month.slice(0, 4)}년도 ${Number(month.slice(5, 7))}월 매출장`}

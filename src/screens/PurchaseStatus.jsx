@@ -155,14 +155,20 @@ export const PurchaseStatusScreen = ({ go }) => {
 
       {!data ? <Loading label="품목을 모으는 중…"/> : !shownWeeks.some(w => w.items.length) ? (
         <div className="card card-pad" style={{ textAlign: 'center', padding: 48, color: 'var(--muted-2)' }}>
-          {unit === 'week' && curWeek ? `${curWeek.from} ~ ${curWeek.to}` : `${data.from} ~ ${data.to}`} 사이에 품목이 적힌 {label} 청구서가 없어요.
+          {unit === 'week' && curWeek
+            ? `${curWeek.from} ~ ${curWeek.to} (${weekIdx + 1}주차)에는 ${label} 품목이 없어요.`
+            : `${data.from} ~ ${data.to} 사이에 품목이 적힌 ${label} 청구서가 없어요.`}
           <div className="text-xs" style={{ marginTop: 8 }}>
             {/* 납품일 기준으로 비었을 때 "청구서를 등록하라"고만 하면 헛다리를 짚게 된다 —
                 청구서는 있는데 납품일을 안 적었을 뿐일 수 있다. */}
-            {dateAxis === 'delivery'
-              ? <>납품일 기준이에요. 품목에 <b>납품일</b>을 적지 않은 청구서는 여기 안 나옵니다 —
-                  발행일 기준으로 바꿔 보세요.</>
-              : <>청구서를 등록할 때 <b>품목 내역</b>을 채우면 여기에 모입니다.</>}
+            {/* 주간 보기에서 빈 주를 고르면 '자료가 없다'가 아니라 '이 주가 비었다'가 맞다 —
+                다른 주에는 있을 수 있고, 주차 칩이 어느 주에 있는지 이미 알려준다. */}
+            {unit === 'week' && weeks.some(w => w.items.length)
+              ? <>위 <b>주차</b>에서 다른 주를 골라 보세요. 자료가 있는 주에는 ‘없음’ 표시가 없습니다.</>
+              : dateAxis === 'delivery'
+                ? <>납품일 기준이에요. 품목에 <b>납품일</b>을 적지 않은 청구서는 여기 안 나옵니다 —
+                    발행일 기준으로 바꿔 보세요.</>
+                : <>청구서를 등록할 때 <b>품목 내역</b>을 채우면 여기에 모입니다.</>}
           </div>
         </div>
       ) : (

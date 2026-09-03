@@ -6,6 +6,7 @@ import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, DateI
          localToday, Loading, StatusBadge, vendorLabel } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
+import { DataTable } from '../lib/components/DataTable'
 import { DrawerHead } from '../lib/components/Drawer'
 
 /**
@@ -271,123 +272,117 @@ export const NotesScreen = ({
         </>
       )}
 
+      {/* 열을 고를 수 있는 공용 표로 옮긴다 — 손으로 짠 표에는 정렬도 열 설정도 없었다.
+          받을어음과 지급어음은 보는 열이 달라 설정도 따로 기억한다. */}
       <div className="card" style={{ overflow: 'hidden' }}>
-        {list.length === 0 ? (
-          <div style={{ padding: 48, textAlign: 'center' }} className="text-sm text-muted">
-            {flt.isFiltered || statusF !== 'all'
-              ? '조건에 맞는 어음이 없어요. 기간이나 상태를 넓혀 보세요.'
-              : `${K.label}이 없어요. ${K.desc}을 여기에 적어두면 만기일이 자금 계획에 잡힙니다.`}
-          </div>
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th style={{ width: 110 }}>만기일</th>
-                <th style={{ width: 90 }}></th>
-                <th>거래처</th>
-                <th style={{ width: 140 }}>어음번호</th>
-                <th style={{ width: 110 }}>발행일</th>
-                <th style={{ width: 130, textAlign: 'right' }}>금액</th>
-                <th style={{ width: 90 }}>상태</th>
-                <th style={{ width: 160 }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.map(n => {
-                const d = dueLabel(n, today)
-                /* 끝난 어음(결제·부도)은 D-day 가 없어 이 칸이 통째로 비었다.
-                   서버가 내려주는 날짜를 대신 세운다 — "언제 들어온 돈인지"를 못 보면
-                   '결제됨'으로 걸러도 쓸모가 없다. */
-                const done = n.status === 'settled' ? (n.settledOn ? `${n.settledOn} 결제` : null)
-                           : n.status === 'dishonored' ? (n.dishonoredOn ? `${n.dishonoredOn} 부도` : null)
-                           : null
-                return (
-                  <tr key={n.id}>
-                    <td className="num">{n.dueOn}</td>
-                    <td>
-                      {d && <span className={`badge ${d.tone}`} style={{ fontSize: 11 }}>{d.text}</span>}
-                      {done && <span className="text-xs text-muted2 num">{done}</span>}
-                    </td>
-                    <td className="fw-600">{n.vendorName || '—'}
-                      {n.invoiceNo && <span className="text-xs text-muted2" style={{ marginLeft: 6 }}>{n.invoiceNo}</span>}
-                    </td>
-                    <td className="text-sm num">{n.noteNo || '—'}</td>
-                    <td className="num text-sm text-muted">{n.issuedOn}</td>
-                    <td className="num fw-700" style={{ textAlign: 'right' }}>{fmtNum(n.amount)}</td>
-                    <td><StatusBadge status={statusOf(n).label} tone={statusOf(n).tone}/></td>
-                    <td>
-                      <div className="row gap-6" style={{ justifyContent: 'flex-end' }}>
-                        {n.status === 'held' && (
-                          <>
-                            <button className="btn sm primary" onClick={() => setSettleTarget(n)}>
-                              {n.kind === 'receivable' ? '입금 처리' : '지급 처리'}
-                            </button>
-                            <button className="btn sm" onClick={async () => {
-                              const ok = await confirm({
-                                tone: 'warn', title: '부도 처리할까요?',
-                                /* 되돌릴 길이 없다(설계상). 확인창이 그 말을 해야 한다 —
-                                   되돌리기·삭제 확인창은 각각 후과를 말하는데 부도만 안 했다. */
-                                body: (n.invoiceNo
-                                  ? `청구서 ${n.invoiceNo}가 다시 미수로 돌아갑니다. 못 받은 돈이 장부에서 사라지지 않게요.`
-                                  : '이 어음을 부도로 표시합니다.')
-                                  + ' 되돌릴 수 없어요 — 다시 어음으로 받으면 새로 등록합니다.',
-                                confirmLabel: '부도 처리',
-                              })
-                              if (!ok) return
-                              const res = await api.dishonorNote(n.id)
-                              if (!res.ok) return toast.push(res.error || '처리하지 못했어요', { tone: 'warn' })
-                              toast.push(res.restored ? '부도 처리하고 청구서를 미수로 되돌렸어요' : '부도 처리했어요')
-                              load()
-                            }}>부도</button>
-                            <button className="btn sm" onClick={() => { setEdit(n); setFormOpen(true) }}>수정</button>
-                          </>
-                        )}
-                        {n.status === 'settled' && (
-                          <button className="btn sm" onClick={async () => {
-                            const ok = await confirm({
-                              tone: 'warn', title: '결제를 되돌릴까요?',
-                              /* 두 경로가 다르다 — 거래 폼에서 온 어음은 그 거래를 **안 지운다**
-                                 (예정으로 되돌릴 뿐이다). 한 문구로 뭉뚱그리면 거짓말이 된다. */
-                              body: n.originTxnId
-                                ? '그 거래가 다시 예정으로 돌아가고 통장 잔액에서 빠집니다. 거래 자체는 남아요.'
-                                : '그때 만든 입출금 거래도 함께 지워집니다.',
-                              confirmLabel: '되돌리기',
-                            })
-                            if (!ok) return
-                            const res = await api.unsettleNote(n.id)
-                            if (!res.ok) return toast.push(res.error || '되돌리지 못했어요', { tone: 'warn' })
-                            toast.push('결제를 되돌렸어요'); load()
-                          }}>되돌리기</button>
-                        )}
-                        {n.status !== 'settled' && (
-                          <button className="btn sm" onClick={async () => {
-                            /* 어음을 지우는 일은 드물다 — 잘못 적었을 때뿐이다.
-                               그래서 **무엇이 남는지**를 어음이 어디서 왔느냐에 따라 말해 준다.
-                               ⚠ 거래에서 온 어음은 지워도 **그 거래가 남는다**(결제방법이 어음인 채로).
-                                 이 말이 없으면 "지웠는데 지출이 그대로네"가 된다. */
-                            const ok = await confirm({
-                              tone: 'neg', title: '어음을 지울까요?',
-                              body: n.originTxnId
-                                ? '어음 대장에서만 지웁니다. 그 거래는 결제방법이 어음인 채로 남아요. 잘못 적은 것이라면 거래를 열어 실제로 낸 방법(계좌이체·카드 등)으로 고쳐주세요.'
-                                : n.invoiceNo
-                                  ? `청구서 ${n.invoiceNo}에 붙여 둔 정산도 함께 걷습니다. 그 청구서는 다시 미수로 돌아가요.`
-                                  : '어음 대장에서 지웁니다. 되돌릴 수 없어요.',
-                              confirmLabel: '지우기',
-                            })
-                            if (!ok) return
-                            const res = await api.deleteNote(n.id)
-                            if (!res.ok) return toast.push(res.error || '지우지 못했어요', { tone: 'warn' })
-                            toast.push('지웠어요'); load()
-                          }}><Icon.Trash size={13}/></button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        )}
+      <DataTable
+        rows={list}
+        rowKey={n => n.id}
+        tableKey={`notes-${tab || 'receivable'}`}
+        empty={flt.isFiltered || statusF !== 'all'
+          ? '조건에 맞는 어음이 없어요. 기간이나 상태를 넓혀 보세요.'
+          : `${K.label}이 없어요. ${K.desc}을 여기에 적어두면 만기일이 자금 계획에 잡힙니다.`}
+        columns={[
+          { key: 'dueOn', header: '만기일', width: 110, sortable: true,
+            render: n => <span className="num">{n.dueOn}</span> },
+          /* 만기까지 며칠 남았나 — 끝난 어음(결제·부도)은 D-day 가 없어 이 칸이 통째로 비었다.
+             서버가 내려주는 날짜를 대신 세운다("언제 들어온 돈인지"를 못 보면 걸러도 쓸모없다). */
+          { key: 'dday', header: '', label: '만기까지', width: 90,
+            render: n => {
+              const d = dueLabel(n, today)
+              const done = n.status === 'settled' ? (n.settledOn ? `${n.settledOn} 결제` : null)
+                         : n.status === 'dishonored' ? (n.dishonoredOn ? `${n.dishonoredOn} 부도` : null)
+                         : null
+              return (
+                <>
+                  {d && <span className={`badge ${d.tone}`} style={{ fontSize: 11 }}>{d.text}</span>}
+                  {done && <span className="text-xs text-muted2 num">{done}</span>}
+                </>
+              )
+            } },
+          { key: 'vendorName', header: '거래처', sortable: true,
+            render: n => (
+              <span className="fw-600">{n.vendorName || '—'}
+                {n.invoiceNo && <span className="text-xs text-muted2" style={{ marginLeft: 6 }}>{n.invoiceNo}</span>}
+              </span>
+            ) },
+          { key: 'noteNo', header: '어음번호', width: 140, sortable: true,
+            render: n => <span className="text-sm num">{n.noteNo || '—'}</span> },
+          { key: 'issuedOn', header: '발행일', width: 110, sortable: true,
+            render: n => <span className="num text-sm text-muted">{n.issuedOn}</span> },
+          { key: 'amount', header: '금액', width: 130, align: 'right', sortable: true,
+            render: n => <span className="num fw-700">{fmtNum(n.amount)}</span> },
+          { key: 'status', header: '상태', width: 90,
+            render: n => <StatusBadge status={statusOf(n).label} tone={statusOf(n).tone}/> },
+          { key: 'actions', header: '', label: '처리 버튼', width: 160,
+            render: n => (
+              <div className="row gap-6" style={{ justifyContent: 'flex-end' }}>
+                  {n.status === 'held' && (
+                    <>
+                      <button className="btn sm primary" onClick={() => setSettleTarget(n)}>
+                        {n.kind === 'receivable' ? '입금 처리' : '지급 처리'}
+                      </button>
+                      <button className="btn sm" onClick={async () => {
+                        const ok = await confirm({
+                          tone: 'warn', title: '부도 처리할까요?',
+                          /* 되돌릴 길이 없다(설계상). 확인창이 그 말을 해야 한다 —
+                             되돌리기·삭제 확인창은 각각 후과를 말하는데 부도만 안 했다. */
+                          body: (n.invoiceNo
+                            ? `청구서 ${n.invoiceNo}가 다시 미수로 돌아갑니다. 못 받은 돈이 장부에서 사라지지 않게요.`
+                            : '이 어음을 부도로 표시합니다.')
+                            + ' 되돌릴 수 없어요 — 다시 어음으로 받으면 새로 등록합니다.',
+                          confirmLabel: '부도 처리',
+                        })
+                        if (!ok) return
+                        const res = await api.dishonorNote(n.id)
+                        if (!res.ok) return toast.push(res.error || '처리하지 못했어요', { tone: 'warn' })
+                        toast.push(res.restored ? '부도 처리하고 청구서를 미수로 되돌렸어요' : '부도 처리했어요')
+                        load()
+                      }}>부도</button>
+                      <button className="btn sm" onClick={() => { setEdit(n); setFormOpen(true) }}>수정</button>
+                    </>
+                  )}
+                  {n.status === 'settled' && (
+                    <button className="btn sm" onClick={async () => {
+                      const ok = await confirm({
+                        tone: 'warn', title: '결제를 되돌릴까요?',
+                        /* 두 경로가 다르다 — 거래 폼에서 온 어음은 그 거래를 **안 지운다**
+                           (예정으로 되돌릴 뿐이다). 한 문구로 뭉뚱그리면 거짓말이 된다. */
+                        body: n.originTxnId
+                          ? '그 거래가 다시 예정으로 돌아가고 통장 잔액에서 빠집니다. 거래 자체는 남아요.'
+                          : '그때 만든 입출금 거래도 함께 지워집니다.',
+                        confirmLabel: '되돌리기',
+                      })
+                      if (!ok) return
+                      const res = await api.unsettleNote(n.id)
+                      if (!res.ok) return toast.push(res.error || '되돌리지 못했어요', { tone: 'warn' })
+                      toast.push('결제를 되돌렸어요'); load()
+                    }}>되돌리기</button>
+                  )}
+                  {n.status !== 'settled' && (
+                    <button className="btn sm" onClick={async () => {
+                      /* 어음을 지우는 일은 드물다 — 잘못 적었을 때뿐이다.
+                         그래서 **무엇이 남는지**를 어음이 어디서 왔느냐에 따라 말해 준다.
+                         ⚠ 거래에서 온 어음은 지워도 **그 거래가 남는다**(결제방법이 어음인 채로).
+                           이 말이 없으면 "지웠는데 지출이 그대로네"가 된다. */
+                      const ok = await confirm({
+                        tone: 'neg', title: '어음을 지울까요?',
+                        body: n.originTxnId
+                          ? '어음 대장에서만 지웁니다. 그 거래는 결제방법이 어음인 채로 남아요. 잘못 적은 것이라면 거래를 열어 실제로 낸 방법(계좌이체·카드 등)으로 고쳐주세요.'
+                          : n.invoiceNo
+                            ? `청구서 ${n.invoiceNo}에 붙여 둔 정산도 함께 걷습니다. 그 청구서는 다시 미수로 돌아가요.`
+                            : '어음 대장에서 지웁니다. 되돌릴 수 없어요.',
+                        confirmLabel: '지우기',
+                      })
+                      if (!ok) return
+                      const res = await api.deleteNote(n.id)
+                      if (!res.ok) return toast.push(res.error || '지우지 못했어요', { tone: 'warn' })
+                      toast.push('지웠어요'); load()
+                    }}><Icon.Trash size={13}/></button>
+                  )}
+              </div>
+            ) },
+        ]}/>
       </div>
 
       <NoteForm open={formOpen} note={edit} defaultKind={tab} lockKind={!!fixedKind} vendors={vendors}
