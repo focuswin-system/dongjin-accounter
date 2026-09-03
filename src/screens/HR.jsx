@@ -7,6 +7,7 @@ import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 // 지급 등록 Drawer는 급여대장·용역계약 상세가 함께 쓴다(공용 컴포넌트로 분리)
 import { PayrollPayDrawer } from '../lib/components/PayrollPayDrawer'
 import { api } from '../lib/api'
+import { escHtml, printHtmlDocument } from '../lib/printHtml'
 
 /* ───────── 급여대장: 항목별(%·수치) 계산 ───────── */
 // item: { label, kind:'earn'|'deduct', mode:'fixed'|'percent', value }
@@ -50,7 +51,7 @@ function printPayslip(row, company = "") {
   const { calc, gross, deduction, net } = computeItems(row.items);
   const won = (n) => (Number(n) || 0).toLocaleString('ko-KR');
   // 이름·항목명·회사명에 <, &, " 등이 있어도 인쇄 레이아웃이 깨지지 않게 이스케이프.
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const esc = escHtml;
   const line = (l, a, neg) => `<tr><td>${esc(l)}</td><td style="text-align:right">${neg ? '-' : ''}${won(a)}</td></tr>`;
   const earns = calc.filter(i => i.kind === 'earn').map(i => line(i.label + (i.mode === 'percent' ? ` (${i.value}%)` : ''), i.amount)).join('');
   const deds  = calc.filter(i => i.kind === 'deduct').map(i => line(i.label + (i.mode === 'percent' ? ` (${i.value}%)` : ''), i.amount)).join('');
@@ -89,18 +90,7 @@ function printPayslip(row, company = "") {
   <div class="foot">${company ? esc(company) + ' · ' : ''}발행일 ${esc(row.pay_date)}</div>
   </body></html>`;
 
-  const iframe = document.createElement('iframe');
-  iframe.setAttribute('aria-hidden', 'true');
-  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
-  iframe.onload = () => {
-    const win = iframe.contentWindow;
-    const cleanup = () => setTimeout(() => { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); }, 500);
-    try { win.onafterprint = cleanup; win.focus(); win.print(); }
-    catch (e) { console.error('명세서 인쇄 실패', e); }
-    setTimeout(cleanup, 60000);
-  };
-  iframe.srcdoc = html;
-  document.body.appendChild(iframe);
+  printHtmlDocument(html);
 }
 
 /* ───────── HRScreen ───────── */
@@ -603,7 +593,7 @@ const PayslipEditorDrawer = ({ row, onClose, onSaved }) => {
           <div className="num text-sm text-muted" style={{ width: 88, textAlign: "right" }}>
             {kind === "deduct" ? "-" : ""}{fmtNum(calc[idx]?.amount || 0)}
           </div>
-          <button className="icon-btn" style={{ width: 28, height: 28 }} onClick={() => removeItem(idx)}><Icon.Close size={13}/></button>
+          <button className="icon-btn" title="이 줄 지우기" style={{ width: 28, height: 28 }} onClick={() => removeItem(idx)}><Icon.Close size={13}/></button>
         </div>
       ))}
       <button className="btn ghost sm" style={{ alignSelf: "flex-start" }} onClick={() => addItem(kind)}><Icon.Plus size={12}/> {kind === "earn" ? "지급 항목 추가" : "공제 항목 추가"}</button>
