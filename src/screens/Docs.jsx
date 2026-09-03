@@ -3602,9 +3602,18 @@ export const ReportsScreen = ({ go, openKey = null, onTitle }) => {
     )
   }
 
+  /* 목록에서 바로 '무엇을 볼지' 고치러 간다 — 안 쓰는 양식을 치우려면 여태 환경설정을
+     따로 찾아 들어가야 했다. 톱니는 '이 화면의 설정'이라는 뜻으로 어디서나 통한다.
+     ⚠ 권한 없는 계정에는 안 보인다 — 눌러도 막히는 버튼은 없느니만 못하다. */
   return (
     <div className="fade-up">
-      <PageHeader title="보고서"/>
+      <PageHeader title="보고서"
+        actions={canDo('settings') ? (
+          <button className="icon-btn" title="보여줄 보고서 고르기 (환경설정 › 보고서 관리)"
+            aria-label="보고서 관리" onClick={() => go?.('settings_reports')}>
+            <Icon.Cog size={16}/>
+          </button>
+        ) : null}/>
       {items === null ? (
         <Loading label="보고서 목록을 불러오는 중…"/>
       ) : list.length === 0 ? (

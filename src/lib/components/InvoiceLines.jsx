@@ -239,7 +239,12 @@ export const InvoiceLines = ({
         <label className="label" style={{ margin: 0 }}>
           {label} {labelHint && <span className="text-muted2">{labelHint}</span>}
         </label>
-        <button type="button" className="btn sm ml-auto" onClick={add}>
+        {/* 키를 적어 둔다 — 되는 줄 모르면 없는 기능이다(실사용 문의).
+            짧게: 두 개만. 나머지(↑↓·Shift+Enter)는 이 둘을 알면 저절로 따라온다. */}
+        <span className="text-xs text-muted2 ml-auto" style={{ marginRight: 10 }}>
+          Enter 아래 줄 · Tab 옆 칸
+        </span>
+        <button type="button" className="btn sm" onClick={add}>
           <Icon.Plus size={12}/> {addLabel}
         </button>
       </div>
