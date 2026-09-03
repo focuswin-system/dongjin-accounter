@@ -285,9 +285,14 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
          쓰면 **버튼도 열림 패널도 카드 모서리에서 잘린다**(실측 — 줄이 적을 때 특히 심하다).
          패널은 화면 좌표(fixed)로 body 에 띄우고, 바에는 오른쪽 여백을 준다. */
     <div className="dt-colbar no-print">
-      <button ref={colBtnRef} className="btn ghost sm" title="보여줄 열·순서·너비를 고쳐요"
+      {/* 테두리 없는 ghost 로 뒀더니 카드 모서리에 얹힌 글자처럼 보였다 —
+          누르는 것임을 알 수 있게 보통 버튼으로 세운다. 이름도 '열'만으로는 안 읽힌다. */}
+      <button ref={colBtnRef} className="btn sm" title="보여줄 열·순서·너비를 고쳐요"
         onClick={() => setColOpen(o => !o)}>
-        <Icon.Filter size={12}/> 열{changed ? ' ·' : ''}
+        {/* 손댄 표라는 표시 — 글자 뒤에 '·' 를 붙였더니 **글자가 잘린 것처럼** 보였다.
+            점은 따로 그린다. 정상(기본값)일 때는 아무 표식도 안 붙인다. */}
+        <Icon.Filter size={12}/> 열 설정
+        {changed && <span className="dt-coldot" title="기본값에서 바꾼 표예요"/>}
       </button>
       {colOpen && colMenuPos && createPortal(
         <div ref={colMenuRef} className="dt-colmenu"
