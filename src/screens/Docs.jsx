@@ -1625,10 +1625,38 @@ const REPORT_PRESETS = [
   { id: 'quarter', label: '이번 분기' }, { id: 'year', label: '올해' },
 ]
 
-const PeriodFilter = ({ value, onChange }) => {
+/* 보고서 조작 줄 — 기간·분기·월·필터가 앉는 자리.
+ *
+ * ⚠ **카드 안에 둔다.** 여태 맨바닥에 떠 있어서, 카드로 감싼 보고서(자금관리표·매입매출
+ *   현황)와 나란히 보면 만들다 만 화면으로 읽혔다(실사용 지적). 골격이 다르면 화면을
+ *   옮겨 다닐 때 눈이 매번 다시 적응해야 한다 — 조작은 늘 같은 상자 안에 있어야 한다. */
+/* 보고서 빈 상태 — **흰 상자에 회색 한 줄만 두지 않는다.**
+   그렇게 두면 "만들다 만 화면"으로 읽힌다(실사용 지적). 무엇이 없는지(제목)와
+   어떻게 하면 되는지(한 줄)를 같이 준다. 아이콘은 눈이 멈출 자리다. */
+const ReportEmpty = ({ title, hint }) => (
+  <div className="card card-pad" style={{ textAlign: 'center', padding: '56px 24px' }}>
+    <div style={{ width: 44, height: 44, borderRadius: 12, margin: '0 auto 14px', display: 'grid',
+      placeItems: 'center', background: 'var(--surface-2)', color: 'var(--muted-2)' }}>
+      <Icon.Doc size={20}/>
+    </div>
+    <div className="fw-700" style={{ fontSize: 15, marginBottom: 6 }}>{title}</div>
+    {hint && <div className="text-sm text-muted" style={{ lineHeight: 1.7, maxWidth: 460, margin: '0 auto' }}>{hint}</div>}
+  </div>
+)
+
+const ReportBar = ({ children }) => (
+  <div className="card card-pad no-print" style={{ marginBottom: 16 }}>
+    <div className="col gap-10">{children}</div>
+  </div>
+)
+
+/* children — 기간 아래에 한 줄 더 붙일 때(카드·외주 보고서의 추가 필터).
+   밖에 두면 그 줄만 카드를 벗어나 다시 어긋난다. */
+const PeriodFilter = ({ value, onChange, children }) => {
   const r = value || { from: '', to: '' }
   return (
-    <div className="row gap-8 no-print" style={{ marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+    <ReportBar>
+    <div className="row gap-8" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
       <span className="text-sm text-muted fw-600">기간</span>
       <DateInput className="input num" style={{ width: 150 }} value={r.from} max={r.to || undefined}
         onChange={e => onChange({ ...r, from: e.target.value })}/>
@@ -1651,6 +1679,8 @@ const PeriodFilter = ({ value, onChange }) => {
           onClick={() => onChange({ from: '', to: '' })}>전체</button>
       </div>
     </div>
+    {children}
+    </ReportBar>
   )
 }
 
@@ -1812,13 +1842,15 @@ const ReportTax4 = ({ toast }) => {
 
   return (
     <div>
-      <div className="row gap-8" style={{ marginBottom: 16 }}>
-        <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, -1))}><Icon.Left size={14}/></button>
-        <div className="fw-700" style={{ fontSize: 15, minWidth: 100, textAlign: "center" }}>{monthLabel(month)}</div>
-        <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, 1))}><Icon.Right size={14}/></button>
-        {/* 출력·내보내기는 보고서 공통 툴바(위쪽 '인쇄'·'엑셀')가 맡는다.
-            여기 있던 '자료 출력'은 토스트만 띄우는 가짜 버튼이었고, 진짜 인쇄와 자리도 겹친다. */}
-      </div>
+      <ReportBar>
+        <div className="row gap-8" style={{ alignItems: 'center' }}>
+          <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, -1))}><Icon.Left size={14}/></button>
+          <div className="fw-700" style={{ fontSize: 15, minWidth: 100, textAlign: "center" }}>{monthLabel(month)}</div>
+          <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, 1))}><Icon.Right size={14}/></button>
+          {/* 출력·내보내기는 보고서 공통 툴바(위쪽 '인쇄'·'엑셀')가 맡는다.
+              여기 있던 '자료 출력'은 토스트만 띄우는 가짜 버튼이었고, 진짜 인쇄와 자리도 겹친다. */}
+        </div>
+      </ReportBar>
 
       <div className="card card-pad" style={{ background: "var(--brand-soft)", borderColor: "transparent", marginBottom: 16 }}>
         <div className="row gap-8">
@@ -1829,9 +1861,8 @@ const ReportTax4 = ({ toast }) => {
       </div>
 
       {rows.length === 0 ? (
-        <div className="card card-pad" style={{ textAlign: "center", color: "var(--muted-2)", padding: "44px 18px" }}>
-          {monthLabel(month)} 급여대장이 없어요. 인사관리 → 급여대장에서 먼저 작성하세요.
-        </div>
+        <ReportEmpty title={`${monthLabel(month)} 급여대장이 없어요`}
+          hint="이 자료는 급여대장에서 만듭니다. 인사관리 → 급여대장에서 그 달을 먼저 작성해주세요."/>
       ) : (
         <>
           <KpiRow cols={3} style={{ marginBottom: 24 }}>
@@ -1931,13 +1962,13 @@ const ReportContract = ({ toast }) => {
 
   return (
     <div>
-      <div className="row gap-8 no-print" style={{ marginBottom: 16 }}>
-        <button className={`chip ${!onlyOpen ? 'active' : ''}`} onClick={() => setOnlyOpen(false)}>전체</button>
-        <button className={`chip ${onlyOpen ? 'active' : ''}`} onClick={() => setOnlyOpen(true)}>진행중만</button>
-        <span className="text-sm text-muted" style={{ marginLeft: 8, alignSelf: 'center' }}>
-          매출 주문 {sales.length}건
-        </span>
-      </div>
+      <ReportBar>
+        <div className="row gap-8" style={{ alignItems: 'center' }}>
+          <button className={`chip ${!onlyOpen ? 'active' : ''}`} onClick={() => setOnlyOpen(false)}>전체</button>
+          <button className={`chip ${onlyOpen ? 'active' : ''}`} onClick={() => setOnlyOpen(true)}>진행중만</button>
+          <span className="text-sm text-muted" style={{ marginLeft: 8 }}>매출 주문 {sales.length}건</span>
+        </div>
+      </ReportBar>
 
       <KpiRow cols={4} style={{ marginBottom: 24 }}>
         <Kpi label="총 수주금액" value={totalAmount} hint="계약서 금액(부가세 별도)"/>
@@ -2385,7 +2416,8 @@ const ReportTaxOffice = ({ toast, registerExport }) => {
 
   return (
     <div>
-      <div className="row gap-12 no-print" style={{ marginBottom: 20, alignItems: "center" }}>
+      <ReportBar>
+        <div className="row gap-12" style={{ alignItems: "center" }}>
         <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, -1))}><Icon.Left size={14}/></button>
         <div className="fw-700" style={{ fontSize: 15, minWidth: 100, textAlign: "center" }}>{monthLabel(month)}</div>
         <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, 1))}><Icon.Right size={14}/></button>
@@ -2395,7 +2427,8 @@ const ReportTaxOffice = ({ toast, registerExport }) => {
         )}
         {/* 내려받기는 위 '엑셀' 버튼 하나로 모았다(registerExport) */}
         {busy && <span className="text-sm text-muted ml-auto">엑셀을 만드는 중…</span>}
-      </div>
+        </div>
+      </ReportBar>
 
       {!pack ? <Loading label="자료를 세는 중…"/> : (
         <>
@@ -2486,14 +2519,16 @@ const ReportVAT = ({ toast, registerExport }) => {
   return (
     <div>
       {/* 분기 선택 */}
-      <div className="row gap-8" style={{ marginBottom: 16 }}>
-        <span className="text-sm text-muted fw-600" style={{ lineHeight: "28px" }}>신고 분기</span>
-        {["Q1", "Q2", "Q3", "Q4"].map(q => (
-          <button key={q} className={`chip${quarter === q ? " active" : ""}`} onClick={() => setQuarter(q)}>
-            {QUARTER_LABEL[q]}
-          </button>
-        ))}
-      </div>
+      <ReportBar>
+        <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+          <span className="text-sm text-muted fw-600">신고 분기</span>
+          {["Q1", "Q2", "Q3", "Q4"].map(q => (
+            <button key={q} className={`chip${quarter === q ? " active" : ""}`} onClick={() => setQuarter(q)}>
+              {QUARTER_LABEL[q]}
+            </button>
+          ))}
+        </div>
+      </ReportBar>
 
       {/* 신고 기간 — 고른 분기에서 계산한다.
           예전엔 "2026.04.01 ~ 2026.06.30 (2기 예정신고) · 기한 2026년 7월 25일"이 **글자로 박혀** 있어서
@@ -2729,11 +2764,13 @@ const ReportFundSheet = ({ toast, registerExport }) => {
   if (!d) {
     return (
       <div>
-        <div className="row gap-12 no-print" style={{ marginBottom: 20, alignItems: 'center' }}>
-          <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, -1))}><Icon.Left size={14}/></button>
-          <div className="fw-700" style={{ fontSize: 15, minWidth: 100, textAlign: 'center' }}>{monthLabel(month)}</div>
-          <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, 1))}><Icon.Right size={14}/></button>
-        </div>
+        <ReportBar>
+          <div className="row gap-12" style={{ alignItems: 'center' }}>
+            <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, -1))}><Icon.Left size={14}/></button>
+            <div className="fw-700" style={{ fontSize: 15, minWidth: 100, textAlign: 'center' }}>{monthLabel(month)}</div>
+            <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, 1))}><Icon.Right size={14}/></button>
+          </div>
+        </ReportBar>
         <Loading label="자금 자료를 모으는 중…"/>
       </div>
     )
@@ -2742,7 +2779,8 @@ const ReportFundSheet = ({ toast, registerExport }) => {
   const S = d.summary
   return (
     <div>
-      <div className="row gap-12 no-print" style={{ marginBottom: 20, alignItems: 'center' }}>
+      <ReportBar>
+        <div className="row gap-12" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
         <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, -1))}><Icon.Left size={14}/></button>
         <div className="fw-700" style={{ fontSize: 15, minWidth: 100, textAlign: 'center' }}>{monthLabel(month)}</div>
         <button className="btn ghost sm" onClick={() => setMonth(shiftMonth(month, 1))}><Icon.Right size={14}/></button>
@@ -2750,7 +2788,8 @@ const ReportFundSheet = ({ toast, registerExport }) => {
         <span className="text-sm text-muted">집계 구간 {d.range.from} ~ {d.range.to}</span>
         {/* 내려받기는 위 '엑셀' 버튼 하나로 모았다(registerExport) */}
         {busy && <span className="text-sm text-muted ml-auto">엑셀을 만드는 중…</span>}
-      </div>
+        </div>
+      </ReportBar>
 
       <KpiRow cols={4} style={{ marginBottom: 20 }}>
         <Kpi label="들어온 돈" value={S.all.actualIn} tone="pos" hint="이 구간에 입금 완료된 돈"/>
@@ -2951,7 +2990,8 @@ const ReportLoan = ({ toast, registerExport }) => {
   const picked = picks.length === 1 ? choices.find(l => l.id === picks[0]) : null
 
   const controls = (
-    <div className="col gap-10 no-print" style={{ marginBottom: 20 }}>
+    <ReportBar>
+    <div className="col gap-10">
       <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
         {/* 범위는 값이 둘뿐이라 칩 */}
         {[['active', '진행 중'], ['all', '상환 완료 포함']].map(([v, l]) => (
@@ -2989,6 +3029,7 @@ const ReportLoan = ({ toast, registerExport }) => {
         내려받기는 위 <b>엑셀</b> 버튼을 쓰세요.
       </div>
     </div>
+    </ReportBar>
   )
 
   if (!d) return <div>{controls}<Loading label="차입금을 불러오는 중…"/></div>
@@ -2998,9 +3039,10 @@ const ReportLoan = ({ toast, registerExport }) => {
     return (
       <div>
         {controls}
-        <div className="text-sm text-muted2" style={{ padding: 24, textAlign: 'center' }}>
-          {status === 'active' ? '진행 중인 차입금이 없어요.' : '등록된 차입금이 없어요.'}
-        </div>
+        <ReportEmpty title={status === 'active' ? '진행 중인 차입금이 없어요' : '등록된 차입금이 없어요'}
+          hint={status === 'active'
+            ? '상환이 끝난 것까지 보려면 위에서 ‘상환 완료 포함’을 고르세요.'
+            : '재무관리 → 차입금에서 등록하면 여기에 모입니다.'}/>
       </div>
     )
   }
@@ -3215,9 +3257,9 @@ const ReportCard = ({ toast }) => {
   }, [choices, cardId])
 
   const controls = (
-    <div className="no-print">
-      <PeriodFilter value={period} onChange={setPeriod}/>
-      <div className="row gap-8" style={{ marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+    /* 추가 필터는 기간과 **같은 카드 안**에 넣는다 — 밖에 두면 그 줄만 맨바닥에 뜬다 */
+    <PeriodFilter value={period} onChange={setPeriod}>
+      <div className="row gap-8" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
         {/* 값이 셋뿐이라 칩. 카드는 회사마다 열 장 넘게 있어 Combobox */}
         <span className="text-sm text-muted fw-600">소유</span>
         {[['all', '전체'], ['corp', '법인'], ['personal', '대표 개인']].map(([v, l]) => (
@@ -3237,7 +3279,7 @@ const ReportCard = ({ toast }) => {
             placeholder="카드 선택"/>
         </div>
       </div>
-    </div>
+    </PeriodFilter>
   )
 
   if (!d) return <div>{controls}<Loading label="카드 내역을 불러오는 중…"/></div>
@@ -3247,11 +3289,11 @@ const ReportCard = ({ toast }) => {
     return (
       <div>
         {controls}
-        <div className="text-sm text-muted2" style={{ padding: 24, textAlign: 'center' }}>
-          {owner === 'all' && cardType === 'all'
-            ? '등록된 카드가 없어요. 기준정보 › 계좌·카드에서 먼저 등록해주세요.'
-            : '조건에 맞는 카드가 없어요.'}
-        </div>
+        <ReportEmpty
+          title={owner === 'all' && cardType === 'all' ? '등록된 카드가 없어요' : '조건에 맞는 카드가 없어요'}
+          hint={owner === 'all' && cardType === 'all'
+            ? '기준정보 › 계좌·카드에서 카드를 먼저 등록하면 쓴 돈과 갚은 돈이 여기 모입니다.'
+            : '위에서 소유·종류 조건을 넓혀 보세요.'}/>
       </div>
     )
   }
@@ -3545,9 +3587,8 @@ export const ReportsScreen = ({ go }) => {
       {items === null ? (
         <Loading label="보고서 목록을 불러오는 중…"/>
       ) : list.length === 0 ? (
-        <div className="card card-pad text-sm text-muted" style={{ textAlign: "center", padding: 40 }}>
-          볼 수 있는 보고서가 없어요. 관리자에게 문의하세요.
-        </div>
+        <ReportEmpty title="볼 수 있는 보고서가 없어요"
+            hint="쓰실 양식을 관리자에게 요청하시면 열어드립니다."/>
       ) : (
         /* 기준정보·환경설정과 **같은 부품**을 쓴다(TileBoard). 즐겨찾기·정렬이 붙는다.
          *
