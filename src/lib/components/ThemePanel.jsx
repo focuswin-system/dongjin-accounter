@@ -72,7 +72,11 @@ export const ThemePanel = ({ embedded }) => {
         이 설정은 <b>나에게만</b> 적용돼요. 다른 PC 로 로그인해도 따라옵니다.
       </div>
 
-      <div className="col gap-12" style={{ maxWidth: 720 }}>
+      {/* ⚠ 폭 제한은 **화면으로 혼자 설 때만** 건다. 전체폭 화면에서 카드가 끝까지
+          늘어나면 글이 한 줄에 너무 길어 읽기 나쁘다.
+          드로어 안(embedded)에서는 서랍이 이미 폭을 정했다 — 여기서 또 720 을 걸면
+          그보다 넓은 서랍에서 **오른쪽이 빈 채로 남는다.** */}
+      <div className="col gap-12" style={embedded ? undefined : { maxWidth: 720 }}>
         <Section title="밝기">
           <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
             {MODES.map(m => {

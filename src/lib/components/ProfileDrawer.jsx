@@ -97,8 +97,10 @@ export const ProfileDrawer = ({ open, onClose, user, onSaved }) => {
 
   const initial = (form.name || user?.displayName || '?')[0]
 
+  /* 서랍 폭 — 접속 이력이 표(시각·결과·IP)이고 화면 설정이 카드 여럿이라 560 은 좁다.
+     문서 드로어(720)와 같은 폭으로 맞춘다. 같은 앱에서 서랍 폭이 제각각이면 어수선하다. */
   return (
-    <Drawer open={open} onClose={onClose} width="min(560px, 100vw)" label="프로필 설정">
+    <Drawer open={open} onClose={onClose} width="min(720px, 100vw)" label="프로필 설정">
       <DrawerHead title="프로필 설정" sub={me ? `${me.company_name} · ${me.username}` : ''} onClose={onClose}/>
 
       <div className="tab-bar" style={{ padding: '0 18px' }}>

@@ -341,7 +341,17 @@ const PREQ_SOURCES = [
     desc: '견적을 요청해 둔 건을 그대로 품의로 올려요',
     effect: '거래처와 품목·단가가 그대로 옮겨져요. 받은 단가가 다르면 그 자리에서 고치면 돼요.',
   },
-  /* 이미 산 것을 품의로 — 급하게 먼저 사고 결재를 나중에 올리는 일이 실무에 흔하다.
+  /* 받은 세금계산서를 품의로 — **이게 정상 순서다.**
+     물건을 받고 계산서를 받으면 미지급금이 잡히고, 그걸 결재 올려 지급한다.
+     거래내역(이미 나간 돈)에서만 가져올 수 있으면 "돈이 나간 뒤에야 품의"가 된다.
+     청구서에는 품목이 직접 달려 있어 거래를 거쳐 되짚을 필요도 없다. */
+  {
+    id: 'invoice', icon: Icon.Receipt,
+    label: '받은 청구서에서',
+    desc: '아직 지급하지 않은 매입 건을 가져와요',
+    effect: '거래처와 품목이 그대로 옮겨져요. 결재가 나면 그 청구서로 지급하면 됩니다.',
+  },
+  /* 이미 산 것을 품의로 — 급하게 먼저 사고 결재를 나중에 올리는 일도 흔하다.
      그때 거래내역에 이미 적어 둔 것을 손으로 다시 옮겨 적고 있었다. */
   {
     id: 'txn', icon: Icon.Bank,
@@ -417,6 +427,9 @@ export const PurchaseReqScreen = () => {
           if (id === 'blank') { setSeed({ items: [] }); setCreating(true); return }
           setRows(null); setPick(id)
           if (id === 'quote') api.getQuoteReqs().then(r => setRows(r || []))
+          /* 매입 청구서 — 목록이 품목(lines)까지 함께 준다(서버 attachMatchesBulk).
+             그래서 고른 뒤 상세를 다시 읽지 않아도 된다. */
+          else if (id === 'invoice') api.getInvoices({ kind: 'received' }).then(r => setRows(r || []))
           // 지출 전체를 받아 화면에서 거른다 — 품의는 보통 최근 몇 달치를 훑어 고른다(정산내역서와 같은 방식)
           else if (id === 'txn') api.getTransactions({ kind: 'expense' }).then(r => setRows(r || []))
           else api.getRefItems('item').then(r => setRows(r || []))
@@ -462,6 +475,61 @@ export const PurchaseReqScreen = () => {
         }}/>
 
       {/* 품목에서 — 견적요청서와 같은 규칙으로 채운다 */}
+      {/* 받은 청구서에서 — 아직 지급 안 한 건이 위로 오게 둔다(그게 품의를 올릴 대상이다).
+          이미 지급을 마친 건도 고를 수는 있다 — 뒤늦게 결재를 올리는 일이 있다. */}
+      <PickListDrawer
+        open={pick === 'invoice'} onClose={() => setPick(null)}
+        title="받은 청구서에서" sub="품의에 넣을 매입 건을 고르세요"
+        placeholder="거래처·청구번호·품목 검색"
+        rows={rows}
+        match={(v, q) => [v.vendor, v.invoiceNo, v.memo, ...(v.lines || []).map(l => l.name)]
+          .filter(Boolean).some(x => String(x).toLowerCase().includes(q.toLowerCase()))}
+        render={(v) => ({
+          title: v.vendor || '(거래처 없음)',
+          sub: [v.issuedAt, v.invoiceNo,
+                (v.lines || []).length ? `품목 ${v.lines.length}개` : null,
+                v.status].filter(Boolean).join(' · '),
+          right: Number(v.totalAmount ?? v.amount) || 0,
+        })}
+        empty="받은 청구서가 없어요."
+        onDone={(picked) => {
+          /* 거래처는 한 곳일 때만 — 거래내역 쪽과 같은 규칙(결재 문서라 거래처가 틀리면
+             그대로 승인이 난다) */
+          const names = [...new Set(picked.map(v => v.vendor).filter(Boolean))]
+          const many = names.length > 1
+          const items = []
+          for (const v of picked) {
+            const from = [v.issuedAt, many && v.vendor ? v.vendor : null].filter(Boolean).join(' ')
+            const ls = v.lines || []
+            if (ls.length) {
+              for (const l of ls) {
+                const qty = Number(l.qty) || 0
+                items.push({
+                  name: [l.name, l.spec].filter(Boolean).join(' '),
+                  unit: l.unit || '',
+                  qty: qty ? String(qty) : '',
+                  unit_price: l.unit_price ? String(l.unit_price) : '',
+                  amount: l.amount ? String(l.amount) : '',
+                  actual_price: '', actual_amount: '',
+                  memo: from,
+                })
+              }
+            } else {
+              /* 품목 없이 총액만 끊은 청구서 — 공급가액으로 한 줄.
+                 합계(total)를 쓰면 부가세가 품의 금액에 섞인다. */
+              const supply = Number(v.supplyAmount) || (Number(v.totalAmount ?? v.amount) || 0)
+              items.push({
+                name: v.memo || v.category || '매입',
+                unit: '식', qty: '1',
+                unit_price: String(supply), amount: String(supply),
+                actual_price: '', actual_amount: '', memo: from,
+              })
+            }
+          }
+          setSeed({ ...(names.length === 1 ? { vendor_name: names[0] } : {}), items })
+          setPick(null); setCreating(true)
+        }}/>
+
       {/* 거래내역에서 — 여러 건을 담는다. 이미 나간 돈이라 금액이 확정이고,
           그래서 수량 1 · 단가=금액으로 둔다(수량을 비워 두면 합계가 0이 된다). */}
       <PickListDrawer
