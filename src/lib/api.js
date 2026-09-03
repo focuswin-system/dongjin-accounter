@@ -2079,6 +2079,21 @@ export const api = {
     catch (e) { return { ok: false, error: e.message } }
   },
 
+  /** 내 정보(이름·이메일) 수정 — 아이디·역할은 여기서 못 바꾼다(신원은 마스터가 정한다) */
+  async saveMyProfile({ name, email }) {
+    try { const r = await req('/auth/me/profile', { method: 'PUT', body: { name, email } }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  /** 내 접속 이력 — 성공·실패를 함께 준다(모르는 접속을 알아채라고) */
+  async getMyLogins(limit = 30) {
+    try { return await req(`/auth/me/logins?limit=${limit}`) } catch { return [] }
+  },
+  /** 내 비밀번호 변경 — 본인 것만(서버가 isSelf 로 검사한다) */
+  async changeMyPassword(userId, password) {
+    try { const r = await req(`/auth/users/${userId}/password`, { method: 'PUT', body: { password } }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
   async getUsers() {
     try { return await req('/auth/users') } catch { return [] }
   },

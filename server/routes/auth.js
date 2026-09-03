@@ -170,8 +170,11 @@ router.get('/me', authMiddleware, async (req, res, next) => {
 /* 화면 설정(theme_*) — 밝기·강조색·메뉴 표시 방식. 사람에 붙는 값이라 PC 를 바꿔도 따라와야 한다.
    ⚠ 값의 뜻은 여기서 안 따진다(위 머리말). 화면이 못 읽는 값이 들어와도
      src/lib/theme.js normalize 가 기본값으로 되돌린다 — 그 한 곳이 판정한다. */
+/* avatar_url — 프로필 사진. 업로드는 기존 경로(POST /api/uploads)를 그대로 쓰고
+   여기엔 **주소만** 담는다. users 표에 컬럼을 더하지 않은 이유: 사진은 권한도
+   신원도 아닌 **내 화면 취향**과 같은 축이고, 여기 두면 스키마를 안 건드린다. */
 const PREF_KEYS = ['nav_hidden', 'onboarded_at',
-  'theme_mode', 'theme_accent', 'theme_nav_mode']
+  'theme_mode', 'theme_accent', 'theme_nav_mode', 'avatar_url']
 const PREF_MAX_LEN = 4000
 
 async function prefsOf(userId) {
@@ -216,6 +219,56 @@ router.put('/me/prefs', authMiddleware, async (req, res, next) => {
 })
 
 // ── 사용자 목록 (회사 마스터만, 자사 계정만) — 배정된 역할 포함 ──
+/**
+ * 내 정보 수정 — 이름·이메일만.
+ *
+ * ⚠ 아이디·역할·소속 회사는 **여기서 못 바꾼다.** 그건 신원이라 마스터가 정한다
+ *   (역할을 스스로 올릴 수 있으면 권한 체계가 없는 것과 같다).
+ *   비밀번호도 여기가 아니라 PUT /users/:id/password 다 — 현재 비번 확인이 붙는 자리다.
+ */
+router.put('/me/profile', authMiddleware, async (req, res, next) => {
+  try {
+    const name = String(req.body?.name ?? '').trim()
+    const email = String(req.body?.email ?? '').trim()
+    if (!name) return res.status(400).json({ error: '이름을 입력하세요' })
+    if (name.length > 100) return res.status(400).json({ error: '이름이 너무 길어요' })
+    /* 형식만 본다 — 실제로 받는 주소인지는 메일을 보내봐야 알고, 그건 이 앱의 일이 아니다.
+       비워 두는 것은 허용한다(이메일이 없는 계정이 있다). */
+    if (email && (email.length > 200 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+      return res.status(400).json({ error: '이메일 형식이 올바르지 않아요' })
+    }
+    await platformPool.execute(
+      'UPDATE users SET name = ?, email = ? WHERE id = ? AND company_id = ?',
+      [name, email || null, req.user.id, req.user.companyId])
+    audit({ companyId: req.user.companyId, userId: req.user.id, username: req.user.username,
+            action: 'edit', resource: 'user', targetId: req.user.id, ip: clientIp(req), detail: '내 정보' })
+    res.json({ ok: true, name, email })
+  } catch (e) { next(e) }
+})
+
+/**
+ * 내 접속 이력 — **본인 것만.**
+ *
+ * 남의 이력은 마스터가 변경 이력 화면에서 본다(routes/audit.js). 여기는 "내 계정으로
+ * 누가 들어왔나"를 본인이 확인하는 자리다 — 모르는 곳에서 성공한 기록이 있으면
+ * 비밀번호를 바꿔야 한다는 뜻이라, **실패한 시도도 함께** 보여준다.
+ *
+ * ⚠ user_id 로 거른다. username 으로 거르면 같은 아이디를 쓰는 **다른 회사** 기록이
+ *   섞인다(uq_company_user — 아이디는 회사 안에서만 유일하다).
+ */
+router.get('/me/logins', authMiddleware, async (req, res, next) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100)
+    const [rows] = await platformPool.execute(
+      `SELECT action, ip, created_at
+         FROM audit_logs
+        WHERE company_id = ? AND user_id = ? AND action IN ('login','login_fail')
+        ORDER BY created_at DESC LIMIT ${limit}`,
+      [req.user.companyId, req.user.id])
+    res.json(rows.map(r => ({ ok: r.action === 'login', ip: r.ip || '', at: r.created_at })))
+  } catch (e) { next(e) }
+})
+
 router.get('/users', authMiddleware, async (req, res, next) => {
   try {
     if (!isMaster(req)) return res.status(403).json({ error: '권한이 없습니다' })

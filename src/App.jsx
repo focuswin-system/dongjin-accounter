@@ -5,6 +5,7 @@ import { api, setApiFailureHandler } from './lib/api'
 import { WelcomeWizard } from './lib/components/WelcomeWizard'
 import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID, MASTER_LEAVES, PORTAL_PAGE_OF_LEAF, NAV_PATH_OF, FOLDABLE_DOMAINS, foldNav, filterDocs, filterPortalDocs } from './lib/nav'
 import { PermCtx, usePerms, visibleNav, visiblePortalNode, withoutMasterOnly } from './lib/perms'
+import { ProfileDrawer } from './lib/components/ProfileDrawer'
 import { sessionAlive, clearSession } from './lib/session'
 import { applyTheme, fromPrefs, writeLocal, readLocal, watchSystem } from './lib/theme'
 import { MANUAL_FOR_ROUTE } from './lib/manual'
@@ -340,7 +341,13 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
      여는 조건을 prefs 로 직접 걸면, 저장하는 순간 onboarded_at 이 찍혀 조건이 꺼지고
      마지막 '완료' 단계가 통째로 건너뛰어진다(실제로 그랬다). 여는 것만 prefs 가 정하고
      닫는 것은 사용자가 정한다. */
-  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
+  /* 프로필에서 바꾼 사진·이름을 헤더가 **바로** 따라오게 하는 값.
+     저장했는데 위쪽이 그대로면 저장이 안 된 줄 안다. 사진은 서버(prefs)가 진실이고
+     이름은 localStorage 스냅샷이 진실이라, 새로고침하면 그쪽으로 수렴한다. */
+  const [myName, setMyName] = useState(null)
+  const avatarUrl = prefs?.avatar_url || '';
   useEffect(() => { if (prefs != null && !prefs.onboarded_at) setWizardOpen(true) }, [prefs]);
   // 환경설정 → 메뉴 관리에서도 다시 열 수 있다(도움말과 같은 '다시 보이기')
   useEffect(() => {
@@ -931,13 +938,18 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
               늘 같은 자리에 있어야 하는 것이라 헤더 오른쪽 끝으로 옮긴다. */}
           <Popover align="right" width={200}
             trigger={
-              <button className="topbar-user" title={user?.displayName || "관리자"}>
-                <div className="avatar">{(user?.displayName || "관")[0]}</div>
+              <button className="topbar-user" title={myName || user?.displayName || "관리자"}>
+                {/* 사진이 있으면 사진, 없으면 이름 첫 글자 — 프로필 드로어와 같은 규칙 */}
+                <div className="avatar" style={{ overflow: 'hidden' }}>
+                  {avatarUrl
+                    ? <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}/>
+                    : (myName || user?.displayName || "관")[0]}
+                </div>
                 {/* 이름 한 줄만. 예전엔 아래에 role 을 그대로 깔았는데 'admin' 이라는
                     영문 코드였고, 그 한 줄 때문에 정작 이름이 작아졌다.
                     역할은 눌러서 여는 팝오버에 한국어로 있다 — 늘 볼 값이 아니다. */}
                 <div className="topbar-user-name">
-                  <div className="who">{user?.displayName || "관리자"}</div>
+                  <div className="who">{myName || user?.displayName || "관리자"}</div>
                 </div>
                 <Icon.Down size={13} style={{ flexShrink: 0, color: "var(--muted-2)" }}/>
               </button>
@@ -945,14 +957,16 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
             <div style={{ padding: 6 }}>
               {/* 좁은 화면에서는 이름이 접히므로 여기서 한 번 더 보여준다 */}
               <div style={{ padding: "6px 10px 8px" }}>
-                <div className="text-sm fw-700">{user?.displayName || "관리자"}</div>
+                <div className="text-sm fw-700">{myName || user?.displayName || "관리자"}</div>
                 {/* 역할은 여기서만 보여주고 **한국어로** 적는다(Master.jsx 사용자 목록과 같은 말) */}
                 <div className="text-xs text-muted2">
                   {user?.role === 'admin' ? '관리자' : '일반 사용자'}
                 </div>
               </div>
               <div style={{ height: 1, background: "var(--line)", margin: "0 0 4px" }}/>
-              <PopItem icon={<Icon.Cog size={14}/>} label="프로필 설정" onClick={() => toast.push("프로필 설정은 준비 중이에요")}/>
+              {/* 화면 설정도 여기 안에 있다 — 환경설정(회사 설정)에 두면 그 권한이 없는
+                  실무 계정이 **자기 비밀번호도 못 바꾸고 다크 모드도 못 켠다.** */}
+              <PopItem icon={<Icon.User size={14}/>} label="프로필 설정" onClick={() => setProfileOpen(true)}/>
               <div style={{ height: 1, background: "var(--line)", margin: "4px 0" }}/>
               <PopItem icon={<Icon.Out size={14}/>} label="로그아웃" onClick={async () => {
                 const ok = await confirm({
@@ -979,6 +993,19 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
 
       <TransactionForm open={txnForm !== null} kind={txnForm?.kind || "expense"} initialContract={txnForm?.contract} initialCostContract={txnForm?.costContract || null} initialVendor={txnForm?.vendor || null} initialCategory={txnForm?.category || null} initialMemo={txnForm?.memo || null} compact={!!txnForm?.compact} editTxn={txnForm?.txn || null} onClose={() => setTxnForm(null)} onSave={() => setTxnVersion(v => v + 1)}/>
       <EvidenceAttachDrawer item={evidenceAttach} onClose={() => setEvidenceAttach(null)}/>
+      <ProfileDrawer open={profileOpen} onClose={() => setProfileOpen(false)} user={user}
+        onSaved={(p) => {
+          /* 헤더가 바로 따라오게 한다 — 저장했는데 위쪽 이름·사진이 그대로면
+             저장이 안 된 줄 안다. localStorage 스냅샷도 같이 고친다(새로고침 대비). */
+          if (p?.avatarUrl !== undefined) setPrefs(x => ({ ...(x || {}), avatar_url: p.avatarUrl || null }))
+          if (p?.displayName) {
+            setMyName(p.displayName)
+            try {
+              const u = JSON.parse(localStorage.getItem('user') || '{}')
+              localStorage.setItem('user', JSON.stringify({ ...u, displayName: p.displayName }))
+            } catch {}
+          }
+        }}/>
       {/* 첫 로그인 안내 — 딱 한 번. onboarded_at 이 찍히면 다시 뜨지 않는다.
           권한이 아니라 '내 화면 정리'라, 저장도 사람 단위다(회사 단위 아님). */}
       <WelcomeWizard open={wizardOpen} userName={user?.displayName} initialOff={navHidden} replay={!!prefs?.onboarded_at}
