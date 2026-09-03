@@ -1010,7 +1010,9 @@ button.cell-tag:hover { color: var(--ink); background: var(--surface-2); }
   width: 5px; height: 5px; border-radius: 50%; background: var(--brand);
   display: inline-block; margin-left: 4px; flex-shrink: 0;
 }
-/* 열 설정 패널 — body 에 띄운다(카드의 overflow:hidden 을 벗어나야 안 잘린다) */
+/* 열 설정 패널 — body 에 띄운다(카드의 overflow:hidden 을 벗어나야 안 잘린다).
+   ⚠ body 직속이라 인쇄 화이트리스트 밖이다. 열어 둔 채 Ctrl+P 하면 종이에 찍히므로
+     여기서 직접 뺀다(no-print 클래스는 이 요소에 안 붙는다 — 클래스를 하나로 묶어 둔다). */
 .dt-colmenu {
   z-index: 1200; background: var(--surface); border: 1px solid var(--line);
   border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.16);
@@ -1503,7 +1505,7 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
   .drawer:has(#statement-print) .drawer-body, .drawer:has(.voucher-print) .drawer-body {
     overflow: visible; padding: 0; background: var(--surface) !important;
   }
-  .no-print { display: none !important; }
+  .no-print, .dt-colmenu { display: none !important; }
   @page { size: A4; margin: 16mm; }
 
   /* 화면용 회색 바탕(--bg)은 body·html 에 있다. '배경 그래픽' 켜고 인쇄하면
