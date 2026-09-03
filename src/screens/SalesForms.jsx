@@ -29,13 +29,25 @@ const ApprovalBox = ({ cols = ['담 당', '검 토', '승 인'] }) => (
 
 /** 제목 줄 — 양식마다 같은 자리에 선다. */
 const FormHead = ({ title, sub, right }) => (
-  <div className="row" style={{ alignItems: 'flex-start', marginBottom: 14 }}>
+  <div className="row" style={{ alignItems: 'flex-start', padding: '20px 24px 16px' }}>
     <div className="fw-700" style={{ fontSize: 16 }}>
       {title}
-      {sub && <div className="text-xs text-muted" style={{ marginTop: 3, fontWeight: 400 }}>{sub}</div>}
+      {sub && <div className="text-xs text-muted" style={{ marginTop: 4, fontWeight: 400 }}>{sub}</div>}
     </div>
     <div style={{ marginLeft: 'auto' }}>{right}</div>
   </div>
+)
+
+/* 종이 한 장 — 제목·결재란은 여백을 갖고, **표는 카드 폭을 꽉 채운다.**
+   이 앱의 표 관례가 그렇다(청구서 목록·거래내역 모두 카드에 표가 꽉 찬다).
+   표만 안쪽으로 들여놓으면 머리글 띠 좌우에 흰 띠가 남아 어설퍼 보인다(실사용 지적). */
+const FormPaper = ({ children, style }) => (
+  <div className="card" style={{ overflow: 'hidden', ...style }}>{children}</div>
+)
+
+/** 표 아래 각주 — 표가 꽉 차 있으므로 여백은 여기서 준다. */
+const FormNote = ({ children }) => (
+  <div className="text-xs text-muted2" style={{ padding: '12px 24px 18px', lineHeight: 1.7 }}>{children}</div>
 )
 
 /** 조작 줄 — 다섯 양식이 같은 줄을 쓴다. 상자를 여럿으로 쪼개지 않는다(듬성해 보인다).
@@ -107,11 +119,11 @@ export const ReportSalesMonth = () => {
         note={d ? `${d.from} ~ ${d.to}${d.closingDay > 0 ? ` · 매월 ${d.closingDay}일 마감` : ''}` : ''}/>
       {err ? <FormError error={err}/> : !d ? <Loading label="매출을 모으는 중…"/> : (
         <>
-          <div className="card" style={{ padding: 24, marginBottom: 20 }}>
+          <FormPaper style={{ marginBottom: 20 }}>
             <FormHead title={`${ym(month)}분 매출내역`}
               sub={`${d.from} ~ ${d.to}`} right={<ApprovalBox/>}/>
             <div className="table-scroll">
-              <table className="table" style={{ minWidth: 880 }}>
+              <table className="table grid-lines" style={{ minWidth: 880 }}>
                 <thead>
                   <tr>
                     <th style={{ width: 48 }}>NO</th>
@@ -156,18 +168,18 @@ export const ReportSalesMonth = () => {
             </div>
             {/* 품목 없이 총액만 끊은 청구서 — 위 표에 줄이 없다. 아래 누계와 왜 다른지 밝힌다 */}
             {d.headless.count > 0 && (
-              <div className="text-xs text-muted2" style={{ marginTop: 10, lineHeight: 1.7 }}>
+              <FormNote>
                 품목 내역이 없는 청구서 {d.headless.count}건({fmtNum(d.headless.total)}원)은 위 표에 줄이 없어요 —
                 아래 <b>연 누계</b>에는 들어갑니다.
-              </div>
+              </FormNote>
             )}
-          </div>
+          </FormPaper>
 
-          <div className="card" style={{ padding: 24 }}>
+          <FormPaper>
             <FormHead title={`${month.slice(0, 4)}년 현재 매출액 합계`}
               sub={`${d.yearFrom} ~ ${d.to} · 청구서 기준`}/>
             <div className="table-scroll">
-              <table className="table" style={{ minWidth: 720 }}>
+              <table className="table grid-lines" style={{ minWidth: 720 }}>
                 <thead>
                   <tr>
                     <th style={{ width: 48 }}>NO</th>
@@ -203,7 +215,7 @@ export const ReportSalesMonth = () => {
                 </tfoot>
               </table>
             </div>
-          </div>
+          </FormPaper>
         </>
       )}
     </div>
@@ -234,13 +246,13 @@ export const ReportSalesYear = () => {
         </div>
       </div>
       {err ? <FormError error={err}/> : !d ? <Loading label="한 해 매출을 모으는 중…"/> : (
-        <div className="card" style={{ padding: 24 }}>
+        <FormPaper>
           <FormHead title={`${year}년 매출액`}
             sub={`업체별 월 매출 · ${basis === 'total' ? '부가세 포함' : '공급가액'} 기준 · ${d.from} ~ ${d.to}`}
             right={<ApprovalBox/>}/>
           <div className="table-scroll">
             {/* 열이 열넷이라 좁은 화면에서는 접힌다 — 접느니 가로로 밀어 보게 한다 */}
-            <table className="table" style={{ minWidth: 1180 }}>
+            <table className="table grid-lines" style={{ minWidth: 1180 }}>
               <thead>
                 <tr>
                   <th style={{ width: 44 }}>NO</th>
@@ -276,7 +288,7 @@ export const ReportSalesYear = () => {
               </tfoot>
             </table>
           </div>
-        </div>
+        </FormPaper>
       )}
     </div>
   )
@@ -292,10 +304,10 @@ export const ReportPurchaseMonth = () => {
       <MonthBar month={month} setMonth={setMonth}
         note={d ? `${d.from} ~ ${d.to}${d.closingDay > 0 ? ` · 매월 ${d.closingDay}일 마감` : ''}` : ''}/>
       {err ? <FormError error={err}/> : !d ? <Loading label="매입을 모으는 중…"/> : (
-        <div className="card" style={{ padding: 24 }}>
+        <FormPaper>
           <FormHead title={`${ym(month)}분 매입내역`} sub={`${d.from} ~ ${d.to}`} right={<ApprovalBox/>}/>
           <div className="table-scroll">
-            <table className="table" style={{ minWidth: 1080 }}>
+            <table className="table grid-lines" style={{ minWidth: 1080 }}>
               <thead>
                 <tr>
                   <th style={{ width: 44 }}>순번</th>
@@ -353,11 +365,11 @@ export const ReportPurchaseMonth = () => {
               </tfoot>
             </table>
           </div>
-          <div className="text-xs text-muted2" style={{ marginTop: 10, lineHeight: 1.7 }}>
+          <FormNote>
             잔액 = 전월 이월 + 합계 − 결제금액. 결제는 청구서에 이어 붙인 지급이고, 어음으로 준 것도 셉니다.
             비고는 그 달 청구서에 적은 메모예요 — 자동이체·리스처럼 늘 같은 말은 청구서 메모에 적어두면 여기 그대로 나옵니다.
-          </div>
-        </div>
+          </FormNote>
+        </FormPaper>
       )}
     </div>
   )
@@ -406,10 +418,10 @@ export const ReportVendorLedger = () => {
           : <FormEmpty title={`${ym(month)}에 품목이 적힌 청구서가 없어요`}
               hint="이 표는 청구서에 적은 품목으로 만듭니다. 기준월을 바꿔 보시거나, 청구서를 등록할 때 품목 내역을 채워주세요."/>
       ) : (
-        <div className="card" style={{ padding: 24 }}>
+        <FormPaper>
           <FormHead title={`${ym(month)} ${d.vendor} 거래내역`} sub={`${d.from} ~ ${d.to}`} right={<ApprovalBox/>}/>
           <div className="table-scroll">
-            <table className="table" style={{ minWidth: 980 }}>
+            <table className="table grid-lines" style={{ minWidth: 980 }}>
               <thead>
                 <tr>
                   <th style={{ width: 100 }}>납품 일자</th>
@@ -454,11 +466,11 @@ export const ReportVendorLedger = () => {
             </table>
           </div>
           {/* 우리 자료의 어느 칸이 어느 칸으로 갔는지 밝힌다 — 안 밝히면 빈 칸을 고장으로 읽는다 */}
-          <div className="text-xs text-muted2" style={{ marginTop: 10, lineHeight: 1.7 }}>
+          <FormNote>
             공사 번호는 <b>주문</b>, 품번은 <b>품목 기준정보의 코드</b>(없으면 규격), W/O 는 <b>품명과 품목 비고</b>에서 옵니다.
             합계는 공급가액 기준이에요.
-          </div>
-        </div>
+          </FormNote>
+        </FormPaper>
       )}
     </div>
   )
@@ -505,12 +517,12 @@ export const ReportSalesBook = () => {
           : <FormEmpty title={`${ym(month)}에 품목이 적힌 매출 청구서가 없어요`}
               hint="매출장은 청구서에 적은 품목으로 만듭니다. 기준월을 바꿔 보시거나, 청구서를 등록할 때 품목 내역을 채워주세요."/>
       ) : (
-        <div className="card" style={{ padding: 24 }}>
+        <FormPaper>
           <FormHead title={`${month.slice(0, 4)}년도 ${Number(month.slice(5, 7))}월 매출장`}
             sub={[d.vendor, closeNote && `마감 ${closeNote}`, staff].filter(Boolean).join(' · ')}
             right={<ApprovalBox cols={['담 당', '승 인']}/>}/>
           <div className="table-scroll">
-            <table className="table" style={{ minWidth: 940 }}>
+            <table className="table grid-lines" style={{ minWidth: 940 }}>
               <thead>
                 <tr>
                   <th style={{ width: 100 }}>{month.slice(0, 4)}년</th>
@@ -555,7 +567,7 @@ export const ReportSalesBook = () => {
               </tfoot>
             </table>
           </div>
-        </div>
+        </FormPaper>
       )}
     </div>
   )

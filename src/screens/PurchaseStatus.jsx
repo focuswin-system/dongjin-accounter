@@ -195,7 +195,7 @@ export const PurchaseStatusScreen = ({ go }) => {
           {/* 열이 12개라 좁은 화면에서는 글자가 접힌다 — 접느니 가로로 밀어 보게 한다.
               (인쇄는 A4 가로폭에 맞춰 브라우저가 축소하므로 min-width 가 방해되지 않는다) */}
           <div className="table-scroll" style={{ overflowX: 'auto' }}>
-            <table className="table" style={{ minWidth: 1060 }}>
+            <table className="table grid-lines" style={{ minWidth: 1060 }}>
               <thead>
                 <tr>
                   <th style={{ width: 42 }}>순번</th>

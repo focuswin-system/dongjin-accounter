@@ -5,6 +5,8 @@
   --surface-3: #F1F3F6;
   --line: #ECEEF2;
   --line-strong: #DEE2E9;
+  /* 얼룩말 줄 — 줄을 세는 데만 쓰는 색이라 아주 옅다. 진하면 상태색(경고·선택)을 이긴다 */
+  --zebra: #FAFBFC;
   --ink: #0B1220;
   --ink-2: #1F2937;
   --muted: #5B6473;
@@ -103,6 +105,9 @@
   --surface-3: #222933;
   --line: #262D38;
   --line-strong: #333C49;
+  /* 다크 — surface(#161B23)와 hover(--surface-2 #1B212B) **사이**에 둔다.
+     hover 와 같은 값이면 마우스를 올린 줄과 그냥 짝수 줄이 구별되지 않는다. */
+  --zebra: #191E26;
   --ink: #E6EAF0;
   --ink-2: #C9D1DB;
   /* ⚠ 라이트에만 있어서 다크에서 밝은 브랜드 면 위에 흰 글씨가 됐다 —
@@ -878,6 +883,11 @@ a { color: inherit; text-decoration: none; }
   font-size: 13.5px;
   vertical-align: middle;
 }
+/* 얼룩말 줄무늬 — 열이 여럿인 표에서 가로로 눈이 미끄러지는 것을 막는다.
+   ⚠ **자리 순서가 규칙이다.** hover·상태색(imp-err/선택/예정)은 아래에 와야 이긴다 —
+     여기 아래에 두는 한 얼룩말이 그것들을 덮지 않는다. tr 에 칠하는 이유도 같다:
+     td 에 칠하면 tr 배경인 hover 가 그 밑에 깔려 안 보인다. */
+.table tbody tr:nth-child(even) { background: var(--zebra); }
 .table tbody tr:hover { background: var(--surface-2); }
 .table tbody tr:last-child td { border-bottom: 0; }
 /* 합계 행(tfoot) — DataTable 의 footer prop 과 일계표가 쓴다.
@@ -896,6 +906,15 @@ a { color: inherit; text-decoration: none; }
    인라인 style 로 칸마다 박아 두면 머리글·본문·합계 세 곳을 따로 맞춰야 해서
    한 곳이 빠지면 선이 중간에 끊긴다. */
 .table th.fs-sep, .table td.fs-sep { border-left: 1px solid var(--line); }
+
+/* 칸이 많은 종이형 표(월별 12칸·매입내역 10칸…) — 세로선을 긋는다.
+   열두 칸을 선 없이 두면 "이 숫자가 8월인지 9월인지"를 머리글까지 눈으로 되짚어야 한다.
+   보통 목록에는 안 붙인다 — 칸이 적을 때 세로선은 촘촘하기만 하다. */
+.table.grid-lines thead th + th,
+.table.grid-lines tbody td + td,
+.table.grid-lines tfoot td + td,
+.table.grid-lines tfoot th + td { border-left: 1px solid var(--line); }
+.table.grid-lines thead th { border-bottom: 1px solid var(--line-strong); }
 /* 엑셀 임포트 미리보기 — 오류 행/제외 행.
    inline style 로 두면 :hover 가 먹지 않아, 어느 줄에 커서가 있는지 알 수 없었다. */
 .table tbody tr.imp-err { background: var(--neg-soft); }
@@ -2442,6 +2461,7 @@ body:has([data-modal-open]) {
   --bg: #FFFFFF;
   --line: #ECEEF2;
   --line-strong: #DEE2E9;
+  --zebra: #FAFBFC;
   --ink: #0B1220;
   --ink-2: #1F2937;
   --muted: #5B6473;
