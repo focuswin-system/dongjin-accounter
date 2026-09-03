@@ -52,7 +52,9 @@ const writePrefs = (k, v) => {
   if (!k) return
   try { localStorage.setItem(prefKey(k), JSON.stringify(v)) } catch { /* 사생활 보호 모드 */ }
 }
-/** 설정 목록에 보일 이름 — header 가 노드(아이콘·배지)거나 아예 비었으면(버튼 칸) 대신 쓸 이름. */
+/** 설정 목록에 보일 이름.
+ *  ⚠ 머리글이 비었거나(버튼 칸) 아이콘·배지면 **label 을 반드시 준다.** 안 주면 영문 키가
+ *    그대로 목록에 나온다 — 'action' 이 무엇인지 아는 사람은 우리뿐이다(실사용 문의). */
 const colLabel = (c) =>
   c.label || (typeof c.header === 'string' && c.header.trim() ? c.header : null) || c.key || '이름 없는 열'
 

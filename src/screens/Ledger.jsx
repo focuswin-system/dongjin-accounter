@@ -386,7 +386,8 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
                   : t.evid
                   ? <span className="badge pos" style={{ padding: "2px 8px" }}><Icon.Check size={11}/></span>
                   : <span className="badge neg" style={{ padding: "2px 8px" }}><Icon.Warn size={11}/></span> },
-              { key: 'actions', header: '', width: 130,
+              // label — 머리글이 비어 있어 '열 설정' 목록에 영문 키(actions)가 그대로 나왔다
+              { key: 'actions', header: '', label: '처리 버튼', width: 130,
                 render: t => t.planned
                   ? <span className="text-xs text-muted2">청구서에서 처리</span>
                   : <TxnActions txn={t} toast={toast} confirm={confirm} onAction={reload}/> },

@@ -1271,7 +1271,8 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", paidLabel = "정
           )
         } },
         // 아직 안 받은/안 낸 청구서는 목록에서 바로 처리 버튼. 누르면 상세의 매칭 탭이 열린다.
-        { key: 'action', header: '', align: 'right', render: inv => (
+        /* label — 머리글이 비어 있어 '열 설정' 목록에 영문 키(action)가 그대로 나왔다 */
+        { key: 'action', header: '', label: '처리 버튼', align: 'right', render: inv => (
           inv.remainAmount > 0 && (
             <button className="btn primary sm" onClick={(e) => { e.stopPropagation(); onSelect(inv); }}>
               {inv.kind === "issued" ? "입금 처리" : "지급 처리"}
