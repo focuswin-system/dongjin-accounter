@@ -3510,10 +3510,18 @@ const GROUP_TONE = {
   '기타': '',
 }
 
-export const ReportsScreen = ({ go }) => {
+/* ⚠ **열린 보고서는 주소에 담는다**(#report/<key>).
+ *
+ * 여태 화면 안 state 였다. 그래서 보고서가 두 종류로 갈렸다 —
+ *   · 껍데기 안에서 열리는 것: 빵부스러기가 '경영관리 › 보고서'에서 멈추고, 대신
+ *     '보고서 목록' 버튼이 따로 있었다. 새로고침하면 목록으로 튕겼다.
+ *   · 독립 화면인 것(자금 현황·매입매출 현황…): '경영관리 › 보고서 › 자금 현황'.
+ * 같은 목록에서 고른 건데 화면 골격이 달랐다(실사용 지적).
+ * 주소에 담으면 빵부스러기·뒤로가기·북마크가 저절로 같아진다. */
+export const ReportsScreen = ({ go, openKey = null, onTitle }) => {
   const { can: canDo } = usePerms()
   const toast = useToast()
-  const [active, setActive] = useState(null)
+  const active = openKey
   const [items, setItems] = useState(null)     // null = 아직 안 불러옴
   const printRef = useRef(null)
 
@@ -3532,6 +3540,9 @@ export const ReportsScreen = ({ go }) => {
      눌러서 403 을 보게 된다. 잎 id 가 곧 권한 자원이라 그대로 물어보면 된다. */
   const visibleList = list.filter(r => !r.route || canDo(r.route))
   const report = list.find(r => r.key === active)
+  /* 빵부스러기 꼬리에 쓸 이름을 위로 알린다 — 목록은 서버가 주므로 App 은 이름을 모른다.
+     닫힐 때(목록으로 돌아갈 때) null 을 보내 꼬리를 지운다. */
+  useEffect(() => { onTitle?.(report?.title || null) }, [report?.title, onTitle])
   /* 보고서가 스스로 등록한 내려받기 함수. ref 인 이유 — 등록 때문에 껍데기가 다시 그려지면
      그 보고서도 다시 그려지고, 그 안의 effect 가 또 등록해 끝없이 돈다. */
   const customExport = useRef(null)
@@ -3562,8 +3573,9 @@ export const ReportsScreen = ({ go }) => {
     const View = REPORT_VIEWS[active]
     return (
       <div className="fade-up">
+        {/* '보고서 목록' 버튼은 두지 않는다 — 빵부스러기의 '보고서'가 그 일을 하고,
+            독립 화면인 보고서들에는 애초에 그 버튼이 없다. 둘을 같은 모양으로 둔다. */}
         <div className="row no-print" style={{ paddingTop: 30, marginBottom: 20 }}>
-          <button className="btn" onClick={() => setActive(null)}><Icon.Left size={14}/> 보고서 목록</button>
           <div className="ml-auto row gap-8">
             {/* 보고서마다 방향을 따로 기억한다 — 매입매출장은 가로, 계약별 수익은 세로 식이다 */}
             <PrintButton storeKey={`report:${active}`}
@@ -3616,7 +3628,7 @@ export const ReportsScreen = ({ go }) => {
           onPick={(key) => {
             const item = list.find(r => r.key === key)
             if (item?.route) return go ? go(item.route) : undefined
-            setActive(key)
+            go?.('report', { reportKey: key })
           }}
           empty="볼 수 있는 보고서가 없어요. 관리자에게 문의하세요."/>
       )}

@@ -27,10 +27,12 @@ const ApprovalBox = ({ cols = ['담 당', '검 토', '승 인'] }) => (
   </table>
 )
 
-/** 제목 줄 — 양식마다 같은 자리에 선다. */
+/** 제목 줄 — 양식마다 같은 자리에 선다.
+    ⚠ 크기는 15px. 화면 제목(page-title)과 같은 무게로 두면 한 화면에 제목이 둘로 읽힌다 —
+      이건 **종이 한 장의 머리**이지 화면 제목이 아니다(매입·매출 현황과 같은 규칙). */
 const FormHead = ({ title, sub, right }) => (
   <div className="row" style={{ alignItems: 'flex-start', padding: '20px 24px 16px' }}>
-    <div className="fw-700" style={{ fontSize: 16 }}>
+    <div className="fw-700" style={{ fontSize: 15 }}>
       {title}
       {sub && <div className="text-xs text-muted" style={{ marginTop: 4, fontWeight: 400 }}>{sub}</div>}
     </div>

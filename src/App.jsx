@@ -371,6 +371,10 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
   // 주소에 id 가 없을 때 없는 주문을 부르고 화면이 멈춘다.
   const [contractId, setContractId] = useState("");
   const [focusInvoiceId, setFocusInvoiceId] = useState(null);
+  /* 열린 보고서 — **주소에 담는다**(#report/<key>). 그래야 빵부스러기가 이름까지 보이고,
+     새로고침·뒤로가기·북마크가 산다. 이름은 서버 목록에 있으므로 화면이 알려준다. */
+  const [reportKey, setReportKey] = useState(null);
+  const [reportTitle, setReportTitle] = useState(null);
   /* '계산서 업로드'를 다른 화면에서 열 때 쓰는 신호. 그 화면(BillingScreen)이 소유한
      상태라 밖에서 직접 못 켠다 — 숫자를 올려 보내면 화면이 열어 준다. */
   const [taxImportSignal, setTaxImportSignal] = useState(0);
@@ -484,6 +488,8 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
         || /^(master_|hrbase_|settings_)/.test(h);
       if (h && known) {
         if (h === "contract_detail" && param) setContractId(param);
+        // 보고서는 파라미터가 곧 '열린 보고서'다. 없으면 목록이다(뒤로가기가 저절로 닫는다)
+        if (h === "report") setReportKey(param || null);
         // 주소로 오간 것은 '계산서 업로드로' 를 누른 것이 아니다 — 신호를 내린다
         setTaxImportSignal(0);
         setRoute(h);
@@ -564,8 +570,11 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
     /* 주문 상세는 **어느 주문인지까지 주소에 담는다.**
        예전엔 라우트 id 만 담아서, 새로고침하면 contractId 가 초기값으로 돌아가
        없는 주문을 부르고 화면이 '불러오는 중…'에서 멈췄다(북마크·뒤로가기도 같았다). */
-    window.location.hash = (id === 'contract_detail' && (opts.contractId || contractId))
-      ? `${id}/${opts.contractId || contractId}` : id;
+    if (id === 'report') setReportKey(opts.reportKey || null);
+    window.location.hash =
+      (id === 'contract_detail' && (opts.contractId || contractId)) ? `${id}/${opts.contractId || contractId}`
+      : (id === 'report' && opts.reportKey) ? `${id}/${opts.reportKey}`
+      : id;
     setSidebarOpen(false);
     // 스크롤 리셋은 route 변경 effect에서(데스크톱은 .content, 모바일은 window) 처리한다.
   };
@@ -644,7 +653,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
       case "cash_report":     return <CashReportScreen/>;
       case "fund_status":     return <FundStatusScreen go={go}/>;
       case "report_daily":    return <DailyTrialScreen/>;
-      case "report":          return <ReportsScreen go={go}/>;
+      case "report":          return <ReportsScreen go={go} openKey={reportKey} onTitle={setReportTitle}/>;
       case "tax_vat":         return <TaxVatScreen/>;
       case "tax_etc":         return <OtherTaxScreen/>;
       case "master":          return <MasterScreen user={user} section="base"/>;
@@ -696,7 +705,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
     /* ⚠ docKeys·navHidden 도 의존성이다. 이 memo 안에서 홈·포털에 넘기는 값인데
        빼 두면 **늦게 온 문서 카탈로그가 반영되지 않는다** — 사이드바(위 navTree memo)는
        따라오고 홈 타일만 안 따라와서, 같은 화면이 두 가지 말을 하게 된다. */
-  }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, taxImportSignal, perms, docKeys, navHidden, manualChapter]);
+  }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, taxImportSignal, reportKey, perms, docKeys, navHidden, manualChapter]);
 
   const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger"
                 : route.startsWith("billing") ? "billing"
@@ -715,7 +724,19 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
   if (route === "contract_detail") {
     crumbs = ["주문", contractName || "주문 상세"];
   }
+  /* 보고서를 열었으면 이름을 꼬리에 붙인다 — 독립 화면인 보고서(자금 현황·매입매출 현황)는
+     이미 '경영관리 › 보고서 › 이름'으로 나온다. 같은 목록에서 고른 건데 골격이 달라선 안 된다. */
+  if (route === "report" && reportKey && reportTitle) {
+    crumbs = [...crumbs, reportTitle];
+  }
   const crumbTo = crumbTargets(route, crumbs);
+  /* ⚠ 보고서 이름을 꼬리에 붙이면 '보고서' 마디가 **중간**이 된다. 그런데 목적지 표
+     (CRUMB_TARGETS)는 두 마디짜리로 만들어져 있어 그 자리가 비고, 링크가 안 붙는다 —
+     목록으로 돌아갈 길이 통째로 사라진다('보고서 목록' 버튼을 뺐으므로 이게 유일한 길이다).
+     그 자리만 채운다. */
+  if (route === "report" && reportKey && reportTitle) {
+    crumbTo[crumbs.length - 2] = "report";
+  }
   /* 빈 마디와 '경영관리 › 경영관리'처럼 같은 말이 잇달아 나오는 자리를 걷어낸다.
      겹칠 땐 뒤쪽(더 가까운 상위)을 남긴다 — 링크가 한 단계만 올라가야 쓸모 있다. */
   const trail = crumbs
@@ -829,8 +850,12 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
           </button>
           <div className="crumb">
             {trail.map((c, i, arr) => {
-              // 지금 화면으로 가는 마디는 링크로 만들지 않는다 — 눌러도 제자리라 고장으로 읽힌다
-              const to = c.to && c.to !== route ? c.to : null;
+              /* 지금 화면으로 가는 마디는 링크로 만들지 않는다 — 눌러도 제자리라 고장으로 읽힌다.
+                 ⚠ 다만 **주소에 파라미터가 있으면 같은 화면이 아니다.** 보고서를 연 상태
+                   (#report/<key>)에서 '보고서'는 목록으로 가는 진짜 이동인데, 라우트 이름만
+                   보고 막으면 돌아갈 길이 통째로 사라진다. */
+              const hereId = route === "report" && reportKey ? `report/${reportKey}` : route;
+              const to = c.to && c.to !== hereId ? c.to : null;
               return (
                 <Fragment key={i}>
                   {i === arr.length - 1
