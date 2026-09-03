@@ -96,8 +96,36 @@ router.get('/', async (req, res, next) => {
       }
     })
 
+    /* 연 누계 — "그 해 1월 1일부터 이 달까지 얼마나 샀나".
+       월 합계만으로는 한 해의 흐름을 못 본다(세무사에게 넘길 때도 누계를 함께 묻는다).
+       ⚠ 시작점은 1월 1일이 아니라 **회계 1월의 시작일**이다 — 마감일이 25일인 회사의
+         1월분은 전년 12월 26일부터다. 달마다 쓰는 기준을 여기서만 바꾸면 누계가 안 맞는다.
+       줄을 다시 읽지 않고 합계만 센다(연초부터면 줄이 수천 개가 된다).
+       세액이 NULL 인 줄은 위 매핑과 **같은 규칙**으로 채운다 — 다르면 월 합계와 누계가 어긋난다. */
+    const yearFrom = monthRange(`${month.slice(0, 4)}-01`, closingDay).from
+    /* ⚠ 합계를 SQL 로 세지 않는다. 세액이 NULL 인 줄을 채우는 반올림이 **SQL 과 JS 에서 다르다** —
+       MySQL 의 곱셈은 DECIMAL(정확)이고 JS 는 부동소수라, amount 가 1,234,565 인 줄에서
+       SQL 은 123,457, JS 는 123,456 이 나온다. 그렇게 세면 같은 달인데도 월 합계와 누계가
+       1원 어긋나고(실제로 그랬다), 보는 사람은 어느 쪽이 맞는지 알 길이 없다.
+       그래서 줄을 받아 **위와 똑같은 식**으로 센다. 열 세 개만 읽으므로 한 해치라도 가볍다. */
+    const [yRows] = await req.db.execute(
+      `SELECT l.amount, l.vat, i.tax_type
+         FROM invoice_lines l
+         JOIN invoices i ON i.id = l.invoice_id
+        WHERE i.kind = ? AND ${where}`, [kind, yearFrom, to])
+    let ytdAmount = 0, ytdVat = 0
+    for (const r of yRows) {
+      const amount = Number(r.amount) || 0
+      ytdAmount += amount
+      ytdVat += r.vat === null || r.vat === undefined
+        ? ((r.tax_type || '과세') === '과세' ? Math.round(amount * VAT_RATE) : 0)
+        : Number(r.vat) || 0
+    }
+
     res.json({
       month, kind, from, to, closingDay, weekStart, weeks, dateAxis: axis,
+      // 연 누계 — 화면이 '월간으로 뽑을 때' 아래에 한 줄 더 낸다
+      ytd: { from: yearFrom, to, amount: ytdAmount, vat: ytdVat, total: ytdAmount + ytdVat },
       amount: lines.reduce((s, l) => s + l.amount, 0),
       vat: lines.reduce((s, l) => s + l.vat, 0),
       total: lines.reduce((s, l) => s + l.total, 0),

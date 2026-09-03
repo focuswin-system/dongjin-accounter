@@ -25,6 +25,11 @@ export const PurchaseStatusScreen = ({ go }) => {
   /* 기준 날짜 — 발행일(청구서를 끊은 날) / 납품일(물건이 오간 날).
      제조·유통은 후자로 이 표를 본다. 여태 발행일 하나로 못 박혀 있었다. */
   const [dateAxis, setDateAxis] = useState('issued')
+  /* 조회 단위 — 월간(한 달 전체) / 주간(한 주만).
+     주간으로 보는 이유는 '이번 주에 얼마 샀나'를 결재에 올리기 때문이다. 그때도 그 주 소계만
+     보면 부족하다 — 이 달 들어 지금까지 얼마인지(월 누계)를 함께 봐야 예산과 견줄 수 있다. */
+  const [unit, setUnit] = useState('month')
+  const [weekIdx, setWeekIdx] = useState(0)
   const [data, setData] = useState(null)
   const [company, setCompany] = useState(null)
 
@@ -32,17 +37,35 @@ export const PurchaseStatusScreen = ({ go }) => {
   useEffect(() => {
     let alive = true
     setData(null)
-    api.getPurchaseStatus(month, kind, dateAxis).then(d => { if (alive) setData(d) })
+    api.getPurchaseStatus(month, kind, dateAxis).then(d => {
+      if (!alive) return
+      setData(d)
+      /* 달을 바꾸면 주차 선택은 **내용이 있는 마지막 주**로 되돌린다.
+         그대로 두면 3주차를 보다 지난달로 갔을 때 빈 주가 열려 "자료가 없다"로 읽힌다. */
+      const last = (d?.weeks || []).reduce((acc, w, i) => (w.items.length ? i : acc), 0)
+      setWeekIdx(last)
+    })
     return () => { alive = false }
   }, [month, kind, dateAxis])
 
   const label = kind === 'received' ? '매입' : '매출'
 
+  /* 화면에 그릴 주와 누계.
+     주간 보기의 누계는 서버를 다시 부르지 않는다 — 이미 그 달 주가 전부 와 있어서
+     고른 주까지 더하면 그게 곧 월 누계다(서버에 또 물으면 같은 값을 두 번 세는 셈이다). */
+  const weeks = data?.weeks || []
+  const shownWeeks = unit === 'week' ? weeks.slice(weekIdx, weekIdx + 1) : weeks
+  const sumUpTo = (i) => weeks.slice(0, i + 1).reduce((a, w) => ({
+    amount: a.amount + w.amount, vat: a.vat + w.vat, total: a.total + w.total,
+  }), { amount: 0, vat: 0, total: 0 })
+  const mtd = unit === 'week' && weeks.length ? sumUpTo(weekIdx) : null
+  const curWeek = weeks[weekIdx] || null
+
   const exportCsv = () => {
-    if (!data?.count) return toast.push('내보낼 내역이 없어요')
+    if (!shownWeeks.some(w => w.items.length)) return toast.push('내보낼 내역이 없어요')
     const rows = []
     let no = 0
-    for (const w of data.weeks) {
+    for (const w of shownWeeks) {
       for (const l of w.items) {
         no++
         rows.push([no, l.date, l.vendor, l.name, l.spec, l.qty, l.unit,
@@ -50,8 +73,14 @@ export const PurchaseStatusScreen = ({ go }) => {
       }
       if (w.items.length) rows.push(['', `${w.from}~${w.to} 소계`, '', '', '', '', '', '', w.amount, w.vat, w.total, ''])
     }
-    rows.push(['', `${month} 총 합계`, '', '', '', '', '', '', data.amount, data.vat, data.total, ''])
-    downloadCsv(`${label}현황_${month}.csv`,
+    /* 화면에 있는 누계는 파일에도 있어야 한다 — 없으면 받아 본 사람이 손으로 다시 더한다 */
+    if (unit === 'week' && mtd) {
+      rows.push(['', `${data.from}~${curWeek?.to} 누계`, '', '', '', '', '', '', mtd.amount, mtd.vat, mtd.total, ''])
+    } else {
+      rows.push(['', `${month} 총 합계`, '', '', '', '', '', '', data.amount, data.vat, data.total, ''])
+      if (data.ytd) rows.push(['', `${data.ytd.from}~${data.ytd.to} 누계`, '', '', '', '', '', '', data.ytd.amount, data.ytd.vat, data.ytd.total, ''])
+    }
+    downloadCsv(`${label}현황_${unit === 'week' ? `${curWeek?.from}_${curWeek?.to}` : month}.csv`,
       ['순번', '일자', '거래처명', '명칭', '규격', '수량', '단위', '단가', '금액', '부가세', '계', '비고'], rows)
   }
 
@@ -60,7 +89,7 @@ export const PurchaseStatusScreen = ({ go }) => {
     <div className="fade-up">
       <PageHeader
         title="매입·매출 현황"
-        sub="청구서에 적은 품목을 기간으로 모읍니다. 주별 소계와 월 합계가 함께 나와요."
+        sub="청구서에 적은 품목을 기간으로 모읍니다. 주간으로 보면 그 주 소계와 이 달 누계, 월간으로 보면 월 합계와 올해 누계가 함께 나와요."
         actions={<>
           <button className="btn" onClick={exportCsv}><Icon.Download/> <span className="btn-label-hide">내보내기</span></button>
           {/* 열이 많다(날짜·거래처·품목·규격·수량·단가·공급가·세액·합계) — 가로로 시작한다 */}
@@ -77,6 +106,13 @@ export const PurchaseStatusScreen = ({ go }) => {
           <div className="row gap-6">
             {[['received', '매입'], ['issued', '매출']].map(([k, t]) => (
               <button key={k} className={`chip ${kind === k ? 'active' : ''}`} onClick={() => setKind(k)}>{t}</button>
+            ))}
+          </div>
+          {/* 조회 단위 — 한 주만 뽑아 결재에 올리는 일이 잦다 */}
+          <span className="chip-div"/>
+          <div className="row gap-6">
+            {[['month', '월간'], ['week', '주간']].map(([k, t]) => (
+              <button key={k} className={`chip ${unit === k ? 'active' : ''}`} onClick={() => setUnit(k)}>{t}</button>
             ))}
           </div>
           {/* 기준 날짜 — 제조·유통은 물건이 오간 날로 이 표를 본다.
@@ -100,11 +136,26 @@ export const PurchaseStatusScreen = ({ go }) => {
             </span>
           )}
         </div>
+
+        {/* 주차 고르기 — 주간일 때만. 날짜 범위를 함께 적는다(회계 주는 마감일에서 잘려
+            달력 주차와 안 맞는다 — '3주차'만 적으면 어느 날들인지 매번 세어 봐야 한다). */}
+        {unit === 'week' && weeks.length > 0 && (
+          <div className="row gap-6" style={{ marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span className="text-sm fw-600" style={{ marginRight: 4 }}>주차</span>
+            {weeks.map((w, i) => (
+              <button key={i} className={`chip sm ${weekIdx === i ? 'active' : ''}`} onClick={() => setWeekIdx(i)}>
+                {i + 1}주 <span className="text-muted2" style={{ fontSize: 10.5 }}>{w.from.slice(5)}~{w.to.slice(5)}</span>
+                {/* 빈 주는 눌러도 되지만 미리 알려 준다 */}
+                {w.items.length === 0 && <span className="text-muted2" style={{ fontSize: 10.5 }}> ·없음</span>}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {!data ? <Loading label="품목을 모으는 중…"/> : data.count === 0 ? (
+      {!data ? <Loading label="품목을 모으는 중…"/> : !shownWeeks.some(w => w.items.length) ? (
         <div className="card card-pad" style={{ textAlign: 'center', padding: 48, color: 'var(--muted-2)' }}>
-          {data.from} ~ {data.to} 사이에 품목이 적힌 {label} 청구서가 없어요.
+          {unit === 'week' && curWeek ? `${curWeek.from} ~ ${curWeek.to}` : `${data.from} ~ ${data.to}`} 사이에 품목이 적힌 {label} 청구서가 없어요.
           <div className="text-xs" style={{ marginTop: 8 }}>
             {/* 납품일 기준으로 비었을 때 "청구서를 등록하라"고만 하면 헛다리를 짚게 된다 —
                 청구서는 있는데 납품일을 안 적었을 뿐일 수 있다. */}
@@ -120,10 +171,10 @@ export const PurchaseStatusScreen = ({ go }) => {
         <div className="card report-print" style={{ padding: 24 }}>
           <div className="row" style={{ alignItems: 'flex-start', marginBottom: 14 }}>
             <div className="fw-700" style={{ fontSize: 15 }}>
-              ※ 주별 총 {label} 현황
+              ※ {unit === 'week' ? `${weekIdx + 1}주차` : '주별'} 총 {label} 현황
               {data.closingDay > 0 && <span className="text-sm fw-400"> (매월 {data.closingDay}일 마감)</span>}
               <div className="text-xs text-muted" style={{ marginTop: 3, fontWeight: 400 }}>
-                {company?.name || ''} · {data.from} ~ {data.to}
+                {company?.name || ''} · {unit === 'week' && curWeek ? `${curWeek.from} ~ ${curWeek.to}` : `${data.from} ~ ${data.to}`}
               </div>
             </div>
             {/* 실물에 결재란이 있다 — 인쇄해서 결재받는 서류다 */}
@@ -156,7 +207,7 @@ export const PurchaseStatusScreen = ({ go }) => {
                 </tr>
               </thead>
               <tbody>
-                {data.weeks.map((w, wi) => (
+                {shownWeeks.map((w, wi) => (
                   w.items.length === 0 ? null : (
                     <Fragment key={wi}>
                       {w.items.map((l, li) => {
@@ -201,15 +252,45 @@ export const PurchaseStatusScreen = ({ go }) => {
               {/* 총 합계는 소계와 같은 무게로 보이면 안 된다 — 위에 선을 하나 더 긋는다.
                   (border-collapse 라 tfoot 자체에 준 선은 안 그려진다 — 칸마다 줘야 한다) */}
               <tfoot>
-                <tr>
-                  <th colSpan={8} style={{ ...TOTAL_CELL, textAlign: 'center' }}>
-                    {month.slice(0, 4)}년 {Number(month.slice(5, 7))}월 총 합계
-                  </th>
-                  <td className="num num-right fw-700" style={TOTAL_CELL}>{fmtNum(data.amount)}</td>
-                  <td className="num num-right fw-700" style={TOTAL_CELL}>{fmtNum(data.vat)}</td>
-                  <td className="num num-right fw-700" style={{ ...TOTAL_CELL, fontSize: 15 }}>{fmtNum(data.total)}</td>
-                  <td style={TOTAL_CELL}></td>
-                </tr>
+                {/* 주간으로 보면 그 주 소계만으로는 부족하다 — 이 달 들어 지금까지가 얼마인지
+                    함께 낸다. 월간으로 보면 같은 이유로 올해 들어 지금까지를 낸다.
+                    ⚠ 누계는 소계와 축이 다르다(기간이 더 넓다) — 라벨에 기간을 적어 둔다. */}
+                {unit === 'week' ? (
+                  <tr>
+                    <th colSpan={8} style={{ ...TOTAL_CELL, textAlign: 'center' }}>
+                      {data.from} ~ {curWeek?.to} 누계
+                      <span className="text-xs text-muted fw-400"> (이 달 들어 지금까지)</span>
+                    </th>
+                    <td className="num num-right fw-700" style={TOTAL_CELL}>{fmtNum(mtd?.amount)}</td>
+                    <td className="num num-right fw-700" style={TOTAL_CELL}>{fmtNum(mtd?.vat)}</td>
+                    <td className="num num-right fw-700" style={{ ...TOTAL_CELL, fontSize: 15 }}>{fmtNum(mtd?.total)}</td>
+                    <td style={TOTAL_CELL}></td>
+                  </tr>
+                ) : (
+                  <>
+                    <tr>
+                      <th colSpan={8} style={{ ...TOTAL_CELL, textAlign: 'center' }}>
+                        {month.slice(0, 4)}년 {Number(month.slice(5, 7))}월 총 합계
+                      </th>
+                      <td className="num num-right fw-700" style={TOTAL_CELL}>{fmtNum(data.amount)}</td>
+                      <td className="num num-right fw-700" style={TOTAL_CELL}>{fmtNum(data.vat)}</td>
+                      <td className="num num-right fw-700" style={{ ...TOTAL_CELL, fontSize: 15 }}>{fmtNum(data.total)}</td>
+                      <td style={TOTAL_CELL}></td>
+                    </tr>
+                    {data.ytd && (
+                      <tr>
+                        <th colSpan={8} style={{ ...SUB_CELL, textAlign: 'center' }}>
+                          {data.ytd.from} ~ {data.ytd.to} 누계
+                          <span className="text-xs text-muted fw-400"> (올해 들어 지금까지)</span>
+                        </th>
+                        <td className="num num-right fw-600" style={SUB_CELL}>{fmtNum(data.ytd.amount)}</td>
+                        <td className="num num-right" style={SUB_CELL}>{fmtNum(data.ytd.vat)}</td>
+                        <td className="num num-right fw-700" style={SUB_CELL}>{fmtNum(data.ytd.total)}</td>
+                        <td style={SUB_CELL}></td>
+                      </tr>
+                    )}
+                  </>
+                )}
               </tfoot>
             </table>
           </div>
