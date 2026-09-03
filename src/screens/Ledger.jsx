@@ -351,7 +351,7 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
                  예전엔 `주문명 || 적요 || 전표번호` 를 '내용' 한 칸에 넣어서,
                  주문에 붙은 거래인지 아닌지를 화면에서 알 수 없었다.
                  원가 귀속(cost_contract_name)은 근거 주문과 다른 축이라 표식을 달아 가른다. */
-              { key: 'contract', optional: true, header: '주문', sortable: true,
+              { key: 'contract', header: '주문', sortable: true,
                 render: t => {
                   if (t.planned) return <span className="text-muted2 text-sm">—</span>
                   if (t.contract) return <span className="badge outline text-sm">{t.contract}</span>
@@ -362,9 +362,9 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
                   )
                   return <span className="text-muted2 text-sm">—</span>
                 } },
-              { key: 'scope', optional: true, header: '적요',
+              { key: 'scope', header: '적요',
                 render: t => <span className="text-muted text-sm">{t.scope}</span> },
-              { key: 'category', optional: true, header: '비목',
+              { key: 'category', header: '비목',
                 render: t => <span className="badge outline">{t.category}</span> },
               { key: 'amount', header: '금액', align: 'right', sortable: true,
                 sortValue: t => t.sign * t.amount,
@@ -373,15 +373,15 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
                 </span> },
               /* 공급가액·부가세 — 금액(합계)만으로는 신고 자료를 못 맞춘다. 접어 두고 필요할 때 편다.
                  값이 없는 거래(이체·급여 등)는 빈 칸이다 — 0 으로 적으면 '면세'로 읽힌다. */
-              { key: 'supplyAmount', header: '공급가액', align: 'right', sortable: true, optional: true, defaultHidden: true,
+              { key: 'supplyAmount', header: '공급가액', align: 'right', sortable: true, defaultHidden: true,
                 render: t => <span className="num-cell text-muted">{t.supplyAmount != null ? fmtNum(t.supplyAmount) : '—'}</span> },
-              { key: 'vatAmount', header: '부가세', align: 'right', sortable: true, optional: true, defaultHidden: true,
+              { key: 'vatAmount', header: '부가세', align: 'right', sortable: true, defaultHidden: true,
                 render: t => <span className="num-cell text-muted">{t.vatAmount != null ? fmtNum(t.vatAmount) : '—'}</span> },
               { key: 'status', header: '상태', width: 110,
                 render: t => <StatusBadge status={t.status}/> },
               /* 예정 행에는 증빙·처리 버튼이 없다. 아직 일어나지 않은 일이라
                  증빙이 '없음(경고)'으로 뜨면 거짓 경고가 되고, 처리 버튼은 대상이 없다. */
-              { key: 'evid', optional: true, header: '증빙', width: 70,
+              { key: 'evid', header: '증빙', width: 70,
                 render: t => t.planned ? <span className="text-muted2">—</span>
                   : t.evid
                   ? <span className="badge pos" style={{ padding: "2px 8px" }}><Icon.Check size={11}/></span>

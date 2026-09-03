@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
-import { Icon, Popover } from '../ui'
+import { createPortal } from 'react-dom'
+import { Icon } from '../ui'
 
 // 표 코어 — 앱 전역 표(약 49개)의 공통 뼈대.
 // 헤더/필터 바(기간·검색·필터패널)는 별도 TableToolbar가 맡고, 여기선 표 본문만 담당한다.
@@ -57,8 +58,9 @@ const colLabel = (c) =>
 
 export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용이 없어요', footer, rowKey, renderExpanded, select, rowClass, minWidth, maxHeight,
   /* tableKey: 주면 '열' 버튼이 생긴다 — 열 접기·순서·너비를 이 브라우저에 기억한다.
+     **모든 열을 접을 수 있다**(마지막 한 열만 남긴다). 무엇이 필요한지는 보는 사람이 정한다 —
+     우리가 '이건 못 끕니다'로 정해 두면 정작 안 쓰는 열을 못 치운다.
      열 정의에 붙일 수 있는 것:
-       optional: true       접을 수 있는 열(안 주면 늘 보인다)
        defaultHidden: true  처음엔 접혀 있는 열(공급가액·부가세처럼 필요한 사람만 펴는 것)
        label                설정 목록에 보일 이름(header 가 아이콘·노드일 때) */
   tableKey }) => {
@@ -80,8 +82,10 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
       (rank.has(b.key) ? rank.get(b.key) : 1e6 + columns.indexOf(b)))
     const hidden = new Set(prefs?.hidden || columns.filter(c => c.defaultHidden).map(c => c.key))
     const widths = prefs?.width || {}
+    /* 접을 수 있는 열을 따로 두지 않는다 — 무엇이 필요한지는 보는 사람이 정한다.
+       (마지막 한 열까지 접는 것만 toggleCol 이 막는다 — 빈 표는 고장으로 보인다) */
     return ordered
-      .filter(c => !(c.optional || c.defaultHidden) || !hidden.has(c.key))
+      .filter(c => !hidden.has(c.key))
       .map(c => (widths[c.key] ? { ...c, width: widths[c.key] } : c))
   }, [columns, prefs, tableKey])
 
@@ -153,6 +157,8 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
 
   const toggleCol = (key) => {
     const on = hiddenNow.includes(key)
+    // 마지막 남은 한 열까지 접으면 표가 통째로 사라진다 — 거기서 멈춘다
+    if (!on && shownColumns.length <= 1) return
     const hidden = on ? hiddenNow.filter(k => k !== key) : [...hiddenNow, key]
     /* 정렬 기준이던 열을 접으면 정렬도 푼다 — 안 그러면 보이지도 않는 열 기준으로
        줄이 서 있어 "왜 이 순서지"를 알 길이 없다. */
@@ -218,6 +224,49 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
 
   const changed = !!(prefs && (prefs.hidden?.length || prefs.order?.length || Object.keys(prefs.width || {}).length))
 
+  /* ── 열 설정 패널 열고 닫기 ──
+     화면 좌표로 띄운다(카드의 overflow 를 벗어나야 안 잘린다). 그래서 자리를 직접 잰다:
+       · 오른쪽 끝을 버튼에 맞추되 화면 밖으로 나가지 않게 민다
+       · 아래가 모자라면 버튼 위로 올린다(줄이 적은 표는 표 아래가 곧 화면 끝이다) */
+  const [colOpen, setColOpen] = useState(false)
+  const [colMenuPos, setColMenuPos] = useState(null)
+  const colBtnRef = useRef(null)
+  const colMenuRef = useRef(null)
+  const MENU_W = 264
+
+  useEffect(() => {
+    if (!colOpen) { setColMenuPos(null); return }
+    const place = () => {
+      const b = colBtnRef.current?.getBoundingClientRect()
+      if (!b) return
+      const h = colMenuRef.current?.offsetHeight || 320
+      const left = Math.max(8, Math.min(b.right - MENU_W, window.innerWidth - MENU_W - 8))
+      const below = b.bottom + 6
+      const top = below + h > window.innerHeight - 8 ? Math.max(8, b.top - h - 6) : below
+      setColMenuPos({ top, left })
+    }
+    place()
+    // 그린 뒤 실제 높이로 한 번 더 맞춘다(첫 계산은 높이를 모른다)
+    const t = setTimeout(place, 0)
+    const onDoc = (e) => {
+      if (colBtnRef.current?.contains(e.target) || colMenuRef.current?.contains(e.target)) return
+      setColOpen(false)
+    }
+    const onKey = (e) => { if (e.key === 'Escape') setColOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('resize', place)
+    // 스크롤하면 버튼이 움직인다 — 패널도 따라간다(안 따라가면 허공에 떠 있다)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [colOpen, orderedAll.length])
+
   /* 너비를 손본 표만 fixed 로 간다 — 안 만진 표는 여태 모습 그대로여야 한다.
      폭을 합계로 못박는 이유: width:100% 인 채로 fixed 면 남는 폭을 열들이 나눠 가져
      끌어 놓은 값과 어긋난다. 합계가 화면보다 좁으면 오른쪽이 비고, 넓으면 가로로 스크롤된다. */
@@ -231,12 +280,18 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
 
   const colBar = tableKey ? (
     /* 표 위 오른쪽 — 늘 있지만 조용하다(ghost). 여기 있는 줄 모르면 아무도 안 쓰므로
-       숨기지는 않는다. 인쇄에는 안 나온다. */
+       숨기지는 않는다. 인쇄에는 안 나온다.
+       ⚠ 이 표들은 대개 `overflow: hidden` 인 카드 안에 있다. 그래서 공용 Popover(absolute)를
+         쓰면 **버튼도 열림 패널도 카드 모서리에서 잘린다**(실측 — 줄이 적을 때 특히 심하다).
+         패널은 화면 좌표(fixed)로 body 에 띄우고, 바에는 오른쪽 여백을 준다. */
     <div className="dt-colbar no-print">
-      <Popover align="right" width={264}
-        trigger={<button className="btn ghost sm" title="보여줄 열·순서·너비를 고쳐요">
-          <Icon.Filter size={12}/> 열{changed ? ' ·' : ''}
-        </button>}>
+      <button ref={colBtnRef} className="btn ghost sm" title="보여줄 열·순서·너비를 고쳐요"
+        onClick={() => setColOpen(o => !o)}>
+        <Icon.Filter size={12}/> 열{changed ? ' ·' : ''}
+      </button>
+      {colOpen && colMenuPos && createPortal(
+        <div ref={colMenuRef} className="dt-colmenu"
+          style={{ position: 'fixed', top: colMenuPos.top, left: colMenuPos.left, width: 264 }}>
         <div style={{ padding: 8 }}>
           <div className="row" style={{ padding: '2px 6px 8px' }}>
             <span className="text-xs text-muted2">보여줄 열과 순서</span>
@@ -245,15 +300,14 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
           {/* 열이 열댓 개인 표도 있다 — 목록이 화면 밖으로 넘치면 아래쪽 열은 손도 못 댄다 */}
           <div style={{ maxHeight: '46vh', overflowY: 'auto' }}>
           {orderedAll.map((c, i) => {
-            const canHide = !!(c.optional || c.defaultHidden)
             const on = !hiddenNow.includes(c.key)
+            const last = on && shownColumns.length <= 1
             return (
               <div key={c.key} className="row gap-6" style={{ padding: '4px 6px', alignItems: 'center' }}>
-                {/* 못 접는 열도 목록에 둔다 — 순서는 바꿀 수 있고, 없으면 목록이 표와 안 맞아 보인다 */}
-                <input type="checkbox" checked={canHide ? on : true} disabled={!canHide}
+                <input type="checkbox" checked={on} disabled={last}
                   onChange={() => toggleCol(c.key)}
-                  title={canHide ? undefined : '이 열은 접을 수 없어요'}/>
-                <span className={`text-sm ${canHide && !on ? 'text-muted2' : ''}`}
+                  title={last ? '열을 모두 접을 수는 없어요' : undefined}/>
+                <span className={`text-sm ${!on ? 'text-muted2' : ''}`}
                   style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {colLabel(c)}
                 </span>
@@ -269,7 +323,7 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
             머리글 오른쪽 끝을 끌면 너비가 바뀌어요. 이 브라우저에만 기억합니다.
           </div>
         </div>
-      </Popover>
+        </div>, document.body)}
     </div>
   ) : null
 

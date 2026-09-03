@@ -1196,7 +1196,7 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", paidLabel = "정
          *
          * ⚠ 값이 **하나가 아니다.** 품목 줄마다 날짜가 달라(8/5·8/12·8/27 을 8월분 한 장으로
          *   묶는 게 월합계 세금계산서다) 범위로 보여준다. 한 줄이면 그 날짜만. */
-        { key: 'deliveryFrom', optional: true, header: '납품일', sortable: true,
+        { key: 'deliveryFrom', header: '납품일', sortable: true,
           render: inv => {
             if (!inv.deliveryFrom) return <span className="text-sm text-muted2">—</span>
             const same = !inv.deliveryTo || inv.deliveryTo === inv.deliveryFrom
@@ -1210,13 +1210,13 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", paidLabel = "정
               )
           } },
         { key: 'vendor', header: '거래처', sortable: true, render: inv => <span className="fw-700">{inv.vendor}</span> },
-        { key: 'contract', optional: true, header: '주문', render: inv => <span className="text-sm text-muted">{inv.contract || "—"}</span> },
+        { key: 'contract', header: '주문', render: inv => <span className="text-sm text-muted">{inv.contract || "—"}</span> },
         { key: 'totalAmount', header: '청구금액', align: 'right', sortable: true, render: inv => <span className="num-cell">{fmtNum(inv.totalAmount)}</span> },
         /* 공급가액·부가세 — 청구금액(합계)만으로는 신고 자료를 못 맞춘다. 그렇다고 늘 세워 두면
            열이 열둘을 넘어 표가 가로로 밀리므로, **접어 두고 필요한 사람이 편다**('열' 버튼). */
-        { key: 'supplyAmount', header: '공급가액', align: 'right', sortable: true, optional: true, defaultHidden: true,
+        { key: 'supplyAmount', header: '공급가액', align: 'right', sortable: true, defaultHidden: true,
           render: inv => <span className="num-cell text-muted">{fmtNum(inv.supplyAmount)}</span> },
-        { key: 'vatAmount', header: '부가세', align: 'right', sortable: true, optional: true, defaultHidden: true,
+        { key: 'vatAmount', header: '부가세', align: 'right', sortable: true, defaultHidden: true,
           render: inv => <span className="num-cell text-muted">{fmtNum(inv.vatAmount)}</span> },
         /* 입금(지급) 흔적 — **양방향 흔적**의 다른 쪽.
            미수금 칸은 '아직 남은 것'을 말하는데, 그것만으로는 "한 번도 안 들어왔나 /
@@ -1244,9 +1244,9 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", paidLabel = "정
         ) },
         /* 어느 통장으로 들어올/들어온 돈인가. 아직 정산 전이면 '예정 계좌'이고,
            정산이 끝났으면 실제로 오간 계좌다 — 통장을 맞춰볼 때 이 칸이 없으면 건마다 열어야 한다. */
-        { key: 'account', optional: true, header: '계좌',
+        { key: 'account', header: '계좌',
           render: inv => <span className="text-sm text-muted">{inv.account || "—"}</span> },
-        { key: 'invoiceNo', optional: true, header: '청구번호', sortable: true,
+        { key: 'invoiceNo', header: '청구번호', sortable: true,
           render: inv => <span className="text-xs text-muted2 num">{inv.invoiceNo}</span> },
         /* ⚠ 어음으로 정산한 건은 상태만 보면 '입금 완료'다 — 회계로는 맞지만(외상매출금이
            받을어음으로 바뀐 것) **통장에는 아직 돈이 없다.** 배지가 없으면 목록에서 이미
