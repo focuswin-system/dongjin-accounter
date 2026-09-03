@@ -484,13 +484,21 @@ export const PurchaseReqScreen = () => {
              결재자는 무엇을 사는지 알 수 없다 — 품의서의 존재 이유가 사라진다.
              그래서 청구서가 딸린 건은 상세를 한 번 더 읽어 품목을 그대로 가져온다
              (견적요청서에서 가져올 때와 같은 방식). */
-          const withInv = picked.filter(t => t.invoiceId || t.invoice_id)
-          const details = await Promise.all(withInv.map(t => api.getInvoice(t.invoiceId || t.invoice_id).catch(() => null)))
-          const linesOf = new Map()
-          withInv.forEach((t, i) => {
+          /* ⚠ **청구서 하나당 한 번만** 읽고, 품목도 한 번만 담는다.
+             한 청구서를 나눠 정산하면(선금·잔금) 거래가 여러 줄이고 셋 다 같은
+             invoice_id 를 가리킨다. 거래마다 품목을 담으면 **같은 품목이 두세 번 서고
+             품의 금액이 그만큼 부풀려진다** — 결재가 나면 그대로 발주가 된다.
+             조회도 청구서 수만큼만 나간다(거래 수만큼이면 같은 것을 여러 번 읽는다). */
+          const invIdOf = (t) => t.invoiceId || t.invoice_id || ''
+          const invIds = [...new Set(picked.map(invIdOf).filter(Boolean))]
+          const details = await Promise.all(invIds.map(id => api.getInvoice(id).catch(() => null)))
+          const linesByInv = new Map()
+          invIds.forEach((id, i) => {
             const ls = details[i]?.lines || []
-            if (ls.length) linesOf.set(t.id, ls)
+            if (ls.length) linesByInv.set(id, ls)
           })
+          // 같은 청구서의 거래가 여럿이면 **첫 거래에서만** 품목을 담는다
+          const usedInv = new Set()
 
           /* 거래처는 **고른 것들이 한 곳일 때만** 채운다. 여러 곳이 섞였는데 첫 건으로
              정해 버리면 나머지가 그 거래처에서 산 것처럼 보인다 — 품의서는 결재를 받는
@@ -500,8 +508,10 @@ export const PurchaseReqScreen = () => {
           const items = []
           for (const t of picked) {
             const from = [t.date, many && t.vendor && t.vendor !== '(미확인)' ? t.vendor : null].filter(Boolean).join(' ')
-            const ls = linesOf.get(t.id)
+            const invId = invIdOf(t)
+            const ls = invId && !usedInv.has(invId) ? linesByInv.get(invId) : null
             if (ls) {
+              usedInv.add(invId)
               /* 품목이 있으면 그 줄을 그대로. 규격은 품명 뒤에 붙인다(품의서 양식엔 '품명 및 규격' 한 칸이다).
                  단위·수량이 비어 있을 수 있다 — 그때는 비운 채 둔다. 1식으로 지어내면
                  실제로 몇 개를 사는지 모르는 채 결재가 난다. */
@@ -517,6 +527,10 @@ export const PurchaseReqScreen = () => {
                   memo: from,
                 })
               }
+            } else if (invId && linesByInv.has(invId)) {
+              /* 같은 청구서의 두 번째 거래 — 품목은 위에서 이미 담았다. 여기서 비목 줄을
+                 또 넣으면 그것도 이중계상이다(품목 합계 + 정산액). 건너뛴다. */
+              continue
             } else {
               // 품목이 없는 거래 — 비목·적요로 한 줄. 금액은 확정이라 수량 1·단가=금액.
               items.push({
