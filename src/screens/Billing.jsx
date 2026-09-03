@@ -1250,7 +1250,10 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", paidLabel = "정
               <StatusBadge status={effStatus(inv)}/>
               {held.length > 0 &&
                 <span className="badge warn" style={{ fontSize: 10 }}
-                      title={isIssued
+                      /* ⚠ 여기는 InvoiceTable 안이다 — 화면(BillingScreen)의 isIssued 는
+                         안 보인다. 참조하면 어음이 걸린 청구서가 하나라도 뜨는 순간
+                         표 전체가 죽는다. 줄이 스스로 아는 값(inv.kind)으로 판단한다. */
+                      title={inv.kind === 'issued'
                         ? `어음으로 받았어요. 만기 ${due} 에 통장으로 들어옵니다.`
                         : `어음으로 줬어요. 만기 ${due} 에 통장에서 나갑니다.`}>
                   어음{due ? ` ${due.slice(5).replace('-', '/')}` : ''}
@@ -1621,6 +1624,16 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const settleable = (inv) => Number(inv.remainAmount) > 0
   const selectedRows = filtered.filter(inv => checkedIds.includes(inv.id))
   const selectedRemain = selectedRows.reduce((s, r) => s + (Number(r.remainAmount) || 0), 0)
+  /* 고른 것들의 **공급가액·부가세**도 함께 센다.
+     여태 '받을 금액'(남은 잔액)만 냈는데, 세금계산서를 여러 장 묶어 볼 때 정작 알아야 하는 건
+     공급가액과 세액이다 — 그 두 숫자로 신고서를 맞추고 거래처에 확인한다.
+     ⚠ 남은 잔액과 축이 다르다. 잔액은 '아직 못 받은 돈'이고 이 둘은 **청구서에 적힌 값**이다.
+       일부 입금된 건이 섞이면 공급가액 합과 잔액 합이 안 맞는 게 정상이라, 그렇게 적어 둔다. */
+  const selectedSupply = selectedRows.reduce((s, r) => s + (Number(r.supplyAmount) || 0), 0)
+  const selectedVat    = selectedRows.reduce((s, r) => s + (Number(r.vatAmount) || 0), 0)
+  const selectedTotal  = selectedRows.reduce((s, r) => s + (Number(r.totalAmount) || 0), 0)
+  // 일부라도 입금된 건이 섞였나 — 섞였으면 '받을 금액'과 총액이 다른 이유를 적어 준다
+  const selectedPartly = selectedRows.some(r => (Number(r.remainAmount) || 0) !== (Number(r.totalAmount) || 0))
   // 필터가 바뀌면 화면에서 사라진 선택은 버린다 — 안 보이는 것을 일괄 처리하면 안 된다
   useEffect(() => {
     /* 걸러낸 결과가 **같으면 이전 배열을 그대로 돌려준다.**
@@ -2198,9 +2211,20 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
               <div className="card card-pad" style={{ marginBottom: 12, position: 'sticky', top: 0, zIndex: 3 }}>
                 <div className="row gap-8" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
                   <span className="fw-700 text-sm">{checkedIds.length}건 선택</span>
+                  {/* 공급가액·부가세를 함께 낸다 — 세금계산서를 묶어 볼 때 정작 맞춰 보는 숫자다.
+                      '받을 금액'(잔액)은 축이 달라 구분선 뒤에 둔다. */}
+                  <span className="num text-sm text-muted">공급가액 {fmtNum(selectedSupply)}</span>
+                  <span className="num text-sm text-muted">부가세 {fmtNum(selectedVat)}</span>
+                  <span className="num text-sm fw-700">합계 {fmtNum(selectedTotal)}원</span>
+                  {/* 구분선은 두지 않는다 — 좁은 화면에서 줄이 바뀌면 선만 줄 끝에 남는다.
+                      굵은 '합계'가 앵커라 그 뒤가 다른 축이라는 건 라벨로 읽힌다. */}
                   <span className="num text-sm text-muted">
                     {isIssued ? '받을' : '낼'} 금액 {fmtNum(selectedRemain)}원
                   </span>
+                  {/* 왜 합계와 다른지 적는다 — 안 적으면 숫자가 틀린 것으로 읽힌다 */}
+                  {selectedPartly && (
+                    <span className="text-xs text-muted2">일부 {isIssued ? '입금' : '지급'}된 건이 있어 합계와 달라요</span>
+                  )}
                   <button className="btn ghost sm" onClick={() => setCheckedIds([])}>선택 해제</button>
 
                   <div className="row gap-6 ml-auto" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
