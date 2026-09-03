@@ -19,6 +19,7 @@ import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 import { SourceChooser } from '../lib/components/SourceChooser'
 import { looksLikeTaxInvoice } from '../lib/hometax'
+import { PrintButton } from '../lib/components/PrintButton'
 
 const todayStr = () => localToday()   // UTC 금지 — KST 새벽에 하루 전으로 찍힌다
 
@@ -3432,6 +3433,11 @@ const REPORT_VIEWS = {
   loan: ReportLoan, card: ReportCard,
 }
 
+/* 처음 열었을 때의 인쇄 방향. 열이 많아 세로로는 오른쪽이 접히는 보고서만 가로로 시작한다
+   (매입매출장은 날짜·거래처·품목·공급가·세액·합계가 한 줄에 선다).
+   사람이 한 번 바꾸면 그 선택이 보고서별로 기억되므로, 여기 없는 것도 얼마든지 가로로 쓸 수 있다. */
+const REPORT_LANDSCAPE = new Set(['taxoffice', 'vat', 'fundsheet', 'monthly', 'card'])
+
 /* 분류를 세우는 순서 — 카탈로그가 주는 이름을 이 순서대로 놓는다.
    축은 '누가 보는가'다: 대표가 여는 것 → 경리가 매일 쓰는 것 → 밖으로 나가는 것.
    목록에 없는 이름은 마지막에 '기타'로 붙는다(카탈로그가 늘어도 화면이 안 깨진다). */
@@ -3511,7 +3517,9 @@ export const ReportsScreen = ({ go }) => {
         <div className="row no-print" style={{ paddingTop: 30, marginBottom: 20 }}>
           <button className="btn" onClick={() => setActive(null)}><Icon.Left size={14}/> 보고서 목록</button>
           <div className="ml-auto row gap-8">
-            <button className="btn" onClick={() => window.print()}><Icon.Print size={14}/> 인쇄</button>
+            {/* 보고서마다 방향을 따로 기억한다 — 매입매출장은 가로, 계약별 수익은 세로 식이다 */}
+            <PrintButton storeKey={`report:${active}`}
+              defaultOrientation={REPORT_LANDSCAPE.has(active) ? 'landscape' : 'portrait'}/>
             <button className="btn excel" onClick={doExport}><Icon.Excel size={14}/> 엑셀</button>
           </div>
         </div>

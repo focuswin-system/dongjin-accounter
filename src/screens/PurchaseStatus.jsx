@@ -3,6 +3,7 @@ import { Icon, fmtNum, useToast, Loading, localToday } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
 import { downloadCsv } from '../lib/export'
+import { PrintButton } from '../lib/components/PrintButton'
 
 /* 주별 총 매입(매출) 현황 — 품목 단위로 기간을 가로지른다.
  *
@@ -62,7 +63,8 @@ export const PurchaseStatusScreen = ({ go }) => {
         sub="청구서에 적은 품목을 기간으로 모읍니다. 주별 소계와 월 합계가 함께 나와요."
         actions={<>
           <button className="btn" onClick={exportCsv}><Icon.Download/> <span className="btn-label-hide">내보내기</span></button>
-          <button className="btn primary" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
+          {/* 열이 많다(날짜·거래처·품목·규격·수량·단가·공급가·세액·합계) — 가로로 시작한다 */}
+          <PrintButton storeKey="purchase-status" defaultOrientation="landscape" className="btn primary"/>
         </>}
       />
 
