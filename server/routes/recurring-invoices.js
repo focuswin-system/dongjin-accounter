@@ -15,6 +15,8 @@ const { auditRecurRules } = require('../lib/recurAudit')
    규칙은 lib/settleTxn.js 한 곳에만 둔다(발행·소급·매입이 같은 규칙을 쓴다). */
 const { openTxnCandidates, settleInvoiceTxn } = require('../lib/settleTxn')
 
+const { createInvoice } = require('../lib/invoiceCreate')
+
 const router = Router()
 
 /** 결제조건은 정해진 셋 중 하나만 받는다(정기지출과 같은 규칙) */
@@ -379,19 +381,24 @@ router.post('/:id/issue', async (req, res, next) => {
       const [[defBank]] = await conn.execute("SELECT id FROM accounts WHERE kind='bank' ORDER BY created_at LIMIT 1")
       acctId = defBank ? defBank.id : null
     }
-    const id = randomUUID()
     let reusedTxn = false   // 새로 만들지 않고 이미 있던 입금에 붙였는가 — 화면이 그대로 알려준다
     /* 마감된 달로는 청구서를 발행할 수 없다. 예전엔 paid 일 때만 검사해서, 마감·신고를 끝낸
      * 달로 청구서만 새로 꽂을 수 있었다 → 그 분기 부가세 집계가 신고 후에 바뀐다. */
     { const ce = await closedPeriodError(conn, target); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
     // 금액 없는 정기청구가 매달 0원 청구서를 찍어내면 미수금 목록만 부풀린다.
     { const ae = amountError(total); if (ae) { await rollbackQuietly(conn); return res.status(400).json({ error: ae }) } }
-    await conn.execute(
-      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [id, invoice_no, 'issued', r.vendor_id || null, r.contract_id || null, supply, vat, total,
-       target, cashDateOf(target, r.pay_term, r.pay_day), paid ? '입금 완료' : '입금 예정', acctId, r.id,
-       `정기청구 · ${r.item || ''}`.trim(), invTaxType(r)]
-    )
+    /* 청구서 만들기와 **회차 닫기(last_generated)** 를 공용 함수가 한 트랜잭션에서 한다.
+       예전엔 여기서 INSERT 하고 저 아래에서 따로 밀었다 — 그러다 다른 창구는 미는 걸
+       통째로 빠뜨렸고, 그 회차가 '발행예정'에 영영 남았다. */
+    const { id } = await createInvoice(conn, {
+      kind: 'issued', invoiceNo: invoice_no,
+      vendorId: r.vendor_id, contractId: r.contract_id,
+      supply, vat, total,
+      issuedAt: target, dueAt: cashDateOf(target, r.pay_term, r.pay_day),
+      status: paid ? '입금 완료' : '입금 예정',
+      accountId: acctId, memo: `정기청구 · ${r.item || ''}`.trim(), taxType: invTaxType(r),
+      origin: { type: 'recurring', ruleTable: 'recurring_invoices', recurringId: r.id, dueDate: target },
+    })
     /* 기입금 처리: 통장에서 이미 올라온 입금이 있으면 **그것에 붙인다.** 없을 때만 만든다.
        예전엔 무조건 만들어서, 임포트한 입금과 나란히 서 같은 돈이 두 번 잡혔다. */
     if (paid) {
@@ -404,7 +411,7 @@ router.post('/:id/issue', async (req, res, next) => {
       if (st.error) { await rollbackQuietly(conn); return res.status(409).json({ error: st.error, candidates: st.candidates }) }
       reusedTxn = st.reused
     }
-    await conn.execute('UPDATE recurring_invoices SET last_generated = ? WHERE id = ?', [target, r.id])
+    // last_generated 는 createInvoice 가 이미 밀었다 — 여기서 또 밀지 않는다
     await conn.commit()
     res.json({ ok: true, id, invoice_no, reused_txn: reusedTxn })
   } catch (e) { await rollbackQuietly(conn); next(e) }
@@ -465,13 +472,20 @@ router.post('/issue-missed', async (req, res, next) => {
         { const ae = amountError(total)
           if (ae) { await rollbackQuietly(conn)
             return res.status(400).json({ error: `${ae} (정기청구 "${r.item || ''}"의 금액을 확인해주세요)` }) } }
-        await conn.execute(
-          'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-          [id, invoice_no, 'issued', r.vendor_id||null, r.contract_id||null, supply, vat, total, dueStr, dueAt, '입금 예정', r.account_id||null, r.id, `정기청구 자동 생성 · ${r.item||''}`.trim(), invTaxType(r)]
-        )
+        await createInvoice(conn, {
+          kind: 'issued', invoiceNo: invoice_no,
+          vendorId: r.vendor_id, contractId: r.contract_id,
+          supply, vat, total,
+          issuedAt: dueStr, dueAt, status: '입금 예정',
+          accountId: r.account_id,
+          memo: `정기청구 자동 생성 · ${r.item || ''}`.trim(), taxType: invTaxType(r),
+          origin: { type: 'recurring', ruleTable: 'recurring_invoices', recurringId: r.id, dueDate: dueStr },
+        })
         generated.push({ id, invoice_no, vendor_id: r.vendor_id, item: r.item, total, date: dueStr })
       }
-      await conn.execute('UPDATE recurring_invoices SET last_generated = ? WHERE id = ?', [dues[dues.length - 1], r.id])
+      /* last_generated 는 createInvoice 가 **회차마다** 민다(dues 는 오름차순이라 마지막 값이 남는다).
+         예전엔 반복문 밖에서 한 번에 밀었는데, 그러면 중간에 실패해도 마지막 회차까지
+         닫힌 것으로 남을 수 있었다. 회차를 닫는 근거는 그 회차의 청구서다. */
     }
 
     await conn.commit()
@@ -614,14 +628,19 @@ router.post('/:id/backfill', async (req, res, next) => {
         const [[defBank]] = await conn.execute("SELECT id FROM accounts WHERE kind='bank' ORDER BY created_at LIMIT 1")
         acctId = defBank ? defBank.id : null
       }
-      const id = randomUUID()
-      await conn.execute(
-        `INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount,
-                               issued_at, due_at, status, account_id, recurring_id, memo, tax_type, backfill_batch)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [id, invoice_no, 'issued', r.vendor_id || null, r.contract_id || null, supply, vat, total,
-         due, cashDateOf(due, r.pay_term, r.pay_day), paid ? '입금 완료' : '입금 예정', acctId, r.id,
-         `소급 등록 · ${r.item || ''}`.trim(), invTaxType(r), batch])
+      /* 소급 등록 — backfill_batch 로 한 묶음을 통째로 되돌릴 수 있게 한다.
+         회차를 닫는 것은 다른 창구와 같다(공용 함수가 한다). */
+      const { id } = await createInvoice(conn, {
+        kind: 'issued', invoiceNo: invoice_no,
+        vendorId: r.vendor_id, contractId: r.contract_id,
+        supply, vat, total,
+        issuedAt: due, dueAt: cashDateOf(due, r.pay_term, r.pay_day),
+        status: paid ? '입금 완료' : '입금 예정',
+        accountId: acctId,
+        memo: `소급 등록 · ${r.item || ''}`.trim(), taxType: invTaxType(r),
+        backfillBatch: batch,
+        origin: { type: 'recurring', ruleTable: 'recurring_invoices', recurringId: r.id, dueDate: due },
+      })
 
       let reused = false
       if (paid) {
@@ -643,13 +662,9 @@ router.post('/:id/backfill', async (req, res, next) => {
       created.push({ id, invoice_no, due_date: due, total, paid, reused })
     }
 
-    /* last_generated 는 '이 값 이하 회차는 이미 생성됨' 하한이다. 소급으로 만든 회차가
-       기존 하한보다 뒤면 밀어준다. 앞이면 건드리지 않는다 — 낮추면 이미 만든 뒤 회차가
-       다시 '놓친 회차'로 살아나 중복 청구가 된다. */
-    const last = created.length ? created[created.length - 1].due_date : null
-    if (last && (!r.last_generated || last > String(r.last_generated).slice(0, 10))) {
-      await conn.execute('UPDATE recurring_invoices SET last_generated = ? WHERE id = ?', [last, r.id])
-    }
+    /* last_generated 는 createInvoice 가 회차마다 **전진만** 하며 민다.
+       (소급으로 만든 회차가 기존 하한보다 앞서면 안 밀린다 — 낮추면 이미 만든 뒤 회차가
+        다시 '놓친 회차'로 살아나 중복 청구가 되기 때문이다. 그 조건은 이제 공용 함수에 있다) */
     await conn.commit()
     res.json({ ok: true, batch, count: created.length, created })
   } catch (e) { await rollbackQuietly(conn); next(e) }

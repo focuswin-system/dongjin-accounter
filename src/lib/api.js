@@ -858,6 +858,13 @@ export const api = {
     try { return await req(`/invoices/${invoiceId}/matchable`) } catch { return [] }
   },
 
+  /** 대사 — 아직 정산 안 된 청구서와 안 붙은 거래의 짝을 **한꺼번에** 받는다.
+   *  읽기 전용이다. 붙이는 건 아래 matchInvoice 가 한 건씩 한다(가드가 거기 있다). */
+  async getReconcile(kind) {
+    try { return await req(`/invoices/reconcile?kind=${kind === 'received' ? 'received' : 'issued'}`) }
+    catch { return { rows: [], invoiceCount: 0, txnCount: 0 } }
+  },
+
   /* 전표 — 이 건이 장부에 어떻게 오르는지 차변·대변 줄로.
    * 거래(결제)와 청구서(발행)는 **서로 다른 전표**다. 발행 때 생긴 채권·채무가 결제 때 사라진다.
    * 실패해도 화면이 깨지면 안 되므로 null 을 준다(전표는 부가 정보다). */
@@ -879,7 +886,8 @@ export const api = {
       /* 응답의 txn_id 를 흘려보내지 않는다 — 정산이 만든 거래에 증빙을 이어 붙이려면
          그 id 가 필요하다(안내에서 바로 정산할 때 쓴다). */
       const r = await req(`/invoices/${invoiceId}/matches`, { method: 'POST', body: { txn_id: txnId, amount, date, category, memo, account_code, account_id } })
-      return { ok: true, txnId: r?.txn_id || null }
+      // matchId 는 되돌리기(unmatchInvoice)에 쓴다 — 대사 화면이 방금 붙인 걸 물릴 때 필요하다
+      return { ok: true, txnId: r?.txn_id || null, matchId: r?.id || null }
     } catch (e) { return { ok: false, error: e.message } }   // 실패 사유를 화면까지 전달한다
   },
 

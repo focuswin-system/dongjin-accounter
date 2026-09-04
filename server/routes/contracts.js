@@ -12,6 +12,8 @@ const { closedPeriodError } = require('../lib/closing')
 const { recurHistory } = require('../lib/recurHistory')
 const { kstDate } = require('../db')
 
+const { createInvoice } = require('../lib/invoiceCreate')
+
 const router = Router()
 
 /* 정기 주문의 이행률은 **청구액을 분모로 쓰면 안 된다.**
@@ -262,13 +264,28 @@ router.get('/', async (req, res, next) => {
 router.get('/schedule/pending', async (req, res, next) => {
   try {
     const forKind = req.query.for
+    /* ⚠ 계약 등록일(c.created_at)을 함께 읽는다 — **소급 하한**에 쓴다.
+     *
+     * 예전엔 조건이 `status='예정' AND invoice_id IS NULL` 뿐이었다. 날짜 조건도,
+     * 계약 상태 조건도 없었다. 그래서 **2년 전에 끝난 계약을 뒤늦게 등록하면**
+     * 그 계약의 청구 일정이 통째로 '발행예정'에 유령처럼 떴다(계약을 만들면 마일스톤이
+     * 무조건 '예정'으로 생성되기 때문이다).
+     * 정기청구는 진작 등록일 하한(setup_date)으로 막아 뒀는데 여기만 안 막혀 있었다 —
+     * 같은 문제를 한쪽만 고친 상태였다.
+     *
+     * ⚠ 소급분을 **빼서 버리지는 않는다.** 계약은 3월에 했는데 시스템 등록이 8월이면
+     *   3~7월 기성은 이미 받았을 수도, 아직 받아야 할 수도 있다. 없애면 진짜 받을 돈이
+     *   사라진다. 그래서 state='backfill' 을 달아 함께 보내고, 화면이 별도 구획으로 그린다.
+     *   (정기청구의 '놓친 회차' 구획과 같은 대접이다) */
     let sql = `SELECT m.id AS milestone_id, m.type, m.amount, m.due_date,
                       c.id AS contract_id, c.name AS contract_name, c.contract_no, c.vendor_id, c.vat_mode,
+                      c.status AS contract_status, UNIX_TIMESTAMP(c.created_at) AS contract_setup_epoch,
                       v.name AS vendor_name, v.gubu
                FROM milestones m
                JOIN contracts c ON m.contract_id = c.id
                LEFT JOIN vendors v ON c.vendor_id = v.id
-               WHERE m.status = '예정' AND (m.invoice_id IS NULL OR m.invoice_id = '')`
+               WHERE m.status = '예정' AND (m.invoice_id IS NULL OR m.invoice_id = '')
+                 AND (c.status IS NULL OR c.status <> '완료')`
     if (forKind === 'purchase')  sql += " AND v.gubu IN ('A','E')"
     else if (forKind === 'sales') sql += " AND (v.gubu IS NULL OR v.gubu = 'B')"
     sql += ' ORDER BY m.due_date'
@@ -276,7 +293,18 @@ router.get('/schedule/pending', async (req, res, next) => {
     // vat를 서버가 주문 vat_mode로 계산해 내려준다(면세=0). 화면이 0.1을 하드코딩하면 면세에 유령 VAT가 붙는다.
     res.json(rows.map(r => {
       const amount = Number(r.amount)
-      return { ...r, amount, vat: vatOf(amount, r.vat_mode) }
+      /* 계약을 등록하기 **전** 날짜의 회차는 소급이다 — 지금 발행할 것이 아니라
+         "이건 어떻게 됐더라"를 사람이 정리할 것이다.
+         ⚠ 등록일은 **kstDate 로 만든다.** 처음엔 SQL 의 DATE(created_at) 을 그대로 비교했는데,
+           mysql2 가 그걸 **Date 객체**로 주는 바람에 String() 이 'Wed Sep 03 2026…' 이 되어
+           '2026-12-20' < 'Wed…' 가 참이 됐다 — **미래 회차까지 전부 소급으로 잡혔다**(실측).
+           UTC 로 자르면 KST 저녁 등록분이 하루 당겨지는 문제도 함께 있어, 이 파일이 정기 규칙에
+           이미 쓰는 방식(UNIX_TIMESTAMP + kstDate)과 똑같이 맞춘다. */
+      const setup = r.contract_setup_epoch != null
+        ? kstDate(Number(r.contract_setup_epoch) * 1000) : ''
+      const due = String(r.due_date || '').slice(0, 10)
+      const state = (setup && due && due < setup) ? 'backfill' : 'due'
+      return { ...r, amount, vat: vatOf(amount, r.vat_mode), contract_setup_date: setup, state }
     }))
   } catch (e) { next(e) }
 })
@@ -487,7 +515,6 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
     // 기입금 시 반영할 계좌: 사용자가 고른 계좌 우선, 없으면 주거래(첫 은행) 계좌.
     const [[defAcc]] = await conn.execute("SELECT id FROM accounts WHERE kind='bank' ORDER BY created_at LIMIT 1")
     const accountId = account_id || (defAcc ? defAcc.id : null)
-    const invId = randomUUID()
     const status = paid ? (isPurchase ? '지급 완료' : '입금 완료') : (isPurchase ? '지급 대기' : '입금 예정')
     /* 만기일은 발행일보다 앞설 수 없다.
      * 청구 일정의 예정일이 이미 지난 뒤 발행하면(늦은 청구) due_at < issued_at 이 되어
@@ -501,10 +528,18 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
     // 금액 0(마일스톤 금액을 안 채운 채 발행)이면 '입금 예정 0원' 청구서가 남아
     // 홈 '할 일'과 미수금 목록을 채운다 — 실제로 그런 청구서가 생겨 있었다.
     { const ae = amountError(total); if (ae) { await rollbackQuietly(conn); return res.status(400).json({ error: ae }) } }
-    await conn.execute(
-      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [invId, invoice_no, kind, ms.vendor_id || null, ms.contract_id, supply, vat, total, today, dueAt, status, paid ? accountId : null, `${ms.contract_name} · ${ms.type}`, taxTypeOfMode(ms.vat_mode)]
-    )
+    /* 청구서 만들기와 **마일스톤 잇기**(status·invoice_id)를 공용 함수가 한 트랜잭션에서 한다.
+       예전엔 여기서 INSERT 하고 저 아래에서 따로 UPDATE 했다 — 창구가 늘 때마다 그 뒤처리를
+       옮겨 적어야 했고, 실제로 다른 창구들은 빠뜨렸다. */
+    const { id: invId } = await createInvoice(conn, {
+      kind, invoiceNo: invoice_no,
+      vendorId: ms.vendor_id, contractId: ms.contract_id,
+      supply, vat, total,
+      issuedAt: today, dueAt, status,
+      accountId: paid ? accountId : null,
+      memo: `${ms.contract_name} · ${ms.type}`, taxType: taxTypeOfMode(ms.vat_mode),
+      origin: { type: 'milestone', milestoneId: req.params.milestoneId, paid: !!paid },
+    })
     // 기입금: 실제 입/출금 거래 + 매칭 생성(장부·계좌·주문 수금에 반영)
     if (paid) {
       // 완료 상태로 넣으므로 계좌가 없으면 잔액에 안 잡힌다(lib/ledger.js)
@@ -526,8 +561,7 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
       )
       await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,1)', [randomUUID(), invId, txnId, total])
     }
-    await conn.execute('UPDATE milestones SET status = ?, invoice_id = ? WHERE id = ?',
-      [paid ? (isPurchase ? '지급 완료' : '입금 완료') : (isPurchase ? '지급 예정' : '입금 예정'), invId, req.params.milestoneId])
+    // 마일스톤 상태·invoice_id 는 createInvoice 가 이미 이었다 — 여기서 또 하지 않는다
     await conn.commit()
     res.json({ ok: true, id: invId, invoice_no, kind })
   } catch (e) { await rollbackQuietly(conn); next(e) }
@@ -614,7 +648,6 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
     // 발행 즉시 정산 시 반영할 계좌: 사용자가 고른 계좌 우선, 없으면 주거래(첫 은행) 계좌.
     const [[defAcc]] = await conn.execute("SELECT id FROM accounts WHERE kind='bank' ORDER BY created_at LIMIT 1")
     const accountId = account_id || (defAcc ? defAcc.id : null)
-    const invId = randomUUID()
     const status = paid ? (isPurchase ? '지급 완료' : '입금 완료') : (isPurchase ? '지급 대기' : '입금 예정')
     /* 마감된 달로는 청구서를 발행할 수 없다. 예전엔 'paid' 일 때(거래를 만들 때)만 검사해서,
      * 마감·신고를 끝낸 달로 청구서만 새로 꽂을 수 있었다 → 그 분기 부가세 집계가 신고 후에 바뀐다.
@@ -622,10 +655,17 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
     { const ce = await closedPeriodError(conn, issuedAt); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
     // 수량을 0으로 둔 채 기성 발행하면 0원 청구서가 된다 — 마일스톤 발행과 같은 이유로 막는다.
     { const ae = amountError(total); if (ae) { await rollbackQuietly(conn); return res.status(400).json({ error: ae }) } }
-    await conn.execute(
-      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [invId, invoice_no, kind, c.vendor_id || null, c.id, supply, vat, total, issuedAt, due_at || null, status, paid ? accountId : null, `${c.name} · 기성 ${clean.length}개 품목`, taxTypeOfMode(c.vat_mode)]
-    )
+    /* 기성 발행 — 닫을 회차가 없다(기성은 품목 누적으로 관리한다). 그래도 같은 함수로
+       만든다: 계약 연결·번호 채기·컬럼이 창구마다 달라지는 걸 막는 게 이 함수의 일이다. */
+    const { id: invId } = await createInvoice(conn, {
+      kind, invoiceNo: invoice_no,
+      vendorId: c.vendor_id, contractId: c.id,
+      supply, vat, total,
+      issuedAt, dueAt: due_at || null, status,
+      accountId: paid ? accountId : null,
+      memo: `${c.name} · 기성 ${clean.length}개 품목`, taxType: taxTypeOfMode(c.vat_mode),
+      origin: { type: 'progress' },
+    })
     let ord = 0
     for (const l of clean) {
       await conn.execute(

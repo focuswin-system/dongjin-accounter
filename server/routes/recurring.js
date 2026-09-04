@@ -19,6 +19,8 @@ const { backfillCycles, tooManyError, addSkip, removeSkip, issuedInvoiceAt } = r
    규칙은 lib/settleTxn.js 한 곳 — 매출(recurring-invoices.js)과 같은 규칙을 쓴다. */
 const { openTxnCandidates, settleInvoiceTxn } = require('../lib/settleTxn')
 
+const { createInvoice } = require('../lib/invoiceCreate')
+
 const router = Router()
 
 /** 결제조건은 정해진 셋 중 하나만 받는다 — 모르는 값이 들어오면 날짜 계산이 조용히 어긋난다 */
@@ -267,17 +269,23 @@ async function createExpenseInvoice(conn, r, target, { paid = false, accountId =
     const [[defBank]] = await conn.execute("SELECT id FROM accounts WHERE kind='bank' ORDER BY created_at LIMIT 1")
     acctId = defBank ? defBank.id : null
   }
-  const invId = randomUUID()
   /* 비목을 청구서에 함께 남긴다. 정기지출은 비목을 이미 알고 있는데(r.category) 안 넘기면
    * 그 매입 청구서의 발행 전표가 차변(비용) 없이 서서 일계표에 오르지 못한다.
    * 매달 자동으로 찍히는 청구서라, 빠뜨리면 매달 '전표 못 세운 청구서'가 쌓인다. */
   const invAcctCode = await acctCodeByCategoryName(conn, r.category, 'received')
-  await conn.execute(
-    'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type, category, account_code) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    [invId, invoice_no, 'received', r.vendor_id || null, r.contract_id || null, supply, vat, total,
-     target, cashDateOf(target, r.pay_term, r.pay_day), paid ? '지급 완료' : '지급 대기', acctId, r.id,
-     `정기지출 · ${r.category || ''}`.trim(), tax_type, r.category || null, invAcctCode]
-  )
+  /* ⚠ 정기지출의 회차는 **recurring_expenses** 에 산다(정기청구의 recurring_invoices 가 아니다).
+     ruleTable 을 넘겨짚게 두면 매입 청구서가 매출 규칙의 하한을 밀어 엉뚱한 회차가 사라진다. */
+  const { id: invId } = await createInvoice(conn, {
+    kind: 'received', invoiceNo: invoice_no,
+    vendorId: r.vendor_id, contractId: r.contract_id,
+    supply, vat, total,
+    issuedAt: target, dueAt: cashDateOf(target, r.pay_term, r.pay_day),
+    status: paid ? '지급 완료' : '지급 대기',
+    accountId: acctId,
+    memo: `정기지출 · ${r.category || ''}`.trim(), taxType: tax_type,
+    category: r.category, accountCode: invAcctCode,
+    origin: { type: 'recurring', ruleTable: 'recurring_expenses', recurringId: r.id, dueDate: target },
+  })
   /* 기지급 처리: 통장에서 이미 나간 지급이 있으면 **그것에 붙인다.** 없을 때만 만든다.
      예전엔 무조건 만들어서, 임포트한 출금과 나란히 서 같은 돈이 두 번 잡혔다. */
   let settled = null
@@ -291,7 +299,7 @@ async function createExpenseInvoice(conn, r, target, { paid = false, accountId =
     })
     if (settled.error) return { error: settled.error, candidates: settled.candidates }
   }
-  await conn.execute('UPDATE recurring_expenses SET last_generated = ? WHERE id = ?', [target, r.id])
+  // last_generated 는 createInvoice 가 이미 밀었다(전진만) — 여기서 또 밀지 않는다
   return { invId, invoice_no, total, txnId: settled ? settled.txnId : null, reused: !!(settled && settled.reused) }
 }
 

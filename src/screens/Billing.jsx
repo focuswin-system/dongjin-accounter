@@ -23,6 +23,7 @@ import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { quickAddCategory } from '../lib/quickAdd'
 import { vatOf } from '../lib/vatRate'
+import { ReconcilePanel } from '../lib/components/ReconcilePanel'
 
 const STATUS_TONE = {
   "입금 완료": "pos",  "지급 완료": "pos",
@@ -1433,6 +1434,8 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
      보이지 않는다("등록은 여기서 했는데 어디 갔지"). 메뉴 이름이 약속한 것을 보여준다. */
   const [plainTxns, setPlainTxns] = useState([])
   const [pending, setPending]   = useState([])
+  // 계약 등록 전 날짜의 회차 — 예정과 섞으면 유령이 된다(위 load 주석 참고)
+  const [pendingBackfill, setPendingBackfill] = useState([])
   const [recSummary, setRecSummary] = useState(null)
   const [paySum, setPaySum]     = useState(null)
   const [selected, setSelected] = useState(null)
@@ -1532,7 +1535,13 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       !t.payrollId && !t.recurringId && isCountable(t)))
     const merged = sched.map(s => ({ ...s, source: 'milestone' }))
       .sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')))
-    setInvoices(rows); setRecSummary(rec); setPaySum(pay); setPending(merged)
+    /* 계약 등록 **전** 날짜의 회차는 발행예정에서 뺀다.
+       과거에 끝난 계약을 뒤늦게 등록하면 그 일정이 통째로 예정에 떠서, 목록이
+       "안 없어지는 것"이 되고 그때부터는 **진짜 놓친 회차도 안 보인다.**
+       버리지는 않는다 — 이미 받았는지 아직인지는 사람만 안다. 아래 별도 구획으로 세운다. */
+    setInvoices(rows); setRecSummary(rec); setPaySum(pay)
+    setPending(merged.filter(m => m.state !== 'backfill'))
+    setPendingBackfill(merged.filter(m => m.state === 'backfill'))
     /* 상세를 열어둔 채 정산·취소를 하면 목록만 새로고침되고 열린 상세는 옛 값 그대로였다
        — 입금을 등록해도 이력·미수금이 그대로라 한 번 더 넣게 된다. 같은 건을 다시 물려준다.
        사라진 청구서(삭제)면 닫는다. */
@@ -2063,7 +2072,9 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           어음번호 검색, 상태 칩). 청구서 툴바를 여기 그대로 세우면 눌러도 안 바뀌는 칸이 되고,
           그렇다고 비우면 탭 줄이 위로 뛴다 — 뼈대(카드 → 기간·검색 → 필터 → 표)는 같게 두고
           거는 대상만 바꾼 것이다. */}
-      {view === "note" ? (
+      {/* 대사는 조작 줄을 두지 않는다 — 기간·검색이 이 목록에는 걸리지 않는다.
+          안 걸리는 필터를 세워 두면 "걸었는데 왜 그대로지"가 된다. */}
+      {view === "match" ? null : view === "note" ? (
         <TableToolbar {...noteF.toolbarProps} periodPicker
           right={<span className="text-xs text-muted2">만기일 기준</span>}/>
       ) : !collect && view === "pending" ? (
@@ -2139,6 +2150,15 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
             <button role="tab" aria-selected={view === "note"}
               className={`seg-btn ${view === "note" ? "active" : ""}`} onClick={() => setView("note")}>
               어음{noteCount > 0 && <span className="seg-count">{noteCount}</span>}
+            </button>
+            {/* 대사 — 앞의 두 축(청구서 / 돈)을 **잇는** 자리다. 그래서 둘 다의 뒤,
+                선 하나를 더 두고 마지막에 선다. 건수는 달지 않는다 — 짝의 수는
+                열어 봐야 알 수 있고(서버가 셈한다), 안 붙은 거래 수를 달면
+                "할 일이 이만큼"으로 잘못 읽힌다. */}
+            <span aria-hidden="true" className="seg-div"/>
+            <button role="tab" aria-selected={view === "match"}
+              className={`seg-btn ${view === "match" ? "active" : ""}`} onClick={() => setView("match")}>
+              대사
             </button>
           </div>
         )}
@@ -2229,6 +2249,25 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
               onIssue={(p) => issueSchedule(p, false)} onPaid={(p) => issueSchedule(p, true)}
               onOpenOrder={openOrder} onDeleteSchedule={deleteSchedule}
               select={{ ids: pendChecked, onChange: setPendChecked }}/>
+
+            {/* 소급 회차 — 계약을 등록하기 전 날짜의 일정이다.
+                예정과 같은 표에 두지 않는다: 지금 발행할 것이 아니라 "이건 어떻게 됐더라"를
+                가려야 하는 것들이라, 섞으면 발행 버튼을 무심코 누르게 된다.
+                감추지도 않는다 — 그중 진짜 못 받은 돈이 있을 수 있다. */}
+            {pendingBackfill.length > 0 && (
+              <div style={{ marginTop: 24 }}>
+                <div className="row gap-8" style={{ alignItems: 'baseline', marginBottom: 8 }}>
+                  <span className="fw-700 text-sm">계약 등록 전 일정</span>
+                  <span className="badge outline" style={{ fontSize: 10 }}>{pendingBackfill.length}건</span>
+                  <span className="text-xs text-muted2">
+                    이미 {isIssued ? '받은' : '낸'} 건인지 확인하고 발행하세요
+                  </span>
+                </div>
+                <PendingScheduleTable rows={pendingBackfill} isIssued={isIssued}
+                  onIssue={(p) => issueSchedule(p, false)} onPaid={(p) => issueSchedule(p, true)}
+                  onOpenOrder={openOrder} onDeleteSchedule={deleteSchedule}/>
+              </div>
+            )}
           </>
         : (collect || view === "list") ? <>
             {/* 선택 바 — 고른 게 있을 때만 나타난다. 늘 떠 있으면 표를 밀어내고,
@@ -2295,6 +2334,12 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           탭에 건수가 붙어 있으면 열지 않아도 있다는 걸 안다.
           표를 섞지 않은 이유는 그대로다 — 청구서는 번호·만기·정산 상태를 갖지만
           이 건들은 없어서, 한 표에 넣으면 절반이 빈 칸인 행이 된다. */}
+      {/* 대사 — 청구서와 오간 돈을 한꺼번에 잇는다. 기간 필터를 안 받는다:
+          짝이 안 맞은 건은 **오래된 것일수록** 손이 필요한데, 기간을 걸면 그게 먼저 사라진다. */}
+      {!collect && view === "match" && (
+        <ReconcilePanel kind={isIssued ? 'issued' : 'received'} onChanged={load}/>
+      )}
+
       {!collect && view === "plain" && (
         <DataTable
           rows={plainFiltered}

@@ -732,6 +732,37 @@ try {
 }
 
 console.log('\n' + '━'.repeat(64))
+// ── [17] 청구서는 공용 함수로만 만든다 ──
+//
+// 라우트에서 INSERT INTO invoices 를 직접 하면, 창구마다 채우는 컬럼이 조금씩 달라진다.
+// 실제로 그렇게 어긋나 있던 것들:
+//   · 정기 회차에서 발행할 때만 recurring_id 를 채웠다 → 다른 창구로 만들면 그 회차가
+//     '발행예정'에 영영 남아, 나중에 또 발행하면 같은 돈을 두 번 청구한다
+//   · 엑셀 임포트 INSERT 에는 contract_id 컬럼이 아예 없었다
+//   · 번호 채는 SQL 이 두 벌로 복사돼 있었다
+// lib/invoiceCreate.js 의 createInvoice 는 origin 을 **필수**로 받아서, 새 창구를 내는
+// 사람이 "이 청구서는 어디서 왔는가"를 답하지 않고는 청구서를 못 만들게 한다.
+console.log('\n[17] 청구서 생성 — 라우트에서 직접 INSERT 하는가')
+try {
+  const files = fs.readdirSync(ROUTES_DIR).filter(f => f.endsWith('.js'))
+  const offenders = []
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(ROUTES_DIR, f), 'utf8')
+    src.split(/\r?\n/).forEach((ln, i) => {
+      if (/INSERT\s+INTO\s+invoices\b/i.test(ln)) offenders.push(`${f}:${i + 1}`)
+    })
+  }
+  if (offenders.length) {
+    fail('라우트가 청구서를 직접 INSERT 합니다:\n      · ' + offenders.join('\n      · ') +
+         '\n      → lib/invoiceCreate.js 의 createInvoice(conn, { …, origin }) 를 쓰세요.' +
+         '\n        origin 을 안 적으면 정기 회차·마일스톤 뒤처리가 조용히 빠집니다.')
+  } else {
+    ok(`청구서 생성 경로 일원화됨 (라우터 ${files.length}개)`)
+  }
+} catch (e) {
+  fail(`청구서 생성 경로 검사 실패: ${e.message}`)
+}
+
 if (failures === 0) {
   console.log(' ✅ 격리 검사 통과')
   console.log('━'.repeat(64) + '\n')

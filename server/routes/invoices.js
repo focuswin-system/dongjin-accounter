@@ -20,6 +20,8 @@ const { invoiceVoucher, withNames } = require('../lib/voucher')
 const { newBook, templateSheet, guideSheet, sendBook } = require('../lib/xlsxBook')
 const { MONTHS, vatPeriodOf } = require('../lib/vatPeriod')
 
+const { reconcileCandidates } = require('../lib/reconcile')
+const { createInvoice } = require('../lib/invoiceCreate')
 const router = Router()
 
 const RECEIVABLE_STATUSES = new Set(['입금 예정', '일부 입금', '기한 지남', '장기 미수'])
@@ -593,15 +595,19 @@ router.post('/import/commit', async (req, res, next) => {
       if (v.created) createdVendors.push(v.name)
       const newId = randomUUID()
       try {
-        await conn.execute(
-          `INSERT INTO invoices (id, invoice_no, kind, vendor_id, supply_amount, vat_amount, total_amount,
-                                 issued_at, due_at, status, memo, tax_type, nts_confirm_no,
-                                 category, account_code)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-          [newId, await nextInvoiceNo(kind, issuedAt.slice(0, 4)), kind, v.id,
-           supply, vat, total, issuedAt, dueAt,
-           kind === 'issued' ? '입금 예정' : '지급 대기', String(it.memo || ''), taxType, confirmNo,
-           category, acctCode])
+        /* 외부 문서(엑셀·홈택스)가 원본이다. 닫을 회차가 없다 —
+           이 계산서가 어느 정기 회차인지는 우리가 알 수 없기 때문이다.
+           그 회차는 '발행예정'에 남고, 나중에 사람이 대사에서 이어 준다. */
+        await createInvoice(conn, {
+          id: newId,
+          kind, invoiceNo: await nextInvoiceNo(kind, issuedAt.slice(0, 4)),
+          vendorId: v.id,
+          supply, vat, total, issuedAt, dueAt,
+          status: kind === 'issued' ? '입금 예정' : '지급 대기',
+          memo: String(it.memo || ''), taxType, ntsConfirmNo: confirmNo,
+          category, accountCode: acctCode,
+          origin: { type: 'import', source: 'excel' },
+        })
       } catch (e) {
         // UNIQUE(nts_confirm_no)가 걸린 경우: 위 조회와 이 삽입 사이에 다른 요청이 먼저 넣었다.
         // 그 한 건 때문에 배치 전체를 500으로 되돌리면 나머지 수백 건이 통째로 날아간다 →
@@ -714,6 +720,16 @@ router.get('/import/template', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/* 대사 — 아직 정산 안 된 청구서와 안 붙은 거래의 짝을 **한꺼번에** 내놓는다.
+ * 읽기 전용이다. 실제로 붙이는 일은 아래 POST /:id/matches 가 한다(가드가 거기 다 있다).
+ * ⚠ /:id 보다 **위**에 둔다 — 아래 두면 'reconcile' 이 청구서 id 로 잡힌다. */
+router.get('/reconcile', async (req, res, next) => {
+  try {
+    const kind = req.query.kind === 'received' ? 'received' : 'issued'
+    res.json(await reconcileCandidates(req.db, kind))
+  } catch (e) { next(e) }
+})
+
 router.get('/:id', async (req, res, next) => {
   try {
     const [rows] = await req.db.execute('SELECT * FROM invoices WHERE id = ?', [req.params.id])
@@ -817,10 +833,16 @@ router.post('/', async (req, res, next) => {
      * 이미 발행한 청구서의 전표는 그대로 남아야 한다). */
     { const fe = fundAccountError(account_code); if (fe) return res.status(400).json({ error: fe }) }
     const invAcctCode = await resolveInvoiceAcctCode(req.db, account_code, category, kind)
-    await req.db.execute(
-      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type, category, account_code) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [id, invoice_no, kind, vendor_id||null, contract_id||null, supply_amount, vat_amount, total_amount, issued_at, due_at||null, status||(kind==='issued' ? '입금 예정' : '지급 대기'), account_id||null, memo||'', taxType, category||null, invAcctCode]
-    )
+    /* 사람이 그 자리에서 만드는 청구서. 닫을 회차가 없다 —
+       정기 회차를 대신해 친 것이라도 어느 회차인지는 사람만 안다(대사에서 잇는다). */
+    await createInvoice(req.db, {
+      id, kind, invoiceNo: invoice_no,
+      vendorId: vendor_id, contractId: contract_id,
+      supply: supply_amount, vat: vat_amount, total: total_amount,
+      issuedAt: issued_at, dueAt: due_at, status,
+      accountId: account_id, memo, taxType, category, accountCode: invAcctCode,
+      origin: { type: 'manual' },
+    })
     // 거래명세서식 품목 내역(선택) — 없으면 총액만 있는 기존 청구서 그대로다
     const lineCount = await writeInvoiceLines(req.db, id, req.body.lines)
     res.json({ id, invoice_no, lines: lineCount })
@@ -934,12 +956,16 @@ router.post('/split', async (req, res, next) => {
         const noteBase = String(memo || '').trim()
         const noteDate = deliveryDate ? `납품 ${deliveryDate}` : '납품일 미기재'
         // 나눠 발행해도 비목은 같다 — 안 물려주면 쪼갠 장들만 발행 전표를 못 세운다
-        await conn.execute(
-          'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, memo, tax_type, category, account_code) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-          [id, invoice_no, kind, vendor_id || null, contract_id || null, supply, vat, total, issued_at,
-           due_at || null, status || (kind === 'issued' ? '입금 예정' : '지급 대기'),
-           account_id || null, noteBase ? `${noteBase} · ${noteDate}` : noteDate, taxType,
-           category || null, splitAcctCode])
+        await createInvoice(conn, {
+          id, kind, invoiceNo: invoice_no,
+          vendorId: vendor_id, contractId: contract_id,
+          supply, vat, total,
+          issuedAt: issued_at, dueAt: due_at, status,
+          accountId: account_id,
+          memo: noteBase ? `${noteBase} · ${noteDate}` : noteDate,
+          taxType, category, accountCode: splitAcctCode,
+          origin: { type: 'manual' },
+        })
         await writeInvoiceLines(conn, id, groupLines)
         created.push({ id, invoice_no, delivery_date: deliveryDate || null, supply, vat, total, lines: groupLines.length })
       }

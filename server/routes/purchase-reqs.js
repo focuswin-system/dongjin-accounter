@@ -6,6 +6,8 @@ const { amountError } = require('../lib/ledger')
 const { addDays } = require('../lib/recurrence')
 const { recurFromSupply } = require('../lib/vat')
 
+const { createInvoice } = require('../lib/invoiceCreate')
+
 const router = Router()
 const parseJson = (v, fb) => { try { return v ? JSON.parse(v) : fb } catch { return fb } }
 
@@ -145,12 +147,16 @@ router.post('/:id/issue-payable', async (req, res, next) => {
       "SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(invoice_no, '-', -1) AS UNSIGNED)), 0) AS maxno FROM invoices WHERE kind='received' AND invoice_no LIKE ?",
       [`매입-${year}-%`])
     const invoice_no = `매입-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
-    const invId = randomUUID()
     // 품목 금액이 비어 있으면 0원 매입 청구서가 되어 '지급 대기'로 남는다.
     { const ae = amountError(total); if (ae) { await rollbackQuietly(conn); return res.status(400).json({ error: ae }) } }
-    await conn.execute(
-      'INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, supply_amount, vat_amount, total_amount, issued_at, due_at, status, account_id, recurring_id, memo, tax_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [invId, invoice_no, 'received', r.vendor_id, null, supply, vat, total, issued, due, '지급 대기', null, null, `구매품의서 ${r.doc_no}`, tax_type])
+    const { id: invId } = await createInvoice(conn, {
+      kind: 'received', invoiceNo: invoice_no,
+      vendorId: r.vendor_id,
+      supply, vat, total,
+      issuedAt: issued, dueAt: due, status: '지급 대기',
+      memo: `구매품의서 ${r.doc_no}`, taxType: tax_type,
+      origin: { type: 'purchase_req' },
+    })
     /* 품의서에 적은 품목을 청구서에도 싣는다.
      *
      * 여태 총액만 넘겨서, 품명·규격·수량·단가를 다 적어 결재까지 받은 품의서가
