@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Combobox, MoneyInput, DateInput, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Combobox, MoneyInput, DateInput, localToday, fmtDateShort } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { Drawer } from '../lib/ui'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
@@ -113,7 +113,7 @@ export const TransferScreen = ({ openEdit }) => {
           empty="이체 내역이 없어요. 급여계좌 보충·시재통장 채우기 같은 통장 간 이동을 여기에 기록하세요."
           columns={[
             { key: 'date', header: '날짜', sortable: true,
-              render: t => <span className="text-sm num">{t.date}</span> },
+              render: t => <span className="text-sm num">{fmtDateShort(t.date)}</span> },
             { key: 'from', header: '보내는 통장',
               render: t => <span className="fw-700">{byId.get(t.accountId)?.name || '—'}</span> },
             { key: 'to', header: '받는 통장',

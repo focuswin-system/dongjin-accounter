@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, localToday, DateInput } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, localToday, DateInput, fmtDateShort } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { DataTable } from '../lib/components/DataTable'
@@ -226,7 +226,7 @@ const DrawLoanDrawer = ({ loan, onClose, onDone, accounts }) => {
     if (!acct) return toast.push('입금 계좌를 선택해주세요 — 안 고르면 계좌 잔액에 반영되지 않아요')
     if (amt <= 0) return toast.push('빌린 금액을 입력해주세요')
     if (date > today) return toast.push('미래 날짜로는 처리할 수 없어요')
-    if (date < loan.start_date) return toast.push(`대출 실행일(${loan.start_date}) 이전 날짜로는 인출할 수 없어요`, { tone: 'warn' })
+    if (date < loan.start_date) return toast.push(`대출 실행일(${fmtDateShort(loan.start_date)}) 이전 날짜로는 인출할 수 없어요`, { tone: 'warn' })
     setBusy(true)
     const res = await api.drawLoan(loan.id, { date, account_id: acct, amount: amt, memo })
     setBusy(false)
@@ -392,7 +392,7 @@ const RepayDrawer = ({ loan, cycle, onClose, onDone, accounts }) => {
   return (
     <Drawer open onClose={onClose} width="min(460px, 100vw)">
       <DrawerHead title={`${cycle.seq}회차 상환 처리`}
-        sub={<>{loan.name} · 예정일 {cycle.due_date}</>} onClose={onClose}/>
+        sub={<>{loan.name} · 예정일 {fmtDateShort(cycle.due_date)}</>} onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
           <div className="row" style={{ marginBottom: 6 }}>
@@ -423,7 +423,7 @@ const RepayDrawer = ({ loan, cycle, onClose, onDone, accounts }) => {
           <DateInput className="input num" value={date} max={today} onChange={e => setDate(e.target.value)}/>
           {cycle.due_date > today && (
             <div className="text-xs" style={{ marginTop: 4, color: 'var(--warn-ink)' }}>
-              예정일({cycle.due_date})이 아직 오지 않았어요. 실제로 낸 날짜로 처리하세요.
+              예정일({fmtDateShort(cycle.due_date)})이 아직 오지 않았어요. 실제로 낸 날짜로 처리하세요.
             </div>
           )}
         </div>
@@ -640,7 +640,7 @@ export const LoanScreen = ({ page = true }) => {
             rowKey={r => `${r.loan.id}-${r.cycle.seq}`}
             columns={[
               { key: 'due', header: '예정일', width: 170, render: ({ cycle }) => (
-                <span className="num text-sm">{cycle.due_date}
+                <span className="num text-sm">{fmtDateShort(cycle.due_date)}
                   <span className={`badge ${ddayTone(cycle.due_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(cycle.due_date)}</span>
                 </span>
               )},

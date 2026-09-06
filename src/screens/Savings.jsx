@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, localToday, DateInput } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, localToday, DateInput, fmtDateShort } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { DataTable } from '../lib/components/DataTable'
@@ -161,7 +161,7 @@ export const SavingsScreen = () => {
             rows={overdue}
             columns={[
               { key: 'due', header: '납입일', width: 170, render: ({ cycle }) => (
-                <span className="num text-sm">{cycle.due_date}
+                <span className="num text-sm">{fmtDateShort(cycle.due_date)}
                   <span className={`badge ${ddayTone(cycle.due_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(cycle.due_date)}</span>
                 </span>
               )},
@@ -262,7 +262,7 @@ const SavingsDetail = ({ s, onUnpay }) => {
         <div className="row gap-16" style={{ flexWrap: 'wrap' }}>
           <span>보증금 <b className="num">{fmtNum(s.principal)}원</b></span>
           <span className="text-muted">계정과목 <b>1801 보증금</b></span>
-          <span className="text-muted">지급일 <b className="num">{s.start_date}</b></span>
+          <span className="text-muted">지급일 <b className="num">{fmtDateShort(s.start_date)}</b></span>
         </div>
         <div className="text-xs text-muted2" style={{ marginTop: 8, lineHeight: 1.6 }}>
           보증금은 만기도 이자도 없어요. 주문이 끝나면 <b>반환</b>으로 처리하면 통장에 들어온 것으로 잡힙니다.<br/>
@@ -277,7 +277,7 @@ const SavingsDetail = ({ s, onUnpay }) => {
         <div className="row gap-16" style={{ flexWrap: 'wrap' }}>
           <span>적립금 <b className="num">{fmtNum(s.principal)}원</b></span>
           <span className="text-muted">계정과목 <b>1505 퇴직연금운용자산</b></span>
-          <span className="text-muted">기준일 <b className="num">{s.start_date}</b></span>
+          <span className="text-muted">기준일 <b className="num">{fmtDateShort(s.start_date)}</b></span>
         </div>
         <div className="text-xs text-muted2" style={{ marginTop: 8, lineHeight: 1.6 }}>
           확정급여형(DB) 적립금이에요. 만기도 이자도 없고, <b>직원이 퇴직할 때</b> 여기서 나갑니다.<br/>
@@ -569,7 +569,7 @@ const PayDrawer = ({ target, accounts, onClose, onPay }) => {
             <b className="num" style={{ fontSize: 16 }}>{fmtNum(cycle.amount)}원</b>
           </div>
           <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-            예정일 {cycle.due_date} · 이 돈은 <b>비용이 아니라 자산</b>이에요(보통예금 → 금융상품).
+            예정일 {fmtDateShort(cycle.due_date)} · 이 돈은 <b>비용이 아니라 자산</b>이에요(보통예금 → 금융상품).
           </div>
         </div>
         <div>

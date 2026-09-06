@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, StatusBadge, Drawer, Combobox, MoneyInput, Loading, DateInput } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, StatusBadge, Drawer, Combobox, MoneyInput, Loading, DateInput, fmtDateShort } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { TableToolbar } from '../lib/components/TableToolbar'
 import { FOLDABLE_DOMAINS } from '../lib/nav'
@@ -2477,7 +2477,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
           ) : adjustments.map((a, i) => (
             <div key={a.id || i} style={{ padding: '12px 0', borderBottom: '1px solid var(--line)' }}>
               <div className="row">
-                <span className="text-sm text-muted">{a.date}</span>
+                <span className="text-sm text-muted">{fmtDateShort(a.date)}</span>
                 <span className="num fw-700 ml-auto" style={{ color: a.amount < 0 ? 'var(--neg-ink)' : 'var(--pos)' }}>
                   {a.amount > 0 ? '+' : ''}{fmtNum(a.amount)}
                 </span>
@@ -2988,7 +2988,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
                     주워 썼는데 그 목록은 35일 미리보기라, 매분기·매년 규칙은 늘 '—'로 떴다 —
                     활성인데 예정이 없으니 규칙이 안 도는 것처럼 읽힌다. */}
                 <td className="text-sm">
-                  {r.active ? (r.nextDue || s?.next || "—") : "—"}
+                  {r.active ? (fmtDateShort(r.nextDue || s?.next) || "—") : "—"}
                   {s?.overdue > 0 && (
                     <span className="badge neg" style={{ marginLeft: 6, fontSize: 10 }}>미처리 {s.overdue}</span>
                   )}
@@ -3383,7 +3383,7 @@ export const RecurringInvoicePanel = ({ page = false, goRoute }) => {
                     주워 썼는데 그 목록은 35일 미리보기라, 매분기·매년 규칙은 늘 '—'로 떴다 —
                     활성인데 예정이 없으니 규칙이 안 도는 것처럼 읽힌다. */}
                 <td className="text-sm">
-                  {r.active ? (r.nextDue || s?.next || "—") : "—"}
+                  {r.active ? (fmtDateShort(r.nextDue || s?.next) || "—") : "—"}
                   {s?.overdue > 0 && (
                     <span className="badge neg" style={{ marginLeft: 6, fontSize: 10 }}>미처리 {s.overdue}</span>
                   )}

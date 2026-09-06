@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, DateInput } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, DateInput, fmtDateShort } from '../lib/ui'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DataTable } from '../lib/components/DataTable'
@@ -352,7 +352,7 @@ const SeveranceTab = () => {
           ) },
           // 기한을 모르는 게 보통이다. 없는 날짜를 지어내지 않고 '미정'이라고 적는다.
           { key: 'due_date', header: '지급 기한', width: 120, render: r => (
-            r.due_date ? <span className="num text-sm">{r.due_date}</span> : <span className="text-xs text-muted2">미정</span>
+            r.due_date ? <span className="num text-sm">{fmtDateShort(r.due_date)}</span> : <span className="text-xs text-muted2">미정</span>
           ) },
           { key: 'memo', header: '메모', className: 'text-sm text-muted', render: r => r.memo || '—' },
           { key: 'act', header: '', width: 120, render: r => (

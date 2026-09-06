@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, StatusBadge, periodToRange, FilterSelect, Drawer, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, StatusBadge, periodToRange, FilterSelect, Drawer, localToday, fmtDateShort } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { DataTable } from '../lib/components/DataTable'
@@ -338,7 +338,7 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
             empty="조건에 맞는 거래내역이 없어요."
             columns={[
               { key: 'date', header: '날짜', width: 110, sortable: true,
-                render: t => <span className="num-cell text-muted text-sm">{t.date}</span> },
+                render: t => <span className="num-cell text-muted text-sm">{fmtDateShort(t.date)}</span> },
               { key: 'vendor', header: '거래처', sortable: true,
                 render: t => (
                   <span className="fw-700">
@@ -479,7 +479,7 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
               <StatusBadge status={txn.status}/>
             </div>
             <div className="fw-700" style={{ fontSize: 16, marginTop: 6 }}>{txn.vendor}</div>
-            <div className="text-xs text-muted">{txn.scope} · {txn.category} · {txn.date}</div>
+            <div className="text-xs text-muted">{txn.scope} · {txn.category} · {fmtDateShort(txn.date)}</div>
           </div>
           <button className="icon-btn ml-auto" title="닫기" onClick={onClose}><Icon.Close size={16}/></button>
         </div>

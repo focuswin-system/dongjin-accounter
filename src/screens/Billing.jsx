@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { NotesScreen, NoteKpis, NoteStatusChips } from './Notes'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday, Loading, DateInput, periodToRange, Popover, PopItem, vendorLabel } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday, Loading, DateInput, periodToRange, Popover, PopItem, vendorLabel, fmtDateShort } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { SummaryCard, SummaryRow } from '../lib/components/Kpi'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
@@ -303,7 +303,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
     const ok = await confirm({
       tone: "brand", icon: <Icon.Check size={22}/>,
       title: `${isIssued ? "입금" : "지급"} 거래 연결`,
-      body: `${txn.date} · ${fmtNum(txn.amount)}원 거래를 이 청구서에 연결해요. 새 거래는 만들지 않아요.`,
+      body: `${fmtDateShort(txn.date)} · ${fmtNum(txn.amount)}원 거래를 이 청구서에 연결해요. 새 거래는 만들지 않아요.`,
       confirmLabel: "연결",
     })
     // 연결 대상에 계좌가 있으면 서버가 그걸 우선 쓴다. 없을 때만 여기 값이 폴백으로 쓰인다.
@@ -499,7 +499,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                             <div key={t.id} className="row gap-10" style={{ padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 10, fontSize: 13, alignItems: "center" }}>
                               <div style={{ minWidth: 0, flex: 1 }}>
                                 <div className="row gap-8" style={{ alignItems: "center" }}>
-                                  <span className="num text-muted" style={{ flexShrink: 0 }}>{t.date}</span>
+                                  <span className="num text-muted" style={{ flexShrink: 0 }}>{fmtDateShort(t.date)}</span>
                                   <span className="fw-600" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{t.vendor_name || "—"}</span>
                                 </div>
                                 <div className="row gap-6" style={{ marginTop: 2, alignItems: "center", flexWrap: "wrap" }}>
@@ -1896,7 +1896,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       tone: "brand", icon: <Icon.Receipt size={22}/>,
       title: isIssued ? "청구서 발행" : "매입 청구서 등록",
       body: isIssued
-        ? `${p.vendor_name} · ${p.type}${isRecurring ? ` (${p.due_date} 회차)` : ''} ${fmtNum(supply + vat)}원(VAT 포함) 청구서를 발행해요. 미수금으로 등록됩니다.`
+        ? `${p.vendor_name} · ${p.type}${isRecurring ? ` (${fmtDateShort(p.due_date)} 회차)` : ''} ${fmtNum(supply + vat)}원(VAT 포함) 청구서를 발행해요. 미수금으로 등록됩니다.`
         : `${p.vendor_name} · ${p.type} ${fmtNum(supply + vat)}원(VAT 포함) 매입 청구서를 등록해요. 미지급금으로 잡힙니다.`,
       confirmLabel: isIssued ? "청구서 발행" : "청구서 등록",
     })
@@ -2352,7 +2352,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           empty={isIssued ? "이 기간에 들어온 입금이 없어요." : "이 기간에 나간 지급이 없어요."}
           columns={[
             { key: 'date', header: '날짜', sortable: true,
-              render: t => <span className="text-sm num">{t.date}</span> },
+              render: t => <span className="text-sm num">{fmtDateShort(t.date)}</span> },
             { key: 'vendor', header: '거래처', sortable: true,
               render: t => <span className="fw-700">{t.vendor || '—'}</span> },
             { key: 'scope', header: '내용',

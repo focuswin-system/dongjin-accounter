@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, MoneyInput, DateInput, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, MoneyInput, DateInput, localToday, fmtDateShort } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { Drawer } from '../lib/ui'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
@@ -317,7 +317,7 @@ export const CardPaymentScreen = ({ openEdit }) => {
                       )}
                       {b.inWindow.map(t => (
                         <tr key={t.id}>
-                          <td className="num-cell text-muted text-sm">{t.date}</td>
+                          <td className="num-cell text-muted text-sm">{fmtDateShort(t.date)}</td>
                           <td className="text-sm">
                             <span className="fw-600">{t.vendor || '—'}</span>
                             {t.memo && <span className="text-muted2"> · {t.memo}</span>}
@@ -355,7 +355,7 @@ export const CardPaymentScreen = ({ openEdit }) => {
                 /* 행을 누르면 그 거래가 열린다. 잘못 갚은 건을 봤을 때 그 자리에서
                    확인·수정할 수 있어야 한다(취소는 오른쪽 버튼이 따로 한다). */
                 <tr key={t.id} style={{ cursor: 'pointer' }} onClick={() => setTxnOpen(t.id)}>
-                  <td className="num-cell text-sm">{t.date}</td>
+                  <td className="num-cell text-sm">{fmtDateShort(t.date)}</td>
                   <td className="fw-700 text-sm">{byId.get(t.accountId)?.name || '—'}</td>
                   <td className="text-sm">{byId.get(t.counterpartyAccountId)?.name || '—'}</td>
                   <td className="text-sm text-muted">{t.memo || '—'}</td>

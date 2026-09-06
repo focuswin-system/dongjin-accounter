@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Combobox, MoneyInput, DateInput, Drawer, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Combobox, MoneyInput, DateInput, Drawer, localToday, fmtDateShort } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
@@ -207,7 +207,7 @@ export const LendingScreen = () => {
                   {detail.schedule.map(c => (
                     <tr key={c.seq}>
                       <td className="num text-sm">{c.seq}</td>
-                      <td className="num text-sm">{c.due_date}</td>
+                      <td className="num text-sm">{fmtDateShort(c.due_date)}</td>
                       <td className="num-cell num-right">{fmtNum(c.principal)}</td>
                       <td className="num-cell num-right">{fmtNum(c.interest)}</td>
                       <td>

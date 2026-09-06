@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum } from '../ui'
+import { Icon, fmtNum, fmtDateShort } from '../ui'
 import { api } from '../api'
 
 /* 홈의 자금 — **이 화면의 주인공**.
@@ -153,10 +153,10 @@ export const CashPanel = ({ go }) => {
 
           <div className="text-sm" style={{ marginTop: 10, color: negative ? 'var(--neg-ink)' : 'var(--muted)' }}>
             {negative
-              ? <><b>{low.date}</b>에 잔액이 마이너스가 됩니다.</>
+              ? <><b>{fmtDateShort(low.date)}</b>에 잔액이 마이너스가 됩니다.</>
               : lowIsToday
                 ? '앞으로 6주 동안 잔액이 지금보다 낮아지지 않습니다.'
-                : <>가장 낮은 날은 <b>{low.date}</b>, <b className="num">{fmtNum(low.balance)}원</b>입니다.</>}
+                : <>가장 낮은 날은 <b>{fmtDateShort(low.date)}</b>, <b className="num">{fmtNum(low.balance)}원</b>입니다.</>}
           </div>
         </div>
       </div>

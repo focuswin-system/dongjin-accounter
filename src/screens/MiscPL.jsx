@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, StatusBadge } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, StatusBadge, fmtDateShort } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DataTable } from '../lib/components/DataTable'
 import { api } from '../lib/api'
@@ -65,7 +65,7 @@ export const MiscPLScreen = ({ initialTab = 'expense', refreshTrigger, openExpen
     e.stopPropagation()   // 행 클릭(수정)과 겹치지 않게
     const ok = await confirm({
       tone: 'warn', icon: <Icon.Warn size={22}/>, title: '거래 삭제',
-      body: `${r.date} · ${r.category} · ${fmtNum(r.amount)}원 거래를 삭제할까요? 계좌 잔액에 반영된 거래면 잔액도 되돌아가요.`,
+      body: `${fmtDateShort(r.date)} · ${r.category} · ${fmtNum(r.amount)}원 거래를 삭제할까요? 계좌 잔액에 반영된 거래면 잔액도 되돌아가요.`,
       confirmLabel: '삭제',
     })
     if (!ok) return
@@ -99,7 +99,7 @@ export const MiscPLScreen = ({ initialTab = 'expense', refreshTrigger, openExpen
           onRowClick={(r) => openEdit(r)}
           empty={cur.empty}
           columns={[
-            { key: 'date', header: '날짜', sortable: true, render: r => <span className="num text-sm">{r.date}</span> },
+            { key: 'date', header: '날짜', sortable: true, render: r => <span className="num text-sm">{fmtDateShort(r.date)}</span> },
             { key: 'vendor', header: '거래처', sortable: true, render: r => <span className="fw-600">{r.vendor}</span> },
             { key: 'category', header: '비목', render: r => <span className="badge outline">{r.category}</span> },
             { key: 'scope', header: '적요/구분', render: r => <span className="text-sm text-muted">{r.scope}</span> },

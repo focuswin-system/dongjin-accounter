@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect, Drawer, Combobox, MoneyInput, localToday, DateInput } from '../lib/ui'
+import { Icon, fmtNum, fmtDateShort, useToast, useConfirm, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect, Drawer, Combobox, MoneyInput, localToday, DateInput } from '../lib/ui'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
@@ -420,7 +420,7 @@ function MilestoneEditDrawer({ open, onClose, contractId, contractAmount, initia
               <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
                 <span className="badge outline">{m.type}</span>
                 <span className="num fw-700">{fmtNum(m.amount)}</span>
-                <span className="text-sm text-muted">{m.due_date || '—'}</span>
+                <span className="text-sm text-muted">{fmtDateShort(m.due_date) || '—'}</span>
                 <StatusBadge status={m.status}/>
                 <span className="badge brand ml-auto" style={{ fontSize: 10 }}>발행됨 · 수정 불가</span>
               </div>
@@ -544,7 +544,7 @@ function RenewDrawer({ open, onClose, contract, onSaved }) {
       <DrawerHead title="주문 갱신 처리" onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div className="text-sm text-muted">
-          현재 종료일 <b className="text-ink num">{contract.end_date || '—'}</b>
+          현재 종료일 <b className="text-ink num">{fmtDateShort(contract.end_date) || '—'}</b>
           {' · '}{recurring
             ? <>{periodLabel(contract.billing_period)} 청구금액 <b className="num">{fmtNum(prevUnit)}원</b></>
             : <>주문금액 <b className="num">{fmtNum(prevAmount)}원</b></>}
@@ -809,7 +809,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     if (res.ok) {
       const rc = res.recurringClosed;
       if (rc && (rc.invoices || rc.expenses)) {
-        toast.push(`정기 ${rc.invoices + rc.expenses}건의 종료일을 ${rc.end_date}로 맞췄어요`);
+        toast.push(`정기 ${rc.invoices + rc.expenses}건의 종료일을 ${fmtDateShort(rc.end_date)}로 맞췄어요`);
       }
       const rs = res.recurringStopped;
       if (rs && (rs.invoices || rs.expenses)) {
@@ -862,8 +862,8 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
      기성형은 총액이 없어 openEnded 로 잡히는데, 종료일이 있는 단가주문을
      '해지할 때까지'로 보여주면 갱신 시점을 놓친다(목록도 같은 원인으로 틀렸다). */
   const period  = (isOpenEnded(c) || !c.end_date)
-    ? `${c.start_date || '—'} ~`
-    : [c.start_date, c.end_date].filter(Boolean).join(' ~ ') || '—';
+    ? `${fmtDateShort(c.start_date) || '—'} ~`
+    : [c.start_date, c.end_date].filter(Boolean).map(fmtDateShort).join(' ~ ') || '—';
   const rn = renewalInfo(c);
 
   return (
@@ -966,7 +966,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                 <div className="text-sm text-muted" style={{ marginTop: 4 }}>
                   {(c.recurrings || []).length === 0
                     ? `이 주문은 ${periodLabel(c.billing_period)}마다 ${fmtNum(c.unit_amount || 0)}원이 ${isPurchase ? '나가는' : '청구되는'} 주문인데, 아직 ${isPurchase ? '정기지출' : '정기청구'}이 걸려 있지 않아요. 지금은 ${isPurchase ? '지출이' : '청구서가'} 자동 생성되지 않습니다.`
-                    : `${periodLabel(c.billing_period)} ${fmtNum(c.unit_amount || 0)}원 · ${cycleMonthsHint(c.start_date, c.billing_day, c.billing_period, localToday())}${c.end_date ? ` · ${c.end_date}까지` : ' · 해지할 때까지'}`}
+                    : `${periodLabel(c.billing_period)} ${fmtNum(c.unit_amount || 0)}원 · ${cycleMonthsHint(c.start_date, c.billing_day, c.billing_period, localToday())}${c.end_date ? ` · ${fmtDateShort(c.end_date)}까지` : ' · 해지할 때까지'}`}
                 </div>
                 {/* 정기청구는 주문에서 관리한다(기준정보에 두면 워크플로우가 끊긴다).
                     주문이 원본, 정기청구는 실행 장치 → 어긋나면 '주문 조건으로 맞추기'로 되돌린다. */}
@@ -977,7 +977,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                       <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
                         <span className={`badge ${r.active ? 'pos' : 'outline'}`}><span className="dot"/>{r.active ? '활성' : '중지됨'}</span>
                         <span className="text-xs text-muted2">
-                          {periodLabel(r.period)} {fmtNum(r.supply_amount)}원 · 매월 {r.day_of_month || 1}일 · {r.start_date} ~ {r.end_date || '무기한'}
+                          {periodLabel(r.period)} {fmtNum(r.supply_amount)}원 · 매월 {r.day_of_month || 1}일 · {fmtDateShort(r.start_date)} ~ {r.end_date ? fmtDateShort(r.end_date) : '무기한'}
                           {r.last_generated ? ` · 최근 발행 ${r.last_generated}` : ' · 아직 발행 이력 없음'}
                         </span>
                         <button className="btn ghost sm" onClick={async () => {
@@ -1138,7 +1138,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                   <RenewalBadge contract={c}/>
                 </div>
                 <div className="text-sm text-muted" style={{ marginTop: 4 }}>
-                  종료일 <b className="num text-ink">{c.end_date || '—'}</b>
+                  종료일 <b className="num text-ink">{fmtDateShort(c.end_date) || '—'}</b>
                   {' · '}{termLabel(c)}
                   {' · '}갱신 시 {c.term_months || 12}개월 연장
                   {' · '}통보 기한 {c.notice_days ?? 60}일 전
@@ -1152,8 +1152,8 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                 )}
                 {(c.renewals?.length > 0) && (
                   <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-                    갱신 {c.renewals.filter(r => r.result === '갱신').length}회 · 최근 {c.renewals[0].renewed_at}
-                    {c.current_term_start ? ` · 이번 계약기간 시작 ${c.current_term_start}` : ''}
+                    갱신 {c.renewals.filter(r => r.result === '갱신').length}회 · 최근 {fmtDateShort(c.renewals[0].renewed_at)}
+                    {c.current_term_start ? ` · 이번 계약기간 시작 ${fmtDateShort(c.current_term_start)}` : ''}
                   </div>
                 )}
               </div>
@@ -1274,7 +1274,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
             </div>
             {recurring && c.renewals?.length > 0 && (
               <div className="text-xs text-muted2" style={{ marginTop: 10 }}>
-                갱신된 주문이라 <b>이번 기간({c.current_term_start} ~ {c.end_date})</b>에 받은 돈만 셉니다. 누적 {doneLabel} {fmtNum(doneAll)}원.
+                갱신된 주문이라 <b>이번 기간({fmtDateShort(c.current_term_start)} ~ {fmtDateShort(c.end_date)})</b>에 받은 돈만 셉니다. 누적 {doneLabel} {fmtNum(doneAll)}원.
               </div>
             )}
           </div>
@@ -1321,7 +1321,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                         <td className="text-sm">{inv.issued_at}</td>
                         <td className="num-cell num-right fw-700">{fmtNum(inv.total_amount)}</td>
                         <td className="num-right text-muted">{inv.line_count}품목</td>
-                        <td className="text-sm text-muted">{inv.due_at || '—'}</td>
+                        <td className="text-sm text-muted">{fmtDateShort(inv.due_at) || '—'}</td>
                         <td><StatusBadge status={inv.status}/></td>
                       </tr>
                     ))}
@@ -1615,7 +1615,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                       {c.renewals.map(r => (
                         <tr key={r.id}>
                           <td className="num">{r.seq}차</td>
-                          <td className="num text-sm">{r.renewed_at || '—'}</td>
+                          <td className="num text-sm">{fmtDateShort(r.renewed_at) || '—'}</td>
                           <td><span className={`badge ${r.result === '갱신' ? 'pos' : 'outline'}`}><span className="dot"/>{r.result}</span></td>
                           <td className="num text-sm">
                             {r.result === '갱신' ? `${r.prev_end_date || '—'} → ${r.new_end_date}` : `${r.prev_end_date || '—'}에 종료`}
@@ -2160,6 +2160,9 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
         <DataTable
           rows={rows}
           rowKey={r => r.id}
+          /* 열 접기·순서·너비를 이 브라우저에 기억한다.
+             수주와 발주는 보는 열이 달라(원가/미지급금) 설정도 따로 둔다. */
+          tableKey={kind === 'purchase' ? 'contracts-purchase' : 'contracts-sales'}
           onRowClick={r => goDetail(r.id, r.name)}
           empty="조건에 맞는 주문이 없어요"
           columns={[
@@ -2197,7 +2200,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
                     총액 개념이 없어 hasTotal=false 라서 종료일을 넣어도 늘 '해지 시까지'로 떴다
                     (2026-12-31 까지인 단가주문이 무기한처럼 보였다 — 갱신 시점을 놓친다).
                     기간은 종료일이 있느냐, 무기한(term_mode=open)이냐로만 정한다. */}
-                {isOpenEnded(r) || !r.end_date ? `${r.start_date || '—'} ~` : [r.start_date, r.end_date].filter(Boolean).join(' ~ ')}
+                {isOpenEnded(r) || !r.end_date ? `${fmtDateShort(r.start_date) || '—'} ~` : [r.start_date, r.end_date].filter(Boolean).map(fmtDateShort).join(' ~ ')}
               </div>
               {renewalInfo(r).managed && <div style={{ marginTop: 6 }}><RenewalBadge contract={r}/></div>}
             </> },
@@ -2205,14 +2208,23 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
               isRecurring(r)
                 ? <div><div className="fw-600">{fmtNum(r.unit_amount || 0)}<span className="text-xs text-muted2">/{periodLabel(r.billing_period)}</span></div>{hasTotal(r) && <div className="text-xs text-muted2">기간 총 {fmtNum(r.amount || 0)}</div>}</div>
                 /* 옆 칸의 '수금'·'남은 주문분'은 전부 **부가세 포함** 금액이다.
-                   여기만 공급가(c.amount)를 보여줘서, 주문 8,400,000 인데 수금 9,240,000 처럼
-                   같은 행의 숫자끼리 앞뒤가 안 맞아 보였다("주문보다 많이 받았나?").
-                   기준을 맞춰 VAT 포함 총액(term_total)을 크게 두고, 공급가는 밑에 적는다. */
-                : (r.term_total != null && r.term_total !== r.amount
-                    ? <div><div className="num-cell">{fmtNum(r.term_total)}</div>
-                        <div className="text-xs text-muted2">공급가 {fmtNum(r.amount || 0)}</div></div>
-                    : <span className="num-cell">{fmtNum(r.amount || 0)}</span>)
+                   여기만 공급가를 보여주면 주문 8,400,000 인데 수금 9,240,000 처럼 같은 행의
+                   숫자끼리 앞뒤가 안 맞아 보인다("주문보다 많이 받았나?"). 그래서 이 칸은
+                   VAT 포함 총액(term_total)으로 통일한다.
+                   공급가는 밑에 작게 달았었는데 이제 **열**로 뺐다 — 같은 값을 두 번 보일
+                   이유가 없다. 필요한 사람은 열 설정에서 '공급가액'을 켠다. */
+                : <span className="num-cell">{fmtNum(r.term_total ?? r.amount ?? 0)}</span>
             ) },
+            /* 공급가액·부가세는 **기본으로 접어 둔다.** 늘 펴 두면 금액 칸이 셋으로 늘어
+                목록이 숫자밭이 된다 — 부가세 신고 자료를 맞출 때만 필요한 열이다.
+                ⚠ 세액을 화면에서 x1.1 로 만들지 않는다. 면세·영세가 있고 반올림 자리도
+                  서버 규칙이라, 총액과 같은 자리(routes/contracts.js metrics)에서 받아 쓴다. */
+            { key: 'supply', header: '공급가액', align: 'right', defaultHidden: true, sortable: true,
+              sortValue: r => r.term_supply ?? 0,
+              render: r => <span className="num-cell text-muted">{r.term_supply == null ? '—' : fmtNum(r.term_supply)}</span> },
+            { key: 'vat', header: '부가세', align: 'right', defaultHidden: true, sortable: true,
+              sortValue: r => r.term_vat ?? 0,
+              render: r => <span className="num-cell text-muted">{r.term_vat == null ? '—' : fmtNum(r.term_vat)}</span> },
             { key: 'collected', header: kind === "purchase" ? "지급액" : "수금", align: 'right', sortable: true, sortValue: r => r.collected ?? 0, render: r => <span className="num-cell">{fmtNum(r.collected ?? 0)}</span> },
             /* 총액형은 '주문잔액'(아직 청구 안 한 몫 포함), 기성·무기한형은 remain 이 없어
                ar_remain(미수금)이 온다. 둘은 성격이 다르므로 무엇을 보고 있는지 밑줄에 적는다. */

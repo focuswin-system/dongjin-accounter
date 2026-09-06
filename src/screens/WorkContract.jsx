@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, StatusBadge, localToday, DateInput } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, StatusBadge, localToday, DateInput, fmtDateShort } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
@@ -230,7 +230,7 @@ export const LaborContractScreen = () => {
             { key: 'employee_name', header: '이름', sortable: true, render: r => <span className="fw-700">{r.employee_name}</span> },
             { key: 'department', header: '부서', render: r => <span className="text-sm">{r.department || '—'}</span> },
             { key: 'employ_type', header: '고용형태', render: r => <span className="text-sm">{r.employ_type || '—'}</span> },
-            { key: 'term', header: '계약기간', render: r => <span className="text-sm text-muted">{r.start_date || '—'}{r.end_date ? ` ~ ${r.end_date}` : (r.term_mode === 'open' ? ' ~ (무기한)' : '')}</span> },
+            { key: 'term', header: '계약기간', render: r => <span className="text-sm text-muted">{fmtDateShort(r.start_date) || '—'}{r.end_date ? ` ~ ${fmtDateShort(r.end_date)}` : (r.term_mode === 'open' ? ' ~ (무기한)' : '')}</span> },
             { key: 'monthly_net', header: '월 기준급여', align: 'right', sortable: true, render: r => <span className="num-cell">{won(r.monthly_net || 0)}</span> },
             { key: 'ins', header: '4대보험', render: r => <span className="text-xs text-muted">{insBadges(r)}</span> },
             { key: 'status', header: '상태', render: r => <StatusBadge status={r.emp_status === '퇴사' ? '퇴사' : r.status}/> },
@@ -485,7 +485,7 @@ const LaborDetailDrawer = ({ id, onClose, onChanged, onNewContract }) => {
           <div className="col gap-form">
             <InfoRow label="고용형태" value={c.employ_type || '—'}/>
             <InfoRow label="소득구분" value={INCOME_LABEL[c.income_type] || c.income_type}/>
-            <InfoRow label="계약기간" value={`${c.start_date || '—'}${c.end_date ? ` ~ ${c.end_date}` : (c.term_mode === 'open' ? ' ~ (무기한)' : '')}`}/>
+            <InfoRow label="계약기간" value={`${fmtDateShort(c.start_date) || '—'}${c.end_date ? ` ~ ${fmtDateShort(c.end_date)}` : (c.term_mode === 'open' ? ' ~ (무기한)' : '')}`}/>
             <InfoRow label="종료방식" value={TERM_LABEL[c.term_mode]}/>
             <InfoRow label="급여형태" value={FORM_LABEL[c.pay_form] || c.pay_form}/>
             <InfoRow label="소정근로시간" value={c.work_hours || '—'}/>
@@ -505,7 +505,7 @@ const LaborDetailDrawer = ({ id, onClose, onChanged, onNewContract }) => {
                   <div className="fw-700 text-sm">{h.employ_type || '근로계약'} {h.id === c.id && <span className="chip active" style={{ padding: '2px 6px', fontSize: 11, marginLeft: 4 }}>현재</span>}</div>
                   <div className="ml-auto num text-sm">{won(h.monthly_net || 0)}</div>
                 </div>
-                <div className="text-xs text-muted" style={{ marginTop: 4 }}>{h.start_date || '—'}{h.end_date ? ` ~ ${h.end_date}` : ''} · {h.status}</div>
+                <div className="text-xs text-muted" style={{ marginTop: 4 }}>{fmtDateShort(h.start_date) || '—'}{h.end_date ? ` ~ ${fmtDateShort(h.end_date)}` : ''} · {h.status}</div>
               </div>
             ))}
           </div>
@@ -639,7 +639,7 @@ export const OutsourcingScreen = () => {
             { key: 'employ_type', header: '고용형태', render: r => <span className="text-sm">{r.employ_type || '—'}</span> },
             { key: 'income_type', header: '소득구분', render: r => <span className="text-sm">{INCOME_LABEL[r.income_type] || r.income_type}</span> },
             { key: 'title', header: '업무내용', render: r => <span className="text-sm text-muted">{r.title || '—'}</span> },
-            { key: 'term', header: '계약기간', render: r => <span className="text-sm text-muted">{r.start_date || '—'}{r.end_date ? ` ~ ${r.end_date}` : (r.term_mode === 'open' ? ' ~ (무기한)' : '')}</span> },
+            { key: 'term', header: '계약기간', render: r => <span className="text-sm text-muted">{fmtDateShort(r.start_date) || '—'}{r.end_date ? ` ~ ${fmtDateShort(r.end_date)}` : (r.term_mode === 'open' ? ' ~ (무기한)' : '')}</span> },
             { key: 'paid_sum', header: '누적 지급', align: 'right', sortable: true, render: r => <span className="num-cell">{won(r.paid_sum || 0)}</span> },
             { key: 'unpaid', header: '미지급', align: 'right', sortable: true, render: r => <span className="num-cell" style={{ color: r.unpaid > 0 ? 'var(--warn-ink)' : undefined }}>{won(r.unpaid || 0)}</span> },
             { key: 'action', header: '', render: r => <button className="btn ghost sm" onClick={e => { e.stopPropagation(); setDrawer({ mode: 'edit', id: r.id }) }}>편집</button> },

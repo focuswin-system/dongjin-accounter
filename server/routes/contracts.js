@@ -161,6 +161,11 @@ const metrics = (r) => {
   // amount는 정기형이면 '이번 텀 총액'(저장 시 서버가 산출), 총액형이면 주문 총액. 면세면 부가세 없음.
   const vatMul = 1 + vatRateOf(r.vat_mode)
   const termTotal = noTotal ? null : Math.round((Number(r.amount) || 0) * vatMul)
+  /* 공급가액·세액을 나눠 내려 준다 — 목록에서 열로 펴 볼 수 있게.
+     ⚠ 화면에서 x1.1 로 되계산하면 안 된다(면세·영세가 있고, 반올림 자리도 여기 규칙이다).
+        그래서 총액과 같은 자리에서 함께 만든다. */
+  const termSupply = noTotal ? null : (Number(r.amount) || 0)
+  const termVat = termTotal == null ? null : termTotal - termSupply
   const remain = termTotal == null ? null : Math.max(0, termTotal - term_collected)
   /* 미수금은 SQL 이 청구서 잔액으로 셌다(ar_open). billed − collected 로 다시 세지 않는다 —
      그 식은 정산 거래에 주문이 안 붙으면 유령 미수금을 만든다(METRIC_COLS 주석 참고). */
@@ -170,7 +175,7 @@ const metrics = (r) => {
     ...r,
     is_purchase: isPurchase,
     in_done, out, billed, term_billed, term_collected, collected,
-    term_total: termTotal, remain, ar_remain,
+    term_total: termTotal, term_supply: termSupply, term_vat: termVat, remain, ar_remain,
     // 매입 주문에 원가·손익 개념을 붙이면 "나간 돈 = 손해"로 읽히는 거짓 숫자가 나온다.
     // 매출 주문의 원가는 '이 주문에 귀속된 지출'(cost_contract_id)이지, 이 주문이 근거인 지출이 아니다.
     cost:   isPurchase ? null : cost,
