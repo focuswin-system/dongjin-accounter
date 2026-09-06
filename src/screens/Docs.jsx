@@ -1202,8 +1202,14 @@ export const ExcelScreen = ({ goRoute }) => {
     if (!f) return
     setBusy(true); setResult(null)
     try {
-      const { headers, rows } = await api.parseExcel(f)
+      const { headers, rows, total, truncated } = await api.parseExcel(f)
       if (!headers.length) { toast.push("열을 인식하지 못했어요. 첫 행이 머리글인지 확인하세요."); setBusy(false); return }
+      /* 행이 잘렸으면 **반드시 알린다.** 예전엔 서버가 조용히 500행에서 끊었고 화면은
+         그걸 알 길이 없어서, 1200행을 올린 사람이 700행을 잃고도 다 올라간 줄 알았다. */
+      if (truncated) {
+        toast.push(`파일이 커서 앞쪽 ${rows.length}행만 읽었어요 — 전체 ${total}행 중 ${total - rows.length}행은 빠집니다. 파일을 나눠 올려주세요.`,
+          { tone: 'warn', duration: 8000 })
+      }
       setFile({ name: f.name, size: f.size })
       setRawRows(rows)
       setMapping(headers.map(h => ({ excelCol: h, target: guessTarget(h) })))

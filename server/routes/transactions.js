@@ -1,7 +1,7 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const multer = require('multer')
-const xlsx = require('xlsx')
+const { uploadMem, parseSheet } = require('../lib/xlsx-import')
 const { futureDateError, kstToday, kstDate } = require('../db')
 const { pnlOnly, NON_PNL_TYPES } = require('../lib/pnl')
 /* SELECT 절 안이라 바인딩(?)을 쓸 수 없어 값을 미리 박는다.
@@ -53,7 +53,8 @@ const resolveAcctCode = async (db, accountCode, categoryName, kind) => {
   )
   return row?.account_code || null
 }
-const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
+/* 업로드 저장소·크기 제한은 lib/xlsx-import.js 것을 그대로 쓴다(위에서 uploadMem 을 가져온다).
+   여기에 또 만들면 제한값이 두 벌이 되어 한쪽만 바뀐다. */
 
 // 청구서 상태 재계산은 lib/invoiceStatus.js 공용
 // (거래 수정·삭제, 정산 추가·취소, 청구서 금액 수정이 모두 같은 규칙을 써야 한다)
@@ -899,12 +900,12 @@ router.delete('/:id', async (req, res, next) => {
 router.post('/import/parse', uploadMem.single('file'), (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: '파일이 없습니다' })
-    const wb = xlsx.read(req.file.buffer, { type: 'buffer', cellDates: true })
-    const sheet = wb.Sheets[wb.SheetNames[0]]
-    if (!sheet) return res.json({ headers: [], rows: [] })
-    const json = xlsx.utils.sheet_to_json(sheet, { defval: '', raw: false })
-    const headers = json.length ? Object.keys(json[0]) : []
-    res.json({ headers, rows: json.slice(0, 500) })
+    /* ⚠ 예전엔 이 라우트가 파싱 코드를 **따로 복사해** 갖고 있었다. 그러다 보니
+         · 500행에서 **조용히** 잘렸다(거래처·품목 임포트는 5000행이고, 잘리면 화면에 알린다)
+         · 엑셀 하단의 빈 줄을 안 걸러 '거래처 없음' 오류로 잡혔다
+         · 취약점이 남아 있는 SheetJS 를 두 번째로 직접 물고 있었다
+       공용 파서 하나로 모은다 — total·truncated 를 함께 줘야 화면이 잘림을 알린다. */
+    res.json(parseSheet(req.file.buffer))
   } catch (e) { next(e) }
 })
 
@@ -1014,17 +1015,26 @@ router.post('/import/commit', async (req, res, next) => {
 // ── 엑셀 임포트: 양식 다운로드(.xlsx) ──
 router.get('/import/template', async (req, res, next) => {
   try {
+    /* ⚠ 샘플은 아래 COLS 와 **칸 수가 같아야 한다.** 열을 늘리고 여기를 안 늘리면
+         값이 옆 칸으로 밀려, 받아 간 사람이 그 줄을 보고 그대로 따라 적는다. */
     const rows = [
-      ["거래일자", "거래처", "주문명", "구분", "비목", "금액", "메모"],
-      ["2026-06-01", "(주)한빛문구", "", "지출", "소모품", 80000, "사무용품"],
-      ["2026-06-03", "정밀가공(주)", "홈페이지 유지보수", "지출", "외주가공비", 1500000, "6월 외주분"],
-      ["2026-06-10", "(재)부산영재교육진흥원", "홈페이지 개선", "입금", "납품대금", 3500000, "선급금"],
+      ["거래일자", "거래처", "주문명", "구분", "비목", "계정과목", "금액", "공급가액", "부가세", "계좌", "메모"],
+      ["2026-06-01", "(주)한빛문구", "", "지출", "소모품", "", 80000, "", "", "기업은행 계좌1", "사무용품"],
+      ["2026-06-03", "정밀가공(주)", "홈페이지 유지보수", "지출", "외주가공비", "", 1650000, 1500000, 150000, "기업은행 계좌1", "6월 외주분"],
+      ["2026-06-10", "(재)부산영재교육진흥원", "홈페이지 개선", "입금", "납품대금", "", 3500000, "", "", "", "선급금"],
     ]
+    /* ⚠ 이 머리글은 업로드 마법사가 열을 알아보는 근거다(Docs.jsx guessTarget).
+         **글자를 바꾸지 말 것** — 바꾸면 받아 간 양식이 그대로 안 붙는다.
+       예전엔 마법사가 받아 주는 열 넷(계정과목·공급가액·부가세·계좌)이 양식에 없었다.
+       양식대로 채운 사람은 그 값을 넣을 자리가 없어, 통장 여러 개를 한 파일로 올리지도
+       못하고 부가세도 따로 적지 못했다. 마법사가 읽는 것과 양식을 맞춘다. */
     const COLS = [
       { header: '거래일자', width: 12, required: true }, { header: '거래처', width: 22 },
       { header: '주문명', width: 24 }, { header: '구분', width: 8, required: true },
-      { header: '비목', width: 14 }, { header: '금액', width: 12, required: true },
-      { header: '메모', width: 20 },
+      { header: '비목', width: 14 }, { header: '계정과목', width: 14 },
+      { header: '금액', width: 12, required: true },
+      { header: '공급가액', width: 12 }, { header: '부가세', width: 12 },
+      { header: '계좌', width: 18 }, { header: '메모', width: 20 },
     ]
 
     const guide = [
@@ -1035,7 +1045,11 @@ router.get('/import/template', async (req, res, next) => {
       ["• 주문명: 연결할 주문이 있으면 정확히 입력, 없으면 비워두세요."],
       ["• 구분: '입금' 또는 '지출' (수입·매출=입금 / 매입·출금=지출 도 인식)."],
       ["• 비목: 외주가공비·소모품·납품대금 등 자유롭게 입력하세요."],
-      ["• 금액: 숫자만 입력(쉼표 가능). 부호 없이 양수로."],
+      ["• 금액: 숫자만 입력(쉼표 가능). 부호 없이 양수로. 부가세가 있으면 부가세까지 더한 금액입니다."],
+      ["• 계정과목: 비워도 됩니다. 비우면 비목에 연결된 계정과목을 따라가요."],
+      ["• 공급가액·부가세: 세금계산서처럼 나눠 적을 때만 쓰세요. 비우면 비목의 부가세 설정대로 계산합니다."],
+      ["• 계좌: 어느 통장·카드에서 오갔는지. 비우면 업로드 화면에서 고른 계좌로 한꺼번에 들어갑니다."],
+      ["  ※ 통장이 여러 개면 이 칸을 채우세요 — 한 파일로 여러 계좌를 올릴 수 있습니다."],
       ["• 첫 행(머리글)은 그대로 두고, 둘째 행부터 데이터를 입력하세요."],
     ]
     const wb = newBook()
