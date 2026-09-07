@@ -59,13 +59,15 @@ function scorePair(inv, txn) {
      처음엔 거래처와 날짜만으로도 내놨더니, 남은 금액 4,400,000원짜리 청구서에
      350,000원 거래를 1등으로 추천했다(실측). 거래처가 같은 건 그 회사와 거래가
      여러 건이라는 뜻일 뿐이라 근거가 못 된다. 금액이 판정의 축이다. */
-  const amt = Number(txn.amount) || 0
+  // 판정 기준은 거래 총액이 아니라 **아직 안 쓴 금액**이다(일부가 다른 청구서에 갔을 수 있다)
+  const amt = (Number(txn.amount) || 0) - (Number(txn.used) || 0)
 
-  /* ⚠ **남은 금액을 넘는 거래는 제시하지 않는다.**
-     POST /:id/matches 가 초과분을 409 로 막는다(맞는 처사다 — 넘치는 돈은 다른 건의 것이다).
-     그런 짝을 목록에 올려 두면 사람이 누를 때마다 실패하고, 왜 실패하는지도 알기 어렵다.
-     이런 건은 청구서를 열어 금액을 나눠 넣는 기존 정산 화면이 맡는다. */
-  if (amt > inv.remain) return { score: 0, why: [] }
+  /* 예전엔 **남은 금액을 넘는 거래를 아예 뺐다.** 서버가 초과분을 409 로 막았기 때문에,
+     올려 봐야 누를 때마다 실패했다.
+     지금은 한 거래를 여러 청구서에 **나눠 붙일 수 있으므로** 그 규칙이 낡았다 —
+     600만원 한 줄로 100·200·300만원 3건을 받는 경우가 바로 이 자리다.
+     대신 노이즈를 막는 조건을 둔다: 넘치는 거래는 **거래처가 같을 때만** 후보로 본다.
+     (거래처도 모르는 큰 입금을 모든 작은 청구서에 붙여 놓으면 목록이 못 쓰게 된다) */
 
   let amountClue = false
   if (amt === inv.remain) { score += 45; why.push('남은 금액과 일치'); amountClue = true }
@@ -79,6 +81,11 @@ function scorePair(inv, txn) {
        남은 금액의 몇 퍼센트짜리 거래까지 후보로 내면 그 거래처의 모든 거래가 딸려 온다. */
     score += 18; amountClue = true
     why.push(`남은 금액의 ${Math.round(amt / inv.remain * 100)}%`)
+  } else if (sameVendor && amt > inv.remain) {
+    /* 거래가 청구서보다 크다 — **여러 건을 한꺼번에 받은 것**으로 본다.
+       이 청구서에는 남은 금액만큼만 붙고, 나머지는 그 거래에 남아 다음 청구서로 간다. */
+    score += 20; amountClue = true
+    why.push('여러 건 한꺼번에')
   }
   if (!amountClue) return { score: 0, why: [] }
 
@@ -145,18 +152,23 @@ async function reconcileCandidates(db, kind) {
      ORDER BY i.issued_at DESC
      LIMIT 300`, [kind])
 
-  /* 아직 어느 청구서에도 안 붙은 거래.
+  /* 아직 **쓸 금액이 남은** 거래.
+     한 거래를 여러 청구서에 나눠 붙일 수 있으므로 '붙었나/안 붙었나'로 가르면 안 된다 —
+     600만원 중 100만원만 쓴 거래는 남은 500만원으로 계속 후보가 되어야 한다.
      ⚠ invoice_id 만 보면 안 된다 — 매칭은 invoice_matches 가 정본이고, invoice_id 는
        거기서 따라 채워지는 값이다. 둘 다 본다. */
   const [txnRows] = await db.execute(`
     SELECT t.id, t.date, t.amount, t.vendor_id, t.category, t.memo, t.status, t.account_id,
-           v.name AS vendor_name, a.name AS account_name
+           v.name AS vendor_name, a.name AS account_name,
+           COALESCE(mm.used, 0) AS used
       FROM transactions t
       LEFT JOIN vendors v ON v.id = t.vendor_id
       LEFT JOIN accounts a ON a.id = t.account_id
+      LEFT JOIN (SELECT txn_id, SUM(amount) AS used FROM invoice_matches
+                  WHERE txn_id IS NOT NULL GROUP BY txn_id) mm ON mm.txn_id = t.id
      WHERE t.kind = ?
-       AND t.invoice_id IS NULL
-       AND t.id NOT IN (SELECT txn_id FROM invoice_matches WHERE txn_id IS NOT NULL)
+       AND COALESCE(mm.used, 0) < t.amount
+       AND (t.invoice_id IS NULL OR COALESCE(mm.used, 0) > 0)
      ORDER BY t.date DESC
      LIMIT 500`, [txnKind])
 
@@ -184,21 +196,31 @@ async function reconcileCandidates(db, kind) {
     }
   }
 
-  /* **한 거래는 한 청구서에만 붙는다.** 그러니 제시도 그렇게 한다.
-     처음엔 청구서마다 따로 1등을 뽑았더니 같은 350,000원 거래가 두 청구서의 1등으로
-     동시에 올라왔다(실측). 사람이 위에서부터 누르다 보면 두 번째는 반드시 실패한다.
-     점수가 높은 짝부터 임자를 정하고, 이미 임자가 있는 거래는 다음 청구서에서 뺀다. */
+  /* 한 거래를 **여러 청구서에 나눠** 배정한다(600만원 한 줄로 100·200·300만원 3건을 받은 경우).
+     예전엔 한 거래 = 한 청구서라 같은 거래가 두 청구서의 1등으로 동시에 올라왔고,
+     사람이 위에서부터 누르면 두 번째는 반드시 실패했다.
+     이제는 **남은 금액을 깎아 가며** 배정한다 — 다 쓴 거래는 그다음 청구서에서 저절로 빠진다. */
   allPairs.sort((a, b) => b.score - a.score)
-  const takenTxn = new Set()
+  const leftOf = new Map()          // 거래 id → 아직 배정 안 된 금액
   const bestOf = new Map()
   for (const p of allPairs) {
-    if (bestOf.has(p.inv.id) || takenTxn.has(p.txn.id)) continue
-    bestOf.set(p.inv.id, p)
-    takenTxn.add(p.txn.id)
+    if (bestOf.has(p.inv.id)) continue
+    const avail = leftOf.has(p.txn.id)
+      ? leftOf.get(p.txn.id)
+      : (Number(p.txn.amount) || 0) - (Number(p.txn.used) || 0)
+    // 붙일 금액은 둘 중 작은 쪽 — 청구서에 남은 것, 거래에 남은 것
+    const apply = Math.min(p.inv.remain, avail)
+    if (apply <= 0) continue
+    bestOf.set(p.inv.id, { ...p, apply })
+    leftOf.set(p.txn.id, avail - apply)
   }
 
   const view = (s, inv) => ({
     id: s.txn.id, date: s.txn.date, amount: Number(s.txn.amount) || 0,
+    /* apply = 이 청구서에 실제로 붙일 금액. 거래 금액과 다를 수 있다
+       (600만원 거래에서 200만원만 붙는 경우) — 화면은 이 값을 보여주고 이 값으로 붙인다. */
+    apply: Number(s.apply ?? ((Number(s.txn.amount) || 0) - (Number(s.txn.used) || 0))) || 0,
+    used: Number(s.txn.used) || 0,
     vendor: s.txn.vendor_name || '', category: s.txn.category || '', memo: s.txn.memo || '',
     account: s.txn.account_name || '', accountId: s.txn.account_id || null,
     score: s.score, why: s.why,
@@ -211,7 +233,7 @@ async function reconcileCandidates(db, kind) {
     if (!picked) continue
     // 다른 청구서가 이미 가져간 거래는 대안으로도 내놓지 않는다 — 눌러도 안 되는 선택지다
     const others = (scoredByInv.get(inv.id) || [])
-      .filter(s => s.txn.id !== picked.txn.id && !takenTxn.has(s.txn.id))
+      .filter(s => s.txn.id !== picked.txn.id && (leftOf.get(s.txn.id) ?? 1) > 0)
       .slice(0, TOP_N - 1)
       .map(s => view(s, inv))
     const best = view(picked, inv)

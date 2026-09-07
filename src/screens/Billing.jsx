@@ -300,14 +300,25 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
   }
 
   const linkMatch = async (txn) => {
+    /* 붙일 금액은 **둘 중 작은 쪽**이다.
+         · 청구서에 남은 금액   — 넘으면 과입금이 된다
+         · 거래에서 아직 안 쓴 금액 — 넘으면 있지도 않은 돈으로 미수금을 지운다
+       예전엔 거래 전액(txn.amount)을 그대로 붙였다. 그래서 600만원 한 줄로 여러 건을 받으면
+       어느 청구서에도 못 붙였다(서버가 잔액 초과로 막았다). 이제 나눠 붙는다. */
+    const usable = Number(txn.available ?? txn.amount) || 0
+    const apply = Math.min(Number(invoice.remainAmount) || 0, usable)
+    if (apply <= 0) { toast.push('이 거래에서 쓸 수 있는 금액이 없어요'); return }
+    const partial = apply < usable
     const ok = await confirm({
       tone: "brand", icon: <Icon.Check size={22}/>,
       title: `${isIssued ? "입금" : "지급"} 거래 연결`,
-      body: `${fmtDateShort(txn.date)} · ${fmtNum(txn.amount)}원 거래를 이 청구서에 연결해요. 새 거래는 만들지 않아요.`,
+      body: `${fmtDateShort(txn.date)} · ${fmtNum(txn.amount)}원 거래에서 ${fmtNum(apply)}원을 이 청구서에 붙여요.`
+        + (partial ? ` 나머지 ${fmtNum(usable - apply)}원은 그 거래에 남아 다른 청구서에 붙일 수 있어요.` : '')
+        + ' 새 거래는 만들지 않아요.',
       confirmLabel: "연결",
     })
     // 연결 대상에 계좌가 있으면 서버가 그걸 우선 쓴다. 없을 때만 여기 값이 폴백으로 쓰인다.
-    if (ok) { onMatch(invoice.id, txn.amount, txn.date, txn.id, { account_id: matchBankId }); onClose() }
+    if (ok) { onMatch(invoice.id, apply, txn.date, txn.id, { account_id: matchBankId }); onClose() }
   }
 
   return (
@@ -509,7 +520,14 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                                   {t.matchSupply && <span className="badge outline" style={{ fontSize: 10, flexShrink: 0 }}>공급가 일치</span>}
                                 </div>
                               </div>
-                              <span className="num fw-700" style={{ flexShrink: 0 }}>{fmtNum(t.amount)}</span>
+                              {/* 한 거래를 여러 청구서에 나눠 붙일 수 있다. 이미 일부가 쓰였으면
+                                    **쓸 수 있는 금액**을 함께 보여야 "왜 600만원인데 500만원만 붙지"가 안 생긴다. */}
+                              <span className="num fw-700" style={{ flexShrink: 0, textAlign: 'right' }}>
+                                {fmtNum(t.amount)}
+                                {Number(t.used) > 0 && (
+                                  <div className="text-xs fw-400 text-muted2">쓸 수 있는 {fmtNum(t.available)}</div>
+                                )}
+                              </span>
                               <button className="btn sm primary" style={{ flexShrink: 0 }} onClick={() => linkMatch(t)}>연결</button>
                             </div>
                           ))}

@@ -77,7 +77,8 @@ export const ReconcilePanel = ({ kind, onChanged }) => {
       const txn = [r.best, ...r.others].find(t => t.id === pick[r.invoice.id])
       if (!txn) continue
       const res = await api.matchInvoice(r.invoice.id, {
-        txnId: txn.id, amount: txn.amount, date: txn.date,
+        // 붙일 금액은 서버가 정해 준 apply 다 — 거래 금액과 다를 수 있다(나눠 붙는 경우)
+        txnId: txn.id, amount: txn.apply ?? txn.amount, date: txn.date,
         category: txn.category || undefined, memo: txn.memo || undefined,
         account_id: txn.accountId || undefined,
       })
@@ -184,8 +185,14 @@ export const ReconcilePanel = ({ kind, onChanged }) => {
               <Icon.Right size={14} style={{ color: 'var(--muted-2)', flexShrink: 0, margin: '4px 12px 0' }}/>
               {/* 거래처가 비면 적요를 제목으로 올린다 — '거래처 없음'을 굵게 세우면
                   그게 상호인 줄 읽힌다(실측). 엑셀로 올린 통장 내역이 대개 이렇다. */}
-              <Side title={cur.vendor || cur.memo || cur.category || '적요 없음'} amount={cur.amount}
-                    sub={`${cur.date} · ${cur.account || '계좌 없음'}`}
+              {/* 붙일 금액이 거래 금액보다 작을 수 있다(600만원 한 줄에서 200만원만 붙는 경우).
+                  그때는 **붙일 금액을 크게** 두고 거래 금액은 밑줄에 적는다 — 큰 숫자가 거래
+                  금액이면 "왜 200만원만 처리됐지"가 된다. */}
+              <Side title={cur.vendor || cur.memo || cur.category || '적요 없음'}
+                    amount={cur.apply ?? cur.amount}
+                    sub={cur.apply != null && cur.apply !== cur.amount
+                      ? `${cur.date} · ${cur.account || '계좌 없음'} · 거래 ${fmtNum(cur.amount)} 중`
+                      : `${cur.date} · ${cur.account || '계좌 없음'}`}
                     foot={
                       <div className="row gap-4" style={{ marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                         {cur.why.map((w, i) => <Why key={i} text={w}/>)}

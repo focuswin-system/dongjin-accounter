@@ -1159,11 +1159,39 @@ router.post('/:id/matches', async (req, res, next) => {
     // 매칭 대상 거래: 기존 거래가 있으면 그대로, 없으면 실제 거래를 새로 만들어 거래내역에 반영
     let realTxnId = null
     if (txn_id) {
-      // 다른 청구서에 이미 매칭된 거래는 재사용 금지(이중 매칭 방지)
-      const [[dup]] = await conn.execute('SELECT invoice_id FROM invoice_matches WHERE txn_id = ? LIMIT 1', [txn_id])
-      if (dup) { await rollbackQuietly(conn); return res.status(409).json({ error: '이미 다른 청구서에 매칭된 거래예요' }) }
-      const [[ex]] = await conn.execute('SELECT id FROM transactions WHERE id = ?', [txn_id])
-      if (ex) realTxnId = ex.id
+      /* ── 한 거래를 여러 청구서에 나눠 붙일 수 있다 ──────────────────────
+       * 100·200·300만원 청구서를 **600만원 한 줄**로 받는 일은 흔하다(월말에 몰아 주는 거래처).
+       * 예전엔 한 거래 = 한 청구서로 막아서, 청구서별로 정산하면 거래가 3건 생기고
+       * 통장 한 줄과 안 맞았다.
+       *
+       * 대신 지켜야 할 것 둘:
+       *   ① 같은 청구서에 같은 거래를 두 번 붙이지 않는다 — 그건 실수다
+       *   ② 이 거래에 붙은 금액의 **합계가 거래 금액을 넘지 않는다** — 넘으면 있지도 않은
+       *      돈으로 미수금을 지운 것이 된다(청구서 잔액 검사만으로는 못 잡는다) */
+      const [[ex]] = await conn.execute('SELECT id, amount FROM transactions WHERE id = ?', [txn_id])
+      if (!ex) { await rollbackQuietly(conn); return res.status(404).json({ error: '거래를 찾을 수 없어요' }) }
+
+      const [[same]] = await conn.execute(
+        'SELECT id FROM invoice_matches WHERE txn_id = ? AND invoice_id = ? LIMIT 1', [txn_id, invoiceId])
+      if (same) { await rollbackQuietly(conn); return res.status(409).json({ error: '이 거래는 이 청구서에 이미 붙어 있어요' }) }
+
+      /* FOR UPDATE — 같은 거래에 두 사람이 동시에 붙이면 둘 다 합계 검사를 통과해
+         거래 금액을 넘길 수 있다(위 청구서 잔액 검사와 같은 이유로 잠근다). */
+      const [[u]] = await conn.execute(
+        'SELECT COALESCE(SUM(amount), 0) AS used FROM invoice_matches WHERE txn_id = ? FOR UPDATE', [txn_id])
+      const txnAmount = Number(ex.amount) || 0
+      const used = Number(u.used) || 0
+      if (used + matchAmount > txnAmount) {
+        await rollbackQuietly(conn)
+        const left = txnAmount - used
+        return res.status(409).json({
+          error: left > 0
+            ? `이 거래에서 아직 안 쓴 금액은 ${left.toLocaleString('ko-KR')}원이에요`
+              + ` (${matchAmount.toLocaleString('ko-KR')}원 입력).`
+            : `이 거래(${txnAmount.toLocaleString('ko-KR')}원)는 이미 전액 청구서에 붙어 있어요.`,
+        })
+      }
+      realTxnId = ex.id
     }
     if (realTxnId) {
       // 기존 거래를 재사용할 때 invoice_id만 붙이면, 그 거래가 아직 '지급 대기'인 경우
@@ -1371,23 +1399,33 @@ router.get('/:id/matchable', async (req, res, next) => {
     const [[{ paid }]] = await req.db.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [req.params.id])
     const supply = Number(inv.supply_amount), total = Number(inv.total_amount), remain = total - Number(paid)
     const [rows] = await req.db.execute(`
-      SELECT t.id, t.amount, t.date, t.category, t.vendor_id, t.status, t.account_id, v.name AS vendor_name
+      SELECT t.id, t.amount, t.date, t.category, t.vendor_id, t.status, t.account_id, v.name AS vendor_name,
+             COALESCE(m.used, 0) AS used
       FROM transactions t
       LEFT JOIN vendors v ON t.vendor_id = v.id
+      /* 이 거래에 이미 붙은 금액. 한 거래를 여러 청구서에 나눠 붙일 수 있으므로
+         '붙었나/안 붙었나'가 아니라 **얼마가 남았나**로 후보를 가린다. */
+      LEFT JOIN (SELECT txn_id, SUM(amount) AS used FROM invoice_matches
+                  WHERE txn_id IS NOT NULL GROUP BY txn_id) m ON m.txn_id = t.id
       WHERE t.kind = ?
-        AND (t.invoice_id IS NULL OR t.invoice_id = '')
+        AND COALESCE(m.used, 0) < t.amount
+        /* invoice_id 가 붙어 있는데 매칭 행이 없는 옛 자료는 그대로 뺀다(보수적으로).
+           부분 사용된 거래는 invoice_id 가 붙어 있지만 used > 0 이라 통과한다. */
+        AND (t.invoice_id IS NULL OR t.invoice_id = '' OR COALESCE(m.used, 0) > 0)
         /* ⚠ NULL 을 반드시 걸러낸다. 어음 정산은 txn_id 를 **비운 채** invoice_matches 에
              들어간다(routes/notes.js — 거래 없이 청구서만 정산하는 것이 그 기능의 핵심).
              NOT IN 은 목록에 NULL 이 하나만 섞여도 술어가 UNKNOWN 이 되어 **모든 행이 탈락**한다.
              즉 어음으로 정산한 청구서가 하나 생기는 순간, 그 회사의 모든 청구서에서
              '거래내역에서 연결' 후보가 사라지고 사용자는 '새 거래로 등록'을 눌러
              **같은 돈을 두 번** 만들게 된다. (lib/settleTxn.js 는 LEFT JOIN 으로 올바르게 푼다.) */
-        AND t.id NOT IN (SELECT txn_id FROM invoice_matches WHERE txn_id IS NOT NULL)
       ORDER BY t.date DESC
       LIMIT 100
     `, [txnKind])
     const enriched = rows.map(r => {
-      const amt = Number(r.amount)
+      /* 금액 판정은 **거래에서 아직 안 쓴 금액**으로 한다. 600만원 중 100만원을 이미
+         다른 청구서에 붙였다면, 이 청구서에 붙일 수 있는 건 500만원이다. */
+      const used = Number(r.used) || 0
+      const amt = Number(r.amount) - used
       const sameVendor = !!inv.vendor_id && r.vendor_id === inv.vendor_id
       const matchTotal = amt === total
       const matchSupply = amt === supply
@@ -1395,7 +1433,8 @@ router.get('/:id/matchable', async (req, res, next) => {
       const related = sameVendor || matchTotal || matchSupply || matchRemain
       // 정렬 점수: 거래처+금액 둘 다 일치 > 금액 일치 > 거래처 일치
       const score = (sameVendor ? 1 : 0) + ((matchTotal || matchRemain || matchSupply) ? 2 : 0)
-      return { ...r, sameVendor, matchTotal, matchSupply, matchRemain, related, score }
+      // available = 이 거래에서 아직 안 쓴 금액(화면이 '남은 500만원'으로 보여준다)
+      return { ...r, used, available: amt, sameVendor, matchTotal, matchSupply, matchRemain, related, score }
     })
     enriched.sort((a, b) => (b.score - a.score) || (a.date < b.date ? 1 : -1))
     res.json(enriched)
@@ -1452,9 +1491,24 @@ router.delete('/:id/matches/:matchId', async (req, res, next) => {
       }
     }
 
+    /* ⚠ 한 거래가 **여러 청구서**에 붙어 있을 수 있다(600만원 한 줄로 3건 받은 경우).
+     *   이 줄만 떼고 나서 그 거래에 **다른 매칭이 남아 있는지**를 먼저 본다.
+     *   남았는데 거래를 지우거나 invoice_id 를 비우면:
+     *     · 거래를 지우면  → 남은 청구서들이 허공을 가리키고 통장에서 그 돈이 사라진다
+     *     · invoice_id 를 비우면 → 그 거래가 '청구서 없는 거래'로 분류돼 **부가세가 이중 계상된다**
+     *       (lib/vatAgg.js·routes/tax.js 가 invoice_id IS NULL 로 청구서분과 갈라 센다) */
+    await conn.execute('DELETE FROM invoice_matches WHERE id = ? AND invoice_id = ?', [req.params.matchId, req.params.id])
+
     let removedTxn = null
     if (match.txn_id) {
-      if (Number(match.txn_created) === 1) {
+      const [[rest]] = await conn.execute(
+        'SELECT COUNT(*) AS n, MIN(invoice_id) AS keep_invoice FROM invoice_matches WHERE txn_id = ?', [match.txn_id])
+      if (Number(rest.n) > 0) {
+        /* 아직 다른 청구서에 붙어 있다 — 거래는 그대로 두고, invoice_id 를 **남은 것 중 하나로**
+           옮겨 준다. 이 칸은 "어느 청구서냐"보다 "청구서에 붙었느냐"의 표식으로 쓰인다. */
+        await conn.execute('UPDATE transactions SET invoice_id = ? WHERE id = ?',
+          [rest.keep_invoice, match.txn_id])
+      } else if (Number(match.txn_created) === 1) {
         // 마감된 달의 거래를 지우면 그 달 잔액이 사후에 바뀐다 → 막는다
         const [[txn]] = await conn.execute('SELECT date FROM transactions WHERE id = ?', [match.txn_id])
         const ce = txn ? await closedPeriodError(conn, txn.date) : null
@@ -1465,7 +1519,6 @@ router.delete('/:id/matches/:matchId', async (req, res, next) => {
         await conn.execute('UPDATE transactions SET invoice_id = NULL WHERE id = ?', [match.txn_id])
       }
     }
-    await conn.execute('DELETE FROM invoice_matches WHERE id = ? AND invoice_id = ?', [req.params.matchId, req.params.id])
     // 남은 매칭 누계로 상태 재계산 — 안 하면 remain이 생겨도 '완료'로 남아 미수/미지급이 누락된다.
     const st = await recalcInvoiceStatus(conn, req.params.id)
     await conn.commit()
