@@ -592,6 +592,36 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       return
     }
     const contractObj = contracts.find(c => c.id === form.contract)
+
+    /* ── 주문을 안 골랐으면 한 번 묻는다 ────────────────────────────────
+     * 계약이 비면 이 앱이 팔리는 이유(계약별 원가율·자금 흐름)가 통째로 안 보인다.
+     * 그래서 그냥 지나가게 두지 않고 저장 직전에 한 번 세운다.
+     *
+     * ⚠ **묻지 않는 자리를 먼저 가린다.** 안 그러면 매일 수십 건 치는 사람에게 벌이 된다.
+     *   · 경비 모드 — 식대 8,000원에 "어느 주문 건인가요"는 늘 '아니오'다.
+     *     그 모드는 애초에 주문 칸을 접어 두는데, 접어 놓고 묻는 건 앞뒤가 안 맞는다.
+     *   · 수정 — 이미 등록된 거래를 고칠 때마다 물으면 고치는 일 자체가 번거로워진다.
+     *   · 원가 귀속만 골라도 통과 — 어느 수주건 때문에 쓴 돈인지는 이미 밝힌 것이다.
+     *
+     * ⚠ **저장을 막지는 않는다.** 주문 없이 오가는 돈이 실제로 많고(경비·공과금·이자),
+     *   막으면 사람들은 '2026년 기타' 같은 더미 주문을 만들어 통과한다 — 그러면 데이터는
+     *   채워지는데 원가율이 거짓말을 한다. 빈 것보다 나쁘다.
+     *   그래서 되돌아갈 길(주문 고르기)을 기본으로 두되, 그냥 등록도 열어 둔다.
+     *
+     * 문구는 짧게. 왜 필요한지는 한 줄이면 된다 — 나머지는 이 주석에 있다. */
+    if (!editTxn && !compact && !form.contract && !form.costContract) {
+      const label = kind === 'income' ? '수주' : '발주'
+      const go = await confirm({
+        tone: 'brand', icon: <Icon.Briefcase size={22}/>,
+        title: `${label}를 안 골랐어요`,
+        body: `${label}를 붙이면 건별 수익·원가와 미${kind === 'income' ? '수' : '지급'}금이 자동으로 잡혀요.\n`
+            + `경비·공과금처럼 ${label} 없이 오가는 돈이면 그대로 등록하세요.`,
+        confirmLabel: `${label} 고르기`,
+        cancelLabel: '없이 등록',
+      })
+      // 고르러 간다 — 칸이 접혀 있으면 펴 준다(경비 모드가 아니어도 접혀 있을 수 있다)
+      if (go) { setShowOrderFields(true); return }
+    }
     const employeeObj = uniqueByName(employees, form.employee)
     /* 계좌는 **필수**다. 비운 채로 저장하면 거래는 '완료'인데 계좌 잔액에는 영영 안 잡혀
        통장과 장부가 그날부터 어긋난다. 그래서 여기서는 비우지 않고 **저장을 막는다.** */
