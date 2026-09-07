@@ -1496,6 +1496,20 @@ export const api = {
     catch (e) { return { ok: false, error: e.message } }
   },
 
+  /* 청구서 품목으로 계약 단가표를 채운다(비어 있을 때만 — 서버가 막는다).
+     ⚠ 실적을 기준선으로 되밀면 "계약 대비 초과"가 영영 안 잡힌다. 그래서 덮어쓰기가 없다. */
+  async seedContractItems(contractId, invoiceId) {
+    try {
+      const r = await req(`/contracts/${contractId}/items/seed`, { method: 'POST', body: { invoice_id: invoiceId } })
+      return { ok: true, count: r?.count || 0 }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
+  /** 단가표와 실제 청구가 어긋나는 곳 — 보여만 준다(고치지 않는다) */
+  async getContractItemDiff(contractId) {
+    try { return await req(`/contracts/${contractId}/item-diff`) }
+    catch { return { hasTable: false, missing: [], priceDiff: [] } }
+  },
+
   async addContract(data) {
     try {
       const result = await req('/contracts', { method: 'POST', body: data })

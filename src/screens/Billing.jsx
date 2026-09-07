@@ -2056,6 +2056,36 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       }
       if (failed) toast.push(`첨부 ${failed}건 연결 실패`, { tone: "warn" })
     }
+
+    /* ── 이 청구서 품목으로 계약 단가표를 채울까 ──────────────────────────
+     * 계약 단가표가 비어 있으면 "계약 대비 얼마에 팔았나/샀나"를 볼 수 없다. 그런데 품목을
+     * 손으로 다시 옮겨 적는 사람은 없다 — 방금 청구서에 다 적었기 때문이다.
+     * 청구서 줄에서 수량·금액만 떼면 그대로 단가표라 옮길 것도 없다. 그래서 여기서 묻는다.
+     *
+     * ⚠ **비어 있을 때만** 묻는다(hasTable=false). 이미 있으면 손대지 않는다 —
+     *   단가표는 기준선이고 청구서는 실적이라, 실적으로 기준선을 덮으면 "계약 대비 초과"가
+     *   영영 안 잡히고 원가율이 늘 100%로 보인다.
+     * ⚠ 앞의 '주문을 안 골랐어요' 확인창과 **겹치지 않는다.** 그건 주문이 없을 때,
+     *   이건 주문이 있을 때 뜬다. */
+    if (!payload.id && invoiceId && payload.contract_id && Array.isArray(data.lines) && data.lines.some(l => (l.name || '').trim())) {
+      const diff = await api.getContractItemDiff(payload.contract_id)
+      if (!diff.hasTable) {
+        const n = data.lines.filter(l => (l.name || '').trim()).length
+        const ok = await confirm({
+          tone: 'brand', icon: <Icon.Book size={22}/>,
+          title: '이 품목을 주문 단가표로 둘까요?',
+          body: `품목 ${n}건을 이 주문의 단가표로 넣어요. 다음부터 같은 품목을 고르면 단가가 자동으로 채워지고,\n`
+              + '계약 단가와 다르게 청구하면 알려드려요. (수량은 안 옮겨요 — 단가표는 "얼마에 하기로 했나"예요)',
+          confirmLabel: '단가표로 두기',
+          cancelLabel: '안 할래요',
+        })
+        if (ok) {
+          const r = await api.seedContractItems(payload.contract_id, invoiceId)
+          toast.push(r.ok ? `품목 ${r.count}건을 주문 단가표에 넣었어요`
+                          : (r.error || '단가표에 넣지 못했어요'), r.ok ? undefined : { tone: 'warn' })
+        }
+      }
+    }
     load()
   }
 

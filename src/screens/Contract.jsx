@@ -635,6 +635,14 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
      { kind, axis } 로 연다. axis 는 탭이 정한다(근거 주문 / 원가 귀속). */
   const [linkOpen, setLinkOpen] = useState(null);
   const [txnOpen, setTxnOpen] = useState(null);   // 주문 화면에서 연 거래 상세
+  /* 단가표와 실제 청구가 어긋나는 곳. 단가표가 있는 주문에서만 뜻이 있다.
+     ⚠ 고치지 않는다 — 보여만 준다. 계약 단가표는 **기준선**이라 실적으로 덮으면
+       "계약 대비 초과"라는 개념 자체가 사라진다(routes/contracts.js seed 주석 참고). */
+  const [itemDiff, setItemDiff] = useState(null);
+  useEffect(() => {
+    if (!contractId) { setItemDiff(null); return }
+    api.getContractItemDiff(contractId).then(setItemDiff);
+  }, [contractId, refreshTrigger]);
 
   /* 실패하면 실패했다고 말한다. 예전엔 데이터가 없으면 그냥 안 넣어서 화면이
      '불러오는 중…'에 영원히 머물렀다 — 주소에 주문 id 가 없던 시절 새로고침하면
@@ -1124,6 +1132,54 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           </>
         );
       })()}
+
+      {/* 단가표와 실제 청구가 어긋나는 곳.
+          ⚠ **고치지 않는다. 보여만 준다.** 계약 단가표는 '얼마에 하기로 했나'(기준선)이고
+            청구서는 '얼마에 했나'(실적)다. 실적으로 기준선을 덮으면 "계약 대비 초과"라는
+            개념 자체가 사라져 원가율이 늘 100%로 보인다.
+            지금까지는 계약 단가와 다르게 청구해도 **아무도 몰랐다** — 실수든 협의 사항이든
+            그 자리에서 보이는 게 맞다. 고칠 곳은 계약 편집(단가표)이나 그 청구서다.
+          단가표가 없는 주문에는 아무것도 안 띄운다(비교할 기준이 없다). */}
+      {itemDiff?.hasTable && (itemDiff.missing.length > 0 || itemDiff.priceDiff.length > 0) && (
+        <>
+          <div className="card card-pad" style={{ borderColor: 'var(--warn-ink)' }}>
+            <div className="row gap-8" style={{ alignItems: 'center' }}>
+              <Icon.Warn size={16} style={{ color: 'var(--warn-ink)' }}/>
+              <div className="section-title">단가표와 다르게 청구된 게 있어요</div>
+            </div>
+            {itemDiff.priceDiff.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <div className="text-xs text-muted2">단가가 다름</div>
+                {itemDiff.priceDiff.map((d, i) => (
+                  <div key={'p' + i} className="text-sm" style={{ marginTop: 4 }}>
+                    <b>{d.name}</b>{d.spec ? <span className="text-muted2"> · {d.spec}</span> : null}
+                    {' — '}
+                    <span className="num text-muted">계약 {fmtNum(d.contract)}</span>
+                    {' → '}
+                    <span className="num fw-700" style={{ color: 'var(--warn-ink)' }}>청구 {fmtNum(d.billed)}</span>
+                    <span className="text-xs text-muted2"> ({d.invoice_no})</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {itemDiff.missing.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <div className="text-xs text-muted2">단가표에 없는 품목</div>
+                {itemDiff.missing.map((d, i) => (
+                  <div key={'m' + i} className="text-sm" style={{ marginTop: 4 }}>
+                    <b>{d.name}</b>{d.spec ? <span className="text-muted2"> · {d.spec}</span> : null}
+                    <span className="text-xs text-muted2"> ({d.invoice_no})</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="text-xs text-muted2" style={{ marginTop: 10 }}>
+              협의해서 바꾼 것이면 <b>편집</b>에서 단가표를 고치세요. 잘못 끊은 것이면 그 청구서를 고치세요.
+            </div>
+          </div>
+          <Spacer h={20}/>
+        </>
+      )}
 
       {/* 갱신 관리 — 만료가 있는 주문만 (무기한은 갱신 개념이 없다) */}
       {!openEnded && (

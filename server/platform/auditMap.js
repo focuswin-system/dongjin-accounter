@@ -62,6 +62,8 @@ const AUDIT_RULES = [
      ⚠ `/:id` 규칙보다 **위**에 둔다. 아래에 두면 'milestones' 를 계약 id 로 읽는다. */
   { m: 'DELETE', re: /^\/api\/contracts\/milestones\/([^/]+)$/,         res: 'contract', action: 'schedule_delete', target: 1 },
   { m: 'DELETE', re: /^\/api\/contracts\/([^/]+)$/,                     res: 'contract', action: 'delete', target: 1 },
+  // 청구서 품목으로 단가표를 채운 것 — 그 주문의 '기준선'이 정해지는 순간이라 남긴다
+  { m: 'POST',   re: /^\/api\/contracts\/([^/]+)\/items\/seed$/,       res: 'contract', action: 'items_seed', target: 1 },
 
   // ── 정기 발행 ── 놓친 회차 일괄 발행은 한 번에 여러 건을 만든다
   { m: 'POST',   re: /^\/api\/recurring-invoices\/issue-missed$/,       res: 'recurring_invoice', action: 'issue_missed' },

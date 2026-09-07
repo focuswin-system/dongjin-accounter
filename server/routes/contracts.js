@@ -914,6 +914,106 @@ async function replaceContractItems(conn, contractId, items) {
   }
 }
 
+/* ── 청구서 품목으로 계약 단가표를 채운다(씨앗) ─────────────────────────────
+ *
+ * ── 왜 ──
+ * 계약 단가표가 비어 있으면 "계약 대비 얼마에 팔았나/샀나"를 볼 수 없다. 그런데 품목을
+ * 손으로 다시 옮겨 적는 사람은 없다 — 청구서에 이미 다 적었기 때문이다.
+ * 청구서 줄에서 수량·금액만 떼면 그대로 단가표라 옮길 것도 없다.
+ *
+ * ── ⚠ 비어 있을 때만 채운다 ──
+ * 단가표는 **기준선**이고 청구서는 **실적**이다. 실적을 기준선으로 되밀면 기준선이
+ * 실적을 따라 움직여서 "계약 대비 초과"라는 개념 자체가 사라진다 — 원가율이 늘 100%로
+ * 보인다. 그래서 이미 줄이 있으면 **손대지 않고 409로 막는다.**
+ * (차이가 궁금하면 아래 /item-diff 가 알려준다. 고치는 건 계약 편집에서 사람이 한다)
+ *
+ * ⚠ replaceContractItems 를 쓰지 않는다 — 그건 전체를 지우고 다시 넣는 함수라
+ *   씨앗에 쓰면 있는 단가표를 날린다. */
+router.post('/:id/items/seed', async (req, res, next) => {
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [[c]] = await conn.execute('SELECT id FROM contracts WHERE id = ? FOR UPDATE', [req.params.id])
+    if (!c) { await rollbackQuietly(conn); return res.status(404).json({ error: '주문을 찾을 수 없어요' }) }
+
+    const [[{ n }]] = await conn.execute(
+      'SELECT COUNT(*) AS n FROM contract_items WHERE contract_id = ?', [req.params.id])
+    if (Number(n) > 0) {
+      await rollbackQuietly(conn)
+      return res.status(409).json({ error: '이미 단가표가 있어요. 덮어쓰지 않습니다 — 계약 편집에서 고쳐주세요.' })
+    }
+
+    /* 청구서는 **이 주문의 것**이어야 한다. 남의 청구서 품목으로 단가표를 채우면
+       그 주문의 기준선이 통째로 남의 것이 된다. */
+    const [[inv]] = await conn.execute(
+      'SELECT id, contract_id FROM invoices WHERE id = ?', [req.body.invoice_id || ''])
+    if (!inv || inv.contract_id !== req.params.id) {
+      await rollbackQuietly(conn)
+      return res.status(400).json({ error: '이 주문의 청구서가 아니에요' })
+    }
+
+    const [lines] = await conn.execute(
+      `SELECT item_id, name, spec, unit, unit_price, cost_price, weight, price_basis
+         FROM invoice_lines WHERE invoice_id = ? ORDER BY sort_order`, [inv.id])
+
+    let ord = 0
+    for (const l of lines) {
+      const nm = String(l.name || '').trim()
+      if (!nm) continue
+      /* 수량은 안 옮긴다 — 단가표는 '얼마에 하기로 했나'지 '몇 개 줬나'가 아니다.
+         수량은 청구할 때마다 달라지고, 기성형은 청구 시점에 넣는다. */
+      await conn.execute(
+        `INSERT INTO contract_items (id, contract_id, item_id, name, spec, unit, qty, weight, price_basis, unit_price, cost_price, sort_order)
+         VALUES (?,?,?,?,?,?,0,?,?,?,?,?)`,
+        [randomUUID(), req.params.id, l.item_id || null, nm, l.spec || null, l.unit || null,
+         Number(l.weight) || 0, l.price_basis === 'weight' ? 'weight' : 'qty',
+         Number(l.unit_price) || 0, Number(l.cost_price) || 0, ++ord])
+    }
+    await conn.commit()
+    res.json({ ok: true, count: ord })
+  } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
+})
+
+/* ── 단가표와 실제 청구가 어긋나는 곳 ──────────────────────────────────────
+ * 단가표가 있는 주문에서만 뜻이 있다. 지금은 계약 단가와 다르게 청구해도 **아무도 모른다** —
+ * 실수든 협의 사항이든 그 자리에서 보이는 게 맞다.
+ * 고치지 않는다. 보여만 준다(기준선을 실적으로 덮으면 안 되는 이유는 위 seed 주석 참고). */
+router.get('/:id/item-diff', async (req, res, next) => {
+  try {
+    const [items] = await req.db.execute(
+      'SELECT name, spec, unit_price FROM contract_items WHERE contract_id = ?', [req.params.id])
+    if (!items.length) return res.json({ hasTable: false, missing: [], priceDiff: [] })
+
+    const [lines] = await req.db.execute(
+      `SELECT l.name, l.spec, l.unit_price, i.invoice_no
+         FROM invoice_lines l JOIN invoices i ON i.id = l.invoice_id
+        WHERE i.contract_id = ?`, [req.params.id])
+
+    /* 품명+규격으로 맞춘다. 표기 차이(공백·괄호)로 어긋나면 멀쩡한 품목이 '없는 품목'으로
+       뜨는데, 그건 경고가 아니라 잡음이다 — 정규화해서 본다. */
+    const norm = (v) => String(v ?? '').replace(/[\s()\-.,·\/]/g, '').toLowerCase()
+    const byKey = new Map()
+    for (const it of items) byKey.set(norm(it.name) + '|' + norm(it.spec), it)
+
+    const missing = [], priceDiff = []
+    const seenMissing = new Set(), seenDiff = new Set()
+    for (const l of lines) {
+      const k = norm(l.name) + '|' + norm(l.spec)
+      const it = byKey.get(k)
+      if (!it) {
+        if (!seenMissing.has(k)) { seenMissing.add(k); missing.push({ name: l.name, spec: l.spec, invoice_no: l.invoice_no }) }
+        continue
+      }
+      const a = Number(it.unit_price) || 0, b = Number(l.unit_price) || 0
+      if (a !== b && !seenDiff.has(k)) {
+        seenDiff.add(k)
+        priceDiff.push({ name: l.name, spec: l.spec, contract: a, billed: b, invoice_no: l.invoice_no })
+      }
+    }
+    res.json({ hasTable: true, missing: missing.slice(0, 20), priceDiff: priceDiff.slice(0, 20) })
+  } catch (e) { next(e) }
+})
+
 router.post('/', async (req, res, next) => {
   const { vendor_id, name, start_date, status, order_no, project_no, cost_budget, file_url, file_name, contract_no } = req.body
   const f = model.normalize(req.body)   // 금액·기간·갱신 필드는 모델이 결정 (모순된 조합 저장 방지)
