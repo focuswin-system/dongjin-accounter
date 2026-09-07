@@ -791,6 +791,10 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   // 회사 정보 — 주거래 계좌를 앞에 세우는 데 쓴다(lib/mainAccount.js)
   const [company, setCompany] = useState(null)
   const [contracts, setContracts] = useState([])
+  const { confirm } = useConfirm()
+  /* ⚠ handleSave 가 **비동기**가 됐다(주문 확인창을 기다린다). 그동안 등록 버튼이 살아
+     있으면 두 번 눌러 **청구서가 두 장** 생긴다. 예전엔 동기라 없던 문제다. */
+  const [saving, setSaving] = useState(false)
   // 거래명세서식 품목 내역(선택) — 있으면 합계가 공급가액이 된다
   const [lines, setLines] = useState([])
   /* 납품일은 **청구서 한 장에 하나**다(선택 입력).
@@ -930,9 +934,68 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   // 품목표와 같은 이름표를 쓴다 — 표에는 '입고일', 나눠 발행 안내에는 '납품일'이면 같은 칸이 아닌 줄 안다
   const deliveryLabel = form.kind === "received" ? "입고일" : "납품일"
 
-  const handleSave = () => {
+  /* 여기서 바로 주문 만들기 — 거래 등록 폼(screens/Form.jsx makeOrderHere)과 **같은 규칙**이다.
+     주문에 필요한 값(거래처·금액·시작일)이 이 폼에 이미 있으므로 물어볼 값이 없다.
+     ⚠ 만든 뒤 **이 청구서에 바로 붙인다.** 만들어만 두면 사람은 붙은 줄 알고 넘어가고,
+       그 매출·매입이 주문 실적에서 통째로 빠진다. */
+  const makeOrderHere = async (q) => {
+    const name = String(q || '').trim()
+    if (!name) return
+    const label = form.kind === 'issued' ? '수주' : '발주'
+    const v = vendors.find(x => x.id === form.vendor)
+    if (!v) { toast.push('거래처를 먼저 고르면 ' + label + '로 만들 수 있어요', { tone: 'warn' }); return }
+
+    const ok = await confirm({
+      tone: 'brand', icon: <Icon.Briefcase size={22}/>,
+      title: `${label} 만들기`,
+      body: `"${name}" ${label}를 지금 만들어 이 청구서에 붙일까요?\n`
+          /* 금액을 아직 안 넣었을 수 있다(주문부터 고르는 사람도 있다). 그때 "0원"이라고 하면
+             0원짜리 주문을 만드는 것으로 읽힌다 — 안 정해졌다고 그대로 말한다. */
+          + `거래처 ${v.name} · 금액 ${supply > 0 ? fmtNum(supply) + '원' : '미정'} · 시작일 ${form.issuedAt || localDate()}\n`
+          + `나머지(기간·청구방식)는 나중에 ${label} 화면에서 채우면 돼요.`,
+      confirmLabel: `${label} 만들기`,
+      cancelLabel: '취소',
+    })
+    if (!ok) return
+
+    const r = await api.addContract({
+      name, vendor_id: v.id, amount: supply,
+      start_date: form.issuedAt || localDate(), status: '진행중',
+    })
+    if (!r.ok) { toast.push(r.error || `${label}를 만들지 못했어요`, { tone: 'warn' }); return }
+    // contractOptions 는 contracts 에서 파생된다 — 원본에 넣어야 목록에 뜬다
+    setContracts(prev => [{ id: r.id, name, vendor_name: v.name, vendor_id: v.id,
+                            is_purchase: form.kind === 'received', status: '진행중', amount: supply }, ...prev])
+    f('contract', r.id)
+    toast.push(`${label} "${name}"를 만들고 이 청구서에 붙였어요`)
+  }
+
+  const handleSave = async () => {
+    if (saving) return
     if (!form.vendor) { toast.push("거래처를 선택하세요", { tone: "warn" }); return }
     if (!supply) { toast.push("공급가액을 입력하세요", { tone: "warn" }); return }
+
+    /* ── 주문을 안 골랐으면 한 번 묻는다 ────────────────────────────────
+     * 거래 등록 폼(screens/Form.jsx)과 **같은 규칙**이다. 여기에 안 붙이면 매입 쪽에
+     * 구멍이 남는다 — 외주비·자재비처럼 발주에 붙어야 할 지출은 대개 세금계산서를
+     * 받으므로 거래 폼이 아니라 **이 폼**으로 들어온다.
+     *
+     * ⚠ 저장을 막지는 않는다. 막으면 '2026년 기타' 같은 더미 주문이 생기고,
+     *   그러면 데이터는 채워지는데 원가율이 거짓말을 한다(빈 것보다 나쁘다).
+     * ⚠ 수정할 때는 안 묻는다 — 고칠 때마다 물으면 고치는 일이 번거로워진다. */
+    if (!editInvoice && !form.contract) {
+      const label = form.kind === 'issued' ? '수주' : '발주'
+      const go = await confirm({
+        tone: 'brand', icon: <Icon.Briefcase size={22}/>,
+        title: `${label}를 안 골랐어요`,
+        body: `${label}를 붙이면 건별 수익·원가와 미${form.kind === 'issued' ? '수' : '지급'}금이 자동으로 잡혀요.\n`
+            + `경비·공과금처럼 ${label} 없이 오가는 청구서면 그대로 등록하세요.`,
+        confirmLabel: `${label} 고르기`,
+        cancelLabel: '없이 등록',
+      })
+      if (go) return
+    }
+    setSaving(true)
     /* 값은 보통 **id** 지만, 거래처 칸은 '직접 입력'으로 글자가 들어올 수도 있다.
        그때는 이름으로 한 번 더 찾아 준다 — 다만 **같은 이름이 하나뿐일 때만**.
        여럿이면 어느 것인지 알 수 없으므로 붙이지 않는다(예전처럼 아무거나 집지 않는다). */
@@ -985,6 +1048,9 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
       _docs: docs,   // 저장 후 청구서에 연결할 첨부(부모 handleSave가 처리)
     })
     onClose()
+    /* ⚠ 잠금을 반드시 푼다. onSave 는 부모가 비동기로 처리하고 실패해도 여기로
+       안 돌아온다 — 안 풀면 드로어를 다시 열었을 때 버튼이 잠긴 채로 뜬다. */
+    setSaving(false)
   }
 
   /* 품목표가 떠 있으면 드로어를 넓힌다 — 명세서식 입력은 12열(날짜·품목·규격·단위·수량·중량·
@@ -1046,11 +1112,16 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
             {/* ⚠ allowAdd={false} — 위 주석대로 '직접 입력'을 뺐는데 **이 속성을 안 걸어서**
                 목록에 없는 이름을 치면 "Enter로 새로 등록할 수 있어요"가 떴다(ui.jsx:774).
                 눌러도 아무 일이 없다 — 안내문이 거짓말을 하고 있었다. */}
+            {/* 예전엔 allowAdd={false} 로 '직접 입력'을 막았다. 여기서 친 이름은 주문이
+                되지 않고 글자로만 남는데, 입력한 사람은 연결된 줄 믿기 때문이었다.
+                이제는 **진짜 주문을 만든다**(makeOrderHere) — 그 걱정이 사라졌다.
+                거래처·금액·발행일이 이 폼에 이미 있어서 물어볼 값도 없다. */}
             <Combobox
               value={form.contract}
               onChange={v => f("contract", v)}
               options={contractOptions}
-              allowAdd={false}
+              onAddNew={makeOrderHere}
+              addNewLabel={`이 이름으로 ${form.kind === 'issued' ? '수주' : '발주'} 만들기`}
               placeholder={contractOptions.length ? "해당 주문이 있으면 선택하세요" : "등록된 주문이 없어요"}/>
             <div className="text-sm text-muted2" style={{ marginTop: 4 }}>
               주문 없이 발행·수취하는 청구서는 비워두세요.
@@ -1180,9 +1251,9 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
               label="세금계산서·납품확인서 등 첨부"/>
           </div>
         </div>
-        <DrawerFooter onCancel={onClose} onSave={handleSave}
-          saveLabel={editInvoice ? "저장"
-            : "등록"}/>
+        <DrawerFooter onCancel={onClose} onSave={handleSave} saveDisabled={saving}
+          saveLabel={saving ? (editInvoice ? "저장 중…" : "등록 중…")
+            : (editInvoice ? "저장" : "등록")}/>
     </Drawer>
   )
 }
