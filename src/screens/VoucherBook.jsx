@@ -56,17 +56,19 @@ export const VoucherBookScreen = () => {
   const printRef = useRef(null)
   const pe = usePrintEdit(printRef, rows ? rows.length : 0)
   return (
-    <div className="fade-up" ref={printRef} onKeyDown={pe.onKeyDown}>
+    /* ⚠ report-print — 인쇄 화이트리스트(index.css @media print) 등록용.
+       '인쇄 전 손보기'가 있는데 이게 없어서 Ctrl+P 가 백지였다. */
+    <div className="fade-up report-print" ref={printRef} onKeyDown={pe.onKeyDown}>
       <PageHeader title="전표 목록"
         sub="기간 안의 거래를 차변·대변으로 펼칩니다. 세무사에게 넘기거나 회계 프로그램에 올릴 때 쓰세요."
-        actions={<>
+        actions={<div className="row gap-6 no-print" style={{ alignItems: 'center' }}>
           <PrintEditButton on={pe.on} toggle={pe.toggle} count={pe.count}/>
           <button className="btn primary" onClick={download} disabled={busy || rows.length === 0}>
             <Icon.Excel size={14}/> 엑셀 내려받기
           </button>
-        </>}/>
+        </div>}/>
 
-      <div className="card card-pad row" style={{ gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+      <div className="card card-pad row no-print" style={{ gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
         <DateInput className="input" style={{ width: 150 }} value={from} onChange={e => setFrom(e.target.value)}/>
         <span className="text-muted2">~</span>
         <DateInput className="input" style={{ width: 150 }} value={to} onChange={e => setTo(e.target.value)}/>

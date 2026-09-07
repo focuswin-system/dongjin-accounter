@@ -1566,8 +1566,12 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
   @page { size: A4; margin: 16mm; }
 
   /* 화면용 회색 바탕(--bg)은 body·html 에 있다. '배경 그래픽' 켜고 인쇄하면
-     종이 아래 남는 부분이 통째로 회색으로 찍힌다 — 인쇄에서는 흰 종이로. */
-  html, body { background: var(--surface) !important; }
+     종이 아래 남는 부분이 통째로 회색으로 찍힌다 — 인쇄에서는 흰 종이로.
+     ⚠ **--surface 를 쓰면 안 된다.** 다크 모드에서 그 값은 어두운 색이라,
+       다크로 쓰다가 '배경 그래픽'을 켜고 인쇄하면 종이 밖이 **새까맣게** 찍힌다
+       (실측: 지출결의서 인쇄 미리보기). 종이는 테마와 무관하게 희다 — 값을 박는다.
+       문서 서식(.doc-paper·.res-viewer·.manual-print)을 흰색으로 고정한 것과 같은 이유다. */
+  html, body { background: #fff !important; }
 
   /* ⚠ 한 장을 넘는 문서가 **첫 장에서 잘려 나갔다.**
    *

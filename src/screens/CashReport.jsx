@@ -68,12 +68,14 @@ export const CashReportScreen = ({ page = true }) => {
     .sort((x, y) => y.lowest.balance - x.lowest.balance)[0] || null
 
   return (
-    <div className="fade-up" ref={printRef} onKeyDown={pe.onKeyDown}>
+    /* ⚠ report-print — 인쇄 화이트리스트(index.css @media print)에 등록된 클래스다.
+       '인쇄 전 손보기'를 달아 두고 이걸 빠뜨려서 Ctrl+P 가 **백지**였다. */
+    <div className="fade-up report-print" ref={printRef} onKeyDown={pe.onKeyDown}>
       {page && (
         <PageHeader title="자금일보"
           sub={`${data.date} 기준 · 앞으로 ${days}일`}
           actions={
-            <div className="row gap-8" style={{ alignItems: 'center' }}>
+            <div className="row gap-8 no-print" style={{ alignItems: 'center' }}>
               <PrintEditButton on={pe.on} toggle={pe.toggle} count={pe.count}/>
               <DateInput className="input" style={{ width: 150 }} value={date}
                 max={localToday()} onChange={e => setDate(e.target.value)}/>
@@ -355,11 +357,12 @@ export const DailyTrialScreen = () => {
        머리글과 표가 한 덩어리로 읽힌다(제목만 왼쪽 끝에 떨어져 있으면 어긋나 보인다). */
     /* margin 축약형을 쓰면 React가 marginTop 같은 개별 속성과 섞였다고 경고한다
        (같은 자리에 다른 화면이 들어왔다 나가면서 스타일이 교체될 때). 개별 속성으로 적는다. */
-    <div className="fade-up" ref={dtRef} onKeyDown={dtPe.onKeyDown} style={{ maxWidth: 860, marginLeft: 'auto', marginRight: 'auto' }}>
+    /* ⚠ report-print — 위 자금일보와 같은 이유(화이트리스트 등록). 빠뜨리면 백지다. */
+    <div className="fade-up report-print" ref={dtRef} onKeyDown={dtPe.onKeyDown} style={{ maxWidth: 860, marginLeft: 'auto', marginRight: 'auto' }}>
       <PageHeader title="일계표"
         sub="하루치 거래를 계정과목별로 차변·대변에 나눠 봅니다"
         actions={
-          <div className="row gap-4" style={{ alignItems: 'center' }}>
+          <div className="row gap-4 no-print" style={{ alignItems: 'center' }}>
             <PrintEditButton on={dtPe.on} toggle={dtPe.toggle} count={dtPe.count}/>
             <button className="btn sm" onClick={() => shift(-1)}>◀</button>
             <DateInput className="input" style={{ width: 150 }} value={date}
