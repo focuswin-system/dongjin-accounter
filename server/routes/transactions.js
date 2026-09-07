@@ -197,15 +197,45 @@ router.get('/entry-hints', async (req, res, next) => {
 
     /* ① 같은 거래처·금액이 가까운 날짜에 이미 있나.
      *   주문으로 좁히지 않는다 — 중복으로 들어간 거래는 애초에 주문을 안 붙인 경우가 많아,
-     *   좁히면 정작 잡아야 할 것을 놓친다. */
-    const [duplicates] = await req.db.execute(
+     *   좁히면 정작 잡아야 할 것을 놓친다.
+     *
+     * ⚠ 예전엔 **금액이 정확히 같아야만** 잡았다. 그래서 실무에서 가장 흔한 이중 입력을
+     *   놓쳤다 — 한 번은 공급가액(1,000,000)으로, 한 번은 총액(1,100,000)으로 적는 경우다.
+     *   두 줄은 서로 다른 숫자라 예전 규칙에는 안 걸렸다.
+     *   이체 수수료로 몇백 원이 어긋난 경우도 마찬가지였다.
+     *
+     * ⚠ 그렇다고 아무 근처 금액이나 잡으면 안 된다. 경고가 자주 틀리면 사람은 그때부터
+     *   읽지 않고, 그러면 진짜 중복도 지나친다 — 안 하느니만 못하다.
+     *   그래서 **뜻이 있는 세 가지만** 본다: 같은 금액 / 부가세 관계 / 아주 근접.
+     *   무엇 때문에 걸렸는지(reason)를 함께 내려 화면이 밝히게 한다. */
+    const vatMul = 1.1
+    const asSupply = Math.round(amount / vatMul)   // 입력이 총액이라면 그 공급가액
+    const asTotal  = Math.round(amount * vatMul)   // 입력이 공급가액이라면 그 총액
+    /* 이체 수수료로 어긋나는 폭. 비율만 쓰면 큰 금액에서 너무 헐거워지므로 절대값과
+       함께 작은 쪽을 택한다(lib/reconcile.js 의 nearly 와 같은 규칙). */
+    const near = Math.min(1000, Math.max(1, Math.round(amount * 0.005)))
+    const [dupRows] = await req.db.execute(
       `SELECT t.id, t.date, t.amount, t.memo, t.category,
               (t.invoice_id IS NOT NULL) AS has_invoice, i.invoice_no
          FROM transactions t LEFT JOIN invoices i ON t.invoice_id = i.id
-        WHERE t.vendor_id = ? AND t.kind = ? AND t.amount = ?
+        WHERE t.vendor_id = ? AND t.kind = ?
           AND ABS(DATEDIFF(t.date, ?)) <= ?
+          AND (t.amount = ? OR t.amount = ? OR t.amount = ? OR ABS(t.amount - ?) <= ?)
         ORDER BY ABS(DATEDIFF(t.date, ?)) LIMIT 5`,
-      [vendorId, kind, amount, date, HINT_DAYS, date])
+      [vendorId, kind, date, HINT_DAYS, amount, asSupply, asTotal, amount, near, date])
+
+    /* 걸린 이유를 붙인다. 같은 금액이면 굳이 적지 않는다 — 정상에는 표식을 안 단다.
+       (부가세 관계·근접은 "왜 이게 뜨지"가 생기는 자리라 이유가 있어야 한다) */
+    const duplicates = dupRows.map(r => {
+      const a = Number(r.amount)
+      let reason = null
+      if (a !== amount) {
+        if (a === asSupply)      reason = '공급가액으로 적힌 같은 건일 수 있어요'
+        else if (a === asTotal)  reason = '부가세까지 더한 금액으로 적힌 같은 건일 수 있어요'
+        else                     reason = `${Math.abs(a - amount).toLocaleString('ko-KR')}원 차이 — 이체 수수료일 수 있어요`
+      }
+      return { ...r, reason }
+    })
 
     /* ② 아직 안 받은(안 낸) 청구서 — 여기에 붙이면 미수금·미지급금이 정리된다.
      *

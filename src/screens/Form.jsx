@@ -1231,8 +1231,14 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                   <div className="text-xs text-muted2" style={{ marginTop: 3 }}>
                     {hints.duplicates.map(d => (
                       <div key={d.id}>
-                        {d.date} · {fmtNum(Number(d.amount))}원
+                        {fmtDateShort(d.date)} · {fmtNum(Number(d.amount))}원
                         {d.invoice_no ? ` · 청구서 ${d.invoice_no} 정산분` : d.memo ? ` · ${d.memo}` : ''}
+                        {/* 금액이 다른데 왜 떴는지 밝힌다 — 안 밝히면 "이건 다른 건인데?" 하고
+                            경고를 통째로 무시하게 된다. 같은 금액이면 이유를 안 적는다
+                            (정상에는 표식을 붙이지 않는다). */}
+                        {d.reason && (
+                          <div style={{ color: 'var(--warn-ink)', marginTop: 1 }}>↳ {d.reason}</div>
+                        )}
                       </div>
                     ))}
                   </div>
