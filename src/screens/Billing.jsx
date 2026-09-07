@@ -25,6 +25,7 @@ import { quickAddCategory } from '../lib/quickAdd'
 import { vatOf } from '../lib/vatRate'
 import { ReconcilePanel } from '../lib/components/ReconcilePanel'
 import { MaybeIssuedPanel } from '../lib/components/MaybeIssuedPanel'
+import { contractsForVendor, contractFitsVendor } from '../lib/contractPick'
 
 const STATUS_TONE = {
   "입금 완료": "pos",  "지급 완료": "pos",
@@ -969,7 +970,8 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     }))
   }
 
-  const contractOptions = contracts.map(c => ({
+  /* 거래처를 골랐으면 그 거래처 주문만 (규칙은 lib/contractPick.js 한 곳) */
+  const contractOptions = contractsForVendor(contracts, form.vendor).map(c => ({
     value: c.id,
     label: c.vendor_name ? `${c.vendor_name} · ${c.name}` : c.name,
     sub: c.status || '',
@@ -1140,7 +1142,11 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
             <label className="label">거래처 <span style={{ color: "var(--neg-ink)" }}>*</span></label>
             <Combobox
               value={form.vendor}
-              onChange={v => f("vendor", v)}
+              /* 거래처를 바꾸면 **안 맞는 주문은 비운다.** 목록에서는 사라졌는데 값만 남으면
+                 딴 회사 주문이 붙은 채로 저장된다(화면에는 아무 표시도 없다). */
+              onChange={v => setForm(prev => contractFitsVendor(contracts, prev.contract, v)
+                ? { ...prev, vendor: v }
+                : { ...prev, vendor: v, contract: "" })}
               options={vendorOptions}
               placeholder={form.kind === "issued" ? "발주처 선택" : "협력사·기관 선택"}
               /* ⚠ 예전엔 **이름만 담고 끝났다.** 그런데 이 칸의 값은 id 다(위 vendorOptions

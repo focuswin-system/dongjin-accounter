@@ -4,6 +4,7 @@ import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { withMainFirst, isMainAccount, MAIN_BADGE } from '../lib/mainAccount'
 import { quickAddCategory, quickAddRefItemWithId } from '../lib/quickAdd'
+import { contractsForVendor, contractFitsVendor } from '../lib/contractPick'
 import { vatOf, supplyOf } from '../lib/vatRate'
 
 // 과세유형 3종. 영세 = 세율 0%인 과세거래(수출·해외용역) — 세액은 0이지만 과세표준엔 들어간다.
@@ -184,7 +185,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
    * 입금 내역은 비어 보였다. 담당자는 "안 들어갔나" 하고 같은 건을 여덟 번 넣었다.
    * (같은 이름이 여럿이면 라벨에 거래처를 붙여 고를 때도 갈리게 한다.) */
   const contractOpts = useMemo(() => {
-    const pool = contracts.filter(c => kind === 'income' ? !c.is_purchase : c.is_purchase)
+    /* 거래처를 골랐으면 그 거래처 주문만 (규칙은 lib/contractPick.js 한 곳).
+       ⚠ 아래 costContractOpts(원가 귀속)에는 쓰지 않는다 — 지출의 거래처는 외주업체인데
+         그 칸은 발주처와의 수주를 고르는 자리라, 걸러 버리면 후보가 늘 0건이 된다. */
+    const pool = contractsForVendor(
+      contracts.filter(c => kind === 'income' ? !c.is_purchase : c.is_purchase), form.vendor)
     /* 이름 앞에 **거래처를 붙여 늘 함께 보여준다.**
        고른 뒤에는 라벨만 남는데, 거기에 계약명만 있으면 어느 회사 것인지 알 수 없다.
        겹칠 때만 붙이는 방식도 써 봤지만, 겹치는 줄 모르는 사람에겐 여전히 같은 이름이다. */
@@ -201,7 +206,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
      *   · 무엇보다 **분류가 아니다.** 원자재냐 생산소모냐는 비목(category)이 이미 받고 있다.
      * 주문은 선택 입력으로 두고, 없으면 비우는 게 맞다(contract_id 는 nullable). */
     return opts;
-  }, [contracts, kind]);
+  }, [contracts, kind, form.vendor]);
 
   // 원가 귀속 후보 = 수주만
   // 원가 귀속도 같은 이유로 **id** 로 고른다(위 주석 참조)
@@ -749,7 +754,14 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
         <div className="drawer-body" style={{ paddingTop: 8 }}>
           <div className="col gap-form">
             <FormField label="거래처" required>
-              <Combobox value={form.vendor} onChange={v => setForm({...form, vendor: v})}
+              {/* 거래처를 바꾸면 **안 맞는 주문은 비운다.** 목록에서는 사라졌는데 값만
+                  남으면 딴 회사 주문이 붙은 채로 저장된다(화면에는 아무 표시도 없다).
+                  ⚠ 원가 귀속(costContract)은 안 비운다 — 그 칸은 이 거래처와 무관한
+                    '어느 수주건 때문에 쓴 돈인가'라서 거래처가 바뀌어도 그대로가 맞다. */}
+              <Combobox value={form.vendor}
+                onChange={v => setForm(prev => contractFitsVendor(contracts, prev.contract, v)
+                  ? { ...prev, vendor: v }
+                  : { ...prev, vendor: v, contract: "" })}
                 /* value 는 **id**. 이름으로 고르면 동명 중 배열 첫 번째가 조용히 붙어
                    돈이 엉뚱한 거래처에 잡힌다(실제로 그렇게 쌓였다).
                    같은 상호가 둘 이상일 때만 사업자번호를 붙여 가릴 수 있게 한다 —

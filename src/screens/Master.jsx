@@ -6,6 +6,7 @@ import { FOLDABLE_DOMAINS } from '../lib/nav'
 import { RecurAuditDrawer } from '../lib/components/RecurAuditDrawer'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
+import { contractsForVendor, contractFitsVendor } from '../lib/contractPick'
 import { ImportWizard } from '../lib/components/ImportWizard'
 import { VendorSubList, ACCOUNT_FIELDS, CONTACT_FIELDS } from '../lib/components/VendorSubList'
 import { RecurringCycles, useRecurringCycles, cycleSummaryByRule, CycleAmountDrawer } from '../lib/components/RecurringCycles'
@@ -2574,7 +2575,12 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
       <DrawerHead title={editing ? "정기지급 수정" : "정기지급 등록"} onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div><label className="label">거래처 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-          <Combobox value={form.vendor_id} onChange={v => f("vendor_id", v)}
+          <Combobox value={form.vendor_id}
+            /* 거래처를 바꾸면 안 맞는 발주는 비운다 — 목록에서 사라졌는데 값만 남으면
+               딴 회사 발주가 붙은 채로 저장된다. */
+            onChange={v => setForm(prev => contractFitsVendor(contracts, prev.contract_id, v)
+              ? { ...prev, vendor_id: v }
+              : { ...prev, vendor_id: v, contract_id: null })}
             options={vendors.map(v => ({ value: v.id, label: v.name, sub: v.type || "" }))} placeholder="거래처 선택·검색"
             onAddNew={async (q) => {
               const nm = (q || '').trim(); if (!nm) return
@@ -2593,7 +2599,9 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
             않았다(값은 들고만 다녔다). 실제로 어느 발주 건인지가 원가 귀속의 근거다. */}
         <div><label className="label">발주 연결 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
           <Combobox value={form.contract_id || ""} onChange={v => f("contract_id", v || null)} allowAdd={false}
-            options={purchaseContracts.map(c => ({ value: c.id, label: c.name, sub: c.vendor_name }))}
+            /* 거래처를 골랐으면 그 거래처 발주만 (규칙은 lib/contractPick.js 한 곳) */
+            options={contractsForVendor(purchaseContracts, form.vendor_id)
+              .map(c => ({ value: c.id, label: c.name, sub: c.vendor_name }))}
             placeholder={purchaseContracts.length ? "발주 선택 (없으면 비워두기)" : "등록된 발주가 없어요"}/>
         </div>
         <div><label className="label">비목 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
@@ -3108,11 +3116,17 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
         {/* 들어오는 돈이라 **수주**다. '주문'이라 두면 발주와 구별이 안 된다. */}
         <div><label className="label">수주 연결 <span className="text-muted">(선택)</span></label>
           <Combobox value={form.contractId} onChange={pickContract} allowAdd={false}
-            options={contracts.map(c => ({ value: c.id, label: c.name, sub: c.vendor_name }))}
+            /* 거래처를 골랐으면 그 거래처 수주만 (규칙은 lib/contractPick.js 한 곳) */
+            options={contractsForVendor(contracts, form.vendorId)
+              .map(c => ({ value: c.id, label: c.name, sub: c.vendor_name }))}
             placeholder="수주 선택 (없으면 비워두기)"/>
         </div>
         <div><label className="label">고객사 (발주처)</label>
-          <Combobox value={form.vendorId} onChange={v => f("vendorId", v)}
+          <Combobox value={form.vendorId}
+            /* 거래처를 바꾸면 안 맞는 수주는 비운다(정기지출과 같은 규칙) */
+            onChange={v => setForm(prev => contractFitsVendor(contracts, prev.contractId, v)
+              ? { ...prev, vendorId: v }
+              : { ...prev, vendorId: v, contractId: "" })}
             options={vendors.map(v => ({ value: v.id, label: v.name, sub: v.type }))}
             placeholder="고객사 선택·검색"
             onAddNew={async (q) => {
