@@ -23,7 +23,7 @@ import { Icon, useToast, fmtNum } from '../ui'
 const Why = ({ text }) => {
   // 뜻이 다른 근거를 같은 색으로 두면 훑을 수 없다 — 맞아떨어진 것과 참고만 할 것을 가른다
   const strong = /일치|거래처 같음|거의 같음|거래처 이름/.test(text)
-  const weak = /다름|보다 이름|모자람/.test(text)
+  const weak = /다름|보다 먼저|모자람/.test(text)
   return (
     <span className={`badge ${strong ? 'pos' : weak ? 'outline' : ''}`} style={{ fontSize: 10 }}>{text}</span>
   )

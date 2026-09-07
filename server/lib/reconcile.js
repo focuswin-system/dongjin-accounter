@@ -114,7 +114,9 @@ function scorePair(inv, txn) {
   else if (gap > 180) { score -= 15; why.push(`${gap}일 차이`) }
 
   // 거래가 청구서보다 **먼저** 있었으면 약하게 깎는다(먼저 받고 나중에 끊는 일도 있어 막지는 않는다)
-  if (txn.date < String(inv.issued_at).slice(0, 10)) { score -= 8; why.push('청구서보다 이름') }
+  /* ⚠ '이름'이라고 적었더니 화면에서 name 으로 읽혔다(검증에서 오타로 착각했다).
+       뜻은 "이 돈이 청구서 발행일보다 먼저 오갔다"이다. 그대로 적는다. */
+  if (txn.date < String(inv.issued_at).slice(0, 10)) { score -= 8; why.push('청구서보다 먼저') }
 
   return { score, why }
 }

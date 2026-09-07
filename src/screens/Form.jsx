@@ -492,7 +492,10 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       tone: 'brand', icon: <Icon.Briefcase size={22}/>,
       title: `${label} 만들기`,
       body: `"${name}" ${label}를 지금 만들어 이 거래에 붙일까요?\n`
-          + `거래처 ${v.name} · 금액 ${fmtNum(amount)}원 · 시작일 ${form.date}\n`
+          /* ⚠ 금액을 아직 안 넣었을 수 있다(주문부터 고르는 사람도 있다). 그때 "0원"이라고
+             하면 **0원짜리 주문을 만드는 것**으로 읽힌다 — 안 정해졌다고 그대로 말한다.
+             청구서 폼(Billing.jsx makeOrderHere)에 같은 수정이 이미 들어가 있었는데 여기만 빠져 있었다. */
+          + `거래처 ${v.name} · 금액 ${amount > 0 ? fmtNum(amount) + '원' : '미정'} · 시작일 ${form.date}\n`
           + `나머지(기간·청구방식)는 나중에 ${label} 화면에서 채우면 돼요.`,
       confirmLabel: `${label} 만들기`,
       cancelLabel: '참조로만 적기',
