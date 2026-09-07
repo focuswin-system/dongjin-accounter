@@ -59,6 +59,10 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
     try {
       const { headers, rows, total, truncated: cut } = await adapter.parse(f)
       if (!headers?.length) { toast.push('열을 인식하지 못했어요. 첫 행이 머리글인지 확인하세요.'); setBusy(false); return }
+      /* 머리글은 있는데 **행이 하나도 없으면** 여기서 멈춘다.
+         예전엔 그대로 매핑 화면으로 넘어가 빈 표를 보여줬다 — 사용자는 "왜 비었지"만 알고
+         무엇이 잘못됐는지는 모른다. 빈 양식을 그대로 올린 흔한 실수이고, 한마디면 끝난다. */
+      if (!rows?.length) { toast.push('읽을 자료가 없어요. 양식에 내용을 채워서 올려주세요.'); setBusy(false); return }
       setFile({ name: f.name, size: f.size })
       setRawRows(rows)
       setTruncated(cut ? { total, shown: rows.length } : null)
