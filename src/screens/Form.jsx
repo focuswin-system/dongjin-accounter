@@ -502,6 +502,9 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     setBusy(true)
     const r = await api.addContract({
       name, vendor_id: v.id, amount, start_date: form.date, status: '진행중',
+      /* ⚠ 일정은 깔지 않는다(청구서 폼과 같은 규칙). 이 주문의 근거는 **지금 적고 있는
+         이 거래**다 — 돈은 이미 오갔다. 일정을 깔면 받은 돈을 또 청구하라고 뜬다. */
+      skip_schedule: true,
     })
     setBusy(false)
     if (!r.ok) { toast.push(r.error || `${label}를 만들지 못했어요`, { tone: 'warn' }); return }
