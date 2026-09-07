@@ -620,7 +620,13 @@ export const ResolutionDocument = ({ doc, company, printClass }) => {
       <table className="res-table res-head">
         <tbody>
           <tr><th>지출처</th><td>{doc.vendor_name}</td><th>지출총액</th><td className="num fw-700">₩ {fmtNum(total || doc.amount)}</td></tr>
-          <tr><th>구매품의NO</th><td className="num">{doc.doc_no}</td><th>신청자</th><td>{doc.applicant}</td></tr>
+          {/* ⚠ 여기는 **구매품의서 번호** 자리다. 예전엔 결의서 자기 번호(doc.doc_no)를 넣었다 —
+              넣을 값이 없어서였는데, 앱에는 구매품의서(GM-…)가 따로 있어서 결재하는 사람이
+              "품의번호가 왜 결의서 번호랑 같지"로 읽거나, 반대로 **품의와 연결된 줄 알고** 넘어갔다.
+              서버가 purchase_reqs.invoice_id ↔ er.invoice_id 로 이어 진짜 번호를 내려준다.
+              ⚠ 품의를 안 거친 지출은 **빈 칸**이다. 없는 걸 있는 것처럼 적지 않는다
+                — 인쇄해서 손으로 적는 자리다. */}
+          <tr><th>구매품의NO</th><td className="num">{doc.purchase_req_no || ''}</td><th>신청자</th><td>{doc.applicant}</td></tr>
           <tr><th>지출방법</th><td>{doc.pay_method}</td><th>지급일</th><td className="num">{doc.pay_date || '—'}</td></tr>
         </tbody>
       </table>
@@ -867,8 +873,15 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
               <td className="num fw-700">₩ {fmtNum(itemsTotal || form.amount)}</td>
             </tr>
             <tr>
+              {/* ⚠ 여기는 **구매품의서 번호** 자리다. 예전엔 결의서 자기 번호(form.doc_no)를
+                  넣었다 — 넣을 값이 없어서였는데, 앱에는 구매품의서(GM-…)가 따로 있어서
+                  결재하는 사람이 "품의번호가 왜 결의서 번호랑 같지"로 읽거나, 반대로
+                  **품의와 연결된 줄 알고** 넘어갔다.
+                  서버가 purchase_reqs.invoice_id ↔ er.invoice_id 로 이어 진짜 번호를 준다.
+                  ⚠ 품의를 안 거친 지출은 **빈 칸**이다 — 인쇄해서 손으로 적는 자리다.
+                  ⚠ 위 미리보기(ResolutionRow)에도 같은 표가 있다. 둘 다 고쳐야 한다. */}
               <th>구매품의NO</th>
-              <td className="num">{form.doc_no}</td>
+              <td className="num">{form.purchase_req_no || ''}</td>
               <th>신청자</th>
               <td>{edit ? <input className="cell-input" value={form.applicant || ''} onChange={e => setForm(f => ({ ...f, applicant: e.target.value }))}/> : form.applicant}</td>
             </tr>

@@ -70,9 +70,21 @@ const nextDocNo = async (execFn, dateStr) => {
 // 목록 (최신순)
 router.get('/', async (req, res, next) => {
   try {
+    /* 양식의 '구매품의NO' 칸에 넣을 **진짜 품의번호**를 함께 읽는다.
+     *
+     * 예전엔 화면이 그 칸에 결의서 자기 번호(DJ-…)를 넣었다. 넣을 값이 없어서였는데,
+     * 앱에는 구매품의서(GM-…)가 따로 있어서 결재하는 사람이 두 가지로 오해했다 —
+     * "품의번호가 왜 결의서 번호랑 같지" 이거나, 반대로 **품의와 연결된 줄 알고** 넘어간다.
+     * 값을 찾을 길은 이미 있었다: 구매품의서가 미지급금을 만들면 purchase_reqs.invoice_id 가
+     * 남고, 결의서도 같은 청구서를 가리킨다(er.invoice_id). 한 번 이으면 진짜 번호가 나온다.
+     * ⚠ 품의를 안 거친 지출은 **빈 칸**이다. 없는 걸 있는 것처럼 적지 않는다
+     *   (인쇄해서 손으로 적는 자리다). */
     const [rows] = await req.db.execute(
-      `SELECT er.*, v.name AS vendor_name2 FROM expense_resolutions er
-       LEFT JOIN vendors v ON er.vendor_id = v.id ORDER BY er.created_at DESC`)
+      `SELECT er.*, v.name AS vendor_name2, pr.doc_no AS purchase_req_no
+         FROM expense_resolutions er
+         LEFT JOIN vendors v ON er.vendor_id = v.id
+         LEFT JOIN purchase_reqs pr ON pr.invoice_id = er.invoice_id
+        ORDER BY er.created_at DESC`)
     res.json(rows.map(adapt))
   } catch (e) { next(e) }
 })
@@ -124,7 +136,12 @@ router.get('/candidates', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const [[r]] = await req.db.execute('SELECT * FROM expense_resolutions WHERE id = ?', [req.params.id])
+    // 목록과 같은 규칙으로 진짜 품의번호를 함께 읽는다(위 주석 참고)
+    const [[r]] = await req.db.execute(
+      `SELECT er.*, pr.doc_no AS purchase_req_no
+         FROM expense_resolutions er
+         LEFT JOIN purchase_reqs pr ON pr.invoice_id = er.invoice_id
+        WHERE er.id = ?`, [req.params.id])
     if (!r) return res.status(404).json({ error: 'Not found' })
     res.json(adapt(r))
   } catch (e) { next(e) }
