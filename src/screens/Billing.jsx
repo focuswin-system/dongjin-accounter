@@ -988,7 +988,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
       const go = await confirm({
         tone: 'brand', icon: <Icon.Briefcase size={22}/>,
         title: `${label}를 안 골랐어요`,
-        body: `${label}를 붙이면 건별 수익·원가와 미${form.kind === 'issued' ? '수' : '지급'}금이 자동으로 잡혀요.\n`
+        body: `${label}를 붙이면 건별 ${form.kind === 'issued' ? '수익' : '원가'}와 미${form.kind === 'issued' ? '수' : '지급'}금이 자동으로 잡혀요.\n`
             + `경비·공과금처럼 ${label} 없이 오가는 청구서면 그대로 등록하세요.`,
         confirmLabel: `${label} 고르기`,
         cancelLabel: '없이 등록',
@@ -1123,8 +1123,12 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
               onAddNew={makeOrderHere}
               addNewLabel={`이 이름으로 ${form.kind === 'issued' ? '수주' : '발주'} 만들기`}
               placeholder={contractOptions.length ? "해당 주문이 있으면 선택하세요" : "등록된 주문이 없어요"}/>
+            {/* ⚠ 이 안내는 **저장 때 묻는 말과 같은 방향**이어야 한다. 예전엔 "주문 없이
+                발행·수취하는 청구서는 비워두세요"라고 비우기를 권해 놓고, 정작 저장하면
+                "수주를 안 골랐어요"라고 물었다 — 안내와 확인창이 서로 반대말을 했다.
+                붙였을 때 얻는 것을 먼저 적고, 비우는 건 예외로 남긴다. */}
             <div className="text-sm text-muted2" style={{ marginTop: 4 }}>
-              주문 없이 발행·수취하는 청구서는 비워두세요.
+              {form.kind === 'issued' ? '수주를 붙이면 건별 수익과 미수금이' : '발주를 붙이면 건별 원가가'} 잡혀요. 없는 건이면 비워두세요.
             </div>
           </div>
           {/* 납품일 — 청구서 한 장에 하나. 품목표에서 줄마다 받던 것을 여기로 올렸다. */}

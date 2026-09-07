@@ -614,7 +614,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       const go = await confirm({
         tone: 'brand', icon: <Icon.Briefcase size={22}/>,
         title: `${label}를 안 골랐어요`,
-        body: `${label}를 붙이면 건별 수익·원가와 미${kind === 'income' ? '수' : '지급'}금이 자동으로 잡혀요.\n`
+        body: `${label}를 붙이면 건별 ${kind === 'income' ? '수익' : '원가'}와 미${kind === 'income' ? '수' : '지급'}금이 자동으로 잡혀요.\n`
             + `경비·공과금처럼 ${label} 없이 오가는 돈이면 그대로 등록하세요.`,
         confirmLabel: `${label} 고르기`,
         cancelLabel: '없이 등록',
@@ -792,9 +792,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
             )}
             {(!compact || showOrderFields || form.contract || form.costContract) && <>
             <FormField label={kind === "income" ? "수주 (선택)" : "발주 (선택)"}
+              /* ⚠ 저장 때 묻는 말과 같은 방향으로 적는다. 예전 문구("있을 때만 고르세요")는
+                 드물게 쓰는 칸처럼 읽혔는데, 정작 저장하면 "안 골랐어요"라고 물었다. */
               hint={kind === "expense"
-                ? "이 돈이 나가는 근거 주문(외주·구매)이 있을 때만 고르세요. 경비·공과금처럼 주문 없이 쓰는 돈은 비워둡니다."
-                : "이 입금의 근거 주문이 있을 때만 고르세요. 없으면 비워둡니다."}>
+                ? "발주를 붙이면 건별 원가가 잡혀요. 경비·공과금처럼 주문 없이 쓰는 돈은 비워둡니다."
+                : "수주를 붙이면 건별 수익과 미수금이 잡혀요. 없는 건이면 비워둡니다."}>
               <Combobox value={form.contract} onChange={v => setForm({...form, contract: v})}
                 options={contractOpts}
                 placeholder={contractOpts.length
