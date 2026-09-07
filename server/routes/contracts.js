@@ -1318,12 +1318,29 @@ router.put('/:id', async (req, res, next) => {
       recurringStopped = await stopRecurringOnModeChange(conn, req.params.id, kstToday())
     }
     /* 단건으로 바뀌었는데 청구 일정이 없으면 만들어 준다(POST 와 같은 규칙).
-       이미 있으면 건드리지 않는다 — 사용자가 선급/기성/잔금으로 쪼갠 걸 덮으면 안 된다. */
+       이미 있으면 건드리지 않는다 — 사용자가 선급/기성/잔금으로 쪼갠 걸 덮으면 안 된다.
+
+       ⚠ **이미 다 끊은 주문에는 만들지 않는다.** POST 는 skip_schedule 로 막아 두었는데
+         여기가 안 막혀 있었다 — 청구서 폼에서 만든 주문을 주문 화면에서 한 번 저장만 해도
+         '일시' 회차가 되살아나, 이미 끊은 청구서를 또 끊으라고 떴다(skip_schedule 이
+         편집 한 번에 무효가 됐다).
+         판정은 **회차에 안 걸린 청구서 합계**로 한다. 그게 주문 금액을 채우면 더 끊을 게
+         없다는 뜻이다. 덜 찼으면 만든다 — 남은 청구를 없애면 못 받는 돈이 되기 때문이고,
+         그렇게 만들어진 회차는 '이미 발행한 것 같아요' 구획이 받아 사람이 판단한다.
+       ⚠ 공급가끼리 견준다. 주문 금액도 회차 금액도 공급가라, 총액(VAT 포함)과 견주면
+         과세 주문에서 10%만큼 늘 모자라 보여 회차가 계속 생긴다. */
     if (f.billing_mode !== 'recurring' && f.billing_mode !== 'progress' && Number(f.amount) > 0) {
       const [[ms]] = await conn.execute(
         `SELECT COUNT(*) AS n FROM milestones WHERE contract_id = ? AND (invoice_id IS NULL OR invoice_id = '')`,
         [req.params.id])
-      if (Number(ms.n) === 0) {
+      const [[iv]] = await conn.execute(
+        `SELECT COALESCE(SUM(i.supply_amount),0) AS supply
+           FROM invoices i
+          WHERE i.contract_id = ?
+            AND NOT EXISTS (SELECT 1 FROM milestones m2 WHERE m2.invoice_id = i.id)`,
+        [req.params.id])
+      const covered = Number(iv.supply) >= Number(f.amount)
+      if (Number(ms.n) === 0 && !covered) {
         await conn.execute(
           'INSERT INTO milestones (id, contract_id, type, ratio, amount, due_date, status) VALUES (?,?,?,?,?,?,?)',
           [randomUUID(), req.params.id, '일시', 100, f.amount, start_date || null, '예정'])
