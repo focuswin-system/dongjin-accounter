@@ -407,6 +407,32 @@ router.post('/schedule/:id/link-invoice', async (req, res, next) => {
   finally { conn.release() }
 })
 
+/* 이 주문에서 **아직 안 끊은 회차** — 청구서를 만들 때 맨 앞에서 고르라고 내주는 목록.
+ *
+ * ── 왜 필요한가 ──
+ * 청구서를 만드는 길이 둘이었다. 발행예정에서 회차를 눌러 만들면 회차와 이어지는데,
+ * 청구서 폼에서 만들면 **폼이 회차를 몰라** 안 이어졌다. 그래서 같은 돈을 두 번 적거나,
+ * 이미 끊은 청구서가 '아직 안 끊음'으로 계속 남았다.
+ * 폼이 맨 앞에서 이 목록을 보여주면 그 틈이 없어진다 — 고르면 값이 채워지고 저장하며 이어진다.
+ *
+ * ⚠ 도래한 것만 거르지 않는다. 앞당겨 끊는 일(선청구)은 정상 업무다.
+ */
+router.get('/:id/schedule/unissued', async (req, res, next) => {
+  try {
+    const [rows] = await req.db.execute(
+      `SELECT m.id, m.type, m.amount, m.due_date, c.vat_mode
+         FROM milestones m JOIN contracts c ON c.id = m.contract_id
+        WHERE m.contract_id = ?
+          AND m.status = '예정' AND (m.invoice_id IS NULL OR m.invoice_id = '')
+        ORDER BY m.due_date`, [req.params.id])
+    // 부가세는 서버가 주문 vat_mode 로 계산한다 — 화면이 0.1 을 박으면 면세에 유령 VAT 가 붙는다
+    res.json(rows.map(r => {
+      const amount = Number(r.amount)
+      return { id: r.id, type: r.type, due_date: r.due_date, amount, vat: vatOf(amount, r.vat_mode) }
+    }))
+  } catch (e) { next(e) }
+})
+
 // 주문 목록 엑셀(.xlsx) — 주문 목록 / 갱신 관리 / 정기 주문 3개 시트.
 // CSV로는 서식·요약·시트 분리가 안 돼서 서버에서 만들어 내려준다.
 router.get('/export.xlsx', async (req, res, next) => {

@@ -781,7 +781,9 @@ function invoiceCreateError({ kind, supply_amount, vat_amount }) {
 router.post('/', async (req, res, next) => {
   try {
     const { kind, vendor_id, contract_id, issued_at, due_at, status, account_id, memo, tax_type,
-            category, account_code } = req.body
+            category, account_code,
+            // 폼이 맨 앞에서 고른 청구 일정(선택) — 있으면 이 청구서로 그 회차를 닫는다
+            milestone_id } = req.body
     /* 품목 내역이 있으면 **그 합계가 공급가액이다.** 화면도 그렇게 동작하지만(공급가액 칸이 잠긴다)
        서버에서도 확정한다 — 두 숫자를 각자 보내면 명세서와 청구서가 다른 말을 하는 청구서가
        저장될 수 있고, 그건 나중에 어느 쪽이 맞는지 알 방법이 없다. */
@@ -833,15 +835,33 @@ router.post('/', async (req, res, next) => {
      * 이미 발행한 청구서의 전표는 그대로 남아야 한다). */
     { const fe = fundAccountError(account_code); if (fe) return res.status(400).json({ error: fe }) }
     const invAcctCode = await resolveInvoiceAcctCode(req.db, account_code, category, kind)
-    /* 사람이 그 자리에서 만드는 청구서. 닫을 회차가 없다 —
-       정기 회차를 대신해 친 것이라도 어느 회차인지는 사람만 안다(대사에서 잇는다). */
+    /* 어느 회차를 끊는 건지 폼이 알려 줬으면 **여기서 닫는다.**
+     *
+     * 예전엔 무조건 origin:'manual' 이었다 — 폼으로 만든 청구서는 회차를 모르니
+     * 발행예정에 그 회차가 그대로 남았고, 그대로 누르면 같은 건을 두 번 청구했다.
+     * 청구서 폼이 맨 앞에서 회차를 고르게 됐으므로(화면), 그 선택을 여기까지 들고 온다.
+     * ⚠ 닫는 일은 createInvoice 가 한다 — 창구마다 뒤처리를 옮겨 적으면 반드시 한 곳을
+     *   빠뜨린다(실제로 그랬다). 여기서는 **고른 회차가 진짜 이 청구서의 것인지만** 본다. */
+    let origin = { type: 'manual' }
+    if (milestone_id) {
+      const [[ms]] = await req.db.execute(
+        "SELECT id, contract_id, status, invoice_id FROM milestones WHERE id = ?", [milestone_id])
+      if (!ms) return res.status(404).json({ error: '고른 청구 일정을 찾을 수 없어요' })
+      if (String(ms.contract_id || '') !== String(contract_id || '')) {
+        return res.status(409).json({ error: '고른 청구 일정이 이 주문의 것이 아니에요' })
+      }
+      if (ms.status !== '예정' || (ms.invoice_id && ms.invoice_id !== '')) {
+        return res.status(409).json({ error: '이미 발행된 청구 일정이에요' })
+      }
+      origin = { type: 'milestone', milestoneId: milestone_id, paid: false }
+    }
     await createInvoice(req.db, {
       id, kind, invoiceNo: invoice_no,
       vendorId: vendor_id, contractId: contract_id,
       supply: supply_amount, vat: vat_amount, total: total_amount,
       issuedAt: issued_at, dueAt: due_at, status,
       accountId: account_id, memo, taxType, category, accountCode: invAcctCode,
-      origin: { type: 'manual' },
+      origin,
     })
     // 거래명세서식 품목 내역(선택) — 없으면 총액만 있는 기존 청구서 그대로다
     const lineCount = await writeInvoiceLines(req.db, id, req.body.lines)

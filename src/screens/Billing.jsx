@@ -796,6 +796,15 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   /* ⚠ handleSave 가 **비동기**가 됐다(주문 확인창을 기다린다). 그동안 등록 버튼이 살아
      있으면 두 번 눌러 **청구서가 두 장** 생긴다. 예전엔 동기라 없던 문제다. */
   const [saving, setSaving] = useState(false)
+  /* 고른 주문에서 **아직 안 끊은 회차**와, 그중 지금 끊는 것.
+   *
+   * 예전엔 청구서를 만드는 길이 둘이었다 — 발행예정에서 회차를 눌러 만들면 회차와
+   * 이어지는데, 이 폼으로 만들면 폼이 회차를 몰라 안 이어졌다. 그래서 같은 돈을 두 번
+   * 적거나, 이미 끊은 청구서가 '아직 안 끊음'으로 계속 남았다.
+   * 주문을 고르는 순간 여기에 회차가 뜨고, 고르면 금액·기한이 채워지고 저장하며 닫힌다.
+   * 길이 하나가 되면 어긋날 자리가 없다. */
+  const [msList, setMsList] = useState([])
+  const [pickedMs, setPickedMs] = useState('')
   // 거래명세서식 품목 내역(선택) — 있으면 합계가 공급가액이 된다
   const [lines, setLines] = useState([])
   /* 납품일은 **청구서 한 장에 하나**다(선택 입력).
@@ -926,6 +935,40 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
    * 고른 사람은 분류한 줄 알지만 아무 데도 안 남는다 → 빈칸과 결과가 같으면서 거짓말만 한다. 뺀다. */
   // 값은 **id**(위 거래처와 같은 이유). 이름이 겹치면 라벨에 거래처를 붙여 갈리게 한다.
   // 거래처를 이름 앞에 늘 붙인다 — 고른 뒤에도 어느 회사 주문인지 보여야 한다(거래 폼과 같은 규칙)
+  /* 주문을 고르면 그 주문의 **안 끊은 회차**를 불러온다.
+     ⚠ 수정 중일 때는 안 부른다 — 이미 발행된 청구서라 닫을 회차가 없고,
+       괜히 목록을 띄우면 "이걸 또 골라야 하나"가 된다. */
+  useEffect(() => {
+    if (editInvoice || !form.contract) { setMsList([]); setPickedMs(''); return }
+    /* 주문에는 거래처가 이미 있다 — **비어 있으면 채워 준다.**
+       주문을 고르고도 거래처를 또 고르게 하면, 아는 걸 두 번 묻는 셈이다.
+       ⚠ 이미 고른 거래처가 있으면 덮지 않는다. 사람이 고른 값을 소리 없이 바꾸면
+         무엇이 저장될지 알 수 없게 된다(다르면 그건 사람이 볼 일이다). */
+    const con = contracts.find(c => c.id === form.contract)
+    if (con?.vendor_id) setForm(f => (f.vendor ? f : { ...f, vendor: con.vendor_id }))
+
+    let alive = true
+    api.getUnissuedSchedule(form.contract).then(rows => {
+      if (!alive) return
+      setMsList(rows || [])
+      setPickedMs('')
+    })
+    return () => { alive = false }
+  }, [form.contract, editInvoice, contracts])
+
+  /* 회차를 고르면 금액·기한을 그대로 가져온다. '직접 입력'(빈 값)이면 건드리지 않는다 —
+     사용자가 이미 적어 둔 금액을 지우면 안 된다. */
+  const pickMilestone = (id) => {
+    setPickedMs(id)
+    const m = msList.find(x => x.id === id)
+    if (!m) return
+    setForm(f => ({ ...f,
+      supplyAmount: String(m.amount || 0),
+      dueAt: m.due_date ? String(m.due_date).slice(0, 10) : f.dueAt,
+      memo: f.memo || m.type || '',
+    }))
+  }
+
   const contractOptions = contracts.map(c => ({
     value: c.id,
     label: c.vendor_name ? `${c.vendor_name} · ${c.name}` : c.name,
@@ -1014,6 +1057,10 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     const contractObj = byIdOrUniqueName(contracts, form.contract)
     onSave({
       id: editInvoice?.id,
+      /* 어느 회차를 끊는 건지 서버까지 들고 간다 — 서버가 그 회차를 닫는다.
+         품목을 넣어 금액이 회차와 달라져도 그대로 보낸다("이 청구서로 그 회차를 끝냈다"는
+         뜻이지 금액이 같아야 한다는 뜻이 아니다). */
+      milestone_id: pickedMs || null,
       kind: form.kind,
       vendor_id: vendorObj?.id || null,
       contract_id: contractObj?.id || null,
@@ -1135,6 +1182,43 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
             <div className="text-sm text-muted2" style={{ marginTop: 4 }}>
               {form.kind === 'issued' ? '수주를 붙이면 건별 수익과 미수금이' : '발주를 붙이면 건별 원가가'} 잡혀요. 없는 건이면 비워두세요.
             </div>
+
+            {/* ── 아직 안 끊은 회차 ────────────────────────────────────────────
+                주문을 고르는 순간 여기 뜬다. 고르면 금액·기한이 채워지고, 저장하며
+                그 회차가 닫힌다.
+                ⚠ 이게 없던 시절엔 청구서를 만드는 길이 둘이었다 — 발행예정에서 만들면
+                  회차와 이어지는데 이 폼으로 만들면 안 이어져, 같은 돈을 두 번 적거나
+                  이미 끊은 청구서가 '아직 안 끊음'으로 남았다. 길을 하나로 모은다.
+                ⚠ 기본값은 **아무것도 안 고른 상태**다. 미리 골라 두면 회차와 무관한
+                  청구서(추가 작업분 등)를 끊으려던 사람이 모르고 회차를 닫는다. */}
+            {msList.length > 0 && (
+              <div className="card" style={{ marginTop: 10, padding: '10px 12px' }}>
+                <div className="row gap-6" style={{ alignItems: 'baseline', marginBottom: 6 }}>
+                  <span className="fw-700 text-sm">아직 안 끊은 회차</span>
+                  <span className="badge outline" style={{ fontSize: 10 }}>{msList.length}건</span>
+                  <span className="text-xs text-muted2">고르면 금액·기한을 가져와요</span>
+                </div>
+                {msList.map(m => (
+                  <label key={m.id} className="row gap-8"
+                         style={{ alignItems: 'center', marginTop: 4, cursor: 'pointer' }}>
+                    <input type="radio" name="ms-pick" checked={pickedMs === m.id}
+                           onChange={() => pickMilestone(m.id)}/>
+                    <span className="text-sm ellipsis" style={{ minWidth: 0 }}>{m.type}</span>
+                    <span className="text-xs text-muted2" style={{ whiteSpace: 'nowrap' }}>
+                      {fmtDateShort(m.due_date) || '기일 없음'}
+                    </span>
+                    <span className="text-sm num" style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>
+                      {fmtNum(m.amount + m.vat)}
+                    </span>
+                  </label>
+                ))}
+                <label className="row gap-8" style={{ alignItems: 'center', marginTop: 6, cursor: 'pointer' }}>
+                  <input type="radio" name="ms-pick" checked={!pickedMs}
+                         onChange={() => setPickedMs('')}/>
+                  <span className="text-sm text-muted">회차 말고 직접 입력</span>
+                </label>
+              </div>
+            )}
           </div>
           {/* 납품일 — 청구서 한 장에 하나. 품목표에서 줄마다 받던 것을 여기로 올렸다. */}
           <div>

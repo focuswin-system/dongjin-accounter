@@ -1681,6 +1681,11 @@ export const api = {
       return { ok: true }
     } catch (e) { return { ok: false, error: e.message } }
   },
+  /* 이 주문에서 아직 안 끊은 회차 — 청구서 폼이 맨 앞에서 고르라고 보여준다.
+     실패하면 빈 배열이다(회차를 못 불러왔다고 청구서를 못 만들면 안 된다). */
+  async getUnissuedSchedule(contractId) {
+    try { return await req(`/contracts/${contractId}/schedule/unissued`) } catch { return [] }
+  },
   async getPendingSchedules(forKind) {
     try { return await req(`/contracts/schedule/pending${forKind ? `?for=${forKind}` : ''}`) } catch { return [] }
   },
