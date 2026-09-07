@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Icon, fmtNum, fmtDateShort, vendorLabel, useToast, Combobox, Drawer, MoneyInput, localToday, DateInput } from '../lib/ui'
+import { Icon, fmtNum, fmtDateShort, vendorLabel, useToast, useConfirm, Combobox, Drawer, MoneyInput, localToday, DateInput } from '../lib/ui'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { withMainFirst, isMainAccount, MAIN_BADGE } from '../lib/mainAccount'
@@ -117,6 +117,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   compact = false,
   editTxn, onClose, onSave }) => {
   const toast = useToast();
+  const { confirm } = useConfirm();
   const [kind, setKind] = useState(initialKind);
   const [form, setForm] = useState(initialFormFor(initialKind, initialContract, "", initialCostContract));
   const [showMore, setShowMore] = useState(false);
@@ -452,6 +453,69 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   /* 안내에서 고른 청구서에 바로 정산한다.
      거래를 따로 만들고 나중에 잇는 게 아니라, 청구서 정산으로 **한 번에** 만든다 —
      두 벌로 만들면 그게 바로 우리가 막으려던 중복이다. */
+  /* ── 여기서 바로 주문 만들기 ────────────────────────────────────────
+   * 이 앱의 값어치는 계약(영업)과 회계를 잇는 데 있다 — 계약별 원가율, 자금 흐름.
+   * 그런데 회계담당자는 "수주·발주 입력은 내 일이 아니다"라고 여겨 계약을 안 만든다.
+   * 계약이 비면 보여줄 게 없고, 그러면 그냥 흔한 회계 프로그램이 된다.
+   *
+   * 예전엔 여기서 이름을 쳐도 **주문이 되지 않고** doc_no 참조로만 남았고,
+   * "주문 화면에서 등록 후 다시 연결해주세요"라고 안내했다. 하던 일을 끊고 다른 화면으로
+   * 가라는 말이라 아무도 안 했다.
+   *
+   * 그런데 주문에 필요한 값은 **이미 이 폼에 다 있다** — 거래처·금액·날짜.
+   * 이름 하나만 더 있으면 된다. 그래서 화면을 옮기지 않고 그 자리에서 만든다.
+   *
+   * ⚠ 조용히 만들지 않는다. 주문은 실적·원가율의 단위라 사람이 알고 만들어야 한다.
+   *   대신 물어보는 값은 없다(다 채워져 있다) — 확인 한 번이면 끝난다.
+   * ⚠ 거절하면 예전처럼 참조로만 남긴다. 정말 주문이 아닌 경비·공과금도 있기 때문이다. */
+  const makeOrderHere = async (q) => {
+    const name = String(q || '').trim()
+    if (!name) return
+    const label = kind === 'income' ? '수주' : '발주'
+    const v = vendors.find(x => x.id === form.vendor)
+    const amount = Number(String(form.amount ?? '').replace(/[^0-9]/g, '')) || 0
+
+    /* 거래처가 없으면 주문을 만들 수 없다 — 주문은 '누구와의 약속'이라 거래처가 뼈대다.
+       (서버는 vendor_id 를 null 로도 받지만, 그렇게 만든 주문은 미수금·실적이 안 잡힌다) */
+    if (!v) {
+      setForm({ ...form, contract: name })
+      toast.push(`거래처를 먼저 고르면 ${label}로 만들 수 있어요. 지금은 참조로만 적어둡니다.`, { tone: 'warn' })
+      return
+    }
+
+    const ok = await confirm({
+      tone: 'brand', icon: <Icon.Briefcase size={22}/>,
+      title: `${label} 만들기`,
+      body: `"${name}" ${label}를 지금 만들어 이 거래에 붙일까요?\n`
+          + `거래처 ${v.name} · 금액 ${fmtNum(amount)}원 · 시작일 ${form.date}\n`
+          + `나머지(기간·청구방식)는 나중에 ${label} 화면에서 채우면 돼요.`,
+      confirmLabel: `${label} 만들기`,
+      cancelLabel: '참조로만 적기',
+    })
+    if (!ok) {
+      // 거절 — 예전 동작 그대로. 무슨 일이 일어나는지 그대로 말한다.
+      setForm({ ...form, contract: name })
+      toast.push(`"${name}"는 참조로만 적어둡니다. ${label} 실적에는 안 잡혀요.`, { tone: 'warn', duration: 5200 })
+      return
+    }
+
+    setBusy(true)
+    const r = await api.addContract({
+      name, vendor_id: v.id, amount, start_date: form.date, status: '진행중',
+    })
+    setBusy(false)
+    if (!r.ok) { toast.push(r.error || `${label}를 만들지 못했어요`, { tone: 'warn' }); return }
+
+    /* 만든 주문을 **바로 이 거래에 붙인다.** 만들어만 두고 안 붙이면 사람은 붙은 줄 알고
+       넘어가고, 그 매출은 주문 실적에서 통째로 빠진다(예전 참조 방식이 그랬다). */
+    /* contractOpts 는 contracts 에서 파생되는 useMemo 다 — 원본에 넣어야 목록에 뜬다.
+       모양을 맞춘다(is_purchase 로 수주/발주를 가르고, vendor_name 이 라벨 앞에 붙는다). */
+    setContracts(prev => [{ id: r.id, name, vendor_name: v.name, vendor_id: v.id,
+                            is_purchase: kind === 'expense', status: '진행중', amount }, ...prev])
+    setForm({ ...form, contract: r.id })
+    toast.push(`${label} "${name}"를 만들고 이 거래에 붙였어요`)
+  }
+
   const settleOnInvoice = async (iv) => {
     const amount = Number(String(form.amount ?? '').replace(/[^0-9]/g, '')) || 0
     const acc = accounts.filter(a => a.name === form.account)
@@ -711,11 +775,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                    이 거래의 '참조'(doc_no)로만 남는다 — 주문별 매출·원가 집계에는 잡히지 않는다.
                    예전엔 "주문을 새로 등록했어요"라고 알려서, 등록된 줄 알고 넘어가면
                    그 매출이 주문 실적에서 통째로 빠졌다. 무슨 일이 일어나는지 그대로 말한다. */
-                onAddNew={(q) => {
-                  setForm({ ...form, contract: q })
-                  toast.push(`"${q}"는 참조로만 적어둡니다. 주문 실적에 넣으려면 주문 화면에서 등록 후 다시 연결해주세요.`, { tone: 'warn' })
-                }}
-                addNewLabel="주문 없이 이 이름으로 적어두기"/>
+                onAddNew={makeOrderHere}
+                addNewLabel={`이 이름으로 ${kind === 'income' ? '수주' : '발주'} 만들기`}/>
             </FormField>
 
             {/* 원가 귀속 — 이 지출이 어느 매출건의 원가인지. 외주비는 외주주문에 '지급'되면서 그 프로젝트의 '원가'가 된다.
