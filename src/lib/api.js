@@ -1672,6 +1672,15 @@ export const api = {
   },
 
   // 발행 예정(대기) 청구 일정 (for: 'sales'|'purchase')
+  /* 회차를 **이미 있는 청구서**로 잇는다. invoiceId 를 null 로 주면 되돌린다.
+     오류 메시지는 그대로 올린다 — '남의 주문 청구서'·'이미 이어짐'처럼 사람이 알아야 할 이유다. */
+  async linkScheduleInvoice(milestoneId, invoiceId) {
+    try {
+      await req(`/contracts/schedule/${milestoneId}/link-invoice`,
+        { method: 'POST', body: { invoice_id: invoiceId || null } })
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
   async getPendingSchedules(forKind) {
     try { return await req(`/contracts/schedule/pending${forKind ? `?for=${forKind}` : ''}`) } catch { return [] }
   },

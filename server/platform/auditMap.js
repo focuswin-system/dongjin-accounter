@@ -58,6 +58,8 @@ const AUDIT_RULES = [
   // ── 주문 ── 기성·마일스톤 발행은 청구서를 만든다
   { m: 'POST',   re: /^\/api\/contracts\/([^/]+)\/progress-invoice$/,   res: 'invoice',  action: 'issue',  target: 1 },
   { m: 'POST',   re: /^\/api\/contracts\/schedule\/([^/]+)\/issue$/,    res: 'invoice',  action: 'issue',  target: 1 },
+  // 회차를 이미 있는 청구서로 잇기/되돌리기 — 주문별 실적과 발행예정 목록이 바뀐다
+  { m: 'POST',   re: /^\/api\/contracts\/schedule\/([^/]+)\/link-invoice$/,    res: 'contract', action: 'schedule_link',  target: 1 },
   /* 청구 일정 삭제 — 앞으로 받을 돈이 목록에서 사라지는 일이라 기록이 남아야 한다.
      ⚠ `/:id` 규칙보다 **위**에 둔다. 아래에 두면 'milestones' 를 계약 id 로 읽는다. */
   { m: 'DELETE', re: /^\/api\/contracts\/milestones\/([^/]+)$/,         res: 'contract', action: 'schedule_delete', target: 1 },
@@ -272,6 +274,9 @@ const ACTION_LABELS = {
   match: '입금 연결', match_cancel: '입금 연결 해제',
   pay: '지급', pay_cancel: '지급 취소', pay_missed: '놓친 회차 납입', unpay: '납입 취소',
   schedule_delete: '청구 일정 삭제',
+  schedule_link: '청구 일정에 청구서 잇기',
+  // 주문 붙이기 — 청구서·거래를 몰아서 주문에 귀속시킨다(되돌리기도 같은 행위)
+  link_orders: '주문 붙이기', items_seed: '주문 단가표 채우기',
   process: '결의서 처리', mature: '만기 처리',
   repay: '상환', repay_missed: '놓친 회차 상환', repay_cancel: '상환 취소',
   // 대여금·투자 회수 — 차입금 상환의 거울상

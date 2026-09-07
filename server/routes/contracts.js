@@ -13,6 +13,7 @@ const { recurHistory } = require('../lib/recurHistory')
 const { kstDate } = require('../db')
 
 const { createInvoice } = require('../lib/invoiceCreate')
+const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
 const { linkCandidates } = require('../lib/orderLink')
 
 const router = Router()
@@ -296,6 +297,33 @@ router.get('/schedule/pending', async (req, res, next) => {
     else if (forKind === 'sales') sql += " AND (v.gubu IS NULL OR v.gubu = 'B')"
     sql += ' ORDER BY m.due_date'
     const [rows] = await req.db.execute(sql)
+
+    /* ── 이 주문에 붙어 있으나 **어느 회차에도 안 걸린 청구서** ────────────────
+     * 임포트(홈택스)·수시 발행·나중에 '주문 붙이기'로 들어온 청구서는 회차를 닫지 않는다.
+     * 자동으로 닫지 않는 건 맞는 선택이다 — 같은 달의 별개 건을 회차로 착각하면 진짜
+     * 청구를 빠뜨려 **못 받는 돈**이 된다(lib/invoiceCreate.js 가 import·manual 에
+     * 뒤처리를 안 두는 이유와 같다).
+     * 다만 그 대가로 **이미 끊은 청구서가 '아직 안 끊음'으로 계속 뜬다.** 그래서 지우지
+     * 않고 후보만 들려 보낸다 — 어느 청구서가 어느 회차인지는 사람만 안다. */
+    const conIds = [...new Set(rows.map(r => r.contract_id))]
+    const loose = new Map()
+    if (conIds.length) {
+      const ph = conIds.map(() => '?').join(',')
+      const [ls] = await req.db.execute(
+        `SELECT i.id, i.invoice_no, i.issued_at, i.total_amount, i.contract_id
+           FROM invoices i
+           JOIN contracts c2 ON c2.id = i.contract_id
+           LEFT JOIN vendors v2 ON v2.id = c2.vendor_id
+          WHERE i.contract_id IN (${ph})
+            AND i.kind = IF(v2.gubu IN ('A','E'), 'received', 'issued')
+            AND NOT EXISTS (SELECT 1 FROM milestones ms WHERE ms.invoice_id = i.id)
+          ORDER BY i.issued_at DESC`, conIds)
+      for (const x of ls) {
+        if (!loose.has(x.contract_id)) loose.set(x.contract_id, [])
+        loose.get(x.contract_id).push({ ...x, total_amount: Number(x.total_amount) })
+      }
+    }
+
     // vat를 서버가 주문 vat_mode로 계산해 내려준다(면세=0). 화면이 0.1을 하드코딩하면 면세에 유령 VAT가 붙는다.
     res.json(rows.map(r => {
       const amount = Number(r.amount)
@@ -309,10 +337,74 @@ router.get('/schedule/pending', async (req, res, next) => {
       const setup = r.contract_setup_epoch != null
         ? kstDate(Number(r.contract_setup_epoch) * 1000) : ''
       const due = String(r.due_date || '').slice(0, 10)
-      const state = (setup && due && due < setup) ? 'backfill' : 'due'
-      return { ...r, amount, vat: vatOf(amount, r.vat_mode), contract_setup_date: setup, state }
+      /* 이을 수 있는 청구서가 있으면 그쪽이 먼저다. '소급'은 "이건 어떻게 됐더라"이고
+         이건 "혹시 이거 아닌가요"라 **할 일이 분명하다** — 더 분명한 쪽으로 보낸다. */
+      const cands = loose.get(r.contract_id) || []
+      const state = cands.length ? 'maybe_issued'
+        : (setup && due && due < setup) ? 'backfill' : 'due'
+      return { ...r, amount, vat: vatOf(amount, r.vat_mode), contract_setup_date: setup, state,
+               loose_invoices: cands }
     }))
   } catch (e) { next(e) }
+})
+
+/* 회차를 **이미 있는 청구서**로 잇는다(invoice_id 를 비워 보내면 되돌린다).
+ *
+ * ── 왜 필요한가 ──
+ * 회차는 '끊기로 한 것', 청구서는 '끊은 것'이다. 회차를 통해 발행하면 둘이 저절로
+ * 이어지지만, 임포트·수시 발행·나중에 주문 붙이기로 들어온 청구서는 이어지지 않는다.
+ * 그러면 이미 끊은 돈이 '아직 안 끊음'으로 발행예정에 남아, 그대로 누르면 **같은 건을
+ * 두 번 청구**한다. 사람이 이어 줄 길이 여기다.
+ *
+ * ⚠ 상태는 여기서 정하지 않는다. '발행' 같은 값을 새로 만들면 청구 일정 화면이 못 읽는다 —
+ *   회차 상태는 **청구서의 정산 누계**가 정하고, 그 규칙은 lib/invoiceStatus.js 한 곳에 있다.
+ * ⚠ 되돌릴 길을 같이 연다. 주문별 실적이 바뀌는 일이라 "잘못 눌렀다"가 반드시 나오고,
+ *   돌아갈 길이 없으면 아무도 안 누른다.
+ */
+router.post('/schedule/:id/link-invoice', async (req, res, next) => {
+  const invoiceId = req.body.invoice_id || null
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [[ms]] = await conn.execute(
+      `SELECT m.id, m.contract_id, m.invoice_id, m.amount
+         FROM milestones m WHERE m.id = ? FOR UPDATE`, [req.params.id])
+    if (!ms) { await rollbackQuietly(conn); return res.status(404).json({ error: '청구 일정을 찾을 수 없어요' }) }
+
+    // 되돌리기
+    if (!invoiceId) {
+      if (!ms.invoice_id) {
+        await rollbackQuietly(conn); return res.status(400).json({ error: '이 회차엔 이어진 청구서가 없어요' })
+      }
+      await conn.execute("UPDATE milestones SET status = '예정', invoice_id = NULL WHERE id = ?", [req.params.id])
+      await conn.commit()
+      return res.json({ ok: true, unlinked: true })
+    }
+
+    if (ms.invoice_id) {
+      await rollbackQuietly(conn); return res.status(409).json({ error: '이미 청구서가 이어진 회차예요' })
+    }
+    const [[inv]] = await conn.execute(
+      'SELECT id, contract_id, total_amount FROM invoices WHERE id = ? FOR UPDATE', [invoiceId])
+    if (!inv) { await rollbackQuietly(conn); return res.status(404).json({ error: '청구서를 찾을 수 없어요' }) }
+    /* 다른 주문의 청구서는 못 잇는다 — 이으면 그 주문의 실적이 남의 것을 먹는다. */
+    if (String(inv.contract_id || '') !== String(ms.contract_id)) {
+      await rollbackQuietly(conn); return res.status(409).json({ error: '이 주문의 청구서가 아니에요' })
+    }
+    /* 한 청구서가 두 회차를 닫으면 안 된다 — 닫힌 만큼 청구가 사라진다. */
+    const [[dup]] = await conn.execute(
+      'SELECT COUNT(*) AS n FROM milestones WHERE invoice_id = ?', [invoiceId])
+    if (Number(dup.n) > 0) {
+      await rollbackQuietly(conn); return res.status(409).json({ error: '이 청구서는 이미 다른 회차에 이어져 있어요' })
+    }
+
+    await conn.execute('UPDATE milestones SET invoice_id = ? WHERE id = ?', [invoiceId, req.params.id])
+    await conn.commit()
+    // 커밋 뒤에 상태를 맞춘다(같은 행을 두 연결로 잡지 않게)
+    await recalcInvoiceStatus(req.db, invoiceId)
+    res.json({ ok: true })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
 })
 
 // 주문 목록 엑셀(.xlsx) — 주문 목록 / 갱신 관리 / 정기 주문 3개 시트.

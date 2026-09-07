@@ -24,6 +24,7 @@ import { api } from '../lib/api'
 import { quickAddCategory } from '../lib/quickAdd'
 import { vatOf } from '../lib/vatRate'
 import { ReconcilePanel } from '../lib/components/ReconcilePanel'
+import { MaybeIssuedPanel } from '../lib/components/MaybeIssuedPanel'
 
 const STATUS_TONE = {
   "입금 완료": "pos",  "지급 완료": "pos",
@@ -1533,6 +1534,9 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const [pending, setPending]   = useState([])
   // 계약 등록 전 날짜의 회차 — 예정과 섞으면 유령이 된다(위 load 주석 참고)
   const [pendingBackfill, setPendingBackfill] = useState([])
+  /* 이 주문에 회차와 안 이어진 청구서가 있는 회차 — 이미 끊었을 가능성이 크다.
+     발행예정 본목록에서 빼 둔다(섞으면 그대로 눌러 같은 건을 두 번 청구한다). */
+  const [pendingMaybe, setPendingMaybe] = useState([])
   const [recSummary, setRecSummary] = useState(null)
   const [paySum, setPaySum]     = useState(null)
   const [selected, setSelected] = useState(null)
@@ -1637,8 +1641,9 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
        "안 없어지는 것"이 되고 그때부터는 **진짜 놓친 회차도 안 보인다.**
        버리지는 않는다 — 이미 받았는지 아직인지는 사람만 안다. 아래 별도 구획으로 세운다. */
     setInvoices(rows); setRecSummary(rec); setPaySum(pay)
-    setPending(merged.filter(m => m.state !== 'backfill'))
+    setPending(merged.filter(m => m.state === 'due'))
     setPendingBackfill(merged.filter(m => m.state === 'backfill'))
+    setPendingMaybe(merged.filter(m => m.state === 'maybe_issued'))
     /* 상세를 열어둔 채 정산·취소를 하면 목록만 새로고침되고 열린 상세는 옛 값 그대로였다
        — 입금을 등록해도 이력·미수금이 그대로라 한 번 더 넣게 된다. 같은 건을 다시 물려준다.
        사라진 청구서(삭제)면 닫는다. */
@@ -1902,6 +1907,13 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   // 달 칩 → 그 달 1일~말일(lib/tableFilter). 이미 그 달이면 한 번 더 눌러 해제한다.
   const activeMonth = activeMonthOf(pendRange)
   const pickMonth = (month) => pendF.setRange(activeMonth === month ? { from: '', to: '' } : monthRange(month))
+
+  /* 발행예정 탭에 **무엇이든** 있나. 탭을 띄울지 정하는 값이다.
+     예전엔 pending(지금 끊을 것)만 셌다 — 그래서 소급 회차나 '이미 발행한 것 같은' 회차만
+     남으면 탭이 통째로 사라져 그 구획에 **갈 길이 없었다**(막다른 길).
+     ⚠ 요약 카드는 여기에 맞추지 않는다. 카드는 "이만큼 끊어야 한다"는 숫자라
+       소급·이미발행분을 더하면 없는 할 일을 만들어 낸다. */
+  const pendingAny = pending.length + pendingBackfill.length + pendingMaybe.length
 
   const pendingSelected = pendingFiltered.filter(p => pendChecked.includes(pendingKey(p)))
   const pendingSelTotal = pendingSelected.reduce((s, p) => s + pendingGross(p), 0)
@@ -2258,7 +2270,10 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
                 예전엔 필터 전 원본을 셌다 — 기간을 이번 달로 좁혀 표에 3건이 남아도 칩은 47을
                 달고 있었고, 어느 쪽이 맞는지 알 수 없었다. 각 탭은 자기 필터를 따로 들고 있으므로
                 (발행예정=pendF / 발행내역=listF+상태칩) 각자 걸러진 수를 센다. */}
-            {pending.length > 0 && (
+            {/* ⚠ **보고 있는 동안에는 안 사라진다.** 마지막 건을 처리하면 탭이 즉시 없어져,
+                방금 한 일을 되돌릴 버튼도 화면에서 같이 사라지고 어느 탭도 선택되지 않은
+                빈 화면만 남았다. 떠날 때 사라지면 된다. */}
+            {(pendingAny > 0 || view === "pending") && (
               <button role="tab" aria-selected={view === "pending"}
                 className={`seg-btn ${view === "pending" ? "active" : ""}`} onClick={() => setView("pending")}>
                 {isIssued ? "발행예정" : "등록예정"}
@@ -2382,6 +2397,12 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
               onIssue={(p) => issueSchedule(p, false)} onPaid={(p) => issueSchedule(p, true)}
               onOpenOrder={openOrder} onDeleteSchedule={deleteSchedule}
               select={{ ids: pendChecked, onChange: setPendChecked }}/>
+
+            {/* 이미 발행한 것 같은 회차 — 이 주문에 회차와 안 이어진 청구서가 있다.
+                소급 구획보다 **위**에 둔다: 소급은 "이건 어떻게 됐더라"이고 이건
+                "혹시 이거 아닌가요"라 할 일이 분명하다. */}
+            <MaybeIssuedPanel rows={pendingMaybe} isIssued={isIssued}
+              onChanged={load} onOpenOrder={openOrder}/>
 
             {/* 소급 회차 — 계약을 등록하기 전 날짜의 일정이다.
                 예정과 같은 표에 두지 않는다: 지금 발행할 것이 아니라 "이건 어떻게 됐더라"를

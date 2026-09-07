@@ -19,36 +19,45 @@ const path = require('node:path')
 
 const routesDir = path.join(__dirname, '..', 'routes')
 const read = (f) => fs.readFileSync(path.join(routesDir, f), 'utf8')
+const CREATOR = path.join(__dirname, '..', 'lib', 'invoiceCreate.js')
 
-/** 청구서를 INSERT 하는 라우트 파일 목록 — 새 파일이 생기면 이 테스트가 알려준다. */
-const INVOICE_WRITERS = [
-  'invoices.js', 'contracts.js', 'recurring.js', 'recurring-invoices.js', 'purchase-reqs.js',
-]
+/* ⚠ 2026-09-07 갱신 — 청구서 INSERT 가 lib/invoiceCreate.js 한 곳으로 모였다.
+ * 그 뒤로 이 테스트는 **라우트를 뒤지며 늘 0건을 찾아** 빨간불로 남아 있었다.
+ * 빨간 테스트는 아무도 안 읽으므로 없는 것과 같다 — 지키려던 것(모든 발행 경로에
+ * 금액 가드가 있다)은 그대로 두고, **보는 자리**를 지금 구조로 옮긴다.
+ *   · 라우트는 직접 INSERT 하지 않는다        (격리검사 [17] 과 같은 규칙)
+ *   · INSERT 는 createInvoice 안에 하나만 있다
+ *   · createInvoice 를 부르는 라우트는 금액을 먼저 검사한다
+ */
 
-test('청구서를 만드는 파일이 늘었으면 이 테스트를 갱신해야 한다', () => {
-  const found = fs.readdirSync(routesDir)
+test('라우트는 청구서를 직접 INSERT 하지 않는다', () => {
+  const direct = fs.readdirSync(routesDir)
     .filter(f => f.endsWith('.js'))
     .filter(f => read(f).includes('INSERT INTO invoices'))
     .sort()
-  assert.deepEqual(found, [...INVOICE_WRITERS].sort(),
-    '청구서를 INSERT 하는 라우트가 바뀌었어요. 새 경로에도 amountError 가드를 넣고 목록을 갱신하세요.')
+  assert.deepEqual(direct, [],
+    '라우트에서 청구서를 직접 INSERT 하고 있어요. lib/invoiceCreate.js 의 createInvoice 를 쓰세요.')
 })
 
-test('청구서 INSERT 가 있는 파일은 모두 amountError 를 쓴다', () => {
-  for (const f of INVOICE_WRITERS) {
-    const src = read(f)
-    assert.ok(src.includes("require('../lib/ledger')") && src.includes('amountError'),
-      `${f}: amountError 를 가져오지 않았어요`)
-  }
+test('청구서 INSERT 는 createInvoice 안에 있다', () => {
+  const src = fs.readFileSync(CREATOR, 'utf8')
+  const n = src.split('INSERT INTO invoices').length - 1
+  assert.equal(n, 1,
+    `lib/invoiceCreate.js 의 청구서 INSERT 가 ${n}곳이에요. 만드는 자리가 옮겨졌거나 늘었어요 — 이 테스트를 갱신하세요.`)
 })
 
-test('INSERT 개수만큼 amountError 가드가 있다', () => {
-  for (const f of INVOICE_WRITERS) {
+test('createInvoice 를 부르는 라우트는 금액을 먼저 검사한다', () => {
+  const callers = fs.readdirSync(routesDir)
+    .filter(f => f.endsWith('.js'))
+    .filter(f => read(f).includes('createInvoice('))
+  assert.ok(callers.length > 0, 'createInvoice 를 부르는 라우트가 하나도 없어요 — 경로가 바뀌었어요')
+  for (const f of callers) {
     const src = read(f)
-    const inserts = (src.match(/INSERT INTO invoices/g) || []).length
-    // require 줄 1개를 뺀 실제 호출 수
-    const guards = (src.match(/amountError\(/g) || []).length
-    assert.ok(guards >= inserts,
-      `${f}: 청구서 INSERT ${inserts}곳인데 amountError 호출은 ${guards}곳이에요. 빠진 경로가 있어요.`)
+    assert.ok(src.includes("require('../lib/ledger')") && src.includes('amountError('),
+      `${f}: createInvoice 를 부르면서 amountError 가드가 없어요`)
+    const calls  = src.split('createInvoice(').length - 1
+    const guards = src.split('amountError(').length - 1
+    assert.ok(guards >= calls,
+      `${f}: 청구서 생성 ${calls}곳인데 amountError 호출은 ${guards}곳이에요. 빠진 경로가 있어요.`)
   }
 })
