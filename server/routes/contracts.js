@@ -1172,7 +1172,12 @@ router.get('/:id/item-diff', async (req, res, next) => {
         continue
       }
       const a = Number(it.unit_price) || 0, b = Number(l.unit_price) || 0
-      if (a !== b && !seenDiff.has(k)) {
+      /* ⚠ 한쪽이 0이면 **비교가 성립하지 않는다.**
+         단가표에 단가를 안 적은 품목(계약 0)은 '다른' 게 아니라 '정한 적 없는' 것이고,
+         총액만 적고 단가를 비운 청구 줄(청구 0)도 견줄 대상이 없다.
+         그런데도 '단가가 다름 · 계약 0 → 청구 12,000' 이라고 띄우고 있었다 —
+         고칠 게 없는 경고라 목록만 채우고, 진짜 어긋난 건이 그 안에 묻힌다. */
+      if (a > 0 && b > 0 && a !== b && !seenDiff.has(k)) {
         seenDiff.add(k)
         priceDiff.push({ name: l.name, spec: l.spec, contract: a, billed: b, invoice_no: l.invoice_no })
       }

@@ -1122,7 +1122,14 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
           {!editInvoice && (
             <div className="row gap-8">
               {["issued", "received"].map(k => (
-                <button key={k} className={`chip ${form.kind === k ? "active" : ""}`} onClick={() => f("kind", k)}>
+                /* ⚠ 방향을 바꾸면 **거래처·주문을 비운다.**
+                   거래처 목록부터 다르고(발행=발주처 B / 수취=협력사 A·E), 주문도 그 거래처의
+                   것이다. 예전엔 kind 만 바꿔서, 매출 거래처를 고른 채 '수취'로 넘어가면
+                   목록에 없는 거래처가 남고 **매출 주문의 회차를 매입 청구서가 닫을** 수도
+                   있었다. 방향은 폼 맨 위에서 먼저 정하는 값이라 여기서 비우는 게 맞다. */
+                <button key={k} className={`chip ${form.kind === k ? "active" : ""}`}
+                        onClick={() => setForm(prev => prev.kind === k ? prev
+                          : { ...prev, kind: k, vendor: "", contract: "" })}>
                   {k === "issued" ? "발행 (미수금)" : "수취 (미지급금)"}
                 </button>
               ))}

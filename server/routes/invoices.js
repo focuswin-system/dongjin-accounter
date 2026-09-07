@@ -845,8 +845,19 @@ router.post('/', async (req, res, next) => {
     let origin = { type: 'manual' }
     if (milestone_id) {
       const [[ms]] = await req.db.execute(
-        "SELECT id, contract_id, status, invoice_id FROM milestones WHERE id = ?", [milestone_id])
+        `SELECT m.id, m.contract_id, m.status, m.invoice_id, v.gubu
+           FROM milestones m
+           JOIN contracts c ON c.id = m.contract_id
+           LEFT JOIN vendors v ON v.id = c.vendor_id
+          WHERE m.id = ?`, [milestone_id])
       if (!ms) return res.status(404).json({ error: '고른 청구 일정을 찾을 수 없어요' })
+      /* 방향이 맞아야 한다. 수주(매출) 회차를 매입 청구서로 닫으면 그 수주의 청구가
+         조용히 사라진다 — 화면에서도 막지만(방향을 바꾸면 주문을 비운다) 여기서도 본다. */
+      const msKind = (ms.gubu === 'A' || ms.gubu === 'E') ? 'received' : 'issued'
+      if (msKind !== kind) {
+        return res.status(409).json({
+          error: `이 청구 일정은 ${msKind === 'issued' ? '수주' : '발주'} 건이에요` })
+      }
       if (String(ms.contract_id || '') !== String(contract_id || '')) {
         return res.status(409).json({ error: '고른 청구 일정이 이 주문의 것이 아니에요' })
       }
