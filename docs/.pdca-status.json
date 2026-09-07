@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-08-31T05:21:47.088Z",
+  "lastUpdated": "2026-09-07T01:53:20.583Z",
   "activeFeatures": [
     "focus-accounter",
     "screens",
@@ -24,9 +24,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-05-15T05:42:27.292Z",
-        "lastUpdated": "2026-08-31T05:16:51.775Z"
+        "lastUpdated": "2026-09-07T01:35:54.280Z"
       },
-      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\src\\lib\\manual.js"
+      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\src\\lib\\components\\OrderLinkPanel.jsx"
     },
     "screens": {
       "phase": "do",
@@ -37,9 +37,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-05-15T05:47:46.297Z",
-        "lastUpdated": "2026-08-31T05:21:47.088Z"
+        "lastUpdated": "2026-09-03T05:04:41.135Z"
       },
-      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\src\\screens\\Manual.jsx"
+      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\src\\screens\\SalesForms.jsx"
     },
     "server": {
       "phase": "do",
@@ -50,9 +50,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-05-28T02:41:31.412Z",
-        "lastUpdated": "2026-08-31T02:03:11.627Z"
+        "lastUpdated": "2026-09-07T01:33:19.399Z"
       },
-      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\verify_req.js"
+      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\lib\\orderLink.js"
     },
     "routes": {
       "phase": "do",
@@ -63,9 +63,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-05-28T02:41:56.724Z",
-        "lastUpdated": "2026-08-31T04:59:11.577Z"
+        "lastUpdated": "2026-09-01T04:00:21.423Z"
       },
-      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\routes\\auth.js"
+      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\routes\\notes.js"
     },
     "middleware": {
       "phase": "do",
@@ -89,9 +89,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-07-01T00:32:44.606Z",
-        "lastUpdated": "2026-08-31T03:33:34.301Z"
+        "lastUpdated": "2026-09-07T01:53:20.583Z"
       },
-      "lastFile": "C:\\Users\\USER\\AppData\\Local\\Temp\\claude\\C--Users-USER-Desktop-Project-public-focus-accounter\\c47fd74d-d19f-4129-9579-6f2c47f62eeb\\scratchpad\\preq.py"
+      "lastFile": "C:\\Users\\USER\\AppData\\Local\\Temp\\claude\\C--Users-USER-Desktop-Project-public-focus-accounter\\5552b42b-02ee-4a1c-98e9-ccfc7db4f360\\scratchpad\\fix4d.js"
     },
     "scripts": {
       "phase": "do",
@@ -102,7 +102,7 @@
       "documents": {},
       "timestamps": {
         "started": "2026-07-20T01:43:38.006Z",
-        "lastUpdated": "2026-08-29T05:32:18.054Z"
+        "lastUpdated": "2026-09-02T04:55:35.656Z"
       },
       "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\scripts\\check-isolation.js"
     },
@@ -154,7 +154,7 @@
   "session": {
     "startedAt": "2026-05-15T05:18:29.210Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-08-31T05:21:47.088Z"
+    "lastActivity": "2026-09-07T01:53:20.583Z"
   },
   "history": [
     {
@@ -26410,6 +26410,612 @@
     {
       "timestamp": "2026-08-31T05:21:47.088Z",
       "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-01T04:00:21.424Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-01T04:02:44.037Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-01T23:01:30.707Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-01T23:01:45.146Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T00:02:30.618Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T01:11:09.445Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T01:43:11.088Z",
+      "feature": "server",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T04:51:24.221Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T04:53:03.258Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T04:53:46.655Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T04:54:52.318Z",
+      "feature": "scripts",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T04:55:35.656Z",
+      "feature": "scripts",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T05:35:14.697Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T05:35:41.148Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T05:45:03.433Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T05:46:19.432Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T05:47:20.545Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T05:47:34.118Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T05:51:20.596Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T05:52:40.769Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T05:57:16.461Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T05:57:56.082Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T06:41:37.695Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T06:45:53.399Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T06:47:03.390Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T06:54:18.347Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T07:30:20.403Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T08:55:29.198Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T09:03:02.489Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T09:04:30.732Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T09:06:14.990Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T09:07:05.050Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T09:08:05.667Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T09:12:12.951Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T09:17:08.735Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T09:20:40.093Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T09:24:23.821Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T09:27:52.848Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-02T09:28:11.819Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-03T00:07:06.463Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-03T00:08:43.895Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-03T00:09:20.020Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-03T00:19:51.810Z",
+      "feature": "server",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-03T00:22:00.799Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-03T00:26:24.800Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-03T00:29:57.775Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-03T00:30:24.488Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-03T00:37:51.671Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-03T00:46:25.503Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-03T04:14:13.064Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-03T05:01:09.819Z",
+      "feature": "server",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-03T05:04:41.135Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-03T07:58:05.194Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-03T07:58:18.726Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-04T00:46:01.100Z",
+      "feature": "server",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-04T00:53:52.946Z",
+      "feature": "server",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-04T00:57:19.419Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-04T01:50:57.601Z",
+      "feature": "server",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-04T02:11:08.269Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-04T02:29:40.265Z",
+      "feature": "server",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-04T03:22:14.940Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-04T03:23:32.432Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-04T03:27:48.515Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-04T03:43:41.084Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-04T03:44:32.529Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-06T01:23:04.628Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-06T01:23:50.456Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-06T01:24:37.782Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T00:05:42.340Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T00:06:24.962Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T00:07:39.908Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T00:12:08.755Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T00:25:40.145Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T00:26:52.969Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T00:28:15.364Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T00:37:11.250Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T00:38:26.693Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T00:46:32.233Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T00:54:11.559Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T00:54:42.788Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T00:55:55.726Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T00:59:32.111Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:04:49.220Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:05:14.141Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:13:37.959Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:14:33.673Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:16:59.033Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:18:00.310Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:18:47.035Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:20:09.609Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:33:19.399Z",
+      "feature": "server",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:33:46.174Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:34:30.116Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:35:54.280Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:36:08.121Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:36:51.335Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:37:26.007Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:44:33.109Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:46:21.251Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:49:14.340Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-07T01:53:20.583Z",
+      "feature": "scratchpad",
       "phase": "do",
       "action": "updated"
     }
