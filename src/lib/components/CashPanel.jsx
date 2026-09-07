@@ -125,6 +125,12 @@ export const CashPanel = ({ go }) => {
             <div>
               <div className="text-xs text-muted2">{WEEKS}주간 들어올 돈</div>
               <div className="num fw-700" style={{ color: 'var(--pos-ink)' }}>{fmtNum(f.totalIn || 0)}</div>
+              {/* ⚠ 아래 '나갈 돈'과 **대칭으로 적는다.**
+                  두 칸은 정확히 반대로 처리한다 — 들어올 돈에서는 기약 없는 걸 빼고(덜 세고),
+                  나갈 돈에는 넣는다(더 센다). 둘 다 보수적으로 보려는 것이다.
+                  예전엔 한쪽은 '기약 없는 …은 뺐어요', 다른 쪽은 '그중 …은 기한 미정'이라
+                  용어도 다르고 처리 방향도 안 드러나서 "왜 하나는 빼고 하나는 넣지"가 됐다.
+                  용어는 자금일보(CashReport)의 '기약 없는 돈'에 맞춘다. */}
               {f.uncertainIn > 0 && (
                 <div className="text-xs text-muted2">기약 없는 {fmtNum(f.uncertainIn)}원은 뺐어요</div>
               )}
@@ -133,7 +139,7 @@ export const CashPanel = ({ go }) => {
               <div className="text-xs text-muted2">{WEEKS}주간 나갈 돈</div>
               <div className="num fw-700" style={{ color: 'var(--neg-ink)' }}>{fmtNum(f.totalOut || 0)}</div>
               {f.uncertainOut > 0 && (
-                <div className="text-xs text-muted2">그중 {fmtNum(f.uncertainOut)}원은 기한 미정</div>
+                <div className="text-xs text-muted2">기약 없는 {fmtNum(f.uncertainOut)}원도 넣었어요</div>
               )}
             </div>
           </div>

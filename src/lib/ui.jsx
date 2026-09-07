@@ -350,8 +350,17 @@ export const StatusBadge = ({ status }) => {
     "활성": { tone: "pos" }, "예정": { tone: "outline" }, "비활성": { tone: "outline" },
     "재직": { tone: "pos" }, "수습": { tone: "warn" }, "퇴사": { tone: "outline" }, "휴직": { tone: "warn" },
   };
-  const tone = (map[status]?.tone) || "outline";
-  return <span className={`badge ${tone}`}><span className="dot"/>{status}</span>;
+  /* ⚠ 거래는 무공백('입금완료'), 청구서는 공백형('입금 완료')을 저장한다
+     (routes/transactions.js normalizeStatus · CLAUDE.md INVOICES 상태값).
+     저장값은 그 규칙대로 두고 **화면에서만** 한 모양으로 보인다.
+     안 맞춰 두면 두 가지가 한꺼번에 어긋났다 —
+       · 같은 뜻이 '입금완료'와 '입금 완료' 두 모양으로 보여 다른 상태로 읽힌다
+       · 무공백 키가 아래 map 에 없어 tone 이 outline 이 된다 → **완료인데 회색**이다
+         (청구서 화면에서는 같은 완료가 초록이라 더 헷갈린다) */
+  const SPACED = { "입금완료": "입금 완료", "지급완료": "지급 완료" };
+  const label = SPACED[status] || status;
+  const tone = (map[label]?.tone) || "outline";
+  return <span className={`badge ${tone}`}><span className="dot"/>{label}</span>;
 };
 
 /* ── Sparkline ── */
