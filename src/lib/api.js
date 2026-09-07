@@ -1496,6 +1496,19 @@ export const api = {
     catch (e) { return { ok: false, error: e.message } }
   },
 
+  /** 주문 없이 남은 청구서·거래와, 붙일 만한 주문 후보 */
+  async getUnlinkedForOrders(kind) {
+    try { return await req(`/contracts/unlinked?kind=${kind === 'expense' ? 'expense' : 'income'}`) }
+    catch { return { rows: [], txnCount: 0, invoiceCount: 0, contractCount: 0 } }
+  },
+  /** 고른 것을 주문에 붙인다. contract_id 를 null 로 보내면 되돌리기다. */
+  async linkOrders(items) {
+    try {
+      const r = await req('/contracts/link-orders', { method: 'POST', body: { items } })
+      return { ok: true, invoices: r?.invoices || 0, txns: r?.txns || 0 }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
+
   /* 청구서 품목으로 계약 단가표를 채운다(비어 있을 때만 — 서버가 막는다).
      ⚠ 실적을 기준선으로 되밀면 "계약 대비 초과"가 영영 안 잡힌다. 그래서 덮어쓰기가 없다. */
   async seedContractItems(contractId, invoiceId) {

@@ -62,6 +62,8 @@ const AUDIT_RULES = [
      ⚠ `/:id` 규칙보다 **위**에 둔다. 아래에 두면 'milestones' 를 계약 id 로 읽는다. */
   { m: 'DELETE', re: /^\/api\/contracts\/milestones\/([^/]+)$/,         res: 'contract', action: 'schedule_delete', target: 1 },
   { m: 'DELETE', re: /^\/api\/contracts\/([^/]+)$/,                     res: 'contract', action: 'delete', target: 1 },
+  // 주문 없이 남아 있던 청구서·거래를 주문에 붙인 것 — 주문별 실적·원가율이 바뀐다
+  { m: 'POST',   re: /^\/api\/contracts\/link-orders$/,                 res: 'contract', action: 'link_orders' },
   // 청구서 품목으로 단가표를 채운 것 — 그 주문의 '기준선'이 정해지는 순간이라 남긴다
   { m: 'POST',   re: /^\/api\/contracts\/([^/]+)\/items\/seed$/,       res: 'contract', action: 'items_seed', target: 1 },
 

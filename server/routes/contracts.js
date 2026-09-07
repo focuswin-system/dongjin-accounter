@@ -13,6 +13,7 @@ const { recurHistory } = require('../lib/recurHistory')
 const { kstDate } = require('../db')
 
 const { createInvoice } = require('../lib/invoiceCreate')
+const { linkCandidates } = require('../lib/orderLink')
 
 const router = Router()
 
@@ -701,6 +702,17 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
   finally { conn.release() }
 })
 
+/* ── 주문 없이 남은 것 모아 보기 ────────────────────────────────────────────
+ * 등록할 때 주문을 묻지만 저장을 막지는 않는다(막으면 더미 주문이 생긴다).
+ * 그렇게 빠져나간 것을 **나중에 몰아서** 붙이는 자리다.
+ * ⚠ /:id 보다 위에 둔다 — 아래 두면 'unlinked' 가 주문 id 로 잡힌다. */
+router.get('/unlinked', async (req, res, next) => {
+  try {
+    const kind = req.query.kind === 'expense' ? 'expense' : 'income'
+    res.json(await linkCandidates(req.db, kind))
+  } catch (e) { next(e) }
+})
+
 router.get('/:id', async (req, res, next) => {
   try {
     const [cRows] = await req.db.execute(
@@ -913,6 +925,43 @@ async function replaceContractItems(conn, contractId, items) {
     )
   }
 }
+
+/* 고른 것을 주문에 붙인다. 청구서와 거래를 한 번에 받는다(화면이 섞어 보여주므로).
+ * ⚠ 되돌릴 수 있어야 한다 — 붙이는 것은 주문별 실적·원가율을 바꾸는 일이다.
+ *   contract_id 를 비우면 그만이라 별도 취소 경로 대신 같은 API 로 null 을 보낸다. */
+router.post('/link-orders', async (req, res, next) => {
+  const items = Array.isArray(req.body.items) ? req.body.items : []
+  if (!items.length) return res.status(400).json({ error: '붙일 항목이 없어요' })
+  if (items.length > 200) return res.status(400).json({ error: '한 번에 200건까지예요' })
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    let invoices = 0, txns = 0
+    for (const it of items) {
+      const cid = it.contract_id || null
+      if (cid) {
+        /* 주문이 실재하고 **같은 거래처**인지 본다. 안 보면 남의 주문에 붙어
+           그 주문의 실적이 조용히 부풀어 오른다. */
+        const [[c]] = await conn.execute('SELECT vendor_id FROM contracts WHERE id = ?', [cid])
+        if (!c) { await rollbackQuietly(conn); return res.status(400).json({ error: '없는 주문이 섞여 있어요' }) }
+        const tbl = it.type === 'invoice' ? 'invoices' : 'transactions'
+        const [[row]] = await conn.execute(`SELECT vendor_id FROM ${tbl} WHERE id = ?`, [it.id])
+        if (!row) { await rollbackQuietly(conn); return res.status(400).json({ error: '없는 항목이 섞여 있어요' }) }
+        if (row.vendor_id !== c.vendor_id) {
+          await rollbackQuietly(conn)
+          return res.status(409).json({ error: '거래처가 다른 주문에는 붙일 수 없어요' })
+        }
+      }
+      if (it.type === 'invoice') {
+        await conn.execute('UPDATE invoices SET contract_id = ? WHERE id = ?', [cid, it.id]); invoices++
+      } else {
+        await conn.execute('UPDATE transactions SET contract_id = ? WHERE id = ?', [cid, it.id]); txns++
+      }
+    }
+    await conn.commit()
+    res.json({ ok: true, invoices, txns })
+  } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
+})
 
 /* ── 청구서 품목으로 계약 단가표를 채운다(씨앗) ─────────────────────────────
  *

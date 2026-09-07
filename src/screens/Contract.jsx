@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { Icon, fmtNum, fmtDateShort, useToast, useConfirm, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect, Drawer, Combobox, MoneyInput, localToday, DateInput } from '../lib/ui'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
+import { OrderLinkPanel } from '../lib/components/OrderLinkPanel'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
 import { ArLinesDrawer } from '../lib/components/ArLinesDrawer'
@@ -2010,6 +2011,18 @@ const CONTRACT_KIND_META = {
 };
 
 export const ContractListScreen = ({ goDetail, kind = "all" }) => {
+  /* 주문 없이 남은 청구서·거래를 모아 붙이는 자리.
+     ⚠ 기본은 **접어 둔다.** 목록을 보러 온 사람에게 먼저 보여야 할 것은 주문 목록이다.
+       다만 몇 건인지는 접힌 채로도 보여야 한다 — 안 보이면 여기 있는 줄 모른다. */
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [linkCount, setLinkCount] = useState(0)
+  /* 몇 건이 붙기를 기다리는지. 목록을 열 때 한 번만 센다 — 자주 부르면 화면이 무거워지고,
+     이 숫자는 '지금 당장'이 아니라 '쌓여 있다'를 말하는 것이라 실시간일 필요가 없다. */
+  const linkKind = kind === 'purchase' ? 'expense' : 'income'
+  useEffect(() => {
+    if (kind === 'all') { setLinkCount(0); return }   // 수주·발주가 섞인 화면에서는 안 센다
+    api.getUnlinkedForOrders(linkKind).then(d => setLinkCount((d.rows || []).length))
+  }, [kind, linkKind])
   const toast = useToast();
   const [tab, setTab] = useState("전체");
   const [q, setQ] = useState("");
@@ -2151,6 +2164,38 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
           badgeTone={renewExpired > 0 ? "neg" : renewDue > 0 ? "warn" : "ink"}/>
       </KpiRow>
       <Spacer h={20}/>
+
+      {/* 주문 없이 남은 것들 — 여기서 몰아서 붙인다.
+          등록할 때 '없이 등록'으로 빠져나간 것들이 쌓이는 자리다. 접어 두되 **건수는 보인다** —
+          안 보이면 이런 게 있는 줄 모르고, 그러면 '없이 등록'이 정상 경로가 아니라
+          그냥 새는 구멍이 된다. */}
+      {kind !== 'all' && linkCount > 0 && (
+        <>
+          <div className="card card-pad">
+            <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+              <Icon.Link size={16} style={{ color: 'var(--warn-ink)' }}/>
+              <div className="section-title">
+                {kind === 'purchase' ? '발주' : '수주'}가 안 붙은 청구서·거래 {linkCount}건
+              </div>
+              <button className="btn sm ml-auto" onClick={() => setLinkOpen(v => !v)}>
+                {linkOpen ? '접기' : '붙이러 가기'}
+              </button>
+            </div>
+            {!linkOpen && (
+              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+                안 붙이면 이 건들은 주문별 수익·원가에 안 잡혀요.
+              </div>
+            )}
+            {linkOpen && (
+              <div style={{ marginTop: 14 }}>
+                <OrderLinkPanel kind={linkKind}
+                  onChanged={() => { reload(); api.getUnlinkedForOrders(linkKind).then(d => setLinkCount((d.rows || []).length)) }}/>
+              </div>
+            )}
+          </div>
+          <Spacer h={16}/>
+        </>
+      )}
 
       <div className="card">
         {/* 상태 칩 6개 + 검색·필터가 한 줄에 서는데 .row 는 줄바꿈을 안 한다 —
