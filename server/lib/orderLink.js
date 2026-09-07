@@ -28,6 +28,24 @@ function inTerm(date, start, end) {
   return true
 }
 
+/* 기간에서 얼마나 벗어났나(일). 안에 들면 0.
+   ⚠ 기간 밖이어도 후보로는 낸다 — 늦게 등록한 건, 마무리 정산처럼 며칠~몇 달 벗어나는 일은
+     흔하다. 다만 **너무 멀면 후보가 아니다.** 실측에서 2020년에 끝난 주문이 2026년 청구서의
+     후보로 5건이나 올라왔다(6년 차이). 그건 제시가 아니라 잡음이다. */
+function daysOutside(date, start, end) {
+  const d = String(date || '').slice(0, 10)
+  const s = String(start || '').slice(0, 10)
+  const e = String(end || '').slice(0, 10)
+  const day = (a, b) => Math.round((Date.parse(a + 'T00:00:00') - Date.parse(b + 'T00:00:00')) / 86400000)
+  if (s && d < s) return Math.abs(day(s, d))
+  if (e && d > e) return Math.abs(day(d, e))
+  return 0
+}
+
+/* 기간에서 이만큼 넘게 벗어나면 후보로 안 낸다(약 1년). 그 정도면 다른 주문이거나
+   주문이 없는 건이지, 이 주문의 것일 리 없다. */
+const OUT_LIMIT_DAYS = 365
+
 /**
  * @param db    테넌트 연결(req.db)
  * @param kind  'income'(매출 — 수주) | 'expense'(매입 — 발주)
@@ -87,13 +105,20 @@ async function linkCandidates(db, kind) {
       .map(c => {
         const why = ['거래처 같음']
         let score = 40
-        if (inTerm(date, c.start_date, c.end_date)) { score += 40; why.push('주문 기간 안') }
-        else why.push('기간 밖')
+        const out = daysOutside(date, c.start_date, c.end_date)
+        if (out === 0) { score += 40; why.push('주문 기간 안') }
+        else if (out > OUT_LIMIT_DAYS) return null      // 너무 멀다 — 후보가 아니다
+        else {
+          // 조금 벗어난 건 후보로 내되, 얼마나 벗어났는지 밝힌다(사람이 판단할 근거)
+          score += Math.max(0, 20 - Math.round(out / 15))
+          why.push(out > 60 ? `기간에서 ${Math.round(out / 30)}개월 벗어남` : `기간에서 ${out}일 벗어남`)
+        }
         // 진행 중인 주문이 끝난 주문보다 그럴듯하다
         if (c.status === '진행중') { score += 10 }
         return { id: c.id, name: c.name, vendor: c.vendor_name,
                  start: c.start_date, end: c.end_date, status: c.status, score, why }
       })
+      .filter(Boolean)
       .sort((a, b) => b.score - a.score)
   }
 

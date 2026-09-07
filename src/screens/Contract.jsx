@@ -2174,8 +2174,10 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
           <div className="card card-pad">
             <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
               <Icon.Link size={16} style={{ color: 'var(--warn-ink)' }}/>
+              {/* linkCount 는 '붙일 만한 짝을 찾은 수'다. '주문이 없는 전체 수'가 아니다 —
+                  제목에 그냥 "안 붙은 …건"이라고 쓰면 아래 패널의 숫자와 안 맞아 보인다. */}
               <div className="section-title">
-                {kind === 'purchase' ? '발주' : '수주'}가 안 붙은 청구서·거래 {linkCount}건
+                {kind === 'purchase' ? '발주' : '수주'}에 붙일 수 있는 청구서·거래 {linkCount}건
               </div>
               <button className="btn sm ml-auto" onClick={() => setLinkOpen(v => !v)}>
                 {linkOpen ? '접기' : '붙이러 가기'}

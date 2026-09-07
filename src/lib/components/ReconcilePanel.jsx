@@ -31,9 +31,11 @@ const Why = ({ text }) => {
 
 const Side = ({ title, sub, amount, foot }) => (
   <div style={{ minWidth: 0, flex: 1 }}>
-    <div className="row gap-6" style={{ alignItems: 'baseline', flexWrap: 'wrap' }}>
-      <span className="fw-700 text-sm ellipsis">{title}</span>
-      <span className="text-xs num" style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>{fmtNum(amount)}</span>
+    {/* ⚠ flexWrap 을 쓰지 않는다. 좁은 화면에서 이름이 길면 금액이 다음 줄로 내려가
+        순서가 어그러진다 — 금액이 자리를 지키고 이름이 줄어드는 게 맞다. */}
+    <div className="row gap-6" style={{ alignItems: 'baseline' }}>
+      <span className="fw-700 text-sm ellipsis" style={{ minWidth: 0 }}>{title}</span>
+      <span className="text-xs num" style={{ marginLeft: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtNum(amount)}</span>
     </div>
     <div className="text-xs text-muted2 ellipsis" style={{ marginTop: 2 }}>{sub}</div>
     {foot}

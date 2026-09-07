@@ -2074,8 +2074,14 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
         const ok = await confirm({
           tone: 'brand', icon: <Icon.Book size={22}/>,
           title: '이 품목을 주문 단가표로 둘까요?',
-          body: `품목 ${n}건을 이 주문의 단가표로 넣어요. 다음부터 같은 품목을 고르면 단가가 자동으로 채워지고,\n`
-              + '계약 단가와 다르게 청구하면 알려드려요. (수량은 안 옮겨요 — 단가표는 "얼마에 하기로 했나"예요)',
+          /* ⚠ **없는 기능을 약속하지 않는다.** 예전 문구는 "다음부터 같은 품목을 고르면 단가가
+             자동으로 채워지고"라고 했는데 **사실이 아니다** — 청구서에서 품목을 고를 때 단가는
+             기준정보(ref_items.amount)에서 온다(lib/components/InvoiceLines.jsx). 단가표를
+             채워도 그 동작은 안 바뀐다.
+             단가표가 실제로 해 주는 일은 **기준선이 생기는 것**과 그 결과인 **차이 알림**이다.
+             그것만 적는다. */
+          body: `품목 ${n}건이 이 주문의 '얼마에 하기로 했나'가 돼요.\n`
+              + '다음부터 이 단가와 다르게 청구하면 계약 화면에서 알려드려요.',
           confirmLabel: '단가표로 두기',
           cancelLabel: '안 할래요',
         })

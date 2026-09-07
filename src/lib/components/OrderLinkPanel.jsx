@@ -18,10 +18,16 @@ import { Icon, useToast, fmtNum, fmtDateShort } from '../ui'
  * ⚠ 제시는 자동, 확정은 사람. 미리 골라 두는 건 후보가 하나뿐이고 기간까지 맞을 때만이다.
  */
 
+/* ⚠ '거래처 같음'은 **적지 않는다.** 후보를 거래처로 걸러서 내므로 늘 참이고,
+     늘 참인 표식은 정보가 0이면서 자리만 차지한다(모든 줄에 똑같이 붙어 있었다).
+   '기간에서 N일/개월 벗어남'은 반대로 **눈에 띄어야 한다** — 확인이 필요하다는
+   뜻이라 회색이면 묻힌다. */
 const Why = ({ text }) => {
-  const strong = /같음|기간 안/.test(text)
-  const weak = /기간 밖/.test(text)
-  return <span className={`badge ${strong ? 'pos' : weak ? 'outline' : ''}`} style={{ fontSize: 10 }}>{text}</span>
+  if (/거래처 같음/.test(text)) return null
+  const warn = /벗어남/.test(text)
+  return (
+    <span className={`badge ${warn ? 'warn' : 'pos'}`} style={{ fontSize: 10 }}>{text}</span>
+  )
 }
 
 export const OrderLinkPanel = ({ kind, onChanged }) => {
@@ -93,8 +99,11 @@ export const OrderLinkPanel = ({ kind, onChanged }) => {
       )}
 
       <div className="row gap-8" style={{ alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+        {/* 예전엔 "청구서 8건 · 거래 3건"만 적었는데, 위 제목의 '8건'(=붙일 만한 짝을 찾은 수)과
+            숫자가 안 맞아 보였다. 무엇의 몇 건인지 한 줄로 밝힌다. */}
         <span className="text-sm text-muted">
           {label} 없는 청구서 {data.invoiceCount}건 · 거래 {data.txnCount}건
+          {' — '}그중 <b className="text-ink">{rows.length}건</b>에 붙일 {label}를 찾았어요
         </span>
         <div className="row gap-6 ml-auto">
           <button className="btn sm" onClick={() => { setDone(null); load() }} disabled={busy}>다시 찾기</button>
@@ -125,14 +134,18 @@ export const OrderLinkPanel = ({ kind, onChanged }) => {
               <input type="checkbox" checked={!!picked} style={{ marginTop: 4 }}
                 onChange={e => setPick(p => ({ ...p, [k]: e.target.checked ? r.best.id : null }))}/>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div className="row gap-6" style={{ alignItems: 'baseline', flexWrap: 'wrap' }}>
+                <div className="row gap-6" style={{ alignItems: 'baseline' }}>
                   {/* 청구서인지 거래인지 밝힌다 — 둘을 한 목록에 섞어 보여주므로
                       무엇을 붙이는 건지 모르면 누를 수가 없다. */}
-                  <span className="badge outline" style={{ fontSize: 10 }}>
+                  <span className="badge outline" style={{ fontSize: 10, flexShrink: 0 }}>
                     {r.type === 'invoice' ? '청구서' : '거래'}
                   </span>
-                  <span className="fw-700 text-sm ellipsis">{r.label}</span>
-                  <span className="text-xs num" style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>{fmtNum(r.amount)}</span>
+                  {/* ⚠ flexWrap 을 쓰지 않는다. 좁은 화면에서 라벨이 길면 금액이 **다음 줄로
+                      내려가** 라벨 → 금액 → 거래처 순서가 어그러진다(라벨이 짧으면 한 줄이라
+                      같은 화면에서 줄이 제각각으로 보인다). 금액은 자리를 지키고
+                      **라벨이 줄어드는** 게 맞다 — ellipsis 가 그 일을 한다. */}
+                  <span className="fw-700 text-sm ellipsis" style={{ minWidth: 0 }}>{r.label}</span>
+                  <span className="text-xs num" style={{ marginLeft: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtNum(r.amount)}</span>
                 </div>
                 <div className="text-xs text-muted2 ellipsis" style={{ marginTop: 2 }}>
                   {r.vendor || '거래처 없음'} · {fmtDateShort(r.date)}
@@ -174,6 +187,16 @@ export const OrderLinkPanel = ({ kind, onChanged }) => {
           </div>
         )
       })}
+
+      {/* 목록이 길다(실데이터에 27건이 떠 있었다). 위에만 두면 스크롤해서 고른 뒤
+          맨 위로 되돌아가야 누를 수 있다. 세 줄 넘어가면 아래에도 둔다. */}
+      {rows.length > 3 && (
+        <div className="row gap-6" style={{ justifyContent: 'flex-end', marginTop: 4 }}>
+          <button className="btn sm primary" onClick={apply} disabled={busy || !chosen.length}>
+            {busy ? '붙이는 중…' : `선택한 ${chosen.length}건 붙이기`}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
