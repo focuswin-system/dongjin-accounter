@@ -513,6 +513,16 @@ router.get('/:id', async (req, res, next) => {
 /* 거래 전표 — 이 거래가 장부에 어떻게 오르는지 차변·대변 줄로 보여준다.
  * 계정과목 이름은 서버에서 붙인다. 코드만 내보내면 화면이 다시 조회해야 하고,
  * 인쇄본에서 코드만 찍히면 사람이 읽을 수 없다. */
+/* 이 거래의 복합 전표 항목 — 편집 화면이 열 때 읽어 채운다(없으면 빈 배열). */
+router.get('/:id/splits', async (req, res, next) => {
+  try {
+    const [rows] = await req.db.execute(
+      'SELECT category, account_code, supply_amount, vat_amount, amount, tax_type, memo FROM txn_splits WHERE txn_id = ? ORDER BY sort_order, id',
+      [req.params.id])
+    res.json(rows.map(r => ({ ...r, supply_amount: Number(r.supply_amount) || 0, vat_amount: Number(r.vat_amount) || 0, amount: Number(r.amount) || 0 })))
+  } catch (e) { next(e) }
+})
+
 router.get('/:id/voucher', async (req, res, next) => {
   try {
     const [[t]] = await req.db.execute(`

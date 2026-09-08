@@ -267,6 +267,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       setKind(initialKind);
       setStaleFundCode('');
       setShowOrderFields(false);
+      setSplitOn(false); setSplitRows([]);   // 복합 전표 항목 초기화(편집이면 아래 효과가 다시 채운다)
       /* ⚠ 기본 계좌는 `accounts[0]` — **가나다순 첫 줄**이었다. 카드가 걸릴 수도 있고,
          주거래를 지정해 뒀는데 엉뚱한 통장이 골라져 있으면 "왜 이게 선택돼 있지"가 된다.
          주거래 → 통장 첫 줄 순으로 고른다(로더와 같은 규칙). */
@@ -343,6 +344,17 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       cpAccountId: editTxn.counterpartyAccountId || '',
       docs:      [],   // 편집 시 새로 올리는 첨부만
     });
+    /* 복합 전표(여러 비목) — 편집으로 열면 이미 나눠 둔 항목을 읽어 채운다.
+       그래야 복합 거래를 열어 항목을 고칠 수 있고, 단순 거래는 그대로 단순으로 열린다. */
+    setSplitOn(false); setSplitRows([]);
+    if (editTxn.id) {
+      api.getTxnSplits(editTxn.id).then(sp => {
+        if (Array.isArray(sp) && sp.length >= 2) {
+          setSplitOn(true)
+          setSplitRows(sp.map(s => ({ category: s.category || '', supply: String(s.supply_amount || 0), vat: String(s.vat_amount || 0) })))
+        }
+      })
+    }
   }, [open, editTxn]);
 
   /* 고른 거래처의 계좌 목록. 거래처가 바뀌면 다시 읽고, 이전 선택은 버린다 —
@@ -674,6 +686,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
           tax_type: numOf(r.vat) > 0 ? "과세" : "면세",
         }))
       : null
+    /* 서버로 보낼 splits.
+       · 켰으면 그 항목들.
+       · 편집인데 껐으면 **빈 배열**을 보내 기존 항목을 비운다(복합→단순 되돌리기).
+       · 새 등록인데 껐으면 아예 안 보낸다(단순 거래). */
+    const splitsToSend = splitOn ? splitPayload : (editTxn ? [] : undefined)
 
     const txnData = {
       kind,
@@ -692,7 +709,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       // 복합이면 대표 비목(첫 항목)을 부모에 두고, 항목은 splits 로 따로 보낸다
       category:     splitOn ? (splitPayload[0]?.category || "복합") : form.category,
       sub_category: "",
-      ...(splitPayload ? { splits: splitPayload } : {}),
+      ...(splitsToSend !== undefined ? { splits: splitsToSend } : {}),
       item_id:      form.itemId || null,
       account_code: form.accountCode || null,
       amount,
@@ -1050,13 +1067,10 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                 ))}
               </div>
 
-              {/* 복합 전표(D1) — 이 금액을 여러 비목으로 나눈다. 신규 등록에서만.
-                  이미 복합으로 등록된 걸 편집할 땐 안내만 하고 항목은 건드리지 않는다. */}
-              {editTxn?.has_splits ? (
-                <div className="text-xs text-muted2" style={{ marginTop: 10, lineHeight: 1.7 }}>
-                  · 이 거래는 <b>여러 비목으로 나뉜 복합 전표</b>예요. 항목을 바꾸려면 지우고 다시 등록해 주세요.
-                </div>
-              ) : !editTxn && (
+              {/* 복합 전표(D1) — 이 금액을 여러 비목으로 나눈다. 신규·편집 모두.
+                  편집으로 열면 이미 나눠 둔 항목을 채워 두고(위 효과), 여기서 고칠 수 있다.
+                  단순 거래를 열어 켜면 복합으로 바뀌고, 끄면 단순으로 되돌아간다. */}
+              {(
                 <div style={{ marginTop: 10 }}>
                   <label style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 12, color: "var(--muted)" }}>
                     <input type="checkbox" checked={splitOn}

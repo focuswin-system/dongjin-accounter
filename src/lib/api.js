@@ -903,6 +903,11 @@ export const api = {
   },
 
   // ─── 거래내역 ─────────────────────────────────────────────────
+  // 거래의 복합 전표 항목 — 편집 화면이 열 때 읽어 채운다
+  async getTxnSplits(id) {
+    try { return await req(`/transactions/${id}/splits`) } catch { return [] }
+  },
+
   async getTransactions({ kind, from, to, category, accountId } = {}) {
     try {
       const params = new URLSearchParams()
