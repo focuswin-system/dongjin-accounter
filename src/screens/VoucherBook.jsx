@@ -37,6 +37,11 @@ export const VoucherBookScreen = () => {
   const openSlip = (v) => setSlip({ ...v, counterparty: v.counterparty || v.vendor_name, summary: v.summary || v.memo || v.category })
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  /* 여러 전표를 골라 한 번에 인쇄한다. 전표 종류마다 id 가 겹칠 수 있어 source 를 붙여 키로 쓴다. */
+  const keyOf = (v) => `${v.source}:${v.id}`
+  const [picked, setPicked] = useState(() => new Set())
+  const [printing, setPrinting] = useState(false)
+  const togglePick = (v) => setPicked(s => { const n = new Set(s); const k = keyOf(v); n.has(k) ? n.delete(k) : n.add(k); return n })
 
   const load = async () => {
     if (!from || !to) return
@@ -59,6 +64,22 @@ export const VoucherBookScreen = () => {
     if (!res.ok) toast.push(res.error || '내려받기에 실패했어요', { tone: 'warn' })
   }
 
+  const chosen = useMemo(() => rows.filter(v => picked.has(keyOf(v))), [rows, picked])
+
+  /* 선택 전표만 한 번에 인쇄 — 고른 것만 슬립으로 펴서 한 장씩 나눠 출력한다.
+     printing 이면 목록은 감추고(no-print) 슬립만 남긴다. 인쇄가 끝나면 원래대로. */
+  const printSelected = () => {
+    if (chosen.length === 0) return toast.push('인쇄할 전표를 선택하세요')
+    setPrinting(true)
+  }
+  useEffect(() => {
+    if (!printing) return
+    const after = () => setPrinting(false)
+    window.addEventListener('afterprint', after)
+    const t = setTimeout(() => window.print(), 80)
+    return () => { clearTimeout(t); window.removeEventListener('afterprint', after) }
+  }, [printing])
+
   /* 인쇄 전 손보기 — 글자 칸만, 저장 안 함(lib/printEdit.js) */
   const printRef = useRef(null)
   const pe = usePrintEdit(printRef, rows ? rows.length : 0)
@@ -66,10 +87,45 @@ export const VoucherBookScreen = () => {
     /* ⚠ report-print — 인쇄 화이트리스트(index.css @media print) 등록용.
        '인쇄 전 손보기'가 있는데 이게 없어서 Ctrl+P 가 백지였다. */
     <div className="fade-up report-print" ref={printRef} onKeyDown={pe.onKeyDown}>
+      {/* 선택 인쇄 — 고른 전표만 한 장씩(페이지 나눠) 슬립으로 인쇄한다. 인쇄 중에는 본문을 감춘다. */}
+      {printing && (
+        <div className="vb-batch">
+          {chosen.map((v, i) => (
+            <div key={keyOf(v)} className="vb-slip" style={{ pageBreakAfter: i < chosen.length - 1 ? 'always' : 'auto' }}>
+              <div className="fw-700" style={{ textAlign: 'center', fontSize: 20, letterSpacing: '0.3em', paddingLeft: '0.3em' }}>{v.type}</div>
+              <div className="text-sm text-muted" style={{ textAlign: 'center', margin: '6px 0 12px' }}>{v.date}</div>
+              {(v.vendor_name || v.memo || v.category) && (
+                <div className="text-sm" style={{ marginBottom: 10 }}>
+                  {v.vendor_name && <span><span className="text-muted2">거래처</span> <b>{v.vendor_name}</b>　</span>}
+                  {(v.memo || v.category) && <span><span className="text-muted2">적요</span> {v.memo || v.category}</span>}
+                </div>
+              )}
+              <table className="table">
+                <thead><tr><th style={{ width: 160, textAlign: 'right' }}>차변</th><th style={{ textAlign: 'center' }}>계정과목</th><th style={{ width: 160, textAlign: 'right' }}>대변</th></tr></thead>
+                <tbody>
+                  {v.lines.map((l, li) => (
+                    <tr key={li}>
+                      <td className="num-cell num-right fw-700">{l.side === 'debit' ? fmtNum(l.amount) : ''}</td>
+                      <td style={{ textAlign: 'center' }}><span className="num text-xs text-muted2" style={{ marginRight: 8 }}>{l.code}</span>{l.name}</td>
+                      <td className="num-cell num-right fw-700">{l.side === 'credit' ? fmtNum(l.amount) : ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot><tr><td className="num-cell num-right fw-700">{fmtNum(v.debitTotal)}</td><td style={{ textAlign: 'center' }}>합계</td><td className="num-cell num-right fw-700">{fmtNum(v.creditTotal)}</td></tr></tfoot>
+              </table>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className={printing ? 'no-print' : undefined}>
       <PageHeader title="전표 목록"
         sub="기간 안의 거래를 차변·대변으로 펼칩니다. 세무사에게 넘기거나 회계 프로그램에 올릴 때 쓰세요."
         actions={<div className="row gap-6 no-print" style={{ alignItems: 'center' }}>
           <PrintEditButton on={pe.on} toggle={pe.toggle} count={pe.count}/>
+          <button className="btn" onClick={printSelected} disabled={chosen.length === 0}>
+            <Icon.Print size={14}/> 선택 인쇄{chosen.length ? ` (${chosen.length})` : ''}
+          </button>
           <button className="btn primary" onClick={download} disabled={busy || rows.length === 0}>
             <Icon.Excel size={14}/> 엑셀 내려받기
           </button>
@@ -132,6 +188,11 @@ export const VoucherBookScreen = () => {
           <table className="vb-table">
             <thead>
               <tr>
+                <th className="no-print" style={{ width: 34, textAlign: 'center' }}>
+                  <input type="checkbox" title="전체 선택"
+                    checked={rows.length > 0 && chosen.length === rows.length}
+                    onChange={e => setPicked(e.target.checked ? new Set(rows.map(keyOf)) : new Set())}/>
+                </th>
                 <th style={{ width: 100 }}>일자</th>
                 <th style={{ width: 60 }}>구분</th>
                 <th style={{ width: 90 }}>계정코드</th>
@@ -144,7 +205,7 @@ export const VoucherBookScreen = () => {
             </thead>
             <tbody>
               {rows.length === 0 && (
-                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--muted-2)', fontSize: 13 }}>
+                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 40, color: 'var(--muted-2)', fontSize: 13 }}>
                   이 기간에 전표가 없어요.
                 </td></tr>
               )}
@@ -155,6 +216,9 @@ export const VoucherBookScreen = () => {
                    빼면 화면에서 그 거래가 사라져, 고쳐야 할 대상을 볼 수가 없다. */
                 <tr key={v.id} className={`vb-top vb-click ${vi % 2 ? 'vb-alt' : ''}`}
                     onClick={() => openSlip(v)} title="전표 보기">
+                  <td className="no-print" style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" checked={picked.has(keyOf(v))} onChange={() => togglePick(v)}/>
+                  </td>
                   <td className="num-cell text-sm text-muted vb-nowrap">{v.date}</td>
                   <td><span className="badge outline" style={{ fontSize: 10 }}>{v.type}</span></td>
                   <td className="num text-sm text-muted">—</td>
@@ -172,6 +236,11 @@ export const VoucherBookScreen = () => {
                    같은 값을 줄마다 되풀이하면 어디서 전표가 갈리는지 눈으로 못 찾는다. */
                 <tr key={`${v.id}-${li}`} className={`vb-click ${li === 0 ? 'vb-top' : ''} ${vi % 2 ? 'vb-alt' : ''}`}
                     onClick={() => openSlip(v)} title="전표 보기">
+                  {li === 0
+                    ? <td className="no-print" rowSpan={v.lines.length} style={{ textAlign: 'center', verticalAlign: 'top' }} onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={picked.has(keyOf(v))} onChange={() => togglePick(v)}/>
+                      </td>
+                    : null}
                   <td className="num-cell text-sm text-muted vb-nowrap">{li === 0 ? v.date : ''}</td>
                   <td>{li === 0 ? <span className="badge outline" style={{ fontSize: 10 }}>{v.type}</span> : ''}</td>
                   <td className="num text-sm text-muted">{l.code}</td>
@@ -195,6 +264,8 @@ export const VoucherBookScreen = () => {
           </table>
         )}
       </div>
+
+      </div>{/* /본문(인쇄 시 감춤) */}
 
       {/* 목록의 한 건을 클릭하면 그 전표를 '전표 모양'으로 띄운다(인쇄 가능). */}
       <VoucherView open={!!slip} voucher={slip} onClose={() => setSlip(null)}/>
