@@ -76,9 +76,28 @@ function transactionVoucher(t) {
   const amount = num(t.amount)
   const isIncome = t.kind === 'income'
 
-  const lines = isIncome
-    ? [line('debit', bank, amount),  line('credit', other, amount)]
-    : [line('debit', other, amount), line('credit', bank, amount)]
+  let lines
+  if (Array.isArray(t.splits) && t.splits.length) {
+    /* 복합 현금 전표(D1) — 한 계좌 움직임(bank)에 비목이 여러 줄.
+       지출: 비목들(공급가)이 차변, 부가세대급금이 차변, 현금/예금이 대변.
+       수입: 거울상(비목·부가세예수금이 대변, 현금/예금이 차변). 합은 거래 금액과 같다. */
+    const bookSide = isIncome ? 'credit' : 'debit'          // 비목이 서는 쪽
+    const bankSide = isIncome ? 'debit' : 'credit'          // 통장이 서는 쪽
+    const vatCode  = isIncome ? VAT_PAYABLE : VAT_RECEIVABLE
+    lines = []
+    let vatSum = 0
+    for (const s of t.splits) {
+      const supply = num(s.supply_amount) || (num(s.amount) - num(s.vat_amount))
+      lines.push(line(bookSide, s.account_code || null, supply))
+      vatSum += num(s.vat_amount)
+    }
+    if (vatSum > 0) lines.push(line(bookSide, vatCode, vatSum))
+    lines.push(line(bankSide, bank, amount))
+  } else {
+    lines = isIncome
+      ? [line('debit', bank, amount),  line('credit', other, amount)]
+      : [line('debit', other, amount), line('credit', bank, amount)]
+  }
 
   // 현금 계정이 낀 거래만 입금·출금전표다. 통장 거래는 대체전표.
   const type = bank === CASH ? (isIncome ? TYPE.IN : TYPE.OUT) : TYPE.TRANSFER

@@ -207,6 +207,51 @@ async function initDb(conn) {
         FOREIGN KEY (employee_id) REFERENCES employees(id)
       )
     `)
+    /* 복합 현금 전표(D1) — 한 번의 입·출금이 여러 비목으로 갈릴 때 그 비목 줄들.
+       거래(transactions)는 여전히 '한 계좌의 한 움직임'이라 잔액 계산은 그대로다.
+       splits 가 있으면 voucher.js 가 이 줄들로 전표를 펴고, 비목·부가세 집계도 이걸 읽는다. */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS txn_splits (
+        id            VARCHAR(36) PRIMARY KEY,
+        txn_id        VARCHAR(36) NOT NULL,
+        category      VARCHAR(100),
+        account_code  VARCHAR(10),
+        supply_amount BIGINT NOT NULL DEFAULT 0,
+        vat_amount    BIGINT NOT NULL DEFAULT 0,
+        amount        BIGINT NOT NULL DEFAULT 0,
+        tax_type      VARCHAR(10),
+        memo          VARCHAR(255),
+        sort_order    INT DEFAULT 0,
+        KEY idx_txnsplit_txn (txn_id),
+        FOREIGN KEY (txn_id) REFERENCES transactions(id)
+      )
+    `)
+    /* 순수 대체 전표(D2) — 현금이 안 움직이는 분개(감가상각 등). 은행 잔액엔 절대 안 섞는다.
+       비은행 계정(감가상각누계액 등) 원장·재무제표에만 반영한다. */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS journal_vouchers (
+        id          VARCHAR(36) PRIMARY KEY,
+        doc_no      VARCHAR(30),
+        date        VARCHAR(20) NOT NULL,
+        summary     VARCHAR(255),
+        memo        TEXT,
+        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `)
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS journal_lines (
+        id            VARCHAR(36) PRIMARY KEY,
+        voucher_id    VARCHAR(36) NOT NULL,
+        side          ENUM('debit','credit') NOT NULL,
+        account_code  VARCHAR(10),
+        account_name  VARCHAR(100),
+        amount        BIGINT NOT NULL DEFAULT 0,
+        memo          VARCHAR(255),
+        sort_order    INT DEFAULT 0,
+        KEY idx_jline_voucher (voucher_id),
+        FOREIGN KEY (voucher_id) REFERENCES journal_vouchers(id)
+      )
+    `)
     await c.execute(`
       CREATE TABLE IF NOT EXISTS recurring_expenses (
         id             VARCHAR(36) PRIMARY KEY,
@@ -1111,6 +1156,8 @@ async function initDb(conn) {
     await c.execute(
       "UPDATE notes SET dishonored_on = due_on WHERE status = 'dishonored' AND dishonored_on IS NULL")
     await ensureColumn('vendors', 'active', "active TINYINT(1) NOT NULL DEFAULT 1")
+    // 복합 현금 전표(D1) — 이 거래가 여러 비목으로 갈렸는지. 보고서·전표가 splits 를 읽을지 가른다.
+    await ensureColumn('transactions', 'has_splits', "has_splits TINYINT(1) NOT NULL DEFAULT 0")
     // 정기청구 → 청구서 역참조. 청구서를 지우면 그 회차의 last_generated 를 되돌려야
     // '발행 예정'에 다시 뜬다. 이 링크가 없으면 그 달 매출이 조용히 미청구로 사라진다.
     // (기존 청구서는 NULL — memo 로 추정 복원하면 엉뚱한 회차를 되살릴 수 있어 하지 않는다)

@@ -27,13 +27,26 @@ async function listVouchers(db, { from, to, kind = 'all', includeIssuance = true
   if (kind === 'income' || kind === 'expense') { where.push('t.kind = ?'); args.push(kind) }
 
   const [rows] = await db.execute(`
-    SELECT t.id, t.kind, t.amount, t.date, t.category, t.memo, t.account_code,
+    SELECT t.id, t.kind, t.amount, t.date, t.category, t.memo, t.account_code, t.has_splits,
            a.acct_code AS bank_code, a.name AS account_name, v.name AS vendor_name
       FROM transactions t
       LEFT JOIN accounts a ON a.id = t.account_id
       LEFT JOIN vendors  v ON v.id = t.vendor_id
      WHERE ${where.join(' AND ')}
      ORDER BY t.date, t.id`, args)
+
+  /* 복합 현금 전표(D1) — 여러 비목으로 갈린 거래는 splits 를 붙여 전표를 여러 줄로 편다.
+     한 번에 모아 읽어(줄마다 조회하지 않는다) 각 거래에 매단다. */
+  const splitIds = rows.filter(r => r.has_splits).map(r => r.id)
+  if (splitIds.length) {
+    const [sp] = await db.execute(
+      `SELECT txn_id, account_code, supply_amount, vat_amount, amount
+         FROM txn_splits WHERE txn_id IN (${splitIds.map(() => '?').join(',')})
+        ORDER BY sort_order, id`, splitIds)
+    const by = new Map()
+    for (const s of sp) { if (!by.has(s.txn_id)) by.set(s.txn_id, []); by.get(s.txn_id).push(s) }
+    for (const r of rows) if (by.has(r.id)) r.splits = by.get(r.id)
+  }
 
   /* 어음 수취·발행도 전표다 — **거래가 아니라서 위 조회에 안 걸린다.**
    * 빼면 만기 결제 전표의 상대 계정(1205·2102)이 이 파일 안에서 대변에만 나타나,

@@ -523,6 +523,11 @@ router.get('/:id/voucher', async (req, res, next) => {
         LEFT JOIN vendors  v ON v.id = t.vendor_id
        WHERE t.id = ?`, [req.params.id])
     if (!t) return res.status(404).json({ error: 'Not found' })
+    // 복합 전표면 비목 줄을 붙여 전표를 여러 줄로 편다
+    const [sp] = await req.db.execute(
+      'SELECT account_code, supply_amount, vat_amount, amount FROM txn_splits WHERE txn_id = ? ORDER BY sort_order, id',
+      [req.params.id])
+    if (sp.length) t.splits = sp
     res.json(await withNames(req.db, transactionVoucher(t), { account_name: t.account_name }))
   } catch (e) { next(e) }
 })
@@ -622,6 +627,41 @@ router.post('/transfer', async (req, res, next) => {
   finally { conn.release() }
 })
 
+/* 복합 현금 전표(D1) — 한 거래를 여러 비목으로 가른 줄. 줄 합계가 거래 금액과 같아야 한다.
+   splits 가 비었으면 복합이 아니다(일반 거래). 한 줄짜리는 굳이 복합으로 두지 않는다. */
+function splitError(splits, total) {
+  if (!Array.isArray(splits) || splits.length === 0) return null
+  if (splits.length < 2) return '복합 전표는 비목이 둘 이상이어야 해요'
+  for (const l of splits) { const ae = amountError(l.amount); if (ae) return '항목 ' + ae }
+  const sum = splits.reduce((s, l) => s + (Math.round(Number(l.amount)) || 0), 0)
+  if (sum !== Math.round(Number(total) || 0)) return `항목 합계 ${sum.toLocaleString('ko-KR')}원이 거래 금액과 달라요`
+  return null
+}
+async function saveSplits(conn, txnId, splits) {
+  await conn.execute('DELETE FROM txn_splits WHERE txn_id = ?', [txnId])
+  const rows = Array.isArray(splits) ? splits.filter(l => Number(l.amount)) : []
+  let ord = 0, supplySum = 0, vatSum = 0
+  for (const l of rows) {
+    const supply = Math.round(Number(l.supply_amount)) || 0
+    const vat = Math.round(Number(l.vat_amount)) || 0
+    supplySum += supply; vatSum += vat
+    await conn.execute(
+      `INSERT INTO txn_splits (id, txn_id, category, account_code, supply_amount, vat_amount, amount, tax_type, memo, sort_order)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [randomUUID(), txnId, l.category || '', l.account_code || null,
+       supply, vat, Math.round(Number(l.amount)) || 0, l.tax_type || null, l.memo || '', ++ord])
+  }
+  /* ⚠ 부가세·공급가를 **부모 거래에 굴려 올린다.** 부가세 집계(lib/vatAgg.js)는 거래의
+     supply_amount/vat_amount 를 읽는다 — 복합 거래도 그 값이 항목 합계와 같아야 신고자료가 맞는다.
+     이렇게 해 두면 vatAgg 를 안 고쳐도 복합 거래가 정확히 잡힌다. splits 가 없으면 손대지 않는다. */
+  if (rows.length) {
+    await conn.execute('UPDATE transactions SET has_splits = 1, supply_amount = ?, vat_amount = ? WHERE id = ?',
+      [supplySum, vatSum, txnId])
+  } else {
+    await conn.execute('UPDATE transactions SET has_splits = 0 WHERE id = ?', [txnId])
+  }
+}
+
 router.post('/', async (req, res, next) => {
   try {
     const {
@@ -629,7 +669,7 @@ router.post('/', async (req, res, next) => {
       amount, date, method, status, project_no, site,
       invoice_id, recurring_id, doc_no, employee_id, employee_name, evid_type, evid_url, memo,
       item_id, account_code, supply_amount, vat_amount, tax_type, vat_deductible,
-      counterparty_account_id
+      counterparty_account_id, splits
     } = req.body
     const dateErr = futureDateError(date)
     if (dateErr) return res.status(400).json({ error: dateErr })
@@ -637,6 +677,8 @@ router.post('/', async (req, res, next) => {
     if (closedErr) return res.status(409).json({ error: closedErr })
     // 음수·초대형 금액을 서버에서 막는다 — 음수 지출은 계좌 잔액을 늘리고 매입세액을 깎는다
     { const ae = amountError(amount); if (ae) return res.status(400).json({ error: ae }) }
+    // 복합 전표면 항목 합계가 거래 금액과 같아야 한다
+    { const se = splitError(splits, amount); if (se) return res.status(400).json({ error: se }) }
     const vat = vatFields({ amount, supply_amount, vat_amount, tax_type, vat_deductible })
     // 완료 상태인데 계좌가 없으면 잔액에 잡히지 않는다(lib/ledger.js 참고)
     // 기본 상태는 종류별로 — 수입에 '지급완료'가 박히면 '입금완료'만 세는 집계에서 빠진다
@@ -650,19 +692,26 @@ router.post('/', async (req, res, next) => {
     // 원가 귀속(cost_contract_id)은 지출에만 의미가 있다 — 수금에 붙으면 매출주문 원가가 부풀어 오른다
     const costId = kind === 'expense' ? (cost_contract_id || null) : null
     const cp = await counterpartySnapshot(req.db, vendor_id, counterparty_account_id)
-    await req.db.execute(`
-      INSERT INTO transactions (id, kind, vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
-        amount, date, method, status, project_no, site,
-        invoice_id, recurring_id, doc_no, employee_id, employee_name, evid_type, evid_url, memo, item_id, account_code,
-        supply_amount, vat_amount, tax_type, vat_deductible,
-        counterparty_account_id, counterparty_bank, counterparty_account, counterparty_holder)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    `, [id, kind, vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
-        amount, date, method||'', st, project_no||'', site||'',
-        invoice_id||null, recurring_id||null, doc_no||'', employee_id||null, employee_name||null, evid_type||'', evid_url||'', memo||'',
-        item_id||null, acctCode,
-        vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible,
-        cp.id, cp.bank, cp.account, cp.holder])
+    const conn = await req.db.getConnection()
+    try {
+      await conn.beginTransaction()
+      await conn.execute(`
+        INSERT INTO transactions (id, kind, vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
+          amount, date, method, status, project_no, site,
+          invoice_id, recurring_id, doc_no, employee_id, employee_name, evid_type, evid_url, memo, item_id, account_code,
+          supply_amount, vat_amount, tax_type, vat_deductible,
+          counterparty_account_id, counterparty_bank, counterparty_account, counterparty_holder)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `, [id, kind, vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
+          amount, date, method||'', st, project_no||'', site||'',
+          invoice_id||null, recurring_id||null, doc_no||'', employee_id||null, employee_name||null, evid_type||'', evid_url||'', memo||'',
+          item_id||null, acctCode,
+          vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible,
+          cp.id, cp.bank, cp.account, cp.holder])
+      if (Array.isArray(splits) && splits.length) await saveSplits(conn, id, splits)
+      await conn.commit()
+    } catch (e) { await rollbackQuietly(conn); throw e }
+    finally { conn.release() }
     res.json({ id })
   } catch (e) { next(e) }
 })
@@ -673,12 +722,13 @@ router.put('/:id', async (req, res, next) => {
       vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
       amount, date, method, status, project_no, site,
       doc_no, employee_id, employee_name, evid_type, evid_url, memo, item_id, account_code,
-      supply_amount, vat_amount, tax_type, vat_deductible, counterparty_account_id
+      supply_amount, vat_amount, tax_type, vat_deductible, counterparty_account_id, splits
     } = req.body
     const dateErr = futureDateError(date)
     if (dateErr) return res.status(400).json({ error: dateErr })
     // 등록과 같은 금액 검증 — 수정으로 음수를 넣는 경로도 막아야 한다
     { const ae = amountError(amount); if (ae) return res.status(400).json({ error: ae }) }
+    { const se = splitError(splits, amount); if (se) return res.status(400).json({ error: se }) }
     const vat = vatFields({ amount, supply_amount, vat_amount, tax_type, vat_deductible })
     // 편집으로 수입 거래가 되면 원가 귀속은 떨어진다
     const [[cur]] = await req.db.execute('SELECT kind, date AS cur_date FROM transactions WHERE id = ?', [req.params.id])
@@ -803,6 +853,9 @@ router.put('/:id', async (req, res, next) => {
         await conn.execute('UPDATE invoice_matches SET amount = ? WHERE id = ?', [newMatch, link.id])
         await recalcInvoiceStatus(conn, link.invoice_id)
       }
+
+      // 복합 전표 항목을 다시 저장한다(없으면 비운다 — 복합→일반으로 되돌릴 수 있어야 한다)
+      await saveSplits(conn, req.params.id, splits)
 
       await conn.commit()
       res.json({ ok: true })
@@ -971,6 +1024,8 @@ router.delete('/:id', async (req, res, next) => {
     const [matches] = await conn.execute('SELECT invoice_id FROM invoice_matches WHERE txn_id = ?', [req.params.id])
     await conn.execute('DELETE FROM invoice_matches WHERE txn_id = ?', [req.params.id])
     for (const m of matches) await recalcInvoiceStatus(conn, m.invoice_id)
+    // 복합 전표 항목(자식)을 먼저 지운다 — FK 로 묶여 있어 안 지우면 거래 삭제가 막힌다
+    await conn.execute('DELETE FROM txn_splits WHERE txn_id = ?', [req.params.id])
     // 정기지출에서 자동 생성된 거래면 last_generated 를 되돌려 그 회차가 다시 생성되게 한다.
     const [[cur]] = await conn.execute('SELECT recurring_id, date, transfer_id FROM transactions WHERE id = ?', [req.params.id])
     /* ⚠ 이체는 **짝과 함께** 지운다.
