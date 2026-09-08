@@ -270,8 +270,21 @@ async function withNames(db, voucher, extra = {}) {
   }
 }
 
+/**
+ * 순수 대체 전표(D2) → 전표. 저장된 분개 줄(차/대·계정·금액)을 그대로 세운다.
+ * 현금이 안 움직이는 분개(감가상각 등)라 통장·잔액과 무관하다.
+ * @param {object} jv   journal_vouchers 행
+ * @param {array}  jl   journal_lines 행들 [{side, account_code, amount}]
+ */
+function journalVoucher(jv, jl) {
+  return build(TYPE.TRANSFER, {
+    source: 'journal', id: jv.id, date: jv.date,
+    summary: jv.summary || jv.memo || '', counterparty: '',
+  }, (jl || []).map(l => line(l.side, l.account_code, l.amount)))
+}
+
 module.exports = {
   TYPE, CASH, AR, AP, VAT_RECEIVABLE, VAT_PAYABLE, DEFAULT_SALES,
   NOTE_RECEIVABLE, NOTE_PAYABLE,
-  transactionVoucher, invoiceVoucher, noteVoucher, noteDishonorVoucher, withNames,
+  transactionVoucher, invoiceVoucher, noteVoucher, noteDishonorVoucher, journalVoucher, withNames,
 }

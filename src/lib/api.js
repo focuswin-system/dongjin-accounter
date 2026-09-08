@@ -972,6 +972,22 @@ export const api = {
   async getVoucherBook({ from, to, kind = 'all' }) {
     try { return await req(`/transactions/vouchers?from=${from}&to=${to}&kind=${kind}`) } catch { return [] }
   },
+  // 순수 대체 전표(D2) — 현금 안 거치는 분개
+  async getJournalVouchers() {
+    try { return await req('/journal-vouchers') } catch { return [] }
+  },
+  async getJournalVoucher(id) {
+    try { return await req('/journal-vouchers/' + id) } catch { return null }
+  },
+  async createJournalVoucher(data) {
+    try { const r = await req('/journal-vouchers', { method: 'POST', body: data }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async deleteJournalVoucher(id) {
+    try { await req('/journal-vouchers/' + id, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
   async downloadTransfersXlsx({ from, to, nums = 'hide', filename }) {
     try {
       const token = localStorage.getItem('token')

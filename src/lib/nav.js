@@ -101,6 +101,9 @@ export const NAV_TREE = [
        * (라벨이 비면 사이드바가 그 줄을 안 그린다. 브레드크럼은 NAV_PATH_OF 가 이미 접는다.) */
       { label: "", items: [
         { id: "ledger", label: "거래내역", icon: Icon.Wallet },
+        /* 전표 입력 — 현금이 안 움직이는 분개(감가상각·대손상각 등)를 차·대변으로 직접 적는다.
+         * 통장이 오가는 건 위 입금·출금에서 넣는다(그래야 잔액에 잡힌다). */
+        { id: "voucher_entry", label: "전표 입력", icon: Icon.Doc },
       ]},
     ],
   },

@@ -58,6 +58,7 @@ const RESOURCES = [
   { id: 'quote_req',               label: '견적요청서',     group: '일반회계 · 문서' },
 
   { id: 'ledger',                  label: '전체 거래내역',  group: '일반회계 · 장부' },
+  { id: 'voucher_entry',           label: '전표 입력(대체전표)', group: '일반회계 · 장부' },
   // 사이드바에서는 뺐지만(수주·발주와 같은 화면) 라우트·권한은 살아 있다 → nav.js HIDDEN_LEAVES
   { id: 'contract',                label: '주문 전체',      group: '일반회계 · 장부' },
 

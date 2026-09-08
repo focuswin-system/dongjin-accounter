@@ -233,6 +233,9 @@ const AUDIT_RULES = [
   { m: 'PUT',    re: /^\/api\/settlements\/([^/]+)$/,                  res: 'settlement', action: 'edit',         target: 1 },
   /* 구매품의서 → 미지급금 발행. `/api/purchase-reqs` 가 LEDGER_PREFIXES 에 없어
      검사조차 안 됐다(주문·결의서와 달리 문지기 밖에 있었다). */
+  /* 순수 대체 전표(D2) — 현금 없는 분개(감가상각 등). 장부에 오르므로 남긴다. */
+  { m: 'POST',   re: /^\/api\/journal-vouchers$/,                       res: 'journal_voucher', action: 'create' },
+  { m: 'DELETE', re: /^\/api\/journal-vouchers\/([^/]+)$/,              res: 'journal_voucher', action: 'delete', target: 1 },
   { m: 'POST',   re: /^\/api\/purchase-reqs\/([^/]+)\/issue-payable$/, res: 'invoice', action: 'issue', target: 1 },
   /* 승인 게이트 — 승인해야 미지급금을 발행할 수 있다. 누가·언제는 이 감사기록이 남긴다. */
   { m: 'POST',   re: /^\/api\/purchase-reqs\/([^/]+)\/approve$/,       res: 'purchase_req', action: 'approve',   target: 1 },
@@ -321,7 +324,7 @@ const RESOURCE_LABELS = {
   loan: '차입금', lending: '대여금', investment: '투자', savings: '예금·적금', unpaid_labor: '미지급 퇴직금',
   account: '계좌/카드', vendor: '거래처', ref_item: '기준정보', user: '사용자',
   feature: '유료 기능',
-  note: '어음', tax: '세금', purchase_req: '구매품의서',
+  note: '어음', tax: '세금', purchase_req: '구매품의서', journal_voucher: '대체전표',
 }
 
 /** 대상 ID 길이 상한 (audit_logs.target_id VARCHAR(64)) */

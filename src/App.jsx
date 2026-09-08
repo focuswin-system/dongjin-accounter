@@ -20,6 +20,7 @@ import { DocsScreen, EvidenceScreen, EvidenceAttachDrawer, ExcelScreen, ReportsS
 import { SettlementScreen } from './screens/Settlement'
 import { PaymentRunScreen } from './screens/PaymentRun'
 import { TransferScreen } from './screens/Transfer'
+import { VoucherEntryScreen } from './screens/VoucherEntry'
 import { CardPaymentScreen } from './screens/CardPayment'
 import { LendingScreen } from './screens/Lending'
 import { NotesScreen } from './screens/Notes'
@@ -665,6 +666,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
       case "card_payment":   return <CardPaymentScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
       case "voucher_book":   return <VoucherBookScreen/>;
       case "transfer":       return <TransferScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
+      case "voucher_entry":  return <VoucherEntryScreen/>;
       case "finance_lending": return <LendingScreen/>;
       case "finance_note":    return <NotesScreen/>;
       case "misc_pl":

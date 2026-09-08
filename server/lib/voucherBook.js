@@ -13,7 +13,7 @@
  *   그대로 세우고 '확인 필요'로 표시해, 받는 사람이 물어볼 수 있게 한다.
  */
 
-const { transactionVoucher, invoiceVoucher, noteVoucher, noteDishonorVoucher } = require('./voucher')
+const { transactionVoucher, invoiceVoucher, noteVoucher, noteDishonorVoucher, journalVoucher } = require('./voucher')
 
 /**
  * 기간 안의 거래를 전표로 만든다.
@@ -170,6 +170,28 @@ async function listVouchers(db, { from, to, kind = 'all', includeIssuance = true
         memo: `${inv.invoice_no || ''} 발행`.trim(),
         category: '',
       })
+    }
+  }
+
+  /* 순수 대체 전표(D2) — 현금이 안 움직이는 분개도 장부다. 기간 안의 것을 붙인다.
+     kind 필터(income/expense)와는 무관하다(수입·지출 어느 쪽도 아니므로 전체일 때만 넣는다). */
+  if (kind === 'all') {
+    const [jvs] = await db.execute(
+      'SELECT id, doc_no, date, summary, memo FROM journal_vouchers WHERE date >= ? AND date <= ?', [from, to])
+    if (jvs.length) {
+      const [jls] = await db.execute(
+        `SELECT voucher_id, side, account_code, amount FROM journal_lines
+          WHERE voucher_id IN (${jvs.map(() => '?').join(',')}) ORDER BY sort_order, id`,
+        jvs.map(v => v.id))
+      const byV = new Map()
+      for (const l of jls) { if (!byV.has(l.voucher_id)) byV.set(l.voucher_id, []); byV.get(l.voucher_id).push(l) }
+      for (const jv of jvs) {
+        vouchers.push({
+          ...journalVoucher(jv, byV.get(jv.id) || []),
+          kind: 'journal', amount: (byV.get(jv.id) || []).filter(l => l.side === 'debit').reduce((s, l) => s + (Number(l.amount) || 0), 0),
+          vendor_name: '', account_name: '', memo: jv.summary || jv.memo || '', category: '',
+        })
+      }
     }
   }
 

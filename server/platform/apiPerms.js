@@ -43,6 +43,7 @@ const API_RESOURCES = {
   '/api/recurring-expenses':  ['recurring_expense'],
   '/api/resolutions':         ['doc'],
   '/api/settlements':         ['settlement'],
+  '/api/journal-vouchers':    ['voucher_entry', 'voucher_book'],
   '/api/purchase-reqs':       ['purchase_req'],
   '/api/payment-runs':        ['payment_run'],
   /* 퇴직금은 **인사 자원만** 요구한다. 자원군 판정이 OR 이라 fund_status 를 함께 두면
