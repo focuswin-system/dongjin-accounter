@@ -1757,6 +1757,8 @@ body:has([data-modal-open]) {
    줄무늬를 넣고도 안 넣은 것과 같았다. 눈에 들어오는 최소치까지 내린다. */
 .vb-table tbody tr.vb-alt > td { background: #F4F6F9; }
 .vb-table tbody tr:hover > td { background: var(--brand-soft); }
+/* 클릭하면 그 전표를 '전표 모양'으로 띄운다 — 누를 수 있음을 손 모양으로 알린다 */
+.vb-table tbody tr.vb-click { cursor: pointer; }
 /* 날짜·금액은 접히면 안 된다 — 접히는 순간 행 높이가 세 배가 되고 표가 성글어진다 */
 .vb-table .vb-nowrap { white-space: nowrap; }
 

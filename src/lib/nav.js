@@ -152,11 +152,13 @@ export const NAV_TREE = [
          홈과 경영관리에도 같은 숫자가 카드로 떠 있다.
          회사마다 쓰는 양식이 다르다. 보고서가 이미 회사별로 켜고 끄는 구조(scope)를
          갖고 있으므로, 문서도 같은 방식으로 넓힐 자리다(⓶ 다음 단계). */
+      /* 순서는 **업무 흐름**을 따른다: 견적을 받고(견적요청) → 살 결정을 결재받고(구매품의)
+         → 돈 내보낼 결재를 받고(지급결의) → 쓴 걸 정리해 넘긴다(정산내역). */
       { label: "문서", items: [
-        { id: "doc",          label: "지급결의서", icon: Icon.Sign },
-        { id: "settlement",   label: "정산내역서", icon: Icon.Doc },
         { id: "quote_req",    label: "견적요청서", icon: Icon.Doc },
         { id: "purchase_req", label: "구매품의서", icon: Icon.Receipt },
+        { id: "doc",          label: "지급결의서", icon: Icon.Sign },
+        { id: "settlement",   label: "정산내역서", icon: Icon.Doc },
       ]},
     ],
   },
@@ -255,7 +257,7 @@ export const FOLDABLE_DOMAINS = [
   { id: "tax_dom", label: "세무관리", icon: Icon.Doc,
     why: "부가세 신고 자료를 장부에서 바로 산출합니다." },
   { id: "office_dom", label: "문서업무", icon: Icon.Doc,
-    why: "지급결의서·정산내역서·견적요청서를 장부 데이터로 작성·출력합니다." },
+    why: "견적요청서·구매품의서·지급결의서·정산내역서를 장부 데이터로 작성·출력합니다." },
   { id: "finance", label: "재무관리", icon: Icon.Bank,
     why: "차입금·투자·예금. 원금과 이자를 구분해 기록하고 상환 일정을 관리합니다." },
   { id: "mgmt", label: "경영관리", icon: Icon.Trend,
@@ -618,8 +620,8 @@ export const PORTAL = [
   {
     id: 'office_dom', label: '문서업무', icon: Icon.Doc,
     categories: [
-      { id: 'office_docs', label: '문서', icon: Icon.Sign, desc: '지급결의서·정산내역서·견적요청서·구매품의서', groups: [
-        { label: '', items: ['doc', 'settlement', 'quote_req', 'purchase_req'] },
+      { id: 'office_docs', label: '문서', icon: Icon.Sign, desc: '견적요청서·구매품의서·지급결의서·정산내역서', groups: [
+        { label: '', items: ['quote_req', 'purchase_req', 'doc', 'settlement'] },
       ]},
     ],
   },

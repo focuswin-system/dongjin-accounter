@@ -41,10 +41,12 @@ const featureKeyOf = (key) => `doc:${key}`
 const prefKeyOf = (key) => `doc:${key}`
 
 const BUILTIN_DOCS = [
-  { key: 'doc',          title: '지급결의서', descr: '지출 전에 결재를 받는 문서예요.',            scope: 'all', sort: 10 },
-  { key: 'settlement',   title: '정산내역서', descr: '쓴 돈을 항목별로 정리해 넘기는 문서예요.',    scope: 'all', sort: 20 },
-  { key: 'quote_req',    title: '견적요청서', descr: '거래처에 단가를 물어보는 문서예요.',          scope: 'all', sort: 30 },
-  { key: 'purchase_req', title: '구매품의서', descr: '무엇을 얼마에 살지 결재를 받는 문서예요.',    scope: 'all', sort: 40 },
+  /* 순서(sort)는 업무 흐름을 따른다 — 견적요청 → 구매품의 → 지급결의 → 정산내역.
+     nav.js 의 문서 메뉴/홈 포털 순서와 같게 맞춘다. */
+  { key: 'quote_req',    title: '견적요청서', descr: '거래처에 단가를 물어보는 문서예요.',          scope: 'all', sort: 10 },
+  { key: 'purchase_req', title: '구매품의서', descr: '무엇을 얼마에 살지 결재를 받는 문서예요.',    scope: 'all', sort: 20 },
+  { key: 'doc',          title: '지급결의서', descr: '지출 전에 결재를 받는 문서예요.',            scope: 'all', sort: 30 },
+  { key: 'settlement',   title: '정산내역서', descr: '쓴 돈을 항목별로 정리해 넘기는 문서예요.',    scope: 'all', sort: 40 },
 ]
 
 const BUILTIN_BY_KEY = Object.fromEntries(BUILTIN_DOCS.map(d => [d.key, d]))

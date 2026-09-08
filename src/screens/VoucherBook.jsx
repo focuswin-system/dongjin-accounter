@@ -4,6 +4,7 @@ import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
 import { PrintEditButton } from '../lib/components/PrintEditButton'
 import { usePrintEdit } from '../lib/printEdit'
+import { VoucherView } from '../lib/components/VoucherView'
 
 /**
  * 전표 목록(분개장) — 기간 안의 거래를 차변·대변 줄로 펼친다.
@@ -28,6 +29,12 @@ export const VoucherBookScreen = () => {
   const [to, setTo] = useState(init.to)
   const [kind, setKind] = useState('all')
   const [rows, setRows] = useState([])
+  /* 전표 목록의 한 건을 클릭하면 그 전표를 '전표 모양'(차변|계정|대변)으로 띄운다.
+     목록이 이미 완성된 전표(lines·합계·source)를 쥐고 있어 재조회 없이 그대로 넘긴다 —
+     그래서 단건 조회 API 가 없는 어음(note)도 함께 열린다.
+     적요·거래처는 슬립이 counterparty/summary 를 읽으므로 목록의 이름을 맞춰 넣는다. */
+  const [slip, setSlip] = useState(null)
+  const openSlip = (v) => setSlip({ ...v, counterparty: v.counterparty || v.vendor_name, summary: v.summary || v.memo || v.category })
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
 
@@ -146,7 +153,8 @@ export const VoucherBookScreen = () => {
               {rows.map((v, vi) => (v.lines.length === 0 ? [
                 /* ⚠ 줄이 하나도 없는 전표(계좌·계정과목이 둘 다 빔)도 세운다.
                    빼면 화면에서 그 거래가 사라져, 고쳐야 할 대상을 볼 수가 없다. */
-                <tr key={v.id} className={`vb-top ${vi % 2 ? 'vb-alt' : ''}`}>
+                <tr key={v.id} className={`vb-top vb-click ${vi % 2 ? 'vb-alt' : ''}`}
+                    onClick={() => openSlip(v)} title="전표 보기">
                   <td className="num-cell text-sm text-muted vb-nowrap">{v.date}</td>
                   <td><span className="badge outline" style={{ fontSize: 10 }}>{v.type}</span></td>
                   <td className="num text-sm text-muted">—</td>
@@ -162,7 +170,8 @@ export const VoucherBookScreen = () => {
               ] : v.lines.map((l, li) => (
                 /* 한 전표가 여러 줄이다. 첫 줄에만 일자·구분·거래처를 적고 나머지는 비운다 —
                    같은 값을 줄마다 되풀이하면 어디서 전표가 갈리는지 눈으로 못 찾는다. */
-                <tr key={`${v.id}-${li}`} className={`${li === 0 ? 'vb-top' : ''} ${vi % 2 ? 'vb-alt' : ''}`}>
+                <tr key={`${v.id}-${li}`} className={`vb-click ${li === 0 ? 'vb-top' : ''} ${vi % 2 ? 'vb-alt' : ''}`}
+                    onClick={() => openSlip(v)} title="전표 보기">
                   <td className="num-cell text-sm text-muted vb-nowrap">{li === 0 ? v.date : ''}</td>
                   <td>{li === 0 ? <span className="badge outline" style={{ fontSize: 10 }}>{v.type}</span> : ''}</td>
                   <td className="num text-sm text-muted">{l.code}</td>
@@ -186,6 +195,9 @@ export const VoucherBookScreen = () => {
           </table>
         )}
       </div>
+
+      {/* 목록의 한 건을 클릭하면 그 전표를 '전표 모양'으로 띄운다(인쇄 가능). */}
+      <VoucherView open={!!slip} voucher={slip} onClose={() => setSlip(null)}/>
     </div>
   )
 }

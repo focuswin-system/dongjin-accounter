@@ -19,18 +19,22 @@ import { api } from '../api'
  * 전표 종류(입금·출금·대체)는 서버가 정한다. 3전표제에서 입금·출금전표는 현금(시재) 전용이라
  * 통장 거래는 전부 대체전표다 — 그 판정을 화면에서 다시 하면 두 벌이 되어 어긋난다.
  */
-export const VoucherView = ({ open, onClose, source, id }) => {
-  const [v, setV] = useState(null)
+export const VoucherView = ({ open, onClose, source, id, voucher }) => {
+  const [v, setV] = useState(voucher || null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!open || !id) return
+    if (!open) return
+    /* 이미 완성된 전표를 받았으면(전표 목록의 행 등) 그대로 그린다 — 다시 조회하지 않는다.
+       어음(note)처럼 단건 전표 조회 API가 없는 종류도 이 경로로 함께 보인다. */
+    if (voucher) { setV(voucher); setLoading(false); return }
+    if (!id) return
     let alive = true
     setLoading(true); setV(null)
     const p = source === 'invoice' ? api.getInvoiceVoucher(id) : api.getTransactionVoucher(id)
     p.then(d => { if (alive) { setV(d); setLoading(false) } })
     return () => { alive = false }
-  }, [open, id, source])
+  }, [open, id, source, voucher])
 
   /* 차변·대변을 같은 줄에 세우려면 계정 하나가 한 행이어야 한다.
      한 계정이 양쪽에 오는 일은 없으므로(그건 곧 자기 자신과의 거래다) 줄을 그대로 편다. */
