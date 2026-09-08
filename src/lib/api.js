@@ -57,12 +57,14 @@ export const minuteOf = (v) => {
  * 그래서 던지는 오류에 status·kind 를 붙여, App 의 전역 핸들러가 무엇이 잘못됐는지
  * 토스트로 알려줄 수 있게 한다.
  */
-function apiError(message, { status = 0, kind = 'http', code = '' } = {}) {
+function apiError(message, { status = 0, kind = 'http', code = '', duplicates = null } = {}) {
   const e = new Error(message)
   e.status = status
   e.kind = kind      // 'network' | 'auth' | 'ratelimit' | 'http'
   // 서버가 준 사유 코드(예: 'duplicate'). 화면이 문구를 다시 파싱하지 않고 분기할 수 있게 남긴다.
   e.code = code
+  // 사유에 딸린 목록(예: 중복 후보). 화면이 확인 다이얼로그에 그대로 쓴다.
+  if (duplicates) e.duplicates = duplicates
   return e
 }
 
@@ -159,11 +161,11 @@ async function req(path, opts = {}) {
   }
   if (!res.ok) {
     let msg = `요청을 처리하지 못했어요 (${res.status})`
-    let code = ''
-    try { const body = await res.json(); if (body?.error) msg = body.error; code = body?.code || '' } catch { /* 본문 없음 */ }
+    let code = '', duplicates = null
+    try { const body = await res.json(); if (body?.error) msg = body.error; code = body?.code || ''; duplicates = body?.duplicates || null } catch { /* 본문 없음 */ }
     // 429는 서버가 이유와 대기 시간을 문구에 담아 보낸다(시도 제한·요청 한도).
     // 이걸 삼키면 사용자는 왜 막혔는지 모른 채 빈 화면만 본다.
-    throw notifyInfra(apiError(msg, { status: res.status, kind: res.status === 429 ? 'ratelimit' : 'http', code }), opts.method || 'GET')
+    throw notifyInfra(apiError(msg, { status: res.status, kind: res.status === 429 ? 'ratelimit' : 'http', code, duplicates }), opts.method || 'GET')
   }
   return res.json()
 }
@@ -1488,10 +1490,20 @@ export const api = {
     try { await req(`/purchase-reqs/${id}`, { method: 'DELETE' }); return { ok: true } }
     catch (e) { return { ok: false, error: e.message } }
   },
-  // 구매품의서 → 미지급금(매입 청구서) 등록
-  async issuePurchaseReqPayable(id, { supply_amount, vat_mode, due } = {}) {
-    try { const r = await req(`/purchase-reqs/${id}/issue-payable`, { method: 'POST', body: { supply_amount, vat_mode, due } }); return { ok: true, ...r } }
+  // 구매품의서 승인 게이트 — 승인해야 미지급금을 등록할 수 있다
+  async approvePurchaseReq(id) {
+    try { const r = await req(`/purchase-reqs/${id}/approve`, { method: 'POST' }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
+  },
+  async unapprovePurchaseReq(id) {
+    try { const r = await req(`/purchase-reqs/${id}/unapprove`, { method: 'POST' }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  // 구매품의서 → 미지급금(매입 청구서) 등록. force 면 중복 경고를 무릅쓰고 등록한다.
+  async issuePurchaseReqPayable(id, { supply_amount, vat_mode, due, force } = {}) {
+    try { const r = await req(`/purchase-reqs/${id}/issue-payable`, { method: 'POST', body: { supply_amount, vat_mode, due, force } }); return { ok: true, ...r } }
+    // 중복이면 code:'duplicate' + duplicates 를 화면으로 넘겨 확인받는다
+    catch (e) { return { ok: false, error: e.message, code: e.code, duplicates: e.duplicates } }
   },
 
   async getQuoteReqs() {

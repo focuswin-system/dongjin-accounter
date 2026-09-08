@@ -234,6 +234,9 @@ const AUDIT_RULES = [
   /* 구매품의서 → 미지급금 발행. `/api/purchase-reqs` 가 LEDGER_PREFIXES 에 없어
      검사조차 안 됐다(주문·결의서와 달리 문지기 밖에 있었다). */
   { m: 'POST',   re: /^\/api\/purchase-reqs\/([^/]+)\/issue-payable$/, res: 'invoice', action: 'issue', target: 1 },
+  /* 승인 게이트 — 승인해야 미지급금을 발행할 수 있다. 누가·언제는 이 감사기록이 남긴다. */
+  { m: 'POST',   re: /^\/api\/purchase-reqs\/([^/]+)\/approve$/,       res: 'purchase_req', action: 'approve',   target: 1 },
+  { m: 'POST',   re: /^\/api\/purchase-reqs\/([^/]+)\/unapprove$/,     res: 'purchase_req', action: 'unapprove', target: 1 },
   { m: 'PUT',    re: /^\/api\/purchase-reqs\/([^/]+)$/,               res: 'purchase_req', action: 'edit',   target: 1 },
   /* 삭제 — 이미 미지급금을 발행한 품의서를 지우면 그 청구서가 고아가 된다(되돌릴 손잡이가
      사라진다). 주문·결의서는 이 상황을 막거나 cascade 하는데 여기만 없다. 기록이라도 남긴다. */
@@ -278,6 +281,7 @@ const ACTION_LABELS = {
   // 주문 붙이기 — 청구서·거래를 몰아서 주문에 귀속시킨다(되돌리기도 같은 행위)
   link_orders: '주문 붙이기', items_seed: '주문 단가표 채우기',
   process: '결의서 처리', mature: '만기 처리',
+  approve: '품의 승인', unapprove: '품의 승인 취소',
   repay: '상환', repay_missed: '놓친 회차 상환', repay_cancel: '상환 취소',
   // 대여금·투자 회수 — 차입금 상환의 거울상
   'collect-cancel': '회수 취소', 'redeem-cancel': '회수 취소',

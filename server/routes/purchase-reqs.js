@@ -122,6 +122,28 @@ router.delete('/:id', async (req, res, next) => {
 // 구매품의서 → 미지급금(매입 청구서) 등록. 품의금액을 공급가로 보고 과세유형으로 세액을 매긴다.
 // 실제 지급이 아니라 '지급 대기' 상태의 미지급금만 만든다(자금 이동·마감 검사 불필요).
 const VAT_MODES = { '과세': 'exclusive', '면세': 'none', '영세': 'zero', exclusive: 'exclusive', none: 'none', zero: 'zero' }
+/* 승인 게이트 — 작성 ↔ 승인. 승인해야 미지급금을 발행할 수 있다(결재 없이 돈이 잡히는 걸 막는다).
+   누가·언제는 감사기록(audit_logs)이 남긴다. 이미 미지급금이 나간 품의는 상태를 못 바꾼다. */
+router.post('/:id/approve', async (req, res, next) => {
+  try {
+    const [[r]] = await req.db.execute('SELECT id, status, invoice_id FROM purchase_reqs WHERE id = ?', [req.params.id])
+    if (!r) return res.status(404).json({ error: 'Not found' })
+    if (r.invoice_id) return res.status(409).json({ error: '이미 미지급금으로 등록된 품의서예요' })
+    if (r.status === '승인') return res.json({ ok: true, status: '승인' })   // 멱등
+    await req.db.execute("UPDATE purchase_reqs SET status = '승인' WHERE id = ?", [req.params.id])
+    res.json({ ok: true, status: '승인' })
+  } catch (e) { next(e) }
+})
+router.post('/:id/unapprove', async (req, res, next) => {
+  try {
+    const [[r]] = await req.db.execute('SELECT id, status, invoice_id FROM purchase_reqs WHERE id = ?', [req.params.id])
+    if (!r) return res.status(404).json({ error: 'Not found' })
+    if (r.invoice_id) return res.status(409).json({ error: '이미 미지급금으로 등록돼 되돌릴 수 없어요' })
+    await req.db.execute("UPDATE purchase_reqs SET status = '작성' WHERE id = ?", [req.params.id])
+    res.json({ ok: true, status: '작성' })
+  } catch (e) { next(e) }
+})
+
 router.post('/:id/issue-payable', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
@@ -133,6 +155,8 @@ router.post('/:id/issue-payable', async (req, res, next) => {
       if (inv) { await rollbackQuietly(conn); return res.status(409).json({ error: `이미 미지급금(${inv.invoice_no})으로 등록됐어요` }) }
     }
     if (!r.vendor_id) { await rollbackQuietly(conn); return res.status(400).json({ error: '공급업체를 거래처로 지정한 뒤 등록해주세요' }) }
+    // 승인 게이트 — 승인된 품의만 미지급금으로 등록한다(결재 없이 돈이 잡히는 걸 막는다)
+    if (r.status !== '승인') { await rollbackQuietly(conn); return res.status(409).json({ error: '먼저 승인한 뒤 등록해주세요' }) }
 
     const supplyIn = Number(req.body.supply_amount)
     const supplyBase = Number.isFinite(supplyIn) && supplyIn > 0 ? supplyIn : null
@@ -149,6 +173,33 @@ router.post('/:id/issue-payable', async (req, res, next) => {
     const invoice_no = `매입-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
     // 품목 금액이 비어 있으면 0원 매입 청구서가 되어 '지급 대기'로 남는다.
     { const ae = amountError(total); if (ae) { await rollbackQuietly(conn); return res.status(400).json({ error: ae }) } }
+
+    /* 중복 확인 — 창구가 둘(품의로도, 거래로도)이라 같은 지출이 두 번 잡힐 수 있다.
+       같은 거래처에 금액이 겹치는 미지급금·거래가 이미 있으면 알려주고, 확인(force)해야 등록한다.
+       "금액이 판정을 맡는다" — 공급가/총액/수수료 오차까지 본다(거래 입력 entry-hints 와 같은 규칙). */
+    if (!req.body.force) {
+      const vatMul = 1.1
+      const asSupply = Math.round(total / vatMul), asTotal = Math.round(total * vatMul)
+      const near = Math.min(1000, Math.max(1, Math.round(total * 0.005)))
+      const [dupInv] = await conn.execute(
+        `SELECT invoice_no AS ref, issued_at AS date, total_amount AS amount, '미지급금' AS label
+           FROM invoices
+          WHERE kind='received' AND vendor_id = ?
+            AND (ABS(total_amount-?)<=? OR ABS(total_amount-?)<=? OR ABS(total_amount-?)<=?)
+          ORDER BY issued_at DESC LIMIT 5`,
+        [r.vendor_id, total, near, asSupply, near, asTotal, near])
+      const [dupTxn] = await conn.execute(
+        `SELECT COALESCE(NULLIF(TRIM(category),''), NULLIF(TRIM(memo),''), '지출') AS ref, date, amount, '거래' AS label
+           FROM transactions
+          WHERE kind='expense' AND vendor_id = ?
+            AND (ABS(amount-?)<=? OR ABS(amount-?)<=? OR ABS(amount-?)<=?)
+          ORDER BY date DESC LIMIT 5`,
+        [r.vendor_id, total, near, asSupply, near, asTotal, near])
+      const duplicates = [...dupInv, ...dupTxn].map(d => ({
+        ref: d.ref, date: String(d.date || '').slice(0, 10), amount: Number(d.amount) || 0, label: d.label,
+      }))
+      if (duplicates.length) { await rollbackQuietly(conn); return res.status(409).json({ code: 'duplicate', duplicates }) }
+    }
     const { id: invId } = await createInvoice(conn, {
       kind: 'received', invoiceNo: invoice_no,
       vendorId: r.vendor_id,
@@ -191,7 +242,7 @@ router.post('/:id/issue-payable', async (req, res, next) => {
           [randomUUID(), invId, '등록 시 금액 조정', `품의 합계 ${sum.toLocaleString('ko-KR')}원 대비`, null, diff, diff, ++ord])
       }
     }
-    await conn.execute('UPDATE purchase_reqs SET invoice_id = ? WHERE id = ?', [invId, req.params.id])
+    await conn.execute("UPDATE purchase_reqs SET invoice_id = ?, status = '등록' WHERE id = ?", [invId, req.params.id])
     await conn.commit()
     res.json({ ok: true, invoice_id: invId, invoice_no, lines: usable.length })
   } catch (e) { await rollbackQuietly(conn); next(e) }

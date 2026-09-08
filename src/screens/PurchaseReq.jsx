@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, MoneyInput, Drawer, DateInput } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, MoneyInput, Drawer, DateInput, StatusBadge } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
@@ -149,10 +149,44 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
   }
   const paySupplyN = numOf(paySupply)
   const payVatAmt = payVat === '과세' ? vatOf(paySupplyN) : 0
-  const submitPayable = async () => {
+  /* 승인 게이트 — 승인해야 미지급금을 등록할 수 있다. 누가·언제는 서버 감사기록에 남는다. */
+  const approve = async () => {
+    const res = await api.approvePurchaseReq(doc.id)
+    if (!res.ok) return toast.push(res.error || '승인에 실패했어요', { tone: 'warn' })
+    toast.push('승인했어요'); onSaved(doc.id)
+  }
+  const unapprove = async () => {
+    const res = await api.unapprovePurchaseReq(doc.id)
+    if (!res.ok) return toast.push(res.error || '되돌리지 못했어요', { tone: 'warn' })
+    toast.push('작성 상태로 되돌렸어요'); onSaved(doc.id)
+  }
+
+  const submitPayable = async (force = false) => {
     if (!paySupplyN) return toast.push('공급가를 입력해주세요')
-    const res = await api.issuePurchaseReqPayable(doc.id, { supply_amount: paySupplyN, vat_mode: payVat, due: payDue || null })
-    if (!res.ok) return toast.push(res.error || '등록에 실패했어요', { tone: 'warn' })
+    const res = await api.issuePurchaseReqPayable(doc.id, { supply_amount: paySupplyN, vat_mode: payVat, due: payDue || null, force })
+    if (!res.ok) {
+      /* 중복이면 그냥 막지 않는다 — 같은 지출이 이미 있을 수 있다고 알려주고, 사람이 확인하면 등록한다.
+         (진짜 다른 지출인데 금액만 겹칠 수도 있어, 판단은 사람이 한다) */
+      if (res.code === 'duplicate' && res.duplicates?.length) {
+        const ok = await confirm({
+          tone: 'warn', icon: <Icon.Warn size={22}/>, title: '이미 비슷한 지출이 있어요',
+          body: (
+            <div>같은 거래처에 금액이 겹치는 게 있어요:
+              <ul style={{ margin: '8px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
+                {res.duplicates.map((d, i) => (
+                  <li key={i}><b>{d.label}</b> {d.ref} · {d.date} · <span className="num">{fmtNum(d.amount)}원</span></li>
+                ))}
+              </ul>
+            </div>
+          ),
+          detail: '같은 지출을 두 번 잡는 것일 수 있어요. 그래도 미지급금으로 등록할까요?',
+          confirmLabel: '그래도 등록',
+        })
+        if (ok) return submitPayable(true)
+        return
+      }
+      return toast.push(res.error || '등록에 실패했어요', { tone: 'warn' })
+    }
     toast.push(`미지급금 ${res.invoice_no}로 등록됐어요`)
     setPayOpen(false); onSaved(doc.id)
   }
@@ -160,7 +194,11 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
   return (
     <>
       <DocToolbar docNo={isNew ? '새 구매품의서' : doc.doc_no}
-        status={!isNew && <span className="text-sm text-muted">품의금액 <b className="num">{fmtNum(total)}원</b></span>}>
+        status={!isNew && <span className="row gap-8" style={{ alignItems: 'center' }}>
+          {/* 등록됐으면 '등록', 아니면 상태(작성/승인). 옛 데이터는 status 가 비어 '작성'으로 본다. */}
+          <StatusBadge status={doc?.payable ? '등록' : (doc?.status || '작성')}/>
+          <span className="text-sm text-muted">품의금액 <b className="num">{fmtNum(total)}원</b></span>
+        </span>}>
         {edit ? (
           <>
             <button className="btn" onClick={cancel}>취소</button>
@@ -168,9 +206,17 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
           </>
         ) : (
           <>
-            {doc?.payable
-              ? <span className="chip" title={`합계 ${fmtNum(doc.payable.total)}원`}><Icon.Check size={12}/> 미지급 {doc.payable.invoice_no} · {doc.payable.status}</span>
-              : <button className="btn" onClick={openPay}><Icon.Receipt size={14}/> 미지급금 등록</button>}
+            {doc?.payable ? (
+              <span className="chip" title={`합계 ${fmtNum(doc.payable.total)}원`}><Icon.Check size={12}/> 미지급 {doc.payable.invoice_no} · {doc.payable.status}</span>
+            ) : doc?.status === '승인' ? (
+              <>
+                <button className="btn ghost sm" onClick={unapprove}>승인 취소</button>
+                <button className="btn primary" onClick={openPay}><Icon.Receipt size={14}/> 미지급금 등록</button>
+              </>
+            ) : (
+              /* 아직 승인 전 — 먼저 승인해야 미지급금을 등록할 수 있다(결재 없이 돈이 잡히는 걸 막는다) */
+              <button className="btn primary" onClick={approve}><Icon.Check size={14}/> 승인</button>
+            )}
             <button className="btn ghost" onClick={remove}><Icon.Trash size={14}/></button>
             <button className="btn" onClick={() => setEdit(true)}><Icon.Pencil size={14}/> 편집</button>
             <button className="btn" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
@@ -323,7 +369,7 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
           </div>
           <div className="row gap-8" style={{ justifyContent: 'flex-end', marginTop: 4 }}>
             <button className="btn" onClick={() => setPayOpen(false)}>취소</button>
-            <button className="btn primary" onClick={submitPayable}><Icon.Check size={14}/> 미지급금 등록</button>
+            <button className="btn primary" onClick={() => submitPayable()}><Icon.Check size={14}/> 미지급금 등록</button>
           </div>
         </div>
       </Drawer>

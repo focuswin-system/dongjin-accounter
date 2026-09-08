@@ -233,6 +233,12 @@ const SETTLE_SOURCES = [
     effect: '고른 지출이 항목 줄로 채워져요. 금액·날짜·거래처가 그대로 와요.',
   },
   {
+    id: 'doc', icon: Icon.Sign,
+    label: '구매품의·지급결의에서 가져와서',
+    desc: '이미 만든 구매품의서·지급결의서를 여러 건 가져와요',
+    effect: '고른 문서가 항목 줄로 채워지고, 출처(GM-…/DJ-…)가 비고에 남아요.',
+  },
+  {
     id: 'blank', icon: Icon.Pencil,
     label: '직접 작성',
     desc: '빈 양식에서 시작해요',
@@ -244,6 +250,8 @@ export const SettlementScreen = () => {
   const [srcOpen, setSrcOpen] = useState(false)
   const [pickOpen, setPickOpen] = useState(false)
   const [txns, setTxns] = useState(null)
+  const [docPickOpen, setDocPickOpen] = useState(false)   // 품의·결의에서 불러오기
+  const [pickDocs, setPickDocs] = useState(null)
   /* 새 문서에 미리 채워 넣을 줄. blankDoc 이 상수라 여기에 담아 둔다 —
      creating 이 false→true 로 갈 때 미리보기가 새로 마운트되면서 이 값을 읽는다. */
   const [seed, setSeed] = useState([])
@@ -282,9 +290,47 @@ export const SettlementScreen = () => {
         onPick={(id) => {
           setSrcOpen(false)
           if (id === 'blank') { setSeed([]); setCreating(true); return }
+          if (id === 'doc') {
+            setPickDocs(null); setDocPickOpen(true)
+            // 구매품의서 + 지급결의서를 한 목록으로 — 출처가 다른 두 문서를 한 자리에서 고른다
+            Promise.all([api.getPurchaseReqs(), api.getResolutions()]).then(([prs, ress]) => {
+              const a = (prs || []).map(r => ({ id: 'pr:' + r.id, kind: '구매품의', docNo: r.doc_no,
+                title: r.summary || r.vendor_name || '구매품의', vendor: r.vendor_name || '',
+                amount: Number(r.total || r.order_amount) || 0, date: r.req_date || '' }))
+              const b = (ress || []).map(r => ({ id: 're:' + r.id, kind: '지급결의', docNo: r.doc_no,
+                title: r.title || r.vendor_name || '지급결의', vendor: r.vendor_name || '',
+                amount: Number(r.amount) || 0, date: r.pay_date || '' }))
+              setPickDocs([...a, ...b])
+            })
+            return
+          }
           setTxns(null); setPickOpen(true)
           // 지출 전체를 받아 화면에서 거른다 — 정산은 보통 최근 몇 달치를 훑어 고른다
           api.getTransactions({ kind: 'expense' }).then(setTxns)
+        }}/>
+
+      <PickListDrawer
+        open={docPickOpen} onClose={() => setDocPickOpen(false)}
+        title="구매품의·지급결의에서 골라서" sub="정산에 넣을 문서를 고르세요"
+        placeholder="문서번호·제목·거래처 검색"
+        rows={pickDocs}
+        match={(r, q) => [r.docNo, r.title, r.vendor, r.kind].filter(Boolean)
+          .some(v => String(v).toLowerCase().includes(q.toLowerCase()))}
+        render={(r) => ({
+          title: `${r.docNo} · ${r.title}`,
+          sub: [r.kind, r.vendor, r.date].filter(Boolean).join(' · '),
+          right: r.amount,
+        })}
+        empty="가져올 구매품의서·지급결의서가 없어요."
+        onDone={(rows) => {
+          /* 문서 → 정산 줄. 제목은 문서 제목, 비고에는 **출처(GM-…/DJ-…)** 와 거래처를 남긴다 —
+             정산내역서를 받는 사람이 어느 결재에서 온 건지 되짚을 수 있어야 한다. */
+          setSeed(rows.map(r => ({
+            title: r.title,
+            amount: r.amount,
+            memo: [`${r.kind} ${r.docNo}`, r.vendor].filter(Boolean).join(' · '),
+          })))
+          setDocPickOpen(false); setCreating(true)
         }}/>
 
       <PickListDrawer
