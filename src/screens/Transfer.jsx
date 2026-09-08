@@ -68,12 +68,27 @@ export const TransferScreen = ({ openEdit }) => {
   const acctLabel = (id) => byId.get(id)?.name || '—'
   const acctSub = (id) => { const a = byId.get(id); return a ? [a.bankName, a.number].filter(Boolean).join(' ') : '' }
 
+  /* 내보내기·인쇄 파일 이름 — '계좌 간 이체' + 기간 + 만든 날짜.
+     받는 사람이 파일만 봐도 무엇의 언제 기준인지 알 수 있게 한다. */
+  const docName = () => `계좌 간 이체 (${range.from}~${range.to}) ${today}`
+
   const exportCsv = () => {
     if (shown.length === 0) return toast.push('내보낼 이체가 없어요')
-    downloadCsv(`내부이체_${range.from}_${range.to}.csv`,
+    downloadCsv(`${docName()}.csv`,
       ['날짜', '보내는 통장', '받는 통장', '내용', '금액'],
       shown.map(t => [t.date, acctLabel(t.accountId), acctLabel(t.counterpartyAccountId), t.memo || '', Number(t.amount) || 0]))
   }
+
+  /* 인쇄로 PDF 저장 시 파일 이름은 브라우저가 document.title 을 쓴다 —
+     인쇄 직전에 바꿔 두고 끝나면 되돌린다. 버튼 인쇄든 Ctrl+P 든 같게 동작한다. */
+  useEffect(() => {
+    const prev = document.title
+    const before = () => { document.title = docName() }
+    const after = () => { document.title = prev }
+    window.addEventListener('beforeprint', before)
+    window.addEventListener('afterprint', after)
+    return () => { window.removeEventListener('beforeprint', before); window.removeEventListener('afterprint', after) }
+  }, [range])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const openForm = (preset = {}) => setForm({
     fromAccountId: '', toAccountId: '', amount: '', date: today, memo: '', ...preset,
