@@ -723,13 +723,14 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
   /* 검색·확정에 쓰는 말 — 사람이 친 것만. 열면서 담아 둔 현재 값은 여기 안 들어온다. */
   const term = dirty ? q : "";
   const filtered = useMemo(() => {
+    // 구분 헤더({ header:'통장' })는 검색하지 않을 때만 보인다 — 검색 중엔 결과만 남긴다
     if (!term) return options;
     const lc = term.toLowerCase();
     // keywords: 화면엔 안 보이지만 검색에는 걸리는 텍스트(예: 계정과목 설명)
-    return options.filter(o =>
+    return options.filter(o => !o.header && (
       o.label.toLowerCase().includes(lc)
       || (o.sub || "").toLowerCase().includes(lc)
-      || (o.keywords || "").toLowerCase().includes(lc));
+      || (o.keywords || "").toLowerCase().includes(lc)));
   }, [term, options]);
 
   const selected = options.find(o => o.value === value);
@@ -740,7 +741,7 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
   const freeInput = allowAdd && !!onAddNew;
   const display = selected?.label || ((options.length || freeInput) ? value : "") || "";
 
-  const pick = (opt) => { onChange(opt.value); setOpen(false); setQ(""); setDirty(false); };
+  const pick = (opt) => { if (opt.header) return; onChange(opt.value); setOpen(false); setQ(""); setDirty(false); };
 
   /* 열면서 지금 값을 담고 **통째로 선택**한다.
      그래서 이어 치면 갈아치우고(종전과 같다), 커서를 옮기거나 지우면 고칠 수 있다.
@@ -850,7 +851,13 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
                 검색 결과가 없어요{allowAdd && term ? ". Enter로 새로 등록할 수 있어요." : "."}
               </div>
             )}
-            {filtered.map((o, i) => (
+            {filtered.map((o, i) => (o.header ? (
+              // 구분 헤더 — 클릭 안 됨. 통장/계정과목처럼 종류를 나눠 보여줄 때 쓴다.
+              <div key={`h-${i}`} className="text-xs text-muted2 fw-600"
+                style={{ padding: '10px 14px 4px', borderTop: i > 0 ? '1px solid var(--line)' : 'none', letterSpacing: '0.02em' }}>
+                {o.header}
+              </div>
+            ) : (
               // key는 value+index — value가 null/중복이어도(집계 계정 등) 안전하게 유일해진다
               <button key={`${o.value ?? ''}-${i}`} type="button" onClick={() => pick(o)} onMouseEnter={() => setHi(i)}
                 style={{ width: "100%", textAlign: "left", padding: "9px 14px", border: 0,
@@ -862,7 +869,7 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
                   {o.sub && <div className="text-xs text-muted2" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.sub}</div>}
                 </div>
               </button>
-            ))}
+            )))}
           </div>
           {allowAdd && onAddNew && (
             <div style={{ borderTop: "1px solid var(--line)" }}>

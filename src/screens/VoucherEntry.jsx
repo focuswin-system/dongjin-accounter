@@ -45,8 +45,10 @@ export const VoucherEntryScreen = () => {
 
   /* 계정 고르는 목록 — 통장을 앞에(자주 씀), 계정과목을 뒤에. 값으로 통장은 'acc:'+id, 계정과목은 코드. */
   const opts = useMemo(() => [
-    ...accounts.map(a => ({ value: 'acc:' + a.id, label: a.name, sub: `통장${a.bankName ? ' · ' + a.bankName : ''}` })),
-    ...subjects.map(s => ({ value: s.code, label: s.name, sub: `${s.code} · 계정과목` })),
+    ...(accounts.length ? [{ header: '통장 (돈이 실제로 오가는 계좌)' }] : []),
+    ...accounts.map(a => ({ value: 'acc:' + a.id, label: a.name, sub: a.bankName || '통장' })),
+    { header: '계정과목' },
+    ...subjects.map(s => ({ value: s.code, label: s.name, sub: `${s.code} · ${s.category || '계정과목'}`, keywords: s.code })),
   ], [accounts, subjects])
   const isBank = (v) => typeof v === 'string' && v.startsWith('acc:')
   const nameOf = (v) => isBank(v) ? (accounts.find(a => 'acc:' + a.id === v)?.name || '') : (subjects.find(s => s.code === v)?.name || '')
@@ -153,27 +155,29 @@ export const VoucherEntryScreen = () => {
           </div>
         </div>
 
-        <table className="table">
+        {/* 드로어에 뜨는 전표 그 모양 그대로 — 차변 | 계정과목 | 대변. 칸 안을 채워 넣는다.
+            계정과목 칸에 계정(또는 통장)을 고르고, 그 아래 줄 적요를 적는다. */}
+        <table className="table voucher-entry-table">
           <thead>
             <tr>
-              <th style={{ width: 220 }}>계정과목 · 통장</th>
-              <th>적요</th>
-              <th className="num-right" style={{ width: 150 }}>차변</th>
-              <th className="num-right" style={{ width: 150 }}>대변</th>
-              <th style={{ width: 34 }}/>
+              <th className="num-right" style={{ width: 200 }}>차변</th>
+              <th style={{ textAlign: 'center' }}>계정과목</th>
+              <th className="num-right" style={{ width: 200 }}>대변</th>
+              <th className="no-print" style={{ width: 32 }}/>
             </tr>
           </thead>
           <tbody>
             {lines.map((l, i) => (
               <tr key={i}>
+                <td><MoneyInput value={l.debit} onChange={raw => setLine(i, 'debit', raw)}/></td>
                 <td>
                   <Combobox value={l.acct} allowAdd={false} options={opts}
-                    onChange={v => setLine(i, 'acct', v)} placeholder="통장 또는 계정과목"/>
+                    onChange={v => setLine(i, 'acct', v)} placeholder="계정과목 · 통장 선택"/>
+                  <input className="input" style={{ marginTop: 4, fontSize: 12 }} value={l.memo}
+                    placeholder="줄 적요(선택)" onChange={e => setLine(i, 'memo', e.target.value)}/>
                 </td>
-                <td><input className="input" value={l.memo} placeholder="줄 적요(선택)" onChange={e => setLine(i, 'memo', e.target.value)}/></td>
-                <td><MoneyInput value={l.debit} onChange={raw => setLine(i, 'debit', raw)}/></td>
                 <td><MoneyInput value={l.credit} onChange={raw => setLine(i, 'credit', raw)}/></td>
-                <td style={{ textAlign: 'center' }}>
+                <td className="no-print" style={{ textAlign: 'center', verticalAlign: 'top' }}>
                   <button className="icon-btn sm" title="줄 삭제" onClick={() => delLine(i)} disabled={lines.length <= 2}><Icon.Close size={14}/></button>
                 </td>
               </tr>
@@ -181,10 +185,10 @@ export const VoucherEntryScreen = () => {
           </tbody>
           <tfoot>
             <tr>
-              <th colSpan={2} style={{ textAlign: 'right' }}>합계</th>
               <th className="num-cell num-right" style={{ color: balanced ? undefined : 'var(--neg-ink)' }}>{fmtNum(debitSum)}</th>
+              <th style={{ textAlign: 'center' }}>합계</th>
               <th className="num-cell num-right" style={{ color: balanced ? undefined : 'var(--neg-ink)' }}>{fmtNum(creditSum)}</th>
-              <th/>
+              <th className="no-print"/>
             </tr>
           </tfoot>
         </table>
