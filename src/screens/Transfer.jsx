@@ -6,7 +6,6 @@ import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { api } from '../lib/api'
 import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
-import { downloadCsv } from '../lib/export'
 
 /**
  * 내부 계좌 이체 — 우리 통장에서 우리 다른 통장으로 옮기는 돈.
@@ -93,17 +92,12 @@ export const TransferScreen = ({ openEdit }) => {
      받는 사람이 파일만 봐도 무엇의 언제 기준인지 알 수 있게 한다. */
   const docName = () => `계좌 간 이체 (${range.from}~${range.to}) ${today}`
 
-  const exportCsv = () => {
+  /* 엑셀은 서식 있는 xlsx 로 낸다 — 서버 xlsxBook 이 머리글·합계·안내 시트까지 만든다
+     (CSV 로 대충 내지 않는다 — 프로젝트 규칙). 계좌번호 표시 모드는 화면과 같이 간다. */
+  const exportXlsx = async () => {
     if (shown.length === 0) return toast.push('내보낼 이체가 없어요')
-    // 계좌번호는 표시 모드가 숨김이 아닐 때만 열로 넣는다(전체·마스킹은 화면과 같은 값)
-    const withNo = numMode !== 'hide'
-    const headers = withNo
-      ? ['날짜', '보내는 통장', '보내는 계좌번호', '받는 통장', '받는 계좌번호', '내용', '금액']
-      : ['날짜', '보내는 통장', '받는 통장', '내용', '금액']
-    downloadCsv(`${docName()}.csv`, headers,
-      shown.map(t => withNo
-        ? [t.date, acctLabel(t.accountId), acctNo(t.accountId), acctLabel(t.counterpartyAccountId), acctNo(t.counterpartyAccountId), t.memo || '', Number(t.amount) || 0]
-        : [t.date, acctLabel(t.accountId), acctLabel(t.counterpartyAccountId), t.memo || '', Number(t.amount) || 0]))
+    const res = await api.downloadTransfersXlsx({ from: range.from, to: range.to, nums: numMode, filename: `${docName()}.xlsx` })
+    if (!res.ok) toast.push(res.error || '내려받기에 실패했어요', { tone: 'warn' })
   }
 
   /* 인쇄로 PDF 저장 시 파일 이름은 브라우저가 document.title 을 쓴다 —
@@ -172,7 +166,7 @@ export const TransferScreen = ({ openEdit }) => {
       <PageHeader title="내부 계좌 이체"
         sub="우리 통장끼리 옮기는 돈이에요. 수입도 지출도 아니라 손익에는 잡히지 않아요."
         actions={<div className="row gap-6" style={{ alignItems: 'center' }}>
-          <button className="btn" onClick={exportCsv} disabled={shown.length === 0}>
+          <button className="btn" onClick={exportXlsx} disabled={shown.length === 0}>
             <Icon.Excel size={14}/> 엑셀
           </button>
           <button className="btn" onClick={() => window.print()} disabled={shown.length === 0}>

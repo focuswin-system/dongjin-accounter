@@ -394,6 +394,77 @@ router.get('/vouchers', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/* 계좌 간 이체 내역 — 서식 있는 엑셀(exceljs). CSV 로 대충 내지 않는다(xlsxBook 규칙).
+   ⚠ '/:id' 보다 위에 있어야 한다 — 아래면 'transfers'가 id 로 잡힌다. */
+router.get('/transfers.xlsx', async (req, res, next) => {
+  try {
+    const { from, to } = req.query
+    const nums = req.query.nums === 'full' || req.query.nums === 'mask' ? req.query.nums : 'hide'
+    if (!from || !to) return res.status(400).json({ error: '기간을 지정해주세요' })
+
+    /* 이체는 두 줄(지출·입금)이 같은 transfer_id 로 묶인다. 보내는 쪽(지출)만 세운다 —
+       둘 다 세우면 한 이체가 두 줄로 보인다. 카드가 낀 줄은 카드 대금 소관이라 뺀다. */
+    const [rows] = await req.db.execute(`
+      SELECT t.date, t.amount, t.memo,
+             fa.name AS from_name, fa.bank AS from_bank, fa.\`number\` AS from_no,
+             ta.name AS to_name,   ta.bank AS to_bank,   ta.\`number\` AS to_no
+        FROM transactions t
+        JOIN accounts fa ON fa.id = t.account_id
+        LEFT JOIN accounts ta ON ta.id = t.counterparty_account_id
+       WHERE t.transfer_id IS NOT NULL AND t.kind = 'expense'
+         AND t.date >= ? AND t.date <= ?
+         AND fa.kind <> 'card' AND (ta.kind IS NULL OR ta.kind <> 'card')
+       ORDER BY t.date DESC`, [from, to])
+
+    // 뒤 4자리만 남기고 가린다(구분자는 유지) — 화면 마스킹과 같은 규칙
+    const maskNo = (s) => {
+      const str = String(s || ''); if (!str) return ''
+      const pos = []; for (let i = 0; i < str.length; i++) if (/\d/.test(str[i])) pos.push(i)
+      const keep = new Set(pos.slice(-4))
+      return str.split('').map((ch, i) => (/\d/.test(ch) && !keep.has(i)) ? '●' : ch).join('')
+    }
+    const noOf = (bank, no) => {
+      if (nums === 'hide' || !no) return ''
+      const full = [bank, no].filter(Boolean).join(' ')
+      return nums === 'mask' ? maskNo(full) : full
+    }
+
+    const withNo = nums !== 'hide'
+    const columns = withNo
+      ? [{ header: '날짜', width: 12, align: 'center' }, { header: '보내는 통장', width: 18 },
+         { header: '보내는 계좌번호', width: 22 }, { header: '받는 통장', width: 18 },
+         { header: '받는 계좌번호', width: 22 }, { header: '내용', width: 24 }, { header: '금액', width: 15, money: true }]
+      : [{ header: '날짜', width: 12, align: 'center' }, { header: '보내는 통장', width: 20 },
+         { header: '받는 통장', width: 20 }, { header: '내용', width: 28 }, { header: '금액', width: 15, money: true }]
+
+    const data = rows.map(r => withNo
+      ? [r.date, r.from_name || '', noOf(r.from_bank, r.from_no), r.to_name || '', noOf(r.to_bank, r.to_no), r.memo || '', Number(r.amount) || 0]
+      : [r.date, r.from_name || '', r.to_name || '', r.memo || '', Number(r.amount) || 0])
+    const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0)
+    const totals = withNo ? ['합계', '', '', '', '', '', total] : ['합계', '', '', '', total]
+
+    const [[co]] = await req.db.execute("SELECT name, biz_no FROM company_info WHERE id = 'main'").catch(() => [[null]])
+
+    const wb = newBook()
+    sheet(wb, '계좌 간 이체', {
+      title: '계좌 간 이체 내역',
+      sub: `${co?.name ? co.name + ' · ' : ''}${from} ~ ${to} · 이체 ${rows.length}건`,
+      columns, rows: data, totals,
+      freezeCols: 1,
+    })
+    guideSheet(wb, [
+      '계좌 간 이체 내역 — 읽는 법',
+      '',
+      '• 우리 회사 통장 사이에서 옮긴 자금입니다. 수입·지출이 아니라 자산의 이동이며 손익에는 반영되지 않습니다.',
+      '• 보내는 통장에서 나가 받는 통장으로 들어간 한 번의 이체를 한 줄로 적었습니다.',
+      nums === 'mask' ? '• 계좌번호는 뒤 4자리만 남기고 가렸습니다.'
+        : nums === 'full' ? '• 계좌번호를 그대로 실었습니다 — 취급에 주의하세요.'
+        : '• 계좌번호는 넣지 않았습니다.',
+    ])
+    await sendBook(res, wb, `계좌 간 이체 (${from}~${to}) ${new Date().toISOString().slice(0, 10)}.xlsx`)
+  } catch (e) { next(e) }
+})
+
 router.get('/vouchers.xlsx', async (req, res, next) => {
   try {
     const { from, to, kind } = req.query

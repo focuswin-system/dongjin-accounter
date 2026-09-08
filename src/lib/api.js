@@ -970,6 +970,23 @@ export const api = {
   async getVoucherBook({ from, to, kind = 'all' }) {
     try { return await req(`/transactions/vouchers?from=${from}&to=${to}&kind=${kind}`) } catch { return [] }
   },
+  async downloadTransfersXlsx({ from, to, nums = 'hide', filename }) {
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch(`${BASE}/transactions/transfers.xlsx?from=${from}&to=${to}&nums=${nums}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || '내려받기에 실패했어요') }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = filename || `계좌 간 이체 (${from}~${to}).xlsx`
+      document.body.appendChild(a); a.click()
+      setTimeout(() => { a.remove(); URL.revokeObjectURL(url) }, 0)
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
+
   async downloadVoucherBookXlsx({ from, to, kind = 'all' }) {
     try {
       const token = localStorage.getItem('token')
