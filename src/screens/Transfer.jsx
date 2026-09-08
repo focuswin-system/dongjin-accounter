@@ -38,6 +38,11 @@ export const TransferScreen = ({ openEdit }) => {
   /* 보고물·엑셀은 기간을 정해 뽑는다 — 거래처에 "이 기간에 이렇게 옮겼습니다"로 낸다.
      기본은 올해. 이체는 잦지 않아 이번 달로 잡으면 대개 빈 표가 된다. */
   const [range, setRange] = useState(() => periodToRange('year'))
+  /* 계좌번호 표시 — 받는 사람·용도에 따라 다르다. 대외 보고엔 마스킹, 내부 확인엔 전체,
+     통장 이름만으로 충분하면 숨김. 기본은 숨김(예전 동작 그대로). */
+  const [numMode, setNumMode] = useState('hide')   // 'hide' | 'mask' | 'full'
+  /* 인쇄 방향 — 계좌번호까지 켜면 가로가 편하다. 기본 세로. */
+  const [landscape, setLandscape] = useState(false)
 
   const load = async () => {
     const [accs, expense, comp] = await Promise.all([
@@ -68,15 +73,37 @@ export const TransferScreen = ({ openEdit }) => {
   const acctLabel = (id) => byId.get(id)?.name || '—'
   const acctSub = (id) => { const a = byId.get(id); return a ? [a.bankName, a.number].filter(Boolean).join(' ') : '' }
 
+  /* 계좌번호를 표시 모드대로 낸다. 마스킹은 **뒤 4자리만** 남기고 나머지 숫자를 가린다
+     (하이픈 등 구분자는 그대로 둬 자릿수 감을 유지). 숨김이면 빈 문자열. */
+  const maskNo = (s) => {
+    const str = String(s || ''); if (!str) return ''
+    const digitPos = []
+    for (let i = 0; i < str.length; i++) if (/\d/.test(str[i])) digitPos.push(i)
+    const keep = new Set(digitPos.slice(-4))
+    return str.split('').map((ch, i) => (/\d/.test(ch) && !keep.has(i)) ? '●' : ch).join('')
+  }
+  const acctNo = (id) => {
+    if (numMode === 'hide') return ''
+    const a = byId.get(id); if (!a || !a.number) return ''
+    const no = [a.bankName, a.number].filter(Boolean).join(' ')
+    return numMode === 'mask' ? maskNo(no) : no
+  }
+
   /* 내보내기·인쇄 파일 이름 — '계좌 간 이체' + 기간 + 만든 날짜.
      받는 사람이 파일만 봐도 무엇의 언제 기준인지 알 수 있게 한다. */
   const docName = () => `계좌 간 이체 (${range.from}~${range.to}) ${today}`
 
   const exportCsv = () => {
     if (shown.length === 0) return toast.push('내보낼 이체가 없어요')
-    downloadCsv(`${docName()}.csv`,
-      ['날짜', '보내는 통장', '받는 통장', '내용', '금액'],
-      shown.map(t => [t.date, acctLabel(t.accountId), acctLabel(t.counterpartyAccountId), t.memo || '', Number(t.amount) || 0]))
+    // 계좌번호는 표시 모드가 숨김이 아닐 때만 열로 넣는다(전체·마스킹은 화면과 같은 값)
+    const withNo = numMode !== 'hide'
+    const headers = withNo
+      ? ['날짜', '보내는 통장', '보내는 계좌번호', '받는 통장', '받는 계좌번호', '내용', '금액']
+      : ['날짜', '보내는 통장', '받는 통장', '내용', '금액']
+    downloadCsv(`${docName()}.csv`, headers,
+      shown.map(t => withNo
+        ? [t.date, acctLabel(t.accountId), acctNo(t.accountId), acctLabel(t.counterpartyAccountId), acctNo(t.counterpartyAccountId), t.memo || '', Number(t.amount) || 0]
+        : [t.date, acctLabel(t.accountId), acctLabel(t.counterpartyAccountId), t.memo || '', Number(t.amount) || 0]))
   }
 
   /* 인쇄로 PDF 저장 시 파일 이름은 브라우저가 document.title 을 쓴다 —
@@ -155,6 +182,10 @@ export const TransferScreen = ({ openEdit }) => {
         </div>}/>
       </div>
 
+      {/* 가로 인쇄를 고르면 이 규칙이 A4 를 눕힌다. @page 는 스타일시트 어디에 있어도
+          브라우저가 인쇄에 반영한다 — 켰을 때만 넣는다(안 넣으면 기본 세로). */}
+      {landscape && <style>{`@media print { @page { size: A4 landscape; } }`}</style>}
+
       {/* 기간 — 보고물·엑셀·화면이 모두 이 기간을 본다 */}
       <div className="card card-pad row no-print" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
         <DateInput className="input" style={{ width: 150 }} max={today} value={range.from}
@@ -164,6 +195,15 @@ export const TransferScreen = ({ openEdit }) => {
           onChange={e => setRange(r => ({ ...r, to: e.target.value }))}/>
         {[['month', '이번 달'], ['year', '올해']].map(([p, label]) => (
           <button key={p} className="chip" onClick={() => setRange(periodToRange(p))}>{label}</button>
+        ))}
+
+        <span className="text-muted2" style={{ marginLeft: 'auto' }}>계좌번호</span>
+        {[['hide', '숨김'], ['mask', '마스킹'], ['full', '전체']].map(([m, label]) => (
+          <button key={m} className={`chip ${numMode === m ? 'active' : ''}`} onClick={() => setNumMode(m)}>{label}</button>
+        ))}
+        <span className="text-muted2" style={{ marginLeft: 12 }}>인쇄</span>
+        {[['portrait', '세로', false], ['landscape', '가로', true]].map(([k, label, v]) => (
+          <button key={k} className={`chip ${landscape === v ? 'active' : ''}`} onClick={() => setLandscape(v)}>{label}</button>
         ))}
       </div>
 
@@ -192,14 +232,22 @@ export const TransferScreen = ({ openEdit }) => {
             { key: 'date', header: '날짜', sortable: true,
               render: t => <span className="text-sm num">{fmtDateShort(t.date)}</span> },
             { key: 'from', header: '보내는 통장',
-              render: t => <span className="fw-700">{byId.get(t.accountId)?.name || '—'}</span> },
+              render: t => <div>
+                <span className="fw-700">{byId.get(t.accountId)?.name || '—'}</span>
+                {acctNo(t.accountId) && <div className="text-xs text-muted2 num">{acctNo(t.accountId)}</div>}
+              </div> },
             { key: 'to', header: '받는 통장',
-              render: t => <span className="text-sm">{byId.get(t.counterpartyAccountId)?.name || '—'}</span> },
+              render: t => <div>
+                <span className="text-sm">{byId.get(t.counterpartyAccountId)?.name || '—'}</span>
+                {acctNo(t.counterpartyAccountId) && <div className="text-xs text-muted2 num">{acctNo(t.counterpartyAccountId)}</div>}
+              </div> },
             { key: 'memo', header: '내용', render: t => <span className="text-sm text-muted">{t.memo || '—'}</span> },
             { key: 'amount', header: '금액', align: 'right', sortable: true,
               render: t => <span className="num-cell">{fmtNum(t.amount)}</span> },
-            { key: 'act', header: '', align: 'right',
-              render: t => <button className="btn sm no-print" style={{ color: 'var(--neg-ink)' }}
+            /* 취소 열은 종이에 필요 없다 — 버튼만이 아니라 열(머리글+칸) 전체를 인쇄에서 뺀다.
+               (버튼만 no-print 로 감추면 빈 열이 남아 오른쪽에 빈 칸이 생긴다) */
+            { key: 'act', header: '', align: 'right', className: 'no-print', headClassName: 'no-print',
+              render: t => <button className="btn sm" style={{ color: 'var(--neg-ink)' }}
                 onClick={(e) => { e.stopPropagation(); remove(t) }}>취소</button> },
           ]}/>
       </div>
