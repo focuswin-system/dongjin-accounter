@@ -854,8 +854,10 @@ router.put('/:id', async (req, res, next) => {
         await recalcInvoiceStatus(conn, link.invoice_id)
       }
 
-      // 복합 전표 항목을 다시 저장한다(없으면 비운다 — 복합→일반으로 되돌릴 수 있어야 한다)
-      await saveSplits(conn, req.params.id, splits)
+      /* 복합 전표 항목은 **명시적으로 splits 를 보냈을 때만** 손댄다.
+         일반 편집(splits 미포함)이 복합 거래를 건드려도 항목이 조용히 지워지지 않게 —
+         복합 전표 수정은 지우고 다시 등록한다(splits 를 안 보내면 그대로 보존). */
+      if (splits !== undefined) await saveSplits(conn, req.params.id, splits)
 
       await conn.commit()
       res.json({ ok: true })

@@ -15,6 +15,9 @@ const TAX_TYPES = ["과세", "면세", "영세"];
  * 계좌를 이미 고르는 화면이라, 상대 계정에까지 예금·현금이 오면 분개가 성립하지 않는다. */
 const FUND_CODES = ["1101", "1102", "1103"];
 
+/** 문자열/숫자 금액을 정수로 — 복합 전표 항목 합계 계산에 쓴다 */
+const numOf = (v) => (typeof v === "string" ? parseInt(v.replace(/[^0-9-]/g, ""), 10) || 0 : Number(v) || 0)
+
 /** 금액 한 값에서 공급가·세액·합계를 한 번에 맞춘다.
  *  bySupply=true 면 입력값이 공급가액(세금계산서 기준), false 면 VAT 포함 총액. */
 const applyTax = (f, value, bySupply) => {
@@ -129,6 +132,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   // Ctrl+Enter 단축키까지 있어 두 번 눌리기 쉽다 — 같은 거래가 2건 등록되는 걸 막는다
   const [busy, setBusy] = useState(false);
   const [supplyMode, setSupplyMode] = useState(false);
+  /* 복합 전표(D1) — 한 번의 입·출금을 여러 비목으로 나눈다(예: 소모품 + 수수료 + 부가세).
+     옵션이라 끄면(기본) 지금까지와 똑같이 동작한다. 신규 등록에서만 연다 — 복합 전표 수정은
+     지우고 다시 등록한다(서버 PUT 이 splits 를 안 건드려 기존 항목을 보존한다). */
+  const [splitOn, setSplitOn] = useState(false);
+  const [splitRows, setSplitRows] = useState([]);   // [{ category, supply, vat }]
   const taxable = form.taxType === "과세";
   const [taxWarningDismissed, setTaxWarningDismissed] = useState(false);
   const [vendors, setVendors] = useState([]);
@@ -568,9 +576,16 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     if (!form.vendor)   { toast.push("거래처를 선택해주세요"); return; }
     // 주문은 선택 입력이다 — 주문 없이 오가는 돈이 정상적으로 더 많다(경비·소모품·공과금).
     // 예전엔 필수라서 '공통'을 고르게 했고, 그게 가짜 주문 선택지가 생긴 이유였다.
-    if (!form.category) { toast.push(kind === "income" ? "수금 유형을 선택해주세요" : "비목을 선택해주세요"); return; }
+    // 복합 전표면 단일 비목 대신 항목들을 본다
+    if (!splitOn && !form.category) { toast.push(kind === "income" ? "수금 유형을 선택해주세요" : "비목을 선택해주세요"); return; }
     if (!form.memo || !form.memo.trim()) { toast.push("적요(거래 내용)를 입력해주세요"); return; }
     if (!form.amount)   { toast.push("금액을 입력해주세요"); return; }
+    if (splitOn) {
+      const rows = splitRows.filter(r => r.category && (numOf(r.supply) || numOf(r.vat)))
+      if (rows.length < 2) { toast.push("복합 전표는 비목을 둘 이상 적어주세요"); return; }
+      const sum = rows.reduce((s, r) => s + numOf(r.supply) + numOf(r.vat), 0)
+      if (sum !== numOf(form.amount)) { toast.push(`항목 합계(${fmtNum(sum)})가 금액(${fmtNum(form.amount)})과 달라요`); return; }
+    }
     if (!form.date || !/^\d{4}-\d{2}-\d{2}$/.test(form.date)) { toast.push("날짜를 올바른 형식으로 입력해주세요"); return; }
     if (form.date > localToday()) { toast.push(`미래 날짜로는 ${kind === "income" ? "입금" : "지출"}을 등록할 수 없어요 (오늘까지만 가능)`); return; }
     /* ⚠ 어음은 만기일이 있어야 한다. 여기서 안 막으면 거래만 저장되고 어음 등록이
@@ -648,6 +663,18 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
 
     const costContractObj = contracts.find(c => c.id === form.costContract)
 
+    /* 복합 전표 항목 — 비목마다 계정과목 코드를 붙여 보낸다(단일 거래와 같은 규칙:
+       비목이 정해 둔 account_code, 없으면 서버가 채운다). 첫 비목을 대표로 부모 category 에 둔다. */
+    const splitPayload = splitOn
+      ? splitRows.filter(r => r.category && (numOf(r.supply) || numOf(r.vat))).map(r => ({
+          category: r.category,
+          account_code: categories.find(c => c.name === r.category)?.account_code || null,
+          supply_amount: numOf(r.supply), vat_amount: numOf(r.vat),
+          amount: numOf(r.supply) + numOf(r.vat),
+          tax_type: numOf(r.vat) > 0 ? "과세" : "면세",
+        }))
+      : null
+
     const txnData = {
       kind,
       vendor_id:    vendorObj?.id   || null,
@@ -662,8 +689,10 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
          법인카드는 실제로 그런 사람이 쓴다. id 만 보내면 그 경우 기록이 통째로 사라진다. */
       employee_id:   employeeObj?.id || null,
       employee_name: form.employee || null,
-      category:     form.category,
+      // 복합이면 대표 비목(첫 항목)을 부모에 두고, 항목은 splits 로 따로 보낸다
+      category:     splitOn ? (splitPayload[0]?.category || "복합") : form.category,
       sub_category: "",
+      ...(splitPayload ? { splits: splitPayload } : {}),
       item_id:      form.itemId || null,
       account_code: form.accountCode || null,
       amount,
@@ -1020,6 +1049,66 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                     onClick={() => setForm(f => applyTax(f, a, supplyMode && taxable))}>{fmtNum(a)}원</button>
                 ))}
               </div>
+
+              {/* 복합 전표(D1) — 이 금액을 여러 비목으로 나눈다. 신규 등록에서만.
+                  이미 복합으로 등록된 걸 편집할 땐 안내만 하고 항목은 건드리지 않는다. */}
+              {editTxn?.has_splits ? (
+                <div className="text-xs text-muted2" style={{ marginTop: 10, lineHeight: 1.7 }}>
+                  · 이 거래는 <b>여러 비목으로 나뉜 복합 전표</b>예요. 항목을 바꾸려면 지우고 다시 등록해 주세요.
+                </div>
+              ) : !editTxn && (
+                <div style={{ marginTop: 10 }}>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 12, color: "var(--muted)" }}>
+                    <input type="checkbox" checked={splitOn}
+                      onChange={e => { setSplitOn(e.target.checked); if (e.target.checked && splitRows.length === 0) setSplitRows([{ category: "", supply: "", vat: "" }, { category: "", supply: "", vat: "" }]) }}/>
+                    여러 비목으로 나누기 <span className="text-muted2">(복합 전표 — 예: 소모품 + 수수료 + 부가세)</span>
+                  </label>
+                  {splitOn && (
+                    <div className="card" style={{ marginTop: 8, padding: 10, background: "var(--surface-2, transparent)" }}>
+                      <table className="table" style={{ fontSize: 13 }}>
+                        <thead><tr><th>비목</th><th className="num-right" style={{ width: 120 }}>공급가</th><th className="num-right" style={{ width: 110 }}>부가세</th><th className="num-right" style={{ width: 120 }}>합계</th><th style={{ width: 30 }}/></tr></thead>
+                        <tbody>
+                          {splitRows.map((r, i) => {
+                            const rs = numOf(r.supply), rv = numOf(r.vat)
+                            return (
+                              <tr key={i}>
+                                <td>
+                                  <Combobox value={r.category} allowAdd={false}
+                                    onChange={v => setSplitRows(rows => rows.map((x, j) => j === i ? { ...x, category: v } : x))}
+                                    options={categories.filter(c => c.id?.startsWith(kind === "income" ? "INC-" : "EXP-")).map(c => ({ value: c.name, label: c.name, sub: c.group_name || "" }))}
+                                    placeholder="비목"/>
+                                </td>
+                                <td><MoneyInput value={r.supply} onChange={raw => setSplitRows(rows => rows.map((x, j) => j === i ? { ...x, supply: raw } : x))}/></td>
+                                <td><MoneyInput value={r.vat} onChange={raw => setSplitRows(rows => rows.map((x, j) => j === i ? { ...x, vat: raw } : x))}/></td>
+                                <td className="num-cell num-right">{fmtNum(rs + rv)}</td>
+                                <td style={{ textAlign: "center" }}>
+                                  <button type="button" className="icon-btn sm" title="줄 삭제" disabled={splitRows.length <= 2}
+                                    onClick={() => setSplitRows(rows => rows.filter((_, j) => j !== i))}><Icon.Close size={13}/></button>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr>
+                            <th style={{ textAlign: "right" }}>합계</th>
+                            <th className="num-cell num-right">{fmtNum(splitRows.reduce((s, r) => s + numOf(r.supply), 0))}</th>
+                            <th className="num-cell num-right">{fmtNum(splitRows.reduce((s, r) => s + numOf(r.vat), 0))}</th>
+                            <th className="num-cell num-right" style={{ color: splitRows.reduce((s, r) => s + numOf(r.supply) + numOf(r.vat), 0) === numOf(form.amount) ? undefined : "var(--neg-ink)" }}>
+                              {fmtNum(splitRows.reduce((s, r) => s + numOf(r.supply) + numOf(r.vat), 0))}
+                            </th>
+                            <th/>
+                          </tr>
+                        </tfoot>
+                      </table>
+                      <div className="row gap-8" style={{ alignItems: "center", marginTop: 8 }}>
+                        <button type="button" className="btn sm" onClick={() => setSplitRows(rows => [...rows, { category: "", supply: "", vat: "" }])}><Icon.Plus size={12}/> 줄 추가</button>
+                        <span className="text-xs text-muted2">항목 합계가 위 금액과 같아야 저장돼요.</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </FormField>
 
             {/* 매입세액 공제는 '적격증빙'이 있어야 받는다 — 공제 여부를 좌우하므로 추가정보에 숨기지 않는다.
