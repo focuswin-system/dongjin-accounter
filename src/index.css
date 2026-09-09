@@ -1420,7 +1420,10 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 .doc-ws { display: grid; grid-template-columns: clamp(280px, 320px, 360px) 1fr; gap: 16px; align-items: start; }
 .doc-ws-side { overflow: hidden; padding: 0; }
 .doc-ws-side-top { padding: 12px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
-.doc-ws-side-scroll { max-height: calc(100dvh - 220px); overflow-y: auto; }
+/* 좌측 목록 스크롤은 **데스크톱 2열 프레임에서만** 준다(아래 min-width:1201px).
+   기본(좁은 폭·모바일)은 캡 없이 자연스럽게 흘러 바깥 스크롤 하나만 생긴다 —
+   예전엔 여기 max-height 캡이 있어 '좌측 목록 스크롤 + 바깥 콘텐츠 스크롤' 이중이 됐다. */
+.doc-ws-side-scroll { }
 .doc-ws-side-empty { padding: 40px 20px; text-align: center; color: var(--muted-2); font-size: 13px; line-height: 1.6; }
 .doc-ws-row { display: block; width: 100%; text-align: left; border: 0; background: transparent; cursor: pointer; padding: 14px 16px; border-top: 1px solid var(--line); font-family: inherit; transition: background .12s ease; }
 .doc-ws-row:first-child { border-top: 0; }
@@ -1453,6 +1456,23 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
    종이가 늘 스크롤 상태가 된다 — 그럴 바엔 목록을 위로 접는 편이 읽기 쉽다. */
 @media (max-width: 1200px) {
   .doc-ws { grid-template-columns: 1fr; }
+}
+
+/* 문서 화면(2열)의 스크롤 프레임 — 셸 높이 안에서 좌측 목록과 우측 문서가 **각자** 스크롤한다.
+   이래야 목록이 길거나 문서가 길어도 바깥 콘텐츠까지 스크롤되는 '이중 스크롤'이 안 생긴다.
+   ⚠ 셸 구조가 .content > .page-shell > .fade-up(.doc-screen) 3겹이라, 세 층을 모두 flex 로
+     이어야 높이가 전달된다(가운데 .page-shell 을 건너뛰면 height/flex 가 끊겨 프레임이 안 걸린다).
+   :has() 로 **문서 화면일 때만** 셸을 프레임으로 바꾼다 — 다른 화면은 예전처럼 바깥 하나로 흐른다. */
+@media (min-width: 1201px) {
+  .content:has(.doc-screen) { display: flex; flex-direction: column; overflow: hidden; }
+  .page-shell:has(> .doc-screen) { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .doc-screen { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .doc-screen > .page-header { flex: 0 0 auto; }
+  .doc-screen .doc-ws { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+  .doc-screen .doc-ws-side { display: flex; flex-direction: column; max-height: 100%; }
+  .doc-screen .doc-ws-side-top { flex: 0 0 auto; }
+  .doc-screen .doc-ws-side-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .doc-screen .doc-ws-main { max-height: 100%; overflow-y: auto; }
 }
 
 /* 定算內譯書 — 실물이 A4 세로. 화면에서는 A4 한 장 크기(210×297)로 보여준다.

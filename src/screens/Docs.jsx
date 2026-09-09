@@ -91,7 +91,7 @@ export const DocsScreen = () => {
   const sel = list.find(d => d.id === selId) || null;
 
   return (
-    <div className="fade-up">
+    <div className="fade-up doc-screen">
       <PageHeader
         title="지급결의서"
         actions={<button className="btn primary" onClick={() => setSrcOpen(true)}><Icon.Plus/> 새 결의서</button>}
