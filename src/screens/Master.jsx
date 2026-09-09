@@ -207,8 +207,8 @@ const MASTER_SECTIONS = {
 };
 
 // ── F-1: 거래처 패널 ────────────────────────────────────────────────
-const GUBU_LABEL = { B: '발주처', A: '매입처/외주', C: '매입·매출', E: '기관' }
-const GUBU_OPTS  = [{ value: 'B', label: '발주처 (수금)' }, { value: 'A', label: '매입처/외주 (지급)' }, { value: 'C', label: '매입·매출 (겸함)' }, { value: 'E', label: '기관' }]
+const GUBU_LABEL = { B: '매출', A: '매입', C: '매입매출', E: '기관' }
+const GUBU_OPTS  = [{ value: 'B', label: '매출 (수금)' }, { value: 'A', label: '매입 (지급)' }, { value: 'C', label: '매입매출 (겸함)' }, { value: 'E', label: '기관' }]
 
 const HrCodePanel = ({ type, label, embedded = false }) => {
   const toast = useToast()
