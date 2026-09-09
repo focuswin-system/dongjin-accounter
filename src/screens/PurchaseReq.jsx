@@ -460,7 +460,7 @@ export const PurchaseReqScreen = () => {
   const blankDoc = { id: '__new', req_date: localToday(), approval: [], items: [], ...seed }
 
   return (
-    <div className="fade-up">
+    <div className="fade-up doc-screen">
       <PageHeader title="구매품의서"
         actions={<button className="btn primary" onClick={() => setSrcOpen(true)}><Icon.Plus size={14}/> 새 구매품의서</button>}/>
 

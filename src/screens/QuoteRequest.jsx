@@ -307,7 +307,7 @@ export const QuoteRequestScreen = () => {
   const blankDoc = { id: '__new', req_date: localToday(), items: seed }
 
   return (
-    <div className="fade-up">
+    <div className="fade-up doc-screen">
       <PageHeader title="견적요청서"
         actions={<button className="btn primary" onClick={() => setSrcOpen(true)}><Icon.Plus size={14}/> 새 견적요청서</button>}/>
 

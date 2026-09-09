@@ -279,7 +279,7 @@ export const SettlementScreen = () => {
   const blankDoc = { id: '__new', settle_date: localToday(), lines: seed, approval: [] }
 
   return (
-    <div className="fade-up">
+    <div className="fade-up doc-screen">
       <PageHeader title="정산내역서"
         actions={<button className="btn primary" onClick={() => setSrcOpen(true)}><Icon.Plus size={14}/> 새 정산내역서</button>}/>
 
