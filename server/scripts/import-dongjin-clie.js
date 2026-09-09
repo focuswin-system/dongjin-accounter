@@ -33,6 +33,9 @@ function arg(name) {
 const companyCode = typeof arg('--company') === 'string' ? arg('--company') : null
 const file        = typeof arg('--file') === 'string' ? arg('--file') : null
 const commit       = !!arg('--commit')
+// 기존 거래처의 구분(gubu)까지 MES 값으로 덮을지. 기본 OFF — 회계에서 일부러 다르게
+// 분류했을 수 있어 말없이 안 바꾼다. 정말 맞추려면 --fix-gubu 를 명시한다.
+const fixGubu      = !!arg('--fix-gubu')
 
 const baseCfg = {
   host: process.env.DB_HOST,
@@ -78,7 +81,7 @@ async function main() {
     console.log(`  회계에만 있음 : ${accountingOnly.length} (안 건드림)`)
     // gubu 갱신이 필요한 매칭(현재 gubu ≠ 계산 gubu)
     const gubuFix = matched.filter(m => (m.vendorGubu || null) !== m.gubu)
-    if (gubuFix.length) console.log(`  구분(gubu) 갱신 대상: ${gubuFix.length}  예) ${gubuFix.slice(0, 5).map(m => `${m.name}:${m.vendorGubu}→${m.gubu}`).join(', ')}`)
+    if (gubuFix.length) console.log(`  구분(gubu) 다른 기존 거래처: ${gubuFix.length}  (${gubuFix.map(m => `${m.name}:${m.vendorGubu}→${m.gubu}`).join(', ')})  ${fixGubu ? '→ --fix-gubu 라 갱신함' : '→ 기본은 안 건드림(맞추려면 --fix-gubu)'}`)
 
     if (!commit) {
       console.log('\n[dry-run] 실제로 넣지 않았어요. --commit 을 붙이면 반영합니다. (반영 전 DB 백업 필수)')
@@ -97,9 +100,11 @@ async function main() {
           [randomUUID(), c.name, c.biz, c.ceo || '', c.gubu])
         inserted++
       }
-      for (const m of gubuFix) {
-        await conn.execute('UPDATE vendors SET gubu = ? WHERE id = ?', [m.gubu, m.vendorId])
-        updated++
+      if (fixGubu) {
+        for (const m of gubuFix) {
+          await conn.execute('UPDATE vendors SET gubu = ? WHERE id = ?', [m.gubu, m.vendorId])
+          updated++
+        }
       }
       await conn.commit()
       console.log(`\n✅ 완료 — 생성 ${inserted} · gubu 갱신 ${updated}`)
