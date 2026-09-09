@@ -209,8 +209,9 @@ const MASTER_SECTIONS = {
 // ── F-1: 거래처 패널 ────────────────────────────────────────────────
 const GUBU_LABEL = { B: '매출', A: '매입', C: '매입매출', E: '기관' }
 const GUBU_OPTS  = [{ value: 'B', label: '매출 (수금)' }, { value: 'A', label: '매입 (지급)' }, { value: 'C', label: '매입매출 (겸함)' }, { value: 'E', label: '기관' }]
-// 구분마다 배지 색을 달리한다(넷이 한눈에 갈리게). 매출=파랑·매입=주황·매입매출=초록·기관=회색.
-const GUBU_BADGE = { B: 'brand', A: 'warn', C: 'pos', E: 'outline' }
+// 구분마다 배지 색을 달리한다(넷이 한눈에 갈리게). ⚠ brand 는 액센트를 따라가 테마에 따라
+// warn 과 겹친다 — **액센트와 무관한 고정색**만 쓴다: 매출=초록·매입=주황·매입매출=진회색·기관=회색.
+const GUBU_BADGE = { B: 'pos', A: 'warn', C: 'ink', E: 'outline' }
 
 const HrCodePanel = ({ type, label, embedded = false }) => {
   const toast = useToast()
