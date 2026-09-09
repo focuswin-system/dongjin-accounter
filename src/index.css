@@ -1465,7 +1465,10 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
    :has() 로 **문서 화면일 때만** 셸을 프레임으로 바꾼다 — 다른 화면은 예전처럼 바깥 하나로 흐른다. */
 @media (min-width: 1201px) {
   .content:has(.doc-screen) { display: flex; flex-direction: column; overflow: hidden; }
-  .page-shell:has(> .doc-screen) { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  /* ⚠ width:100% 필수 — .page-shell 은 margin:0 auto 를 갖는다. flex 아이템이 되면 auto 마진이
+     아이템을 **콘텐츠 폭으로 줄여 가운데로** 몰아 좌우가 텅 빈다(회귀 겪음). width:100% 로 폭을
+     꽉 채우면 max-width:1680 은 그대로라 초대형 모니터에선 여전히 상한·중앙정렬된다. */
+  .page-shell:has(> .doc-screen) { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; flex-direction: column; }
   .doc-screen { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
   .doc-screen > .page-header { flex: 0 0 auto; }
   .doc-screen .doc-ws { flex: 1 1 auto; min-height: 0; align-items: stretch; }
