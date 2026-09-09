@@ -896,6 +896,8 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   const filledLines = lines.filter(isFilledLine)
   const linesTotal = filledLines.reduce((s, l) => s + (Number(String(l.amount).replace(/[^0-9.-]/g, '')) || 0), 0)
   const hasLines = filledLines.length > 0
+  // 금액 입력 기준 — 거래입력과 같은 토글(false=총액 입력, true=공급가액 입력).
+  const [supplyMode, setSupplyMode] = useState(false)
 
   const f = (k, v) => {
     const next = { ...form, [k]: v }
@@ -1296,29 +1298,37 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
             /* 납품일은 위 한 칸이 정한다 — 줄마다 받던 칸은 끈다 */
             columns={{ deliveryDate: false }}/>
 
+          {/* 금액 — 거래입력과 같은 방식으로 통일: 총액/공급가 토글 + 단일 칸 + 내역.
+              (예전엔 공급가·부가세·합계 3칸이라 거래입력과 이질적이고, 250,000 총액을 만들려면
+               공급가에 227,273 을 손으로 나눠 넣어야 했다.) 품목이 있으면 합계는 품목에서 나오므로
+               직접 입력을 막고 내역만 보여준다. */}
           <div>
             <label className="label">
-              공급가액
+              금액 {!hasLines && <span style={{ color: "var(--neg-ink)" }}>*</span>}
               {hasLines && <span className="text-muted2" style={{ fontWeight: 400 }}> · 품목 합계에서 자동</span>}
             </label>
-            {/* 품목이 있으면 직접 입력을 막는다 — 두 숫자가 어긋나면 명세서와 청구서가 다른 말을 한다.
-                고치려면 품목 줄의 금액을 고치면 된다(그쪽이 근거다). */}
-            <MoneyInput value={hasLines ? String(supply) : form.supplyAmount} disabled={hasLines}
-              onChange={raw => f("supplyAmount", raw)}/>
-          </div>
-          <div className="row gap-12">
-            <div style={{ flex: 1 }}>
-              <label className="label">부가세</label>
-              <MoneyInput placeholder={taxable ? "자동 계산" : "면세·영세 (0)"} value={taxable ? form.vatAmount : "0"}
-                onChange={raw => f("vatAmount", raw)} disabled={!taxable}/>
-            </div>
-            <div style={{ flex: 1 }}>
-              <label className="label">합계{!hasLines && taxable && <span className="text-muted2" style={{ fontWeight: 400 }}> · 넣으면 공급가·VAT로 나눔</span>}</label>
-              {/* 합계도 입력 가능 — 총액을 넣으면 공급가·부가세로 역산한다(위 f 의 totalAmount).
-                  품목이 있으면 합계는 품목에서 나오므로 잠근다. */}
-              <MoneyInput value={String(total)} disabled={hasLines}
-                onChange={raw => f("totalAmount", raw)}/>
-            </div>
+            {!hasLines && taxable && (
+              <div className="row gap-6" style={{ marginBottom: 8 }}>
+                <button type="button" className={`chip ${!supplyMode ? "active" : ""}`}
+                  onClick={() => setSupplyMode(false)}>총액 입력</button>
+                <button type="button" className={`chip ${supplyMode ? "active" : ""}`}
+                  onClick={() => setSupplyMode(true)}>공급가액 입력</button>
+                <span className="text-muted2" style={{ fontSize: 11.5, alignSelf: "center" }}>
+                  {supplyMode ? "세금계산서 기준 (VAT 별도)" : "VAT 포함 총액"}
+                </span>
+              </div>
+            )}
+            <MoneyInput className="num fw-700" style={{ fontSize: 20 }}
+              value={hasLines ? String(total) : (supplyMode && taxable ? form.supplyAmount : String(total))}
+              disabled={hasLines}
+              onChange={raw => f(supplyMode && taxable ? "supplyAmount" : "totalAmount", raw)}/>
+            {taxable && total > 0 && (
+              <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--muted)" }}>
+                공급가액 <b className="num" style={{ color: "var(--ink)" }}>{fmtNum(supply)}</b> ·
+                부가세 <b className="num" style={{ color: "var(--ink)" }}>{fmtNum(vat)}</b> ·
+                합계 <b className="num" style={{ color: "var(--ink)" }}>{fmtNum(total)}</b>
+              </div>
+            )}
           </div>
           <div className="row gap-12">
             <div style={{ flex: 1 }}>
