@@ -921,8 +921,8 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   const total  = supply + vat
 
   const vendorOptions = (form.kind === "issued"
-    ? vendors.filter(v => v.gubu === "B")
-    : vendors.filter(v => ["A", "E"].includes(v.gubu))
+    ? vendors.filter(v => ["B", "C"].includes(v.gubu))
+    : vendors.filter(v => ["A", "E", "C"].includes(v.gubu))
   /* ⚠ 값은 **id** 다. 거래처 이름도 유일하지 않다(실제로 같은 이름이 넷 있었다).
      이름으로 되찾으면 동명 중 배열 첫 번째가 붙어 청구서가 엉뚱한 거래처로 간다. */
   ).map((v, _i, arr) => ({ value: v.id, label: vendorLabel(v, arr), sub: v.type }))

@@ -207,8 +207,8 @@ const MASTER_SECTIONS = {
 };
 
 // ── F-1: 거래처 패널 ────────────────────────────────────────────────
-const GUBU_LABEL = { B: '발주처', A: '매입처/외주', E: '기관' }
-const GUBU_OPTS  = [{ value: 'B', label: '발주처 (수금)' }, { value: 'A', label: '매입처/외주 (지급)' }, { value: 'E', label: '기관' }]
+const GUBU_LABEL = { B: '발주처', A: '매입처/외주', C: '매입·매출', E: '기관' }
+const GUBU_OPTS  = [{ value: 'B', label: '발주처 (수금)' }, { value: 'A', label: '매입처/외주 (지급)' }, { value: 'C', label: '매입·매출 (겸함)' }, { value: 'E', label: '기관' }]
 
 const HrCodePanel = ({ type, label, embedded = false }) => {
   const toast = useToast()
@@ -761,6 +761,7 @@ const normGubu = (v) => {
   const s = String(v ?? '').trim()
   if (!s) return null
   if (/기관|금융|은행|관공|공공|정부|카드사|^e$/i.test(s)) return 'E'
+  if (/매입.*매출|매출.*매입|^c$/i.test(s)) return 'C'   // 매입·매출 겸함(둘 다 언급)
   if (/매입|외주|자재|원자재|협력|하청|구매|^a$/i.test(s)) return 'A'
   if (/발주|매출|수금|고객|판매|^b$/i.test(s)) return 'B'
   return null
@@ -1138,7 +1139,7 @@ const VendorPanel = ({ embedded = false }) => {
           </div>
         )}
         <div className="row gap-6" style={{ marginLeft: 'auto' }}>
-          {['', 'B', 'A', 'E'].map(g => (
+          {['', 'B', 'A', 'C', 'E'].map(g => (
             <button key={g} className={`chip ${!showInactive && filterGubu === g ? 'active' : ''}`}
               onClick={() => { setFilterGubu(g); setShowInactive(false) }}>
               {g === '' ? '전체' : GUBU_LABEL[g]}
@@ -2524,7 +2525,7 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
      ⚠ 목록 API 는 `gubu`, 상세 API 는 `vendor_gubu` 로 같은 값을 내려준다 —
         한쪽만 보면 목록에서 온 계약이 통째로 걸러져 "등록된 발주가 없어요"가 된다. */
   const purchaseGubu = (c) => c.vendor_gubu ?? c.gubu
-  const purchaseContracts = contracts.filter(c => ['A', 'E'].includes(purchaseGubu(c)))
+  const purchaseContracts = contracts.filter(c => ['A', 'E', 'C'].includes(purchaseGubu(c)))
   useEffect(() => {
     if (!open) return
     if (editing) {
@@ -2880,7 +2881,7 @@ export const RecurringExpensePanel = ({ page = false, goRoute }) => {
   useEffect(() => { load() }, [])
   // 매입처(A)·기관(E) 만 — 정기 지출의 상대는 돈을 주는 쪽이다
   const reloadVendors = async () => {
-    const list = (await api.getVendors()).filter(x => x.gubu === 'A' || x.gubu === 'E')
+    const list = (await api.getVendors()).filter(x => x.gubu === 'A' || x.gubu === 'E' || x.gubu === 'C')
     setVendors(list)
     return list
   }

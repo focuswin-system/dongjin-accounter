@@ -73,7 +73,7 @@ async function initDb(conn) {
         ceo          VARCHAR(100),
         address      VARCHAR(500),
         phone        VARCHAR(50),
-        gubu         ENUM('A','B','E'),
+        gubu         ENUM('A','B','C','E'),
         type         VARCHAR(100),
         service_type VARCHAR(100),
         contact      VARCHAR(100),
@@ -1156,6 +1156,8 @@ async function initDb(conn) {
     await c.execute(
       "UPDATE notes SET dishonored_on = due_on WHERE status = 'dishonored' AND dishonored_on IS NULL")
     await ensureColumn('vendors', 'active', "active TINYINT(1) NOT NULL DEFAULT 1")
+    // 거래처 구분에 C(매입매출) 추가 — 한 회사가 매입·매출을 겸하는 경우(MES 연동에서 특히).
+    await ensureEnum('vendors', 'gubu', ['A', 'B', 'C', 'E'])
     // 복합 현금 전표(D1) — 이 거래가 여러 비목으로 갈렸는지. 보고서·전표가 splits 를 읽을지 가른다.
     await ensureColumn('transactions', 'has_splits', "has_splits TINYINT(1) NOT NULL DEFAULT 0")
     // 정기청구 → 청구서 역참조. 청구서를 지우면 그 회차의 last_generated 를 되돌려야

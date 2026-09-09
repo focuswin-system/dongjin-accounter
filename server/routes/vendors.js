@@ -16,7 +16,9 @@ router.get('/', async (req, res, next) => {
     const { gubu, all } = req.query
     const where = []
     const params = []
-    if (gubu) { where.push('gubu = ?'); params.push(gubu) }
+    // 매출(B)·매입(A) 상대를 물으면 겸함(C)도 함께 준다 — C 는 양쪽 다 하므로 어느 목록에서도 빠지면 안 된다.
+    if (gubu === 'A' || gubu === 'B') { where.push('gubu IN (?, ?)'); params.push(gubu, 'C') }
+    else if (gubu) { where.push('gubu = ?'); params.push(gubu) }
     if (all !== '1') where.push('active = 1')
     const sql = `SELECT * FROM vendors${where.length ? ' WHERE ' + where.join(' AND ') : ''}`
       + (gubu ? ' ORDER BY name' : ' ORDER BY gubu, name')
@@ -198,7 +200,7 @@ router.post('/import/commit', async (req, res, next) => {
     for (const it of items) {
       const name = String(it.name || '').trim()
       if (!name) continue
-      const gubu = ['A', 'B', 'E'].includes(it.gubu) ? it.gubu : 'A'
+      const gubu = ['A', 'B', 'C', 'E'].includes(it.gubu) ? it.gubu : 'A'
       if (it.action === 'update' && it.id) {
         const [rows] = await conn.execute('SELECT * FROM vendors WHERE id = ?', [it.id])
         const cur = rows[0]

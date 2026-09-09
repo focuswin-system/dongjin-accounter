@@ -817,8 +817,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                    늘 붙이면 목록이 읽기 어려워진다. */
                 options={(() => {
                   const pool = kind === "income"
-                    ? vendors.filter(v => v.gubu === "B")
-                    : vendors.filter(v => ["A", "E"].includes(v.gubu))
+                    ? vendors.filter(v => ["B", "C"].includes(v.gubu))
+                    : vendors.filter(v => ["A", "E", "C"].includes(v.gubu))
                   /* 쓰는 거래처가 먼저, 미사용은 뒤로. 미사용을 아예 빼면 '검색해도 안 나온다'가
                      되고, 섞어 두면 목록이 지저분해진다 — 뒤로 밀고 이유를 적는 게 답이다. */
                   const rank = (v) => (v.active === 0 ? 1 : 0)

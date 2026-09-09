@@ -293,8 +293,8 @@ router.get('/schedule/pending', async (req, res, next) => {
                LEFT JOIN vendors v ON c.vendor_id = v.id
                WHERE m.status = '예정' AND (m.invoice_id IS NULL OR m.invoice_id = '')
                  AND (c.status IS NULL OR c.status <> '완료')`
-    if (forKind === 'purchase')  sql += " AND v.gubu IN ('A','E')"
-    else if (forKind === 'sales') sql += " AND (v.gubu IS NULL OR v.gubu = 'B')"
+    if (forKind === 'purchase')  sql += " AND v.gubu IN ('A','E','C')"
+    else if (forKind === 'sales') sql += " AND (v.gubu IS NULL OR v.gubu IN ('B','C'))"
     sql += ' ORDER BY m.due_date'
     const [rows] = await req.db.execute(sql)
 
@@ -442,8 +442,8 @@ router.get('/export.xlsx', async (req, res, next) => {
         COALESCE((SELECT COUNT(*) FROM contract_renewals WHERE contract_id=c.id AND result='갱신'),0) AS renew_count,
         COALESCE((SELECT COUNT(*) FROM recurring_invoices WHERE contract_id=c.id AND active=1),0) AS recurring_active
       FROM contracts c LEFT JOIN vendors v ON c.vendor_id = v.id WHERE 1=1`
-    if (kind === 'purchase')   sql += " AND v.gubu IN ('A','E')"
-    else if (kind === 'sales') sql += " AND (v.gubu IS NULL OR v.gubu = 'B')"
+    if (kind === 'purchase')   sql += " AND v.gubu IN ('A','E','C')"
+    else if (kind === 'sales') sql += " AND (v.gubu IS NULL OR v.gubu IN ('B','C'))"
     sql += ' ORDER BY c.start_date DESC, c.created_at DESC'
     const [rows] = await req.db.execute(sql)
     const contracts = rows.map(metrics)
@@ -478,8 +478,8 @@ router.get('/renewals/upcoming', async (req, res, next) => {
                  AND (c.term_mode = 'auto_renew' OR c.billing_mode = 'recurring')
                  AND c.end_date IS NOT NULL AND c.end_date <> ''
                  AND DATEDIFF(c.end_date, CURDATE()) <= COALESCE(c.notice_days, 60)`
-    if (forKind === 'purchase')   sql += " AND v.gubu IN ('A','E')"
-    else if (forKind === 'sales') sql += " AND (v.gubu IS NULL OR v.gubu = 'B')"
+    if (forKind === 'purchase')   sql += " AND v.gubu IN ('A','E','C')"
+    else if (forKind === 'sales') sql += " AND (v.gubu IS NULL OR v.gubu IN ('B','C'))"
     sql += ' ORDER BY c.end_date'
     const [rows] = await req.db.execute(sql)
     res.json(rows.map(r => ({ ...r, amount: Number(r.amount), unit_amount: r.unit_amount == null ? null : Number(r.unit_amount), days_left: Number(r.days_left) })))

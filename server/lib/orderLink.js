@@ -54,14 +54,14 @@ const OUT_LIMIT_DAYS = 365
  */
 async function linkCandidates(db, kind) {
   const isIncome = kind === 'income'
-  const gubu = isIncome ? ["B"] : ['A', 'E']
+  const gubu = isIncome ? ["B", "C"] : ['A', 'E', 'C']
 
   /* 후보 주문 — 이 종류(수주/발주)의 것만. 거래처 없는 주문은 붙일 근거가 없어 뺀다. */
   const [conRows] = await db.execute(`
     SELECT c.id, c.name, c.vendor_id, c.start_date, c.end_date, c.status, c.amount,
            v.name AS vendor_name, v.gubu
       FROM contracts c JOIN vendors v ON v.id = c.vendor_id
-     WHERE v.gubu ${isIncome ? "= 'B'" : "IN ('A','E')"}
+     WHERE v.gubu ${isIncome ? "IN ('B','C')" : "IN ('A','E','C')"}
        AND (c.status IS NULL OR c.status <> '완료')
      ORDER BY c.start_date DESC
      LIMIT 500`)

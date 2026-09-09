@@ -66,7 +66,7 @@ async function contractHealth(db, today) {
                       WHERE i2.contract_id = c.id AND i2.kind = 'issued'), 0) AS collected
       FROM contracts c
       LEFT JOIN vendors v ON v.id = c.vendor_id
-     WHERE v.gubu = 'B'
+     WHERE v.gubu IN ('B','C')
      ORDER BY c.amount DESC`)
   if (!rows.length) return { contracts: [], totals: emptyTotals() }
 

@@ -2608,7 +2608,7 @@ export const api = {
     }))
     vendors.forEach(v => cmds.push({
       kind: '거래처', label: v.name,
-      sub: [v.gubu === 'B' ? '발주처' : v.gubu === 'E' ? '기관' : '매입처', v.type].filter(Boolean).join(' · '),
+      sub: [v.gubu === 'B' ? '발주처' : v.gubu === 'C' ? '매입·매출' : v.gubu === 'E' ? '기관' : '매입처', v.type].filter(Boolean).join(' · '),
       // 거래처를 고르면 **거래처 화면**으로 간다. 예전엔 'contract'(주문)로 보내서,
       // 거래처를 검색해 눌렀는데 엉뚱하게 주문 목록이 열렸다.
       route: 'master_vendor',
