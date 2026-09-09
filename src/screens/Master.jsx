@@ -209,6 +209,8 @@ const MASTER_SECTIONS = {
 // ── F-1: 거래처 패널 ────────────────────────────────────────────────
 const GUBU_LABEL = { B: '매출', A: '매입', C: '매입매출', E: '기관' }
 const GUBU_OPTS  = [{ value: 'B', label: '매출 (수금)' }, { value: 'A', label: '매입 (지급)' }, { value: 'C', label: '매입매출 (겸함)' }, { value: 'E', label: '기관' }]
+// 구분마다 배지 색을 달리한다(넷이 한눈에 갈리게). 매출=파랑·매입=주황·매입매출=초록·기관=회색.
+const GUBU_BADGE = { B: 'brand', A: 'warn', C: 'pos', E: 'outline' }
 
 const HrCodePanel = ({ type, label, embedded = false }) => {
   const toast = useToast()
@@ -857,7 +859,7 @@ const vendorImportAdapter = {
   },
   previewCols: [
     { header: '상호명', className: 'fw-600', render: (d) => d.name || <span className="text-neg">—</span> },
-    { header: '구분', width: 64, render: (d) => <span className="badge outline" style={{ fontSize: 10 }}>{GUBU_LABEL[d.gubu]}</span> },
+    { header: '구분', width: 64, render: (d) => <span className={`badge ${GUBU_BADGE[d.gubu] || 'outline'}`} style={{ fontSize: 10 }}>{GUBU_LABEL[d.gubu]}</span> },
     { header: '사업자번호', className: 'num text-sm text-muted', render: (d) => d.biz_no || '—' },
     { header: '대표자', className: 'text-sm', render: (d) => d.ceo || '—' },
     { header: '연락처', className: 'text-sm text-muted', render: (d) => d.contact || d.phone || '—' },
@@ -1188,7 +1190,7 @@ const VendorPanel = ({ embedded = false }) => {
             {filtered.map(v => (
               <tr key={v.id} style={v.active === 0 ? { opacity: 0.55 } : undefined}>
                 <td className="fw-700">{v.name}</td>
-                <td><span className={`badge ${v.gubu === 'B' ? 'brand' : v.gubu === 'E' ? 'outline' : 'warn'}`}>{GUBU_LABEL[v.gubu] || v.gubu}</span></td>
+                <td><span className={`badge ${GUBU_BADGE[v.gubu] || 'outline'}`}>{GUBU_LABEL[v.gubu] || v.gubu}</span></td>
                 <td className="text-sm text-muted">{v.type || '—'}</td>
                 <td className="text-sm">{v.biz_no || '—'}</td>
                 <td className="text-sm">{v.ceo || '—'}</td>
