@@ -2592,6 +2592,9 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       )}
 
       {!collect && view === "plain" && (
+        /* 입금내역도 발행내역·발행예정과 같은 card 로 감싼다 — 예전엔 이 표만 맨몸이라 흰 카드
+           배경이 없어 탭마다 배경이 중구난방이었다. */
+        <div className="card" style={{ overflow: "hidden" }}>
         <DataTable
           rows={plainFiltered}
           /* 열을 고를 수 있다 — 입금내역·지급내역은 보는 열이 달라 설정도 따로 기억한다 */
@@ -2628,6 +2631,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
             { key: 'amount', header: '금액', align: 'right', sortable: true,
               render: t => <span className="num-cell fw-700">{fmtNum(t.amount)}</span> },
           ]}/>
+        </div>
       )}
 
       {txnOpen && (

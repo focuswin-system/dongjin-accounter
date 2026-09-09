@@ -1107,6 +1107,27 @@ router.put('/:id', async (req, res, next) => {
       'UPDATE transactions SET vendor_id = ?, contract_id = ? WHERE invoice_id = ?',
       [vendor_id || null, contract_id || null, req.params.id])
 
+    /* 총액이 바뀌면 정산 매칭도 다시 편다 — 예전엔 매칭액이 **수정 당시 총액에 묶여(clamp)**
+       있어서, 거래를 올린 뒤 청구서 총액을 올려도 매칭이 옛 값으로 남았다(입금이력이 249,998
+       로 남는 실사고). 실제 거래액에 맞춰 다시 잡되, ⚠ **한 거래가 여러 청구서에 걸린
+       분할 입금은 건드리지 않는다**(어느 쪽을 늘릴지 알 수 없으므로). */
+    const [reclaimMs] = await conn.execute(
+      `SELECT m.id, m.amount, m.txn_id, t.amount AS txn_amt
+         FROM invoice_matches m LEFT JOIN transactions t ON t.id = m.txn_id
+        WHERE m.invoice_id = ?`, [req.params.id])
+    for (const m of reclaimMs) {
+      if (m.txn_id) {
+        const [[{ cnt }]] = await conn.execute('SELECT COUNT(*) AS cnt FROM invoice_matches WHERE txn_id = ?', [m.txn_id])
+        if (cnt > 1) continue   // 분할 입금 — 자동으로 늘리지 않는다
+      }
+      const [[{ others }]] = await conn.execute(
+        'SELECT COALESCE(SUM(amount),0) AS others FROM invoice_matches WHERE invoice_id = ? AND id <> ?',
+        [req.params.id, m.id])
+      const want = Number(m.txn_amt != null ? m.txn_amt : m.amount)
+      const fixed = Math.max(0, Math.min(want, newTotal - Number(others)))
+      if (fixed !== Number(m.amount)) await conn.execute('UPDATE invoice_matches SET amount = ? WHERE id = ?', [fixed, m.id])
+    }
+
     /* 품목 내역 — lines 를 **보낸 요청만** 갱신한다.
        청구서를 다루지 않는 화면(정산·상태 변경)의 저장이 기존 품목표를 지우면 안 된다
        (주문 items·cost_budget 과 같은 부분 수정 보존 원칙). */

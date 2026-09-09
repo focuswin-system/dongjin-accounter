@@ -852,6 +852,13 @@ router.put('/:id', async (req, res, next) => {
 
       // 이 거래에 걸린 청구서 매칭을 새 금액에 맞춰 조정하고 청구서 상태를 재계산한다.
       const [links] = await conn.execute('SELECT id, invoice_id, amount FROM invoice_matches WHERE txn_id = ?', [req.params.id])
+      /* ⚠ 한 거래가 여러 청구서에 나눠 붙은(분할) 경우, 각 매칭을 독립적으로 min(거래액, 청구서잔여)
+         로 자르면 매칭 합이 새 거래액을 넘을 수 있다(600만을 200만×3 에 붙였다가 300만으로 줄이면
+         200×3=600 유지 → 초과 계상). 그래서 **거래액을 예산처럼 나눠 준다**:
+           · 분할(매칭 여럿) → 늘리지 않고(어느 청구서를 늘릴지 모름) 예산 안에서만 남긴다.
+           · 단건 → 실제 거래액에 맞춰 펴고 줄인다(청구서 잔여 한도). */
+      const isSplit = links.length > 1
+      let budget = Number(amount) || 0
       for (const link of links) {
         // 같은 청구서의 다른 매칭을 뺀 잔여를 넘지 않도록 제한(과입금·과지급 방지)
         const [[{ others }]] = await conn.execute(
@@ -859,7 +866,10 @@ router.put('/:id', async (req, res, next) => {
           [link.invoice_id, link.id])
         const [[inv]] = await conn.execute('SELECT total_amount FROM invoices WHERE id = ?', [link.invoice_id])
         const remainForThis = Number(inv?.total_amount || 0) - Number(others)
-        const newMatch = Math.max(0, Math.min(Number(amount) || 0, remainForThis))
+        const newMatch = isSplit
+          ? Math.max(0, Math.min(Number(link.amount), remainForThis, budget))
+          : Math.max(0, Math.min(budget, remainForThis))
+        budget -= newMatch
         await conn.execute('UPDATE invoice_matches SET amount = ? WHERE id = ?', [newMatch, link.id])
         await recalcInvoiceStatus(conn, link.invoice_id)
       }

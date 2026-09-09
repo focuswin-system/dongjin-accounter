@@ -192,6 +192,26 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
     setCheckedIds([]); setBulkContract(null); reload();
   };
 
+  // 선택한 거래를 한꺼번에 삭제. 각 건은 deleteTransaction 이 청구서 매칭·복합전표 splits 까지 정리한다.
+  const doBulkDelete = async () => {
+    const rows = filtered.filter(t => checkedIds.includes(t.id) && !t.planned);
+    if (!rows.length) return;
+    const total = rows.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+    const ok = await confirm({
+      tone: 'neg', icon: <Icon.Warn size={22}/>, title: '거래 일괄 삭제',
+      body: `선택한 ${rows.length}건(합계 ${fmtNum(total)}원)을 삭제합니다. 복구할 수 없어요. 청구서에 붙은 입금·지급이면 그 정산도 함께 풀립니다.`,
+      confirmLabel: '삭제',
+    });
+    if (!ok) return;
+    let done = 0, fail = 0;
+    for (const t of rows) {
+      const res = await api.deleteTransaction(t.id);
+      res.ok ? done++ : fail++;
+    }
+    setCheckedIds([]); reload();
+    toast.push(fail ? `${done}건 삭제, ${fail}건 실패` : `${done}건 삭제됐어요`, fail ? { tone: 'warn' } : undefined);
+  };
+
   const inSum  = scoped.filter(t => t.kind === "income"  && t.status === "입금완료").reduce((a, t) => a + t.amount, 0);
   const outSum = scoped.filter(t => t.kind === "expense" && t.status === "지급완료").reduce((a, t) => a + t.amount, 0);
 
@@ -293,6 +313,10 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
               <div className="row gap-8" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
                 <span className="fw-700 text-sm">{checkedIds.length}건 선택</span>
                 <button className="btn ghost sm" onClick={() => setCheckedIds([])}>선택 해제</button>
+                {/* 삭제는 눈에 덜 띄게(ghost·경고색) — 조회하다 잘못 누르지 않게. 확인 한 번 받는다. */}
+                <button className="btn ghost sm" style={{ color: 'var(--neg-ink)' }} onClick={doBulkDelete}>
+                  <Icon.Trash size={13}/> 삭제
+                </button>
                 <div className="row gap-6 ml-auto" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
                   <span className="text-xs text-muted2">주문</span>
                   <FilterSelect value={bulkContract} onChange={setBulkContract}
