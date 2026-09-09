@@ -909,6 +909,20 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
       const n = parseInt(String(next.supplyAmount).replace(/[^0-9]/g, "")) || 0
       next.vatAmount = v === "과세" ? String(vatOf(n)) : "0"
     }
+    /* 합계(총액)를 넣으면 공급가·부가세로 **역산**한다 — 250,000 을 넣으면 공급가 227,273·VAT 22,727.
+       (공급가 칸은 반대로 '더하기': 250,000 넣으면 VAT 25,000·합계 275,000). 두 방향 다 쓰게 둔다.
+       vat = 총액 - 공급가 로 두어 반올림해도 합계가 입력값과 정확히 맞아떨어진다. */
+    if (k === "totalAmount") {
+      const n = parseInt(String(v).replace(/[^0-9]/g, "")) || 0
+      if (next.taxType === "과세") {
+        const s = Math.round(n / 1.1)
+        next.supplyAmount = String(s)
+        next.vatAmount = String(n - s)
+      } else {
+        next.supplyAmount = String(n)
+        next.vatAmount = "0"
+      }
+    }
     if (k === "vendor") next.contract = ""
     setForm(next)
   }
@@ -1299,10 +1313,11 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
                 onChange={raw => f("vatAmount", raw)} disabled={!taxable}/>
             </div>
             <div style={{ flex: 1 }}>
-              <label className="label">합계</label>
-              <div className="input num fw-700" style={{ background: "var(--surface-2)", display: "flex", alignItems: "center" }}>
-                {fmtNum(total)}
-              </div>
+              <label className="label">합계{!hasLines && taxable && <span className="text-muted2" style={{ fontWeight: 400 }}> · 넣으면 공급가·VAT로 나눔</span>}</label>
+              {/* 합계도 입력 가능 — 총액을 넣으면 공급가·부가세로 역산한다(위 f 의 totalAmount).
+                  품목이 있으면 합계는 품목에서 나오므로 잠근다. */}
+              <MoneyInput value={String(total)} disabled={hasLines}
+                onChange={raw => f("totalAmount", raw)}/>
             </div>
           </div>
           <div className="row gap-12">
