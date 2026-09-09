@@ -157,9 +157,10 @@ export const TransferScreen = ({ openEdit }) => {
   }))
 
   return (
-    /* ⚠ report-print — 인쇄 화이트리스트(index.css @media print) 등록 클래스.
-       이걸 빼면 Ctrl+P 가 백지가 된다. 조작부(기간 바·버튼·취소)는 .no-print 로 감춘다. */
-    <div className="fade-up report-print">
+    /* 바깥은 보통 화면(회색 바탕·정상 헤더). 인쇄 대상(제목·합계·표)만 아래 report-print
+       블록으로 감싼다 — 그래야 화면에서 헤더·필터가 흰 종이처럼 뜨지 않고, Ctrl+P 는
+       그 블록만 흰 종이로 찍는다. (report-print 를 전체에 걸면 화면까지 흰 종이가 된다) */
+    <div className="fade-up">
       {/* 화면 머리(캐주얼 설명·조작부)는 종이에 안 넣는다 — 거래처에 내는 종이엔
           아래 print-only 머리글(회사·기간)만 나온다. 그래서 no-print 로 감싼다. */}
       <div className="no-print">
@@ -201,6 +202,9 @@ export const TransferScreen = ({ openEdit }) => {
         ))}
       </div>
 
+      {/* ⚠ report-print — 여기부터 표 끝까지가 인쇄 대상(화이트리스트 등록). 이 블록만
+          흰 종이로 나온다. 바깥 조작부(헤더·기간 바)는 위에서 .no-print 로 이미 감췄다. */}
+      <div className="report-print">
       {/* 인쇄 때만 나오는 머리글 — 거래처에 내는 종이라 회사·기간·제목이 있어야 한다 */}
       <div className="print-only" style={{ textAlign: 'center', marginBottom: 16 }}>
         <div className="fw-700" style={{ fontSize: 20 }}>내부 계좌 이체 내역</div>
@@ -245,11 +249,7 @@ export const TransferScreen = ({ openEdit }) => {
                 onClick={(e) => { e.stopPropagation(); remove(t) }}>취소</button> },
           ]}/>
       </div>
-
-      {/* 받는 사람이 오해하지 않게 — 내부 이체의 뜻을 종이에도 적는다 */}
-      <div className="text-xs text-muted2" style={{ marginTop: 12, lineHeight: 1.7 }}>
-        · 우리 회사 통장 사이에서 옮긴 자금이에요. 수입·지출이 아니라 자산의 이동이며 손익에는 반영되지 않습니다.
-      </div>
+      </div>{/* /report-print — 인쇄 대상 끝 */}
 
       {txnOpen && <TxnQuickDrawer txnId={txnOpen} onClose={() => setTxnOpen(null)} onChanged={load} openEdit={openEdit}/>}
 

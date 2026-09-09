@@ -51,27 +51,43 @@ export const DocsScreen = () => {
   const [srcOpen, setSrcOpen] = useState(false);
   const [src, setSrc] = useState(null);
   const [showDone, setShowDone] = useState(false);   // 처리된 결의서까지 볼지
+  const [total, setTotal] = useState(0);             // 현재 조건의 전체 건수
+  const [pendingCount, setPendingCount] = useState(0); // '처리 대기' 배지(검색 무관)
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const LIMIT = 50;
 
-  const load = async () => {
-    const [list, comp] = await Promise.all([api.getResolutions(), api.getCompany()]);
-    setDocs(list); setCompany(comp);
+  /* 문서가 쌓여도 견디게 — 목록은 서버에서 한 페이지(50건)씩 받는다.
+     탭(대기/전체)은 status, 검색은 q, '더 보기'는 offset 으로 서버에 넘긴다.
+     ⚠ done/query 를 인자로 받는다: 탭을 바꾼 직후 부를 때 state 가 아직 안 바뀌어
+       있어(비동기) 새 값을 명시로 넘겨야 옳은 페이지가 온다. */
+  const load = async ({ append = false, done = showDone, query = q } = {}) => {
+    if (append) setLoadingMore(true);
+    const offset = append ? docs.length : 0;
+    const page = await api.getResolutionsPage({ q: query, status: done ? undefined : 'pending', limit: LIMIT, offset });
+    if (!company) api.getCompany().then(setCompany);
+    setDocs(prev => append ? [...prev, ...page.rows] : page.rows);
+    setTotal(page.total); setPendingCount(page.pendingCount); setHasMore(page.hasMore);
+    setLoadingMore(false);
+    return page;
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 기본은 '처리 안 된 것'만 = 할 일 큐. 완료(처리됨)는 전체 보기에서만.
-  const pendingCount = docs.filter(d => d.status !== '완료').length;
-  const list = docs
-    .filter(d => showDone || d.status !== '완료')
-    .filter(d => !q || (d.title || "").includes(q) || (d.vendor_name || "").includes(q) || (d.doc_no || "").includes(q));
+  // 검색은 서버로 — 타이핑마다 때리지 않게 300ms 디바운스. 첫 렌더는 위 load 가 이미 했다.
+  const firstQ = useRef(true);
+  useEffect(() => {
+    if (firstQ.current) { firstQ.current = false; return; }
+    const t = setTimeout(() => { load({ query: q }); }, 300);
+    return () => clearTimeout(t);
+  }, [q]);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* 선택은 **지금 목록에 보이는 것** 중에서만 유지한다.
-     예전엔 전체 docs 에서 골랐다(`list[0]` 도 필터 전 배열이었다). 그래서
-     '전체' 탭에서 완료 결의서를 열어둔 채 '처리 대기'로 돌아오면 왼쪽 목록엔 없는
-     완료 문서가 오른쪽에 그대로 떠 있었다 — 탭이 거르는 의미가 사라진다.
-     검색어를 쳐서 선택 건이 목록에서 빠질 때도 같은 일이 난다. */
+  const list = docs;   // 서버가 이미 탭·검색을 반영했다
+
+  /* 선택은 **지금 목록에 보이는 것** 중에서만 유지한다. 목록이 바뀌면(탭·검색·더보기)
+     선택이 그 안에 있으면 지키고, 없으면 첫 줄로. */
   useEffect(() => {
     setSelId(prev => (prev && list.some(d => d.id === prev)) ? prev : (list[0]?.id || null));
-  }, [docs, showDone, q]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [docs]);   // eslint-disable-line react-hooks/exhaustive-deps
   const sel = list.find(d => d.id === selId) || null;
 
   return (
@@ -95,17 +111,17 @@ export const DocsScreen = () => {
           그래서 '처리 대기' 탭에는 없다 — 그대로 두면 만들고 나서 화면이 텅 비어 보여
           "만들었는데 실패했나" 가 된다. 만든 것을 보여주려면 탭도 함께 옮겨야 한다. */}
       <TxnPickDrawer open={src === 'txn'} onClose={() => setSrc(null)}
-        onPicked={(id) => { setSrc(null); setShowDone(true); load().then(() => setSelId(id)); }}/>
+        onPicked={(id) => { setSrc(null); setShowDone(true); load({ done: true }).then(() => setSelId(id)); }}/>
       <NewResolutionDrawer open={src === 'blank'} onClose={() => setSrc(null)}
         onCreated={(id) => { setSrc(null); load().then(() => setSelId(id)); }}/>
 
       <DocWorkspace>
         <DocSide top={<>
           <div className="row gap-6">
-            <button className={`chip ${!showDone ? "active" : ""}`} onClick={() => setShowDone(false)}>
+            <button className={`chip ${!showDone ? "active" : ""}`} onClick={() => { setShowDone(false); load({ done: false }); }}>
               처리 대기 {pendingCount > 0 && <span className="badge brand" style={{ marginLeft: 6 }}>{pendingCount}</span>}
             </button>
-            <button className={`chip ${showDone ? "active" : ""}`} onClick={() => setShowDone(true)}>전체</button>
+            <button className={`chip ${showDone ? "active" : ""}`} onClick={() => { setShowDone(true); load({ done: true }); }}>전체</button>
           </div>
           <div className="search" style={{ margin: 0, padding: "6px 10px" }}>
             <Icon.Search size={14}/>
@@ -113,12 +129,20 @@ export const DocsScreen = () => {
           </div>
         </>}>
           {list.length === 0
-            ? <DocSideEmpty>{showDone ? "결의서가 없어요." : "처리 대기 중인 결의서가 없어요."}<br/>'새 결의서'를 누르면 받은 청구서·이미 나간 돈에서 만들 수 있어요.</DocSideEmpty>
-            : list.map(d => (
-              <DocListRow key={d.id} active={d.id === selId} onClick={() => setSelId(d.id)}
-                docNo={d.doc_no} right={<StatusBadge status={d.status}/>}
-                title={d.title} meta={`${d.pay_date || "—"} · ${d.vendor_name || "—"}`} amount={d.amount}/>
-            ))}
+            ? <DocSideEmpty>{showDone ? (q ? "검색 결과가 없어요." : "결의서가 없어요.") : (q ? "검색 결과가 없어요." : "처리 대기 중인 결의서가 없어요.")}<br/>'새 결의서'를 누르면 받은 청구서·이미 나간 돈에서 만들 수 있어요.</DocSideEmpty>
+            : <>
+              {list.map(d => (
+                <DocListRow key={d.id} active={d.id === selId} onClick={() => setSelId(d.id)}
+                  docNo={d.doc_no} right={<StatusBadge status={d.status}/>}
+                  title={d.title} meta={`${d.pay_date || "—"} · ${d.vendor_name || "—"}`} amount={d.amount}/>
+              ))}
+              {hasMore && (
+                <button className="btn ghost" style={{ width: '100%', marginTop: 6 }}
+                  disabled={loadingMore} onClick={() => load({ append: true })}>
+                  {loadingMore ? "불러오는 중…" : `더 보기 · ${list.length}/${total}건`}
+                </button>
+              )}
+            </>}
         </DocSide>
         <DocMain>
           {sel

@@ -79,13 +79,45 @@ router.get('/', async (req, res, next) => {
      * 남고, 결의서도 같은 청구서를 가리킨다(er.invoice_id). 한 번 이으면 진짜 번호가 나온다.
      * ⚠ 품의를 안 거친 지출은 **빈 칸**이다. 없는 걸 있는 것처럼 적지 않는다
      *   (인쇄해서 손으로 적는 자리다). */
+    /* 목록이 한없이 길어져도 견디게 — 검색(q)·기간(from/to)·페이지(limit/offset)를 받는다.
+     * ⚠ 파라미터가 하나도 없으면 **예전처럼 배열 전체**를 준다. 정산내역서가 결의서를
+     *   후보로 끌어올 때(getResolutions) 그 계약을 안 깨려는 것. 화면 목록만 페이지로 부른다. */
+    const q = (req.query.q || '').trim()
+    const { from, to, status } = req.query
+    const paged = q || from || to || status != null || req.query.limit != null || req.query.offset != null
+    const where = [], args = []
+    if (q) { const like = `%${q}%`; where.push('(er.doc_no LIKE ? OR er.vendor_name LIKE ? OR v.name LIKE ? OR er.title LIKE ?)'); args.push(like, like, like, like) }
+    if (status === 'pending') where.push("(er.status <> '완료' OR er.status IS NULL)")
+    if (from) { where.push('er.created_at >= ?'); args.push(from + ' 00:00:00') }
+    if (to)   { where.push('er.created_at <= ?'); args.push(to + ' 23:59:59') }
+    const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : ''
+
+    if (!paged) {
+      const [rows] = await req.db.execute(
+        `SELECT er.*, v.name AS vendor_name2, pr.doc_no AS purchase_req_no
+           FROM expense_resolutions er
+           LEFT JOIN vendors v ON er.vendor_id = v.id
+           LEFT JOIN purchase_reqs pr ON pr.invoice_id = er.invoice_id
+          ORDER BY er.created_at DESC`)
+      return res.json(rows.map(adapt))
+    }
+
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200)
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0)
+    const [[{ cnt }]] = await req.db.execute(
+      `SELECT COUNT(*) AS cnt FROM expense_resolutions er LEFT JOIN vendors v ON er.vendor_id = v.id ${whereSql}`, args)
     const [rows] = await req.db.execute(
       `SELECT er.*, v.name AS vendor_name2, pr.doc_no AS purchase_req_no
          FROM expense_resolutions er
          LEFT JOIN vendors v ON er.vendor_id = v.id
          LEFT JOIN purchase_reqs pr ON pr.invoice_id = er.invoice_id
-        ORDER BY er.created_at DESC`)
-    res.json(rows.map(adapt))
+         ${whereSql}
+        ORDER BY er.created_at DESC
+        LIMIT ${limit} OFFSET ${offset}`, args)
+    // 배지용 — 검색과 무관한 '처리 대기' 전체 건수(작업 큐 크기).
+    const [[{ pend }]] = await req.db.execute(
+      "SELECT COUNT(*) AS pend FROM expense_resolutions WHERE status <> '완료' OR status IS NULL")
+    res.json({ rows: rows.map(adapt), total: Number(cnt), pendingCount: Number(pend), hasMore: offset + rows.length < Number(cnt) })
   } catch (e) { next(e) }
 })
 

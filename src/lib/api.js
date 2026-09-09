@@ -1395,6 +1395,17 @@ export const api = {
   async getResolutions() {
     try { return await req('/resolutions') } catch { return [] }
   },
+  // 화면 목록용 — 검색·기간·페이지(더보기). { rows, total, hasMore } 반환.
+  async getResolutionsPage(params = {}) {
+    const qs = new URLSearchParams()
+    if (params.q) qs.set('q', params.q)
+    if (params.from) qs.set('from', params.from)
+    if (params.to) qs.set('to', params.to)
+    if (params.status) qs.set('status', params.status)
+    qs.set('limit', params.limit ?? 50)
+    qs.set('offset', params.offset ?? 0)
+    try { return await req('/resolutions?' + qs.toString()) } catch { return { rows: [], total: 0, pendingCount: 0, hasMore: false } }
+  },
   async getResolution(id) {
     try { return await req(`/resolutions/${id}`) } catch { return null }
   },
