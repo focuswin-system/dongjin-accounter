@@ -1475,7 +1475,12 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
   .doc-screen .doc-ws-side { display: flex; flex-direction: column; max-height: 100%; }
   .doc-screen .doc-ws-side-top { flex: 0 0 auto; }
   .doc-screen .doc-ws-side-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-  .doc-screen .doc-ws-main { max-height: 100%; overflow-y: auto; }
+  /* 우측은 툴바(문서번호·편집·인쇄·처리) 고정 + 아래 문서만 스크롤.
+     ResolutionPreview 가 <DocToolbar/> + <DocViewport/> 를 Fragment 로 내놓아
+     .doc-ws-main 의 직계가 둘이다 — main 은 안 흐르고(overflow:hidden) 뷰포트만 흐른다. */
+  .doc-screen .doc-ws-main { max-height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+  .doc-screen .doc-ws-main > .doc-ws-toolbar { flex: 0 0 auto; }
+  .doc-screen .doc-ws-main > .doc-ws-viewport { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 }
 
 /* 定算內譯書 — 실물이 A4 세로. 화면에서는 A4 한 장 크기(210×297)로 보여준다.
