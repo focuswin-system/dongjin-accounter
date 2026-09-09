@@ -1487,6 +1487,16 @@ export const api = {
   async getSettlements() {
     try { return await req('/settlements') } catch { return [] }
   },
+  // 화면 목록용 — 검색·기간·페이지. { rows, total, hasMore }.
+  async getSettlementsPage(params = {}) {
+    const qs = new URLSearchParams()
+    if (params.q) qs.set('q', params.q)
+    if (params.from) qs.set('from', params.from)
+    if (params.to) qs.set('to', params.to)
+    qs.set('limit', params.limit ?? 50)
+    qs.set('offset', params.offset ?? 0)
+    try { return await req('/settlements?' + qs.toString()) } catch { return { rows: [], total: 0, hasMore: false } }
+  },
   async getSettlement(id) {
     try { return await req(`/settlements/${id}`) } catch { return null }
   },
@@ -1506,6 +1516,15 @@ export const api = {
   // ── 구매품의서 ──────────────────────────────────────────────
   async getPurchaseReqs() {
     try { return await req('/purchase-reqs') } catch { return [] }
+  },
+  async getPurchaseReqsPage(params = {}) {
+    const qs = new URLSearchParams()
+    if (params.q) qs.set('q', params.q)
+    if (params.from) qs.set('from', params.from)
+    if (params.to) qs.set('to', params.to)
+    qs.set('limit', params.limit ?? 50)
+    qs.set('offset', params.offset ?? 0)
+    try { return await req('/purchase-reqs?' + qs.toString()) } catch { return { rows: [], total: 0, hasMore: false } }
   },
   async getPurchaseReq(id) {
     try { return await req(`/purchase-reqs/${id}`) } catch { return null }
@@ -1540,6 +1559,15 @@ export const api = {
 
   async getQuoteReqs() {
     try { return await req('/quote-reqs') } catch { return [] }
+  },
+  async getQuoteReqsPage(params = {}) {
+    const qs = new URLSearchParams()
+    if (params.q) qs.set('q', params.q)
+    if (params.from) qs.set('from', params.from)
+    if (params.to) qs.set('to', params.to)
+    qs.set('limit', params.limit ?? 50)
+    qs.set('offset', params.offset ?? 0)
+    try { return await req('/quote-reqs?' + qs.toString()) } catch { return { rows: [], total: 0, hasMore: false } }
   },
   async getQuoteReq(id) {
     try { return await req(`/quote-reqs/${id}`) } catch { return null }

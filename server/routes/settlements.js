@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
+const { pageParams, buildWhere, inClause } = require('../lib/pagedList')
 
 const router = Router()
 
@@ -26,15 +27,32 @@ const adapt = (r, lines) => {
 // 목록 (최신순) — 라인 합계는 한 번에 집계
 router.get('/', async (req, res, next) => {
   try {
-    const [rows] = await req.db.execute('SELECT * FROM settlements ORDER BY created_at DESC')
-    const [sums] = await req.db.execute('SELECT settlement_id, COALESCE(SUM(amount),0) AS total FROM settlement_lines GROUP BY settlement_id')
-    const map = {}
-    for (const s of sums) map[s.settlement_id] = Number(s.total)
-    res.json(rows.map(r => {
+    const pp = pageParams(req)
+    const adaptRow = (r, total) => {
       const received = Number(r.received_amount) || 0
-      const total = map[r.id] || 0
       return { ...r, received_amount: received, total, balance: received - total, approval: parseJson(r.approval, []) }
-    }))
+    }
+    // 파라미터 없음 = 예전처럼 전체 배열(후보용 호출 호환)
+    if (!pp.paged) {
+      const [rows] = await req.db.execute('SELECT * FROM settlements ORDER BY created_at DESC, id DESC')
+      const [sums] = await req.db.execute('SELECT settlement_id, COALESCE(SUM(amount),0) AS total FROM settlement_lines GROUP BY settlement_id')
+      const map = {}
+      for (const s of sums) map[s.settlement_id] = Number(s.total)
+      return res.json(rows.map(r => adaptRow(r, map[r.id] || 0)))
+    }
+    // 페이지 모드 — 검색·기간·50건씩. 합계는 이 페이지 행에만 붙인다.
+    const { whereSql, args } = buildWhere(pp, ['doc_no', 'settler', 'purpose'])
+    const [[{ cnt }]] = await req.db.execute(`SELECT COUNT(*) AS cnt FROM settlements ${whereSql}`, args)
+    const [rows] = await req.db.execute(
+      `SELECT * FROM settlements ${whereSql} ORDER BY created_at DESC, id DESC LIMIT ${pp.limit} OFFSET ${pp.offset}`, args)
+    const { clause, ids } = inClause(rows.map(r => r.id))
+    const map = {}
+    if (ids.length) {
+      const [sums] = await req.db.execute(
+        `SELECT settlement_id, COALESCE(SUM(amount),0) AS total FROM settlement_lines WHERE settlement_id IN ${clause} GROUP BY settlement_id`, ids)
+      for (const s of sums) map[s.settlement_id] = Number(s.total)
+    }
+    res.json({ rows: rows.map(r => adaptRow(r, map[r.id] || 0)), total: Number(cnt), hasMore: pp.offset + rows.length < Number(cnt) })
   } catch (e) { next(e) }
 })
 

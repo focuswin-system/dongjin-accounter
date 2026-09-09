@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, localToday } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
@@ -260,16 +260,40 @@ export const SettlementScreen = () => {
   const [selId, setSelId] = useState(null)
   const [sel, setSel] = useState(null)
   const [creating, setCreating] = useState(false)
+  const [q, setQ] = useState('')
+  const [total, setTotal] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const LIMIT = 50
 
-  const load = async (keepId) => {
-    const [rows, comp] = await Promise.all([api.getSettlements(), api.getCompany()])
-    setList(rows); setCompany(comp)
+  /* 문서가 쌓여도 견디게 — 목록은 서버에서 50건씩. 검색은 q, '더 보기'는 offset.
+     ⚠ keepId/query 를 인자로: 저장 직후 방금 문서를 유지하거나, 검색 직후 새 질의를 쓴다. */
+  const load = async ({ append = false, query = q, keepId } = {}) => {
+    if (append) setLoadingMore(true)
+    const offset = append ? list.length : 0
+    const [page, comp] = await Promise.all([
+      api.getSettlementsPage({ q: query, limit: LIMIT, offset }),
+      company ? Promise.resolve(company) : api.getCompany(),
+    ])
+    const rows = page.rows || []
+    const merged = append ? [...list, ...rows] : rows
+    setList(merged); setTotal(page.total); setHasMore(page.hasMore); setLoadingMore(false)
+    if (comp) setCompany(comp)
     setSelId(prev => {
       const want = keepId || prev
-      return want && rows.some(r => r.id === want) ? want : (rows[0]?.id || null)
+      return want && merged.some(r => r.id === want) ? want : (merged[0]?.id || null)
     })
+    return page
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 검색은 서버로 — 300ms 디바운스. 첫 렌더는 위 load 가 이미 했다.
+  const firstQ = useRef(true)
+  useEffect(() => {
+    if (firstQ.current) { firstQ.current = false; return }
+    const t = setTimeout(() => { load({ query: q }) }, 300)
+    return () => clearTimeout(t)
+  }, [q])   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (creating) return
     if (!selId) { setSel(null); return }
@@ -358,23 +382,35 @@ export const SettlementScreen = () => {
         }}/>
 
       <DocWorkspace>
-        <DocSide>
+        <DocSide top={
+          <div className="search" style={{ margin: 0, padding: '6px 10px' }}>
+            <Icon.Search size={14}/>
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="문서번호·정산자·목적 검색"/>
+          </div>}>
           {list.length === 0
-            ? <DocSideEmpty>정산내역서가 없어요.<br/>'새 정산내역서'로 만드세요.</DocSideEmpty>
-            : list.map(d => (
-              <DocListRow key={d.id} active={!creating && selId === d.id} onClick={() => { setCreating(false); setSelId(d.id) }}
-                docNo={d.doc_no} right={<span className="text-xs text-muted2">{d.settle_date || ''}</span>}
-                title={d.settler || '—'} meta="잔액" amount={d.balance || 0}/>
-            ))}
+            ? <DocSideEmpty>{q ? '검색 결과가 없어요.' : <>정산내역서가 없어요.<br/>'새 정산내역서'로 만드세요.</>}</DocSideEmpty>
+            : <>
+              {list.map(d => (
+                <DocListRow key={d.id} active={!creating && selId === d.id} onClick={() => { setCreating(false); setSelId(d.id) }}
+                  docNo={d.doc_no} right={<span className="text-xs text-muted2">{d.settle_date || ''}</span>}
+                  title={d.settler || '—'} meta="잔액" amount={d.balance || 0}/>
+              ))}
+              {hasMore && (
+                <button className="btn ghost" style={{ width: '100%', marginTop: 6 }}
+                  disabled={loadingMore} onClick={() => load({ append: true })}>
+                  {loadingMore ? '불러오는 중…' : `더 보기 · ${list.length}/${total}건`}
+                </button>
+              )}
+            </>}
         </DocSide>
         <DocMain>
           {creating
             ? <SettlementPreview doc={blankDoc} company={company} isNew
-                onSaved={(id) => { setCreating(false); load(id) }}
+                onSaved={(id) => { setCreating(false); load({ keepId: id }) }}
                 onCancelNew={() => setCreating(false)}/>
             : sel
               ? <SettlementPreview key={sel.id} doc={sel} company={company}
-                  onSaved={(id) => load(id)}
+                  onSaved={(id) => load({ keepId: id })}
                   onDeleted={() => { setSelId(null); load() }}/>
               : <DocEmpty icon={<Icon.Doc size={32} style={{ opacity: 0.3 }}/>}>왼쪽에서 정산내역서를 고르거나 새로 만드세요.</DocEmpty>}
         </DocMain>

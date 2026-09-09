@@ -7,6 +7,7 @@ const { addDays } = require('../lib/recurrence')
 const { recurFromSupply } = require('../lib/vat')
 
 const { createInvoice } = require('../lib/invoiceCreate')
+const { pageParams, buildWhere, inClause } = require('../lib/pagedList')
 
 const router = Router()
 const parseJson = (v, fb) => { try { return v ? JSON.parse(v) : fb } catch { return fb } }
@@ -29,11 +30,27 @@ const adapt = (r, items) => {
 
 router.get('/', async (req, res, next) => {
   try {
-    const [rows] = await req.db.execute('SELECT * FROM purchase_reqs ORDER BY created_at DESC')
-    const [sums] = await req.db.execute('SELECT req_id, COALESCE(SUM(amount),0) AS total FROM purchase_req_items GROUP BY req_id')
+    const pp = pageParams(req)
+    const adaptRow = (r, total) => ({ ...r, order_amount: Number(r.order_amount) || 0, total, approval: parseJson(r.approval, []) })
+    if (!pp.paged) {
+      const [rows] = await req.db.execute('SELECT * FROM purchase_reqs ORDER BY created_at DESC, id DESC')
+      const [sums] = await req.db.execute('SELECT req_id, COALESCE(SUM(amount),0) AS total FROM purchase_req_items GROUP BY req_id')
+      const map = {}
+      for (const s of sums) map[s.req_id] = Number(s.total)
+      return res.json(rows.map(r => adaptRow(r, map[r.id] || 0)))
+    }
+    const { whereSql, args } = buildWhere(pp, ['doc_no', 'vendor_name', 'summary'])
+    const [[{ cnt }]] = await req.db.execute(`SELECT COUNT(*) AS cnt FROM purchase_reqs ${whereSql}`, args)
+    const [rows] = await req.db.execute(
+      `SELECT * FROM purchase_reqs ${whereSql} ORDER BY created_at DESC, id DESC LIMIT ${pp.limit} OFFSET ${pp.offset}`, args)
+    const { clause, ids } = inClause(rows.map(r => r.id))
     const map = {}
-    for (const s of sums) map[s.req_id] = Number(s.total)
-    res.json(rows.map(r => ({ ...r, order_amount: Number(r.order_amount) || 0, total: map[r.id] || 0, approval: parseJson(r.approval, []) })))
+    if (ids.length) {
+      const [sums] = await req.db.execute(
+        `SELECT req_id, COALESCE(SUM(amount),0) AS total FROM purchase_req_items WHERE req_id IN ${clause} GROUP BY req_id`, ids)
+      for (const s of sums) map[s.req_id] = Number(s.total)
+    }
+    res.json({ rows: rows.map(r => adaptRow(r, map[r.id] || 0)), total: Number(cnt), hasMore: pp.offset + rows.length < Number(cnt) })
   } catch (e) { next(e) }
 })
 

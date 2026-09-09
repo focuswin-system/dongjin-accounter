@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, MoneyInput, Drawer, DateInput, StatusBadge } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
@@ -433,16 +433,41 @@ export const PurchaseReqScreen = () => {
   const [sel, setSel] = useState(null)
   const [creating, setCreating] = useState(false)
 
-  const load = async (keepId) => {
-    const [rows, comp, vs] = await Promise.all([api.getPurchaseReqs(), api.getCompany(), api.getVendors()])
-    setList(rows); setCompany(comp); setVendors(vs)
+  const [q, setQ] = useState('')
+  const [total, setTotal] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const LIMIT = 50
+
+  // 본 목록은 서버에서 50건씩(검색·기간·더보기). picker 후보(rows/setRows)와는 별개다.
+  const load = async ({ append = false, query = q, keepId } = {}) => {
+    if (append) setLoadingMore(true)
+    const offset = append ? list.length : 0
+    const [page, comp, vs] = await Promise.all([
+      api.getPurchaseReqsPage({ q: query, limit: LIMIT, offset }), api.getCompany(), api.getVendors(),
+    ])
+    const fetched = page.rows || []
+    const merged = append ? [...list, ...fetched] : fetched
+    setList(merged); setCompany(comp); setVendors(vs)
+    setTotal(page.total); setHasMore(page.hasMore); setLoadingMore(false)
     const want = keepId || selId
-    const nextId = want && rows.some(r => r.id === want) ? want : (rows[0]?.id || null)
+    const nextId = want && merged.some(r => r.id === want) ? want : (merged[0]?.id || null)
     setSelId(nextId)
-    // 선택 id가 그대로여도 상세를 다시 읽는다 — 미지급금 등록 후 payable 상태 최신화
-    if (nextId) api.getPurchaseReq(nextId).then(setSel); else setSel(null)
+    // 선택 id가 그대로여도 상세를 다시 읽는다 — 미지급금 등록 후 payable 상태 최신화.
+    // 단 '더 보기'(append)는 선택이 안 바뀌니 재조회를 건너뛴다(낭비 방지).
+    if (!nextId) setSel(null)
+    else if (!append) api.getPurchaseReq(nextId).then(setSel)
+    return page
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 검색은 서버로 — 300ms 디바운스. 첫 렌더는 위 load 가 이미 했다.
+  const firstQ = useRef(true)
+  useEffect(() => {
+    if (firstQ.current) { firstQ.current = false; return }
+    const t = setTimeout(() => { load({ query: q }) }, 300)
+    return () => clearTimeout(t)
+  }, [q])   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (creating) return
     if (!selId) { setSel(null); return }
@@ -686,22 +711,34 @@ export const PurchaseReqScreen = () => {
           setPick(null); setCreating(true)
         }}/>
       <DocWorkspace>
-        <DocSide>
+        <DocSide top={
+          <div className="search" style={{ margin: 0, padding: '6px 10px' }}>
+            <Icon.Search size={14}/>
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="문서번호·거래처·품의내용 검색"/>
+          </div>}>
           {list.length === 0
-            ? <DocSideEmpty>구매품의서가 없어요.<br/>'새 구매품의서'로 만드세요.</DocSideEmpty>
-            : list.map(d => (
-              <DocListRow key={d.id} active={!creating && selId === d.id} onClick={() => { setCreating(false); setSelId(d.id) }}
-                docNo={d.doc_no} right={<span className="text-xs text-muted2">{d.req_date || ''}</span>}
-                title={d.vendor_name || d.summary || '—'} meta={d.order_source || ''} amount={d.total || 0}/>
-            ))}
+            ? <DocSideEmpty>{q ? '검색 결과가 없어요.' : <>구매품의서가 없어요.<br/>'새 구매품의서'로 만드세요.</>}</DocSideEmpty>
+            : <>
+              {list.map(d => (
+                <DocListRow key={d.id} active={!creating && selId === d.id} onClick={() => { setCreating(false); setSelId(d.id) }}
+                  docNo={d.doc_no} right={<span className="text-xs text-muted2">{d.req_date || ''}</span>}
+                  title={d.vendor_name || d.summary || '—'} meta={d.order_source || ''} amount={d.total || 0}/>
+              ))}
+              {hasMore && (
+                <button className="btn ghost" style={{ width: '100%', marginTop: 6 }}
+                  disabled={loadingMore} onClick={() => load({ append: true })}>
+                  {loadingMore ? '불러오는 중…' : `더 보기 · ${list.length}/${total}건`}
+                </button>
+              )}
+            </>}
         </DocSide>
         <DocMain>
           {creating
             ? <PurchaseReqPreview doc={blankDoc} company={company} vendors={vendors} onVendorAdd={addVendor} isNew
-                onSaved={(id) => { setCreating(false); load(id) }} onCancelNew={() => setCreating(false)}/>
+                onSaved={(id) => { setCreating(false); load({ keepId: id }) }} onCancelNew={() => setCreating(false)}/>
             : sel
               ? <PurchaseReqPreview key={sel.id} doc={sel} company={company} vendors={vendors} onVendorAdd={addVendor}
-                  onSaved={(id) => load(id)} onDeleted={() => { setSelId(null); load() }}/>
+                  onSaved={(id) => load({ keepId: id })} onDeleted={() => { setSelId(null); load() }}/>
               : <DocEmpty icon={<Icon.Receipt size={32} style={{ opacity: 0.3 }}/>}>왼쪽에서 구매품의서를 고르거나 새로 만드세요.</DocEmpty>}
         </DocMain>
       </DocWorkspace>

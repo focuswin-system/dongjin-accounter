@@ -98,7 +98,7 @@ router.get('/', async (req, res, next) => {
            FROM expense_resolutions er
            LEFT JOIN vendors v ON er.vendor_id = v.id
            LEFT JOIN purchase_reqs pr ON pr.invoice_id = er.invoice_id
-          ORDER BY er.created_at DESC`)
+          ORDER BY er.created_at DESC, er.id DESC`)
       return res.json(rows.map(adapt))
     }
 
@@ -112,7 +112,7 @@ router.get('/', async (req, res, next) => {
          LEFT JOIN vendors v ON er.vendor_id = v.id
          LEFT JOIN purchase_reqs pr ON pr.invoice_id = er.invoice_id
          ${whereSql}
-        ORDER BY er.created_at DESC
+        ORDER BY er.created_at DESC, er.id DESC
         LIMIT ${limit} OFFSET ${offset}`, args)
     // 배지용 — 검색과 무관한 '처리 대기' 전체 건수(작업 큐 크기).
     const [[{ pend }]] = await req.db.execute(

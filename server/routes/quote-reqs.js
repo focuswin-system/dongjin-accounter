@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
+const { pageParams, buildWhere, inClause } = require('../lib/pagedList')
 
 const router = Router()
 
@@ -14,11 +15,26 @@ const adapt = (r, items) => {
 
 router.get('/', async (req, res, next) => {
   try {
-    const [rows] = await req.db.execute('SELECT * FROM quote_reqs ORDER BY created_at DESC')
-    const [sums] = await req.db.execute('SELECT req_id, COALESCE(SUM(amount),0) AS total FROM quote_req_items GROUP BY req_id')
+    const pp = pageParams(req)
+    if (!pp.paged) {
+      const [rows] = await req.db.execute('SELECT * FROM quote_reqs ORDER BY created_at DESC, id DESC')
+      const [sums] = await req.db.execute('SELECT req_id, COALESCE(SUM(amount),0) AS total FROM quote_req_items GROUP BY req_id')
+      const map = {}
+      for (const s of sums) map[s.req_id] = Number(s.total)
+      return res.json(rows.map(r => ({ ...r, total: map[r.id] || 0 })))
+    }
+    const { whereSql, args } = buildWhere(pp, ['doc_no', 'vendor_name', 'order_source'])
+    const [[{ cnt }]] = await req.db.execute(`SELECT COUNT(*) AS cnt FROM quote_reqs ${whereSql}`, args)
+    const [rows] = await req.db.execute(
+      `SELECT * FROM quote_reqs ${whereSql} ORDER BY created_at DESC, id DESC LIMIT ${pp.limit} OFFSET ${pp.offset}`, args)
+    const { clause, ids } = inClause(rows.map(r => r.id))
     const map = {}
-    for (const s of sums) map[s.req_id] = Number(s.total)
-    res.json(rows.map(r => ({ ...r, total: map[r.id] || 0 })))
+    if (ids.length) {
+      const [sums] = await req.db.execute(
+        `SELECT req_id, COALESCE(SUM(amount),0) AS total FROM quote_req_items WHERE req_id IN ${clause} GROUP BY req_id`, ids)
+      for (const s of sums) map[s.req_id] = Number(s.total)
+    }
+    res.json({ rows: rows.map(r => ({ ...r, total: map[r.id] || 0 })), total: Number(cnt), hasMore: pp.offset + rows.length < Number(cnt) })
   } catch (e) { next(e) }
 })
 
