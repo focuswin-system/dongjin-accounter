@@ -74,19 +74,25 @@ export const CashReportScreen = ({ page = true }) => {
       {page && (
         <PageHeader title="자금일보"
           sub={`${data.date} 기준 · 앞으로 ${days}일`}
-          actions={
-            <div className="row gap-8 no-print" style={{ alignItems: 'center' }}>
-              <PrintEditButton on={pe.on} toggle={pe.toggle} count={pe.count}/>
-              <DateInput className="input" style={{ width: 150 }} value={date}
-                max={localToday()} onChange={e => setDate(e.target.value)}/>
-              <div className="row gap-4">
-                {RANGES.map(r => (
-                  <button key={r.days} type="button" className={`chip ${days === r.days ? 'active' : ''}`}
-                    onClick={() => setDays(r.days)}>{r.label}</button>
-                ))}
-              </div>
-            </div>
-          }/>
+          /* 머리글에는 **동작만** 둔다. 기준일·기간은 무엇을 볼지 고르는 것이라 본문이다
+             (PageHeader 규약). 다섯 개를 머리글에 몰아 두었더니 휴대폰에서 78px 밀리기도 했다. */
+          actions={<PrintEditButton on={pe.on} toggle={pe.toggle} count={pe.count}/>}/>
+      )}
+
+      {/* 무엇을 볼지 고르는 줄 — 기준일과 내다볼 기간.
+          ⚠ 머리글과 같은 조건(page)으로 묶는다. 다른 화면 안에 끼워 넣은 때(embedded)는
+            원래 이 컨트롤이 없었다 — 조건을 안 맞추면 거기에만 새 줄이 생긴다. */}
+      {page && (
+        <div className="row gap-8 no-print" style={{ alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
+          <DateInput className="input" style={{ width: 150 }} value={date}
+            max={localToday()} onChange={e => setDate(e.target.value)}/>
+          <div className="row gap-4">
+            {RANGES.map(r => (
+              <button key={r.days} type="button" className={`chip ${days === r.days ? 'active' : ''}`}
+                onClick={() => setDays(r.days)}>{r.label}</button>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* 결론부터 — 며칠에 얼마까지 떨어지나 */}
@@ -361,16 +367,17 @@ export const DailyTrialScreen = () => {
     <div className="fade-up report-print" ref={dtRef} onKeyDown={dtPe.onKeyDown} style={{ maxWidth: 860, marginLeft: 'auto', marginRight: 'auto' }}>
       <PageHeader title="일계표"
         sub="하루치 거래를 계정과목별로 차변·대변에 나눠 봅니다"
-        actions={
-          <div className="row gap-4 no-print" style={{ alignItems: 'center' }}>
-            <PrintEditButton on={dtPe.on} toggle={dtPe.toggle} count={dtPe.count}/>
-            <button className="btn sm" onClick={() => shift(-1)}>◀</button>
-            <DateInput className="input" style={{ width: 150 }} value={date}
-              onChange={e => setDate(e.target.value)}/>
-            <button className="btn sm" onClick={() => shift(1)}>▶</button>
-            <button className="btn sm" onClick={() => setDate(localToday())}>오늘</button>
-          </div>
-        }/>
+        /* 머리글은 동작만 — 어느 날을 볼지 고르는 것은 본문이다(PageHeader 규약) */
+        actions={<PrintEditButton on={dtPe.on} toggle={dtPe.toggle} count={dtPe.count}/>}/>
+
+      {/* 어느 날을 볼지 — 하루씩 넘기거나 날짜를 직접 고른다 */}
+      <div className="row gap-4 no-print" style={{ alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
+        <button className="btn sm" onClick={() => shift(-1)}>◀</button>
+        <DateInput className="input" style={{ width: 150 }} value={date}
+          onChange={e => setDate(e.target.value)}/>
+        <button className="btn sm" onClick={() => shift(1)}>▶</button>
+        <button className="btn sm" onClick={() => setDate(localToday())}>오늘</button>
+      </div>
 
       {loading && !data && <div className="text-sm text-muted" style={{ padding: 40, textAlign: 'center' }}>불러오는 중…</div>}
       {data && (

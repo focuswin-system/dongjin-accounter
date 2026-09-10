@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, StatusBadge, Drawer, Combobox, MoneyInput, Loading, DateInput, fmtDateShort } from '../lib/ui'
-import { PageHeader } from '../lib/components/PageHeader'
+import { PageHeader, HeaderActions } from '../lib/components/PageHeader'
 import { TableToolbar } from '../lib/components/TableToolbar'
 import { FOLDABLE_DOMAINS } from '../lib/nav'
 import { RecurAuditDrawer } from '../lib/components/RecurAuditDrawer'
@@ -649,8 +649,10 @@ export const RefMasterPanel = ({ cfg, page = false, embedded = false }) => {
           <Icon.Search size={14}/>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder={`${cfg.label} 검색`}/>
         </div>
-        {canImport && <button className="btn excel" onClick={() => setImporting(true)}><Icon.Excel/> 엑셀 업로드</button>}
-        <button className="btn primary" onClick={openNew}><Icon.Plus size={14}/> {cfg.label} 등록</button>
+        <HeaderActions when={embedded}>
+          {canImport && <button className="btn excel" onClick={() => setImporting(true)}><Icon.Excel/> 엑셀 업로드</button>}
+          <button className="btn primary" onClick={openNew}><Icon.Plus size={14}/> {cfg.label} 등록</button>
+        </HeaderActions>
       </div>
 
       <div className="card" style={{ overflow: 'hidden' }}>
@@ -1158,8 +1160,10 @@ const VendorPanel = ({ embedded = false }) => {
           <Icon.Search size={14}/>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="상호·담당자·연락처·계좌"/>
         </div>
-        <button className="btn excel" onClick={() => setImporting(true)}><Icon.Excel/> 엑셀 업로드</button>
-        <button className="btn primary" onClick={openNew}><Icon.Plus size={14}/> 거래처 등록</button>
+        <HeaderActions when={embedded}>
+          <button className="btn excel" onClick={() => setImporting(true)}><Icon.Excel/> 엑셀 업로드</button>
+          <button className="btn primary" onClick={openNew}><Icon.Plus size={14}/> 거래처 등록</button>
+        </HeaderActions>
       </div>
 
       <div className="card" style={{ overflow: 'hidden' }}>
@@ -1523,7 +1527,7 @@ const CategoryPanel = ({ embedded = false }) => {
           <Icon.Search size={14}/>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="비목 검색"/>
         </div>
-        <button className="btn primary" onClick={openNew}><Icon.Plus size={14}/> 비목 추가</button>
+        <HeaderActions when={embedded}><button className="btn primary" onClick={openNew}><Icon.Plus size={14}/> 비목 등록</button></HeaderActions>
       </div>
 
       <div className="card" style={{ overflow: "hidden" }}>
@@ -2211,7 +2215,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
           <Icon.Search size={14}/>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder={isCardPanel ? '별칭·카드사·번호' : '별칭·은행·번호'}/>
         </div>
-        <button className="btn primary" onClick={openNew}><Icon.Plus size={14}/> {isCardPanel ? '카드' : '계좌'} 등록</button>
+        <HeaderActions when={embedded}><button className="btn primary" onClick={openNew}><Icon.Plus size={14}/> {isCardPanel ? '카드' : '계좌'} 등록</button></HeaderActions>
       </div>
 
       <div className="card" style={{ overflow: 'hidden' }}>
@@ -3497,7 +3501,7 @@ const ApprovalPanel = ({ embedded = false }) => {
     <div style={{ padding: 20 }}>
       <div className="row" style={{ marginBottom: 6 }}>
         {!embedded && <div className="section-title">결재선</div>}
-        <button className="btn primary ml-auto" onClick={startNew}><Icon.Plus size={14}/> 새 결재선</button>
+        <HeaderActions when={embedded}><button className="btn primary ml-auto" onClick={startNew}><Icon.Plus size={14}/> 새 결재선</button></HeaderActions>
       </div>
       <div className="text-sm text-muted" style={{ marginBottom: 16 }}>
         지급결의서에 쓰는 결재 단계를 저장해두는 곳이에요. 결의서 만들 때 <b>기본</b> 결재선이 자동으로 붙고, 골라 바꿀 수 있어요. 직위는 인사 기준정보의 직위에서 고르거나 직접 입력하세요.
