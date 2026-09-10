@@ -5008,7 +5008,7 @@ const EmployTypePanel = ({ embedded = false }) => {
       <div style={{ padding: 20 }}>
         {open && (
           <div className="card" style={{ padding: 16, marginBottom: 22, border: editingId ? "1px solid var(--brand)" : "1px solid var(--line)" }}>
-            <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div className="form-cols-2">
               <FieldRow label="고용형태 이름" required>
                 <input className="input" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))}
                   placeholder="예: 정규직, 일용(행사), 프리랜서"/>

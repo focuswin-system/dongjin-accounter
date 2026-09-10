@@ -81,7 +81,7 @@ export const PayrollPayDrawer = ({ row, accounts, onClose, onSaved, label = '급
               <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", color: "var(--muted-2)", fontSize: 12 }}>원</span>
             </div>
           </div>
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <div className="form-cols-2">
             <div>
               <label className="label">지급일</label>
               <DateInput className="input num" value={date} max={localToday()} onChange={e => setDate(e.target.value)}/>

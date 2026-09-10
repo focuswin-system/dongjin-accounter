@@ -142,7 +142,7 @@ export const MgmtDashScreen = () => {
         </div>
       )}
 
-      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div className="cols-2">
         <div className="card card-pad">
           <div className="section-title" style={{ marginBottom: 4 }}>정상 진행 중인 큰 계약</div>
           <div className="text-xs text-muted2" style={{ marginBottom: 6 }}>주문금액 순이에요.</div>

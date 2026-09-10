@@ -333,7 +333,7 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
             <div className="text-xs text-muted2 fw-600" style={{ marginBottom: 12 }}>인적 정보</div>
             <div className="col gap-form" style={{ marginBottom: 24 }}>
               <Field label="이름" required><input className="input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="예: 홍길동"/></Field>
-              <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <div className="form-cols-2">
                 <Field label="부서">
                   <Combobox value={form.department} onChange={v => setForm(f => ({ ...f, department: v }))}
                     options={depts.map(d => ({ value: d.name, label: d.name }))} placeholder="부서 선택"
@@ -360,7 +360,7 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
             <Combobox value={form.employ_type_id} onChange={pickType}
               options={employTypes.map(t => ({ value: t.id, label: t.label, sub: FORM_LABEL[t.pay_form] }))} placeholder="고용형태 선택"/>
           </Field>
-          <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div className="form-cols-2">
             <Field label="계약 시작"><DateInput className="input num" value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))}/></Field>
             <Field label="종료 방식">
               <div className="row gap-4">
@@ -371,7 +371,7 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
           {form.term_mode !== 'open' && (
             <Field label="계약 종료"><DateInput className="input num" value={form.end_date} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))}/></Field>
           )}
-          <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div className="form-cols-2">
             <Field label="소정근로시간" hint="예: 주 40시간"><input className="input" value={form.work_hours} onChange={e => setForm(f => ({ ...f, work_hours: e.target.value }))} placeholder="주 40시간 / 09:00~18:00"/></Field>
             <Field label="급여 지급일"><input className="input num" type="number" min="1" max="31" value={form.pay_day} onChange={e => setForm(f => ({ ...f, pay_day: parseInt(e.target.value) || 25 }))}/></Field>
           </div>
@@ -725,7 +725,7 @@ const OutsourcingDrawer = ({ info, onClose, onSaved }) => {
               options={employTypes.map(t => ({ value: t.id, label: t.label, sub: `${INCOME_LABEL[t.income_type]} · ${t.default_unit || ''}` }))} placeholder="고용형태 선택"/>
           </Field>
           <Field label="업무내용"><input className="input" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="예: 외주 개발, 행사 진행"/></Field>
-          <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div className="form-cols-2">
             <Field label="소득구분">
               <div className="row gap-4" style={{ flexWrap: 'wrap' }}>
                 {['사업', '일용', '기타'].map(k => (
@@ -740,7 +740,7 @@ const OutsourcingDrawer = ({ info, onClose, onSaved }) => {
               ))}</div>
             </Field>
           </div>
-          <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div className="form-cols-2">
             <Field label="계약 시작"><DateInput className="input num" value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))}/></Field>
             {form.term_mode !== 'open' && <Field label="계약 종료"><DateInput className="input num" value={form.end_date} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))}/></Field>}
           </div>

@@ -595,7 +595,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
           {/* 탭: 청구 정보 */}
           {innerTab === "info" && (
             <div className="card" style={{ padding: 16, background: "var(--surface-2)" }}>
-              <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "10px 16px", fontSize: 13 }}>
+              <div className="form-cols-2" style={{ gap: "10px 16px", fontSize: 13 }}>
                 <span className="text-muted">거래처</span><span className="fw-700">{invoice.vendor}</span>
                 <span className="text-muted">주문</span><span>{invoice.contract || "—"}</span>
                 <span className="text-muted">공급가액</span><span className="num fw-600">{fmtNum(invoice.supplyAmount)}</span>

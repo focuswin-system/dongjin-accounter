@@ -713,6 +713,18 @@ a { color: inherit; text-decoration: none; }
 .page-header-main { min-width: 0; }
 .page-header-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
+/* 휴대폰 — 머리글 액션이 서너 개를 넘으면 가로로 밀린다(자금일보는 다섯 개라 78px 밀렸다).
+   제목 옆에 억지로 붙이지 말고 아래 줄로 내려 접는다. 버튼 자리는 화면마다 같아야 하므로
+   '제목 아래, 왼쪽부터'로 못 박는다 — 화면마다 다른 곳에 흩어지는 것보다 낫다. */
+@media (max-width: 640px) {
+  .page-header { flex-wrap: wrap; gap: 10px; padding: 20px 0 14px; }
+  .page-header-main { flex: 1 1 100%; }
+  .page-header-actions { margin-left: 0; width: 100%; flex-wrap: wrap; flex-shrink: 1; min-width: 0; }
+  /* 액션을 .row 로 한 번 더 감싼 화면들(자금일보의 기간 프리셋 다섯 개)이 있다.
+     바깥만 접어도 안쪽 .row 는 nowrap 이라 그대로 밀린다 — 안쪽도 함께 접는다. */
+  .page-header-actions .row { flex-wrap: wrap; min-width: 0; }
+}
+
 /* 데스크톱: 셸 고정 + 내부 스크롤. topbar·헤더는 가만히, .content 안쪽만 스크롤. */
 @media (min-width: 769px) {
   .app  { height: 100dvh; overflow: hidden; }
@@ -1133,10 +1145,16 @@ button.cell-tag:hover { color: var(--ink); background: var(--surface-2); }
 @media (max-width: 1024px) { .search.tbar-search { width: 200px; } }
 @media (max-width: 768px)  { .search.tbar-search { width: 160px; } }
 /* 아주 좁은 화면에서만 묶음을 안에서 접고 검색칸을 한 줄로 편다.
-   display 를 되살리는 것은 위 ≤480 규칙을 되돌리기 위한 것이다. */
+   display 를 되살리는 것은 위 ≤480 규칙을 되돌리기 위한 것이다.
+
+   ⚠ **줄어들 수 있어야 한다.** flex-shrink:0 인 채로 접기만 허용하면, 검색칸이
+     input 의 기본 폭만큼 자리를 계속 요구해 묶음이 화면보다 넓어진다 —
+     390px 에서 본문이 84px 가로로 밀렸다(수시 입금·수시 출금·거래내역).
+     한 줄을 통째로 내주고(flex 1 1 100%), 안에서 접고, min-width:0 으로 줄어들게 한다. */
 @media (max-width: 520px) {
-  .tbar-right { flex-wrap: wrap; }
-  .search.tbar-search { width: 100%; display: flex; }
+  .tbar-right { flex-wrap: wrap; flex: 1 1 100%; min-width: 0; margin-left: 0; }
+  .search.tbar-search { width: 100%; display: flex; flex-shrink: 1; min-width: 0; }
+  .search.tbar-search input { min-width: 0; }
 }
 
 /* 툴바 바에 직접 선 필터(inline) — 자주 쓰는 축은 ⚙ 뒤에 숨기지 않는다.
@@ -1292,6 +1310,13 @@ button.cell-tag:hover { color: var(--ink); background: var(--surface-2); }
 .cols-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
 @media (max-width: 1100px) { .cols-2 { grid-template-columns: 1fr; } }
 
+/* 폼·상세 안의 2단(드로어 안처럼 이미 좁은 자리).
+   여기는 ≤1100 에서 접으면 노트북에서도 한 줄이 되어 되레 길어진다 — 휴대폰에서만 접는다.
+   ⚠ 화면마다 인라인 grid 를 적으면 이 규칙이 안 걸린다(경영 대시보드가 그래서 390px 에서
+     188px 밀렸다). 2단이 필요하면 이 클래스를 쓴다. */
+.form-cols-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 560px) { .form-cols-2 { grid-template-columns: 1fr; } }
+
 /* ── KPI 지표 줄 (lib/components/Kpi.jsx의 KpiRow) ──
    카드 안 금액은 줄바꿈 없이 한 줄이라, 열이 좁아지면 뒷자리가 잘려 나간다.
    예전엔 화면마다 grid를 손으로 적었고 접힘은 ≤480px에서 한 번뿐이라, 노트북(1280) 폭에서도
@@ -1435,6 +1460,12 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 .doc-ws-row-meta { display: flex; align-items: baseline; gap: 8px; }
 .doc-ws-row-amt { margin-left: auto; }
 .doc-ws-toolbar { padding: 12px 16px; margin-bottom: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+/* 휴대폰 — 툴바 자체는 접히는데 그 안의 버튼 묶음(.ml-auto.row)이 nowrap 이라 그대로 밀렸다
+   (구매품의서 390px 에서 77px). 안쪽도 접고, 오른쪽으로 밀어붙이던 것을 푼다. */
+@media (max-width: 640px) {
+  .doc-ws-toolbar .row { flex-wrap: wrap; min-width: 0; }
+  .doc-ws-toolbar .ml-auto { margin-left: 0; }
+}
 .doc-ws-empty { padding: 48px 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 300px; color: var(--muted-2); }
 /* 문서 영역은 흰 배경 데스크. 실제 인쇄될 문서(paper)는 그 위에서 박스 쉐도우로 도드라지게 구분한다. */
 .doc-ws-viewport { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 32px 28px; }
@@ -2040,6 +2071,12 @@ body:has([data-modal-open]) {
   display: inline-flex; align-items: center; gap: 2px;
   padding: 3px; border-radius: 999px;
   background: var(--surface-2); border: 1px solid var(--line);
+}
+/* 휴대폰 — 탭이 서넛을 넘으면(청구서는 다섯) 본문을 가로로 민다.
+   탭은 줄바꿈하면 알약 모양이 깨지므로 **자기 안에서 옆으로 밀어** 보게 한다. */
+@media (max-width: 640px) {
+  .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .seg::-webkit-scrollbar { display: none; }
 }
 .seg-btn {
   display: inline-flex; align-items: center; gap: 6px;

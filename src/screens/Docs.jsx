@@ -2630,7 +2630,7 @@ const ReportVAT = ({ toast, registerExport }) => {
 
       {/* alignItems:start — 안 주면 줄 수가 적은 쪽(대개 매입)이 반대쪽 높이에 맞춰 늘어나
           아래가 텅 빈 흰 상자가 된다. 표는 제 내용만큼만 높으면 된다. */}
-      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: 'start' }}>
+      <div className="cols-2">
         {/* 매출 */}
         <div className="card" style={{ overflow: "hidden" }}>
           <div className="row" style={{ padding: "14px 18px", borderBottom: "1px solid var(--line)" }}>
