@@ -127,7 +127,7 @@ export const VoucherBookScreen = () => {
             <Icon.Print size={14}/> 선택 인쇄{chosen.length ? ` (${chosen.length})` : ''}
           </button>
           <button className="btn primary" onClick={download} disabled={busy || rows.length === 0}>
-            <Icon.Excel size={14}/> 엑셀 내려받기
+            <Icon.Excel size={14}/> 엑셀 내보내기
           </button>
         </div>}/>
 

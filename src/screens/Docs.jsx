@@ -3641,7 +3641,7 @@ export const ReportsScreen = ({ go, openKey = null, onTitle }) => {
             {/* 보고서마다 방향을 따로 기억한다 — 매입매출장은 가로, 계약별 수익은 세로 식이다 */}
             <PrintButton storeKey={`report:${active}`}
               defaultOrientation={REPORT_LANDSCAPE.has(active) ? 'landscape' : 'portrait'}/>
-            <button className="btn excel" onClick={doExport}><Icon.Excel size={14}/> 엑셀</button>
+            <button className="btn" onClick={doExport}><Icon.Download size={14}/> CSV 내보내기</button>
           </>}/>
         {/* report-print — index.css 의 인쇄 whitelist. 이 클래스가 없으면 인쇄가 백지로 나온다. */}
         <div className="report-print report-body" ref={printRef} onKeyDown={pe.onKeyDown}>

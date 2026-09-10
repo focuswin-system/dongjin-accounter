@@ -97,7 +97,7 @@ export const PurchaseStatusScreen = ({ go }) => {
         sub="청구서에 적은 품목을 기간으로 모읍니다. 주간으로 보면 그 주 소계와 이 달 누계, 월간으로 보면 월 합계와 올해 누계가 함께 나와요."
         actions={<>
           <PrintEditButton on={pe.on} toggle={pe.toggle} count={pe.count}/>
-          <button className="btn" onClick={exportCsv}><Icon.Download/> <span className="btn-label-hide">내보내기</span></button>
+          <button className="btn" onClick={exportCsv}><Icon.Download/> <span className="btn-label-hide">CSV 내보내기</span></button>
           {/* 열이 많다(날짜·거래처·품목·규격·수량·단가·공급가·세액·합계) — 가로로 시작한다 */}
           <PrintButton storeKey="purchase-status" defaultOrientation="landscape" className="btn primary"/>
         </>}

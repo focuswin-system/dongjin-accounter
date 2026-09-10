@@ -264,7 +264,7 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
              둘 다 primary 가 아니다 — 이 화면에서 제일 하고 싶은 일이 아니다. */
           actions={<>
             <button className="btn excel" onClick={openExcel}><Icon.Excel/> <span className="btn-label-hide">엑셀 업로드</span></button>
-            <button className="btn" onClick={exportCsv}><Icon.Download/> <span className="btn-label-hide">내보내기</span></button>
+            <button className="btn" onClick={exportCsv}><Icon.Download/> <span className="btn-label-hide">CSV 내보내기</span></button>
           </>}
         />
 
