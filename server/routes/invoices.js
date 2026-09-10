@@ -9,6 +9,8 @@ const { restoreLastGenerated } = require('../lib/recurrence')
 const { ledgerError, amountError } = require('../lib/ledger')
 const { vatOfQuarter } = require('../lib/vatAgg')
 const { settleAcctCode } = require('../lib/acctCode')
+// 정산이 거래를 새로 만들기 전에 "이 돈이 이미 장부에 있나"를 묻는 규칙(정기 회차와 같은 층)
+const { lookalikeSettleTxns, dupSettleMessage } = require('../lib/settleTxn')
 const { removeUploadedFile } = require('../lib/uploads')
 const { normalizeTaxType, VAT_RATE } = require('../lib/vat')
 const { recalcInvoiceStatus, paidAmountOf } = require('../lib/invoiceStatus')
@@ -1266,29 +1268,17 @@ router.post('/:id/matches', async (req, res, next) => {
       if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
 
       /* ── 같은 돈을 두 번 만들지 않는다 ────────────────────────────────
-       * 통장에 이미 있는 입금인데 '새 거래로 등록'을 누르면 장부에 같은 돈이 두 줄 생긴다.
-       * '거래내역에서 연결' 후보는 **아직 안 쓴 금액이 있는 거래만** 보여주므로,
-       * 그 입금이 이미 다른 청구서에 전액 물려 있으면 후보에서 빠지고 사용자에게는
-       * '새 거래로 등록'밖에 남지 않는다 — 중복 청구서가 하나 생기면 이중계상이 따라온다.
-       * (운영 fowin 2026-09-09: 성도건설산업 220만 입금 2건이 그렇게 복제됐다.)
-       *
-       * 그래서 **같은 거래처·같은 날·같은 금액**의 거래가 이미 있으면 만들지 않고 되묻는다.
-       * 같은 날 같은 금액이 진짜로 두 번 오가는 일도 있으므로 막지는 않고,
-       * 화면이 사용자 확인을 받아 allow_new 로 다시 부르면 그대로 만든다. */
+       * 판정은 lib/settleTxn.js 한 곳에 있다(정기 회차 기정산이 쓰던 규칙과 같은 층).
+       * 날짜는 창으로 보고, 이 청구서에 이미 붙은 거래는 빼고, '붙일 수 있는 것'과
+       * '이미 다른 청구서에 물린 것'을 갈라 서로 다른 말을 해 준다.
+       * 진짜로 두 번 오간 돈이면 화면이 확인을 받아 allow_new 로 다시 부른다. */
       const settleDate = date || kstToday()
-      if (!allow_new && inv.vendor_id) {
-        const [dups] = await conn.execute(
-          `SELECT id, amount, date FROM transactions
-            WHERE kind = ? AND vendor_id = ? AND date = ? AND amount = ? LIMIT 1`,
-          [isIssued ? 'income' : 'expense', inv.vendor_id, settleDate, matchAmount])
-        if (dups.length) {
-          await rollbackQuietly(conn)
-          return res.status(409).json({
-            code: 'dup_txn',
-            error: `${settleDate} 에 같은 거래처의 ${matchAmount.toLocaleString('ko-KR')}원 `
-                 + `${isIssued ? '입금' : '지급'} 거래가 이미 있어요. 그 거래에 붙이면 장부가 한 줄로 맞습니다.`,
-          })
-        }
+      if (!allow_new) {
+        const kindT = isIssued ? 'income' : 'expense'
+        const found = await lookalikeSettleTxns(conn, {
+          kind: kindT, vendorId: inv.vendor_id, amount: matchAmount, date: settleDate, invoiceId })
+        const msg = dupSettleMessage(found, kindT)
+        if (msg) { await rollbackQuietly(conn); return res.status(409).json({ code: 'dup_txn', error: msg }) }
       }
       realTxnId = randomUUID()
       const cat   = (category && category.trim()) || (isIssued ? '수금' : '대금 지급')
@@ -1359,33 +1349,46 @@ router.post('/bulk/settle', async (req, res, next) => {
 
     // 1) 먼저 전부 검사한다(아무것도 만들기 전에)
     const blocked = []
+    /* 막힌 이유를 두 갈래로 센다.
+       중복 의심만으로 막혔다면 사람이 보고 '그래도 진행'할 수 있지만(allow_new),
+       계좌 미지정·이미 정산 완료 같은 건 확인해도 통과시키면 안 된다. */
+    let dupBlocked = 0, hardBlocked = 0
     const plan = []
     for (const inv of invs) {
       const [[{ paid }]] = await conn.execute(
         'SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [inv.id])
       const remain = Number(inv.total_amount) - Number(paid)
-      if (remain <= 0) { blocked.push(`${inv.invoice_no}: 이미 정산 완료`); continue }
+      if (remain <= 0) { blocked.push(`${inv.invoice_no}: 이미 정산 완료`); hardBlocked++; continue }
       const isIssued = inv.kind === 'issued'
       const acct = req.body.account_id || inv.account_id || null
       const lerr = ledgerError({ kind: isIssued ? 'income' : 'expense', account_id: acct,
         status: isIssued ? '입금완료' : '지급완료' })
       // 계좌가 없으면 그 돈은 어느 계좌 잔액에도 안 잡힌다 — 조용히 새는 것보다 막는 게 낫다
-      if (lerr) { blocked.push(`${inv.invoice_no}: ${lerr}`); continue }
-      /* 단건 정산과 같은 가드 — 통장 한 줄을 장부 두 줄로 만들지 않는다.
-         여기는 되묻을 자리가 없으므로(한 번에 여러 건) 막고 이유를 말한다.
-         진짜로 같은 날 같은 금액이 두 번 오간 건이면 그 청구서만 빼고 열어서 처리하면 된다
-         (단건 정산은 사용자 확인을 받고 그대로 만든다). */
-      if (inv.vendor_id) {
-        const [dups] = await conn.execute(
-          `SELECT id FROM transactions
-            WHERE kind = ? AND vendor_id = ? AND date = ? AND amount = ? LIMIT 1`,
-          [isIssued ? 'income' : 'expense', inv.vendor_id, date, remain])
-        if (dups.length) {
-          blocked.push(`${inv.invoice_no}: ${date} 에 같은 거래처의 같은 금액 ${isIssued ? '입금' : '지급'} 거래가 이미 있어요`)
+      if (lerr) { blocked.push(`${inv.invoice_no}: ${lerr}`); hardBlocked++; continue }
+      /* 단건 정산과 같은 가드 — 통장 한 줄을 장부 두 줄로 만들지 않는다(같은 lib 규칙).
+         ⚠ 여기서 막으면 **선택한 전부가 멈춘다**(이 라우트는 전부 아니면 전부다).
+            그래서 화면이 확인을 받아 allow_new 로 다시 부를 수 있게 열어 둔다 —
+            안 그러면 어느 건이 걸렸는지 짐작해 빼는 수밖에 없다. */
+      if (!req.body.allow_new) {
+        const kindT = isIssued ? 'income' : 'expense'
+        const found = await lookalikeSettleTxns(conn, {
+          kind: kindT, vendorId: inv.vendor_id, amount: remain, date, invoiceId: inv.id })
+        const msg = dupSettleMessage(found, kindT)
+        if (msg) { blocked.push(`${inv.invoice_no}: ${msg}`); dupBlocked++; continue }
+        /* ⚠ **이 묶음 안에서 생기는 중복은 위 조회로 못 본다** — 아직 아무것도 INSERT 하기
+           전이라 DB엔 없다. 같은 거래처·같은 금액·같은 날짜가 선택 안에 둘 있으면
+           똑같은 거래 두 줄이 한 커밋에 들어간다(막으려던 바로 그 일이다). */
+        const key = `${inv.vendor_id || ''}|${kindT}|${remain}|${date}`
+        const twin = plan.find(p => p.key === key)
+        if (twin) {
+          blocked.push(`${inv.invoice_no}: 선택 안에 ${twin.inv.invoice_no} 와 거래처·금액·날짜가 같은 건이 있어요`)
+          dupBlocked++
           continue
         }
+        plan.push({ inv, remain, isIssued, acct, key })
+        continue
       }
-      plan.push({ inv, remain, isIssued, acct })
+      plan.push({ inv, remain, isIssued, acct, key: null })
     }
     if (blocked.length) {
       await rollbackQuietly(conn)
@@ -1403,6 +1406,8 @@ router.post('/bulk/settle', async (req, res, next) => {
       return res.status(409).json({
         error: `처리할 수 없는 청구서가 있어 아무것도 처리하지 않았어요.\n· ${lines.join('\n· ')}`,
         blocked,
+        // 중복 의심'만'으로 막혔을 때만 되물을 수 있다 — 다른 이유가 섞였으면 그대로 막는다
+        code: dupBlocked > 0 && hardBlocked === 0 ? 'dup_txn' : undefined,
       })
     }
 

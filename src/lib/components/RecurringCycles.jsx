@@ -3,6 +3,7 @@ import { Icon, fmtNum, useToast, useConfirm, localToday, Drawer, MoneyInput , fm
 import { DrawerHead, DrawerFooter } from './Drawer'
 import { api } from '../api'
 import { vatOf } from '../vatRate'
+import { matchInvoiceAsking } from '../settleAsk'
 
 /* ── 정기 회차 이행 현황 (정기청구·정기지출 공용) ──────────────────
  *
@@ -363,7 +364,9 @@ export const useRecurringCycles = (kind, { onChanged } = {}) => {
      *                   있는 청구서에 입금을 붙인다(matchInvoice — 수시입금 화면과 같은 경로).
      * 한 버튼(입금 처리)이 두 가지 일을 하는 셈이라, 갈림길을 여기 한 곳에 둔다. */
     if (t.state === 'unpaid' && t.invoice_id) {
-      return api.matchInvoice(t.invoice_id, {
+      /* 거래를 새로 만드는 경로 → 같은 날·같은 금액 거래가 이미 있으면 서버가 되묻는다.
+         matchInvoiceAsking 이 그 되물음을 확인창으로 받는다(청구서 상세·거래 입력과 같은 문구). */
+      return matchInvoiceAsking(confirm, t.invoice_id, {
         txnId: null,                      // 붙일 거래가 없으니 새로 만든다(서버가 만든다)
         /* ⚠ `_amount` 를 쓰면 안 된다. 그건 **회차** 금액이고(매출이면 공급가액이라
            부가세만큼 모자란다), 여기서 필요한 건 **그 청구서의 남은 금액**이다.

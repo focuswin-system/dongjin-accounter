@@ -1637,9 +1637,10 @@ export const api = {
   /* 청구서 일괄 처리 — 하나라도 막히면 서버가 전부 멈추고 무엇이 왜 걸렸는지 돌려준다.
      일부만 처리하고 "5건 중 3건 됐어요"라고 하면 나머지를 사용자가 되짚어야 하는데,
      돈이 오가는 일에서 그 되짚기는 현실적으로 안 일어난다. */
-  async bulkSettleInvoices(ids, { date, account_id } = {}) {
-    try { return { ok: true, ...(await req('/invoices/bulk/settle', { method: 'POST', body: { ids, date, account_id } })) } }
-    catch (e) { return { ok: false, error: e.message } }
+  async bulkSettleInvoices(ids, { date, account_id, allowNew } = {}) {
+    try { return { ok: true, ...(await req('/invoices/bulk/settle', { method: 'POST', body: { ids, date, account_id, allow_new: allowNew || undefined } })) } }
+    // code 를 넘긴다 — 'dup_txn' 은 되물을 수 있는 막힘이다(계좌 미지정 같은 건 아니다)
+    catch (e) { return { ok: false, error: e.message, code: e.code || '' } }
   },
   async bulkDeleteInvoices(ids) {
     try { return { ok: true, ...(await req('/invoices/bulk/delete', { method: 'POST', body: { ids } })) } }

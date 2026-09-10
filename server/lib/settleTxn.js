@@ -39,6 +39,67 @@ async function openTxnCandidates(db, { kind, vendorId, amount, date, windowDays 
 }
 
 /**
+ * **이 돈이 이미 장부에 있는가.** 정산이 거래를 새로 만들기 직전에 묻는 말이다.
+ *
+ * 위 openTxnCandidates 는 '붙일 수 있는 것'만 본다(아직 안 붙은 거래). 그런데 이중계상은
+ * 붙일 수 없을 때 오히려 더 크게 난다 — 그 입금이 **이미 다른 청구서에 물려 있으면**
+ * 후보 목록에서 사라지고, 화면에는 '새 거래로 등록'만 남는다. 그대로 누르면 통장 한 줄이
+ * 장부 두 줄이 된다(운영 fowin 2026-09-09, 성도건설산업 220만 x 2).
+ *
+ * 그래서 여기서는 붙일 수 있든 없든 **닮은 거래를 다 찾고, 두 갈래로 나눠 돌려준다.**
+ *   open  아직 안 붙었다 → 그 거래에 붙이면 된다(후보 목록에도 실제로 뜬다)
+ *   taken 이미 다른 청구서에 물렸다 → 붙일 수 없다. 이 청구서가 중복은 아닌지 봐야 한다
+ *
+ * ⚠ 날짜는 **창(窓)으로** 본다. 같은 날만 보면 못 잡는다 — 정산 폼의 기본 날짜는 오늘이고
+ *   통장에서 올라온 그 입금은 실제 입금일을 달고 있어서, 정확히 같은 날인 경우가 오히려 드물다.
+ * ⚠ 이 청구서에 이미 붙은 거래는 뺀다. 100만을 오전·오후로 나눠 넣는 분할 정산은 정상이고,
+ *   거기에 대고 "같은 거래가 있어요"를 띄우면 사람은 경고를 읽지 않고 넘기는 법을 배운다.
+ */
+async function lookalikeSettleTxns(db, { kind, vendorId, amount, date, invoiceId, windowDays = MATCH_WINDOW_DAYS }) {
+  if (!db) throw new Error('lookalikeSettleTxns: 테넌트 연결(db)이 필요합니다')
+  if (!vendorId || !date || !(Number(amount) > 0)) return { open: [], taken: [] }
+  const settled = kind === 'income' ? '입금완료' : '지급완료'
+  const [rows] = await db.execute(
+    `SELECT t.id, t.date, t.amount,
+            COALESCE(SUM(m.amount), 0) AS used,
+            MAX(CASE WHEN m.invoice_id <> ? THEN i.invoice_no END) AS other_no,
+            MAX(CASE WHEN m.invoice_id = ? THEN 1 ELSE 0 END) AS mine
+       FROM transactions t
+       LEFT JOIN invoice_matches m ON m.txn_id = t.id
+       LEFT JOIN invoices i ON i.id = m.invoice_id
+      WHERE t.kind = ? AND t.vendor_id = ? AND t.amount = ? AND t.status = ?
+        AND ABS(DATEDIFF(t.date, ?)) <= ?
+      GROUP BY t.id, t.date, t.amount
+     HAVING mine = 0
+      ORDER BY ABS(DATEDIFF(t.date, ?)), t.date
+      LIMIT 3`,
+    [invoiceId || '', invoiceId || '', kind, vendorId, Number(amount), settled, date, windowDays, date])
+  const open = [], taken = []
+  for (const r of rows) (Number(r.used) < Number(r.amount) ? open : taken).push(r)
+  return { open, taken }
+}
+
+/**
+ * 위 결과를 사람에게 할 말로 바꾼다 — 라우트마다 문구가 갈리지 않게 여기 둔다.
+ * 닮은 거래가 없으면 null(=그냥 만들면 된다).
+ */
+function dupSettleMessage({ open, taken }, kind) {
+  const 돈 = kind === 'income' ? '입금' : '지급'
+  const won = (n) => Number(n).toLocaleString('ko-KR')
+  if (open.length) {
+    const t = open[0]
+    return `${t.date} 에 같은 거래처의 ${won(t.amount)}원 ${돈} 거래가 이미 있어요.`
+         + ` '거래내역에서 연결'로 그 거래에 붙이면 장부가 한 줄로 맞습니다.`
+  }
+  if (taken.length) {
+    const t = taken[0]
+    return `${t.date} 의 ${won(t.amount)}원 ${돈}은 이미 청구서 ${t.other_no || '(다른 건)'} 에 물려 있어요.`
+         + ` 새로 만들면 같은 돈이 장부에 두 번 섭니다 — 이 청구서가 중복은 아닌지 먼저 확인해주세요.`
+  }
+  return null
+}
+
+/**
  * 청구서 한 장을 정산 처리한다 — 기존 거래에 붙이거나(우선), 없으면 새 거래를 만든다.
  *
  * @returns {{ txnId:string, reused:boolean } | { error:string, candidates?:Array }}
@@ -140,4 +201,6 @@ async function settleInvoiceTxn(conn, {
   return { txnId: newId, reused: false }
 }
 
-module.exports = { openTxnCandidates, settleInvoiceTxn, MATCH_WINDOW_DAYS }
+module.exports = {
+  openTxnCandidates, settleInvoiceTxn, lookalikeSettleTxns, dupSettleMessage, MATCH_WINDOW_DAYS,
+}

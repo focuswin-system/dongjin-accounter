@@ -61,6 +61,8 @@ export const PaidIssueDrawer = ({ target, isIssued, onClose, onDone, onIssuePaid
     // 매출은 공급가액, 매입은 총액을 그대로 보낸다(위 주석 참조)
     const res = await onIssuePaid({ ...target, _accountId: accountId || null, _date: date, _amount: variable ? typed : null })
     setBusy(false)
+    // 확인창에서 그만둔 것은 실패가 아니다(같은 거래가 이미 있어 되물었을 때) — 조용히 돌아간다
+    if (res.cancelled) return
     if (!res.ok) { toast.push(res.error || "처리에 실패했어요", { tone: "warn" }); return }
     /* 거래를 새로 만들었는지, 이미 장부에 있던 것에 붙였는지는 사용자에게 다른 일이다 —
        붙인 경우 계좌 잔액이 안 움직이는데 아무 말이 없으면 "반영이 안 됐나" 가 된다. */

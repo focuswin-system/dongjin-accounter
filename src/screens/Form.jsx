@@ -6,6 +6,7 @@ import { withMainFirst, isMainAccount, MAIN_BADGE } from '../lib/mainAccount'
 import { quickAddCategory, quickAddRefItemWithId } from '../lib/quickAdd'
 import { contractsForVendor, contractFitsVendor } from '../lib/contractPick'
 import { vatOf, supplyOf } from '../lib/vatRate'
+import { matchInvoiceAsking } from '../lib/settleAsk'
 
 // 과세유형 3종. 영세 = 세율 0%인 과세거래(수출·해외용역) — 세액은 0이지만 과세표준엔 들어간다.
 // 면세와 값을 나눠 두지 않으면 신고서에서 둘을 구분할 수 없다. 서버 lib/vat.js와 같은 값집합.
@@ -552,12 +553,17 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     const acc = accounts.filter(a => a.name === form.account)
     if (acc.length !== 1) { toast.push('계좌를 먼저 하나만 고른 뒤에 처리해 주세요'); return }
     setBusy(true)
-    const r = await api.matchInvoice(iv.id, {
+    /* 여기는 거래를 **새로 만드는** 경로다 — 같은 날·같은 금액 거래가 이미 있으면
+       서버가 되묻고(dup_txn), 그 되물음을 matchInvoiceAsking 이 확인창으로 받는다.
+       그냥 api.matchInvoice 를 부르면 사용자는 "실패했어요" 토스트만 보고 길이 없다. */
+    const r = await matchInvoiceAsking(confirm, iv.id, {
       txnId: null, amount, date: form.date, account_id: acc[0].id,
       // 고른 수금 유형을 넘긴다 — 안 넘기면 서버 기본값이 박혀, 필수로 받아 놓고 버리는 꼴이 된다
       category: form.category || undefined,
       memo: (form.memo || '').trim() || `${iv.invoice_no} ${kind === 'income' ? '입금' : '지급'}`,
     })
+    // 사용자가 확인창에서 그만둔 것은 실패가 아니다 — 토스트로 나무라지 않는다
+    if (r.cancelled) { setBusy(false); return }
     if (!r.ok) { setBusy(false); toast.push(r.error || '청구서 정산에 실패했어요'); return }
 
     /* 붙여 둔 증빙을 정산 거래로 옮긴다.

@@ -6,6 +6,7 @@ import { SummaryCard, SummaryRow } from '../lib/components/Kpi'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
 import { TableToolbar } from '../lib/components/TableToolbar'
+import { matchInvoiceAsking } from '../lib/settleAsk'
 import { useTableFilter, monthRange, activeMonthOf } from '../lib/tableFilter'
 import { isCountable } from '../lib/txnScope'
 import { ImportWizard } from '../lib/components/ImportWizard'
@@ -1932,7 +1933,22 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
        이름을 account_id 자리에 넣으면 서버가 없는 계좌로 보고 잔액에 반영되지 않는다.
        이름이 겹치는 계좌가 실제로 있어서(공용 카드 2장) 이름 대신 label 로 되찾는다. */
     const acctId = accountIdByLabel(accounts, bulkAccount)
-    const res = await api.bulkSettleInvoices(checkedIds, { date: bulkDate, account_id: acctId })
+    let res = await api.bulkSettleInvoices(checkedIds, { date: bulkDate, account_id: acctId })
+    /* 중복 의심'만'으로 막힌 경우엔 되묻는다. 이 라우트는 전부 아니면 전부라서,
+       되물을 길이 없으면 사용자는 어느 건이 걸렸는지 짐작해 빼는 수밖에 없다. */
+    if (!res.ok && res.code === 'dup_txn') {
+      const go = await confirm({
+        tone: 'warn', icon: <Icon.Warn size={22}/>,
+        title: '이미 장부에 있는 돈일 수 있어요',
+        body: <>
+          <div style={{ whiteSpace: 'pre-wrap', marginBottom: 6 }}>{res.error}</div>
+          <div>그래도 진행하면 선택한 건마다 거래를 새로 만듭니다 — 같은 돈이 두 줄 남을 수 있어요.</div>
+        </>,
+        confirmLabel: '그래도 진행',
+      })
+      if (!go) return
+      res = await api.bulkSettleInvoices(checkedIds, { date: bulkDate, account_id: acctId, allowNew: true })
+    }
     if (!res.ok) return toast.push(res.error || '처리에 실패했어요', { tone: 'warn' })
     toast.push(`${res.count}건 · ${fmtNum(res.total)}원을 처리했어요`)
     setCheckedIds([]); load()
@@ -2139,20 +2155,10 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   }
 
   const handleMatch = async (invoiceId, amount, date, txnId, extra) => {
-    let r = await api.matchInvoice(invoiceId, { txnId: txnId || null, amount, date, ...extra })
     /* 같은 날·같은 금액의 거래가 이미 있으면 서버가 만들지 않고 되묻는다(409 dup_txn).
-       통장 한 줄을 장부 두 줄로 만드는 걸 막는 가드다. 같은 날 같은 금액이 진짜로 두 번
-       오가기도 하므로, 사용자가 "그래도 새로"를 고르면 그대로 만든다. */
-    if (!r.ok && r.code === 'dup_txn') {
-      const ok = await confirm({
-        tone: "warn", icon: <Icon.Warn size={22}/>,
-        title: "같은 거래가 이미 있어요",
-        body: `${r.error} 그래도 새 거래로 등록하면 장부에 같은 돈이 두 줄 남습니다.`,
-        confirmLabel: "그래도 새로 등록",
-      })
-      if (!ok) return
-      r = await api.matchInvoice(invoiceId, { txnId: txnId || null, amount, date, ...extra, allowNew: true })
-    }
+       그 되물음은 정산을 부르는 세 화면이 똑같이 받아야 하므로 lib/settleAsk 에 두었다. */
+    const r = await matchInvoiceAsking(confirm, invoiceId, { txnId: txnId || null, amount, date, ...extra })
+    if (r.cancelled) return
     /* 결과를 보지 않고 성공 문구를 띄우면, 계좌 누락 같은 400을 사용자가 모른 채 넘어간다.
        ⚠ 한 일을 그대로 말한다 — 두 경로가 다르다. 새로 등록한 것인지(거래가 생김)
          이미 있던 거래를 이은 것인지(거래는 그대로)에 따라 다음에 할 일이 달라진다. */
