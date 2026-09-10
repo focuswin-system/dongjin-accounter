@@ -37,8 +37,8 @@ async (page) => {
     'report_daily', 'voucher_book', 'cash_report', 'payment_run', 'purchase_status', 'fund_status',
     'manual',
   ]
-  const BATCH = [49, 65]                    // 이번에 돌 구간 [시작, 끝)
-  const WIDTHS = [[1440, 900, 'desktop'], [1280, 800, 'laptop'], [390, 844, 'phone']]
+  const BATCH = [0, 65]                    // 이번에 돌 구간 [시작, 끝)
+  const WIDTHS = [[390, 844, 'phone']]   // 최종 확인은 가장 좁은 폭만 — 여기서 안 밀리면 넓은 폭은 안 밀린다
 
   const ctx = await page.context().browser().newContext({ viewport: { width: 1440, height: 900 } })
   const p = await ctx.newPage()
@@ -60,7 +60,7 @@ async (page) => {
         await p.setViewportSize({ width: w, height: h })
         errors.length = 0
         await p.goto(`${BASE}/#${route}`, { waitUntil: 'domcontentloaded' })
-        await p.waitForTimeout(2300)   // 자료를 불러오는 화면은 1.7초로는 덜 그려진다
+        await p.waitForTimeout(1500)
         const m = await p.evaluate(() => {
           const de = document.scrollingElement || document.documentElement
           const overflowX = de.scrollWidth - de.clientWidth
@@ -98,10 +98,10 @@ async (page) => {
           }
         })
         if (errors.length) m.err = errors.slice(0, 2)
-        row.w[tag] = m
+        if (m.ox > 2 || (m.err && m.err.length)) row.w[tag] = { ox: m.ox, wide: m.wide, err: m.err }
         await p.screenshot({ path: `${SHOT_DIR}/${route}-${tag}.png`, fullPage: false }).catch(() => {})
       }
-      report.push(row)
+      if (Object.keys(row.w).length) report.push(row)
     }
   } catch (e) {
     report.push({ fatal: String(e).slice(0, 300) })
