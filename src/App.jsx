@@ -494,6 +494,16 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
         // 주소로 오간 것은 '계산서 업로드로' 를 누른 것이 아니다 — 신호를 내린다
         setTaxImportSignal(0);
         setRoute(h);
+      } else if (h) {
+        /* 모르는 해시 — 예전엔 **아무 일도 하지 않았다.** 그러면 주소만 바뀌고 화면은
+           직전 것이 그대로 남는다: `#cash_dom` 을 열었는데 발주가, `#hr_dom` 에 전표 입력이
+           떠 있었다(즐겨찾기·뒤로가기·주소 직접 입력으로 실제로 들어오는 길이다).
+           주소와 화면은 반드시 같은 것을 가리켜야 한다.
+           도메인 묶음(계약관리·입출금…)이면 그 안의 첫 화면으로, 그것도 아니면 홈으로 보내고
+           주소도 함께 고쳐 쓴다(고쳐 쓰면 hashchange 가 한 번 더 돌아 정상 경로로 들어온다). */
+        const domain = NAV_TREE.find(n => n.id === h);
+        const first = domain?.sections?.[0]?.items?.[0]?.id;
+        window.location.hash = first || "home";
       }
     };
     apply();

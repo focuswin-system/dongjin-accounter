@@ -701,6 +701,10 @@ a { color: inherit; text-decoration: none; }
   margin: 0 auto;
   padding: 0 20px 48px;
 }
+/* 휴대폰 — 바로가기 독(우하단 고정 버튼)이 본문 마지막 줄을 덮는다.
+   독은 떠 있는 것이라 스크롤로 피할 수 없다 — 마지막 줄이 그 밑에 깔리면
+   그 줄의 버튼(수정·삭제)은 누를 방법이 없다. 독 높이(50)+여백만큼 자리를 비운다. */
+@media (max-width: 640px) { .page-shell { padding-bottom: 96px; } }
 
 /* 화면 상단 헤더 — (제목+부제) 왼쪽, 액션 버튼 오른쪽, 세로 가운데. lib/components/PageHeader.jsx
    데스크톱에선 스크롤 컨테이너(.content) 안에서 sticky 로 상단에 고정된다(본문만 스크롤). */
