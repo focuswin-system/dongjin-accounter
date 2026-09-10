@@ -203,13 +203,22 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
       confirmLabel: '삭제',
     });
     if (!ok) return;
-    let done = 0, fail = 0;
+    /* ⚠ 실패는 **어느 건인지** 말한다. 여기서 막히는 건 마감된 달·결의서나 어음이 붙든 거래처럼
+       진짜 이유가 있는 것들인데, "2건 실패"만 띄우면 무엇이 남았는지 알 길이 없다
+       (한 건씩 지우는 경로라 일부만 지워진 채 끝난다 — 되짚을 수 있어야 한다). */
+    let done = 0;
+    const failed = [];
     for (const t of rows) {
       const res = await api.deleteTransaction(t.id);
-      res.ok ? done++ : fail++;
+      if (res.ok) done++;
+      else failed.push(`${t.date} ${t.vendor || t.category || ''} ${fmtNum(t.amount)}원`.replace(/ +/g, ' ').trim());
     }
     setCheckedIds([]); reload();
-    toast.push(fail ? `${done}건 삭제, ${fail}건 실패` : `${done}건 삭제됐어요`, fail ? { tone: 'warn' } : undefined);
+    if (!failed.length) return toast.push(`${done}건 삭제됐어요`);
+    toast.push(
+      `${done}건 삭제, ${failed.length}건은 그대로예요 — ${failed.slice(0, 3).join(' / ')}`
+      + (failed.length > 3 ? ` 외 ${failed.length - 3}건` : ''),
+      { tone: 'warn' });
   };
 
   const inSum  = scoped.filter(t => t.kind === "income"  && t.status === "입금완료").reduce((a, t) => a + t.amount, 0);

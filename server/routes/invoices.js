@@ -1112,22 +1112,35 @@ router.put('/:id', async (req, res, next) => {
     /* 총액이 바뀌면 정산 매칭도 다시 편다 — 예전엔 매칭액이 **수정 당시 총액에 묶여(clamp)**
        있어서, 거래를 올린 뒤 청구서 총액을 올려도 매칭이 옛 값으로 남았다(입금이력이 249,998
        로 남는 실사고). 실제 거래액에 맞춰 다시 잡되, ⚠ **한 거래가 여러 청구서에 걸린
-       분할 입금은 건드리지 않는다**(어느 쪽을 늘릴지 알 수 없으므로). */
-    const [reclaimMs] = await conn.execute(
-      `SELECT m.id, m.amount, m.txn_id, t.amount AS txn_amt
-         FROM invoice_matches m LEFT JOIN transactions t ON t.id = m.txn_id
-        WHERE m.invoice_id = ?`, [req.params.id])
-    for (const m of reclaimMs) {
-      if (m.txn_id) {
-        const [[{ cnt }]] = await conn.execute('SELECT COUNT(*) AS cnt FROM invoice_matches WHERE txn_id = ?', [m.txn_id])
-        if (cnt > 1) continue   // 분할 입금 — 자동으로 늘리지 않는다
+       분할 입금은 건드리지 않는다**(어느 쪽을 늘릴지 알 수 없으므로).
+
+       ⚠ **총액이 실제로 바뀐 저장에서만 돈다.** 예전엔 모든 PUT 에서 돌았다 —
+         적요나 만기일만 고쳐 저장해도 매칭이 다시 잡혔다.
+       ⚠ **늘리는 폭은 총액이 늘어난 만큼까지다.** 예전엔 거래 전액(txn_amt)까지 늘렸다.
+         300만 입금에서 일부러 100만만 붙여 둔 청구서를 한 번 저장하면 매칭이 300만으로
+         부풀어, 남은 200만 채권이 아무 말 없이 사라지고 그 입금을 다른 청구서에
+         나눠 붙일 수도 없게 됐다. 총액이 준 경우에는 줄이기만 한다(늘리는 폭 0). */
+    if (newTotal !== Number(cur.total_amount)) {
+      const grown = Math.max(0, newTotal - Number(cur.total_amount))
+      const [reclaimMs] = await conn.execute(
+        `SELECT m.id, m.amount, m.txn_id, t.amount AS txn_amt
+           FROM invoice_matches m LEFT JOIN transactions t ON t.id = m.txn_id
+          WHERE m.invoice_id = ?`, [req.params.id])
+      for (const m of reclaimMs) {
+        if (m.txn_id) {
+          const [[{ cnt }]] = await conn.execute('SELECT COUNT(*) AS cnt FROM invoice_matches WHERE txn_id = ?', [m.txn_id])
+          if (cnt > 1) continue   // 분할 입금 — 자동으로 늘리지 않는다
+        }
+        const [[{ others }]] = await conn.execute(
+          'SELECT COALESCE(SUM(amount),0) AS others FROM invoice_matches WHERE invoice_id = ? AND id <> ?',
+          [req.params.id, m.id])
+        // 거래에 실제로 있는 돈을 넘지 않고(txn_amt), 총액이 늘어난 만큼만 늘린다
+        const cap = Math.min(
+          Number(m.txn_amt != null ? m.txn_amt : m.amount),
+          Number(m.amount) + grown)
+        const fixed = Math.max(0, Math.min(cap, newTotal - Number(others)))
+        if (fixed !== Number(m.amount)) await conn.execute('UPDATE invoice_matches SET amount = ? WHERE id = ?', [fixed, m.id])
       }
-      const [[{ others }]] = await conn.execute(
-        'SELECT COALESCE(SUM(amount),0) AS others FROM invoice_matches WHERE invoice_id = ? AND id <> ?',
-        [req.params.id, m.id])
-      const want = Number(m.txn_amt != null ? m.txn_amt : m.amount)
-      const fixed = Math.max(0, Math.min(want, newTotal - Number(others)))
-      if (fixed !== Number(m.amount)) await conn.execute('UPDATE invoice_matches SET amount = ? WHERE id = ?', [fixed, m.id])
     }
 
     /* 품목 내역 — lines 를 **보낸 요청만** 갱신한다.

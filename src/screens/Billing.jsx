@@ -910,7 +910,18 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     }
     if (k === "taxType") {
       const n = parseInt(String(next.supplyAmount).replace(/[^0-9]/g, "")) || 0
-      next.vatAmount = v === "과세" ? String(vatOf(n)) : "0"
+      const v0 = parseInt(String(next.vatAmount).replace(/[^0-9]/g, "")) || 0
+      /* ⚠ **총액 입력 모드에서는 사용자가 넣은 값이 '총액'이다** — 과세유형을 바꿔도 그 총액을 지킨다.
+         예전엔 세액만 0으로 지워서, 250,000(총액)을 넣고 면세로 바꾸면 227,273 으로 조용히
+         줄었다. 칸에는 '총액 입력'이라 적혀 있는데 적은 금액이 아닌 값이 저장되는 셈이다.
+         품목이 있으면 금액은 품목에서 나오므로(칸이 잠긴다) 옛 방식 그대로 둔다. */
+      if (!supplyMode && !hasLines) {
+        const t = n + v0
+        if (v === "과세") { const s = Math.round(t / 1.1); next.supplyAmount = String(s); next.vatAmount = String(t - s) }
+        else { next.supplyAmount = String(t); next.vatAmount = "0" }
+      } else {
+        next.vatAmount = v === "과세" ? String(vatOf(n)) : "0"
+      }
     }
     /* 합계(총액)를 넣으면 공급가·부가세로 **역산**한다 — 250,000 을 넣으면 공급가 227,273·VAT 22,727.
        (공급가 칸은 반대로 '더하기': 250,000 넣으면 VAT 25,000·합계 275,000). 두 방향 다 쓰게 둔다.
@@ -1319,7 +1330,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
                 </span>
               </div>
             )}
-            <MoneyInput className="num fw-700" style={{ fontSize: 20 }}
+            <MoneyInput className="input num fw-700" style={{ fontSize: 20 }}
               value={hasLines ? String(total) : (supplyMode && taxable ? form.supplyAmount : String(total))}
               disabled={hasLines}
               onChange={raw => f(supplyMode && taxable ? "supplyAmount" : "totalAmount", raw)}/>

@@ -851,7 +851,17 @@ router.put('/:id', async (req, res, next) => {
       if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
 
       // 이 거래에 걸린 청구서 매칭을 새 금액에 맞춰 조정하고 청구서 상태를 재계산한다.
-      const [links] = await conn.execute('SELECT id, invoice_id, amount FROM invoice_matches WHERE txn_id = ?', [req.params.id])
+      /* ⚠ 순서를 못 박는다. 예전엔 ORDER BY 가 없어 **누가 돈을 잃을지 저장 순서가 정했다** —
+         600만을 200만짜리 셋에 붙였다가 300만으로 줄이면 어느 하나가 전액을 지키고
+         다른 하나가 반토막 나는데, 그게 매번 달랐다.
+         기준은 **먼저 발행된 청구서가 먼저 갖는다**(오래된 채권부터 회수한다 — 경리가 아는 순서다).
+         matched_at 으로 잡으면 안 된다: 초 단위라 한 번에 붙인 건들이 동률이 되고,
+         그러면 UUID 순, 즉 다시 임의가 된다(실제로 그렇게 갈렸다). */
+      const [links] = await conn.execute(
+        `SELECT m.id, m.invoice_id, m.amount
+           FROM invoice_matches m LEFT JOIN invoices i ON i.id = m.invoice_id
+          WHERE m.txn_id = ?
+          ORDER BY i.issued_at, i.invoice_no, m.id`, [req.params.id])
       /* ⚠ 한 거래가 여러 청구서에 나눠 붙은(분할) 경우, 각 매칭을 독립적으로 min(거래액, 청구서잔여)
          로 자르면 매칭 합이 새 거래액을 넘을 수 있다(600만을 200만×3 에 붙였다가 300만으로 줄이면
          200×3=600 유지 → 초과 계상). 그래서 **거래액을 예산처럼 나눠 준다**:
@@ -870,8 +880,21 @@ router.put('/:id', async (req, res, next) => {
           ? Math.max(0, Math.min(Number(link.amount), remainForThis, budget))
           : Math.max(0, Math.min(budget, remainForThis))
         budget -= newMatch
-        await conn.execute('UPDATE invoice_matches SET amount = ? WHERE id = ?', [newMatch, link.id])
+        /* 예산이 바닥나 0원이 된 연결은 **행을 지운다.** 0원짜리 매칭을 남기면 청구서는
+           미정산으로 돌아가면서 입금이력에 '0원' 줄이 남아, 사용자가 그 줄을 정산 취소로
+           지우기 전에는 사라지지 않는다(무슨 돈인지도 안 적힌 줄이다). */
+        if (newMatch <= 0) await conn.execute('DELETE FROM invoice_matches WHERE id = ?', [link.id])
+        else await conn.execute('UPDATE invoice_matches SET amount = ? WHERE id = ?', [newMatch, link.id])
         await recalcInvoiceStatus(conn, link.invoice_id)
+      }
+      /* 연결이 하나도 안 남았으면 거래의 invoice_id 도 비운다 — 남겨 두면 이 거래가
+         '청구서에 붙은 거래'로 분류돼 부가세 집계에서 청구서분과 이중으로 센다
+         (정산 취소 경로가 같은 이유로 하는 처리다). 남았으면 남은 쪽을 가리키게 한다. */
+      if (links.length) {
+        const [[rest]] = await conn.execute(
+          'SELECT COUNT(*) AS n, MIN(invoice_id) AS keep FROM invoice_matches WHERE txn_id = ?', [req.params.id])
+        await conn.execute('UPDATE transactions SET invoice_id = ? WHERE id = ?',
+          [Number(rest.n) > 0 ? rest.keep : null, req.params.id])
       }
 
       /* 복합 전표 항목은 **명시적으로 splits 를 보냈을 때만** 손댄다.
