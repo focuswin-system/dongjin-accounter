@@ -883,14 +883,16 @@ export const api = {
   },
 
   // account_code = 계정과목 코드, account_id = 입출금 계좌. 서로 다른 값이니 섞지 말 것.
-  async matchInvoice(invoiceId, { txnId, amount, date, category, memo, account_code, account_id }) {
+  async matchInvoice(invoiceId, { txnId, amount, date, category, memo, account_code, account_id, allowNew }) {
     try {
       /* 응답의 txn_id 를 흘려보내지 않는다 — 정산이 만든 거래에 증빙을 이어 붙이려면
          그 id 가 필요하다(안내에서 바로 정산할 때 쓴다). */
-      const r = await req(`/invoices/${invoiceId}/matches`, { method: 'POST', body: { txn_id: txnId, amount, date, category, memo, account_code, account_id } })
+      const r = await req(`/invoices/${invoiceId}/matches`, { method: 'POST', body: { txn_id: txnId, amount, date, category, memo, account_code, account_id, allow_new: allowNew || undefined } })
       // matchId 는 되돌리기(unmatchInvoice)에 쓴다 — 대사 화면이 방금 붙인 걸 물릴 때 필요하다
       return { ok: true, txnId: r?.txn_id || null, matchId: r?.id || null }
-    } catch (e) { return { ok: false, error: e.message } }   // 실패 사유를 화면까지 전달한다
+    /* code 도 함께 넘긴다 — 'dup_txn'(같은 날·같은 금액 거래가 이미 있음)은 실패가 아니라
+       **되묻는 것**이라, 화면이 문구를 파싱하지 않고 확인창을 띄울 수 있어야 한다. */
+    } catch (e) { return { ok: false, error: e.message, code: e.code || '' } }
   },
 
   /** 정산(입금·지급 매칭) 취소. 잘못 연결한 입금을 되돌리는 유일한 길이다.

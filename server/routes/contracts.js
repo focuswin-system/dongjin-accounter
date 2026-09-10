@@ -1355,9 +1355,15 @@ router.put('/:id', async (req, res, next) => {
          여기가 안 막혀 있었다 — 청구서 폼에서 만든 주문을 주문 화면에서 한 번 저장만 해도
          '일시' 회차가 되살아나, 이미 끊은 청구서를 또 끊으라고 떴다(skip_schedule 이
          편집 한 번에 무효가 됐다).
-         판정은 **회차에 안 걸린 청구서 합계**로 한다. 그게 주문 금액을 채우면 더 끊을 게
+         판정은 **이 주문으로 이미 끊은 청구서 합계**로 한다. 그게 주문 금액을 채우면 더 끊을 게
          없다는 뜻이다. 덜 찼으면 만든다 — 남은 청구를 없애면 못 받는 돈이 되기 때문이고,
          그렇게 만들어진 회차는 '이미 발행한 것 같아요' 구획이 받아 사람이 판단한다.
+       ⚠ **회차에 걸린 청구서도 센다.** 예전엔 회차에 안 걸린 것만 셌는데, 그러면
+         이미 청구·완납된 단건 주문이 두 검사 사이로 빠져나갔다:
+           · 미발행 회차 수(ms.n) → 기존 회차엔 청구서가 붙어 있어 0
+           · 회차에 안 걸린 청구서 합 → 그 청구서는 회차에 걸려 있어 0
+         둘 다 통과해 '일시' 회차가 되살아났고, 사용자가 그걸 보고 청구서를 한 번 더 끊었다.
+         (운영 fowin 2026-09-04: 성도건설산업 4,000,000 주문 → 청구서 2건·8,000,000 과청구)
        ⚠ 공급가끼리 견준다. 주문 금액도 회차 금액도 공급가라, 총액(VAT 포함)과 견주면
          과세 주문에서 10%만큼 늘 모자라 보여 회차가 계속 생긴다. */
     if (f.billing_mode !== 'recurring' && f.billing_mode !== 'progress' && Number(f.amount) > 0) {
@@ -1365,10 +1371,7 @@ router.put('/:id', async (req, res, next) => {
         `SELECT COUNT(*) AS n FROM milestones WHERE contract_id = ? AND (invoice_id IS NULL OR invoice_id = '')`,
         [req.params.id])
       const [[iv]] = await conn.execute(
-        `SELECT COALESCE(SUM(i.supply_amount),0) AS supply
-           FROM invoices i
-          WHERE i.contract_id = ?
-            AND NOT EXISTS (SELECT 1 FROM milestones m2 WHERE m2.invoice_id = i.id)`,
+        `SELECT COALESCE(SUM(i.supply_amount),0) AS supply FROM invoices i WHERE i.contract_id = ?`,
         [req.params.id])
       const covered = Number(iv.supply) >= Number(f.amount)
       if (Number(ms.n) === 0 && !covered) {

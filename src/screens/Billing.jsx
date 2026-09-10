@@ -2139,7 +2139,20 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   }
 
   const handleMatch = async (invoiceId, amount, date, txnId, extra) => {
-    const r = await api.matchInvoice(invoiceId, { txnId: txnId || null, amount, date, ...extra })
+    let r = await api.matchInvoice(invoiceId, { txnId: txnId || null, amount, date, ...extra })
+    /* 같은 날·같은 금액의 거래가 이미 있으면 서버가 만들지 않고 되묻는다(409 dup_txn).
+       통장 한 줄을 장부 두 줄로 만드는 걸 막는 가드다. 같은 날 같은 금액이 진짜로 두 번
+       오가기도 하므로, 사용자가 "그래도 새로"를 고르면 그대로 만든다. */
+    if (!r.ok && r.code === 'dup_txn') {
+      const ok = await confirm({
+        tone: "warn", icon: <Icon.Warn size={22}/>,
+        title: "같은 거래가 이미 있어요",
+        body: `${r.error} 그래도 새 거래로 등록하면 장부에 같은 돈이 두 줄 남습니다.`,
+        confirmLabel: "그래도 새로 등록",
+      })
+      if (!ok) return
+      r = await api.matchInvoice(invoiceId, { txnId: txnId || null, amount, date, ...extra, allowNew: true })
+    }
     /* 결과를 보지 않고 성공 문구를 띄우면, 계좌 누락 같은 400을 사용자가 모른 채 넘어간다.
        ⚠ 한 일을 그대로 말한다 — 두 경로가 다르다. 새로 등록한 것인지(거래가 생김)
          이미 있던 거래를 이은 것인지(거래는 그대로)에 따라 다음에 할 일이 달라진다. */

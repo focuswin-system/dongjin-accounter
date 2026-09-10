@@ -1176,7 +1176,7 @@ router.delete('/:id', async (req, res, next) => {
 
 router.post('/:id/matches', async (req, res, next) => {
   // account_code(계정과목 코드)와 account_id(입출금 계좌)는 다른 값이다 — 섞지 말 것.
-  const { txn_id, amount, date, category, memo, account_code, account_id } = req.body
+  const { txn_id, amount, date, category, memo, account_code, account_id, allow_new } = req.body
   const invoiceId = req.params.id
   const dateErr = futureDateError(date)
   if (dateErr) return res.status(400).json({ error: dateErr })
@@ -1264,6 +1264,32 @@ router.post('/:id/matches', async (req, res, next) => {
       const acct = account_id || inv.account_id || null
       const lerr = ledgerError({ kind: isIssued ? 'income' : 'expense', account_id: acct, status: isIssued ? '입금완료' : '지급완료' })
       if (lerr) { await rollbackQuietly(conn); return res.status(400).json({ error: lerr }) }
+
+      /* ── 같은 돈을 두 번 만들지 않는다 ────────────────────────────────
+       * 통장에 이미 있는 입금인데 '새 거래로 등록'을 누르면 장부에 같은 돈이 두 줄 생긴다.
+       * '거래내역에서 연결' 후보는 **아직 안 쓴 금액이 있는 거래만** 보여주므로,
+       * 그 입금이 이미 다른 청구서에 전액 물려 있으면 후보에서 빠지고 사용자에게는
+       * '새 거래로 등록'밖에 남지 않는다 — 중복 청구서가 하나 생기면 이중계상이 따라온다.
+       * (운영 fowin 2026-09-09: 성도건설산업 220만 입금 2건이 그렇게 복제됐다.)
+       *
+       * 그래서 **같은 거래처·같은 날·같은 금액**의 거래가 이미 있으면 만들지 않고 되묻는다.
+       * 같은 날 같은 금액이 진짜로 두 번 오가는 일도 있으므로 막지는 않고,
+       * 화면이 사용자 확인을 받아 allow_new 로 다시 부르면 그대로 만든다. */
+      const settleDate = date || kstToday()
+      if (!allow_new && inv.vendor_id) {
+        const [dups] = await conn.execute(
+          `SELECT id, amount, date FROM transactions
+            WHERE kind = ? AND vendor_id = ? AND date = ? AND amount = ? LIMIT 1`,
+          [isIssued ? 'income' : 'expense', inv.vendor_id, settleDate, matchAmount])
+        if (dups.length) {
+          await rollbackQuietly(conn)
+          return res.status(409).json({
+            code: 'dup_txn',
+            error: `${settleDate} 에 같은 거래처의 ${matchAmount.toLocaleString('ko-KR')}원 `
+                 + `${isIssued ? '입금' : '지급'} 거래가 이미 있어요. 그 거래에 붙이면 장부가 한 줄로 맞습니다.`,
+          })
+        }
+      }
       realTxnId = randomUUID()
       const cat   = (category && category.trim()) || (isIssued ? '수금' : '대금 지급')
       const memoV = (memo && memo.trim()) || `청구서 ${inv.invoice_no || ''} 정산`.trim()
@@ -1272,7 +1298,7 @@ router.post('/:id/matches', async (req, res, next) => {
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `, [realTxnId, isIssued ? 'income' : 'expense', inv.vendor_id || null, inv.contract_id || null,
           acct, cat, matchAmount,
-          date || kstToday(), '계좌이체',   // UTC(new Date())면 KST 새벽에 하루 전으로 찍힌다
+          settleDate, '계좌이체',   // UTC(new Date())면 KST 새벽에 하루 전으로 찍힌다
           isIssued ? '입금완료' : '지급완료', inv.contract_id ? '' : '공통', invoiceId, memoV,
           /* 계정과목은 화면에서 '선택'이라 대부분 비워서 온다. 그대로 두면 일계표에서
              상대 계정이 없어 차변·대변이 안 맞는다(실제로 수금 1,687만원 거래가 불일치로 떴다).
@@ -1345,6 +1371,20 @@ router.post('/bulk/settle', async (req, res, next) => {
         status: isIssued ? '입금완료' : '지급완료' })
       // 계좌가 없으면 그 돈은 어느 계좌 잔액에도 안 잡힌다 — 조용히 새는 것보다 막는 게 낫다
       if (lerr) { blocked.push(`${inv.invoice_no}: ${lerr}`); continue }
+      /* 단건 정산과 같은 가드 — 통장 한 줄을 장부 두 줄로 만들지 않는다.
+         여기는 되묻을 자리가 없으므로(한 번에 여러 건) 막고 이유를 말한다.
+         진짜로 같은 날 같은 금액이 두 번 오간 건이면 그 청구서만 빼고 열어서 처리하면 된다
+         (단건 정산은 사용자 확인을 받고 그대로 만든다). */
+      if (inv.vendor_id) {
+        const [dups] = await conn.execute(
+          `SELECT id FROM transactions
+            WHERE kind = ? AND vendor_id = ? AND date = ? AND amount = ? LIMIT 1`,
+          [isIssued ? 'income' : 'expense', inv.vendor_id, date, remain])
+        if (dups.length) {
+          blocked.push(`${inv.invoice_no}: ${date} 에 같은 거래처의 같은 금액 ${isIssued ? '입금' : '지급'} 거래가 이미 있어요`)
+          continue
+        }
+      }
       plan.push({ inv, remain, isIssued, acct })
     }
     if (blocked.length) {
