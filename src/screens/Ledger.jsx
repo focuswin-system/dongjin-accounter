@@ -7,7 +7,7 @@ import { TableToolbar } from '../lib/components/TableToolbar'
 import { VoucherView } from '../lib/components/VoucherView'
 import { useTableFilter } from '../lib/tableFilter'
 import { api } from '../lib/api'
-import { downloadCsv } from '../lib/export'
+import { downloadXlsx } from '../lib/export'
 import { ResolutionDocument } from './Docs'
 
 // CSV 저장은 보고서 내보내기와 같은 것을 쓴다 → lib/export.js
@@ -132,12 +132,27 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
 
   /* 내보내기는 화면에 보이는 그대로 담는다. 다만 '예정'은 실제 입출금과 반드시 갈라져야 한다 —
      한 열로 구분해 두지 않으면 받은 파일에서 합계를 내는 순간 통장과 안 맞는다. */
-  const exportCsv = () => {
+  const exportXlsx = async () => {
     if (filtered.length === 0) return toast.push("내보낼 거래가 없어요");
-    downloadCsv(`거래내역_${localToday()}.csv`,
-      ["날짜", "실제/예정", "구분", "거래처", "주문", "원가 귀속", "적요", "비목", "금액", "상태"],
-      filtered.map(t => [t.date, t.planned ? "예정" : "실제", t.kind === "income" ? "입금" : "지출",
-        t.vendor, t.contract || "", t.cost_contract_name || "", t.scope, t.category, t.sign * t.amount, t.status]));
+    const r = await downloadXlsx(`거래내역_${localToday()}.xlsx`, {
+      title: "거래내역",
+      sub: `${range.from} ~ ${range.to}` + (filter === "income" ? " · 입금" : filter === "expense" ? " · 지출" : ""),
+      columns: [
+        { header: "날짜", width: 12 },
+        { header: "실제/예정", width: 10, align: "center" },
+        { header: "구분", width: 8, align: "center" },
+        { header: "거래처", width: 22 },
+        { header: "주문", width: 20 },
+        { header: "원가 귀속", width: 20 },
+        { header: "적요", width: 24 },
+        { header: "비목", width: 14 },
+        { header: "금액", width: 15, money: true },
+        { header: "상태", width: 12, align: "center" },
+      ],
+      rows: filtered.map(t => [t.date, t.planned ? "예정" : "실제", t.kind === "income" ? "입금" : "지출",
+        t.vendor, t.contract || "", t.cost_contract_name || "", t.scope, t.category, t.sign * t.amount, t.status]),
+    });
+    if (!r.ok) toast.push(r.error || "엑셀을 만들지 못했어요", { tone: "warn" });
   };
 
   // 화면에서 사라진 선택은 버린다 — 안 보이는 거래를 주문에 붙이면 안 된다
@@ -264,7 +279,7 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
              둘 다 primary 가 아니다 — 이 화면에서 제일 하고 싶은 일이 아니다. */
           actions={<>
             <button className="btn excel" onClick={openExcel}><Icon.Excel/> <span className="btn-label-hide">엑셀 업로드</span></button>
-            <button className="btn" onClick={exportCsv}><Icon.Download/> <span className="btn-label-hide">CSV 내보내기</span></button>
+            <button className="btn" onClick={exportXlsx}><Icon.Excel/> <span className="btn-label-hide">엑셀 내보내기</span></button>
           </>}
         />
 

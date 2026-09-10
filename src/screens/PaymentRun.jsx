@@ -2,7 +2,7 @@ import { useState, useEffect, useRef} from 'react'
 import { Icon, fmtNum, useToast, FilterSelect, Loading, localToday } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
-import { downloadCsv } from '../lib/export'
+import { downloadXlsx } from '../lib/export'
 import { PrintEditButton } from '../lib/components/PrintEditButton'
 import { usePrintEdit } from '../lib/printEdit'
 
@@ -39,19 +39,33 @@ export const PaymentRunScreen = ({ go }) => {
 
   const acc = accounts.find(a => a.name === fromAccount)
 
-  const exportCsv = () => {
+  const exportXlsx = async () => {
     if (!data?.vendors?.length) return toast.push('내보낼 내역이 없어요')
     /* 계좌번호는 **글자**로 내보낸다(textCols). 그냥 두면 Excel 이 숫자로 읽어
        하이픈 없는 계좌가 1.73065E+13 이 되고 앞자리 0 이 사라진다 — 틀린 계좌로 돈이 나간다.
        이체금액은 반대로 숫자여야 한다(엑셀에서 합계를 내야 하므로). */
-    downloadCsv(`매입처_결제내역_${month}.csv`,
-      ['순번', '업체명', '은행', '계좌번호', '예금주', '이체금액', '건수', '비고'],
-      data.vendors.map((v, i) => [
-        i + 1, v.vendor_name, v.bank_name, v.bank_account,
+    /* ⚠ 계좌번호는 **글자 그대로** 넘어가야 한다(문자열이라 엑셀이 숫자로 뭉개지 않는다).
+       숫자로 읽히면 하이픈 없는 계좌가 1.73065E+13 이 되고 앞자리 0 이 사라진다 —
+       틀린 계좌로 돈이 나간다. 이체금액은 반대로 숫자여야 합계가 난다. */
+    return downloadXlsx(`매입처_결제내역_${month}.xlsx`, {
+      title: '매입처 결제내역',
+      sub: `${month} · ${data.vendors.length}개 업체`,
+      columns: [
+        { header: '순번', width: 6, int: true },
+        { header: '업체명', width: 22 },
+        { header: '은행', width: 12 },
+        { header: '계좌번호', width: 20 },
+        { header: '예금주', width: 14 },
+        { header: '이체금액', width: 15, money: true },
+        { header: '건수', width: 7, int: true },
+        { header: '비고', width: 20 },
+      ],
+      rows: data.vendors.map((v, i) => [
+        i + 1, v.vendor_name, v.bank_name, String(v.bank_account || ''),
         v.account_holder || v.vendor_name, v.amount, v.count,
         v.overdue > 0 ? `연체 ${fmtNum(v.overdue)}원 포함` : '',
       ]),
-      { textCols: [3] })
+    })
   }
 
   /* 인쇄 전 손보기 — 글자 칸만, 저장 안 함(lib/printEdit.js). 보고서마다 다르게 만들지 않는다 */
@@ -64,7 +78,7 @@ export const PaymentRunScreen = ({ go }) => {
         sub="이번 달 매입처에 보낼 대금을 한 장으로 모읍니다. 은행 이체 명단으로 그대로 쓰세요."
         actions={<>
           <PrintEditButton on={pe.on} toggle={pe.toggle} count={pe.count}/>
-          <button className="btn" onClick={exportCsv}><Icon.Download/> <span className="btn-label-hide">CSV 내보내기</span></button>
+          <button className="btn" onClick={exportXlsx}><Icon.Excel/> <span className="btn-label-hide">엑셀 내보내기</span></button>
           <button className="btn primary" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
         </>}
       />

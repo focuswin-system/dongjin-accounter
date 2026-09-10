@@ -76,3 +76,56 @@ export function downloadVisibleTables(container, filename) {
   downloadCsv(filename, rows[0] || [], rows.slice(1))
   return true
 }
+
+/* ── 서식 있는 엑셀로 내보내기 ─────────────────────────────────────
+ *
+ * 줄은 화면이, **서식은 서버(lib/xlsxBook)가** 만든다.
+ *   · 화면이 파일까지 만들면 CSV 가 된다 — 서식도 합계도 자동필터도 없다.
+ *   · 서버가 줄까지 다시 만들면 집계가 두 벌이 되어 화면과 파일이 어긋난다
+ *     (이 저장소가 '보이는 것과 받는 것이 같다'를 원칙으로 삼은 이유).
+ * 그래서 화면이 거른 줄을 그대로 보내고 서식만 입혀 돌려받는다.
+ *
+ * columns: [{ header, width?, money?, int?, align? }] — money/int 면 숫자 서식·우측 정렬이 붙는다.
+ * rows:    셀 값 배열의 배열. 금액은 **숫자로** 넣는다(문자로 넣으면 엑셀에서 합계가 안 된다).
+ */
+export async function downloadXlsx(filename, { title, sub, columns, rows, totals } = {}) {
+  try {
+    const token = localStorage.getItem('token')
+    const res = await fetch('/api/export/xlsx', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ filename, title, sub, columns, rows, totals }),
+    })
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}))
+      return { ok: false, error: d.error || '엑셀을 만들지 못했어요' }
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`
+    // Firefox 는 anchor 가 DOM 에 있어야 내려받고, 같은 tick 에 revoke 하면 취소된다(api.js 와 같은 이유)
+    document.body.appendChild(a)
+    a.click()
+    setTimeout(() => { a.remove(); URL.revokeObjectURL(url) }, 0)
+    return { ok: true }
+  } catch (e) { return { ok: false, error: e.message } }
+}
+
+/** 화면에 그려진 표를 그대로 **서식 있는 엑셀**로. 표가 없으면 ok:false·empty 로 알린다. */
+export async function downloadVisibleTablesXlsx(container, filename, { title, sub } = {}) {
+  const rows = tablesToRows(container)
+  if (rows.length === 0) return { ok: false, empty: true }
+  /* 표가 여럿이면 머리글도 여럿이라 첫 줄을 머리글로 삼을 수 없다(구분선·소제목 줄도 섞인다).
+     가장 넓은 줄에 맞춰 빈 머리글을 만들고 전부 본문으로 넣는다 — 화면 그대로가 목적이다. */
+  const span = rows.reduce((m, r) => Math.max(m, r.length), 0)
+  const columns = Array.from({ length: span }, (_, i) => ({ header: '', width: i === 0 ? 24 : 16 }))
+  const body = rows.map(r => {
+    const padded = [...r]
+    while (padded.length < span) padded.push('')
+    // 숫자로 정리된 칸은 숫자로 넘긴다 — 문자로 두면 엑셀에서 합계가 안 된다
+    return padded.map(v => (v !== '' && /^-?\d+(\.\d+)?$/.test(String(v)) ? Number(v) : v))
+  })
+  return downloadXlsx(filename, { title, sub, columns, rows: body })
+}

@@ -143,6 +143,7 @@ app.use('/api/notes',              require('./routes/notes'))
 app.use('/api/audit',              require('./routes/audit'))
 // 보고서 카탈로그 — 회사가 볼 수 있는 양식 목록(숫자는 없다). 회사 구분은 토큰으로만 한다
 app.use('/api/reports',            require('./routes/reports'))
+app.use('/api/export',             require('./routes/export'))
 app.use('/api/doc-catalog',        require('./routes/doc-catalog'))
 app.use('/api/template-requests',  require('./routes/template-requests'))
 

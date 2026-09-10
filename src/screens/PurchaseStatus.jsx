@@ -2,7 +2,7 @@ import { useState, useEffect, Fragment, useRef} from 'react'
 import { Icon, fmtNum, useToast, Loading, localToday } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
-import { downloadCsv } from '../lib/export'
+import { downloadXlsx } from '../lib/export'
 import { PrintButton } from '../lib/components/PrintButton'
 import { PrintEditButton } from '../lib/components/PrintEditButton'
 import { usePrintEdit } from '../lib/printEdit'
@@ -63,7 +63,7 @@ export const PurchaseStatusScreen = ({ go }) => {
   const mtd = unit === 'week' && weeks.length ? sumUpTo(weekIdx) : null
   const curWeek = weeks[weekIdx] || null
 
-  const exportCsv = () => {
+  const exportXlsx = async () => {
     if (!shownWeeks.some(w => w.items.length)) return toast.push('내보낼 내역이 없어요')
     const rows = []
     let no = 0
@@ -82,8 +82,27 @@ export const PurchaseStatusScreen = ({ go }) => {
       rows.push(['', `${month} 총 합계`, '', '', '', '', '', '', data.amount, data.vat, data.total, ''])
       if (data.ytd) rows.push(['', `${data.ytd.from}~${data.ytd.to} 누계`, '', '', '', '', '', '', data.ytd.amount, data.ytd.vat, data.ytd.total, ''])
     }
-    downloadCsv(`${label}현황_${unit === 'week' ? `${curWeek?.from}_${curWeek?.to}` : month}.csv`,
-      ['순번', '일자', '거래처명', '명칭', '규격', '수량', '단위', '단가', '금액', '부가세', '계', '비고'], rows)
+    const r = await downloadXlsx(
+      `${label}현황_${unit === 'week' ? `${curWeek?.from}_${curWeek?.to}` : month}.xlsx`, {
+      title: `${label}현황`,
+      sub: unit === 'week' ? `${curWeek?.from} ~ ${curWeek?.to}` : `${month}`,
+      columns: [
+        { header: '순번', width: 6, int: true },
+        { header: '일자', width: 12 },
+        { header: '거래처명', width: 20 },
+        { header: '명칭', width: 22 },
+        { header: '규격', width: 14 },
+        { header: '수량', width: 8, int: true },
+        { header: '단위', width: 7, align: 'center' },
+        { header: '단가', width: 13, money: true },
+        { header: '금액', width: 14, money: true },
+        { header: '부가세', width: 12, money: true },
+        { header: '계', width: 14, money: true },
+        { header: '비고', width: 16 },
+      ],
+      rows,
+    })
+    if (!r.ok) toast.push(r.error || '엑셀을 만들지 못했어요', { tone: 'warn' })
   }
 
   let seq = 0
@@ -97,7 +116,7 @@ export const PurchaseStatusScreen = ({ go }) => {
         sub="청구서에 적은 품목을 기간으로 모읍니다. 주간으로 보면 그 주 소계와 이 달 누계, 월간으로 보면 월 합계와 올해 누계가 함께 나와요."
         actions={<>
           <PrintEditButton on={pe.on} toggle={pe.toggle} count={pe.count}/>
-          <button className="btn" onClick={exportCsv}><Icon.Download/> <span className="btn-label-hide">CSV 내보내기</span></button>
+          <button className="btn" onClick={exportXlsx}><Icon.Excel/> <span className="btn-label-hide">엑셀 내보내기</span></button>
           {/* 열이 많다(날짜·거래처·품목·규격·수량·단가·공급가·세액·합계) — 가로로 시작한다 */}
           <PrintButton storeKey="purchase-status" defaultOrientation="landscape" className="btn primary"/>
         </>}

@@ -14,7 +14,7 @@ import { DataTable } from '../lib/components/DataTable'
 import { PageHeader } from '../lib/components/PageHeader'
 import { TileBoard } from '../lib/components/TileBoard'
 import { usePerms } from '../lib/perms'
-import { downloadVisibleTables } from '../lib/export'
+import { downloadVisibleTablesXlsx } from '../lib/export'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 import { SourceChooser } from '../lib/components/SourceChooser'
@@ -3618,10 +3618,14 @@ export const ReportsScreen = ({ go, openKey = null, onTitle }) => {
      없으면 화면 표를 CSV 로 뽑는 기본 동작.
      예전엔 이 버튼(CSV)과 보고서 안의 전용 엑셀 버튼이 나란히 서 있었다 —
      둘 다 '엑셀'인데 나오는 파일이 달라 어느 걸 눌러야 하는지 매번 갈렸다. */
-  const doExport = () => {
+  const doExport = async () => {
     if (customExport.current) return customExport.current()
-    const ok = downloadVisibleTables(printRef.current, `${report.title}_${localToday()}.csv`)
-    if (!ok) toast.push("내보낼 표가 없어요", { tone: 'warn' })
+    /* 화면 표를 그대로 뽑되 **서식 있는 엑셀**로 준다(서식은 서버 lib/xlsxBook 한 곳).
+       예전엔 CSV 였다 — 버튼에는 '엑셀'이라 적혀 있었는데 서식도 합계도 없는 파일이 나왔다. */
+    const r = await downloadVisibleTablesXlsx(printRef.current, `${report.title}_${localToday()}.xlsx`,
+      { title: report.title, sub: localToday() })
+    if (r.empty) return toast.push("내보낼 표가 없어요", { tone: 'warn' })
+    if (!r.ok) toast.push(r.error || "엑셀을 만들지 못했어요", { tone: 'warn' })
   }
 
   if (active && report) {
@@ -3641,7 +3645,7 @@ export const ReportsScreen = ({ go, openKey = null, onTitle }) => {
             {/* 보고서마다 방향을 따로 기억한다 — 매입매출장은 가로, 계약별 수익은 세로 식이다 */}
             <PrintButton storeKey={`report:${active}`}
               defaultOrientation={REPORT_LANDSCAPE.has(active) ? 'landscape' : 'portrait'}/>
-            <button className="btn" onClick={doExport}><Icon.Download size={14}/> CSV 내보내기</button>
+            <button className="btn excel" onClick={doExport}><Icon.Excel size={14}/> 엑셀 내보내기</button>
           </>}/>
         {/* report-print — index.css 의 인쇄 whitelist. 이 클래스가 없으면 인쇄가 백지로 나온다. */}
         <div className="report-print report-body" ref={printRef} onKeyDown={pe.onKeyDown}>

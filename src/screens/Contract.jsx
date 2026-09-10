@@ -349,17 +349,6 @@ const FormBlock = ({ title, hint, children }) => (
   </div>
 );
 
-/* ============ CSV 내보내기 헬퍼 ============ */
-const downloadCsv = (filename, headers, rows) => {
-  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`
-  const csv = [headers, ...rows].map(r => r.map(esc).join(',')).join('\r\n')
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = filename; a.click()
-  URL.revokeObjectURL(url)
-}
-
 /* ============ 청구 일정 편집 Drawer ============ */
 const MS_TYPES = ["정기", "일시", "계약금(선급금)", "중도금", "기성", "잔금"]
 const MS_STATUSES = ["예정", "입금 예정", "일부 입금", "입금 완료", "지급 예정", "지급 완료", "기한 지남"]
