@@ -25,8 +25,10 @@ router.post('/xlsx', async (req, res, next) => {
     if (!Array.isArray(rows)) return res.status(400).json({ error: '내보낼 줄이 없어요' })
     /* 한 번에 너무 큰 표는 막는다 — 엑셀 한 장의 실용 한계이기도 하고,
        메모리에 통째로 올려 만들기 때문이다. 기간을 좁히라고 말해 준다. */
-    if (rows.length > 50000) {
-      return res.status(413).json({ error: `한 번에 5만 줄까지예요 (${rows.length.toLocaleString('ko-KR')}줄). 기간을 좁혀주세요.` })
+    /* 상한은 **본문 한도(8MB)와 맞춰** 둔다. 예전엔 5만 줄로 적었는데 그보다 먼저
+       body-parser 가 413 을 던져서 이 안내는 한 번도 뜨지 못했다(도달 불가능한 가드였다). */
+    if (rows.length > 30000) {
+      return res.status(413).json({ error: `한 번에 3만 줄까지예요 (${rows.length.toLocaleString('ko-KR')}줄). 기간을 좁혀주세요.` })
     }
 
     const cols = columns.slice(0, 60).map(c => ({

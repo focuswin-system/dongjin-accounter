@@ -503,7 +503,10 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
            주소도 함께 고쳐 쓴다(고쳐 쓰면 hashchange 가 한 번 더 돌아 정상 경로로 들어온다). */
         const domain = NAV_TREE.find(n => n.id === h);
         const first = domain?.sections?.[0]?.items?.[0]?.id;
-        window.location.hash = first || "home";
+        /* ⚠ **갈아끼운다(replace)**. 대입(`location.hash = …`)은 히스토리를 새로 쌓아서,
+           뒤로가기를 누르면 방금 보정한 그 해시로 돌아왔다가 여기서 다시 앞으로 밀린다 —
+           사용자는 그 화면 이전으로 영영 못 돌아간다(뒤로가기가 갇힌다). */
+        window.location.replace(`#${first || "home"}`);
       }
     };
     apply();

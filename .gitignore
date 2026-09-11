@@ -41,3 +41,5 @@ session-handoff.json
 
 # 도구 상태
 .claude/
+# UI 감사 하네스의 로컬 사본(서버 주소·계정을 채워 쓰는 파일)
+scripts/ui-audit.local.mjs

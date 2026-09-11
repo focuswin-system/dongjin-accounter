@@ -167,6 +167,11 @@ const ACTION_OVERRIDES = [
   // 양식·자료 내려받기 — GET이지만 '다운로드'
   { re: /^\/api\/[a-z-]+\/import\/template$/, action: 'download' },
   { re: /\/export(\.xlsx)?$/, action: 'download' },
+  /* ⚠ 위 규칙은 경로가 '/export' 또는 '/export.xlsx' 로 **끝날 때만** 맞는다.
+     화면 표를 엑셀로 바꿔 주는 통로는 '/api/export/xlsx' 라 안 걸려 POST='create' 로 떨어졌다 —
+     조회전용 역할이 '엑셀 내보내기'를 누르면 "이 작업(등록)에 대한 권한이 없어요" 가 떴다.
+     버튼은 화면을 볼 수 있으면 보이므로, 눌러보고 나서야 알게 된다(/backfill/preview 와 같은 구멍). */
+  { re: /^\/api\/export\/xlsx$/, action: 'download' },
   // 인쇄·출력용 조회
   { re: /\/(print|pdf)$/, action: 'export' },
   /* 소급 등록 '미리보기' — POST지만 아무것도 바꾸지 않는 조회다.

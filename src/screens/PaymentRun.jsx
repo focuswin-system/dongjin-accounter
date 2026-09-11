@@ -47,7 +47,7 @@ export const PaymentRunScreen = ({ go }) => {
     /* ⚠ 계좌번호는 **글자 그대로** 넘어가야 한다(문자열이라 엑셀이 숫자로 뭉개지 않는다).
        숫자로 읽히면 하이픈 없는 계좌가 1.73065E+13 이 되고 앞자리 0 이 사라진다 —
        틀린 계좌로 돈이 나간다. 이체금액은 반대로 숫자여야 합계가 난다. */
-    return downloadXlsx(`매입처_결제내역_${month}.xlsx`, {
+    const r = await downloadXlsx(`매입처_결제내역_${month}.xlsx`, {
       title: '매입처 결제내역',
       sub: `${month} · ${data.vendors.length}개 업체`,
       columns: [
@@ -66,6 +66,9 @@ export const PaymentRunScreen = ({ go }) => {
         v.overdue > 0 ? `연체 ${fmtNum(v.overdue)}원 포함` : '',
       ]),
     })
+    /* 실패를 삼키지 않는다 — 여기는 **은행 이체 명단**이라, 파일을 받은 줄 알고 넘어가면
+       그 달 지급이 통째로 밀린다(다른 화면들과 같은 처리). */
+    if (!r.ok) toast.push(r.error || '엑셀을 만들지 못했어요', { tone: 'warn' })
   }
 
   /* 인쇄 전 손보기 — 글자 칸만, 저장 안 함(lib/printEdit.js). 보고서마다 다르게 만들지 않는다 */

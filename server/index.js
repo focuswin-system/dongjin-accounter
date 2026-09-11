@@ -43,6 +43,17 @@ app.use(cors({
 // 본문 크기 상한 — 기본값(100kb)보다 넉넉하되 무제한은 아니다.
 // 엑셀 일괄 업로드는 파일을 multer 로 받지만, 매핑 결과를 JSON 으로 되보내는 경로가 있어
 // 100kb 는 빠듯할 수 있다. 파일 자체는 multer 의 20MB 제한이 따로 건다.
+/* 내보내기만 본문이 크다 — 화면에 보이는 표를 통째로 보낸다(줄은 화면이, 서식은 서버가).
+   전역 1MB 로는 거래내역 5천 줄쯤에서 body-parser 가 먼저 413 을 던지고, 그 영문 메시지가
+   그대로 사용자에게 간다. 이 경로만 앞에서 더 크게 받는다 —
+   body-parser 는 한 번 읽으면 req._body 를 세우므로 아래 전역 파서는 건너뛴다. */
+app.use('/api/export', express.json({ limit: '8mb' }))
+app.use('/api/export', (err, req, res, next) => {
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ error: '한 번에 내보내기엔 줄이 너무 많아요. 기간을 좁혀주세요.' })
+  }
+  next(err)
+})
 app.use(express.json({ limit: '1mb' }))
 
 // /api 전역 요청 한도(완만). 로그인은 loginGuard 가 따로, 더 엄격하게 막는다.

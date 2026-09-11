@@ -13,8 +13,13 @@
  * ⚠ BATCH 를 고쳐 나눠 돈다 — 한 번에 다 돌리면 결과가 길어 읽히지 않는다.
  */
 async (page) => {
-  const BASE = 'http://192.168.0.34:8081'
-  const LOGIN = { company: 'claude', user: 'admin', pass: 'claude1234' }
+  /* ⚠ **자격증명을 여기에 적은 채로 커밋하지 않는다.**
+     이 파일은 저장소에 있고, 테스트 테넌트라도 운영 서버에 있는 계정이다.
+     실행할 때는 이 파일을 `scripts/ui-audit.local.mjs` 로 복사해 아래 두 줄을 채우고
+     그 사본을 돌린다(사본은 .gitignore 에 있다). 값은 접속정보.md 에 있다.
+     (이 스크립트가 도는 곳에는 process.env 도 require 도 없어서 밖에서 주입할 길이 없다.) */
+  const BASE = '<서버 주소>'
+  const LOGIN = { company: '<회사코드>', user: '<아이디>', pass: '<비밀번호>' }
   const SHOT_DIR = 'C:/Users/USER/Desktop/Project/public/focus-accounter/screenshots/audit'
 
   /* 점검 대상 — src/lib/nav.js 의 잎 id. 묶음(_dom)은 포털 화면이라 함께 본다. */

@@ -124,8 +124,15 @@ export async function downloadVisibleTablesXlsx(container, filename, { title, su
   const body = rows.map(r => {
     const padded = [...r]
     while (padded.length < span) padded.push('')
-    // 숫자로 정리된 칸은 숫자로 넘긴다 — 문자로 두면 엑셀에서 합계가 안 된다
-    return padded.map(v => (v !== '' && /^-?\d+(\.\d+)?$/.test(String(v)) ? Number(v) : v))
+    /* 숫자로 정리된 칸은 숫자로 넘긴다 — 문자로 두면 엑셀에서 합계가 안 된다.
+       ⚠ 다만 **자릿수가 긴 값은 그대로 둔다.** 하이픈 없는 계좌번호(17306510701013)나
+         사업자번호가 표에 있으면 숫자로 바뀌는 순간 1.73065E+13 이 되고 앞자리 0 이 사라진다
+         — 이 파일 위쪽 downloadCsv 의 textCols 가 막던 바로 그 위험이다(틀린 계좌로 돈이 나간다). */
+    return padded.map(v => {
+      const t = String(v)
+      if (v === '' || !/^-?\d+(\.\d+)?$/.test(t)) return v
+      return t.replace(/[-.]/g, '').length >= 12 ? v : Number(v)
+    })
   })
   return downloadXlsx(filename, { title, sub, columns, rows: body })
 }

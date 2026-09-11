@@ -891,10 +891,24 @@ router.put('/:id', async (req, res, next) => {
          '청구서에 붙은 거래'로 분류돼 부가세 집계에서 청구서분과 이중으로 센다
          (정산 취소 경로가 같은 이유로 하는 처리다). 남았으면 남은 쪽을 가리키게 한다. */
       if (links.length) {
-        const [[rest]] = await conn.execute(
-          'SELECT COUNT(*) AS n, MIN(invoice_id) AS keep FROM invoice_matches WHERE txn_id = ?', [req.params.id])
-        await conn.execute('UPDATE transactions SET invoice_id = ? WHERE id = ?',
-          [Number(rest.n) > 0 ? rest.keep : null, req.params.id])
+        /* 어느 청구서를 가리키게 할지도 **먼저 발행된 것** 기준이다(위 배분 순서와 같은 규칙).
+           ⚠ MIN(invoice_id) 로 고르면 UUID 사전순이라 **금액과 무관한 편집(적요만 수정)에도**
+             주 청구서가 A↔B 로 뒤집힌다. 그러면 청구서 쪽 거래처 전파
+             (invoices.js: UPDATE transactions … WHERE invoice_id = ?)가 이 거래를 놓치고,
+             거래처 변경을 막는 409 안내가 엉뚱한 청구번호를 댄다.
+           ⚠ 지금 값이 아직 살아 있으면 그대로 둔다 — 바꿀 이유가 없다. */
+        const [remain] = await conn.execute(
+          `SELECT m.invoice_id
+             FROM invoice_matches m LEFT JOIN invoices i ON i.id = m.invoice_id
+            WHERE m.txn_id = ?
+            ORDER BY i.issued_at, i.invoice_no, m.id`, [req.params.id])
+        const [[cur]] = await conn.execute('SELECT invoice_id FROM transactions WHERE id = ?', [req.params.id])
+        const keep = remain.some(r => r.invoice_id === cur?.invoice_id)
+          ? cur.invoice_id
+          : (remain[0]?.invoice_id || null)
+        if (keep !== cur?.invoice_id) {
+          await conn.execute('UPDATE transactions SET invoice_id = ? WHERE id = ?', [keep, req.params.id])
+        }
       }
 
       /* 복합 전표 항목은 **명시적으로 splits 를 보냈을 때만** 손댄다.
