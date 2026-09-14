@@ -1068,6 +1068,15 @@ router.delete('/:id', async (req, res, next) => {
           만들어 만기 기록을 살린다. routes/notes.js 가 의도적으로 감내한다.) */
       ['notes', 'txn_id', '어음 만기 결제'],
     ]
+    /* 구매품의서에서 지출 처리한 거래. purchase_reqs.txn_id 는 ensureColumn 이라 FK 가 없다 —
+       지우면 품의는 '완료'인데 돈은 사라져, 처리 취소도 못 하고 다시 처리할 수도 없다. */
+    {
+      const [[pr]] = await conn.execute('SELECT doc_no FROM purchase_reqs WHERE txn_id = ? LIMIT 1', [req.params.id])
+      if (pr) {
+        await rollbackQuietly(conn)
+        return res.status(409).json({ error: `구매품의서 ${pr.doc_no}에서 지출 처리한 거래예요. 품의서에서 처리 취소하면 함께 정리됩니다.` })
+      }
+    }
     for (const [table, col, label] of FIN_REFS) {
       const [[hit]] = await conn.execute(`SELECT 1 AS x FROM ${table} WHERE ${col} = ? LIMIT 1`, [req.params.id])
       if (hit) {
@@ -1083,6 +1092,8 @@ router.delete('/:id', async (req, res, next) => {
     const [matches] = await conn.execute('SELECT invoice_id FROM invoice_matches WHERE txn_id = ?', [req.params.id])
     await conn.execute('DELETE FROM invoice_matches WHERE txn_id = ?', [req.params.id])
     for (const m of matches) await recalcInvoiceStatus(conn, m.invoice_id)
+    // 품의의 '근거 지출' 표시만 걷는다 — 돈을 만든 연결이 아니라 "이 지출로 품의를 썼다"는 기록이다
+    await conn.execute('DELETE FROM purchase_req_txns WHERE txn_id = ?', [req.params.id])
     // 복합 전표 항목(자식)을 먼저 지운다 — FK 로 묶여 있어 안 지우면 거래 삭제가 막힌다
     await conn.execute('DELETE FROM txn_splits WHERE txn_id = ?', [req.params.id])
     // 정기지출에서 자동 생성된 거래면 last_generated 를 되돌려 그 회차가 다시 생성되게 한다.

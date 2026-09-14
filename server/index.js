@@ -230,7 +230,7 @@ app.use((err, req, res, _next) => {
     const msg = err.code === 'LIMIT_FILE_SIZE'
       ? '파일이 너무 커요 (최대 20MB)'
       : (err.expose && err.message) || '요청을 처리할 수 없어요. 입력값을 확인해 주세요.'
-    return res.status(status).json({ error: msg })
+    return res.status(status).json({ ...(err.expose && err.payload ? err.payload : {}), error: msg })
   }
   // 문서번호 충돌 — 두 사람이 동시에 발행하면 같은 MAX+1 을 뽑는다.
   // 유니크 인덱스가 중복 저장은 막아주지만, 그대로 두면 사용자는 원인 모를 500 을 본다.

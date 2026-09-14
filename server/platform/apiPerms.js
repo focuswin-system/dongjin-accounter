@@ -198,6 +198,11 @@ const ACTION_OVERRIDES = [
   /* 부도·만기 결제 — 새 어음을 만드는 게 아니라 있는 어음의 상태를 바꾼다.
      부도는 청구서 정산까지 걷어 미수금을 되살리므로 '수정' 권한이 필요하다. */
   { re: /^\/api\/notes\/[^/]+\/(dishonor|settle)$/, action: 'edit' },
+  /* 문서 승인·승인 취소 — 새 문서를 만드는 게 아니라 있는 문서의 결재 상태를 바꾼다.
+     'create'로 두면 문서를 쓸 수만 있는 사람이 자기 문서를 스스로 승인할 수 있다. */
+  { re: /^\/api\/(resolutions|purchase-reqs)\/[^/]+\/(approve|unapprove|link-invoice)$/, action: 'edit' },
+  /* 처리 취소 — POST 지만 하는 일은 **지출 거래를 지우는 것**이다(어음 되돌리기와 같은 구멍). */
+  { re: /^\/api\/(resolutions|purchase-reqs)\/[^/]+\/unprocess$/, action: 'delete' },
 ]
 
 /** 요청 → 필요한 행위 */

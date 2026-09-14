@@ -1784,8 +1784,66 @@ async function initDb(conn) {
     // 구매품의서 품목: 실적가(단가·금액) — 공급업체 견적가와 별도로 과거 실적 단가를 나란히 보여준다.
     await ensureColumn('purchase_req_items', 'actual_price',  "actual_price BIGINT DEFAULT 0")
     await ensureColumn('purchase_req_items', 'actual_amount', "actual_amount BIGINT DEFAULT 0")
-    // 구매품의서 → 미지급금(매입 청구서) 연결. 한 번만 등록되게 생성된 invoices.id 를 물고 있는다.
+    // 구매품의서 → 매입 청구서 연결. 품의가 **어느 청구서의 결재인지**를 뜻한다.
+    // (2026-09 전: '미지급금 등록' 버튼이 새로 만든 청구서를 물었다. 그 버튼은 없앴다 — 아래 설명)
     await ensureColumn('purchase_reqs', 'invoice_id', "invoice_id VARCHAR(36)")
+
+    /* ── 구매품의 → 지급결의 → 정산내역 흐름 (2026-09) ──
+     *
+     * 품의 승인 = "사도 된다"는 허락이지 빚이 생긴 게 아니다. 그래서 승인 때 미지급금을
+     * 만들던 버튼을 없앴다 — 등록일로 찍힌 그 청구서가 나중에 들어오는 진짜 세금계산서와
+     * 대조가 안 돼(승인번호 없음·날짜 다름) 같은 매입이 두 벌 생겼다. 미지급금은 이제
+     * 세금계산서(청구서 등록·홈택스 임포트)에서만 생긴다.
+     *
+     * 대신 두 문서가 **지출 처리**를 할 수 있다(lib/docExec.js 하나를 같이 쓴다).
+     *   작성 → 승인 → 완료(지출 처리됨)
+     * 품의에서 바로 처리하거나, 결의서로 넘겨 거기서 처리한다. 둘 중 한 곳에서만 돈이 나간다. */
+    // 품의의 지출 처리 결과 — 결의서(expense_resolutions)의 같은 이름 칸과 뜻이 같다
+    await ensureColumn('purchase_reqs', 'txn_id',              "txn_id VARCHAR(36)")
+    await ensureColumn('purchase_reqs', 'txn_created',         "txn_created TINYINT DEFAULT 0")
+    await ensureColumn('purchase_reqs', 'txn_prev_status',     "txn_prev_status VARCHAR(20)")
+    await ensureColumn('purchase_reqs', 'txn_prev_account_id', "txn_prev_account_id VARCHAR(36)")
+    /* 품의를 **이미 나간 지출에서** 만들었을 때, 그 지출들. 여러 건을 한 품의로 묶을 수 있다.
+       이 품의는 처리할 돈이 없다(이미 나갔다) — 승인하면 곧바로 완료가 된다.
+       UNIQUE(txn_id): 같은 지출을 두 품의가 붙들지 않는다. */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS purchase_req_txns (
+        id         VARCHAR(36) PRIMARY KEY,
+        req_id     VARCHAR(36) NOT NULL,
+        txn_id     VARCHAR(36) NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_purchase_req_txns_txn (txn_id),
+        INDEX idx_purchase_req_txns_req (req_id),
+        FOREIGN KEY (req_id) REFERENCES purchase_reqs(id) ON DELETE CASCADE
+      )
+    `)
+    // 결의서가 어느 품의에서 왔나 — 결의서를 처리하면 그 품의도 완료가 된다
+    await ensureColumn('expense_resolutions', 'purchase_req_id', "purchase_req_id VARCHAR(36)")
+    await ensureIndex('expense_resolutions', 'idx_expense_resolutions_preq', 'purchase_req_id')
+    // 정산내역서 줄의 출처 — 같은 돈이 두 정산서(또는 한 정산서의 두 줄)에 들어가는 걸 막는 근거
+    await ensureColumn('settlement_lines', 'source_type', "source_type VARCHAR(20)")
+    await ensureColumn('settlement_lines', 'source_id',   "source_id VARCHAR(36)")
+    // '등록'(미지급금을 만든 품의)은 이제 없는 상태다. 그 품의는 승인까지 받은 것이므로 승인으로 둔다.
+    await runOnce('2026-09_purchase_req_status_registered', async () => {
+      await c.execute("UPDATE purchase_reqs SET status = '승인' WHERE status = '등록'")
+    })
+    /* 옛 흐름(품의 → 미지급금 → 그 청구서로 결의서)의 넘김을 새 칸으로 잇는다.
+       안 이으면 결의서를 처리해도 품의가 '승인'에 영원히 남아 할 일 숫자를 부풀리고,
+       아직 처리 전이면 품의·결의서 둘 다 처리 버튼이 살아 있어 서로 어긋난다. */
+    await runOnce('2026-09_link_legacy_preq_resolutions', async () => {
+      await c.execute(
+        `UPDATE expense_resolutions er
+           JOIN purchase_reqs pr ON pr.invoice_id = er.invoice_id
+            SET er.purchase_req_id = pr.id
+          WHERE er.purchase_req_id IS NULL AND er.invoice_id IS NOT NULL`)
+      // 이미 끝난 돈의 품의는 완료로 — 결의서가 처리됐거나 그 청구서가 다 지급된 것
+      await c.execute(
+        `UPDATE purchase_reqs pr SET pr.status = '완료'
+          WHERE pr.status = '승인' AND pr.txn_id IS NULL AND (
+                EXISTS (SELECT 1 FROM expense_resolutions er WHERE er.purchase_req_id = pr.id AND er.status = '완료')
+             OR EXISTS (SELECT 1 FROM invoices i WHERE i.id = pr.invoice_id
+                          AND i.total_amount <= (SELECT COALESCE(SUM(m.amount), 0) FROM invoice_matches m WHERE m.invoice_id = i.id)))`)
+    })
     // ── 주문 모델: 독립된 두 축 ──
     // billing_mode : onetime(총액을 마일스톤으로 나눠 청구) / recurring(주기마다 정액 청구)
     // term_mode    : fixed(종료일에 만료 — 재계약해야 이어짐) / auto_renew(해지 통보 없으면 자동 연장) / open(무기한 — 해지 시까지)

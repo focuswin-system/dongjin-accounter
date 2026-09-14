@@ -11,6 +11,8 @@ const { vatOfQuarter } = require('../lib/vatAgg')
 const { settleAcctCode } = require('../lib/acctCode')
 // 정산이 거래를 새로 만들기 전에 "이 돈이 이미 장부에 있나"를 묻는 규칙(정기 회차와 같은 층)
 const { lookalikeSettleTxns, dupSettleMessage } = require('../lib/settleTxn')
+// 청구서를 지울 때 그 청구서를 가리키던 품의·결의서 연결을 푼다(lib/docExec.js)
+const { detachInvoiceFromDocs } = require('../lib/docExec')
 const { removeUploadedFile } = require('../lib/uploads')
 const { normalizeTaxType, VAT_RATE } = require('../lib/vat')
 const { recalcInvoiceStatus, paidAmountOf } = require('../lib/invoiceStatus')
@@ -1174,6 +1176,7 @@ router.delete('/:id', async (req, res, next) => {
     await conn.execute('UPDATE transactions SET invoice_id = NULL WHERE invoice_id = ?', [id])
     // 연결된 청구 일정은 '예정'으로 되돌려 발행 예정에 다시 노출(고아 방지)
     await conn.execute("UPDATE milestones SET status = '예정', invoice_id = NULL WHERE invoice_id = ?", [id])
+    await detachInvoiceFromDocs(conn, id)
     await conn.execute('DELETE FROM invoices WHERE id = ?', [id])
     /* 규칙 테이블은 청구서 종류를 따라간다. 여태 매출이든 매입이든 recurring_invoices 만 봤는데,
        정기지출에서 나온 매입 청구서의 recurring_id 는 recurring_expenses 의 것이다 —
@@ -1486,6 +1489,7 @@ router.post('/bulk/delete', async (req, res, next) => {
       await conn.execute('UPDATE transactions SET invoice_id = NULL WHERE invoice_id = ?', [inv.id])
       // 연결된 청구 일정은 '예정'으로 되돌린다 — 안 하면 그 일정이 영영 발행 대기에 안 뜬다
       await conn.execute("UPDATE milestones SET status = '예정', invoice_id = NULL WHERE invoice_id = ?", [inv.id])
+      await detachInvoiceFromDocs(conn, inv.id)
       await conn.execute('DELETE FROM invoices WHERE id = ?', [inv.id])
       // 정기청구에서 나온 회차면 하한을 되돌려 그 달이 다시 청구 가능해지게(단건 삭제와 같은 처리)
       if (inv.recurring_id) {
@@ -1576,6 +1580,15 @@ router.delete('/:id/matches/:matchId', async (req, res, next) => {
         await rollbackQuietly(conn)
         return res.status(409).json({
           error: `이 건은 지급결의서 ${res0.doc_no || ''}로 집행됐어요. 결의서에서 되돌려주세요.`.replace('  ', ' '),
+        })
+      }
+      // 구매품의서에서 지출 처리한 건도 같다 — 품의가 이 거래를 자기 결과물로 붙들고 있다(lib/docExec.js)
+      const [[pr0]] = await conn.execute(
+        'SELECT doc_no FROM purchase_reqs WHERE txn_id = ? LIMIT 1', [match.txn_id])
+      if (pr0) {
+        await rollbackQuietly(conn)
+        return res.status(409).json({
+          error: `이 건은 구매품의서 ${pr0.doc_no || ''}에서 지출 처리했어요. 품의서에서 처리 취소해주세요.`.replace('  ', ' '),
         })
       }
     }

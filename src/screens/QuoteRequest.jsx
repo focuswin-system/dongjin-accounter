@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, DateInput } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 import { SourceChooser } from '../lib/components/SourceChooser'
 import { PickListDrawer } from '../lib/components/PickListDrawer'
+import { DocFilters, vendorParams } from '../lib/components/DocFilters'
+import { useDocList } from '../lib/useDocList'
 import { makeGridKeyHandler } from '../lib/gridKeys'
 
 const numOf = (v) => (typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, ''), 10) || 0 : Number(v) || 0)
@@ -166,7 +168,7 @@ const QuoteRequestPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSave
                 <td>{edit ? <CellIn value={form.order_source} onChange={v => setH('order_source', v)}/> : form.order_source}</td>
                 <td>{edit ? <CellIn value={form.ship_no} onChange={v => setH('ship_no', v)}/> : form.ship_no}</td>
                 <td>{edit ? <CellIn value={form.drawing} onChange={v => setH('drawing', v)}/> : form.drawing}</td>
-                <td>{edit ? <CellIn value={form.req_date} onChange={v => setH('req_date', v)} placeholder="YYYY-MM-DD"/> : form.req_date}</td>
+                <td>{edit ? <DateInput className="settle-cellin" value={form.req_date || ''} onChange={e => setH('req_date', e.target.value)}/> : form.req_date}</td>
                 <td>{edit ? <CellIn value={form.applicant} onChange={v => setH('applicant', v)}/> : (form.applicant || doc?.applicant || '')}</td>
                 <td>{edit ? <CellIn value={form.currency} onChange={v => setH('currency', v)}/> : (form.currency || 'WON')}</td>
               </tr>
@@ -269,57 +271,40 @@ const QUOTE_SOURCES = [
   },
 ]
 
-export const QuoteRequestScreen = () => {
+export const QuoteRequestScreen = ({ focusId = null }) => {
   const toast = useToast()
   const [srcOpen, setSrcOpen] = useState(false)
   const [pickOpen, setPickOpen] = useState(false)
   const [items, setItems] = useState(null)
   /* 새 문서에 미리 채워 넣을 품목 줄 (Settlement.jsx 와 같은 방식) */
   const [seed, setSeed] = useState([])
-  const [list, setList] = useState([])
   const [company, setCompany] = useState(null)
   const [vendors, setVendors] = useState([])
-  const [selId, setSelId] = useState(null)
+  const [selId, setSelId] = useState(focusId)
   const [sel, setSel] = useState(null)
   const [creating, setCreating] = useState(false)
 
-  const [q, setQ] = useState('')
-  const [total, setTotal] = useState(0)
-  const [hasMore, setHasMore] = useState(false)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const LIMIT = 50
+  useEffect(() => { api.getCompany().then(setCompany); api.getVendors().then(setVendors) }, [])
 
-  // 목록은 서버에서 50건씩(검색·기간·더보기). keepId/query 를 인자로 받는다.
-  const load = async ({ append = false, query = q, keepId } = {}) => {
-    if (append) setLoadingMore(true)
-    const offset = append ? list.length : 0
-    const [page, comp, vs] = await Promise.all([
-      api.getQuoteReqsPage({ q: query, limit: LIMIT, offset }), api.getCompany(), api.getVendors(),
-    ])
-    const rows = page.rows || []
-    const merged = append ? [...list, ...rows] : rows
-    setList(merged); setCompany(comp); setVendors(vs)
-    setTotal(page.total); setHasMore(page.hasMore); setLoadingMore(false)
-    setSelId(prev => {
-      const want = keepId || prev
-      return want && merged.some(r => r.id === want) ? want : (merged[0]?.id || null)
-    })
-    return page
+  // 목록 — 서버에서 50건씩. 필터(기간·거래처·검색)는 lib/useDocList.js
+  const list = useDocList((p) => api.getQuoteReqsPage({ ...p, ...vendorParams(vendors, p.vendor) }))
+
+  const pinned = useRef(focusId)
+  useEffect(() => { if (focusId) { pinned.current = focusId; setCreating(false); setSelId(focusId) } }, [focusId])
+  useEffect(() => {
+    if (list.loading) return
+    setSelId(prev => (prev && (prev === pinned.current || list.rows.some(r => r.id === prev))) ? prev : (list.rows[0]?.id || null))
+  }, [list.rows, list.loading])
+  // 늦게 온 응답은 버린다 — 줄을 빠르게 옮겨 누르면 목록에 칠해진 줄과 열린 문서가 달라진다
+  const selSeq = useRef(0)
+  const loadSel = (id) => { const my = ++selSeq.current; if (!id) { setSel(null); return } api.getQuoteReq(id).then(d => { if (my === selSeq.current) setSel(d) }) }
+  useEffect(() => { if (!creating) loadSel(selId) }, [selId, creating])
+  const refresh = (id) => {
+    const target = id || selId
+    pinned.current = target
+    if (id) setSelId(id)
+    list.reload(); loadSel(target)
   }
-  useEffect(() => { load() }, [])   // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 검색은 서버로 — 300ms 디바운스. 첫 렌더는 위 load 가 이미 했다.
-  const firstQ = useRef(true)
-  useEffect(() => {
-    if (firstQ.current) { firstQ.current = false; return }
-    const t = setTimeout(() => { load({ query: q }) }, 300)
-    return () => clearTimeout(t)
-  }, [q])   // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (creating) return
-    if (!selId) { setSel(null); return }
-    api.getQuoteReq(selId).then(setSel)
-  }, [selId, creating])
 
   const addVendor = async (q) => {
     const res = await api.addVendor({ name: q, gubu: 'A' })
@@ -374,23 +359,21 @@ export const QuoteRequestScreen = () => {
           setPickOpen(false); setCreating(true)
         }}/>
       <DocWorkspace>
-        <DocSide top={
-          <div className="search" style={{ margin: 0, padding: '6px 10px' }}>
-            <Icon.Search size={14}/>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="문서번호·거래처·수주처 검색"/>
-          </div>}>
-          {list.length === 0
-            ? <DocSideEmpty>{q ? '검색 결과가 없어요.' : <>견적요청서가 없어요.<br/>'새 견적요청서'로 만드세요.</>}</DocSideEmpty>
+        <DocSide top={<DocFilters list={list} placeholder="문서번호·거래처·수주처 검색" vendors={vendors}/>}>
+          {list.rows.length === 0
+            ? <DocSideEmpty>{list.loading ? '불러오는 중…'
+                : (list.filters.q || list.filters.from || list.filters.vendor) ? '조건에 맞는 견적요청서가 없어요.'
+                : <>견적요청서가 없어요.<br/>{"'새 견적요청서'로 만드세요."}</>}</DocSideEmpty>
             : <>
-              {list.map(d => (
+              {list.rows.map(d => (
                 <DocListRow key={d.id} active={!creating && selId === d.id} onClick={() => { setCreating(false); setSelId(d.id) }}
                   docNo={d.doc_no} right={<span className="text-xs text-muted2">{d.req_date || ''}</span>}
                   title={d.vendor_name || d.order_source || '—'} meta={d.drawing || ''} amount={d.total || 0}/>
               ))}
-              {hasMore && (
+              {list.hasMore && (
                 <button className="btn ghost" style={{ width: '100%', marginTop: 6 }}
-                  disabled={loadingMore} onClick={() => load({ append: true })}>
-                  {loadingMore ? '불러오는 중…' : `더 보기 · ${list.length}/${total}건`}
+                  disabled={list.loadingMore} onClick={list.loadMore}>
+                  {list.loadingMore ? '불러오는 중…' : `더 보기 · ${list.rows.length}/${list.total}건`}
                 </button>
               )}
             </>}
@@ -398,10 +381,10 @@ export const QuoteRequestScreen = () => {
         <DocMain>
           {creating
             ? <QuoteRequestPreview doc={blankDoc} company={company} vendors={vendors} onVendorAdd={addVendor} isNew
-                onSaved={(id) => { setCreating(false); load({ keepId: id }) }} onCancelNew={() => setCreating(false)}/>
+                onSaved={(id) => { setCreating(false); refresh(id) }} onCancelNew={() => setCreating(false)}/>
             : sel
               ? <QuoteRequestPreview key={sel.id} doc={sel} company={company} vendors={vendors} onVendorAdd={addVendor}
-                  onSaved={(id) => load({ keepId: id })} onDeleted={() => { setSelId(null); load() }}/>
+                  onSaved={(id) => refresh(id)} onDeleted={() => { setSelId(null); setSel(null); list.reload() }}/>
               : <DocEmpty icon={<Icon.Doc size={32} style={{ opacity: 0.3 }}/>}>왼쪽에서 견적요청서를 고르거나 새로 만드세요.</DocEmpty>}
         </DocMain>
       </DocWorkspace>

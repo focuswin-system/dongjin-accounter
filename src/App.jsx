@@ -152,6 +152,8 @@ const NOTIF_ICON = {
 };
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+// 주소 뒤에 문서 id 를 받는 화면(#doc/<id>) — 다른 화면에서 만든 문서를 곧바로 열어 보여준다
+const DOC_ROUTES = ['doc', 'purchase_req', 'settlement', 'quote_req']
 
 const HELP_MAP = {
   home: {
@@ -381,6 +383,9 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
   const [taxImportSignal, setTaxImportSignal] = useState(0);
   // 청구서 이력·주문 상세에서 "이 거래를 거래내역에서 열어줘"로 넘겨준 id
   const [focusTxnId, setFocusTxnId] = useState(null);
+  /* 문서 화면(#doc/<id> 등)에서 **어느 문서를 열지.** 다른 화면에서 문서를 만들고 넘어올 때
+     (청구서 → 지급결의서, 품의 → 그 결의서) 목록 첫 줄이 아니라 그 문서가 열려야 한다. */
+  const [docFocusId, setDocFocusId] = useState(null);
   const [contractName, setContractName] = useState("");
   const [txnForm, setTxnForm] = useState(null); // null | { kind, contract? }
   const [txnVersion, setTxnVersion] = useState(0);
@@ -491,6 +496,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
         if (h === "contract_detail" && param) setContractId(param);
         // 보고서는 파라미터가 곧 '열린 보고서'다. 없으면 목록이다(뒤로가기가 저절로 닫는다)
         if (h === "report") setReportKey(param || null);
+        if (DOC_ROUTES.includes(h)) setDocFocusId(param || null);
         // 주소로 오간 것은 '계산서 업로드로' 를 누른 것이 아니다 — 신호를 내린다
         setTaxImportSignal(0);
         setRoute(h);
@@ -585,9 +591,11 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
        예전엔 라우트 id 만 담아서, 새로고침하면 contractId 가 초기값으로 돌아가
        없는 주문을 부르고 화면이 '불러오는 중…'에서 멈췄다(북마크·뒤로가기도 같았다). */
     if (id === 'report') setReportKey(opts.reportKey || null);
+    if (DOC_ROUTES.includes(id)) setDocFocusId(opts.docId || null);
     window.location.hash =
       (id === 'contract_detail' && (opts.contractId || contractId)) ? `${id}/${opts.contractId || contractId}`
       : (id === 'report' && opts.reportKey) ? `${id}/${opts.reportKey}`
+      : (DOC_ROUTES.includes(id) && opts.docId) ? `${id}/${opts.docId}`
       : id;
     setSidebarOpen(false);
     // 스크롤 리셋은 route 변경 effect에서(데스크톱은 .content, 모바일은 window) 처리한다.
@@ -700,12 +708,12 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
       // 미수금/미지급금은 청구서 기준 → 발행 청구서와 같은 BillingScreen을 '회수 모드'로 재사용
       case "ar":              return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} initialTab="issued"  role="collect" focusInvoiceId={focusInvoiceId} goRoute={go} openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
       case "ap":              return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} initialTab="received" role="collect" focusInvoiceId={focusInvoiceId} goRoute={go} openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
-      case "doc":             return <DocsScreen/>;
-      case "settlement":      return <SettlementScreen/>;
+      case "doc":             return <DocsScreen focusId={docFocusId} goRoute={go}/>;
+      case "settlement":      return <SettlementScreen focusId={docFocusId}/>;
       case "payment_run":     return <PaymentRunScreen go={go}/>;
       case "purchase_status": return <PurchaseStatusScreen go={go}/>;
-      case "purchase_req":    return <PurchaseReqScreen/>;
-      case "quote_req":       return <QuoteRequestScreen/>;
+      case "purchase_req":    return <PurchaseReqScreen focusId={docFocusId} goRoute={go}/>;
+      case "quote_req":       return <QuoteRequestScreen focusId={docFocusId}/>;
       // 증빙 관리는 아직 목 데이터만 보여주는 화면이라 nav 에서 뺐는데, #evidence 해시로는
       // 계속 들어와져 가짜 숫자가 실데이터처럼 보였다. 실구현 전까지 '준비 중'으로 막는다.
       // (화면 코드 EvidenceScreen 은 그대로 둔다 — 추후 실구현 시 여기만 되돌리면 된다)
@@ -720,7 +728,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
     /* ⚠ docKeys·navHidden 도 의존성이다. 이 memo 안에서 홈·포털에 넘기는 값인데
        빼 두면 **늦게 온 문서 카탈로그가 반영되지 않는다** — 사이드바(위 navTree memo)는
        따라오고 홈 타일만 안 따라와서, 같은 화면이 두 가지 말을 하게 된다. */
-  }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, taxImportSignal, reportKey, perms, docKeys, navHidden, manualChapter]);
+  }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, taxImportSignal, reportKey, perms, docKeys, navHidden, manualChapter, docFocusId]);
 
   const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger"
                 : route.startsWith("billing") ? "billing"

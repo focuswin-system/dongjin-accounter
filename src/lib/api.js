@@ -57,7 +57,7 @@ export const minuteOf = (v) => {
  * 그래서 던지는 오류에 status·kind 를 붙여, App 의 전역 핸들러가 무엇이 잘못됐는지
  * 토스트로 알려줄 수 있게 한다.
  */
-function apiError(message, { status = 0, kind = 'http', code = '', duplicates = null } = {}) {
+function apiError(message, { status = 0, kind = 'http', code = '', duplicates = null, payload = null } = {}) {
   const e = new Error(message)
   e.status = status
   e.kind = kind      // 'network' | 'auth' | 'ratelimit' | 'http'
@@ -65,6 +65,8 @@ function apiError(message, { status = 0, kind = 'http', code = '', duplicates = 
   e.code = code
   // 사유에 딸린 목록(예: 중복 후보). 화면이 확인 다이얼로그에 그대로 쓴다.
   if (duplicates) e.duplicates = duplicates
+  // 응답 본문 전체 — 사유마다 딸린 값의 이름이 달라서(invoices 등) 통째로 둔다
+  if (payload) e.payload = payload
   return e
 }
 
@@ -161,11 +163,11 @@ async function req(path, opts = {}) {
   }
   if (!res.ok) {
     let msg = `요청을 처리하지 못했어요 (${res.status})`
-    let code = '', duplicates = null
-    try { const body = await res.json(); if (body?.error) msg = body.error; code = body?.code || ''; duplicates = body?.duplicates || null } catch { /* 본문 없음 */ }
+    let code = '', duplicates = null, payload = null
+    try { const body = await res.json(); if (body?.error) msg = body.error; code = body?.code || ''; duplicates = body?.duplicates || null; payload = body || null } catch { /* 본문 없음 */ }
     // 429는 서버가 이유와 대기 시간을 문구에 담아 보낸다(시도 제한·요청 한도).
     // 이걸 삼키면 사용자는 왜 막혔는지 모른 채 빈 화면만 본다.
-    throw notifyInfra(apiError(msg, { status: res.status, kind: res.status === 429 ? 'ratelimit' : 'http', code, duplicates }), opts.method || 'GET')
+    throw notifyInfra(apiError(msg, { status: res.status, kind: res.status === 429 ? 'ratelimit' : 'http', code, duplicates, payload }), opts.method || 'GET')
   }
   return res.json()
 }
@@ -182,6 +184,25 @@ async function postImportFile(path, file) {
   })
   if (!res.ok) throw new Error('엑셀 파싱에 실패했어요')
   return res.json() // { headers, rows, total, truncated }
+}
+
+/* 문서 목록(견적·품의·결의·정산) 한 페이지 요청의 쿼리 — 네 화면이 같은 필터를 쓴다.
+   빈 값은 안 보낸다(빈 거래처가 조건으로 걸리지 않게). */
+function docPageQs(params = {}) {
+  const qs = new URLSearchParams()
+  for (const k of ['q', 'from', 'to', 'vendor', 'vendor_id', 'status']) {
+    if (params[k]) qs.set(k, params[k])
+  }
+  qs.set('limit', params.limit ?? 50)
+  qs.set('offset', params.offset ?? 0)
+  return qs.toString()
+}
+
+/* 문서 승인·처리 호출의 공통 모양 — 실패하면 서버가 준 사유 코드와 딸린 값을 그대로 넘긴다.
+   (처리 창이 'dup_txn'·'open_invoice' 로 되묻는 데 쓴다) */
+async function docAction(path, body) {
+  try { const r = await req(path, { method: 'POST', body: body || {} }); return { ok: true, ...r } }
+  catch (e) { return { ok: false, error: e.message, code: e.code, payload: e.payload || null } }
 }
 
 // 서버 응답 → 컴포넌트 형식 변환
@@ -1399,14 +1420,7 @@ export const api = {
   },
   // 화면 목록용 — 검색·기간·페이지(더보기). { rows, total, hasMore } 반환.
   async getResolutionsPage(params = {}) {
-    const qs = new URLSearchParams()
-    if (params.q) qs.set('q', params.q)
-    if (params.from) qs.set('from', params.from)
-    if (params.to) qs.set('to', params.to)
-    if (params.status) qs.set('status', params.status)
-    qs.set('limit', params.limit ?? 50)
-    qs.set('offset', params.offset ?? 0)
-    try { return await req('/resolutions?' + qs.toString()) } catch { return { rows: [], total: 0, pendingCount: 0, hasMore: false } }
+    try { return await req('/resolutions?' + docPageQs(params)) } catch { return { rows: [], total: 0, pendingCount: 0, hasMore: false } }
   },
   async getResolution(id) {
     try { return await req(`/resolutions/${id}`) } catch { return null }
@@ -1452,8 +1466,22 @@ export const api = {
     try { const r = await req(`/resolutions/from-invoice/${invoiceId}`, { method: 'POST' }); return { ok: true, resolution: r } }
     catch (e) { return { ok: false, error: e.message } }
   },
+  // 승인된 구매품의서 → 결의서(품의를 넘긴다 — 이후 처리는 결의서에서만)
+  async createResolutionFromPurchaseReq(reqId) {
+    try { const r = await req(`/resolutions/from-purchase-req/${reqId}`, { method: 'POST' }); return { ok: true, resolution: r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  // 결의서로 넘길 수 있는 품의(승인됐고, 처리 안 됐고, 결의서가 없는 것)
+  async getResolutionPurchaseReqCandidates() {
+    try { return await req('/resolutions/purchase-req-candidates') } catch { return [] }
+  },
+  // 이미 나간 지출 → 결의서를 만들고 곧바로 연결(한 트랜잭션 — 연결이 막히면 결의서도 안 생긴다)
+  async createResolutionFromTxn(txnId) {
+    try { const r = await req(`/resolutions/from-txn/${txnId}`, { method: 'POST' }); return { ok: true, resolution: r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
   async updateResolution(id, data) {
-    try { await req(`/resolutions/${id}`, { method: 'PUT', body: data }); return { ok: true } }
+    try { const r = await req(`/resolutions/${id}`, { method: 'PUT', body: data }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
   },
   /* 연결된 청구서의 품목을 다시 불러온다. 만들 때 한 번 복사하고 끝이라,
@@ -1466,17 +1494,18 @@ export const api = {
   async getResolutionMatchable(id) {
     try { return await req(`/resolutions/${id}/matchable`) } catch { return [] }
   },
-  // 결의서 처리 — mode:'link'(기존 거래 연결) | 'create'(새 지출 생성)
-  async processResolution(id, body) {
-    try { const r = await req(`/resolutions/${id}/process`, { method: 'POST', body }); return { ok: true, ...r } }
-    catch (e) { return { ok: false, error: e.message } }
+  /* 결의서 승인·처리 — 규칙은 서버 lib/docExec.js 하나(구매품의서와 같다).
+     process: mode 'link'(기존 거래 연결) | 'create'(새 지출). 실패하면 code 로 되묻는다. */
+  approveResolution(id) { return docAction(`/resolutions/${id}/approve`) },
+  unapproveResolution(id) { return docAction(`/resolutions/${id}/unapprove`) },
+  processResolution(id, body) { return docAction(`/resolutions/${id}/process`, body) },
+  linkResolutionInvoice(id, invoiceId) { return docAction(`/resolutions/${id}/link-invoice`, { invoice_id: invoiceId }) },
+  async getResolutionOpenInvoices(id, amount) {
+    try { return await req(`/resolutions/${id}/open-invoices${amount ? `?amount=${amount}` : ''}`) } catch { return [] }
   },
   /* 처리 취소 — 집행(완료)을 되돌린다. 지출 거래·청구서 정산도 함께 풀린다.
      결의서가 만든 거래는 지워지고, 이미 있던 거래에 연결한 것은 남는다(keptTxn=true). */
-  async unprocessResolution(id) {
-    try { const r = await req(`/resolutions/${id}/unprocess`, { method: 'POST' }); return { ok: true, ...r } }
-    catch (e) { return { ok: false, error: e.message } }
-  },
+  unprocessResolution(id) { return docAction(`/resolutions/${id}/unprocess`) },
   // cascade=true 면 완료된 결의서도 지운다(지출 이력까지 되돌린 뒤 삭제)
   async deleteResolution(id, { cascade = false } = {}) {
     /* 서버 응답(keptTxn)을 그대로 넘긴다 — 버리면 화면이 "연결돼 있던 지출은 남겼다"를
@@ -1491,13 +1520,11 @@ export const api = {
   },
   // 화면 목록용 — 검색·기간·페이지. { rows, total, hasMore }.
   async getSettlementsPage(params = {}) {
-    const qs = new URLSearchParams()
-    if (params.q) qs.set('q', params.q)
-    if (params.from) qs.set('from', params.from)
-    if (params.to) qs.set('to', params.to)
-    qs.set('limit', params.limit ?? 50)
-    qs.set('offset', params.offset ?? 0)
-    try { return await req('/settlements?' + qs.toString()) } catch { return { rows: [], total: 0, hasMore: false } }
+    try { return await req('/settlements?' + docPageQs(params)) } catch { return { rows: [], total: 0, hasMore: false } }
+  },
+  // 이미 정산서에 들어간 돈의 열쇠 { 'txn:<id>': 'JS-…', 'resolution:<id>': …, 'purchase_req:<id>': … }
+  async getSettlementUsedSources() {
+    try { return await req('/settlements/used-sources') } catch { return {} }
   },
   async getSettlement(id) {
     try { return await req(`/settlements/${id}`) } catch { return null }
@@ -1520,13 +1547,7 @@ export const api = {
     try { return await req('/purchase-reqs') } catch { return [] }
   },
   async getPurchaseReqsPage(params = {}) {
-    const qs = new URLSearchParams()
-    if (params.q) qs.set('q', params.q)
-    if (params.from) qs.set('from', params.from)
-    if (params.to) qs.set('to', params.to)
-    qs.set('limit', params.limit ?? 50)
-    qs.set('offset', params.offset ?? 0)
-    try { return await req('/purchase-reqs?' + qs.toString()) } catch { return { rows: [], total: 0, hasMore: false } }
+    try { return await req('/purchase-reqs?' + docPageQs(params)) } catch { return { rows: [], total: 0, hasMore: false } }
   },
   async getPurchaseReq(id) {
     try { return await req(`/purchase-reqs/${id}`) } catch { return null }
@@ -1536,40 +1557,37 @@ export const api = {
     catch (e) { return { ok: false, error: e.message } }
   },
   async updatePurchaseReq(id, data) {
-    try { await req(`/purchase-reqs/${id}`, { method: 'PUT', body: data }); return { ok: true } }
+    try { const r = await req(`/purchase-reqs/${id}`, { method: 'PUT', body: data }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
   },
-  async deletePurchaseReq(id) {
-    try { await req(`/purchase-reqs/${id}`, { method: 'DELETE' }); return { ok: true } }
+  // cascade=true 면 지출 처리된 품의도 지운다(지출을 되돌린 뒤 삭제)
+  async deletePurchaseReq(id, { cascade = false } = {}) {
+    try { const r = await req(`/purchase-reqs/${id}${cascade ? '?cascade=1' : ''}`, { method: 'DELETE' }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
   },
-  // 구매품의서 승인 게이트 — 승인해야 미지급금을 등록할 수 있다
-  async approvePurchaseReq(id) {
-    try { const r = await req(`/purchase-reqs/${id}/approve`, { method: 'POST' }); return { ok: true, ...r } }
-    catch (e) { return { ok: false, error: e.message } }
+  // 다른 품의가 이미 붙든 청구서·지출 { invoices:{id:docNo}, txns:{id:docNo} }
+  async getPurchaseReqClaimed() {
+    try { return await req('/purchase-reqs/claimed') } catch { return { invoices: {}, txns: {} } }
   },
-  async unapprovePurchaseReq(id) {
-    try { const r = await req(`/purchase-reqs/${id}/unapprove`, { method: 'POST' }); return { ok: true, ...r } }
-    catch (e) { return { ok: false, error: e.message } }
+  /* 구매품의서 승인·처리 — 지급결의서와 같은 규칙(서버 lib/docExec.js).
+     승인: 처리할 돈이 없는 품의(이미 나간 지출·완납 청구서)는 곧바로 완료가 된다(autoDone). */
+  approvePurchaseReq(id) { return docAction(`/purchase-reqs/${id}/approve`) },
+  unapprovePurchaseReq(id) { return docAction(`/purchase-reqs/${id}/unapprove`) },
+  processPurchaseReq(id, body) { return docAction(`/purchase-reqs/${id}/process`, body) },
+  unprocessPurchaseReq(id) { return docAction(`/purchase-reqs/${id}/unprocess`) },
+  linkPurchaseReqInvoice(id, invoiceId) { return docAction(`/purchase-reqs/${id}/link-invoice`, { invoice_id: invoiceId }) },
+  async getPurchaseReqMatchable(id) {
+    try { return await req(`/purchase-reqs/${id}/matchable`) } catch { return [] }
   },
-  // 구매품의서 → 미지급금(매입 청구서) 등록. force 면 중복 경고를 무릅쓰고 등록한다.
-  async issuePurchaseReqPayable(id, { supply_amount, vat_mode, due, force } = {}) {
-    try { const r = await req(`/purchase-reqs/${id}/issue-payable`, { method: 'POST', body: { supply_amount, vat_mode, due, force } }); return { ok: true, ...r } }
-    // 중복이면 code:'duplicate' + duplicates 를 화면으로 넘겨 확인받는다
-    catch (e) { return { ok: false, error: e.message, code: e.code, duplicates: e.duplicates } }
+  async getPurchaseReqOpenInvoices(id, amount) {
+    try { return await req(`/purchase-reqs/${id}/open-invoices${amount ? `?amount=${amount}` : ''}`) } catch { return [] }
   },
 
   async getQuoteReqs() {
     try { return await req('/quote-reqs') } catch { return [] }
   },
   async getQuoteReqsPage(params = {}) {
-    const qs = new URLSearchParams()
-    if (params.q) qs.set('q', params.q)
-    if (params.from) qs.set('from', params.from)
-    if (params.to) qs.set('to', params.to)
-    qs.set('limit', params.limit ?? 50)
-    qs.set('offset', params.offset ?? 0)
-    try { return await req('/quote-reqs?' + qs.toString()) } catch { return { rows: [], total: 0, hasMore: false } }
+    try { return await req('/quote-reqs?' + docPageQs(params)) } catch { return { rows: [], total: 0, hasMore: false } }
   },
   async getQuoteReq(id) {
     try { return await req(`/quote-reqs/${id}`) } catch { return null }

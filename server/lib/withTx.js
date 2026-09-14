@@ -34,11 +34,14 @@ const MAX_TRIES = 3
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
-/** 라우트가 원하는 상태코드로 끝내고 싶을 때 쓰는 오류(재시도 대상이 아니다) */
-function httpError(status, message) {
+/** 라우트가 원하는 상태코드로 끝내고 싶을 때 쓰는 오류(재시도 대상이 아니다)
+ *  payload — 화면이 되물을 때 필요한 값({ code:'dup_txn', ... }). 오류 처리기(index.js)가
+ *  error 옆에 그대로 실어 보낸다. 문구만 보내면 화면이 '무엇 때문에 막혔는지'를 가를 수 없다. */
+function httpError(status, message, payload = null) {
   const e = new Error(message)
   e.status = status
   e.expose = true
+  if (payload) e.payload = payload
   return e
 }
 

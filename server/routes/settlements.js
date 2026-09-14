@@ -2,7 +2,8 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
-const { pageParams, buildWhere, inClause } = require('../lib/pagedList')
+const { pageParams, buildWhere, inClause, docDateExpr } = require('../lib/pagedList')
+const { usedSourceMap, duplicateSourceError } = require('../lib/settleSources')
 
 const router = Router()
 
@@ -41,7 +42,8 @@ router.get('/', async (req, res, next) => {
       return res.json(rows.map(r => adaptRow(r, map[r.id] || 0)))
     }
     // 페이지 모드 — 검색·기간·50건씩. 합계는 이 페이지 행에만 붙인다.
-    const { whereSql, args } = buildWhere(pp, ['doc_no', 'settler', 'purpose'])
+    // 정산서는 거래처가 한 곳이 아니다(줄마다 다르다) — 기간·검색만 건다
+    const { whereSql, args } = buildWhere(pp, ['doc_no', 'settler', 'purpose'], { dateExpr: docDateExpr('settle_date') })
     const [[{ cnt }]] = await req.db.execute(`SELECT COUNT(*) AS cnt FROM settlements ${whereSql}`, args)
     const [rows] = await req.db.execute(
       `SELECT * FROM settlements ${whereSql} ORDER BY created_at DESC, id DESC LIMIT ${pp.limit} OFFSET ${pp.offset}`, args)
@@ -56,6 +58,15 @@ router.get('/', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/**
+ * 이미 정산서에 들어간 돈 — 새 정산서의 '가져오기'에서 빼는 근거. { 열쇠: 정산서 번호 }
+ * 같은 돈이 거래·결의서·품의 여러 얼굴로 오므로 사슬 끝까지 펼친다(lib/settleSources.js).
+ */
+router.get('/used-sources', async (req, res, next) => {
+  try { res.json(await usedSourceMap(req.db)) }
+  catch (e) { next(e) }
+})
+
 router.get('/:id', async (req, res, next) => {
   try {
     const [[r]] = await req.db.execute('SELECT * FROM settlements WHERE id = ?', [req.params.id])
@@ -65,13 +76,20 @@ router.get('/:id', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/* 줄의 출처(어느 거래·결의서·품의에서 가져왔나). 이 목록 밖의 값은 버린다 —
+   used-sources 가 이 값으로 표를 찾아가므로 엉뚱한 값이 들어가면 판정이 조용히 빠진다. */
+const SOURCE_TYPES = new Set(['txn', 'resolution', 'purchase_req'])
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
 const insertLines = async (conn, settlementId, lines) => {
   const list = Array.isArray(lines) ? lines.filter(l => (l.title && l.title.trim()) || Number(l.amount)) : []
   let i = 0
   for (const l of list) {
+    const st = SOURCE_TYPES.has(l.source_type) && l.source_id ? l.source_type : null
     await conn.execute(
-      'INSERT INTO settlement_lines (id, settlement_id, category, title, amount, memo, sort_order) VALUES (?,?,?,?,?,?,?)',
-      [randomUUID(), settlementId, l.category || '기타경비', l.title || '', Number(l.amount) || 0, l.memo || '', i++])
+      'INSERT INTO settlement_lines (id, settlement_id, category, title, amount, memo, sort_order, source_type, source_id) VALUES (?,?,?,?,?,?,?,?,?)',
+      [randomUUID(), settlementId, l.category || '기타경비', l.title || '', Number(l.amount) || 0, l.memo || '', i++,
+       st, st ? String(l.source_id) : null])
   }
 }
 
@@ -81,6 +99,8 @@ const insertLines = async (conn, settlementId, lines) => {
 // (쓰면 옛 문서를 한 번 저장하는 것만으로 값이 빈칸으로 지워진다).
 router.post('/', async (req, res, next) => {
   const { settler, settle_date, purpose, received_amount, note, lines } = req.body
+  // 목록의 기간 필터가 이 칸을 문자열로 비교한다 — 날짜 모양이 아니면 엉뚱한 기간에 잡힌다
+  if (settle_date && !DATE_RE.test(settle_date)) return res.status(400).json({ error: '정산일은 YYYY-MM-DD 로 적어주세요' })
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
@@ -90,6 +110,8 @@ router.post('/', async (req, res, next) => {
       `SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(doc_no, '-', -1) AS UNSIGNED)), 0) AS maxno
        FROM settlements WHERE doc_no LIKE ? FOR UPDATE`, [`JS-${year}-%`])
     const doc_no = `JS-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
+    // 같은 돈을 두 번 담지 않는다 — 화면이 목록에서 빼 주지만 동시에 넣으면 겹친다
+    { const de = await duplicateSourceError(conn, lines); if (de) { await rollbackQuietly(conn); return res.status(409).json({ error: de }) } }
     const id = randomUUID()
     const approval = Array.isArray(req.body.approval) && req.body.approval.length
       ? req.body.approval
@@ -112,11 +134,13 @@ router.post('/', async (req, res, next) => {
 // 수정 — 헤더 갱신 + 라인 통째 교체(삭제 후 재삽입)
 router.put('/:id', async (req, res, next) => {
   const { settler, settle_date, purpose, received_amount, note, status, approval, lines } = req.body
+  if (settle_date && !DATE_RE.test(settle_date)) return res.status(400).json({ error: '정산일은 YYYY-MM-DD 로 적어주세요' })
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[cur]] = await conn.execute('SELECT id FROM settlements WHERE id = ? FOR UPDATE', [req.params.id])
     if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    { const de = await duplicateSourceError(conn, lines, { settlementId: req.params.id }); if (de) { await rollbackQuietly(conn); return res.status(409).json({ error: de }) } }
     await conn.execute(
       `UPDATE settlements SET settler=?, settle_date=?, purpose=?, received_amount=?, note=?, status=?, approval=? WHERE id=?`,
       [settler || '', settle_date || null, purpose || '',

@@ -18,6 +18,10 @@ import { downloadVisibleTablesXlsx } from '../lib/export'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 import { SourceChooser } from '../lib/components/SourceChooser'
+import { PickListDrawer } from '../lib/components/PickListDrawer'
+import { DocFilters, approvalStatuses, vendorParams } from '../lib/components/DocFilters'
+import { ExecDrawer, approveAndAsk } from '../lib/components/ExecDrawer'
+import { useDocList } from '../lib/useDocList'
 import { looksLikeTaxInvoice } from '../lib/hometax'
 import { PrintButton } from '../lib/components/PrintButton'
 import { PrintEditButton } from '../lib/components/PrintEditButton'
@@ -39,56 +43,42 @@ const FormBlock = ({ title, hint, children }) => (
 /* ============ 지출 등록 Drawer (레거시 7-step) ============ */
 
 /* ============ 결의서 관리 ============ */
-export const DocsScreen = () => {
-  const toast = useToast();
-  const [docs, setDocs] = useState([]);
+export const DocsScreen = ({ focusId = null, goRoute }) => {
   const [company, setCompany] = useState(null);
-  const [selId, setSelId] = useState(null);
-  const [q, setQ] = useState("");
-  /* srcOpen 출처 고르기가 열려 있나 · src 고른 출처('invoice'|'txn'|'blank')
+  const [vendors, setVendors] = useState([]);
+  const [selId, setSelId] = useState(focusId);
+  const [sel, setSel] = useState(null);
+  /* srcOpen 출처 고르기가 열려 있나 · src 고른 출처('invoice'|'preq'|'txn'|'blank')
      둘을 나눈다 — 하나로 두면 출처를 고르는 순간 고르기 화면이 닫히면서
      이어질 화면의 열림 조건까지 함께 꺼진다(첫 안내 마법사에서 겪은 것과 같다). */
   const [srcOpen, setSrcOpen] = useState(false);
   const [src, setSrc] = useState(null);
-  const [showDone, setShowDone] = useState(false);   // 처리된 결의서까지 볼지
-  const [total, setTotal] = useState(0);             // 현재 조건의 전체 건수
-  const [pendingCount, setPendingCount] = useState(0); // '처리 대기' 배지(검색 무관)
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const LIMIT = 50;
 
-  /* 문서가 쌓여도 견디게 — 목록은 서버에서 한 페이지(50건)씩 받는다.
-     탭(대기/전체)은 status, 검색은 q, '더 보기'는 offset 으로 서버에 넘긴다.
-     ⚠ done/query 를 인자로 받는다: 탭을 바꾼 직후 부를 때 state 가 아직 안 바뀌어
-       있어(비동기) 새 값을 명시로 넘겨야 옳은 페이지가 온다. */
-  const load = async ({ append = false, done = showDone, query = q } = {}) => {
-    if (append) setLoadingMore(true);
-    const offset = append ? docs.length : 0;
-    const page = await api.getResolutionsPage({ q: query, status: done ? undefined : 'pending', limit: LIMIT, offset });
-    if (!company) api.getCompany().then(setCompany);
-    setDocs(prev => append ? [...prev, ...page.rows] : page.rows);
-    setTotal(page.total); setPendingCount(page.pendingCount); setHasMore(page.hasMore);
-    setLoadingMore(false);
-    return page;
+  useEffect(() => { api.getCompany().then(setCompany); api.getVendors().then(setVendors); }, []);
+
+  /* 문서가 쌓여도 견디게 — 목록은 서버에서 한 페이지(50건)씩, 필터는 lib/useDocList.js.
+     상태 칩 옆 숫자가 곧 할 일이다(작성 = 승인 대기, 승인 = 처리 대기). */
+  const list = useDocList((p) => api.getResolutionsPage({ ...p, ...vendorParams(vendors, p.vendor) }));
+
+  /* 선택은 지금 목록에 보이는 것 중에서 지킨다. 예외 — 다른 화면에서 넘어온 문서(focusId)와
+     방금 승인·처리한 문서는 목록에서 빠져도 연 채로 둔다(방금 한 일의 결과를 보여준다). */
+  const pinned = useRef(focusId);
+  useEffect(() => { if (focusId) { pinned.current = focusId; setSelId(focusId); } }, [focusId]);
+  useEffect(() => {
+    if (list.loading) return;
+    setSelId(prev => (prev && (prev === pinned.current || list.rows.some(d => d.id === prev))) ? prev : (list.rows[0]?.id || null));
+  }, [list.rows, list.loading]);
+  /* 늦게 온 응답은 버린다 — 줄을 빠르게 옮겨 누르면 앞 문서 응답이 뒤에 도착해, 목록에 칠해진 줄과
+     오른쪽에 열린 문서가 달라진다(누른 버튼이 보이는 문서에 걸려 엉뚱한 문서를 승인할 수 있다). */
+  const selSeq = useRef(0);
+  const loadSel = (id) => { const my = ++selSeq.current; if (!id) { setSel(null); return; } api.getResolution(id).then(d => { if (my === selSeq.current) setSel(d); }); };
+  useEffect(() => { loadSel(selId); }, [selId]);
+  const refresh = (id) => {
+    const target = id || selId;
+    pinned.current = target;
+    if (id) setSelId(id);
+    list.reload(); loadSel(target);
   };
-  useEffect(() => { load(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 검색은 서버로 — 타이핑마다 때리지 않게 300ms 디바운스. 첫 렌더는 위 load 가 이미 했다.
-  const firstQ = useRef(true);
-  useEffect(() => {
-    if (firstQ.current) { firstQ.current = false; return; }
-    const t = setTimeout(() => { load({ query: q }); }, 300);
-    return () => clearTimeout(t);
-  }, [q]);   // eslint-disable-line react-hooks/exhaustive-deps
-
-  const list = docs;   // 서버가 이미 탭·검색을 반영했다
-
-  /* 선택은 **지금 목록에 보이는 것** 중에서만 유지한다. 목록이 바뀌면(탭·검색·더보기)
-     선택이 그 안에 있으면 지키고, 없으면 첫 줄로. */
-  useEffect(() => {
-    setSelId(prev => (prev && list.some(d => d.id === prev)) ? prev : (list[0]?.id || null));
-  }, [docs]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const sel = list.find(d => d.id === selId) || null;
 
   return (
     <div className="fade-up doc-screen">
@@ -102,51 +92,45 @@ export const DocsScreen = () => {
         open={srcOpen} onClose={() => setSrcOpen(false)}
         title="새 지급결의서" sub="어디서 만들까요?"
         options={RESOLUTION_SOURCES}
-        onPick={(id) => { setSrcOpen(false); setSrc(id); }}
-        footer={<>· 어느 쪽으로 만들어도 <b>결의서 목록에는 함께</b> 모입니다.</>}/>
+        onPick={(id) => { setSrcOpen(false); setSrc(id); }}/>
 
       <InvoicePickDrawer open={src === 'invoice'} onClose={() => setSrc(null)}
-        onPicked={(id) => { setSrc(null); load().then(() => setSelId(id)); }}/>
-      {/* ⚠ 이 경로로 만든 결의서는 **곧바로 완료**가 된다(이미 나간 돈이라 붙이는 즉시 처리된다).
-          그래서 '처리 대기' 탭에는 없다 — 그대로 두면 만들고 나서 화면이 텅 비어 보여
-          "만들었는데 실패했나" 가 된다. 만든 것을 보여주려면 탭도 함께 옮겨야 한다. */}
+        onPicked={(id) => { setSrc(null); refresh(id); }}/>
+      <PurchaseReqPickDrawer open={src === 'preq'} onClose={() => setSrc(null)}
+        onPicked={(id) => { setSrc(null); refresh(id); }}/>
       <TxnPickDrawer open={src === 'txn'} onClose={() => setSrc(null)}
-        onPicked={(id) => { setSrc(null); setShowDone(true); load({ done: true }).then(() => setSelId(id)); }}/>
+        onPicked={(id) => { setSrc(null); refresh(id); }}/>
       <NewResolutionDrawer open={src === 'blank'} onClose={() => setSrc(null)}
-        onCreated={(id) => { setSrc(null); load().then(() => setSelId(id)); }}/>
+        onCreated={(id) => { setSrc(null); refresh(id); }}/>
 
       <DocWorkspace>
-        <DocSide top={<>
-          <div className="row gap-6">
-            <button className={`chip ${!showDone ? "active" : ""}`} onClick={() => { setShowDone(false); load({ done: false }); }}>
-              처리 대기 {pendingCount > 0 && <span className="badge brand" style={{ marginLeft: 6 }}>{pendingCount}</span>}
-            </button>
-            <button className={`chip ${showDone ? "active" : ""}`} onClick={() => { setShowDone(true); load({ done: true }); }}>전체</button>
-          </div>
-          <div className="search" style={{ margin: 0, padding: "6px 10px" }}>
-            <Icon.Search size={14}/>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="문서번호·거래처·목적 검색"/>
-          </div>
-        </>}>
-          {list.length === 0
-            ? <DocSideEmpty>{showDone ? (q ? "검색 결과가 없어요." : "결의서가 없어요.") : (q ? "검색 결과가 없어요." : "처리 대기 중인 결의서가 없어요.")}<br/>'새 결의서'를 누르면 받은 청구서·이미 나간 돈에서 만들 수 있어요.</DocSideEmpty>
+        <DocSide top={
+          <DocFilters list={list} placeholder="문서번호·거래처·목적 검색" vendors={vendors}
+            statuses={approvalStatuses(list.page?.counts)}/>}>
+          {list.rows.length === 0
+            ? <DocSideEmpty>{list.loading ? "불러오는 중…"
+                : (list.filters.q || list.filters.from || list.filters.vendor || list.filters.status) ? "조건에 맞는 결의서가 없어요."
+                : <>결의서가 없어요.<br/>'새 결의서'로 만드세요.</>}</DocSideEmpty>
             : <>
-              {list.map(d => (
+              {list.rows.map(d => (
                 <DocListRow key={d.id} active={d.id === selId} onClick={() => setSelId(d.id)}
                   docNo={d.doc_no} right={<StatusBadge status={d.status}/>}
-                  title={d.title} meta={`${d.pay_date || "—"} · ${d.vendor_name || "—"}`} amount={d.amount}/>
+                  title={d.title}
+                  meta={[d.pay_date, d.vendor_name, d.purchase_req_no].filter(Boolean).join(" · ") || "—"}
+                  amount={d.amount}/>
               ))}
-              {hasMore && (
+              {list.hasMore && (
                 <button className="btn ghost" style={{ width: '100%', marginTop: 6 }}
-                  disabled={loadingMore} onClick={() => load({ append: true })}>
-                  {loadingMore ? "불러오는 중…" : `더 보기 · ${list.length}/${total}건`}
+                  disabled={list.loadingMore} onClick={list.loadMore}>
+                  {list.loadingMore ? "불러오는 중…" : `더 보기 · ${list.rows.length}/${list.total}건`}
                 </button>
               )}
             </>}
         </DocSide>
         <DocMain>
           {sel
-            ? <ResolutionPreview doc={sel} company={company} onSaved={load} onDeleted={() => { setSelId(null); load(); }}/>
+            ? <ResolutionPreview key={sel.id} doc={sel} company={company} goRoute={goRoute}
+                onSaved={(id) => refresh(id)} onDeleted={() => { setSelId(null); setSel(null); list.reload(); }}/>
             : <DocEmpty icon={<Icon.Receipt size={32} style={{ opacity: 0.3 }}/>}>결의서를 선택하면 내용이 표시됩니다</DocEmpty>}
         </DocMain>
       </DocWorkspace>
@@ -160,8 +144,9 @@ export const DocsScreen = () => {
  * 적었다** — 그 값이 이미 장부에 있는데도. 옮겨 적으면 오타가 나고, 오타가 나면
  * 결의서와 장부가 다른 말을 한다.
  *
- * 이제 출처를 먼저 묻는다(DocTypeChooser 가 "받으신 서류가 뭔가요"를 먼저 묻는 것과 같다).
+ * 이제 출처를 먼저 묻는다.
  *   invoice  받은 청구서에서 — 품목 줄과 부가세까지 그대로 온다
+ *   preq     승인한 구매품의서에서 — 품의를 넘겨받는다(이후 처리는 결의서에서만)
  *   txn      이미 나간 돈에서 — 통장에서 빠진 지출에 **사후로** 결재 근거를 붙인다
  *   blank    직접 작성 — 근거 서류가 없는 소액
  */
@@ -170,19 +155,25 @@ const RESOLUTION_SOURCES = [
     id: 'invoice', icon: Icon.Receipt,
     label: '받은 청구서에서',
     desc: '세금계산서는 받았고 아직 지급 전이에요',
-    effect: '품목·금액·부가세가 그대로 옮겨져요. 지급하면 그 청구서의 미지급금이 줄어요.',
+    effect: '품목·금액·부가세가 그대로 와요. 처리하면 그 청구서가 지급돼요.',
+  },
+  {
+    id: 'preq', icon: Icon.Sign,
+    label: '구매품의서에서',
+    desc: '승인한 품의서를 지급 결재로 넘겨요',
+    effect: '품목이 그대로 와요. 처리는 이 결의서에서만 해요.',
   },
   {
     id: 'txn', icon: Icon.Bank,
     label: '이미 나간 돈에서',
     desc: '통장에서 빠져나간 지출에 결재 근거를 붙여요',
-    effect: '고른 지출에 연결되고 바로 처리 완료가 돼요. 돈이 또 나가지는 않아요.',
+    effect: '고른 지출에 연결되고 바로 완료돼요. 돈이 또 나가지 않아요.',
   },
   {
     id: 'blank', icon: Icon.Pencil,
     label: '직접 작성',
     desc: '근거 서류가 없는 소액 지출',
-    effect: '빈 양식으로 시작해요. 지급은 만든 뒤 따로 처리해요.',
+    effect: '빈 양식으로 시작해요. 승인한 뒤 지출을 처리해요.',
   },
 ]
 
@@ -261,6 +252,38 @@ const InvoicePickDrawer = ({ open, onClose, onPicked }) => {
   );
 };
 
+/** 승인한 구매품의서 고르기 → 결의서로 넘긴다 */
+const PurchaseReqPickDrawer = ({ open, onClose, onPicked }) => {
+  const toast = useToast();
+  const [rows, setRows] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (open) { setRows(null); api.getResolutionPurchaseReqCandidates().then(setRows); } }, [open]);
+  return (
+    <PickListDrawer single
+      open={open} onClose={onClose}
+      title="구매품의서에서" sub="어느 품의를 지급 결재로 넘길까요?"
+      placeholder="문서번호·거래처·품명 검색"
+      rows={rows}
+      match={(r, q) => [r.doc_no, r.vendor_name, r.summary].filter(Boolean)
+        .some(v => String(v).toLowerCase().includes(q.toLowerCase()))}
+      render={(r) => ({
+        title: r.summary || r.vendor_name || r.doc_no,
+        sub: [r.doc_no, r.req_date, r.vendor_name, r.invoice_no ? `청구서 ${r.invoice_no}` : null].filter(Boolean).join(' · '),
+        right: r.total,
+      })}
+      empty="넘길 품의서가 없어요. 승인했고 아직 처리하지 않은 품의서만 나와요."
+      onDone={async ([r]) => {
+        if (busy) return;
+        setBusy(true);
+        const res = await api.createResolutionFromPurchaseReq(r.id);
+        setBusy(false);
+        if (!res.ok) return toast.push(res.error || '만들지 못했어요', { tone: 'warn' });
+        toast.push(res.resolution.reused ? '이미 넘긴 결의서를 엽니다' : `${r.doc_no}를 지급결의서 ${res.resolution.doc_no}로 넘겼어요`);
+        onPicked(res.resolution.id);
+      }}/>
+  );
+};
+
 /** 이미 나간 지출 거래 고르기 → 결의서를 만들고 곧바로 그 거래에 연결 */
 const TxnPickDrawer = ({ open, onClose, onPicked }) => {
   const toast = useToast();
@@ -283,30 +306,12 @@ const TxnPickDrawer = ({ open, onClose, onPicked }) => {
 
   const pick = async (t) => {
     setBusy(t.id);
-    /* ⚠ **만들기와 연결을 나눠 부른다.** 연결(process)에는 마감 검사·잔액 규칙·이중계상
-       가드가 들어 있고(routes/resolutions.js 165줄), 그건 이미 검증된 경로다. 여기서
-       질러 넣으면 그 가드를 통째로 우회하게 된다. */
-    const title = t.category || t.memo || '지출';
-    const made = await api.createResolution({
-      vendor_id: t.vendor_id || undefined,
-      vendor_name: t.vendor_name || '',
-      title,
-      // 거래에는 품목 줄이 없다(transactions 스키마) — 한 줄로 뭉친다.
-      // 여러 줄로 나누려면 만든 뒤 상세에서 편집한다.
-      items: [{ name: title, unit: '식', qty: 1, price: t.amount, amount: t.amount, note: t.memo || '' }],
-      pay_method: '계좌이체',
-      pay_date: t.date,
-    });
-    if (!made.ok) { setBusy(''); return toast.push(made.error || '만들지 못했어요', { tone: 'warn' }); }
-
-    const linked = await api.processResolution(made.resolution.id, { mode: 'link', txn_id: t.id });
+    /* 만들기와 연결을 **서버 한 트랜잭션**으로 한다(routes/resolutions.js from-txn).
+       예전엔 화면이 둘을 따로 불러, 연결이 막히면(마감된 달 등) 결의서만 남았다.
+       연결은 처리 규칙(lib/docExec.js — 마감·중복·잔액 가드)을 그대로 탄다. */
+    const made = await api.createResolutionFromTxn(t.id);
     setBusy('');
-    if (!linked.ok) {
-      /* 만들기는 됐는데 연결이 막힌 경우(마감된 달의 거래 등). 결의서는 남겨 둔다 —
-         지우면 사용자가 쓴 것이 사라지고, 남기면 그 화면에서 바로 처리하거나 지울 수 있다. */
-      toast.push(`${linked.error || '연결하지 못했어요'} — 결의서는 만들어 두었어요`, { tone: 'warn' });
-      return onPicked(made.resolution.id);
-    }
+    if (!made.ok) return toast.push(made.error || '만들지 못했어요', { tone: 'warn' });
     toast.push(`지급결의서 ${made.resolution.doc_no}를 만들고 그 지출에 연결했어요`);
     onPicked(made.resolution.id);
   };
@@ -476,154 +481,6 @@ const NewResolutionDrawer = ({ open, onClose, onCreated }) => {
   );
 };
 
-// 출금 계좌 선택 — 계좌가 비면 그 지출은 어느 계좌 잔액에서도 빠지지 않으므로 필수 입력이다.
-const AccountPick = ({ accounts, value, onChange, hint }) => (
-  <div>
-    <label className="label" style={{ marginBottom: 8 }}>출금 계좌 <span style={{ color: 'var(--danger, #dc2626)' }}>*</span></label>
-    <Combobox
-      value={value}
-      onChange={onChange}
-      options={accounts.map(a => ({
-        value: a.id,
-        label: a.name,
-        sub: [a.kind === 'card' ? '카드' : a.bankName, a.number].filter(Boolean).join(' '),
-      }))}
-      placeholder="계좌 선택"/>
-    <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-      {hint || '이 계좌에서 나간 것으로 기록돼 잔액에 반영됩니다.'}
-    </div>
-  </div>
-);
-
-// 결의서 처리 — 이 결의서대로 지출을 집행한다.
-//   기존 지출 연결: 이미 카드·이체로 나간 지출을 이 결의서에 붙임
-//   새 지출 등록: 결의서 내용으로 지출 거래를 생성(금액 자동, 수정 가능)
-// 어느 쪽이든 그 지출의 증빙(doc_no)에 결의서번호가 붙어 추적된다.
-const ProcessDrawer = ({ open, onClose, doc, onDone }) => {
-  const toast = useToast();
-  const [mode, setMode] = useState('create');   // 'create' | 'link'
-  const [amount, setAmount] = useState('');
-  const [date, setDate] = useState(todayStr());
-  const [candidates, setCandidates] = useState([]);
-  const [pickedTxn, setPickedTxn] = useState(null);
-  const [accounts, setAccounts] = useState([]);
-  const [accountId, setAccountId] = useState('');
-
-  useEffect(() => {
-    if (!open) return;
-    setMode('create'); setAmount(String(doc.amount || ''));
-    /* 지출일 기본값은 **오늘까지**로 자른다.
-     * doc.pay_date 는 '언제까지 주기로 한 날'(지급 기한)이라 대개 미래다. 그걸 그대로
-     * 채워 두면 사용자가 아무것도 안 바꾸고 '처리 완료'를 눌렀을 때
-     * 서버가 "미래 날짜로는 처리할 수 없어요"로 거절한다 — 화면이 스스로 만든 기본값이
-     * 자기 규칙에 걸리는 셈이라, 뭘 고쳐야 하는지도 알기 어렵다.
-     * 결의서 처리의 지출일은 '실제로 돈이 나간 날'이므로 미래일 수 없다. */
-    const t = todayStr();
-    setDate(doc.pay_date && doc.pay_date <= t ? doc.pay_date : t);
-    setPickedTxn(null);
-    api.getResolutionMatchable(doc.id).then(setCandidates);
-    api.getAccounts().then(list => {
-      setAccounts(list);
-      // 은행계좌를 기본 선택(kind='bank' — type은 '보통예금'/'법인카드' 값이라 쓰면 안 된다).
-      // 카드 지출도 있으므로 목록에서는 카드도 고를 수 있게 둔다.
-      const bank = list.find(a => a.kind === 'bank') || list[0];
-      setAccountId(prev => prev || bank?.id || '');
-    });
-  }, [open, doc.id]);
-
-  const amountNum = parseInt(String(amount).replace(/[^0-9]/g, ''), 10) || 0;
-  // 연결 대상이 이미 계좌를 갖고 있으면 그 계좌가 쓰인다(서버 우선순위). 없을 때만 골라야 한다.
-  const pickedRow = candidates.find(t => t.id === pickedTxn);
-  const linkNeedsAccount = mode === 'link' && pickedRow && !pickedRow.account_id;
-  const needsAccount = mode === 'create' || linkNeedsAccount;
-
-  const submit = async () => {
-    if (mode === 'link' && !pickedTxn) return toast.push('연결할 지출을 선택해주세요');
-    if (needsAccount && !accountId) return toast.push('출금 계좌를 선택해주세요');
-    const body = mode === 'link'
-      ? { mode: 'link', txn_id: pickedTxn, account_id: accountId || null }
-      : { mode: 'create', amount: amountNum, date, account_id: accountId || null };
-    const res = await api.processResolution(doc.id, body);
-    if (!res.ok) return toast.push(res.error || '처리에 실패했어요', { tone: 'warn' });
-    const base = mode === 'link' ? '기존 지출에 연결했어요' : '지출을 등록하고 처리했어요';
-    toast.push(res.invoicePaid ? `${base}. 청구서도 지급 처리됐어요` : base);
-    onDone();
-  };
-
-  return (
-    <Drawer open={open} onClose={onClose} width="min(480px,100vw)" label="결의서 처리">
-      <DrawerHead title="결의서 처리" sub={<>{doc.doc_no} · {doc.title} · {fmtNum(doc.amount)}원</>} onClose={onClose}/>
-      <div className="drawer-body col gap-form">
-        <div className="text-sm text-muted">이 결의서대로 지출을 집행합니다. 처리하면 목록의 '처리 대기'에서 빠져요.</div>
-        <div className="row gap-6">
-          <button type="button" className={`chip ${mode === 'create' ? 'active' : ''}`} onClick={() => setMode('create')}>지출 새로 등록</button>
-          <button type="button" className={`chip ${mode === 'link' ? 'active' : ''}`} onClick={() => setMode('link')}>기존 지출에 연결</button>
-        </div>
-
-        {mode === 'create' ? (
-          <>
-            <div>
-              <label className="label" style={{ marginBottom: 8 }}>지출 금액</label>
-              <div style={{ position: 'relative' }}>
-                <MoneyInput className="input num fw-700" style={{ fontSize: 20, paddingRight: 36 }}
-                  value={amount}
-                  onChange={raw => setAmount(raw)}/>
-                <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>원</span>
-              </div>
-              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>결의서 금액으로 채웠어요. 실제 지출액이 다르면 고치세요.</div>
-            </div>
-            <div>
-              <label className="label" style={{ marginBottom: 8 }}>지출일</label>
-              <DateInput className="input" max={localToday()} value={date} onChange={e => setDate(e.target.value)}/>
-            </div>
-            <AccountPick accounts={accounts} value={accountId} onChange={setAccountId}/>
-            <div className="text-xs text-muted2">{doc.vendor_name || '거래처 미지정'} · {doc.pay_method || '계좌이체'}로 지출 거래가 생성됩니다.</div>
-          </>
-        ) : (
-          <div>
-            <label className="label" style={{ marginBottom: 8 }}>연결할 지출 거래</label>
-            {candidates.length === 0 ? (
-              <div className="text-sm text-muted2" style={{ padding: 16, textAlign: 'center', border: '1px dashed var(--line)', borderRadius: 8 }}>
-                연결할 미연결 지출이 없어요. '지출 새로 등록'을 쓰세요.
-              </div>
-            ) : (
-              <div style={{ maxHeight: 300, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {candidates.map(t => (
-                  <button key={t.id} type="button" onClick={() => setPickedTxn(t.id)}
-                    style={{ textAlign: 'left', padding: '10px 12px', border: `1px solid ${pickedTxn === t.id ? 'var(--brand)' : 'var(--line)'}`,
-                             borderRadius: 8, background: pickedTxn === t.id ? 'var(--brand-soft)' : 'var(--surface)', cursor: 'pointer' }}>
-                    <div className="row gap-8">
-                      <span className="fw-600 text-sm">{t.vendor_name || '거래처 미상'}</span>
-                      {t.related && <span className="badge outline" style={{ fontSize: 10 }}>같은 거래처</span>}
-                      <span className="ml-auto num fw-700">{fmtNum(t.amount)}원</span>
-                    </div>
-                    <div className="text-xs text-muted2" style={{ marginTop: 3 }}>
-                      {t.date} · {t.category || '—'} · {t.status}
-                      {!t.account_id && <span style={{ color: 'var(--warn, #b45309)' }}> · 계좌 없음</span>}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-            {pickedRow && pickedRow.status !== '지급완료' && (
-              <div className="text-xs" style={{ marginTop: 8, color: 'var(--muted-2)' }}>
-                이 거래는 아직 <b>{pickedRow.status}</b> 상태예요. 연결하면 <b>지급완료</b>로 함께 처리돼 계좌 잔액에서 빠집니다.
-              </div>
-            )}
-            {linkNeedsAccount && (
-              <div style={{ marginTop: 10 }}>
-                <AccountPick accounts={accounts} value={accountId} onChange={setAccountId}
-                  hint="이 거래에는 출금 계좌가 없어요. 지정해야 잔액에 반영됩니다."/>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-      <DrawerFooter onCancel={onClose} onSave={submit} saveLabel="처리 완료"/>
-    </Drawer>
-  );
-};
-
 // 읽기전용 결의서 문서 — 결의서 화면과 지출 증빙 영역 양쪽에서 재사용.
 // printClass가 있으면 그 요소가 인쇄 대상이 된다(증빙 모달에서 이것만 뽑아 인쇄).
 export const ResolutionDocument = ({ doc, company, printClass }) => {
@@ -709,7 +566,7 @@ export const ResolutionDocument = ({ doc, company, printClass }) => {
 
 // 실제 동진테크 지출결의서 양식(지출처·지출총액·구매품의NO·신청자·지출방법 + 품목 명세 + 결재란) 기반.
 // 화면에서 품목·특기사항을 보완하고 인쇄하면 대표가 서명하는 방식(전자결재 아님).
-export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
+export const ResolutionPreview = ({ doc, company, onSaved, onDeleted, goRoute }) => {
   const toast = useToast();
   const { confirm } = useConfirm();
   const [edit, setEdit] = useState(false);
@@ -720,7 +577,11 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
   useEffect(() => { setForm(doc); setEdit(false); }, [doc.id]);
   useEffect(() => { api.getApprovalPresets().then(setPresets); }, []);
   useEffect(() => { api.getRefItems('item').then(list => setItemMaster(list || [])); }, []);
-  const done = doc.status === '완료';
+  /* 결재 단계 — 작성 → 승인 → 완료(지출 처리됨). 규칙은 서버 lib/docExec.js(구매품의서와 같다).
+     돈 없이 끝난 완료(이미 지급된 청구서라 승인 즉시 완료)는 txn_id 가 없다 — 되돌릴 곳은 '승인 취소'. */
+  const status = doc.status || '작성';
+  const done = status === '완료';
+  const spent = done && !!doc.txn_id;
   // 결재선: 편집 중이면 form, 아니면 doc. 없으면 담당/결재/대표 기본
   const approval = (form.approval && form.approval.length)
     ? form.approval
@@ -776,14 +637,34 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
        같은 문서의 내용만 바뀐 지금은 id 가 그대로라 form 이 옛 품목·옛 금액에 머물렀다 —
        왼쪽 목록은 550,000인데 본문 지출총액은 500,000으로 남는 식이다. */
     setForm(res.resolution);
-    toast.push(`${res.resolution.invoiceNo || '청구서'} 품목 ${res.resolution.lineCount}줄을 불러왔어요`);
-    setEdit(false); onSaved();
+    toast.push(`${res.resolution.invoiceNo || '청구서'} 품목 ${res.resolution.lineCount}줄을 불러왔어요${res.resolution.unapproved ? '. 작성 상태로 돌아갔어요' : ''}`);
+    setEdit(false); onSaved(doc.id);
   };
 
   const save = async () => {
+    // 승인된 결의서를 고치면 결재받은 문서가 아니게 된다 — 서버가 작성으로 되돌린다. 먼저 알린다.
+    if (status === '승인') {
+      const ok = await confirm({
+        tone: 'warn', icon: <Icon.Warn size={22}/>, title: '승인이 풀려요',
+        body: '승인된 결의서를 고치면 작성 상태로 돌아가요. 다시 승인받아야 해요.',
+        confirmLabel: '고쳐서 저장',
+      });
+      if (!ok) return;
+    }
     const res = await api.updateResolution(doc.id, { ...form, amount: itemsTotal || form.amount });
     if (!res.ok) return toast.push(res.error || '저장에 실패했어요', { tone: 'warn' });
-    toast.push('결의서를 저장했어요'); setEdit(false); onSaved();
+    toast.push(res.unapproved ? '저장했어요. 작성 상태로 돌아갔어요.' : '결의서를 저장했어요'); setEdit(false); onSaved(doc.id);
+  };
+
+  // 승인 — 처리할지 곧바로 묻는다(처리할 돈이 없으면 서버가 바로 완료로 둔다)
+  const approve = async () => {
+    const next = await approveAndAsk({ approve: () => api.approveResolution(doc.id), confirm, toast, onApproved: () => onSaved(doc.id) });
+    if (next === 'exec') setProcessOpen(true);
+  };
+  const unapprove = async () => {
+    const res = await api.unapproveResolution(doc.id);
+    if (!res.ok) return toast.push(res.error || '되돌리지 못했어요', { tone: 'warn' });
+    toast.push('작성 상태로 되돌렸어요'); onSaved(doc.id);
   };
   const remove = async () => {
     /* 완료된 결의서는 지출 거래·청구서 정산을 물고 있다. 그냥 지우면 그것들이 고아로 남고
@@ -791,8 +672,8 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
        그래서 완료 건은 "지출까지 함께 지운다"고 분명히 말하고 cascade 로 부른다. */
     const ok = await confirm({
       tone: 'neg',
-      title: done ? '결의서·지출 함께 삭제' : '결의서 삭제',
-      body: done
+      title: spent ? '결의서·지출 함께 삭제' : '결의서 삭제',
+      body: spent
         ? <>
             <div style={{ marginBottom: 6 }}>{doc.doc_no} 결의서와 <b>이 결의서로 집행된 지출 이력</b>을 함께 지웁니다.</div>
             <div>연결된 매입 청구서가 있으면 <b>미지급</b>으로 되돌아가고, 계좌 잔액도 그만큼 복구됩니다.</div>
@@ -804,7 +685,7 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
       confirmLabel: '삭제',
     });
     if (!ok) return;
-    const res = await api.deleteResolution(doc.id, { cascade: done });
+    const res = await api.deleteResolution(doc.id, { cascade: spent });
     if (!res.ok) return toast.push(res.error || '삭제에 실패했어요', { tone: 'warn' });
     toast.push(res.keptTxn
       ? '삭제됐어요. 연결돼 있던 지출 거래는 장부에 남겨뒀어요(연결 전 상태로 되돌렸습니다).'
@@ -819,7 +700,7 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
       tone: 'neg',
       title: '처리를 취소할까요?',
       body: <>
-        <div style={{ marginBottom: 6 }}>{doc.doc_no} 집행을 되돌려 <b>처리 대기</b>로 보냅니다.</div>
+        <div style={{ marginBottom: 6 }}>{doc.doc_no} 집행을 되돌려 <b>승인</b> 상태로 보냅니다.</div>
         <div>이 결의서로 만든 지출 거래는 지워지고, 연결된 매입 청구서는 <b>미지급</b>으로 되돌아갑니다.</div>
         <div style={{ marginTop: 6 }} className="text-muted">마감된 달의 지출은 되돌릴 수 없어요(그 달 잔액이 바뀝니다).</div>
       </>,
@@ -830,7 +711,7 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
     if (!res.ok) return toast.push(res.error || '되돌리지 못했어요', { tone: 'warn' });
     /* 무엇을 했는지 그대로 말한다. '남겨뒀다'만 말하면, 그 거래가 여전히 '지급완료'인지
        원래 상태로 돌아갔는지 알 수 없어 사용자가 장부를 직접 확인해야 한다. */
-    toast.push(!res.keptTxn ? '처리를 취소했어요. 처리 대기로 돌아갔어요.'
+    toast.push(!res.keptTxn ? '처리를 취소했어요. 승인 상태로 돌아갔어요.'
       : res.restored ? '처리를 취소했어요. 연결돼 있던 지출 거래는 연결 전 상태로 되돌렸어요.'
       : '처리를 취소했어요. 연결돼 있던 지출 거래는 장부에 그대로 남아 있어요 — 상태를 확인해주세요.');
     onSaved();
@@ -857,28 +738,39 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted }) => {
           </>
         ) : (
           <>
+            {/* 결재 단계별 주 동작 — 작성: 승인 / 승인: 지출 처리 / 완료: 처리 취소 */}
+            {spent ? (
+              <button className="btn" onClick={unprocess} title="집행을 되돌려 승인 상태로 보냅니다">
+                <Icon.Refresh size={14}/> 처리 취소
+              </button>
+            ) : done ? (
+              <button className="btn ghost sm" onClick={unapprove} title="처리할 돈 없이 끝난 결의서예요">승인 취소</button>
+            ) : status === '승인' ? (
+              <>
+                <button className="btn ghost sm" onClick={unapprove}>승인 취소</button>
+                <button className="btn primary" onClick={() => setProcessOpen(true)}><Icon.Check size={14}/> 지출 처리</button>
+              </>
+            ) : (
+              <button className="btn primary" onClick={approve}><Icon.Check size={14}/> 승인</button>
+            )}
             {/* 삭제는 완료 건에도 있다. 잘못 집행한 결의서를 없앨 길이 없으면
                 틀린 지출이 장부에 영원히 남는다(완료 건은 지출까지 함께 되돌린다). */}
-            <button className="btn ghost" onClick={remove} title={done ? '결의서와 지출 이력을 함께 삭제' : '결의서 삭제'}>
+            <button className="btn ghost" onClick={remove} title={spent ? '결의서와 지출 이력을 함께 삭제' : '결의서 삭제'}>
               <Icon.Trash size={14}/>
             </button>
             {!done && <button className="btn" onClick={() => setEdit(true)}><Icon.Pencil size={14}/> 편집</button>}
             <button className="btn" onClick={doPrint}><Icon.Print/> 인쇄</button>
-            {/* 처리 = 이 결의서대로 지출 집행. 처리되면 목록에서 빠진다. */}
-            {done
-              ? <>
-                  <span className="badge pos" style={{ alignSelf: 'center' }}><span className="dot"/>처리 완료</span>
-                  <button className="btn" onClick={unprocess} title="집행을 되돌려 처리 대기로 보냅니다">
-                    <Icon.Refresh size={14}/> 처리 취소
-                  </button>
-                </>
-              : <button className="btn primary" onClick={() => setProcessOpen(true)}><Icon.Check size={14}/> 처리</button>}
           </>
         )}
       </DocToolbar>
 
-      <ProcessDrawer open={processOpen} onClose={() => setProcessOpen(false)} doc={doc}
-        onDone={() => { setProcessOpen(false); onSaved(); }}/>
+      <ExecDrawer open={processOpen} onClose={() => setProcessOpen(false)}
+        doc={{
+          kind: 'resolution', id: doc.id, docNo: doc.doc_no, title: doc.title, vendorName: doc.vendor_name,
+          vendorId: doc.vendor_id, amount: doc.amount, amountIsSupply: false, payDate: doc.pay_date,
+          invoice: doc.invoice && doc.invoice.remain > 0 ? doc.invoice : null,
+        }}
+        onDone={() => { setProcessOpen(false); onSaved(doc.id); }} onChanged={() => onSaved(doc.id)}/>
 
       {/* 인쇄 대상 — 실제 결의서 양식(가로 계열이라 그대로 폭 채움) */}
       <DocViewport>

@@ -1447,8 +1447,12 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 .resolution-paper { padding: 36px 40px; }
 /* ── 문서 센터 공용 레이아웃(DocWorkspace) — 좌 리스트 + 우 헤더/콘텐츠 ── */
 .doc-ws { display: grid; grid-template-columns: clamp(280px, 320px, 360px) 1fr; gap: 16px; align-items: start; }
-.doc-ws-side { overflow: hidden; padding: 0; }
-.doc-ws-side-top { padding: 12px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+/* overflow 를 자르지 않는다 — 위쪽 필터의 기간 선택 패널(absolute)이 카드에 잘려 안 보였다.
+   둥근 모서리 밖으로 행 배경이 새지 않게 스크롤 칸 쪽에서 아래 모서리를 둥글린다. */
+.doc-ws-side { padding: 0; }
+.doc-ws-side-top { padding: 12px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px;
+  position: relative; z-index: 3; }
+.doc-ws-side-scroll { border-radius: 0 0 var(--r-lg) var(--r-lg); overflow: hidden; }
 /* 좌측 목록 스크롤은 **데스크톱 2열 프레임에서만** 준다(아래 min-width:1201px).
    기본(좁은 폭·모바일)은 캡 없이 자연스럽게 흘러 바깥 스크롤 하나만 생긴다 —
    예전엔 여기 max-height 캡이 있어 '좌측 목록 스크롤 + 바깥 콘텐츠 스크롤' 이중이 됐다. */
@@ -1938,7 +1942,9 @@ body:has([data-modal-open]) {
 
 /* Tablet (≤ 1024px) */
 @media (max-width: 1024px) {
-  .search { width: 200px; }
+  /* ⚠ 상단바 검색에만 건다. 맨 .search 로 두면 화면·서랍 안의 검색창까지 줄고,
+     아래 ≤480 규칙은 **통째로 숨겨** 폰에서 문서 목록·고르기 서랍의 검색이 사라졌다. */
+  .topbar .search { width: 200px; }
   .page-shell { padding: 0 24px 48px; }
   .topbar { padding: 0 24px; }
 }
@@ -1979,7 +1985,7 @@ body:has([data-modal-open]) {
     gap: 10px;
   }
 
-  .search {
+  .topbar .search {
     width: 160px;
     padding: 7px 10px;
     font-size: 12px;
@@ -2009,7 +2015,7 @@ body:has([data-modal-open]) {
 
 /* Narrow mobile (≤ 480px) */
 @media (max-width: 480px) {
-  .search { display: none; }
+  .topbar .search { display: none; }
 
   .stat .stat-num { font-size: 22px; }
 
@@ -2190,6 +2196,33 @@ body:has([data-modal-open]) {
 .entry-hint.warn { background: var(--warn-bg, #fff7ed); }
 .entry-hint.warn > svg { color: var(--warn, #c2410c); }
 .entry-hints > .btn.sm.ghost { align-self: flex-start; }
+
+/* ── 지출 처리 창(ExecDrawer) — 품의·결의서 공용 ──
+   안내는 entry-hint 와 같은 결: 평소엔 회색 면, 되물을 일(금액 맞는 미지급 청구서)만 경고색. */
+.exec-note { display: flex; gap: 10px; align-items: flex-start;
+  padding: 12px 14px; border-radius: 10px; background: var(--surface-2); font-size: 13px; line-height: 1.55; }
+.exec-note > svg { flex: 0 0 auto; margin-top: 2px; color: var(--muted); }
+.exec-note.warn { background: var(--warn-bg); }
+.exec-note.warn > svg { color: var(--warn-ink); }
+.exec-cands { max-height: 320px; overflow-y: auto; }
+.exec-cand { text-align: left; padding: 10px 12px; border-radius: 10px; cursor: pointer; font-family: inherit;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.exec-cand:hover { background: var(--surface-2); }
+.exec-cand.on { border-color: var(--brand); background: var(--brand-soft); }
+.exec-empty { padding: 16px; text-align: center; border: 1px dashed var(--line); border-radius: 10px; }
+
+/* ── 문서 목록 필터(DocFilters) — 좌측 목록 위 ── */
+.doc-filters { display: flex; flex-direction: column; gap: 8px; }
+.doc-filters .search { width: 100%; box-sizing: border-box; }
+.doc-filters .search input { min-width: 0; flex: 1; }
+.doc-filters-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.doc-filters-row .period-picker { flex: 0 0 auto; }
+.doc-filters-vendor { position: relative; flex: 1 1 auto; min-width: 0; }
+.doc-filters-vendor .input, .doc-filters-vendor input { height: 32px; font-size: 12.5px; }
+.doc-filters-count { margin-left: 2px; font-weight: 600; color: var(--brand-ink); }
+.chip.active .doc-filters-count { color: inherit; }
+/* 문서 목록 한 줄의 연결 표시(DJ-… 결의 / 청구서 번호) — 본문보다 한 단계 옅게 */
+.doc-ws-link { font-size: 11.5px; color: var(--muted); }
 
 /* 헤더 오른쪽 끝의 사용자 — 사이드바 맨 아래에 있던 것을 옮겨왔다.
    메뉴가 길어져 스크롤이 생기면 접힌 자리로 밀려 "로그아웃이 어디 갔지"가 됐다.

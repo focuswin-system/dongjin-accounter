@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, localToday } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, localToday, DateInput } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 import { SourceChooser } from '../lib/components/SourceChooser'
 import { PickListDrawer } from '../lib/components/PickListDrawer'
+import { DocFilters } from '../lib/components/DocFilters'
+import { useDocList } from '../lib/useDocList'
 import { makeGridKeyHandler } from '../lib/gridKeys'
 
 // 定算內譯書 — 항목은 고정 분류(도로비·교통비…) 없이 쓰는 사람이 필요한 줄만 추가한다.
@@ -35,7 +37,8 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
     received_amount: d.received_amount ? String(d.received_amount) : '', note: d.note || '',
     // category 는 화면에서 사라진 옛 분류(도로비·교통비…)다. 안 들고 있으면 옛 문서를 한 번
     // 저장하는 것만으로 전부 '기타경비'로 뭉개진다 → 손대지 않고 그대로 되돌려 보낸다.
-    lines: (d.lines || []).map(l => ({ title: l.title || '', amount: String(l.amount || ''), memo: l.memo || '', category: l.category || '' })),
+    lines: (d.lines || []).map(l => ({ title: l.title || '', amount: String(l.amount || ''), memo: l.memo || '', category: l.category || '',
+      source_type: l.source_type || '', source_id: l.source_id || '' })),
     approval: (d.approval && d.approval.length) ? d.approval : [],
   })
 
@@ -76,7 +79,9 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
     for (const l of form.lines) {
       if ((l.title || '').trim() || numOf(l.amount)) {
         // category 는 옛 문서에서 읽어온 값만 되돌려 보낸다(새 줄은 서버 기본값).
-        lines.push({ title: (l.title || '').trim(), amount: numOf(l.amount), memo: (l.memo || '').trim(), ...(l.category ? { category: l.category } : {}) })
+        lines.push({ title: (l.title || '').trim(), amount: numOf(l.amount), memo: (l.memo || '').trim(), ...(l.category ? { category: l.category } : {}),
+          // 어디서 가져온 줄인지(거래·결의서·품의) — 같은 돈이 다른 정산서에 또 들어가는 걸 막는 근거
+          ...(l.source_type && l.source_id ? { source_type: l.source_type, source_id: l.source_id } : {}) })
       }
     }
     if (!lines.length) return toast.push('지출 항목을 하나 이상 입력해주세요')
@@ -138,7 +143,7 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
             <tbody>
               <tr>
                 <th>정산자</th><td colSpan={2}>{edit ? <CellIn value={form.settler} onChange={v => setH('settler', v)}/> : form.settler}</td>
-                <th>정산일</th><td colSpan={2}>{edit ? <CellIn value={form.settle_date} onChange={v => setH('settle_date', v)} placeholder="YYYY-MM-DD"/> : (form.settle_date || '')}</td>
+                <th>정산일</th><td colSpan={2}>{edit ? <DateInput className="settle-cellin" value={form.settle_date || ''} onChange={e => setH('settle_date', e.target.value)}/> : (form.settle_date || '')}</td>
               </tr>
               <tr>
                 <th>제　목</th><td colSpan={5} className="settle-subject">{edit ? <CellIn value={form.purpose} onChange={v => setH('purpose', v)} placeholder="예: 7월 세금납부·자재대 정산"/> : form.purpose}</td>
@@ -246,61 +251,57 @@ const SETTLE_SOURCES = [
   },
 ]
 
-export const SettlementScreen = () => {
+export const SettlementScreen = ({ focusId = null }) => {
+  const toast = useToast()
   const [srcOpen, setSrcOpen] = useState(false)
   const [pickOpen, setPickOpen] = useState(false)
   const [txns, setTxns] = useState(null)
   const [docPickOpen, setDocPickOpen] = useState(false)   // 품의·결의에서 불러오기
   const [pickDocs, setPickDocs] = useState(null)
+  const [hiddenUsed, setHiddenUsed] = useState(0)          // 이미 정산서에 들어가 뺀 건수
   /* 새 문서에 미리 채워 넣을 줄. blankDoc 이 상수라 여기에 담아 둔다 —
      creating 이 false→true 로 갈 때 미리보기가 새로 마운트되면서 이 값을 읽는다. */
   const [seed, setSeed] = useState([])
-  const [list, setList] = useState([])
   const [company, setCompany] = useState(null)
-  const [selId, setSelId] = useState(null)
+  const [selId, setSelId] = useState(focusId)
   const [sel, setSel] = useState(null)
   const [creating, setCreating] = useState(false)
-  const [q, setQ] = useState('')
-  const [total, setTotal] = useState(0)
-  const [hasMore, setHasMore] = useState(false)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const LIMIT = 50
 
-  /* 문서가 쌓여도 견디게 — 목록은 서버에서 50건씩. 검색은 q, '더 보기'는 offset.
-     ⚠ keepId/query 를 인자로: 저장 직후 방금 문서를 유지하거나, 검색 직후 새 질의를 쓴다. */
-  const load = async ({ append = false, query = q, keepId } = {}) => {
-    if (append) setLoadingMore(true)
-    const offset = append ? list.length : 0
-    const [page, comp] = await Promise.all([
-      api.getSettlementsPage({ q: query, limit: LIMIT, offset }),
-      company ? Promise.resolve(company) : api.getCompany(),
-    ])
-    const rows = page.rows || []
-    const merged = append ? [...list, ...rows] : rows
-    setList(merged); setTotal(page.total); setHasMore(page.hasMore); setLoadingMore(false)
-    if (comp) setCompany(comp)
-    setSelId(prev => {
-      const want = keepId || prev
-      return want && merged.some(r => r.id === want) ? want : (merged[0]?.id || null)
-    })
-    return page
+  useEffect(() => { api.getCompany().then(setCompany) }, [])
+
+  // 목록 — 서버에서 50건씩. 정산서는 거래처가 줄마다 달라 기간·검색만 건다(lib/useDocList.js)
+  const list = useDocList((p) => api.getSettlementsPage(p))
+
+  /* 선택은 지금 목록에 보이는 것 중에서 지킨다. 다른 화면에서 넘어온 문서(focusId)와
+     방금 저장한 문서는 목록에서 빠져도 연 채로 둔다. */
+  const pinned = useRef(focusId)
+  useEffect(() => { if (focusId) { pinned.current = focusId; setCreating(false); setSelId(focusId) } }, [focusId])
+  useEffect(() => {
+    if (list.loading) return
+    setSelId(prev => (prev && (prev === pinned.current || list.rows.some(r => r.id === prev))) ? prev : (list.rows[0]?.id || null))
+  }, [list.rows, list.loading])
+  // 늦게 온 응답은 버린다 — 줄을 빠르게 옮겨 누르면 목록에 칠해진 줄과 열린 문서가 달라진다
+  const selSeq = useRef(0)
+  const loadSel = (id) => { const my = ++selSeq.current; if (!id) { setSel(null); return } api.getSettlement(id).then(d => { if (my === selSeq.current) setSel(d) }) }
+  useEffect(() => { if (!creating) loadSel(selId) }, [selId, creating])
+  const refresh = (id) => {
+    const target = id || selId
+    pinned.current = target
+    if (id) setSelId(id)
+    list.reload(); loadSel(target)
   }
-  useEffect(() => { load() }, [])   // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 검색은 서버로 — 300ms 디바운스. 첫 렌더는 위 load 가 이미 했다.
-  const firstQ = useRef(true)
-  useEffect(() => {
-    if (firstQ.current) { firstQ.current = false; return }
-    const t = setTimeout(() => { load({ query: q }) }, 300)
-    return () => clearTimeout(t)
-  }, [q])   // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (creating) return
-    if (!selId) { setSel(null); return }
-    api.getSettlement(selId).then(setSel)
-  }, [selId, creating])
 
   const blankDoc = { id: '__new', settle_date: localToday(), lines: seed, approval: [] }
+
+  /* ── 같은 돈을 두 번 넣지 않는다 ──
+     한 지출이 여러 얼굴로 온다: 거래 그 자체, 그 거래를 처리한 결의서, 그 결의서가 넘겨받은 품의.
+     각 후보가 가리키는 돈의 열쇠를 전부 모아, 이미 정산서에 들어간 열쇠(서버 used-sources)와
+     하나라도 겹치면 뺀다. 고른 것끼리 겹치면(품의와 그 결의서) 결의서 한 줄만 남긴다. */
+  const keysOfResolution = (r) => [`resolution:${r.id}`, r.txn_id && `txn:${r.txn_id}`,
+    r.purchase_req_id && `purchase_req:${r.purchase_req_id}`].filter(Boolean)
+  const keysOfPreq = (r) => [`purchase_req:${r.id}`, r.txn_id && `txn:${r.txn_id}`,
+    r.resolution && `resolution:${r.resolution.id}`, ...(r.source_txn_ids || []).map(t => `txn:${t}`)].filter(Boolean)
+  const usedBy = (keys, used) => keys.map(k => used[k]).find(Boolean) || null
 
   return (
     <div className="fade-up doc-screen">
@@ -317,49 +318,67 @@ export const SettlementScreen = () => {
           if (id === 'doc') {
             setPickDocs(null); setDocPickOpen(true)
             // 구매품의서 + 지급결의서를 한 목록으로 — 출처가 다른 두 문서를 한 자리에서 고른다
-            Promise.all([api.getPurchaseReqs(), api.getResolutions()]).then(([prs, ress]) => {
-              const a = (prs || []).map(r => ({ id: 'pr:' + r.id, kind: '구매품의', docNo: r.doc_no,
-                title: r.summary || r.vendor_name || '구매품의', vendor: r.vendor_name || '',
-                amount: Number(r.total || r.order_amount) || 0, date: r.req_date || '' }))
-              const b = (ress || []).map(r => ({ id: 're:' + r.id, kind: '지급결의', docNo: r.doc_no,
-                title: r.title || r.vendor_name || '지급결의', vendor: r.vendor_name || '',
-                amount: Number(r.amount) || 0, date: r.pay_date || '' }))
-              setPickDocs([...a, ...b])
+            Promise.all([api.getPurchaseReqs(), api.getResolutions(), api.getSettlementUsedSources()]).then(([prs, ress, used]) => {
+              const a = (prs || []).map(r => ({ id: 'pr:' + r.id, srcType: 'purchase_req', srcId: r.id, kind: '구매품의', docNo: r.doc_no,
+                title: r.summary || r.vendor_name || '구매품의', vendor: r.vendor_name || '', status: r.status || '작성',
+                amount: Number(r.total || r.order_amount) || 0, date: r.req_date || '', keys: keysOfPreq(r) }))
+              const b = (ress || []).map(r => ({ id: 're:' + r.id, srcType: 'resolution', srcId: r.id, kind: '지급결의', docNo: r.doc_no,
+                title: r.title || r.vendor_name || '지급결의', vendor: r.vendor_name || '', status: r.status || '작성',
+                amount: Number(r.amount) || 0, date: r.pay_date || '', keys: keysOfResolution(r) }))
+              const all = [...a, ...b]
+              const free = all.filter(r => !usedBy(r.keys, used || {}))
+              setHiddenUsed(all.length - free.length)
+              // 돈이 실제로 나간(완료) 문서를 위로 — 정산은 쓴 돈을 정리하는 문서다
+              setPickDocs(free.sort((x, y) => Number(y.status === '완료') - Number(x.status === '완료')))
             })
             return
           }
           setTxns(null); setPickOpen(true)
-          // 지출 전체를 받아 화면에서 거른다 — 정산은 보통 최근 몇 달치를 훑어 고른다
-          api.getTransactions({ kind: 'expense' }).then(setTxns)
+          /* 이미 나간 지출만(지급완료) — 정산은 쓴 돈을 정리한다. 아직 안 나간 지출을 넣으면
+             정산서의 지출총액이 통장과 달라진다. 다른 정산서에 이미 들어간 지출은 뺀다. */
+          Promise.all([api.getTransactions({ kind: 'expense' }), api.getSettlementUsedSources()]).then(([rows, used]) => {
+            const all = (rows || []).filter(t => t.status === '지급완료')
+            const free = all.filter(t => !(used || {})[`txn:${t.id}`])
+            setHiddenUsed(all.length - free.length)
+            setTxns(free)
+          })
         }}/>
 
       <PickListDrawer
         open={docPickOpen} onClose={() => setDocPickOpen(false)}
-        title="구매품의·지급결의에서 골라서" sub="정산에 넣을 문서를 고르세요"
+        title="구매품의·지급결의에서 골라서"
+        sub={hiddenUsed > 0 ? `다른 정산서에 이미 들어간 ${hiddenUsed}건은 뺐어요` : '정산에 넣을 문서를 고르세요'}
         placeholder="문서번호·제목·거래처 검색"
         rows={pickDocs}
         match={(r, q) => [r.docNo, r.title, r.vendor, r.kind].filter(Boolean)
           .some(v => String(v).toLowerCase().includes(q.toLowerCase()))}
         render={(r) => ({
           title: `${r.docNo} · ${r.title}`,
-          sub: [r.kind, r.vendor, r.date].filter(Boolean).join(' · '),
+          sub: [r.kind, r.status !== '완료' ? `${r.status} · 지출 전` : null, r.vendor, r.date].filter(Boolean).join(' · '),
           right: r.amount,
         })}
         empty="가져올 구매품의서·지급결의서가 없어요."
         onDone={(rows) => {
+          /* 고른 것끼리 같은 돈이면(품의와 그 품의를 넘겨받은 결의서) 결의서 한 줄만 남긴다 —
+             결의서가 실제 지급액(세액 포함)이고, 품의는 그 전 단계의 결재다. */
+          const resKeys = new Set(rows.filter(r => r.srcType === 'resolution').flatMap(r => r.keys))
+          const kept = rows.filter(r => r.srcType !== 'purchase_req' || !r.keys.some(k => resKeys.has(k)))
+          if (kept.length < rows.length) toast.push(`같은 지출인 구매품의 ${rows.length - kept.length}건은 결의서 줄로 합쳤어요`)
           /* 문서 → 정산 줄. 제목은 문서 제목, 비고에는 **출처(GM-…/DJ-…)** 와 거래처를 남긴다 —
              정산내역서를 받는 사람이 어느 결재에서 온 건지 되짚을 수 있어야 한다. */
-          setSeed(rows.map(r => ({
+          setSeed(kept.map(r => ({
             title: r.title,
             amount: r.amount,
             memo: [`${r.kind} ${r.docNo}`, r.vendor].filter(Boolean).join(' · '),
+            source_type: r.srcType, source_id: r.srcId,
           })))
           setDocPickOpen(false); setCreating(true)
         }}/>
 
       <PickListDrawer
         open={pickOpen} onClose={() => setPickOpen(false)}
-        title="거래내역에서 골라서" sub="정산에 넣을 지출을 고르세요"
+        title="거래내역에서 골라서"
+        sub={hiddenUsed > 0 ? `다른 정산서에 이미 들어간 ${hiddenUsed}건은 뺐어요` : '정산에 넣을 지출을 고르세요'}
         placeholder="거래처·비목·적요 검색"
         rows={txns}
         match={(t, q) => [t.vendor, t.category, t.memo].filter(Boolean)
@@ -377,28 +396,27 @@ export const SettlementScreen = () => {
             title: t.category && t.category !== '—' ? t.category : (t.memo || '지출'),
             amount: Number(t.amount) || 0,
             memo: [t.date, t.vendor !== '(미확인)' ? t.vendor : null].filter(Boolean).join(' · '),
+            source_type: 'txn', source_id: t.id,
           })))
           setPickOpen(false); setCreating(true)
         }}/>
 
       <DocWorkspace>
-        <DocSide top={
-          <div className="search" style={{ margin: 0, padding: '6px 10px' }}>
-            <Icon.Search size={14}/>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="문서번호·정산자·목적 검색"/>
-          </div>}>
-          {list.length === 0
-            ? <DocSideEmpty>{q ? '검색 결과가 없어요.' : <>정산내역서가 없어요.<br/>'새 정산내역서'로 만드세요.</>}</DocSideEmpty>
+        <DocSide top={<DocFilters list={list} placeholder="문서번호·정산자·제목 검색"/>}>
+          {list.rows.length === 0
+            ? <DocSideEmpty>{list.loading ? '불러오는 중…'
+                : (list.filters.q || list.filters.from) ? '조건에 맞는 정산내역서가 없어요.'
+                : <>정산내역서가 없어요.<br/>{"'새 정산내역서'로 만드세요."}</>}</DocSideEmpty>
             : <>
-              {list.map(d => (
+              {list.rows.map(d => (
                 <DocListRow key={d.id} active={!creating && selId === d.id} onClick={() => { setCreating(false); setSelId(d.id) }}
                   docNo={d.doc_no} right={<span className="text-xs text-muted2">{d.settle_date || ''}</span>}
-                  title={d.settler || '—'} meta="잔액" amount={d.balance || 0}/>
+                  title={d.purpose || d.settler || '—'} meta={d.purpose ? `${d.settler || ''} · 잔액` : '잔액'} amount={d.balance || 0}/>
               ))}
-              {hasMore && (
+              {list.hasMore && (
                 <button className="btn ghost" style={{ width: '100%', marginTop: 6 }}
-                  disabled={loadingMore} onClick={() => load({ append: true })}>
-                  {loadingMore ? '불러오는 중…' : `더 보기 · ${list.length}/${total}건`}
+                  disabled={list.loadingMore} onClick={list.loadMore}>
+                  {list.loadingMore ? '불러오는 중…' : `더 보기 · ${list.rows.length}/${list.total}건`}
                 </button>
               )}
             </>}
@@ -406,16 +424,15 @@ export const SettlementScreen = () => {
         <DocMain>
           {creating
             ? <SettlementPreview doc={blankDoc} company={company} isNew
-                onSaved={(id) => { setCreating(false); load({ keepId: id }) }}
+                onSaved={(id) => { setCreating(false); refresh(id) }}
                 onCancelNew={() => setCreating(false)}/>
             : sel
               ? <SettlementPreview key={sel.id} doc={sel} company={company}
-                  onSaved={(id) => load({ keepId: id })}
-                  onDeleted={() => { setSelId(null); load() }}/>
+                  onSaved={(id) => refresh(id)}
+                  onDeleted={() => { setSelId(null); setSel(null); list.reload() }}/>
               : <DocEmpty icon={<Icon.Doc size={32} style={{ opacity: 0.3 }}/>}>왼쪽에서 정산내역서를 고르거나 새로 만드세요.</DocEmpty>}
         </DocMain>
       </DocWorkspace>
     </div>
   )
 }
-

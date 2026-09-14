@@ -1,20 +1,21 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { futureDateError, kstToday } = require('../db')
-const { closedPeriodError } = require('../lib/closing')
-const { rollbackQuietly } = require('../lib/tx')
-const { vatFields } = require('../lib/vat')
-const { ledgerError } = require('../lib/ledger')
-const { settleAcctCode } = require('../lib/acctCode')
+const { kstToday } = require('../db')
 const { insertWithDocNo } = require('../lib/docno')
 const { withTx, httpError } = require('../lib/withTx')
-const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
+const { pageParams, buildWhere, docDateExpr, approvalStatusSql, approvalCounts } = require('../lib/pagedList')
+const {
+  NOT_CLAIMED_SQL, syncReqFromResolution,
+  approveDoc, execCandidates, executeDoc, invoiceState, linkInvoiceDoc, loadDoc, openInvoicesFor, resolutionOfReq, sourceTxnsOfReq, unapproveDoc, undoDoc,
+} = require('../lib/docExec')
+const { VAT_RATE } = require('../lib/vat')
 
 const router = Router()
+const TABLE = 'expense_resolutions'
 
 const parseItems = (v) => { try { return v ? JSON.parse(v) : [] } catch { return [] } }
 const parseJson = (v, fb) => { try { return v ? JSON.parse(v) : fb } catch { return fb } }
-const adapt = (r) => ({ ...r, amount: Number(r.amount), items: parseItems(r.items), approval: parseJson(r.approval, []) })
+const adapt = (r) => ({ ...r, status: r.status || '작성', amount: Number(r.amount), items: parseItems(r.items), approval: parseJson(r.approval, []) })
 
 /**
  * 청구서 1건 → 결의서 품목 줄.
@@ -26,21 +27,27 @@ const adapt = (r) => ({ ...r, amount: Number(r.amount), items: parseItems(r.item
  * 만들 때와 다시 불러올 때가 **같은 함수를 쓴다.** 규칙을 두 군데 두면 한쪽만 고쳐져
  * "새로 만든 결의서와 불러온 결의서의 합계가 다른" 일이 생긴다.
  *
+ * 이미 일부 지급된 청구서면 '기지급' 줄을 빼서 **남은 금액**이 합계가 되게 한다.
+ * 예전엔 청구서 총액으로 만들어, 500만 중 200만 낸 청구서의 결의서가 500만으로 결재됐다.
+ *
  * 품명과 규격은 한 칸에 합친다 — 양식의 칸이 '품명 및 규격' 하나이고,
  * 구매품의서·견적요청서도 같은 방식으로 채운다(`품명 규격`).
  */
-function itemsFromInvoice(inv, lines, fallbackTitle) {
+function itemsFromInvoice(inv, lines, fallbackTitle, paid = 0) {
+  let items
   if (!lines.length) {
     const gross = Number(inv.total_amount) || 0
-    return [{ name: fallbackTitle, unit: '식', qty: 1, price: gross, amount: gross, note: inv.invoice_no || '' }]
+    items = [{ name: fallbackTitle, unit: '식', qty: 1, price: gross, amount: gross, note: inv.invoice_no || '' }]
+  } else {
+    items = lines.map(l => ({
+      name: [l.name, l.spec].filter(Boolean).join(' '),
+      unit: l.unit || '', qty: Number(l.qty) || 0, price: Number(l.unit_price) || 0,
+      amount: Number(l.amount) || 0, note: '',
+    }))
+    const vat = Number(inv.vat_amount) || 0
+    if (vat > 0) items.push({ name: '부가세', unit: '', qty: 1, price: vat, amount: vat, note: inv.invoice_no || '' })
   }
-  const items = lines.map(l => ({
-    name: [l.name, l.spec].filter(Boolean).join(' '),
-    unit: l.unit || '', qty: Number(l.qty) || 0, price: Number(l.unit_price) || 0,
-    amount: Number(l.amount) || 0, note: '',
-  }))
-  const vat = Number(inv.vat_amount) || 0
-  if (vat > 0) items.push({ name: '부가세', unit: '', qty: 1, price: vat, amount: vat, note: inv.invoice_no || '' })
+  if (paid > 0) items.push({ name: '기지급액', unit: '', qty: 1, price: -paid, amount: -paid, note: '이미 지급한 금액' })
   return items
 }
 
@@ -67,76 +74,78 @@ const nextDocNo = async (execFn, dateStr) => {
   return `DJ-${year}-${String(Number(maxno) + 1).padStart(4, '0')}`
 }
 
+/** 결의서 한 건을 넣는다 — 만드는 창구가 넷이라(직접·청구서·품의·지출) 칸 목록을 한 곳에 둔다 */
+async function insertResolution(conn, f) {
+  const id = randomUUID()
+  await insertWithDocNo(
+    () => nextDocNo((sql, p) => conn.execute(sql, p), f.pay_date),
+    (doc_no) => conn.execute(
+      `INSERT INTO expense_resolutions (id, doc_no, invoice_id, purchase_req_id, vendor_id, vendor_name, title, amount, pay_method, pay_date, applicant, items, note, approval, status)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [id, doc_no, f.invoice_id || null, f.purchase_req_id || null, f.vendor_id || null, f.vendor_name || '', f.title || '지출 결의',
+       Number(f.amount) || 0, f.pay_method || '계좌이체', f.pay_date || null, f.applicant || '관리자',
+       JSON.stringify(f.items || []), f.note || '', JSON.stringify(f.approval || []), f.status || '작성']))
+  return id
+}
+
+/* 양식의 '구매품의NO' 칸에 넣을 **진짜 품의번호**.
+ *
+ * 예전엔 화면이 그 칸에 결의서 자기 번호(DJ-…)를 넣었다 — 결재하는 사람이
+ * "품의번호가 왜 결의서 번호랑 같지" 이거나, 반대로 **품의와 연결된 줄 알고** 넘어갔다.
+ * 품의에서 만든 결의서는 purchase_req_id 로, 그 전 방식(품의→미지급금→결의서)은 같은 청구서로 잇는다.
+ * ⚠ 서브쿼리로 한 개만 집는다. JOIN 으로 잇던 시절엔 한 청구서에 품의가 둘이면 결의서가 목록에 두 줄 섰다.
+ * ⚠ 품의를 안 거친 지출은 **빈 칸**이다. 없는 걸 있는 것처럼 적지 않는다(인쇄해서 손으로 적는 자리다). */
+const PREQ_NO_SQL = `COALESCE(
+    (SELECT pr.doc_no FROM purchase_reqs pr WHERE pr.id = er.purchase_req_id),
+    (SELECT pr.doc_no FROM purchase_reqs pr WHERE er.invoice_id IS NOT NULL AND pr.invoice_id = er.invoice_id ORDER BY pr.created_at LIMIT 1)
+  ) AS purchase_req_no`
+
 // 목록 (최신순)
 router.get('/', async (req, res, next) => {
   try {
-    /* 양식의 '구매품의NO' 칸에 넣을 **진짜 품의번호**를 함께 읽는다.
-     *
-     * 예전엔 화면이 그 칸에 결의서 자기 번호(DJ-…)를 넣었다. 넣을 값이 없어서였는데,
-     * 앱에는 구매품의서(GM-…)가 따로 있어서 결재하는 사람이 두 가지로 오해했다 —
-     * "품의번호가 왜 결의서 번호랑 같지" 이거나, 반대로 **품의와 연결된 줄 알고** 넘어간다.
-     * 값을 찾을 길은 이미 있었다: 구매품의서가 미지급금을 만들면 purchase_reqs.invoice_id 가
-     * 남고, 결의서도 같은 청구서를 가리킨다(er.invoice_id). 한 번 이으면 진짜 번호가 나온다.
-     * ⚠ 품의를 안 거친 지출은 **빈 칸**이다. 없는 걸 있는 것처럼 적지 않는다
-     *   (인쇄해서 손으로 적는 자리다). */
-    /* 목록이 한없이 길어져도 견디게 — 검색(q)·기간(from/to)·페이지(limit/offset)를 받는다.
-     * ⚠ 파라미터가 하나도 없으면 **예전처럼 배열 전체**를 준다. 정산내역서가 결의서를
-     *   후보로 끌어올 때(getResolutions) 그 계약을 안 깨려는 것. 화면 목록만 페이지로 부른다. */
-    const q = (req.query.q || '').trim()
-    const { from, to, status } = req.query
-    const paged = q || from || to || status != null || req.query.limit != null || req.query.offset != null
-    const where = [], args = []
-    if (q) { const like = `%${q}%`; where.push('(er.doc_no LIKE ? OR er.vendor_name LIKE ? OR v.name LIKE ? OR er.title LIKE ?)'); args.push(like, like, like, like) }
-    if (status === 'pending') where.push("(er.status <> '완료' OR er.status IS NULL)")
-    if (from) { where.push('er.created_at >= ?'); args.push(from + ' 00:00:00') }
-    if (to)   { where.push('er.created_at <= ?'); args.push(to + ' 23:59:59') }
-    const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : ''
-
-    if (!paged) {
+    /* 파라미터가 하나도 없으면 **예전처럼 배열 전체**를 준다. 정산내역서가 결의서를
+     * 후보로 끌어올 때(getResolutions) 그 계약을 안 깨려는 것. 화면 목록만 페이지로 부른다. */
+    const pp = pageParams(req)
+    if (!pp.paged) {
       const [rows] = await req.db.execute(
-        `SELECT er.*, v.name AS vendor_name2, pr.doc_no AS purchase_req_no
+        `SELECT er.*, v.name AS vendor_name2, ${PREQ_NO_SQL}
            FROM expense_resolutions er
            LEFT JOIN vendors v ON er.vendor_id = v.id
-           LEFT JOIN purchase_reqs pr ON pr.invoice_id = er.invoice_id
           ORDER BY er.created_at DESC, er.id DESC`)
       return res.json(rows.map(adapt))
     }
-
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200)
-    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0)
+    const { whereSql, args } = buildWhere(pp, ['er.doc_no', 'er.vendor_name', 'v.name', 'er.title'], {
+      prefix: 'er.', dateExpr: docDateExpr('pay_date', 'er.'), vendor: true, statusSql: approvalStatusSql('er.'),
+    })
     const [[{ cnt }]] = await req.db.execute(
       `SELECT COUNT(*) AS cnt FROM expense_resolutions er LEFT JOIN vendors v ON er.vendor_id = v.id ${whereSql}`, args)
     const [rows] = await req.db.execute(
-      `SELECT er.*, v.name AS vendor_name2, pr.doc_no AS purchase_req_no
+      `SELECT er.*, v.name AS vendor_name2, ${PREQ_NO_SQL}
          FROM expense_resolutions er
          LEFT JOIN vendors v ON er.vendor_id = v.id
-         LEFT JOIN purchase_reqs pr ON pr.invoice_id = er.invoice_id
          ${whereSql}
         ORDER BY er.created_at DESC, er.id DESC
-        LIMIT ${limit} OFFSET ${offset}`, args)
-    // 배지용 — 검색과 무관한 '처리 대기' 전체 건수(작업 큐 크기).
-    const [[{ pend }]] = await req.db.execute(
-      "SELECT COUNT(*) AS pend FROM expense_resolutions WHERE status <> '완료' OR status IS NULL")
-    res.json({ rows: rows.map(adapt), total: Number(cnt), pendingCount: Number(pend), hasMore: offset + rows.length < Number(cnt) })
+        LIMIT ${pp.limit} OFFSET ${pp.offset}`, args)
+    // 배지용 — 검색과 무관한 '할 일' 크기(작성 = 승인 대기, 승인 = 처리 대기)
+    const counts = await approvalCounts(req.db, 'expense_resolutions')
+    res.json({ rows: rows.map(adapt), total: Number(cnt), hasMore: pp.offset + rows.length < Number(cnt), counts,
+      pendingCount: (counts['작성'] || 0) + (counts['승인'] || 0) })
   } catch (e) { next(e) }
 })
 
 // 특정 지출 거래에 연결된 결의서 (증빙 영역에서 열람용). 없으면 null.
 router.get('/by-txn/:txnId', async (req, res, next) => {
   try {
-    const [[r]] = await req.db.execute('SELECT * FROM expense_resolutions WHERE txn_id = ?', [req.params.txnId])
+    const [[r]] = await req.db.execute(
+      `SELECT er.*, ${PREQ_NO_SQL} FROM expense_resolutions er WHERE er.txn_id = ?`, [req.params.txnId])
     res.json(r ? adapt(r) : null)
   } catch (e) { next(e) }
 })
 
 /**
- * 결의서를 붙일 수 있는 지출 거래 — **결의서를 만들기 전에** 고르는 목록.
+ * 결의서를 붙일 수 있는 지출 거래 — **결의서를 만들기 전에** 고르는 목록('이미 나간 돈에서').
  *
- * ⚠ /:id/matchable 과 하는 일이 비슷하지만 그건 **결의서가 이미 있을 때** 쓴다
- *   (그 결의서의 거래처·금액에 가까운 것을 위로 올린다). 여기는 아직 결의서가 없어서
- *   기준으로 삼을 값이 없다 — 최근 것부터 준다.
- *
- * 왜 필요한가: 통장에서 이미 나간 돈에 **사후로 결재 근거를 붙이는** 흐름이다.
+ * 통장에서 이미 나간 돈에 **사후로 결재 근거를 붙이는** 흐름이다.
  * 예전엔 빈 폼을 열어 거래처·금액·날짜를 손으로 옮겨 적었다 — 그 값이 장부에 이미 있는데도.
  */
 router.get('/candidates', async (req, res, next) => {
@@ -150,14 +159,12 @@ router.get('/candidates', async (req, res, next) => {
          LEFT JOIN vendors  v ON t.vendor_id  = v.id
          LEFT JOIN accounts a ON t.account_id = a.id
         WHERE t.kind = 'expense'
-          /* ⚠ **이미 나간 돈만.** 화면이 "통장에서 빠져나간 지출"이라고 약속하고,
-             연결(process)은 대상 거래를 '지급완료'로 바꾼다 — 아직 안 나간 건을 넣어 주면
-             나가지도 않은 돈이 계좌 잔액에서 빠진다. 계좌 잔액은 이 조합만 센다
-             (routes/accounts.js calcBalance: kind='expense' AND status='지급완료').
-             계좌가 없는 건도 뺀다 — 골라 봐야 ledgerError 로 막히는 선택지다. */
+          /* ⚠ **이미 나간 돈만.** 연결은 대상 거래를 '지급완료'로 바꾼다 — 아직 안 나간 건을
+             넣어 주면 나가지도 않은 돈이 계좌 잔액에서 빠진다. 계좌가 없는 건도 뺀다 —
+             골라 봐야 ledgerError 로 막히는 선택지다. */
           AND t.status = '지급완료'
           AND t.account_id IS NOT NULL
-          AND t.id NOT IN (SELECT txn_id FROM expense_resolutions WHERE txn_id IS NOT NULL)
+          ${NOT_CLAIMED_SQL('t.id', null)}
           ${q ? 'AND (v.name LIKE ? OR t.category LIKE ? OR t.memo LIKE ?)' : ''}
         ORDER BY t.date DESC, t.created_at DESC
         LIMIT 50`,
@@ -166,314 +173,288 @@ router.get('/candidates', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/**
+ * 결의서로 넘길 수 있는 구매품의서 — **승인됐고, 아직 처리 안 됐고, 다른 결의서가 없는 것.**
+ *
+ * 작성 중인 품의는 결재가 안 났으므로 넘기지 않는다. 품의에서 이미 지출 처리한 것(완료)도
+ * 넘기지 않는다 — 그걸 결의서로 또 처리하면 같은 돈이 두 번 나간다.
+ * (구매품의서 목록 API 를 쓰지 않는 이유: 결의서만 쓰는 역할은 그 API 권한이 없어 목록이 빈다)
+ */
+router.get('/purchase-req-candidates', async (req, res, next) => {
+  try {
+    const [rows] = await req.db.execute(
+      `SELECT pr.id, pr.doc_no, pr.req_date, pr.vendor_id, pr.vendor_name, pr.summary, pr.invoice_id,
+              COALESCE((SELECT SUM(amount) FROM purchase_req_items WHERE req_id = pr.id), 0) AS total,
+              (SELECT invoice_no FROM invoices WHERE id = pr.invoice_id) AS invoice_no
+         FROM purchase_reqs pr
+        WHERE pr.status = '승인'
+          AND NOT EXISTS (SELECT 1 FROM expense_resolutions er WHERE er.purchase_req_id = pr.id)
+          AND NOT EXISTS (SELECT 1 FROM purchase_req_txns p WHERE p.req_id = pr.id)
+        ORDER BY pr.created_at DESC
+        LIMIT 200`)
+    res.json(rows.map(r => ({ ...r, total: Number(r.total) || 0 })))
+  } catch (e) { next(e) }
+})
+
 router.get('/:id', async (req, res, next) => {
   try {
-    // 목록과 같은 규칙으로 진짜 품의번호를 함께 읽는다(위 주석 참고)
     const [[r]] = await req.db.execute(
-      `SELECT er.*, pr.doc_no AS purchase_req_no
-         FROM expense_resolutions er
-         LEFT JOIN purchase_reqs pr ON pr.invoice_id = er.invoice_id
-        WHERE er.id = ?`, [req.params.id])
+      `SELECT er.*, ${PREQ_NO_SQL} FROM expense_resolutions er WHERE er.id = ?`, [req.params.id])
     if (!r) return res.status(404).json({ error: 'Not found' })
-    res.json(adapt(r))
+    const inv = await invoiceState(req.db, r.invoice_id)
+    res.json({ ...adapt(r),
+      invoice: inv ? { id: inv.id, invoice_no: inv.invoice_no, total: inv.total, remain: inv.remain } : null })
   } catch (e) { next(e) }
 })
 
 // 직접 등록 — 청구서 없는 소액 경비(비누·간식 등)를 결의서부터 작성해 결재받는 경우.
-// 거래·청구서 연결 없이 사람이 지출처·품목·금액을 입력한다.
 router.post('/', async (req, res, next) => {
   try {
-    const { vendor_id, vendor_name, title, items, pay_method, pay_date, applicant, note } = req.body
-    const itemList = Array.isArray(items) && items.length ? items
-      : [{ name: title || '지출', unit: '식', qty: 1, price: Number(req.body.amount) || 0, amount: Number(req.body.amount) || 0, note: '' }]
-    const amount = itemList.reduce((s, it) => s + (Number(it.amount) || 0), 0)
-    const id = randomUUID()
-    // 결재선: 요청에 있으면 그걸 쓰고(만들 때 고른 프리셋), 없으면 기본 프리셋
-    const approval = Array.isArray(req.body.approval) && req.body.approval.length
-      ? req.body.approval
-      : await defaultApproval((sql, p) => req.db.execute(sql, p))
-    await insertWithDocNo(
-      () => nextDocNo((sql, p) => req.db.execute(sql, p), pay_date),
-      (doc_no) => req.db.execute(
-        `INSERT INTO expense_resolutions (id, doc_no, vendor_id, vendor_name, title, amount, pay_method, pay_date, applicant, items, note, approval, status)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [id, doc_no, vendor_id || null, vendor_name || '', title || '지출 결의', amount,
-         pay_method || '계좌이체', pay_date || null,
-         applicant || req.user?.name || req.user?.username || '관리자',
-         JSON.stringify(itemList), note || '', JSON.stringify(approval), '작성']))
-    const [[created]] = await req.db.execute('SELECT * FROM expense_resolutions WHERE id = ?', [id])
-    res.json(adapt(created))
-  } catch (e) { next(e) }
-})
-
-// 매입 청구서 1건 → 결의서 생성(있으면 그대로 반환). 지급 전 결재용.
-// 거래(txn_id)는 아직 없을 수 있다 — 나중에 지급 매칭되면 그 거래와 연결(선택).
-// 동시 생성이 많은 경로라 교착(deadlock)이 실제로 난다. 교착은 트랜잭션 전체가
-// 롤백되므로 문 단위 재시도로는 못 살린다 → withTx 로 begin 부터 다시 시도한다.
-router.post('/from-invoice/:invoiceId', async (req, res, next) => {
-  try {
     const out = await withTx(req.db, async (conn) => {
-    const [[existing]] = await conn.execute('SELECT * FROM expense_resolutions WHERE invoice_id = ?', [req.params.invoiceId])
-    if (existing) return { ...adapt(existing), reused: true }
-
-    const [[inv]] = await conn.execute(
-      `SELECT i.*, v.name AS vendor_name, c.name AS contract_name FROM invoices i
-       LEFT JOIN vendors v ON i.vendor_id = v.id
-       LEFT JOIN contracts c ON i.contract_id = c.id
-       WHERE i.id = ? FOR UPDATE`, [req.params.invoiceId])
-    if (!inv) throw httpError(404, '청구서를 찾을 수 없어요')
-    if (inv.kind !== 'received') throw httpError(400, '매입(수취) 청구서만 지급결의서를 만들 수 있어요')
-
-
-    const title = inv.contract_name || inv.memo || '매입 대금 지급'
-    const [lines] = await conn.execute('SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY sort_order, name', [inv.id])
-    const items = itemsFromInvoice(inv, lines, title)
-
-    const approval = await defaultApproval((sql, p) => conn.execute(sql, p))
-    const id = randomUUID()
-    // 동시에 두 명이 만들면 같은 doc_no 를 뽑는다 → 충돌 시 번호를 다시 뽑아 재시도
-    await insertWithDocNo(
-      () => nextDocNo((sql, p) => conn.execute(sql, p), inv.issued_at),
-      (doc_no) => conn.execute(
-        `INSERT INTO expense_resolutions (id, doc_no, invoice_id, vendor_id, vendor_name, title, amount, pay_method, pay_date, applicant, items, note, approval, status)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [id, doc_no, inv.id, inv.vendor_id || null, inv.vendor_name || '', title,
-         Number(inv.total_amount), '계좌이체', inv.due_at || null,
-         req.user?.name || req.user?.username || '관리자',
-         JSON.stringify(items), '', JSON.stringify(approval), '작성']))
-    // 커밋 전 같은 커넥션으로 재조회. req.db 를 쓰면 conn 을 쥔 채 두 번째 커넥션을
-    // 요구하게 되는데, 테넌트 풀은 작아서(기본 3) 동시 요청 시 고갈된다.
-    const [[created]] = await conn.execute('SELECT * FROM expense_resolutions WHERE id = ?', [id])
-    return adapt(created)
+      const { vendor_id, vendor_name, title, items, pay_method, pay_date, applicant, note } = req.body
+      const itemList = Array.isArray(items) && items.length ? items
+        : [{ name: title || '지출', unit: '식', qty: 1, price: Number(req.body.amount) || 0, amount: Number(req.body.amount) || 0, note: '' }]
+      const amount = itemList.reduce((s, it) => s + (Number(it.amount) || 0), 0)
+      // 결재선: 요청에 있으면 그걸 쓰고(만들 때 고른 프리셋), 없으면 기본 프리셋
+      const approval = Array.isArray(req.body.approval) && req.body.approval.length
+        ? req.body.approval : await defaultApproval((sql, p) => conn.execute(sql, p))
+      /* 거래처는 이름으로 온다(콤보박스). 등록된 거래처면 id 도 채운다 —
+         비워 두면 처리할 때 같은 거래처의 미지급 청구서·통장 지출을 못 찾아 중복 가드가 헛돈다. */
+      let vid = vendor_id || null
+      if (!vid && vendor_name) {
+        const [[v]] = await conn.execute('SELECT id FROM vendors WHERE name = ? LIMIT 1', [vendor_name])
+        vid = v?.id || null
+      }
+      const id = await insertResolution(conn, {
+        vendor_id: vid, vendor_name, title: title || '지출 결의', amount, pay_method, pay_date,
+        applicant: applicant || req.user?.name || req.user?.username || '관리자',
+        items: itemList, note, approval, status: '작성',
+      })
+      const [[created]] = await conn.execute('SELECT * FROM expense_resolutions WHERE id = ?', [id])
+      return adapt(created)
     })
     res.json(out)
   } catch (e) { next(e) }
 })
 
-// 처리 후보 지출 거래 — 이 결의서와 연결할 만한 미연결 지출.
-// 거래처가 같으면 위로, 금액이 비슷하면 위로. 이미 결의서가 붙은 거래는 제외.
-router.get('/:id/matchable', async (req, res, next) => {
+/**
+ * 매입 청구서 1건 → 결의서 생성(있으면 그대로 반환). 지급 전 결재용.
+ * 동시 생성이 많은 경로라 교착(deadlock)이 실제로 난다 → withTx 로 begin 부터 다시 시도한다.
+ *
+ * 그 청구서로 **승인된 품의**가 있으면 이어 준다(purchase_req_id) — 구매품의NO가 채워지고,
+ * 결의서를 처리하면 그 품의도 완료가 된다. 안 이으면 품의는 '승인'으로 남아 누군가 품의에서
+ * 또 처리할 수 있다(청구서가 완납이라 막히긴 하지만, 할 일 목록에 영영 남는다).
+ */
+router.post('/from-invoice/:invoiceId', async (req, res, next) => {
   try {
-    const [[r]] = await req.db.execute('SELECT * FROM expense_resolutions WHERE id = ?', [req.params.id])
-    if (!r) return res.status(404).json({ error: 'Not found' })
-    const [rows] = await req.db.execute(
-      `SELECT t.id, t.date, t.amount, t.category, t.status, t.account_id, v.name AS vendor_name
-       FROM transactions t LEFT JOIN vendors v ON t.vendor_id = v.id
-       WHERE t.kind='expense'
-         AND t.id NOT IN (SELECT txn_id FROM expense_resolutions WHERE txn_id IS NOT NULL)
-       ORDER BY (t.vendor_id <=> ?) DESC, ABS(t.amount - ?) ASC, t.date DESC
-       LIMIT 20`,
-      [r.vendor_id || null, Number(r.amount) || 0])
-    res.json(rows.map(t => ({ ...t, amount: Number(t.amount), related: r.vendor_id && t.vendor_name === r.vendor_name })))
+    const out = await withTx(req.db, async (conn) => {
+      const [[existing]] = await conn.execute('SELECT * FROM expense_resolutions WHERE invoice_id = ?', [req.params.invoiceId])
+      if (existing) return { ...adapt(existing), reused: true }
+
+      const [[inv]] = await conn.execute(
+        `SELECT i.*, v.name AS vendor_name, c.name AS contract_name FROM invoices i
+         LEFT JOIN vendors v ON i.vendor_id = v.id
+         LEFT JOIN contracts c ON i.contract_id = c.id
+         WHERE i.id = ? FOR UPDATE`, [req.params.invoiceId])
+      if (!inv) throw httpError(404, '청구서를 찾을 수 없어요')
+      if (inv.kind !== 'received') throw httpError(400, '매입(수취) 청구서만 지급결의서를 만들 수 있어요')
+      const st = await invoiceState(conn, inv.id)
+      if (st.remain <= 0) throw httpError(409, '이미 지급이 끝난 청구서예요')
+
+      // 잠그고 본다 — 그 사이 품의에서 직접 처리하면(txn_id) 넘겨받을 돈이 없다
+      const [[preq]] = await conn.execute(
+        `SELECT pr.id FROM purchase_reqs pr
+          WHERE pr.invoice_id = ? AND pr.status = '승인' AND pr.txn_id IS NULL
+            AND NOT EXISTS (SELECT 1 FROM expense_resolutions er WHERE er.purchase_req_id = pr.id)
+          LIMIT 1 FOR UPDATE`, [inv.id])
+
+      const title = inv.contract_name || inv.memo || '매입 대금 지급'
+      const [lines] = await conn.execute('SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY sort_order, name', [inv.id])
+      const items = itemsFromInvoice(inv, lines, title, st.paid)
+      const id = await insertResolution(conn, {
+        invoice_id: inv.id, purchase_req_id: preq?.id || null,
+        vendor_id: inv.vendor_id, vendor_name: inv.vendor_name, title, amount: st.remain,
+        pay_date: inv.due_at || null, applicant: req.user?.name || req.user?.username || '관리자',
+        items, approval: await defaultApproval((sql, p) => conn.execute(sql, p)), status: '작성',
+      })
+      // 커밋 전 같은 커넥션으로 재조회 — req.db 를 쓰면 conn 을 쥔 채 두 번째 커넥션을 요구해 풀이 고갈된다
+      const [[created]] = await conn.execute('SELECT * FROM expense_resolutions WHERE id = ?', [id])
+      return adapt(created)
+    })
+    res.json(out)
   } catch (e) { next(e) }
 })
 
-// 결의서 처리 — 이 결의서대로 지출을 집행한다. 처리되면 status='완료'로 목록(할 일 큐)에서 빠진다.
-//   mode='link'   : 이미 등록된 지출 거래에 연결
-//   mode='create' : 결의서 내용으로 지출 거래를 새로 생성(금액은 body.amount로 덮어쓸 수 있음)
-// 어느 쪽이든 지출 doc_no에 결의서번호를 역참조해, 그 지출의 증빙에서 결의서를 찾을 수 있게 한다.
-router.post('/:id/process', async (req, res, next) => {
-  const { mode, txn_id, amount, date, account_id } = req.body
-  const conn = await req.db.getConnection()
+/**
+ * 승인된 구매품의서 → 결의서. 품의를 **넘긴다**: 이후 처리는 결의서에서만 한다.
+ *
+ * 금액:
+ *   · 품의에 청구서가 붙어 있으면 그 청구서의 **남은 금액**(세액 포함) — 청구서에서 만들 때와 같은 규칙
+ *   · 없으면 품의 품목(공급가) + 부가세 10% 한 줄. 결의서는 지급액(VAT 포함)을 결재받는 문서다.
+ *     면세면 편집에서 그 줄을 지우면 된다(처리 창에서 과세유형도 다시 고른다).
+ */
+router.post('/from-purchase-req/:reqId', async (req, res, next) => {
   try {
-    await conn.beginTransaction()
-    const [[r]] = await conn.execute('SELECT * FROM expense_resolutions WHERE id = ? FOR UPDATE', [req.params.id])
-    if (!r) { await rollbackQuietly(conn); return res.status(404).json({ error: '결의서를 찾을 수 없어요' }) }
-    if (r.status === '완료') { await rollbackQuietly(conn); return res.status(409).json({ error: '이미 처리된 결의서예요' }) }
+    const out = await withTx(req.db, async (conn) => {
+      const pr = await loadDoc(conn, 'purchase_reqs', req.params.reqId, { lock: true })
+      if (!pr) throw httpError(404, '구매품의서를 찾을 수 없어요')
+      if (pr.status === '완료') throw httpError(409, `구매품의서 ${pr.doc_no}는 이미 처리됐어요`)
+      if (pr.status !== '승인') throw httpError(409, '승인한 구매품의서만 결의서로 넘길 수 있어요')
+      const er = await resolutionOfReq(conn, pr.id)
+      if (er) return { ...adapt((await conn.execute('SELECT * FROM expense_resolutions WHERE id = ?', [er.id]))[0][0]), reused: true }
+      if ((await sourceTxnsOfReq(conn, pr.id)).length) throw httpError(409, '이미 나간 지출로 만든 품의예요. 결의서로 넘길 돈이 없어요.')
 
-    /* 마감 검사 — body의 date 하나만 보면 두 갈래로 우회된다.
-     *   · create: 실제 거래일은 `date || r.pay_date || today`인데 date만 검사했다 →
-     *     date를 비우면 마감월 pay_date로 지출이 들어갔다.
-     *   · link:   화면(Docs.jsx)이 link 모드에서 date를 아예 보내지 않는다 →
-     *     closedPeriodError(undefined)가 즉시 null이라 **항상 무검사**였다.
-     * 그래서 '실제로 쓰일 날짜'를 모두 모아서 검사한다(연결 대상 거래의 날짜까지). */
-    let linkTxnDate = null
-    if (mode === 'link' && txn_id) {
-      const [[lt]] = await conn.execute('SELECT date FROM transactions WHERE id = ?', [txn_id])
-      linkTxnDate = lt?.date || null
-    }
-    {
-      const effDateForCheck = mode === 'link' ? linkTxnDate : (date || r.pay_date || kstToday())
-      const ce = await closedPeriodError(conn, effDateForCheck)
-      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
-    }
-
-    // 매입 청구서 연결 결의서인데 그 청구서가 이미 완납이면, 새 지출을 만들어봐야 매칭할 잔액이 없어
-    // 지출만 붕 뜬다(이중 계상). 처리 자체를 막는다.
-    // 겸사겸사 청구서의 출금 계좌와 주문을 받아둔다 — 아래에서 지출 거래에 승계한다.
-    let invAccountId = null
-    let invContractId = null
-    if (r.invoice_id) {
-      const [[inv]] = await conn.execute('SELECT total_amount, account_id, contract_id FROM invoices WHERE id = ?', [r.invoice_id])
-      if (inv) {
-        invAccountId = inv.account_id || null
-        invContractId = inv.contract_id || null
-        const [[{ paid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [r.invoice_id])
-        if (Number(inv.total_amount) - Number(paid) <= 0) {
-          await rollbackQuietly(conn); return res.status(409).json({ error: '연결된 청구서가 이미 지급 완료됐어요' })
-        }
+      let items, amount, invoiceId = null
+      const st = await invoiceState(conn, pr.invoice_id)
+      if (st) {
+        if (st.remain <= 0) throw httpError(409, `청구서 ${st.invoice_no || ''}가 이미 지급 완료됐어요`.replace('  ', ' '))
+        const [[other]] = await conn.execute('SELECT doc_no FROM expense_resolutions WHERE invoice_id = ? LIMIT 1', [st.id])
+        if (other) throw httpError(409, `청구서 ${st.invoice_no || ''}로 이미 결의서 ${other.doc_no}가 있어요.`.replace('  ', ' '))
+        const [[inv]] = await conn.execute('SELECT * FROM invoices WHERE id = ?', [st.id])
+        const [lines] = await conn.execute('SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY sort_order, name', [st.id])
+        items = itemsFromInvoice(inv, lines, pr._title, st.paid)
+        amount = st.remain
+        invoiceId = st.id
+      } else {
+        const [its] = await conn.execute('SELECT * FROM purchase_req_items WHERE req_id = ? ORDER BY sort_order, id', [pr.id])
+        items = its.map(it => ({
+          name: it.name || '', unit: it.unit || '', qty: Number(it.qty) || 0,
+          price: Number(it.unit_price) || 0, amount: Number(it.amount) || 0, note: it.memo || '',
+        }))
+        const supply = items.reduce((s, it) => s + it.amount, 0)
+        const vat = Math.round(supply * VAT_RATE)
+        if (vat > 0) items.push({ name: '부가세', unit: '', qty: 1, price: vat, amount: vat, note: '' })
+        amount = supply + vat
       }
-    }
+      if (!(amount > 0)) throw httpError(400, '품의 금액이 비어 있어요. 품목 금액을 먼저 채워주세요.')
 
-    // 계좌 잔액은 `kind='expense' AND account_id=? AND status='지급완료'` 인 거래만 차감한다
-    // (routes/accounts.js calcBalance). 둘 중 하나라도 어긋나면 통장은 줄었는데 장부 잔액은
-    // 그대로 남아 조용히 틀어진다. 아래 두 분기 모두 이 조건을 반드시 만족시킨다.
-    let linkedTxnId = null
-    // 이 지출 거래를 결의서가 **직접 만들었는지**. 처리 취소 때 지울지 남길지를 가른다.
-    let txnCreated = false
-    // 연결한 기존 거래의 **연결 전** 상태·계좌 — 되돌릴 때 그대로 복원한다
-    let prevStatus = null
-    let prevAccountId = null
-    if (mode === 'link') {
-      if (!txn_id) { await rollbackQuietly(conn); return res.status(400).json({ error: '연결할 지출 거래를 선택해주세요' }) }
-      // FOR UPDATE — 같은 거래를 두 결의서가 동시에 집으려 할 때 한쪽을 기다리게 한다.
-      const [[t]] = await conn.execute("SELECT id, status, account_id FROM transactions WHERE id = ? AND kind='expense' FOR UPDATE", [txn_id])
-      if (!t) { await rollbackQuietly(conn); return res.status(404).json({ error: '지출 거래를 찾을 수 없어요' }) }
-      /* 아래에서 이 거래를 '지급완료'로 바꾸고 계좌도 채운다. 되돌릴 때 쓰려면 지금 적어 둬야 한다
-         — 바꾼 뒤에는 원래 무엇이었는지 알 방법이 없다. */
-      prevStatus = t.status || null
-      prevAccountId = t.account_id || null
-      // 이미 다른 결의서가 집행한 지출이면 막는다.
-      // 후보 목록(/:id/matchable)이 연결된 거래를 빼주긴 하지만, 그 목록은 드로어를 열 때
-      // 한 번만 받아온다. 결의서 A를 처리한 뒤 열어둔 B의 드로어에서 같은 거래를 고르면
-      // 한 번 나간 돈으로 두 결의서가 '완료'가 되고, B에 해당하는 지출은 영영 기록되지 않는다.
-      const [[dupRes]] = await conn.execute(
-        'SELECT id, doc_no FROM expense_resolutions WHERE txn_id = ? AND id <> ? LIMIT 1', [txn_id, req.params.id])
-      if (dupRes) {
-        await rollbackQuietly(conn)
-        return res.status(409).json({
-          error: `이 지출은 이미 결의서 ${dupRes.doc_no || ''}에 연결돼 있어요. 다른 지출을 고르거나 '지출 새로 등록'을 쓰세요.`.replace('  ', ' '),
-        })
-      }
-      // 결의서 처리는 '집행'이다. 연결 대상이 아직 미지급이면 지급완료로 바꿔야 잔액에서 빠진다.
-      const acct = t.account_id || account_id || invAccountId || null
-      const lerrL = ledgerError({ kind: 'expense', account_id: acct, status: '지급완료' })
-      if (lerrL) { await rollbackQuietly(conn); return res.status(400).json({ error: lerrL }) }
-      linkedTxnId = txn_id
-      await conn.execute("UPDATE transactions SET doc_no = ? WHERE id = ? AND (doc_no IS NULL OR doc_no = '' OR doc_no = '공통')", [r.doc_no, txn_id])
-      await conn.execute("UPDATE transactions SET status = '지급완료', account_id = ? WHERE id = ?", [acct, txn_id])
-    } else if (mode === 'create') {
-      // 실효 지출일 = 넘어온 date, 없으면 결의서 지급예정일(pay_date), 그것도 없으면 오늘.
-      // date만 검사하면 미래인 pay_date로 집행될 때 미래날짜 차단이 우회되므로 실효 날짜로 막는다.
-      const effDate = date || r.pay_date || kstToday()
-      if (futureDateError(effDate)) { await rollbackQuietly(conn); return res.status(400).json({ error: '미래 날짜로는 처리할 수 없어요 (오늘까지만 가능)' }) }
-      const amt = Number(amount) > 0 ? Number(amount) : Number(r.amount)
-      // 계좌가 없으면 만들지 않는다. NULL로 넣으면 지출이 어느 계좌 잔액에서도 빠지지 않아
-      // 사용자는 돈이 나간 줄 모른 채 잔액을 과대 계상하게 된다(과거 F-02와 동일 유형).
-      const acct = account_id || invAccountId || null
-      const lerrC = ledgerError({ kind: 'expense', account_id: acct, status: '지급완료' })
-      if (lerrC) { await rollbackQuietly(conn); return res.status(400).json({ error: lerrC }) }
-      const id = randomUUID()
-      // contract_id 를 청구서에서 승계한다. 안 넣으면 그 매입주문의 지급 내역·원가 실적에서
-      // 통째로 빠져, 같은 청구서를 결의서 없이 바로 '지급 처리'했을 때와 숫자가 달라진다.
-      /* 부가세 필드를 채운다. 예전엔 INSERT 목록에 없어 전부 NULL 이었고,
-       * 부가세 집계(routes/tax.js)가 `vat_amount IS NOT NULL` 만 세므로
-       * **청구서 없는 소액경비 결의서의 매입세액이 신고 자료에서 통째로 빠졌다.**
-       * (매입 청구서에서 발행한 결의서는 아래에서 invoice_id 가 붙어 청구서 쪽으로 집계된다) */
-      const vat = vatFields({ amount: amt, tax_type: r.tax_type, vat_deductible: r.vat_deductible })
-      await conn.execute(
-        /* 매입 청구서에서 발행한 결의서면 이 지출은 **청구서 정산**이다 —
-         * 매입은 청구서 수취 시점에 이미 인식됐고, 지금은 그때 생긴 외상매입금이 사라지는 것.
-         * 계정과목을 안 넣으면 일계표에서 상대 계정이 비어 차·대변이 안 맞는다
-         * (실데이터 검수에서 8,580,000원 지출이 그대로 불일치로 떴다).
-         *
-         * 청구서 없는 소액경비 결의서(r.invoice_id 없음)는 실제 비용 발생이라 계정과목이
-         * 비목마다 다른데, 지금 구조에는 비목→계정과목 매핑이 없다 → null 로 두고
-         * 일계표가 '계정과목 없음' 목록으로 알려주게 한다(그건 설계대로다).
-         * 근본 해결은 비목 기준정보에 계정과목 칸을 붙이는 것 — 별도 과제. */
-        `INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, account_code, category, amount, date, method, status, doc_no, memo,
-                                   supply_amount, vat_amount, tax_type, vat_deductible)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [id, 'expense', r.vendor_id || null, invContractId, acct,
-         r.invoice_id ? settleAcctCode('expense') : null,
-         /* 비목(category)은 기준정보의 분류값이어야 한다. 결의서 제목(r.title)을 그대로
-          * 넣던 탓에 '5축 가공 외주 단가주문'·'AL7075 판재 7월분' 같은 자유 텍스트가
-          * 비목 칸에 들어갔다 — 그런 비목은 기준정보에 없으므로 비목별 집계가 오염된다.
-          * 청구서 기반 결의서는 청구서 정산과 같은 성격이므로 같은 값('대금 지급')을 쓴다.
-          * 청구서 없는 소액경비는 고를 비목이 없어 제목을 그대로 두되, 결의서에 비목 칸을
-          * 붙이는 것이 근본 해결이다(비목→계정과목 매핑과 같은 과제). */
-         r.invoice_id ? '대금 지급' : (r.title || '지출'), amt,
-         effDate, r.pay_method || '계좌이체',
-         '지급완료', r.doc_no, `결의서 ${r.doc_no} 집행`,
-         vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible])
-      linkedTxnId = id
-      txnCreated = true
-    } else {
-      await rollbackQuietly(conn); return res.status(400).json({ error: "mode는 'link' 또는 'create'여야 해요" })
-    }
-
-    // 매입 청구서에서 발행한 결의서면, 처리한 지출을 그 청구서에 지급 매칭한다.
-    // (안 하면 결의서·지출은 처리됐는데 청구서는 '지급 예정'으로 남는다)
-    let invoicePaid = false
-    if (r.invoice_id) {
-      const [[inv]] = await conn.execute('SELECT * FROM invoices WHERE id = ? FOR UPDATE', [r.invoice_id])
-      if (inv) {
-        const [[{ paid: prevPaid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [r.invoice_id])
-        const remainBefore = Number(inv.total_amount) - Number(prevPaid)
-        // 이 지출이 이미 다른 청구서에 매칭돼 있으면 재매칭 금지(이중 계상 방지)
-        const [[dupMatch]] = await conn.execute('SELECT invoice_id FROM invoice_matches WHERE txn_id = ? LIMIT 1', [linkedTxnId])
-        if (dupMatch) { await rollbackQuietly(conn); return res.status(409).json({ error: '이미 다른 청구서에 매칭된 지출이에요' }) }
-        if (remainBefore > 0) {
-          const [[txnRow]] = await conn.execute('SELECT amount FROM transactions WHERE id = ?', [linkedTxnId])
-          const matchAmount = Math.min(Number(txnRow.amount) || 0, remainBefore)
-          await conn.execute('UPDATE transactions SET invoice_id = ? WHERE id = ?', [r.invoice_id, linkedTxnId])
-          await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,?)', [randomUUID(), r.invoice_id, linkedTxnId, matchAmount, txnCreated ? 1 : 0])
-          const [[{ paid }]] = await conn.execute('SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [r.invoice_id])
-          const status = Number(paid) >= Number(inv.total_amount) ? '지급 완료' : '일부 지급'
-          await conn.execute('UPDATE invoices SET status = ? WHERE id = ?', [status, r.invoice_id])
-          await conn.execute('UPDATE milestones SET status = ? WHERE invoice_id = ?', [status, r.invoice_id])
-          invoicePaid = true
-        }
-      }
-    }
-
-    await conn.execute(
-      "UPDATE expense_resolutions SET status='완료', txn_id=?, txn_created=?, txn_prev_status=?, txn_prev_account_id=? WHERE id=?",
-      [linkedTxnId, txnCreated ? 1 : 0, prevStatus, prevAccountId, req.params.id])
-    await conn.commit()
-    res.json({ ok: true, txn_id: linkedTxnId, invoicePaid })
-  } catch (e) { await rollbackQuietly(conn); next(e) }
-  finally { conn.release() }
+      const id = await insertResolution(conn, {
+        invoice_id: invoiceId, purchase_req_id: pr.id,
+        vendor_id: pr.vendor_id, vendor_name: pr.vendor_name, title: pr._title, amount,
+        pay_date: null, applicant: req.user?.name || req.user?.username || pr.applicant || '관리자',
+        items, approval: await defaultApproval((sql, p) => conn.execute(sql, p)), status: '작성',
+      })
+      const [[created]] = await conn.execute('SELECT * FROM expense_resolutions WHERE id = ?', [id])
+      return adapt(created)
+    })
+    res.json(out)
+  } catch (e) { next(e) }
 })
 
-// 결의서 내용 수정 (품목 명세·특기사항·헤더 보완)
+/**
+ * 이미 나간 지출 → 결의서를 만들고 그 지출에 **바로 연결**(사후 결재 근거).
+ *
+ * 예전엔 화면이 '만들기'와 '연결'을 따로 불렀다. 연결이 막히면(마감된 달 등) 결의서만 남았다.
+ * 이제 한 트랜잭션이다 — 연결이 막히면 결의서도 안 생긴다. 돈은 이미 나갔으므로 승인 단계를
+ * 거치지 않고 곧바로 완료가 된다(종이 결재는 인쇄해서 받는다).
+ */
+router.post('/from-txn/:txnId', async (req, res, next) => {
+  try {
+    const out = await withTx(req.db, async (conn) => {
+      const [[t]] = await conn.execute(
+        `SELECT t.*, v.name AS vendor_name FROM transactions t LEFT JOIN vendors v ON v.id = t.vendor_id
+          WHERE t.id = ? AND t.kind = 'expense'`, [req.params.txnId])
+      if (!t) throw httpError(404, '지출 거래를 찾을 수 없어요')
+      /* 이미 나간 돈만 — 연결은 거래를 '지급완료'로 바꾼다. 아직 안 나간 지출을 넣으면
+         나가지도 않은 돈이 계좌 잔액에서 빠진다(후보 목록 /candidates 와 같은 조건). */
+      if (t.status !== '지급완료' || !t.account_id) throw httpError(409, '통장에서 이미 나간 지출(지급완료·계좌 있음)만 붙일 수 있어요')
+      const title = t.category || t.memo || '지출'
+      const amount = Number(t.amount) || 0
+      const id = await insertResolution(conn, {
+        vendor_id: t.vendor_id, vendor_name: t.vendor_name || '', title, amount,
+        pay_date: t.date, applicant: req.user?.name || req.user?.username || '관리자',
+        // 거래에는 품목 줄이 없다 — 한 줄로 뭉친다. 나누려면 만든 뒤 편집한다.
+        items: [{ name: title, unit: '식', qty: 1, price: amount, amount, note: t.memo || '' }],
+        approval: await defaultApproval((sql, p) => conn.execute(sql, p)), status: '승인',
+      })
+      // 연결은 처리 규칙(마감·중복·잔액)을 그대로 탄다 — 여기서 직접 적으면 그 가드를 우회한다
+      await executeDoc(conn, TABLE, id, { mode: 'link', txn_id: t.id })
+      const [[created]] = await conn.execute('SELECT * FROM expense_resolutions WHERE id = ?', [id])
+      return adapt(created)
+    })
+    res.json(out)
+  } catch (e) { next(e) }
+})
+
+/* ── 승인·처리 ── 규칙은 lib/docExec.js (구매품의서와 같은 함수) */
+
+router.post('/:id/approve', async (req, res, next) => {
+  try { res.json(await withTx(req.db, conn => approveDoc(conn, TABLE, req.params.id))) }
+  catch (e) { next(e) }
+})
+router.post('/:id/unapprove', async (req, res, next) => {
+  try { res.json(await withTx(req.db, conn => unapproveDoc(conn, TABLE, req.params.id))) }
+  catch (e) { next(e) }
+})
+
+// 처리 창 — 연결할 만한 지출 거래(거래처가 같으면 위로, 금액이 가까우면 위로)
+router.get('/:id/matchable', async (req, res, next) => {
+  try {
+    const doc = await loadDoc(req.db, TABLE, req.params.id)
+    if (!doc) return res.status(404).json({ error: 'Not found' })
+    res.json(await execCandidates(req.db, TABLE, doc))
+  } catch (e) { next(e) }
+})
+
+// 처리 창 — 같은 거래처의 미지급 청구서
+router.get('/:id/open-invoices', async (req, res, next) => {
+  try {
+    const doc = await loadDoc(req.db, TABLE, req.params.id)
+    if (!doc) return res.status(404).json({ error: 'Not found' })
+    const amount = Number(req.query.amount) || doc._amount
+    res.json(await openInvoicesFor(req.db, doc.vendor_id, amount))
+  } catch (e) { next(e) }
+})
+
+router.post('/:id/link-invoice', async (req, res, next) => {
+  try { res.json(await withTx(req.db, conn => linkInvoiceDoc(conn, TABLE, req.params.id, req.body.invoice_id || null))) }
+  catch (e) { next(e) }
+})
+
+// 결의서 처리 — 이 결의서대로 지출을 집행한다. mode 'link'(기존 지출) | 'create'(새 지출)
+router.post('/:id/process', async (req, res, next) => {
+  try { res.json({ ok: true, ...(await withTx(req.db, conn => executeDoc(conn, TABLE, req.params.id, req.body))) }) }
+  catch (e) { next(e) }
+})
+
+/**
+ * 결의서 내용 수정 (품목 명세·특기사항·헤더 보완). **상태는 본문에서 받지 않는다.**
+ *   · 완료 — 금액은 못 바꾼다(이미 만들어진 지출과 어긋난다). 적요·결재선 같은 문서 정보만.
+ *   · 승인 — 내용을 바꾸면 결재받은 문서가 아니다 → 작성으로 되돌린다(화면이 먼저 알린다)
+ * 예전엔 `status || '작성'` 이라, status 를 안 보내는 저장이 완료 가드를 우회해 같은 결의서를
+ * 두 번 집행할 수 있었다.
+ */
 router.put('/:id', async (req, res, next) => {
   try {
-    const { title, amount, pay_method, pay_date, applicant, items, note, status, vendor_name, approval } = req.body
-    const [[cur]] = await req.db.execute('SELECT status, amount FROM expense_resolutions WHERE id = ?', [req.params.id])
-    if (!cur) return res.status(404).json({ error: 'Not found' })
-
-    // 이미 집행된 결의서는 금액·상태를 바꿀 수 없다.
-    //  · status 를 안 보내면 '작성'으로 떨어져(기존 `status || '작성'`) 처리 가드를 통과,
-    //    같은 결의서를 두 번 집행할 수 있었다 — 한 번 나간 돈으로 지출이 두 건 생긴다.
-    //  · 금액을 바꾸면 이미 만들어진 지출 거래와 어긋나 장부가 틀어진다.
-    // 적요·결재선 같은 문서 정보는 집행 후에도 고칠 수 있게 둔다.
-    const done = cur.status === '완료'
-    if (done && Number(amount) !== Number(cur.amount)) {
-      return res.status(409).json({ error: '이미 처리된 결의서의 금액은 바꿀 수 없어요. 연결된 지출 거래와 어긋나요.' })
-    }
-    const nextStatus = done ? '완료' : (status || '작성')
-
-    const [r] = await req.db.execute(
-      `UPDATE expense_resolutions SET title=?, amount=?, pay_method=?, pay_date=?, applicant=?, items=?, note=?, status=?, vendor_name=?, approval=?
-       WHERE id=?`,
-      [title || '', Number(amount) || 0, pay_method || '', pay_date || null, applicant || '',
-       JSON.stringify(items || []), note || '', nextStatus, vendor_name || '',
-       JSON.stringify(approval || []), req.params.id])
-    if (r.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
-    res.json({ ok: true })
+    const { title, amount, pay_method, pay_date, applicant, items, note, vendor_name, approval } = req.body
+    if (pay_date && !/^\d{4}-\d{2}-\d{2}$/.test(pay_date)) return res.status(400).json({ error: '지급일은 YYYY-MM-DD 로 적어주세요' })
+    /* 잠그고 읽는다. 잠그지 않으면 화면이 연 뒤 다른 탭에서 처리(완료)된 결의서를 이 저장이
+       '작성'으로 덮는다 — txn_id 는 남은 채 다시 승인·처리가 열려 같은 돈이 두 번 나간다. */
+    const out = await withTx(req.db, async (conn) => {
+      const [[cur]] = await conn.execute('SELECT status, amount FROM expense_resolutions WHERE id = ? FOR UPDATE', [req.params.id])
+      if (!cur) throw httpError(404, 'Not found')
+      const done = cur.status === '완료'
+      if (done && Number(amount) !== Number(cur.amount)) {
+        throw httpError(409, '이미 처리된 결의서의 금액은 바꿀 수 없어요. 연결된 지출 거래와 어긋나요.')
+      }
+      const nextStatus = done ? '완료' : '작성'
+      await conn.execute(
+        `UPDATE expense_resolutions SET title=?, amount=?, pay_method=?, pay_date=?, applicant=?, items=?, note=?, status=?, vendor_name=?, approval=?
+         WHERE id=?`,
+        [title || '', Number(amount) || 0, pay_method || '', pay_date || null, applicant || '',
+         JSON.stringify(items || []), note || '', nextStatus, vendor_name || '',
+         JSON.stringify(approval || []), req.params.id])
+      return { ok: true, status: nextStatus, unapproved: cur.status === '승인' }
+    })
+    res.json(out)
   } catch (e) { next(e) }
 })
 
 /**
  * 연결된 청구서의 품목을 **다시 불러온다.**
- *
- * 만들 때 한 번 복사하고 끝이라, 청구서에 품목을 나중에 채워도 결의서는 옛 모습
- * ("매입 대금 지급 · 식 · 1") 그대로였다. 청구서 품목 입력이 생기기 전에 만든
- * 결의서가 전부 그렇다.
- *
- * 이미 집행된(완료) 결의서는 막는다 — 품목을 갈아끼우면 이미 나간 지출 거래와
- * 문서가 다른 말을 하게 된다. 금액이 같더라도 마찬가지다.
+ * 만들 때 한 번 복사하고 끝이라, 청구서에 품목을 나중에 채워도 결의서는 옛 모습 그대로였다.
+ * 완료 결의서는 막는다 — 품목을 갈아끼우면 이미 나간 지출 거래와 문서가 다른 말을 한다.
+ * 승인 결의서는 내용이 바뀌므로 작성으로 되돌린다(수정과 같은 규칙).
  */
 router.post('/:id/reload-lines', async (req, res, next) => {
   try {
@@ -493,119 +474,51 @@ router.post('/:id/reload-lines', async (req, res, next) => {
       if (!lines.length) {
         throw httpError(400, `청구서 ${inv.invoice_no || ''}에 품목 내역이 없어요. 청구서를 열어 품목을 넣고 다시 불러오세요.`.trim())
       }
-      const items = itemsFromInvoice(inv, lines, cur.title || '매입 대금 지급')
-      /* 금액도 청구서 지급액으로 다시 맞춘다. 품목 합(공급가+부가세)이 곧 지급액이라
+      const st = await invoiceState(conn, inv.id)
+      const items = itemsFromInvoice(inv, lines, cur.title || '매입 대금 지급', st.paid)
+      /* 금액도 청구서의 남은 금액으로 다시 맞춘다. 품목 합이 곧 지급액이라
          따로 두면 표의 합계와 헤더의 '지출총액'이 어긋난다. */
-      const amount = Number(inv.total_amount) || 0
-      await conn.execute('UPDATE expense_resolutions SET items = ?, amount = ? WHERE id = ?',
-        [JSON.stringify(items), amount, cur.id])
-      const [[updated]] = await conn.execute('SELECT * FROM expense_resolutions WHERE id = ?', [cur.id])
-      return { ...adapt(updated), lineCount: lines.length, invoiceNo: inv.invoice_no }
+      await conn.execute("UPDATE expense_resolutions SET items = ?, amount = ?, status = '작성' WHERE id = ?",
+        [JSON.stringify(items), st.remain, cur.id])
+      const [[updated]] = await conn.execute(`SELECT er.*, ${PREQ_NO_SQL} FROM expense_resolutions er WHERE er.id = ?`, [cur.id])
+      return { ...adapt(updated), lineCount: lines.length, invoiceNo: inv.invoice_no, unapproved: cur.status === '승인' }
     })
     res.json(out)
   } catch (e) { next(e) }
 })
 
 /**
- * 집행(완료)을 되돌린다 — 처리 취소.
- *
- * 청구서 쪽 정산 취소(`invoices.js` DELETE /:id/matches/:matchId)는 결의서로 집행된 건을
- * **"결의서에서 되돌려주세요"** 라며 막는다. 그 되돌릴 곳이 여기다. 없으면 잘못 처리한 건이
- * 영영 완료로 남는다(삭제 버튼도 완료 건에는 안 나온다).
- *
- * 되돌리는 순서와 이유:
- *   1. 마감 검사 — 마감된 달의 지출을 지우면 그 달 잔액이 사후에 바뀐다.
- *   2. 청구서 정산(invoice_matches) 해제 → recalcInvoiceStatus 로 상태 재계산.
- *      직접 UPDATE 하면 부분지급이 섞인 청구서에서 상태를 틀린다 — 규칙은 그 lib 하나뿐이다.
- *   3. 지출 거래는 **결의서가 만든 것만**(txn_created=1) 지운다.
- *      이미 있던 거래에 연결한 것(0)은 통장에 실제로 오간 독립 기록이라 남기고 연결만 끊는다.
- *      지우면 계좌 잔액이 틀어진다. 대신 무엇을 남겼는지 응답으로 알려준다.
- *   4. 결의서를 '작성'으로 되돌린다 → '처리 대기' 목록에 다시 뜬다.
- *
- * 공용 함수인 이유: 삭제(cascade)도 같은 되돌리기를 먼저 해야 한다. 두 벌로 두면
- * 한쪽만 고쳐져 "취소는 맞는데 삭제하면 잔액이 틀어지는" 상태가 된다.
+ * 집행(완료)을 되돌린다 — 처리 취소. 완료 → 승인.
+ * 청구서 쪽 정산 취소는 결의서로 집행된 건을 "결의서에서 되돌려주세요"라며 막는다 — 그 출구가 여기다.
  */
-const unprocessInTx = async (conn, id) => {
-  const [[r]] = await conn.execute('SELECT * FROM expense_resolutions WHERE id = ? FOR UPDATE', [id])
-  if (!r) throw httpError(404, '결의서를 찾을 수 없어요')
-  if (r.status !== '완료') return { resolution: r, changed: false, keptTxn: false }
-
-  let keptTxn = false
-  let restored = false      // 연결 전 상태로 되돌렸는가(옛 데이터는 되돌릴 근거가 없다)
-  /* 결의서의 거래 연결을 **먼저** 끊는다.
-     expense_resolutions.txn_id 는 transactions(id) 를 FK 로 참조한다. 연결을 쥔 채
-     거래를 지우면 ER_ROW_IS_REFERENCED_2 로 트랜잭션 전체가 터진다(실제로 500 이 났다).
-     같은 트랜잭션 안이라 순서만 바꾸면 되고, 중간 상태가 밖으로 보이지도 않는다. */
-  await conn.execute(
-    "UPDATE expense_resolutions SET status='작성', txn_id=NULL, txn_created=0, txn_prev_status=NULL, txn_prev_account_id=NULL WHERE id=?",
-    [id])
-
-  if (r.txn_id) {
-    const [[txn]] = await conn.execute('SELECT id, date FROM transactions WHERE id = ? FOR UPDATE', [r.txn_id])
-    if (txn) {
-      const ce = await closedPeriodError(conn, txn.date)
-      if (ce) throw httpError(409, ce)
-    }
-    // 이 지출이 물고 있던 청구서 정산을 푼다(거래를 지우기 전에).
-    const [matches] = await conn.execute('SELECT invoice_id FROM invoice_matches WHERE txn_id = ?', [r.txn_id])
-    await conn.execute('DELETE FROM invoice_matches WHERE txn_id = ?', [r.txn_id])
-    for (const invId of [...new Set(matches.map(m => m.invoice_id).filter(Boolean))]) {
-      await recalcInvoiceStatus(conn, invId)
-    }
-    if (txn) {
-      if (Number(r.txn_created) === 1) {
-        await conn.execute('DELETE FROM transactions WHERE id = ?', [r.txn_id])
-      } else {
-        /* 이미 있던 거래는 지우지 않는다 — 통장에 실제로 오간 독립 기록이다.
-           대신 **연결 전 상태·계좌로 되돌린다.** 이걸 안 하면 처리가 '지급완료'로 바꿔 둔
-           상태가 그대로 남아, 청구서는 미지급으로 되살아나는데 돈은 나간 것으로 남는다
-           → 그 청구서를 다시 지급 처리하면 같은 돈이 두 번 나간 것으로 기록된다. */
-        await conn.execute('UPDATE transactions SET invoice_id = NULL WHERE id = ?', [r.txn_id])
-        // 증빙란의 결의서번호도 지운다 — 단, 이 결의서가 붙인 번호일 때만(다른 번호는 남의 것)
-        await conn.execute('UPDATE transactions SET doc_no = NULL WHERE id = ? AND doc_no = ?', [r.txn_id, r.doc_no])
-        if (r.txn_prev_status) {
-          /* 계좌는 처리가 **비어 있을 때만** 채웠으므로, 원래 비어 있었다면 다시 비운다.
-             원래 있던 계좌는 그대로 둔다(처리가 건드리지 않았다). */
-          await conn.execute('UPDATE transactions SET status = ?, account_id = ? WHERE id = ?',
-            [r.txn_prev_status, r.txn_prev_account_id || null, r.txn_id])
-          restored = true
-        }
-        keptTxn = true
-      }
-    }
-  }
-  return { resolution: r, changed: true, keptTxn, restored }
-}
-
-// 처리 취소 — 완료 → 작성. 지출·청구서 정산을 함께 되돌린다.
 router.post('/:id/unprocess', async (req, res, next) => {
   try {
-    const out = await withTx(req.db, (conn) => unprocessInTx(conn, req.params.id))
+    const out = await withTx(req.db, (conn) => undoDoc(conn, TABLE, req.params.id))
     if (!out.changed) return res.status(409).json({ error: '아직 처리되지 않은 결의서예요' })
     res.json({ ok: true, keptTxn: out.keptTxn, restored: out.restored })
   } catch (e) { next(e) }
 })
 
 /**
- * 삭제. 완료 건은 `?cascade=1` 이 있어야 지운다.
- *
+ * 삭제. 지출까지 처리된 건은 `?cascade=1` 이 있어야 지운다.
  * 예전엔 행만 지웠다. 완료 건이 그렇게 지워지면 지출 거래와 청구서 정산은 그대로 남아
- * **되돌릴 손잡이가 사라진다** — 청구서 쪽 정산 취소는 "결의서에서 되돌려라"고 하는데
- * 그 결의서가 없다. 그래서 완료 건은 먼저 되돌린 뒤에만 지운다.
+ * **되돌릴 손잡이가 사라진다.** 그래서 먼저 되돌린 뒤에만 지운다.
+ * 품의에서 넘겨받은 결의서를 지우면 그 품의는 다시 '승인'으로 돌아간다(다시 넘기거나 품의에서 처리).
  */
 router.delete('/:id', async (req, res, next) => {
   try {
     const cascade = req.query.cascade === '1' || req.query.cascade === 'true'
     const out = await withTx(req.db, async (conn) => {
-      const [[cur]] = await conn.execute('SELECT status, doc_no FROM expense_resolutions WHERE id = ? FOR UPDATE', [req.params.id])
+      const [[cur]] = await conn.execute('SELECT status, doc_no, txn_id, purchase_req_id FROM expense_resolutions WHERE id = ? FOR UPDATE', [req.params.id])
       if (!cur) throw httpError(404, '결의서를 찾을 수 없어요')
       let keptTxn = false
-      if (cur.status === '완료') {
+      if (cur.status === '완료' && cur.txn_id) {
         if (!cascade) {
           throw httpError(409, '이미 처리된 결의서예요. 지출 이력까지 함께 지우려면 처리 취소 후 삭제하거나, 삭제 시 함께 삭제를 선택하세요.')
         }
-        keptTxn = (await unprocessInTx(conn, req.params.id)).keptTxn
+        keptTxn = (await undoDoc(conn, TABLE, req.params.id)).keptTxn
       }
+      await syncReqFromResolution(conn, cur.purchase_req_id, '승인')
       await conn.execute('DELETE FROM expense_resolutions WHERE id = ?', [req.params.id])
       return { keptTxn }
     })

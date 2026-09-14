@@ -1,4 +1,5 @@
 const { Router } = require('express')
+const { detachInvoiceFromDocs } = require('../lib/docExec')
 const { randomUUID } = require('crypto')
 const { futureDateError, kstToday, kstDate } = require('../db')
 const { dueDatesToGenerate, LOOKAHEAD_DAYS, pendingCycle, cashDateOf, PAY_TERMS, PAY_TERMS_WITH_DAY } = require('../lib/recurrence')
@@ -558,6 +559,20 @@ router.delete('/backfill/:batch', async (req, res, next) => {
     const recurringId = rows.find(r => r.recurring_id)?.recurring_id || null
     const ids = rows.map(r => r.id)
     const ph = ids.map(() => '?').join(',')
+    /* 소급이 만든 거래를 문서(결의서·품의)가 처리 결과로 쥐고 있으면 되돌리지 않는다.
+       거래를 지우면 그 문서는 없는 거래를 가리킨 채 완료로 남는다(품의 쪽은 FK 도 없다). */
+    {
+      const [held] = await conn.execute(
+        `SELECT doc_no FROM expense_resolutions WHERE txn_id IN (SELECT id FROM transactions WHERE backfill_batch = ?)
+         UNION ALL
+         SELECT doc_no FROM purchase_reqs WHERE txn_id IN (SELECT id FROM transactions WHERE backfill_batch = ?)
+         LIMIT 1`, [req.params.batch, req.params.batch])
+      if (held.length) {
+        await rollbackQuietly(conn)
+        return res.status(409).json({ error: `문서 ${held[0].doc_no}가 이 묶음의 지출을 처리 결과로 쓰고 있어요. 그 문서에서 처리 취소부터 해주세요.` })
+      }
+    }
+    for (const id of ids) await detachInvoiceFromDocs(conn, id)
     /* 소급이 **붙여 쓴 진짜 거래**(통장에서 나간 것)는 지우지 않는다 — 청구서 연결만 푼다.
        지우면 계좌 잔액이 틀어진다(매출 쪽·정산 취소와 같은 규칙). */
     await conn.execute(

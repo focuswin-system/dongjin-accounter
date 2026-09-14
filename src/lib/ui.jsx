@@ -344,6 +344,8 @@ export const StatusBadge = ({ status }) => {
     "기한 지남": { tone: "neg" }, "지급 지연": { tone: "neg" }, "정산 완료": { tone: "pos" },
     "작성중": { tone: "outline" }, "승인 요청": { tone: "warn" }, "승인 대기": { tone: "warn" },
     "승인 완료": { tone: "pos" }, "반려": { tone: "neg" },
+    // 문서(구매품의·지급결의) 결재 단계 — 작성 → 승인(처리 대기) → 완료
+    "작성": { tone: "outline" }, "승인": { tone: "brand" },
     "연결 완료": { tone: "pos" }, "연결 필요": { tone: "warn" }, "검토 필요": { tone: "warn" }, "누락": { tone: "neg" },
     "진행중": { tone: "brand" }, "완료": { tone: "pos" }, "보류": { tone: "warn" },
     "청구 예정": { tone: "outline" },

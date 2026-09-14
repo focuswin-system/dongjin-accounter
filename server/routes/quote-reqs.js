@@ -2,7 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
-const { pageParams, buildWhere, inClause } = require('../lib/pagedList')
+const { pageParams, buildWhere, inClause, docDateExpr } = require('../lib/pagedList')
 
 const router = Router()
 
@@ -23,7 +23,7 @@ router.get('/', async (req, res, next) => {
       for (const s of sums) map[s.req_id] = Number(s.total)
       return res.json(rows.map(r => ({ ...r, total: map[r.id] || 0 })))
     }
-    const { whereSql, args } = buildWhere(pp, ['doc_no', 'vendor_name', 'order_source'])
+    const { whereSql, args } = buildWhere(pp, ['doc_no', 'vendor_name', 'order_source'], { dateExpr: docDateExpr('req_date'), vendor: true })
     const [[{ cnt }]] = await req.db.execute(`SELECT COUNT(*) AS cnt FROM quote_reqs ${whereSql}`, args)
     const [rows] = await req.db.execute(
       `SELECT * FROM quote_reqs ${whereSql} ORDER BY created_at DESC, id DESC LIMIT ${pp.limit} OFFSET ${pp.offset}`, args)
@@ -65,7 +65,11 @@ const headVals = (b) => [b.req_date || null, b.vendor_id || null, b.vendor_code 
   b.order_source || '', b.ship_no || '', b.drawing || '', b.pay_terms || '', b.deliver_place || '',
   b.currency || 'WON', b.applicant || '', b.note || '']
 
+/* 요청일은 'YYYY-MM-DD' 만 받는다 — 목록의 기간 필터가 이 칸을 문자열로 비교한다(lib/pagedList.js) */
+const dateError = (b) => (b.req_date && !/^\d{4}-\d{2}-\d{2}$/.test(b.req_date) ? '요청일은 YYYY-MM-DD 로 적어주세요' : null)
+
 router.post('/', async (req, res, next) => {
+  { const de = dateError(req.body); if (de) return res.status(400).json({ error: de }) }
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
@@ -89,6 +93,7 @@ router.post('/', async (req, res, next) => {
 })
 
 router.put('/:id', async (req, res, next) => {
+  { const de = dateError(req.body); if (de) return res.status(400).json({ error: de }) }
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()

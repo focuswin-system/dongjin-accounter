@@ -115,6 +115,15 @@ const AUDIT_RULES = [
      미지급으로 되살아나는데, 기록이 없으면 나중에 "왜 다시 낼 돈이 생겼나"를 못 짚는다.
      check:isolation [11] 은 DELETE 만 보므로 이런 POST 취소는 사람이 챙겨야 한다. */
   { m: 'POST',   re: /^\/api\/resolutions\/([^/]+)\/unprocess$/,        res: 'resolution', action: 'unprocess', target: 1 },
+  /* 승인 게이트 — 승인해야 처리(돈)가 열린다. 누가 언제 결재 상태를 바꿨는지 남긴다. */
+  { m: 'POST',   re: /^\/api\/resolutions\/([^/]+)\/approve$/,          res: 'resolution', action: 'approve',   target: 1 },
+  { m: 'POST',   re: /^\/api\/resolutions\/([^/]+)\/unapprove$/,        res: 'resolution', action: 'unapprove', target: 1 },
+  // 붙은 청구서가 바뀌면 처리가 '새 비용'인지 '그 청구서 지급'인지가 바뀐다
+  { m: 'POST',   re: /^\/api\/resolutions\/([^/]+)\/link-invoice$/,     res: 'resolution', action: 'link_invoice', target: 1 },
+  // 이미 나간 지출에 결의서를 만들며 곧바로 연결한다 — 처리(process)와 같은 무게다
+  { m: 'POST',   re: /^\/api\/resolutions\/from-txn\/([^/]+)$/,         res: 'resolution', action: 'create_from_txn', target: 'created' },
+  // 품의를 결의서로 넘긴다 — 이후 그 품의의 처리 권한이 결의서로 옮겨 간다
+  { m: 'POST',   re: /^\/api\/resolutions\/from-purchase-req\/([^/]+)$/, res: 'resolution', action: 'create_from_preq', target: 'created' },
   { m: 'DELETE', re: /^\/api\/resolutions\/([^/]+)$/,                   res: 'resolution', action: 'delete',  target: 1 },
   { m: 'DELETE', re: /^\/api\/settlements\/([^/]+)$/,                   res: 'settlement', action: 'delete',  target: 1 },
 
@@ -231,18 +240,19 @@ const AUDIT_RULES = [
   { m: 'PUT',    re: /^\/api\/resolutions\/([^/]+)$/,                  res: 'resolution', action: 'edit',         target: 1 },
   { m: 'POST',   re: /^\/api\/resolutions\/([^/]+)\/reload-lines$/,    res: 'resolution', action: 'reload_lines', target: 1 },
   { m: 'PUT',    re: /^\/api\/settlements\/([^/]+)$/,                  res: 'settlement', action: 'edit',         target: 1 },
-  /* 구매품의서 → 미지급금 발행. `/api/purchase-reqs` 가 LEDGER_PREFIXES 에 없어
-     검사조차 안 됐다(주문·결의서와 달리 문지기 밖에 있었다). */
   /* 순수 대체 전표(D2) — 현금 없는 분개(감가상각 등). 장부에 오르므로 남긴다. */
   { m: 'POST',   re: /^\/api\/journal-vouchers$/,                       res: 'journal_voucher', action: 'create' },
   { m: 'DELETE', re: /^\/api\/journal-vouchers\/([^/]+)$/,              res: 'journal_voucher', action: 'delete', target: 1 },
-  { m: 'POST',   re: /^\/api\/purchase-reqs\/([^/]+)\/issue-payable$/, res: 'invoice', action: 'issue', target: 1 },
-  /* 승인 게이트 — 승인해야 미지급금을 발행할 수 있다. 누가·언제는 이 감사기록이 남긴다. */
+  /* 승인 게이트 — 승인해야 지출 처리가 열린다. 누가·언제는 이 감사기록이 남긴다.
+     (예전의 issue-payable — 품의 승인으로 미지급금을 만들던 경로 — 은 2026-09 에 없앴다.
+      미지급금은 세금계산서에서만 생긴다. lib/docExec.js 머리말 참고) */
+  { m: 'POST',   re: /^\/api\/purchase-reqs\/([^/]+)\/process$/,         res: 'purchase_req', action: 'process',   target: 1 },
+  { m: 'POST',   re: /^\/api\/purchase-reqs\/([^/]+)\/unprocess$/,       res: 'purchase_req', action: 'unprocess', target: 1 },
+  { m: 'POST',   re: /^\/api\/purchase-reqs\/([^/]+)\/link-invoice$/,    res: 'purchase_req', action: 'link_invoice', target: 1 },
   { m: 'POST',   re: /^\/api\/purchase-reqs\/([^/]+)\/approve$/,       res: 'purchase_req', action: 'approve',   target: 1 },
   { m: 'POST',   re: /^\/api\/purchase-reqs\/([^/]+)\/unapprove$/,     res: 'purchase_req', action: 'unapprove', target: 1 },
   { m: 'PUT',    re: /^\/api\/purchase-reqs\/([^/]+)$/,               res: 'purchase_req', action: 'edit',   target: 1 },
-  /* 삭제 — 이미 미지급금을 발행한 품의서를 지우면 그 청구서가 고아가 된다(되돌릴 손잡이가
-     사라진다). 주문·결의서는 이 상황을 막거나 cascade 하는데 여기만 없다. 기록이라도 남긴다. */
+  /* 삭제 — 지출 처리까지 끝난 품의는 cascade 로 지출을 되돌린 뒤 지운다. 무엇이 사라졌는지 남긴다. */
   { m: 'DELETE', re: /^\/api\/purchase-reqs\/([^/]+)$/,               res: 'purchase_req', action: 'delete', target: 1 },
 
   // ── 근로·용역계약 ── 계약 조건이 급여·용역대장의 근거다
@@ -283,8 +293,8 @@ const ACTION_LABELS = {
   schedule_link: '청구 일정에 청구서 잇기',
   // 주문 붙이기 — 청구서·거래를 몰아서 주문에 귀속시킨다(되돌리기도 같은 행위)
   link_orders: '주문 붙이기', items_seed: '주문 단가표 채우기',
-  process: '결의서 처리', mature: '만기 처리',
-  approve: '품의 승인', unapprove: '품의 승인 취소',
+  process: '지출 처리', mature: '만기 처리',
+  approve: '승인', unapprove: '승인 취소',
   repay: '상환', repay_missed: '놓친 회차 상환', repay_cancel: '상환 취소',
   // 대여금·투자 회수 — 차입금 상환의 거울상
   'collect-cancel': '회수 취소', 'redeem-cancel': '회수 취소',
@@ -307,6 +317,8 @@ const ACTION_LABELS = {
   toggle_recurring: '정기 규칙 켜기·끄기',
   // ── 문서 ──
   reload_lines: '집행 내역 다시 불러오기', duplicate: '복제',
+  // 대상(구매품의서·지급결의서)은 자원 이름이 붙여 준다 — 행위 이름에 문서명을 넣지 않는다
+  link_invoice: '청구서 연결·해제', create_from_txn: '나간 지출에 결의서 붙이기', create_from_preq: '품의를 결의서로 넘기기',
   // 계정 (routes/auth.js)
   login: '로그인', login_fail: '로그인 실패', create: '등록',
   password_change: '비밀번호 변경', password_reset: '비밀번호 초기화',

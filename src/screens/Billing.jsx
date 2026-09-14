@@ -719,7 +719,8 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                     if (!res.ok) return toast.push(res.error || "결의서 생성에 실패했어요", { tone: 'warn' });
                     toast.push(res.resolution.reused ? "이미 만든 결의서를 엽니다" : `지급결의서 ${res.resolution.doc_no}를 만들었어요`);
                     onClose();
-                    window.location.hash = "doc";
+                    // 방금 만든(또는 이미 있던) 그 결의서를 연다 — 목록 첫 줄이 아니라
+                    window.location.hash = `doc/${res.resolution.id}`;
                   }}>
                   <Icon.Sign size={14}/> 지급결의서 발행
                 </button>

@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, MoneyInput, Drawer, DateInput, StatusBadge } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, DateInput, StatusBadge } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 import { SourceChooser } from '../lib/components/SourceChooser'
 import { PickListDrawer } from '../lib/components/PickListDrawer'
-import { vatOf } from '../lib/vatRate'
+import { DocFilters, approvalStatuses, vendorParams } from '../lib/components/DocFilters'
+import { ExecDrawer, approveAndAsk } from '../lib/components/ExecDrawer'
+import { useDocList } from '../lib/useDocList'
 import { makeGridKeyHandler } from '../lib/gridKeys'
 
 const numOf = (v) => (typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, ''), 10) || 0 : Number(v) || 0)
@@ -17,7 +19,7 @@ const CellIn = ({ value, onChange, right, placeholder }) => (
     onChange={e => onChange(e.target.value)} style={right ? { textAlign: 'right' } : undefined}/>
 )
 
-const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved, onCancelNew, onDeleted }) => {
+const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved, onCancelNew, onDeleted, goRoute }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [edit, setEdit] = useState(!!isNew)
@@ -28,10 +30,7 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
   const [form, setForm] = useState(empty())
   const [presets, setPresets] = useState([])
   const [itemMaster, setItemMaster] = useState([])   // 품목 기준정보 — 행에서 골라 규격·단위·매입단가 자동채움
-  const [payOpen, setPayOpen] = useState(false)      // 미지급금 등록 다이얼로그
-  const [paySupply, setPaySupply] = useState('')
-  const [payVat, setPayVat] = useState('과세')
-  const [payDue, setPayDue] = useState('')
+  const [execOpen, setExecOpen] = useState(false)    // 지출 처리 창
 
   const reloadMaster = () => api.getRefItems('item').then(r => setItemMaster(r || []))
   useEffect(() => { api.getApprovalPresets().then(setPresets); reloadMaster() }, [])
@@ -120,84 +119,81 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
       pay_terms: form.pay_terms.trim(), man_hours: form.man_hours.trim(),
       applicant: form.applicant.trim(), note: form.note.trim(), items,
       approval,   // 화면에 보이는 결재선(form.approval 없으면 defApproval)을 그대로 저장 — WYSIWYG
+      // 어디서 만들었나(받은 청구서·이미 나간 지출) — 서버가 잇는다. 새 문서일 때만 의미가 있다
+      ...(isNew && doc?.source ? { source: doc.source } : {}),
+    }
+    // 승인된 품의를 고치면 결재받은 문서가 아니게 된다 — 서버가 작성으로 되돌린다. 먼저 알린다.
+    if (!isNew && status === '승인') {
+      const ok = await confirm({
+        tone: 'warn', icon: <Icon.Warn size={22}/>, title: '승인이 풀려요',
+        body: '승인된 품의서를 고치면 작성 상태로 돌아가요. 다시 승인받아야 해요.',
+        confirmLabel: '고쳐서 저장',
+      })
+      if (!ok) return
     }
     const res = isNew ? await api.createPurchaseReq(payload) : await api.updatePurchaseReq(doc.id, payload)
     if (!res.ok) return toast.push(res.error || '저장에 실패했어요', { tone: 'warn' })
-    toast.push(isNew ? `구매품의서 ${res.req?.doc_no || ''}를 만들었어요` : '저장됐어요')
+    toast.push(isNew ? `구매품의서 ${res.req?.doc_no || ''}를 만들었어요` : res.unapproved ? '저장했어요. 작성 상태로 돌아갔어요.' : '저장됐어요')
     setEdit(false); onSaved(isNew ? res.req?.id : doc.id)
   }
   const cancel = () => { if (isNew) return onCancelNew(); setEdit(false) }
+
+  /* ── 결재·처리 상태 ──
+     작성 → 승인 → 완료. 결의서로 넘긴 품의(resolution)는 처리를 그 결의서에서만 한다. */
+  const status = doc?.status || '작성'
+  const handed = !isNew && doc?.resolution            // 지급결의서로 넘김
+  const spent = !isNew && status === '완료' && !!doc?.txn_id   // 품의에서 지출 처리함
+  const closedNoMoney = !isNew && status === '완료' && !doc?.txn_id && !handed   // 처리할 돈 없이 끝남
+
   const remove = async () => {
-    const ok = await confirm({ tone: 'neg', icon: <Icon.Warn size={22}/>, title: `${doc.doc_no} 삭제`, body: '이 구매품의서를 삭제할까요? 복구할 수 없어요.', confirmLabel: '삭제' })
+    const ok = await confirm({
+      tone: 'neg', icon: <Icon.Warn size={22}/>, title: `${doc.doc_no} 삭제`,
+      body: spent
+        ? '이 품의서로 처리한 지출까지 함께 되돌리고 지워요. 복구할 수 없어요.'
+        : '이 구매품의서를 삭제할까요? 복구할 수 없어요.',
+      confirmLabel: '삭제',
+    })
     if (!ok) return
-    const res = await api.deletePurchaseReq(doc.id)
+    const res = await api.deletePurchaseReq(doc.id, { cascade: spent })
     if (!res.ok) return toast.push(res.error || '삭제에 실패했어요', { tone: 'warn' })
-    toast.push('삭제됐어요'); onDeleted()
+    toast.push(res.keptTxn ? '삭제했어요. 연결했던 지출은 장부에 남겨 두었어요.' : '삭제됐어요'); onDeleted()
   }
   const amt = (n) => (n ? fmtNum(n) : '')
 
-  // ── 미지급금 등록 ──
-  const due30 = () => { const d = new Date(); d.setDate(d.getDate() + 30); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` }
-  /* 공급업체(거래처)가 없으면 서버가 등록을 거절한다. 예전엔 그걸 모른 채 창이 열려
-     금액·과세유형·지급예정일을 다 채우고 누른 **뒤에야** 거절당했다.
-     못 할 일이면 시작하기 전에 알려주는 편이 낫다 — 헛일을 시키지 않는다. */
-  const openPay = () => {
-    if (!doc?.vendor_id) {
-      return toast.push('공급업체를 먼저 거래처로 지정해주세요. 편집에서 공급업체를 고르면 돼요.', { tone: 'warn' })
-    }
-    setPaySupply(String(total)); setPayVat('과세'); setPayDue(due30()); setPayOpen(true)
-  }
-  const paySupplyN = numOf(paySupply)
-  const payVatAmt = payVat === '과세' ? vatOf(paySupplyN) : 0
-  /* 승인 게이트 — 승인해야 미지급금을 등록할 수 있다. 누가·언제는 서버 감사기록에 남는다. */
+  // 승인 — 처리할지 곧바로 묻는다(처리할 돈이 없으면 서버가 바로 완료로 둔다)
   const approve = async () => {
-    const res = await api.approvePurchaseReq(doc.id)
-    if (!res.ok) return toast.push(res.error || '승인에 실패했어요', { tone: 'warn' })
-    toast.push('승인했어요'); onSaved(doc.id)
+    const next = await approveAndAsk({ approve: () => api.approvePurchaseReq(doc.id), confirm, toast, onApproved: () => onSaved(doc.id) })
+    if (next === 'exec') setExecOpen(true)
   }
   const unapprove = async () => {
     const res = await api.unapprovePurchaseReq(doc.id)
     if (!res.ok) return toast.push(res.error || '되돌리지 못했어요', { tone: 'warn' })
     toast.push('작성 상태로 되돌렸어요'); onSaved(doc.id)
   }
-
-  const submitPayable = async (force = false) => {
-    if (!paySupplyN) return toast.push('공급가를 입력해주세요')
-    const res = await api.issuePurchaseReqPayable(doc.id, { supply_amount: paySupplyN, vat_mode: payVat, due: payDue || null, force })
-    if (!res.ok) {
-      /* 중복이면 그냥 막지 않는다 — 같은 지출이 이미 있을 수 있다고 알려주고, 사람이 확인하면 등록한다.
-         (진짜 다른 지출인데 금액만 겹칠 수도 있어, 판단은 사람이 한다) */
-      if (res.code === 'duplicate' && res.duplicates?.length) {
-        const ok = await confirm({
-          tone: 'warn', icon: <Icon.Warn size={22}/>, title: '이미 비슷한 지출이 있어요',
-          body: (
-            <div>같은 거래처에 금액이 겹치는 게 있어요:
-              <ul style={{ margin: '8px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
-                {res.duplicates.map((d, i) => (
-                  <li key={i}><b>{d.label}</b> {d.ref} · {d.date} · <span className="num">{fmtNum(d.amount)}원</span></li>
-                ))}
-              </ul>
-            </div>
-          ),
-          detail: '같은 지출을 두 번 잡는 것일 수 있어요. 그래도 미지급금으로 등록할까요?',
-          confirmLabel: '그래도 등록',
-        })
-        if (ok) return submitPayable(true)
-        return
-      }
-      return toast.push(res.error || '등록에 실패했어요', { tone: 'warn' })
-    }
-    toast.push(`미지급금 ${res.invoice_no}로 등록됐어요`)
-    setPayOpen(false); onSaved(doc.id)
+  const unprocess = async () => {
+    const ok = await confirm({
+      tone: 'neg', title: '처리를 취소할까요?',
+      body: '이 품의서로 등록한 지출은 지워지고, 연결만 한 지출은 연결 전으로 돌아가요. 품의서는 승인 상태로 남아요.',
+      confirmLabel: '처리 취소',
+    })
+    if (!ok) return
+    const res = await api.unprocessPurchaseReq(doc.id)
+    if (!res.ok) return toast.push(res.error || '되돌리지 못했어요', { tone: 'warn' })
+    toast.push(res.keptTxn ? '처리를 취소했어요. 연결했던 지출은 장부에 남겨 두었어요.' : '처리를 취소했어요')
+    onSaved(doc.id)
   }
 
   return (
     <>
       <DocToolbar docNo={isNew ? '새 구매품의서' : doc.doc_no}
-        status={!isNew && <span className="row gap-8" style={{ alignItems: 'center' }}>
-          {/* 등록됐으면 '등록', 아니면 상태(작성/승인). 옛 데이터는 status 가 비어 '작성'으로 본다. */}
-          <StatusBadge status={doc?.payable ? '등록' : (doc?.status || '작성')}/>
+        status={!isNew && <span className="row gap-8" style={{ alignItems: 'center', minWidth: 0 }}>
+          <StatusBadge status={status}/>
           <span className="text-sm text-muted">품의금액 <b className="num">{fmtNum(total)}원</b></span>
+          {doc?.invoice && (
+            <span className="text-xs text-muted2" title="이 품의서의 매입 청구서">
+              청구서 {doc.invoice.invoice_no}{doc.invoice.remain > 0 ? ` · 남음 ${fmtNum(doc.invoice.remain)}원` : ' · 지급 완료'}
+            </span>
+          )}
         </span>}>
         {edit ? (
           <>
@@ -206,19 +202,31 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
           </>
         ) : (
           <>
-            {doc?.payable ? (
-              <span className="chip" title={`합계 ${fmtNum(doc.payable.total)}원`}><Icon.Check size={12}/> 미지급 {doc.payable.invoice_no} · {doc.payable.status}</span>
-            ) : doc?.status === '승인' ? (
+            {handed ? (
+              /* 결의서로 넘긴 품의 — 처리·수정은 그 결의서에서. 눌러서 바로 간다. */
+              <button className="btn ghost sm" onClick={() => goRoute?.('doc', { docId: doc.resolution.id })}
+                title="이 품의서를 넘겨받은 지급결의서를 엽니다">
+                <Icon.Sign size={14}/> {doc.resolution.doc_no}에서 처리
+              </button>
+            ) : spent ? (
+              <>
+                <span className="text-xs text-muted" style={{ alignSelf: 'center' }}>
+                  지출 {doc.txn ? `${doc.txn.date} · ${fmtNum(doc.txn.amount)}원` : '처리됨'}
+                </span>
+                <button className="btn" onClick={unprocess}><Icon.Refresh size={14}/> 처리 취소</button>
+              </>
+            ) : closedNoMoney ? (
+              <button className="btn ghost sm" onClick={unapprove} title="처리할 돈 없이 끝난 품의서예요">승인 취소</button>
+            ) : status === '승인' ? (
               <>
                 <button className="btn ghost sm" onClick={unapprove}>승인 취소</button>
-                <button className="btn primary" onClick={openPay}><Icon.Receipt size={14}/> 미지급금 등록</button>
+                <button className="btn primary" onClick={() => setExecOpen(true)}><Icon.Check size={14}/> 지출 처리</button>
               </>
             ) : (
-              /* 아직 승인 전 — 먼저 승인해야 미지급금을 등록할 수 있다(결재 없이 돈이 잡히는 걸 막는다) */
               <button className="btn primary" onClick={approve}><Icon.Check size={14}/> 승인</button>
             )}
-            <button className="btn ghost" onClick={remove}><Icon.Trash size={14}/></button>
-            <button className="btn" onClick={() => setEdit(true)}><Icon.Pencil size={14}/> 편집</button>
+            {!handed && <button className="btn ghost" onClick={remove} title="삭제"><Icon.Trash size={14}/></button>}
+            {!handed && status !== '완료' && <button className="btn" onClick={() => setEdit(true)}><Icon.Pencil size={14}/> 편집</button>}
             <button className="btn" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
           </>
         )}
@@ -228,7 +236,7 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
         <div className="doc-paper resolution-paper resolution-print" id="resolution-print">
           <div className="res-title-ko">구매품의서</div>
           <div className="res-title">購 買 稟 議 書</div>
-          <div className="pr-date num">품의일자 {edit ? <input className="settle-cellin" style={{ width: 110, display: 'inline-block' }} value={form.req_date} onChange={e => setH('req_date', e.target.value)} placeholder="YYYY-MM-DD"/> : form.req_date}</div>
+          <div className="pr-date num">품의일자 {edit ? <DateInput className="settle-cellin" style={{ width: 130, display: 'inline-block' }} value={form.req_date} onChange={e => setH('req_date', e.target.value)}/> : form.req_date}</div>
 
           {/* 헤더 — 가로 표(라벨행 + 값행), 품의금액은 금번/누계 */}
           <table className="res-table pr-head">
@@ -247,7 +255,7 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
                 <td>{edit ? <CellIn value={form.order_source} onChange={v => setH('order_source', v)}/> : form.order_source}</td>
                 <td>{edit ? <CellIn value={form.ship_no} onChange={v => setH('ship_no', v)}/> : form.ship_no}</td>
                 <td>{edit ? <CellIn value={form.summary} onChange={v => setH('summary', v)}/> : form.summary}</td>
-                <td>{edit ? <CellIn value={form.arrival_date} onChange={v => setH('arrival_date', v)} placeholder="YYYY-MM-DD"/> : form.arrival_date}</td>
+                <td>{edit ? <DateInput className="settle-cellin" value={form.arrival_date || ''} onChange={e => setH('arrival_date', e.target.value)}/> : form.arrival_date}</td>
                 <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={form.order_amount} onChange={v => setH('order_amount', v)} right/> : (form.order_amount ? fmtNum(numOf(form.order_amount)) : '')}</td>
                 <td className="num fw-700" style={{ textAlign: 'right' }}>{amt(total)}</td>
                 <td className="num" style={{ textAlign: 'right' }}>{amt(total)}</td>
@@ -344,35 +352,17 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
         </div>
       </DocViewport>
 
-      <Drawer open={payOpen} onClose={() => setPayOpen(false)} width="min(420px, 100vw)" label="미지급금 등록">
-        <div className="col gap-16" style={{ padding: 20 }}>
-          <div className="text-sm text-muted2">이 구매품의서를 매입 청구서(미지급금)로 등록합니다. 미지급금·부가세 매입세액·지급결의서에 반영돼요.</div>
-          <div>
-            <label className="label" style={{ marginBottom: 6, display: 'block' }}>공급가</label>
-            <MoneyInput value={paySupply} onChange={setPaySupply}/>
-          </div>
-          <div>
-            <label className="label" style={{ marginBottom: 6, display: 'block' }}>과세유형</label>
-            <div className="row gap-6">
-              {['과세', '면세', '영세'].map(t => (
-                <button key={t} type="button" className={`chip ${payVat === t ? 'active' : ''}`} onClick={() => setPayVat(t)}>{t}</button>
-              ))}
-            </div>
-            <div className="text-xs text-muted2" style={{ marginTop: 8 }}>
-              {payVat === '과세' ? '공급가 + VAT 10%' : payVat === '면세' ? '세액 없음' : '영세율(세액 0, 과세표준 포함)'}
-              {' · 세액 '}<b className="num">{fmtNum(payVatAmt)}</b>{' · 합계 '}<b className="num">{fmtNum(paySupplyN + payVatAmt)}원</b>
-            </div>
-          </div>
-          <div>
-            <label className="label" style={{ marginBottom: 6, display: 'block' }}>지급 예정일</label>
-            <DateInput className="input" value={payDue} onChange={e => setPayDue(e.target.value)}/>
-          </div>
-          <div className="row gap-8" style={{ justifyContent: 'flex-end', marginTop: 4 }}>
-            <button className="btn" onClick={() => setPayOpen(false)}>취소</button>
-            <button className="btn primary" onClick={() => submitPayable()}><Icon.Check size={14}/> 미지급금 등록</button>
-          </div>
-        </div>
-      </Drawer>
+      {!isNew && doc && (
+        <ExecDrawer open={execOpen} onClose={() => setExecOpen(false)}
+          doc={{
+            kind: 'purchase_req', id: doc.id, docNo: doc.doc_no, title: doc.summary || doc.vendor_name || '구매품의',
+            vendorName: doc.vendor_name, vendorId: doc.vendor_id,
+            // 품의 금액은 견적(공급가)이다 — 처리 창이 과세유형에 따라 세액을 얹는다
+            amount: total, amountIsSupply: true,
+            invoice: doc.invoice && doc.invoice.remain > 0 ? doc.invoice : null,
+          }}
+          onDone={() => { setExecOpen(false); onSaved(doc.id) }} onChanged={() => onSaved(doc.id)}/>
+      )}
     </>
   )
 }
@@ -394,16 +384,16 @@ const PREQ_SOURCES = [
   {
     id: 'invoice', icon: Icon.Receipt,
     label: '받은 청구서에서',
-    desc: '아직 지급하지 않은 매입 건을 가져와요',
-    effect: '거래처와 품목이 그대로 옮겨져요. 결재가 나면 그 청구서로 지급하면 됩니다.',
+    desc: '받은 세금계산서 한 장을 결재에 올려요',
+    effect: '품목이 그대로 와요. 승인 후 처리하면 그 청구서를 지급해요.',
   },
   /* 이미 산 것을 품의로 — 급하게 먼저 사고 결재를 나중에 올리는 일도 흔하다.
      그때 거래내역에 이미 적어 둔 것을 손으로 다시 옮겨 적고 있었다. */
   {
     id: 'txn', icon: Icon.Bank,
     label: '거래내역에서 골라서',
-    desc: '이미 기록한 지출을 여러 건 가져와요',
-    effect: '고른 지출이 품목 줄로 채워져요. 거래처·금액이 그대로 오고, 수량은 1로 둡니다.',
+    desc: '이미 나간 지출에 사후 결재를 붙여요',
+    effect: '돈은 이미 나갔으니 승인하면 바로 완료돼요.',
   },
   {
     id: 'item', icon: Icon.Copy,
@@ -419,60 +409,45 @@ const PREQ_SOURCES = [
   },
 ]
 
-export const PurchaseReqScreen = () => {
+export const PurchaseReqScreen = ({ focusId = null, goRoute }) => {
   const toast = useToast()
   const [srcOpen, setSrcOpen] = useState(false)
-  const [pick, setPick] = useState(null)      // 'quote' | 'item' | null
+  const [pick, setPick] = useState(null)      // 'quote' | 'invoice' | 'txn' | 'item' | null
   const [rows, setRows] = useState(null)
   /* 새 문서에 미리 채워 넣을 값 (Settlement·QuoteRequest 와 같은 방식) */
   const [seed, setSeed] = useState({ items: [] })
-  const [list, setList] = useState([])
   const [company, setCompany] = useState(null)
   const [vendors, setVendors] = useState([])
-  const [selId, setSelId] = useState(null)
+  const [selId, setSelId] = useState(focusId)
   const [sel, setSel] = useState(null)
   const [creating, setCreating] = useState(false)
 
-  const [q, setQ] = useState('')
-  const [total, setTotal] = useState(0)
-  const [hasMore, setHasMore] = useState(false)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const LIMIT = 50
+  useEffect(() => { api.getCompany().then(setCompany); api.getVendors().then(setVendors) }, [])
 
-  // 본 목록은 서버에서 50건씩(검색·기간·더보기). picker 후보(rows/setRows)와는 별개다.
-  const load = async ({ append = false, query = q, keepId } = {}) => {
-    if (append) setLoadingMore(true)
-    const offset = append ? list.length : 0
-    const [page, comp, vs] = await Promise.all([
-      api.getPurchaseReqsPage({ q: query, limit: LIMIT, offset }), api.getCompany(), api.getVendors(),
-    ])
-    const fetched = page.rows || []
-    const merged = append ? [...list, ...fetched] : fetched
-    setList(merged); setCompany(comp); setVendors(vs)
-    setTotal(page.total); setHasMore(page.hasMore); setLoadingMore(false)
-    const want = keepId || selId
-    const nextId = want && merged.some(r => r.id === want) ? want : (merged[0]?.id || null)
-    setSelId(nextId)
-    // 선택 id가 그대로여도 상세를 다시 읽는다 — 미지급금 등록 후 payable 상태 최신화.
-    // 단 '더 보기'(append)는 선택이 안 바뀌니 재조회를 건너뛴다(낭비 방지).
-    if (!nextId) setSel(null)
-    else if (!append) api.getPurchaseReq(nextId).then(setSel)
-    return page
+  // 목록 — 서버에서 50건씩. 필터(기간·거래처·상태·검색)는 lib/useDocList.js
+  const list = useDocList((p) => api.getPurchaseReqsPage({ ...p, ...vendorParams(vendors, p.vendor) }))
+
+  /* 선택은 **지금 목록에 보이는 것** 중에서 지킨다. 예외 둘 — 목록에 없어도 연 채로 둔다:
+     · 다른 화면에서 넘어온 문서(focusId) — 필터를 바꿔 찾게 하지 않는다
+     · 방금 저장·승인·처리한 문서 — '작성' 필터로 보다가 승인하면 목록에서 빠지는데,
+       그 순간 다른 문서로 튀면 방금 한 일의 결과를 못 본다 */
+  const pinned = useRef(focusId)
+  useEffect(() => { if (focusId) { pinned.current = focusId; setCreating(false); setSelId(focusId) } }, [focusId])
+  useEffect(() => {
+    if (list.loading) return
+    setSelId(prev => (prev && (prev === pinned.current || list.rows.some(r => r.id === prev))) ? prev : (list.rows[0]?.id || null))
+  }, [list.rows, list.loading])
+  // 늦게 온 응답은 버린다 — 줄을 빠르게 옮겨 누르면 목록에 칠해진 줄과 열린 문서가 달라진다
+  const selSeq = useRef(0)
+  const loadSel = (id) => { const my = ++selSeq.current; if (!id) { setSel(null); return } api.getPurchaseReq(id).then(d => { if (my === selSeq.current) setSel(d) }) }
+  useEffect(() => { if (!creating) loadSel(selId) }, [selId, creating])
+  // 저장·승인·처리 뒤 — 목록(상태 배지·건수)과 열린 문서를 함께 새로 읽는다
+  const refresh = (id) => {
+    const target = id || selId
+    pinned.current = target
+    if (id) setSelId(id)
+    list.reload(); loadSel(target)
   }
-  useEffect(() => { load() }, [])   // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 검색은 서버로 — 300ms 디바운스. 첫 렌더는 위 load 가 이미 했다.
-  const firstQ = useRef(true)
-  useEffect(() => {
-    if (firstQ.current) { firstQ.current = false; return }
-    const t = setTimeout(() => { load({ query: q }) }, 300)
-    return () => clearTimeout(t)
-  }, [q])   // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (creating) return
-    if (!selId) { setSel(null); return }
-    api.getPurchaseReq(selId).then(setSel)
-  }, [selId, creating])
 
   const addVendor = async (q) => {
     const res = await api.addVendor({ name: q, gubu: 'A' })
@@ -500,9 +475,14 @@ export const PurchaseReqScreen = () => {
           if (id === 'quote') api.getQuoteReqs().then(r => setRows(r || []))
           /* 매입 청구서 — 목록이 품목(lines)까지 함께 준다(서버 attachMatchesBulk).
              그래서 고른 뒤 상세를 다시 읽지 않아도 된다. */
-          else if (id === 'invoice') api.getInvoices({ kind: 'received' }).then(r => setRows(r || []))
-          // 지출 전체를 받아 화면에서 거른다 — 품의는 보통 최근 몇 달치를 훑어 고른다(정산내역서와 같은 방식)
-          else if (id === 'txn') api.getTransactions({ kind: 'expense' }).then(r => setRows(r || []))
+          /* ⚠ 다른 품의가 이미 붙든 청구서·지출은 뺀다. 같은 청구서로 품의가 둘이면
+             둘 다 승인·처리하려 들어 같은 매입이 두 번 결재된다(서버도 막는다). */
+          else if (id === 'invoice') Promise.all([api.getInvoices({ kind: 'received' }), api.getPurchaseReqClaimed()])
+            .then(([r, c]) => setRows((r || []).filter(v => !c.invoices[v.id])))
+          /* 이미 나간 지출만(지급완료) — 이 출처로 만든 품의는 '처리할 돈이 없는' 품의라 승인하면
+             곧바로 완료가 된다. 아직 안 나간 지출을 넣으면 나가지도 않은 돈이 완료로 끝난다. */
+          else if (id === 'txn') Promise.all([api.getTransactions({ kind: 'expense' }), api.getPurchaseReqClaimed()])
+            .then(([r, c]) => setRows((r || []).filter(t => t.status === '지급완료' && !c.txns[t.id])))
           else api.getRefItems('item').then(r => setRows(r || []))
         }}/>
 
@@ -549,8 +529,9 @@ export const PurchaseReqScreen = () => {
       {/* 받은 청구서에서 — 아직 지급 안 한 건이 위로 오게 둔다(그게 품의를 올릴 대상이다).
           이미 지급을 마친 건도 고를 수는 있다 — 뒤늦게 결재를 올리는 일이 있다. */}
       <PickListDrawer
+        single
         open={pick === 'invoice'} onClose={() => setPick(null)}
-        title="받은 청구서에서" sub="품의에 넣을 매입 건을 고르세요"
+        title="받은 청구서에서" sub="어느 청구서를 품의로 올릴까요?"
         placeholder="거래처·청구번호·품목 검색"
         rows={rows}
         match={(v, q) => [v.vendor, v.invoiceNo, v.memo, ...(v.lines || []).map(l => l.name)]
@@ -560,9 +541,10 @@ export const PurchaseReqScreen = () => {
           sub: [v.issuedAt, v.invoiceNo,
                 (v.lines || []).length ? `품목 ${v.lines.length}개` : null,
                 v.status].filter(Boolean).join(' · '),
-          right: Number(v.totalAmount ?? v.amount) || 0,
+          // 남은 금액 — 일부 낸 청구서는 총액보다 이쪽이 결재할 돈이다
+          right: Number(v.remainAmount ?? v.totalAmount ?? v.amount) || 0,
         })}
-        empty="받은 청구서가 없어요."
+        empty="품의로 올릴 청구서가 없어요."
         onDone={(picked) => {
           /* 거래처는 한 곳일 때만 — 거래내역 쪽과 같은 규칙(결재 문서라 거래처가 틀리면
              그대로 승인이 난다) */
@@ -597,7 +579,8 @@ export const PurchaseReqScreen = () => {
               })
             }
           }
-          setSeed({ ...(names.length === 1 ? { vendor_name: names[0] } : {}), items })
+          // 이 청구서의 품의라고 잇는다 — 승인 후 처리하면 새 지출이 아니라 이 청구서를 지급한다
+          setSeed({ ...(names.length === 1 ? { vendor_name: names[0] } : {}), items, source: { type: 'invoice', id: picked[0].id } })
           setPick(null); setCreating(true)
         }}/>
 
@@ -683,7 +666,8 @@ export const PurchaseReqScreen = () => {
               })
             }
           }
-          setSeed({ ...(names.length === 1 ? { vendor_name: names[0] } : {}), items })
+          // 이미 나간 지출로 만든 품의라고 잇는다 — 처리할 돈이 없어 승인하면 곧바로 완료가 된다
+          setSeed({ ...(names.length === 1 ? { vendor_name: names[0] } : {}), items, source: { type: 'txn', ids: picked.map(t => t.id) } })
           setPick(null); setCreating(true)
         }}/>
 
@@ -712,33 +696,36 @@ export const PurchaseReqScreen = () => {
         }}/>
       <DocWorkspace>
         <DocSide top={
-          <div className="search" style={{ margin: 0, padding: '6px 10px' }}>
-            <Icon.Search size={14}/>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="문서번호·거래처·품의내용 검색"/>
-          </div>}>
-          {list.length === 0
-            ? <DocSideEmpty>{q ? '검색 결과가 없어요.' : <>구매품의서가 없어요.<br/>'새 구매품의서'로 만드세요.</>}</DocSideEmpty>
+          <DocFilters list={list} placeholder="문서번호·거래처·품명 검색" vendors={vendors}
+            statuses={approvalStatuses(list.page?.counts)}/>}>
+          {list.rows.length === 0
+            ? <DocSideEmpty>{list.loading ? '불러오는 중…'
+                : (list.filters.q || list.filters.from || list.filters.vendor || list.filters.status) ? '조건에 맞는 구매품의서가 없어요.'
+                : <>구매품의서가 없어요.<br/>'새 구매품의서'로 만드세요.</>}</DocSideEmpty>
             : <>
-              {list.map(d => (
+              {list.rows.map(d => (
                 <DocListRow key={d.id} active={!creating && selId === d.id} onClick={() => { setCreating(false); setSelId(d.id) }}
-                  docNo={d.doc_no} right={<span className="text-xs text-muted2">{d.req_date || ''}</span>}
-                  title={d.vendor_name || d.summary || '—'} meta={d.order_source || ''} amount={d.total || 0}/>
+                  docNo={d.doc_no} right={<StatusBadge status={d.status}/>}
+                  title={d.summary || d.vendor_name || '—'}
+                  meta={[d.req_date, d.vendor_name && d.summary ? d.vendor_name : null,
+                         d.resolution ? `${d.resolution.doc_no} 결의` : null].filter(Boolean).join(' · ')}
+                  amount={d.total || 0}/>
               ))}
-              {hasMore && (
+              {list.hasMore && (
                 <button className="btn ghost" style={{ width: '100%', marginTop: 6 }}
-                  disabled={loadingMore} onClick={() => load({ append: true })}>
-                  {loadingMore ? '불러오는 중…' : `더 보기 · ${list.length}/${total}건`}
+                  disabled={list.loadingMore} onClick={list.loadMore}>
+                  {list.loadingMore ? '불러오는 중…' : `더 보기 · ${list.rows.length}/${list.total}건`}
                 </button>
               )}
             </>}
         </DocSide>
         <DocMain>
           {creating
-            ? <PurchaseReqPreview doc={blankDoc} company={company} vendors={vendors} onVendorAdd={addVendor} isNew
-                onSaved={(id) => { setCreating(false); load({ keepId: id }) }} onCancelNew={() => setCreating(false)}/>
+            ? <PurchaseReqPreview doc={blankDoc} company={company} vendors={vendors} onVendorAdd={addVendor} isNew goRoute={goRoute}
+                onSaved={(id) => { setCreating(false); refresh(id) }} onCancelNew={() => setCreating(false)}/>
             : sel
-              ? <PurchaseReqPreview key={sel.id} doc={sel} company={company} vendors={vendors} onVendorAdd={addVendor}
-                  onSaved={(id) => load({ keepId: id })} onDeleted={() => { setSelId(null); load() }}/>
+              ? <PurchaseReqPreview key={sel.id} doc={sel} company={company} vendors={vendors} onVendorAdd={addVendor} goRoute={goRoute}
+                  onSaved={(id) => refresh(id)} onDeleted={() => { setSelId(null); setSel(null); list.reload() }}/>
               : <DocEmpty icon={<Icon.Receipt size={32} style={{ opacity: 0.3 }}/>}>왼쪽에서 구매품의서를 고르거나 새로 만드세요.</DocEmpty>}
         </DocMain>
       </DocWorkspace>
