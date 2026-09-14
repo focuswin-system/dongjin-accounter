@@ -404,7 +404,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   }, [form.vendor, form.account, form.amount, form.date, form.contract, kind, vendors, accounts, editTxn]);
 
   // 거래처가 바뀌면 '알아요'는 없던 일로 — 다른 거래처의 판단이었다
-  useEffect(() => { setHintsOff(false) }, [form.vendor, kind]);
+  useEffect(() => { setHintsOff(false) }, [form.vendor, form.account, kind]);
 
   /* 폼을 열어 주는 쪽이 **이름**을 넘겼을 때의 대비.
    *

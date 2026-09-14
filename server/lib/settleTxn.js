@@ -66,32 +66,36 @@ async function lookalikeSettleTxns(db, { kind, vendorId, amount, date, invoiceId
    * 둘 다 모르면(거래처도 계좌도 없음) 판정하지 않는다 — 금액·날짜만으로 걸면 경고가 늘 떠서 안 읽힌다. */
   if (!vendorId && !accountId) return { open: [], taken: [] }
   const settled = kind === 'income' ? '입금완료' : '지급완료'
+  /* 거래처를 모를 때(같은 계좌로 볼 때)는 날짜 창을 **3일로 좁힌다.** 주거래 통장엔 같은 금액(20만·100만)이
+     흔해서, 거래처 없이 20일을 보면 무관한 지출에 경고가 늘 뜨고 사람은 경고를 안 읽게 된다. */
+  const ACCOUNT_WINDOW = Math.min(3, windowDays)
   const who = []
   const whoArgs = []
   if (vendorId) {
-    who.push(`t.vendor_id IN (SELECT v2.id FROM vendors v1 JOIN vendors v2 ON TRIM(v2.name) = TRIM(v1.name) WHERE v1.id = ?)`)
-    whoArgs.push(vendorId)
+    who.push(`(t.vendor_id IN (SELECT v2.id FROM vendors v1 JOIN vendors v2 ON TRIM(v2.name) = TRIM(v1.name) WHERE v1.id = ?)
+              AND ABS(DATEDIFF(t.date, ?)) <= ?)`)
+    whoArgs.push(vendorId, date, windowDays)
   }
   if (accountId) {
-    who.push(vendorId ? '(t.vendor_id IS NULL AND t.account_id = ?)' : 't.account_id = ?')
-    whoArgs.push(accountId)
+    who.push(`(${vendorId ? 't.vendor_id IS NULL AND ' : ''}t.account_id = ? AND ABS(DATEDIFF(t.date, ?)) <= ?)`)
+    whoArgs.push(accountId, date, ACCOUNT_WINDOW)
   }
   const [rows] = await db.execute(
-    `SELECT t.id, t.date, t.amount,
+    `SELECT t.id, t.date, t.amount, t.memo, v.name AS vendor_name,
             COALESCE(SUM(m.amount), 0) AS used,
             MAX(CASE WHEN m.invoice_id <> ? THEN i.invoice_no END) AS other_no,
             MAX(CASE WHEN m.invoice_id = ? THEN 1 ELSE 0 END) AS mine
        FROM transactions t
+       LEFT JOIN vendors v ON v.id = t.vendor_id
        LEFT JOIN invoice_matches m ON m.txn_id = t.id
        LEFT JOIN invoices i ON i.id = m.invoice_id
       WHERE t.kind = ? AND (${who.join(' OR ')}) AND t.amount = ? AND t.status = ?
         AND t.transfer_id IS NULL
-        AND ABS(DATEDIFF(t.date, ?)) <= ?
-      GROUP BY t.id, t.date, t.amount
+      GROUP BY t.id, t.date, t.amount, t.memo, v.name
      HAVING mine = 0
       ORDER BY ABS(DATEDIFF(t.date, ?)), t.date
       LIMIT 3`,
-    [invoiceId || '', invoiceId || '', kind, ...whoArgs, Number(amount), settled, date, windowDays, date])
+    [invoiceId || '', invoiceId || '', kind, ...whoArgs, Number(amount), settled, date])
   const open = [], taken = []
   for (const r of rows) (Number(r.used) < Number(r.amount) ? open : taken).push(r)
   return { open, taken }
@@ -106,7 +110,9 @@ function dupSettleMessage({ open, taken }, kind) {
   const won = (n) => Number(n).toLocaleString('ko-KR')
   if (open.length) {
     const t = open[0]
-    return `${t.date} 에 같은 ${won(t.amount)}원 ${돈} 거래가 이미 있어요.`
+    // 어느 거래인지 알아볼 수 있게 거래처·적요를 붙인다 — 금액·날짜만으로는 통장에서 못 찾는다
+    const what = [t.vendor_name, t.memo].filter(Boolean).join(' · ')
+    return `${t.date} 에 같은 ${won(t.amount)}원 ${돈} 거래${what ? `(${what})` : ''}가 이미 있어요.`
          + ` '거래내역에서 연결'로 그 거래에 붙이면 장부가 한 줄로 맞습니다.`
   }
   if (taken.length) {

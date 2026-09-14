@@ -825,7 +825,10 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
 
   useEffect(() => {
     api.getCategories().then(setCategories)
-    api.getVendors().then(setVendors)
+    /* 미사용 거래처까지 받는다 — 목록에는 사용 중인 것만 보이되(아래 vendorOptions), 지금 청구서의
+       거래처가 미사용이면 그것도 남겨야 한다. 안 그러면 미사용 거래처의 옛 청구서를 고칠 때
+       거래처를 못 찾아 저장이 막힌다(거래처 없는 청구서 저장을 막은 뒤로 생긴 막다른 길). */
+    api.getVendors({ all: true }).then(setVendors)
     /* ⚠ 기본 계좌가 이미 자동으로 골라지고 있었다(`list[0]`) — **가나다순 첫 줄**이라
        카드가 걸릴 수도 있었다. 주거래가 지정돼 있으면 그것을, 없으면 통장 첫 줄을 쓴다.
        발행은 돈이 들어오는 일(주입금), 수취는 나가는 일(주지출)이다. */
@@ -949,9 +952,10 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   const vat    = !taxable ? 0 : (vatRaw === "" ? vatOf(supply) : parseInt(vatRaw))
   const total  = supply + vat
 
+  const liveOrCurrent = vendors.filter(v => v.active !== 0 || v.id === form.vendor)
   const vendorOptions = (form.kind === "issued"
-    ? vendors.filter(v => ["B", "C"].includes(v.gubu))
-    : vendors.filter(v => ["A", "E", "C"].includes(v.gubu))
+    ? liveOrCurrent.filter(v => ["B", "C"].includes(v.gubu) || v.id === form.vendor)
+    : liveOrCurrent.filter(v => ["A", "E", "C"].includes(v.gubu) || v.id === form.vendor)
   /* ⚠ 값은 **id** 다. 거래처 이름도 유일하지 않다(실제로 같은 이름이 넷 있었다).
      이름으로 되찾으면 동명 중 배열 첫 번째가 붙어 청구서가 엉뚱한 거래처로 간다. */
   ).map((v, _i, arr) => ({ value: v.id, label: vendorLabel(v, arr), sub: v.type }))
@@ -1198,11 +1202,11 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
                 const gubu = form.kind === "issued" ? "B" : "A"
                 const res = await api.addVendor({ name: nm, gubu })
                 if (!res.ok) return toast.push(res.error || "거래처를 등록하지 못했어요", { tone: 'warn' })
-                const updated = await api.getVendors()   // 682행 초기 로드와 같은 조건으로 (미사용 거래처가 섞이지 않게)
+                const updated = await api.getVendors({ all: true })   // 초기 로드와 같은 조건(미사용은 목록 필터가 가린다)
                 setVendors(updated)
                 const made = res.id || updated.find(v => (v.name || '').trim() === nm)?.id || ''
                 f("vendor", made)
-                toast.push(`"${nm}" 거래처를 등록했어요`)
+                toast.push(res.existed ? `이미 있는 "${nm}" 거래처를 골랐어요` : `"${nm}" 거래처를 등록했어요`)
               }}
               addNewLabel="거래처로 등록"/>
           </div>

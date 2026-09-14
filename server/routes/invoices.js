@@ -926,6 +926,8 @@ router.post('/split', async (req, res, next) => {
             category, account_code } = req.body
     const lines = Array.isArray(req.body.lines) ? req.body.lines : []
     if (!lines.length) return res.status(400).json({ error: '나눌 품목이 없어요. 품목을 먼저 입력해주세요.' })
+    // 한 장 발행과 같은 규칙 — 거래처 없는 청구서는 만들지 않는다
+    if (!vendor_id) return res.status(400).json({ error: '거래처를 골라주세요' })
     if (!issued_at) return res.status(400).json({ error: '발행일을 선택해주세요' })
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(issued_at))) {
       return res.status(400).json({ error: '발행일 형식이 올바르지 않아요 (YYYY-MM-DD)' })
@@ -1400,7 +1402,9 @@ router.post('/bulk/settle', async (req, res, next) => {
         /* ⚠ **이 묶음 안에서 생기는 중복은 위 조회로 못 본다** — 아직 아무것도 INSERT 하기
            전이라 DB엔 없다. 같은 거래처·같은 금액·같은 날짜가 선택 안에 둘 있으면
            똑같은 거래 두 줄이 한 커밋에 들어간다(막으려던 바로 그 일이다). */
-        const key = `${inv.vendor_id || ''}|${kindT}|${remain}|${date}`
+        // 같은 이름으로 여러 벌 등록된 거래처도 한곳으로 본다(바로 위 중복 판정과 같은 규칙)
+        const [[vn]] = inv.vendor_id ? await conn.execute('SELECT TRIM(name) AS n FROM vendors WHERE id = ?', [inv.vendor_id]) : [[null]]
+        const key = `${vn?.n || inv.vendor_id || ''}|${acct || ''}|${kindT}|${remain}|${date}`
         const twin = plan.find(p => p.key === key)
         if (twin) {
           blocked.push(`${inv.invoice_no}: 선택 안에 ${twin.inv.invoice_no} 와 거래처·금액·날짜가 같은 건이 있어요`)

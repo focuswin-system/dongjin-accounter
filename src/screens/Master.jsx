@@ -1034,6 +1034,7 @@ export const refImportAdapter = (cfg) => {
 
 const VendorPanel = ({ embedded = false }) => {
   const toast = useToast()
+  const { confirm } = useConfirm()
   const [importing,   setImporting]   = useState(false)
   const [vendors,     setVendors]     = useState([])
   const [q,           setQ]           = useState('')
@@ -1109,9 +1110,21 @@ const VendorPanel = ({ embedded = false }) => {
   const handleSave = async () => {
     if (!form.name) return toast.push('상호명을 입력하세요')
     const payload = { ...form, accounts: vAccounts, contacts: vContacts }
-    const res = editing
+    let res = editing
       ? await api.updateVendor(editing.id, payload)
       : await api.addVendor(payload)
+    /* 같은 이름이 이미 있다 — 동명이인·지점처럼 진짜 다른 곳일 수 있으니 막지 않고 묻는다.
+       그냥 두면 같은 곳이 두 벌 생겨 청구서·중복 판정이 갈라진다. */
+    if (!editing && !res.ok && res.code === 'dup_vendor') {
+      const ok = await confirm({
+        tone: 'warn', icon: <Icon.Warn size={22}/>, title: '같은 이름의 거래처가 있어요',
+        body: `${res.error} 다른 곳이 맞으면 따로 등록할 수 있어요.`,
+        detail: '사업자번호를 넣으면 같은 이름이어도 구분돼요.',
+        confirmLabel: '다른 곳이에요 — 등록', cancelLabel: '취소',
+      })
+      if (!ok) return
+      res = await api.addVendor({ ...payload, allow_duplicate: true })
+    }
     if (!res.ok) return toast.push(res.error || '저장 실패', { tone: 'warn' })
     toast.push(editing ? '수정됐어요' : '거래처가 등록됐어요')
     setDrawerOpen(false)
@@ -2262,8 +2275,8 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
                   </>
                 ) : (
                   /* 음수면 표시한다 — 대개 초기잔액을 안 넣은 것이다(정상 잔액엔 표식을 안 단다) */
-                  <td className="num-cell num-right" style={a.currentBalance < 0 ? { color: 'var(--neg-ink)' } : undefined}
-                    title={a.currentBalance < 0 ? '잔액이 음수예요. 초기잔액을 확인하세요' : undefined}>
+                  <td className="num-cell num-right" style={a.currentBalance < 0 && a.type !== '당좌예금' ? { color: 'var(--neg-ink)' } : undefined}
+                    title={a.currentBalance < 0 && a.type !== '당좌예금' ? '잔액이 음수예요. 초기잔액을 확인하세요' : undefined}>
                     {a.currentBalance == null ? '—' : fmtNum(a.currentBalance)}
                   </td>
                 )}
@@ -2303,7 +2316,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
                   </div>
                 </div>
                 {/* 잔액이 어떻게 나온 숫자인지 보여준다 — 근거 없이 뜬 금액은 못 믿는다 */}
-                {detail.currentBalance < 0 && (
+                {detail.currentBalance < 0 && detail.type !== '당좌예금' && (
                   <div className="text-xs" style={{ marginTop: 6, color: 'var(--neg-ink)' }}>
                     잔액이 음수예요. 통장 개설·도입 시점의 초기잔액을 넣었는지 확인하세요.
                   </div>
@@ -2602,12 +2615,11 @@ const RecurringFormDrawer = ({ open, editing, onClose, onSave, vendors = [], acc
             onAddNew={async (q) => {
               const nm = (q || '').trim(); if (!nm) return
               const res = await api.addVendor({ name: nm, gubu: addGubu })
-              if (!res.ok) return toast.push("거래처 등록에 실패했어요", { tone: 'warn' })
-              // 목록을 다시 받아 방금 만든 거래처를 id로 잡는다(Combobox 값이 이름이 아니라 id라서)
-              const fresh = reloadVendors ? await reloadVendors() : []
-              const hit = fresh.find(v => v.name === nm)
-              f("vendor_id", hit ? hit.id : "")
-              toast.push(`"${nm}" 거래처가 등록됐어요`)
+              if (!res.ok) return toast.push(res.error || "거래처 등록에 실패했어요", { tone: 'warn' })
+              // 서버가 준 id 를 쓴다 — 이름으로 다시 찾으면 같은 이름이 있던 경우 구분 필터에 걸려 빈칸이 됐다
+              if (reloadVendors) await reloadVendors()
+              f("vendor_id", res.id || "")
+              toast.push(res.existed ? `이미 있는 "${nm}" 거래처를 골랐어요` : `"${nm}" 거래처가 등록됐어요`)
             }}
             addNewLabel="거래처로 추가"/>
         </div>
@@ -3149,11 +3161,10 @@ const RecurringInvoiceFormDrawer = ({ open, editing, onClose, onSave, vendors, c
             onAddNew={async (q) => {
               const nm = (q || '').trim(); if (!nm) return
               const res = await api.addVendor({ name: nm, gubu: 'B' })   // 정기청구 상대는 발주처(B)
-              if (!res.ok) return toast.push("고객사 등록에 실패했어요", { tone: 'warn' })
-              const fresh = reloadVendors ? await reloadVendors() : []
-              const hit = fresh.find(v => v.name === nm)
-              f("vendorId", hit ? hit.id : "")
-              toast.push(`"${nm}" 고객사가 등록됐어요`)
+              if (!res.ok) return toast.push(res.error || "고객사 등록에 실패했어요", { tone: 'warn' })
+              if (reloadVendors) await reloadVendors()
+              f("vendorId", res.id || "")
+              toast.push(res.existed ? `이미 있는 "${nm}" 고객사를 골랐어요` : `"${nm}" 고객사가 등록됐어요`)
             }}
             addNewLabel="고객사로 추가"/>
         </div>

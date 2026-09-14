@@ -125,14 +125,32 @@ router.post('/', async (req, res, next) => {
      * '거래처로 추가'를 누르면 매번 새로 만들어졌다. 그렇게 같은 이름이 여럿이 되면 청구서 폼이
      * 어느 것인지 못 골라 **거래처 없이 저장**했고(Billing byIdOrUniqueName), 거래처별 미수·미지급이 흩어졌다.
      * 사업자번호가 둘 다 있고 서로 다르면 다른 회사다(지점·동명 법인) — 그때만 새로 만든다. */
-    {
+    if (!req.body.allow_duplicate) {
       const nm = String(name).trim()
-      const [same] = await req.db.execute('SELECT id, name, biz_no, gubu FROM vendors WHERE TRIM(name) = ?', [nm])
-      const biz = String(biz_no || '').replace(/[^0-9]/g, '')
-      const clash = same.find(v => !biz || !String(v.biz_no || '').replace(/[^0-9]/g, '') || String(v.biz_no).replace(/[^0-9]/g, '') === biz)
-      if (clash && !req.body.allow_duplicate) {
-        return res.status(409).json({ code: 'dup_vendor', id: clash.id, name: clash.name, gubu: clash.gubu,
-          error: `'${clash.name}' 거래처가 이미 있어요. 목록에서 골라주세요.` })
+      const [same] = await req.db.execute('SELECT id, name, biz_no, gubu, active FROM vendors WHERE TRIM(name) = ?', [nm])
+      const digits = (s) => String(s || '').replace(/[^0-9]/g, '')
+      const biz = digits(biz_no)
+      const clash = same.filter(v => !biz || !digits(v.biz_no) || digits(v.biz_no) === biz)
+      if (clash.length) {
+        const live = clash.filter(v => Number(v.active) === 1)
+        /* 폼 안의 '거래처로 추가'(reuse_existing)는 **사용 중인 같은 이름이 딱 하나일 때만** 그걸 쓴다.
+           여럿이면 어느 회사인지 모르고(짐작해 붙이면 안 된다), 미사용이면 목록에 안 보여 고를 수 없다. */
+        if (req.body.reuse_existing && live.length === 1) {
+          const v = live[0]
+          /* 매출(B)로 쓰려는데 매입(A)으로만 등록돼 있으면(또는 그 반대) 양쪽(C)으로 넓힌다.
+             안 넓히면 방금 '있는 거래처'를 돌려받고도 그 폼의 목록(구분별)에 안 떠서 빈칸이 된다. */
+          let g = v.gubu
+          if (['A', 'B'].includes(gubu) && ['A', 'B'].includes(v.gubu) && v.gubu !== gubu) {
+            await req.db.execute("UPDATE vendors SET gubu = 'C' WHERE id = ?", [v.id]); g = 'C'
+          }
+          return res.json({ id: v.id, existed: true, gubu: g })
+        }
+        const error = live.length === 0
+          ? `'${nm}' 거래처가 '사용 안 함'으로 등록돼 있어요. 기준정보 › 거래처에서 다시 사용으로 바꿔주세요.`
+          : live.length > 1
+            ? `'${nm}' 이름의 거래처가 여러 개예요. 목록에서 골라주세요.`
+            : `'${nm}' 거래처가 이미 있어요. 목록에서 골라주세요.`
+        return res.status(409).json({ code: 'dup_vendor', count: clash.length, live: live.length, error })
       }
     }
     const id = randomUUID()

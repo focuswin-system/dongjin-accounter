@@ -224,18 +224,20 @@ router.get('/entry-hints', async (req, res, next) => {
               (t.invoice_id IS NOT NULL) AS has_invoice, i.invoice_no
          FROM transactions t LEFT JOIN invoices i ON t.invoice_id = i.id
         WHERE t.kind = ? AND t.transfer_id IS NULL
-          AND ABS(DATEDIFF(t.date, ?)) <= ?
           AND (
                 (? IS NOT NULL
                  AND t.vendor_id IN (SELECT v2.id FROM vendors v1 JOIN vendors v2 ON TRIM(v2.name) = TRIM(v1.name) WHERE v1.id = ?)
+                 AND ABS(DATEDIFF(t.date, ?)) <= ?
                  AND (t.amount = ? OR t.amount = ? OR t.amount = ? OR ABS(t.amount - ?) <= ?))
              OR (? IS NOT NULL AND t.account_id = ? AND t.amount = ?
-                 AND (? IS NULL OR t.vendor_id IS NULL))
+                 AND (? IS NULL OR t.vendor_id IS NULL)
+                 /* 계좌로만 볼 때는 3일 — 주거래 통장엔 같은 금액이 흔해 넓게 보면 늘 뜬다 */
+                 AND ABS(DATEDIFF(t.date, ?)) <= 3)
               )
         ORDER BY ABS(DATEDIFF(t.date, ?)) LIMIT 5`,
-      [kind, date, HINT_DAYS,
-       vendorId, vendorId, amount, asSupply, asTotal, amount, near,
-       accountId, accountId, amount, vendorId,
+      [kind,
+       vendorId, vendorId, date, HINT_DAYS, amount, asSupply, asTotal, amount, near,
+       accountId, accountId, amount, vendorId, date,
        date])
 
     /* 걸린 이유를 붙인다. 같은 금액이면 굳이 적지 않는다 — 정상에는 표식을 안 단다.

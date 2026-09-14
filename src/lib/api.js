@@ -1851,17 +1851,14 @@ export const api = {
     try { return await req(`/vendors/${id}`) } catch { return null }
   },
   async addVendor(data) {
+    /* 폼 안의 '거래처로 추가'(이름·구분만 보낸다)면 같은 이름이 이미 있을 때 새로 만들 이유가 없다 —
+       서버에 있는 거래처를 쓰라고 알린다(사용 중인 것이 딱 하나일 때만 서버가 돌려준다).
+       거래처 관리의 전체 등록 폼은 적은 내용(사업자번호·계좌…)이 버려지면 안 되므로 오류로 받는다. */
+    const quick = Object.keys(data || {}).every(k => ['name', 'gubu'].includes(k))
     try {
-      const result = await req('/vendors', { method: 'POST', body: data })
-      return { ok: true, id: result.id }
-    } catch(e) {
-      /* 같은 이름이 이미 있다(서버 dup_vendor). 폼 안의 '거래처로 추가'(이름·구분만 보낸다)면
-         새로 만들 이유가 없다 — 있는 거래처를 그대로 쓴다. 거래처 관리의 전체 등록 폼은
-         적은 내용(사업자번호·계좌…)이 버려지면 안 되므로 오류로 돌려 알린다. */
-      const quick = Object.keys(data || {}).every(k => ['name', 'gubu'].includes(k))
-      if (e.code === 'dup_vendor' && quick && e.payload?.id) return { ok: true, id: e.payload.id, existed: true }
-      return { ok: false, error: e.message, code: e.code }
-    }
+      const result = await req('/vendors', { method: 'POST', body: quick ? { ...data, reuse_existing: true } : data })
+      return { ok: true, id: result.id, existed: !!result.existed }
+    } catch(e) { return { ok: false, error: e.message, code: e.code } }
   },
 
   async updateVendor(id, data) {
@@ -2621,7 +2618,8 @@ export const api = {
        권한이 없어 잔액이 가려진(null) 계좌는 보지 않는다. 카드는 쓰면 음수가 정상이라 뺀다. */
     try {
       const accs = await this.getAccounts()
-      const neg = (accs || []).filter(a => a.kind === 'bank' && a.currentBalance != null && a.currentBalance < 0)
+      // 당좌예금은 약정 한도 안에서 음수가 정상이라 뺀다(마이너스 통장)
+      const neg = (accs || []).filter(a => a.kind === 'bank' && a.type !== '당좌예금' && a.currentBalance != null && a.currentBalance < 0)
       if (neg.length) {
         items.push({ tone: 'warn', icon: 'Warn', to: 'master_account', sortKey: 1,
           title: `잔액이 음수인 계좌가 ${neg.length}개 있어요`,
