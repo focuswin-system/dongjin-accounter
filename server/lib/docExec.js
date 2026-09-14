@@ -198,11 +198,13 @@ async function unapproveDoc(conn, table, id) {
 /** 같은 거래처에 **금액이 맞는** 미지급 청구서 — 오차 규칙은 구매품의 중복 확인과 같다 */
 async function openInvoicesFor(db, vendorId, amount, { nearOnly = false, excludeIds = [] } = {}) {
   if (!vendorId) return []
+  // 같은 이름으로 여러 벌 등록된 거래처도 한곳으로 본다(그 청구서가 다른 벌에 붙어 있을 수 있다)
   const [rows] = await db.execute(
     `SELECT i.id, i.invoice_no, i.issued_at, i.due_at, i.total_amount, i.memo,
             COALESCE((SELECT SUM(m.amount) FROM invoice_matches m WHERE m.invoice_id = i.id), 0) AS paid
        FROM invoices i
-      WHERE i.kind = 'received' AND i.vendor_id = ?
+      WHERE i.kind = 'received'
+        AND i.vendor_id IN (SELECT v2.id FROM vendors v1 JOIN vendors v2 ON TRIM(v2.name) = TRIM(v1.name) WHERE v1.id = ?)
       ORDER BY i.issued_at DESC
       LIMIT 200`, [vendorId])
   const amt = Number(amount) || 0
@@ -354,9 +356,10 @@ async function executeDoc(conn, table, id, body = {}) {
       }
     }
     // 통장에서 이미 올라온 같은 지출이 있으면 되묻는다(새로 만들면 한 번 나간 돈이 두 줄이 된다)
-    if (!body.allow_new && r.vendor_id) {
+    // 거래처를 몰라도 같은 계좌로 본다(lib/settleTxn.js) — 결의서 직접 작성은 거래처가 비기 쉽다
+    if (!body.allow_new) {
       const found = await lookalikeSettleTxns(conn, {
-        kind: 'expense', vendorId: r.vendor_id, amount: amt, date: effDate, invoiceId: inv?.id || null })
+        kind: 'expense', vendorId: r.vendor_id || inv?.vendor_id || null, accountId: acct, amount: amt, date: effDate, invoiceId: inv?.id || null })
       const msg = dupSettleMessage(found, 'expense')
       if (msg) throw httpError(409, msg, { code: 'dup_txn' })
     }

@@ -189,11 +189,14 @@ router.get('/entry-hints', async (req, res, next) => {
   try {
     const kind = req.query.kind === 'income' ? 'income' : 'expense'
     const vendorId = req.query.vendor_id || null
+    const accountId = req.query.account_id || null
     const contractId = req.query.contract_id || null
     const date = dateOrNull(req.query.date)
     const amount = Math.round(Number(req.query.amount) || 0)
     const empty = { duplicates: [], openInvoices: [], recurring: [] }
-    if (!vendorId || !date || amount <= 0) return res.json(empty)
+    /* 거래처를 아직 안 골랐어도 계좌가 있으면 중복만은 본다 — 축의금·공과금처럼 거래처 없이
+       넣는 지출이 이미 결의서로 들어가 있는 경우를 여기서 잡는다(운영 dongjin 2026-09 이중 지출). */
+    if (!date || amount <= 0 || (!vendorId && !accountId)) return res.json(empty)
 
     /* ① 같은 거래처·금액이 가까운 날짜에 이미 있나.
      *   주문으로 좁히지 않는다 — 중복으로 들어간 거래는 애초에 주문을 안 붙인 경우가 많아,
@@ -215,14 +218,25 @@ router.get('/entry-hints', async (req, res, next) => {
        함께 작은 쪽을 택한다(lib/reconcile.js 의 nearly 와 같은 규칙). */
     const near = Math.min(1000, Math.max(1, Math.round(amount * 0.005)))
     const [dupRows] = await req.db.execute(
+      /* 누구와의 돈인가: 거래처를 알면 **이름이 같은 벌까지**(같은 이름이 여러 벌이면 id 가 갈린다),
+         한쪽이라도 거래처를 모르면 **같은 계좌·같은 금액**으로 본다(느슨한 금액 규칙은 거래처가 있을 때만). */
       `SELECT t.id, t.date, t.amount, t.memo, t.category,
               (t.invoice_id IS NOT NULL) AS has_invoice, i.invoice_no
          FROM transactions t LEFT JOIN invoices i ON t.invoice_id = i.id
-        WHERE t.vendor_id = ? AND t.kind = ?
+        WHERE t.kind = ? AND t.transfer_id IS NULL
           AND ABS(DATEDIFF(t.date, ?)) <= ?
-          AND (t.amount = ? OR t.amount = ? OR t.amount = ? OR ABS(t.amount - ?) <= ?)
+          AND (
+                (? IS NOT NULL
+                 AND t.vendor_id IN (SELECT v2.id FROM vendors v1 JOIN vendors v2 ON TRIM(v2.name) = TRIM(v1.name) WHERE v1.id = ?)
+                 AND (t.amount = ? OR t.amount = ? OR t.amount = ? OR ABS(t.amount - ?) <= ?))
+             OR (? IS NOT NULL AND t.account_id = ? AND t.amount = ?
+                 AND (? IS NULL OR t.vendor_id IS NULL))
+              )
         ORDER BY ABS(DATEDIFF(t.date, ?)) LIMIT 5`,
-      [vendorId, kind, date, HINT_DAYS, amount, asSupply, asTotal, amount, near, date])
+      [kind, date, HINT_DAYS,
+       vendorId, vendorId, amount, asSupply, asTotal, amount, near,
+       accountId, accountId, amount, vendorId,
+       date])
 
     /* 걸린 이유를 붙인다. 같은 금액이면 굳이 적지 않는다 — 정상에는 표식을 안 단다.
        (부가세 관계·근접은 "왜 이게 뜨지"가 생기는 자리라 이유가 있어야 한다) */
@@ -259,7 +273,8 @@ router.get('/entry-hints', async (req, res, next) => {
                                         WHERE m.invoice_id = i.id), 0) AS remaining
          FROM invoices i
          LEFT JOIN contracts c ON i.contract_id = c.id
-        WHERE i.vendor_id = ? AND i.kind = ? AND i.status <> ?
+        WHERE i.vendor_id IN (SELECT v2.id FROM vendors v1 JOIN vendors v2 ON TRIM(v2.name) = TRIM(v1.name) WHERE v1.id = ?)
+          AND i.kind = ? AND i.status <> ?
           AND (? IS NULL OR i.contract_id IS NULL OR i.contract_id = ?)
         ORDER BY i.due_at IS NULL, i.due_at, i.issued_at
         LIMIT 20`,

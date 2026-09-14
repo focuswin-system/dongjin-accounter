@@ -530,9 +530,11 @@ export const api = {
      — 두 축은 서로 다른 컬럼이라 후보도 다르다. */
   /* 거래를 넣기 **전에** 물어보는 곳 — 중복이거나, 청구서·정기 규칙 쪽 일이면 알려준다.
      실패해도 등록을 막지 않는다(안내일 뿐이다). */
-  async getEntryHints({ vendorId, kind, date, amount, contractId }) {
-    if (!vendorId) return { duplicates: [], openInvoices: [], recurring: [] }
-    const p = new URLSearchParams({ vendor_id: vendorId, kind, date: date || '', amount: String(amount || 0) })
+  async getEntryHints({ vendorId, accountId, kind, date, amount, contractId }) {
+    if (!vendorId && !accountId) return { duplicates: [], openInvoices: [], recurring: [] }
+    const p = new URLSearchParams({ kind, date: date || '', amount: String(amount || 0) })
+    if (vendorId) p.set('vendor_id', vendorId)
+    if (accountId) p.set('account_id', accountId)
     if (contractId) p.set('contract_id', contractId)
     try { return await req(`/transactions/entry-hints?${p}`) }
     catch { return { duplicates: [], openInvoices: [], recurring: [] } }
@@ -2614,6 +2616,18 @@ export const api = {
           sub: `${r.name} · 종료일 ${r.end_date}`, when: d === 0 ? '오늘 만료' : `D-${d}` })
       }
     })
+    /* 통장 잔액이 음수 — 대개 **초기잔액을 안 넣은 것**이다(운영 dongjin: 계좌 8개 전부 0원이라
+       이체만 나간 통장이 -1억·-1.5억으로 보였다). 잔액이 틀리면 자금 예측·잔액 보고서가 전부 틀린다.
+       권한이 없어 잔액이 가려진(null) 계좌는 보지 않는다. 카드는 쓰면 음수가 정상이라 뺀다. */
+    try {
+      const accs = await this.getAccounts()
+      const neg = (accs || []).filter(a => a.kind === 'bank' && a.currentBalance != null && a.currentBalance < 0)
+      if (neg.length) {
+        items.push({ tone: 'warn', icon: 'Warn', to: 'master_account', sortKey: 1,
+          title: `잔액이 음수인 계좌가 ${neg.length}개 있어요`,
+          sub: `${neg.slice(0, 2).map(a => a.name).join(' · ')}${neg.length > 2 ? ' 외' : ''} · 초기잔액을 확인하세요`, when: '' })
+      }
+    } catch { /* noop */ }
     items.sort((a, b) => a.sortKey - b.sortKey)
     return items.slice(0, 15)
   },

@@ -389,15 +389,19 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   useEffect(() => {
     if (editTxn) { setHints(null); return }
     const v = vendors.find(x => x.id === form.vendor)
+    /* 계좌도 함께 보낸다 — 거래처를 안 고른 지출(축의금·공과금)도 같은 계좌·같은 금액이면 중복을 잡는다.
+       계좌 칸은 이름을 담으므로 하나로 확정될 때만 id 로 바꾼다(저장할 때와 같은 규칙). */
+    const accHit = accounts.filter(a => a.id === form.account || a.name === form.account)
+    const accountId = accHit.length === 1 ? accHit[0].id : null
     const amount = Number(String(form.amount ?? '').replace(/[^0-9]/g, '')) || 0
-    if (!v || !amount || !form.date) { setHints(null); return }
+    if ((!v && !accountId) || !amount || !form.date) { setHints(null); return }
     let alive = true
     const t = setTimeout(() => {
-      api.getEntryHints({ vendorId: v.id, kind, date: form.date, amount, contractId: isUuid(form.contract) ? form.contract : null })
+      api.getEntryHints({ vendorId: v?.id || null, accountId, kind, date: form.date, amount, contractId: isUuid(form.contract) ? form.contract : null })
         .then(h => { if (alive) setHints(h) })
     }, 350)   // 금액은 타자 중에 바뀐다 — 멈춘 뒤에 묻는다
     return () => { alive = false; clearTimeout(t) }
-  }, [form.vendor, form.amount, form.date, form.contract, kind, vendors, editTxn]);
+  }, [form.vendor, form.account, form.amount, form.date, form.contract, kind, vendors, accounts, editTxn]);
 
   // 거래처가 바뀌면 '알아요'는 없던 일로 — 다른 거래처의 판단이었다
   useEffect(() => { setHintsOff(false) }, [form.vendor, kind]);

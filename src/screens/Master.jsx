@@ -2261,7 +2261,11 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
                     <td className="text-sm">{accounts.find(x => x.id === a.card_pay_account_id)?.name || '—'}</td>
                   </>
                 ) : (
-                  <td className="num-cell num-right">{a.currentBalance == null ? '—' : fmtNum(a.currentBalance)}</td>
+                  /* 음수면 표시한다 — 대개 초기잔액을 안 넣은 것이다(정상 잔액엔 표식을 안 단다) */
+                  <td className="num-cell num-right" style={a.currentBalance < 0 ? { color: 'var(--neg-ink)' } : undefined}
+                    title={a.currentBalance < 0 ? '잔액이 음수예요. 초기잔액을 확인하세요' : undefined}>
+                    {a.currentBalance == null ? '—' : fmtNum(a.currentBalance)}
+                  </td>
                 )}
                 <td>
                   <div className="row gap-6">
@@ -2299,6 +2303,11 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
                   </div>
                 </div>
                 {/* 잔액이 어떻게 나온 숫자인지 보여준다 — 근거 없이 뜬 금액은 못 믿는다 */}
+                {detail.currentBalance < 0 && (
+                  <div className="text-xs" style={{ marginTop: 6, color: 'var(--neg-ink)' }}>
+                    잔액이 음수예요. 통장 개설·도입 시점의 초기잔액을 넣었는지 확인하세요.
+                  </div>
+                )}
                 <div className="row text-xs text-muted2" style={{ marginTop: 6, gap: 10 }}>
                   <span>초기잔액 <span className="num">{fmtNum(detail.initialBalance)}</span></span>
                   <span>·</span>

@@ -1028,6 +1028,9 @@ router.patch('/:id/evidence', async (req, res, next) => {
 })
 
 router.put('/:id', async (req, res, next) => {
+  /* 등록과 같은 규칙 — 수정으로 거래처를 비울 수 없다. 이 PUT 은 vendor_id 를 그대로 덮어써서,
+     본문에 없으면 NULL 로 지워진다(등록만 막으면 비우는 길이 남는다). */
+  if (!req.body.vendor_id) return res.status(400).json({ error: '거래처를 골라주세요' })
   const conn = await req.db.getConnection()
   try {
     const { vendor_id, contract_id, issued_at, due_at, account_id, memo, tax_type,
@@ -1295,7 +1298,7 @@ router.post('/:id/matches', async (req, res, next) => {
       if (!allow_new) {
         const kindT = isIssued ? 'income' : 'expense'
         const found = await lookalikeSettleTxns(conn, {
-          kind: kindT, vendorId: inv.vendor_id, amount: matchAmount, date: settleDate, invoiceId })
+          kind: kindT, vendorId: inv.vendor_id, accountId: acct, amount: matchAmount, date: settleDate, invoiceId })
         const msg = dupSettleMessage(found, kindT)
         if (msg) { await rollbackQuietly(conn); return res.status(409).json({ code: 'dup_txn', error: msg }) }
       }
@@ -1391,7 +1394,7 @@ router.post('/bulk/settle', async (req, res, next) => {
       if (!req.body.allow_new) {
         const kindT = isIssued ? 'income' : 'expense'
         const found = await lookalikeSettleTxns(conn, {
-          kind: kindT, vendorId: inv.vendor_id, amount: remain, date, invoiceId: inv.id })
+          kind: kindT, vendorId: inv.vendor_id, accountId: acct, amount: remain, date, invoiceId: inv.id })
         const msg = dupSettleMessage(found, kindT)
         if (msg) { blocked.push(`${inv.invoice_no}: ${msg}`); dupBlocked++; continue }
         /* ⚠ **이 묶음 안에서 생기는 중복은 위 조회로 못 본다** — 아직 아무것도 INSERT 하기

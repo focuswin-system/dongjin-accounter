@@ -55,10 +55,27 @@ async function openTxnCandidates(db, { kind, vendorId, amount, date, windowDays 
  * ⚠ 이 청구서에 이미 붙은 거래는 뺀다. 100만을 오전·오후로 나눠 넣는 분할 정산은 정상이고,
  *   거기에 대고 "같은 거래가 있어요"를 띄우면 사람은 경고를 읽지 않고 넘기는 법을 배운다.
  */
-async function lookalikeSettleTxns(db, { kind, vendorId, amount, date, invoiceId, windowDays = MATCH_WINDOW_DAYS }) {
+async function lookalikeSettleTxns(db, { kind, vendorId, amount, date, invoiceId, accountId = null, windowDays = MATCH_WINDOW_DAYS }) {
   if (!db) throw new Error('lookalikeSettleTxns: 테넌트 연결(db)이 필요합니다')
-  if (!vendorId || !date || !(Number(amount) > 0)) return { open: [], taken: [] }
+  if (!date || !(Number(amount) > 0)) return { open: [], taken: [] }
+  /* ⚠ **거래처 id 가 같아야만** 잡던 시절엔 두 경우를 통째로 놓쳤다(운영 dongjin 2026-09, 축의금 20만 이중 지출):
+   *   · 한쪽에 거래처가 비어 있다 — 결의서 직접 작성·통장 임포트는 거래처 없이 들어오기 쉽다
+   *   · 같은 이름 거래처가 여러 벌이다 — 한쪽은 A벌, 다른 쪽은 B벌에 붙어 id 가 다르다
+   * 그래서 거래처는 **이름이 같은 벌까지** 같은 곳으로 보고, 어느 한쪽이라도 거래처를 모르면
+   * **같은 계좌**를 근거로 본다(같은 계좌·같은 금액·가까운 날짜는 거래처 없이도 충분히 수상하다).
+   * 둘 다 모르면(거래처도 계좌도 없음) 판정하지 않는다 — 금액·날짜만으로 걸면 경고가 늘 떠서 안 읽힌다. */
+  if (!vendorId && !accountId) return { open: [], taken: [] }
   const settled = kind === 'income' ? '입금완료' : '지급완료'
+  const who = []
+  const whoArgs = []
+  if (vendorId) {
+    who.push(`t.vendor_id IN (SELECT v2.id FROM vendors v1 JOIN vendors v2 ON TRIM(v2.name) = TRIM(v1.name) WHERE v1.id = ?)`)
+    whoArgs.push(vendorId)
+  }
+  if (accountId) {
+    who.push(vendorId ? '(t.vendor_id IS NULL AND t.account_id = ?)' : 't.account_id = ?')
+    whoArgs.push(accountId)
+  }
   const [rows] = await db.execute(
     `SELECT t.id, t.date, t.amount,
             COALESCE(SUM(m.amount), 0) AS used,
@@ -67,13 +84,14 @@ async function lookalikeSettleTxns(db, { kind, vendorId, amount, date, invoiceId
        FROM transactions t
        LEFT JOIN invoice_matches m ON m.txn_id = t.id
        LEFT JOIN invoices i ON i.id = m.invoice_id
-      WHERE t.kind = ? AND t.vendor_id = ? AND t.amount = ? AND t.status = ?
+      WHERE t.kind = ? AND (${who.join(' OR ')}) AND t.amount = ? AND t.status = ?
+        AND t.transfer_id IS NULL
         AND ABS(DATEDIFF(t.date, ?)) <= ?
       GROUP BY t.id, t.date, t.amount
      HAVING mine = 0
       ORDER BY ABS(DATEDIFF(t.date, ?)), t.date
       LIMIT 3`,
-    [invoiceId || '', invoiceId || '', kind, vendorId, Number(amount), settled, date, windowDays, date])
+    [invoiceId || '', invoiceId || '', kind, ...whoArgs, Number(amount), settled, date, windowDays, date])
   const open = [], taken = []
   for (const r of rows) (Number(r.used) < Number(r.amount) ? open : taken).push(r)
   return { open, taken }
@@ -88,7 +106,7 @@ function dupSettleMessage({ open, taken }, kind) {
   const won = (n) => Number(n).toLocaleString('ko-KR')
   if (open.length) {
     const t = open[0]
-    return `${t.date} 에 같은 거래처의 ${won(t.amount)}원 ${돈} 거래가 이미 있어요.`
+    return `${t.date} 에 같은 ${won(t.amount)}원 ${돈} 거래가 이미 있어요.`
          + ` '거래내역에서 연결'로 그 거래에 붙이면 장부가 한 줄로 맞습니다.`
   }
   if (taken.length) {
