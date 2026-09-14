@@ -222,8 +222,9 @@ router.post('/', async (req, res, next) => {
          비워 두면 처리할 때 같은 거래처의 미지급 청구서·통장 지출을 못 찾아 중복 가드가 헛돈다. */
       let vid = vendor_id || null
       if (!vid && vendor_name) {
-        const [[v]] = await conn.execute('SELECT id FROM vendors WHERE name = ? LIMIT 1', [vendor_name])
-        vid = v?.id || null
+        // 같은 이름이 하나뿐일 때만 — 여럿이면 어느 회사인지 모르므로 짐작해 붙이지 않는다
+        const [vs] = await conn.execute('SELECT id FROM vendors WHERE TRIM(name) = ? LIMIT 2', [String(vendor_name).trim()])
+        vid = vs.length === 1 ? vs[0].id : null
       }
       const id = await insertResolution(conn, {
         vendor_id: vid, vendor_name, title: title || '지출 결의', amount, pay_method, pay_date,

@@ -120,6 +120,21 @@ router.post('/', async (req, res, next) => {
     const { name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email, biz_type, biz_item, pay_account,
             bank_name, bank_account, account_holder } = req.body
     { const e = nameError(name); if (e) return res.status(400).json({ error: e }) }
+    /* 같은 이름의 거래처가 이미 있으면 만들지 않는다.
+     * 운영(dongjin)에서 '한국전력공사김해지사'가 10분 사이 6개, '조영년'이 3개 생겼다 — 목록에서 고르는 대신
+     * '거래처로 추가'를 누르면 매번 새로 만들어졌다. 그렇게 같은 이름이 여럿이 되면 청구서 폼이
+     * 어느 것인지 못 골라 **거래처 없이 저장**했고(Billing byIdOrUniqueName), 거래처별 미수·미지급이 흩어졌다.
+     * 사업자번호가 둘 다 있고 서로 다르면 다른 회사다(지점·동명 법인) — 그때만 새로 만든다. */
+    {
+      const nm = String(name).trim()
+      const [same] = await req.db.execute('SELECT id, name, biz_no, gubu FROM vendors WHERE TRIM(name) = ?', [nm])
+      const biz = String(biz_no || '').replace(/[^0-9]/g, '')
+      const clash = same.find(v => !biz || !String(v.biz_no || '').replace(/[^0-9]/g, '') || String(v.biz_no).replace(/[^0-9]/g, '') === biz)
+      if (clash && !req.body.allow_duplicate) {
+        return res.status(409).json({ code: 'dup_vendor', id: clash.id, name: clash.name, gubu: clash.gubu,
+          error: `'${clash.name}' 거래처가 이미 있어요. 목록에서 골라주세요.` })
+      }
+    }
     const id = randomUUID()
     await req.db.execute(
       'INSERT INTO vendors (id, name, biz_no, ceo, address, phone, gubu, type, service_type, contact, fax, email, biz_type, biz_item, pay_account, bank_name, bank_account, account_holder) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',

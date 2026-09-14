@@ -1085,6 +1085,13 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
       return named.length === 1 ? named[0] : null
     }
     const vendorObj = byIdOrUniqueName(vendors, form.vendor)
+    /* 거래처를 못 찾으면 멈춘다. 예전엔 vendor_id 없이 조용히 저장돼, 운영에 거래처 없는 매출 청구서가
+       쌓였다 — 그 청구서의 입금 거래도 거래처가 비고, 거래처별 미수금에서 통째로 빠진다. */
+    if (!vendorObj) {
+      setSaving(false)
+      toast.push("거래처를 목록에서 골라주세요. 같은 이름이 여럿이면 기준정보 › 거래처에서 정리해주세요.", { tone: "warn" })
+      return
+    }
     const contractObj = byIdOrUniqueName(contracts, form.contract)
     onSave({
       id: editInvoice?.id,

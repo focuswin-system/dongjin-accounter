@@ -735,6 +735,9 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
       || (o.keywords || "").toLowerCase().includes(lc)));
   }, [term, options]);
 
+  /* 친 글자와 **똑같은** 항목이 이미 있으면 '추가'는 새로 만들 게 아니라 그걸 고르는 것이다.
+     예전엔 늘 "추가"가 떠서 같은 거래처가 여러 벌 생겼다(운영 dongjin: 한 이름이 6개). */
+  const exact = term ? options.find(o => !o.header && String(o.label || '').trim() === term.trim()) : null;
   const selected = options.find(o => o.value === value);
   // 목록에 없는 자유입력 값(적요·직접 입력 주문·거래처 등)은 원문 그대로 표시.
   // 코드형(계정과목 등, allowAdd=false)은 옵션이 async로 실리기 전 코드/ID가 잠깐 노출되지 않게
@@ -767,6 +770,7 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
     else if (e.key === "Enter") {
       e.preventDefault();
       if (filtered[hi]) pick(filtered[hi]);
+      else if (exact) pick(exact);
       else if (term && allowAdd) { onAddNew?.(term); setOpen(false); setQ(""); setDirty(false); }
       // 아무것도 안 치고 안 짚었으면 '이대로 두기'다 — 값을 건드리지 않고 닫는다
       else { setOpen(false); setQ(""); setDirty(false); }
@@ -873,7 +877,7 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
               </button>
             )))}
           </div>
-          {allowAdd && onAddNew && (
+          {allowAdd && onAddNew && !exact && (
             <div style={{ borderTop: "1px solid var(--line)" }}>
               <button type="button"
                 onClick={() => { onAddNew(q); setOpen(false); setQ(""); setDirty(false); }}

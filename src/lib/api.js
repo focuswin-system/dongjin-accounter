@@ -1852,7 +1852,14 @@ export const api = {
     try {
       const result = await req('/vendors', { method: 'POST', body: data })
       return { ok: true, id: result.id }
-    } catch(e) { return { ok: false, error: e.message } }
+    } catch(e) {
+      /* 같은 이름이 이미 있다(서버 dup_vendor). 폼 안의 '거래처로 추가'(이름·구분만 보낸다)면
+         새로 만들 이유가 없다 — 있는 거래처를 그대로 쓴다. 거래처 관리의 전체 등록 폼은
+         적은 내용(사업자번호·계좌…)이 버려지면 안 되므로 오류로 돌려 알린다. */
+      const quick = Object.keys(data || {}).every(k => ['name', 'gubu'].includes(k))
+      if (e.code === 'dup_vendor' && quick && e.payload?.id) return { ok: true, id: e.payload.id, existed: true }
+      return { ok: false, error: e.message, code: e.code }
+    }
   },
 
   async updateVendor(id, data) {

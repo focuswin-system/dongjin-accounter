@@ -810,6 +810,9 @@ router.post('/', async (req, res, next) => {
      * (다른 청구서 INSERT 7곳은 주문·정기 규칙에서 내부 계산하므로 이 문제가 없다) */
     { const e = invoiceCreateError({ kind, supply_amount, vat_amount })
       if (e) return res.status(400).json({ error: e }) }
+    /* 세금계산서에는 늘 상대가 있다. 거래처 없는 청구서는 거래처별 미수·미지급에서 빠지고,
+       그 청구서로 정산한 거래까지 거래처가 빈다(운영 dongjin 에 그렇게 생긴 매출 청구서 4건). */
+    if (!vendor_id) return res.status(400).json({ error: '거래처를 골라주세요' })
     /* 발행일은 반드시 받는다. 없으면 DB의 NOT NULL 제약에 걸려 **500**이 났다 —
      * 사용자에겐 "처리 중 오류"라고만 보여서 무엇을 안 넣었는지 알 수 없다.
      * 게다가 발행일이 없으면 바로 아래 마감 검사가 undefined 로 통과해 버린다. */
