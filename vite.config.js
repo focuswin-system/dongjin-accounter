@@ -92,7 +92,9 @@ export default defineConfig(({ mode }) => {
           // 첨부 파일(/uploads)·API(/api)로의 이동은 SPA fallback(index.html)으로 가로채지 말고
           // 실제 서버로 넘긴다. 안 그러면 첨부 파일 새 탭 열기가 메인페이지로 빠진다.
           navigateFallback: 'index.html',
-          navigateFallbackDenylist: [/^\/uploads\//, /^\/api\//],
+          /* /admin — 운영콘솔(server/admin). 빠져 있으면 같은 주소에서 고객 앱을 한 번 연 브라우저는
+             콘솔 주소를 쳐도 서비스워커가 고객 앱(index.html)을 대신 내준다(2026-09-15 로컬에서 겪음). */
+          navigateFallbackDenylist: [/^\/uploads\//, /^\/api\//, /^\/admin(\/|$|\?)/],
         },
       }),
     ],

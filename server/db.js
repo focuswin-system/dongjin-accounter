@@ -1148,11 +1148,7 @@ async function initDb(conn) {
     /* 발행 시점 원거래 계정과목 스냅샷. 이미 결제된 어음은 원거래가 어음 계정으로
        덮어써져 되살릴 값이 없다 — 비워 둔다(전표가 '확인 필요'로 선다). */
     await ensureColumn('notes', 'origin_acct_code', 'origin_acct_code VARCHAR(20)')
-    await c.execute(
-      `UPDATE notes n JOIN transactions t ON t.id = n.origin_txn_id
-          SET n.origin_acct_code = t.account_code
-        WHERE n.origin_txn_id IS NOT NULL AND n.origin_acct_code IS NULL
-          AND n.status = 'held' AND t.account_code IS NOT NULL`)
+    // ↳ 채우기(UPDATE)는 transactions.account_code 가 생긴 **뒤**에 한다 — 아래 '어음 원거래 계정 채우기'
     await c.execute(
       "UPDATE notes SET dishonored_on = due_on WHERE status = 'dishonored' AND dishonored_on IS NULL")
     await ensureColumn('vendors', 'active', "active TINYINT(1) NOT NULL DEFAULT 1")
@@ -1189,6 +1185,15 @@ async function initDb(conn) {
     // 선택 입력: 품목(ref_items) · 계정과목(account_subjects 코드)
     await ensureColumn('transactions', 'item_id',      "item_id VARCHAR(36)")
     await ensureColumn('transactions', 'account_code', "account_code VARCHAR(10)")
+    /* 어음 원거래 계정 채우기 — 위 notes.origin_acct_code 의 짝.
+       ⚠ 이 줄보다 **위**로 올리지 않는다. 빈 DB(새 회사)에서는 transactions.account_code 가
+         여기서 처음 생기므로, 위에 있으면 회사 생성이 'Unknown column' 으로 통째로 실패한다
+         (2026-09-02 에 위에 넣었다가 9-15 발견. 기존 회사 DB 는 칸이 있어 티가 안 났다). */
+    await c.execute(
+      `UPDATE notes n JOIN transactions t ON t.id = n.origin_txn_id
+          SET n.origin_acct_code = t.account_code
+        WHERE n.origin_txn_id IS NOT NULL AND n.origin_acct_code IS NULL
+          AND n.status = 'held' AND t.account_code IS NOT NULL`)
 
     /* 계좌의 계정과목 — 일계표(복식 전개)에 필요하다.
      *
@@ -1382,7 +1387,14 @@ async function initDb(conn) {
     await ensureColumn('company_info', 'main_in_account_id',  'main_in_account_id VARCHAR(36)')
     await ensureColumn('company_info', 'main_out_account_id', 'main_out_account_id VARCHAR(36)')
     await ensureColumn('company_info', 'main_card_id',        'main_card_id VARCHAR(36)')
-    await ensureColumn('vendors',   'bank_name',      "bank_name VARCHAR(60)")
+    /* 첫 로그인 회사 설정(2026-09) — 종사업장·회기.
+     * 회기는 세 값만 저장하고 기간·기수·이름은 lib/fiscal.js 가 계산한다(해마다 행을 만들지 않는다).
+     * 결산월 기본 12 — 이미 쓰던 회사는 달력연도로 시작하고, 기수는 비워 둔다. */
+    await ensureColumn('company_info', 'sub_biz_no',       'sub_biz_no VARCHAR(4)')
+    await ensureColumn('company_info', 'fiscal_end_month', 'fiscal_end_month TINYINT NOT NULL DEFAULT 12')
+    await ensureColumn('company_info', 'fiscal_base_year', 'fiscal_base_year SMALLINT')
+    await ensureColumn('company_info', 'fiscal_base_seq',  'fiscal_base_seq SMALLINT')
+    await ensureColumn('vendors',   'bank_name',     "bank_name VARCHAR(60)")
     await ensureColumn('vendors',   'bank_account',   "bank_account VARCHAR(60)")
     await ensureColumn('vendors',   'account_holder', "account_holder VARCHAR(100)")
 

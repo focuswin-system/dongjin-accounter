@@ -84,6 +84,14 @@ test('직원 전체 목록은 공용이 아니다 — 급여·생년월일·급�
   assert.equal(requiredPerm('GET', '/api/employees/options'), null)   // 고르기용 최소 목록만 공용
 })
 
+test('회사 정보 조회는 공용, 수정·미리보기는 환경설정 권한', () => {
+  // 인쇄물 머리글·첫 설정 판정에 쓰인다 — 권한 없는 직원의 인쇄물에서 공급자 칸이 비면 안 된다
+  assert.equal(requiredPerm('GET', '/api/company'), null)
+  assert.deepEqual(requiredPerm('PUT', '/api/company'), { resources: ['settings'], action: 'edit' })
+  assert.deepEqual(requiredPerm('GET', '/api/company/fiscal-preview').resources, ['settings'])
+  assert.deepEqual(requiredPerm('GET', '/api/company/accounting-prefs').resources, ['settings'])
+})
+
 test('계좌 목록은 공용이되 잔액은 라우트가 따로 가린다', () => {
   // 결제수단이라 목록 자체는 열어야 한다. 잔액 차단은 routes/accounts.js canSeeBalance 소관.
   assert.equal(requiredPerm('GET', '/api/accounts'), null)

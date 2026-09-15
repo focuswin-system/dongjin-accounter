@@ -148,7 +148,7 @@ export const WelcomeWizard = ({ open, userName, initialOff, replay, onClose, onS
                 <span className="wz-point-ico"><Icon.Check size={20}/></span>
                 <div>
                   <div className="wz-point-title">다음은 기초 자료</div>
-                  <div className="wz-point-desc">홈의 ‘처음 세팅’에서 회사 정보·계좌·거래처를 채우면 준비가 끝납니다.</div>
+                  <div className="wz-point-desc">홈의 ‘처음 세팅’에서 계좌·거래처를 채우면 준비가 끝납니다.</div>
                 </div>
               </div>
               {/* 되살리는 길은 반드시 말한다 — 지운 줄 알면 다시 안 켠다 */}

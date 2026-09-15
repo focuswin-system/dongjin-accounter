@@ -36,7 +36,7 @@ const SetupCard = ({ onOpen }) => {
         <div style={{ flex: 1, minWidth: 180 }}>
           <div className="fw-700">처음 세팅이 아직 끝나지 않았어요</div>
           <div className="text-sm text-muted" style={{ marginTop: 2 }}>
-            회사 정보·계좌·거래처를 채우면 청구서와 명세서가 자동으로 채워져요.
+            계좌·거래처를 채우면 청구서와 명세서가 자동으로 채워져요.
           </div>
         </div>
         {/* 몇 개 남았는지가 이 카드의 핵심이다 — '아직'만 말하면 얼마나 남았는지 몰라 미룬다 */}

@@ -29,6 +29,10 @@
 
 /** 되돌리기 어렵거나 돈이 움직이는 행위만. 위에서부터 먼저 맞는 것이 이긴다. */
 const AUDIT_RULES = [
+  /* ── 회사 정보 ── 사업자번호가 바뀌면 인쇄물 머리글과 세금계산서 매출·매입 판정이 달라진다.
+     누가 언제 바꿨는지 남긴다. */
+  { m: 'PUT',    re: /^\/api\/company$/,                           res: 'company', action: 'edit' },
+
   // ── 마감 ── 장부를 잠그고 여는 행위. 마감 해제는 특히 남아야 한다(잠긴 기간을 다시 연다)
   { m: 'POST',   re: /^\/api\/closings$/,                          res: 'closing', action: 'close',  target: { body: 'period' } },
   { m: 'DELETE', re: /^\/api\/closings\/([^/]+)$/,                 res: 'closing', action: 'reopen', target: 1 },
@@ -336,6 +340,7 @@ const RESOURCE_LABELS = {
   loan: '차입금', lending: '대여금', investment: '투자', savings: '예금·적금', unpaid_labor: '미지급 퇴직금',
   account: '계좌/카드', vendor: '거래처', ref_item: '기준정보', user: '사용자',
   feature: '유료 기능',
+  company: '회사 정보',
   note: '어음', tax: '세금', purchase_req: '구매품의서', journal_voucher: '대체전표',
 }
 

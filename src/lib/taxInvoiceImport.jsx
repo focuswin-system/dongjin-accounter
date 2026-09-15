@@ -69,7 +69,7 @@ export const taxInvoiceImportAdapter = ({ ourBizNo = '', defaultKind = 'issued',
     <div className="col gap-12">
       <div className="row gap-10" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
         <div style={{ minWidth: 190 }}>
-          <div className="text-sm fw-600">우리 회사 사업자등록번호</div>
+          <div className="text-sm fw-600">우리 회사 사업자번호</div>
           <div className="text-xs text-muted2">이 번호로 매출·매입을 가릅니다</div>
         </div>
         <input className="input" style={{ width: 160 }} value={opts.ourBizNo || ''}
@@ -79,7 +79,7 @@ export const taxInvoiceImportAdapter = ({ ourBizNo = '', defaultKind = 'issued',
             원래 자리는 환경설정 › 회사 정보이고, 여기 입력은 이번 업로드에만 쓰는 임시값이다. */}
         {!digits(ourBizNo) ? (
           <span className="text-xs" style={{ color: 'var(--warn-ink)' }}>
-            <b>환경설정 › 회사 정보</b>에 사업자등록번호가 비어 있어요 — 거기 한 번 넣어두면 다음부터 자동으로 채워집니다
+            <b>환경설정 › 회사 정보</b>에 사업자번호가 없어요
           </span>
         ) : digits(opts.ourBizNo) === digits(ourBizNo) ? (
           <span className="text-xs text-muted2">환경설정 › 회사 정보에서 가져왔어요</span>

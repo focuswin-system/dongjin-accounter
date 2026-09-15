@@ -786,11 +786,28 @@ export const api = {
     try { return await req('/company') } catch { return null }
   },
 
+  /* 첫 설정 화면을 띄울지 가르는 호출 — **못 읽은 것과 없는 것을 구분한다.**
+     getCompany 처럼 실패를 null 로 삼키면, 서버가 잠깐 흔들린 순간 전 직원이
+     '회사 정보 없음' 설정 화면에 갇힌다. 실패면 ok:false 로 알리고 화면은 막지 않는다. */
+  async loadCompany() {
+    try { return { ok: true, company: await req('/company', { softAuth: true }) } }
+    catch { return { ok: false } }
+  },
+
+  /* 보낸 칸만 바뀐다(서버 부분 갱신). field — 어느 칸 때문에 막혔는지(화면이 그 칸 아래에 붙인다) */
   async saveCompany(data) {
     try {
       await req('/company', { method: 'PUT', body: data })
       return { ok: true }
-    } catch (e) { return { ok: false, error: e.message } }
+    } catch (e) { return { ok: false, error: e.message, field: e.payload?.field || null } }
+  },
+
+  /* 올해 회기 미리보기 — 계산은 서버(lib/fiscal.js)만 한다.
+     @returns { year, name, start, end } | { error } */
+  async getFiscalPreview({ endMonth } = {}) {
+    const qs = new URLSearchParams({ end_month: String(endMonth ?? '') })
+    try { return await req(`/company/fiscal-preview?${qs}`) }
+    catch (e) { return { error: e.message } }
   },
 
   /* 회계 처리 방식 — 회사가 정하는 장부 규약.

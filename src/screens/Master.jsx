@@ -20,6 +20,7 @@ import { normBizNo, normVendorName } from '../lib/normalize'
 import { cycleMonthsLabel, PAY_TERM_OPTS, payTermNeedsDay, payTermHint,
          BILLING_PERIODS, periodMonths, periodLong } from '../lib/renewal'
 import { bizTypeOptions, bizItemOptions } from '../lib/bizTypes'
+import { CoRow, BizSection, ContactSection, FiscalSection, emptyCompanyForm, companyFormOf, focusCompanyField } from '../lib/components/CompanyFields'
 import { api, minuteOf } from '../lib/api'
 import { vatOf } from '../lib/vatRate'
 
@@ -1834,39 +1835,36 @@ const AdjustDrawer = ({ account, onClose, onSave }) => {
 }
 
 // ── 회사 정보 패널 (자사 기준정보, 단일 레코드) ────────────────────
-/* 회사 정보의 한 줄 — 이름 열 + 값 열.
-   ⚠ CompanyPanel **안**에서 정의하면 안 된다. 렌더마다 새 컴포넌트 타입이 되어
-     input 이 통째로 다시 붙고, 한 글자 칠 때마다 포커스가 날아간다. */
-const CoRow = ({ label, req, hint, children }) => (
-  <div className="co-row">
-    <div className="co-key">{label}{req && <span style={{ color: 'var(--neg-ink)' }}> *</span>}</div>
-    <div style={{ minWidth: 0 }}>
-      {children}
-      {hint && <div className="co-hint">{hint}</div>}
-    </div>
-  </div>
-)
-
+/* 사업자·연락처·회기 칸은 첫 설정 화면과 같은 부품이다(components/CompanyFields). */
+const companyPanelFormOf = (c) => ({
+  ...companyFormOf(c),
+  main_account: c?.main_account || '',
+  main_in_account_id: c?.main_in_account_id || '',
+  main_out_account_id: c?.main_out_account_id || '',
+  main_card_id: c?.main_card_id || '',
+  closing_day: Number(c?.closing_day) || 0, week_start_day: Number(c?.week_start_day ?? 1),
+})
 const CompanyPanel = ({ embedded = false }) => {
   const toast = useToast()
-  const [form, setForm] = useState({ name:'', biz_no:'', ceo:'', biz_type:'', biz_item:'', address:'', phone:'', fax:'', email:'', main_account:'', closing_day: 0, week_start_day: 1,
-    main_in_account_id: '', main_out_account_id: '', main_card_id: '' })
+  const { confirm } = useConfirm()
+  const [form, setForm] = useState(() => companyPanelFormOf(null))
+  /* 불러온 그대로 — 저장할 때 **바뀐 칸만** 보내려고 둔다.
+     전부 보내면 탭을 열어 둔 채 회기가 넘어간 뒤 전화번호만 고쳐도, 화면을 연 날의 기수가
+     오늘 회기의 기수로 저장돼 한 칸 밀린다(3/31 에 열고 4/1 에 저장). 안 건드린 칸은 안 보낸다. */
+  const [loaded, setLoaded] = useState(null)
+  const [errors, setErrors] = useState({})
   const [accounts, setAccounts] = useState([])
   // 회계 처리 방식 — 저장 버튼과 무관하게 토글 즉시 반영된다(장부 규약이라 되돌리기 쉬워야 한다)
   const [acctPrefs, setAcctPrefs] = useState({ voucher_issuance: true })
 
+  const loadCompany = async () => {
+    const c = await api.getCompany()
+    if (!c) return
+    const next = companyPanelFormOf(c)
+    setForm(next); setLoaded(next)
+  }
   useEffect(() => {
-    api.getCompany().then(c => {
-      if (c) setForm({
-        name: c.name||'', biz_no: c.biz_no||'', ceo: c.ceo||'', biz_type: c.biz_type||'',
-        biz_item: c.biz_item||'', address: c.address||'', phone: c.phone||'', fax: c.fax||'',
-        email: c.email||'', main_account: c.main_account||'',
-        main_in_account_id: c.main_in_account_id || '',
-        main_out_account_id: c.main_out_account_id || '',
-        main_card_id: c.main_card_id || '',
-        closing_day: Number(c.closing_day) || 0, week_start_day: Number(c.week_start_day ?? 1),
-      })
-    })
+    loadCompany()
     /* ⚠ 카드까지 **다** 담는다. 예전엔 여기서 card 를 걸러 놓고 아래 '주카드' 칸이
        `kind === 'card'` 로 다시 골라, 그 칸은 늘 비어 있었다(고를 수가 없었다).
        거르는 일은 쓰는 자리에서 한다 — 대표 입금계좌만 카드를 뺀다. */
@@ -1874,11 +1872,30 @@ const CompanyPanel = ({ embedded = false }) => {
     api.getAccountingPrefs().then(setAcctPrefs)
   }, [])
 
-  const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
+  const f = (k, v) => { setErrors(e => (e[k] ? { ...e, [k]: '' } : e)); setForm(p => ({ ...p, [k]: v })) }
   const handleSave = async () => {
-    if (!form.name) return toast.push('상호(법인명)를 입력하세요')
-    const res = await api.saveCompany(form)
-    if (!res.ok) return toast.push(res.error || '저장 실패', { tone: 'warn' })
+    const changed = Object.fromEntries(Object.entries(form)
+      .filter(([k, v]) => !loaded || String(v ?? '') !== String(loaded[k] ?? '')))
+    if (!Object.keys(changed).length) return toast.push('바뀐 내용이 없어요')
+    const digits = (v) => String(v || '').replace(/\D/g, '')
+    /* 사업자번호를 바꿀 때만 한 번 묻는다 — 인쇄물 머리글과 세금계산서 매출·매입 판정이 함께 바뀐다.
+       자릿수부터 틀린 번호는 묻지 않고 서버가 칸 아래에 알리게 둔다(틀린 번호에 '바꿀까요?'는 헛수고다). */
+    const nb = digits(changed.biz_no)
+    if ('biz_no' in changed && (nb.length === 10 || nb.length === 6) && loaded?.biz_no) {
+      const ok = await confirm({
+        tone: 'warn', icon: <Icon.Warn size={22}/>, title: '사업자번호를 바꿀까요?',
+        body: `${loaded.biz_no} → ${form.biz_no}. 이제부터 출력하는 문서와 세금계산서 가져오기에 새 번호를 씁니다.`,
+        confirmLabel: '바꾸기',
+      })
+      if (!ok) return
+    }
+    const res = await api.saveCompany(changed)
+    if (!res.ok) {
+      if (res.field) { setErrors({ [res.field]: res.error }); if (focusCompanyField(res.field)) return }
+      return toast.push(res.error || '저장 실패', { tone: 'warn' })
+    }
+    setErrors({})
+    await loadCompany()   // 서버가 정리한 값(사업자번호 표기·올해 기수)으로 다시 맞춘다
     toast.push('회사 정보가 저장됐어요')
   }
 
@@ -1902,47 +1919,9 @@ const CompanyPanel = ({ embedded = false }) => {
           값이 시작하는 선이 같아, 눈이 세로 두 줄만 따라가면 된다. */}
       <div className="co-grid">
 
-        <div className="card card-pad col co-sec" style={{ gap: 14 }}>
-          <div className="co-head">사업자 정보</div>
-          <CoRow label="상호(법인명)" req>
-            <input className="input" value={form.name} onChange={e => f('name', e.target.value)} placeholder="예: 도니도라 주식회사"/>
-          </CoRow>
-          <CoRow label="대표자">
-            <input className="input" value={form.ceo} onChange={e => f('ceo', e.target.value)} placeholder="예: 홍길동"/>
-          </CoRow>
-          <CoRow label="사업자등록번호">
-            <input className="input num" value={form.biz_no} onChange={e => f('biz_no', e.target.value)} placeholder="예: 000-00-00000"/>
-          </CoRow>
-          {/* 업태·종목은 사업자등록증에 적힌 문구를 그대로 옮기는 칸이다. 자유 입력이라
-              같은 뜻을 여러 표기로 쓰게 되므로(소프트웨어개발/소프트웨어 개발/SW개발)
-              표준 목록에서 고르게 하되, 목록에 없으면 직접 입력도 된다. */}
-          <CoRow label="업태">
-            <Combobox value={form.biz_type} onChange={v => f('biz_type', v)}
-              options={bizTypeOptions()} placeholder="선택 또는 직접 입력"
-              onAddNew={q => f('biz_type', q)} addNewLabel="직접 입력"/>
-          </CoRow>
-          <CoRow label="종목">
-            <Combobox value={form.biz_item} onChange={v => f('biz_item', v)}
-              options={bizItemOptions(form.biz_type)} placeholder="선택 또는 직접 입력"
-              onAddNew={q => f('biz_item', q)} addNewLabel="직접 입력"/>
-          </CoRow>
-        </div>
-
-        <div className="card card-pad col co-sec" style={{ gap: 14 }}>
-          <div className="co-head">연락처 · 주소</div>
-          <CoRow label="사업장 주소">
-            <input className="input" value={form.address} onChange={e => f('address', e.target.value)} placeholder="예: 경기도 안산시 ..."/>
-          </CoRow>
-          <CoRow label="대표 전화">
-            <input className="input" value={form.phone} onChange={e => f('phone', e.target.value)} placeholder="예: 031-000-0000"/>
-          </CoRow>
-          <CoRow label="팩스">
-            <input className="input" value={form.fax} onChange={e => f('fax', e.target.value)} placeholder="예: 031-000-0001"/>
-          </CoRow>
-          <CoRow label="이메일">
-            <input className="input" value={form.email} onChange={e => f('email', e.target.value)} placeholder="예: info@company.co.kr"/>
-          </CoRow>
-        </div>
+        <BizSection form={form} f={f} errors={errors}/>
+        <ContactSection form={form} f={f} errors={errors}/>
+        <FiscalSection form={form} f={f} errors={errors}/>
 
         <div className="card card-pad col co-sec" style={{ gap: 14 }}>
           <div className="co-head">계좌 · 카드</div>

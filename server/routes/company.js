@@ -1,4 +1,8 @@
 const { Router } = require('express')
+const { withTx, httpError } = require('../lib/withTx')
+const { fiscalOfDate, fiscalOfYear, fiscalYearOf, parseFiscal } = require('../lib/fiscal')
+const { planCompanyChange } = require('../lib/companyChange')
+const { kstToday } = require('../db')
 
 const router = Router()
 const COMPANY_ID = 'main' // 자사 정보는 단일 레코드
@@ -6,41 +10,49 @@ const COMPANY_ID = 'main' // 자사 정보는 단일 레코드
 router.get('/', async (req, res, next) => {
   try {
     const [rows] = await req.db.execute('SELECT * FROM company_info WHERE id = ?', [COMPANY_ID])
-    res.json(rows[0] || null)
+    const row = rows[0]
+    if (!row) return res.json(null)
+    // fiscal — 오늘이 속한 회기(기간·이름·기수). 화면은 기수를 '올해 기수'로 보여주고 받는다.
+    res.json({ ...row, fiscal: fiscalOfDate(row, kstToday()) })
   } catch (e) { next(e) }
 })
 
+/* 올해 회기 미리보기 — 결산월을 고르는 순간 "2026.04.01 ~ 2027.03.31 (26-27년)"을 보여준다.
+   계산을 화면에 두 벌 두지 않으려고 서버에 묻는다(lib/fiscal.js 한 곳). */
+router.get('/fiscal-preview', async (req, res, next) => {
+  try {
+    const endMonth = Number(req.query.end_month)
+    const p = parseFiscal({ fiscal_end_month: endMonth })
+    if (!p.ok) return res.status(400).json({ error: p.error })
+    res.json(fiscalOfYear(p.value, fiscalYearOf(endMonth, kstToday())))
+  } catch (e) { next(e) }
+})
+
+/* 저장 — **보낸 칸만 바꾼다.**
+ *
+ * 예전엔 안 보낸 칸을 빈 값으로 덮었다. 모든 칸을 보내는 화면 하나뿐일 땐 티가 안 났지만,
+ * 첫 설정 화면처럼 일부만 보내는 곳이 생기면 주거래 계좌·마감일이 조용히 지워진다.
+ *
+ * 검사 규칙은 lib/companyChange.js — 오류에 field 를 실어 화면이 그 칸 아래에 붙인다.
+ * 감사 기록은 platform/auditMap.js 가 남긴다(사업자번호가 바뀌면 인쇄물 머리글·매출/매입 판정이 달라진다).
+ */
 router.put('/', async (req, res, next) => {
   try {
-    const { name, biz_no, ceo, biz_type, biz_item, address, phone, fax, email, main_account,
-            closing_day, week_start_day } = req.body
-    /* 주거래 계좌·카드 — 화면의 계좌 칩을 어느 순서로 세울지 정하는 값(accounts.id).
-       빈 문자열은 '지정 안 함'이라 null 로 눕힌다 — ''로 두면 어떤 계좌와도 안 맞는
-       유령 값이 남는다. */
-    const mainId = (v) => (v ? String(v) : null)
-    await req.db.execute(
-      `INSERT INTO company_info
-         (id, name, biz_no, ceo, biz_type, biz_item, address, phone, fax, email, main_account, closing_day, week_start_day,
-          main_in_account_id, main_out_account_id, main_card_id)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-       ON DUPLICATE KEY UPDATE
-         name=VALUES(name), biz_no=VALUES(biz_no), ceo=VALUES(ceo),
-         biz_type=VALUES(biz_type), biz_item=VALUES(biz_item), address=VALUES(address),
-         phone=VALUES(phone), fax=VALUES(fax), email=VALUES(email),
-         main_account=VALUES(main_account),
-         closing_day=VALUES(closing_day), week_start_day=VALUES(week_start_day),
-         main_in_account_id=VALUES(main_in_account_id),
-         main_out_account_id=VALUES(main_out_account_id),
-         main_card_id=VALUES(main_card_id), updated_at=NOW()`,
-      [COMPANY_ID, name||'', biz_no||'', ceo||'', biz_type||'', biz_item||'',
-       address||'', phone||'', fax||'', email||'', main_account||'',
-       // 0~28 만 받는다 — 29~31 은 짧은 달에 존재하지 않아 그 달만 조용히 어긋난다
-       Math.min(28, Math.max(0, parseInt(closing_day, 10) || 0)),
-       Math.min(6, Math.max(0, parseInt(week_start_day, 10) || 0)),
-       mainId(req.body.main_in_account_id), mainId(req.body.main_out_account_id),
-       mainId(req.body.main_card_id)]
-    )
-    res.json({ ok: true })
+    const out = await withTx(req.db, async (conn) => {
+      await conn.execute('INSERT IGNORE INTO company_info (id, name) VALUES (?, ?)', [COMPANY_ID, ''])
+      const [[cur]] = await conn.execute('SELECT * FROM company_info WHERE id = ? FOR UPDATE', [COMPANY_ID])
+      const r = planCompanyChange(cur, req.body || {}, kstToday())
+      if (!r.ok) throw httpError(r.status, r.error, r.field ? { field: r.field } : null)
+      const keys = Object.keys(r.set)
+      if (keys.length) {
+        // 칸 이름은 planCompanyChange 의 허용 목록에서만 나온다(요청 본문의 키를 그대로 쓰지 않는다)
+        await conn.execute(
+          `UPDATE company_info SET ${keys.map(k => `${k} = ?`).join(', ')}, updated_at = NOW() WHERE id = ?`,
+          [...keys.map(k => r.set[k]), COMPANY_ID])
+      }
+      return { ok: true }
+    })
+    res.json(out)
   } catch (e) { next(e) }
 })
 

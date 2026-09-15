@@ -3,6 +3,7 @@ import logoSymbol from './assets/company/favicon.svg'
 import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider } from './lib/ui'
 import { api, setApiFailureHandler } from './lib/api'
 import { WelcomeWizard } from './lib/components/WelcomeWizard'
+import { CompanySetup } from './lib/components/CompanySetup'
 import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID, MASTER_LEAVES, PORTAL_PAGE_OF_LEAF, NAV_PATH_OF, FOLDABLE_DOMAINS, foldNav, filterDocs, filterPortalDocs } from './lib/nav'
 import { PermCtx, usePerms, visibleNav, visiblePortalNode, withoutMasterOnly } from './lib/perms'
 import { ProfileDrawer } from './lib/components/ProfileDrawer'
@@ -1394,13 +1395,45 @@ export default function App() {
      null = 아직 못 읽음 → **하나도 안 가린다.** 카탈로그를 못 읽었다고 메뉴가 사라지면
      서버가 잠깐 흔들린 것이 고객에게는 '기능이 없어졌다'로 보인다(권한과 같은 판단). */
   const [docKeys, setDocKeys] = useState(null);
+  /* 회사 첫 설정이 필요한가 — null(아직 모름) | 'need' | 'ok'.
+     사업자번호가 비었으면 앱에 들어가기 전에 받는다(CompanySetup).
+     ⚠ **못 읽으면 'ok'** — 서버가 잠깐 흔들렸다고 전 직원을 설정 화면에 가두지 않는다.
+       실제 강제는 서버가 한다(사업자번호 없이는 회사 정보 저장이 안 된다). */
+  /* 사업자번호는 한 번 들어가면 비울 수 없다(서버가 막는다) — 한 번 'ok' 면 그 회사는
+     이 기기에서 다시 기다리지 않는다. 안 그러면 새로고침마다 빈 화면으로 /company 응답을 기다린다. */
+  const readyKey = () => `companyReady:${localStorage.getItem('companyCode') || ''}`;
+  const [companyGate, setCompanyGate] = useState(() => {
+    try { return localStorage.getItem(readyKey()) === '1' ? 'ok' : null; } catch { return null; }
+  });
+  // 내 정보(권한)를 읽으려는 시도가 끝났나 — 실패해도 true. 첫 설정 화면이 이걸 기다린다.
+  const [meDone, setMeDone] = useState(false);
   useEffect(() => {
-    if (!loggedIn) { setPerms(null); setPrefs(null); setDocKeys(null); return; }
+    if (!loggedIn) { setCompanyGate(null); return; }
+    try { if (localStorage.getItem(readyKey()) === '1') { setCompanyGate('ok'); return; } } catch { /* 저장소 막힘 — 물어본다 */ }
     let alive = true;
+    let timer;
+    const timeout = new Promise(r => { timer = setTimeout(() => r({ ok: false }), 5000); });
+    Promise.race([api.loadCompany(), timeout]).then(r => {
+      clearTimeout(timer);
+      if (!alive) return;
+      const need = r.ok && !String(r.company?.biz_no || '').trim();
+      setCompanyGate(need ? 'need' : 'ok');
+      // '못 읽어서 ok' 는 기억하지 않는다 — 다음엔 다시 물어야 한다
+      if (r.ok && !need) { try { localStorage.setItem(readyKey(), '1'); } catch { /* 무시 */ } }
+    });
+    return () => { alive = false; clearTimeout(timer); };
+  }, [loggedIn]);
+  useEffect(() => {
+    if (!loggedIn) { setPerms(null); setPrefs(null); setDocKeys(null); setMeDone(false); return; }
+    let alive = true;
+    /* me() 가 끝나지 않아도(fetch 에는 기본 시한이 없다) 첫 설정 게이트가 빈 화면에 갇히지 않게 —
+       권한을 못 읽은 채 넘어가면 입력 폼이 보이지만 저장은 서버가 권한으로 막는다. */
+    const meTimer = setTimeout(() => { if (alive) setMeDone(true); }, 6000);
     api.me()
       .then(me => {
         if (!alive) return;
         setPerms(me?.perms || {});
+        setMeDone(true);
         setPrefs(me?.prefs || {});
         /* 화면 설정의 진실은 서버다. 첫 페인트는 index.html 이 기기 사본으로 이미
            그렸으니, 여기서는 **다른 PC 에서 바꾼 것**을 따라잡는 일만 한다.
@@ -1408,7 +1441,7 @@ export default function App() {
         const t = fromPrefs(me?.prefs);
         applyTheme(t); writeLocal(t);
       })
-      .catch(() => { /* 실패 시 제한 없음 유지 — 서버 게이트가 최종 판정 */ });
+      .catch(() => { if (alive) setMeDone(true); /* 실패 시 제한 없음 유지 — 서버 게이트가 최종 판정 */ });
     const loadDocs = () => api.getDocCatalog()
       .then(items => { if (alive && items) setDocKeys(items.map(d => d.key)); });
     loadDocs();
@@ -1424,6 +1457,7 @@ export default function App() {
     const stopWatch = watchSystem(readLocal);
     return () => {
       alive = false;
+      clearTimeout(meTimer);
       window.removeEventListener('doccatalog:changed', loadDocs);
       window.removeEventListener('theme:changed', onTheme);
       stopWatch();
@@ -1460,7 +1494,14 @@ export default function App() {
             ? <LoginScreen onLogin={handleLogin}/>
             : user?.mustChangePw
               ? <ForcePasswordChange user={user} onDone={clearMustChange} onLogout={handleLogout}/>
-              : <AppInner onLogout={handleLogout} user={user} prefs={prefs} setPrefs={setPrefs} docKeys={docKeys}/>}
+              /* 회사 첫 설정 — 권한(perms)을 읽은 뒤에 가른다. 권한 없는 사람에게 입력 폼이
+                 한 번 번쩍였다 '관리자가 입력해야 해요'로 바뀌는 게 가장 나쁘다. */
+              : companyGate === null || (companyGate === 'need' && !meDone)
+                ? <div style={{ minHeight: '100vh', background: 'var(--surface)' }}/>
+                : companyGate === 'need'
+                  ? <CompanySetup onLogout={handleLogout}
+                      onDone={() => { try { localStorage.setItem(readyKey(), '1'); } catch { /* 무시 */ } setCompanyGate('ok'); }}/>
+                  : <AppInner onLogout={handleLogout} user={user} prefs={prefs} setPrefs={setPrefs} docKeys={docKeys}/>}
           {/* 배포로 새 버전이 올라왔을 때만 뜬다. 로그인 화면에서도 보여야 한다 —
               옛 번들이 옛 인증 흐름을 타면 로그인 자체가 이상하게 동작할 수 있다. */}
           <UpdateBanner/>

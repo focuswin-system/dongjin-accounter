@@ -16,19 +16,13 @@ import { api } from '../api'
  */
 
 /* 순서에 뜻이 있다. 앞의 것이 뒤의 것을 채워준다:
-   회사 정보 → 세금계산서·명세서에 우리 정보가 찍힌다
+   (회사 정보는 여기 없다 — 첫 로그인 때 CompanySetup 이 앱에 들어가기 전에 받는다.
+    여기 두면 늘 '입력됨'이라 진행률만 부풀리고 "뭘 빠뜨렸나"를 만든다)
    계좌      → 입출금을 어디로 넣을지 정해진다(계좌 없는 거래는 잔액에 안 잡힌다)
    거래처    → 청구서·거래 입력에서 고를 수 있다
    품목      → 청구서 품목·주문 단가가 자동으로 채워진다
    정기청구  → 매달 반복되는 매출이 자동으로 잡힌다 */
 const STEPS = [
-  {
-    key: 'company', label: '회사 정보', route: 'settings_company',
-    why: '사업자번호·대표·주소. 세금계산서와 거래명세서에 우리 정보로 찍혀요.',
-    done: (s) => s.company > 0,
-    doneText: '입력됨',
-    single: true,   // 한 건짜리라 '더 등록'이 아니라 '수정'이다
-  },
   {
     key: 'accounts', label: '계좌 · 카드', route: 'master_account',
     why: '통장과 카드를 등록해야 입출금이 잔액에 잡혀요. 계좌 없는 거래는 어디에도 안 잡힙니다.',
@@ -123,7 +117,7 @@ export const SetupWizard = ({ open, onClose, onGo }) => {
                   <button className={`btn sm ${done ? 'ghost' : ''}`} style={{ marginTop: 10 }}
                     onClick={() => { onGo?.(s.route); onClose() }}>
                     {done
-                      ? (s.single ? `${s.label} 수정` : `${s.label} 더 등록`)
+                      ? `${s.label} 더 등록`
                       : `${s.label} 등록하러 가기`} <Icon.Right size={12}/>
                   </button>
                 </div>

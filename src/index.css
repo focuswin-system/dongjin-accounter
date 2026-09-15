@@ -2546,6 +2546,13 @@ body:has([data-modal-open]) {
   font-size: 13.5px; font-weight: 700; color: var(--ink);
   padding-bottom: 12px; margin-bottom: 2px; border-bottom: 1px solid var(--line);
 }
+/* 첫 설정 안내 — 경고가 아니라 '왜 정확해야 하나'의 설명이라 중립 바탕(나중에 고칠 수 있다) */
+.cs-notice {
+  display: flex; gap: 10px; align-items: flex-start;
+  background: var(--surface-2); border-color: transparent;
+  color: var(--ink); font-size: 13px; line-height: 1.65;
+}
+.cs-notice > svg { color: var(--muted); flex-shrink: 0; margin-top: 3px; }
 
 /* ───── 화면 설정 (환경설정 > 화면 설정) ─────────────────────────────── */
 
