@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, DateInput, StatusBadge } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
@@ -9,6 +9,7 @@ import { DocFilters, approvalStatuses, vendorParams } from '../lib/components/Do
 import { ExecDrawer, approveAndAsk } from '../lib/components/ExecDrawer'
 import { useDocList } from '../lib/useDocList'
 import { makeGridKeyHandler } from '../lib/gridKeys'
+import { copySeedOf } from '../lib/docCopy'
 
 const numOf = (v) => (typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, ''), 10) || 0 : Number(v) || 0)
 const ROWS = 15
@@ -19,7 +20,8 @@ const CellIn = ({ value, onChange, right, placeholder }) => (
     onChange={e => onChange(e.target.value)} style={right ? { textAlign: 'right' } : undefined}/>
 )
 
-const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved, onCancelNew, onDeleted, goRoute }) => {
+/* onCopy — 보고 있는 품의서를 본떠 새로 쓰기(3b). 화면이 seed 를 만들어 새 문서를 연다 */
+const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved, onCancelNew, onDeleted, goRoute, onCopy }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [edit, setEdit] = useState(!!isNew)
@@ -50,6 +52,25 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
       approval: (doc.approval && doc.approval.length) ? doc.approval : [],
     })
   }, [doc?.id, isNew])
+
+  /* 새로 쓸 때 거래처를 고르면 그 거래처의 지난 품의서를 찾아 둔다 — "지난번 거랑 같은 거"를
+     거래처 옆에서 바로 가져오게(3b, 사용자 구상 '거래처 옆 버튼'). 거래처는 이미 골랐으니 품목·건명만 옮긴다. */
+  const [past, setPast] = useState([])
+  const [pastOpen, setPastOpen] = useState(false)
+  useEffect(() => {
+    if (!isNew || !form.vendor_name) { setPast([]); return }
+    let alive = true
+    api.getPurchaseReqsPage({ vendor: form.vendor_name, limit: 20 }).then(r => { if (alive) setPast(r.rows || []) })
+    return () => { alive = false }
+  }, [isNew, form.vendor_name])
+  const takePast = async ([r]) => {
+    setPastOpen(false)
+    const full = await api.getPurchaseReq(r.id)
+    if (!full) return toast.push('품의서를 불러오지 못했어요', { tone: 'warn' })
+    const seed = copySeedOf('preq', full, { itemsOnly: true })
+    setForm(f => ({ ...f, items: seed.items.length ? seed.items : f.items, summary: f.summary || seed.summary }))
+    toast.push(`${full.doc_no}의 품목 ${seed.items.length}개를 가져왔어요`)
+  }
 
   const setH = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const setItem = (i, field, v) => setForm(f => {
@@ -186,7 +207,11 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
   return (
     <>
       <DocToolbar docNo={isNew ? '새 구매품의서' : doc.doc_no}
-        status={!isNew && <span className="row gap-8" style={{ alignItems: 'center', minWidth: 0 }}>
+        status={isNew ? (past.length > 0 && (
+          <button type="button" className="link-cell text-sm" onClick={() => setPastOpen(true)}>
+            {form.vendor_name} 지난 품의서 {past.length}건에서 품목 가져오기 →
+          </button>
+        )) : <span className="row gap-8" style={{ alignItems: 'center', minWidth: 0 }}>
           <StatusBadge status={status}/>
           <span className="text-sm text-muted">품의금액 <b className="num">{fmtNum(total)}원</b></span>
           {doc?.invoice && (
@@ -227,10 +252,21 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
             )}
             {!handed && <button className="btn ghost" onClick={remove} title="삭제"><Icon.Trash size={14}/></button>}
             {!handed && status !== '완료' && <button className="btn" onClick={() => setEdit(true)}><Icon.Pencil size={14}/> 편집</button>}
+            {onCopy && <button className="btn" onClick={onCopy} title="이 품의서를 본떠 새로 써요"><Icon.Copy size={14}/> 복사</button>}
             <button className="btn" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
           </>
         )}
       </DocToolbar>
+      <PickListDrawer
+        single
+        open={pastOpen} onClose={() => setPastOpen(false)}
+        title="지난 품의서에서 품목 가져오기" sub={form.vendor_name}
+        placeholder="문서번호·건명 검색"
+        rows={past}
+        match={(r, q) => [r.doc_no, r.summary].filter(Boolean).some(v => String(v).toLowerCase().includes(q.toLowerCase()))}
+        render={(r) => ({ title: r.summary || r.doc_no, sub: [r.req_date, r.doc_no, r.status].filter(Boolean).join(' · '), right: Number(r.total) || 0 })}
+        empty="이 거래처의 지난 품의서가 없어요."
+        onDone={takePast}/>
 
       <DocViewport>
         <div className="doc-paper resolution-paper resolution-print" id="resolution-print">
@@ -401,6 +437,14 @@ const PREQ_SOURCES = [
     desc: '기준정보에 등록된 품목을 여러 개 담아요',
     effect: '규격·단위·매입단가가 채워져요. 수량만 적으면 돼요.',
   },
+  /* 지난 품의서를 본떠 — 매달 같은 곳에서 같은 걸 사는 회사는 품의를 매번 처음부터 적었다(3b).
+     옮기는 칸은 lib/docCopy.js 허용 목록 하나. 연결·결재·날짜는 안 옮긴다(같은 돈이 두 번 결재되지 않게). */
+  {
+    id: 'copy', icon: Icon.Copy,
+    label: '지난 품의서에서 복사',
+    desc: '비슷한 품의를 본떠 새로 써요',
+    effect: '거래처·품목·단가가 옮겨져요. 날짜·결재는 새로 서고, 원본의 청구서·지출 연결은 따라오지 않아요.',
+  },
   {
     id: 'blank', icon: Icon.Pencil,
     label: '직접 작성',
@@ -458,6 +502,9 @@ export const PurchaseReqScreen = ({ focusId = null, goRoute }) => {
   /* ⚠ seed 를 펼쳐 넣는다 — 견적에서 오면 품목뿐 아니라 거래처·건명도 함께 온다.
      items 만 채우면 사용자가 거래처를 다시 고르게 되어 '가져온' 느낌이 안 난다. */
   const blankDoc = { id: '__new', req_date: localToday(), approval: [], items: [], ...seed }
+  /* 새 문서 미리보기는 **seed 가 바뀔 때마다 새로 그린다.** 폼은 doc.id('__new')가 바뀔 때만 다시 채우는데
+     그 값이 늘 같아서, 작성 중에 다른 출처(복사 등)로 또 만들면 옛 폼이 그대로 남았다. */
+  const seedKey = useMemo(() => Math.random().toString(36).slice(2), [seed])
 
   return (
     <div className="fade-up doc-screen">
@@ -483,7 +530,30 @@ export const PurchaseReqScreen = ({ focusId = null, goRoute }) => {
              곧바로 완료가 된다. 아직 안 나간 지출을 넣으면 나가지도 않은 돈이 완료로 끝난다. */
           else if (id === 'txn') Promise.all([api.getTransactions({ kind: 'expense' }), api.getPurchaseReqClaimed()])
             .then(([r, c]) => setRows((r || []).filter(t => t.status === '지급완료' && !c.txns[t.id])))
+          else if (id === 'copy') api.getPurchaseReqsPage({ limit: 50 }).then(r => setRows(r.rows || []))
           else api.getRefItems('item').then(r => setRows(r || []))
+        }}/>
+
+      {/* 지난 품의서에서 복사 — 한 건만. 목록에는 품목이 없어 고른 뒤 상세를 한 번 더 읽는다.
+          반려된 것도 뜬다 — 반려된 품의를 고쳐 다시 올리는 게 흔한 일이다. */}
+      <PickListDrawer
+        single
+        open={pick === 'copy'} onClose={() => setPick(null)}
+        title="지난 품의서에서 복사" sub="어느 품의서를 본뜰까요?"
+        placeholder="거래처·문서번호·건명 검색"
+        rows={rows}
+        match={(r, q) => [r.vendor_name, r.doc_no, r.summary].filter(Boolean)
+          .some(v => String(v).toLowerCase().includes(q.toLowerCase()))}
+        render={(r) => ({
+          title: r.summary || r.vendor_name || '—',
+          sub: [r.req_date, r.doc_no, r.summary ? r.vendor_name : null, r.status].filter(Boolean).join(' · '),
+          right: Number(r.total) || 0,
+        })}
+        empty="복사할 품의서가 없어요."
+        onDone={async ([r]) => {
+          const full = await api.getPurchaseReq(r.id)
+          if (!full) { setPick(null); return toast.push('품의서를 불러오지 못했어요', { tone: 'warn' }) }
+          setSeed(copySeedOf('preq', full)); setPick(null); setCreating(true)
         }}/>
 
       {/* 견적요청서에서 — 한 건만 고른다(견적 하나 = 품의 하나). 목록에는 품목이 없어
@@ -721,10 +791,11 @@ export const PurchaseReqScreen = ({ focusId = null, goRoute }) => {
         </DocSide>
         <DocMain>
           {creating
-            ? <PurchaseReqPreview doc={blankDoc} company={company} vendors={vendors} onVendorAdd={addVendor} isNew goRoute={goRoute}
+            ? <PurchaseReqPreview key={`new-${seedKey}`} doc={blankDoc} company={company} vendors={vendors} onVendorAdd={addVendor} isNew goRoute={goRoute}
                 onSaved={(id) => { setCreating(false); refresh(id) }} onCancelNew={() => setCreating(false)}/>
             : sel
               ? <PurchaseReqPreview key={sel.id} doc={sel} company={company} vendors={vendors} onVendorAdd={addVendor} goRoute={goRoute}
+                  onCopy={() => { setSeed(copySeedOf('preq', sel)); setCreating(true) }}
                   onSaved={(id) => refresh(id)} onDeleted={() => { setSelId(null); setSel(null); list.reload() }}/>
               : <DocEmpty icon={<Icon.Receipt size={32} style={{ opacity: 0.3 }}/>}>왼쪽에서 구매품의서를 고르거나 새로 만드세요.</DocEmpty>}
         </DocMain>

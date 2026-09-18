@@ -24,6 +24,7 @@ import { ExecDrawer, approveAndAsk } from '../lib/components/ExecDrawer'
 import { useDocList } from '../lib/useDocList'
 import { looksLikeTaxInvoice } from '../lib/hometax'
 import { PrintButton } from '../lib/components/PrintButton'
+import { copySeedOf, resolutionTotalOf } from '../lib/docCopy'
 import { PrintEditButton } from '../lib/components/PrintEditButton'
 import { usePrintEdit } from '../lib/printEdit'
 /* 고객사 양식 다섯 — 파일을 나눈다. 이 파일은 이미 삼천 줄이 넘고,
@@ -44,6 +45,7 @@ const FormBlock = ({ title, hint, children }) => (
 
 /* ============ 결의서 관리 ============ */
 export const DocsScreen = ({ focusId = null, goRoute }) => {
+  const toast = useToast();
   const [company, setCompany] = useState(null);
   const [vendors, setVendors] = useState([]);
   const [selId, setSelId] = useState(focusId);
@@ -53,6 +55,9 @@ export const DocsScreen = ({ focusId = null, goRoute }) => {
      이어질 화면의 열림 조건까지 함께 꺼진다(첫 안내 마법사에서 겪은 것과 같다). */
   const [srcOpen, setSrcOpen] = useState(false);
   const [src, setSrc] = useState(null);
+  /* 복사(3b) — 본뜰 값. 있으면 작성 서랍이 그 값으로 열린다. copyRows 는 선택창 '지난 결의서' 목록 */
+  const [copySeed, setCopySeed] = useState(null);
+  const [copyRows, setCopyRows] = useState(null);
 
   useEffect(() => { api.getCompany().then(setCompany); api.getVendors().then(setVendors); }, []);
 
@@ -92,7 +97,26 @@ export const DocsScreen = ({ focusId = null, goRoute }) => {
         open={srcOpen} onClose={() => setSrcOpen(false)}
         title="새 지급결의서" sub="어디서 만들까요?"
         options={RESOLUTION_SOURCES}
-        onPick={(id) => { setSrcOpen(false); setSrc(id); }}/>
+        onPick={(id) => {
+          setSrcOpen(false); setSrc(id);
+          if (id === 'copy') { setCopyRows(null); api.getResolutionsPage({ limit: 50 }).then(r => setCopyRows(r.rows || [])); }
+        }}/>
+      {/* 지난 결의서에서 복사 — 반려된 것도 뜬다(고쳐 다시 올리는 게 흔하다) */}
+      <PickListDrawer
+        single
+        open={src === 'copy'} onClose={() => setSrc(null)}
+        title="지난 결의서에서 복사" sub="어느 결의서를 본뜰까요?"
+        placeholder="거래처·문서번호·목적 검색"
+        rows={copyRows}
+        match={(r, q) => [r.vendor_name, r.doc_no, r.title].filter(Boolean).some(v => String(v).toLowerCase().includes(q.toLowerCase()))}
+        render={(r) => ({ title: r.title || r.doc_no, sub: [r.pay_date, r.doc_no, r.vendor_name, r.status].filter(Boolean).join(' · '), right: Number(r.amount) || 0 })}
+        empty="복사할 결의서가 없어요."
+        onDone={async ([r]) => {
+          const full = await api.getResolution(r.id);
+          setSrc(null);
+          if (!full) return toast.push('결의서를 불러오지 못했어요', { tone: 'warn' });
+          setCopySeed(copySeedOf('resolution', full));
+        }}/>
 
       <InvoicePickDrawer open={src === 'invoice'} onClose={() => setSrc(null)}
         onPicked={(id) => { setSrc(null); refresh(id); }}/>
@@ -100,8 +124,9 @@ export const DocsScreen = ({ focusId = null, goRoute }) => {
         onPicked={(id) => { setSrc(null); refresh(id); }}/>
       <TxnPickDrawer open={src === 'txn'} onClose={() => setSrc(null)}
         onPicked={(id) => { setSrc(null); refresh(id); }}/>
-      <NewResolutionDrawer open={src === 'blank'} onClose={() => setSrc(null)}
-        onCreated={(id) => { setSrc(null); refresh(id); }}/>
+      <NewResolutionDrawer open={src === 'blank' || !!copySeed} seed={copySeed}
+        onClose={() => { setSrc(null); setCopySeed(null); }}
+        onCreated={(id) => { setSrc(null); setCopySeed(null); refresh(id); }}/>
 
       <DocWorkspace>
         <DocSide top={
@@ -130,6 +155,7 @@ export const DocsScreen = ({ focusId = null, goRoute }) => {
         <DocMain>
           {sel
             ? <ResolutionPreview key={sel.id} doc={sel} company={company} goRoute={goRoute}
+                onCopy={() => setCopySeed(copySeedOf('resolution', sel))}
                 onSaved={(id) => refresh(id)} onDeleted={() => { setSelId(null); setSel(null); list.reload(); }}/>
             : <DocEmpty icon={<Icon.Receipt size={32} style={{ opacity: 0.3 }}/>}>결의서를 선택하면 내용이 표시됩니다</DocEmpty>}
         </DocMain>
@@ -168,6 +194,14 @@ const RESOLUTION_SOURCES = [
     label: '이미 나간 돈에서',
     desc: '통장에서 빠져나간 지출에 결재 근거를 붙여요',
     effect: '고른 지출에 연결되고 바로 완료돼요. 돈이 또 나가지 않아요.',
+  },
+  /* 지난 결의서를 본떠(3b) — 옮기는 칸은 lib/docCopy.js 허용 목록 하나.
+     원본의 청구서·품의·지출 연결은 안 옮긴다 — 같은 돈이 두 번 결재되지 않게. */
+  {
+    id: 'copy', icon: Icon.Copy,
+    label: '지난 결의서에서 복사',
+    desc: '비슷한 결의를 본떠 새로 써요',
+    effect: '거래처·목적·품목이 옮겨져요. 지급일·결재는 새로 정하고, 원본의 연결은 따라오지 않아요.',
   },
   {
     id: 'blank', icon: Icon.Pencil,
@@ -367,16 +401,22 @@ const TxnPickDrawer = ({ open, onClose, onPicked }) => {
 };
 
 // 새 결의서 직접 등록 — 청구서 없는 소액 경비(비누·간식 등). 지급 전에 결의서부터 작성해 결재받는 흐름.
-const NewResolutionDrawer = ({ open, onClose, onCreated }) => {
+/* seed — 지난 결의서를 본뜬 값(3b, lib/docCopy.js). 품목까지 온다. 지급일은 비워 둔다(설계 — 새로 정한다). */
+const NewResolutionDrawer = ({ open, onClose, onCreated, seed = null }) => {
   const toast = useToast();
-  const empty = { vendor: '', title: '', amount: '', pay_method: '계좌이체', pay_date: todayStr(), note: '' };
+  const empty = { vendor: '', title: '', amount: '', pay_method: '계좌이체', pay_date: todayStr(), note: '', items: [] };
+  /* vendor_id 도 들고 간다 — 이름만 보내면 같은 이름 거래처가 둘일 때 서버가 id 를 못 정하고,
+     처리할 때 그 거래처의 미지급·출금을 못 찾아 이중 지급 가드가 꺼진다(코드 검토 지적).
+     사람이 거래처를 바꾸면 비운다(아래 onChange). */
+  const fromSeed = (sd) => ({ ...empty, vendor: sd.vendor_name || '', vendor_id: sd.vendor_id || null, title: sd.title || '',
+    pay_method: sd.pay_method || '계좌이체', note: sd.note || '', pay_date: '', items: sd.items || [] });
   const [form, setForm] = useState(empty);
   const [vendors, setVendors] = useState([]);
   const [presets, setPresets] = useState([]);
   const [presetId, setPresetId] = useState('');   // 선택한 결재선 프리셋
   useEffect(() => {
     if (!open) return;
-    setForm(empty);
+    setForm(seed ? fromSeed(seed) : empty);
     api.getVendors().then(setVendors);
     api.getApprovalPresets().then(list => {
       setPresets(list);
@@ -384,18 +424,40 @@ const NewResolutionDrawer = ({ open, onClose, onCreated }) => {
     });
   }, [open]);
 
-  const amountNum = parseInt(String(form.amount).replace(/[^0-9]/g, ''), 10) || 0;
+  /* 품목이 있으면(복사해 왔으면) 금액은 품목 합계다 — 서버도 품목 합으로 금액을 정한다(routes/resolutions.js) */
+  const hasItems = form.items.length > 0;
+  const amountNum = hasItems ? resolutionTotalOf(form.items) : (parseInt(String(form.amount).replace(/[^0-9]/g, ''), 10) || 0);
+
+  /* 거래처 옆 '지난 결의서' — 고른 거래처로 올렸던 결의서를 찾아 품목·목적만 가져온다(3b) */
+  const [past, setPast] = useState([]);
+  const [pastOpen, setPastOpen] = useState(false);
+  useEffect(() => {
+    if (!open || !form.vendor.trim()) { setPast([]); return; }
+    let alive = true;
+    api.getResolutionsPage({ vendor: form.vendor.trim(), limit: 20 }).then(r => { if (alive) setPast(r.rows || []); });
+    return () => { alive = false; };
+  }, [open, form.vendor]);
+  const takePast = async ([r]) => {
+    setPastOpen(false);
+    const full = await api.getResolution(r.id);
+    if (!full) return toast.push('결의서를 불러오지 못했어요', { tone: 'warn' });
+    const sd = copySeedOf('resolution', full, { itemsOnly: true });
+    setForm(f => ({ ...f, items: sd.items, title: f.title || sd.title }));
+    toast.push(`${full.doc_no}의 품목 ${sd.items.length}개를 가져왔어요`);
+  };
   const chosen = presets.find(p => p.id === presetId);
   const save = async () => {
     if (!form.title.trim()) return toast.push('지출 목적을 입력해주세요');
     if (!amountNum) return toast.push('금액을 입력해주세요');
     const res = await api.createResolution({
+      vendor_id: form.vendor_id || undefined,
       vendor_name: form.vendor.trim(),
       title: form.title.trim(),
       amount: amountNum,
       pay_method: form.pay_method,
       pay_date: form.pay_date || null,
       note: form.note.trim(),
+      ...(hasItems ? { items: form.items } : {}),
       approval: chosen ? chosen.steps.map(s => ({ label: s.label, position: s.position || '', name: '' })) : undefined,
     });
     if (!res.ok) return toast.push(res.error || '생성에 실패했어요', { tone: 'warn' });
@@ -410,7 +472,7 @@ const NewResolutionDrawer = ({ open, onClose, onCreated }) => {
         <div className="text-sm text-muted">청구서(세금계산서) 없는 지출을 결의서로 만들어요. 품목을 여러 줄로 나누려면 만든 뒤 상세에서 편집하세요.</div>
         <div>
           <label className="label" style={{ marginBottom: 8 }}>지출처 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
-          <Combobox value={form.vendor} onChange={v => setForm(f => ({ ...f, vendor: v }))}
+          <Combobox value={form.vendor} onChange={v => setForm(f => ({ ...f, vendor: v, vendor_id: v === f.vendor ? f.vendor_id : null }))}
             options={vendors.map(v => ({ value: v.name, label: v.name, sub: v.type || '' }))}
             placeholder="거래처 선택 또는 새로 추가"
             onAddNew={async (q) => {
@@ -425,6 +487,11 @@ const NewResolutionDrawer = ({ open, onClose, onCreated }) => {
               }
             }}
             addNewLabel="거래처로 추가"/>
+          {past.length > 0 && (
+            <button type="button" className="link-cell text-xs" style={{ marginTop: 6 }} onClick={() => setPastOpen(true)}>
+              이 거래처 지난 결의서 {past.length}건에서 품목 가져오기 →
+            </button>
+          )}
         </div>
         <div>
           <label className="label" style={{ marginBottom: 8 }}>지출 목적 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
@@ -432,12 +499,29 @@ const NewResolutionDrawer = ({ open, onClose, onCreated }) => {
         </div>
         <div>
           <label className="label" style={{ marginBottom: 8 }}>금액 (VAT 포함) <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-          <div style={{ position: 'relative' }}>
-            <MoneyInput className="input num fw-700" style={{ fontSize: 20, paddingRight: 36 }}
-              value={form.amount}
-              onChange={raw => setForm(f => ({ ...f, amount: raw }))}/>
-            <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>원</span>
-          </div>
+          {hasItems ? (
+            /* 가져온 품목 — 금액은 그 합이다. 품목을 고치려면 만든 뒤 상세에서 편집한다(작성 서랍은 한 줄짜리라서) */
+            <div className="card card-pad col gap-6" style={{ background: 'var(--surface-2)' }}>
+              {form.items.map((it, i) => (
+                <div key={i} className="row text-sm" style={{ justifyContent: 'space-between', gap: 8 }}>
+                  <span style={{ minWidth: 0 }}>{it.name || '—'}{it.qty ? ` × ${fmtNum(it.qty)}${it.unit || ''}` : ''}</span>
+                  <span className="num">{fmtNum(it.amount)}</span>
+                </div>
+              ))}
+              <div className="row" style={{ justifyContent: 'space-between', borderTop: '1px solid var(--line)', paddingTop: 6 }}>
+                <span className="text-sm fw-700">합계</span><span className="num fw-700">{fmtNum(amountNum)}원</span>
+              </div>
+              <button type="button" className="link-cell text-xs" style={{ alignSelf: 'flex-start' }}
+                onClick={() => setForm(f => ({ ...f, items: [], amount: String(amountNum) }))}>품목 없이 금액만 적기</button>
+            </div>
+          ) : (
+            <div style={{ position: 'relative' }}>
+              <MoneyInput className="input num fw-700" style={{ fontSize: 20, paddingRight: 36 }}
+                value={form.amount}
+                onChange={raw => setForm(f => ({ ...f, amount: raw }))}/>
+              <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>원</span>
+            </div>
+          )}
         </div>
         <div className="row gap-12">
           <div style={{ flex: 1 }}>
@@ -477,6 +561,16 @@ const NewResolutionDrawer = ({ open, onClose, onCreated }) => {
         )}
       </div>
       <DrawerFooter onCancel={onClose} onSave={save} saveLabel="결의서 만들기"/>
+      <PickListDrawer
+        single
+        open={pastOpen} onClose={() => setPastOpen(false)}
+        title="지난 결의서에서 품목 가져오기" sub={form.vendor}
+        placeholder="문서번호·목적 검색"
+        rows={past}
+        match={(r, q) => [r.doc_no, r.title].filter(Boolean).some(v => String(v).toLowerCase().includes(q.toLowerCase()))}
+        render={(r) => ({ title: r.title || r.doc_no, sub: [r.pay_date, r.doc_no, r.status].filter(Boolean).join(' · '), right: Number(r.amount) || 0 })}
+        empty="이 거래처의 지난 결의서가 없어요."
+        onDone={takePast}/>
     </Drawer>
   );
 };
@@ -566,7 +660,8 @@ export const ResolutionDocument = ({ doc, company, printClass }) => {
 
 // 실제 동진테크 지출결의서 양식(지출처·지출총액·구매품의NO·신청자·지출방법 + 품목 명세 + 결재란) 기반.
 // 화면에서 품목·특기사항을 보완하고 인쇄하면 대표가 서명하는 방식(전자결재 아님).
-export const ResolutionPreview = ({ doc, company, onSaved, onDeleted, goRoute }) => {
+/* onCopy — 보고 있는 결의서를 본떠 새로 쓰기(3b). 없으면 [복사]를 안 세운다(다른 화면이 이 미리보기를 빌려 쓸 때) */
+export const ResolutionPreview = ({ doc, company, onSaved, onDeleted, goRoute, onCopy }) => {
   const toast = useToast();
   const { confirm } = useConfirm();
   const [edit, setEdit] = useState(false);
@@ -759,6 +854,7 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted, goRoute })
               <Icon.Trash size={14}/>
             </button>
             {!done && <button className="btn" onClick={() => setEdit(true)}><Icon.Pencil size={14}/> 편집</button>}
+            {onCopy && <button className="btn" onClick={onCopy} title="이 결의서를 본떠 새로 써요"><Icon.Copy size={14}/> 복사</button>}
             <button className="btn" onClick={doPrint}><Icon.Print/> 인쇄</button>
           </>
         )}

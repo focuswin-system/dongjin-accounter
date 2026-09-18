@@ -215,6 +215,9 @@ router.post('/', async (req, res, next) => {
       const itemList = Array.isArray(items) && items.length ? items
         : [{ name: title || '지출', unit: '식', qty: 1, price: Number(req.body.amount) || 0, amount: Number(req.body.amount) || 0, note: '' }]
       const amount = itemList.reduce((s, it) => s + (Number(it.amount) || 0), 0)
+      /* 0원·음수 결의서는 받지 않는다 — 화면은 0원만 막았고 여기엔 검사가 없어, 음수 줄(기지급액)이 섞인
+         품목을 보내면 합계가 0 이하인 결의서가 그대로 섰다(코드 검토 지적, 문서 복사 경로) */
+      if (!(amount > 0)) throw httpError(400, '결의서 금액이 0원 이하예요. 품목 금액을 확인해주세요')
       // 결재선: 요청에 있으면 그걸 쓰고(만들 때 고른 프리셋), 없으면 기본 프리셋
       const approval = Array.isArray(req.body.approval) && req.body.approval.length
         ? req.body.approval : await defaultApproval((sql, p) => conn.execute(sql, p))
