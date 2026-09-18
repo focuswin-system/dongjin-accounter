@@ -9,7 +9,7 @@
  */
 
 import { createContext, useContext } from 'react'
-import { NAV_TREE, SETTINGS_LEAVES, PORTAL, ALL_LEAVES } from './nav'
+import { NAV_TREE, SETTINGS_LEAVES, PORTAL, ALL_LEAVES, ABSORB_GROUP_OF } from './nav'
 
 /** perms 가 비어 있으면(= 역할 미배정 계정) 전부 허용한다 — 서버 게이트와 같은 규칙 */
 const unrestricted = (perms) => !perms || Object.keys(perms).length === 0
@@ -30,8 +30,13 @@ export const resourceOf = (id) => (String(id || '').startsWith('settings') ? 'se
 
 export function can(perms, resource, action = 'access') {
   if (unrestricted(perms)) return true
-  const list = perms[resourceOf(resource)]
-  return Array.isArray(list) && list.includes(action)
+  const has = (r) => { const list = perms[resourceOf(r)]; return Array.isArray(list) && list.includes(action) }
+  /* 여러 메뉴를 한 잎으로 합친 경우(nav.js LEAF_ABSORBS·ABSORB_GROUP_OF) — **들어가는 것(access)만** 묶음의
+     권한으로도 열어 준다. 안 그러면 '수시 출금' 권한만 받은 계정이 세금계산서 메뉴를 통째로 잃는다
+     (그 역할에 저장된 권한 이름은 옛 잎 id 그대로다). 들어간 뒤 무엇을 보고 쓰는지는 화면이 탭마다,
+     서버가 줄마다 따진다(server/platform/sidePerms.js). */
+  if (action === 'access' && ABSORB_GROUP_OF[resource]) return ABSORB_GROUP_OF[resource].some(has)
+  return has(resource)
 }
 
 /**

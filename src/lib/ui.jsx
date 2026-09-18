@@ -622,12 +622,17 @@ export const ToastProvider = ({ children }) => {
   // ⚠ tone 은 오래 무시되고 있었다 — 호출부는 { tone: "warn" } 을 넘기는데 저장도 표시도
   //   하지 않아, "금액을 입력하세요"·"삭제에 실패했어요" 가 성공과 똑같은 체크 표시로 떴다.
   //   실패를 성공처럼 보여주는 것은 알리지 않는 것보다 나쁘다.
+  const dismiss = (id) => setItems(cur => cur.filter(t => t.id !== id));
+  /* actions — [{ label, onClick, primary }]. 누르면 그 일을 하고 토스트를 닫는다.
+     버튼이 있는 토스트는 **읽고 고를 시간**이 필요하다 — 기본 8초로 길게 둔다.
+     (반복 제안처럼 권유를 담는 자리. 할 일을 강요하는 확인창은 이걸로 만들지 않는다.) */
   const push = (msg, opts = {}) => {
     const id = Math.random().toString(36).slice(2);
     const tone = opts.tone === "warn" || opts.tone === "neg" ? opts.tone : null;
-    setItems(cur => [...cur, { id, msg, icon: opts.icon, tone }]);
+    const actions = Array.isArray(opts.actions) ? opts.actions : null;
+    setItems(cur => [...cur, { id, msg, icon: opts.icon, tone, actions }]);
     // 경고는 읽는 데 시간이 더 걸린다(대기 시간 안내 등 문장이 길다).
-    setTimeout(() => setItems(cur => cur.filter(t => t.id !== id)), opts.duration || (tone ? 4200 : 2400));
+    setTimeout(() => dismiss(id), opts.duration || (actions ? 8000 : tone ? 4200 : 2400));
   };
   return (
     <ToastCtx.Provider value={{ push }}>
@@ -637,6 +642,14 @@ export const ToastProvider = ({ children }) => {
           <div key={t.id} className={`toast${t.tone ? ` is-${t.tone}` : ""}`}>
             {t.tone ? <Icon.Warn size={16}/> : <Icon.Check size={16}/>}
             <span>{t.msg}</span>
+            {t.actions && (
+              <span className="toast-actions">
+                {t.actions.map((a, i) => (
+                  <button key={i} type="button" className={`toast-btn${a.primary ? " is-primary" : ""}`}
+                    onClick={() => { dismiss(t.id); a.onClick?.(); }}>{a.label}</button>
+                ))}
+              </span>
+            )}
           </div>
         ))}
       </div>

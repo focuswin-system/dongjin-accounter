@@ -1201,6 +1201,12 @@ export const api = {
     catch (e) { return { ok: false, error: e.message } }
   },
   /** 만들기 확인 — 기본 날짜·금액과 '이미 장부에 있는 같은 돈' 후보 */
+  /* 반복 제안 — 거래를 적은 뒤 "매달 오가는 돈이면 반복거래로?"를 물을지(판정은 서버 lib/repeat.js).
+     실패하면 조용히 안 권한다 — 권유라서 못 물어도 할 일에는 지장이 없다. */
+  async repeatSuggest({ kind, vendorId, category }) {
+    const q = new URLSearchParams({ kind, vendor_id: vendorId || '', category: category || '' })
+    try { return await req('/repeat-templates/suggest?' + q.toString()) } catch { return { suggest: false } }
+  },
   async previewRepeat(ym, ids) {
     try { return { ok: true, rows: await req('/repeat-templates/preview', { method: 'POST', body: { ym, ids } }) } }
     catch (e) { return { ok: false, error: e.message, rows: [] } }

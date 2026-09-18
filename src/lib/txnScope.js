@@ -9,7 +9,7 @@
  *
  *   Docs.jsx      isPnl !== false || invoiceId
  *   Billing.jsx   invoiceId || noteId || isPnl !== false
- *   MiscPL.jsx    isPnl !== false && !invoiceId (+ 주문·급여 제외)
+ *   MiscPL.jsx    isPnl !== false && !invoiceId (+ 주문·급여 제외) — 지금은 거래내역 '주문 없는 돈'(isMiscPl)
  *
  * 그래서 어음이 들어왔을 때 Billing 만 고쳐지고 Docs 는 그대로 남았다.
  * 규칙이 흩어지면 다음 예외에서 또 한쪽만 고쳐진다.
@@ -45,3 +45,13 @@ export const isCountable = (t) =>
  * ((주)포커스윈 실자료: 4월에 재고 매입 331,240원이 나갔는데 월별 현황엔 −0 으로 보였다.)
  */
 export const notCountable = (t) => !isCountable(t)
+
+/**
+ * '주문 없는 돈' — 옛 '경비 처리·잡손익' 화면이 보여주던 것. 3단계(2026-09)에서 거래내역의 필터로 옮겼다.
+ *
+ * 주문 두 축(근거 주문·원가 귀속)이 모두 비었고, 손익에 드는 돈만.
+ * ⚠ 급여·청구서 정산은 뺀다 — 각자 화면(급여·임금 / 세금계산서)이 있고, 섞으면 합계의 대부분이
+ *   급여가 된다(실데이터 58건 중 급여 20건·정산 2건). 재무 거래(대출·예적금)는 isCountable 이 뺀다.
+ */
+export const isMiscPl = (t) =>
+  !t.contractId && !t.cost_contract_id && isCountable(t) && !t.payrollId && !t.invoiceId

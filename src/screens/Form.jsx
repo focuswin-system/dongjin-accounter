@@ -7,6 +7,7 @@ import { quickAddCategory, quickAddRefItemWithId } from '../lib/quickAdd'
 import { contractsForVendor, contractFitsVendor } from '../lib/contractPick'
 import { vatOf, supplyOf } from '../lib/vatRate'
 import { matchInvoiceAsking } from '../lib/settleAsk'
+import { usePerms } from '../lib/perms'
 
 // 과세유형 3종. 영세 = 세율 0%인 과세거래(수출·해외용역) — 세액은 0이지만 과세표준엔 들어간다.
 // 면세와 값을 나눠 두지 않으면 신고서에서 둘을 구분할 수 없다. 서버 lib/vat.js와 같은 값집합.
@@ -120,9 +121,13 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
    * **읽고 판단해야 해서** 느려진다("이건 발주가 있나?"). 경비는 정의상 주문에 안 붙는 돈이라
    * 그 판단이 늘 '아니오'다. 필요하면 '주문에 붙이기'로 펼 수 있게 두어 기능은 잃지 않는다. */
   compact = false,
-  editTxn, onClose, onSave }) => {
+  editTxn, onClose, onSave,
+  /* 화면을 옮기는 일(세금계산서로 보내기·반복 제안)은 App 이 한다 — 이 폼은 여러 화면이 같이 연다 */
+  goRoute }) => {
   const toast = useToast();
   const { confirm } = useConfirm();
+  // 세금계산서로 가는 길은 들어갈 수 있을 때만 낸다
+  const { can: canGo } = usePerms();
   const [kind, setKind] = useState(initialKind);
   const [form, setForm] = useState(initialFormFor(initialKind, initialContract, "", initialCostContract));
   const [showMore, setShowMore] = useState(false);
@@ -232,6 +237,10 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   }, [contracts]);
 
   useEffect(() => {
+    /* ⚠ **열 때마다** 다시 읽는다. 이 폼은 App 에 늘 붙어 있고 열고 닫기만 해서, 예전엔 앱을 켤 때
+       한 번 읽은 목록을 세션 내내 썼다 — 다른 화면에서 방금 만든 거래처·계좌·비목이 새로고침 전까지
+       '검색 결과가 없어요'로 떴다(3단계 검증 중 실측). 기본 계좌도 지금 여는 방향(입금/출금)으로 고른다. */
+    if (!open) return;
     /* 미사용 거래처까지 받는다(all). 아래 옵션에서 **뒤로 밀고 '미사용'이라 적어** 둔다.
        빼 버리면 과거 거래에 거래처를 붙이려는 사람이 '아무리 검색해도 안 나오는' 상태가 된다 —
        왜 없는지 화면이 말해주지 않으니 거래처가 지워진 줄 안다(실제로 그렇게 막혔다). */
@@ -244,7 +253,9 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     Promise.all([api.getAccounts(), api.getCompany()]).then(([list, co]) => {
       setAccounts(list);
       setCompany(co);
-      const wantId = co?.[kind === 'income' ? 'main_in_account_id' : 'main_out_account_id']
+      /* initialKind 를 본다 — kind 상태는 아래 초기화 effect 가 setKind 하기 전이라 **직전에 연 방향**이다.
+         페이지를 열고 처음 [입금]을 누르면 주 출금 계좌가 골라지던 자리(코드 검토 지적). */
+      const wantId = co?.[initialKind === 'income' ? 'main_in_account_id' : 'main_out_account_id']
       const pick = list.find(a => a.id === wantId) || list.find(a => a.kind !== 'card') || list[0]
       if (pick) setForm(f => ({ ...f, account: f.account || pick.name }));
     });
@@ -261,7 +272,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
      * (2026-08 실데이터 조사에서 이 유형 결함 15건 — '현금 = 돈'으로 오해해 1101을 골랐다) */
     api.getAccountSubjects({ postableOnly: true })
       .then(rows => setAcctSubjects(rows.filter(a => !FUND_CODES.includes(String(a.code)))));
-  }, []);
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -593,6 +604,23 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     onClose?.()
   }
 
+  /* 반복 제안(3단계) — 같은 거래처·방향(·비목)이 최근 3개월 중 2개월 이상이고 반복거래가 없으면
+     "매달 오가는 돈이면 반복거래로?"를 묻는다. 판정은 서버(lib/repeat.js). 권유라서 실패해도 조용하다.
+     '안 할래요'는 이 브라우저에 거래처·방향 단위로 기억한다 — 규칙이 아니라 취향이다. */
+  const skipKey = (vendorId) => `repeatSuggestSkip:${vendorId}:${kind}`
+  const suggestRepeat = async (vendorId, category) => {
+    if (!goRoute) return
+    try { if (localStorage.getItem(skipKey(vendorId))) return } catch { /* 저장소를 못 쓰면 그냥 묻는다 */ }
+    const r = await api.repeatSuggest({ kind, vendorId, category })
+    if (!r?.suggest || !r.prefill) return
+    toast.push(`최근 3개월 중 ${r.months}개월에 오간 돈이에요. 반복거래로 등록할까요?`, {
+      actions: [
+        { label: '안 할래요', onClick: () => { try { localStorage.setItem(skipKey(vendorId), '1') } catch { /* 무시 */ } } },
+        { label: '반복거래로 등록', primary: true, onClick: () => goRoute('recurring_invoice', { repeatPrefill: r.prefill }) },
+      ],
+    })
+  }
+
   const handleSave = async () => {
     if (busy) return;
     if (!form.vendor)   { toast.push("거래처를 선택해주세요"); return; }
@@ -789,6 +817,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       onClose()
       onSave?.()
       toast.push(editTxn ? "수정됐어요" : (kind === "income" ? "입금 내역이 등록됐어요" : "지출 내역이 등록됐어요"))
+      if (!editTxn && vendorObj?.id) suggestRepeat(vendorObj.id, form.category)
     } else {
       // 마감된 달·계좌 누락 등 서버가 알려준 사유를 그대로 보여준다(막연한 '실패' 대신)
       toast.push(res.error || "저장에 실패했어요. 다시 시도해주세요.", { tone: 'warn' })
@@ -811,6 +840,14 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
         </div>
 
         <div className="drawer-body" style={{ paddingTop: 8 }}>
+          {/* 옛 "받은 서류" 선택창이 하던 일(3단계에서 메뉴가 대신한다). 세금계산서가 오간 돈을
+              여기 적으면 미수·미지급과 매출·매입세액이 안 잡힌다 — 새로 적을 때만 한 줄로 길을 낸다. */}
+          {!editTxn && goRoute && canGo(kind === "income" ? "billing_issued" : "billing_received") && (
+            <button type="button" className="link-cell text-xs" style={{ marginBottom: 10 }}
+              onClick={() => { onClose(); goRoute(kind === "income" ? "billing_issued" : "billing_received"); }}>
+              {kind === "income" ? "세금계산서를 발행하는 건이면 세금계산서 › 발행에서 적어요 →" : "세금계산서를 받으셨으면 세금계산서 › 수취에서 적어요 →"}
+            </button>
+          )}
           <div className="col gap-form">
             <FormField label="거래처" required>
               {/* 거래처를 바꾸면 **안 맞는 주문은 비운다.** 목록에서는 사라졌는데 값만

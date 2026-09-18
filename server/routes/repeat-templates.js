@@ -2,8 +2,8 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { withTx, httpError } = require('../lib/withTx')
 const { kstToday } = require('../db')
-const { canAny } = require('../platform/userPerms')
-const { normalizeTemplate, listTemplates, monthItems, previewItems, createOne } = require('../lib/repeat')
+const { sideGuard } = require('../platform/sidePerms')
+const { normalizeTemplate, listTemplates, monthItems, previewItems, createOne, repeatSuggestion } = require('../lib/repeat')
 
 /* 반복거래 — 규칙은 lib/repeat.js 한 곳. 여기는 요청을 받아 넘기기만 한다.
  * 설계: docs/02-design/features/repeat-templates.design.md */
@@ -12,27 +12,13 @@ const YM_RE = /^\d{4}-\d{2}$/
 
 /* ── 방향별 권한 ───────────────────────────────────────────────────
  * 입금·출금이 **한 라우트**로 합쳐졌다(옛 /api/recurring-invoices · /api/recurring 둘).
- * 권한 게이트(middleware/perm.js)는 경로 하나에 자원군 OR 라, 출금 권한만 있는 역할이
- * 이 경로를 통과하면 입금 반복거래까지 읽고 **매출 청구서까지 만들 수 있었다**
- * (정작 /api/invoices 는 403 인데 여기로 우회됐다 — 실측 확인).
- * 그래서 줄마다 그 방향의 자원을 다시 따진다. 옛 두 라우트와 같은 경계다.
- *
- * ⚠ 역할이 하나도 없는 계정은 통과시킨다 — perm.js 의 설계 결정과 같다.
- *   여기서만 막으면 역할 미배정 계정이 이 화면에서만 빈손이 된다. */
-const dirResource = (dir) => (dir === 'in' ? 'recurring_invoice' : 'recurring_expense')
-
-const allowsDir = (req, dir, action) =>
-  !req.permRoles?.length || canAny(req.perms, [dirResource(dir)], action)
-
-/** 볼 수 있는 방향만 남긴다 */
-const visibleDirs = (req) => ['in', 'out'].filter(d => allowsDir(req, d, 'view'))
-
-/** 그 방향을 쓸 수 없으면 403 */
-const assertDir = (req, dir, action) => {
-  if (!allowsDir(req, dir, action)) {
-    throw httpError(403, `${dir === 'in' ? '입금' : '출금'} 반복거래에 대한 권한이 없어요. 관리자에게 문의하세요.`)
-  }
-}
+ * 게이트는 자원군 OR 이라, 줄마다 그 방향의 자원을 다시 따진다 — 규칙은 platform/sidePerms.js.
+ * (합친 직후 출금 권한만으로 매출 청구서를 만들 수 있었다. 2026-09-18 실측) */
+const guard = sideGuard(
+  { in: ['recurring_invoice'], out: ['recurring_expense'] },
+  { in: '입금 반복거래', out: '출금 반복거래' })
+const visibleDirs = (req) => guard.visible(req)
+const assertDir = (req, dir, action) => guard.assert(req, dir, action)
 
 /** 이 반복거래의 방향 (없으면 404) */
 const dirOfTemplate = async (db, id) => {
@@ -63,6 +49,19 @@ router.get('/month', async (req, res, next) => {
     const asked = dirOf(req.query.direction)
     const rows = await monthItems(req.db, ymOf(req.query.ym), { direction: asked })
     res.json(rows.filter(r => dirs.includes(r.direction)))
+  } catch (e) { next(e) }
+})
+
+/* 반복 제안 — 거래를 적은 뒤 "매달 오가는 돈이면 반복거래로?"를 물을지. 판정은 lib/repeat.js.
+   그 방향의 반복거래를 볼 수 없는 사람에게는 권하지 않는다(눌러도 등록을 못 한다). */
+router.get('/suggest', async (req, res, next) => {
+  try {
+    const kind = req.query.kind === 'income' ? 'income' : req.query.kind === 'expense' ? 'expense' : null
+    const dir = kind === 'income' ? 'in' : 'out'
+    if (!kind || !guard.allows(req, dir, 'create')) return res.json({ suggest: false })
+    res.json(await repeatSuggestion(req.db, {
+      kind, vendorId: req.query.vendor_id || null, category: req.query.category || null, today: kstToday(),
+    }))
   } catch (e) { next(e) }
 })
 

@@ -1758,6 +1758,17 @@ body:has([data-modal-open]) {
 /* 글씨가 흰색이므로 밝은 --warn/--neg 가 아니라 어두운 -ink 계열을 배경으로 쓴다(대비 확보) */
 .toast.is-warn { background: var(--warn-ink, #b45309); }
 .toast.is-neg  { background: var(--neg-ink, #b91c1c); }
+/* 토스트 안 버튼 — 어두운 배경(--ink) 위라 글씨는 --surface, 테두리는 반투명.
+   주 버튼만 채운다. 색은 토큰만(다크 모드에서 --ink·--surface 가 뒤집혀도 대비가 유지된다). */
+.toast-actions { display: inline-flex; gap: 6px; margin-left: 8px; flex-shrink: 0; }
+.toast-btn {
+  font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+  padding: 5px 10px; border-radius: 8px;
+  background: transparent; color: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--surface) 35%, transparent);
+}
+.toast-btn:hover { background: color-mix(in srgb, var(--surface) 12%, transparent); }
+.toast-btn.is-primary { background: var(--surface); color: var(--ink); border-color: var(--surface); }
 @keyframes toastIn { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ───── KBD tag ───── */

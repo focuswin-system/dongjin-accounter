@@ -9,12 +9,19 @@ import { useTableFilter } from '../lib/tableFilter'
 import { api } from '../lib/api'
 import { downloadXlsx } from '../lib/export'
 import { ResolutionDocument } from './Docs'
+import { JournalEntryDrawer, journalVoucherOf } from './VoucherEntry'
+import { isMiscPl } from '../lib/txnScope'
+import { usePerms } from '../lib/perms'
 
 // CSV 저장은 보고서 내보내기와 같은 것을 쓴다 → lib/export.js
 
 /* 거래내역 — **조회 화면**. openIncome/openExpense 를 더 받지 않는다(등록 입구는 여기 없다).
    화면에서 뺀 것은 배선까지 은퇴시킨다 — 남겨 두면 다음 사람이 "쓰는 줄 알고" 다시 버튼을 단다. */
 export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openInvoice, refreshTrigger,
+  /* 3단계(2026-09) — 서류 없이 오간 돈의 **유일한 입구**가 됐다(세금계산서가 있으면 세금계산서 화면).
+     입금·출금 폼은 App 이 소유하는 거래 서랍이고, 대체는 이 화면이 연다.
+     canJournal — 대체전표 권한(voucher_entry)이 있을 때만 [대체]. openJournalOnMount — 옛 '전표 입력' 주소로 들어온 경우 */
+  openIncome, openExpense, canJournal = false, openJournalOnMount = false,
   /* 다른 화면에서 "이 거래를 거래내역에서 열어줘"라고 넘겨준 id.
      없으면 평소처럼 목록만 연다(청구서의 focusInvoiceId 와 같은 방식). */
   focusTxnId }) => {
@@ -39,15 +46,30 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
      잔액이 안 맞는다. 그래서 행은 함께 보여주되 **합계는 실제분만** 세고, 예정은 따로 적는다. */
   const [showPlanned, setShowPlanned] = useState(false);
   const [openInvoices, setOpenInvoices] = useState([]);   // 아직 안 받은/안 낸 청구서
+  /* 대체전표 — 돈이 안 움직이는 분개. 예전엔 '전표 입력' 화면에만 있어서 거래내역만 보면 빠졌다.
+     같은 표에 '대체'로 세운다. 합계(입금·지출)에는 안 든다 — 통장이 안 움직였으니까. */
+  const [journals, setJournals] = useState([]);
+  const [jOpen, setJOpen] = useState(openJournalOnMount && canJournal);
+  const [jView, setJView] = useState(null);   // { voucher, jvId, docNo }
+  useEffect(() => { if (openJournalOnMount && canJournal) setJOpen(true); }, [openJournalOnMount, canJournal]);
 
   useEffect(() => { setFilter(initialFilter); }, [initialFilter]);
 
+  /* 볼 권한이 있는 것만 부른다 — 조회의 403 은 화면 전체에 '권한이 없어요'를 띄운다(api.js notifyInfra).
+     거래내역만 받은 역할이 이 화면을 열 때마다 오류를 보게 된다(대체전표·미수·미지급 요약). */
+  const { can } = usePerms();
+  const canJournalView = can("voucher_entry", "view") || can("voucher_book", "view");
+  const canRec = can("billing_issued", "view") || can("ar", "view");
+  const canPay = can("billing_received", "view") || can("ap", "view");
   const reload = () => {
     api.getTransactions().then(setTxns);
-    api.getReceivablesSummary().then(setRecSummary);
-    api.getPayablesSummary().then(setPaySummary);
-    api.getInvoices().then(list => setOpenInvoices((list || []).filter(inv => Number(inv.remainAmount) > 0)));
-    api.getContracts().then(list => setAllContracts(list || []));
+    if (canRec) api.getReceivablesSummary().then(setRecSummary);
+    if (canPay) api.getPayablesSummary().then(setPaySummary);
+    // 서버가 볼 수 있는 방향만 준다(sidePerms) — 둘 다 없으면 부르지 않는다
+    if (canRec || canPay) api.getInvoices().then(list => setOpenInvoices((list || []).filter(inv => Number(inv.remainAmount) > 0)));
+    if (can("contract_sales", "view") || can("contract_purchase", "view") || can("contract", "view"))
+      api.getContracts().then(list => setAllContracts(list || []));
+    if (canJournalView) api.getJournalVouchers().then(list => setJournals(list || []));
   };
   useEffect(() => { reload(); }, []);
   useEffect(() => { if (refreshTrigger > 0) reload(); }, [refreshTrigger]);
@@ -78,7 +100,13 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
      합계 카드와 탭 옆 건수는 이 범위를 쓴다 — 예전엔 둘 다 전체 txns 로 계산해서
      "2026년 7월"로 좁혀놔도 카드에는 **개업 이래 누계**가, 탭에는 전체 건수가 떠 있었다.
      화면의 표와 숫자가 서로 다른 기간을 말하니 그 값을 그대로 보고에 옮기면 틀린다. */
-  const scoped = useMemo(() => tf.apply(txns), [txns, tf.apply]);
+  const journalRows = useMemo(() => journals.map(v => ({
+    id: `jv-${v.id}`, journal: true, jvId: v.id, docNo: v.doc_no,
+    kind: 'journal', sign: 0, date: String(v.date || '').slice(0, 10),
+    vendor: '', contract: '', scope: v.summary || v.memo || v.doc_no, category: '대체',
+    amount: Number(v.total) || 0, status: '대체',
+  })), [journals]);
+  const scoped = useMemo(() => tf.apply([...txns, ...journalRows]), [txns, journalRows, tf.apply]);
 
   /* 미정산 청구서를 거래 모양으로 바꾼다. 실제 거래와 **같은 필터**를 타야 한다 —
      기간을 좁혀놓고 예정만 전 기간이 뜨면 화면이 두 기간을 동시에 말하게 된다.
@@ -119,6 +147,9 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
     const byTab = (rows) =>
       filter === "income"  ? rows.filter(t => t.kind === "income")
       : filter === "expense" ? rows.filter(t => t.kind === "expense")
+      : filter === "journal" ? rows.filter(t => t.journal)
+      /* 주문 없는 돈 = 옛 '경비 처리·잡손익' 화면(3단계에서 이 필터로 흡수). 규칙은 lib/txnScope.js 하나 */
+      : filter === "misc"    ? rows.filter(t => !t.journal && !t.planned && isMiscPl(t))
       : rows;
     const real = byTab(scoped);
     if (!showPlanned) return real;
@@ -149,8 +180,10 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
         { header: "금액", width: 15, money: true },
         { header: "상태", width: 12, align: "center" },
       ],
-      rows: filtered.map(t => [t.date, t.planned ? "예정" : "실제", t.kind === "income" ? "입금" : "지출",
-        t.vendor, t.contract || "", t.cost_contract_name || "", t.scope, t.category, t.sign * t.amount, t.status]),
+      rows: filtered.map(t => [t.date, t.planned ? "예정" : "실제",
+        t.journal ? "대체" : t.kind === "income" ? "입금" : "지출",
+        t.vendor, t.contract || "", t.cost_contract_name || "", t.scope, t.category,
+        t.journal ? t.amount : t.sign * t.amount, t.status]),
     });
     if (!r.ok) toast.push(r.error || "엑셀을 만들지 못했어요", { tone: "warn" });
   };
@@ -236,6 +269,21 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
       { tone: 'warn' });
   };
 
+  const openJournal = async (t) => {
+    const v = await api.getJournalVoucher(t.jvId);
+    if (!v) return toast.push('전표를 불러오지 못했어요', { tone: 'warn' });
+    setJView({ voucher: journalVoucherOf(v), jvId: t.jvId, docNo: v.doc_no });
+  };
+  const removeJournal = async () => {
+    if (!jView) return;
+    const ok = await confirm({ tone: 'neg', icon: <Icon.Warn size={22}/>, title: '대체전표 삭제',
+      body: `전표 ${jView.docNo || ''}를 지웁니다.`, detail: '분개 줄이 함께 지워져요.', confirmLabel: '삭제' });
+    if (!ok) return;
+    const res = await api.deleteJournalVoucher(jView.jvId);
+    toast.push(res.ok ? '전표를 지웠어요' : (res.error || '삭제에 실패했어요'), res.ok ? undefined : { tone: 'warn' });
+    if (res.ok) { setJView(null); reload(); }
+  };
+
   const inSum  = scoped.filter(t => t.kind === "income"  && t.status === "입금완료").reduce((a, t) => a + t.amount, 0);
   const outSum = scoped.filter(t => t.kind === "expense" && t.status === "지급완료").reduce((a, t) => a + t.amount, 0);
 
@@ -243,29 +291,29 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
      '예정 포함'을 켜 놓고 탭이 15인데 표가 18줄이면, 어느 쪽이 틀렸나부터 의심하게 된다. */
   const tabCount = (pred) => scoped.filter(pred).length + (showPlanned ? plannedRows.filter(pred).length : 0);
   const tabs = [
-    { id: "all",     label: "전체 거래",  count: tabCount(() => true) },
+    { id: "all",     label: "전체",       count: tabCount(() => true) },
     { id: "income",  label: "입금",       count: tabCount(t => t.kind === "income") },
-    { id: "expense", label: "지출",       count: tabCount(t => t.kind === "expense") },
+    { id: "expense", label: "출금",       count: tabCount(t => t.kind === "expense") },
+    { id: "journal", label: "대체",       count: tabCount(t => t.journal) },
+    { id: "misc",    label: "주문 없는 돈", count: tabCount(t => !t.journal && !t.planned && isMiscPl(t)) },
   ];
 
-  const titleMap = { all: "거래내역", income: "거래내역 · 입금", expense: "거래내역 · 지출" };
-  /* 이 화면은 **조회하는 곳**이다.
+  /* 이 화면은 **서류 없이 오간 돈의 입구이자 전부를 보는 곳**이다(3단계, 2026-09).
    *
-   * 여기 있는 모든 줄은 다른 화면에서 만들어진다 — 입금은 수시입금·정기입금에서,
-   * 지급은 수시지급·정기지급·경비에서, 급여는 인사급여에서. 거래내역은 그 전부가
-   * 한 자리에 모여 "그래서 통장에 무슨 일이 있었나"를 보는 곳이다.
+   * 예전엔 조회 전용이었다 — 등록 입구는 수시 입금·출금의 "받은 서류" 선택창 하나였고, 여기에
+   * 등록 버튼을 두면 같은 거래를 만드는 입구가 두 벌이 됐기 때문이다.
+   * 3단계에서 **메뉴가 그 질문을 대신하게** 됐다: 세금계산서가 있으면 세금계산서, 없으면 여기.
+   * 세금계산서 화면은 더 이상 거래 폼을 열지 않으므로 입구는 여전히 하나다.
    *
-   * 그래서 문구가 **등록을 시키면 안 된다.** 예전엔 "…등록하고 처리하세요"라고 적어 두고
-   * 상단에 '거래 등록' 버튼까지 세워 뒀는데, 그러면 같은 거래를 만드는 입구가 두 벌이 된다 —
-   * 회계 분류를 먼저 묻지 않는 이 입구로 들어오면 서류 선택(DocTypeChooser)이 걸러 주던
-   * 것들을 그냥 지나친다. 보다가 이상한 줄을 찾으면 그 줄을 열어 고치면 된다. 그건 됐다.
-   * 다만 **권하지는 않는다.** */
-  /* ⚠ 이 표는 오랫동안 **정의만 돼 있고 화면에 안 붙어 있었다.** 등록 버튼을 뺀 지금은
-     이 줄이 있어야 한다 — "그럼 등록은 어디서 하지"에 그 자리에서 답해 줘야 하기 때문이다. */
+   * 반복되는 돈은 반복거래에서, 세금계산서가 오간 돈은 세금계산서 화면에서 처리하는 게 낫다 —
+   * 거래 폼이 거래처·금액을 보고 그 둘을 알려준다(entry-hints). */
+  const titleMap = { all: "거래내역", income: "거래내역 · 입금", expense: "거래내역 · 출금", journal: "거래내역 · 대체", misc: "거래내역 · 주문 없는 돈" };
   const subMap = {
-    all:     "실제로 오간 모든 입금·지출을 한자리에서 봅니다. 이상한 줄이 있으면 눌러서 확인하세요. 등록은 입금관리·지급처리에서 해요.",
-    income:  "들어온 돈을 모아 봅니다. 등록은 입금관리에서 해요.",
-    expense: "나간 돈을 모아 봅니다. 등록은 지급처리에서 해요.",
+    all:     "통장에서 오간 돈과 대체전표를 봅니다. 세금계산서가 있는 건은 세금계산서에서 적어요.",
+    income:  "들어온 돈을 모아 봅니다.",
+    expense: "나간 돈을 모아 봅니다.",
+    journal: "돈이 안 움직인 분개(감가상각·정정 등)예요. 합계에는 들지 않아요.",
+    misc:    "어느 주문에도 붙지 않은 운영비·잡수익이에요(급여·세금계산서 정산은 빼고).",
   };
 
   return (
@@ -274,12 +322,14 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
         <PageHeader
           title={titleMap[filter]}
           sub={subMap[filter]}
-          /* '거래 등록'을 여기서 뺐다 — 등록 입구는 입금관리·지급처리 쪽 하나로 모은다.
-             남은 둘은 조회의 연장이다(엑셀로 한꺼번에 들여오기 / 본 것을 내보내기).
-             둘 다 primary 가 아니다 — 이 화면에서 제일 하고 싶은 일이 아니다. */
+          /* 등록 셋은 **손에 든 것**으로 고른다 — 들어온 돈 / 나간 돈 / 돈이 안 움직인 분개.
+             엑셀 둘은 조회의 연장이라 primary 가 아니다. */
           actions={<>
             <button className="btn excel" onClick={openExcel}><Icon.Excel/> <span className="btn-label-hide">엑셀 업로드</span></button>
             <button className="btn" onClick={exportXlsx}><Icon.Excel/> <span className="btn-label-hide">엑셀 내보내기</span></button>
+            {canJournal && <button className="btn" onClick={() => setJOpen(true)}><Icon.Plus size={14}/> 대체</button>}
+            {openIncome && <button className="btn primary" onClick={openIncome}><Icon.Plus size={14}/> 입금</button>}
+            {openExpense && <button className="btn primary" onClick={openExpense}><Icon.Plus size={14}/> 출금</button>}
           </>}
         />
 
@@ -290,7 +340,7 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
           {/* 앞 둘은 **필터**다(누르면 그 종류만 남는다) — active 가 고른 상태를 낸다.
               뒤 둘은 다른 화면으로 가는 길이라 뱃지로 어디로 가는지 적는다. */}
           <Kpi label="입금 합계" value={inSum} tone="pos" active={filter === "income"} onClick={() => setFilter("income")}/>
-          <Kpi label="지출 합계" value={outSum} tone="neg" active={filter === "expense"} onClick={() => setFilter("expense")}/>
+          <Kpi label="출금 합계" value={outSum} tone="neg" active={filter === "expense"} onClick={() => setFilter("expense")}/>
           <Kpi label="미수금"   value={recSummary?.total ?? 0} badge="미수금 화면으로"   badgeTone="brand" onClick={() => { window.location.hash = "ar"; }}/>
           <Kpi label="미지급금" value={paySummary?.total ?? 0} badge="미지급금 화면으로" badgeTone="warn"  onClick={() => { window.location.hash = "ap"; }}/>
         </KpiRow>
@@ -369,14 +419,15 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
             /* 예정 행은 거래가 아니라 청구서다 — 거래 상세를 열면 없는 거래를 보여주게 된다.
                그 청구서 화면으로 보낸다(미수금=#ar / 미지급금=#ap, 해당 건이 열린 채로). */
             onRowClick={t => {
+              if (t.journal) return openJournal(t)
               if (!t.planned) return setSel(t)
               openInvoice?.(t.kind, t.invoiceId)
             }}
             select={{
               ids: checkedIds, onChange: setCheckedIds,
               // 예정 행은 청구서라 주문에 붙일 거래가 아니다
-              isSelectable: t => !t.planned,
-              disabledHint: () => '아직 오가지 않은 돈이라 주문에 붙일 수 없어요',
+              isSelectable: t => !t.planned && !t.journal,
+              disabledHint: t => t.journal ? '대체전표는 주문에 붙이지 않아요' : '아직 오가지 않은 돈이라 주문에 붙일 수 없어요',
             }}
             rowKey={t => t.id}
             rowClass={t => t.planned ? 'row-planned' : ''}
@@ -416,9 +467,11 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
                 render: t => <span className="badge outline">{t.category}</span> },
               { key: 'amount', header: '금액', align: 'right', sortable: true,
                 sortValue: t => t.sign * t.amount,
-                render: t => <span className="num-cell fw-700" style={{ color: t.sign > 0 ? "var(--pos)" : "var(--ink)" }}>
-                  {t.sign > 0 ? "+" : "−"}{fmtNum(t.amount)}
-                </span> },
+                render: t => t.journal
+                  ? <span className="num-cell text-muted">{fmtNum(t.amount)}</span>
+                  : <span className="num-cell fw-700" style={{ color: t.sign > 0 ? "var(--pos)" : "var(--ink)" }}>
+                      {t.sign > 0 ? "+" : "−"}{fmtNum(t.amount)}
+                    </span> },
               /* 공급가액·부가세 — 금액(합계)만으로는 신고 자료를 못 맞춘다. 접어 두고 필요할 때 편다.
                  값이 없는 거래(이체·급여 등)는 빈 칸이다 — 0 으로 적으면 '면세'로 읽힌다. */
               { key: 'supplyAmount', header: '공급가액', align: 'right', sortable: true, defaultHidden: true,
@@ -430,13 +483,15 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
               /* 예정 행에는 증빙·처리 버튼이 없다. 아직 일어나지 않은 일이라
                  증빙이 '없음(경고)'으로 뜨면 거짓 경고가 되고, 처리 버튼은 대상이 없다. */
               { key: 'evid', header: '증빙', width: 70,
-                render: t => t.planned ? <span className="text-muted2">—</span>
+                render: t => (t.planned || t.journal) ? <span className="text-muted2">—</span>
                   : t.evid
                   ? <span className="badge pos" style={{ padding: "2px 8px" }}><Icon.Check size={11}/></span>
                   : <span className="badge neg" style={{ padding: "2px 8px" }}><Icon.Warn size={11}/></span> },
               // label — 머리글이 비어 있어 '열 설정' 목록에 영문 키(actions)가 그대로 나왔다
               { key: 'actions', header: '', label: '처리 버튼', width: 130,
-                render: t => t.planned
+                render: t => t.journal
+                  ? <span className="text-xs text-muted2">{t.docNo}</span>
+                  : t.planned
                   ? <span className="text-xs text-muted2">청구서에서 처리</span>
                   : <TxnActions txn={t} toast={toast} confirm={confirm} onAction={reload}/> },
             ]}
@@ -449,6 +504,16 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
       </div>
 
       <TransactionDetailDrawer txn={sel} onClose={() => setSel(null)} toast={toast} confirm={confirm} openEdit={openEdit} onAction={reload}/>
+      <JournalEntryDrawer open={jOpen} onClose={() => setJOpen(false)}
+        onSaved={({ source, id }) => {
+          setJOpen(false); reload();
+          if (source === 'journal') openJournal({ jvId: id });
+          else setFilter('all');
+        }}/>
+      <VoucherView open={!!jView} voucher={jView?.voucher} onClose={() => setJView(null)}
+        extra={jView && canJournal && (
+          <button className="btn" style={{ color: 'var(--neg-ink)' }} onClick={removeJournal}>삭제</button>
+        )}/>
     </>
   );
 };

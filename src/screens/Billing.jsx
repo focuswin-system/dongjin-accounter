@@ -13,7 +13,6 @@ import { ImportWizard } from '../lib/components/ImportWizard'
 import { VoucherView } from '../lib/components/VoucherView'
 import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
-import { DocTypeChooser } from '../lib/components/DocTypeChooser'
 import { InvoiceLines, lineVat, blankLine, isFilledLine } from '../lib/components/InvoiceLines'
 import { StatementDoc } from '../lib/components/StatementDoc'
 import { computeLineAmount } from '../lib/lineAmount'
@@ -27,6 +26,7 @@ import { vatOf } from '../lib/vatRate'
 import { ReconcilePanel } from '../lib/components/ReconcilePanel'
 import { MaybeIssuedPanel } from '../lib/components/MaybeIssuedPanel'
 import { contractsForVendor, contractFitsVendor } from '../lib/contractPick'
+import { usePerms } from '../lib/perms'
 
 const STATUS_TONE = {
   "입금 완료": "pos",  "지급 완료": "pos",
@@ -1157,8 +1157,9 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
   return (
     <Drawer open={open} onClose={onClose} width={lines.length > 0 ? "min(1680px, 100vw)" : undefined}>
         <DrawerHead
-          title={editInvoice ? "청구서 수정" : (form.kind === "issued" ? "청구서 발행" : "청구서 등록 (수취)")}
-          sub={editInvoice ? "청구서 내용을 수정합니다" : (form.kind === "issued" ? "발주처에 청구서를 발행합니다" : "협력사로부터 받은 청구서를 등록합니다")}
+          /* 메뉴·버튼이 '세금계산서'다(3단계) — 누른 버튼과 열린 폼이 다른 이름이면 다른 곳에 온 것처럼 읽힌다 */
+          title={editInvoice ? "세금계산서 수정" : (form.kind === "issued" ? "세금계산서 발행" : "세금계산서 등록 (수취)")}
+          sub={editInvoice ? "세금계산서 내용을 고칩니다" : (form.kind === "issued" ? "거래처에 발행한 세금계산서를 적어요" : "거래처에서 받은 세금계산서를 적어요")}
           onClose={onClose}/>
         <div className="drawer-body col gap-form">
           {!editInvoice && (
@@ -1632,9 +1633,10 @@ const countHeldNotes = (rows, isIssued) =>
   (rows || []).filter(n => n.status === 'held' && n.kind === (isIssued ? 'receivable' : 'payable')).length
 
 export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefund, openReturn, focusInvoiceId,
-  /* 서류 선택에서 '계산서 아님'을 고르면 거래 등록 드로어로 넘긴다.
-     그 드로어는 App 이 소유하므로(여러 화면이 공유) 함수로 받아 호출만 한다. */
-  openExpense, openIncome,
+  /* 발행·수취 탭 — 이 화면이 세금계산서 한 메뉴로 합쳐졌다(3단계, 2026-09).
+     볼 수 있는 방향만 들어온다(App 이 권한으로 거른다). 누르면 주소를 옮긴다 — 두 방향은
+     서로 다른 장부라 App 이 라우트마다 key 로 다시 그려 상태가 새지 않게 한다. */
+  sideTabs = null,
   /* 카드 대금으로 넘어가는 줄에서 쓴다 — 화면을 옮기는 일은 App 이 한다.
      목록을 섞지 않고 길만 낸다: 카드 대금은 청구서가 아니라 여기 목록에 들어올 수 없다
      (카드사는 세금계산서를 주지 않고, 개별 사용분은 이미 거래로 매입세액에 잡혀 있다). */
@@ -1688,9 +1690,11 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const [txnOpen, setTxnOpen] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
   const [editInvoice, setEditInvoice] = useState(null)
-  /* 등록 입구 — 청구서 폼을 바로 열지 않고 **받은 서류부터 묻는다**(DocTypeChooser 머리말).
-     고른 값을 상태로 남기지 않는 이유: 다음 건은 다른 서류일 수 있어서 매번 물어야 한다. */
-  const [chooserOpen, setChooserOpen] = useState(false)
+  /* 등록 입구 — 예전엔 "받은 서류가 뭔가요?"를 먼저 물었다(DocTypeChooser). 3단계에서 메뉴가
+     그 질문을 대신하게 됐다: 세금계산서가 있으면 여기, 없으면 거래내역. 그래서 곧장 청구서 폼을 연다. */
+  const openNewInvoice = () => { setEditInvoice(null); setFormOpen(true) }
+  // 거래내역으로 가는 길은 들어갈 수 있을 때만 낸다 — 눌렀는데 '권한이 없어요'면 막다른 길이다
+  const { can: canGo } = usePerms()
 
   // 회수 모드는 '못 받은 것'을 보러 오는 화면이라 그 필터로 연다(아래 UNSETTLED 와 같은 값)
   const [statusFilter, setStatusFilter] = useState(collect ? (initialTab === "issued" ? "미수금" : "미지급금") : "전체")
@@ -2283,10 +2287,10 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   return (
     <div className="fade-up">
       <PageHeader
-        /* 제목은 메뉴 이름과 같아야 한다 — 메뉴가 수시 입금/수시 출금으로 바뀌었는데
+        /* 제목은 메뉴 이름과 같아야 한다 — 메뉴가 '세금계산서'로 합쳐졌다(3단계). 예전에 메뉴가 바뀌었는데
            제목만 '대금 청구서'로 남아 있으면 다른 화면에 온 것처럼 읽힌다
            (HR 화면을 '급여·임금'으로 맞춘 것과 같은 이유). */
-        title={collect ? (isIssued ? "미수금" : "미지급금") : (isIssued ? "수시 입금" : "수시 출금")}
+        title={collect ? (isIssued ? "미수금" : "미지급금") : "세금계산서"}
         actions={collect
           ? <button className="btn" onClick={isIssued ? openRefund : openReturn}>
               <Icon.Plus size={14}/> {isIssued ? "환불 등록" : "환입 등록"}
@@ -2304,11 +2308,35 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
                 ? <button className="btn primary" onClick={() => setNoteAddSignal(n => n + 1)}>
                     <Icon.Plus size={14}/> 어음 등록
                   </button>
-                : <button className="btn primary" onClick={() => setChooserOpen(true)}>
-                    <Icon.Plus size={14}/> {isIssued ? "입금" : "지급"} 등록
+                : <button className="btn primary" onClick={openNewInvoice}>
+                    <Icon.Plus size={14}/> {isIssued ? "세금계산서 발행" : "세금계산서 등록"}
                   </button>}
             </>}
       />
+
+      {/* 발행·수취 — 이 화면의 첫 갈림이다. 그 아래 보기 탭(발행내역·입금내역·어음·대사)과 섞지 않는다:
+          저건 한 장부를 여러 축으로 보는 것이고, 이건 **장부 자체**가 바뀐다. 권한 있는 쪽만 선다.
+          옆의 한 줄은 옛 "받은 서류" 선택창이 하던 일이다 — 세금계산서가 없으면 여기가 아니다. */}
+      {!collect && sideTabs && (
+        <div className="row gap-12" style={{ marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+          {sideTabs.length > 1 && (
+            <div className="seg" role="tablist" aria-label="발행·수취">
+              {sideTabs.map(side => (
+                <button key={side} role="tab" aria-selected={initialTab === side}
+                  className={`seg-btn ${initialTab === side ? "active" : ""}`}
+                  onClick={() => initialTab !== side && goRoute?.(side === "issued" ? "billing_issued" : "billing_received")}>
+                  {side === "issued" ? "발행 (매출)" : "수취 (매입)"}
+                </button>
+              ))}
+            </div>
+          )}
+          {canGo("ledger") && (
+            <button type="button" className="link-cell text-sm ml-auto" onClick={() => goRoute?.("ledger")}>
+              세금계산서 없이 {isIssued ? "들어온" : "나간"} 돈은 거래내역에서 적어요 →
+            </button>
+          )}
+        </div>
+      )}
 
       {/* 카드 대금으로 넘어가는 줄 — 지급 업무를 하러 온 김에 카드값도 챙기게 한다.
           목록에 섞지는 않는다: 청구서와 카드는 행도 컬럼도 상태 흐름도 다르다
@@ -2727,19 +2755,6 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
           · expense/plain → 거래 등록 드로어 (청구서를 만들지 않는다)
           거래 드로어는 App 이 소유하므로 함수가 없으면 청구서 폼으로 떨어뜨린다 —
           입구가 죽는 것보다는 낫다(라우트마다 배선이 다를 수 있다). */}
-      <DocTypeChooser
-        open={chooserOpen}
-        kind={isIssued ? 'receive' : 'pay'}
-        /* 거래 등록 드로어는 App 이 소유한다. 그 함수를 안 받은 라우트(#billing 등)에서는
-           청구서 말고는 열 수 없으므로 그 선택지를 아예 안 보여준다 — 폴백으로 청구서를
-           열면 "미수금에 안 잡혀요"를 보고 고른 사람에게 미수금을 만들어 준다. */
-        canPlain={isIssued ? !!openIncome : !!openExpense}
-        onClose={() => setChooserOpen(false)}
-        onPick={(pick) => {
-          setChooserOpen(false)
-          if (pick === 'invoice') { setEditInvoice(null); setFormOpen(true); return }
-          isIssued ? openIncome?.() : openExpense?.()
-        }}/>
     </div>
   )
 }

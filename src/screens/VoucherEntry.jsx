@@ -1,11 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Combobox, MoneyInput, DateInput, localToday, fmtDateShort } from '../lib/ui'
-import { PageHeader } from '../lib/components/PageHeader'
-import { VoucherView } from '../lib/components/VoucherView'
+import { Icon, fmtNum, useToast, Combobox, MoneyInput, DateInput, localToday, Drawer } from '../lib/ui'
+import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { api } from '../lib/api'
 
 /**
- * 전표 입력 — 분개전표 모양 그대로. 왼쪽이 **차변** 블록, 오른쪽이 **대변** 블록이고,
+ * 대체전표 입력 — 분개전표 모양 그대로. 왼쪽이 **차변** 블록, 오른쪽이 **대변** 블록이고,
  * 각 쪽에서 줄을 더해 계정과목·적요·금액을 채운다. 차변 합계 = 대변 합계여야 저장된다.
  *
  * 저장은 통장 줄이 있느냐로 갈린다:
@@ -13,34 +12,49 @@ import { api } from '../lib/api'
  *       (통장이 차변이면 입금, 대변이면 지출)
  *   · 통장 줄 없음 → 현금이 안 움직이는 대체전표(감가상각 등).
  * 통장 두 줄(통장↔통장)은 내부이체 화면을 쓴다 — 여기서는 막는다.
+ *
+ * 3단계(2026-09): 따로 있던 '전표 입력' 화면을 **거래내역의 [대체] 서랍**으로 옮겼다.
+ * 만든 대체전표는 거래내역 목록에 '대체'로 함께 보인다(예전엔 이 화면에만 있어 거래내역만 보면 빠졌다).
  */
 
 const numOf = (v) => (typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, ''), 10) || 0 : Number(v) || 0)
 const emptyRow = () => ({ acct: '', memo: '', amount: '' })
 const VAT_CODES = new Set(['1306', '2208'])   // 부가세대급금/예수금 — 이 줄은 세액으로 잡는다
 
-export const VoucherEntryScreen = () => {
+/** 대체전표 한 건 → 전표 보기(VoucherView)가 그리는 모양 */
+export const journalVoucherOf = (v) => ({
+  type: '대체전표', date: v.date, source: 'journal', counterparty: '', category: '', summary: v.summary || v.memo || '',
+  lines: (v.lines || []).map(l => ({ side: l.side, code: l.account_code, name: l.account_name, amount: Number(l.amount) || 0 })),
+  debitTotal: (v.lines || []).filter(l => l.side === 'debit').reduce((s, l) => s + (Number(l.amount) || 0), 0),
+  creditTotal: (v.lines || []).filter(l => l.side === 'credit').reduce((s, l) => s + (Number(l.amount) || 0), 0),
+  balanced: true,
+})
+
+/**
+ * @param open     열림
+ * @param onClose  닫기
+ * @param onSaved  ({ source: 'transaction'|'journal', id }) — 저장 뒤 목록을 새로 읽고 그 전표를 열 수 있게
+ */
+export const JournalEntryDrawer = ({ open, onClose, onSaved }) => {
   const toast = useToast()
-  const { confirm } = useConfirm()
   const [accounts, setAccounts] = useState([])
   const [subjects, setSubjects] = useState([])
-  const [list, setList] = useState([])
   const [date, setDate] = useState(localToday())
   const [summary, setSummary] = useState('')
   const [debits, setDebits] = useState([emptyRow()])    // 차변 블록
   const [credits, setCredits] = useState([emptyRow()])  // 대변 블록
   const [busy, setBusy] = useState(false)
-  const [view, setView] = useState(null)
 
-  const load = async () => {
-    const [accs, subs, vs] = await Promise.all([
-      api.getAccounts(), api.getAccountSubjects({ postableOnly: true }), api.getJournalVouchers(),
-    ])
-    setAccounts((accs || []).filter(a => a.kind !== 'card'))
-    setSubjects(subs || [])
-    setList(vs || [])
-  }
-  useEffect(() => { load() }, [])
+  const reset = () => { setDate(localToday()); setSummary(''); setDebits([emptyRow()]); setCredits([emptyRow()]) }
+
+  useEffect(() => {
+    if (!open) return
+    reset()
+    Promise.all([api.getAccounts(), api.getAccountSubjects({ postableOnly: true })]).then(([accs, subs]) => {
+      setAccounts((accs || []).filter(a => a.kind !== 'card'))
+      setSubjects(subs || [])
+    })
+  }, [open])
 
   const opts = useMemo(() => [
     ...(accounts.length ? [{ header: '통장 (돈이 실제로 오가는 계좌)' }] : []),
@@ -61,8 +75,6 @@ export const VoucherEntryScreen = () => {
   const balanced = debitSum > 0 && debitSum === creditSum
   const usableDebits = debits.filter(r => r.acct && numOf(r.amount))
   const usableCredits = credits.filter(r => r.acct && numOf(r.amount))
-
-  const reset = () => { setDate(localToday()); setSummary(''); setDebits([emptyRow()]); setCredits([emptyRow()]) }
 
   const save = async () => {
     if (usableDebits.length + usableCredits.length < 2 || !usableDebits.length || !usableCredits.length)
@@ -96,46 +108,23 @@ export const VoucherEntryScreen = () => {
           status: kind === 'income' ? '입금완료' : '지급완료', splits,
         })
         if (!res.ok) return toast.push(res.error || '저장에 실패했어요', { tone: 'warn' })
-        toast.push('거래로 저장했어요 (거래내역·전표목록에서 보여요)')
-        reset(); load()
-        setView({ source: 'transaction', id: res.id })
+        toast.push('통장이 오간 거래로 저장했어요')
+        onSaved?.({ source: 'transaction', id: res.id })
       } else {
         const res = await api.createJournalVoucher({
           date, summary,
           lines: rows.map(r => ({ side: r.side, account_code: r.acct, account_name: nameOf(r.acct), amount: numOf(r.amount), memo: r.memo || '' })),
         })
         if (!res.ok) return toast.push(res.error || '저장에 실패했어요', { tone: 'warn' })
-        toast.push(`전표 ${res.doc_no}를 저장했어요`)
-        reset(); load()
-        openJournalView(res.id)
+        toast.push(`대체전표 ${res.doc_no}를 저장했어요`)
+        onSaved?.({ source: 'journal', id: res.id })
       }
     } finally { setBusy(false) }
   }
 
-  const openJournalView = async (id) => {
-    const v = await api.getJournalVoucher(id)
-    if (!v) return
-    setView({ voucher: {
-      type: '대체전표', date: v.date, source: 'journal', counterparty: '', category: '', summary: v.summary || v.memo || '',
-      lines: (v.lines || []).map(l => ({ side: l.side, code: l.account_code, name: l.account_name, amount: Number(l.amount) || 0 })),
-      debitTotal: (v.lines || []).filter(l => l.side === 'debit').reduce((s, l) => s + (Number(l.amount) || 0), 0),
-      creditTotal: (v.lines || []).filter(l => l.side === 'credit').reduce((s, l) => s + (Number(l.amount) || 0), 0),
-      balanced: true,
-    } })
-  }
-
-  const remove = async (v) => {
-    const ok = await confirm({ tone: 'neg', icon: <Icon.Warn size={22}/>, title: '전표 삭제',
-      body: `전표 ${v.doc_no}를 지웁니다.`, detail: '분개 줄이 함께 지워져요.', confirmLabel: '삭제' })
-    if (!ok) return
-    const res = await api.deleteJournalVoucher(v.id)
-    toast.push(res.ok ? '전표를 지웠어요' : (res.error || '삭제에 실패했어요'), res.ok ? undefined : { tone: 'warn' })
-    load()
-  }
-
   // 한 쪽 블록 렌더 — 차변/대변 공통
   const Side = ({ title, rows, setter, sum, tone }) => (
-    <div style={{ flex: 1, minWidth: 0 }}>
+    <div style={{ flex: '1 1 280px', minWidth: 0 }}>
       <div className="fw-700" style={{ textAlign: 'center', padding: '8px 0', background: 'var(--surface-2)', borderRadius: 8, marginBottom: 10, color: `var(--${tone}-ink)` }}>{title}</div>
       <div className="col gap-10">
         {rows.map((r, i) => (
@@ -163,66 +152,38 @@ export const VoucherEntryScreen = () => {
   )
 
   return (
-    <div className="fade-up">
-      <PageHeader title="전표 입력"
-        sub="분개전표 모양 그대로 — 왼쪽 차변, 오른쪽 대변에 줄을 더해 계정과목·금액을 채워요. 통장 줄이 있으면 통장이 오간 거래로, 없으면 대체전표로 저장돼요."/>
-
-      <div className="card card-pad" style={{ marginBottom: 16 }}>
-        <div className="row gap-12" style={{ flexWrap: 'wrap', marginBottom: 16 }}>
+    <Drawer open={open} onClose={onClose} width="min(860px, 100vw)" label="대체전표">
+      <DrawerHead title="대체전표" sub="돈이 안 움직이는 분개(감가상각·대손·정정 등)" onClose={onClose}/>
+      <div className="drawer-body col gap-16">
+        <div className="row gap-12" style={{ flexWrap: 'wrap' }}>
           <div><label className="label">날짜</label>
             <DateInput className="input" style={{ width: 160 }} max={localToday()} value={date} onChange={e => setDate(e.target.value)}/>
           </div>
           <div style={{ flex: 1, minWidth: 220 }}><label className="label">전표 적요</label>
-            <input className="input" value={summary} placeholder="예: 자동차보험료 납부" onChange={e => setSummary(e.target.value)}/>
+            <input className="input" value={summary} placeholder="예: 9월 감가상각" onChange={e => setSummary(e.target.value)}/>
           </div>
         </div>
 
         {/* 분개전표 — 차변 | 대변 반반. Side 는 컴포넌트가 아니라 함수로 호출한다
             (<Side/> 로 쓰면 매 렌더마다 새 타입이 되어 입력 포커스가 튄다). */}
-        <div className="row gap-16" style={{ alignItems: 'stretch' }}>
+        <div className="row gap-16" style={{ alignItems: 'stretch', flexWrap: 'wrap' }}>
           {Side({ title: '차변', rows: debits, setter: setDebits, sum: debitSum, tone: 'pos' })}
-          <div style={{ width: 1, background: 'var(--line)' }}/>
           {Side({ title: '대변', rows: credits, setter: setCredits, sum: creditSum, tone: 'neg' })}
         </div>
 
-        <div className="row gap-8" style={{ alignItems: 'center', marginTop: 16, paddingTop: 12, borderTop: '2px solid var(--line-strong, var(--line))', flexWrap: 'wrap' }}>
-          {debitSum !== creditSum
-            ? <span className="badge warn" style={{ fontSize: 11 }}>차변·대변 차이 {fmtNum(Math.abs(debitSum - creditSum))}</span>
-            : (debitSum > 0 && <span className="badge pos" style={{ fontSize: 11 }}>차·대변 일치</span>)}
-          <button className="btn primary ml-auto" onClick={save} disabled={busy || !balanced}>
-            <Icon.Check size={14}/> 전표 저장
-          </button>
+        <div className="text-xs text-muted2">
+          통장을 한 줄 넣으면 통장이 오간 거래로 저장돼요. 통장이 없으면 대체전표예요.
         </div>
       </div>
-
-      <div className="card" style={{ overflow: 'hidden' }}>
-        <div className="card-pad" style={{ paddingBottom: 8 }}>
-          <span className="fw-700 text-sm">최근 대체전표</span>
-          <span className="text-xs text-muted2" style={{ marginLeft: 8 }}>통장이 오간 전표는 거래내역·전표목록에서 봐요</span>
-        </div>
-        {list.length === 0
-          ? <div className="text-sm text-muted2" style={{ padding: '8px 16px 20px' }}>아직 입력한 대체전표가 없어요.</div>
-          : (
-            <table className="table">
-              <thead><tr><th style={{ width: 130 }}>전표번호</th><th style={{ width: 110 }}>날짜</th><th>적요</th><th className="num-right" style={{ width: 140 }}>금액</th><th style={{ width: 60 }}/></tr></thead>
-              <tbody>
-                {list.map(v => (
-                  <tr key={v.id} style={{ cursor: 'pointer' }} onClick={() => openJournalView(v.id)}>
-                    <td className="num text-sm">{v.doc_no}</td>
-                    <td className="text-sm text-muted">{fmtDateShort(v.date)}</td>
-                    <td className="text-sm">{v.summary || v.memo || '—'}</td>
-                    <td className="num-cell num-right">{fmtNum(v.total)}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button className="btn sm" style={{ color: 'var(--neg-ink)' }} onClick={(e) => { e.stopPropagation(); remove(v) }}>삭제</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-      </div>
-
-      <VoucherView open={!!view} voucher={view?.voucher} source={view?.source} id={view?.id} onClose={() => setView(null)}/>
-    </div>
+      <DrawerFooter>
+        {debitSum !== creditSum
+          ? <span className="badge warn" style={{ fontSize: 11 }}>차변·대변 차이 {fmtNum(Math.abs(debitSum - creditSum))}</span>
+          : (debitSum > 0 && <span className="badge pos" style={{ fontSize: 11 }}>차·대변 일치</span>)}
+        <button className="btn ml-auto" onClick={onClose}>취소</button>
+        <button className="btn primary" onClick={save} disabled={busy || !balanced}>
+          <Icon.Check size={14}/> 전표 저장
+        </button>
+      </DrawerFooter>
+    </Drawer>
   )
 }

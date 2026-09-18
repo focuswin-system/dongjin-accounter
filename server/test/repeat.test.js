@@ -149,3 +149,62 @@ test('값 정리 — 금액 콤마, 모르는 주기·부가세는 기본값, �
   assert.strictEqual(normalizeTemplate({ ...base, amount: 0 }).field, 'amount')
   assert.strictEqual(normalizeTemplate({ ...base, direction: 'x' }).field, 'direction')
 })
+
+/* ── 반복 제안(repeatSuggestion) — DB 는 SQL 모양으로 흉내 낸다 ── */
+const { repeatSuggestion } = require('../lib/repeat')
+const fakeDb = ({ templates = 0, txns = [] }) => ({
+  execute: async (sql, params) => {
+    if (/FROM repeat_templates/.test(sql)) return [[{ n: templates }]]
+    if (/FROM transactions/.test(sql)) {
+      const [, , from, to] = params
+      return [txns.filter(t => t.d >= from && t.d <= to)
+        .map(t => ({ ym: t.d.slice(0, 7), d: t.d, amount: t.amount || 10000, category: t.category || '통신비',
+                     account_id: 'acc1', memo: '', tax_type: t.tax_type || '과세' }))
+        .sort((a, b) => b.d.localeCompare(a.d))]
+    }
+    throw new Error('예상 못 한 SQL: ' + sql)
+  },
+})
+
+test('반복 제안 — 최근 3개월 중 2개월이면 권한다', async () => {
+  const db = fakeDb({ txns: [{ d: '2026-07-25' }, { d: '2026-09-27', amount: 132000 }] })
+  const r = await repeatSuggestion(db, { kind: 'expense', vendorId: 'v1', category: '통신비', today: '2026-09-28' })
+  assert.strictEqual(r.suggest, true)
+  assert.strictEqual(r.months, 2)
+  // 가장 최근 거래를 본뜬다 — 금액·일자·바로 출금·부가세 포함
+  assert.strictEqual(r.prefill.amount, 132000)
+  assert.strictEqual(r.prefill.day_of_month, 27)
+  assert.strictEqual(r.prefill.creates, 'txn')
+  assert.strictEqual(r.prefill.vat_mode, 'inclusive')
+})
+
+test('반복 제안 — 한 달뿐이면 안 권한다', async () => {
+  const db = fakeDb({ txns: [{ d: '2026-09-05' }, { d: '2026-09-20' }] })
+  const r = await repeatSuggestion(db, { kind: 'expense', vendorId: 'v1', category: '통신비', today: '2026-09-28' })
+  assert.strictEqual(r.suggest, false)
+})
+
+test('반복 제안 — 3개월보다 오래된 건 안 센다(연초 경계 포함)', async () => {
+  // 오늘 1월 → 11월·12월·1월이 창이다. 10월 거래는 빠진다
+  const db = fakeDb({ txns: [{ d: '2025-10-10' }, { d: '2026-01-10' }] })
+  const r = await repeatSuggestion(db, { kind: 'expense', vendorId: 'v1', category: '통신비', today: '2026-01-15' })
+  assert.strictEqual(r.suggest, false)
+  const db2 = fakeDb({ txns: [{ d: '2025-11-10' }, { d: '2026-01-10' }] })
+  const r2 = await repeatSuggestion(db2, { kind: 'expense', vendorId: 'v1', category: '통신비', today: '2026-01-15' })
+  assert.strictEqual(r2.suggest, true)
+})
+
+test('반복 제안 — 그 거래처·방향 반복거래가 이미 있으면(꺼진 것도) 안 권한다', async () => {
+  const db = fakeDb({ templates: 1, txns: [{ d: '2026-08-10' }, { d: '2026-09-10' }] })
+  const r = await repeatSuggestion(db, { kind: 'expense', vendorId: 'v1', category: '통신비', today: '2026-09-28' })
+  assert.strictEqual(r.suggest, false)
+})
+
+test('반복 제안 — 면세 거래는 면세로, 입금은 청구서로 본뜬다', async () => {
+  const db = fakeDb({ txns: [{ d: '2026-08-10', tax_type: '면세' }, { d: '2026-09-10', tax_type: '면세' }] })
+  const r = await repeatSuggestion(db, { kind: 'income', vendorId: 'v1', today: '2026-09-28' })
+  assert.strictEqual(r.suggest, true)
+  assert.strictEqual(r.prefill.vat_mode, 'none')
+  assert.strictEqual(r.prefill.creates, 'invoice')
+  assert.strictEqual(r.prefill.category, null)
+})

@@ -25,7 +25,28 @@ const { MONTHS, vatPeriodOf } = require('../lib/vatPeriod')
 
 const { reconcileCandidates } = require('../lib/reconcile')
 const { createInvoice } = require('../lib/invoiceCreate')
+const { sideGuard } = require('../platform/sidePerms')
 const router = Router()
+
+/* ── 방향별 권한 ───────────────────────────────────────────────────
+ * 매출(issued)·매입(received) 청구서가 한 경로를 쓴다. 게이트는 네 자원 OR 이라
+ * 수시 출금 권한만 가진 역할이 매출 청구서를 조회·발행할 수 있었다.
+ * 줄의 kind 로 자원을 다시 따진다 — 규칙은 platform/sidePerms.js(반복거래와 같은 것).
+ * 미수금(ar)·미지급금(ap) 화면은 같은 장부를 '회수 모드'로 여는 잎이라 같은 방향에 묶는다. */
+const invGuard = sideGuard(
+  { issued: ['billing_issued', 'ar'], received: ['billing_received', 'ap'] },
+  { issued: '매출 세금계산서', received: '매입 세금계산서' })
+const kindOf = (v) => (v === 'issued' ? 'issued' : 'received')
+
+/* :id 가 붙은 모든 경로(조회·수정·삭제·정산·첨부·전표)는 그 청구서의 방향으로 따진다.
+ * 행위는 게이트가 본 것과 같다(sidePerms 가 경로에서 다시 계산한다). */
+router.param('id', async (req, res, next, id) => {
+  try {
+    const [[row]] = await req.db.execute('SELECT kind FROM invoices WHERE id = ?', [String(id || '')])
+    if (row) invGuard.assert(req, kindOf(row.kind))
+    next()   // 없는 id 는 각 핸들러가 404 로 답한다(여기서 삼키면 문구가 달라진다)
+  } catch (e) { next(e) }
+})
 
 const RECEIVABLE_STATUSES = new Set(['입금 예정', '일부 입금', '기한 지남', '장기 미수'])
 const PAYABLE_STATUSES    = new Set(['지급 대기', '지급 예정', '일부 지급', '기한 지남'])
@@ -176,7 +197,11 @@ router.get('/', async (req, res, next) => {
       LEFT JOIN contracts c ON i.contract_id = c.id
       LEFT JOIN accounts a ON i.account_id = a.id WHERE 1=1`
     const params = []
+    // 볼 수 있는 방향만 — 한쪽 권한만 있으면 반대쪽 장부는 빈 목록이다(403 이 아니라 안 보이는 것)
+    const kinds = invGuard.visible(req)
+    if (!kinds.length || (kind && !kinds.includes(kind))) return res.json([])
     if (kind)     { sql += ' AND i.kind = ?';       params.push(kind) }
+    else if (kinds.length === 1) { sql += ' AND i.kind = ?'; params.push(kinds[0]) }
     if (status)   { sql += ' AND i.status = ?';     params.push(status) }
     if (vendorId) { sql += ' AND i.vendor_id = ?';  params.push(vendorId) }
     if (from || to) {
@@ -205,8 +230,15 @@ router.get('/', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/* 요약은 **막지 않고 비워 준다** — 목록과 같은 원칙(권한 없는 쪽은 403 이 아니라 '안 보이는 것').
+   세금계산서·거래내역 화면이 두 요약을 늘 함께 부르는데, 조회의 403 은 화면 전체에 '권한이 없어요'를
+   띄운다(api.js notifyInfra). 한쪽 권한만 가진 사람이 화면을 열 때마다 오류를 보게 된다. */
+const EMPTY_RECEIVABLES = { summary: { total: 0, count: 0, overdue: 0, overdueCount: 0, longOverdue: 0 }, rows: [] }
+const EMPTY_PAYABLES = { summary: { total: 0, count: 0, overdue: 0, overdueCount: 0, pendingApproval: 0 }, rows: [] }
+
 router.get('/summary/receivables', async (req, res, next) => {
   try {
+    if (!invGuard.allows(req, 'issued', 'view')) return res.json(EMPTY_RECEIVABLES)
     const [rows] = await req.db.execute("SELECT * FROM invoices WHERE kind='issued'")
     const active = rows.filter(r => RECEIVABLE_STATUSES.has(r.status))
     const withMatches = await attachMatchesBulk(req.db, active)
@@ -225,6 +257,7 @@ router.get('/summary/receivables', async (req, res, next) => {
 
 router.get('/summary/payables', async (req, res, next) => {
   try {
+    if (!invGuard.allows(req, 'received', 'view')) return res.json(EMPTY_PAYABLES)
     const [rows] = await req.db.execute("SELECT * FROM invoices WHERE kind='received'")
     const withMatches = await attachMatchesBulk(req.db, rows)
     const pending = withMatches.filter(r => PAYABLE_STATUSES.has(r.status))
@@ -494,6 +527,10 @@ async function findOrCreateVendor(db, { name, bizNo, kind }) {
 router.post('/import/commit', async (req, res, next) => {
   const items = Array.isArray(req.body.items) ? req.body.items : []
   if (!items.length) return res.json({ ok: true, inserted: 0, updated: 0 })
+  try {
+    // 행위는 게이트와 같게(이 경로는 ACTION_OVERRIDES 로 'upload') — 다르면 게이트는 통과시키고 여기서 막는다
+    for (const k of new Set(items.map(it => kindOf(it.kind)))) invGuard.assert(req, k)
+  } catch (e) { return next(e) }
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
@@ -729,6 +766,7 @@ router.get('/import/template', async (req, res, next) => {
 router.get('/reconcile', async (req, res, next) => {
   try {
     const kind = req.query.kind === 'received' ? 'received' : 'issued'
+    invGuard.assert(req, kind, 'view')
     res.json(await reconcileCandidates(req.db, kind))
   } catch (e) { next(e) }
 })
@@ -787,6 +825,7 @@ router.post('/', async (req, res, next) => {
             category, account_code,
             // 폼이 맨 앞에서 고른 청구 일정(선택) — 있으면 이 청구서로 그 회차를 닫는다
             milestone_id } = req.body
+    invGuard.assert(req, kindOf(kind), 'create')
     /* 품목 내역이 있으면 **그 합계가 공급가액이다.** 화면도 그렇게 동작하지만(공급가액 칸이 잠긴다)
        서버에서도 확정한다 — 두 숫자를 각자 보내면 명세서와 청구서가 다른 말을 하는 청구서가
        저장될 수 있고, 그건 나중에 어느 쪽이 맞는지 알 방법이 없다. */
@@ -923,6 +962,7 @@ router.post('/split', async (req, res, next) => {
   try {
     const { kind, vendor_id, contract_id, issued_at, due_at, status, account_id, memo, tax_type,
             category, account_code } = req.body
+    invGuard.assert(req, kindOf(kind), 'create')
     const lines = Array.isArray(req.body.lines) ? req.body.lines : []
     if (!lines.length) return res.status(400).json({ error: '나눌 품목이 없어요. 품목을 먼저 입력해주세요.' })
     // 한 장 발행과 같은 규칙 — 거래처 없는 청구서는 만들지 않는다
@@ -1339,10 +1379,19 @@ router.post('/:id/matches', async (req, res, next) => {
  * 그래서 미리 전부 검사하고, 걸리는 게 있으면 무엇이 왜 걸렸는지 말한 뒤 아무것도 안 한다.
  * (놓친 회차 일괄 발행·소급 등록이 같은 규칙을 쓴다)
  */
+
+/** 고른 청구서들의 방향을 전부 따진다 — 일괄 처리는 한 건이라도 권한 밖이면 아무것도 안 한다 */
+const assertKindsOf = async (req, ids) => {
+  const ph = ids.map(() => '?').join(',')
+  const [rows] = await req.db.execute(`SELECT DISTINCT kind FROM invoices WHERE id IN (${ph})`, ids)
+  for (const r of rows) invGuard.assert(req, kindOf(r.kind))
+}
+
 router.post('/bulk/settle', async (req, res, next) => {
   const ids = Array.isArray(req.body.ids) ? req.body.ids.filter(Boolean) : []
   if (!ids.length) return res.status(400).json({ error: '처리할 청구서를 선택해주세요' })
   if (ids.length > 100) return res.status(400).json({ error: `한 번에 100건까지예요 (${ids.length}건 선택). 기간이나 거래처로 좁혀주세요.` })
+  try { await assertKindsOf(req, ids) } catch (e) { return next(e) }
 
   const date = String(req.body.date || kstToday())
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: '처리일 형식이 올바르지 않아요 (YYYY-MM-DD)' })
@@ -1456,6 +1505,7 @@ router.post('/bulk/delete', async (req, res, next) => {
   const ids = Array.isArray(req.body.ids) ? req.body.ids.filter(Boolean) : []
   if (!ids.length) return res.status(400).json({ error: '삭제할 청구서를 선택해주세요' })
   if (ids.length > 100) return res.status(400).json({ error: `한 번에 100건까지예요 (${ids.length}건 선택).` })
+  try { await assertKindsOf(req, ids) } catch (e) { return next(e) }
 
   const conn = await req.db.getConnection()
   try {
@@ -1660,7 +1710,10 @@ router.post('/:id/docs', async (req, res, next) => {
 router.delete('/docs/:docId', async (req, res, next) => {
   try {
     // DB 행만 지우면 실제 파일이 uploads/{companyId}/ 에 그대로 남는다(고아 파일).
-    const [[doc]] = await req.db.execute('SELECT url FROM invoice_docs WHERE id = ?', [req.params.docId])
+    const [[doc]] = await req.db.execute(
+      `SELECT d.url, i.kind FROM invoice_docs d LEFT JOIN invoices i ON i.id = d.invoice_id WHERE d.id = ?`,
+      [req.params.docId])
+    if (doc?.kind) invGuard.assert(req, kindOf(doc.kind))
     await req.db.execute('DELETE FROM invoice_docs WHERE id = ?', [req.params.docId])
     if (doc) removeUploadedFile(doc.url, req.user?.companyId)
     res.json({ ok: true })

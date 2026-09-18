@@ -29,7 +29,9 @@ const createsLabel = (r) => (r.direction === 'in' ? '청구서' : r.creates === 
 
 const VAT_OPTS = [['exclusive', '부가세 별도'], ['inclusive', '부가세 포함'], ['none', '면세'], ['zero', '영세']]
 
-export const RepeatScreen = ({ goRoute, initialDirection = 'all' }) => {
+/* prefill — 거래를 적은 뒤 반복 제안에서 [반복거래로 등록]을 누르고 온 경우(3단계).
+   그 거래를 본뜬 값으로 등록 서랍을 열어 준다. id 가 없으니 저장하면 새로 등록된다. */
+export const RepeatScreen = ({ goRoute, initialDirection = 'all', prefill = null, onPrefillUsed }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [ym, setYm] = useState(localToday().slice(0, 7))
@@ -90,6 +92,11 @@ export const RepeatScreen = ({ goRoute, initialDirection = 'all' }) => {
     reload()
   }
   const openEdit = (t) => { setEditing(t); setFormOpen(true) }
+  useEffect(() => {
+    if (!prefill) return
+    setEditing({ ...prefill, active: 1 }); setFormOpen(true)
+    onPrefillUsed?.()
+  }, [prefill])
 
   const pickedTotal = monthRows.filter(r => picked.has(r.id)).reduce((s, r) => s + r.total, 0)
 
@@ -427,7 +434,7 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
       if (res.field) { setErrors({ [res.field]: res.error }); return }
       return toast.push(res.error || '저장하지 못했어요', { tone: 'warn' })
     }
-    toast.push(editing ? '수정했어요' : '등록했어요')
+    toast.push(editing?.id ? '수정했어요' : '등록했어요')
     onClose()
     onSaved?.()
   }
@@ -437,7 +444,7 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
 
   return (
     <Drawer open={open} onClose={onClose} width="min(600px,100vw)" label="반복거래">
-      <DrawerHead title={editing ? '반복거래 수정' : '반복거래 등록'} onClose={onClose}/>
+      <DrawerHead title={editing?.id ? '반복거래 수정' : '반복거래 등록'} onClose={onClose}/>
       <div className="drawer-body col gap-form">
         <div>
           <label className="label">구분</label>
@@ -561,7 +568,7 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
           </div>
         )}
       </div>
-      <DrawerFooter onCancel={onClose} onSave={save} saveLabel={editing ? '수정' : '등록'}/>
+      <DrawerFooter onCancel={onClose} onSave={save} saveLabel={editing?.id ? '수정' : '등록'}/>
     </Drawer>
   )
 }

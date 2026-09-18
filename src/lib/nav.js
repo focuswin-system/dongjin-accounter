@@ -54,38 +54,35 @@ export const NAV_TREE = [
    * 최상위가 셋이라 사이드바 위쪽이 그만큼 무거웠고, 등록하고 확인하러 가는 흐름
    * (수시입금 → 거래내역)이 도메인을 건너뛰어야 했다.
    *
-   * 잎 이름은 **네 글자로 맞춘다** — 정기 입금 / 수시 입금 / 정기 출금 / 수시 출금 /
-   * 경비 처리 / 카드 대금 / 내부 이체 / 급여·임금. 길이가 들쭉날쭉하면 목록이 어지럽다.
    * ⚠ 이름은 **한 곳으로만 둔다.** 사이드바에서만 줄이는 방식(short)을 잠깐 썼는데,
-   *   그러면 메뉴는 '정기'인데 화면 제목은 '정기지급'이 되어 같은 화면이 두 이름을 갖는다.
-   *   이 파일이 계속 경계하는 어긋남이다(Master.jsx 2861 주석도 같은 말을 한다).
-   * ⚠ 옛 이름(정기지급·수시입금…)으로 찾는 사람이 있다. LEAF_TAGS 에 그대로 남겨 둔다.
+   *   그러면 메뉴와 화면 제목이 다른 이름을 갖는다. 이 파일이 계속 경계하는 어긋남이다.
+   * ⚠ 옛 이름(정기지급·수시입금·경비 처리·전표 입력…)으로 찾는 사람이 있다. LEAF_TAGS 에 남겨 둔다.
    *
    * 급여·임금이 여기 있는 이유: hr 화면은 급여대장·용역/일용 대장·미지급 퇴직금으로
    * **전부 나가는 돈**이다. 반면 근로계약·고용형태 같은 인사 데이터는 성격이 달라
    * 아래 인사관리에 남는다 — 지급 메뉴에서 직원을 등록하게 두면 안 된다.
    *
-   * ⓶ '경비'가 아직 잎으로 남아 있다. 다음 단계에서 **수시지급 안의 입력 폼 분기**로 흡수한다.
-   *   경비(성격)와 정기/수시(리듬)는 서로 직교해서, 경비를 메뉴로 세우면 정기 경비(임차료·
-   *   서버비)가 갈 곳이 애매해지고 정기/수시 안에 넣으면 경비가 두 군데로 흩어진다.
-   *   답은 "메뉴는 하나, 폼은 둘"이다 — 등록할 때 **받은 서류가 뭔지**만 물으면
-   *   세금계산서면 청구서 폼, 카드전표·영수증이면 가벼운 경비 폼으로 갈린다. */
+   * 옛 '경비 처리' 잎은 거래내역의 '주문 없는 돈' 필터로 흡수했다(3단계). 경비(성격)와
+   * 정기/수시(리듬)가 직교한다는 판단은 그대로다 — 메뉴를 세우지 않고 **손에 든 서류**로 가른다. */
   {
     type: "domain", id: "cash_dom", label: "입출금", icon: Icon.Recv,
     sections: [
-      /* 반복거래 — 매달 오가는 돈을 목록에서 골라 한 번에 만든다(입금·출금 한 화면).
-       * 옛 정기 입금·정기 출금 두 메뉴를 대신한다(2026-09). 잎 id 는 옛 'recurring_invoice' 를
-       * 그대로 쓴다 — 역할에 저장된 권한과 옛 링크·바로가기가 그대로 들어오게.
-       * 'recurring_expense' 는 숨김 잎으로 남아 출금만 걸러 연다. */
+      /* 단순화 3단계(2026-09) — 아홉 잎을 여섯으로. **손에 든 것으로 고른다**:
+       *   세금계산서를 발행·수취했다 → 세금계산서 / 서류 없이 돈만 오갔다 → 거래내역 [입금][출금]
+       *   돈이 안 움직이는 분개 → 거래내역 [대체] / 매달 같은 돈 → 반복거래
+       * 메뉴가 곧 "받은 서류가 뭔가요?"라서 등록 입구의 선택창(DocTypeChooser)은 없앴다.
+       * 설계: docs/02-design/features/cash-menu-restructure.design.md
+       *
+       * ⚠ 흡수된 잎(수시 출금·경비 처리·전표 입력)은 **지우지 않고 숨긴다**(HIDDEN_LEAVES).
+       *   잎 id 는 권한 자원이자 바로가기·주소의 이름이다. 옛 주소로 들어오면 새 자리의
+       *   맞는 탭·필터로 열린다(App.jsx). 권한은 LEAF_ABSORBS 가 이어 준다.
+       *
+       * '거래내역' 라벨 — 등록까지 하는 화면이 됐지만 '입출금'으로 두면 도메인과 같은 이름이
+       *   두 겹으로 선다(사이드바 '입출금 › 입출금'). 등록 버튼은 화면 머리에 크게 둔다. */
       { label: "", items: [
         { id: "recurring_invoice", label: "반복거래", icon: Icon.Clock },
-      ]},
-      { label: "입금", items: [
-        { id: "billing_issued",    label: "수시 입금", icon: Icon.Receipt },
-      ]},
-      { label: "출금", items: [
-        { id: "billing_received",  label: "수시 출금", icon: Icon.Receipt },
-        { id: "misc_pl",           label: "경비 처리", icon: Icon.Wallet },
+        { id: "billing_issued",    label: "세금계산서", icon: Icon.Receipt },
+        { id: "ledger",            label: "거래내역", icon: Icon.Wallet },
         /* 카드 대금 지급 / 내부 계좌 이체 — 둘 다 **벌지도 쓰지도 않은 돈**이라
          * 수입도 지출도 아니다(저장은 양쪽 모두 두 줄 대체 거래, api.transfer 하나를 쓴다).
          * 그런데도 **화면을 가른다.** 회계로도 화면 뼈대로도 다른 일이기 때문이다.
@@ -95,21 +92,12 @@ export const NAV_TREE = [
          *   내부 계좌 이체 : 예금 A ↓ + 예금 B ↑ — 자산 안에서 옮긴다(총액 불변).
          *                    화면 본체가 **폼 하나**다.
          *
-         * ⚠ 수시지급(매입 청구서) 안에 넣지 않는다. 카드사는 세금계산서를 주지 않고,
+         * ⚠ 세금계산서(매입 청구서) 안에 넣지 않는다. 카드사는 세금계산서를 주지 않고,
          *   개별 카드 사용분은 이미 거래로 매입세액에 잡혀 있다(routes/tax.js).
          *   카드 대금을 청구서로 또 등록하면 **매입세액이 두 번 잡힌다.** */
         { id: "card_payment",      label: "카드 대금", icon: Icon.Card },
         { id: "transfer",          label: "내부 이체", icon: Icon.Bank },
         { id: "hr",                label: "급여·임금", icon: Icon.Building },
-      ]},
-      /* 거래내역 — **조회 전용**. 등록은 위 입금·출금에서 하고 여기서는 오간 돈을 본다.
-       * 섹션 라벨을 비워 둔다 — '거래내역 › 거래내역'은 한 겹이 헛돈다.
-       * (라벨이 비면 사이드바가 그 줄을 안 그린다. 브레드크럼은 NAV_PATH_OF 가 이미 접는다.) */
-      { label: "", items: [
-        { id: "ledger", label: "거래내역", icon: Icon.Wallet },
-        /* 전표 입력 — 현금이 안 움직이는 분개(감가상각·대손상각 등)를 차·대변으로 직접 적는다.
-         * 통장이 오가는 건 위 입금·출금에서 넣는다(그래야 잔액에 잡힌다). */
-        { id: "voucher_entry", label: "전표 입력", icon: Icon.Doc },
       ]},
     ],
   },
@@ -424,8 +412,8 @@ export const HIDDEN_LEAVES = [
   /* 미수금·미지급금 — 대금 청구서와 같은 화면이라 트리에서 뺐지만 살아 있다.
      홈 화면·알림·거래내역 KPI가 이 라우트로 들어오고, Ctrl+K 에서 '미수금'으로 찾으면
      청구서 화면이 '미정산' 필터로 열린다. 권한 자원(ar·ap)도 그대로 유지된다. */
-  { id: "ar", label: "미수금 (수시입금)",   icon: Icon.Recv, domain: "입금관리", section: "입금" },
-  { id: "ap", label: "미지급금 (수시지급)", icon: Icon.Pay,  domain: "지급처리", section: "지급" },
+  { id: "ar", label: "미수금 (세금계산서)",   icon: Icon.Recv, domain: "입금관리", section: "입금" },
+  { id: "ap", label: "미지급금 (세금계산서)", icon: Icon.Pay,  domain: "지급처리", section: "지급" },
   /* 계좌 잔액 — 계좌 상세 안으로 들어갔지만 라우트는 살아 있다(계좌 화면을 띄운다).
      '잔액'·'통장잔고'로 찾는 사람이 실제로 있어서 Ctrl+K 에서 걸려야 하고,
      권한 자원(master_accountBalance)은 잔액 조회 게이트가 아직 참조한다
@@ -439,6 +427,11 @@ export const HIDDEN_LEAVES = [
   /* 반복거래(출금만) — 옛 '정기 출금' 메뉴. 반복거래 한 화면으로 합쳤지만 옛 링크·바로가기·권한 자원이
      이 id 로 들어온다. 열면 반복거래 화면이 출금으로 걸러져 열린다. */
   { id: "recurring_expense", label: "반복거래 (출금)", icon: Icon.Clock, domain: "입출금", section: "" },
+  /* 단순화 3단계(2026-09)에서 흡수한 셋 — 옛 링크·바로가기·역할 권한이 이 id 로 들어온다.
+     열면 새 자리의 맞는 탭·필터로 연다(App.jsx). */
+  { id: "billing_received", label: "세금계산서 (수취)", icon: Icon.Receipt, domain: "입출금", section: "" },
+  { id: "misc_pl",          label: "경비 (거래내역)",   icon: Icon.Wallet,  domain: "입출금", section: "" },
+  { id: "voucher_entry",    label: "전표 입력 (대체)",  icon: Icon.Doc,     domain: "입출금", section: "" },
 
   /* 보고서 카탈로그로 흡수한 여섯 — 화면·라우트·권한 자원은 그대로다.
    * 사이드바에서만 뺐고, 경영관리 › 보고서 안에서 분류 탭으로 열린다.
@@ -450,6 +443,24 @@ export const HIDDEN_LEAVES = [
   { id: "purchase_status", label: "매입·매출 현황", icon: Icon.Chart, domain: "경영관리", section: "보고서" },
   { id: "fund_status",     label: "자금 현황",      icon: Icon.Chart, domain: "경영관리", section: "보고서" },
 ]
+
+/* 한 잎이 흡수한 옛 잎들 — **들어가는 권한(access)** 만 이어 준다(lib/perms.js can).
+ * 역할에 저장된 권한 이름은 옛 잎 id 그대로라, 이게 없으면 '수시 출금' 권한만 받은 계정이
+ * 세금계산서 메뉴를 통째로 잃는다. 들어간 뒤 무엇을 보고 쓰는지는 화면이 탭마다,
+ * 서버가 줄마다 따진다(server/platform/sidePerms.js). */
+export const LEAF_ABSORBS = {
+  billing_issued:    ['billing_received', 'ar', 'ap'],
+  ledger:            ['misc_pl', 'misc_income', 'voucher_entry'],
+  recurring_invoice: ['recurring_expense'],
+}
+/* 묶음의 **어느 잎으로 들어와도** 같은 묶음 권한이면 연다(옛 주소·바로가기).
+   한 방향만 이으면 '미지급금(ap)만 가진 역할'이 수취 탭을 눌러 #billing_received 로 가는 순간
+   권한 없음 화면이 뜬다 — 탭은 보여 놓고 막는 셈이다. 화면은 볼 수 있는 쪽으로 연다(App.jsx). */
+export const ABSORB_GROUP_OF = {}
+for (const [leaf, absorbed] of Object.entries(LEAF_ABSORBS)) {
+  const group = [leaf, ...absorbed]
+  for (const id of group) ABSORB_GROUP_OF[id] = group
+}
 
 // 잎 id → 소속 도메인 id (활성 도메인 자동 펼침용)
 export const DOMAIN_OF = {}
@@ -510,7 +521,7 @@ export const LEAF_TAGS = {
   contract_sales:   '매출주문 매출 수주 납품주문 오더 주문 발주처 계약 수주계약 매출계약',
   /* 미수금 메뉴를 청구서로 합치면서 그 검색어를 여기로 옮겼다 —
      경리는 '미수금·받을돈·연체'로 찾지 '대금 청구서'로 찾지 않는다. */
-  billing_issued:   '세금계산서 계산서 청구 발행 매출 인보이스 수금 미수금 받을돈 채권 외상매출금 미수 연체 독촉 회수 미정산 대금청구서 수시입금 수시청구',
+  billing_issued:   '세금계산서 계산서 청구 발행 수취 매출 매입 인보이스 수금 미수금 받을돈 채권 외상매출금 미수 연체 독촉 회수 미지급금 줄돈 미정산 대금청구서 수시입금 수시청구 수시출금 수시지급',
   /* 라벨이 '정기청구' → '정기입금' → '반복거래'가 됐다. 옛 이름으로 못 찾으면 이름이 바뀐 게 아니라
      기능이 사라진 걸로 읽힌다(수주·미수금과 같은 이유). */
   recurring_invoice:'반복 반복거래 정기 매달 월정액 구독 정기청구 정기입금 정기수금 정기지출 정기출금 고정비 임차료 월세',
@@ -536,7 +547,8 @@ export const LEAF_TAGS = {
   purchase_status:  '매입현황 주별 품목별 자재 구매현황 매출현황',
   fund_status:      '자금현황 자금수지 자금계획 월별 분기 주별 예정 잔고 현금흐름',
   // 장부
-  ledger:           '거래 입출금 통장내역 원장 전표 입금 출금',
+  /* 3단계(2026-09)부터 등록까지 하는 곳이다 — '출금 등록'·'경비'·'전표 입력'으로 찾는 사람이 여기로 와야 한다 */
+  ledger:           '거래 입출금 통장내역 원장 전표 입금 출금 입금등록 출금등록 지출등록 입금전표 출금전표 대체전표 경비 영수증 카드전표 전표입력 분개',
   contract:         '주문조회 주문목록 전체주문 수주발주 통합',
   // 세무
   tax_vat:          '부가가치세 신고 매출세액 매입세액 환급 홈택스',
@@ -605,13 +617,11 @@ export const PORTAL = [
     id: 'cash_dom', label: '입출금', icon: Icon.Recv,
     categories: [
       { id: 'repeat_all', label: '반복거래', icon: Icon.Clock, desc: '매달 오가는 돈을 골라 만듭니다', route: 'recurring_invoice' },
-      { id: 'cash_in', label: '입금', icon: Icon.Recv, desc: '청구와 수금', groups: [
-        { label: '', items: ['billing_issued'] },
+      { id: 'tax_invoice', label: '세금계산서', icon: Icon.Receipt, desc: '발행·수취와 입금·출금 처리', route: 'billing_issued' },
+      { id: 'ledger_all', label: '거래내역', icon: Icon.Wallet, desc: '오간 돈을 보고, 입금·출금·대체를 적습니다', route: 'ledger' },
+      { id: 'cash_out', label: '카드·이체·급여', icon: Icon.Pay, desc: '카드 대금·내부 이체·급여', groups: [
+        { label: '', items: ['card_payment', 'transfer', 'hr'] },
       ]},
-      { id: 'cash_out', label: '출금', icon: Icon.Pay, desc: '지급, 경비·카드·이체·급여', groups: [
-        { label: '', items: ['billing_received', 'misc_pl', 'card_payment', 'transfer', 'hr'] },
-      ]},
-      { id: 'ledger_all', label: '거래내역', icon: Icon.Wallet, desc: '오간 돈을 모아 봅니다 (조회 전용)', route: 'ledger' },
     ],
   },
   {
@@ -740,7 +750,9 @@ export function leafIdOf(route) {
      그 라우트로 들어와도 사이드바에서 '대금 청구서'가 켜져야 지금 어디인지 알 수 있다 —
      안 그러면 아무것도 활성화되지 않아 길을 잃는다. */
   if (route === "ar" || route === "ledger_ar") return "billing_issued"
-  if (route === "ap" || route === "ledger_ap") return "billing_received"
+  if (route === "ap" || route === "ledger_ap" || route === "billing_received") return "billing_issued"
+  if (route === "misc_pl" || route === "misc_income" || route === "voucher_entry") return "ledger"
+  if (route === "recurring_expense") return "recurring_invoice"
   if (route === "billing") return "billing_issued"
   // 환경설정 하위(settings_<tab>)는 사이드바 하단 '환경설정'을 활성으로
   if (route === "settings" || route.startsWith("settings_")) return "settings"

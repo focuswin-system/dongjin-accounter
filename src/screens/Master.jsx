@@ -1892,7 +1892,7 @@ const CompanyPanel = ({ embedded = false }) => {
                 그러면 다른 통장에서 나간 돈이 주거래로 기록된다(현금/카드에서 실제로 겪었다).
                 순서를 바꾸는 것은 틀린 기록을 만들지 않지만, 미리 고르는 것은 만든다. */}
           {[
-            ['main_in_account_id',  '주입금 계좌', '청구서 입금·수시입금', a => a.kind !== 'card'],
+            ['main_in_account_id',  '주입금 계좌', '세금계산서 입금·거래내역 입금', a => a.kind !== 'card'],
             ['main_out_account_id', '주지출 계좌', '지급·경비·이체',       a => a.kind !== 'card'],
             ['main_card_id',        '주카드',      '카드로 쓰는 일',       a => a.kind === 'card'],
           ].map(([key, label, hint, pick]) => (

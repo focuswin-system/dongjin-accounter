@@ -543,7 +543,56 @@ async function contractRepeatProgress(db, contractId, isPurchase, termStart, tod
   return out
 }
 
+/* ── 반복 제안 ─────────────────────────────────────────────────────
+ * 거래를 적은 뒤 "이거 매달 오가는 돈 아닌가요?"를 묻는다(3단계, 사용자 확정 2026-09-18).
+ *
+ * 판정 — **같은 거래처 · 같은 방향(· 출금이면 같은 비목)** 이 이번 달 포함 최근 3개월 중
+ * 2개월 이상 있고, 그 거래처·방향의 반복거래가 아직 없을 때.
+ *   · 금액은 안 본다 — 변동 공과금(전기·가스)도 반복이다.
+ *   · 날짜(일)는 안 본다 — 25일·27일은 같은 반복이다.
+ *   · 반복거래는 꺼진 것도 '있음'으로 친다 — 사람이 일부러 끈 것을 다시 권하면 안 된다.
+ * 제안은 권유다. '안 할래요'는 화면이 브라우저에 기억한다(규칙이 아니라 취향이라서). */
+async function repeatSuggestion(db, { kind, vendorId, category, today }) {
+  const direction = kind === 'income' ? 'in' : kind === 'expense' ? 'out' : null
+  if (!direction || !vendorId) return { suggest: false }
+  const [[has]] = await db.execute(
+    'SELECT COUNT(*) AS n FROM repeat_templates WHERE vendor_id = ? AND direction = ?', [vendorId, direction])
+  if (Number(has.n) > 0) return { suggest: false }
+
+  const thisYm = String(today).slice(0, 7)
+  const y = Number(thisYm.slice(0, 4)), m = Number(thisYm.slice(5, 7))
+  const back2 = m > 2 ? `${y}-${pad(m - 2)}` : `${y - 1}-${pad(m + 10)}`
+  const catSql = direction === 'out' && category ? ' AND category = ?' : ''
+  const [rows] = await db.execute(
+    `SELECT id, LEFT(date, 7) AS ym, LEFT(date, 10) AS d, amount, category, account_id, memo, tax_type
+       FROM transactions
+      WHERE vendor_id = ? AND kind = ? AND date BETWEEN ? AND ?${catSql}
+      ORDER BY date DESC`,
+    [vendorId, kind, `${back2}-01`, monthRange(thisYm).to, ...(catSql ? [category] : [])])
+  const months = new Set(rows.map(r => r.ym))
+  if (months.size < 2) return { suggest: false }
+
+  // 반복거래 등록 서랍을 채울 값 — 가장 최근 거래를 본뜬다
+  const last = rows[0]
+  const taxType = String(last.tax_type || '')
+  return {
+    suggest: true, months: months.size,
+    prefill: {
+      direction, vendor_id: vendorId,
+      // 서류 없이 나간 돈을 본뜬 것이라 바로 출금으로. 입금은 늘 청구서(설계 — 미수금을 추적한다)
+      creates: direction === 'out' ? 'txn' : 'invoice',
+      item: last.category || last.memo || '', category: direction === 'out' ? (last.category || null) : null,
+      amount: Number(last.amount) || 0,
+      // 거래 금액은 합계다 — 과세면 '부가세 포함'으로 받는다
+      vat_mode: taxType === '면세' ? 'none' : taxType === '영세' ? 'zero' : 'inclusive',
+      period: 'monthly', day_of_month: Number(String(last.d).slice(8, 10)) || 1,
+      account_id: last.account_id || null,
+    },
+  }
+}
+
 module.exports = {
+  repeatSuggestion,
   VAT_MODES, occursInMonth, dateInMonth, contractAllows, amountsOf, itemText, normalizeTemplate,
   listTemplates, monthItems, previewItems, createOne, madeInMonth,
   upcomingOccurrences, dueTotalBetween, monthlyEquivalent, TEMPLATE_SELECT, monthRange,

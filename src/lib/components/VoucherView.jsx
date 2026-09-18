@@ -19,7 +19,9 @@ import { api } from '../api'
  * 전표 종류(입금·출금·대체)는 서버가 정한다. 3전표제에서 입금·출금전표는 현금(시재) 전용이라
  * 통장 거래는 전부 대체전표다 — 그 판정을 화면에서 다시 하면 두 벌이 되어 어긋난다.
  */
-export const VoucherView = ({ open, onClose, source, id, voucher }) => {
+/* extra — 머리 오른쪽에 더 세울 버튼(예: 거래내역에서 연 대체전표의 '삭제').
+   전표 보기는 읽기 전용이 기본이고, 지우기를 허락하는 쪽(부른 화면)이 버튼을 넣는다. */
+export const VoucherView = ({ open, onClose, source, id, voucher, extra = null }) => {
   const [v, setV] = useState(voucher || null)
   const [loading, setLoading] = useState(false)
 
@@ -47,9 +49,12 @@ export const VoucherView = ({ open, onClose, source, id, voucher }) => {
         sub={v ? `${v.type} · ${v.date || ''}` : ''}
         onClose={onClose}
         right={v && (
-          <button className="btn no-print" onClick={() => window.print()}>
-            <Icon.Print size={14}/> 인쇄
-          </button>
+          <div className="row gap-6 no-print">
+            {extra}
+            <button className="btn" onClick={() => window.print()}>
+              <Icon.Print size={14}/> 인쇄
+            </button>
+          </div>
         )}/>
 
       <div className="drawer-body">
@@ -136,8 +141,11 @@ export const VoucherView = ({ open, onClose, source, id, voucher }) => {
             </div>
 
             <div className="text-xs text-muted2 no-print" style={{ marginTop: 12, lineHeight: 1.7 }}>
+              {/* 대체전표(journal)는 돈이 안 움직인 분개다 — '돈이 오간 시점'이라고 적으면 거짓말이 된다 */}
               {v.source === 'invoice'
                 ? '· 청구서를 발행한 시점의 전표예요. 대금이 실제로 오갈 때는 별도의 전표가 따로 생깁니다.'
+                : v.source === 'journal'
+                ? '· 돈이 움직이지 않은 분개예요. 통장 잔액에는 영향이 없습니다.'
                 : '· 돈이 실제로 오간 시점의 전표예요. 청구서를 거친 건이면 발행 시점 전표가 따로 있습니다.'}
               <br/>
               · 통장 거래는 <b>대체전표</b>예요. 입금·출금전표는 현금(시재)이 오갈 때만 씁니다.

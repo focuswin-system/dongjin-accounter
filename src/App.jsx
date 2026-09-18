@@ -21,7 +21,6 @@ import { DocsScreen, EvidenceScreen, EvidenceAttachDrawer, ExcelScreen, ReportsS
 import { SettlementScreen } from './screens/Settlement'
 import { PaymentRunScreen } from './screens/PaymentRun'
 import { TransferScreen } from './screens/Transfer'
-import { VoucherEntryScreen } from './screens/VoucherEntry'
 import { CardPaymentScreen } from './screens/CardPayment'
 import { LendingScreen } from './screens/Lending'
 import { NotesScreen } from './screens/Notes'
@@ -38,7 +37,6 @@ import { SavingsScreen } from './screens/Savings'
 import { CashReportScreen, DailyTrialScreen } from './screens/CashReport'
 import { BillingScreen } from './screens/Billing'
 import { TaxVatScreen, OtherTaxScreen } from './screens/Tax'
-import { MiscPLScreen } from './screens/MiscPL'
 import { MgmtDashScreen } from './screens/Mgmt'
 import { MgmtAskScreen } from './screens/MgmtAsk'
 import { PortalScreen } from './screens/Portal'
@@ -73,8 +71,10 @@ const CRUMB_MAP = {
      2026-08 재편으로 acct_* 카테고리가 사라지고 아래 셋이 새로 생겼다.
      여기 빠지면 그 타일에서 크럼이 "홈" 하나로 떨어진다(App.jsx 아래 fallback). */
   tax_all:         ["세무관리", "신고"],
-  cash_in:         ["입출금", "입금"],
-  cash_out:        ["입출금", "출금"],
+  /* cash_in 은 3단계(2026-09)에서 없어졌다 — 입금 타일이 세금계산서·거래내역으로 갈렸다.
+     옛 주소로 들어와도 길을 잃지 않게 크럼만 남긴다. */
+  cash_in:         ["입출금"],
+  cash_out:        ["입출금", "카드·이체·급여"],
   /* office_report 는 2026-08-27 재편으로 mgmt_report 가 됐다. 옛 주소로 들어와도
      길을 잃지 않게 크럼을 남겨 둔다(nav.js ROUTE_ALIAS 가 화면은 새 것으로 보낸다). */
   office_report:   ["경영관리", "보고서"],
@@ -170,10 +170,10 @@ const HELP_MAP = {
   ledger: {
     title: "거래내역",
     items: [
-      "상단 탭으로 입금·지출·미수금·미지급금을 구분해 조회하세요",
-      "필터 버튼으로 기간·비목을 조합해 원하는 거래만 볼 수 있어요",
-      "행 클릭 시 상세 정보·결의서·증빙을 확인하고 바로 처리할 수 있어요",
-      "증빙 ⚠️ 표시는 세금계산서가 첨부되지 않은 거래예요",
+      "세금계산서 없이 오간 돈은 오른쪽 위 입금·출금·대체로 적어요",
+      "칩으로 입금·출금·대체·주문 없는 돈을 골라 볼 수 있어요",
+      "행을 누르면 상세가 열려요. 대체전표는 전표가 열려요",
+      "증빙 ⚠️ 표시는 세금계산서·영수증이 안 붙은 거래예요",
     ]
   },
   contract: {
@@ -388,6 +388,9 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
   /* 문서 화면(#doc/<id> 등)에서 **어느 문서를 열지.** 다른 화면에서 문서를 만들고 넘어올 때
      (청구서 → 지급결의서, 품의 → 그 결의서) 목록 첫 줄이 아니라 그 문서가 열려야 한다. */
   const [docFocusId, setDocFocusId] = useState(null);
+  /* 반복 제안에서 [반복거래로 등록]을 누르고 온 값 — 반복거래 화면이 등록 서랍을 그 값으로 연다.
+     쓰고 나면 비운다(안 비우면 다시 들어올 때마다 서랍이 열린다). */
+  const [repeatPrefill, setRepeatPrefill] = useState(null);
   const [contractName, setContractName] = useState("");
   const [txnForm, setTxnForm] = useState(null); // null | { kind, contract? }
   const [txnVersion, setTxnVersion] = useState(0);
@@ -582,6 +585,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
        예전엔 라우트 id 만 담아서, 새로고침하면 contractId 가 초기값으로 돌아가
        없는 주문을 부르고 화면이 '불러오는 중…'에서 멈췄다(북마크·뒤로가기도 같았다). */
     if (id === 'report') setReportKey(opts.reportKey || null);
+    if (id === 'recurring_invoice' || id === 'recurring_expense') setRepeatPrefill(opts.repeatPrefill || null);
     if (DOC_ROUTES.includes(id)) setDocFocusId(opts.docId || null);
     window.location.hash =
       (id === 'contract_detail' && (opts.contractId || contractId)) ? `${id}/${opts.contractId || contractId}`
@@ -591,6 +595,18 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
     setSidebarOpen(false);
     // 스크롤 리셋은 route 변경 effect에서(데스크톱은 .content, 모바일은 window) 처리한다.
   };
+
+  /* 거래내역 — 서류 없이 오간 돈의 입구(3단계). 옛 '경비 처리'·'전표 입력' 주소도 여기로 온다.
+     [대체]는 대체전표 권한이 있을 때만. 입금·출금 폼은 늘 연다 — 쓰기 권한은 서버가 따진다. */
+  const renderLedger = (filter, { openJournalOnMount = false } = {}) => (
+    <LedgerScreen key={`ledger-${filter}`} initialFilter={filter} refreshTrigger={txnVersion} focusTxnId={focusTxnId}
+      openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}
+      openInvoice={(kind, invoiceId) => go(kind === "income" ? "ar" : "ap", { invoiceId })}
+      openIncome={() => setTxnForm({ kind: "income" })}
+      openExpense={() => setTxnForm({ kind: "expense" })}
+      canJournal={canDo("voucher_entry", "create")}
+      openJournalOnMount={openJournalOnMount}/>
+  );
 
   const Screen = useMemo(() => {
     // 주소창·북마크·옛 링크로 권한 없는 화면에 들어오는 경우. 메뉴에서 숨겨도 이 길은 열려 있다.
@@ -615,9 +631,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
       /* 거래내역의 '예정' 행(미수금·미지급금)에서 해당 청구서로 보낸다.
          해시에 ?invoiceId= 를 붙이면 안 된다 — 이 앱의 해시 라우터는 질의문자열을 모르고,
          알려진 라우트가 아니라며 아무 데도 안 간다. 청구서 지정은 go(…, {invoiceId}) 소관. */
-      return <LedgerScreen initialFilter={filter} refreshTrigger={txnVersion} focusTxnId={focusTxnId}
-        openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}
-        openInvoice={(kind, invoiceId) => go(kind === "income" ? "ar" : "ap", { invoiceId })}/>;
+      return renderLedger(filter);
     }
     if (PORTAL_CAT_BY_ID[route]) {
       // 포털 타일도 권한대로 걸러 그린다. 남는 게 없으면 들어갈 데가 없다는 뜻.
@@ -638,8 +652,6 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
       case "billing":         return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} goRoute={go}/>;
       /* focusInvoiceId 를 넘긴다 — Ctrl+K 에서 청구서를 골랐는데 목록만 열리면
          찾은 것을 다시 찾아야 한다(BillingScreen 은 이미 이 값을 받아 그 건을 연다). */
-      /* 등록 입구가 '받은 서류'를 먼저 묻고, 계산서가 아니면 거래 드로어로 넘긴다
-         (Billing.jsx DocTypeChooser). 그래서 두 화면에 열기 함수를 내려준다. */
       /* ⚠ key 로 **다시 마운트**시킨다. 같은 컴포넌트를 두 라우트가 쓰므로 key 가 없으면
          React 가 인스턴스를 재사용하고, 화면 안의 상태가 그대로 건너간다:
            · 수시입금에서 '입금내역'을 보다 수시지급으로 가면 '지급내역'이 골라진 채로 뜬다
@@ -647,11 +659,21 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
              그 쪽 칩 목록에는 없는 값이 남아 **아무 칩도 안 눌린 빈 표**가 된다
              ("왜 아무것도 없지" — 필터가 걸린 흔적조차 화면에 없다).
          기간·거래처 필터도 같은 경로로 새어 나간다. 두 화면은 서로 다른 장부다. */
-      case "billing_issued":  return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} key="billing_issued" openImportSignal={taxImportSignal} initialTab="issued" focusInvoiceId={focusInvoiceId} goRoute={go}
-                                       openIncome={() => setTxnForm({ kind: "income" })}/>;
-      case "billing_received":return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} key="billing_received" openImportSignal={taxImportSignal} initialTab="received" focusInvoiceId={focusInvoiceId}
-                                       goRoute={go}
-                                       openExpense={() => setTxnForm({ kind: "expense", compact: true })}/>;
+      /* 세금계산서 — 발행·수취를 한 메뉴로(3단계). 볼 수 있는 쪽만 탭이 선다.
+         한쪽 권한만 있으면 그쪽으로 연다(수취 권한만 가진 사람이 '세금계산서'를 누른 경우).
+         key 는 **방향마다** 다르게 — 두 장부의 상태(필터·보기 탭)가 서로 새지 않게 다시 그린다. */
+      case "billing_issued":
+      case "billing_received": {
+        const sides = [
+          (canDo("billing_issued", "view") || canDo("ar", "view")) && "issued",
+          (canDo("billing_received", "view") || canDo("ap", "view")) && "received",
+        ].filter(Boolean);
+        let side = route === "billing_received" ? "received" : "issued";
+        if (!sides.includes(side) && sides.length) side = sides[0];
+        return <BillingScreen key={`billing_${side}`} initialTab={side} sideTabs={sides}
+                 openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openImportSignal={taxImportSignal}
+                 focusInvoiceId={focusInvoiceId} goRoute={go}/>;
+      }
       case "contract":        return <ContractListScreen kind="all" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
       case "contract_sales":  return <ContractListScreen kind="sales" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
       case "contract_purchase": return <ContractListScreen kind="purchase" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
@@ -678,18 +700,18 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
       case "card_payment":   return <CardPaymentScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
       case "voucher_book":   return <VoucherBookScreen/>;
       case "transfer":       return <TransferScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
-      case "voucher_entry":  return <VoucherEntryScreen/>;
+      // 옛 '전표 입력' — 거래내역의 [대체] 서랍으로 옮겼다(3단계). 옛 주소로 오면 서랍을 열어 준다
+      case "voucher_entry":  return renderLedger("journal", { openJournalOnMount: true });
       case "finance_lending": return <LendingScreen/>;
       case "finance_note":    return <NotesScreen/>;
+      // 옛 '경비 처리'·'잡손익' — 거래내역의 '주문 없는 돈' 필터로 흡수(3단계)
       case "misc_pl":
-      case "misc_income":     return <MiscPLScreen initialTab={route === "misc_income" ? "income" : "expense"}
-                                       refreshTrigger={txnVersion}
-                                       openExpense={() => setTxnForm({ kind: "expense" })}
-                                       openIncome={() => setTxnForm({ kind: "income" })}
-                                       openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
+      case "misc_income":     return renderLedger("misc");
       // 반복거래 — 입금·출금 한 화면. 옛 '정기 출금' 주소로 들어오면 출금으로 걸러 연다.
-      case "recurring_expense": return <RepeatScreen key="repeat-out" goRoute={go} initialDirection="out"/>;
-      case "recurring_invoice": return <RepeatScreen key="repeat-all" goRoute={go}/>;
+      case "recurring_expense": return <RepeatScreen key="repeat-out" goRoute={go} initialDirection="out"
+                                         prefill={repeatPrefill} onPrefillUsed={() => setRepeatPrefill(null)}/>;
+      case "recurring_invoice": return <RepeatScreen key="repeat-all" goRoute={go}
+                                         prefill={repeatPrefill} onPrefillUsed={() => setRepeatPrefill(null)}/>;
       case "mgmt_dash":       return <MgmtDashScreen/>;
       case "mgmt_ask":        return <MgmtAskScreen/>;
       case "excel_modal":     return <ExcelScreen goRoute={go}/>;
@@ -718,9 +740,10 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
     /* ⚠ docKeys·navHidden 도 의존성이다. 이 memo 안에서 홈·포털에 넘기는 값인데
        빼 두면 **늦게 온 문서 카탈로그가 반영되지 않는다** — 사이드바(위 navTree memo)는
        따라오고 홈 타일만 안 따라와서, 같은 화면이 두 가지 말을 하게 된다. */
-  }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, taxImportSignal, reportKey, perms, docKeys, navHidden, manualChapter, docFocusId]);
+  }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, taxImportSignal, reportKey, perms, docKeys, navHidden, manualChapter, docFocusId, repeatPrefill]);
 
-  const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger"
+  // 옛 경비 처리·잡손익·전표 입력은 거래내역으로 흡수됐다(3단계) — 도움말도 거래내역 것을 보인다
+  const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal","misc_pl","misc_income","voucher_entry"].includes(route) ? "ledger"
                 : route.startsWith("billing") ? "billing"
                 : (route === "contract_sales" || route === "contract_purchase") ? "contract"
                 : (route === "settings" || route === "hr_base" || route === "hr_labor_contract" || route === "hr_outsourcing" || route.startsWith("master") || route.startsWith("hrbase") || route.startsWith("settings_")) ? "master"
@@ -1037,7 +1060,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
         </div>
       </main>
 
-      <TransactionForm open={txnForm !== null} kind={txnForm?.kind || "expense"} initialContract={txnForm?.contract} initialCostContract={txnForm?.costContract || null} initialVendor={txnForm?.vendor || null} initialCategory={txnForm?.category || null} initialMemo={txnForm?.memo || null} compact={!!txnForm?.compact} editTxn={txnForm?.txn || null} onClose={() => setTxnForm(null)} onSave={() => setTxnVersion(v => v + 1)}/>
+      <TransactionForm open={txnForm !== null} kind={txnForm?.kind || "expense"} initialContract={txnForm?.contract} initialCostContract={txnForm?.costContract || null} initialVendor={txnForm?.vendor || null} initialCategory={txnForm?.category || null} initialMemo={txnForm?.memo || null} compact={!!txnForm?.compact} editTxn={txnForm?.txn || null} onClose={() => setTxnForm(null)} onSave={() => setTxnVersion(v => v + 1)} goRoute={go}/>
       <EvidenceAttachDrawer item={evidenceAttach} onClose={() => setEvidenceAttach(null)}/>
       <ProfileDrawer open={profileOpen} onClose={() => setProfileOpen(false)} user={user}
         onSaved={(p) => {
@@ -1080,10 +1103,10 @@ const FAQ_CATEGORIES = ["거래 등록", "미수금·미지급금", "주문 관�
 
 const FAQ_DATA = [
   // 거래 등록
-  { id:"f01", cat:"거래 등록",       routes:["home","ledger"],              q:"입금을 어떻게 등록하나요?",                  a:"입출금 → 입금 → 수시 입금에서 '입금 등록'을 누르면 받으신 서류(세금계산서인지 아닌지)를 먼저 묻고, 그에 맞는 폼으로 안내해요. 매달 같은 곳에서 들어오는 돈은 반복거래에 등록해 두고, 달마다 골라 만들면 돼요.", action:{ label:"수시입금으로", route:"billing_issued" } },
-  { id:"f02", cat:"거래 등록",       routes:["home","ledger"],              q:"지출을 어떻게 등록하나요?",                  a:"입출금 → 출금 → 수시 출금에서 '지급 등록'을 누르세요. 받으신 서류(세금계산서 / 카드전표·영수증 / 없음)를 먼저 고르면 그에 맞는 폼이 열려요. 매달 나가는 고정비는 반복거래에 등록해 두면 됩니다.", action:{ label:"수시지급으로", route:"billing_received" } },
+  { id:"f01", cat:"거래 등록",       routes:["home","ledger"],              q:"입금을 어떻게 등록하나요?",                  a:"세금계산서를 발행한 건이면 입출금 › 세금계산서에서, 계산서 없이 들어온 돈이면 입출금 › 거래내역의 [입금]으로 적어요. 매달 같은 곳에서 들어오는 돈은 반복거래에 등록해 두면 달마다 골라 만들 수 있어요.", action:{ label:"거래내역으로", route:"ledger" } },
+  { id:"f02", cat:"거래 등록",       routes:["home","ledger"],              q:"지출을 어떻게 등록하나요?",                  a:"세금계산서를 받았으면 입출금 › 세금계산서의 수취에서, 카드전표·영수증만 있거나 통장에서 나가기만 했으면 입출금 › 거래내역의 [출금]으로 적어요. 매달 나가는 고정비는 반복거래에 등록해 두면 됩니다.", action:{ label:"거래내역으로", route:"ledger" } },
   { id:"f03", cat:"거래 등록",       routes:["ledger"],                     q:"여러 건을 한꺼번에 올리고 싶어요",            a:"엑셀 업로드 기능을 이용하면 여러 거래를 한 번에 등록할 수 있어요. 거래내역 오른쪽 위 '엑셀 업로드'에서 서식을 내려받아 작성한 뒤 올려 주세요.", action:{ label:"엑셀 업로드로", route:"excel_modal" } },
-  { id:"f04", cat:"거래 등록",       routes:["ledger"],                     q:"거래 내용을 수정하거나 삭제하고 싶어요",      a:"거래내역에서 그 줄을 누르면 상세가 열려요. 아래쪽 '편집'으로 고치고, '삭제'로 지울 수 있어요. 거래내역은 보는 곳이라 평소에는 여기서 고칠 일이 많지 않아요 — 잘못 들어간 게 보일 때만 쓰면 됩니다.", action:{ label:"거래내역으로", route:"ledger" } },
+  { id:"f04", cat:"거래 등록",       routes:["ledger"],                     q:"거래 내용을 수정하거나 삭제하고 싶어요",      a:"거래내역에서 그 줄을 누르면 상세가 열려요. 아래쪽 '편집'으로 고치고, '삭제'로 지울 수 있어요. 대체전표는 줄을 누르면 전표가 열리고 거기서 지울 수 있어요.", action:{ label:"거래내역으로", route:"ledger" } },
   { id:"f05", cat:"거래 등록",       routes:["ledger","home"],              q:"등록하려는 거래처가 목록에 없어요",           a:"거래처는 설정 화면에서 먼저 추가해야 해요. 설정 → 거래처 탭에서 새 거래처를 등록한 뒤 다시 시도해 보세요.", action:{ label:"설정으로", route:"master" } },
   { id:"f06", cat:"거래 등록",       routes:["ledger","home","contract"],   q:"등록하려는 주문이 목록에 없어요",             a:"주문은 수주·발주 화면에서 '신규 생성' 버튼으로 먼저 만들어야 해요. 주문이 없는 거래라면 등록 폼에서 주문 칸을 비워두면 됩니다(선택 입력이에요).", action:{ label:"수주로", route:"contract_sales" } },
   // 미수금·미지급금
@@ -1126,7 +1149,7 @@ function FaqPanel({ open, onClose, route, go }) {
     if (open) { setSearch(""); setSelId(null); setCat(null); setTimeout(() => inputRef.current?.focus(), 80); }
   }, [open]);
 
-  const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal"].includes(route) ? "ledger" : route;
+  const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal","misc_pl","misc_income","voucher_entry"].includes(route) ? "ledger" : route;
   const sel = selId ? FAQ_DATA.find(f => f.id === selId) : null;
   const currentFaqs = FAQ_DATA.filter(f => f.routes.includes(helpKey));
   const filtered = search
