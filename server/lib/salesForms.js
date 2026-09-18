@@ -1,4 +1,5 @@
 const { monthRange } = require('./period')
+const { notCarryover } = require('./carryover')
 const { VAT_RATE } = require('./vat')
 
 /**
@@ -31,7 +32,7 @@ const vatOfLine = (r) => (r.vat === null || r.vat === undefined
 /** 품목 줄을 기간으로 읽는다. 한 곳에서만 읽어야 다섯 양식의 숫자가 같다. */
 async function linesOf(db, { kind, from, to, vendorId = null }) {
   const args = [kind, from, to]
-  let where = 'i.kind = ? AND i.issued_at BETWEEN ? AND ?'
+  let where = `i.kind = ? AND i.issued_at BETWEEN ? AND ? AND ${notCarryover('i.')}`   // 이월 잔액은 기간 매출이 아니다(lib/carryover.js)
   if (vendorId) { where += ' AND i.vendor_id = ?'; args.push(vendorId) }
   const [rows] = await db.execute(
     `SELECT i.id AS invoice_id, i.issued_at, i.invoice_no, i.tax_type, i.memo AS invoice_memo,
@@ -77,7 +78,7 @@ async function headsOf(db, { kind, from, to }) {
             i.supply_amount, i.vat_amount, i.total_amount, i.memo
        FROM invoices i
        LEFT JOIN vendors v ON v.id = i.vendor_id
-      WHERE i.kind = ? AND i.issued_at BETWEEN ? AND ?
+      WHERE i.kind = ? AND i.issued_at BETWEEN ? AND ? AND ${notCarryover('i.')}
       ORDER BY i.issued_at`, [kind, from, to])
   return rows.map(r => ({
     id: r.id, date: r.issued_at,

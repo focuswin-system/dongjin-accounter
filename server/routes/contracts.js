@@ -8,7 +8,7 @@ const { ledgerError, amountError } = require('../lib/ledger')
 const { settleAcctCode } = require('../lib/acctCode')
 const { removeUploadedFile } = require('../lib/uploads')
 const { vatOf, vatRateOf, taxTypeOfMode } = require('../lib/vat')
-const { closedPeriodError } = require('../lib/closing')
+const { closedPeriodError, closedDocError } = require('../lib/closing')
 const { kstDate } = require('../db')
 const { syncContractTemplates, stopContractTemplates, contractRepeatProgress } = require('../lib/repeat')
 
@@ -543,7 +543,7 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
     /* 마감된 달로는 청구서를 발행할 수 없다. 예전엔 'paid' 일 때(거래를 만들 때)만 검사해서,
      * 마감·신고를 끝낸 달로 청구서만 새로 꽂을 수 있었다 → 그 분기 부가세 집계가 신고 후에 바뀐다.
      * 수동 등록(POST /invoices)은 처음부터 issued_at 으로 막고 있었다. */
-    { const ce = await closedPeriodError(conn, today); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
+    { const ce = await closedDocError(conn, today); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
     // 금액 0(마일스톤 금액을 안 채운 채 발행)이면 '입금 예정 0원' 청구서가 남아
     // 홈 '할 일'과 미수금 목록을 채운다 — 실제로 그런 청구서가 생겨 있었다.
     { const ae = amountError(total); if (ae) { await rollbackQuietly(conn); return res.status(400).json({ error: ae }) } }
@@ -671,7 +671,7 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
     /* 마감된 달로는 청구서를 발행할 수 없다. 예전엔 'paid' 일 때(거래를 만들 때)만 검사해서,
      * 마감·신고를 끝낸 달로 청구서만 새로 꽂을 수 있었다 → 그 분기 부가세 집계가 신고 후에 바뀐다.
      * 수동 등록(POST /invoices)은 처음부터 issued_at 으로 막고 있었다. */
-    { const ce = await closedPeriodError(conn, issuedAt); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
+    { const ce = await closedDocError(conn, issuedAt); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
     // 수량을 0으로 둔 채 기성 발행하면 0원 청구서가 된다 — 마일스톤 발행과 같은 이유로 막는다.
     { const ae = amountError(total); if (ae) { await rollbackQuietly(conn); return res.status(400).json({ error: ae }) } }
     /* 기성 발행 — 닫을 회차가 없다(기성은 품목 누적으로 관리한다). 그래도 같은 함수로

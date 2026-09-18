@@ -19,6 +19,7 @@
  */
 
 const { SETTLED_INCOME, SETTLED_EXPENSE } = require('./ledger')
+const { notCarryover } = require('./carryover')
 const { monthRange } = require('./period')
 const { pnlOnly, pnlParams } = require('./pnl')
 
@@ -72,7 +73,7 @@ async function taxofficePack(db, month, closingDay = 0) {
       SELECT i.issued_at, i.invoice_no, v.name AS vendor_name,
              i.supply_amount, i.vat_amount, i.total_amount, i.status
         FROM invoices i LEFT JOIN vendors v ON v.id = i.vendor_id
-       WHERE i.kind = ? AND i.issued_at BETWEEN ? AND ?
+       WHERE i.kind = ? AND i.issued_at BETWEEN ? AND ? AND ${notCarryover('i.')}
        ORDER BY i.issued_at, i.invoice_no`, [kind, from, to])
     return rows
   }

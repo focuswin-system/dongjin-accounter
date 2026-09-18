@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, Popover, Loading, periodToRange, DateInput } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, Popover, Loading, periodToRange, DateInput, yearLabel } from '../lib/ui'
 // SAMPLE placeholder — Docs 화면은 실 API 연동 전까지 빈 데이터로 동작
 const SAMPLE = {
   docs: [], evidences: [], evidenceMissing: [], excelPreview: [],
@@ -1379,15 +1379,17 @@ export const ExcelScreen = ({ goRoute }) => {
           )}
           {/* 서버가 건너뛴 행을 반드시 보여준다 — 예전엔 "N건 등록됐어요"만 떠서
               마감월·미래일자·금액오류로 빠진 행을 사용자가 영영 몰랐다. */}
-          {(result.skippedClosed > 0 || result.skippedFuture > 0 || result.skippedAmount > 0) && (
+          {(result.skippedClosed > 0 || result.skippedFuture > 0 || result.skippedAmount > 0 || result.skippedBeforeStart > 0) && (
             <div className="card card-pad" style={{ marginBottom: 16, textAlign: 'left', background: 'var(--warn-soft, var(--surface-2))' }}>
               <div className="fw-700 text-sm" style={{ marginBottom: 4 }}>
-                {(result.skippedClosed || 0) + (result.skippedFuture || 0) + (result.skippedAmount || 0)}건은 등록하지 않았어요
+                {(result.skippedClosed || 0) + (result.skippedFuture || 0) + (result.skippedAmount || 0) + (result.skippedBeforeStart || 0)}건은 등록하지 않았어요
               </div>
               <div className="text-sm text-muted" style={{ lineHeight: 1.7 }}>
                 {result.skippedClosed > 0 && <>· 마감된 달: {result.skippedClosed}건<br/></>}
                 {result.skippedFuture > 0 && <>· 미래 날짜: {result.skippedFuture}건<br/></>}
                 {result.skippedAmount > 0 && <>· 금액 오류(0·음수·과대): {result.skippedAmount}건<br/></>}
+                {/* 이건 고쳐서 다시 올릴 행이 아니다 — 기초잔액에 이미 든 돈이라 올리면 두 번 잡힌다 */}
+                {result.skippedBeforeStart > 0 && <>· 장부 시작일 전: {result.skippedBeforeStart}건 (기초잔액에 이미 들어 있어요)<br/></>}
                 해당 행을 고쳐서 다시 올려주세요.
               </div>
             </div>
@@ -1655,7 +1657,7 @@ const useLedger = () => {
  */
 const REPORT_PRESETS = [
   { id: 'month', label: '이번 달' }, { id: 'last', label: '지난 달' },
-  { id: 'quarter', label: '이번 분기' }, { id: 'year', label: '올해' },
+  { id: 'quarter', label: '이번 분기' }, { id: 'year', get label() { return yearLabel() } },
 ]
 
 /* 보고서 조작 줄 — 기간·분기·월·필터가 앉는 자리.

@@ -25,14 +25,16 @@
  * ⚠ 멀티테넌트 — db 는 반드시 인자로 받는다. 기본값을 두면 조용히 남의 회사를 읽는다.
  */
 
-/** 분기별 청구서 세액 */
+const { notCarryover } = require('./carryover')
+
+/** 분기별 청구서 세액 — 이월 잔액 청구서는 뺀다(세액 0 이지만 기간 집계의 규칙을 한 벌로, lib/carryover.js) */
 async function invoiceVat(db, year) {
   const [rows] = await db.execute(
     `SELECT QUARTER(issued_at) AS q,
             SUM(CASE WHEN kind='issued'   THEN vat_amount ELSE 0 END) AS sales_vat,
             SUM(CASE WHEN kind='received' THEN vat_amount ELSE 0 END) AS purchase_vat
        FROM invoices
-      WHERE YEAR(issued_at) = ?
+      WHERE YEAR(issued_at) = ? AND ${notCarryover()}
       GROUP BY QUARTER(issued_at)`, [year])
   return rows
 }

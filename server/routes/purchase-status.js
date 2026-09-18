@@ -1,4 +1,5 @@
 const { Router } = require('express')
+const { notCarryover } = require('../lib/carryover')
 const { monthRange, weeksOf, mergeStubWeeks } = require('../lib/period')
 const { VAT_RATE } = require('../lib/vat')
 
@@ -50,6 +51,7 @@ router.get('/', async (req, res, next) => {
     const where = axis === 'delivery'
       ? "l.delivery_date IS NOT NULL AND l.delivery_date <> '' AND l.delivery_date BETWEEN ? AND ?"
       : 'i.issued_at BETWEEN ? AND ?'
+    // 이월 잔액 청구서는 그 기간의 매입·매출이 아니다(lib/carryover.js) — 어느 축이든 뺀다
     const order = axis === 'delivery'
       ? 'l.delivery_date, i.invoice_no, l.sort_order'
       : 'i.issued_at, i.invoice_no, l.sort_order'
@@ -60,7 +62,7 @@ router.get('/', async (req, res, next) => {
          FROM invoice_lines l
          JOIN invoices i ON i.id = l.invoice_id
          LEFT JOIN vendors v ON i.vendor_id = v.id
-        WHERE i.kind = ? AND ${where}
+        WHERE i.kind = ? AND ${where} AND ${notCarryover('i.')}
         ORDER BY ${order}`, [kind, from, to])
 
     /* 세액이 NULL 이면 '아직 안 정했다' — 청구서 과세유형대로 채운다.

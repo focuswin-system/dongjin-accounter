@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef} from 'react'
-import { Icon, fmtNum, useToast, DateInput, Loading, periodToRange } from '../lib/ui'
+import { Icon, fmtNum, useToast, DateInput, Loading, periodToRange, yearLabel } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
 import { PrintEditButton } from '../lib/components/PrintEditButton'
@@ -136,7 +136,7 @@ export const VoucherBookScreen = () => {
         <span className="text-muted2">~</span>
         <DateInput className="input" style={{ width: 150 }} value={to} onChange={e => setTo(e.target.value)}/>
         <div className="row gap-6" style={{ marginLeft: 8 }}>
-          {[['month', '이번 달'], ['quarter', '이번 분기'], ['year', '올해']].map(([p, label]) => (
+          {[['month', '이번 달'], ['quarter', '이번 분기'], ['year', yearLabel()]].map(([p, label]) => (
             <button key={p} className="chip" onClick={() => { const r = periodToRange(p); setFrom(r.from); setTo(r.to) }}>{label}</button>
           ))}
         </div>

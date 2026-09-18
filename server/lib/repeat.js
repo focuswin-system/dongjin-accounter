@@ -16,7 +16,7 @@ const { VAT_RATE } = require('./vat')
 const { createInvoice } = require('./invoiceCreate')
 const { insertExpenseTxn } = require('./directTxn')
 const { acctCodeByCategoryName } = require('./categoryAccount')
-const { closedPeriodError } = require('./closing')
+const { closedPeriodError, closedDocError } = require('./closing')
 const { amountError, MAX_AMOUNT } = require('./ledger')
 const { lookalikeSettleTxns } = require('./settleTxn')
 const { httpError } = require('./withTx')
@@ -302,7 +302,8 @@ async function createOne(conn, ym, row, today) {
   // 같은 달에 이미 있으면 막는다 — 두 번 누름·두 탭. 잠금은 위 FOR UPDATE 가 템플릿 단위로 건다
   const made = (await madeInMonth(conn, [t.id], ym)).get(t.id)
   if (made) throw httpError(409, `${name} — 이미 ${made.no || made.date} 로 만들었어요`)
-  { const ce = await closedPeriodError(conn, date); if (ce) throw httpError(409, `${name} — ${ce}`) }
+  // 청구서면 문서 잠금(월 마감만), 거래면 돈 잠금(월 마감 + 장부 시작일) — lib/closing.js
+  { const ce = await (t.creates === 'invoice' ? closedDocError : closedPeriodError)(conn, date); if (ce) throw httpError(409, `${name} — ${ce}`) }
   /* 옛 정기 규칙에서 옮겨 온 줄은 등록 폼(normalizeTemplate)을 안 거쳤다 — 출금인데 비목이 없을 수 있다.
      비목 없이 만들면 전표의 비용 줄이 비어 일계표 차·대변이 안 맞는다. 무엇을 고쳐야 하는지 말해준다. */
   if (t.direction === 'out' && !t.category) {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Combobox, MoneyInput, DateInput, localToday, fmtDateShort, periodToRange } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Combobox, MoneyInput, DateInput, localToday, fmtDateShort, periodToRange, yearLabel } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { Drawer } from '../lib/ui'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
@@ -188,7 +188,7 @@ export const TransferScreen = ({ openEdit }) => {
         <span className="text-muted2">~</span>
         <DateInput className="input" style={{ width: 150 }} max={today} value={range.to}
           onChange={e => setRange(r => ({ ...r, to: e.target.value }))}/>
-        {[['month', '이번 달'], ['year', '올해']].map(([p, label]) => (
+        {[['month', '이번 달'], ['year', yearLabel()]].map(([p, label]) => (
           <button key={p} className="chip" onClick={() => setRange(periodToRange(p))}>{label}</button>
         ))}
 

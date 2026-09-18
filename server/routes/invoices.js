@@ -1,10 +1,14 @@
 const { Router } = require('express')
+const { notCarryover, CARRYOVER_ACCT, dayBefore } = require('../lib/carryover')
 const { randomUUID } = require('crypto')
 const { uploadMem, parseSheet } = require('../lib/xlsx-import')
 const { futureDateError, kstToday } = require('../db')
-const { closedPeriodError } = require('../lib/closing')
+/* 청구서 **문서**는 closedDocError(월 마감만) — 장부 시작일 전 세금계산서도 이번 분기 부가세라 들어와야 한다.
+   돈이 오가는 정산·대사는 closedPeriodError(월 마감 + 장부 시작일). lib/closing.js */
+const { closedPeriodError, closedDocError } = require('../lib/closing')
 // 부가세 집계는 lib/vatAgg.js 한 곳 — 화면·보고서·엑셀이 같은 값을 본다
 const { rollbackQuietly } = require('../lib/tx')
+const { withTx, httpError } = require('../lib/withTx')
 const { ledgerError, amountError } = require('../lib/ledger')
 const { vatOfQuarter } = require('../lib/vatAgg')
 const { settleAcctCode } = require('../lib/acctCode')
@@ -288,7 +292,7 @@ router.get('/summary/vat', async (req, res, next) => {
     const [all] = await req.db.execute(
       `SELECT i.*, v.name AS vendor_name FROM invoices i
        LEFT JOIN vendors v ON i.vendor_id = v.id
-       WHERE (${placeholders})`,
+       WHERE (${placeholders}) AND ${notCarryover('i.')}`,   // 이월 잔액은 부가세 명세가 아니다(lib/carryover.js)
       params
     )
     /* ⚠ 세액은 **lib/vatAgg.js** 에서 온다 — 청구서만 세면 카드·현금 매입세액이 통째로
@@ -556,7 +560,7 @@ router.post('/import/commit', async (req, res, next) => {
     const closedCache = new Map()
     const isClosedMonth = async (date) => {
       const m = String(date || '').slice(0, 7)
-      if (!closedCache.has(m)) closedCache.set(m, !!(await closedPeriodError(conn, date)))
+      if (!closedCache.has(m)) closedCache.set(m, !!(await closedDocError(conn, date)))
       return closedCache.get(m)
     }
     const createdVendors = []
@@ -763,6 +767,67 @@ router.get('/import/template', async (req, res, next) => {
 /* 대사 — 아직 정산 안 된 청구서와 안 붙은 거래의 짝을 **한꺼번에** 내놓는다.
  * 읽기 전용이다. 실제로 붙이는 일은 아래 POST /:id/matches 가 한다(가드가 거기 다 있다).
  * ⚠ /:id 보다 **위**에 둔다 — 아래 두면 'reconcile' 이 청구서 id 로 잡힌다. */
+/* ── 이월 잔액(4단계, 2026-09) ─────────────────────────────────────
+ * 쓰기 전부터 있던 미수금·미지급금을 **거래처별 금액만** 받아 청구서로 세운다(사용자 확정 2026-09-18).
+ * 세금계산서를 다 찾아 올리지 않아도 받을 돈·줄 돈이 맞는다. 규칙은 lib/carryover.js:
+ *   발행일 = 장부 시작일 전날 · 상대 계정 = 미처분이익잉여금(손익 아님) · 세액 0 · carryover = 1
+ *   → 잔액·입금 처리·대사에는 들고, 기간 매출·부가세 명세에서는 빠진다.
+ * ⚠ '/:id' 보다 위에 둔다 — 아래로 가면 GET /carryover 가 GET /:id 에 먹힌다. */
+router.get('/carryover', async (req, res, next) => {
+  try {
+    const kinds = invGuard.visible(req)
+    if (!kinds.length) return res.json([])
+    const [rows] = await req.db.execute(
+      `SELECT i.*, v.name AS vendor_name FROM invoices i LEFT JOIN vendors v ON v.id = i.vendor_id
+        WHERE i.carryover = 1 AND i.kind IN (${kinds.map(() => '?').join(',')})
+        ORDER BY i.kind, v.name`, kinds)
+    res.json(await attachMatchesBulk(req.db, rows))
+  } catch (e) { next(e) }
+})
+
+router.post('/carryover', async (req, res, next) => {
+  try {
+    const [[co]] = await req.db.execute('SELECT books_start FROM company_info WHERE id = ?', ['main'])
+    if (!co?.books_start) throw httpError(400, '장부 시작일을 먼저 정해주세요 — 이월 잔액은 그 전날 잔액이에요', { field: 'books_start' })
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : []
+    if (!rows.length) throw httpError(400, '이월할 잔액을 적어주세요')
+    if (rows.length > 500) throw httpError(400, '한 번에 500줄까지예요')
+    const clean = []
+    for (const [i, r] of rows.entries()) {
+      const kind = r.kind === 'received' ? 'received' : r.kind === 'issued' ? 'issued' : null
+      const amount = Math.round(Number(String(r.amount ?? '').replace(/[^0-9.-]/g, '')) || 0)
+      const at = `${i + 1}번째 줄`
+      if (!kind) throw httpError(400, `${at} — 받을 돈인지 줄 돈인지 골라주세요`)
+      if (!r.vendor_id) throw httpError(400, `${at} — 거래처를 골라주세요`)
+      { const ae = amountError(amount); if (ae) throw httpError(400, `${at} — ${ae}`) }
+      invGuard.assert(req, kind, 'create')
+      clean.push({ kind, vendorId: String(r.vendor_id), amount, memo: String(r.memo || '').trim().slice(0, 200) })
+    }
+    const issuedAt = dayBefore(co.books_start)
+    const out = await withTx(req.db, async (conn) => {
+      // 시작일 전날 달이 마감돼 있으면 막는다 — 잠긴 달에 미수·미지급이 새로 생기면 마감 숫자가 바뀐다
+      { const ce = await closedDocError(conn, issuedAt); if (ce) throw httpError(409, ce) }
+      const ids = []
+      for (const r of clean) {
+        const [[v]] = await conn.execute('SELECT id FROM vendors WHERE id = ?', [r.vendorId])
+        if (!v) throw httpError(400, '없는 거래처가 섞여 있어요. 다시 골라주세요')
+        const made = await createInvoice(conn, {
+          kind: r.kind, vendorId: r.vendorId,
+          supply: r.amount, vat: 0, total: r.amount,
+          issuedAt, dueAt: issuedAt,
+          taxType: '면세',                       // 세액 0 을 뜻할 뿐 — 부가세 명세에서는 carryover 로 빠진다
+          memo: r.memo ? `전기이월 · ${r.memo}` : '전기이월',
+          accountCode: CARRYOVER_ACCT,
+          origin: { type: 'carryover' },
+        })
+        ids.push(made.id)
+      }
+      return ids
+    })
+    res.json({ ok: true, created: out.length, issued_at: issuedAt })
+  } catch (e) { next(e) }
+})
+
 router.get('/reconcile', async (req, res, next) => {
   try {
     const kind = req.query.kind === 'received' ? 'received' : 'issued'
@@ -861,7 +926,7 @@ router.post('/', async (req, res, next) => {
     // 마감된 달에는 청구서를 새로 발행할 수 없다 — 부가세 집계의 주 소스가 청구서이므로,
     // 신고를 끝낸 분기에 청구서가 추가되면 제출 자료와 장부가 어긋난다.
     // (미래 발행일은 막지 않는다 — 정기청구의 미리 발행이 정당한 업무다)
-    { const ce = await closedPeriodError(req.db, issued_at); if (ce) return res.status(409).json({ error: ce }) }
+    { const ce = await closedDocError(req.db, issued_at); if (ce) return res.status(409).json({ error: ce }) }
     // 과세유형: 화면이 정해 보내면 그대로, 아니면 세액 유무로 과세/면세를 가른다.
     // (영세는 세액이 0이라 추론이 안 되므로 반드시 명시해야 한다 — 주문에서 발행하면 자동으로 채워진다)
     const taxType = normalizeTaxType(tax_type || (Number(vat_amount) > 0 ? '과세' : '면세'))
@@ -996,7 +1061,7 @@ router.post('/split', async (req, res, next) => {
     try {
       await conn.beginTransaction()
       // 마감 검사는 한 번만 — 모든 장이 같은 발행일을 쓴다
-      const ce = await closedPeriodError(conn, issued_at)
+      const ce = await closedDocError(conn, issued_at)
       if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
 
       const year = String(issued_at).slice(0, 4) || kstToday().slice(0, 4)
@@ -1084,7 +1149,7 @@ router.put('/:id', async (req, res, next) => {
 
     // 부가세 집계의 주 소스가 청구서다 → 마감된 달의 신고 자료가 사후에 바뀌면 안 된다.
     // 날짜를 옮기는 경우 양쪽을 본다(잠긴 달에서 빼내거나 밀어넣는 것도 막는다 — 거래와 같은 규칙).
-    const ce = await closedPeriodError(conn, cur.issued_at, issued_at)
+    const ce = await closedDocError(conn, cur.issued_at, issued_at)
     if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
 
     // 수정에도 같은 규칙 — 발행만 막고 수정으로 0원을 만들 수 있으면 막은 의미가 없다.
@@ -1216,7 +1281,7 @@ router.delete('/:id', async (req, res, next) => {
     const [[inv]] = await conn.execute('SELECT issued_at, kind FROM invoices WHERE id = ?', [id])
     if (!inv) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     // 마감된 달의 청구서를 지우면 이미 신고한 부가세 자료가 줄어든다 → 막는다
-    { const ce = await closedPeriodError(conn, inv.issued_at); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
+    { const ce = await closedDocError(conn, inv.issued_at); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
     await conn.execute('DELETE FROM invoice_matches WHERE invoice_id = ?', [id])
     await conn.execute('DELETE FROM invoice_docs WHERE invoice_id = ?', [id])
     await conn.execute('UPDATE transactions SET invoice_id = NULL WHERE invoice_id = ?', [id])
@@ -1524,7 +1589,7 @@ router.post('/bulk/delete', async (req, res, next) => {
       const [[{ mcnt }]] = await conn.execute(
         'SELECT COUNT(*) AS mcnt FROM invoice_matches WHERE invoice_id = ?', [inv.id])
       if (Number(mcnt) > 0) { blocked.push(`${inv.invoice_no}: 입금·지급 내역이 있어요(먼저 정산을 취소하세요)`); continue }
-      const ce = await closedPeriodError(conn, inv.issued_at)
+      const ce = await closedDocError(conn, inv.issued_at)
       if (ce) blocked.push(`${inv.invoice_no}: ${ce}`)
     }
     if (blocked.length) {

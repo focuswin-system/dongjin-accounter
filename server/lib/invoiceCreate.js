@@ -34,8 +34,9 @@ const { randomUUID } = require('crypto')
  *   purchase_req  구매품의서에서       → 뒤처리 없음(품의서가 청구서를 붙들지 않는다)
  *   import        엑셀·홈택스 문서에서 → 뒤처리 없음(어느 회차인지 알 수 없다)
  *   manual        사람이 그 자리에서   → 뒤처리 없음
+ *   carryover     이월 잔액 입력에서   → carryover=1(기간 매출·부가세 명세에서 빠진다, lib/carryover.js)
  */
-const ORIGINS = new Set(['repeat', 'milestone', 'progress', 'purchase_req', 'import', 'manual'])
+const ORIGINS = new Set(['repeat', 'milestone', 'progress', 'purchase_req', 'import', 'manual', 'carryover'])
 
 /**
  * 청구번호 — `청구-2026-0001` / `매입-2026-0001`.
@@ -99,16 +100,18 @@ async function createInvoice(conn, f) {
        주석 속 쉼표를 값으로 세어 위반으로 잡는다(실제로 걸렸다). 검사를 우회할 게 아니라
        읽기 쉬운 자리에 쓴다. */
   const templateId = origin.type === 'repeat' ? origin.templateId : null
+  // 이월 잔액(4단계) — 기간 매출·부가세 명세에서 빠지는 표시. 규칙은 lib/carryover.js
+  const carryover = origin.type === 'carryover' ? 1 : 0
   const status = f.status || (f.kind === 'issued' ? '입금 예정' : '지급 대기')
   await conn.execute(
     `INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, template_id,
                            supply_amount, vat_amount, total_amount, issued_at, due_at,
-                           status, account_id, memo, tax_type, nts_confirm_no, category, account_code)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                           status, account_id, memo, tax_type, nts_confirm_no, category, account_code, carryover)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [id, invoiceNo, f.kind, f.vendorId || null, f.contractId || null, templateId,
      f.supply, f.vat, f.total, f.issuedAt, f.dueAt || null,
      status, f.accountId || null, f.memo || '', f.taxType, f.ntsConfirmNo || null,
-     f.category || null, f.accountCode || null]
+     f.category || null, f.accountCode || null, carryover]
   )
 
   const lines = f.writeLines ? await f.writeLines(conn, id) : 0

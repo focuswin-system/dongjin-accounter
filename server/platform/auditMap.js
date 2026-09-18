@@ -35,6 +35,9 @@ const AUDIT_RULES = [
 
   // ── 마감 ── 장부를 잠그고 여는 행위. 마감 해제는 특히 남아야 한다(잠긴 기간을 다시 연다)
   { m: 'POST',   re: /^\/api\/closings$/,                          res: 'closing', action: 'close',  target: { body: 'period' } },
+  // 회기 마감(4단계) — 열두 달을 한 번에 잠그고 푼다. 월 마감과 같은 자원·행위로 남긴다
+  { m: 'POST',   re: /^\/api\/closings\/fiscal$/,                   res: 'closing', action: 'close',  target: { body: 'year' } },
+  { m: 'DELETE', re: /^\/api\/closings\/fiscal\/([^/]+)$/,          res: 'closing', action: 'reopen', target: 1 },
   { m: 'DELETE', re: /^\/api\/closings\/([^/]+)$/,                 res: 'closing', action: 'reopen', target: 1 },
 
   // ── 일괄 등록 ── 한 번에 수백 건이 들어온다. 무엇이 언제 들어왔는지 못 짚으면 되돌릴 수 없다
@@ -50,6 +53,8 @@ const AUDIT_RULES = [
   { m: 'POST',   re: /^\/api\/invoices$/,                          res: 'invoice', action: 'issue',        target: 'created' },
   // 한 번에 세금계산서 여러 장이 나간다 — 한 장 발행이 남는데 N장이 안 남을 이유가 없다
   { m: 'POST',   re: /^\/api\/invoices\/split$/,                    res: 'invoice', action: 'issue_split' },
+  // 이월 잔액(4단계) — 쓰기 전 미수·미지급을 금액만으로 세운다. 장부의 출발점이라 남긴다
+  { m: 'POST',   re: /^\/api\/invoices\/carryover$/,                res: 'invoice', action: 'carryover' },
   { m: 'POST',   re: /^\/api\/invoices\/([^/]+)\/matches$/,        res: 'invoice', action: 'match',        target: 1 },
   { m: 'DELETE', re: /^\/api\/invoices\/([^/]+)\/matches\/[^/]+$/, res: 'invoice', action: 'match_cancel', target: 1 },
   { m: 'DELETE', re: /^\/api\/invoices\/([^/]+)$/,                 res: 'invoice', action: 'delete',       target: 1 },
@@ -273,7 +278,7 @@ const ACTION_LABELS = {
   // 대여금·투자 회수 — 차입금 상환의 거울상
   'collect-cancel': '회수 취소', 'redeem-cancel': '회수 취소',
   draw: '추가 차입', draw_cancel: '추가 차입 취소',
-  unprocess: '처리 취소', issue_split: '나눠 발행',
+  unprocess: '처리 취소', issue_split: '나눠 발행', carryover: '이월 잔액 등록',
   /* ── 어음 ── 만기에 실제로 돈이 오가거나(결제) 안 오간다(부도) */
   settle: '어음 만기 결제', unsettle: '어음 결제 취소', dishonor: '어음 부도 처리',
   // ── 세금 ──

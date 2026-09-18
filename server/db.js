@@ -1394,6 +1394,10 @@ async function initDb(conn) {
     await ensureColumn('company_info', 'fiscal_end_month', 'fiscal_end_month TINYINT NOT NULL DEFAULT 12')
     await ensureColumn('company_info', 'fiscal_base_year', 'fiscal_base_year SMALLINT')
     await ensureColumn('company_info', 'fiscal_base_seq',  'fiscal_base_seq SMALLINT')
+    /* 장부 시작일(4단계, 2026-09) — 계좌 기초잔액이 '이날 아침 잔액'이라는 뜻을 준다. 그 전 날짜의 거래(돈이 오간 것)는
+       막는다 — 기초잔액 안에 이미 들어 있어 두 번 잡힌다. 청구서는 막지 않는다(시작 전달 계산서가 이번 분기 부가세다).
+       비어 있으면 지금처럼(막는 것 없음). 설계: docs/02-design/features/fiscal-opening.design.md */
+    await ensureColumn('company_info', 'books_start', 'books_start VARCHAR(10)')
     await ensureColumn('vendors',   'bank_name',     "bank_name VARCHAR(60)")
     await ensureColumn('vendors',   'bank_account',   "bank_account VARCHAR(60)")
     await ensureColumn('vendors',   'account_holder', "account_holder VARCHAR(100)")
@@ -2543,6 +2547,9 @@ async function initDb(conn) {
     `)
     // 어느 반복거래에서 만들었나 — '그 달 만듦' 판정의 근거. FK 없음(반복거래를 지워도 장부는 그대로)
     await ensureColumn('invoices',     'template_id', 'template_id VARCHAR(36)')
+    /* 이월 잔액(4단계) — 쓰기 전부터 있던 미수·미지급을 거래처별 금액만 받아 세운 청구서.
+       받을 돈·줄 돈(잔액·대사·입금 처리)에는 들고, **기간 매출·부가세 명세에는 안 든다**(lib/carryover.js). */
+    await ensureColumn('invoices',     'carryover',   'carryover TINYINT(1) NOT NULL DEFAULT 0')
     await ensureColumn('transactions', 'template_id', 'template_id VARCHAR(36)')
     await ensureIndex('invoices', 'idx_inv_template', 'template_id, issued_at')
     await ensureIndex('transactions', 'idx_txn_template', 'template_id, date')

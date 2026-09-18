@@ -1871,6 +1871,26 @@ export const api = {
     try { await req(`/closings/${period}`, { method: 'DELETE' }); return { ok: true } }
     catch (e) { return { ok: false, error: e.message } }
   },
+  // 회기 마감(4단계) — 최근 회기 셋(잠긴 달 수 포함), 회기 열두 달 한 번에 잠그기·풀기
+  // 이월 잔액(4단계) — 쓰기 전부터 있던 미수·미지급. 청구서로 서고 기간 매출·부가세 명세에선 빠진다(서버 lib/carryover.js)
+  async getCarryovers() {
+    try { return await req('/invoices/carryover') } catch { return [] }
+  },
+  async saveCarryovers(rows) {
+    try { return { ok: true, ...(await req('/invoices/carryover', { method: 'POST', body: { rows } })) } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async getFiscalClosings() {
+    try { return await req('/closings/fiscal') } catch { return [] }
+  },
+  async closeFiscal(year) {
+    try { return { ok: true, ...(await req('/closings/fiscal', { method: 'POST', body: { year } })) } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async reopenFiscal(year) {
+    try { return { ok: true, ...(await req(`/closings/fiscal/${year}`, { method: 'DELETE' })) } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
   // 변경 이력(감사 로그) — 회사 마스터만. 실패해도 화면이 죽지 않게 빈 결과로 떨어진다.
   async getAuditLogs(params = {}) {
     const qs = new URLSearchParams(

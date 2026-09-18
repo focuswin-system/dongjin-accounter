@@ -83,6 +83,15 @@ function planCompanyChange(cur, body, today) {
     }
   }
 
+  /* 장부 시작일(4단계) — 계좌 기초잔액이 '이날 아침 잔액'이 된다. 그 전 날짜의 거래는 막힌다(lib/closing.js).
+     비우면 막는 것이 없어진다(지금처럼). 미래 날짜는 받지 않는다 — 오늘 거래까지 막히게 된다. */
+  if (has('books_start')) {
+    const v = String(body.books_start ?? '').trim()
+    if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) return fail(400, '장부 시작일을 YYYY-MM-DD 로 적어주세요', 'books_start')
+    if (v && v > today) return fail(400, '장부 시작일은 오늘까지만 정할 수 있어요', 'books_start')
+    set.books_start = v || null
+  }
+
   const after = { ...cur, ...set }
   if (!String(after.name || '').trim()) return fail(400, '상호를 입력해주세요', 'name')
   if (!hasBizNo(after)) return fail(400, '사업자번호를 입력해주세요', 'biz_no')

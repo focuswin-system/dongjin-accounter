@@ -77,12 +77,30 @@ export const MoneyInput = ({ value, onChange, allowNegative = false, className =
 };
 
 /* ── 기간 프리셋 ── */
+/* ── 회기(4단계, 2026-09) ── 기간 프리셋의 '올해'는 **회사의 회기**다.
+ * 12월 결산이면 1~12월 그대로, 3월 결산이면 4/1~3/31. 로그인 때 회사 정보의 결산월을 받아 둔다(App).
+ * 테마처럼 한 곳에 두고 화면들은 모른다 — 기간을 periodToRange 로 계산하는 화면은 저절로 맞는다.
+ * 서버 짝: server/lib/fiscal.js(같은 규칙). */
+let FISCAL_END_MONTH = 12;
+export const setFiscalEndMonth = (m) => { const n = Number(m); FISCAL_END_MONTH = n >= 1 && n <= 12 ? n : 12; };
+/** 오늘이 속한 회기 { from, to, y(시작하는 해) } */
+const fiscalYearRange = (d = new Date()) => {
+  const end = FISCAL_END_MONTH, y = d.getFullYear(), m1 = d.getMonth() + 1;
+  if (end === 12) return { from: `${y}-01-01`, to: `${y}-12-31`, y };
+  const start = end + 1;                           // 시작 달(1–12)
+  const sy = m1 >= start ? y : y - 1;              // 회계연도 = 시작하는 해
+  return { from: ymd(sy, start, 1), to: ymd(sy + 1, end, lastDay(sy + 1, end)), y: sy };
+};
+/** '올해' 칩 이름 — 12월 결산이면 '올해', 아니면 '이번 회기' */
+export const yearLabel = () => (FISCAL_END_MONTH === 12 ? "올해" : "이번 회기");
+
 export const PERIOD_PRESETS = [
   { id: "all",     label: "전체" },
   { id: "month",   label: "이번 달" },
   { id: "last",    label: "지난 달" },
   { id: "quarter", label: "이번 분기" },
-  { id: "year",    label: "올해" },
+  // label 은 getter — 결산월을 받기 전에 모듈이 읽혀도 그릴 때의 값을 쓴다
+  { id: "year",    get label() { return yearLabel(); } },
   { id: "custom",  label: "직접 입력" },
 ];
 
@@ -106,7 +124,7 @@ export const periodToRange = (id) => {
     const qs = Math.floor(m / 3) * 3 + 1, qe = qs + 2;
     return { from: ymd(y, qs, 1), to: ymd(y, qe, lastDay(y, qe)) };
   }
-  if (id === "year") return { from: `${y}-01-01`, to: `${y}-12-31` };
+  if (id === "year") { const r = fiscalYearRange(d); return { from: r.from, to: r.to }; }
   return null;
 };
 
@@ -132,7 +150,7 @@ export const periodRangeLabel = (id, custom) => {
   if (id === "month")   return `${fmt(y,m+1,1)} ~ ${fmt(y,m+1,lastDay(y,m+1))}`;
   if (id === "last")    { const lm=m||12, ly=m?y:y-1; return `${fmt(ly,lm,1)} ~ ${fmt(ly,lm,lastDay(ly,lm))}`; }
   if (id === "quarter") { const qs=Math.floor(m/3)*3+1, qe=qs+2; return `${fmt(y,qs,1)} ~ ${fmt(y,qe,lastDay(y,qe))}`; }
-  if (id === "year")    return `${fmt(y,1,1)} ~ ${fmt(y,12,31)}`;
+  if (id === "year")    { const r = fiscalYearRange(d); return `${r.from.replace(/-/g, ".")} ~ ${r.to.replace(/-/g, ".")}`; }
   return null;
 };
 

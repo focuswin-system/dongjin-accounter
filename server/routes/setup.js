@@ -19,7 +19,7 @@ router.get('/status', async (req, res, next) => {
     }
     /* 회사 정보는 '행이 있나'가 아니라 **사업자번호가 있나**로 본다.
        빈 행만 만들어두고 넘어가면 세금계산서·거래명세서에 우리 정보가 안 찍힌다. */
-    const [company, accounts, vendors, items, recurring, txns, invoices] = await Promise.all([
+    const [company, accounts, vendors, items, recurring, txns, invoices, booksStart] = await Promise.all([
       one("SELECT COUNT(*) FROM company_info WHERE biz_no IS NOT NULL AND biz_no <> ''"),
       one('SELECT COUNT(*) FROM accounts'),
       one('SELECT COUNT(*) FROM vendors WHERE active = 1'),
@@ -27,8 +27,10 @@ router.get('/status', async (req, res, next) => {
       one("SELECT COUNT(*) FROM repeat_templates WHERE active = 1"),
       one('SELECT COUNT(*) FROM transactions'),
       one('SELECT COUNT(*) FROM invoices'),
+      // 기초 잔액 단계(4단계) — 장부 시작일을 정했나
+      one("SELECT COUNT(*) FROM company_info WHERE books_start IS NOT NULL AND books_start <> ''"),
     ])
-    res.json({ company, accounts, vendors, items, recurring, txns, invoices })
+    res.json({ company, accounts, vendors, items, recurring, txns, invoices, booksStart })
   } catch (e) { next(e) }
 })
 

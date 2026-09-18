@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, Fragment, Component } from 'react'
 import logoSymbol from './assets/company/favicon.svg'
-import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider } from './lib/ui'
+import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider, setFiscalEndMonth } from './lib/ui'
 import { api, setApiFailureHandler } from './lib/api'
 import { WelcomeWizard } from './lib/components/WelcomeWizard'
 import { CompanySetup } from './lib/components/CompanySetup'
@@ -1434,6 +1434,12 @@ export default function App() {
       if (r.ok && !need) { try { localStorage.setItem(readyKey(), '1'); } catch { /* 무시 */ } }
     });
     return () => { alive = false; clearTimeout(timer); };
+  }, [loggedIn]);
+  /* 회기(결산월) — 보고서 기간 '올해'가 회기를 따른다(ui.jsx periodToRange, 4단계).
+     위 게이트는 한 번 확인한 회사는 다시 안 읽으므로 따로 받는다. 못 읽으면 12월(달력)로 둔다. */
+  useEffect(() => {
+    if (!loggedIn) { setFiscalEndMonth(12); return; }
+    api.getCompany().then(co => setFiscalEndMonth(co?.fiscal_end_month)).catch(() => {});
   }, [loggedIn]);
   useEffect(() => {
     if (!loggedIn) { setPerms(null); setPrefs(null); setDocKeys(null); setMeDone(false); return; }

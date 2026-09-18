@@ -18,7 +18,7 @@ const { normalizeStatus, ledgerError, defaultSettledStatus, amountError, isSettl
 const { monthItems } = require('../lib/repeat')
 const { removeUploadedFile } = require('../lib/uploads')
 const { vatFields } = require('../lib/vat')
-const { closedPeriodError } = require('../lib/closing')
+const { closedPeriodError, beforeBooksError } = require('../lib/closing')
 const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
 const { isFundAccount } = require('../lib/categoryAccount')
 const { transactionVoucher, withNames } = require('../lib/voucher')
@@ -662,7 +662,7 @@ router.post('/', async (req, res, next) => {
     const dateErr = futureDateError(date)
     if (dateErr) return res.status(400).json({ error: dateErr })
     const closedErr = await closedPeriodError(req.db, date)
-    if (closedErr) return res.status(409).json({ error: closedErr })
+    if (closedErr) return res.status(409).json({ error: closedErr })  // 장부 시작일 전도 여기서 막힌다(lib/closing.js)
     // 음수·초대형 금액을 서버에서 막는다 — 음수 지출은 계좌 잔액을 늘리고 매입세액을 깎는다
     { const ae = amountError(amount); if (ae) return res.status(400).json({ error: ae }) }
     // 복합 전표면 항목 합계가 거래 금액과 같아야 한다
@@ -721,7 +721,9 @@ router.put('/:id', async (req, res, next) => {
     // 편집으로 수입 거래가 되면 원가 귀속은 떨어진다
     const [[cur]] = await req.db.execute('SELECT kind, date AS cur_date FROM transactions WHERE id = ?', [req.params.id])
     if (!cur) return res.status(404).json({ error: 'Not found' })
-    // 마감은 옮기기 전·후 두 날짜를 모두 본다 — 한쪽만 보면 잠긴 달에서 거래를 빼내거나 밀어넣을 수 있다
+    /* 마감은 옮기기 전·후 두 날짜를 모두 본다 — 한쪽만 보면 잠긴 달에서 거래를 빼내거나 밀어넣을 수 있다.
+       장부 시작일 전도 마감된 달처럼 잠긴다(lib/closing.js) — 그 전 돈은 기초잔액에 이미 들어 있어서,
+       옛 거래를 고치면 잔액이 두 번 움직인다. */
     const closedErr = await closedPeriodError(req.db, cur.cur_date, date)
     if (closedErr) return res.status(409).json({ error: closedErr })
     /* 다른 장부가 참조하는 거래는 **수정도** 막는다.
@@ -1143,11 +1145,14 @@ router.post('/import/commit', async (req, res, next) => {
     const ambiguous = []   // 이름이 겹쳐 못 이은 것 — 응답으로 알려준다
 
     await conn.beginTransaction()
-    let inserted = 0, skippedFuture = 0, skippedClosed = 0, skippedAmount = 0; const createdVendors = []
+    let inserted = 0, skippedFuture = 0, skippedClosed = 0, skippedAmount = 0, skippedBeforeStart = 0; const createdVendors = []
     for (const it of items) {
       // 미래 일자 거래는 건너뛴다 — 완료 상태로 들어가 계좌 잔액에 즉시 반영되므로 개별 등록과 같은 규칙 적용.
       if (futureDateError(it.date)) { skippedFuture++; continue }
       // 마감된 달도 같은 이유로 건너뛴다 — 개별 등록이면 409로 막히는 행이 일괄에서만 통과하면 안 된다.
+      /* 장부 시작일 전 — **사용자가 짚은 바로 그 통로다**: 시작일 잔액을 기초잔액에 넣고 그 전 통장 내역을
+         엑셀로 올리면 같은 돈이 두 번 잡힌다. 건너뛰고 몇 건인지 따로 알린다(아래 마감 검사도 막지만 이유가 다르다) */
+      if (await beforeBooksError(conn, it.date)) { skippedBeforeStart++; continue }
       if (await closedPeriodError(conn, it.date)) { skippedClosed++; continue }
       let vendorId = null
       const vname = String(it.vendor || '').trim()
@@ -1207,7 +1212,7 @@ router.post('/import/commit', async (req, res, next) => {
     await conn.commit()
     /* ambiguous — 이름이 겹쳐 **일부러 안 이은** 것. 조용히 비우면 "왜 주문이 안 붙었지"가
        한참 뒤 계약 수익을 볼 때에야 드러난다. 올린 자리에서 바로 알린다. */
-    res.json({ inserted, createdVendors, skippedFuture, skippedClosed, skippedAmount,
+    res.json({ inserted, createdVendors, skippedFuture, skippedClosed, skippedAmount, skippedBeforeStart,
       ambiguous: [...new Set(ambiguous)] })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }

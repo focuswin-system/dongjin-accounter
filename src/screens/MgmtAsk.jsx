@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, localToday, Spinner, Loading, DateInput } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, localToday, Spinner, Loading, DateInput, yearLabel } from '../lib/ui'
 import { api } from '../lib/api'
 
 /* 경영 도우미 — 대화(세션)형 조회.
@@ -28,7 +28,7 @@ const GROUPS = [
 ]
 const PERIODS = [
   { v: 'this_month', label: '이번 달' }, { v: 'this_quarter', label: '이번 분기' },
-  { v: 'last_3m', label: '최근 3개월' }, { v: 'this_year', label: '올해' }, { v: 'last_12m', label: '최근 12개월' },
+  { v: 'last_3m', label: '최근 3개월' }, { v: 'this_year', get label() { return yearLabel() } }, { v: 'last_12m', label: '최근 12개월' },
   { v: 'custom', label: '직접 입력' },
 ]
 

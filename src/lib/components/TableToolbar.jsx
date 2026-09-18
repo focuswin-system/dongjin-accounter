@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Icon, periodToRange, DateInput } from '../ui'
+import { Icon, periodToRange, DateInput, yearLabel } from '../ui'
 import { PeriodPicker } from './PeriodPicker'
 
 // 표 상단 툴바 — 날짜 범위 + 검색 + 필터 패널. DataTable 위에 얹는다.
@@ -18,7 +18,7 @@ const DATE_PRESETS = [
   { id: 'month',   label: '이번 달' },
   { id: 'last',    label: '지난 달' },
   { id: 'quarter', label: '이번 분기' },
-  { id: 'year',    label: '올해' },
+  { id: 'year',    get label() { return yearLabel() } },   // 회기 — 결산월이 12월이 아니면 '이번 회기'
 ]
 
 /* periodPicker: true 면 날짜 인풋 두 개 + 프리셋 다섯 대신 **드릴다운 선택기** 하나를 쓴다.

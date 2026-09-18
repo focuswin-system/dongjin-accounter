@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Combobox } from '../ui'
+import { Combobox, DateInput, localToday } from '../ui'
 import { api } from '../api'
 import { bizTypeOptions, bizItemOptions } from '../bizTypes'
 
@@ -30,7 +30,7 @@ export const CoRow = ({ label, req, hint, error, children }) => (
 export const emptyCompanyForm = () => ({
   name: '', biz_no: '', sub_biz_no: '', ceo: '', biz_type: '', biz_item: '',
   address: '', phone: '', fax: '', email: '',
-  fiscal_end_month: 12, fiscal_base_seq: '',
+  fiscal_end_month: 12, fiscal_base_seq: '', books_start: '',
 })
 
 /** 서버 행 → 폼. 기수는 **올해 회기의 기수**로 받는다(저장된 기준 기수가 아니라 서버가 계산한 fiscal.seq) */
@@ -118,7 +118,9 @@ const dot = (d) => String(d || '').replace(/-/g, '.')
 /* ── 회기 ──
  * 결산월과 **올해 회기의 기수**만 받는다(사용자 확정 2026-09-15 — 회계연도 칸 없음, 기수는 선택).
  * 올해 회기의 기간·이름은 서버가 계산해 보여준다. */
-export const FiscalSection = ({ form, f, errors = {} }) => {
+/* onCarryover — 이월 잔액 서랍 열기(환경설정 › 회사 정보에서만). 장부 시작일이 **저장돼** 있어야 연다 —
+   이월 잔액의 날짜가 시작일 전날이라서(서버 routes/invoices.js /carryover) */
+export const FiscalSection = ({ form, f, errors = {}, savedBooksStart = '', onCarryover = null }) => {
   const month = Number(form.fiscal_end_month) || 12
   /* '직접입력'은 누른 것 **또는** 값이 3·6·9·12 가 아닌 것. 누른 것만 상태로 두면
      회사 정보를 나중에 불러와 5월이 들어왔을 때 어느 칩도 안 켜진 채 값이 숨는다. */
@@ -168,6 +170,24 @@ export const FiscalSection = ({ form, f, errors = {} }) => {
             onChange={e => f('fiscal_base_seq', e.target.value.replace(/\D/g, ''))} placeholder="예: 5"/>
           <span className="text-sm text-muted">기</span>
         </div>
+      </CoRow>
+      {/* 장부 시작일(4단계) — 쓰기 시작한 날. 계좌 기초잔액이 이날 아침 잔액이 되고, 그 전 날짜의 거래는 막힌다
+          (같은 돈이 기초잔액과 거래로 두 번 잡히지 않게). 비우면 막는 것이 없다. */}
+      <CoRow label="장부 시작일" hint="선택 · 계좌 기초잔액이 이날 아침 잔액이에요" error={errors.books_start}>
+        <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+          <DateInput id="co-books_start" className="input" style={{ maxWidth: 170, ...errStyle(errors.books_start) }}
+            max={localToday()} value={form.books_start || ''} onChange={e => f('books_start', e.target.value)}/>
+          {onCarryover && savedBooksStart && (
+            <button type="button" className="link-cell text-sm" onClick={onCarryover}>
+              쓰기 전부터 있던 미수·미지급(이월 잔액) →
+            </button>
+          )}
+        </div>
+        {form.books_start && (
+          <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+            {dot(form.books_start)} 전 날짜의 입금·출금은 등록할 수 없어요. 그 전 돈은 기초잔액·이월 잔액에 넣어 주세요.
+          </div>
+        )}
       </CoRow>
     </div>
   )

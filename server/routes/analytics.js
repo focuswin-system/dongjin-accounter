@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { kstToday } = require('../db')
 const { countableOnly, countableParams } = require('../lib/pnl')
+const { fiscalOfDate } = require('../lib/fiscal')
 
 const router = Router()
 
@@ -30,7 +31,9 @@ const pad2 = (n) => String(n).padStart(2, '0')
 const shiftMonth = (y, m, n) => { const i = y * 12 + (m - 1) - n; return { y: Math.floor(i / 12), m: (i % 12) + 1 } }
 
 // 기간 프리셋 → {from,to,label}. KST 오늘 기준. 상대기간은 여기서 매번 그 시점 날짜로 환산된다.
-function resolvePeriod(spec) {
+/* fiscal — 회사 회기(결산월). '올해(this_year)'는 회기다(4단계 — 화면 ui.jsx periodToRange 와 같은 규칙).
+   12월 결산이면 1월~오늘 그대로. */
+function resolvePeriod(spec, fiscal = null) {
   const today = kstToday()               // 'YYYY-MM-DD' (KST)
   const [y, m] = today.split('-').map(Number)
   const ms = (yy, mm) => `${yy}-${pad2(mm)}-01`
@@ -44,7 +47,9 @@ function resolvePeriod(spec) {
       to:   DATE_RE.test(spec.to   || '') ? spec.to   : '2999-12-31',
       label: `${spec.from || '전체'} ~ ${spec.to || ''}`.trim(),
     }
-    default:             return { from: ms(y, 1), to: `${y}-12-31`, label: `${y}년` }  // this_year
+    default:             // this_year — 회기 시작 ~ 오늘(끝은 회기 말일)
+      if (fiscal && fiscal.start) return { from: fiscal.start, to: fiscal.end, label: `${fiscal.name} 회기` }
+      return { from: ms(y, 1), to: `${y}-12-31`, label: `${y}년` }
   }
 }
 
@@ -69,7 +74,9 @@ async function runAggregate(db, spec) {
   const s = normalizeSpec(spec)
   const kind = KIND[s.topic]
   const grp = GROUP[s.group]
-  const { from, to, label: periodLabel } = resolvePeriod(s)
+  const [[co]] = await db.execute('SELECT fiscal_end_month, fiscal_base_year, fiscal_base_seq FROM company_info WHERE id = ?', ['main'])
+  const fiscal = co && Number(co.fiscal_end_month) !== 12 ? fiscalOfDate(co, kstToday()) : null
+  const { from, to, label: periodLabel } = resolvePeriod(s, fiscal)
   /* 완료된 것만 세는 옵션이 지출에만 걸려 있었다 — 매출은 어떤 값을 줘도 status 조건이 안 붙어
    * 아직 안 들어온 입금이 매출로 집계됐다. 수입도 같은 규칙으로 맞춘다. */
   const statusCond = s.status_scope === 'completed'

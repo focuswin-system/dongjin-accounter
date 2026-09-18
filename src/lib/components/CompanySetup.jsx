@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Icon, useToast } from '../ui'
+import { Icon, useToast, setFiscalEndMonth } from '../ui'
 import { api } from '../api'
 import { usePerms } from '../perms'
 import { BizSection, ContactSection, FiscalSection, emptyCompanyForm, companyFormOf, focusCompanyField } from './CompanyFields'
@@ -49,6 +49,7 @@ export const CompanySetup = ({ onDone, onLogout }) => {
     setBusy(true)
     const res = await api.saveCompany(form)
     setBusy(false)
+    if (res.ok) setFiscalEndMonth(form.fiscal_end_month)   // 보고서 '올해' = 이 회기(4단계)
     if (!res.ok) {
       // 서버가 어느 칸인지 알려주면 그 칸 아래에 붙이고 데려간다
       if (res.field) {

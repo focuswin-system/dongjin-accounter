@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, StatusBadge, Drawer, Combobox, MoneyInput, Loading, DateInput, fmtDateShort } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, StatusBadge, Drawer, Combobox, MoneyInput, Loading, DateInput, fmtDateShort, setFiscalEndMonth } from '../lib/ui'
 import { PageHeader, HeaderActions } from '../lib/components/PageHeader'
 import { TableToolbar } from '../lib/components/TableToolbar'
 import { FOLDABLE_DOMAINS } from '../lib/nav'
@@ -13,6 +13,7 @@ import { RowActions } from '../lib/components/RowActions'
 import { normBizNo, normVendorName } from '../lib/normalize'
 import { bizTypeOptions, bizItemOptions } from '../lib/bizTypes'
 import { CoRow, BizSection, ContactSection, FiscalSection, emptyCompanyForm, companyFormOf, focusCompanyField } from '../lib/components/CompanyFields'
+import { CarryoverDrawer } from '../lib/components/CarryoverDrawer'
 import { api, minuteOf } from '../lib/api'
 
 /* ⚠ 한 건을 고치는 버튼은 **'수정'** 이다.
@@ -1812,6 +1813,7 @@ const CompanyPanel = ({ embedded = false }) => {
   const [accounts, setAccounts] = useState([])
   // 회계 처리 방식 — 저장 버튼과 무관하게 토글 즉시 반영된다(장부 규약이라 되돌리기 쉬워야 한다)
   const [acctPrefs, setAcctPrefs] = useState({ voucher_issuance: true })
+  const [carryOpen, setCarryOpen] = useState(false)   // 이월 잔액 서랍(4단계)
 
   const loadCompany = async () => {
     const c = await api.getCompany()
@@ -1852,6 +1854,8 @@ const CompanyPanel = ({ embedded = false }) => {
     }
     setErrors({})
     await loadCompany()   // 서버가 정리한 값(사업자번호 표기·올해 기수)으로 다시 맞춘다
+    // 결산월을 바꿨으면 보고서 '올해'(회기)도 새로고침 없이 따라간다(ui.jsx periodToRange)
+    if (changed.fiscal_end_month != null) setFiscalEndMonth(changed.fiscal_end_month)
     toast.push('회사 정보가 저장됐어요')
   }
 
@@ -1877,7 +1881,9 @@ const CompanyPanel = ({ embedded = false }) => {
 
         <BizSection form={form} f={f} errors={errors}/>
         <ContactSection form={form} f={f} errors={errors}/>
-        <FiscalSection form={form} f={f} errors={errors}/>
+        <FiscalSection form={form} f={f} errors={errors}
+          savedBooksStart={loaded?.books_start || ''} onCarryover={() => setCarryOpen(true)}/>
+        <CarryoverDrawer open={carryOpen} onClose={() => setCarryOpen(false)} booksStart={loaded?.books_start || ''}/>
 
         <div className="card card-pad col co-sec" style={{ gap: 14 }}>
           <div className="co-head">계좌 · 카드</div>
@@ -2408,7 +2414,8 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
             </div>
             {!isCard && (
               <div style={{ flex: 1 }}>
-                <label className="label" style={{ marginBottom: 8 }}>초기 잔액</label>
+                {/* 뜻을 적어 둔다 — 쓰기 시작한 날 잔액을 넣고 그 전 통장 내역을 또 올리면 두 번 잡힌다(4단계, 장부 시작일) */}
+                <label className="label" style={{ marginBottom: 8 }}>초기 잔액 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 장부 시작일 아침 잔액</span></label>
                 <MoneyInput allowNegative value={form.initial_balance} onChange={raw => f('initial_balance', raw)}/>
                 {/* 초기 잔액과 잔액 조정은 둘 다 잔액을 움직이지만 성격이 다르다.
                     여기는 '출발점'이고, 조정은 그 뒤에 생긴 차이를 사유와 함께 남기는 기록이다. */}
@@ -2840,8 +2847,33 @@ const ClosingPanel = ({ embedded = false }) => {
   })
   const [memo, setMemo] = useState('')
 
-  const load = () => api.getClosings().then(setRows)
+  /* 회기 마감(4단계) — 끝난 회기의 열두 달을 한 번에 잠근다. 잠금은 아래 월 마감 표 그대로다 */
+  const [fiscals, setFiscals] = useState([])
+  const load = () => { api.getClosings().then(setRows); api.getFiscalClosings().then(setFiscals) }
   useEffect(() => { load() }, [])
+  const closeFiscal = async (f) => {
+    const ok = await confirm({
+      tone: 'warn', icon: <Icon.Warn size={22}/>, title: `${f.name} 회기 마감`,
+      body: `${f.start} ~ ${f.end} 의 모든 달을 잠급니다. 그 기간의 거래·청구서는 등록·수정·삭제가 막혀요.`,
+      detail: '이미 잠근 달은 그대로 두고, 안 잠근 달만 잠가요. 풀 때도 한 번에 풀 수 있어요.',
+      confirmLabel: '회기 마감',
+    })
+    if (!ok) return
+    const res = await api.closeFiscal(f.year)
+    if (!res.ok) return toast.push(res.error || '마감에 실패했어요', { tone: 'warn' })
+    toast.push(`${f.name} 회기를 마감했어요`); load()
+  }
+  const reopenFiscal = async (f) => {
+    const ok = await confirm({
+      tone: 'warn', icon: <Icon.Warn size={22}/>, title: `${f.name} 회기 마감 해제`,
+      body: `${f.start} ~ ${f.end} 의 잠긴 달을 모두 풉니다. 이미 제출한 신고자료와 장부가 어긋날 수 있어요.`,
+      confirmLabel: '해제',
+    })
+    if (!ok) return
+    const res = await api.reopenFiscal(f.year)
+    if (!res.ok) return toast.push(res.error || '해제에 실패했어요', { tone: 'warn' })
+    toast.push(`${f.name} 회기 마감을 풀었어요`); load()
+  }
 
   const close = async () => {
     const res = await api.closePeriod(period, memo)
@@ -2869,6 +2901,38 @@ const ClosingPanel = ({ embedded = false }) => {
           이미 제출한 자료와 장부가 어긋나지 않아요.
         </div>
       </div>
+
+      {fiscals.length > 0 && (
+        <div className="card" style={{ overflow: 'hidden', marginBottom: 16 }}>
+          <div className="card-pad" style={{ paddingBottom: 8 }}>
+            <span className="fw-700 text-sm">회기 마감</span>
+            <span className="text-xs text-muted2" style={{ marginLeft: 8 }}>끝난 회기의 모든 달을 한 번에 잠가요</span>
+          </div>
+          <table className="table">
+            <tbody>
+              {fiscals.map(f => {
+                const all = f.closed === f.months
+                return (
+                  <tr key={f.year}>
+                    <td className="fw-600" style={{ width: 120 }}>{f.name}{f.seq ? ` (제${f.seq}기)` : ''}</td>
+                    <td className="text-sm text-muted num">{f.start} ~ {f.end}</td>
+                    <td className="text-sm" style={{ width: 150 }}>
+                      {all ? <span className="badge pos">마감됨</span>
+                        : f.closed > 0 ? <span className="text-muted">{f.months}달 중 {f.closed}달 잠김</span>
+                        : <span className="text-muted2">{f.ended ? '안 잠김' : '진행 중'}</span>}
+                    </td>
+                    <td style={{ width: 130, textAlign: 'right' }}>
+                      {all
+                        ? <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => reopenFiscal(f)}>회기 마감 해제</button>
+                        : f.ended && <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => closeFiscal(f)}>회기 마감</button>}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div className="card card-pad" style={{ marginBottom: 16 }}>
         <div className="row gap-12" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>

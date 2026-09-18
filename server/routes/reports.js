@@ -1,4 +1,5 @@
 const { Router } = require('express')
+const { notCarryover } = require('../lib/carryover')
 const { platformPool } = require('../platform/db')
 const { featuresOf } = require('../lib/entitlements')
 const { BUILTIN_REPORTS, visibleReports, featureKeyOf } = require('../platform/reportCatalog')
@@ -120,7 +121,7 @@ router.get('/vat.xlsx', async (req, res, next) => {
     const [rows] = await req.db.execute(
       `SELECT i.*, v.name AS vendor_name FROM invoices i
          LEFT JOIN vendors v ON i.vendor_id = v.id
-        WHERE ${months.map(() => 'i.issued_at LIKE ?').join(' OR ')}`,
+        WHERE (${months.map(() => 'i.issued_at LIKE ?').join(' OR ')}) AND ${notCarryover('i.')}`,   // 이월 잔액 제외(lib/carryover.js)
       months.map(m => `${year}-${m}%`))
     /* 직접 입력 거래의 세액을 함께 넘긴다 — 화면(세무관리)과 같은 값이 되도록.
        lib/vatAgg.js 한 곳에서 계산한다. */

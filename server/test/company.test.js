@@ -165,3 +165,15 @@ test('회기가 지금과 같으면 기준을 다시 잡지 않는다 — 저장
   assert.deepStrictEqual(r.set, { phone: '1' })
   assert.strictEqual(plan(cur, { fiscal_end_month: 13 }).field, 'fiscal_end_month')
 })
+
+test('장부 시작일 — 날짜만, 오늘까지, 비우면 풀린다(4단계)', () => {
+  assert.strictEqual(plan(live, { books_start: '2026-09-01' }).set.books_start, '2026-09-01')
+  assert.strictEqual(plan(live, { books_start: '' }).set.books_start, null)
+  const bad = plan(live, { books_start: '2026.9.1' })
+  assert.strictEqual(bad.ok, false)
+  assert.strictEqual(bad.field, 'books_start')
+  const future = plan(live, { books_start: '2026-09-16' })   // TODAY 다음 날 — 오늘 거래까지 막히게 된다
+  assert.strictEqual(future.ok, false)
+  assert.strictEqual(future.field, 'books_start')
+  assert.strictEqual('books_start' in plan(live, { phone: '2' }).set, false)   // 안 보내면 안 건드린다
+})
