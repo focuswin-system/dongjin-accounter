@@ -2505,6 +2505,110 @@ async function initDb(conn) {
     await runOnce('fix_txn_paid_status_space_v1', async () => {
       await c.execute("UPDATE transactions SET status='지급완료' WHERE kind='expense' AND status='지급 완료'")
     })
+
+    /* ── 반복거래(2026-09) — 정기 규칙(recurring_invoices·recurring_expenses)을 대신한다 ──
+     *
+     * 회차를 **기억하지 않는다.** 그 달에 이 반복거래로 만든 청구서·거래가 있는지만 본다(lib/repeat.js).
+     * last_generated·건너뛰기·소급 묶음이 어긋나 같은 달을 두 번 청구하던 사고가 여기서 났다.
+     * 설계: docs/02-design/features/repeat-templates.design.md
+     *
+     *   direction  in(입금) / out(출금)
+     *   creates    invoice(청구서) / txn(바로 출금 거래) — 입금은 늘 invoice
+     *   amount + vat_mode  exclusive(금액=공급가, +10%) / inclusive(금액=합계) / none(면세) / zero(영세)
+     *   period + anchor_month  매월·격월·분기·매년 + 기준 달(1–12). 매월이면 기준 달은 뜻이 없다
+     *   day_of_month  1–31(말일 clamp). 0 = 만들 때 날짜를 고른다
+     *   contract_id   계약 연결이면 계약이 진행중·기간 안일 때만 그 달 목록에 뜬다(계산) */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS repeat_templates (
+        id            VARCHAR(36) PRIMARY KEY,
+        direction     ENUM('in','out') NOT NULL,
+        creates       ENUM('invoice','txn') NOT NULL DEFAULT 'invoice',
+        vendor_id     VARCHAR(36),
+        contract_id   VARCHAR(36),
+        item          VARCHAR(255) NOT NULL DEFAULT '',
+        category      VARCHAR(100),
+        amount        BIGINT NOT NULL DEFAULT 0,
+        vat_mode      ENUM('exclusive','inclusive','none','zero') NOT NULL DEFAULT 'exclusive',
+        period        ENUM('${PERIODS.join("','")}') NOT NULL DEFAULT 'monthly',
+        anchor_month  TINYINT NOT NULL DEFAULT 1,
+        day_of_month  TINYINT NOT NULL DEFAULT 1,
+        account_id    VARCHAR(36),
+        pay_term      VARCHAR(12) NOT NULL DEFAULT 'net30',
+        pay_day       TINYINT NOT NULL DEFAULT 0,
+        active        TINYINT(1) NOT NULL DEFAULT 1,
+        created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_rt_contract (contract_id),
+        KEY idx_rt_vendor (vendor_id)
+      )
+    `)
+    // 어느 반복거래에서 만들었나 — '그 달 만듦' 판정의 근거. FK 없음(반복거래를 지워도 장부는 그대로)
+    await ensureColumn('invoices',     'template_id', 'template_id VARCHAR(36)')
+    await ensureColumn('transactions', 'template_id', 'template_id VARCHAR(36)')
+    await ensureIndex('invoices', 'idx_inv_template', 'template_id, issued_at')
+    await ensureIndex('transactions', 'idx_txn_template', 'template_id, date')
+
+    /* 옮기기 — **같은 id** 로 넣어 invoices/transactions.recurring_id 를 그대로 template_id 로 쓴다.
+     * 옛 표는 지우지 않는다(되돌릴 길). 코드만 안 쓴다. */
+    await runOnce('2026-09_repeat_templates_from_recurring', async () => {
+      const today = kstToday()
+      /* 기준일 = 시작일, 없으면 등록일. 청구일이 비면 기준일의 일자 — 옛 recurrence.js 의 앵커 규칙 그대로다
+         (비었다고 1일로 두면 25일에 돌던 규칙이 1일로 옮겨 온다). */
+      const ymd = (v) => (v instanceof Date ? kstDate(v.getTime()) : String(v || '').slice(0, 10))
+      const anchorDate = (r) => (/^\d{4}-\d{2}-\d{2}$/.test(ymd(r.start_date)) ? ymd(r.start_date) : ymd(r.created_at))
+      const monthOf = (r) => Math.min(12, Math.max(1, Number(anchorDate(r).slice(5, 7)) || 1))
+      const dayOf = (r) => Math.min(31, Math.max(1, Number(r.day_of_month) || Number(anchorDate(r).slice(8, 10)) || 1))
+      const [ins] = await c.execute(
+        `SELECT r.*, ct.vat_mode AS contract_vat_mode FROM recurring_invoices r
+           LEFT JOIN contracts ct ON ct.id = r.contract_id`)
+      for (const r of ins) {
+        // 매출: 금액=공급가. 과세유형은 계약이 규칙보다 세다(옛 effRecurVatMode 와 같은 판정)
+        const vm = r.contract_vat_mode
+          ? (r.contract_vat_mode === 'exempt' ? 'none' : r.contract_vat_mode === 'zero' ? 'zero' : 'exclusive')
+          : (r.vat_mode === 'none' || r.vat_mode === 'zero' ? r.vat_mode : 'exclusive')
+        const ended = r.end_date && String(r.end_date).slice(0, 10) < today
+        await c.execute(
+          `INSERT IGNORE INTO repeat_templates (id, direction, creates, vendor_id, contract_id, item, amount, vat_mode,
+             period, anchor_month, day_of_month, account_id, pay_term, pay_day, active, created_at)
+           VALUES (?,'in','invoice',?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [r.id, r.vendor_id, r.contract_id, r.item || '', Number(r.supply_amount) || 0, vm,
+           PERIODS.includes(r.period) ? r.period : 'monthly', monthOf(r), dayOf(r),
+           r.account_id, r.pay_term || 'net30', Number(r.pay_day) || 0, r.active && !ended ? 1 : 0, r.created_at])
+      }
+      const [outs] = await c.execute(
+        `SELECT r.*, cat.vat AS cat_vat FROM recurring_expenses r LEFT JOIN categories cat ON cat.name = r.category`)
+      for (const r of outs) {
+        // 매입: 금액=합계(VAT 포함). 옛 규칙은 vat_mode 가 비면 비목 부가세를 따랐다
+        const mode = r.vat_mode || (r.cat_vat === '10%' ? 'exclusive' : r.cat_vat === '영세' ? 'zero' : 'none')
+        const vm = mode === 'none' || mode === 'zero' ? mode : 'inclusive'
+        /* 당일 출금(자동이체)은 바로 출금 거래로 — 청구서를 거칠 이유가 없다(사용자 확정 2026-09-15).
+           ⚠ 단 **계좌가 없으면 바로 출금으로 옮기지 않는다.** 등록 폼은 계좌 없는 바로 출금을
+             막는데(normalizeTemplate), 옮겨 온 행은 그 문을 안 거친다. 그대로 두면 매달 목록에
+             멀쩡히 떠 있다가 만들 때 400 이 나고, 만들기는 전부 아니면 전무라 같이 고른 줄까지 죽는다.
+             청구서로 옮겨 두면 사람이 화면에서 계좌를 채워 바로 출금으로 바꿀 수 있다. */
+        const creates = r.pay_term === 'immediate' && r.account_id ? 'txn' : 'invoice'
+        const ended = r.end_date && String(r.end_date).slice(0, 10) < today
+        await c.execute(
+          `INSERT IGNORE INTO repeat_templates (id, direction, creates, vendor_id, contract_id, item, category, amount, vat_mode,
+             period, anchor_month, day_of_month, account_id, pay_term, pay_day, active, created_at)
+           VALUES (?,'out',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [r.id, creates, r.vendor_id, r.contract_id, r.category || '', r.category || null, Number(r.amount) || 0, vm,
+           PERIODS.includes(r.period) ? r.period : 'monthly', monthOf(r), dayOf(r),
+           r.account_id, r.pay_term || 'net30', Number(r.pay_day) || 0, r.active && !ended ? 1 : 0, r.created_at])
+      }
+      await c.execute('UPDATE invoices SET template_id = recurring_id WHERE recurring_id IS NOT NULL AND template_id IS NULL')
+      await c.execute('UPDATE transactions SET template_id = recurring_id WHERE recurring_id IS NOT NULL AND template_id IS NULL')
+    })
+    /* 옛 정기 표는 **보관용**이다 — 그런데 거래처·계약·계좌에 FK 가 걸려 있어, 두면 그것들을 지울 때
+       아무 화면에도 안 보이는 옛 규칙이 삭제를 막는다(500). FK 만 걷는다(행은 그대로). 멱등. */
+    for (const t of ['recurring_invoices', 'recurring_expenses']) {
+      const [fks] = await c.execute(
+        `SELECT CONSTRAINT_NAME AS name FROM information_schema.TABLE_CONSTRAINTS
+          WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND CONSTRAINT_TYPE = 'FOREIGN KEY'`, [schemaName, t])
+      for (const fk of fks) {
+        try { await c.execute(`ALTER TABLE \`${t}\` DROP FOREIGN KEY \`${fk.name}\``) }
+        catch (e) { console.warn(`[migration] ${t}.${fk.name} FK 제거 실패: ${e.message}`) }
+      }
+    }
   } finally {
     if (pooled) c.release()
   }

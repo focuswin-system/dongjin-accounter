@@ -1531,7 +1531,7 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", paidLabel = "정
 
 /* 예정 회차의 키·금액 — 표(rowKey)와 일괄 처리가 **같은 함수**를 써야 한다.
    따로 두면 체크한 줄과 실제로 처리되는 줄이 어긋나, 고르지 않은 회차가 발행된다. */
-export const pendingKey = (p) => p.recurring_id ? `r-${p.recurring_id}-${p.due_date}` : `m-${p.milestone_id}`
+export const pendingKey = (p) => `m-${p.milestone_id}`
 /** 거래처가 비어 있는 줄을 가리키는 이름표. 실제 거래처명과 겹치지 않게 괄호를 붙인다. */
 const NO_VENDOR = '(거래처 미지정)'
 // VAT 포함 금액. vat 가 없는 회차는 10% 로 본다(표·소계·합계가 모두 이 값을 쓴다).
@@ -1608,9 +1608,7 @@ const PendingScheduleTable = ({ rows, onIssue, onPaid, onOpenOrder, onDeleteSche
             </button>
             <button className="btn sm" onClick={() => onPaid(p)}>{isIssued ? "입금 처리" : "지급 처리"}</button>
             {/* 잘못 깔아둔 일정을 **보이는 자리에서** 치우게 한다. 여태는 주문 편집으로
-                들어가 그 줄을 찾아 빼는 수밖에 없었다.
-                ⚠ 정기 회차(source='recurring…')는 여기서 지우지 않는다 — 규칙이 만들어 낸
-                   회차라 지워도 다음에 다시 선다. 그건 정기 화면의 '건너뛰기'가 할 일이다. */}
+                들어가 그 줄을 찾아 빼는 수밖에 없었다. */}
             {p.source === 'milestone' && (
               <Popover align="right" width={210}
                 trigger={<button className="icon-btn sm" title="더보기"><Icon.More size={15}/></button>}>
@@ -1744,11 +1742,8 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
    * 있어서 "내가 한 게 맞나"가 된다.
    *
    * 그래서 축을 하나로 정리했다:
-   *   정기 회차 → **정기입금·정기지급 화면**이 단독으로 맡는다(놓친 회차는 사이드바 뱃지가 알린다)
-   *   마일스톤  → 여기. 계약이 일정을 만들고, 회계는 도래한 것만 받는다
-   *
-   * 둘은 성격이 다르다 — 정기 회차는 시계가 만들고(판단 없음), 마일스톤은 사람이 끊는다
-   * (현장이 그만큼 진행됐나를 판단). 한 목록에 두면 매번 "그냥 눌러도 되나"를 가려야 한다. */
+   *   매달 오가는 돈 → **반복거래 화면**이 맡는다(달을 골라 만든다)
+   *   마일스톤       → 여기. 계약이 일정을 만들고, 회계는 도래한 것만 받는다 */
   const load = async () => {
     const [rows, rec, pay, sched, txns] = await Promise.all([
       api.getInvoices(),
@@ -1765,8 +1760,9 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
      *   입금내역  돈이 들어왔다  (통장 대사가 보는 축)
      * 모든 입금은 입금내역에 있고, 그중 일부에 청구서가 붙는다. 그 흔적은 행에 적는다.
      *
-     * 빼는 것: 급여·재무 거래(대출·예적금)는 각자의 화면이 있고, **정기 규칙에서 나온 건**은
-     * 정기입금 화면이 맡는다(수시 화면에 섞으면 방금 갈라놓은 축이 다시 뭉개진다).
+     * 빼는 것: 급여·재무 거래(대출·예적금)는 각자의 화면이 있다.
+     * 반복거래로 만든 거래는 **뺀지 않는다** — 반복거래 화면은 장부가 아니라 만드는 틀이라,
+     * 통장에서 나간 돈은 여기서 보여야 대사가 된다(옛 정기 화면은 회차 목록을 따로 들고 있었다).
      *
      * ⚠ 청구서에 붙은 거래는 `isPnl` 로 걸러지지 않게 **먼저 통과시킨다.** 정산 거래는
      *   is_pnl=0 으로 들어온다 — 매출은 청구서 발행 시점에 이미 인식했으니 입금까지 손익에
@@ -1779,7 +1775,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
      *   "낸 기억은 있는데 목록에 없다"가 된다. 청구서가 없는 어음이라 invoiceId 로도
      *   안 걸린다. */
     setPlainTxns((txns || []).filter(t =>
-      !t.payrollId && !t.recurringId && isCountable(t)))
+      !t.payrollId && isCountable(t)))
     const merged = sched.map(s => ({ ...s, source: 'milestone' }))
       .sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')))
     /* 계약 등록 **전** 날짜의 회차는 발행예정에서 뺀다.
@@ -2129,12 +2125,9 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     }
   }
 
-  // 예정 회차 1건을 청구서로 발행/등록. 출처(마일스톤/정기청구/정기지출)마다 API가 다르다.
+  // 청구 일정 1건을 청구서로 발행/등록. 기지급 시 사용자가 고른 날짜(_date)를 쓴다
   const issuePending = (p, paid) => {
     const opts = { paid, account_id: paid ? (p._accountId || null) : undefined }
-    if (p.source === 'recurring')          return api.issueRecurring(p.recurring_id, { due: p.due_date, ...opts })
-    if (p.source === 'recurring-expense')  return api.issueRecurringExpense(p.recurring_id, { due: p.due_date, ...opts })
-    // 마일스톤은 기지급 시 사용자가 고른 날짜(_date)를 쓴다(정기 회차는 회차일 고정)
     return api.issueSchedule(p.milestone_id, { date: p._date || p.due_date, ...opts })
   }
 
@@ -2161,12 +2154,11 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     if (paid) { setPaidTarget(p); return }
     const supply = p.amount || 0
     const vat = p.vat != null ? p.vat : vatOf(supply)
-    const isRecurring = p.source === 'recurring'
     const ok = await confirm({
       tone: "brand", icon: <Icon.Receipt size={22}/>,
       title: isIssued ? "청구서 발행" : "매입 청구서 등록",
       body: isIssued
-        ? `${p.vendor_name} · ${p.type}${isRecurring ? ` (${fmtDateShort(p.due_date)} 회차)` : ''} ${fmtNum(supply + vat)}원(VAT 포함) 청구서를 발행해요. 미수금으로 등록됩니다.`
+        ? `${p.vendor_name} · ${p.type} ${fmtNum(supply + vat)}원(VAT 포함) 청구서를 발행해요. 미수금으로 등록됩니다.`
         : `${p.vendor_name} · ${p.type} ${fmtNum(supply + vat)}원(VAT 포함) 매입 청구서를 등록해요. 미지급금으로 잡힙니다.`,
       confirmLabel: isIssued ? "청구서 발행" : "청구서 등록",
     })
@@ -2179,7 +2171,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
 
   const handleMatch = async (invoiceId, amount, date, txnId, extra) => {
     /* 같은 날·같은 금액의 거래가 이미 있으면 서버가 만들지 않고 되묻는다(409 dup_txn).
-       그 되물음은 정산을 부르는 세 화면이 똑같이 받아야 하므로 lib/settleAsk 에 두었다. */
+       그 되물음은 정산을 부르는 두 화면이 똑같이 받아야 하므로 lib/settleAsk 에 두었다. */
     const r = await matchInvoiceAsking(confirm, invoiceId, { txnId: txnId || null, amount, date, ...extra })
     if (r.cancelled) return
     /* 결과를 보지 않고 성공 문구를 띄우면, 계좌 누락 같은 400을 사용자가 모른 채 넘어간다.

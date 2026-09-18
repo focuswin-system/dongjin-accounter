@@ -73,31 +73,12 @@ const AUDIT_RULES = [
   // 청구서 품목으로 단가표를 채운 것 — 그 주문의 '기준선'이 정해지는 순간이라 남긴다
   { m: 'POST',   re: /^\/api\/contracts\/([^/]+)\/items\/seed$/,       res: 'contract', action: 'items_seed', target: 1 },
 
-  // ── 정기 발행 ── 놓친 회차 일괄 발행은 한 번에 여러 건을 만든다
-  { m: 'POST',   re: /^\/api\/recurring-invoices\/issue-missed$/,       res: 'recurring_invoice', action: 'issue_missed' },
-  { m: 'POST',   re: /^\/api\/recurring-invoices\/([^/]+)\/issue$/,     res: 'recurring_invoice', action: 'issue', target: 1 },
-  { m: 'POST',   re: /^\/api\/recurring-expenses\/issue-missed$/,       res: 'recurring_expense', action: 'issue_missed' },
-  { m: 'POST',   re: /^\/api\/recurring-expenses\/([^/]+)\/issue$/,     res: 'recurring_expense', action: 'issue', target: 1 },
-
-  /* 정기 규칙 삭제 — 장부(청구서·거래)는 남지만 **앞으로의 청구·지출이 멈춘다.**
-     "왜 이번 달에 안 청구됐지"를 나중에 짚으려면 누가 언제 지웠는지가 있어야 한다. */
-  { m: 'DELETE', re: /^\/api\/recurring-invoices\/([^/]+)$/,            res: 'recurring_invoice', action: 'delete', target: 1 },
-  { m: 'DELETE', re: /^\/api\/recurring-expenses\/([^/]+)$/,            res: 'recurring_expense', action: 'delete', target: 1 },
-
-  /* ── 회차 건너뛰기 ── 그 달 청구가 사라지는 결정이다. "왜 3월만 없지"를 짚으려면 남아야 한다.
-     되살리기(DELETE)도 마찬가지 — 있던 게 다시 생기는 것이라 양쪽 다 기록한다. */
-  { m: 'POST',   re: /^\/api\/recurring-invoices\/([^/]+)\/skip$/,      res: 'recurring_invoice', action: 'skip',   target: 1 },
-  { m: 'DELETE', re: /^\/api\/recurring-invoices\/([^/]+)\/skip\/[^/]+$/, res: 'recurring_invoice', action: 'unskip', target: 1 },
-  { m: 'POST',   re: /^\/api\/recurring-expenses\/([^/]+)\/skip$/,      res: 'recurring_expense', action: 'skip',   target: 1 },
-  { m: 'DELETE', re: /^\/api\/recurring-expenses\/([^/]+)\/skip\/[^/]+$/, res: 'recurring_expense', action: 'unskip', target: 1 },
-
-  /* ── 소급 등록 ── 한 번에 최대 60건의 청구서·거래가 생기고, 되돌리기는 그만큼을 지운다.
-   * 과거 기간에 꽂는 일이라 "이 달 숫자가 왜 달라졌지"가 나중에 반드시 나온다.
-   * (미리보기는 아무것도 바꾸지 않으므로 기록하지 않는다) */
-  { m: 'POST',   re: /^\/api\/recurring-invoices\/([^/]+)\/backfill$/,  res: 'recurring_invoice', action: 'backfill', target: 1 },
-  { m: 'DELETE', re: /^\/api\/recurring-invoices\/backfill\/([^/]+)$/,  res: 'recurring_invoice', action: 'backfill_undo', target: 1 },
-  { m: 'POST',   re: /^\/api\/recurring-expenses\/([^/]+)\/backfill$/,  res: 'recurring_expense', action: 'backfill', target: 1 },
-  { m: 'DELETE', re: /^\/api\/recurring-expenses\/backfill\/([^/]+)$/,  res: 'recurring_expense', action: 'backfill_undo', target: 1 },
+  /* ── 반복거래 ── 한 번에 여러 건의 청구서·거래가 생긴다(또는 이미 들어온 돈에 붙는다).
+     반복거래 삭제는 장부를 안 지우지만 앞으로의 목록에서 사라진다 — "왜 이번 달에 안 떴지"를 짚으려면 남긴다. */
+  { m: 'POST',   re: /^\/api\/repeat-templates\/create$/,             res: 'repeat_template', action: 'repeat_create' },
+  { m: 'DELETE', re: /^\/api\/repeat-templates\/([^/]+)$/,            res: 'repeat_template', action: 'delete', target: 1 },
+  { m: 'PUT',    re: /^\/api\/repeat-templates\/([^/]+)$/,            res: 'repeat_template', action: 'edit',   target: 1 },
+  { m: 'PATCH',  re: /^\/api\/repeat-templates\/([^/]+)\/toggle$/,    res: 'repeat_template', action: 'toggle', target: 1 },
 
   // ── 급여·용역 지급 ── 계좌에서 돈이 나간다
   { m: 'POST',   re: /^\/api\/payroll\/generate$/,                      res: 'payroll', action: 'generate' },
@@ -229,16 +210,7 @@ const AUDIT_RULES = [
   { m: 'PUT',    re: /^\/api\/contracts\/([^/]+)$/,                        res: 'contract', action: 'edit',            target: 1 },
   { m: 'POST',   re: /^\/api\/contracts\/([^/]+)\/renew$/,                 res: 'contract', action: 'renew',           target: 1 },
   { m: 'POST',   re: /^\/api\/contracts\/([^/]+)\/milestones$/,            res: 'contract', action: 'save_milestones', target: 1 },
-  { m: 'POST',   re: /^\/api\/contracts\/([^/]+)\/recurring$/,             res: 'contract', action: 'add_recurring',   target: 1 },
-  { m: 'PATCH',  re: /^\/api\/contracts\/([^/]+)\/recurring\/sync$/,       res: 'contract', action: 'sync_recurring',  target: 1 },
-  { m: 'PATCH',  re: /^\/api\/contracts\/([^/]+)\/recurring\/[^/]+\/toggle$/, res: 'contract', action: 'toggle_recurring', target: 1 },
   { m: 'PUT',    re: /^\/api\/contracts\/([^/]+)\/cost-budget$/,           res: 'contract', action: 'edit_budget',     target: 1 },
-
-  // ── 정기 규칙 ── 금액·주기를 바꾸면 앞으로 자동 발행될 청구서가 바뀐다
-  { m: 'PUT',    re: /^\/api\/recurring-expenses\/([^/]+)$/,           res: 'recurring_expense', action: 'edit',   target: 1 },
-  { m: 'PATCH',  re: /^\/api\/recurring-expenses\/([^/]+)\/toggle$/,   res: 'recurring_expense', action: 'toggle', target: 1 },
-  { m: 'PUT',    re: /^\/api\/recurring-invoices\/([^/]+)$/,           res: 'recurring_invoice', action: 'edit',   target: 1 },
-  { m: 'PATCH',  re: /^\/api\/recurring-invoices\/([^/]+)\/toggle$/,   res: 'recurring_invoice', action: 'toggle', target: 1 },
 
   // ── 문서 ── 결의서·정산내역서 수정은 집행 금액과 짝이 맞아야 한다
   { m: 'PUT',    re: /^\/api\/resolutions\/([^/]+)$/,                  res: 'resolution', action: 'edit',         target: 1 },
@@ -285,9 +257,7 @@ const ACTION_LABELS = {
   // 등록·삭제
   import: '일괄 등록', delete: '삭제', edit: '수정', delete_month: '월 전체 삭제', generate: '급여 생성',
   // 발행
-  issue: '발행', issue_missed: '놓친 회차 일괄 발행',
-  backfill: '지난 회차 소급 등록', backfill_undo: '소급 등록 되돌리기',
-  skip: '회차 건너뛰기', unskip: '건너뛴 회차 되살리기',
+  issue: '발행', repeat_create: '반복거래로 만들기',
   bulk_settle: '청구서 일괄 정산', bulk_delete: '청구서 일괄 삭제',
   link_contract: '거래 주문 연결·해제',
   // 입금·지급
@@ -317,8 +287,6 @@ const ACTION_LABELS = {
   repay_adhoc: '수시 상환', collect: '회수', collect_adhoc: '수시 회수', redeem: '회수',
   // ── 주문 ──
   renew: '갱신', save_milestones: '청구 일정 저장', edit_budget: '원가 예산 수정',
-  add_recurring: '정기 규칙 추가', sync_recurring: '정기 규칙 맞춤',
-  toggle_recurring: '정기 규칙 켜기·끄기',
   // ── 문서 ──
   reload_lines: '집행 내역 다시 불러오기', duplicate: '복제',
   // 대상(구매품의서·지급결의서)은 자원 이름이 붙여 준다 — 행위 이름에 문서명을 넣지 않는다
@@ -334,6 +302,8 @@ const ACTION_LABELS = {
 
 const RESOURCE_LABELS = {
   closing: '월 마감', transaction: '거래', invoice: '청구서', contract: '주문',
+  repeat_template: '반복거래',
+  /* 옛 정기청구·정기지출 기록(2026-09 이전 감사 로그)을 읽을 때 이름이 비지 않게 남긴다 */
   recurring_invoice: '정기청구', recurring_expense: '정기지출',
   payroll: '급여', work_contract: '근로·용역계약',
   resolution: '지급결의서', settlement: '정산내역서',

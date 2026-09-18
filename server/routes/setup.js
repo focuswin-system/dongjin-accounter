@@ -24,7 +24,7 @@ router.get('/status', async (req, res, next) => {
       one('SELECT COUNT(*) FROM accounts'),
       one('SELECT COUNT(*) FROM vendors WHERE active = 1'),
       one("SELECT COUNT(*) FROM ref_items WHERE type = 'item'"),
-      one('SELECT COUNT(*) FROM recurring_invoices WHERE active = 1'),
+      one("SELECT COUNT(*) FROM repeat_templates WHERE active = 1"),
       one('SELECT COUNT(*) FROM transactions'),
       one('SELECT COUNT(*) FROM invoices'),
     ])

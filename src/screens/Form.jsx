@@ -1353,8 +1353,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
         {/* ── 등록 전 안내 ──
             막지 않는다. 같은 날 같은 금액이 정말 두 번 들어오기도 한다.
             대신 **더 나은 자리**가 있으면 그 자리로 보내 준다 — 청구서에 붙이면
-            미수금이 정리되고, 정기 규칙 쪽에서 처리하면 청구서까지 함께 만들어진다. */}
-        {!hintsOff && hints && (hints.duplicates?.length > 0 || hints.openInvoices?.length > 0 || hints.recurring?.length > 0) && (
+            미수금이 정리되고, 반복거래에서 만들면 그 달이 '만듦'이 되어 두 번 적히지 않는다. */}
+        {!hintsOff && hints && (hints.duplicates?.length > 0 || hints.openInvoices?.length > 0 || hints.repeats?.length > 0) && (
           <div className="entry-hints">
             {hints.duplicates?.length > 0 && (
               <div className="entry-hint warn">
@@ -1427,36 +1427,29 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
               )
             })()}
 
-            {hints.recurring?.length > 0 && (
+            {hints.repeats?.length > 0 && (
               <div className="entry-hint">
                 <Icon.Clock size={14}/>
                 <div style={{ flex: 1 }}>
-                  <b>정기 {kind === 'income' ? '입금' : '출금'}에서 처리할 건 같아요.</b>
-                  {/* 무엇 때문에 짚었는지 밝힌다 — 근거를 안 보여주면 사용자는 판단할 수 없고,
-                      판단할 수 없는 안내는 그냥 넘기게 된다. */}
+                  <b>이번 달 반복거래에 있는 건 같아요.</b>
+                  {/* 무엇 때문에 짚었는지 밝힌다 — 근거가 없으면 판단할 수 없고, 판단할 수 없는 안내는 넘기게 된다 */}
                   <div className="text-xs text-muted2" style={{ marginTop: 3 }}>
-                    {hints.recurring.map(r => (
+                    {hints.repeats.map(r => (
                       <div key={r.id}>
-                        {r.item || '(항목 없음)'}
+                        {r.item || '(내용 없음)'}
                         {r.contract_name ? ` · ${r.contract_name}` : ''}
-                        {r.variable ? ' · 금액 매번 다름' : ` · ${fmtNum(Number(r.amount))}원`}
-                        {r.due ? ` · 아직 처리 안 된 회차 ${fmtDateShort(r.due)}` : ''}
-                        <span style={{ marginLeft: 4 }}>
-                          ({r.why === 'both' ? '금액도 회차 날짜도 맞아요'
-                            : r.why === 'amount' ? '금액이 같아요'
-                            : '회차가 이 날짜 즈음이에요'})
-                        </span>
+                        {` · ${fmtNum(Number(r.amount))}원`}
+                        {r.date ? ` · ${fmtDateShort(r.date)}` : ''}
+                        <span style={{ marginLeft: 4 }}>({r.why === 'amount' ? '금액이 같아요' : '날짜와 금액이 가까워요'})</span>
                       </div>
                     ))}
                   </div>
                   <div className="text-xs text-muted2" style={{ marginTop: 3 }}>
-                    {kind === 'income'
-                      ? '그 화면에서 회차로 처리하면 청구서까지 함께 만들어져요.'
-                      : '그 화면에서 회차로 처리하면 회차 이력에 남아 두 번 나가지 않아요.'}
+                    반복거래에서 만들면 그 달이 '만듦'으로 남아 다음에 또 적지 않아요.
                   </div>
                   <button type="button" className="btn sm" style={{ marginTop: 6 }}
-                    onClick={() => { onClose?.(); location.hash = kind === 'income' ? '#recurring_invoice' : '#recurring_expense' }}>
-                    정기 {kind === 'income' ? '입금' : '출금'} 화면으로
+                    onClick={() => { onClose?.(); location.hash = '#recurring_invoice' }}>
+                    반복거래 화면으로
                   </button>
                 </div>
               </div>

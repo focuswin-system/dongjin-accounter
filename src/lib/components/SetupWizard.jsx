@@ -21,7 +21,7 @@ import { api } from '../api'
    계좌      → 입출금을 어디로 넣을지 정해진다(계좌 없는 거래는 잔액에 안 잡힌다)
    거래처    → 청구서·거래 입력에서 고를 수 있다
    품목      → 청구서 품목·주문 단가가 자동으로 채워진다
-   정기청구  → 매달 반복되는 매출이 자동으로 잡힌다 */
+   (반복거래는 여기 없다 — 세팅이 아니라 매달 하는 일이고, 입출금 › 반복거래에서 등록한다) */
 const STEPS = [
   {
     key: 'accounts', label: '계좌 · 카드', route: 'master_account',
@@ -42,13 +42,6 @@ const STEPS = [
     done: (s) => s.items > 0,
     doneText: (s) => `${s.items}건`,
     importHint: '엑셀로 한 번에 올릴 수 있어요',
-    optional: true,
-  },
-  {
-    key: 'recurring', label: '정기청구', route: 'recurring_invoice',
-    why: '매달 같은 금액이 나가는 매출이 있으면 걸어두세요. 회차가 자동으로 잡힙니다.',
-    done: (s) => s.recurring > 0,
-    doneText: (s) => `${s.recurring}건`,
     optional: true,
   },
 ]
@@ -110,8 +103,7 @@ export const SetupWizard = ({ open, onClose, onGo }) => {
                     </div>
                   )}
                   {/* 끝난 단계에도 **가는 길을 남긴다.**
-                      한 번 채웠다고 끝이 아니다 — 거래처는 계속 늘고, 정기청구도 두 번째·세 번째를
-                      걸게 된다. 예전엔 done 이면 버튼을 감춰서, 그 단계가 마법사 안에서
+                      한 번 채웠다고 끝이 아니다 — 거래처도 계좌도 계속 는다. 예전엔 done 이면 버튼을 감춰서, 그 단계가 마법사 안에서
                       막다른 길이 됐다(9곳 있는 거래처에 10번째를 더할 길이 없었다).
                       다만 말은 달라야 한다 — 아직인 것은 '등록하러', 이미 있는 것은 '더/수정'. */}
                   <button className={`btn sm ${done ? 'ghost' : ''}`} style={{ marginTop: 10 }}

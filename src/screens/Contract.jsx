@@ -14,7 +14,7 @@ import { LinkTxnDrawer } from '../lib/components/LinkTxnDrawer'
 import { InvoiceLines, CONTRACT_COLUMNS, CONTRACT_PROGRESS_COLUMNS } from '../lib/components/InvoiceLines'
 import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
 import { BILLING_MODES, TERM_MODES, BILLING_PERIODS, billingLabel, termLabel, periodLabel, periodMonths, cycleMonthsHint,
-         isRecurring, isProgress, isOpenEnded, hasTotal, amountLabel, renewalInfo, nextEndDate, recurringMismatch } from '../lib/renewal'
+         isRecurring, isProgress, isOpenEnded, hasTotal, amountLabel, renewalInfo, nextEndDate } from '../lib/renewal'
 // 라인 금액 규칙 — 서버 server/lib/lineAmount.js 와 한 벌(소수점을 살린다)
 import { num, basisValue, computeLineAmount } from '../lib/lineAmount'
 import { vatOf } from '../lib/vatRate'
@@ -248,7 +248,7 @@ const ContractTermFields = ({ form, set }) => {
             </div>
             <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
               주문 초기에 한 번만 받는 돈이 있으면 넣으세요. <b>청구 일정</b>에 1회성 항목으로 깔려서 대금청구에서 발행할 수 있고,
-              매달 나가는 {periodLabel(form.billing_period)} 청구는 정기청구가 따로 돕니다. 갱신 후 기간에는 붙지 않아요.
+              매달 나가는 {periodLabel(form.billing_period)} 청구는 반복거래로 만듭니다. 갱신 후 기간에는 붙지 않아요.
             </div>
           </div>
         </>
@@ -521,7 +521,7 @@ function RenewDrawer({ open, onClose, contract, onSaved }) {
     if (!res.ok) return toast.push(res.error || '갱신 처리에 실패했어요', { tone: 'warn' })
     if (isRenew) {
       toast.push(res.recurringExtended > 0
-        ? `${form.new_end_date}까지 갱신하고 정기청구도 함께 연장했어요`
+        ? `${form.new_end_date}까지 갱신하고 반복거래 금액도 맞췄어요`
         : `${form.new_end_date}까지 갱신됐어요`)
     } else {
       toast.push('미갱신으로 종료 처리했어요')
@@ -581,7 +581,7 @@ function RenewDrawer({ open, onClose, contract, onSaved }) {
               {recurring && (
                 <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
                   새 기간의 주문 총액은 이 금액 × 회차수로 자동 계산돼요.
-                  {contract.recurring_active > 0 && ' 연결된 정기청구 금액·종료일도 같이 맞춰집니다.'}
+                  {contract.recurring_active > 0 && ' 연결된 반복거래 금액도 같이 맞춰집니다.'}
                 </div>
               )}
             </div>
@@ -592,12 +592,6 @@ function RenewDrawer({ open, onClose, contract, onSaved }) {
           <input className="input" value={form.memo} onChange={e => setForm(f => ({ ...f, memo: e.target.value }))}
             placeholder={isRenew ? '예: 단가 5% 인상 합의' : '예: 내부 개발로 전환'}/>
         </div>
-        {contract.recurring_active > 0 && !isRenew && (
-          <div className="alert-row" style={{ background: 'var(--warn-soft)', borderColor: 'transparent' }}>
-            <Icon.Warn/>
-            <div className="text-sm">이 주문에 걸린 <b>정기청구 {contract.recurring_active}건</b>이 아직 활성입니다. 미갱신 종료 후 기준정보 → 정기청구에서 중지하세요.</div>
-          </div>
-        )}
       </div>
       <DrawerFooter onCancel={onClose} onSave={save} saveLabel={isRenew ? '갱신 처리' : '미갱신 종료'}/>
     </Drawer>
@@ -741,78 +735,11 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     const vendorObj = vendors.find(v => v.name === editForm.vendor);
     const payload = contractPayload(editForm, vendorObj?.id || c.vendor_id);
 
-    /* 주문을 '완료'로 닫을 때, 종료일이 없는 정기 규칙이 걸려 있으면 먼저 물어본다.
-       무기한 주문은 종료일이 없어 닫은 뒤에도 회차가 영원히 발행 후보로 뜬다.
-       동의 없이는 아무것도 바꾸지 않는다(서버도 close_recurring 을 받아야만 처리한다). */
-    /* 정기형에서 다른 청구방식으로 바꿀 때 — 걸려 있는 정기청구/정기지출을 멈출지 묻는다.
-       안 물으면 주문은 단건인데 매달 청구가 계속 나간다(과청구). 반대로 말없이 멈추면
-       청구가 왜 끊겼는지 알 수 없다. 그래서 무엇이 멈추는지 보여주고 고르게 한다. */
-    const wasRecurring = c.billing_mode === 'recurring'
-    const nowRecurring = editForm.billing_mode === 'recurring'
-    if (wasRecurring && !nowRecurring) {
-      const live = (c.recurrings || []).filter(r => r.active)
-      if (live.length > 0) {
-        const ok = await confirm({
-          title: '걸려 있는 정기 청구도 멈출까요?',
-          body: (
-            <>
-              <div style={{ marginBottom: 8 }}>
-                청구방식을 <b>{editForm.billing_mode === 'progress' ? '기성형' : '단건'}</b>으로 바꾸는데,
-                이 주문에 정기 {isPurchase ? '지출' : '청구'} {live.length}건이 아직 돌고 있어요.
-                그대로 두면 매 주기마다 계속 {isPurchase ? '지출이' : '청구가'} 잡힙니다.
-              </div>
-              <div>
-                오늘({localToday()})로 종료일을 맞춥니다. 그 전에 아직 발행 안 한 회차는
-                ‘놓친 회차’로 남아 그대로 처리할 수 있어요.
-              </div>
-            </>
-          ),
-          confirmLabel: '멈추기',
-          cancelLabel: '그대로 두기',
-        });
-        if (ok) payload.stop_recurring = true;
-      }
-    }
-
-    if (editForm.status === '완료' && c.status !== '완료') {
-      const open = await api.getOpenEndedRecurring(contractId);
-      const list = [...(open.invoices || []), ...(open.expenses || [])];
-      if (list.length > 0) {
-        const ok = await confirm({
-          title: '이 주문의 정기 청구·지출도 종료할까요?',
-          body: (
-            <>
-              <div style={{ marginBottom: 8 }}>
-                종료일이 없어서, 주문을 닫아도 회차가 계속 발행 후보로 올라옵니다.
-              </div>
-              <ul style={{ margin: '0 0 8px 16px', padding: 0 }}>
-                {(open.invoices || []).map(r => <li key={r.id}>정기청구 · {r.label || '(이름 없음)'}</li>)}
-                {(open.expenses || []).map(r => <li key={r.id}>정기지출 · {r.label || '(이름 없음)'}</li>)}
-              </ul>
-              <div>
-                종료일을 <b>{open.suggestedEndDate}</b>로 맞춥니다.
-                그 전에 아직 발행 안 한 회차는 ‘놓친 회차’로 남아 그대로 청구할 수 있어요.
-                나중에 정기청구·정기지출 화면에서 종료일을 지우면 되돌릴 수 있습니다.
-              </div>
-            </>
-          ),
-          confirmLabel: '종료일 맞추기',
-          cancelLabel: '그대로 두기',
-        });
-        if (ok) payload.close_recurring = true;
-      }
-    }
-
+    /* 반복거래는 따로 묻지 않는다 — 계약을 완료로 바꾸면 반복거래 목록에 저절로 안 뜨고(server/lib/repeat.js
+       contractAllows), 정기형을 다른 방식으로 바꾸면 서버가 그 반복거래를 끈다(routes/contracts.js PUT).
+       예전엔 여기서 종료일을 맞출지·멈출지를 두 번 물었다. */
     const res = await api.updateContract(contractId, payload);
     if (res.ok) {
-      const rc = res.recurringClosed;
-      if (rc && (rc.invoices || rc.expenses)) {
-        toast.push(`정기 ${rc.invoices + rc.expenses}건의 종료일을 ${fmtDateShort(rc.end_date)}로 맞췄어요`);
-      }
-      const rs = res.recurringStopped;
-      if (rs && (rs.invoices || rs.expenses)) {
-        toast.push(`정기 ${rs.invoices + rs.expenses}건을 오늘로 멈췄어요`);
-      }
       // 편집 폼에서 새로 올린 계약서 파일들을 주문 첨부(contract_docs)로 연결
       for (const d of (editForm.docs || [])) await api.addContractDoc(contractId, { url: d.url, name: d.name, doc_type: '계약서', size: d.size || 0 });
       toast.push("수정됐어요"); setEditOpen(false); reload();
@@ -951,69 +878,31 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       )}
       <Spacer h={20}/>
 
-      {/* 정기청구 연결 — 정기형 주문은 정기청구가 실제 청구를 돌리는 장치다.
-          주문이 원본이고 정기청구가 실행 → 어긋나면(금액·주기·종료일) 여기서 잡는다. */}
+      {/* 반복거래 — 정기형 계약은 반복거래 목록에서 달마다 골라 청구한다.
+          계약이 원본이라 금액·청구일·주기는 계약을 저장하면 반복거래가 따라간다(서버가 맞춘다).
+          여기서는 무엇이 걸려 있는지만 보여주고, 만드는 일은 반복거래 화면으로 보낸다. */}
       {recurring && (
         <>
           <div className="card card-pad">
             <div className="row gap-12" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
               <div>
-                {/* 매출 주문이면 정기청구(받을 돈), 매입 주문이면 정기지출(나갈 돈).
-                    이걸 안 나누면 매입 주문의 반복이 미수금으로 둔갑한다. */}
-                <div className="section-title">{isPurchase ? '정기지출' : '정기청구'}</div>
+                <div className="section-title">반복거래</div>
                 <div className="text-sm text-muted" style={{ marginTop: 4 }}>
                   {(c.recurrings || []).length === 0
-                    ? `이 주문은 ${periodLabel(c.billing_period)}마다 ${fmtNum(c.unit_amount || 0)}원이 ${isPurchase ? '나가는' : '청구되는'} 주문인데, 아직 ${isPurchase ? '정기지출' : '정기청구'}이 걸려 있지 않아요. 지금은 ${isPurchase ? '지출이' : '청구서가'} 자동 생성되지 않습니다.`
+                    ? `${periodLabel(c.billing_period)} ${fmtNum(c.unit_amount || 0)}원 계약인데 반복거래가 없어요. 주기당 금액을 넣고 계약을 저장하면 만들어져요.`
                     : `${periodLabel(c.billing_period)} ${fmtNum(c.unit_amount || 0)}원 · ${cycleMonthsHint(c.start_date, c.billing_day, c.billing_period, localToday())}${c.end_date ? ` · ${fmtDateShort(c.end_date)}까지` : ' · 해지할 때까지'}`}
                 </div>
-                {/* 정기청구는 주문에서 관리한다(기준정보에 두면 워크플로우가 끊긴다).
-                    주문이 원본, 정기청구는 실행 장치 → 어긋나면 '주문 조건으로 맞추기'로 되돌린다. */}
-                {(c.recurrings || []).map(r => {
-                  const gaps = recurringMismatch(c, r);
-                  return (
-                    <div key={r.id} style={{ marginTop: 8 }}>
-                      <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-                        <span className={`badge ${r.active ? 'pos' : 'outline'}`}><span className="dot"/>{r.active ? '활성' : '중지됨'}</span>
-                        <span className="text-xs text-muted2">
-                          {periodLabel(r.period)} {fmtNum(r.supply_amount)}원 · 매월 {r.day_of_month || 1}일 · {fmtDateShort(r.start_date)} ~ {r.end_date ? fmtDateShort(r.end_date) : '무기한'}
-                          {r.last_generated ? ` · 최근 발행 ${r.last_generated}` : ' · 아직 발행 이력 없음'}
-                        </span>
-                        <button className="btn ghost sm" onClick={async () => {
-                          const res = await api.toggleContractRecurring(contractId, r.id);
-                          if (!res.ok) return toast.push(res.error || '처리에 실패했어요', { tone: 'warn' });
-                          const what = isPurchase ? '정기지출' : '정기청구';
-                          toast.push(res.active ? `${what}을 재개했어요` : `${what}을 중지했어요. 다음 회차부터 생성되지 않아요`);
-                          reload();
-                        }}>{r.active ? '중지' : '재개'}</button>
-                      </div>
-                      {gaps.length > 0 && (
-                        <div className="alert-row" style={{ marginTop: 8, background: 'var(--warn-soft)', borderColor: 'transparent' }}>
-                          <Icon.Warn/>
-                          <div className="text-sm" style={{ flex: 1 }}>
-                            주문과 정기청구가 달라요 — {gaps.join(' / ')}
-                          </div>
-                          <button className="btn sm" onClick={async () => {
-                            const res = await api.syncContractRecurring(contractId);
-                            if (!res.ok) return toast.push(res.error || '맞추기에 실패했어요', { tone: 'warn' });
-                            toast.push('주문 조건으로 맞췄어요');
-                            reload();
-                          }}>주문 조건으로 맞추기</button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                {(c.recurrings || []).map(r => (
+                  <div key={r.id} className="text-xs text-muted2" style={{ marginTop: 6 }}>
+                    {r.item || '(내용 없음)'} · {fmtNum(r.amount)}원{r.active ? '' : ' · 꺼짐'}
+                  </div>
+                ))}
               </div>
-              {(c.recurrings || []).length === 0 && (
+              {(c.recurrings || []).length > 0 && (
                 <div className="ml-auto">
-                  <button className="btn primary" onClick={async () => {
-                    const res = await api.addContractRecurring(contractId);
-                    if (!res.ok) return toast.push(res.error || '생성에 실패했어요', { tone: 'warn' });
-                    toast.push(isPurchase
-                      ? '정기지출을 걸었어요. 회차가 되면 지출이 자동 생성됩니다'
-                      : '정기청구를 걸었어요. 대금 청구서의 "발행 예정"에서 회차를 발행하세요');
-                    reload();
-                  }}><Icon.Plus/> {isPurchase ? '정기지출 걸기' : '정기청구 걸기'}</button>
+                  <button className="btn" onClick={() => { location.hash = '#recurring_invoice' }}>
+                    반복거래에서 {isPurchase ? '만들기' : '청구하기'} <Icon.Right size={12}/>
+                  </button>
                 </div>
               )}
             </div>
@@ -1209,12 +1098,6 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                 </button>
               </div>
             </div>
-            {c.recurring_active > 0 && rn.stage === 'expired' && (
-              <div className="alert-row" style={{ marginTop: 14, background: 'var(--warn-soft)', borderColor: 'transparent' }}>
-                <Icon.Warn/>
-                <div className="text-sm">주문이 만료됐는데 <b>정기청구 {c.recurring_active}건</b>이 아직 돌고 있어요. 갱신하거나 정기청구를 중지하세요.</div>
-              </div>
-            )}
           </div>
           <Spacer h={20}/>
         </>
@@ -1253,13 +1136,12 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
               {/* 청구조차 안 한 달이 있으면 그게 이 막대의 요점이다 — 가장 눈에 띄게 적는다 */}
               {rp.missing > 0 && (
                 <div className="text-sm" style={{ marginTop: 10, color: 'var(--neg-ink)' }}>
-                  도래했는데 <b>청구서를 안 만든 회차가 {rp.missing}회</b> 있어요 (약 {fmtNum(notBilled)}원).
-                  정기 규칙의 <b>지난 회차 넣기</b>로 채울 수 있어요.
+                  도래했는데 <b>청구서를 안 만든 달이 {rp.missing}번</b> 있어요 (약 {fmtNum(notBilled)}원).
+                  반복거래에서 그 달로 넘겨 만들 수 있어요.
                 </div>
               )}
               <div className="text-xs text-muted2" style={{ marginTop: 10 }}>
-                해지할 때까지 도는 주문이라 채울 총액이 없어요. <b>오늘까지 도래한 회차</b>를 100으로 봅니다
-                {' '}— 건너뛴 달은 빼고요.
+                해지할 때까지 도는 주문이라 채울 총액이 없어요. <b>이번 계약기간에 오늘까지 도래한 달</b>을 100으로 봅니다.
               </div>
             </div>
             <Spacer h={20}/>
@@ -1291,7 +1173,6 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
               </div>
               <div className="text-xs text-muted2" style={{ marginTop: 10 }}>
                 해지할 때까지 도는 주문이라 채울 총액이 없어요. <b>오늘까지 청구한 돈</b>을 100으로 봅니다
-                {recurring && ' — 회차가 통째로 빠졌는지는 정기 규칙의 회차 이력에서 볼 수 있어요.'}
               </div>
             </div>
             <Spacer h={20}/>

@@ -2258,16 +2258,7 @@ body:has([data-modal-open]) {
   min-height: 100%; padding: 40px 24px 24px;
   display: flex; flex-direction: column;
 }
-.wz-dots { display: flex; gap: 6px; justify-content: center; margin-bottom: 36px; }
-.wz-dot {
-  width: 6px; height: 6px; border-radius: 999px; background: var(--line-strong);
-  transition: width .22s ease, background .22s ease;
-}
-.wz-dot.done { background: var(--ink); }
-.wz-dot.on { width: 20px; background: var(--ink); }
-
 .wz-stage { flex: 1; display: flex; flex-direction: column; gap: 28px; }
-.wz-stage-center { align-items: center; text-align: center; }
 .wz-head { display: flex; flex-direction: column; gap: 8px; animation: wzUp .34s ease both; }
 .wz-title { font-size: 27px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.3; color: var(--ink); }
 .wz-sub { font-size: 14.5px; color: var(--muted); line-height: 1.6; }
@@ -2281,16 +2272,6 @@ body:has([data-modal-open]) {
 .wz-stagger > *:nth-child(4) { animation-delay: .24s; }
 .wz-stagger > *:nth-child(5) { animation-delay: .30s; }
 .wz-stagger > *:nth-child(6) { animation-delay: .36s; }
-
-.wz-points { display: flex; flex-direction: column; gap: 20px; }
-.wz-point { display: flex; gap: 14px; align-items: flex-start; text-align: left; }
-.wz-point-ico {
-  width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
-  background: var(--surface-2); color: var(--ink);
-  display: grid; place-items: center;
-}
-.wz-point-title { font-size: 15px; font-weight: 700; margin-bottom: 3px; }
-.wz-point-desc { font-size: 13.5px; color: var(--muted); line-height: 1.6; }
 
 /* 고르는 카드 — 아이콘을 크게 세워 '무엇에 대한 선택인지'가 글보다 먼저 읽히게 */
 .wz-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
@@ -2321,12 +2302,6 @@ body:has([data-modal-open]) {
 .wz-card.on .wz-card-check { background: var(--ink); border-color: var(--ink); }
 
 .wz-note { font-size: 12.5px; color: var(--muted-2); }
-.wz-done-mark {
-  width: 64px; height: 64px; border-radius: 999px;
-  background: var(--pos-soft); color: var(--pos-ink);
-  display: grid; place-items: center;
-  animation: nudgePop .3s ease both;
-}
 .wz-foot {
   display: flex; align-items: center; gap: 8px;
   padding-top: 28px; margin-top: 28px; border-top: 1px solid var(--line);

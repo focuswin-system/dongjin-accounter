@@ -158,7 +158,6 @@ try {
   const routeDir = path.join(__dirname, '..', 'routes')
   // 계좌 없이 생성되는 것이 정상인 경로(미완료 상태로만 만든다)는 면제한다.
   const EXEMPT = {
-    'recurring.js': "정기지출은 '지급 대기'로 생성 — 잔액 집계 대상이 아니다",
   }
   const offenders = []
   for (const f of fs.readdirSync(routeDir).filter(n => n.endsWith('.js'))) {
@@ -437,10 +436,9 @@ try {
     '/api/purchase-reqs',
     // 세금 — 납부·환급이 지출·입금 거래를 만들고 지운다. 규칙이 0건이었다.
     '/api/tax',
-    /* 정기 라우터가 빠져 있었다 — 이름이 '기준정보처럼' 생겼지만 여기서 청구서·거래가
-       만들어지고 지워진다(발행·놓친회차 일괄·소급 등록/되돌리기). 실제로 소급 되돌리기가
-       최대 60건을 감사 기록 없이 지울 뻔했다. */
-    '/api/recurring-invoices', '/api/recurring-expenses',
+    /* 반복거래 — 이름이 '기준정보처럼' 생겼지만 여기서 청구서·거래가 한 번에 여러 건 만들어진다.
+       (옛 정기 라우터가 이 목록에서 빠져 소급 되돌리기가 최대 60건을 감사 기록 없이 지울 뻔했다) */
+    '/api/repeat-templates',
     /* 미지급 퇴직금도 장부다 — 자금 예측이 '나갈 돈'으로 세는 금액이라
        삭제·수정에 감사 기록이 없으면 "그 퇴직금 누가 지웠지"에 답할 수 없다. */
     '/api/unpaid-labor',
@@ -736,8 +734,8 @@ console.log('\n' + '━'.repeat(64))
 //
 // 라우트에서 INSERT INTO invoices 를 직접 하면, 창구마다 채우는 컬럼이 조금씩 달라진다.
 // 실제로 그렇게 어긋나 있던 것들:
-//   · 정기 회차에서 발행할 때만 recurring_id 를 채웠다 → 다른 창구로 만들면 그 회차가
-//     '발행예정'에 영영 남아, 나중에 또 발행하면 같은 돈을 두 번 청구한다
+//   · (옛) 정기 회차에서 발행할 때만 회차를 닫았다 → 다른 창구로 만들면 그 회차가
+//     '발행예정'에 남아, 나중에 또 발행하면 같은 돈을 두 번 청구했다
 //   · 엑셀 임포트 INSERT 에는 contract_id 컬럼이 아예 없었다
 //   · 번호 채는 SQL 이 두 벌로 복사돼 있었다
 // lib/invoiceCreate.js 의 createInvoice 는 origin 을 **필수**로 받아서, 새 창구를 내는
@@ -755,7 +753,7 @@ try {
   if (offenders.length) {
     fail('라우트가 청구서를 직접 INSERT 합니다:\n      · ' + offenders.join('\n      · ') +
          '\n      → lib/invoiceCreate.js 의 createInvoice(conn, { …, origin }) 를 쓰세요.' +
-         '\n        origin 을 안 적으면 정기 회차·마일스톤 뒤처리가 조용히 빠집니다.')
+         '\n        origin 을 안 적으면 반복거래·마일스톤 뒤처리가 조용히 빠집니다.')
   } else {
     ok(`청구서 생성 경로 일원화됨 (라우터 ${files.length}개)`)
   }

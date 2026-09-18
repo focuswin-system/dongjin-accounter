@@ -9,8 +9,8 @@ const { settleAcctCode } = require('../lib/acctCode')
 const { removeUploadedFile } = require('../lib/uploads')
 const { vatOf, vatRateOf, taxTypeOfMode } = require('../lib/vat')
 const { closedPeriodError } = require('../lib/closing')
-const { recurHistory } = require('../lib/recurHistory')
 const { kstDate } = require('../db')
+const { syncContractTemplates, stopContractTemplates, contractRepeatProgress } = require('../lib/repeat')
 
 const { createInvoice } = require('../lib/invoiceCreate')
 const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
@@ -18,105 +18,10 @@ const { linkCandidates } = require('../lib/orderLink')
 
 const router = Router()
 
-/* 정기 주문의 이행률은 **청구액을 분모로 쓰면 안 된다.**
- *
- * 청구를 안 한 달은 분모에서도 통째로 빠져서, 한 회차를 통째로 빠뜨려도 막대가 100%로 보인다
- * (창원YWCA 8월이 정확히 그렇게 사라졌다). 정기 주문은 규칙이 곧 스케줄이니
- * **'오늘까지 도래했어야 할 돈'** 을 셀 수 있다 — 그게 진짜 분모다.
- *
- * 기성형에는 이 개념이 없다. 실제 작업량대로 그때그때 청구하는 것이라
- * '나왔어야 할 돈'을 규칙으로 정할 수 없다 — 거기선 청구액이 분모가 맞다.
- *
- * @returns {{ due:number, billed:number, paid:number, missing:number }|null}
- *          걸린 정기 규칙이 없으면 null (화면이 이 막대를 안 그린다)
- */
-async function recurProgress(db, contractId, isPurchase, today) {
-  const table = isPurchase ? 'recurring_expenses' : 'recurring_invoices'
-  const kind  = isPurchase ? 'expense' : 'invoice'
-  const [rules] = await db.execute(
-    `SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch FROM ${table} r WHERE r.contract_id = ?`,
-    [contractId])
-  if (!rules.length) return null
-  const out = { due: 0, billed: 0, paid: 0, missing: 0 }
-  for (const rule of rules) {
-    // 등록일 하한 — 다른 라우트와 같은 방식으로 채운다(안 채우면 지난 회차가 예정으로 샌다)
-    rule.setup_date = rule.created_epoch != null ? kstDate(Number(rule.created_epoch) * 1000) : rule.setup_date
-    const h = await recurHistory(db, kind, rule, today)
-    out.due     += h.totals.due_amount
-    out.paid    += h.totals.paid_amount
-    // 청구한 돈 = 도래액에서 '만들지도 건너뛰지도 않은 달'을 뺀 것
-    out.billed  += h.totals.due_amount - h.totals.missing_amount
-    out.missing += h.totals.missing
-  }
-  return out
-}
-
-/* 주문을 '완료'로 닫을 때, 거기 걸린 정기 규칙 중 **종료일이 빈 것**에 종료일을 채운다.
- *
- * 왜 '끄기'(active=0)가 아니라 '종료일 채우기'인가:
- *   · 주문이 완료돼도 **마지막 회차 청구는 남는 게 정상**이다(8월 말 종료 → 8월분을 9월에 발행).
- *     상태로 목록에서 잘라내면 그 회차가 사라져 못 받은 돈이 조용히 없어진다.
- *     종료일을 채우면 과거 미청구분은 '놓친 회차'로 남고 미래만 멈춘다.
- *   · 종료일은 정기청구·정기지출 화면에 보이고 고칠 수 있다. 잘못됐으면 날짜만 지우면 원복된다.
- *     active 토글은 껐다 켜는 사이 회차가 '놓친 회차'로 몰려 되돌리기가 지저분하다.
- *
- * 기한 있는 주문은 이미 종료일이 있어 자연히 멈추므로 대상이 아니다(빈 것만 고른다).
- * '보류'는 끝난 게 아니라 잠깐 멈춘 것이라 여기서 다루지 않는다.
- */
-async function findOpenEndedRecurring(db, contractId) {
-  const [invoices] = await db.execute(
-    `SELECT id, item AS label, period, day_of_month FROM recurring_invoices
-     WHERE contract_id = ? AND active = 1 AND (end_date IS NULL OR end_date = '')`, [contractId])
-  const [expenses] = await db.execute(
-    `SELECT id, category AS label, period, day_of_month FROM recurring_expenses
-     WHERE contract_id = ? AND active = 1 AND (end_date IS NULL OR end_date = '')`, [contractId])
-  return { invoices, expenses }
-}
-
-/* 주문 조건 → 정기 규칙 반영. 주문이 원본이고 정기 규칙은 실행 장치다.
- *
- * ⚠ start_date 가 빠져 있었다. 그래서 주문 시작일을 고쳐도 규칙은 옛 날짜를 붙들었고,
- *   화면의 어긋남 경고(recurringMismatch)에도 시작일이 없어 **아무도 알려주지 않았다.**
- *   방향에 따라 덜 청구(시작일 앞당김)도, 더 청구(시작일 미룸)도 난다.
- * 소급은 이걸로 열리지 않는다 — 등록일 하한(setup_date)은 그대로다. 정합성만 맞춘다.
- */
-async function syncRecurringToContract(db, c, isPurchase) {
-  const start = c.start_date || ''
-  return isPurchase
-    ? (await db.execute(
-        'UPDATE recurring_expenses SET amount=?, period=?, day_of_month=?, start_date=?, end_date=? WHERE contract_id=?',
-        [Number(c.unit_amount) || 0, c.billing_period || 'monthly', c.billing_day || 1, start, c.end_date || null, c.id]))[0]
-    : (await db.execute(
-        'UPDATE recurring_invoices SET supply_amount=?, vat_mode=?, period=?, day_of_month=?, start_date=?, end_date=? WHERE contract_id=?',
-        [Number(c.unit_amount) || 0, vatRateOf(c.vat_mode) === 0 ? 'none' : 'exclusive',
-         c.billing_period || 'monthly', c.billing_day || 1, start, c.end_date || null, c.id]))[0]
-}
-
-/* 청구 방식을 정기형에서 **바꿨을 때** 정기 규칙을 멈춘다.
- * closeOpenEndedRecurring 과 달리 종료일이 이미 있는 규칙도 대상이다 —
- * 주문이 더 이상 정기형이 아닌데 그 종료일까지 계속 청구되면 안 된다.
- * 여기서도 '끄기'가 아니라 '종료일 채우기'다(과거 미청구분은 남기고 미래만 멈춘다). */
-async function stopRecurringOnModeChange(conn, contractId, endDate) {
-  const [ri] = await conn.execute(
-    `UPDATE recurring_invoices SET end_date = ?
-     WHERE contract_id = ? AND active = 1 AND (end_date IS NULL OR end_date = '' OR end_date > ?)`,
-    [endDate, contractId, endDate])
-  const [re] = await conn.execute(
-    `UPDATE recurring_expenses SET end_date = ?
-     WHERE contract_id = ? AND active = 1 AND (end_date IS NULL OR end_date = '' OR end_date > ?)`,
-    [endDate, contractId, endDate])
-  return { invoices: ri.affectedRows, expenses: re.affectedRows }
-}
-
-async function closeOpenEndedRecurring(conn, contractId, endDate) {
-  const [ri] = await conn.execute(
-    `UPDATE recurring_invoices SET end_date = ?
-     WHERE contract_id = ? AND active = 1 AND (end_date IS NULL OR end_date = '')`, [endDate, contractId])
-  const [re] = await conn.execute(
-    `UPDATE recurring_expenses SET end_date = ?
-     WHERE contract_id = ? AND active = 1 AND (end_date IS NULL OR end_date = '')`, [endDate, contractId])
-  return { invoices: ri.affectedRows, expenses: re.affectedRows }
-}
+/* 정기형 계약의 반복거래 — 등록·금액만 연동한다(lib/repeat.js syncContractTemplates).
+ * 갱신·완료 때 반복거래를 고치지 않는다. 그 달 목록에 뜰지는 반복거래 쪽이
+ * 계약의 상태·기간을 보고 계산한다(사용자 확정 2026-09-15). 정기형을 다른 방식으로 바꿀 때만 끈다. 예전엔 이 연동이 다섯 갈래였고
+ * 한 갈래라도 빠지면 청구가 멈추거나 계속 나갔다. */
 
 // cost_budget(JSON)이 손상된 행 하나가 주문 목록/상세 응답 전체를 500으로 만들지 않도록 안전 파싱.
 const safeBudget = (raw, fallback = null) => { if (!raw) return fallback; try { return JSON.parse(raw) } catch { return fallback } }
@@ -440,7 +345,7 @@ router.get('/export.xlsx', async (req, res, next) => {
     const kind = ['sales', 'purchase'].includes(req.query.kind) ? req.query.kind : 'all'
     let sql = `SELECT c.*, v.name AS vendor_name, v.gubu, ${METRIC_COLS},
         COALESCE((SELECT COUNT(*) FROM contract_renewals WHERE contract_id=c.id AND result='갱신'),0) AS renew_count,
-        COALESCE((SELECT COUNT(*) FROM recurring_invoices WHERE contract_id=c.id AND active=1),0) AS recurring_active
+        COALESCE((SELECT COUNT(*) FROM repeat_templates WHERE contract_id=c.id AND active=1),0) AS recurring_active
       FROM contracts c LEFT JOIN vendors v ON c.vendor_id = v.id WHERE 1=1`
     if (kind === 'purchase')   sql += " AND v.gubu IN ('A','E','C')"
     else if (kind === 'sales') sql += " AND (v.gubu IS NULL OR v.gubu IN ('B','C'))"
@@ -540,34 +445,24 @@ router.post('/:id/renew', async (req, res, next) => {
     )
 
     let recurringExtended = 0
-    let recurringClosed = null
     if (isRenew) {
       await conn.execute(
         'UPDATE contracts SET end_date=?, amount=?, unit_amount=?, current_term_start=?, status=? WHERE id=?',
         [new_end_date, nextAmount, recurring ? nextUnit : null, nextTermStart, '진행중', req.params.id]
       )
-      // 주문에 걸린 정기 반복도 새 종료일까지 연장 + 단가 반영.
-      // 매출이면 정기청구, 매입이면 정기지출 — 안 하면 갱신했는데 청구/지출이 끊긴다.
-      const [[vg]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [c.vendor_id || ''])
-      const isPurchaseC = vg && (vg.gubu === 'A' || vg.gubu === 'E')
-      const sql = isPurchaseC
-        ? 'UPDATE recurring_expenses SET end_date=?, amount=IF(? IS NULL, amount, ?) WHERE contract_id=? AND active=1'
-        : 'UPDATE recurring_invoices SET end_date=?, supply_amount=IF(? IS NULL, supply_amount, ?) WHERE contract_id=? AND active=1'
-      const [ri] = await conn.execute(sql,
-        [new_end_date, recurring ? nextUnit : null, recurring ? nextUnit : null, req.params.id])
-      recurringExtended = ri.affectedRows
+      /* 반복거래는 **금액만** 따라간다. 종료일은 반복거래에 없다 — 계약 기간이 목록 노출을 정한다. */
+      if (recurring) {
+        const [[vg]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [c.vendor_id || ''])
+        const r = await syncContractTemplates(conn,
+          { ...c, unit_amount: nextUnit, start_date: c.start_date }, !!(vg && (vg.gubu === 'A' || vg.gubu === 'E')))
+        recurringExtended = r.updated
+      }
     } else {
       await conn.execute("UPDATE contracts SET status = '완료' WHERE id = ?", [req.params.id])
-      /* 미갱신 종료 — 종료일이 빈 정기 규칙은 여기서 닫아준다.
-         갱신 쪽(위)은 종료일을 새 날짜로 밀어주는데 이쪽만 아무것도 안 해서,
-         무기한 주문을 닫아도 회차가 계속 후보로 떴다. 기준일은 주문 종료일(없으면 오늘). */
-      if (req.body.close_recurring) {
-        const endDate = c.end_date || kstToday()
-        recurringClosed = { ...(await closeOpenEndedRecurring(conn, req.params.id, endDate)), end_date: endDate }
-      }
+      // 미갱신 종료 — 반복거래는 건드리지 않는다. 계약이 '완료'라 그 달 목록에 더는 뜨지 않는다
     }
     await conn.commit()
-    res.json({ ok: true, seq: Number(maxseq) + 1, result: isRenew ? '갱신' : '미갱신', recurringExtended, recurringClosed })
+    res.json({ ok: true, seq: Number(maxseq) + 1, result: isRenew ? '갱신' : '미갱신', recurringExtended })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
@@ -920,15 +815,11 @@ router.get('/:id', async (req, res, next) => {
       'SELECT * FROM contract_renewals WHERE contract_id = ? ORDER BY seq DESC', [req.params.id]
     )
     const num = (v) => (v == null ? null : Number(v))
-    // 정기 반복은 매출이면 정기청구(받을 돈), 매입이면 정기지출(나갈 돈)에 들어 있다
-    const [recRows] = isPurchaseC
-      ? await req.db.execute(
-          'SELECT id, category AS item, amount AS supply_amount, period, day_of_month, start_date, end_date, active, last_generated FROM recurring_expenses WHERE contract_id = ?',
-          [req.params.id])
-      : await req.db.execute(
-          'SELECT id, item, supply_amount, period, day_of_month, start_date, end_date, active, last_generated FROM recurring_invoices WHERE contract_id = ?',
-          [req.params.id])
-    const recurrings = recRows.map(r => ({ ...r, supply_amount: Number(r.supply_amount), active: !!r.active }))
+    // 이 계약에 걸린 반복거래(매출이면 입금, 매입이면 출금)
+    const [recRows] = await req.db.execute(
+      'SELECT id, direction, item, amount, vat_mode, period, day_of_month, active FROM repeat_templates WHERE contract_id = ?',
+      [req.params.id])
+    const recurrings = recRows.map(r => ({ ...r, amount: Number(r.amount), active: !!r.active }))
 
     // 주문 품목표 + 품목별 누적 기성(이 주문의 청구서 line 합계 — 기성형에서만 채워진다)
     const [itemRows] = await req.db.execute(
@@ -990,10 +881,11 @@ router.get('/:id', async (req, res, next) => {
       foreign_vendor: !!(c.vendor_id && r.vendor_id && r.vendor_id !== c.vendor_id),
     }))
 
-    /* 정기 주문의 이행률 — 분모는 청구액이 아니라 '오늘까지 도래했어야 할 돈'.
-       기성형에는 이 개념이 없어 계산하지 않는다(위 recurProgress 주석 참고). */
+    /* 정기형 계약의 이행률 — 분모는 청구액이 아니라 '이번 계약기간에 도래했어야 할 돈'.
+       청구를 안 한 달도 분모에 들어가야 빠진 달이 보인다. 기성형에는 이 개념이 없다. */
     const recur_progress = c.billing_mode === 'recurring'
-      ? await recurProgress(req.db, req.params.id, m.is_purchase, kstToday())
+      ? await contractRepeatProgress(req.db, req.params.id, c.gubu === 'A' || c.gubu === 'E',
+          c.current_term_start || c.start_date, kstToday())
       : null
 
     res.json({
@@ -1203,7 +1095,7 @@ router.post('/', async (req, res, next) => {
        f.billing_mode, f.term_mode, f.unit_amount, f.billing_period, f.billing_day, f.initial_amount, f.term_months, f.notice_days, start_date||null, f.vat_mode]
     )
 
-    // 거래처 gubu로 매출/매입 판별 — 정기 반복을 정기청구(매출)에 걸지 정기지출(매입)에 걸지 결정.
+    // 거래처 gubu로 매출/매입 판별 — 반복거래를 입금으로 만들지 출금으로 만들지 결정.
     let gubu = null
     if (vendor_id) {
       const [[v]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [vendor_id])
@@ -1212,7 +1104,7 @@ router.post('/', async (req, res, next) => {
     const isPurchase = gubu === 'A' || gubu === 'E'
 
     /* 주문을 등록하면 청구할 것이 자동으로 '발행 예정'에 뜨도록, 유형에 맞춰 일정/정기반복을 깔아준다.
-     * (수동 설정을 깜빡해 청구가 누락되는 걸 막는다. 필요하면 청구 일정 탭·정기청구 탭에서 수정)
+     * (수동 설정을 깜빡해 청구가 누락되는 걸 막는다. 필요하면 청구 일정 탭·반복거래에서 수정)
      *
      * ⚠ 단, **이미 발행한 청구서·이미 오간 거래에서 거슬러 만든 주문**은 예외다(skip_schedule).
      *   그 돈은 이미 청구서나 거래로 존재한다. 그런데 여기서 일정을 깔면 **같은 금액이
@@ -1230,35 +1122,11 @@ router.post('/', async (req, res, next) => {
           [randomUUID(), id, '초기 일시금', 0, f.initial_amount, start_date || null, '예정']
         )
       }
-      /* 월 정액은 정기청구(매출)/정기지출(매입)로 자동 세팅 → 회차가 도래하면 발행예정에 뜬다.
-       *
-       * 예전엔 `&& start_date` 가 붙어 있어서 **시작일 없는 주문은 정기 규칙이 아예 안 만들어졌다.**
-       * 주문은 저장되고 월 정액도 적혀 있는데 청구만 조용히 빠지는 것이라, 사용자가 알 방법이
-       * 없었다(무기한 유지보수처럼 시작일이 모호한 주문에서 그대로 걸린다).
-       * 월 정액을 적었다는 건 청구·지급을 하겠다는 뜻이므로 규칙은 만들고, 언제부터 셀지는
-       * 엔진이 등록일로 받아준다(lib/recurrence.js 앵커 폴백). */
-      if (Number(f.unit_amount) > 0) {
-        if (isPurchase) {
-          /* ⚠ vat_mode 를 반드시 넣는다. 빠뜨리면 recurring.js 가 비목명으로 세액을 유추하는데,
-           * 여기서 category 에 넣는 값은 비목명이 아니라 **주문명**이라 조인이 절대 안 맞는다
-           * → modeFromCatVat(null) → 'none'(면세) → 과세 매입주문인데 매달 부가세 0으로 청구되어
-           *   **매입세액이 매달 사라졌다.** 바로 아래 매출(recurring_invoices)은 원래 넣고 있었다. */
-          await conn.execute(
-            `INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-            [randomUUID(), vendor_id || null, id, name || '정기지출', Number(f.unit_amount),
-             vatRateOf(f.vat_mode) === 0 ? 'none' : 'exclusive',
-             f.billing_period || 'monthly', f.billing_day || 1, start_date || '', f.end_date || null, null]
-          )
-        } else {
-          await conn.execute(
-            `INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-            [randomUUID(), vendor_id || null, id, name || '', Number(f.unit_amount), vatRateOf(f.vat_mode) === 0 ? 'none' : 'exclusive',
-             f.billing_period || 'monthly', f.billing_day || 1, start_date || '', f.end_date || null, null]
-          )
-        }
-      }
+      /* 월 정액 → 반복거래를 만든다(매출 계약이면 입금, 매입 계약이면 출금). 매달 반복거래 목록에서 골라 청구한다. */
+      await syncContractTemplates(conn, {
+        id, name, vendor_id, unit_amount: f.unit_amount, vat_mode: f.vat_mode,
+        billing_period: f.billing_period, billing_day: f.billing_day, start_date,
+      }, isPurchase)
     } else if (f.billing_mode === 'progress') {
       // 기성형: 총액·마일스톤 없음. 청구는 주문 상세의 '기성 청구'에서 그때그때 발행한다.
     } else if (Number(f.amount) > 0) {
@@ -1284,24 +1152,13 @@ router.post('/', async (req, res, next) => {
   }
 })
 
-/* 주문을 '완료'로 바꾸기 전에 "무엇이 멈추는지"를 화면이 먼저 보여줄 수 있게 하는 조회.
-   무기한 주문은 종료일이 없어 끝난 뒤에도 회차가 영원히 후보로 뜬다 — 그걸 여기서 잡는다. */
-router.get('/:id/recurring/open-ended', async (req, res, next) => {
-  try {
-    const [[c]] = await req.db.execute('SELECT end_date FROM contracts WHERE id = ?', [req.params.id])
-    if (!c) return res.status(404).json({ error: '주문을 찾을 수 없어요' })
-    const found = await findOpenEndedRecurring(req.db, req.params.id)
-    res.json({ ...found, suggestedEndDate: c.end_date || kstToday() })
-  } catch (e) { next(e) }
-})
-
 router.put('/:id', async (req, res, next) => {
   const { vendor_id, name, start_date, status, order_no, project_no, file_url, file_name, contract_no, cost_budget } = req.body
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     // 이번 텀 총액은 현재 텀 시작일 기준으로 다시 산출 (편집으로 단가·종료일이 바뀔 수 있음)
-    const [[cur]] = await conn.execute('SELECT current_term_start, start_date FROM contracts WHERE id = ? FOR UPDATE', [req.params.id])
+    const [[cur]] = await conn.execute('SELECT current_term_start, start_date, billing_mode, vendor_id FROM contracts WHERE id = ? FOR UPDATE', [req.params.id])
     if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     const termStart = cur.current_term_start || start_date || cur.start_date || null
     const f = model.normalize({ ...req.body, current_term_start: termStart })
@@ -1341,13 +1198,10 @@ router.put('/:id', async (req, res, next) => {
          WHERE contract_id = ? AND type = '일시' AND status = '예정'
            AND (invoice_id IS NULL OR invoice_id = '')`, [req.params.id])
     }
-    /* 정기형 → 단건/기성으로 되돌린 경우. 등록(POST)의 반대 방향인데 아무 처리가 없어서
-       **주문은 단건인데 매달 청구가 계속 나가고**(과청구), 주문금액 청구는 안 떴다(미청구).
-       청구를 멈추는 건 사용자가 모르면 안 되므로 화면이 동의를 받아 왔을 때만 한다. */
-    let recurringStopped = null
-    if (f.billing_mode !== 'recurring' && req.body.stop_recurring) {
-      recurringStopped = await stopRecurringOnModeChange(conn, req.params.id, kstToday())
-    }
+    /* 정기형 → 단건/기성으로 바뀌면 반복거래를 **끈다**(stopContractTemplates).
+       ⚠ contractAllows 는 청구 방식(billing_mode)을 보지 않는다 — 옛 정기지출이 총액형 발주에도
+         붙어 돌았기 때문이다(lib/repeat.js 주석). 그래서 끄지 않으면 방식을 바꿔도 계속 뜬다.
+       되돌리면(다시 정기형) syncContractTemplates 가 같은 방향 반복거래를 다시 켠다. */
     /* 단건으로 바뀌었는데 청구 일정이 없으면 만들어 준다(POST 와 같은 규칙).
        이미 있으면 건드리지 않는다 — 사용자가 선급/기성/잔금으로 쪼갠 걸 덮으면 안 된다.
 
@@ -1394,49 +1248,31 @@ router.put('/:id', async (req, res, next) => {
           [randomUUID(), req.params.id, '초기 일시금', 0, f.initial_amount, start_date || null, '예정'])
       }
     }
+    const [[vg]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [vendor_id || ''])
+    const purchaseSide = !!(vg && (vg.gubu === 'A' || vg.gubu === 'E'))
+    /* 거래처를 매출처↔매입처로 바꾸면 계약의 방향이 뒤집힌다. 그대로 두면 sync 가 새 방향에서
+       아무것도 못 찾아 **두 번째 반복거래를 만들고**, 옛 방향 것은 켜진 채 남아 달별 목록에
+       유령 청구 줄이 선다(같은 계약이 입금·출금 양쪽으로). 옛 방향 것을 끈다 — 다만 그 방향에
+       여러 벌이면 손대지 않는다(원가로 붙인 반복거래를 끄면 안 된다. sync 와 같은 규칙). */
+    if (cur.vendor_id && cur.vendor_id !== vendor_id) {
+      const [[pg]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [cur.vendor_id])
+      const prevSide = !!(pg && (pg.gubu === 'A' || pg.gubu === 'E'))
+      if (prevSide !== purchaseSide) await stopContractTemplates(conn, req.params.id, prevSide, { onlyIfSingle: true })
+    }
     if (f.billing_mode === 'recurring' && Number(f.unit_amount) > 0) {
-      /* 규칙이 **하나도 없을 때만** 만든다(active=0 도 '있는' 것으로 친다).
-         사용자가 일부러 꺼 둔 정기청구를, 주문을 저장했다는 이유로 되살리면 안 된다. */
-      const [[vg]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [vendor_id || ''])
-      const isPurchaseC = vg && (vg.gubu === 'A' || vg.gubu === 'E')
-      const table = isPurchaseC ? 'recurring_expenses' : 'recurring_invoices'
-      const [[cnt]] = await conn.execute(`SELECT COUNT(*) AS n FROM ${table} WHERE contract_id = ?`, [req.params.id])
-      if (Number(cnt.n) > 0) {
-        /* 이미 규칙이 있으면 주문 조건으로 맞춘다 — 주문이 원본이기 때문이다.
-           예전엔 주문을 고쳐도 규칙이 그대로여서, 시작일을 7/1로 당겨도 규칙은 8/5를 붙들었다.
-           (화면의 '주문 조건으로 맞추기' 버튼은 그대로 둔다 — 규칙이 다른 이유로 어긋났을 때 쓴다) */
-        await syncRecurringToContract(conn, {
-          id: req.params.id, unit_amount: f.unit_amount, vat_mode: f.vat_mode,
-          billing_period: f.billing_period, billing_day: f.billing_day,
-          start_date, end_date: f.end_date,
-        }, isPurchaseC)
-      } else {
-        const vatMode = vatRateOf(f.vat_mode) === 0 ? 'none' : 'exclusive'
-        if (isPurchaseC) {
-          await conn.execute(
-            `INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, vat_mode, period, day_of_month, start_date, end_date, account_id)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-            [randomUUID(), vendor_id || null, req.params.id, name || '정기지출', Number(f.unit_amount), vatMode,
-             f.billing_period || 'monthly', f.billing_day || 1, start_date || '', f.end_date || null, null])
-        } else {
-          await conn.execute(
-            `INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-            [randomUUID(), vendor_id || null, req.params.id, name || '', Number(f.unit_amount), vatMode,
-             f.billing_period || 'monthly', f.billing_day || 1, start_date || '', f.end_date || null, null])
-        }
-      }
+      /* 반복거래가 없으면 만들고, 있으면 금액·과세·주기·청구일을 계약 값으로 맞춘다(계약이 원본).
+         꺼 둔 반복거래도 '있는' 것으로 친다 — 저장했다는 이유로 되살리지 않는다. */
+      await syncContractTemplates(conn, {
+        id: req.params.id, name, vendor_id, unit_amount: f.unit_amount, vat_mode: f.vat_mode,
+        billing_period: f.billing_period, billing_day: f.billing_day, start_date,
+      }, purchaseSide)
+    } else if (cur.billing_mode === 'recurring' && f.billing_mode !== 'recurring') {
+      // 정기형 → 다른 방식: 청구 일정과 반복거래로 같은 돈을 두 번 청구하지 않게 끈다(지우지 않는다)
+      await stopContractTemplates(conn, req.params.id, purchaseSide)
     }
 
-    /* '완료'로 닫으면서 화면이 동의를 받아 왔을 때만 정기 규칙의 종료일을 채운다.
-       요청하지 않으면 아무것도 안 한다 — 사용자가 모르는 사이에 청구가 멈추면 안 된다. */
-    let recurringClosed = null
-    if (status === '완료' && req.body.close_recurring) {
-      const endDate = f.end_date || kstToday()
-      recurringClosed = { ...(await closeOpenEndedRecurring(conn, req.params.id, endDate)), end_date: endDate }
-    }
     await conn.commit()
-    res.json({ ok: true, recurringClosed, recurringStopped })
+    res.json({ ok: true })
   } catch (e) {
     await rollbackQuietly(conn)
     if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '이미 사용 중인 주문번호예요' })
@@ -1461,24 +1297,15 @@ router.delete('/:id', async (req, res, next) => {
     const [[cnt]] = await conn.execute(`
       SELECT
         (SELECT COUNT(*) FROM invoices           WHERE contract_id = ?) AS invs,
-        (SELECT COUNT(*) FROM transactions        WHERE contract_id = ? OR cost_contract_id = ?) AS txns,
-        (SELECT COUNT(*) FROM recurring_invoices  WHERE contract_id = ?) AS recin,
-        (SELECT COUNT(*) FROM recurring_expenses  WHERE contract_id = ?) AS recex`,
-      [id, id, id, id, id])
+        (SELECT COUNT(*) FROM transactions        WHERE contract_id = ? OR cost_contract_id = ?) AS txns`,
+      [id, id, id])
     const parts = []
     if (Number(cnt.invs)  > 0) parts.push(`청구서 ${cnt.invs}건`)
     if (Number(cnt.txns)  > 0) parts.push(`거래 ${cnt.txns}건`)
-    if (Number(cnt.recin) > 0) parts.push(`정기청구 ${cnt.recin}건`)
-    if (Number(cnt.recex) > 0) parts.push(`정기지출 ${cnt.recex}건`)
     if (parts.length) {
       await rollbackQuietly(conn)
-      // 어디서 정리하는지까지 알려준다. 예전에는 "먼저 정리하세요"라고만 해서,
-      // 정작 정기지출·정기청구는 지울 화면이 없어 사용자가 막다른 골목에 갇혔다.
-      const where = (Number(cnt.recin) > 0 || Number(cnt.recex) > 0)
-        ? " 정기청구·정기지출은 기준정보 화면에서 삭제할 수 있어요."
-        : ""
       return res.status(409).json({
-        error: `이 주문엔 ${parts.join(' · ')}이 연결돼 있어 지울 수 없어요. 먼저 그 기록을 정리하거나, 주문 상태를 '완료'·'보류'로 두세요.${where}`,
+        error: `이 주문엔 ${parts.join(' · ')}이 연결돼 있어 지울 수 없어요. 먼저 그 기록을 정리하거나, 주문 상태를 '완료'·'보류'로 두세요.`,
       })
     }
 
@@ -1492,6 +1319,8 @@ router.delete('/:id', async (req, res, next) => {
     await conn.execute('DELETE FROM contract_items     WHERE contract_id = ?', [id])
     await conn.execute('DELETE FROM contract_renewals  WHERE contract_id = ?', [id])
     await conn.execute('DELETE FROM contract_docs      WHERE contract_id = ?', [id])
+    // 반복거래는 이 계약에서 만든 복사틀이다 — 계약이 없으면 뜰 곳도 없다(만든 청구서는 위에서 이미 0건 확인)
+    await conn.execute('DELETE FROM repeat_templates   WHERE contract_id = ?', [id])
     await conn.execute('DELETE FROM contracts          WHERE id = ?', [id])
     await conn.commit()
     // 커밋 후 파일 정리 — 실패해도 주문 삭제는 이미 끝났으므로 조용히 넘어간다(고아 파일만 남을 뿐)
@@ -1503,83 +1332,6 @@ router.delete('/:id', async (req, res, next) => {
   } finally {
     conn.release()
   }
-})
-
-// 주문의 정기 반복은 매출/매입에 따라 들어가는 곳이 다르다.
-//   매출 주문(gubu B·미상) → recurring_invoices (받을 돈: 정기청구)
-//   매입 주문(gubu A·E)    → recurring_expenses (나갈 돈: 정기지출)
-// 이걸 안 나누면 매입 주문에 건 반복이 '받을 돈(미수금)'으로 둔갑한다.
-const purchaseContract = (c) => c.gubu === 'A' || c.gubu === 'E'
-const loadContractWithGubu = async (db, id) => {
-  const [[c]] = await db.execute(
-    'SELECT c.*, v.gubu FROM contracts c LEFT JOIN vendors v ON c.vendor_id = v.id WHERE c.id = ?', [id]
-  )
-  return c
-}
-
-// 정기형 주문 → 정기청구(매출) 또는 정기지출(매입) 걸기.
-// 주문의 주기·금액·기간·거래처를 그대로 가져간다 (주문이 원본, 반복은 실행 장치).
-router.post('/:id/recurring', async (req, res, next) => {
-  try {
-    const c = await loadContractWithGubu(req.db, req.params.id)
-    if (!c) return res.status(404).json({ error: '주문을 찾을 수 없어요' })
-    if (c.billing_mode !== 'recurring') return res.status(400).json({ error: '정기형 주문이 아니에요' })
-    if (!c.unit_amount)  return res.status(400).json({ error: '주기당 금액이 없어요' })
-    // 시작일은 없어도 된다 — 없으면 등록일부터 센다(lib/recurrence.js 앵커 폴백).
-    // 예전엔 여기서 400으로 막아, 시작일이 모호한 무기한 주문은 정기청구를 걸 길이 없었다.
-
-    const isPurchase = purchaseContract(c)
-    const table = isPurchase ? 'recurring_expenses' : 'recurring_invoices'
-    const [[dup]] = await req.db.execute(`SELECT COUNT(*) AS n FROM ${table} WHERE contract_id=? AND active=1`, [req.params.id])
-    if (Number(dup.n) > 0) {
-      return res.status(409).json({ error: `이미 이 주문에 걸린 ${isPurchase ? '정기지출' : '정기청구'}이 있어요` })
-    }
-
-    const id = randomUUID()
-    if (isPurchase) {
-      await req.db.execute(
-        `INSERT INTO recurring_expenses (id, vendor_id, contract_id, category, amount, period, day_of_month, start_date, end_date, account_id)
-         VALUES (?,?,?,?,?,?,?,?,?,?)`,
-        [id, c.vendor_id || null, c.id, c.name || '정기지출', Number(c.unit_amount),
-         c.billing_period || 'monthly', c.billing_day || 1, c.start_date || '', c.end_date || null, req.body.account_id || null]
-      )
-    } else {
-      await req.db.execute(
-        `INSERT INTO recurring_invoices (id, vendor_id, contract_id, item, supply_amount, vat_mode, period, day_of_month, start_date, end_date, account_id)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-        [id, c.vendor_id || null, c.id, c.name || '', Number(c.unit_amount), vatRateOf(c.vat_mode) === 0 ? 'none' : 'exclusive',
-         c.billing_period || 'monthly', c.billing_day || 1, c.start_date || '', c.end_date || null, req.body.account_id || null]
-      )
-    }
-    res.json({ ok: true, id, kind: isPurchase ? 'expense' : 'invoice' })
-  } catch (e) { next(e) }
-})
-
-// 주문에 걸린 정기 반복을 주문 조건에 다시 맞춘다(금액·주기·청구일·종료일).
-router.patch('/:id/recurring/sync', async (req, res, next) => {
-  try {
-    const c = await loadContractWithGubu(req.db, req.params.id)
-    if (!c) return res.status(404).json({ error: '주문을 찾을 수 없어요' })
-    if (c.billing_mode !== 'recurring') return res.status(400).json({ error: '정기형 주문이 아니에요' })
-    const isPurchase = purchaseContract(c)
-    // 매출 정기청구는 주문의 과세/면세(vat_mode)도 함께 맞춘다(주문을 과세↔면세로 바꾼 뒤 sync 시 반영).
-    const r = await syncRecurringToContract(req.db, c, isPurchase)
-    res.json({ ok: true, updated: r.affectedRows })
-  } catch (e) { next(e) }
-})
-
-// 주문에 걸린 정기 반복 중지/재개 — 매출·매입 어느 쪽이든 주문 화면에서 처리한다
-router.patch('/:id/recurring/:recId/toggle', async (req, res, next) => {
-  try {
-    const c = await loadContractWithGubu(req.db, req.params.id)
-    if (!c) return res.status(404).json({ error: '주문을 찾을 수 없어요' })
-    const table = purchaseContract(c) ? 'recurring_expenses' : 'recurring_invoices'
-    const [[row]] = await req.db.execute(`SELECT active FROM ${table} WHERE id=? AND contract_id=?`, [req.params.recId, req.params.id])
-    if (!row) return res.status(404).json({ error: '정기 항목을 찾을 수 없어요' })
-    const next_ = row.active ? 0 : 1
-    await req.db.execute(`UPDATE ${table} SET active=? WHERE id=?`, [next_, req.params.recId])
-    res.json({ ok: true, active: !!next_ })
-  } catch (e) { next(e) }
 })
 
 router.post('/:id/milestones', async (req, res, next) => {

@@ -108,8 +108,11 @@ async function seedInto(c) {
       console.log('⏭️  임직원 이미 존재, 건너뜀')
     }
 
-    // ─── 4. 정기 지출 ────────────────────────────────────────────
-    const [[{ recCnt }]] = await c.execute('SELECT COUNT(*) AS recCnt FROM recurring_expenses')
+    // ─── 4. 반복거래(출금) ────────────────────────────────────────────
+    /* ⚠ 옛 recurring_expenses 가 아니라 repeat_templates 에 넣는다.
+       옛 표는 이제 아무도 읽지 않고, 이관(runOnce '2026-09_repeat_templates_from_recurring')은
+       시드가 돌 무렵 이미 끝난 것으로 표시돼 있어 — 옛 표에 넣으면 화면에 영영 안 보인다. */
+    const [[{ recCnt }]] = await c.execute('SELECT COUNT(*) AS recCnt FROM repeat_templates')
     if (recCnt === 0) {
       const getVendorId = async (name) => {
         const [rows] = await c.execute('SELECT id FROM vendors WHERE name = ?', [name])
@@ -132,13 +135,15 @@ async function seedInto(c) {
       for (const r of recurring) {
         const vendorId = await getVendorId(r.vendor)
         await c.execute(
-          'INSERT INTO recurring_expenses (id, vendor_id, category, amount, period, day_of_month, start_date, account_id, active) VALUES (?,?,?,?,?,?,?,?,?)',
-          [randomUUID(), vendorId, r.cat, r.amount, r.period, r.day, '2026-01-01', 'acc-001', r.active]
+          `INSERT INTO repeat_templates (id, direction, creates, vendor_id, item, category, amount, vat_mode,
+             period, anchor_month, day_of_month, account_id, pay_term, active)
+           VALUES (?,'out','invoice',?,?,?,?,'inclusive',?,1,?,?,'net30',?)`,
+          [randomUUID(), vendorId, r.cat, r.cat, r.amount, r.period, r.day, 'acc-001', r.active]
         )
       }
-      console.log(`✅ 정기지출 ${recurring.length}건 등록`)
+      console.log(`✅ 반복거래(출금) ${recurring.length}건 등록`)
     } else {
-      console.log('⏭️  정기지출 이미 존재, 건너뜀')
+      console.log('⏭️  반복거래 이미 존재, 건너뜀')
     }
 
     console.log('\n✅ 기준정보 시딩 완료')

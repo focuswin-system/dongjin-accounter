@@ -29,9 +29,8 @@ const { randomUUID } = require('crypto')
 const { futureDateError, kstToday } = require('../db')
 const { closedPeriodError } = require('./closing')
 const { ledgerError } = require('./ledger')
-const { vatFields } = require('./vat')
+const { insertExpenseTxn } = require('./directTxn')
 const { settleAcctCode } = require('./acctCode')
-const { acctCodeByCategoryName } = require('./categoryAccount')
 const { recalcInvoiceStatus } = require('./invoiceStatus')
 const { lookalikeSettleTxns, dupSettleMessage } = require('./settleTxn')
 const { httpError } = require('./withTx')
@@ -364,7 +363,7 @@ async function executeDoc(conn, table, id, body = {}) {
       if (msg) throw httpError(409, msg, { code: 'dup_txn' })
     }
 
-    const newId = randomUUID()
+    let newId = randomUUID()
     if (inv) {
       /* 청구서 정산 — 매입은 청구서 받을 때 이미 인식됐고, 지금은 그때 생긴 외상매입금이 사라진다.
          그래서 계정은 외상매입금, 비목은 '대금 지급', 세액 칸은 비운다(청구서 쪽에서 센다).
@@ -376,17 +375,14 @@ async function executeDoc(conn, table, id, body = {}) {
          settleAcctCode('expense'), '대금 지급', amt, effDate, r._payMethod,
          '지급완료', r.doc_no, `${label} ${r.doc_no} 처리`])
     } else {
-      /* 청구서 없는 실제 비용 — 부가세 칸을 채워야 부가세 집계(lib/vatAgg.js)에 잡힌다.
+      /* 청구서 없는 실제 비용 — 부가세·계정 칸은 공용 함수가 채운다(lib/directTxn.js, 반복거래와 같은 규칙).
          증빙유형이 불공제(간이영수증 등)면 집계가 알아서 공제에서 뺀다. */
-      const vat = vatFields({ amount: amt, tax_type: body.tax_type, vat_deductible: body.vat_deductible })
-      const acctCode = await acctCodeByCategoryName(conn, category, 'expense')
-      await conn.execute(
-        `INSERT INTO transactions (id, kind, vendor_id, account_id, account_code, category, amount, date, method, status, doc_no, memo,
-                                   supply_amount, vat_amount, tax_type, vat_deductible, evid_type)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [newId, 'expense', r.vendor_id || null, acct, acctCode, category, amt, effDate, r._payMethod,
-         '지급완료', r.doc_no, `${label} ${r.doc_no} 처리`,
-         vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible, String(body.evid_type || '').trim() || null])
+      newId = await insertExpenseTxn(conn, {
+        vendorId: r.vendor_id, accountId: acct, category, amount: amt, date: effDate, method: r._payMethod,
+        docNo: r.doc_no, memo: `${label} ${r.doc_no} 처리`,
+        taxType: body.tax_type, vatDeductible: body.vat_deductible,
+        evidType: String(body.evid_type || '').trim() || null,
+      })
     }
     linkedTxnId = newId
     txnCreated = true

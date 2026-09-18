@@ -16,9 +16,10 @@ import { Icon } from './ui'
  * 그래서 축을 둘로 바꿨다.
  *   1) **돈의 방향** — "돈 나간 거 어디 기록하지? 들어온 거 어디 기록하지?"에 바로 답한다.
  *      회계를 모르는 사람도 방향은 안다. 매출/매입은 알아야 고를 수 있는 말이었다.
- *   2) **정기 / 수시** — 둘은 다루는 리듬이 다르다. 정기는 "이번 달 회차 돌았나"(이행 관리),
- *      수시는 "이거 청구서 끊자"(발행 작업)다. 예전엔 정기청구가 판매 밑, 정기지출이 구매
- *      밑에 흩어져 **"이번 달 정기 건들"을 한 번에 볼 수 없었다.**
+ *   2) **반복 / 수시** — 되풀이되는 돈은 반복거래에서 복사해 만들고, 이번에만 오간 돈은
+ *      수시에서 적는다. 예전엔 정기청구가 판매 밑, 정기지출이 구매 밑에 흩어져
+ *      **"이번 달 되풀이 건들"을 한 번에 볼 수 없었다.** (2026-09: 정기 회차 추적을 걷고
+ *      입금·출금을 한 화면 '반복거래'로 합쳤다 — docs/02-design/features/repeat-templates.design.md)
  *
  * ⚠ 이번 단계는 **배치와 라벨만** 바꾼다. 라우트 id·권한 자원은 하나도 안 건드렸다.
  *   즐겨찾기(homeFavorites)·북마크·FAQ 링크가 그대로 살아 있고, 되돌리기도 쉽다.
@@ -72,12 +73,17 @@ export const NAV_TREE = [
   {
     type: "domain", id: "cash_dom", label: "입출금", icon: Icon.Recv,
     sections: [
+      /* 반복거래 — 매달 오가는 돈을 목록에서 골라 한 번에 만든다(입금·출금 한 화면).
+       * 옛 정기 입금·정기 출금 두 메뉴를 대신한다(2026-09). 잎 id 는 옛 'recurring_invoice' 를
+       * 그대로 쓴다 — 역할에 저장된 권한과 옛 링크·바로가기가 그대로 들어오게.
+       * 'recurring_expense' 는 숨김 잎으로 남아 출금만 걸러 연다. */
+      { label: "", items: [
+        { id: "recurring_invoice", label: "반복거래", icon: Icon.Clock },
+      ]},
       { label: "입금", items: [
-        { id: "recurring_invoice", label: "정기 입금", icon: Icon.Clock },
         { id: "billing_issued",    label: "수시 입금", icon: Icon.Receipt },
       ]},
       { label: "출금", items: [
-        { id: "recurring_expense", label: "정기 출금", icon: Icon.Clock },
         { id: "billing_received",  label: "수시 출금", icon: Icon.Receipt },
         { id: "misc_pl",           label: "경비 처리", icon: Icon.Wallet },
         /* 카드 대금 지급 / 내부 계좌 이체 — 둘 다 **벌지도 쓰지도 않은 돈**이라
@@ -430,6 +436,9 @@ export const HIDDEN_LEAVES = [
      비목으로 고르면 되고, 조회는 거래내역에서 한다.
      라우트·권한 자원은 살려 둔다 — 옛 링크와 Ctrl+K('잡수익')가 여전히 들어온다. */
   { id: "misc_income", label: "잡손익", icon: Icon.Trend, domain: "지급처리", section: "지급" },
+  /* 반복거래(출금만) — 옛 '정기 출금' 메뉴. 반복거래 한 화면으로 합쳤지만 옛 링크·바로가기·권한 자원이
+     이 id 로 들어온다. 열면 반복거래 화면이 출금으로 걸러져 열린다. */
+  { id: "recurring_expense", label: "반복거래 (출금)", icon: Icon.Clock, domain: "입출금", section: "" },
 
   /* 보고서 카탈로그로 흡수한 여섯 — 화면·라우트·권한 자원은 그대로다.
    * 사이드바에서만 뺐고, 경영관리 › 보고서 안에서 분류 탭으로 열린다.
@@ -502,9 +511,9 @@ export const LEAF_TAGS = {
   /* 미수금 메뉴를 청구서로 합치면서 그 검색어를 여기로 옮겼다 —
      경리는 '미수금·받을돈·연체'로 찾지 '대금 청구서'로 찾지 않는다. */
   billing_issued:   '세금계산서 계산서 청구 발행 매출 인보이스 수금 미수금 받을돈 채권 외상매출금 미수 연체 독촉 회수 미정산 대금청구서 수시입금 수시청구',
-  /* 라벨이 '정기청구' → '정기입금'이 됐다. 옛 이름으로 못 찾으면 이름이 바뀐 게 아니라
+  /* 라벨이 '정기청구' → '정기입금' → '반복거래'가 됐다. 옛 이름으로 못 찾으면 이름이 바뀐 게 아니라
      기능이 사라진 걸로 읽힌다(수주·미수금과 같은 이유). */
-  recurring_invoice:'정기 매달 월정액 자동청구 구독 정기청구 정기입금 정기수금',
+  recurring_invoice:'반복 반복거래 정기 매달 월정액 구독 정기청구 정기입금 정기수금 정기지출 정기출금 고정비 임차료 월세',
   ar:               '받을돈 채권 외상매출금 미수 연체 독촉 회수',
   // 매입
   contract_purchase:'매입주문 매입 발주 외주주문 하도급 구매주문 주문 계약 발주계약 매입계약',
@@ -595,11 +604,12 @@ export const PORTAL = [
        (거래내역이 트리에만 있고 타일이 없어 홈에서 못 들어가던 적이 실제로 있다). */
     id: 'cash_dom', label: '입출금', icon: Icon.Recv,
     categories: [
-      { id: 'cash_in', label: '입금', icon: Icon.Recv, desc: '정기·수시 청구와 수금', groups: [
-        { label: '', items: ['recurring_invoice', 'billing_issued'] },
+      { id: 'repeat_all', label: '반복거래', icon: Icon.Clock, desc: '매달 오가는 돈을 골라 만듭니다', route: 'recurring_invoice' },
+      { id: 'cash_in', label: '입금', icon: Icon.Recv, desc: '청구와 수금', groups: [
+        { label: '', items: ['billing_issued'] },
       ]},
-      { id: 'cash_out', label: '출금', icon: Icon.Pay, desc: '정기·수시 지급, 경비·카드·이체·급여', groups: [
-        { label: '', items: ['recurring_expense', 'billing_received', 'misc_pl', 'card_payment', 'transfer', 'hr'] },
+      { id: 'cash_out', label: '출금', icon: Icon.Pay, desc: '지급, 경비·카드·이체·급여', groups: [
+        { label: '', items: ['billing_received', 'misc_pl', 'card_payment', 'transfer', 'hr'] },
       ]},
       { id: 'ledger_all', label: '거래내역', icon: Icon.Wallet, desc: '오간 돈을 모아 봅니다 (조회 전용)', route: 'ledger' },
     ],

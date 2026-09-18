@@ -391,8 +391,6 @@ function adaptTransaction(row) {
        이 표시가 없으면 통째로 빠진다. */
     noteId: row.note_id || '',
     noteNo: row.note_no || '',
-    // 정기 규칙에서 나온 건인가 — 수시 화면은 정기 건을 섞지 않는다(정기 화면이 맡는다)
-    recurringId: row.recurring_id || '',
     /* 급여·용역 지급으로 생긴 거래인가. 인사급여에서 관리하는 건이라
      * '일반 경비' 목록에서는 빼야 한다(안 빼면 경비의 대부분이 급여가 된다). */
     payrollId: row.payroll_id || '',
@@ -528,16 +526,16 @@ export const api = {
 
   /* 주문에 붙일 만한 거래 후보. axis: 'contract'(근거 주문) | 'cost'(원가 귀속)
      — 두 축은 서로 다른 컬럼이라 후보도 다르다. */
-  /* 거래를 넣기 **전에** 물어보는 곳 — 중복이거나, 청구서·정기 규칙 쪽 일이면 알려준다.
+  /* 거래를 넣기 **전에** 물어보는 곳 — 중복이거나, 청구서·반복거래 쪽 일이면 알려준다.
      실패해도 등록을 막지 않는다(안내일 뿐이다). */
   async getEntryHints({ vendorId, accountId, kind, date, amount, contractId }) {
-    if (!vendorId && !accountId) return { duplicates: [], openInvoices: [], recurring: [] }
+    if (!vendorId && !accountId) return { duplicates: [], openInvoices: [], repeats: [] }
     const p = new URLSearchParams({ kind, date: date || '', amount: String(amount || 0) })
     if (vendorId) p.set('vendor_id', vendorId)
     if (accountId) p.set('account_id', accountId)
     if (contractId) p.set('contract_id', contractId)
     try { return await req(`/transactions/entry-hints?${p}`) }
-    catch { return { duplicates: [], openInvoices: [], recurring: [] } }
+    catch { return { duplicates: [], openInvoices: [], repeats: [] } }
   },
   async getLinkableTxns({ contractId, kind, axis = 'contract', q = '' }) {
     const p = new URLSearchParams({ contractId, kind, axis })
@@ -1173,245 +1171,45 @@ export const api = {
     catch { return { ok: false } }
   },
 
-  // ─── 정기지출 ─────────────────────────────────────────────────
-  async getRecurringExpenses() {
-    try {
-      return (await req('/recurring-expenses')).map(r => ({
-        id: r.id,
-        vendor: r.vendor_name || '(미확인)',
-        vendorId: r.vendor_id,
-        contractId: r.contract_id,   // 수정 시 주문 연결을 잃지 않도록 함께 싣는다
-        // 화면의 주문 배지·검색이 쓰는 이름. 안 실으면 배지가 '주문'이라고만 뜬다(정기청구와 대칭)
-        contractName: r.contract_name || '',
-        category: r.category,
-        amount: r.amount,
-        period: r.period,
-        dayOfMonth: r.day_of_month,
-        startDate: r.start_date,
-        endDate: r.end_date,
-        accountId: r.account_id,
-        vatMode: r.vat_mode,
-        // 결제조건 — 이게 빠져 있어서 수정 화면이 늘 '30일 후'로 되돌아갔다
-        payTerm: r.pay_term || 'net30',
-        payDay: Number(r.pay_day) || 0,
-        // 이 규칙에서 나온 회차가 증빙을 챙겨야 하는가 — 미비 집계의 기준
-        evidenceRequired: r.evidence_required === 1 || r.evidence_required === true,
-        /* 다음 회차 — **서버가 계산해 준 값만 쓴다.**
-           이 값을 이행 현황(pending)에서 주워 쓰면 미리보기 창(35일, 월간 기준) 밖에 있는
-           매분기·매년 규칙이 영원히 '—'로 뜬다. 프런트에서 다시 세지도 않는다 —
-           서버가 실제로 발행하는 회차와 어긋나면 화면이 거짓말을 한다. */
-        nextDue: r.next_due || '',
-        /* 금액이 확정인가(fixed) 매번 다른가(variable).
-           변동형은 규칙의 금액이 **예상액**이고, 회차를 발행할 때 실제 금액을 받는다.
-           놓친 회차 일괄에서도 빠진다 — 같은 금액으로 여러 달을 한꺼번에 찍으면 전부 틀린다. */
-        amountMode: r.amount_mode === 'variable' ? 'variable' : 'fixed',
-        // 어느 통장으로 들어올/나갈 돈인가 — 규칙에 지정해 두는데 목록에 안 보이면 확인할 길이 없다
-        accountName: r.account_name || '',
-        active: r.active === 1,
-        lastGenerated: r.last_generated,
-      }))
-    } catch { return [] }
+  // ─── 반복거래 ─────────────────────────────────────────────────
+  /* 매달 비슷하게 오가는 돈 — 목록에서 골라 한 번에 만든다(lib/repeat.js).
+     회차를 기억하지 않는다. 그 달에 만든 청구서·거래가 있는지만 서버가 계산해 준다. */
+  async getRepeatTemplates() {
+    try { return await req('/repeat-templates') } catch { return [] }
   },
-
-  // 폼이 보내는 snake_case 를 그대로 쓴다. 예전에는 camelCase(vendorId·startDate…)를 읽었는데
-  // 폼은 다른 이름으로 보내고 있어, 필수값이 통째로 undefined 로 전달돼 저장이 항상 실패했다.
-  async addRecurringExpense(data) {
-    try {
-      const result = await req('/recurring-expenses', { method: 'POST', body: {
-        vendor_id: data.vendor_id ?? data.vendorId ?? null,
-        contract_id: data.contract_id ?? null,
-        category: data.category,
-        amount: data.amount,
-        vat_mode: data.vat_mode ?? data.vatMode ?? null,
-        period: data.period,
-        day_of_month: data.day_of_month ?? data.dayOfMonth,
-        start_date: data.start_date ?? data.startDate,
-        end_date: data.end_date ?? data.endDate ?? null,
-        account_id: data.account_id ?? data.accountId ?? null,
-        pay_term: data.pay_term ?? data.payTerm,
-        pay_day: data.pay_day ?? data.payDay,
-        /* ⚠ 이 본문은 **화이트리스트**다 — 여기 안 적은 필드는 폼이 보내도 조용히 버려진다.
-           증빙 요구가 빠져 있어서, 규칙 폼에서 '서류를 챙겨야 함'을 골라 저장해도 서버에는
-           안 갔고(POST 는 기본 0, PUT 은 undefined 라 기존 값 유지) 다시 열면 늘 '필요 없음'
-           이었다. 기능 전체가 화면에서 죽어 있었다. 필드를 더할 때 여기도 같이 봐야 한다. */
-        evidence_required: data.evidence_required ?? data.evidenceRequired ?? false,
-        // 화이트리스트라 여기 없으면 폼이 보내도 버려진다
-        amount_mode: data.amount_mode ?? data.amountMode,
-      }})
-      return { ok: true, id: result.id }
-    } catch (e) { return { ok: false, error: e.message } }
+  /** 그 달(YYYY-MM)에 해당하는 반복거래 + 만듦 여부(made) */
+  async getRepeatMonth(ym, direction) {
+    const qs = new URLSearchParams({ ym })
+    if (direction) qs.set('direction', direction)
+    try { return await req(`/repeat-templates/month?${qs}`) } catch { return [] }
   },
-
-  async updateRecurringExpense(id, data) {
+  /* 저장 — id 가 있으면 수정. field 는 어느 칸 때문에 막혔는지(화면이 그 칸 아래에 붙인다) */
+  async saveRepeatTemplate(id, data) {
     try {
-      await req(`/recurring-expenses/${id}`, { method: 'PUT', body: {
-        vendor_id: data.vendor_id ?? data.vendorId ?? null,
-        // 주문 연결은 폼이 다루지 않으므로 기존 값을 그대로 실어 보낸다.
-        // 예전엔 항상 null이라, 주문에 걸린 정기지출을 수정하면 연결이 조용히 끊겼다.
-        contract_id: data.contract_id ?? data.contractId ?? null,
-        category: data.category,
-        amount: data.amount,
-        vat_mode: data.vat_mode ?? data.vatMode ?? null,
-        period: data.period,
-        day_of_month: data.day_of_month ?? data.dayOfMonth,
-        start_date: data.start_date ?? data.startDate,
-        end_date: data.end_date ?? data.endDate ?? null,
-        account_id: data.account_id ?? data.accountId ?? null,
-        pay_term: data.pay_term ?? data.payTerm,
-        pay_day: data.pay_day ?? data.payDay,
-        /* ⚠ 이 본문은 **화이트리스트**다 — 여기 안 적은 필드는 폼이 보내도 조용히 버려진다.
-           증빙 요구가 빠져 있어서, 규칙 폼에서 '서류를 챙겨야 함'을 골라 저장해도 서버에는
-           안 갔고(POST 는 기본 0, PUT 은 undefined 라 기존 값 유지) 다시 열면 늘 '필요 없음'
-           이었다. 기능 전체가 화면에서 죽어 있었다. 필드를 더할 때 여기도 같이 봐야 한다. */
-        evidence_required: data.evidence_required ?? data.evidenceRequired ?? false,
-        // 화이트리스트라 여기 없으면 폼이 보내도 버려진다
-        amount_mode: data.amount_mode ?? data.amountMode,
-      }})
-      return { ok: true }
-    } catch (e) { return { ok: false, error: e.message } }
+      const r = id
+        ? await req(`/repeat-templates/${id}`, { method: 'PUT', body: data })
+        : await req('/repeat-templates', { method: 'POST', body: data })
+      return { ok: true, id: r.id || id }
+    } catch (e) { return { ok: false, error: e.message, field: e.payload?.field || null } }
   },
-  async toggleRecurringExpense(id) {
-    try {
-      const result = await req(`/recurring-expenses/${id}/toggle`, { method: 'PATCH', body: {} })
-      return { ok: true, active: result.active }
-    } catch { return { ok: false } }
-  },
-  // 정기지출 삭제 — 앞으로 자동 생성만 멈춘다. 이미 만들어진 청구서·거래는 남는다(실제 돈 기록).
-  async deleteRecurringExpense(id) {
-    try { const r = await req(`/recurring-expenses/${id}`, { method: 'DELETE' }); return { ok: true, ...r } }
+  async toggleRepeatTemplate(id) {
+    try { return { ok: true, ...(await req(`/repeat-templates/${id}/toggle`, { method: 'PATCH', body: {} })) } }
     catch (e) { return { ok: false, error: e.message } }
   },
-  // 지급 예정인 정기지출 회차(아직 매입 청구서 미생성) — 매입 대금청구서 '지급 예정'에 주문 지급일정과 함께
-  async getPendingRecurringExpenses() {
-    try { return await req('/recurring-expenses/pending') } catch { return [] }
-  },
-  // 정기지출 회차 1건을 매입 청구서(미지급금)로 등록. paid=true면 지급 처리까지
-  /* amount — 변동형 규칙에서 **이번 회차 실제 금액**. 규칙의 금액은 예상액이라 그대로 쓰면
-     틀린 금액이 미지급금으로 잡힌다. 정액형에서도 보내면 그것이 이긴다(그 달만 다를 때). */
-  async issueRecurringExpense(recurringId, { due, paid = false, account_id, amount } = {}) {
-    try { const r = await req(`/recurring-expenses/${recurringId}/issue`, { method: 'POST', body: { due, paid, account_id, amount } }); return { ok: true, ...r } }
+  async deleteRepeatTemplate(id) {
+    try { return { ok: true, ...(await req(`/repeat-templates/${id}`, { method: 'DELETE' })) } }
     catch (e) { return { ok: false, error: e.message } }
   },
-  // 놓친 회차 일괄 등록 — 예정일이 지난 미등록 회차를 모두 '지급 대기' 청구서로.
-  // 계좌는 건드리지 않는다(지급 처리는 회차별 '기지급 처리'에서). 매출 쪽과 대칭.
-  async issueMissedRecurringExpenses() {
-    try {
-      const r = await req('/recurring-expenses/issue-missed', { method: 'POST', body: {} })
-      return { ok: true, count: r.count, generated: r.generated }
-    } catch (e) { return { ok: false, count: 0, error: e.message } }
+  /** 만들기 확인 — 기본 날짜·금액과 '이미 장부에 있는 같은 돈' 후보 */
+  async previewRepeat(ym, ids) {
+    try { return { ok: true, rows: await req('/repeat-templates/preview', { method: 'POST', body: { ym, ids } }) } }
+    catch (e) { return { ok: false, error: e.message, rows: [] } }
   },
-
-  // ─── 정기청구(고정수입) ───────────────────────────────────────
-  /* 정기 회차 이력 — 지난 회차(실제 만들어진 것) + 건너뛴 회차(사유) + 앞으로 올 회차.
-     서버가 세 갈래를 한 줄기로 합쳐 준다(lib/recurHistory.js). 화면에서 다시 섞지 않는다. */
-  async getRecurringInvoiceHistory(id) {
-    try { return await req(`/recurring-invoices/${id}/history`) } catch { return null }
-  },
-
-  async getRecurringExpenseHistory(id) {
-    try { return await req(`/recurring-expenses/${id}/history`) } catch { return null }
-  },
-
-  async getRecurringInvoices() {
-    try {
-      return (await req('/recurring-invoices')).map(r => ({
-        id: r.id,
-        vendor: r.vendor_name || '(미지정)',
-        vendorId: r.vendor_id,
-        contractId: r.contract_id,
-        contractName: r.contract_name,
-        item: r.item,
-        supplyAmount: r.supply_amount,
-        vatMode: r.vat_mode,
-        period: r.period,
-        dayOfMonth: r.day_of_month,
-        startDate: r.start_date,
-        endDate: r.end_date,
-        accountId: r.account_id,
-        // 회차일과 실제로 입금되는 날은 다르다 — 자금 예측이 이 값으로 날짜를 세운다
-        payTerm: r.pay_term || 'net30',
-        payDay: Number(r.pay_day) || 0,
-        // 이 규칙에서 나온 회차가 증빙을 챙겨야 하는가 — 미비 집계의 기준
-        evidenceRequired: r.evidence_required === 1 || r.evidence_required === true,
-        // 다음 회차 — 서버 계산값(정기지출 어댑터의 주석 참조)
-        nextDue: r.next_due || '',
-        /* 금액이 확정인가(fixed) 매번 다른가(variable).
-           변동형은 규칙의 금액이 **예상액**이고, 회차를 발행할 때 실제 금액을 받는다.
-           놓친 회차 일괄에서도 빠진다 — 같은 금액으로 여러 달을 한꺼번에 찍으면 전부 틀린다. */
-        amountMode: r.amount_mode === 'variable' ? 'variable' : 'fixed',
-        // 어느 통장으로 들어올/나갈 돈인가 — 규칙에 지정해 두는데 목록에 안 보이면 확인할 길이 없다
-        accountName: r.account_name || '',
-        active: r.active === 1,
-        lastGenerated: r.last_generated,
-      }))
-    } catch { return [] }
-  },
-
-  async addRecurringInvoice(data) {
-    try {
-      const result = await req('/recurring-invoices', { method: 'POST', body: {
-        vendor_id: data.vendorId,
-        contract_id: data.contractId,
-        item: data.item,
-        supply_amount: data.supplyAmount,
-        vat_mode: data.vatMode,
-        period: data.period,
-        day_of_month: data.dayOfMonth,
-        start_date: data.startDate,
-        end_date: data.endDate,
-        account_id: data.accountId,
-        pay_term: data.payTerm,
-        pay_day: data.payDay,
-        // 화이트리스트라 여기 없으면 폼이 보내도 버려진다(정기지출 쪽 주석 참조)
-        evidence_required: data.evidence_required ?? data.evidenceRequired ?? false,
-        // 화이트리스트라 여기 없으면 폼이 보내도 버려진다
-        amount_mode: data.amount_mode ?? data.amountMode,
-      }})
-      return { ok: true, id: result.id }
-    } catch { return { ok: false } }
-  },
-
-  async updateRecurringInvoice(id, data) {
-    try {
-      await req(`/recurring-invoices/${id}`, { method: 'PUT', body: {
-        vendor_id: data.vendorId ?? data.vendor_id ?? null,
-        contract_id: data.contractId ?? data.contract_id ?? null,
-        item: data.item,
-        supply_amount: data.supplyAmount ?? data.supply_amount,
-        vat_mode: data.vatMode ?? data.vat_mode,
-        period: data.period,
-        day_of_month: data.dayOfMonth ?? data.day_of_month,
-        start_date: data.startDate ?? data.start_date,
-        end_date: data.endDate ?? data.end_date ?? null,
-        account_id: data.accountId ?? data.account_id ?? null,
-        pay_term: data.payTerm ?? data.pay_term,
-        pay_day: data.payDay ?? data.pay_day,
-        evidence_required: data.evidence_required ?? data.evidenceRequired ?? false,
-        // 화이트리스트라 여기 없으면 폼이 보내도 버려진다
-        amount_mode: data.amount_mode ?? data.amountMode,
-      }})
-      return { ok: true }
-    } catch (e) { return { ok: false, error: e.message } }
-  },
-  async toggleRecurringInvoice(id) {
-    try {
-      const result = await req(`/recurring-invoices/${id}/toggle`, { method: 'PATCH', body: {} })
-      return { ok: true, active: result.active }
-    } catch { return { ok: false } }
-  },
-  // 정기청구 삭제 — 앞으로 자동 발행만 멈춘다. 이미 발행된 청구서는 남는다.
-  async deleteRecurringInvoice(id) {
-    try { const r = await req(`/recurring-invoices/${id}`, { method: 'DELETE' }); return { ok: true, ...r } }
-    catch (e) { return { ok: false, error: e.message } }
-  },
-
-  // 놓친 회차 일괄 발행 — 예정일이 지난 미발행 회차를 모두 '입금 예정' 청구서로.
-  // 계좌는 건드리지 않는다(입금 처리는 회차별 '기입금 처리'에서).
-  async issueMissedRecurringInvoices() {
-    try {
-      const r = await req('/recurring-invoices/issue-missed', { method: 'POST', body: {} })
-      return { ok: true, count: r.count, generated: r.generated }
-    } catch (e) { return { ok: false, count: 0, error: e.message } }
+  /* 만들기 — 한 줄이라도 막히면 아무것도 안 만든다.
+     code 'lookalike' 면 payload.lookalikes 로 그 줄에서 연결/새로 만들기를 고르게 한다 */
+  async createRepeat(ym, items) {
+    try { return { ok: true, ...(await req('/repeat-templates/create', { method: 'POST', body: { ym, items } })) } }
+    catch (e) { return { ok: false, error: e.message, code: e.code, payload: e.payload || null } }
   },
 
   // ─── 주문 ─────────────────────────────────────────────────────
@@ -1664,8 +1462,6 @@ export const api = {
 
   async updateContract(id, data) {
     try {
-      // 응답을 그대로 실어 보낸다 — 주문을 닫으며 정기 규칙 종료일을 맞췄는지(recurringClosed)를
-      // 화면이 알아야 결과를 알려줄 수 있다.
       const r = await req(`/contracts/${id}`, { method: 'PUT', body: data })
       return { ok: true, ...(r || {}) }
     } catch (e) { return { ok: false, error: e.message } }
@@ -1684,56 +1480,6 @@ export const api = {
     catch (e) { return { ok: false, error: e.message } }
   },
 
-  /* 회차 건너뛰기 — 정기 회차는 저장된 행이 아니라 계산값이라 '삭제'가 없다.
-     건너뛴 사실을 남겨 계산에서 뺀다(규칙 자체는 계속 돈다). kind: 'sales' | 'purchase' */
-  async skipRecurringCycle(kind, id, dueDate, reason) {
-    const base = kind === 'purchase' ? '/recurring-expenses' : '/recurring-invoices'
-    try { await req(`${base}/${id}/skip`, { method: 'POST', body: { due_date: dueDate, reason } }); return { ok: true } }
-    catch (e) { return { ok: false, error: e.message } }
-  },
-  async unskipRecurringCycle(kind, id, dueDate) {
-    const base = kind === 'purchase' ? '/recurring-expenses' : '/recurring-invoices'
-    try { await req(`${base}/${id}/skip/${dueDate}`, { method: 'DELETE' }); return { ok: true } }
-    catch (e) { return { ok: false, error: e.message } }
-  },
-
-  /* ─── 정기 회차 소급 등록 ───────────────────────────────────
-     등록일 이전 회차는 평소 경로로는 만들어지지 않는다(소급 홍수 방지).
-     사용자가 기간을 명시적으로 열었을 때만, 미리보기 → 선택 → 일괄 생성. kind: 'invoice' | 'expense' */
-  /* ⚠ 화면이 넘기는 값은 'purchase'/'sales' 다(BackfillWizard·RecurHistoryDrawer 가 그 말을 쓴다).
-     여기서 'expense' 만 보고 있어서 **매입 소급이 매출 라우터로 갔다** — 규칙 id 가
-     recurring_invoices 에 없으니 '정기청구를 찾을 수 없어요' 로 떨어진다.
-     두 이름 다 받는다. 화면 말(purchase)과 서버 말(expense)이 다른 게 원인이라,
-     한쪽만 고치면 나중에 반대편에서 같은 실수가 난다. */
-  _backfillBase(kind) {
-    return (kind === 'expense' || kind === 'purchase') ? '/recurring-expenses' : '/recurring-invoices'
-  },
-
-  /** 정기 점검 — 전 규칙을 한 번에 훑어 이상만 돌려준다(하나씩 열어 보지 않아도 되게) */
-  async recurAudit(kind) {
-    try { return { ok: true, ...(await req(`${this._backfillBase(kind)}/audit`)) } }
-    catch (e) { return { ok: false, error: e.message } }
-  },
-
-  async backfillPreview(kind, id, { from, to }) {
-    try { return { ok: true, ...(await req(`${this._backfillBase(kind)}/${id}/backfill/preview`, { method: 'POST', body: { from, to } })) } }
-    catch (e) { return { ok: false, error: e.message } }
-  },
-  async backfillCommit(kind, id, cycles) {
-    try { return { ok: true, ...(await req(`${this._backfillBase(kind)}/${id}/backfill`, { method: 'POST', body: { cycles } })) } }
-    catch (e) { return { ok: false, error: e.message } }
-  },
-  /** 방금 만든 묶음 통째로 되돌리기 — 잘못된 범위로 수십 건을 만들면 하나씩은 못 지운다 */
-  async backfillUndo(kind, batch) {
-    try { return { ok: true, ...(await req(`${this._backfillBase(kind)}/backfill/${batch}`, { method: 'DELETE' })) } }
-    catch (e) { return { ok: false, error: e.message } }
-  },
-
-  /** 주문을 '완료'로 닫기 전 확인용 — 종료일이 비어 있는(=영원히 도는) 정기 규칙 */
-  async getOpenEndedRecurring(id) {
-    try { return await req(`/contracts/${id}/recurring/open-ended`) }
-    catch { return { invoices: [], expenses: [], suggestedEndDate: '' } }
-  },
   async updateContractMemo(id, memo) {
     try { await req(`/contracts/${id}/memo`, { method: 'PATCH', body: { memo } }); return { ok: true } }
     catch (e) { return { ok: false, error: e.message } }
@@ -1771,35 +1517,6 @@ export const api = {
     try { const r = await req(`/contracts/${id}/renew`, { method: 'POST', body: data }); return { ok: true, ...r } }
     catch (e) { return { ok: false, error: e.message } }
   },
-  // 정기형 주문 → 주문의 주기·금액·기간으로 정기청구 걸기
-  async addContractRecurring(id, accountId) {
-    try { const r = await req(`/contracts/${id}/recurring`, { method: 'POST', body: { account_id: accountId || null } }); return { ok: true, id: r.id } }
-    catch (e) { return { ok: false, error: e.message } }
-  },
-  // 주문에 걸린 정기 반복(매출=정기청구 / 매입=정기지출)을 주문 조건에 다시 맞춘다.
-  // 주문이 원본이므로, 어긋나면 주문 쪽으로 되돌리는 게 맞다.
-  async syncContractRecurring(id) {
-    try { const r = await req(`/contracts/${id}/recurring/sync`, { method: 'PATCH' }); return { ok: true, ...r } }
-    catch (e) { return { ok: false, error: e.message } }
-  },
-  // 주문에 걸린 정기 반복 중지/재개 (매출·매입 모두 주문 화면에서)
-  async toggleContractRecurring(contractId, recId) {
-    try { const r = await req(`/contracts/${contractId}/recurring/${recId}/toggle`, { method: 'PATCH' }); return { ok: true, ...r } }
-    catch (e) { return { ok: false, error: e.message } }
-  },
-
-  // 청구 예정인 정기청구 회차(아직 청구서 미생성) — 발행 예정 목록에 주문 청구일정과 함께 뜬다
-  async getPendingRecurring() {
-    try { return await req('/recurring-invoices/pending') } catch { return [] }
-  },
-  // 정기청구 회차 1건 발행 (paid=true면 기입금 처리까지)
-  /* supply_amount — 변동형 규칙에서 이번 회차 **공급가액**(부가세는 서버가 붙인다).
-     정기지출 issueRecurringExpense 의 amount 와 같은 뜻이다. */
-  async issueRecurring(recurringId, { due, paid = false, account_id, supply_amount } = {}) {
-    try { const r = await req(`/recurring-invoices/${recurringId}/issue`, { method: 'POST', body: { due, paid, account_id, supply_amount } }); return { ok: true, ...r } }
-    catch (e) { return { ok: false, error: e.message } }
-  },
-
   // 발행 예정(대기) 청구 일정 (for: 'sales'|'purchase')
   /* 회차를 **이미 있는 청구서**로 잇는다. invoiceId 를 null 로 주면 되돌린다.
      오류 메시지는 그대로 올린다 — '남의 주문 청구서'·'이미 이어짐'처럼 사람이 알아야 할 이유다. */
@@ -2650,11 +2367,10 @@ export const api = {
   // ─── Ctrl+K 명령 팔레트: 실데이터 검색 인덱스 ──────────────────
   async getCommandIndex() {
     const won = (n) => (Number(n) || 0).toLocaleString('ko-KR') + '원'
-    let vendors = [], contracts = [], invoices = [], recInv = [], recExp = []
+    let vendors = [], contracts = [], invoices = [], repeats = []
     try {
-      [vendors, contracts, invoices, recInv, recExp] = await Promise.all([
-        this.getVendors(), this.getContracts(), this.getInvoices(),
-        this.getRecurringInvoices(), this.getRecurringExpenses(),
+      [vendors, contracts, invoices, repeats] = await Promise.all([
+        this.getVendors(), this.getContracts(), this.getInvoices(), this.getRepeatTemplates(),
       ])
     } catch { /* noop */ }
     const cmds = []
@@ -2688,21 +2404,14 @@ export const api = {
         rank: open ? 1 : 3,
       })
     })
-    /* 정기청구·정기지출 규칙 — 거래처를 검색하면 "이 회사와 매달 오가는 게 있나"가
-     * 같이 나와야 한다. 규칙은 청구서가 만들어지기 **전**의 것이라 위 목록엔 안 잡힌다. */
-    recInv.forEach(r => cmds.push({
-      kind: '정기청구', label: r.item || r.contractName || r.vendor,
-      sub: [r.vendor, periodLong(r.period),
-        won(r.supplyAmount), r.active ? null : '중지됨'].filter(Boolean).join(' · '),
-      keywords: [r.vendor, r.contractName].filter(Boolean).join(' '),
+    /* 반복거래 — 거래처를 검색하면 "이 회사와 매달 오가는 게 있나"가 같이 나와야 한다.
+     * 반복거래는 청구서가 만들어지기 **전**의 것이라 위 목록엔 안 잡힌다. */
+    repeats.forEach(r => cmds.push({
+      kind: '반복거래', label: r.item || r.vendor_name || '(내용 없음)',
+      sub: [r.vendor_name, r.direction === 'in' ? '입금' : '출금', periodLong(r.period),
+        won(r.total), r.active ? null : '꺼짐'].filter(Boolean).join(' · '),
+      keywords: [r.vendor_name, r.contract_name, r.category].filter(Boolean).join(' '),
       route: 'recurring_invoice', rank: r.active ? 1 : 3,
-    }))
-    recExp.forEach(r => cmds.push({
-      kind: '정기지출', label: r.item || r.category || r.vendor,
-      sub: [r.vendor, periodLong(r.period),
-        won(r.amount), r.active ? null : '중지됨'].filter(Boolean).join(' · '),
-      keywords: [r.vendor, r.category, r.contractName].filter(Boolean).join(' '),
-      route: 'recurring_expense', rank: r.active ? 1 : 3,
     }))
     /* 메뉴 전체를 색인한다.
      *

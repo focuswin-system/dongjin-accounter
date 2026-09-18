@@ -17,12 +17,10 @@ const { SETTLED_INCOME, SETTLED_EXPENSE } = require('./ledger')
 const { pendingCond } = require('./invoiceStatus')
 const { paymentSchedule, unpaidPayments, paidPrincipal } = require('./savings')
 const { repaymentSchedule } = require('./loan')
-const { dueDatesToGenerate, cashDateOf } = require('./recurrence')
+const { upcomingOccurrences } = require('./repeat')
 const { inflowCertainty, outflowCertainty } = require('./certainty')
 // 청구서 발행 분개는 전표 규칙과 한 벌이어야 한다 — 두 벌이면 전표와 일계표가 다른 말을 한다
 const { invoiceVoucher, noteVoucher, noteDishonorVoucher } = require('./voucher')
-const { recurFromSupply } = require('./vat')
-const { kstDate } = require('../db')
 
 const num = (v) => Number(v) || 0
 
@@ -68,13 +66,11 @@ async function balancesAsOf(db, asOf) {
  *   2. 미지급금 청구서 due_at
  *   3. 대출 상환 — 저장된 예정 회차
  *   4. 적금 납입 — 저장된 예정 회차
- *   5. 정기청구 중 아직 청구서가 안 된 회차
- *   6. 정기지출 중 아직 청구서가 안 된 회차
+ *   5·6. 반복거래 중 그 달에 아직 안 만든 것(입금·출금)
  *
  * 5·6 은 한때 "청구서가 되면 1·2로 잡히니 또 세면 이중계상"이라며 빠져 있었다. 판단은
- * 옳았지만 결과가 틀렸다 — 회차는 그 날이 와야 청구서가 되므로 **앞을 볼수록 급여·임대료·
- * 통신비·정기수입이 통째로 빠졌다.** 이중계상은 dueDatesToGenerate 가 막아준다
- * (이미 발행한 달의 회차는 목록에서 빠진다).
+ * 옳았지만 결과가 틀렸다 — **앞을 볼수록 임대료·통신비·정기수입이 통째로 빠졌다.**
+ * 이중계상은 lib/repeat.js 가 막는다(그 달에 만든 반복거래는 빼고 준다).
  *
  * @returns {{date, kind:'in'|'out', amount, label, source, account_id, planned?}[]} 날짜 오름차순
  */
@@ -206,71 +202,28 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
     }
   }
 
-  /* 5·6. 정기청구·정기지출 중 **아직 청구서가 안 만들어진 회차**.
+  /* 5·6. 반복거래 중 **그 달에 아직 안 만든 것**(사용자 확정 2026-09-15: 자금 예측에 넣는다).
    *
-   * 예전엔 "청구서가 만들어지면 1·2번으로 잡히니 여기서 또 세지 않는다"며 통째로 뺐다.
-   * 이중계상을 피한 판단은 옳지만 결과가 틀렸다 — 회차는 그 날이 와야 청구서가 되므로,
-   * **한 달 앞을 볼수록 급여·임대료·관리비·통신비·정기수입이 통째로 빠진다.**
-   * 예측이 낙관 쪽으로 틀리는 가장 큰 원인이었다("지출 날짜를 못 지키면 신용 문제").
+   * 예측에서 빼면 한 달 앞을 볼수록 임대료·관리비·통신비·유지보수 매출이 통째로 빠져
+   * 예측이 낙관 쪽으로 틀린다. 만든 달은 청구서·거래가 1·2번(또는 잔액)으로 이미 잡히므로
+   * lib/repeat.js 가 '그 달 만듦'인 것을 빼고 준다 — 이중계상은 거기서 막힌다.
    *
-   * 이중계상은 dueDatesToGenerate 가 막는다 — last_generated 가 놓인 달의 회차는
-   * 이미 청구서가 됐으므로 목록에서 빠지고, 그 청구서는 1·2번이 센다.
-   * 건너뛴 회차(recurring_skips)와 등록일 소급 하한도 정기청구 화면과 같은 규칙을 쓴다.
+   * 기준일이 속한 달의 첫날부터 본다 — 이번 달에 날짜가 지났는데 아직 안 만든 것은
+   * **아직 안 나간 돈**이라 기준일로 끌어온다(청구서의 place 와 같은 규칙). 지난달 이전은 세지 않는다
+   * (반복거래는 지난달을 추적하지 않는다 — 달을 골라 보는 것은 반복거래 화면의 일이다).
+   * 돈이 오가는 날은 청구서면 결제기한, 바로 출금이면 그 날이다.
    */
-  const [skipRows] = await db.execute('SELECT kind, recurring_id, due_date FROM recurring_skips')
-  const skipBy = new Map()
-  for (const s of skipRows) {
-    const key = `${s.kind}:${s.recurring_id}`
-    if (!skipBy.has(key)) skipBy.set(key, [])
-    skipBy.get(key).push(String(s.due_date).slice(0, 10))
-  }
-  const spanDays = Math.max(0, Math.round((new Date(`${to}T00:00:00`) - new Date(`${from}T00:00:00`)) / 86400000))
-  // 회차일 + 결제기한 이 구간 안에 들어오는 회차까지 세려면, 회차는 그만큼 더 앞까지 봐야 한다
-  const horizonDays = spanDays
-
-  for (const spec of [
-    { table: 'recurring_invoices', skipKind: 'invoice', kind: 'in',  source: '정기청구',
-      label: r => `${r.vendor_name || '거래처'} ${r.item || ''}`.trim(),
-      // 정기청구는 공급가액을 저장한다 — 통장에 들어오는 돈은 세액을 더한 값이다
-      amount: r => { const s = num(r.supply_amount); return s + recurFromSupply(s, r.vat_mode).vat } },
-    { table: 'recurring_expenses', skipKind: 'expense', kind: 'out', source: '정기지출',
-      label: r => `${r.vendor_name || '거래처'} ${r.category || ''}`.trim(),
-      // 정기지출은 합계(VAT 포함)를 저장한다 — 그대로 나간다
-      amount: r => num(r.amount) },
-  ]) {
-    const [recs] = await db.execute(
-      `SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch, v.name AS vendor_name
-         FROM ${spec.table} r LEFT JOIN vendors v ON r.vendor_id = v.id
-        WHERE r.active = 1`)
-    for (const r of recs) {
-      r.setup_date = kstDate(Number(r.created_epoch) * 1000)   // 등록일 이전으로는 소급하지 않는다
-      r.skips = skipBy.get(`${spec.skipKind}:${r.id}`) || []
-      const amount = spec.amount(r)
-      if (amount <= 0) continue
-      /* 회차일은 '청구서를 내는 날'이고, 돈이 오가는 날은 **결제기한**이다.
-         회차일에 세면 그 회차를 발행하는 순간 같은 돈이 30일 뒤로 점프한다 —
-         발행 버튼을 눌렀는지에 따라 예측이 달라지면 문서를 못 믿는다.
-         발행 경로와 같은 상수를 쓴다(lib/recurrence.js PAYMENT_TERM_DAYS). */
-      for (const cycle of dueDatesToGenerate(r, from, { horizonDays })) {
-        const natural = cashDateOf(cycle, r.pay_term, r.pay_day)
-        /* 지난 회차를 그냥 버리면 안 된다.
-         *
-         * 예전엔 `due < from` 이면 continue 했다. 그런데 아직 청구서가 안 된 과거 회차는
-         * **아직 안 나간 돈**이다 — 청구서(1·2번)는 같은 상황을 place() 로 기준일에 끌어오는데
-         * 여기만 버려서, 놓친 급여·임대료가 통째로 예측에서 사라졌다(늘 낙관 쪽 오류).
-         * pay_term='immediate' 는 회차일=결제일이라 하루만 지나도 사라져 더 자주 샜다. */
-        const due = place(natural)
-        if (due === null || due > to) continue
-        out.push({
-          date: due, cycle_date: cycle, kind: spec.kind, amount,
-          label: spec.label(r), source: spec.source,
-          account_id: r.account_id || null,
-          // 회차일이 이미 지났으면 연체다 — 화면이 '지남'으로 갈라 보여준다
-          overdue: natural < from,
-          planned: true,         // 확정이 아니라 규칙에서 나온 예정 — 화면이 구분해 보여준다
-        })
-      }
-    }
+  for (const o of await upcomingOccurrences(db, `${from.slice(0, 7)}-01`, to)) {
+    const due = place(o.cashDate)
+    if (due === null || due > to || o.total <= 0) continue
+    const t = o.template
+    out.push({
+      date: due, cycle_date: o.date, kind: o.direction, amount: o.total,
+      label: `${t.vendor_name || '거래처'} ${t.item || ''}`.trim(), source: '반복거래',
+      account_id: t.account_id || null,
+      overdue: o.cashDate < from,
+      planned: true,         // 확정이 아니라 반복거래에서 나온 예정 — 화면이 구분해 보여준다
+    })
   }
 
   /* 7. 카드 결제 — 쓴 날과 **돈이 빠지는 날**이 다르다.

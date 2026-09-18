@@ -199,7 +199,7 @@ async function buildContractWorkbook(contracts, { kind = 'all', today = new Date
   const recurrings = contracts.filter(c => c.billing_mode === 'recurring')
   const ws3 = wb.addWorksheet('정기 주문')
   addTitle(ws3, '정기 주문', `기준일 ${stamp} · ${recurrings.length}건 · 월 환산 합계 ${monthly.toLocaleString()}원`, 9)
-  ws3.getRow(4).values = ['주문명', '거래처', '주기', '주기당 금액', '월 환산', '초기 일시금', '청구일', '계약 기간', '정기청구 연결']
+  ws3.getRow(4).values = ['주문명', '거래처', '주기', '주기당 금액', '월 환산', '초기 일시금', '청구일', '계약 기간', '반복거래']
   recurrings.forEach(c => {
     const openEnded = c.term_mode === 'open'
     ws3.addRow([
@@ -210,7 +210,7 @@ async function buildContractWorkbook(contracts, { kind = 'all', today = new Date
       Number(c.initial_amount) || 0,
       `${c.billing_day || 1}일`,
       openEnded ? `${c.start_date || ''} ~ 해지 시까지` : `${c.start_date || ''} ~ ${c.end_date || ''}`,
-      Number(c.recurring_active || 0) > 0 ? '연결됨' : '미연결 (청구서 자동생성 안 됨)',
+      Number(c.recurring_active || 0) > 0 ? '있음' : '없음 (반복거래 목록에 안 뜸)',
     ])
   })
   if (ws3.rowCount >= 5) moneyCols(ws3, 5, ws3.rowCount, [4, 5, 6])

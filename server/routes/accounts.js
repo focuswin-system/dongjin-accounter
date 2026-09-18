@@ -167,8 +167,8 @@ router.delete('/:id', async (req, res, next) => {
       `SELECT
          (SELECT COUNT(*) FROM transactions        WHERE account_id = ?) AS txns,
          (SELECT COUNT(*) FROM invoices            WHERE account_id = ?) AS invs,
-         (SELECT COUNT(*) FROM recurring_expenses  WHERE account_id = ?) AS rexp,
-         (SELECT COUNT(*) FROM recurring_invoices  WHERE account_id = ?) AS rinv,
+         (SELECT COUNT(*) FROM repeat_templates    WHERE account_id = ? AND direction = 'out') AS rexp,
+         (SELECT COUNT(*) FROM repeat_templates    WHERE account_id = ? AND direction = 'in') AS rinv,
          (SELECT COUNT(*) FROM vat_filings         WHERE account_id = ?) AS vat,
          (SELECT COUNT(*) FROM other_taxes         WHERE account_id = ?) AS otax,
          (SELECT COUNT(*) FROM ref_items           WHERE account_id = ?) AS refi,
@@ -178,8 +178,8 @@ router.delete('/:id', async (req, res, next) => {
     const parts = []
     if (Number(c.txns) > 0) parts.push(`거래 ${c.txns}건`)
     if (Number(c.invs) > 0) parts.push(`청구서 ${c.invs}건`)
-    if (Number(c.rexp) > 0) parts.push(`정기지출 ${c.rexp}건`)
-    if (Number(c.rinv) > 0) parts.push(`정기청구 ${c.rinv}건`)
+    if (Number(c.rexp) > 0) parts.push(`반복거래(출금) ${c.rexp}건`)
+    if (Number(c.rinv) > 0) parts.push(`반복거래(입금) ${c.rinv}건`)
     if (Number(c.vat)  > 0) parts.push(`부가세 납부 ${c.vat}건`)
     if (Number(c.otax) > 0) parts.push(`기타세액 ${c.otax}건`)
     if (Number(c.refi) > 0) parts.push(`기준정보 ${c.refi}건`)

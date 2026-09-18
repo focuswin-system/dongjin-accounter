@@ -39,8 +39,9 @@ const API_RESOURCES = {
   '/api/contracts':           ['contract_sales', 'contract_purchase', 'contract'],
   // 전표 목록(분개장)도 이 경로를 쓴다 — /transactions/vouchers
   '/api/transactions':        ['ledger', 'misc_pl', 'misc_income', 'voucher_book'],
-  '/api/recurring-invoices':  ['recurring_invoice'],
-  '/api/recurring-expenses':  ['recurring_expense'],
+  /* 반복거래 — 입금(recurring_invoice)·출금(recurring_expense) 두 자원 중 하나라도 있으면 쓴다.
+     옛 정기청구·정기지출 자원 id 를 그대로 쓴다(역할에 저장된 권한이 그대로 들어오게). */
+  '/api/repeat-templates':    ['recurring_invoice', 'recurring_expense'],
   '/api/resolutions':         ['doc'],
   '/api/settlements':         ['settlement'],
   '/api/journal-vouchers':    ['voucher_entry', 'voucher_book'],
@@ -174,15 +175,13 @@ const ACTION_OVERRIDES = [
   /* ⚠ 위 규칙은 경로가 '/export' 또는 '/export.xlsx' 로 **끝날 때만** 맞는다.
      화면 표를 엑셀로 바꿔 주는 통로는 '/api/export/xlsx' 라 안 걸려 POST='create' 로 떨어졌다 —
      조회전용 역할이 '엑셀 내보내기'를 누르면 "이 작업(등록)에 대한 권한이 없어요" 가 떴다.
-     버튼은 화면을 볼 수 있으면 보이므로, 눌러보고 나서야 알게 된다(/backfill/preview 와 같은 구멍). */
+     버튼은 화면을 볼 수 있으면 보이므로, 눌러보고 나서야 알게 된다(아래 반복거래 미리보기와 같은 구멍). */
   { re: /^\/api\/export\/xlsx$/, action: 'download' },
   // 인쇄·출력용 조회
   { re: /\/(print|pdf)$/, action: 'export' },
-  /* 소급 등록 '미리보기' — POST지만 아무것도 바꾸지 않는 조회다.
-     'create'로 두면 조회 권한만 있는 사람이 버튼을 눌렀을 때 403이 난다
-     (버튼은 화면을 볼 수 있으면 보이므로, 눌러보고 나서야 알게 된다).
-     실제 생성(/backfill)은 그대로 'create'다 — 이 규칙보다 위에 없으므로 걸리지 않는다. */
-  { re: /\/backfill\/preview$/, action: 'view' },
+  /* 반복거래 '미리보기' — POST지만(고른 id 배열을 본문에 싣는다) 아무것도 바꾸지 않는 조회다.
+     실제 만들기(/create)는 그대로 'create'다. */
+  { re: /^\/api\/repeat-templates\/preview$/, action: 'view' },
   /* 일괄 삭제 — POST 로 보내지만(본문에 id 배열이 필요하다) 하는 일은 삭제다.
      'create'로 판정되면 **삭제 권한이 없는 사람이 100건을 지울 수 있다.**
      메서드만으로 행위를 정하면 이런 구멍이 난다. */

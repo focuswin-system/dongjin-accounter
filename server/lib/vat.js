@@ -70,45 +70,7 @@ const taxTypeOfMode = (vatMode) => (vatMode === 'exempt' ? '면세' : vatMode ==
 /** 공급가액 → 세액 (주문 vat_mode 기준) */
 const vatOf = (supply, vatMode) => Math.round((Number(supply) || 0) * vatRateOf(vatMode))
 
-/* ── 정기 반복(recurring_*)의 vat_mode ──
- * exclusive(과세, 10%) / none(면세) / zero(영세). 정기청구는 이 값을 직접 저장하고,
- * 정기지출은 이 값이 있으면 그걸, 없으면 비목(categories.vat)을 따른다. */
-const RECUR_VAT = {
-  exclusive: { rate: VAT_RATE, tax: '과세' },
-  none:      { rate: 0,   tax: '면세' },
-  zero:      { rate: 0,   tax: '영세' },
-}
-const recurVat = (mode) => RECUR_VAT[mode] || RECUR_VAT.exclusive
-
-/** 정기청구: 공급가액 → { supply, vat, tax_type } (vat_mode 기준) */
-function recurFromSupply(supply, vatMode) {
-  const s = Number(supply) || 0
-  const { rate, tax } = recurVat(vatMode)
-  return { supply: s, vat: Math.round(s * rate), tax_type: tax }
-}
-
-/** 정기지출: 합계(VAT 포함) → { supply, vat, tax_type } (vat_mode 기준) */
-function recurFromTotal(total, vatMode) {
-  const t = Number(total) || 0
-  const { rate, tax } = recurVat(vatMode)
-  if (rate === 0) return { supply: t, vat: 0, tax_type: tax }
-  const supply = Math.round(t / (1 + rate))
-  return { supply, vat: t - supply, tax_type: tax }
-}
-
-/** 정기청구 규칙의 **실효** vat_mode — 주문의 과세유형이 규칙보다 세다.
- *
- * 주문이 면세면 그 주문의 청구서는 규칙에 뭐라 적혀 있든 세액이 0이다. 그래서 회차 금액을
- * 계산하는 쪽은 모두 이 함수를 거쳐야 한다. 예전엔 발행 경로만 주문을 봤고 안내 경로는
- * 규칙만 봐서, 면세 주문의 금액이 10% 어긋난 채로 비교됐다.
- * r 은 recurring_invoices 행 + contracts.vat_mode 를 contract_vat_mode 로 실은 것. */
-const effRecurVatMode = (r) => (r.contract_vat_mode
-  ? (r.contract_vat_mode === 'exempt' ? 'none' : r.contract_vat_mode === 'zero' ? 'zero' : 'exclusive')
-  : (r.vat_mode || 'exclusive'))
-
-/** 비목 vat('10%'/'면세'/'영세'/'—') → 정기 vat_mode */
-const modeFromCatVat = (catVat) => (catVat === '10%' ? 'exclusive' : catVat === '영세' ? 'zero' : 'none')
-
+/* (옛 정기 규칙 전용 recurFromSupply·recurFromTotal·effRecurVatMode·modeFromCatVat 는 반복거래로 바뀌며 걷었다.
+   반복거래의 금액·부가세는 lib/repeat.js amountsOf 가 VAT_RATE 로 계산한다.) */
 module.exports = {
-  TAX_TYPES, normalizeTaxType, vatFields, CONTRACT_VAT_MODES, vatRateOf, taxTypeOfMode, vatOf,
-  recurVat, recurFromSupply, recurFromTotal, modeFromCatVat, effRecurVatMode, VAT_RATE }
+  TAX_TYPES, normalizeTaxType, vatFields, CONTRACT_VAT_MODES, vatRateOf, taxTypeOfMode, vatOf, VAT_RATE }

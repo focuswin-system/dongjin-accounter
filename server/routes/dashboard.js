@@ -3,7 +3,7 @@ const { kstDate, kstToday } = require('../db')
 const { pendingCond } = require('../lib/invoiceStatus')
 const { balancesAsOf, upcomingFlows, project, projectByAccount, dailyTrial } = require('../lib/cashReport')
 const { contractHealth } = require('../lib/contractHealth')
-const { periodMonths } = require('../lib/recurPeriod')
+const { monthlyEquivalent } = require('../lib/repeat')
 const { paidPrincipal } = require('../lib/savings')
 const { remainingPrincipal } = require('../lib/loan')
 
@@ -139,17 +139,11 @@ router.get('/mgmt', async (req, res, next) => {
     const health = await contractHealth(req.db, today)
 
     /* 주기적으로 오가는 돈 — 대표님이 계약과 함께 보고 싶어 한 축이다.
-       주기가 섞여 있으면 금액을 그냥 더한 수는 아무 뜻이 없어 **월 환산**한다
-       (분기 ÷3, 년 ÷12 — 화면의 monthlyEquivalent 와 같은 산식). */
-    const monthly = async (table, col) => {
-      const [rows] = await req.db.execute(
-        `SELECT ${col} AS amount, period FROM ${table} WHERE active = 1`)
-      return Math.round(rows.reduce((s, r) => s + (Number(r.amount) || 0) / periodMonths(r.period), 0))
-    }
-    const [recurIn, recurOut] = await Promise.all([
-      monthly('recurring_invoices', 'supply_amount'),
-      monthly('recurring_expenses', 'amount'),
-    ])
+       주기가 섞여 있으면 금액을 그냥 더한 수는 아무 뜻이 없어 **월 환산**한다(분기 ÷3, 년 ÷12).
+       켜진 반복거래 기준, 합계(VAT 포함) — 통장에 오가는 돈이다. 산식은 lib/repeat.js 한 곳. */
+    const [tpls] = await req.db.execute('SELECT direction, amount, vat_mode, period FROM repeat_templates WHERE active = 1')
+    const recurIn = tpls.filter(t => t.direction === 'in').reduce((s, t) => s + monthlyEquivalent(t), 0)
+    const recurOut = tpls.filter(t => t.direction === 'out').reduce((s, t) => s + monthlyEquivalent(t), 0)
 
     res.json({ today, ...health, recurring: { monthlyIn: recurIn, monthlyOut: recurOut } })
   } catch (e) { next(e) }

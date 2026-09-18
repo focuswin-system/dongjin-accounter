@@ -2,7 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const multer = require('multer')
 const { uploadMem, parseSheet } = require('../lib/xlsx-import')
-const { futureDateError, kstToday, kstDate } = require('../db')
+const { futureDateError, kstToday } = require('../db')
 const { pnlOnly, NON_PNL_TYPES } = require('../lib/pnl')
 /* SELECT 절 안이라 바인딩(?)을 쓸 수 없어 값을 미리 박는다.
    ⚠ NON_PNL_TYPES 를 shift 로 소비하면 **모듈 상수가 비어** 다른 호출자가 조용히 망가진다.
@@ -15,9 +15,9 @@ const PNL_ONLY = (() => {
 const { rollbackQuietly } = require('../lib/tx')
 const { dateOrNull } = require('../lib/period')
 const { normalizeStatus, ledgerError, defaultSettledStatus, amountError, isSettled } = require('../lib/ledger')
-const { restoreLastGenerated, dueDatesToGenerate, LOOKAHEAD_DAYS } = require('../lib/recurrence')
+const { monthItems } = require('../lib/repeat')
 const { removeUploadedFile } = require('../lib/uploads')
-const { vatFields, recurFromSupply, effRecurVatMode } = require('../lib/vat')
+const { vatFields } = require('../lib/vat')
 const { closedPeriodError } = require('../lib/closing')
 const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
 const { isFundAccount } = require('../lib/categoryAccount')
@@ -193,7 +193,7 @@ router.get('/entry-hints', async (req, res, next) => {
     const contractId = req.query.contract_id || null
     const date = dateOrNull(req.query.date)
     const amount = Math.round(Number(req.query.amount) || 0)
-    const empty = { duplicates: [], openInvoices: [], recurring: [] }
+    const empty = { duplicates: [], openInvoices: [], repeats: [] }
     /* 거래처를 아직 안 골랐어도 계좌가 있으면 중복만은 본다 — 축의금·공과금처럼 거래처 없이
        넣는 지출이 이미 결의서로 들어가 있는 경우를 여기서 잡는다(운영 dongjin 2026-09 이중 지출). */
     if (!date || amount <= 0 || (!vendorId && !accountId)) return res.json(empty)
@@ -290,74 +290,35 @@ router.get('/entry-hints', async (req, res, next) => {
     const pick = ['exact', 'partial', 'over'].map(m => tagged.filter(r => r.match === m)).find(a => a.length) || []
     const openInvoices = pick.slice(0, 3)
 
-    /* ③ 정기 규칙 — 짚을 근거가 분명할 때만.
+    /* ③ 반복거래 — 이번 달에 **아직 안 만든** 같은 거래처의 반복거래가 이 입력과 닮았나.
      *
-     * 판정은 두 겹이다.
-     *   (가) 그 규칙에 **아직 처리 안 된 회차가 있어야** 한다. 다 처리된 규칙은 지금 할 일이
-     *        없으므로 짚어 봐야 "이미 했는데?"가 된다.
-     *   (나) 그 위에 — 금액이 고정인 규칙은 **금액이 맞아야** 하고, 금액이 매번 다른 규칙
-     *        (amount_mode='variable', 전기료 같은 것)은 금액으로 맞출 수 없으니 **회차가
-     *        입력 날짜 근처**여야 한다.
+     * 닮았으면 "반복거래 'X' 에서 만들기"를 권한다. 반복거래로 만들어야 그 달이 '만듦'이 되고,
+     * 여기서 손으로 적으면 다음에 반복거래 목록에서 또 만들어 같은 돈이 두 번 선다.
      *
-     * 날짜만으로 판정하면 안 된다. 월 규칙은 어느 날짜에서든 열흘 안에 회차가 걸려서
-     * 사실상 매번 뜬다 — 실제로 그렇게 만들어 보니 금액이 전혀 다른 입력에도 규칙 둘이
-     * 그대로 떴다. **매번 뜨는 안내는 읽히지 않는다.**
-     *
-     * 회차 계산은 손으로 하지 않고 lib/recurrence.js 의 dueDatesToGenerate 를 쓴다 —
-     * 주기(월·분기·연)·월말 clamp·건너뛴 회차·소급 하한이 전부 거기 있고, 여기서 다시 세면
-     * 두 곳이 다른 답을 갖게 된다. */
-    const recTable = kind === 'income' ? 'recurring_invoices' : 'recurring_expenses'
-    const itemCol = kind === 'income' ? 'item' : 'category'
-    const skipKind = kind === 'income' ? 'invoice' : 'expense'
-    const [recRows] = await req.db.execute(
-      `SELECT r.*, r.${itemCol} AS item, c.name AS contract_name,
-              c.vat_mode AS contract_vat_mode,
-              UNIX_TIMESTAMP(r.created_at) AS created_epoch
-         FROM ${recTable} r
-         LEFT JOIN contracts c ON r.contract_id = c.id
-        WHERE r.vendor_id = ? AND r.active = 1
-          AND (? IS NULL OR r.contract_id IS NULL OR r.contract_id = ?)`,
-      [vendorId, contractId, contractId])
-    const [skipRows] = await req.db.execute(
-      'SELECT recurring_id, due_date FROM recurring_skips WHERE kind = ?', [skipKind])
-    const skipBy = new Map()
-    for (const s of skipRows) {
-      if (!skipBy.has(s.recurring_id)) skipBy.set(s.recurring_id, [])
-      skipBy.get(s.recurring_id).push(String(s.due_date).slice(0, 10))
-    }
-
-    const today = kstToday()
-    const recurring = []
-    for (const r of recRows) {
-      r.setup_date = kstDate(Number(r.created_epoch) * 1000)
-      r.skips = skipBy.get(r.id) || []
-      // 정기청구는 공급가액이 저장돼 있다 — 거래에 적히는 건 부가세 포함 총액이다
-      const total = kind === 'income'
-        ? Number(r.supply_amount) + recurFromSupply(Number(r.supply_amount), effRecurVatMode(r)).vat
-        : Number(r.amount)
-      const variable = (r.amount_mode || 'fixed') === 'variable'
-      // 부가세 계산의 원 단위 반올림 차이까지 '다른 금액'으로 보지는 않는다
-      const amountMatch = !variable && Math.abs(total - amount) <= 10
-      // 아직 처리 안 된 회차 중 입력 날짜와 가장 가까운 것
-      const dues = dueDatesToGenerate(r, today, { horizonDays: LOOKAHEAD_DAYS })
-      if (!dues.length) continue                // (가) 할 일이 남은 규칙만
-      let nearDue = null, best = Infinity
-      for (const d of dues) {
-        const gap = Math.abs((new Date(d) - new Date(date)) / 86400000)
-        if (gap < best) { best = gap; nearDue = d }
+     * 판정: 같은 방향·같은 거래처(이름이 같은 벌까지는 안 넓힌다 — 반복거래는 거래처를 골라 둔다)
+     *   (가) 금액이 맞다(원 단위 반올림 ±10) — 또는
+     *   (나) 날짜가 반복거래 날짜 근처(HINT_DAYS)이고 금액이 20% 안 — 전기료처럼 매번 조금씩 다른 것
+     * **매번 뜨는 안내는 읽히지 않는다** — 날짜만으로는 안 띄운다(월 반복은 어느 날이든 열흘 안에 걸린다). */
+    const repeats = []
+    if (vendorId) {
+      const ym = date.slice(0, 7)
+      const items = await monthItems(req.db, ym, { direction: kind === 'income' ? 'in' : 'out' })
+      for (const it of items) {
+        if (it.made || it.vendor_id !== vendorId) continue
+        if (contractId && it.contract_id && it.contract_id !== contractId) continue
+        const amountMatch = Math.abs(it.total - amount) <= 10
+        const dayGap = it.date ? Math.abs((new Date(it.date) - new Date(date)) / 86400000) : Infinity
+        const close = it.total > 0 && Math.abs(it.total - amount) / it.total <= 0.2
+        if (!(amountMatch || (dayGap <= HINT_DAYS && close))) continue
+        repeats.push({
+          id: it.id, item: it.item_text, amount: it.total, date: it.date, ym,
+          contract_name: it.contract_name || null, why: amountMatch ? 'amount' : 'due',
+        })
+        if (repeats.length >= 3) break
       }
-      const dueNear = best <= HINT_DAYS
-      if (!(variable ? dueNear : amountMatch)) continue   // (나) 근거가 없으면 잠자코 있는다
-      recurring.push({
-        id: r.id, item: r.item || '', amount: total, day_of_month: r.day_of_month,
-        contract_name: r.contract_name || null, variable,
-        due: nearDue, due_near: dueNear, amount_match: amountMatch,
-        why: dueNear && amountMatch ? 'both' : dueNear ? 'due' : 'amount',
-      })
-      if (recurring.length >= 3) break
     }
 
-    res.json({ duplicates, openInvoices, recurring })
+    res.json({ duplicates, openInvoices, repeats })
   } catch (e) { next(e) }
 })
 
@@ -694,7 +655,7 @@ router.post('/', async (req, res, next) => {
     const {
       kind, vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
       amount, date, method, status, project_no, site,
-      invoice_id, recurring_id, doc_no, employee_id, employee_name, evid_type, evid_url, memo,
+      invoice_id, doc_no, employee_id, employee_name, evid_type, evid_url, memo,
       item_id, account_code, supply_amount, vat_amount, tax_type, vat_deductible,
       counterparty_account_id, splits
     } = req.body
@@ -725,13 +686,13 @@ router.post('/', async (req, res, next) => {
       await conn.execute(`
         INSERT INTO transactions (id, kind, vendor_id, contract_id, cost_contract_id, account_id, category, sub_category,
           amount, date, method, status, project_no, site,
-          invoice_id, recurring_id, doc_no, employee_id, employee_name, evid_type, evid_url, memo, item_id, account_code,
+          invoice_id, doc_no, employee_id, employee_name, evid_type, evid_url, memo, item_id, account_code,
           supply_amount, vat_amount, tax_type, vat_deductible,
           counterparty_account_id, counterparty_bank, counterparty_account, counterparty_holder)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `, [id, kind, vendor_id||null, contract_id||null, costId, account_id||null, category||'', sub_category||'',
           amount, date, method||'', st, project_no||'', site||'',
-          invoice_id||null, recurring_id||null, doc_no||'', employee_id||null, employee_name||null, evid_type||'', evid_url||'', memo||'',
+          invoice_id||null, doc_no||'', employee_id||null, employee_name||null, evid_type||'', evid_url||'', memo||'',
           item_id||null, acctCode,
           vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible,
           cp.id, cp.bank, cp.account, cp.holder])
@@ -1113,8 +1074,8 @@ router.delete('/:id', async (req, res, next) => {
     await conn.execute('DELETE FROM purchase_req_txns WHERE txn_id = ?', [req.params.id])
     // 복합 전표 항목(자식)을 먼저 지운다 — FK 로 묶여 있어 안 지우면 거래 삭제가 막힌다
     await conn.execute('DELETE FROM txn_splits WHERE txn_id = ?', [req.params.id])
-    // 정기지출에서 자동 생성된 거래면 last_generated 를 되돌려 그 회차가 다시 생성되게 한다.
-    const [[cur]] = await conn.execute('SELECT recurring_id, date, transfer_id FROM transactions WHERE id = ?', [req.params.id])
+    /* 반복거래에서 만든 거래면 지우는 것만으로 그 달이 다시 '안 만듦'이 된다(lib/repeat.js — 기억하는 값이 없다) */
+    const [[cur]] = await conn.execute('SELECT transfer_id FROM transactions WHERE id = ?', [req.params.id])
     /* ⚠ 이체는 **짝과 함께** 지운다.
      * 이체는 거래 두 줄(보내는 계좌의 지출 + 받는 계좌의 입금)로 남는다. 한 줄만 지우면
      * 나머지 한 줄이 짝 없이 남아 **돈이 사라지거나 생겨난다** — 통장에서는 나갔는데
@@ -1125,11 +1086,8 @@ router.delete('/:id', async (req, res, next) => {
     } else {
       await conn.execute('DELETE FROM transactions WHERE id = ?', [req.params.id])
     }
-    const rec = cur?.recurring_id
-      ? await restoreLastGenerated(conn, 'recurring_expenses', cur.recurring_id, cur.date)
-      : { restored: false, note: null }
     await conn.commit()
-    res.json({ ok: true, recurringNote: rec.note })
+    res.json({ ok: true })
   } catch (e) {
     await rollbackQuietly(conn)
     if (e.code === 'ER_ROW_IS_REFERENCED_2' || e.errno === 1451) {

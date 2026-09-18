@@ -5,9 +5,9 @@
  *   · 반올림을 단수 조정 없이 하면 마지막 회차 뒤에 잔액이 1~2원 남거나 초과된다
  *
  * 설계: docs/02-design/features/finance-management.design.md §4
- * 날짜 계산은 정기청구·정기지출과 같은 규칙을 쓴다(lib/recurrence.js) — 말일 clamp가 필요하다.
+ * 날짜 계산은 반복거래와 같은 달력 함수를 쓴다(lib/payTerm.js) — 말일 clamp가 필요하다.
  */
-const { daysInMonth, fmtDate } = require('./recurrence')
+const { daysInMonth, fmtDate } = require('./payTerm')
 
 /* 상환 방식. 'none' 은 **상환 일정이 아예 없는 채무**다.
  *

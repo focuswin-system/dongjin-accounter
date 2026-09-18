@@ -9,7 +9,6 @@ const assert = require('node:assert')
 
 const {
   normalizeTaxType, vatFields, vatRateOf, taxTypeOfMode, vatOf,
-  recurFromSupply, recurFromTotal, modeFromCatVat, effRecurVatMode,
 } = require('../lib/vat')
 
 test('과세 — 합계에서 공급가·세액을 역산한다', () => {
@@ -89,51 +88,3 @@ test('공급가 → 세액', () => {
   assert.strictEqual(vatOf(3333, 'taxable'), 333)   // 반올림
 })
 
-test('정기청구 — 공급가 기준', () => {
-  assert.deepStrictEqual(recurFromSupply(10000, 'exclusive'), { supply: 10000, vat: 1000, tax_type: '과세' })
-  assert.deepStrictEqual(recurFromSupply(10000, 'none'), { supply: 10000, vat: 0, tax_type: '면세' })
-  assert.deepStrictEqual(recurFromSupply(10000, 'zero'), { supply: 10000, vat: 0, tax_type: '영세' })
-})
-
-test('정기지출 — 합계 기준 역산이 합계와 맞는다', () => {
-  for (const total of [11000, 33333, 7]) {
-    const r = recurFromTotal(total, 'exclusive')
-    assert.strictEqual(r.supply + r.vat, total, `합계 ${total}`)
-  }
-  assert.deepStrictEqual(recurFromTotal(10000, 'none'), { supply: 10000, vat: 0, tax_type: '면세' })
-})
-
-test('모르는 정기 vat_mode는 과세로 본다', () => {
-  assert.strictEqual(recurFromSupply(10000, undefined).tax_type, '과세')
-  assert.strictEqual(recurFromSupply(10000, 'garbage').vat, 1000)
-})
-
-test('비목 vat 문자열 → 정기 vat_mode', () => {
-  assert.strictEqual(modeFromCatVat('10%'), 'exclusive')
-  assert.strictEqual(modeFromCatVat('영세'), 'zero')
-  assert.strictEqual(modeFromCatVat('면세'), 'none')
-  assert.strictEqual(modeFromCatVat('—'), 'none')
-})
-
-/* ── 정기청구 회차의 실효 과세유형 ──
- * 주문이 면세면 그 주문의 청구서는 규칙에 뭐라 적혀 있든 세액이 0이다.
- * 이 규칙이 두 벌이었던 적이 있다 — 발행 경로만 주문을 보고 안내 경로는 규칙만 봐서,
- * 면세 주문의 회차 금액이 10% 어긋난 채 비교돼 안내가 **조용히 안 떴다.** */
-test('정기 실효 과세유형 — 주문이 면세면 규칙이 과세라도 면세', () => {
-  assert.equal(effRecurVatMode({ contract_vat_mode: 'exempt', vat_mode: 'exclusive' }), 'none')
-  assert.equal(recurFromSupply(1000000, effRecurVatMode({ contract_vat_mode: 'exempt', vat_mode: 'exclusive' })).vat, 0)
-})
-
-test('정기 실효 과세유형 — 주문이 영세면 영세(면세와 구분된다)', () => {
-  assert.equal(effRecurVatMode({ contract_vat_mode: 'zero', vat_mode: 'exclusive' }), 'zero')
-})
-
-test('정기 실효 과세유형 — 주문이 과세면 규칙과 무관하게 과세', () => {
-  assert.equal(effRecurVatMode({ contract_vat_mode: 'taxable', vat_mode: 'none' }), 'exclusive')
-})
-
-test('정기 실효 과세유형 — 주문이 없으면 규칙을 따르고, 규칙도 비면 과세', () => {
-  assert.equal(effRecurVatMode({ vat_mode: 'none' }), 'none')
-  assert.equal(effRecurVatMode({}), 'exclusive')
-  assert.equal(recurFromSupply(1000000, effRecurVatMode({})).vat, 100000)
-})

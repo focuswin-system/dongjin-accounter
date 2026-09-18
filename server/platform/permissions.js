@@ -35,13 +35,13 @@ const RESOURCES = [
 
   { id: 'contract_sales',          label: '수주',          group: '일반회계 · 판매·수주(매출)' },
   { id: 'billing_issued',          label: '대금 청구서(매출)', group: '일반회계 · 판매·수주(매출)' },
-  { id: 'recurring_invoice',       label: '정기청구',       group: '일반회계 · 판매·수주(매출)' },
+  { id: 'recurring_invoice',       label: '반복거래(입금)',       group: '일반회계 · 판매·수주(매출)' },
   // 대금 청구서와 같은 화면(메뉴 통합). 이 자원은 #ar 라우트 진입을 가른다.
   { id: 'ar',                      label: '미수금(청구서)', group: '일반회계 · 판매·수주(매출)' },
 
   { id: 'contract_purchase',       label: '발주',          group: '일반회계 · 구매·발주(매입)' },
   { id: 'billing_received',        label: '대금 청구서(매입)', group: '일반회계 · 구매·발주(매입)' },
-  { id: 'recurring_expense',       label: '정기지출',       group: '일반회계 · 구매·발주(매입)' },
+  { id: 'recurring_expense',       label: '반복거래(출금)',       group: '일반회계 · 구매·발주(매입)' },
   { id: 'ap',                      label: '미지급금(청구서)', group: '일반회계 · 구매·발주(매입)' },
 
   { id: 'misc_pl',                 label: '일반 경비',      group: '일반회계 · 경비' },

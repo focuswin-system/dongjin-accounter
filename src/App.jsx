@@ -31,7 +31,8 @@ import { PurchaseReqScreen } from './screens/PurchaseReq'
 import { QuoteRequestScreen } from './screens/QuoteRequest'
 import { HRScreen } from './screens/HR'
 import { LaborContractScreen, OutsourcingScreen } from './screens/WorkContract'
-import { MasterScreen, RefMasterPanel, REF_CONFIGS, RecurringExpensePanel, RecurringInvoicePanel } from './screens/Master'
+import { MasterScreen, RefMasterPanel, REF_CONFIGS } from './screens/Master'
+import { RepeatScreen } from './screens/Repeat'
 import { LoanScreen, InvestmentScreen, FinanceDashScreen } from './screens/Finance'
 import { SavingsScreen } from './screens/Savings'
 import { CashReportScreen, DailyTrialScreen } from './screens/CashReport'
@@ -244,16 +245,16 @@ const HELP_MAP = {
       "주문·품목에 붙지 않는 운영비(임차료·통신비·보험료 등)를 등록하는 화면이에요",
       "매입(원가)과 달리 여기 지출은 판매관리비로 잡혀요",
       "행을 클릭하면 바로 수정하고, 오른쪽 삭제 버튼으로 지울 수 있어요",
-      "매달 같은 날 나가는 지출은 매입의 '정기지출'에 걸어두세요",
+      "매달 같은 곳에 나가는 지출은 '반복거래'에 등록해 두면 복사해서 만들 수 있어요",
     ]
   },
   recurring: {
-    title: "정기 반복",
+    title: "반복거래",
     items: [
-      "무엇을 · 언제 · 얼마씩 반복할지 조건을 설정하는 곳이에요",
-      "정기청구의 실제 발행은 판매·수주(매출) → 대금 청구서의 '발행 예정'에서 해요",
-      "등록일 이전 회차는 소급 생성되지 않아요 (과거분은 직접 입력)",
-      "비활성으로 돌리면 다음 회차부터 생성이 멈춰요",
+      "매달 오가는 돈을 한 번 등록해 두면, 달마다 목록에서 골라 한 번에 만들어요",
+      "만든 달은 번호가 보이고, 만든 청구서·거래를 지우면 다시 고를 수 있어요",
+      "지난달은 ◀ 로 넘겨서 만들어요",
+      "통장·홈택스로 같은 돈이 먼저 들어와 있으면 새로 만들지 않고 그것에 연결해요",
     ]
   },
   evidence: {
@@ -391,7 +392,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
   const [txnForm, setTxnForm] = useState(null); // null | { kind, contract? }
   const [txnVersion, setTxnVersion] = useState(0);
   // 잎 id → 처리가 밀린 건수 (사이드바 배지). 0이면 배지를 그리지 않는다.
-  const [overdueCycles, setOverdueCycles] = useState({ recurring_invoice: 0, recurring_expense: 0, finance_loan: 0 });
+  const [overdueCycles, setOverdueCycles] = useState({ finance_loan: 0 });
   const [evidenceAttach, setEvidenceAttach] = useState(null);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -454,28 +455,17 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
     return () => { alive = false }
   }, [txnVersion]);
 
-  /* '처리가 밀린 건수' — 사이드바 배지.
-   * 이행 관리 화면을 만들어도 그 화면을 열지 않으면 밀린 게 있는지 모른다.
-   * 정기 회차(청구·지출)와 차입금 상환이 같은 성격이라 함께 센다 —
-   * 셋 다 "예정일이 지났는데 처리되지 않은 것"이고, 방치하면 그 달 장부에 구멍이 난다.
+  /* '처리가 밀린 건수' — 사이드바 배지. 차입금 상환만 센다.
+   * (옛 정기 회차 배지는 반복거래로 바뀌며 없앴다 — 반복거래는 놓친 달을 추적하지 않는다,
+   *  사용자 확정 2026-09-15. 달을 골라 보는 것은 반복거래 화면의 일이다.)
    * 라우트가 바뀔 때 다시 센다(그 화면에 있는 동안은 화면 자체가 진실을 보여준다). */
   useEffect(() => {
     let alive = true
-    const overdueOf = (list) => (list || []).filter(c => c.state === 'overdue').length
     // 권한 없는 화면의 배지는 세지 않는다 — 세려고 부르면 403만 쌓이고 숫자는 어차피 안 나온다
-    const skip = Promise.resolve([])
-    Promise.all([
-      canDo("recurring_invoice") ? api.getPendingRecurring() : skip,
-      canDo("recurring_expense") ? api.getPendingRecurringExpenses() : skip,
-      canDo("finance_loan") ? api.getFinanceSummary() : skip,
-    ])
-      .then(([sales, purchase, finance]) => {
+    ;(canDo("finance_loan") ? api.getFinanceSummary() : Promise.resolve(null))
+      .then((finance) => {
         if (!alive) return
-        setOverdueCycles({
-          recurring_invoice: overdueOf(sales),
-          recurring_expense: overdueOf(purchase),
-          finance_loan: finance?.overdue_count || 0,
-        })
+        setOverdueCycles({ finance_loan: finance?.overdue_count || 0 })
       })
       .catch(() => {})
     return () => { alive = false }
@@ -697,10 +687,9 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
                                        openExpense={() => setTxnForm({ kind: "expense" })}
                                        openIncome={() => setTxnForm({ kind: "income" })}
                                        openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
-      // 정기 반복은 기준정보(정적 참조)가 아니라 돈 흐름이다 → 성격에 맞는 회계처리 그룹에 둔다.
-      // 정기지출=경비(판관비), 정기청구=판매·수주(매출). 패널은 Master의 것을 그대로 재사용.
-      case "recurring_expense": return <RecurringExpensePanel page goRoute={go}/>;
-      case "recurring_invoice": return <RecurringInvoicePanel page goRoute={go}/>;
+      // 반복거래 — 입금·출금 한 화면. 옛 '정기 출금' 주소로 들어오면 출금으로 걸러 연다.
+      case "recurring_expense": return <RepeatScreen key="repeat-out" goRoute={go} initialDirection="out"/>;
+      case "recurring_invoice": return <RepeatScreen key="repeat-all" goRoute={go}/>;
       case "mgmt_dash":       return <MgmtDashScreen/>;
       case "mgmt_ask":        return <MgmtAskScreen/>;
       case "excel_modal":     return <ExcelScreen goRoute={go}/>;
@@ -802,7 +791,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
                   <Dic className="nav-ico"/>
                   <span>{node.label}</span>
                   {!open && domainOverdue > 0 && (
-                    <span className="nav-count neg ml-auto" title={`처리가 밀린 정기 회차 ${domainOverdue}건`}>{domainOverdue}</span>
+                    <span className="nav-count neg ml-auto" title={`처리가 밀린 상환 ${domainOverdue}건`}>{domainOverdue}</span>
                   )}
                   <Icon.Down className="nav-chev" style={{ transform: open ? "none" : "rotate(-90deg)" }}/>
                 </button>
@@ -830,9 +819,9 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
                         <div key={it.id} className={`nav-item nav-sub${activeId === it.id ? " active" : ""}`} onClick={() => go(it.id)}>
                           <Lic className="nav-ico"/>
                           <span>{it.label}</span>
-                          {/* 놓친 회차 — '해야 하는데 안 된 것'이라 개수만 조용히 놓지 않고 눈에 걸리게 */}
+                          {/* 밀린 상환 — '해야 하는데 안 된 것'이라 개수만 조용히 놓지 않고 눈에 걸리게 */}
                           {overdue > 0 && (
-                            <span className="nav-count neg" title={`처리가 밀린 회차 ${overdue}건`}>{overdue}</span>
+                            <span className="nav-count neg" title={`처리가 밀린 상환 ${overdue}건`}>{overdue}</span>
                           )}
                         </div>
                       );
@@ -1091,8 +1080,8 @@ const FAQ_CATEGORIES = ["거래 등록", "미수금·미지급금", "주문 관�
 
 const FAQ_DATA = [
   // 거래 등록
-  { id:"f01", cat:"거래 등록",       routes:["home","ledger"],              q:"입금을 어떻게 등록하나요?",                  a:"입출금 → 입금 → 수시 입금에서 '입금 등록'을 누르면 받으신 서류(세금계산서인지 아닌지)를 먼저 묻고, 그에 맞는 폼으로 안내해요. 매달 같은 곳에서 들어오는 돈은 정기입금에 규칙으로 걸어 두면 회차가 알아서 떠요.", action:{ label:"수시입금으로", route:"billing_issued" } },
-  { id:"f02", cat:"거래 등록",       routes:["home","ledger"],              q:"지출을 어떻게 등록하나요?",                  a:"입출금 → 출금 → 수시 출금에서 '지급 등록'을 누르세요. 받으신 서류(세금계산서 / 카드전표·영수증 / 없음)를 먼저 고르면 그에 맞는 폼이 열려요. 매달 나가는 고정비는 정기지급에 걸어 두면 됩니다.", action:{ label:"수시지급으로", route:"billing_received" } },
+  { id:"f01", cat:"거래 등록",       routes:["home","ledger"],              q:"입금을 어떻게 등록하나요?",                  a:"입출금 → 입금 → 수시 입금에서 '입금 등록'을 누르면 받으신 서류(세금계산서인지 아닌지)를 먼저 묻고, 그에 맞는 폼으로 안내해요. 매달 같은 곳에서 들어오는 돈은 반복거래에 등록해 두고, 달마다 골라 만들면 돼요.", action:{ label:"수시입금으로", route:"billing_issued" } },
+  { id:"f02", cat:"거래 등록",       routes:["home","ledger"],              q:"지출을 어떻게 등록하나요?",                  a:"입출금 → 출금 → 수시 출금에서 '지급 등록'을 누르세요. 받으신 서류(세금계산서 / 카드전표·영수증 / 없음)를 먼저 고르면 그에 맞는 폼이 열려요. 매달 나가는 고정비는 반복거래에 등록해 두면 됩니다.", action:{ label:"수시지급으로", route:"billing_received" } },
   { id:"f03", cat:"거래 등록",       routes:["ledger"],                     q:"여러 건을 한꺼번에 올리고 싶어요",            a:"엑셀 업로드 기능을 이용하면 여러 거래를 한 번에 등록할 수 있어요. 거래내역 오른쪽 위 '엑셀 업로드'에서 서식을 내려받아 작성한 뒤 올려 주세요.", action:{ label:"엑셀 업로드로", route:"excel_modal" } },
   { id:"f04", cat:"거래 등록",       routes:["ledger"],                     q:"거래 내용을 수정하거나 삭제하고 싶어요",      a:"거래내역에서 그 줄을 누르면 상세가 열려요. 아래쪽 '편집'으로 고치고, '삭제'로 지울 수 있어요. 거래내역은 보는 곳이라 평소에는 여기서 고칠 일이 많지 않아요 — 잘못 들어간 게 보일 때만 쓰면 됩니다.", action:{ label:"거래내역으로", route:"ledger" } },
   { id:"f05", cat:"거래 등록",       routes:["ledger","home"],              q:"등록하려는 거래처가 목록에 없어요",           a:"거래처는 설정 화면에서 먼저 추가해야 해요. 설정 → 거래처 탭에서 새 거래처를 등록한 뒤 다시 시도해 보세요.", action:{ label:"설정으로", route:"master" } },
@@ -1282,10 +1271,10 @@ const CommandPalette = ({ open, onClose, onPick }) => {
   /* 줄 세우는 순서 — 위에서부터 이렇게 읽힌다.
    *   0 메뉴        : 거래처가 수백 건이면 메뉴가 밑으로 밀려, '보험'을 쳐도
    *                   보험 거래처만 잔뜩 나오고 정작 보험 화면은 안 보인다.
-   *   1 아직 안 끝난 것 : 정산 안 된 청구서, 살아 있는 정기 규칙(rank=1).
+   *   1 아직 안 끝난 것 : 정산 안 된 청구서, 켜진 반복거래(rank=1).
    *                   거래처를 검색하는 이유는 대개 "받을 게 남았나"다.
    *   2 그 밖의 데이터  : 주문·거래처(rank 없음 → 2)
-   *   3 끝난 것        : 정산 완료 청구서, 중지된 규칙
+   *   3 끝난 것        : 정산 완료 청구서, 꺼진 반복거래
    * 같은 층 안에서는 원래 순서를 지킨다(정렬이 안정적이라 목록이 튀지 않는다). */
   const tier = (c) => (c.kind === '메뉴' ? 0 : (c.rank ?? 2));
   const results = (ql
@@ -1325,7 +1314,7 @@ const CommandPalette = ({ open, onClose, onPick }) => {
         <div className="row gap-10" style={{ padding: "14px 18px", borderBottom: "1px solid var(--line)" }}>
           <Icon.Search size={18} className="text-muted"/>
           <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)} onKeyDown={handleKeyDown}
-            placeholder="거래처·주문·청구서·정기 규칙·메뉴 검색"
+            placeholder="거래처·주문·청구서·반복거래·메뉴 검색"
             style={{ flex: 1, border: 0, outline: 0, fontSize: 15, fontFamily: "inherit", background: "transparent" }}/>
           <span className="kbd">ESC</span>
         </div>

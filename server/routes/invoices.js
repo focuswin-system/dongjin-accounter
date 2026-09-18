@@ -5,7 +5,6 @@ const { futureDateError, kstToday } = require('../db')
 const { closedPeriodError } = require('../lib/closing')
 // 부가세 집계는 lib/vatAgg.js 한 곳 — 화면·보고서·엑셀이 같은 값을 본다
 const { rollbackQuietly } = require('../lib/tx')
-const { restoreLastGenerated } = require('../lib/recurrence')
 const { ledgerError, amountError } = require('../lib/ledger')
 const { vatOfQuarter } = require('../lib/vatAgg')
 const { settleAcctCode } = require('../lib/acctCode')
@@ -1173,9 +1172,8 @@ router.delete('/:id', async (req, res, next) => {
     // 입금/지급(매칭) 내역이 있으면 삭제 금지 — 이미 장부에 반영된 돈이므로
     const [[{ mcnt }]] = await conn.execute('SELECT COUNT(*) AS mcnt FROM invoice_matches WHERE invoice_id = ?', [id])
     if (mcnt > 0) { await rollbackQuietly(conn); return res.status(409).json({ error: '입금·지급 내역이 있는 청구서는 삭제할 수 없어요. 먼저 입금 매칭을 취소하세요.' }) }
-    // 정기청구에서 나온 회차면 last_generated 를 되돌려 '발행 예정'에 다시 뜨게 한다.
-    // 안 하면 그 달치가 자동 생성에도 예정 목록에도 안 나와 매출이 조용히 미청구로 사라진다.
-    const [[inv]] = await conn.execute('SELECT recurring_id, issued_at, kind FROM invoices WHERE id = ?', [id])
+    /* 반복거래에서 만든 청구서면 지우는 것만으로 그 달이 다시 '안 만듦'이 된다(lib/repeat.js — 기억하는 값이 없다) */
+    const [[inv]] = await conn.execute('SELECT issued_at, kind FROM invoices WHERE id = ?', [id])
     if (!inv) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     // 마감된 달의 청구서를 지우면 이미 신고한 부가세 자료가 줄어든다 → 막는다
     { const ce = await closedPeriodError(conn, inv.issued_at); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
@@ -1186,17 +1184,8 @@ router.delete('/:id', async (req, res, next) => {
     await conn.execute("UPDATE milestones SET status = '예정', invoice_id = NULL WHERE invoice_id = ?", [id])
     await detachInvoiceFromDocs(conn, id)
     await conn.execute('DELETE FROM invoices WHERE id = ?', [id])
-    /* 규칙 테이블은 청구서 종류를 따라간다. 여태 매출이든 매입이든 recurring_invoices 만 봤는데,
-       정기지출에서 나온 매입 청구서의 recurring_id 는 recurring_expenses 의 것이다 —
-       그 표에서 찾으니 없는 규칙이라 조용히 아무것도 안 되돌리고, 지운 그 달치가
-       '놓친 회차'에도 자동 생성에도 영영 안 떴다(일괄 삭제는 처음부터 종류를 봤다). */
-    const rec = inv?.recurring_id
-      ? await restoreLastGenerated(conn,
-          inv.kind === 'issued' ? 'recurring_invoices' : 'recurring_expenses',
-          inv.recurring_id, inv.issued_at)
-      : { restored: false, note: null }
     await conn.commit()
-    res.json({ ok: true, recurringNote: rec.note })
+    res.json({ ok: true })
   } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
 })
 
@@ -1501,11 +1490,6 @@ router.post('/bulk/delete', async (req, res, next) => {
       await conn.execute("UPDATE milestones SET status = '예정', invoice_id = NULL WHERE invoice_id = ?", [inv.id])
       await detachInvoiceFromDocs(conn, inv.id)
       await conn.execute('DELETE FROM invoices WHERE id = ?', [inv.id])
-      // 정기청구에서 나온 회차면 하한을 되돌려 그 달이 다시 청구 가능해지게(단건 삭제와 같은 처리)
-      if (inv.recurring_id) {
-        await restoreLastGenerated(conn, inv.kind === 'issued' ? 'recurring_invoices' : 'recurring_expenses',
-          inv.recurring_id, inv.issued_at)
-      }
     }
     await conn.commit()
     res.json({ ok: true, count: invs.length })

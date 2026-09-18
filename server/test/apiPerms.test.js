@@ -42,6 +42,12 @@ test('내려받기·인쇄는 별도 행위', () => {
   assert.equal(actionFor('GET', '/api/resolutions/12/print'), 'export')
 })
 
+test('반복거래 미리보기는 조회, 만들기는 등록', () => {
+  assert.equal(actionFor('POST', '/api/repeat-templates/preview'), 'view')
+  assert.equal(actionFor('POST', '/api/repeat-templates/create'), 'create')
+  assert.equal(requiredPerm('POST', '/api/repeat-templates/preview').action, 'view')
+})
+
 test('쿼리스트링이 붙어도 prefix를 찾는다', () => {
   // 게이트는 ?를 잘라 넘기지만, prefix 추출 자체가 앞부분만 보는지 확인
   assert.equal(prefixOf('/api/payroll-items'), '/api/payroll-items')

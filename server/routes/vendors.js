@@ -52,8 +52,8 @@ router.patch('/:id/active', async (req, res, next) => {
     if (!active) {
       const [[c]] = await req.db.execute(`
         SELECT (SELECT COUNT(*) FROM contracts WHERE vendor_id = ? AND status = '진행중') AS contracts,
-               (SELECT COUNT(*) FROM recurring_invoices WHERE vendor_id = ? AND active = 1) AS recur_in,
-               (SELECT COUNT(*) FROM recurring_expenses WHERE vendor_id = ? AND active = 1) AS recur_out,
+               (SELECT COUNT(*) FROM repeat_templates WHERE vendor_id = ? AND active = 1 AND direction = 'in') AS recur_in,
+               (SELECT COUNT(*) FROM repeat_templates WHERE vendor_id = ? AND active = 1 AND direction = 'out') AS recur_out,
                (SELECT COUNT(*) FROM invoices WHERE vendor_id = ?
                   AND status IN ('입금 예정','일부 입금','기한 지남','장기 미수','지급 대기','지급 예정','일부 지급')) AS open_invoices`,
         [req.params.id, req.params.id, req.params.id, req.params.id])
@@ -183,6 +183,17 @@ router.put('/:id', async (req, res, next) => {
 
 router.delete('/:id', async (req, res, next) => {
   try {
+    /* 반복거래는 **FK 가 없다**(repeat_templates — 템플릿을 지워도 장부는 그대로여야 해서).
+       그래서 반복거래만 붙은 거래처는 FK 가 안 막는다. 그냥 두면 거래처 없는 반복거래가
+       달별 목록에 '—' 로 떠 있다가, 만들 때 청구서의 거래처 FK 에 걸려 500 이 난다(실측 재현).
+       옛 정기 표에는 FK 가 있어 막히던 자리다 — 여기서 대신 센다. */
+    const [[r]] = await req.db.execute(
+      'SELECT COUNT(*) AS n FROM repeat_templates WHERE vendor_id = ?', [req.params.id])
+    if (Number(r.n) > 0) {
+      return res.status(409).json({
+        error: `이 거래처에 반복거래 ${r.n}건이 연결돼 있어 삭제할 수 없어요. 반복거래를 먼저 지우거나 거래처를 바꿔주세요.`,
+      })
+    }
     await req.db.execute('DELETE FROM vendors WHERE id = ?', [req.params.id])
     res.json({ ok: true })
   } catch (e) {

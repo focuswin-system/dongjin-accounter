@@ -156,19 +156,19 @@ export const MgmtDashScreen = () => {
           <div className="text-xs text-muted2" style={{ marginBottom: 10 }}>
             한 달치로 환산했어요(분기 ÷3, 년 ÷12). 주기가 섞여 있으면 그냥 더한 수는 뜻이 없어요.
           </div>
-          {/* 규칙이 하나도 없으면 0원 세 줄 대신 한 줄로 — 빈 구획은 그리지 않는다 */}
+          {/* 반복거래가 하나도 없으면 0원 세 줄 대신 한 줄로 — 빈 구획은 그리지 않는다 */}
           {!d.recurring.monthlyIn && !d.recurring.monthlyOut ? (
             <div className="text-sm text-muted2" style={{ padding: '12px 0' }}>
-              등록된 정기입금·정기지급이 없어요.
+              켜진 반복거래가 없어요.
             </div>
           ) : (<>
           <div className="row" style={{ padding: '10px 0', borderBottom: '1px solid var(--line)' }}>
-            <span className="text-sm">매달 들어올 돈 <span className="text-muted2">정기입금</span></span>
+            <span className="text-sm">매달 들어올 돈 <span className="text-muted2">반복거래</span></span>
             <span className="num fw-700 ml-auto" style={{ color: 'var(--pos-ink)' }}>
               {fmtNum(d.recurring.monthlyIn)}원</span>
           </div>
           <div className="row" style={{ padding: '10px 0', borderBottom: '1px solid var(--line)' }}>
-            <span className="text-sm">매달 나갈 돈 <span className="text-muted2">정기지급</span></span>
+            <span className="text-sm">매달 나갈 돈 <span className="text-muted2">반복거래</span></span>
             <span className="num fw-700 ml-auto" style={{ color: 'var(--neg-ink)' }}>
               {fmtNum(d.recurring.monthlyOut)}원</span>
           </div>

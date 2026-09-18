@@ -117,84 +117,21 @@ export const nextEndDate = (c) => {
   return d.toISOString().slice(0, 10);
 };
 
-/** 정기청구가 주문과 어긋났는지 — 금액·주기·종료일 대조 */
-export const recurringMismatch = (c, rec) => {
-  if (!c || !rec || !isRecurring(c)) return [];
-  const out = [];
-  // supply_amount가 없으면 Number(undefined)=NaN이라 항상 불일치로 잡히고 'NaN원'이 노출된다 → 0으로 방어
-  const recSupply = Number(rec.supply_amount) || 0;
-  if (recSupply !== Number(c.unit_amount || 0)) {
-    out.push(`청구금액 ${recSupply.toLocaleString()}원 ≠ 주문 ${Number(c.unit_amount || 0).toLocaleString()}원`);
-  }
-  if (rec.period !== c.billing_period) {
-    out.push(`청구주기 ${periodLabel(rec.period)} ≠ 주문 ${periodLabel(c.billing_period)}`);
-  }
-  if (!isOpenEnded(c) && c.end_date && rec.end_date !== c.end_date) {
-    out.push(`종료일 ${rec.end_date || '없음'} ≠ 주문 ${c.end_date}`);
-  }
-  /* 시작일·청구일도 봐야 한다 — 이 둘이 빠져 있어서 "주문은 7/1인데 규칙은 8/5" 같은 어긋남이
-     경고조차 안 떴다. 방향에 따라 양쪽으로 틀린다:
-       시작일을 앞당겼는데 규칙이 그대로 → 그 사이 회차가 안 잡힌다(덜 청구)
-       시작일을 미뤘는데 규칙이 그대로   → 아직 시작도 안 한 주문에 회차가 뜬다(더 청구)
-     ⚠ 시작일을 과거로 고쳐도 **등록일 하한(setup_date)은 그대로**라 소급은 열리지 않는다.
-        과거 회차는 소급 등록 마법사로만 만든다. 여기서 맞추는 건 데이터 정합성이다. */
-  const cStart = c.start_date || '';
-  const rStart = rec.start_date || '';
-  if (cStart && rStart !== cStart) {
-    out.push(`시작일 ${rStart || '없음'} ≠ 주문 ${cStart}`);
-  }
-  const cDay = Number(c.billing_day) || 1;
-  const rDay = Number(rec.day_of_month) || 1;
-  if (rDay !== cDay) {
-    out.push(`청구일 매월 ${rDay}일 ≠ 주문 ${cDay}일`);
-  }
-  return out;
-};
 
 /* ── 회차가 '몇 월 며칠'인지 ────────────────────────────────────────
  *
  * 주기(월·분기·년)와 일자(day_of_month/billing_day)만 화면에 있으면
- * **분기·년이 몇 월인지 알 수 없다.** 실제 규칙은 서버(lib/recurrence.js)에 있다:
+ * **분기·년이 몇 월인지 알 수 없다.** 실제 규칙은 서버(lib/repeat.js occursInMonth)에 있다:
  *   달  = 시작일이 속한 달에서 3개월(분기)·12개월(년)씩
  *   일  = day_of_month (그 달 말일보다 크면 말일로 clamp)
  * 즉 **월은 시작일이 정한다.** 화면이 그걸 말해주지 않아 "분기는 몇 월인가"가 물음으로 남았다.
  */
 
-/** 일자 인풋 라벨. '매월 N일'을 주기와 무관하게 쓰면 격월·분기·년에서 거짓말이 된다. */
-const DAY_LABEL = {
-  monthly: '매월 N일', bimonthly: '두 달마다 N일', quarterly: '분기마다 N일', yearly: '매년 N일',
-};
-export const cycleDayLabel = (period) => DAY_LABEL[period] || DAY_LABEL.monthly;
-
-/**
- * 회차가 놓이는 달만 짧게. 예) '2·5·8·11월 25일'
- *
- * 라벨 괄호 안에 넣으려고 뗀 것이다. 예전엔 일자 칸 라벨이 `생성 일 (매월 N일)` 이고
- * 그 **아래에 또** `매월 25일` 이 연한 글씨로 붙어 있었다 — 괄호는 **틀**만 말하고
- * 아래 줄이 **실제 답**이라, 같은 말이 두 번 있는 데다 줄 높이까지 어긋났다.
- * 실제 답을 괄호로 올리고 아래 줄은 없앤다.
- *
- * ⚠ '시작일을 비우면 등록일 기준' 안내는 여기서 뺀다 — 바로 아래 FirstCycleHint 가
- *   "비워두면 오늘(등록일)부터 시작해요" 로 이미 말한다. 두 곳에서 말하면 또 중복이다.
- */
-export const cycleMonthsLabel = (startDate, day, period, today) => {
-  const d = Math.min(Math.max(Number(day) || 1, 1), 31);
-  const sm = Number(String(startDate || today || '').split('-')[1]);
-  if (!sm) return cycleDayLabel(period);          // 날짜를 못 읽으면 틀이라도 보여준다
-  if (period === 'yearly') return `매년 ${sm}월 ${d}일`;
-  const step = periodMonths(period);
-  if (step > 1) {
-    const ms = Array.from({ length: 12 / step }, (_, i) => ((sm - 1 + i * step) % 12) + 1)
-      .sort((a, b) => a - b);
-    return `${ms.join('·')}월 ${d}일`;
-  }
-  return `매월 ${d}일`;
-};
 
 /**
  * 회차가 놓이는 달을 사람 말로. 예) '2·5·8·11월 25일'
  * startDate 가 없으면 등록일(오늘)이 앵커가 되므로 그렇게 알려준다.
- * (주문 화면에서 쓴다 — 정기 규칙 폼은 위 cycleMonthsLabel 을 라벨 괄호에 쓴다)
+ * (주문 화면에서 쓴다)
  */
 export const cycleMonthsHint = (startDate, day, period, today) => {
   const d = Math.min(Math.max(Number(day) || 1, 1), 31);
@@ -220,7 +157,7 @@ export const cycleMonthsHint = (startDate, day, period, today) => {
  * ("이번 달 것은 다음 달 10일에 넣어드립니다"). net30 으로 뭉뚱그리면
  * 자금 현황의 예정일이 며칠씩 어긋난다 — 8/5 회차를 익월 10일로 받는 거래처면
  * 실제는 9/10 인데 net30 은 9/4 로 잡는다.
- * ⚠ 값(value)은 서버 lib/recurrence.js PAY_TERMS 와 **글자까지 같아야** 한다.
+ * ⚠ 값(value)은 서버 lib/payTerm.js PAY_TERMS 와 **글자까지 같아야** 한다.
  */
 export const PAY_TERM_OPTS = [
   { value: 'immediate', label: '당일' },
@@ -236,11 +173,11 @@ export const payTermNeedsDay = (t) => !!PAY_TERM_OPTS.find(o => o.value === t)?.
 export const payTermHint = (term, day, verb) => {
   const d = Math.min(Math.max(Number(day) || 1, 1), 31);
   switch (term) {
-    case 'immediate': return `회차일 당일에 ${verb}.`;
-    case 'dom':       return `회차가 있는 달 ${d}일에 ${verb}. (그 달에 없는 날짜면 말일)`;
-    case 'eom':       return `회차가 있는 달 말일에 ${verb}.`;
-    case 'nm_day':    return `회차 다음 달 ${d}일에 ${verb}. 국내 B2B에서 가장 흔한 조건이에요.`;
-    case 'nm_eom':    return `회차 다음 달 말일에 ${verb}.`;
-    default:          return `회차일부터 30일 뒤에 ${verb}.`;
+    case 'immediate': return `그 날 바로 ${verb}.`;
+    case 'dom':       return `청구한 달 ${d}일에 ${verb}. (그 달에 없는 날짜면 말일)`;
+    case 'eom':       return `청구한 달 말일에 ${verb}.`;
+    case 'nm_day':    return `청구한 다음 달 ${d}일에 ${verb}.`;
+    case 'nm_eom':    return `청구한 다음 달 말일에 ${verb}.`;
+    default:          return `청구일부터 30일 뒤에 ${verb}.`;
   }
 };
