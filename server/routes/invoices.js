@@ -814,7 +814,8 @@ router.post('/carryover', async (req, res, next) => {
         const made = await createInvoice(conn, {
           kind: r.kind, vendorId: r.vendorId,
           supply: r.amount, vat: 0, total: r.amount,
-          issuedAt, dueAt: issuedAt,
+          // 결제기한은 비운다 — 원래 기한을 모른다. 전날로 두면 넣자마자 전부 '기한 지남'·연체 미수로 잡혔다(화면 검증)
+          issuedAt, dueAt: null,
           taxType: '면세',                       // 세액 0 을 뜻할 뿐 — 부가세 명세에서는 carryover 로 빠진다
           memo: r.memo ? `전기이월 · ${r.memo}` : '전기이월',
           accountCode: CARRYOVER_ACCT,

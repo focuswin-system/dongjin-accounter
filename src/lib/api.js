@@ -276,6 +276,7 @@ function adaptInvoice(row) {
     ntsConfirmNo: row.nts_confirm_no || '',   // 홈택스 승인번호 — 세금계산서 임포트의 중복 판정 키
     issuedAt: row.issued_at,
     dueAt: row.due_at || null,
+    carryover: !!Number(row.carryover || 0),   // 이월 잔액(4단계) — 목록에서 '전기 이월'로 알아보게
     /* 납품일(입고일) 범위 — **품목 줄에 있는 값**이라 하나로 정해지지 않는다.
        8/5·8/12·8/27 납품분을 한 장으로 묶는 게 실무의 보통 모습이라 범위로 다룬다.
        둘 다 없으면 납품일을 안 적은 청구서(용역 등)다. */

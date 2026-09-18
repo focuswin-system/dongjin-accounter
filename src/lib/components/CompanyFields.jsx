@@ -185,7 +185,7 @@ export const FiscalSection = ({ form, f, errors = {}, savedBooksStart = '', onCa
         </div>
         {form.books_start && (
           <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-            {dot(form.books_start)} 전 날짜의 입금·출금은 등록할 수 없어요. 그 전 돈은 기초잔액·이월 잔액에 넣어 주세요.
+            {dot(form.books_start)} 전 입금·출금은 마감된 달처럼 잠겨요. 그 전 돈은 기초잔액·이월 잔액에 넣어 주세요.
           </div>
         )}
       </CoRow>

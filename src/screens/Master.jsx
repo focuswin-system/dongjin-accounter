@@ -2950,7 +2950,7 @@ const ClosingPanel = ({ embedded = false }) => {
 
       <div className="card" style={{ overflow: 'hidden' }}>
         <table className="table">
-          <thead><tr><th style={{ width: 120 }}>마감한 달</th><th>메모</th><th style={{ width: 150 }}>마감 시각</th><th style={{ width: 90 }}></th></tr></thead>
+          <thead><tr><th style={{ width: 120 }}>마감한 달</th><th>메모</th><th style={{ width: 170 }}>마감 시각</th><th style={{ width: 90 }}></th></tr></thead>
           <tbody>
             {rows.length === 0 && (
               <tr><td colSpan={4} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)' }}>마감한 달이 없어요.</td></tr>
@@ -2959,7 +2959,7 @@ const ClosingPanel = ({ embedded = false }) => {
               <tr key={r.id}>
                 <td className="fw-600 num">{r.period}</td>
                 <td className="text-sm text-muted">{r.memo || '—'}</td>
-                <td className="text-sm text-muted2 num">{minuteOf(r.created_at)}</td>
+                <td className="text-sm text-muted2 num" style={{ whiteSpace: 'nowrap' }}>{minuteOf(r.created_at)}</td>
                 <td>
                   <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => reopen(r.period)}>해제</button>
                 </td>

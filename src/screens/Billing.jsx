@@ -1456,7 +1456,7 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", paidLabel = "정
               )
           } },
         { key: 'vendor', header: '거래처', sortable: true, render: inv => <span className="fw-700">{inv.vendor}</span> },
-        { key: 'contract', header: '주문', render: inv => <span className="text-sm text-muted">{inv.contract || "—"}</span> },
+        { key: 'contract', header: '주문', render: inv => <span className="text-sm text-muted">{inv.contract || (inv.carryover ? "전기 이월" : "—")}</span> },
         { key: 'totalAmount', header: '청구금액', align: 'right', sortable: true, render: inv => <span className="num-cell">{fmtNum(inv.totalAmount)}</span> },
         /* 공급가액·부가세 — 청구금액(합계)만으로는 신고 자료를 못 맞춘다. 그렇다고 늘 세워 두면
            열이 열둘을 넘어 표가 가로로 밀리므로, **접어 두고 필요한 사람이 편다**('열' 버튼). */
@@ -1484,7 +1484,7 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", paidLabel = "정
           /* D-day 뱃지는 **아직 받을(낼) 돈이 남았을 때만** 붙인다.
              예전엔 기한만 보고 붙여서, 이미 다 받은 '입금 완료' 청구서에도 '+3일 초과'가
              빨갛게 떴다 — 처리할 게 남은 것처럼 보여 다시 들여다보게 만든다. */
-          <><span className="text-sm">{inv.dueAt}</span>
+          <><span className="text-sm">{inv.dueAt || <span className="text-muted2">—</span>}</span>
             {inv.dueAt && inv.remainAmount > 0 &&
               <span className={`badge ${ddayTone(inv.dueAt)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(inv.dueAt)}</span>}</>
         ) },
