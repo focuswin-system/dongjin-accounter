@@ -8,15 +8,12 @@ import { PickListDrawer } from '../lib/components/PickListDrawer'
 import { DocFilters, vendorParams } from '../lib/components/DocFilters'
 import { useDocList } from '../lib/useDocList'
 import { makeGridKeyHandler } from '../lib/gridKeys'
+import { CellIn } from '../lib/components/CellIn'
 
 const numOf = (v) => (typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, ''), 10) || 0 : Number(v) || 0)
 const ROWS = 15
 const emptyItem = () => ({ code: '', name: '', unit: '', qty: '', unit_price: '', amount: '', memo: '' })
 
-const CellIn = ({ value, onChange, right, placeholder }) => (
-  <input className={`settle-cellin ${right ? 'num' : ''}`} value={value ?? ''} placeholder={placeholder}
-    onChange={e => onChange(e.target.value)} style={right ? { textAlign: 'right' } : undefined}/>
-)
 
 const QuoteRequestPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved, onCancelNew, onDeleted }) => {
   const toast = useToast()
@@ -224,7 +221,7 @@ const QuoteRequestPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSave
                       : (it?.name || '')}</td>
                     <td style={{ textAlign: 'center' }}>{edit ? <CellIn value={it?.unit} onChange={v => setItem(i, 'unit', v)}/> : (it?.unit || '')}</td>
                     <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={it?.qty} onChange={v => setItem(i, 'qty', v)} right/> : (it?.qty ? fmtNum(it.qty) : '')}</td>
-                    <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={it?.unit_price} onChange={v => setItem(i, 'unit_price', v)} right/> : (it?.unit_price ? fmtNum(it.unit_price) : '')}</td>
+                    <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={it?.unit_price} onChange={v => setItem(i, 'unit_price', v)} money/> : (it?.unit_price ? fmtNum(it.unit_price) : '')}</td>
                     <td className="num fw-600" style={{ textAlign: 'right' }}>{it && numOf(it.amount) ? fmtNum(numOf(it.amount)) : ''}</td>
                     <td>{edit ? <CellIn value={it?.memo} onChange={v => setItem(i, 'memo', v)}/> : (it?.memo || '')}</td>
                   </tr>

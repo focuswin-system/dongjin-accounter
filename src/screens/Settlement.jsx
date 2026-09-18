@@ -8,17 +8,13 @@ import { PickListDrawer } from '../lib/components/PickListDrawer'
 import { DocFilters } from '../lib/components/DocFilters'
 import { useDocList } from '../lib/useDocList'
 import { makeGridKeyHandler } from '../lib/gridKeys'
+import { CellIn } from '../lib/components/CellIn'
 
 // 定算內譯書 — 항목은 고정 분류(도로비·교통비…) 없이 쓰는 사람이 필요한 줄만 추가한다.
 // 옛 양식의 좌측 고정 슬롯·출장 항번호(①②③…) 주석은 2026-08 고객 요청으로 걷어냈다.
 const numOf = (v) => (typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, ''), 10) || 0 : Number(v) || 0)
 const emptyLine = () => ({ title: '', amount: '', memo: '' })
 
-// 얇은 인라인 셀 입력
-const CellIn = ({ value, onChange, right, placeholder }) => (
-  <input className={`settle-cellin ${right ? 'num' : ''}`} value={value} placeholder={placeholder}
-    onChange={e => onChange(e.target.value)} style={right ? { textAlign: 'right' } : undefined}/>
-)
 
 // ── 정산내역서 미리보기 + 인라인 편집(지급결의서처럼 양식 내에서 바로 편집) ──
 const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDeleted }) => {
@@ -149,7 +145,7 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
                 <th>제　목</th><td colSpan={5} className="settle-subject">{edit ? <CellIn value={form.purpose} onChange={v => setH('purpose', v)} placeholder="예: 7월 세금납부·자재대 정산"/> : form.purpose}</td>
               </tr>
               <tr>
-                <th>수령액</th><td className="num fw-700">{edit ? <CellIn value={form.received_amount} onChange={v => setH('received_amount', v)} right/> : amt(received)}</td>
+                <th>수령액</th><td className="num fw-700">{edit ? <CellIn value={form.received_amount} onChange={v => setH('received_amount', v)} money/> : amt(received)}</td>
                 <th>지출총액</th><td className="num">{amt(total)}</td>
                 <th>잔　액</th><td className="num fw-700" style={{ color: balance < 0 ? 'var(--neg-ink)' : undefined }}>{amt(balance)}</td>
               </tr>
@@ -176,7 +172,7 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
                     </td>
                     <td className="num" style={{ textAlign: 'right' }}>
                       {edit
-                        ? <CellIn value={r.amount || ''} onChange={v => setLine(i, 'amount', v)} right/>
+                        ? <CellIn value={r.amount || ''} onChange={v => setLine(i, 'amount', v)} money/>
                         : fmtNum(r.amount)}
                     </td>
                     {edit ? (

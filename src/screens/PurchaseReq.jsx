@@ -10,15 +10,12 @@ import { ExecDrawer, approveAndAsk } from '../lib/components/ExecDrawer'
 import { useDocList } from '../lib/useDocList'
 import { makeGridKeyHandler } from '../lib/gridKeys'
 import { copySeedOf } from '../lib/docCopy'
+import { CellIn } from '../lib/components/CellIn'
 
 const numOf = (v) => (typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, ''), 10) || 0 : Number(v) || 0)
 const ROWS = 15
 const emptyItem = () => ({ name: '', unit: '', qty: '', unit_price: '', amount: '', actual_price: '', actual_amount: '', memo: '' })
 
-const CellIn = ({ value, onChange, right, placeholder }) => (
-  <input className={`settle-cellin ${right ? 'num' : ''}`} value={value ?? ''} placeholder={placeholder}
-    onChange={e => onChange(e.target.value)} style={right ? { textAlign: 'right' } : undefined}/>
-)
 
 /* onCopy — 보고 있는 품의서를 본떠 새로 쓰기(3b). 화면이 seed 를 만들어 새 문서를 연다 */
 const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved, onCancelNew, onDeleted, goRoute, onCopy }) => {
@@ -292,7 +289,7 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
                 <td>{edit ? <CellIn value={form.ship_no} onChange={v => setH('ship_no', v)}/> : form.ship_no}</td>
                 <td>{edit ? <CellIn value={form.summary} onChange={v => setH('summary', v)}/> : form.summary}</td>
                 <td>{edit ? <DateInput className="settle-cellin" value={form.arrival_date || ''} onChange={e => setH('arrival_date', e.target.value)}/> : form.arrival_date}</td>
-                <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={form.order_amount} onChange={v => setH('order_amount', v)} right/> : (form.order_amount ? fmtNum(numOf(form.order_amount)) : '')}</td>
+                <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={form.order_amount} onChange={v => setH('order_amount', v)} money/> : (form.order_amount ? fmtNum(numOf(form.order_amount)) : '')}</td>
                 <td className="num fw-700" style={{ textAlign: 'right' }}>{amt(total)}</td>
                 <td className="num" style={{ textAlign: 'right' }}>{amt(total)}</td>
                 <td>{edit ? <CellIn value={form.pay_terms} onChange={v => setH('pay_terms', v)}/> : form.pay_terms}</td>
@@ -345,9 +342,9 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
                       : (it?.name || '')}</td>
                     <td style={{ textAlign: 'center' }}>{edit ? <CellIn value={it?.unit} onChange={v => setItem(i, 'unit', v)}/> : (it?.unit || '')}</td>
                     <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={it?.qty} onChange={v => setItem(i, 'qty', v)} right/> : (it?.qty ? fmtNum(it.qty) : '')}</td>
-                    <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={it?.unit_price} onChange={v => setItem(i, 'unit_price', v)} right/> : (it?.unit_price ? fmtNum(it.unit_price) : '')}</td>
+                    <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={it?.unit_price} onChange={v => setItem(i, 'unit_price', v)} money/> : (it?.unit_price ? fmtNum(it.unit_price) : '')}</td>
                     <td className="num fw-600" style={{ textAlign: 'right' }}>{it && numOf(it.amount) ? fmtNum(numOf(it.amount)) : ''}</td>
-                    <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={it?.actual_price} onChange={v => setItem(i, 'actual_price', v)} right/> : (it?.actual_price ? fmtNum(it.actual_price) : '')}</td>
+                    <td className="num" style={{ textAlign: 'right' }}>{edit ? <CellIn value={it?.actual_price} onChange={v => setItem(i, 'actual_price', v)} money/> : (it?.actual_price ? fmtNum(it.actual_price) : '')}</td>
                     <td className="num" style={{ textAlign: 'right' }}>{it && numOf(it.actual_amount) ? fmtNum(numOf(it.actual_amount)) : ''}</td>
                     <td>{edit ? <CellIn value={it?.memo} onChange={v => setItem(i, 'memo', v)}/> : (it?.memo || '')}</td>
                   </tr>

@@ -156,7 +156,7 @@ const TEMPLATE_SELECT = `
  * 그대로 두면 체크해서 만들 때 가서야 막히고, 만들기는 전부 아니면 전무라 같이 고른 줄까지 죽는다.
  * 목록에서 미리 말하고 고르지 못하게 한다. */
 function needsFix(t) {
-  if (t.direction === 'out' && !t.category) return '비목을 골라주세요 — 없으면 전표의 비용 줄이 빕니다'
+  if (t.direction === 'out' && !t.category) return '비목을 골라주세요'
   if (t.creates === 'txn' && !t.account_id) return '출금 계좌를 골라주세요'
   return null
 }
