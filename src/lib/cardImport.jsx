@@ -75,15 +75,25 @@ export const cardImportAdapter = ({ cards = [], categories = [], defaultAccountI
         </div>
         <div style={{ width: 260 }}>
           <Combobox value={opts.defaultCategory || ''} onChange={v => patch({ defaultCategory: v })} allowAdd={false}
+            /* 과세 여부를 함께 보여 준다 — 명세서에 세액 열이 없으면 **이 설정대로** 들어가는데,
+               안 보이면 면세 비목을 골라 놓고 "왜 매입세액이 0이지"를 나중에 묻게 된다. */
             options={[{ value: '', label: '비워 둠', sub: '나중에 거래내역에서 채우기' },
-              ...categories.map(c => ({ value: c.name, label: c.name, sub: c.account_code || '' }))]}
+              ...categories.map(c => ({ value: c.name, label: c.name,
+                sub: [c.account_code, c.vat, Number(c.vat_deductible) === 0 ? '불공제' : ''].filter(Boolean).join(' · ') }))]}
             placeholder="비목 선택"/>
         </div>
-        {!opts.defaultCategory && (
+        {!opts.defaultCategory ? (
           <span className="text-xs" style={{ color: 'var(--warn-ink)' }}>
             비우면 계정과목이 없어 전표에서 상대 계정이 빕니다
           </span>
-        )}
+        ) : (() => {
+          const c = categories.find(x => x.name === opts.defaultCategory)
+          return c ? (
+            <span className="text-xs text-muted2">
+              명세서에 세액 칸이 없으면 이 비목 설정({c.vat || '과세'}{Number(c.vat_deductible) === 0 ? ' · 불공제' : ''})대로 들어가요
+            </span>
+          ) : null
+        })()}
       </div>
 
       <div className="row gap-10" style={{ alignItems: 'center', flexWrap: 'wrap' }}>

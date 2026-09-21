@@ -890,7 +890,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
               <div className="row gap-4">
                 {[["income", "입금"], ["expense", "출금"]].map(([v, l]) => (
                   <button key={v} type="button" className={`chip ${kind === v ? "active" : ""}`}
-                    onClick={() => setKind(v)}>{l}</button>
+                    onClick={() => switchKind(v)}>{l}</button>
                 ))}
               </div>
             )}
