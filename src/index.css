@@ -2146,6 +2146,11 @@ body:has([data-modal-open]) {
 /* 표에서 키보드로 행을 훑을 때 지금 어디에 있는지 보이게 — 색은 토큰만(다크에서도 같이 간다) */
 .table tbody tr[tabindex]:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
 .table thead th[tabindex]:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+
+/* 입출금 폼의 '청구서 연결' 줄 — 고르면 테두리로만 표시한다(정상 상태에 표식을 달지 않는다) */
+.inv-pick { padding: 9px 12px; text-align: left; cursor: pointer; background: var(--surface); border: 1px solid var(--line); }
+.inv-pick:hover { border-color: var(--line-strong); }
+.inv-pick.on { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
 /* 키보드 안내 — 좁은 화면(휴대폰)에서는 감춘다 */
 @media (max-width: 640px) { .kbd-hint { display: none; } }
 

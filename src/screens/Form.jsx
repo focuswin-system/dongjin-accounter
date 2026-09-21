@@ -138,6 +138,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   const [hintsOff, setHintsOff] = useState(false);
   // Ctrl+Enter 단축키까지 있어 두 번 눌리기 쉽다 — 같은 거래가 2건 등록되는 걸 막는다
   const [busy, setBusy] = useState(false);
+  /* 거래처의 **아직 안 받은/안 낸 청구서** — 세금계산서 매칭을 여기서 한다.
+     여태는 금액까지 다 적어야 안내로 떴다. 실무는 통장을 보고 "이 입금이 어느 청구서지"를
+     먼저 생각하므로, 거래처를 고르는 순간 보여 주고 거기서 고르게 한다. */
+  const [openInvs, setOpenInvs] = useState([]);
+  const [linkInv, setLinkInv] = useState(null);
   const [supplyMode, setSupplyMode] = useState(false);
   /* 복합 전표(D1) — 한 번의 입·출금을 여러 비목으로 나눈다(예: 소모품 + 수수료 + 부가세).
      옵션이라 끄면(기본) 지금까지와 똑같이 동작한다. 신규 등록에서만 연다 — 복합 전표 수정은
@@ -559,6 +564,22 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     toast.push(`${label} "${name}"를 만들고 이 거래에 붙였어요`)
   }
 
+  const invKind = kind === 'income' ? 'issued' : 'received'
+  const mayInvoice = canGo(invKind === 'issued' ? 'billing_issued' : 'billing_received') || canGo(invKind === 'issued' ? 'ar' : 'ap')
+  useEffect(() => {
+    if (!open || editTxn || !mayInvoice || (kind !== 'income' && kind !== 'expense')) { setOpenInvs([]); return }
+    const vid = (vendors.find(v => v.id === form.vendor) || {}).id
+    if (!vid) { setOpenInvs([]); setLinkInv(null); return }
+    let alive = true
+    api.getInvoices({ kind: invKind, vendorId: vid }).then(list => {
+      if (!alive) return
+      setOpenInvs((list || []).filter(i => Number(i.remainAmount ?? i.totalAmount) > 0).slice(0, 5))
+    })
+    return () => { alive = false }
+  }, [open, form.vendor, kind, editTxn])
+  // 거래처를 바꾸면 고른 청구서는 푼다 — 남아 있으면 엉뚱한 청구서에 붙는다
+  useEffect(() => { setLinkInv(null) }, [form.vendor])
+
   const settleOnInvoice = async (iv) => {
     const amount = Number(String(form.amount ?? '').replace(/[^0-9]/g, '')) || 0
     const acc = accounts.filter(a => a.name === form.account)
@@ -628,6 +649,9 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     if (!splitOn && !form.category) { toast.push(kind === "income" ? "수금 유형을 선택해주세요" : "비목을 선택해주세요"); return; }
     if (!form.memo || !form.memo.trim()) { toast.push("적요(거래 내용)를 입력해주세요"); return; }
     if (!form.amount)   { toast.push("금액을 입력해주세요"); return; }
+    /* 청구서를 골랐으면 **그 청구서에 붙이는 길**로 간다 — 거래를 따로 만들고 나중에 잇는 게 아니라
+       한 번에 만들고 연결한다(그래야 같은 돈이 두 줄 서지 않는다). */
+    if (linkInv && !editTxn) { await settleOnInvoice(linkInv); return; }
     if (splitOn) {
       const rows = splitRows.filter(r => r.category && (numOf(r.supply) || numOf(r.vat)))
       if (rows.length < 2) { toast.push("복합 전표는 비목을 둘 이상 적어주세요"); return; }
@@ -890,6 +914,37 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                 }}
                 addNewLabel="거래처로 추가"/>
             </FormField>
+
+            {/* 청구서 연결 — 세금계산서가 오간 건은 여기서 그 청구서에 바로 붙인다.
+                고르면 남은 금액이 금액 칸에 들어가고, 저장하면 그 청구서의 미수/미지급이 줄어든다.
+                (안 고르고 저장하면 예전처럼 그냥 통장 거래로만 남는다 — 청구서 없는 돈도 있다) */}
+            {openInvs.length > 0 && (
+              <FormField label={kind === 'income' ? '어느 청구서 입금인가요' : '어느 청구서 지급인가요'}
+                hint="고르면 그 청구서의 미수금이 함께 정리돼요 · 없으면 비워두세요">
+                <div className="col gap-6">
+                  {openInvs.map(iv => {
+                    const left = Number(iv.remainAmount ?? iv.totalAmount)
+                    const on = linkInv?.id === iv.id
+                    return (
+                      <button key={iv.id} type="button" className={`card inv-pick${on ? ' on' : ''}`}
+                        onClick={() => {
+                          if (on) { setLinkInv(null); return }
+                          setLinkInv(iv)
+                          // 금액이 비어 있으면 남은 금액을 채운다 — 대부분 전액을 받는다
+                          setForm(f => (Number(String(f.amount ?? '').replace(/[^0-9]/g, '')) > 0 ? f : { ...f, amount: String(left) }))
+                        }}>
+                        <span className="row gap-8" style={{ alignItems: 'center', width: '100%' }}>
+                          <span className="fw-600 text-sm">{iv.invoiceNo}</span>
+                          <span className="text-xs text-muted2">{String(iv.issuedAt || '').slice(0, 10)}{iv.contract ? ` · ${iv.contract}` : ''}</span>
+                          <span className="num ml-auto fw-700">{fmtNum(left)}원</span>
+                          {on && <Icon.Check size={14}/>}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </FormField>
+            )}
 
             {/* 경비 모드에서는 주문 두 칸을 접어 둔다. 수정 중이거나 이미 값이 있으면 편다 —
                 접어서 보이지 않는 칸에 값이 들어 있으면 "왜 이 주문에 붙었지"를 알 수 없다. */}
@@ -1417,7 +1472,9 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
               </div>
             )}
 
-            {hints.openInvoices?.length > 0 && (() => {
+            {/* 위 '청구서 연결' 칸이 같은 목록을 이미 보여 준다 — 둘 다 뜨면 같은 말을 두 번 하고,
+                어느 쪽으로 처리해야 하는지 사람이 고르게 된다. 칸이 없을 때(권한·수정 중)만 안내한다. */}
+            {openInvs.length === 0 && hints.openInvoices?.length > 0 && (() => {
               /* 금액 관계는 서버가 셋 중 하나로 판정해 준다(같은 종류만 내려온다).
                  over = 청구서 잔액보다 많이 들어온 것 — 여기서 붙이면 과입금이 되므로
                  버튼을 주지 않고 청구서 화면으로 보낸다. */

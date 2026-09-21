@@ -825,11 +825,12 @@ export const api = {
   /* dateAxis — 기간을 어느 날짜로 걸를 것인가.
      'issued'(발행일·기본) | 'delivery'(납품일) | 'due'(결제기한).
      회사마다 업무의 축이 다르다 — 제조·유통은 물건이 오간 날, 자금은 돈이 오갈 날이다. */
-  async getInvoices({ kind, status, from, to, dateAxis } = {}) {
+  async getInvoices({ kind, status, vendorId, from, to, dateAxis } = {}) {
     try {
       const params = new URLSearchParams()
       if (kind)   params.set('kind', kind)
       if (status) params.set('status', status)
+      if (vendorId) params.set('vendorId', vendorId)   // 거래처로 좁힌다 — 입출금 폼의 '청구서 연결'이 쓴다
       if (from) params.set('from', from)   // 기본 전체 기간(연말 넘긴 미수금이 사라지지 않도록)
       if (to) params.set('to', to)
       if (dateAxis && dateAxis !== 'issued') params.set('date_axis', dateAxis)
