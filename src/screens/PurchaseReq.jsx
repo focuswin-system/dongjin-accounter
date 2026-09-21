@@ -306,6 +306,9 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
           {/* 품목 — 이중 단가(공급업체 견적 / 실적가) */}
           {/* 키보드로 다닌다 — Enter 로 아래 줄(마지막이면 줄이 하나 더 생긴다), ↑↓ 로 위아래.
               품목이 열 줄이면 칸이 팔십 개다. 손이 자판을 떠나면 속도가 절반이 된다. */}
+          {edit && <div className="text-xs text-muted2 kbd-hint no-print" style={{ margin: '2px 0 4px' }}>
+            <span className="kbd">Enter</span> 아래 줄 · <span className="kbd">Tab</span> 옆 칸 · 마지막 줄에서 Enter 면 줄이 하나 더 생겨요
+          </div>}
           <table className="res-table res-items pr-items" onKeyDown={gridKeys}>
             <thead>
               <tr>

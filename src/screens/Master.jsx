@@ -2447,7 +2447,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
         <DrawerHead title="조정 이력" sub={histTarget?.name} onClose={() => setHistTarget(null)}/>
         <div className="drawer-body">
           {!adjustments?.length ? (
-            <div className="text-muted text-sm" style={{ padding: '20px 0' }}>조정 이력이 없습니다</div>
+            <div className="text-muted text-sm" style={{ padding: '20px 0' }}>조정 이력이 없어요</div>
           ) : adjustments.map((a, i) => (
             <div key={a.id || i} style={{ padding: '12px 0', borderBottom: '1px solid var(--line)' }}>
               <div className="row">

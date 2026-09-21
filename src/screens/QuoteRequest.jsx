@@ -123,7 +123,7 @@ const QuoteRequestPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSave
           </>
         ) : (
           <>
-            <button className="btn ghost" onClick={remove}><Icon.Trash size={14}/></button>
+            <button className="btn ghost" onClick={remove} title="삭제" aria-label="삭제"><Icon.Trash size={14}/></button>
             <button className="btn" onClick={() => setEdit(true)}><Icon.Pencil size={14}/> 편집</button>
             <button className="btn" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
           </>
@@ -192,6 +192,9 @@ const QuoteRequestPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSave
 
           {/* 품목 — NO·자재코드·품명/규격·단위·수량·단가·금액·비고 */}
           {/* 키보드로 다닌다 — 구매품의서·정산내역서와 같은 규칙(lib/gridKeys.js) */}
+          {edit && <div className="text-xs text-muted2 kbd-hint no-print" style={{ margin: '2px 0 4px' }}>
+            <span className="kbd">Enter</span> 아래 줄 · <span className="kbd">Tab</span> 옆 칸 · 마지막 줄에서 Enter 면 줄이 하나 더 생겨요
+          </div>}
           <table className="res-table res-items pr-items" onKeyDown={gridKeys}>
             <thead>
               <tr>

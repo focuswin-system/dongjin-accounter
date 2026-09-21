@@ -447,7 +447,7 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
           <div className="row gap-8">
             <div style={{ flex: 1 }}>
               <label className="label">연 이율 (%)</label>
-              <input className="input" value={f.annual_rate} onChange={e => set('annual_rate', e.target.value)} placeholder="4.0"/>
+              <input className="input" value={f.annual_rate} onChange={e => set('annual_rate', e.target.value)} placeholder="예: 4.0"/>
             </div>
             <div style={{ flex: 1 }}>
               <label className="label">기간 (개월) *</label>

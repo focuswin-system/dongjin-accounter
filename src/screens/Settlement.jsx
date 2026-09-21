@@ -121,7 +121,7 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
           </>
         ) : (
           <>
-            <button className="btn ghost" onClick={remove}><Icon.Trash size={14}/></button>
+            <button className="btn ghost" onClick={remove} title="삭제" aria-label="삭제"><Icon.Trash size={14}/></button>
             <button className="btn" onClick={() => setEdit(true)}><Icon.Pencil size={14}/> 편집</button>
             <button className="btn" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
           </>
@@ -153,6 +153,9 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
           </table>
 
           {/* 키보드로 다닌다 — 구매품의서·견적요청서와 같은 규칙(lib/gridKeys.js) */}
+          {edit && <div className="text-xs text-muted2 kbd-hint no-print" style={{ margin: '2px 0 4px' }}>
+            <span className="kbd">Enter</span> 아래 줄 · <span className="kbd">Tab</span> 옆 칸 · 마지막 줄에서 Enter 면 줄이 하나 더 생겨요
+          </div>}
           <table className="res-table settle-grid" onKeyDown={gridKeys}>
             <colgroup>
               <col/><col style={{ width: 160 }}/>{edit ? <col style={{ width: 34 }}/> : null}

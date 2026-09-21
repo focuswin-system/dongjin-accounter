@@ -719,7 +719,7 @@ const OutsourcingDrawer = ({ info, onClose, onSaved }) => {
 
       <div className="drawer-body">
         <div className="col gap-form" style={{ marginBottom: 22 }}>
-          {!editing && <Field label="성명" required><input className="input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="김프리"/></Field>}
+          {!editing && <Field label="성명" required><input className="input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="예: 김프리"/></Field>}
           <Field label="고용형태">
             <Combobox value={form.employ_type_id} onChange={pickType}
               options={employTypes.map(t => ({ value: t.id, label: t.label, sub: `${INCOME_LABEL[t.income_type]} · ${t.default_unit || ''}` }))} placeholder="고용형태 선택"/>

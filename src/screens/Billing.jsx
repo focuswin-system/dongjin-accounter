@@ -1427,7 +1427,7 @@ const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", paidLabel = "정
       /* 열을 고를 수 있다 — 같은 표라도 경리는 청구금액·입금만 보면 되고,
          신고 자료를 맞추는 사람은 공급가액·부가세를 봐야 한다. */
       tableKey={tableKey}
-      empty="해당 청구서가 없습니다"
+      empty="해당 청구서가 없어요"
       columns={[
         /* 발행일이 맨 앞이다.
          *

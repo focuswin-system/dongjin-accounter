@@ -1057,7 +1057,7 @@ export const EvidenceScreen = ({ onAttach }) => {
                         : <><Icon.Link size={11}/> {r.linked} · {r.contract}</>}
                     </div>
                   </div>
-                  <button className="btn ghost sm"><Icon.More/></button>
+                  <button className="btn ghost sm" title="더 보기" aria-label="더 보기"><Icon.More/></button>
                 </div>
               );
             })}
@@ -1453,7 +1453,7 @@ export const ExcelScreen = ({ goRoute }) => {
                 </div>
                 <div className="ml-auto row gap-6">
                   <button className="btn sm" onClick={() => fileRef.current?.click()}>다시 업로드</button>
-                  <button className="btn ghost sm" onClick={reset}><Icon.Close size={14}/></button>
+                  <button className="btn ghost sm" onClick={reset} title="고른 것 지우기" aria-label="고른 것 지우기"><Icon.Close size={14}/></button>
                 </div>
               </div>
               <div style={{ height: 1, background: "var(--line)", margin: "14px 0" }}/>

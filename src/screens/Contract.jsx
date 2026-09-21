@@ -195,7 +195,7 @@ const ContractTermFields = ({ form, set }) => {
               <label className="label" style={{ marginBottom: 8 }}>청구일</label>
               <div style={{ position: 'relative' }}>
                 <input className="input num" style={{ paddingRight: 28 }} value={form.billing_day ?? ''}
-                  onChange={e => set(f => ({ ...f, billing_day: numOnly(e.target.value).slice(0, 2) }))} placeholder="1"/>
+                  onChange={e => set(f => ({ ...f, billing_day: numOnly(e.target.value).slice(0, 2) }))} placeholder="예: 1"/>
                 <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>일</span>
               </div>
             </div>

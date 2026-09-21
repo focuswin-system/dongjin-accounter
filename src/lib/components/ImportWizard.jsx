@@ -251,7 +251,7 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
                 </div>
                 <div className="ml-auto row gap-6">
                   <button className="btn sm" onClick={() => fileRef.current?.click()}>다시 업로드</button>
-                  <button className="btn ghost sm" onClick={reset}><Icon.Close size={14}/></button>
+                  <button className="btn ghost sm" onClick={reset} title="파일 다시 고르기" aria-label="파일 다시 고르기"><Icon.Close size={14}/></button>
                 </div>
               </div>
               {/* 행이 잘렸으면 반드시 알린다 — 조용히 자르면 전부 올라간 줄 안다 */}
