@@ -175,19 +175,46 @@ router.post('/', async (req, res, next) => {
 })
 
 router.put('/:id', async (req, res, next) => {
+  const conn = await req.db.getConnection()
   try {
     const b = req.body || {}
     const termMonths = parseInt(b.term_months, 10) || 12
-    const [r] = await req.db.execute(
+    await conn.beginTransaction()
+    const [[cur]] = await conn.execute('SELECT * FROM lendings WHERE id = ? FOR UPDATE', [req.params.id])
+    if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    const principal = intOf(b.principal)
+    const startDate = b.start_date || cur.start_date
+    const acct = b.account_id !== undefined ? (b.account_id || null) : (cur.account_id || null)
+
+    /* 실행 출금 거래도 함께 맞춘다 — 원본은 대여금 쪽 하나다.
+       예전엔 lendings 행만 고쳐서, 원금을 정정하면 **대여금 잔액과 통장 출금이 어긋났다**
+       (차입금 수정에서와 같은 자리). 마감된 달의 거래는 못 바꾼다. */
+    if (cur.txn_id) {
+      const [[t]] = await conn.execute('SELECT date, amount, account_id FROM transactions WHERE id = ?', [cur.txn_id])
+      const moved = t && (String(t.date) !== String(startDate)
+        || Number(t.amount) !== Number(principal)
+        || String(t.account_id || '') !== String(acct || ''))
+      if (moved) {
+        const ce = await closedPeriodError(conn, t.date, startDate)
+        if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
+        await conn.execute(
+          'UPDATE transactions SET amount = ?, date = ?, account_id = ?, account_code = ? WHERE id = ?',
+          [principal, startDate, acct,
+           b.acct_code_principal || cur.acct_code_principal || principalCode(termMonths), cur.txn_id])
+      }
+    }
+    const [r] = await conn.execute(
       `UPDATE lendings SET name=?, borrower=?, vendor_id=?, principal=?, annual_rate=?, method=?,
         term_months=?, start_date=?, pay_day=?, end_date=?, account_id=?, memo=? WHERE id=?`,
-      [b.name || '대여금', b.borrower || '', b.vendor_id || null, intOf(b.principal),
-       Number(b.annual_rate) || 0, methodOf(b.method), termMonths, b.start_date,
-       parseInt(b.pay_day, 10) || 1, b.end_date || null, b.account_id || null,
+      [b.name || '대여금', b.borrower || '', b.vendor_id || null, principal,
+       Number(b.annual_rate) || 0, methodOf(b.method), termMonths, startDate,
+       parseInt(b.pay_day, 10) || 1, b.end_date || null, acct,
        b.memo || '', req.params.id])
-    if (r.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
+    if (r.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    await conn.commit()
     res.json({ ok: true })
-  } catch (e) { next(e) }
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
 })
 
 /* 회수 처리 — 원금과 이자를 **각각** 거래로 남긴다.
@@ -373,7 +400,16 @@ router.delete('/:id', async (req, res, next) => {
              + ` 다 받은 것이라면 그대로 두세요 — 종료로 표시됩니다.` })
     }
     // 실행 거래(대여금 지급)는 함께 지운다 — 대여가 없으면 그 출금도 근거를 잃는다
-    const [[l]] = await conn.execute('SELECT txn_id FROM lendings WHERE id = ?', [req.params.id])
+    const [[l]] = await conn.execute(
+      `SELECT l.txn_id, t.date AS txn_date FROM lendings l
+         LEFT JOIN transactions t ON t.id = l.txn_id WHERE l.id = ?`, [req.params.id])
+    /* 마감된 달의 실행 거래는 지울 수 없다.
+       지우면 그 달 통장 잔액이 조용히 바뀐다 — 이미 세무사에 넘긴 숫자가 달라진다.
+       (거래·청구서·결의서가 다 막는 자리인데 여기만 열려 있었다) */
+    if (l?.txn_date) {
+      const ce = await closedPeriodError(conn, l.txn_date)
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
+    }
     if (l?.txn_id) await conn.execute('DELETE FROM transactions WHERE id = ?', [l.txn_id])
     await conn.execute('DELETE FROM lendings WHERE id = ?', [req.params.id])   // repayments 는 CASCADE
     await conn.commit()

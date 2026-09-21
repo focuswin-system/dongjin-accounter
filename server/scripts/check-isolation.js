@@ -788,6 +788,57 @@ try {
   fail(`권한 자원 매핑 검사 실패: ${e.message}`)
 }
 
+// ── [19] 돈을 쓰는 핸들러가 마감 가드를 지나는가 ──
+//
+// 마감은 "그 달 숫자를 고정한다"는 약속이다. 그런데 가드를 **라우트마다 손으로** 붙이므로,
+// 새로 낸 경로 하나가 빠지면 그 경로로만 마감이 뚫린다. 2026-07-30 검토에서 청구서·결의서·
+// 세금 취소·PATCH status 가 그렇게 뚫려 있었고, 2026-09-21 에는 **차입금·대여금·투자를
+// 지우면 마감된 달의 실행 거래가 조용히 사라지는** 구멍이 남아 있었다.
+// 둘 다 "돈을 쓰는데 가드가 없다"는 같은 모양이라, 그 모양을 기계가 본다.
+//
+// 핸들러 한 덩어리 안에 transactions 쓰기가 있으면 같은 덩어리에 마감 검사가 있어야 한다.
+// 핸들러 사이에 놓인 헬퍼 함수는 그 핸들러의 몸통이 아니므로 경계에서 끊는다
+// (헬퍼를 부르는 라우트가 가드를 갖는다 — applyRepayment·applyCollect 가 그렇다).
+console.log('\n[19] 마감 가드 — 돈을 쓰는 핸들러가 마감을 검사하는가')
+try {
+  const MONEY = /INSERT\s+INTO\s+transactions|UPDATE\s+transactions\s+SET|DELETE\s+FROM\s+transactions/i
+  const GUARD = /closedPeriodError|closedDocError|beforeBooksError/
+  /* 돈을 안 옮기는 쓰기 — 여기만 예외다. 예외를 늘릴 때는 "그 달 합계가 바뀌는가"를 묻는다.
+     바뀌면 예외가 아니라 가드를 붙여야 한다. */
+  const ALLOW = [
+    'transactions.js:/:id/evidence',   // 증빙 첨부 — 금액·날짜·계좌를 안 건드린다
+    'contracts.js:/link-orders',       // 주문 귀속 — 그 달 입출금 합계가 안 바뀐다
+  ]
+  const files = fs.readdirSync(ROUTES_DIR).filter(f => f.endsWith('.js'))
+  const offenders = []
+  for (const f of files) {
+    const lines = fs.readFileSync(path.join(ROUTES_DIR, f), 'utf8').split(/\r?\n/)
+    const starts = [], bounds = []
+    lines.forEach((ln, i) => {
+      if (/^router\.(post|put|patch|delete)\s*\(/.test(ln)) { starts.push(i); bounds.push(i) }
+      else if (/^(async\s+)?function\s/.test(ln) || /^router\.get\s*\(/.test(ln)
+            || /^const\s+\w+\s*=\s*(async\s*)?\(/.test(ln)) bounds.push(i)
+    })
+    for (const s of starts) {
+      const next = bounds.find(b => b > s)
+      const block = lines.slice(s, next == null ? lines.length : next).join('\n')
+      if (!MONEY.test(block) || GUARD.test(block)) continue
+      const route = (lines[s].match(/['"`]([^'"`]+)['"`]/) || [])[1] || '?'
+      if (ALLOW.includes(`${f}:${route}`)) continue
+      offenders.push(`${f}:${s + 1}  ${lines[s].trim().slice(0, 64)}`)
+    }
+  }
+  if (offenders.length) {
+    fail('마감 검사 없이 거래를 쓰는 핸들러가 있습니다:\n      · ' + offenders.join('\n      · ') +
+         '\n      → lib/closing.js 의 closedPeriodError(conn, 날짜…) 를 거래를 쓰기 전에 부르세요.' +
+         '\n        돈을 안 옮기는 쓰기(증빙 첨부 등)라면 이 검사의 ALLOW 에 이유와 함께 적으세요.')
+  } else {
+    ok(`돈 쓰기 핸들러가 모두 마감을 검사함 (라우터 ${files.length}개)`)
+  }
+} catch (e) {
+  fail(`마감 가드 검사 실패: ${e.message}`)
+}
+
 if (failures === 0) {
   console.log(' ✅ 격리 검사 통과')
   console.log('━'.repeat(64) + '\n')

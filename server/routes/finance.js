@@ -332,6 +332,30 @@ router.put('/loans/:id', async (req, res, next) => {
        b.status === 'closed' ? 'closed' : (b.status === 'active' ? 'active' : cur.status),
        req.params.id])
     if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+
+    /* 실행 입금 거래도 함께 맞춘다.
+     *
+     * 예전엔 loans 행만 고쳤다. 원금을 5,000만 → 3,000만으로 정정하면 **부채는 3,000만인데
+     * 통장 입금은 5,000만으로 남아** 재무상태표에서 차입금과 예금이 2,000만 어긋났다.
+     * 실행일·입금 계좌도 같은 이유로 따라가야 한다 — 원본은 차입금 쪽 하나다.
+     *
+     * ⚠ 마감된 달의 거래는 못 바꾼다(옛 날짜·새 날짜 둘 다 본다). 상환을 시작한 뒤에도
+     *   실행 거래 자체는 그대로이므로 여기 조건과 무관하다. */
+    if (cur.txn_id) {
+      const [[t]] = await conn.execute('SELECT date, amount, account_id FROM transactions WHERE id = ?', [cur.txn_id])
+      const nextAcct = b.account_id !== undefined ? (b.account_id || null) : (t?.account_id ?? null)
+      const moved = t && (String(t.date) !== String(want.start_date)
+        || Number(t.amount) !== Number(want.principal)
+        || String(t.account_id || '') !== String(nextAcct || ''))
+      if (moved) {
+        const ce = await closedPeriodError(conn, t.date, want.start_date)
+        if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
+        await conn.execute(
+          'UPDATE transactions SET amount = ?, date = ?, account_id = ?, account_code = ? WHERE id = ?',
+          [want.principal, want.start_date, nextAcct,
+           b.acct_code_principal || cur.acct_code_principal || ACCT.shortLoan, cur.txn_id])
+      }
+    }
     /* 스케줄을 바꾸는 값이 달라졌을 때만 예정 회차를 다시 깐다.
        늘 다시 깔면, 이름만 고쳐도 은행 통보액으로 고쳐 둔 예정 금액이 공식값으로 되돌아간다.
        pay_day 는 LOAN_TERMS 에 없지만 예정일을 바꾸므로 여기 포함한다. */
@@ -799,8 +823,17 @@ router.delete('/loans/:id', async (req, res, next) => {
       await rollbackQuietly(conn)
       return res.status(409).json({ error: `상환 처리한 회차가 ${cnt}건 있어 삭제할 수 없어요. 상환을 취소하거나 '완료'로 두세요.` })
     }
-    const [[loan]] = await conn.execute('SELECT txn_id FROM loans WHERE id = ?', [req.params.id])
+    const [[loan]] = await conn.execute(
+      `SELECT l.txn_id, t.date AS txn_date FROM loans l
+         LEFT JOIN transactions t ON t.id = l.txn_id WHERE l.id = ?`, [req.params.id])
     if (!loan) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    /* 마감된 달의 실행 거래는 지울 수 없다.
+       지우면 그 달 통장 잔액이 조용히 바뀐다 — 이미 세무사에 넘긴 숫자가 달라진다.
+       (거래·청구서·결의서가 다 막는 자리인데 여기만 열려 있었다) */
+    if (loan.txn_date) {
+      const ce = await closedPeriodError(conn, loan.txn_date)
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
+    }
     // 실행 입금 거래도 함께 지운다(상환이 없으므로 되돌려도 장부에 구멍이 없다)
     if (loan.txn_id) await conn.execute('DELETE FROM transactions WHERE id = ?', [loan.txn_id])
     await conn.execute('DELETE FROM loan_repayments WHERE loan_id = ?', [req.params.id])
@@ -1007,8 +1040,17 @@ router.delete('/investments/:id', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
-    const [[inv]] = await conn.execute('SELECT txn_id FROM investments WHERE id = ?', [req.params.id])
+    const [[inv]] = await conn.execute(
+      `SELECT i.txn_id, t.date AS txn_date FROM investments i
+         LEFT JOIN transactions t ON t.id = i.txn_id WHERE i.id = ?`, [req.params.id])
     if (!inv) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    /* 마감된 달의 실행 거래는 지울 수 없다.
+       지우면 그 달 통장 잔액이 조용히 바뀐다 — 이미 세무사에 넘긴 숫자가 달라진다.
+       (거래·청구서·결의서가 다 막는 자리인데 여기만 열려 있었다) */
+    if (inv.txn_date) {
+      const ce = await closedPeriodError(conn, inv.txn_date)
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
+    }
     /* 회수 이력이 있으면 막는다 — 지우면 그 입출금이 어디서 온 돈인지 사라진다
        (대여금·근로계약 삭제와 같은 규칙). 되돌리려면 회수 취소를 먼저 한다. */
     const [[{ rcnt }]] = await conn.execute(
