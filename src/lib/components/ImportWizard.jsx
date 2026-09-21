@@ -8,7 +8,8 @@ import { josa, hasBatchim } from '../josa'
 //
 // adapter 규약
 //   label, title, sub          — 문구
-//   templateUrl, templateName  — 양식 다운로드
+//   templateUrl, templateName  — 양식 다운로드 (없으면 버튼을 감춘다 — 받아온 파일 그대로 올리는 업로드)
+//   fileWarn(headers)          — (선택) 머리글만 보고 '이 파일이 아니다'를 알릴 때
 //   targets[], requiredTarget  — 매핑 대상 라벨 목록 / 필수 항목
 //   guess(header)              — 엑셀 머리글 → 매핑 대상 추측
 //   initialOpts, renderOpts()  — 어댑터 전용 옵션(예: 거래처 기본 구분)
@@ -67,6 +68,10 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
       setFile({ name: f.name, size: f.size })
       setRawRows(rows)
       setTruncated(cut ? { total, shown: rows.length } : null)
+      /* 머리글만 보고도 '이 파일이 아닌데'를 알 수 있는 경우가 있다(카드사 청구내역 vs 이용내역).
+         행을 다 훑고 등록한 뒤에 알면 되돌리기가 훨씬 비싸다 — 올린 자리에서 바로 말한다. */
+      const fw = adapter.fileWarn?.(headers)
+      if (fw) toast.push(fw)
       setMapping(headers.map(h => ({ excelCol: h, target: adapter.guess(h) || '사용 안함' })))
       setOverrides({})
     } catch (e) { toast.push(e.message || '파싱 실패') }
@@ -160,7 +165,10 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
     setBusy(false)
     if (!res.ok) return toast.push(res.error || '등록 실패')
     setResult(res)
-    toast.push(`신규 ${res.inserted}건 · 갱신 ${res.updated}건 반영됐어요`)
+    /* 덮어쓰기가 없는 업로드도 있다(카드 명세서는 새로 넣거나 건너뛰거나 둘 뿐이다).
+       그때 res.updated 는 아예 안 온다 — 예전엔 '갱신 undefined건'이 그대로 떴다. */
+    toast.push(res.updated ? `신규 ${res.inserted}건 · 갱신 ${res.updated}건 반영됐어요`
+      : `${res.inserted}건 등록됐어요`)
   }
 
   const downloadTemplate = async () => {
@@ -192,7 +200,11 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
           <div className="section-sub">{adapter.sub}</div>
         </div>
         <div className="ml-auto row gap-8">
-          <button className="btn" onClick={downloadTemplate}><Icon.Download/> 양식 다운로드</button>
+          {/* 양식이 없는 업로드도 있다 — 카드 명세서는 **카드사에서 받은 파일 그대로** 올리는 것이
+              요점이라 양식을 내주면 "이 양식으로 옮겨 적으라"는 말이 된다. 버튼을 지운다. */}
+          {adapter.templateUrl && (
+            <button className="btn" onClick={downloadTemplate}><Icon.Download/> 양식 다운로드</button>
+          )}
           <button className="btn ghost" onClick={onCancel}><Icon.Close size={14}/> 닫기</button>
         </div>
       </div>
@@ -218,7 +230,9 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
         <div className="card card-pad fade-up" style={{ textAlign: 'center', padding: '48px 24px', maxWidth: 520, margin: '0 auto' }}>
           <div style={{ width: 48, height: 48, borderRadius: 14, background: 'var(--pos-soft)', color: 'var(--pos)', display: 'grid', placeItems: 'center', margin: '0 auto 16px' }}><Icon.Check size={24}/></div>
           <div className="fw-700" style={{ fontSize: 16, marginBottom: 8 }}>{josa(adapter.label, "이")} 반영됐어요</div>
-          <div className="text-sm text-muted" style={{ marginBottom: result.note ? 8 : 20 }}>신규 등록 {result.inserted}건 · 기존 갱신 {result.updated}건</div>
+          <div className="text-sm text-muted" style={{ marginBottom: result.note ? 8 : 20 }}>
+            신규 등록 {result.inserted}건{result.updated ? ` · 기존 갱신 ${result.updated}건` : ''}
+          </div>
           {/* 건수만 보면 모르는 일(거래처가 새로 생겼다 등)은 반드시 적는다 */}
           {result.note && <div className="text-xs text-muted2" style={{ marginBottom: 20, lineHeight: 1.6 }}>{result.note}</div>}
           <div className="row gap-8" style={{ justifyContent: 'center' }}>
@@ -386,7 +400,8 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
                 <div className="ml-auto row gap-8">
                   <button className="btn" onClick={onCancel}>취소</button>
                   <button className="btn primary" disabled={busy || (!counts.insert && !counts.update)} style={{ opacity: (busy || (!counts.insert && !counts.update)) ? 0.5 : 1 }} onClick={onCommit}>
-                    <Icon.Check size={14}/> {busy ? '등록 중...' : `신규 ${counts.insert} · 갱신 ${counts.update} 반영`}
+                    <Icon.Check size={14}/> {busy ? '등록 중...'
+                      : counts.update ? `신규 ${counts.insert} · 갱신 ${counts.update} 반영` : `${counts.insert}건 등록`}
                   </button>
                 </div>
               </div>

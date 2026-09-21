@@ -2554,6 +2554,11 @@ async function initDb(conn) {
     await ensureIndex('invoices', 'idx_inv_template', 'template_id, issued_at')
     await ensureIndex('transactions', 'idx_txn_template', 'template_id, date')
 
+    /* 카드 승인번호 — 카드사 이용내역(카드대금명세서) 업로드의 **중복 판정 축**.
+       같은 명세서를 두 번 올려도 경비가 두 번 쌓이지 않게 한다. 손으로 적은 거래는 비어 있다. */
+    await ensureColumn('transactions', 'approval_no', 'approval_no VARCHAR(40)')
+    await ensureIndex('transactions', 'idx_txn_approval', 'approval_no')
+
     /* 옮기기 — **같은 id** 로 넣어 invoices/transactions.recurring_id 를 그대로 template_id 로 쓴다.
      * 옛 표는 지우지 않는다(되돌릴 길). 코드만 안 쓴다. */
     await runOnce('2026-09_repeat_templates_from_recurring', async () => {

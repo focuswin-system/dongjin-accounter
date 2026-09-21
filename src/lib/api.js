@@ -369,6 +369,8 @@ function adaptTransaction(row) {
     site: row.site || '',
     invoiceId: row.invoice_id,
     docNo: row.doc_no,
+    // 카드 승인번호 — 카드 명세서 업로드가 같은 건을 두 번 넣지 않게 보는 값
+    approvalNo: row.approval_no || '',
     evid_url: row.evid_url || '',
     evid_type: row.evid_type || '',
     docs: buildTxnDocs(row),
@@ -1643,6 +1645,20 @@ export const api = {
   async commitTaxInvoiceImport(items, { registerItems = false } = {}) {
     try {
       const r = await req('/invoices/import/commit', { method: 'POST', body: { items, registerItems } })
+      return { ok: true, ...r }
+    } catch (e) { return { ok: false, error: e.message } }
+  },
+
+  // ─── 카드사 이용내역(카드대금명세서) 엑셀 임포트(→ 카드 사용 지출) ──
+  // 파싱은 거래내역 업로드와 같은 공용 파서를 쓴다(양식이 아니라 받아온 파일 그대로 읽으므로
+  // 여기에 전용 파서를 또 둘 이유가 없다). 읽는 규칙은 lib/cardStatement.js.
+  parseCardStatement(file) { return postImportFile('/transactions/import/parse', file) },
+
+  async commitCardStatement(accountId, items, { createVendors = false } = {}) {
+    try {
+      const r = await req('/transactions/import/card', { method: 'POST', body: {
+        account_id: accountId, items, create_vendors: createVendors,
+      }})
       return { ok: true, ...r }
     } catch (e) { return { ok: false, error: e.message } }
   },

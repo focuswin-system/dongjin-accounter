@@ -38,7 +38,10 @@ const API_RESOURCES = {
   '/api/invoices':            ['billing_issued', 'billing_received', 'ar', 'ap'],
   '/api/contracts':           ['contract_sales', 'contract_purchase', 'contract'],
   // 전표 목록(분개장)도 이 경로를 쓴다 — /transactions/vouchers
-  '/api/transactions':        ['ledger', 'misc_pl', 'misc_income', 'voucher_book'],
+  /* 카드 대금·내부 이체 화면도 이 경로로 저장한다(/transactions/transfer, /transactions/import/card).
+     빠져 있던 동안은 그 화면 권한만 받은 사람에게 **화면은 보이는데 저장이 403** 이었다.
+     자원군 판정이라 범위가 넓어지는 건 맞지만, 형제 화면 구분은 화면 노출로 하는 것이 이 파일의 규칙이다. */
+  '/api/transactions':        ['ledger', 'misc_pl', 'misc_income', 'voucher_book', 'card_payment', 'transfer'],
   /* 반복거래 — 입금(recurring_invoice)·출금(recurring_expense) 두 자원 중 하나라도 있으면 쓴다.
      옛 정기청구·정기지출 자원 id 를 그대로 쓴다(역할에 저장된 권한이 그대로 들어오게). */
   '/api/repeat-templates':    ['recurring_invoice', 'recurring_expense'],

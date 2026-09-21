@@ -5,6 +5,8 @@ import { Drawer } from '../lib/ui'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { api } from '../lib/api'
 import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
+import { ImportWizard } from '../lib/components/ImportWizard'
+import { cardImportAdapter } from '../lib/cardImport'
 
 /**
  * 카드 대금 지급 — 쌓인 카드값을 통장에서 갚는다.
@@ -82,6 +84,10 @@ export const CardPaymentScreen = ({ openEdit }) => {
   const [busy, setBusy] = useState(false)
   // 지급 이력 행에서 연 거래 상세 — 거래내역과 같은 드로어를 쓴다
   const [txnOpen, setTxnOpen] = useState(null)
+  /* 카드 명세서 업로드 — 어느 카드에서 눌렀는지 기억한다(목록의 '명세서 올리기'로 들어오면
+     그 카드가 미리 골라져 있다). 빈 문자열이면 위쪽 버튼으로 들어온 것이라 마법사에서 고른다. */
+  const [importing, setImporting] = useState(null)
+  const [categories, setCategories] = useState([])
 
   const today = localToday()
 
@@ -109,9 +115,18 @@ export const CardPaymentScreen = ({ openEdit }) => {
       .sort((a, b) => String(b.date).localeCompare(String(a.date))))
   }
   useEffect(() => { load() }, [])
+  // 명세서 업로드에서 고를 비목 — 업로드를 안 열면 안 쓰지만, 화면에 들어올 때 한 번만 받는다
+  useEffect(() => { api.getCategories().then(rows => setCategories(rows || [])).catch(() => {}) }, [])
 
   const byId = useMemo(() => new Map(accounts.map(a => [a.id, a])), [accounts])
   const bankOpts = useMemo(() => accounts.filter(a => a.kind !== 'card'), [accounts])
+  // 명세서를 올릴 수 있는 카드 — 체크카드는 쓴 즉시 통장에서 빠지므로 통장 거래로 올린다
+  const creditCards = useMemo(
+    () => accounts.filter(a => a.kind === 'card' && a.cardType === 'credit'), [accounts])
+  /* 어댑터는 옵션이 바뀔 때만 새로 만든다 — 매 렌더 새 객체면 마법사가 중복 판정을 통째로 다시 계산한다. */
+  const importAdapter = useMemo(
+    () => cardImportAdapter({ cards: creditCards, categories, defaultAccountId: importing || '' }),
+    [creditCards, categories, importing])
 
   /* 갚을 카드 목록.
    *
@@ -214,12 +229,28 @@ export const CardPaymentScreen = ({ openEdit }) => {
     load()
   }
 
+  /* 명세서 업로드는 목록을 통째로 바꾸므로 화면을 넘겨받는다(세금계산서 업로드와 같은 방식).
+     대조 대상은 **카드 사용 지출**만 준다 — 통장 지출까지 주면 같은 날 같은 금액의 통장 건이
+     '확인 필요'로 잡혀, 멀쩡한 카드 사용분을 건너뛰게 만든다. */
+  if (importing !== null) return (
+    <ImportWizard
+      adapter={importAdapter}
+      existing={uses.filter(t => byId.get(t.accountId)?.kind === 'card')}
+      onCancel={() => setImporting(null)}
+      onDone={() => { setImporting(null); load() }}/>
+  )
+
   return (
     <div className="fade-up">
       <PageHeader title="카드 대금 지급"
         sub={bills.length > 0
           ? `갚을 카드 ${bills.length}장 · ${fmtNum(totalUnpaid)}원`
-          : '쌓인 카드값을 통장에서 갚습니다. 수입도 지출도 아니라 손익에는 잡히지 않아요.'}/>
+          : '쌓인 카드값을 통장에서 갚습니다. 수입도 지출도 아니라 손익에는 잡히지 않아요.'}
+        actions={creditCards.length > 0
+          ? <button className="btn" onClick={() => setImporting('')}>
+              <Icon.Upload size={14}/> 명세서 올리기
+            </button>
+          : null}/>
 
       {/* 결제일을 안 정한 카드의 미결제 — 목록에 못 세우니 여기서 알린다.
           "갚을 카드값이 없어요"라고 말해 놓고 100만원이 걸려 있으면 그건 거짓말이다. */}
@@ -301,7 +332,12 @@ export const CardPaymentScreen = ({ openEdit }) => {
                       · 이번 구간에 이미 갚음 <span className="num">{fmtNum(b.paidInWindow)}</span>
                     </span>
                   )}
-                  <button className="btn sm ml-auto" onClick={() => setOpenCard(open ? null : b.card.id)}>
+                  {/* 대조하다가 "장부가 비네"를 발견하는 자리가 여기다 — 그 자리에서 바로 올린다.
+                      위쪽 버튼과 달리 이건 **이 카드**로 골라진 채 열린다. */}
+                  <button className="btn sm ml-auto" onClick={() => setImporting(b.card.id)}>
+                    <Icon.Upload size={13}/> 명세서 올리기
+                  </button>
+                  <button className="btn sm" onClick={() => setOpenCard(open ? null : b.card.id)}>
                     {open ? '사용 내역 접기' : '사용 내역 보기'}
                   </button>
                 </div>

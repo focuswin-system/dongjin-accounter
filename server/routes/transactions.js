@@ -1218,6 +1218,104 @@ router.post('/import/commit', async (req, res, next) => {
   finally { conn.release() }
 })
 
+/* ── 카드 명세서 업로드: 카드사 이용내역 → 카드 사용 지출 일괄 등록 ──────────
+ *
+ * 카드로 쓴 돈은 통장에 안 찍힌다(결제일에 합계 한 줄로만 빠진다). 그래서 명세서를 보고
+ * 수십 건을 손으로 옮겨 적어 왔다 — 이 앱에서 가장 지루한 반복 입력이고, 빠뜨리면
+ * 그 경비가 통째로 누락된다. 여기서 한 번에 받는다.
+ *
+ * 읽는 규칙(열 이름 짐작·금액·할부)은 src/lib/cardStatement.js 한 곳에 있다.
+ * 여기는 **저장할 때의 규칙**만 본다.
+ *
+ * ⚠ 개별 등록(POST /)과 **같은 가드**를 지난다. 한 경로만 느슨하면 그 경로로 들어온
+ *   수백 건이 마감·장부시작일·미래일자를 통째로 우회한다(엑셀 임포트에서 겪은 그대로다).
+ * ⚠ 승인번호가 이미 있는 건은 건너뛴다 — 같은 명세서를 두 번 올려도 경비가 두 번 쌓이지 않는다.
+ * ⚠ 가맹점은 **기본으로 거래처를 만들지 않는다.** 가맹점은 수백 곳이고 대부분 한 번 쓰고 마는데,
+ *   자동 등록하면 거래처 목록이 못 쓰게 된다. 이름·사업자번호가 기존 거래처와 맞으면 잇기만 한다.
+ */
+router.post('/import/card', async (req, res, next) => {
+  const conn = await req.db.getConnection()
+  try {
+    const items = Array.isArray(req.body.items) ? req.body.items : []
+    const accountId = req.body.account_id || null
+    if (!accountId) return res.status(400).json({ error: '어느 카드의 명세서인지 골라주세요' })
+    const [[acc]] = await conn.execute('SELECT id, kind, name FROM accounts WHERE id = ?', [accountId])
+    if (!acc) return res.status(400).json({ error: '카드를 찾을 수 없어요' })
+    /* 카드가 아닌 계좌로 올리면 사용분이 통장에서 바로 빠진 것으로 잡혀, 실제 통장 잔액과 어긋난다.
+       (체크카드는 계좌에서 즉시 빠지므로 카드가 아니라 통장 거래로 올리는 것이 맞다) */
+    if (acc.kind !== 'card') {
+      return res.status(400).json({ error: `'${acc.name}'은 카드가 아니에요. 카드 명세서는 카드로만 올릴 수 있습니다.` })
+    }
+    const createVendors = !!req.body.create_vendors
+
+    // 기존 승인번호 — 같은 건을 두 번 넣지 않는다
+    const [known] = await conn.execute(
+      'SELECT approval_no FROM transactions WHERE approval_no IS NOT NULL AND approval_no <> ?', [''])
+    const seen = new Set(known.map(r => String(r.approval_no)))
+
+    /* 가맹점 → 거래처. 이름이 겹치면 **붙이지 않는다** — 엉뚱한 거래처에 붙은 경비는
+       아무도 모른 채 그 거래처의 매입 통계를 틀리게 만든다(엑셀 임포트에서 겪은 그대로다). */
+    const [vs] = await conn.execute('SELECT id, name, biz_no FROM vendors')
+    const digits = (s) => String(s || '').replace(/[^0-9]/g, '')
+    const byName = {}, byBiz = {}
+    for (const v of vs) {
+      (byName[String(v.name || '').trim()] ||= []).push(v.id)
+      const b = digits(v.biz_no); if (b) (byBiz[b] ||= []).push(v.id)
+    }
+
+    await conn.beginTransaction()
+    let inserted = 0, dupSkipped = 0, skippedFuture = 0, skippedClosed = 0,
+        skippedAmount = 0, skippedBeforeStart = 0, linkedVendors = 0
+    const createdVendors = []
+    for (const it of items) {
+      const approval = String(it.approval_no || '').trim()
+      if (approval && seen.has(approval)) { dupSkipped++; continue }
+      if (futureDateError(it.date)) { skippedFuture++; continue }
+      if (await beforeBooksError(conn, it.date)) { skippedBeforeStart++; continue }
+      if (await closedPeriodError(conn, it.date)) { skippedClosed++; continue }
+      if (amountError(it.amount)) { skippedAmount++; continue }
+
+      const merchant = String(it.merchant || '').trim()
+      const biz = digits(it.biz_no)
+      let vendorId = null
+      const hitBiz = biz ? (byBiz[biz] || []) : []
+      const hitName = merchant ? (byName[merchant] || []) : []
+      if (hitBiz.length === 1) { vendorId = hitBiz[0]; linkedVendors++ }
+      else if (hitName.length === 1) { vendorId = hitName[0]; linkedVendors++ }
+      else if (createVendors && merchant && !hitName.length) {
+        vendorId = randomUUID()
+        await conn.execute('INSERT INTO vendors (id, name, biz_no, gubu) VALUES (?,?,?,?)',
+          [vendorId, merchant, it.biz_no || null, 'A'])
+        ;(byName[merchant] ||= []).push(vendorId)
+        if (biz) (byBiz[biz] ||= []).push(vendorId)
+        createdVendors.push(merchant)
+      }
+
+      const accountCode = await resolveAcctCode(conn, it.account_code, it.category, 'expense')
+      const vat = vatFields({
+        amount: it.amount, supply_amount: it.supply_amount, vat_amount: it.vat_amount,
+        tax_type: it.tax_type, vat_deductible: it.vat_deductible,
+      })
+      /* 증빙유형은 '카드전표'로 둔다 — 카드 사용분의 증빙은 언제나 매출전표이고,
+         나중에 증빙 없는 지출을 찾을 때 이 건들이 '증빙 없음'으로 잡히면 안 된다. */
+      await conn.execute(`
+        INSERT INTO transactions (id, kind, vendor_id, account_id, account_code, category, amount, date,
+                                  method, status, memo, approval_no, evid_type,
+                                  supply_amount, vat_amount, tax_type, vat_deductible)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `, [randomUUID(), 'expense', vendorId, accountId, accountCode, it.category || '', it.amount, it.date,
+          '카드', '지급완료', it.memo || merchant || '', approval || null, '카드전표',
+          vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible])
+      if (approval) seen.add(approval)
+      inserted++
+    }
+    await conn.commit()
+    res.json({ inserted, dupSkipped, skippedFuture, skippedClosed, skippedAmount, skippedBeforeStart,
+      linkedVendors, createdVendors })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
+})
+
 // ── 엑셀 임포트: 양식 다운로드(.xlsx) ──
 router.get('/import/template', async (req, res, next) => {
   try {
