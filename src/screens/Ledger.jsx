@@ -383,10 +383,11 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
             <button className="btn" onClick={exportXlsx}><Icon.Excel/> <span className="btn-label-hide">엑셀 내보내기</span></button>
             {/* 입구는 **하나**다 — 누르면 어떻게 적을지 묻는다(전표입력·폼 입력·세금계산서에서…).
                 ⚠ 버튼 이름은 '전표'가 아니다 — 전표입력은 그 안의 **한 가지**일 뿐이라,
-                버튼에 그 이름을 달면 나머지 넷이 없는 것처럼 보인다. */}
+                버튼에 그 이름을 달면 나머지 넷이 없는 것처럼 보인다.
+                홈의 [거래 등록]과 같은 말을 쓴다 — 같은 일에 두 이름을 두지 않는다. */}
             {entryOptions.length > 0 && (
               <button className="btn primary" onClick={() => setEntryPick(true)}>
-                <Icon.Plus size={14}/> 입력
+                <Icon.Plus size={14}/> 거래 등록
               </button>
             )}
           </>}
