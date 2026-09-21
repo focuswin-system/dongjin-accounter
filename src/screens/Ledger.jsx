@@ -315,8 +315,11 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
       effect: '계좌 잔액이 늘고, 못 받은 청구서가 있으면 함께 알려줘요.' },
     openExpense && { id: 'expense', icon: Icon.Out, label: '출금', desc: '통장에서 나간 돈',
       effect: '계좌 잔액이 줄고, 비목이 그대로 비용 계정이 돼요.' },
-    canJournal && { id: 'journal', icon: Icon.Sign, label: '대체', desc: '돈이 안 움직인 분개(감가상각·정정 등)',
-      effect: '차변·대변을 직접 적어요. 입금·출금 합계에는 들지 않아요.' },
+    /* 전표로 적는 길 — 계정과목이 손에 익은 사람은 이쪽이 빠르다.
+       입금전표·출금전표·대체전표 셋 다 여기 있다(통장이 어느 쪽에 서는가의 차이다). */
+    canJournal && { id: 'journal', icon: Icon.Sign, label: '전표 (차변·대변)',
+      desc: '입금전표 · 출금전표 · 대체전표',
+      effect: '계정과목으로 직접 적어요. 통장이 들어가면 잔액에 반영되고, 없으면 대체전표예요.' },
   ].filter(Boolean);
   const pickEntry = (id) => {
     setEntryPick(false);

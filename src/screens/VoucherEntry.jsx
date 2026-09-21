@@ -45,15 +45,29 @@ export const JournalEntryDrawer = ({ open, onClose, onSaved }) => {
   const [debits, setDebits] = useState([emptyRow()])    // 차변 블록
   const [credits, setCredits] = useState([emptyRow()])  // 대변 블록
   const [busy, setBusy] = useState(false)
+  /* 전표 종류 — 경리가 손에 익은 세 가지. 뜻은 '통장이 어느 쪽에 서는가'다.
+       입금전표  차변 = 통장(들어온다) · 대변만 적는다(상대 계정)
+       출금전표  대변 = 통장(나간다)  · 차변만 적는다
+       대체전표  통장이 없다 — 양쪽을 다 적는다(감가상각·정정)
+     셋 다 같은 저장 규칙을 탄다(통장 줄이 있으면 거래, 없으면 대체전표). */
+  const [vtype, setVtype] = useState('in')
+  const [bankId, setBankId] = useState('')
+  /* 거래처 — 전표에도 **선택으로** 둔다. 없으면 거래내역에 '(미확인)'으로 남아
+     나중에 거래처별로 묶어 보거나 청구서와 맞출 수 없다. 대체전표는 거래처가 없는 게 보통이라 강요하지 않는다. */
+  const [vendors, setVendors] = useState([])
+  const [vendorId, setVendorId] = useState('')
 
-  const reset = () => { setDate(localToday()); setSummary(''); setDebits([emptyRow()]); setCredits([emptyRow()]) }
+  const reset = () => { setDate(localToday()); setSummary(''); setDebits([emptyRow()]); setCredits([emptyRow()]); setBankId(''); setVendorId('') }
 
   useEffect(() => {
     if (!open) return
     reset()
+    api.getVendors().then(v => setVendors(v || []))
     Promise.all([api.getAccounts(), api.getAccountSubjects({ postableOnly: true })]).then(([accs, subs]) => {
-      setAccounts((accs || []).filter(a => a.kind !== 'card'))
+      const banks = (accs || []).filter(a => a.kind !== 'card')
+      setAccounts(banks)
       setSubjects(subs || [])
+      setBankId(prev => prev || banks[0]?.id || '')
     })
   }, [open])
 
@@ -71,22 +85,36 @@ export const JournalEntryDrawer = ({ open, onClose, onSaved }) => {
   const addRow = (setter) => () => setter(rs => [...rs, emptyRow()])
   const delRow = (setter) => (i) => setter(rs => rs.length <= 1 ? rs : rs.filter((_, j) => j !== i))
 
-  const debitSum = useMemo(() => debits.reduce((s, r) => s + numOf(r.amount), 0), [debits])
-  const creditSum = useMemo(() => credits.reduce((s, r) => s + numOf(r.amount), 0), [credits])
-  const balanced = debitSum > 0 && debitSum === creditSum
+  const rawDebit = useMemo(() => debits.reduce((s, r) => s + numOf(r.amount), 0), [debits])
+  const rawCredit = useMemo(() => credits.reduce((s, r) => s + numOf(r.amount), 0), [credits])
+  /* 입금·출금전표는 통장 쪽 금액을 **사람이 적지 않는다** — 반대쪽 합계가 곧 통장 금액이다.
+     적게 하면 두 숫자를 맞추는 일이 하나 더 생기고, 안 맞으면 저장이 막힌다. */
+  const debitSum = vtype === 'in' ? rawCredit : rawDebit
+  const creditSum = vtype === 'out' ? rawDebit : rawCredit
+  const balanced = debitSum > 0 && debitSum === creditSum && (vtype === 'tr' || !!bankId)
   const usableDebits = debits.filter(r => r.acct && numOf(r.amount))
   const usableCredits = credits.filter(r => r.acct && numOf(r.amount))
 
   useSaveKey(open, () => { if (balanced && !busy) save() })
   const save = async () => {
-    if (usableDebits.length + usableCredits.length < 2 || !usableDebits.length || !usableCredits.length)
+    /* 입금·출금전표는 사람이 **한쪽만** 적는다. 통장 줄은 여기서 만들어 붙인다. */
+    const entered = vtype === 'in' ? usableCredits : vtype === 'out' ? usableDebits : null
+    if (vtype !== 'tr') {
+      if (!bankId) return toast.push('통장을 골라주세요', { tone: 'warn' })
+      if (!entered.length) return toast.push(vtype === 'in' ? '대변(상대 계정)을 한 줄 이상 적어주세요' : '차변(상대 계정)을 한 줄 이상 적어주세요', { tone: 'warn' })
+    } else if (usableDebits.length + usableCredits.length < 2 || !usableDebits.length || !usableCredits.length) {
       return toast.push('차변과 대변에 각각 한 줄 이상 적어주세요', { tone: 'warn' })
+    }
     if (!balanced) return toast.push('차변 합계와 대변 합계가 같아야 해요', { tone: 'warn' })
 
-    const rows = [
-      ...usableDebits.map(r => ({ ...r, side: 'debit' })),
-      ...usableCredits.map(r => ({ ...r, side: 'credit' })),
-    ]
+    const bankRow = vtype === 'tr' ? null
+      : { acct: 'acc:' + bankId, memo: '', amount: String(vtype === 'in' ? rawCredit : rawDebit), side: vtype === 'in' ? 'debit' : 'credit' }
+    const rows = vtype === 'tr'
+      ? [
+          ...usableDebits.map(r => ({ ...r, side: 'debit' })),
+          ...usableCredits.map(r => ({ ...r, side: 'credit' })),
+        ]
+      : [bankRow, ...entered.map(r => ({ ...r, side: vtype === 'in' ? 'credit' : 'debit' }))]
     const banks = rows.filter(r => isBank(r.acct))
     if (banks.length > 1) return toast.push('통장은 한 줄만 — 통장끼리 옮기는 건 내부 이체 화면을 쓰세요', { tone: 'warn' })
 
@@ -104,10 +132,17 @@ export const JournalEntryDrawer = ({ open, onClose, onSaved }) => {
                    supply_amount: vat ? 0 : amt, vat_amount: vat ? amt : 0, amount: amt,
                    tax_type: vat ? '과세' : '면세', memo: r.memo || '' }
         })
+        /* 상대 계정이 **한 줄이면 복합 전표가 아니다** — splits 로 보내면 서버가
+           "비목이 둘 이상이어야 해요"로 막는다(전표 입력에서 늘 한 줄로 적는다). */
+        const one = splits.length === 1 ? splits[0] : null
         const res = await api.addTransaction({
           kind, account_id: bank.acct.slice(4), amount, date,
           category: splits[0]?.category || '복합', memo: summary || counters[0]?.memo || '전표 입력',
-          status: kind === 'income' ? '입금완료' : '지급완료', splits,
+          status: kind === 'income' ? '입금완료' : '지급완료',
+          vendor_id: vendorId || null,
+          ...(one
+            ? { account_code: one.account_code, supply_amount: one.supply_amount, vat_amount: one.vat_amount, tax_type: one.tax_type }
+            : { splits }),
         })
         if (!res.ok) return toast.push(res.error || '저장에 실패했어요', { tone: 'warn' })
         toast.push('통장이 오간 거래로 저장했어요')
@@ -153,13 +188,47 @@ export const JournalEntryDrawer = ({ open, onClose, onSaved }) => {
     </div>
   )
 
+  /* 통장 쪽 — 금액은 반대쪽 합계를 그대로 따른다(사람이 두 번 적지 않는다) */
+  const BankSide = ({ title, tone, sum }) => (
+    <div style={{ flex: '1 1 280px', minWidth: 0 }}>
+      <div className="fw-700" style={{ textAlign: 'center', padding: '8px 0', background: 'var(--surface-2)', borderRadius: 8, marginBottom: 10, color: `var(--${tone}-ink)` }}>{title}</div>
+      <label className="label">통장</label>
+      <Combobox value={bankId} allowAdd={false} onChange={setBankId}
+        options={accounts.map(a => ({ value: a.id, label: a.name, sub: a.bankName || '통장' }))}
+        placeholder="통장 선택"/>
+      <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+        금액은 반대쪽 합계로 자동입니다.
+      </div>
+      <div className="row" style={{ justifyContent: 'space-between', marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
+        <span className="text-sm text-muted2">{title} 합계</span>
+        <span className="num fw-700">{fmtNum(sum)}</span>
+      </div>
+    </div>
+  )
+
+  const typeLabel = vtype === 'in' ? '입금전표' : vtype === 'out' ? '출금전표' : '대체전표'
+  const typeSub = vtype === 'in' ? '통장으로 들어온 돈 — 차변은 통장, 대변(상대 계정)만 적어요'
+    : vtype === 'out' ? '통장에서 나간 돈 — 대변은 통장, 차변(상대 계정)만 적어요'
+    : '돈이 안 움직이는 분개(감가상각·대손·정정 등)'
+
   return (
-    <Drawer open={open} onClose={onClose} width="min(860px, 100vw)" label="대체전표">
-      <DrawerHead title="대체전표" sub="돈이 안 움직이는 분개(감가상각·대손·정정 등)" onClose={onClose}/>
+    <Drawer open={open} onClose={onClose} width="min(860px, 100vw)" label={typeLabel}>
+      <DrawerHead title={typeLabel} sub={typeSub} onClose={onClose}/>
       <div className="drawer-body col gap-16">
+        {/* 전표 종류 — 손에 익은 세 가지를 그대로 둔다 */}
+        <div className="row gap-6">
+          {[['in', '입금전표'], ['out', '출금전표'], ['tr', '대체전표']].map(([v, l]) => (
+            <button key={v} type="button" className={`chip ${vtype === v ? 'active' : ''}`}
+              onClick={() => setVtype(v)}>{l}</button>
+          ))}
+        </div>
         <div className="row gap-12" style={{ flexWrap: 'wrap' }}>
           <div><label className="label">날짜</label>
             <DateInput className="input" style={{ width: 160 }} max={localToday()} value={date} onChange={e => setDate(e.target.value)}/>
+          </div>
+          <div style={{ width: 200 }}><label className="label">거래처 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
+            <Combobox value={vendorId} allowAdd={false} onChange={setVendorId}
+              options={vendors.map(v => ({ value: v.id, label: v.name, sub: v.type || '' }))} placeholder="거래처 선택"/>
           </div>
           <div style={{ flex: 1, minWidth: 220 }}><label className="label">전표 적요</label>
             <input className="input" value={summary} placeholder="예: 9월 감가상각" onChange={e => setSummary(e.target.value)}/>
@@ -169,12 +238,18 @@ export const JournalEntryDrawer = ({ open, onClose, onSaved }) => {
         {/* 분개전표 — 차변 | 대변 반반. Side 는 컴포넌트가 아니라 함수로 호출한다
             (<Side/> 로 쓰면 매 렌더마다 새 타입이 되어 입력 포커스가 튄다). */}
         <div className="row gap-16" style={{ alignItems: 'stretch', flexWrap: 'wrap' }}>
-          {Side({ title: '차변', rows: debits, setter: setDebits, sum: debitSum, tone: 'pos' })}
-          {Side({ title: '대변', rows: credits, setter: setCredits, sum: creditSum, tone: 'neg' })}
+          {vtype === 'in'
+            ? BankSide({ title: '차변', tone: 'pos', sum: debitSum })
+            : Side({ title: '차변', rows: debits, setter: setDebits, sum: debitSum, tone: 'pos' })}
+          {vtype === 'out'
+            ? BankSide({ title: '대변', tone: 'neg', sum: creditSum })
+            : Side({ title: '대변', rows: credits, setter: setCredits, sum: creditSum, tone: 'neg' })}
         </div>
 
         <div className="text-xs text-muted2">
-          통장을 한 줄 넣으면 통장이 오간 거래로 저장돼요. 통장이 없으면 대체전표예요.
+          {vtype === 'tr'
+            ? '통장을 한 줄 넣으면 통장이 오간 거래로 저장돼요. 통장이 없으면 대체전표예요.'
+            : '저장하면 통장 잔액에 반영되고 거래내역에도 함께 보여요.'}
         </div>
       </div>
       <DrawerFooter>
