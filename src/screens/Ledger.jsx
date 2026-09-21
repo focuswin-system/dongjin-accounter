@@ -381,12 +381,12 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
           actions={<>
             <button className="btn excel" onClick={openExcel}><Icon.Excel/> <span className="btn-label-hide">엑셀 업로드</span></button>
             <button className="btn" onClick={exportXlsx}><Icon.Excel/> <span className="btn-label-hide">엑셀 내보내기</span></button>
-            {/* 입구는 **하나**다 — 누르면 무엇을 적는지 묻는다(입금·출금·대체).
-                버튼 셋을 늘어놓으면 고르는 일이 화면 머리에 상시로 놓여, 매번 세 개를 읽고 고르게 된다.
-                고르는 자리는 다른 입구(문서 만들기)와 같은 모양을 쓴다(SourceChooser). */}
+            {/* 입구는 **하나**다 — 누르면 어떻게 적을지 묻는다(전표입력·폼 입력·세금계산서에서…).
+                ⚠ 버튼 이름은 '전표'가 아니다 — 전표입력은 그 안의 **한 가지**일 뿐이라,
+                버튼에 그 이름을 달면 나머지 넷이 없는 것처럼 보인다. */}
             {entryOptions.length > 0 && (
               <button className="btn primary" onClick={() => setEntryPick(true)}>
-                <Icon.Plus size={14}/> 전표
+                <Icon.Plus size={14}/> 입력
               </button>
             )}
           </>}
