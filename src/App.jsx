@@ -718,8 +718,21 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
       case "income":          return <LedgerScreen initialFilter="income" openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
       case "expense":         return <LedgerScreen initialFilter="expense" openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}/>;
       // 미수금/미지급금은 청구서 기준 → 발행 청구서와 같은 BillingScreen을 '회수 모드'로 재사용
-      case "ar":              return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} initialTab="issued"  role="collect" focusInvoiceId={focusInvoiceId} goRoute={go} openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
-      case "ap":              return <BillingScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} initialTab="received" role="collect" focusInvoiceId={focusInvoiceId} goRoute={go} openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>;
+      /* 미수금/미지급금 — 세금계산서와 같은 화면을 '회수 모드'로 쓴다.
+         ⚠ 여는 쪽(issued/received)은 **볼 수 있는 쪽으로 맞춘다.** 권한 묶음(LEAF_ABSORBS)이 access 를
+         한 덩어리로 열어 주기 때문에, 고정해 두면 미지급금만 가진 역할이 '미수금' 제목의 빈 화면을 본다. */
+      case "ar":
+      case "ap": {
+        const sides = [
+          (canDo("billing_issued", "view") || canDo("ar", "view")) && "issued",
+          (canDo("billing_received", "view") || canDo("ap", "view")) && "received",
+        ].filter(Boolean);
+        let side = route === "ap" ? "received" : "issued";
+        if (!sides.includes(side) && sides.length) side = sides[0];
+        return side === "received"
+          ? <BillingScreen key="collect_received" openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} initialTab="received" role="collect" focusInvoiceId={focusInvoiceId} goRoute={go} openReturn={() => setTxnForm({ kind: "income",  category: "매입 환입", memo: "매입 환입" })}/>
+          : <BillingScreen key="collect_issued"   openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} initialTab="issued"  role="collect" focusInvoiceId={focusInvoiceId} goRoute={go} openRefund={() => setTxnForm({ kind: "expense", category: "매출 환불", memo: "매출 환불" })}/>;
+      }
       case "doc":             return <DocsScreen focusId={docFocusId} goRoute={go}/>;
       case "settlement":      return <SettlementScreen focusId={docFocusId}/>;
       case "payment_run":     return <PaymentRunScreen go={go}/>;
