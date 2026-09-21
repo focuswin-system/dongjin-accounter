@@ -598,7 +598,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
   };
 
   /* 거래내역 — 서류 없이 오간 돈의 입구(3단계). 옛 '경비 처리'·'전표 입력' 주소도 여기로 온다.
-     [대체]는 대체전표 권한이 있을 때만. 입금·출금 폼은 늘 연다 — 쓰기 권한은 서버가 따진다. */
+     전표입력은 대체전표 권한이 있을 때만 보인다. 폼 입력은 늘 연다 — 쓰기 권한은 서버가 따진다. */
   const renderLedger = (filter, { openJournalOnMount = false } = {}) => (
     <LedgerScreen key={`ledger-${filter}`} initialFilter={filter} refreshTrigger={txnVersion} focusTxnId={focusTxnId}
       openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}
@@ -702,7 +702,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
       case "card_payment":   return <CardPaymentScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
       case "voucher_book":   return <VoucherBookScreen/>;
       case "transfer":       return <TransferScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
-      // 옛 '전표 입력' — 거래내역의 [대체] 서랍으로 옮겼다(3단계). 옛 주소로 오면 서랍을 열어 준다
+      // 옛 '전표 입력' — 거래내역의 전표 서랍으로 옮겼다(3단계). 옛 주소로 오면 서랍을 열어 준다
       case "voucher_entry":  return renderLedger("journal", { openJournalOnMount: true });
       case "finance_lending": return <LendingScreen/>;
       case "finance_note":    return <NotesScreen/>;
@@ -1118,8 +1118,8 @@ const FAQ_CATEGORIES = ["거래 등록", "미수금·미지급금", "주문 관�
 
 const FAQ_DATA = [
   // 거래 등록
-  { id:"f01", cat:"거래 등록",       routes:["home","ledger"],              q:"입금을 어떻게 등록하나요?",                  a:"세금계산서를 발행한 건이면 입출금 › 세금계산서에서, 계산서 없이 들어온 돈이면 입출금 › 거래내역의 [입금]으로 적어요. 매달 같은 곳에서 들어오는 돈은 반복거래에 등록해 두면 달마다 골라 만들 수 있어요.", action:{ label:"거래내역으로", route:"ledger" } },
-  { id:"f02", cat:"거래 등록",       routes:["home","ledger"],              q:"지출을 어떻게 등록하나요?",                  a:"세금계산서를 받았으면 입출금 › 세금계산서의 수취에서, 카드전표·영수증만 있거나 통장에서 나가기만 했으면 입출금 › 거래내역의 [출금]으로 적어요. 매달 나가는 고정비는 반복거래에 등록해 두면 됩니다.", action:{ label:"거래내역으로", route:"ledger" } },
+  { id:"f01", cat:"거래 등록",       routes:["home","ledger"],              q:"입금을 어떻게 등록하나요?",                  a:"세금계산서를 발행한 건이면 입출금 › 세금계산서에서, 계산서 없이 들어온 돈이면 입출금 › 거래내역의 [거래 등록]에서 적어요(전표입력·폼 입력 중에 고릅니다). 매달 같은 곳에서 들어오는 돈은 반복거래에 등록해 두면 달마다 골라 만들 수 있어요.", action:{ label:"거래내역으로", route:"ledger" } },
+  { id:"f02", cat:"거래 등록",       routes:["home","ledger"],              q:"지출을 어떻게 등록하나요?",                  a:"세금계산서를 받았으면 입출금 › 세금계산서의 수취에서, 카드전표·영수증만 있거나 통장에서 나가기만 했으면 입출금 › 거래내역의 [거래 등록]에서 적어요(전표입력·폼 입력 중에 고릅니다). 매달 나가는 고정비는 반복거래에 등록해 두면 됩니다.", action:{ label:"거래내역으로", route:"ledger" } },
   { id:"f03", cat:"거래 등록",       routes:["ledger"],                     q:"여러 건을 한꺼번에 올리고 싶어요",            a:"엑셀 업로드 기능을 이용하면 여러 거래를 한 번에 등록할 수 있어요. 거래내역 오른쪽 위 '엑셀 업로드'에서 서식을 내려받아 작성한 뒤 올려 주세요.", action:{ label:"엑셀 업로드로", route:"excel_modal" } },
   { id:"f04", cat:"거래 등록",       routes:["ledger"],                     q:"거래 내용을 수정하거나 삭제하고 싶어요",      a:"거래내역에서 그 줄을 누르면 상세가 열려요. 아래쪽 '편집'으로 고치고, '삭제'로 지울 수 있어요. 대체전표는 줄을 누르면 전표가 열리고 거기서 지울 수 있어요.", action:{ label:"거래내역으로", route:"ledger" } },
   { id:"f05", cat:"거래 등록",       routes:["ledger","home"],              q:"등록하려는 거래처가 목록에 없어요",           a:"거래처는 설정 화면에서 먼저 추가해야 해요. 설정 → 거래처 탭에서 새 거래처를 등록한 뒤 다시 시도해 보세요.", action:{ label:"설정으로", route:"master" } },

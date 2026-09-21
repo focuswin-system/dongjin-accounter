@@ -21,7 +21,7 @@ import { usePerms } from '../lib/perms'
 export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openInvoice, refreshTrigger,
   /* 3단계(2026-09) — 서류 없이 오간 돈의 **유일한 입구**가 됐다(세금계산서가 있으면 세금계산서 화면).
      입금·출금 폼은 App 이 소유하는 거래 서랍이고, 대체는 이 화면이 연다.
-     canJournal — 대체전표 권한(voucher_entry)이 있을 때만 [대체]. openJournalOnMount — 옛 '전표 입력' 주소로 들어온 경우 */
+     canJournal — 전표 권한(voucher_entry)이 있을 때만 '전표입력'. openJournalOnMount — 옛 '전표 입력' 주소로 들어온 경우 */
   openIncome, openExpense, canJournal = false, openJournalOnMount = false,
   /* 다른 화면에서 "이 거래를 거래내역에서 열어줘"라고 넘겨준 id.
      없으면 평소처럼 목록만 연다(청구서의 focusInvoiceId 와 같은 방식). */
@@ -577,7 +577,8 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
         sub={srcPick === 'simple' ? '고르면 그 양식이 열려요' : '고르면 그 목록으로 갑니다'}
         label="방향" options={srcPick ? sourceOptions(srcPick) : []} onPick={pickSource}/>
 
-      <JournalEntryDrawer goRoute={goRoute} open={jOpen} onClose={() => setJOpen(false)}
+      {/* 옛 '전표 입력' 주소로 들어오면 목록이 '대체'로 걸려 있다 — 서랍도 대체전표로 연다(둘이 어긋나면 헷갈린다) */}
+      <JournalEntryDrawer goRoute={goRoute} initialType={openJournalOnMount ? 'tr' : 'in'} open={jOpen} onClose={() => setJOpen(false)}
         onSaved={({ source, id }) => {
           setJOpen(false); reload();
           if (source === 'journal') openJournal({ jvId: id });

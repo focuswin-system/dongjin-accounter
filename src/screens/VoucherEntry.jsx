@@ -17,7 +17,7 @@ import { useConfirm } from '../lib/ui'
  *   · 통장 줄 없음 → 현금이 안 움직이는 대체전표(감가상각 등).
  * 통장 두 줄(통장↔통장)은 내부이체 화면을 쓴다 — 여기서는 막는다.
  *
- * 3단계(2026-09): 따로 있던 '전표 입력' 화면을 **거래내역의 [대체] 서랍**으로 옮겼다.
+ * 3단계(2026-09): 따로 있던 '전표 입력' 화면을 **거래내역의 [거래 등록] › 전표입력**으로 옮겼다.
  * 만든 대체전표는 거래내역 목록에 '대체'로 함께 보인다(예전엔 이 화면에만 있어 거래내역만 보면 빠졌다).
  */
 
@@ -39,7 +39,7 @@ export const journalVoucherOf = (v) => ({
  * @param onClose  닫기
  * @param onSaved  ({ source: 'transaction'|'journal', id }) — 저장 뒤 목록을 새로 읽고 그 전표를 열 수 있게
  */
-export const JournalEntryDrawer = ({ open, onClose, onSaved, goRoute }) => {
+export const JournalEntryDrawer = ({ open, onClose, onSaved, goRoute, initialType = 'in' }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [accounts, setAccounts] = useState([])
@@ -54,14 +54,14 @@ export const JournalEntryDrawer = ({ open, onClose, onSaved, goRoute }) => {
        출금전표  대변 = 통장(나간다)  · 차변만 적는다
        대체전표  통장이 없다 — 양쪽을 다 적는다(감가상각·정정)
      셋 다 같은 저장 규칙을 탄다(통장 줄이 있으면 거래, 없으면 대체전표). */
-  const [vtype, setVtype] = useState('in')
+  const [vtype, setVtype] = useState(initialType)
   const [bankId, setBankId] = useState('')
   /* 거래처 — 전표에도 **선택으로** 둔다. 없으면 거래내역에 '(미확인)'으로 남아
      나중에 거래처별로 묶어 보거나 청구서와 맞출 수 없다. 대체전표는 거래처가 없는 게 보통이라 강요하지 않는다. */
   const [vendors, setVendors] = useState([])
   const [vendorId, setVendorId] = useState('')
 
-  const reset = () => { setDate(localToday()); setSummary(''); setDebits([emptyRow()]); setCredits([emptyRow()]); setBankId(''); setVendorId('') }
+  const reset = () => { setDate(localToday()); setSummary(''); setDebits([emptyRow()]); setCredits([emptyRow()]); setBankId(''); setVendorId(''); setVtype(initialType) }
 
   useEffect(() => {
     if (!open) return

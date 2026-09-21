@@ -68,8 +68,8 @@ export const NAV_TREE = [
     type: "domain", id: "cash_dom", label: "입출금", icon: Icon.Recv,
     sections: [
       /* 단순화 3단계(2026-09) — 아홉 잎을 여섯으로. **손에 든 것으로 고른다**:
-       *   세금계산서를 발행·수취했다 → 세금계산서 / 서류 없이 돈만 오갔다 → 거래내역 [입금][출금]
-       *   돈이 안 움직이는 분개 → 거래내역 [대체] / 매달 같은 돈 → 반복거래
+       *   세금계산서를 발행·수취했다 → 세금계산서 / 서류 없이 돈만 오갔다 → 거래내역 [거래 등록]
+       *   돈이 안 움직이는 분개 → 거래 등록 › 전표입력 › 대체전표 / 매달 같은 돈 → 반복거래
        * 메뉴가 곧 "받은 서류가 뭔가요?"라서 등록 입구의 선택창(DocTypeChooser)은 없앴다.
        * 설계: docs/02-design/features/cash-menu-restructure.design.md
        *
@@ -431,7 +431,7 @@ export const HIDDEN_LEAVES = [
      열면 새 자리의 맞는 탭·필터로 연다(App.jsx). */
   { id: "billing_received", label: "세금계산서 (수취)", icon: Icon.Receipt, domain: "입출금", section: "" },
   { id: "misc_pl",          label: "경비 (거래내역)",   icon: Icon.Wallet,  domain: "입출금", section: "" },
-  { id: "voucher_entry",    label: "전표 입력 (대체)",  icon: Icon.Doc,     domain: "입출금", section: "" },
+  { id: "voucher_entry",    label: "전표입력",          icon: Icon.Doc,     domain: "입출금", section: "" },
 
   /* 보고서 카탈로그로 흡수한 여섯 — 화면·라우트·권한 자원은 그대로다.
    * 사이드바에서만 뺐고, 경영관리 › 보고서 안에서 분류 탭으로 열린다.
