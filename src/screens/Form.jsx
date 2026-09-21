@@ -7,6 +7,7 @@ import { quickAddCategory, quickAddRefItemWithId } from '../lib/quickAdd'
 import { contractsForVendor, contractFitsVendor } from '../lib/contractPick'
 import { vatOf, supplyOf } from '../lib/vatRate'
 import { matchInvoiceAsking } from '../lib/settleAsk'
+import { askInvoiceLink } from '../lib/askInvoiceLink'
 import { usePerms } from '../lib/perms'
 import { useSaveKey, SaveKeyHint } from '../lib/useSaveKey'
 
@@ -652,6 +653,18 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     /* 청구서를 골랐으면 **그 청구서에 붙이는 길**로 간다 — 거래를 따로 만들고 나중에 잇는 게 아니라
        한 번에 만들고 연결한다(그래야 같은 돈이 두 줄 서지 않는다). */
     if (linkInv && !editTxn) { await settleOnInvoice(linkInv); return; }
+    /* 안 골랐어도 **맞아떨어지면 한 번 묻는다** — 청구서를 안 걸면 통장만 맞고 미수금은 안 줄어든다.
+       규칙은 lib/askInvoiceLink.jsx 한 곳(전표입력도 같은 것을 쓴다). */
+    if (!editTxn && (kind === 'income' || kind === 'expense')) {
+      const acc = accounts.filter(a => a.name === form.account)
+      const picked = await askInvoiceLink(confirm, {
+        kind, vendorId: vendors.find(v => v.id === form.vendor)?.id,
+        accountId: acc.length === 1 ? acc[0].id : null,
+        amount: Number(String(form.amount ?? '').replace(/[^0-9]/g, '')) || 0, date: form.date,
+      })
+      if (picked?.pickMany) { onClose?.(); goRoute?.(kind === 'income' ? 'billing_issued' : 'billing_received'); return; }
+      if (picked) { await settleOnInvoice({ id: picked.id, invoice_no: picked.invoice_no, remaining: picked.remaining }); return; }
+    }
     if (splitOn) {
       const rows = splitRows.filter(r => r.category && (numOf(r.supply) || numOf(r.vat)))
       if (rows.length < 2) { toast.push("복합 전표는 비목을 둘 이상 적어주세요"); return; }

@@ -576,7 +576,7 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
         sub={srcPick === 'simple' ? '고르면 그 양식이 열려요' : '고르면 그 목록으로 갑니다'}
         label="방향" options={srcPick ? sourceOptions(srcPick) : []} onPick={pickSource}/>
 
-      <JournalEntryDrawer open={jOpen} onClose={() => setJOpen(false)}
+      <JournalEntryDrawer goRoute={goRoute} open={jOpen} onClose={() => setJOpen(false)}
         onSaved={({ source, id }) => {
           setJOpen(false); reload();
           if (source === 'journal') openJournal({ jvId: id });

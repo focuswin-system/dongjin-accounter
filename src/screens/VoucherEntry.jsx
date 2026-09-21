@@ -3,6 +3,9 @@ import { Icon, fmtNum, useToast, Combobox, MoneyInput, DateInput, localToday, Dr
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { api } from '../lib/api'
 import { useSaveKey, SaveKeyHint } from '../lib/useSaveKey'
+import { askInvoiceLink } from '../lib/askInvoiceLink'
+import { matchInvoiceAsking } from '../lib/settleAsk'
+import { useConfirm } from '../lib/ui'
 
 /**
  * 대체전표 입력 — 분개전표 모양 그대로. 왼쪽이 **차변** 블록, 오른쪽이 **대변** 블록이고,
@@ -36,8 +39,9 @@ export const journalVoucherOf = (v) => ({
  * @param onClose  닫기
  * @param onSaved  ({ source: 'transaction'|'journal', id }) — 저장 뒤 목록을 새로 읽고 그 전표를 열 수 있게
  */
-export const JournalEntryDrawer = ({ open, onClose, onSaved }) => {
+export const JournalEntryDrawer = ({ open, onClose, onSaved, goRoute }) => {
   const toast = useToast()
+  const { confirm } = useConfirm()
   const [accounts, setAccounts] = useState([])
   const [subjects, setSubjects] = useState([])
   const [date, setDate] = useState(localToday())
@@ -132,6 +136,24 @@ export const JournalEntryDrawer = ({ open, onClose, onSaved }) => {
                    supply_amount: vat ? 0 : amt, vat_amount: vat ? amt : 0, amount: amt,
                    tax_type: vat ? '과세' : '면세', memo: r.memo || '' }
         })
+        /* 저장하기 전에 **청구서 건인지 한 번 묻는다** — 폼 입력과 같은 규칙(lib/askInvoiceLink.jsx).
+           전표로 적었다고 미수금이 안 줄면, 며칠 뒤 "통장엔 들어왔는데 안 받은 걸로 뜬다"가 된다. */
+        const picked = await askInvoiceLink(confirm, {
+          kind, vendorId: vendorId || null, accountId: bank.acct.slice(4), amount, date })
+        if (picked?.pickMany) { onClose?.(); goRoute?.(kind === 'income' ? 'billing_issued' : 'billing_received'); return }
+        if (picked) {
+          const r = await matchInvoiceAsking(confirm, picked.id, {
+            txnId: null, amount, date, account_id: bank.acct.slice(4),
+            category: nameOf(counters[0]?.acct) || undefined,
+            memo: summary || `${picked.invoice_no} ${kind === 'income' ? '입금' : '지급'}`,
+          })
+          if (r.cancelled) return
+          if (!r.ok) return toast.push(r.error || '청구서 정산에 실패했어요', { tone: 'warn' })
+          toast.push(`${picked.invoice_no}에 연결했어요`)
+          onSaved?.({ source: 'transaction', id: r.txnId || r.id })
+          return
+        }
+
         /* 상대 계정이 **한 줄이면 복합 전표가 아니다** — splits 로 보내면 서버가
            "비목이 둘 이상이어야 해요"로 막는다(전표 입력에서 늘 한 줄로 적는다). */
         const one = splits.length === 1 ? splits[0] : null
