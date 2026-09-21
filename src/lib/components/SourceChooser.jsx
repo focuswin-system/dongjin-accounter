@@ -81,7 +81,8 @@ export const SourceChooser = ({ open, title, sub, label, options = [], onPick, o
       {footer && (
         <div className="text-xs text-muted2" style={{ marginTop: 6, lineHeight: 1.7 }}>{footer}</div>
       )}
-      <div className="text-xs text-muted2" style={{ marginTop: 2 }}>숫자키로 바로 고를 수 있어요 · ↑↓ 로 옮기고 Enter</div>
+      {/* 키보드 안내는 키보드가 있는 화면에서만 — 휴대폰에서는 읽을 이유가 없는 한 줄이다 */}
+      <div className="text-xs text-muted2 kbd-hint" style={{ marginTop: 2 }}>숫자키로 바로 고를 수 있어요 · ↑↓ 로 옮기고 Enter</div>
     </div>
   </Drawer>
   )

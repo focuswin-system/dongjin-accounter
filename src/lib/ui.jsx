@@ -499,6 +499,18 @@ export const Drawer = ({ open, onClose, width = "min(480px, 100vw)", label, chil
   // 물어보는 순간 '닫기'에 초점을 준다 — Enter 가 무엇을 누르는지 눈으로도 보이게
   useEffect(() => { if (asking) okRef.current?.focus(); }, [asking]);
 
+  /* 닫히면 **열었던 자리로 손을 되돌린다.** 안 돌려주면 초점이 <body> 로 떨어져,
+     Esc 로 닫은 사람은 Tab 을 화면 처음부터 다시 눌러야 한다. */
+  const openerRef = useRef(null);
+  useEffect(() => {
+    if (open) { openerRef.current = document.activeElement; return; }
+    const back = openerRef.current;
+    openerRef.current = null;
+    if (back && document.contains(back) && typeof back.focus === 'function') {
+      setTimeout(() => back.focus({ preventScroll: true }), 30);
+    }
+  }, [open]);
+
   /* 열리면 **첫 칸에 손을 얹어 준다.** 서랍을 열 때마다 마우스로 첫 칸을 찍게 하면
      한 건 적는 동안 손이 키보드를 두 번 떠난다(경리 업무는 연달아 친다).
      `data-autofocus` 가 있으면 그 칸을, 없으면 본문의 첫 입력 칸을 잡는다.
