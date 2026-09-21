@@ -18,6 +18,8 @@
  */
 
 /** 날짜가 주문 기간 안에 드나. 종료일이 없으면(무기한) 시작일 이후면 참. */
+const { sideFilterSql } = require('./contractSide')
+
 function inTerm(date, start, end) {
   const d = String(date || '').slice(0, 10)
   if (!d) return false
@@ -54,14 +56,15 @@ const OUT_LIMIT_DAYS = 365
  */
 async function linkCandidates(db, kind) {
   const isIncome = kind === 'income'
-  const gubu = isIncome ? ["B", "C"] : ['A', 'E', 'C']
 
-  /* 후보 주문 — 이 종류(수주/발주)의 것만. 거래처 없는 주문은 붙일 근거가 없어 뺀다. */
+  /* 후보 주문 — 이 종류(수주/발주)의 것만. 거래처 없는 주문은 붙일 근거가 없어 뺀다.
+     ⚠ 방향은 **주문에 적힌 것**으로 본다. 거래처 구분으로 고르면 겸함('C') 거래처의
+        발주가 수주 후보로도 떠서, 입금을 발주에 붙일 수 있게 된다. */
   const [conRows] = await db.execute(`
-    SELECT c.id, c.name, c.vendor_id, c.start_date, c.end_date, c.status, c.amount,
+    SELECT c.id, c.name, c.vendor_id, c.start_date, c.end_date, c.status, c.amount, c.side,
            v.name AS vendor_name, v.gubu
       FROM contracts c JOIN vendors v ON v.id = c.vendor_id
-     WHERE v.gubu ${isIncome ? "IN ('B','C')" : "IN ('A','E','C')"}
+     WHERE 1=1 ${sideFilterSql(isIncome ? 'sales' : 'purchase')}
        AND (c.status IS NULL OR c.status <> '완료')
      ORDER BY c.start_date DESC
      LIMIT 500`)

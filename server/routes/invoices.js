@@ -18,6 +18,7 @@ const { lookalikeSettleTxns, dupSettleMessage } = require('../lib/settleTxn')
 const { detachInvoiceFromDocs } = require('../lib/docExec')
 const { removeUploadedFile } = require('../lib/uploads')
 const { normalizeTaxType, VAT_RATE } = require('../lib/vat')
+const { isPurchaseSide } = require('../lib/contractSide')
 const { recalcInvoiceStatus, paidAmountOf } = require('../lib/invoiceStatus')
 // 품목 라인 금액 규칙 — 프런트 src/lib/lineAmount.js 와 같은 규칙(중량 단가 포함)
 const { computeLineAmount, normBasis } = require('../lib/lineAmount')
@@ -956,7 +957,7 @@ router.post('/', async (req, res, next) => {
     let origin = { type: 'manual' }
     if (milestone_id) {
       const [[ms]] = await req.db.execute(
-        `SELECT m.id, m.contract_id, m.status, m.invoice_id, v.gubu
+        `SELECT m.id, m.contract_id, m.status, m.invoice_id, c.side, v.gubu
            FROM milestones m
            JOIN contracts c ON c.id = m.contract_id
            LEFT JOIN vendors v ON v.id = c.vendor_id
@@ -964,7 +965,7 @@ router.post('/', async (req, res, next) => {
       if (!ms) return res.status(404).json({ error: '고른 청구 일정을 찾을 수 없어요' })
       /* 방향이 맞아야 한다. 수주(매출) 회차를 매입 청구서로 닫으면 그 수주의 청구가
          조용히 사라진다 — 화면에서도 막지만(방향을 바꾸면 주문을 비운다) 여기서도 본다. */
-      const msKind = (ms.gubu === 'A' || ms.gubu === 'E') ? 'received' : 'issued'
+      const msKind = isPurchaseSide(ms) ? 'received' : 'issued'
       if (msKind !== kind) {
         return res.status(409).json({
           error: `이 청구 일정은 ${msKind === 'issued' ? '수주' : '발주'} 건이에요` })

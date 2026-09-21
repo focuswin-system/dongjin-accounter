@@ -761,6 +761,33 @@ try {
   fail(`청구서 생성 경로 검사 실패: ${e.message}`)
 }
 
+// ── [18] 권한 자원이 어느 API 에도 안 실렸는가 ──
+//
+// 화면(nav 잎) ↔ 자원(permissions.RESOURCES) 은 1:1 이고, 자원은 API 경로에 매여야
+// 그 화면이 **동작**한다. 매핑에서 빠지면 조용히 이렇게 된다:
+//   그 자원만 받은 사람에게 **화면은 보이는데 저장이 403** 이다.
+// 실제로 '카드 대금'·'내부 이체'가 /api/transactions 매핑에서 빠져 있었다 —
+// 두 화면 다 그 경로로 저장하는데, 그 권한만 받은 사람은 아무것도 할 수 없었다.
+// 화면을 새로 내면서 자원만 만들고 API 를 안 잇는 것이 흔한 실수라 여기서 막는다.
+console.log('\n[18] 권한 자원 ↔ API 매핑 — 화면만 열리고 저장은 막히는가')
+try {
+  const { API_RESOURCES } = require('../platform/apiPerms')
+  const { RESOURCES } = require('../platform/permissions')
+  const used = new Set()
+  for (const list of Object.values(API_RESOURCES)) for (const r of list) used.add(r)
+  const orphan = RESOURCES.filter(r => !used.has(r.id))
+  if (orphan.length) {
+    fail('어느 API 에도 안 실린 자원이 있습니다:\n      · ' +
+         orphan.map(r => `${r.id} (${r.label})`).join('\n      · ') +
+         '\n      → platform/apiPerms.js 의 API_RESOURCES 에서 그 화면이 쓰는 경로에 자원 id 를 더하세요.' +
+         '\n        안 더하면 그 권한만 받은 사람은 화면은 보이는데 저장이 403 입니다.')
+  } else {
+    ok(`권한 자원 ${RESOURCES.length}개 모두 API 에 매여 있음`)
+  }
+} catch (e) {
+  fail(`권한 자원 매핑 검사 실패: ${e.message}`)
+}
+
 if (failures === 0) {
   console.log(' ✅ 격리 검사 통과')
   console.log('━'.repeat(64) + '\n')

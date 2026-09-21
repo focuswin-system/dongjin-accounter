@@ -15,6 +15,7 @@ const { syncContractTemplates, stopContractTemplates, contractRepeatProgress } =
 const { createInvoice } = require('../lib/invoiceCreate')
 const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
 const { linkCandidates } = require('../lib/orderLink')
+const { isPurchaseSide, sideFromGubu, normalizeSide, sideFilterSql } = require('../lib/contractSide')
 
 const router = Router()
 
@@ -51,7 +52,9 @@ const costBucket = (categoryName, groupName) => {
 //   profit     매출 주문만. 매입 주문은 null
 // 정기 주문은 '이번 텀'(current_term_start 이후) 기준으로 봐야 갱신 후에도 진행률이 맞는다.
 const metrics = (r) => {
-  const isPurchase = r.gubu === 'A' || r.gubu === 'E'
+  /* ⚠ 방향은 **주문에 적힌 값**(contracts.side)으로 본다 — 거래처 구분으로 추정하면
+     'C'(매입·매출 겸함) 거래처의 매입 주문이 매출로 잡힌다. 규칙은 lib/contractSide.js. */
+  const isPurchase = isPurchaseSide(r)
   const in_done = Number(r.in_done || 0)
   const out     = Number(r.out_total || 0)     // 이 주문이 근거인 지출 = 매입주문의 지급액
   const cost    = Number(r.cost_total || 0)    // 이 매출주문에 귀속된 원가 (외주비 등)
@@ -198,8 +201,7 @@ router.get('/schedule/pending', async (req, res, next) => {
                LEFT JOIN vendors v ON c.vendor_id = v.id
                WHERE m.status = '예정' AND (m.invoice_id IS NULL OR m.invoice_id = '')
                  AND (c.status IS NULL OR c.status <> '완료')`
-    if (forKind === 'purchase')  sql += " AND v.gubu IN ('A','E','C')"
-    else if (forKind === 'sales') sql += " AND (v.gubu IS NULL OR v.gubu IN ('B','C'))"
+    sql += sideFilterSql(forKind)
     sql += ' ORDER BY m.due_date'
     const [rows] = await req.db.execute(sql)
 
@@ -347,8 +349,7 @@ router.get('/export.xlsx', async (req, res, next) => {
         COALESCE((SELECT COUNT(*) FROM contract_renewals WHERE contract_id=c.id AND result='갱신'),0) AS renew_count,
         COALESCE((SELECT COUNT(*) FROM repeat_templates WHERE contract_id=c.id AND active=1),0) AS recurring_active
       FROM contracts c LEFT JOIN vendors v ON c.vendor_id = v.id WHERE 1=1`
-    if (kind === 'purchase')   sql += " AND v.gubu IN ('A','E','C')"
-    else if (kind === 'sales') sql += " AND (v.gubu IS NULL OR v.gubu IN ('B','C'))"
+    sql += sideFilterSql(kind)
     sql += ' ORDER BY c.start_date DESC, c.created_at DESC'
     const [rows] = await req.db.execute(sql)
     const contracts = rows.map(metrics)
@@ -374,7 +375,7 @@ router.get('/renewals/upcoming', async (req, res, next) => {
     const forKind = req.query.for
     let sql = `SELECT c.id, c.name, c.contract_no, c.amount, c.unit_amount, c.billing_mode, c.billing_period,
                       c.term_mode, c.term_months, c.notice_days, c.start_date, c.end_date, c.status,
-                      c.vendor_id, v.name AS vendor_name, v.gubu,
+                      c.vendor_id, c.side, v.name AS vendor_name, v.gubu,
                       DATEDIFF(c.end_date, CURDATE()) AS days_left
                FROM contracts c LEFT JOIN vendors v ON c.vendor_id = v.id
                WHERE c.term_mode IN ('fixed','auto_renew') AND c.status = '진행중'
@@ -383,8 +384,7 @@ router.get('/renewals/upcoming', async (req, res, next) => {
                  AND (c.term_mode = 'auto_renew' OR c.billing_mode = 'recurring')
                  AND c.end_date IS NOT NULL AND c.end_date <> ''
                  AND DATEDIFF(c.end_date, CURDATE()) <= COALESCE(c.notice_days, 60)`
-    if (forKind === 'purchase')   sql += " AND v.gubu IN ('A','E','C')"
-    else if (forKind === 'sales') sql += " AND (v.gubu IS NULL OR v.gubu IN ('B','C'))"
+    sql += sideFilterSql(forKind)
     sql += ' ORDER BY c.end_date'
     const [rows] = await req.db.execute(sql)
     res.json(rows.map(r => ({ ...r, amount: Number(r.amount), unit_amount: r.unit_amount == null ? null : Number(r.unit_amount), days_left: Number(r.days_left) })))
@@ -452,9 +452,8 @@ router.post('/:id/renew', async (req, res, next) => {
       )
       /* 반복거래는 **금액만** 따라간다. 종료일은 반복거래에 없다 — 계약 기간이 목록 노출을 정한다. */
       if (recurring) {
-        const [[vg]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [c.vendor_id || ''])
         const r = await syncContractTemplates(conn,
-          { ...c, unit_amount: nextUnit, start_date: c.start_date }, !!(vg && (vg.gubu === 'A' || vg.gubu === 'E')))
+          { ...c, unit_amount: nextUnit, start_date: c.start_date }, isPurchaseSide(c))
         recurringExtended = r.created + r.updated   // 지웠던 계약이면 새로 만들어진다 — 0건으로 알리면 화면이 "연동 없음"이라 말한다
       }
     } else {
@@ -506,7 +505,7 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
   try {
     await conn.beginTransaction()
     const [[ms]] = await conn.execute(
-      `SELECT m.*, c.name AS contract_name, c.vendor_id, c.vat_mode, v.gubu
+      `SELECT m.*, c.name AS contract_name, c.vendor_id, c.vat_mode, c.side, v.gubu
        FROM milestones m JOIN contracts c ON m.contract_id = c.id
        LEFT JOIN vendors v ON c.vendor_id = v.id WHERE m.id = ? FOR UPDATE`,
       [req.params.milestoneId]
@@ -515,7 +514,7 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
     if (ms.status !== '예정' || (ms.invoice_id && ms.invoice_id !== '')) {
       await rollbackQuietly(conn); return res.status(409).json({ error: '이미 발행된 청구 일정이에요' })
     }
-    const isPurchase = ms.gubu === 'A' || ms.gubu === 'E'
+    const isPurchase = isPurchaseSide(ms)
     const kind = isPurchase ? 'received' : 'issued'
     const supply = Number(ms.amount) || 0
     // 면세 주문이면 부가세 0
@@ -652,7 +651,7 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
     const vat = vatOf(supply, c.vat_mode)
     const total = supply + vat
 
-    const isPurchase = c.gubu === 'A' || c.gubu === 'E'
+    const isPurchase = isPurchaseSide(c)
     const kind = isPurchase ? 'received' : 'issued'
     const today = kstToday()   // UTC면 KST 00~09시에 하루 전(연초엔 전년도 채번)으로 찍힌다
     const issuedAt = issued_at || today
@@ -751,7 +750,7 @@ router.get('/:id', async (req, res, next) => {
     // 지출 목록도 관점에 따라 다른 축을 본다.
     //   매입 주문 → 이 주문이 근거인 지급 (contract_id)
     //   매출 주문 → 이 주문에 귀속된 원가 (cost_contract_id) — 외주비는 외주 매입주문에 지급되지만 원가는 여기 붙는다
-    const isPurchaseC = c.vendor_gubu === 'A' || c.vendor_gubu === 'E'
+    const isPurchaseC = isPurchaseSide(c)
     const [expenseRows] = await req.db.execute(
       `SELECT t.*, v.name AS vendor_name, pc.name AS paid_contract_name, cat.group_name AS category_group
        FROM transactions t
@@ -884,7 +883,7 @@ router.get('/:id', async (req, res, next) => {
     /* 정기형 계약의 이행률 — 분모는 청구액이 아니라 '이번 계약기간에 도래했어야 할 돈'.
        청구를 안 한 달도 분모에 들어가야 빠진 달이 보인다. 기성형에는 이 개념이 없다. */
     const recur_progress = c.billing_mode === 'recurring'
-      ? await contractRepeatProgress(req.db, req.params.id, c.gubu === 'A' || c.gubu === 'E',
+      ? await contractRepeatProgress(req.db, req.params.id, isPurchaseSide(c),
           c.current_term_start || c.start_date, kstToday())
       : null
 
@@ -1085,23 +1084,29 @@ router.post('/', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
+    /* 방향(매출/매입)은 **만든 화면이 안다** — 수주 화면이면 sales, 발주 화면이면 purchase.
+       거래처로 추정하면 'C'(매입·매출 겸함) 거래처에서 매입 주문이 매출이 된다(lib/contractSide.js).
+       옛 화면이 안 보내면 그때 거래처로 정한다. */
+    let side = normalizeSide(req.body.side)
+    if (!side) {
+      let gubu = null
+      if (vendor_id) {
+        const [[v]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [vendor_id])
+        gubu = v ? v.gubu : null
+      }
+      side = sideFromGubu(gubu)
+    }
     await conn.execute(
       `INSERT INTO contracts (id, vendor_id, name, amount, start_date, end_date, status, order_no, project_no,
-                              cost_budget, file_url, file_name, contract_no,
+                              cost_budget, file_url, file_name, contract_no, side,
                               billing_mode, term_mode, unit_amount, billing_period, billing_day, initial_amount, term_months, notice_days, current_term_start, vat_mode)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [id, vendor_id||null, name, f.amount, start_date||null, f.end_date, status||'진행중', order_no||null, project_no||null,
-       cost_budget ? JSON.stringify(cost_budget) : null, file_url||null, file_name||null, contract_no||null,
+       cost_budget ? JSON.stringify(cost_budget) : null, file_url||null, file_name||null, contract_no||null, side,
        f.billing_mode, f.term_mode, f.unit_amount, f.billing_period, f.billing_day, f.initial_amount, f.term_months, f.notice_days, start_date||null, f.vat_mode]
     )
 
-    // 거래처 gubu로 매출/매입 판별 — 반복거래를 입금으로 만들지 출금으로 만들지 결정.
-    let gubu = null
-    if (vendor_id) {
-      const [[v]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [vendor_id])
-      gubu = v ? v.gubu : null
-    }
-    const isPurchase = gubu === 'A' || gubu === 'E'
+    const isPurchase = side === 'purchase'
 
     /* 주문을 등록하면 청구할 것이 자동으로 '발행 예정'에 뜨도록, 유형에 맞춰 일정/정기반복을 깔아준다.
      * (수동 설정을 깜빡해 청구가 누락되는 걸 막는다. 필요하면 청구 일정 탭·반복거래에서 수정)
@@ -1158,17 +1163,30 @@ router.put('/:id', async (req, res, next) => {
   try {
     await conn.beginTransaction()
     // 이번 텀 총액은 현재 텀 시작일 기준으로 다시 산출 (편집으로 단가·종료일이 바뀔 수 있음)
-    const [[cur]] = await conn.execute('SELECT current_term_start, start_date, billing_mode, vendor_id FROM contracts WHERE id = ? FOR UPDATE', [req.params.id])
+    const [[cur]] = await conn.execute('SELECT current_term_start, start_date, billing_mode, vendor_id, side FROM contracts WHERE id = ? FOR UPDATE', [req.params.id])
     if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     const termStart = cur.current_term_start || start_date || cur.start_date || null
     const f = model.normalize({ ...req.body, current_term_start: termStart })
+
+    /* 방향(매출/매입).
+     *   화면이 보낸 값 > 이미 적혀 있던 값 > 거래처로 추정(옛 규칙).
+     * ⚠ 거래처만 바꿨다고 방향을 따라 바꾸지 않는다. 적혀 있는 값이 사람의 답이고,
+     *   거래처는 그 뒤에 바뀔 수 있다(같은 일을 다른 업체에 맡기는 경우). */
+    let prevSide = normalizeSide(cur.side)
+    if (!prevSide) {
+      let pg = null
+      if (cur.vendor_id) [[pg]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [cur.vendor_id])
+      prevSide = sideFromGubu(pg?.gubu)
+    }
+    let newSide = normalizeSide(req.body.side) || prevSide
+    const prevPurchase = prevSide === 'purchase'
     const [result] = await conn.execute(
       `UPDATE contracts SET vendor_id=?, name=?, amount=?, start_date=?, end_date=?, status=?, order_no=?, project_no=?,
-                            file_url=?, file_name=?, contract_no=?,
+                            file_url=?, file_name=?, contract_no=?, side=?,
                             billing_mode=?, term_mode=?, unit_amount=?, billing_period=?, billing_day=?, initial_amount=?, term_months=?, notice_days=?, current_term_start=?, vat_mode=?
        WHERE id=?`,
       [vendor_id||null, name, f.amount, start_date||null, f.end_date, status||'진행중', order_no||null, project_no||null,
-       file_url||null, file_name||null, contract_no||null,
+       file_url||null, file_name||null, contract_no||null, newSide,
        f.billing_mode, f.term_mode, f.unit_amount, f.billing_period, f.billing_day, f.initial_amount, f.term_months, f.notice_days, termStart, f.vat_mode, req.params.id]
     )
     if (result.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
@@ -1248,24 +1266,17 @@ router.put('/:id', async (req, res, next) => {
           [randomUUID(), req.params.id, '초기 일시금', 0, f.initial_amount, start_date || null, '예정'])
       }
     }
-    const [[vg]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [vendor_id || ''])
-    const purchaseSide = !!(vg && (vg.gubu === 'A' || vg.gubu === 'E'))
+    const purchaseSide = newSide === 'purchase'
     /* 거래처를 매출처↔매입처로 바꾸면 계약의 방향이 뒤집힌다. 그대로 두면 sync 가 새 방향에서
        아무것도 못 찾아 **두 번째 반복거래를 만들고**, 옛 방향 것은 켜진 채 남아 달별 목록에
        유령 청구 줄이 선다(같은 계약이 입금·출금 양쪽으로). 옛 방향 것을 끈다 — 다만 그 방향에
        여러 벌이면 손대지 않는다(원가로 붙인 반복거래를 끄면 안 된다. sync 와 같은 규칙). */
     /* 거래처가 **비어 있던** 계약도 본다 — 빈 계약은 매출(in)로 서 있다가 매입처를 붙이면
        out 이 새로 생기고 옛 in 은 켜진 채 남아, 위에 적은 유령 줄이 그대로 난다. */
-    let sideFlipped = false
-    if (cur.vendor_id !== vendor_id) {
-      let prevSide = false
-      if (cur.vendor_id) {
-        const [[pg]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [cur.vendor_id])
-        prevSide = !!(pg && (pg.gubu === 'A' || pg.gubu === 'E'))
-      }
-      sideFlipped = prevSide !== purchaseSide
-      if (sideFlipped) await stopContractTemplates(conn, req.params.id, prevSide, { onlyIfSingle: true })
-    }
+    /* 이제 방향은 주문에 적혀 있으므로 **거래처가 그대로여도** 뒤집힐 수 있다(사람이 고친 경우).
+       거래처 변경만 보던 예전 조건으로는 그 경우를 놓쳐 유령 반복거래가 남는다. */
+    const sideFlipped = prevPurchase !== purchaseSide
+    if (sideFlipped) await stopContractTemplates(conn, req.params.id, prevPurchase, { onlyIfSingle: true })
     if (f.billing_mode === 'recurring' && Number(f.unit_amount) > 0) {
       /* 반복거래가 없으면 만들고, 있으면 금액·과세·주기·청구일을 계약 값으로 맞춘다(계약이 원본).
          꺼 둔 반복거래도 '있는' 것으로 친다 — 저장했다는 이유로 되살리지 않는다.

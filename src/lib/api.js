@@ -2380,7 +2380,7 @@ export const api = {
     renewals.forEach(r => {
       const auto = r.term_mode === 'auto_renew'
       const d = Number(r.days_left)
-      const to = (r.gubu === 'A' || r.gubu === 'E') ? 'contract_purchase' : 'contract_sales'
+      const to = (r.side ? r.side === 'purchase' : (r.gubu === 'A' || r.gubu === 'E')) ? 'contract_purchase' : 'contract_sales'
       if (d < 0) {
         items.push({ tone: 'neg', icon: 'Warn', to, sortKey: 0,
           title: `${r.vendor_name || '거래처'} 주문이 만료됐는데 ${auto ? '연장 입력이 안 됐습니다' : '갱신되지 않았습니다'}`,

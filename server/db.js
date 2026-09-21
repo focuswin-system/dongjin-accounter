@@ -2559,6 +2559,20 @@ async function initDb(conn) {
     await ensureColumn('transactions', 'approval_no', 'approval_no VARCHAR(40)')
     await ensureIndex('transactions', 'idx_txn_approval', 'approval_no')
 
+    /* 주문의 방향(매출/매입) — 예전엔 거래처 구분(gubu)으로 **추정**했다.
+       'C'(매입·매출 겸함) 거래처면 추정이 매출로 떨어져, 매입 주문이 매출로 집계되고
+       정기 주문은 없는 매출 청구서까지 만들었다. 판정 규칙은 lib/contractSide.js. */
+    await ensureColumn('contracts', 'side', 'side VARCHAR(10)')
+    await runOnce('2026-09_contract_side_from_gubu', async () => {
+      /* 옛 행을 그때의 규칙 그대로 채운다 — 값이 바뀌면 안 된다(지금 보이는 집계가 달라진다).
+         거래처가 없는 주문은 매출로 본다(옛 규칙의 else 가지와 같다). */
+      const [r] = await c.execute(`
+        UPDATE contracts ct LEFT JOIN vendors v ON v.id = ct.vendor_id
+           SET ct.side = CASE WHEN v.gubu IN ('A','E') THEN 'purchase' ELSE 'sales' END
+         WHERE ct.side IS NULL`)
+      if (r.affectedRows) console.log(`   · 주문 방향 채움: ${r.affectedRows}건`)
+    })
+
     /* 옮기기 — **같은 id** 로 넣어 invoices/transactions.recurring_id 를 그대로 template_id 로 쓴다.
      * 옛 표는 지우지 않는다(되돌릴 길). 코드만 안 쓴다. */
     await runOnce('2026-09_repeat_templates_from_recurring', async () => {

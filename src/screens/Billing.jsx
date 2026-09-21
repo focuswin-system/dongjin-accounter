@@ -1043,6 +1043,8 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     const r = await api.addContract({
       name, vendor_id: v.id, amount: supply,
       start_date: form.issuedAt || localDate(), status: '진행중',
+      // 매출 청구서에서 만들면 수주, 매입 청구서에서 만들면 발주 — 거래처로 추정하지 않는다
+      side: form.kind === 'received' ? 'purchase' : 'sales',
       /* ⚠ 일정은 깔지 않는다. 이 주문의 근거는 **지금 저장하려는 이 청구서**다.
          일정을 깔면 같은 금액이 '발행예정'에 하나 더 떠서, 이미 끊은 청구서를
          또 끊으라고 재촉한다. */

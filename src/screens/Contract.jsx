@@ -765,7 +765,9 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   const cost    = c.cost     || 0;   // 이 매출주문에 귀속된 원가 — 손익(profit)이 빼는 값
   const profit  = c.profit   || 0;
   // 매입 주문(gubu A/E)이면 '지급' 관점, 매출이면 '수금' 관점
-  const isPurchase = c.vendor_gubu === 'A' || c.vendor_gubu === 'E';
+  /* 서버가 주문에 적힌 방향으로 판정해 내려준다(is_purchase). 거래처 구분으로 다시
+     추정하면 겸함 거래처에서 서버와 화면이 서로 다른 답을 낸다. */
+  const isPurchase = c.is_purchase ?? (c.vendor_gubu === 'A' || c.vendor_gubu === 'E');
   const doneLabel   = isPurchase ? '지급' : '입금';
   const remainLabel = isPurchase ? '남은 미지급' : '남은 미수금';
   // 지표는 서버(metrics)가 계산한 값을 그대로 쓴다 — 화면마다 다시 계산하면 어긋난다.
@@ -1675,7 +1677,7 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
   const [accounts, setAccounts] = useState([]);
   const [accountId, setAccountId] = useState('');
 
-  const isPurchase = contract?.vendor_gubu === 'A' || contract?.vendor_gubu === 'E';
+  const isPurchase = contract?.is_purchase ?? (contract?.vendor_gubu === 'A' || contract?.vendor_gubu === 'E');
   const exempt = contract?.vat_mode === 'exempt' || contract?.vat_mode === 'zero';
 
   // 열릴 때 주문 품목표를 수량 0으로 깔아준다(단가는 주문 단가 스냅샷).
@@ -1835,8 +1837,13 @@ const NEW_CONTRACT_FORM = {
 };
 
 // 폼 → 서버 payload. 금액·기간의 해석은 서버(contract-model)가 하고, 화면은 입력값만 넘긴다.
-const contractPayload = (form, vendorId) => ({
+/* side — 이 주문이 파는 것(sales)인가 사는 것(purchase)인가.
+   **화면이 안다**: 수주 목록에서 만들면 sales, 발주 목록에서 만들면 purchase.
+   서버가 거래처 구분으로 추정하면 'C'(매입·매출 겸함) 거래처에서 매입 주문이
+   매출로 잡힌다(server/lib/contractSide.js). 모르면 안 보낸다 — 서버가 옛 규칙으로 정한다. */
+const contractPayload = (form, vendorId, side) => ({
   vendor_id:   vendorId || null,
+  ...(side ? { side } : {}),
   contract_no: form.contract_no?.trim() || null,
   order_no:    form.order_no?.trim()    || null,
   project_no:  form.project_no?.trim()  || null,
@@ -1926,7 +1933,8 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
     if (!recurring && !progress && !asNum(newForm.amount) && !lineSum) return toast.push("주문금액을 입력하거나 품목을 등록해주세요");
     if (newForm.term_mode !== 'open' && !newForm.end_date) return toast.push("주문 종료일을 입력해주세요 (무기한이면 종료 방식을 '무기한'으로)");
     const vendorObj = vendors.find(v => v.name === newForm.vendor);
-    const res = await api.addContract(contractPayload(newForm, vendorObj?.id));
+    const res = await api.addContract(contractPayload(newForm, vendorObj?.id,
+      kind === 'purchase' ? 'purchase' : kind === 'sales' ? 'sales' : undefined));
     if (res.ok) {
       // 폼에서 올린 계약서 파일들을 주문 첨부(contract_docs)로 연결
       for (const d of (newForm.docs || [])) await api.addContractDoc(res.id, { url: d.url, name: d.name, doc_type: '계약서', size: d.size || 0 });
@@ -1941,7 +1949,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
 
   // 거래처 gubu로 매출(B)·매입(A/E) 분류. gubu 미상은 매출로 간주(기존 데이터 호환).
   const vendorGubu = useMemo(() => Object.fromEntries(vendors.map(v => [v.id, v.gubu])), [vendors]);
-  const isPurchase = (r) => { const g = vendorGubu[r.vendor_id]; return g === "A" || g === "E"; };
+  const isPurchase = (r) => r.is_purchase ?? (() => { const g = vendorGubu[r.vendor_id]; return g === "A" || g === "E" })();
   // 남은 잔액은 서버(metrics)가 주문 성격에 맞게 계산해 준다.
   // 무기한 정기주문은 '남은 주문분'이 없으므로(null) 미수금을 대신 보여준다.
   const rowRemain = (r) => (r.remain != null ? r.remain : (r.ar_remain || 0));
