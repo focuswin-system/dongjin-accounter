@@ -18,7 +18,7 @@ const { normalizeStatus, ledgerError, defaultSettledStatus, amountError, isSettl
 const { monthItems } = require('../lib/repeat')
 const { removeUploadedFile } = require('../lib/uploads')
 const { vatFields } = require('../lib/vat')
-const { closedPeriodError, beforeBooksError } = require('../lib/closing')
+const { closedPeriodError, closedDocError, beforeBooksError } = require('../lib/closing')
 const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
 const { isFundAccount } = require('../lib/categoryAccount')
 const { transactionVoucher, withNames } = require('../lib/voucher')
@@ -996,12 +996,29 @@ router.delete('/docs/:docId', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/* 이체·카드대금 화면 권한**만** 가진 사람은 그 화면이 만든 줄만 지울 수 있다.
+ *
+ * 권한 게이트는 경로로 판정하는데 `DELETE /transactions/:id` 하나로 모든 거래를 지운다.
+ * 그 경로를 두 화면에 열어 주면 '카드값 갚기' 권한으로 **매출 입금도 지울 수 있게 된다.**
+ * 어느 거래인지는 여기서만 알 수 있으므로, 좁히는 것도 여기서 한다.
+ * 역할 미배정(perms 비어 있음)과 거래내역 삭제 권한이 있는 사람은 종전대로다.
+ */
+const transferOnlyGuard = (req, txn) => {
+  const perms = req.perms
+  if (!perms || perms.size === 0) return null
+  const wide = ['ledger', 'misc_pl', 'misc_income', 'voucher_book'].some(r => perms.has(`${r}:delete`))
+  if (wide) return null
+  if (txn?.transfer_id) return null
+  return '이 거래는 카드 대금·내부 이체 화면에서 만든 것이 아니에요. 거래내역에서 지워주세요.'
+}
+
 router.delete('/:id', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     // 마감된 달의 거래는 지울 수 없다(신고자료와 장부가 어긋난다)
-    const [[del]] = await conn.execute('SELECT date FROM transactions WHERE id = ?', [req.params.id])
+    const [[del]] = await conn.execute('SELECT date, transfer_id FROM transactions WHERE id = ?', [req.params.id])
+    { const ge = transferOnlyGuard(req, del); if (ge) { await rollbackQuietly(conn); return res.status(403).json({ error: ge }) } }
     if (del) {
       const closedErr = await closedPeriodError(conn, del.date)
       if (closedErr) { await rollbackQuietly(conn); return res.status(409).json({ error: closedErr }) }
@@ -1270,13 +1287,33 @@ router.post('/import/card', async (req, res, next) => {
       "SELECT name, account_code, vat, vat_deductible FROM categories WHERE id LIKE 'EXP-%'")
     const catByName = new Map(cats.map(c => [String(c.name || '').trim(), c]))
 
-    /* 마감·장부시작일은 **행마다 묻지 않는다** — 5,000행이면 왕복이 1만 번이다.
-       한 번 읽어 판정 함수를 만든다(규칙은 lib/closing.js 그대로). */
-    const monthsChecked = new Map()
+    /* 마감·장부시작일은 **행마다 묻지 않는다** — 5,000행이면 왕복이 1만 번이고
+       그동안 transactions 에 잠금이 걸린 채 트랜잭션이 열려 있다.
+       두 규칙은 눈금이 달라서 각각 캐시한다:
+         · 월 마감(closedDocError)  — **달** 단위. 같은 달이면 답이 같다.
+         · 장부 시작일(beforeBooksError) — **날** 단위. 같은 달 안에서도 앞뒤가 갈린다.
+       ⚠ 한 함수로 뭉쳐 달 단위로만 캐시하면 시작일이 낀 달에서 앞뒤가 서로의 답을 덮어쓴다.
+         (규칙 자체는 lib/closing.js 가 단일 소스다 — 여기선 부르는 횟수만 줄인다) */
+    const closedMonths = new Map()
     const closedOf = async (date) => {
       const ym = String(date || '').slice(0, 7)
-      if (!monthsChecked.has(ym)) monthsChecked.set(ym, await closedPeriodError(conn, date))
-      return monthsChecked.get(ym)
+      if (!closedMonths.has(ym)) closedMonths.set(ym, await closedDocError(conn, date))
+      return closedMonths.get(ym)
+    }
+    let booksErrOf = async () => null
+    {
+      // 시작일은 회사에 하나뿐이라 한 번만 읽고, 날짜 비교만 행마다 한다
+      const probe = await beforeBooksError(conn, '1000-01-01')
+      const m = probe && probe.match(/장부 시작일\((\d{4}-\d{2}-\d{2})\)/)
+      const start = m ? m[1] : null
+      if (start) {
+        booksErrOf = async (date) => {
+          const day = String(date || '').slice(0, 10)
+          return day && day < start
+            ? `${day}은 장부 시작일(${start}) 전이에요. 그 전 돈은 계좌 기초잔액·이월 잔액에 들어 있어요.`
+            : null
+        }
+      }
     }
 
     /* 가맹점 → 거래처. 이름이 겹치면 **붙이지 않는다** — 엉뚱한 거래처에 붙은 경비는
@@ -1291,7 +1328,7 @@ router.post('/import/card', async (req, res, next) => {
 
     await conn.beginTransaction()
     let inserted = 0, dupSkipped = 0, skippedFuture = 0, skippedClosed = 0,
-        skippedAmount = 0, skippedBeforeStart = 0, linkedVendors = 0
+        skippedAmount = 0, skippedBeforeStart = 0, skippedNoDate = 0, skippedCanceled = 0, linkedVendors = 0
     const createdVendors = []
     const dupRows = []   // 건너뛴 건이 무엇이었는지 — 건수만 주면 사람이 확인할 길이 없다
     for (const it of items) {
@@ -1302,14 +1339,17 @@ router.post('/import/card', async (req, res, next) => {
         await rollbackQuietly(conn)
         return res.status(400).json({ error: '카드 사용분은 덮어쓸 수 없어요. 기존 거래를 고치려면 거래내역에서 여세요.' })
       }
-      if (!it.date) { skippedAmount++; continue }     // 날짜 없는 행은 장부에 설 수 없다
+      if (!it.date) { skippedNoDate++; continue }     // 날짜 없는 행은 장부에 설 수 없다
+      /* 취소된 결제는 넣지 않는다 — 화면이 이미 거르지만 서버도 본다(체크카드와 같은 기준).
+         금액이 양수라 금액만 봐서는 못 가리므로, 화면이 판정해 보낸 값을 믿되 여기서도 막는다. */
+      if (it.canceled) { skippedCanceled++; continue }
       const approval = String(it.approval_no || '').trim()
       if (approval && seen.has(approval)) {
         dupSkipped++; dupRows.push(`${it.date} ${Number(it.amount || 0).toLocaleString('ko-KR')}원 ${it.merchant || ''}`.trim())
         continue
       }
       if (futureDateError(it.date)) { skippedFuture++; continue }
-      if (await beforeBooksError(conn, it.date)) { skippedBeforeStart++; continue }
+      if (await booksErrOf(it.date)) { skippedBeforeStart++; continue }
       if (await closedOf(it.date)) { skippedClosed++; continue }
       if (amountError(it.amount)) { skippedAmount++; continue }
 
@@ -1332,7 +1372,9 @@ router.post('/import/card', async (req, res, next) => {
       /* 비목 설정을 물려받는다 — 명세서가 준 값이 있으면 그쪽이 이긴다(카드사가 찍어 준 실제 세액). */
       const cat = catByName.get(String(it.category || '').trim())
       const accountCode = it.account_code || cat?.account_code || null
-      const taxType = it.tax_type || (cat && String(cat.vat) === '면세' ? '면세' : null)
+      /* 면세·영세 **둘 다** 본다. 영세를 빼 두면 vatFields 가 '과세'로 정규화해
+         없는 매입세액 1/11 이 생긴다 — 면세에서 고친 것과 똑같은 실패다(거래 폼도 둘 다 본다). */
+      const taxType = it.tax_type || (cat && ['면세', '영세'].includes(String(cat.vat)) ? String(cat.vat) : null)
       const deductible = it.vat_deductible != null ? it.vat_deductible
         : (cat && Number(cat.vat_deductible) === 0 ? 0 : 1)
       const vat = vatFields({
@@ -1357,7 +1399,7 @@ router.post('/import/card', async (req, res, next) => {
     }
     await conn.commit()
     res.json({ inserted, dupSkipped, skippedFuture, skippedClosed, skippedAmount, skippedBeforeStart,
-      linkedVendors, createdVendors, dupRows: dupRows.slice(0, 20) })
+      skippedNoDate, skippedCanceled, linkedVendors, createdVendors, dupRows: dupRows.slice(0, 20) })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
@@ -1491,3 +1533,6 @@ router.post('/link-contract', async (req, res, next) => {
 })
 
 module.exports = router
+/* 테스트에서 쓰려고 함께 내보낸다 — 라우터를 띄우지 않고 규칙만 검사한다.
+   (거부 케이스까지 테스트가 있어야 문지기다) */
+module.exports.transferOnlyGuard = transferOnlyGuard

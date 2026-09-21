@@ -346,7 +346,11 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
                 <div className="row gap-8" style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', background: 'var(--surface-2)', flexWrap: 'wrap', alignItems: 'center' }}>
                   <span className="text-xs fw-600 text-muted">중복 {counts.dup + counts.ambiguous + counts.filedup}건 일괄</span>
                   <button className="btn sm" onClick={() => applyBulk('skip')}>전체 건너뛰기</button>
-                  <button className="btn sm" onClick={() => applyBulk('overwrite')}>전체 덮어쓰기 <span className="text-muted2" style={{ fontSize: 11 }}>(후보 1곳)</span></button>
+                  {/* 덮어쓰기를 안 받는 업로드는 일괄 버튼도 없어야 한다 — 행별 드롭다운만 막고
+                      여기를 두면, 누르는 순간 서버가 400 으로 거절해 **신규 건까지 통째로** 안 들어간다. */}
+                  {!adapter.noUpdate && (
+                    <button className="btn sm" onClick={() => applyBulk('overwrite')}>전체 덮어쓰기 <span className="text-muted2" style={{ fontSize: 11 }}>(후보 1곳)</span></button>
+                  )}
                   <button className="btn sm" onClick={() => applyBulk('insert')}>전체 새로 등록</button>
                   {Object.keys(overrides).length > 0 && <button className="btn ghost sm ml-auto" onClick={() => setOverrides({})}>처리 초기화</button>}
                 </div>

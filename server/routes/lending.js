@@ -178,7 +178,10 @@ router.put('/:id', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     const b = req.body || {}
-    const termMonths = parseInt(b.term_months, 10) || 12
+    /* 0·빈 값이면 **기존 값 유지** — `|| 12` 로 두면 회차 0 인 옛 행이 저장할 때마다 12 로 바뀌어,
+       회수 이력이 있는 대여는 '회차가 달라졌다'로 걸려 메모만 고쳐도 409 가 난다(차입금에서 겪은 것). */
+    const termMonths = (b.term_months != null && b.term_months !== '' && parseInt(b.term_months, 10) >= 1)
+      ? parseInt(b.term_months, 10) : null
     await conn.beginTransaction()
     const [[cur]] = await conn.execute('SELECT * FROM lendings WHERE id = ? FOR UPDATE', [req.params.id])
     if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
@@ -204,7 +207,9 @@ router.put('/:id', async (req, res, next) => {
       if (Number(principal) !== Number(cur.principal)) changed.push('원금')
       if (String(startDate) !== String(cur.start_date)) changed.push('대여일')
       if (methodOf(b.method) !== cur.method) changed.push('상환 방식')
-      if (termMonths !== Number(cur.term_months)) changed.push('회차')
+      if (termMonths != null && termMonths !== Number(cur.term_months)) changed.push('회차')
+      // 이율도 회차 금액을 바꾼다 — 차입금 잠금 목록(LOAN_TERMS)에는 있는데 여기만 빠져 있었다
+      if (b.annual_rate != null && b.annual_rate !== '' && Number(b.annual_rate) !== Number(cur.annual_rate)) changed.push('이율')
       if (changed.length) {
         await rollbackQuietly(conn)
         return res.status(409).json({
@@ -226,14 +231,16 @@ router.put('/:id', async (req, res, next) => {
         await conn.execute(
           'UPDATE transactions SET amount = ?, date = ?, account_id = ?, account_code = ? WHERE id = ?',
           [principal, startDate, acct,
-           b.acct_code_principal || cur.acct_code_principal || principalCode(termMonths), cur.txn_id])
+           b.acct_code_principal || cur.acct_code_principal
+             || principalCode(termMonths ?? cur.term_months), cur.txn_id])
       }
     }
     const [r] = await conn.execute(
       `UPDATE lendings SET name=?, borrower=?, vendor_id=?, principal=?, annual_rate=?, method=?,
         term_months=?, start_date=?, pay_day=?, end_date=?, account_id=?, memo=? WHERE id=?`,
       [b.name || '대여금', b.borrower || '', b.vendor_id || null, principal,
-       Number(b.annual_rate) || 0, methodOf(b.method), termMonths, startDate,
+       b.annual_rate != null && b.annual_rate !== '' ? Number(b.annual_rate) : Number(cur.annual_rate),
+       methodOf(b.method), termMonths ?? Number(cur.term_months) ?? 12, startDate,
        parseInt(b.pay_day, 10) || 1, b.end_date || null, acct,
        b.memo || '', req.params.id])
     if (r.affectedRows === 0) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }

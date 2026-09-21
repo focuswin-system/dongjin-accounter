@@ -297,6 +297,8 @@ router.put('/loans/:id', async (req, res, next) => {
     if (want.method !== 'none' && !(want.term_months >= 1)) want.term_months = 12
     /* 등록에는 있고 **수정에는 없던** 검사다. 등록에서 막힌 값을 수정으로 넣으면 그대로 통과해
        회차 이자가 음수가 되거나(잔여 원금이 늘어난다) 터무니없는 상환표가 깔렸다. */
+    /* 실행일을 미래로 밀면 실행 입금 거래가 미래 날짜로 따라간다 — 등록·대여금과 같은 선으로 막는다. */
+    { const de = futureDateError(want.start_date); if (de) { await rollbackQuietly(conn); return res.status(400).json({ error: de }) } }
     if (!Number.isFinite(want.annual_rate) || want.annual_rate < 0) {
       await rollbackQuietly(conn); return res.status(400).json({ error: '연이율을 숫자로 입력해주세요' })
     }
@@ -321,6 +323,12 @@ router.put('/loans/:id', async (req, res, next) => {
       })
     }
 
+    /* 원금 계정과목 폴백은 **등록(POST)과 같은 규칙** — 1년 초과면 장기(2302).
+     * shortLoan 으로 고정하면 acct_code_principal 이 비어 있던 옛 장기차입이 한 번 저장에
+     * 단기로 덮이고 아래 실행 거래는 기간 기준을 쓰므로, 원장과 거래가 2201/2302 로 갈린다.
+     * (주석은 값 배열 **밖**에 둔다 — check:isolation 이 주석 안의 콤마까지 값으로 센다) */
+    const acctPrincipal = b.acct_code_principal || cur.acct_code_principal
+      || (want.term_months > 12 ? ACCT.longLoan : ACCT.shortLoan)
     const [result] = await conn.execute(
       `UPDATE loans SET name=?, lender=?, vendor_id=?, principal=?, annual_rate=?, method=?, term_months=?,
               start_date=?, pay_day=?, end_date=?, account_id=?, acct_code_principal=?, acct_code_interest=?,
@@ -332,7 +340,7 @@ router.put('/loans/:id', async (req, res, next) => {
           요청이 원장 계좌를 지웠다**(거래 쪽 계좌는 지켜 놓고 원본을 지우는 꼴이었다). */
        intOf(b.pay_day) || cur.pay_day || 1, b.end_date || null,
        b.account_id !== undefined ? (b.account_id || null) : (cur.account_id || null),
-       b.acct_code_principal || cur.acct_code_principal || ACCT.shortLoan,
+       acctPrincipal,
        b.acct_code_interest || cur.acct_code_interest || ACCT.interest,
        b.memo || null,
        /* status 를 안 보낸 요청(메모만 수정 등)이 완료된 대출을 조용히 되살렸다.
@@ -358,7 +366,7 @@ router.put('/loans/:id', async (req, res, next) => {
       const [[{ drawSum }]] = await conn.execute(
         'SELECT COALESCE(SUM(amount),0) AS drawSum FROM loan_draws WHERE loan_id = ?', [req.params.id])
       const initialAmt = Number(want.principal) - Number(drawSum)
-      const [[t]] = await conn.execute('SELECT date, amount, account_id FROM transactions WHERE id = ?', [cur.txn_id])
+      const [[t]] = await conn.execute('SELECT date, amount, account_id, account_code FROM transactions WHERE id = ?', [cur.txn_id])
       const nextAcct = b.account_id !== undefined ? (b.account_id || null) : (t?.account_id ?? null)
       /* 최초 실행액이 0 이하가 되는 값은 받지 않는다 — 그대로 두면 통장에 음수 입금이 남는다. */
       if (!(initialAmt > 0)) {
@@ -368,17 +376,15 @@ router.put('/loans/:id', async (req, res, next) => {
       }
       const moved = t && (String(t.date) !== String(want.start_date)
         || Number(t.amount) !== initialAmt
-        || String(t.account_id || '') !== String(nextAcct || ''))
+        || String(t.account_id || '') !== String(nextAcct || '')
+        /* 계정과목만 바꾼 저장도 따라가야 한다 — 안 보면 원장은 장기, 거래는 단기로 갈린다 */
+        || String(t.account_code || '') !== String(acctPrincipal || ''))
       if (moved) {
         const ce = await closedPeriodError(conn, t.date, want.start_date)
         if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
         await conn.execute(
           'UPDATE transactions SET amount = ?, date = ?, account_id = ?, account_code = ? WHERE id = ?',
-          [initialAmt, want.start_date, nextAcct,
-           /* 계정과목 폴백은 **등록(POST)과 같은 규칙**이어야 한다 — shortLoan 으로 고정하면
-              1년 초과 차입(장기 2302)이 단기(2201)로 덮여 재무상태표의 유동/비유동이 갈린다. */
-           b.acct_code_principal || cur.acct_code_principal
-             || (want.term_months > 12 ? ACCT.longLoan : ACCT.shortLoan), cur.txn_id])
+          [initialAmt, want.start_date, nextAcct, acctPrincipal, cur.txn_id])
       }
     }
     /* 스케줄을 바꾸는 값이 달라졌을 때만 예정 회차를 다시 깐다.

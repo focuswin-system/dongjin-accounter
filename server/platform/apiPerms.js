@@ -219,14 +219,26 @@ const ACTION_OVERRIDES = [
  *
  * 먼저 맞는 것이 이긴다. 여기 안 걸리면 접두사 목록(API_RESOURCES)을 쓴다.
  */
+const TXN_BASE = ['ledger', 'misc_pl', 'misc_income', 'voucher_book']
 const RESOURCE_OVERRIDES = [
-  // 내부 계좌 이체 + 카드 대금 지급 — 둘 다 이 한 경로로 두 줄짜리 이체를 만든다
-  { re: /^\/api\/transactions\/transfer$/, resources: ['ledger', 'transfer', 'card_payment'] },
-  // 카드 명세서 업로드 — 카드 대금 화면에서만 연다
-  { re: /^\/api\/transactions\/import\/card$/, resources: ['ledger', 'card_payment'] },
-  /* 이체로 만든 줄을 되돌리는 길. 어느 거래인지는 경로만으로 알 수 없으므로
-     삭제 권한을 넓히는 셈이지만, 그 화면의 '지급 취소'가 이 경로를 쓴다. */
-  { re: /^\/api\/transactions\/[^/]+$/, resources: ['ledger', 'misc_pl', 'misc_income', 'voucher_book', 'transfer', 'card_payment'], methods: ['DELETE'] },
+  /* 카드 대금·내부 이체 화면이 **실제로 쓰는 문**만 연다.
+   *
+   * ⚠ 저장 문만 열고 **읽기 문을 안 열면 화면이 통째로 빈다.** 두 화면 다 목록을 먼저
+   *   읽어야 "갚을 카드"·"이체 이력"을 그릴 수 있고, 명세서 업로드는 commit 전에
+   *   parse 를 먼저 부른다. 한 번은 저장만 403 이었고, 좁히면서 이번엔 읽기가 403 이었다.
+   *   두 번 다 "화면은 보이는데 안 된다"였다 — 문 목록을 화면 코드에서 세어 맞춘다. */
+  { re: /^\/api\/transactions(\/(summary|entry-hints|linkable|transfers\.xlsx))?$/,
+    resources: [...TXN_BASE, 'transfer', 'card_payment'], methods: ['GET'] },
+  { re: /^\/api\/transactions\/[^/]+$/, resources: [...TXN_BASE, 'transfer', 'card_payment'], methods: ['GET'] },
+  // 두 화면 다 이 한 경로로 두 줄짜리 이체를 만든다
+  { re: /^\/api\/transactions\/transfer$/, resources: [...TXN_BASE, 'transfer', 'card_payment'] },
+  // 카드 명세서 업로드 — 파싱과 등록이 한 쌍이다(파싱만 막으면 파일을 고르는 순간 멈춘다)
+  { re: /^\/api\/transactions\/import\/(parse|card)$/, resources: [...TXN_BASE, 'card_payment'] },
+  /* 이체·카드대금 줄을 되돌리는 길.
+     ⚠ 경로만으로는 그 거래가 이체인지 알 수 없다. 그래서 **라우트에서 한 번 더** 본다 —
+     transfer·card_payment 로만 들어온 사람은 이체로 만든 줄만 지울 수 있다
+     (routes/transactions.js DELETE 의 transferOnlyGuard). */
+  { re: /^\/api\/transactions\/[^/]+$/, resources: [...TXN_BASE, 'transfer', 'card_payment'], methods: ['DELETE'] },
 ]
 
 /** 요청 → 필요한 행위 */

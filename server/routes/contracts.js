@@ -134,7 +134,8 @@ const METRIC_COLS = `
   COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='expense' AND ${PAID}
             AND (c.current_term_start IS NULL OR date >= c.current_term_start)),0)  AS term_out,
   /* ⚠ 주문의 성격에 맞는 청구서만 센다.
-   *   매출 주문(gubu='B')에는 발행 청구서(issued), 매입 주문에는 수취 청구서(received).
+   *   매출 주문(side='sales')에는 발행 청구서(issued), 매입 주문에는 수취 청구서(received).
+   *   판정은 purchaseKindSql — 주문에 적힌 방향을 보고, 없으면 옛 규칙(거래처)으로 떨어진다.
    *   kind 필터가 없으면, 외주비 매입 청구서를 프로젝트(매출) 주문에 귀속시켰을 때
    *   그 금액이 매출 주문의 '청구액'에 더해지고 collected 는 그대로라
    *   **받을 돈이 아닌데 미수금으로 뜬다**(ar_remain = billed − collected).

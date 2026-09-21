@@ -41,7 +41,15 @@ export const cardImportAdapter = ({ cards = [], categories = [], defaultAccountI
     if (made.length) {
       notes.push(`거래처 ${made.length}곳이 새로 등록됐어요 (${made.slice(0, 3).join(', ')}${made.length > 3 ? ' 외' : ''})`)
     }
-    if (r.dupSkipped) notes.push(`승인번호가 이미 등록된 ${r.dupSkipped}건은 건너뛰었어요 — 같은 명세서를 두 번 올려도 쌓이지 않습니다`)
+    if (r.dupSkipped) {
+      /* 건수만 주면 "그 1건이 뭐였지"를 확인할 길이 없다 — 서버가 실어 준 행을 그대로 보여 준다. */
+      const list = (r.dupRows || []).slice(0, 5).join(' / ')
+      notes.push(`승인번호가 이미 등록된 ${r.dupSkipped}건은 건너뛰었어요`
+        + (list ? ` (${list}${r.dupSkipped > 5 ? ' 외' : ''})` : '')
+        + ' — 같은 명세서를 두 번 올려도 쌓이지 않습니다')
+    }
+    if (r.skippedNoDate) notes.push(`이용일자를 못 읽은 ${r.skippedNoDate}건은 건너뛰었어요`)
+    if (r.skippedCanceled) notes.push(`취소된 결제 ${r.skippedCanceled}건은 등록하지 않았어요`)
     if (r.skippedClosed) notes.push(`마감된 달의 ${r.skippedClosed}건은 등록하지 않았어요 — 필요하면 환경설정에서 마감을 해제하세요`)
     if (r.skippedBeforeStart) notes.push(`장부 시작일 전 ${r.skippedBeforeStart}건은 등록하지 않았어요 — 그 전 금액은 기초잔액에 이미 들어 있습니다`)
     if (r.skippedFuture) notes.push(`아직 오지 않은 날짜 ${r.skippedFuture}건은 등록하지 않았어요`)

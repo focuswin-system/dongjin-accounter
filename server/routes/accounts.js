@@ -240,6 +240,9 @@ router.get('/:id/adjustments', async (req, res, next) => {
  * 나중에 "이 5백만은 왜 조정됐나"에 답할 수 없으면 조정 자체가 장부를 흐린다. */
 router.post('/:id/adjustments', async (req, res, next) => {
   try {
+    /* 잔액을 볼 수 없는 사람은 잔액을 움직일 수도 없다 — 되돌리기(DELETE)와 같은 선.
+       한쪽만 막으면 "넣을 수는 있는데 지울 수는 없는" 더 나쁜 상태가 된다. */
+    if (!canSeeBalance(req)) return res.status(403).json({ error: '계좌 잔액을 볼 권한이 없어요' })
     const { amount, reason, date, created_by } = req.body
     const amt = parseInt(String(amount ?? '').replace(/[^0-9-]/g, ''), 10)
     if (!Number.isFinite(amt) || amt === 0) return res.status(400).json({ error: '조정 금액을 입력해주세요' })

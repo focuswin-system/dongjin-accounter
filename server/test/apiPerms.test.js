@@ -103,3 +103,49 @@ test('계좌 목록은 공용이되 잔액은 라우트가 따로 가린다', ()
   assert.equal(requiredPerm('GET', '/api/accounts'), null)
   assert.equal(requiredPerm('POST', '/api/accounts').action, 'create')
 })
+
+/* ── 경로별 자원 재정의(RESOURCE_OVERRIDES) ──
+ *
+ * 한 라우터가 여러 화면을 받으면 접두사 하나로는 못 가른다. '카드 대금'·'내부 이체'는
+ * /api/transactions 로 저장하는데, 이 두 자원을 접두사 목록에 더하면 그 권한 하나로
+ * 전 거래를 다루게 되고, 빼면 화면이 통째로 403 이 된다. 두 사고를 다 겪었으므로
+ * **열어야 하는 문과 열면 안 되는 문을 둘 다** 못박는다. */
+const hasRes = (need, r) => !!need && need.resources.includes(r)
+
+test('카드 대금·내부 이체 화면이 쓰는 문은 열려 있다', () => {
+  // 목록을 못 읽으면 '갚을 카드'도 '이체 이력'도 못 그린다 — 화면이 통째로 빈다
+  assert.ok(hasRes(requiredPerm('GET', '/api/transactions'), 'card_payment'))
+  assert.ok(hasRes(requiredPerm('GET', '/api/transactions'), 'transfer'))
+  // 이체 두 줄 만들기 — 두 화면의 주 동작
+  assert.ok(hasRes(requiredPerm('POST', '/api/transactions/transfer'), 'card_payment'))
+  assert.ok(hasRes(requiredPerm('POST', '/api/transactions/transfer'), 'transfer'))
+  // 명세서 업로드는 parse → card 가 한 쌍이다. 파싱만 막으면 파일 고르는 순간 멈춘다
+  assert.ok(hasRes(requiredPerm('POST', '/api/transactions/import/parse'), 'card_payment'))
+  assert.ok(hasRes(requiredPerm('POST', '/api/transactions/import/card'), 'card_payment'))
+  // 이체 내역 엑셀
+  assert.ok(hasRes(requiredPerm('GET', '/api/transactions/transfers.xlsx'), 'transfer'))
+})
+
+test('그 두 자원으로 거래를 새로 등록하거나 고칠 수는 없다', () => {
+  // 화면에 없는 동작까지 열리면 '카드값 갚기' 권한이 사실상 거래내역 전권이 된다
+  assert.ok(!hasRes(requiredPerm('POST', '/api/transactions'), 'card_payment'))
+  assert.ok(!hasRes(requiredPerm('POST', '/api/transactions'), 'transfer'))
+  assert.ok(!hasRes(requiredPerm('PUT', '/api/transactions/abc'), 'card_payment'))
+  assert.ok(!hasRes(requiredPerm('PATCH', '/api/transactions/abc/status'), 'card_payment'))
+  // 엑셀 일괄 등록(통장 거래)은 거래내역 몫이다
+  assert.ok(!hasRes(requiredPerm('POST', '/api/transactions/import/commit'), 'card_payment'))
+})
+
+test('삭제는 경로로 못 가르므로 라우트가 한 번 더 본다', () => {
+  // 경로만으로는 그 거래가 이체인지 알 수 없어 게이트는 열어 두고,
+  // routes/transactions.js 의 transferOnlyGuard 가 '이체로 만든 줄'로 좁힌다.
+  assert.ok(hasRes(requiredPerm('DELETE', '/api/transactions/abc'), 'card_payment'))
+  assert.equal(requiredPerm('DELETE', '/api/transactions/abc').action, 'delete')
+})
+
+test('일괄 등록은 create 가 아니라 upload 다 — 카드 경로도 마찬가지', () => {
+  // upload 를 일부러 안 준 역할이 API 를 직접 쳐서 게이트를 우회하면 안 된다
+  assert.equal(requiredPerm('POST', '/api/transactions/import/commit').action, 'upload')
+  assert.equal(requiredPerm('POST', '/api/transactions/import/card').action, 'upload')
+  assert.equal(requiredPerm('POST', '/api/transactions/import/parse').action, 'upload')
+})

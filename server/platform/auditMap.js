@@ -192,9 +192,10 @@ const AUDIT_RULES = [
   /* 카드 명세서 업로드 — 한 번에 수백 건의 지출을 만들고 거래처까지 새로 만든다.
      다른 일괄 등록은 다 남는데 이 경로만 빠져 있었다. */
   { m: 'POST',   re: /^\/api\/transactions\/import\/card$/,             res: 'transaction', action: 'import' },
-  /* target 은 **조정 id** 로 둔다(계좌 id 가 아니라) — 행이 지워진 뒤에는 감사기록이
-     유일한 흔적이라, 어느 조정이었는지 못 남기면 "그 5백만은 뭐였나"에 답할 수 없다. */
-  { m: 'DELETE', re: /^\/api\/accounts\/([^/]+)\/adjustments\/([^/]+)$/, res: 'account', action: 'adjust_delete', target: 2 },
+  /* target 은 **계좌 id**. 조정 id 를 남겨 봐야 그 행은 방금 지워져 어디서도 조회되지 않는다 —
+     이 파일의 규칙은 "ID 를 남기고 무엇이었는지는 그 화면에서 찾아본다"이므로, 찾을 수 있는
+     쪽을 남긴다. 어느 계좌에서 언제 누가 지웠나까지는 남고, 금액은 정책상 안 남긴다. */
+  { m: 'DELETE', re: /^\/api\/accounts\/([^/]+)\/adjustments\/([^/]+)$/, res: 'account', action: 'adjust_delete', target: 1 },
 
   /* ── 차입금·투자 ── 상환·회수는 거래 2건(원금+이자)을 만든다.
      ⚠ `/repay$` 규칙은 있었는데 `-adhoc` 이 정규식에 안 걸려 수시 상환만 무기록이었다. */
