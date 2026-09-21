@@ -1155,9 +1155,13 @@ router.put('/:id', async (req, res, next) => {
        대신 금액이 바뀌면 붙어 있는 **정산 거래의 날짜**로 돈 잠금을 본다 — 돈이 움직이는 건 그쪽이다. */
     let ce = await closedDocError(conn, cur.issued_at, issued_at)
     if (!ce && Number(total_amount) !== Number(cur.total_amount)) {
+      /* 표본은 **이 저장이 건드리는 거래 전부**다 — 정산으로 붙은 것(invoice_matches)과
+         청구서에 직접 달린 것(transactions.invoice_id) 둘 다. 한쪽만 보면 잠긴 달의 거래를
+         고치는 길이 남는다. */
       const [ms] = await conn.execute(
-        'SELECT t.date FROM invoice_matches m JOIN transactions t ON t.id = m.txn_id WHERE m.invoice_id = ?',
-        [req.params.id])
+        `SELECT t.date FROM invoice_matches m JOIN transactions t ON t.id = m.txn_id WHERE m.invoice_id = ?
+          UNION SELECT date FROM transactions WHERE invoice_id = ?`,
+        [req.params.id, req.params.id])
       if (ms.length) ce = await closedPeriodError(conn, ...ms.map(m => m.date))
     }
     if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }

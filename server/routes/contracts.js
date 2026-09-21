@@ -1254,10 +1254,15 @@ router.put('/:id', async (req, res, next) => {
        아무것도 못 찾아 **두 번째 반복거래를 만들고**, 옛 방향 것은 켜진 채 남아 달별 목록에
        유령 청구 줄이 선다(같은 계약이 입금·출금 양쪽으로). 옛 방향 것을 끈다 — 다만 그 방향에
        여러 벌이면 손대지 않는다(원가로 붙인 반복거래를 끄면 안 된다. sync 와 같은 규칙). */
+    /* 거래처가 **비어 있던** 계약도 본다 — 빈 계약은 매출(in)로 서 있다가 매입처를 붙이면
+       out 이 새로 생기고 옛 in 은 켜진 채 남아, 위에 적은 유령 줄이 그대로 난다. */
     let sideFlipped = false
-    if (cur.vendor_id && cur.vendor_id !== vendor_id) {
-      const [[pg]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [cur.vendor_id])
-      const prevSide = !!(pg && (pg.gubu === 'A' || pg.gubu === 'E'))
+    if (cur.vendor_id !== vendor_id) {
+      let prevSide = false
+      if (cur.vendor_id) {
+        const [[pg]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [cur.vendor_id])
+        prevSide = !!(pg && (pg.gubu === 'A' || pg.gubu === 'E'))
+      }
       sideFlipped = prevSide !== purchaseSide
       if (sideFlipped) await stopContractTemplates(conn, req.params.id, prevSide, { onlyIfSingle: true })
     }

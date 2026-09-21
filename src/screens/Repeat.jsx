@@ -464,8 +464,10 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
                   return { ...base, ...p, direction: v, contract_id: null,
                     creates: base.creates, pay_term: base.pay_term, account_id: base.account_id,
                     /* 부가세 방식도 되돌린다 — 출금은 '포함', 입금은 '별도'가 기본이라, 안 되돌리면
-                       적어 둔 100만이 공급가에서 합계로(또는 그 반대로) 뜻만 조용히 바뀐다. */
-                    vat_mode: base.vat_mode }
+                       적어 둔 100만이 공급가에서 합계로(또는 그 반대로) 뜻만 조용히 바뀐다.
+                       다만 면세·영세는 방향과 무관한 **사실**이라 그대로 둔다(되돌리면 세액 0이
+                       10%로 바뀐다 — 막으려던 바로 그 일이 면세 사용자에게 난다). */
+                    vat_mode: (p.vat_mode === 'none' || p.vat_mode === 'zero') ? p.vat_mode : base.vat_mode }
                 })}>{l}</button>
             ))}
           </div>
