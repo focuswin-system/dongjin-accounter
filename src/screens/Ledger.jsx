@@ -310,54 +310,55 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
    *
    * 반복되는 돈은 반복거래에서, 세금계산서가 오간 돈은 세금계산서 화면에서 처리하는 게 낫다 —
    * 거래 폼이 거래처·금액을 보고 그 둘을 알려준다(entry-hints). */
-  /* ── 두 걸음으로 고른다(계획서 '목표 구조': **손에 든 것으로 고른다**) ──
-   *   1단계  입금 / 출금 / 대체      — 돈이 어느 쪽으로 움직였나
-   *   2단계  무엇에서 가져오나        — 입금전표(직접) · 세금계산서 · 반복거래 · (출금)결의서
-   * 2단계가 없으면 "세금계산서가 있는데 여기서 적어도 되나"를 매번 사용자가 판단하게 된다. */
+  /* ── 입력수단으로 고른다 ──
+   * 첫 물음은 **어떻게 적을까**다(사용자 정의: 입력수단 1 = 전표입력).
+   *   1 전표입력     입금전표 / 출금전표 / 대체전표 — 전표 양식 그대로. 입금·출금전표는 반대편(통장)이 고정이다
+   *   2 간편 입력    거래처·비목·금액 — 계정과목을 안 외워도 되는 길(청구서 연결도 여기서)
+   *   3~5 가져오기   세금계산서 · 지급결의서 · 반복거래 — 이미 장부에 있는 것에서 끌어온다
+   * 방향(입금/출금)을 먼저 묻지 않는다 — 전표입력은 전표 종류가 곧 방향이고,
+   * 가져오기는 서류가 방향을 이미 안다. 두 번 묻지 않기 위해서다. */
   const entryOptions = [
-    openIncome && { id: 'income', icon: Icon.In, label: '입금', desc: '통장으로 들어온 돈',
-      effect: '입금전표로 바로 적거나, 세금계산서·반복거래에서 가져옵니다.' },
-    openExpense && { id: 'expense', icon: Icon.Out, label: '출금', desc: '통장에서 나간 돈',
-      effect: '출금전표로 바로 적거나, 결의서·세금계산서·반복거래에서 가져옵니다.' },
-    canJournal && { id: 'journal', icon: Icon.Sign, label: '대체', desc: '돈이 안 움직인 분개(감가상각·정정 등)',
-      effect: '차변·대변을 직접 적어요. 입금·출금 합계에는 들지 않아요.' },
-  ].filter(Boolean);
-
-  /* 2단계 목록 — 방향마다 손에 드는 것이 다르다(출금에는 결의서가 하나 더 있다) */
-  const sourceOptions = (kind) => [
-    { id: 'form', icon: kind === 'income' ? Icon.In : Icon.Out,
-      label: kind === 'income' ? '입금전표 — 바로 적기' : '출금전표 — 바로 적기',
-      desc: '거래처·비목·금액을 적어요',
-      effect: '거래처를 고르면 그 거래처의 남은 청구서도 함께 보여줘요.' },
-    { id: 'invoice', icon: Icon.Receipt,
-      label: kind === 'income' ? '세금계산서(발행)에서' : '세금계산서(수취)에서',
-      desc: kind === 'income' ? '못 받은 청구서를 골라 입금 처리' : '안 낸 청구서를 골라 지급 처리',
+    canJournal && { id: 'voucher', icon: Icon.Book, label: '전표입력',
+      desc: '입금전표 · 출금전표 · 대체전표',
+      effect: '계정과목으로 적어요. 입금·출금전표는 반대편이 통장으로 고정됩니다.' },
+    (openIncome || openExpense) && { id: 'simple', icon: Icon.Wallet, label: '간편 입력',
+      desc: '거래처 · 비목 · 금액',
+      effect: '계정과목을 몰라도 됩니다. 거래처를 고르면 그 거래처의 남은 청구서도 보여줘요.' },
+    { id: 'invoice', icon: Icon.Receipt, label: '세금계산서에서',
+      desc: '발행·수취한 청구서를 골라 입금·지급 처리',
       effect: '미수금·미지급금이 함께 정리돼요.' },
-    kind === 'expense' && { id: 'doc', icon: Icon.Sign, label: '지급결의서에서',
+    { id: 'doc', icon: Icon.Sign, label: '지급결의서에서',
       desc: '승인된 결의서를 골라 지급 처리',
       effect: '결의서가 완료로 바뀌고 거래가 만들어져요.' },
     { id: 'repeat', icon: Icon.Clock, label: '반복거래에서',
       desc: '매달 같은 돈은 여기서 가져와요',
       effect: '그 달이 ‘만듦’으로 남아 다음에 또 적지 않아요.' },
-    canJournal && { id: 'journal', icon: Icon.Book, label: '차변·대변으로 적기',
-      desc: kind === 'income' ? '입금전표를 계정과목으로' : '출금전표를 계정과목으로',
-      effect: '통장은 자동으로 한쪽에 서고, 상대 계정만 적어요.' },
   ].filter(Boolean);
+
+  /* 간편 입력·세금계산서만 방향을 한 번 더 묻는다(전표입력은 전표 종류가 방향이다) */
+  const sourceOptions = (id) => id === 'simple'
+    ? [
+        { id: 'income', icon: Icon.In, label: '입금', desc: '통장으로 들어온 돈' },
+        { id: 'expense', icon: Icon.Out, label: '출금', desc: '통장에서 나간 돈' },
+      ]
+    : [
+        { id: 'income', icon: Icon.In, label: '발행 (매출)', desc: '못 받은 청구서를 골라 입금 처리' },
+        { id: 'expense', icon: Icon.Out, label: '수취 (매입)', desc: '안 낸 청구서를 골라 지급 처리' },
+      ];
 
   const pickEntry = (id) => {
     setEntryPick(false);
-    if (id === 'journal') { setJOpen(true); return; }
-    setSrcPick(id);   // 'income' | 'expense' — 두 번째 물음으로
-  };
-
-  const pickSource = (id) => {
-    const kind = srcPick;
-    setSrcPick(null);
-    if (id === 'form') { (kind === 'income' ? openIncome : openExpense)?.(); return; }
-    if (id === 'journal') { setJOpen(true); return; }
-    if (id === 'invoice') { goRoute?.(kind === 'income' ? 'billing_issued' : 'billing_received'); return; }
+    if (id === 'voucher') { setJOpen(true); return; }
     if (id === 'doc') { goRoute?.('payment_run'); return; }
     if (id === 'repeat') { goRoute?.('recurring_invoice'); return; }
+    setSrcPick(id);   // 'simple' | 'invoice' — 방향만 한 번 더
+  };
+
+  const pickSource = (kind) => {
+    const how = srcPick;
+    setSrcPick(null);
+    if (how === 'simple') { (kind === 'income' ? openIncome : openExpense)?.(); return; }
+    goRoute?.(kind === 'income' ? 'billing_issued' : 'billing_received');
   };
 
   const titleMap = { all: "거래내역", income: "거래내역 · 입금", expense: "거래내역 · 출금", journal: "거래내역 · 대체", misc: "거래내역 · 주문 없는 돈" };
@@ -565,16 +566,15 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
       {/* 1단계 — 돈이 어느 쪽으로 움직였나 */}
       <SourceChooser
         open={entryPick} onClose={() => setEntryPick(false)}
-        title="무엇을 적을까요?" sub="통장에서 돈이 어느 쪽으로 움직였나요"
-        label="전표 종류" options={entryOptions} onPick={pickEntry}/>
+        title="어떻게 적을까요?" sub="손에 든 것으로 고르세요"
+        label="입력 방법" options={entryOptions} onPick={pickEntry}/>
 
       {/* 2단계 — 손에 든 것 */}
       <SourceChooser
         open={!!srcPick} onClose={() => setSrcPick(null)}
-        title={srcPick === 'income' ? '입금 — 무엇에서 적을까요?' : '출금 — 무엇에서 적을까요?'}
-        sub="손에 든 것으로 고르세요"
-        label="입력 방법" options={srcPick ? sourceOptions(srcPick) : []} onPick={pickSource}
-        footer="세금계산서·결의서에서 가져오면 그 서류의 미수금·미지급금이 함께 정리돼요."/>
+        title={srcPick === 'simple' ? '들어온 돈인가요, 나간 돈인가요?' : '어느 쪽 세금계산서인가요?'}
+        sub={srcPick === 'simple' ? '고르면 그 양식이 열려요' : '고르면 그 목록으로 갑니다'}
+        label="방향" options={srcPick ? sourceOptions(srcPick) : []} onPick={pickSource}/>
 
       <JournalEntryDrawer open={jOpen} onClose={() => setJOpen(false)}
         onSaved={({ source, id }) => {
