@@ -15,6 +15,7 @@ import { bizTypeOptions, bizItemOptions } from '../lib/bizTypes'
 import { CoRow, BizSection, ContactSection, FiscalSection, emptyCompanyForm, companyFormOf, focusCompanyField } from '../lib/components/CompanyFields'
 import { CarryoverDrawer } from '../lib/components/CarryoverDrawer'
 import { api, minuteOf } from '../lib/api'
+import { josa } from '../lib/josa'
 
 /* ⚠ 한 건을 고치는 버튼은 **'수정'** 이다.
  * 예전엔 이 파일 안에서 표마다 '수정'과 '편집'이 갈렸다. 그런데 눌러서 열린 드로어
@@ -646,7 +647,7 @@ export const RefMasterPanel = ({ cfg, page = false, embedded = false }) => {
           ]}
           rows={filtered}
           rowKey={r => r.id}
-          empty={`등록된 ${cfg.label}이(가) 없어요. 위에서 추가하세요.`}
+          empty={`등록된 ${josa(cfg.label, "이")} 없어요. 위에서 추가하세요.`}
         />
       </div>
 

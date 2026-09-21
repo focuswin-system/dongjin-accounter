@@ -38,6 +38,7 @@ import { CashReportScreen, DailyTrialScreen } from './screens/CashReport'
 import { BillingScreen } from './screens/Billing'
 import { TaxVatScreen, OtherTaxScreen } from './screens/Tax'
 import { MgmtDashScreen } from './screens/Mgmt'
+import { josa } from './lib/josa'
 import { MgmtAskScreen } from './screens/MgmtAsk'
 import { PortalScreen } from './screens/Portal'
 import { QuickDock } from './lib/components/QuickDock'
@@ -316,7 +317,7 @@ function NoPermission({ title }) {
       <div style={{ width: 48, height: 48, borderRadius: 14, background: "var(--surface-3)", color: "var(--muted-2)", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
         <Icon.Warn size={24}/>
       </div>
-      <div className="fw-700" style={{ fontSize: 16, marginBottom: 8 }}>{title || "이 화면"}을(를) 볼 권한이 없어요</div>
+      <div className="fw-700" style={{ fontSize: 16, marginBottom: 8 }}>{josa(title || "이 화면", "을")} 볼 권한이 없어요</div>
       <div className="text-sm text-muted" style={{ lineHeight: 1.6 }}>
         회사 관리자에게 권한을 요청하세요.<br/>환경설정 › 사용자에서 역할을 배정할 수 있어요.
       </div>
@@ -843,7 +844,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
                       if (it.disabled) {
                         return (
                           <div key={it.id} className="nav-item nav-sub disabled" title="준비 중인 메뉴예요"
-                            onClick={() => toast.push(`${it.label}은(는) 준비 중이에요`)}>
+                            onClick={() => toast.push(`${josa(it.label, "은")} 준비 중이에요`)}>
                             <Lic className="nav-ico"/>
                             <span>{it.label}</span>
                             <span className="nav-count" style={{ background: "var(--surface-3)", color: "var(--muted-2)" }}>준비중</span>

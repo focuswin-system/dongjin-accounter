@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Icon, useToast, useConfirm, Drawer } from '../ui'
 import { api } from '../api'
 import { DrawerHead } from './Drawer'
+import { josa } from '../josa'
 
 /**
  * 양식 신청함 — 보고서 관리·문서 관리 아래에 함께 서는 부품.
@@ -135,7 +136,7 @@ const RequestDrawer = ({ open, kind, word, onClose, onDone }) => {
     e.target.value = ''                       // 같은 파일을 다시 고를 수 있게
     for (const f of list) {
       const up = await api.uploadFile(f)
-      if (!up?.url) { toast.push(`${f.name} 을(를) 올리지 못했어요`, { tone: 'warn' }); continue }
+      if (!up?.url) { toast.push(`${josa(f.name, "을")} 올리지 못했어요`, { tone: 'warn' }); continue }
       setFiles(prev => [...prev, { url: up.url, name: up.originalName || f.name, size: up.size || f.size }])
     }
   }

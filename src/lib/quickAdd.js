@@ -12,6 +12,7 @@
  *   기준정보 화면에서 보완한다 — 입력을 막지 않는 것이 우선이다.
  */
 import { api } from './api'
+import { josa } from './josa'
 
 /**
  * 비목을 등록하고 목록을 새로고침한다.
@@ -44,11 +45,11 @@ export async function quickAddRefItem(type, name, { setList, toast, label = '항
   if (!nm) return null
   const res = await api.addRefItem({ type, name: nm })
   if (!res.ok) {
-    toast?.push(res.error || `${label}을(를) 등록하지 못했어요`, { tone: 'warn' })
+    toast?.push(res.error || `${josa(label, "을")} 등록하지 못했어요`, { tone: 'warn' })
     return null
   }
   setList(await api.getRefItems(type))
-  toast?.push(`"${nm}" ${label}을(를) 등록했어요`)
+  toast?.push(`"${nm}" ${josa(label, "을")} 등록했어요`)
   return nm
 }
 
@@ -66,10 +67,10 @@ export async function quickAddRefItemWithId(type, q, { setList, toast, label = '
   if (!nm) return null
   const res = await api.addRefItem({ type, name: nm })
   if (!res.ok) {
-    toast?.push(res.error || `${label}을(를) 등록하지 못했어요`, { tone: 'warn' })
+    toast?.push(res.error || `${josa(label, "을")} 등록하지 못했어요`, { tone: 'warn' })
     return null
   }
   setList?.(await api.getRefItems(type))
-  toast?.push(`"${nm}" ${label}을(를) 등록했어요`)
+  toast?.push(`"${nm}" ${josa(label, "을")} 등록했어요`)
   return { id: res.id || '', name: nm }
 }

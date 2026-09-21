@@ -786,6 +786,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
 
 // ── 청구서 발행 Drawer ────────────────────────────────────────────
 const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSave, editInvoice }) => {
+  const { can: canGo } = usePerms()
   const [form, setForm] = useState({
     kind: defaultKind, vendor: "", contract: "", supplyAmount: "", vatAmount: "", issuedAt: "", dueAt: "", memo: "",
     accountId: "",
@@ -842,7 +843,9 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
         return { ...f, accountId: pick?.id || "" }
       })
     })
-    api.getContracts().then(setContracts)
+    /* 곁다리 호출도 권한을 본다 — 없으면 403 이 전역 알림('권한이 없어요')으로 떠서,
+       좁은 역할은 화면을 열 때마다 영문 모를 알림을 본다(실측: 세금계산서 화면에서 4개). */
+    if (canGo('contract_sales') || canGo('contract_purchase') || canGo('contract')) api.getContracts().then(setContracts)
     api.getRefItems('item').then(setItemMaster)   // 품목 내역에서 고를 기준정보
   }, [])
 
@@ -1749,12 +1752,16 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
    *   매달 오가는 돈 → **반복거래 화면**이 맡는다(달을 골라 만든다)
    *   마일스톤       → 여기. 계약이 일정을 만들고, 회계는 도래한 것만 받는다 */
   const load = async () => {
+    /* 청구 일정·거래내역은 **볼 권한이 있을 때만** 부른다 — 없는 역할에는 빈 값으로 둔다.
+       403 하나가 전역 알림을 띄우므로, 안 쓰는 자료를 넉넉히 부르면 그게 그대로 잔소리가 된다. */
+    const mayContract = canGo(isIssued ? 'contract_sales' : 'contract_purchase') || canGo('contract')
+    const mayLedger = canGo('ledger')
     const [rows, rec, pay, sched, txns] = await Promise.all([
       api.getInvoices(),
       api.getReceivablesSummary(),
       api.getPayablesSummary(),
-      api.getPendingSchedules(isIssued ? "sales" : "purchase"),
-      api.getTransactions({ kind: isIssued ? 'income' : 'expense' }),
+      mayContract ? api.getPendingSchedules(isIssued ? "sales" : "purchase") : Promise.resolve([]),
+      mayLedger ? api.getTransactions({ kind: isIssued ? 'income' : 'expense' }) : Promise.resolve([]),
     ])
     /* 입금내역 — **실제로 오간 돈** 전부. 청구서에 붙은 것도 안 붙은 것도 함께 온다.
      *

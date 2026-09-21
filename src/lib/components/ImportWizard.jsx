@@ -1,5 +1,6 @@
 import { useState, useRef, useMemo, useEffect, Fragment } from 'react'
 import { Icon, Spacer, Combobox, Popover, useToast } from '../ui'
+import { josa, hasBatchim } from '../josa'
 
 // ── 엑셀·CSV 일괄 업로드 공용 마법사 ──────────────────────────────
 // 파일 업로드 → 컬럼 매핑 → 중복 판정 → 일괄 등록. 화면 흐름은 모든 임포트가 같고
@@ -153,7 +154,7 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
         id: a.startsWith('update:') ? a.slice(7) : undefined,
         ...r.data,
       }))
-    if (!items.length) return toast.push(`등록·갱신할 ${adapter.label}이(가) 없어요`)
+    if (!items.length) return toast.push(`등록·갱신할 ${josa(adapter.label, "이")} 없어요`)
     setBusy(true)
     const res = await adapter.commit(items, opts)
     setBusy(false)
@@ -216,7 +217,7 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
       {result ? (
         <div className="card card-pad fade-up" style={{ textAlign: 'center', padding: '48px 24px', maxWidth: 520, margin: '0 auto' }}>
           <div style={{ width: 48, height: 48, borderRadius: 14, background: 'var(--pos-soft)', color: 'var(--pos)', display: 'grid', placeItems: 'center', margin: '0 auto 16px' }}><Icon.Check size={24}/></div>
-          <div className="fw-700" style={{ fontSize: 16, marginBottom: 8 }}>{adapter.label}이(가) 반영됐어요</div>
+          <div className="fw-700" style={{ fontSize: 16, marginBottom: 8 }}>{josa(adapter.label, "이")} 반영됐어요</div>
           <div className="text-sm text-muted" style={{ marginBottom: result.note ? 8 : 20 }}>신규 등록 {result.inserted}건 · 기존 갱신 {result.updated}건</div>
           {/* 건수만 보면 모르는 일(거래처가 새로 생겼다 등)은 반드시 적는다 */}
           {result.note && <div className="text-xs text-muted2" style={{ marginBottom: 20, lineHeight: 1.6 }}>{result.note}</div>}
@@ -273,7 +274,7 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
 
             <div className="card card-pad">
               <div className="section-title" style={{ marginBottom: 4 }}>컬럼 매핑</div>
-              <div className="section-sub" style={{ marginBottom: 14 }}>왼쪽은 엑셀 컬럼명(수정 가능), 오른쪽은 우리 항목으로 연결하세요. ‘{adapter.requiredTarget}’은(는) 필수예요.</div>
+              <div className="section-sub" style={{ marginBottom: 14 }}>왼쪽은 엑셀 컬럼명(수정 가능), 오른쪽은 우리 항목으로 연결하세요. ‘{adapter.requiredTarget}’{hasBatchim(adapter.requiredTarget) ? '은' : '는'} 필수예요.</div>
               <div className="table-scroll">
                 <table className="table" style={{ marginTop: 6 }}>
                   <thead><tr><th style={{ width: 200 }}>엑셀 컬럼</th><th>샘플 값</th><th style={{ width: 200 }}>매핑 항목</th></tr></thead>
