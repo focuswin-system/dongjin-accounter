@@ -38,10 +38,7 @@ const API_RESOURCES = {
   '/api/invoices':            ['billing_issued', 'billing_received', 'ar', 'ap'],
   '/api/contracts':           ['contract_sales', 'contract_purchase', 'contract'],
   // 전표 목록(분개장)도 이 경로를 쓴다 — /transactions/vouchers
-  /* 카드 대금·내부 이체 화면도 이 경로로 저장한다(/transactions/transfer, /transactions/import/card).
-     빠져 있던 동안은 그 화면 권한만 받은 사람에게 **화면은 보이는데 저장이 403** 이었다.
-     자원군 판정이라 범위가 넓어지는 건 맞지만, 형제 화면 구분은 화면 노출로 하는 것이 이 파일의 규칙이다. */
-  '/api/transactions':        ['ledger', 'misc_pl', 'misc_income', 'voucher_book', 'card_payment', 'transfer'],
+  '/api/transactions':        ['ledger', 'misc_pl', 'misc_income', 'voucher_book'],
   /* 반복거래 — 입금(recurring_invoice)·출금(recurring_expense) 두 자원 중 하나라도 있으면 쓴다.
      옛 정기청구·정기지출 자원 id 를 그대로 쓴다(역할에 저장된 권한이 그대로 들어오게). */
   '/api/repeat-templates':    ['recurring_invoice', 'recurring_expense'],
@@ -171,7 +168,7 @@ const LOOKUP_PATHS = ['/api/employees/options', '/api/company']
  */
 const ACTION_OVERRIDES = [
   // 엑셀 일괄 등록 — POST지만 '업로드' 권한이다
-  { re: /^\/api\/[a-z-]+\/import\/(parse|commit)$/, action: 'upload' },
+  { re: /^\/api\/[a-z-]+\/import\/(parse|commit|card)$/, action: 'upload' },
   // 양식·자료 내려받기 — GET이지만 '다운로드'
   { re: /^\/api\/[a-z-]+\/import\/template$/, action: 'download' },
   { re: /\/export(\.xlsx)?$/, action: 'download' },
@@ -211,6 +208,27 @@ const ACTION_OVERRIDES = [
   { re: /^\/api\/(resolutions|purchase-reqs)\/[^/]+\/unprocess$/, action: 'delete' },
 ]
 
+/**
+ * 경로별 **자원 재정의**. 한 라우터가 여러 화면을 받는데 그 중 한 화면만 권한을 준 사람이
+ * 있을 때 쓴다 — 접두사 하나로 판정하면 그 화면이 쓰는 문 하나 때문에 라우터 전체가 열린다.
+ *
+ * 실제로 그랬다: '카드 대금'·'내부 이체' 화면은 /api/transactions 로 저장하는데 그 자원이
+ * 매핑에 없어 **화면은 보이는데 저장이 403** 이었다. 접두사 목록에 자원을 더해 고쳤더니
+ * 이번엔 '카드값 갚기' 권한 하나로 **전 거래 열람·등록·수정·삭제**가 열렸다.
+ * 그 화면들이 실제로 쓰는 경로만 연다.
+ *
+ * 먼저 맞는 것이 이긴다. 여기 안 걸리면 접두사 목록(API_RESOURCES)을 쓴다.
+ */
+const RESOURCE_OVERRIDES = [
+  // 내부 계좌 이체 + 카드 대금 지급 — 둘 다 이 한 경로로 두 줄짜리 이체를 만든다
+  { re: /^\/api\/transactions\/transfer$/, resources: ['ledger', 'transfer', 'card_payment'] },
+  // 카드 명세서 업로드 — 카드 대금 화면에서만 연다
+  { re: /^\/api\/transactions\/import\/card$/, resources: ['ledger', 'card_payment'] },
+  /* 이체로 만든 줄을 되돌리는 길. 어느 거래인지는 경로만으로 알 수 없으므로
+     삭제 권한을 넓히는 셈이지만, 그 화면의 '지급 취소'가 이 경로를 쓴다. */
+  { re: /^\/api\/transactions\/[^/]+$/, resources: ['ledger', 'misc_pl', 'misc_income', 'voucher_book', 'transfer', 'card_payment'], methods: ['DELETE'] },
+]
+
 /** 요청 → 필요한 행위 */
 function actionFor(method, fullPath) {
   for (const o of ACTION_OVERRIDES) if (o.re.test(fullPath)) return o.action
@@ -231,7 +249,8 @@ function requiredPerm(method, fullPath) {
   const prefix = prefixOf(fullPath)
   if (!prefix) return null
   if (ANY_AUTHENTICATED.includes(prefix)) return null
-  const resources = API_RESOURCES[prefix]
+  const ov = RESOURCE_OVERRIDES.find(o => o.re.test(fullPath) && (!o.methods || o.methods.includes(method)))
+  const resources = ov ? ov.resources : API_RESOURCES[prefix]
   if (!resources) return null      // 매핑 누락 — check:isolation 이 잡는다(런타임에선 막지 않는다)
   const action = actionFor(method, fullPath)
   // 기준정보 조회는 공용(위 설명 참고). 다운로드·업로드·등록·수정·삭제는 그대로 막는다.
@@ -249,11 +268,14 @@ function unknownResources() {
   for (const [prefix, list] of Object.entries(API_RESOURCES)) {
     for (const r of list) if (!known.has(r)) bad.push(`${prefix} → ${r}`)
   }
+  for (const o of RESOURCE_OVERRIDES) {
+    for (const r of o.resources) if (!known.has(r)) bad.push(`${o.re} → ${r}`)
+  }
   return bad
 }
 
 module.exports = {
-  METHOD_ACTION, API_RESOURCES, ANY_AUTHENTICATED, TENANT_GATE_EXEMPT,
+  METHOD_ACTION, API_RESOURCES, RESOURCE_OVERRIDES, ANY_AUTHENTICATED, TENANT_GATE_EXEMPT,
   ACTION_OVERRIDES, LOOKUP_PREFIXES, LOOKUP_PATHS,
   actionFor, prefixOf, requiredPerm, unknownResources,
 }

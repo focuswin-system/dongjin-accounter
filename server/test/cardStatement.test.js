@@ -36,7 +36,34 @@ test('카드사마다 다른 열 이름을 같은 뜻으로 짚는다', async ()
   assert.equal(g('사업자등록번호'), M.C.bizNo)
   assert.equal(g('봉사료'), M.C.tip)
   assert.equal(g(''), null)
-  assert.equal(g('매입상태'), null)              // 모르는 열은 비워 둔다(사람이 고른다)
+  assert.equal(g('포인트'), null)                // 모르는 열은 비워 둔다(사람이 고른다)
+})
+
+test('취소 건은 상태 열로 가려낸다 — 금액이 양수라 금액만 보면 못 가린다', async () => {
+  const M = await loading
+  // 신한·KB 는 금액을 양수로 두고 '매입상태=취소'로만 표시한다
+  assert.equal(M.guessCardColumn('매입상태'), M.C.status)
+  assert.equal(M.guessCardColumn('승인상태'), M.C.status)
+
+  const canceled = M.mapCardRow(getter({
+    [M.C.date]: '2026-09-03', [M.C.merchant]: '지에스25', [M.C.amount]: '11,000', [M.C.status]: '취소',
+  }))
+  assert.equal(canceled.canceled, true)
+  assert.equal(M.isCardRowValid(canceled), false)
+  assert.match(M.cardInvalidLabel(canceled), /취소/)
+
+  const normal = M.mapCardRow(getter({
+    [M.C.date]: '2026-09-03', [M.C.merchant]: '지에스25', [M.C.amount]: '11,000', [M.C.status]: '정상',
+  }))
+  assert.equal(normal.canceled, false)
+  assert.equal(M.isCardRowValid(normal), true)
+})
+
+test('업종이 가맹점보다 먼저다 — 가맹점업종이 거래처 이름으로 들어가면 안 된다', async () => {
+  const M = await loading
+  assert.equal(M.guessCardColumn('가맹점업종'), M.C.industry)
+  assert.equal(M.guessCardColumn('업종'), M.C.industry)
+  assert.equal(M.guessCardColumn('가맹점명'), M.C.merchant)   // 업종이 없으면 가맹점 그대로
 })
 
 test('공급가액을 합계로 짚지 않는다 — 그러면 경비가 10% 적게 잡힌다', async () => {
@@ -138,4 +165,8 @@ test('청구내역 파일을 이용내역으로 잘못 올리는 것을 머리�
   assert.equal(M.looksLikeBillingFile(['이용일자', '가맹점명', '이용금액', '승인번호']), false)
   assert.equal(M.looksLikeBillingFile(['결제일', '가맹점', '이번달청구금액', '할부회차']), true)
   assert.equal(M.looksLikeBillingFile(['이용일자', '잔여할부금']), true)
+  // 실제 이용대금명세서에 흔한 머리글들 — 하나라도 놓치면 할부 원금이 회차마다 또 잡힌다
+  assert.equal(M.looksLikeBillingFile(['결제일', '가맹점', '결제금액', '수수료', '원금']), true)
+  assert.equal(M.looksLikeBillingFile(['이용일자', '잔여회차']), true)
+  assert.equal(M.looksLikeBillingFile(['결제예정금액']), true)
 })

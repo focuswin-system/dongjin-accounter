@@ -696,6 +696,8 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
   const openEdit = () => {
     if (!c) return;
     setEditForm({
+      // 방향은 주문에 적힌 값으로 연다(서버가 is_purchase 로 판정해 내려준다)
+      side:        c.is_purchase ? 'purchase' : 'sales',
       vendor:      c.vendor_name || '',
       contract_no: c.contract_no || '',
       order_no:    c.order_no    || '',
@@ -733,7 +735,10 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
 
   const handleEditSave = async () => {
     const vendorObj = vendors.find(v => v.name === editForm.vendor);
-    const payload = contractPayload(editForm, vendorObj?.id || c.vendor_id);
+    /* 방향을 반드시 실어 보낸다 — 안 보내면 서버가 적혀 있던 값을 그대로 둔다(그게 기본).
+       화면에서 바꿨는데 안 보내면 사람이 고친 것이 조용히 사라진다. */
+    const payload = contractPayload(editForm, vendorObj?.id || c.vendor_id,
+      editForm.side || (c.is_purchase ? 'purchase' : 'sales'));
 
     /* 반복거래는 따로 묻지 않는다 — 계약을 완료로 바꾸면 반복거래 목록에 저절로 안 뜨고(server/lib/repeat.js
        contractAllows), 정기형을 다른 방식으로 바꾸면 서버가 그 반복거래를 끈다(routes/contracts.js PUT).
@@ -1597,6 +1602,24 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
         label="주문 편집">
         <div className="drawer-body">
           <div className="col gap-form">
+            {/* 방향 — 이 주문이 파는 것인가 사는 것인가.
+                고칠 수단이 없으면 잘못 들어간 방향(옛 자료는 거래처로 추정해 채웠다)을
+                영영 못 되돌린다. 바꾸면 청구서 종류·집계 관점·반복거래 방향이 함께 따라간다. */}
+            <div>
+              <label className="label" style={{ marginBottom: 8 }}>구분</label>
+              <div className="row gap-6">
+                {[{ v: 'sales', l: '수주 (파는 것)' }, { v: 'purchase', l: '발주 (사는 것)' }].map(o => (
+                  <button key={o.v} type="button"
+                    className={`chip ${(editForm.side || (c.is_purchase ? 'purchase' : 'sales')) === o.v ? 'active' : ''}`}
+                    onClick={() => setEditForm(f => ({ ...f, side: o.v }))}>{o.l}</button>
+                ))}
+              </div>
+              {(editForm.side || (c.is_purchase ? 'purchase' : 'sales')) !== (c.is_purchase ? 'purchase' : 'sales') && (
+                <div className="text-xs" style={{ color: 'var(--warn-ink)', marginTop: 6 }}>
+                  구분을 바꾸면 이 주문의 청구서 종류와 집계 관점이 바뀌어요. 걸려 있는 반복거래도 새 방향으로 정리됩니다.
+                </div>
+              )}
+            </div>
             <div>
               <label className="label" style={{ marginBottom: 8 }}>거래처</label>
               <Combobox value={editForm.vendor} onChange={v => setEditForm(f => ({ ...f, vendor: v }))}
@@ -1830,6 +1853,8 @@ const ProgressInvoiceDrawer = ({ open, onClose, contract, onSaved }) => {
 
 /* ============ 주문 목록 ============ */
 const NEW_CONTRACT_FORM = {
+  side: '',            // '주문 전체' 화면에서만 묻는다. 수주·발주 화면은 화면이 정한다
+
   vendor: "", contract_no: "", order_no: "", project_no: "", name: "", status: "진행중", file_url: "", file_name: "",
   billing_mode: "onetime", term_mode: "fixed", vat_mode: "taxable", docs: [], items: [],
   amount: "", unit_amount: "", billing_period: "monthly", billing_day: "1", initial_amount: "",
@@ -1933,8 +1958,9 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
     if (!recurring && !progress && !asNum(newForm.amount) && !lineSum) return toast.push("주문금액을 입력하거나 품목을 등록해주세요");
     if (newForm.term_mode !== 'open' && !newForm.end_date) return toast.push("주문 종료일을 입력해주세요 (무기한이면 종료 방식을 '무기한'으로)");
     const vendorObj = vendors.find(v => v.name === newForm.vendor);
-    const res = await api.addContract(contractPayload(newForm, vendorObj?.id,
-      kind === 'purchase' ? 'purchase' : kind === 'sales' ? 'sales' : undefined));
+    const side = kind === 'purchase' ? 'purchase' : kind === 'sales' ? 'sales' : newForm.side
+    if (!side) return toast.push('수주인지 발주인지 골라주세요')
+    const res = await api.addContract(contractPayload(newForm, vendorObj?.id, side));
     if (res.ok) {
       // 폼에서 올린 계약서 파일들을 주문 첨부(contract_docs)로 연결
       for (const d of (newForm.docs || [])) await api.addContractDoc(res.id, { url: d.url, name: d.name, doc_type: '계약서', size: d.size || 0 });
@@ -2247,6 +2273,21 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
         label="신규 생성">
         <div className="drawer-body">
           <div className="col gap-form">
+            {/* '주문 전체' 화면에는 방향이 없다 — 수주·발주 화면과 달리 여기서 만들면
+                누구도 방향을 모른다. 예전엔 서버가 거래처로 추정했고, 겸함 거래처면
+                매입 주문이 매출이 됐다. 물어보는 편이 낫다. */}
+            {kind === 'all' && (
+              <div>
+                <label className="label" style={{ marginBottom: 8 }}>구분 <span style={{ color: "var(--neg-ink)" }}>*</span></label>
+                <div className="row gap-6">
+                  {[{ v: 'sales', l: '수주 (파는 것)' }, { v: 'purchase', l: '발주 (사는 것)' }].map(o => (
+                    <button key={o.v} type="button"
+                      className={`chip ${newForm.side === o.v ? 'active' : ''}`}
+                      onClick={() => setNewForm(f => ({ ...f, side: o.v }))}>{o.l}</button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div>
               <label className="label" style={{ marginBottom: 8 }}>거래처 <span style={{ color: "var(--neg-ink)" }}>*</span></label>
               <Combobox

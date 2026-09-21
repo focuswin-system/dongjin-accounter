@@ -771,10 +771,12 @@ try {
 // 화면을 새로 내면서 자원만 만들고 API 를 안 잇는 것이 흔한 실수라 여기서 막는다.
 console.log('\n[18] 권한 자원 ↔ API 매핑 — 화면만 열리고 저장은 막히는가')
 try {
-  const { API_RESOURCES } = require('../platform/apiPerms')
+  const { API_RESOURCES, RESOURCE_OVERRIDES } = require('../platform/apiPerms')
   const { RESOURCES } = require('../platform/permissions')
   const used = new Set()
   for (const list of Object.values(API_RESOURCES)) for (const r of list) used.add(r)
+  // 접두사 목록에 없어도 **경로별 재정의**로 열리는 자원이 있다(카드 대금·내부 이체가 그렇다)
+  for (const o of RESOURCE_OVERRIDES) for (const r of o.resources) used.add(r)
   const orphan = RESOURCES.filter(r => !used.has(r.id))
   if (orphan.length) {
     fail('어느 API 에도 안 실린 자원이 있습니다:\n      · ' +

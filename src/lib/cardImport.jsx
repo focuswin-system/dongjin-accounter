@@ -104,6 +104,10 @@ export const cardImportAdapter = ({ cards = [], categories = [], defaultAccountI
     </div>
   ),
 
+  /* 이 업로드는 **새로 넣기만** 한다 — 기존 지출을 고치려면 거래내역에서 연다.
+     덮어쓰기를 내주면 서버가 그걸 무시하고 INSERT 해 중복이 하나 더 생긴다. */
+  noUpdate: true,
+
   mapRow: (get, opts) => mapCardRow(get, opts),
   isValid: isCardRowValid,
   invalidLabel: cardInvalidLabel,
@@ -125,6 +129,8 @@ export const cardImportAdapter = ({ cards = [], categories = [], defaultAccountI
     }
     return { byApproval, byKey }
   },
+  /* ⚠ 후보는 **그 카드의 거래**로만 만든다(화면이 그렇게 넘긴다) — 모든 카드를 넣으면
+     다른 카드의 같은 날 같은 금액 결제가 '확인 필요'로 잡혀 멀쩡한 지출이 조용히 빠진다. */
   findMatch: (d, idx) => {
     const a = String(d.approval_no || '').trim()
     const matched = a ? (idx.byApproval.get(a) || null) : null

@@ -421,10 +421,14 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
   const f = (k, v) => { setErrors(e => (e[k] ? { ...e, [k]: '' } : e)); setForm(p => ({ ...p, [k]: v })) }
   const isOut = form.direction === 'out'
   const needsVendor = !isOut || form.creates === 'invoice'
-  /* 계약은 방향에 맞는 것만 — 나가는 돈에 수주를 걸면 원가가 엉뚱한 건에 붙는다(Contract.jsx isPurchase 와 같은 판정) */
+  /* 계약은 방향에 맞는 것만 — 나가는 돈에 수주를 걸면 원가가 엉뚱한 건에 붙는다.
+     ⚠ 방향은 **서버가 준 is_purchase** 로 본다(주문에 적힌 값). 거래처 구분으로 추정하면
+        겸함('C') 주문이 들어오는 돈·나가는 돈 양쪽 후보에 중복으로 뜨고, 반대로 거래처가
+        매출처인데 발주로 만든 주문은 나가는 돈 후보에서 빠져 고를 수조차 없다. */
   const sideContracts = useMemo(() => contracts.filter(c => {
     const g = c.vendor_gubu ?? c.gubu
-    return isOut ? ['A', 'E', 'C'].includes(g) : !['A', 'E'].includes(g)
+    const purchase = c.is_purchase ?? ['A', 'E'].includes(g)
+    return isOut ? purchase : !purchase
   }), [contracts, isOut])
 
   const save = async () => {

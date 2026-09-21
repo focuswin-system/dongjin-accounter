@@ -60,4 +60,18 @@ const sideFilterSql = (kind, c = 'c', v = 'v') => {
   return ''
 }
 
-module.exports = { SIDES, sideFromGubu, normalizeSide, isPurchaseSide, sideOf, sideFilterSql }
+/**
+ * 이 주문에 맞는 **청구서 종류**를 SQL 안에서 정한다 (issued=발행 / received=수취).
+ *
+ * ⚠ 집계 SQL 은 JS 판정(isPurchaseSide)을 못 쓴다. 그래서 같은 규칙을 SQL 로도 한 벌 둔다 —
+ *   **두 벌이 갈리면 한 응답 안에서 타일과 내역이 서로 다른 말을 한다.** 실제로 그랬다:
+ *   청구액·미수금은 거래처로, 수금·원가는 주문 방향으로 판정해서, 겸함 거래처의 발주가
+ *   '남은 미지급 0원'인데 근거 목록에는 청구서가 그대로 한 줄 떠 있었다.
+ *   고칠 때는 **여기와 isPurchaseSide 를 같이** 고친다.
+ *
+ * @param c contracts 별칭 / @param v vendors 별칭
+ */
+const purchaseKindSql = (c = 'c', v = 'v') =>
+  `IF(COALESCE(${c}.side, IF(${v}.gubu IN ('A','E'), 'purchase', 'sales')) = 'purchase', 'received', 'issued')`
+
+module.exports = { SIDES, sideFromGubu, normalizeSide, isPurchaseSide, sideOf, sideFilterSql, purchaseKindSql }

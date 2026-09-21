@@ -15,7 +15,7 @@ const { syncContractTemplates, stopContractTemplates, contractRepeatProgress } =
 const { createInvoice } = require('../lib/invoiceCreate')
 const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
 const { linkCandidates } = require('../lib/orderLink')
-const { isPurchaseSide, sideFromGubu, normalizeSide, sideFilterSql } = require('../lib/contractSide')
+const { isPurchaseSide, sideFromGubu, normalizeSide, sideFilterSql, purchaseKindSql } = require('../lib/contractSide')
 
 const router = Router()
 
@@ -115,11 +115,12 @@ const RECV = "status='입금완료'"
  * 부가세 컬럼이 없던 시절 거래는 supply_amount 가 NULL 이므로 amount 로 폴백한다
  * — 옛 데이터의 숫자를 갑자기 바꾸지 않으면서, 데이터가 채워질수록 정확해진다. */
 const SUPPLY = 'COALESCE(supply_amount, amount)'
-/* 주문 성격에 맞는 청구서 종류. 매입 주문(거래처 gubu A=외주/매입, E=기관)은 수취 청구서,
- * 매출 주문(B=발주처)은 발행 청구서. 판정 기준은 위 isPurchase 와 같아야 한다.
+/* 주문 성격에 맞는 청구서 종류. 매입 주문은 수취 청구서, 매출 주문은 발행 청구서.
+ * 판정 기준은 metrics 의 isPurchaseSide 와 **같아야 한다** — 갈리면 한 응답 안에서
+ * 청구액·미수금(이 상수를 쓰는 값)과 수금·원가(JS 판정)가 서로 다른 말을 한다.
  * 이 필터가 없으면 외주비 매입 청구서를 매출 주문에 귀속시켰을 때 그 금액이 매출 주문의
  * '청구액'에 더해지고, 받을 돈이 아닌데 미수금(billed − collected)으로 뜬다. */
-const PURCHASE_KIND = "IF(v.gubu IN ('A','E'), 'received', 'issued')"
+const PURCHASE_KIND = purchaseKindSql('c', 'v')
 const METRIC_COLS = `
   COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='income' AND ${RECV}),0)  AS in_done,
   COALESCE((SELECT SUM(amount) FROM transactions WHERE contract_id=c.id AND kind='expense' AND ${PAID}),0) AS out_total,
@@ -222,7 +223,7 @@ router.get('/schedule/pending', async (req, res, next) => {
            JOIN contracts c2 ON c2.id = i.contract_id
            LEFT JOIN vendors v2 ON v2.id = c2.vendor_id
           WHERE i.contract_id IN (${ph})
-            AND i.kind = IF(v2.gubu IN ('A','E'), 'received', 'issued')
+            AND i.kind = ${purchaseKindSql('c2', 'v2')}
             AND NOT EXISTS (SELECT 1 FROM milestones ms WHERE ms.invoice_id = i.id)
           ORDER BY i.issued_at DESC`, conIds)
       for (const x of ls) {

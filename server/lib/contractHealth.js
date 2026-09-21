@@ -65,9 +65,12 @@ async function contractHealth(db, today) {
            COALESCE((SELECT SUM(m.amount) FROM invoice_matches m
                        JOIN invoices i2 ON i2.id = m.invoice_id
                       WHERE i2.contract_id = c.id AND i2.kind = 'issued'), 0) AS collected
+      /* ⚠ 거래처 없는 주문은 뺀다 — **받을 상대가 없는 주문**이라 회수 현황에 설 수 없다.
+         옛 조건(v.gubu IN 'B','C')이 NULL 을 자연히 걸러 주던 것을, 방향 필터로 바꾸면서
+         조건으로 드러냈다(안 적으면 배포 전후로 합계·건수가 조용히 달라진다). */
       FROM contracts c
       LEFT JOIN vendors v ON v.id = c.vendor_id
-     WHERE 1=1 ${sideFilterSql('sales')}
+     WHERE c.vendor_id IS NOT NULL ${sideFilterSql('sales')}
      ORDER BY c.amount DESC`)
   if (!rows.length) return { contracts: [], totals: emptyTotals() }
 

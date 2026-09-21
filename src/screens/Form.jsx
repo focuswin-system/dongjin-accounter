@@ -643,6 +643,18 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     })
   }
 
+  /* 방향을 바꾸면 **방향에 매인 값들을 비운다.**
+   * 비목·계정과목·과세유형은 입금용(INC-)과 출금용(EXP-)이 서로 다른 목록이다.
+   * 안 비우면 입금으로 고른 수금 유형이 그대로 남아 **지출 거래에 매출 계정과목이 박힌다** —
+   * 저장 검증은 "비어 있지 않음"만 보므로 그대로 통과한다.
+   * 거래처·금액·날짜·적요는 방향과 무관하니 그대로 둔다(다시 적게 하면 성가시다). */
+  const switchKind = (v) => {
+    if (v === kind) return
+    setKind(v)
+    setForm(f => ({ ...f, category: '', acctGroup: '', accountCode: '', item: '', itemId: '',
+      taxType: '과세', contract: '', costContract: '' }))
+  }
+
   const handleSave = async () => {
     if (busy) return;
     if (!form.vendor)   { toast.push("거래처를 선택해주세요"); return; }

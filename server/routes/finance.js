@@ -283,7 +283,12 @@ router.put('/loans/:id', async (req, res, next) => {
       principal:   b.principal   != null && b.principal   !== '' ? intOf(b.principal)   : Number(cur.principal),
       annual_rate: b.annual_rate != null && b.annual_rate !== '' ? numOf(b.annual_rate) : Number(cur.annual_rate),
       method:      METHODS.includes(b.method) ? b.method : cur.method,
-      term_months: b.term_months != null && b.term_months !== '' ? Math.max(1, intOf(b.term_months)) : Number(cur.term_months),
+      /* ⚠ `Math.max(1, intOf(...))` 만 두면 '일정 없음' 대출(회차 0)을 저장할 때마다 1 로 바뀐다.
+         그러면 수시 상환 실적이 있는 대출은 '회차가 달라졌다'로 걸려 **메모만 고쳐도 409** 가 났다.
+         등록(POST)과 같게 — 값이 없으면 12, 0 이면 기존 값을 지킨다. */
+      term_months: b.term_months != null && b.term_months !== ''
+        ? (intOf(b.term_months) >= 1 ? intOf(b.term_months) : Number(cur.term_months))
+        : Number(cur.term_months),
       start_date:  b.start_date || cur.start_date,
     }
     /* '일정 없음'의 이율은 **참고값**이다 — 회차가 없어 이 이율로 이자를 계산하지 않는다.
@@ -323,7 +328,10 @@ router.put('/loans/:id', async (req, res, next) => {
        WHERE id=?`,
       [String(b.name || '').trim() || cur.name, b.lender || null, b.vendor_id || null,
        want.principal, want.annual_rate, want.method, want.term_months, want.start_date,
-       intOf(b.pay_day) || cur.pay_day || 1, b.end_date || null, b.account_id || null,
+       /* 안 보낸 값은 기존 값 유지 — 예전엔 `b.account_id || null` 이라 **일부 필드만 보내는
+          요청이 원장 계좌를 지웠다**(거래 쪽 계좌는 지켜 놓고 원본을 지우는 꼴이었다). */
+       intOf(b.pay_day) || cur.pay_day || 1, b.end_date || null,
+       b.account_id !== undefined ? (b.account_id || null) : (cur.account_id || null),
        b.acct_code_principal || cur.acct_code_principal || ACCT.shortLoan,
        b.acct_code_interest || cur.acct_code_interest || ACCT.interest,
        b.memo || null,
@@ -342,18 +350,35 @@ router.put('/loans/:id', async (req, res, next) => {
      * ⚠ 마감된 달의 거래는 못 바꾼다(옛 날짜·새 날짜 둘 다 본다). 상환을 시작한 뒤에도
      *   실행 거래 자체는 그대로이므로 여기 조건과 무관하다. */
     if (cur.txn_id) {
+      /* ⚠ **loans.principal 은 누적 차입액이다** — 추가 차입(loan_draws)이 그 값을 더한다.
+       *   반면 실행 거래는 **최초 실행액**만 담고, 추가 차입분은 각자 **별도 입금 거래**로 이미
+       *   장부에 있다. 그래서 거래 금액을 principal 로 맞추면 추가 차입분이 두 번 잡힌다 —
+       *   메모 한 글자만 고쳐 저장해도 통장 입금이 부풀었다(화면에는 안 보인다).
+       *   맞출 값은 principal 에서 인출 합계를 뺀 **최초 실행액**이다. */
+      const [[{ drawSum }]] = await conn.execute(
+        'SELECT COALESCE(SUM(amount),0) AS drawSum FROM loan_draws WHERE loan_id = ?', [req.params.id])
+      const initialAmt = Number(want.principal) - Number(drawSum)
       const [[t]] = await conn.execute('SELECT date, amount, account_id FROM transactions WHERE id = ?', [cur.txn_id])
       const nextAcct = b.account_id !== undefined ? (b.account_id || null) : (t?.account_id ?? null)
+      /* 최초 실행액이 0 이하가 되는 값은 받지 않는다 — 그대로 두면 통장에 음수 입금이 남는다. */
+      if (!(initialAmt > 0)) {
+        await rollbackQuietly(conn)
+        return res.status(400).json({
+          error: `원금이 추가 차입 합계(${Number(drawSum).toLocaleString('ko-KR')}원)보다 커야 해요.` })
+      }
       const moved = t && (String(t.date) !== String(want.start_date)
-        || Number(t.amount) !== Number(want.principal)
+        || Number(t.amount) !== initialAmt
         || String(t.account_id || '') !== String(nextAcct || ''))
       if (moved) {
         const ce = await closedPeriodError(conn, t.date, want.start_date)
         if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
         await conn.execute(
           'UPDATE transactions SET amount = ?, date = ?, account_id = ?, account_code = ? WHERE id = ?',
-          [want.principal, want.start_date, nextAcct,
-           b.acct_code_principal || cur.acct_code_principal || ACCT.shortLoan, cur.txn_id])
+          [initialAmt, want.start_date, nextAcct,
+           /* 계정과목 폴백은 **등록(POST)과 같은 규칙**이어야 한다 — shortLoan 으로 고정하면
+              1년 초과 차입(장기 2302)이 단기(2201)로 덮여 재무상태표의 유동/비유동이 갈린다. */
+           b.acct_code_principal || cur.acct_code_principal
+             || (want.term_months > 12 ? ACCT.longLoan : ACCT.shortLoan), cur.txn_id])
       }
     }
     /* 스케줄을 바꾸는 값이 달라졌을 때만 예정 회차를 다시 깐다.
@@ -817,6 +842,10 @@ router.delete('/loans/:id', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
+    /* 부모 행을 먼저 잠근다 — 검사와 삭제 사이에 다른 창에서 상환이 들어오면
+       '상환 0건'으로 통과해 놓고 그 상환 거래가 고아로 남는다(repay 경로와 같은 규칙). */
+    const [[lock]] = await conn.execute('SELECT id FROM loans WHERE id = ? FOR UPDATE', [req.params.id])
+    if (!lock) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     const [[{ cnt }]] = await conn.execute(
       'SELECT COUNT(*) AS cnt FROM loan_repayments WHERE loan_id = ? AND paid_date IS NOT NULL', [req.params.id])
     if (Number(cnt) > 0) {
@@ -834,8 +863,24 @@ router.delete('/loans/:id', async (req, res, next) => {
       const ce = await closedPeriodError(conn, loan.txn_date)
       if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
     }
+    /* ⚠ **추가 차입(loan_draws)의 입금 거래도 같이 본다.**
+     *   loan_draws 행은 CASCADE 로 사라지지만 그 입금 거래는 transactions 에 그대로 남는다
+     *   (transactions.loan_id 에는 FK 가 없다). 그러면 부채만 사라지고 **근거 없는 입금**이
+     *   통장에 남아, 나중에 "이 2,000만은 어디서 온 돈인가"에 아무도 답할 수 없다.
+     *   마감 검사도 인출 날짜까지 포함해야 한다 — 하나라도 마감된 달이면 통째로 막는다. */
+    const [draws] = await conn.execute(
+      `SELECT d.txn_id, t.date AS txn_date FROM loan_draws d
+         LEFT JOIN transactions t ON t.id = d.txn_id WHERE d.loan_id = ?`, [req.params.id])
+    for (const d of draws) {
+      if (!d.txn_date) continue
+      const ce = await closedPeriodError(conn, d.txn_date)
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: `추가 차입(${d.txn_date}): ${ce}` }) }
+    }
     // 실행 입금 거래도 함께 지운다(상환이 없으므로 되돌려도 장부에 구멍이 없다)
     if (loan.txn_id) await conn.execute('DELETE FROM transactions WHERE id = ?', [loan.txn_id])
+    for (const d of draws) {
+      if (d.txn_id) await conn.execute('DELETE FROM transactions WHERE id = ?', [d.txn_id])
+    }
     await conn.execute('DELETE FROM loan_repayments WHERE loan_id = ?', [req.params.id])
     await conn.execute('DELETE FROM loans WHERE id = ?', [req.params.id])
     await conn.commit()
@@ -1042,17 +1087,12 @@ router.delete('/investments/:id', async (req, res, next) => {
     await conn.beginTransaction()
     const [[inv]] = await conn.execute(
       `SELECT i.txn_id, t.date AS txn_date FROM investments i
-         LEFT JOIN transactions t ON t.id = i.txn_id WHERE i.id = ?`, [req.params.id])
+         LEFT JOIN transactions t ON t.id = i.txn_id WHERE i.id = ? FOR UPDATE`, [req.params.id])
     if (!inv) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
-    /* 마감된 달의 실행 거래는 지울 수 없다.
-       지우면 그 달 통장 잔액이 조용히 바뀐다 — 이미 세무사에 넘긴 숫자가 달라진다.
-       (거래·청구서·결의서가 다 막는 자리인데 여기만 열려 있었다) */
-    if (inv.txn_date) {
-      const ce = await closedPeriodError(conn, inv.txn_date)
-      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
-    }
     /* 회수 이력이 있으면 막는다 — 지우면 그 입출금이 어디서 온 돈인지 사라진다
-       (대여금·근로계약 삭제와 같은 규칙). 되돌리려면 회수 취소를 먼저 한다. */
+       (대여금·근로계약 삭제와 같은 규칙). 되돌리려면 회수 취소를 먼저 한다.
+       ⚠ 마감 검사보다 **먼저** 본다. 순서가 반대면 회수가 있는 투자를 지우려 할 때
+         진짜 이유("회수 기록이 있어요") 대신 "마감된 기간이에요"가 떠서 엉뚱한 데를 고치게 된다. */
     const [[{ rcnt }]] = await conn.execute(
       'SELECT COUNT(*) AS rcnt FROM investment_redemptions WHERE investment_id = ?', [req.params.id])
     if (rcnt > 0) {
@@ -1060,6 +1100,11 @@ router.delete('/investments/:id', async (req, res, next) => {
       return res.status(409).json({
         error: '회수 기록이 ' + rcnt + '건 있어요. 지우면 그 입출금이 어디서 온 돈인지 알 수 없게 됩니다.'
              + ' 회수를 되돌리려면 회수 취소를 먼저 해주세요.' })
+    }
+    /* 마감된 달의 실행 거래는 지울 수 없다 — 지우면 그 달 통장 잔액이 조용히 바뀐다. */
+    if (inv.txn_date) {
+      const ce = await closedPeriodError(conn, inv.txn_date)
+      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
     }
     if (inv.txn_id) await conn.execute('DELETE FROM transactions WHERE id = ?', [inv.txn_id])
     await conn.execute('DELETE FROM investments WHERE id = ?', [req.params.id])

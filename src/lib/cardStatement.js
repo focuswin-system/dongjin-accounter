@@ -34,6 +34,7 @@ export const C = {
   approval: '승인번호',
   industry: '업종',
   cardNo: '카드번호',
+  status: '상태',
   memo: '비고',
 }
 
@@ -49,13 +50,18 @@ const RULES = [
   [C.approval,    /승인\s*번호|거래\s*번호|전표\s*번호|approval/i],
   [C.date,        /이용\s*일|승인\s*일|거래\s*일|사용\s*일|매출\s*일|결제\s*일자|date/i],
   [C.bizNo,       /사업자\s*(등록)?\s*번호|biz/i],
+  /* ⚠ 업종을 **가맹점보다 먼저** 본다. '가맹점업종'처럼 둘이 붙은 머리글이 흔한데,
+     가맹점 규칙이 먼저 잡으면 업종명이 거래처 이름 자리로 들어간다. */
+  [C.industry,    /업종|가맹점\s*분류|업태/],
+  /* 취소 건을 가려내는 열. 신한·KB 는 금액을 양수로 두고 '매입상태=취소'로만 표시한다 —
+     이 열을 안 보면 **취소된 결제가 경비로 그대로 들어간다.** */
+  [C.status,      /매입\s*상태|승인\s*상태|취소\s*여부|거래\s*상태|^상태$/],
   [C.merchant,    /가맹점|이용\s*처|사용\s*처|상호|거래처|merchant|store/i],
   [C.supply,      /공급\s*가액|과세\s*금액|supply/i],
   [C.vat,         /부가\s*세|세액|부\s*가\s*가치세|vat|tax/i],
   [C.tip,         /봉사료/],
   [C.installment, /할부/],
   [C.cardNo,      /카드\s*번호|카드\s*No|카드\s*종류|카드\s*명/i],
-  [C.industry,    /업종|가맹점\s*분류|분류|업태/],
   /* 금액은 마지막에 본다 — 위의 구체적인 금액 열(공급가액·부가세·봉사료)을 먼저 집고 남은 것만 합계로. */
   [C.amount,      /이용\s*금액|승인\s*금액|합계|총\s*금액|결제\s*금액|사용\s*금액|금액|amount/i],
   [C.memo,        /비고|메모|적요|내용|note|memo/i],
@@ -109,6 +115,9 @@ export function mapCardRow(g, opts = {}) {
     installment: months,
     approval_no: digits(g(C.approval)) || '',
     industry: String(g(C.industry) ?? '').trim(),
+    /* 카드사가 준 상태. '취소'가 적힌 행은 등록하지 않는다 — 금액이 양수라 금액만 보면 못 가린다. */
+    status: String(g(C.status) ?? '').trim(),
+    canceled: /취소|반품|무효/.test(String(g(C.status) ?? '')),
     card_no: String(g(C.cardNo) ?? '').trim(),
     category: opts.defaultCategory || '',
     /* 가맹점 이름은 **메모에 남긴다.** 거래처로 자동 등록하지 않는 편이 기본이라
@@ -118,7 +127,7 @@ export function mapCardRow(g, opts = {}) {
   }
 }
 
-export const isCardRowValid = (d) => !!d.date && Number(d.amount) > 0
+export const isCardRowValid = (d) => !!d.date && Number(d.amount) > 0 && !d.canceled
 
 /* ⚠ 취소 건(음수)은 등록하지 않는다.
    카드 취소는 '마이너스 지출'이 아니라 **원래 지출을 없던 일로 하는 것**이다. 음수로 넣으면
@@ -126,6 +135,7 @@ export const isCardRowValid = (d) => !!d.date && Number(d.amount) > 0
    먼저 올린 원거래를 지우는 것이 맞고, 그 말을 여기서 한다. */
 export const cardInvalidLabel = (d) =>
   !d.date ? '이용일자를 못 읽었어요'
+    : d.canceled ? `취소된 결제예요(${d.status}) — 등록하지 않습니다`
     : Number(d.amount) < 0 ? '취소 건이에요 — 먼저 올린 원거래를 지워주세요'
     : '금액이 0이에요'
 
@@ -152,4 +162,5 @@ export function cardRowWarns(d) {
  * 열 이름으로 가려낼 수 있으면 올리기 전에 알린다 — 등록한 뒤에는 되돌리기가 훨씬 비싸다.
  */
 export const looksLikeBillingFile = (headers = []) =>
-  headers.some(h => /청구\s*금액|이번\s*달\s*청구|당월\s*청구|할부\s*회차|잔여\s*할부|남은\s*할부/.test(String(h ?? '')))
+  headers.some(h => /청구\s*금액|이번\s*달\s*청구|당월\s*청구|결제\s*예정|할부\s*회차|잔여\s*(할부|회차|원금)|남은\s*(할부|회차)|수수료/
+    .test(String(h ?? '')))

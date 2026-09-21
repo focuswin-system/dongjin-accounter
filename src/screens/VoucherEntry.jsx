@@ -233,9 +233,7 @@ export const JournalEntryDrawer = ({ open, onClose, onSaved, goRoute, initialTyp
         <button className="btn sm" onClick={addRow(setter)}><Icon.Plus size={12}/> {title} 줄 추가</button>
         {/* 세금계산서 건을 전표로 적으면 늘 두 줄이다(매출/매입 + 부가세). 손으로 나누면
             1/11 을 매번 계산하고 끝자리가 틀어진다 — 여기서 한 번에 가른다. */}
-        {splitVat && (
-          <button className="btn sm" onClick={() => splitVat(setter, rows)}>부가세 10% 나누기</button>
-        )}
+        <button className="btn sm" onClick={() => splitVat(setter, rows)}>부가세 10% 나누기</button>
       </div>
       <div className="row" style={{ justifyContent: 'space-between', marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
         <span className="text-sm text-muted2">{title} 합계</span>

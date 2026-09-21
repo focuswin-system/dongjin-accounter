@@ -217,7 +217,11 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
     const target = unlink ? null : allContracts.find(c => c.id === bulkContract);
     if (!unlink && !target) return toast.push('주문을 골라주세요', { tone: 'warn' });
 
-    const isPurchaseC = target && (target.gubu === 'A' || target.gubu === 'E' || target.is_purchase);
+    /* ⚠ **주문에 적힌 방향이 먼저다.** 예전엔 `gubu A·E || is_purchase` 라 거래처가 이겼다 —
+       수주로 만든 주문인데 거래처가 매입처면 축을 contract_id 로 보내는데, 서버는 그 주문을
+       매출로 보아 원가를 cost_contract_id 에서만 센다. 붙인 지출이 원가에도 지급액에도
+       안 잡히고 조용히 사라진다("N건 연결했어요"만 뜬다). */
+    const isPurchaseC = target && (target.is_purchase ?? (target.gubu === 'A' || target.gubu === 'E'));
     const groups = new Map();   // axis → txnIds
     for (const t of rows) {
       const axis = (!unlink && t.kind === 'expense' && !isPurchaseC) ? 'cost' : 'contract';

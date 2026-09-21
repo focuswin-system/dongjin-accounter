@@ -182,9 +182,35 @@ router.put('/:id', async (req, res, next) => {
     await conn.beginTransaction()
     const [[cur]] = await conn.execute('SELECT * FROM lendings WHERE id = ? FOR UPDATE', [req.params.id])
     if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
-    const principal = intOf(b.principal)
+    /* 안 보낸 값은 기존 값 유지 — 예전엔 `intOf(b.principal)` 이라 **원금 칸을 비우고 저장하면
+       0 원**이 됐다. 이제 그 값이 실행 거래까지 가므로 그 달 출금에서 대여금이 통째로 사라진다.
+       차입금 PUT 과 **거울상**이어야 한다(그쪽에는 폴백도 검사도 있었다). */
+    const principal = b.principal != null && b.principal !== '' ? intOf(b.principal) : Number(cur.principal)
     const startDate = b.start_date || cur.start_date
     const acct = b.account_id !== undefined ? (b.account_id || null) : (cur.account_id || null)
+    if (!(principal > 0)) {
+      await rollbackQuietly(conn); return res.status(400).json({ error: '대여 원금을 입력해주세요' })
+    }
+    { const de = futureDateError(startDate); if (de) { await rollbackQuietly(conn); return res.status(400).json({ error: de }) } }
+
+    /* 이미 회수한 회차가 있으면 **조건을 못 바꾼다** — 차입금과 같은 규칙.
+       원금을 바꾸면 미회수 회차만 다시 계산되는데 회수한 회차는 옛 금액으로 저장돼 있어
+       회차 합계와 원금이 어긋나고, 남은 원금(새 원금 − 옛 회수액)도 실제와 달라진다. */
+    const [[{ cnt }]] = await conn.execute(
+      'SELECT COUNT(*) AS cnt FROM lending_repayments WHERE lending_id = ? AND paid_date IS NOT NULL',
+      [req.params.id])
+    if (Number(cnt) > 0) {
+      const changed = []
+      if (Number(principal) !== Number(cur.principal)) changed.push('원금')
+      if (String(startDate) !== String(cur.start_date)) changed.push('대여일')
+      if (methodOf(b.method) !== cur.method) changed.push('상환 방식')
+      if (termMonths !== Number(cur.term_months)) changed.push('회차')
+      if (changed.length) {
+        await rollbackQuietly(conn)
+        return res.status(409).json({
+          error: `이미 ${cnt}회차를 회수해서 ${changed.join('·')}은 바꿀 수 없어요. 회수를 먼저 취소해주세요.` })
+      }
+    }
 
     /* 실행 출금 거래도 함께 맞춘다 — 원본은 대여금 쪽 하나다.
        예전엔 lendings 행만 고쳐서, 원금을 정정하면 **대여금 잔액과 통장 출금이 어긋났다**
@@ -390,6 +416,10 @@ router.delete('/:id', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
+    /* 부모 행을 먼저 잠근다 — 검사와 삭제 사이에 회수가 들어오면 '회수 0건'으로 통과해 놓고
+       그 회수 거래가 고아로 남는다(회수 경로와 같은 규칙). */
+    const [[lock]] = await conn.execute('SELECT id FROM lendings WHERE id = ? FOR UPDATE', [req.params.id])
+    if (!lock) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     const [[{ cnt }]] = await conn.execute(
       'SELECT COUNT(*) AS cnt FROM lending_repayments WHERE lending_id = ? AND paid_date IS NOT NULL',
       [req.params.id])

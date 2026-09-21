@@ -235,7 +235,11 @@ export const CardPaymentScreen = ({ openEdit }) => {
   if (importing !== null) return (
     <ImportWizard
       adapter={importAdapter}
-      existing={uses.filter(t => byId.get(t.accountId)?.kind === 'card')}
+      /* ⚠ 대조 대상은 **고른 그 카드**의 사용분만. 모든 카드를 주면 다른 카드의 같은 날
+         같은 금액 결제가 '확인 필요'로 잡혀(기본 건너뛰기) 멀쩡한 지출이 조용히 빠진다.
+         카드를 아직 안 골랐으면(위쪽 버튼으로 들어온 경우) 카드 전체를 준다 — 그래도
+         승인번호가 있으면 서버가 그 카드 안에서 다시 본다. */
+      existing={uses.filter(t => (importing ? t.accountId === importing : byId.get(t.accountId)?.kind === 'card'))}
       onCancel={() => setImporting(null)}
       onDone={() => { setImporting(null); load() }}/>
   )

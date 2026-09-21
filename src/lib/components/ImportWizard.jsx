@@ -9,6 +9,7 @@ import { josa, hasBatchim } from '../josa'
 // adapter 규약
 //   label, title, sub          — 문구
 //   templateUrl, templateName  — 양식 다운로드 (없으면 버튼을 감춘다 — 받아온 파일 그대로 올리는 업로드)
+//   noUpdate                   — (선택) true 면 '덮어쓰기'를 아예 안 내준다(새로 넣기만 하는 업로드)
 //   fileWarn(headers)          — (선택) 머리글만 보고 '이 파일이 아니다'를 알릴 때
 //   targets[], requiredTarget  — 매핑 대상 라벨 목록 / 필수 항목
 //   guess(header)              — 엑셀 머리글 → 매핑 대상 추측
@@ -186,10 +187,12 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
   const rowOpts = (r) => [
     { value: 'skip', label: '건너뛰기' },
     { value: 'insert', label: '새로 등록' },
-    ...r.candidates.map(c => {
+    /* 덮어쓰기를 안 받는 업로드(카드 명세서처럼 새로 넣기만 하는 것)는 그 선택지를 안 낸다.
+       내주면 서버가 무시하고 INSERT 해서 중복이 하나 더 생기고, 결과는 "갱신했다"고 거짓말을 한다. */
+    ...(adapter.noUpdate ? [] : r.candidates.map(c => {
       const meta = adapter.candidateLabel(c)
       return { value: 'update:' + c.id, label: `덮어쓰기 → ${meta.label}`, sub: meta.sub || '' }
-    }),
+    })),
   ]
 
   return (

@@ -267,6 +267,9 @@ router.post('/:id/adjustments', async (req, res, next) => {
  * ⚠ 마감된 달의 조정은 못 지운다(넣을 때와 같은 선). 지우면 그 달 잔액이 바뀐다. */
 router.delete('/:id/adjustments/:adjId', async (req, res, next) => {
   try {
+    /* 잔액을 볼 수 없는 사람은 조정도 못 지운다 — 조회(GET)가 요구하는 것과 같은 선이다.
+       없으면 잔액을 못 보는 사람이 그 잔액을 움직일 수 있다. */
+    if (!canSeeBalance(req)) return res.status(403).json({ error: '계좌 잔액을 볼 권한이 없어요' })
     const [[adj]] = await req.db.execute(
       'SELECT id, date FROM account_adjustments WHERE id = ? AND account_id = ?',
       [req.params.adjId, req.params.id])

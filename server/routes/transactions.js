@@ -1239,19 +1239,45 @@ router.post('/import/card', async (req, res, next) => {
     const items = Array.isArray(req.body.items) ? req.body.items : []
     const accountId = req.body.account_id || null
     if (!accountId) return res.status(400).json({ error: '어느 카드의 명세서인지 골라주세요' })
-    const [[acc]] = await conn.execute('SELECT id, kind, name FROM accounts WHERE id = ?', [accountId])
+    const [[acc]] = await conn.execute(
+      'SELECT id, kind, name, card_type FROM accounts WHERE id = ?', [accountId])
     if (!acc) return res.status(400).json({ error: '카드를 찾을 수 없어요' })
-    /* 카드가 아닌 계좌로 올리면 사용분이 통장에서 바로 빠진 것으로 잡혀, 실제 통장 잔액과 어긋난다.
-       (체크카드는 계좌에서 즉시 빠지므로 카드가 아니라 통장 거래로 올리는 것이 맞다) */
+    /* 카드가 아닌 계좌로 올리면 사용분이 통장에서 바로 빠진 것으로 잡혀, 실제 통장 잔액과 어긋난다. */
     if (acc.kind !== 'card') {
       return res.status(400).json({ error: `'${acc.name}'은 카드가 아니에요. 카드 명세서는 카드로만 올릴 수 있습니다.` })
     }
+    /* 체크카드는 **쓴 즉시 통장에서 빠진다** — 갚을 것이 없으므로 카드 사용분으로 쌓으면
+       통장 잔액과 두 번 어긋난다. 화면은 이미 거르지만 서버도 본다(API 직접 호출). */
+    if (acc.card_type === 'check') {
+      return res.status(400).json({ error: `'${acc.name}'은 체크카드예요. 쓴 즉시 통장에서 빠지므로 통장 거래로 올려주세요.` })
+    }
     const createVendors = !!req.body.create_vendors
 
-    // 기존 승인번호 — 같은 건을 두 번 넣지 않는다
+    /* 기존 승인번호 — 같은 건을 두 번 넣지 않는다.
+       ⚠ **이 카드 것만** 본다. 승인번호는 카드사·VAN 이 주는 짧은 숫자라 다른 카드끼리 겹칠 수
+         있고, 전역으로 보면 멀쩡한 결제가 '중복'으로 조용히 사라진다. */
     const [known] = await conn.execute(
-      'SELECT approval_no FROM transactions WHERE approval_no IS NOT NULL AND approval_no <> ?', [''])
+      'SELECT approval_no FROM transactions WHERE account_id = ? AND approval_no IS NOT NULL AND approval_no <> ?',
+      [accountId, ''])
     const seen = new Set(known.map(r => String(r.approval_no)))
+
+    /* 비목의 과세·공제 설정 — **손으로 넣을 때와 같은 답이 나와야 한다.**
+     * 카드사 이용내역에는 공급가·세액 열이 없는 경우가 흔한데, 그때 아무것도 안 주면
+     * vatFields 가 '과세·공제'로 역산해 **없는 매입세액을 만든다**. 면세 비목(병원·학원·도서)이나
+     * 불공제 비목(접대비·비영업용 승용차)이면 그대로 부가세 신고가 틀어진다.
+     * 거래 폼(Form.jsx)은 비목에서 이 두 값을 물려받는다 — 여기서도 같이 읽는다. */
+    const [cats] = await conn.execute(
+      "SELECT name, account_code, vat, vat_deductible FROM categories WHERE id LIKE 'EXP-%'")
+    const catByName = new Map(cats.map(c => [String(c.name || '').trim(), c]))
+
+    /* 마감·장부시작일은 **행마다 묻지 않는다** — 5,000행이면 왕복이 1만 번이다.
+       한 번 읽어 판정 함수를 만든다(규칙은 lib/closing.js 그대로). */
+    const monthsChecked = new Map()
+    const closedOf = async (date) => {
+      const ym = String(date || '').slice(0, 7)
+      if (!monthsChecked.has(ym)) monthsChecked.set(ym, await closedPeriodError(conn, date))
+      return monthsChecked.get(ym)
+    }
 
     /* 가맹점 → 거래처. 이름이 겹치면 **붙이지 않는다** — 엉뚱한 거래처에 붙은 경비는
        아무도 모른 채 그 거래처의 매입 통계를 틀리게 만든다(엑셀 임포트에서 겪은 그대로다). */
@@ -1267,12 +1293,24 @@ router.post('/import/card', async (req, res, next) => {
     let inserted = 0, dupSkipped = 0, skippedFuture = 0, skippedClosed = 0,
         skippedAmount = 0, skippedBeforeStart = 0, linkedVendors = 0
     const createdVendors = []
+    const dupRows = []   // 건너뛴 건이 무엇이었는지 — 건수만 주면 사람이 확인할 길이 없다
     for (const it of items) {
+      /* 덮어쓰기는 받지 않는다 — 이 경로는 **새로 넣기만** 한다.
+         마법사가 '갱신'으로 보낸 것을 조용히 INSERT 하면 중복이 하나 더 생기고,
+         결과 화면은 "갱신했다"고 거짓말을 한다. */
+      if (it.action === 'update') {
+        await rollbackQuietly(conn)
+        return res.status(400).json({ error: '카드 사용분은 덮어쓸 수 없어요. 기존 거래를 고치려면 거래내역에서 여세요.' })
+      }
+      if (!it.date) { skippedAmount++; continue }     // 날짜 없는 행은 장부에 설 수 없다
       const approval = String(it.approval_no || '').trim()
-      if (approval && seen.has(approval)) { dupSkipped++; continue }
+      if (approval && seen.has(approval)) {
+        dupSkipped++; dupRows.push(`${it.date} ${Number(it.amount || 0).toLocaleString('ko-KR')}원 ${it.merchant || ''}`.trim())
+        continue
+      }
       if (futureDateError(it.date)) { skippedFuture++; continue }
       if (await beforeBooksError(conn, it.date)) { skippedBeforeStart++; continue }
-      if (await closedPeriodError(conn, it.date)) { skippedClosed++; continue }
+      if (await closedOf(it.date)) { skippedClosed++; continue }
       if (amountError(it.amount)) { skippedAmount++; continue }
 
       const merchant = String(it.merchant || '').trim()
@@ -1291,27 +1329,35 @@ router.post('/import/card', async (req, res, next) => {
         createdVendors.push(merchant)
       }
 
-      const accountCode = await resolveAcctCode(conn, it.account_code, it.category, 'expense')
+      /* 비목 설정을 물려받는다 — 명세서가 준 값이 있으면 그쪽이 이긴다(카드사가 찍어 준 실제 세액). */
+      const cat = catByName.get(String(it.category || '').trim())
+      const accountCode = it.account_code || cat?.account_code || null
+      const taxType = it.tax_type || (cat && String(cat.vat) === '면세' ? '면세' : null)
+      const deductible = it.vat_deductible != null ? it.vat_deductible
+        : (cat && Number(cat.vat_deductible) === 0 ? 0 : 1)
       const vat = vatFields({
         amount: it.amount, supply_amount: it.supply_amount, vat_amount: it.vat_amount,
-        tax_type: it.tax_type, vat_deductible: it.vat_deductible,
+        tax_type: taxType, vat_deductible: deductible,
       })
-      /* 증빙유형은 '카드전표'로 둔다 — 카드 사용분의 증빙은 언제나 매출전표이고,
-         나중에 증빙 없는 지출을 찾을 때 이 건들이 '증빙 없음'으로 잡히면 안 된다. */
+      /* 증빙유형은 기준정보의 이름과 **글자까지 같아야 한다**('신용카드매출전표').
+         다르면 부가세 집계의 조인(ev.name = t.evid_type)이 빗나가 공제 여부가 기본값으로
+         떨어지고, 회사가 그 이름을 나중에 만들면 이미 넣은 경비의 매입세액이 조용히 사라진다. */
       await conn.execute(`
         INSERT INTO transactions (id, kind, vendor_id, account_id, account_code, category, amount, date,
                                   method, status, memo, approval_no, evid_type,
                                   supply_amount, vat_amount, tax_type, vat_deductible)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `, [randomUUID(), 'expense', vendorId, accountId, accountCode, it.category || '', it.amount, it.date,
-          '카드', '지급완료', it.memo || merchant || '', approval || null, '카드전표',
+          /* 결제수단은 화면의 다섯 값 중 하나여야 한다 — '카드'라고 적으면 거래 편집 폼에서
+             어느 칩도 안 켜지고 계좌를 고르는 칸이 통째로 안 그려진다. */
+          '법인카드', '지급완료', it.memo || merchant || '', approval || null, '신용카드매출전표',
           vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible])
       if (approval) seen.add(approval)
       inserted++
     }
     await conn.commit()
     res.json({ inserted, dupSkipped, skippedFuture, skippedClosed, skippedAmount, skippedBeforeStart,
-      linkedVendors, createdVendors })
+      linkedVendors, createdVendors, dupRows: dupRows.slice(0, 20) })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
@@ -1392,13 +1438,15 @@ router.post('/link-contract', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
+    let con = null
     if (contractId) {
-      const [[c]] = await conn.execute('SELECT id FROM contracts WHERE id = ?', [contractId])
+      const [[c]] = await conn.execute('SELECT id, vendor_id FROM contracts WHERE id = ?', [contractId])
       if (!c) { await rollbackQuietly(conn); return res.status(404).json({ error: '주문을 찾을 수 없어요' }) }
+      con = c
     }
     const ph = ids.map(() => '?').join(',')
     const [txns] = await conn.execute(
-      `SELECT id, date, kind FROM transactions WHERE id IN (${ph}) FOR UPDATE`, ids)
+      `SELECT id, date, kind, vendor_id FROM transactions WHERE id IN (${ph}) FOR UPDATE`, ids)
     if (txns.length !== ids.length) {
       await rollbackQuietly(conn)
       return res.status(404).json({ error: '없는 거래가 섞여 있어요. 목록을 새로고침해주세요.' })
@@ -1407,6 +1455,21 @@ router.post('/link-contract', async (req, res, next) => {
     if (col === 'cost_contract_id' && txns.some(t => t.kind !== 'expense')) {
       await rollbackQuietly(conn)
       return res.status(400).json({ error: '원가 귀속은 지출 거래에만 붙일 수 있어요' })
+    }
+    /* 근거 주문(contract_id)은 **같은 거래처**여야 한다 — 주문 회수 화면(contracts /link-orders)이
+     * 하는 검사인데 여기만 빠져 있었다. 없으면 남의 주문에 붙어 그 주문의 실적이 조용히 부푼다.
+     *
+     * ⚠ 원가 귀속(cost_contract_id)에는 **적용하지 않는다.** 외주비는 외주업체에 지급되지만
+     *   원가는 그 일을 파는 매출 주문(다른 거래처)에 붙는다 — 거래처가 다른 것이 정상이다.
+     *   여기에 같은 검사를 걸면 원가 귀속이라는 기능 자체가 성립하지 않는다. */
+    if (contractId && col === 'contract_id') {
+      const bad = txns.filter(t => String(t.vendor_id || '') !== String(con.vendor_id || ''))
+      if (bad.length) {
+        await rollbackQuietly(conn)
+        return res.status(409).json({
+          error: `거래처가 다른 거래 ${bad.length}건이 섞여 있어요. 근거 주문은 같은 거래처의 것만 붙일 수 있습니다.`
+               + ` (다른 거래처의 지출을 이 주문의 원가로 붙이려면 '원가 거래 연결'을 쓰세요)` })
+      }
     }
     /* ⚠ **마감을 보지 않는다.** 주문 연결은 돈을 움직이지 않는다 —
      *   금액·날짜·계좌가 그대로라 그 달 입출금 합계도, 부가세도, 손익도 안 바뀐다.
