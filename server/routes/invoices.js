@@ -1150,12 +1150,16 @@ router.put('/:id', async (req, res, next) => {
 
     // 부가세 집계의 주 소스가 청구서다 → 마감된 달의 신고 자료가 사후에 바뀌면 안 된다.
     // 날짜를 옮기는 경우 양쪽을 본다(잠긴 달에서 빼내거나 밀어넣는 것도 막는다 — 거래와 같은 규칙).
-    /* 금액이 바뀌면 이 핸들러가 정산액(invoice_matches)까지 다시 편성한다 — 그건 문서가 아니라 돈이다.
-       그때는 장부 시작일까지 보는 돈 잠금을 쓴다(거래 PUT 과 같은 규칙). 발행일·거래처만 고치는
-       경우는 문서 잠금(월 마감만) — 시작 전 달 세금계산서도 고칠 수 있어야 한다. */
-    const amountChanged = Number(total_amount) !== Number(cur.total_amount)   // 품목 합계까지 반영된 값으로 본다
-    const lockOf = amountChanged ? closedPeriodError : closedDocError
-    const ce = await lockOf(conn, cur.issued_at, issued_at)
+    /* 청구서 **날짜**는 문서 잠금(월 마감만) — 이월 잔액과 시작 전 달 세금계산서는 발행일이 늘
+       장부 시작일 전이다. 여기에 돈 잠금을 걸면 그 청구서들은 금액 오타 하나 못 고치게 된다.
+       대신 금액이 바뀌면 붙어 있는 **정산 거래의 날짜**로 돈 잠금을 본다 — 돈이 움직이는 건 그쪽이다. */
+    let ce = await closedDocError(conn, cur.issued_at, issued_at)
+    if (!ce && Number(total_amount) !== Number(cur.total_amount)) {
+      const [ms] = await conn.execute(
+        'SELECT t.date FROM invoice_matches m JOIN transactions t ON t.id = m.txn_id WHERE m.invoice_id = ?',
+        [req.params.id])
+      if (ms.length) ce = await closedPeriodError(conn, ...ms.map(m => m.date))
+    }
     if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
 
     // 수정에도 같은 규칙 — 발행만 막고 수정으로 0원을 만들 수 있으면 막은 의미가 없다.

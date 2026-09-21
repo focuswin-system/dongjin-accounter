@@ -462,7 +462,10 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
                      안 그러면 출금에서 고른 '바로 출금(immediate)'이 입금에 남아 결제기한 칩이 하나도 안 눌린 채 저장된다. */
                   const base = emptyForm(v)
                   return { ...base, ...p, direction: v, contract_id: null,
-                    creates: base.creates, pay_term: base.pay_term, account_id: base.account_id }
+                    creates: base.creates, pay_term: base.pay_term, account_id: base.account_id,
+                    /* 부가세 방식도 되돌린다 — 출금은 '포함', 입금은 '별도'가 기본이라, 안 되돌리면
+                       적어 둔 100만이 공급가에서 합계로(또는 그 반대로) 뜻만 조용히 바뀐다. */
+                    vat_mode: base.vat_mode }
                 })}>{l}</button>
             ))}
           </div>

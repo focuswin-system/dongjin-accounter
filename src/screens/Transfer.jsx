@@ -24,7 +24,7 @@ import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
  *   있지도 않은 잔액이 생긴다.
  */
 export const TransferScreen = ({ openEdit }) => {
-  useFiscalTick()
+  const fiscalTick = useFiscalTick()
   const toast = useToast()
   const { confirm } = useConfirm()
   const [accounts, setAccounts] = useState([])
@@ -38,6 +38,9 @@ export const TransferScreen = ({ openEdit }) => {
   /* 보고물·엑셀은 기간을 정해 뽑는다 — 거래처에 "이 기간에 이렇게 옮겼습니다"로 낸다.
      기본은 올해. 이체는 잦지 않아 이번 달로 잡으면 대개 빈 표가 된다. */
   const [range, setRange] = useState(() => periodToRange('year'))
+  /* 결산월은 로그인 뒤에 온다 — 기본 기간을 마운트 때 한 번만 잡으면 칩 이름만 '이번 회기'로 바뀌고
+     실제 기간은 달력연도로 남는다(사용자는 어긋난 걸 볼 방법이 없다). 바뀌면 다시 잡는다. */
+  useEffect(() => { setRange(periodToRange('year')) }, [fiscalTick])
   /* 계좌번호 표시 — 받는 사람·용도에 따라 다르다. 대외 보고엔 마스킹, 내부 확인엔 전체,
      통장 이름만으로 충분하면 숨김. 기본은 숨김(예전 동작 그대로). */
   const [numMode, setNumMode] = useState('hide')   // 'hide' | 'mask' | 'full'

@@ -162,6 +162,9 @@ const TEMPLATE_SELECT = `
 function needsFix(t) {
   if (t.direction === 'out' && !t.category) return '비목을 골라주세요'
   if (t.creates === 'txn' && !t.account_id) return '출금 계좌를 골라주세요'
+  /* 등록 폼을 안 거치고 들어온 줄이 있다 — 계약 연동(syncContractTemplates)과 옛 정기 규칙 이관.
+     거래처가 없으면 거래처 없는 청구서가 매달 서고, findLookalikes 가 빠져나가 중복 방지도 꺼진다. */
+  if (t.creates === 'invoice' && !t.vendor_id) return '거래처를 골라주세요'
   return null
 }
 
@@ -319,6 +322,9 @@ async function createOne(conn, ym, row, today) {
   if (t.direction === 'out' && !t.category) {
     throw httpError(400, `${name} — 비목이 비어 있어요. 반복거래를 열어 비목을 골라주세요`)
   }
+  if (t.creates === 'invoice' && !t.vendor_id) {
+    throw httpError(400, `${name} — 거래처가 비어 있어요. 반복거래를 열어 거래처를 골라주세요`)
+  }
 
   const amount = row.amount != null && row.amount !== '' ? row.amount : t.amount
   const a = amountsOf(t.vat_mode, amount)
@@ -472,7 +478,8 @@ async function syncContractTemplates(conn, c, isPurchase, { reactivate = false }
          ${reactivate ? ', active = 1' : ''}
         WHERE id = ?`,
       [c.vendor_id || null, Number(c.unit_amount), vm, period, anchorOf(c.start_date), day, same[0].id])
-    return { created: 0, updated: r.affectedRows, skipped: 0 }
+    // 값이 그대로면 affectedRows 가 0이다 — 연동은 '있다'가 답이라 1로 센다(화면이 '연동 없음'이라 말하던 것)
+    return { created: 0, updated: r.affectedRows || 1, skipped: 0 }
   }
   await conn.execute(
     `INSERT INTO repeat_templates (id, direction, creates, vendor_id, contract_id, item, amount, vat_mode,

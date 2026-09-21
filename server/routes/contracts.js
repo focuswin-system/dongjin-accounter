@@ -1254,10 +1254,12 @@ router.put('/:id', async (req, res, next) => {
        아무것도 못 찾아 **두 번째 반복거래를 만들고**, 옛 방향 것은 켜진 채 남아 달별 목록에
        유령 청구 줄이 선다(같은 계약이 입금·출금 양쪽으로). 옛 방향 것을 끈다 — 다만 그 방향에
        여러 벌이면 손대지 않는다(원가로 붙인 반복거래를 끄면 안 된다. sync 와 같은 규칙). */
+    let sideFlipped = false
     if (cur.vendor_id && cur.vendor_id !== vendor_id) {
       const [[pg]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [cur.vendor_id])
       const prevSide = !!(pg && (pg.gubu === 'A' || pg.gubu === 'E'))
-      if (prevSide !== purchaseSide) await stopContractTemplates(conn, req.params.id, prevSide, { onlyIfSingle: true })
+      sideFlipped = prevSide !== purchaseSide
+      if (sideFlipped) await stopContractTemplates(conn, req.params.id, prevSide, { onlyIfSingle: true })
     }
     if (f.billing_mode === 'recurring' && Number(f.unit_amount) > 0) {
       /* 반복거래가 없으면 만들고, 있으면 금액·과세·주기·청구일을 계약 값으로 맞춘다(계약이 원본).
@@ -1266,7 +1268,9 @@ router.put('/:id', async (req, res, next) => {
       await syncContractTemplates(conn, {
         id: req.params.id, name, vendor_id, unit_amount: f.unit_amount, vat_mode: f.vat_mode,
         billing_period: f.billing_period, billing_day: f.billing_day, start_date,
-      }, purchaseSide, { reactivate: cur.billing_mode !== 'recurring' })
+      /* 방향이 뒤집힌 저장도 되살림으로 본다 — A→B→A 로 되돌리면 옛 방향 것을 위에서 껐다가
+         다시 그 방향이 되는데, 안 켜면 양쪽 다 꺼져 달별 목록에서 통째로 사라진다. */
+      }, purchaseSide, { reactivate: cur.billing_mode !== 'recurring' || sideFlipped })
     } else if (cur.billing_mode === 'recurring' && f.billing_mode !== 'recurring') {
       // 정기형 → 다른 방식: 청구 일정과 반복거래로 같은 돈을 두 번 청구하지 않게 끈다(지우지 않는다)
       await stopContractTemplates(conn, req.params.id, purchaseSide)

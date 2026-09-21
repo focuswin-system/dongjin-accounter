@@ -49,6 +49,9 @@ function describe(from, to) {
   if (!y) return { mode: 'custom' }
   const r = { from, to }
   if (same(r, yearRange(y))) return { mode: 'year', year: y }
+  /* 결산월이 12월이 아니면 회기는 달력연도가 아니다 — 알아보지 못하면 고른 직후 '직접 지정'처럼
+     날짜 두 개로 보이고, 다시 열면 '달' 탭으로 돌아간다. */
+  { const f = periodToRange('year'); if (f && same(r, f)) return { mode: 'fiscal', year: Number(f.from.slice(0, 4)) } }
   for (const q of QUARTERS) if (same(r, quarterRange(y, q.id))) return { mode: 'quarter', year: y, quarter: q.id }
   for (let m = 1; m <= 12; m++) if (same(r, monthRange(y, m))) return { mode: 'month', year: y, month: m }
   return { mode: 'custom' }
@@ -63,7 +66,7 @@ export const PeriodPicker = ({ from, to, onChange }) => {
   const cur = describe(from, to)
   const [open, setOpen] = useState(false)
   // 어느 탭을 펼쳐 뒀나. 지금 값이 달이면 '달'로 열린다 — 방금 고른 자리에서 이어서 고르게.
-  const [tab, setTab] = useState(cur.mode === 'quarter' ? 'quarter' : cur.mode === 'year' ? 'year' : 'month')
+  const [tab, setTab] = useState(cur.mode === 'quarter' ? 'quarter' : (cur.mode === 'year' || cur.mode === 'fiscal') ? 'year' : 'month')
   const [year, setYear] = useState(cur.year || thisYear)
   const boxRef = useRef(null)
 
@@ -78,6 +81,7 @@ export const PeriodPicker = ({ from, to, onChange }) => {
   }, [open])
 
   const label = cur.mode === 'all' ? '전체 기간'
+    : cur.mode === 'fiscal' ? yearLabel()
     : cur.mode === 'year' ? `${cur.year}년`
     : cur.mode === 'quarter' ? `${cur.year}년 ${cur.quarter}분기`
     : cur.mode === 'month' ? `${cur.year}년 ${cur.month}월`
@@ -160,7 +164,8 @@ export const PeriodPicker = ({ from, to, onChange }) => {
               {/* 결산월이 12월이 아니면 달력연도와 회기가 다르다 — 여기서도 회기를 고를 수 있어야
                   다른 화면의 '이번 회기' 칩과 같은 기간이 나온다(ui.jsx periodToRange). */}
               {yearLabel() !== '올해' && (
-                <button type="button" className="period-cell" style={{ width: '100%', marginTop: 6 }}
+                <button type="button" className={`period-cell${cur.mode === 'fiscal' ? ' active' : ''}`}
+                  style={{ width: '100%', marginTop: 6 }}
                   onClick={() => pick(periodToRange('year'))}>{yearLabel()}</button>
               )}
             </>

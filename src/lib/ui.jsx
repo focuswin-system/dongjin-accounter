@@ -92,12 +92,13 @@ export const setFiscalEndMonth = (m) => {
 };
 /** 회기(결산월)가 바뀌면 다시 그린다 — 기간 프리셋을 쓰는 화면이 구독한다 */
 export const useFiscalTick = () => {
-  const [, bump] = useState(0);
+  const [tick, bump] = useState(0);
   useEffect(() => {
     const on = () => bump(v => v + 1);
     window.addEventListener('fiscal:changed', on);
     return () => window.removeEventListener('fiscal:changed', on);
   }, []);
+  return tick;   // 기본 기간을 state 로 잡아 둔 화면은 이 값으로 다시 계산한다
 };
 /** 오늘이 속한 회기 { from, to, y(시작하는 해) } */
 const fiscalYearRange = (d = new Date()) => {
