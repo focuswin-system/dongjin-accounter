@@ -1408,13 +1408,18 @@ router.post('/link-contract', async (req, res, next) => {
       await rollbackQuietly(conn)
       return res.status(400).json({ error: '원가 귀속은 지출 거래에만 붙일 수 있어요' })
     }
-    /* 마감된 달의 거래는 못 건드린다 — 거래 수정(PUT)과 같은 규칙이다.
-       금액이 안 바뀌어도 주문 귀속이 바뀌면 그 달 원가·손익 보고가 달라진다.
-       하나라도 걸리면 전부 멈춘다 — 일부만 옮기면 어디까지 됐는지 되짚어야 한다. */
-    for (const t of txns) {
-      const ce = await closedPeriodError(conn, t.date)
-      if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: `${t.date} 거래: ${ce}` }) }
-    }
+    /* ⚠ **마감을 보지 않는다.** 주문 연결은 돈을 움직이지 않는다 —
+     *   금액·날짜·계좌가 그대로라 그 달 입출금 합계도, 부가세도, 손익도 안 바뀐다.
+     *   바뀌는 것은 '이 돈이 어느 주문 것인가'라는 꼬리표뿐이다.
+     *
+     *   예전엔 여기만 마감으로 막았다. 그런데 **주문 없이 남은 것을 나중에 회수하는 일**이
+     *   바로 이 기능의 존재 이유이고(lib/orderLink.js), 회수 대상은 거의 다 지난 달 —
+     *   즉 마감된 달이다. 그래서 막아 두면 정작 쓰라고 만든 자리에서 못 쓴다.
+     *   실제로 같은 일을 하는 주문 회수 화면(contracts.js /link-orders)은 막지 않아
+     *   **같은 동작이 들어온 문에 따라 되고 안 되는** 상태였다.
+     *
+     *   마감이 지키는 것은 '그 달 숫자'다. 꼬리표는 그 숫자가 아니다.
+     *   (계약별 수익·원가 보고는 달라진다 — 그건 귀속을 고치려고 누르는 버튼이라 의도한 결과다) */
     await conn.execute(`UPDATE transactions SET ${col} = ? WHERE id IN (${ph})`, [contractId, ...ids])
     await conn.commit()
     res.json({ ok: true, count: ids.length, linked: !!contractId })

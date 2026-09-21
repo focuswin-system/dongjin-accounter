@@ -808,6 +808,7 @@ try {
   const ALLOW = [
     'transactions.js:/:id/evidence',   // 증빙 첨부 — 금액·날짜·계좌를 안 건드린다
     'contracts.js:/link-orders',       // 주문 귀속 — 그 달 입출금 합계가 안 바뀐다
+    'transactions.js:/link-contract',  // 〃 (같은 동작이 두 화면에 있다 — 규칙도 같아야 한다)
   ]
   const files = fs.readdirSync(ROUTES_DIR).filter(f => f.endsWith('.js'))
   const offenders = []
