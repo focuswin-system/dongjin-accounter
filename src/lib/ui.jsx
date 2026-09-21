@@ -82,7 +82,23 @@ export const MoneyInput = ({ value, onChange, allowNegative = false, className =
  * 테마처럼 한 곳에 두고 화면들은 모른다 — 기간을 periodToRange 로 계산하는 화면은 저절로 맞는다.
  * 서버 짝: server/lib/fiscal.js(같은 규칙). */
 let FISCAL_END_MONTH = 12;
-export const setFiscalEndMonth = (m) => { const n = Number(m); FISCAL_END_MONTH = n >= 1 && n <= 12 ? n : 12; };
+/* 값이 바뀌면 알린다 — 모듈 변수만 바꾸면 이미 그려진 화면은 '올해'(달력연도)인 채로 남아,
+   같은 버튼이 화면마다 다른 기간을 낸다(회사 정보를 받아오기 전에 그려진 첫 화면). */
+export const setFiscalEndMonth = (m) => {
+  const n = Number(m), next = n >= 1 && n <= 12 ? n : 12;
+  if (next === FISCAL_END_MONTH) return;
+  FISCAL_END_MONTH = next;
+  try { window.dispatchEvent(new Event('fiscal:changed')); } catch { /* 서버 렌더 등 */ }
+};
+/** 회기(결산월)가 바뀌면 다시 그린다 — 기간 프리셋을 쓰는 화면이 구독한다 */
+export const useFiscalTick = () => {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const on = () => bump(v => v + 1);
+    window.addEventListener('fiscal:changed', on);
+    return () => window.removeEventListener('fiscal:changed', on);
+  }, []);
+};
 /** 오늘이 속한 회기 { from, to, y(시작하는 해) } */
 const fiscalYearRange = (d = new Date()) => {
   const end = FISCAL_END_MONTH, y = d.getFullYear(), m1 = d.getMonth() + 1;

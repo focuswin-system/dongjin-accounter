@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, localToday, Spinner, Loading, DateInput, yearLabel } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, localToday, Spinner, Loading, DateInput, yearLabel, useFiscalTick } from '../lib/ui'
 import { api } from '../lib/api'
 
 /* 경영 도우미 — 대화(세션)형 조회.
@@ -174,6 +174,7 @@ const Composer = ({ onAdd, busy }) => {
 }
 
 export const MgmtAskScreen = () => {
+  useFiscalTick()
   const toast = useToast()
   const { confirm } = useConfirm()
   const [chats, setChats] = useState([])

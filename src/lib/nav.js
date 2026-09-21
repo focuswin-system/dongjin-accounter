@@ -685,6 +685,8 @@ for (const d of PORTAL) for (const c of d.categories) if (c.groups) PORTAL_CAT_B
  *   office_report → mgmt_report : 보고서를 사무업무에서 경영관리로 올렸다(2026-08-27) */
 export const ROUTE_ALIAS = {
   office_report: 'mgmt_report',
+  // 입금 타일은 3단계(2026-09)에 세금계산서·거래내역으로 갈렸다. 옛 주소는 입출금 포털로.
+  cash_in: 'cash_dom',
 }
 for (const [from, to] of Object.entries(ROUTE_ALIAS)) {
   if (PORTAL_CAT_BY_ID[to]) PORTAL_CAT_BY_ID[from] = PORTAL_CAT_BY_ID[to]

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Combobox, MoneyInput, DateInput, localToday, fmtDateShort, periodToRange, yearLabel } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Combobox, MoneyInput, DateInput, localToday, fmtDateShort, periodToRange, yearLabel, useFiscalTick } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { Drawer } from '../lib/ui'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
@@ -24,6 +24,7 @@ import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
  *   있지도 않은 잔액이 생긴다.
  */
 export const TransferScreen = ({ openEdit }) => {
+  useFiscalTick()
   const toast = useToast()
   const { confirm } = useConfirm()
   const [accounts, setAccounts] = useState([])

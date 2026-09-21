@@ -48,6 +48,9 @@ export const RepeatScreen = ({ goRoute, initialDirection = 'all', prefill = null
   const loadAll = async () => setTemplates(await api.getRepeatTemplates())
   useEffect(() => { loadMonth() }, [ym])
   useEffect(() => { if (view === 'all') loadAll() }, [view])
+  /* 보이는 것만 고른 것이다 — 입금/출금 칩이나 보기를 바꾸면 선택을 푼다.
+     안 그러면 화면에 없는 줄이 '선택한 N건'에 섞여 확인 서랍에서 처음 보게 된다. */
+  useEffect(() => { setPicked(new Set()) }, [dir, view])
   const reload = () => { loadMonth(); if (view === 'all' || templates) loadAll() }
 
   const byDir = (list) => (list || []).filter(r => dir === 'all' || r.direction === dir)
@@ -292,7 +295,7 @@ const RepeatCreateDrawer = ({ rows, ym, onClose, onDone }) => {
     setBusy(false)
     if (!res.ok) {
       /* 확인 서랍을 연 뒤에 같은 돈이 들어왔다 — 그 줄에 후보를 붙여 다시 고르게 한다 */
-      if (res.code === 'lookalike' && res.payload?.template_id) {
+      if (res.code === 'lookalike' && res.payload?.template_id && res.payload.lookalikes?.length) {
         setItems(list => list.map(it => it.row.id === res.payload.template_id
           ? { ...it, row: { ...it.row, lookalikes: res.payload.lookalikes },
               choice: `link:${res.payload.lookalikes[0].type}:${res.payload.lookalikes[0].id}` }
@@ -358,6 +361,7 @@ const RepeatCreateDrawer = ({ rows, ym, onClose, onDone }) => {
                       <input type="radio" name={`lk-${r.id}`} checked={it.choice === `link:${l.type}:${l.id}`}
                         onChange={() => set(i, 'choice', `link:${l.type}:${l.id}`)}/>
                       그것에 연결 — {fmtDateShort(l.date)} · <span className="num">{fmtNum(l.amount)}</span>원 {l.no || l.label || ''}
+                      {l.note ? <span className="text-xs text-muted2">· {l.note}</span> : null}
                     </label>
                   ))}
                   <label className="row gap-6 text-sm" style={{ alignItems: 'center' }}>
@@ -416,6 +420,7 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
 
   const f = (k, v) => { setErrors(e => (e[k] ? { ...e, [k]: '' } : e)); setForm(p => ({ ...p, [k]: v })) }
   const isOut = form.direction === 'out'
+  const needsVendor = !isOut || form.creates === 'invoice'
   /* 계약은 방향에 맞는 것만 — 나가는 돈에 수주를 걸면 원가가 엉뚱한 건에 붙는다(Contract.jsx isPurchase 와 같은 판정) */
   const sideContracts = useMemo(() => contracts.filter(c => {
     const g = c.vendor_gubu ?? c.gubu
@@ -423,6 +428,7 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
   }), [contracts, isOut])
 
   const save = async () => {
+    if (needsVendor && !form.vendor_id) { setErrors({ vendor_id: '거래처를 골라주세요' }); return }
     const body = {
       ...form,
       creates: isOut ? form.creates : 'invoice',
@@ -451,8 +457,13 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
           <div className="row gap-6">
             {[['in', '입금'], ['out', '출금']].map(([v, l]) => (
               <button key={v} type="button" className={`chip ${form.direction === v ? 'active' : ''}`}
-                onClick={() => setForm(p => ({ ...emptyForm(v), ...p, direction: v,
-                  creates: v === 'in' ? 'invoice' : p.creates, contract_id: null }))}>{l}</button>
+                onClick={() => setForm(p => {
+                  /* 방향이 바뀌면 '만들 것'·결제기한은 그 방향의 기본값으로 되돌린다 — 적은 내용·금액·거래처만 남긴다.
+                     안 그러면 출금에서 고른 '바로 출금(immediate)'이 입금에 남아 결제기한 칩이 하나도 안 눌린 채 저장된다. */
+                  const base = emptyForm(v)
+                  return { ...base, ...p, direction: v, contract_id: null,
+                    creates: base.creates, pay_term: base.pay_term, account_id: base.account_id }
+                })}>{l}</button>
             ))}
           </div>
         </div>
@@ -471,7 +482,11 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
           </div>
         )}
         <div>
-          <label className="label">거래처</label>
+          {/* 청구서를 만드는 규칙은 거래처가 필수다(서버 lib/repeat.js) — 바로 출금은 공과금처럼 없을 수 있다 */}
+          <label className="label">거래처 {needsVendor
+            ? <span style={{ color: 'var(--neg-ink)' }}>*</span>
+            : <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span>}</label>
+          {errors.vendor_id && <div className="text-xs" style={{ color: 'var(--neg-ink)' }}>{errors.vendor_id}</div>}
           <Combobox value={form.vendor_id} allowAdd={false}
             onChange={v => setForm(p => contractFitsVendor(contracts, p.contract_id, v) ? { ...p, vendor_id: v } : { ...p, vendor_id: v, contract_id: null })}
             options={vendors.map(v => ({ value: v.id, label: v.name, sub: v.type || '' }))} placeholder="거래처 선택·검색"/>

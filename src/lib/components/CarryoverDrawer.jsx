@@ -12,7 +12,8 @@ import { api } from '../api'
  *
  * 지우거나 고치는 것은 세금계산서 화면에서 한다(청구서다) — 여기는 넣는 자리와 지금 무엇이 있는지 보는 자리.
  */
-const emptyRow = () => ({ vendor_id: '', kind: 'issued', amount: '', memo: '' })
+let rowSeq = 0
+const emptyRow = () => ({ _k: ++rowSeq, vendor_id: '', kind: 'issued', amount: '', memo: '' })
 
 export const CarryoverDrawer = ({ open, onClose, booksStart }) => {
   const toast = useToast()
@@ -57,7 +58,7 @@ export const CarryoverDrawer = ({ open, onClose, booksStart }) => {
 
         <div className="col gap-10">
           {rows.map((r, i) => (
-            <div key={i} className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+            <div key={r._k} className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
               <div className="row gap-4">
                 {[['issued', '받을 돈'], ['received', '줄 돈']].map(([k, l]) => (
                   <button key={k} type="button" className={`chip ${r.kind === k ? 'active' : ''}`} onClick={() => set(i, 'kind', k)}>{l}</button>

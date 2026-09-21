@@ -133,12 +133,22 @@ test('출금은 비목이 필요하다 — 전표의 비용 줄이 비면 일계
 
 test('바로 출금은 계좌가 필요하다 — 매달 만들 때 막히면 반복거래를 버린다', () => {
   assert.strictEqual(normalizeTemplate({ ...base, account_id: '' }).field, 'account_id')
-  assert.strictEqual(normalizeTemplate({ ...base, creates: 'invoice', account_id: '' }).value.creates, 'invoice')
+  assert.strictEqual(normalizeTemplate({ ...base, creates: 'invoice', vendor_id: 'v1', account_id: '' }).value.creates, 'invoice')
 })
 
 test('입금은 늘 청구서 — txn 을 보내도 청구서', () => {
-  const r = normalizeTemplate({ ...base, direction: 'in', creates: 'txn', category: '' })
+  const r = normalizeTemplate({ ...base, direction: 'in', creates: 'txn', category: '', vendor_id: 'v1' })
   assert.strictEqual(r.value.creates, 'invoice')
+})
+
+/* 거래처 없는 청구서가 매달 서면 미수금·대사에서 '—' 로 남고, findLookalikes 가 거래처 없이는
+   후보를 못 찾아 중복 방지까지 꺼진다. 바로 출금(공과금)은 거래처 없이도 된다. */
+test('청구서를 만드는 반복거래는 거래처가 필요하다', () => {
+  assert.deepStrictEqual(normalizeTemplate({ ...base, direction: 'in', vendor_id: '' }),
+    { error: '거래처를 골라주세요', field: 'vendor_id' })
+  assert.deepStrictEqual(normalizeTemplate({ ...base, creates: 'invoice', vendor_id: '' }),
+    { error: '거래처를 골라주세요', field: 'vendor_id' })
+  assert.strictEqual(normalizeTemplate({ ...base, vendor_id: '' }).value.creates, 'txn')
 })
 
 test('값 정리 — 금액 콤마, 모르는 주기·부가세는 기본값, 일자 범위', () => {

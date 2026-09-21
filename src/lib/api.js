@@ -777,7 +777,7 @@ export const api = {
      안내가 목적인데 그것 때문에 화면에 오류가 뜨면 본말이 뒤집힌다. */
   async getSetupStatus() {
     try { return await req('/setup/status') }
-    catch { return { company: 1, accounts: 1, vendors: 1, items: 1, recurring: 1, txns: 1, invoices: 1 } }
+    catch { return { company: 1, accounts: 1, vendors: 1, items: 1, booksStart: 1, txns: 1, invoices: 1 } }
   },
 
   // ─── 회사 정보 ────────────────────────────────────────────────

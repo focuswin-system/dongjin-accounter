@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Icon, periodToRange, DateInput, yearLabel } from '../ui'
+import { Icon, periodToRange, DateInput, yearLabel, useFiscalTick } from '../ui'
 import { PeriodPicker } from './PeriodPicker'
 
 // 표 상단 툴바 — 날짜 범위 + 검색 + 필터 패널. DataTable 위에 얹는다.
@@ -25,6 +25,7 @@ const DATE_PRESETS = [
    한 화면(수시입금)에서 먼저 써 보고 괜찮으면 전체로 올린다 — 날짜 필터는 매일 쓰는
    물건이라 한 번에 전부 바꾸면 되돌리기가 번거롭다. */
 export const TableToolbar = ({ date, search, filters, hasActiveFilter, onReset, right, periodPicker = false }) => {
+  useFiscalTick()   // 결산월을 늦게 받아도 '올해/이번 회기' 칩이 따라온다
   const [open, setOpen] = useState(false)
   // inline 로 표시한 필터는 바에 직접 세우고, 나머지만 ⚙ 패널로 보낸다
   const inlineFilters = (filters || []).filter(f => f.inline)

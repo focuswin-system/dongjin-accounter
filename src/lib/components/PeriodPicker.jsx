@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Icon, localToday, DateInput } from '../ui'
+import { Icon, localToday, DateInput, periodToRange, yearLabel, useFiscalTick } from '../ui'
 
 /**
  * 기간 선택기 — **드릴다운**. "달을 누르면 달이, 년을 누르면 년이 나온다."
@@ -55,6 +55,7 @@ function describe(from, to) {
 }
 
 export const PeriodPicker = ({ from, to, onChange }) => {
+  useFiscalTick()
   const today = localToday()
   const thisYear = Number(today.slice(0, 4))
   const thisMonth = Number(today.slice(5, 7))
@@ -148,13 +149,21 @@ export const PeriodPicker = ({ from, to, onChange }) => {
           )}
 
           {tab === 'year' && (
-            <div className="period-grid period-grid-2">
-              {years.map(y => (
-                <button key={y} type="button"
-                  className={`period-cell${cur.mode === 'year' && cur.year === y ? ' active' : ''}`}
-                  onClick={() => pick(yearRange(y))}>{y}년</button>
-              ))}
-            </div>
+            <>
+              <div className="period-grid period-grid-2">
+                {years.map(y => (
+                  <button key={y} type="button"
+                    className={`period-cell${cur.mode === 'year' && cur.year === y ? ' active' : ''}`}
+                    onClick={() => pick(yearRange(y))}>{y}년</button>
+                ))}
+              </div>
+              {/* 결산월이 12월이 아니면 달력연도와 회기가 다르다 — 여기서도 회기를 고를 수 있어야
+                  다른 화면의 '이번 회기' 칩과 같은 기간이 나온다(ui.jsx periodToRange). */}
+              {yearLabel() !== '올해' && (
+                <button type="button" className="period-cell" style={{ width: '100%', marginTop: 6 }}
+                  onClick={() => pick(periodToRange('year'))}>{yearLabel()}</button>
+              )}
+            </>
           )}
 
           {/* 그 밖의 기간은 직접 찍는다. 자주 쓰는 길이 아니라 아래에 작게 둔다. */}

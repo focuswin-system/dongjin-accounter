@@ -609,7 +609,9 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
      '안 할래요'는 이 브라우저에 거래처·방향 단위로 기억한다 — 규칙이 아니라 취향이다. */
   const skipKey = (vendorId) => `repeatSuggestSkip:${vendorId}:${kind}`
   const suggestRepeat = async (vendorId, category) => {
-    if (!goRoute) return
+    /* 반복거래를 못 보는 역할에는 묻지 않는다 — 물어봤자 갈 곳이 없고, 묻는 요청 자체가 403 이라
+       저장할 때마다 '권한이 없어요' 알림이 뜬다(세금계산서 링크와 같은 규칙). */
+    if (!goRoute || (!canGo('recurring_invoice') && !canGo('recurring_expense'))) return
     try { if (localStorage.getItem(skipKey(vendorId))) return } catch { /* 저장소를 못 쓰면 그냥 묻는다 */ }
     const r = await api.repeatSuggest({ kind, vendorId, category })
     if (!r?.suggest || !r.prefill) return

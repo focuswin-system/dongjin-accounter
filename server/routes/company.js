@@ -43,6 +43,18 @@ router.put('/', async (req, res, next) => {
       const [[cur]] = await conn.execute('SELECT * FROM company_info WHERE id = ? FOR UPDATE', [COMPANY_ID])
       const r = planCompanyChange(cur, req.body || {}, kstToday())
       if (!r.ok) throw httpError(r.status, r.error, r.field ? { field: r.field } : null)
+      /* 장부 시작일을 뒤로 잡으면 그 전 거래가 **기초잔액과 이중계상된다** — 잔액은 기초잔액 + 전체 거래 합이라
+         날짜를 안 가린다. 게다가 그 거래는 이제 잠겨서 지울 수도 없다(lib/closing.js). 먼저 막고 사정을 알린다.
+         ⚠ **값이 실제로 바뀔 때만** 본다 — 회사 정보 폼은 시작일을 그대로 다시 보내므로,
+         그냥 막으면 이미 그 상태인 회사는 상호 하나도 못 고친다(실측). */
+      if (r.set.books_start && r.set.books_start !== (cur.books_start || null)) {
+        const [[{ n }]] = await conn.execute(
+          'SELECT COUNT(*) AS n FROM transactions WHERE date < ?', [r.set.books_start])
+        if (n > 0) {
+          throw httpError(400, `그 날짜 전 거래가 ${n}건 있어요. 기초잔액과 이중으로 잡히니, 더 앞 날짜로 정하거나 그 거래를 먼저 정리해주세요`,
+            { field: 'books_start' })
+        }
+      }
       const keys = Object.keys(r.set)
       if (keys.length) {
         // 칸 이름은 planCompanyChange 의 허용 목록에서만 나온다(요청 본문의 키를 그대로 쓰지 않는다)

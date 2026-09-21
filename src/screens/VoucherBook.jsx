@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef} from 'react'
-import { Icon, fmtNum, useToast, DateInput, Loading, periodToRange, yearLabel } from '../lib/ui'
+import { Icon, fmtNum, useToast, DateInput, Loading, periodToRange, yearLabel, useFiscalTick } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
 import { PrintEditButton } from '../lib/components/PrintEditButton'
@@ -23,6 +23,7 @@ import { VoucherView } from '../lib/components/VoucherView'
 const KINDS = [['all', '전체'], ['income', '입금'], ['expense', '지출']]
 
 export const VoucherBookScreen = () => {
+  useFiscalTick()
   const toast = useToast()
   const init = periodToRange('month')
   const [from, setFrom] = useState(init.from)

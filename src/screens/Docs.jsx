@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, Popover, Loading, periodToRange, DateInput, yearLabel } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, Popover, Loading, periodToRange, DateInput, yearLabel, useFiscalTick } from '../lib/ui'
 // SAMPLE placeholder — Docs 화면은 실 API 연동 전까지 빈 데이터로 동작
 const SAMPLE = {
   docs: [], evidences: [], evidenceMissing: [], excelPreview: [],
@@ -1688,6 +1688,7 @@ const ReportBar = ({ children }) => (
 /* children — 기간 아래에 한 줄 더 붙일 때(카드·외주 보고서의 추가 필터).
    밖에 두면 그 줄만 카드를 벗어나 다시 어긋난다. */
 const PeriodFilter = ({ value, onChange, children }) => {
+  useFiscalTick()
   const r = value || { from: '', to: '' }
   return (
     <ReportBar>

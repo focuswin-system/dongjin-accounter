@@ -455,7 +455,7 @@ router.post('/:id/renew', async (req, res, next) => {
         const [[vg]] = await conn.execute('SELECT gubu FROM vendors WHERE id = ?', [c.vendor_id || ''])
         const r = await syncContractTemplates(conn,
           { ...c, unit_amount: nextUnit, start_date: c.start_date }, !!(vg && (vg.gubu === 'A' || vg.gubu === 'E')))
-        recurringExtended = r.updated
+        recurringExtended = r.created + r.updated   // 지웠던 계약이면 새로 만들어진다 — 0건으로 알리면 화면이 "연동 없음"이라 말한다
       }
     } else {
       await conn.execute("UPDATE contracts SET status = '완료' WHERE id = ?", [req.params.id])
@@ -1261,11 +1261,12 @@ router.put('/:id', async (req, res, next) => {
     }
     if (f.billing_mode === 'recurring' && Number(f.unit_amount) > 0) {
       /* 반복거래가 없으면 만들고, 있으면 금액·과세·주기·청구일을 계약 값으로 맞춘다(계약이 원본).
-         꺼 둔 반복거래도 '있는' 것으로 친다 — 저장했다는 이유로 되살리지 않는다. */
+         꺼 둔 반복거래도 '있는' 것으로 친다 — 저장했다는 이유로 되살리지 않는다.
+         다른 방식에서 정기형으로 **돌아온** 저장에서만 다시 켠다(reactivate). */
       await syncContractTemplates(conn, {
         id: req.params.id, name, vendor_id, unit_amount: f.unit_amount, vat_mode: f.vat_mode,
         billing_period: f.billing_period, billing_day: f.billing_day, start_date,
-      }, purchaseSide)
+      }, purchaseSide, { reactivate: cur.billing_mode !== 'recurring' })
     } else if (cur.billing_mode === 'recurring' && f.billing_mode !== 'recurring') {
       // 정기형 → 다른 방식: 청구 일정과 반복거래로 같은 돈을 두 번 청구하지 않게 끈다(지우지 않는다)
       await stopContractTemplates(conn, req.params.id, purchaseSide)

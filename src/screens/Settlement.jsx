@@ -145,7 +145,7 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
                 <th>제　목</th><td colSpan={5} className="settle-subject">{edit ? <CellIn value={form.purpose} onChange={v => setH('purpose', v)} placeholder="예: 7월 세금납부·자재대 정산"/> : form.purpose}</td>
               </tr>
               <tr>
-                <th>수령액</th><td className="num fw-700">{edit ? <CellIn value={form.received_amount} onChange={v => setH('received_amount', v)} money/> : amt(received)}</td>
+                <th>수령액</th><td className="num fw-700">{edit ? <CellIn value={form.received_amount} onChange={v => setH('received_amount', v)} money allowNegative/> : amt(received)}</td>
                 <th>지출총액</th><td className="num">{amt(total)}</td>
                 <th>잔　액</th><td className="num fw-700" style={{ color: balance < 0 ? 'var(--neg-ink)' : undefined }}>{amt(balance)}</td>
               </tr>
@@ -172,7 +172,7 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
                     </td>
                     <td className="num" style={{ textAlign: 'right' }}>
                       {edit
-                        ? <CellIn value={r.amount || ''} onChange={v => setLine(i, 'amount', v)} money/>
+                        ? <CellIn value={r.amount || ''} onChange={v => setLine(i, 'amount', v)} money allowNegative/>
                         : fmtNum(r.amount)}
                     </td>
                     {edit ? (

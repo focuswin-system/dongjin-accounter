@@ -125,6 +125,10 @@ function normalizeTemplate(body) {
   const dayOfMonth = Number.isFinite(day) ? Math.min(31, Math.max(0, day)) : 1
   const accountId = b.account_id ? String(b.account_id) : null
   if (creates === 'txn' && !accountId) return fail('출금 계좌를 골라주세요', 'account_id')
+  /* 청구서를 만드는 규칙은 거래처가 있어야 한다 — 청구서를 만드는 다른 창구는 전부 거래처를 요구한다.
+     비면 거래처 없는 청구서가 매달 서고(미수금·대사에서 '—'), findLookalikes 가 거래처 없이는
+     후보를 못 찾아 **중복 방지까지 꺼진다**. 바로 출금(공과금 등)은 지금대로 선택. */
+  if (creates === 'invoice' && !b.vendor_id) return fail('거래처를 골라주세요', 'vendor_id')
   const payTerm = PAY_TERMS.includes(b.pay_term) ? b.pay_term : (creates === 'txn' ? 'immediate' : 'net30')
   const payDay = PAY_TERMS_WITH_DAY.includes(payTerm) ? Math.min(31, Math.max(1, parseInt(b.pay_day, 10) || 1)) : 0
   return {
@@ -237,18 +241,24 @@ async function monthItems(db, ym, { direction = null } = {}) {
  */
 async function findLookalikes(db, t, date, total, ym) {
   if (t.creates === 'txn') {
-    const { open } = await lookalikeSettleTxns(db, {
+    /* ⚠ **taken(이미 청구서에 물린 거래)도 후보로 싣는다.** open 만 보던 때는, 세금계산서를 받아
+       지급처리까지 끝낸 달에 이 반복거래를 만들면 경고 한 줄 없이 같은 돈이 두 줄 섰다
+       (통장 한 줄 = 장부 두 줄, 운영 fowin 2026-09-09 과 같은 모양). 붙이면 그 달은 '만듦'이 되고
+       장부는 한 줄로 남는다 — 어디에 물린 건지는 note 로 보여준다. */
+    const { open, taken } = await lookalikeSettleTxns(db, {
       kind: 'expense', vendorId: t.vendor_id, accountId: t.account_id, amount: total, date })
-    if (!open.length) return []
-    const ph = open.map(() => '?').join(',')
+    const cand = [...open, ...taken]
+    if (!cand.length) return []
+    const ph = cand.map(() => '?').join(',')
     // 날짜 창이 달을 넘을 수 있다 — 다른 달 거래는 붙여도 이 달 '만듦'이 안 되므로 후보에서 뺀다
     const { from, to } = monthRange(ym)
     const [free] = await db.execute(
       `SELECT id FROM transactions WHERE id IN (${ph}) AND template_id IS NULL AND date BETWEEN ? AND ?`,
-      [...open.map(o => o.id), from, to])
+      [...cand.map(o => o.id), from, to])
     const ok = new Set(free.map(f => f.id))
-    return open.filter(o => ok.has(o.id))
-      .map(o => ({ type: 'txn', id: o.id, date: String(o.date).slice(0, 10), amount: Number(o.amount), label: o.memo || o.vendor_name || '' }))
+    return cand.filter(o => ok.has(o.id))
+      .map(o => ({ type: 'txn', id: o.id, date: String(o.date).slice(0, 10), amount: Number(o.amount),
+        label: o.memo || o.vendor_name || '', note: o.other_no ? `${o.other_no} 정산분` : '' }))
   }
   if (!t.vendor_id) return []
   const { from, to } = monthRange(ym)
@@ -443,7 +453,7 @@ const dirOfContract = (isPurchase) => (isPurchase ? 'out' : 'in')
  * 모르므로 건드리지 않는다(skipped 로 알린다).
  * @param c { id, name, vendor_id, unit_amount, vat_mode, billing_period, billing_day, start_date }
  */
-async function syncContractTemplates(conn, c, isPurchase) {
+async function syncContractTemplates(conn, c, isPurchase, { reactivate = false } = {}) {
   if (!(Number(c.unit_amount) > 0)) return { created: 0, updated: 0, skipped: 0 }
   const direction = dirOfContract(isPurchase)
   const period = PERIODS.includes(c.billing_period) ? c.billing_period : 'monthly'
@@ -453,12 +463,13 @@ async function syncContractTemplates(conn, c, isPurchase) {
     'SELECT id FROM repeat_templates WHERE contract_id = ? AND direction = ? FOR UPDATE', [c.id, direction])
   if (same.length > 1) return { created: 0, updated: 0, skipped: same.length }
   if (same.length === 1) {
-    /* active = 1 을 함께 되돌린다 — 정기형을 단건으로 바꾸면 stopContractTemplates 가 껐고(설계),
-       다시 정기형으로 되돌릴 때 켜 주지 않으면 계약은 정기형인데 달별 목록에는 영영 안 뜬다
-       (사람은 계약 화면만 보고 "청구가 왜 안 뜨지"를 알 길이 없다. 실측 재현). */
+    /* ⚠ 켜는 것은 **방식이 정기형으로 돌아온 그 저장에서만**(reactivate). 늘 active=1 로 쓰면,
+       이번 분기는 직접 청구하려고 일부러 꺼 둔 반복거래가 계약을 아무거나 고쳐 저장할 때마다
+       되살아나 다음 달 목록에 뜬다. 반대로 되돌릴 때 안 켜면 계약은 정기형인데 목록에 영영
+       안 뜬다(둘 다 실측). 그래서 '껐다'와 '방식이 돌아왔다'를 가른다. */
     const [r] = await conn.execute(
-      `UPDATE repeat_templates SET vendor_id = ?, amount = ?, vat_mode = ?, period = ?, anchor_month = ?, day_of_month = ?,
-         active = 1
+      `UPDATE repeat_templates SET vendor_id = ?, amount = ?, vat_mode = ?, period = ?, anchor_month = ?, day_of_month = ?
+         ${reactivate ? ', active = 1' : ''}
         WHERE id = ?`,
       [c.vendor_id || null, Number(c.unit_amount), vm, period, anchorOf(c.start_date), day, same[0].id])
     return { created: 0, updated: r.affectedRows, skipped: 0 }
