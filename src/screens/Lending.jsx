@@ -281,7 +281,7 @@ export const LendingScreen = () => {
                 <MoneyInput value={form.principal} onChange={raw => f('principal', raw)}/>
               </div>
               <div style={{ flex: 1 }}><label className="label">연이율 (%)</label>
-                <input className="input num" type="number" step="0.01" min="0" value={form.annual_rate}
+                <input className="input num" type="number" onWheel={e => e.currentTarget.blur()} step="0.01" min="0" value={form.annual_rate}
                   placeholder="0" onChange={e => f('annual_rate', e.target.value)}/>
                 <div className="text-xs text-muted2" style={{ marginTop: 6 }}>비우면 무이자예요.</div>
               </div>
@@ -301,14 +301,14 @@ export const LendingScreen = () => {
             {form.method !== 'none' && (
               <div className="row gap-12">
                 <div style={{ flex: 1 }}><label className="label">기간 (개월)</label>
-                  <input className="input num" type="number" min="1" value={form.term_months}
+                  <input className="input num" type="number" onWheel={e => e.currentTarget.blur()} min="1" value={form.term_months}
                     onChange={e => { f('term_months', e.target.value); setPreview(null) }}/>
                   <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
                     12개월을 넘으면 장기대여금(1503)으로 잡아요.
                   </div>
                 </div>
                 <div style={{ flex: 1 }}><label className="label">회수일</label>
-                  <input className="input num" type="number" min="1" max="28" value={form.pay_day}
+                  <input className="input num" type="number" onWheel={e => e.currentTarget.blur()} min="1" max="28" value={form.pay_day}
                     onChange={e => { f('pay_day', e.target.value); setPreview(null) }}/>
                 </div>
               </div>

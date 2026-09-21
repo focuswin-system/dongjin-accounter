@@ -373,7 +373,7 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
           )}
           <div className="form-cols-2">
             <Field label="소정근로시간" hint="예: 주 40시간"><input className="input" value={form.work_hours} onChange={e => setForm(f => ({ ...f, work_hours: e.target.value }))} placeholder="주 40시간 / 09:00~18:00"/></Field>
-            <Field label="급여 지급일"><input className="input num" type="number" min="1" max="31" value={form.pay_day} onChange={e => setForm(f => ({ ...f, pay_day: parseInt(e.target.value) || 25 }))}/></Field>
+            <Field label="급여 지급일"><input className="input num" type="number" onWheel={e => e.currentTarget.blur()} min="1" max="31" value={form.pay_day} onChange={e => setForm(f => ({ ...f, pay_day: parseInt(e.target.value) || 25 }))}/></Field>
           </div>
           <Field label="4대보험 적용">
             <div className="row gap-4" style={{ flexWrap: 'wrap' }}>

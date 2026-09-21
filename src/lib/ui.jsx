@@ -180,8 +180,11 @@ export const FilterSelect = ({ value, onChange, options, placeholder = "전체" 
   useEffect(() => {
     if (!open) { setQ(""); return; }
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    // 연 것은 Esc 로 닫힌다 — 앱의 다른 목록(기간 선택·행 메뉴)이 이미 그렇게 동작한다
+    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", handler); document.removeEventListener("keydown", onKey); };
   }, [open]);
 
   /* 항목은 **글자 또는 {value,label}** 둘 다 받는다.
@@ -252,8 +255,11 @@ export const HelpPopover = ({ title, items }) => {
   useEffect(() => {
     if (!open) return;
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    // 연 것은 Esc 로 닫힌다 — 앱의 다른 목록(기간 선택·행 메뉴)이 이미 그렇게 동작한다
+    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", handler); document.removeEventListener("keydown", onKey); };
   }, [open]);
 
   return (
@@ -473,7 +479,9 @@ export const Drawer = ({ open, onClose, width = "min(480px, 100vw)", label, chil
   useEffect(() => {
     if (!open || asking) return;
     const onKey = (e) => {
-      if (e.key !== "Escape" || e.defaultPrevented || !isTop()) return;
+      /* 확인창이 위에 떠 있으면 서랍은 Esc 를 받지 않는다 — 안 그러면 확인창을 닫으려던 Esc 가
+         뒤에서 "정말 닫을까요?"를 켜고, 이어 누른 Enter 가 **작성 중이던 서랍을 닫아 버린다**. */
+      if (e.key !== "Escape" || e.defaultPrevented || !isTop() || confirmOpen.n > 0) return;
       e.preventDefault();
       // 읽기 전용이면 물을 것이 없다 — 바로 닫는다
       if (!confirmClose) { onClose?.(); return; }
@@ -569,8 +577,10 @@ export const Popover = ({ trigger, children, align = "right", width = 240, direc
   useEffect(() => {
     if (!open) return;
     const onDoc = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
   }, [open]);
   return (
     <div ref={ref} style={{ position: "relative", display: "block" }}>
@@ -617,6 +627,9 @@ export const PopItem = ({ icon, label, sub, onClick, danger }) => (
 );
 
 /* ── ConfirmDialog ── */
+/* 확인창이 떠 있나 — 서랍이 Esc 를 양보하는 데 쓴다(둘 다 window 에서 키를 듣는다) */
+const confirmOpen = { n: 0 };
+
 const CONFIRM_TONES = {
   info: { bg: "var(--brand-soft)", color: "var(--brand-ink)", btnBg: "var(--brand)",    btnColor: "var(--on-brand)" },
   warn: { bg: "var(--warn-soft)",  color: "var(--warn-ink)",  btnBg: "var(--warn-ink)", btnColor: "var(--on-brand)" },
@@ -629,8 +642,34 @@ export const useConfirm = () => useContext(ConfirmCtx);
 
 export const ConfirmProvider = ({ children }) => {
   const [dlg, setDlg] = useState(null);
+  const okRef = useRef(null);
+  const openerRef = useRef(null);
   const confirm = (opts) => new Promise(resolve => { setDlg({ ...opts, resolve }); });
   const close = (val) => { if (dlg?.resolve) dlg.resolve(val); setDlg(null); };
+
+  /* 확인창은 지우기·마감·이체 같은 **되돌리기 어려운 일** 앞에 선다. 그런데 키보드로는
+     아무것도 안 됐다 — Esc 도 Enter 도 안 먹고, 초점이 뒤 화면에 남아 어디 있는지도 안 보였다.
+     Esc = 취소, Enter = 확인. 열리면 확인 버튼을 잡고, 닫히면 원래 자리로 돌려준다. */
+  useEffect(() => {
+    if (!dlg) return;
+    confirmOpen.n += 1;
+    openerRef.current = document.activeElement;
+    const t = setTimeout(() => okRef.current?.focus({ preventScroll: true }), 30);
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(false); }
+      else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); close(true); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      confirmOpen.n = Math.max(0, confirmOpen.n - 1);
+      clearTimeout(t);
+      window.removeEventListener("keydown", onKey, true);
+      const back = openerRef.current; openerRef.current = null;
+      if (back && document.contains(back) && typeof back.focus === 'function') {
+        setTimeout(() => back.focus({ preventScroll: true }), 30);
+      }
+    };
+  }, [dlg]);
 
   const tone = dlg ? (CONFIRM_TONES[dlg.tone] ?? CONFIRM_TONES.info) : null;
 
@@ -665,11 +704,13 @@ export const ConfirmProvider = ({ children }) => {
 
             {/* 버튼 */}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 24 }}>
-              <button className="btn" onClick={() => close(false)}>{dlg.cancelLabel || "취소"}</button>
-              <button className="btn"
+              <button className="btn" onClick={() => close(false)}>
+                {dlg.cancelLabel || "취소"} <span className="kbd" style={{ marginLeft: 4 }}>Esc</span>
+              </button>
+              <button className="btn" ref={okRef}
                 style={{ background: tone.btnBg, color: tone.btnColor, borderColor: tone.btnBg }}
                 onClick={() => close(true)}>
-                {dlg.confirmLabel || "확인"}
+                {dlg.confirmLabel || "확인"} <span className="kbd" style={{ marginLeft: 4 }}>↵</span>
               </button>
             </div>
           </div>

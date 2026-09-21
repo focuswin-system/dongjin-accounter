@@ -26,9 +26,12 @@ export const useSaveKey = (active, onSave) => {
   }, [active, onSave])
 }
 
+/** 이 컴퓨터의 수정키 — 윈도우 사용자에게 ⌘ 를 보여주면 무슨 키인지 모른다(사용자 환경은 윈도우다) */
+export const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+
 /** 저장 단축키 안내 — 버튼 옆에 같은 모양으로 붙인다 */
 export const SaveKeyHint = () => (
-  <span className="text-xs text-muted2">
-    <span className="kbd">⌘</span> <span className="kbd">↵</span> 저장
+  <span className="text-xs text-muted2 kbd-hint">
+    <span className="kbd">{isMac ? '⌘' : 'Ctrl'}</span> <span className="kbd">↵</span> 저장
   </span>
 )

@@ -8,7 +8,7 @@ import { contractsForVendor, contractFitsVendor } from '../lib/contractPick'
 import { vatOf, supplyOf } from '../lib/vatRate'
 import { matchInvoiceAsking } from '../lib/settleAsk'
 import { usePerms } from '../lib/perms'
-import { useSaveKey } from '../lib/useSaveKey'
+import { useSaveKey, SaveKeyHint } from '../lib/useSaveKey'
 
 // 과세유형 3종. 영세 = 세율 0%인 과세거래(수출·해외용역) — 세액은 0이지만 과세표준엔 들어간다.
 // 면세와 값을 나눠 두지 않으면 신고서에서 둘을 구분할 수 없다. 서버 lib/vat.js와 같은 값집합.
@@ -1499,7 +1499,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
         <div className="drawer-foot">
           <button className="btn" onClick={onClose}>취소</button>
           <div className="ml-auto row gap-8" style={{ alignItems: "center" }}>
-            <span className="text-xs text-muted2"><span className="kbd">⌘</span> <span className="kbd">↵</span> 저장</span>
+            <SaveKeyHint/>
             <button className="btn primary" onClick={handleSave} disabled={busy}><Icon.Check size={14}/> {busy ? "저장 중…" : (editTxn ? "수정" : "등록")}</button>
           </div>
         </div>

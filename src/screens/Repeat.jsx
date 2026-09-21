@@ -7,7 +7,6 @@ import { contractsForVendor, contractFitsVendor } from '../lib/contractPick'
 import { BILLING_PERIODS, periodLong, PAY_TERM_OPTS, payTermNeedsDay, payTermHint } from '../lib/renewal'
 import { vatOf } from '../lib/vatRate'
 import { api } from '../lib/api'
-import { useSaveKey, SaveKeyHint } from '../lib/useSaveKey'
 
 /* 반복거래 — 매달 비슷하게 오가는 돈을 **목록에서 골라 한 번에 만든다.**
  *
@@ -428,7 +427,6 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
     return isOut ? ['A', 'E', 'C'].includes(g) : !['A', 'E'].includes(g)
   }), [contracts, isOut])
 
-  useSaveKey(open, () => save())
   const save = async () => {
     if (needsVendor && !form.vendor_id) { setErrors({ vendor_id: '거래처를 골라주세요' }); return }
     const body = {
@@ -551,7 +549,7 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
           <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
             {!form.pick_day && (
               <>
-                <input className="input num" type="number" min="1" max="31" style={{ width: 80 }}
+                <input className="input num" type="number" onWheel={e => e.currentTarget.blur()} min="1" max="31" style={{ width: 80 }}
                   value={form.day_of_month} onChange={e => f('day_of_month', e.target.value)}/>
                 <span className="text-sm text-muted">일</span>
               </>
@@ -580,7 +578,7 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
               ))}
               {payTermNeedsDay(form.pay_term) && (
                 <div className="row gap-6" style={{ alignItems: 'center' }}>
-                  <input className="input num" type="number" min="1" max="31" style={{ width: 76 }}
+                  <input className="input num" type="number" onWheel={e => e.currentTarget.blur()} min="1" max="31" style={{ width: 76 }}
                     value={form.pay_day ?? 1} onChange={e => f('pay_day', e.target.value)}/>
                   <span className="text-sm text-muted">일</span>
                 </div>

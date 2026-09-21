@@ -358,11 +358,19 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
             )}
             {shownColumns.map((c, i) => {
               const active = sort?.key === c.key
+              /* 정렬은 머리글 클릭이다 — 키보드로도 되게 한다(Tab 으로 오고 Enter/Space).
+                 aria-sort 는 읽어 주는 도구가 지금 어느 방향인지 말할 수 있게 한다. */
               return (
                 <th key={c.key ?? i} data-dt-th={c.key}
                   className={`${alignClass(c.align)} ${c.headClassName || ''}`.trim()}
                   style={{ width: c.width, cursor: c.sortable ? 'pointer' : undefined,
                            position: tableKey ? 'relative' : undefined }}
+                  tabIndex={c.sortable ? 0 : undefined}
+                  aria-sort={c.sortable ? (active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none') : undefined}
+                  onKeyDown={c.sortable ? (e) => {
+                    if (e.target !== e.currentTarget) return
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); clickSort(c) }
+                  } : undefined}
                   onClick={() => clickSort(c)}>
                   <span className="dt-th" style={{ justifyContent: c.align === 'right' ? 'flex-end' : c.align === 'center' ? 'center' : 'flex-start' }}>
                     {c.header}
