@@ -54,14 +54,17 @@ export const JournalEntryDrawer = ({ open, onClose, onSaved, goRoute, initialTyp
        출금전표  대변 = 통장(나간다)  · 차변만 적는다
        대체전표  통장이 없다 — 양쪽을 다 적는다(감가상각·정정)
      셋 다 같은 저장 규칙을 탄다(통장 줄이 있으면 거래, 없으면 대체전표). */
-  const [vtype, setVtype] = useState(initialType)
+  /* 마지막에 쓴 종류로 연다 — 감가상각 시기엔 대체전표만 연달아 적는다.
+     옛 주소(#voucher_entry)로 들어온 경우는 목록이 '대체'라 그쪽이 먼저다(initialType). */
+  const lastType = () => { try { return localStorage.getItem('voucherType') || null } catch { return null } }
+  const [vtype, setVtype] = useState(initialType !== 'in' ? initialType : (lastType() || 'in'))
   const [bankId, setBankId] = useState('')
   /* 거래처 — 전표에도 **선택으로** 둔다. 없으면 거래내역에 '(미확인)'으로 남아
      나중에 거래처별로 묶어 보거나 청구서와 맞출 수 없다. 대체전표는 거래처가 없는 게 보통이라 강요하지 않는다. */
   const [vendors, setVendors] = useState([])
   const [vendorId, setVendorId] = useState('')
 
-  const reset = () => { setDate(localToday()); setSummary(''); setDebits([emptyRow()]); setCredits([emptyRow()]); setBankId(''); setVendorId(''); setVtype(initialType) }
+  const reset = () => { setDate(localToday()); setSummary(''); setDebits([emptyRow()]); setCredits([emptyRow()]); setBankId(''); setVendorId(''); setVtype(initialType !== 'in' ? initialType : (lastType() || 'in')) }
 
   useEffect(() => {
     if (!open) return
@@ -181,6 +184,30 @@ export const JournalEntryDrawer = ({ open, onClose, onSaved, goRoute, initialTyp
     } finally { setBusy(false) }
   }
 
+  /* 한 줄에 적은 **총액**을 공급가액 + 부가세로 가른다.
+     세액은 총액/11 을 반올림하고 공급가는 나머지로 둔다 — 두 줄의 합이 총액과 정확히 같아야
+     차·대변이 맞는다(각각 반올림하면 1원이 남는다). */
+  const vatCodeFor = () => (vtype === 'in' ? '2208' : vtype === 'out' ? '1306' : null)
+  const splitVat = (setter, rows) => {
+    /* 금액 칸에 커서가 남아 있으면 **보이는 숫자가 안 바뀐다** — MoneyInput 은 편집 중에는
+       바깥 값 변경을 따라오지 않는다(치는 중에 숫자가 튀지 않게 막아 둔 장치다).
+       나누기는 바깥에서 값을 바꾸는 일이라, 먼저 커서를 뗀다. */
+    try { document.activeElement?.blur?.() } catch { /* 무시 */ }
+    const code = vatCodeFor()
+    if (!code) return toast.push('부가세 나누기는 입금·출금전표에서 쓸 수 있어요', { tone: 'warn' })
+    const at = [...rows].map((r, i) => ({ r, i })).filter(x => numOf(x.r.amount) > 0 && !VAT_CODES.has(x.r.acct)).pop()
+    if (!at) return toast.push('나눌 금액을 먼저 적어주세요', { tone: 'warn' })
+    const total = numOf(at.r.amount)
+    const vat = Math.round(total / 11)
+    const supply = total - vat
+    setter(rs => {
+      const next = rs.map((r, j) => (j === at.i ? { ...r, amount: String(supply) } : r))
+      next.splice(at.i + 1, 0, { acct: code, memo: '부가세', amount: String(vat) })
+      return next
+    })
+    toast.push(`공급가액 ${fmtNum(supply)} · 부가세 ${fmtNum(vat)} 로 나눴어요`)
+  }
+
   // 한 쪽 블록 렌더 — 차변/대변 공통
   const Side = ({ title, rows, setter, sum, tone }) => (
     <div style={{ flex: '1 1 280px', minWidth: 0 }}>
@@ -202,7 +229,14 @@ export const JournalEntryDrawer = ({ open, onClose, onSaved, goRoute, initialTyp
           </div>
         ))}
       </div>
-      <button className="btn sm" style={{ marginTop: 10 }} onClick={addRow(setter)}><Icon.Plus size={12}/> {title} 줄 추가</button>
+      <div className="row gap-6" style={{ marginTop: 10, flexWrap: 'wrap' }}>
+        <button className="btn sm" onClick={addRow(setter)}><Icon.Plus size={12}/> {title} 줄 추가</button>
+        {/* 세금계산서 건을 전표로 적으면 늘 두 줄이다(매출/매입 + 부가세). 손으로 나누면
+            1/11 을 매번 계산하고 끝자리가 틀어진다 — 여기서 한 번에 가른다. */}
+        {splitVat && (
+          <button className="btn sm" onClick={() => splitVat(setter, rows)}>부가세 10% 나누기</button>
+        )}
+      </div>
       <div className="row" style={{ justifyContent: 'space-between', marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
         <span className="text-sm text-muted2">{title} 합계</span>
         <span className="num fw-700">{fmtNum(sum)}</span>
@@ -241,7 +275,7 @@ export const JournalEntryDrawer = ({ open, onClose, onSaved, goRoute, initialTyp
         <div className="row gap-6">
           {[['in', '입금전표'], ['out', '출금전표'], ['tr', '대체전표']].map(([v, l]) => (
             <button key={v} type="button" className={`chip ${vtype === v ? 'active' : ''}`}
-              onClick={() => setVtype(v)}>{l}</button>
+              onClick={() => { setVtype(v); try { localStorage.setItem('voucherType', v) } catch { /* 저장소를 못 써도 동작은 같다 */ } }}>{l}</button>
           ))}
         </div>
         <div className="row gap-12" style={{ flexWrap: 'wrap' }}>

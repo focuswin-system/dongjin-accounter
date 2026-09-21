@@ -861,14 +861,25 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
 
   return (
     <Drawer open={open} onClose={onClose} width="min(520px, 100vw)" label={editTxn ? "거래 수정" : "거래 등록"}>
-        {/* 종류는 진입점(입금 등록/지출 등록)에서 이미 정해져 열린다 → 폼 안에서 전환하지 않는다. */}
+        {/* 방향은 **폼 안에서** 바꾼다(전표입력이 전표 종류를 안에서 바꾸는 것과 같은 규칙).
+            밖에서 한 번 더 묻던 때는, 잘못 골라 들어오면 닫고 처음부터 다시 해야 했다.
+            ⚠ 수정 중에는 못 바꾼다 — 방향이 바뀌면 그건 다른 거래다(지우고 다시 적는 게 맞다). */}
         <div className="drawer-head" style={{ padding: "14px 22px" }}>
           <div className="row gap-8" style={{ alignItems: "center" }}>
-            <span className={`badge ${kind === "income" ? "pos" : "neg"}`}>
-              {kind === "income"
-                ? <><Icon.In size={13} style={{ verticalAlign: -2, marginRight: 3 }}/> 입금</>
-                : <><Icon.Out size={13} style={{ verticalAlign: -2, marginRight: 3 }}/> 지출</>}
-            </span>
+            {editTxn ? (
+              <span className={`badge ${kind === "income" ? "pos" : "neg"}`}>
+                {kind === "income"
+                  ? <><Icon.In size={13} style={{ verticalAlign: -2, marginRight: 3 }}/> 입금</>
+                  : <><Icon.Out size={13} style={{ verticalAlign: -2, marginRight: 3 }}/> 지출</>}
+              </span>
+            ) : (
+              <div className="row gap-4">
+                {[["income", "입금"], ["expense", "출금"]].map(([v, l]) => (
+                  <button key={v} type="button" className={`chip ${kind === v ? "active" : ""}`}
+                    onClick={() => setKind(v)}>{l}</button>
+                ))}
+              </div>
+            )}
             <span className="fw-700" style={{ fontSize: 15 }}>{editTxn ? "거래 수정" : "거래 등록"}</span>
           </div>
           <button className="icon-btn ml-auto" title="닫기" onClick={onClose}><Icon.Close size={16}/></button>
