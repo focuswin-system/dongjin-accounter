@@ -189,6 +189,7 @@ const AUDIT_RULES = [
   // ── 계좌 ── 잔액 조정은 되돌릴 길이 좁다(project_undelete_gaps 참조)
   { m: 'PUT',    re: /^\/api\/accounts\/([^/]+)$/,                     res: 'account', action: 'edit',   target: 1 },
   { m: 'POST',   re: /^\/api\/accounts\/([^/]+)\/adjustments$/,        res: 'account', action: 'adjust', target: 1 },
+  { m: 'DELETE', re: /^\/api\/accounts\/([^/]+)\/adjustments\/([^/]+)$/, res: 'account', action: 'adjust_delete', target: 1 },
 
   /* ── 차입금·투자 ── 상환·회수는 거래 2건(원금+이자)을 만든다.
      ⚠ `/repay$` 규칙은 있었는데 `-adhoc` 이 정규식에 안 걸려 수시 상환만 무기록이었다. */
@@ -287,6 +288,7 @@ const ACTION_LABELS = {
   transfer: '계좌 이체', status: '상태 변경', evidence: '증빙 첨부·해제',
   // ── 계좌 ──
   adjust: '잔액 조정',
+  adjust_delete: '잔액 조정 지움',
   // ── 회차가 있는 것(차입금·예적금·정기) ──
   edit_cycle: '회차 수정', toggle: '사용 켜기·끄기',
   repay_adhoc: '수시 상환', collect: '회수', collect_adhoc: '수시 회수', redeem: '회수',

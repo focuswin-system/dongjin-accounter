@@ -495,9 +495,19 @@ export const api = {
   async getAdjustments(accountId) {
     try {
       return (await req(`/accounts/${accountId}/adjustments`)).map(a => ({
-        date: a.date, amount: Number(a.amount), reason: a.reason, by: a.created_by,
+        // id 를 함께 준다 — 이게 없으면 잘못 넣은 조정을 지울 수가 없다
+        id: a.id, date: a.date, amount: Number(a.amount), reason: a.reason, by: a.created_by,
       }))
     } catch { return [] }
+  },
+
+  /* 잘못 넣은 조정 되돌리기. 없을 땐 반대 금액으로 한 번 더 조정하는 수밖에 없었고,
+     그러면 틀린 조정 두 줄이 이력에 영원히 남았다. */
+  async deleteAdjustment(accountId, adjId) {
+    try {
+      await req(`/accounts/${accountId}/adjustments/${adjId}`, { method: 'DELETE' })
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
   },
 
   /* 기준일 시점 잔액 — 조정 화면이 "그날 통장에 얼마였나"를 보여주는 데 쓴다.

@@ -2071,6 +2071,26 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
     reloadDetail()
   }
 
+  /* 잘못 넣은 조정 되돌리기.
+     없을 땐 반대 금액으로 한 번 더 조정하는 수밖에 없었고, 그러면 **틀린 조정 두 줄**이
+     이력에 영원히 남아 "이 5백만은 왜 조정됐나"에 답할 수 없었다.
+     잔액이 그 자리에서 움직이므로 반드시 묻는다. 마감된 달은 서버가 막는다. */
+  const removeAdjust = async (a) => {
+    const ok = await confirm({
+      tone: 'neg', icon: <Icon.Warn size={22}/>,
+      title: '조정 지우기',
+      body: `${fmtDateShort(a.date)} · ${a.amount > 0 ? '+' : ''}${fmtNum(a.amount)}원 조정을 지웁니다.`,
+      detail: '이 계좌 잔액이 그만큼 되돌아가요.',
+      confirmLabel: '지우기',
+    })
+    if (!ok) return
+    const res = await api.deleteAdjustment(histTarget.id, a.id)
+    if (!res.ok) { toast.push(res.error || '지우지 못했어요', { tone: 'warn' }); return }
+    toast.push('조정을 지웠어요')
+    setAdjustments(list => (list || []).filter(x => x.id !== a.id))
+    reloadDetail()
+  }
+
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
   /* 드로어가 들고 있는 editing 은 열 때 떠 온 사본이라 잔액을 조정해도 그대로다.
@@ -2457,7 +2477,14 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
                 </span>
               </div>
               <div className="text-sm" style={{ marginTop: 4 }}>{a.reason}</div>
-              <div className="text-xs text-muted">작성: {a.by}</div>
+              <div className="row" style={{ marginTop: 2 }}>
+                <span className="text-xs text-muted">작성: {a.by}</span>
+                {/* 잘못 넣은 조정을 되돌린다 — 없을 땐 반대 금액으로 한 번 더 조정하는 수밖에
+                    없었고, 그러면 틀린 조정 두 줄이 이력에 남았다. 마감된 달은 서버가 막는다. */}
+                {a.id && (
+                  <button className="btn sm ghost ml-auto" onClick={() => removeAdjust(a)}>지우기</button>
+                )}
+              </div>
             </div>
           ))}
         </div>

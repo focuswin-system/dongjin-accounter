@@ -258,4 +258,23 @@ router.post('/:id/adjustments', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/* 잔액 조정 되돌리기 — **없어서 못 지우던 유일한 장부 항목**이었다.
+ *
+ * 조정은 거래가 아니라서 거래내역에서 지울 수 없고, 이력에도 지우기가 없었다.
+ * 그래서 0 하나 더 붙인 조정이 들어가면 되돌릴 길이 아예 없었다 — 반대 금액으로 한 번 더
+ * 조정해 상쇄하는 수밖에 없었고, 그러면 이력에 틀린 조정 두 줄이 영원히 남는다.
+ *
+ * ⚠ 마감된 달의 조정은 못 지운다(넣을 때와 같은 선). 지우면 그 달 잔액이 바뀐다. */
+router.delete('/:id/adjustments/:adjId', async (req, res, next) => {
+  try {
+    const [[adj]] = await req.db.execute(
+      'SELECT id, date FROM account_adjustments WHERE id = ? AND account_id = ?',
+      [req.params.adjId, req.params.id])
+    if (!adj) return res.status(404).json({ error: '그 조정을 찾을 수 없어요' })
+    { const ce = await closedPeriodError(req.db, adj.date); if (ce) return res.status(409).json({ error: ce }) }
+    await req.db.execute('DELETE FROM account_adjustments WHERE id = ?', [req.params.adjId])
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
 module.exports = router
