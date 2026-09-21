@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { Drawer, Icon } from '../ui'
 import { DrawerHead } from './Drawer'
 
@@ -25,17 +26,41 @@ import { DrawerHead } from './Drawer'
  * @param onPick  (id) => void
  * @param footer  목록 아래 한 줄(선택)
  */
-export const SourceChooser = ({ open, title, sub, label, options = [], onPick, onClose, footer }) => (
+export const SourceChooser = ({ open, title, sub, label, options = [], onPick, onClose, footer }) => {
+  /* 고르기는 **손이 키보드에 있을 때 가장 빠르다** — 숫자키로 바로, ↑↓ 로 옮겨 Enter.
+     번호를 카드에 적어 둔다(안 보이는 단축키는 없는 단축키다). */
+  const boxRef = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e) => {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return
+      const btns = [...(boxRef.current?.querySelectorAll('button.doctype-pick') || [])]
+      if (!btns.length) return
+      const n = Number(e.key)
+      if (n >= 1 && n <= btns.length) { e.preventDefault(); btns[n - 1].click(); return }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        const at = btns.indexOf(document.activeElement)
+        const next = e.key === 'ArrowDown' ? Math.min(btns.length - 1, at + 1) : Math.max(0, at - 1)
+        btns[at < 0 ? 0 : next].focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, options])
+
+  return (
   /* confirmClose={false} — 입력 칸이 없는 '고르기' 화면이다. 기본값이면 Esc 를 눌렀을 때
      "쓰던 내용은 저장되지 않아요"가 뜨는데, 쓴 내용이 없는데 물으면 사용자는 자기가 뭘
      잃는지 몰라 멈칫한다. */
   <Drawer open={open} onClose={onClose} confirmClose={false} label={label || title}>
     <DrawerHead title={title} sub={sub} onClose={onClose}/>
-    <div className="drawer-body col" style={{ gap: 10 }}>
-      {options.map(o => {
+    <div className="drawer-body col" style={{ gap: 10 }} ref={boxRef}>
+      {options.map((o, i) => {
         const Ic = o.icon || Icon.Doc
         return (
-          <button key={o.id} type="button" className="card doctype-pick" onClick={() => onPick(o.id)}>
+          <button key={o.id} type="button" className="card doctype-pick" data-autofocus={i === 0 ? '' : undefined}
+            onClick={() => onPick(o.id)}>
             <div className="row" style={{ gap: 12, alignItems: 'flex-start' }}>
               <span className="doctype-ico"><Ic size={18}/></span>
               <span style={{ flex: 1, textAlign: 'left' }}>
@@ -47,6 +72,7 @@ export const SourceChooser = ({ open, title, sub, label, options = [], onPick, o
                   </span>
                 )}
               </span>
+              <span className="kbd" style={{ alignSelf: 'center' }}>{i + 1}</span>
               <Icon.Right size={16}/>
             </div>
           </button>
@@ -55,6 +81,8 @@ export const SourceChooser = ({ open, title, sub, label, options = [], onPick, o
       {footer && (
         <div className="text-xs text-muted2" style={{ marginTop: 6, lineHeight: 1.7 }}>{footer}</div>
       )}
+      <div className="text-xs text-muted2" style={{ marginTop: 2 }}>숫자키로 바로 고를 수 있어요 · ↑↓ 로 옮기고 Enter</div>
     </div>
   </Drawer>
-)
+  )
+}

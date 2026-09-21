@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, Drawer, Combobox, MoneyInput } from '../ui'
 import { DrawerHead, DrawerFooter } from './Drawer'
 import { api } from '../api'
+import { useSaveKey, SaveKeyHint } from '../useSaveKey'
 
 /**
  * 이월 잔액 — 이 프로그램을 쓰기 전부터 있던 미수금·미지급금(4단계, 2026-09).
@@ -35,6 +36,7 @@ export const CarryoverDrawer = ({ open, onClose, booksStart }) => {
   const filled = rows.filter(r => r.vendor_id && num(r.amount) > 0)
   const sumOf = (kind) => filled.filter(r => r.kind === kind).reduce((s, r) => s + num(r.amount), 0)
 
+  useSaveKey(open, () => { if (filled.length && !busy) save() })
   const save = async () => {
     if (!filled.length) return toast.push('거래처와 금액을 적어주세요', { tone: 'warn' })
     setBusy(true)
@@ -106,7 +108,8 @@ export const CarryoverDrawer = ({ open, onClose, booksStart }) => {
       </div>
       <DrawerFooter>
         <span className="text-xs text-muted2">받을 돈 {fmtNum(sumOf('issued'))} · 줄 돈 {fmtNum(sumOf('received'))}</span>
-        <button className="btn ml-auto" onClick={onClose}>닫기</button>
+        <span className="ml-auto" style={{ marginRight: 8 }}><SaveKeyHint/></span>
+        <button className="btn" onClick={onClose}>닫기</button>
         <button className="btn primary" onClick={save} disabled={busy || !filled.length}><Icon.Check size={14}/> 넣기</button>
       </DrawerFooter>
     </Drawer>

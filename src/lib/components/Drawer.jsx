@@ -1,4 +1,5 @@
 import { Icon } from '../ui'
+import { SaveKeyHint } from '../useSaveKey'
 
 // 드로어 머리·발 공통 부품. 껍데기(포털+백드롭+aside)는 lib/ui.jsx 의 Drawer 가 담당하고,
 // 그 안의 반복되는 머리(제목+부제+닫기)·발(취소/저장)만 여기서 뽑는다.
@@ -34,9 +35,13 @@ export const DrawerFooter = ({ onCancel, cancelLabel = '취소', onSave, saveLab
       <>
         {onCancel && <button className="btn" onClick={onCancel}>{cancelLabel}</button>}
         {onSave && (
-          <button className="btn primary ml-auto" onClick={onSave} disabled={saveDisabled}>
-            <Icon.Check size={14}/> {saveLabel}
-          </button>
+          <>
+            {/* 단축키는 **보이는 자리에** 적는다 — 안 보이는 단축키는 없는 단축키다 */}
+            <span className="ml-auto" style={{ marginRight: 8 }}><SaveKeyHint/></span>
+            <button className="btn primary" onClick={onSave} disabled={saveDisabled}>
+              <Icon.Check size={14}/> {saveLabel}
+            </button>
+          </>
         )}
       </>
     )}

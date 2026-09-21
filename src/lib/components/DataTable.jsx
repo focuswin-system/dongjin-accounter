@@ -389,7 +389,15 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
             const able = select ? canSelect(row) : false
             return (
               <Fragment key={key}>
+                {/* 눌러서 여는 행은 **키보드로도 열려야 한다** — Tab 으로 옮기고 Enter/Space.
+                    마우스로만 열리면 키보드로 표를 훑던 사람은 거기서 손을 떼야 한다. */}
                 <tr onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  tabIndex={onRowClick ? 0 : undefined}
+                  role={onRowClick ? 'button' : undefined}
+                  onKeyDown={onRowClick ? (e) => {
+                    if (e.target !== e.currentTarget) return   // 칸 안의 버튼·체크박스가 먼저다
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onRowClick(row) }
+                  } : undefined}
                   style={onRowClick ? { cursor: 'pointer' } : undefined}
                   className={[on ? 'dt-selected' : '', rowClass ? rowClass(row) : ''].filter(Boolean).join(' ') || undefined}>
                   {select && (

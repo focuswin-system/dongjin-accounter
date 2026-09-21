@@ -7,6 +7,7 @@ import { contractsForVendor, contractFitsVendor } from '../lib/contractPick'
 import { BILLING_PERIODS, periodLong, PAY_TERM_OPTS, payTermNeedsDay, payTermHint } from '../lib/renewal'
 import { vatOf } from '../lib/vatRate'
 import { api } from '../lib/api'
+import { useSaveKey, SaveKeyHint } from '../lib/useSaveKey'
 
 /* 반복거래 — 매달 비슷하게 오가는 돈을 **목록에서 골라 한 번에 만든다.**
  *
@@ -427,6 +428,7 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
     return isOut ? ['A', 'E', 'C'].includes(g) : !['A', 'E'].includes(g)
   }), [contracts, isOut])
 
+  useSaveKey(open, () => save())
   const save = async () => {
     if (needsVendor && !form.vendor_id) { setErrors({ vendor_id: '거래처를 골라주세요' }); return }
     const body = {

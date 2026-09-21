@@ -2138,6 +2138,8 @@ body:has([data-modal-open]) {
 }
 .link-cell:hover { text-decoration: underline; text-underline-offset: 3px; }
 .link-cell:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 3px; }
+/* 표에서 키보드로 행을 훑을 때 지금 어디에 있는지 보이게 — 색은 토큰만(다크에서도 같이 간다) */
+.table tbody tr[tabindex]:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
 
 /* 머리글 없는 섹션 — '거래내역'처럼 한 겹이 헛도는 자리라 라벨을 비웠다(nav.js).
    그런데 라벨만 지우면 **위 섹션의 마지막 항목처럼 보인다**(들여쓰기가 같다).

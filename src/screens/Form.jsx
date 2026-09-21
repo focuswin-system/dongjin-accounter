@@ -8,6 +8,7 @@ import { contractsForVendor, contractFitsVendor } from '../lib/contractPick'
 import { vatOf, supplyOf } from '../lib/vatRate'
 import { matchInvoiceAsking } from '../lib/settleAsk'
 import { usePerms } from '../lib/perms'
+import { useSaveKey } from '../lib/useSaveKey'
 
 // 과세유형 3종. 영세 = 세율 0%인 과세거래(수출·해외용역) — 세액은 0이지만 과세표준엔 들어간다.
 // 면세와 값을 나눠 두지 않으면 신고서에서 둘을 구분할 수 없다. 서버 lib/vat.js와 같은 값집합.
@@ -461,14 +462,9 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   }, [form.accountCode, form.category, categories, acctSubjects]);
 
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); handleSave(); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, form, kind]);
+  /* ⌘/Ctrl+Enter 저장 — 규칙은 lib/useSaveKey.jsx 한 곳.
+     ⚠ handleSave 는 **아래에** 선언돼 있다. 그대로 넘기면 렌더 중에 읽혀 터진다(TDZ). 감싸서 넘긴다. */
+  useSaveKey(open, () => handleSave());
 
   /* 상대 계좌 고르기 — 거래처가 계좌를 **여럿** 준 경우에만 묻는다.
      하나뿐이면 고를 것이 없으므로 묻지 않고 그 계좌를 붙인다(위 effect).

@@ -10,6 +10,7 @@ import { api } from '../lib/api'
 import { downloadXlsx } from '../lib/export'
 import { ResolutionDocument } from './Docs'
 import { JournalEntryDrawer, journalVoucherOf } from './VoucherEntry'
+import { SourceChooser } from '../lib/components/SourceChooser'
 import { isMiscPl } from '../lib/txnScope'
 import { usePerms } from '../lib/perms'
 
@@ -50,6 +51,7 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
      같은 표에 '대체'로 세운다. 합계(입금·지출)에는 안 든다 — 통장이 안 움직였으니까. */
   const [journals, setJournals] = useState([]);
   const [jOpen, setJOpen] = useState(openJournalOnMount && canJournal);
+  const [entryPick, setEntryPick] = useState(false);   // 전표 고르기(입금·출금·대체)
   const [jView, setJView] = useState(null);   // { voucher, jvId, docNo }
   useEffect(() => { if (openJournalOnMount && canJournal) setJOpen(true); }, [openJournalOnMount, canJournal]);
 
@@ -307,6 +309,22 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
    *
    * 반복되는 돈은 반복거래에서, 세금계산서가 오간 돈은 세금계산서 화면에서 처리하는 게 낫다 —
    * 거래 폼이 거래처·금액을 보고 그 둘을 알려준다(entry-hints). */
+  /* 전표 고르기 — 권한이 있는 것만 담는다. 하나도 없으면 버튼 자체를 안 그린다. */
+  const entryOptions = [
+    openIncome && { id: 'income', icon: Icon.In, label: '입금', desc: '통장으로 들어온 돈',
+      effect: '계좌 잔액이 늘고, 못 받은 청구서가 있으면 함께 알려줘요.' },
+    openExpense && { id: 'expense', icon: Icon.Out, label: '출금', desc: '통장에서 나간 돈',
+      effect: '계좌 잔액이 줄고, 비목이 그대로 비용 계정이 돼요.' },
+    canJournal && { id: 'journal', icon: Icon.Sign, label: '대체', desc: '돈이 안 움직인 분개(감가상각·정정 등)',
+      effect: '차변·대변을 직접 적어요. 입금·출금 합계에는 들지 않아요.' },
+  ].filter(Boolean);
+  const pickEntry = (id) => {
+    setEntryPick(false);
+    if (id === 'income') openIncome?.();
+    else if (id === 'expense') openExpense?.();
+    else setJOpen(true);
+  };
+
   const titleMap = { all: "거래내역", income: "거래내역 · 입금", expense: "거래내역 · 출금", journal: "거래내역 · 대체", misc: "거래내역 · 주문 없는 돈" };
   const subMap = {
     all:     "통장에서 오간 돈과 대체전표를 봅니다. 세금계산서가 있는 건은 세금계산서에서 적어요.",
@@ -327,9 +345,14 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
           actions={<>
             <button className="btn excel" onClick={openExcel}><Icon.Excel/> <span className="btn-label-hide">엑셀 업로드</span></button>
             <button className="btn" onClick={exportXlsx}><Icon.Excel/> <span className="btn-label-hide">엑셀 내보내기</span></button>
-            {canJournal && <button className="btn" onClick={() => setJOpen(true)}><Icon.Plus size={14}/> 대체</button>}
-            {openIncome && <button className="btn primary" onClick={openIncome}><Icon.Plus size={14}/> 입금</button>}
-            {openExpense && <button className="btn primary" onClick={openExpense}><Icon.Plus size={14}/> 출금</button>}
+            {/* 입구는 **하나**다 — 누르면 무엇을 적는지 묻는다(입금·출금·대체).
+                버튼 셋을 늘어놓으면 고르는 일이 화면 머리에 상시로 놓여, 매번 세 개를 읽고 고르게 된다.
+                고르는 자리는 다른 입구(문서 만들기)와 같은 모양을 쓴다(SourceChooser). */}
+            {entryOptions.length > 0 && (
+              <button className="btn primary" onClick={() => setEntryPick(true)}>
+                <Icon.Plus size={14}/> 전표
+              </button>
+            )}
           </>}
         />
 
@@ -504,6 +527,12 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
       </div>
 
       <TransactionDetailDrawer txn={sel} onClose={() => setSel(null)} toast={toast} confirm={confirm} openEdit={openEdit} onAction={reload}/>
+      <SourceChooser
+        open={entryPick} onClose={() => setEntryPick(false)}
+        title="무엇을 적을까요?" sub="손에 든 것으로 고르세요"
+        label="전표 종류" options={entryOptions} onPick={pickEntry}
+        footer="세금계산서가 오간 건은 세금계산서 화면에서, 매달 반복되는 건은 반복거래에서 적어요."/>
+
       <JournalEntryDrawer open={jOpen} onClose={() => setJOpen(false)}
         onSaved={({ source, id }) => {
           setJOpen(false); reload();

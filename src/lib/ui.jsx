@@ -499,11 +499,30 @@ export const Drawer = ({ open, onClose, width = "min(480px, 100vw)", label, chil
   // 물어보는 순간 '닫기'에 초점을 준다 — Enter 가 무엇을 누르는지 눈으로도 보이게
   useEffect(() => { if (asking) okRef.current?.focus(); }, [asking]);
 
+  /* 열리면 **첫 칸에 손을 얹어 준다.** 서랍을 열 때마다 마우스로 첫 칸을 찍게 하면
+     한 건 적는 동안 손이 키보드를 두 번 떠난다(경리 업무는 연달아 친다).
+     `data-autofocus` 가 있으면 그 칸을, 없으면 본문의 첫 입력 칸을 잡는다.
+     ⚠ 버튼은 잡지 않는다 — 첫 버튼이 '삭제'인 서랍에서 Enter 가 사고가 된다. */
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(() => {
+      const root = meRef.current?.el || document.querySelector('.drawer.open');
+      if (!root) return;
+      /* 순서대로 찾는다: 화면이 지목한 칸 → 본문의 첫 입력 칸(콤보박스 포함).
+         콤보박스는 초점을 받으면 목록을 여는데, 그게 맞다 — 거래처부터 치기 시작하는 자리다. */
+      const pick = root.querySelector('[data-autofocus]')
+        || root.querySelector('.drawer-body input:not([type=hidden]):not([disabled]):not([readonly]), .drawer-body textarea:not([disabled]), .drawer-body [tabindex="0"]');
+      if (pick && typeof pick.focus === 'function') pick.focus({ preventScroll: true });
+    }, 60);
+    return () => clearTimeout(t);
+  }, [open]);
+
   if (!open) return null;
   return createPortal(
     <>
       <div className="drawer-backdrop open" onClick={onClose}/>
-      <aside className="drawer open" role="dialog" aria-label={label} style={{ width }}>
+      <aside className="drawer open" role="dialog" aria-label={label} style={{ width }}
+        ref={el => { if (meRef.current) meRef.current.el = el }}>
         {children}
         {asking && (
           <div className="drawer-ask" onClick={() => setAsking(false)}>
@@ -812,14 +831,26 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
     setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select(); }, 10);
   };
 
+  /* 고른 다음엔 **다음 칸으로 손을 옮겨 준다** — 엑셀에서 Enter 가 하는 일과 같다.
+     안 옮기면 초점이 사라져(닫힌 상자에는 초점 둘 곳이 없다) 다음 칸을 마우스로 찍어야 한다. */
+  const focusNextField = () => {
+    const root = rootRef.current?.closest('.drawer, form, body') || document
+    const all = [...root.querySelectorAll('input:not([type=hidden]):not([disabled]):not([readonly]), textarea:not([disabled]), [tabindex="0"]')]
+      .filter(el => el.offsetParent !== null)
+    const here = rootRef.current
+    const at = all.findIndex(el => here?.contains(el) || el === here)
+    const next = all.slice(at + 1).find(el => !here?.contains(el))
+    next?.focus({ preventScroll: true })
+  }
+
   const onKeyDown = (e) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setHi(h => Math.min(filtered.length - 1, h + 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setHi(h => Math.max(0, h - 1)); }
     else if (e.key === "Enter") {
       e.preventDefault();
-      if (filtered[hi]) pick(filtered[hi]);
-      else if (exact) pick(exact);
-      else if (term && allowAdd) { onAddNew?.(term); setOpen(false); setQ(""); setDirty(false); }
+      if (filtered[hi]) { pick(filtered[hi]); setTimeout(focusNextField, 20); }
+      else if (exact) { pick(exact); setTimeout(focusNextField, 20); }
+      else if (term && allowAdd) { onAddNew?.(term); setOpen(false); setQ(""); setDirty(false); setTimeout(focusNextField, 20); }
       // 아무것도 안 치고 안 짚었으면 '이대로 두기'다 — 값을 건드리지 않고 닫는다
       else { setOpen(false); setQ(""); setDirty(false); }
     } else if (e.key === "Escape") {

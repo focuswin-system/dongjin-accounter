@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { Icon, fmtNum, useToast, Combobox, MoneyInput, DateInput, localToday, Drawer } from '../lib/ui'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { api } from '../lib/api'
+import { useSaveKey, SaveKeyHint } from '../lib/useSaveKey'
 
 /**
  * 대체전표 입력 — 분개전표 모양 그대로. 왼쪽이 **차변** 블록, 오른쪽이 **대변** 블록이고,
@@ -76,6 +77,7 @@ export const JournalEntryDrawer = ({ open, onClose, onSaved }) => {
   const usableDebits = debits.filter(r => r.acct && numOf(r.amount))
   const usableCredits = credits.filter(r => r.acct && numOf(r.amount))
 
+  useSaveKey(open, () => { if (balanced && !busy) save() })
   const save = async () => {
     if (usableDebits.length + usableCredits.length < 2 || !usableDebits.length || !usableCredits.length)
       return toast.push('차변과 대변에 각각 한 줄 이상 적어주세요', { tone: 'warn' })
@@ -179,7 +181,8 @@ export const JournalEntryDrawer = ({ open, onClose, onSaved }) => {
         {debitSum !== creditSum
           ? <span className="badge warn" style={{ fontSize: 11 }}>차변·대변 차이 {fmtNum(Math.abs(debitSum - creditSum))}</span>
           : (debitSum > 0 && <span className="badge pos" style={{ fontSize: 11 }}>차·대변 일치</span>)}
-        <button className="btn ml-auto" onClick={onClose}>취소</button>
+        <span className="ml-auto" style={{ marginRight: 8 }}><SaveKeyHint/></span>
+        <button className="btn" onClick={onClose}>취소</button>
         <button className="btn primary" onClick={save} disabled={busy || !balanced}>
           <Icon.Check size={14}/> 전표 저장
         </button>
