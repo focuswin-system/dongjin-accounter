@@ -606,7 +606,8 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
       openIncome={() => setTxnForm({ kind: "income" })}
       openExpense={() => setTxnForm({ kind: "expense" })}
       canJournal={canDo("voucher_entry", "create")}
-      openJournalOnMount={openJournalOnMount}/>
+      openJournalOnMount={openJournalOnMount}
+      goRoute={go}/>
   );
 
   const Screen = useMemo(() => {
