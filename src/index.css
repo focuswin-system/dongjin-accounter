@@ -1633,6 +1633,11 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
     overflow: visible; padding: 0; background: var(--surface) !important;
   }
   .no-print, .dt-colmenu { display: none !important; }
+  /* ⚠ 머리글의 **버튼 자리는 언제나 화면 전용**이다 — 종이에 누를 것이 없다.
+     버튼마다 no-print 를 달게 하면 하나는 반드시 빠진다. 실제로 '손보기' 버튼이
+     자금일보 종이 오른쪽 위에 그대로 찍혔다(안내 문구에는 달려 있었는데 버튼에만 없었다).
+     자리를 통째로 막아서 다음 버튼도 저절로 빠지게 한다. */
+  .page-header-actions { display: none !important; }
   /* 종이에서만 나오는 것 — 회사·기간 머리글처럼 화면엔 필요 없고 인쇄물엔 있어야 하는 줄 */
   .print-only { display: block !important; }
   /* 보고서 이름 — 화면에서는 PageHeader 가 맡고, 종이에서는 이 줄이 맡는다

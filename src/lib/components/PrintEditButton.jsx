@@ -15,7 +15,9 @@ export const PrintEditButton = ({ on, toggle, count }) => {
           글자 칸만 · 저장 안 됨
         </span>
       )}
-      <button className={`btn sm ${on ? 'primary' : ''}`} onClick={toggle}
+      {/* ⚠ no-print — 이 버튼은 **화면 전용**이다. 빠뜨렸더니 종이 오른쪽 위에 '손보기'가
+          그대로 찍혔다(다크 모드 인쇄 미리보기에서 발견). 바로 위 안내 문구에는 걸려 있었다. */}
+      <button className={`btn sm no-print ${on ? 'primary' : ''}`} onClick={toggle}
         title={on ? '손보기를 끕니다' : '인쇄 전에 비고 같은 글자 칸을 그 자리에서 고칩니다 (숫자는 잠겨요)'}>
         <Icon.Pencil size={13}/> {on ? '손보기 끄기' : '손보기'}
       </button>
