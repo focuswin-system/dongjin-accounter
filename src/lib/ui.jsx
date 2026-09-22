@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, createContext, useContext, cloneElement } from 'react'
 import { createPortal } from 'react-dom'
+import { createBusyRun } from './busyRun.js'
 
 /* ── Formatters ── */
 export const fmtNum = (n) => (n ?? 0).toLocaleString("ko-KR");
@@ -739,14 +740,10 @@ export const useToast = () => useContext(ToastCtx);
  */
 export const useBusy = () => {
   const [busy, setBusy] = useState(false)
-  const lock = useRef(false)
-  const run = async (fn) => {
-    if (lock.current) return
-    lock.current = true; setBusy(true)
-    try { return await fn() }
-    finally { lock.current = false; setBusy(false) }
-  }
-  return [busy, run]
+  // 규칙은 lib/busyRun.js — 순수 함수라 테스트로 못박혀 있다(server/test/busyRun.test.js)
+  const runRef = useRef(null)
+  if (!runRef.current) runRef.current = createBusyRun(setBusy)
+  return [busy, runRef.current]
 }
 
 export const ToastProvider = ({ children }) => {
