@@ -19,6 +19,12 @@ import { Icon } from '../ui'
 //   headClassName,  th className
 // }]
 // rows: 배열 / onRowClick(row): 행 클릭 / empty: 빈 상태(문자열·노드) / minWidth: 표 최소 폭(px) / maxHeight: 세로 스크롤 상한(px)
+//
+// loading: 아직 못 읽었나. **'없음'과 '아직 안 옴'은 다른 말이다.**
+//   예전엔 둘을 구분하지 않아, 화면을 열면 "조건에 맞는 거래내역이 없어요."가 번쩍였다가
+//   표가 채워졌다. 새 회사는 그 문구가 진짜인지 로딩인지 알 수 없었고, 카드 대금에서는
+//   "카드 등록하러 가기" 버튼이 번쩍여 **없는 카드를 또 만들러 가게** 만들었다.
+//   화면이 파생 계산을 많이 하면 rows 를 null 로 바꾸기 어렵다 — 그때는 loading 플래그만 든다.
 // footer: <tfoot> 내용(합계 행 등, 옵션) / rowKey(row): key 추출(기본 row.id ?? index)
 // renderExpanded(row): 펼침 내용. 값을 돌려주는 행만 아래에 전폭 행이 하나 더 붙는다.
 //   (차입금 상환 스케줄·예적금 납입 스케줄처럼 '행 안의 표'가 필요한 화면이 여럿이라 여기 둔다.
@@ -58,7 +64,7 @@ const writePrefs = (k, v) => {
 const colLabel = (c) =>
   c.label || (typeof c.header === 'string' && c.header.trim() ? c.header : null) || c.key || '이름 없는 열'
 
-export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용이 없어요', footer, rowKey, renderExpanded, select, rowClass, minWidth, maxHeight,
+export const DataTable = ({ columns, rows, loading, onRowClick, empty = '표시할 내용이 없어요', footer, rowKey, renderExpanded, select, rowClass, minWidth, maxHeight,
   /* tableKey: 주면 '열' 버튼이 생긴다 — 열 접기·순서·너비를 이 브라우저에 기억한다.
      **모든 열을 접을 수 있다**(마지막 한 열만 남긴다). 무엇이 필요한지는 보는 사람이 정한다 —
      우리가 '이건 못 끕니다'로 정해 두면 정작 안 쓰는 열을 못 치운다.
@@ -91,7 +97,13 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
       .map(c => (widths[c.key] ? { ...c, width: widths[c.key] } : c))
   }, [columns, prefs, tableKey])
 
+  /* '아직 안 옴' 판정 — 화면이 loading 을 주면 그것을, 안 주면 rows 가 null/undefined 인지 본다.
+     빈 배열([])은 **진짜 없음**이다 — 그건 로딩으로 보지 않는다. */
+  const isLoading = loading ?? (rows == null)
+
   const sorted = useMemo(() => {
+    // rows 가 null 로 오는 화면이 있다(아직 안 읽음) — 정렬·지도에서 터지지 않게 빈 배열로 본다
+    if (!Array.isArray(rows)) return []
     if (!sort) return rows
     const col = shownColumns.find(c => c.key === sort.key)
     if (!col) return rows
@@ -388,7 +400,9 @@ export const DataTable = ({ columns, rows, onRowClick, empty = '표시할 내용
           </tr>
         </thead>
         <tbody>
-          {sorted.length === 0 ? (
+          {isLoading ? (
+            <tr><td colSpan={colCount} className="dt-empty">불러오는 중…</td></tr>
+          ) : sorted.length === 0 ? (
             <tr><td colSpan={colCount} className="dt-empty">{empty}</td></tr>
           ) : sorted.map((row, i) => {
             const key = keyByRow.get(row) ?? keyOf(row, i)

@@ -37,6 +37,9 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
   const [bulkContract, setBulkContract] = useState(null);
   const [allContracts, setAllContracts] = useState([]);
   const [txns, setTxns] = useState([]);
+  /* 아직 못 읽었나 — 빈 배열만 보면 "거래내역이 없어요"가 열자마자 번쩍인다.
+     '없음'과 '아직 안 옴'은 다른 말이다. 파생 계산은 그대로 두고 플래그만 따로 든다. */
+  const [loading, setLoading] = useState(true);
   // 미수금/미지급금은 청구서 기준(회수는 입금·환불/지급·환입 화면에서). 여기선 요약만 청구서 기준으로 표시.
   const [recSummary, setRecSummary] = useState(null);
   const [paySummary, setPaySummary] = useState(null);
@@ -65,7 +68,7 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
   const canRec = can("billing_issued", "view") || can("ar", "view");
   const canPay = can("billing_received", "view") || can("ap", "view");
   const reload = () => {
-    api.getTransactions().then(setTxns);
+    api.getTransactions().then(setTxns).finally(() => setLoading(false));
     if (canRec) api.getReceivablesSummary().then(setRecSummary);
     if (canPay) api.getPayablesSummary().then(setPaySummary);
     // 서버가 볼 수 있는 방향만 준다(sidePerms) — 둘 다 없으면 부르지 않는다
@@ -475,6 +478,7 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
 
           <DataTable
             rows={filtered}
+            loading={loading}
             /* 예정 행은 거래가 아니라 청구서다 — 거래 상세를 열면 없는 거래를 보여주게 된다.
                그 청구서 화면으로 보낸다(미수금=#ar / 미지급금=#ap, 해당 건이 열린 채로). */
             onRowClick={t => {

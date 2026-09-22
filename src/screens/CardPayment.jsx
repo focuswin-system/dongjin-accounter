@@ -88,6 +88,9 @@ export const CardPaymentScreen = ({ openEdit, goRoute }) => {
      그 카드가 미리 골라져 있다). 빈 문자열이면 위쪽 버튼으로 들어온 것이라 마법사에서 고른다. */
   const [importing, setImporting] = useState(null)
   const [categories, setCategories] = useState([])
+  /* 아직 못 읽었나 — 빈 상태가 **행동을 권하는** 화면이라(카드 등록하러 가기) 번쩍이면
+     없는 카드를 또 만들러 간다. 읽기 전에는 아무 말도 하지 않는다. */
+  const [loading, setLoading] = useState(true)
 
   const today = localToday()
 
@@ -114,7 +117,7 @@ export const CardPaymentScreen = ({ openEdit, goRoute }) => {
       .filter(t => t.transferId && cardIds.has(t.counterpartyAccountId))
       .sort((a, b) => String(b.date).localeCompare(String(a.date))))
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => { load().finally(() => setLoading(false)) }, [])
   // 명세서 업로드에서 고를 비목 — 업로드를 안 열면 안 쓰지만, 화면에 들어올 때 한 번만 받는다
   useEffect(() => { api.getCategories().then(rows => setCategories(rows || [])).catch(() => {}) }, [])
 
@@ -271,7 +274,9 @@ export const CardPaymentScreen = ({ openEdit, goRoute }) => {
         </div>
       )}
 
-      {bills.length === 0 ? (
+      {loading ? (
+        <div className="card card-pad text-sm text-muted2">불러오는 중…</div>
+      ) : bills.length === 0 ? (
         /* 빈 상태는 **다음에 뭘 해야 하는지**를 말해야 한다.
            카드가 한 장도 없는 것과, 카드는 있는데 갚을 게 없는 것은 다른 상황이다 —
            전자는 등록하러 가야 하고, 후자는 명세서를 올려 사용분을 채워야 한다.

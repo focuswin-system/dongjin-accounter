@@ -243,7 +243,7 @@ export const TransferScreen = ({ openEdit }) => {
                 <span className="text-sm">{byId.get(t.counterpartyAccountId)?.name || '—'}</span>
                 {acctNo(t.counterpartyAccountId) && <div className="text-xs text-muted2 num">{acctNo(t.counterpartyAccountId)}</div>}
               </div> },
-            { key: 'memo', header: '내용', render: t => <span className="text-sm text-muted">{t.memo || '—'}</span> },
+            { key: 'memo', header: '적요', render: t => <span className="text-sm text-muted">{t.memo || '—'}</span> },
             { key: 'amount', header: '금액', align: 'right', sortable: true,
               render: t => <span className="num-cell">{fmtNum(t.amount)}</span> },
             /* 취소 열은 종이에 필요 없다 — 버튼만이 아니라 열(머리글+칸) 전체를 인쇄에서 뺀다.

@@ -3437,7 +3437,7 @@ const ReportCard = ({ toast }) => {
                   render: l => <span className="text-sm">{l.vendor || '—'}</span> },
                 { key: 'category', header: '비목', width: 140, sortable: true,
                   render: l => <span className="text-sm text-muted">{l.category || '—'}</span> },
-                { key: 'memo', header: '내용', sortable: true,
+                { key: 'memo', header: '적요', sortable: true,
                   render: l => <span className="text-sm text-muted">{l.memo || '—'}</span> },
                 /* 챙긴 건에는 표식을 달지 않는다 — 눈에 띄어야 하는 건 빠진 쪽이다.
                    정렬은 **미첨부가 먼저** 오게 둔다(0=미첨부) — 이 열을 누르는 이유가 그거다. */
@@ -3479,7 +3479,7 @@ const ReportCard = ({ toast }) => {
                     render: p => <span className="text-sm num">{p.date}</span> },
                   { key: 'from', header: '출금 계좌', sortable: true,
                     render: p => <span className="text-sm">{p.from || '—'}</span> },
-                  { key: 'memo', header: '내용', sortable: true,
+                  { key: 'memo', header: '적요', sortable: true,
                     render: p => <span className="text-sm text-muted">{p.memo || '—'}</span> },
                   { key: 'amount', header: '결제액', width: 130, align: 'right', sortable: true,
                     sortValue: p => Number(p.amount || 0),
