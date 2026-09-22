@@ -72,7 +72,7 @@ function billingWindow(today, payDay) {
   return { payDate, from: nextDay(prevPay), to: payDate }
 }
 
-export const CardPaymentScreen = ({ openEdit }) => {
+export const CardPaymentScreen = ({ openEdit, goRoute }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [accounts, setAccounts] = useState([])
@@ -272,14 +272,31 @@ export const CardPaymentScreen = ({ openEdit }) => {
       )}
 
       {bills.length === 0 ? (
-        <div className="card card-pad" style={{ display: 'flex', gap: 10, alignItems: 'center', color: 'var(--muted)' }}>
-          <Icon.Check size={16} className="text-pos"/>
-          <span className="text-sm fw-600" style={{ color: 'var(--ink)' }}>
-            {noPayDay.length > 0 ? '결제일이 정해진 카드 중에는 갚을 것이 없어요.' : '갚을 카드값이 없어요.'}
-          </span>
-          <span className="text-xs text-muted2">
-            결제일을 정해 둔 신용카드만 여기 나와요 (기준정보 › 카드).
-          </span>
+        /* 빈 상태는 **다음에 뭘 해야 하는지**를 말해야 한다.
+           카드가 한 장도 없는 것과, 카드는 있는데 갚을 게 없는 것은 다른 상황이다 —
+           전자는 등록하러 가야 하고, 후자는 명세서를 올려 사용분을 채워야 한다.
+           예전엔 둘 다 "갚을 카드값이 없어요"였고 '기준정보 › 카드'는 누를 수도 없었다. */
+        <div className="card card-pad" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', color: 'var(--muted)' }}>
+          {creditCards.length === 0 ? (
+            <>
+              <Icon.Card size={16} className="text-muted2"/>
+              <span className="text-sm fw-600" style={{ color: 'var(--ink)' }}>등록된 신용카드가 없어요.</span>
+              <span className="text-xs text-muted2">카드를 등록하면 쓴 돈과 갚을 돈이 여기 모입니다.</span>
+              {goRoute && (
+                <button className="btn sm ml-auto" onClick={() => goRoute('master_card')}>카드 등록하러 가기</button>
+              )}
+            </>
+          ) : (
+            <>
+              <Icon.Check size={16} className="text-pos"/>
+              <span className="text-sm fw-600" style={{ color: 'var(--ink)' }}>
+                {noPayDay.length > 0 ? '결제일이 정해진 카드 중에는 갚을 것이 없어요.' : '갚을 카드값이 없어요.'}
+              </span>
+              <span className="text-xs text-muted2">
+                카드로 쓴 내역을 올리면 갚을 금액이 잡혀요.
+              </span>
+            </>
+          )}
         </div>
       ) : (
         <div className="col gap-12">

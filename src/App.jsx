@@ -699,7 +699,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
       case "hr_labor_contract": return <LaborContractScreen/>;
       case "hr_outsourcing":  return <OutsourcingScreen/>;
       // 일반 경비 / 잡손익 — 화면은 하나를 공유하고 진입 메뉴가 초기 탭을 정한다
-      case "card_payment":   return <CardPaymentScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
+      case "card_payment":   return <CardPaymentScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} goRoute={go}/>;
       case "voucher_book":   return <VoucherBookScreen/>;
       case "transfer":       return <TransferScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
       // 옛 '전표 입력' — 거래내역의 전표 서랍으로 옮겼다(3단계). 옛 주소로 오면 서랍을 열어 준다
