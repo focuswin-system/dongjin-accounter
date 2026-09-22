@@ -371,7 +371,7 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
                       const a = eff(r)
                       const skipped = r.state === 'error' || a === 'skip'
                       return (
-                        <tr key={r.i} style={{ background: r.state === 'error' ? 'rgba(255,80,80,0.04)' : undefined, opacity: skipped && r.state !== 'error' ? 0.55 : 1 }}>
+                        <tr key={r.i} style={{ background: r.state === 'error' ? 'var(--neg-soft)' : undefined, opacity: skipped && r.state !== 'error' ? 0.55 : 1 }}>
                           <td className="num text-muted2">{r.excelRow + 2}</td>
                           {adapter.previewCols.map(c => (
                             <td key={c.header} className={c.className}>{c.render(r.data)}</td>

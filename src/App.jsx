@@ -928,7 +928,8 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
             trigger={
               <button className="icon-btn" title="알림" style={{ position: "relative" }} onClick={() => {}}>
                 <Icon.Bell size={16}/>
-                {unreadCount > 0 && <span style={{ position: "absolute", top: 8, right: 8, width: 7, height: 7, borderRadius: "50%", background: "var(--neg)", border: "1.5px solid #fff" }}/>}
+                {unreadCount > 0 && <span style={{ position: "absolute", top: 8, right: 8, width: 7, height: 7, borderRadius: "50%", background: "var(--neg)", /* 다크에서 흰 링이 돈다 — 상단바 색을 따라야 한다 */
+                    border: "1.5px solid var(--surface)" }}/>}
               </button>
             }>
             <div>

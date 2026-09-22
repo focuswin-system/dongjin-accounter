@@ -542,10 +542,14 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
               /* 예정 행에는 증빙·처리 버튼이 없다. 아직 일어나지 않은 일이라
                  증빙이 '없음(경고)'으로 뜨면 거짓 경고가 되고, 처리 버튼은 대상이 없다. */
               { key: 'evid', header: '증빙', width: 70,
+                /* ⚠ 증빙이 **없는 것이 보통이다**(카드전표·영수증을 건건이 붙이는 회사는 드물다).
+                   없음을 빨간 경고로 칠했더니 목록 전체가 빨강이 됐다 — 그건 경고가 아니라 벽지다.
+                   정상에는 표식을 달지 않는다(디자인 규약). 붙은 것만 조용히 표시하고,
+                   없는 것은 비워 둔다. '증빙 없는 지출'을 찾는 일은 세무 보고서가 맡는다. */
                 render: t => (t.planned || t.journal) ? <span className="text-muted2">—</span>
                   : t.evid
                   ? <span className="badge pos" style={{ padding: "2px 8px" }}><Icon.Check size={11}/></span>
-                  : <span className="badge neg" style={{ padding: "2px 8px" }}><Icon.Warn size={11}/></span> },
+                  : <span className="text-muted2" title="증빙이 아직 안 붙었어요">—</span> },
               // label — 머리글이 비어 있어 '열 설정' 목록에 영문 키(actions)가 그대로 나왔다
               { key: 'actions', header: '', label: '처리 버튼', width: 130,
                 render: t => t.journal
@@ -655,8 +659,11 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
     }
   }, [txn]);
   if (!txn) return null;
+  /* confirmClose={false} — 여기는 **보는 서랍**이다(입력칸은 숨은 파일 선택 하나뿐).
+     없으면 Esc 를 누를 때마다 "쓰던 내용은 저장되지 않아요"를 묻는다. 쓴 것이 없는데.
+     같은 거래를 카드대금에서 열면(TxnQuickDrawer) 바로 닫힌다 — 문에 따라 달랐다. */
   return (
-    <Drawer open={true} onClose={onClose} width="min(560px, 100vw)">
+    <Drawer open={true} onClose={onClose} width="min(560px, 100vw)" label="거래 상세" confirmClose={false}>
         <div className="drawer-head">
           <div>
             <div className="row gap-8">

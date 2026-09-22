@@ -1172,7 +1172,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
               </div>
               <div style={{ display: "flex", height: 14, borderRadius: 999, overflow: "hidden", background: "var(--surface-3)" }}>
                 <div style={{ width: `${pct}%`, background: "var(--ink)" }}/>
-                <div style={{ width: `${100 - pct}%`, background: "transparent", borderLeft: "1px dashed rgba(0,0,0,0.1)" }}/>
+                <div style={{ width: `${100 - pct}%`, background: "transparent", borderLeft: "1px dashed var(--line-strong)" }}/>
               </div>
               <div className="row" style={{ marginTop: 10, fontSize: 11.5, color: "var(--muted-2)" }}>
                 <div><span style={{ display: "inline-block", width: 8, height: 8, background: "var(--ink)", borderRadius: 2, marginRight: 6 }}/>{doneLabel} 완료 {fmtNum(doneAll)}원</div>
@@ -1200,7 +1200,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
             </div>
             <div style={{ display: "flex", height: 14, borderRadius: 999, overflow: "hidden", background: "var(--surface-3)" }}>
               <div style={{ width: `${donePct}%`, background: "var(--ink)" }}/>
-              <div style={{ width: `${100-donePct}%`, background: "transparent", borderLeft: "1px dashed rgba(0,0,0,0.1)" }}/>
+              <div style={{ width: `${100-donePct}%`, background: "transparent", borderLeft: "1px dashed var(--line-strong)" }}/>
             </div>
             <div className="row" style={{ marginTop: 10, fontSize: 11.5, color: "var(--muted-2)" }}>
               <div><span style={{ display: "inline-block", width: 8, height: 8, background: "var(--ink)", borderRadius: 2, marginRight: 6 }}/>{doneLabel} 완료 {fmtNum(done)}원</div>

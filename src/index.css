@@ -391,6 +391,20 @@ a { color: inherit; text-decoration: none; }
   --login-form-title: #2B2115;   /* 거의 검정으로 보이는 웜 브라운 */
   --login-form-label: #3D3020;
   --login-form-sub:   #8A7963;
+  /* ⚠ 로그인 화면은 **테마와 무관하게 흰 종이**다(Login.jsx 가 배경을 #fff 로 못박는다).
+     그런데 입력칸은 var(--surface)/var(--ink) 를 쓰므로, 다크로 쓰다 세션이 끊겨
+     로그인 화면으로 오면 **흰 배경에 새까만 입력칸**이 떴다. 자동완성된 칸만 흰색이라
+     한 폼 안에서 칸 색이 갈렸다. 면·글자·선을 여기서 밝은 값으로 되돌린다. */
+  color-scheme: light;
+  --surface: #FFFDF9;
+  --surface-2: #FAF8F3;
+  --surface-3: #F1EEE7;
+  --ink: #2B2115;
+  --ink-2: #3D3020;
+  --line: #E6E0D5;
+  --line-strong: #D6CEBF;
+  --muted: #6B5D48;
+  --muted-2: #8A7963;
 }
 /* 버튼은 좌측 금빛의 **어두운 형제**다 — 카라멜 골드.
  *
@@ -1921,8 +1935,11 @@ body:has([data-modal-open]) {
 
 /* Esc 로 닫으려 할 때의 확인. 드로어 **안에** 덮는다 — 화면 한가운데로 띄우면
    무엇을 닫는다는 건지가 멀어진다. 뒤는 살짝 가려 지금 답할 것이 이것뿐임을 말한다. */
+/* ⚠ z-index 는 **서랍 안에서 가장 위**여야 한다. 2 였을 때 결의서 뷰어(.res-viewer-overlay,
+   z-index 200) 가 덮어서, Esc 를 눌러도 아무 일도 안 일어나 보이고 이어 누른 Enter 가
+   뒤에 있던 서랍을 닫아 버렸다(작성 중이던 내용이 사라진다). */
 .drawer-ask {
-  position: absolute; inset: 0; z-index: 2;
+  position: absolute; inset: 0; z-index: 300;
   background: color-mix(in srgb, var(--surface) 78%, transparent); backdrop-filter: blur(1.5px);
   display: flex; align-items: center; justify-content: center; padding: 24px;
 }
