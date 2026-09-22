@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, localToday, DateInput } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, localToday, DateInput, useBusy } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
@@ -69,6 +69,8 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
 
   // 표시할 줄 — 편집 중이면 입력한 줄 + 맨 끝 ghost 행, 아니면 저장된 라인 그대로
   const rows = edit ? [...form.lines, emptyLine()] : (doc?.lines || [])
+  // 저장 버튼 이중 클릭 — 두 번 눌리면 문서번호가 두 장, 근로계약은 직원까지 두 명 생긴다(lib/ui.jsx useBusy)
+  const [busy, run] = useBusy()
 
   const save = async () => {
     const lines = []
@@ -117,7 +119,9 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
         {edit ? (
           <>
             <button className="btn" onClick={cancel}>취소</button>
-            <button className="btn primary" onClick={save}><Icon.Check size={14}/> 저장</button>
+            <button className="btn primary" onClick={() => run(save)} disabled={busy}>
+              <Icon.Check size={14}/> {busy ? '저장 중…' : '저장'}
+            </button>
           </>
         ) : (
           <>

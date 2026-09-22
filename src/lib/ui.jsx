@@ -724,6 +724,31 @@ export const ConfirmProvider = ({ children }) => {
 const ToastCtx = createContext({ push: () => {} });
 export const useToast = () => useContext(ToastCtx);
 
+/**
+ * 저장 버튼 이중 클릭 막기 — `const [busy, run] = useBusy()` 로 쓰고
+ * `onClick={() => run(save)}` · `disabled={busy}` 를 건다.
+ *
+ * ── 왜 필요한가 ──
+ * 서류를 만드는 버튼은 누르는 순간 **번호를 따고 행을 만든다.** 느린 순간에 두 번 눌리면
+ * 문서번호가 두 장 나오고, 근로계약은 **직원까지 두 명** 생긴다. 화면에 아무 표시가 없으니
+ * 사용자는 두 번 눌러도 되는 줄 안다.
+ * 거래 등록 폼(Form.jsx)은 처음부터 이 가드가 있었는데 서류 화면 다섯 곳에는 없었다.
+ *
+ * ⚠ 상태 하나로 두 가지를 다 한다 — **재진입 차단**(ref)과 **버튼 비활성**(state).
+ *   state 만 쓰면 리렌더 전에 들어온 두 번째 클릭을 못 막는다.
+ */
+export const useBusy = () => {
+  const [busy, setBusy] = useState(false)
+  const lock = useRef(false)
+  const run = async (fn) => {
+    if (lock.current) return
+    lock.current = true; setBusy(true)
+    try { return await fn() }
+    finally { lock.current = false; setBusy(false) }
+  }
+  return [busy, run]
+}
+
 export const ToastProvider = ({ children }) => {
   const [items, setItems] = useState([]);
   // ⚠ tone 은 오래 무시되고 있었다 — 호출부는 { tone: "warn" } 을 넘기는데 저장도 표시도

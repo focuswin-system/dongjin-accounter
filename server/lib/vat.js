@@ -20,7 +20,22 @@ const TAX_TYPES = ['과세', '면세', '영세']
  *   둘 중 하나를 고치면 나머지도 같이 고친다.
  */
 const VAT_RATE = 0.1
-const num = (v) => Number(String(v ?? '').replace(/[^0-9-]/g, '')) || 0
+/* 금액 파싱 — **소수점을 삼키면 안 된다.**
+ * 예전엔 숫자·부호만 남겨서 `110000.7` 이 `"1100007"` → 110만 7원이 됐다(10배).
+ * amount 는 반올림해 11만원으로 저장되는데 공급가·세액만 10배로 남아, 합계와 안 맞는
+ * 거래가 오류 없이 저장됐다. 규칙은 lib/money.js·src/lib/hometax.js 와 같다. */
+const num = (v) => {
+  if (v == null || v === '') return 0
+  if (typeof v === 'number') return Number.isFinite(v) ? Math.round(v) : 0
+  let t = String(v).trim()
+  const paren = /^\(.*\)$/.test(t)            // 회계형식 (1,100) = 음수
+  t = t.replace(/[^0-9.-]/g, '')
+  if (!t || t === '-' || t === '.') return 0
+  if ((t.match(/\./g) || []).length > 1) t = t.replace(/\./g, '')   // 점이 여럿이면 천단위 구분자
+  const n = parseFloat(t)
+  if (!Number.isFinite(n)) return 0
+  return Math.round(paren ? -Math.abs(n) : n)
+}
 
 /** 과세유형 정규화. 모르는 값·빈 값은 '과세'로 본다(종전 동작과 같다). */
 function normalizeTaxType(v) {
@@ -48,6 +63,26 @@ function vatFields({ amount, supply_amount, vat_amount, tax_type, vat_deductible
     vat = 0
   }
   if (type !== '과세') vat = 0           // 유형이 우선 — 면세·영세에 세액이 실려 오면 버린다
+
+  /* ── 보낸 값을 그대로 믿지 않는다 ──
+   *
+   * 예전엔 공급가·세액을 **검증 없이** 저장했다. amount 는 amountError 가 보는데
+   * 이 둘은 아무도 안 봤다. 그래서 이런 것이 200 으로 통과했다:
+   *   · 11만원 거래에 세액 9,999,999  → 그 분기가 납부에서 환급으로 뒤집혔다
+   *   · 공급가 −100,000            → 세액이 금액보다 커졌다
+   *   · 카드 명세서 열을 잘못 이어 공급가·세액이 둘 다 합계와 같아짐
+   * 화면이 막아도 엑셀·카드 업로드·API 가 여기를 지난다 — **서버가 최종 판정**이다.
+   *
+   * 고치지 않고 **버린다**(역산으로 되돌린다). 막아서 통째로 거절하면 수백 줄짜리
+   * 업로드가 한 줄 때문에 전부 못 들어가고, 사람은 어느 줄인지도 모른다.
+   * 합계는 이미 amountError 가 본 값이라 역산 결과는 언제나 말이 된다.
+   */
+  const bad = supply < 0 || vat < 0 || supply + vat !== total
+  if (bad) {
+    if (type === '과세') { supply = Math.round(total / (1 + VAT_RATE)); vat = total - supply }
+    else { supply = total; vat = 0 }
+  }
+
   return {
     supply_amount: supply,
     vat_amount: vat,

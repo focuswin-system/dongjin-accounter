@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, DateInput } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, DateInput, useBusy } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
@@ -119,7 +119,9 @@ const QuoteRequestPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSave
         {edit ? (
           <>
             <button className="btn" onClick={cancel}>취소</button>
-            <button className="btn primary" onClick={save}><Icon.Check size={14}/> 저장</button>
+            <button className="btn primary" onClick={() => run(save)} disabled={busy}>
+              <Icon.Check size={14}/> {busy ? '저장 중…' : '저장'}
+            </button>
           </>
         ) : (
           <>
@@ -283,6 +285,8 @@ export const QuoteRequestScreen = ({ focusId = null }) => {
   const [selId, setSelId] = useState(focusId)
   const [sel, setSel] = useState(null)
   const [creating, setCreating] = useState(false)
+  // 저장 버튼 이중 클릭 — 두 번 눌리면 문서번호가 두 장 나온다(lib/ui.jsx useBusy)
+  const [busy, run] = useBusy()
 
   useEffect(() => { api.getCompany().then(setCompany); api.getVendors().then(setVendors) }, [])
 

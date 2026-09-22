@@ -1081,6 +1081,8 @@ router.get('/:id/item-diff', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   const { vendor_id, name, start_date, status, order_no, project_no, cost_budget, file_url, file_name, contract_no } = req.body
+  // 주문명은 필수다 — 없으면 NOT NULL 로 500 이 나고 이유를 알 수 없다(화면은 막지만 서버가 최종 판정)
+  if (!String(name || '').trim()) return res.status(400).json({ error: '주문명을 입력해주세요' })
   const f = model.normalize(req.body)   // 금액·기간·갱신 필드는 모델이 결정 (모순된 조합 저장 방지)
   const id = randomUUID()
   const conn = await req.db.getConnection()

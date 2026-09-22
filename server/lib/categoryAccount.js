@@ -193,6 +193,38 @@ const accountCodeOf = (categoryId) => CATEGORY_ACCOUNT[String(categoryId || '').
  * @param db   테넌트 연결. 기본값을 두지 않는다 — 빠뜨리면 조용히 남의 회사를 읽는다.
  * @param kind 'issued'|'received' 또는 'income'|'expense'
  */
+/**
+ * 비목 한 줄의 **장부 설정 전부** — 계정과목 + 과세유형 + 매입세액 공제 여부.
+ *
+ * ── 왜 한 함수인가 ──
+ * 이 셋은 늘 같이 쓰인다. 따로 읽으면 한쪽만 읽는 경로가 생기고, 실제로 그렇게 됐다:
+ * 엑셀 일괄 업로드가 **계정과목만** 읽고 과세 설정을 안 읽어서, 면세 비목(보험료·급여·
+ * 세금과공과금)으로 올린 지출마다 `금액/11` 이 매입세액으로 **지어졌다**.
+ * 300,000원 보험료 한 줄에 27,273원. 분기 신고가 그만큼 과다공제된다 —
+ * 오류도 경고도 없고, 신고 때 가산세로 돌아온다.
+ *
+ * 손으로 넣을 때(Form.jsx)는 화면이 비목에서 이 값들을 물려받는다. **같은 거래가 입력
+ * 경로에 따라 다른 답을 내면 안 된다** — 그래서 서버도 같은 곳에서 읽는다.
+ *
+ * @returns { account_code, tax_type, vat_deductible } — 비목을 못 찾으면 전부 null
+ */
+async function categorySettingsOf(db, categoryName, kind) {
+  if (!db) throw new Error('categorySettingsOf: 테넌트 연결(db)이 필요합니다')
+  const name = String(categoryName || '').trim()
+  if (!name) return { account_code: null, tax_type: null, vat_deductible: null }
+  const isIncome = kind === 'issued' || kind === 'income'
+  const [[row]] = await db.execute(
+    'SELECT account_code, vat, vat_deductible FROM categories WHERE name = ? AND id LIKE ? LIMIT 1',
+    [name, isIncome ? 'INC-%' : 'EXP-%'])
+  if (!row) return { account_code: null, tax_type: null, vat_deductible: null }
+  return {
+    account_code: row.account_code || null,
+    // 비목의 '10%'는 과세다. 과세는 기본값이라 굳이 정하지 않는다(보낸 값이 이긴다).
+    tax_type: ['면세', '영세'].includes(String(row.vat)) ? String(row.vat) : null,
+    vat_deductible: Number(row.vat_deductible) === 0 ? 0 : null,
+  }
+}
+
 async function acctCodeByCategoryName(db, categoryName, kind) {
   if (!db) throw new Error('acctCodeByCategoryName: 테넌트 연결(db)이 필요합니다')
   const name = String(categoryName || '').trim()
@@ -206,5 +238,5 @@ async function acctCodeByCategoryName(db, categoryName, kind) {
 
 module.exports = {
   CATEGORY_ACCOUNT, EXTRA_CATEGORIES,
-  FUND_CODES, isFundAccount, accountCodeOf, acctCodeByCategoryName,
+  FUND_CODES, isFundAccount, accountCodeOf, acctCodeByCategoryName, categorySettingsOf,
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, StatusBadge, localToday, DateInput, fmtDateShort } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, StatusBadge, localToday, DateInput, fmtDateShort, useBusy } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
@@ -297,6 +297,9 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
       insure_np: t.insure_np, insure_hi: t.insure_hi, insure_ei: t.insure_ei, insure_ai: t.insure_ai }))
   }
 
+  // 저장 버튼 이중 클릭 — 두 번 눌리면 문서번호가 두 장, 근로계약은 직원까지 두 명 생긴다(lib/ui.jsx useBusy)
+  const [busy, run] = useBusy()
+
   const save = async () => {
     if (!form.name.trim()) return toast.push('이름을 입력해주세요')
     const body = {
@@ -391,7 +394,9 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
       <div className="drawer-foot">
         <div className="ml-auto row gap-8">
           <button className="btn" onClick={onClose}>취소</button>
-          <button className="btn primary" onClick={save}><Icon.Check size={14}/> {editing ? '저장' : '등록'}</button>
+          <button className="btn primary" onClick={() => run(save)} disabled={busy}>
+            <Icon.Check size={14}/> {busy ? '저장 중…' : (editing ? '저장' : '등록')}
+          </button>
         </div>
       </div>
     </Drawer>
@@ -684,6 +689,9 @@ const OutsourcingDrawer = ({ info, onClose, onSaved }) => {
       pay_form: t.pay_form, default_unit: t.default_unit || '건', conv_alert_months: t.conv_alert_months || 0 }))
   }
 
+  // 저장 버튼 이중 클릭 — 두 번 눌리면 문서번호가 두 장, 근로계약은 직원까지 두 명 생긴다(lib/ui.jsx useBusy)
+  const [busy, run] = useBusy()
+
   const save = async () => {
     if (!form.name.trim()) return toast.push('성명을 입력해주세요')
     /* 단가표(업무)가 하나도 없으면 **지급 자체를 못 한다** — 지급 등록은 단가표의
@@ -758,7 +766,9 @@ const OutsourcingDrawer = ({ info, onClose, onSaved }) => {
       <div className="drawer-foot">
         <div className="ml-auto row gap-8">
           <button className="btn" onClick={onClose}>취소</button>
-          <button className="btn primary" onClick={save}><Icon.Check size={14}/> {editing ? '저장' : '등록'}</button>
+          <button className="btn primary" onClick={() => run(save)} disabled={busy}>
+            <Icon.Check size={14}/> {busy ? '저장 중…' : (editing ? '저장' : '등록')}
+          </button>
         </div>
       </div>
     </Drawer>

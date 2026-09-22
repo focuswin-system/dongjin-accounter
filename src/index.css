@@ -2630,6 +2630,22 @@ body:has([data-modal-open]) {
   --muted: #5B6473;
   --muted-2: #6E7787;
   --subtle: #B5BCC8;
+  /* ⚠ **상태색도 되돌린다.** 면·선·글자만 되돌리고 이걸 빠뜨렸더니, 다크로 쓰다 Ctrl+P 하면
+     마이너스 금액이 **연분홍**으로(다크 --neg-ink 는 밝기 0.78 — 흰 종이 위 대비 2:1)
+     찍히고 '기한 지남' 배지가 어두운 알약으로 나왔다. 대표에게 내미는 종이가 그렇게 나간다.
+     라이트 값(20~36행)과 **같은 값**을 적는다 — 종이는 언제나 라이트다. */
+  --brand: oklch(0.52 0.15 255);
+  --brand-soft: oklch(0.96 0.03 255);
+  --brand-ink: oklch(0.40 0.16 255);
+  --pos: oklch(0.55 0.13 165);
+  --pos-soft: oklch(0.96 0.04 165);
+  --pos-ink: oklch(0.45 0.12 165);
+  --warn: oklch(0.68 0.15 65);
+  --warn-soft: oklch(0.97 0.06 75);
+  --warn-ink: oklch(0.48 0.14 55);
+  --neg: oklch(0.58 0.20 25);
+  --neg-soft: oklch(0.97 0.04 25);
+  --neg-ink: oklch(0.48 0.18 25);
   /* ⚠ 토큰만 되돌리면 부족하다 — .doc-paper 는 자기 배경(1306행)이 있어 그것으로 흰
      종이가 되지만, 아래 넷은 배경이 투명이라 **다크 body 가 그대로 비쳤다.**
      글자색도 상속이라 밝은 채로 남는다. 종이 자체를 흰색으로 못 박는다. */
@@ -2855,6 +2871,9 @@ body:has([data-modal-open]) {
     --muted: #5B6473; --muted-2: #8A93A2; --subtle: #B5BCC8;
     --warn-soft: oklch(0.97 0.06 75); --warn-ink: oklch(0.48 0.14 55);
     --brand: oklch(0.62 0.11 75);
+    /* 주의·금지 상자에 pos/neg 도 쓴다 — 빠뜨리면 다크에서 그 글자만 밝게 찍힌다 */
+    --pos: oklch(0.55 0.13 165); --pos-soft: oklch(0.96 0.04 165); --pos-ink: oklch(0.45 0.12 165);
+    --neg: oklch(0.58 0.20 25); --neg-soft: oklch(0.97 0.04 25); --neg-ink: oklch(0.48 0.18 25);
     color: var(--ink);
   }
   .man-layout { grid-template-columns: 1fr; gap: 0; }

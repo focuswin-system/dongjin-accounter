@@ -20,7 +20,7 @@ const { removeUploadedFile } = require('../lib/uploads')
 const { vatFields } = require('../lib/vat')
 const { closedPeriodError, closedDocError, beforeBooksError } = require('../lib/closing')
 const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
-const { isFundAccount } = require('../lib/categoryAccount')
+const { isFundAccount, categorySettingsOf } = require('../lib/categoryAccount')
 const { transactionVoucher, withNames } = require('../lib/voucher')
 const { listVouchers, toRows, COLUMNS: VOUCHER_COLUMNS, GUIDE: VOUCHER_GUIDE } = require('../lib/voucherBook')
 const { newBook, sheet, templateSheet, guideSheet, sendBook } = require('../lib/xlsxBook')
@@ -659,6 +659,11 @@ router.post('/', async (req, res, next) => {
       item_id, account_code, supply_amount, vat_amount, tax_type, vat_deductible,
       counterparty_account_id, splits
     } = req.body
+    /* 날짜는 반드시 받는다. futureDateError 는 `date &&` 로 시작해 **빈 값을 그냥 통과**시키고,
+       transactions.date 는 NOT NULL 이라 그대로 INSERT 하면 500 이 난다 —
+       사용자는 "처리 중 오류"만 보고 무엇을 안 넣었는지 모른다.
+       바로 옆 이체 경로(POST /transfer)는 이미 이 짝을 갖고 있었다. */
+    if (!date) return res.status(400).json({ error: '날짜를 입력해주세요' })
     const dateErr = futureDateError(date)
     if (dateErr) return res.status(400).json({ error: dateErr })
     const closedErr = await closedPeriodError(req.db, date)
@@ -667,7 +672,13 @@ router.post('/', async (req, res, next) => {
     { const ae = amountError(amount); if (ae) return res.status(400).json({ error: ae }) }
     // 복합 전표면 항목 합계가 거래 금액과 같아야 한다
     { const se = splitError(splits, amount); if (se) return res.status(400).json({ error: se }) }
-    const vat = vatFields({ amount, supply_amount, vat_amount, tax_type, vat_deductible })
+    /* 비목의 과세·공제 설정을 물려받는다. 화면(Form.jsx)은 이미 물려받아 보내지만
+       **서버가 최종 판정**이다 — API 를 직접 치거나 다른 화면이 안 보내면 여기서 정해진다.
+       보낸 값이 있으면 그쪽이 이긴다(같은 비목이라도 건별로 다를 수 있다). */
+    const cs = await categorySettingsOf(req.db, category, kind)
+    const vat = vatFields({ amount, supply_amount, vat_amount,
+      tax_type: tax_type || cs.tax_type,
+      vat_deductible: vat_deductible != null ? vat_deductible : cs.vat_deductible })
     // 완료 상태인데 계좌가 없으면 잔액에 잡히지 않는다(lib/ledger.js 참고)
     // 기본 상태는 종류별로 — 수입에 '지급완료'가 박히면 '입금완료'만 세는 집계에서 빠진다
     const st = normalizeStatus(status || defaultSettledStatus(kind))
@@ -717,10 +728,16 @@ router.put('/:id', async (req, res, next) => {
     // 등록과 같은 금액 검증 — 수정으로 음수를 넣는 경로도 막아야 한다
     { const ae = amountError(amount); if (ae) return res.status(400).json({ error: ae }) }
     { const se = splitError(splits, amount); if (se) return res.status(400).json({ error: se }) }
-    const vat = vatFields({ amount, supply_amount, vat_amount, tax_type, vat_deductible })
     // 편집으로 수입 거래가 되면 원가 귀속은 떨어진다
     const [[cur]] = await req.db.execute('SELECT kind, date AS cur_date FROM transactions WHERE id = ?', [req.params.id])
     if (!cur) return res.status(404).json({ error: 'Not found' })
+    /* 수정에서도 같은 규칙 — 비목을 바꿔 저장하면 과세유형도 그 비목을 따라간다.
+       ⚠ 방향(kind)은 **이 라우트가 본문으로 안 받는다**(수정으로 입금↔출금을 뒤집지 않는다).
+         저장된 거래의 kind 로 본다 — 안 그러면 비목을 반대편 목록에서 찾는다. */
+    const csEdit = await categorySettingsOf(req.db, category, cur.kind)
+    const vat = vatFields({ amount, supply_amount, vat_amount,
+      tax_type: tax_type || csEdit.tax_type,
+      vat_deductible: vat_deductible != null ? vat_deductible : csEdit.vat_deductible })
     /* 마감은 옮기기 전·후 두 날짜를 모두 본다 — 한쪽만 보면 잠긴 달에서 거래를 빼내거나 밀어넣을 수 있다.
        장부 시작일 전도 마감된 달처럼 잠긴다(lib/closing.js) — 그 전 돈은 기초잔액에 이미 들어 있어서,
        옛 거래를 고치면 잔액이 두 번 움직인다. */
@@ -736,9 +753,19 @@ router.put('/:id', async (req, res, next) => {
       ['loans', 'txn_id', '차입금 실행', '재무관리 > 차입금'],
       ['loan_repayments', 'txn_principal_id', '차입금 상환(원금)', '재무관리 > 차입금'],
       ['loan_repayments', 'txn_interest_id', '차입금 상환(이자)', '재무관리 > 차입금'],
+      /* ⚠ 대여금은 차입금의 **거울상**인데 이 목록에도, 삭제 가드에도 없었다.
+         실행 거래 300만을 1만으로 고쳐도 200 이 나고, lendings.principal 은 300만 그대로 —
+         재무관리는 "300만 빌려줬다"는데 통장에선 1만원만 나갔다. */
+      ['lendings', 'txn_id', '대여금 실행', '재무관리 > 대여금'],
+      ['lending_repayments', 'txn_principal_id', '대여금 회수(원금)', '재무관리 > 대여금'],
+      ['lending_repayments', 'txn_interest_id', '대여금 회수(이자)', '재무관리 > 대여금'],
       ['savings', 'txn_id', '예금 가입', '재무관리 > 예금·적금'],
       ['savings_payments', 'txn_id', '적금 납입', '재무관리 > 예금·적금'],
       ['investments', 'txn_id', '투자', '재무관리 > 투자'],
+      /* ⚠ 지급결의서. 삭제는 FK 가 막는데 **수정은 아무도 안 막았다** — 440,000 결의서가
+         물린 거래를 990,000 으로 고치면 통장은 99만, 승인받아 인쇄한 문서는 44만이 된다.
+         부가세·차입금·어음을 여기 넣은 이유("금액을 고치면 어긋난다")와 같은 자리다. */
+      ['expense_resolutions', 'txn_id', '지급결의서', '문서업무 > 지급결의서'],
       /* ⚠ 어음. PATCH(상태변경)만 막고 있었는데, 수정 폼은 status·amount·method 를
          전부 받는다 — 같은 일을 PUT 으로 할 수 있었다.
          · 완료로 바꾸면 일계표가 거래와 어음 전표를 **둘 다** 세어 비용이 두 배가 되고
@@ -1018,6 +1045,8 @@ router.delete('/:id', async (req, res, next) => {
     await conn.beginTransaction()
     // 마감된 달의 거래는 지울 수 없다(신고자료와 장부가 어긋난다)
     const [[del]] = await conn.execute('SELECT date, transfer_id FROM transactions WHERE id = ?', [req.params.id])
+    // 없는 것을 지워도 200 이면 화면이 "지웠다"고 말한다 — 반복거래·마감과 같은 답(404)을 준다
+    if (!del) { await rollbackQuietly(conn); return res.status(404).json({ error: '그 거래를 찾을 수 없어요' }) }
     { const ge = transferOnlyGuard(req, del); if (ge) { await rollbackQuietly(conn); return res.status(403).json({ error: ge }) } }
     if (del) {
       const closedErr = await closedPeriodError(conn, del.date)
@@ -1054,6 +1083,10 @@ router.delete('/:id', async (req, res, next) => {
       ['loan_draws', 'txn_id', '차입금 추가 인출'],
       ['loan_repayments', 'txn_principal_id', '차입금 상환(원금)'],
       ['loan_repayments', 'txn_interest_id', '차입금 상환(이자)'],
+      // 대여금 — 차입금의 거울상. 회수 거래를 지우면 회차는 '받음'으로 잠긴 채 돈만 사라졌다
+      ['lendings', 'txn_id', '대여금 실행'],
+      ['lending_repayments', 'txn_principal_id', '대여금 회수(원금)'],
+      ['lending_repayments', 'txn_interest_id', '대여금 회수(이자)'],
       ['savings', 'txn_id', '예금 가입'],
       ['savings', 'txn_maturity_id', '예적금 만기(원금)'],
       ['savings', 'txn_interest_id', '예적금 만기(이자)'],
@@ -1110,7 +1143,16 @@ router.delete('/:id', async (req, res, next) => {
   } catch (e) {
     await rollbackQuietly(conn)
     if (e.code === 'ER_ROW_IS_REFERENCED_2' || e.errno === 1451) {
-      return res.status(409).json({ error: '지급결의서·급여에 연결된 거래라 삭제할 수 없어요' })
+      /* 막는 것만으로는 부족하다 — **무엇을 먼저 해야 하는지**를 말해야 한다.
+         청구서("먼저 입금 매칭을 취소하세요")·차입금·구매품의는 이미 그렇게 한다. */
+      let where = ''
+      try {
+        const [[r]] = await req.db.execute(
+          'SELECT doc_no FROM expense_resolutions WHERE txn_id = ? LIMIT 1', [req.params.id])
+        if (r?.doc_no) where = ` (${r.doc_no})`
+      } catch { /* 문서번호를 못 읽어도 막는 것은 그대로다 */ }
+      return res.status(409).json({
+        error: `지급결의서·급여에 연결된 거래예요${where}. 그 문서에서 '처리 취소'를 먼저 하면 이 거래가 함께 정리됩니다.` })
     }
     next(e)
   } finally { conn.release() }
@@ -1203,9 +1245,16 @@ router.post('/import/commit', async (req, res, next) => {
        * 부가세 집계(routes/tax.js)는 `vat_amount IS NOT NULL` 인 거래만 세므로,
        * **엑셀로 올린 수백 건의 매입세액이 신고 자료에서 통째로 빠졌다.**
        * 개별 등록(POST /)은 처음부터 vatFields 를 거쳤다 — 이 경로만 빠져 있었다. */
+      /* 비목의 과세·공제 설정을 물려받는다 — **손으로 넣을 때와 같은 답**이어야 한다.
+       * 예전엔 계정과목만 읽어서, 면세 비목으로 올린 지출마다 금액/11 이 매입세액으로
+       * 지어졌다(보험료 300,000 -> 27,273). 양식 안내문은 "비목의 부가세 설정대로
+       * 계산합니다"라고 적혀 있었는데 코드가 그렇지 않았다 — 분기 신고가 과다공제된다.
+       * 엑셀이 공급가·세액을 적어 보냈으면 그쪽이 이긴다(세금계산서에 찍힌 실제 값). */
+      const cs = await categorySettingsOf(conn, it.category, it.kind)
       const vat = vatFields({
         amount: it.amount, supply_amount: it.supply_amount, vat_amount: it.vat_amount,
-        tax_type: it.tax_type, vat_deductible: it.vat_deductible,
+        tax_type: it.tax_type || cs.tax_type,
+        vat_deductible: it.vat_deductible != null ? it.vat_deductible : cs.vat_deductible,
       })
       // 금액 검증도 개별 등록과 같게 — 음수 지출이 들어오면 계좌 잔액이 늘어난다
       const ae = amountError(it.amount)
@@ -1369,7 +1418,8 @@ router.post('/import/card', async (req, res, next) => {
         createdVendors.push(merchant)
       }
 
-      /* 비목 설정을 물려받는다 — 명세서가 준 값이 있으면 그쪽이 이긴다(카드사가 찍어 준 실제 세액). */
+      /* 비목 설정을 물려받는다 — 명세서가 준 값이 있으면 그쪽이 이긴다(카드사가 찍어 준 실제 세액).
+         같은 규칙이 엑셀 업로드·단건 등록에도 있다(lib/categoryAccount.js categorySettingsOf). */
       const cat = catByName.get(String(it.category || '').trim())
       const accountCode = it.account_code || cat?.account_code || null
       /* 면세·영세 **둘 다** 본다. 영세를 빼 두면 vatFields 가 '과세'로 정규화해

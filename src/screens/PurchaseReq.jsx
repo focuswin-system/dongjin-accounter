@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, DateInput, StatusBadge } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, DateInput, StatusBadge, useBusy } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
@@ -122,6 +122,8 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
   const itemRows = edit ? [...viewItems, emptyItem()] : viewItems
   const padRows = Math.max(0, ROWS - itemRows.length)
   const vendorLabel = form.vendor_name || '견적가'
+  // 저장 버튼 이중 클릭 — 두 번 눌리면 문서번호가 두 장 나온다(lib/ui.jsx useBusy)
+  const [busy, run] = useBusy()
 
   const save = async () => {
     const items = form.items.filter(it => (it.name || '').trim() || numOf(it.amount) || numOf(it.qty))
@@ -220,7 +222,9 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
         {edit ? (
           <>
             <button className="btn" onClick={cancel}>취소</button>
-            <button className="btn primary" onClick={save}><Icon.Check size={14}/> 저장</button>
+            <button className="btn primary" onClick={() => run(save)} disabled={busy}>
+              <Icon.Check size={14}/> {busy ? '저장 중…' : '저장'}
+            </button>
           </>
         ) : (
           <>

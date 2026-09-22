@@ -17,8 +17,24 @@ async function recalcInvoiceStatus(db, invoiceId) {
   if (!invoiceId) return null
   const [[inv]] = await db.execute('SELECT kind, total_amount FROM invoices WHERE id = ?', [invoiceId])
   if (!inv) return null
+  /* ⚠ **정산은 '돈이 오간 거래'만 센다.**
+   *
+   * 예전엔 invoice_matches 금액만 합산하고 **연결된 거래의 상태를 안 봤다.** 그래서
+   * 이미 정산한 거래의 결제수단을 '어음'으로 고치면(그 순간 상태가 '지급 예정'이 된다)
+   *   · 통장에서는 돈이 되돌아오고
+   *   · 청구서는 '지급 완료'로 남아 미지급금에도 안 잡혔다
+   * 아직 안 낸 220만원이 **통장에도 없고 미지급금에도 없는** 상태가 오류 한 줄 없이 만들어졌다.
+   * 매출 쪽도 대칭으로 같았다.
+   *
+   * 미완료 거래(지급 예정·입금 예정 등)의 매칭은 **약속일 뿐 정산이 아니다.**
+   * 어음은 만기에 결제되면 그때 완료로 바뀌고, 그 순간 이 합계에 들어온다.
+   * 거래가 지워졌으면 매칭도 함께 지워지므로 JOIN 이 남길 것도 없다(INNER JOIN).
+   */
   const [[{ paid }]] = await db.execute(
-    'SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [invoiceId])
+    `SELECT COALESCE(SUM(m.amount),0) AS paid
+       FROM invoice_matches m
+       JOIN transactions t ON t.id = m.txn_id
+      WHERE m.invoice_id = ? AND REPLACE(t.status, ' ', '') IN ('지급완료','입금완료')`, [invoiceId])
   const isIssued = inv.kind === 'issued'
   const total = Number(inv.total_amount)
   const paidNum = Number(paid)
@@ -33,8 +49,12 @@ async function recalcInvoiceStatus(db, invoiceId) {
 /** 이미 정산된 금액 — 청구서 금액을 이 아래로 내리면 잔여가 음수가 된다 */
 async function paidAmountOf(db, invoiceId) {
   if (!db) throw new Error('paidAmountOf: 테넌트 연결(db)이 필요합니다')
+  // 위 recalc 과 **같은 기준**이어야 한다 — 한쪽만 미완료를 세면 상태와 하한이 어긋난다
   const [[{ paid }]] = await db.execute(
-    'SELECT COALESCE(SUM(amount),0) AS paid FROM invoice_matches WHERE invoice_id = ?', [invoiceId])
+    `SELECT COALESCE(SUM(m.amount),0) AS paid
+       FROM invoice_matches m
+       JOIN transactions t ON t.id = m.txn_id
+      WHERE m.invoice_id = ? AND REPLACE(t.status, ' ', '') IN ('지급완료','입금완료')`, [invoiceId])
   return Number(paid)
 }
 

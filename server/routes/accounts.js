@@ -111,6 +111,9 @@ async function nameDuplicateError(db, name, exceptId = null) {
 router.post('/', async (req, res, next) => {
   try {
     const { name, bank, type, initial_balance, kind, number, purpose } = req.body
+    /* 이름은 필수다 — 없으면 NOT NULL 로 500 이 났다. 같은 이름 중복은 409 로 친절히
+       막으면서 빈 이름만 500 이면, 화면 밖 경로(임포트·API)가 이유를 못 듣는다. */
+    if (!String(name || '').trim()) return res.status(400).json({ error: '계좌·카드 이름을 입력해주세요' })
     const owner = req.body.owner === 'personal' ? 'personal' : 'corp'
     // 카드만 의미가 있다. 1~28 밖은 미설정으로 본다(29~31 은 짧은 달에 없는 날짜다)
     const cardType = cardTypeOf(req.body.card_type)
