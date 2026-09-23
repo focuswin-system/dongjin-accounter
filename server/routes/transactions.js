@@ -15,6 +15,9 @@ const PNL_ONLY = (() => {
 const { rollbackQuietly } = require('../lib/tx')
 const { dateOrNull } = require('../lib/period')
 const { normalizeStatus, ledgerError, defaultSettledStatus, amountError, isSettled } = require('../lib/ledger')
+const { splitJoin, splitCategory, splitAmount, splitTxnCount } = require('../lib/categoryAxis')
+const CAT_COL = splitCategory()
+const CAT_AMT = splitAmount()
 const { monthItems } = require('../lib/repeat')
 const { removeUploadedFile } = require('../lib/uploads')
 const { vatFields } = require('../lib/vat')
@@ -148,10 +151,13 @@ router.get('/', async (req, res, next) => {
 router.get('/summary', async (req, res, next) => {
   try {
     const { year, month } = req.query
-    let sql = "SELECT category, SUM(amount) AS total, COUNT(*) AS cnt FROM transactions WHERE kind='expense'"
+    /* 복합 거래는 **항목으로 펼쳐** 센다 — 규칙은 lib/categoryAxis.js 한 곳(왜 필요한지도 거기에).
+       예전엔 부모 거래의 비목 하나로만 세어서, 한 전표에 여러 비목을 적으면 첫 비목에 전액이 몰렸다. */
+    let sql = `SELECT ${CAT_COL} AS category, SUM(${CAT_AMT}) AS total, ${splitTxnCount()} AS cnt
+                 FROM transactions t ${splitJoin()} WHERE t.kind='expense'`
     const params = []
-    if (year && month) { sql += ' AND date LIKE ?'; params.push(`${year}-${month}%`) }
-    sql += ' GROUP BY category ORDER BY total DESC'
+    if (year && month) { sql += ' AND t.date LIKE ?'; params.push(`${year}-${month}%`) }
+    sql += ` GROUP BY ${CAT_COL} ORDER BY total DESC`
     const [rows] = await req.db.execute(sql, params)
     res.json(rows)
   } catch (e) { next(e) }
@@ -1474,8 +1480,8 @@ router.get('/import/template', async (req, res, next) => {
       { header: '거래일자', width: 12, required: true }, { header: '거래처', width: 22 },
       { header: '주문명', width: 24 }, { header: '구분', width: 8, required: true },
       { header: '비목', width: 14 }, { header: '계정과목', width: 14 },
-      { header: '금액', width: 12, required: true },
-      { header: '공급가액', width: 12 }, { header: '부가세', width: 12 },
+      { header: '금액', width: 12, required: true, money: true },
+      { header: '공급가액', width: 12, money: true }, { header: '부가세', width: 12, money: true },
       { header: '계좌', width: 18 }, { header: '메모', width: 20 },
     ]
 

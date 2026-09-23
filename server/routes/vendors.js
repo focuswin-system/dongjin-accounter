@@ -310,7 +310,10 @@ router.get('/import/template', async (req, res, next) => {
     const wb = newBook()
     // rows[0] 은 머리글이라 예시에서 뺀다 — 머리글은 COLS 가 만든다
     templateSheet(wb, '거래처', { columns: COLS, samples: rows.slice(1) })
-    guideSheet(wb, guide.map(g => g[0], '작성안내', { hasRequired: true }))
+    /* ⚠ 괄호가 map 안에서 닫혀 있었다 — guideSheet 가 인자 하나만 받아서
+       시트 이름('작성안내')도 필수 칸 안내도 통째로 버려졌다(Array.map 은 남는 인자를 무시한다).
+       다른 양식(invoices.js)과 같은 모양으로 맞춘다. */
+    guideSheet(wb, guide.map(g => g[0]), '작성안내', { hasRequired: true })
     await sendBook(res, wb, '거래처_업로드_양식.xlsx')
   } catch (e) { next(e) }
 })

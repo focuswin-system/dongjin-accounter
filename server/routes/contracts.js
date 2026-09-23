@@ -6,6 +6,7 @@ const { buildContractWorkbook } = require('../contract-export')
 const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError, amountError } = require('../lib/ledger')
 const { settleAcctCode } = require('../lib/acctCode')
+const { splitJoin, splitCategory, splitAmount } = require('../lib/categoryAxis')
 const { removeUploadedFile } = require('../lib/uploads')
 const { vatOf, vatRateOf, taxTypeOfMode } = require('../lib/vat')
 const { closedPeriodError, closedDocError } = require('../lib/closing')
@@ -1402,10 +1403,13 @@ router.get('/:id/cost-analysis', async (req, res, next) => {
     // 지급액)이라 매출주문에는 붙지 않아, 예전 코드는 항상 0을 반환했다(호출자가 없어
     // 드러나지 않았을 뿐이다). 주문 상세가 쓰는 cost_total(METRIC_COLS)과 같은 축으로 맞춘다.
     const [txns] = await req.db.execute(
-      `SELECT t.category, cat.group_name AS category_group, SUM(t.amount) AS total
-       FROM transactions t LEFT JOIN categories cat ON t.category = cat.name
+      /* 복합 거래는 항목으로 펼친다(lib/categoryAxis.js) — 원가를 비목 대분류로 나눠 담는
+         자리라, 한 전표에 재료비와 외주비를 같이 적으면 예전엔 한쪽에 전액이 몰렸다. */
+      `SELECT ${splitCategory()} AS category, cat.group_name AS category_group, SUM(${splitAmount()}) AS total
+       FROM transactions t ${splitJoin()}
+       LEFT JOIN categories cat ON cat.name = ${splitCategory()}
        WHERE t.cost_contract_id = ? AND t.kind='expense' AND t.status='지급완료'
-       GROUP BY t.category, cat.group_name`,
+       GROUP BY ${splitCategory()}, cat.group_name`,
       [req.params.id]
     )
     const actual = { material: 0, outsource: 0, labor: 0, overhead: 0 }

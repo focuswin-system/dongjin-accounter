@@ -22,10 +22,12 @@ import { VoucherView } from '../lib/components/VoucherView'
 
 const KINDS = [['all', '전체'], ['income', '입금'], ['expense', '지출']]
 
-export const VoucherBookScreen = () => {
+/* initialRange — 거래내역에서 '전표로 보기'로 넘어온 기간. goRoute — 되돌아가는 길.
+   둘 다 없으면 평소처럼 이번 달을 본다(메뉴로 바로 들어온 경우). */
+export const VoucherBookScreen = ({ initialRange = null, goRoute }) => {
   useFiscalTick()
   const toast = useToast()
-  const init = periodToRange('month')
+  const init = initialRange || periodToRange('month')
   const [from, setFrom] = useState(init.from)
   const [to, setTo] = useState(init.to)
   const [kind, setKind] = useState('all')
@@ -123,6 +125,11 @@ export const VoucherBookScreen = () => {
       <PageHeader title="전표 목록"
         sub="기간 안의 거래를 차변·대변으로 펼칩니다. 세무사에게 넘기거나 회계 프로그램에 올릴 때 쓰세요."
         actions={<div className="row gap-6 no-print" style={{ alignItems: 'center' }}>
+          {/* 같은 돈을 그리드로 — 거래내역과 이 화면은 한 데이터의 두 얼굴이다.
+              전에는 서로 오갈 길이 없어 메뉴를 거슬러 올라가야 했다. 기간을 들고 간다. */}
+          <button className="btn" onClick={() => goRoute?.('ledger', { range: { from, to } })}>
+            <Icon.Wallet size={14}/> 거래내역으로
+          </button>
           <PrintEditButton on={pe.on} toggle={pe.toggle} count={pe.count}/>
           <button className="btn" onClick={printSelected} disabled={chosen.length === 0}>
             <Icon.Print size={14}/> 선택 인쇄{chosen.length ? ` (${chosen.length})` : ''}

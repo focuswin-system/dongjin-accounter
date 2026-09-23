@@ -22,6 +22,7 @@ const { SETTLED_INCOME, SETTLED_EXPENSE } = require('./ledger')
 const { notCarryover } = require('./carryover')
 const { monthRange } = require('./period')
 const { pnlOnly, pnlParams } = require('./pnl')
+const { splitJoin, splitCategory, splitAmount, splitSupplyRaw, splitVat } = require('./categoryAxis')
 
 /* 항목 정의. label 은 화면·엑셀 시트 이름으로 그대로 쓴다(둘이 갈리면 대조가 안 된다).
  * required=true 인 항목이 0건이면 화면이 '확인 필요'로 표시한다 —
@@ -47,16 +48,24 @@ const num = (v) => Number(v) || 0
 async function taxofficePack(db, month, closingDay = 0) {
   const { from, to } = monthRange(month, closingDay)
 
-  // 1. 입출금 — 완료된 거래만. 세무사가 통장과 대조하는 자료라 계좌·적요까지 낸다.
+  /* 1. 입출금 — 완료된 거래만. 세무사가 통장과 대조하는 자료라 계좌·적요까지 낸다.
+        복합 거래는 **항목 줄로 펼쳐** 넘긴다(lib/categoryAxis.js). 세무사가 받는 것은 계정이다 —
+        한 줄로 뭉치면 첫 비목 하나만 넘어가 나머지가 엉뚱한 계정에 올라간다.
+        줄이 늘어도 금액 합계는 그대로다(항목 합계 = 거래 금액을 저장 때 보장한다). */
   const [txns] = await db.execute(`
-    SELECT t.date, t.kind, t.category, t.amount, t.supply_amount, t.vat_amount,
-           t.memo, v.name AS vendor_name, a.name AS account_name
+    SELECT t.date, t.kind, ${splitCategory()} AS category, ${splitAmount()} AS amount,
+           ${splitSupplyRaw()} AS supply_amount, ${splitVat()} AS vat_amount,
+           /* ⚠ NULLIF — 항목의 적요는 비어 있어도 **빈 문자열**로 저장된다(saveSplits).
+              COALESCE 만 쓰면 빈 문자열이 값으로 통과해서 거래 적요가 통째로 사라진다. */
+           COALESCE(NULLIF(s.memo, ''), t.memo) AS memo, v.name AS vendor_name, a.name AS account_name
       FROM transactions t
+      ${splitJoin()}
       LEFT JOIN vendors  v ON v.id = t.vendor_id
       LEFT JOIN accounts a ON a.id = t.account_id
      WHERE t.date BETWEEN ? AND ?
        AND ((t.kind = 'income' AND t.status = ?) OR (t.kind = 'expense' AND t.status = ?))
-     ORDER BY t.date, t.kind DESC`,
+     /* 항목 줄은 적은 순서대로 — 안 적으면 같은 거래의 줄 순서가 실행마다 달라진다 */
+     ORDER BY t.date, t.kind DESC, t.id, s.sort_order`,
     [from, to, SETTLED_INCOME, SETTLED_EXPENSE])
 
   /* 2. 지출결의서 — **승인이 끝난 것만.** 작성 중인 결의서를 넘기면 세무사가 미확정 지출을

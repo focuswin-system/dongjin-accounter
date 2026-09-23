@@ -10,6 +10,8 @@ const router = Router()
 // 설계: docs/02-design/features/mgmt-query-assistant.design.md · mgmt-chat-sessions.design.md
 // ⚠ 멀티테넌트 — 전역 풀 금지. 반드시 req.db 로만 질의한다. 대화는 user_id(req.user.id)로 격리.
 
+const { splitJoin, splitCategory, splitSupply, splitTxnCount, splitCategoryFilter } = require('../lib/categoryAxis')
+
 const KIND = { sales: 'income', purchase: 'expense' }
 const TOPIC_LABEL = { sales: '매출', purchase: '매입' }
 // group → { key 컬럼식, 라벨식, JOIN, 한글라벨, 차트 }. 컬럼식은 사용자 입력이 아니라 이 맵의 값만 SQL에 들어간다.
@@ -17,12 +19,23 @@ const GROUP = {
   none:     { col: null, label: null, join: '', ko: '합계', chart: 'bar' },
   vendor:   { col: 't.vendor_id',                  label: 'MAX(v.name)',   join: 'LEFT JOIN vendors v ON t.vendor_id = v.id',   ko: '거래처별', chart: 'bar' },
   contract: { col: 't.contract_id',                label: 'MAX(c.name)',   join: 'LEFT JOIN contracts c ON t.contract_id = c.id', ko: '주문별', chart: 'bar' },
-  category: { col: 't.category',                   label: 'MAX(t.category)', join: '',                                          ko: '비목별', chart: 'bar' },
+  /* 비목 축만 복합 거래를 **항목으로 펼친다**(lib/categoryAxis.js). 금액·건수 식도 함께 바꾼다 —
+     펼친 줄에 부모 금액을 더하면 그 비목이 항목 수만큼 부풀고, COUNT(*) 는 한 거래를 여럿으로 센다.
+     ⚠ 다른 축(거래처·주문·월)에는 이 JOIN 을 붙이면 안 된다 — 그 축의 합계가 부푼다. */
+  category: { col: splitCategory(),                label: `MAX(${splitCategory()})`, join: splitJoin(),
+              amount: splitSupply(), count: splitTxnCount(),                            ko: '비목별', chart: 'bar' },
   item:     { col: 't.item_id',                    label: 'MAX(ri.name)',  join: 'LEFT JOIN ref_items ri ON t.item_id = ri.id', ko: '품목별', chart: 'bar' },
   month:    { col: "DATE_FORMAT(t.date, '%Y-%m')", label: "DATE_FORMAT(t.date, '%Y-%m')", join: '',                            ko: '월별 추이', chart: 'line' },
 }
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
-const FILTER_COLS = { vendor_id: 't.vendor_id', contract_id: 't.contract_id', category: 't.category', item_id: 't.item_id' }
+const FILTER_COLS = { vendor_id: 't.vendor_id', contract_id: 't.contract_id', item_id: 't.item_id' }
+/* 비목으로 거르는 것은 따로 둔다 — 복합 거래는 **항목에 그 비목이 있으면** 걸려야 한다.
+   FILTER_COLS 에 두면 JOIN 이 없는 축(거래처·월)에서 s 별칭을 못 찾아 질의가 깨진다.
+   EXISTS 라 줄이 늘지 않아 어느 축에서나 안전하다. 값은 두 번 넣는다. */
+const CATEGORY_FILTER = splitCategoryFilter()
+/* 받아들이는 필터 키 — **비목을 여기서 빠뜨리면 비목 필터가 통째로 죽는다.**
+   거르는 식만 따로 뺐을 뿐 사용자가 보내는 값은 예전과 같다. */
+const FILTER_KEYS = [...Object.keys(FILTER_COLS), 'category']
 const PERIODS = new Set(['this_month', 'this_quarter', 'this_year', 'last_3m', 'last_12m', 'custom'])
 
 const won = (n) => (Math.round(Number(n) || 0)).toLocaleString('ko-KR') + '원'
@@ -64,7 +77,7 @@ function normalizeSpec(src = {}) {
   if (period === 'custom') { if (DATE_RE.test(src.from || '')) spec.from = src.from; if (DATE_RE.test(src.to || '')) spec.to = src.to }
   const filter = {}
   const fsrc = src.filter || src
-  for (const k of Object.keys(FILTER_COLS)) if (fsrc[k]) filter[k] = String(fsrc[k])
+  for (const k of FILTER_KEYS) if (fsrc[k]) filter[k] = String(fsrc[k])
   if (Object.keys(filter).length) spec.filter = filter
   return spec
 }
@@ -85,7 +98,10 @@ async function runAggregate(db, spec) {
   /* 금액은 **공급가액**으로 센다. 부가세는 회사 돈이 아니라 받아서 내는 돈이라,
    * VAT 포함 금액으로 매출·원가를 집계하면 손익이 10% 부풀려진다.
    * 부가세 컬럼이 없던 시절 거래는 supply_amount 가 NULL 이라 amount 로 폴백한다. */
-  const AGG = s.measure === 'count' ? 'COUNT(*)' : 'COALESCE(SUM(COALESCE(t.supply_amount, t.amount)), 0)'
+  /* 축마다 금액·건수 식이 다를 수 있다(비목 축은 항목으로 펼치므로). 안 적은 축은 예전 그대로. */
+  const amountExpr = grp.amount || 'COALESCE(t.supply_amount, t.amount)'
+  const countExpr  = grp.count  || 'COUNT(*)'
+  const AGG = s.measure === 'count' ? countExpr : `COALESCE(SUM(${amountExpr}), 0)`
 
   /* 재무 거래(차입금 원금·자본금·투자자산)는 매출/매입이 아니다 → 집계에서 뺀다.
    * 대출 수령을 income 으로 넣는 순간 이 조건이 없으면 그대로 '매출'로 잡힌다.
@@ -98,17 +114,18 @@ async function runAggregate(db, spec) {
   const params = [kind, from, to, ...countableParams()]
   const filter = s.filter || {}
   for (const [k, col] of Object.entries(FILTER_COLS)) if (filter[k]) { where.push(`${col} = ?`); params.push(filter[k]) }
+  if (filter.category) { where.push(CATEGORY_FILTER); params.push(filter.category, filter.category) }
   const whereSql = where.join(' AND ') + statusCond
 
   let rows, total
   if (s.group === 'none') {
-    const [[row]] = await db.execute(`SELECT ${AGG} AS value, COUNT(*) AS cnt FROM transactions t WHERE ${whereSql}`, params)
+    const [[row]] = await db.execute(`SELECT ${AGG} AS value, ${countExpr} AS cnt FROM transactions t WHERE ${whereSql}`, params)
     rows = [{ key: 'total', label: '합계', value: Number(row.value), count: Number(row.cnt) }]
     total = Number(row.value)
   } else {
     const order = s.group === 'month' ? `${grp.col} ASC` : 'value DESC'
     const [res] = await db.execute(
-      `SELECT ${grp.col} AS gkey, ${grp.label} AS label, ${AGG} AS value, COUNT(*) AS cnt
+      `SELECT ${grp.col} AS gkey, ${grp.label} AS label, ${AGG} AS value, ${countExpr} AS cnt
        FROM transactions t ${grp.join} WHERE ${whereSql}
        GROUP BY ${grp.col} ORDER BY ${order}`, params)
     rows = res.map(r => ({ key: r.gkey, label: r.label || '(미지정)', value: Number(r.value), count: Number(r.cnt) }))

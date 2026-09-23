@@ -25,7 +25,11 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
   openIncome, openExpense, canJournal = false, openJournalOnMount = false,
   /* 다른 화면에서 "이 거래를 거래내역에서 열어줘"라고 넘겨준 id.
      없으면 평소처럼 목록만 연다(청구서의 focusInvoiceId 와 같은 방식). */
-  focusTxnId, goRoute }) => {
+  focusTxnId, goRoute,
+  /* 다른 화면(전표 목록)에서 "이 기간 그대로 와라"고 넘겨준 기간. 없으면 이번 달.
+     ⚠ 기간만 들고 온다 — 비목·주문·검색까지 넘기면 두 화면이 서로의 필터를 알아야 한다. */
+  initialRange = null,
+  canVoucherBook = false }) => {
   const toast = useToast();
   const { confirm } = useConfirm();
   const [filter, setFilter] = useState(initialFilter);
@@ -89,7 +93,7 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
   /* 기간·비목·주문·검색 — 규칙은 공용 훅(lib/tableFilter)에 하나만 둔다.
      기본 기간은 이번 달(프리셋 버튼이 값을 바꿔준다). */
   const tf = useTableFilter({
-    date: { field: 'date', initial: periodToRange("month") },
+    date: { field: 'date', initial: initialRange || periodToRange("month") },
     search: { fields: ['vendor', 'scope', 'category', 'contract'], placeholder: "거래처·주문·비목 검색" },
     filters: [
       { key: 'cat', label: "비목", field: 'category', options: categories },
@@ -153,7 +157,6 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
     const byTab = (rows) =>
       filter === "income"  ? rows.filter(t => t.kind === "income")
       : filter === "expense" ? rows.filter(t => t.kind === "expense")
-      : filter === "journal" ? rows.filter(t => t.journal)
       /* 주문 없는 돈 = 옛 '경비 처리·잡손익' 화면(3단계에서 이 필터로 흡수). 규칙은 lib/txnScope.js 하나 */
       : filter === "misc"    ? rows.filter(t => !t.journal && !t.planned && isMiscPl(t))
       : rows;
@@ -304,7 +307,12 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
     { id: "all",     label: "전체",       count: tabCount(() => true) },
     { id: "income",  label: "입금",       count: tabCount(t => t.kind === "income") },
     { id: "expense", label: "출금",       count: tabCount(t => t.kind === "expense") },
-    { id: "journal", label: "대체",       count: tabCount(t => t.journal) },
+    /* ⚠ '대체' 탭은 뺐다(2026-09). 두 가지 이유다.
+       ① **축이 다르다.** 전체·입금·출금은 돈의 방향인데 대체만 전표 종류였다. 한 줄에
+          다른 층위가 섞이면 "대체는 입금도 출금도 아닌 제3의 방향인가"에서 멈춘다.
+       ② 운영 전 테넌트에서 대체전표가 **0건**이었다. 늘 빈 탭이 맨 앞줄을 차지했다.
+       잃는 것은 없다 — 대체 행은 전체 탭에 그대로 서고, 누르면 openJournal 이 전표를 열고
+       거기서 지운다(행 클릭에 붙어 있지 탭에 붙어 있지 않다). 등록은 '거래 등록 › 전표입력'. */
     { id: "misc",    label: "주문 없는 돈", count: tabCount(t => !t.journal && !t.planned && isMiscPl(t)) },
   ];
 
@@ -363,12 +371,11 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
     goRoute?.(kind === 'income' ? 'billing_issued' : 'billing_received');
   };
 
-  const titleMap = { all: "거래내역", income: "거래내역 · 입금", expense: "거래내역 · 출금", journal: "거래내역 · 대체", misc: "거래내역 · 주문 없는 돈" };
+  const titleMap = { all: "거래내역", income: "거래내역 · 입금", expense: "거래내역 · 출금", misc: "거래내역 · 주문 없는 돈" };
   const subMap = {
     all:     "통장에서 오간 돈과 대체전표를 봅니다. 세금계산서가 있는 건은 세금계산서에서 적어요.",
     income:  "들어온 돈을 모아 봅니다.",
     expense: "나간 돈을 모아 봅니다.",
-    journal: "돈이 안 움직인 분개(감가상각·정정 등)예요. 합계에는 들지 않아요.",
     misc:    "어느 주문에도 붙지 않은 운영비·잡수익이에요(급여·세금계산서 정산은 빼고).",
   };
 
@@ -383,6 +390,14 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
           actions={<>
             <button className="btn excel" onClick={openExcel}><Icon.Excel/> <span className="btn-label-hide">엑셀 업로드</span></button>
             <button className="btn" onClick={exportXlsx}><Icon.Excel/> <span className="btn-label-hide">엑셀 내보내기</span></button>
+            {/* 같은 돈을 **차변·대변으로** 보고 싶을 때. 전표 렌더러를 여기 또 만들지 않는다 —
+                복합 거래(txn_splits)를 펼치는 곳이 둘이 되면 곧 두 모양으로 갈린다.
+                보고 있던 기간을 들고 간다(비목·검색은 안 들고 간다 — 전표 목록의 축이 아니다). */}
+            {canVoucherBook && (
+              <button className="btn" onClick={() => goRoute?.('voucher_book', { range })}>
+                <Icon.Doc size={14}/> <span className="btn-label-hide">전표로 보기</span>
+              </button>
+            )}
             {/* 입구는 **하나**다 — 누르면 어떻게 적을지 묻는다(전표입력·폼 입력·세금계산서에서…).
                 ⚠ 버튼 이름은 '전표'가 아니다 — 전표입력은 그 안의 **한 가지**일 뿐이라,
                 버튼에 그 이름을 달면 나머지 넷이 없는 것처럼 보인다.
@@ -527,7 +542,18 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
               { key: 'scope', header: '적요',
                 render: t => <span className="text-muted text-sm">{t.scope}</span> },
               { key: 'category', header: '비목',
-                render: t => <span className="badge outline">{t.category}</span> },
+                /* 복합 전표는 비목이 여럿인데 이 칸에 서는 것은 **첫 항목 하나**다.
+                   표시가 없으면 나머지가 없는 것처럼 보인다 — 눌러서 항목을 펼칠 수 있다는 것도
+                   알 길이 없었다. 조용히 '복합'만 덧붙인다(정상에 경고를 달지 않는다). */
+                render: t => (
+                  <>
+                    <span className="badge outline">{t.category}</span>
+                    {t.hasSplits && (
+                      <span className="badge outline text-muted2" style={{ marginLeft: 4, fontSize: 10 }}
+                            title="비목이 여럿인 전표예요 — 열면 항목이 펼쳐집니다">복합</span>
+                    )}
+                  </>
+                ) },
               { key: 'amount', header: '금액', align: 'right', sortable: true,
                 sortValue: t => t.sign * t.amount,
                 render: t => t.journal

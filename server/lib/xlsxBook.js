@@ -137,12 +137,23 @@ function sheet(wb, name, { title, sub, columns, rows, totals = null, freezeCols 
  *   '상호명*' 은 '상호명' 과 다른 글자가 된다. 사용자는 열세 칸을 손으로 다시 이어야 한다.
  *   양식은 **그대로 돌아올 파일**이라, 사람에게 보이는 표시는 값이 아니라 서식으로만 준다.
  *
- * @param opts.columns [{ header, width, required? }]
+ * @param opts.columns [{ header, width, required?, money?, int? }]
  * @param opts.samples 예시 행(값 배열). 비워도 된다
  */
 function templateSheet(wb, name, { columns, samples = [] }) {
   const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1 }] })
   ws.columns = columns.map(c => ({ width: c.width || 16 }))
+
+  /* 금액 열에는 **양식에도** 천단위 서식을 건다. 양식은 사람이 손으로 채우는 파일이라
+     서식이 없으면 8000000 을 눈으로 세어야 하고, 한 자리 틀리게 적어도 티가 안 난 채 올라간다.
+     받는 표(sheet)에만 서식을 걸고 주는 양식에는 안 걸어 두었던 것이 그동안의 빈자리였다.
+     ⚠ 머리글 **글자는 그대로** 둔다 — 별표를 붙이면 임포트 파서가 열을 못 찾는다(위 주석). */
+  columns.forEach((c, i) => {
+    if (!c.money && !c.int) return
+    const col = ws.getColumn(i + 1)
+    col.numFmt = c.money ? MONEY : INT
+    col.alignment = { horizontal: 'right' }
+  })
 
   const head = ws.getRow(1)
   columns.forEach((c, i) => {

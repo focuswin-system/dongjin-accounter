@@ -701,6 +701,9 @@ router.get('/import/template', async (req, res, next) => {
        상호는 공급자/공급받는자 중 **우리 반대편**이 쓰이므로 둘 다 표시한다.
        나머지는 홈택스 파일에 있으면 쓰고 없으면 비운다 — 별을 남발하면 별이 뜻을 잃는다. */
     const REQUIRED = new Set(['작성일자', '공급자 상호', '공급받는자 상호', '합계금액'])
+    /* 금액 칸은 **이름으로** 적는다 — 자리(index)로 적으면 열이 하나 끼는 순간 엉뚱한 칸이 금액이 된다.
+       사업자등록번호·승인번호는 일부러 뺀다(숫자로 보이지만 앞의 0 이 사라지면 안 되는 글자다). */
+    const MONEY_COLS = new Set(['합계금액', '공급가액', '세액', '품목 단가', '품목 공급가액'])
 
     /* ⚠ 이 안내는 **코드와 같은 말을 해야 한다.** 예전엔 "작성일자만 필수"라고 적어 두었는데
        실제로는 상호와 금액도 없으면 못 넣었고(isHometaxRowValid), 승인번호는 필수가 아닌데
@@ -757,7 +760,8 @@ router.get('/import/template', async (req, res, next) => {
     ]
     const wb = newBook()
     templateSheet(wb, '세금계산서', {
-      columns: cols.map((header, i) => ({ header, width: WIDTHS[i] || 16, required: REQUIRED.has(header) })),
+      columns: cols.map((header, i) => ({ header, width: WIDTHS[i] || 16, required: REQUIRED.has(header),
+        money: MONEY_COLS.has(header), int: header === '품목 수량' })),
       samples: rows.slice(1),
     })
     guideSheet(wb, guide.map(g => g[0]), '작성안내', { hasRequired: true })

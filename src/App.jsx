@@ -392,6 +392,10 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
   /* 반복 제안에서 [반복거래로 등록]을 누르고 온 값 — 반복거래 화면이 등록 서랍을 그 값으로 연다.
      쓰고 나면 비운다(안 비우면 다시 들어올 때마다 서랍이 열린다). */
   const [repeatPrefill, setRepeatPrefill] = useState(null);
+  /* 거래내역 ↔ 전표 목록이 **보고 있던 기간을 들고** 오간다. 주소(해시)에 안 담는 이유:
+     기간은 북마크할 값이 아니고(새로 열면 이번 달이 맞다), 해시에 담으면 뒤로가기가
+     기간 단위로 쌓여 두어 번만 눌러도 못 빠져나온다. 화면 전환 한 번만 사는 값이다. */
+  const [carryRange, setCarryRange] = useState(null);
   const [contractName, setContractName] = useState("");
   const [txnForm, setTxnForm] = useState(null); // null | { kind, contract? }
   const [txnVersion, setTxnVersion] = useState(0);
@@ -588,6 +592,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
     if (id === 'report') setReportKey(opts.reportKey || null);
     if (id === 'recurring_invoice' || id === 'recurring_expense') setRepeatPrefill(opts.repeatPrefill || null);
     if (DOC_ROUTES.includes(id)) setDocFocusId(opts.docId || null);
+    if (id === 'ledger' || id === 'voucher_book') setCarryRange(opts.range || null);
     window.location.hash =
       (id === 'contract_detail' && (opts.contractId || contractId)) ? `${id}/${opts.contractId || contractId}`
       : (id === 'report' && opts.reportKey) ? `${id}/${opts.reportKey}`
@@ -600,7 +605,11 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
   /* 거래내역 — 서류 없이 오간 돈의 입구(3단계). 옛 '경비 처리'·'전표 입력' 주소도 여기로 온다.
      전표입력은 대체전표 권한이 있을 때만 보인다. 폼 입력은 늘 연다 — 쓰기 권한은 서버가 따진다. */
   const renderLedger = (filter, { openJournalOnMount = false } = {}) => (
-    <LedgerScreen key={`ledger-${filter}`} initialFilter={filter} refreshTrigger={txnVersion} focusTxnId={focusTxnId}
+    /* key 에 기간을 넣는다 — 전표 목록에서 기간을 들고 오면 화면이 새로 서야 초기 기간이 먹는다
+       (useTableFilter 의 range 는 첫 렌더에만 initial 을 읽는다). */
+    <LedgerScreen key={`ledger-${filter}-${carryRange ? `${carryRange.from}~${carryRange.to}` : ''}`}
+      initialRange={carryRange} canVoucherBook={canDo("voucher_book", "view")}
+      initialFilter={filter} refreshTrigger={txnVersion} focusTxnId={focusTxnId}
       openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}
       openInvoice={(kind, invoiceId) => go(kind === "income" ? "ar" : "ap", { invoiceId })}
       openIncome={() => setTxnForm({ kind: "income" })}
@@ -700,10 +709,13 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
       case "hr_outsourcing":  return <OutsourcingScreen/>;
       // 일반 경비 / 잡손익 — 화면은 하나를 공유하고 진입 메뉴가 초기 탭을 정한다
       case "card_payment":   return <CardPaymentScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} goRoute={go}/>;
-      case "voucher_book":   return <VoucherBookScreen/>;
+      case "voucher_book":   return <VoucherBookScreen key={`vb-${carryRange ? `${carryRange.from}~${carryRange.to}` : ''}`}
+                                      initialRange={carryRange} goRoute={go}/>;
       case "transfer":       return <TransferScreen openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })}/>;
       // 옛 '전표 입력' — 거래내역의 전표 서랍으로 옮겼다(3단계). 옛 주소로 오면 서랍을 열어 준다
-      case "voucher_entry":  return renderLedger("journal", { openJournalOnMount: true });
+      /* 옛 '전표 입력' 주소 — 서랍은 전표입력으로 열되 목록은 **전체**다('대체' 탭은 없앴다).
+         저장하면 대체전표는 전표 보기로, 통장 거래는 목록에 그대로 선다. */
+      case "voucher_entry":  return renderLedger("all", { openJournalOnMount: true });
       case "finance_lending": return <LendingScreen/>;
       case "finance_note":    return <NotesScreen/>;
       // 옛 '경비 처리'·'잡손익' — 거래내역의 '주문 없는 돈' 필터로 흡수(3단계)

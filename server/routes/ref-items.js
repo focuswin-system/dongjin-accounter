@@ -188,6 +188,10 @@ router.post('/import/commit', async (req, res, next) => {
 })
 
 // 양식 다운로드(.xlsx) — type별 머리글 + 예시 2행 + 작성안내 시트
+/* 양식의 금액 칸 — **이름으로** 적는다(자리로 적으면 열이 끼는 순간 어긋난다).
+   중량·수량은 돈이 아니라 뺀다. 품목코드·자산번호도 숫자가 아니라 글자다. */
+const MONEY_COLS = new Set(['매입가', '출고가', '취득가액'])
+
 const TEMPLATES = {
   item: {
     file: '품목_업로드_양식.xlsx',
@@ -280,7 +284,8 @@ router.get('/import/template', async (req, res, next) => {
        품목·자산은 둘째 칸이 필수지만 적요는 첫째 칸이다. 머리글에서 갈라 보여야
        빈 칸으로 올리고 나서 거절당하는 일이 줄어든다. */
     templateSheet(wb, t.sheet, {
-      columns: t.cols.map((header, i) => ({ header, width: t.widths[i] || 16, required: header === t.required })),
+      columns: t.cols.map((header, i) => ({ header, width: t.widths[i] || 16,
+        required: header === t.required, money: MONEY_COLS.has(header) })),
       samples: t.samples,
     })
     guideSheet(wb, guideLines, '작성안내', { hasRequired: true })

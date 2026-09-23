@@ -1163,7 +1163,11 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     <Drawer open={open} onClose={onClose} width={lines.length > 0 ? "min(1680px, 100vw)" : undefined}>
         <DrawerHead
           /* 메뉴·버튼이 '세금계산서'다(3단계) — 누른 버튼과 열린 폼이 다른 이름이면 다른 곳에 온 것처럼 읽힌다 */
-          title={editInvoice ? "세금계산서 수정" : (form.kind === "issued" ? "세금계산서 발행" : "세금계산서 등록 (수취)")}
+          /* ⚠ 방향으로 **동사를 가르지 않는다.** 예전엔 매출이면 '발행', 매입이면 '등록'이었다.
+             두 가지가 틀렸다 — ① 이 앱은 세금계산서를 발행하지 않는다(홈택스가 한다).
+             '발행'이라 적으면 누르는 순간 국세청에 뭔가 넘어간다고 읽힌다. ② 같은 일에 이름이
+             둘이면 탭만 바꿔도 다른 기능처럼 보인다. 옆의 '어음 등록'과도 짝이 맞는다. */
+          title={editInvoice ? "세금계산서 수정" : "세금계산서 등록"}
           sub={editInvoice ? "세금계산서 내용을 고칩니다" : (form.kind === "issued" ? "거래처에 발행한 세금계산서를 적어요" : "거래처에서 받은 세금계산서를 적어요")}
           onClose={onClose}/>
         <div className="drawer-body col gap-form">
@@ -2318,7 +2322,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
                     <Icon.Plus size={14}/> 어음 등록
                   </button>
                 : <button className="btn primary" onClick={openNewInvoice}>
-                    <Icon.Plus size={14}/> {isIssued ? "세금계산서 발행" : "세금계산서 등록"}
+                    <Icon.Plus size={14}/> 세금계산서 등록
                   </button>}
             </>}
       />

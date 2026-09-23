@@ -354,6 +354,9 @@ function adaptTransaction(row) {
        그 칸만 봐서는 주문인지 메모인지 알 수 없었다. 주문은 이제 자기 칸(contract)이 있다. */
     scope: row.memo || row.doc_no || '—',
     category: row.category || '—',
+    /* 한 거래를 여러 비목으로 가른 복합 전표인가. 비목 칸에 보이는 것은 **첫 항목 하나**라,
+       이 표시가 없으면 나머지 비목이 없는 것처럼 보인다(항목은 거래 수정 폼·전표에서 펼쳐진다). */
+    hasSplits: !!row.has_splits,
     subCategory: row.sub_category,
     amount: row.amount,
     // 부가세: null이면 이 기능 이전 거래(세액 미상) — 화면이 합계에서 역산한다
