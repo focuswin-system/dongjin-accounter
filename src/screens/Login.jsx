@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Icon } from '../lib/ui'
 
 /* 직전에 세션이 끊겨 되돌아왔는지 — **모듈 로드 시 한 번만** 읽는다.
@@ -23,7 +23,23 @@ const BRAND_THEME = 'gold-light'
 
 export const LoginScreen = ({ onLogin }) => {
   // 회사코드는 마지막 로그인 값을 기억한다(같은 PC는 대개 같은 회사에서 쓴다).
-  const [company, setCompany] = useState(() => localStorage.getItem('companyCode') || '');
+  // 고객사 시스템이 `?company=코드` 로 걸어 보내면 그 값이 먼저다 — 그 링크를 누른 사람은 그 회사다.
+  const [company, setCompany] = useState(() =>
+    new URLSearchParams(window.location.search).get('company')?.trim().toLowerCase()
+    || localStorage.getItem('companyCode') || '');
+  /* 회사 전용 주소(예: acct.dongjintech.kr)로 들어왔으면 서버가 회사코드를 알려준다.
+     칸이 비어 있을 때만 채운다 — 사람이 이미 친 값을 덮지 않는다. */
+  useEffect(() => {
+    if (company) return;
+    let alive = true;
+    fetch('/api/auth/domain-hint')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (alive && d?.code) setCompany(c => c || d.code); })
+      .catch(() => { /* 힌트는 편의일 뿐 — 못 받으면 직접 친다 */ });
+    return () => { alive = false; };
+    // 첫 화면에서 한 번만 묻는다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [id, setId] = useState('');
   const [pw, setPw] = useState('');
   const [showPw, setShowPw] = useState(false);

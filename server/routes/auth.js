@@ -137,6 +137,21 @@ router.post('/logout', (req, res) => {
 })
 
 // ── 내 정보 ──
+/* 회사 전용 주소 → 회사코드. 로그인 화면이 회사코드 칸을 채우는 데만 쓴다(인증 아님).
+ *
+ * 공개 경로다(index.js PUBLIC_API). 그래서 **요청의 Host 만** 보고, 등록된 주소일 때만
+ * 코드를 돌려준다 — 아무 주소나 넣어 회사 목록을 훑을 수 없다. 회사코드는 로그인
+ * 화면에 사람이 직접 치는 값이라 비밀이 아니지만, 굳이 목록으로 내주지는 않는다. */
+router.get('/domain-hint', async (req, res, next) => {
+  try {
+    const host = String(req.hostname || '').toLowerCase().slice(0, 120)
+    if (!host) return res.json({ code: null })
+    const [[row]] = await platformPool.execute(
+      "SELECT code FROM companies WHERE domain = ? AND active = 1 LIMIT 1", [host])
+    res.json({ code: row?.code || null })
+  } catch (e) { next(e) }
+})
+
 router.get('/me', authMiddleware, async (req, res, next) => {
   try {
     const [rows] = await platformPool.execute(

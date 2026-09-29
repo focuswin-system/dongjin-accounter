@@ -91,7 +91,8 @@ const tenantMiddleware = require('./middleware/tenant')
 const permGate = require('./middleware/perm')
 const auditTrail = require('./middleware/auditTrail')
 // 로그아웃은 인증을 요구하지 않는다 — 토큰이 이미 만료된 상태에서도 쿠키는 정리되어야 한다.
-const PUBLIC_API = new Set(['/api/auth/login', '/api/auth/logout', '/api/health'])
+// domain-hint: 회사 전용 주소로 들어왔을 때 로그인 화면이 회사코드를 채우는 데 쓴다(로그인 전이라 공개)
+const PUBLIC_API = new Set(['/api/auth/login', '/api/auth/logout', '/api/health', '/api/auth/domain-hint'])
 app.use((req, res, next) => {
   // 대소문자를 낮춰 판정한다(이중 방어). case sensitive routing 과 함께 두어,
   // 둘 중 하나가 설정 변경으로 풀려도 게이트가 뚫리지 않게 한다.

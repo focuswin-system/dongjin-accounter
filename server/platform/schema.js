@@ -409,6 +409,18 @@ async function migratePlatformSchema(c) {
       console.log(`[platform] users.${col} 추가 완료`)
     }
   }
+
+  /* 회사 전용 주소(예: acct.dongjintech.kr). 그 주소로 들어오면 로그인 화면이 회사코드를
+     채운다(routes/auth.js domain-hint). 인증이 아니라 **편의**다 — 비워 두면 아무 일도 없다. */
+  const [[{ domCnt }]] = await c.execute(
+    `SELECT COUNT(*) AS domCnt FROM information_schema.columns
+      WHERE table_schema = ? AND table_name = 'companies' AND column_name = 'domain'`,
+    [db]
+  )
+  if (domCnt === 0) {
+    await c.execute('ALTER TABLE companies ADD COLUMN domain VARCHAR(120) NULL, ADD UNIQUE KEY uq_companies_domain (domain)')
+    console.log('[platform] companies.domain 추가 완료')
+  }
 }
 
 /**
