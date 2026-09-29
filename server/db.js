@@ -1386,6 +1386,63 @@ async function initDb(conn) {
      *   틀린 기록을 만들지 않는다. */
     await ensureColumn('company_info', 'main_in_account_id',  'main_in_account_id VARCHAR(36)')
     await ensureColumn('company_info', 'main_out_account_id', 'main_out_account_id VARCHAR(36)')
+
+    /* ── 전자결재 ── 설계: docs/02-design/features/e-approval.design.md
+     * e_approval  회사가 전자결재를 쓰나. 끄면(기본) 지금처럼 '승인' 버튼 하나, 켜면 결재로만 승인된다(Q4). */
+    await ensureColumn('company_info', 'e_approval', 'e_approval TINYINT NOT NULL DEFAULT 0')
+    /* 결재 한 건 = 문서 한 번의 상신(회차). 반려 뒤 다시 올리면 **새 행**(round+1) — 앞 회차 기록은 남는다.
+     *   status  진행 | 승인 | 반려 | 회수 | 취소(승인 뒤 문서가 다시 작성으로 돌아가 효력을 잃음)
+     *   mode    normal | post(후결 — 먼저 처리하고 결재는 뒤에) */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS approvals (
+        id            VARCHAR(36) PRIMARY KEY,
+        doc_type      VARCHAR(30)  NOT NULL,
+        doc_id        VARCHAR(36)  NOT NULL,
+        round         INT          NOT NULL DEFAULT 1,
+        title         VARCHAR(200),
+        amount        BIGINT,
+        mode          VARCHAR(10)  NOT NULL DEFAULT 'normal',
+        reason        VARCHAR(500),
+        status        VARCHAR(10)  NOT NULL,
+        drafter_id    VARCHAR(36)  NOT NULL,
+        drafter_name  VARCHAR(100),
+        drafter_pos   VARCHAR(50),
+        submitted_at  DATETIME     NOT NULL,
+        finished_at   DATETIME,
+        KEY ix_approvals_doc (doc_type, doc_id),
+        UNIQUE KEY uq_approvals_round (doc_type, doc_id, round),
+        KEY ix_approvals_drafter (drafter_id, status)
+      )
+    `)
+    /* 회차 중복 방지 — 문서 행 잠금으로 이미 직렬화되지만, 규칙이 바뀌어도 두 번째 방어선이 남게.
+       이 표를 먼저 만든 설치본(개발 중)에는 없을 수 있어 따로 건다 */
+    {
+      const [[{ n }]] = await c.execute(
+        `SELECT COUNT(*) AS n FROM information_schema.statistics
+          WHERE table_schema = DATABASE() AND table_name = 'approvals' AND index_name = 'uq_approvals_round'`)
+      if (Number(n) === 0) await c.execute('ALTER TABLE approvals ADD UNIQUE KEY uq_approvals_round (doc_type, doc_id, round)')
+    }
+    /* 결재선 한 줄 = 한 사람의 한 차례.
+     *   kind    결재 | 참조(차례 없이 보기만)
+     *   status  대기 | 차례 | 승인 | 반려 | 전결 | 생략 | 참조 */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS approval_steps (
+        id            VARCHAR(36) PRIMARY KEY,
+        approval_id   VARCHAR(36)  NOT NULL,
+        seq           INT          NOT NULL,
+        kind          VARCHAR(10)  NOT NULL DEFAULT '결재',
+        approver_id   VARCHAR(36)  NOT NULL,
+        approver_name VARCHAR(100),
+        approver_pos  VARCHAR(50),
+        label         VARCHAR(30),
+        status        VARCHAR(10)  NOT NULL,
+        acted_at      DATETIME,
+        comment       VARCHAR(500),
+        UNIQUE KEY uq_approval_step (approval_id, seq),
+        KEY ix_approval_turn (approver_id, status),
+        FOREIGN KEY (approval_id) REFERENCES approvals(id) ON DELETE CASCADE
+      )
+    `)
     await ensureColumn('company_info', 'main_card_id',        'main_card_id VARCHAR(36)')
     /* 첫 로그인 회사 설정(2026-09) — 종사업장·회기.
      * 회기는 세 값만 저장하고 기간·기수·이름은 lib/fiscal.js 가 계산한다(해마다 행을 만들지 않는다).

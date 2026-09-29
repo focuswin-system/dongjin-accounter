@@ -7,6 +7,7 @@ const { pageParams, buildWhere, inClause, docDateExpr, approvalStatusSql, approv
 const {
   approveDoc, execCandidates, executeDoc, invoiceState, linkInvoiceDoc, loadDoc, openInvoicesFor, resolutionOfReq, sourceTxnsOfReq, unapproveDoc, undoDoc,
 } = require('../lib/docExec')
+const approval = require('../lib/approval')
 
 const router = Router()
 const parseJson = (v, fb) => { try { return v ? JSON.parse(v) : fb } catch { return fb } }
@@ -44,10 +45,11 @@ async function attachLinks(db, rows) {
     const [t] = await db.execute(`SELECT req_id, txn_id FROM purchase_req_txns WHERE req_id IN ${clause}`, ids)
     for (const x of t) (srcTxns[x.req_id] = srcTxns[x.req_id] || []).push(x.txn_id)
   }
-  return rows.map(r => ({
+  // 최근 결재 상태(반려 표시 등) — 목록에서 '돌려받은 문서'가 보이게
+  return approval.withApprovalState(db, 'purchase_req', rows.map(r => ({
     ...r, status: r.status || '작성', order_amount: Number(r.order_amount) || 0, total: sums[r.id] || 0,
     approval: parseJson(r.approval, []), resolution: resol[r.id] || null, source_txn_ids: srcTxns[r.id] || [],
-  }))
+  })))
 }
 
 router.get('/', async (req, res, next) => {
@@ -200,6 +202,9 @@ router.put('/:id', async (req, res, next) => {
     const [[cur]] = await conn.execute('SELECT id, status FROM purchase_reqs WHERE id = ? FOR UPDATE', [req.params.id])
     if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
     if (cur.status === '완료') { await rollbackQuietly(conn); return res.status(409).json({ error: '처리가 끝난 품의서는 고칠 수 없어요. 처리 취소부터 해주세요.' }) }
+    // 결재 중(후결 진행 포함)이면 못 고친다 — 결재자가 보고 있는 문서와 달라진다
+    if (cur.status === '결재중') { await rollbackQuietly(conn); return res.status(409).json({ error: '결재 중인 품의서예요. 고치려면 먼저 회수해 주세요.' }) }
+    try { await approval.assertNoActive(conn, 'purchase_req', req.params.id) } catch (e) { await rollbackQuietly(conn); return next(e) }
     const er = await resolutionOfReq(conn, req.params.id)
     if (er) { await rollbackQuietly(conn); return res.status(409).json({ error: `지급결의서 ${er.doc_no}로 넘긴 품의서예요. 고치려면 그 결의서를 먼저 지워주세요.` }) }
     await conn.execute(
@@ -207,6 +212,8 @@ router.put('/:id', async (req, res, next) => {
       [...headVals(req.body), JSON.stringify(Array.isArray(req.body.approval) ? req.body.approval : []), req.params.id])
     await conn.execute('DELETE FROM purchase_req_items WHERE req_id = ?', [req.params.id])
     await insertItems(conn, req.params.id, req.body.items)
+    // 승인받은 내용을 바꿨다 — 그 결재는 효력을 잃는다(다시 올려야 한다)
+    if (cur.status === '승인') await approval.voidApproved(conn, 'purchase_req', req.params.id)
     await conn.commit()
     res.json({ ok: true, status: '작성', unapproved: cur.status === '승인' })
   } catch (e) { await rollbackQuietly(conn); next(e) }
@@ -224,6 +231,8 @@ router.delete('/:id', async (req, res, next) => {
     const out = await withTx(req.db, async (conn) => {
       const [[cur]] = await conn.execute('SELECT id, status, txn_id FROM purchase_reqs WHERE id = ? FOR UPDATE', [req.params.id])
       if (!cur) throw httpError(404, '구매품의서를 찾을 수 없어요')
+      if (cur.status === '결재중') throw httpError(409, '결재 중인 품의서예요. 먼저 회수해 주세요.')
+      await approval.assertNoActive(conn, 'purchase_req', req.params.id)
       const er = await resolutionOfReq(conn, req.params.id)
       if (er) throw httpError(409, `지급결의서 ${er.doc_no}에서 쓰고 있어요. 그 결의서를 먼저 지워주세요.`)
       let keptTxn = false
@@ -235,6 +244,7 @@ router.delete('/:id', async (req, res, next) => {
       await conn.execute('DELETE FROM purchase_req_txns WHERE req_id = ?', [req.params.id])
       await conn.execute('DELETE FROM purchase_req_items WHERE req_id = ?', [req.params.id])
       await conn.execute('DELETE FROM purchase_reqs WHERE id = ?', [req.params.id])
+      await approval.voidAll(conn, 'purchase_req', req.params.id)
       return { ok: true, keptTxn }
     })
     res.json(out)
@@ -244,13 +254,29 @@ router.delete('/:id', async (req, res, next) => {
 /* ── 승인·처리 ── 규칙은 lib/docExec.js (지급결의서와 같은 함수) */
 
 // 승인. 처리할 돈이 없는 품의(이미 나간 지출·완납 청구서)는 곧바로 완료가 된다(autoDone 에 이유)
+/* 전자결재를 쓰는 회사는 승인 버튼이 없다 — 결재로만 승인된다(설계 e-approval Q4).
+   승인 취소는 관리자만(결재받은 문서를 한 사람이 되돌리는 일이라). 취소하면 그 결재는 효력을 잃는다. */
 router.post('/:id/approve', async (req, res, next) => {
-  try { res.json(await withTx(req.db, conn => approveDoc(conn, TABLE, req.params.id))) }
-  catch (e) { next(e) }
+  try {
+    if (await approval.isEnabled(req.db)) return res.status(409).json({ error: '전자결재를 쓰는 회사예요. [결재 올리기]로 올려 주세요.', code: 'use_approval' })
+    res.json(await withTx(req.db, async (conn) => {
+      // 결재가 진행 중인 문서를 버튼으로 건너뛰지 않는다(전자결재를 끈 사이에도)
+      await approval.assertNoActive(conn, 'purchase_req', req.params.id)
+      return approveDoc(conn, TABLE, req.params.id)
+    }))
+  } catch (e) { next(e) }
 })
 router.post('/:id/unapprove', async (req, res, next) => {
-  try { res.json(await withTx(req.db, conn => unapproveDoc(conn, TABLE, req.params.id))) }
-  catch (e) { next(e) }
+  try {
+    const on = await approval.isEnabled(req.db)
+    if (on && req.user?.role !== 'admin') return res.status(403).json({ error: '결재가 끝난 문서예요. 승인 취소는 관리자만 할 수 있어요.' })
+    res.json(await withTx(req.db, async (conn) => {
+      await approval.assertNoActive(conn, 'purchase_req', req.params.id)
+      const out = await unapproveDoc(conn, TABLE, req.params.id)
+      await approval.voidApproved(conn, 'purchase_req', req.params.id)
+      return out
+    }))
+  } catch (e) { next(e) }
 })
 
 // 처리 창 — 연결할 만한 지출 거래
@@ -274,8 +300,13 @@ router.get('/:id/open-invoices', async (req, res, next) => {
 
 // 청구서 붙이기/떼기 — { invoice_id } (null 이면 뗀다)
 router.post('/:id/link-invoice', async (req, res, next) => {
-  try { res.json(await withTx(req.db, conn => linkInvoiceDoc(conn, TABLE, req.params.id, req.body.invoice_id || null))) }
-  catch (e) { next(e) }
+  try {
+    res.json(await withTx(req.db, async (conn) => {
+      // 결재 중엔 처리 대상(청구서)이 바뀌면 안 된다 — 결재가 끝날 때 '처리할 돈이 있나' 판단이 달라진다
+      await approval.assertNoActive(conn, 'purchase_req', req.params.id)
+      return linkInvoiceDoc(conn, TABLE, req.params.id, req.body.invoice_id || null)
+    }))
+  } catch (e) { next(e) }
 })
 
 // 지출 처리 — mode 'link' | 'create'

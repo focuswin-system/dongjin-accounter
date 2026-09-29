@@ -70,14 +70,14 @@ function buildWhere(pp, searchCols, opts = {}) {
 
 /**
  * 승인 흐름이 있는 문서(구매품의서·지급결의서)의 상태 필터.
- *   pending  아직 안 끝난 것(작성·승인) — '할 일' 큐
- *   작성 / 승인 / 완료
+ *   pending  아직 안 끝난 것(작성·결재중·승인) — '할 일' 큐
+ *   작성 / 결재중(전자결재) / 승인 / 완료
  * 옛 행은 status 가 비어 있을 수 있다 — 작성으로 본다.
  */
 const approvalStatusSql = (prefix = '') => (status) => {
   const col = `COALESCE(NULLIF(${prefix}status, ''), '작성')`
   if (status === 'pending') return { sql: `${col} <> '완료'`, args: [] }
-  if (['작성', '승인', '완료'].includes(status)) return { sql: `${col} = ?`, args: [status] }
+  if (['작성', '결재중', '승인', '완료'].includes(status)) return { sql: `${col} = ?`, args: [status] }
   return null
 }
 

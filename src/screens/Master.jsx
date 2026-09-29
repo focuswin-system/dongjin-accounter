@@ -15,6 +15,7 @@ import { bizTypeOptions, bizItemOptions } from '../lib/bizTypes'
 import { CoRow, BizSection, ContactSection, FiscalSection, emptyCompanyForm, companyFormOf, focusCompanyField } from '../lib/components/CompanyFields'
 import { CarryoverDrawer } from '../lib/components/CarryoverDrawer'
 import { api, minuteOf } from '../lib/api'
+import { refreshApprovalOn } from '../lib/components/Approval'
 import { josa } from '../lib/josa'
 
 /* ⚠ 한 건을 고치는 버튼은 **'수정'** 이다.
@@ -2508,18 +2509,37 @@ const ApprovalPanel = ({ embedded = false }) => {
   const [presets, setPresets] = useState([]);
   const [positions, setPositions] = useState([]);
   const [editing, setEditing] = useState(null);   // { id?, name, steps, is_default }
+  /* 전자결재 — 켜면 문서의 '승인' 버튼이 사라지고 결재로만 승인된다. 결재선 단계마다 사람을 정해 둘 수 있다 */
+  const [eOn, setEOn] = useState(null);
+  const [people, setPeople] = useState([]);
 
   const load = () => api.getApprovalPresets().then(setPresets);
   useEffect(() => {
     load();
     api.getHrCodes('pos').then(list => setPositions(list.map(p => p.name)));
+    api.getApprovalSettings().then(s => setEOn(!!s.enabled));
+    api.getApprovers().then(setPeople);
   }, []);
+  const personName = (id) => people.find(u => u.id === id)?.name || '';
+  const toggleE = async () => {
+    const next = !eOn;
+    if (next) {
+      const ok = await confirm({ title: '전자결재를 켤까요?',
+        body: '문서의 승인 버튼이 없어지고, 결재선의 사람이 차례대로 승인해야 문서가 승인돼요. 결재자마다 도니도라 계정이 있어야 해요.',
+        confirmLabel: '켜기' });
+      if (!ok) return;
+    }
+    const r = await api.setApprovalEnabled(next);
+    if (!r.ok) return toast.push(r.error || '바꾸지 못했어요', { tone: 'warn' });
+    setEOn(next); refreshApprovalOn();
+    toast.push(next ? '전자결재를 켰어요' : '전자결재를 껐어요');
+  };
 
   const startNew = () => setEditing({ name: '', steps: [{ label: '담당', position: '' }], is_default: false });
   const startEdit = (p) => setEditing({ id: p.id, name: p.name, steps: p.steps.length ? p.steps : [{ label: '', position: '' }], is_default: p.is_default });
 
   const setStep = (i, key, val) => setEditing(e => ({ ...e, steps: e.steps.map((s, j) => j === i ? { ...s, [key]: val } : s) }));
-  const addStep = () => setEditing(e => ({ ...e, steps: [...e.steps, { label: '', position: '' }] }));
+  const addStep = () => setEditing(e => ({ ...e, steps: [...e.steps, { label: '', position: '', user_id: '', kind: '결재' }] }));
   const removeStep = (i) => setEditing(e => ({ ...e, steps: e.steps.filter((_, j) => j !== i) }));
 
   const save = async () => {
@@ -2544,8 +2564,22 @@ const ApprovalPanel = ({ embedded = false }) => {
         {!embedded && <div className="section-title">결재선</div>}
         <HeaderActions when={embedded}><button className="btn primary ml-auto" onClick={startNew}><Icon.Plus size={14}/> 새 결재선</button></HeaderActions>
       </div>
+      <div className="card card-pad" style={{ marginBottom: 16 }}>
+        <div className="row gap-12" style={{ alignItems: 'center' }}>
+          <div style={{ minWidth: 0 }}>
+            <div className="fw-700">전자결재</div>
+            <div className="text-sm text-muted">
+              {eOn ? '결재선의 사람이 차례대로 승인해요. 문서의 승인 버튼은 없어요.' : '꺼져 있어요. 문서마다 승인 버튼 하나로 승인해요.'}
+            </div>
+          </div>
+          <button className={`btn ${eOn ? '' : 'primary'} ml-auto`} disabled={eOn === null} onClick={toggleE}>
+            {eOn ? '끄기' : '켜기'}
+          </button>
+        </div>
+      </div>
       <div className="text-sm text-muted" style={{ marginBottom: 16 }}>
-        지급결의서에 쓰는 결재 단계를 저장해두는 곳이에요. 결의서 만들 때 <b>기본</b> 결재선이 자동으로 붙고, 골라 바꿀 수 있어요. 직위는 인사 기준정보의 직위에서 고르거나 직접 입력하세요.
+        구매품의서·지급결의서·정산내역서의 결재 단계예요. <b>기본</b> 결재선이 자동으로 붙어요.
+        {eOn && ' 단계마다 결재할 사람을 정해 두면 결재 올릴 때 채워져요.'}
       </div>
 
       <div className="col gap-10">
@@ -2564,7 +2598,7 @@ const ApprovalPanel = ({ embedded = false }) => {
             <div className="row gap-6" style={{ marginTop: 10, flexWrap: 'wrap' }}>
               {p.steps.map((s, i) => (
                 <span key={i} className="badge outline">
-                  {s.label}{s.position ? ` · ${s.position}` : ''}
+                  {s.kind === '참조' ? '참조 ' : ''}{s.label}{s.position ? ` · ${s.position}` : ''}{s.user_id && personName(s.user_id) ? ` · ${personName(s.user_id)}` : ''}
                   {i < p.steps.length - 1 && <span style={{ margin: '0 2px', opacity: 0.5 }}>→</span>}
                 </span>
               ))}
@@ -2588,11 +2622,28 @@ const ApprovalPanel = ({ embedded = false }) => {
                   <div key={i} className="row gap-6" style={{ alignItems: 'center' }}>
                     <input className="input" style={{ width: 100 }} value={s.label} onChange={e => setStep(i, 'label', e.target.value)} placeholder="단계(담당)"/>
                     <div style={{ flex: 1 }}>
-                      <Combobox value={s.position} onChange={v => setStep(i, 'position', v)}
-                        options={positions.map(p => ({ value: p, label: p }))}
-                        placeholder="직위 (선택/직접입력)"
-                        onAddNew={(q) => setStep(i, 'position', q)} addNewLabel="이 직위로 입력"/>
+                      {eOn ? (
+                        /* 전자결재 — 직위 대신 **사람**. 비워 두면 올릴 때 고른다 */
+                        <Combobox value={s.user_id || ''} onChange={v => {
+                            const u = people.find(x => x.id === v);
+                            setEditing(e => ({ ...e, steps: e.steps.map((x, j) => j === i ? { ...x, user_id: v, position: u?.position || x.position } : x) }));
+                          }}
+                          options={people.map(u => ({ value: u.id, label: u.name, sub: [u.position, u.department].filter(Boolean).join(' · ') }))}
+                          placeholder="결재자" allowAdd={false}/>
+                      ) : (
+                        <Combobox value={s.position} onChange={v => setStep(i, 'position', v)}
+                          options={positions.map(p => ({ value: p, label: p }))}
+                          placeholder="직위 (선택/직접입력)"
+                          onAddNew={(q) => setStep(i, 'position', q)} addNewLabel="이 직위로 입력"/>
+                      )}
                     </div>
+                    {eOn && (
+                      <div className="seg" role="tablist">
+                        {['결재', '참조'].map(k => (
+                          <button key={k} className={`seg-btn ${(s.kind || '결재') === k ? 'active' : ''}`} onClick={() => setStep(i, 'kind', k)}>{k}</button>
+                        ))}
+                      </div>
+                    )}
                     <button className="icon-btn" title="이 결재 단계 지우기" onClick={() => removeStep(i)}><Icon.Close size={13}/></button>
                   </div>
                 ))}
@@ -2623,6 +2674,9 @@ const UserPanel = ({ currentUser, embedded = false }) => {
   const [roles, setRoles] = useState([]);
   const [rolesError, setRolesError] = useState("");
   const [roleTarget, setRoleTarget] = useState(null);   // 역할 배정 중인 사용자
+  /* 직위·부서 — 전자결재 결재란·결재함에 "이사 김OO"로 보이는 값(설계 e-approval Q1) */
+  const [profTarget, setProfTarget] = useState(null);
+  const [prof, setProf] = useState({ position: '', department: '' });
   const [pickedRoles, setPickedRoles] = useState([]);
 
   const load = () => api.getUsers().then(setUsers);
@@ -2760,6 +2814,30 @@ const UserPanel = ({ currentUser, embedded = false }) => {
     </Drawer>
   );
 
+  const openProf = (u) => { setProfTarget(u); setProf({ position: u.position || '', department: u.department || '' }); };
+  const saveProf = async () => {
+    const res = await api.updateUserProfile(profTarget.id, prof);
+    if (!res.ok) return toast.push(res.error || '저장하지 못했어요', { tone: 'warn' });
+    toast.push('저장했어요'); setProfTarget(null); load();
+  };
+  const profDrawer = (
+    <Drawer open={!!profTarget} onClose={() => setProfTarget(null)}>
+      <DrawerHead title="직위·부서" sub={profTarget?.name || profTarget?.username} onClose={() => setProfTarget(null)}/>
+      <div className="drawer-body col gap-form">
+        <div>
+          <label className="label">직위</label>
+          <input className="input" value={prof.position} onChange={e => setProf(p => ({ ...p, position: e.target.value }))} placeholder="예: 이사"/>
+        </div>
+        <div>
+          <label className="label">부서</label>
+          <input className="input" value={prof.department} onChange={e => setProf(p => ({ ...p, department: e.target.value }))} placeholder="예: 경영지원"/>
+        </div>
+        <div className="text-xs text-muted2">전자결재의 결재란·결재함에 이름과 함께 보여요.</div>
+      </div>
+      <DrawerFooter onCancel={() => setProfTarget(null)} onSave={saveProf}/>
+    </Drawer>
+  );
+
   // 일반 사용자 — 본인 비밀번호만 변경 가능
   if (!isAdmin) {
     return (
@@ -2816,13 +2894,18 @@ const UserPanel = ({ currentUser, embedded = false }) => {
         {/* 계정 목록 */}
         <div className="card" style={{ overflow: "hidden" }}>
           <table className="table">
-            <thead><tr><th>이름</th><th>아이디</th><th style={{ width: 100 }}>계정 권한</th><th style={{ width: 190 }}>역할(화면 권한)</th><th style={{ width: 90 }}>상태</th><th style={{ width: 300 }}></th></tr></thead>
+            <thead><tr><th>이름</th><th>아이디</th><th style={{ width: 130 }}>직위·부서</th><th style={{ width: 100 }}>계정 권한</th><th style={{ width: 190 }}>역할(화면 권한)</th><th style={{ width: 90 }}>상태</th><th style={{ width: 300 }}></th></tr></thead>
             <tbody>
-              {users.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", padding: 28, color: "var(--muted-2)", fontSize: 13 }}>계정이 없어요. 위에서 추가하세요.</td></tr>}
+              {users.length === 0 && <tr><td colSpan={7} style={{ textAlign: "center", padding: 28, color: "var(--muted-2)", fontSize: 13 }}>계정이 없어요. 위에서 추가하세요.</td></tr>}
               {users.map(u => (
                 <tr key={u.id} style={{ opacity: u.active ? 1 : 0.5 }}>
                   <td className="fw-700">{u.name || u.username}{u.id === currentUser?.id && <span className="text-xs text-muted2" style={{ marginLeft: 6 }}>(나)</span>}</td>
                   <td className="text-sm text-muted">{u.username}</td>
+                  <td className="text-sm">
+                    <button className="btn ghost sm" onClick={() => openProf(u)} title="직위·부서 바꾸기">
+                      {[u.position, u.department].filter(Boolean).join(' · ') || <span className="text-muted2">정하기</span>}
+                    </button>
+                  </td>
                   <td><span className={`badge ${u.role === "admin" ? "ink" : "outline"}`}>{u.role === "admin" ? "관리자" : "일반"}</span></td>
                   <td>
                     {(u.roleNames || []).length
@@ -2859,6 +2942,7 @@ const UserPanel = ({ currentUser, embedded = false }) => {
         </div>
       </div>
       {pwDrawer}
+      {profDrawer}
       {roleDrawer}
     </div>
   );

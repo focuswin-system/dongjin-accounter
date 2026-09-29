@@ -69,7 +69,17 @@ test('권한이 없는 역할(LEFT JOIN NULL)도 역할로는 잡힌다', async 
   const db = fakeDb([{ role_name: '빈역할', resource: null, action: null }])
   const { perms, roles } = await loadUserPerms(db, { companyId: 'c1', userId: 'u9' })
   assert.deepEqual(roles, ['빈역할'])
-  assert.equal(perms.size, 0)
+  // 모든 계정에 열린 자원(결재함 — permissions OPEN_RESOURCES)만 있다. 그 밖엔 0개
+  const { OPEN_RESOURCES } = require('../platform/permissions')
+  assert.equal([...perms].filter(p => !OPEN_RESOURCES.includes(p.split(':')[0])).length, 0)
+})
+
+test('역할이 없는 계정은 권한 목록이 비어 있다 — 결재함(열린 자원)도 얹지 않는다(빈 목록 = 제한 없음 규약)', async () => {
+  invalidate()
+  const db = fakeDb([])
+  const { perms, roles } = await loadUserPerms(db, { companyId: 'c1', userId: 'u-norole' })
+  assert.deepEqual(roles, [])
+  assert.equal(perms.size, 0, '여기에 무엇이든 들어가면 화면이 그 계정을 제한된 계정으로 읽어 메뉴를 다 잃는다')
 })
 
 test('canAny — 자원군 중 하나만 있어도 통과', () => {

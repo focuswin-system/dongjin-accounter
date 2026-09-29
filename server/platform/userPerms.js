@@ -1,3 +1,4 @@
+const { OPEN_RESOURCES, ACTIONS } = require('./permissions')
 /**
  * 사용자 권한 조회 — 역할(user_roles) → 권한(role_perms) 합집합.
  *
@@ -52,6 +53,11 @@ async function loadUserPerms(platformDb, { companyId, userId }) {
     if (row.role_name) roles.add(row.role_name)
     if (row.resource && row.action) perms.add(`${row.resource}:${row.action}`)
   }
+  /* 모든 계정에 열린 자원(결재함 등) — **역할이 있는 계정에만** 얹는다.
+   * ⚠ 역할이 없는 계정은 권한 목록이 **비어 있어야** 한다. 빈 목록 = '제한 없음'이라는 규약이다
+   *   (middleware/perm.js · src/lib/perms.js unrestricted). 여기에 결재함을 얹었더니 목록이
+   *   '결재함 하나'가 되어, 역할 없는 계정이 화면에서 나머지 메뉴를 전부 잃었다(2026-09-28 실화면). */
+  if (roles.size) for (const r of OPEN_RESOURCES) for (const act of ACTIONS) perms.add(`${r}:${act}`)
   const entry = { at: Date.now(), perms, roles: [...roles] }
   cache.set(k, entry)
   return entry

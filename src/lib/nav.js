@@ -27,6 +27,8 @@ import { Icon } from './ui'
  */
 export const NAV_TREE = [
   { type: "leaf", id: "home", label: "홈", icon: Icon.Home },
+  /* 결재함 — 전자결재를 켠 회사에서만 선다(App.jsx 가 꺼진 회사에선 뺀다). 자기 것만 보여 모든 계정에 열린다 */
+  { type: "leaf", id: "approval_box", label: "결재함", icon: Icon.Sign },
 
   /* 계약관리 — 수주와 발주를 **한 도메인**에 둔다.
    *
@@ -219,7 +221,9 @@ export const NAV_TREE = [
       ]},
     ],
   },
+
 ]
+
 
 /* ── 기준정보 (사이드바 하단·환경설정 위) ──────────────────────────
  *
@@ -474,6 +478,7 @@ for (const node of NAV_TREE) {
   if (node.type === "leaf") { if (node.id !== "home") ALL_LEAVES.push({ id: node.id, label: node.label, icon: node.icon }) }
   else for (const s of node.sections) for (const it of s.items) ALL_LEAVES.push({ id: it.id, label: it.label, icon: it.icon, domain: node.label, section: s.label })
 }
+
 /* 기준정보·환경설정 잎도 평탄화 목록에 넣는다.
    사이드바 트리에서는 빠졌지만 **찾을 수 있어야 한다** —
    포털 타일·브레드크럼·명령팔레트(Ctrl+K)가 모두 이 목록을 쓴다. */
@@ -590,6 +595,7 @@ export const LEAF_TAGS = {
   voucher_book:     '전표 분개장 분개 차변 대변 신고 세무사 회계프로그램 이관 원장',
   mgmt_dash:        '경영 대시보드 지표 KPI 현황판',
   mgmt_ask:         '질의 도우미 물어보기',
+  approval_box:     '결재 전자결재 승인 반려 상신 기안 전결 후결 품의',
   // 환경설정
   settings_company: '회사정보 사업자등록증 대표자 회사',
   settings_user:    '사용자 계정 권한 로그인 비밀번호 역할',

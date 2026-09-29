@@ -145,6 +145,8 @@ app.use('/api/fund-status', require('./routes/fund-status'))
 app.use('/api/unpaid-labor', require('./routes/unpaid-labor'))
 app.use('/api/quote-reqs',         require('./routes/quote-reqs'))
 app.use('/api/approval-presets',   require('./routes/approval-presets'))
+// 전자결재 — 결재함·상신·승인·반려. 결재함은 자기 것만 보여 로그인만 되면 연다(permissions OPEN_RESOURCES)
+app.use('/api/approvals',          require('./routes/approvals'))
 app.use('/api/finance',            require('./routes/finance'))
 // 대여금(빌려준 돈) — 차입금의 거울상. 테이블·라우트를 가른 이유는 db.js lendings 주석 참고.
 app.use('/api/lendings',           require('./routes/lending'))

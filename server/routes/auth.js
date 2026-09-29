@@ -140,7 +140,7 @@ router.post('/logout', (req, res) => {
 router.get('/me', authMiddleware, async (req, res, next) => {
   try {
     const [rows] = await platformPool.execute(
-      `SELECT u.id, u.username, u.name, u.email, u.role, u.must_change_pw, u.created_at,
+      `SELECT u.id, u.username, u.name, u.email, u.role, u.must_change_pw, u.created_at, u.position, u.department,
               c.code AS company_code, c.name AS company_name
          FROM users u JOIN companies c ON u.company_id = c.id
         WHERE u.id = ? AND u.company_id = ?`,
@@ -273,7 +273,7 @@ router.get('/users', authMiddleware, async (req, res, next) => {
   try {
     if (!isMaster(req)) return res.status(403).json({ error: '권한이 없습니다' })
     const [rows] = await platformPool.execute(
-      `SELECT u.id, u.username, u.name, u.email, u.role, u.active, u.must_change_pw, u.created_at,
+      `SELECT u.id, u.username, u.name, u.email, u.role, u.active, u.must_change_pw, u.created_at, u.position, u.department,
               GROUP_CONCAT(r.name ORDER BY r.name) AS role_names,
               GROUP_CONCAT(r.id ORDER BY r.name)   AS role_ids
          FROM users u
@@ -396,6 +396,22 @@ router.post('/users', authMiddleware, async (req, res, next) => {
 
 // ── 비밀번호 변경 (본인) / 리셋 (마스터가 사내 계정 대상) ──
 // 마스터가 남의 비번을 바꾸면 임시 비번으로 보고 최초 로그인 시 변경을 강제한다.
+/* 계정의 직위·부서 — 마스터가 정한다(조직 정보라 본인이 바꾸지 않는다).
+   전자결재 결재란·결재함에 "이사 김OO"로 보이게 하는 값이다(설계 e-approval Q1). */
+router.put('/users/:id/profile', authMiddleware, async (req, res, next) => {
+  try {
+    if (!isMaster(req)) return res.status(403).json({ error: '권한이 없습니다' })
+    const clip = (v) => String(v ?? '').trim().slice(0, 50) || null
+    const [r] = await platformPool.execute(
+      'UPDATE users SET position = ?, department = ? WHERE id = ? AND company_id = ?',
+      [clip(req.body?.position), clip(req.body?.department), req.params.id, req.user.companyId])
+    if (!r.affectedRows) return res.status(404).json({ error: '계정을 찾을 수 없어요' })
+    audit({ companyId: req.user.companyId, userId: req.user.id, username: req.user.username,
+            action: 'edit', resource: 'user', targetId: req.params.id, ip: clientIp(req) })
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
 router.put('/users/:id/password', authMiddleware, async (req, res, next) => {
   try {
     const isSelf = req.user.id === req.params.id
@@ -432,6 +448,17 @@ router.patch('/users/:id/active', authMiddleware, async (req, res, next) => {
     if (!isMaster(req)) return res.status(403).json({ error: '권한이 없습니다' })
     if (req.user.id === req.params.id) return res.status(400).json({ error: '본인 계정은 비활성화할 수 없습니다' })
     const { active } = req.body
+    /* 결재할 차례가 남은 사람을 끄면 그 결재가 영영 멈춘다 — 먼저 정리하게 한다(관리자 회수로 풀 수 있다) */
+    if (!active && req.db) {
+      let pending = 0
+      try {
+        const [[{ n }]] = await req.db.execute(
+          `SELECT COUNT(*) AS n FROM approval_steps s JOIN approvals a ON a.id = s.approval_id
+            WHERE s.approver_id = ? AND a.status = '진행' AND s.status IN ('차례','대기')`, [req.params.id])
+        pending = Number(n)
+      } catch { /* 결재 표가 없는 옛 회사 — 확인할 것 없음 */ }
+      if (pending > 0) return res.status(409).json({ error: `이 사람에게 걸린 결재가 ${pending}건 있어요. 결재함에서 관리자 회수로 정리한 뒤 비활성화해 주세요.` })
+    }
     const [result] = await platformPool.execute(
       'UPDATE users SET active = ? WHERE id = ? AND company_id = ?',
       [active ? 1 : 0, req.params.id, req.user.companyId]

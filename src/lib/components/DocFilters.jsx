@@ -70,10 +70,13 @@ export const DocFilters = ({ list, placeholder = '검색', vendors, statuses, ch
   )
 }
 
-/** 승인 흐름 문서(구매품의·지급결의)의 상태 칩. counts = 서버 page.counts */
-export const approvalStatuses = (counts = {}) => [
+/** 승인 흐름 문서(구매품의·지급결의)의 상태 칩. counts = 서버 page.counts, current = 지금 고른 상태 */
+export const approvalStatuses = (counts = {}, current = '') => [
   { id: '', label: '전체' },
   { id: '작성', label: '작성', count: counts['작성'] || 0 },
+  /* 결재중 — 전자결재 문서가 **있을 때만** 선다. 늘 세우면 좁은 목록에서 칩 줄이 접힌다(2026-09-28 지적) */
+  /* 고른 채로 0건이 되면(마지막 결재가 끝남) 칩이 사라져 되돌아갈 곳이 안 보인다 — 고른 동안은 남긴다 */
+  ...(counts['결재중'] || current === '결재중' ? [{ id: '결재중', label: '결재중', count: counts['결재중'] || 0 }] : []),
   { id: '승인', label: '승인', count: counts['승인'] || 0 },
   { id: '완료', label: '완료' },
 ]

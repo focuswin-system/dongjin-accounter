@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Icon, fmtNum, useToast, useConfirm, localToday, DateInput, useBusy } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, localToday, DateInput, useBusy, StatusBadge } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
@@ -9,6 +9,7 @@ import { DocFilters } from '../lib/components/DocFilters'
 import { useDocList } from '../lib/useDocList'
 import { makeGridKeyHandler } from '../lib/gridKeys'
 import { CellIn } from '../lib/components/CellIn'
+import { useApprovalOn, useDocApproval, ApprovalButtons, ApprovalLine, ApprovalStamp, RejectedNote, listStatusOf } from '../lib/components/Approval'
 
 // 定算內譯書 — 항목은 고정 분류(도로비·교통비…) 없이 쓰는 사람이 필요한 줄만 추가한다.
 // 옛 양식의 좌측 고정 슬롯·출장 항번호(①②③…) 주석은 2026-08 고객 요청으로 걷어냈다.
@@ -66,6 +67,21 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
     ? (form.approval && form.approval.length ? form.approval : defApproval)
     : (doc?.approval && doc.approval.length ? doc.approval : defApproval)
   const applyPreset = (p) => setForm(f => ({ ...f, approval: (p.steps || []).map(s => ({ label: s.label, position: s.position || '', name: '' })) }))
+  /* 전자결재 — 켠 회사만 정산내역서도 결재를 받는다(작성 → 결재중 → 승인). 끈 회사는 예전처럼 상태 없이 쓴다 */
+  const approvalOn = useApprovalOn()
+  const status = doc?.status || '작성'
+  const { current: apv, reload: reloadApv } = useDocApproval('settlement', isNew ? null : doc?.id, status)
+  const inApproval = status === '결재중' || apv?.status === '진행'
+
+  /* 결재가 끝난 문서를 고치면 결재가 무효가 된다(서버 voidApproved) — 모르고 고치면 도장이 사라진다 */
+  const startEdit = async () => {
+    if (apv?.status === '승인') {
+      const ok = await confirm({ tone: 'warn', icon: <Icon.Warn size={22}/>, title: '결재가 끝난 문서예요',
+        body: '고쳐서 저장하면 결재가 무효가 돼요. 다시 결재를 받아야 해요.', confirmLabel: '고치기' })
+      if (!ok) return
+    }
+    setEdit(true)
+  }
 
   // 표시할 줄 — 편집 중이면 입력한 줄 + 맨 끝 ghost 행, 아니면 저장된 라인 그대로
   const rows = edit ? [...form.lines, emptyLine()] : (doc?.lines || [])
@@ -115,7 +131,10 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
   return (
     <>
       <DocToolbar docNo={isNew ? '새 정산내역서' : doc.doc_no}
-        status={!isNew && <span className="text-sm text-muted">잔액 <b className="num" style={{ color: balance < 0 ? 'var(--neg-ink)' : 'var(--brand-ink)' }}>{fmtNum(balance)}원</b></span>}>
+        status={!isNew && <span className="row gap-8" style={{ alignItems: 'center' }}>
+          {approvalOn && status !== '작성' && <StatusBadge status={status}/>}
+          <span className="text-sm text-muted">잔액 <b className="num" style={{ color: balance < 0 ? 'var(--neg-ink)' : 'var(--brand-ink)' }}>{fmtNum(balance)}원</b></span>
+        </span>}>
         {edit ? (
           <>
             <button className="btn" onClick={cancel}>취소</button>
@@ -125,13 +144,23 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
           </>
         ) : (
           <>
-            <button className="btn ghost" onClick={remove} title="삭제" aria-label="삭제"><Icon.Trash size={14}/></button>
-            <button className="btn" onClick={() => setEdit(true)}><Icon.Pencil size={14}/> 편집</button>
+            {approvalOn && (
+              <ApprovalButtons docType="settlement" docId={doc.id} status={status} current={apv} allowPost={false}
+                onChanged={() => { reloadApv(); onSaved(doc.id) }}/>
+            )}
+            {!inApproval && <button className="btn ghost" onClick={remove} title="삭제" aria-label="삭제"><Icon.Trash size={14}/></button>}
+            {!inApproval && <button className="btn" onClick={startEdit}><Icon.Pencil size={14}/> 편집</button>}
             <button className="btn" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
           </>
         )}
       </DocToolbar>
 
+      {!isNew && !edit && approvalOn && (
+        <div className="no-print" style={{ padding: '0 0 12px' }}>
+          <RejectedNote current={apv} status={status}/>
+          {apv && ['진행', '승인'].includes(apv.status) && <ApprovalLine approval={apv}/>}
+        </div>
+      )}
       <DocViewport portrait>
         <div className="doc-paper resolution-paper resolution-print settle-paper" id="resolution-print">
           <div className="res-title-ko">정산내역서</div>
@@ -215,12 +244,7 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
               <div className="res-note-head">특기사항</div>
               <div className="res-note-body">{edit ? <input className="settle-cellin" value={form.note} onChange={e => setH('note', e.target.value)} placeholder="예: 우리.090-044469-13-301 계좌인출 후 송금"/> : form.note}</div>
             </div>
-            <table className="res-approve">
-              <tbody>
-                <tr>{approval.map((s, i) => <th key={i}>{s.label}{s.position ? <div style={{ fontWeight: 400, fontSize: 10, color: '#888' }}>{s.position}</div> : null}</th>)}</tr>
-                <tr>{approval.map((_, i) => <td key={i}></td>)}</tr>
-              </tbody>
-            </table>
+            <ApprovalStamp approval={edit ? null : apv} legacy={approval}/>
           </div>
 
           <div className="res-company num">{company?.name || ''}</div>
@@ -413,7 +437,10 @@ export const SettlementScreen = ({ focusId = null }) => {
             : <>
               {list.rows.map(d => (
                 <DocListRow key={d.id} active={!creating && selId === d.id} onClick={() => { setCreating(false); setSelId(d.id) }}
-                  docNo={d.doc_no} right={<span className="text-xs text-muted2">{d.settle_date || ''}</span>}
+                  docNo={d.doc_no} right={d.approval_state && listStatusOf(d) !== '작성'
+                    /* 전자결재를 거친 정산만 상태를 단다(결재 없이 쓰는 회사는 예전처럼 날짜) */
+                    ? <StatusBadge status={listStatusOf(d)}/>
+                    : <span className="text-xs text-muted2">{d.settle_date || ''}</span>}
                   title={d.purpose || d.settler || '—'} meta={d.purpose ? `${d.settler || ''} · 잔액` : '잔액'} amount={d.balance || 0}/>
               ))}
               {list.hasMore && (

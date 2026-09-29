@@ -32,6 +32,8 @@ const ACTION_LABELS = {
  */
 const RESOURCES = [
   { id: 'home',                    label: '홈',            group: '공통' },
+  // 전자결재 결재함 — 자기에게 온 것·자기가 올린 것만 보인다. 모든 계정에 열린다(OPEN_RESOURCES)
+  { id: 'approval_box',            label: '결재함',        group: '공통' },
 
   { id: 'contract_sales',          label: '수주',          group: '일반회계 · 판매·수주(매출)' },
   { id: 'billing_issued',          label: '대금 청구서(매출)', group: '일반회계 · 판매·수주(매출)' },
@@ -102,10 +104,16 @@ const RESOURCES = [
   { id: 'mgmt_dash',               label: '경영 대시보드',  group: '경영관리' },
   { id: 'mgmt_ask',                label: '경영 질의',      group: '경영관리' },
 
+
   { id: 'settings',                label: '환경설정',      group: '공통' },
 ]
 
 const RESOURCE_IDS = RESOURCES.map(r => r.id)
+
+/* 역할과 무관하게 **모든 계정**이 갖는 자원 — 화면이 '내 것'만 보여 주는 자리.
+ * 결재함을 역할 권한으로 가르면, 결재자로 지정됐는데 결재함을 못 여는 사람이 생긴다
+ * (새 자원은 기존 역할에 권한 행이 없어 기본 차단이다 — 이 파일 머리말). */
+const OPEN_RESOURCES = ['approval_box']
 const HR_RESOURCES = RESOURCE_IDS.filter(id => id === 'hr' || id.startsWith('hr_') || id.startsWith('hrbase_'))
 
 /** 읽기 전용 묶음 — 조회는 되지만 아무것도 바꾸지 못한다. */
@@ -161,7 +169,7 @@ function expandPresetPerms(perms) {
   return out
 }
 
-module.exports = {
+module.exports = { OPEN_RESOURCES,
   ACTIONS, ACTION_LABELS, RESOURCES, RESOURCE_IDS,
   PRESET_ROLES, expandPresetPerms, READ_ONLY,
 }

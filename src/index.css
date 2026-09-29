@@ -1609,6 +1609,20 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 .res-approve { border-collapse: collapse; width: 100%; }
 .res-approve th { border: 1px solid #333; background: #F1F3F5; font-size: 11.5px; font-weight: 700; padding: 5px 4px; text-align: center; }
 .res-approve td { border: 1px solid #333; height: 58px; }
+/* 전자결재 결재란 — 칸마다 이름·날짜(종이 위라 흰 종이 색 그대로. .res-approve 가 이미 흰 종이 규칙 안에 있다) */
+.appr-stamp td { text-align: center; vertical-align: middle; }
+.appr-stamp-name { font-size: 12.5px; font-weight: 700; color: #111; }
+.appr-stamp-date { font-size: 10.5px; color: #555; margin-top: 2px; }
+.appr-stamp td.appr-skip { background: linear-gradient(to top right, transparent calc(50% - 0.6px), #333 50%, transparent calc(50% + 0.6px)); }
+.appr-stamp-post { caption-side: bottom; text-align: right; font-size: 10.5px; color: #555; padding-top: 2px; }
+/* 결재선 진행(화면) — 기안 → 결재자들. 지금 차례인 칸만 테두리로 짚는다(정상엔 표식 없음) */
+.appr-line { display: flex; flex-wrap: wrap; gap: 8px; }
+.appr-node { min-width: 104px; max-width: 160px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); display: flex; flex-direction: column; gap: 2px; }
+.appr-node.is-turn { border-color: var(--warn); }
+.appr-node.is-skip { opacity: .5; }
+/* 결재 의견 — 기안자가 읽어야 할 말이라 한 줄로 자르지 않는다. 두 줄까지 보이고 나머지는 칸을 눌러(title) 본다 */
+.appr-comment { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: keep-all; }
 .res-company { margin-top: 16px; text-align: right; font-size: 12px; color: #333; font-weight: 600; }
 .res-viewer-overlay { position: fixed; inset: 0; background: rgba(15,23,42,0.5); display: grid; place-items: center; z-index: 200; padding: 24px; }
 .res-viewer { background: #fff; border-radius: 10px; width: min(760px, 96vw); max-height: 92vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 20px 60px -20px rgba(0,0,0,0.4); }

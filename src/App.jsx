@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo, useRef, Fragment, Component } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, Fragment, Component } from 'react'
 import logoSymbol from './assets/company/favicon.svg'
-import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider, setFiscalEndMonth } from './lib/ui'
+import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider, setFiscalEndMonth, Loading } from './lib/ui'
 import { api, setApiFailureHandler } from './lib/api'
 import { WelcomeWizard } from './lib/components/WelcomeWizard'
 import { CompanySetup } from './lib/components/CompanySetup'
@@ -43,6 +43,10 @@ import { MgmtAskScreen } from './screens/MgmtAsk'
 import { PortalScreen } from './screens/Portal'
 import { QuickDock } from './lib/components/QuickDock'
 import { VoucherBookScreen } from './screens/VoucherBook'
+// 고객사 전용 모듈 — 동진테크는 계약관리 › 수주가 MES 수주(보기 전용)다. 코드는 src/custom/ 에만
+import { MesOrdersScreen } from './custom/dongjin/MesOrders'
+import { ApprovalBoxScreen } from './screens/ApprovalBox'
+import { useApprovalOn, refreshApprovalOn } from './lib/components/Approval'
 
 /* 브레드크럼에 세울 말.
  *
@@ -311,23 +315,31 @@ function ComingSoon({ title }) {
 
 // 권한 없는 화면에 주소로 직접 들어왔을 때. 서버가 이미 403을 주므로 데이터는 안 나오지만,
 // 빈 화면에 에러 토스트만 뜨면 고장으로 보인다 → 왜 못 보는지 알려준다.
-function NoPermission({ title }) {
+function NoPermission({ title, off }) {
   return (
     <div className="card card-pad fade-up" style={{ textAlign: "center", padding: "56px 24px", maxWidth: 460, margin: "40px auto" }}>
       <div style={{ width: 48, height: 48, borderRadius: 14, background: "var(--surface-3)", color: "var(--muted-2)", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
         <Icon.Warn size={24}/>
       </div>
-      <div className="fw-700" style={{ fontSize: 16, marginBottom: 8 }}>{josa(title || "이 화면", "을")} 볼 권한이 없어요</div>
+      {/* off: 권한이 아니라 회사가 그 기능을 안 쓰는 것 — '권한 요청'으로 안내하면 엉뚱한 데를 찾는다 */}
+      <div className="fw-700" style={{ fontSize: 16, marginBottom: 8 }}>
+        {off ? `${title}은 쓰지 않는 기능이에요` : `${josa(title || "이 화면", "을")} 볼 권한이 없어요`}
+      </div>
       <div className="text-sm text-muted" style={{ lineHeight: 1.6 }}>
-        회사 관리자에게 권한을 요청하세요.<br/>환경설정 › 사용자에서 역할을 배정할 수 있어요.
+        {off ? <>환경설정 › 회사 정보에서 켤 수 있어요.</>
+          : <>회사 관리자에게 권한을 요청하세요.<br/>환경설정 › 사용자에서 역할을 배정할 수 있어요.</>}
       </div>
     </div>
   );
 }
 
-function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
+function AppInner({ onLogout, user, prefs, setPrefs, docKeys, customKeys }) {
   // 권한 없는 메뉴는 아예 그리지 않는다. 눌러서 403을 받는 것보다 없는 게 낫다.
-  const { perms, can: canDo } = usePerms();
+  const { perms, can: canPerm } = usePerms();
+  // 전자결재를 쓰는 회사인가 — 결재함 메뉴·배지(null = 아직 모름 → 감춘다)
+  const approvalOn = useApprovalOn();
+  /* 결재함은 권한이 아니라 회사 설정이 연다 — 권한만 보면 끈 회사의 Ctrl+K·바로가기에 결재함이 남는다 */
+  const canDo = useCallback((id) => canPerm(id) && (id !== 'approval_box' || !!approvalOn), [canPerm, approvalOn]);
   /* 개인 설정 — '보고 싶나'(내 화면 정리). 권한('볼 수 있나')과 다른 축이라 따로 든다.
      user.prefs 는 /api/auth/me 가 함께 내려준다(따로 부르면 메뉴가 한 번 다 보였다가 접힌다). */
   const navHidden = useMemo(() => {
@@ -336,8 +348,12 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
   /* 문서는 회사마다 쓰는 것이 다르다 — 안 쓰는 문서를 메뉴에서 뺀다.
      docKeys 가 null 이면 아직 못 읽은 것이라 하나도 안 가린다(filterDocs 주석). */
   const navTree = useMemo(
-    () => filterDocs(foldNav(visibleNav(perms), navHidden), docKeys),
-    [perms, navHidden, docKeys]);
+    () => {
+      const t = filterDocs(foldNav(visibleNav(perms), navHidden), docKeys);
+      // 결재함은 전자결재를 켠 회사에서만(아직 모르면 감춘다 — 안 쓰는 회사에 번쩍 보이지 않게)
+      return approvalOn ? t : t.filter(n => n.id !== 'approval_box');
+    },
+    [perms, navHidden, docKeys, approvalOn]);
   const savePrefs = async (patch) => {
     const res = await api.saveMyPrefs(patch);
     if (res.ok) setPrefs(res.prefs || {});
@@ -401,6 +417,8 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
   const [txnVersion, setTxnVersion] = useState(0);
   // 잎 id → 처리가 밀린 건수 (사이드바 배지). 0이면 배지를 그리지 않는다.
   const [overdueCycles, setOverdueCycles] = useState({ finance_loan: 0 });
+  /* 결재함 배지 — 내 차례인 결재 수. 화면을 옮길 때마다 다시 센다(결재는 다른 사람이 올린다) */
+  const [apprTodo, setApprTodo] = useState(0);
   const [evidenceAttach, setEvidenceAttach] = useState(null);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -462,6 +480,16 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
     api.getNotifications().then(list => { if (alive) { setNotifs(list); setNotifRead(false); } }).catch(() => {})
     return () => { alive = false }
   }, [txnVersion]);
+
+  useEffect(() => {
+    if (!approvalOn) { setApprTodo(0); return; }
+    let alive = true;
+    const count = () => api.getApprovalCounts().then(c => { if (alive) setApprTodo(c?.todo || 0); });
+    count();
+    // 결재 동작 직후에도 다시 센다(Approval.jsx notifyApprovalActed)
+    window.addEventListener('approval:acted', count);
+    return () => { alive = false; window.removeEventListener('approval:acted', count); };
+  }, [approvalOn, route, txnVersion]);
 
   /* '처리가 밀린 건수' — 사이드바 배지. 차입금 상환만 센다.
    * (옛 정기 회차 배지는 반복거래로 바뀌며 없앴다 — 반복거래는 놓친 달을 추적하지 않는다,
@@ -685,8 +713,15 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
                  openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openImportSignal={taxImportSignal}
                  focusInvoiceId={focusInvoiceId} goRoute={go}/>;
       }
+      case "approval_box":    return approvalOn ? <ApprovalBoxScreen go={go}/>
+        : approvalOn === null ? <Loading/> : <NoPermission title="결재함" off/>;
       case "contract":        return <ContractListScreen kind="all" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
-      case "contract_sales":  return <ContractListScreen kind="sales" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
+      /* 동진테크(MES 연결 모듈)는 수주의 원본이 MES 다 — MES 수주를 **보기 전용**으로 보여 준다.
+         ⚠ 모듈 상태를 읽기 전(null)에는 기다린다. 옛 화면을 먼저 그리면 동진에서 '신규 생성'이
+           잠깐 보이고, 그 사이에 누르면 MES 밖에 수주가 생긴다(실화면에서 번쩍이는 게 보였다). */
+      case "contract_sales":  if (customKeys === null) return <Loading/>;
+                              if (customKeys.includes("dongjin_mes")) return <MesOrdersScreen/>;
+                              return <ContractListScreen kind="sales" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
       case "contract_purchase": return <ContractListScreen kind="purchase" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
       case "contract_detail": return <ContractScreen goList={() => go("contract")} contractId={contractId} refreshTrigger={txnVersion} openIncome={(contract, vendor) => setTxnForm({ kind: "income", contract, vendor })} openExpense={(contract, vendor, opts) => setTxnForm(opts?.asCost ? { kind: "expense", costContract: contract, vendor } : { kind: "expense", contract, vendor })}/>;
       case "hr":              return <HRScreen/>;
@@ -767,7 +802,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
     /* ⚠ docKeys·navHidden 도 의존성이다. 이 memo 안에서 홈·포털에 넘기는 값인데
        빼 두면 **늦게 온 문서 카탈로그가 반영되지 않는다** — 사이드바(위 navTree memo)는
        따라오고 홈 타일만 안 따라와서, 같은 화면이 두 가지 말을 하게 된다. */
-  }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, taxImportSignal, reportKey, perms, docKeys, navHidden, manualChapter, docFocusId, repeatPrefill]);
+  }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, taxImportSignal, reportKey, perms, docKeys, customKeys, approvalOn, navHidden, manualChapter, docFocusId, repeatPrefill]);
 
   // 옛 경비 처리·잡손익·전표 입력은 거래내역으로 흡수됐다(3단계) — 도움말도 거래내역 것을 보인다
   const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal","misc_pl","misc_income","voucher_entry"].includes(route) ? "ledger"
@@ -826,6 +861,9 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys }) {
                 <div key={node.id} className={`nav-item${activeId === node.id ? " active" : ""}`} onClick={() => go(node.id)}>
                   <Ic className="nav-ico"/>
                   <span>{node.label}</span>
+                  {node.id === "approval_box" && apprTodo > 0 && (
+                    <span className="nav-count" title={`결재할 문서 ${apprTodo}건`}>{apprTodo}</span>
+                  )}
                 </div>
               );
             }
@@ -1150,7 +1188,7 @@ const FAQ_DATA = [
   // 증빙·결의서
   { id:"f15", cat:"증빙·결의서",     routes:["ledger"],                     q:"세금계산서를 어떻게 등록하나요?",              a:"거래를 등록할 때 증빙 첨부 단계에서 세금계산서 파일을 올리거나, 거래내역에서 해당 거래를 열어 증빙을 첨부하세요.", action:null },
   { id:"f16", cat:"증빙·결의서",     routes:["ledger"],                     q:"거래내역에 ⚠️ 표시는 무엇인가요?",            a:"세금계산서나 영수증이 연결되지 않은 거래에 표시돼요. 거래 상세를 열어 증빙을 첨부하면 사라져요.", action:null },
-  { id:"f17", cat:"증빙·결의서",     routes:["doc","contract"],             q:"결의서 승인이 안 돼요",                        a:"결의서는 결재선 순서대로 승인이 이루어져요. 현재 결재자가 누구인지 결의서 상세에서 확인하고, 해당 담당자에게 승인을 요청하세요.", action:{ label:"결의서로", route:"doc" } },
+  { id:"f17", cat:"증빙·결의서",     routes:["doc","contract"],             q:"결의서 승인이 안 돼요",                        a:"전자결재를 켠 회사는 [결재 올리기]로 올린 뒤 결재선의 사람이 차례대로 승인해야 해요. 지금 누구 차례인지는 결의서 위쪽 결재선에 보여요. 전자결재를 끈 회사는 [승인] 버튼으로 바로 승인해요.", action:{ label:"결재함으로", route:"approval_box" } },
   { id:"f18", cat:"증빙·결의서",     routes:["doc"],                        q:"외주가공비 결의서를 새로 만들고 싶어요",      a:"지출 등록 마지막 단계에서 '결의서 자동 생성'을 켜두면 지출 등록과 동시에 결의서가 생성돼요. 또는 결의서 화면에서 '+ 결의서 작성'을 눌러도 돼요.", action:{ label:"결의서로", route:"doc" } },
   { id:"f19", cat:"증빙·결의서",     routes:["doc","contract"],             q:"결의서와 미지급금은 어떻게 연결되나요?",      a:"지출 등록 시 결의서가 생성되고, 결의서가 승인되면 해당 금액이 미지급금 목록에 자동으로 올라와요. 이체 실행 시 미지급금이 차감돼요.", action:null },
   // 인사·급여
@@ -1299,7 +1337,10 @@ function FaqPanel({ open, onClose, route, go }) {
 }
 
 const CommandPalette = ({ open, onClose, onPick }) => {
-  const { can: canDo } = usePerms();
+  const { can: canPerm } = usePerms();
+  const approvalOn = useApprovalOn();
+  // 결재함은 회사가 전자결재를 켰을 때만(AppInner canDo 와 같은 규칙)
+  const canDo = (id) => canPerm(id) && (id !== 'approval_box' || !!approvalOn);
   const [q, setQ] = useState("");
   const [idx, setIdx] = useState(0);
   const [index, setIndex] = useState([]);
@@ -1435,6 +1476,8 @@ export default function App() {
      null = 아직 못 읽음 → **하나도 안 가린다.** 카탈로그를 못 읽었다고 메뉴가 사라지면
      서버가 잠깐 흔들린 것이 고객에게는 '기능이 없어졌다'로 보인다(권한과 같은 판단). */
   const [docKeys, setDocKeys] = useState(null);
+  /* 이 회사에 켜진 고객사 전용 모듈. null = 아직 모름. 동진(MES 연결)이면 수주 화면이 MES 수주로 바뀐다 */
+  const [customKeys, setCustomKeys] = useState(null);
   /* 회사 첫 설정이 필요한가 — null(아직 모름) | 'need' | 'ok'.
      사업자번호가 비었으면 앱에 들어가기 전에 받는다(CompanySetup).
      ⚠ **못 읽으면 'ok'** — 서버가 잠깐 흔들렸다고 전 직원을 설정 화면에 가두지 않는다.
@@ -1470,7 +1513,7 @@ export default function App() {
     api.getCompany().then(co => setFiscalEndMonth(co?.fiscal_end_month)).catch(() => {});
   }, [loggedIn]);
   useEffect(() => {
-    if (!loggedIn) { setPerms(null); setPrefs(null); setDocKeys(null); setMeDone(false); return; }
+    if (!loggedIn) { setPerms(null); setPrefs(null); setDocKeys(null); setCustomKeys(null); setMeDone(false); return; }
     let alive = true;
     /* me() 가 끝나지 않아도(fetch 에는 기본 시한이 없다) 첫 설정 게이트가 빈 화면에 갇히지 않게 —
        권한을 못 읽은 채 넘어가면 입력 폼이 보이지만 저장은 서버가 권한으로 막는다. */
@@ -1491,6 +1534,15 @@ export default function App() {
     const loadDocs = () => api.getDocCatalog()
       .then(items => { if (alive && items) setDocKeys(items.map(d => d.key)); });
     loadDocs();
+    /* 전용 모듈 — 지금은 동진 MES 하나. 켜진 회사만 200, 나머지는 404(조용히 꺼짐) */
+    /* 404 가 아닌 실패(서버 재시작 중 등)는 '꺼짐'이 아니다 — 꺼짐으로 보면 동진 회사가 수주 화면 대신
+       옛 계약 화면을 본다. 한 번 더 묻고, 그래도 안 되면 그때 옛 화면 */
+    const loadCustom = (retry) => api.mesStatus().then(s => {
+      if (!alive) return;
+      if (s?.error && retry) { setTimeout(() => { if (alive) loadCustom(false) }, 3000); return; }
+      setCustomKeys(s?.enabled ? ['dongjin_mes'] : []);
+    });
+    loadCustom(true);
     /* 환경설정 > 문서 관리에서 켜고 끄면 **바로** 메뉴가 따라온다.
        새로고침해야 반영되면 사용자는 저장이 안 된 줄 안다. */
     window.addEventListener('doccatalog:changed', loadDocs);
@@ -1513,6 +1565,7 @@ export default function App() {
   const handleLogin = (u) => {
     localStorage.setItem('loggedIn', '1');
     localStorage.setItem('user', JSON.stringify(u));
+    refreshApprovalOn();   // 앞 회사의 전자결재 켜짐 값을 버린다(모듈 캐시)
     setUser(u); setLoggedIn(true);
   };
   const handleLogout = () => {
@@ -1521,6 +1574,7 @@ export default function App() {
     // 실패해도 로그아웃은 계속 진행한다(응답을 기다리지 않음).
     fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     clearSession();
+    refreshApprovalOn();
     setUser(null); setLoggedIn(false);
   };
 
@@ -1547,7 +1601,7 @@ export default function App() {
                 : companyGate === 'need'
                   ? <CompanySetup onLogout={handleLogout}
                       onDone={() => { try { localStorage.setItem(readyKey(), '1'); } catch { /* 무시 */ } setCompanyGate('ok'); }}/>
-                  : <AppInner onLogout={handleLogout} user={user} prefs={prefs} setPrefs={setPrefs} docKeys={docKeys}/>}
+                  : <AppInner onLogout={handleLogout} user={user} prefs={prefs} setPrefs={setPrefs} docKeys={docKeys} customKeys={customKeys}/>}
           {/* 배포로 새 버전이 올라왔을 때만 뜬다. 로그인 화면에서도 보여야 한다 —
               옛 번들이 옛 인증 흐름을 타면 로그인 자체가 이상하게 동작할 수 있다. */}
           <UpdateBanner/>

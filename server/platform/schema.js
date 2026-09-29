@@ -397,6 +397,18 @@ async function migratePlatformSchema(c) {
       console.warn('[platform] audit_logs 인덱스 추가 실패:', e.code || e.message)
     }
   }
+
+  /* 계정의 직위·부서 — 전자결재의 결재자는 로그인 계정이다(설계 e-approval Q1).
+     결재란·결재함에 "이사 김OO" 처럼 보이려면 계정이 직위를 알아야 한다. 인사 직원 대장과의 연결은 나중. */
+  for (const col of ['position', 'department']) {
+    const [[{ n }]] = await c.execute(
+      `SELECT COUNT(*) AS n FROM information_schema.columns
+        WHERE table_schema = ? AND table_name = 'users' AND column_name = ?`, [db, col])
+    if (n === 0) {
+      await c.execute(`ALTER TABLE users ADD COLUMN ${col} VARCHAR(50) NULL`)
+      console.log(`[platform] users.${col} 추가 완료`)
+    }
+  }
 }
 
 /**

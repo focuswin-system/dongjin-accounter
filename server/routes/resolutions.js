@@ -8,6 +8,8 @@ const {
   NOT_CLAIMED_SQL, syncReqFromResolution,
   approveDoc, execCandidates, executeDoc, invoiceState, linkInvoiceDoc, loadDoc, openInvoicesFor, resolutionOfReq, sourceTxnsOfReq, unapproveDoc, undoDoc,
 } = require('../lib/docExec')
+// 전자결재 엔진 — 이름을 approvalEngine 으로(이 파일은 결재란 JSON 을 'approval' 이라는 이름으로 이미 쓴다)
+const approvalEngine = require('../lib/approval')
 const { VAT_RATE } = require('../lib/vat')
 
 const router = Router()
@@ -112,7 +114,7 @@ router.get('/', async (req, res, next) => {
            FROM expense_resolutions er
            LEFT JOIN vendors v ON er.vendor_id = v.id
           ORDER BY er.created_at DESC, er.id DESC`)
-      return res.json(rows.map(adapt))
+      return res.json(await approvalEngine.withApprovalState(req.db, 'resolution', rows.map(adapt)))
     }
     const { whereSql, args } = buildWhere(pp, ['er.doc_no', 'er.vendor_name', 'v.name', 'er.title'], {
       prefix: 'er.', dateExpr: docDateExpr('pay_date', 'er.'), vendor: true, statusSql: approvalStatusSql('er.'),
@@ -128,7 +130,7 @@ router.get('/', async (req, res, next) => {
         LIMIT ${pp.limit} OFFSET ${pp.offset}`, args)
     // 배지용 — 검색과 무관한 '할 일' 크기(작성 = 승인 대기, 승인 = 처리 대기)
     const counts = await approvalCounts(req.db, 'expense_resolutions')
-    res.json({ rows: rows.map(adapt), total: Number(cnt), hasMore: pp.offset + rows.length < Number(cnt), counts,
+    res.json({ rows: await approvalEngine.withApprovalState(req.db, 'resolution', rows.map(adapt)), total: Number(cnt), hasMore: pp.offset + rows.length < Number(cnt), counts,
       pendingCount: (counts['작성'] || 0) + (counts['승인'] || 0) })
   } catch (e) { next(e) }
 })
@@ -382,13 +384,29 @@ router.post('/from-txn/:txnId', async (req, res, next) => {
 
 /* ── 승인·처리 ── 규칙은 lib/docExec.js (구매품의서와 같은 함수) */
 
+/* 전자결재를 쓰는 회사는 승인 버튼이 없다 — 결재로만 승인된다(설계 e-approval Q4).
+   승인 취소는 관리자만. 취소하면 그 결재는 효력을 잃는다. */
 router.post('/:id/approve', async (req, res, next) => {
-  try { res.json(await withTx(req.db, conn => approveDoc(conn, TABLE, req.params.id))) }
-  catch (e) { next(e) }
+  try {
+    if (await approvalEngine.isEnabled(req.db)) return res.status(409).json({ error: '전자결재를 쓰는 회사예요. [결재 올리기]로 올려 주세요.', code: 'use_approval' })
+    res.json(await withTx(req.db, async (conn) => {
+      // 결재가 진행 중인 문서를 버튼으로 건너뛰지 않는다(전자결재를 끈 사이에도)
+      await approvalEngine.assertNoActive(conn, 'resolution', req.params.id)
+      return approveDoc(conn, TABLE, req.params.id)
+    }))
+  } catch (e) { next(e) }
 })
 router.post('/:id/unapprove', async (req, res, next) => {
-  try { res.json(await withTx(req.db, conn => unapproveDoc(conn, TABLE, req.params.id))) }
-  catch (e) { next(e) }
+  try {
+    const on = await approvalEngine.isEnabled(req.db)
+    if (on && req.user?.role !== 'admin') return res.status(403).json({ error: '결재가 끝난 문서예요. 승인 취소는 관리자만 할 수 있어요.' })
+    res.json(await withTx(req.db, async (conn) => {
+      await approvalEngine.assertNoActive(conn, 'resolution', req.params.id)
+      const out = await unapproveDoc(conn, TABLE, req.params.id)
+      await approvalEngine.voidApproved(conn, 'resolution', req.params.id)
+      return out
+    }))
+  } catch (e) { next(e) }
 })
 
 // 처리 창 — 연결할 만한 지출 거래(거래처가 같으면 위로, 금액이 가까우면 위로)
@@ -411,8 +429,13 @@ router.get('/:id/open-invoices', async (req, res, next) => {
 })
 
 router.post('/:id/link-invoice', async (req, res, next) => {
-  try { res.json(await withTx(req.db, conn => linkInvoiceDoc(conn, TABLE, req.params.id, req.body.invoice_id || null))) }
-  catch (e) { next(e) }
+  try {
+    res.json(await withTx(req.db, async (conn) => {
+      // 결재 중엔 처리 대상(청구서)이 바뀌면 안 된다 — 결재가 끝날 때 '처리할 돈이 있나' 판단이 달라진다
+      await approvalEngine.assertNoActive(conn, 'resolution', req.params.id)
+      return linkInvoiceDoc(conn, TABLE, req.params.id, req.body.invoice_id || null)
+    }))
+  } catch (e) { next(e) }
 })
 
 // 결의서 처리 — 이 결의서대로 지출을 집행한다. mode 'link'(기존 지출) | 'create'(새 지출)
@@ -437,6 +460,8 @@ router.put('/:id', async (req, res, next) => {
     const out = await withTx(req.db, async (conn) => {
       const [[cur]] = await conn.execute('SELECT status, amount FROM expense_resolutions WHERE id = ? FOR UPDATE', [req.params.id])
       if (!cur) throw httpError(404, 'Not found')
+      if (cur.status === '결재중') throw httpError(409, '결재 중인 결의서예요. 고치려면 먼저 회수해 주세요.')
+      await approvalEngine.assertNoActive(conn, 'resolution', req.params.id)
       const done = cur.status === '완료'
       if (done && Number(amount) !== Number(cur.amount)) {
         throw httpError(409, '이미 처리된 결의서의 금액은 바꿀 수 없어요. 연결된 지출 거래와 어긋나요.')
@@ -448,6 +473,8 @@ router.put('/:id', async (req, res, next) => {
         [title || '', Number(amount) || 0, pay_method || '', pay_date || null, applicant || '',
          JSON.stringify(items || []), note || '', nextStatus, vendor_name || '',
          JSON.stringify(approval || []), req.params.id])
+      // 승인받은 내용을 바꿨다 — 그 결재는 효력을 잃는다(다시 올려야 한다)
+      if (cur.status === '승인') await approvalEngine.voidApproved(conn, 'resolution', req.params.id)
       return { ok: true, status: nextStatus, unapproved: cur.status === '승인' }
     })
     res.json(out)
@@ -466,6 +493,9 @@ router.post('/:id/reload-lines', async (req, res, next) => {
       const [[cur]] = await conn.execute('SELECT * FROM expense_resolutions WHERE id = ? FOR UPDATE', [req.params.id])
       if (!cur) throw httpError(404, '결의서를 찾을 수 없어요')
       if (cur.status === '완료') throw httpError(409, '이미 처리된 결의서는 품목을 바꿀 수 없어요. 연결된 지출 거래와 어긋나요.')
+      // 결재 중엔 금액이 바뀌면 안 된다 — 결재자가 본 금액과 문서가 달라진다(검토에서 재현됨)
+      if (cur.status === '결재중') throw httpError(409, '결재 중인 결의서예요. 먼저 회수해 주세요.')
+      await approvalEngine.assertNoActive(conn, 'resolution', cur.id)
       if (!cur.invoice_id) throw httpError(400, '청구서에서 만든 결의서가 아니에요. 품목을 직접 입력해주세요.')
 
       const [[inv]] = await conn.execute(
@@ -484,6 +514,8 @@ router.post('/:id/reload-lines', async (req, res, next) => {
          따로 두면 표의 합계와 헤더의 '지출총액'이 어긋난다. */
       await conn.execute("UPDATE expense_resolutions SET items = ?, amount = ?, status = '작성' WHERE id = ?",
         [JSON.stringify(items), st.remain, cur.id])
+      // 승인받은 내용이 바뀌었다 — 그 결재는 효력을 잃는다(수정과 같은 규칙)
+      if (cur.status === '승인') await approvalEngine.voidApproved(conn, 'resolution', cur.id)
       const [[updated]] = await conn.execute(`SELECT er.*, ${PREQ_NO_SQL} FROM expense_resolutions er WHERE er.id = ?`, [cur.id])
       return { ...adapt(updated), lineCount: lines.length, invoiceNo: inv.invoice_no, unapproved: cur.status === '승인' }
     })
@@ -515,6 +547,8 @@ router.delete('/:id', async (req, res, next) => {
     const out = await withTx(req.db, async (conn) => {
       const [[cur]] = await conn.execute('SELECT status, doc_no, txn_id, purchase_req_id FROM expense_resolutions WHERE id = ? FOR UPDATE', [req.params.id])
       if (!cur) throw httpError(404, '결의서를 찾을 수 없어요')
+      if (cur.status === '결재중') throw httpError(409, '결재 중인 결의서예요. 먼저 회수해 주세요.')
+      await approvalEngine.assertNoActive(conn, 'resolution', req.params.id)
       let keptTxn = false
       if (cur.status === '완료' && cur.txn_id) {
         if (!cascade) {
@@ -524,6 +558,7 @@ router.delete('/:id', async (req, res, next) => {
       }
       await syncReqFromResolution(conn, cur.purchase_req_id, '승인')
       await conn.execute('DELETE FROM expense_resolutions WHERE id = ?', [req.params.id])
+      await approvalEngine.voidAll(conn, 'resolution', req.params.id)
       return { keptTxn }
     })
     res.json({ ok: true, keptTxn: out.keptTxn })

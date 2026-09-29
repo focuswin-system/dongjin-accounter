@@ -8,6 +8,7 @@ const SAMPLE = {
 }
 import { computeItems, shiftMonth, monthLabel } from './HR'
 import { api } from '../lib/api'
+import { useApprovalOn, useDocApproval, ApprovalButtons, ApprovalLine, ApprovalStamp, RejectedNote, listStatusOf } from '../lib/components/Approval'
 import { isCountable, notCountable } from '../lib/txnScope'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { DataTable } from '../lib/components/DataTable'
@@ -131,7 +132,7 @@ export const DocsScreen = ({ focusId = null, goRoute }) => {
       <DocWorkspace>
         <DocSide top={
           <DocFilters list={list} placeholder="문서번호·거래처·목적 검색" vendors={vendors}
-            statuses={approvalStatuses(list.page?.counts)}/>}>
+            statuses={approvalStatuses(list.page?.counts, list.filters.status)}/>}>
           {list.rows.length === 0
             ? <DocSideEmpty>{list.loading ? "불러오는 중…"
                 : (list.filters.q || list.filters.from || list.filters.vendor || list.filters.status) ? "조건에 맞는 결의서가 없어요."
@@ -139,7 +140,7 @@ export const DocsScreen = ({ focusId = null, goRoute }) => {
             : <>
               {list.rows.map(d => (
                 <DocListRow key={d.id} active={d.id === selId} onClick={() => setSelId(d.id)}
-                  docNo={d.doc_no} right={<StatusBadge status={d.status}/>}
+                  docNo={d.doc_no} right={<StatusBadge status={listStatusOf(d)}/>}
                   title={d.title}
                   meta={[d.pay_date, d.vendor_name, d.purchase_req_no].filter(Boolean).join(" · ") || "—"}
                   amount={d.amount}/>
@@ -577,7 +578,7 @@ const NewResolutionDrawer = ({ open, onClose, onCreated, seed = null }) => {
 
 // 읽기전용 결의서 문서 — 결의서 화면과 지출 증빙 영역 양쪽에서 재사용.
 // printClass가 있으면 그 요소가 인쇄 대상이 된다(증빙 모달에서 이것만 뽑아 인쇄).
-export const ResolutionDocument = ({ doc, company, printClass }) => {
+export const ResolutionDocument = ({ doc, company, printClass, approvalFlow = null }) => {
   const items = doc.items && doc.items.length ? doc.items
     : [{ name: doc.title, unit: '식', qty: 1, price: doc.amount, amount: doc.amount, note: '' }];
   const total = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
@@ -643,12 +644,8 @@ export const ResolutionDocument = ({ doc, company, printClass }) => {
           <div className="res-note-head">특기사항</div>
           <div className="res-note-body">{doc.note || ''}</div>
         </div>
-        <table className="res-approve">
-          <tbody>
-            <tr>{approval.map((s, i) => <th key={i}>{s.label}{s.position ? <div style={{ fontWeight: 400, fontSize: 10, color: '#888' }}>{s.position}</div> : null}</th>)}</tr>
-            <tr>{approval.map((_, i) => <td key={i}></td>)}</tr>
-          </tbody>
-        </table>
+        {/* 전자결재가 있으면 결재자 이름·날짜, 없으면 예전 빈 결재란 */}
+        <ApprovalStamp approval={approvalFlow} legacy={approval}/>
       </div>
 
       <div className="res-company">
@@ -677,6 +674,23 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted, goRoute, o
   const status = doc.status || '작성';
   const done = status === '완료';
   const spent = done && !!doc.txn_id;
+  /* 전자결재 — 켜졌으면 '승인' 대신 결재로만. 승인 취소는 관리자만, 결재 중엔 고치거나 지울 수 없다 */
+  const approvalOn = useApprovalOn();
+  const { isMaster } = usePerms();
+  const { current: apv, reload: reloadApv } = useDocApproval('resolution', doc.id, status);
+  const inApproval = status === '결재중' || apv?.status === '진행';
+
+  /* 결재가 끝난 문서를 고치면 결재가 무효가 된다(서버 voidApproved) — 모르고 고치면 도장이 사라진다 */
+  const startEdit = async () => {
+    if (apv?.status === '승인') {
+      const ok = await confirm({ tone: 'warn', icon: <Icon.Warn size={22}/>, title: '결재가 끝난 문서예요',
+        body: '고쳐서 저장하면 결재가 무효가 돼요. 다시 결재를 받아야 해요.', confirmLabel: '고치기' })
+      if (!ok) return
+    }
+    setEdit(true);
+  };
+  // 결재 중인 문서는 승인 취소가 아니라 회수로 푼다(서버도 409)
+  const canUnapprove = (approvalOn === false || isMaster) && !inApproval;
   // 결재선: 편집 중이면 form, 아니면 doc. 없으면 담당/결재/대표 기본
   const approval = (form.approval && form.approval.length)
     ? form.approval
@@ -839,21 +853,27 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted, goRoute, o
                 <Icon.Refresh size={14}/> 처리 취소
               </button>
             ) : done ? (
-              <button className="btn ghost sm" onClick={unapprove} title="처리할 돈 없이 끝난 결의서예요">승인 취소</button>
+              canUnapprove && <button className="btn ghost sm" onClick={unapprove} title="처리할 돈 없이 끝난 결의서예요">승인 취소</button>
             ) : status === '승인' ? (
               <>
-                <button className="btn ghost sm" onClick={unapprove}>승인 취소</button>
+                {canUnapprove && <button className="btn ghost sm" onClick={unapprove}>승인 취소</button>}
                 <button className="btn primary" onClick={() => setProcessOpen(true)}><Icon.Check size={14}/> 지출 처리</button>
               </>
-            ) : (
+            ) : approvalOn !== false ? null : (
               <button className="btn primary" onClick={approve}><Icon.Check size={14}/> 승인</button>
             )}
+            {approvalOn && (
+              <ApprovalButtons docType="resolution" docId={doc.id} status={status} current={apv}
+                onChanged={() => { reloadApv(); onSaved(doc.id); }}/>
+            )}
             {/* 삭제는 완료 건에도 있다. 잘못 집행한 결의서를 없앨 길이 없으면
-                틀린 지출이 장부에 영원히 남는다(완료 건은 지출까지 함께 되돌린다). */}
-            <button className="btn ghost" onClick={remove} title={spent ? '결의서와 지출 이력을 함께 삭제' : '결의서 삭제'}>
-              <Icon.Trash size={14}/>
-            </button>
-            {!done && <button className="btn" onClick={() => setEdit(true)}><Icon.Pencil size={14}/> 편집</button>}
+                틀린 지출이 장부에 영원히 남는다(완료 건은 지출까지 함께 되돌린다). 결재 중엔 회수가 먼저다. */}
+            {!inApproval && (
+              <button className="btn ghost" onClick={remove} title={spent ? '결의서와 지출 이력을 함께 삭제' : '결의서 삭제'}>
+                <Icon.Trash size={14}/>
+              </button>
+            )}
+            {!done && !inApproval && <button className="btn" onClick={startEdit}><Icon.Pencil size={14}/> 편집</button>}
             {onCopy && <button className="btn" onClick={onCopy} title="이 결의서를 본떠 새로 써요"><Icon.Copy size={14}/> 복사</button>}
             <button className="btn" onClick={doPrint}><Icon.Print/> 인쇄</button>
           </>
@@ -868,6 +888,12 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted, goRoute, o
         }}
         onDone={() => { setProcessOpen(false); onSaved(doc.id); }} onChanged={() => onSaved(doc.id)}/>
 
+      {!edit && approvalOn && (
+        <div className="no-print" style={{ padding: '0 0 12px' }}>
+          <RejectedNote current={apv} status={status}/>
+          {apv && ['진행', '승인'].includes(apv.status) && <ApprovalLine approval={apv}/>}
+        </div>
+      )}
       {/* 인쇄 대상 — 실제 결의서 양식(가로 계열이라 그대로 폭 채움) */}
       <DocViewport>
       <div className="doc-paper resolution-paper" id="resolution-print">
@@ -974,12 +1000,7 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted, goRoute, o
                 ))}
               </div>
             )}
-            <table className="res-approve">
-              <tbody>
-                <tr>{approval.map((s, i) => <th key={i}>{s.label}{s.position ? <div style={{ fontWeight: 400, fontSize: 10, color: '#888' }}>{s.position}</div> : null}</th>)}</tr>
-                <tr>{approval.map((_, i) => <td key={i}></td>)}</tr>
-              </tbody>
-            </table>
+            <ApprovalStamp approval={edit ? null : apv} legacy={approval}/>
           </div>
         </div>
 

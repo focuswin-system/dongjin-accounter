@@ -389,7 +389,7 @@ export const StatusBadge = ({ status }) => {
     // 문서(구매품의·지급결의) 결재 단계 — 작성 → 승인(처리 대기) → 완료
     "작성": { tone: "outline" }, "승인": { tone: "brand" },
     "연결 완료": { tone: "pos" }, "연결 필요": { tone: "warn" }, "검토 필요": { tone: "warn" }, "누락": { tone: "neg" },
-    "진행중": { tone: "brand" }, "완료": { tone: "pos" }, "보류": { tone: "warn" },
+    "진행중": { tone: "brand" }, "완료": { tone: "pos" }, "보류": { tone: "warn" }, "결재중": { tone: "warn" }, "후결 반려": { tone: "neg" },
     "청구 예정": { tone: "outline" },
     "활성": { tone: "pos" }, "예정": { tone: "outline" }, "비활성": { tone: "outline" },
     "재직": { tone: "pos" }, "수습": { tone: "warn" }, "퇴사": { tone: "outline" }, "휴직": { tone: "warn" },

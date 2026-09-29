@@ -4,6 +4,8 @@ const { kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
 const { pageParams, buildWhere, inClause, docDateExpr } = require('../lib/pagedList')
 const { usedSourceMap, duplicateSourceError } = require('../lib/settleSources')
+const approvalEngine = require('../lib/approval')
+const { withTx, httpError } = require('../lib/withTx')
 
 const router = Router()
 
@@ -39,7 +41,7 @@ router.get('/', async (req, res, next) => {
       const [sums] = await req.db.execute('SELECT settlement_id, COALESCE(SUM(amount),0) AS total FROM settlement_lines GROUP BY settlement_id')
       const map = {}
       for (const s of sums) map[s.settlement_id] = Number(s.total)
-      return res.json(rows.map(r => adaptRow(r, map[r.id] || 0)))
+      return res.json(await approvalEngine.withApprovalState(req.db, 'settlement', rows.map(r => adaptRow(r, map[r.id] || 0))))
     }
     // 페이지 모드 — 검색·기간·50건씩. 합계는 이 페이지 행에만 붙인다.
     // 정산서는 거래처가 한 곳이 아니다(줄마다 다르다) — 기간·검색만 건다
@@ -54,7 +56,7 @@ router.get('/', async (req, res, next) => {
         `SELECT settlement_id, COALESCE(SUM(amount),0) AS total FROM settlement_lines WHERE settlement_id IN ${clause} GROUP BY settlement_id`, ids)
       for (const s of sums) map[s.settlement_id] = Number(s.total)
     }
-    res.json({ rows: rows.map(r => adaptRow(r, map[r.id] || 0)), total: Number(cnt), hasMore: pp.offset + rows.length < Number(cnt) })
+    res.json({ rows: await approvalEngine.withApprovalState(req.db, 'settlement', rows.map(r => adaptRow(r, map[r.id] || 0))), total: Number(cnt), hasMore: pp.offset + rows.length < Number(cnt) })
   } catch (e) { next(e) }
 })
 
@@ -133,19 +135,24 @@ router.post('/', async (req, res, next) => {
 
 // 수정 — 헤더 갱신 + 라인 통째 교체(삭제 후 재삽입)
 router.put('/:id', async (req, res, next) => {
-  const { settler, settle_date, purpose, received_amount, note, status, approval, lines } = req.body
+  const { settler, settle_date, purpose, received_amount, note, approval, lines } = req.body
   if (settle_date && !DATE_RE.test(settle_date)) return res.status(400).json({ error: '정산일은 YYYY-MM-DD 로 적어주세요' })
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
-    const [[cur]] = await conn.execute('SELECT id FROM settlements WHERE id = ? FOR UPDATE', [req.params.id])
+    const [[cur]] = await conn.execute('SELECT id, status FROM settlements WHERE id = ? FOR UPDATE', [req.params.id])
     if (!cur) { await rollbackQuietly(conn); return res.status(404).json({ error: 'Not found' }) }
+    /* 상태는 본문에서 받지 않는다 — 예전엔 status 를 그대로 받아, 결재 없이 '승인'을 적어 넣을 수 있었다.
+       고치면 늘 '작성'(승인받은 내용이 바뀌었으니 다시 결재). 결재 중이면 못 고친다(회수 먼저). */
+    if (cur.status === '결재중') { await rollbackQuietly(conn); return res.status(409).json({ error: '결재 중인 정산내역서예요. 고치려면 먼저 회수해 주세요.' }) }
+    try { await approvalEngine.assertNoActive(conn, 'settlement', req.params.id) } catch (e) { await rollbackQuietly(conn); return next(e) }
     { const de = await duplicateSourceError(conn, lines, { settlementId: req.params.id }); if (de) { await rollbackQuietly(conn); return res.status(409).json({ error: de }) } }
     await conn.execute(
       `UPDATE settlements SET settler=?, settle_date=?, purpose=?, received_amount=?, note=?, status=?, approval=? WHERE id=?`,
       [settler || '', settle_date || null, purpose || '',
        Number(received_amount) || 0, note || '',
-       status || '작성', JSON.stringify(Array.isArray(approval) ? approval : []), req.params.id])
+       '작성', JSON.stringify(Array.isArray(approval) ? approval : []), req.params.id])
+    if (cur.status === '승인') await approvalEngine.voidApproved(conn, 'settlement', req.params.id)
     await conn.execute('DELETE FROM settlement_lines WHERE settlement_id = ?', [req.params.id])
     await insertLines(conn, req.params.id, lines)
     await conn.commit()
@@ -156,8 +163,15 @@ router.put('/:id', async (req, res, next) => {
 
 router.delete('/:id', async (req, res, next) => {
   try {
-    await req.db.execute('DELETE FROM settlement_lines WHERE settlement_id = ?', [req.params.id])
-    await req.db.execute('DELETE FROM settlements WHERE id = ?', [req.params.id])
+    /* 잠그고 확인한 뒤 지운다 — 확인과 삭제 사이에 상신이 끼면, 문서는 지워지고 '진행' 결재만 결재함에 남는다 */
+    await withTx(req.db, async (conn) => {
+      const [[cur]] = await conn.execute('SELECT status FROM settlements WHERE id = ? FOR UPDATE', [req.params.id])
+      if (cur?.status === '결재중') throw httpError(409, '결재 중인 정산내역서예요. 먼저 회수해 주세요.')
+      await approvalEngine.assertNoActive(conn, 'settlement', req.params.id)
+      await conn.execute('DELETE FROM settlement_lines WHERE settlement_id = ?', [req.params.id])
+      await conn.execute('DELETE FROM settlements WHERE id = ?', [req.params.id])
+      await approvalEngine.voidAll(conn, 'settlement', req.params.id)
+    })
     res.json({ ok: true })
   } catch (e) { next(e) }
 })

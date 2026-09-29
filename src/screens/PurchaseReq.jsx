@@ -11,6 +11,8 @@ import { useDocList } from '../lib/useDocList'
 import { makeGridKeyHandler } from '../lib/gridKeys'
 import { copySeedOf } from '../lib/docCopy'
 import { CellIn } from '../lib/components/CellIn'
+import { useApprovalOn, useDocApproval, ApprovalButtons, ApprovalLine, ApprovalStamp, RejectedNote, listStatusOf } from '../lib/components/Approval'
+import { usePerms } from '../lib/perms'
 
 const numOf = (v) => (typeof v === 'string' ? parseInt(v.replace(/[^0-9-]/g, ''), 10) || 0 : Number(v) || 0)
 const ROWS = 15
@@ -164,6 +166,24 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
   const handed = !isNew && doc?.resolution            // 지급결의서로 넘김
   const spent = !isNew && status === '완료' && !!doc?.txn_id   // 품의에서 지출 처리함
   const closedNoMoney = !isNew && status === '완료' && !doc?.txn_id && !handed   // 처리할 돈 없이 끝남
+  /* 전자결재 — 회사가 켰으면 '승인' 버튼 대신 결재로만 승인된다(설계 e-approval Q4).
+     승인 취소는 관리자만(서버도 막는다). 결재 중에는 고치거나 지울 수 없다(회수가 먼저). */
+  const approvalOn = useApprovalOn()
+  const { isMaster } = usePerms()
+  const { current: apv, reload: reloadApv } = useDocApproval('purchase_req', isNew ? null : doc?.id, status)
+  const inApproval = status === '결재중' || apv?.status === '진행'
+
+  /* 결재가 끝난 문서를 고치면 결재가 무효가 된다(서버 voidApproved) — 모르고 고치면 도장이 사라진다 */
+  const startEdit = async () => {
+    if (apv?.status === '승인') {
+      const ok = await confirm({ tone: 'warn', icon: <Icon.Warn size={22}/>, title: '결재가 끝난 문서예요',
+        body: '고쳐서 저장하면 결재가 무효가 돼요. 다시 결재를 받아야 해요.', confirmLabel: '고치기' })
+      if (!ok) return
+    }
+    setEdit(true)
+  }
+  // 결재 중인 문서는 승인 취소가 아니라 회수로 푼다(서버도 409)
+  const canUnapprove = (approvalOn === false || isMaster) && !inApproval
 
   const remove = async () => {
     const ok = await confirm({
@@ -242,17 +262,21 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
                 <button className="btn" onClick={unprocess}><Icon.Refresh size={14}/> 처리 취소</button>
               </>
             ) : closedNoMoney ? (
-              <button className="btn ghost sm" onClick={unapprove} title="처리할 돈 없이 끝난 품의서예요">승인 취소</button>
+              canUnapprove && <button className="btn ghost sm" onClick={unapprove} title="처리할 돈 없이 끝난 품의서예요">승인 취소</button>
             ) : status === '승인' ? (
               <>
-                <button className="btn ghost sm" onClick={unapprove}>승인 취소</button>
+                {canUnapprove && <button className="btn ghost sm" onClick={unapprove}>승인 취소</button>}
                 <button className="btn primary" onClick={() => setExecOpen(true)}><Icon.Check size={14}/> 지출 처리</button>
               </>
-            ) : (
+            ) : approvalOn !== false ? null : (
               <button className="btn primary" onClick={approve}><Icon.Check size={14}/> 승인</button>
             )}
-            {!handed && <button className="btn ghost" onClick={remove} title="삭제"><Icon.Trash size={14}/></button>}
-            {!handed && status !== '완료' && <button className="btn" onClick={() => setEdit(true)}><Icon.Pencil size={14}/> 편집</button>}
+            {approvalOn && !handed && (
+              <ApprovalButtons docType="purchase_req" docId={doc.id} status={status} current={apv}
+                onChanged={() => { reloadApv(); onSaved(doc.id) }}/>
+            )}
+            {!handed && !inApproval && <button className="btn ghost" onClick={remove} title="삭제"><Icon.Trash size={14}/></button>}
+            {!handed && !inApproval && status !== '완료' && <button className="btn" onClick={startEdit}><Icon.Pencil size={14}/> 편집</button>}
             {onCopy && <button className="btn" onClick={onCopy} title="이 품의서를 본떠 새로 써요"><Icon.Copy size={14}/> 복사</button>}
             <button className="btn" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
           </>
@@ -269,6 +293,12 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
         empty="이 거래처의 지난 품의서가 없어요."
         onDone={takePast}/>
 
+      {!isNew && !edit && approvalOn && (
+        <div className="no-print" style={{ padding: '0 0 12px' }}>
+          <RejectedNote current={apv} status={status}/>
+          {apv && ['진행', '승인'].includes(apv.status) && <ApprovalLine approval={apv}/>}
+        </div>
+      )}
       <DocViewport>
         <div className="doc-paper resolution-paper resolution-print" id="resolution-print">
           <div className="res-title-ko">구매품의서</div>
@@ -381,12 +411,8 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
               <div className="res-note-head">특기사항</div>
               <div className="res-note-body">{edit ? <input className="settle-cellin" value={form.note} onChange={e => setH('note', e.target.value)}/> : form.note}</div>
             </div>
-            <table className="res-approve">
-              <tbody>
-                <tr>{approval.map((s, i) => <th key={i}>{s.label}{s.position ? <div style={{ fontWeight: 400, fontSize: 10, color: '#888' }}>{s.position}</div> : null}</th>)}</tr>
-                <tr>{approval.map((_, i) => <td key={i}></td>)}</tr>
-              </tbody>
-            </table>
+            {/* 결재가 있으면 칸마다 결재자 이름·날짜, 없으면 예전 빈 결재란(손 서명) */}
+            <ApprovalStamp approval={edit ? null : apv} legacy={approval}/>
           </div>
           <div className="res-company num">{company?.name || ''}</div>
         </div>
@@ -771,7 +797,7 @@ export const PurchaseReqScreen = ({ focusId = null, goRoute }) => {
       <DocWorkspace>
         <DocSide top={
           <DocFilters list={list} placeholder="문서번호·거래처·품명 검색" vendors={vendors}
-            statuses={approvalStatuses(list.page?.counts)}/>}>
+            statuses={approvalStatuses(list.page?.counts, list.filters.status)}/>}>
           {list.rows.length === 0
             ? <DocSideEmpty>{list.loading ? '불러오는 중…'
                 : (list.filters.q || list.filters.from || list.filters.vendor || list.filters.status) ? '조건에 맞는 구매품의서가 없어요.'
@@ -779,7 +805,7 @@ export const PurchaseReqScreen = ({ focusId = null, goRoute }) => {
             : <>
               {list.rows.map(d => (
                 <DocListRow key={d.id} active={!creating && selId === d.id} onClick={() => { setCreating(false); setSelId(d.id) }}
-                  docNo={d.doc_no} right={<StatusBadge status={d.status}/>}
+                  docNo={d.doc_no} right={<StatusBadge status={listStatusOf(d)}/>}
                   title={d.summary || d.vendor_name || '—'}
                   meta={[d.req_date, d.vendor_name && d.summary ? d.vendor_name : null,
                          d.resolution ? `${d.resolution.doc_no} 결의` : null].filter(Boolean).join(' · ')}

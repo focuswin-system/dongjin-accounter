@@ -1292,6 +1292,28 @@ export const api = {
   async getApprovalPresets() {
     try { return await req('/approval-presets') } catch { return [] }
   },
+  /* ── 전자결재 (server/routes/approvals.js) ── 실패는 { ok:false, error } 로 — 화면이 사유를 띄운다 */
+  async getApprovalSettings() {
+    // 실패는 null — '꺼짐'으로 답하면 그 답이 캐시에 남아 켜진 회사가 끝까지 예전 버튼을 본다
+    try { return await req('/approvals/settings', { quiet: true }) } catch { return null }
+  },
+  async setApprovalEnabled(enabled) {
+    try { return { ok: true, ...(await req('/approvals/settings', { method: 'PUT', body: { enabled } })) } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async getApprovers() { try { return await req('/approvals/approvers') } catch { return [] } },
+  async getApprovalCounts() { try { return await req('/approvals/counts', { quiet: true }) } catch { return { todo: 0, rejected: 0 } } },
+  async getApprovalBox(box) { return req(`/approvals?box=${encodeURIComponent(box)}`) },
+  async getApproval(id) { return req(`/approvals/${id}`) },
+  async getDocApprovals(type, id) { try { return await req(`/approvals/doc/${type}/${id}`) } catch { return [] } },
+  async submitApproval(body) {
+    try { return { ok: true, ...(await req('/approvals', { method: 'POST', body })) } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async actApproval(id, action, comment) {   // action: approve | final | reject | recall
+    try { return { ok: true, ...(await req(`/approvals/${id}/${action}`, { method: 'POST', body: { comment } })) } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
   async addApprovalPreset(data) {
     try { const r = await req('/approval-presets', { method: 'POST', body: data }); return { ok: true, id: r.id } }
     catch (e) { return { ok: false, error: e.message } }
@@ -2090,6 +2112,11 @@ export const api = {
     try { return await req('/auth/users') } catch { return [] }
   },
 
+  async updateUserProfile(id, { position, department }) {
+    try { await req(`/auth/users/${id}/profile`, { method: 'PUT', body: { position, department } }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+
   async addUser(data) {
     try {
       const result = await req('/auth/users', { method: 'POST', body: data })
@@ -2358,6 +2385,14 @@ export const api = {
     try { notes = await this.getNotes() } catch { /* noop */ }
     const PAY_PENDING = new Set(['지급 대기', '지급 예정', '일부 지급', '기한 지남'])
     const items = []
+    /* 전자결재 — 내 차례인 결재, 반려되어 돌아온 내 문서. 맨 위에(결재는 사람을 기다리게 한다) */
+    try {
+      const ac = await this.getApprovalCounts()
+      if (ac.todo > 0) items.push({ tone: 'warn', icon: 'Sign', to: 'approval_box', sortKey: -1,
+        title: `결재할 문서가 ${ac.todo}건 있어요`, sub: '결재함에서 승인·반려해 주세요', when: '' })
+      if (ac.rejected > 0) items.push({ tone: 'neg', icon: 'Warn', to: 'approval_box', sortKey: -1,
+        title: `반려된 내 문서가 ${ac.rejected}건 있어요`, sub: '사유를 확인하고 고쳐서 다시 올려 주세요', when: '' })
+    } catch { /* 결재를 안 쓰는 회사 — 알림 없음 */ }
     // 미수금: 마감일이 지났으면(상태 라벨 무관) 연체, 7일 내면 임박, 그 외 일부입금은 잔액 회수
     rec.rows.forEach(r => {
       const d = dleft(r.due)
