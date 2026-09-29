@@ -156,6 +156,8 @@ app.use('/api/reports',            require('./routes/reports'))
 app.use('/api/export',             require('./routes/export'))
 app.use('/api/doc-catalog',        require('./routes/doc-catalog'))
 app.use('/api/template-requests',  require('./routes/template-requests'))
+// 고객사 전용 모듈 — 켜진 회사만(라우터 첫 미들웨어가 404). 코드는 custom/dongjin/ 에만 있다
+app.use('/api/dongjin-mes',        require('./routes/dongjin-mes'))
 
 // ── 헬스체크 ──
 // deploy.sh 가 배포 시점에 기록한 provenance 를 함께 돌려준다.

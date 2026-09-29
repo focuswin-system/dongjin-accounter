@@ -170,6 +170,7 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
        그때 res.updated 는 아예 안 온다 — 예전엔 '갱신 undefined건'이 그대로 떴다. */
     toast.push(res.updated ? `신규 ${res.inserted}건 · 갱신 ${res.updated}건 반영됐어요`
       : `${res.inserted}건 등록됐어요`)
+    if (res.warning) toast.push(res.warning, { tone: 'warn' })
   }
 
   const downloadTemplate = async () => {

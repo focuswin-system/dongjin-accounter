@@ -1491,6 +1491,31 @@ async function initDb(conn) {
       )
     `)
 
+    /* 외부 시스템 키 대장 — 회계 행 ↔ 바깥 시스템(MES 등)의 키.
+     *
+     * 회계 쪽에는 외부 ID 칸이 없다(biz_no·order_no·code 는 모두 자유 텍스트라 고유하지 않다).
+     * 같은 외부 건을 두 번 가져와도 한 번만 생기게(멱등) 하려면 이 대장이 판정해야 한다.
+     * 이름은 **제품 중립**(연동 일반)이다 — 전 회사에 깔려도 무해하고, 다른 고객사 연동에도 쓴다.
+     * 회사 전용 컬럼을 공통 테이블에 붙이지 않는다(회계코어 재정비 때 걷어낸 원칙).
+     *
+     * 동진 거래처는 1:1 이다(MES 거래처코드 하나 ↔ 회계 짝 행 하나 — custom/dongjin/vendorSource.js).
+     * UNIQUE 는 외부 키 쪽에만 둔다 — 다른 연동이 N:1 로 쓸 수 있게 local_id 는 막지 않는다.
+     * 설계: docs/02-design/features/dongjin-custom-module.design.md §4 */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS external_links (
+        id         VARCHAR(36) PRIMARY KEY,
+        source     VARCHAR(20) NOT NULL,
+        entity     VARCHAR(30) NOT NULL,
+        local_id   VARCHAR(36) NOT NULL,
+        ext_key    VARCHAR(80) NOT NULL,
+        ext_rev    DATETIME NULL,
+        ext_gone   TINYINT NOT NULL DEFAULT 0,
+        synced_at  DATETIME NOT NULL,
+        UNIQUE KEY uq_external (source, entity, ext_key),
+        KEY ix_external_local (source, entity, local_id)
+      )
+    `)
+
     await ensureColumn('transactions', 'counterparty_account_id', "counterparty_account_id VARCHAR(36)")
     await ensureColumn('transactions', 'counterparty_bank',       "counterparty_bank VARCHAR(60)")
     await ensureColumn('transactions', 'counterparty_account',    "counterparty_account VARCHAR(60)")

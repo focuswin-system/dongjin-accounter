@@ -9,6 +9,7 @@ const platformAuth = require('../middleware/platformAuth')
 const { getPool } = require('../db/poolManager')
 const { BUILTIN_REPORTS, featureKeyOf } = require('../platform/reportCatalog')
 const { BUILTIN_DOCS, featureKeyOf: docFeatureKeyOf, prefKeyOf: docPrefKeyOf } = require('../platform/docCatalog')
+const { BUILTIN_CUSTOM, customFeatureKeyOf } = require('../platform/customCatalog')
 const { invalidate, dateOf } = require('../lib/entitlements')
 const { kstToday } = require('../db')
 const { STATUS_IDS, fileNameOf } = require('../platform/templateRequests')
@@ -455,6 +456,12 @@ function sellableCatalog() {
       key: docFeatureKeyOf(d.key), pref: docPrefKeyOf(d.key),
       label: d.title, descr: d.descr || '', group: '문서',
       scope: d.scope,
+    })),
+    /* 고객사 전용 모듈 — 회사가 스스로 끄는 자리(pref)가 없다. 쓰고 안 쓰고는 우리가 정한다. */
+    ...BUILTIN_CUSTOM.map(m => ({
+      key: customFeatureKeyOf(m.key), pref: null,
+      label: m.title, descr: m.descr || '', group: '전용 모듈',
+      scope: m.scope,
     })),
   ]
 }

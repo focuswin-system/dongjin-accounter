@@ -3,6 +3,9 @@ const { newBook, templateSheet, guideSheet, sendBook } = require('../lib/xlsxBoo
 const { randomUUID } = require('crypto')
 const { rollbackQuietly } = require('../lib/tx')
 const { uploadMem, parseSheet } = require('../lib/xlsx-import')
+/* 거래처 원본이 이 앱 밖에 있는 회사(예: 동진테크 — MES 거래처 표)를 위한 끼움 자리.
+   끼워진 게 없는 회사에서는 아무 일도 안 한다(lib/vendorSource.js). */
+const { beforeVendorRead, afterVendorWrite, vendorDeleteOverride } = require('../lib/vendorSource')
 
 const router = Router()
 
@@ -13,6 +16,7 @@ const router = Router()
 // 계속 드롭다운에 쌓여, 거래처가 늘수록 고르기 어려워진다.
 router.get('/', async (req, res, next) => {
   try {
+    await beforeVendorRead(req)
     const { gubu, all } = req.query
     const where = []
     const params = []
@@ -47,6 +51,7 @@ router.patch('/:id/active', async (req, res, next) => {
     const active = req.body.active ? 1 : 0
     const [r] = await req.db.execute('UPDATE vendors SET active = ? WHERE id = ?', [active, req.params.id])
     if (r.affectedRows === 0) return res.status(404).json({ error: '거래처를 찾을 수 없어요' })
+    await afterVendorWrite(req, [req.params.id])
 
     let pending = null
     if (!active) {
@@ -66,6 +71,7 @@ router.patch('/:id/active', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   try {
+    await beforeVendorRead(req)
     const [rows] = await req.db.execute('SELECT * FROM vendors WHERE id = ?', [req.params.id])
     if (!rows[0]) return res.status(404).json({ error: 'Not found' })
     const [accounts] = await req.db.execute(
@@ -142,6 +148,7 @@ router.post('/', async (req, res, next) => {
           let g = v.gubu
           if (['A', 'B'].includes(gubu) && ['A', 'B'].includes(v.gubu) && v.gubu !== gubu) {
             await req.db.execute("UPDATE vendors SET gubu = 'C' WHERE id = ?", [v.id]); g = 'C'
+            await afterVendorWrite(req, [v.id])
           }
           return res.json({ id: v.id, existed: true, gubu: g })
         }
@@ -160,6 +167,14 @@ router.post('/', async (req, res, next) => {
     )
     await replaceVendorList(req.db, 'vendor_accounts', id, req.body.accounts, ACCOUNT_COLS)
     await replaceVendorList(req.db, 'vendor_contacts', id, req.body.contacts, CONTACT_COLS)
+    /* 원본이 밖에 있으면 거기에도 만든다. 못 만들면 여기 것도 지운다 — 한쪽에만 생긴 거래처는
+       다시 등록할 때 '이미 있어요'로 막혀 사용자가 빠져나올 수 없다(계좌·담당자는 FK CASCADE 로 함께 지워진다) */
+    try { await afterVendorWrite(req, [id]) }
+    catch (e) {
+      await req.db.execute('DELETE FROM vendors WHERE id = ?', [id])
+      await req.db.execute('DELETE FROM external_links WHERE entity = ? AND local_id = ?', ['vendor', id])
+      throw e
+    }
     res.json({ id })
   } catch (e) { next(e) }
 })
@@ -177,12 +192,16 @@ router.put('/:id', async (req, res, next) => {
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     await replaceVendorList(req.db, 'vendor_accounts', req.params.id, req.body.accounts, ACCOUNT_COLS)
     await replaceVendorList(req.db, 'vendor_contacts', req.params.id, req.body.contacts, CONTACT_COLS)
+    await afterVendorWrite(req, [req.params.id])
     res.json({ ok: true })
   } catch (e) { next(e) }
 })
 
 router.delete('/:id', async (req, res, next) => {
   try {
+    // 원본이 밖에 있으면 그쪽 규칙대로(예: MES 는 지우지 않고 '사용 안 함')
+    const override = await vendorDeleteOverride(req, req.params.id)
+    if (override) return res.json(override)
     /* 반복거래는 **FK 가 없다**(repeat_templates — 템플릿을 지워도 장부는 그대로여야 해서).
        그래서 반복거래만 붙은 거래처는 FK 가 안 막는다. 그냥 두면 거래처 없는 반복거래가
        달별 목록에 '—' 로 떠 있다가, 만들 때 청구서의 거래처 FK 에 걸려 500 이 난다(실측 재현).
@@ -241,6 +260,7 @@ router.post('/import/commit', async (req, res, next) => {
     await conn.beginTransaction()
     let inserted = 0, updated = 0
     const createdNames = []
+    const touched = []
     for (const it of items) {
       const name = String(it.name || '').trim()
       if (!name) continue
@@ -259,7 +279,7 @@ router.post('/import/commit', async (req, res, next) => {
           [merged.name, merged.biz_no, merged.ceo, merged.address, merged.phone, merged.gubu, merged.type, merged.contact, merged.fax, merged.email,
            merged.bank_name, merged.bank_account, merged.account_holder, it.id]
         )
-        updated++
+        updated++; touched.push(it.id)
       } else {
         const id = randomUUID()
         await conn.execute(
@@ -269,11 +289,15 @@ router.post('/import/commit', async (req, res, next) => {
            String(it.contact || '').trim(), String(it.fax || '').trim(), String(it.email || '').trim(),
            String(it.bank_name || '').trim(), String(it.bank_account || '').trim(), String(it.account_holder || '').trim()]
         )
-        inserted++; createdNames.push(name)
+        inserted++; createdNames.push(name); touched.push(id)
       }
     }
     await conn.commit()
-    res.json({ inserted, updated, createdNames })
+    /* 회계 쪽은 이미 들어갔다 — 바깥 원본(MES) 쓰기가 실패해도 500 을 내면 사용자는 '안 들어갔다'고
+       보고 한 번 더 올려 중복이 생긴다. 들어간 건수와 함께 경고로 알린다. */
+    let warning = null
+    try { await afterVendorWrite(req, touched) } catch (e) { warning = e.message }
+    res.json({ inserted, updated, createdNames, warning })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })

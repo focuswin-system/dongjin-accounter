@@ -960,7 +960,7 @@ async function viewFeatures(main, ov) {
      묶음 **안에서는 종류(보고서/문서)끼리 붙여 세운다** — 섞여 있으면 문서 신청을
      처리하다 목록에서 그 문서를 찾지 못한다(보고서 12개 사이에 문서 4개가 흩어진다). */
   const ORDER = ['entitled', 'all', 'hidden']
-  const KIND_ORDER = ['보고서', '문서']
+  const KIND_ORDER = ['보고서', '문서', '전용 모듈']
   const byKind = (a, b) =>
     (KIND_ORDER.indexOf(a.group) - KIND_ORDER.indexOf(b.group))
     || String(a.label).localeCompare(String(b.label), 'ko')

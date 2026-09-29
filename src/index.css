@@ -1092,6 +1092,8 @@ button.cell-tag:hover { color: var(--ink); background: var(--surface-2); }
 /* 보고서 이름은 화면에선 PageHeader 가 이미 내고 있다 — 종이에서만 쓴다 */
 .rep-print-head { display: none; }
 .dt-colbar { display: flex; justify-content: flex-end; padding: 6px 10px 0; margin-bottom: -4px; position: relative; z-index: 2; }
+/* 표 위 한 줄 대신 툴바 줄에 앉힌 열 설정(DataTable colBarIn) — 제 여백을 지운다 */
+.dt-colbar-inline .dt-colbar { padding: 0; margin: 0; }
 /* 손댄 표라는 점 하나 — 글자 옆에 두면 잘린 글자로 읽혀서 동그라미로 그린다 */
 .dt-coldot {
   width: 5px; height: 5px; border-radius: 50%; background: var(--brand);

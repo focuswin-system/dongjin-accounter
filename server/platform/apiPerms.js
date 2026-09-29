@@ -98,6 +98,11 @@ const API_RESOURCES = {
   /* 양식 신청 — 보고서·문서 관리 화면(환경설정 하위)에서만 쓴다.
      라우트가 회사 마스터인지 한 번 더 본다. */
   '/api/template-requests':   ['settings'],
+  /* 고객사 전용 모듈(동진 MES). 회사 축(켜졌나)은 라우터가 404 로 보고, 여기는 사람 축이다.
+     동진에서는 계약관리 › 수주 화면이 MES 수주를 보여 준다 — 그 화면의 권한을 그대로 쓴다. */
+  '/api/dongjin-mes':         ['contract_sales'],
+  // 전자결재 — 결재함은 모든 계정에 열린 자원이다(permissions OPEN_RESOURCES). 결재 동작은 엔진이 '차례'로 판정
+  '/api/approvals':           ['approval_box'],
   // 첨부 업로드/다운로드는 어느 화면에서든 쓴다 → 자원으로 가르지 않고 아래 ANY_AUTHENTICATED 로 둔다
 }
 
@@ -239,6 +244,10 @@ const RESOURCE_OVERRIDES = [
      transfer·card_payment 로만 들어온 사람은 이체로 만든 줄만 지울 수 있다
      (routes/transactions.js DELETE 의 transferOnlyGuard). */
   { re: /^\/api\/transactions\/[^/]+$/, resources: [...TXN_BASE, 'transfer', 'card_payment'], methods: ['DELETE'] },
+  // 전자결재 켜고 끄기는 회사 설정이다
+  { re: /^\/api\/approvals\/settings$/, resources: ['settings'], methods: ['PUT'] },
+  /* 결재선 프리셋 **읽기**는 문서를 쓰는 사람 모두 — 결재 올릴 때 고른다. 고치기는 그대로 settings */
+  { re: /^\/api\/approval-presets$/, resources: ['settings', 'doc', 'purchase_req', 'settlement'], methods: ['GET'] },
 ]
 
 /** 요청 → 필요한 행위 */

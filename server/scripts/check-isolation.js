@@ -590,7 +590,9 @@ try {
     const rel = path.relative(path.join(__dirname, '..'), file).replace(/\\/g, '/')
     for (const [sym, from] of exported) {
       if (`lib/${from}` === rel) continue                       // 자기 자신이 정의한 것
-      if (!new RegExp(`\\b${sym}\\s*\\(`).test(src)) continue    // 호출하지 않으면 대상 아님
+      /* 호출하지 않으면 대상 아님. **객체.함수( 는 제외** — `approval.isEnabled(` 는 모듈을 통째로
+         가져와 부르는 것이라 import 가 있다(예전 정규식은 점 뒤도 잡아 오탐이었다) */
+      if (!new RegExp(`(?<![.\\w])${sym}\\s*\\(`).test(src)) continue
       // 같은 파일에서 정의했거나(지역 헬퍼) require 로 가져왔으면 통과
       const declared = new RegExp(`(const|let|function|async function)\\s+${sym}\\b`).test(src)
       const imported = new RegExp(`require\\([^)]*\\)`).test(src) &&
@@ -840,6 +842,92 @@ try {
   }
 } catch (e) {
   fail(`마감 가드 검사 실패: ${e.message}`)
+}
+
+// ── [20] 고객사 전용 모듈(server/custom/) 경계 ──
+//
+// 포크하지 않고 한 코드에 둔다(설계 dongjin-custom-module §7-2). 대신 경계를 기계가 지킨다:
+//   a) 공통 코드가 custom/ 을 부르는 곳은 **입구 라우터**(routes/<모듈>.js)뿐이다.
+//      다른 데서 부르기 시작하면 'if (dongjin)' 이 공통 코드로 번지는 첫걸음이다 — 분리 신호.
+//   b) custom/ 도 전역 풀을 쓰지 않는다([1] 은 routes/ 만 본다 — 여기가 사각지대였다).
+//   c) MES 읽기 파일(mesRead.js)의 SQL 은 SELECT 로만 시작한다. 계정 권한과 이중 잠금.
+//   d) 입구 라우터는 index.js 에 **평평한** 경로로 마운트한다(/api/a/b 는 [10] 의 정규식이
+//      못 알아봐 권한 매핑 없이 통과한다 — 조사에서 확인한 구멍).
+console.log('\n[20] 고객사 전용 모듈 경계 (server/custom/)')
+try {
+  const CUSTOM_DIR = path.join(__dirname, '..', 'custom')
+  const ENTRY = { dongjin: 'dongjin-mes.js' }   // 모듈 폴더 → 유일한 입구 라우터
+  const bad = []
+  const walk = (dir) => fs.existsSync(dir)
+    ? fs.readdirSync(dir, { withFileTypes: true }).flatMap(d =>
+        d.isDirectory() ? walk(path.join(dir, d.name))
+          : d.name.endsWith('.js') ? [path.join(dir, d.name)] : [])
+    : []
+  const rel = (p) => path.relative(path.join(__dirname, '..'), p).replace(/\\/g, '/')
+
+  // a) 공통 코드(server/ 아래, custom/·node_modules·scripts 제외)에서 custom/ require
+  const serverRoot = path.join(__dirname, '..')
+  const common = walk(serverRoot).filter(p => {
+    const r = rel(p)
+    return !r.startsWith('custom/') && !r.startsWith('node_modules/') && !r.startsWith('scripts/') && !r.startsWith('test')
+  })
+  const entries = new Set(Object.values(ENTRY).map(f => `routes/${f}`))
+  for (const p of common) {
+    const src = fs.readFileSync(p, 'utf8')
+    if (/require\(\s*['"][^'"]*\/custom\//.test(src) && !entries.has(rel(p))) {
+      bad.push(`${rel(p)} 가 custom/ 을 부른다 — 입구 라우터(${[...entries].join(', ')})만 부를 수 있다`)
+    }
+  }
+
+  // b) custom/ 의 전역 풀
+  const customFiles = walk(CUSTOM_DIR)
+  for (const p of customFiles) {
+    const src = fs.readFileSync(p, 'utf8')
+    if (/require\(\s*['"](\.\.\/)+db['"]\s*\)/.test(src) && /\bpool\b/.test(src)) {
+      bad.push(`${rel(p)} 가 전역 풀을 쓴다 — db 를 인자로 받을 것`)
+    }
+    // 테넌트 풀을 직접 여는 것도 금지 — 그 풀의 DB 이름은 JWT 에서만 와야 한다(mesDb.js 머리말)
+    if (/require\(\s*['"][^'"]*poolManager['"]\s*\)|\bgetPool\s*\(/.test(src)) {
+      bad.push(`${rel(p)} 가 테넌트 풀을 직접 연다 — req.db 를 인자로 받을 것`)
+    }
+  }
+
+  // c) mesRead.js 는 SELECT 만 — 따옴표 셋 다(` ' ")
+  for (const p of customFiles.filter(f => path.basename(f) === 'mesRead.js')) {
+    const src = fs.readFileSync(p, 'utf8')
+    for (const m of src.matchAll(/\.(?:query|execute)\(\s*[`'"]\s*([A-Za-z]+)/g)) {
+      if (m[1].toUpperCase() !== 'SELECT') bad.push(`${rel(p)}: '${m[1]}' 문 — 읽기 파일은 SELECT 만`)
+    }
+  }
+
+  // d) 입구 라우터 마운트가 평평한가
+  for (const f of Object.values(ENTRY)) {
+    const name = f.replace(/\.js$/, '')
+    const mount = new RegExp(`app\\.use\\(\\s*['"](/api/[^'"]+)['"]\\s*,\\s*require\\(['"]\\./routes/${name}['"]\\)`).exec(idxSrc)
+    if (!mount) bad.push(`routes/${f} 가 index.js 에 마운트되지 않았다`)
+    else if (!/^\/api\/[a-z-]+$/.test(mount[1])) bad.push(`routes/${f} 마운트 경로 ${mount[1]} — /api/<이름> 한 단계로(권한 매핑 검사가 못 알아본다)`)
+  }
+
+  // e) 화면도 같다 — src/custom/ 을 부르는 공통 화면은 App.jsx(라우트 분기) 하나뿐
+  const SRC = path.join(__dirname, '..', '..', 'src')
+  const walkSrc = (dir) => fs.existsSync(dir)
+    ? fs.readdirSync(dir, { withFileTypes: true }).flatMap(d =>
+        d.isDirectory() ? walkSrc(path.join(dir, d.name))
+          : /\.(jsx?|tsx?)$/.test(d.name) ? [path.join(dir, d.name)] : [])
+    : []
+  const relSrc = (p) => path.relative(SRC, p).replace(/\\/g, '/')
+  for (const p of walkSrc(SRC)) {
+    const r = relSrc(p)
+    if (r.startsWith('custom/') || r === 'App.jsx') continue
+    if (/from\s+['"][^'"]*\/custom\/|import\(\s*['"][^'"]*\/custom\//.test(fs.readFileSync(p, 'utf8'))) {
+      bad.push(`src/${r} 가 src/custom/ 을 부른다 — App.jsx 만 부를 수 있다`)
+    }
+  }
+
+  if (bad.length) fail('전용 모듈 경계 위반:\n      · ' + bad.join('\n      · '))
+  else ok(`경계 확인 — 공통 ${common.length}개 파일, 전용 ${customFiles.length}개 파일`)
+} catch (e) {
+  fail(`전용 모듈 경계 검사 실패: ${e.message}`)
 }
 
 if (failures === 0) {

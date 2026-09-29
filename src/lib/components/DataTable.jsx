@@ -71,7 +71,11 @@ export const DataTable = ({ columns, rows, loading, onRowClick, empty = '표시�
      열 정의에 붙일 수 있는 것:
        defaultHidden: true  처음엔 접혀 있는 열(공급가액·부가세처럼 필요한 사람만 펴는 것)
        label                설정 목록에 보일 이름(header 가 아이콘·노드일 때) */
-  tableKey }) => {
+  tableKey,
+  /* colBarIn: '열 설정' 버튼을 표 위 **따로 한 줄** 대신 이 자리(DOM 노드)에 그린다.
+     툴바에 필터·검색이 이미 한 줄 있는 화면은 버튼 하나 때문에 한 줄이 더 생겨 표가 밀려 내려간다.
+     화면이 툴바 안에 <span ref={setSlot}/> 을 두고 그 노드를 넘긴다. 아직 null 이면 그리지 않는다. */
+  colBarIn }) => {
   const [sort, setSort] = useState(null)   // { key, dir: 'asc' | 'desc' } | null
   const [prefs, setPrefs] = useState(() => readPrefs(tableKey))
   /* 표가 다른 화면으로 재사용될 때(같은 컴포넌트, 다른 tableKey) 앞 표의 설정이 남지 않게 한다 */
@@ -351,7 +355,7 @@ export const DataTable = ({ columns, rows, loading, onRowClick, empty = '표시�
 
   return (
     <>
-    {colBar}
+    {colBarIn === undefined ? colBar : (colBarIn && colBar ? createPortal(colBar, colBarIn) : null)}
     <div className="table-scroll" style={maxHeight ? { maxHeight } : undefined}>
       {/* minWidth: 열이 많아 좁은 화면에서 짓눌리는 표(자금관리표 등)가 쓴다.
           인쇄에서는 index.css 가 min-width 를 0으로 되돌린다 — 종이는 안 밀린다. */}

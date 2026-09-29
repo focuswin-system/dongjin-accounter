@@ -167,7 +167,13 @@ async function req(path, opts = {}) {
     try { const body = await res.json(); if (body?.error) msg = body.error; code = body?.code || ''; duplicates = body?.duplicates || null; payload = body || null } catch { /* 본문 없음 */ }
     // 429는 서버가 이유와 대기 시간을 문구에 담아 보낸다(시도 제한·요청 한도).
     // 이걸 삼키면 사용자는 왜 막혔는지 모른 채 빈 화면만 본다.
-    throw notifyInfra(apiError(msg, { status: res.status, kind: res.status === 429 ? 'ratelimit' : 'http', code, duplicates, payload }), opts.method || 'GET')
+    const err = apiError(msg, { status: res.status, kind: res.status === 429 ? 'ratelimit' : 'http', code, duplicates, payload })
+    // 다른 탭에서 전자결재를 켰는데 이 화면은 아직 예전 '승인' 버튼 — 서버가 알려 주면 켜짐 여부를 다시 받는다
+    if (code === 'use_approval') window.dispatchEvent(new Event('approval:stale'))
+    /* opts.quiet: 404·403 이 **정상 답**인 조회 — 예) 전용 모듈이 켜졌나 묻는 호출은
+       대부분의 회사에서 404 다. 그걸 '권한이 없어요'로 알리면 모든 회사가 매번 토스트를 본다. */
+    if (opts.quiet && (res.status === 403 || res.status === 404)) throw err
+    throw notifyInfra(err, opts.method || 'GET')
   }
   return res.json()
 }
@@ -442,6 +448,18 @@ export const api = {
    * ⚠ 실패하면 **null** 을 준다(빈 배열이 아니다). 화면은 null 을 '아직 모름'으로 읽고
    *   문서를 하나도 안 가린다 — 서버가 잠깐 흔들린 것이 고객에게 '메뉴가 사라졌다'로
    *   보이면 안 된다. 권한과 같은 원칙이다(App.jsx perms 주석). */
+  /* ── 고객사 전용 모듈: 동진 MES 연결 (server/routes/dongjin-mes.js) ──
+   * 모듈이 꺼진 회사는 404 — 조용히 '꺼짐'으로 본다(quiet). */
+  async mesStatus() {
+    try { return await req('/dongjin-mes/status', { quiet: true, softAuth: true }) }
+    catch (e) { return e.status === 404 || e.status === 403 ? { enabled: false } : { enabled: false, error: e.message } }
+  },
+  // 거르기(원청·검색·기간)는 화면이 한다 — 수주 PO 는 수백 건이라 한 번에 받는다
+  mesOrders() {
+    return req('/dongjin-mes/orders', { quiet: true })   // 꺼진 회사의 404 는 화면(MesGate)이 말한다
+  },
+  mesOrderLines(contNumb) { return req(`/dongjin-mes/orders/${encodeURIComponent(contNumb)}/lines`) },
+
   async getDocCatalog() {
     try { return (await req('/doc-catalog'))?.items || [] } catch { return null }
   },
@@ -1627,8 +1645,9 @@ export const api = {
 
   async deleteVendor(id) {
     try {
-      await req(`/vendors/${id}`, { method: 'DELETE' })
-      return { ok: true }
+      const r = await req(`/vendors/${id}`, { method: 'DELETE' })
+      // 원본이 밖에 있는 회사는 지우지 않고 '사용 안 함'으로 바꾼다 — 그 안내를 화면까지
+      return { ok: true, deactivated: !!r?.deactivated, message: r?.message || '' }
     } catch(e) { return { ok: false, error: e.message } }   // 실패 사유(FK 409)를 화면까지 전달
   },
 
