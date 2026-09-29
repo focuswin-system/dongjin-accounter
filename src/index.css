@@ -2268,6 +2268,9 @@ body:has([data-modal-open]) {
 .doc-filters-vendor { position: relative; flex: 1 1 auto; min-width: 0; }
 .doc-filters-vendor .input, .doc-filters-vendor input { height: 32px; font-size: 12.5px; }
 .doc-filters-count { margin-left: 2px; font-weight: 600; color: var(--brand-ink); }
+.doc-filters-chips { display: flex; gap: 4px; flex-wrap: nowrap; overflow-x: auto; min-width: 0; scrollbar-width: none; }
+.doc-filters-chips::-webkit-scrollbar { display: none; }
+.doc-filters-chips .chip { flex: 0 0 auto; padding-left: 10px; padding-right: 10px; }
 .chip.active .doc-filters-count { color: inherit; }
 /* 문서 목록 한 줄의 연결 표시(DJ-… 결의 / 청구서 번호) — 본문보다 한 단계 옅게 */
 .doc-ws-link { font-size: 11.5px; color: var(--muted); }

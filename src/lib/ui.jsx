@@ -645,7 +645,11 @@ export const ConfirmProvider = ({ children }) => {
   const [dlg, setDlg] = useState(null);
   const okRef = useRef(null);
   const openerRef = useRef(null);
-  const confirm = (opts) => new Promise(resolve => { setDlg({ ...opts, resolve }); });
+  /* 이미 떠 있는 확인창이 있으면 그것을 '취소'로 끝내고 바꾼다. 그냥 덮으면 앞 약속이
+     영영 안 풀려, 그걸 기다리던 저장(useBusy 잠금)이 '저장 중…'에 멈춘다. */
+  const confirm = (opts) => new Promise(resolve => {
+    setDlg(prev => { prev?.resolve?.(false); return { ...opts, resolve }; });
+  });
   const close = (val) => { if (dlg?.resolve) dlg.resolve(val); setDlg(null); };
 
   /* 확인창은 지우기·마감·이체 같은 **되돌리기 어려운 일** 앞에 선다. 그런데 키보드로는

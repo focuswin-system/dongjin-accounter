@@ -6,18 +6,17 @@ import { PeriodPicker } from './PeriodPicker'
  *
  *   [검색                         ]
  *   [📅 전체 기간 ▾] [거래처 ▾      ×]
- *   전체 · 작성 2 · 승인 1 · 완료          초기화
+ *   전체 · 작성 2 · 승인 1 · 완료
  *
  * 기간은 **문서 날짜**(품의일자·지급일·정산일)로 거른다 — 서버 lib/pagedList.js.
  * 거래처·상태는 그 문서에 그 칸이 있을 때만 준다(정산서는 거래처가 줄마다 달라 없다).
  *
- * @param list      useDocList() 가 돌려준 것 (filters·setFilter·setPeriod·resetFilters)
+ * @param list      useDocList() 가 돌려준 것 (filters·setFilter·setPeriod)
  * @param vendors   [{ id, name }] — 없으면 거래처 칸을 안 그린다
  * @param statuses  [{ id, label, count? }] — 없으면 상태 줄을 안 그린다. id '' 는 전체
  */
 export const DocFilters = ({ list, placeholder = '검색', vendors, statuses, children }) => {
-  const { filters, setFilter, setPeriod, resetFilters } = list
-  const active = !!(filters.from || filters.to || filters.vendor || filters.status)
+  const { filters, setFilter, setPeriod } = list
   return (
     <div className="doc-filters">
       <div className="search" style={{ margin: 0, padding: '6px 10px' }}>
@@ -47,24 +46,23 @@ export const DocFilters = ({ list, placeholder = '검색', vendors, statuses, ch
         )}
       </div>
 
-      {(statuses || active) && (
+      {/* 초기화 버튼은 두지 않는다 — 칸마다 되돌리는 길이 이미 있다(기간 '전체'·거래처 ×·상태 '전체').
+          필터를 누를 때마다 버튼이 생겨 칩 줄이 접히고 '완료'가 아래로 밀렸다. */}
+      {statuses && (
         <div className="doc-filters-row">
-          {statuses && (
-            <div className="row gap-4" style={{ flexWrap: 'wrap' }}>
-              {statuses.map(s => (
-                <button key={s.id || 'all'} type="button"
-                  className={`chip ${filters.status === s.id ? 'active' : ''}`}
-                  onClick={() => setFilter('status', s.id)}>
-                  {s.label}
-                  {/* 정상엔 표식을 달지 않는다 — 0건이면 숫자도 없다 */}
-                  {s.count > 0 && <span className="num doc-filters-count">{s.count}</span>}
-                </button>
-              ))}
-            </div>
-          )}
-          {active && (
-            <button type="button" className="btn ghost sm ml-auto" onClick={resetFilters}>초기화</button>
-          )}
+          {/* 한 줄 고정 — 접히면 '완료'가 아래로 밀려 줄마다 눈이 다시 찾아야 한다(2026-09-28 지적 두 번).
+              칩이 늘어 폭이 모자라면 줄을 바꾸지 않고 옆으로 민다(index.css .doc-filters-chips) */}
+          <div className="doc-filters-chips">
+            {statuses.map(s => (
+              <button key={s.id || 'all'} type="button"
+                className={`chip ${filters.status === s.id ? 'active' : ''}`}
+                onClick={() => setFilter('status', s.id)}>
+                {s.label}
+                {/* 정상엔 표식을 달지 않는다 — 0건이면 숫자도 없다 */}
+                {s.count > 0 && <span className="num doc-filters-count">{s.count}</span>}
+              </button>
+            ))}
+          </div>
         </div>
       )}
       {children}
