@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-09-29T00:01:34.765Z",
+  "lastUpdated": "2026-09-30T00:44:23.896Z",
   "activeFeatures": [
     "focus-accounter",
     "screens",
@@ -27,9 +27,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-05-15T05:42:27.292Z",
-        "lastUpdated": "2026-09-28T08:37:54.058Z"
+        "lastUpdated": "2026-09-29T23:54:57.923Z"
       },
-      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\src\\lib\\components\\DocFilters.jsx"
+      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\src\\lib\\components\\AccountPicker.jsx"
     },
     "screens": {
       "phase": "do",
@@ -40,9 +40,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-05-15T05:47:46.297Z",
-        "lastUpdated": "2026-09-28T08:40:30.165Z"
+        "lastUpdated": "2026-09-29T08:37:36.584Z"
       },
-      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\src\\screens\\ApprovalBox.jsx"
+      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\src\\screens\\Contract.jsx"
     },
     "server": {
       "phase": "do",
@@ -53,9 +53,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-05-28T02:41:31.412Z",
-        "lastUpdated": "2026-09-28T09:05:40.416Z"
+        "lastUpdated": "2026-09-30T00:42:11.492Z"
       },
-      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\lib\\approval.js"
+      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\lib\\memoText.js"
     },
     "routes": {
       "phase": "do",
@@ -92,9 +92,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-07-01T00:32:44.606Z",
-        "lastUpdated": "2026-09-29T00:01:34.765Z"
+        "lastUpdated": "2026-09-30T00:43:32.338Z"
       },
-      "lastFile": "C:\\Users\\USER\\AppData\\Local\\Temp\\claude\\C--Users-USER-Desktop-Project-public-focus-accounter\\52b5886c-4ca0-4bb2-93af-d15b6867a49e\\scratchpad\\stage.py"
+      "lastFile": "C:\\Users\\USER\\AppData\\Local\\Temp\\claude\\C--Users-USER-Desktop-Project-public-focus-accounter\\52b5886c-4ca0-4bb2-93af-d15b6867a49e\\scratchpad\\match_form.py"
     },
     "scripts": {
       "phase": "do",
@@ -105,9 +105,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-07-20T01:43:38.006Z",
-        "lastUpdated": "2026-09-28T09:14:58.746Z"
+        "lastUpdated": "2026-09-29T06:22:56.346Z"
       },
-      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\scripts\\check-isolation.js"
+      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\scripts\\check-style-mix.js"
     },
     "platform": {
       "phase": "do",
@@ -144,9 +144,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-07-28T23:41:50.664Z",
-        "lastUpdated": "2026-09-28T08:46:23.982Z"
+        "lastUpdated": "2026-09-30T00:44:23.896Z"
       },
-      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\test\\userPerms.test.js"
+      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\test\\memoText.test.js"
     },
     "script": {
       "phase": "do",
@@ -170,9 +170,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-09-28T07:03:18.794Z",
-        "lastUpdated": "2026-09-28T09:12:20.860Z"
+        "lastUpdated": "2026-09-29T07:22:34.179Z"
       },
-      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\server\\custom\\dongjin\\mesDb.js"
+      "lastFile": "C:\\Users\\USER\\Desktop\\Project\\public\\focus-accounter\\src\\custom\\dongjin\\MesPurchases.jsx"
     },
     "map": {
       "phase": "do",
@@ -196,7 +196,7 @@
   "session": {
     "startedAt": "2026-05-15T05:18:29.210Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-09-29T00:01:34.765Z"
+    "lastActivity": "2026-09-30T00:44:23.896Z"
   },
   "history": [
     {
@@ -30346,6 +30346,276 @@
     {
       "timestamp": "2026-09-29T00:01:34.765Z",
       "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T05:31:40.139Z",
+      "feature": "server",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T05:32:43.772Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T05:33:26.797Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T05:34:14.314Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T05:36:39.311Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T05:36:48.395Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T05:37:34.449Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T05:38:06.964Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T05:46:35.481Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T05:47:45.120Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T06:21:00.478Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T06:21:26.825Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T06:21:51.187Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T06:22:56.346Z",
+      "feature": "scripts",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T07:11:49.695Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T07:21:28.433Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T07:22:34.179Z",
+      "feature": "dongjin",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T08:06:59.137Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T08:07:24.653Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T08:20:12.852Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T08:21:20.289Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T08:23:40.306Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T08:29:33.117Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T08:30:37.615Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T08:34:19.493Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T08:35:05.130Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T08:35:35.256Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T08:35:54.424Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T08:36:10.546Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T08:36:24.916Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T08:36:37.040Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T08:37:27.479Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T08:37:36.584Z",
+      "feature": "screens",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T08:37:49.561Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T23:54:57.923Z",
+      "feature": "focus-accounter",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-29T23:55:21.913Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-30T00:01:18.473Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-30T00:14:58.245Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-30T00:19:58.204Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-30T00:20:23.198Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-30T00:23:28.393Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-30T00:42:11.492Z",
+      "feature": "server",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-30T00:42:34.500Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-30T00:43:32.338Z",
+      "feature": "scratchpad",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-09-30T00:44:23.896Z",
+      "feature": "test",
       "phase": "do",
       "action": "updated"
     }
