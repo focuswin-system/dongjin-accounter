@@ -77,10 +77,18 @@ const LINES_WITH_STAGE = `
  * PO 의 단계 = 가장 덜 진행된 줄의 단계(한 줄이라도 남았으면 그 PO 는 아직 거기 있다).
  * 납기 = 출하완료가 아닌 줄 중 가장 이른 납기.
  */
+/* 수주일 — MES 에 원청 공통 '수주일' 칸이 없다(2026-09-29 실측):
+ *   현대  cont_date(계약일) 100% 채워짐
+ *   한화  appr_date(구매오더 최종승인일) 7.5% 만 — 나머지는 user_date(MES 등록일) 밖에 없다
+ *   user_date 만 쓰면 MES 도입 전 수주가 전부 일괄 이관일(2026-06/07)로 찍힌다.
+ * 그래서 계약일 → 승인일 → 등록일 순으로 있는 것을 쓴다. PO 의 수주일은 품목 중 가장 이른 날. */
+const ORDER_DATE = 'DATE(COALESCE(cont_date, appr_date, user_date))'
+
 async function orderGroups(mes) {
   const [rows] = await mes.query(`
     SELECT * FROM (
     SELECT cont_numb,
+           MIN(${ORDER_DATE})                            AS order_date,
            MIN(orig_gubu)                                AS orig_gubu,
            MIN(clie_name)                                AS clie_name,
            MIN(proj_numb)                                AS proj_numb,
@@ -113,4 +121,37 @@ async function orderLines(mes, contNumb) {
   return rows
 }
 
-module.exports = { counts, listClients, clientsByCodes, orderGroups, orderLines }
+/* ── 발주(구매) ── MES 2F 구매발주. 헤더 COERP_PRO_PPRO · 품목 COERP_PRO_PPROITEM · 입고 COERP_MAT_WAREHOUSING
+ * 진행 단계는 **MES 가 적은 값(ppro_stat)** 을 그대로 쓴다 — 발주등록 → 승인요청 → 발주완료 → 입고처리 → 입고완료.
+ * 수주와 달리 MES 가 단계를 스스로 관리하므로 여기서 다시 판정하지 않는다(두 답이 생긴다).
+ * 입고 진척은 품목의 누적 입고수량(rece_qtys) / 발주수량으로 따로 보여 준다. */
+async function purchaseOrders(mes) {
+  const [rows] = await mes.query(`
+    SELECT p.ppro_numb, p.ppro_date, p.clie_code, p.clie_name, p.damd_name, p.pdel_date,
+           p.ppro_stat, p.afte_conf, p.pays_cond, p.ppro_usag,
+           COUNT(i.ppro_seri)            AS line_cnt,
+           MIN(i.matl_name)              AS first_matl,
+           SUM(i.ppro_qtys)              AS qty,
+           SUM(COALESCE(i.rece_qtys, 0)) AS rece_qty,
+           SUM(i.ppro_cwon)              AS amount
+      FROM COERP_PRO_PPRO p
+      LEFT JOIN COERP_PRO_PPROITEM i ON i.ppro_numb = p.ppro_numb
+     GROUP BY p.ppro_numb
+     ORDER BY p.ppro_date DESC, p.ppro_numb DESC`)
+  return rows
+}
+
+/** 한 발주의 품목 + 입고 기록 */
+async function purchaseOrderLines(mes, pproNumb) {
+  const [items] = await mes.query(`
+    SELECT ppro_seri, item_gubu, matl_code, matl_name, matl_spec, puro_unit,
+           ppro_qtys, COALESCE(rece_qtys, 0) AS rece_qtys, ppro_pric, ppro_cwon, rece_plac, purs_numb, ppro_memo
+      FROM COERP_PRO_PPROITEM WHERE ppro_numb = ? ORDER BY ppro_seri`, [String(pproNumb)])
+  const [wares] = await mes.query(`
+    SELECT ware_numb, pros_seri, ware_date, ware_qtys, ware_pric, ware_kwon, lots_numb,
+           CAST(clos_yesn AS UNSIGNED) AS clos_yesn, CAST(insp_okey AS UNSIGNED) AS insp_okey
+      FROM COERP_MAT_WAREHOUSING WHERE pros_numb = ? ORDER BY ware_date, ware_numb`, [String(pproNumb)])
+  return { items, wares }
+}
+
+module.exports = { counts, listClients, clientsByCodes, orderGroups, orderLines, purchaseOrders, purchaseOrderLines }

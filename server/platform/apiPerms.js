@@ -226,6 +226,8 @@ const ACTION_OVERRIDES = [
  */
 const TXN_BASE = ['ledger', 'misc_pl', 'misc_income', 'voucher_book']
 const RESOURCE_OVERRIDES = [
+  /* 동진 MES — 발주 목록은 계약관리 › 발주 화면(contract_purchase)이 쓴다. 나머지(수주)는 contract_sales */
+  { re: /^\/api\/dongjin-mes\/purchase-orders(\/|$)/, resources: ['contract_purchase'] },
   /* 카드 대금·내부 이체 화면이 **실제로 쓰는 문**만 연다.
    *
    * ⚠ 저장 문만 열고 **읽기 문을 안 열면 화면이 통째로 빈다.** 두 화면 다 목록을 먼저

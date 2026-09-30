@@ -10,14 +10,15 @@
  * 고객사 전용 모듈(custom:dongjin_mes). 설계: dongjin-custom-module.design.md
  */
 import { useState, useEffect, useMemo } from 'react'
-import { Icon, fmtNum, Loading, Drawer } from '../../lib/ui'
+import { Icon, fmtNum, Loading, Drawer, localToday } from '../../lib/ui'
 import { PageHeader } from '../../lib/components/PageHeader'
-import { DataTable } from '../../lib/components/DataTable'
+import { DataTable, Sub } from '../../lib/components/DataTable'
 import { TableToolbar } from '../../lib/components/TableToolbar'
 import { Kpi, KpiRow } from '../../lib/components/Kpi'
 import { DrawerHead } from '../../lib/components/Drawer'
 import { api } from '../../lib/api'
 import { MesGate } from './MesGate'
+import { qtySum } from './MesPurchases'
 
 const ORIGS = [['', '전체'], ['HW', '한화'], ['HD', '현대'], ['ETC', '기타']]
 const ORIG_LABEL = { HW: '한화', HD: '현대', ETC: '기타' }
@@ -27,6 +28,14 @@ const STAGES = [[1, '수주'], [2, '생산'], [3, '출하대기'], [4, '출하']
 const DUE_COLOR = { late: 'var(--neg-ink)', soon: 'var(--warn-ink)' }
 const DUE_TITLE = { late: '납기가 지났어요', soon: '납기가 14일 안이에요' }
 
+/* 기본 조회기간 — 최근 한 달(30일 전 ~ 오늘). 2026-09-29 사용자: PO 가 수백 건이라 전부 펼치면 끝없이 내려간다 */
+const daysAgo = (ymd, n) => {
+  const [y, m, d] = ymd.split('-').map(Number)
+  const t = new Date(Date.UTC(y, m - 1, d - n))
+  return t.toISOString().slice(0, 10)
+}
+const defaultRange = () => { const to = localToday(); return { from: daysAgo(to, 30), to } }
+
 export const MesOrdersScreen = () => {
   const [data, setData] = useState(null)       // { today, rows } | { error }
   const [stage, setStage] = useState(0)        // 0 = 전체
@@ -34,12 +43,13 @@ export const MesOrdersScreen = () => {
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(null)
   const [colSlot, setColSlot] = useState(null) // '열 설정' 버튼을 단계 줄에 앉힌다(표 위 빈 줄을 없앤다)
+  const [range, setRange] = useState(defaultRange)   // 수주일 기간(서버가 거른다)
 
   const load = () => {
     setData(null)
-    api.mesOrders().then(setData).catch(e => setData({ error: e.message, code: e.code, status: e.status }))
+    api.mesOrders(range).then(setData).catch(e => setData({ error: e.message, code: e.code, status: e.status }))
   }
-  useEffect(load, [])
+  useEffect(load, [range.from, range.to])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = data?.rows || []
   const byOrig = useMemo(() => (orig ? rows.filter(r => r.orig === orig) : rows), [rows, orig])
@@ -51,21 +61,20 @@ export const MesOrdersScreen = () => {
   }, [byOrig, stage, q])
 
   const stageCount = (n) => byOrig.filter(r => r.stage === n).length
-  const going = byOrig.filter(r => r.stage < 5)
-  const late = going.filter(r => r.due === 'late').length
-  const soon = going.filter(r => r.due === 'soon').length
   const sumOf = (list) => list.reduce((a, r) => a + r.amount, 0)
+  /* 위 카드는 **기간과 무관한 지금 전체**(서버 summary) — 기간으로 자르면 오래된 지연 PO 가 카드에서 사라진다 */
+  const sm = data?.summary || { going: 0, goingAmount: 0, late: 0, soon: 0 }
 
   const columns = [
-    { key: 'stage', header: '단계', width: 110, sortable: true, render: r => (
-      <div>
-        <div>{r.stageLabel}</div>
+    { key: 'stage', header: '단계', width: 130, sortable: true, render: r => (
+      <>
+        {r.stageLabel}
         {/* 일부 품목만 끝난 PO — 단계는 가장 덜 된 품목 기준이라, 나머지가 얼마나 왔는지 알려 준다 */}
-        {r.doneLines > 0 && r.doneLines < r.lines && (
-          <div className="text-xs text-muted">{fmtNum(r.doneLines)}/{fmtNum(r.lines)} 완료</div>
-        )}
-      </div>
+        {r.doneLines > 0 && r.doneLines < r.lines && <Sub>{fmtNum(r.doneLines)}/{fmtNum(r.lines)} 완료</Sub>}
+      </>
     ) },
+    { key: 'orderDate', header: '수주일', width: 104, sortable: true,
+      render: r => <span className="num" style={{ whiteSpace: 'nowrap' }}>{r.orderDate || '—'}</span> },
     { key: 'orig', header: '원청', width: 64, render: r => ORIG_LABEL[r.orig] || '—' },
     { key: 'contNumb', header: 'PO 번호', width: 150, sortable: true, render: r => (
       <span className="row gap-6" style={{ alignItems: 'center' }}>
@@ -74,10 +83,7 @@ export const MesOrdersScreen = () => {
       </span>
     ) },
     { key: 'proj', header: '공사·호선', render: r => (
-      <div style={{ minWidth: 0 }}>
-        <div className="truncate">{r.projName || r.projNumb || '—'}</div>
-        {r.ships && <div className="text-xs text-muted truncate">{r.ships}</div>}
-      </div>
+      <>{r.projName || r.projNumb || '—'}<Sub>{r.ships}</Sub></>
     ) },
     { key: 'lines', header: '품목', width: 72, align: 'right', sortable: true,
       render: r => <span className="num">{fmtNum(r.lines)}</span> },
@@ -99,14 +105,15 @@ export const MesOrdersScreen = () => {
 
       <MesGate data={data} onRetry={load}>
         <KpiRow cols={4} style={{ marginBottom: 16 }}>
-          <Kpi label="진행 중인 PO" value={going.length} unit="건"/>
-          <Kpi label="진행 중 금액" value={Math.round(sumOf(going))}/>
-          <Kpi label="납기 지남" value={late} unit="건" tone={late ? 'neg' : undefined}/>
-          <Kpi label="납기 14일 안" value={soon} unit="건" tone={soon ? 'warn' : undefined}/>
+          <Kpi label="진행 중인 PO · 전체" value={sm.going} unit="건"/>
+          <Kpi label="진행 중 금액 · 전체" value={Math.round(sm.goingAmount)}/>
+          <Kpi label="납기 지남 · 전체" value={sm.late} unit="건" tone={sm.late ? 'neg' : undefined}/>
+          <Kpi label="납기 14일 안 · 전체" value={sm.soon} unit="건" tone={sm.soon ? 'warn' : undefined}/>
         </KpiRow>
 
         <div className="card">
           <TableToolbar
+            date={{ from: range.from, to: range.to, onChange: setRange }}
             search={{ value: q, onChange: setQ, placeholder: 'PO 번호·공사·호선 검색' }}
             right={
               <div className="seg" role="tablist" aria-label="원청">
@@ -131,7 +138,7 @@ export const MesOrdersScreen = () => {
             </div>
             <span ref={setColSlot} className="dt-colbar-inline ml-auto"/>
           </div>
-          <DataTable tableKey="mes_orders" colBarIn={colSlot} columns={columns} rows={shown} rowKey={r => r.contNumb}
+          <DataTable tableKey="mes_orders" colBarIn={colSlot} columns={columns} rows={shown} rowKey={r => r.contNumb} pageSize={50}
             loading={!data} onRowClick={setOpen} empty="조건에 맞는 수주가 없어요"
             footer={shown.length > 0 && (
               <tr>
@@ -163,10 +170,7 @@ const OrderLinesDrawer = ({ group, onClose }) => {
 
   const columns = [
     { key: 'matl', header: '품명·규격', render: l => (
-      <div style={{ minWidth: 0 }}>
-        <div className="truncate">{l.matl_desc || '—'}</div>
-        <div className="text-xs text-muted truncate">{[l.matl_code, l.matl_quli].filter(Boolean).join(' · ')}</div>
-      </div>
+      <>{l.matl_desc || '—'}<Sub>{[l.matl_code, l.matl_quli].filter(Boolean).join(' · ')}</Sub></>
     ) },
     { key: 'stage', header: '단계', width: 84, render: l => l.stage_label },
     { key: 'qty', header: '수량', width: 100, align: 'right', render: l => {
@@ -197,7 +201,15 @@ const OrderLinesDrawer = ({ group, onClose }) => {
               <Kpi size="sm" label="금액" value={Math.round(group.amount)}/>
             </KpiRow>
             {!lines ? <Loading/> : (
-              <DataTable columns={columns} rows={lines} rowKey={l => l.orde_numb} empty={error || '품목이 없어요'}/>
+              <DataTable columns={columns} rows={lines} rowKey={l => l.orde_numb} empty={error || '품목이 없어요'}
+                footer={lines.length > 0 && (
+                  <tr>
+                    <td colSpan={2} className="text-sm text-muted">합계 {fmtNum(lines.length)}품목</td>
+                    <td className="num num-right fw-700">{qtySum(lines, 'orde_qtys', 'orde_quni') ?? '—'}</td>
+                    <td/>
+                    <td className="num num-right fw-700">{fmtNum(Math.round(lines.reduce((a, l) => a + (Number(l.orde_cwon) || 0), 0)))}</td>
+                  </tr>
+                )}/>
             )}
           </div>
         </>

@@ -134,3 +134,23 @@ test('한 회사 안에서 끌어오기·쓰기는 한 줄로 — 겹치지 않�
   assert.equal(maxRunning, 1)
   assert.deepEqual(rs.map(r => r.status), ['fulfilled', 'rejected', 'fulfilled'])
 })
+
+test('발주: MES 진행상태를 그대로 단계로 · 입고 진척 · 입고완료면 납품일을 안 따진다', () => {
+  const { shapePurchase } = require('../custom/dongjin/map/order')
+  const base = { ppro_numb: 'PP1', ppro_date: '2026-09-01 00:00:00', clie_name: 'A', line_cnt: 3, first_matl: 'BENDING',
+    qty: 10, rece_qty: 4, amount: 1000, afte_conf: '완결', pdel_date: '2026-09-10 00:00:00' }
+  const a = shapePurchase({ ...base, ppro_stat: '입고처리' }, '2026-09-20')
+  assert.equal(a.stage, 4); assert.equal(a.stageLabel, '입고처리')
+  assert.equal(a.items, 'BENDING 외 2'); assert.equal(a.receRate, 40)
+  assert.equal(a.due, 'late', '납품일이 지났는데 입고가 안 끝났다')
+  const b = shapePurchase({ ...base, ppro_stat: '입고완료', rece_qty: 10 }, '2026-09-20')
+  assert.equal(b.due, null, '다 들어온 발주는 늦었다고 하지 않는다'); assert.equal(b.receRate, 100)
+  assert.equal(shapePurchase({ ...base, ppro_stat: '모르는값' }, '2026-09-20').stageLabel, '발주등록')
+  assert.equal(shapePurchase({ ...base, line_cnt: 0, qty: 0 }, '2026-09-20').receRate, null)
+})
+
+test('권한: 동진 발주 목록은 발주 화면 권한, 수주는 수주 화면 권한', () => {
+  assert.deepEqual(requiredPerm('GET', '/api/dongjin-mes/purchase-orders').resources, ['contract_purchase'])
+  assert.deepEqual(requiredPerm('GET', '/api/dongjin-mes/purchase-orders/PP1/lines').resources, ['contract_purchase'])
+  assert.deepEqual(requiredPerm('GET', '/api/dongjin-mes/orders').resources, ['contract_sales'])
+})

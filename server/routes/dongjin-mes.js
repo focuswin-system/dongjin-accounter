@@ -24,7 +24,7 @@ const { mesPool } = require('../custom/dongjin/mesDb')
 const mesRead = require('../custom/dongjin/mesRead')
 const { registerVendorSource } = require('../lib/vendorSource')
 const dongjinVendors = require('../custom/dongjin/vendorSource')
-const { shapeGroup, STAGES } = require('../custom/dongjin/map/order')
+const { shapeGroup, STAGES, shapePurchase, PUR_STAGES } = require('../custom/dongjin/map/order')
 
 const router = Router()
 const FEATURE = customFeatureKeyOf('dongjin_mes')
@@ -72,9 +72,22 @@ router.get('/status', async (req, res, next) => {
 router.get('/orders', async (req, res, next) => {
   try {
     const mes = needMes(res); if (!mes) return
-    const rows = await mesRead.orderGroups(mes)
+    // 기간(수주일) — 날짜 모양만 받는다. 비우면 전체
+    const ymd = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : '')
+    const from = ymd(req.query.from), to = ymd(req.query.to)
     const today = kstToday()
-    res.json({ today, rows: rows.map(g => shapeGroup(g, today)) })
+    const all = (await mesRead.orderGroups(mes)).map(g => shapeGroup(g, today))
+    /* 요약(화면 위 카드)은 **기간과 무관하게 지금 전체**를 센다. 기간으로 자르면 한 달 전에 받은 PO 는
+       늦어도 '납기 지남'에서 사라진다 — 운영 실측 전체 740건 중 기본 기간(30일)에선 9건만 보였다(2026-09-29) */
+    const going = all.filter(r => r.stage < 5)
+    const summary = {
+      going: going.length,
+      goingAmount: going.reduce((a, r) => a + r.amount, 0),
+      late: going.filter(r => r.due === 'late').length,
+      soon: going.filter(r => r.due === 'soon').length,
+    }
+    const rows = all.filter(r => (!from || (r.orderDate && r.orderDate >= from)) && (!to || (r.orderDate && r.orderDate <= to)))
+    res.json({ today, summary, rows })
   } catch (e) { next(e) }
 })
 
@@ -83,6 +96,35 @@ router.get('/orders/:contNumb/lines', async (req, res, next) => {
     const mes = needMes(res); if (!mes) return
     const lines = await mesRead.orderLines(mes, String(req.params.contNumb).slice(0, 20))
     res.json({ lines: lines.map(l => ({ ...l, stage_label: STAGES[Number(l.stage)] || '수주' })) })
+  } catch (e) { next(e) }
+})
+
+/* 발주 — 동진에서는 계약관리 › 발주 자리가 MES 구매발주(보기 전용). 권한은 발주 화면(contract_purchase)
+   — apiPerms RESOURCE_OVERRIDES. 기간은 발주일, 위 요약은 수주와 같이 **기간과 무관한 지금 전체** */
+router.get('/purchase-orders', async (req, res, next) => {
+  try {
+    const mes = needMes(res); if (!mes) return
+    const ymd = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : '')
+    const from = ymd(req.query.from), to = ymd(req.query.to)
+    const today = kstToday()
+    const all = (await mesRead.purchaseOrders(mes)).map(p => shapePurchase(p, today))
+    const going = all.filter(p => p.stageLabel !== '입고완료')
+    const summary = {
+      going: going.length,
+      goingAmount: going.reduce((a, p) => a + p.amount, 0),
+      late: going.filter(p => p.due === 'late').length,
+      // 발주는 나갔는데 아직 다 안 들어온 것 — 매입(세금계산서)이 곧 올 돈
+      waiting: going.filter(p => p.stageLabel === '발주완료' || p.stageLabel === '입고처리').length,
+    }
+    const rows = all.filter(p => (!from || (p.orderDate && p.orderDate >= from)) && (!to || (p.orderDate && p.orderDate <= to)))
+    res.json({ today, stages: PUR_STAGES, summary, rows })
+  } catch (e) { next(e) }
+})
+
+router.get('/purchase-orders/:pproNumb/lines', async (req, res, next) => {
+  try {
+    const mes = needMes(res); if (!mes) return
+    res.json(await mesRead.purchaseOrderLines(mes, String(req.params.pproNumb).slice(0, 12)))
   } catch (e) { next(e) }
 })
 

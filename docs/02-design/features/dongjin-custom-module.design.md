@@ -194,6 +194,15 @@ GRANT UPDATE ON winc_dj.COERP_COM_CLIENTELE TO 'winc_ac_mes'@'localhost';   -- D
   (모듈 상태를 읽기 전에는 로딩 — 옛 화면의 '신규 생성'이 번쩍이지 않게)
 - API `GET /api/dongjin-mes/orders` · `/orders/:po/lines`, 권한 자원은 `contract_sales` 그대로
 
+### 발주 (2026-09-29 사용자 A안)
+- **계약관리 › 발주** 자리도 동진에서는 MES 구매발주(보기 전용, 등록 없음). `App.jsx contract_purchase`
+- 운영 실측: 헤더 `COERP_PRO_PPRO`(6) · 품목 `COERP_PRO_PPROITEM`(8) · 입고 `COERP_MAT_WAREHOUSING`(8, pros_numb 로 연결)
+- 단계 = MES 진행상태 `ppro_stat` 그대로(발주등록 → 승인요청 → 발주완료 → 입고처리 → 입고완료) — 다시 판정하지 않는다.
+  입고 진척은 품목 누적 `rece_qtys` / 발주수량. 납품일(`pdel_date`) 지났는데 입고완료가 아니면 빨강
+- API `GET /api/dongjin-mes/purchase-orders`(기간=발주일, summary 는 기간 무관 전체) · `/purchase-orders/:no/lines`(품목+입고)
+- 권한: 발주 목록은 `contract_purchase`(apiPerms RESOURCE_OVERRIDES), 수주는 `contract_sales`
+- 수주도 같은 날: 기간 필터(수주일 = 현대 cont_date → 한화 appr_date → user_date) + 카드는 기간 무관 전체
+
 ### 거래처 — MES 표(COERP_COM_CLIENTELE)가 원본
 - 회계 vendors 에는 MES 코드 하나당 **짝 행**(1:1, `external_links` source=mes_dj). 회계 표 11곳이
   vendors.id 를 FK 로 가리키기 때문에 행 자체는 필요하다. 내용은 MES 값으로 덮인다.
