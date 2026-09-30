@@ -177,8 +177,8 @@ const HELP_MAP = {
   ledger: {
     title: "거래내역",
     items: [
-      "세금계산서 없이 오간 돈은 오른쪽 위 입금·출금·대체로 적어요",
-      "칩으로 입금·출금·대체·주문 없는 돈을 골라 볼 수 있어요",
+      "세금계산서 없이 오간 돈은 오른쪽 위 [거래 등록]으로 적어요",
+      "탭으로 입금·출금·계약 미연결을 골라 볼 수 있어요",
       "행을 누르면 상세가 열려요. 대체전표는 전표가 열려요",
       "증빙 ⚠️ 표시는 세금계산서·영수증이 안 붙은 거래예요",
     ]
@@ -641,7 +641,6 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys, customKeys }) {
       initialRange={carryRange} canVoucherBook={canDo("voucher_book", "view")}
       initialFilter={filter} refreshTrigger={txnVersion} focusTxnId={focusTxnId}
       openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openExcel={() => go("excel_modal")}
-      openInvoice={(kind, invoiceId) => go(kind === "income" ? "ar" : "ap", { invoiceId })}
       openIncome={() => setTxnForm({ kind: "income" })}
       openExpense={() => setTxnForm({ kind: "expense" })}
       canJournal={canDo("voucher_entry", "create")}
@@ -759,7 +758,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys, customKeys }) {
       case "voucher_entry":  return renderLedger("all", { openJournalOnMount: true });
       case "finance_lending": return <LendingScreen/>;
       case "finance_note":    return <NotesScreen/>;
-      // 옛 '경비 처리'·'잡손익' — 거래내역의 '주문 없는 돈' 필터로 흡수(3단계)
+      // 옛 '경비 처리'·'잡손익' — 거래내역의 '계약 미연결' 필터로 흡수(3단계)
       case "misc_pl":
       case "misc_income":     return renderLedger("misc");
       // 반복거래 — 입금·출금 한 화면. 옛 '정기 출금' 주소로 들어오면 출금으로 걸러 연다.

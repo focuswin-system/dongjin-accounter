@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, StatusBadge, periodToRange, FilterSelect, Drawer, localToday, fmtDateShort } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
-import { Kpi, KpiRow } from '../lib/components/Kpi'
+import { SummaryCard, SummaryRow } from '../lib/components/Kpi'
 import { DataTable } from '../lib/components/DataTable'
 import { TableToolbar } from '../lib/components/TableToolbar'
 import { VoucherView } from '../lib/components/VoucherView'
@@ -16,12 +16,13 @@ import { JournalEntryDrawer, journalVoucherOf } from './VoucherEntry'
 import { SourceChooser } from '../lib/components/SourceChooser'
 import { isMiscPl } from '../lib/txnScope'
 import { usePerms } from '../lib/perms'
+import { useOrdersFromMes } from '../lib/customModules'
 
 // CSV 저장은 보고서 내보내기와 같은 것을 쓴다 → lib/export.js
 
 /* 거래내역 — **조회 화면**. openIncome/openExpense 를 더 받지 않는다(등록 입구는 여기 없다).
    화면에서 뺀 것은 배선까지 은퇴시킨다 — 남겨 두면 다음 사람이 "쓰는 줄 알고" 다시 버튼을 단다. */
-export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openInvoice, refreshTrigger,
+export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, refreshTrigger,
   /* 3단계(2026-09) — 서류 없이 오간 돈의 **유일한 입구**가 됐다(세금계산서가 있으면 세금계산서 화면).
      입금·출금 폼은 App 이 소유하는 거래 서랍이고, 대체는 이 화면이 연다.
      canJournal — 전표 권한(voucher_entry)이 있을 때만 '전표입력'. openJournalOnMount — 옛 '전표 입력' 주소로 들어온 경우 */
@@ -47,16 +48,11 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
   /* 아직 못 읽었나 — 빈 배열만 보면 "거래내역이 없어요"가 열자마자 번쩍인다.
      '없음'과 '아직 안 옴'은 다른 말이다. 파생 계산은 그대로 두고 플래그만 따로 든다. */
   const [loading, setLoading] = useState(true);
-  // 미수금/미지급금은 청구서 기준(회수는 입금·환불/지급·환입 화면에서). 여기선 요약만 청구서 기준으로 표시.
-  const [recSummary, setRecSummary] = useState(null);
-  const [paySummary, setPaySummary] = useState(null);
-  /* '예정 포함' — 고객 요청: "전체 거래내역에서 미납금과 미지급금은 왜 안 보이냐.
-     한 번에 나갈 돈·들어올 돈·거래내역을 볼 수 있어야 되는 거 아니냐."
-     맞는 요구다. 다만 **같은 합계에 섞으면 안 된다** — 이 화면의 입금·지출 합계는 실제로
-     오간 돈이고 계좌 잔액·손익과 맞아야 한다. 아직 안 받은 돈을 더하면 그 달 매출이 부풀고
-     잔액이 안 맞는다. 그래서 행은 함께 보여주되 **합계는 실제분만** 세고, 예정은 따로 적는다. */
-  const [showPlanned, setShowPlanned] = useState(false);
-  const [openInvoices, setOpenInvoices] = useState([]);   // 아직 안 받은/안 낸 청구서
+  /* 거래내역은 **실제로 오간 돈만** 싣는다(2026-09-30 사용자 결정).
+     예전엔 '예정 포함'(미수·미지급 세금계산서를 행으로 섞기)과 미수금·미지급금 카드가 있었다 —
+     화면이 여럿으로 흩어져 있던 시절 "한 번에 들어올·나갈 돈을 보자"는 고객 요청이었다.
+     지금은 미수·미지급은 세금계산서 화면이, 들어올·나갈 돈의 흐름은 자금일보가 맡는다.
+     여기 섞으면 이 화면의 합계(통장 잔액과 맞아야 하는 숫자)와 표가 어긋나 보인다. */
   /* 대체전표 — 돈이 안 움직이는 분개. 예전엔 '전표 입력' 화면에만 있어서 거래내역만 보면 빠졌다.
      같은 표에 '대체'로 세운다. 합계(입금·지출)에는 안 든다 — 통장이 안 움직였으니까. */
   const [journals, setJournals] = useState([]);
@@ -66,20 +62,18 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
   const [jView, setJView] = useState(null);   // { voucher, jvId, docNo }
   useEffect(() => { if (openJournalOnMount && canJournal) setJOpen(true); }, [openJournalOnMount, canJournal]);
 
-  useEffect(() => { setFilter(initialFilter); }, [initialFilter]);
+  /* 수주·발주를 MES 에서 보는 회사(동진) — 회계 쪽 계약 연결을 안 쓴다. 계약 칸·필터·미연결 탭·연결 도구를
+     세우면 전부 빈 칸이거나 '전체'와 같은 목록이 된다(거래 등록 폼이 계약 칸을 숨기는 것과 같은 판단) */
+  const ordersFromMes = useOrdersFromMes();
+  // MES 회사는 '계약 미연결' 탭이 없다 — 옛 주소(misc_pl)로 들어와도 전체로 연다
+  useEffect(() => { setFilter(initialFilter === 'misc' && ordersFromMes ? 'all' : initialFilter); }, [initialFilter, ordersFromMes]);
 
   /* 볼 권한이 있는 것만 부른다 — 조회의 403 은 화면 전체에 '권한이 없어요'를 띄운다(api.js notifyInfra).
      거래내역만 받은 역할이 이 화면을 열 때마다 오류를 보게 된다(대체전표·미수·미지급 요약). */
   const { can } = usePerms();
   const canJournalView = can("voucher_entry", "view") || can("voucher_book", "view");
-  const canRec = can("billing_issued", "view") || can("ar", "view");
-  const canPay = can("billing_received", "view") || can("ap", "view");
   const reload = () => {
     api.getTransactions().then(setTxns).finally(() => setLoading(false));
-    if (canRec) api.getReceivablesSummary().then(setRecSummary);
-    if (canPay) api.getPayablesSummary().then(setPaySummary);
-    // 서버가 볼 수 있는 방향만 준다(sidePerms) — 둘 다 없으면 부르지 않는다
-    if (canRec || canPay) api.getInvoices().then(list => setOpenInvoices((list || []).filter(inv => Number(inv.remainAmount) > 0)));
     if (can("contract_sales", "view") || can("contract_purchase", "view") || can("contract", "view"))
       api.getContracts().then(list => setAllContracts(list || []));
     if (canJournalView) api.getJournalVouchers().then(list => setJournals(list || []));
@@ -97,14 +91,14 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
      기본 기간은 이번 달(프리셋 버튼이 값을 바꿔준다). */
   const tf = useTableFilter({
     date: { field: 'date', initial: initialRange || periodToRange("month") },
-    search: { fields: ['vendor', 'scope', 'category', 'contract'], placeholder: "거래처·주문·비목 검색" },
+    search: { fields: ['vendor', 'scope', 'category', 'contract'], placeholder: ordersFromMes ? "거래처·적요·비목 검색" : "거래처·계약·비목 검색" },
     filters: [
       { key: 'cat', label: "비목", field: 'category', options: categories },
       /* 주문으로 거르기 — 잘못 붙은 거래를 찾으려면 "이 주문에 붙은 것 전부"를
          한 번에 봐야 한다. 예전엔 검색어로 더듬는 수밖에 없었다.
          두 축(근거·원가 귀속)을 모두 본다 — 이 필터의 뜻이 그것이지, 어느 컬럼이냐가 아니다. */
-      { key: 'contract', label: "주문", options: contracts,
-        match: (t, v) => t.contract === v || t.cost_contract_name === v },
+      ...(ordersFromMes ? [] : [{ key: 'contract', label: "계약", options: contracts,
+        match: (t, v) => t.contract === v || t.cost_contract_name === v }]),
     ],
   });
   const { range, setRange, q, setQ } = tf;
@@ -121,29 +115,6 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
   })), [journals]);
   const scoped = useMemo(() => tf.apply([...txns, ...journalRows]), [txns, journalRows, tf.apply]);
 
-  /* 미정산 청구서를 거래 모양으로 바꾼다. 실제 거래와 **같은 필터**를 타야 한다 —
-     기간을 좁혀놓고 예정만 전 기간이 뜨면 화면이 두 기간을 동시에 말하게 된다.
-     날짜는 지급 기한(없으면 발행일)이다. "언제 들어올·나갈 돈인가"가 이 화면의 축이므로. */
-  const plannedRows = useMemo(() => {
-    if (!showPlanned) return [];
-    let rows = openInvoices.map(inv => ({
-      id: `planned-${inv.id}`,
-      planned: true,
-      invoiceId: inv.id,
-      kind: inv.kind === 'issued' ? 'income' : 'expense',
-      sign: inv.kind === 'issued' ? +1 : -1,
-      date: inv.dueAt || inv.issuedAt,
-      vendor: inv.vendor || '(거래처 미지정)',
-      contract: inv.contract || '',
-      scope: inv.memo || inv.invoiceNo,
-      category: inv.kind === 'issued' ? '미수금' : '미지급금',
-      amount: Number(inv.remainAmount) || 0,
-      status: inv.status,
-    }));
-    /* 실제 거래와 **같은 규칙**으로 거른다. 예전엔 여기에 술어를 다시 적었고,
-       그러다 주문 필터가 빠져서 주문으로 좁혀도 예정분은 전 주문이 떠 있었다. */
-    return tf.apply(rows);
-  }, [showPlanned, openInvoices, tf.apply]);
 
   /* 짚어 열기 — 청구서·주문에서 "이 거래를 거래내역에서 열어줘"로 넘어온 경우.
      ⚠ **필터를 안 거친 원본(txns)에서 찾는다.** 기본 기간이 이번 달이라, 지난달 거래를
@@ -155,26 +126,18 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
     if (hit) setSel(hit)
   }, [focusTxnId, txns]);
 
-  // 표에 실제로 그려지는 행 = 범위 + 탭 (+ 켰으면 예정분)
+  // 표에 실제로 그려지는 행 = 범위 + 탭
   const filtered = useMemo(() => {
     const byTab = (rows) =>
       filter === "income"  ? rows.filter(t => t.kind === "income")
       : filter === "expense" ? rows.filter(t => t.kind === "expense")
-      /* 주문 없는 돈 = 옛 '경비 처리·잡손익' 화면(3단계에서 이 필터로 흡수). 규칙은 lib/txnScope.js 하나 */
-      : filter === "misc"    ? rows.filter(t => !t.journal && !t.planned && isMiscPl(t))
+      /* 계약 미연결 = 옛 '경비 처리·잡손익' 화면(3단계에서 이 필터로 흡수). 규칙은 lib/txnScope.js 하나 */
+      : filter === "misc"    ? rows.filter(t => !t.journal && isMiscPl(t))
       : rows;
-    const real = byTab(scoped);
-    if (!showPlanned) return real;
-    // 날짜 순으로 섞어 놓는다 — 예정만 아래로 몰면 "언제 무엇이" 흐름이 끊긴다
-    return [...real, ...byTab(plannedRows)].sort((a, b) => String(b.date).localeCompare(String(a.date)));
-  }, [scoped, filter, showPlanned, plannedRows]);
+    return byTab(scoped);
+  }, [scoped, filter]);
 
-  // 예정분 합계는 실제 합계와 **따로** 적는다(섞으면 잔액·손익이 틀어진다)
-  const plannedIn  = plannedRows.filter(t => t.kind === 'income').reduce((a, t) => a + t.amount, 0);
-  const plannedOut = plannedRows.filter(t => t.kind === 'expense').reduce((a, t) => a + t.amount, 0);
-
-  /* 내보내기는 화면에 보이는 그대로 담는다. 다만 '예정'은 실제 입출금과 반드시 갈라져야 한다 —
-     한 열로 구분해 두지 않으면 받은 파일에서 합계를 내는 순간 통장과 안 맞는다. */
+  /* 내보내기는 화면에 보이는 그대로 담는다(실제로 오간 돈 + 대체전표) */
   const exportXlsx = async () => {
     if (filtered.length === 0) return toast.push("내보낼 거래가 없어요");
     const r = await downloadXlsx(`거래내역_${localToday()}.xlsx`, {
@@ -182,19 +145,17 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
       sub: `${range.from} ~ ${range.to}` + (filter === "income" ? " · 입금" : filter === "expense" ? " · 지출" : ""),
       columns: [
         { header: "날짜", width: 12 },
-        { header: "실제/예정", width: 10, align: "center" },
         { header: "구분", width: 8, align: "center" },
         { header: "거래처", width: 22 },
-        { header: "주문", width: 20 },
-        { header: "원가 귀속", width: 20 },
+        ...(ordersFromMes ? [] : [{ header: "계약", width: 20 }, { header: "원가 귀속", width: 20 }]),
         { header: "적요", width: 24 },
         { header: "비목", width: 14 },
         { header: "금액", width: 15, money: true },
         { header: "상태", width: 12, align: "center" },
       ],
-      rows: filtered.map(t => [t.date, t.planned ? "예정" : "실제",
+      rows: filtered.map(t => [t.date,
         t.journal ? "대체" : t.kind === "income" ? "입금" : "지출",
-        t.vendor, t.contract || "", t.cost_contract_name || "", t.scope, t.category,
+        t.vendor, ...(ordersFromMes ? [] : [t.contract || "", t.cost_contract_name || ""]), t.scope, t.category,
         t.journal ? t.amount : t.sign * t.amount, t.status]),
     });
     if (!r.ok) toast.push(r.error || "엑셀을 만들지 못했어요", { tone: "warn" });
@@ -218,13 +179,13 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
         그 외             → 근거 주문(contract)
      지출·입금이 섞여 있으면 축이 갈리므로 나눠 보낸다. */
   const doBulkLink = async (unlink) => {
-    const rows = filtered.filter(t => checkedIds.includes(t.id) && !t.planned);
+    const rows = filtered.filter(t => checkedIds.includes(t.id));
     if (!rows.length) return;
     /* ⚠ **id 로 찾는다.** 예전엔 이름으로 찾았는데 주문 이름은 유일하지 않다 —
        실제 회사에 거래처만 다른 '홈페이지 유지보수' 가 여덟 개 있었고, 그때 find 는
        목록의 첫 번째를 집었다. 여기는 **한 번에 수십 건**을 붙이는 자리라 피해가 크다. */
     const target = unlink ? null : allContracts.find(c => c.id === bulkContract);
-    if (!unlink && !target) return toast.push('주문을 골라주세요', { tone: 'warn' });
+    if (!unlink && !target) return toast.push('계약을 골라주세요', { tone: 'warn' });
 
     /* ⚠ **주문에 적힌 방향이 먼저다.** 예전엔 `gubu A·E || is_purchase` 라 거래처가 이겼다 —
        수주로 만든 주문인데 거래처가 매입처면 축을 contract_id 로 보내는데, 서버는 그 주문을
@@ -251,14 +212,14 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
       if (!res.ok) return toast.push(res.error || '연결에 실패했어요', { tone: 'warn' });
       done += res.count;
     }
-    if (!done) return toast.push('연결된 주문이 없는 거래예요');
-    toast.push(unlink ? `${done}건의 주문 연결을 뗐어요` : `${done}건을 ${target?.name || '주문'}에 연결했어요`);
+    if (!done) return toast.push('연결된 계약이 없는 거래예요');
+    toast.push(unlink ? `${done}건의 계약 연결을 뗐어요` : `${done}건을 ${target?.name || '계약'}에 연결했어요`);
     setCheckedIds([]); setBulkContract(null); reload();
   };
 
   // 선택한 거래를 한꺼번에 삭제. 각 건은 deleteTransaction 이 청구서 매칭·복합전표 splits 까지 정리한다.
   const doBulkDelete = async () => {
-    const rows = filtered.filter(t => checkedIds.includes(t.id) && !t.planned);
+    const rows = filtered.filter(t => checkedIds.includes(t.id));
     if (!rows.length) return;
     const total = rows.reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const ok = await confirm({
@@ -302,10 +263,11 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
 
   const inSum  = scoped.filter(t => t.kind === "income"  && t.status === "입금완료").reduce((a, t) => a + t.amount, 0);
   const outSum = scoped.filter(t => t.kind === "expense" && t.status === "지급완료").reduce((a, t) => a + t.amount, 0);
+  const inCount  = scoped.filter(t => t.kind === "income"  && t.status === "입금완료").length;
+  const outCount = scoped.filter(t => t.kind === "expense" && t.status === "지급완료").length;
 
-  /* 탭 숫자는 **그 탭을 눌렀을 때 표에 뜨는 줄 수**여야 한다.
-     '예정 포함'을 켜 놓고 탭이 15인데 표가 18줄이면, 어느 쪽이 틀렸나부터 의심하게 된다. */
-  const tabCount = (pred) => scoped.filter(pred).length + (showPlanned ? plannedRows.filter(pred).length : 0);
+  /* 탭 숫자는 **그 탭을 눌렀을 때 표에 뜨는 줄 수**여야 한다 — 다르면 어느 쪽이 틀렸나부터 의심하게 된다. */
+  const tabCount = (pred) => scoped.filter(pred).length;
   const tabs = [
     { id: "all",     label: "전체",       count: tabCount(() => true) },
     { id: "income",  label: "입금",       count: tabCount(t => t.kind === "income") },
@@ -316,7 +278,8 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
        ② 운영 전 테넌트에서 대체전표가 **0건**이었다. 늘 빈 탭이 맨 앞줄을 차지했다.
        잃는 것은 없다 — 대체 행은 전체 탭에 그대로 서고, 누르면 openJournal 이 전표를 열고
        거기서 지운다(행 클릭에 붙어 있지 탭에 붙어 있지 않다). 등록은 '거래 등록 › 전표입력'. */
-    { id: "misc",    label: "주문 없는 돈", count: tabCount(t => !t.journal && !t.planned && isMiscPl(t)) },
+    /* 계약 미연결 — 수주·발주 어디에도 연결 안 된 손익 거래(lib/txnScope isMiscPl). MES 회사는 계약 연결을 안 써서 뺀다 */
+    ...(ordersFromMes ? [] : [{ id: "misc", label: "계약 미연결", count: tabCount(t => !t.journal && isMiscPl(t)) }]),
   ];
 
   /* 이 화면은 **서류 없이 오간 돈의 입구이자 전부를 보는 곳**이다(3단계, 2026-09).
@@ -374,12 +337,12 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
     goRoute?.(kind === 'income' ? 'billing_issued' : 'billing_received');
   };
 
-  const titleMap = { all: "거래내역", income: "거래내역 · 입금", expense: "거래내역 · 출금", misc: "거래내역 · 주문 없는 돈" };
+  const titleMap = { all: "거래내역", income: "거래내역 · 입금", expense: "거래내역 · 출금", misc: "거래내역 · 계약 미연결" };
   const subMap = {
     all:     "통장에서 오간 돈과 대체전표를 봅니다. 세금계산서가 있는 건은 세금계산서에서 적어요.",
     income:  "들어온 돈을 모아 봅니다.",
     expense: "나간 돈을 모아 봅니다.",
-    misc:    "어느 주문에도 붙지 않은 운영비·잡수익이에요(급여·세금계산서 정산은 빼고).",
+    misc:    "수주·발주에 연결되지 않은 운영비·잡수익 (급여·세금계산서 정산 제외)",
   };
 
   return (
@@ -413,57 +376,35 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
           </>}
         />
 
-        {/* 미수금/미지급금은 청구서 기준(요약만 표시). 카드 클릭 시 회수 화면으로 이동. */}
-        {/* KpiRow 를 쓴다 — 손수 gridTemplateColumns 를 주면 좁은 화면에서 접히는
-            규칙(index.css .kpi-row[data-cols])을 덮어써서 금액이 잘린다 */}
-        <KpiRow cols={4} style={{ marginBottom: 20 }}>
-          {/* 앞 둘은 **필터**다(누르면 그 종류만 남는다) — active 가 고른 상태를 낸다.
-              뒤 둘은 다른 화면으로 가는 길이라 뱃지로 어디로 가는지 적는다. */}
-          <Kpi label="입금 합계" value={inSum} tone="pos" active={filter === "income"} onClick={() => setFilter("income")}/>
-          <Kpi label="출금 합계" value={outSum} tone="neg" active={filter === "expense"} onClick={() => setFilter("expense")}/>
-          <Kpi label="미수금"   value={recSummary?.total ?? 0} badge="미수금 화면으로"   badgeTone="brand" onClick={() => { window.location.hash = "ar"; }}/>
-          <Kpi label="미지급금" value={paySummary?.total ?? 0} badge="미지급금 화면으로" badgeTone="warn"  onClick={() => { window.location.hash = "ap"; }}/>
-        </KpiRow>
+        {/* 세금계산서 화면과 **같은 틀**(2026-09-30 사용자: "업무는 달라도 헤더·필터는 비슷해야"):
+              요약 카드(SummaryCard) → 필터 줄(바탕 위) → 보기 탭(이어 붙은 탭) → 표만 카드.
+            필터가 탭보다 위인 이유는 세금계산서 쪽 주석과 같다 — 기간은 어느 탭에나 걸린다.
+            카드는 **필터**다(누르면 그 종류만 남는다) — active 가 고른 상태를 낸다 */}
+        <SummaryRow cols={2}>
+          <SummaryCard label="입금 합계" amount={inSum} count={inCount} accent="pos"
+            active={filter === "income"} onClick={() => setFilter("income")} hint="입금만 보기"/>
+          <SummaryCard label="출금 합계" amount={outSum} count={outCount} accent="neg"
+            active={filter === "expense"} onClick={() => setFilter("expense")} hint="출금만 보기"/>
+        </SummaryRow>
 
-        <div className="card" style={{ overflow: "hidden" }}>
-          {/* 탭(전체 거래/입금/지출) — 상단 KPI 카드 클릭과 연동. 툴바와 별개로 유지. */}
-          <div className="row gap-6" style={{ padding: 12, borderBottom: "1px solid var(--line)", flexWrap: "wrap" }}>
+        <TableToolbar {...tf.toolbarProps}/>
+
+        <div className="row gap-8" style={{ marginTop: 12, marginBottom: 16, flexWrap: "wrap" }}>
+          <div className="seg" role="tablist" aria-label="보기">
             {tabs.map(t => (
-              <button key={t.id} className={`chip ${filter === t.id ? "active" : ""}`} onClick={() => setFilter(t.id)}>
-                {t.label} <span style={{ marginLeft: 4, opacity: 0.7 }}>{t.count}</span>
+              <button key={t.id} role="tab" aria-selected={filter === t.id}
+                className={`seg-btn ${filter === t.id ? "active" : ""}`} onClick={() => setFilter(t.id)}>
+                {t.label}<span className="seg-count">{t.count}</span>
               </button>
             ))}
           </div>
+        </div>
 
-          <TableToolbar
-            {...tf.toolbarProps}
-            right={
-              /* 아직 안 오간 돈을 이 표에 함께 띄운다. 켜져 있다는 걸 숫자로도 말해준다 —
-                 "왜 합계랑 표가 안 맞지"가 생기지 않도록. */
-              <label className="row gap-6 text-sm" style={{ cursor: 'pointer', alignItems: 'center' }}
-                title="미수금·미지급금을 함께 봅니다. 합계에는 더해지지 않아요.">
-                <input type="checkbox" checked={showPlanned} onChange={e => setShowPlanned(e.target.checked)}/>
-                예정 포함
-                {showPlanned && (
-                  <span className="text-xs text-muted2">
-                    (들어올 {fmtNum(plannedIn)} · 나갈 {fmtNum(plannedOut)})
-                  </span>
-                )}
-              </label>
-            }
-          />
-
-          {showPlanned && (
-            <div className="text-xs text-muted2" style={{ padding: '8px 16px', borderBottom: '1px solid var(--line)' }}>
-              점선 행은 <b>아직 오가지 않은 돈</b>(미수금·미지급금)이에요. 위 <b>입금·지출 합계에는 들어가지 않습니다</b> —
-              그 합계는 실제로 통장을 오간 금액이라 계좌 잔액과 맞아야 하거든요. 행을 누르면 해당 청구서로 갑니다.
-            </div>
-          )}
-
+        <div className="card" style={{ overflow: "hidden" }}>
           {/* 선택 바 — 엑셀로 올린 거래를 주문에 한꺼번에 붙이는 자리.
               한 건씩 열어 고르던 것이 "굉장히 번거롭다"는 지적에서 나왔다. */}
           {checkedIds.length > 0 && (
-            <div className="card card-pad" style={{ margin: '0 16px 12px', position: 'sticky', top: 0, zIndex: 3 }}>
+            <div className="card card-pad" style={{ margin: '12px 16px', position: 'sticky', top: 0, zIndex: 3 }}>
               <div className="row gap-8" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
                 <span className="fw-700 text-sm">{checkedIds.length}건 선택</span>
                 <button className="btn ghost sm" onClick={() => setCheckedIds([])}>선택 해제</button>
@@ -471,47 +412,43 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
                 <button className="btn ghost sm" style={{ color: 'var(--neg-ink)' }} onClick={doBulkDelete}>
                   <Icon.Trash size={13}/> 삭제
                 </button>
+                {!ordersFromMes && (
                 <div className="row gap-6 ml-auto" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
-                  <span className="text-xs text-muted2">주문</span>
+                  <span className="text-xs text-muted2">계약</span>
                   <FilterSelect value={bulkContract} onChange={setBulkContract}
                     /* 이름이 겹치는 주문은 거래처를 붙여 갈리게 한다(값은 id). */
                     options={allContracts.map(c => ({
                       value: c.id,
                       label: c.vendor_name ? `${c.vendor_name} · ${c.name}` : c.name,
-                    }))} placeholder="주문 선택"/>
+                    }))} placeholder="계약 선택"/>
                   <button className="btn primary" onClick={() => doBulkLink(false)} disabled={!bulkContract}>
                     <Icon.Link size={14}/> 연결
                   </button>
                   <button className="btn" onClick={() => doBulkLink(true)}>연결 떼기</button>
                 </div>
+                )}
               </div>
               {/* 지출을 매출 주문에 붙이는 건 '원가 귀속'이다 — 근거 주문과 다른 축이라
                   무엇으로 붙는지 미리 말해줘야 한다. 조용히 틀리면 원가율만 이상해진다. */}
-              <div className="text-xs text-muted2" style={{ marginTop: 8 }}>
-                금액은 바뀌지 않아요. 지출을 <b>매출 주문</b>에 붙이면 그 주문의 <b>원가</b>로,
-                <b>발주</b>에 붙이면 <b>지급 근거</b>로 잡힙니다.
-              </div>
+              {!ordersFromMes && (
+                <div className="text-xs text-muted2" style={{ marginTop: 8 }}>
+                  금액은 바뀌지 않습니다. 지출을 <b>수주</b>에 연결하면 그 수주의 <b>원가</b>로,
+                  <b>발주</b>에 연결하면 <b>지급 근거</b>로 잡힙니다.
+                </div>
+              )}
             </div>
           )}
 
           <DataTable
             rows={filtered}
             loading={loading}
-            /* 예정 행은 거래가 아니라 청구서다 — 거래 상세를 열면 없는 거래를 보여주게 된다.
-               그 청구서 화면으로 보낸다(미수금=#ar / 미지급금=#ap, 해당 건이 열린 채로). */
-            onRowClick={t => {
-              if (t.journal) return openJournal(t)
-              if (!t.planned) return setSel(t)
-              openInvoice?.(t.kind, t.invoiceId)
-            }}
+            onRowClick={t => (t.journal ? openJournal(t) : setSel(t))}
             select={{
               ids: checkedIds, onChange: setCheckedIds,
-              // 예정 행은 청구서라 주문에 붙일 거래가 아니다
-              isSelectable: t => !t.planned && !t.journal,
-              disabledHint: t => t.journal ? '대체전표는 주문에 붙이지 않아요' : '아직 오가지 않은 돈이라 주문에 붙일 수 없어요',
+              isSelectable: t => !t.journal,
+              disabledHint: () => '대체전표는 계약에 연결하지 않아요',
             }}
             rowKey={t => t.id}
-            rowClass={t => t.planned ? 'row-planned' : ''}
             /* 열을 고를 수 있다 — 이 표는 하루에도 여러 번 보는 자리라 사람마다 보는 열이 다르다
                ('열' 버튼에서 접기·순서·너비, 이 브라우저에만 기억) */
             tableKey="ledger"
@@ -521,27 +458,22 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
                 render: t => <span className="num-cell text-muted text-sm">{fmtDateShort(t.date)}</span> },
               { key: 'vendor', header: '거래처', sortable: true,
                 render: t => (
-                  <span className="fw-700">
-                    {t.vendor}
-                    {/* 실제로 오간 돈과 섞여 보이면 안 된다 — 행마다 '예정'이라고 적는다 */}
-                    {t.planned && <span className="badge outline" style={{ marginLeft: 6, fontSize: 10 }}>예정</span>}
-                  </span>
+                  <span className="fw-700">{t.vendor}</span>
                 ) },
               /* 주문 — 적요와 **한 칸에 뭉치지 않는다.**
                  예전엔 `주문명 || 적요 || 전표번호` 를 '내용' 한 칸에 넣어서,
                  주문에 붙은 거래인지 아닌지를 화면에서 알 수 없었다.
                  원가 귀속(cost_contract_name)은 근거 주문과 다른 축이라 표식을 달아 가른다. */
-              { key: 'contract', header: '주문', sortable: true,
+              ...(ordersFromMes ? [] : [{ key: 'contract', header: '계약', sortable: true,
                 render: t => {
-                  if (t.planned) return <span className="text-muted2 text-sm">—</span>
                   if (t.contract) return <span className="badge outline text-sm">{t.contract}</span>
                   if (t.cost_contract_name) return (
-                    <span className="badge outline text-sm" title="이 지출이 원가로 붙은 매출 주문">
+                    <span className="badge outline text-sm" title="이 지출이 원가로 귀속된 수주">
                       {t.cost_contract_name} <span className="text-muted2" style={{ fontSize: 10 }}>원가</span>
                     </span>
                   )
                   return <span className="text-muted2 text-sm">—</span>
-                } },
+                } }]),
               { key: 'scope', header: '적요',
                 render: t => <span className="text-muted text-sm">{t.scope}</span> },
               { key: 'category', header: '비목',
@@ -579,7 +511,7 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
                    없음을 빨간 경고로 칠했더니 목록 전체가 빨강이 됐다 — 그건 경고가 아니라 벽지다.
                    정상에는 표식을 달지 않는다(디자인 규약). 붙은 것만 조용히 표시하고,
                    없는 것은 비워 둔다. '증빙 없는 지출'을 찾는 일은 세무 보고서가 맡는다. */
-                render: t => (t.planned || t.journal) ? <span className="text-muted2">—</span>
+                render: t => t.journal ? <span className="text-muted2">—</span>
                   : t.evid
                   ? <span className="badge pos" style={{ padding: "2px 8px" }}><Icon.Check size={11}/></span>
                   : <span className="text-muted2" title="증빙이 아직 안 붙었어요">—</span> },
@@ -587,8 +519,6 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, openI
               { key: 'actions', header: '', label: '처리 버튼', width: 130,
                 render: t => t.journal
                   ? <span className="text-xs text-muted2">{t.docNo}</span>
-                  : t.planned
-                  ? <span className="text-xs text-muted2">청구서에서 처리</span>
                   : <TxnActions txn={t} toast={toast} confirm={confirm} onAction={reload}/> },
             ]}
           />
@@ -780,8 +710,8 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
                   ? <span>{t.category} 외 <span className="badge outline" style={{ marginLeft: 4 }}>여러 비목 · 전표 참고</span></span>
                   : t.category}/>
                 {t.method && <DetailRow label="결제수단" value={t.method}/>}
-                {t.contract && <DetailRow label="주문" value={t.contract}/>}
-                {t.cost_contract_name && <DetailRow label="원가 주문" value={t.cost_contract_name}/>}
+                {t.contract && <DetailRow label="계약" value={t.contract}/>}
+                {t.cost_contract_name && <DetailRow label="원가 귀속" value={t.cost_contract_name}/>}
               </section>
 
               <section>

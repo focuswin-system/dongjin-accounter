@@ -1967,12 +1967,12 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
        기준 날짜는 **사용자가 고른다**(dateAxis) — 아래 AXES 주석 참조. */
     date: { field: AXIS_FIELD[dateAxis], initial: periodToRange("month") },
     search: { fields: ['invoiceNo', 'vendor', 'contract', 'memo'], placeholder: "청구번호·거래처·주문·메모 검색" },
-    // 거래처는 매일 쓰는 축이라 ⚙ 뒤가 아니라 바에 직접 세운다(inline)
-    filters: [{ key: 'vendor', label: "거래처", field: 'vendor', inline: true,
-      options: [...new Set(kindRows.map(i => i.vendor).filter(Boolean))].sort() }],
   })
-  const vendorFilter = listF.values.vendor ?? null
-  const setVendorFilter = (v) => listF.setValue('vendor', v)
+  /* 거래처 드롭다운은 **필터 줄에서 뺐다** — 오른쪽 검색이 거래처도 찾는다(2026-09-30 사용자).
+     거래처로 딱 좁히는 일은 '거래처별 미수금' 칩이 한다(누르면 그 거래처만 — 같은 이름만, 검색처럼 부분 일치가 아니다).
+     걸린 동안은 칩 자리에 '거래처: ○○ ✕'가 선다(풀 곳이 있어야 한다) */
+  const [vendorFilter, setVendorFilter] = useState(null)
+  useEffect(() => { setVendorFilter(null) }, [kind])
   /* 요약 카드를 누르면 **기간까지 전체로 풀어준다.**
    *
    * 카드의 숫자는 서버가 전 기간으로 센 값인데(GET /invoices/summary/receivables),
@@ -1988,19 +1988,23 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
 
   /* ⚠ dateAxis 를 의존성에 넣어야 한다. useTableFilter 의 apply 는 설정을 ref 로 읽어서
      축이 바뀌어도 **함수 신원이 그대로**다 — 빼면 축을 바꿔도 목록이 안 바뀐다. */
-  const filtered = useMemo(() => listF.apply(byStatus), [byStatus, listF.apply, dateAxis])
+  const filtered = useMemo(() => listF.apply(byStatus).filter(i => !vendorFilter || i.vendor === vendorFilter),
+    [byStatus, listF.apply, dateAxis, vendorFilter])
 
   /* 미발행 건도 **같은 기간·거래처**로 거른다.
      툴바가 탭 위에 있어 '이 화면 전체의 범위'로 읽히는데, 한 탭만 그 범위를 무시하면
      "이번 달로 좁혔는데 저기만 왜 다 나오지"가 된다. 날짜 칸 이름만 다르다(date vs issuedAt). */
   const plainFiltered = useMemo(() => {
     const { from, to } = listF.range
-    const v = listF.values.vendor ?? null
+    const v = vendorFilter
+    // 검색도 같이 건다 — 필터 줄이 이 탭에도 서 있는데 검색만 안 먹으면 "쳤는데 왜 그대로지"가 된다
+    const lc = (listF.q || '').trim().toLowerCase()
     return plainTxns.filter(t =>
       (!from || (t.date || '') >= from) &&
       (!to   || (t.date || '') <= to) &&
-      (!v    || t.vendor === v))
-  }, [plainTxns, listF.range, listF.values.vendor])
+      (!v    || t.vendor === v) &&
+      (!lc   || [t.vendor, t.memo, t.category, t.scope].some(x => String(x || '').toLowerCase().includes(lc))))
+  }, [plainTxns, listF.range, vendorFilter, listF.q])
 
   /* 일괄 처리 대상 판정 — 이미 정산이 끝난 건은 **체크 자체가 안 된다.**
      골라놓고 나중에 "3건 중 1건만 됐어요"라고 말하는 것보다, 애초에 못 고르게 하고
@@ -2395,6 +2399,26 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
            제목만 '대금 청구서'로 남아 있으면 다른 화면에 온 것처럼 읽힌다
            (HR 화면을 '급여·임금'으로 맞춘 것과 같은 이유). */
         title={collect ? (isIssued ? "미수금" : "미지급금") : "세금계산서"}
+        /* 발행·수취 — 이 화면의 첫 갈림이다. 아래 보기 탭(발행내역·입금내역·어음·대사)과 섞지 않는다:
+           저건 한 장부를 여러 축으로 보는 것이고, 이건 **장부 자체**가 바뀐다. 그래서 제목 옆(PageHeader aside)에
+           선다 — 제목 아래 한 줄을 따로 쓰던 것을 올렸다(2026-09-30 사용자). 권한 있는 쪽만 선다.
+           부제의 안내는 옛 "받은 서류" 선택창이 하던 일이다 — 세금계산서가 없으면 여기가 아니다. */
+        aside={!collect && sideTabs && sideTabs.length > 1 && (
+          <div className="seg" role="tablist" aria-label="발행·수취">
+            {sideTabs.map(side => (
+              <button key={side} role="tab" aria-selected={initialTab === side}
+                className={`seg-btn ${initialTab === side ? "active" : ""}`}
+                onClick={() => initialTab !== side && goRoute?.(side === "issued" ? "billing_issued" : "billing_received")}>
+                {side === "issued" ? "발행 (매출)" : "수취 (매입)"}
+              </button>
+            ))}
+          </div>
+        )}
+        sub={!collect && sideTabs && canGo("ledger") && (
+          <button type="button" className="link-cell text-sm" onClick={() => goRoute?.("ledger")}>
+            세금계산서 없이 {isIssued ? "들어온" : "나간"} 돈은 거래내역에서 적어요 →
+          </button>
+        )}
         actions={collect
           ? <button className="btn" onClick={isIssued ? openRefund : openReturn}>
               <Icon.Plus size={14}/> {isIssued ? "환불 등록" : "환입 등록"}
@@ -2417,30 +2441,6 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
                   </button>}
             </>}
       />
-
-      {/* 발행·수취 — 이 화면의 첫 갈림이다. 그 아래 보기 탭(발행내역·입금내역·어음·대사)과 섞지 않는다:
-          저건 한 장부를 여러 축으로 보는 것이고, 이건 **장부 자체**가 바뀐다. 권한 있는 쪽만 선다.
-          옆의 한 줄은 옛 "받은 서류" 선택창이 하던 일이다 — 세금계산서가 없으면 여기가 아니다. */}
-      {!collect && sideTabs && (
-        <div className="row gap-12" style={{ marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
-          {sideTabs.length > 1 && (
-            <div className="seg" role="tablist" aria-label="발행·수취">
-              {sideTabs.map(side => (
-                <button key={side} role="tab" aria-selected={initialTab === side}
-                  className={`seg-btn ${initialTab === side ? "active" : ""}`}
-                  onClick={() => initialTab !== side && goRoute?.(side === "issued" ? "billing_issued" : "billing_received")}>
-                  {side === "issued" ? "발행 (매출)" : "수취 (매입)"}
-                </button>
-              ))}
-            </div>
-          )}
-          {canGo("ledger") && (
-            <button type="button" className="link-cell text-sm ml-auto" onClick={() => goRoute?.("ledger")}>
-              세금계산서 없이 {isIssued ? "들어온" : "나간"} 돈은 거래내역에서 적어요 →
-            </button>
-          )}
-        </div>
-      )}
 
       {/* 카드 대금으로 넘어가는 줄 — 지급 업무를 하러 온 김에 카드값도 챙기게 한다.
           목록에 섞지는 않는다: 청구서와 카드는 행도 컬럼도 상태 흐름도 다르다
@@ -2631,6 +2631,13 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
 
       {/* 거래처별 소계 — 필터를 걸면 "그래서 이 거래처에 얼마"가 다음 질문이다.
           한 거래처만 골랐으면 표 아래 합계와 같은 말이라 안 보여준다. */}
+      {(collect || view === "list" || view === "plain") && vendorFilter && (
+        <div className="row gap-8" style={{ marginBottom: 12, alignItems: "center" }}>
+          <span className="text-sm text-muted">거래처</span>
+          <span className="badge outline" style={{ fontSize: 12 }}>{vendorFilter}</span>
+          <button className="btn ghost sm" onClick={() => setVendorFilter(null)}><Icon.Close size={12}/> 해제</button>
+        </div>
+      )}
       {(collect || view === "list") && !vendorFilter && vendorSubtotals.length > 1 && (
         <SubtotalChips
           title={`거래처별 ${isIssued ? "미수금" : "미지급금"}`}

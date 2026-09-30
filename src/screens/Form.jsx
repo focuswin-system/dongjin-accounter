@@ -327,7 +327,6 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     setStaleFundCode(stale);
     if (stale) setShowMore(true);
     setForm({
-      vendor:    editTxn.vendor   || '',
       /* 주문이 비어 있으면 비운 채로 둔다. 예전엔 '공통'을 지어내 채웠는데(주문이 필수였으니까),
          주문 없이 만들어진 자동 생성 거래(청구서 정산·정기지출·급여)를 한 번만 열어도
          '공통'이 doc_no 에 박혔다. 없는 것은 없는 채로 보여준다. */

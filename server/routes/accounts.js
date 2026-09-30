@@ -102,10 +102,13 @@ async function cashDuplicateError(db, type, exceptId = null) {
 async function nameDuplicateError(db, name, exceptId = null) {
   const nm = String(name || '').trim()
   if (!nm) return null
-  const sql = 'SELECT id FROM accounts WHERE TRIM(name) = ?' + (exceptId ? ' AND id <> ?' : '')
+  const sql = 'SELECT id, kind FROM accounts WHERE TRIM(name) = ?' + (exceptId ? ' AND id <> ?' : '')
   const [rows] = await db.execute(sql, exceptId ? [nm, exceptId] : [nm])
   if (!rows.length) return null
-  return `"${nm}" 이름의 계좌가 이미 있어요. 이름이 같으면 거래를 등록할 때 어느 쪽인지 가릴 수 없어요.`
+  /* 카드도 이 표(accounts)에 있다 — 무조건 '계좌'라고 하면 카드 화면에서 "왜 계좌 얘기지?"가 된다(2026-09-30 사용자).
+     걸린 **상대**의 종류로 말한다(카드를 저장하는데 같은 이름의 통장이 있을 수도 있다) */
+  const what = rows[0].kind === 'card' ? '카드' : '계좌'
+  return `"${nm}" 이름의 ${what}가 이미 있어요. 이름이 같으면 거래를 등록할 때 어느 쪽인지 가릴 수 없어요.`
 }
 
 router.post('/', async (req, res, next) => {
@@ -115,11 +118,11 @@ router.post('/', async (req, res, next) => {
        막으면서 빈 이름만 500 이면, 화면 밖 경로(임포트·API)가 이유를 못 듣는다. */
     if (!String(name || '').trim()) return res.status(400).json({ error: '계좌·카드 이름을 입력해주세요' })
     const owner = req.body.owner === 'personal' ? 'personal' : 'corp'
-    // 카드만 의미가 있다. 1~28 밖은 미설정으로 본다(29~31 은 짧은 달에 없는 날짜다)
+    // 카드만 의미가 있다. 1~28 + 31(말일). 날짜를 만드는 쪽이 그 달 마지막 날로 자른다(lib/cashReport.js — 2월이면 28·29일)
     const cardType = cardTypeOf(req.body.card_type)
     // 체크카드는 결제일이 없다 — 값이 와도 버린다(남겨 두면 예측이 허수를 만든다)
     const cardPayDay = cardType === 'check' ? 0
-      : Math.min(28, Math.max(0, parseInt(req.body.card_pay_day, 10) || 0))
+      : Math.min(31, Math.max(0, parseInt(req.body.card_pay_day, 10) || 0))
     const cardPayAcct = cardType === 'check' ? null : (req.body.card_pay_account_id || null)
     { const ce = await cashDuplicateError(req.db, type); if (ce) return res.status(409).json({ error: ce }) }
     { const ne = await nameDuplicateError(req.db, name); if (ne) return res.status(409).json({ error: ne }) }
@@ -139,14 +142,21 @@ router.put('/:id', async (req, res, next) => {
   try {
     const { name, bank, type, initial_balance, kind, number, purpose } = req.body
     const owner = req.body.owner === 'personal' ? 'personal' : 'corp'
-    // 카드만 의미가 있다. 1~28 밖은 미설정으로 본다(29~31 은 짧은 달에 없는 날짜다)
+    // 카드만 의미가 있다. 1~28 + 31(말일). 날짜를 만드는 쪽이 그 달 마지막 날로 자른다(lib/cashReport.js — 2월이면 28·29일)
     const cardType = cardTypeOf(req.body.card_type)
     // 체크카드는 결제일이 없다 — 값이 와도 버린다(남겨 두면 예측이 허수를 만든다)
     const cardPayDay = cardType === 'check' ? 0
-      : Math.min(28, Math.max(0, parseInt(req.body.card_pay_day, 10) || 0))
+      : Math.min(31, Math.max(0, parseInt(req.body.card_pay_day, 10) || 0))
     const cardPayAcct = cardType === 'check' ? null : (req.body.card_pay_account_id || null)
     { const ce = await cashDuplicateError(req.db, type, req.params.id); if (ce) return res.status(409).json({ error: ce }) }
-    { const ne = await nameDuplicateError(req.db, req.body.name, req.params.id); if (ne) return res.status(409).json({ error: ne }) }
+    /* 이름 중복은 **이름을 바꿀 때만** 본다. 규칙이 생기기 전에 같은 이름으로 등록된 계좌(국민카드-공용 두 장)는
+       결제일만 고쳐도 "같은 이름이 있다"로 막혀 아무것도 못 고쳤다(2026-09-30 사용자). 이름을 그대로 두면
+       중복이 더 나빠지지 않는다 — 새로 만들거나 다른 계좌와 같은 이름으로 **바꿀 때**만 막는다 */
+    {
+      const [[cur]] = await req.db.execute('SELECT name FROM accounts WHERE id = ?', [req.params.id])
+      const same = cur && String(cur.name || '').trim() === String(req.body.name || '').trim()
+      if (!same) { const ne = await nameDuplicateError(req.db, req.body.name, req.params.id); if (ne) return res.status(409).json({ error: ne }) }
+    }
     // 종류(보통예금↔당좌예금↔현금)가 바뀌면 계정과목도 따라가야 한다 — 안 그러면 일계표가 어긋난다
     const [result] = await req.db.execute(
       'UPDATE accounts SET name=?, bank=?, type=?, initial_balance=?, kind=?, `number`=?, purpose=?, acct_code=?, owner=?, card_pay_day=?, card_pay_account_id=?, card_type=? WHERE id=?',

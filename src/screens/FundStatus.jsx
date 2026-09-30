@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef} from 'react'
+import { GoOrAsk } from '../lib/components/GoOrAsk'
 import { Icon, fmtNum, Loading } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
@@ -331,9 +332,10 @@ export const FundStatusScreen = ({ go }) => {
             <span className="text-xs text-muted2 ml-auto">
               {data.range.from} ~ {data.range.to}
               {data.closingDay > 0 && <> · 매월 {data.closingDay}일 마감</>}
-              <button className="btn ghost sm" style={{ marginLeft: 8 }} onClick={() => go?.('settings_company')}>
+              {/* 기간(마감일) 설정은 환경설정 권한이 있을 때만 — 없으면 안 그린다(부제 옆이라 안내가 오히려 시끄럽다) */}
+              <GoOrAsk route="settings_company" go={go} ask={null} className="btn ghost sm" style={{ marginLeft: 8 }}>
                 기간 설정 <Icon.Right size={11}/>
-              </button>
+              </GoOrAsk>
             </span>
           )}
         </div>

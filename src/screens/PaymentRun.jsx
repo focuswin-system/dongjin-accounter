@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef} from 'react'
+import { GoOrAsk } from '../lib/components/GoOrAsk'
 import { Icon, fmtNum, useToast, FilterSelect, Loading, localToday } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
@@ -119,7 +120,10 @@ export const PaymentRunScreen = ({ go }) => {
                 (엑셀로 한 번에 올릴 수도 있어요).
               </div>
             </div>
-            <button className="btn sm" onClick={() => go?.('master_vendor')}>거래처로 <Icon.Right size={12}/></button>
+            <GoOrAsk route="master_vendor" action="edit" go={go}
+              ask="거래처 계좌는 기준정보(거래처) 권한이 있는 담당자에게 요청해 주세요.">
+              거래처로 <Icon.Right size={12}/>
+            </GoOrAsk>
           </div>
         </div>
       )}

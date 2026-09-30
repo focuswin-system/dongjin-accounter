@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { GoOrAsk } from '../lib/components/GoOrAsk'
 import { Icon, fmtNum, useToast, useConfirm, MoneyInput, DateInput, localToday, fmtDateShort } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { Drawer } from '../lib/ui'
@@ -7,6 +8,7 @@ import { api } from '../lib/api'
 import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
 import { ImportWizard } from '../lib/components/ImportWizard'
 import { cardImportAdapter } from '../lib/cardImport'
+import { accountLabels } from '../lib/accountLabel'
 
 /**
  * 카드 대금 지급 — 쌓인 카드값을 통장에서 갚는다.
@@ -183,6 +185,9 @@ export const CardPaymentScreen = ({ openEdit, goRoute }) => {
     .filter(x => x.unpaid > 0), [accounts])
   const noPayDayTotal = noPayDay.reduce((s, x) => s + x.unpaid, 0)
 
+  // 이름이 겹치는 카드(국민카드-공용 두 장)는 끝자리를 붙여 가른다 — 같은 이름 둘이면 어느 카드인지 모른다
+  const cardLabel = useMemo(() => new Map(accountLabels(accounts).map(a => [a.id, a.label])), [accounts])
+
   const openPay = (b) => setForm({
     card: b.card, fromAccountId: b.payAcct?.id || '', amount: String(b.unpaid),
     unpaid: b.unpaid,
@@ -267,9 +272,16 @@ export const CardPaymentScreen = ({ openEdit, goRoute }) => {
             결제일을 안 정한 카드에 {fmtNum(noPayDayTotal)}원이 남아 있어요
           </div>
           <div className="text-sm text-muted" style={{ lineHeight: 1.7 }}>
-            {noPayDay.map(x => `${x.card.name} ${fmtNum(x.unpaid)}원`).join(' · ')}<br/>
-            <b>기준정보 › 카드</b>에서 결제일을 정하면 위 목록에 올라와 갚을 수 있어요.
-            언제 빠지는지 모르면 자금 예측에도 안 잡힙니다.
+            {noPayDay.map(x => `${cardLabel.get(x.card.id) || x.card.name} ${fmtNum(x.unpaid)}원`).join(' · ')}<br/>
+            결제일을 정하면 위 목록에 올라와 갚을 수 있어요. 언제 빠지는지 모르면 자금 예측에도 안 잡힙니다.
+          </div>
+          {/* 할 일을 말했으면 갈 길을 준다 — 예전엔 '기준정보 › 카드'를 글자로만 적었다(2026-09-30 사용자) */}
+          {/* 거기서 고칠 수 있을 때만 버튼, 아니면 누구에게 부탁할지(lib/components/GoOrAsk) */}
+          <div style={{ marginTop: 10 }}>
+            <GoOrAsk route="master_card" action="edit" go={goRoute}
+              ask="결제일은 기준정보(카드) 권한이 있는 담당자에게 요청해 주세요.">
+              기준정보 › 카드에서 결제일 정하기 <Icon.Right size={12}/>
+            </GoOrAsk>
           </div>
         </div>
       )}
@@ -287,9 +299,10 @@ export const CardPaymentScreen = ({ openEdit, goRoute }) => {
               <Icon.Card size={16} className="text-muted2"/>
               <span className="text-sm fw-600" style={{ color: 'var(--ink)' }}>등록된 신용카드가 없어요.</span>
               <span className="text-xs text-muted2">카드를 등록하면 쓴 돈과 갚을 돈이 여기 모입니다.</span>
-              {goRoute && (
-                <button className="btn sm ml-auto" onClick={() => goRoute('master_card')}>카드 등록하러 가기</button>
-              )}
+              <GoOrAsk route="master_card" action="create" go={goRoute} className="btn sm ml-auto"
+                askStyle={{ marginLeft: 'auto' }} ask="카드 등록은 기준정보(카드) 권한이 있는 담당자에게 요청해 주세요.">
+                카드 등록하러 가기
+              </GoOrAsk>
             </>
           ) : (
             <>

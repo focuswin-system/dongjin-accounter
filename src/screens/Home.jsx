@@ -105,11 +105,14 @@ export const HomeScreen = ({ go, user, navHidden, docKeys, openIncome, openExpen
               {/* 엑셀 업로드는 여태 각 화면 안에만 있어서, 처음 쓰는 사람은 있는 줄도 몰랐다.
                   이미 엑셀로 일하던 자료를 옮기는 게 진입 비용을 가장 크게 낮추는 길이라
                   가장 잘 보이는 자리에 무엇을 올릴 수 있는지 함께 적는다. */}
+              {(canDo("ledger", "create") || canDo("master_vendor", "create") || canDo("master_item", "create")) && <>
               <div style={{ height: 1, background: "var(--line)", margin: "6px 0" }}/>
               <div className="text-xs text-muted2" style={{ padding: "4px 10px 2px" }}>엑셀로 가져오기</div>
-              <PopItem icon={<Icon.Excel size={16}/>} label="거래내역"  sub="입출금 여러 건"   onClick={() => go("excel_modal")}/>
-              <PopItem icon={<Icon.Excel size={16}/>} label="거래처"    sub="매출처·매입처"   onClick={() => go("master_vendor")}/>
-              <PopItem icon={<Icon.Excel size={16}/>} label="품목"      sub="단가표"          onClick={() => go("master_item")}/>
+              </>}
+              {canDo("ledger", "create") && <PopItem icon={<Icon.Excel size={16}/>} label="거래내역" sub="입출금 여러 건" onClick={() => go("excel_modal")}/>}
+              {/* 올릴 권한이 없는 곳은 메뉴에서 뺀다 — 눌렀는데 '권한이 없어요'면 막다른 길이다 */}
+              {canDo("master_vendor", "create") && <PopItem icon={<Icon.Excel size={16}/>} label="거래처" sub="매출처·매입처" onClick={() => go("master_vendor")}/>}
+              {canDo("master_item", "create") && <PopItem icon={<Icon.Excel size={16}/>} label="품목" sub="단가표" onClick={() => go("master_item")}/>}
               {/* 목록만 열어 주고 끝나서, 정작 업로드 자리를 다시 찾아야 했다 — 바로 연다.
                   매출·매입은 사업자번호로 갈리므로 어느 쪽 화면에서 올리든 결과는 같다. */}
               <PopItem icon={<Icon.Excel size={16}/>} label="세금계산서" sub="홈택스에서 내려받은 것" onClick={() => go("billing_issued", { taxImport: true })}/>

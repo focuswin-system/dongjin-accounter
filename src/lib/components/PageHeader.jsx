@@ -10,18 +10,26 @@ import { createPortal } from 'react-dom'
 //
 // 탭·기간필터는 여기 넣지 않는다 — 그건 본문(표/그리드)에 속하는 요소다(사용자 규약).
 // 헤더는 제목·부제·액션만 담는다.
+// ⚠ 예외 하나 — **장부 자체를 바꾸는 전환**(세금계산서의 발행/수취)은 제목 옆(aside)에 둔다(2026-09-30 사용자).
+//   보기 탭(등록내역·입금내역…)과 다르다: 이건 같은 장부를 다르게 보는 게 아니라 다른 장부로 간다.
+//   제목 아래 한 줄을 따로 차지하던 것이 사라져, 거래내역과 머리 높이도 맞는다.
 //
 // props
 //   title    제목(필수)
 //   sub      부제(문자열/JSX). 없으면 부제 줄 자체를 그리지 않는다
+//   aside    제목 바로 옆(같은 줄) — 장부 전환 탭만. 위 예외 참고
 //   actions  오른쪽 버튼 영역(JSX). 없어도 자리(슬롯)는 그린다 — 아래 HeaderActions 참고
 
 const SLOT_ID = 'page-header-actions-slot'
 
-export const PageHeader = ({ title, sub, actions }) => (
+export const PageHeader = ({ title, sub, actions, aside }) => (
   <div className="page-header">
     <div className="page-header-main">
-      <div className="page-title">{title}</div>
+      {aside
+        ? <div className="row gap-16" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+            <div className="page-title">{title}</div>{aside}
+          </div>
+        : <div className="page-title">{title}</div>}
       {sub && <div className="page-sub">{sub}</div>}
     </div>
     {/* ⚠ 비어 있어도 그린다. 화면 본문 깊숙한 곳(패널)에 있는 주 동작 버튼이

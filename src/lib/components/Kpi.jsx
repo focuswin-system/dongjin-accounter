@@ -93,13 +93,15 @@ export const KpiRow = ({ cols = 4, gap = 12, children, style }) => (
  *   금액·건수를 세는 카드는 이제 여기 하나만 쓴다.
  *
  * props: label · amount · count · accent(뱃지 색) · warn(금액을 빨강으로) · onClick · hint
+ *        active — 고른 상태(누르면 그 종류만 남는 **필터 카드**일 때 — 거래내역의 입금·출금)
  */
-export const SummaryCard = ({ label, amount, count, accent = "blue", warn, onClick, hint }) => {
+export const SummaryCard = ({ label, amount, count, accent = "blue", warn, onClick, hint, active }) => {
   const Tag = onClick ? 'button' : 'div'
   return (
-    <Tag className="card" onClick={onClick} type={onClick ? 'button' : undefined}
+    <Tag className="card" onClick={onClick} type={onClick ? 'button' : undefined} aria-pressed={active ?? undefined}
       style={{ padding: "16px 18px", textAlign: 'left', width: '100%',
-               cursor: onClick ? 'pointer' : undefined }}>
+               cursor: onClick ? 'pointer' : undefined,
+               ...(active ? { background: 'var(--brand-soft)', borderColor: 'var(--brand)' } : null) }}>
       <div className="row" style={{ marginBottom: 6 }}>
         <span className="text-sm text-muted fw-600">{label}</span>
         <span className={`badge ${accent} ml-auto`}>{count}건</span>

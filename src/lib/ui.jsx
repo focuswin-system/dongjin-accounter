@@ -797,20 +797,33 @@ export const ToastProvider = ({ children }) => {
   /* actions — [{ label, onClick, primary }]. 누르면 그 일을 하고 토스트를 닫는다.
      버튼이 있는 토스트는 **읽고 고를 시간**이 필요하다 — 기본 8초로 길게 둔다.
      (반복 제안처럼 권유를 담는 자리. 할 일을 강요하는 확인창은 이걸로 만들지 않는다.) */
+  /* 경고·오류는 **팝업이 열려 있으면 그 팝업의 [저장] 버튼 바로 위, 가운데**에 띄운다(2026-09-30 사용자:
+     "왜 사용자들이 뜨는 문구를 확인 못하지?"). 화면 오른쪽 아래 구석은 방금 누른 버튼에서 1,000px 넘게
+     떨어져 있어 눈이 안 간다. 호출하는 곳(153군데)은 그대로 두고 **여기 한 곳**에서 자리를 정한다.
+     성공 토스트는 구석에 짧게 — 방해하지 않는 게 그 일이다. */
+  const anchorOf = () => {
+    const open = [...document.querySelectorAll('aside.drawer.open')]
+    if (!open.length) return null
+    const top = open.reduce((a, b) => (Number(getComputedStyle(b).zIndex) > Number(getComputedStyle(a).zIndex) ? b : a))
+    const r = top.getBoundingClientRect()
+    const foot = top.querySelector('.drawer-foot')
+    const edge = foot ? foot.getBoundingClientRect().top : r.bottom
+    return { left: r.left + r.width / 2, bottom: window.innerHeight - edge + 10, maxWidth: Math.max(240, r.width - 48) }
+  };
   const push = (msg, opts = {}) => {
     const id = Math.random().toString(36).slice(2);
     const tone = opts.tone === "warn" || opts.tone === "neg" ? opts.tone : null;
     const actions = Array.isArray(opts.actions) ? opts.actions : null;
-    setItems(cur => [...cur, { id, msg, icon: opts.icon, tone, actions }]);
-    // 경고는 읽는 데 시간이 더 걸린다(대기 시간 안내 등 문장이 길다).
-    setTimeout(() => dismiss(id), opts.duration || (actions ? 8000 : tone ? 4200 : 2400));
+    const anchor = tone ? anchorOf() : null;
+    setItems(cur => [...cur, { id, msg, icon: opts.icon, tone, actions, anchor }]);
+    // 경고·오류는 읽고 이해할 시간이 필요하다 — 8초(눌러서 먼저 닫을 수 있다)
+    setTimeout(() => dismiss(id), opts.duration || (actions || tone ? 8000 : 2400));
   };
-  return (
-    <ToastCtx.Provider value={{ push }}>
-      {children}
-      <div className="toast-stack">
-        {items.map(t => (
-          <div key={t.id} className={`toast${t.tone ? ` is-${t.tone}` : ""}`}>
+  const render = (t) => (
+          <div key={t.id} className={`toast${t.tone ? ` is-${t.tone}` : ""}`}
+            /* 눌러서 닫는다 — 8초를 다 기다리게 하지 않는다(버튼이 있는 토스트는 버튼이 닫는다) */
+            onClick={t.actions ? undefined : () => dismiss(t.id)} style={t.actions ? undefined : { cursor: 'pointer' }}
+            title={t.actions ? undefined : '눌러서 닫기'}>
             {t.tone ? <Icon.Warn size={16}/> : <Icon.Check size={16}/>}
             <span>{t.msg}</span>
             {t.actions && (
@@ -822,8 +835,19 @@ export const ToastProvider = ({ children }) => {
               </span>
             )}
           </div>
-        ))}
-      </div>
+  );
+  const corner = items.filter(t => !t.anchor);
+  const inPopup = items.filter(t => t.anchor);
+  const pa = inPopup.length ? inPopup[inPopup.length - 1].anchor : null;
+  return (
+    <ToastCtx.Provider value={{ push }}>
+      {children}
+      <div className="toast-stack">{corner.map(render)}</div>
+      {pa && (
+        <div className="toast-stack is-popup" style={{ left: pa.left, bottom: pa.bottom, maxWidth: pa.maxWidth }}>
+          {inPopup.map(render)}
+        </div>
+      )}
     </ToastCtx.Provider>
   );
 };

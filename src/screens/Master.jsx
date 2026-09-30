@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
+import { payDayLabel, PAY_DAY_OPTIONS } from '../lib/cardPayDay'
 import { UPLOAD_ACCEPT } from '../lib/fileKinds'
 import { Icon, fmtNum, useToast, useConfirm, StatusBadge, Drawer, Combobox, MoneyInput, Loading, DateInput, fmtDateShort, setFiscalEndMonth } from '../lib/ui'
 import { PageHeader, HeaderActions } from '../lib/components/PageHeader'
@@ -638,10 +639,9 @@ export const RefMasterPanel = ({ cfg, page = false, embedded = false }) => {
               ),
             })),
             {
-              key: '__actions', header: '', width: 90,
+              key: '__actions', header: '', width: 60,
               render: (r) => (
-                <div className="row gap-6">
-                  <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => openEdit(r)}>수정</button>
+                <div className="row gap-6" onClick={e => e.stopPropagation()}>
                   <button className="btn" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--neg)' }} onClick={() => handleDelete(r)}>삭제</button>
                 </div>
               ),
@@ -649,6 +649,7 @@ export const RefMasterPanel = ({ cfg, page = false, embedded = false }) => {
           ]}
           rows={filtered}
           rowKey={r => r.id}
+          onRowClick={openEdit}
           empty={`등록된 ${josa(cfg.label, "이")} 없어요. 위에서 추가하세요.`}
         />
       </div>
@@ -1168,7 +1169,7 @@ const VendorPanel = ({ embedded = false }) => {
               <tr><td colSpan={10} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)' }}>등록된 거래처가 없어요</td></tr>
             )}
             {filtered.map(v => (
-              <tr key={v.id} style={v.active === 0 ? { opacity: 0.55 } : undefined}>
+              <tr key={v.id} style={{ cursor: 'pointer', ...(v.active === 0 ? { opacity: 0.55 } : null) }} onClick={() => openEdit(v)}>
                 <td className="fw-700">{v.name}</td>
                 <td><span className={`badge ${GUBU_BADGE[v.gubu] || 'outline'}`}>{GUBU_LABEL[v.gubu] || v.gubu}</span></td>
                 <td className="text-sm text-muted">{v.type || '—'}</td>
@@ -1195,9 +1196,9 @@ const VendorPanel = ({ embedded = false }) => {
                     ? <span className="badge outline">미사용</span>
                     : <span className="badge pos">사용중</span>}
                 </td>
-                <td>
+                {/* 줄을 누르면 상세 — 거래내역·세금계산서와 같은 동작(2026-09-30 사용자). 줄 끝엔 [삭제]만, 누를 때 줄 클릭으로 번지지 않게 */}
+                <td onClick={e => e.stopPropagation()}>
                   <div className="row gap-6">
-                    <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => openEdit(v)}>수정</button>
                     <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => toggleActive(v)}>
                       {v.active === 0 ? '사용' : '미사용'}
                     </button>
@@ -1512,7 +1513,7 @@ const CategoryPanel = ({ embedded = false }) => {
               <tr><td colSpan={6} style={{ textAlign: "center", padding: 32, color: "var(--muted-2)" }}>비목이 없어요. 위에서 추가하세요.</td></tr>
             )}
             {filtered.map(c => (
-              <tr key={c.id}>
+              <tr key={c.id} style={{ cursor: 'pointer' }} onClick={() => openEdit(c)}>
                 <td><span className={`badge ${kindOf(c) === "inc" ? "pos" : "warn"}`}>{kindOf(c) === "inc" ? "수입" : "지출"}</span></td>
                 <td className="fw-600">{c.name}</td>
                 <td className="text-sm">
@@ -1522,9 +1523,8 @@ const CategoryPanel = ({ embedded = false }) => {
                 </td>
                 <td className="text-sm">{c.vat}</td>
                 <td className="text-sm">{c.pay_method}</td>
-                <td>
+                <td onClick={e => e.stopPropagation()}>
                   <div className="row gap-6">
-                    <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => openEdit(c)}>수정</button>
                     <button className="btn" style={{ fontSize: 11, padding: "2px 8px", color: "var(--neg)" }} onClick={() => handleDelete(c)}>삭제</button>
                   </div>
                 </td>
@@ -2105,6 +2105,8 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
     ? `총 ${ownCount}장 · 결제수단으로 사용됩니다`
     : `총 ${ownCount}개 · 입출금이 기록되는 통장이에요`
   const openDetail = (a) => { fillForm(a); setMode('view'); setDrawerOpen(true) }
+  // 보기 — 상세와 수정이 같은 칸 배치를 쓰고, 보기면 입력칸 자리에 글자를 둔다
+  const ro = mode === 'view' && !!detail
 
   const fillForm = (a) => {
     setEditing(a)
@@ -2198,7 +2200,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
               {isCardPanel
                 ? <><th>결제일</th><th>결제 계좌</th></>
                 : <th className="num-right">잔액</th>}
-              <th style={{ width: 90 }}></th>
+              <th style={{ width: 60 }}></th>
             </tr>
           </thead>
           <tbody>
@@ -2206,7 +2208,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
               <tr><td colSpan={isCardPanel ? 8 : 7} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)' }}>등록된 {isCardPanel ? '카드' : '계좌'}가 없어요</td></tr>
             )}
             {filtered.map(a => (
-              <tr key={a.id}>
+              <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => openDetail(a)}>
                 <td className="fw-700">
                   {a.name}
                   {/* 개인 것만 표시한다 — 법인이 대부분이라 양쪽에 다 붙이면 표가 시끄럽다 */}
@@ -2225,7 +2227,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
                 <td className="text-sm">{a.purpose || '—'}</td>
                 {isCardPanel ? (
                   <>
-                    <td className="text-sm num">{a.card_pay_day ? `매월 ${a.card_pay_day}일` : '—'}</td>
+                    <td className="text-sm num">{a.card_pay_day ? `매월 ${payDayLabel(a.card_pay_day)}` : '—'}</td>
                     <td className="text-sm">{accounts.find(x => x.id === a.card_pay_account_id)?.name || '—'}</td>
                   </>
                 ) : (
@@ -2235,11 +2237,9 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
                     {a.currentBalance == null ? '—' : fmtNum(a.currentBalance)}
                   </td>
                 )}
-                <td>
-                  <div className="row gap-6">
-                    <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => openDetail(a)}>상세</button>
-                    <button className="btn" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--neg)' }} onClick={() => handleDelete(a)}>삭제</button>
-                  </div>
+                {/* 줄을 누르면 상세 — 거래내역·세금계산서와 같은 동작(2026-09-30 사용자). 줄 끝엔 [삭제]만, 누를 때 줄 클릭으로 번지지 않게 */}
+                <td onClick={e => e.stopPropagation()}>
+                  <button className="btn" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--neg)' }} onClick={() => handleDelete(a)}>삭제</button>
                 </td>
               </tr>
             ))}
@@ -2248,8 +2248,10 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
       </div>
 
       {/* 폭 — 보기(상세)는 원래 폭, 등록·수정 폼만 두 칸 배치라 넓힌다 */}
-      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} confirmClose={mode === 'edit'}
-        width={mode === 'view' && detail ? undefined : '880px'}>
+      {/* 상세와 수정은 **같은 폭·같은 칸 배치**다 — [수정]을 누르면 그 자리에서 글자가 입력칸으로 바뀐다
+          (거래 상세의 제자리 수정과 같다). 예전엔 상세가 좁은 '항목 : 값' 목록이라, 수정을 누르면
+          화면이 통째로 바뀌어 다른 창처럼 보였다(2026-09-30 사용자: "이질감") */}
+      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} confirmClose={mode === 'edit'} width="880px">
         <DrawerHead
           title={editing ? detail?.name : `${isCard ? '카드' : '계좌'} 등록`}
           /* 카드는 옛 type(법인카드/체크카드…) 대신 소유·결제방식으로 적는다 —
@@ -2261,10 +2263,11 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
             : '수정 중') : null}
           onClose={() => setDrawerOpen(false)}/>
 
-        {mode === 'view' && detail ? (
-          <div className="drawer-body col gap-16">
-            {/* 잔액 — 통장에만 있다. 카드는 결제수단이라 담아 두는 돈이 없다. */}
-            {!isCard && (
+        {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2. 보기(ro)면 입력칸 자리에 글자 */}
+        <div className="drawer-body form-grid-2">
+          {/* 보기일 때만 — 잔액·조정은 통장의 '지금 상태'라 수정 폼에는 없다. 본문 안 첫 줄이라 같이 스크롤된다 */}
+          {ro && !isCard && (
+            <div className="span-2">
               <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
                 <div className="row">
                   <div className="text-sm text-muted">현재 잔액</div>
@@ -2297,26 +2300,8 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
                   </button>
                 </div>
               </div>
-            )}
-
-            <dl className="detail-list">
-              <dt>{isCard ? '카드 종류' : '예금 종류'}</dt>
-              <dd>{isCard
-                ? [detail.owner === 'personal' ? '대표 개인' : '법인', detail.cardType === 'check' ? '체크' : '신용'].join(' · ')
-                : (detail.type || '—')}</dd>
-              <dt>{isCard ? '카드사' : '은행'}</dt><dd>{detail.bankName || '—'}</dd>
-              <dt>{isCard ? '카드번호' : '계좌번호'}</dt><dd className="num">{detail.number || '—'}</dd>
-              <dt>용도</dt><dd>{detail.purpose || '—'}</dd>
-              <dt>소유</dt><dd>{detail.owner === 'personal' ? '대표 개인' : '법인'}</dd>
-              {isCard && <>
-                <dt>결제일</dt><dd>{detail.cardPayDay ? `매월 ${detail.cardPayDay}일` : '설정 안 함'}</dd>
-                <dt>결제 계좌</dt><dd>{accounts.find(x => x.id === detail.cardPayAccountId)?.name || '—'}</dd>
-              </>}
-            </dl>
-          </div>
-        ) : (
-        /* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */
-        <div className="drawer-body form-grid-2">
+            </div>
+          )}
           {/* 예금 종류는 통장에만 낸다.
               ⚠ 카드에서 걷어낸 이유: 옛 목록이 `법인카드 / 개인카드 / 체크카드` 였는데
                 이건 **두 축을 한 칸에 섞은 것**이다 — 법인/개인은 '소유', 체크는 '결제 방식'.
@@ -2327,11 +2312,12 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
           {!isCard && (
             <div className="span-2">
               <label className="label" style={{ marginBottom: 8 }}>예금 종류</label>
+              {ro ? <div className="ro-field">{form.type || '—'}</div> : (
               <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
                 {subTypes.map(t => (
                   <button key={t} type="button" className={`chip ${form.type === t ? 'active' : ''}`} onClick={() => f('type', t)}>{t}</button>
                 ))}
-              </div>
+              </div>)}
             </div>
           )}
 
@@ -2343,17 +2329,18 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
           {isCard && (
             <div className="span-w2">
               <label className="label" style={{ marginBottom: 8 }}>카드 종류</label>
+              {ro ? <div className="ro-field">{(form.card_type || 'credit') === 'check' ? '체크카드' : '신용카드'}</div> : (
               <div className="row gap-6">
                 {[['credit', '신용카드'], ['check', '체크카드']].map(([v, l]) => (
                   <button key={v} type="button" className={`chip ${(form.card_type || 'credit') === v ? 'active' : ''}`}
                     onClick={() => f('card_type', v)}>{l}</button>
                 ))}
-              </div>
-              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+              </div>)}
+              {!ro && <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
                 {(form.card_type || 'credit') === 'check'
                   ? '쓴 즉시 통장에서 빠져요. 결제일이 없어 자금 예측에 따로 잡지 않습니다.'
                   : '결제일에 통장에서 한꺼번에 빠져요. 그 날짜와 통장을 아래에 적어주세요.'}
-              </div>
+              </div>}
             </div>
           )}
 
@@ -2364,23 +2351,24 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
             <>
               <div style={{ flex: 1 }}>
                 <label className="label" style={{ marginBottom: 8 }}>결제일</label>
+                {ro ? <div className="ro-field">{form.card_pay_day ? `매월 ${payDayLabel(form.card_pay_day)}` : '설정 안 함'}</div> :
                 <Combobox value={String(form.card_pay_day || '')} allowAdd={false}
                   onChange={v => f('card_pay_day', v)}
-                  options={[{ value: '', label: '설정 안 함' },
-                    ...Array.from({ length: 28 }, (_, i) => ({ value: String(i + 1), label: `매월 ${i + 1}일` }))]}
-                  placeholder="결제일 선택"/>
+                  options={[{ value: '', label: '설정 안 함' }, ...PAY_DAY_OPTIONS]}
+                  placeholder="결제일 선택"/>}
               </div>
               <div style={{ flex: 1 }}>
                 <label className="label" style={{ marginBottom: 8 }}>결제 계좌</label>
+                {ro ? <div className="ro-field">{accounts.find(x => x.id === form.card_pay_account_id)?.name || '—'}</div> :
                 <Combobox value={form.card_pay_account_id || ''} allowAdd={false}
                   onChange={v => f('card_pay_account_id', v)}
                   options={[{ value: '', label: '선택 안 함' },
                     ...accounts.filter(a => a.kind !== 'card').map(a => ({ value: a.id, label: a.name }))]}
-                  placeholder="어느 통장에서 빠지나요"/>
+                  placeholder="어느 통장에서 빠지나요"/>}
               </div>
             </>
           )}
-          {isCard && (form.card_type || 'credit') === 'credit' && (
+          {!ro && isCard && (form.card_type || 'credit') === 'credit' && (
             <div className="text-xs text-muted2 span-2" style={{ marginTop: -8 }}>
               결제일을 넣으면 이번 달 사용액이 그 날 이 통장에서 빠지는 것으로 자금 현황에 잡혀요.
               실제 결제는 <b>지급처리 → 카드 대금 지급</b>에서 한 번에 처리할 수 있어요.
@@ -2392,60 +2380,67 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
               회계(손익·부가세)는 계좌가 아니라 등록된 거래로 잡히므로 이 값과 무관하다. */}
           <div>
             <label className="label" style={{ marginBottom: 8 }}>소유</label>
+            {ro ? <div className="ro-field">{form.owner === 'personal' ? '대표 개인' : '법인'}</div> : (
             <div className="row gap-6">
               {[['corp', '법인'], ['personal', '대표 개인']].map(([v, t]) => (
                 <button key={v} type="button" className={`chip ${form.owner === v ? 'active' : ''}`}
                   onClick={() => f('owner', v)}>{t}</button>
               ))}
-            </div>
-            <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+            </div>)}
+            {!ro && <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
               {form.owner === 'personal'
                 ? '자금 현황에서 법인과 따로 집계돼요. 잔액은 마스터에게만 보입니다.'
                 : '회사 명의 계좌·카드예요.'}
-            </div>
+            </div>}
           </div>
 
           <div className="span-2" style={{ height: 1, background: 'var(--line)' }}/>
 
           <div>
             <label className="label" style={{ marginBottom: 8 }}>별칭 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+            {ro ? <div className="ro-field">{form.name || '—'}</div> : <>
             <input className="input" value={form.name} onChange={e => f('name', e.target.value)} placeholder={isCard ? '예) 법인카드(국민) *1234' : '예) 기업은행(주거래) *4010'}/>
-            <div className="text-xs text-muted2" style={{ marginTop: 6 }}>거래 등록·잔액 화면에 이 이름으로 표시돼요.</div>
+            <div className="text-xs text-muted2" style={{ marginTop: 6 }}>거래 등록·잔액 화면에 이 이름으로 표시돼요.</div></>}
+            {/* 규칙이 생기기 전에 같은 이름으로 등록된 계좌 — 저장은 막지 않되(서버 PUT 주석) 바꾸도록 권한다 */}
+            {editing && accounts.some(x => x.id !== editing.id && String(x.name || '').trim() === String(form.name || '').trim()) && (
+              <div className="text-xs" style={{ marginTop: 6, color: 'var(--warn-ink)' }}>
+                같은 이름의 {isCard ? '카드' : '계좌'}가 하나 더 있어요. 끝자리를 붙이는 등 이름을 바꾸면 거래 등록 때 헷갈리지 않습니다.
+              </div>
+            )}
           </div>
 
           <>
             <div style={{ flex: 1 }}>
               <label className="label" style={{ marginBottom: 8 }}>{isCard ? '카드사' : '은행'}</label>
-              <input className="input" value={form.bank} onChange={e => f('bank', e.target.value)} placeholder={isCard ? '국민카드' : 'IBK기업은행'}/>
+              {ro ? <div className="ro-field">{form.bank || '—'}</div> : <input className="input" value={form.bank} onChange={e => f('bank', e.target.value)} placeholder={isCard ? '국민카드' : 'IBK기업은행'}/>}
             </div>
             <div style={{ flex: 1 }}>
               <label className="label" style={{ marginBottom: 8 }}>{isCard ? '카드번호' : '계좌번호'}</label>
-              <input className="input num" value={form.number} onChange={e => f('number', e.target.value)} placeholder={isCard ? '0000-****-****-0000' : '000-000000-00-000'}/>
+              {ro ? <div className="ro-field num">{form.number || '—'}</div> : <input className="input num" value={form.number} onChange={e => f('number', e.target.value)} placeholder={isCard ? '0000-****-****-0000' : '000-000000-00-000'}/>}
             </div>
           </>
 
           <>
             <div style={{ flex: 1 }}>
               <label className="label" style={{ marginBottom: 8 }}>용도</label>
-              <input className="input" value={form.purpose} onChange={e => f('purpose', e.target.value)} placeholder={isCard ? '소모품·접대비' : '주거래 / 급여이체'}/>
+              {ro ? <div className="ro-field">{form.purpose || '—'}</div> : <input className="input" value={form.purpose} onChange={e => f('purpose', e.target.value)} placeholder={isCard ? '소모품·접대비' : '주거래 / 급여이체'}/>}
             </div>
             {!isCard && (
               <div style={{ flex: 1 }}>
                 {/* 뜻을 적어 둔다 — 쓰기 시작한 날 잔액을 넣고 그 전 통장 내역을 또 올리면 두 번 잡힌다(4단계, 장부 시작일) */}
                 <label className="label" style={{ marginBottom: 8 }}>초기 잔액 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 장부 시작일 아침 잔액</span></label>
-                <MoneyInput allowNegative value={form.initial_balance} onChange={raw => f('initial_balance', raw)}/>
+                {ro ? <div className="ro-field num">{fmtNum(Number(form.initial_balance) || 0)}</div> : <MoneyInput allowNegative value={form.initial_balance} onChange={raw => f('initial_balance', raw)}/>}
                 {/* 초기 잔액과 잔액 조정은 둘 다 잔액을 움직이지만 성격이 다르다.
                     여기는 '출발점'이고, 조정은 그 뒤에 생긴 차이를 사유와 함께 남기는 기록이다. */}
-                <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+                {!ro && <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
                   등록 시점 통장 잔액이에요. 이후 생긴 차이는 상세의 <b>잔액 조정</b>으로 맞추세요.
-                </div>
+                </div>}
               </div>
             )}
           </>
         </div>
-        )}
 
-        {mode === 'view' && detail ? (
+        {ro ? (
           <div className="drawer-foot">
             <button className="btn" style={{ color: 'var(--neg)' }} onClick={() => handleDelete(detail)}>삭제</button>
             <button className="btn ml-auto" onClick={() => setDrawerOpen(false)}>닫기</button>
@@ -2453,7 +2448,8 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
           </div>
         ) : (
           <DrawerFooter
-            onCancel={() => (editing ? setMode('view') : setDrawerOpen(false))}
+            /* 취소하면 **원래 값으로** 돌린다 — 보기도 폼 값을 보여 주므로, 안 되돌리면 저장 안 한 값이 상세에 남아 보인다 */
+            onCancel={() => (editing ? (fillForm(detail), setMode('view')) : setDrawerOpen(false))}
             onSave={handleSave}/>
         )}
       </Drawer>
@@ -3703,7 +3699,6 @@ const FlatTable = ({ data, rows, onEdit, onDelete }) => (
           })}
           <td>
             <div className="row gap-4">
-              <button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); onEdit(i); }}>수정</button>
               <button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); onDelete(r[0]); }}><Icon.Close size={14}/></button>
             </div>
           </td>
@@ -3805,7 +3800,6 @@ const GroupedTable = ({ data, q, collapsed, toggleGroup, onEdit, onDelete }) => 
                                 })}
                                 <td>
                                   <div className="row gap-4">
-                                    <button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); onEdit(g, idx); }}>수정</button>
                                     <button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); onDelete(r[0]); }}><Icon.Close size={14}/></button>
                                   </div>
                                 </td>
@@ -3874,7 +3868,6 @@ const GroupedTable = ({ data, q, collapsed, toggleGroup, onEdit, onDelete }) => 
                         })}
                         <td>
                           <div className="row gap-4">
-                            <button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); onEdit(g, idx); }}>수정</button>
                             <button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); onDelete(r[0]); }}><Icon.Close size={14}/></button>
                           </div>
                         </td>
@@ -4052,13 +4045,12 @@ const PayrollItemPanel = ({ embedded = false }) => {
             <tbody>
               {list.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", padding: 28, color: "var(--muted-2)", fontSize: 13 }}>항목이 없어요. 위에서 추가하세요.</td></tr>}
               {list.map(it => (
-                <tr key={it.id}>
+                <tr key={it.id} style={{ cursor: 'pointer' }} onClick={() => edit(it)}>
                   <td className="fw-700">{it.label}</td>
                   <td className="text-sm text-muted">{it.mode === "percent" ? "% (요율)" : "원 (금액)"}</td>
                   <td className="num-cell num-right">{fmtVal(it)}</td>
-                  <td>
+                  <td onClick={e => e.stopPropagation()}>
                     <div className="row gap-4">
-                      <button className="btn ghost sm" onClick={() => edit(it)}>수정</button>
                       <button className="btn ghost sm" style={{ color: "var(--neg)" }} onClick={() => del(it)}>삭제</button>
                     </div>
                   </td>
@@ -4252,7 +4244,7 @@ const EmployTypePanel = ({ embedded = false }) => {
             <tbody>
               {types.length === 0 && <tr><td colSpan={8} style={{ textAlign: "center", padding: 28, color: "var(--muted-2)", fontSize: 13 }}>고용형태가 없어요. 위에서 추가하세요.</td></tr>}
               {types.map(t => (
-                <tr key={t.id}>
+                <tr key={t.id} style={{ cursor: 'pointer' }} onClick={() => edit(t)}>
                   <td className="fw-700">{t.label}</td>
                   <td className="text-sm text-muted">{kindLabel(t.kind)}</td>
                   <td className="text-sm">{t.income_type}</td>
@@ -4260,9 +4252,8 @@ const EmployTypePanel = ({ embedded = false }) => {
                   <td className="text-sm text-muted">{t.default_unit || "—"}</td>
                   <td className="text-xs text-muted">{insBadges(t)}</td>
                   <td className="text-sm text-muted">{Number(t.conv_alert_months) > 0 ? `${t.conv_alert_months}개월` : "—"}</td>
-                  <td>
+                  <td onClick={e => e.stopPropagation()}>
                     <div className="row gap-4">
-                      <button className="btn ghost sm" onClick={() => edit(t)}>수정</button>
                       <button className="btn ghost sm" style={{ color: "var(--neg)" }} onClick={() => del(t)}>삭제</button>
                     </div>
                   </td>
