@@ -1133,6 +1133,12 @@ export const api = {
   },
 
   // accountId — 대량 등록분이 어느 계좌에서 오간 것인지. 없으면 잔액에 반영되지 않아 서버가 400을 준다.
+  /* 엑셀 줄 중 이미 등록된 같은 거래 — { dups: { [줄 순번]: { id, date, amount, vendor, memo } } } */
+  async checkImportDups(items, accountId) {
+    try { return await req('/transactions/import/dups', { method: 'POST', body: { items, account_id: accountId || null } }) }
+    catch { return { dups: {} } }
+  },
+
   async commitImport(items, accountId) {
     try {
       const r = await req('/transactions/import/commit', { method: 'POST', body: { items, account_id: accountId || null } })

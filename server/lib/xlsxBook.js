@@ -140,6 +140,13 @@ function sheet(wb, name, { title, sub, columns, rows, totals = null, freezeCols 
  * @param opts.columns [{ header, width, required?, money?, int? }]
  * @param opts.samples 예시 행(값 배열). 비워도 된다
  */
+/* 칸별 도움(선택) — 엑셀에는 입력칸의 placeholder 가 없다. 그 대신
+ *   note    머리글 셀의 메모(빨간 삼각형) — 칸 이름에 마우스를 올리면 뜬다
+ *   prompt  그 열의 셀을 **고르면** 뜨는 안내 풍선(데이터 유효성 '설명 메시지') — placeholder 에 가장 가깝다
+ *   list    고를 값 — 문자열 배열이나 { ref: "'계좌 목록'!$A$2:$A$9" }(다른 시트의 목록)
+ *   strict  true 면 목록 밖 값을 막는다. 기본은 **안내만**(새 거래처·계좌번호처럼 목록 밖 값도 받아야 하는 칸)
+ * 예시 줄(samples)을 비우는 양식은 이걸로 예시를 대신한다 — 예시 줄은 지우지 않고 올리면 진짜로 등록된다. */
+const TEMPLATE_ROWS = 1000   // 유효성을 걸어 둘 줄 수 — 한 번에 올리는 양으로 넉넉하다
 function templateSheet(wb, name, { columns, samples = [] }) {
   const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1 }] })
   ws.columns = columns.map(c => ({ width: c.width || 16 }))
@@ -166,6 +173,25 @@ function templateSheet(wb, name, { columns, samples = [] }) {
     cell.border = { bottom: { style: 'thin', color: { argb: LINE } } }
   })
   head.height = 22
+
+  columns.forEach((c, i) => {
+    const L = ws.getColumn(i + 1).letter
+    if (c.note) head.getCell(i + 1).note = { texts: [{ text: c.note }] }
+    if (!c.prompt && !c.list) return
+    const v = { allowBlank: true, showInputMessage: !!c.prompt }
+    if (c.prompt) Object.assign(v, { promptTitle: String(c.header).slice(0, 32), prompt: String(c.prompt).slice(0, 255) })
+    if (c.list) {
+      const formula = Array.isArray(c.list) ? `"${c.list.join(',')}"` : c.list.ref
+      Object.assign(v, { type: 'list', formulae: [formula],
+        showErrorMessage: true, errorStyle: c.strict ? 'stop' : 'information',
+        errorTitle: String(c.header).slice(0, 32),
+        error: c.strict ? '목록에 있는 값만 쓸 수 있어요.' : '목록에 없는 값이에요. 그대로 두려면 [확인]을 누르세요.' })
+    } else {
+      // 목록 없이 안내 풍선만 — '모든 값' 유효성에 설명 메시지를 단다
+      v.type = 'any'
+    }
+    ws.dataValidations.add(`${L}2:${L}${TEMPLATE_ROWS + 1}`, v)
+  })
 
   samples.forEach((r, ri) => {
     const row = ws.getRow(2 + ri)
@@ -246,11 +272,12 @@ function blockSheet(wb, name, { title, sub, rows, widths = [], money = [] }) {
 /** 안내 시트 — 무엇을 어떻게 읽는 파일인지. 받은 사람이 우리에게 되묻지 않게 한다.
  *  @param opts.hasRequired 업로드 양식이면 true — 필수 칸 표시를 읽는 법을 맨 앞에 얹는다
  *         (머리글에 별표를 못 붙이므로 색의 뜻을 어딘가에서 알려야 한다) */
-function guideSheet(wb, lines, name = '작성안내', { hasRequired = false } = {}) {
+function guideSheet(wb, lines, name = '작성안내', { hasRequired = false, hasSamples = true } = {}) {
   if (hasRequired) {
     lines = [lines[0], '',
       '• 머리글이 빨간 칸은 필수입니다 — 비우면 그 줄은 등록되지 않습니다.',
-      '• 회색 기울임으로 적힌 예시 줄은 지우고 쓰세요. 그대로 두면 예시가 등록됩니다.',
+      hasSamples ? '• 회색 기울임으로 적힌 예시 줄은 지우고 쓰세요. 그대로 두면 예시가 등록됩니다.'
+                 : '• 칸을 고르면 적는 법과 예시가 풍선으로 뜹니다. 목록이 있는 칸은 ▼ 를 눌러 고르세요.',
       ...lines.slice(1)]
   }
   const ws = wb.addWorksheet(name)

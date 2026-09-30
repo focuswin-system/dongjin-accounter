@@ -21,7 +21,7 @@ import { MAIN_BADGE } from '../mainAccount'
  * @param icon      'bank' | 'card'
  */
 export const AccountPicker = ({ accounts = [], value, onChange, valueKey = 'id', isMain = () => false,
-  icon = 'bank', chipLimit = 6, placeholder = '계좌 선택', empty = null }) => {
+  icon = 'bank', chipLimit = 6, placeholder = '계좌 선택', empty = null, portal = false }) => {
   const Ico = icon === 'card' ? Icon.Card : Icon.Bank
   const labelOf = (a) => a.label || a.name
   if (accounts.length === 0) return empty
@@ -40,7 +40,8 @@ export const AccountPicker = ({ accounts = [], value, onChange, valueKey = 'id',
     )
   }
   return (
-    <Combobox value={value || ''} allowAdd={false} placeholder={placeholder}
+    /* portal — 스크롤 상자 안(표 펼침 줄 등)에서 목록이 잘리지 않게 맨 위층에 띄운다. 팝업 안은 Combobox 가 알아서 켠다 */
+    <Combobox value={value || ''} allowAdd={false} placeholder={placeholder} portal={portal}
       onChange={v => onChange(v, accounts.find(a => a[valueKey] === v))}
       options={accounts.map(a => ({
         value: a[valueKey],

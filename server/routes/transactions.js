@@ -24,6 +24,7 @@ const { vatFields } = require('../lib/vat')
 const { closedPeriodError, closedDocError, beforeBooksError } = require('../lib/closing')
 const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
 const { isFundAccount, categorySettingsOf } = require('../lib/categoryAccount')
+const { normVendorName } = require('../lib/vendorName')
 const { transactionVoucher, withNames } = require('../lib/voucher')
 const { relatedToTxn } = require('../lib/attachments')
 const { canAny } = require('../platform/userPerms')
@@ -57,6 +58,43 @@ const resolveAcctCode = async (db, accountCode, categoryName, kind) => {
     [categoryName, kind === 'income' ? 'INC-%' : 'EXP-%']
   )
   return row?.account_code || null
+}
+/* 엑셀에서 온 계정과목 칸 → 계정 코드. 사람은 '6101', '6101 원재료비', '원재료비' 어느 것으로도 적는다
+ * (양식의 '비목 목록' 시트가 '6101 원재료비' 모양이라 그대로 베껴 오기 쉽다).
+ * 예전엔 **글자 그대로** 코드 자리에 넣어 '6101 원재료비'가 코드가 됐다 — 전표가 짝이 안 맞는다.
+ * 앞의 숫자를 코드로 보고, 숫자가 없으면 이름으로 찾는다. 표에 없거나 현금·예금이면 null(비목 설정으로 간다). */
+const importAcctCode = async (db, raw) => {
+  const t = String(raw ?? '').trim()
+  if (!t) return null
+  const m = t.match(/^(\d{3,})/)
+  const [[row]] = m
+    ? await db.execute('SELECT code FROM account_subjects WHERE code = ?', [m[1]])
+    : await db.execute('SELECT code FROM account_subjects WHERE name = ? LIMIT 1', [t])
+  const code = row?.code ? String(row.code) : null
+  return code && !isFundAccount(code) ? code : null
+}
+/* 엑셀 한 줄과 **이미 등록된 같은 거래**를 찾는다 — 같은 파일을 두 번 올리면 수십 건이 통째로 두 번 들어가
+ * 통장 잔액·비용이 두 배가 됐다(2026-09-30 사용자: "똑같은 엑셀을 또 올렸는데 중복 의심을 하나도 안 한다").
+ * 같다고 보는 것: 구분·날짜·금액·계좌가 같고, 거래처가 **같은 회사**(lib/vendorName). 한쪽에 거래처가 없으면 나머지로만 본다.
+ * 미리보기(/import/dups)와 등록(/import/commit)이 **같은 판정**을 쓴다 — 둘이 다르면 화면은 통과시키고 서버가 막는다. */
+const findSameTxn = async (db, it, fallbackAccountId) => {
+  const acct = it.account_id || fallbackAccountId || null
+  const amount = Number(it.amount)
+  if (!it.date || !it.kind || !Number.isFinite(amount)) return null
+  const [rows] = await db.execute(
+    `SELECT t.id, t.date, t.amount, t.memo, t.category, t.created_at, v.name AS vendor_name, a.name AS account_name
+       FROM transactions t
+       LEFT JOIN vendors v ON v.id = t.vendor_id
+       LEFT JOIN accounts a ON a.id = t.account_id
+      WHERE t.kind = ? AND t.date = ? AND t.amount = ? AND t.account_id <=> ? AND t.transfer_id IS NULL
+      LIMIT 20`, [it.kind, it.date, amount, acct])
+  const vk = normVendorName(it.vendor)
+  const hit = rows.find(r => !vk || !r.vendor_name || normVendorName(r.vendor_name) === vk)
+  return hit ? { id: hit.id, date: String(hit.date instanceof Date ? hit.date.toISOString().slice(0, 10) : hit.date).slice(0, 10),
+    amount: Number(hit.amount), vendor: hit.vendor_name || '', memo: hit.memo || '',
+    category: hit.category || '', account: hit.account_name || '',
+    // 언제 들어온 거래인가 — '아까 올린 그 파일'인지 사람이 가늠하는 단서
+    createdAt: hit.created_at ? new Date(hit.created_at).toISOString() : '' } : null
 }
 /* 업로드 저장소·크기 제한은 lib/xlsx-import.js 것을 그대로 쓴다(위에서 uploadMem 을 가져온다).
    여기에 또 만들면 제한값이 두 벌이 되어 한쪽만 바뀐다. */
@@ -1212,6 +1250,20 @@ router.post('/import/parse', uploadMem.single('file'), (req, res, next) => {
 })
 
 // ── 엑셀 임포트: 일괄 등록(미등록 거래처는 자동 생성) ──
+/* 미리보기용 중복 확인 — 등록 **전에** '이미 등록됨'을 보여 주고 기본으로 빼 둔다(화면). 읽기만 한다 */
+router.post('/import/dups', async (req, res, next) => {
+  try {
+    const items = Array.isArray(req.body.items) ? req.body.items.slice(0, 5000) : []
+    const accountId = req.body.account_id || null
+    const dups = {}
+    for (let i = 0; i < items.length; i++) {
+      const hit = await findSameTxn(req.db, items[i] || {}, accountId)
+      if (hit) dups[i] = hit
+    }
+    res.json({ dups })
+  } catch (e) { next(e) }
+})
+
 router.post('/import/commit', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
@@ -1238,32 +1290,63 @@ router.post('/import/commit', async (req, res, next) => {
     const [vs] = await conn.execute('SELECT id, name FROM vendors')
     const vendorByName = {}
     for (const v of vs) (vendorByName[String(v.name || '').trim()] ||= []).push(v.id)
+    // 같은 회사로 보는 이름 — (주)·주식회사·띄어쓰기만 다르면 같다(lib/vendorName.js, 화면 규칙과 같다)
+    const vendorByNorm = {}
+    for (const v of vs) { const k = normVendorName(v.name); if (k) (vendorByNorm[k] ||= []).push(v.id) }
     const [cs] = await conn.execute('SELECT id, name, vendor_id FROM contracts')
     const contractByName = {}
     for (const c of cs) (contractByName[String(c.name || '').trim()] ||= []).push(c)
     const ambiguous = []   // 이름이 겹쳐 못 이은 것 — 응답으로 알려준다
 
     await conn.beginTransaction()
-    let inserted = 0, skippedFuture = 0, skippedClosed = 0, skippedAmount = 0, skippedBeforeStart = 0; const createdVendors = []
+    let inserted = 0, skippedFuture = 0, skippedClosed = 0, skippedAmount = 0, skippedBeforeStart = 0, skippedDup = 0; const createdVendors = []
+    /* 줄마다 어떻게 됐나 — 결과 화면이 '어느 줄이 등록됐고 어느 줄이 왜 빠졌는지, 거래처는 어떻게 됐는지'를
+       보여 준다(2026-09-30 사용자). 건수만 돌려주면 "3건 빠졌어요"에서 끝나 어느 줄인지 찾을 수 없다.
+       results[i] 는 items[i] 와 짝이다(화면이 보낸 순서) */
+    const results = []
+    const linkedVendors = []   // (주)·주식회사만 달라 기존 거래처로 이은 것 — { from, to }
+    const vendorNameById = Object.fromEntries(vs.map(v => [v.id, v.name]))
     for (const it of items) {
+      const res1 = { status: 'inserted', vendor: '' }
+      results.push(res1)
       // 미래 일자 거래는 건너뛴다 — 완료 상태로 들어가 계좌 잔액에 즉시 반영되므로 개별 등록과 같은 규칙 적용.
-      if (futureDateError(it.date)) { skippedFuture++; continue }
+      if (futureDateError(it.date)) { skippedFuture++; res1.status = 'future'; continue }
       // 마감된 달도 같은 이유로 건너뛴다 — 개별 등록이면 409로 막히는 행이 일괄에서만 통과하면 안 된다.
       /* 장부 시작일 전 — **사용자가 짚은 바로 그 통로다**: 시작일 잔액을 기초잔액에 넣고 그 전 통장 내역을
          엑셀로 올리면 같은 돈이 두 번 잡힌다. 건너뛰고 몇 건인지 따로 알린다(아래 마감 검사도 막지만 이유가 다르다) */
-      if (await beforeBooksError(conn, it.date)) { skippedBeforeStart++; continue }
-      if (await closedPeriodError(conn, it.date)) { skippedClosed++; continue }
+      if (await beforeBooksError(conn, it.date)) { skippedBeforeStart++; res1.status = 'beforeStart'; continue }
+      if (await closedPeriodError(conn, it.date)) { skippedClosed++; res1.status = 'closed'; continue }
+      /* 이미 등록된 같은 거래 — **서버가 최종 판정**이다(화면을 거치지 않은 요청도 막는다).
+         사람이 미리보기에서 보고 '그래도 넣겠다'고 한 줄(dup_ok)만 통과. 같은 파일 안의 두 번째 줄도
+         방금 넣은 첫 줄에 걸린다(같은 트랜잭션이라 보인다) — 그것도 화면이 경고한 줄이라 dup_ok 로 온다.
+         거래처를 만들기 **전에** 본다 — 빠질 줄 때문에 거래처가 생기면 안 된다 */
+      if (!it.dup_ok) {
+        const same = await findSameTxn(conn, it, accountId)
+        if (same) { skippedDup++; res1.status = 'duplicate'; res1.same = same; continue }
+      }
       let vendorId = null
       const vname = String(it.vendor || '').trim()
       if (vname) {
-        const hit = vendorByName[vname] || []
-        if (hit.length === 1) vendorId = hit[0]
-        else if (hit.length > 1) ambiguous.push(`거래처 "${vname}"`)   // 여럿이면 안 잇는다
+        /* 글자가 똑같은 게 먼저, 없으면 같은 회사로 보는 이름. 예전엔 똑같을 때만 이어서
+           '(주)한빛문구'를 올리면 기존 '한빛문구'가 있어도 거래처가 하나 더 생겼다 */
+        const exact = vendorByName[vname] || []
+        const hit = exact.length ? exact : (vendorByNorm[normVendorName(vname)] || [])
+        if (hit.length === 1) {
+          vendorId = hit[0]
+          res1.vendor = exact.length ? 'existing' : 'linked'
+          if (!exact.length) {
+            res1.vendorTo = vendorNameById[vendorId] || ''
+            if (!linkedVendors.some(l => l.from === vname)) linkedVendors.push({ from: vname, to: res1.vendorTo })
+          }
+        }
+        else if (hit.length > 1) { ambiguous.push(`거래처 "${vname}"`); res1.vendor = 'ambiguous' }   // 여럿이면 안 잇는다
         else {
           vendorId = randomUUID()
           await conn.execute('INSERT INTO vendors (id, name, gubu) VALUES (?,?,?)',
             [vendorId, vname, it.kind === 'income' ? 'B' : 'A'])
-          vendorByName[vname] = [vendorId]; createdVendors.push(vname)
+          vendorByName[vname] = [vendorId]; createdVendors.push(vname); res1.vendor = 'created'
+          vendorNameById[vendorId] = vname
+          { const k = normVendorName(vname); if (k) vendorByNorm[k] = [vendorId] }   // 같은 파일의 다음 줄이 또 만들지 않게
         }
       }
       const cname = String(it.contract || '').trim()
@@ -1298,17 +1381,22 @@ router.post('/import/commit', async (req, res, next) => {
       })
       // 금액 검증도 개별 등록과 같게 — 음수 지출이 들어오면 계좌 잔액이 늘어난다
       const ae = amountError(it.amount)
-      if (ae) { skippedAmount++; continue }
+      if (ae) { skippedAmount++; res1.status = 'amount'; continue }
+      /* 계정과목 — 적힌 값을 코드로 풀고, 없으면 **비목이 정한 계정**을 쓴다(양식 안내 "비우면 비목을 따라가요").
+         예전엔 비워도 비목을 안 따라가 null 로 들어갔다 — 그 거래들의 전표가 한 다리로 섰다. */
+      const acctCode = (await importAcctCode(conn, it.account_code)) || cs.account_code || null
       /* account_code — 빠지면 일계표에서 상대 계정이 비어 차·대변이 안 맞는다.
          엑셀 대량 등록은 수백 건이 한 번에 들어오는 경로라, 빠지면 그날들이 통째로 깨진다.
          (주석은 값 배열 **밖에** 둔다 — check:isolation 의 인자 개수 검사가 주석 안의
           콤마까지 값으로 세어 '?=17 값=18' 오탐이 난다) */
+      const txnId = randomUUID()
+      res1.id = txnId
       await conn.execute(`
         INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, account_code, category, amount, date, method, status, doc_no, memo,
                                   supply_amount, vat_amount, tax_type, vat_deductible)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      `, [randomUUID(), it.kind, vendorId, contractId, it.account_id || accountId,
-          it.account_code || null,
+      `, [txnId, it.kind, vendorId, contractId, it.account_id || accountId,
+          acctCode,
           it.category || '', it.amount, it.date,
           '계좌이체', it.kind === 'income' ? '입금완료' : '지급완료',
           (cname && !contractId) ? cname : '', it.memo || '',
@@ -1318,8 +1406,8 @@ router.post('/import/commit', async (req, res, next) => {
     await conn.commit()
     /* ambiguous — 이름이 겹쳐 **일부러 안 이은** 것. 조용히 비우면 "왜 주문이 안 붙었지"가
        한참 뒤 계약 수익을 볼 때에야 드러난다. 올린 자리에서 바로 알린다. */
-    res.json({ inserted, createdVendors, skippedFuture, skippedClosed, skippedAmount, skippedBeforeStart,
-      ambiguous: [...new Set(ambiguous)] })
+    res.json({ inserted, createdVendors, skippedFuture, skippedClosed, skippedAmount, skippedBeforeStart, skippedDup,
+      ambiguous: [...new Set(ambiguous)], linkedVendors, results })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
@@ -1497,46 +1585,81 @@ router.post('/import/card', async (req, res, next) => {
 // ── 엑셀 임포트: 양식 다운로드(.xlsx) ──
 router.get('/import/template', async (req, res, next) => {
   try {
-    /* ⚠ 샘플은 아래 COLS 와 **칸 수가 같아야 한다.** 열을 늘리고 여기를 안 늘리면
-         값이 옆 칸으로 밀려, 받아 간 사람이 그 줄을 보고 그대로 따라 적는다. */
-    const rows = [
-      ["거래일자", "거래처", "주문명", "구분", "비목", "계정과목", "금액", "공급가액", "부가세", "계좌", "메모"],
-      ["2026-06-01", "(주)한빛문구", "", "지출", "소모품", "", 80000, "", "", "기업은행 계좌1", "사무용품"],
-      ["2026-06-03", "정밀가공(주)", "홈페이지 유지보수", "지출", "외주가공비", "", 1650000, 1500000, 150000, "기업은행 계좌1", "6월 외주분"],
-      ["2026-06-10", "(재)부산영재교육진흥원", "홈페이지 개선", "입금", "납품대금", "", 3500000, "", "", "", "선급금"],
-    ]
-    /* ⚠ 이 머리글은 업로드 마법사가 열을 알아보는 근거다(Docs.jsx guessTarget).
-         **글자를 바꾸지 말 것** — 바꾸면 받아 간 양식이 그대로 안 붙는다.
-       예전엔 마법사가 받아 주는 열 넷(계정과목·공급가액·부가세·계좌)이 양식에 없었다.
-       양식대로 채운 사람은 그 값을 넣을 자리가 없어, 통장 여러 개를 한 파일로 올리지도
-       못하고 부가세도 따로 적지 못했다. 마법사가 읽는 것과 양식을 맞춘다. */
+    /* 양식은 **이 회사 것**으로 만든다(2026-09-30 사용자: "기준정보를 왔다 갔다 하며 봐야 할 게 많다").
+     *   - 예시 줄을 없앴다. 엑셀엔 placeholder 가 없어 회색 예시 줄을 넣었는데, 지우지 않고 올리면
+     *     가짜 거래가 그대로 등록됐다. 예시는 칸을 고르면 뜨는 **안내 풍선**으로 옮겼다(xlsxBook templateSheet).
+     *   - 계좌·비목은 **이 회사 목록**을 시트로 싣고 ▼ 로 고르게 한다. 비목 목록엔 부가세·계정과목을 함께 적어
+     *     기준정보 화면을 따로 열지 않아도 된다.
+     * ⚠ 머리글 글자는 업로드 마법사가 열을 알아보는 근거다(Docs.jsx guessTarget) — **바꾸지 말 것.**
+     * ⚠ 화면의 1단계 안내(Docs.jsx TEMPLATE_GUIDE)와 같은 말이어야 한다. */
+    const [accts] = await req.db.execute('SELECT name, bank, number, kind FROM accounts ORDER BY name')
+    const [cats] = await req.db.execute(
+      `SELECT c.id, c.name, c.vat, c.account_code, s.name AS acct_name
+         FROM categories c LEFT JOIN account_subjects s ON s.code = c.account_code
+        WHERE c.active = 1 ORDER BY c.id LIKE 'INC-%' DESC, c.sort_order, c.id`).catch(() => [[]])
+
+    const listRef = (sheetName, n) => ({ ref: `'${sheetName}'!$A$2:$A$${Math.max(2, n + 1)}` })
     const COLS = [
-      { header: '거래일자', width: 12, required: true }, { header: '거래처', width: 22 },
-      { header: '주문명', width: 24 }, { header: '구분', width: 8, required: true },
-      { header: '비목', width: 14 }, { header: '계정과목', width: 14 },
-      { header: '금액', width: 12, required: true, money: true },
-      { header: '공급가액', width: 12, money: true }, { header: '부가세', width: 12, money: true },
-      { header: '계좌', width: 18 }, { header: '메모', width: 20 },
+      { header: '거래일자', width: 12, required: true,
+        prompt: '거래일. 예: 2026-06-01 (2026.6.1 형식도 인식)' },
+      { header: '거래처', width: 22,
+        prompt: '예: (주)한빛문구 — 미등록 거래처는 업로드 시 자동 등록. 생략 가능.' },
+      { header: '주문명', width: 24,
+        prompt: '연결할 주문명. 없으면 생략.' },
+      { header: '구분', width: 8, required: true, list: ['입금', '지출'], strict: true,
+        prompt: '입금 / 지출 선택' },
+      { header: '비목', width: 16, list: listRef('비목 목록', cats.length),
+        prompt: "목록에서 선택. 부가세·계정과목은 '비목 목록' 시트 설정이 적용됩니다." },
+      { header: '계정과목', width: 14,
+        prompt: '생략 가능 — 비목에 연결된 계정과목이 적용됩니다.' },
+      { header: '금액', width: 12, required: true, money: true,
+        prompt: '부가세 포함 금액(숫자). 예: 1650000' },
+      { header: '공급가액', width: 12, money: true,
+        prompt: '공급가액·부가세를 나눠 적을 때만. 생략 시 비목의 부가세 설정으로 계산.' },
+      { header: '부가세', width: 12, money: true,
+        prompt: '공급가액·부가세를 나눠 적을 때만. 생략 시 비목의 부가세 설정으로 계산.' },
+      { header: '계좌', width: 18, list: listRef('계좌 목록', accts.length),
+        prompt: '목록에서 선택 또는 계좌번호 입력. 생략 시 업로드 화면에서 지정한 계좌 적용.' },
+      { header: '메모', width: 20, prompt: '예: 6월 외주분' },
     ]
 
-    const guide = [
-      ["거래내역 일괄 업로드 — 작성 안내"],
-      [""],
-      ["• 거래일자: YYYY-MM-DD 권장 (예: 2026-06-01). 2026.6.1 / 6/1/26 형식도 인식됩니다."],
-      ["• 거래처: 비워도 됩니다. 목록에 없는 거래처는 업로드 시 자동 등록돼요 (입금=발주처 / 지출=매입처)."],
-      ["• 주문명: 연결할 주문이 있으면 정확히 입력, 없으면 비워두세요."],
-      ["• 구분: '입금' 또는 '지출' (수입·매출=입금 / 매입·출금=지출 도 인식)."],
-      ["• 비목: 외주가공비·소모품·납품대금 등 자유롭게 입력하세요."],
-      ["• 금액: 숫자만 입력(쉼표 가능). 부호 없이 양수로. 부가세가 있으면 부가세까지 더한 금액입니다."],
-      ["• 계정과목: 비워도 됩니다. 비우면 비목에 연결된 계정과목을 따라가요."],
-      ["• 공급가액·부가세: 세금계산서처럼 나눠 적을 때만 쓰세요. 비우면 비목의 부가세 설정대로 계산합니다."],
-      ["• 계좌: 어느 통장·카드에서 오갔는지. 비우면 업로드 화면에서 고른 계좌로 한꺼번에 들어갑니다."],
-      ["  ※ 통장이 여러 개면 이 칸을 채우세요 — 한 파일로 여러 계좌를 올릴 수 있습니다."],
-      ["• 첫 행(머리글)은 그대로 두고, 둘째 행부터 데이터를 입력하세요."],
-    ]
     const wb = newBook()
-    templateSheet(wb, '거래내역', { columns: COLS, samples: rows.slice(1) })
-    guideSheet(wb, guide.map(g => g[0]), '작성안내', { hasRequired: true })
+    templateSheet(wb, '거래내역', { columns: COLS, samples: [] })
+
+    // 고를 목록 — 첫 열이 ▼ 목록의 값이다(위 listRef 가 A열을 본다)
+    const listSheet = (name, header, rows, widths) => {
+      const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1 }] })
+      ws.columns = widths.map(w => ({ width: w }))
+      const h = ws.getRow(1)
+      header.forEach((t, i) => {
+        const c = h.getCell(i + 1)
+        c.value = t
+        c.font = { bold: true, size: 10 }
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F4F7' } }
+      })
+      rows.forEach((r, i) => r.forEach((v, j) => { ws.getRow(i + 2).getCell(j + 1).value = v }))
+    }
+    listSheet('계좌 목록', ['계좌 이름', '은행', '계좌번호', '종류'],
+      accts.map(a => [a.name, a.bank || '', a.number || '', a.kind === 'card' ? '카드' : '통장']), [22, 12, 22, 8])
+    listSheet('비목 목록', ['비목', '입금/지출', '부가세', '계정과목'],
+      cats.map(c => [c.name, String(c.id).startsWith('INC-') ? '입금' : '지출', c.vat || '',
+        c.account_code ? `${c.account_code} ${c.acct_name || ''}`.trim() : '']), [20, 10, 10, 22])
+
+    const guide = [
+      '거래내역 일괄 업로드 — 작성 안내',
+      '',
+      '• 거래일자: YYYY-MM-DD 권장 (예: 2026-06-01). 2026.6.1 / 6/1/26 형식도 인식됩니다.',
+      '• 구분: ▼ 로 입금 또는 지출.',
+      '• 금액: 숫자만(쉼표 가능), 부호 없이. 부가세가 있으면 부가세까지 더한 금액입니다.',
+      "• 계좌: ▼ 로 고르세요('계좌 목록' 시트). 계좌번호로 적어도 알아봅니다. 비우면 업로드 화면에서 고른 계좌로 들어갑니다.",
+      '  ※ 통장이 여러 개면 이 칸을 채우세요 — 한 파일로 여러 계좌를 올릴 수 있습니다.',
+      '• 거래처: 비워도 됩니다. 목록에 없는 거래처는 업로드 시 자동 등록돼요 (입금=발주처 / 지출=매입처).',
+      "• 비목: ▼ 로 고르세요('비목 목록' 시트). 부가세·계정과목이 비목 설정대로 따라옵니다.",
+      '• 주문명: 연결할 주문이 있으면 정확히, 없으면 비워 두세요.',
+      '• 계정과목·공급가액·부가세: 비워도 됩니다. 세금계산서처럼 나눠 적을 때만 쓰세요.',
+      '• 첫 행(열 제목)은 그대로 두고, 둘째 행부터 적으세요.',
+    ]
+    guideSheet(wb, guide, '작성안내', { hasRequired: true, hasSamples: false })
     await sendBook(res, wb, '거래내역_업로드_양식.xlsx')
   } catch (e) { next(e) }
 })

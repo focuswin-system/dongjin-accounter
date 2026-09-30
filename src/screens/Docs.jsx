@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react'
+import { payDayLabel } from '../lib/cardPayDay'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, Popover, Loading, periodToRange, DateInput, yearLabel, useFiscalTick } from '../lib/ui'
 // SAMPLE placeholder — Docs 화면은 실 API 연동 전까지 빈 데이터로 동작
 const SAMPLE = {
@@ -11,7 +12,8 @@ import { api } from '../lib/api'
 import { useApprovalOn, useDocApproval, ApprovalButtons, ApprovalLine, ApprovalStamp, RejectedNote, listStatusOf } from '../lib/components/Approval'
 import { isCountable, notCountable } from '../lib/txnScope'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
-import { DataTable } from '../lib/components/DataTable'
+import { DataTable, Sub } from '../lib/components/DataTable'
+import { AccountPicker } from '../lib/components/AccountPicker'
 import { PageHeader } from '../lib/components/PageHeader'
 import { TileBoard } from '../lib/components/TileBoard'
 import { usePerms } from '../lib/perms'
@@ -24,6 +26,8 @@ import { DocFilters, approvalStatuses, vendorParams } from '../lib/components/Do
 import { ExecDrawer, approveAndAsk } from '../lib/components/ExecDrawer'
 import { useDocList } from '../lib/useDocList'
 import { looksLikeTaxInvoice } from '../lib/hometax'
+import { useOrdersFromMes } from '../lib/customModules'
+import { normVendorName } from '../lib/normalize'
 import { PrintButton } from '../lib/components/PrintButton'
 import { copySeedOf, resolutionTotalOf } from '../lib/docCopy'
 import { PrintEditButton } from '../lib/components/PrintEditButton'
@@ -1207,7 +1211,14 @@ const normDate = (v) => {
   if (v == null || v === '') return ''
   const s = String(v).trim()
   const m = s.match(/(\d{4})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})/)
-  if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`
+  if (m) {
+    /* 모양만 맞고 **없는 날짜**(2026-13-40)는 날짜가 아니다. 예전엔 그대로 통과해
+       서버에서 엉뚱한 이유(미래 날짜)로 빠지거나 저장 오류가 났다 */
+    const [y, mo, d] = [+m[1], +m[2], +m[3]]
+    const t = new Date(y, mo - 1, d)
+    if (t.getFullYear() !== y || t.getMonth() !== mo - 1 || t.getDate() !== d) return ''
+    return `${m[1]}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+  }
   const d = new Date(s)
   if (!isNaN(d.getTime())) return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   return ''
@@ -1224,6 +1235,196 @@ const normKind = (v) => {
   return null
 }
 
+/* 양식 칸 안내 — 1단계 '양식 받기'에 그대로 보여 준다.
+   ⚠ 서버 양식(server/routes/transactions.js /import/template 의 COLS·작성안내)과 **같은 말**이어야 한다.
+   칸 이름을 바꾸면 guessTarget 이 못 알아본다 — 이름은 여기서도 그대로 쓴다. */
+const TEMPLATE_GUIDE = [
+  { col: '거래일자', req: true, how: '거래일 (2026.6.1 형식도 인식)', ex: '2026-06-01', num: true },
+  { col: '구분',     req: true, how: '입금 / 지출 선택', ex: '지출' },
+  { col: '금액',     req: true, how: '부가세 포함 금액 (숫자)', ex: '1,650,000', num: true },
+  { col: '계좌',     how: '목록에서 선택 또는 계좌번호 입력', ex: '기업은행 계좌1 · 4010' },
+  { col: '거래처',   how: '미등록 거래처는 자동 등록', ex: '(주)한빛문구' },
+  { col: '비목',     how: '목록에서 선택 (부가세·계정과목 자동 적용)', ex: '소모품 · 외주가공비' },
+  { col: '주문명',   how: '연결할 주문명', ex: '홈페이지 유지보수', orders: true },
+  { col: '메모',     how: '자유 입력', ex: '6월 외주분' },
+  { col: '계정과목 · 공급가액 · 부가세', how: '생략 가능 (비목 설정 적용)', ex: '' },
+]
+/* 양식에 들어 있는 예시 줄 — 지우지 않고 올리면 **가짜 거래가 실제로 등록된다.**
+   날짜·거래처·금액이 셋 다 같을 때만 예시로 본다(진짜 거래가 우연히 겹칠 일은 없다).
+   ⚠ 서버 양식의 예시(rows)를 바꾸면 여기도 같이 바꾼다. */
+/* 줄 오류의 이름 — '오류'를 기계적으로 붙이면 '미래 오류'가 된다(2026-09-30 사용자: "미래오류가 뭐임?").
+   무엇이 왜 안 되는지를 그대로 말한다 */
+const ERR_LABEL = {
+  날짜: '날짜 형식 오류', 금액: '금액 오류', 구분: '구분 오류', 계좌: '미등록 계좌',
+  미래: '미래 일자', 계정과목: '미등록 계정과목', 비목: '비목 오류', 예시: '양식 예시 행',
+}
+const TEMPLATE_SAMPLES = new Set([
+  '2026-06-01|(주)한빛문구|80000',
+  '2026-06-03|정밀가공(주)|1650000',
+  '2026-06-10|(재)부산영재교육진흥원|3500000',
+])
+
+/* 등록 결과 — **어느 줄이 등록됐고, 어느 줄이 왜 빠졌고, 거래처는 어떻게 됐는지.**
+   예전엔 "30건이 등록됐어요"와 빠진 건수만 떠서, 어느 줄인지 찾으려면 엑셀과 거래내역을 대조해야 했다(2026-09-30 사용자). */
+const RESULT_LABEL = {
+  inserted: '등록', error: '등록 불가', pulled: '제외',
+  future: '미래 일자', closed: '마감 월', amount: '금액 오류', beforeStart: '장부 시작일 이전', duplicate: '중복 거래',
+}
+const ImportResult = ({ result, goRoute, onAgain }) => {
+  const [show, setShow] = useState('all')   // all | ok | no
+  const [q, setQ] = useState('')
+  const rows = result.rows || []
+  const ok = rows.filter(r => r.out.status === 'inserted')
+  const no = rows.filter(r => r.out.status !== 'inserted')
+  const why = (r) => r.out.status === 'error'
+    ? [...new Set(r.errs)].map(e => ERR_LABEL[e] || e).join(' · ')
+    : r.out.status === 'beforeStart' ? '장부 시작일 이전 — 기초잔액에 포함'
+    : RESULT_LABEL[r.out.status] || r.out.status
+  const vendorOf = (r) => r.out.vendor
+  const created = [...new Set(ok.filter(r => vendorOf(r) === 'created').map(r => r.vendor))]
+  const linked = result.linkedVendors || []
+  const existing = [...new Set(ok.filter(r => vendorOf(r) === 'existing').map(r => r.vendor))]
+  const unclear = [...new Set(ok.filter(r => vendorOf(r) === 'ambiguous').map(r => r.vendor))]
+
+  const kw = q.trim().toLowerCase()
+  const list = (show === 'ok' ? ok : show === 'no' ? no : rows).filter(r => !kw
+    || [r.vendor, r.category, r.memo, r.acctName, r.contract].some(v => String(v || '').toLowerCase().includes(kw)))
+
+  return (
+    <div className="col gap-16 fade-up">
+      <div className="card card-pad row gap-16" style={{ alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ width: 44, height: 44, borderRadius: 12, background: "var(--pos-soft)", color: "var(--pos)", display: "grid", placeItems: "center" }}><Icon.Check size={22}/></div>
+        <div>
+          <div className="fw-700" style={{ fontSize: 16 }}>{ok.length}건이 등록됐어요</div>
+          <div className="text-sm text-muted" style={{ marginTop: 2 }}>
+            {no.length > 0 ? `등록 불가 ${no.length}건 — 아래 업로드 내역에서 확인할 수 있습니다` : '업로드한 행이 모두 등록됐습니다'}
+          </div>
+        </div>
+        <div className="row gap-8 ml-auto">
+          <button className="btn" onClick={() => goRoute?.('ledger')}>거래내역에서 보기</button>
+          <button className="btn primary" onClick={onAgain}>새 파일 업로드</button>
+        </div>
+      </div>
+
+      {/* 거래처 — 새로 만든 곳·이어 붙인 곳. 오타로 생긴 거래처는 여기서 바로 눈에 띈다 */}
+      <div className="card card-pad col gap-12">
+        <div className="section-title">거래처</div>
+        <div className="form-grid-2">
+          <div>
+            <div className="text-sm fw-700">거래처 자동 등록 (신규) {created.length}곳</div>
+            <div className="text-xs text-muted2" style={{ margin: "2px 0 6px" }}>미등록 거래처를 신규 등록했습니다</div>
+            <div className="row gap-6" style={{ flexWrap: "wrap" }}>
+              {created.length ? created.map(n => <span key={n} className="badge outline">{n}</span>) : <span className="text-sm text-muted2">없음</span>}
+            </div>
+          </div>
+          <div>
+            <div className="text-sm fw-700">거래처 자동 매칭 {linked.length + existing.length}곳</div>
+            <div className="text-xs text-muted2" style={{ margin: "2px 0 6px" }}>
+              기존 거래처에 연결했습니다{linked.length ? ` — ${linked.length}곳은 법인 표기·띄어쓰기 차이` : ''}
+            </div>
+            <div className="row gap-6" style={{ flexWrap: "wrap" }}>
+              {linked.map(l => <span key={l.from} className="badge outline">{l.from} → {l.to}</span>)}
+              {existing.map(n => <span key={n} className="badge outline">{n}</span>)}
+              {!linked.length && !existing.length && <span className="text-sm text-muted2">없음</span>}
+            </div>
+          </div>
+          {unclear.length > 0 && (
+            <div>
+              <div className="text-sm fw-700">거래처 미지정 {unclear.length}곳</div>
+              <div className="text-xs text-muted2" style={{ margin: "2px 0 6px" }}>동일 이름 거래처가 여러 곳입니다 — 거래내역에서 지정해 주세요</div>
+              <div className="row gap-6" style={{ flexWrap: "wrap" }}>
+                {unclear.map(n => <span key={n} className="badge warn">{n}</span>)}
+              </div>
+            </div>
+          )}
+        </div>
+        {result.ambiguous?.some(a => a.startsWith('주문')) && (
+          <div className="text-xs text-muted">
+            주문명 중복으로 연결하지 못한 항목: {result.ambiguous.filter(a => a.startsWith('주문')).join(' · ')} — 거래내역에서 연결해 주세요.
+          </div>
+        )}
+      </div>
+
+      {/* 올린 줄 전부 — 거르기·찾기 */}
+      <div className="card">
+        <div className="row gap-8" style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", flexWrap: "wrap", alignItems: "center" }}>
+          <div className="section-title">업로드 내역</div>
+          <div className="row gap-6" style={{ marginLeft: 8 }}>
+            {[['all', `전체 ${rows.length}`], ['ok', `등록 ${ok.length}`], ['no', `등록 불가 ${no.length}`]].map(([v, l]) => (
+              <button key={v} className={`chip ${show === v ? 'active' : ''}`} onClick={() => setShow(v)}>{l}</button>
+            ))}
+          </div>
+          <div className="search tbar-search ml-auto">
+            <Icon.Search size={14}/>
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="거래처·비목·메모·계좌 검색"/>
+          </div>
+        </div>
+        <DataTable
+          rows={list}
+          rowKey={r => r.idx}
+          maxHeight={520}
+          empty="해당 내역이 없습니다."
+          rowClass={r => (r.out.status === 'inserted' ? undefined : 'imp-err')}
+          columns={[
+            { key: 'idx', header: '행', width: 48, sortable: true, render: r => <span className="num text-muted2">{r.idx + 2}</span> },
+            { key: 'date', header: '날짜', sortable: true, render: r => <span className="num text-sm">{r.date || r.rawDate || '—'}</span> },
+            { key: 'vendor', header: '거래처', sortable: true, render: r => (
+              <><span className="fw-600">{r.vendor || '—'}</span>
+                {r.out.vendor === 'created' && <Sub>신규</Sub>}
+                {r.out.vendor === 'linked' && <Sub>→ {r.out.vendorTo}</Sub>}
+                {r.out.vendor === 'ambiguous' && <Sub>미지정</Sub>}</>
+            ) },
+            { key: 'kind', header: '구분', render: r => (r.kind ? (r.kind === 'income' ? '입금' : '지출') : (r.rawKind || '—')) },
+            { key: 'category', header: '비목', sortable: true, render: r => r.category || '—' },
+            { key: 'amount', header: '금액', align: 'right', sortable: true, sortValue: r => r.amount ?? -1,
+              render: r => <span className="num-cell">{r.amount != null ? fmtNum(r.amount) : (r.rawAmount || '—')}</span> },
+            { key: 'acct', header: '계좌', render: r => r.acctName || '—' },
+            { key: 'out', header: '결과', sortable: true, sortValue: r => (r.out.status === 'inserted' ? 1 : 0),
+              render: r => (r.out.status === 'inserted'
+                ? <span className="badge pos"><Icon.Check size={11}/> 등록</span>
+                : r.out.status === 'pulled'
+                  ? <span className="badge outline">제외{r.warns?.some(w => w.short === '이미 등록됨') ? ' · 중복 의심' : ''}</span>
+                  : <span className="badge neg"><Icon.Close size={11}/> {why(r)}</span>) },
+          ]}/>
+      </div>
+    </div>
+  )
+}
+
+/* 중복 의심 줄 아래 — 올린 줄과 이미 있는 거래를 나란히. 사람이 보고 넣을지 정한다 */
+const DupCompare = ({ same, out, onToggle }) => {
+  // 서버는 UTC(ISO)로 준다 — 그대로 자르면 9시간 어긋난다. 이 컴퓨터 시각(한국)으로 읽는다
+  const when = (() => {
+    if (!same.createdAt) return '—'
+    const d = new Date(same.createdAt), p2 = n => String(n).padStart(2, '0')
+    return isNaN(d) ? '—' : `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`
+  })()
+  /* 올린 줄은 바로 위에 보인다 — 여기엔 **이미 있는 거래**만(2026-09-30 사용자).
+     등록 시각은 제 칸을 준다 — 이름 옆에 붙였더니 좁아서 줄이 바뀌었다 */
+  const cells = [
+    ['등록일자', when, true], ['날짜', same.date, true], ['거래처', same.vendor || '—'],
+    ['금액', fmtNum(same.amount), true], ['계좌', same.account || '—'], ['비목', same.category || '—'], ['메모', same.memo || '—'],
+  ]
+  return (
+    /* 펼침 줄은 안쪽 여백이 0이다(DataTable) — 여백은 여기서 */
+    <div className="col gap-10" style={{ padding: "12px 16px" }}>
+      <div className="text-sm">
+        <b>기존 거래</b>
+        <span className="text-muted" style={{ marginLeft: 6 }}>일자·금액·계좌·거래처가 같습니다. 같은 파일을 다시 업로드한 경우 제외하세요.</span>
+      </div>
+      <table className="table table-compact" style={{ background: "var(--surface)", borderRadius: 8 }}>
+        <thead><tr>{cells.map(c => <th key={c[0]} style={{ whiteSpace: "nowrap" }}>{c[0]}</th>)}</tr></thead>
+        <tbody><tr>{cells.map(c => <td key={c[0]} className={`text-sm${c[2] ? ' num' : ''}`} style={c[2] ? { whiteSpace: "nowrap" } : undefined}>{c[1]}</td>)}</tr></tbody>
+      </table>
+      {/* 상태와 바꾸는 버튼은 붙여 둔다 — 멀리 떨어지면 무엇을 바꾸는 버튼인지 눈이 오간다 */}
+      <div className="row gap-10" style={{ alignItems: "center" }}>
+        <span className="text-sm">{out ? '현재 제외됨 — 등록되지 않습니다.' : '현재 포함됨 — 중복 등록됩니다.'}</span>
+        <button className="btn sm" onClick={onToggle}>{out ? '포함' : '제외'}</button>
+      </div>
+    </div>
+  )
+}
+
 export const ExcelScreen = ({ goRoute }) => {
   const toast = useToast()
   const fileRef = useRef(null)
@@ -1231,20 +1432,57 @@ export const ExcelScreen = ({ goRoute }) => {
   const [rawRows, setRawRows] = useState([])
   const [mapping, setMapping] = useState([])
   const [defaultKind, setDefaultKind] = useState('expense')
+  /* 사람이 뺀 줄 — **등록되는 줄에만** 쓴다(중복 경고처럼 '들어가긴 하는데 빼고 싶은' 줄).
+     오류 줄은 원래 안 들어간다. 예전엔 오류 줄에도 [제외]가 있어서, 제외해야 안 들어가는 것처럼 보였다(2026-09-30 사용자) */
   const [excluded, setExcluded] = useState(() => new Set())
+  /* 미리보기에서 고친 값 — { [줄 idx]: { date, amount, kind, account_id, category, account_code } }
+     몇 줄 틀렸다고 엑셀로 돌아가 고치고·저장하고·다시 올리고·칸을 다시 맞추게 하지 않는다(2026-09-30 사용자).
+     **틀린 칸만** 고치게 한다(멀쩡한 칸까지 열면 미리보기가 엑셀 편집기가 된다).
+     ⚠ 항목 기준으로 들고 있다 — 칸 맞추기(매핑)를 바꿔도 고친 값은 남는다.
+     ⚠ 올린 파일은 그대로다 — 같은 파일을 또 올리면 같은 오류가 난다. */
+  const [fixes, setFixes] = useState({})
+  const [mapOpen, setMapOpen] = useState(null)
+  /* 이미 등록된 같은 거래 — { [줄 idx]: { date, amount, vendor, memo } }. 같은 파일을 두 번 올리면
+     전부 두 번 들어가던 것을 막는다(2026-09-30 사용자). 찾으면 **기본으로 제외한다** — 진짜 두 번 오간 돈이면 [그래도 넣기].
+     한 번 자동으로 뺀 줄은 기억한다(autoOut) — 사람이 [다시 넣기]한 걸 다음 확인에서 또 빼면 안 된다 */
+  const [dupHits, setDupHits] = useState({})
+  const [dupOpen, setDupOpen] = useState(() => new Set())   // 비교를 펼친 줄
+  const toggleDup = (idx) => setDupOpen(s => { const n = new Set(s); n.has(idx) ? n.delete(idx) : n.add(idx); return n })
+  const autoOut = useRef(new Set())
+  const setFix = (idx, k, v) => setFixes(f => ({ ...f, [idx]: { ...(f[idx] || {}), [k]: v } }))
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
   // 올린 파일이 세금계산서 목록으로 보이나 — 맞으면 다른 자리를 알려 준다(막지는 않는다)
   const [taxLike, setTaxLike] = useState(false)
   // 대량 등록분이 어느 계좌에서 오간 것인지 — 없으면 잔액에 반영되지 않는다
   const [importAccounts, setImportAccounts] = useState([])
+  /* ⚠ 일괄 계좌를 **미리 고르지 않는다.** 계좌 칸이 빈 행 전부가 이 통장으로 들어가는데,
+     첫 통장을 채워 두면 확인 없이 눌러 수백 건이 엉뚱한 잔액에 붙는다(lib/mainAccount.js 의 사고와 같은 유형) */
   const [importAccountId, setImportAccountId] = useState("")
+  useEffect(() => { api.getAccounts().then(setImportAccounts) }, [])
+  // 계정과목·비목 — 올리기 **전에** 틀린 줄을 보여 주려고(서버는 조용히 비목 설정으로 돌린다)
+  const [vendorsAll, setVendorsAll] = useState([])
+  useEffect(() => { api.getVendors({ all: true }).then(r => setVendorsAll(Array.isArray(r) ? r : [])) }, [])
+  const [subjects, setSubjects] = useState([])
+  const [cats, setCats] = useState([])
   useEffect(() => {
-    api.getAccounts().then(list => {
-      setImportAccounts(list)
-      setImportAccountId(prev => prev || list.find(a => a.kind === "bank")?.id || "")
-    })
+    api.getAccountSubjects({ postableOnly: true }).then(r => setSubjects(Array.isArray(r) ? r : []))
+    api.getCategories().then(r => setCats(Array.isArray(r) ? r : []))
   }, [])
+  /* 계정과목 칸 → 코드. 서버(routes/transactions.js importAcctCode)와 같은 규칙:
+     앞의 숫자가 코드('6101', '6101 원재료비'), 숫자가 없으면 이름('원재료비') */
+  const subjectCode = (raw) => {
+    const t = String(raw ?? '').trim()
+    if (!t) return null
+    const m = t.match(/^(\d{3,})/)
+    const hit = m ? subjects.find(a => String(a.code) === m[1]) : subjects.find(a => a.name === t)
+    return hit ? String(hit.code) : null
+  }
+  // 비목이 그 방향(입금/지출)에 있나 — 입금 줄에 지출 비목이면 서버가 못 찾아 계정이 빈다
+  const catOk = (name, kind) => cats.some(c => c.name === name && String(c.id || '').startsWith(kind === 'income' ? 'INC-' : 'EXP-'))
+  // 1단계(양식 받기)를 지나갔나 — 처음 오면 양식 안내부터, '새 파일 업로드'는 2단계로 돌아온다
+  const [started, setStarted] = useState(false)
+  const ordersFromMes = useOrdersFromMes()
 
   const onFile = async (f) => {
     if (!f) return
@@ -1262,13 +1500,30 @@ export const ExcelScreen = ({ goRoute }) => {
       setRawRows(rows)
       setMapping(headers.map(h => ({ excelCol: h, target: guessTarget(h) })))
       setExcluded(new Set())
+      setFixes({})
+      setMapOpen(null)
+      setDupHits({}); autoOut.current = new Set()
       setTaxLike(looksLikeTaxInvoice(headers))
     } catch (e) { toast.push(e.message || "파싱 실패", { tone: 'warn' }) }
     setBusy(false)
   }
 
-  const reset = () => { setFile(null); setRawRows([]); setMapping([]); setExcluded(new Set()); setResult(null); setTaxLike(false) }
+  const reset = () => { setFile(null); setRawRows([]); setMapping([]); setExcluded(new Set()); setFixes({}); setDupHits({}); autoOut.current = new Set(); setResult(null); setTaxLike(false) }
   const colFor = (t) => mapping.find(m => m.target === t)?.excelCol
+  /* 칸 맞추기에서 사람이 볼 것 — 양식대로 올리면 다 저절로 맞아 **할 일이 없다**. 그때는 한 줄로 접는다(2026-09-30 사용자: "너무 길다").
+     할 일: 꼭 필요한 항목(날짜·금액)이 빠졌거나, 값이 든 칸을 못 알아봤거나, 두 칸이 같은 항목에 걸렸을 때 */
+  const firstValue = (col) => {
+    const i = rawRows.findIndex(r => String(r?.[col] ?? '').trim() !== '')
+    return i < 0 ? null : { v: String(rawRows[i][col]), row: i + 2 }
+  }
+  const mapNeeds = (() => {
+    const missing = ["날짜", "금액"].filter(t => colFor(t) == null)
+    const unknown = mapping.filter(m => m.target === "사용 안함" && firstValue(m.excelCol))
+    const dupT = Object.entries(mapping.reduce((a, m) => (m.target !== "사용 안함" ? { ...a, [m.target]: (a[m.target] || 0) + 1 } : a), {}))
+      .filter(([, n]) => n > 1).map(([t]) => t)
+    return { missing, unknown, dupT, any: missing.length + unknown.length + dupT.length > 0 }
+  })()
+  const mapShown = mapOpen ?? mapNeeds.any
   const setMap = (i, k, v) => setMapping(ms => ms.map((m, idx) => idx === i ? { ...m, [k]: v } : m))
 
   /* 계좌 이름 → 계좌 id. 회계 프로그램에서 뽑은 통합 분개장은 여러 통장·카드가 섞여 있어,
@@ -1278,38 +1533,132 @@ export const ExcelScreen = ({ goRoute }) => {
     for (const a of importAccounts) { const k = String(a.name || '').replace(/\s/g, ''); if (k && !m[k]) m[k] = a.id }
     return m
   }, [importAccounts])
-  const matchAccount = (v) => acctByName[String(v || '').replace(/\s/g, '')] || null
+  /* 계좌번호로도 찾는다(2026-09-30 사용자) — 통장 내역에서 옮기면 이름보다 번호가 먼저 있다.
+     숫자만 비교하고, 전체가 같거나 **끝자리가 딱 하나에만** 맞을 때만 잇는다(4자리 이상).
+     둘 이상에 걸리면 잇지 않는다 — 엉뚱한 통장 잔액에 붙는 것보다 '못 찾음'으로 묻는 게 낫다. */
+  const acctNos = useMemo(() => importAccounts
+    .map(a => ({ id: a.id, no: String(a.number || '').replace(/\D/g, '') })).filter(a => a.no), [importAccounts])
+  const matchAccount = (v) => {
+    const byName = acctByName[String(v || '').replace(/\s/g, '')]
+    if (byName) return byName
+    const d = String(v || '').replace(/\D/g, '')
+    if (d.length < 4) return null
+    const exact = acctNos.filter(a => a.no === d)
+    if (exact.length === 1) return exact[0].id
+    const tail = acctNos.filter(a => a.no.endsWith(d))
+    return tail.length === 1 ? tail[0].id : null
+  }
 
   const preview = rawRows.map((row, idx) => {
     const g = (t) => { const c = colFor(t); return c != null ? row[c] : '' }
-    const date = normDate(g("날짜"))
+    const f = fixes[idx] || {}
+    const has = (k) => Object.prototype.hasOwnProperty.call(f, k)
+    const date = has('date') ? (f.date || '') : normDate(g("날짜"))
     const kCol = colFor("입금/지출 구분")
-    const kind = kCol != null ? normKind(row[kCol]) : defaultKind
-    const amount = normAmount(g("금액"))
+    const kind = has('kind') ? f.kind : (kCol != null ? normKind(row[kCol]) : defaultKind)
+    const amount = has('amount') ? f.amount : normAmount(g("금액"))
     const acctCol = colFor("계좌")
-    const acctName = acctCol != null ? String(row[acctCol] || '').trim() : ''
+    const acctName = has('account_id')
+      ? (importAccounts.find(a => a.id === f.account_id)?.name || '')
+      : (acctCol != null ? String(row[acctCol] || '').trim() : '')
     // 매핑했는데 이름이 안 맞으면 오류로 잡는다. 조용히 일괄 계좌로 흘리면 엉뚱한 통장 잔액이 된다.
-    const account_id = acctName ? matchAccount(acctName) : null
+    const account_id = has('account_id') ? f.account_id : (acctName ? matchAccount(acctName) : null)
     const errs = []
-    if (!colFor("날짜") || !date) errs.push("날짜")
-    if (!colFor("금액") || amount == null) errs.push("금액")
+    if (!date || (!colFor("날짜") && !has('date'))) errs.push("날짜")
+    if (amount == null || (!colFor("금액") && !has('amount'))) errs.push("금액")
     if (!kind) errs.push("구분")
     if (acctName && !account_id) errs.push("계좌")
+    if (TEMPLATE_SAMPLES.has(`${date}|${String(g("거래처") || '').trim()}|${amount}`)) errs.push("예시")
+    // 서버가 등록 때 건너뛰는 것들 — 미리 보여야 '40건 올렸는데 37건'에 놀라지 않는다
+    if (amount != null && amount <= 0) errs.push("금액")
+    if (date && date > localToday()) errs.push("미래")
+    const acctRaw = has('account_code') ? f.account_code : String(g("계정과목") || '').trim()
+    const code = subjectCode(acctRaw)
+    if (acctRaw && !code) errs.push("계정과목")
+    const category = has('category') ? f.category : String(g("비목") || '').trim()
+    /* 비목이 목록에 없거나 방향이 반대면 계정과목이 비어 전표가 한 다리로 선다 — 계정과목을 직접 적었으면 괜찮다 */
+    if (category && kind && !code && !catOk(category, kind)) errs.push("비목")
+    // 경고(등록은 된다) — 공급가액+부가세가 금액과 안 맞으면 서버가 금액에서 다시 계산한다(lib/vat.js)
+    const sup = normAmount(g("공급가액")), vt = normAmount(g("부가세"))
+    const warns = []
+    if (sup != null && vt != null && amount != null && sup + vt !== amount)
+      warns.push({ short: '공급가액 불일치', long: `공급가액+부가세(${fmtNum(sup + vt)})가 금액과 다릅니다 — 금액 기준으로 재계산합니다` })
     return {
-      idx, date, kind, amount, account_id, acctName,
+      idx, date, kind, amount, account_id, acctName, fixed: new Set(Object.keys(f)),
+      rawDate: String(g("날짜") ?? '').trim(), rawKind: String(kCol != null ? (row[kCol] ?? '') : '').trim(),
+      rawAmount: String(g("금액") ?? '').trim(),
       vendor: String(g("거래처") || '').trim(),
       contract: String(g("주문명") || '').trim(),
-      category: String(g("비목") || '').trim(),
-      account_code: String(g("계정과목") || '').trim(),
+      category,
+      account_code: code || '',
+      warns,
       supply_amount: normAmount(g("공급가액")),
       vat_amount: normAmount(g("부가세")),
       memo: String(g("메모") || '').trim(), errs,
     }
   })
 
-  const active = preview.filter(r => !excluded.has(r.idx))
-  const okRows = active.filter(r => r.errs.length === 0)
-  const errRows = active.filter(r => r.errs.length > 0)
+  {
+    for (const r of preview) {
+      const h = !r.errs.length && dupHits[r.idx]
+      if (h) r.warns.push({ short: '이미 등록됨', dup: true,
+        long: `기존 거래 — ${h.date} · ${h.vendor || '거래처 없음'} · ${fmtNum(h.amount)}원${h.memo ? ` · ${h.memo}` : ''}` })
+    }
+    const seen = new Map()
+    for (const r of preview) {
+      if (r.errs.length) continue
+      const k = [r.date, r.vendor, r.amount, r.kind, r.account_id || r.acctName].join('|')
+      if (seen.has(k)) r.warns.push({ dup: true, short: `${seen.get(k) + 2}행과 중복`, long: `${seen.get(k) + 2}행과 일자·거래처·금액·계좌가 같습니다` })
+      else seen.set(k, r.idx)
+    }
+  }
+  const errRows = preview.filter(r => r.errs.length > 0)
+  const dupAsk = preview.filter(r => r.errs.length === 0)
+    .map(r => ({ idx: r.idx, date: r.date, kind: r.kind, amount: r.amount, account_id: r.account_id || null, vendor: r.vendor }))
+  const dupKey = JSON.stringify([dupAsk, importAccountId])
+  useEffect(() => {
+    if (!dupAsk.length) { setDupHits({}); return }
+    let alive = true
+    const t = setTimeout(async () => {
+      const { dups = {} } = await api.checkImportDups(dupAsk, importAccountId)
+      if (!alive) return
+      const hits = {}
+      for (const [i, h] of Object.entries(dups)) hits[dupAsk[i].idx] = h
+      setDupHits(hits)
+      const fresh = Object.keys(hits).map(Number).filter(idx => !autoOut.current.has(idx))
+      if (fresh.length) {
+        fresh.forEach(idx => autoOut.current.add(idx))
+        setExcluded(s => { const n = new Set(s); fresh.forEach(idx => n.add(idx)); return n })
+      }
+    }, 300)
+    return () => { alive = false; clearTimeout(t) }
+  }, [dupKey])   // eslint-disable-line react-hooks/exhaustive-deps
+  const okRows = preview.filter(r => r.errs.length === 0 && !excluded.has(r.idx))
+  const toggleOut = (idx) => setExcluded(s => { const n = new Set(s); n.has(idx) ? n.delete(idx) : n.add(idx); return n })
+
+  /* 거래처 — 등록 **전에** 어떻게 될지 보여 준다. 서버(routes/transactions.js import/commit)와 같은 순서:
+     글자가 똑같은 거래처 → 같은 회사로 보는 이름(normVendorName) → 없으면 새로 만든다. 여럿에 걸리면 비워 둔다.
+     오타·줄임말은 규칙이 못 잡는다 — 그래서 '새로 만들 거래처'를 눈으로 볼 수 있게 한다 */
+  const vendorPlan = useMemo(() => {
+    const exact = new Map(), norm = new Map()
+    for (const v of vendorsAll) {
+      const n = String(v.name || '').trim()
+      if (n) exact.set(n, (exact.get(n) || 0) + 1)
+      const k = normVendorName(v.name)
+      if (k) norm.set(k, [...(norm.get(k) || []), v.name])
+    }
+    const created = new Set(), linked = new Map(), unclear = new Set()
+    for (const r of okRows) {
+      const n = r.vendor
+      if (!n || exact.get(n) === 1) continue
+      if (exact.get(n) > 1) { unclear.add(n); continue }
+      const hits = norm.get(normVendorName(n)) || []
+      if (hits.length === 1) linked.set(n, hits[0])
+      else if (hits.length > 1) unclear.add(n)
+      else created.add(n)
+    }
+    return { created: [...created], linked: [...linked], unclear: [...unclear] }
+  }, [okRows, vendorsAll])
   /* 표에 그릴 행 — 앞 100행 + **그 뒤에 있는 오류 행 전부**.
      여태 앞 100행만 그려서, 300행짜리 파일의 250번째 오류는 "오류 3건"이라고
      세어 놓고 정작 어느 행인지 볼 수가 없었다(고치려면 엑셀을 따로 열어야 했다). */
@@ -1318,21 +1667,19 @@ export const ExcelScreen = ({ goRoute }) => {
     ...preview.slice(0, PREVIEW_N),
     ...preview.slice(PREVIEW_N).filter(r => r.errs.length > 0),
   ]
-  const stage = result ? 4 : (file ? 3 : 1)
+  const stage = result ? 4 : (file ? 3 : (started ? 2 : 1))
 
   const buckets = [
-    { key: "날짜", label: "날짜 오류", fix: "날짜가 비었거나 형식을 인식 못했어요. 매핑을 다시 보거나 해당 행을 제외하세요." },
-    { key: "금액", label: "금액 오류", fix: "금액이 비었거나 숫자가 아니에요. 매핑을 다시 보거나 해당 행을 제외하세요." },
-    { key: "구분", label: "입금/지출 구분 오류", fix: "구분을 인식 못했어요. '구분' 매핑을 해제하면 위의 기본 유형이 적용돼요." },
-    { key: "계좌", label: "계좌 이름을 못 찾음", fix: "엑셀의 계좌 이름과 기준정보의 계좌·카드 이름이 정확히 같아야 해요. 기준정보에 추가하거나, '계좌' 매핑을 해제하면 아래 일괄 계좌가 적용돼요." },
+    { key: "날짜", label: "날짜 형식 오류", fix: "날짜가 비었거나 형식을 인식 못했어요. 매핑을 다시 보거나 엑셀에서 고쳐 다시 올리세요." },
+    { key: "금액", label: "금액 오류", fix: "금액이 비었거나, 숫자가 아니거나, 0 이하예요. 매핑을 다시 보거나 엑셀에서 고쳐 다시 올리세요." },
+    { key: "구분", label: "구분 오류", fix: "구분 칸에 입금 또는 지출을 적어야 해요(매출·수금·매입·출금도 알아봐요)." },
+    { key: "미래", label: "미래 일자", fix: "아직 안 온 날짜는 등록할 수 없어요. 엑셀에서 날짜를 고쳐 다시 올리세요." },
+    { key: "계정과목", label: "미등록 계정과목", fix: "계정 코드(예: 6101)나 이름이 계정과목표에 있어야 해요. 비워 두면 비목 설정을 따라가요." },
+    { key: "비목", label: "비목 오류", fix: "입금 줄엔 입금 비목, 지출 줄엔 지출 비목을 써야 해요('비목 목록' 시트). 기준정보에 비목을 추가해도 돼요." },
+    { key: "예시", label: "양식 예시 행", fix: "양식에 들어 있던 예시예요. 등록되지 않으니 그대로 두셔도 돼요." },
+    { key: "계좌", label: "미등록 계좌", fix: "계좌 이름이 기준정보와 똑같거나, 계좌번호(끝 4자리 이상)가 한 계좌에만 맞아야 해요. 기준정보에 추가하거나, '계좌' 매핑을 해제하면 아래 일괄 계좌가 적용돼요." },
   ].map(b => ({ ...b, n: errRows.filter(r => r.errs.includes(b.key)).length })).filter(b => b.n > 0)
 
-  const excludeErr = (key) => setExcluded(s => {
-    const n = new Set(s)
-    errRows.filter(r => r.errs.includes(key)).forEach(r => n.add(r.idx))
-    return n
-  })
-  const unmapKind = () => setMapping(ms => ms.map(m => m.target === "입금/지출 구분" ? { ...m, target: "사용 안함" } : m))
 
   const onCommit = async () => {
     if (!okRows.length) return toast.push("등록할 정상 행이 없어요")
@@ -1351,11 +1698,21 @@ export const ExcelScreen = ({ goRoute }) => {
       account_id: r.account_id || null,
       supply_amount: r.supply_amount || null,
       vat_amount: r.vat_amount || null,
+      // 중복 경고를 보고도 넣은 줄 — 서버의 중복 막기(findSameTxn)를 통과시킨다. 경고가 없던 줄은 서버가 한 번 더 본다
+      dup_ok: r.warns.some(w => w.dup) || undefined,
     }))
     const res = await api.commitImport(items, importAccountId)
     setBusy(false)
     if (!res.ok) return toast.push(res.error || "등록 실패", { tone: 'warn' })
-    setResult(res)
+    /* 결과 화면이 줄마다 보여 줄 수 있게, 보낸 줄·안 보낸 줄을 같이 든다(2026-09-30 사용자) */
+    setResult({
+      ...res,
+      rows: [
+        ...okRows.map((r, i) => ({ ...r, out: res.results?.[i] || { status: 'inserted' } })),
+        ...errRows.map(r => ({ ...r, out: { status: 'error' } })),
+        ...preview.filter(r => r.errs.length === 0 && excluded.has(r.idx)).map(r => ({ ...r, out: { status: 'pulled' } })),
+      ].sort((a, b) => a.idx - b.idx),
+    })
     toast.push(`${res.inserted}건이 등록됐어요`)
   }
 
@@ -1372,15 +1729,14 @@ export const ExcelScreen = ({ goRoute }) => {
 
   return (
     <div className="fade-up import-wrap">
-      <PageHeader
-        title="엑셀 업로드"
-        actions={<button className="btn" onClick={downloadTemplate}><Icon.Download/> 양식 다운로드</button>}
-      />
+      <PageHeader title="엑셀 업로드"/>
 
       <div className="row gap-12" style={{ marginBottom: 20 }}>
-        {[{ n: 1, t: "파일 업로드" }, { n: 2, t: "데이터 유형" }, { n: 3, t: "컬럼 매핑 · 미리보기" }, { n: 4, t: "일괄 등록" }].map((s, i, arr) => (
+        {[{ n: 1, t: "양식 다운로드" }, { n: 2, t: "파일 업로드" }, { n: 3, t: "열 매핑 · 검증" }, { n: 4, t: "등록 완료" }].map((s, i, arr) => (
           <Fragment key={s.n}>
-            <div className="row gap-8" style={{ opacity: stage >= s.n ? 1 : 0.4 }}>
+            {/* 파일을 올리기 전에는 1단계로 돌아갈 수 있다(양식 안내를 다시 보려고) */}
+            <div className="row gap-8" style={{ opacity: stage >= s.n ? 1 : 0.4, cursor: s.n === 1 && stage === 2 ? "pointer" : undefined }}
+              onClick={s.n === 1 && stage === 2 ? () => setStarted(false) : undefined}>
               <div style={{ width: 28, height: 28, borderRadius: "50%", background: stage >= s.n ? "var(--ink)" : "var(--surface)", color: stage >= s.n ? "var(--surface)" : "var(--muted)", border: "1px solid var(--line-strong)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: 12 }}>
                 {stage > s.n ? <Icon.Check size={14}/> : s.n}
               </div>
@@ -1394,46 +1750,67 @@ export const ExcelScreen = ({ goRoute }) => {
       <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={e => onFile(e.target.files[0])}/>
 
       {result ? (
-        <div className="card card-pad fade-up" style={{ textAlign: "center", padding: "48px 24px", maxWidth: 520, margin: "0 auto" }}>
-          <div style={{ width: 48, height: 48, borderRadius: 14, background: "var(--pos-soft)", color: "var(--pos)", display: "grid", placeItems: "center", margin: "0 auto 16px" }}><Icon.Check size={24}/></div>
-          <div className="fw-700" style={{ fontSize: 16, marginBottom: 8 }}>{result.inserted}건이 등록됐어요</div>
-          {result.createdVendors?.length > 0 && (
-            <div className="text-sm text-muted" style={{ marginBottom: 16 }}>신규 거래처 {result.createdVendors.length}곳 자동 등록: {result.createdVendors.slice(0, 5).join(', ')}{result.createdVendors.length > 5 ? ' 외' : ''}</div>
-          )}
-          {/* 서버가 건너뛴 행을 반드시 보여준다 — 예전엔 "N건 등록됐어요"만 떠서
-              마감월·미래일자·금액오류로 빠진 행을 사용자가 영영 몰랐다. */}
-          {(result.skippedClosed > 0 || result.skippedFuture > 0 || result.skippedAmount > 0 || result.skippedBeforeStart > 0) && (
-            <div className="card card-pad" style={{ marginBottom: 16, textAlign: 'left', background: 'var(--warn-soft, var(--surface-2))' }}>
-              <div className="fw-700 text-sm" style={{ marginBottom: 4 }}>
-                {(result.skippedClosed || 0) + (result.skippedFuture || 0) + (result.skippedAmount || 0) + (result.skippedBeforeStart || 0)}건은 등록하지 않았어요
+        <ImportResult result={result} goRoute={goRoute} onAgain={reset}/>
+      ) : !file && !started ? (
+        /* 1단계 — 양식 받기. 처음 오는 사람이 '무엇을 올려야 하나'부터 알게 한다(2026-09-30 사용자).
+           예전엔 첫 화면이 곧 파일 올리기라, 양식은 오른쪽 위 버튼으로만 있었다 */
+        /* 폭을 다 쓴다 — 가운데 좁게 두었더니 양옆이 비어 덩그러니 떠 보였다(2026-09-30 사용자).
+           왼쪽 설명·주의 | 오른쪽 칸 안내 표. 좁으면 위아래로 */
+        <div className="card card-pad col gap-20">
+          <div className="xl-guide">
+            <div className="col gap-16">
+              <div>
+                <div className="section-title" style={{ marginBottom: 6 }}>업로드 양식을 내려받아 작성해 주세요</div>
+                <div className="text-sm text-muted" style={{ lineHeight: 1.7 }}>
+                  양식의 열 제목 그대로 업로드하면 <b>열 매핑 없이</b> 바로 검증 단계로 넘어갑니다.<br/>
+                  은행·회계 프로그램에서 내려받은 파일도 업로드할 수 있습니다 — 이 경우 열을 직접 매핑합니다.
+                </div>
               </div>
-              <div className="text-sm text-muted" style={{ lineHeight: 1.7 }}>
-                {result.skippedClosed > 0 && <>· 마감된 달: {result.skippedClosed}건<br/></>}
-                {result.skippedFuture > 0 && <>· 미래 날짜: {result.skippedFuture}건<br/></>}
-                {result.skippedAmount > 0 && <>· 금액 오류(0·음수·과대): {result.skippedAmount}건<br/></>}
-                {/* 이건 고쳐서 다시 올릴 행이 아니다 — 기초잔액에 이미 든 돈이라 올리면 두 번 잡힌다 */}
-                {result.skippedBeforeStart > 0 && <>· 장부 시작일 전: {result.skippedBeforeStart}건 (기초잔액에 이미 들어 있어요)<br/></>}
-                해당 행을 고쳐서 다시 올려주세요.
+
+              <div className="man-note" style={{ margin: 0 }}>
+                <Icon.Help size={15}/>
+                <div style={{ lineHeight: 1.7 }}>
+                  <b>첫 행(열 제목)은 수정하지 마세요.</b> 열 제목으로 항목을 인식합니다.<br/>
+                  셀을 선택하면 <b>작성 방법과 예시</b>가 표시됩니다. ▼ 표시 항목은 목록에서 선택하세요.<br/>
+                  계좌·비목 목록은 양식의 <b>'계좌 목록'·'비목 목록'</b> 시트를 참고하세요.
+                </div>
               </div>
-            </div>
-          )}
-          {/* 이름이 겹쳐 **일부러 안 이은** 것. 조용히 비우면 "왜 주문이 안 붙었지"가
-              한참 뒤 계약 수익을 볼 때에야 드러난다. 올린 자리에서 바로 알린다.
-              (아무거나 잇지 않는 이유 — 엉뚱한 주문에 붙으면 아무도 모른다.) */}
-          {result.ambiguous?.length > 0 && (
-            <div className="card card-pad" style={{ marginBottom: 16, textAlign: 'left', background: 'var(--surface-2)' }}>
-              <div className="fw-700 text-sm" style={{ marginBottom: 4 }}>
-                이름이 겹쳐 연결하지 못한 항목이 있어요
-              </div>
-              <div className="text-sm text-muted" style={{ lineHeight: 1.7 }}>
-                {result.ambiguous.slice(0, 6).join(' · ')}{result.ambiguous.length > 6 ? ' 외' : ''}<br/>
-                같은 이름이 여럿이라 어느 것인지 정할 수 없었어요. 거래는 등록됐지만
-                <b> 거래처·주문 연결은 비어 있습니다.</b> 기준정보에서 이름을 구분해 주시거나,
-                거래내역에서 해당 건을 열어 직접 이어주세요.
+
+              {/* 이 단계의 주된 일은 '받기'다 — 가장 눈에 띄게, 안내를 다 읽은 자리 바로 밑에 */}
+              <div className="row gap-12" style={{ alignItems: "center" }}>
+                <button className="btn primary" style={{ padding: "12px 20px", fontSize: 14 }} onClick={downloadTemplate}>
+                  <Icon.Download size={16}/> 양식 다운로드
+                </button>
+                <span className="text-xs text-muted2">회사 계좌·비목 목록 포함</span>
               </div>
             </div>
-          )}
-          <button className="btn primary" onClick={reset}>새 파일 업로드</button>
+            <div>
+              <div className="fw-700 text-sm" style={{ marginBottom: 8 }}>작성 방법</div>
+              <div className="table-scroll">
+                {/* 촘촘한 표 — 안내가 길어져 [다운로드]·[다음 단계]가 화면 밖으로 밀리면 안 된다 */}
+                <table className="table table-compact">
+                  <thead><tr><th style={{ width: 200 }}>항목</th><th>작성 방법</th><th style={{ width: 200 }}>예시</th></tr></thead>
+                  <tbody>
+                    {TEMPLATE_GUIDE.filter(g => !(g.orders && ordersFromMes)).map(g => (
+                      <tr key={g.col}>
+                        <td className="fw-600">{g.col}{g.req && <span style={{ color: "var(--neg-ink)" }}> *</span>}</td>
+                        <td className="text-sm">{g.how}</td>
+                        <td className={`text-sm text-muted${g.num ? ' num' : ''}`}>{g.ex}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>* 필수 항목</div>
+            </div>
+
+          </div>
+          <div className="row gap-8" style={{ borderTop: "1px solid var(--line)", paddingTop: 16 }}>
+            <span className="text-sm text-muted">양식 작성을 마쳤으면</span>
+            <button className="btn ml-auto" onClick={() => setStarted(true)}>
+              다음 단계 — 파일 업로드 <Icon.Right size={14}/>
+            </button>
+          </div>
         </div>
       ) : !file ? (
         <div className="card card-pad">
@@ -1444,6 +1821,11 @@ export const ExcelScreen = ({ goRoute }) => {
             <Icon.Excel size={36} style={{ color: "var(--pos)" }}/>
             <div className="fw-600" style={{ marginTop: 8 }}>{busy ? "분석 중..." : "엑셀·CSV 파일을 끌어다 놓거나 클릭해서 업로드"}</div>
             <div className="text-xs text-muted2" style={{ marginTop: 4 }}>.xlsx · .xls · .csv · 최대 20MB · 첫 행은 머리글</div>
+          </div>
+          <div className="row" style={{ marginTop: 12 }}>
+            <button className="btn ghost sm" onClick={() => setStarted(false)}>
+              <Icon.Left size={14}/> 양식 안내로 돌아가기
+            </button>
           </div>
         </div>
       ) : (
@@ -1479,72 +1861,153 @@ export const ExcelScreen = ({ goRoute }) => {
                   <button className="btn ghost sm" onClick={reset} title="고른 것 지우기" aria-label="고른 것 지우기"><Icon.Close size={14}/></button>
                 </div>
               </div>
+              {/* 파일에 구분 칸이 없을 때만 묻는다 — 칸이 있으면 쓰이지 않는 값이라, 보이면 헷갈린다(2026-09-30 사용자) */}
+              {colFor("입금/지출 구분") == null && (<>
               <div style={{ height: 1, background: "var(--line)", margin: "14px 0" }}/>
               <div className="row gap-10" style={{ alignItems: "center", flexWrap: "wrap" }}>
-                <span className="text-sm fw-600">기본 데이터 유형</span>
-                <span className="text-xs text-muted2">구분 컬럼을 매핑하면 그 값이 우선해요</span>
+                <span className="text-sm fw-600">전체 거래 구분</span>
+                <span className="text-xs text-muted2">구분 열이 없어 모든 행에 같은 구분을 적용합니다</span>
                 <div className="row gap-6 ml-auto">
                   {[["expense", "지출"], ["income", "입금"]].map(([v, l]) => (
                     <button key={v} className={`chip ${defaultKind === v ? "active" : ""}`} onClick={() => setDefaultKind(v)}>{l}</button>
                   ))}
                 </div>
               </div>
+              </>)}
             </div>
 
+            {/* 칸 맞추기 — 다 맞았으면 한 줄, 펼치면 3~4칸씩 카드. 할 일이 있으면 저절로 펴고 그 칸을 맨 앞에.
+                ⚠ 엑셀 칸 이름은 글자로만 둔다 — 예전엔 고칠 수 있었는데, 고치면 그 칸 값을 못 읽게 됐다 */}
             <div className="card card-pad">
-              <div className="section-title" style={{ marginBottom: 4 }}>컬럼 매핑</div>
-              <div className="section-sub" style={{ marginBottom: 14 }}>왼쪽은 엑셀 컬럼명(수정 가능), 오른쪽은 우리 항목으로 연결하세요.</div>
-              <div className="table-scroll">
-                <table className="table" style={{ marginTop: 6 }}>
-                  <thead><tr><th style={{ width: 200 }}>엑셀 컬럼</th><th>샘플 값</th><th style={{ width: 220 }}>매핑 항목</th></tr></thead>
-                  <tbody>
-                    {mapping.map((m, i) => (
-                      <tr key={i}>
-                        <td><input className="input" value={m.excelCol} onChange={e => setMap(i, "excelCol", e.target.value)}/></td>
-                        <td className="text-muted num text-sm" style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(rawRows[0]?.[m.excelCol] ?? '—') || '—'}</td>
-                        <td>
+              <div className="row gap-10" style={{ alignItems: "center", flexWrap: "wrap" }}>
+                {mapNeeds.any
+                  ? <Icon.Warn size={16} style={{ color: "var(--warn-ink)" }}/>
+                  : <Icon.Check size={16} style={{ color: "var(--pos)" }}/>}
+                <div style={{ minWidth: 0 }}>
+                  <div className="fw-700 text-sm">
+                    {mapNeeds.any ? "열 매핑을 확인해 주세요" : `열 ${mapping.filter(m => m.target !== "사용 안함").length}개가 모두 매핑됐어요`}
+                  </div>
+                  <div className="text-xs text-muted2" style={{ marginTop: 2 }}>
+                    {mapNeeds.any
+                      ? [
+                          mapNeeds.missing.length > 0 && `${mapNeeds.missing.join('·')} 열을 지정해 주세요`,
+                          mapNeeds.unknown.length > 0 && `매핑 안 된 열 ${mapNeeds.unknown.length}개`,
+                          mapNeeds.dupT.length > 0 && `${mapNeeds.dupT.join('·')}에 열이 중복 지정됨`,
+                        ].filter(Boolean).join(' · ')
+                      : mapping.filter(m => m.target !== "사용 안함").map(m => m.excelCol).join(' · ')}
+                  </div>
+                </div>
+                <button className="btn ghost sm ml-auto" onClick={() => setMapOpen(!mapShown)}>
+                  {mapShown ? "접기" : "열 매핑 보기"} <Icon.Down size={12} style={{ transform: mapShown ? "rotate(180deg)" : undefined }}/>
+                </button>
+              </div>
+
+              {mapShown && (
+                <div className="form-grid-2" style={{ marginTop: 14 }}>
+                  {/* 할 일이 있는 칸이 앞 — 못 알아본 칸, 같은 항목에 겹친 칸 */}
+                  {mapping.map((m, i) => ({ m, i }))
+                    .sort((a, b) => {
+                      const w = ({ m }) => (m.target === "사용 안함" && firstValue(m.excelCol)) || mapNeeds.dupT.includes(m.target) ? 0 : 1
+                      return w(a) - w(b) || a.i - b.i
+                    })
+                    .map(({ m, i }) => {
+                      const fv = firstValue(m.excelCol)
+                      const off = m.target === "사용 안함"
+                      const warn = (off && fv) || mapNeeds.dupT.includes(m.target)
+                      return (
+                        <div key={i} style={{ padding: 12, borderRadius: 10, border: `1px solid ${warn ? "var(--warn)" : "var(--line)"}`,
+                          background: off ? "var(--surface-2)" : "var(--surface)", opacity: off && !fv ? 0.6 : 1 }}>
+                          <div className="row gap-6" style={{ alignItems: "baseline", minWidth: 0 }}>
+                            <span className="fw-700 text-sm" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.excelCol}</span>
+                            <span className="text-xs text-muted2 ml-auto" style={{ flexShrink: 0 }}>{fv ? `${fv.row}행` : ''}</span>
+                          </div>
+                          <div className="text-xs text-muted" style={{ margin: "2px 0 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {fv ? fv.v : "(값 없음)"}
+                          </div>
                           <div className="row gap-6" style={{ alignItems: "center" }}>
                             <Icon.Right size={12} className="text-muted2"/>
-                            <div style={{ flex: 1 }}>
-                              <Combobox value={m.target} onChange={v => setMap(i, "target", v)} allowAdd={false}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <Combobox value={m.target} allowAdd={false}
+                                /* 손댄 뒤엔 펼친 채로 — 마지막 칸을 맞추는 순간 저절로 접히면 방금 한 걸 확인할 수 없다 */
+                                onChange={v => { setMap(i, "target", v); setMapOpen(o => o ?? true) }}
                                 options={IMPORT_TARGETS.map(o => ({ value: o, label: o }))}/>
                             </div>
                           </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                        </div>
+                      )
+                    })}
+                </div>
+              )}
             </div>
 
             <div className="card">
               <div className="row" style={{ padding: "14px 16px", borderBottom: "1px solid var(--line)", flexWrap: "wrap", gap: 8 }}>
                 <div className="section-title">미리보기</div>
                 <div className="ml-auto row gap-8" style={{ flexWrap: "wrap", alignItems: "center" }}>
-                  <span className="badge pos"><Icon.Check size={11}/> 정상 {okRows.length}</span>
-                  <span className="badge neg"><Icon.Warn size={11}/> 오류 {errRows.length}</span>
+                  <span className="badge pos"><Icon.Check size={11}/> 등록 대상 {okRows.length}</span>
+                  {errRows.length > 0 && <span className="badge neg"><Icon.Warn size={11}/> 등록 불가 {errRows.length}</span>}
                   {excluded.size > 0 && <span className="badge outline">제외 {excluded.size}</span>}
+                  {Object.keys(dupHits).length > 0 && (
+                    <span className="badge warn" title="일자·금액·계좌·거래처가 같은 기존 거래가 있어 제외했습니다. [중복 의심]을 누르면 기존 거래를 볼 수 있습니다">
+                      중복 의심 {Object.keys(dupHits).length}
+                    </span>
+                  )}
                   <Popover align="right" width={280}
                     trigger={<button className="icon-btn" title="안내"><Icon.Help size={16}/></button>}>
                     <div style={{ padding: 14 }}>
-                      <div className="fw-700" style={{ marginBottom: 6 }}>미등록 거래처는 자동 등록</div>
-                      <div className="text-sm text-muted" style={{ lineHeight: 1.6 }}>엑셀에만 있는 거래처는 등록 시 자동으로 거래처 목록에 추가돼요 (입금=발주처, 지출=매입처). 오류 행은 매핑을 바꾸거나 제외하면 바로 다시 검증됩니다.</div>
+                      <div className="fw-700" style={{ marginBottom: 6 }}>거래처 자동 등록</div>
+                      <div className="text-sm text-muted" style={{ lineHeight: 1.6 }}>미등록 거래처는 등록 시 자동으로 추가됩니다 (입금=발주처, 지출=매입처). 법인 표기·띄어쓰기만 다른 이름은 기존 거래처에 연결합니다. 매핑을 바꾸면 즉시 다시 검증합니다.</div>
                     </div>
                   </Popover>
                 </div>
               </div>
 
-              {(buckets.length > 0 || excluded.size > 0) && (
-                <div className="row gap-8" style={{ padding: "10px 16px", borderBottom: "1px solid var(--line)", background: "var(--surface-2)", flexWrap: "wrap", alignItems: "center" }}>
-                  {buckets.length > 0 && <span className="text-xs fw-600 text-muted">오류 {errRows.length}건</span>}
-                  {buckets.map((b, i) => (
-                    <Fragment key={i}>
-                      <button className="btn sm" onClick={() => excludeErr(b.key)}>{b.label} {b.n} 제외</button>
-                      {b.key === "구분" && <button className="btn sm" onClick={unmapKind}>기본값 적용</button>}
-                    </Fragment>
+              {/* 등록 안 되는 줄 — 버튼이 아니라 **이유와 고칠 방법**. 이 줄들은 무엇을 해도 등록되지 않는다 */}
+              {buckets.length > 0 && (
+                <div className="col gap-6" style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", background: "var(--neg-soft)" }}>
+                  <div className="text-sm fw-700" style={{ color: "var(--neg-ink)" }}>
+                    등록 불가 {errRows.length}건 — 행 아래에서 오류 항목을 수정할 수 있습니다
+                  </div>
+                  {errRows.length > 20 && (
+                    <div className="text-xs text-muted">수정할 행이 많으면 엑셀에서 수정 후 다시 업로드하는 편이 빠릅니다.</div>
+                  )}
+                  {buckets.map(b => (
+                    <div key={b.key} className="row gap-8 text-sm" style={{ alignItems: "baseline" }}>
+                      <span className="fw-600" style={{ flexShrink: 0 }}>{b.label} {b.n}건</span>
+                      <span className="text-muted">{b.fix}</span>
+                      {/* ⚠ 예전의 [기본값 적용]은 뺐다 — 구분 칸을 통째로 끄는 버튼이라, 한 줄이 틀렸는데
+                          멀쩡한 입금 줄까지 전부 한쪽(지출)으로 들어갔다 */}
+                    </div>
                   ))}
-                  {excluded.size > 0 && <button className="btn ghost sm ml-auto" onClick={() => setExcluded(new Set())}>제외 해제 ({excluded.size})</button>}
+                </div>
+              )}
+              {/* 거래처 — 새로 만들 곳과 이어 붙일 곳을 등록 전에(오타는 여기서 눈으로 잡는다) */}
+              {(vendorPlan.created.length > 0 || vendorPlan.linked.length > 0 || vendorPlan.unclear.length > 0) && (
+                <div className="col gap-6" style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", background: "var(--surface-2)" }}>
+                  {vendorPlan.created.length > 0 && (
+                    <div className="text-sm">
+                      <span className="fw-700">신규 등록 거래처 {vendorPlan.created.length}곳</span>
+                      <span className="text-muted2" style={{ marginLeft: 6 }}>오타 여부를 확인해 주세요</span>
+                      <div className="row gap-6" style={{ flexWrap: "wrap", marginTop: 6 }}>
+                        {vendorPlan.created.map(n => <span key={n} className="badge outline">{n}</span>)}
+                      </div>
+                    </div>
+                  )}
+                  {vendorPlan.linked.length > 0 && (
+                    <div className="text-sm">
+                      <span className="fw-700">기존 거래처 연결 {vendorPlan.linked.length}곳</span>
+                      <span className="text-muted2" style={{ marginLeft: 6 }}>법인 표기·띄어쓰기 차이</span>
+                      <div className="row gap-6" style={{ flexWrap: "wrap", marginTop: 6 }}>
+                        {vendorPlan.linked.map(([from, to]) => <span key={from} className="badge outline">{from} → {to}</span>)}
+                      </div>
+                    </div>
+                  )}
+                  {vendorPlan.unclear.length > 0 && (
+                    <div className="text-sm">
+                      <span className="fw-700">거래처 미지정 {vendorPlan.unclear.length}곳 (동일 이름 복수)</span>
+                      <span className="text-muted2" style={{ marginLeft: 6 }}>{vendorPlan.unclear.join(' · ')}</span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1554,46 +2017,129 @@ export const ExcelScreen = ({ goRoute }) => {
                 maxHeight={420}
                 empty="읽을 행이 없어요."
                 rowClass={r => (excluded.has(r.idx) ? 'imp-ex' : r.errs.length ? 'imp-err' : undefined)}
+                /* 오류 줄 아래 — **틀린 칸만** 입력칸으로. 고치는 즉시 다시 검사해 줄이 '등록'으로 바뀐다 */
+                renderExpanded={r => (!r.errs.length && dupHits[r.idx] && dupOpen.has(r.idx) ? (
+                  <DupCompare same={dupHits[r.idx]} out={excluded.has(r.idx)} onToggle={() => toggleOut(r.idx)}/>
+                ) : r.errs.length ? (
+                  /* 펼침 줄은 안쪽 여백이 0이다(DataTable — 다른 화면은 거기에 표를 통째로 넣는다). 여백은 여기서 준다 */
+                  <div className="row gap-16" style={{ flexWrap: "wrap", alignItems: "flex-end", padding: "12px 16px" }}>
+                    <span className="text-xs fw-700 text-muted" style={{ alignSelf: "center" }}>{r.idx + 2}행 수정</span>
+                    {(r.errs.includes("날짜") || r.errs.includes("미래")) && (
+                      <label className="col gap-4" style={{ width: 170 }}>
+                        <span className="text-xs text-muted">날짜</span>
+                        <DateInput className="input num" value={r.date || ''} max={localToday()}
+                          onChange={e => setFix(r.idx, 'date', e.target.value)}/>
+                      </label>
+                    )}
+                    {r.errs.includes("금액") && (
+                      <label className="col gap-4" style={{ width: 170 }}>
+                        <span className="text-xs text-muted">금액 (부가세 포함)</span>
+                        <MoneyInput value={r.amount ? String(r.amount) : ''} onChange={raw => setFix(r.idx, 'amount', raw === '' ? null : Number(raw))}/>
+                      </label>
+                    )}
+                    {r.errs.includes("구분") && (
+                      <div className="col gap-4">
+                        <span className="text-xs text-muted">구분</span>
+                        <div className="row gap-6">
+                          {[["income", "입금"], ["expense", "지출"]].map(([v, l]) => (
+                            <button key={v} type="button" className={`chip ${r.kind === v ? "active" : ""}`} onClick={() => setFix(r.idx, 'kind', v)}>{l}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {r.errs.includes("계좌") && (
+                      <div className="col gap-4" style={{ minWidth: 240 }}>
+                        <span className="text-xs text-muted">계좌 <span className="text-muted2">(파일: {r.acctName})</span></span>
+                        <AccountPicker portal accounts={importAccounts} value={r.account_id || ''} onChange={v => setFix(r.idx, 'account_id', v)}/>
+                      </div>
+                    )}
+                    {r.errs.includes("비목") && (
+                      <div className="col gap-4" style={{ width: 240 }}>
+                        <span className="text-xs text-muted">비목 <span className="text-muted2">({r.kind === 'income' ? '입금' : '지출'} 비목만)</span></span>
+                        <Combobox portal value={r.category} allowAdd={false} placeholder="비목 선택"
+                          onChange={v => setFix(r.idx, 'category', v)}
+                          options={cats.filter(c => String(c.id || '').startsWith(r.kind === 'income' ? 'INC-' : 'EXP-'))
+                            .map(c => ({ value: c.name, label: c.name, sub: c.group_name || '' }))}/>
+                      </div>
+                    )}
+                    {r.errs.includes("계정과목") && (
+                      <div className="col gap-4" style={{ width: 260 }}>
+                        <span className="text-xs text-muted">계정과목</span>
+                        <div className="row gap-6">
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <Combobox portal value="" allowAdd={false} placeholder="계정과목 선택"
+                              onChange={v => setFix(r.idx, 'account_code', v)}
+                              options={subjects.map(a => ({ value: String(a.code), label: a.name, sub: `${a.code} · ${a.category || ''}` }))}/>
+                          </div>
+                          {/* 비우면 비목이 정한 계정을 따라간다(서버 importAcctCode) */}
+                          <button type="button" className="btn sm" style={{ flexShrink: 0 }} onClick={() => setFix(r.idx, 'account_code', '')}>비목 기준</button>
+                        </div>
+                      </div>
+                    )}
+                    {r.errs.includes("예시") && (
+                      <span className="text-sm text-muted" style={{ alignSelf: "center" }}>양식 예시 행입니다 — 등록되지 않습니다.</span>
+                    )}
+                  </div>
+                ) : null)}
                 columns={[
                   { key: 'idx', header: '행', width: 40, sortable: true,
                     sortValue: r => r.idx,
                     render: r => <span className="num text-muted2">{r.idx + 2}</span> },
                   { key: 'date', header: '날짜', sortable: true,
-                    render: r => <span className="num text-sm">{r.date || <span className="text-neg">—</span>}</span> },
+                    render: r => <><span className="num text-sm">{r.date || <span className="text-neg">{r.rawDate || '(비어 있음)'}</span>}</span>{r.fixed.has('date') && <Sub>수정됨</Sub>}</> },
                   { key: 'vendor', header: '거래처', sortable: true,
                     render: r => <span className="fw-600">{r.vendor || "—"}</span> },
                   { key: 'contract', header: '주문', sortable: true,
                     render: r => <span className="text-muted text-sm">{r.contract || "—"}</span> },
                   { key: 'kind', header: '구분', sortable: true,
                     render: r => (r.kind
-                      ? <span className="badge outline">{r.kind === "income" ? "입금" : "지출"}</span>
-                      : <span className="text-neg text-xs">?</span>) },
+                      ? <><span className="badge outline">{r.kind === "income" ? "입금" : "지출"}</span>{r.fixed.has('kind') && <Sub>수정됨</Sub>}</>
+                      : <span className="text-neg text-sm">{r.rawKind || '(비어 있음)'}</span>) },
                   { key: 'category', header: '비목', sortable: true,
-                    render: r => <span className="text-sm">{r.category || "—"}</span> },
+                    render: r => <><span className="text-sm">{r.category || "—"}</span>{r.fixed.has('category') && <Sub>수정됨</Sub>}</> },
                   { key: 'amount', header: '금액', align: 'right', sortable: true,
                     sortValue: r => (r.amount == null ? null : Number(r.amount)),
-                    render: r => <span className="num-cell">{r.amount != null ? fmtNum(r.amount) : <span className="text-neg">—</span>}</span> },
+                    render: r => <>{r.fixed.has('amount') && <Sub style={{ marginRight: 6, marginLeft: 0 }}>수정됨</Sub>}<span className="num-cell">{r.amount != null ? fmtNum(r.amount) : <span className="text-neg">{r.rawAmount || '(비어 있음)'}</span>}</span></> },
                   ...(colFor("계좌") != null ? [{
                     key: 'acctName', header: '계좌', sortable: true,
                     render: r => (
                       <span className="text-sm">
                         {!r.acctName ? <span className="text-muted2">일괄</span>
-                          : r.account_id ? r.acctName
+                          : r.account_id ? <>{r.acctName}{r.fixed.has('account_id') && <Sub>수정됨</Sub>}</>
                           : <span className="text-neg">{r.acctName}</span>}
                       </span>
                     ),
                   }] : []),
                   /* 상태 정렬은 **오류를 위로** 올린다(0=오류) — 이 열을 누르는 이유가 그거다 */
-                  { key: 'state', header: '상태', sortable: true,
-                    sortValue: r => (excluded.has(r.idx) ? 2 : r.errs.length ? 0 : 1),
-                    render: r => (excluded.has(r.idx)
-                      ? <span className="badge outline">제외</span>
-                      : r.errs.length === 0
-                        ? <span className="badge pos"><Icon.Check size={11}/> 정상</span>
-                        : <span className="badge neg"><Icon.Warn size={11}/> {r.errs.join('·')} 오류</span>) },
+                  { key: 'state', header: '상태', sortable: true, className: 'imp-keep',
+                    sortValue: r => (r.errs.length ? 0 : dupHits[r.idx] ? 1 : excluded.has(r.idx) ? 2 : r.warns.length ? 3 : 4),
+                    render: r => (r.errs.length
+                      ? <span className="badge neg"><Icon.Close size={11}/> 등록 불가 · {[...new Set(r.errs)].map(e => ERR_LABEL[e] || e).join(' · ')}</span>
+                      : dupHits[r.idx]
+                        /* 이미 있는 거래와 같다 — '뺌'만 적으면 왜 뺐는지 모른다(2026-09-30 사용자).
+                           무엇이 걸렸는지 말하고, 누르면 아래에 그 거래를 펼친다 */
+                        /* 배지가 아니라 **버튼 모양** — 배지처럼 생기면 누를 수 있는지 모른다 */
+                        ? <button type="button" className="btn sm" style={{ color: "var(--warn-ink)", borderColor: "var(--warn)" }}
+                            onClick={() => toggleDup(r.idx)} aria-expanded={dupOpen.has(r.idx)}>
+                            <Icon.Warn size={11}/> 중복 의심
+                            <Icon.Down size={11} style={{ transform: dupOpen.has(r.idx) ? 'rotate(180deg)' : undefined }}/>
+                          </button>
+                      : excluded.has(r.idx)
+                        ? <span className="row gap-6" style={{ alignItems: "center" }}>
+                            <span className="badge outline" title={r.warns.map(w => w.long).join('\n') || undefined}>제외</span>
+                            <button className="btn ghost sm" onClick={() => toggleOut(r.idx)}>포함</button>
+                          </span>
+                        : r.warns.length
+                          ? <span className="row gap-6" style={{ alignItems: "center" }}>
+                              <span className="badge warn" title={r.warns.map(w => w.long).join('\n')}><Icon.Warn size={11}/> {r.warns.map(w => w.short).join(' · ')}</span>
+                              <button className="btn ghost sm" onClick={() => toggleOut(r.idx)}>제외</button>
+                            </span>
+                          : <span className="badge pos"><Icon.Check size={11}/> 정상</span>) },
                 ]}
               />
               <div className="row" style={{ padding: 16, borderTop: "1px solid var(--line)", flexWrap: "wrap", gap: 12 }}>
+                {/* 모든 줄에 계좌가 있으면 묻지 않는다 — 쓰이지 않는 칸이 보이면 헷갈린다(2026-09-30 사용자) */}
+                {okRows.some(r => !r.account_id) && (
                 <div style={{ minWidth: 260 }}>
                   <label className="label" style={{ marginBottom: 6 }}>
                     입출금 계좌 {okRows.some(r => !r.account_id) && <span style={{ color: "var(--neg-ink)" }}>*</span>}
@@ -1607,11 +2153,12 @@ export const ExcelScreen = ({ goRoute }) => {
                       : "이 거래들이 오간 계좌예요. 지정해야 계좌 잔액에 반영됩니다. 엑셀에 계좌 열이 있으면 '계좌'로 매핑하세요."}
                   </div>
                 </div>
+                )}
                 <span className="text-sm text-muted">{preview.length > shown.length ? `상위 ${PREVIEW_N}행 + 오류 행 표시 · 전체 ${preview.length}행` : `전체 ${preview.length}행`}</span>
                 <div className="ml-auto row gap-8">
                   <button className="btn" onClick={reset}>취소</button>
                   <button className="btn primary" disabled={busy || !okRows.length || (!importAccountId && okRows.some(r => !r.account_id))} style={{ opacity: (busy || !okRows.length || (!importAccountId && okRows.some(r => !r.account_id))) ? 0.5 : 1 }} onClick={onCommit}>
-                    <Icon.Check size={14}/> {busy ? "등록 중..." : `정상 ${okRows.length}건 일괄 등록`}
+                    <Icon.Check size={14}/> {busy ? "등록 중..." : `${okRows.length}건 등록`}
                   </button>
                 </div>
               </div>
@@ -3411,7 +3958,7 @@ const ReportCard = ({ toast }) => {
                  정렬에서도 0일이 아니라 빈 값이다(1일 결제 카드보다 앞에 서면 안 된다). */
               { key: 'pay_day', header: '결제일', width: 80, sortable: true,
                 sortValue: c => (c.pay_day ? Number(c.pay_day) : null),
-                render: c => <span className="text-sm text-muted num">{c.pay_day ? `${c.pay_day}일` : '—'}</span> },
+                render: c => <span className="text-sm text-muted num">{c.pay_day ? payDayLabel(c.pay_day) : '—'}</span> },
               { key: 'pay_account', header: '결제계좌', sortable: true,
                 render: c => <span className="text-sm text-muted">{c.pay_account || '—'}</span> },
             ]}
