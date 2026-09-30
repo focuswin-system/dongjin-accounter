@@ -406,11 +406,12 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
   }
 
   return (
-    <Drawer open={open} onClose={onClose}>
+    <Drawer open={open} onClose={onClose} width="880px">
       <DrawerHead title={`${KIND_LABEL[f.kind]} ${editing ? '수정' : '등록'}`}
         sub={KIND_HINT[f.kind]} onClose={onClose}/>
-      <div className="drawer-body col gap-form">
-        <div>
+      {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */}
+      <div className="drawer-body form-grid-2">
+        <div className="span-2">
           <label className="label">구분</label>
           <div className="row gap-4">
             {['installment', 'deposit', 'guarantee', 'pension'].map(k => (
@@ -444,7 +445,7 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
         )}
         {/* 보증금·퇴직연금은 만기도 이자도 없다 — 칸을 그려 두면 사용자가 뭔가 채워야 하는 줄 안다 */}
         {!noMat && (
-          <div className="row gap-8">
+          <>
             <div style={{ flex: 1 }}>
               <label className="label">연 이율 (%)</label>
               <input className="input" value={f.annual_rate} onChange={e => set('annual_rate', e.target.value)} placeholder="예: 4.0"/>
@@ -453,9 +454,9 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
               <label className="label">기간 (개월) *</label>
               <input className="input" value={f.term_months} onChange={e => set('term_months', e.target.value)} placeholder="예: 12"/>
             </div>
-          </div>
+          </>
         )}
-        <div className="row gap-8">
+        <>
           <div style={{ flex: 1 }}>
             <label className="label">{guar ? '지급일 *' : pen ? '기준일 *' : '가입일 *'}</label>
             <DateInput className="input" value={f.start_date} onChange={e => set('start_date', e.target.value)}/>
@@ -466,14 +467,14 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
               <input className="input" value={f.pay_day} onChange={e => set('pay_day', e.target.value)} placeholder="가입일과 같은 날"/>
             </div>
           )}
-        </div>
+        </>
         {/* 보증금은 대개 몇 년 전에 이미 낸 것을, 퇴직연금은 여태 쌓인 적립금 잔액을
             뒤늦게 등록한다. 그때 통장에 이미 출금이 찍혀 있으므로, 여기서 거래를 또 만들면
             잔액이 두 번 빠진다(퇴직연금은 과거 몇 년치가 오늘 하루에 나간 것처럼 찍힌다). */}
         {/* 수정할 때는 안 보여준다 — PUT 이 recorded 를 읽지 않아 눌러도 거래가 안 생긴다.
             "거래를 만듭니다"라는 안내가 수정 모드에서는 거짓이었다. 등록에서만 뜻이 있다. */}
         {noMat && !editing && (
-          <div>
+          <div className="span-2">
             <label className="label">{pen ? '지금 납입하는 금액인가요?' : '지금 내는 보증금인가요?'}</label>
             <div className="row gap-4">
               {(pen ? [[false, '여태 쌓인 적립금'], [true, '지금 납입해요']]
@@ -504,14 +505,14 @@ const SavingsForm = ({ open, onClose, editing, accounts, onSaved }) => {
                 : '매월 이 계좌에서 납입액이 빠져나갑니다. 가입만으로는 돈이 나가지 않아요.'}
           </div>
         </div>
-        <div>
+        <div className="span-2">
           <label className="label">메모</label>
           <input className="input" value={f.memo} onChange={e => set('memo', e.target.value)}/>
         </div>
 
         {/* 만기 미리보기 — 가입 판단의 핵심 숫자라 저장 전에 보여준다 */}
         {preview && preview.principal > 0 && (
-          <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
+          <div className="card card-pad span-2" style={{ background: 'var(--surface-2)' }}>
             <div className="text-xs fw-700" style={{ marginBottom: 8 }}>만기에 이렇게 됩니다</div>
             <div className="col gap-4 text-sm">
               <div className="row" style={{ justifyContent: 'space-between' }}>

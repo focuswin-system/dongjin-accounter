@@ -7,7 +7,7 @@ import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
 import { ArLinesDrawer } from '../lib/components/ArLinesDrawer'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
-import { DataTable } from '../lib/components/DataTable'
+import { DataTable, Sub } from '../lib/components/DataTable'
 import { LinkTxnDrawer } from '../lib/components/LinkTxnDrawer'
 /* 청구서 품목표와 **같은 컴포넌트**를 쓴다 — 칸 구성만 다르다(CONTRACT_COLUMNS).
    따로 만들어 두니 청구서 쪽 개선(목록 잘림·칸 자동확장·Tab 확정)이 주문에는 하나도 안 왔다. */
@@ -52,7 +52,8 @@ const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster, withQty = fa
   };
 
   return (
-    <div>
+    /* span-2 — 두 칸 배치(.form-grid-2) 안에서 품목표는 한 줄을 다 쓴다. 바깥이 그리드가 아니면 뜻 없음 */
+    <div className="span-2">
       <InvoiceLines
         lines={rows}
         onChange={setRows}
@@ -79,8 +80,9 @@ const ContractItemsEditor = ({ form, set, itemMaster, reloadMaster, withQty = fa
 /* 상대편 번호·프로젝트 번호 — 둘 다 선택 입력이라 폼 맨 아래(계약서 첨부 위)에 둔다.
    업종마다 부르는 이름이 다르다(조선=호선번호, 천막=설치현장, 선반=작업지시번호, SW=프로젝트코드)
    → 라벨은 업종중립으로 두고 예시로 감을 준다. */
+/* 두 칸 배치(.form-grid-2) 안에서 쓰므로 감싸는 줄 없이 칸 둘을 그대로 내놓는다(2026-09-29) */
 const ContractRefFields = ({ form, set }) => (
-  <div className="row gap-12">
+  <>
     <div style={{ flex: 1 }}>
       <label className="label" style={{ marginBottom: 8 }}>
         발주번호 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span>
@@ -95,7 +97,7 @@ const ContractRefFields = ({ form, set }) => (
       <input className="input" value={form.project_no || ''} placeholder="예: PRJ-2026-01 / 231호선"
         onChange={e => set(f => ({ ...f, project_no: e.target.value }))}/>
     </div>
-  </div>
+  </>
 )
 
 /* 주문 조건 입력 — 신규 생성/편집 Drawer 공용.
@@ -181,7 +183,7 @@ const ContractTermFields = ({ form, set }) => {
           hint="기성 청구할 품목과 단가를 등록하세요. 수량은 주문 상세의 기성 청구에서 회차마다 넣습니다."/>
       ) : recurring ? (
         <>
-          <div className="row gap-12">
+          <div className="row gap-12 span-2">
             <div style={{ flex: 1 }}>
               <label className="label" style={{ marginBottom: 8 }}>청구 주기</label>
               <div className="row gap-6">
@@ -236,7 +238,7 @@ const ContractTermFields = ({ form, set }) => {
             </div>
           </div>
           {/* 초기 구축비 + 월 정액처럼 두 갈래로 청구되는 주문 — 주문은 하나로 두고 청구만 나눈다 */}
-          <div>
+          <div className="span-w2">
             <label className="label" style={{ marginBottom: 8 }}>
               초기 일시금 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택 (구축비·설치비)</span>
             </label>
@@ -283,7 +285,7 @@ const ContractTermFields = ({ form, set }) => {
       )}
 
       {/* 기간 — 무기한이면 종료일이 없다 */}
-      <div className="row gap-12">
+      <>
         <div style={{ flex: 1 }}>
           <label className="label" style={{ marginBottom: 8 }}>주문 시작일</label>
           <DateInput className="input" value={form.start_date || ''}
@@ -296,12 +298,12 @@ const ContractTermFields = ({ form, set }) => {
             : <DateInput className="input" value={form.end_date || ''}
                 onChange={e => set(f => ({ ...f, end_date: e.target.value }))}/>}
         </div>
-      </div>
+      </>
 
       {/* 갱신 조건 — 갱신 개념이 있는 주문(자동갱신 또는 정기형)만. 총액형+만료·무기한은 숨김 */}
       {hasRenewal && (
         <>
-          <div className="row gap-12">
+          <>
             <div style={{ flex: 1 }}>
               <label className="label" style={{ marginBottom: 8 }}>갱신 시 연장 기간</label>
               <div style={{ position: 'relative' }}>
@@ -318,8 +320,8 @@ const ContractTermFields = ({ form, set }) => {
                 <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 13 }}>일 전</span>
               </div>
             </div>
-          </div>
-          <div className="text-xs text-muted2" style={{ marginTop: -6 }}>
+          </>
+          <div className="text-xs text-muted2 span-2" style={{ marginTop: -6 }}>
             종료일 {form.notice_days || 60}일 전부터 목록·알림에 뜹니다
             {form.term_mode === 'auto_renew'
               ? ' — 자동갱신이라도 해지하려면 이 기한 안에 통보해야 하니까요.'
@@ -1597,15 +1599,18 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       <Drawer open={editOpen} onClose={() => setEditOpen(false)}
         /* 품목표가 뜨면 넓힌다 — 청구서 드로어와 같은 규칙(Billing.jsx).
            품목표는 8~9열이라 480px 안에서는 첫 칸부터 가로 스크롤이 된다.
-           품목이 없으면 예전 폭 그대로 — 나머지 칸은 좁아야 읽기 쉽다. */
-        width={(editForm.items || []).length > 0 ? "min(1240px,100vw)" : "min(480px,100vw)"}
+           품목이 없으면 880px — 짧은 칸을 여러 칸으로 나란히 둔다(2026-09-29, 예전엔 480px 한 줄씩). */
+        width={(editForm.items || []).length > 0 ? "min(1240px,100vw)" : "880px"}
         label="주문 편집">
+        {/* 머리가 없었다 — 가운데 팝업에선 무엇을 고치는 창인지·어디서 닫는지가 안 보인다 */}
+        <DrawerHead title="주문 편집" sub={editForm?.name || undefined} onClose={() => setEditOpen(false)}/>
         <div className="drawer-body">
-          <div className="col gap-form">
+          {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */}
+          <div className="form-grid-2">
             {/* 방향 — 이 주문이 파는 것인가 사는 것인가.
                 고칠 수단이 없으면 잘못 들어간 방향(옛 자료는 거래처로 추정해 채웠다)을
                 영영 못 되돌린다. 바꾸면 청구서 종류·집계 관점·반복거래 방향이 함께 따라간다. */}
-            <div>
+            <div className="span-2">
               <label className="label" style={{ marginBottom: 8 }}>구분</label>
               <div className="row gap-6">
                 {[{ v: 'sales', l: '수주 (파는 것)' }, { v: 'purchase', l: '발주 (사는 것)' }].map(o => (
@@ -1643,7 +1648,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
               </div>
             </div>
             <ContractRefFields form={editForm} set={setEditForm}/>
-            <div>
+            <div className="span-2">
               <label className="label" style={{ marginBottom: 8 }}>계약서 추가 첨부 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 여러 개 가능</span></label>
               {editForm.file_url && (
                 <div className="row gap-10" style={{ padding: '10px 14px', border: '1px solid var(--line)', borderRadius: 10, background: 'var(--surface-2)', marginBottom: 8 }}>
@@ -2173,7 +2178,9 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
           onRowClick={r => goDetail(r.id, r.name)}
           empty="조건에 맞는 주문이 없어요"
           columns={[
-            { key: 'name', header: '주문', width: '24%', render: r => {
+            /* 청구 방식·기간 종류는 이름 옆에 작게 — 진행 칸에 두면 표가 화면을 넘는다(2026-09-30 한 줄 규칙) */
+            { key: 'name', header: '주문', maxWidth: 360, render: r => <><span className="fw-600">{r.name}</span><Sub>{billingLabel(r)}/{termLabel(r)}</Sub></> },
+            { key: 'progress', header: '진행', width: 130, render: r => {
               const openEnded = !hasTotal(r);
               // 진행률은 '이번 계약기간' 기준. 무기한 주문은 채울 총액이 없어 막대를 안 그린다.
               // 총액은 서버 metrics의 term_total 사용(vat_mode 반영). 화면에서 ×1.1 재계산 금지.
@@ -2187,33 +2194,33 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
               const billedPct = (r.billing_mode !== 'progress' || !(r.billed > 0)) ? null
                 : Math.min(100, Math.round(((r.collected ?? 0) / r.billed) * 100));
               return <>
-                <div className="fw-600">{r.name}</div>
-                <div className="row gap-8" style={{ marginTop: 8 }}>
+                <div className="row gap-8" style={{ alignItems: 'center' }}>
                   {pct == null && billedPct == null
-                    ? <span className="text-xs text-muted2">청구 {r.billed ? fmtNum(r.billed) : 0}원 · 수금 {fmtNum(r.collected ?? 0)}원</span>
+                    /* 수금은 바로 옆 '수금' 칸에 있다 — 여기선 청구만 */
+                    ? <span className="text-xs text-muted2">청구 {r.billed ? fmtNum(r.billed) : 0}</span>
                     : pct == null
                       // 무기한 — 총액 기준 진행률과 헷갈리지 않게 '청구분' 이라고 밝힌다
-                      ? <><div className="bar-track" style={{ width: 120 }}><div className="bar-fill" style={{ width: `${billedPct}%` }}/></div><span className="text-xs text-muted2 num">청구분 {billedPct}%</span></>
-                      : <><div className="bar-track" style={{ width: 120 }}><div className="bar-fill" style={{ width: `${pct}%` }}/></div><span className="text-xs text-muted2 num">{pct}%</span></>}
-                  <span className="text-xs text-muted2">· {billingLabel(r)}/{termLabel(r)}</span>
+                      ? <><div className="bar-track" style={{ width: 56 }}><div className="bar-fill" style={{ width: `${billedPct}%` }}/></div><span className="text-xs text-muted2 num" title="청구한 돈 중 받은 비율">청구분 {billedPct}%</span></>
+                      : <><div className="bar-track" style={{ width: 56 }}><div className="bar-fill" style={{ width: `${pct}%` }}/></div><span className="text-xs text-muted2 num">{pct}%</span></>}
                 </div>
               </>
             } },
             { key: 'contract_no', header: '주문번호', width: 110, sortable: true, render: r => <span className="text-sm num" style={{ color: r.contract_no ? undefined : "var(--muted-2)" }}>{r.contract_no || '—'}</span> },
             { key: 'vendor', header: '거래처', sortable: true, sortValue: r => r.vendor_name || r.vendor || '', render: r => <span className="fw-600">{r.vendor_name || r.vendor || '—'}</span> },
-            { key: 'term', header: '계약기간 · 갱신', width: 175, render: r => <>
-              <div className="text-sm num">
+            { key: 'term', header: '계약기간 · 갱신', width: 230, shrink: false, render: r => <>
+              <span className="text-sm num">
                 {/* 기간은 **총액 유무와 무관하다.** 예전엔 hasTotal 로 갈랐는데, 기성형은
                     총액 개념이 없어 hasTotal=false 라서 종료일을 넣어도 늘 '해지 시까지'로 떴다
                     (2026-12-31 까지인 단가주문이 무기한처럼 보였다 — 갱신 시점을 놓친다).
                     기간은 종료일이 있느냐, 무기한(term_mode=open)이냐로만 정한다. */}
                 {isOpenEnded(r) || !r.end_date ? `${fmtDateShort(r.start_date) || '—'} ~` : [r.start_date, r.end_date].filter(Boolean).map(fmtDateShort).join(' ~ ')}
-              </div>
-              {renewalInfo(r).managed && <div style={{ marginTop: 6 }}><RenewalBadge contract={r}/></div>}
+              </span>
+              {renewalInfo(r).managed && <span style={{ marginLeft: 6 }}><RenewalBadge contract={r}/></span>}
             </> },
             { key: 'amount', header: '금액', align: 'right', sortable: true, sortValue: r => r.amount || 0, render: r => (
               isRecurring(r)
-                ? <div><div className="fw-600">{fmtNum(r.unit_amount || 0)}<span className="text-xs text-muted2">/{periodLabel(r.billing_period)}</span></div>{hasTotal(r) && <div className="text-xs text-muted2">기간 총 {fmtNum(r.amount || 0)}</div>}</div>
+                /* 기간 총액은 말풍선으로 — 칸에 같이 적으면 한 줄 규칙에서 표가 화면을 넘는다 */
+                ? <span title={hasTotal(r) ? `기간 총 ${fmtNum(r.amount || 0)}원` : undefined}><span className="fw-600">{fmtNum(r.unit_amount || 0)}</span><span className="text-xs text-muted2">/{periodLabel(r.billing_period)}</span></span>
                 /* 옆 칸의 '수금'·'남은 주문분'은 전부 **부가세 포함** 금액이다.
                    여기만 공급가를 보여주면 주문 8,400,000 인데 수금 9,240,000 처럼 같은 행의
                    숫자끼리 앞뒤가 안 맞아 보인다("주문보다 많이 받았나?"). 그래서 이 칸은
@@ -2234,15 +2241,12 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
               render: r => <span className="num-cell text-muted">{r.term_vat == null ? '—' : fmtNum(r.term_vat)}</span> },
             { key: 'collected', header: kind === "purchase" ? "지급액" : "수금", align: 'right', sortable: true, sortValue: r => r.collected ?? 0, render: r => <span className="num-cell">{fmtNum(r.collected ?? 0)}</span> },
             /* 총액형은 '주문잔액'(아직 청구 안 한 몫 포함), 기성·무기한형은 remain 이 없어
-               ar_remain(미수금)이 온다. 둘은 성격이 다르므로 무엇을 보고 있는지 밑줄에 적는다. */
+               ar_remain(미수금)이 온다. 둘은 성격이 다르므로 무엇을 보고 있는지 말풍선에 적는다. */
             { key: 'remain', header: '남은 주문분', align: 'right', sortable: true, sortValue: r => rowRemain(r), render: r => (
-              <span className="num-cell fw-700" style={{ color: rowRemain(r) > 0 ? "var(--warn-ink)" : "var(--muted-2)" }}>
+              /* 무엇을 세는지(미청구 포함 / 미수금 / 미지급금)는 말풍선으로 — 칸은 한 줄이다 */
+              <span className="num-cell fw-700" style={{ color: rowRemain(r) > 0 ? "var(--warn-ink)" : "var(--muted-2)" }}
+                title={rowRemain(r) > 0 ? (hasTotal(r) ? '미청구 포함' : (isPurchase(r) ? '미지급금' : '미수금')) : undefined}>
                 {rowRemain(r) > 0 ? fmtNum(rowRemain(r)) : "—"}
-                {rowRemain(r) > 0 && (
-                  <div className="text-xs fw-400 text-muted2">
-                    {hasTotal(r) ? '미청구 포함' : (isPurchase(r) ? '미지급금' : '미수금')}
-                  </div>
-                )}
               </span>
             ) },
             // 매입 주문엔 원가·손익이 없다 → 미지급금으로 대체
@@ -2269,15 +2273,19 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
       </div>
 
       <Drawer open={newOpen} onClose={() => setNewOpen(false)}
-        width={(newForm.items || []).length > 0 ? "min(1240px,100vw)" : "min(480px,100vw)"}
+        width={(newForm.items || []).length > 0 ? "min(1240px,100vw)" : "880px"}
         label="신규 생성">
+        {/* 머리가 없었다 — 옆판일 땐 덜 보였지만 가운데 팝업에선 무엇을 쓰는 창인지·어디서 닫는지가 안 보인다 */}
+        <DrawerHead title={kind === 'sales' ? '수주 등록' : kind === 'purchase' ? '발주 등록' : '주문 등록'}
+          onClose={() => setNewOpen(false)}/>
         <div className="drawer-body">
-          <div className="col gap-form">
+          {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */}
+          <div className="form-grid-2">
             {/* '주문 전체' 화면에는 방향이 없다 — 수주·발주 화면과 달리 여기서 만들면
                 누구도 방향을 모른다. 예전엔 서버가 거래처로 추정했고, 겸함 거래처면
                 매입 주문이 매출이 됐다. 물어보는 편이 낫다. */}
             {kind === 'all' && (
-              <div>
+              <div className="span-2">
                 <label className="label" style={{ marginBottom: 8 }}>구분 <span style={{ color: "var(--neg-ink)" }}>*</span></label>
                 <div className="row gap-6">
                   {[{ v: 'sales', l: '수주 (파는 것)' }, { v: 'purchase', l: '발주 (사는 것)' }].map(o => (
@@ -2326,7 +2334,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
               </div>
             </div>
             <ContractRefFields form={newForm} set={setNewForm}/>
-            <div>
+            <div className="span-2">
               <label className="label" style={{ marginBottom: 8 }}>계약서 첨부 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택 · 여러 개 가능</span></label>
               <FileAttach
                 docs={newForm.docs || []}

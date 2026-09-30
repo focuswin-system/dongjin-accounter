@@ -8,6 +8,7 @@
  */
 // 메뉴 색인·검색 태그 — 명령팔레트(Ctrl+K)가 화면 전체를 찾을 수 있게 한다
 import { ALL_LEAVES, LEAF_TAGS } from './nav'
+import { toUploadable } from './fileKinds'
 import { periodLong } from './renewal'   // 주기 이름은 한 표에서만 (격월 추가 때 여기가 빠지면 '매월'로 뜬다)
 
 
@@ -455,10 +456,17 @@ export const api = {
     catch (e) { return e.status === 404 || e.status === 403 ? { enabled: false } : { enabled: false, error: e.message } }
   },
   // 거르기(원청·검색·기간)는 화면이 한다 — 수주 PO 는 수백 건이라 한 번에 받는다
-  mesOrders() {
-    return req('/dongjin-mes/orders', { quiet: true })   // 꺼진 회사의 404 는 화면(MesGate)이 말한다
+  // 기간은 서버가 수주일로 거른다(비우면 전체). 원청·단계·검색은 화면이 거른다
+  mesOrders({ from = '', to = '' } = {}) {
+    const qs = new URLSearchParams({ from, to }).toString()
+    return req(`/dongjin-mes/orders?${qs}`, { quiet: true })   // 꺼진 회사의 404 는 화면(MesGate)이 말한다
   },
   mesOrderLines(contNumb) { return req(`/dongjin-mes/orders/${encodeURIComponent(contNumb)}/lines`) },
+  // 발주(MES 구매발주) — 기간은 발주일. 계약관리 › 발주 화면(동진)이 쓴다
+  mesPurchaseOrders({ from = '', to = '' } = {}) {
+    return req(`/dongjin-mes/purchase-orders?${new URLSearchParams({ from, to })}`, { quiet: true })
+  },
+  mesPurchaseOrderLines(pproNumb) { return req(`/dongjin-mes/purchase-orders/${encodeURIComponent(pproNumb)}/lines`) },
 
   async getDocCatalog() {
     try { return (await req('/doc-catalog'))?.items || [] } catch { return null }
@@ -1155,6 +1163,11 @@ export const api = {
 
   async uploadFile(file) {
     try {
+      /* 휴대폰 사진(HEIC)은 여기서 JPG 로 바꾼다 — 올리는 입력이 FileAttach 밖에도 여럿이라
+         한 곳(여기)에서 해야 빠지는 데가 없다(설계 popup-attachments-print §8) */
+      try { file = await toUploadable(file) } catch (e) { return { ok: false, error: e.message } }
+      // 서버 한도(routes/uploads.js)와 같은 값 — 큰 파일을 끝까지 보낸 뒤에야 거절당하지 않게 먼저 본다
+      if (file.size > 20 * 1024 * 1024) return { ok: false, error: '파일이 너무 커요. 20MB 까지 올릴 수 있어요.' }
       const token = localStorage.getItem('token')
       const formData = new FormData()
       formData.append('file', file)
@@ -1163,9 +1176,21 @@ export const api = {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       })
-      if (!res.ok) throw new Error('upload failed')
+      // 서버가 준 사유(용량·형식)를 그대로 — 영어 'upload failed' 로 뭉개지 않는다
+      if (!res.ok) {
+        let why = ''
+        try { why = (await res.json())?.error || '' } catch { /* 본문 없음 */ }
+        return { ok: false, error: why || '파일을 올리지 못했어요. 다시 시도해 주세요.' }
+      }
       return await res.json()
-    } catch(e) { return { ok: false, error: e.message } }
+    } catch { return { ok: false, error: '파일을 올리지 못했어요. 연결을 확인해 주세요.' } }
+  },
+
+  /* 거래 한눈에 보기 — 거래·전표·청구서·문서·걸린 첨부를 한 번에(server GET /transactions/:id/overview).
+     txn 은 목록과 같은 모양으로 바꿔 준다 — 팝업이 목록 행과 같은 칸 이름을 쓴다 */
+  async getTransactionOverview(id) {
+    const d = await req(`/transactions/${id}/overview`)
+    return { ...d, txn: d.txn ? adaptTransaction(d.txn) : null }
   },
 
   // 거래의 증빙(레거시 단일)만 갱신(다른 필드 보존)

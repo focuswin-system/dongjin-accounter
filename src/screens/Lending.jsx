@@ -254,17 +254,18 @@ export const LendingScreen = () => {
 
       {/* ── 등록/수정 ── */}
       <Drawer open={!!form && !form._adhoc} onClose={() => { setForm(null); setPreview(null) }}
-        width="min(560px,100vw)" label="대여금 등록">
+        width="880px" label="대여금 등록">
         {form && !form._adhoc && (<>
           <DrawerHead title={form.id ? '대여금 수정' : '대여금 등록'}
             sub="빌려준 돈이에요 — 통장에서 나가고 받을 자산이 늘어납니다"
             onClose={() => { setForm(null); setPreview(null) }}/>
-          <div className="drawer-body col gap-form">
+          {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */}
+          <div className="drawer-body form-grid-2">
             <div><label className="label">대여 이름 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
               <input className="input" value={form.name} placeholder="예: 김대표 개인 대여"
                 onChange={e => f('name', e.target.value)}/>
             </div>
-            <div className="row gap-12">
+            <>
               <div style={{ flex: 1 }}><label className="label">빌려간 곳</label>
                 <input className="input" value={form.borrower} placeholder="이름 또는 상호"
                   onChange={e => f('borrower', e.target.value)}/>
@@ -275,8 +276,8 @@ export const LendingScreen = () => {
                   options={[{ value: '', label: '연결 안 함' }, ...vendors.map(v => ({ value: v.id, label: v.name }))]}
                   placeholder="거래처 선택"/>
               </div>
-            </div>
-            <div className="row gap-12">
+            </>
+            <>
               <div style={{ flex: 1 }}><label className="label">빌려준 금액 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
                 <MoneyInput value={form.principal} onChange={raw => f('principal', raw)}/>
               </div>
@@ -285,8 +286,8 @@ export const LendingScreen = () => {
                   placeholder="0" onChange={e => f('annual_rate', e.target.value)}/>
                 <div className="text-xs text-muted2" style={{ marginTop: 6 }}>비우면 무이자예요.</div>
               </div>
-            </div>
-            <div>
+            </>
+            <div className="span-w2">
               <label className="label">상환방식</label>
               <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
                 {METHOD_OPTS.map(o => (
@@ -299,7 +300,7 @@ export const LendingScreen = () => {
               </div>
             </div>
             {form.method !== 'none' && (
-              <div className="row gap-12">
+              <>
                 <div style={{ flex: 1 }}><label className="label">기간 (개월)</label>
                   <input className="input num" type="number" onWheel={e => e.currentTarget.blur()} min="1" value={form.term_months}
                     onChange={e => { f('term_months', e.target.value); setPreview(null) }}/>
@@ -311,9 +312,9 @@ export const LendingScreen = () => {
                   <input className="input num" type="number" onWheel={e => e.currentTarget.blur()} min="1" max="28" value={form.pay_day}
                     onChange={e => { f('pay_day', e.target.value); setPreview(null) }}/>
                 </div>
-              </div>
+              </>
             )}
-            <div className="row gap-12">
+            <>
               <div style={{ flex: 1 }}><label className="label">대여일 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
                 <DateInput className="input" value={form.start_date}
                   onChange={e => { f('start_date', e.target.value); setPreview(null) }}/>
@@ -324,11 +325,11 @@ export const LendingScreen = () => {
                   options={accounts.filter(a => a.kind !== 'card').map(a => ({ value: a.id, label: a.name }))}
                   placeholder="계좌 선택"/>
               </div>
-            </div>
+            </>
 
             {/* 거래를 만들지 끌지 — 몇 년 전에 빌려준 돈을 뒤늦게 등록하면 그때 찍힌 출금과 겹친다 */}
             {!form.id && (
-              <div>
+              <div className="span-2">
                 <label className="label">출금 기록</label>
                 <div className="row gap-6">
                   {[[true, '지금 통장에서 나감'], [false, '이미 나간 돈 (기록만)']].map(([v, l]) => (
@@ -345,7 +346,7 @@ export const LendingScreen = () => {
             )}
 
             {form.method !== 'none' && (
-              <div>
+              <div className="span-2">
                 <button type="button" className="btn" onClick={doPreview}><Icon.Chart size={13}/> 회수 일정 미리보기</button>
                 {preview?.schedule?.length > 0 && (
                   <div className="text-xs text-muted2" style={{ marginTop: 8, lineHeight: 1.8 }}>
@@ -355,7 +356,7 @@ export const LendingScreen = () => {
                 )}
               </div>
             )}
-            <div><label className="label">메모</label>
+            <div className="span-2"><label className="label">메모</label>
               <input className="input" value={form.memo || ''} onChange={e => f('memo', e.target.value)}
                 placeholder="차용증·공증 여부 등"/>
             </div>

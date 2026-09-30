@@ -73,12 +73,13 @@ const FilingDrawer = ({ target, year, onClose, onSaved }) => {
   }
 
   return (
-    <Drawer open={!!target} onClose={onClose}>
+    <Drawer open={!!target} onClose={onClose} width="880px">
       <DrawerHead
         title={<>{year}년 {target.quarter}분기 부가세</>}
         sub={<>자동집계 예상 {target.estimate < 0 ? '환급 ' : ''}{fmtNum(Math.abs(target.estimate ?? 0))}원 (매출세액 − 매입세액)</>}
         onClose={onClose}/>
-      <div className="drawer-body col gap-form">
+      {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */}
+      <div className="drawer-body form-grid-2">
         <div>
           <label className="label" style={{ marginBottom: 8 }}>신고세액 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 실제 신고한 금액 (환급이면 음수)</span></label>
           <MoneyInput value={form.filed_amount} allowNegative onChange={raw => f('filed_amount', raw)}/>
@@ -100,7 +101,7 @@ const FilingDrawer = ({ target, year, onClose, onSaved }) => {
         </div>
         {/* 납부/환급 완료면 실제 자금이 오간 계좌 → 거래내역·계좌잔고에 반영 */}
         {isDone && (
-          <div>
+          <div className="span-2">
             <label className="label" style={{ marginBottom: 8 }}>{isRefund ? '환급 입금' : '납부 출금'} 계좌 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
             <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
               {accounts.map(a => (
@@ -291,9 +292,10 @@ const OtherTaxDrawer = ({ open, editing, onClose, onSaved }) => {
   }
 
   return (
-    <Drawer open={open} onClose={onClose}>
+    <Drawer open={open} onClose={onClose} width="880px">
       <DrawerHead title={editing ? '기타세액 수정' : '기타세액 등록'} onClose={onClose}/>
-      <div className="drawer-body col gap-form">
+      {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */}
+      <div className="drawer-body form-grid-2">
         <div>
           <label className="label" style={{ marginBottom: 8 }}>세목 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
           <input className="input" value={form.name} onChange={e => f('name', e.target.value)} placeholder="예: 원천세(근로소득), 지방소득세"/>
@@ -302,7 +304,7 @@ const OtherTaxDrawer = ({ open, editing, onClose, onSaved }) => {
           <label className="label" style={{ marginBottom: 8 }}>과세기간 / 귀속</label>
           <input className="input" value={form.period} onChange={e => f('period', e.target.value)} placeholder="예: 2026년 3월분, 2026년 귀속"/>
         </div>
-        <div className="row gap-12">
+        <>
           <div style={{ flex: 1 }}>
             <label className="label" style={{ marginBottom: 8 }}>신고(납부)세액</label>
             <MoneyInput value={form.tax_amount} onChange={raw => f('tax_amount', raw)}/>
@@ -311,7 +313,7 @@ const OtherTaxDrawer = ({ open, editing, onClose, onSaved }) => {
             <label className="label" style={{ marginBottom: 8 }}>납부액</label>
             <MoneyInput value={form.paid_amount} onChange={raw => f('paid_amount', raw)}/>
           </div>
-        </div>
+        </>
         <div>
           <label className="label" style={{ marginBottom: 8 }}>상태</label>
           <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
@@ -325,7 +327,7 @@ const OtherTaxDrawer = ({ open, editing, onClose, onSaved }) => {
           <DateInput className="input" max={localToday()} value={form.paid_date} onChange={e => f('paid_date', e.target.value)}/>
         </div>
         {isDone && (
-          <div>
+          <div className="span-2">
             <label className="label" style={{ marginBottom: 8 }}>{isRefund ? '환급 입금' : '납부 출금'} 계좌 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
             <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
               {accounts.map(a => (

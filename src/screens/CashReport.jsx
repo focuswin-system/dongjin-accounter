@@ -2,7 +2,7 @@ import { useState, useEffect, useRef} from 'react'
 import { Icon, fmtNum, localToday, DateInput } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
-import { DataTable } from '../lib/components/DataTable'
+import { DataTable, Sub } from '../lib/components/DataTable'
 import { api } from '../lib/api'
 import { PrintEditButton } from '../lib/components/PrintEditButton'
 import { usePrintEdit } from '../lib/printEdit'
@@ -196,10 +196,10 @@ export const CashReportScreen = ({ page = true }) => {
             empty="등록된 계좌가 없어요."
             columns={[
               { key: 'name', header: '계좌', render: r => (
-                <div style={{ opacity: r.locked ? 0.7 : 1 }}>
-                  <div className={r.locked ? 'text-sm' : 'fw-700 text-sm'}>{r.name}</div>
-                  <div className="text-xs text-muted2">{r.sub}</div>
-                </div>
+                <span style={{ opacity: r.locked ? 0.7 : 1 }}>
+                  <span className={r.locked ? 'text-sm' : 'fw-700 text-sm'}>{r.name}</span>
+                  <Sub>{r.sub}</Sub>
+                </span>
               )},
               { key: 'amount', header: '지금 잔액', width: 120, align: 'right',
                 className: 'num-cell', render: r => (
@@ -207,19 +207,18 @@ export const CashReportScreen = ({ page = true }) => {
                 )},
               /* 예상 최저 = 앞으로 N일 사이 이 통장이 가장 낮아지는 순간.
                  지금 잔액이 넉넉해도 그 사이 빠져나갈 게 많으면 여기서 드러난다. */
-              { key: 'low', header: `예상 최저 (${data.days}일)`, width: 150, align: 'right', render: r => {
+              { key: 'low', header: `예상 최저 (${data.days}일)`, width: 170, align: 'right', render: r => {
                 if (r.locked) return <span className="text-xs text-muted2">—</span>
                 const v = r.low?.balance
                 if (v == null) return <span className="text-xs text-muted2">—</span>
                 const short = v < 0
                 return (
-                  <div>
-                    <div className={`num-cell ${short ? 'fw-700' : 'text-muted'}`}
-                      style={short ? { color: 'var(--neg-ink)' } : undefined}>{fmtNum(v)}</div>
-                    {(r.flowIn > 0 || r.flowOut > 0) && (
-                      <div className="text-xs text-muted2">{r.low?.date}</div>
-                    )}
-                  </div>
+                  <>
+                    {/* 언제 가장 낮아지나 — 숫자 앞에 작게(오른쪽 정렬 칸이라 숫자 끝이 줄을 맞춘다) */}
+                    {(r.flowIn > 0 || r.flowOut > 0) && <span className="text-xs text-muted2" style={{ marginRight: 6 }}>{r.low?.date?.slice(5)}</span>}
+                    <span className={`num-cell ${short ? 'fw-700' : 'text-muted'}`}
+                      style={short ? { color: 'var(--neg-ink)' } : undefined}>{fmtNum(v)}</span>
+                  </>
                 )
               }},
             ]}/>

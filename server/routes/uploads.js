@@ -22,9 +22,10 @@ const storage = multer.diskStorage({
   },
 })
 
+const MAX_MB = 20
 const upload = multer({
   storage,
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+  limits: { fileSize: MAX_MB * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = ['.pdf', '.jpg', '.jpeg', '.png', '.xlsx', '.xls', '.docx', '.hwp']
     const ext = path.extname(file.originalname).toLowerCase()
@@ -32,8 +33,19 @@ const upload = multer({
   },
 })
 
-router.post('/', upload.single('file'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: '파일이 없거나 허용되지 않는 형식입니다' })
+/* multer 가 던지는 오류(용량 초과 등)를 **사람 말로** 돌려준다. 그냥 두면 전역 오류 처리로 가서
+   500 '서버 오류'가 되고, 화면은 무엇이 문제였는지 모른 채 'upload failed' 만 띄웠다(2026-09-29 실사용). */
+const single = (req, res, next) => upload.single('file')(req, res, (err) => {
+  if (!err) return next()
+  if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: `파일이 너무 커요. ${MAX_MB}MB 까지 올릴 수 있어요.` })
+  }
+  if (err instanceof multer.MulterError) return res.status(400).json({ error: '파일을 올리지 못했어요. 다시 시도해 주세요.' })
+  next(err)
+})
+
+router.post('/', single, (req, res) => {
+  if (!req.file) return res.status(400).json({ error: '올릴 수 없는 형식이에요. PDF·사진(JPG·PNG)·엑셀·워드·한글만 돼요.' })
   const originalName = Buffer.from(req.file.originalname, 'latin1').toString('utf8')
   res.json({
     url:          `/uploads/${req.user.companyId}/${req.file.filename}`,

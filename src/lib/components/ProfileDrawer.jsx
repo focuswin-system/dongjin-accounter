@@ -55,7 +55,7 @@ export const ProfileDrawer = ({ open, onClose, user, onSaved }) => {
     setBusy(true)
     const up = await api.uploadFile(file)
     setBusy(false)
-    if (!up?.url) return toast.push('사진을 올리지 못했어요', { tone: 'warn' })
+    if (!up?.url) return toast.push(up?.error || '사진을 올리지 못했어요', { tone: 'warn' })
     /* 주소만 개인 설정에 담는다 — 파일 자체는 기존 업로드 경로가 회사 폴더에 넣는다 */
     const r = await api.saveMyPrefs({ avatar_url: up.url })
     if (!r.ok) return toast.push(r.error || '사진을 저장하지 못했어요', { tone: 'warn' })

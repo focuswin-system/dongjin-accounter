@@ -467,10 +467,11 @@ const NewResolutionDrawer = ({ open, onClose, onCreated, seed = null }) => {
   };
 
   return (
-    <Drawer open={open} onClose={onClose} width="min(460px,100vw)" label="새 결의서">
+    <Drawer open={open} onClose={onClose} width="880px" label="새 결의서">
       <DrawerHead title="새 지급결의서" onClose={onClose}/>
-      <div className="drawer-body col gap-form">
-        <div className="text-sm text-muted">청구서(세금계산서) 없는 지출을 결의서로 만들어요. 품목을 여러 줄로 나누려면 만든 뒤 상세에서 편집하세요.</div>
+      {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */}
+      <div className="drawer-body form-grid-2">
+        <div className="text-sm text-muted span-2">청구서(세금계산서) 없는 지출을 결의서로 만들어요. 품목을 여러 줄로 나누려면 만든 뒤 상세에서 편집하세요.</div>
         <div>
           <label className="label" style={{ marginBottom: 8 }}>지출처 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
           <Combobox value={form.vendor} onChange={v => setForm(f => ({ ...f, vendor: v, vendor_id: v === f.vendor ? f.vendor_id : null }))}
@@ -498,7 +499,8 @@ const NewResolutionDrawer = ({ open, onClose, onCreated, seed = null }) => {
           <label className="label" style={{ marginBottom: 8 }}>지출 목적 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
           <input className="input" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="예: 사무실 간식 구입"/>
         </div>
-        <div>
+        {/* 가져온 품목 목록이 뜨면 넓게 쓴다 */}
+        <div className={hasItems ? 'span-2' : undefined}>
           <label className="label" style={{ marginBottom: 8 }}>금액 (VAT 포함) <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
           {hasItems ? (
             /* 가져온 품목 — 금액은 그 합이다. 품목을 고치려면 만든 뒤 상세에서 편집한다(작성 서랍은 한 줄짜리라서) */
@@ -524,7 +526,7 @@ const NewResolutionDrawer = ({ open, onClose, onCreated, seed = null }) => {
             </div>
           )}
         </div>
-        <div className="row gap-12">
+        <>
           <div style={{ flex: 1 }}>
             <label className="label" style={{ marginBottom: 8 }}>지급 방법</label>
             <div className="row gap-6">
@@ -538,14 +540,14 @@ const NewResolutionDrawer = ({ open, onClose, onCreated, seed = null }) => {
             <label className="label" style={{ marginBottom: 8 }}>지급일</label>
             <DateInput className="input" value={form.pay_date} onChange={e => setForm(f => ({ ...f, pay_date: e.target.value }))}/>
           </div>
-        </div>
+        </>
         <div>
           <label className="label" style={{ marginBottom: 8 }}>특기사항 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
           <input className="input" value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} placeholder="예: 팀 공용"/>
         </div>
         {/* 결재선 — 프리셋에서 선택. 기본 프리셋이 미리 골라져 있음. 만든 뒤 상세에서 바꿀 수도 있음. */}
         {presets.length > 0 && (
-          <div>
+          <div className="span-2">
             <label className="label" style={{ marginBottom: 8 }}>결재선</label>
             <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
               {presets.map(p => (
@@ -1097,7 +1099,7 @@ export const EvidenceScreen = ({ onAttach }) => {
             {SAMPLE.evidenceMissing.map((m, i) => (
               <button key={i} onClick={() => onAttach && onAttach(m)}
                 className="row gap-10"
-                style={{ padding: "12px 0", borderTop: i ? "1px solid var(--line)" : 0, background: "transparent", border: 0, textAlign: "left", cursor: "pointer", fontFamily: "inherit", width: "100%" }}
+                style={{ padding: "12px 0", borderTop: i ? "1px solid var(--line)" : 0, background: "transparent", borderLeft: 0, borderRight: 0, borderBottom: 0, textAlign: "left", cursor: "pointer", fontFamily: "inherit", width: "100%" }}
                 onMouseEnter={e => e.currentTarget.style.background = "var(--surface-2)"}
                 onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -2374,7 +2376,7 @@ const ReportDefense = ({ toast }) => {
               {/* 주문 헤더 */}
               <button
                 onClick={() => setExpanded(open ? null : i)}
-                style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", width: "100%", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", borderBottom: open ? "1px solid var(--line)" : "none" }}
+                style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", width: "100%", background: "none", borderTop: "none", borderLeft: "none", borderRight: "none", cursor: "pointer", fontFamily: "inherit", borderBottom: open ? "1px solid var(--line)" : "none" }}
               >
                 <div style={{ textAlign: "left", flex: 1 }}>
                   <div className="fw-700 text-sm">{r.contractNo}</div>

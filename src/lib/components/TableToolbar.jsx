@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Icon, periodToRange, DateInput, yearLabel, useFiscalTick } from '../ui'
-import { PeriodPicker } from './PeriodPicker'
+import { Icon } from '../ui'
+import { DateRangeBar } from './PeriodPicker'
 
 // 표 상단 툴바 — 날짜 범위 + 검색 + 필터 패널. DataTable 위에 얹는다.
 //
@@ -14,18 +14,7 @@ import { PeriodPicker } from './PeriodPicker'
 // onReset: 있으면 패널에 '초기화' 버튼 노출
 // right:   툴바 바 우측 끝 추가 노드(옵션)
 
-const DATE_PRESETS = [
-  { id: 'month',   label: '이번 달' },
-  { id: 'last',    label: '지난 달' },
-  { id: 'quarter', label: '이번 분기' },
-  { id: 'year',    get label() { return yearLabel() } },   // 회기 — 결산월이 12월이 아니면 '이번 회기'
-]
-
-/* periodPicker: true 면 날짜 인풋 두 개 + 프리셋 다섯 대신 **드릴다운 선택기** 하나를 쓴다.
-   한 화면(수시입금)에서 먼저 써 보고 괜찮으면 전체로 올린다 — 날짜 필터는 매일 쓰는
-   물건이라 한 번에 전부 바꾸면 되돌리기가 번거롭다. */
-export const TableToolbar = ({ date, search, filters, hasActiveFilter, onReset, right, periodPicker = false }) => {
-  useFiscalTick()   // 결산월을 늦게 받아도 '올해/이번 회기' 칩이 따라온다
+export const TableToolbar = ({ date, search, filters, hasActiveFilter, onReset, right }) => {
   const [open, setOpen] = useState(false)
   // inline 로 표시한 필터는 바에 직접 세우고, 나머지만 ⚙ 패널로 보낸다
   const inlineFilters = (filters || []).filter(f => f.inline)
@@ -35,42 +24,11 @@ export const TableToolbar = ({ date, search, filters, hasActiveFilter, onReset, 
   return (
     <div className="tbar">
       <div className="tbar-bar">
-        {date && periodPicker && (
-          <PeriodPicker from={date.from} to={date.to} onChange={date.onChange}/>
-        )}
         {inlineFilters.map((f, i) => (
           <div key={i} className="tbar-inline-filter">{f.node}</div>
         ))}
-        {date && !periodPicker && (
-          <div className="tbar-date">
-            <Icon.Calendar size={14} className="text-muted2"/>
-            <DateInput className="input num tbar-dateinput"
-              value={date.from || ''} max={date.to || undefined}
-              onChange={e => date.onChange({ from: e.target.value, to: date.to })}/>
-            <span className="text-muted fw-600">~</span>
-            <DateInput className="input num tbar-dateinput"
-              value={date.to || ''} min={date.from || undefined}
-              onChange={e => date.onChange({ from: date.from, to: e.target.value })}/>
-            {/* 지금 걸린 범위와 같은 프리셋은 눌린 상태로 보여준다.
-                예전엔 어느 버튼에도 표시가 없어서, **기본값이 '이번 달'인데 필터가 없다고
-                믿게 됐다** — 거래내역에 98건 중 4건만 뜨니 "왜 안 나오지"가 된다.
-                '전체'도 범위가 비었을 때 눌린 것으로 보여야 짝이 맞는다. */}
-            <div className="tbar-presets">
-              {DATE_PRESETS.map(p => {
-                const r = periodToRange(p.id)
-                const on = date.from === r.from && date.to === r.to
-                return (
-                  <button key={p.id} className={`btn ghost sm${on ? ' active' : ''}`}
-                    aria-pressed={on}
-                    onClick={() => date.onChange(r)}>{p.label}</button>
-                )
-              })}
-              <button className={`btn ghost sm${!date.from && !date.to ? ' active' : ''}`}
-                aria-pressed={!date.from && !date.to}
-                onClick={() => date.onChange({ from: '', to: '' })}>전체</button>
-            </div>
-          </div>
-        )}
+        {/* 기간 — 앱 전체가 같은 모양(lib/components/PeriodPicker.jsx DateRangeBar) */}
+        {date && <DateRangeBar from={date.from} to={date.to} onChange={date.onChange}/>}
 
         <div className="tbar-right">
           {search && (

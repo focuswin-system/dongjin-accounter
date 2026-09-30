@@ -11,7 +11,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { Icon, fmtNum, Drawer, useToast } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
-import { DataTable } from '../lib/components/DataTable'
+import { DataTable, Sub } from '../lib/components/DataTable'
 import { DrawerHead } from '../lib/components/Drawer'
 import { api } from '../lib/api'
 import { ApprovalLine, ActApprovalDrawer, notifyApprovalActed } from '../lib/components/Approval'
@@ -57,20 +57,18 @@ export const ApprovalBoxScreen = ({ go }) => {
 
   const columns = useMemo(() => [
     { key: 'doc_label', header: '문서', width: 96 },
-    { key: 'title', header: '제목', render: a => (
-      <div style={{ minWidth: 0 }}>
-        <div className="truncate">{a.title || '—'}</div>
-        {a.mode === 'post' && <div className="text-xs" style={{ color: 'var(--warn-ink)' }}>후결 · {a.reason}</div>}
-      </div>
+    { key: 'title', header: '제목', maxWidth: 420, render: a => (
+      <>
+        {a.mode === 'post' && <span className="badge warn" style={{ marginRight: 6 }}>후결</span>}
+        {a.title || '—'}
+        {a.mode === 'post' && <Sub>{a.reason}</Sub>}
+      </>
     ) },
     { key: 'amount', header: '금액', width: 120, align: 'right',
       render: a => (a.amount == null ? '—' : <span className="num">{fmtNum(a.amount)}</span>) },
     // 올린 문서함에서는 기안자가 늘 나라서 칸을 뺀다(아래 filter)
-    { key: 'drafter', header: '기안', width: 120, render: a => (
-      <div>
-        <div>{a.drafter_name}</div>
-        {a.drafter_pos && <div className="text-xs text-muted">{a.drafter_pos}</div>}
-      </div>
+    { key: 'drafter', header: '기안', width: 140, render: a => (
+      <>{a.drafter_name}<Sub>{a.drafter_pos}</Sub></>
     ) },
     { key: 'submitted_at', header: '올린 날', width: 112, sortable: true,
       render: a => <span className="num" style={{ whiteSpace: 'nowrap' }}>{String(a.submitted_at || '').slice(0, 10)}</span> },

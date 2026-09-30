@@ -265,7 +265,7 @@ export const QuickDock = ({ go, route, canDo, onOpenFaq }) => {
             </div>
             {links.length === 0 ? (
               <div className="text-sm text-muted" style={{ padding: '16px 0' }}>
-                아직 없어요. 아래에서 골라 담으세요.
+                담아 둔 바로가기가 없어요. 아래에서 골라 담으세요.
               </div>
             ) : (
               <div className="col gap-10">

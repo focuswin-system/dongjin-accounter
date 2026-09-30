@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useOrdersFromMes } from '../lib/customModules'
 import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, DateInput, fmtDateShort } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
@@ -43,6 +44,8 @@ export const RepeatScreen = ({ goRoute, initialDirection = 'all', prefill = null
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState(null)
   const [createRows, setCreateRows] = useState(null)   // 만들기 확인 서랍
+  const [q, setQ] = useState('')                       // 검색 — 거래처·내용·계약
+  const [vendor, setVendor] = useState('')             // 거래처 필터(이름)
 
   const loadMonth = async () => { setRows(await api.getRepeatMonth(ym)); setPicked(new Set()) }
   const loadAll = async () => setTemplates(await api.getRepeatTemplates())
@@ -50,10 +53,20 @@ export const RepeatScreen = ({ goRoute, initialDirection = 'all', prefill = null
   useEffect(() => { if (view === 'all') loadAll() }, [view])
   /* 보이는 것만 고른 것이다 — 입금/출금 칩이나 보기를 바꾸면 선택을 푼다.
      안 그러면 화면에 없는 줄이 '선택한 N건'에 섞여 확인 서랍에서 처음 보게 된다. */
-  useEffect(() => { setPicked(new Set()) }, [dir, view])
+  useEffect(() => { setPicked(new Set()) }, [dir, view, q, vendor])
   const reload = () => { loadMonth(); if (view === 'all' || templates) loadAll() }
 
-  const byDir = (list) => (list || []).filter(r => dir === 'all' || r.direction === dir)
+  /* 방향 · 거래처 · 검색을 한 번에 거른다. 검색은 거래처·내용·계약 이름에 걸린다(달별은 치환된 내용, 전체 목록은 틀의 내용) */
+  const term = q.trim().toLowerCase()
+  const byDir = (list) => (list || []).filter(r =>
+    (dir === 'all' || r.direction === dir)
+    && (!vendor || (r.vendor_name || '') === vendor)
+    && (!term || [r.vendor_name, r.item_text, r.item, r.contract_name].some(v => String(v || '').toLowerCase().includes(term))))
+  // 거래처 필터 목록 — 등록된 반복거래에 실제로 나오는 거래처만(모든 거래처를 늘어놓으면 고를 게 너무 많다)
+  const vendorOpts = useMemo(() => {
+    const names = new Set([...(rows || []), ...(templates || [])].map(r => r.vendor_name).filter(Boolean))
+    return [...names].sort((a, b) => a.localeCompare(b, 'ko')).map(n => ({ value: n, label: n }))
+  }, [rows, templates])
   const monthRows = byDir(rows)
   const allRows = byDir(templates)
   // 손볼 것이 남은 줄(비목·계좌 없음)은 고를 수 없다 — 골라도 서버가 막고, 만들기는 전부 아니면 전무다
@@ -119,6 +132,18 @@ export const RepeatScreen = ({ goRoute, initialDirection = 'all', prefill = null
             <button key={v} className={`chip ${dir === v ? 'active' : ''}`} onClick={() => setDir(v)}>{l}</button>
           ))}
         </div>
+        <div className="search" style={{ margin: 0, width: 220, padding: '6px 10px' }}>
+          <Icon.Search size={14}/>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="거래처·내용 검색"/>
+          {q && <button type="button" className="icon-btn" aria-label="검색어 지우기" onClick={() => setQ('')}><Icon.Close size={12}/></button>}
+        </div>
+        <div className="row gap-4" style={{ alignItems: 'center', width: 200 }}>
+          {/* 문서 목록의 거래처 필터와 같은 낮은 칸(.doc-filters-vendor) — 옆 검색칸·칩과 높이를 맞춘다 */}
+          <div className="doc-filters-vendor">
+            <Combobox value={vendor} onChange={v => setVendor(v || '')} options={vendorOpts} allowAdd={false} placeholder="거래처 전체"/>
+          </div>
+          {vendor && <button type="button" className="icon-btn" aria-label="거래처 필터 지우기" onClick={() => setVendor('')}><Icon.Close size={12}/></button>}
+        </div>
         {view === 'month' && (
           <div className="row gap-4 ml-auto" style={{ alignItems: 'center' }}>
             <button className="btn ghost sm" aria-label="이전 달" onClick={() => setYm(shiftYm(ym, -1))}><Icon.Left size={14}/></button>
@@ -147,7 +172,7 @@ export const RepeatScreen = ({ goRoute, initialDirection = 'all', prefill = null
                   <tr><td colSpan={8} className="text-sm text-muted" style={{ textAlign: 'center', padding: 24 }}>불러오는 중…</td></tr>
                 ) : monthRows.length === 0 ? (
                   <tr><td colSpan={8} className="text-sm text-muted" style={{ textAlign: 'center', padding: 24 }}>
-                    {ymLabel(ym)}에 해당하는 반복거래가 없어요.
+                    {term || vendor ? '조건에 맞는 반복거래가 없어요.' : `${ymLabel(ym)}에 해당하는 반복거래가 없어요.`}
                   </td></tr>
                 ) : monthRows.map(r => (
                   <tr key={r.id} style={{ opacity: r.made ? 0.6 : 1 }}>
@@ -195,6 +220,8 @@ export const RepeatScreen = ({ goRoute, initialDirection = 'all', prefill = null
             <tbody>
               {templates === null ? (
                 <tr><td colSpan={7} className="text-sm text-muted" style={{ textAlign: 'center', padding: 24 }}>불러오는 중…</td></tr>
+              ) : allRows.length === 0 && (term || vendor) ? (
+                <tr><td colSpan={7} className="text-sm text-muted" style={{ textAlign: 'center', padding: 24 }}>조건에 맞는 반복거래가 없어요.</td></tr>
               ) : allRows.length === 0 ? (
                 <tr><td colSpan={7} className="text-sm text-muted" style={{ textAlign: 'center', padding: 24 }}>
                   등록된 반복거래가 없어요. 유지보수비·임차료처럼 매달 오가는 돈을 등록해 두면 달마다 골라서 만들 수 있어요.
@@ -384,11 +411,13 @@ const RepeatCreateDrawer = ({ rows, ym, onClose, onDone }) => {
 const emptyForm = (direction) => ({
   direction, creates: direction === 'out' ? 'txn' : 'invoice', vendor_id: '', contract_id: null,
   item: '', category: '', amount: '', vat_mode: direction === 'out' ? 'inclusive' : 'exclusive',
-  period: 'monthly', anchor_month: new Date().getMonth() + 1, day_of_month: '1', pick_day: false,
+  period: 'monthly', anchor_month: new Date().getMonth() + 1, day_of_month: '1',
   account_id: '', pay_term: direction === 'out' ? 'immediate' : 'net30', pay_day: 1, active: true,
 })
 
 const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved }) => {
+  /* 수주·발주 원본이 MES 인 회사(동진)는 회계 쪽 주문 연결을 감춘다 — lib/customModules.js */
+  const ordersFromMes = useOrdersFromMes()
   const toast = useToast()
   const [form, setForm] = useState(() => emptyForm(defaultDirection))
   const [errors, setErrors] = useState({})
@@ -409,8 +438,10 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
         ...emptyForm(editing.direction),
         ...editing,
         contract_id: editing.contract_id || null, vendor_id: editing.vendor_id || '', category: editing.category || '',
-        amount: String(editing.amount || ''), day_of_month: String(editing.day_of_month || 1),
-        pick_day: Number(editing.day_of_month) === 0, account_id: editing.account_id || '',
+        /* 일자 0 은 옛 '날짜가 매번 달라요'(기본 날짜 없음). 그 선택은 없앴지만(만들 때 늘 날짜를 고친다)
+           이미 그렇게 저장된 것은 빈칸으로 보여 주고, 비운 채 저장하면 그대로 둔다 */
+        amount: String(editing.amount || ''), day_of_month: Number(editing.day_of_month) ? String(editing.day_of_month) : '',
+        account_id: editing.account_id || '',
         active: !!editing.active,
       })
     } else {
@@ -433,11 +464,15 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
 
   const save = async () => {
     if (needsVendor && !form.vendor_id) { setErrors({ vendor_id: '거래처를 골라주세요' }); return }
+    // 새로 만들 땐 날짜가 있어야 한다(기본 날짜). 옛 '매번 달라요'(0)로 저장된 것만 빈칸을 허락한다
+    if (!(parseInt(form.day_of_month, 10) > 0) && !(editing?.id && !Number(editing.day_of_month))) {
+      setErrors({ day_of_month: '날짜를 적어 주세요' }); return
+    }
     const body = {
       ...form,
       creates: isOut ? form.creates : 'invoice',
       amount: String(form.amount).replace(/[^0-9]/g, ''),
-      day_of_month: form.pick_day ? 0 : (parseInt(form.day_of_month, 10) || 1),
+      day_of_month: parseInt(form.day_of_month, 10) || 0,
     }
     const res = await api.saveRepeatTemplate(editing?.id, body)
     if (!res.ok) {
@@ -453,9 +488,12 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
   const req = <span style={{ color: 'var(--neg-ink)' }}> *</span>
 
   return (
-    <Drawer open={open} onClose={onClose} width="min(600px,100vw)" label="반복거래">
+    /* 두 칸 배치 — 한 줄에 하나씩 세우면 짧은 칸(구분·주기·날짜)까지 줄을 다 먹어 스크롤이 길었다
+       (2026-09-29 사용자: "쓸데없이 한 줄, 가로를 늘리고 두 줄로"). 좁은 화면에선 한 줄로 돌아간다 */
+    <Drawer open={open} onClose={onClose} width="880px" label="반복거래">
       <DrawerHead title={editing?.id ? '반복거래 수정' : '반복거래 등록'} onClose={onClose}/>
-      <div className="drawer-body col gap-form">
+      <div className="drawer-body form-grid-2">
+        <div className="span-2 row" style={{ gap: 32, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         <div>
           <label className="label">구분</label>
           <div className="row gap-6">
@@ -490,6 +528,7 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
             </div>
           </div>
         )}
+        </div>
         <div>
           {/* 청구서를 만드는 규칙은 거래처가 필수다(서버 lib/repeat.js) — 바로 출금은 공과금처럼 없을 수 있다 */}
           <label className="label">거래처 {needsVendor
@@ -500,12 +539,14 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
             onChange={v => setForm(p => contractFitsVendor(contracts, p.contract_id, v) ? { ...p, vendor_id: v } : { ...p, vendor_id: v, contract_id: null })}
             options={vendors.map(v => ({ value: v.id, label: v.name, sub: v.type || '' }))} placeholder="거래처 선택·검색"/>
         </div>
+        {!ordersFromMes && (
         <div>
           <label className="label">{isOut ? '발주' : '수주'} 연결 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
           <Combobox value={form.contract_id || ''} onChange={v => f('contract_id', v || null)} allowAdd={false}
             options={contractsForVendor(sideContracts, form.vendor_id).map(c => ({ value: c.id, label: c.name, sub: c.vendor_name }))}
             placeholder="없으면 비워두기"/>
         </div>
+        )}
         <div>
           <label className="label">내용{req}</label>
           <input className="input" value={form.item} onChange={e => f('item', e.target.value)} placeholder="예: {월}월 유지보수"/>
@@ -550,19 +591,14 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
         </div>
         <div>
           <label className="label">날짜</label>
-          <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-            {!form.pick_day && (
-              <>
-                <input className="input num" type="number" onWheel={e => e.currentTarget.blur()} min="1" max="31" style={{ width: 80 }}
-                  value={form.day_of_month} onChange={e => f('day_of_month', e.target.value)}/>
-                <span className="text-sm text-muted">일</span>
-              </>
-            )}
-            <label className="row gap-6 text-sm" style={{ alignItems: 'center' }}>
-              <input type="checkbox" checked={form.pick_day} onChange={e => f('pick_day', e.target.checked)}/>
-              날짜가 매번 달라요(만들 때 고름)
-            </label>
+          <div className="row gap-8" style={{ alignItems: 'center' }}>
+            <input className="input num" type="number" onWheel={e => e.currentTarget.blur()} min="1" max="31" style={{ width: 80 }}
+              value={form.day_of_month} onChange={e => f('day_of_month', e.target.value)}/>
+            <span className="text-sm text-muted">일</span>
           </div>
+          {/* '날짜가 매번 달라요' 체크를 없앴다 — 만들 때(이번 달 반복거래 만들기) 건마다 날짜를 늘 고칠 수 있다 */}
+          <div className="text-xs text-muted2" style={{ marginTop: 4 }}>만들 때 그 달 날짜를 바꿀 수 있어요</div>
+          <Err k="day_of_month"/>
         </div>
         <div>
           <label className="label">{isOut ? '출금' : '입금'} 계좌{isOut && form.creates === 'txn' ? req : null}</label>
@@ -580,13 +616,15 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
                 <button key={o.value} type="button" className={`chip ${form.pay_term === o.value ? 'active' : ''}`}
                   onClick={() => f('pay_term', o.value)}>{o.label}</button>
               ))}
-              {payTermNeedsDay(form.pay_term) && (
-                <div className="row gap-6" style={{ alignItems: 'center' }}>
-                  <input className="input num" type="number" onWheel={e => e.currentTarget.blur()} min="1" max="31" style={{ width: 76 }}
-                    value={form.pay_day ?? 1} onChange={e => f('pay_day', e.target.value)}/>
-                  <span className="text-sm text-muted">일</span>
-                </div>
-              )}
+              {/* 'N일' 칸은 **늘 자리에 둔다** — 당월·익월 N일을 누를 때만 생기면 누를 때마다 줄이 밀렸다.
+                  N일 기한이 아니면 끈 채로 둔다 */}
+              <div className="row gap-6" style={{ alignItems: 'center' }}>
+                <input className="input num" type="number" onWheel={e => e.currentTarget.blur()} min="1" max="31" style={{ width: 64 }}
+                  disabled={!payTermNeedsDay(form.pay_term)} aria-label="N일"
+                  value={payTermNeedsDay(form.pay_term) ? (form.pay_day ?? 1) : ''} placeholder="N"
+                  onChange={e => f('pay_day', e.target.value)}/>
+                <span className="text-sm text-muted">일</span>
+              </div>
             </div>
             <div className="text-xs text-muted2" style={{ marginTop: 6 }}>{payTermHint(form.pay_term, form.pay_day, isOut ? '나가요' : '들어와요')}</div>
           </div>

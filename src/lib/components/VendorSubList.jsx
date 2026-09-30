@@ -1,4 +1,5 @@
 import { Icon } from '../ui'
+import { josa } from '../josa'
 
 /* 거래처의 계좌·담당자 목록 편집기.
  *
@@ -30,7 +31,7 @@ export const VendorSubList = ({ label, hint, rows = [], onChange, fields, addLab
       {hint && <div className="text-xs text-muted2" style={{ marginBottom: 8 }}>{hint}</div>}
 
       {rows.length === 0 ? (
-        <div className="text-xs text-muted2" style={{ padding: '6px 0' }}>아직 없어요.</div>
+        <div className="text-xs text-muted2" style={{ padding: '6px 0' }}>등록된 {josa(label, '이')} 없어요.</div>
       ) : (
         <div className="col gap-6">
           {rows.map((r, i) => (

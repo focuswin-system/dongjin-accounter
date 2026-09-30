@@ -90,12 +90,13 @@ const LoanFormDrawer = ({ open, editing, onClose, onSave, vendors, accounts }) =
   if (!open) return null
   const t = preview?.totals
   return (
-    <Drawer open onClose={onClose} width="min(560px, 100vw)">
+    <Drawer open onClose={onClose} width="880px">
       <DrawerHead title={editing ? '차입금 수정' : '차입금 등록'}
         sub={editing ? '상환 실적이 있으면 원금·방식·회차는 바꿀 수 없어요' : '대출을 받은 기록을 남깁니다'}
         onClose={onClose}/>
-      <div className="drawer-body col gap-form">
-        <div className="alert-row" style={{ background: 'var(--surface-2)', borderColor: 'var(--line)' }}>
+      {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */}
+      <div className="drawer-body form-grid-2">
+        <div className="alert-row span-2" style={{ background: 'var(--surface-2)', borderColor: 'var(--line)' }}>
           <Icon.Bank/>
           <div className="text-sm">
             대출금은 <b>수익이 아니라 부채</b>예요. 계좌 잔액에는 들어오지만 매출로 집계되지 않고,
@@ -106,7 +107,7 @@ const LoanFormDrawer = ({ open, editing, onClose, onSave, vendors, accounts }) =
           <input className="input" value={form.name} onChange={e => f('name', e.target.value)}
             placeholder="예: 기업은행 운전자금"/>
         </div>
-        <div className="row gap-12">
+        <>
           <div style={{ flex: 1 }}><label className="label">금융기관·대여자</label>
             <input className="input" value={form.lender} onChange={e => f('lender', e.target.value)} placeholder="예: 기업은행"/>
           </div>
@@ -114,12 +115,12 @@ const LoanFormDrawer = ({ open, editing, onClose, onSave, vendors, accounts }) =
             <Combobox value={form.vendor_id} onChange={v => f('vendor_id', v)} allowAdd={false}
               options={vendors.map(v => ({ value: v.id, label: v.name, sub: v.type }))} placeholder="거래처 선택"/>
           </div>
-        </div>
-        <div className="row gap-12">
+        </>
+        <>
           <div style={{ flex: 1 }}><label className="label">원금 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
             <MoneyInput value={form.principal} onChange={v => f('principal', v)}/>
           </div>
-          <div style={{ width: 150 }}><label className="label">연이율 (%)</label>
+          <div><label className="label">연이율 (%)</label>
             <input className="input num" value={form.annual_rate} onChange={e => f('annual_rate', e.target.value)}
               placeholder={noSchedule(form.method) ? '몰라도 됨' : '4.2'}/>
             {/* '일정 없음'의 이율은 참고값이다 — 회차가 없어 이걸로 이자를 계산하지 않는다.
@@ -128,8 +129,8 @@ const LoanFormDrawer = ({ open, editing, onClose, onSave, vendors, accounts }) =
               {noSchedule(form.method) ? '적어도 계산엔 안 써요 — 이자는 갚을 때 직접 입력' : '무이자는 0'}
             </div>
           </div>
-        </div>
-        <div><label className="label">상환 방식</label>
+        </>
+        <div className="span-w2"><label className="label">상환 방식</label>
           <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
             {Object.entries(METHOD_LABEL).map(([v, l]) => (
               <button key={v} type="button" className={`chip ${form.method === v ? 'active' : ''}`}
@@ -139,7 +140,7 @@ const LoanFormDrawer = ({ open, editing, onClose, onSave, vendors, accounts }) =
           <div className="text-xs text-muted2" style={{ marginTop: 6 }}>{METHOD_HINT[form.method]}</div>
         </div>
         {/* 일정이 없는 채무는 회차·상환일이 뜻을 잃는다 — 칸을 그리면 뭔가 채워야 하는 줄 안다 */}
-        <div className="row gap-12">
+        <>
           {!noSchedule(form.method) && (
             <div style={{ flex: 1 }}><label className="label">상환 회차 (개월)</label>
               <input className="input num" value={form.term_months} onChange={e => f('term_months', e.target.value.replace(/[^0-9]/g, ''))}/>
@@ -149,15 +150,15 @@ const LoanFormDrawer = ({ open, editing, onClose, onSave, vendors, accounts }) =
             <DateInput className="input" value={form.start_date} onChange={e => f('start_date', e.target.value)}/>
           </div>
           {!noSchedule(form.method) && (
-            <div style={{ width: 110 }}><label className="label">상환일</label>
+            <div><label className="label">상환일</label>
               <input className="input num" value={form.pay_day} onChange={e => f('pay_day', e.target.value.replace(/[^0-9]/g, ''))}
                 placeholder="매월 N일"/>
             </div>
           )}
-        </div>
+        </>
         {/* 조건을 바꿀 때마다 결과를 보여준다 — 총 이자를 모르고 방식을 고를 수는 없다 */}
         {t && (
-          <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
+          <div className="card card-pad span-2" style={{ background: 'var(--surface-2)' }}>
             <div className="row" style={{ marginBottom: 8 }}>
               <div className="fw-700 text-sm">상환 미리보기</div>
               <div className="ml-auto text-xs text-muted2">{t.firstDue} ~ {t.lastDue} · {t.months}회</div>
@@ -178,7 +179,7 @@ const LoanFormDrawer = ({ open, editing, onClose, onSave, vendors, accounts }) =
             placeholder="계좌 선택"/>
         </div>
         {!editing && (
-          <div className="row gap-10" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="row gap-10 span-2" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
             <button type="button" className={`chip ${form.received ? 'active' : ''}`}
               onClick={() => f('received', !form.received)}>
               {form.received ? <Icon.Check size={12}/> : null} 실행일에 입금된 것으로 기록
@@ -190,7 +191,7 @@ const LoanFormDrawer = ({ open, editing, onClose, onSave, vendors, accounts }) =
             </span>
           </div>
         )}
-        <div><label className="label">메모</label>
+        <div className="span-2"><label className="label">메모</label>
           <input className="input" value={form.memo} onChange={e => f('memo', e.target.value)}/>
         </div>
       </div>
@@ -943,10 +944,11 @@ const InvestFormDrawer = ({ open, onClose, onSave, vendors, accounts }) => {
     onClose()
   }
   return (
-    <Drawer open onClose={onClose} width="min(500px, 100vw)">
+    <Drawer open onClose={onClose} width="880px">
       <DrawerHead title="투자 등록" sub={isIn ? '투자받은 돈(자본)' : '투자한 돈(투자자산)'} onClose={onClose}/>
-      <div className="drawer-body col gap-form">
-        <div><label className="label">구분</label>
+      {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */}
+      <div className="drawer-body form-grid-2">
+        <div className="span-2"><label className="label">구분</label>
           <div className="row gap-6">
             {[['in', '투자받은 돈'], ['out', '투자한 돈']].map(([v, l]) => (
               <button key={v} type="button" className={`chip ${form.direction === v ? 'active' : ''}`}
@@ -962,14 +964,14 @@ const InvestFormDrawer = ({ open, onClose, onSave, vendors, accounts }) => {
           <input className="input" value={form.counterparty} onChange={e => f('counterparty', e.target.value)}
             placeholder={isIn ? '예: 개인투자 홍길동' : '예: (주)○○'}/>
         </div>
-        <div className="row gap-12">
+        <>
           <div style={{ flex: 1 }}><label className="label">금액 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
             <MoneyInput value={form.amount} onChange={v => f('amount', v)}/>
           </div>
           <div style={{ flex: 1 }}><label className="label">일자 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
             <DateInput className="input" value={form.invested_at} onChange={e => f('invested_at', e.target.value)}/>
           </div>
-        </div>
+        </>
         {isIn && (
           <div>
             <label className="label">자본금 <span className="text-muted2">· 액면가 × 주식수</span></label>
@@ -989,7 +991,7 @@ const InvestFormDrawer = ({ open, onClose, onSave, vendors, accounts }) => {
             options={accounts.filter(a => a.kind === 'bank').map(a => ({ value: a.id, label: a.name, sub: a.number }))}
             placeholder="계좌 선택"/>
         </div>
-        <div className="row gap-10" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="row gap-10 span-2" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
           <button type="button" className={`chip ${form.recorded ? 'active' : ''}`}
             onClick={() => f('recorded', !form.recorded)}>
             {form.recorded ? <Icon.Check size={12}/> : null} 실제 {isIn ? '입금' : '출금'}으로 기록
@@ -998,7 +1000,7 @@ const InvestFormDrawer = ({ open, onClose, onSave, vendors, accounts }) => {
             {form.recorded ? '계좌 잔액에 반영해요' : '기록만 남기고 계좌는 건드리지 않아요'}
           </span>
         </div>
-        <div><label className="label">메모</label>
+        <div className="span-2"><label className="label">메모</label>
           <input className="input" value={form.memo} onChange={e => f('memo', e.target.value)}/>
         </div>
       </div>

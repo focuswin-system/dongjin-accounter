@@ -89,6 +89,10 @@ export default defineConfig(({ mode }) => {
         },
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+          /* PDF 그리기(pdf.js)·휴대폰 사진 변환(heic2any)은 **쓸 때만** 불러오는 큰 조각이다(합쳐 약 3MB).
+             미리 받아 두기에 넣으면 앱을 연 모든 사람이 배경에서 통째로 받는다 — 빼 둔다.
+             (설계 popup-attachments-print §8 — workbox 선캐시 한도) */
+          globIgnores: ['**/pdf-*.js', '**/pdf.worker*', '**/heic2any-*.js'],
           // 첨부 파일(/uploads)·API(/api)로의 이동은 SPA fallback(index.html)으로 가로채지 말고
           // 실제 서버로 넘긴다. 안 그러면 첨부 파일 새 탭 열기가 메인페이지로 빠진다.
           navigateFallback: 'index.html',

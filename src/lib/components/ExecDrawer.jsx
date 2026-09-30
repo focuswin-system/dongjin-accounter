@@ -169,11 +169,12 @@ export const ExecDrawer = ({ open, onClose, doc, onDone, onChanged }) => {
   }
 
   return (
-    <Drawer open={open} onClose={onClose} width="min(500px,100vw)" label="지출 처리">
+    <Drawer open={open} onClose={onClose} width="880px" label="지출 처리">
       <DrawerHead title="지출 처리" sub={[doc.docNo, doc.title, doc.vendorName !== doc.title ? doc.vendorName : null].filter(Boolean).join(' · ')} onClose={onClose}/>
-      <div className="drawer-body col gap-form" ref={bodyRef}>
+      {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */}
+      <div className="drawer-body form-grid-2" ref={bodyRef}>
         {invoice ? (
-          <div className="exec-note">
+          <div className="exec-note span-2">
             <Icon.Receipt size={16}/>
             <div>
               청구서 <b>{invoice.invoice_no}</b>를 지급해요
@@ -181,7 +182,7 @@ export const ExecDrawer = ({ open, onClose, doc, onDone, onChanged }) => {
             </div>
           </div>
         ) : nearInvoices.length > 0 && !skipInvoice && (
-          <div className="exec-note warn">
+          <div className="exec-note warn span-2">
             <Icon.Warn size={16}/>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fw-600">금액이 맞는 미지급 청구서가 있어요</div>
@@ -201,7 +202,7 @@ export const ExecDrawer = ({ open, onClose, doc, onDone, onChanged }) => {
           </div>
         )}
 
-        <div className="row gap-6">
+        <div className="row gap-6 span-2">
           <button type="button" className={`chip ${mode === 'create' ? 'active' : ''}`} onClick={() => setMode('create')}>
             {invoice ? '지급 등록' : '새 지출 등록'}
           </button>
@@ -263,7 +264,7 @@ export const ExecDrawer = ({ open, onClose, doc, onDone, onChanged }) => {
             <AccountPick accounts={accounts} value={accountId} onChange={setAccountId}/>
           </>
         ) : (
-          <div>
+          <div className="span-2">
             <label className="label" style={{ marginBottom: 8 }}>연결할 지출</label>
             {candidates === null ? <Loading label="지출을 불러오는 중…"/>
               : candidates.length === 0 ? (

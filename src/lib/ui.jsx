@@ -439,7 +439,7 @@ export const Loading = ({ label = "불러오는 중…", size = 26 }) => (
 const drawerStack = [];
 
 /**
- * Drawer — 모든 폼·상세가 쓰는 옆판.
+ * Drawer — 모든 폼·상세가 쓰는 팝업(2026-09-29 전엔 옆판이었다. 이름만 남았다).
  *
  * Esc 로 닫을 때는 **한 번 묻는다.** 여태 Esc 가 아예 안 먹어서 답답했는데,
  * 그렇다고 바로 닫으면 한참 채운 청구서가 습관적인 Esc 한 번에 통째로 사라진다.
@@ -452,8 +452,21 @@ const drawerStack = [];
  * 저장될 내용이 없는데 "쓰던 내용은 저장되지 않아요"라고 물으면 거짓 경고이고,
  * 그런 경고가 쌓이면 정작 진짜 경고를 그냥 넘기게 된다.
  */
-export const Drawer = ({ open, onClose, width = "min(480px, 100vw)", label, children, confirmClose = true }) => {
+/* 2026-09-29 옆판 → 가운데 팝업(설계 popup-attachments-print §2). 이름은 Drawer 그대로 — 75곳이 쓴다.
+ * size: sm 480 · md 720 · lg 960 · xl 1200 (width 를 주면 그 값). 높이·좁은 화면은 CSS 가 맡는다.
+ * height: 높이를 **고정**할 때(탭이 있는 팝업). 기본은 내용만큼이라, 탭을 옮기면 창이 커졌다 작아졌다 한다
+ *         (2026-09-29 사용자: "증빙 들어가면 갑자기 확 커진다"). */
+const DRAWER_SIZES = { sm: 480, md: 720, lg: 960, xl: 1200 };
+
+/* '조용한 초점' — 팝업이 열리며 첫 칸에 커서만 얹을 때. 콤보박스는 초점을 받으면 목록을 여는데,
+   그게 팝업을 여는 순간에도 일어나 거래처 목록이 들어오자마자 펼쳐져 폼을 가렸다(2026-09-29 사용자).
+   이 짧은 틈에 온 초점은 목록을 안 연다 — 누르거나 치기 시작하면 연다(Combobox). */
+let quietFocusUntil = 0;
+const focusQuietly = (el) => { quietFocusUntil = Date.now() + 150; el.focus({ preventScroll: true }); };
+export const Drawer = ({ open, onClose, width, size, height, label, children, confirmClose = true }) => {
+  const w = width || `${DRAWER_SIZES[size] || DRAWER_SIZES.sm}px`;
   const [asking, setAsking] = useState(false);
+  const [depth, setDepth] = useState(0);
   const meRef = useRef({});
   const okRef = useRef(null);
 
@@ -462,6 +475,7 @@ export const Drawer = ({ open, onClose, width = "min(480px, 100vw)", label, chil
     if (!open) return;
     const me = meRef.current;
     drawerStack.push(me);
+    setDepth(drawerStack.length - 1);
     return () => {
       const i = drawerStack.indexOf(me);
       if (i >= 0) drawerStack.splice(i, 1);
@@ -470,6 +484,18 @@ export const Drawer = ({ open, onClose, width = "min(480px, 100vw)", label, chil
 
   // 닫히면 질문도 접는다 — 다음에 열 때 물음이 남아 있으면 안 된다
   useEffect(() => { if (!open) setAsking(false); }, [open]);
+
+  /* '손댐' — 이 팝업에서 **실제로 뭔가 바꿨나.** 안 바꿨으면 닫을 때 묻지 않는다.
+     confirmClose 기본값이 true 라 보기만 하는 팝업(변경 이력·명세 등) 수십 곳이 닫을 때마다
+     "쓰던 내용은 저장되지 않아요"를 물었다 — 쓴 게 없는데. 가운데 팝업이 되며 바깥 클릭도
+     묻게 되자 더 잦아졌다(2026-09-29 설계 검토). 입력칸 입력·선택, 칩·세그먼트·목록 항목 클릭을 센다. */
+  const dirtyRef = useRef(false);
+  useEffect(() => { if (open) dirtyRef.current = false; }, [open]);
+  const markDirty = (e) => {
+    if (e.type === "click" && !e.target.closest?.('.chip, .seg-btn, [role="option"], input[type="checkbox"], input[type="radio"]')) return;
+    dirtyRef.current = true;
+  };
+  const shouldAsk = () => confirmClose && dirtyRef.current;
 
   const isTop = () => drawerStack[drawerStack.length - 1] === meRef.current;
 
@@ -484,8 +510,8 @@ export const Drawer = ({ open, onClose, width = "min(480px, 100vw)", label, chil
          뒤에서 "정말 닫을까요?"를 켜고, 이어 누른 Enter 가 **작성 중이던 서랍을 닫아 버린다**. */
       if (e.key !== "Escape" || e.defaultPrevented || !isTop() || confirmOpen.n > 0) return;
       e.preventDefault();
-      // 읽기 전용이면 물을 것이 없다 — 바로 닫는다
-      if (!confirmClose) { onClose?.(); return; }
+      // 읽기 전용이거나 손댄 게 없으면 물을 것이 없다 — 바로 닫는다
+      if (!shouldAsk()) { onClose?.(); return; }
       setAsking(true);
     };
     window.addEventListener("keydown", onKey);
@@ -530,10 +556,10 @@ export const Drawer = ({ open, onClose, width = "min(480px, 100vw)", label, chil
       const root = meRef.current?.el || document.querySelector('.drawer.open');
       if (!root) return;
       /* 순서대로 찾는다: 화면이 지목한 칸 → 본문의 첫 입력 칸(콤보박스 포함).
-         콤보박스는 초점을 받으면 목록을 여는데, 그게 맞다 — 거래처부터 치기 시작하는 자리다. */
+         콤보박스는 **커서만** 받고 목록은 안 연다(focusQuietly) — 치기 시작하면 연다. 들어오자마자 목록이 폼을 가렸다. */
       const pick = root.querySelector('[data-autofocus]')
         || root.querySelector('.drawer-body input:not([type=hidden]):not([disabled]):not([readonly]), .drawer-body textarea:not([disabled]), .drawer-body [tabindex="0"]');
-      if (pick && typeof pick.focus === 'function') pick.focus({ preventScroll: true });
+      if (pick && typeof pick.focus === 'function') focusQuietly(pick);
     }, 60);
     return () => clearTimeout(t);
   }, [open]);
@@ -541,8 +567,17 @@ export const Drawer = ({ open, onClose, width = "min(480px, 100vw)", label, chil
   if (!open) return null;
   return createPortal(
     <>
-      <div className="drawer-backdrop open" onClick={onClose}/>
-      <aside className="drawer open" role="dialog" aria-label={label} style={{ width }}
+      {/* 바깥 클릭 — 입력 팝업은 Esc 처럼 한 번 묻는다. 옆판일 땐 바깥을 일부러 눌렀지만,
+          가운데 팝업은 바깥 여백이 넓어 실수로 눌린다(한참 쓴 청구서가 한 번에 사라진다).
+          읽기 전용(confirmClose=false)은 물을 것이 없어 바로 닫는다. 맨 위 팝업만 반응한다. */}
+      {/* 겹칠수록 z 를 올린다 — 같은 z 면 위 팝업의 가림막이 아래 팝업 **밑에** 깔려 아래 것이 안 어두워진다.
+          2씩: 가림막(짝) → 팝업(홀). 확인창(200)·드롭다운 포털(1200)보다는 늘 아래다 */}
+      <div className="drawer-backdrop open" style={{ zIndex: 100 + depth * 2 }} onClick={() => {
+        if (!isTop() || asking) return;
+        if (shouldAsk()) setAsking(true); else onClose?.();
+      }}/>
+      <aside className="drawer open" role="dialog" aria-modal="true" aria-label={label} style={{ width: w, zIndex: 101 + depth * 2, ...(height ? { height } : null) }}
+        onInputCapture={markDirty} onChangeCapture={markDirty} onClickCapture={markDirty}
         ref={el => { if (meRef.current) meRef.current.el = el }}>
         {children}
         {asking && (
@@ -570,6 +605,9 @@ export const Drawer = ({ open, onClose, width = "min(480px, 100vw)", label, chil
     document.body
   );
 };
+
+/* 팝업의 새 이름 — 새 코드는 Modal 로 쓴다. 속은 Drawer 와 같다(옛 이름은 75곳 때문에 남긴다) */
+export const Modal = Drawer;
 
 /* ── Popover ── */
 export const Popover = ({ trigger, children, align = "right", width = 240, direction = "down" }) => {
@@ -816,7 +854,7 @@ export const DateInput = ({ min = DATE_MIN, max = DATE_MAX, ...rest }) => (
  * 목록이 그 상자에 잘린다 — 청구서 품목표(가로 스크롤)가 그렇다. 거기서는 목록의
  * 아랫부분('직접 입력' 버튼)이 통째로 잘려, 목록에 없는 값을 넣을 방법이 사라진다.
  * 그런 자리에서만 portal 을 켠다. 켜지 않은 곳의 동작은 그대로다. */
-export const Combobox = ({ value, onChange, options, frequent = [], placeholder, onAddNew, allowAdd = true, addNewLabel = "새 항목 등록", portal = false }) => {
+export const Combobox = ({ value, onChange, options, frequent = [], placeholder, onAddNew, allowAdd = true, addNewLabel = "새 항목 등록", portal: portalProp = false }) => {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   /* 열 때 **지금 값을 입력칸에 담아 둔다.** 여태는 값이 placeholder 로만 보여서,
@@ -830,6 +868,10 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
   const inputRef = useRef(null);
   const popRef = useRef(null);
   const rootRef = useRef(null);
+  /* 팝업 안에서는 늘 portal — 팝업은 높이가 내용만큼이라, 부모 안에 absolute 로 그리면
+     목록이 팝업 본문(스크롤 상자)에 잘린다(옆판일 땐 화면 높이 전체라 괜찮았다. 2026-09-29 팝업 전환 검토).
+     열린 뒤에만 보므로 ref 는 이미 붙어 있다. */
+  const portal = portalProp || !!(open && rootRef.current?.closest?.('.drawer'));
 
   useEffect(() => {
     if (!open) return;
@@ -964,10 +1006,16 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
       <div
         tabIndex={0}
         onClick={() => openWithValue()}
-        onFocus={() => openWithValue()}
+        onFocus={() => { if (Date.now() >= quietFocusUntil) openWithValue(); }}
         onKeyDown={!open ? (e) => {
           if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
             e.preventDefault(); openWithValue();
+          } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            /* 목록이 닫힌 채 초점만 있을 때(팝업의 첫 칸) **치기 시작하면** 열고, 친 글자를 검색어로 이어 받는다 —
+               한 글자를 버리면 '삼'을 치려다 '성'부터 다시 치게 된다 */
+            e.preventDefault(); openWithValue();
+            const ch = e.key;
+            setTimeout(() => { setQ(ch); setDirty(true); setHi(0); }, 20);
           }
         } : undefined}
         className="input"

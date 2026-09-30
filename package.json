@@ -8,9 +8,11 @@
     "dev:all": "concurrently -n \"server,client\" -c \"yellow,cyan\" \"npm run dev --prefix server\" \"vite\"",
     "build": "vite build",
     "preview": "vite preview",
-    "check:css": "node scripts/check-css-vars.js"
+    "check:css": "node scripts/check-css-vars.js && node scripts/check-style-mix.js"
   },
   "dependencies": {
+    "heic2any": "^0.0.4",
+    "pdfjs-dist": "^4.10.38",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

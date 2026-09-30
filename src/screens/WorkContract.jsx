@@ -80,10 +80,18 @@ const PayItemsEditor = ({ items, setItems, masters }) => {
           </div>
         </div>
       </div>
-      <div className="text-xs text-muted2 fw-600" style={{ marginBottom: 10 }}>지급 항목</div>
-      <div style={{ marginBottom: 20 }}>{renderItems('earn')}</div>
-      <div className="text-xs text-muted2 fw-600" style={{ marginBottom: 10 }}>공제 항목 <span style={{ fontWeight: 400 }}>· %는 지급 고정금액 합계 기준</span></div>
-      <div style={{ marginBottom: 14 }}>{renderItems('deduct')}</div>
+      {/* 지급 | 공제 나란히 — 위아래로 이으면 급여 기준 하나가 팝업 높이를 다 먹었다(2026-09-29).
+          폭이 모자라면(한 목록 440px 미만) 저절로 위아래로 돌아간다(.pay-cols) */}
+      <div className="pay-cols" style={{ marginBottom: 14 }}>
+        <div>
+          <div className="text-xs text-muted2 fw-600" style={{ marginBottom: 10 }}>지급 항목</div>
+          {renderItems('earn')}
+        </div>
+        <div>
+          <div className="text-xs text-muted2 fw-600" style={{ marginBottom: 10 }}>공제 항목 <span style={{ fontWeight: 400 }}>· %는 지급 고정금액 합계 기준</span></div>
+          {renderItems('deduct')}
+        </div>
+      </div>
       {masters.length > 0 && (
         <div className="row gap-8" style={{ alignItems: 'center', maxWidth: 380 }}>
           <span className="text-xs text-muted2 fw-600" style={{ whiteSpace: 'nowrap' }}>표준 항목에서 추가</span>
@@ -322,21 +330,24 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
     else toast.push(res.error || '저장에 실패했어요', { tone: 'warn' })
   }
 
+  // key 를 붙인다 — 목록(.map)으로 그리는 자리에서 쓰인다(없으면 React 가 줄을 구별 못 한다)
   const chip = (val, cur, on, label) => (
-    <button type="button" className={`chip ${cur === val ? 'active' : ''}`} onClick={on}>{label}</button>
+    <button key={val} type="button" className={`chip ${cur === val ? 'active' : ''}`} onClick={on}>{label}</button>
   )
 
   return (
-    <Drawer open={true} onClose={onClose} width="min(640px, 100vw)">
+    /* 1100px — 급여 기준(지급|공제)을 나란히 두려면 목록 하나가 440px 는 돼야 항목명이 안 찌그러진다 */
+    <Drawer open={true} onClose={onClose} width="1100px">
       <DrawerHead title={editing ? `${form.name} 근로계약` : (info.employeeId ? '새 근로계약' : '직원 등록')} sub="인적 정보와 근로계약·급여 기준을 입력하세요." onClose={onClose}/>
 
       <div className="drawer-body">
         {!info.employeeId && (
           <>
             <div className="text-xs text-muted2 fw-600" style={{ marginBottom: 12 }}>인적 정보</div>
-            <div className="col gap-form" style={{ marginBottom: 24 }}>
+            {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */}
+            <div className="form-grid-2" style={{ marginBottom: 24 }}>
               <Field label="이름" required><input className="input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="예: 홍길동"/></Field>
-              <div className="form-cols-2">
+              <>
                 <Field label="부서">
                   <Combobox value={form.department} onChange={v => setForm(f => ({ ...f, department: v }))}
                     options={depts.map(d => ({ value: d.name, label: d.name }))} placeholder="부서 선택"
@@ -347,44 +358,45 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
                     options={positions.map(p => ({ value: p.name, label: p.name }))} placeholder="직위 선택"
                     onAddNew={async (name) => { const r = await api.addHrCode('pos', name); if (r.ok) { setPositions(await api.getHrCodes('pos')); setForm(f => ({ ...f, role: name })) } }} addNewLabel="직위로 추가"/>
                 </Field>
-              </div>
+              </>
               <Field label="생년월일" hint="급여명세서 표기용"><DateInput className="input num" value={form.birth_date} onChange={e => setForm(f => ({ ...f, birth_date: e.target.value }))}/></Field>
               {/* 주민등록번호는 저장하지 않는다 — 신고서 자동생성이 범위 밖이라 얻는 게 없고,
                   저장하는 순간 암호화·파기 의무가 붙는다. 급여이체 계좌만 둔다. */}
-              <Field label="급여이체 계좌" hint="선택 · 급여 지급 시 참고"><input className="input" value={form.salary_account || ''}
-                onChange={e => setForm(f => ({ ...f, salary_account: e.target.value }))} placeholder="예: 하나은행 123-456789-01 홍길동"/></Field>
+              <div><Field label="급여이체 계좌" hint="선택 · 급여 지급 시 참고"><input className="input" value={form.salary_account || ''}
+                onChange={e => setForm(f => ({ ...f, salary_account: e.target.value }))} placeholder="예: 하나은행 123-456789-01 홍길동"/></Field></div>
             </div>
           </>
         )}
 
         <div className="text-xs text-muted2 fw-600" style={{ marginBottom: 12 }}>계약 정보</div>
-        <div className="col gap-form" style={{ marginBottom: 24 }}>
+        {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */}
+        <div className="form-grid-2" style={{ marginBottom: 24 }}>
           <Field label="고용형태">
             <Combobox value={form.employ_type_id} onChange={pickType}
               options={employTypes.map(t => ({ value: t.id, label: t.label, sub: FORM_LABEL[t.pay_form] }))} placeholder="고용형태 선택"/>
           </Field>
-          <div className="form-cols-2">
+          <>
             <Field label="계약 시작"><DateInput className="input num" value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))}/></Field>
             <Field label="종료 방식">
               <div className="row gap-4">
                 {Object.entries(TERM_LABEL).map(([k, lbl]) => chip(k, form.term_mode, () => setForm(f => ({ ...f, term_mode: k })), lbl))}
               </div>
             </Field>
-          </div>
+          </>
           {form.term_mode !== 'open' && (
             <Field label="계약 종료"><DateInput className="input num" value={form.end_date} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))}/></Field>
           )}
-          <div className="form-cols-2">
+          <>
             <Field label="소정근로시간" hint="예: 주 40시간"><input className="input" value={form.work_hours} onChange={e => setForm(f => ({ ...f, work_hours: e.target.value }))} placeholder="주 40시간 / 09:00~18:00"/></Field>
             <Field label="급여 지급일"><input className="input num" type="number" onWheel={e => e.currentTarget.blur()} min="1" max="31" value={form.pay_day} onChange={e => setForm(f => ({ ...f, pay_day: parseInt(e.target.value) || 25 }))}/></Field>
-          </div>
-          <Field label="4대보험 적용">
+          </>
+          <div className="span-w2"><Field label="4대보험 적용">
             <div className="row gap-4" style={{ flexWrap: 'wrap' }}>
               {[['insure_np', '국민연금'], ['insure_hi', '건강보험'], ['insure_ei', '고용보험'], ['insure_ai', '산재보험']].map(([k, lbl]) => (
                 <button key={k} type="button" className={`chip ${form[k] ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, [k]: f[k] ? 0 : 1 }))}>{form[k] ? '✓ ' : ''}{lbl}</button>
               ))}
             </div>
-          </Field>
+          </Field></div>
         </div>
 
         <div className="text-xs text-muted2 fw-600" style={{ marginBottom: 12 }}>급여 기준 <span style={{ fontWeight: 400 }}>· 급여대장 생성 시 이 항목이 명세서에 채워져요</span></div>
@@ -722,18 +734,19 @@ const OutsourcingDrawer = ({ info, onClose, onSaved }) => {
   }
 
   return (
-    <Drawer open={true} onClose={onClose} width="min(620px, 100vw)">
+    <Drawer open={true} onClose={onClose} width="880px">
       <DrawerHead title={editing ? `${form.name} 용역계약` : '용역·일용 인력 등록'} sub="고용형태를 고르면 소득구분·단가 단위가 자동으로 채워져요." onClose={onClose}/>
 
       <div className="drawer-body">
-        <div className="col gap-form" style={{ marginBottom: 22 }}>
+        {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */}
+        <div className="form-grid-2" style={{ marginBottom: 22 }}>
           {!editing && <Field label="성명" required><input className="input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="예: 김프리"/></Field>}
           <Field label="고용형태">
             <Combobox value={form.employ_type_id} onChange={pickType}
               options={employTypes.map(t => ({ value: t.id, label: t.label, sub: `${INCOME_LABEL[t.income_type]} · ${t.default_unit || ''}` }))} placeholder="고용형태 선택"/>
           </Field>
-          <Field label="업무내용"><input className="input" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="예: 외주 개발, 행사 진행"/></Field>
-          <div className="form-cols-2">
+          <div><Field label="업무내용"><input className="input" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="예: 외주 개발, 행사 진행"/></Field></div>
+          <>
             <Field label="소득구분">
               <div className="row gap-4" style={{ flexWrap: 'wrap' }}>
                 {['사업', '일용', '기타'].map(k => (
@@ -747,11 +760,11 @@ const OutsourcingDrawer = ({ info, onClose, onSaved }) => {
                 <button key={k} type="button" className={`chip ${form.term_mode === k ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, term_mode: k }))}>{lbl}</button>
               ))}</div>
             </Field>
-          </div>
-          <div className="form-cols-2">
+          </>
+          <>
             <Field label="계약 시작"><DateInput className="input num" value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))}/></Field>
             {form.term_mode !== 'open' && <Field label="계약 종료"><DateInput className="input num" value={form.end_date} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))}/></Field>}
-          </div>
+          </>
           {form.kind === 'daily' && (
             <Field label="상용전환 경고 (개월)" hint="이 개월수 이상 계속 근로 시 알림 (건설 12)">
               <input className="input num" style={{ width: 90 }} value={form.conv_alert_months} onChange={e => setForm(f => ({ ...f, conv_alert_months: parseInt(e.target.value.replace(/[^0-9]/g, '')) || 0 }))}/>

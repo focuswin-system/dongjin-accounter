@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, DateInput, fmtDateShort } from '../lib/ui'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
-import { DataTable } from '../lib/components/DataTable'
+import { DataTable, Sub } from '../lib/components/DataTable'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 // 지급 등록 Drawer는 급여대장·용역계약 상세가 함께 쓴다(공용 컴포넌트로 분리)
 import { PayrollPayDrawer } from '../lib/components/PayrollPayDrawer'
@@ -219,7 +219,7 @@ export const HRScreen = () => {
 
               {payRows.length === 0 ? (
                 <div style={{ padding: "40px 18px 48px", textAlign: "center", color: "var(--muted-2)" }}>
-                  <div style={{ marginBottom: 12 }}>{monthLabel(month)} 급여대장이 아직 없어요.</div>
+                  <div style={{ marginBottom: 12 }}>{monthLabel(month)} 급여대장이 없어요.</div>
                   <button className="btn primary" onClick={handleGeneratePayroll}><Icon.Plus/> 재직 직원 급여대장 만들기</button>
                 </div>
               ) : (
@@ -228,7 +228,7 @@ export const HRScreen = () => {
                     rows={payRows}
                     columns={[
                       { key: 'name', header: '직원', sortable: true, render: r => (
-                        <><div className="fw-700">{r.name}</div><div className="text-xs text-muted2">{r.department || "—"} · {r.role || "—"}</div></>
+                        <><span className="fw-700">{r.name}</span><Sub>{[r.department, r.role].filter(Boolean).join(' · ')}</Sub></>
                       ) },
                       { key: 'net_salary', header: '실수령', align: 'right', sortable: true, render: r => <span className="num-cell fw-700">{fmtNum(r.net_salary)}</span> },
                       { key: 'paid', header: '지급 완료', align: 'right', render: r => <span className="num-cell text-muted">{fmtNum(r.paid)}</span> },
@@ -418,10 +418,11 @@ const SeveranceDrawer = ({ row, employees, onClose, onSaved }) => {
   };
 
   return (
-    <Drawer open onClose={onClose}>
+    <Drawer open onClose={onClose} width="880px">
       <DrawerHead title={isNew ? '미지급 퇴직금 등록' : '미지급 퇴직금 수정'}
         sub="아직 안 나간 퇴직금이에요. 급여는 급여대장에서 관리해요." onClose={onClose}/>
-      <div className="drawer-body col gap-form">
+      {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */}
+      <div className="drawer-body form-grid-2">
         <div>
           <label className="label">직원</label>
           {/* allowAdd 기본값이 true 라 "Enter로 새로 등록할 수 있어요"가 떴는데 onAddNew 가 없어
@@ -444,7 +445,7 @@ const SeveranceDrawer = ({ row, employees, onClose, onSaved }) => {
             ))}
           </div>
         </div>
-        <div className="row gap-8">
+        <>
           <div style={{ flex: 1 }}>
             <label className="label">퇴직금 총액 *</label>
             <MoneyInput value={f.amount} onChange={v => set('amount', v)}/>
@@ -453,7 +454,7 @@ const SeveranceDrawer = ({ row, employees, onClose, onSaved }) => {
             <label className="label">이미 지급한 금액</label>
             <MoneyInput value={f.paid_amount} onChange={v => set('paid_amount', v)}/>
           </div>
-        </div>
+        </>
         <div>
           <label className="label">지급 기한</label>
           <DateInput className="input" value={f.due_date} onChange={e => set('due_date', e.target.value)}/>
@@ -461,7 +462,7 @@ const SeveranceDrawer = ({ row, employees, onClose, onSaved }) => {
             모르면 비워두세요. '기한 미정'으로 잡아 자금 현황에서 지금 나갈 돈처럼 보수적으로 셉니다.
           </div>
         </div>
-        <div>
+        <div className="span-2">
           <label className="label">메모</label>
           <input className="input" value={f.memo} onChange={e => set('memo', e.target.value)} placeholder="예: 2024년 퇴사, 분할 지급 협의"/>
         </div>

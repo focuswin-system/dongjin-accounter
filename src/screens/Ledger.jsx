@@ -5,6 +5,9 @@ import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { DataTable } from '../lib/components/DataTable'
 import { TableToolbar } from '../lib/components/TableToolbar'
 import { VoucherView } from '../lib/components/VoucherView'
+import { VoucherSlip } from '../lib/components/VoucherSlip'
+import { AttachmentPanel } from '../lib/components/AttachmentPanel'
+import { TransactionForm } from './Form'
 import { useTableFilter } from '../lib/tableFilter'
 import { api } from '../lib/api'
 import { downloadXlsx } from '../lib/export'
@@ -672,141 +675,214 @@ const DetailRow = ({ label, value }) => (
   </div>
 );
 
+/* 거래 상세 — 큰 팝업, 탭 둘(2026-09-29 사용자).
+ *   거래 정보  왼쪽: 흐름(어디서 → 어디로) · 내용 · 청구(세금계산서) · 연결 문서 / 오른쪽: 전표(인쇄 종이 그대로)
+ *   증빙       왼쪽: 서류 목록 / 오른쪽: 미리보기(이미지·PDF) — 팝업 높이를 다 쓴다
+ * 한 장에 전부 펼쳤더니 "너무 난잡하다" — 보는 목적이 다른 둘(장부 확인 / 서류 확인)을 가른다.
+ *
+ * [편집]은 **제자리 수정**이다 — 거래 정보 탭의 왼쪽이 그대로 입력 폼이 된다(다른 창으로 넘어가지 않는다).
+ * 폼은 거래 등록 폼(TransactionForm) 그 자체를 끼워 넣는다 — 규칙을 두 벌 만들지 않는다.
+ * 데이터는 한 번에 받는다(GET /transactions/:id/overview — 연결 문서·첨부는 보는 사람 권한으로 걸러 온다).
+ * 설계: popup-attachments-print §4 */
 const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAction }) => {
-  const [tab, setTab] = useState("개요");
-  const [docs, setDocs] = useState([]);
-  const [resolution, setResolution] = useState(null);   // 이 지출에 연결된 지급결의서
+  const [ov, setOv] = useState(null);                   // overview 응답
+  const [tab, setTab] = useState("info");               // info | docs
+  const [editing, setEditing] = useState(false);        // 제자리 수정 중
   const [company, setCompany] = useState(null);
-  const [resView, setResView] = useState(false);        // 결의서 열람 모달
-  const [voucherOpen, setVoucherOpen] = useState(false); // 전표 열람(차변·대변)
+  const [resView, setResView] = useState(null);         // 결의서 열람(문서)
+  const load = () => api.getTransactionOverview(txn.id)
+    .then(setOv)
+    .catch(e => toast.push(e.message || "불러오지 못했어요", { tone: "warn" }));
   useEffect(() => {
     if (!txn) return;
-    // 겹쳐 띄우는 것들도 함께 되돌린다 — 안 그러면 다음 거래를 열 때 전표가 저절로 펼쳐진 채 뜬다
-    setTab("개요"); setDocs(txn.docs || []); setResolution(null); setResView(false); setVoucherOpen(false);
-    if (txn.kind === "expense") {
-      api.getResolutionByTxn(txn.id).then(setResolution);
-      api.getCompany().then(setCompany);
-    }
-  }, [txn]);
+    setOv(null); setResView(null); setTab("info"); setEditing(false);
+    load();
+    api.getCompany().then(setCompany);
+  }, [txn]);   // eslint-disable-line react-hooks/exhaustive-deps
   if (!txn) return null;
-  /* confirmClose={false} — 여기는 **보는 서랍**이다(입력칸은 숨은 파일 선택 하나뿐).
-     없으면 Esc 를 누를 때마다 "쓰던 내용은 저장되지 않아요"를 묻는다. 쓴 것이 없는데.
-     같은 거래를 카드대금에서 열면(TxnQuickDrawer) 바로 닫힌다 — 문에 따라 달랐다. */
+  const t = ov?.txn || txn;
+  const out = t.sign < 0;
+  const acct = t.account || "계좌 미지정";
+  const party = [t.vendor, [t.counterpartyBank, t.counterpartyAccount].filter(Boolean).join(" ")].filter(Boolean).join(" · ") || "상대 미지정";
+  const files = ov?.files || [];
+
+  const attach = async (file) => {
+    const up = await api.uploadFile(file);
+    if (!up?.url) { toast.push(up?.error || "업로드에 실패했어요", { tone: "warn" }); return; }
+    const res = await api.addTransactionDoc(t.id, { url: up.url, name: up.originalName || file.name, doc_type: "기타", size: up.size || 0 });
+    if (res.ok) { toast.push("증빙이 붙었어요"); load(); onAction?.(); }
+    else toast.push(res.error || "첨부에 실패했어요", { tone: "warn" });
+  };
+  const remove = async (f) => {
+    const ok = await confirm({ tone: "neg", icon: <Icon.Trash size={22}/>, title: "증빙 지우기", body: `${f.name} 을(를) 지울까요?`, confirmLabel: "지우기" });
+    if (!ok) return;
+    const res = f.id ? await api.deleteTransactionDoc(f.id) : await api.updateTransactionEvidence(t.id, { evid_url: "", evid_type: "" });
+    if (res.ok) { toast.push("지웠어요"); load(); onAction?.(); }
+    else toast.push(res.error || "삭제에 실패했어요", { tone: "warn" });
+  };
+
+  /* 보는 동안은 묻지 않고 닫는다(증빙 올리기는 그 자리에서 저장된다). 고치는 중에만 묻는다 */
   return (
-    <Drawer open={true} onClose={onClose} width="min(560px, 100vw)" label="거래 상세" confirmClose={false}>
+    <Drawer open={true} onClose={onClose} size="xl" height="min(800px, calc(100vh - 48px))" label="거래 상세" confirmClose={editing}>
         <div className="drawer-head">
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div className="row gap-8">
-              <span className={`badge ${txn.sign > 0 ? "pos" : "neg"}`}>{txn.sign > 0 ? "입금" : "지출"}</span>
-              <StatusBadge status={txn.status}/>
+              <span className={`badge ${out ? "neg" : "pos"}`}>{out ? "지출" : "입금"}</span>
+              <StatusBadge status={t.status}/>
             </div>
-            <div className="fw-700" style={{ fontSize: 16, marginTop: 6 }}>{txn.vendor}</div>
-            <div className="text-xs text-muted">{txn.scope} · {txn.category} · {fmtDateShort(txn.date)}</div>
+            <div className="fw-700" style={{ fontSize: 17, marginTop: 6 }}>{t.vendor}</div>
+            <div className="text-xs text-muted">{[t.scope, t.category, t.date].filter(Boolean).join(" · ")}</div>
           </div>
-          <button className="icon-btn ml-auto" title="닫기" onClick={onClose}><Icon.Close size={16}/></button>
+          <div className="ml-auto num fw-700" style={{ fontSize: 26, letterSpacing: "-0.02em", color: out ? "var(--ink)" : "var(--pos)" }}>
+            {out ? "−" : "+"}{fmtNum(t.amount)}<span className="text-muted" style={{ fontWeight: 400, fontSize: 15, marginLeft: 3 }}>원</span>
+          </div>
+          <button className="icon-btn" title="닫기" onClick={onClose}><Icon.Close size={16}/></button>
         </div>
 
-        <div style={{ borderBottom: "1px solid var(--line)", padding: "0 22px" }}>
-          {["개요", "증빙"].map(t => (
-            <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t}</button>
-          ))}
+        <div className="txo-tabs" role="tablist">
+          <button role="tab" aria-selected={tab === "info"} className={`tab ${tab === "info" ? "active" : ""}`} onClick={() => setTab("info")}>거래 정보</button>
+          {/* 고치는 중엔 탭을 못 옮긴다 — 옮기면 쓰던 폼이 사라진다 */}
+          <button role="tab" aria-selected={tab === "docs"} className={`tab ${tab === "docs" ? "active" : ""}`} disabled={editing}
+            title={editing ? "수정을 마치고 볼 수 있어요" : undefined} onClick={() => setTab("docs")}>
+            증빙{files.length > 0 && <span className="num txo-count">{files.length}</span>}
+          </button>
         </div>
 
-        <div className="drawer-body">
-          {tab === "개요" && (
-            <div>
-              <div className="card" style={{ padding: 18, background: "var(--surface-2)", border: "1px solid var(--line)", marginBottom: 18 }}>
-                <div className="text-xs text-muted2 fw-600" style={{ marginBottom: 4 }}>{txn.sign > 0 ? "입금액" : "지출액"}</div>
-                <div className="num fw-700" style={{ fontSize: 28, letterSpacing: "-0.02em", color: txn.sign > 0 ? "var(--pos)" : "var(--ink)" }}>
-                  {txn.sign > 0 ? "+" : "−"}{fmtNum(txn.amount)}<span className="text-muted" style={{ fontWeight: 400, fontSize: 16, marginLeft: 4 }}>원</span>
-                </div>
+        {/* 증빙 탭은 고정된 창 높이를 목록·미리보기가 꽉 채운다(txo-body-fill) */}
+        <div className={`drawer-body${tab === "docs" ? " txo-body-fill" : ""}`}>
+          {tab === "info" && (
+          <div className="txo-grid">
+            {editing ? (
+              <div style={{ minWidth: 0 }}>
+                <TransactionForm embedded open editTxn={t} kind={t.kind}
+                  onClose={() => setEditing(false)}
+                  onSave={() => { load(); onAction?.(); }}/>
               </div>
-              <DetailRow label="거래일"    value={txn.date}/>
-              <DetailRow label="거래처"    value={txn.vendor}/>
-              <DetailRow label="내용" value={txn.scope}/>
-              <DetailRow label="비목"      value={txn.category}/>
-              {/* 지출인데 '입금 계좌'라고 적혀 있었다. 바로 위 금액 칸은 sign으로 갈라 쓰면서
-                  여기만 고정 문구였다. 앱 전체가 쓰는 짝(PaidIssueDrawer·Contract·Finance)에 맞춘다. */}
-              {txn.account && <DetailRow label={txn.sign > 0 ? "입금 계좌" : "출금 계좌"} value={txn.account}/>}
-              {/* 상대 계좌 — 거래처가 계좌를 여럿 가지면 여기만이 '어디로 갔나'의 답이다 */}
-              {(txn.counterpartyAccount || txn.counterpartyBank) && (
-                <DetailRow label={txn.sign > 0 ? "보낸 계좌" : "받는 계좌"}
-                  value={[[txn.counterpartyBank, txn.counterpartyAccount].filter(Boolean).join(' '),
-                          txn.counterpartyHolder].filter(Boolean).join(' · ')}/>
+            ) : (
+            <div className="col gap-20" style={{ minWidth: 0 }}>
+              {/* 자금 흐름 — 지출은 우리 계좌 → 상대, 입금은 상대 → 우리 계좌 */}
+              <section>
+                <div className="txo-label">자금 흐름</div>
+                <div className="txo-flow">
+                  <div className="txo-node"><div className="text-xs text-muted2">{out ? "출금" : "보낸 곳"}</div><div className="fw-600">{out ? acct : party}</div></div>
+                  <Icon.Right size={18}/>
+                  <div className="txo-node"><div className="text-xs text-muted2">{out ? "받는 곳" : "입금"}</div><div className="fw-600">{out ? party : acct}</div></div>
+                </div>
+              </section>
+
+              <section>
+                <div className="txo-label">내용</div>
+                <DetailRow label="거래일" value={t.date}/>
+                <DetailRow label="내용" value={t.scope}/>
+                {/* 복합 거래는 비목 칸에 **첫 항목 하나**만 담긴다 — 그대로 두면 나머지가 없는 것처럼 읽힌다.
+                    항목별 금액은 오른쪽 전표 줄이 이미 보여 준다 */}
+                <DetailRow label="비목" value={t.hasSplits
+                  ? <span>{t.category} 외 <span className="badge outline" style={{ marginLeft: 4 }}>여러 비목 · 전표 참고</span></span>
+                  : t.category}/>
+                {t.method && <DetailRow label="결제수단" value={t.method}/>}
+                {t.contract && <DetailRow label="주문" value={t.contract}/>}
+                {t.cost_contract_name && <DetailRow label="원가 주문" value={t.cost_contract_name}/>}
+              </section>
+
+              <section>
+                <div className="txo-label">청구</div>
+                {!ov ? <div className="text-sm text-muted">불러오는 중…</div>
+                  : ov.invoices.length === 0 ? <div className="text-sm text-muted">연결된 세금계산서가 없어요</div>
+                  : ov.invoices.map(i => (
+                    <div key={i.id} className="txo-row">
+                      <div style={{ minWidth: 0 }}>
+                        <div className="fw-600">{i.kind === "issued" ? "매출" : "매입"} 세금계산서 {i.invoice_no || ""}</div>
+                        <div className="text-xs text-muted2">{i.vendor_name} · 발행 {i.issued_at}{i.due_at ? ` · 기한 ${i.due_at}` : ""}</div>
+                      </div>
+                      <div className="ml-auto" style={{ textAlign: "right" }}>
+                        <div className="num fw-700">{fmtNum(i.total_amount)}</div>
+                        <div className="text-xs text-muted2">
+                          {i.this_amount != null && i.this_amount !== i.total_amount ? `이 거래 ${fmtNum(i.this_amount)} · ` : ""}
+                          남음 {fmtNum(Math.max(0, i.total_amount - i.paid_amount))}
+                        </div>
+                      </div>
+                      <StatusBadge status={i.status}/>
+                    </div>
+                  ))}
+              </section>
+
+              {ov && (ov.resolutions.length + ov.purchaseReqs.length + ov.settlements.length) > 0 && (
+                <section>
+                  <div className="txo-label">문서</div>
+                  {ov.resolutions.map(r => (
+                    <div key={r.id} className="txo-row">
+                      <div style={{ minWidth: 0 }}>
+                        <div className="fw-600">지급결의서 {r.doc_no}</div>
+                        <div className="text-xs text-muted2">{r.title} · {fmtNum(r.amount)}원</div>
+                      </div>
+                      <span className="ml-auto"><StatusBadge status={r.status || "작성"}/></span>
+                      <button className="btn sm" onClick={async () => {
+                        const full = await api.getResolutionByTxn(t.id);
+                        if (full) setResView(full); else toast.push("결의서를 열지 못했어요", { tone: "warn" });
+                      }}><Icon.Eye size={13}/> 보기</button>
+                    </div>
+                  ))}
+                  {ov.purchaseReqs.map(r => (
+                    <div key={r.id} className="txo-row">
+                      <div style={{ minWidth: 0 }}>
+                        <div className="fw-600">구매품의서 {r.doc_no}</div>
+                        <div className="text-xs text-muted2">{r.summary || "—"} · {r.req_date}</div>
+                      </div>
+                      <span className="ml-auto"><StatusBadge status={r.status || "작성"}/></span>
+                    </div>
+                  ))}
+                  {ov.settlements.map(r => (
+                    <div key={r.id} className="txo-row">
+                      <div className="fw-600">정산내역서 {r.doc_no}</div>
+                      <span className="ml-auto"><StatusBadge status={r.status || "작성"}/></span>
+                    </div>
+                  ))}
+                </section>
               )}
-              {txn.method  && <DetailRow label="결제수단"  value={txn.method}/>}
-              {txn.memo    && <DetailRow label="메모"      value={txn.memo}/>}
-              {txn.doc     && <DetailRow label="결의서"    value={<StatusBadge status={txn.doc}/>}/>}
             </div>
+            )}
+
+            {/* 전표 — 인쇄되는 종이 그대로. 인쇄는 이 종이만(.voucher-print 화이트리스트) */}
+            <section style={{ minWidth: 0 }}>
+              <div className="row" style={{ alignItems: "center", marginBottom: 8 }}>
+                <div className="txo-label" style={{ margin: 0 }}>전표</div>
+                {editing && <span className="text-xs text-muted2" style={{ marginLeft: 8 }}>저장하면 다시 계산돼요</span>}
+                {ov?.voucher && !editing && <button className="btn sm ml-auto" onClick={() => window.print()}><Icon.Print size={13}/> 전표 인쇄</button>}
+              </div>
+              <div className="doc-paper txo-paper voucher-print">
+                {!ov ? <div className="text-sm text-muted" style={{ padding: 30, textAlign: "center" }}>불러오는 중…</div>
+                  : ov.voucher ? <VoucherSlip v={ov.voucher}/>
+                  : <div className="text-sm text-muted" style={{ padding: 30, textAlign: "center" }}>전표를 세우지 못했어요</div>}
+              </div>
+            </section>
+          </div>
+
           )}
-          {tab === "증빙" && (() => {
-            const ACCEPT = ".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.hwp";
-            const attach = async (file, docType) => {
-              if (!file) return;
-              const up = await api.uploadFile(file);
-              if (!up?.url) { toast.push("업로드에 실패했어요", { tone: 'warn' }); return; }
-              const res = await api.addTransactionDoc(txn.id, { url: up.url, name: up.originalName || file.name, doc_type: docType || '기타', size: up.size || 0 });
-              if (res.ok) { setDocs(prev => [...prev, { id: res.id, url: up.url, name: up.originalName || file.name, type: docType || '기타', size: up.size || 0 }]); toast.push("증빙이 첨부됐어요"); onAction?.(); }
-              else toast.push("첨부에 실패했어요", { tone: 'warn' });
-            };
-            const remove = async (d) => {
-              const res = d.id ? await api.deleteTransactionDoc(d.id) : await api.updateTransactionEvidence(txn.id, { evid_url: '', evid_type: '' });
-              if (res.ok) { setDocs(prev => prev.filter(x => x !== d)); toast.push("삭제됐어요"); onAction?.(); }
-              else toast.push("삭제에 실패했어요", { tone: 'warn' });
-            };
-            return (
-            <div className="col gap-10">
-              {/* 이 지출에 연결된 지급결의서 — 별도 파일 없이 여기서 열람·인쇄 */}
-              {resolution && (
-                <div className="row gap-12" style={{ padding: 14, border: "1px solid var(--brand)", borderRadius: 12, background: "var(--brand-soft)" }}>
-                  <div style={{ width: 40, height: 48, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 6, display: "grid", placeItems: "center" }}><Icon.Sign size={20}/></div>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="fw-600">지급결의서 {resolution.doc_no}</div>
-                    <div className="text-xs text-muted2">{resolution.title} · {fmtNum(resolution.amount)}원</div>
-                  </div>
-                  <button className="btn sm" onClick={() => setResView(true)}><Icon.Eye size={13}/> 보기</button>
-                </div>
+
+          {tab === "docs" && (
+            <>
+              <AttachmentPanel files={files} onUpload={attach} onRemove={remove}
+                height="auto"
+                canRemove={f => f.source === "txn"}
+                empty={ov ? "붙은 서류가 없어요" : "불러오는 중…"}/>
+              {files.some(f => f.source !== "txn") && (
+                <div className="text-xs text-muted2" style={{ marginTop: 6 }}>세금계산서에 붙은 서류는 세금계산서 화면에서 지워요.</div>
               )}
-              {docs.length === 0 && !resolution && (
-                <div className="alert-row" style={{ background: "var(--neg-soft)", borderColor: "transparent" }}>
-                  <Icon.Warn/>
-                  <div><div className="lead">증빙이 없어요</div><div className="body">영수증·세금계산서 등을 첨부해주세요. 여러 개도 됩니다.</div></div>
-                </div>
-              )}
-              {docs.map((d, i) => (
-                <div key={d.id || i} className="row gap-12" style={{ padding: 14, border: "1px solid var(--line)", borderRadius: 12, background: "var(--surface)" }}>
-                  <div style={{ width: 40, height: 48, background: "var(--surface-3)", border: "1px solid var(--line)", borderRadius: 6, display: "grid", placeItems: "center" }}><Icon.File size={20}/></div>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="fw-600" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name || '첨부 파일'}</div>
-                    <div className="text-xs text-muted2">{d.type || '기타'}{d.size ? ` · ${Math.round(d.size / 1024)}KB` : ''}</div>
-                  </div>
-                  <button className="btn ghost sm" onClick={() => window.open(d.url, '_blank')}><Icon.Eye/></button>
-                  <a className="btn ghost sm" href={d.url} download={d.name} style={{ textDecoration: "none" }}><Icon.Download size={14}/></a>
-                  <button className="btn ghost sm" style={{ color: "var(--neg)" }} onClick={() => remove(d)}><Icon.Close size={14}/></button>
-                </div>
-              ))}
-              <label className="drop" style={{ display: "block", cursor: "pointer" }}
-                onDragOver={e => e.preventDefault()}
-                onDrop={e => { e.preventDefault(); attach(e.dataTransfer.files[0]); }}>
-                <Icon.Upload size={22}/>
-                <div className="fw-600" style={{ marginTop: 8 }}>증빙 파일을 끌어다 놓거나 클릭해서 추가</div>
-                <div className="text-xs text-muted2" style={{ marginTop: 4 }}>여러 개 첨부 가능 · PDF, JPG, PNG · 최대 20MB</div>
-                <input type="file" style={{ display: "none" }} accept={ACCEPT} onChange={e => attach(e.target.files[0])}/>
-              </label>
-            </div>
-            );
-          })()}
+            </>
+          )}
         </div>
 
+        {/* 고치는 중엔 폼이 자기 [취소]·[저장]을 가진다 — 팝업 발은 접는다 */}
+        {!editing && (
         <div className="drawer-foot">
           <button className="btn" onClick={onClose}>닫기</button>
           {/* 삭제는 **눈에 덜 띄게** 둔다. 조회하러 온 화면에서 붉게 채운 버튼이 늘 왼쪽에
               서 있으면 "여기서 지우는 게 보통"으로 읽힌다. 지울 수는 있어야 하니 남기되,
               바탕을 빼고 글자만 붉게 둔다. */}
           <button className="btn" style={{ color: "var(--neg-ink)" }} onClick={async () => {
-            const ok = await confirm({ tone: "neg", icon: <Icon.Warn size={22}/>, title: "거래 삭제", body: `${txn.vendor} · ${fmtNum(txn.amount)}원 거래를 삭제합니다. 복구할 수 없어요.`, confirmLabel: "삭제" });
+            const ok = await confirm({ tone: "neg", icon: <Icon.Warn size={22}/>, title: "거래 삭제", body: `${t.vendor} · ${fmtNum(t.amount)}원 거래를 삭제합니다. 복구할 수 없어요.`, confirmLabel: "삭제" });
             if (ok) {
-              const res = await api.deleteTransaction(txn.id);
+              const res = await api.deleteTransaction(t.id);
               if (res.ok) { toast.push("삭제됐어요"); onClose(); onAction?.(); }
               // 세금 납부·결의서·급여에 연결된 거래는 409로 막힌다. 사유를 그대로 보여줘야
               // 사용자가 어디서 취소해야 하는지 알 수 있다.
@@ -814,44 +890,40 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
             }
           }}><Icon.Trash size={14}/> 삭제</button>
           <div className="ml-auto row gap-8">
-            {/* 이 거래가 장부에 어떻게 오르는지 — 경리가 분개를 확인하고 인쇄하는 자리 */}
-            <button className="btn" onClick={() => setVoucherOpen(true)}><Icon.Book size={14}/> 전표</button>
-            <button className="btn" onClick={() => { onClose(); openEdit?.(txn); }}><Icon.Pencil size={14}/> 편집</button>
-            {txn.kind === "income" && ["입금 예정", "일부 입금", "장기 미수"].includes(txn.status) && (
+            <button className="btn" onClick={() => { setTab("info"); setEditing(true); }}><Icon.Pencil size={14}/> 편집</button>
+            {t.kind === "income" && ["입금 예정", "일부 입금", "장기 미수"].includes(t.status) && (
               <button className="btn" onClick={async () => {
-                const ok = await confirm({ tone: "brand", icon: <Icon.In size={22}/>, title: "입금 처리", body: `${fmtNum(txn.amount)}원을 입금 완료로 처리합니다.`, confirmLabel: "입금 처리" });
-                if (ok) { const res = await api.updateTransactionStatus(txn.id, "입금완료"); if (res.ok) { toast.push("입금이 처리됐어요"); onClose(); onAction?.(); } else toast.push(res.error || "처리에 실패했어요", { tone: "warn" }); }
+                const ok = await confirm({ tone: "brand", icon: <Icon.In size={22}/>, title: "입금 처리", body: `${fmtNum(t.amount)}원을 입금 완료로 처리합니다.`, confirmLabel: "입금 처리" });
+                if (ok) { const res = await api.updateTransactionStatus(t.id, "입금완료"); if (res.ok) { toast.push("입금이 처리됐어요"); onClose(); onAction?.(); } else toast.push(res.error || "처리에 실패했어요", { tone: "warn" }); }
               }}><Icon.Check size={14}/> 입금 처리</button>
             )}
-            {txn.kind === "expense" && ["지급 예정", "지급 대기", "기한 지남"].includes(txn.status) && (
+            {t.kind === "expense" && ["지급 예정", "지급 대기", "기한 지남"].includes(t.status) && (
               <button className="btn" onClick={async () => {
-                const ok = await confirm({ tone: "neg", icon: <Icon.Bank size={22}/>, title: "이체 실행", body: `${fmtNum(txn.amount)}원을 지급완료로 처리합니다.`, confirmLabel: "이체 실행" });
-                if (ok) { const res = await api.updateTransactionStatus(txn.id, "지급완료"); if (res.ok) { toast.push("이체가 완료됐어요"); onClose(); onAction?.(); } else toast.push(res.error || "처리에 실패했어요", { tone: "warn" }); }
+                const ok = await confirm({ tone: "neg", icon: <Icon.Bank size={22}/>, title: "이체 실행", body: `${fmtNum(t.amount)}원을 지급완료로 처리합니다.`, confirmLabel: "이체 실행" });
+                if (ok) { const res = await api.updateTransactionStatus(t.id, "지급완료"); if (res.ok) { toast.push("이체가 완료됐어요"); onClose(); onAction?.(); } else toast.push(res.error || "처리에 실패했어요", { tone: "warn" }); }
               }}><Icon.Bank size={14}/> 이체 실행</button>
             )}
           </div>
         </div>
+        )}
 
-        {/* 지급결의서 열람·인쇄 모달 — 별도 파일 없이 증빙 영역에서 바로 */}
-        {resView && resolution && (
-          <div className="res-viewer-overlay" onClick={() => setResView(false)}>
+        {/* 지급결의서 열람·인쇄 — 결의서 종이 그대로 */}
+        {resView && (
+          <div className="res-viewer-overlay" onClick={() => setResView(null)}>
             <div className="res-viewer" onClick={e => e.stopPropagation()}>
               <div className="row gap-8 no-print" style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)" }}>
-                <span className="fw-700">지급결의서 {resolution.doc_no}</span>
+                <span className="fw-700">지급결의서 {resView.doc_no}</span>
                 <div className="ml-auto row gap-6">
                   <button className="btn" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
-                  <button className="icon-btn" title="닫기" onClick={() => setResView(false)}><Icon.Close size={16}/></button>
+                  <button className="icon-btn" title="닫기" onClick={() => setResView(null)}><Icon.Close size={16}/></button>
                 </div>
               </div>
               <div style={{ padding: 20, overflow: "auto" }}>
-                <ResolutionDocument doc={resolution} company={company} printClass="resolution-print"/>
+                <ResolutionDocument doc={resView} company={company} printClass="resolution-print"/>
               </div>
             </div>
           </div>
         )}
-
-        {/* 전표 — 이 거래의 차변·대변. 드로어 위에 겹쳐 뜬다(Drawer 스택이 순서를 관리한다) */}
-        <VoucherView open={voucherOpen} onClose={() => setVoucherOpen(false)} source="transaction" id={txn.id}/>
     </Drawer>
   );
 };

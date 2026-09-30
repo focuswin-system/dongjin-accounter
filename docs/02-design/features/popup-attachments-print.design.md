@@ -1,0 +1,172 @@
+# UI 개편 — 팝업 전환 · 첨부 한눈에 · 인쇄 마법사
+
+> 2026-09-29 착수. 요청: 사용자(경리 실사용자 요청 포함).
+> "거래를 눌렀을 때 한눈에 안 들어온다 — 어디서 어디로 나갔고, 청구는 어떻고, 서류는 뭐가 있는지.
+>  전표·지급결의서를 인쇄할 때 증빙(계산서·고지서 이미지)을 A4 에 맞춰 같이 뽑고 싶다."
+
+## 0. 결정 (2026-09-29 사용자)
+
+| # | 질문 | 결정 |
+|---|---|---|
+| D1 | PDF 첨부도 화면 미리보기·인쇄에 넣나 | **넣는다** — pdf.js 를 쓸 때만 불러온다(평소 번들 무게 없음) |
+| D2 | 휴대폰 사진(HEIC) 받나 | **받는다** — 브라우저가 HEIC 를 못 그리므로 올리기 전에 JPEG 로 바꿔 올린다(§3-3) |
+| D3 | 드로어를 어디까지 팝업으로 | **전부** — 입력·수정 포함 75곳 |
+
+## 1. 지금 상태 (조사 2026-09-29)
+
+- 드로어: `<Drawer` 75곳 / 34파일. 껍데기는 **한 곳**(`src/lib/ui.jsx` Drawer + `index.css .drawer*`),
+  머리·발은 `components/Drawer.jsx`(DrawerHead·DrawerFooter). 큰 팝업 공용 부품은 없다
+  (Ledger 의 결의서 보기 `.res-viewer-overlay` 하나만 따로 있다).
+- 첨부: 파일은 `uploads/{companyId}/`, DB 는 URL 만. 받는 곳은 거래(`transaction_docs`+옛 `evid_url`)·
+  청구서(`invoice_docs`)·주문(`contract_docs`)·근로계약(`work_contract_docs`) 넷뿐.
+  **전표(journal_vouchers)·지급결의서·구매품의서·정산내역서는 첨부가 없다.**
+  공용 부품 `src/lib/FileAttach.jsx` 는 아이콘 줄 — 썸네일·미리보기 없음(새 탭 열기).
+  받는 형식은 확장자로만: pdf·jpg·jpeg·png·xlsx·xls·docx·hwp, 20MB.
+- 거래 상세: `Ledger.jsx TransactionDetailDrawer`(개요·증빙 두 탭). **연결 청구서·분개가 안 보인다.**
+  분개는 서버가 계산(`lib/voucher.js`, `GET /transactions/:id/voucher`) — 저장된 줄이 아니다.
+- 인쇄: `index.css @media print` 가 `body *` 를 숨기고 화이트리스트만 살린다. `@page A4 16mm`.
+  **첨부가 종이에 찍히는 곳은 한 군데도 없다.** PDF 를 그리는 라이브러리 없음.
+- 파일 서빙 `GET /uploads/:companyId/:file` — 쿠키(`fa_file_token`)로 같은 출처 `<img>` 가 된다.
+  응답에 `CSP: default-src 'none'; sandbox` → `<iframe>` 로 PDF 를 띄우는 건 막힐 수 있다.
+  **그래서 PDF 는 iframe 이 아니라 pdf.js 로 fetch → canvas 로 그린다**(화면·인쇄 같은 길).
+
+## 2. 팝업 전환 — 껍데기 하나를 바꾼다 (D3)
+
+**화면 75곳을 고치지 않는다. `Drawer` 껍데기를 팝업으로 바꾼다.** Esc 확인·겹침 스택·첫 칸 초점·
+열었던 자리로 초점 되돌리기·⌘Enter 저장(DrawerFooter)은 이미 껍데기에 있어 그대로 따라온다.
+
+- 이름: 컴포넌트는 `Drawer` 그대로 두고 `Modal` 을 별칭으로 내보낸다(75곳 import 안 흔든다).
+  CSS 클래스는 `.drawer` 유지 — 인쇄 규칙(`index.css` 1659)·`closest('.drawer')`(DrawerFooter)가 쓴다.
+- 크기: `width` 를 그대로 받되 팝업 폭으로 쓴다. 새 `size` 프롭(sm 480 · md 720 · lg 960 · xl 1200)을
+  더하고, `width` 가 오면 그 값. 높이는 내용만큼, 최대 `calc(100vh - 48px)`, 본문만 스크롤(머리·발 고정).
+- 위치: 가운데. 겹치면 뒤 팝업이 살짝 어두워지고 위 팝업이 앞(스택은 이미 있다).
+- 바깥 클릭: **입력 팝업(confirmClose)은 Esc 처럼 한 번 묻는다.** 큰 팝업은 바깥이 넓어 실수 클릭이
+  잦다 — 드로어 때 '바깥 클릭은 바로 닫기'였던 근거(옆판이라 바깥을 일부러 눌렀다)가 사라진다.
+  읽기 전용(confirmClose=false)은 바로 닫는다.
+- 모바일(≤ 640px): 전체 화면 시트. 지금 모바일 드로어(`width:100%`)와 같다.
+- 넓어진 뒤의 **폼 배치**: 480px 한 줄 폼이 960px 에 그대로면 텅 빈다. 폭 `md` 이상에서
+  `.form-grid` 두 칸 배치를 켠다(짧은 칸 둘을 한 줄에). 화면별 손보기는 2단계에서 Playwright 로 전수.
+- 인쇄 규칙: `.drawer:has(.voucher-print)` 등 드로어 안 인쇄 규칙은 팝업에서도 같은 클래스라 유지.
+  팝업의 가운데 정렬(transform)은 인쇄 때 풀어야 한다 — 기존 규칙에 `transform:none; position:static` 추가.
+
+## 3. 첨부
+
+### 3-1. 저장 — 새 문서는 공용 표 하나
+- 기존 4표(transaction_docs·invoice_docs·contract_docs·work_contract_docs)는 **그대로 둔다**(옮기면 위험만 크다).
+- 첨부가 없던 문서는 공용 표 하나로:
+  `attachments(id, owner_type, owner_id, url, name, mime, size, created_at)` —
+  owner_type: `journal_voucher` · `resolution` · `purchase_req` · `settlement`. FK 가 없으므로
+  **문서 삭제 라우트가 첨부를 같이 지운다**(파일도 `removeUploadedFile`). 격리 검사에 "owner 삭제 라우트가
+  attachments 를 지우는가" 항목을 더한다.
+- `mime` 을 저장한다(지금은 확장자 추정) — 미리보기가 이미지/PDF/기타를 가른다.
+- 서버 `lib/attachments.js`:
+  - `listFor(db, ownerType, id)` · `add` · `remove` — 공용 표와 기존 4표를 **같은 모양**으로 돌려준다
+  - `relatedFiles(db, 'txn', id)` — 거래 하나에 **걸린 첨부 전부**: 거래 자체 + 연결 청구서(invoice_id·
+    invoice_matches) + 지급결의서(txn_id) + 구매품의서(txn_id) + 대체전표. 출처 라벨을 붙인다
+    ("세금계산서 · 2026-09-10 한빛").  인쇄 마법사·거래 한눈에 보기가 쓴다.
+
+### 3-2. 화면 — 썸네일과 미리보기
+- `AttachmentGallery`: 썸네일 격자(이미지는 그대로, PDF 는 첫 쪽을 그린 그림, 기타는 아이콘+이름).
+  누르면 `AttachmentViewer`(큰 미리보기 — 이미지 확대, PDF 쪽 넘기기, 다운로드). 올리기·지우기는 편집 권한일 때.
+- `FileAttach` 는 이 갤러리를 쓰도록 속을 바꾼다(쓰는 곳 5곳이 저절로 따라온다).
+- 전표 입력(`VoucherEntry.jsx JournalEntryDrawer`)·지급결의서·구매품의서·정산내역서에 붙인다.
+
+### 3-3. HEIC (D2)
+- 서버 prebuilt 이미지 라이브러리는 HEIC(HEVC) 를 못 푼다 → **올리기 전 브라우저에서 JPEG 로** 바꾼다
+  (`heic2any`, HEIC 를 골랐을 때만 불러옴). 서버는 여전히 jpg 로 받는다 — 서버 허용 목록은 안 넓힌다.
+- 바꾸기 실패는 "이 사진을 읽지 못했어요 — 휴대폰에서 JPG 로 저장해 올려 주세요"로 막는다.
+
+### 3-4. PDF (D1)
+- `pdfjs-dist` — 동적 import(미리보기·인쇄 마법사를 열 때만). worker 는 같은 출처 번들로.
+- `fetch(url, { credentials: 'same-origin' })` → ArrayBuffer → pdf.js. CSP sandbox 는 fetch 에 영향 없다.
+
+## 4. 거래 한눈에 보기 (요청 1의 핵심)
+
+거래·청구서·전표를 누르면 뜨는 **큰 팝업(lg)** — 한 화면에 다 보이게 탭을 없앤다.
+
+```
+┌ 2026-09-10 · 출금 1,100,000원 · 한빛이엔지 ─────────────── [전표][편집][인쇄 마법사] ┐
+│ 흐름   기업 *4010  ──▶  한빛이엔지 (하나 123-…)            외주가공비 · 주문 DJ-24-031     │
+│ 청구   세금계산서 2026-09-05  1,100,000  지급 1,100,000 / 남음 0   [열기]                   │
+│ 전표   차) 외주가공비 1,000,000 · 부가세대급금 100,000   대) 보통예금 1,100,000              │
+│ 문서   지급결의서 JG-2026-0012 (승인) · 구매품의서 GM-2026-0031 (완료)                        │
+│ 증빙   [계산서.pdf][견적.jpg][+ 올리기]      ← 누르면 큰 미리보기                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+- 서버 `GET /api/transactions/:id/overview` — 거래 + 청구(매칭 포함) + 분개 + 문서 + `relatedFiles` 를 한 번에.
+  (지금 상세는 거래 목록 전체를 받아 `.find` 하는 곳도 있다 — TxnQuickDrawer)
+- 청구서 상세·전표 상세도 같은 뼈대(흐름/청구/전표/문서/증빙)로.
+
+## 5. 인쇄 마법사 (요청 2)
+
+거래·전표·지급결의서 팝업의 [인쇄 마법사], 전표 목록 일괄 인쇄에서 연다.
+
+1. **무엇을** — 전표 / 지급결의서 / 둘 다 (그 거래에 있는 것만 켜짐)
+2. **첨부** — `relatedFiles` 목록에 체크(기본: 이미지·PDF 전부 켬, 엑셀·한글은 인쇄 불가 표시).
+   순서 끌어 바꾸기, [빈 A4 추가]
+3. **미리보기** — A4 쪽을 그대로 보여 준다. 쪽마다 머리띠 "첨부 2/5 · 세금계산서 · 계산서.pdf"
+   - 이미지: 인쇄 가능 영역(A4 − 여백 − 머리띠)에 **비율 유지로 꽉 맞춤**. 가로 사진은 90° 돌리기 선택
+   - PDF: **쪽마다 한 장**(150dpi 로 그려 이미지로). 20쪽 넘으면 경고
+   - 양식(전표·결의서)은 지금 인쇄 컴포넌트를 그대로 쓴다 — 새로 그리지 않는다
+   → [인쇄]
+
+- 인쇄 루트 클래스 `.print-bundle` — **CLAUDE.md 규칙대로 `@media print` 화이트리스트 5곳 + 흰 종이 목록에 등록**
+  (안 하면 Ctrl+P 가 백지거나 다크에서 검은 종이).
+- 쪽 나눔은 `break-after: page`, 각 쪽 상자는 `210mm × 297mm` 안쪽에 맞춘다(`@page` 여백 16mm 기준).
+
+## 6. 단계
+
+| 단계 | 내용 | 검증 |
+|---|---|---|
+| 1 | 팝업 껍데기(§2) + 폼 두 칸 배치 규칙 | 75곳 중 대표 20곳 Playwright 스크린샷(라이트·다크·모바일), 겹침·Esc·⌘Enter·인쇄 |
+| 2 | 화면별 손보기(텅 빈 폼·넘치는 표) | 나머지 전수 스크린샷 |
+| 3 | 첨부 공용 표·`lib/attachments`·갤러리·뷰어·HEIC·PDF 미리보기(§3) | 이미지·PDF·HEIC 올리기/미리보기/지우기, 다른 회사 파일 접근 403 |
+| 4 | 거래 한눈에 보기 + 청구서·전표 상세(§4) | 실데이터(claude 테넌트)로 흐름·청구·분개·문서·증빙 확인 |
+| 5 | 전표·결의서·품의서·정산서에 첨부(§3-2) | 올리기 → 문서 삭제 시 파일까지 지워지는지 |
+| 6 | 인쇄 마법사(§5) | 실제 인쇄 미리보기 — 이미지·가로 사진·PDF 여러 쪽·빈 A4, 다크 모드에서 흰 종이 |
+
+## 7. 위험
+
+- **75곳이 한 번에 바뀐다** — 1단계 직후 화면 전수 확인 전에는 배포하지 않는다.
+- 드로어를 전제로 한 코드: `document.querySelector('.drawer.open')`, `closest('.drawer')`, 인쇄의 `.drawer:has(...)`.
+  클래스를 유지해서 피한다. 폭을 숫자로 가정한 화면(`width="min(480px…)"`)은 grep 으로 찾아 본다.
+- PDF 그리기는 무겁다(쪽당 수백 KB 캔버스). 미리보기는 보이는 쪽만 그리고, 인쇄 때 전부 그린다.
+- 첨부 공용 표는 FK 가 없다 — 지우기 누락이 곧 고아 파일. §3-1 격리 검사 항목으로 막는다.
+
+## 8. 설계 검토 반영 (2026-09-29, 별도 세션 검토)
+
+이 절이 위 내용보다 우선한다.
+
+**P0 — 인쇄·배치**
+- 팝업 가운데 맞춤은 `inset:0; margin:auto` 로 한다(transform 금지). 여는 애니메이션은 끝 상태가 `transform:none` 인
+  keyframes 만 쓴다. transform 이 남으면 안의 fixed(결의서 뷰어 `.res-viewer-overlay`)가 팝업 안에 갇힌다. **1단계에 반영함.**
+  폼 두 칸 배치에 컨테이너 쿼리를 쓰면 `.drawer-body` **안쪽 래퍼**에만 건다(container 도 fixed 기준 상자를 만든다).
+- 인쇄 묶음(`.print-bundle`)은 **포털로 body 바로 아래에** 그린다. fixed 조상 안에 있으면 첫 장만 찍힌다(`:has` 해제 규칙은 position 을 안 푼다).
+- 묶음이 떠 있으면 다른 인쇄 루트를 끈다: `body:has(.print-bundle) :is(나머지 루트):not(.print-bundle *) { display:none }`.
+  묶음 안에서는 id(`#resolution-print`)를 쓰지 않는다(여러 장이면 겹친다).
+- 쪽 상자 = 인쇄 가능 영역 **178 × (265 − 머리띠 − 3)mm**, `overflow:hidden`. 210×297 로 잡으면 매 쪽 넘친다(정산내역서 두 장 사고와 같은 원인).
+- 화이트리스트 등록은 `index.css` 1640·1652·1700(한 줄에 `:is()` **셋**)·1709·1717 + 흰 종이 2645.
+
+**P1 — 첨부**
+- 첨부 추가·삭제에도 잠금: 전표 `closedPeriodError`, 결의서·정산서 결재 중(`assertNoActive`), 기존 거래 첨부 라우트에도 마감 검사를 더한다.
+  완료·승인 문서는 **추가만 허용, 삭제 금지**.
+- 공용 `/api/attachments/:type/:id` 대신 **문서 라우트 아래**(`/api/journal-vouchers/:id/attachments` 등) — 권한 매핑을 그대로 물려받는다. auditMap 에 첨부 규칙 추가.
+- overview·`relatedFiles` 는 **보는 사람의 권한으로 구획을 거른다**(ledger 권한만 있으면 결의서·품의서 첨부 URL 을 주지 않는다).
+- `relatedFiles` 연결 실제: 청구서(invoice_id·invoice_matches) · 결의서(txn_id) · 구매품의서(txn_id **+ purchase_req_txns**) · 정산서(settlement_lines.source) · 옛 `evid_url`.
+  **대체전표는 거래와 이어지지 않는다**(비현금 전용) — 거래 쪽 묶음에서 뺀다.
+- 파일 지우기(`removeUploadedFile`)는 **커밋 뒤**. 문서를 지우는 모든 길(일괄 삭제·undoDoc 연쇄·거래 삭제 CASCADE·청구서 삭제)을 격리 검사 범위로.
+- mime 은 서버가 확장자·앞머리로 정한다(브라우저 값은 못 믿는다).
+- HEIC 변환은 `api.uploadFile` 한 곳에(업로드 입력이 FileAttach 밖에도 셋 있다). 파일명을 `.jpg` 로 바꿔 보낸다. accept 에 `.heic,.heif`.
+- 인쇄 전 모든 `<img>` `decode()` 후 `print()`. PDF 캔버스는 `toBlob` → objectURL, 캔버스는 즉시 버린다.
+- 양식 재사용 전에 **컴포넌트로 뽑는다**: `VoucherSlip`(VoucherView·VoucherBook 두 벌) · 결의서(두 벌) · 품의서·정산서 종이.
+- 짧은 팝업에서 콤보박스 목록이 잘린다(기본 `portal=false`) → 팝업 안에서는 포털 기본.
+
+**P2**
+- 바깥 클릭 물음: `confirmClose` 기본값이 true 라 읽기 전용 팝업(59곳 중 다수)도 묻는다 →
+  **실제로 입력한 게 있을 때만** 묻는다(팝업 안 input 이벤트로 '손댐' 표시). Esc 도 같은 규칙.
+- 모바일 기준 640px 하나로(옛 768 규칙 제거 — 1단계에 반영). `width` 는 `max-width: calc(100vw − 48px)` 가 자른다.
+- 품목 유무로 폭이 480↔1240 튀는 팝업(Contract.jsx 1601·2272) — 열 때 폭을 정해 두고 안 바꾼다.
+- 새 표는 `server/db.js initDb` 의 `CREATE TABLE IF NOT EXISTS`(실제 관례) + `check:fresh-schema`.
+- 문서 복사(`docCopy.js`)는 첨부를 **복사하지 않는다**(URL 공유 시 한쪽 삭제가 다른 쪽을 깬다). `evidence.js` 증빙 판정이 공용 표를 세게.
+- 라이브러리: pdfjs-dist 는 **legacy 빌드**(사무실 옛 브라우저 — `Promise.withResolvers`). HEIC 는 Safari 자체 디코딩 먼저, 실패 시 라이브러리. 번들은 동적 import, workbox 선캐시 한도 확인.
+- 사용 설명서(`manual.js` "서랍이 열리면")·FAQ 의 '서랍' 표현 고치기. 올리고 저장 안 한 파일(고아) 청소 방안.

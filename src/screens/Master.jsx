@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
+import { UPLOAD_ACCEPT } from '../lib/fileKinds'
 import { Icon, fmtNum, useToast, useConfirm, StatusBadge, Drawer, Combobox, MoneyInput, Loading, DateInput, fmtDateShort, setFiscalEndMonth } from '../lib/ui'
 import { PageHeader, HeaderActions } from '../lib/components/PageHeader'
 import { TableToolbar } from '../lib/components/TableToolbar'
@@ -490,7 +491,7 @@ const RefFileField = ({ url, name, uploading, onUpload, onRemove }) => {
   )
   return (
     <div className="drop" style={{ padding: 14, cursor: 'pointer', opacity: uploading ? 0.6 : 1 }} onClick={() => inputRef.current?.click()}>
-      <input ref={inputRef} type="file" style={{ display: 'none' }} accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.hwp" onChange={e => onUpload(e.target.files[0])}/>
+      <input ref={inputRef} type="file" style={{ display: 'none' }} accept={UPLOAD_ACCEPT} onChange={e => onUpload(e.target.files[0])}/>
       <Icon.Upload size={16}/>
       <div className="text-sm fw-600" style={{ marginTop: 4 }}>{uploading ? '업로드 중...' : '파일 첨부 (클릭)'}</div>
       <div className="text-xs text-muted2" style={{ marginTop: 2 }}>PDF, 이미지 등 · 최대 20MB</div>
@@ -534,7 +535,7 @@ export const RefMasterPanel = ({ cfg, page = false, embedded = false }) => {
     const res = await api.uploadFile(file)
     setUploading(false)
     if (res.url) setForm(p => ({ ...p, file_url: res.url, file_name: res.originalName || file.name }))
-    else toast.push('파일 업로드에 실패했어요', { tone: 'warn' })
+    else toast.push(res?.error || '파일 업로드에 실패했어요', { tone: 'warn' })
   }
   const handleSave = async () => {
     const reqField = cfg.fields.find(fd => fd.req)
@@ -605,7 +606,7 @@ export const RefMasterPanel = ({ cfg, page = false, embedded = false }) => {
             {cfg.sub && <div className={page ? 'page-sub' : 'section-sub'}>{cfg.sub} · 총 {rows.length}건</div>}
           </div>
         )}
-        <div className="search" style={{ margin: 0, marginLeft: 'auto', width: 200, padding: '6px 10px' }}>
+        <div className="search" style={{ margin: '0 0 0 auto', width: 200, padding: '6px 10px' }}>
           <Icon.Search size={14}/>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder={`${cfg.label} 검색`}/>
         </div>
@@ -1209,18 +1210,19 @@ const VendorPanel = ({ embedded = false }) => {
         </table>
       </div>
 
-      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
+      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} width="880px">
         <DrawerHead title={editing ? '거래처 수정' : '거래처 등록'} onClose={() => setDrawerOpen(false)}/>
-        <div className="drawer-body col gap-form">
+        {/* 칸 배치(폭에 맞춰 3칸) — 짧은 칸은 나란히, 목록(이체 계좌·담당자)은 좌우로 둘.
+            한 줄에 하나씩이던 때는 거래처 하나 적는 데 스크롤을 두 번 내렸다(2026-09-29).
+            순서는 보는 순서만 바꿨다 — 저장하는 칸은 그대로다 */}
+        <div className="drawer-body form-grid-2">
           <div>
             <label className="label" style={{ marginBottom: 8 }}>상호명 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
             <input className="input" value={form.name} onChange={e => f('name', e.target.value)} placeholder="예: (주)한화오션"/>
           </div>
 
-          <div style={{ height: 1, background: 'var(--line)' }}/>
-
-          {/* 거래 구분은 칩 라벨이 길어('매입처/외주 (지급)') 절반 폭에서는 2줄로 접힌다. 한 줄을 다 쓴다. */}
-          <div>
+          {/* 거래 구분은 칩 라벨이 길어('매입처/외주 (지급)') 한 칸에서는 두 줄로 접힌다 — 두 칸 폭 */}
+          <div className="span-w2">
             <label className="label" style={{ marginBottom: 8 }}>거래 구분 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
             <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
               {GUBU_OPTS.map(o => (
@@ -1233,86 +1235,74 @@ const VendorPanel = ({ embedded = false }) => {
             <label className="label" style={{ marginBottom: 8 }}>거래 유형</label>
             <input className="input" value={form.type} onChange={e => f('type', e.target.value)} placeholder="예: 발주처 / 외주가공 / 원자재"/>
           </div>
-
-          <div style={{ height: 1, background: 'var(--line)' }}/>
-
-          <div className="row gap-16" style={{ alignItems: 'flex-start' }}>
-            <div style={{ flex: 1 }}>
-              <label className="label" style={{ marginBottom: 8 }}>사업자번호</label>
-              <input className="input" value={form.biz_no} onChange={e => f('biz_no', e.target.value)} placeholder="예: 000-00-00000"/>
-            </div>
-            <div style={{ flex: 1 }}>
-              <label className="label" style={{ marginBottom: 8 }}>대표자</label>
-              <input className="input" value={form.ceo} onChange={e => f('ceo', e.target.value)} placeholder="예: 홍길동"/>
-            </div>
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>사업자번호</label>
+            <input className="input" value={form.biz_no} onChange={e => f('biz_no', e.target.value)} placeholder="예: 000-00-00000"/>
+          </div>
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>대표자</label>
+            <input className="input" value={form.ceo} onChange={e => f('ceo', e.target.value)} placeholder="예: 홍길동"/>
           </div>
 
           {/* 업태·종목은 세금계산서에 찍히는 항목이라 거래처마다 들고 있어야 한다 */}
-          <div className="row gap-16" style={{ alignItems: 'flex-start' }}>
-            <div style={{ flex: 1 }}>
-              <label className="label" style={{ marginBottom: 8 }}>업태</label>
-              <Combobox value={form.biz_type} onChange={v => f('biz_type', v)}
-                options={bizTypeOptions()} placeholder="업태 선택 또는 직접 입력"
-                onAddNew={q => f('biz_type', q)} addNewLabel="직접 입력"/>
-            </div>
-            <div style={{ flex: 1 }}>
-              <label className="label" style={{ marginBottom: 8 }}>종목</label>
-              <Combobox value={form.biz_item} onChange={v => f('biz_item', v)}
-                options={bizItemOptions(form.biz_type)} placeholder="종목 선택 또는 직접 입력"
-                onAddNew={q => f('biz_item', q)} addNewLabel="직접 입력"/>
-            </div>
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>업태</label>
+            <Combobox value={form.biz_type} onChange={v => f('biz_type', v)}
+              options={bizTypeOptions()} placeholder="업태 선택 또는 직접 입력"
+              onAddNew={q => f('biz_type', q)} addNewLabel="직접 입력"/>
+          </div>
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>종목</label>
+            <Combobox value={form.biz_item} onChange={v => f('biz_item', v)}
+              options={bizItemOptions(form.biz_type)} placeholder="종목 선택 또는 직접 입력"
+              onAddNew={q => f('biz_item', q)} addNewLabel="직접 입력"/>
+          </div>
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>담당자</label>
+            <input className="input" value={form.contact} onChange={e => f('contact', e.target.value)} placeholder="예: 김담당"/>
+          </div>
+
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>전화번호</label>
+            <input className="input" value={form.phone} onChange={e => f('phone', e.target.value)} placeholder="예: 031-000-0000"/>
+          </div>
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>팩스번호</label>
+            <input className="input" value={form.fax} onChange={e => f('fax', e.target.value)} placeholder="예: 031-000-0001"/>
+          </div>
+          <div>
+            <label className="label" style={{ marginBottom: 8 }}>이메일</label>
+            <input className="input" value={form.email} onChange={e => f('email', e.target.value)} placeholder="예: contact@company.com"/>
+          </div>
+
+          <div className="span-2">
+            <label className="label" style={{ marginBottom: 8 }}>주소</label>
+            <input className="input" value={form.address} onChange={e => f('address', e.target.value)} placeholder="예: 경기도 안산시 ..."/>
           </div>
 
           {/* 이체 정보 — 은행·계좌번호·예금주를 **나눠서** 받는다.
               매입처 결제내역서(월별 일괄이체 명단)가 각각을 열로 요구하고, 한 칸에 몰아
               적은 값에서 그걸 갈라내려면 표기가 제각각이라 반드시 틀린다.
               ⚠ 예금주는 상호와 다른 경우가 흔하다(개인 명의 계좌). 비워두면 상호로 대신하지만,
-                 실제 명단에는 '김선국맑은유통' 같은 예금주가 섞여 있어 그대로 두면 이체가 튕긴다. */}
-          <VendorSubList
-            label="이체 계좌" addLabel="계좌 추가"
-            hint="거래처가 계좌를 여러 개 주는 일이 흔해요. '주로 씀'으로 표시한 계좌가 매입 결제내역 명단에 실립니다."
-            rows={vAccounts} onChange={setVAccounts} fields={ACCOUNT_FIELDS}/>
-
-          <VendorSubList
-            label="담당자" addLabel="담당자 추가"
-            hint="영업·경리·배송 담당이 다른 경우가 많아요. 위쪽 전화·팩스·이메일은 회사 대표 연락처입니다."
-            rows={vContacts} onChange={setVContacts} fields={CONTACT_FIELDS}/>
+                 실제 명단에는 '김선국맑은유통' 같은 예금주가 섞여 있어 그대로 두면 이체가 튕긴다.
+              이체 계좌 | 담당자 목록은 나란히(좁으면 위아래로 — .pay-cols) */}
+          <div className="span-2 pay-cols">
+            <VendorSubList
+              label="이체 계좌" addLabel="계좌 추가"
+              hint="거래처가 계좌를 여러 개 주는 일이 흔해요. '주로 씀'으로 표시한 계좌가 매입 결제내역 명단에 실립니다."
+              rows={vAccounts} onChange={setVAccounts} fields={ACCOUNT_FIELDS}/>
+            <VendorSubList
+              label="담당자" addLabel="담당자 추가"
+              hint="영업·경리·배송 담당이 다른 경우가 많아요. 위쪽 전화·팩스·이메일은 회사 대표 연락처입니다."
+              rows={vContacts} onChange={setVContacts} fields={CONTACT_FIELDS}/>
+          </div>
 
           {/* 예전에 한 칸으로 적어둔 값이 있으면 버리지 않고 보여준다 — 옮겨 적을 근거가 된다 */}
           {form.pay_account && vAccounts.length === 0 && (
-            <div className="text-xs text-muted2">
+            <div className="text-xs text-muted2 span-2">
               예전 지급계좌 입력: {form.pay_account} <span className="text-muted2">— 위 '계좌 추가'로 옮겨 적어주세요</span>
             </div>
           )}
-
-          <div className="row gap-16" style={{ alignItems: 'flex-start' }}>
-            <div style={{ flex: 1 }}>
-              <label className="label" style={{ marginBottom: 8 }}>담당자</label>
-              <input className="input" value={form.contact} onChange={e => f('contact', e.target.value)} placeholder="예: 김담당"/>
-            </div>
-            <div style={{ flex: 1 }}>
-              <label className="label" style={{ marginBottom: 8 }}>전화번호</label>
-              <input className="input" value={form.phone} onChange={e => f('phone', e.target.value)} placeholder="예: 031-000-0000"/>
-            </div>
-          </div>
-
-          <div className="row gap-16" style={{ alignItems: 'flex-start' }}>
-            <div style={{ flex: 1 }}>
-              <label className="label" style={{ marginBottom: 8 }}>팩스번호</label>
-              <input className="input" value={form.fax} onChange={e => f('fax', e.target.value)} placeholder="예: 031-000-0001"/>
-            </div>
-            <div style={{ flex: 1 }}>
-              <label className="label" style={{ marginBottom: 8 }}>이메일</label>
-              <input className="input" value={form.email} onChange={e => f('email', e.target.value)} placeholder="예: contact@company.com"/>
-            </div>
-          </div>
-
-          <div style={{ height: 1, background: 'var(--line)' }}/>
-
-          <div>
-            <label className="label" style={{ marginBottom: 8 }}>주소</label>
-            <input className="input" value={form.address} onChange={e => f('address', e.target.value)} placeholder="예: 경기도 안산시 ..."/>
-          </div>
         </div>
         <DrawerFooter onCancel={() => setDrawerOpen(false)} onSave={handleSave}/>
       </Drawer>
@@ -1355,7 +1345,7 @@ const AccountSubjectPanel = ({ embedded = false }) => {
             <div className="section-sub">한국채택 회계기준(K-GAAP) 표준 계정과목이에요. 거래 입력 시 선택용으로 쓰이며, 이 목록은 수정할 수 없어요. · 총 {rows.length}개</div>
           </div>
         )}
-        <div className="search" style={{ margin: 0, marginLeft: "auto", width: 200, padding: "6px 10px" }}>
+        <div className="search" style={{ margin: "0 0 0 auto", width: 200, padding: "6px 10px" }}>
           <Icon.Search size={14}/>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="계정과목·코드·내용"/>
         </div>
@@ -1544,9 +1534,10 @@ const CategoryPanel = ({ embedded = false }) => {
         </table>
       </div>
 
-      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
+      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} width="880px">
         <DrawerHead title={editing ? "비목 수정" : "비목 추가"} onClose={() => setDrawerOpen(false)}/>
-        <div className="drawer-body col gap-form">
+        {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */}
+        <div className="drawer-body form-grid-2">
           <div>
             <label className="label">구분 <span style={{ color: "var(--neg-ink)" }}>*</span></label>
             <div className="row gap-6">
@@ -2188,7 +2179,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
             <div className="section-sub">{headerSub}</div>
           </div>
         )}
-        <div className="search" style={{ margin: 0, marginLeft: 'auto', width: 200, padding: '6px 10px' }}>
+        <div className="search" style={{ margin: '0 0 0 auto', width: 200, padding: '6px 10px' }}>
           <Icon.Search size={14}/>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder={isCardPanel ? '별칭·카드사·번호' : '별칭·은행·번호'}/>
         </div>
@@ -2256,7 +2247,9 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
         </table>
       </div>
 
-      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} confirmClose={mode === 'edit'}>
+      {/* 폭 — 보기(상세)는 원래 폭, 등록·수정 폼만 두 칸 배치라 넓힌다 */}
+      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} confirmClose={mode === 'edit'}
+        width={mode === 'view' && detail ? undefined : '880px'}>
         <DrawerHead
           title={editing ? detail?.name : `${isCard ? '카드' : '계좌'} 등록`}
           /* 카드는 옛 type(법인카드/체크카드…) 대신 소유·결제방식으로 적는다 —
@@ -2322,7 +2315,8 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
             </dl>
           </div>
         ) : (
-        <div className="drawer-body col gap-form">
+        /* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */
+        <div className="drawer-body form-grid-2">
           {/* 예금 종류는 통장에만 낸다.
               ⚠ 카드에서 걷어낸 이유: 옛 목록이 `법인카드 / 개인카드 / 체크카드` 였는데
                 이건 **두 축을 한 칸에 섞은 것**이다 — 법인/개인은 '소유', 체크는 '결제 방식'.
@@ -2331,7 +2325,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
                 결제방식=신용). 실제로 운영 데이터에 카드인데 종류가 '보통예금'인 것도 있었다.
                 → 소유는 owner, 결제 방식은 card_type 하나씩만 쓴다. */}
           {!isCard && (
-            <div>
+            <div className="span-2">
               <label className="label" style={{ marginBottom: 8 }}>예금 종류</label>
               <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
                 {subTypes.map(t => (
@@ -2347,7 +2341,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
               구분이 없던 시절엔 체크카드에도 결제일이 붙어, 이미 빠진 돈을 자금일보가
               "그 날 한꺼번에 빠질 돈"으로 한 번 더 세웠다(있지도 않은 출금). */}
           {isCard && (
-            <div>
+            <div className="span-w2">
               <label className="label" style={{ marginBottom: 8 }}>카드 종류</label>
               <div className="row gap-6">
                 {[['credit', '신용카드'], ['check', '체크카드']].map(([v, l]) => (
@@ -2367,7 +2361,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
               이게 없으면 이번 달 카드값이 며칠에 어느 통장에서 빠지는지 자금 예측이 모른다.
               비워두면 예측하지 않는다 — 모르는 날짜를 지어내면 그 날 잔고가 틀린다. */}
           {isCard && (form.card_type || 'credit') === 'credit' && (
-            <div className="row gap-16" style={{ alignItems: 'flex-start' }}>
+            <>
               <div style={{ flex: 1 }}>
                 <label className="label" style={{ marginBottom: 8 }}>결제일</label>
                 <Combobox value={String(form.card_pay_day || '')} allowAdd={false}
@@ -2384,10 +2378,10 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
                     ...accounts.filter(a => a.kind !== 'card').map(a => ({ value: a.id, label: a.name }))]}
                   placeholder="어느 통장에서 빠지나요"/>
               </div>
-            </div>
+            </>
           )}
           {isCard && (form.card_type || 'credit') === 'credit' && (
-            <div className="text-xs text-muted2" style={{ marginTop: -8 }}>
+            <div className="text-xs text-muted2 span-2" style={{ marginTop: -8 }}>
               결제일을 넣으면 이번 달 사용액이 그 날 이 통장에서 빠지는 것으로 자금 현황에 잡혀요.
               실제 결제는 <b>지급처리 → 카드 대금 지급</b>에서 한 번에 처리할 수 있어요.
             </div>
@@ -2411,7 +2405,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
             </div>
           </div>
 
-          <div style={{ height: 1, background: 'var(--line)' }}/>
+          <div className="span-2" style={{ height: 1, background: 'var(--line)' }}/>
 
           <div>
             <label className="label" style={{ marginBottom: 8 }}>별칭 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
@@ -2419,7 +2413,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
             <div className="text-xs text-muted2" style={{ marginTop: 6 }}>거래 등록·잔액 화면에 이 이름으로 표시돼요.</div>
           </div>
 
-          <div className="row gap-16" style={{ alignItems: 'flex-start' }}>
+          <>
             <div style={{ flex: 1 }}>
               <label className="label" style={{ marginBottom: 8 }}>{isCard ? '카드사' : '은행'}</label>
               <input className="input" value={form.bank} onChange={e => f('bank', e.target.value)} placeholder={isCard ? '국민카드' : 'IBK기업은행'}/>
@@ -2428,9 +2422,9 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
               <label className="label" style={{ marginBottom: 8 }}>{isCard ? '카드번호' : '계좌번호'}</label>
               <input className="input num" value={form.number} onChange={e => f('number', e.target.value)} placeholder={isCard ? '0000-****-****-0000' : '000-000000-00-000'}/>
             </div>
-          </div>
+          </>
 
-          <div className="row gap-16" style={{ alignItems: 'flex-start' }}>
+          <>
             <div style={{ flex: 1 }}>
               <label className="label" style={{ marginBottom: 8 }}>용도</label>
               <input className="input" value={form.purpose} onChange={e => f('purpose', e.target.value)} placeholder={isCard ? '소모품·접대비' : '주거래 / 급여이체'}/>
@@ -2447,7 +2441,7 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
                 </div>
               </div>
             )}
-          </div>
+          </>
         </div>
         )}
 
@@ -3775,7 +3769,7 @@ const GroupedTable = ({ data, q, collapsed, toggleGroup, onEdit, onDelete }) => 
                       style={{
                         width: "100%", textAlign: "left",
                         padding: "12px 18px 12px 42px",
-                        background: "var(--surface-2)", border: 0,
+                        background: "var(--surface-2)", borderTop: 0, borderLeft: 0, borderRight: 0,
                         borderBottom: "1px solid var(--line)",
                         cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
                         fontFamily: "inherit",

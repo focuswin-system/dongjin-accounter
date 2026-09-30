@@ -1,4 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { AccountPicker } from '../lib/components/AccountPicker'
+import { AttachmentPanel } from '../lib/components/AttachmentPanel'
+import { VoucherSlip } from '../lib/components/VoucherSlip'
+import { useOrdersFromMes } from '../lib/customModules'
 import { NotesScreen, NoteKpis, NoteStatusChips } from './Notes'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, FilterSelect, localToday, Loading, DateInput, periodToRange, Popover, PopItem, vendorLabel, fmtDateShort } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
@@ -10,16 +14,14 @@ import { matchInvoiceAsking } from '../lib/settleAsk'
 import { useTableFilter, monthRange, activeMonthOf } from '../lib/tableFilter'
 import { isCountable } from '../lib/txnScope'
 import { ImportWizard } from '../lib/components/ImportWizard'
-import { VoucherView } from '../lib/components/VoucherView'
 import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { InvoiceLines, lineVat, blankLine, isFilledLine } from '../lib/components/InvoiceLines'
 import { StatementDoc } from '../lib/components/StatementDoc'
 import { computeLineAmount } from '../lib/lineAmount'
 import { accountLabels, accountIdByLabel } from '../lib/accountLabel'
-import { withMainFirst, isMainAccount, MAIN_BADGE } from '../lib/mainAccount'
+import { withMainFirst, isMainAccount } from '../lib/mainAccount'
 import { taxInvoiceImportAdapter } from '../lib/taxInvoiceImport'
-import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
 import { quickAddCategory } from '../lib/quickAdd'
 import { vatOf } from '../lib/vatRate'
@@ -139,44 +141,63 @@ const NoteSettle = ({ invoice, isIssued, toast, onDone }) => {
           어음은 만기가 와야 현금이 되니까요. 만기 입금은 <b>어음</b> 탭에서 처리합니다.
         </div>
       </div>
-      <div className="row gap-12">
-        <div style={{ flex: 1 }}>
+      {/* 옆 '새 거래로 등록'과 **같은 틀**(칸 배치·오른쪽 버튼) — 탭만 바꿨는데 폼 모양이 달라지면
+          다른 기능처럼 보인다(2026-09-30 사용자: "버튼 크기가 왜 다르지") */}
+      <div className="form-grid-2">
+        <div>
           <label className="label">어음번호</label>
           <input className="input num" value={f.noteNo} onChange={e => set('noteNo', e.target.value)}
             placeholder="예: 자가12345678"/>
         </div>
-        <div style={{ flex: 1 }}>
+        <div>
           <label className="label">{isIssued ? '받은' : '준'} 금액 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
           <MoneyInput value={f.amount} onChange={raw => set('amount', raw)}/>
         </div>
-      </div>
-      <div className="row gap-12">
-        <div style={{ flex: 1 }}>
+        <div>
           <label className="label">발행일 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
           <DateInput className="input num" value={f.issuedOn} onChange={e => set('issuedOn', e.target.value)}/>
         </div>
-        <div style={{ flex: 1 }}>
+        <div>
           <label className="label">
             만기일 <span style={{ color: 'var(--neg-ink)' }}>*</span>
-            <span className="text-muted2 fw-600" style={{ marginLeft: 6, fontWeight: 400 }}>· 현금이 되는 날</span>
+            <span className="text-muted2" style={{ marginLeft: 6, fontWeight: 400 }}>· 현금이 되는 날</span>
           </label>
           <DateInput className="input num" value={f.dueOn} onChange={e => set('dueOn', e.target.value)}/>
         </div>
+        <div className="span-w2">
+          <label className="label">메모 <span className="text-muted2">(선택)</span></label>
+          <input className="input" value={f.memo} onChange={e => set('memo', e.target.value)}
+            placeholder="예: 3개월 만기"/>
+        </div>
       </div>
-      <div>
-        <label className="label">메모 <span className="text-muted2">(선택)</span></label>
-        <input className="input" value={f.memo} onChange={e => set('memo', e.target.value)}
-          placeholder="예: 3개월 만기"/>
+      <div className="row">
+        <button className="btn primary ml-auto" disabled={busy} onClick={save}>
+          <Icon.Check size={14}/> {busy ? '처리 중…' : (isIssued ? '어음으로 받음' : '어음으로 지급')}
+        </button>
       </div>
-      <button className="btn primary" disabled={busy} onClick={save}>
-        <Icon.Check size={14}/> {busy ? '처리 중…' : (isIssued ? '어음으로 받음' : '어음으로 지급')}
-      </button>
     </div>
   )
 }
 
-const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onChanged, toast, goRoute }) => {
+/* 입금·지급 거래의 적요 기본값 — **서버 lib/memoText.js settleMemo 와 같은 말이어야 한다.**
+   (칸을 미리 채워 보여주려고 화면에도 둔다. 비워 보내면 서버가 같은 규칙으로 채운다.)
+   청구번호는 안 넣는다 — 프로그램 안에서만 쓰는 번호라 장부를 보는 사람은 뜻을 모른다.
+   어느 청구서인지는 연결 데이터와 분개장 엑셀의 청구번호 칸이 들고 있다. */
+const settleMemoOf = (inv) => {
+  const base = inv?.kind === "issued" ? "매출대금 입금" : "매입대금 지급"
+  const m = String(inv?.memo ?? "").trim()   // 표시용 메모(엑셀 임포트의 JSON 메모는 api.js 가 풀어 둔다)
+  return m ? `${base} · ${m}` : base
+}
+
+/* 세금계산서 상세 — 거래 상세(Ledger)와 **같은 틀**(2026-09-29 사용자: "거래내역 수정 폼 형태로, 정보와 첨부 분리").
+ *   청구 정보  왼쪽: 내용·품목 / 오른쪽: 발행 시점 전표(인쇄 종이 그대로). [편집]은 이 자리에서 폼으로(제자리 수정)
+ *   입금 처리  돈이 오간 기록·처리 — 세금계산서에만 있는 일이라 탭 하나를 더 둔다
+ *   증빙       왼쪽 서류 목록 / 오른쪽 미리보기
+ * 창 높이는 고정 — 탭을 옮겨도 창이 커졌다 작아졌다 하지 않는다. */
+const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onChanged, onSaveInvoice, toast, goRoute }) => {
   const { confirm } = useConfirm()
+  const [editing, setEditing] = useState(false)            // 제자리 수정 중
+  const [voucher, setVoucher] = useState(null)             // 발행 시점 전표(undefined=못 세움)
   // 취소 중인 매칭 id — 같은 줄을 두 번 눌러 이미 지운 매칭을 또 지우려 하는 걸 막는다
   const [unmatching, setUnmatching] = useState(null)
   /* ⚠ 남은 금액을 **값으로** 채운다. 예전엔 placeholder 로만 보여줬는데,
@@ -185,8 +206,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
      채워 두고, 일부만 받았을 때 고치게 한다(고치는 쪽이 드물다). */
   const [matchAmt, setMatchAmt] = useState("")
   const [matchDate, setMatchDate] = useState(localDate())
-  const [innerTab, setInnerTab] = useState("match")
-  const [voucherOpen, setVoucherOpen] = useState(false)   // 발행 시점 전표(차변·대변)
+  const [innerTab, setInnerTab] = useState("info")
   const [txnOpen, setTxnOpen] = useState(null)            // 이력 행에서 연 거래 상세
   /* 거래명세서 — 이 청구서의 품목을 서류로 뽑는다.
      회사·거래처 정보(사업자번호·대표·주소)는 명세서를 열 때만 받아온다.
@@ -219,12 +239,11 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
   // 새 거래로 입금/지급 처리할 때 채울 분류값(자동으로 채우되 수정 가능)
   const [matchCategory, setMatchCategory] = useState("")
   const [matchMemo, setMatchMemo] = useState("")
-  const [matchAcct, setMatchAcct] = useState("")
-  // 입출금 계좌 — 위 matchAcct(계정과목 코드)와 다른 값이다. 비면 잔액에 반영되지 않는다.
+  // 입출금 계좌 — 이 돈이 잡히는 통장. 비면 잔액에 반영되지 않는다(서버도 400)
   const [bankAccounts, setBankAccounts] = useState([])
+  const [company, setCompany] = useState(null)   // 주거래 계좌를 앞에 세우려고
   const [matchBankId, setMatchBankId] = useState("")
   const [categories, setCategories] = useState([])
-  const [acctSubjects, setAcctSubjects] = useState([])
   const [jeokyos, setJeokyos] = useState([])
   useEffect(() => {
     if (invoice?.id && invoice.remainAmount > 0) api.getMatchable(invoice.id).then(setCandidates)
@@ -232,29 +251,39 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
     setShowAll(false)
   }, [invoice?.id, invoice?.remainAmount])
   useEffect(() => { setDocs(invoice?.docs || []) }, [invoice?.id])
-  // 겹쳐 띄운 전표는 청구서가 바뀌면 닫는다 — 안 닫으면 다음 청구서에 저절로 펼쳐진 채 뜬다
-  useEffect(() => { setVoucherOpen(false) }, [invoice?.id])
+  /* 다른 세금계산서를 열면 처음 자리로 — 남은 돈이 있으면 '입금 처리'가 할 일이라 그 탭부터, 다 끝났으면 청구 정보.
+     전표는 열 때 한 번 받는다(발행 시점 분개 — 서버 lib/voucher.js) */
+  useEffect(() => {
+    if (!invoice?.id) return
+    setEditing(false)
+    setInnerTab(invoice.remainAmount > 0 ? "match" : "info")
+    setVoucher(null)
+    let alive = true
+    api.getInvoiceVoucher(invoice.id).then(v => { if (alive) setVoucher(v || undefined) }).catch(() => { if (alive) setVoucher(undefined) })
+    return () => { alive = false }
+  }, [invoice?.id])   // eslint-disable-line react-hooks/exhaustive-deps
   // 청구서에 계좌가 지정돼 있으면 그걸, 없으면 은행계좌를 기본값으로 (정기청구 자동 생성분은 계좌가 비어 있다)
   useEffect(() => {
-    api.getAccounts().then(list => {
+    /* ⚠ **미리 고르지 않는다.** 실제 돈이 잡히는 통장이라, 채워 두면 확인 없이 눌러
+       다른 통장에 들어온 돈이 주거래(또는 청구서에 적어 둔 예정 계좌)로 기록된다 —
+       lib/mainAccount.js 머리말의 사고와 같은 유형(2026-09-30). 주거래를 앞에 세우고 표시만 한다.
+       (세금계산서 등록 폼의 계좌는 '여기로 받을 예정'이라 채워 둔다 — 틀려도 장부가 안 틀어진다) */
+    setMatchBankId("")
+    Promise.all([api.getAccounts(), api.getCompany()]).then(([list, co]) => {
       setBankAccounts(list)
-      setMatchBankId(invoice?.accountId || list.find(a => a.kind === "bank")?.id || "")
+      setCompany(co)
     })
   }, [invoice?.id])
   useEffect(() => {
     api.getCategories().then(setCategories)
-    // 거래 입력용은 postable 계정만 — 집계 계정(code=NULL)이 섞이면 code로 만든 옵션이
-    // value=null 로 여럿 생겨 Combobox key가 중복된다(선택도 불가).
-    api.getAccountSubjects({ postableOnly: true }).then(setAcctSubjects)
     api.getRefItems('jeokyo').then(setJeokyos)
   }, [])
-  // 청구서 열릴 때 분류 기본값 채움: 비목=수금/대금 지급, 적요=청구서 정산
+  // 청구서 열릴 때 분류 기본값 채움: 비목=수금/대금 지급, 적요=매출대금 입금(· 청구서 메모)
   useEffect(() => {
     if (!invoice) return
     const isInc = invoice.kind === "issued"
     setMatchCategory(isInc ? "수금" : "대금 지급")
-    setMatchMemo(`청구서 ${invoice.invoiceNo || ""} 정산`.trim())
-    setMatchAcct("")
+    setMatchMemo(settleMemoOf(invoice))
   }, [invoice?.id])
 
   if (!invoice) return null
@@ -279,7 +308,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
       body: `${fmtNum(amount)}원을 이 청구서에 연결합니다. 그만큼 ${isIssued ? "미수금" : "미지급금"}이 줄어요.`,
       confirmLabel: "연결",
     })
-    if (ok) { onMatch(invoice.id, amount, matchDate, null, { category: matchCategory, memo: matchMemo, account_code: matchAcct, account_id: matchBankId }); onClose() }
+    if (ok) { onMatch(invoice.id, amount, matchDate, null, { category: matchCategory, memo: matchMemo, account_id: matchBankId }); onClose() }
   }
 
   /* 정산 취소. 되돌리면 미수금(미지급금)이 그만큼 되살아난다.
@@ -325,61 +354,43 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
   }
 
   return (
-    <Drawer open={true} onClose={onClose}>
+    <Drawer open={true} onClose={onClose} size="xl" height="min(800px, calc(100vh - 48px))" label="세금계산서 상세" confirmClose={editing}>
         <div className="drawer-head">
-          <div>
-            <div className="fw-700" style={{ fontSize: 16 }}>청구서 상세</div>
-            <div className="text-xs text-muted">{invoice.invoiceNo}</div>
+          <div style={{ minWidth: 0 }}>
+            <div className="row gap-8">
+              <span className={`badge ${isIssued ? "pos" : "neg"}`}>{isIssued ? "매출" : "매입"}</span>
+              <StatusBadge status={effStatus(invoice)}/>
+            </div>
+            <div className="fw-700" style={{ fontSize: 17, marginTop: 6 }}>{invoice.vendor || "거래처 없음"}</div>
+            <div className="text-xs text-muted">{[invoice.invoiceNo, `발행 ${invoice.issuedAt || "—"}`, invoice.dueAt ? `기한 ${invoice.dueAt}` : ""].filter(Boolean).join(" · ")}</div>
           </div>
-          <div className="ml-auto row gap-6">
-            {/* 거래명세서 — 품목이 있는 청구서만. 품목이 없으면 명세서에 적을 내용이 없다
-                (그럴 땐 '수정'에서 품목을 넣으면 버튼이 생긴다). */}
-            {invoice.lines?.length > 0 && (
-              <button className="btn" style={{ fontSize: 12 }} onClick={() => setStmtOpen(true)}
-                title="품목 내역을 거래명세서로 인쇄합니다">
-                <Icon.Print size={13}/> 거래명세서
-              </button>
+          <div className="ml-auto" style={{ textAlign: "right" }}>
+            <div className="num fw-700" style={{ fontSize: 26, letterSpacing: "-0.02em" }}>
+              {fmtNum(invoice.totalAmount)}<span className="text-muted" style={{ fontWeight: 400, fontSize: 15, marginLeft: 3 }}>원</span>
+            </div>
+            {invoice.remainAmount > 0 && invoice.remainAmount < invoice.totalAmount && (
+              <div className="text-xs text-muted">남음 <span className="num">{fmtNum(invoice.remainAmount)}</span></div>
             )}
-            <button className="btn" style={{ fontSize: 12 }}
-              onClick={() => onEdit?.(invoice)}>
-              <Icon.Pencil size={13}/> 수정
-            </button>
-            <button className="btn" style={{ fontSize: 12, color: "var(--neg-ink)" }}
-              onClick={async () => {
-                const ok = await confirm({ tone: "neg", icon: <Icon.Warn size={22}/>,
-                  title: "청구서 삭제", body: "이 청구서를 삭제합니다. 되돌릴 수 없어요.", confirmLabel: "삭제" })
-                if (ok) { onClose(); if (onDelete) onDelete(invoice.id); }
-              }}>
-              삭제
-            </button>
-            <button className="icon-btn" title="닫기" onClick={onClose}><Icon.Close size={16}/></button>
           </div>
+          <button className="icon-btn" title="닫기" onClick={onClose}><Icon.Close size={16}/></button>
         </div>
 
-        {/* 탭 */}
-        <div className="row gap-0" style={{ borderBottom: "1px solid var(--line)", padding: "0 22px" }}>
+        <div className="txo-tabs" role="tablist">
           {[
-            { id: "match", label: isIssued ? "입금 처리" : "지급 처리" },
             { id: "info",  label: "청구 정보" },
-            { id: "docs",  label: `첨부 서류${docs.length ? ` (${docs.length})` : ""}` },
+            { id: "match", label: isIssued ? "입금 처리" : "지급 처리" },
+            { id: "docs",  label: "증빙", count: docs.length },
           ].map(t => (
-            <button key={t.id} onClick={() => setInnerTab(t.id)}
-              style={{
-                padding: "10px 14px", border: "none", background: "none", cursor: "pointer",
-                fontFamily: "inherit", fontSize: 13, fontWeight: innerTab === t.id ? 700 : 500,
-                color: innerTab === t.id ? "var(--ink)" : "var(--muted)",
-                borderBottom: innerTab === t.id ? "2px solid var(--ink)" : "2px solid transparent",
-                marginBottom: -1,
-              }}>
-              {t.label}
+            /* 고치는 중엔 탭을 못 옮긴다 — 옮기면 쓰던 폼이 사라진다 */
+            <button key={t.id} role="tab" aria-selected={innerTab === t.id} className={`tab ${innerTab === t.id ? "active" : ""}`}
+              disabled={editing && t.id !== "info"} title={editing && t.id !== "info" ? "수정을 마치고 볼 수 있어요" : undefined}
+              onClick={() => setInnerTab(t.id)}>
+              {t.label}{t.count > 0 && <span className="num txo-count">{t.count}</span>}
             </button>
           ))}
-          <div className="ml-auto row gap-6" style={{ alignItems: "center", paddingBottom: 8 }}>
-            <StatusBadge status={effStatus(invoice)}/>
-          </div>
         </div>
 
-        <div className="drawer-body col gap-form">
+        <div className={`drawer-body${innerTab === "docs" ? " txo-body-fill" : " col gap-form"}`}>
           {/* 탭: 입금/지급 처리 */}
           {innerTab === "match" && (
             <>
@@ -537,53 +548,68 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                         </div>
                       )
                     ) : (
+                      /* 두 칸 배치(2026-09-30 사용자) — 금액|날짜, 계좌|비목, 적요는 두 칸 폭.
+                         계좌를 금액 바로 아래로 올렸다: 이 돈이 어느 통장 잔액에 잡히느냐가 금액 다음으로 중요하다 */
                       <>
-                        <label className="label">{isIssued ? "입금" : "지급"} 금액</label>
-                        <MoneyInput value={matchAmt} onChange={raw => setMatchAmt(raw)}/>
-                        {/* 추천 금액 칩(전액·절반)은 걷어냈다 — 칸이 이미 전액으로 채워져 있으니
-                            '전액' 칩은 아무 일도 안 하고, '절반'은 근거 없는 숫자였다. */}
-                        <div className="text-xs text-muted2">
-                          남은 금액 전액이에요. 일부만 {isIssued ? '받았으면' : '냈으면'} 고쳐주세요.
+                      <div className="form-grid-2">
+                        <div>
+                          <label className="label">{isIssued ? "입금" : "지급"} 금액</label>
+                          <MoneyInput value={matchAmt} onChange={raw => setMatchAmt(raw)}/>
+                          {/* 추천 금액 칩(전액·절반)은 걷어냈다 — 칸이 이미 전액으로 채워져 있으니
+                              '전액' 칩은 아무 일도 안 하고, '절반'은 근거 없는 숫자였다. */}
+                          <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+                            남은 금액 전액이에요. 일부만 {isIssued ? '받았으면' : '냈으면'} 고쳐주세요.
+                          </div>
                         </div>
-                        <label className="label" style={{ marginTop: 4 }}>
-                          {isIssued ? "입금일" : "지급일"} <span style={{ color: "var(--neg-ink)" }}>*</span>
-                          <span className="text-muted2 fw-600" style={{ marginLeft: 6, fontWeight: 400 }}>· 기본값: 오늘</span>
-                        </label>
-                        <DateInput className="input" value={matchDate}
-                          max={localDate()}
-                          onChange={e => setMatchDate(e.target.value)}/>
+                        <div>
+                          <label className="label">
+                            {isIssued ? "입금일" : "지급일"} <span style={{ color: "var(--neg-ink)" }}>*</span>
+                          </label>
+                          <DateInput className="input" value={matchDate}
+                            max={localDate()}
+                            onChange={e => setMatchDate(e.target.value)}/>
+                        </div>
 
+                        <div>
+                          <label className="label">
+                            {isIssued ? "입금" : "출금"} 계좌 <span style={{ color: "var(--neg-ink)" }}>*</span>
+                            <span className="text-muted2" style={{ marginLeft: 6, fontWeight: 400 }}>· 이 계좌 잔액에 반영</span>
+                          </label>
+                          {/* 몇 개 없으면 칩, 많으면 검색 목록(lib/components/AccountPicker) */}
+                          {/* 입금은 카드로 받을 수 없다 — 카드는 지급 쪽에만 */}
+                          <AccountPicker accounts={withMainFirst(isIssued ? bankAccounts.filter(a => a.kind !== 'card') : bankAccounts, company, isIssued ? 'in' : 'out')}
+                            value={matchBankId} onChange={v => setMatchBankId(v)}
+                            isMain={a => isMainAccount(a, company, isIssued ? 'in' : 'out')}/>
+                        </div>
                         {/* 분류 — 청구서 정보로 미리 채워두고, 필요하면 사용자가 바꾼다 */}
-                        <label className="label" style={{ marginTop: 4 }}>비목</label>
-                        <Combobox value={matchCategory} onChange={setMatchCategory}
-                          options={categories.filter(c => c.id?.startsWith(isIssued ? "INC-" : "EXP-")).map(c => ({ value: c.name, label: c.name, sub: c.group_name || "" }))}
-                          placeholder="비목 선택"
-                          onAddNew={async (q) => {
-                            // 예전에는 값만 넣고 끝나서, 같은 비목을 다음 정산 때 또 타이핑해야 했다.
-                            const nm = await quickAddCategory(q, { kind: isIssued ? 'inc' : 'exp', setCategories, toast })
-                            if (nm) setMatchCategory(nm)
-                          }}
-                          addNewLabel="비목으로 등록"/>
-                        <label className="label" style={{ marginTop: 4 }}>적요</label>
-                        <Combobox value={matchMemo} onChange={setMatchMemo}
-                          options={jeokyos.map(j => ({ value: j.name, label: j.name, sub: j.memo || "" }))}
-                          placeholder="적요 입력" onAddNew={setMatchMemo} addNewLabel="이 적요로 입력"/>
-                        <label className="label" style={{ marginTop: 4 }}>계정과목 <span className="text-muted2 fw-600" style={{ fontSize: 11 }}>· 선택</span></label>
-                        <Combobox value={matchAcct} onChange={setMatchAcct}
-                          options={acctSubjects.map(a => ({ value: a.code, label: a.name, sub: `${a.code} · ${a.category}`, keywords: a.note || "" }))}
-                          placeholder="계정과목 선택 (선택)" allowAdd={false}/>
+                        <div>
+                          <label className="label">비목</label>
+                          <Combobox value={matchCategory} onChange={setMatchCategory}
+                            options={categories.filter(c => c.id?.startsWith(isIssued ? "INC-" : "EXP-")).map(c => ({ value: c.name, label: c.name, sub: c.group_name || "" }))}
+                            placeholder="비목 선택"
+                            onAddNew={async (q) => {
+                              // 예전에는 값만 넣고 끝나서, 같은 비목을 다음 정산 때 또 타이핑해야 했다.
+                              const nm = await quickAddCategory(q, { kind: isIssued ? 'inc' : 'exp', setCategories, toast })
+                              if (nm) setMatchCategory(nm)
+                            }}
+                            addNewLabel="비목으로 등록"/>
+                        </div>
 
-                        <label className="label" style={{ marginTop: 4 }}>
-                          {isIssued ? "입금" : "출금"} 계좌 <span style={{ color: "var(--neg-ink)" }}>*</span>
-                        </label>
-                        <Combobox value={matchBankId} onChange={setMatchBankId}
-                          options={bankAccounts.map(a => ({ value: a.id, label: a.name, sub: [a.kind === "card" ? "카드" : a.bankName, a.number].filter(Boolean).join(" ") }))}
-                          placeholder="계좌 선택" allowAdd={false}/>
-                        <div className="text-xs text-muted2">이 계좌의 잔액에 반영됩니다.</div>
+                        <div className="span-w2">
+                          <label className="label">적요</label>
+                          <Combobox value={matchMemo} onChange={setMatchMemo}
+                            options={jeokyos.map(j => ({ value: j.name, label: j.name, sub: j.memo || "" }))}
+                            placeholder="적요 입력" onAddNew={setMatchMemo} addNewLabel="이 적요로 입력"/>
+                        </div>
+                        {/* 계정과목 칸은 없다 — 정산의 상대 계정은 규칙이 정한다(외상매출금/외상매입금, 서버 settleAcctCode).
+                            '선택' 칸으로 두었더니 제품매출을 골라 매출이 두 번 잡힐 수 있었다(2026-09-30) */}
+                      </div>
 
-                        <button className="btn primary" style={{ marginTop: 8 }} onClick={handleMatch}>
-                          <Icon.Check size={14}/> {labelPaid} 처리 (새 거래 생성)
-                        </button>
+                        <div className="row" style={{ marginTop: 8 }}>
+                          <button className="btn primary ml-auto" onClick={handleMatch}>
+                            <Icon.Check size={14}/> {labelPaid} 처리 (새 거래 생성)
+                          </button>
+                        </div>
                       </>
                     )}
                   </div>
@@ -592,8 +618,15 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
             </>
           )}
 
-          {/* 탭: 청구 정보 */}
-          {innerTab === "info" && (
+          {/* 탭: 청구 정보 — 편집이면 이 자리에서 폼(세금계산서 등록 폼 그대로, 품목표가 넓어 한 칸을 다 쓴다) */}
+          {innerTab === "info" && editing && (
+            <InvoiceFormDrawer embedded open editInvoice={invoice} toast={toast} defaultKind={invoice.kind}
+              onClose={() => setEditing(false)}
+              onSave={async (data) => { await onSaveInvoice?.(data); onChanged?.() }}/>
+          )}
+          {innerTab === "info" && !editing && (
+          <div className="txo-grid">
+          <div className="col gap-16" style={{ minWidth: 0 }}>
             <div className="card" style={{ padding: 16, background: "var(--surface-2)" }}>
               <div className="form-cols-2" style={{ gap: "10px 16px", fontSize: 13 }}>
                 <span className="text-muted">거래처</span><span className="fw-700">{invoice.vendor}</span>
@@ -621,13 +654,12 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                 {invoice.memo && <><span className="text-muted">메모</span><span>{invoice.memo}</span></>}
               </div>
             </div>
-          )}
 
           {/* 품목 내역 — 청구 정보 탭에 함께 둔다.
               여태 넣기만 하고 볼 데가 없었다(보려면 '수정'을 눌러 폼을 열어야 했다).
               지급결의서·거래명세서가 이 줄들을 근거로 삼으므로, 청구서를 열었을 때
               무엇을 청구했는지 그대로 보여야 한다. 중량은 쓰는 줄이 있을 때만 칸을 낸다. */}
-          {innerTab === "info" && invoice.lines?.length > 0 && (
+          {invoice.lines?.length > 0 && (
             <div className="card" style={{ overflowX: 'auto' }}>
               <div className="row" style={{ padding: '12px 16px 0' }}>
                 <span className="text-sm fw-700">품목 내역</span>
@@ -680,31 +712,62 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
               </table>
             </div>
           )}
+          </div>
 
-          {/* 탭: 첨부 서류 — 여러 파일 한 번에 첨부 가능(공용 컴포넌트) */}
+          {/* 발행 시점 전표 — 인쇄되는 종이 그대로. 대금이 오갈 때의 전표는 거래 쪽에 따로 있다 */}
+          <section style={{ minWidth: 0 }}>
+            <div className="row" style={{ alignItems: "center", marginBottom: 8 }}>
+              <div className="txo-label" style={{ margin: 0 }}>전표 <span className="text-muted2" style={{ fontWeight: 500 }}>· 발행 시점</span></div>
+              {voucher && <button className="btn sm ml-auto" onClick={() => window.print()}><Icon.Print size={13}/> 전표 인쇄</button>}
+            </div>
+            <div className="doc-paper txo-paper voucher-print">
+              {voucher === null ? <div className="text-sm text-muted" style={{ padding: 30, textAlign: "center" }}>불러오는 중…</div>
+                : voucher ? <VoucherSlip v={voucher}/>
+                : <div className="text-sm text-muted" style={{ padding: 30, textAlign: "center" }}>전표를 세우지 못했어요</div>}
+            </div>
+          </section>
+          </div>
+          )}
+
+          {/* 탭: 증빙 — 왼쪽 서류 목록 / 오른쪽 미리보기(거래 상세와 같은 판) */}
           {innerTab === "docs" && (
-            <FileAttach
-              docs={docs}
-              onAdd={async (d) => {
-                const res = await api.addInvoiceDoc(invoice.id, { url: d.url, name: d.name, doc_type: '기타', size: d.size || 0 })
-                if (res.ok) setDocs(prev => [...prev, { id: res.id, url: d.url, name: d.name, type: '기타', size: d.size || 0 }])
-                else toast.push("첨부에 실패했어요", { tone: 'warn' })
+            <AttachmentPanel files={docs} height="auto" empty="붙은 서류가 없어요"
+              onUpload={async (file) => {
+                const up = await api.uploadFile(file)
+                if (!up?.url) { toast.push(up?.error || "업로드에 실패했어요", { tone: 'warn' }); return }
+                const name = up.originalName || file.name
+                const res = await api.addInvoiceDoc(invoice.id, { url: up.url, name, doc_type: '기타', size: up.size || 0 })
+                if (res.ok) { setDocs(prev => [...prev, { id: res.id, url: up.url, name, type: '기타', size: up.size || 0 }]); onChanged?.() }
+                else toast.push(res.error || "첨부에 실패했어요", { tone: 'warn' })
               }}
               onRemove={async (d) => {
-                if (!d.id) { setDocs(prev => prev.filter(x => x !== d)); return }
-                const res = await api.deleteInvoiceDoc(d.id)
-                if (res.ok) setDocs(prev => prev.filter(x => x.id !== d.id))
-                else toast.push("삭제에 실패했어요", { tone: 'warn' })
-              }}
-              label="세금계산서·납품확인서 등을 끌어다 놓거나 클릭 (여러 개 가능)"/>
+                const ok = await confirm({ tone: "neg", icon: <Icon.Trash size={22}/>, title: "증빙 지우기", body: `${d.name} 을(를) 지울까요?`, confirmLabel: "지우기" })
+                if (!ok) return
+                const res = d.id ? await api.deleteInvoiceDoc(d.id) : { ok: true }
+                if (res.ok) { setDocs(prev => prev.filter(x => x !== d)); onChanged?.() }
+                else toast.push(res.error || "삭제에 실패했어요", { tone: 'warn' })
+              }}/>
           )}
         </div>
 
+        {!editing && (
         <div className="drawer-foot">
           <button className="btn" onClick={onClose}>닫기</button>
-          {/* 발행 시점 전표 — 대금이 오갈 때 생기는 거래 전표와는 별개다
-              (발행 때 생긴 채권·채무가 결제 때 사라진다) */}
-          <button className="btn" onClick={() => setVoucherOpen(true)}><Icon.Book size={14}/> 전표</button>
+          {/* 삭제는 눈에 덜 띄게 — 조회하러 온 화면에서 붉게 채운 버튼이 늘 서 있으면 지우는 게 보통처럼 읽힌다 */}
+          <button className="btn" style={{ color: "var(--neg-ink)" }}
+            onClick={async () => {
+              const ok = await confirm({ tone: "neg", icon: <Icon.Warn size={22}/>,
+                title: "세금계산서 삭제", body: "이 세금계산서를 삭제합니다. 되돌릴 수 없어요.", confirmLabel: "삭제" })
+              if (ok) { onClose(); if (onDelete) onDelete(invoice.id); }
+            }}><Icon.Trash size={14}/> 삭제</button>
+          <div className="ml-auto row gap-8">
+            {/* 거래명세서 — 품목이 있는 세금계산서만(품목이 없으면 명세서에 적을 내용이 없다) */}
+            {invoice.lines?.length > 0 && (
+              <button className="btn" onClick={() => setStmtOpen(true)} title="품목 내역을 거래명세서로 인쇄합니다">
+                <Icon.Print size={14}/> 거래명세서
+              </button>
+            )}
+            <button className="btn" onClick={() => { setInnerTab("info"); setEditing(true) }}><Icon.Pencil size={14}/> 편집</button>
           {/* 매입 미지급금은 우리가 낼 돈이라 독촉 대상이 아님 → 지급결의서 발행.
               (제거) 매출 미수금의 '독촉 발송' — 누르면 "독촉 메일을 발송했어요"라고 알렸지만
               서버에 메일 발송 경로가 **아예 없다**(독촉·메일 관련 코드 0건). 아무것도 안 나가는데
@@ -713,7 +776,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
           {isIssued
             ? null
             : (
-                <button className="btn primary" style={{ marginLeft: "auto" }}
+                <button className="btn primary"
                   onClick={async () => {
                     const res = await api.createResolutionFromInvoice(invoice.id);
                     if (!res.ok) return toast.push(res.error || "결의서 생성에 실패했어요", { tone: 'warn' });
@@ -725,10 +788,9 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
                   <Icon.Sign size={14}/> 지급결의서 발행
                 </button>
               )}
+          </div>
         </div>
-
-        {/* 발행 전표 — 이 청구서를 끊은 시점의 분개. 결제 전표는 거래내역 쪽에 따로 있다. */}
-        <VoucherView open={voucherOpen} onClose={() => setVoucherOpen(false)} source="invoice" id={invoice.id}/>
+        )}
 
         {/* 거래명세서 — 상세 위에 한 겹 더 띄운다. 인쇄는 이 종이(#statement-print)만 나간다.
             드로어 안에서 바로 뽑는 이유: 명세서는 '이 청구서'의 서류라 목록으로 돌아가
@@ -785,7 +847,14 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onEdit, onCh
 }
 
 // ── 청구서 발행 Drawer ────────────────────────────────────────────
-const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSave, editInvoice }) => {
+/* embedded — 팝업 틀 없이 세금계산서 상세 **안에서** 제자리 수정(거래 상세와 같은 방식, 2026-09-29).
+   칸·검사·저장 규칙은 이 폼 하나 그대로. 머리(제목·닫기)와 첨부 칸은 부른 쪽(상세의 탭)이 가진다 */
+const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSave, editInvoice, embedded = false }) => {
+  /* 탭 — 세금계산서 정보 | 증빙(거래 등록 폼과 같다). 증빙은 올려 두면 등록할 때 붙는다 */
+  const [formTab, setFormTab] = useState("info")
+  useEffect(() => { if (open) setFormTab("info") }, [open])
+  /* 수주·발주 원본이 MES 인 회사(동진)는 회계 쪽 주문 칸을 감춘다 — lib/customModules.js */
+  const ordersFromMes = useOrdersFromMes()
   const { can: canGo } = usePerms()
   const [form, setForm] = useState({
     kind: defaultKind, vendor: "", contract: "", supplyAmount: "", vatAmount: "", issuedAt: "", dueAt: "", memo: "",
@@ -1071,7 +1140,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
      * ⚠ 저장을 막지는 않는다. 막으면 '2026년 기타' 같은 더미 주문이 생기고,
      *   그러면 데이터는 채워지는데 원가율이 거짓말을 한다(빈 것보다 나쁘다).
      * ⚠ 수정할 때는 안 묻는다 — 고칠 때마다 물으면 고치는 일이 번거로워진다. */
-    if (!editInvoice && !form.contract) {
+    if (!editInvoice && !ordersFromMes && !form.contract) {
       const label = form.kind === 'issued' ? '수주' : '발주'
       const go = await confirm({
         tone: 'brand', icon: <Icon.Briefcase size={22}/>,
@@ -1160,8 +1229,8 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
      회계 실무자는 가로가 긴 모니터를 쓴다. 앱 셸과 같은 상한(1680px)까지 내주고,
      그보다 좁은 화면은 화면 폭. 그래도 모자라면 표만 가로로 스크롤한다(폼 전체가 아니라). */
   return (
-    <Drawer open={open} onClose={onClose} width={lines.length > 0 ? "min(1680px, 100vw)" : undefined}>
-        <DrawerHead
+    <InvoiceFormShell embedded={embedded} open={open} onClose={onClose} wide={lines.length > 0}>
+        {!embedded && <DrawerHead
           /* 메뉴·버튼이 '세금계산서'다(3단계) — 누른 버튼과 열린 폼이 다른 이름이면 다른 곳에 온 것처럼 읽힌다 */
           /* ⚠ 방향으로 **동사를 가르지 않는다.** 예전엔 매출이면 '발행', 매입이면 '등록'이었다.
              두 가지가 틀렸다 — ① 이 앱은 세금계산서를 발행하지 않는다(홈택스가 한다).
@@ -1169,10 +1238,30 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
              둘이면 탭만 바꿔도 다른 기능처럼 보인다. 옆의 '어음 등록'과도 짝이 맞는다. */
           title={editInvoice ? "세금계산서 수정" : "세금계산서 등록"}
           sub={editInvoice ? "세금계산서 내용을 고칩니다" : (form.kind === "issued" ? "거래처에 발행한 세금계산서를 적어요" : "거래처에서 받은 세금계산서를 적어요")}
-          onClose={onClose}/>
-        <div className="drawer-body col gap-form">
+          onClose={onClose}/>}
+        {!embedded && (
+          <div className="txo-tabs" role="tablist">
+            <button role="tab" aria-selected={formTab === "info"} className={`tab ${formTab === "info" ? "active" : ""}`} onClick={() => setFormTab("info")}>세금계산서 정보</button>
+            <button role="tab" aria-selected={formTab === "docs"} className={`tab ${formTab === "docs" ? "active" : ""}`} onClick={() => setFormTab("docs")}>
+              증빙{docs.length > 0 && <span className="num txo-count">{docs.length}</span>}
+            </button>
+          </div>
+        )}
+        <div className={`drawer-body${formTab === "docs" && !embedded ? " txo-body-fill" : " col gap-form"}`}>
+          {formTab === "docs" && !embedded && (
+            <AttachmentPanel files={docs} height="auto" empty="올린 서류가 없어요. 세금계산서·납품확인서를 추가해 주세요."
+              onUpload={async (file) => {
+                const up = await api.uploadFile(file)
+                if (!up?.url) { toast.push(up?.error || "업로드에 실패했어요", { tone: 'warn' }); return }
+                setDocs(prev => [...prev, { url: up.url, name: up.originalName || file.name, size: up.size || 0 }])
+              }}
+              onRemove={(d) => setDocs(prev => prev.filter(x => x !== d))}/>
+          )}
+          {/* 정보 칸은 탭을 옮겨도 숨기기만 한다 — 쓰던 값이 그대로 남는다 */}
+          {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29 사용자). 품목표만 한 줄을 다 쓴다 */}
+          <div className="form-grid-2" style={formTab === "docs" && !embedded ? { display: "none" } : undefined}>
           {!editInvoice && (
-            <div className="row gap-8">
+            <div className="row gap-8 span-2">
               {["issued", "received"].map(k => (
                 /* ⚠ 방향을 바꾸면 **거래처·주문을 비운다.**
                    거래처 목록부터 다르고(발행=발주처 B / 수취=협력사 A·E), 주문도 그 거래처의
@@ -1220,6 +1309,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
               }}
               addNewLabel="거래처로 등록"/>
           </div>
+          {!ordersFromMes && (
           <div>
             <label className="label">주문 <span className="text-muted2">(선택)</span></label>
             {/* '직접 입력'도 뺐다 — 목록에 없는 이름을 타이핑하면 저장 때 버려져(위 주석)
@@ -1283,6 +1373,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
               </div>
             )}
           </div>
+          )}
           {/* 납품일 — 청구서 한 장에 하나. 품목표에서 줄마다 받던 것을 여기로 올렸다. */}
           <div>
             <label className="label">
@@ -1327,35 +1418,46 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
             </div>
           </div>
           {/* 거래명세서식 품목 입력 — 여기서 넣은 합계가 아래 공급가액이 된다 */}
+          <div className="span-2">
           <InvoiceLines lines={lines} onChange={setLines} itemMaster={itemMaster}
             taxType={form.taxType} kind={form.kind}
             /* 납품일은 위 한 칸이 정한다 — 줄마다 받던 칸은 끈다 */
             columns={{ deliveryDate: false }}/>
+          </div>
 
           {/* 금액 — 거래입력과 같은 방식으로 통일: 총액/공급가 토글 + 단일 칸 + 내역.
               (예전엔 공급가·부가세·합계 3칸이라 거래입력과 이질적이고, 250,000 총액을 만들려면
                공급가에 227,273 을 손으로 나눠 넣어야 했다.) 품목이 있으면 합계는 품목에서 나오므로
-               직접 입력을 막고 내역만 보여준다. */}
+               직접 입력을 막고 내역만 보여준다.
+              금액 | 계좌를 한 줄에 반씩(.form-pair), 날짜는 그 아래 — 날짜 두 칸을 한 칸에 욱여넣었더니
+              계좌보다 아래로 밀려 읽는 순서가 뒤집혔다(2026-09-30 사용자). */}
+          <div className="span-2 form-pair">
           <div>
             <label className="label">
               금액 {!hasLines && <span style={{ color: "var(--neg-ink)" }}>*</span>}
               {hasLines && <span className="text-muted2" style={{ fontWeight: 400 }}> · 품목 합계에서 자동</span>}
-            </label>
-            {!hasLines && taxable && (
-              <div className="row gap-6" style={{ marginBottom: 8 }}>
-                <button type="button" className={`chip ${!supplyMode ? "active" : ""}`}
-                  onClick={() => setSupplyMode(false)}>총액 입력</button>
-                <button type="button" className={`chip ${supplyMode ? "active" : ""}`}
-                  onClick={() => setSupplyMode(true)}>공급가액 입력</button>
-                <span className="text-muted2" style={{ fontSize: 11.5, alignSelf: "center" }}>
-                  {supplyMode ? "세금계산서 기준 (VAT 별도)" : "VAT 포함 총액"}
+              {/* 지금 치는 값이 무엇인지 — 칩 옆에 두면 칸이 좁아져 라벨 옆으로 */}
+              {!hasLines && taxable && (
+                <span className="text-muted2" style={{ fontWeight: 400 }}>
+                  {" · "}{supplyMode ? "세금계산서 기준 (VAT 별도)" : "VAT 포함 총액"}
                 </span>
-              </div>
-            )}
-            <MoneyInput className="input num fw-700" style={{ fontSize: 20 }}
-              value={hasLines ? String(total) : (supplyMode && taxable ? form.supplyAmount : String(total))}
-              disabled={hasLines}
-              onChange={raw => f(supplyMode && taxable ? "supplyAmount" : "totalAmount", raw)}/>
+              )}
+            </label>
+            {/* 입력 기준(총액/공급가액)은 칸 옆에 — 무엇을 치는지 칸을 보면서 고른다 */}
+            <div className="row gap-8" style={{ alignItems: "center" }}>
+              <MoneyInput className="input num fw-700" style={{ fontSize: 20, flex: 1, minWidth: 0 }}
+                value={hasLines ? String(total) : (supplyMode && taxable ? form.supplyAmount : String(total))}
+                disabled={hasLines}
+                onChange={raw => f(supplyMode && taxable ? "supplyAmount" : "totalAmount", raw)}/>
+              {!hasLines && taxable && (
+                <div className="row gap-6" style={{ flexShrink: 0 }}>
+                  <button type="button" className={`chip ${!supplyMode ? "active" : ""}`}
+                    onClick={() => setSupplyMode(false)}>총액 입력</button>
+                  <button type="button" className={`chip ${supplyMode ? "active" : ""}`}
+                    onClick={() => setSupplyMode(true)}>공급가액 입력</button>
+                </div>
+              )}
+            </div>
             {taxable && total > 0 && (
               <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--muted)" }}>
                 공급가액 <b className="num" style={{ color: "var(--ink)" }}>{fmtNum(supply)}</b> ·
@@ -1364,64 +1466,53 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
               </div>
             )}
           </div>
-          <div className="row gap-12">
-            <div style={{ flex: 1 }}>
-              {/* ⚠ 미래 날짜를 막지 않는다. 다음 달 자를 미리 끊어 두는 일이 실제로 있고
-                  (정기 화면의 '앞서 발행함' 구획이 그것이다), 지난 날짜도 막지 않는다 —
-                  바로 처리하지 못하고 며칠 뒤에 적는 일이 흔하다.
-                  마감된 달은 서버가 막는다(closedPeriodError). */}
-              <label className="label">
-                발행일 <span style={{ color: "var(--neg-ink)" }}>*</span>
-                <span className="text-muted2 fw-600" style={{ marginLeft: 6, fontWeight: 400 }}>· 청구서를 끊은 날</span>
-              </label>
-              <DateInput className="input num" value={form.issuedAt} onChange={e => f("issuedAt", e.target.value)}/>
-            </div>
-            <div style={{ flex: 1 }}>
-              <label className="label">지급 기한</label>
-              <DateInput className="input" value={form.dueAt} onChange={e => f("dueAt", e.target.value)}/>
-            </div>
-          </div>
           <div>
             <label className="label">{form.kind === "issued" ? "수금 계좌" : "지급 계좌"}</label>
-            <div className="row gap-6" style={{ flexWrap: "wrap" }}>
-              {/* 이름이 겹치는 계좌에만 은행·끝자리가 붙는다 — 같은 이름의 공용 카드가
-                  두 장 있으면 칩만 보고는 어느 쪽인지 고를 수 없다(lib/accountLabel.js) */}
-              {/* 주거래를 맨 앞으로 — 매일 쓰는 통장이 가나다순 뒤에 있으면 매번 눈으로 찾는다.
-                  ⚠ 앞에 세우기만 하고 미리 고르지는 않는다(lib/mainAccount.js 주석 참조).
-                  발행 청구서는 돈이 들어오는 일이라 'in', 수취는 나가는 일이라 'out' 축이다. */}
-              {withMainFirst(accountLabels(accounts), company,
-                             form.kind === "issued" ? 'in' : 'out').map(acc => (
-                <button key={acc.id} type="button"
-                  className={`chip ${form.accountId === acc.id ? "active" : ""}`}
-                  onClick={() => f("accountId", acc.id)}>
-                  <Icon.Bank size={12}/>{acc.label}
-                  {isMainAccount(acc, company, form.kind === "issued" ? 'in' : 'out') && (
-                    <span className="text-muted2" style={{ fontSize: 10, marginLeft: 3 }}>{MAIN_BADGE}</span>
-                  )}
-                </button>
-              ))}
-            </div>
+            {/* 이름이 겹치는 계좌에만 은행·끝자리가 붙는다 — 같은 이름의 공용 카드가
+                두 장 있으면 칩만 보고는 어느 쪽인지 고를 수 없다(lib/accountLabel.js)
+                주거래를 맨 앞으로 — 매일 쓰는 통장이 가나다순 뒤에 있으면 매번 눈으로 찾는다.
+                ⚠ 앞에 세우기만 하고 미리 고르지는 않는다(lib/mainAccount.js 주석 참조).
+                발행 청구서는 돈이 들어오는 일이라 'in', 수취는 나가는 일이라 'out' 축이다.
+                몇 개 없으면 칩, 많으면 검색되는 목록(lib/components/AccountPicker) */}
+            <AccountPicker accounts={withMainFirst(accountLabels(accounts), company, form.kind === "issued" ? 'in' : 'out')}
+              value={form.accountId} onChange={v => f("accountId", v)}
+              isMain={a => isMainAccount(a, company, form.kind === "issued" ? 'in' : 'out')}/>
+          </div>
+          </div>
+          <div>
+            {/* ⚠ 미래 날짜를 막지 않는다. 다음 달 자를 미리 끊어 두는 일이 실제로 있고
+                (정기 화면의 '앞서 발행함' 구획이 그것이다), 지난 날짜도 막지 않는다 —
+                바로 처리하지 못하고 며칠 뒤에 적는 일이 흔하다.
+                마감된 달은 서버가 막는다(closedPeriodError). */}
+            <label className="label">
+              발행일 <span style={{ color: "var(--neg-ink)" }}>*</span>
+              <span className="text-muted2 fw-600" style={{ marginLeft: 6, fontWeight: 400 }}>· 청구서를 끊은 날</span>
+            </label>
+            <DateInput className="input num" value={form.issuedAt} onChange={e => f("issuedAt", e.target.value)}/>
+          </div>
+          <div>
+            <label className="label">지급 기한</label>
+            <DateInput className="input" value={form.dueAt} onChange={e => f("dueAt", e.target.value)}/>
           </div>
           <div>
             <label className="label">메모 (선택)</label>
             <input className="input" placeholder="예: 기성고 3차, 잔금" value={form.memo} onChange={e => f("memo", e.target.value)}/>
           </div>
 
-          <div>
-            <label className="label">첨부 서류 (선택)</label>
-            <FileAttach
-              docs={docs}
-              onAdd={(d) => setDocs(prev => [...prev, d])}
-              onRemove={(d) => setDocs(prev => prev.filter(x => x !== d))}
-              label="세금계산서·납품확인서 등 첨부"/>
+          {/* 첨부 서류는 '증빙' 탭으로 옮겼다(2026-09-29) */}
           </div>
         </div>
         <DrawerFooter onCancel={onClose} onSave={handleSave} saveDisabled={saving}
           saveLabel={saving ? (editInvoice ? "저장 중…" : "등록 중…")
             : (editInvoice ? "저장" : "등록")}/>
-    </Drawer>
+    </InvoiceFormShell>
   )
 }
+
+/* 팝업이면 팝업 틀, 끼워 넣기면 그냥 상자 — 안쪽(.drawer-body·.drawer-foot)은 같다(Form.jsx FormShell 과 같은 방식) */
+const InvoiceFormShell = ({ embedded, open, onClose, wide, children }) => (embedded
+  ? <div className="txf-inline">{children}</div>
+  : <Drawer open={open} onClose={onClose} width={wide ? "min(1680px, 100vw)" : "760px"} height="min(860px, calc(100vh - 48px))">{children}</Drawer>)
 
 // ── 청구서 테이블 ────────────────────────────────────────────────
 const InvoiceTable = ({ rows, onSelect, remainLabel = "잔여", paidLabel = "정산", select, tableKey }) => (
@@ -2417,15 +2508,15 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       {/* 대사는 조작 줄을 두지 않는다 — 기간·검색이 이 목록에는 걸리지 않는다.
           안 걸리는 필터를 세워 두면 "걸었는데 왜 그대로지"가 된다. */}
       {view === "match" ? null : view === "note" ? (
-        <TableToolbar {...noteF.toolbarProps} periodPicker
+        <TableToolbar {...noteF.toolbarProps}
           right={<span className="text-xs text-muted2">만기일 기준</span>}/>
       ) : !collect && view === "pending" ? (
-        <TableToolbar {...pendF.toolbarProps} periodPicker
+        <TableToolbar {...pendF.toolbarProps}
           right={<span className="text-xs text-muted2">
             예정일 기준 · {pendingFiltered.length}건 {fmtNum(pendingFiltered.reduce((s, p) => s + pendingGross(p), 0))}원
           </span>}/>
       ) : (
-        <TableToolbar {...listF.toolbarProps} periodPicker
+        <TableToolbar {...listF.toolbarProps}
           right={view === "plain"
             ? <span className="text-xs text-muted2">거래일 기준</span>
             : (
@@ -2744,7 +2835,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
         onClose={() => setSelected(null)}
         onMatch={handleMatch}
         onDelete={async (id) => { const r = await api.deleteInvoice(id); toast.push(r.ok ? "청구서가 삭제됐어요" : (r.error || "삭제에 실패했어요")); load() }}
-        onEdit={(inv) => { setEditInvoice(inv); setSelected(null); setFormOpen(true) }}
+        onSaveInvoice={handleSave}
         onChanged={load}
         toast={toast}
       />

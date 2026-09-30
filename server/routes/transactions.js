@@ -25,6 +25,8 @@ const { closedPeriodError, closedDocError, beforeBooksError } = require('../lib/
 const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
 const { isFundAccount, categorySettingsOf } = require('../lib/categoryAccount')
 const { transactionVoucher, withNames } = require('../lib/voucher')
+const { relatedToTxn } = require('../lib/attachments')
+const { canAny } = require('../platform/userPerms')
 const { listVouchers, toRows, COLUMNS: VOUCHER_COLUMNS, GUIDE: VOUCHER_GUIDE } = require('../lib/voucherBook')
 const { newBook, sheet, templateSheet, guideSheet, sendBook } = require('../lib/xlsxBook')
 
@@ -507,22 +509,54 @@ router.get('/:id/splits', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+async function voucherOfTxn(db, id) {
+  const [[t]] = await db.execute(`
+    SELECT t.id, t.kind, t.amount, t.date, t.category, t.memo, t.account_code,
+           a.acct_code AS bank_code, a.name AS account_name, v.name AS vendor_name
+      FROM transactions t
+      LEFT JOIN accounts a ON a.id = t.account_id
+      LEFT JOIN vendors  v ON v.id = t.vendor_id
+     WHERE t.id = ?`, [id])
+  if (!t) return null
+  // 복합 전표면 비목 줄을 붙여 전표를 여러 줄로 편다
+  const [sp] = await db.execute(
+    'SELECT account_code, supply_amount, vat_amount, amount FROM txn_splits WHERE txn_id = ? ORDER BY sort_order, id', [id])
+  if (sp.length) t.splits = sp
+  return withNames(db, transactionVoucher(t), { account_name: t.account_name })
+}
+
 router.get('/:id/voucher', async (req, res, next) => {
   try {
-    const [[t]] = await req.db.execute(`
-      SELECT t.id, t.kind, t.amount, t.date, t.category, t.memo, t.account_code,
-             a.acct_code AS bank_code, a.name AS account_name, v.name AS vendor_name
-        FROM transactions t
-        LEFT JOIN accounts a ON a.id = t.account_id
-        LEFT JOIN vendors  v ON v.id = t.vendor_id
-       WHERE t.id = ?`, [req.params.id])
-    if (!t) return res.status(404).json({ error: 'Not found' })
-    // 복합 전표면 비목 줄을 붙여 전표를 여러 줄로 편다
-    const [sp] = await req.db.execute(
-      'SELECT account_code, supply_amount, vat_amount, amount FROM txn_splits WHERE txn_id = ? ORDER BY sort_order, id',
-      [req.params.id])
-    if (sp.length) t.splits = sp
-    res.json(await withNames(req.db, transactionVoucher(t), { account_name: t.account_name }))
+    const v = await voucherOfTxn(req.db, req.params.id)
+    if (!v) return res.status(404).json({ error: 'Not found' })
+    res.json(v)
+  } catch (e) { next(e) }
+})
+
+/* 거래 한눈에 보기 — 거래 + 전표 + 청구서 + 문서 + 걸린 첨부 전부를 **한 번에.**
+ * 화면이 조각마다 따로 부르면 한 팝업을 여는 데 대여섯 번 오가고, 조각마다 늦게 떠 화면이 들썩인다.
+ * 연결 문서·첨부는 **보는 사람의 권한으로** 거른다(lib/attachments.js 머리말).
+ * 설계: popup-attachments-print §4 */
+router.get('/:id/overview', async (req, res, next) => {
+  try {
+    const [rows] = await req.db.execute(`
+      SELECT t.*, v.name AS vendor_name, c.name AS contract_name, a.name AS account_name,
+             COALESCE(e.name, t.employee_name) AS employee_name, ri.name AS item_name, cc.name AS cost_contract_name
+      FROM transactions t
+      LEFT JOIN vendors v ON t.vendor_id = v.id
+      LEFT JOIN contracts c ON t.contract_id = c.id
+      LEFT JOIN contracts cc ON t.cost_contract_id = cc.id
+      LEFT JOIN accounts a ON t.account_id = a.id
+      LEFT JOIN employees e ON t.employee_id = e.id
+      LEFT JOIN ref_items ri ON t.item_id = ri.id
+      WHERE t.id = ?`, [req.params.id])
+    if (!rows[0]) return res.status(404).json({ error: 'Not found' })
+    await attachDocs(req.db, rows)
+    const txn = rows[0]
+    // 역할이 없는 계정은 권한 게이트가 전부 통과시킨다(middleware/perm.js) — 여기서도 같게 본다
+    const canSee = (resources) => !req.permRoles?.length || canAny(req.perms, resources, 'view')
+    const [voucher, related] = await Promise.all([voucherOfTxn(req.db, txn.id), relatedToTxn(req.db, txn, canSee)])
+    res.json({ txn, voucher, ...related })
   } catch (e) { next(e) }
 })
 

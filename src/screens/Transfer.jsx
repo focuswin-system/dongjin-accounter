@@ -3,7 +3,7 @@ import { Icon, fmtNum, useToast, useConfirm, Combobox, MoneyInput, DateInput, lo
 import { PageHeader } from '../lib/components/PageHeader'
 import { Drawer } from '../lib/ui'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
-import { DataTable } from '../lib/components/DataTable'
+import { DataTable, Sub } from '../lib/components/DataTable'
 import { api } from '../lib/api'
 import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
 
@@ -234,15 +234,15 @@ export const TransferScreen = ({ openEdit }) => {
             { key: 'date', header: '날짜', sortable: true,
               render: t => <span className="text-sm num">{fmtDateShort(t.date)}</span> },
             { key: 'from', header: '보내는 통장',
-              render: t => <div>
+              render: t => <>
                 <span className="fw-700">{byId.get(t.accountId)?.name || '—'}</span>
-                {acctNo(t.accountId) && <div className="text-xs text-muted2 num">{acctNo(t.accountId)}</div>}
-              </div> },
+                <Sub className="num">{acctNo(t.accountId)}</Sub>
+              </> },
             { key: 'to', header: '받는 통장',
-              render: t => <div>
+              render: t => <>
                 <span className="text-sm">{byId.get(t.counterpartyAccountId)?.name || '—'}</span>
-                {acctNo(t.counterpartyAccountId) && <div className="text-xs text-muted2 num">{acctNo(t.counterpartyAccountId)}</div>}
-              </div> },
+                <Sub className="num">{acctNo(t.counterpartyAccountId)}</Sub>
+              </> },
             { key: 'memo', header: '적요', render: t => <span className="text-sm text-muted">{t.memo || '—'}</span> },
             { key: 'amount', header: '금액', align: 'right', sortable: true,
               render: t => <span className="num-cell">{fmtNum(t.amount)}</span> },

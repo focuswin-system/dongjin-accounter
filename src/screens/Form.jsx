@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { AccountPicker } from '../lib/components/AccountPicker'
+import { AttachmentPanel } from '../lib/components/AttachmentPanel'
+import { useOrdersFromMes } from '../lib/customModules'
 import { Icon, fmtNum, fmtDateShort, vendorLabel, useToast, useConfirm, Combobox, Drawer, MoneyInput, localToday, DateInput } from '../lib/ui'
-import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
-import { withMainFirst, isMainAccount, MAIN_BADGE } from '../lib/mainAccount'
+import { withMainFirst, isMainAccount } from '../lib/mainAccount'
 import { quickAddCategory, quickAddRefItemWithId } from '../lib/quickAdd'
 import { contractsForVendor, contractFitsVendor } from '../lib/contractPick'
 import { vatOf, supplyOf } from '../lib/vatRate'
@@ -39,8 +41,9 @@ const initialFormFor = (kind, contract = "", firstAccount = "", costContract = "
     : { vendor: "", contract, costContract, acctGroup: "", category: "", item: "", itemId: "", accountCode: "", amount: 0, method: "계좌이체", account: firstAccount, employee: "", date: today, memo: "", taxType: "과세", vatDeductible: true, supply: 0, vat: 0, docs: [] };
 };
 
-const FormField = ({ label, required, hint, children }) => (
-  <div>
+/* span — 두 칸 배치(.form-grid-2)에서 한 줄을 다 쓸 칸(금액·청구서 고르기처럼 넓은 것) */
+const FormField = ({ label, required, hint, children, span }) => (
+  <div className={span ? "span-2" : undefined}>
     <label className="label" style={{ marginBottom: 8 }}>
       {label}
       {required && <span style={{ color: "var(--neg-ink)" }}> *</span>}
@@ -125,14 +128,24 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   compact = false,
   editTxn, onClose, onSave,
   /* 화면을 옮기는 일(세금계산서로 보내기·반복 제안)은 App 이 한다 — 이 폼은 여러 화면이 같이 연다 */
-  goRoute }) => {
+  goRoute,
+  /* embedded — 팝업 틀 없이 **남의 화면 안에** 그린다(거래 상세의 제자리 수정).
+     2026-09-29 사용자: "편집 누르면 폼이 확 바뀌는 게 아니라 거기서 바로 수정할 수 있게".
+     칸·검사·저장 규칙은 이 폼 하나 그대로 — 제자리용 폼을 따로 만들면 부가세·복합 비목·청구서 연결
+     규칙이 두 벌이 되어 곧 어긋난다. 머리(제목·닫기)만 빼고, 부른 쪽 화면이 머리를 가진다. */
+  embedded = false }) => {
   const toast = useToast();
   const { confirm } = useConfirm();
+  /* 수주·발주 원본이 MES 인 회사(동진)는 회계 쪽 주문 칸을 감춘다 — lib/customModules.js */
+  const ordersFromMes = useOrdersFromMes();
   // 세금계산서로 가는 길은 들어갈 수 있을 때만 낸다
   const { can: canGo } = usePerms();
   const [kind, setKind] = useState(initialKind);
   const [form, setForm] = useState(initialFormFor(initialKind, initialContract, "", initialCostContract));
   const [showMore, setShowMore] = useState(false);
+  /* 탭 — 거래 정보 | 증빙(2026-09-29 사용자: "정보와 첨부 분리"). 증빙은 올려 두면 등록할 때 붙는다 */
+  const [formTab, setFormTab] = useState("info");
+  useEffect(() => { if (open) setFormTab("info"); }, [open]);
   /* 등록 전 안내 — 중복이거나 청구서·정기 규칙 쪽 일이면 알려준다.
      hintsOff 는 사용자가 '알아요, 그냥 넣을게요'를 누른 상태. */
   const [hints, setHints] = useState(null);
@@ -602,7 +615,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     if (!r.ok) { setBusy(false); toast.push(r.error || '청구서 정산에 실패했어요'); return }
 
     /* 붙여 둔 증빙을 정산 거래로 옮긴다.
-       FileAttach 는 고른 즉시 서버로 올리므로, 여기서 버리면 파일은 남고 연결만 사라진다 —
+       증빙 탭(AttachmentPanel)은 고른 즉시 서버로 올리므로, 여기서 버리면 파일은 남고 연결만 사라진다 —
        사용자는 붙인 줄 알고, 그 거래에는 증빙이 없다. */
     const docs = form.docs || []
     let docFail = 0
@@ -734,7 +747,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
      *   그래서 되돌아갈 길(주문 고르기)을 기본으로 두되, 그냥 등록도 열어 둔다.
      *
      * 문구는 짧게. 왜 필요한지는 한 줄이면 된다 — 나머지는 이 주석에 있다. */
-    if (!editTxn && !compact && !form.contract && !form.costContract) {
+    if (!editTxn && !compact && !ordersFromMes && !form.contract && !form.costContract) {
       const label = kind === 'income' ? '수주' : '발주'
       const go = await confirm({
         tone: 'brand', icon: <Icon.Briefcase size={22}/>,
@@ -874,10 +887,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   };
 
   return (
-    <Drawer open={open} onClose={onClose} width="min(520px, 100vw)" label={editTxn ? "거래 수정" : "거래 등록"}>
+    <FormShell embedded={embedded} open={open} onClose={onClose} label={editTxn ? "거래 수정" : "거래 등록"}>
         {/* 방향은 **폼 안에서** 바꾼다(전표입력이 전표 종류를 안에서 바꾸는 것과 같은 규칙).
             밖에서 한 번 더 묻던 때는, 잘못 골라 들어오면 닫고 처음부터 다시 해야 했다.
             ⚠ 수정 중에는 못 바꾼다 — 방향이 바뀌면 그건 다른 거래다(지우고 다시 적는 게 맞다). */}
+        {!embedded && (
         <div className="drawer-head" style={{ padding: "14px 22px" }}>
           <div className="row gap-8" style={{ alignItems: "center" }}>
             {editTxn ? (
@@ -898,8 +912,38 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
           </div>
           <button className="icon-btn ml-auto" title="닫기" onClick={onClose}><Icon.Close size={16}/></button>
         </div>
+        )}
+        {!embedded && (() => {
+          const n = (form.docs || []).length + (form.evid_url ? 1 : 0)
+          return (
+            <div className="txo-tabs" role="tablist">
+              <button role="tab" aria-selected={formTab === "info"} className={`tab ${formTab === "info" ? "active" : ""}`} onClick={() => setFormTab("info")}>거래 정보</button>
+              <button role="tab" aria-selected={formTab === "docs"} className={`tab ${formTab === "docs" ? "active" : ""}`} onClick={() => setFormTab("docs")}>
+                증빙{n > 0 && <span className="num txo-count">{n}</span>}
+              </button>
+            </div>
+          )
+        })()}
 
-        <div className="drawer-body" style={{ paddingTop: 8 }}>
+        <div className={`drawer-body${formTab === "docs" && !embedded ? " txo-body-fill" : ""}`} style={{ paddingTop: 8 }}>
+          {/* 증빙 탭 — 올려 둔 파일은 등록할 때 이 거래에 붙는다(저장 흐름은 예전 첨부 칸과 같다: form.docs) */}
+          {formTab === "docs" && !embedded && (
+            <AttachmentPanel height="auto" empty="올린 서류가 없어요. 영수증·세금계산서를 추가해 주세요."
+              files={[
+                ...(form.evid_url ? [{ url: form.evid_url, name: String(form.evid_url).split('/').pop() || '기존 증빙', legacy: true }] : []),
+                ...(form.docs || []),
+              ]}
+              onUpload={async (file) => {
+                const up = await api.uploadFile(file)
+                if (!up?.url) { toast.push(up?.error || "업로드에 실패했어요", { tone: 'warn' }); return }
+                setForm(f => ({ ...f, docs: [...(f.docs || []), { url: up.url, name: up.originalName || file.name, size: up.size || 0 }] }))
+              }}
+              onRemove={(d) => setForm(f => d.legacy
+                ? { ...f, evidFile: null, evid_url: '', evid_type: '' }
+                : { ...f, docs: (f.docs || []).filter(x => x !== d) })}/>
+          )}
+          {/* 정보 칸은 탭을 옮겨도 **지우지 않고 숨긴다** — 쓰던 값이 그대로 남는다 */}
+          <div style={formTab === "docs" && !embedded ? { display: "none" } : undefined}>
           {/* 옛 "받은 서류" 선택창이 하던 일(3단계에서 메뉴가 대신한다). 세금계산서가 오간 돈을
               여기 적으면 미수·미지급과 매출·매입세액이 안 잡힌다 — 새로 적을 때만 한 줄로 길을 낸다. */}
           {!editTxn && goRoute && canGo(kind === "income" ? "billing_issued" : "billing_received") && (
@@ -908,7 +952,9 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
               {kind === "income" ? "세금계산서를 발행하는 건이면 세금계산서 › 발행에서 적어요 →" : "세금계산서를 받으셨으면 세금계산서 › 수취에서 적어요 →"}
             </button>
           )}
-          <div className="col gap-form">
+          {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29 사용자). 넓은 칸(금액·청구서·추가 정보)은 한 줄을 다 쓴다.
+              제자리 수정(상세의 왼쪽 반)은 폭이 좁아 한 줄로 둔다 */}
+          <div className={embedded ? "col gap-form" : "form-grid-2"}>
             <FormField label="거래처" required>
               {/* 거래처를 바꾸면 **안 맞는 주문은 비운다.** 목록에서는 사라졌는데 값만
                   남으면 딴 회사 주문이 붙은 채로 저장된다(화면에는 아무 표시도 없다).
@@ -957,7 +1003,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                 고르면 남은 금액이 금액 칸에 들어가고, 저장하면 그 청구서의 미수/미지급이 줄어든다.
                 (안 고르고 저장하면 예전처럼 그냥 통장 거래로만 남는다 — 청구서 없는 돈도 있다) */}
             {openInvs.length > 0 && (
-              <FormField label={kind === 'income' ? '어느 청구서 입금인가요' : '어느 청구서 지급인가요'}
+              <FormField span label={kind === 'income' ? '어느 청구서 입금인가요' : '어느 청구서 지급인가요'}
                 hint="고르면 그 청구서의 미수금이 함께 정리돼요 · 없으면 비워두세요">
                 <div className="col gap-6">
                   {openInvs.map(iv => {
@@ -986,13 +1032,13 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
 
             {/* 경비 모드에서는 주문 두 칸을 접어 둔다. 수정 중이거나 이미 값이 있으면 편다 —
                 접어서 보이지 않는 칸에 값이 들어 있으면 "왜 이 주문에 붙었지"를 알 수 없다. */}
-            {compact && !showOrderFields && !form.contract && !form.costContract && (
+            {!ordersFromMes && compact && !showOrderFields && !form.contract && !form.costContract && (
               <button type="button" className="btn ghost sm" style={{ alignSelf: 'flex-start' }}
                 onClick={() => setShowOrderFields(true)}>
                 <Icon.Plus size={12}/> 주문에 붙이기 (발주·원가 귀속)
               </button>
             )}
-            {(!compact || showOrderFields || form.contract || form.costContract) && <>
+            {!ordersFromMes && (!compact || showOrderFields || form.contract || form.costContract) && <>
             <FormField label={kind === "income" ? "수주 (선택)" : "발주 (선택)"}
               /* ⚠ 저장 때 묻는 말과 같은 방향으로 적는다. 예전 문구("있을 때만 고르세요")는
                  드물게 쓰는 칸처럼 읽혔는데, 정작 저장하면 "안 골랐어요"라고 물었다. */
@@ -1120,7 +1166,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
             </FormField>
 
             {kind === "expense" && form.acctGroup && TAX_INVOICE_GROUPS.includes(form.acctGroup) && !taxWarningDismissed && (
-              <div style={{ background: "var(--warn-bg, #fffbeb)", border: "1px solid var(--warn, #f59e0b)", borderRadius: 10, padding: "12px 14px" }}>
+              <div className="span-2" style={{ background: "var(--warn-bg, #fffbeb)", border: "1px solid var(--warn, #f59e0b)", borderRadius: 10, padding: "12px 14px" }}>
                 <div className="row gap-8" style={{ marginBottom: 8 }}>
                   <Icon.Warn size={15} style={{ color: "var(--warn-ink, #92400e)", flexShrink: 0 }}/>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "var(--warn-ink, #92400e)" }}>세금계산서가 있는 지출이에요</div>
@@ -1158,7 +1204,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
               </div>
             </FormField>
 
-            <FormField label="금액" required>
+            <FormField span label="금액" required>
               {taxable && (
                 <div className="row gap-6" style={{ marginBottom: 8 }}>
                   <button type="button"
@@ -1280,7 +1326,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
             )}
 
             {kind === "expense" ? (
-              <FormField label="결제수단" required>
+              <FormField span label="결제수단" required>
                 <div className="row gap-6" style={{ flexWrap: "wrap" }}>
                   {/* 어음 — **돈이 아직 안 나갔는데 비용은 잡히는** 유일한 결제수단이다.
                       고르면 계좌 대신 어음번호·만기일을 묻고, 저장할 때 이 거래는
@@ -1298,16 +1344,10 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                   ))}
                 </div>
                 {form.method === "계좌이체" && (
-                  <div className="row gap-6" style={{ flexWrap: "wrap", marginTop: 8 }}>
-                    {bankAccounts.map(a => (
-                      <button key={a.id} type="button" className={`chip ${form.account === a.name ? "active" : ""}`}
-                        onClick={() => setForm({...form, account: a.name})}>
-                        <Icon.Bank size={12}/>{a.name}
-                        {isMainAccount(a, company, use) && (
-                          <span className="text-muted2" style={{ fontSize: 10, marginLeft: 3 }}>{MAIN_BADGE}</span>
-                        )}
-                      </button>
-                    ))}
+                  /* 몇 개 없으면 칩, 많으면 검색되는 목록(lib/components/AccountPicker) */
+                  <div style={{ marginTop: 8 }}>
+                    <AccountPicker accounts={bankAccounts} valueKey="name" value={form.account}
+                      onChange={v => setForm({...form, account: v})} isMain={a => isMainAccount(a, company, use)}/>
                   </div>
                 )}
                 {/* 카드로 쓰면 그 카드 계정에 미결제가 쌓인다. 나중에 어디서 갚는지 그 자리에서
@@ -1325,19 +1365,10 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                   </div>
                 )}
                 {(form.method === "법인카드" || form.method === "개인카드") && (
-                  <div className="row gap-6" style={{ flexWrap: "wrap", marginTop: 8 }}>
-                    {cardAccounts.length === 0 ? (
-                      <span className="text-xs text-muted2">등록된 카드가 없어요. 설정 → 계좌/카드에서 추가하세요.</span>
-                    ) : cardAccounts.map(a => (
-                      <button key={a.id} type="button" className={`chip ${form.account === a.name ? "active" : ""}`}
-                        onClick={() => setForm({...form, account: a.name})}>
-                        <Icon.Card size={12}/>{a.name}
-                        {/* 왜 맨 앞인지 말해주지 않으면 "왜 순서가 이렇지"가 된다 */}
-                        {isMainAccount(a, company, 'card') && (
-                          <span className="text-muted2" style={{ fontSize: 10, marginLeft: 3 }}>{MAIN_BADGE}</span>
-                        )}
-                      </button>
-                    ))}
+                  <div style={{ marginTop: 8 }}>
+                    <AccountPicker accounts={cardAccounts} valueKey="name" value={form.account} icon="card" placeholder="카드 선택"
+                      onChange={v => setForm({...form, account: v})} isMain={a => isMainAccount(a, company, 'card')}
+                      empty={<span className="text-xs text-muted2">등록된 카드가 없어요. 설정 → 계좌/카드에서 추가하세요.</span>}/>
                   </div>
                 )}
                 {/* 현금 — **금고 시재**에서 나간다. 기준정보에서 종류 '현금'인 계정을 만들어 두면
@@ -1368,7 +1399,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                 {form.method === "어음" && <NoteFields form={form} setForm={setForm} kind="expense"/>}
               </FormField>
             ) : (
-              <FormField label={form.method === "어음" ? "어떻게 받았나요?" : "입금 계좌"} required>
+              <FormField span label={form.method === "어음" ? "어떻게 받았나요?" : "입금 계좌"} required>
                 {/* 받을어음 — 통장으로 받은 게 아니라 **어음을 받은** 경우.
                     지출 쪽 결제수단과 같은 규칙이다(위 주석). */}
                 <div className="row gap-6" style={{ flexWrap: "wrap", marginBottom: 8 }}>
@@ -1385,17 +1416,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                   <NoteFields form={form} setForm={setForm} kind="income"/>
                 ) : (
                   <>
-                    <div className="row gap-6" style={{ flexWrap: "wrap" }}>
-                      {bankAccounts.map(a => (
-                        <button key={a.id} type="button" className={`chip ${form.account === a.name ? "active" : ""}`}
-                          onClick={() => setForm({...form, account: a.name})}>
-                          <Icon.Bank size={12}/>{a.name}
-                          {isMainAccount(a, company, use) && (
-                            <span className="text-muted2" style={{ fontSize: 10, marginLeft: 3 }}>{MAIN_BADGE}</span>
-                          )}
-                        </button>
-                      ))}
-                    </div>
+                    <AccountPicker accounts={bankAccounts} valueKey="name" value={form.account}
+                      onChange={v => setForm({...form, account: v})} isMain={a => isMainAccount(a, company, use)}/>
                     {counterpartyPicker("어디서 들어왔나요?")}
                   </>
                 )}
@@ -1432,7 +1454,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
               <DateInput className="input" max={localToday()} value={form.date} onChange={e => setForm({...form, date: e.target.value})}/>
             </FormField>
 
-            <div>
+            <div className="span-2">
               <button type="button"
                 onClick={() => setShowMore(s => !s)}
                 style={{ border: 0, background: "transparent", color: "var(--muted)", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -1457,24 +1479,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                       </FormField>
                     </div>
                   </div>
-                  <FormField label="증빙 첨부" hint="세금계산서·영수증 등 여러 개 첨부 가능">
-                    {form.evid_url && (
-                      <div className="row gap-10" style={{ padding: '10px 14px', border: '1px solid var(--line)', borderRadius: 10, background: 'var(--surface-2)', marginBottom: 8 }}>
-                        <Icon.Receipt size={15} style={{ color: 'var(--brand)', flexShrink: 0 }}/>
-                        <span className="text-sm fw-600" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(form.evid_url).split('/').pop() || '기존 증빙'}</span>
-                        <a className="btn ghost sm" href={form.evid_url} target="_blank" rel="noreferrer"><Icon.Eye size={13}/></a>
-                        <button type="button" className="icon-btn" title="증빙 지우기" onClick={() => setForm(f => ({ ...f, evidFile: null, evid_url: '', evid_type: '' }))}><Icon.Close size={14}/></button>
-                      </div>
-                    )}
-                    <FileAttach
-                      docs={form.docs || []}
-                      onAdd={(d) => setForm(f => ({ ...f, docs: [...(f.docs || []), d] }))}
-                      onRemove={(d) => setForm(f => ({ ...f, docs: (f.docs || []).filter(x => x !== d) }))}
-                      label="증빙을 끌어다 놓거나 클릭 (여러 개 가능)"/>
-                  </FormField>
+                  {/* 증빙 첨부는 '증빙' 탭으로 옮겼다(2026-09-29) — 제자리 수정에서는 상세의 증빙 탭이 맡는다 */}
                 </div>
               )}
             </div>
+          </div>
           </div>
         </div>
 
@@ -1595,9 +1604,14 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
           <button className="btn" onClick={onClose}>취소</button>
           <div className="ml-auto row gap-8" style={{ alignItems: "center" }}>
             <SaveKeyHint/>
-            <button className="btn primary" onClick={handleSave} disabled={busy}><Icon.Check size={14}/> {busy ? "저장 중…" : (editTxn ? "수정" : "등록")}</button>
+            <button className="btn primary" onClick={handleSave} disabled={busy}><Icon.Check size={14}/> {busy ? "저장 중…" : (editTxn ? (embedded ? "저장" : "수정") : "등록")}</button>
           </div>
         </div>
-    </Drawer>
+    </FormShell>
   );
 };
+
+/* 팝업이면 팝업 틀, 끼워 넣기면 그냥 상자 — 안쪽(.drawer-body·.drawer-foot)은 같다 */
+const FormShell = ({ embedded, open, onClose, label, children }) => (embedded
+  ? <div className="txf-inline" aria-label={label}>{children}</div>
+  : <Drawer open={open} onClose={onClose} width="960px" height="min(820px, calc(100vh - 48px))" label={label}>{children}</Drawer>)

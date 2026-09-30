@@ -5,7 +5,8 @@ import { PeriodPicker } from './PeriodPicker'
  * 문서 목록 필터 — 좌측 목록 위(DocSide top)에 선다. 견적요청·구매품의·지급결의·정산내역이 같이 쓴다.
  *
  *   [검색                         ]
- *   [📅 전체 기간 ▾] [거래처 ▾      ×]
+ *   📅 [시작일] ~ [종료일]  이번 달·지난 달·이번 분기·올해·전체
+ *   [거래처 ▾                    ×]
  *   전체 · 작성 2 · 승인 1 · 완료
  *
  * 기간은 **문서 날짜**(품의일자·지급일·정산일)로 거른다 — 서버 lib/pagedList.js.
@@ -29,8 +30,12 @@ export const DocFilters = ({ list, placeholder = '검색', vendors, statuses, ch
         )}
       </div>
 
-      <div className="doc-filters-row">
+      {/* 기간 — 앱 전체가 같은 모양(날짜칸 두 개 + 지름길). 좁은 목록이라 제 줄을 쓴다 */}
+      <div className="doc-filters-date">
         <PeriodPicker from={filters.from} to={filters.to} onChange={setPeriod}/>
+      </div>
+
+      <div className="doc-filters-row">
         {vendors && (
           <div className="doc-filters-vendor">
             {/* portal — 목록 카드가 넘침을 자르므로 밖에 띄운다 */}

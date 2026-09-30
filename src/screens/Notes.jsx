@@ -244,7 +244,7 @@ export const NotesScreen = ({
           주입받았으면(탭 안) 이 줄들은 품은 화면이 자기 자리에 그린다. */}
       {!filter && (
         <>
-          <TableToolbar {...flt.toolbarProps} periodPicker
+          <TableToolbar {...flt.toolbarProps}
             right={<span className="text-xs text-muted2">만기일 기준</span>}/>
 
           <div className="row gap-8" style={{ marginTop: 12, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -444,12 +444,13 @@ const NoteForm = ({ open, note, defaultKind, lockKind = false, vendors, onClose,
   }
 
   return (
-    <Drawer open={open} onClose={onClose} width="min(560px,100vw)" label="어음">
+    <Drawer open={open} onClose={onClose} width="880px" label="어음">
       <DrawerHead title={note ? '어음 수정' : '어음 등록'}
         sub={note ? null : '받은(또는 끊어 준) 어음을 대장에 올립니다'} onClose={onClose}/>
-      <div className="drawer-body col gap-form">
+      {/* 두 칸 배치 — 짧은 칸 둘을 한 줄에(2026-09-29). 넓은 칸은 span-2 */}
+      <div className="drawer-body form-grid-2">
         {!note && (
-          <div>
+          <div className="span-2">
             <label className="label">어느 쪽 어음인가요? <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
             {/* ⚠ 한쪽만 보는 화면(수시 입금·출금의 어음 탭)에서는 **고르게 두지 않는다.**
                 반대쪽을 고르면 저장은 되는데 그 탭에는 안 보여 "등록했는데 사라졌다"가 된다. */}
@@ -474,7 +475,7 @@ const NoteForm = ({ open, note, defaultKind, lockKind = false, vendors, onClose,
             placeholder={(KIND[f.kind] || KIND.receivable).vendorHint}/>
         </div>
 
-        <div className="row gap-12">
+        <>
           <div style={{ flex: 1 }}>
             <label className="label">어음번호</label>
             <input className="input num" value={f.noteNo || ''} onChange={e => set('noteNo', e.target.value)}
@@ -488,9 +489,9 @@ const NoteForm = ({ open, note, defaultKind, lockKind = false, vendors, onClose,
             <label className="label">금액 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
             <MoneyInput value={f.amount} onChange={raw => set('amount', raw)}/>
           </div>
-        </div>
+        </>
 
-        <div className="row gap-12">
+        <>
           <div style={{ flex: 1 }}>
             <label className="label">발행일 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
             <DateInput className="input num" value={f.issuedOn || ''} onChange={e => set('issuedOn', e.target.value)}/>
@@ -502,10 +503,10 @@ const NoteForm = ({ open, note, defaultKind, lockKind = false, vendors, onClose,
             </label>
             <DateInput className="input num" value={f.dueOn || ''} onChange={e => set('dueOn', e.target.value)}/>
           </div>
-        </div>
+        </>
 
         {!note && (
-          <div>
+          <div className="span-2">
             <label className="label">어느 청구서를 대신하나요? <span className="text-muted2">(선택)</span></label>
             <Combobox value={f.invoiceId} onChange={v => set('invoiceId', v)} allowAdd={false}
               options={[{ value: '', label: '연결 안 함' },
@@ -523,7 +524,7 @@ const NoteForm = ({ open, note, defaultKind, lockKind = false, vendors, onClose,
           </div>
         )}
 
-        <div>
+        <div className="span-2">
           <label className="label">메모 <span className="text-muted2">(선택)</span></label>
           <input className="input" value={f.memo || ''} onChange={e => set('memo', e.target.value)}
             placeholder="예: 3개월 만기, 은행 지점 확인"/>

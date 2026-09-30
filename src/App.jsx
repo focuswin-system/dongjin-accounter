@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback, Fragment, Component } from 'react'
+import { setCustomKeys as setGlobalCustomKeys } from './lib/customModules'
 import logoSymbol from './assets/company/favicon.svg'
 import { Icon, useToast, useConfirm, Popover, PopItem, ToastProvider, ConfirmProvider, setFiscalEndMonth, Loading } from './lib/ui'
 import { api, setApiFailureHandler } from './lib/api'
@@ -45,6 +46,7 @@ import { QuickDock } from './lib/components/QuickDock'
 import { VoucherBookScreen } from './screens/VoucherBook'
 // 고객사 전용 모듈 — 동진테크는 계약관리 › 수주가 MES 수주(보기 전용)다. 코드는 src/custom/ 에만
 import { MesOrdersScreen } from './custom/dongjin/MesOrders'
+import { MesPurchasesScreen } from './custom/dongjin/MesPurchases'
 import { ApprovalBoxScreen } from './screens/ApprovalBox'
 import { useApprovalOn, refreshApprovalOn } from './lib/components/Approval'
 
@@ -722,7 +724,11 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys, customKeys }) {
       case "contract_sales":  if (customKeys === null) return <Loading/>;
                               if (customKeys.includes("dongjin_mes")) return <MesOrdersScreen/>;
                               return <ContractListScreen kind="sales" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
-      case "contract_purchase": return <ContractListScreen kind="purchase" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
+      /* 발주도 수주와 같다 — 동진은 MES 구매발주를 보기 전용으로(2026-09-29 사용자 A안).
+         모듈 상태를 읽기 전(null)에는 기다린다 — 옛 화면의 '신규 생성'이 번쩍이지 않게 */
+      case "contract_purchase": if (customKeys === null) return <Loading/>;
+                                if (customKeys.includes("dongjin_mes")) return <MesPurchasesScreen/>;
+                                return <ContractListScreen kind="purchase" goDetail={(id, name) => go("contract_detail", { contractId: id, contractName: name })}/>;
       case "contract_detail": return <ContractScreen goList={() => go("contract")} contractId={contractId} refreshTrigger={txnVersion} openIncome={(contract, vendor) => setTxnForm({ kind: "income", contract, vendor })} openExpense={(contract, vendor, opts) => setTxnForm(opts?.asCost ? { kind: "expense", costContract: contract, vendor } : { kind: "expense", contract, vendor })}/>;
       case "hr":              return <HRScreen/>;
       // 재무관리 — 차입금·투자. 손익이 아니라 부채·자본이다(server/lib/pnl.js)
@@ -996,8 +1002,11 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys, customKeys }) {
                 {notifs.map((n, i) => (
                   <button key={i} data-pop-item onClick={() => go(n.to)}
                     className="row gap-10"
-                    style={{ width: "100%", padding: "12px 14px", borderTop: i ? "1px solid var(--line)" : 0,
-                      border: i ? undefined : 0, borderLeft: 0, borderRight: 0, borderBottom: 0,
+                    /* 테두리는 끄고 구분선은 안쪽 그림자로 긋는다. 예전엔 borderTop 과 border(조건부 undefined)를
+                       섞어 써서 React 가 위 선을 빠뜨렸고, 버튼 기본 테두리(2px 검은 입체선)가 구분선으로 보였다.
+                       border 와 borderTop 을 한 style 에 같이 두면 다시 그릴 때 또 어긋날 수 있다 — 아예 안 섞는다 */
+                    style={{ width: "100%", padding: "12px 14px", border: 0,
+                      boxShadow: i ? "inset 0 1px 0 var(--line)" : "none",
                       alignItems: "flex-start", textAlign: "left", background: "transparent",
                       fontFamily: "inherit", cursor: "pointer", opacity: notifRead ? 0.5 : 1 }}
                     onMouseEnter={e => e.currentTarget.style.background = "var(--surface-2)"}
@@ -1227,7 +1236,7 @@ function FaqPanel({ open, onClose, route, go }) {
   const QRow = ({ f, showCat = false }) => (
     <button onClick={() => setSelId(f.id)}
       style={{ width:"100%", padding:"12px 18px", borderTop:"1px solid var(--line)", textAlign:"left",
-        border:0, background:"transparent", cursor:"pointer", fontFamily:"inherit",
+        borderLeft:0, borderRight:0, borderBottom:0, background:"transparent", cursor:"pointer", fontFamily:"inherit",
         display:"flex", alignItems:"center", gap:10, transition:"background .1s" }}
       onMouseEnter={e => e.currentTarget.style.background = "var(--surface-2)"}
       onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
@@ -1478,6 +1487,8 @@ export default function App() {
   const [docKeys, setDocKeys] = useState(null);
   /* 이 회사에 켜진 고객사 전용 모듈. null = 아직 모름. 동진(MES 연결)이면 수주 화면이 MES 수주로 바뀐다 */
   const [customKeys, setCustomKeys] = useState(null);
+  // 화면 어디서든 읽게(lib/customModules.js) — 입력 폼이 '수주·발주 원본이 MES 인가'를 묻는다
+  useEffect(() => { setGlobalCustomKeys(customKeys); }, [customKeys]);
   /* 회사 첫 설정이 필요한가 — null(아직 모름) | 'need' | 'ok'.
      사업자번호가 비었으면 앱에 들어가기 전에 받는다(CompanySetup).
      ⚠ **못 읽으면 'ok'** — 서버가 잠깐 흔들렸다고 전 직원을 설정 화면에 가두지 않는다.

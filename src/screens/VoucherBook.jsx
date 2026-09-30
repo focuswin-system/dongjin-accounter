@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo, useRef} from 'react'
-import { Icon, fmtNum, useToast, DateInput, Loading, periodToRange, yearLabel, useFiscalTick } from '../lib/ui'
+import { Icon, fmtNum, useToast, Loading, periodToRange, useFiscalTick } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { api } from '../lib/api'
 import { PrintEditButton } from '../lib/components/PrintEditButton'
 import { usePrintEdit } from '../lib/printEdit'
 import { VoucherView } from '../lib/components/VoucherView'
+import { VoucherSlip } from '../lib/components/VoucherSlip'
+import { DateRangeBar } from '../lib/components/PeriodPicker'
 
 /**
  * 전표 목록(분개장) — 기간 안의 거래를 차변·대변 줄로 펼친다.
@@ -95,27 +97,7 @@ export const VoucherBookScreen = ({ initialRange = null, goRoute }) => {
         <div className="vb-batch">
           {chosen.map((v, i) => (
             <div key={keyOf(v)} className="vb-slip" style={{ pageBreakAfter: i < chosen.length - 1 ? 'always' : 'auto' }}>
-              <div className="fw-700" style={{ textAlign: 'center', fontSize: 20, letterSpacing: '0.3em', paddingLeft: '0.3em' }}>{v.type}</div>
-              <div className="text-sm text-muted" style={{ textAlign: 'center', margin: '6px 0 12px' }}>{v.date}</div>
-              {(v.vendor_name || v.memo || v.category) && (
-                <div className="text-sm" style={{ marginBottom: 10 }}>
-                  {v.vendor_name && <span><span className="text-muted2">거래처</span> <b>{v.vendor_name}</b>　</span>}
-                  {(v.memo || v.category) && <span><span className="text-muted2">적요</span> {v.memo || v.category}</span>}
-                </div>
-              )}
-              <table className="table">
-                <thead><tr><th style={{ width: 160, textAlign: 'right' }}>차변</th><th style={{ textAlign: 'center' }}>계정과목</th><th style={{ width: 160, textAlign: 'right' }}>대변</th></tr></thead>
-                <tbody>
-                  {v.lines.map((l, li) => (
-                    <tr key={li}>
-                      <td className="num-cell num-right fw-700">{l.side === 'debit' ? fmtNum(l.amount) : ''}</td>
-                      <td style={{ textAlign: 'center' }}><span className="num text-xs text-muted2" style={{ marginRight: 8 }}>{l.code}</span>{l.name}</td>
-                      <td className="num-cell num-right fw-700">{l.side === 'credit' ? fmtNum(l.amount) : ''}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot><tr><td className="num-cell num-right fw-700">{fmtNum(v.debitTotal)}</td><td style={{ textAlign: 'center' }}>합계</td><td className="num-cell num-right fw-700">{fmtNum(v.creditTotal)}</td></tr></tfoot>
-              </table>
+              <VoucherSlip v={v}/>
             </div>
           ))}
         </div>
@@ -140,14 +122,8 @@ export const VoucherBookScreen = ({ initialRange = null, goRoute }) => {
         </div>}/>
 
       <div className="card card-pad row no-print" style={{ gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-        <DateInput className="input" style={{ width: 150 }} value={from} onChange={e => setFrom(e.target.value)}/>
-        <span className="text-muted2">~</span>
-        <DateInput className="input" style={{ width: 150 }} value={to} onChange={e => setTo(e.target.value)}/>
-        <div className="row gap-6" style={{ marginLeft: 8 }}>
-          {[['month', '이번 달'], ['quarter', '이번 분기'], ['year', yearLabel()]].map(([p, label]) => (
-            <button key={p} className="chip" onClick={() => { const r = periodToRange(p); setFrom(r.from); setTo(r.to) }}>{label}</button>
-          ))}
-        </div>
+        {/* 기간은 앱 전체가 같은 모양(DateRangeBar). 전표 목록은 기간이 꼭 있어야 해서 '전체'는 안 낸다 */}
+        <DateRangeBar from={from} to={to} all={false} onChange={r => { setFrom(r.from); setTo(r.to) }}/>
         <div className="row gap-6 ml-auto">
           {KINDS.map(([v, label]) => (
             <button key={v} className={`chip ${kind === v ? 'active' : ''}`} onClick={() => setKind(v)}>{label}</button>

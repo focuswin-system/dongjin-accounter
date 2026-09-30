@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import { UPLOAD_ACCEPT } from './fileKinds'
 import { Icon } from './ui'
 import { api } from './api'
 
@@ -16,7 +17,7 @@ import { api } from './api'
  *   multiple  여러 파일 동시 선택 허용 (기본 true)
  *   readOnly  목록만 보이고 추가/삭제 숨김
  */
-const DEFAULT_ACCEPT = '.pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.hwp'
+const DEFAULT_ACCEPT = UPLOAD_ACCEPT
 
 const isImg = (name) => /\.(jpe?g|png|gif|webp)$/i.test(name || '')
 
@@ -41,7 +42,7 @@ export const FileAttach = ({
         if (up?.url) {
           await onAdd({ url: up.url, name: up.originalName || f.name, size: up.size || 0 })
         } else {
-          setErr(`'${f.name}' 업로드에 실패했어요`)
+          setErr(`'${f.name}' — ${up?.error || '업로드에 실패했어요'}`)
         }
       }
     } catch {

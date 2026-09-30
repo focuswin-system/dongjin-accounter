@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
+import { useState, useMemo, useEffect, useLayoutEffect, useRef, Fragment } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../ui'
 
@@ -17,7 +17,15 @@ import { Icon } from '../ui'
 //   render,         (row, i) => 셀 내용 (기본 row[key])
 //   className,      td className
 //   headClassName,  th className
+//   maxWidth,       글 칸이 차지할 최대 폭(px, 기본 320). 넘치면 한 줄 '…'
+//   shrink,         false 면 화면 맞추기에서 깎지 않는다(날짜 범위처럼 잘리면 뜻이 사라지는 칸)
 // }]
+//
+// ⚠ **칸은 한 줄이다**(2026-09-30 사용자). 줄바꿈이 섞이면 행 높이가 들쭉날쭉해 목록을 훑을 수 없다.
+//   넘치는 글은 '…'로 자르고, 잘린 칸에 마우스를 올리면 전체 글이 뜬다(title — 잘렸을 때만).
+//   전체 내용은 행을 눌러 상세에서 본다. 그래서 render 도 **한 줄로** 그린다 —
+//   이름 아래 작은 글씨를 붙이고 싶으면 '이름 · 부가정보'로 옆에 잇거나 칸을 따로 뺀다.
+//   칸 폭을 직접 끌어 정한 표(fixedWidth)는 그 폭 안에서 자른다.
 // rows: 배열 / onRowClick(row): 행 클릭 / empty: 빈 상태(문자열·노드) / minWidth: 표 최소 폭(px) / maxHeight: 세로 스크롤 상한(px)
 //
 // loading: 아직 못 읽었나. **'없음'과 '아직 안 옴'은 다른 말이다.**
@@ -64,6 +72,27 @@ const writePrefs = (k, v) => {
 const colLabel = (c) =>
   c.label || (typeof c.header === 'string' && c.header.trim() ? c.header : null) || c.key || '이름 없는 열'
 
+/* 칸 안의 보조 정보 — 이름 **옆에** 작고 흐리게 잇는다(아래 줄에 달지 않는다 — 칸은 한 줄).
+   예: <b>경남은행 계좌1</b><Sub>529070105612</Sub> → '경남은행 계좌1  529070105612' */
+export const Sub = ({ children, className = '', style }) =>
+  children == null || children === false || children === '' ? null
+    : <span className={`dt-sub ${className}`.trim()} style={style}>{children}</span>
+
+/* 잘린 칸에만 전체 글을 띄운다 — 늘 걸면 멀쩡한 칸에도 말풍선이 떠 시끄럽다.
+   render 가 이미 title 을 준 칸(안내 말풍선)은 건드리지 않는다 */
+const titleIfClipped = (e) => {
+  const el = e.currentTarget
+  const inner = el.firstElementChild
+  const clipped = el.scrollWidth > el.clientWidth || (inner && inner.scrollWidth > inner.clientWidth)
+  if (clipped && !el.querySelector('[title]')) {
+    // 보조 정보(Sub)는 화면에선 여백으로 떨어져 있지만 글자로는 붙어 있다 — 말풍선엔 ' · '로 잇는다
+    const copy = el.cloneNode(true)
+    copy.querySelectorAll('.dt-sub').forEach(n => n.prepend(' · '))
+    el.title = copy.textContent.replace(/\s+/g, ' ').trim()
+  }
+  else if (!clipped) el.removeAttribute('title')
+}
+
 export const DataTable = ({ columns, rows, loading, onRowClick, empty = '표시할 내용이 없어요', footer, rowKey, renderExpanded, select, rowClass, minWidth, maxHeight,
   /* tableKey: 주면 '열' 버튼이 생긴다 — 열 접기·순서·너비를 이 브라우저에 기억한다.
      **모든 열을 접을 수 있다**(마지막 한 열만 남긴다). 무엇이 필요한지는 보는 사람이 정한다 —
@@ -75,8 +104,16 @@ export const DataTable = ({ columns, rows, loading, onRowClick, empty = '표시�
   /* colBarIn: '열 설정' 버튼을 표 위 **따로 한 줄** 대신 이 자리(DOM 노드)에 그린다.
      툴바에 필터·검색이 이미 한 줄 있는 화면은 버튼 하나 때문에 한 줄이 더 생겨 표가 밀려 내려간다.
      화면이 툴바 안에 <span ref={setSlot}/> 을 두고 그 노드를 넘긴다. 아직 null 이면 그리지 않는다. */
-  colBarIn }) => {
+  colBarIn,
+  /* pageSize: 주면 **앞 N건만** 그리고 아래에 [더 보기]를 단다(수백 건 목록 — 2026-09-29 수주·발주).
+     ⚠ 자르는 것은 **맨 마지막**이다: 화면이 거른(검색·필터) rows 를 받아 여기서 정렬한 **다음** 자른다.
+       잘린 50건 안에서 검색·정렬하면 뒤쪽 건은 영영 못 찾는다(사용자 지적). 합계(footer)도 거른 전체 기준.
+     거르는 조건(rows)이나 정렬이 바뀌면 다시 N건부터 — 그래서 rows 는 useMemo 로 넘긴다
+     (매번 새 배열이면 그릴 때마다 N건으로 되돌아간다). */
+  pageSize }) => {
   const [sort, setSort] = useState(null)   // { key, dir: 'asc' | 'desc' } | null
+  const [limit, setLimit] = useState(pageSize || 0)
+  useEffect(() => { if (pageSize) setLimit(pageSize) }, [rows, sort, pageSize])
   const [prefs, setPrefs] = useState(() => readPrefs(tableKey))
   /* 표가 다른 화면으로 재사용될 때(같은 컴포넌트, 다른 tableKey) 앞 표의 설정이 남지 않게 한다 */
   useEffect(() => { setPrefs(readPrefs(tableKey)) }, [tableKey])
@@ -146,6 +183,9 @@ export const DataTable = ({ columns, rows, loading, onRowClick, empty = '표시�
      React 가 경고를 내고, 줄이 신원을 잃어 정렬·필터 때 엉뚱한 줄이 재사용된다. */
   const keyOf = (row, i) => (rowKey ? rowKey(row, i) : (row.id ?? i))
   const keyByRow = new Map(sorted.map((r, i) => [r, keyOf(r, i)]))
+  // 그릴 줄 — 거르고 정렬한 **뒤에** 자른다(pageSize 머리말)
+  const visible = pageSize ? sorted.slice(0, limit) : sorted
+  const hiddenCount = sorted.length - visible.length
   const canSelect = (row) => !select?.isSelectable || select.isSelectable(row)
   const selectable = select ? sorted.filter(canSelect) : []
   const selectedSet = new Set(select?.ids || [])
@@ -299,6 +339,62 @@ export const DataTable = ({ columns, rows, loading, onRowClick, empty = '표시�
     return cols.reduce((a, c) => a + Number(w[c.key] || 0), 0) + (select ? 40 : 0)
   }, [prefs, shownColumns, select, tableKey])
 
+  /* 화면에 맞추기 — 칸이 한 줄이 되면서 표가 화면보다 넓어질 수 있다(줄바꿈이 폭을 흡수하던 몫).
+     넘치면 **가장 넓은 글 칸부터** 같은 높이로 깎는다(물 채우기: 넓은 칸들이 같은 상한 L 로 잘린다).
+     금액(오른쪽 정렬)·버튼 칸은 깎지 않는다 — 숫자가 '…'가 되면 읽을 수 없다.
+     L 은 FIT_MIN 밑으로 안 내린다. 그래도 넘치면 가로 스크롤이 맡는다(좁은 화면).
+     원래 FIT_MIN 보다 좁은 칸(번호·날짜·기한 배지 같은 짧은 것)은 후보가 아니다 — 긴 글만 깎는다.
+     다 깎아도 못 맞추면 깎을 만큼 깎고 나머지는 가로 스크롤 — 덜 밀게 하는 편이 낫다
+     (안 깎아 봤더니 1600 화면에서 주문 목록의 상태 칸이 화면 밖으로 나갔다).
+     ⚠ 자연 폭은 칸의 scrollWidth(잘려도 글 전체 폭)에서 구한다 — 지금 폭에서 구하면
+       깎은 결과를 다시 재서 또 깎는 되먹임이 생긴다. 폭을 직접 끈 표(fixedWidth)는 건드리지 않는다. */
+  const scrollRef = useRef(null)
+  const [caps, setCaps] = useState(null)
+  useLayoutEffect(() => {
+    const box = scrollRef.current
+    if (!box) return
+    const FIT_MIN = 150, PAD = 30
+    const fit = () => {
+      const table = box.querySelector(':scope > table')
+      if (!table || fixedWidth) { setCaps(c => (c ? null : c)); return }
+      let extra = 0
+      const cand = []
+      for (const c of shownColumns) {
+        if (c.align === 'right' || c.key == null || c.shrink === false) continue
+        const th = table.querySelector(`:scope > thead th[data-dt-th="${c.key}"]`)
+        const cells = table.querySelectorAll(`:scope > tbody .dt-cell[data-dt-col="${c.key}"]`)
+        if (!th || !cells.length) continue
+        let nat = 0, btn = false
+        cells.forEach(el => { nat = Math.max(nat, el.scrollWidth); if (!btn && el.querySelector('button')) btn = true })
+        if (btn) continue
+        nat = Math.max(nat + PAD, th.querySelector('.dt-th')?.scrollWidth + PAD || 0)
+        if (nat <= FIT_MIN) continue
+        extra += nat - th.getBoundingClientRect().width
+        cand.push({ key: c.key, nat })
+      }
+      const over = table.offsetWidth + extra - box.clientWidth
+      if (over <= 1 || !cand.length) { setCaps(c => (c ? null : c)); return }
+      // 물 채우기 — 상한 L 을 내리며 넘친 만큼 깎일 때 멈춘다
+      const w = cand.map(c => c.nat).sort((a, b) => b - a)
+      let L = FIT_MIN
+      for (let i = 0, cut = 0; i < w.length; i++) {
+        const next = i + 1 < w.length ? Math.max(w[i + 1], FIT_MIN) : FIT_MIN
+        const room = (w[i] - next) * (i + 1)          // L 을 w[i] → next 로 내리면 더 깎이는 폭
+        if (cut + room >= over) { L = w[i] - (over - cut) / (i + 1); break }
+        cut += room
+        if (next === FIT_MIN) break
+      }
+      L = Math.max(FIT_MIN, Math.floor(L))
+      const next = {}
+      cand.forEach(c => { if (c.nat > L) next[c.key] = L - PAD })
+      setCaps(prev => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+    }
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(box)
+    return () => ro.disconnect()
+  }, [rows, sort, limit, shownColumns, fixedWidth])   // eslint-disable-line react-hooks/exhaustive-deps
+
   const colBar = tableKey ? (
     /* 표 위 오른쪽 — 늘 있지만 조용하다(ghost). 여기 있는 줄 모르면 아무도 안 쓰므로
        숨기지는 않는다. 인쇄에는 안 나온다.
@@ -356,7 +452,7 @@ export const DataTable = ({ columns, rows, loading, onRowClick, empty = '표시�
   return (
     <>
     {colBarIn === undefined ? colBar : (colBarIn && colBar ? createPortal(colBar, colBarIn) : null)}
-    <div className="table-scroll" style={maxHeight ? { maxHeight } : undefined}>
+    <div ref={scrollRef} className="table-scroll" style={maxHeight ? { maxHeight } : undefined}>
       {/* minWidth: 열이 많아 좁은 화면에서 짓눌리는 표(자금관리표 등)가 쓴다.
           인쇄에서는 index.css 가 min-width 를 0으로 되돌린다 — 종이는 안 밀린다. */}
       <table className="table"
@@ -408,7 +504,7 @@ export const DataTable = ({ columns, rows, loading, onRowClick, empty = '표시�
             <tr><td colSpan={colCount} className="dt-empty">불러오는 중…</td></tr>
           ) : sorted.length === 0 ? (
             <tr><td colSpan={colCount} className="dt-empty">{empty}</td></tr>
-          ) : sorted.map((row, i) => {
+          ) : visible.map((row, i) => {
             const key = keyByRow.get(row) ?? keyOf(row, i)
             const expanded = renderExpanded ? renderExpanded(row, i) : null
             const on = selectedSet.has(key)
@@ -437,7 +533,10 @@ export const DataTable = ({ columns, rows, loading, onRowClick, empty = '표시�
                   )}
                   {shownColumns.map((c, ci) => (
                     <td key={c.key ?? ci} className={`${alignClass(c.align)} ${c.className || ''}`.trim()}>
-                      {c.render ? c.render(row, i) : row[c.key]}
+                      <div className="dt-cell" data-dt-col={c.key} onMouseEnter={titleIfClipped}
+                        style={fixedWidth ? undefined : { maxWidth: Math.min(c.maxWidth ?? 320, caps?.[c.key] ?? Infinity) }}>
+                        {c.render ? c.render(row, i) : row[c.key]}
+                      </div>
                     </td>
                   ))}
                 </tr>
@@ -452,6 +551,15 @@ export const DataTable = ({ columns, rows, loading, onRowClick, empty = '표시�
         </tbody>
         {footer && <tfoot>{footer}</tfoot>}
       </table>
+      {hiddenCount > 0 && !isLoading && (
+        <div className="dt-more">
+          <span className="text-xs text-muted num">{visible.length.toLocaleString()} / {sorted.length.toLocaleString()}건</span>
+          <button type="button" className="btn sm" onClick={() => setLimit(l => l + pageSize)}>
+            {Math.min(pageSize, hiddenCount).toLocaleString()}건 더 보기
+          </button>
+          <button type="button" className="btn ghost sm" onClick={() => setLimit(sorted.length)}>전부 보기</button>
+        </div>
+      )}
     </div>
     </>
   )

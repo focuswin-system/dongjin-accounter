@@ -188,7 +188,7 @@ export const TileBoard = ({ storageKey, groups = [], onPick, empty = '볼 수 �
 
       {shown.length === 0 ? (
         <div className="card card-pad text-sm text-muted" style={{ textAlign: 'center', padding: 32 }}>
-          이 분류에는 아직 없어요.
+          이 분류에 해당하는 항목이 없어요.
         </div>
       ) : sections ? (
         sections.map(sec => {
