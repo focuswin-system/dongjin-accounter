@@ -28,6 +28,8 @@
  * 줄이 셋 이상 필요한 분개도 스키마를 바꾸지 않고 표현할 수 있다(transactions 는 계정이 둘 고정).
  */
 
+const { issueSummary } = require('./memoText')
+
 const CASH = '1101'                    // 현금(시재) — 입금·출금전표를 가르는 유일한 기준
 const AR   = '1204'                    // 외상매출금
 const AP   = '2101'                    // 외상매입금
@@ -145,7 +147,8 @@ function invoiceVoucher(inv) {
     source: 'invoice',
     id: inv.id,
     date: inv.issued_at,
-    summary: `${inv.invoice_no || ''} ${isIssued ? '매출' : '매입'} 발행`.trim(),
+    summary: issueSummary(inv),   // lib/memoText.js — 청구번호는 적요가 아니라 분개장의 청구번호 칸에
+    invoice_no: inv.invoice_no || '',
     counterparty: inv.vendor_name || '',
   }, lines)
 

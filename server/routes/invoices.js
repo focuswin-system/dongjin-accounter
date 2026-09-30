@@ -30,6 +30,7 @@ const { MONTHS, vatPeriodOf } = require('../lib/vatPeriod')
 
 const { reconcileCandidates } = require('../lib/reconcile')
 const { createInvoice } = require('../lib/invoiceCreate')
+const { settleMemo } = require('../lib/memoText')
 const { sideGuard } = require('../platform/sidePerms')
 const router = Router()
 
@@ -1314,8 +1315,8 @@ router.delete('/:id', async (req, res, next) => {
 })
 
 router.post('/:id/matches', async (req, res, next) => {
-  // account_code(계정과목 코드)와 account_id(입출금 계좌)는 다른 값이다 — 섞지 말 것.
-  const { txn_id, amount, date, category, memo, account_code, account_id, allow_new } = req.body
+  // account_id 는 입출금 계좌다. 계정과목(account_code)은 **받지 않는다** — 아래 정산 거래 주석 참고.
+  const { txn_id, amount, date, category, memo, account_id, allow_new } = req.body
   const invoiceId = req.params.id
   const dateErr = futureDateError(date)
   if (dateErr) return res.status(400).json({ error: dateErr })
@@ -1419,7 +1420,7 @@ router.post('/:id/matches', async (req, res, next) => {
       }
       realTxnId = randomUUID()
       const cat   = (category && category.trim()) || (isIssued ? '수금' : '대금 지급')
-      const memoV = (memo && memo.trim()) || `청구서 ${inv.invoice_no || ''} 정산`.trim()
+      const memoV = (memo && memo.trim()) || settleMemo(inv)
       await conn.execute(`
         INSERT INTO transactions (id, kind, vendor_id, contract_id, account_id, category, amount, date, method, status, doc_no, invoice_id, memo, account_code)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -1431,8 +1432,10 @@ router.post('/:id/matches', async (req, res, next) => {
              상대 계정이 없어 차변·대변이 안 맞는다(실제로 수금 1,687만원 거래가 불일치로 떴다).
              정산 거래의 상대 계정은 이미 정해져 있다 — 매출·매입은 청구서 발행 시점에
              인식됐고 지금은 그때 생긴 채권·채무가 사라지는 것이다(외상매출금/외상매입금).
-             사용자가 고른 값이 있으면 그것을 우선한다. */
-          account_code || settleAcctCode(isIssued ? 'income' : 'expense')])
+             ⚠ 예전엔 사용자가 고른 값을 우선했다. 화면에 '계정과목 · 선택' 칸이 있어서
+               "입금이니까 매출"로 제품매출을 고르면 매출이 두 번 잡히고(발행 때 한 번)
+               외상매출금은 영영 안 지워졌다(2026-09-30). 고를 일이 없는 값이라 칸도 뺐고 여기서도 안 받는다. */
+          settleAcctCode(isIssued ? 'income' : 'expense')])
     }
 
     const id = randomUUID()
@@ -1570,7 +1573,7 @@ router.post('/bulk/settle', async (req, res, next) => {
         [txnId, isIssued ? 'income' : 'expense', inv.vendor_id || null, inv.contract_id || null,
          acct, isIssued ? '수금' : '대금 지급', remain, date, '계좌이체',
          isIssued ? '입금완료' : '지급완료', inv.contract_id ? '' : '공통', inv.id,
-         `청구서 ${inv.invoice_no || ''} 정산 (일괄)`.trim(),
+         settleMemo(inv),
          settleAcctCode(isIssued ? 'income' : 'expense'), batch])
       await conn.execute(
         'INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,1)',

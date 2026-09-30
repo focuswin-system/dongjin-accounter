@@ -17,6 +17,7 @@ const { createInvoice } = require('../lib/invoiceCreate')
 const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
 const { linkCandidates } = require('../lib/orderLink')
 const { isPurchaseSide, sideFromGubu, normalizeSide, sideFilterSql, purchaseKindSql } = require('../lib/contractSide')
+const { settleMemo } = require('../lib/memoText')
 
 const router = Router()
 
@@ -552,13 +553,14 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
     /* 청구서 만들기와 **마일스톤 잇기**(status·invoice_id)를 공용 함수가 한 트랜잭션에서 한다.
        예전엔 여기서 INSERT 하고 저 아래에서 따로 UPDATE 했다 — 창구가 늘 때마다 그 뒤처리를
        옮겨 적어야 했고, 실제로 다른 창구들은 빠뜨렸다. */
+    const invMemo = `${ms.contract_name} · ${ms.type}`   // 청구서 메모 — 같이 만드는 입금 거래의 적요 꼬리도 된다
     const { id: invId } = await createInvoice(conn, {
       kind, invoiceNo: invoice_no,
       vendorId: ms.vendor_id, contractId: ms.contract_id,
       supply, vat, total,
       issuedAt: today, dueAt, status,
       accountId: paid ? accountId : null,
-      memo: `${ms.contract_name} · ${ms.type}`, taxType: taxTypeOfMode(ms.vat_mode),
+      memo: invMemo, taxType: taxTypeOfMode(ms.vat_mode),
       origin: { type: 'milestone', milestoneId: req.params.milestoneId, paid: !!paid },
     })
     // 기입금: 실제 입/출금 거래 + 매칭 생성(장부·계좌·주문 수금에 반영)
@@ -578,7 +580,7 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
          // 비우면 일계표에서 한쪽 다리가 없어 차변·대변이 안 맞는다.
          settleAcctCode(isPurchase ? 'expense' : 'income'),
          isPurchase ? '대금 지급' : '수금', total, date || today, '계좌이체',
-         isPurchase ? '지급완료' : '입금완료', '', invId, `청구서 ${invoice_no} 정산`]
+         isPurchase ? '지급완료' : '입금완료', '', invId, settleMemo({ kind: isPurchase ? 'received' : 'issued', memo: invMemo })]
       )
       await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,1)', [randomUUID(), invId, txnId, total])
     }
@@ -678,13 +680,14 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
     { const ae = amountError(total); if (ae) { await rollbackQuietly(conn); return res.status(400).json({ error: ae }) } }
     /* 기성 발행 — 닫을 회차가 없다(기성은 품목 누적으로 관리한다). 그래도 같은 함수로
        만든다: 계약 연결·번호 채기·컬럼이 창구마다 달라지는 걸 막는 게 이 함수의 일이다. */
+    const invMemo = `${c.name} · 기성 ${clean.length}개 품목`
     const { id: invId } = await createInvoice(conn, {
       kind, invoiceNo: invoice_no,
       vendorId: c.vendor_id, contractId: c.id,
       supply, vat, total,
       issuedAt, dueAt: due_at || null, status,
       accountId: paid ? accountId : null,
-      memo: `${c.name} · 기성 ${clean.length}개 품목`, taxType: taxTypeOfMode(c.vat_mode),
+      memo: invMemo, taxType: taxTypeOfMode(c.vat_mode),
       origin: { type: 'progress' },
     })
     let ord = 0
@@ -707,7 +710,7 @@ router.post('/:id/progress-invoice', async (req, res, next) => {
         [txnId, isPurchase ? 'expense' : 'income', c.vendor_id || null, c.id, accountId,
          settleAcctCode(isPurchase ? 'expense' : 'income'),   // 위 마일스톤 발행과 같은 이유
          isPurchase ? '대금 지급' : '수금', total, issuedAt, '계좌이체',
-         isPurchase ? '지급완료' : '입금완료', '', invId, `청구서 ${invoice_no} 정산`]
+         isPurchase ? '지급완료' : '입금완료', '', invId, settleMemo({ kind: isPurchase ? 'received' : 'issued', memo: invMemo })]
       )
       await conn.execute('INSERT INTO invoice_matches (id, invoice_id, txn_id, amount, txn_created) VALUES (?,?,?,?,1)', [randomUUID(), invId, txnId, total])
     }

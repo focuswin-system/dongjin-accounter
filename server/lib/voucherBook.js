@@ -28,8 +28,14 @@ async function listVouchers(db, { from, to, kind = 'all', includeIssuance = true
 
   const [rows] = await db.execute(`
     SELECT t.id, t.kind, t.amount, t.date, t.category, t.memo, t.account_code, t.has_splits,
-           a.acct_code AS bank_code, a.name AS account_name, v.name AS vendor_name
+           a.acct_code AS bank_code, a.name AS account_name, v.name AS vendor_name,
+           /* 이 거래가 붙은 청구서 — 한 거래를 여러 청구서에 나눠 붙일 수 있어 모아 적는다.
+              매칭이 없는 옛 거래는 invoice_id 로 본다 */
+           COALESCE((SELECT GROUP_CONCAT(DISTINCT i2.invoice_no ORDER BY i2.invoice_no SEPARATOR ', ')
+                       FROM invoice_matches m JOIN invoices i2 ON i2.id = m.invoice_id
+                      WHERE m.txn_id = t.id), ti.invoice_no) AS invoice_no
       FROM transactions t
+      LEFT JOIN invoices ti ON ti.id = t.invoice_id
       LEFT JOIN accounts a ON a.id = t.account_id
       LEFT JOIN vendors  v ON v.id = t.vendor_id
      WHERE ${where.join(' AND ')}
@@ -66,12 +72,13 @@ async function listVouchers(db, { from, to, kind = 'all', includeIssuance = true
   if (kind === 'expense') noteWhere.push("n.kind = 'payable'")
   const [noteRows] = await db.execute(`
     SELECT n.id, n.kind, n.amount, n.issued_on, n.note_no, n.origin_txn_id,
-           n.status, n.due_on, n.dishonored_on, n.invoice_id,
+           n.status, n.due_on, n.dishonored_on, n.invoice_id, ni.invoice_no,
            v.name AS vendor_name,
            /* ⚠ 거래를 다시 읽지 않는다 — 만기 결제가 그 거래의 account_code 를
               어음 계정으로 덮어쓰기 때문이다. 발행 시점에 굳혀 둔 값을 쓴다. */
            n.origin_acct_code
       FROM notes n
+      LEFT JOIN invoices ni ON ni.id = n.invoice_id
       LEFT JOIN vendors v ON v.id = n.vendor_id
      WHERE ${noteWhere.join(' AND ')}
      ORDER BY n.issued_on, n.id`, noteArgs).catch(() => [[]])
@@ -107,6 +114,7 @@ async function listVouchers(db, { from, to, kind = 'all', includeIssuance = true
     account_name: t.account_name || '',
     memo: t.memo || '',
     category: t.category || '',
+    invoice_no: t.invoice_no || '',
   }))
   const inRange = (d) => !!d && d >= from && d <= to
   for (const nt of noteRows) {
@@ -133,6 +141,7 @@ async function listVouchers(db, { from, to, kind = 'all', includeIssuance = true
       account_name: '',            // 어음은 통장을 안 거친다
       memo: `어음 ${nt.note_no || ''}`.trim(),
       category: nt.kind === 'receivable' ? '받을어음' : '지급어음',
+      invoice_no: nt.invoice_no || '',
     })
   }
   /* ⚠ **청구서 발행도 전표다.** 여기 없어서 이 파일에는 매출 계정(4102)·부가세예수금이
@@ -153,7 +162,7 @@ async function listVouchers(db, { from, to, kind = 'all', includeIssuance = true
     if (kind === 'expense') invWhere.push("i.kind = 'received'")
     const [invs] = await db.execute(`
       SELECT i.id, i.invoice_no, i.kind, i.supply_amount, i.vat_amount, i.total_amount,
-             i.issued_at, i.account_code, v.name AS vendor_name
+             i.issued_at, i.account_code, i.memo, v.name AS vendor_name
         FROM invoices i
         LEFT JOIN vendors v ON v.id = i.vendor_id
        WHERE ${invWhere.join(' AND ')}`, invArgs)
@@ -167,7 +176,7 @@ async function listVouchers(db, { from, to, kind = 'all', includeIssuance = true
         amount: Number(inv.total_amount) || 0,
         vendor_name: inv.vendor_name || '',
         account_name: '',            // 발행 시점엔 통장을 안 거친다
-        memo: `${inv.invoice_no || ''} 발행`.trim(),
+        memo: invoiceVoucher(inv).summary,   // lib/memoText.js 와 같은 말(전표 화면·분개장이 같은 적요)
         category: '',
       })
     }
@@ -235,7 +244,7 @@ function toRows(vouchers) {
         v.date, no, v.type, '', '(계정과목 없음)',
         v.kind === 'income' ? null : v.amount,
         v.kind === 'income' ? v.amount : null,
-        v.vendor_name, v.memo || v.category,
+        v.vendor_name, v.memo || v.category, v.invoice_no || '',
         '계좌·계정과목이 모두 비어 분개를 만들 수 없어요',
       ])
       return
@@ -252,6 +261,7 @@ function toRows(vouchers) {
         l.side === 'credit' ? l.amount : null,
         li === 0 ? head(v.vendor_name) : '',
         li === 0 ? head(v.memo || v.category) : '',
+        li === 0 ? head(v.invoice_no || '') : '',
         li === 0 ? (v.balanced ? '' : (v.missing || '차·대 불일치')) : '',
       ])
     })
@@ -269,6 +279,9 @@ const COLUMNS = [
   { header: '대변',       width: 15, money: true },
   { header: '거래처',     width: 20 },
   { header: '적요',       width: 30 },
+  /* 청구번호 — 예전엔 적요 속에 섞여 있던 번호(lib/memoText.js). 이 파일에서 이 줄이 어느
+     청구서인지 알려주는 유일한 단서라 칸으로 뺐다. 칸이면 정렬·필터도 된다 */
+  { header: '청구번호',   width: 16, align: 'center' },
   { header: '확인',       width: 22 },
 ]
 
@@ -280,6 +293,7 @@ const GUIDE = [
   '• 구분: 입금/출금은 현금 계정이 낀 거래, 대체는 통장·카드끼리 오간 거래입니다.',
   '• "확인" 칸에 글자가 있으면 그 전표는 짝이 안 맞습니다. 대개 거래에 계정과목을 안 골라서 한쪽 다리가 비어 있는 경우입니다.',
   '  숨기지 않고 그대로 실었습니다 — 빼면 합계는 맞아 보이지만 그 거래가 장부에서 사라집니다.',
+  '• 청구번호: 세금계산서(청구서)에서 생긴 줄이거나 거기에 붙은 입금·지급이면 그 번호가 적힙니다.',
   '• 금액의 "-" 는 0원이라는 뜻입니다.',
 ]
 
