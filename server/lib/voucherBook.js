@@ -25,9 +25,13 @@ async function listVouchers(db, { from, to, kind = 'all', includeIssuance = true
   const where = ['t.date >= ?', 't.date <= ?']
   const args = [from, to]
   if (kind === 'income' || kind === 'expense') { where.push('t.kind = ?'); args.push(kind) }
+  /* 이체는 두 줄(보내는 쪽 지출 + 받는 쪽 입금)로 저장되지만 **분개는 한 번**이다.
+     둘 다 세우면 같은 분개(받는 계좌 / 보내는 계좌)가 두 장 나와, 이체 한 번이 분개장과
+     일계표에 두 배로 잡혔다. 보내는 쪽 줄 하나로 세운다(그 줄이 상대 계좌의 계정과목을 들고 있다). */
+  where.push("NOT (t.kind = 'income' AND t.transfer_id IS NOT NULL)")
 
   const [rows] = await db.execute(`
-    SELECT t.id, t.kind, t.amount, t.date, t.category, t.memo, t.account_code, t.has_splits,
+    SELECT t.id, t.kind, t.amount, t.date, t.category, t.memo, t.account_code, t.has_splits, t.vat_deductible,
            a.acct_code AS bank_code, a.name AS account_name, v.name AS vendor_name,
            /* 이 거래가 붙은 청구서 — 한 거래를 여러 청구서에 나눠 붙일 수 있어 모아 적는다.
               매칭이 없는 옛 거래는 invoice_id 로 본다 */
@@ -161,7 +165,7 @@ async function listVouchers(db, { from, to, kind = 'all', includeIssuance = true
     if (kind === 'income')  invWhere.push("i.kind = 'issued'")
     if (kind === 'expense') invWhere.push("i.kind = 'received'")
     const [invs] = await db.execute(`
-      SELECT i.id, i.invoice_no, i.kind, i.supply_amount, i.vat_amount, i.total_amount,
+      SELECT i.id, i.invoice_no, i.kind, i.supply_amount, i.vat_amount, i.total_amount, i.vat_deductible,
              i.issued_at, i.account_code, i.memo, v.name AS vendor_name
         FROM invoices i
         LEFT JOIN vendors v ON v.id = i.vendor_id

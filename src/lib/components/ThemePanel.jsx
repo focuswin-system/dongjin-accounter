@@ -16,7 +16,7 @@ import { MODES, ACCENTS, NAV_MODES, fromPrefs, toPrefs, applyTheme, writeLocal, 
  */
 
 const MODE_ICON = { light: Icon.Sun, dark: Icon.Moon, system: Icon.Screen }
-const NAVMODE_ICON = { fixed: Icon.Menu, rail: Icon.Right, toggle: Icon.More }
+const NAVMODE_ICON = { auto: Icon.Menu, fixed: Icon.Menu, rail: Icon.Right, toggle: Icon.More }
 
 const MODE_WHY = {
   light:  '기본. 밝은 사무실에서 가장 또렷해요.',

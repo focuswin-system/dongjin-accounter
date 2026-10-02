@@ -88,10 +88,13 @@ function transactionVoucher(t) {
     const vatCode  = isIncome ? VAT_PAYABLE : VAT_RECEIVABLE
     lines = []
     let vatSum = 0
+    /* 매입세액 불공제(접대비 등)면 세액을 돌려받지 못한다 → 부가세대급금이 아니라 그 비용에 얹는다.
+       대급금으로 세우면 받을 수 없는 돈이 자산으로 남는다. */
+    const vatToCost = !isIncome && Number(t.vat_deductible) === 0
     for (const s of t.splits) {
       const supply = num(s.supply_amount) || (num(s.amount) - num(s.vat_amount))
-      lines.push(line(bookSide, s.account_code || null, supply))
-      vatSum += num(s.vat_amount)
+      lines.push(line(bookSide, s.account_code || null, vatToCost ? supply + num(s.vat_amount) : supply))
+      if (!vatToCost) vatSum += num(s.vat_amount)
     }
     if (vatSum > 0) lines.push(line(bookSide, vatCode, vatSum))
     lines.push(line(bankSide, bank, amount))
@@ -136,7 +139,13 @@ function invoiceVoucher(inv) {
         line('credit', inv.account_code || DEFAULT_SALES, supply),
         line('credit', VAT_PAYABLE, vat),
       ]
-    : [
+    : Number(inv.vat_deductible) === 0
+      ? [
+          // 불공제 매입(접대비 등): 세액을 돌려받지 못하므로 비용에 얹는다 — 부가세대급금이 없다
+          line('debit',  inv.account_code, supply + vat),
+          line('credit', AP, total),
+        ]
+      : [
         // 매입: 비용과 돌려받을 세금이 생기고(차변), 갚을 빚이 생긴다(대변)
         line('debit',  inv.account_code, supply),
         line('debit',  VAT_RECEIVABLE, vat),

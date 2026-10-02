@@ -28,8 +28,9 @@ const { invoiceVoucher, withNames } = require('../lib/voucher')
 const { newBook, templateSheet, guideSheet, sendBook } = require('../lib/xlsxBook')
 const { MONTHS, vatPeriodOf } = require('../lib/vatPeriod')
 
-const { reconcileCandidates } = require('../lib/reconcile')
-const { createInvoice } = require('../lib/invoiceCreate')
+const { reconcileCandidates, scorePair, isSure, markClearSure } = require('../lib/reconcile')
+const { sameVendorIds } = require('../lib/vendorName')
+const { createInvoice, invoiceDeductible } = require('../lib/invoiceCreate')
 const { settleMemo } = require('../lib/memoText')
 const { sideGuard } = require('../platform/sidePerms')
 const router = Router()
@@ -858,7 +859,7 @@ router.get('/:id', async (req, res, next) => {
 router.get('/:id/voucher', async (req, res, next) => {
   try {
     const [[inv]] = await req.db.execute(`
-      SELECT i.id, i.invoice_no, i.kind, i.supply_amount, i.vat_amount, i.total_amount,
+      SELECT i.id, i.invoice_no, i.kind, i.supply_amount, i.vat_amount, i.total_amount, i.vat_deductible,
              i.issued_at, i.category, i.account_code, v.name AS vendor_name
         FROM invoices i LEFT JOIN vendors v ON v.id = i.vendor_id
        WHERE i.id = ?`, [req.params.id])
@@ -989,6 +990,7 @@ router.post('/', async (req, res, next) => {
       supply: supply_amount, vat: vat_amount, total: total_amount,
       issuedAt: issued_at, dueAt: due_at, status,
       accountId: account_id, memo, taxType, category, accountCode: invAcctCode,
+      vatDeductible: req.body.vat_deductible,
       origin,
     })
     // 거래명세서식 품목 내역(선택) — 없으면 총액만 있는 기존 청구서 그대로다
@@ -1213,6 +1215,14 @@ router.put('/:id', async (req, res, next) => {
       curInv = row || null
     }
     if (category !== undefined) { sets.push('category=?'); vals.push(category || null) }
+    /* 매입세액 공제 여부 — 보냈으면 그대로, 안 보냈는데 비목이 바뀌었으면 새 비목을 따른다.
+       둘 다 아니면 건드리지 않는다(정산·상태 화면의 저장이 사람이 정한 값을 덮지 않게). */
+    if (req.body.vat_deductible !== undefined
+        || (category !== undefined && String(category || '') !== String(curInv?.category || ''))) {
+      const [[k]] = await conn.execute('SELECT kind FROM invoices WHERE id = ?', [req.params.id])
+      sets.push('vat_deductible=?')
+      vals.push(await invoiceDeductible(conn, { kind: k?.kind, category, vatDeductible: req.body.vat_deductible }))
+    }
     if (account_code !== undefined) {
       sets.push('account_code=?')
       vals.push(await resolveInvoiceAcctCode(conn, account_code, category, curInv?.kind))
@@ -1637,7 +1647,8 @@ router.post('/bulk/delete', async (req, res, next) => {
 // ── 매칭 후보: 거래내역에 이미 있는(미매칭) 같은 종류 거래 ──
 router.get('/:id/matchable', async (req, res, next) => {
   try {
-    const [invRows] = await req.db.execute('SELECT kind, vendor_id, supply_amount, total_amount FROM invoices WHERE id = ?', [req.params.id])
+    const [invRows] = await req.db.execute(
+      'SELECT kind, vendor_id, supply_amount, total_amount, issued_at, due_at FROM invoices WHERE id = ?', [req.params.id])
     const inv = invRows[0]
     if (!inv) return res.json([])
     const txnKind = inv.kind === 'issued' ? 'income' : 'expense'
@@ -1666,22 +1677,35 @@ router.get('/:id/matchable', async (req, res, next) => {
       ORDER BY t.date DESC
       LIMIT 100
     `, [txnKind])
+    /* 같은 곳으로 볼 거래처 — 이름이 비슷한 벌까지(lib/vendorName.js). '복지관'과 '복지회관'으로 갈린
+       입금이 이 청구서의 짝인데도 '거래처 다름'으로 밀렸다(운영 fowin) */
+    const simIds = new Set(inv.vendor_id ? await sameVendorIds(req.db, inv.vendor_id) : [])
+    const invForScore = { vendor_id: inv.vendor_id, issued_at: inv.issued_at, due_at: inv.due_at, remain, total, supply }
     const enriched = rows.map(r => {
       /* 금액 판정은 **거래에서 아직 안 쓴 금액**으로 한다. 600만원 중 100만원을 이미
          다른 청구서에 붙였다면, 이 청구서에 붙일 수 있는 건 500만원이다. */
       const used = Number(r.used) || 0
       const amt = Number(r.amount) - used
-      const sameVendor = !!inv.vendor_id && r.vendor_id === inv.vendor_id
+      const sameVendor = !!inv.vendor_id && simIds.has(r.vendor_id)
       const matchTotal = amt === total
       const matchSupply = amt === supply
       const matchRemain = amt === remain
       const related = sameVendor || matchTotal || matchSupply || matchRemain
       // 정렬 점수: 거래처+금액 둘 다 일치 > 금액 일치 > 거래처 일치
       const score = (sameVendor ? 1 : 0) + ((matchTotal || matchRemain || matchSupply) ? 2 : 0)
+      /* 거의 확실한 짝 — **대사와 같은 판정**(lib/reconcile.js isSure: 거래처·금액이 맞고, 청구서보다 먼저가
+         아니고, 기한 근처). 화면은 이게 있으면 '새로 등록' 대신 연결부터 보여 준다 — 이미 들어온 입금을 두고
+         [입금 처리]가 새 입금을 만들어 같은 돈이 두 줄 섰다(운영 fowin 10줄).
+         비슷한 이름 거래처는 판정에서 같은 거래처로 본다(위 simIds) */
+      const forScore = { ...r, vendor_id: sameVendor ? inv.vendor_id : r.vendor_id }
+      const sure = isSure(invForScore, forScore, scorePair(invForScore, forScore).why)
       // available = 이 거래에서 아직 안 쓴 금액(화면이 '남은 500만원'으로 보여준다)
-      return { ...r, used, available: amt, sameVendor, matchTotal, matchSupply, matchRemain, related, score }
+      return { ...r, used, available: amt, sameVendor, matchTotal, matchSupply, matchRemain, related, score, sure }
     })
-    enriched.sort((a, b) => (b.score - a.score) || (a.date < b.date ? 1 : -1))
+    // 확실한 짝은 하나일 때만 — 둘 이상이면 tie(사람이 고른다). 규칙은 lib/reconcile.js 한 곳
+    markClearSure(enriched)
+    // 확실한 짝이 맨 위 — 그다음은 종전대로(점수 → 최근)
+    enriched.sort((a, b) => (Number(b.sure || b.tie) - Number(a.sure || a.tie)) || (b.score - a.score) || (a.date < b.date ? 1 : -1))
     res.json(enriched)
   } catch (e) { next(e) }
 })

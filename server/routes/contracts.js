@@ -62,16 +62,21 @@ const metrics = (r) => {
   const cost    = Number(r.cost_total || 0)    // 이 매출주문에 귀속된 원가 (외주비 등)
   const term_in_done = Number(r.term_in_done || 0)
   const term_out     = Number(r.term_out || 0)
-  const collected      = isPurchase ? out : in_done
-  const term_collected = isPurchase ? term_out : term_in_done
-  const billed      = Number(r.billed || 0)
-  const term_billed = Number(r.term_billed || 0)
+  /* 장부 전 정산(PRIOR) — 이 장부를 쓰기 전에 이미 청구·수금이 끝난 회차. 청구서·거래가 없으니
+     위 합계에는 없다 → 여기서 청구액·수금액 양쪽에 더한다(공급가액에 이 계약의 세율을 붙여 총액으로).
+     손익(profit)에는 넣지 않는다 — 그때의 원가도 장부에 없어서, 매출만 넣으면 이익이 부풀어 보인다. */
+  const vatMul = 1 + vatRateOf(r.vat_mode)   // 면세면 1 — 아래 총액(termTotal)도 같은 값을 쓴다
+  const prior      = Math.round(Number(r.prior_supply || 0) * vatMul)
+  const term_prior = Math.round(Number(r.term_prior_supply || 0) * vatMul)
+  const collected      = (isPurchase ? out : in_done) + prior
+  const term_collected = (isPurchase ? term_out : term_in_done) + term_prior
+  const billed      = Number(r.billed || 0) + prior
+  const term_billed = Number(r.term_billed || 0) + term_prior
 
   const openEnded = r.billing_mode === 'recurring' && r.term_mode === 'open'
   // 총액 개념이 없는 주문: 무기한 정기 + 기성형(품목 단가×수량으로 그때그때 청구).
   const noTotal = openEnded || r.billing_mode === 'progress'
-  // amount는 정기형이면 '이번 텀 총액'(저장 시 서버가 산출), 총액형이면 주문 총액. 면세면 부가세 없음.
-  const vatMul = 1 + vatRateOf(r.vat_mode)
+  // amount는 정기형이면 '이번 텀 총액'(저장 시 서버가 산출), 총액형이면 주문 총액. 면세면 부가세 없음(vatMul 은 위에서).
   const termTotal = noTotal ? null : Math.round((Number(r.amount) || 0) * vatMul)
   /* 공급가액·세액을 나눠 내려 준다 — 목록에서 열로 펴 볼 수 있게.
      ⚠ 화면에서 x1.1 로 되계산하면 안 된다(면세·영세가 있고, 반올림 자리도 여기 규칙이다).
@@ -86,7 +91,7 @@ const metrics = (r) => {
   return {
     ...r,
     is_purchase: isPurchase,
-    in_done, out, billed, term_billed, term_collected, collected,
+    in_done, out, billed, term_billed, term_collected, collected, prior,
     term_total: termTotal, term_supply: termSupply, term_vat: termVat, remain, ar_remain,
     // 매입 주문에 원가·손익 개념을 붙이면 "나간 돈 = 손해"로 읽히는 거짓 숫자가 나온다.
     // 매출 주문의 원가는 '이 주문에 귀속된 지출'(cost_contract_id)이지, 이 주문이 근거인 지출이 아니다.
@@ -108,6 +113,8 @@ const metrics = (r) => {
 // '지급액'에 섞여, 매입주문의 미지급 잔액이 실제보다 적게 보이고 원가는 부풀려진다.
 // (입금은 calcBalance도 status를 보지 않으므로 여기서도 동일하게 맞춘다)
 const PAID = "status='지급완료'"
+/** 장부 전 정산 — 계약 등록 전에 이미 끝난 회차의 상태(화면 Contract.jsx PRIOR_SETTLED 와 같은 글자). 아래 라우트 설명 참고 */
+const PRIOR = '장부 전 정산'
 /* 수입도 완료된 것만 센다. 예전 주석은 'calcBalance 가 입금 status 를 안 본다'였는데
  * 그 뒤 calcBalance 가 SETTLED_INCOME 으로 막도록 바뀌었고 여기만 남았다 →
  * 아직 안 들어온 입금이 주문 수금액·손익에 섞여 손익이 부풀었다. */
@@ -162,7 +169,10 @@ const METRIC_COLS = `
                WHERE i.contract_id=c.id AND i.kind = ${PURCHASE_KIND}),0)
   - COALESCE((SELECT SUM(m.amount) FROM invoice_matches m
                JOIN invoices i2 ON i2.id = m.invoice_id
-              WHERE i2.contract_id=c.id AND i2.kind = ${PURCHASE_KIND}),0)) AS ar_open`
+              WHERE i2.contract_id=c.id AND i2.kind = ${PURCHASE_KIND}),0)) AS ar_open,
+  COALESCE((SELECT SUM(m.amount) FROM milestones m WHERE m.contract_id=c.id AND m.status='${PRIOR}'),0) AS prior_supply,
+  COALESCE((SELECT SUM(m.amount) FROM milestones m WHERE m.contract_id=c.id AND m.status='${PRIOR}'
+            AND (c.current_term_start IS NULL OR m.due_date >= c.current_term_start)),0) AS term_prior_supply`
 
 router.get('/', async (req, res, next) => {
   try {
@@ -245,14 +255,13 @@ router.get('/schedule/pending', async (req, res, next) => {
            '2026-12-20' < 'Wed…' 가 참이 됐다 — **미래 회차까지 전부 소급으로 잡혔다**(실측).
            UTC 로 자르면 KST 저녁 등록분이 하루 당겨지는 문제도 함께 있어, 이 파일이 정기 규칙에
            이미 쓰는 방식(UNIX_TIMESTAMP + kstDate)과 똑같이 맞춘다. */
-      const setup = r.contract_setup_epoch != null
-        ? kstDate(Number(r.contract_setup_epoch) * 1000) : ''
+      const setup = setupDateOf(r.contract_setup_epoch)
       const due = String(r.due_date || '').slice(0, 10)
       /* 이을 수 있는 청구서가 있으면 그쪽이 먼저다. '소급'은 "이건 어떻게 됐더라"이고
          이건 "혹시 이거 아닌가요"라 **할 일이 분명하다** — 더 분명한 쪽으로 보낸다. */
       const cands = loose.get(r.contract_id) || []
       const state = cands.length ? 'maybe_issued'
-        : (setup && due && due < setup) ? 'backfill' : 'due'
+        : isBeforeSetup(due, setup) ? 'backfill' : 'due'
       return { ...r, amount, vat: vatOf(amount, r.vat_mode), contract_setup_date: setup, state,
                loose_invoices: cands }
     }))
@@ -502,14 +511,23 @@ router.delete('/milestones/:id', async (req, res, next) => {
 // 청구 일정 → 청구서 발행 (+선택적 기입금). 원자적: 청구서·(기입금 시)거래·매칭·일정 상태를 한 트랜잭션에서 처리.
 // 거래처 gubu로 매출(issued)/매입(received) 자동 판별. 이미 발행된 일정은 409로 거부(중복 방지).
 router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
-  const { paid, date, account_id } = req.body
+  const { paid, date, account_id, issued_at } = req.body
   // 기입금(paid)이면 실제 입/출금 거래가 생기므로 미래 일자 금지
   if (paid) { const de = futureDateError(date); if (de) return res.status(400).json({ error: de }) }
+  /* 발행일 — 보내면 그 날짜로, 안 보내면 오늘(종전대로).
+     ⚠ 예전엔 **늘 오늘**이었다. 계약 등록 전 회차(2024년 일정)를 발행해도 오늘 날짜 청구서가 되어,
+       2년 전 매출·부가세가 이번 분기에 섰다(운영 fowin 2026-08: 2,200만 원). 화면이 소급 회차는
+       일정 날짜를 보낸다. 미래 날짜는 막는다 — 미리 끊는 건 반복거래·수동 등록의 일이다. */
+  if (issued_at != null && issued_at !== '') {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(issued_at))) return res.status(400).json({ error: '발행일 형식이 올바르지 않아요 (YYYY-MM-DD)' })
+    const fe = futureDateError(issued_at); if (fe) return res.status(400).json({ error: fe })
+  }
   const conn = await req.db.getConnection()
   try {
     await conn.beginTransaction()
     const [[ms]] = await conn.execute(
-      `SELECT m.*, c.name AS contract_name, c.vendor_id, c.vat_mode, c.side, v.gubu
+      `SELECT m.*, c.name AS contract_name, c.vendor_id, c.vat_mode, c.side, v.gubu,
+              UNIX_TIMESTAMP(c.created_at) AS setup_epoch
        FROM milestones m JOIN contracts c ON m.contract_id = c.id
        LEFT JOIN vendors v ON c.vendor_id = v.id WHERE m.id = ? FOR UPDATE`,
       [req.params.milestoneId]
@@ -525,7 +543,11 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
     const vat = vatOf(supply, ms.vat_mode)
     const total = supply + vat
     const today = kstToday()   // UTC면 KST 00~09시에 하루 전(연초엔 전년도 채번)으로 찍힌다
-    const year = today.slice(0, 4)
+    /* 날짜를 안 보냈으면 오늘 — 단 **계약 등록 전 회차는 그 일정 날짜**다(그때 끊은 청구서다).
+       화면 두 곳(세금계산서 발행예정·계약 청구 일정)이 따로 정하지 않게 여기서 정한다 */
+    const msDue = String(ms.due_date || '').slice(0, 10)
+    const issuedAt = issued_at || (isBeforeSetup(msDue, setupDateOf(ms.setup_epoch)) ? msDue : today)
+    const year = issuedAt.slice(0, 4)   // 번호는 발행 연도로 — 2024년 청구서가 2026 번호를 달지 않게
     const prefix = isPurchase ? '매입' : '청구'
     // 채번: 최대 일련번호+1 (삭제해도 재사용 안 됨)
     const [[{ maxno }]] = await conn.execute(
@@ -542,11 +564,11 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
      * 청구 일정의 예정일이 이미 지난 뒤 발행하면(늦은 청구) due_at < issued_at 이 되어
      * 발행 즉시 '연체 미수금'으로 집계됐다 — 연체 금액·건수가 실제와 다르게 잡힌다.
      * 예정일이 지났으면 발행일을 만기로 본다(그날부터 받을 돈이다). */
-    const dueAt = ms.due_date && ms.due_date >= today ? ms.due_date : today
+    const dueAt = ms.due_date && ms.due_date >= issuedAt ? ms.due_date : issuedAt
     /* 마감된 달로는 청구서를 발행할 수 없다. 예전엔 'paid' 일 때(거래를 만들 때)만 검사해서,
      * 마감·신고를 끝낸 달로 청구서만 새로 꽂을 수 있었다 → 그 분기 부가세 집계가 신고 후에 바뀐다.
      * 수동 등록(POST /invoices)은 처음부터 issued_at 으로 막고 있었다. */
-    { const ce = await closedDocError(conn, today); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
+    { const ce = await closedDocError(conn, issuedAt); if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) } }
     // 금액 0(마일스톤 금액을 안 채운 채 발행)이면 '입금 예정 0원' 청구서가 남아
     // 홈 '할 일'과 미수금 목록을 채운다 — 실제로 그런 청구서가 생겨 있었다.
     { const ae = amountError(total); if (ae) { await rollbackQuietly(conn); return res.status(400).json({ error: ae }) } }
@@ -558,7 +580,7 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
       kind, invoiceNo: invoice_no,
       vendorId: ms.vendor_id, contractId: ms.contract_id,
       supply, vat, total,
-      issuedAt: today, dueAt, status,
+      issuedAt, dueAt, status,
       accountId: paid ? accountId : null,
       memo: invMemo, taxType: taxTypeOfMode(ms.vat_mode),
       origin: { type: 'milestone', milestoneId: req.params.milestoneId, paid: !!paid },
@@ -589,6 +611,52 @@ router.post('/schedule/:milestoneId/issue', async (req, res, next) => {
     res.json({ ok: true, id: invId, invoice_no, kind })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
+})
+
+/** 계약 등록일(KST 'YYYY-MM-DD'). UNIX_TIMESTAMP 로 읽어 kstDate 로 만든다 — 발행예정 목록 주석의 사고 참고 */
+const setupDateOf = (epoch) => (epoch != null ? kstDate(Number(epoch) * 1000) : '')
+/** 계약을 등록하기 **전** 날짜의 회차인가 — 발행예정(소급 구획)·발행일 기본값·장부 전 정산이 같은 답을 쓴다 */
+const isBeforeSetup = (due, setup) => !!(due && setup && String(due).slice(0, 10) < setup)
+
+/* ── 장부 전 정산 ──────────────────────────────────────────────────
+ * 계약을 등록하기 **전** 날짜의 회차가 그때 이미 청구·수금(지급)까지 끝났으면, 청구서도 입금도 만들지
+ * 않고 회차만 '장부 전 정산'으로 닫는다. 계약 수금 현황에는 들어가고(METRIC_COLS prior_*),
+ * 매출·부가세·통장에는 안 들어간다 — 그 돈은 이 장부를 쓰기 전의 일이다.
+ *
+ * 왜 — 2024년 계약을 2026년에 등록해 '수금 완료'로 만들려면 청구서를 발행하고 입금을 넣는 수밖에
+ *   없었고, 발행일이 오늘이라 2년 전 매출 2,200만 원이 이번 분기 부가세에 섰다(운영 fowin 2026-08-21).
+ * 계약 등록 전 회차에만 쓴다 — 등록 뒤의 일은 장부에 있어야 한다(청구서·입금을 정상으로). */
+router.post('/schedule/:milestoneId/prior-settle', async (req, res, next) => {
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [[ms]] = await conn.execute(
+      `SELECT m.id, m.status, m.invoice_id, LEFT(m.due_date, 10) AS due, UNIX_TIMESTAMP(c.created_at) AS setup_epoch
+         FROM milestones m JOIN contracts c ON c.id = m.contract_id WHERE m.id = ? FOR UPDATE`,
+      [req.params.milestoneId])
+    if (!ms) { await rollbackQuietly(conn); return res.status(404).json({ error: '청구 일정을 찾을 수 없어요' }) }
+    if (ms.status !== '예정' || (ms.invoice_id && ms.invoice_id !== '')) {
+      await rollbackQuietly(conn); return res.status(409).json({ error: '이미 처리된 청구 일정이에요' })
+    }
+    if (!isBeforeSetup(ms.due, setupDateOf(ms.setup_epoch))) {
+      await rollbackQuietly(conn)
+      return res.status(409).json({ error: '계약을 등록하기 전 날짜의 일정만 장부 전 정산으로 닫을 수 있어요. 그 뒤의 일은 청구서를 발행해 주세요.' })
+    }
+    await conn.execute('UPDATE milestones SET status = ? WHERE id = ?', [PRIOR, ms.id])
+    await conn.commit()
+    res.json({ ok: true })
+  } catch (e) { await rollbackQuietly(conn); next(e) }
+  finally { conn.release() }
+})
+
+// 장부 전 정산 되돌리기 — 다시 '예정'으로(청구서·거래는 애초에 없었으니 지울 것도 없다)
+router.post('/schedule/:milestoneId/prior-reopen', async (req, res, next) => {
+  try {
+    const [r] = await req.db.execute('UPDATE milestones SET status = ? WHERE id = ? AND status = ?',
+      ['예정', req.params.milestoneId, PRIOR])
+    if (!r.affectedRows) return res.status(409).json({ error: '장부 전 정산인 일정이 아니에요' })
+    res.json({ ok: true })
+  } catch (e) { next(e) }
 })
 
 // 기성 청구 발행 — 기성형(progress) 주문에서 품목별 수량을 받아 청구서 1건 + 품목 내역(invoice_lines)을 만든다.
@@ -741,10 +809,13 @@ router.get('/:id', async (req, res, next) => {
     if (!cRows[0]) return res.status(404).json({ error: 'Not found' })
     const c = cRows[0]
     const m = metrics(c)
-    const [milestones] = await req.db.execute(
+    const [msRows] = await req.db.execute(
       'SELECT * FROM milestones WHERE contract_id = ? ORDER BY due_date',
       [req.params.id]
     )
+    // 계약 등록 전 회차 표시 — 화면이 '장부 전 정산'·'일정 날짜로 발행'을 보여줄지 정한다(판정은 위 isBeforeSetup 하나)
+    const setupDate = setupDateOf(c.created_at ? Math.floor(new Date(c.created_at).getTime() / 1000) : null)
+    const milestones = msRows.map(x => ({ ...x, before_setup: isBeforeSetup(x.due_date, setupDate) }))   // due_date 는 VARCHAR('YYYY-MM-DD')
     const [incomeRows] = await req.db.execute(
       `SELECT t.*, v.name AS vendor_name, a.name AS account_name
          FROM transactions t
@@ -776,7 +847,7 @@ router.get('/:id', async (req, res, next) => {
       id: t.id,
       date: t.date, type: t.category || '입금', vendor: t.vendor_name || '—',
       memo: t.memo || t.doc_no || '', account: t.account_name || '',
-      amount: Number(t.amount), status: t.status, evid: !!(t.evid_url || t.evid_type),
+      amount: Number(t.amount), status: t.status, evid: !!(t.evid_url || (t.evid_type && t.evid_type !== '없음')),
     }))
     const expenses = expenseRows.map(t => ({
       id: t.id,
@@ -787,7 +858,7 @@ router.get('/:id', async (req, res, next) => {
       paidContract: t.paid_contract_name || null,
     }))
     const evidences = [...incomeRows, ...expenseRows]
-      .filter(t => t.evid_url || t.evid_type)
+      .filter(t => t.evid_url || (t.evid_type && t.evid_type !== '없음'))
       .map(t => ({
         name: t.evid_url ? String(t.evid_url).split('/').pop() : (t.evid_type || '증빙'),
         type: t.evid_type || '', size: '', date: t.date,
@@ -1472,3 +1543,6 @@ router.patch('/:id/clear-file', async (req, res, next) => {
 })
 
 module.exports = router
+// 테스트용 — 판정 규칙(DB 없이 검증)
+module.exports._isBeforeSetup = isBeforeSetup
+module.exports._metrics = metrics

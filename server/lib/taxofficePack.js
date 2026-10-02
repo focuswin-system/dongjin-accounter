@@ -124,7 +124,7 @@ async function taxofficePack(db, month, closingDay = 0) {
      WHERE t.kind = 'expense' AND t.status = ?
        AND t.date BETWEEN ? AND ?
        AND (t.evid_url IS NULL OR t.evid_url = '')
-       AND (t.evid_type IS NULL OR t.evid_type = '')
+       AND (t.evid_type IS NULL OR t.evid_type IN ('', '없음'))
        AND t.payroll_id IS NULL
        AND t.loan_id IS NULL AND t.savings_id IS NULL
        AND ${pnlOnly('t')}

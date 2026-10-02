@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { AccountPicker } from '../lib/components/AccountPicker'
+import { categoryOption } from '../lib/categoryWords'
+import { AccountField } from '../lib/components/AccountField'
 import { AttachmentPanel } from '../lib/components/AttachmentPanel'
 import { useOrdersFromMes } from '../lib/customModules'
 import { Icon, fmtNum, fmtDateShort, vendorLabel, useToast, useConfirm, Combobox, Drawer, MoneyInput, localToday, DateInput } from '../lib/ui'
 import { api } from '../lib/api'
+import { addVendorAsking } from '../lib/vendorAsk'
 import { withMainFirst, isMainAccount } from '../lib/mainAccount'
 import { quickAddCategory, quickAddRefItemWithId } from '../lib/quickAdd'
 import { contractsForVendor, contractFitsVendor } from '../lib/contractPick'
@@ -16,6 +18,9 @@ import { useSaveKey, SaveKeyHint } from '../lib/useSaveKey'
 // 과세유형 3종. 영세 = 세율 0%인 과세거래(수출·해외용역) — 세액은 0이지만 과세표준엔 들어간다.
 // 면세와 값을 나눠 두지 않으면 신고서에서 둘을 구분할 수 없다. 서버 lib/vat.js와 같은 값집합.
 const TAX_TYPES = ["과세", "면세", "영세"];
+/* 증빙 '없음' — 사람이 **확인하고 고른** 값이라 저장한다. 빈 값(아직 안 고름·옛 거래)과 구분해야
+   부가세 집계가 이 거래를 불공제로 센다(server/lib/vatAgg.js). */
+const NO_EVID = "없음";
 
 /* 자금 계정 — 계정과목 후보에서 제외한다. 서버 lib/categoryAccount.js FUND_CODES 와 같은 값집합.
  * 계좌를 이미 고르는 화면이라, 상대 계정에까지 예금·현금이 오면 분개가 성립하지 않는다. */
@@ -173,11 +178,6 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
   /* 기본으로 골라 둘 계좌 — 주거래가 있으면 그것, 없으면 통장 첫 줄.
      ⚠ 이 자리는 **원래도 자동 선택**하던 곳이다(accounts[0]). 새로 위험을 만드는 게 아니라
        더 맞는 것으로 바꾸는 것이다. 칩 목록은 여전히 앞에 세우기만 하고 미리 고르지 않는다. */
-  const defaultAccountName = () => {
-    const wantId = company?.[initialKind === 'income' ? 'main_in_account_id' : 'main_out_account_id']
-    const pick = accounts.find(a => a.id === wantId) || accounts.find(a => a.kind !== 'card') || accounts[0]
-    return pick?.name || ''
-  };
   /* 계좌를 세 갈래로 나눠 쓴다 — 결제수단마다 고를 수 있는 것이 다르다.
      현금(금고 시재)을 통장 칩에 섞어 두면 "이체로 현금을 냈다"는 말이 안 되는 기록이 생긴다. */
   const isCashAcct = (a) => a.kind !== 'card' && a.type === '현금'
@@ -190,6 +190,30 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     accounts.filter(a => a.kind !== 'card' && !isCashAcct(a)), company, use)
   const cardAccounts = withMainFirst(accounts.filter(a => a.kind === 'card'), company, 'card')
   const cashAccounts = accounts.filter(isCashAcct)
+  /* 결제수단 → 증빙 기본값. 카드는 신용카드매출전표로 정해져 있다(물을 게 없다).
+     카드에서 다른 수단으로 바꾸면 그 자동값만 비운다 — 사람이 고른 증빙은 건드리지 않는다 */
+  const CARD_EVID = '신용카드매출전표'
+  /* 매입세액 공제 여부 — **비목도 증빙도 공제 가능일 때만** 공제(2026-09-30).
+     예전엔 비목·증빙이 각자 덮어써서, 불공제 비목(접대비)을 고른 뒤 법인카드를 고르면 카드 매출전표가
+     '공제 가능'이라며 되돌려 놓았다. 증빙은 불공제로 **낮출 수만** 있고 비목의 불공제를 풀지 못한다.
+     (아래 '매입세액 불공제' 체크는 사람이 직접 고치는 자리라 이 규칙 밖이다) */
+  const dedOf = (f, evidName, catName = f.category) => {
+    const c = categories.find(x => x.name === catName && String(x.id || '').startsWith(kind === 'income' ? 'INC-' : 'EXP-'))
+    const e = evidenceTypes.find(x => x.name === evidName)
+    // '없음'을 **골랐으면** 적격증빙이 없는 것 — 매입세액 공제 불가. 아직 안 고른 빈 값과 다르다
+    if (evidName === NO_EVID) return false
+    return (!c || c.vat_deductible !== 0) && (!e || e.deductible !== 0)
+  }
+  const evidFor = (method, f) => {
+    const card = ['법인카드', '개인카드'].includes(method)
+    if (card) {
+      const e = evidenceTypes.find(x => x.name === CARD_EVID)
+      return { evid_type: CARD_EVID, vatDeductible: e ? dedOf(f, CARD_EVID) : f.vatDeductible }
+    }
+    return f.evid_type === CARD_EVID ? { evid_type: '' } : {}
+  }
+  // 결제수단 칸에서 새 계좌·카드를 만들면 목록을 다시 읽는다(AccountField onCreated)
+  const reloadAccounts = async () => { const list = await api.getAccounts(); if (Array.isArray(list)) setAccounts(list) }
   const [categories, setCategories] = useState([]);
   const [items, setItems] = useState([]);            // 품목(선택)
   const [jeokyos, setJeokyos] = useState([]);        // 적요
@@ -275,9 +299,9 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       setCompany(co);
       /* initialKind 를 본다 — kind 상태는 아래 초기화 effect 가 setKind 하기 전이라 **직전에 연 방향**이다.
          페이지를 열고 처음 [입금]을 누르면 주 출금 계좌가 골라지던 자리(코드 검토 지적). */
-      const wantId = co?.[initialKind === 'income' ? 'main_in_account_id' : 'main_out_account_id']
-      const pick = list.find(a => a.id === wantId) || list.find(a => a.kind !== 'card') || list[0]
-      if (pick) setForm(f => ({ ...f, account: f.account || pick.name }));
+      /* ⚠ 새 거래에서 **계좌를 미리 고르지 않는다**(2026-09-30). 예전엔 주거래(없으면 첫 통장)를 채워 두었는데,
+         그대로 저장하면 다른 통장·카드로 나간 돈이 주거래로 적힌다 — lib/mainAccount.js 머리말의 사고가 이 폼에서 났다.
+         주거래는 목록 맨 앞에 세우고 '주거래' 표시만 한다(입금 처리·엑셀 업로드와 같은 규칙) */
     });
     api.getContracts().then(list => setContracts(list));
     // 고르기만 하면 되므로 최소 목록 — 전체 목록은 급여까지 담고 있어 인사 권한이 필요하다
@@ -303,7 +327,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       /* ⚠ 기본 계좌는 `accounts[0]` — **가나다순 첫 줄**이었다. 카드가 걸릴 수도 있고,
          주거래를 지정해 뒀는데 엉뚱한 통장이 골라져 있으면 "왜 이게 선택돼 있지"가 된다.
          주거래 → 통장 첫 줄 순으로 고른다(로더와 같은 규칙). */
-      setForm({ ...initialFormFor(initialKind, initialContract, defaultAccountName(), initialCostContract),
+      // 계좌는 미리 채우지 않는다 — 계좌 로드 쪽 주석과 같은 이유(lib/mainAccount.js). 주거래는 목록 앞에 세우기만
+      setForm({ ...initialFormFor(initialKind, initialContract, "", initialCostContract),
         vendor: initialVendor || "",
         category: initialCategory || "",   // 환불·환입처럼 비목을 미리 지정하고 여는 경우
         memo: initialMemo || "" });
@@ -655,18 +680,6 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     })
   }
 
-  /* 방향을 바꾸면 **방향에 매인 값들을 비운다.**
-   * 비목·계정과목·과세유형은 입금용(INC-)과 출금용(EXP-)이 서로 다른 목록이다.
-   * 안 비우면 입금으로 고른 수금 유형이 그대로 남아 **지출 거래에 매출 계정과목이 박힌다** —
-   * 저장 검증은 "비어 있지 않음"만 보므로 그대로 통과한다.
-   * 거래처·금액·날짜·적요는 방향과 무관하니 그대로 둔다(다시 적게 하면 성가시다). */
-  const switchKind = (v) => {
-    if (v === kind) return
-    setKind(v)
-    setForm(f => ({ ...f, category: '', acctGroup: '', accountCode: '', item: '', itemId: '',
-      taxType: '과세', contract: '', costContract: '' }))
-  }
-
   const handleSave = async () => {
     if (busy) return;
     if (!form.vendor)   { toast.push("거래처를 선택해주세요"); return; }
@@ -676,6 +689,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
     if (!splitOn && !form.category) { toast.push(kind === "income" ? "수금 유형을 선택해주세요" : "비목을 선택해주세요"); return; }
     if (!form.memo || !form.memo.trim()) { toast.push("적요(거래 내용)를 입력해주세요"); return; }
     if (!form.amount)   { toast.push("금액을 입력해주세요"); return; }
+    /* 계좌를 미리 골라 두지 않으므로(위 계좌 로드 주석) 여기서 묻는다 — 현금·어음은 계좌 없이도 된다(서버 ledgerError 와 같은 규칙) */
+    if (!form.account && !['현금', '어음'].includes(form.method)) {
+      toast.push(kind === "income" ? "입금 계좌를 골라 주세요"
+        : ['법인카드', '개인카드'].includes(form.method) ? "카드를 골라 주세요" : "출금 계좌를 골라 주세요", { tone: 'warn' }); return;
+    }
     /* 청구서를 골랐으면 **그 청구서에 붙이는 길**로 간다 — 거래를 따로 만들고 나중에 잇는 게 아니라
        한 번에 만들고 연결한다(그래야 같은 돈이 두 줄 서지 않는다). */
     if (linkInv && !editTxn) { await settleOnInvoice(linkInv); return; }
@@ -835,7 +853,8 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
       //   그때 id 문자열이 doc_no 에 박히면 화면에 uuid 가 적힌 주문처럼 보인다. 걸러 낸다.
       doc_no:       contractObj ? '' : (isUuid(form.contract) ? '' : (form.contract || '')),
       memo:         form.memo || "",
-      evid_type:    form.evid_type || "",
+      // 카드 결제는 증빙이 정해져 있다 — 비어 있던 옛 거래도 저장하면 채운다(화면이 "(자동)"으로 보여 준 값과 같게)
+      evid_type:    form.evid_type || (kind === "expense" && ["법인카드", "개인카드"].includes(form.method) ? CARD_EVID : ""),
       evid_url:     form.evid_url  || "",
     }
 
@@ -887,26 +906,18 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
 
   return (
     <FormShell embedded={embedded} open={open} onClose={onClose} label={editTxn ? "거래 수정" : "거래 등록"}>
-        {/* 방향은 **폼 안에서** 바꾼다(전표입력이 전표 종류를 안에서 바꾸는 것과 같은 규칙).
-            밖에서 한 번 더 묻던 때는, 잘못 골라 들어오면 닫고 처음부터 다시 해야 했다.
-            ⚠ 수정 중에는 못 바꾼다 — 방향이 바뀌면 그건 다른 거래다(지우고 다시 적는 게 맞다). */}
+        {/* 방향은 **입구에서** 고르고 폼에서는 표시만 한다(2026-09-30 사용자).
+            예전엔 폼 안에서 바꿨다 — 밖에서 물으면 잘못 골랐을 때 다시 적어야 해서였다. 그런데 폼이 **입금으로 먼저**
+            열리는 바람에 그대로 적다가 거래처가 매출처로 등록됐다. 이제 방향은 아무것도 적기 전(첫 화면)에 고르니
+            잘못 골라도 닫고 다시 여는 값이 거의 없다. 수정 중에도 못 바꾼다 — 방향이 바뀌면 다른 거래다. */}
         {!embedded && (
         <div className="drawer-head" style={{ padding: "14px 22px" }}>
           <div className="row gap-8" style={{ alignItems: "center" }}>
-            {editTxn ? (
-              <span className={`badge ${kind === "income" ? "pos" : "neg"}`}>
-                {kind === "income"
-                  ? <><Icon.In size={13} style={{ verticalAlign: -2, marginRight: 3 }}/> 입금</>
-                  : <><Icon.Out size={13} style={{ verticalAlign: -2, marginRight: 3 }}/> 지출</>}
-              </span>
-            ) : (
-              <div className="row gap-4">
-                {[["income", "입금"], ["expense", "출금"]].map(([v, l]) => (
-                  <button key={v} type="button" className={`chip ${kind === v ? "active" : ""}`}
-                    onClick={() => switchKind(v)}>{l}</button>
-                ))}
-              </div>
-            )}
+            <span className={`badge ${kind === "income" ? "pos" : "neg"}`}>
+              {kind === "income"
+                ? <><Icon.In size={13} style={{ verticalAlign: -2, marginRight: 3 }}/> 입금</>
+                : <><Icon.Out size={13} style={{ verticalAlign: -2, marginRight: 3 }}/> 출금</>}
+            </span>
             <span className="fw-700" style={{ fontSize: 15 }}>{editTxn ? "거래 수정" : "거래 등록"}</span>
           </div>
           <button className="icon-btn ml-auto" title="닫기" onClick={onClose}><Icon.Close size={16}/></button>
@@ -968,9 +979,13 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                    같은 상호가 둘 이상일 때만 사업자번호를 붙여 가릴 수 있게 한다 —
                    늘 붙이면 목록이 읽기 어려워진다. */
                 options={(() => {
-                  const pool = kind === "income"
+                  const base = kind === "income"
                     ? vendors.filter(v => ["B", "C"].includes(v.gubu))
                     : vendors.filter(v => ["A", "E", "C"].includes(v.gubu))
+                  /* ⚠ **이미 고른 거래처는 방향과 상관없이 남긴다.** 입금 폼에서 추가한 거래처(매출처)를 고른 채
+                     출금으로 바꾸면 목록에서 빠져, 칸에 이름 대신 **내부 id(영문·숫자)**가 보였다(2026-09-30 사용자) */
+                  const sel = form.vendor && !base.some(v => v.id === form.vendor) && vendors.find(v => v.id === form.vendor)
+                  const pool = sel ? [sel, ...base] : base
                   /* 쓰는 거래처가 먼저, 미사용은 뒤로. 미사용을 아예 빼면 '검색해도 안 나온다'가
                      되고, 섞어 두면 목록이 지저분해진다 — 뒤로 밀고 이유를 적는 게 답이다. */
                   const rank = (v) => (v.active === 0 ? 1 : 0)
@@ -983,138 +998,18 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                 placeholder={kind === "income" ? "발주처를 검색하거나 선택하세요" : "거래처를 검색하거나 선택하세요"}
                 onAddNew={async (q) => {
                   const gubu = kind === "income" ? "B" : "A"
-                  const res = await api.addVendor({ name: q, gubu })
-                  if (res.ok) {
-                    const updated = await api.getVendors()
-                    setVendors(updated)
-                    // 방금 만든 줄의 **id** 를 담는다(이름을 담으면 동명일 때 다시 헷갈린다)
-                    const made = res.id || updated.find(v => (v.name || '').trim() === q.trim())?.id || ''
-                    setForm(f => ({ ...f, vendor: made }))
-                    toast.push(`"${q}" 거래처가 등록됐어요`)
-                  } else {
-                    toast.push("거래처 등록에 실패했어요", { tone: 'warn' })
-                  }
+                  const v = await addVendorAsking({ confirm, toast }, { name: q, gubu })
+                  if (!v) return
+                  setVendors(await api.getVendors())
+                  // 고르거나 만든 줄의 **id** 를 담는다(이름을 담으면 동명일 때 다시 헷갈린다)
+                  setForm(f => ({ ...f, vendor: v.id }))
                 }}
                 addNewLabel="거래처로 추가"/>
             </FormField>
 
-            {/* 청구서 연결 — 세금계산서가 오간 건은 여기서 그 청구서에 바로 붙인다.
-                고르면 남은 금액이 금액 칸에 들어가고, 저장하면 그 청구서의 미수/미지급이 줄어든다.
-                (안 고르고 저장하면 예전처럼 그냥 통장 거래로만 남는다 — 청구서 없는 돈도 있다) */}
-            {openInvs.length > 0 && (
-              <FormField span label={kind === 'income' ? '어느 청구서 입금인가요' : '어느 청구서 지급인가요'}
-                hint="고르면 그 청구서의 미수금이 함께 정리돼요 · 없으면 비워두세요">
-                <div className="col gap-6">
-                  {openInvs.map(iv => {
-                    const left = Number(iv.remainAmount ?? iv.totalAmount)
-                    const on = linkInv?.id === iv.id
-                    return (
-                      <button key={iv.id} type="button" className={`card inv-pick${on ? ' on' : ''}`}
-                        onClick={() => {
-                          if (on) { setLinkInv(null); return }
-                          setLinkInv(iv)
-                          // 금액이 비어 있으면 남은 금액을 채운다 — 대부분 전액을 받는다
-                          setForm(f => (Number(String(f.amount ?? '').replace(/[^0-9]/g, '')) > 0 ? f : { ...f, amount: String(left) }))
-                        }}>
-                        <span className="row gap-8" style={{ alignItems: 'center', width: '100%' }}>
-                          <span className="fw-600 text-sm">{iv.invoiceNo}</span>
-                          <span className="text-xs text-muted2">{String(iv.issuedAt || '').slice(0, 10)}{iv.contract ? ` · ${iv.contract}` : ''}</span>
-                          <span className="num ml-auto fw-700">{fmtNum(left)}원</span>
-                          {on && <Icon.Check size={14}/>}
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </FormField>
-            )}
-
-            {/* 경비 모드에서는 주문 두 칸을 접어 둔다. 수정 중이거나 이미 값이 있으면 편다 —
-                접어서 보이지 않는 칸에 값이 들어 있으면 "왜 이 주문에 붙었지"를 알 수 없다. */}
-            {!ordersFromMes && compact && !showOrderFields && !form.contract && !form.costContract && (
-              <button type="button" className="btn ghost sm" style={{ alignSelf: 'flex-start' }}
-                onClick={() => setShowOrderFields(true)}>
-                <Icon.Plus size={12}/> 주문에 붙이기 (발주·원가 귀속)
-              </button>
-            )}
-            {!ordersFromMes && (!compact || showOrderFields || form.contract || form.costContract) && <>
-            <FormField label={kind === "income" ? "수주 (선택)" : "발주 (선택)"}
-              /* ⚠ 저장 때 묻는 말과 같은 방향으로 적는다. 예전 문구("있을 때만 고르세요")는
-                 드물게 쓰는 칸처럼 읽혔는데, 정작 저장하면 "안 골랐어요"라고 물었다. */
-              hint={kind === "expense"
-                ? "발주를 붙이면 건별 원가가 잡혀요. 경비·공과금처럼 주문 없이 쓰는 돈은 비워둡니다."
-                : "수주를 붙이면 건별 수익과 미수금이 잡혀요. 없는 건이면 비워둡니다."}>
-              <Combobox value={form.contract} onChange={v => setForm({...form, contract: v})}
-                options={contractOpts}
-                placeholder={contractOpts.length
-                  ? (kind === "expense" ? "해당 발주가 있으면 선택" : "해당 수주가 있으면 선택")
-                  : "등록된 주문이 없어요 (비워두면 됩니다)"}
-                /* 주문은 거래처·품목과 달리 이름만으로 만들 수 없다(거래처·금액·기간·청구방식이 있어야
-                   미수금과 기성 집계가 성립한다). 그래서 여기서 입력한 이름은 주문이 되지 않고
-                   이 거래의 '참조'(doc_no)로만 남는다 — 주문별 매출·원가 집계에는 잡히지 않는다.
-                   예전엔 "주문을 새로 등록했어요"라고 알려서, 등록된 줄 알고 넘어가면
-                   그 매출이 주문 실적에서 통째로 빠졌다. 무슨 일이 일어나는지 그대로 말한다. */
-                onAddNew={makeOrderHere}
-                addNewLabel={`이 이름으로 ${kind === 'income' ? '수주' : '발주'} 만들기`}/>
-            </FormField>
-
-            {/* 원가 귀속 — 이 지출이 어느 매출건의 원가인지. 외주비는 외주주문에 '지급'되면서 그 프로젝트의 '원가'가 된다.
-                두 축이 따로라 이중계상이 아니다. */}
-            {kind === "expense" && (
-              <FormField label="원가 귀속 (수주)"
-                hint="이 지출이 특정 수주건 때문에 나갔다면 그 주문을 고르세요. 그 주문의 손익에 원가로 잡힙니다.">
-                <Combobox value={form.costContract || ""} onChange={v => setForm({...form, costContract: v})}
-                  options={costContractOpts}
-                  placeholder="귀속할 수주 (없으면 비워두세요)"/>
-              </FormField>
-            )}
-            </>}
-
-            {/* 계정과목(선택) → 비목(필수) → 적요(필수) 순. 계정과목은 표준 분류라 기본 노출.
-                비워 두면 서버가 비목에 달린 계정과목을 넣는다(routes/transactions.js resolveAcctCode) —
-                그래서 '선택'이지만 실제로는 대부분 채워진다. 다르게 잡아야 할 때만 직접 고르면 된다. */}
-            <FormField label="계정과목"
-              hint={staleFundCode
-                ? `이 거래에 '${staleFundCode}' 가 상대 계정으로 들어 있었어요. 그러면 장부에 매출·비용이 잡히지 않아 비웠습니다 — 비목에 맞춰 다시 정해집니다.`
-                : "비워두면 비목에 맞춰 자동으로 정해집니다"}>
-              <Combobox value={form.accountCode}
-                onChange={(v) => setForm(f => ({ ...f, accountCode: v }))}
-                options={acctSubjects.map(a => ({ value: a.code, label: a.name, sub: `${a.code} · ${a.category}`, keywords: a.note || "" }))}
-                placeholder={autoAcctName ? `자동: ${autoAcctName}` : "비목에 따라 자동 (직접 고를 수도 있어요)"}
-                allowAdd={false}/>
-            </FormField>
-
-            <FormField label={kind === "income" ? "수금 유형(비목)" : "비목"} required>
-              <Combobox value={form.category}
-                onChange={(v) => {
-                  const catItems = categories.filter(c => c.id?.startsWith(kind === "income" ? "INC-" : "EXP-"))
-                  const c = catItems.find(x => x.name === v)
-                  setForm(f => {
-                    // 비목이 정해 둔 과세유형·매입세액 공제 여부를 기본값으로 물려받는다(거래별 수정 가능).
-                    const next = { ...f, category: v, acctGroup: c?.group_name || "" }
-                    if (c) {
-                      if (c.vat === "면세" || c.vat === "영세") next.taxType = c.vat
-                      else if (c.vat === "10%") next.taxType = "과세"
-                      next.vatDeductible = c.vat_deductible !== 0
-                    }
-                    // 과세유형 칩과 같은 이유로 입력 기준을 지킨다(공급가액 입력 모드 보존)
-                    return applyTax(next, supplyMode ? next.supply : next.amount, supplyMode)
-                  })
-                }}
-                options={categories.filter(c => c.id?.startsWith(kind === "income" ? "INC-" : "EXP-"))
-                  .map(c => ({ value: c.name, label: c.name, sub: c.group_name || "" }))}
-                placeholder={kind === "income" ? "수금 유형을 검색하거나 선택하세요" : "비목을 검색하거나 선택하세요"}
-                onAddNew={async (q) => {
-                  const nm = await quickAddCategory(q, {
-                    kind: kind === "income" ? "inc" : "exp", setCategories, toast,
-                  })
-                  // 새 비목은 서버 기본값(과세 10%·공제 가능)으로 만들어진다.
-                  // 그 값들을 폼에도 그대로 반영해 '고른 것'과 '만든 것'이 같게 동작하게 한다.
-                  if (nm) setForm(f => applyTax({ ...f, category: nm, acctGroup: "", taxType: "과세", vatDeductible: true }, f.amount, false))
-                }}
-                addNewLabel={kind === "income" ? "수금 유형으로 등록" : "비목으로 등록"}/>
-            </FormField>
-
+            {/* 칸 순서(2026-09-30 사용자): 거래처 · 품목 · 과세유형 / 계정과목 · 비목 · 적요 — 세 칸씩 두 줄.
+                청구서 연결·수주/발주·원가 귀속은 그 **다음** — 청구서 연결은 남은 청구서가 있을 때만 나타나
+                위에 두면 두 줄 배치가 들쭉날쭉해진다 */}
             <FormField label="품목" hint="선택 · 고르면 적요·금액 자동 채움">
               {/* value 는 품목 id. 이름을 값으로 쓰면 규격만 다른 동명 품목(도면 개정 등)이
                   한 값으로 뭉개져 무엇을 골라도 첫 번째가 잡힌다 — 단가·과세유형까지 그 품목 것이 들어온다. */}
@@ -1155,6 +1050,71 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                 addNewLabel="품목으로 등록"/>
             </FormField>
 
+            {/* 과세유형은 입금·지출 모두에 필요하다. 여태 지출에만 '면세' 체크가 있었고 입금은
+                무조건 세액 0으로 처리돼, 청구서를 안 거친 매출의 세액이 부가세 신고에서 빠졌다. */}
+            <FormField label="과세유형" hint={
+              taxable ? "공급가액에 부가세 10%" : form.taxType === "영세" ? "세율 0% — 세액은 없지만 과세표준에는 들어가요" : "부가세 없는 거래"}>
+              <div className="row gap-6" style={{ flexWrap: "wrap" }}>
+                {TAX_TYPES.map(t => (
+                  /* 입력 기준(supplyMode)을 지켜서 재계산한다.
+                     예전엔 항상 f.amount(VAT 포함 총액)를 넘겨서, '공급가액 입력' 모드에서
+                     과세 100만(총액 110만) → 영세로 바꾸면 **공급가가 110만**이 됐다.
+                     영세는 세액이 0이어도 공급가가 과세표준에 들어가므로 신고가 10% 부풀어진다. */
+                  <button key={t} type="button" className={`chip ${form.taxType === t ? "active" : ""}`}
+                    onClick={() => setForm(f => applyTax({ ...f, taxType: t }, supplyMode ? f.supply : f.amount, supplyMode))}>{t}</button>
+                ))}
+              </div>
+            </FormField>
+
+            {/* 계정과목(선택) → 비목(필수) → 적요(필수) 순. 계정과목은 표준 분류라 기본 노출.
+                비워 두면 서버가 비목에 달린 계정과목을 넣는다(routes/transactions.js resolveAcctCode) —
+                그래서 '선택'이지만 실제로는 대부분 채워진다. 다르게 잡아야 할 때만 직접 고르면 된다. */}
+            <FormField label="계정과목"
+              hint={staleFundCode
+                ? `이 거래에 '${staleFundCode}' 가 상대 계정으로 들어 있었어요. 그러면 장부에 매출·비용이 잡히지 않아 비웠습니다 — 비목에 맞춰 다시 정해집니다.`
+                : "비워두면 비목에 맞춰 자동으로 정해집니다"}>
+              <Combobox value={form.accountCode}
+                onChange={(v) => setForm(f => ({ ...f, accountCode: v }))}
+                options={acctSubjects.map(a => ({ value: a.code, label: a.name, sub: `${a.code} · ${a.category}`, keywords: a.note || "" }))}
+                placeholder={autoAcctName ? `자동: ${autoAcctName}` : "비목에 따라 자동 (직접 고를 수도 있어요)"}
+                allowAdd={false}/>
+            </FormField>
+
+            <FormField label={kind === "income" ? "수금 유형(비목)" : "비목"} required>
+              <Combobox value={form.category}
+                onChange={(v) => {
+                  const catItems = categories.filter(c => c.id?.startsWith(kind === "income" ? "INC-" : "EXP-"))
+                  const c = catItems.find(x => x.name === v)
+                  setForm(f => {
+                    // 비목이 정해 둔 과세유형·매입세액 공제 여부를 기본값으로 물려받는다(거래별 수정 가능).
+                    const next = { ...f, category: v, acctGroup: c?.group_name || "" }
+                    if (c) {
+                      if (c.vat === "면세" || c.vat === "영세") next.taxType = c.vat
+                      else if (c.vat === "10%") next.taxType = "과세"
+                      next.vatDeductible = dedOf(f, f.evid_type, v)
+                      /* 비목이 과세 유형을 **바꿨으면 말한다** — 말없이 면세로 바뀌어 사용자가 영문을 몰랐다(2026-09-30).
+                         바뀐 게 틀리면 바로 옆 칩으로 되돌리면 된다(거래별 수정 가능) */
+                      if (next.taxType !== f.taxType)
+                        setTimeout(() => toast.push(`비목 '${v}' 설정에 따라 ${next.taxType}로 바꿨어요`), 0)
+                    }
+                    // 과세유형 칩과 같은 이유로 입력 기준을 지킨다(공급가액 입력 모드 보존)
+                    return applyTax(next, supplyMode ? next.supply : next.amount, supplyMode)
+                  })
+                }}
+                options={categories.filter(c => c.id?.startsWith(kind === "income" ? "INC-" : "EXP-"))
+                  .map(categoryOption)}
+                placeholder={kind === "income" ? "수금 유형을 검색하거나 선택하세요" : "비목을 검색하거나 선택하세요"}
+                onAddNew={async (q) => {
+                  const nm = await quickAddCategory(q, {
+                    kind: kind === "income" ? "inc" : "exp", setCategories, toast,
+                  })
+                  // 새 비목은 서버 기본값(과세 10%·공제 가능)으로 만들어진다.
+                  // 그 값들을 폼에도 그대로 반영해 '고른 것'과 '만든 것'이 같게 동작하게 한다.
+                  if (nm) setForm(f => applyTax({ ...f, category: nm, acctGroup: "", taxType: "과세", vatDeductible: dedOf(f, f.evid_type, nm) }, f.amount, false))
+                }}
+                addNewLabel={kind === "income" ? "수금 유형으로 등록" : "비목으로 등록"}/>
+            </FormField>
+
             <FormField label="적요" required hint="거래 내용">
               <Combobox value={form.memo}
                 onChange={(v) => setForm(f => ({ ...f, memo: v }))}
@@ -1187,21 +1147,77 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
               </div>
             )}
 
-            {/* 과세유형은 입금·지출 모두에 필요하다. 여태 지출에만 '면세' 체크가 있었고 입금은
-                무조건 세액 0으로 처리돼, 청구서를 안 거친 매출의 세액이 부가세 신고에서 빠졌다. */}
-            <FormField label="과세유형" hint={
-              taxable ? "공급가액에 부가세 10%" : form.taxType === "영세" ? "세율 0% — 세액은 없지만 과세표준에는 들어가요" : "부가세 없는 거래"}>
-              <div className="row gap-6" style={{ flexWrap: "wrap" }}>
-                {TAX_TYPES.map(t => (
-                  /* 입력 기준(supplyMode)을 지켜서 재계산한다.
-                     예전엔 항상 f.amount(VAT 포함 총액)를 넘겨서, '공급가액 입력' 모드에서
-                     과세 100만(총액 110만) → 영세로 바꾸면 **공급가가 110만**이 됐다.
-                     영세는 세액이 0이어도 공급가가 과세표준에 들어가므로 신고가 10% 부풀어진다. */
-                  <button key={t} type="button" className={`chip ${form.taxType === t ? "active" : ""}`}
-                    onClick={() => setForm(f => applyTax({ ...f, taxType: t }, supplyMode ? f.supply : f.amount, supplyMode))}>{t}</button>
-                ))}
-              </div>
+            {/* 청구서 연결 — 세금계산서가 오간 건은 여기서 그 청구서에 바로 붙인다.
+                고르면 남은 금액이 금액 칸에 들어가고, 저장하면 그 청구서의 미수/미지급이 줄어든다.
+                (안 고르고 저장하면 예전처럼 그냥 통장 거래로만 남는다 — 청구서 없는 돈도 있다) */}
+            {openInvs.length > 0 && (
+              <FormField span label={kind === 'income' ? '어느 청구서 입금인가요' : '어느 청구서 지급인가요'}
+                hint="고르면 그 청구서의 미수금이 함께 정리돼요 · 없으면 비워두세요">
+                <div className="col gap-6">
+                  {openInvs.map(iv => {
+                    const left = Number(iv.remainAmount ?? iv.totalAmount)
+                    const on = linkInv?.id === iv.id
+                    return (
+                      <button key={iv.id} type="button" className={`card inv-pick${on ? ' on' : ''}`}
+                        onClick={() => {
+                          if (on) { setLinkInv(null); return }
+                          setLinkInv(iv)
+                          // 금액이 비어 있으면 남은 금액을 채운다 — 대부분 전액을 받는다
+                          setForm(f => (Number(String(f.amount ?? '').replace(/[^0-9]/g, '')) > 0 ? f : { ...f, amount: String(left) }))
+                        }}>
+                        <span className="row gap-8" style={{ alignItems: 'center', width: '100%' }}>
+                          <span className="fw-600 text-sm">{iv.invoiceNo}</span>
+                          <span className="text-xs text-muted2">{String(iv.issuedAt || '').slice(0, 10)}{iv.contract ? ` · ${iv.contract}` : ''}</span>
+                          <span className="num ml-auto fw-700">{fmtNum(left)}원</span>
+                          {on && <Icon.Check size={14}/>}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </FormField>
+            )}
+
+            {/* 경비 모드에서는 주문 두 칸을 접어 둔다. 수정 중이거나 이미 값이 있으면 편다 —
+                접어서 보이지 않는 칸에 값이 들어 있으면 "왜 이 주문에 붙었지"를 알 수 없다. */}
+            {!ordersFromMes && compact && !showOrderFields && !form.contract && !form.costContract && (
+              <button type="button" className="btn ghost sm" style={{ alignSelf: 'flex-start' }}
+                onClick={() => setShowOrderFields(true)}>
+                <Icon.Plus size={12}/> 계약에 연결 (발주·원가 귀속)
+              </button>
+            )}
+            {!ordersFromMes && (!compact || showOrderFields || form.contract || form.costContract) && <>
+            <FormField label={kind === "income" ? "수주 (선택)" : "발주 (선택)"}
+              /* ⚠ 저장 때 묻는 말과 같은 방향으로 적는다. 예전 문구("있을 때만 고르세요")는
+                 드물게 쓰는 칸처럼 읽혔는데, 정작 저장하면 "안 골랐어요"라고 물었다. */
+              hint={kind === "expense"
+                ? "발주를 붙이면 건별 원가가 잡혀요. 경비·공과금처럼 계약 없이 쓰는 돈은 비워둡니다."
+                : "수주를 붙이면 건별 수익과 미수금이 잡혀요. 없는 건이면 비워둡니다."}>
+              <Combobox value={form.contract} onChange={v => setForm({...form, contract: v})}
+                options={contractOpts}
+                placeholder={contractOpts.length
+                  ? (kind === "expense" ? "해당 발주가 있으면 선택" : "해당 수주가 있으면 선택")
+                  : "등록된 계약이 없어요 (비워두면 됩니다)"}
+                /* 주문은 거래처·품목과 달리 이름만으로 만들 수 없다(거래처·금액·기간·청구방식이 있어야
+                   미수금과 기성 집계가 성립한다). 그래서 여기서 입력한 이름은 주문이 되지 않고
+                   이 거래의 '참조'(doc_no)로만 남는다 — 주문별 매출·원가 집계에는 잡히지 않는다.
+                   예전엔 "주문을 새로 등록했어요"라고 알려서, 등록된 줄 알고 넘어가면
+                   그 매출이 주문 실적에서 통째로 빠졌다. 무슨 일이 일어나는지 그대로 말한다. */
+                onAddNew={makeOrderHere}
+                addNewLabel={`이 이름으로 ${kind === 'income' ? '수주' : '발주'} 만들기`}/>
             </FormField>
+
+            {/* 원가 귀속 — 이 지출이 어느 매출건의 원가인지. 외주비는 외주주문에 '지급'되면서 그 프로젝트의 '원가'가 된다.
+                두 축이 따로라 이중계상이 아니다. */}
+            {kind === "expense" && (
+              <FormField label="원가 귀속 (수주)"
+                hint="이 지출이 특정 수주건 때문에 나갔다면 그 수주를 고르세요. 그 수주의 손익에 원가로 잡힙니다.">
+                <Combobox value={form.costContract || ""} onChange={v => setForm({...form, costContract: v})}
+                  options={costContractOpts}
+                  placeholder="귀속할 수주 (없으면 비워두세요)"/>
+              </FormField>
+            )}
+            </>}
 
             <FormField span label="금액" required>
               {taxable && (
@@ -1243,12 +1259,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                   매입세액 불공제 <span className="text-muted2">(접대비·비영업용 승용차 등)</span>
                 </label>
               )}
-              <div className="row gap-6" style={{ marginTop: 8, flexWrap: "wrap" }}>
-                {(kind === "income" ? [5000000, 10000000, 20000000, 50000000] : [500000, 1000000, 3000000, 5000000]).map(a => (
-                  <button key={a} type="button" className="chip"
-                    onClick={() => setForm(f => applyTax(f, a, supplyMode && taxable))}>{fmtNum(a)}원</button>
-                ))}
-              </div>
+              {/* 금액 추천 칩(50만·100만…)은 뺐다 — 근거 없는 고정 숫자라 누를 일이 없었다(2026-09-30 사용자) */}
 
               {/* 복합 전표(D1) — 이 금액을 여러 비목으로 나눈다. 신규·편집 모두.
                   편집으로 열면 이미 나눠 둔 항목을 채워 두고(위 효과), 여기서 고칠 수 있다.
@@ -1272,7 +1283,7 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                                 <td>
                                   <Combobox value={r.category} allowAdd={false}
                                     onChange={v => setSplitRows(rows => rows.map((x, j) => j === i ? { ...x, category: v } : x))}
-                                    options={categories.filter(c => c.id?.startsWith(kind === "income" ? "INC-" : "EXP-")).map(c => ({ value: c.name, label: c.name, sub: c.group_name || "" }))}
+                                    options={categories.filter(c => c.id?.startsWith(kind === "income" ? "INC-" : "EXP-")).map(categoryOption)}
                                     placeholder="비목"/>
                                 </td>
                                 <td><MoneyInput value={r.supply} onChange={raw => setSplitRows(rows => rows.map((x, j) => j === i ? { ...x, supply: raw } : x))}/></td>
@@ -1308,22 +1319,6 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
               )}
             </FormField>
 
-            {/* 매입세액 공제는 '적격증빙'이 있어야 받는다 — 공제 여부를 좌우하므로 추가정보에 숨기지 않는다.
-                불공제 증빙(간이영수증 등)을 고르면 불공제 체크도 같이 맞춰 준다. */}
-            {kind === "expense" && taxable && (
-              <FormField label="증빙유형" hint="선택 · 매입세액 공제 판정에 쓰여요">
-                <Combobox value={form.evid_type}
-                  onChange={(v) => {
-                    const e = evidenceTypes.find(x => x.name === v)
-                    setForm(f => ({ ...f, evid_type: v, vatDeductible: e ? e.deductible !== 0 : f.vatDeductible }))
-                  }}
-                  options={evidenceTypes.map(e => ({ value: e.name, label: e.name,
-                    sub: [e.deductible === 0 ? '매입세액 공제 불가' : '공제 가능', e.memo].filter(Boolean).join(' · ') }))}
-                  placeholder="증빙유형 선택 (선택)"
-                  allowAdd={false}/>
-              </FormField>
-            )}
-
             {kind === "expense" ? (
               <FormField span label="결제수단" required>
                 <div className="row gap-6" style={{ flexWrap: "wrap" }}>
@@ -1333,7 +1328,12 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                       만기가 오면 재무관리 › 어음에서 결제 → 그때 이 거래가 완료로 바뀐다. */}
                   {["계좌이체", "법인카드", "개인카드", "현금", "어음"].map(v => (
                     <button key={v} type="button" className={`chip ${form.method === v ? "active" : ""}`}
-                      onClick={() => setForm({ ...form, method: v, account: keepAccount(form.account, v, accounts) })}>
+                      /* 현금은 회사에 하나 — [현금]을 고르면 그 계정으로 바로 채운다. 아래에서 또 고르게 하면
+                         같은 걸 두 번 고르는 셈이다(2026-09-30 사용자). 여럿 중 하나를 대신 고르는 게 아니라
+                         미리 고르기 금지(lib/mainAccount.js)의 대상이 아니다 */
+                      onClick={() => setForm({ ...form, method: v,
+                        account: v === '현금' ? (cashAccounts[0]?.name || '') : keepAccount(form.account, v, accounts),
+                        ...evidFor(v, form) })}>
                       {v === "계좌이체" && <Icon.Bank size={12}/>}
                       {(v === "법인카드" || v === "개인카드") && <Icon.Card size={12}/>}
                       {v === "현금" && <Icon.Wallet size={12}/>}
@@ -1343,10 +1343,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                   ))}
                 </div>
                 {form.method === "계좌이체" && (
-                  /* 몇 개 없으면 칩, 많으면 검색되는 목록(lib/components/AccountPicker) */
-                  <div style={{ marginTop: 8 }}>
-                    <AccountPicker accounts={bankAccounts} valueKey="name" value={form.account}
-                      onChange={v => setForm({...form, account: v})} isMain={a => isMainAccount(a, company, use)}/>
+                  /* 이름·은행·번호 칸 + 없으면 그 자리에서 등록(lib/components/AccountField) */
+                  <div style={{ marginTop: 10 }}>
+                    <AccountField kind="bank" accounts={bankAccounts} allAccounts={accounts} valueKey="name" value={form.account}
+                      onChange={v => setForm(f => ({ ...f, account: v }))} onCreated={reloadAccounts}
+                      isMain={a => isMainAccount(a, company, use)}/>
                   </div>
                 )}
                 {/* 카드로 쓰면 그 카드 계정에 미결제가 쌓인다. 나중에 어디서 갚는지 그 자리에서
@@ -1364,10 +1365,10 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                   </div>
                 )}
                 {(form.method === "법인카드" || form.method === "개인카드") && (
-                  <div style={{ marginTop: 8 }}>
-                    <AccountPicker accounts={cardAccounts} valueKey="name" value={form.account} icon="card" placeholder="카드 선택"
-                      onChange={v => setForm({...form, account: v})} isMain={a => isMainAccount(a, company, 'card')}
-                      empty={<span className="text-xs text-muted2">등록된 카드가 없어요. 설정 → 계좌/카드에서 추가하세요.</span>}/>
+                  <div style={{ marginTop: 10 }}>
+                    <AccountField kind="card" accounts={cardAccounts} allAccounts={accounts} valueKey="name" value={form.account}
+                      onChange={v => setForm(f => ({ ...f, account: v }))} onCreated={reloadAccounts}
+                      isMain={a => isMainAccount(a, company, 'card')}/>
                   </div>
                 )}
                 {/* 현금 — **금고 시재**에서 나간다. 기준정보에서 종류 '현금'인 계정을 만들어 두면
@@ -1375,24 +1376,11 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                     ⚠ 시재를 안 세는 회사도 있다. 그런 회사는 계정을 안 만들면 되고,
                       계좌 없이 비용만 잡힌다(서버도 현금은 계좌 없이 통과시킨다). */}
                 {form.method === "현금" && (
-                  cashAccounts.length === 0 ? (
-                    <div className="text-xs text-muted2" style={{ marginTop: 8, lineHeight: 1.7 }}>
-                      금고 시재를 관리하시면 <b>기준정보 › 계좌</b>에서 종류를 <b>현금</b>으로 계정을
-                      하나 만들어 주세요. 그러면 여기서 골라 시재 잔액이 관리됩니다.<br/>
-                      안 만드셔도 됩니다 — 그때는 비용만 잡히고 통장 잔액은 움직이지 않아요.
-                    </div>
-                  ) : (
-                    <div className="row gap-6" style={{ flexWrap: "wrap", marginTop: 8 }}>
-                      {cashAccounts.map(a => (
-                        <button key={a.id} type="button" className={`chip ${form.account === a.name ? "active" : ""}`}
-                          onClick={() => setForm({...form, account: a.name})}>
-                          <Icon.Wallet size={12}/>{a.name}
-                        </button>
-                      ))}
-                      <button type="button" className={`chip ${!form.account ? "active" : ""}`}
-                        onClick={() => setForm({...form, account: ""})}>지정 안 함</button>
-                    </div>
-                  )
+                  /* 현금은 회사에 하나 — 고르거나, 없으면 한 번에 만든다. 안 골라도 비용은 잡힌다 */
+                  <div style={{ marginTop: 10 }}>
+                    <AccountField kind="cash" accounts={cashAccounts} allAccounts={accounts} valueKey="name" value={form.account}
+                      onChange={v => setForm(f => ({ ...f, account: v }))} onCreated={reloadAccounts}/>
+                  </div>
                 )}
                 {form.method === "계좌이체" && counterpartyPicker("어디로 보냈나요?")}
                 {form.method === "어음" && <NoteFields form={form} setForm={setForm} kind="expense"/>}
@@ -1415,13 +1403,47 @@ export const TransactionForm = ({ open, kind: initialKind = "expense", initialCo
                   <NoteFields form={form} setForm={setForm} kind="income"/>
                 ) : (
                   <>
-                    <AccountPicker accounts={bankAccounts} valueKey="name" value={form.account}
-                      onChange={v => setForm({...form, account: v})} isMain={a => isMainAccount(a, company, use)}/>
+                    <AccountField kind="bank" accounts={bankAccounts} allAccounts={accounts} valueKey="name" value={form.account}
+                      onChange={v => setForm(f => ({ ...f, account: v }))} onCreated={reloadAccounts}
+                      isMain={a => isMainAccount(a, company, use)}/>
                     {counterpartyPicker("어디서 들어왔나요?")}
                   </>
                 )}
               </FormField>
             )}
+
+            {/* 증빙 — **결제수단 뒤**에서, 결제수단에 맞는 것만 묻는다(2026-09-30 사용자).
+                카드는 신용카드매출전표로 정해져 있어 묻지 않는다(결제수단을 고를 때 채운다 — evidFor).
+                현금·계좌이체는 무엇을 받았는지에 따라 매입세액 공제가 갈리므로 칩으로 고른다.
+                고르면 공제 여부(불공제 체크)도 그 증빙에 맞춘다. 목록은 기준정보 › 증빙유형 — 회사가 지운 이름은 안 나온다 */}
+            {kind === "expense" && (() => {
+              const isCard = ['법인카드', '개인카드'].includes(form.method)
+              if (isCard) return (
+                <div className="span-2 text-xs text-muted2" style={{ marginTop: -6 }}>
+                  {/* 공제 여부는 증빙만으로 정해지지 않는다 — 접대비는 카드전표가 있어도 불공제(dedOf) */}
+                  증빙: <b>{form.evid_type || CARD_EVID}</b> (카드 결제라 자동)
+                  {form.taxType === '과세' && (form.vatDeductible ? ' — 매입세액 공제 대상이에요.' : ' — 이 비목은 매입세액 불공제예요.')}
+                </div>
+              )
+              const names = (form.method === '현금' ? ['현금영수증', '간이영수증'] : ['세금계산서', '계산서', '거래명세서'])
+                .filter(n => evidenceTypes.some(e => e.name === n))
+              return (
+                <FormField span label="증빙" hint="무엇을 받았나요 · 매입세액 공제 판정에 쓰여요">
+                  <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+                    {[...names, NO_EVID].map(n => {
+                      const e = evidenceTypes.find(x => x.name === n)
+                      return (
+                        <button key={n} type="button" className={`chip ${form.evid_type === n ? 'active' : ''}`}
+                          onClick={() => setForm(f => ({ ...f, evid_type: n, vatDeductible: dedOf(f, n) }))}>
+                          {n}
+                          {((e && e.deductible === 0) || n === NO_EVID) && <span className="text-muted2" style={{ marginLeft: 4, fontSize: 10.5 }}>불공제</span>}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </FormField>
+              )
+            })()}
 
             {/* ⚠ 예전 hint 는 "월말 정산을 위해 지정하세요"였다. 그런데 **월말 정산은 없는
                 기능**이다 — employee_id 를 저장만 하고 정산하는 코드가 어디에도 없다.

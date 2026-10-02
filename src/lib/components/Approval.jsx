@@ -83,6 +83,12 @@ export const listStatusOf = (d) => {
 const STEP_TONE = { 차례: 'warn', 승인: 'pos', 전결: 'pos', 반려: 'neg' }
 
 /* ── 결재선 진행 ── */
+/* 결재선 카드를 문서 위에 띄울지. 승인이 끝나면 종이의 결재란(ApprovalStamp)에 이름·날짜가 다 찍혀
+   카드가 **같은 말을 두 번** 한다(2026-10-01 사용자). 카드에만 있는 것 — '지금 누구 차례인지'(진행 중)와
+   결재 의견 — 이 있을 때만 띄운다. 세 문서 화면(결의서·품의서·정산서)이 이 하나를 쓴다. */
+export const showApprovalLine = (apv) =>
+  !!apv && (apv.status === '진행' || (apv.status === '승인' && (apv.steps || []).some(s => s.comment)))
+
 export const ApprovalLine = ({ approval }) => {
   if (!approval) return null
   const steps = approval.steps || []

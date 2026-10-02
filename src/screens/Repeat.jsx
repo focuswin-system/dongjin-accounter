@@ -1,9 +1,12 @@
 import { useState, useEffect, useMemo } from 'react'
+import { categoryOption } from '../lib/categoryWords'
 import { useOrdersFromMes } from '../lib/customModules'
 import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, DateInput, fmtDateShort } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { RowActions } from '../lib/components/RowActions'
+import { DataTable, Sub } from '../lib/components/DataTable'
+import { SelectionBar } from '../lib/components/SelectionBar'
 import { contractsForVendor, contractFitsVendor } from '../lib/contractPick'
 import { BILLING_PERIODS, periodLong, PAY_TERM_OPTS, payTermNeedsDay, payTermHint } from '../lib/renewal'
 import { vatOf } from '../lib/vatRate'
@@ -46,6 +49,7 @@ export const RepeatScreen = ({ goRoute, initialDirection = 'all', prefill = null
   const [createRows, setCreateRows] = useState(null)   // 만들기 확인 서랍
   const [q, setQ] = useState('')                       // 검색 — 거래처·내용·계약
   const [vendor, setVendor] = useState('')             // 거래처 필터(이름)
+  const [showMade, setShowMade] = useState(false)      // 달별 — 이미 만든 줄 펼치기
 
   const loadMonth = async () => { setRows(await api.getRepeatMonth(ym)); setPicked(new Set()) }
   const loadAll = async () => setTemplates(await api.getRepeatTemplates())
@@ -69,11 +73,14 @@ export const RepeatScreen = ({ goRoute, initialDirection = 'all', prefill = null
   }, [rows, templates])
   const monthRows = byDir(rows)
   const allRows = byDir(templates)
-  // 손볼 것이 남은 줄(비목·계좌 없음)은 고를 수 없다 — 골라도 서버가 막고, 만들기는 전부 아니면 전무다
-  const pickable = monthRows.filter(r => !r.made && !r.needs_fix)
+  // 손볼 것이 남은 줄(비목·계좌 없음)은 고를 수 없다 — 골라도 서버가 막고, 만들기는 전부 아니면 전무다(아래 select.isSelectable)
 
-  const toggle = (id) => setPicked(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
-  const toggleAll = () => setPicked(s => s.size === pickable.length ? new Set() : new Set(pickable.map(r => r.id)))
+  /* 달별은 **할 일 목록**이다 — 만들 것과 이미 만든 것을 가른다(2026-10-01 사용자 · 40건 시험).
+     섞어 두면 처리할수록 목록이 줄지 않고, 어디까지 했는지 눈으로 다시 찾아야 한다.
+     만든 것은 접어 두고 필요하면 편다. ⚠ 달별은 끊어 보지 않는다(pageSize 0) — 한 줄이라도
+     안 보이면 그달 청구서가 빠진다(놓친 회차). */
+  const pendingRows = monthRows.filter(r => !r.made)
+  const madeRows = monthRows.filter(r => r.made)
 
   const openCreate = async () => {
     const res = await api.previewRepeat(ym, [...picked])
@@ -155,101 +162,96 @@ export const RepeatScreen = ({ goRoute, initialDirection = 'all', prefill = null
 
       {view === 'month' ? (
         <>
-          <div className="card" style={{ overflow: 'auto' }}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th style={{ width: 36 }}>
-                    <input type="checkbox" aria-label="모두 고르기" disabled={!pickable.length}
-                      checked={pickable.length > 0 && picked.size === pickable.length} onChange={toggleAll}/>
-                  </th>
-                  <th>날짜</th><th>구분</th><th>거래처</th><th>내용</th>
-                  <th className="num-right">금액</th><th>만들 것</th><th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows === null ? (
-                  <tr><td colSpan={8} className="text-sm text-muted" style={{ textAlign: 'center', padding: 24 }}>불러오는 중…</td></tr>
-                ) : monthRows.length === 0 ? (
-                  <tr><td colSpan={8} className="text-sm text-muted" style={{ textAlign: 'center', padding: 24 }}>
-                    {term || vendor ? '조건에 맞는 반복거래가 없어요.' : `${ymLabel(ym)}에 해당하는 반복거래가 없어요.`}
-                  </td></tr>
-                ) : monthRows.map(r => (
-                  <tr key={r.id} style={{ opacity: r.made ? 0.6 : 1 }}>
-                    <td>{!r.made && !r.needs_fix
-                      && <input type="checkbox" aria-label="고르기" checked={picked.has(r.id)} onChange={() => toggle(r.id)}/>}</td>
-                    {/* 만든 줄은 틀의 값이 아니라 **실제로 만든** 날짜·금액을 보여준다 — 만들 때 고쳤을 수 있다 */}
-                    <td className="text-sm">{r.made ? fmtDateShort(r.made.date) : r.date ? fmtDateShort(r.date) : '만들 때 고름'}</td>
-                    <td className="text-sm">{dirLabel(r.direction)}</td>
-                    <td className="fw-600">{r.vendor_name || '—'}</td>
-                    <td className="text-sm">
-                      {r.item_text}
-                      {r.contract_name && <div className="text-xs text-muted2">계약: {r.contract_name}</div>}
-                      {r.needs_fix && <div className="text-xs text-warn">{r.needs_fix}</div>}
-                    </td>
-                    <td className="num-cell num-right">{fmtNum(r.made ? r.made.amount : r.total)}</td>
-                    <td className="text-sm text-muted">{createsLabel(r)}</td>
-                    <td className="text-sm">
-                      {r.made
-                        ? <button type="button" className="link-cell" onClick={() => openInvoiceOrTxn(r.made, r)}>
-                            {r.made.no || `${fmtDateShort(r.made.date)} 출금`}
-                          </button>
-                        : <button type="button" className="btn ghost sm" onClick={() => openEdit(r)}>수정</button>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="text-sm text-muted" style={{ marginBottom: 8 }}>
+            만들 것 <b className="num" style={{ color: 'var(--ink)' }}>{pendingRows.length}</b>건
           </div>
-          {picked.size > 0 && (
-            <div className="row gap-8" style={{ marginTop: 12, alignItems: 'center' }}>
-              <span className="text-sm text-muted">{picked.size}건 · <span className="num">{fmtNum(pickedTotal)}</span>원</span>
-              <button className="btn primary ml-auto" onClick={openCreate}><Icon.Check size={14}/> 선택한 {picked.size}건 만들기</button>
-            </div>
+          <div className="card" style={{ overflow: 'hidden' }}>
+            <DataTable
+              tableKey="repeat-month" rows={pendingRows} loading={rows === null} pageSize={0}
+              rowKey={r => r.id}
+              select={{
+                ids: [...picked], onChange: ids => setPicked(new Set(ids)),
+                isSelectable: r => !r.needs_fix,
+                disabledHint: r => r.needs_fix,
+              }}
+              onRowClick={openEdit}
+              empty={term || vendor ? '조건에 맞는 반복거래가 없어요.'
+                : madeRows.length ? `${ymLabel(ym)}에 만들 것을 다 만들었어요.` : `${ymLabel(ym)}에 해당하는 반복거래가 없어요.`}
+              columns={[
+                { key: 'date', header: '날짜', sortable: true, sortValue: r => r.date || '9999',
+                  render: r => (r.date ? fmtDateShort(r.date) : <span className="text-muted2">만들 때 고름</span>) },
+                { key: 'direction', header: '구분', sortable: true, render: r => dirLabel(r.direction) },
+                { key: 'vendor_name', header: '거래처', sortable: true, render: r => <b>{r.vendor_name || '—'}</b> },
+                { key: 'item_text', header: '내용', maxWidth: 420,
+                  render: r => <>{r.item_text}{r.contract_name && <Sub>계약 {r.contract_name}</Sub>}
+                    {r.needs_fix && <Sub className="text-warn">{r.needs_fix}</Sub>}</> },
+                { key: 'total', header: '금액', align: 'right', sortable: true,
+                  render: r => <span className="num">{fmtNum(r.total)}</span> },
+                { key: 'creates', header: '만들 것', render: r => <span className="text-muted">{createsLabel(r)}</span> },
+              ]}/>
+          </div>
+
+          {madeRows.length > 0 && (
+            <>
+              <button type="button" className="btn ghost sm" style={{ marginTop: 12 }} onClick={() => setShowMade(v => !v)}>
+                {showMade ? <Icon.Down size={13}/> : <Icon.Right size={13}/>} 이미 만든 것 {madeRows.length}건
+              </button>
+              {showMade && (
+                <div className="card" style={{ overflow: 'hidden', marginTop: 8 }}>
+                  {/* 만든 줄은 틀의 값이 아니라 **실제로 만든** 날짜·금액이다 — 만들 때 고쳤을 수 있다 */}
+                  <DataTable rows={madeRows} pageSize={0} rowKey={r => r.id}
+                    onRowClick={r => openInvoiceOrTxn(r.made, r)}
+                    columns={[
+                      { key: 'date', header: '날짜', sortable: true, sortValue: r => r.made.date, render: r => fmtDateShort(r.made.date) },
+                      { key: 'direction', header: '구분', render: r => dirLabel(r.direction) },
+                      { key: 'vendor_name', header: '거래처', sortable: true, render: r => <b>{r.vendor_name || '—'}</b> },
+                      { key: 'item_text', header: '내용', maxWidth: 420 },
+                      { key: 'amount', header: '금액', align: 'right', sortable: true, sortValue: r => r.made.amount,
+                        render: r => <span className="num">{fmtNum(r.made.amount)}</span> },
+                      { key: 'made', header: '만든 것', render: r => <span className="link-cell">{r.made.no || `${fmtDateShort(r.made.date)} 출금`}</span> },
+                    ]}/>
+                </div>
+              )}
+            </>
           )}
+          {/* 고른 것 · 만들기 — 화면 아래에 떠서 스크롤을 따라다닌다(SelectionBar).
+              표 위에 두면 긴 목록에서 스크롤과 함께 사라졌다. ⚠ 목록 **맨 끝**에 둔다 —
+              바가 마지막 줄을 가리지 않게 남기는 여백(spacer)이 이 자리에 생긴다 */}
+          <SelectionBar count={picked.size} summary={`${fmtNum(pickedTotal)}원`} onClear={() => setPicked(new Set())}>
+            <button className="btn primary" onClick={openCreate}><Icon.Check size={14}/> 선택한 {picked.size}건 만들기</button>
+          </SelectionBar>
         </>
       ) : (
-        <div className="card" style={{ overflow: 'auto' }}>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>거래처</th><th>내용</th><th>구분</th><th className="num-right">금액</th>
-                <th>주기</th><th>만들 것</th><th style={{ width: 96 }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {templates === null ? (
-                <tr><td colSpan={7} className="text-sm text-muted" style={{ textAlign: 'center', padding: 24 }}>불러오는 중…</td></tr>
-              ) : allRows.length === 0 && (term || vendor) ? (
-                <tr><td colSpan={7} className="text-sm text-muted" style={{ textAlign: 'center', padding: 24 }}>조건에 맞는 반복거래가 없어요.</td></tr>
-              ) : allRows.length === 0 ? (
-                <tr><td colSpan={7} className="text-sm text-muted" style={{ textAlign: 'center', padding: 24 }}>
-                  등록된 반복거래가 없어요. 유지보수비·임차료처럼 매달 오가는 돈을 등록해 두면 달마다 골라서 만들 수 있어요.
-                </td></tr>
-              ) : allRows.map(t => (
-                <tr key={t.id} style={{ opacity: t.active ? 1 : 0.45 }}>
-                  <td className="fw-600">{t.vendor_name || '—'}</td>
-                  <td className="text-sm">
-                    {t.item}
-                    {t.contract_name && <div className="text-xs text-muted2">계약: {t.contract_name}</div>}
-                    {t.hidden_reason && <div className="text-xs" style={{ color: 'var(--warn-ink)' }}>{t.hidden_reason}</div>}
-                  </td>
-                  <td className="text-sm">{dirLabel(t.direction)}</td>
-                  <td className="num-cell num-right">{fmtNum(t.total)}</td>
-                  <td className="text-sm">{periodLong(t.period)} {t.day_of_month ? `${t.day_of_month}일` : '(날짜는 만들 때)'}</td>
-                  <td className="text-sm text-muted">{createsLabel(t)}{t.active ? '' : ' · 꺼짐'}</td>
-                  <td>
+        <div className="card" style={{ overflow: 'hidden' }}>
+          {/* 규칙 목록 — 공용 표(정렬·열 설정·한 줄). tableKey 가 있어 50건씩 + [더 보기] */}
+          <DataTable tableKey="repeat-templates"
+            rows={allRows} loading={templates === null} rowKey={t => t.id}
+            onRowClick={openEdit}
+            rowClass={t => (t.active ? undefined : 'row-off')}
+            empty={term || vendor ? '조건에 맞는 반복거래가 없어요.'
+              : '등록된 반복거래가 없어요. 유지보수비·임차료처럼 매달 오가는 돈을 등록해 두면 달마다 골라서 만들 수 있어요.'}
+            columns={[
+              { key: 'vendor_name', header: '거래처', sortable: true, render: t => <b>{t.vendor_name || '—'}</b> },
+              { key: 'item', header: '내용', sortable: true, maxWidth: 420,
+                render: t => <>{t.item}{t.contract_name && <Sub>계약 {t.contract_name}</Sub>}
+                  {t.hidden_reason && <Sub style={{ color: 'var(--warn-ink)' }}>{t.hidden_reason}</Sub>}</> },
+              { key: 'direction', header: '구분', sortable: true, render: t => dirLabel(t.direction) },
+              { key: 'total', header: '금액', align: 'right', sortable: true, render: t => <span className="num">{fmtNum(t.total)}</span> },
+              { key: 'period', header: '주기', sortable: true, sortValue: t => `${t.period}|${String(t.day_of_month).padStart(2, '0')}`,
+                render: t => `${periodLong(t.period)} ${t.day_of_month ? `${t.day_of_month}일` : '(날짜는 만들 때)'}` },
+              { key: 'creates', header: '만들 것', render: t => <span className="text-muted">{createsLabel(t)}{t.active ? '' : ' · 꺼짐'}</span> },
+              { key: 'actions', header: '', label: '관리', width: 110, shrink: false,
+                render: t => (
+                  <span onClick={e => e.stopPropagation()}>
                     <RowActions
                       primary={{ label: '수정', onClick: () => openEdit(t) }}
                       items={[
                         { label: t.active ? '끄기' : '켜기', onClick: () => handleToggle(t) },
                         { label: '삭제', tone: 'neg', onClick: () => handleDelete(t) },
                       ]}/>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </span>
+                ) },
+            ]}/>
         </div>
       )}
 
@@ -557,7 +559,7 @@ const RepeatFormDrawer = ({ open, editing, defaultDirection, onClose, onSaved })
           <div>
             <label className="label">비목{req}</label>
             <Combobox value={form.category} onChange={v => f('category', v)} allowAdd={false}
-              options={cats.map(c => ({ value: c.name, label: c.name, sub: c.group_name || '' }))} placeholder="비목 선택"/>
+              options={cats.map(categoryOption)} placeholder="비목 선택"/>
             <Err k="category"/>
           </div>
         )}

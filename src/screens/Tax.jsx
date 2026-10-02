@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { categoryOption } from '../lib/categoryWords'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, Drawer, Combobox, MoneyInput, localToday, DateInput } from '../lib/ui'
 import { api } from '../lib/api'
 import { quickAddCategory } from '../lib/quickAdd'
@@ -121,7 +122,7 @@ const FilingDrawer = ({ target, year, onClose, onSaved }) => {
             <div>
               <label className="label" style={{ marginBottom: 8 }}>비목</label>
               <Combobox value={form.category} onChange={v => f('category', v)}
-                options={categories.filter(c => c.id?.startsWith(isRefund ? 'INC-' : 'EXP-')).map(c => ({ value: c.name, label: c.name, sub: c.group_name || '' }))}
+                options={categories.filter(c => c.id?.startsWith(isRefund ? 'INC-' : 'EXP-')).map(categoryOption)}
                 placeholder="비목 선택"
                 onAddNew={async (q) => {
                   const nm = await quickAddCategory(q, { kind: isRefund ? 'inc' : 'exp', setCategories, toast })
@@ -346,7 +347,7 @@ const OtherTaxDrawer = ({ open, editing, onClose, onSaved }) => {
             <div>
               <label className="label" style={{ marginBottom: 8 }}>비목</label>
               <Combobox value={form.category} onChange={v => f('category', v)}
-                options={categories.filter(c => c.id?.startsWith(isRefund ? 'INC-' : 'EXP-')).map(c => ({ value: c.name, label: c.name, sub: c.group_name || '' }))}
+                options={categories.filter(c => c.id?.startsWith(isRefund ? 'INC-' : 'EXP-')).map(categoryOption)}
                 placeholder="비목 선택"
                 onAddNew={async (q) => {
                   const nm = await quickAddCategory(q, { kind: isRefund ? 'inc' : 'exp', setCategories, toast })

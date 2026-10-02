@@ -1248,6 +1248,8 @@ button.cell-tag:hover { color: var(--ink); background: var(--surface-2); }
 .tbar-fcontrol { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* ───── Inputs ───── */
+/* 계좌·카드 칸(AccountField) — 이름 · 은행(카드사) · 번호. 한 칸이 160px 못 되면 위아래로 */
+.acct-field-cells { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
 /* 보기 칸 — 상세에서 입력칸 **자리에** 서는 글자. 입력칸과 높이·안쪽 여백을 맞춰 [수정]을 눌러도 칸이 안 뛴다 */
 .ro-field { min-height: 44px; padding: 11px 12px; border-radius: 10px; background: var(--surface-2); color: var(--ink); line-height: 1.5; word-break: break-all; }
 .input {
@@ -1384,6 +1386,18 @@ button.cell-tag:hover { color: var(--ink); background: var(--surface-2); }
 .neg-ink { color: var(--neg-ink); }
 .text-pos { color: var(--pos); }
 .text-warn { color: var(--warn-ink); }
+/* 고른 것 바(SelectionBar) — 화면 아래 가운데에 떠서 스크롤을 따라다닌다.
+   오른쪽 아래 바로가기 독(QuickDock)과 안 겹치게 가운데에 둔다. 색은 토큰만 */
+.sel-bar {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 70;
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 18px;
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: 14px;
+  box-shadow: 0 12px 36px -12px rgba(15,23,42,0.35);
+  max-width: calc(100vw - 32px); white-space: nowrap;
+}
+.sel-bar-spacer { height: 104px; }   /* 바(약 52px) + 아래 띄움(24px) + 숨 쉴 틈 — 맨 아래 줄이 바에 가리지 않게 */
+/* 꺼 둔 줄(반복거래 끄기 등) — 지우지 않고 흐리게 */
+.table tr.row-off > td { opacity: 0.45; }
 .text-neg { color: var(--neg-ink); }
 .text-sm { font-size: 12.5px; }
 .text-xs { font-size: 11.5px; }
@@ -1522,9 +1536,17 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 .doc-ws-side, .doc-ws-main { min-width: 0; }
 .doc-ws-viewport { overflow-x: auto; }
 
-/* 2열이 버티는 하한. 1200px 아래에서는 목록+종이가 나란히 설 자리가 없어
-   종이가 늘 스크롤 상태가 된다 — 그럴 바엔 목록을 위로 접는 편이 읽기 쉽다. */
-@media (max-width: 1200px) {
+/* 종이 맞춤 — DocViewport 가 칸 폭에 맞춰 --doc-fit 을 정한다(화면 전용, 인쇄는 아래에서 1로 되돌린다) */
+.doc-ws-fit { zoom: var(--doc-fit, 1); flex-shrink: 0; }
+
+/* 2열이 버티는 하한 — **900px**. 예전엔 1200px 이었는데, 노트북(1366×768·배율 125% → 1093px)이
+   그 아래라 문서가 목록 밑 화면 밖으로 밀렸다. 고객사가 "목록만 뜨고 문서가 안 뜬다"고 했다(2026-10-01).
+   2열을 지키는 대신 종이를 칸에 맞춰 줄이고(.doc-ws-fit), 목록·여백을 조금 좁힌다. */
+@media (max-width: 1400px) {
+  .doc-ws { grid-template-columns: 260px 1fr; }
+  .doc-ws-viewport { padding: 20px 16px; }
+}
+@media (max-width: 900px) {
   .doc-ws { grid-template-columns: 1fr; }
 }
 
@@ -1533,7 +1555,7 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
    ⚠ 셸 구조가 .content > .page-shell > .fade-up(.doc-screen) 3겹이라, 세 층을 모두 flex 로
      이어야 높이가 전달된다(가운데 .page-shell 을 건너뛰면 height/flex 가 끊겨 프레임이 안 걸린다).
    :has() 로 **문서 화면일 때만** 셸을 프레임으로 바꾼다 — 다른 화면은 예전처럼 바깥 하나로 흐른다. */
-@media (min-width: 1201px) {
+@media (min-width: 901px) {
   .content:has(.doc-screen) { display: flex; flex-direction: column; overflow: hidden; }
   /* ⚠ width:100% 필수 — .page-shell 은 margin:0 auto 를 갖는다. flex 아이템이 되면 auto 마진이
      아이템을 **콘텐츠 폭으로 줄여 가운데로** 몰아 좌우가 텅 빈다(회귀 겪음). width:100% 로 폭을
@@ -1541,7 +1563,10 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
   .page-shell:has(> .doc-screen) { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; flex-direction: column; }
   .doc-screen { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
   .doc-screen > .page-header { flex: 0 0 auto; }
-  .doc-screen .doc-ws { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+  /* ⚠ 행 높이를 **칸 높이에 묶는다**(minmax(0,1fr)). 기본 행(auto)은 내용 길이만큼 늘어나서
+     문서가 703px 칸에 1051px 로 넘쳤다 — 바깥은 overflow:hidden 이라 문서 아랫부분(결재란)이
+     잘리고 휠도 먹지 않았다. 행이 칸에 묶여야 그 안의 뷰포트가 스크롤한다(2026-10-01). */
+  .doc-screen .doc-ws { flex: 1 1 auto; min-height: 0; align-items: stretch; grid-template-rows: minmax(0, 1fr); }
   .doc-screen .doc-ws-side { display: flex; flex-direction: column; max-height: 100%; }
   .doc-screen .doc-ws-side-top { flex: 0 0 auto; }
   .doc-screen .doc-ws-side-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
@@ -1719,6 +1744,8 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
     overflow: visible; padding: 0; background: var(--surface) !important;
   }
   .no-print, .dt-colmenu { display: none !important; }
+  /* 화면에서 칸에 맞춰 줄인 문서는 종이에선 원래 크기로(DocViewport) */
+  .doc-ws-fit { zoom: 1 !important; width: auto !important; }
   /* ⚠ 머리글의 **버튼 자리는 언제나 화면 전용**이다 — 종이에 누를 것이 없다.
      버튼마다 no-print 를 달게 하면 하나는 반드시 빠진다. 실제로 '손보기' 버튼이
      자금일보 종이 오른쪽 위에 그대로 찍혔다(안내 문구에는 달려 있었는데 버튼에만 없었다).

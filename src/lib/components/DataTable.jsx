@@ -110,10 +110,33 @@ export const DataTable = ({ columns, rows, loading, onRowClick, empty = '표시�
        잘린 50건 안에서 검색·정렬하면 뒤쪽 건은 영영 못 찾는다(사용자 지적). 합계(footer)도 거른 전체 기준.
      거르는 조건(rows)이나 정렬이 바뀌면 다시 N건부터 — 그래서 rows 는 useMemo 로 넘긴다
      (매번 새 배열이면 그릴 때마다 N건으로 되돌아간다). */
-  pageSize }) => {
+  pageSize: pageSizeProp }) => {
+  /* ── 끊어 보기 기본값(2026-10-01 사용자: "그리드 일괄 적용") ──
+     **목록 표**(tableKey 가 있는 표 — 열 설정을 저장하는 업무 목록)는 50건 + [더 보기]가 기본이다.
+     **보고서 표**(tableKey 없음 — 자금일보·부가세처럼 종이로 내는 표)는 통째로 그린다. 보고서를 끊으면
+       읽는 사람이 [더 보기]를 눌러 가며 맞춰 봐야 하고, 그건 보고서가 아니다.
+     끊으면 안 되는 목록(이번 달 할 일처럼 한 줄도 놓치면 안 되는 것)은 pageSize={0} 으로 끈다. */
+  const pageSize = pageSizeProp ?? (tableKey ? 50 : 0)
   const [sort, setSort] = useState(null)   // { key, dir: 'asc' | 'desc' } | null
   const [limit, setLimit] = useState(pageSize || 0)
-  useEffect(() => { if (pageSize) setLimit(pageSize) }, [rows, sort, pageSize])
+  /* 거르는 조건이 바뀌면 다시 N건부터 — 그런데 **배열이 새로 만들어졌다는 것만으로** 되돌리면 안 된다.
+     화면이 rows 를 useMemo 없이 넘기면(수주·발주 등) 다시 그릴 때마다 [더 보기]가 풀렸다.
+     그래서 '내용이 바뀌었나'를 건수 + 첫·끝 줄의 키로 본다 — 검색·필터가 바뀌면 거의 늘 여기서 갈린다. */
+  const rowsSig = (() => {
+    const k = (r, i) => (r == null ? '' : String(rowKey ? rowKey(r, i) : (r.id ?? i)))
+    const n = rows?.length || 0
+    return `${n}|${n ? k(rows[0], 0) : ''}|${n ? k(rows[n - 1], n - 1) : ''}`
+  })()
+  useEffect(() => { if (pageSize) setLimit(pageSize) }, [rowsSig, sort, pageSize])  // eslint-disable-line react-hooks/exhaustive-deps
+  /* 인쇄는 **전부** — 화면에서 50건만 보고 있어도 종이에는 잘리면 안 된다(Ctrl+P 포함).
+     beforeprint 는 브라우저가 인쇄용 배치를 하기 전에 온다 — 그때 펴고, 끝나면 되돌린다. */
+  const [printing, setPrinting] = useState(false)
+  useEffect(() => {
+    if (!pageSize) return
+    const on = () => setPrinting(true), off = () => setPrinting(false)
+    window.addEventListener('beforeprint', on); window.addEventListener('afterprint', off)
+    return () => { window.removeEventListener('beforeprint', on); window.removeEventListener('afterprint', off) }
+  }, [pageSize])
   const [prefs, setPrefs] = useState(() => readPrefs(tableKey))
   /* 표가 다른 화면으로 재사용될 때(같은 컴포넌트, 다른 tableKey) 앞 표의 설정이 남지 않게 한다 */
   useEffect(() => { setPrefs(readPrefs(tableKey)) }, [tableKey])
@@ -184,10 +207,13 @@ export const DataTable = ({ columns, rows, loading, onRowClick, empty = '표시�
   const keyOf = (row, i) => (rowKey ? rowKey(row, i) : (row.id ?? i))
   const keyByRow = new Map(sorted.map((r, i) => [r, keyOf(r, i)]))
   // 그릴 줄 — 거르고 정렬한 **뒤에** 자른다(pageSize 머리말)
-  const visible = pageSize ? sorted.slice(0, limit) : sorted
+  const visible = pageSize && !printing ? sorted.slice(0, limit) : sorted
   const hiddenCount = sorted.length - visible.length
   const canSelect = (row) => !select?.isSelectable || select.isSelectable(row)
-  const selectable = select ? sorted.filter(canSelect) : []
+  /* ⚠ **그려진 줄**에서만 고른다. 예전엔 거른 전체(sorted)에서 골라서, 50건만 보이는 상태로
+     머리 체크박스를 누르면 안 보이는 51번째부터도 선택됐다 — 그다음 '일괄 삭제'가 못 본 줄을 지운다
+     (바로 아래 주석이 막겠다고 한 바로 그 일이다). */
+  const selectable = select ? visible.filter(canSelect) : []
   const selectedSet = new Set(select?.ids || [])
   /* 머리 체크박스는 **지금 화면에 보이는 것 중 고를 수 있는 것**만 다룬다.
      필터를 걸어 놓고 전체 선택을 눌렀는데 안 보이는 행까지 선택되면, 그 다음 '일괄 삭제'가

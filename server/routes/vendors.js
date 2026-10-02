@@ -1,3 +1,4 @@
+const { similarVendors } = require('../lib/vendorName')
 const { Router } = require('express')
 const { newBook, templateSheet, guideSheet, sendBook } = require('../lib/xlsxBook')
 const { randomUUID } = require('crypto')
@@ -158,6 +159,24 @@ router.post('/', async (req, res, next) => {
             ? `'${nm}' 이름의 거래처가 여러 개예요. 목록에서 골라주세요.`
             : `'${nm}' 거래처가 이미 있어요. 목록에서 골라주세요.`
         return res.status(409).json({ code: 'dup_vendor', count: clash.length, live: live.length, error })
+      }
+    }
+    /* 이름이 **비슷한** 거래처가 있으면 묻는다(같은 이름은 위에서 이미 다뤘다).
+       '금강노인종합복지회관'이 '복지관' 옆에 새로 생겨 같은 입금이 두 줄 섰다(운영 fowin). 묻기만 한다 —
+       다른 곳이면 화면이 allow_similar 로 다시 부른다. 사업자번호가 둘 다 있고 다르면 다른 회사로 본다. */
+    if (!req.body.allow_duplicate && !req.body.allow_similar) {
+      const digits = (s) => String(s || '').replace(/[^0-9]/g, '')
+      const biz = digits(biz_no)
+      const nm = String(name).trim()
+      const sims = (await similarVendors(req.db, nm))
+        .filter(v => String(v.name).trim() !== nm && Number(v.active) === 1)
+        .filter(v => !biz || !digits(v.biz_no) || digits(v.biz_no) === biz)
+      if (sims.length) {
+        return res.status(409).json({
+          code: 'similar_vendor',
+          candidates: sims.slice(0, 3).map(v => ({ id: v.id, name: v.name, gubu: v.gubu })),
+          error: `이름이 비슷한 거래처가 있어요: '${sims[0].name}'`,
+        })
       }
     }
     const id = randomUUID()

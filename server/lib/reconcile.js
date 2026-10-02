@@ -126,7 +126,11 @@ function isSure(inv, txn, why) {
   const amtExact = why.includes('남은 금액과 일치') || why.includes('청구금액과 일치')
   const vendorOk = why.includes('거래처 같음')
   const base = inv.due_at || inv.issued_at
-  return amtExact && vendorOk && daysBetween(txn.date, base) <= 60
+  /* 청구서보다 **먼저** 오간 돈은 미리 골라 두지 않는다(후보로는 보인다 — 사람이 고른다).
+     1일 발행·말일 수금인 곳에서 이번 달 입금이 아직 안 들어왔으면, 지난달 말일 입금이 이 조건을 다 맞춰
+     '확실한 짝'으로 체크돼 있었다 — 그대로 누르면 그 뒤로 매달 한 달씩 밀린다(운영 fowin 2026-09). */
+  const early = String(txn.date).slice(0, 10) < String(inv.issued_at).slice(0, 10)
+  return amtExact && vendorOk && !early && daysBetween(txn.date, base) <= 60
 }
 
 const MIN_SCORE = 45          // 이보다 낮으면 보여주지 않는다 — 근거 없는 제시는 방해가 된다
@@ -257,4 +261,15 @@ async function reconcileCandidates(db, kind) {
   return { rows, invoiceCount: invoices.length, txnCount: txnRows.length }
 }
 
-module.exports = { reconcileCandidates, scorePair, normName, daysBetween }
+/**
+ * 한 청구서의 후보 목록에서 '확실한 짝'을 정리한다 — **하나일 때만** 확실하다.
+ * 같은 금액 입금이 두 번이면 어느 쪽인지 우리는 모른다(위 reconcileCandidates 의 clear 와 같은 생각).
+ * 그때는 sure 를 내리고 tie 를 단다 — 화면은 목록을 먼저 열되 한 번에 잇는 버튼은 안 띄운다.
+ * @param items [{ sure }] — 제자리에서 고친다
+ */
+function markClearSure(items) {
+  if (items.filter(x => x.sure).length > 1) for (const x of items) if (x.sure) { x.sure = false; x.tie = true }
+  return items
+}
+
+module.exports = { reconcileCandidates, scorePair, isSure, markClearSure, normName, daysBetween }

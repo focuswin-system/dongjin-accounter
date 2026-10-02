@@ -25,6 +25,7 @@
  */
 
 const { randomUUID } = require('crypto')
+const { categorySettingsOf } = require('./categoryAccount')
 
 /** origin 종류 — 여기 없는 값은 받지 않는다(오타로 뒤처리가 조용히 빠지는 걸 막는다)
  *
@@ -59,6 +60,23 @@ async function nextInvoiceNo(db, kind, year, seq = null) {
   const n = Number(maxno) + 1
   if (seq) seq.set(key, n)
   return `${prefix}-${year}-${String(n).padStart(4, '0')}`
+}
+
+/**
+ * 매입세액 공제 여부(0/1). **매입 청구서만** 따진다 — 매출세액에는 공제라는 개념이 없다.
+ *
+ * 화면이 정해 보내면(f.vatDeductible) 그대로, 아니면 **비목**에서 물려받는다(접대비 → 불공제).
+ * 창구가 10군데라 창구마다 챙기면 반드시 한 곳이 빠진다 — 그래서 여기서 정한다.
+ * 수정(PUT)도 같은 함수를 쓴다(routes/invoices.js).
+ */
+async function invoiceDeductible(db, f) {
+  if (f.kind !== 'received') return 1
+  if (f.vatDeductible !== undefined && f.vatDeductible !== null) {
+    return f.vatDeductible === 0 || f.vatDeductible === false || f.vatDeductible === '0' ? 0 : 1
+  }
+  if (!f.category) return 1
+  const cs = await categorySettingsOf(db, f.category, 'received')
+  return cs.vat_deductible === 0 ? 0 : 1
 }
 
 /**
@@ -103,15 +121,16 @@ async function createInvoice(conn, f) {
   // 이월 잔액(4단계) — 기간 매출·부가세 명세에서 빠지는 표시. 규칙은 lib/carryover.js
   const carryover = origin.type === 'carryover' ? 1 : 0
   const status = f.status || (f.kind === 'issued' ? '입금 예정' : '지급 대기')
+  const vatDeductible = await invoiceDeductible(conn, f)
   await conn.execute(
     `INSERT INTO invoices (id, invoice_no, kind, vendor_id, contract_id, template_id,
                            supply_amount, vat_amount, total_amount, issued_at, due_at,
-                           status, account_id, memo, tax_type, nts_confirm_no, category, account_code, carryover)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                           status, account_id, memo, tax_type, nts_confirm_no, category, account_code, carryover, vat_deductible)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [id, invoiceNo, f.kind, f.vendorId || null, f.contractId || null, templateId,
      f.supply, f.vat, f.total, f.issuedAt, f.dueAt || null,
      status, f.accountId || null, f.memo || '', f.taxType, f.ntsConfirmNo || null,
-     f.category || null, f.accountCode || null, carryover]
+     f.category || null, f.accountCode || null, carryover, vatDeductible]
   )
 
   const lines = f.writeLines ? await f.writeLines(conn, id) : 0
@@ -134,4 +153,4 @@ async function createInvoice(conn, f) {
   return { id, invoiceNo, lines }
 }
 
-module.exports = { createInvoice, nextInvoiceNo, ORIGINS }
+module.exports = { createInvoice, nextInvoiceNo, invoiceDeductible, ORIGINS }

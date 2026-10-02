@@ -1077,6 +1077,19 @@ const VendorPanel = ({ embedded = false }) => {
       : await api.addVendor(payload)
     /* 같은 이름이 이미 있다 — 동명이인·지점처럼 진짜 다른 곳일 수 있으니 막지 않고 묻는다.
        그냥 두면 같은 곳이 두 벌 생겨 청구서·중복 판정이 갈라진다. */
+    /* 이름이 **비슷한** 거래처 — 전체 폼이라 '그걸 쓰기'로 바꾸면 적은 사업자번호·계좌가 버려진다.
+       같은 곳이면 취소하고 그 거래처를 고치면 된다고 말한다(lib/vendorName.js isSimilarVendorName) */
+    if (!editing && !res.ok && res.code === 'similar_vendor') {
+      const c = res.candidates?.[0]
+      const ok = await confirm({
+        tone: 'warn', icon: <Icon.Warn size={22}/>, title: '이름이 비슷한 거래처가 있어요',
+        body: `'${form.name}' — 이미 있는 거래처 '${c?.name}'. 다른 곳이 맞나요?`,
+        detail: `같은 곳이면 취소하고 기존 거래처를 고쳐 주세요. 두 벌이 되면 입금·미수금이 갈라져요.`,
+        confirmLabel: '다른 곳이에요 — 등록', cancelLabel: '취소',
+      })
+      if (!ok) return
+      res = await api.addVendor({ ...payload, allow_similar: true })
+    }
     if (!editing && !res.ok && res.code === 'dup_vendor') {
       const ok = await confirm({
         tone: 'warn', icon: <Icon.Warn size={22}/>, title: '같은 이름의 거래처가 있어요',
@@ -2365,15 +2378,17 @@ const AccountPanel = ({ embedded = false, kind = 'bank' }) => {
                   options={[{ value: '', label: '선택 안 함' },
                     ...accounts.filter(a => a.kind !== 'card').map(a => ({ value: a.id, label: a.name }))]}
                   placeholder="어느 통장에서 빠지나요"/>}
+                {/* 안내는 이 칸 **안에** — 따로 한 줄을 차지하면 수정할 때만 줄이 생겨 아래 칸(소유)이 밀렸다.
+                    상세와 수정의 칸 자리가 같아야 한다(2026-09-30 화면 검토) */}
+                {!ro && (
+                  <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
+                    이번 달 사용액이 결제일에 이 통장에서 빠지는 것으로 자금 현황에 잡혀요. 갚기는 <b>카드 대금</b>에서.
+                  </div>
+                )}
               </div>
             </>
           )}
-          {!ro && isCard && (form.card_type || 'credit') === 'credit' && (
-            <div className="text-xs text-muted2 span-2" style={{ marginTop: -8 }}>
-              결제일을 넣으면 이번 달 사용액이 그 날 이 통장에서 빠지는 것으로 자금 현황에 잡혀요.
-              실제 결제는 <b>지급처리 → 카드 대금 지급</b>에서 한 번에 처리할 수 있어요.
-            </div>
-          )}
+
 
           {/* 소유 — 중소기업은 대표 개인 계좌·카드로 회사 돈을 쓰는 일이 흔하다.
               자금 현황에서 법인/개인 합계를 가르는 근거이고, 개인 잔액은 마스터만 본다.

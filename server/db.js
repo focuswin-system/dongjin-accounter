@@ -32,6 +32,9 @@ const pool = mysql.createPool({
  *
  * @param {import('mysql2/promise').Connection} [conn] 관리 계정 연결(대상 DB에 접속된 상태)
  */
+/** 매입세액 불공제가 기본인 비목(부가가치세법 제39조 ①6 — 기업업무추진비) */
+const NON_DEDUCTIBLE_CATEGORIES = ['접대비', '기업업무추진비']
+
 async function initDb(conn) {
   const c = conn || await pool.getConnection()
   const pooled = !conn   // 풀에서 빌린 연결만 release 한다
@@ -1301,6 +1304,9 @@ async function initDb(conn) {
     await ensureColumn('categories',   'vat_deductible', "vat_deductible TINYINT DEFAULT 1")
     // 청구서도 면세/영세를 구분해 저장(과세표준 구분용). 기존 행은 NULL → 세액>0이면 과세로 본다.
     await ensureColumn('invoices',     'tax_type',      "tax_type VARCHAR(10)")
+    /* 매입 청구서(세금계산서 수취)의 매입세액 공제 여부. 접대비 세금계산서는 받아도 공제받지 못한다
+       (부가가치세법 제39조 ①6). 없던 동안은 수취분 세액이 전부 공제로 집계됐다. 기존 행은 1(종전대로). */
+    await ensureColumn('invoices',     'vat_deductible', "vat_deductible TINYINT DEFAULT 1")
     // 홈택스 전자세금계산서 승인번호(24자리). 임포트에서 같은 계산서가 두 번 쌓이는 걸 막는 유일한 키다.
     // 수기로 등록한 청구서는 비어 있고, 나중에 엑셀을 올리면 그 청구서에 채워진다.
     await ensureColumn('invoices',     'nts_confirm_no', "nts_confirm_no VARCHAR(40)")
@@ -1739,6 +1745,14 @@ async function initDb(conn) {
       await c.execute(
         "UPDATE accounts SET owner = 'personal' WHERE kind = 'card' AND type = '개인카드' AND owner = 'corp'")
     })
+    /* 신용카드 계정과목: 보통예금 → 미지급금 (lib/acctCode.js accountAcctCode).
+     * 카드도 예금 라벨로 계정을 받아 카드 지출 전표가 '통장에서 나간 것'으로 섰다.
+     * 손으로 다른 계정을 단 카드는 그 판단을 존중한다 — 1103·빈 값인 것만 바꾼다.
+     * 거래(transactions)는 안 바꾼다: 전표는 계좌의 계정과목을 **읽어** 세우므로 이것만으로 바로잡힌다. */
+    await runOnce('2026-10_card_acct_code_payable', async () => {
+      await c.execute(
+        "UPDATE accounts SET acct_code = '2202' WHERE kind = 'card' AND card_type <> 'check' AND (acct_code IS NULL OR acct_code IN ('', '1103'))")
+    })
 
     /* ── 정액형 / 변동형 ────────────────────────────────────────
      * 매달 같은 날 청구·지급하는데 **금액만 다른** 건이 흔하다(전기·수도·통신·클라우드,
@@ -2099,10 +2113,10 @@ async function initDb(conn) {
     if (cnt === 0) {
       const seed = [
         ["EXP-101","생산 급여","인건비(생산)","면세","계좌이체",1],
-        ["EXP-102","복리후생비(생산)","인건비(생산)","면세","계좌이체",2],
+        ["EXP-102","복리후생비(생산)","인건비(생산)","10%","계좌이체",2],
         ["EXP-103","퇴직급여(생산)","인건비(생산)","면세","계좌이체",3],
         ["EXP-104","관리 급여","인건비(관리)","면세","계좌이체",4],
-        ["EXP-105","복리후생비(관리)","인건비(관리)","면세","계좌이체",5],
+        ["EXP-105","복리후생비(관리)","인건비(관리)","10%","계좌이체",5],
         ["EXP-106","퇴직급여(관리)","인건비(관리)","면세","계좌이체",6],
         ["EXP-201","철강 원자재","재료비","10%","계좌이체",7],
         ["EXP-202","비철금속","재료비","10%","계좌이체",8],
@@ -2121,7 +2135,7 @@ async function initDb(conn) {
         ["EXP-501","시험검사비","시험·인증","10%","계좌이체",21],
         ["EXP-502","검사성적서 발급","시험·인증","10%","계좌이체",22],
         ["EXP-503","방산인증 수수료","시험·인증","면세","계좌이체",23],
-        ["EXP-504","KS·ISO 인증","시험·인증","면세","계좌이체",24],
+        ["EXP-504","KS·ISO 인증","시험·인증","10%","계좌이체",24],
         ["EXP-601","임차료","운영비","10%","계좌이체",25],
         ["EXP-602","전력비","운영비","10%","계좌이체",26],
         ["EXP-603","수도광열비","운영비","10%","계좌이체",27],
@@ -2134,12 +2148,12 @@ async function initDb(conn) {
         ["EXP-610","수수료","운영비","10%","계좌이체",34],
         ["EXP-701","차량유지비","차량·여비","10%","법인카드",35],
         ["EXP-702","출장비","차량·여비","면세","법인카드",36],
-        ["EXP-703","접대비","차량·여비","10%","법인카드",37],
+        ["EXP-703","접대비","운영비","10%","법인카드",37],
         ["EXP-801","안전관리비","안전·환경","10%","계좌이체",38],
         ["EXP-802","환경규제 비용","안전·환경","면세","계좌이체",39],
         ["EXP-901","세금과공과금","세금·금융","면세","계좌이체",40],
         ["EXP-902","이자비용","세금·금융","면세","계좌이체",41],
-        ["EXP-903","판공비","세금·금융","면세","법인카드",42],
+        ["EXP-903","판공비","운영비","면세","법인카드",42],
         ["EXP-904","기타 지출","세금·금융","—","—",43],
         ["INC-101","선급금","납품수익","10%","—",44],
         ["INC-102","기성고","납품수익","10%","—",45],
@@ -2153,12 +2167,52 @@ async function initDb(conn) {
         ["INC-204","이자수익","기타수익","면세","—",53],
       ]
       for (const [id, name, group_name, vat, pay_method, sort_order] of seed) {
+        // 접대비는 매입세액 불공제(부가가치세법 제39조 ①6). 세금계산서·카드전표를 받아도 못 돌려받는다
+        const deductible = NON_DEDUCTIBLE_CATEGORIES.includes(name) ? 0 : 1
         await c.execute(
-          'INSERT INTO categories (id, name, group_name, vat, pay_method, sort_order) VALUES (?,?,?,?,?,?)',
-          [id, name, group_name, vat, pay_method, sort_order]
+          'INSERT INTO categories (id, name, group_name, vat, pay_method, sort_order, vat_deductible) VALUES (?,?,?,?,?,?,?)',
+          [id, name, group_name, vat, pay_method, sort_order, deductible]
         )
       }
     }
+
+    /* 비목 부가세 기본값 바로잡기 (2026-09-30).
+     *
+     *   복리후생비  면세 → 과세(10%)·공제
+     *     직원 식대·회식·간식은 과세 재화·용역이다. 사업 관련 지출이라 적격증빙
+     *     (세금계산서·카드전표·지출증빙 현금영수증)이 있으면 매입세액을 공제받는다.
+     *     면세로 두면 세액이 0 으로 잡혀 돌려받을 매입세액이 신고에서 빠졌다.
+     *     예외(경조사비 현금·간이과세자 영수증)는 비목이 아니라 거래 단위 사정이다 — 증빙·과세유형 칸이 가른다.
+     *   접대비      공제 → 불공제
+     *     부가가치세법 제39조 ①6: 기업업무추진비(구 접대비) 관련 매입세액은 공제하지 않는다.
+     *     공제로 두면 매입세액이 부풀려져 추징·가산세 대상이 된다.
+     *   접대비 분류  차량·여비 → 운영비 (여비교통비와 무관하다)
+     *
+     * **옛 기본값 그대로인 행만** 바꾼다 — 회사가 직접 고친 값은 그 회사의 판단이라 건드리지 않는다.
+     * 이미 쌓인 거래는 바꾸지 않는다: 신고가 끝났을 수 있는 과거 기록이다(고칠지는 세무사와 볼 일).
+     * 새 회사는 위 시드가 이미 맞는 값으로 들어가므로 여기서 바뀌는 것이 없다. */
+    await runOnce('2026-09_category_vat_defaults', async () => {
+      await c.execute(
+        "UPDATE categories SET vat = '10%' WHERE id LIKE 'EXP-%' AND name IN ('복리후생비(생산)','복리후생비(관리)','복리후생비') AND vat = '면세'")
+      await c.execute(
+        "UPDATE categories SET vat_deductible = 0 WHERE id LIKE 'EXP-%' AND name IN ('접대비','기업업무추진비') AND vat_deductible = 1")
+      await c.execute(
+        "UPDATE categories SET group_name = '운영비' WHERE id LIKE 'EXP-%' AND name = '접대비' AND group_name = '차량·여비'")
+    })
+    /* 같은 날 두 번째 검토분 — 위 키가 이미 돈 곳이 있어 따로 둔다.
+     *   KS·ISO 인증  면세 → 과세  민간 인증기관 수수료는 과세 용역이다(세금계산서가 온다)
+     *   판공비       세금·금융 → 운영비 (세금도 금융도 아니다)
+     * 손대지 않은 것 — 판단이 거래마다 갈려 기본값 하나로 못 정한다:
+     *   출장비        숙박·식대는 과세·공제, KTX·항공·택시는 카드로 내도 공제 불가(여객운송 영수증)
+     *   방산인증 수수료  받는 기관이 국가·지자체면 면세, 그 밖이면 과세
+     *   판공비 과세유형  접대 성격이면 불공제라, 과세·공제로 바꾸면 과다공제 통로가 된다 — 면세(세액 0) 유지
+     * 옛 기본값 그대로인 행만 바꾼다(회사가 고친 값은 둔다). */
+    await runOnce('2026-09_category_vat_defaults_2', async () => {
+      await c.execute(
+        "UPDATE categories SET vat = '10%' WHERE id LIKE 'EXP-%' AND name = 'KS·ISO 인증' AND vat = '면세'")
+      await c.execute(
+        "UPDATE categories SET group_name = '운영비' WHERE id LIKE 'EXP-%' AND name = '판공비' AND group_name = '세금·금융'")
+    })
 
     // 표준 계정과목 시딩 (비어 있을 때만) — server/data/account-subjects.json (계정과목분류표.xlsx 기준)
     const [[{ acnt }]] = await c.execute('SELECT COUNT(*) AS acnt FROM account_subjects')

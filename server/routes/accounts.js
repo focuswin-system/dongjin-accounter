@@ -3,7 +3,7 @@ const { randomUUID } = require('crypto')
 const { futureDateError } = require('../db')
 const { closedPeriodError } = require('../lib/closing')
 const { SETTLED_INCOME, SETTLED_EXPENSE } = require('../lib/ledger')
-const { bankAcctCode } = require('../lib/acctCode')
+const { accountAcctCode } = require('../lib/acctCode')
 const { balancesAsOf } = require('../lib/cashReport')
 
 const router = Router()
@@ -126,17 +126,32 @@ router.post('/', async (req, res, next) => {
     const cardPayAcct = cardType === 'check' ? null : (req.body.card_pay_account_id || null)
     { const ce = await cashDuplicateError(req.db, type); if (ce) return res.status(409).json({ error: ce }) }
     { const ne = await nameDuplicateError(req.db, name); if (ne) return res.status(409).json({ error: ne }) }
+    { const de = await numberDuplicateError(req.db, number, kind); if (de) return res.status(409).json({ error: de }) }
     const id = randomUUID()
     // acct_code 를 빠뜨리면 이 계좌의 거래는 일계표에서 **한쪽 다리가 없어** 차대변이 안 맞는다.
     // (실제로 여기가 비어 있어서 새로 만든 계좌의 거래가 전부 짝을 잃었다)
     await req.db.execute(
       'INSERT INTO accounts (id, name, bank, type, initial_balance, kind, `number`, purpose, acct_code, owner, card_pay_day, card_pay_account_id, card_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, name, bank||'', type||'보통예금', initial_balance||0, kind||'bank', number||'', purpose||'',
-       bankAcctCode(type), owner, cardPayDay, cardPayAcct, cardType]
+       accountAcctCode({ type, kind: kind || 'bank', card_type: cardType }), owner, cardPayDay, cardPayAcct, cardType]
     )
     res.json({ id })
   } catch (e) { next(e) }
 })
+
+/* 번호가 같은 계좌·카드 — 이름이 달라도 **같은 것**이다(끝자리만 다르게 이름 붙여 두 번 등록하는 일을 막는다).
+ * 거래 폼에서 바로 새 카드·계좌를 만들 수 있게 되면서(2026-09-30) 서버에서도 본다 — 화면만 막으면 다른 길로 뚫린다.
+ * 숫자만 비교한다('0000-1234' = '00001234'). 번호가 없으면 보지 않는다(번호 없이 쓰는 회사도 있다). */
+async function numberDuplicateError(db, number, kind, exceptId = null) {
+  const d = String(number || '').replace(/\D/g, '')
+  if (d.length < 4) return null
+  const [rows] = await db.execute(
+    "SELECT id, name, kind, `number` FROM accounts WHERE `number` IS NOT NULL AND `number` <> ''" + (exceptId ? ' AND id <> ?' : ''),
+    exceptId ? [exceptId] : [])
+  const hit = rows.find(r => String(r.number || '').replace(/\D/g, '') === d && (r.kind === 'card') === (kind === 'card'))
+  if (!hit) return null
+  return `번호가 같은 ${hit.kind === 'card' ? '카드' : '계좌'} "${hit.name}"가 이미 있어요. 그걸 고르시면 됩니다.`
+}
 
 router.put('/:id', async (req, res, next) => {
   try {
@@ -161,7 +176,7 @@ router.put('/:id', async (req, res, next) => {
     const [result] = await req.db.execute(
       'UPDATE accounts SET name=?, bank=?, type=?, initial_balance=?, kind=?, `number`=?, purpose=?, acct_code=?, owner=?, card_pay_day=?, card_pay_account_id=?, card_type=? WHERE id=?',
       [name, bank||'', type||'보통예금', initial_balance||0, kind||'bank', number||'', purpose||'',
-       bankAcctCode(type), owner, cardPayDay, cardPayAcct, cardType, req.params.id]
+       accountAcctCode({ type, kind: kind || 'bank', card_type: cardType }), owner, cardPayDay, cardPayAcct, cardType, req.params.id]
     )
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })

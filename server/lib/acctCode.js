@@ -19,14 +19,27 @@ const CODES = {
 }
 
 /**
- * @param {string} type 계좌 종류 라벨(보통예금·당좌예금·현금·법인카드 …)
+ * @param {string} type 계좌 종류 라벨(보통예금·당좌예금·현금)
  * @returns {string} 계정과목 코드
- *
- * 카드는 실제로는 미지급금(2101)이지만, 이 앱은 카드 지출도 즉시 출금으로 다룬다
- * (카드 결제일·미결제 잔액 개념이 없다). 그래서 지금은 보통예금으로 둔다 —
- * 카드 결제 주기를 도입하면 2101로 바꾸고 결제일에 상계하는 흐름이 필요하다.
  */
 const bankAcctCode = (type) => CODES[String(type || '').trim()] || CODES.보통예금
+
+/** 신용카드 — 긁은 돈은 결제일까지 **갚을 돈**이다 */
+const CARD_CODE = '2202'   // 미지급금
+
+/**
+ * 계좌·카드 한 줄의 계정과목. **계좌를 만들거나 고칠 때, 이체를 세울 때 모두 이걸 쓴다.**
+ *
+ * 신용카드는 미지급금(2202)이다. 예전엔 카드도 종류 라벨로만 정해 보통예금(1103)을 받았다
+ * ("카드 결제 주기가 없어 즉시 출금으로 다룬다"던 시절의 임시값). 그 탓에
+ *   · 카드 지출 전표가 `비용 / 보통예금` — 통장에서 바로 나간 것처럼 섰고
+ *   · 카드 대금 지급(통장→카드 이체)은 카드 쪽이 `보통예금 / 보통예금` 이 됐다.
+ * 카드 대금(결제일·지급 처리)이 생겼으니 임시값을 걷는다:
+ *   사용   비용 / 미지급금      결제일   미지급금 / 보통예금
+ * 체크카드는 긁는 즉시 통장에서 빠지므로 예금 그대로다.
+ */
+const accountAcctCode = ({ type, kind, card_type } = {}) =>
+  kind === 'card' && card_type !== 'check' ? CARD_CODE : bankAcctCode(type)
 
 /**
  * 인건비성 지급의 계정과목 — 근로계약 소득구분(work_contracts.income_type) 기준.
@@ -84,7 +97,7 @@ const SETTLE_CODES = { income: '1204', expense: '2101' }   // 외상매출금 / 
 const settleAcctCode = (kind) => SETTLE_CODES[kind] || null
 
 module.exports = {
-  CODES, bankAcctCode,
+  CODES, bankAcctCode, accountAcctCode, CARD_CODE,
   LABOR_CODES, laborAcctCode, LABOR_CATEGORIES, laborCategory,
   SETTLE_CODES, settleAcctCode,
 }

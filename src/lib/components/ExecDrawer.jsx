@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { categoryOption } from '../categoryWords'
 import { api } from '../api'
 import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, MoneyInput, DateInput, localToday, Loading } from '../ui'
 import { DrawerHead, DrawerFooter } from './Drawer'
@@ -230,7 +231,7 @@ export const ExecDrawer = ({ open, onClose, doc, onDone, onChanged }) => {
                 <div>
                   <label className="label" style={{ marginBottom: 8 }}>비목 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
                   <Combobox value={category} onChange={pickCategory} allowAdd={false}
-                    options={categories.map(c => ({ value: c.name, label: c.name, sub: c.group_name || '' }))}
+                    options={categories.map(categoryOption)}
                     placeholder="비목 검색·선택"/>
                 </div>
                 <div>

@@ -746,10 +746,13 @@ export const ConfirmProvider = ({ children }) => {
             )}
 
             {/* 버튼 */}
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 24 }}>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 24, flexWrap: "wrap" }}>
               <button className="btn" onClick={() => close(false)}>
                 {dlg.cancelLabel || "취소"} <span className="kbd" style={{ marginLeft: 4 }}>Esc</span>
               </button>
+              {/* 세 갈래 질문(예: 그 거래처 쓰기 / 다른 곳 — 새로 / 취소)일 때만. 'alt' 로 풀린다 —
+                  취소(false)와 섞이면 Esc 로 닫았는데 새로 만들어지는 일이 생긴다 */}
+              {dlg.altLabel && <button className="btn" onClick={() => close('alt')}>{dlg.altLabel}</button>}
               <button className="btn" ref={okRef}
                 style={{ background: tone.btnBg, color: tone.btnColor, borderColor: tone.btnBg }}
                 onClick={() => close(true)}>
@@ -808,11 +811,24 @@ export const ToastProvider = ({ children }) => {
     const r = top.getBoundingClientRect()
     const foot = top.querySelector('.drawer-foot')
     const edge = foot ? foot.getBoundingClientRect().top : r.bottom
-    return { left: r.left + r.width / 2, bottom: window.innerHeight - edge + 10, maxWidth: Math.max(240, r.width - 48) }
+    return { el: top, left: r.left + r.width / 2, bottom: window.innerHeight - edge + 10, maxWidth: Math.max(240, r.width - 48) }
+  };
+  /* 경고인데 경고라고 안 넘긴 토스트 — "금액을 입력해주세요" 같은 것이 **85군데** tone 없이 불려
+     ✓(성공) 모양으로 구석에 떴다(2026-09-30 화면 검토). 부르는 곳을 하나씩 고치면 또 빠진다 — 여기서 문장으로 가른다.
+       실패·할 수 없음·오류 → 경고 / '~했어요·됐어요'(완료 알림) → 성공 / '~해 주세요·하세요·없어요' → 경고
+     부르는 쪽이 tone 을 주면 그게 이긴다('ok' 는 성공으로 못박기). */
+  const inferTone = (msg) => {
+    const t = String(msg ?? '')
+    if (/실패|수 없|못 했|못했|오류|잘못|초과/.test(t)) return 'warn'
+    if (/했어요|됐어요|되었어요|했습니다|됐습니다|완료/.test(t)) return null
+    if (/주세요|하세요|없어요|없습니다|골라|선택해|입력해/.test(t)) return 'warn'
+    return null
   };
   const push = (msg, opts = {}) => {
     const id = Math.random().toString(36).slice(2);
-    const tone = opts.tone === "warn" || opts.tone === "neg" ? opts.tone : null;
+    const tone = opts.tone === "warn" || opts.tone === "neg" ? opts.tone
+      : opts.tone === "ok" ? null
+      : (opts.tone == null && !opts.actions ? inferTone(msg) : null);
     const actions = Array.isArray(opts.actions) ? opts.actions : null;
     const anchor = tone ? anchorOf() : null;
     setItems(cur => [...cur, { id, msg, icon: opts.icon, tone, actions, anchor }]);
@@ -836,6 +852,17 @@ export const ToastProvider = ({ children }) => {
             )}
           </div>
   );
+  /* 붙어 있던 팝업이 닫히면 **구석으로 내린다** — 그 자리에 남으면 빈 화면 한가운데·다음 팝업 위에 떠 있었다
+     (2026-09-30 화면 검토). 팝업이 닫혀도 이 부품은 다시 그려지지 않으므로 잠깐씩 들여다본다 */
+  useEffect(() => {
+    if (!items.some(t => t.anchor)) return
+    const iv = setInterval(() => {
+      setItems(cur => cur.some(t => t.anchor && !(t.anchor.el?.isConnected && t.anchor.el.classList.contains('open')))
+        ? cur.map(t => (t.anchor && !(t.anchor.el?.isConnected && t.anchor.el.classList.contains('open')) ? { ...t, anchor: null } : t))
+        : cur)
+    }, 250)
+    return () => clearInterval(iv)
+  }, [items]);
   const corner = items.filter(t => !t.anchor);
   const inPopup = items.filter(t => t.anchor);
   const pa = inPopup.length ? inPopup[inPopup.length - 1].anchor : null;

@@ -296,15 +296,22 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, refre
    *   1 전표입력     입금전표 / 출금전표 / 대체전표 — 전표 양식 그대로. 입금·출금전표는 반대편(통장)이 고정이다
    *   2 간편 입력    거래처·비목·금액 — 계정과목을 안 외워도 되는 길(청구서 연결도 여기서)
    *   3~5 가져오기   세금계산서 · 지급결의서 · 반복거래 — 이미 장부에 있는 것에서 끌어온다
-   * 방향(입금/출금)을 먼저 묻지 않는다 — 전표입력은 전표 종류가 곧 방향이고,
+   * 일반 입력만 여기서 방향(출금·입금)을 고른다 — 전표입력은 전표 종류가 곧 방향이고,
    * 가져오기는 서류가 방향을 이미 안다. 두 번 묻지 않기 위해서다. */
+  /* ⚠ **일반 입력이 맨 위, 방향을 여기서 고른다**(2026-09-30 사용자 실사용 관찰).
+     예전엔 맨 위가 '전표입력'(계정과목으로 적는 전문가용)이고 일반 입력은 '폼 입력'이라는 모호한 이름으로
+     두 번째에 있었다. 게다가 폼 입력은 방향을 안 묻고 **무조건 입금**으로 열려, 법인카드 밥값을 적으려던
+     사람이 입금 폼에 거래처를 추가했다(→ 매출처로 등록됐다). 가장 흔한 일(돈이 나감)을 맨 위에 둔다 */
   const entryOptions = [
+    openExpense && { id: 'simple-out', icon: Icon.Out, label: '일반 입력 · 출금',
+      desc: '돈이 나감 — 카드 결제·계좌 이체·현금 지출',
+      effect: '거래처·비목·금액만 적으면 됩니다. 계정과목을 몰라도 돼요.' },
+    openIncome && { id: 'simple-in', icon: Icon.In, label: '일반 입력 · 입금',
+      desc: '돈이 들어옴 — 매출 입금·환급·이자',
+      effect: '거래처를 고르면 그 거래처의 남은 청구서도 보여줘요.' },
     canJournal && { id: 'voucher', icon: Icon.Book, label: '전표입력',
-      desc: '입금전표 · 출금전표 · 대체전표',
+      desc: '입금전표 · 출금전표 · 대체전표 (계정과목으로 적기)',
       effect: '계정과목으로 적어요. 입금·출금전표는 반대편이 통장으로 고정됩니다.' },
-    (openIncome || openExpense) && { id: 'simple', icon: Icon.Wallet, label: '폼 입력',
-      desc: '칸을 채워 적어요 — 입금·출금은 폼 안에서 고릅니다',
-      effect: '계정과목을 몰라도 됩니다. 거래처를 고르면 그 거래처의 남은 청구서도 보여줘요.' },
     { id: 'invoice', icon: Icon.Receipt, label: '세금계산서에서',
       desc: '발행·수취한 청구서를 골라 입금·지급 처리',
       effect: '미수금·미지급금이 함께 정리돼요.' },
@@ -317,7 +324,7 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, refre
   ].filter(Boolean);
 
   /* 세금계산서만 어느 쪽인지 한 번 더 묻는다 —
-     전표입력은 전표 종류가 곧 방향이고, 폼 입력도 이제 폼 안에서 입금/출금을 바꾼다. */
+     전표입력은 전표 종류가 곧 방향이고, 일반 입력은 입구에서 출금·입금을 고른다. */
   const sourceOptions = () => [
     { id: 'income', icon: Icon.In, label: '발행 (매출)', desc: '못 받은 청구서를 골라 입금 처리' },
     { id: 'expense', icon: Icon.Out, label: '수취 (매입)', desc: '안 낸 청구서를 골라 지급 처리' },
@@ -326,7 +333,8 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, refre
   const pickEntry = (id) => {
     setEntryPick(false);
     if (id === 'voucher') { setJOpen(true); return; }
-    if (id === 'simple') { openIncome?.(); return; }          // 폼 안에서 입금/출금을 바꾼다
+    if (id === 'simple-out') { openExpense?.(); return; }
+    if (id === 'simple-in') { openIncome?.(); return; }
     if (id === 'doc') { goRoute?.('payment_run'); return; }
     if (id === 'repeat') { goRoute?.('recurring_invoice'); return; }
     setSrcPick(id);   // 'invoice' — 어느 쪽 세금계산서인지만
@@ -364,7 +372,7 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, refre
                 <Icon.Doc size={14}/> <span className="btn-label-hide">전표로 보기</span>
               </button>
             )}
-            {/* 입구는 **하나**다 — 누르면 어떻게 적을지 묻는다(전표입력·폼 입력·세금계산서에서…).
+            {/* 입구는 **하나**다 — 누르면 어떻게 적을지 묻는다(일반 입력·전표입력·세금계산서에서…).
                 ⚠ 버튼 이름은 '전표'가 아니다 — 전표입력은 그 안의 **한 가지**일 뿐이라,
                 버튼에 그 이름을 달면 나머지 넷이 없는 것처럼 보인다.
                 홈의 [거래 등록]과 같은 말을 쓴다 — 같은 일에 두 이름을 두지 않는다. */}
@@ -681,14 +689,15 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
         {/* 증빙 탭은 고정된 창 높이를 목록·미리보기가 꽉 채운다(txo-body-fill) */}
         <div className={`drawer-body${tab === "docs" ? " txo-body-fill" : ""}`}>
           {tab === "info" && (
+          /* 편집 중엔 폼이 한 칸을 다 쓴다 — 옆의 전표는 저장 전 옛 값이라 볼 이유가 없었다
+             (저장하면 다시 계산된다). 세금계산서 편집과 같은 모양(2026-10-01 사용자) */
+          editing ? (
+            <TransactionForm embedded open editTxn={t} kind={t.kind}
+              onClose={() => setEditing(false)}
+              onSave={() => { load(); onAction?.(); }}/>
+          ) : (
           <div className="txo-grid">
-            {editing ? (
-              <div style={{ minWidth: 0 }}>
-                <TransactionForm embedded open editTxn={t} kind={t.kind}
-                  onClose={() => setEditing(false)}
-                  onSave={() => { load(); onAction?.(); }}/>
-              </div>
-            ) : (
+            {(
             <div className="col gap-20" style={{ minWidth: 0 }}>
               {/* 자금 흐름 — 지출은 우리 계좌 → 상대, 입금은 상대 → 우리 계좌 */}
               <section>
@@ -776,8 +785,7 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
             <section style={{ minWidth: 0 }}>
               <div className="row" style={{ alignItems: "center", marginBottom: 8 }}>
                 <div className="txo-label" style={{ margin: 0 }}>전표</div>
-                {editing && <span className="text-xs text-muted2" style={{ marginLeft: 8 }}>저장하면 다시 계산돼요</span>}
-                {ov?.voucher && !editing && <button className="btn sm ml-auto" onClick={() => window.print()}><Icon.Print size={13}/> 전표 인쇄</button>}
+                {ov?.voucher && <button className="btn sm ml-auto" onClick={() => window.print()}><Icon.Print size={13}/> 전표 인쇄</button>}
               </div>
               <div className="doc-paper txo-paper voucher-print">
                 {!ov ? <div className="text-sm text-muted" style={{ padding: 30, textAlign: "center" }}>불러오는 중…</div>
@@ -786,7 +794,7 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
               </div>
             </section>
           </div>
-
+          )
           )}
 
           {tab === "docs" && (

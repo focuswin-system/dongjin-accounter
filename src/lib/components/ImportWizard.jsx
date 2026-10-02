@@ -34,7 +34,8 @@ const STATE_META = {
   filedup:   { badge: 'outline', label: '파일 내 중복' },
 }
 
-export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
+/* resultExtra — 결과 화면 아래 덧붙일 것(예: 세금계산서 업로드 → 대사 안내). 쓰는 쪽이 정한다 */
+export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultExtra = null }) => {
   const toast = useToast()
   const fileRef = useRef(null)
   const [file, setFile] = useState(null)
@@ -243,6 +244,7 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone }) => {
             <button className="btn" onClick={reset}>새 파일 업로드</button>
             <button className="btn primary" onClick={onDone}>{adapter.label} 목록으로</button>
           </div>
+          {resultExtra && <div style={{ marginTop: 16, textAlign: 'left' }}>{resultExtra}</div>}
         </div>
       ) : !file ? (
         <div className="card card-pad">

@@ -24,7 +24,7 @@ const { vatFields } = require('../lib/vat')
 const { closedPeriodError, closedDocError, beforeBooksError } = require('../lib/closing')
 const { recalcInvoiceStatus } = require('../lib/invoiceStatus')
 const { isFundAccount, categorySettingsOf } = require('../lib/categoryAccount')
-const { normVendorName } = require('../lib/vendorName')
+const { normVendorName, isSimilarVendorName } = require('../lib/vendorName')
 const { transactionVoucher, withNames } = require('../lib/voucher')
 const { relatedToTxn } = require('../lib/attachments')
 const { canAny } = require('../platform/userPerms')
@@ -32,6 +32,7 @@ const { listVouchers, toRows, COLUMNS: VOUCHER_COLUMNS, GUIDE: VOUCHER_GUIDE } =
 const { newBook, sheet, templateSheet, guideSheet, sendBook } = require('../lib/xlsxBook')
 
 const router = Router()
+const { accountAcctCode } = require('../lib/acctCode')
 
 /* 상대 계정과목에 자금 계정(현금·당좌·보통예금)이 오면 분개가 성립하지 않는다.
  *
@@ -89,7 +90,8 @@ const findSameTxn = async (db, it, fallbackAccountId) => {
       WHERE t.kind = ? AND t.date = ? AND t.amount = ? AND t.account_id <=> ? AND t.transfer_id IS NULL
       LIMIT 20`, [it.kind, it.date, amount, acct])
   const vk = normVendorName(it.vendor)
-  const hit = rows.find(r => !vk || !r.vendor_name || normVendorName(r.vendor_name) === vk)
+  // 거래처는 비슷한 이름까지 같은 곳으로 의심한다 — '중복 의심'으로 묻는 자리라 넓게 봐도 안전하다
+  const hit = rows.find(r => !vk || !r.vendor_name || isSimilarVendorName(r.vendor_name, it.vendor))
   return hit ? { id: hit.id, date: String(hit.date instanceof Date ? hit.date.toISOString().slice(0, 10) : hit.date).slice(0, 10),
     amount: Number(hit.amount), vendor: hit.vendor_name || '', memo: hit.memo || '',
     category: hit.category || '', account: hit.account_name || '',
@@ -548,8 +550,14 @@ router.get('/:id/splits', async (req, res, next) => {
 })
 
 async function voucherOfTxn(db, id) {
+  /* 이체는 두 줄(보내는 쪽 지출 + 받는 쪽 입금)이지만 **전표는 하나**다. 받는 쪽 줄을 열면
+     보내는 쪽 줄의 전표(받는 계좌 차변 / 보내는 계좌 대변)를 보인다 — lib/voucherBook.js 와 같은 규칙 */
+  const [[tr]] = await db.execute(
+    `SELECT p.id FROM transactions t JOIN transactions p ON p.transfer_id = t.transfer_id AND p.kind = 'expense'
+      WHERE t.id = ? AND t.kind = 'income' AND t.transfer_id IS NOT NULL LIMIT 1`, [id])
+  if (tr) id = tr.id
   const [[t]] = await db.execute(`
-    SELECT t.id, t.kind, t.amount, t.date, t.category, t.memo, t.account_code,
+    SELECT t.id, t.kind, t.amount, t.date, t.category, t.memo, t.account_code, t.vat_deductible,
            a.acct_code AS bank_code, a.name AS account_name, v.name AS vendor_name
       FROM transactions t
       LEFT JOIN accounts a ON a.id = t.account_id
@@ -652,7 +660,7 @@ router.post('/transfer', async (req, res, next) => {
     if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
 
     const [accts] = await conn.execute(
-      'SELECT id, name, kind, acct_code FROM accounts WHERE id IN (?, ?)',
+      'SELECT id, name, kind, type, card_type, acct_code FROM accounts WHERE id IN (?, ?)',
       [from_account_id, to_account_id])
     const from = accts.find(a => a.id === from_account_id)
     const to   = accts.find(a => a.id === to_account_id)
@@ -666,8 +674,7 @@ router.post('/transfer', async (req, res, next) => {
      *   신용카드 잔액은 회계적으로 '아직 안 갚은 돈'이므로 미지급금이 맞다.
      * 그 밖에는 계좌의 계정과목, 비어 있으면 1103. 어느 쪽이든 자산·부채라
      * lib/pnl.js 가 손익에서 빼 준다. */
-    const CARD_CODE = '2202'   // 미지급금
-    const codeOf = (a) => (a.kind === 'card' ? CARD_CODE : (String(a.acct_code || '').trim() || '1103'))
+    const codeOf = (a) => (a.kind === 'card' ? accountAcctCode(a) : (String(a.acct_code || '').trim() || '1103'))
     const transferId = randomUUID()
     const note = (memo || '').trim() || `${from.name} → ${to.name} 이체`
 
@@ -1562,6 +1569,10 @@ router.post('/import/card', async (req, res, next) => {
       /* 증빙유형은 기준정보의 이름과 **글자까지 같아야 한다**('신용카드매출전표').
          다르면 부가세 집계의 조인(ev.name = t.evid_type)이 빗나가 공제 여부가 기본값으로
          떨어지고, 회사가 그 이름을 나중에 만들면 이미 넣은 경비의 매입세액이 조용히 사라진다. */
+      /* 적요 — 가맹점을 잃지 않는다. 거래처로 못 이은 가맹점은 **적요만이** 그 이름을 들고 있는데,
+   메모 열이 따로 있으면 예전엔 메모가 이겨 가맹점 이름이 사라졌다(2026-09-30 화면 검토). 둘 다 있으면 잇는다.
+   (값 배열 밖에서 계산한다 — 배열 안의 쉼표를 check:isolation 이 값 개수로 센다) */
+      const cardMemo = (vendorId ? (it.memo || merchant) : [merchant, it.memo].filter(Boolean).join(' · ')) || ''
       await conn.execute(`
         INSERT INTO transactions (id, kind, vendor_id, account_id, account_code, category, amount, date,
                                   method, status, memo, approval_no, evid_type,
@@ -1570,7 +1581,7 @@ router.post('/import/card', async (req, res, next) => {
       `, [randomUUID(), 'expense', vendorId, accountId, accountCode, it.category || '', it.amount, it.date,
           /* 결제수단은 화면의 다섯 값 중 하나여야 한다 — '카드'라고 적으면 거래 편집 폼에서
              어느 칩도 안 켜지고 계좌를 고르는 칸이 통째로 안 그려진다. */
-          '법인카드', '지급완료', it.memo || merchant || '', approval || null, '신용카드매출전표',
+          '법인카드', '지급완료', cardMemo, approval || null, '신용카드매출전표',
           vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible])
       if (approval) seen.add(approval)
       inserted++

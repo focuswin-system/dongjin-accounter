@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, DateInput, useBusy } from '../lib/ui'
 import { api } from '../lib/api'
+import { addVendorAsking } from '../lib/vendorAsk'
 import { PageHeader } from '../lib/components/PageHeader'
 import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 import { SourceChooser } from '../lib/components/SourceChooser'
@@ -275,6 +276,7 @@ const QUOTE_SOURCES = [
 
 export const QuoteRequestScreen = ({ focusId = null }) => {
   const toast = useToast()
+  const { confirm } = useConfirm()   // 거래처로 추가 — 비슷한 이름이면 묻는다(lib/vendorAsk)
   const [srcOpen, setSrcOpen] = useState(false)
   const [pickOpen, setPickOpen] = useState(false)
   const [items, setItems] = useState(null)
@@ -310,10 +312,12 @@ export const QuoteRequestScreen = ({ focusId = null }) => {
     list.reload(); loadSel(target)
   }
 
+  // 비슷한 이름이 있으면 묻는다(lib/vendorAsk). 고른 거래처의 **이름**을 돌려준다 — 받는 쪽이 이름으로 담는다
   const addVendor = async (q) => {
-    const res = await api.addVendor({ name: q, gubu: 'A' })
-    if (res.ok) { setVendors(await api.getVendors()); toast.push(`"${q}" 거래처가 등록됐어요`); return q }
-    toast.push(res.error || '거래처 등록에 실패했어요', { tone: 'warn' }); return ''
+    const v = await addVendorAsking({ confirm, toast }, { name: q, gubu: 'A' })
+    if (!v) return ''
+    setVendors(await api.getVendors())
+    return v.name
   }
 
   const blankDoc = { id: '__new', req_date: localToday(), items: seed }

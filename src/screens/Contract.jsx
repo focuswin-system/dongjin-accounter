@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { Icon, fmtNum, fmtDateShort, useToast, useConfirm, Spacer, StatusBadge, PERIOD_PRESETS, inPeriod, periodRangeLabel, FilterSelect, Drawer, Combobox, MoneyInput, localToday, DateInput } from '../lib/ui'
 import { FileAttach } from '../lib/FileAttach'
 import { api } from '../lib/api'
+import { addVendorAsking } from '../lib/vendorAsk'
 import { OrderLinkPanel } from '../lib/components/OrderLinkPanel'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { PageHeader } from '../lib/components/PageHeader'
@@ -354,6 +355,8 @@ const FormBlock = ({ title, hint, children }) => (
 /* ============ 청구 일정 편집 Drawer ============ */
 const MS_TYPES = ["정기", "일시", "계약금(선급금)", "중도금", "기성", "잔금"]
 const MS_STATUSES = ["예정", "입금 예정", "일부 입금", "입금 완료", "지급 예정", "지급 완료", "기한 지남"]
+/** 계약 등록 전에 이미 끝난 회차 — 청구서·거래 없이 닫힌다(서버 routes/contracts.js PRIOR 와 같은 글자) */
+const PRIOR_SETTLED = '장부 전 정산'
 
 function MilestoneEditDrawer({ open, onClose, contractId, contractAmount, initial, onSaved }) {
   const toast = useToast()
@@ -406,7 +409,7 @@ function MilestoneEditDrawer({ open, onClose, contractId, contractAmount, initia
         {rows.length === 0 && <div className="text-sm text-muted2" style={{ padding: '8px 0' }}>아직 청구 일정이 없어요. 아래에서 추가하세요.</div>}
         {rows.map((m, i) => {
           // 이미 청구서로 발행된 회차는 수정 불가(청구서와 금액이 어긋나지 않도록)
-          const locked = !!m.invoice_id
+          const locked = !!m.invoice_id || m.status === PRIOR_SETTLED
           if (locked) return (
             <div key={i} className="card" style={{ padding: 12, border: '1px solid var(--brand-soft)', background: 'var(--surface-2)' }}>
               <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
@@ -414,7 +417,7 @@ function MilestoneEditDrawer({ open, onClose, contractId, contractAmount, initia
                 <span className="num fw-700">{fmtNum(m.amount)}</span>
                 <span className="text-sm text-muted">{fmtDateShort(m.due_date) || '—'}</span>
                 <StatusBadge status={m.status}/>
-                <span className="badge brand ml-auto" style={{ fontSize: 10 }}>발행됨 · 수정 불가</span>
+                <span className="badge brand ml-auto" style={{ fontSize: 10 }}>{m.invoice_id ? '발행됨' : '장부 전 정산'} · 수정 불가</span>
               </div>
             </div>
           )
@@ -671,6 +674,8 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
       tone: "brand", icon: <Icon.Receipt size={22}/>,
       title: `${ms.type} 청구서 발행`,
       body: `${c.vendor_name || c.vendor || "거래처"} · ${ms.type} ${fmtNum(supply + vat)}원${exempt ? "(면세)" : "(VAT 포함)"} 청구서를 발행해요. 대금 청구에 등록됩니다.`,
+      // 계약 등록 전 일정은 그 일정 날짜로 발행된다(서버 규칙)
+      detail: ms.before_setup && ms.due_date ? `발행일은 일정 날짜인 ${ms.due_date}이에요 — 그 기간의 매출·부가세로 잡혀요.` : undefined,
       confirmLabel: "청구서 발행",
     });
     if (!ok) return;
@@ -679,6 +684,25 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
     if (!res.ok) { toast.push(res.error || "청구서 발행에 실패했어요", { tone: 'warn' }); return; }
     toast.push(`${ms.type} 청구서를 발행했어요`);
     reload();
+  };
+
+  /* 장부 전 정산 — 세금계산서 발행예정의 소급 구획과 같은 일(문구도 같은 뜻으로) */
+  const priorSettle = async (ms) => {
+    const ok = await confirm({
+      tone: "brand", icon: <Icon.Check size={22}/>, title: "장부 전 정산",
+      body: `${ms.type} ${fmtNum(ms.amount)}원(${ms.due_date}) — 계약 등록 전에 이미 ${isPurchase ? '낸' : '받은'} 돈으로 닫아요.`,
+      detail: `청구서·${isPurchase ? '지급' : '입금'}을 만들지 않아요. 매출·부가세·통장에는 안 잡히고, 이 계약의 ${isPurchase ? '지급' : '수금'} 현황에만 들어가요.`,
+      confirmLabel: "장부 전 정산",
+    });
+    if (!ok) return;
+    const r = await api.priorSettleMilestone(ms.id);
+    if (!r.ok) return toast.push(r.error || '처리하지 못했어요', { tone: 'warn' });
+    toast.push('장부 전 정산으로 닫았어요'); reload();
+  };
+  const reopenPrior = async (ms) => {
+    const r = await api.priorReopenMilestone(ms.id);
+    if (!r.ok) return toast.push(r.error || '되돌리지 못했어요', { tone: 'warn' });
+    toast.push('청구 예정으로 되돌렸어요'); reload();
   };
 
   const handleDelete = async () => {
@@ -853,7 +877,7 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
         // 기성형은 총액·월 정액·진행률 개념이 없다 → 실제로 의미 있는 세 숫자만: 누적 기성 청구 / 누적 수금(지급) / 미수(미지급).
         <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
           <Kpi label={isPurchase ? "누적 기성(청구)" : "누적 청구(기성)"} value={c.billed || 0}/>
-          <Kpi label={`누적 ${doneLabel}`} value={doneAll}/>
+          <Kpi label={`누적 ${doneLabel}`} value={doneAll} hint={c.prior ? `장부 전 정산 ${fmtNum(c.prior)} 포함` : undefined}/>
           <Kpi label={isPurchase ? "미지급금" : "미수금"} value={arRemain} emphasis onClick={arRemain ? () => setArOpen(true) : undefined} actionLabel={arRemain ? "근거 보기" : undefined}/>
         </div>
       ) : (
@@ -866,7 +890,8 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
         <Kpi
           label={openEnded ? `누적 ${doneLabel}` : `${doneLabel} 완료`}
           value={openEnded ? doneAll : done}
-          hint={openEnded ? undefined : `전체의 ${donePct}%`}/>
+          /* 장부 전 정산분을 밝힌다 — 입금 내역 탭에 그 돈이 없어서, 안 밝히면 숫자가 어디서 왔는지 모른다 */
+          hint={[openEnded ? null : `전체의 ${donePct}%`, c.prior ? `장부 전 정산 ${fmtNum(c.prior)} 포함` : null].filter(Boolean).join(' · ') || undefined}/>
         <Kpi
           label={openEnded ? (isPurchase ? "미지급금" : "미수금") : remainLabel}
           value={openEnded ? arRemain : remainAmt}
@@ -1274,8 +1299,10 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
           const collectLabel = isPurchase ? "지급" : "수금"
           const msSum = milestones.reduce((s, m) => s + (Number(m.amount) || 0), 0)
           const diff = msSum - (Number(c.amount) || 0)
-          const doneSum = milestones.filter(m => m.status === DONE).reduce((s, m) => s + Number(m.amount || 0), 0)
-          const remainSum = milestones.filter(m => m.status !== DONE).reduce((s, m) => s + Number(m.amount || 0), 0)
+          // 장부 전 정산도 끝난 돈이다(그때 이미 받았거나 냈다)
+          const isDone = (m) => m.status === DONE || m.status === PRIOR_SETTLED
+          const doneSum = milestones.filter(isDone).reduce((s, m) => s + Number(m.amount || 0), 0)
+          const remainSum = milestones.filter(m => !isDone(m)).reduce((s, m) => s + Number(m.amount || 0), 0)
           return (
             <div style={{ padding: 20 }}>
               <div className="row" style={{ marginBottom: 14 }}>
@@ -1303,8 +1330,16 @@ export const ContractScreen = ({ goList, contractId, openIncome, openExpense, re
                         <td className="text-sm">{ms.due_date}</td>
                         <td><StatusBadge status={ms.status}/></td>
                         <td>
-                          {ms.status === "예정"
-                            ? <button className="btn" style={{ fontSize: 11, padding: "3px 10px" }} onClick={() => issueInvoiceForMilestone(ms)}><Icon.Plus size={11}/> 청구서 발행</button>
+                          {ms.status === PRIOR_SETTLED
+                            ? <button className="btn ghost" style={{ fontSize: 11, padding: "3px 10px" }} onClick={() => reopenPrior(ms)}>되돌리기</button>
+                            : ms.status === "예정"
+                            ? <div className="row gap-6">
+                                {/* 계약 등록 전 일정 — 그때 이미 끝났으면 청구서 없이 닫는다(서버가 before_setup 을 정한다) */}
+                                {ms.before_setup && (
+                                  <button className="btn" style={{ fontSize: 11, padding: "3px 10px" }} onClick={() => priorSettle(ms)}>장부 전 정산</button>
+                                )}
+                                <button className="btn" style={{ fontSize: 11, padding: "3px 10px" }} onClick={() => issueInvoiceForMilestone(ms)}><Icon.Plus size={11}/> 청구서 발행</button>
+                              </div>
                             : (ms.status === "입금 완료" || ms.status === "지급 완료")
                               ? <span className="text-muted text-xs">완료</span>
                               : <span className="text-muted text-xs">청구됨</span>}
@@ -1931,6 +1966,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
     api.getUnlinkedForOrders(linkKind).then(d => setLinkCount((d.rows || []).length))
   }, [kind, linkKind])
   const toast = useToast();
+  const { confirm } = useConfirm();   // 거래처로 추가 — 비슷한 이름이면 묻는다(lib/vendorAsk)
   const [tab, setTab] = useState("전체");
   const [q, setQ] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -2304,13 +2340,11 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
                 options={vendors.map(v => ({ value: v.name, label: v.name, sub: v.type || "" }))}
                 placeholder="거래처를 검색하거나 선택하세요"
                 onAddNew={async (q) => {
-                  const res = await api.addVendor({ name: q, gubu: meta.addGubu });
-                  if (res.ok) {
-                    const updated = await api.getVendors();
-                    setVendors(updated);
-                    setNewForm(f => ({ ...f, vendor: q }));
-                    toast.push(`"${q}" 거래처가 등록됐어요`);
-                  }
+                  const v = await addVendorAsking({ confirm, toast }, { name: q, gubu: meta.addGubu });
+                  if (!v) return;
+                  setVendors(await api.getVendors());
+                  // 비슷한 거래처를 골랐으면 이름이 q 와 다르다 — 돌려받은 이름으로 담는다
+                  setNewForm(f => ({ ...f, vendor: v.name }));
                 }}
                 addNewLabel="거래처로 추가"
               />

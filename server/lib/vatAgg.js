@@ -15,12 +15,14 @@
  *
  * ── 집계에 들어가는 것 ──
  *   1) 청구서(invoices)의 vat_amount — 발행일 기준
+ *      · 매입 청구서도 불공제(vat_deductible=0, 접대비 세금계산서 등)는 공제세액에서 뺀다
  *   2) 청구서를 거치지 않은 **직접 입력 거래**의 vat_amount — 거래일 기준
  *      · invoice_id 가 있는 거래는 청구서 정산분이라 1)에 이미 있다 → 반드시 제외(이중계상)
  *      · vat_amount 가 NULL 인 옛 거래는 세액을 모르므로 안 센다
  *      · 매입은 불공제(vat_deductible=0)를 뺀다 — 그래야 실제 공제세액이다
  *      · 증빙유형이 불공제(간이영수증·거래명세서 등)면 거래 플래그와 무관하게 공제 대상 아님
  *      · 증빙유형을 안 적은 거래는 종전대로 공제로 본다(과거 데이터를 갑자기 불공제로 만들지 않는다)
+ *      · 증빙 '없음'을 **고른** 거래는 불공제 — 적격증빙이 없으면 공제받지 못한다
  *
  * ⚠ 멀티테넌트 — db 는 반드시 인자로 받는다. 기본값을 두면 조용히 남의 회사를 읽는다.
  */
@@ -32,7 +34,8 @@ async function invoiceVat(db, year) {
   const [rows] = await db.execute(
     `SELECT QUARTER(issued_at) AS q,
             SUM(CASE WHEN kind='issued'   THEN vat_amount ELSE 0 END) AS sales_vat,
-            SUM(CASE WHEN kind='received' THEN vat_amount ELSE 0 END) AS purchase_vat
+            SUM(CASE WHEN kind='received' AND COALESCE(vat_deductible, 1) = 1 THEN vat_amount ELSE 0 END) AS purchase_vat,
+            SUM(CASE WHEN kind='received' AND vat_deductible = 0 THEN vat_amount ELSE 0 END) AS non_deductible_vat
        FROM invoices
       WHERE YEAR(issued_at) = ? AND ${notCarryover()}
       GROUP BY QUARTER(issued_at)`, [year])
@@ -45,8 +48,10 @@ async function directVat(db, year) {
     `SELECT QUARTER(t.date) AS q,
             SUM(CASE WHEN t.kind='income'  THEN t.vat_amount ELSE 0 END) AS sales_vat,
             SUM(CASE WHEN t.kind='expense' AND t.vat_deductible = 1 AND COALESCE(ev.deductible, 1) = 1
+                          AND COALESCE(t.evid_type, '') <> '없음'
                      THEN t.vat_amount ELSE 0 END) AS purchase_vat,
-            SUM(CASE WHEN t.kind='expense' AND (t.vat_deductible = 0 OR COALESCE(ev.deductible, 1) = 0)
+            SUM(CASE WHEN t.kind='expense' AND (t.vat_deductible = 0 OR COALESCE(ev.deductible, 1) = 0
+                          OR t.evid_type = '없음')
                      THEN t.vat_amount ELSE 0 END) AS non_deductible_vat,
             /* ⚠ **과세표준(공급가액)도 센다.** 홈택스의 '그 밖의 매출'·'그 밖의 공제매입세액'
                칸은 과세표준과 세액을 **둘 다** 요구한다. 세액만 주면 엑셀 합계 행에서
@@ -55,6 +60,7 @@ async function directVat(db, year) {
                (vat_amount IS NOT NULL) 여기서도 짝이 맞는다. */
             SUM(CASE WHEN t.kind='income'  THEN COALESCE(t.supply_amount, t.amount - t.vat_amount) ELSE 0 END) AS sales_supply,
             SUM(CASE WHEN t.kind='expense' AND t.vat_deductible = 1 AND COALESCE(ev.deductible, 1) = 1
+                          AND COALESCE(t.evid_type, '') <> '없음'
                      THEN COALESCE(t.supply_amount, t.amount - t.vat_amount) ELSE 0 END) AS purchase_supply
        FROM transactions t
        LEFT JOIN (
@@ -84,7 +90,8 @@ async function vatByQuarter(db, year) {
       salesDirect:     Number(t.sales_vat || 0),
       purchaseInvoice: Number(a.purchase_vat || 0),
       purchaseDirect:  Number(t.purchase_vat || 0),
-      nonDeductible:   Number(t.non_deductible_vat || 0),
+      // 청구서(세금계산서 수취 — 접대비 등) + 직접 입력 거래의 불공제 세액
+      nonDeductible:   Number(a.non_deductible_vat || 0) + Number(t.non_deductible_vat || 0),
       salesSupplyDirect:    Number(t.sales_supply || 0),
       purchaseSupplyDirect: Number(t.purchase_supply || 0),
     }

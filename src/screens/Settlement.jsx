@@ -9,7 +9,7 @@ import { DocFilters } from '../lib/components/DocFilters'
 import { useDocList } from '../lib/useDocList'
 import { makeGridKeyHandler } from '../lib/gridKeys'
 import { CellIn } from '../lib/components/CellIn'
-import { useApprovalOn, useDocApproval, ApprovalButtons, ApprovalLine, ApprovalStamp, RejectedNote, listStatusOf } from '../lib/components/Approval'
+import { useApprovalOn, useDocApproval, ApprovalButtons, ApprovalLine, showApprovalLine, ApprovalStamp, RejectedNote, listStatusOf } from '../lib/components/Approval'
 
 // 定算內譯書 — 항목은 고정 분류(도로비·교통비…) 없이 쓰는 사람이 필요한 줄만 추가한다.
 // 옛 양식의 좌측 고정 슬롯·출장 항번호(①②③…) 주석은 2026-08 고객 요청으로 걷어냈다.
@@ -158,7 +158,7 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
       {!isNew && !edit && approvalOn && (
         <div className="no-print" style={{ padding: '0 0 12px' }}>
           <RejectedNote current={apv} status={status}/>
-          {apv && ['진행', '승인'].includes(apv.status) && <ApprovalLine approval={apv}/>}
+          {showApprovalLine(apv) && <ApprovalLine approval={apv}/>}
         </div>
       )}
       <DocViewport portrait>

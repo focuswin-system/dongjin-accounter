@@ -7,6 +7,7 @@
  *  반복거래로 바뀌며 둘 다 없어져 함께 걷었다. 반복거래는 lib/repeat.js findLookalikes 가 이 함수를 쓴다.)
  */
 /** 기준 날짜에서 이만큼 떨어진 거래까지 같은 돈으로 본다(월 반복이 이웃 달을 넘보지 않는 폭) */
+const { sameVendorIds } = require('./vendorName')
 const MATCH_WINDOW_DAYS = 20
 
 /**
@@ -43,9 +44,12 @@ async function lookalikeSettleTxns(db, { kind, vendorId, amount, date, invoiceId
   const who = []
   const whoArgs = []
   if (vendorId) {
-    who.push(`(t.vendor_id IN (SELECT v2.id FROM vendors v1 JOIN vendors v2 ON TRIM(v2.name) = TRIM(v1.name) WHERE v1.id = ?)
-              AND ABS(DATEDIFF(t.date, ?)) <= ?)`)
-    whoArgs.push(vendorId, date, windowDays)
+    /* 거래처는 **비슷한 이름까지** 같은 곳으로 의심한다(lib/vendorName.js isSimilarVendorName).
+       '복지관'과 '복지회관'으로 갈려 같은 입금이 두 줄 선 적이 있다. 여기는 붙이는 게 아니라 **묻는** 자리라
+       넓게 봐도 안전하다(사람이 '그래도 새로'를 고를 수 있다). */
+    const ids = await sameVendorIds(db, vendorId)
+    who.push(`(t.vendor_id IN (${ids.map(() => '?').join(',')}) AND ABS(DATEDIFF(t.date, ?)) <= ?)`)
+    whoArgs.push(...ids, date, windowDays)
   }
   if (accountId) {
     who.push(`(${vendorId ? 't.vendor_id IS NULL AND ' : ''}t.account_id = ? AND ABS(DATEDIFF(t.date, ?)) <= ?)`)

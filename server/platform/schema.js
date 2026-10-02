@@ -421,6 +421,27 @@ async function migratePlatformSchema(c) {
     await c.execute('ALTER TABLE companies ADD COLUMN domain VARCHAR(120) NULL, ADD UNIQUE KEY uq_companies_domain (domain)')
     console.log('[platform] companies.domain 추가 완료')
   }
+
+  /* ── 1회성 데이터 변경 가드 ── 위 규칙들은 멱등이라 매번 돌아도 되지만, 값을 **바꾸는** 일은
+     한 번만 돌아야 한다(다음 배포에서 사람이 새로 고른 값을 또 덮으면 안 된다). 테넌트 DB 의 runOnce 와 같은 뜻. */
+  await c.execute(`CREATE TABLE IF NOT EXISTS platform_migrations (
+    id VARCHAR(80) PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`)
+  const once = async (key, fn) => {
+    const [[done]] = await c.execute('SELECT id FROM platform_migrations WHERE id = ?', [key])
+    if (done) return
+    await fn()
+    await c.execute('INSERT INTO platform_migrations (id) VALUES (?)', [key])
+  }
+
+  /* 메뉴 표시 방식 기본값을 'fixed' → 'auto'(화면 폭에 맞춤)로 바꿨다(src/lib/theme.js).
+     화면 설정은 저장할 때 세 값을 **함께** 쓴다 — 밝기만 바꾼 사람에게도 'fixed' 가 적혀 있다.
+     그래서 지금까지 저장된 'fixed' 는 "고른 값"이 아니라 "기본값 그대로"였다. 한 번만 'auto' 로 옮긴다.
+     이후에 'fixed' 를 고르는 사람은 진짜로 고른 것이라 다시 건드리지 않는다. */
+  await once('2026-10_theme_nav_mode_auto', async () => {
+    const [r] = await c.execute(
+      "UPDATE user_prefs SET pref_value = 'auto' WHERE pref_key = 'theme_nav_mode' AND pref_value = 'fixed'")
+    if (r.affectedRows) console.log(`[platform] 메뉴 표시 방식 기본값 → 화면 폭에 맞춤: ${r.affectedRows}명`)
+  })
 }
 
 /**

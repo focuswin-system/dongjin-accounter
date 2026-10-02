@@ -9,7 +9,7 @@ import { NAV_TREE, DOMAIN_OF, leafIdOf, PORTAL_CAT_BY_ID, LEAF_BY_ID, MASTER_LEA
 import { PermCtx, usePerms, visibleNav, visiblePortalNode, withoutMasterOnly } from './lib/perms'
 import { ProfileDrawer } from './lib/components/ProfileDrawer'
 import { sessionAlive, clearSession } from './lib/session'
-import { applyTheme, fromPrefs, writeLocal, readLocal, watchSystem } from './lib/theme'
+import { applyTheme, fromPrefs, writeLocal, readLocal, watchSystem, watchWidth } from './lib/theme'
 import { MANUAL_FOR_ROUTE } from './lib/manual'
 import { UpdateBanner } from './lib/components/UpdateBanner'
 import { LoginScreen } from './screens/Login'
@@ -395,6 +395,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys, customKeys }) {
   // 주소에 id 가 없을 때 없는 주문을 부르고 화면이 멈춘다.
   const [contractId, setContractId] = useState("");
   const [focusInvoiceId, setFocusInvoiceId] = useState(null);
+  const [billingView, setBillingView] = useState(null);
   /* 열린 보고서 — **주소에 담는다**(#report/<key>). 그래야 빵부스러기가 이름까지 보이고,
      새로고침·뒤로가기·북마크가 산다. 이름은 서버 목록에 있으므로 화면이 알려준다. */
   const [reportKey, setReportKey] = useState(null);
@@ -611,6 +612,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys, customKeys }) {
     if (opts.contractName != null) setContractName(opts.contractName);
     // 홈 '할 일'에서 특정 청구서를 바로 열 때 사용 (없으면 목록만 보여준다)
     setFocusInvoiceId(opts.invoiceId || null);
+    setBillingView(opts.view || null);   // 세금계산서를 특정 보기(대사 등)로 열 때
     setFocusTxnId(opts.txnId || null);
     /* 신호는 **켠 그 이동에만** 유효하다. 안 내리면 나중에 이 화면에 다시 들어올 때
        아무것도 안 눌렀는데 업로드 화면이 열린다(고장으로 읽힌다). */
@@ -633,7 +635,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys, customKeys }) {
   };
 
   /* 거래내역 — 서류 없이 오간 돈의 입구(3단계). 옛 '경비 처리'·'전표 입력' 주소도 여기로 온다.
-     전표입력은 대체전표 권한이 있을 때만 보인다. 폼 입력은 늘 연다 — 쓰기 권한은 서버가 따진다. */
+     전표입력은 대체전표 권한이 있을 때만 보인다. 일반 입력(출금·입금)은 늘 연다 — 쓰기 권한은 서버가 따진다. */
   const renderLedger = (filter, { openJournalOnMount = false } = {}) => (
     /* key 에 기간을 넣는다 — 전표 목록에서 기간을 들고 오면 화면이 새로 서야 초기 기간이 먹는다
        (useTableFilter 의 range 는 첫 렌더에만 initial 을 읽는다). */
@@ -710,9 +712,9 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys, customKeys }) {
         ].filter(Boolean);
         let side = route === "billing_received" ? "received" : "issued";
         if (!sides.includes(side) && sides.length) side = sides[0];
-        return <BillingScreen key={`billing_${side}`} initialTab={side} sideTabs={sides}
+        return <BillingScreen key={`billing_${side}_${billingView || ''}`} initialTab={side} sideTabs={sides}
                  openEdit={(txn) => setTxnForm({ kind: txn.kind, txn })} openImportSignal={taxImportSignal}
-                 focusInvoiceId={focusInvoiceId} goRoute={go}/>;
+                 focusInvoiceId={focusInvoiceId} initialView={billingView} goRoute={go}/>;
       }
       case "approval_box":    return approvalOn ? <ApprovalBoxScreen go={go}/>
         : approvalOn === null ? <Loading/> : <NoPermission title="결재함" off/>;
@@ -807,7 +809,7 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys, customKeys }) {
     /* ⚠ docKeys·navHidden 도 의존성이다. 이 memo 안에서 홈·포털에 넘기는 값인데
        빼 두면 **늦게 온 문서 카탈로그가 반영되지 않는다** — 사이드바(위 navTree memo)는
        따라오고 홈 타일만 안 따라와서, 같은 화면이 두 가지 말을 하게 된다. */
-  }, [route, contractId, txnVersion, focusInvoiceId, focusTxnId, taxImportSignal, reportKey, perms, docKeys, customKeys, approvalOn, navHidden, manualChapter, docFocusId, repeatPrefill]);
+  }, [route, contractId, txnVersion, focusInvoiceId, billingView, focusTxnId, taxImportSignal, reportKey, perms, docKeys, customKeys, approvalOn, navHidden, manualChapter, docFocusId, repeatPrefill]);
 
   // 옛 경비 처리·잡손익·전표 입력은 거래내역으로 흡수됐다(3단계) — 도움말도 거래내역 것을 보인다
   const helpKey = route.startsWith("ledger") || ["income","expense","ar","ap","excel_modal","misc_pl","misc_income","voucher_entry"].includes(route) ? "ledger"
@@ -976,8 +978,9 @@ function AppInner({ onLogout, user, prefs, setPrefs, docKeys, customKeys }) {
           </div>
           <button className="search" onClick={() => setCmdOpen(true)} style={{ border: 0, cursor: "pointer", textAlign: "left" }}>
             <Icon.Search size={14}/>
-            <span style={{ flex: 1 }}>거래처, 주문, 영수증 검색</span>
-            <span className="kbd">{isMac ? "⌘K" : "Ctrl K"}</span>
+            {/* 폭이 줄면 두 줄로 꺾여 상단바가 들쭉날쭉했다 — 한 줄로 두고 넘치면 … 로 자른다 */}
+            <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>거래처, 계약, 영수증 검색</span>
+            <span className="kbd" style={{ flexShrink: 0 }}>{isMac ? "⌘K" : "Ctrl K"}</span>
           </button>
           <Popover align="right" width={360}
             trigger={
@@ -1177,8 +1180,8 @@ const FAQ_CATEGORIES = ["거래 등록", "미수금·미지급금", "주문 관�
 
 const FAQ_DATA = [
   // 거래 등록
-  { id:"f01", cat:"거래 등록",       routes:["home","ledger"],              q:"입금을 어떻게 등록하나요?",                  a:"세금계산서를 발행한 건이면 입출금 › 세금계산서에서, 계산서 없이 들어온 돈이면 입출금 › 거래내역의 [거래 등록]에서 적어요(전표입력·폼 입력 중에 고릅니다). 매달 같은 곳에서 들어오는 돈은 반복거래에 등록해 두면 달마다 골라 만들 수 있어요.", action:{ label:"거래내역으로", route:"ledger" } },
-  { id:"f02", cat:"거래 등록",       routes:["home","ledger"],              q:"지출을 어떻게 등록하나요?",                  a:"세금계산서를 받았으면 입출금 › 세금계산서의 수취에서, 카드전표·영수증만 있거나 통장에서 나가기만 했으면 입출금 › 거래내역의 [거래 등록]에서 적어요(전표입력·폼 입력 중에 고릅니다). 매달 나가는 고정비는 반복거래에 등록해 두면 됩니다.", action:{ label:"거래내역으로", route:"ledger" } },
+  { id:"f01", cat:"거래 등록",       routes:["home","ledger"],              q:"입금을 어떻게 등록하나요?",                  a:"세금계산서를 발행한 건이면 입출금 › 세금계산서에서, 계산서 없이 들어온 돈이면 입출금 › 거래내역의 [거래 등록]에서 적어요([일반 입력 · 입금]을 고릅니다). 매달 같은 곳에서 들어오는 돈은 반복거래에 등록해 두면 달마다 골라 만들 수 있어요.", action:{ label:"거래내역으로", route:"ledger" } },
+  { id:"f02", cat:"거래 등록",       routes:["home","ledger"],              q:"지출을 어떻게 등록하나요?",                  a:"세금계산서를 받았으면 입출금 › 세금계산서의 수취에서, 카드전표·영수증만 있거나 통장에서 나가기만 했으면 입출금 › 거래내역의 [거래 등록]에서 적어요([일반 입력 · 출금]을 고릅니다). 매달 나가는 고정비는 반복거래에 등록해 두면 됩니다.", action:{ label:"거래내역으로", route:"ledger" } },
   { id:"f03", cat:"거래 등록",       routes:["ledger"],                     q:"여러 건을 한꺼번에 올리고 싶어요",            a:"엑셀 업로드 기능을 이용하면 여러 거래를 한 번에 등록할 수 있어요. 거래내역 오른쪽 위 '엑셀 업로드'에서 서식을 내려받아 작성한 뒤 올려 주세요.", action:{ label:"엑셀 업로드로", route:"excel_modal" } },
   { id:"f04", cat:"거래 등록",       routes:["ledger"],                     q:"거래 내용을 수정하거나 삭제하고 싶어요",      a:"거래내역에서 그 줄을 누르면 상세가 열려요. 아래쪽 '편집'으로 고치고, '삭제'로 지울 수 있어요. 대체전표는 줄을 누르면 전표가 열리고 거기서 지울 수 있어요.", action:{ label:"거래내역으로", route:"ledger" } },
   { id:"f05", cat:"거래 등록",       routes:["ledger","home"],              q:"등록하려는 거래처가 목록에 없어요",           a:"거래처는 설정 화면에서 먼저 추가해야 해요. 설정 → 거래처 탭에서 새 거래처를 등록한 뒤 다시 시도해 보세요.", action:{ label:"설정으로", route:"master" } },
@@ -1563,12 +1566,15 @@ export default function App() {
     window.addEventListener('theme:changed', onTheme);
     /* '시스템 설정'을 고른 사람은 OS 가 밤에 바뀔 때 같이 바뀌어야 한다 */
     const stopWatch = watchSystem(readLocal);
+    // '화면 폭에 맞춤' 메뉴 — 창을 줄이거나 노트북 화면으로 옮기면 따라 접힌다
+    const stopWidth = watchWidth(readLocal);
     return () => {
       alive = false;
       clearTimeout(meTimer);
       window.removeEventListener('doccatalog:changed', loadDocs);
       window.removeEventListener('theme:changed', onTheme);
       stopWatch();
+      stopWidth();
     };
   }, [loggedIn]);
 

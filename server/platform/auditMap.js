@@ -76,6 +76,9 @@ const AUDIT_RULES = [
   { m: 'POST',   re: /^\/api\/contracts\/schedule\/([^/]+)\/issue$/,    res: 'invoice',  action: 'issue',  target: 1 },
   // 회차를 이미 있는 청구서로 잇기/되돌리기 — 주문별 실적과 발행예정 목록이 바뀐다
   { m: 'POST',   re: /^\/api\/contracts\/schedule\/([^/]+)\/link-invoice$/,    res: 'contract', action: 'schedule_link',  target: 1 },
+  // 장부 전 정산 — 청구서 없이 회차를 닫는다(계약 수금 현황이 바뀐다). 되돌리기도 남긴다
+  { m: 'POST',   re: /^\/api\/contracts\/schedule\/([^/]+)\/prior-settle$/,    res: 'contract', action: 'schedule_prior',  target: 1 },
+  { m: 'POST',   re: /^\/api\/contracts\/schedule\/([^/]+)\/prior-reopen$/,    res: 'contract', action: 'schedule_prior_reopen', target: 1 },
   /* 청구 일정 삭제 — 앞으로 받을 돈이 목록에서 사라지는 일이라 기록이 남아야 한다.
      ⚠ `/:id` 규칙보다 **위**에 둔다. 아래에 두면 'milestones' 를 계약 id 로 읽는다. */
   { m: 'DELETE', re: /^\/api\/contracts\/milestones\/([^/]+)$/,         res: 'contract', action: 'schedule_delete', target: 1 },
@@ -277,6 +280,7 @@ const ACTION_LABELS = {
   import: '일괄 등록', delete: '삭제', edit: '수정', delete_month: '월 전체 삭제', generate: '급여 생성',
   // 발행
   issue: '발행', repeat_create: '반복거래로 만들기',
+  schedule_prior: '장부 전 정산', schedule_prior_reopen: '장부 전 정산 되돌림',
   bulk_settle: '청구서 일괄 정산', bulk_delete: '청구서 일괄 삭제',
   link_contract: '거래 주문 연결·해제',
   // 입금·지급

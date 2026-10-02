@@ -45,12 +45,23 @@ export const ACCENTS = [
  *   메뉴를 자주 오가는 사람이 원하는 게 다르다.
  */
 export const NAV_MODES = [
+  { id: 'auto',   label: '화면 폭에 맞춤', desc: '넓은 화면에선 펼치고, 노트북처럼 좁으면 아이콘만 둬요.' },
   { id: 'fixed',  label: '항상 펼침', desc: '왼쪽에 늘 서 있어요. 길을 잃지 않아요.' },
   { id: 'rail',   label: '마우스 올리면 펼침', desc: '평소엔 아이콘만. 가져다 대면 펼쳐져요.' },
   { id: 'toggle', label: '버튼으로 열기', desc: '숨겨 두고 ☰ 를 눌러 열어요. 화면이 가장 넓어요.' },
 ]
 
-export const DEFAULTS = { mode: 'light', accent: 'gold', navMode: 'fixed' }
+/* 메뉴 기본값은 'auto'(화면 폭에 맞춤).
+ * 왜 — 노트북(1366×768·배율 125% → 폭 1093px)에서 펼친 메뉴가 230px 를 먹어 문서·표 자리가 모자랐다.
+ *   지급결의서가 목록 아래 화면 밖으로 밀려 고객사가 "문서가 안 뜬다"고 했다(2026-10-01).
+ * 화면 설정에서 메뉴 방식을 직접 고른 사람은 그 값이 서버에 저장돼 있어 그대로 간다 — 안 고른 사람만 바뀐다. */
+export const DEFAULTS = { mode: 'light', accent: 'gold', navMode: 'auto' }
+
+/** 'auto' 가 아이콘만(rail)으로 접히는 폭. 이보다 좁으면 메뉴가 문서·표 자리를 너무 먹는다 */
+const NARROW = '(max-width: 1280px)'
+const narrowNow = () => { try { return window.matchMedia(NARROW).matches } catch { return false } }
+/** CSS 가 읽는 실제 값 — 'auto' 를 폭에 따라 'rail'/'fixed' 로 푼다(CSS 는 'auto' 를 모른다) */
+const resolveNav = (navMode) => (navMode === 'auto' ? (narrowNow() ? 'rail' : 'fixed') : navMode)
 
 const oneOf = (list, v, fallback) => (list.some(x => x.id === v) ? v : fallback)
 
@@ -86,7 +97,7 @@ export const applyTheme = (raw) => {
 
   el.setAttribute('data-theme', mode)
   el.setAttribute('data-accent', t.accent)
-  el.setAttribute('data-navmode', t.navMode)
+  el.setAttribute('data-navmode', resolveNav(t.navMode))
   return t
 }
 
@@ -110,6 +121,15 @@ export const fromPrefs = (prefs) => normalize({
 export const toPrefs = (t) => {
   const n = normalize(t)
   return { theme_mode: n.mode, theme_accent: n.accent, theme_nav_mode: n.navMode }
+}
+
+/* '화면 폭에 맞춤'은 창 크기를 바꾸거나 모니터를 옮길 때 따라 바뀌어야 한다. 구독을 끊는 함수를 돌려준다. */
+export const watchWidth = (getTheme) => {
+  let mq
+  try { mq = window.matchMedia(NARROW) } catch { return () => {} }
+  const on = () => { if (normalize(getTheme()).navMode === 'auto') applyTheme(getTheme()) }
+  mq.addEventListener?.('change', on)
+  return () => mq.removeEventListener?.('change', on)
 }
 
 /* 'system' 을 고른 사람은 OS 가 밤에 바뀔 때 같이 바뀌어야 한다. 안 그러면

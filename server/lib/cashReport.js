@@ -498,7 +498,9 @@ async function dailyTrial(db, date, { includeIssuance = true } = {}) {
            a.acct_code AS bank_code, a.name AS account_name
       FROM transactions t
       LEFT JOIN accounts a ON a.id = t.account_id
-     WHERE t.date = ? AND t.status IN (?, ?)`,
+     WHERE t.date = ? AND t.status IN (?, ?)
+       /* 이체는 두 줄이지만 분개는 한 번 — 받는 쪽 줄을 빼야 두 배로 안 잡힌다(lib/voucherBook.js) */
+       AND NOT (t.kind = 'income' AND t.transfer_id IS NOT NULL)`,
     [date, SETTLED_INCOME, SETTLED_EXPENSE])
 
   // 계정과목 이름표 — 코드만 보여주면 사람이 못 읽는다
@@ -556,7 +558,7 @@ async function dailyTrial(db, date, { includeIssuance = true } = {}) {
   const pendingInvoices = []   // 비목이 없어 아직 전표를 세울 수 없는 청구서
   if (includeIssuance) {
     const [invs] = await db.execute(`
-      SELECT id, invoice_no, kind, supply_amount, vat_amount, total_amount, issued_at, account_code
+      SELECT id, invoice_no, kind, supply_amount, vat_amount, total_amount, vat_deductible, issued_at, account_code
         FROM invoices WHERE issued_at = ?`, [date])
     for (const inv of invs) {
       const v = invoiceVoucher(inv)

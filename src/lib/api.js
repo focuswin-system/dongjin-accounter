@@ -280,6 +280,7 @@ function adaptInvoice(row) {
     vatAmount: row.vat_amount,
     totalAmount: row.total_amount,
     taxType: row.tax_type || '',   // 과세/면세/영세 — 편집 시 자동 10% 재계산을 막는 데 필요
+    vatDeductible: Number(row.vat_deductible) !== 0,   // 매입세액 공제 여부(접대비 세금계산서는 불공제)
     ntsConfirmNo: row.nts_confirm_no || '',   // 홈택스 승인번호 — 세금계산서 임포트의 중복 판정 키
     issuedAt: row.issued_at,
     dueAt: row.due_at || null,
@@ -1630,8 +1631,17 @@ export const api = {
     try { return await req(`/contracts/schedule/pending${forKind ? `?for=${forKind}` : ''}`) } catch { return [] }
   },
   // 청구 일정 → 청구서 발행(원자적). paid=true면 기입금(거래+매칭까지 생성)
-  async issueSchedule(milestoneId, { paid = false, date, account_id } = {}) {
-    try { const r = await req(`/contracts/schedule/${milestoneId}/issue`, { method: 'POST', body: { paid, date, account_id } }); return { ok: true, id: r.id, invoice_no: r.invoice_no } }
+  async issueSchedule(milestoneId, { paid = false, date, account_id, issued_at } = {}) {
+    try { const r = await req(`/contracts/schedule/${milestoneId}/issue`, { method: 'POST', body: { paid, date, account_id, issued_at } }); return { ok: true, id: r.id, invoice_no: r.invoice_no } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  /** 장부 전 정산 — 계약 등록 전 회차를 청구서·입금 없이 닫는다(계약 수금 현황에만 들어간다) */
+  async priorSettleMilestone(milestoneId) {
+    try { await req(`/contracts/schedule/${milestoneId}/prior-settle`, { method: 'POST' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async priorReopenMilestone(milestoneId) {
+    try { await req(`/contracts/schedule/${milestoneId}/prior-reopen`, { method: 'POST' }); return { ok: true } }
     catch (e) { return { ok: false, error: e.message } }
   },
   /** 잘못 깔아둔 청구 일정 한 줄 삭제. 청구서가 이미 나간 일정은 서버가 막는다. */
@@ -1682,11 +1692,12 @@ export const api = {
     /* 폼 안의 '거래처로 추가'(이름·구분만 보낸다)면 같은 이름이 이미 있을 때 새로 만들 이유가 없다 —
        서버에 있는 거래처를 쓰라고 알린다(사용 중인 것이 딱 하나일 때만 서버가 돌려준다).
        거래처 관리의 전체 등록 폼은 적은 내용(사업자번호·계좌…)이 버려지면 안 되므로 오류로 받는다. */
-    const quick = Object.keys(data || {}).every(k => ['name', 'gubu'].includes(k))
+    // allow_similar(비슷한 이름이어도 새로 — lib/vendorAsk)는 '빠른 추가'를 깨지 않는다
+    const quick = Object.keys(data || {}).every(k => ['name', 'gubu', 'allow_similar'].includes(k))
     try {
       const result = await req('/vendors', { method: 'POST', body: quick ? { ...data, reuse_existing: true } : data })
-      return { ok: true, id: result.id, existed: !!result.existed }
-    } catch(e) { return { ok: false, error: e.message, code: e.code } }
+      return { ok: true, id: result.id, existed: !!result.existed, gubu: result.gubu }
+    } catch(e) { return { ok: false, error: e.message, code: e.code, candidates: e.payload?.candidates || null } }
   },
 
   async updateVendor(id, data) {

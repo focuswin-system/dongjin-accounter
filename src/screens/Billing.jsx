@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { categoryOption } from '../lib/categoryWords'
 import { AccountPicker } from '../lib/components/AccountPicker'
+import { AccountField } from '../lib/components/AccountField'
 import { AttachmentPanel } from '../lib/components/AttachmentPanel'
 import { VoucherSlip } from '../lib/components/VoucherSlip'
 import { useOrdersFromMes } from '../lib/customModules'
@@ -23,9 +25,11 @@ import { accountLabels, accountIdByLabel } from '../lib/accountLabel'
 import { withMainFirst, isMainAccount } from '../lib/mainAccount'
 import { taxInvoiceImportAdapter } from '../lib/taxInvoiceImport'
 import { api } from '../lib/api'
+import { addVendorAsking } from '../lib/vendorAsk'
 import { quickAddCategory } from '../lib/quickAdd'
 import { vatOf } from '../lib/vatRate'
 import { ReconcilePanel } from '../lib/components/ReconcilePanel'
+import { ReconcileHint } from '../lib/components/ReconcileHint'
 import { MaybeIssuedPanel } from '../lib/components/MaybeIssuedPanel'
 import { contractsForVendor, contractFitsVendor } from '../lib/contractPick'
 import { usePerms } from '../lib/perms'
@@ -230,8 +234,9 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onChanged, o
     /* invoice 는 null 일 수 있다(드로어가 닫히는 순간). 이 파일의 다른 훅이 전부 `invoice?.`
        를 쓰는 이유이고, 여기만 `invoice.vendor` 로 두었다가 상세를 열 때마다 화면이 깨졌다. */
   }, [stmtOpen, stmtParties, invoice?.vendor])
-  // 기본은 '새 거래로 등록'(정상 워크플로우 — 청구서 열어 바로 입금/지급 기록).
-  // '거래내역에서 연결'은 이미 들어온 거래를 뒤늦게 이 청구서에 붙이는 보조 경로라 뒤로.
+  /* 기본은 '새로 등록' — 단 **이미 들어온 거의 확실한 짝(sure)이 있으면 연결부터** 연다(아래 후보 효과).
+     예전엔 늘 '새로 등록'이 먼저라, 통장 업로드로 이미 들어온 입금을 두고 새 입금을 또 만들었다
+     (운영 fowin: 같은 돈 두 줄 10건). 같은 돈이 들어오는 문이 둘(거래내역·입금 처리)이라 생기는 일이다. */
   const [matchMode, setMatchMode] = useState("new")
   const [candidates, setCandidates] = useState([])
   const [showAll, setShowAll] = useState(false)
@@ -246,7 +251,12 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onChanged, o
   const [categories, setCategories] = useState([])
   const [jeokyos, setJeokyos] = useState([])
   useEffect(() => {
-    if (invoice?.id && invoice.remainAmount > 0) api.getMatchable(invoice.id).then(setCandidates)
+    setMatchMode("new")
+    if (invoice?.id && invoice.remainAmount > 0) api.getMatchable(invoice.id).then(c => {
+      setCandidates(c)
+      // 짝이 확실하거나(sure) 같은 금액이 여럿이라 골라야 하면(tie) — 어느 쪽이든 연결 목록이 먼저다
+      if (c.some(x => x.sure || x.tie)) setMatchMode("link")
+    })
     else setCandidates([])
     setShowAll(false)
   }, [invoice?.id, invoice?.remainAmount])
@@ -289,6 +299,7 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onChanged, o
   if (!invoice) return null
 
   const relatedCands = candidates.filter(c => c.related)
+  const sureCand = candidates.find(c => c.sure) || null
   const shownCands = showAll ? candidates : (relatedCands.length ? relatedCands : candidates)
   const hasOther = relatedCands.length > 0 && candidates.length > relatedCands.length
 
@@ -302,7 +313,18 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onChanged, o
     if (amount > invoice.remainAmount) { toast.push("잔여 금액을 초과할 수 없어요", { tone: "warn" }); return }
     // 계좌가 비면 이 돈이 어느 계좌 잔액에도 잡히지 않는다(서버도 400으로 막는다)
     if (!matchBankId) { toast.push(`${isIssued ? "입금" : "출금"} 계좌를 선택해주세요`, { tone: "warn" }); return }
-    const ok = await confirm({
+    /* 돈이 청구서보다 **먼저** 오간 날짜면 한 번 더 묻는다(막지는 않는다 — 선불도 있다).
+       1일 발행·말일 수금인 곳에서 지난달 말일 입금을 이번 달 청구서에 붙이면 그 뒤로 매달 한 달씩
+       밀린다(운영 fowin 2026-09: 9/1 청구서에 8/31 입금). 보통은 같은 달 말일 입금이 짝이다. */
+    const issued = String(invoice.issuedAt || '').slice(0, 10)
+    const early = issued && matchDate && matchDate < issued
+    const ok = await confirm(early ? {
+      tone: "warn", icon: <Icon.Warn size={22}/>,
+      title: `청구서 발행일(${issued})보다 앞선 ${isIssued ? "입금" : "지급"}이에요`,
+      body: `${matchDate} ${fmtNum(amount)}원을 이 청구서에 연결할까요? 지난 청구서의 ${isIssued ? "입금" : "지급"}이 아닌지 확인해 주세요.`,
+      detail: "미리 받은 돈(선불)이 맞으면 그대로 연결하세요.",
+      confirmLabel: "그래도 연결",
+    } : {
       tone: "brand", icon: <Icon.Check size={22}/>,
       title: `이 청구서에 ${isIssued ? "입금" : "지급"}을 연결할까요?`,
       body: `${fmtNum(amount)}원을 이 청구서에 연결합니다. 그만큼 ${isIssued ? "미수금" : "미지급금"}이 줄어요.`,
@@ -482,8 +504,9 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onChanged, o
                 {invoice.remainAmount > 0 && (
                   <div className="col gap-10">
                     <div style={{ display: "flex", background: "var(--surface-2)", borderRadius: 8, padding: 3, gap: 2 }}>
-                      {[["new", "새 거래로 등록"],
-                        ["link", `거래내역에서 연결${(relatedCands.length || candidates.length) ? ` (${relatedCands.length || candidates.length})` : ""}`],
+                      {[["new", "새로 등록"],
+                        // 무엇을 고르는지 이름에서 보이게 — '거래내역'은 화면 이름이라 무슨 일인지 안 읽혔다
+                        ["link", `${isIssued ? "들어온 입금" : "나간 지급"}에서 연결${(relatedCands.length || candidates.length) ? ` (${relatedCands.length || candidates.length})` : ""}`],
                         /* 어음 — **돈이 아직 안 왔는데 청구서는 정산되는** 유일한 경로다.
                            어음 화면에서만 등록하게 두었더니 "지급하려는데 어음이 없다"가 됐다 —
                            실무 동선은 청구서를 보다가 "이건 어음으로 받았다"이지,
@@ -498,6 +521,15 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onChanged, o
                       ))}
                     </div>
 
+                    {/* '새로 등록' 탭에서도 짝이 이미 들어와 있으면 **저장 전에** 말한다(저장을 누르면 그때 막히던 것을 앞당긴다) */}
+                    {matchMode === "new" && sureCand && (
+                      <div className="row gap-8" style={{ padding: "10px 12px", borderRadius: 10, background: "var(--warn-soft)", alignItems: "center", flexWrap: "wrap" }}>
+                        <span className="text-sm" style={{ flex: 1, minWidth: 0 }}>
+                          같은 {isIssued ? "입금" : "지급"}이 이미 있어요 — <span className="num">{fmtDateShort(sureCand.date)}</span> {sureCand.vendor_name || ""} <b className="num">{fmtNum(sureCand.available)}</b>원
+                        </span>
+                        <button className="btn sm primary" onClick={() => linkMatch(sureCand)}>그걸로 연결</button>
+                      </div>
+                    )}
                     {matchMode === "note" ? (
                       <NoteSettle invoice={invoice} isIssued={isIssued} toast={toast}
                         onDone={() => { setMatchMode("new"); onChanged?.() }}/>
@@ -529,8 +561,9 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onChanged, o
                                 </div>
                                 <div className="row gap-6" style={{ marginTop: 2, alignItems: "center", flexWrap: "wrap" }}>
                                   <span className="text-xs text-muted2" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.category || "—"}</span>
-                                  {t.sameVendor && <span className="badge brand" style={{ fontSize: 10, flexShrink: 0 }}>거래처 일치</span>}
-                                  {(t.matchTotal || t.matchRemain) && <span className="badge pos" style={{ fontSize: 10, flexShrink: 0 }}>금액 일치</span>}
+                                  {t.sure && <span className="badge pos" style={{ fontSize: 10, flexShrink: 0 }}>이 청구서의 {isIssued ? "입금" : "지급"}으로 보여요</span>}
+                                  {!t.sure && t.sameVendor && <span className="badge brand" style={{ fontSize: 10, flexShrink: 0 }}>거래처 일치</span>}
+                                  {!t.sure && (t.matchTotal || t.matchRemain) && <span className="badge pos" style={{ fontSize: 10, flexShrink: 0 }}>금액 일치</span>}
                                   {t.matchSupply && <span className="badge outline" style={{ fontSize: 10, flexShrink: 0 }}>공급가 일치</span>}
                                 </div>
                               </div>
@@ -570,22 +603,24 @@ const InvoiceDetailDrawer = ({ invoice, onClose, onMatch, onDelete, onChanged, o
                             onChange={e => setMatchDate(e.target.value)}/>
                         </div>
 
-                        <div>
+                        {/* 한 줄 전체 — 이름·은행·번호 칸 + 없으면 그 자리에서 등록(lib/components/AccountField, 거래 폼과 같은 부품) */}
+                        <div className="span-2">
                           <label className="label">
                             {isIssued ? "입금" : "출금"} 계좌 <span style={{ color: "var(--neg-ink)" }}>*</span>
                             <span className="text-muted2" style={{ marginLeft: 6, fontWeight: 400 }}>· 이 계좌 잔액에 반영</span>
                           </label>
-                          {/* 몇 개 없으면 칩, 많으면 검색 목록(lib/components/AccountPicker) */}
-                          {/* 입금은 카드로 받을 수 없다 — 카드는 지급 쪽에만 */}
-                          <AccountPicker accounts={withMainFirst(isIssued ? bankAccounts.filter(a => a.kind !== 'card') : bankAccounts, company, isIssued ? 'in' : 'out')}
-                            value={matchBankId} onChange={v => setMatchBankId(v)}
+                          {/* 입금은 카드로 받을 수 없다 — 카드는 지급 쪽에만(지급은 통장·카드 함께) */}
+                          <AccountField kind={isIssued ? 'bank' : 'any'} valueKey="id" value={matchBankId}
+                            accounts={withMainFirst(isIssued ? bankAccounts.filter(a => a.kind !== 'card') : bankAccounts, company, isIssued ? 'in' : 'out')}
+                            allAccounts={bankAccounts} onChange={v => setMatchBankId(v)}
+                            onCreated={async () => { const list = await api.getAccounts(); if (Array.isArray(list)) setBankAccounts(list) }}
                             isMain={a => isMainAccount(a, company, isIssued ? 'in' : 'out')}/>
                         </div>
                         {/* 분류 — 청구서 정보로 미리 채워두고, 필요하면 사용자가 바꾼다 */}
                         <div>
                           <label className="label">비목</label>
                           <Combobox value={matchCategory} onChange={setMatchCategory}
-                            options={categories.filter(c => c.id?.startsWith(isIssued ? "INC-" : "EXP-")).map(c => ({ value: c.name, label: c.name, sub: c.group_name || "" }))}
+                            options={categories.filter(c => c.id?.startsWith(isIssued ? "INC-" : "EXP-")).map(categoryOption)}
                             placeholder="비목 선택"
                             onAddNew={async (q) => {
                               // 예전에는 값만 넣고 끝나서, 같은 비목을 다음 정산 때 또 타이핑해야 했다.
@@ -902,15 +937,11 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
     /* ⚠ 기본 계좌가 이미 자동으로 골라지고 있었다(`list[0]`) — **가나다순 첫 줄**이라
        카드가 걸릴 수도 있었다. 주거래가 지정돼 있으면 그것을, 없으면 통장 첫 줄을 쓴다.
        발행은 돈이 들어오는 일(주입금), 수취는 나가는 일(주지출)이다. */
+    /* 계좌는 **미리 고르지 않는다**(lib/mainAccount.js) — 여기만 주거래·첫 줄을 골라 넣고 있어서,
+       확인 안 한 계좌가 청구서에 붙었다. 주거래는 목록 맨 앞에 세우는 것으로 충분하다. */
     Promise.all([api.getAccounts(), api.getCompany()]).then(([list, co]) => {
       setAccounts(list)
       setCompany(co)
-      setForm(f => {
-        if (f.accountId) return f
-        const wantId = co?.[f.kind === 'issued' ? 'main_in_account_id' : 'main_out_account_id']
-        const pick = list.find(a => a.id === wantId) || list.find(a => a.kind !== 'card') || list[0]
-        return { ...f, accountId: pick?.id || "" }
-      })
     })
     /* 곁다리 호출도 권한을 본다 — 없으면 403 이 전역 알림('권한이 없어요')으로 떠서,
        좁은 역할은 화면을 열 때마다 영문 모를 알림을 본다(실측: 세금계산서 화면에서 4개). */
@@ -956,12 +987,13 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
         issuedAt: editInvoice.issuedAt || localDate(),
         dueAt: editInvoice.dueAt || "",
         memo: editInvoice.memoRaw || "",
-        accountId: editInvoice.accountId || accounts[0]?.id || "",
+        accountId: editInvoice.accountId || "",
         // 비목을 안 실으면 저장 한 번에 발행 전표의 계정과목이 통째로 사라진다
         category: editInvoice.category || "",
+        vatDeductible: editInvoice.vatDeductible !== false,
       })
     } else {
-      setForm({ kind: defaultKind, vendor: "", contract: "", supplyAmount: "", vatAmount: "", taxType: "과세", issuedAt: localDate(), dueAt: "", memo: "", accountId: accounts[0]?.id || "", category: "" })
+      setForm({ kind: defaultKind, vendor: "", contract: "", supplyAmount: "", vatAmount: "", taxType: "과세", issuedAt: localDate(), dueAt: "", memo: "", accountId: "", category: "", vatDeductible: true })
     }
   }, [open, defaultKind, editInvoice])
 
@@ -1014,6 +1046,10 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
       }
     }
     if (k === "vendor") next.contract = ""
+    if (k === "category" && next.kind === "received") {
+      const c = categories.find(x => x.name === v && String(x.id || '').startsWith('EXP-'))
+      next.vatDeductible = !c || c.vat_deductible !== 0
+    }
     setForm(next)
   }
 
@@ -1190,6 +1226,8 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
          매출은 없으면 제품매출로 갈음되지만, **매입은 갈음할 수 없다** —
          외주가공비인지 통신비인지는 받는 사람이 정해줘야 안다. */
       category: form.category || null,
+      // 매입세액 공제 여부 — 매입만(접대비 세금계산서는 받아도 공제받지 못한다). 매출은 서버가 1로 둔다
+      vat_deductible: form.kind === "received" ? (form.vatDeductible === false ? 0 : 1) : undefined,
       /* 품목 내역. 손대지 않은 빈 줄은 여기서 걸러낸다 — 표가 빈 줄로 시작하므로
          그냥 보내면 이름도 금액도 없는 줄이 거래명세서·지급결의서에 그대로 찍힌다.
          화면에서 쓰는 보조 필드(amountTouched)도 빼고 보낸다 —
@@ -1299,13 +1337,10 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
                 /* 구분(gubu)을 지금 고른 방향에서 정한다 — 안 넣으면 목록 필터
                    (issued=B / received=A·E)에 안 걸려, 등록은 됐는데 다시 안 보인다. */
                 const gubu = form.kind === "issued" ? "B" : "A"
-                const res = await api.addVendor({ name: nm, gubu })
-                if (!res.ok) return toast.push(res.error || "거래처를 등록하지 못했어요", { tone: 'warn' })
-                const updated = await api.getVendors({ all: true })   // 초기 로드와 같은 조건(미사용은 목록 필터가 가린다)
-                setVendors(updated)
-                const made = res.id || updated.find(v => (v.name || '').trim() === nm)?.id || ''
-                f("vendor", made)
-                toast.push(res.existed ? `이미 있는 "${nm}" 거래처를 골랐어요` : `"${nm}" 거래처를 등록했어요`)
+                const v = await addVendorAsking({ confirm, toast }, { name: nm, gubu })
+                if (!v) return
+                setVendors(await api.getVendors({ all: true }))   // 초기 로드와 같은 조건(미사용은 목록 필터가 가린다)
+                f("vendor", v.id)
               }}
               addNewLabel="거래처로 등록"/>
           </div>
@@ -1395,6 +1430,15 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
                 <button key={t} type="button" className={`chip ${form.taxType === t ? "active" : ""}`} onClick={() => f("taxType", t)}>{t}</button>
               ))}
             </div>
+            {/* 접대비 등은 세금계산서를 받아도 매입세액을 공제받지 못한다(부가가치세법 제39조).
+                비목을 고르면 그 설정을 따르고, 여기서 바꿀 수 있다 */}
+            {form.kind === "received" && taxable && (
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", marginTop: 8, fontSize: 11.5, color: "var(--muted)" }}>
+                <input type="checkbox" checked={form.vatDeductible === false}
+                  onChange={e => setForm(p => ({ ...p, vatDeductible: !e.target.checked }))}/>
+                매입세액 불공제 <span className="text-muted2">(접대비 등)</span>
+              </label>
+            )}
           </div>
 
           {/* 비목 — 이 청구서가 장부에 어떤 계정으로 오르는지 정한다.
@@ -1408,7 +1452,7 @@ const InvoiceFormDrawer = ({ open, onClose, defaultKind = "issued", toast, onSav
               onChange={v => f("category", v)}
               options={categories
                 .filter(c => c.id?.startsWith(form.kind === "issued" ? "INC-" : "EXP-"))
-                .map(c => ({ value: c.name, label: c.name, sub: c.group_name || "" }))}
+                .map(categoryOption)}
               placeholder={form.kind === "issued" ? "매출 유형 (비우면 제품매출)" : "비목 선택"}
               allowAdd={false}/>
             <div className="text-sm text-muted2" style={{ marginTop: 4 }}>
@@ -1671,19 +1715,23 @@ const SubtotalChips = ({ title, note, rows, onPick, activeKey, limit = 12, moreH
 
 // ── 발행예정(대기) 청구 일정 테이블 ─────────────────────────────
 // 주문에 깔아둔 청구/지급 일정 → 아직 청구서가 안 만들어진 건. 매출은 '발행', 매입은 '등록' 관점.
-const PendingScheduleTable = ({ rows, onIssue, onPaid, onOpenOrder, onDeleteSchedule, isIssued = true, select }) => (
+/* backfill — 계약 등록 전 일정 구획. 지금 청구할 것이 아니라 '그때 어떻게 됐나'를 정리하는 줄이라
+   버튼이 다르다: [장부 전 정산](그때 이미 끝남) / [발행 처리](그때 날짜로 청구서만). 입금까지 넣는 건 ⋯ 안에 둔다 —
+   지난 입금을 장부에 새로 넣으면 그 돈이 이번 통장·매출에 끼어든다(운영 fowin 2026-08). */
+const PendingScheduleTable = ({ rows, onIssue, onPaid, onPrior, onOpenOrder, onDeleteSchedule, isIssued = true, select, backfill = false }) => (
   <div className="card" style={{ overflow: "hidden" }}>
     {/* 이 줄들이 아직 청구서가 **아니라는 것**을 적어 둔다.
         옆 탭(발행내역)은 행을 누르면 청구서 상세가 열려서, 여기서도 눌러보고
         아무 일도 안 일어나 "고장 났나" 하는 일이 실제로 있었다. */}
     {/* ⚠ 탭 이름을 그대로 적는다. 매입 쪽 탭은 '수취내역'이 아니라 **등록내역**이다 —
         없는 탭을 가리키면 안내가 오히려 사람을 헤매게 한다. */}
-    <div className="text-xs text-muted2" style={{ padding: "12px 16px 0", lineHeight: 1.6 }}>
-      아직 <b>청구서가 아니에요</b> — 주문에 깔아둔 청구 일정입니다.
+    {/* 소급 구획에는 안 단다 — 바로 위 예정 표에 같은 말이 있고, 소급 구획은 제목 줄이 할 일을 말한다 */}
+    {!backfill && <div className="text-xs text-muted2" style={{ padding: "12px 16px 0", lineHeight: 1.6 }}>
+      아직 <b>청구서가 아니에요</b> — 계약에 깔아둔 청구 일정입니다.
       {/* 조사를 붙여서 쓴다 — '처리을'이 되지 않게(받침 유무가 달라 하나로 못 쓴다) */}
       {isIssued ? " 발행 처리를" : " 청구서 등록을"} 눌러야 청구서가 만들어지고, 그 뒤
       <b>{isIssued ? " 발행내역" : " 등록내역"}</b> 탭에서 열어 보거나 지울 수 있어요.
-    </div>
+    </div>}
     <DataTable
       rows={rows}
       rowKey={pendingKey}
@@ -1694,27 +1742,37 @@ const PendingScheduleTable = ({ rows, onIssue, onPaid, onOpenOrder, onDeleteSche
       columns={[
         { key: 'due_date', header: '예정일', sortable: true, render: p => (
           <span className="num text-sm">{p.due_date || "—"}
-            {p.due_date && <span className={`badge ${ddayTone(p.due_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(p.due_date)}</span>}</span>
+            {/* 소급 구획은 연체가 아니라 지난 기록이다 — '+819일 초과' 같은 빨간 경고를 달지 않는다 */}
+            {p.due_date && !backfill && <span className={`badge ${ddayTone(p.due_date)}`} style={{ marginLeft: 6, fontSize: 10 }}>{dday(p.due_date)}</span>}</span>
         ) },
         { key: 'vendor_name', header: '거래처', sortable: true, render: p => <span className="fw-700">{p.vendor_name || "—"}</span> },
-        { key: 'contract_name', header: '주문', render: p => <span className="text-sm text-muted">{p.contract_name}{p.contract_no ? ` · ${p.contract_no}` : ""}</span> },
+        { key: 'contract_name', header: '계약', render: p => <span className="text-sm text-muted">{p.contract_name}{p.contract_no ? ` · ${p.contract_no}` : ""}</span> },
         { key: 'type', header: '유형', render: p => <span className="badge outline">{p.type}</span> },
         { key: 'total', header: `${isIssued ? "청구금액" : "지급금액"}(VAT 포함)`, align: 'right', sortable: true,
           sortValue: pendingGross,
           render: p => <span className="num-cell fw-700">{fmtNum(pendingGross(p))}</span> },
-        { key: 'action', header: '', width: 248, render: p => (
+        { key: 'action', header: '', label: '처리', width: 248, shrink: false, render: p => (
           <div className="row gap-6">
+            {backfill && (
+              <button className="btn sm" onClick={() => onPrior?.(p)} title={`그때 이미 ${isIssued ? '받은' : '낸'} 돈 — 청구서·${isIssued ? '입금' : '지급'} 없이 닫아요`}>
+                장부 전 정산
+              </button>
+            )}
             <button className="btn primary sm" onClick={() => onIssue(p)}>
               <Icon.Receipt size={12}/> {isIssued ? "발행 처리" : "청구서 등록"}
             </button>
-            <button className="btn sm" onClick={() => onPaid(p)}>{isIssued ? "입금 처리" : "지급 처리"}</button>
+            {!backfill && <button className="btn sm" onClick={() => onPaid(p)}>{isIssued ? "입금 처리" : "지급 처리"}</button>}
             {/* 잘못 깔아둔 일정을 **보이는 자리에서** 치우게 한다. 여태는 주문 편집으로
                 들어가 그 줄을 찾아 빼는 수밖에 없었다. */}
             {p.source === 'milestone' && (
               <Popover align="right" width={210}
                 trigger={<button className="icon-btn sm" title="더보기"><Icon.More size={15}/></button>}>
-                <PopItem icon={<Icon.Doc size={14}/>} label="주문 열기"
+                <PopItem icon={<Icon.Doc size={14}/>} label="계약 열기"
                   onClick={() => onOpenOrder?.(p)}/>
+                {backfill && (
+                  <PopItem icon={<Icon.Receipt size={14}/>} label={isIssued ? '발행하고 입금까지 기록' : '등록하고 지급까지 기록'}
+                    onClick={() => onPaid(p)}/>
+                )}
                 <PopItem danger icon={<Icon.Trash size={14}/>} label="이 일정 삭제"
                   onClick={() => onDeleteSchedule?.(p)}/>
               </Popover>
@@ -1744,6 +1802,8 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   /* 다른 화면(홈 '거래 등록', 거래내역 엑셀 업로드)에서 '계산서 업로드'로 바로 들어오는 길.
      숫자를 하나 올려 보낸다 — boolean 이면 한 번 닫은 뒤 다시 누를 때 값이 안 바뀌어 안 열린다. */
   openImportSignal = 0,
+  /* 처음 열 보기 — 업로드 결과 화면의 [대사 열기]가 'match' 로 연다 */
+  initialView = null,
   openEdit }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
@@ -1756,7 +1816,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
    * 수시 입금을 열 때마다 빈 화면과 "주문 상세의 '청구 일정'에서 등록하세요"를 먼저 봤다 —
    * 안 쓰기로 한 기능으로 매번 안내하고, 정작 하려던 청구서 끊기는 한 번 더 눌러야 했다.
    * 이제 청구할 게 실제로 있을 때만 그쪽으로 연다(아래 effect). */
-  const [view, setView] = useState("list")   // issued: pending|list|plain|note
+  const [view, setView] = useState(initialView || "list")   // issued: pending|list|plain|note|match
   /* 어음. 탭 건수와 **카드 줄**이 같은 자료를 본다 — 목록은 NotesScreen 이 스스로
      불러오고, 읽을 때마다 onLoaded 로 여기에도 넘겨 준다. */
   const [notes, setNotes] = useState([])
@@ -2266,12 +2326,15 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     if (paid) { setPaidTarget(p); return }
     const supply = p.amount || 0
     const vat = p.vat != null ? p.vat : vatOf(supply)
+    // 계약 등록 전 일정은 **그 일정 날짜로** 발행된다(서버 규칙 — routes/contracts.js isBeforeSetup)
+    const past = p.state === 'backfill' && p.due_date
     const ok = await confirm({
       tone: "brand", icon: <Icon.Receipt size={22}/>,
       title: isIssued ? "청구서 발행" : "매입 청구서 등록",
       body: isIssued
         ? `${p.vendor_name} · ${p.type} ${fmtNum(supply + vat)}원(VAT 포함) 청구서를 발행해요. 미수금으로 등록됩니다.`
         : `${p.vendor_name} · ${p.type} ${fmtNum(supply + vat)}원(VAT 포함) 매입 청구서를 등록해요. 미지급금으로 잡힙니다.`,
+      detail: past ? `발행일은 일정 날짜인 ${p.due_date}이에요 — 그 기간의 ${isIssued ? '매출' : '매입'}·부가세로 잡혀요.` : undefined,
       confirmLabel: isIssued ? "청구서 발행" : "청구서 등록",
     })
     if (!ok) return
@@ -2279,6 +2342,21 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
     if (!res.ok) { toast.push(res.error || "처리에 실패했어요", { tone: 'warn' }); return }
     toast.push(isIssued ? "청구서를 발행했어요" : "매입 청구서를 등록했어요")
     load()
+  }
+
+  /* 장부 전 정산 — 계약 등록 전에 이미 끝난 일정을 청구서·입금 없이 닫는다.
+     2024년 계약을 '수금 완료'로 만들려고 오늘 날짜 청구서와 지난 입금을 넣던 일을 대신한다(운영 fowin 2026-08) */
+  const priorSettle = async (p) => {
+    const ok = await confirm({
+      tone: "brand", icon: <Icon.Check size={22}/>, title: "장부 전 정산",
+      body: `${p.vendor_name || '거래처 미지정'} · ${p.type} ${fmtNum(pendingGross(p))}원(${p.due_date}) — 계약 등록 전에 이미 ${isIssued ? '받은' : '낸'} 돈으로 닫아요.`,
+      detail: `청구서·${isIssued ? '입금' : '지급'}을 만들지 않아요. 매출·부가세·통장에는 안 잡히고, 계약의 ${isIssued ? '수금' : '지급'} 현황에만 들어가요.`,
+      confirmLabel: "장부 전 정산",
+    })
+    if (!ok) return
+    const r = await api.priorSettleMilestone(p.milestone_id)
+    if (!r.ok) return toast.push(r.error || '처리하지 못했어요', { tone: 'warn' })
+    toast.push('장부 전 정산으로 닫았어요'); load()
   }
 
   const handleMatch = async (invoiceId, amount, date, txnId, extra) => {
@@ -2389,7 +2467,8 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       adapter={importAdapter}
       existing={invoices}
       onCancel={() => setImporting(false)}
-      onDone={() => { setImporting(false); load() }}/>
+      onDone={() => { setImporting(false); load() }}
+      resultExtra={<ReconcileHint goRoute={goRoute} kinds={[kind]} onGo={() => setImporting(false)}/>}/>
   )
 
   return (
@@ -2709,11 +2788,11 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
                   <span className="fw-700 text-sm">계약 등록 전 일정</span>
                   <span className="badge outline" style={{ fontSize: 10 }}>{pendingBackfill.length}건</span>
                   <span className="text-xs text-muted2">
-                    이미 {isIssued ? '받은' : '낸'} 건인지 확인하고 발행하세요
+                    그때 이미 {isIssued ? '받았으면' : '냈으면'} 장부 전 정산, 청구만 했으면 발행 처리(일정 날짜로)
                   </span>
                 </div>
-                <PendingScheduleTable rows={pendingBackfill} isIssued={isIssued}
-                  onIssue={(p) => issueSchedule(p, false)} onPaid={(p) => issueSchedule(p, true)}
+                <PendingScheduleTable rows={pendingBackfill} isIssued={isIssued} backfill
+                  onIssue={(p) => issueSchedule(p, false)} onPaid={(p) => issueSchedule(p, true)} onPrior={priorSettle}
                   onOpenOrder={openOrder} onDeleteSchedule={deleteSchedule}/>
               </div>
             )}

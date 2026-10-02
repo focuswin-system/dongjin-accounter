@@ -56,10 +56,17 @@ function vatPack(rows, { quarter, year, direct = {} }) {
 
   const sales = bucket(of('issued'))
   const purchase = bucket(of('received'))
+  /* 공제받지 못할 매입세액 — 홈택스 신고서도 수취분을 **전부** 적은 뒤 (16)란에서 뺀다.
+     수취분에서 조용히 빼 버리면 매입처별 합계표와 매수·금액이 안 맞는다. */
+  const nonDed = { supply: 0, vat: 0, n: 0 }
+  for (const r of of('received')) {
+    if (Number(r.vat_deductible) !== 0 || taxTypeOf(r) === '면세') continue
+    nonDed.supply += num(r.supply_amount); nonDed.vat += num(r.vat_amount); nonDed.n += 1
+  }
   /* 납부세액 = 매출세액 − 매입세액. 면세는 신고 대상이 아니므로 세액 계산에서 빠진다
      (면세 청구서에는 세액이 0이라 더해도 값은 같지만, 뜻이 다르니 명세에서 구분해 보여준다). */
   const salesInv = sales.과세.vat + sales.영세.vat
-  const purchaseInv = purchase.과세.vat + purchase.영세.vat
+  const purchaseInv = purchase.과세.vat + purchase.영세.vat - nonDed.vat
   const salesDirect = Number(direct.salesDirect || 0)
   const purchaseDirect = Number(direct.purchaseDirect || 0)
   /* 과세표준도 함께 받는다 — 홈택스의 '그 밖의 매출'·'그 밖의 공제매입세액' 칸은
@@ -71,7 +78,7 @@ function vatPack(rows, { quarter, year, direct = {} }) {
   const purchaseVat = purchaseInv + purchaseDirect
 
   return { period, sales, purchase, salesVat, purchaseVat, netVat: salesVat - purchaseVat, rows,
-           salesInv, purchaseInv, salesDirect, purchaseDirect,
+           salesInv, purchaseInv, salesDirect, purchaseDirect, nonDed,
            salesSupplyDirect, purchaseSupplyDirect }
 }
 
@@ -106,7 +113,8 @@ const sumCol = (rows, i) => rows.reduce((s, r) => s + (Number(r[i]) || 0), 0)
 function buildVatWorkbook(pack, { quarter, year }) {
   const { period, sales, purchase, salesVat, purchaseVat, netVat,
           salesDirect = 0, purchaseDirect = 0,
-          salesSupplyDirect = 0, purchaseSupplyDirect = 0 } = pack
+          salesSupplyDirect = 0, purchaseSupplyDirect = 0,
+          nonDed = { supply: 0, vat: 0, n: 0 } } = pack
   const wb = newBook()
 
   const S = (...cells) => ({ kind: 'section', cells })
@@ -142,8 +150,10 @@ function buildVatWorkbook(pack, { quarter, year }) {
       line('영세율', purchase.영세),
       // 카드·현금영수증 등 청구서 없이 적은 매입 — 이게 빠져 화면보다 세액이 적게 나왔다
       ...(purchaseDirect ? [D('그 밖의 공제매입(카드·현금영수증 등)', '', purchaseSupplyDirect, purchaseDirect)] : []),
-      T('매입 합계', purchase.과세.n + purchase.영세.n,
-        purchase.과세.supply + purchase.영세.supply + purchaseSupplyDirect, purchaseVat),
+      // 신고서 (16)란 — 접대비 등. 위 수취분에 들어 있는 것을 여기서 뺀다
+      ...(nonDed.n ? [D('공제받지 못할 매입세액 (접대비 등)', nonDed.n, -nonDed.supply, -nonDed.vat)] : []),
+      T('매입 합계 (공제분)', purchase.과세.n + purchase.영세.n - nonDed.n,
+        purchase.과세.supply + purchase.영세.supply + purchaseSupplyDirect - nonDed.supply, purchaseVat),
       B(),
       S('3. 납부(환급)할 세액'),
       H('구분', '', '', '세액'),

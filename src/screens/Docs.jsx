@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react'
+import { categoryOption } from '../lib/categoryWords'
 import { payDayLabel } from '../lib/cardPayDay'
 import { Icon, fmtNum, useToast, useConfirm, Spacer, StatusBadge, Drawer, Combobox, MoneyInput, localToday, Popover, Loading, periodToRange, DateInput, yearLabel, useFiscalTick } from '../lib/ui'
 // SAMPLE placeholder — Docs 화면은 실 API 연동 전까지 빈 데이터로 동작
@@ -9,7 +10,8 @@ const SAMPLE = {
 }
 import { computeItems, shiftMonth, monthLabel } from './HR'
 import { api } from '../lib/api'
-import { useApprovalOn, useDocApproval, ApprovalButtons, ApprovalLine, ApprovalStamp, RejectedNote, listStatusOf } from '../lib/components/Approval'
+import { addVendorAsking } from '../lib/vendorAsk'
+import { useApprovalOn, useDocApproval, ApprovalButtons, ApprovalLine, showApprovalLine, ApprovalStamp, RejectedNote, listStatusOf } from '../lib/components/Approval'
 import { isCountable, notCountable } from '../lib/txnScope'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { DataTable, Sub } from '../lib/components/DataTable'
@@ -27,7 +29,8 @@ import { ExecDrawer, approveAndAsk } from '../lib/components/ExecDrawer'
 import { useDocList } from '../lib/useDocList'
 import { looksLikeTaxInvoice } from '../lib/hometax'
 import { useOrdersFromMes } from '../lib/customModules'
-import { normVendorName } from '../lib/normalize'
+import { normVendorName, isSimilarVendorName } from '../lib/normalize'
+import { ReconcileHint } from '../lib/components/ReconcileHint'
 import { PrintButton } from '../lib/components/PrintButton'
 import { copySeedOf, resolutionTotalOf } from '../lib/docCopy'
 import { PrintEditButton } from '../lib/components/PrintEditButton'
@@ -409,6 +412,7 @@ const TxnPickDrawer = ({ open, onClose, onPicked }) => {
 /* seed — 지난 결의서를 본뜬 값(3b, lib/docCopy.js). 품목까지 온다. 지급일은 비워 둔다(설계 — 새로 정한다). */
 const NewResolutionDrawer = ({ open, onClose, onCreated, seed = null }) => {
   const toast = useToast();
+  const { confirm } = useConfirm();   // 거래처로 추가 — 비슷한 이름이면 묻는다(lib/vendorAsk)
   const empty = { vendor: '', title: '', amount: '', pay_method: '계좌이체', pay_date: todayStr(), note: '', items: [] };
   /* vendor_id 도 들고 간다 — 이름만 보내면 같은 이름 거래처가 둘일 때 서버가 id 를 못 정하고,
      처리할 때 그 거래처의 미지급·출금을 못 찾아 이중 지급 가드가 꺼진다(코드 검토 지적).
@@ -483,14 +487,10 @@ const NewResolutionDrawer = ({ open, onClose, onCreated, seed = null }) => {
             placeholder="거래처 선택 또는 새로 추가"
             onAddNew={async (q) => {
               // 지출처는 매입처(A)로 등록 — 이후 다른 화면에서도 선택 가능. 상세 문구는 결의서 상세에서 수정.
-              const res = await api.addVendor({ name: q, gubu: 'A' })
-              if (res.ok) {
-                setVendors(await api.getVendors())
-                setForm(f => ({ ...f, vendor: q }))
-                toast.push(`"${q}" 거래처가 등록됐어요`)
-              } else {
-                toast.push(res.error || '거래처 등록에 실패했어요', { tone: 'warn' })
-              }
+              const v = await addVendorAsking({ confirm, toast }, { name: q, gubu: 'A' })
+              if (!v) return
+              setVendors(await api.getVendors())
+              setForm(f => ({ ...f, vendor: v.name }))
             }}
             addNewLabel="거래처로 추가"/>
           {past.length > 0 && (
@@ -897,7 +897,7 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted, goRoute, o
       {!edit && approvalOn && (
         <div className="no-print" style={{ padding: '0 0 12px' }}>
           <RejectedNote current={apv} status={status}/>
-          {apv && ['진행', '승인'].includes(apv.status) && <ApprovalLine approval={apv}/>}
+          {showApprovalLine(apv) && <ApprovalLine approval={apv}/>}
         </div>
       )}
       {/* 인쇄 대상 — 실제 결의서 양식(가로 계열이라 그대로 폭 채움) */}
@@ -1306,6 +1306,9 @@ const ImportResult = ({ result, goRoute, onAgain }) => {
         </div>
       </div>
 
+      {/* 다음 할 일 — 세금계산서와 이을 입금·지급이 있으면(서버 판정) 대사로 */}
+      <ReconcileHint goRoute={goRoute}/>
+
       {/* 거래처 — 새로 만든 곳·이어 붙인 곳. 오타로 생긴 거래처는 여기서 바로 눈에 띈다 */}
       <div className="card card-pad col gap-12">
         <div className="section-title">거래처</div>
@@ -1450,6 +1453,10 @@ export const ExcelScreen = ({ goRoute }) => {
   const toggleDup = (idx) => setDupOpen(s => { const n = new Set(s); n.has(idx) ? n.delete(idx) : n.add(idx); return n })
   const autoOut = useRef(new Set())
   const setFix = (idx, k, v) => setFixes(f => ({ ...f, [idx]: { ...(f[idx] || {}), [k]: v } }))
+  /* 거래처 이름 바꿔 읽기 — { 엑셀에 적힌 이름: 이어 붙일 기존 거래처 이름 }.
+     '새로 만들 거래처'에 이름이 **비슷한** 기존 거래처가 있으면 사람이 [그 거래처로]를 눌러 여기 담는다.
+     짐작해서 잇지 않는다 — 다른 회사를 잘못 이으면 남의 거래처에 돈이 붙는다(lib/normalize.js 주석). */
+  const [vendorAlias, setVendorAlias] = useState({})
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
   // 올린 파일이 세금계산서 목록으로 보이나 — 맞으면 다른 자리를 알려 준다(막지는 않는다)
@@ -1500,7 +1507,7 @@ export const ExcelScreen = ({ goRoute }) => {
       setRawRows(rows)
       setMapping(headers.map(h => ({ excelCol: h, target: guessTarget(h) })))
       setExcluded(new Set())
-      setFixes({})
+      setFixes({}); setVendorAlias({})
       setMapOpen(null)
       setDupHits({}); autoOut.current = new Set()
       setTaxLike(looksLikeTaxInvoice(headers))
@@ -1508,7 +1515,7 @@ export const ExcelScreen = ({ goRoute }) => {
     setBusy(false)
   }
 
-  const reset = () => { setFile(null); setRawRows([]); setMapping([]); setExcluded(new Set()); setFixes({}); setDupHits({}); autoOut.current = new Set(); setResult(null); setTaxLike(false) }
+  const reset = () => { setFile(null); setRawRows([]); setMapping([]); setExcluded(new Set()); setFixes({}); setVendorAlias({}); setDupHits({}); autoOut.current = new Set(); setResult(null); setTaxLike(false) }
   const colFor = (t) => mapping.find(m => m.target === t)?.excelCol
   /* 칸 맞추기에서 사람이 볼 것 — 양식대로 올리면 다 저절로 맞아 **할 일이 없다**. 그때는 한 줄로 접는다(2026-09-30 사용자: "너무 길다").
      할 일: 꼭 필요한 항목(날짜·금액)이 빠졌거나, 값이 든 칸을 못 알아봤거나, 두 칸이 같은 항목에 걸렸을 때 */
@@ -1587,7 +1594,7 @@ export const ExcelScreen = ({ goRoute }) => {
       idx, date, kind, amount, account_id, acctName, fixed: new Set(Object.keys(f)),
       rawDate: String(g("날짜") ?? '').trim(), rawKind: String(kCol != null ? (row[kCol] ?? '') : '').trim(),
       rawAmount: String(g("금액") ?? '').trim(),
-      vendor: String(g("거래처") || '').trim(),
+      vendor: (() => { const v = String(g("거래처") || '').trim(); return vendorAlias[v] || v })(),
       contract: String(g("주문명") || '').trim(),
       category,
       account_code: code || '',
@@ -1648,6 +1655,8 @@ export const ExcelScreen = ({ goRoute }) => {
       if (k) norm.set(k, [...(norm.get(k) || []), v.name])
     }
     const created = new Set(), linked = new Map(), unclear = new Set()
+    // 사람이 [그 거래처로]로 이은 것은 따로 보여 준다(되돌릴 수 있게)
+    const aliased = Object.entries(vendorAlias)
     for (const r of okRows) {
       const n = r.vendor
       if (!n || exact.get(n) === 1) continue
@@ -1657,8 +1666,14 @@ export const ExcelScreen = ({ goRoute }) => {
       else if (hits.length > 1) unclear.add(n)
       else created.add(n)
     }
-    return { created: [...created], linked: [...linked], unclear: [...unclear] }
-  }, [okRows, vendorsAll])
+    /* 새로 만들 이름마다 **비슷한** 기존 거래처를 붙여 보낸다 — '복지회관'이 '복지관' 옆에 새로 생겨
+       같은 입금이 두 줄 선 적이 있다(운영 fowin). 고르는 건 사람이다 */
+    const createdWithSimilar = [...created].map(n => ({
+      name: n,
+      similar: vendorsAll.filter(v => String(v.name || '').trim() !== n && isSimilarVendorName(v.name, n)).map(v => v.name).slice(0, 2),
+    }))
+    return { created: createdWithSimilar, linked: [...linked], unclear: [...unclear], aliased }
+  }, [okRows, vendorsAll, vendorAlias])
   /* 표에 그릴 행 — 앞 100행 + **그 뒤에 있는 오류 행 전부**.
      여태 앞 100행만 그려서, 300행짜리 파일의 250번째 오류는 "오류 3건"이라고
      세어 놓고 정작 어느 행인지 볼 수가 없었다(고치려면 엑셀을 따로 열어야 했다). */
@@ -1982,15 +1997,25 @@ export const ExcelScreen = ({ goRoute }) => {
                 </div>
               )}
               {/* 거래처 — 새로 만들 곳과 이어 붙일 곳을 등록 전에(오타는 여기서 눈으로 잡는다) */}
-              {(vendorPlan.created.length > 0 || vendorPlan.linked.length > 0 || vendorPlan.unclear.length > 0) && (
+              {(vendorPlan.created.length > 0 || vendorPlan.linked.length > 0 || vendorPlan.unclear.length > 0 || vendorPlan.aliased.length > 0) && (
                 <div className="col gap-6" style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", background: "var(--surface-2)" }}>
                   {vendorPlan.created.length > 0 && (
                     <div className="text-sm">
                       <span className="fw-700">신규 등록 거래처 {vendorPlan.created.length}곳</span>
                       <span className="text-muted2" style={{ marginLeft: 6 }}>오타 여부를 확인해 주세요</span>
                       <div className="row gap-6" style={{ flexWrap: "wrap", marginTop: 6 }}>
-                        {vendorPlan.created.map(n => <span key={n} className="badge outline">{n}</span>)}
+                        {vendorPlan.created.filter(c => !c.similar.length).map(c => <span key={c.name} className="badge outline">{c.name}</span>)}
                       </div>
+                      {/* 이름이 비슷한 기존 거래처가 있는 것 — 같은 곳이면 이어 붙인다 */}
+                      {vendorPlan.created.filter(c => c.similar.length).map(c => (
+                        <div key={c.name} className="row gap-6" style={{ alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
+                          <span className="badge outline">{c.name}</span>
+                          <span className="text-xs text-warn">이름이 비슷한 거래처: {c.similar[0]}</span>
+                          <button type="button" className="btn sm" onClick={() => setVendorAlias(a => ({ ...a, [c.name]: c.similar[0] }))}>
+                            기존 거래처로 연결
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   )}
                   {vendorPlan.linked.length > 0 && (
@@ -1999,6 +2024,19 @@ export const ExcelScreen = ({ goRoute }) => {
                       <span className="text-muted2" style={{ marginLeft: 6 }}>법인 표기·띄어쓰기 차이</span>
                       <div className="row gap-6" style={{ flexWrap: "wrap", marginTop: 6 }}>
                         {vendorPlan.linked.map(([from, to]) => <span key={from} className="badge outline">{from} → {to}</span>)}
+                      </div>
+                    </div>
+                  )}
+                  {vendorPlan.aliased.length > 0 && (
+                    <div className="text-sm">
+                      <span className="fw-700">직접 연결 {vendorPlan.aliased.length}곳</span>
+                      <div className="row gap-6" style={{ flexWrap: "wrap", marginTop: 6 }}>
+                        {vendorPlan.aliased.map(([from, to]) => (
+                          <span key={from} className="row gap-4" style={{ alignItems: "center" }}>
+                            <span className="badge outline">{from} → {to}</span>
+                            <button type="button" className="btn ghost sm" onClick={() => setVendorAlias(a => { const n = { ...a }; delete n[from]; return n })}>되돌리기</button>
+                          </span>
+                        ))}
                       </div>
                     </div>
                   )}
@@ -2059,7 +2097,7 @@ export const ExcelScreen = ({ goRoute }) => {
                         <Combobox portal value={r.category} allowAdd={false} placeholder="비목 선택"
                           onChange={v => setFix(r.idx, 'category', v)}
                           options={cats.filter(c => String(c.id || '').startsWith(r.kind === 'income' ? 'INC-' : 'EXP-'))
-                            .map(c => ({ value: c.name, label: c.name, sub: c.group_name || '' }))}/>
+                            .map(categoryOption)}/>
                       </div>
                     )}
                     {r.errs.includes("계정과목") && (
@@ -2089,8 +2127,9 @@ export const ExcelScreen = ({ goRoute }) => {
                     render: r => <><span className="num text-sm">{r.date || <span className="text-neg">{r.rawDate || '(비어 있음)'}</span>}</span>{r.fixed.has('date') && <Sub>수정됨</Sub>}</> },
                   { key: 'vendor', header: '거래처', sortable: true,
                     render: r => <span className="fw-600">{r.vendor || "—"}</span> },
-                  { key: 'contract', header: '주문', sortable: true,
-                    render: r => <span className="text-muted text-sm">{r.contract || "—"}</span> },
+                  /* 계약 — 거래내역과 같은 말. MES 회사(동진)는 계약 연결을 안 써서 안 세운다 */
+                  ...(ordersFromMes ? [] : [{ key: 'contract', header: '계약', sortable: true,
+                    render: r => <span className="text-muted text-sm">{r.contract || "—"}</span> }]),
                   { key: 'kind', header: '구분', sortable: true,
                     render: r => (r.kind
                       ? <><span className="badge outline">{r.kind === "income" ? "입금" : "지출"}</span>{r.fixed.has('kind') && <Sub>수정됨</Sub>}</>
