@@ -149,7 +149,9 @@ export const AccountField = ({ kind = 'bank', accounts = [], allAccounts, value,
             : null}
         </div>
       )}
-      <div className="acct-field-cells">
+      {/* 고르기 전엔 칸을 안 그린다 — '—' 세 칸은 아무 말도 안 하면서 폼 높이만 차지했다
+          (2026-10-02 카드 대금 팝업: "왜 이렇게 답답하지"). 고른 뒤 이름·은행·번호로 확인하는 게 칸의 일이다 */}
+      {(adding || sel) && <div className="acct-field-cells">
         {adding ? <>
           {input(w.name, 'name', w.ph[0])}
           {input(w.org, 'bank', w.ph[1])}
@@ -159,7 +161,7 @@ export const AccountField = ({ kind = 'bank', accounts = [], allAccounts, value,
           {cell(w.org, sel?.bankName || sel?.bank)}
           {cell(w.no, sel?.number, true)}
         </>}
-      </div>
+      </div>}
       {adding && (
         <>
           {/* 번호가 같으면 이미 있는 것 — 만들지 말고 그걸 고르게 한다 */}

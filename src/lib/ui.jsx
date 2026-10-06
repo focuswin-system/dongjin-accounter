@@ -492,6 +492,8 @@ export const Drawer = ({ open, onClose, width, size, height, label, children, co
   const dirtyRef = useRef(false);
   useEffect(() => { if (open) dirtyRef.current = false; }, [open]);
   const markDirty = (e) => {
+    // data-view = 보는 것만 바꾸는 칩(카드 대금 회차 칩 등) — 고른 값이 저장되지 않으니 손댐이 아니다
+    if (e.target.closest?.('[data-view]')) return;
     if (e.type === "click" && !e.target.closest?.('.chip, .seg-btn, [role="option"], input[type="checkbox"], input[type="radio"]')) return;
     dirtyRef.current = true;
   };
@@ -1079,7 +1081,9 @@ export const Combobox = ({ value, onChange, options, frequent = [], placeholder,
             onKeyDown={onKeyDown} placeholder={display || placeholder || "검색"}
             style={{ flex: 1, border: 0, outline: 0, background: "transparent", fontFamily: "inherit", fontSize: 13.5, color: "var(--ink)", padding: 0 }}/>
         ) : (
-          <span style={{ flex: 1, color: display ? "var(--ink)" : "var(--muted-2)" }}>
+          /* 한 줄 — 긴 값은 '…'(표·그리드와 같은 규칙). 칸이 좁으면 '공급자 사업자등록번호'가 두 줄로 접혀 칸 높이가 들쭉날쭉했다 */
+          <span title={display || undefined} style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            color: display ? "var(--ink)" : "var(--muted-2)" }}>
             {display || placeholder || "선택하세요"}
           </span>
         )}

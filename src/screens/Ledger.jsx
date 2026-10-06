@@ -5,6 +5,8 @@ import { SummaryCard, SummaryRow } from '../lib/components/Kpi'
 import { DataTable } from '../lib/components/DataTable'
 import { TableToolbar } from '../lib/components/TableToolbar'
 import { VoucherView } from '../lib/components/VoucherView'
+import { DocAttachButton } from '../lib/components/DocAttachments'
+import { PrintWizardButton, voucherForm, resolutionForm, docFiles } from '../lib/components/PrintWizard'
 import { VoucherSlip } from '../lib/components/VoucherSlip'
 import { AttachmentPanel } from '../lib/components/AttachmentPanel'
 import { TransactionForm } from './Form'
@@ -363,7 +365,7 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, refre
              엑셀 둘은 조회의 연장이라 primary 가 아니다. */
           actions={<>
             <button className="btn excel" onClick={openExcel}><Icon.Excel/> <span className="btn-label-hide">엑셀 업로드</span></button>
-            <button className="btn" onClick={exportXlsx}><Icon.Excel/> <span className="btn-label-hide">엑셀 내보내기</span></button>
+            <button className="btn" onClick={exportXlsx}><Icon.Excel/> <span className="btn-label-hide">엑셀 다운로드</span></button>
             {/* 같은 돈을 **차변·대변으로** 보고 싶을 때. 전표 렌더러를 여기 또 만들지 않는다 —
                 복합 거래(txn_splits)를 펼치는 곳이 둘이 되면 곧 두 모양으로 갈린다.
                 보고 있던 기간을 들고 간다(비목·검색은 안 들고 간다 — 전표 목록의 축이 아니다). */}
@@ -558,9 +560,12 @@ export const LedgerScreen = ({ initialFilter = "all", openEdit, openExcel, refre
           else setFilter('all');
         }}/>
       <VoucherView open={!!jView} voucher={jView?.voucher} onClose={() => setJView(null)}
-        extra={jView && canJournal && (
-          <button className="btn" style={{ color: 'var(--neg-ink)' }} onClick={removeJournal}>삭제</button>
-        )}/>
+        extra={jView && <>
+          <DocAttachButton ownerType="journal_voucher" ownerId={jView.jvId} title={`대체전표 ${jView.docNo || ''} 증빙`} readOnly={!canJournal}/>
+          <PrintWizardButton title={`대체전표 ${jView.docNo || ''} 인쇄`} label="인쇄 편집" layoutKey={{ ownerType: 'journal_voucher', ownerId: jView.jvId }} forms={[voucherForm({ voucher: jView.voucher, label: '대체전표' })]}
+            getFiles={docFiles('journal_voucher', jView.jvId)}/>
+          {canJournal && <button className="btn" style={{ color: 'var(--neg-ink)' }} onClick={removeJournal}>삭제</button>}
+        </>}/>
     </>
   );
 };
@@ -828,6 +833,11 @@ const TransactionDetailDrawer = ({ txn, onClose, toast, confirm, openEdit, onAct
             }
           }}><Icon.Trash size={14}/> 삭제</button>
           <div className="ml-auto row gap-8">
+            {/* 전표 + 걸린 결의서 + 증빙 한 묶음(설계 popup-attachments-print §5) */}
+            {ov && <PrintWizardButton title={`${t.vendor || '거래'} 인쇄`} label="인쇄 편집" layoutKey={{ ownerType: 'txn', ownerId: t.id }}
+              forms={[...(ov.voucher ? [voucherForm({ voucher: ov.voucher })] : []),
+                ...(ov.resolutions || []).map(r => resolutionForm({ id: r.id, docNo: r.doc_no }))]}
+              getFiles={() => Promise.resolve(ov.files || [])}/>}
             <button className="btn" onClick={() => { setTab("info"); setEditing(true); }}><Icon.Pencil size={14}/> 편집</button>
             {t.kind === "income" && ["입금 예정", "일부 입금", "장기 미수"].includes(t.status) && (
               <button className="btn" onClick={async () => {

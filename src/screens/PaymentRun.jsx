@@ -82,7 +82,7 @@ export const PaymentRunScreen = ({ go }) => {
         sub="이번 달 매입처에 보낼 대금을 한 장으로 모읍니다. 은행 이체 명단으로 그대로 쓰세요."
         actions={<>
           <PrintEditButton on={pe.on} toggle={pe.toggle} count={pe.count}/>
-          <button className="btn" onClick={exportXlsx}><Icon.Excel/> <span className="btn-label-hide">엑셀 내보내기</span></button>
+          <button className="btn" onClick={exportXlsx}><Icon.Excel/> <span className="btn-label-hide">엑셀 다운로드</span></button>
           <button className="btn primary" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
         </>}
       />

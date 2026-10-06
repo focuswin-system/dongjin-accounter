@@ -2506,8 +2506,8 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
               {/* '홈택스 업로드'라고만 적어 두니 무엇을 올리는 자리인지 안 읽혔다 —
                   세금계산서를 거래내역 엑셀 업로드에 올리는 일이 실제로 있었다.
                   홈택스는 받아 오는 곳이고, 올리는 것은 계산서다. */}
-              <button className="btn" onClick={() => setImporting(true)} title="홈택스에서 내려받은 전자세금계산서 엑셀">
-                <Icon.Excel size={14}/> 계산서 업로드
+              <button className="btn excel" onClick={() => setImporting(true)} title="세금계산서 여러 장을 양식에 맞춰 한 번에 등록">
+                <Icon.Excel/> 엑셀 업로드
               </button>
               {/* 어음 탭에서는 '어음 등록'이 여기 선다 — 등록 버튼은 한자리에 모아 둔다.
                   필터 줄에 끼워 넣었더니 상태 칩과 나란히 붙어 칩처럼 보였다. */}

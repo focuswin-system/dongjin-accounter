@@ -66,7 +66,7 @@ export const VoucherBookScreen = ({ initialRange = null, goRoute }) => {
     setBusy(true)
     const res = await api.downloadVoucherBookXlsx({ from, to, kind })
     setBusy(false)
-    if (!res.ok) toast.push(res.error || '내려받기에 실패했어요', { tone: 'warn' })
+    if (!res.ok) toast.push(res.error || '다운로드에 실패했어요', { tone: 'warn' })
   }
 
   const chosen = useMemo(() => rows.filter(v => picked.has(keyOf(v))), [rows, picked])
@@ -117,7 +117,7 @@ export const VoucherBookScreen = ({ initialRange = null, goRoute }) => {
             <Icon.Print size={14}/> 선택 인쇄{chosen.length ? ` (${chosen.length})` : ''}
           </button>
           <button className="btn primary" onClick={download} disabled={busy || rows.length === 0}>
-            <Icon.Excel size={14}/> 엑셀 내보내기
+            <Icon.Excel size={14}/> 엑셀 다운로드
           </button>
         </div>}/>
 

@@ -3,6 +3,8 @@ const { randomUUID } = require('crypto')
 const { kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
 const { withTx, httpError } = require('../lib/withTx')
+const { attachRoutes, removeAllFor, removeFilesIfUnused } = require('../lib/attachments')
+const { printLayoutRoutes, removeLayoutFor } = require('../lib/printLayouts')
 const { pageParams, buildWhere, inClause, docDateExpr, approvalStatusSql, approvalCounts } = require('../lib/pagedList')
 const {
   approveDoc, execCandidates, executeDoc, invoiceState, linkInvoiceDoc, loadDoc, openInvoicesFor, resolutionOfReq, sourceTxnsOfReq, unapproveDoc, undoDoc,
@@ -228,6 +230,7 @@ router.put('/:id', async (req, res, next) => {
 router.delete('/:id', async (req, res, next) => {
   try {
     const cascade = req.query.cascade === '1' || req.query.cascade === 'true'
+    let files = []
     const out = await withTx(req.db, async (conn) => {
       const [[cur]] = await conn.execute('SELECT id, status, txn_id FROM purchase_reqs WHERE id = ? FOR UPDATE', [req.params.id])
       if (!cur) throw httpError(404, '구매품의서를 찾을 수 없어요')
@@ -244,9 +247,12 @@ router.delete('/:id', async (req, res, next) => {
       await conn.execute('DELETE FROM purchase_req_txns WHERE req_id = ?', [req.params.id])
       await conn.execute('DELETE FROM purchase_req_items WHERE req_id = ?', [req.params.id])
       await conn.execute('DELETE FROM purchase_reqs WHERE id = ?', [req.params.id])
+      files = await removeAllFor(conn, 'purchase_req', req.params.id)   // 첨부 행 — 파일은 커밋 뒤에
+      await removeLayoutFor(conn, 'purchase_req', req.params.id)
       await approval.voidAll(conn, 'purchase_req', req.params.id)
       return { ok: true, keptTxn }
     })
+    await removeFilesIfUnused(req.db, files, req.user?.companyId)
     res.json(out)
   } catch (e) { next(e) }
 })
@@ -323,5 +329,10 @@ router.post('/:id/unprocess', async (req, res, next) => {
     res.json({ ok: true, keptTxn: out.keptTxn, restored: out.restored })
   } catch (e) { next(e) }
 })
+
+// 첨부(증빙) — 공용 표, 권한은 이 경로를 따른다
+attachRoutes(router, 'purchase_req')
+// 인쇄 배치(인쇄 양식 편집기)
+printLayoutRoutes(router, 'purchase_req')
 
 module.exports = router

@@ -69,7 +69,7 @@ export const AttachmentPanel = ({ files = [], onUpload, onRemove, canRemove = ()
             <div className="att-view-head">
               <span className="fw-600 truncate" style={{ minWidth: 0 }}>{cur.name}</span>
               <div className="row gap-4 ml-auto" style={{ flexShrink: 0 }}>
-                <a className="btn ghost sm" href={cur.url} download={cur.name} title="내려받기"><Icon.Download size={14}/></a>
+                <a className="btn ghost sm" href={cur.url} download={cur.name} title="다운로드"><Icon.Download size={14}/></a>
                 {onRemove && canRemove(cur) && (
                   <button className="btn ghost sm" style={{ color: 'var(--neg-ink)' }} title="지우기"
                     onClick={() => onRemove(cur)}><Icon.Trash size={14}/></button>
@@ -96,7 +96,7 @@ const Preview = ({ file }) => {
   if (k === 'pdf') return <PdfPages url={file.url}/>
   return (
     <div className="att-view-empty text-sm text-muted">
-      이 형식은 미리 볼 수 없어요. 내려받아 열어 주세요.
+      이 형식은 미리 볼 수 없어요. 다운로드해 열어 주세요.
     </div>
   )
 }
@@ -126,21 +126,29 @@ export async function renderPdfPages(url, { scale = 1.5, maxPages = 30 } = {}) {
   if (!res.ok) throw new Error(`PDF 를 받지 못했어요 (${res.status})`)
   const doc = await pdfjs.getDocument({ data: await res.arrayBuffer() }).promise
   const out = []
-  const n = Math.min(doc.numPages, maxPages)
-  for (let i = 1; i <= n; i++) {
-    const page = await doc.getPage(i)
-    const vp = page.getViewport({ scale })
-    const c = document.createElement('canvas')
-    c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height)
-    await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise
-    const blob = await new Promise(r => c.toBlob(r, 'image/png'))
-    c.width = 0; c.height = 0
-    out.push({ src: URL.createObjectURL(blob), w: vp.width, h: vp.height })
-    page.cleanup()
+  // 중간에 실패하면 이미 만든 그림도 버린다 — 부르는 쪽은 실패만 받으니 해제할 길이 없다
+  try {
+    const n = Math.min(doc.numPages, maxPages)
+    for (let i = 1; i <= n; i++) {
+      const page = await doc.getPage(i)
+      const vp = page.getViewport({ scale })
+      const c = document.createElement('canvas')
+      c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height)
+      await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise
+      const blob = await new Promise(r => c.toBlob(r, 'image/png'))
+      c.width = 0; c.height = 0
+      // 너무 큰 쪽(도면 등)은 브라우저 캔버스 한도를 넘어 blob 이 비어 온다
+      if (!blob) throw new Error('쪽이 너무 커서 그리지 못했어요')
+      out.push({ src: URL.createObjectURL(blob), w: vp.width, h: vp.height })
+      page.cleanup()
+    }
+    return { pages: out, total: doc.numPages }
+  } catch (e) {
+    out.forEach(pg => URL.revokeObjectURL(pg.src))
+    throw e
+  } finally {
+    doc.destroy()
   }
-  const total = doc.numPages
-  doc.destroy()
-  return { pages: out, total }
 }
 
 const PdfPages = ({ url }) => {

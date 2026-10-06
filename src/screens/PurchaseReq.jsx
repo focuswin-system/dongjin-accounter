@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { DocAttachButton } from '../lib/components/DocAttachments'
+import { PrintWizardButton, domForm, docFiles } from '../lib/components/PrintWizard'
 import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, DateInput, StatusBadge, useBusy } from '../lib/ui'
 import { api } from '../lib/api'
 import { addVendorAsking } from '../lib/vendorAsk'
@@ -279,7 +281,11 @@ const PurchaseReqPreview = ({ doc, company, vendors, onVendorAdd, isNew, onSaved
             {!handed && !inApproval && <button className="btn ghost" onClick={remove} title="삭제"><Icon.Trash size={14}/></button>}
             {!handed && !inApproval && status !== '완료' && <button className="btn" onClick={startEdit}><Icon.Pencil size={14}/> 편집</button>}
             {onCopy && <button className="btn" onClick={onCopy} title="이 품의서를 본떠 새로 써요"><Icon.Copy size={14}/> 복사</button>}
+            {!isNew && <DocAttachButton ownerType="purchase_req" ownerId={doc.id} title={`구매품의서 ${doc.doc_no} 증빙`}/>}
             <button className="btn" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
+            {!isNew && <PrintWizardButton title={`구매품의서 ${doc.doc_no} 인쇄`} label="인쇄 편집" layoutKey={{ ownerType: 'purchase_req', ownerId: doc.id }}
+              forms={[domForm({ key: 'purchase_req', label: `구매품의서 ${doc.doc_no}` })]}
+              getFiles={docFiles('purchase_req', doc.id)}/>}
           </>
         )}
       </DocToolbar>

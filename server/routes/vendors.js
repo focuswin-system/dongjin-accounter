@@ -280,14 +280,17 @@ router.post('/import/commit', async (req, res, next) => {
     let inserted = 0, updated = 0
     const createdNames = []
     const touched = []
-    for (const it of items) {
+    /* 줄마다 결과 — 건수만 주면 '어느 줄이 왜 빠졌나'를 사람이 엑셀과 대조해야 한다(거래내역 업로드와 같은 결과 화면).
+       results[k] 는 items[k] 의 결과: { status, vendor?: 'created'|'existing', no? } */
+    const results = items.map(() => ({ status: 'skipped' }))
+    for (const [k, it] of items.entries()) {
       const name = String(it.name || '').trim()
-      if (!name) continue
+      if (!name) { results[k] = { status: 'noName' }; continue }
       const gubu = ['A', 'B', 'C', 'E'].includes(it.gubu) ? it.gubu : 'A'
       if (it.action === 'update' && it.id) {
         const [rows] = await conn.execute('SELECT * FROM vendors WHERE id = ?', [it.id])
         const cur = rows[0]
-        if (!cur) continue
+        if (!cur) { results[k] = { status: 'missing' }; continue }
         const merged = {}
         for (const k of VENDOR_FIELDS) {
           const incoming = k === 'gubu' ? gubu : String(it[k] ?? '').trim()
@@ -298,7 +301,7 @@ router.post('/import/commit', async (req, res, next) => {
           [merged.name, merged.biz_no, merged.ceo, merged.address, merged.phone, merged.gubu, merged.type, merged.contact, merged.fax, merged.email,
            merged.bank_name, merged.bank_account, merged.account_holder, it.id]
         )
-        updated++; touched.push(it.id)
+        updated++; touched.push(it.id); results[k] = { status: 'updated' }
       } else {
         const id = randomUUID()
         await conn.execute(
@@ -308,7 +311,7 @@ router.post('/import/commit', async (req, res, next) => {
            String(it.contact || '').trim(), String(it.fax || '').trim(), String(it.email || '').trim(),
            String(it.bank_name || '').trim(), String(it.bank_account || '').trim(), String(it.account_holder || '').trim()]
         )
-        inserted++; createdNames.push(name); touched.push(id)
+        inserted++; createdNames.push(name); touched.push(id); results[k] = { status: 'inserted' }
       }
     }
     await conn.commit()
@@ -316,7 +319,7 @@ router.post('/import/commit', async (req, res, next) => {
        보고 한 번 더 올려 중복이 생긴다. 들어간 건수와 함께 경고로 알린다. */
     let warning = null
     try { await afterVendorWrite(req, touched) } catch (e) { warning = e.message }
-    res.json({ inserted, updated, createdNames, warning })
+    res.json({ inserted, updated, createdNames, warning, results })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })

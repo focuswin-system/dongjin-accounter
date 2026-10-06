@@ -14,7 +14,7 @@ const PNL_ONLY = (() => {
 })()
 const { rollbackQuietly } = require('../lib/tx')
 const { dateOrNull } = require('../lib/period')
-const { normalizeStatus, ledgerError, defaultSettledStatus, amountError, isSettled } = require('../lib/ledger')
+const { normalizeStatus, ledgerError, defaultSettledStatus, amountError, isSettled, SETTLED_INCOME, SETTLED_EXPENSE } = require('../lib/ledger')
 const { splitJoin, splitCategory, splitAmount, splitTxnCount } = require('../lib/categoryAxis')
 const CAT_COL = splitCategory()
 const CAT_AMT = splitAmount()
@@ -31,8 +31,10 @@ const { canAny } = require('../platform/userPerms')
 const { listVouchers, toRows, COLUMNS: VOUCHER_COLUMNS, GUIDE: VOUCHER_GUIDE } = require('../lib/voucherBook')
 const { newBook, sheet, templateSheet, guideSheet, sendBook } = require('../lib/xlsxBook')
 
+const { canSeeBalance, canSeePersonal } = require('../lib/balanceAccess')
 const router = Router()
 const { accountAcctCode } = require('../lib/acctCode')
+const { cardBills } = require('../lib/cardBill')
 
 /* 상대 계정과목에 자금 계정(현금·당좌·보통예금)이 오면 분개가 성립하지 않는다.
  *
@@ -420,6 +422,18 @@ router.get('/vouchers', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+/* 카드 대금 — 신용카드마다 이번 결제 예정·밀린 대금·미결제 합계(lib/cardBill.js).
+   ⚠ '/:id' 보다 위에 있어야 한다 — 아래면 'card-bills'가 거래 id 로 잡힌다. */
+router.get('/card-bills', async (req, res, next) => {
+  try {
+    /* 미결제는 곧 −카드 잔액이다. 대표 **개인**카드는 개인 계좌를 볼 수 있는 사람에게만(lib/balanceAccess
+       canSeePersonal — 검토: 이 경로가 개인카드 잔액의 뒷문이었다). 회사 카드의 미결제는 카드 대금 화면의
+       본래 내용이라 잔액 열람 권한(canSeeBalance)으로는 가리지 않는다 — 이 화면 권한이 곧 그 권한이다 */
+    const bills = await cardBills(req.db, kstToday())
+    res.json(canSeePersonal(req) ? bills : bills.filter(b => b.owner !== 'personal'))
+  } catch (e) { next(e) }
+})
+
 /* 계좌 간 이체 내역 — 서식 있는 엑셀(exceljs). CSV 로 대충 내지 않는다(xlsxBook 규칙).
    ⚠ '/:id' 보다 위에 있어야 한다 — 아래면 'transfers'가 id 로 잡힌다. */
 router.get('/transfers.xlsx', async (req, res, next) => {
@@ -427,6 +441,8 @@ router.get('/transfers.xlsx', async (req, res, next) => {
     const { from, to } = req.query
     const nums = req.query.nums === 'full' || req.query.nums === 'mask' ? req.query.nums : 'hide'
     if (!from || !to) return res.status(400).json({ error: '기간을 지정해주세요' })
+    // 화면의 검색어(통장·적요)도 같이 — 화면 6건에 엑셀 20건이면 무엇을 받은 건지 모른다(검토)
+    const q = String(req.query.q || '').trim()
 
     /* 이체는 두 줄(지출·입금)이 같은 transfer_id 로 묶인다. 보내는 쪽(지출)만 세운다 —
        둘 다 세우면 한 이체가 두 줄로 보인다. 카드가 낀 줄은 카드 대금 소관이라 뺀다. */
@@ -440,7 +456,8 @@ router.get('/transfers.xlsx', async (req, res, next) => {
        WHERE t.transfer_id IS NOT NULL AND t.kind = 'expense'
          AND t.date >= ? AND t.date <= ?
          AND fa.kind <> 'card' AND (ta.kind IS NULL OR ta.kind <> 'card')
-       ORDER BY t.date DESC`, [from, to])
+         ${q ? 'AND (fa.name LIKE ? OR ta.name LIKE ? OR t.memo LIKE ?)' : ''}
+       ORDER BY t.date DESC`, q ? [from, to, `%${q}%`, `%${q}%`, `%${q}%`] : [from, to])
 
     // 뒤 4자리만 남기고 가린다(구분자는 유지) — 화면 마스킹과 같은 규칙
     const maskNo = (s) => {
@@ -570,6 +587,50 @@ async function voucherOfTxn(db, id) {
   if (sp.length) t.splits = sp
   return withNames(db, transactionVoucher(t), { account_name: t.account_name })
 }
+
+/* 이체 상세 — 두 통장의 **이체 전·후 잔액**과 전표(2026-10-02 사용자: "이체 전 잔액이나 이체 후 잔액 같은 잔액 변동").
+ *
+ * 그 시점의 잔액 = 기초 + (그 날짜 **앞**의 거래) + (**같은 날** 이 이체보다 먼저 등록된 거래)
+ *   날짜에 시각이 없어 같은 날의 앞뒤는 등록 순서(created_at, 같으면 id)로 가른다 — 통장 화면의 잔액 계산과 같은 재료다.
+ *   잔액 조정은 날짜만 있어 그 날짜 **앞**의 것만 넣는다.
+ * 완료 상태만 센다(lib/ledger SETTLED_*) — 계좌 잔액(routes/accounts.js calcBalance)과 같은 규칙.
+ * 잔액은 계좌 목록과 **같은 자격**으로 가린다(lib/balanceAccess.js) — 여기서만 보이면 뒷문이 된다. */
+router.get('/:id/transfer-detail', async (req, res, next) => {
+  try {
+    const [[t]] = await req.db.execute(
+      `SELECT p.id, p.transfer_id, p.amount, p.date, p.created_at, p.account_id AS from_id, q.account_id AS to_id
+         FROM transactions t
+         JOIN transactions p ON p.transfer_id = t.transfer_id AND p.kind = 'expense'
+         JOIN transactions q ON q.transfer_id = t.transfer_id AND q.kind = 'income'
+        WHERE t.id = ? AND t.transfer_id IS NOT NULL LIMIT 1`, [req.params.id])
+    if (!t) return res.status(404).json({ error: '이체를 찾을 수 없어요' })
+    const voucher = await voucherOfTxn(req.db, t.id)
+    const seeAll = canSeeBalance(req), seePersonal = canSeePersonal(req)
+    const balanceBefore = async (accountId) => {
+      const [[r]] = await req.db.execute(`
+        SELECT a.initial_balance, a.owner, a.name,
+          COALESCE((SELECT SUM(CASE WHEN x.kind = 'income' THEN x.amount ELSE -x.amount END) FROM transactions x
+                     WHERE x.account_id = a.id
+                       AND ((x.kind = 'income' AND x.status = ?) OR (x.kind = 'expense' AND x.status = ?))
+                       -- ⚠ NULL 은 '<>' 에 안 걸린다 — 일반 거래(transfer_id 없음)가 통째로 빠졌었다
+                       AND (x.transfer_id IS NULL OR x.transfer_id <> ?)
+                       AND (x.date < ? OR (x.date = ? AND (x.created_at < ? OR (x.created_at = ? AND x.id < ?))))), 0) AS moved,
+          /* 잔액 조정도 거래처럼 — 같은 날이면 이체보다 먼저 등록된 것만 '이체 전'에(검토: 당일 조정이 빠졌다) */
+          COALESCE((SELECT SUM(amount) FROM account_adjustments WHERE account_id = a.id
+                     AND (date < ? OR (date = ? AND created_at <= ?))), 0) AS adj
+          FROM accounts a WHERE a.id = ?`,
+        [SETTLED_INCOME, SETTLED_EXPENSE, t.transfer_id, t.date, t.date, t.created_at, t.created_at, t.id, t.date, t.date, t.created_at, accountId])
+      if (!r) return null
+      if (!seeAll || (r.owner === 'personal' && !seePersonal)) return { name: r.name, hidden: true }
+      return { name: r.name, before: Number(r.initial_balance) + Number(r.moved) + Number(r.adj) }
+    }
+    const [from, to] = await Promise.all([balanceBefore(t.from_id), balanceBefore(t.to_id)])
+    const amt = Number(t.amount)
+    const side = (b, id, delta) => (b ? { id, name: b.name, hidden: !!b.hidden,
+      before: b.hidden ? null : b.before, delta, after: b.hidden ? null : b.before + delta } : null)
+    res.json({ voucher, from: side(from, t.from_id, -amt), to: side(to, t.to_id, amt) })
+  } catch (e) { next(e) }
+})
 
 router.get('/:id/voucher', async (req, res, next) => {
   try {
@@ -878,6 +939,13 @@ router.put('/:id', async (req, res, next) => {
         })
       }
     }
+    /* 퇴직금 [지급]으로 만든 거래 — 금액·상태를 여기서 바꾸면 미지급 퇴직금의 지급액과 어긋난다
+       (3,000,000 → 1,000,000 으로 고치면 통장은 100만 나갔는데 퇴직금은 300만 지급, 그 뒤 지우면 200만이 '지급됨'으로 영구히 남는다).
+       지우면 지급액이 되돌아가므로(DELETE) — 지운 뒤 다시 지급하게 한다(2026-10-02 검토) */
+    {
+      const [[sv]] = await req.db.execute('SELECT unpaid_labor_id FROM transactions WHERE id = ? AND unpaid_labor_id IS NOT NULL', [req.params.id])
+      if (sv) return res.status(409).json({ error: '퇴직금 지급 거래는 여기서 고칠 수 없어요. 이 거래를 지우면 퇴직금 지급액이 되돌아가요 — 지운 뒤 급여·임금 › 미지급 퇴직금에서 다시 지급해주세요.' })
+    }
     for (const [table, col, label, where, cond] of OWNED) {
       const [[hit]] = await req.db.execute(
         `SELECT 1 AS x FROM ${table} WHERE ${col} = ?${cond ? ' AND ' + cond : ''} LIMIT 1`, [req.params.id])
@@ -1024,6 +1092,13 @@ router.patch('/:id/status', async (req, res, next) => {
     if (!status) return res.status(400).json({ error: 'status 필수' })
     const [[cur]] = await req.db.execute('SELECT kind, account_id, date, method FROM transactions WHERE id = ?', [req.params.id])
     if (!cur) return res.status(404).json({ error: 'Not found' })
+    /* 퇴직금 [지급]으로 만든 거래 — 금액·상태를 여기서 바꾸면 미지급 퇴직금의 지급액과 어긋난다
+       (3,000,000 → 1,000,000 으로 고치면 통장은 100만 나갔는데 퇴직금은 300만 지급, 그 뒤 지우면 200만이 '지급됨'으로 영구히 남는다).
+       지우면 지급액이 되돌아가므로(DELETE) — 지운 뒤 다시 지급하게 한다(2026-10-02 검토) */
+    {
+      const [[sv]] = await req.db.execute('SELECT unpaid_labor_id FROM transactions WHERE id = ? AND unpaid_labor_id IS NOT NULL', [req.params.id])
+      if (sv) return res.status(409).json({ error: '퇴직금 지급 거래는 여기서 고칠 수 없어요. 이 거래를 지우면 퇴직금 지급액이 되돌아가요 — 지운 뒤 급여·임금 › 미지급 퇴직금에서 다시 지급해주세요.' })
+    }
     // 상태를 바꾸면 계좌 잔액이 움직인다('지급 대기'↔'지급완료'). 마감된 달이면 막는다 —
     // POST·PUT·DELETE는 모두 검사하는데 여기만 빠져 있어서, 거래내역의 '이체 실행' 버튼 하나로
     // 마감월 잔액이 사후에 바뀌었다(양방향 모두).
@@ -1211,6 +1286,12 @@ router.delete('/:id', async (req, res, next) => {
     await conn.execute('DELETE FROM purchase_req_txns WHERE txn_id = ?', [req.params.id])
     // 복합 전표 항목(자식)을 먼저 지운다 — FK 로 묶여 있어 안 지우면 거래 삭제가 막힌다
     await conn.execute('DELETE FROM txn_splits WHERE txn_id = ?', [req.params.id])
+    /* 미지급 퇴직금에서 [지급]으로 만든 거래면 그 건의 지급액을 되돌린다 — 안 하면 돈은 안 나갔는데
+       퇴직금은 '지급 완료'로 남아 자금 현황에서 사라진다 */
+    const [[sev]] = await conn.execute('SELECT unpaid_labor_id, amount FROM transactions WHERE id = ?', [req.params.id])
+    if (sev?.unpaid_labor_id) {
+      await conn.execute('UPDATE unpaid_labor SET paid_amount = GREATEST(0, paid_amount - ?) WHERE id = ?', [Number(sev.amount) || 0, sev.unpaid_labor_id])
+    }
     /* 반복거래에서 만든 거래면 지우는 것만으로 그 달이 다시 '안 만듦'이 된다(lib/repeat.js — 기억하는 값이 없다) */
     const [[cur]] = await conn.execute('SELECT transfer_id FROM transactions WHERE id = ?', [req.params.id])
     /* ⚠ 이체는 **짝과 함께** 지운다.
@@ -1218,11 +1299,16 @@ router.delete('/:id', async (req, res, next) => {
      * 나머지 한 줄이 짝 없이 남아 **돈이 사라지거나 생겨난다** — 통장에서는 나갔는데
      * 카드에는 들어온 기록만 남는 식이다. 잔액도 장부도 그때부터 틀린다.
      * 그래서 transfer_id 가 같은 줄을 통째로 지운다(자기 자신 포함). */
+    // 인쇄 배치(인쇄 양식 편집기) — 지워지는 줄 전부(이체면 짝 줄까지)
+    const [gone] = cur?.transfer_id
+      ? await conn.execute('SELECT id FROM transactions WHERE transfer_id = ?', [cur.transfer_id])
+      : [[{ id: req.params.id }]]
     if (cur?.transfer_id) {
       await conn.execute('DELETE FROM transactions WHERE transfer_id = ?', [cur.transfer_id])
     } else {
       await conn.execute('DELETE FROM transactions WHERE id = ?', [req.params.id])
     }
+    for (const g of gone) await require('../lib/printLayouts').removeLayoutFor(conn, 'txn', g.id)
     await conn.commit()
     res.json({ ok: true })
   } catch (e) {
@@ -1438,18 +1524,23 @@ router.post('/import/card', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {
     const items = Array.isArray(req.body.items) ? req.body.items : []
+    /* 카드는 **줄마다** 정한다(it.account_id) — 한 파일에 카드 여러 장(2026-10-02). account_id 는 줄에 카드가 없을 때의 기본값.
+       기본값이 없어도 줄마다 카드가 있으면 된다 */
     const accountId = req.body.account_id || null
-    if (!accountId) return res.status(400).json({ error: '어느 카드의 명세서인지 골라주세요' })
-    const [[acc]] = await conn.execute(
-      'SELECT id, kind, name, card_type FROM accounts WHERE id = ?', [accountId])
-    if (!acc) return res.status(400).json({ error: '카드를 찾을 수 없어요' })
+    const [cardRows] = await conn.execute("SELECT id, kind, name, card_type FROM accounts WHERE kind = 'card'")
+    const cardById = new Map(cardRows.map(c => [c.id, c]))
+    const [[acc]] = accountId ? await conn.execute(
+      'SELECT id, kind, name, card_type FROM accounts WHERE id = ?', [accountId]) : [[null]]
+    if (accountId && !acc) return res.status(400).json({ error: '카드를 찾을 수 없어요' })
     /* 카드가 아닌 계좌로 올리면 사용분이 통장에서 바로 빠진 것으로 잡혀, 실제 통장 잔액과 어긋난다. */
-    if (acc.kind !== 'card') {
+    if (acc && acc.kind !== 'card') {
       return res.status(400).json({ error: `'${acc.name}'은 카드가 아니에요. 카드 명세서는 카드로만 올릴 수 있습니다.` })
     }
     /* 체크카드는 **쓴 즉시 통장에서 빠진다** — 갚을 것이 없으므로 카드 사용분으로 쌓으면
        통장 잔액과 두 번 어긋난다. 화면은 이미 거르지만 서버도 본다(API 직접 호출). */
-    if (acc.card_type === 'check') {
+    /* 기본 카드가 체크카드여도 **그 카드를 쓰는 줄이 있을 때만** 막는다 — 줄마다 신용카드가 정해져 있으면
+       기본값은 안 쓰인다(검토: 일괄 400 이 났다). 줄 단위 체크카드는 아래에서 checkCard 로 건너뛴다 */
+    if (acc && acc.card_type === 'check' && items.some(it => !it.account_id)) {
       return res.status(400).json({ error: `'${acc.name}'은 체크카드예요. 쓴 즉시 통장에서 빠지므로 통장 거래로 올려주세요.` })
     }
     const createVendors = !!req.body.create_vendors
@@ -1458,9 +1549,10 @@ router.post('/import/card', async (req, res, next) => {
        ⚠ **이 카드 것만** 본다. 승인번호는 카드사·VAN 이 주는 짧은 숫자라 다른 카드끼리 겹칠 수
          있고, 전역으로 보면 멀쩡한 결제가 '중복'으로 조용히 사라진다. */
     const [known] = await conn.execute(
-      'SELECT approval_no FROM transactions WHERE account_id = ? AND approval_no IS NOT NULL AND approval_no <> ?',
-      [accountId, ''])
-    const seen = new Set(known.map(r => String(r.approval_no)))
+      `SELECT account_id, approval_no FROM transactions
+        WHERE account_id IN (SELECT id FROM accounts WHERE kind = 'card') AND approval_no IS NOT NULL AND approval_no <> ''`)
+    // 카드|승인번호 — 카드끼리는 섞지 않는다(위 주석)
+    const seen = new Set(known.map(r => `${r.account_id}|${r.approval_no}`))
 
     /* 비목의 과세·공제 설정 — **손으로 넣을 때와 같은 답이 나와야 한다.**
      * 카드사 이용내역에는 공급가·세액 열이 없는 경우가 흔한데, 그때 아무것도 안 주면
@@ -1502,6 +1594,10 @@ router.post('/import/card', async (req, res, next) => {
 
     /* 가맹점 → 거래처. 이름이 겹치면 **붙이지 않는다** — 엉뚱한 거래처에 붙은 경비는
        아무도 모른 채 그 거래처의 매입 통계를 틀리게 만든다(엑셀 임포트에서 겪은 그대로다). */
+    // 사용 직원 — 이름이 정확히 한 명과 맞을 때만 잇는다(동명이인이면 이름만 남긴다)
+    const [emps] = await conn.execute('SELECT id, name FROM employees')
+    const empByName = new Map()
+    for (const e of emps) { const n = String(e.name || '').trim(); if (n) empByName.set(n, empByName.has(n) ? null : e.id) }
     const [vs] = await conn.execute('SELECT id, name, biz_no FROM vendors')
     const digits = (s) => String(s || '').replace(/[^0-9]/g, '')
     const byName = {}, byBiz = {}
@@ -1515,7 +1611,10 @@ router.post('/import/card', async (req, res, next) => {
         skippedAmount = 0, skippedBeforeStart = 0, skippedNoDate = 0, skippedCanceled = 0, linkedVendors = 0
     const createdVendors = []
     const dupRows = []   // 건너뛴 건이 무엇이었는지 — 건수만 주면 사람이 확인할 길이 없다
-    for (const it of items) {
+    /* 줄마다 결과 — 건수만 주면 '어느 줄이 왜 빠졌나'를 사람이 엑셀과 대조해야 한다(거래내역 업로드와 같은 결과 화면).
+       results[k] 는 items[k] 의 결과: { status, vendor?: 'created'|'existing', no? } */
+    const results = items.map(() => ({ status: 'skipped' }))
+    for (const [k, it] of items.entries()) {
       /* 덮어쓰기는 받지 않는다 — 이 경로는 **새로 넣기만** 한다.
          마법사가 '갱신'으로 보낸 것을 조용히 INSERT 하면 중복이 하나 더 생기고,
          결과 화면은 "갱신했다"고 거짓말을 한다. */
@@ -1523,34 +1622,39 @@ router.post('/import/card', async (req, res, next) => {
         await rollbackQuietly(conn)
         return res.status(400).json({ error: '카드 사용분은 덮어쓸 수 없어요. 기존 거래를 고치려면 거래내역에서 여세요.' })
       }
-      if (!it.date) { skippedNoDate++; continue }     // 날짜 없는 행은 장부에 설 수 없다
+      if (!it.date) { skippedNoDate++; results[k] = { status: 'noDate' }; continue }     // 날짜 없는 행은 장부에 설 수 없다
       /* 취소된 결제는 넣지 않는다 — 화면이 이미 거르지만 서버도 본다(체크카드와 같은 기준).
          금액이 양수라 금액만 봐서는 못 가리므로, 화면이 판정해 보낸 값을 믿되 여기서도 막는다. */
-      if (it.canceled) { skippedCanceled++; continue }
+      if (it.canceled) { skippedCanceled++; results[k] = { status: 'canceled' }; continue }
+      // 이 줄의 카드 — 줄에 있으면 그것, 없으면 기본값. 카드가 아니거나 체크카드면 넣지 않는다(위와 같은 이유)
+      const rowAcc = cardById.get(it.account_id || accountId)
+      if (!rowAcc) { results[k] = { status: 'noCard' }; continue }
+      if (rowAcc.card_type === 'check') { results[k] = { status: 'checkCard' }; continue }
+      const accId = rowAcc.id
       const approval = String(it.approval_no || '').trim()
-      if (approval && seen.has(approval)) {
-        dupSkipped++; dupRows.push(`${it.date} ${Number(it.amount || 0).toLocaleString('ko-KR')}원 ${it.merchant || ''}`.trim())
+      if (approval && seen.has(`${accId}|${approval}`)) {
+        dupSkipped++; results[k] = { status: 'dup' }; dupRows.push(`${it.date} ${Number(it.amount || 0).toLocaleString('ko-KR')}원 ${it.merchant || ''}`.trim())
         continue
       }
-      if (futureDateError(it.date)) { skippedFuture++; continue }
-      if (await booksErrOf(it.date)) { skippedBeforeStart++; continue }
-      if (await closedOf(it.date)) { skippedClosed++; continue }
-      if (amountError(it.amount)) { skippedAmount++; continue }
+      if (futureDateError(it.date)) { skippedFuture++; results[k] = { status: 'future' }; continue }
+      if (await booksErrOf(it.date)) { skippedBeforeStart++; results[k] = { status: 'beforeStart' }; continue }
+      if (await closedOf(it.date)) { skippedClosed++; results[k] = { status: 'closed' }; continue }
+      if (amountError(it.amount)) { skippedAmount++; results[k] = { status: 'amount' }; continue }
 
       const merchant = String(it.merchant || '').trim()
       const biz = digits(it.biz_no)
-      let vendorId = null
+      let vendorId = null, vendorOut = null
       const hitBiz = biz ? (byBiz[biz] || []) : []
       const hitName = merchant ? (byName[merchant] || []) : []
-      if (hitBiz.length === 1) { vendorId = hitBiz[0]; linkedVendors++ }
-      else if (hitName.length === 1) { vendorId = hitName[0]; linkedVendors++ }
+      if (hitBiz.length === 1) { vendorId = hitBiz[0]; linkedVendors++; vendorOut = 'existing' }
+      else if (hitName.length === 1) { vendorId = hitName[0]; linkedVendors++; vendorOut = 'existing' }
       else if (createVendors && merchant && !hitName.length) {
         vendorId = randomUUID()
         await conn.execute('INSERT INTO vendors (id, name, biz_no, gubu) VALUES (?,?,?,?)',
           [vendorId, merchant, it.biz_no || null, 'A'])
         ;(byName[merchant] ||= []).push(vendorId)
         if (biz) (byBiz[biz] ||= []).push(vendorId)
-        createdVendors.push(merchant)
+        createdVendors.push(merchant); vendorOut = 'created'
       }
 
       /* 비목 설정을 물려받는다 — 명세서가 준 값이 있으면 그쪽이 이긴다(카드사가 찍어 준 실제 세액).
@@ -1572,23 +1676,29 @@ router.post('/import/card', async (req, res, next) => {
       /* 적요 — 가맹점을 잃지 않는다. 거래처로 못 이은 가맹점은 **적요만이** 그 이름을 들고 있는데,
    메모 열이 따로 있으면 예전엔 메모가 이겨 가맹점 이름이 사라졌다(2026-09-30 화면 검토). 둘 다 있으면 잇는다.
    (값 배열 밖에서 계산한다 — 배열 안의 쉼표를 check:isolation 이 값 개수로 센다) */
-      const cardMemo = (vendorId ? (it.memo || merchant) : [merchant, it.memo].filter(Boolean).join(' · ')) || ''
+      /* 화면(mapCardRow)이 이미 적요 앞에 가맹점을 붙여 보낸다 — 여기서 또 붙이면 "가맹점 · 가맹점 · …"이 된다
+         (2026-10-02 양식 업로드에서 발견). 조각을 겹치지 않게 잇는다 */
+      const cardMemo = (vendorId ? (it.memo || merchant)
+        : [...new Set([merchant, ...String(it.memo || '').split(' · ')].map(x => String(x || '').trim()).filter(Boolean))].join(' · ')) || ''
+      const empName = String(it.employee_name || '').trim().slice(0, 60)   // 칸 길이(VARCHAR 60) — 긴 한 줄이 배치 전체를 500 으로 되돌리지 않게
+      const empId = empName ? (empByName.get(empName) || null) : null
       await conn.execute(`
         INSERT INTO transactions (id, kind, vendor_id, account_id, account_code, category, amount, date,
                                   method, status, memo, approval_no, evid_type,
-                                  supply_amount, vat_amount, tax_type, vat_deductible)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      `, [randomUUID(), 'expense', vendorId, accountId, accountCode, it.category || '', it.amount, it.date,
+                                  supply_amount, vat_amount, tax_type, vat_deductible, employee_id, employee_name)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `, [randomUUID(), 'expense', vendorId, accId, accountCode, it.category || '', it.amount, it.date,
           /* 결제수단은 화면의 다섯 값 중 하나여야 한다 — '카드'라고 적으면 거래 편집 폼에서
              어느 칩도 안 켜지고 계좌를 고르는 칸이 통째로 안 그려진다. */
           '법인카드', '지급완료', cardMemo, approval || null, '신용카드매출전표',
-          vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible])
-      if (approval) seen.add(approval)
+          vat.supply_amount, vat.vat_amount, vat.tax_type, vat.vat_deductible, empId, empName || null])
+      if (approval) seen.add(`${accId}|${approval}`)
       inserted++
+      results[k] = { status: 'inserted', vendor: vendorOut }
     }
     await conn.commit()
     res.json({ inserted, dupSkipped, skippedFuture, skippedClosed, skippedAmount, skippedBeforeStart,
-      skippedNoDate, skippedCanceled, linkedVendors, createdVendors, dupRows: dupRows.slice(0, 20) })
+      skippedNoDate, skippedCanceled, linkedVendors, createdVendors, dupRows: dupRows.slice(0, 20), results })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
@@ -1676,6 +1786,90 @@ router.get('/import/template', async (req, res, next) => {
 })
 
 
+
+/* 카드 사용 업로드 양식 — 2026-10-02 사용자: "카드 명세서 업로드도 우리가 양식을 준비하자".
+ * 카드사 파일엔 없는 **비목·공제 여부·사용 직원·차량** 칸을 둔다(공제는 용도로 갈린다 — 같은 주유도 차에 따라 다르다).
+ * ⚠ 머리글 글자는 업로드 화면이 열을 알아보는 근거다(src/lib/cardStatement.js C·RULES) — **바꾸지 말 것.**
+ * ⚠ 화면의 1단계 안내(src/lib/cardImport.jsx guide)와 같은 말이어야 한다. */
+router.get('/import/card-template', async (req, res, next) => {
+  try {
+    const [cats] = await req.db.execute(
+      `SELECT c.name, c.vat, c.vat_deductible, c.account_code, s.name AS acct_name
+         FROM categories c LEFT JOIN account_subjects s ON s.code = c.account_code
+        WHERE c.active = 1 AND c.id LIKE 'EXP-%' ORDER BY c.sort_order, c.id`).catch(() => [[]])
+    const [emps] = await req.db.execute("SELECT name FROM employees WHERE COALESCE(status, '재직') <> '퇴사' ORDER BY name").catch(() => [[]])
+    // 신용카드만(체크카드는 쓴 즉시 통장에서 빠져 여기로 올리지 않는다)
+    const [cardsRaw] = await req.db.execute(
+      "SELECT name, bank, `number` FROM accounts WHERE kind = 'card' AND COALESCE(card_type, 'credit') <> 'check' ORDER BY name").catch(() => [[]])
+    /* 이름이 겹치는 카드엔 '(카드사 끝4자리)'를 붙인다 — **화면 lib/accountLabel.js 와 같은 글자**여야
+       업로드 화면이 그 이름으로 카드를 되찾는다(src/lib/cardStatement.js resolveCard) */
+    const nameCount = new Map()
+    for (const c of cardsRaw) nameCount.set(c.name, (nameCount.get(c.name) || 0) + 1)
+    const tail4 = (n) => String(n || '').replace(/\D/g, '').slice(-4)
+    const cardLabel = (c) => {
+      if (nameCount.get(c.name) < 2) return c.name
+      const mark = [c.bank, tail4(c.number)].filter(Boolean).join(' ')
+      return mark ? `${c.name} (${mark})` : c.name
+    }
+    const listRef = (sheetName, n) => ({ ref: `'${sheetName}'!$A$2:$A$${Math.max(2, n + 1)}` })
+    const COLS = [
+      { header: '이용일자', width: 12, required: true, prompt: '이용한 날(결제일 아님). 예: 2026-09-15' },
+      { header: '카드', width: 22, list: listRef('카드 목록', cardsRaw.length),
+        prompt: "목록에서 선택('카드 목록' 시트). 비우면 업로드 화면에서 고른 카드로 들어갑니다." },
+      { header: '가맹점', width: 24, prompt: '쓴 곳. 예: SK에너지 성산주유소 — 거래처와 이름·사업자번호가 맞으면 연결, 아니면 적요에 남습니다.' },
+      { header: '이용금액', width: 12, required: true, money: true, prompt: '부가세 포함 결제 금액(숫자). 예: 57700' },
+      { header: '공급가액', width: 12, money: true, prompt: '영수증에 찍힌 공급가액. 비우면 비목의 부가세 설정으로 계산합니다.' },
+      { header: '부가세', width: 11, money: true, prompt: '영수증에 찍힌 부가세. 0 이면 면세로 봅니다. 비우면 비목 설정으로 계산.' },
+      { header: '공제 여부', width: 10, list: ['공제', '불공제'], strict: true,
+        prompt: '매입세액 공제 / 불공제. 비우면 비목 설정을 따릅니다. 접대비·비영업용 승용차 관련 등은 불공제일 수 있어요.' },
+      { header: '비목', width: 16, list: listRef('비목 목록', cats.length),
+        prompt: "목록에서 선택('비목 목록' 시트). 비우면 업로드 화면에서 고른 비목이 적용됩니다." },
+      { header: '사용 직원', width: 12, list: listRef('직원 목록', emps.length), prompt: '카드를 쓴 사람. 목록에서 선택.' },
+      { header: '차량', width: 18, prompt: '차량 관련 지출(주유·하이패스·정비)이면 차량번호·차종. 예: 12가3456 스타렉스 — 적요에 남습니다.' },
+      { header: '비고', width: 22, prompt: '용도 등. 예: 거제 현장 출장' },
+      { header: '승인번호', width: 14, prompt: '있으면 같은 건을 두 번 올려도 한 번만 등록됩니다.' },
+      { header: '사업자번호', width: 14, prompt: '가맹점 사업자번호. 거래처 연결에 씁니다.' },
+      { header: '할부', width: 8, prompt: '일시불 또는 개월 수. 할부도 승인일에 전액으로 잡습니다.' },
+    ]
+    const wb = newBook()
+    templateSheet(wb, '카드 사용', { columns: COLS, samples: [] })
+    const listSheet = (name, header, rows, widths) => {
+      const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1 }] })
+      ws.columns = widths.map(w => ({ width: w }))
+      const h = ws.getRow(1)
+      header.forEach((t, i) => {
+        const c = h.getCell(i + 1)
+        c.value = t
+        c.font = { bold: true, size: 10 }
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F4F7' } }
+      })
+      rows.forEach((r, i) => r.forEach((v, j) => { ws.getRow(i + 2).getCell(j + 1).value = v }))
+    }
+    listSheet('비목 목록', ['비목', '부가세', '공제', '계정과목'],
+      cats.map(c => [c.name, c.vat || '', Number(c.vat_deductible) === 0 ? '불공제' : '공제',
+        c.account_code ? `${c.account_code} ${c.acct_name || ''}`.trim() : '']), [20, 10, 8, 22])
+    listSheet('직원 목록', ['이름'], emps.map(e => [e.name]), [16])
+    listSheet('카드 목록', ['카드', '카드사', '끝자리'], cardsRaw.map(c => [cardLabel(c), c.bank || '', tail4(c.number)]), [26, 12, 8])
+    const guide = [
+      '카드 사용 일괄 업로드 — 작성 안내',
+      '',
+      "• 카드: ▼ 로 고르세요('카드 목록' 시트). 카드가 여러 장이면 한 파일에 적어도 됩니다. 비운 줄은 업로드 화면에서 고른 카드로 들어갑니다.",
+      '• 이용일자·이용금액은 꼭 적으세요. 이용금액은 부가세까지 더한 결제 금액입니다.',
+      '• 공급가액·부가세: 영수증에 찍힌 값을 적으면 그대로 씁니다. 비우면 비목의 부가세 설정으로 계산합니다(부가세 0 = 면세).',
+      "• 공제 여부: ▼ 공제/불공제. 비우면 비목 설정('비목 목록' 시트의 공제 칸)을 따릅니다.",
+      '  ※ 공제 여부는 가맹점이 아니라 용도로 갈립니다 — 같은 주유·하이패스도 차량에 따라 다를 수 있어요. 애매하면 세무사에게 확인하세요.',
+      "• 비목: ▼ 로 고르세요. 비우면 업로드 화면에서 고른 비목이 들어갑니다.",
+      "• 사용 직원: ▼ 로 고르세요('직원 목록' 시트). 목록에 없는 이름은 이름만 남습니다.",
+      '• 차량: 차량번호·차종을 적으면 적요에 "차량: …"으로 남습니다.',
+      '• 승인번호가 있으면 같은 파일을 다시 올려도 두 번 등록되지 않습니다.',
+      "• 취소된 결제는 적지 마세요(카드사 파일의 '취소' 표시 줄은 자동으로 빠집니다).",
+      '• 첫 행(열 제목)은 그대로 두고, 둘째 행부터 적으세요.',
+    ]
+    guideSheet(wb, guide, '작성안내', { hasRequired: true, hasSamples: false })
+    await sendBook(res, wb, '카드사용_업로드_양식.xlsx')
+  } catch (e) { next(e) }
+})
+
 /* ── 주문 연결 ──────────────────────────────────────────────────
  *
  * 고객 지적: "엑셀로 거래를 올린 뒤 주문과 맞추는 과정이 굉장히 번거롭다",
@@ -1755,6 +1949,9 @@ router.post('/link-contract', async (req, res, next) => {
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
+
+// 인쇄 배치(인쇄 양식 편집기) — 거래 상세에서 연 묶음
+require('../lib/printLayouts').printLayoutRoutes(router, 'txn')
 
 module.exports = router
 /* 테스트에서 쓰려고 함께 내보낸다 — 라우터를 띄우지 않고 규칙만 검사한다.

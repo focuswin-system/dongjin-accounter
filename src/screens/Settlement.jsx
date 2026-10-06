@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
+import { DocAttachButton } from '../lib/components/DocAttachments'
+import { PrintWizardButton, domForm, docFiles } from '../lib/components/PrintWizard'
 import { Icon, fmtNum, useToast, useConfirm, localToday, DateInput, useBusy, StatusBadge } from '../lib/ui'
 import { api } from '../lib/api'
 import { PageHeader } from '../lib/components/PageHeader'
@@ -150,7 +152,11 @@ const SettlementPreview = ({ doc, company, isNew, onSaved, onCancelNew, onDelete
             )}
             {!inApproval && <button className="btn ghost" onClick={remove} title="삭제" aria-label="삭제"><Icon.Trash size={14}/></button>}
             {!inApproval && <button className="btn" onClick={startEdit}><Icon.Pencil size={14}/> 편집</button>}
+            {!isNew && <DocAttachButton ownerType="settlement" ownerId={doc.id} title={`정산내역서 ${doc.doc_no} 증빙`}/>}
             <button className="btn" onClick={() => window.print()}><Icon.Print/> 인쇄</button>
+            {!isNew && <PrintWizardButton title={`정산내역서 ${doc.doc_no} 인쇄`} label="인쇄 편집" layoutKey={{ ownerType: 'settlement', ownerId: doc.id }}
+              forms={[domForm({ key: 'settlement', label: `정산내역서 ${doc.doc_no}` })]}
+              getFiles={docFiles('settlement', doc.id)}/>}
           </>
         )}
       </DocToolbar>

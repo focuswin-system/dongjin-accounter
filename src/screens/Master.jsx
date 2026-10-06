@@ -588,7 +588,7 @@ export const RefMasterPanel = ({ cfg, page = false, embedded = false }) => {
   }
 
   if (importing && adapter) return (
-    <ImportWizard
+    <ImportWizard embedded
       adapter={adapter}
       existing={rows}
       onCancel={() => setImporting(false)}
@@ -764,6 +764,21 @@ const vendorImportAdapter = {
   sub: '거래처 목록을 엑셀(.xlsx)·CSV로 한 번에 등록하세요. 이미 있는 거래처는 중복 판정 후 건너뛰거나 덮어쓸 수 있어요.',
   templateUrl: '/api/vendors/import/template',
   templateName: '거래처_업로드_양식.xlsx',
+  /* 1단계 안내 — ⚠ 서버 양식(routes/vendors.js 작성안내)과 같은 말이어야 한다 */
+  guide: {
+    intro: <>양식의 열 제목 그대로 올리면 <b>열 매핑 없이</b> 바로 검토 단계로 넘어갑니다.<br/>
+      다른 프로그램에서 다운로드한 거래처 목록도 올릴 수 있어요 — 이 경우 열을 직접 매핑합니다.</>,
+    note: <><b>첫 행(열 제목)은 수정하지 마세요.</b> 예시 행은 지우고 쓰세요.<br/>
+      이미 등록된 거래처(사업자번호 또는 상호명 일치)는 검토 단계에서 건너뛰기·덮어쓰기를 고를 수 있어요.</>,
+    rows: [
+      { col: '상호명', req: true, how: '거래처 이름', ex: '(주)한화오션' },
+      { col: '거래구분', how: '발주처 / 매입처 / 기관 — 비우면 기본 구분', ex: '매입처' },
+      { col: '거래유형', how: '자유 입력', ex: '외주가공' },
+      { col: '사업자번호', how: '있으면 중복 판정에 우선 사용', ex: '111-11-11111', num: true },
+      { col: '대표자 · 담당자 · 연락처', how: '전화·팩스·이메일·주소', ex: '' },
+      { col: '은행 · 계좌번호 · 예금주', how: '매입처 지급 이체에 사용', ex: '기업 · 123-456789-01-011' },
+    ],
+  },
   targets: ["상호명", "거래구분", "거래유형", "사업자번호", "대표자", "담당자", "전화", "팩스", "이메일", "주소",
     // 이체 정보 — 매입처 결제내역(월별 일괄이체 명단)이 이 셋을 각각 요구한다
     "은행", "계좌번호", "예금주"],
@@ -777,7 +792,7 @@ const vendorImportAdapter = {
   renderOpts: (opts, patch) => (
     <div className="row gap-10" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
       <span className="text-sm fw-600">기본 거래구분</span>
-      <span className="text-xs text-muted2">‘거래구분’ 컬럼을 매핑하면 그 값이 우선해요</span>
+      <span className="text-xs text-muted2">‘거래구분’ 열을 매핑하면 그 값이 우선해요</span>
       <div className="row gap-6 ml-auto">
         {GUBU_OPTS.map(o => (
           <button key={o.value} className={`chip ${opts.defaultGubu === o.value ? 'active' : ''}`}
@@ -801,6 +816,11 @@ const vendorImportAdapter = {
     bank_name: g('은행'), bank_account: g('계좌번호'), account_holder: g('예금주'),
   }),
   isValid: (d) => !!String(d.name || '').trim(),
+  fixFields: (d) => (String(d.name || '').trim() ? [] : [{ key: 'name', label: '상호명', kind: 'text' }]),
+  compareCols: [
+    ['상호', v => v.name], ['사업자번호', v => v.biz_no || '—', true], ['대표자', v => v.ceo || '—'],
+    ['전화', v => v.phone || '—', true], ['주소', v => v.address || '—'],
+  ],
   matchKey: (d) => normBizNo(d.biz_no) || normVendorName(d.name),
   buildIndex: (existing) => {
     const byBiz = new Map(), byName = new Map(), byNorm = new Map()
@@ -908,6 +928,21 @@ export const refImportAdapter = (cfg) => {
     sub: `${cfg.label} 목록을 엑셀(.xlsx)·CSV로 한 번에 등록하세요. 이미 있는 항목은 중복 판정 후 건너뛰거나 덮어쓸 수 있어요.`,
     templateUrl: `/api/ref-items/import/template?type=${cfg.type}`,
     templateName: `${cfg.label}_업로드_양식.xlsx`,
+    /* 1단계 안내 — 표는 칸 정의(fields)에서 뽑는다. 칸을 고치면 안내도 따라온다 */
+    guide: {
+      intro: <>양식의 열 제목 그대로 올리면 <b>열 매핑 없이</b> 바로 검토 단계로 넘어갑니다.<br/>
+        다른 프로그램에서 다운로드한 목록도 올릴 수 있어요 — 이 경우 열을 직접 매핑합니다.</>,
+      note: <><b>첫 행(열 제목)은 수정하지 마세요.</b> 예시 행은 지우고 쓰세요.<br/>
+        덮어쓰기는 값이 있는 칸만 바꿉니다 — 빈 칸으로 기존 정보가 지워지지 않아요.</>,
+      rows: fields.map(fd => ({
+        col: fd.label, req: !!fd.req,
+        how: fd.hint || (fd.kind === 'select' ? (fd.options || []).map(o => (Array.isArray(o) ? o[1] : o)).join(' / ')
+          : fd.kind === 'num' ? '숫자' : fd.kind === 'dec' ? '숫자 (소수 가능)'
+          : fd.kind === 'date' || fd.kind === 'partdate' ? '날짜' : '자유 입력'),
+        ex: fd.kind === 'date' || fd.kind === 'partdate' ? '2026-07-01' : '',
+        num: fd.kind === 'date' || fd.kind === 'partdate',
+      })),
+    },
     targets: fields.map(fd => fd.label),
     requiredTarget: reqField.label,
     requiredHelp: `${reqField.label}이(가) 없으면 ${cfg.label}을(를) 등록할 수 없어요.`,
@@ -937,6 +972,12 @@ export const refImportAdapter = (cfg) => {
       return d
     },
     isValid: (d) => !!String(d[reqField.key] || '').trim(),
+    fixFields: (d) => (String(d[reqField.key] || '').trim() ? [] : [{ key: reqField.key, label: reqField.label, kind: 'text' }]),
+    // 기존 건 비교 — 앞쪽 칸 다섯 개(코드·이름·유형·규격·단가 등)
+    compareCols: fields.slice(0, 5).map(fd => [fd.label, r => {
+      const v = r[fd.key]
+      return v == null || v === '' ? '—' : fd.kind === 'num' ? fmtNum(v) : String(v)
+    }, fd.kind === 'num' || fd.kind === 'date']),
     matchKey: keyOf,
     buildIndex: (existing) => {
       const byCode = new Map(), byKeyMap = new Map(), byName = new Map()
@@ -1114,7 +1155,7 @@ const VendorPanel = ({ embedded = false }) => {
   }
 
   if (importing) return (
-    <ImportWizard
+    <ImportWizard embedded
       adapter={vendorImportAdapter}
       existing={vendors}
       onCancel={() => setImporting(false)}
@@ -3142,7 +3183,7 @@ const AuditPanel = ({ embedded = false }) => {
     setDownloading(true)
     const r = await api.exportAuditXlsx(filter)
     setDownloading(false)
-    if (!r.ok) toast.push(r.error || '내보내기에 실패했어요', { tone: 'warn' })
+    if (!r.ok) toast.push(r.error || '다운로드에 실패했어요', { tone: 'warn' })
   }
 
   return (
@@ -3187,7 +3228,7 @@ const AuditPanel = ({ embedded = false }) => {
             초기화
           </button>
           <button className="btn" disabled={downloading || !!error} onClick={download}>
-            <Icon.Excel/> {downloading ? '내보내는 중…' : '엑셀 받기'}
+            <Icon.Excel/> {downloading ? '만드는 중…' : '엑셀 다운로드'}
           </button>
         </div>
       </div>
@@ -3590,7 +3631,7 @@ export const MasterScreen = ({ user, section = "base", forcedTab }) => {
         title={single ? (TAB_BY_ID[activeTab]?.label || sectionCfg.title) : sectionCfg.title}
         actions={!isCustomTab && data && (
           <>
-            <button className="btn" onClick={() => toast.push(`${data.label} 양식을 내려받았어요`)}><Icon.Download/> <span className="btn-label-hide">양식 다운로드</span></button>
+            <button className="btn" onClick={() => toast.push(`${data.label} 양식을 다운로드했어요`)}><Icon.Download/> <span className="btn-label-hide">양식 다운로드</span></button>
             <button className="btn" onClick={() => toast.push(`${data.label} 일괄 업로드 창을 열었어요`)}><Icon.Excel/> <span className="btn-label-hide">일괄 업로드</span></button>
             <button className="btn primary" onClick={() => setDrawer("new")}><Icon.Plus/> {data.label} 등록</button>
           </>

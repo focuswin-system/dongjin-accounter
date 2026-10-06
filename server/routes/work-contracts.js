@@ -6,6 +6,8 @@ const { rollbackQuietly } = require('../lib/tx')
 const { ledgerError } = require('../lib/ledger')
 const { laborAcctCode, laborCategory } = require('../lib/acctCode')
 const { removeUploadedFile } = require('../lib/uploads')
+const { uploadMem, parseSheet } = require('../lib/xlsx-import')
+const { newBook, templateSheet, guideSheet, sendBook } = require('../lib/xlsxBook')
 
 const router = Router()
 
@@ -110,7 +112,7 @@ router.get('/', async (req, res, next) => {
   try {
     const conn = req.db
     const { kind, income_type, status } = req.query
-    let sql = `SELECT w.*, e.name AS employee_name, e.emp_no, e.department, e.status AS emp_status, e.leave_date
+    let sql = `SELECT w.*, e.name AS employee_name, e.emp_no, e.department, e.role, e.birth_date, e.status AS emp_status, e.leave_date
                FROM work_contracts w LEFT JOIN employees e ON w.employee_id = e.id WHERE 1=1`
     const params = []
     if (kind) {
@@ -210,6 +212,152 @@ router.get('/:id', async (req, res, next) => {
 })
 
 // ── 계약 생성. body.employee(신규 인력)면 사람도 함께 만든다. ──
+/* ── 근로계약 엑셀 업로드 — 직원 + 근로계약을 한 번에(2026-10-02 사용자: "엑셀 업로드 없음") ──
+ *
+ * 한 줄 = 직원 한 명 + 그 사람의 근로계약 하나. 화면의 '직원 등록'과 같은 일을 여러 줄로 한다.
+ * 급여 기준은 **지급 항목만** 칸으로 받는다(이 회사 표준 지급 항목이 칸이 된다). 공제(4대보험·세금)는
+ * 표준 항목의 기본값으로 채운다 — 사람마다 요율을 엑셀로 받으면 틀리기 쉽고, 화면에서 고치는 게 낫다.
+ * ⚠ 머리글 글자는 업로드 화면(WorkContract.jsx laborImportAdapter)이 열을 알아보는 근거다 — 바꾸지 말 것.
+ * ⚠ 새로 넣기만 한다. 이미 있는 직원의 재계약은 화면의 '새 계약(연봉 인상)'으로 — 엑셀로 덮으면 계약 이력이 끊긴다. */
+const TERM_BY_LABEL = { '무기한': 'open', '기간 만료': 'fixed', '자동 갱신': 'auto_renew' }
+
+router.get('/import/template', async (req, res, next) => {
+  try {
+    const [depts] = await req.db.execute("SELECT name FROM hr_codes WHERE type = 'dept' ORDER BY sort_order, name")
+    const [poss] = await req.db.execute("SELECT name FROM hr_codes WHERE type = 'pos' ORDER BY sort_order, name")
+    const [types] = await req.db.execute("SELECT label FROM employ_types WHERE kind = 'labor' AND COALESCE(active, 1) = 1 ORDER BY sort_order, label").catch(() => [[]])
+    const [earns] = await req.db.execute("SELECT label FROM payroll_item_types WHERE active = 1 AND kind = 'earn' AND mode = 'fixed' ORDER BY sort_order, label")
+    const listRef = (sheet, n) => ({ ref: `'${sheet}'!$A$2:$A$${Math.max(2, n + 1)}` })
+    const YN = ['적용', '제외']
+    const COLS = [
+      { header: '이름', width: 12, required: true, prompt: '직원 이름. 예: 홍길동' },
+      { header: '부서', width: 14, list: listRef('부서 목록', depts.length), prompt: "목록에서 선택('부서 목록' 시트). 없는 부서는 인사 기준정보에 먼저 추가하세요." },
+      { header: '직위', width: 12, list: listRef('직위 목록', poss.length), prompt: "목록에서 선택('직위 목록' 시트)." },
+      { header: '생년월일', width: 12, prompt: '급여명세서 표기용. 예: 1990-05-12' },
+      { header: '입사일', width: 12, required: true, prompt: '계약 시작일. 예: 2026-03-02' },
+      { header: '고용형태', width: 12, list: listRef('고용형태 목록', types.length), prompt: '목록에서 선택. 고르면 급여형태·4대보험 기본값이 따라옵니다.' },
+      { header: '종료 방식', width: 10, list: Object.keys(TERM_BY_LABEL), strict: true, prompt: '무기한 / 기간 만료 / 자동 갱신. 비우면 무기한.' },
+      { header: '계약 종료', width: 12, prompt: '종료 방식이 기간 만료·자동 갱신일 때만. 예: 2027-03-01' },
+      { header: '소정근로시간', width: 16, prompt: '예: 주 40시간 / 09:00~18:00' },
+      { header: '급여 지급일', width: 10, int: true, prompt: '매월 며칠(1~31). 비우면 25일.' },
+      { header: '국민연금', width: 9, list: YN, strict: true, prompt: '적용 / 제외. 비우면 고용형태 기본값.' },
+      { header: '건강보험', width: 9, list: YN, strict: true, prompt: '적용 / 제외. 비우면 고용형태 기본값.' },
+      { header: '고용보험', width: 9, list: YN, strict: true, prompt: '적용 / 제외. 비우면 고용형태 기본값.' },
+      { header: '산재보험', width: 9, list: YN, strict: true, prompt: '적용 / 제외. 비우면 고용형태 기본값.' },
+      { header: '급여이체 계좌', width: 26, prompt: '예: 하나은행 123-456789-01 홍길동' },
+      // 이 회사의 표준 지급 항목(고정 금액)이 그대로 칸이 된다 — 급여 기준의 지급 항목
+      ...earns.map(e => ({ header: e.label, width: 13, money: true, prompt: `월 ${e.label}(원). 비우면 0.` })),
+      { header: '메모', width: 24, prompt: '특이사항' },
+    ]
+    const wb = newBook()
+    templateSheet(wb, '근로계약', { columns: COLS, samples: [] })
+    const listSheet = (name, rows) => {
+      const ws = wb.addWorksheet(name)
+      ws.columns = [{ width: 20 }]
+      const h = ws.getRow(1).getCell(1)
+      h.value = name.replace(' 목록', ''); h.font = { bold: true, size: 10 }
+      h.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F4F7' } }
+      rows.forEach((v, i) => { ws.getRow(i + 2).getCell(1).value = v })
+    }
+    listSheet('부서 목록', depts.map(d => d.name))
+    listSheet('직위 목록', poss.map(d => d.name))
+    listSheet('고용형태 목록', types.map(t => t.label))
+    guideSheet(wb, [
+      '근로계약 일괄 업로드 — 작성 안내',
+      '',
+      '• 한 줄에 직원 한 명과 그 사람의 근로계약 하나를 적습니다. 직원과 계약이 함께 등록됩니다.',
+      '• 이름·입사일은 꼭 적으세요. 이미 등록된 직원(이름·생년월일이 같음)은 건너뜁니다 — 재계약은 화면의 [새 계약(연봉 인상)]으로 하세요.',
+      '• 고용형태를 고르면 급여형태와 4대보험 기본값이 따라옵니다. 4대보험 칸을 적으면 그 값이 우선합니다.',
+      '• 급여 기준: 지급 항목(기본급·수당 등)은 칸에 월 금액을 적습니다. 공제(4대보험·세금)는 표준 항목의 기본값으로 채워지고, 화면에서 고칠 수 있습니다.',
+      '• 부서·직위는 목록에 있는 이름을 쓰세요. 목록에 없는 이름도 그대로 저장되지만 부서별로 모아 볼 때 갈라집니다.',
+      '• 첫 행(열 제목)은 그대로 두고, 둘째 행부터 적으세요.',
+    ], '작성안내', { hasRequired: true, hasSamples: false })
+    await sendBook(res, wb, '근로계약_업로드_양식.xlsx')
+  } catch (e) { next(e) }
+})
+
+router.post('/import/parse', uploadMem.single('file'), (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: '파일이 없습니다' })
+    res.json(parseSheet(req.file.buffer))
+  } catch (e) { next(e) }
+})
+
+// items: [{ name, department, role, birth_date, start_date, employ_type, term_mode, end_date, work_hours, pay_day,
+//           insure_np|hi|ei|ai (1/0/null), salary_account, earns: { 항목명: 금액 }, memo }]
+router.post('/import/commit', async (req, res, next) => {
+  const items = Array.isArray(req.body.items) ? req.body.items : []
+  const conn = await req.db.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [types] = await conn.execute("SELECT * FROM employ_types WHERE kind = 'labor'")
+    const typeByLabel = new Map(types.map(t => [String(t.label).trim(), t]))
+    const [masters] = await conn.execute('SELECT * FROM payroll_item_types WHERE active = 1 ORDER BY sort_order, label')
+    // 이미 있는 직원 — 이름+생년월일(생년월일이 없으면 이름만)으로 본다
+    const [emps] = await conn.execute('SELECT name, birth_date FROM employees')
+    const known = new Set(emps.map(e => `${String(e.name).trim()}|${e.birth_date || ''}`))
+    const knownName = new Set(emps.map(e => String(e.name).trim()))
+    // 생년월일이 비어 있는 기존 직원 — 업로드 줄에 생년월일이 있어도 같은 사람일 수 있다
+    const nameNoBirth = new Set(emps.filter(e => !e.birth_date).map(e => String(e.name).trim()))
+    const results = items.map(() => ({ status: 'skipped' }))
+    let inserted = 0
+    for (const [k, it] of items.entries()) {
+      const name = String(it.name || '').trim()
+      if (!name) { results[k] = { status: 'noName' }; continue }
+      const birth = String(it.birth_date || '').slice(0, 10) || null
+      /* 이름·생년월일이 같으면 중복. 생년월일 없이 이름만 같으면 '확인 필요' — 사용자가 미리보기에서
+         '새로 등록'을 골랐으면(confirmed) 넣는다. 예전엔 고른 것을 무시하고 '중복'으로 건너뛰었다(검토) */
+      if (birth && known.has(`${name}|${birth}`)) { results[k] = { status: 'dup' }; continue }
+      if (!birth && knownName.has(name) && !it.confirmed) { results[k] = { status: 'dup' }; continue }
+      if (birth && nameNoBirth.has(name) && !it.confirmed) { results[k] = { status: 'dup' }; continue }
+      // 화면 검사만 믿지 않는다 — 날짜 모양·지급일 범위
+      const ISO = /^\d{4}-\d{2}-\d{2}$/
+      if (!ISO.test(String(it.start_date || '').slice(0, 10))) { results[k] = { status: 'invalid', why: '입사일 형식' }; continue }
+      if (birth && !ISO.test(birth)) { results[k] = { status: 'invalid', why: '생년월일 형식' }; continue }
+      if (it.end_date && !ISO.test(String(it.end_date).slice(0, 10))) { results[k] = { status: 'invalid', why: '계약 종료일 형식' }; continue }
+      if (it.pay_day != null && it.pay_day !== '' && !(Number(it.pay_day) >= 1 && Number(it.pay_day) <= 31)) { results[k] = { status: 'invalid', why: '급여 지급일(1~31)' }; continue }
+      const t = typeByLabel.get(String(it.employ_type || '').trim()) || null
+      const ins = (key) => (it[key] === 1 || it[key] === 0 ? it[key] : (t ? Number(t[key]) || 0 : 1))
+      const earnVal = (label) => Number(String((it.earns || {})[label] ?? '').replace(/[^0-9]/g, '')) || 0
+      // 급여 기준 — 표준 항목 순서대로. 지급(고정)은 엑셀 금액, 그 밖(공제·비율)은 기본값
+      const payItems = masters.map(m => ({
+        label: m.label, kind: m.kind, mode: m.mode,
+        value: m.kind === 'earn' && m.mode === 'fixed' ? earnVal(m.label) : Number(m.default_value) || 0,
+      }))
+      const start = String(it.start_date || '').slice(0, 10) || null
+      const term = ['open', 'fixed', 'auto_renew'].includes(it.term_mode) ? it.term_mode : 'open'
+      const eid = randomUUID()
+      await conn.execute(
+        `INSERT INTO employees (id, emp_no, name, role, department, base_salary, join_date, birth_date, status, active, person_kind, salary_account)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [eid, await nextEmpNo(conn), name, it.role || '', it.department || '', earnVal('기본급'),
+         start, birth, '재직', 1, 'employee', it.salary_account || null])
+      const f = normalize({
+        kind: 'labor', income_type: '근로', title: `${name} 근로계약`,
+        employ_type_id: t?.id || null, employ_type: t?.label || (it.employ_type || null),
+        start_date: start, end_date: it.end_date || null, term_mode: term,
+        pay_form: t?.pay_form || 'monthly', work_hours: it.work_hours || null,
+        pay_day: Number(it.pay_day) || 25, pay_items: payItems,
+        insure_np: ins('insure_np'), insure_hi: ins('insure_hi'), insure_ei: ins('insure_ei'), insure_ai: ins('insure_ai'),
+        memo: it.memo || null,
+      })
+      await conn.execute(
+        `INSERT INTO work_contracts
+           (id, employee_id, kind, income_type, title, employ_type_id, employ_type, start_date, end_date, term_mode,
+            status, pay_form, work_hours, pay_day, pay_items, insure_np, insure_hi, insure_ei, insure_ai, conv_alert_months, memo)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [randomUUID(), eid, f.kind, f.income_type, f.title, f.employ_type_id, f.employ_type, f.start_date, f.end_date, f.term_mode,
+         f.status, f.pay_form, f.work_hours, f.pay_day, f.pay_items,
+         f.insure_np, f.insure_hi, f.insure_ei, f.insure_ai, f.conv_alert_months, f.memo])
+      known.add(`${name}|${birth || ''}`); knownName.add(name)
+      inserted++
+      results[k] = { status: 'inserted' }
+    }
+    await conn.commit()
+    res.json({ ok: true, inserted, results })
+  } catch (e) { await rollbackQuietly(conn); next(e) } finally { conn.release() }
+})
+
 router.post('/', async (req, res, next) => {
   const conn = await req.db.getConnection()
   try {

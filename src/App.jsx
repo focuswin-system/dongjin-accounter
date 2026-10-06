@@ -93,8 +93,8 @@ const CRUMB_MAP = {
   settings:        ["환경설정"],
   hr_base:         ["인사급여", "기준정보"],
   evidence:        ["증빙 관리"],
-  excel:           ["엑셀 업로드"],
-  excel_modal:     ["엑셀 업로드"],
+  excel:           ["거래내역 엑셀 업로드"],
+  excel_modal:     ["거래내역 엑셀 업로드"],
 };
 
 /* 브레드크럼 마디를 누르면 갈 곳 — CRUMB_MAP과 같은 자리 순서로, 앞쪽(누를 수 있는) 마디만 적는다.

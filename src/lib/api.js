@@ -180,6 +180,9 @@ async function req(path, opts = {}) {
 }
 
 // 엑셀 임포트 파싱용 — multipart라 req()(JSON 전용)를 쓸 수 없다
+// 문서 증빙 경로 — 서버 lib/attachments.js OWNERS 와 같은 종류
+const DOC_ATTACH_BASE = { journal_voucher: '/journal-vouchers', resolution: '/resolutions', purchase_req: '/purchase-reqs', settlement: '/settlements', txn: '/transactions' }
+
 async function postImportFile(path, file) {
   const fd = new FormData()
   fd.append('file', file)
@@ -620,7 +623,7 @@ export const api = {
       })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
-        throw new Error(d.error || '내려받기에 실패했어요')
+        throw new Error(d.error || '다운로드에 실패했어요')
       }
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
@@ -646,7 +649,7 @@ export const api = {
       })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
-        throw new Error(d.error || '내려받기에 실패했어요')
+        throw new Error(d.error || '다운로드에 실패했어요')
       }
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
@@ -684,7 +687,7 @@ export const api = {
       })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
-        throw new Error(d.error || '내려받기에 실패했어요')
+        throw new Error(d.error || '다운로드에 실패했어요')
       }
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
@@ -755,7 +758,7 @@ export const api = {
       })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
-        throw new Error(d.error || '내려받기에 실패했어요')
+        throw new Error(d.error || '다운로드에 실패했어요')
       }
       /* 파일명 — 서버가 Content-Disposition 에 적어 보낸다(고른 계좌 이름이 들어간다).
          a.download 를 채우면 그 값이 헤더를 **이깁니다.** 그래서 헤더를 직접 읽어 쓴다 —
@@ -952,6 +955,32 @@ export const api = {
   /* 전표 — 이 건이 장부에 어떻게 오르는지 차변·대변 줄로.
    * 거래(결제)와 청구서(발행)는 **서로 다른 전표**다. 발행 때 생긴 채권·채무가 결제 때 사라진다.
    * 실패해도 화면이 깨지면 안 되므로 null 을 준다(전표는 부가 정보다). */
+  /** 이체 한 건 — 두 통장의 이체 전·후 잔액(볼 자격이 없으면 hidden)과 전표 */
+  async getTransferDetail(id) {
+    try { return await req(`/transactions/${id}/transfer-detail`) } catch { return null }
+  },
+  /* 문서 증빙(공용 첨부) — 대체전표·지급결의서·구매품의서·정산내역서. 권한은 그 문서 경로를 따른다 */
+  /* 인쇄 배치(인쇄 양식 편집기) — 문서별 마지막 배치(server lib/printLayouts.js) */
+  async getPrintLayout(ownerType, id) {
+    try { return await req(`${DOC_ATTACH_BASE[ownerType]}/${id}/print-layout`) }
+    catch (e) { return { layout: null, error: e.message || '저장된 배치를 불러오지 못했어요' } }
+  },
+  async savePrintLayout(ownerType, id, layout) {
+    try { await req(`${DOC_ATTACH_BASE[ownerType]}/${id}/print-layout`, { method: 'PUT', body: { layout } }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async getDocAttachments(ownerType, id) {
+    try { return await req(`${DOC_ATTACH_BASE[ownerType]}/${id}/attachments`) }
+    catch (e) { return { files: [], editable: false, error: e.message || '증빙을 불러오지 못했어요' } }
+  },
+  async addDocAttachment(ownerType, id, data) {
+    try { const r = await req(`${DOC_ATTACH_BASE[ownerType]}/${id}/attachments`, { method: 'POST', body: data }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
+  async deleteDocAttachment(ownerType, id, attId) {
+    try { await req(`${DOC_ATTACH_BASE[ownerType]}/${id}/attachments/${attId}`, { method: 'DELETE' }); return { ok: true } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
   async getTransactionVoucher(id) {
     try { return await req(`/transactions/${id}/voucher`) } catch { return null }
   },
@@ -1046,6 +1075,11 @@ export const api = {
     catch (e) { return { ok: false, error: e?.message || '삭제에 실패했어요' } }
   },
 
+  /** 카드 대금 — 신용카드마다 이번 결제 예정·밀린 대금·미결제 합계(서버 lib/cardBill.js 한 곳에서 계산) */
+  async getCardBills() {
+    try { return await req('/transactions/card-bills') } catch { return [] }
+  },
+
   async transfer({ fromAccountId, toAccountId, amount, date, memo }) {
     try {
       const r = await req('/transactions/transfer', { method: 'POST', body: {
@@ -1077,13 +1111,13 @@ export const api = {
     catch (e) { return { ok: false, error: e.message } }
   },
 
-  async downloadTransfersXlsx({ from, to, nums = 'hide', filename }) {
+  async downloadTransfersXlsx({ from, to, nums = 'hide', q = '', filename }) {
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`${BASE}/transactions/transfers.xlsx?from=${from}&to=${to}&nums=${nums}`, {
+      const res = await fetch(`${BASE}/transactions/transfers.xlsx?from=${from}&to=${to}&nums=${nums}&q=${encodeURIComponent(q)}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || '내려받기에 실패했어요') }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || '다운로드에 실패했어요') }
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -1100,7 +1134,7 @@ export const api = {
       const res = await fetch(`${BASE}/transactions/vouchers.xlsx?from=${from}&to=${to}&kind=${kind}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || '내려받기에 실패했어요') }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || '다운로드에 실패했어요') }
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -1588,7 +1622,7 @@ export const api = {
       const res = await fetch(`${BASE}/contracts/export.xlsx?kind=${kind}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
-      if (!res.ok) throw new Error('내보내기에 실패했어요')
+      if (!res.ok) throw new Error('다운로드에 실패했어요')
       const blob = await res.blob()
       const label = kind === 'purchase' ? '발주' : kind === 'sales' ? '수주' : '주문'
       const url = URL.createObjectURL(blob)
@@ -2031,7 +2065,7 @@ export const api = {
       if (!res.ok) {
         // 기간 초과·권한 없음은 서버가 이유를 준다. 삼키면 사용자는 왜 안 되는지 모른다.
         const d = await res.json().catch(() => ({}))
-        throw new Error(d.error || '내보내기에 실패했어요')
+        throw new Error(d.error || '다운로드에 실패했어요')
       }
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
@@ -2251,6 +2285,14 @@ export const api = {
     try { await req('/unpaid-labor/' + id, { method: 'PUT', body: data }); return { ok: true } }
     catch (e) { return { ok: false, error: e.message } }
   },
+  /** 예상 퇴직금 — { eligible, amount, serviceDays, avgDaily, months[], basis, reason? } */
+  async getSeveranceEstimate(employeeId, leaveDate) {
+    try { return await req(`/unpaid-labor/estimate?employee_id=${encodeURIComponent(employeeId)}${leaveDate ? `&leave_date=${leaveDate}` : ''}`) } catch (e) { return { eligible: false, reason: e.message } }
+  },
+  async payUnpaidLabor(id, data) {
+    try { const r = await req('/unpaid-labor/' + id + '/pay', { method: 'POST', body: data }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
   async deleteUnpaidLabor(id) {
     try { await req('/unpaid-labor/' + id, { method: 'DELETE' }); return { ok: true } }
     catch (e) { return { ok: false, error: e.message } }
@@ -2285,6 +2327,11 @@ export const api = {
   },
 
   // 근로·용역 주문
+  parseWorkContractExcel(file) { return postImportFile('/work-contracts/import/parse', file) },
+  async commitWorkContractImport(items) {
+    try { const r = await req('/work-contracts/import/commit', { method: 'POST', body: { items } }); return { ok: true, ...r } }
+    catch (e) { return { ok: false, error: e.message } }
+  },
   async getWorkContracts(params = {}) {
     const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== '')).toString()
     try { return await req('/work-contracts' + (qs ? `?${qs}` : '')) } catch { return [] }
@@ -2582,7 +2629,7 @@ export const api = {
         route: l.id,
       })
     }
-    cmds.push({ kind: '메뉴', label: '엑셀 업로드', sub: '', keywords: '엑셀 일괄 업로드 임포트 가져오기', route: 'excel' })
+    cmds.push({ kind: '메뉴', label: '거래내역 엑셀 업로드', sub: '', keywords: '엑셀 일괄 업로드 임포트 가져오기', route: 'excel' })
     return cmds
   },
 

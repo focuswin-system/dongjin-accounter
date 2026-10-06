@@ -361,3 +361,15 @@ test('세금계산서 파일을 거래내역 업로드에 올리면 알아챈다
   assert.equal(M.looksLikeTaxInvoice([]), false)
   assert.equal(M.looksLikeTaxInvoice(null), false)
 })
+
+test('품목 — 머리 칸이 모두 빈 줄은 바로 위 계산서의 품목이다(품목 수십 개를 손으로 적을 때)', async () => {
+  const M = await loading
+  const head = { ...rowsWithItems(M)[0], [M.T.confirm]: '' }
+  const item = (name, amt) => ({ [M.T.itemName]: name, [M.T.itemQty]: '1', [M.T.itemPrice]: String(amt), [M.T.itemAmount]: String(amt) })
+  const rows = [head, item('부품 A', 100000), item('부품 B', 200000), { ...rowsWithItems(M)[2], [M.T.confirm]: '' }]
+  const grouped = M.groupHometaxRows(rows, colForSelf(M))
+  assert.strictEqual(grouped.length, 2)                    // 품목 줄 둘이 첫 계산서에 붙는다
+  assert.strictEqual(grouped[0].__lines.length, 3)
+  assert.strictEqual(grouped[0].__mergedRows, 3)
+  assert.strictEqual(grouped[1].__row, 3)
+})

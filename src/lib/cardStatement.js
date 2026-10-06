@@ -36,6 +36,15 @@ export const C = {
   cardNo: '카드번호',
   status: '상태',
   memo: '비고',
+  /* 우리 양식에만 있는 칸(2026-10-02) — 카드사 파일엔 없다. 비목·공제는 용도로 갈리고(같은 주유도 차에 따라
+     공제/불공제가 다르다), 누가·어느 차로 썼는지는 명세서에 안 나온다 */
+  category: '비목',
+  deductible: '공제 여부',
+  employee: '사용 직원',
+  vehicle: '차량',
+  /* 줄마다 카드 — 카드 여러 장을 한 파일에(2026-10-02). 비우면 업로드 화면에서 고른 카드.
+     ⚠ '카드번호'(카드사 파일의 끝자리 열)와 다른 칸이다 */
+  card: '카드',
 }
 
 export const CARD_TARGETS = Object.values(C)
@@ -47,6 +56,13 @@ export const CARD_TARGETS = Object.values(C)
  * ⚠ '승인일자'는 날짜, '승인번호'는 번호다. 둘 다 '승인'으로 시작하므로 번호를 먼저 본다.
  */
 const RULES = [
+  /* 우리 양식 칸을 **맨 앞에서** 본다 — 카드사 머리글과 겹치지 않는 이름이지만, 뒤에 두면 느슨한 규칙
+     ('사용일'·'세액' 등)이 먼저 집을 여지가 생긴다 */
+  [C.card,        /^카드$|^사용\s*카드$|^카드\s*이름$/],
+  [C.category,    /^비목$|^비목\s*명$/],
+  [C.deductible,  /공제\s*여부|매입\s*세액\s*공제|^공제$/],
+  [C.employee,    /사용\s*직원|사용자|이용자|직원|사원/],
+  [C.vehicle,     /차량|차\s*번호|차종/],
   [C.approval,    /승인\s*번호|거래\s*번호|전표\s*번호|approval/i],
   [C.date,        /이용\s*일|승인\s*일|거래\s*일|사용\s*일|매출\s*일|결제\s*일자|date/i],
   [C.bizNo,       /사업자\s*(등록)?\s*번호|biz/i],
@@ -89,6 +105,36 @@ export const installmentMonths = (v) => {
  * @param g    (라벨) => 셀 값
  * @param opts { defaultCategory }
  */
+/** '불공제'·'공제' → 0·1. 비우면 null(비목 설정을 따른다). ⚠ '불공제'에도 '공제'가 들어 있다 — 불공제를 먼저 본다 */
+export const deductibleOf = (v) => {
+  const s = String(v ?? '').trim()
+  if (!s) return null
+  if (/불공제|불|아니|^n$|^no$|^x$/i.test(s)) return 0
+  if (/공제|^y$|^yes$|^o$|예/i.test(s)) return 1
+  return null
+}
+
+/**
+ * 카드 칸 글자 → 카드 id. 비었으면 null(화면에서 고른 카드), 못 찾으면 false.
+ * 고르는 순서: 화면 이름(이름이 겹치면 끝자리가 붙은 이름) → 이름(한 장일 때만) → 끝 4자리(한 장일 때만).
+ * ⚠ 두 장 이상에 걸리면 **찾지 못한 것**으로 본다 — 첫 번째를 집으면 다른 카드에 조용히 붙는다(lib/accountLabel.js).
+ * @param cards [{ id, name, label, number }]
+ */
+export function resolveCard(text, cards = []) {
+  const s = String(text ?? '').trim()
+  if (!s) return null
+  const byLabel = cards.filter(c => c.label === s)
+  if (byLabel.length === 1) return byLabel[0].id
+  const byName = cards.filter(c => c.name === s)
+  if (byName.length === 1) return byName[0].id
+  const d = digits(s)
+  if (d.length >= 4) {
+    const t = cards.filter(c => digits(c.number).endsWith(d.slice(-4)))
+    if (t.length === 1) return t[0].id
+  }
+  return false
+}
+
 export function mapCardRow(g, opts = {}) {
   const amountRaw = intOf(g(C.amount))
   const supply = g(C.supply) !== '' ? intOf(g(C.supply)) : null
@@ -99,6 +145,7 @@ export function mapCardRow(g, opts = {}) {
   const amount = amountRaw || ((supply || 0) + (vat || 0) + tip)
   const months = installmentMonths(g(C.installment))
   const merchant = String(g(C.merchant) ?? '').trim()
+  const vehicle = String(g(C.vehicle) ?? '').trim()
 
   return {
     date: normDate(g(C.date)),
@@ -119,10 +166,17 @@ export function mapCardRow(g, opts = {}) {
     status: String(g(C.status) ?? '').trim(),
     canceled: /취소|반품|무효/.test(String(g(C.status) ?? '')),
     card_no: String(g(C.cardNo) ?? '').trim(),
-    category: opts.defaultCategory || '',
+    // 줄의 비목이 먼저, 비었으면 업로드 화면에서 한 번에 고른 비목
+    category: String(g(C.category) ?? '').trim() || opts.defaultCategory || '',
+    // 공제 여부 — 비우면 null 을 보낸다(서버가 비목 설정대로)
+    vat_deductible: deductibleOf(g(C.deductible)),
+    employee_name: String(g(C.employee) ?? '').trim(),
+    card_text: String(g(C.card) ?? '').trim(),
+    vehicle,
     /* 가맹점 이름은 **메모에 남긴다.** 거래처로 자동 등록하지 않는 편이 기본이라
        (가맹점은 수백 곳이고 대부분 한 번 쓰고 만다) 이 줄이 없으면 어디서 쓴 돈인지 사라진다. */
-    memo: [merchant, months > 1 ? `${months}개월 할부` : '', String(g(C.memo) ?? '').trim()]
+    // 차량은 기준정보가 아직 없어 **적요에 글자로** 남긴다(2026-10-02 사용자: 이번엔 글자로)
+    memo: [merchant, months > 1 ? `${months}개월 할부` : '', vehicle ? `차량: ${vehicle}` : '', String(g(C.memo) ?? '').trim()]
       .filter(Boolean).join(' · '),
   }
 }

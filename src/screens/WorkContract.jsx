@@ -1,15 +1,19 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Icon, fmtNum, useToast, useConfirm, Drawer, Combobox, StatusBadge, localToday, DateInput, fmtDateShort, useBusy } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
 import { Kpi, KpiRow } from '../lib/components/Kpi'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { DataTable } from '../lib/components/DataTable'
-import { FileAttach } from '../lib/FileAttach'
+import { AttachmentPanel } from '../lib/components/AttachmentPanel'
+import { TableToolbar } from '../lib/components/TableToolbar'
+import { useTableFilter } from '../lib/tableFilter'
+import { ImportWizard } from '../lib/components/ImportWizard'
 import { api } from '../lib/api'
 import { computeItems, monthLabel } from './HR'
 // 지급 등록 Drawer — 급여대장과 같은 컴포넌트(같은 API POST /payroll/:id/pay)
 import { PayrollPayDrawer } from '../lib/components/PayrollPayDrawer'
 import { escHtml, printHtmlDocument } from '../lib/printHtml'
+import { severanceBasisText, severanceDueDate, SEVERANCE_CAVEAT } from '../lib/severance'
 
 /* 근로·용역·일용 계약 화면.
  * 근로계약(hr_labor_contract)과 기타 용역·일용(hr_outsourcing)이 같은 work_contracts를 쓰되
@@ -58,7 +62,7 @@ const PayItemsEditor = ({ items, setItems, masters }) => {
             <span style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-2)', fontSize: 11 }}>{it.mode === 'percent' ? '%' : '원'}</span>
           </div>
           <div className="num text-sm text-muted" style={{ width: 88, textAlign: 'right' }}>
-            {kind === 'deduct' ? '-' : ''}{fmtNum(calc[idx]?.amount || 0)}
+            {kind === 'deduct' && (calc[idx]?.amount || 0) > 0 ? '−' : ''}{fmtNum(calc[idx]?.amount || 0)}
           </div>
           <button className="icon-btn" title="이 줄 지우기" style={{ width: 28, height: 28 }} onClick={() => removeItem(idx)}><Icon.Close size={13}/></button>
         </div>
@@ -76,7 +80,7 @@ const PayItemsEditor = ({ items, setItems, masters }) => {
           </div>
           <div className="ml-auto text-sm" style={{ textAlign: 'right' }}>
             <div className="text-muted">지급 합계 <b className="text-ink">{fmtNum(gross)}</b></div>
-            <div className="text-muted">공제 합계 <b className="text-warn">-{fmtNum(deduction)}</b></div>
+            <div className="text-muted">공제 합계 <b className="text-warn">{deduction > 0 ? '−' : ''}{fmtNum(deduction)}</b></div>
           </div>
         </div>
       </div>
@@ -199,59 +203,220 @@ export function printWorkPayslip(p, contract, company = '') {
   printHtmlDocument(html)
 }
 
+/* 계약기간 — 시작일이 없으면 '— ~'를 찍지 않는다(무기한만 남기면 읽힌다) */
+const termText = (r) => {
+  const st = fmtDateShort(r.start_date)
+  const en = r.end_date ? fmtDateShort(r.end_date) : (r.term_mode === 'open' ? '무기한' : '')
+  return st ? `${st} ~ ${en || '—'}` : (en || '—')
+}
+
 /* ═══════════════ 근로계약 화면 ═══════════════ */
 export const LaborContractScreen = () => {
-  const toast = useToast()
-  const { confirm } = useConfirm()
   const [rows, setRows] = useState([])
-  const [filter, setFilter] = useState('active')  // active | all
   const [drawer, setDrawer] = useState(null)       // { mode:'new'|'edit', id? }
   const [detail, setDetail] = useState(null)       // contract id
+  const [importing, setImporting] = useState(false)
+  const [earnLabels, setEarnLabels] = useState([])
+  const [employTypes, setEmployTypes] = useState([])
+  const [codes, setCodes] = useState({ dept: [], pos: [] })
 
   const load = () => api.getWorkContracts({ kind: 'labor' }).then(setRows)
   useEffect(() => { load() }, [])
+  // 업로드 확인용 목록 — 지급 항목(양식 칸)·고용형태·부서·직위
+  useEffect(() => {
+    api.getPayrollItemTypes('earn').then(r => setEarnLabels((r || []).filter(m => m.mode === 'fixed').map(m => m.label)))
+    api.getEmployTypes('labor').then(r => setEmployTypes(r || []))
+    Promise.all([api.getHrCodes('dept'), api.getHrCodes('pos')]).then(([dept, pos]) => setCodes({ dept: dept || [], pos: pos || [] }))
+  }, [])
 
-  const list = rows.filter(r => filter === 'all' || (r.emp_status !== '퇴사' && r.status === '진행중'))
+  /* 검색·필터 — 다른 목록과 같은 공용 필터 줄(2026-10-02 사용자: "검색에 필터 같은 거도 없네").
+     상태는 재직이 기본(예전 '재직/전체' 칩과 같은 출발점) */
+  const statusOf = (r) => (r.emp_status === '퇴사' || r.status !== '진행중' ? 'left' : 'active')
+  const tf = useTableFilter({
+    search: { fields: ['employee_name', 'emp_no', 'department', 'role', 'employ_type'], placeholder: '이름·사번·부서 검색' },
+    filters: [
+      { key: 'status', label: '상태', inline: true, chips: true, initial: 'active',
+        options: [{ value: 'active', label: '재직' }, { value: 'left', label: '퇴사·만료' }], match: (r, v) => statusOf(r) === v },
+      { key: 'employ_type', label: '고용형태', inline: true, chips: true, allLabel: '전체 고용형태',
+        options: [...new Set(rows.map(r => r.employ_type).filter(Boolean))].sort().map(d => ({ value: d, label: d })) },
+      { key: 'department', label: '부서', inline: true, placeholder: '전체 부서',
+        options: [...new Set(rows.map(r => r.department).filter(Boolean))].sort().map(d => ({ value: d, label: d })) },
+    ],
+  })
+  const list = useMemo(() => tf.apply(rows), [rows, tf.apply])   // eslint-disable-line react-hooks/exhaustive-deps
+  const adapter = useMemo(() => laborImportAdapter({ earnLabels, employTypes, codes }), [earnLabels, employTypes, codes])
+
+  if (importing) return (
+    <ImportWizard adapter={adapter} existing={rows}
+      onCancel={() => setImporting(false)}
+      onDone={() => { setImporting(false); load() }}/>
+  )
 
   return (
     <div className="fade-up">
       <PageHeader
         title="근로계약"
-        actions={<button className="btn primary" onClick={() => setDrawer({ mode: 'new' })}><Icon.Plus/> 직원 등록</button>}
+        actions={<>
+          <button className="btn excel" onClick={() => setImporting(true)}><Icon.Excel/> 엑셀 업로드</button>
+          <button className="btn primary" onClick={() => setDrawer({ mode: 'new' })}><Icon.Plus/> 직원 등록</button>
+        </>}
       />
 
-      <div className="card" style={{ overflow: 'hidden', marginTop: 16 }}>
-        <div className="row" style={{ padding: '14px 18px', borderBottom: '1px solid var(--line)', gap: 8 }}>
-          <div className="row gap-4">
-            {[['active', '재직'], ['all', '전체']].map(([k, lbl]) => (
-              <button key={k} className={`chip ${filter === k ? 'active' : ''}`} onClick={() => setFilter(k)}>{lbl}</button>
-            ))}
-          </div>
-          <div className="ml-auto text-sm text-muted2">{list.length}명</div>
-        </div>
+      <TableToolbar {...tf.toolbarProps} right={<span className="text-sm text-muted2" style={{ whiteSpace: 'nowrap' }}>{list.length}명</span>}/>
+      <div className="card" style={{ overflow: 'hidden', marginTop: 12 }}>
         <DataTable
+          tableKey="labor-contracts"
           rows={list}
           onRowClick={r => setDetail(r.id)}
-          empty="근로계약이 없어요. 직원을 등록하세요."
+          empty={rows.length ? '조건에 맞는 근로계약이 없어요.' : '근로계약이 없어요. 직원을 등록하거나 엑셀로 올리세요.'}
           columns={[
             { key: 'emp_no', header: '사번', sortable: true, render: r => <span className="num text-muted text-sm">{r.emp_no || '—'}</span> },
             { key: 'employee_name', header: '이름', sortable: true, render: r => <span className="fw-700">{r.employee_name}</span> },
-            { key: 'department', header: '부서', render: r => <span className="text-sm">{r.department || '—'}</span> },
+            { key: 'department', header: '부서', sortable: true, render: r => <span className="text-sm">{r.department || '—'}</span> },
+            { key: 'role', header: '직위', render: r => <span className="text-sm">{r.role || '—'}</span> },
             { key: 'employ_type', header: '고용형태', render: r => <span className="text-sm">{r.employ_type || '—'}</span> },
-            { key: 'term', header: '계약기간', render: r => <span className="text-sm text-muted">{fmtDateShort(r.start_date) || '—'}{r.end_date ? ` ~ ${fmtDateShort(r.end_date)}` : (r.term_mode === 'open' ? ' ~ (무기한)' : '')}</span> },
+            { key: 'term', header: '계약기간', render: r => <span className="text-sm text-muted">{termText(r)}</span> },
             { key: 'monthly_net', header: '월 기준급여', align: 'right', sortable: true, render: r => <span className="num-cell">{won(r.monthly_net || 0)}</span> },
             { key: 'ins', header: '4대보험', render: r => <span className="text-xs text-muted">{insBadges(r)}</span> },
-            { key: 'status', header: '상태', render: r => <StatusBadge status={r.emp_status === '퇴사' ? '퇴사' : r.status}/> },
-            { key: 'action', header: '', render: r => <button className="btn ghost sm" onClick={e => { e.stopPropagation(); setDrawer({ mode: 'edit', id: r.id }) }}>편집</button> },
+            // 정상(진행중)엔 표식을 달지 않는다 — 퇴사·만료만 배지
+            { key: 'status', header: '상태', render: r => (statusOf(r) === 'active'
+              ? <span className="text-sm text-muted">재직</span>
+              : <StatusBadge status={r.emp_status === '퇴사' ? '퇴사' : r.status}/>) },
           ]}
         />
       </div>
 
       {drawer && <LaborDrawer info={drawer} onClose={() => setDrawer(null)} onSaved={() => { setDrawer(null); load() }}/>}
       {detail && <LaborDetailDrawer id={detail} onClose={() => setDetail(null)} onChanged={load}
+        onEdit={(id) => { setDetail(null); setDrawer({ mode: 'edit', id }) }}
         onNewContract={(empId) => { setDetail(null); setDrawer({ mode: 'new', employeeId: empId }) }}/>}
     </div>
   )
+}
+
+/* ── 근로계약 엑셀 업로드 — 직원 + 근로계약(서버 routes/work-contracts.js /import/*) ──
+   ⚠ 머리글은 서버 양식과 같은 글자. 지급 항목 칸은 이 회사 표준 지급 항목(고정 금액) 이름 그대로 */
+const LB = { name: '이름', dept: '부서', role: '직위', birth: '생년월일', start: '입사일', type: '고용형태', term: '종료 방식',
+  end: '계약 종료', hours: '소정근로시간', payDay: '급여 지급일', np: '국민연금', hi: '건강보험', ei: '고용보험', ai: '산재보험',
+  account: '급여이체 계좌', memo: '메모' }
+const TERM_BY_LABEL = Object.fromEntries(Object.entries(TERM_LABEL).map(([k, v]) => [v, k]))
+const normYmd = (v) => {
+  const s = String(v ?? '').trim()
+  const m = s.match(/(\d{4})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})/)
+  if (!m) return ''
+  const [y, mo, d] = [+m[1], +m[2], +m[3]]
+  const t = new Date(y, mo - 1, d)
+  return t.getFullYear() === y && t.getMonth() === mo - 1 && t.getDate() === d ? `${m[1]}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}` : ''
+}
+// 적용/제외 → 1/0, 비우면 null(고용형태 기본값)
+const ynOf = (v) => { const s = String(v ?? '').trim(); return !s ? null : /제외|아니|^n|^x|미적용|0/i.test(s) ? 0 : 1 }
+
+const laborImportAdapter = ({ earnLabels = [], employTypes = [], codes = { dept: [], pos: [] } }) => {
+  const fixed = Object.values(LB)
+  const typeNames = new Set(employTypes.map(t => t.label))
+  const deptNames = new Set(codes.dept.map(d => d.name)), posNames = new Set(codes.pos.map(d => d.name))
+  const earnSum = (d) => Object.values(d.earns || {}).reduce((s, v) => s + (Number(v) || 0), 0)
+  return {
+    label: '근로계약',
+    title: '근로계약 엑셀 업로드',
+    sub: '직원과 근로계약을 양식에 맞춰 한 번에 등록해요.',
+    templateUrl: '/api/work-contracts/import/template',
+    templateName: '근로계약_업로드_양식.xlsx',
+    guide: {
+      intro: <>양식의 열 제목 그대로 올리면 <b>열 매핑 없이</b> 바로 검토 단계로 넘어갑니다.<br/>
+        한 줄에 직원 한 명 — 직원과 근로계약이 함께 등록돼요.</>,
+      note: <><b>첫 행(열 제목)은 수정하지 마세요.</b> 부서·직위·고용형태는 ▼ 목록에서 고르세요.<br/>
+        지급 항목(기본급·수당)은 칸에 월 금액을 적고, 공제(4대보험·세금)는 표준 항목 기본값으로 채워져요.<br/>
+        이미 등록된 직원(이름·생년월일이 같음)은 건너뜁니다 — 재계약은 상세의 [새 계약(연봉 인상)]으로 하세요.</>,
+      downloadHint: '회사 부서·직위·고용형태·지급 항목 포함',
+      rows: [
+        { col: LB.name, req: true, how: '직원 이름', ex: '홍길동' },
+        { col: LB.start, req: true, how: '계약 시작일', ex: '2026-03-02', num: true },
+        { col: `${LB.dept} · ${LB.role}`, how: '목록에서 선택', ex: '관리부 · 대리' },
+        { col: LB.birth, how: '급여명세서 표기용', ex: '1990-05-12', num: true },
+        { col: LB.type, how: '목록에서 선택 — 급여형태·4대보험 기본값이 따라옴', ex: '정규직' },
+        { col: `${LB.term} · ${LB.end}`, how: '무기한 / 기간 만료 / 자동 갱신', ex: '무기한' },
+        { col: '4대보험', how: '적용 / 제외 — 비우면 고용형태 기본값', ex: '적용' },
+        { col: earnLabels.slice(0, 3).join(' · ') || '지급 항목', how: '월 금액(원) — 이 회사 지급 항목이 칸이 됨', ex: '2,500,000', num: true },
+        { col: LB.memo, how: '특이사항', ex: '' },
+      ],
+    },
+    targets: [...fixed.filter(x => x !== LB.memo), ...earnLabels, LB.memo],
+    requiredTarget: LB.name,
+    requiredHelp: '이름과 입사일이 있어야 직원·계약을 등록할 수 있어요.',
+    guess: (h) => {
+      const s = String(h).replace(/\s/g, '')
+      const hit = [...fixed, ...earnLabels].find(t => t.replace(/\s/g, '') === s)
+      if (hit) return hit
+      if (/^성명$|^직원명$/.test(s)) return LB.name
+      if (/입사|계약시작|시작일/.test(s)) return LB.start
+      if (/생일|생년/.test(s)) return LB.birth
+      if (/계좌/.test(s)) return LB.account
+      if (/비고|메모|특이/.test(s)) return LB.memo
+      return '사용 안함'
+    },
+    parse: (file) => api.parseWorkContractExcel(file),
+    noUpdate: true,
+    mapRow: (g) => ({
+      name: g(LB.name), department: g(LB.dept), role: g(LB.role),
+      birth_date: normYmd(g(LB.birth)), start_date: normYmd(g(LB.start)),
+      employ_type: g(LB.type), term_mode: TERM_BY_LABEL[g(LB.term)] || 'open', end_date: normYmd(g(LB.end)),
+      work_hours: g(LB.hours), pay_day: parseInt(g(LB.payDay), 10) || 25,
+      insure_np: ynOf(g(LB.np)), insure_hi: ynOf(g(LB.hi)), insure_ei: ynOf(g(LB.ei)), insure_ai: ynOf(g(LB.ai)),
+      salary_account: g(LB.account), memo: g(LB.memo),
+      earns: Object.fromEntries(earnLabels.map(l => [l, asNum(g(l))])),
+    }),
+    isValid: (d) => !!String(d.name || '').trim() && !!d.start_date,
+    invalidLabel: (d) => (!String(d.name || '').trim() ? '이름 필요' : '입사일 필요'),
+    fixFields: (d) => [
+      !String(d.name || '').trim() && { key: 'name', label: '이름', kind: 'text' },
+      !d.start_date && { key: 'start_date', label: '입사일', kind: 'date' },
+    ].filter(Boolean),
+    rowWarns: (d) => [
+      d.employ_type && employTypes.length && !typeNames.has(d.employ_type) ? `고용형태 '${d.employ_type}'이(가) 목록에 없어요 — 4대보험 기본값이 안 따라와요` : null,
+      d.department && codes.dept.length && !deptNames.has(d.department) ? `부서 '${d.department}'이(가) 목록에 없어요` : null,
+      d.role && codes.pos.length && !posNames.has(d.role) ? `직위 '${d.role}'이(가) 목록에 없어요` : null,
+      earnSum(d) === 0 ? '지급 항목 금액이 모두 0이에요' : null,
+    ].filter(Boolean),
+    matchKey: (d) => `${String(d.name).trim()}|${d.birth_date || ''}`,
+    // 이미 있는 직원 — 이름+생년월일이 같으면 중복, 이름만 같으면 확인 필요(동명이인일 수 있다)
+    buildIndex: (existing) => {
+      const byKey = new Map(), byName = new Map()
+      for (const c of existing) {
+        const n = String(c.employee_name || '').trim()
+        if (c.birth_date) byKey.set(`${n}|${String(c.birth_date).slice(0, 10)}`, c)
+        if (!byName.has(n)) byName.set(n, [])
+        byName.get(n).push(c)
+      }
+      return { byKey, byName }
+    },
+    findMatch: (d, idx) => {
+      const n = String(d.name).trim()
+      const m = d.birth_date ? idx.byKey.get(`${n}|${d.birth_date}`) : null
+      if (m) return { matched: m, candidates: [] }
+      return { matched: null, candidates: idx.byName.get(n) || [] }
+    },
+    candidateLabel: (c) => ({ label: `${c.employee_name} · ${c.emp_no || ''}`, sub: [c.department, c.employ_type].filter(Boolean).join(' · ') }),
+    compareCols: [
+      ['이름', c => c.employee_name], ['사번', c => c.emp_no || '—', true], ['부서', c => c.department || '—'],
+      ['생년월일', c => c.birth_date || '—', true], ['계약기간', c => termText(c)], ['상태', c => (c.emp_status === '퇴사' ? '퇴사' : c.status)],
+    ],
+    previewCols: [
+      { header: '이름', className: 'fw-600', render: d => d.name || <span className="text-neg">—</span> },
+      { header: '부서', className: 'text-sm', render: d => d.department || <span className="text-muted2">—</span> },
+      { header: '직위', className: 'text-sm', render: d => d.role || <span className="text-muted2">—</span> },
+      { header: '입사일', className: 'num text-sm', render: d => d.start_date || <span className="text-neg">—</span> },
+      { header: '고용형태', className: 'text-sm', render: d => d.employ_type || <span className="text-muted2">—</span> },
+      { header: '4대보험', className: 'text-xs text-muted', render: d => {
+        const t = employTypes.find(x => x.label === d.employ_type)
+        const v = (k) => (d[k] === 1 || d[k] === 0 ? d[k] : (t ? t[k] : 1))
+        return insBadges({ insure_np: v('insure_np'), insure_hi: v('insure_hi'), insure_ei: v('insure_ei'), insure_ai: v('insure_ai') })
+      } },
+      { header: '월 지급 합계', className: 'num text-sm fw-600', render: d => fmtNum(earnSum(d)) },
+    ],
+    dupHelp: <>이름과 생년월일이 같은 직원이 이미 있으면 <b>중복</b>, 이름만 같으면 <b>확인 필요</b>(동명이인일 수 있어요)로 표시합니다. 기존 직원의 재계약은 상세의 [새 계약(연봉 인상)]으로 하세요.</>,
+    commit: (items) => api.commitWorkContractImport(items),
+  }
 }
 
 // 직원 + 근로계약 등록/편집 Drawer
@@ -324,7 +489,9 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
     // 편집 시 직원 인적정보도 갱신. status는 보내지 않는다 — 계약 편집이 직원의
     // 재직/퇴사 상태를 건드리면 안 된다(퇴사자 부활 방지). 서버는 미전송 상태를 유지한다.
     if (res.ok && editing && form.employee_id) {
-      await api.updateEmployee(form.employee_id, { name: form.name, department: form.department, role: form.role, birth_date: form.birth_date || null, salary_account: form.salary_account || '' })
+      const er = await api.updateEmployee(form.employee_id, { name: form.name, department: form.department, role: form.role, birth_date: form.birth_date || null, salary_account: form.salary_account || '' })
+      // 계약은 저장됐는데 인적정보만 못 고친 경우 — 조용히 넘기면 바꾼 이름·부서가 사라진 줄 모른다
+      if (!er.ok) toast.push('계약은 저장했지만 인적정보(이름·부서 등)는 저장하지 못했어요', { tone: 'warn' })
     }
     if (res.ok) { toast.push(editing ? '계약을 저장했어요' : '직원·계약을 등록했어요'); onSaved() }
     else toast.push(res.error || '저장에 실패했어요', { tone: 'warn' })
@@ -416,7 +583,7 @@ const LaborDrawer = ({ info, onClose, onSaved }) => {
 }
 
 // 근로계약 상세 Drawer (탭)
-const LaborDetailDrawer = ({ id, onClose, onChanged, onNewContract }) => {
+const LaborDetailDrawer = ({ id, onClose, onChanged, onNewContract, onEdit }) => {
   const toast = useToast()
   const { confirm } = useConfirm()
   const [c, setC] = useState(null)
@@ -433,19 +600,44 @@ const LaborDetailDrawer = ({ id, onClose, onChanged, onNewContract }) => {
   }, [c?.employee_id])
 
   if (!c) return null
-  const TABS = ['계약 정보', '급여 기준', '계약서', '계약 이력', '급여 이력', '메모']
+  // 메모는 '계약 정보' 안에 둔다(2026-10-02 사용자: "메모도 계약 정보 쪽에 있어야 하는 거 아닌가")
+  const TABS = ['계약 정보', '급여 기준', '계약서', '계약 이력', '급여 이력']
 
   const doLeave = async () => {
     const ok = await confirm({ tone: 'neg', icon: <Icon.Warn size={22}/>, title: `${c.employee_name} 퇴사 처리`,
       body: '퇴사일을 오늘로 기록하고 진행 계약을 만료합니다. 급여대장 생성 대상에서 제외돼요.', confirmLabel: '퇴사 처리' })
     if (!ok) return
     const today = localToday()
-    await api.updateEmployee(c.employee_id, { name: c.employee_name, status: '퇴사', leave_date: today })
-    await api.saveWorkContract({ id: c.id, employee_id: c.employee_id, kind: 'labor', income_type: '근로', title: c.title,
+    /* 직원 퇴사일을 먼저 — 실패하면 계약을 만료시키지 않는다(계약만 끝나고 직원은 재직으로 남는 어긋남) */
+    const er = await api.updateEmployee(c.employee_id, { name: c.employee_name, status: '퇴사', leave_date: today })
+    if (!er.ok) return toast.push('직원 퇴사 처리를 하지 못했어요 — 권한이나 연결을 확인하세요', { tone: 'warn' })
+    const cr = await api.saveWorkContract({ id: c.id, employee_id: c.employee_id, kind: 'labor', income_type: '근로', title: c.title,
       employ_type_id: c.employ_type_id, employ_type: c.employ_type, start_date: c.start_date, end_date: c.end_date,
       term_mode: c.term_mode, pay_form: c.pay_form, pay_day: c.pay_day, pay_items: c.pay_items, status: '만료',
       insure_np: c.insure_np, insure_hi: c.insure_hi, insure_ei: c.insure_ei, insure_ai: c.insure_ai })
-    toast.push('퇴사 처리했어요'); onChanged?.(); onClose()
+    // 직원은 퇴사인데 계약이 진행중으로 남으면 — 알리고 퇴직금 단계로 넘어가지 않는다(검토)
+    if (cr && cr.ok === false) {
+      toast.push(`직원은 퇴사로 바꿨는데 계약을 만료하지 못했어요 — 계약 수정에서 상태를 '만료'로 바꿔 주세요. (${cr.error || '저장 실패'})`, { tone: 'warn' })
+      onChanged?.(); return
+    }
+    toast.push('퇴사 처리했어요')
+    /* 퇴직금 — 퇴사 처리한 그 자리에서 예상액을 계산해 '미지급 퇴직금'에 올릴지 묻는다
+       (2026-10-02 사용자 합의: 계산은 예상액, 사람이 확인). 1년 미만이면 대상이 아니라고만 알린다 */
+    const est = await api.getSeveranceEstimate(c.employee_id, today)
+    if (est?.eligible) {
+      const reg = await confirm({
+        tone: 'brand', icon: <Icon.Wallet size={22}/>, title: '퇴직금 등록',
+        body: `예상 퇴직금 ${fmtNum(est.amount)}원을 미지급 퇴직금에 등록할까요?`,
+        detail: `${severanceBasisText(est)}. ${SEVERANCE_CAVEAT} 지급 기한은 퇴사일부터 14일(${severanceDueDate(today)})로 잡아요.`,
+        confirmLabel: '등록', cancelLabel: '나중에',
+      })
+      if (reg) {
+        const r = await api.addUnpaidLabor({ employee_id: c.employee_id, name: c.employee_name, status: 'retired',
+          amount: est.amount, paid_amount: 0, due_date: severanceDueDate(today), memo: severanceBasisText(est) })
+        toast.push(r.ok ? '미지급 퇴직금에 등록했어요 — 급여·임금에서 지급할 수 있어요' : (r.error || '퇴직금을 등록하지 못했어요'), r.ok ? undefined : { tone: 'warn' })
+      }
+    } else if (est?.reason) toast.push(`퇴직금: ${est.reason}`)
+    onChanged?.(); onClose()
   }
 
   const doDelete = async () => {
@@ -487,7 +679,8 @@ const LaborDetailDrawer = ({ id, onClose, onChanged, onNewContract }) => {
   }
 
   return (
-    <Drawer open={true} onClose={onClose} width="min(680px, 100vw)">
+    /* 넓게·높이 고정 — 급여 기준(지급|공제)이 나란히 서고, 탭을 옮겨도 창이 커졌다 작아졌다 하지 않는다 */
+    <Drawer open={true} onClose={onClose} size="xl" height="min(820px, 92vh)">
       <DrawerHead
         title={<>{c.employee_name} <span className="text-muted" style={{ fontSize: 13, fontWeight: 400 }}>· {c.employ_type || '근로계약'}</span></>}
         sub={<>{c.emp_no || ''} · {c.department || '—'} · {c.emp_status === '퇴사' ? '퇴사' : c.status}</>}
@@ -499,16 +692,20 @@ const LaborDetailDrawer = ({ id, onClose, onChanged, onNewContract }) => {
 
       <div className="drawer-body">
         {tab === '계약 정보' && (
+          <div className="split-2">
           <div className="col gap-form">
             <InfoRow label="고용형태" value={c.employ_type || '—'}/>
             <InfoRow label="소득구분" value={INCOME_LABEL[c.income_type] || c.income_type}/>
-            <InfoRow label="계약기간" value={`${fmtDateShort(c.start_date) || '—'}${c.end_date ? ` ~ ${fmtDateShort(c.end_date)}` : (c.term_mode === 'open' ? ' ~ (무기한)' : '')}`}/>
+            <InfoRow label="계약기간" value={termText(c)}/>
             <InfoRow label="종료방식" value={TERM_LABEL[c.term_mode]}/>
             <InfoRow label="급여형태" value={FORM_LABEL[c.pay_form] || c.pay_form}/>
             <InfoRow label="소정근로시간" value={c.work_hours || '—'}/>
             <InfoRow label="급여 지급일" value={c.pay_day ? `매월 ${c.pay_day}일` : '—'}/>
             <InfoRow label="4대보험" value={insBadges(c)}/>
             <InfoRow label="월 기준급여" value={won(computeItems(c.pay_items || []).net)}/>
+          </div>
+          {/* 메모 — 계약 정보 옆에서 바로 적는다 */}
+          <WorkContractMemoTab contract={c} onSaved={load}/>
           </div>
         )}
         {tab === '급여 기준' && <LaborPayItemsTab contract={c} onSaved={() => { load(); onChanged?.() }}/>}
@@ -538,7 +735,6 @@ const LaborDetailDrawer = ({ id, onClose, onChanged, onNewContract }) => {
             ))}
           </div>
         )}
-        {tab === '메모' && <WorkContractMemoTab contract={c} onSaved={load}/>}
       </div>
 
       <div className="drawer-foot">
@@ -554,6 +750,8 @@ const LaborDetailDrawer = ({ id, onClose, onChanged, onNewContract }) => {
             : undefined}
           onClick={doDelete}>삭제</button>
         <div className="ml-auto row gap-8">
+          {/* 목록의 '편집' 칸을 없애고 여기로 — 줄을 누르면 상세, 고치기는 상세에서(다른 화면과 같은 흐름) */}
+          {onEdit && <button className="btn" onClick={() => onEdit(c.id)}><Icon.Pencil size={13}/> 계약 수정</button>}
           <button className="btn" onClick={() => onNewContract(c.employee_id)}><Icon.Plus size={13}/> 새 계약(연봉 인상)</button>
         </div>
       </div>
@@ -579,18 +777,25 @@ const LaborPayItemsTab = ({ contract, onSaved }) => {
   )
 }
 
+/* 계약서 — 왼쪽 목록 · 오른쪽 미리보기(PDF·이미지). 거래·세금계산서 증빙과 같은 판(AttachmentPanel) */
 const WorkContractDocsTab = ({ contract, onChanged }) => {
+  const toast = useToast()
   const [docs, setDocs] = useState(contract.attachments || [])
-  const add = async (doc) => {
-    const res = await api.addWorkContractDoc(contract.id, { url: doc.url, name: doc.name })
-    if (res.ok) setDocs(d => [...d, { id: res.id, url: doc.url, name: doc.name }])
+  const upload = async (file) => {
+    const up = await api.uploadFile(file)
+    if (!up?.url) return toast.push(up?.error || '업로드에 실패했어요', { tone: 'warn' })
+    const name = up.originalName || file.name
+    const res = await api.addWorkContractDoc(contract.id, { url: up.url, name })
+    if (res.ok) setDocs(d => [...d, { id: res.id, url: up.url, name, size: up.size || file.size }])
+    else toast.push(res.error || '계약서를 붙이지 못했어요', { tone: 'warn' })
     onChanged?.()
   }
   const remove = async (doc) => {
     if (doc.id) await api.deleteWorkContractDoc(doc.id)
     setDocs(d => d.filter(x => x.url !== doc.url)); onChanged?.()
   }
-  return <FileAttach docs={docs} onAdd={add} onRemove={remove} label="계약서를 끌어다 놓거나 클릭해서 추가" hint="근로·용역 계약서 (PDF·이미지·문서)"/>
+  return <AttachmentPanel files={docs} onUpload={upload} onRemove={remove} height={560}
+    empty="올린 계약서가 없어요. 근로·용역 계약서(PDF·이미지)를 추가해 주세요."/>
 }
 
 const WorkContractMemoTab = ({ contract, onSaved }) => {
@@ -602,8 +807,11 @@ const WorkContractMemoTab = ({ contract, onSaved }) => {
   }
   return (
     <div>
-      <textarea className="input" style={{ minHeight: 160, resize: 'vertical' }} value={memo} onChange={e => setMemo(e.target.value)} placeholder="특이사항·비고"/>
-      <div className="row" style={{ marginTop: 12 }}><button className="btn primary ml-auto" onClick={save}>메모 저장</button></div>
+      <div className="label">메모</div>
+      <textarea className="input" style={{ minHeight: 180, resize: 'vertical' }} value={memo} onChange={e => setMemo(e.target.value)} placeholder="특이사항·비고"/>
+      <div className="row" style={{ marginTop: 10 }}>
+        <button className="btn ml-auto" disabled={memo === (contract.memo || '')} onClick={save}>메모 저장</button>
+      </div>
     </div>
   )
 }

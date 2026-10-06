@@ -6,6 +6,8 @@ const { pageParams, buildWhere, inClause, docDateExpr } = require('../lib/pagedL
 const { usedSourceMap, duplicateSourceError } = require('../lib/settleSources')
 const approvalEngine = require('../lib/approval')
 const { withTx, httpError } = require('../lib/withTx')
+const { attachRoutes, removeAllFor, removeFilesIfUnused } = require('../lib/attachments')
+const { printLayoutRoutes, removeLayoutFor } = require('../lib/printLayouts')
 
 const router = Router()
 
@@ -164,16 +166,25 @@ router.put('/:id', async (req, res, next) => {
 router.delete('/:id', async (req, res, next) => {
   try {
     /* 잠그고 확인한 뒤 지운다 — 확인과 삭제 사이에 상신이 끼면, 문서는 지워지고 '진행' 결재만 결재함에 남는다 */
+    let files = []
     await withTx(req.db, async (conn) => {
       const [[cur]] = await conn.execute('SELECT status FROM settlements WHERE id = ? FOR UPDATE', [req.params.id])
       if (cur?.status === '결재중') throw httpError(409, '결재 중인 정산내역서예요. 먼저 회수해 주세요.')
       await approvalEngine.assertNoActive(conn, 'settlement', req.params.id)
       await conn.execute('DELETE FROM settlement_lines WHERE settlement_id = ?', [req.params.id])
       await conn.execute('DELETE FROM settlements WHERE id = ?', [req.params.id])
+      files = await removeAllFor(conn, 'settlement', req.params.id)   // 첨부 행 — 파일은 커밋 뒤에
+      await removeLayoutFor(conn, 'settlement', req.params.id)
       await approvalEngine.voidAll(conn, 'settlement', req.params.id)
     })
+    await removeFilesIfUnused(req.db, files, req.user?.companyId)
     res.json({ ok: true })
   } catch (e) { next(e) }
 })
+
+// 첨부(증빙) — 공용 표, 권한은 이 경로를 따른다
+attachRoutes(router, 'settlement')
+// 인쇄 배치(인쇄 양식 편집기)
+printLayoutRoutes(router, 'settlement')
 
 module.exports = router

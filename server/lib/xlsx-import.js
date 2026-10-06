@@ -70,7 +70,7 @@ function parseSheet(buffer) {
     throw new ImportFormatError('엑셀 파일을 열지 못했어요. 파일이 깨졌는지 확인해주세요.')
   }
   const sheet = wb.Sheets[wb.SheetNames[0]]
-  if (!sheet) throw new ImportFormatError('시트가 없는 파일이에요. 양식을 내려받아 채워서 올려주세요.')
+  if (!sheet) throw new ImportFormatError('시트가 없는 파일이에요. 양식을 다운로드해 채워서 올려주세요.')
 
   const json = xlsx.utils.sheet_to_json(sheet, { defval: '', raw: false })
   // 값이 하나도 없는 행(엑셀 하단 빈 줄)은 버린다 — 미리보기에서 '상호명 없음' 오류로 잡히면 지저분하다

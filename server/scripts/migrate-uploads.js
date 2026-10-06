@@ -20,16 +20,8 @@ const { platformPool, withAdmin } = require('../platform/db')
 const CHECK_ONLY = process.argv.includes('--check')
 const UPLOAD_ROOT = path.join(__dirname, '..', 'uploads')
 
-// (테이블, URL 컬럼) — 첨부 경로가 저장되는 모든 자리
-const URL_COLUMNS = [
-  ['invoice_docs',       'url'],
-  ['contract_docs',      'url'],
-  ['transaction_docs',   'url'],
-  ['work_contract_docs', 'file_url'],
-  ['transactions',       'evid_url'],
-  ['ref_items',          'file_url'],
-  ['contracts',          'file_url'],
-]
+// (테이블, URL 컬럼) — 첨부 경로가 저장되는 모든 자리. 원본은 lib/attachments.js 한 곳
+const { URL_COLUMNS } = require('../lib/attachments')
 
 async function main() {
   console.log('━'.repeat(64))

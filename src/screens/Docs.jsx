@@ -31,6 +31,9 @@ import { looksLikeTaxInvoice } from '../lib/hometax'
 import { useOrdersFromMes } from '../lib/customModules'
 import { normVendorName, isSimilarVendorName } from '../lib/normalize'
 import { ReconcileHint } from '../lib/components/ReconcileHint'
+import { DocAttachButton } from '../lib/components/DocAttachments'
+import { PrintWizardButton, domForm, voucherForm, docFiles } from '../lib/components/PrintWizard'
+import { ImportSteps, ImportGuideCard, ImportResultView, downloadWithAuth } from '../lib/components/ImportGuide'
 import { PrintButton } from '../lib/components/PrintButton'
 import { copySeedOf, resolutionTotalOf } from '../lib/docCopy'
 import { PrintEditButton } from '../lib/components/PrintEditButton'
@@ -881,7 +884,12 @@ export const ResolutionPreview = ({ doc, company, onSaved, onDeleted, goRoute, o
             )}
             {!done && !inApproval && <button className="btn" onClick={startEdit}><Icon.Pencil size={14}/> 편집</button>}
             {onCopy && <button className="btn" onClick={onCopy} title="이 결의서를 본떠 새로 써요"><Icon.Copy size={14}/> 복사</button>}
+            <DocAttachButton ownerType="resolution" ownerId={doc.id} title={`지급결의서 ${doc.doc_no} 증빙`}/>
             <button className="btn" onClick={doPrint}><Icon.Print/> 인쇄</button>
+            {/* 결의서 + 전표 + 증빙 한 묶음 — 결의서 종이는 화면에 보이는 그대로 복사한다 */}
+            <PrintWizardButton title={`지급결의서 ${doc.doc_no} 인쇄`} label="인쇄 편집" layoutKey={{ ownerType: 'resolution', ownerId: doc.id }}
+              forms={[domForm({ key: 'reso', label: `지급결의서 ${doc.doc_no}` }), ...(doc.txn_id ? [voucherForm({ txnId: doc.txn_id })] : [])]}
+              getFiles={docFiles('resolution', doc.id)}/>
           </>
         )}
       </DocToolbar>
@@ -1039,7 +1047,7 @@ export const EvidenceScreen = ({ onAttach }) => {
       <PageHeader
         title="증빙 관리"
         actions={<>
-          <button className="btn" onClick={() => toast.push("증빙 파일을 ZIP으로 내려받았어요")}><Icon.Download/> 일괄 내려받기</button>
+          <button className="btn" onClick={() => toast.push("증빙 파일을 ZIP으로 다운로드했어요")}><Icon.Download/> 일괄 다운로드</button>
           <button className="btn primary" onClick={() => toast.push("파일 선택 창을 열었어요")}><Icon.Upload/> 파일 업로드</button>
         </>}
       />
@@ -1270,127 +1278,54 @@ const RESULT_LABEL = {
   inserted: '등록', error: '등록 불가', pulled: '제외',
   future: '미래 일자', closed: '마감 월', amount: '금액 오류', beforeStart: '장부 시작일 이전', duplicate: '중복 거래',
 }
+/* 생김새는 공용(ImportResultView) — 세금계산서·카드 명세서·기준정보 업로드와 같은 결과 화면이다.
+   여기엔 거래내역만의 칸(구분·비목·계좌)과 거래처 판정만 둔다 */
 const ImportResult = ({ result, goRoute, onAgain }) => {
-  const [show, setShow] = useState('all')   // all | ok | no
-  const [q, setQ] = useState('')
   const rows = result.rows || []
-  const ok = rows.filter(r => r.out.status === 'inserted')
-  const no = rows.filter(r => r.out.status !== 'inserted')
+  const isOk = (r) => r.out.status === 'inserted'
+  const ok = rows.filter(isOk)
   const why = (r) => r.out.status === 'error'
     ? [...new Set(r.errs)].map(e => ERR_LABEL[e] || e).join(' · ')
     : r.out.status === 'beforeStart' ? '장부 시작일 이전 — 기초잔액에 포함'
     : RESULT_LABEL[r.out.status] || r.out.status
-  const vendorOf = (r) => r.out.vendor
-  const created = [...new Set(ok.filter(r => vendorOf(r) === 'created').map(r => r.vendor))]
-  const linked = result.linkedVendors || []
-  const existing = [...new Set(ok.filter(r => vendorOf(r) === 'existing').map(r => r.vendor))]
-  const unclear = [...new Set(ok.filter(r => vendorOf(r) === 'ambiguous').map(r => r.vendor))]
-
-  const kw = q.trim().toLowerCase()
-  const list = (show === 'ok' ? ok : show === 'no' ? no : rows).filter(r => !kw
-    || [r.vendor, r.category, r.memo, r.acctName, r.contract].some(v => String(v || '').toLowerCase().includes(kw)))
-
+  const namesBy = (st) => [...new Set(ok.filter(r => r.out.vendor === st).map(r => r.vendor))]
   return (
-    <div className="col gap-16 fade-up">
-      <div className="card card-pad row gap-16" style={{ alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ width: 44, height: 44, borderRadius: 12, background: "var(--pos-soft)", color: "var(--pos)", display: "grid", placeItems: "center" }}><Icon.Check size={22}/></div>
-        <div>
-          <div className="fw-700" style={{ fontSize: 16 }}>{ok.length}건이 등록됐어요</div>
-          <div className="text-sm text-muted" style={{ marginTop: 2 }}>
-            {no.length > 0 ? `등록 불가 ${no.length}건 — 아래 업로드 내역에서 확인할 수 있습니다` : '업로드한 행이 모두 등록됐습니다'}
-          </div>
+    <ImportResultView
+      headline={`${ok.length}건이 등록됐어요`} noCount={rows.length - ok.length}
+      viewLabel="거래내역에서 보기" onView={() => goRoute?.('ledger')} onAgain={onAgain}
+      /* 다음 할 일 — 세금계산서와 이을 입금·지급이 있으면(서버 판정) 대사로 */
+      extra={<ReconcileHint goRoute={goRoute}/>}
+      vendors={{ created: namesBy('created'), linked: result.linkedVendors || [], existing: namesBy('existing'),
+        unclear: namesBy('ambiguous'), unclearHelp: '동일 이름 거래처가 여러 곳입니다 — 거래내역에서 지정해 주세요' }}
+      vendorNote={result.ambiguous?.some(a => a.startsWith('주문')) && (
+        <div className="text-xs text-muted">
+          주문명 중복으로 연결하지 못한 항목: {result.ambiguous.filter(a => a.startsWith('주문')).join(' · ')} — 거래내역에서 연결해 주세요.
         </div>
-        <div className="row gap-8 ml-auto">
-          <button className="btn" onClick={() => goRoute?.('ledger')}>거래내역에서 보기</button>
-          <button className="btn primary" onClick={onAgain}>새 파일 업로드</button>
-        </div>
-      </div>
-
-      {/* 다음 할 일 — 세금계산서와 이을 입금·지급이 있으면(서버 판정) 대사로 */}
-      <ReconcileHint goRoute={goRoute}/>
-
-      {/* 거래처 — 새로 만든 곳·이어 붙인 곳. 오타로 생긴 거래처는 여기서 바로 눈에 띈다 */}
-      <div className="card card-pad col gap-12">
-        <div className="section-title">거래처</div>
-        <div className="form-grid-2">
-          <div>
-            <div className="text-sm fw-700">거래처 자동 등록 (신규) {created.length}곳</div>
-            <div className="text-xs text-muted2" style={{ margin: "2px 0 6px" }}>미등록 거래처를 신규 등록했습니다</div>
-            <div className="row gap-6" style={{ flexWrap: "wrap" }}>
-              {created.length ? created.map(n => <span key={n} className="badge outline">{n}</span>) : <span className="text-sm text-muted2">없음</span>}
-            </div>
-          </div>
-          <div>
-            <div className="text-sm fw-700">거래처 자동 매칭 {linked.length + existing.length}곳</div>
-            <div className="text-xs text-muted2" style={{ margin: "2px 0 6px" }}>
-              기존 거래처에 연결했습니다{linked.length ? ` — ${linked.length}곳은 법인 표기·띄어쓰기 차이` : ''}
-            </div>
-            <div className="row gap-6" style={{ flexWrap: "wrap" }}>
-              {linked.map(l => <span key={l.from} className="badge outline">{l.from} → {l.to}</span>)}
-              {existing.map(n => <span key={n} className="badge outline">{n}</span>)}
-              {!linked.length && !existing.length && <span className="text-sm text-muted2">없음</span>}
-            </div>
-          </div>
-          {unclear.length > 0 && (
-            <div>
-              <div className="text-sm fw-700">거래처 미지정 {unclear.length}곳</div>
-              <div className="text-xs text-muted2" style={{ margin: "2px 0 6px" }}>동일 이름 거래처가 여러 곳입니다 — 거래내역에서 지정해 주세요</div>
-              <div className="row gap-6" style={{ flexWrap: "wrap" }}>
-                {unclear.map(n => <span key={n} className="badge warn">{n}</span>)}
-              </div>
-            </div>
-          )}
-        </div>
-        {result.ambiguous?.some(a => a.startsWith('주문')) && (
-          <div className="text-xs text-muted">
-            주문명 중복으로 연결하지 못한 항목: {result.ambiguous.filter(a => a.startsWith('주문')).join(' · ')} — 거래내역에서 연결해 주세요.
-          </div>
-        )}
-      </div>
-
-      {/* 올린 줄 전부 — 거르기·찾기 */}
-      <div className="card">
-        <div className="row gap-8" style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", flexWrap: "wrap", alignItems: "center" }}>
-          <div className="section-title">업로드 내역</div>
-          <div className="row gap-6" style={{ marginLeft: 8 }}>
-            {[['all', `전체 ${rows.length}`], ['ok', `등록 ${ok.length}`], ['no', `등록 불가 ${no.length}`]].map(([v, l]) => (
-              <button key={v} className={`chip ${show === v ? 'active' : ''}`} onClick={() => setShow(v)}>{l}</button>
-            ))}
-          </div>
-          <div className="search tbar-search ml-auto">
-            <Icon.Search size={14}/>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="거래처·비목·메모·계좌 검색"/>
-          </div>
-        </div>
-        <DataTable
-          rows={list}
-          rowKey={r => r.idx}
-          maxHeight={520}
-          empty="해당 내역이 없습니다."
-          rowClass={r => (r.out.status === 'inserted' ? undefined : 'imp-err')}
-          columns={[
-            { key: 'idx', header: '행', width: 48, sortable: true, render: r => <span className="num text-muted2">{r.idx + 2}</span> },
-            { key: 'date', header: '날짜', sortable: true, render: r => <span className="num text-sm">{r.date || r.rawDate || '—'}</span> },
-            { key: 'vendor', header: '거래처', sortable: true, render: r => (
-              <><span className="fw-600">{r.vendor || '—'}</span>
-                {r.out.vendor === 'created' && <Sub>신규</Sub>}
-                {r.out.vendor === 'linked' && <Sub>→ {r.out.vendorTo}</Sub>}
-                {r.out.vendor === 'ambiguous' && <Sub>미지정</Sub>}</>
-            ) },
-            { key: 'kind', header: '구분', render: r => (r.kind ? (r.kind === 'income' ? '입금' : '지출') : (r.rawKind || '—')) },
-            { key: 'category', header: '비목', sortable: true, render: r => r.category || '—' },
-            { key: 'amount', header: '금액', align: 'right', sortable: true, sortValue: r => r.amount ?? -1,
-              render: r => <span className="num-cell">{r.amount != null ? fmtNum(r.amount) : (r.rawAmount || '—')}</span> },
-            { key: 'acct', header: '계좌', render: r => r.acctName || '—' },
-            { key: 'out', header: '결과', sortable: true, sortValue: r => (r.out.status === 'inserted' ? 1 : 0),
-              render: r => (r.out.status === 'inserted'
-                ? <span className="badge pos"><Icon.Check size={11}/> 등록</span>
-                : r.out.status === 'pulled'
-                  ? <span className="badge outline">제외{r.warns?.some(w => w.short === '이미 등록됨') ? ' · 중복 의심' : ''}</span>
-                  : <span className="badge neg"><Icon.Close size={11}/> {why(r)}</span>) },
-          ]}/>
-      </div>
-    </div>
+      )}
+      rows={rows} rowKey={r => r.idx} isOk={isOk}
+      searchOf={r => [r.vendor, r.category, r.memo, r.acctName, r.contract].join(' ')}
+      searchPlaceholder="거래처·비목·메모·계좌 검색"
+      columns={[
+        { key: 'idx', header: '행', width: 48, sortable: true, render: r => <span className="num text-muted2">{r.idx + 2}</span> },
+        { key: 'date', header: '날짜', sortable: true, render: r => <span className="num text-sm">{r.date || r.rawDate || '—'}</span> },
+        { key: 'vendor', header: '거래처', sortable: true, render: r => (
+          <><span className="fw-600">{r.vendor || '—'}</span>
+            {r.out.vendor === 'created' && <Sub>신규</Sub>}
+            {r.out.vendor === 'linked' && <Sub>→ {r.out.vendorTo}</Sub>}
+            {r.out.vendor === 'ambiguous' && <Sub>미지정</Sub>}</>
+        ) },
+        { key: 'kind', header: '구분', render: r => (r.kind ? (r.kind === 'income' ? '입금' : '지출') : (r.rawKind || '—')) },
+        { key: 'category', header: '비목', sortable: true, render: r => r.category || '—' },
+        { key: 'amount', header: '금액', align: 'right', sortable: true, sortValue: r => r.amount ?? -1,
+          render: r => <span className="num-cell">{r.amount != null ? fmtNum(r.amount) : (r.rawAmount || '—')}</span> },
+        { key: 'acct', header: '계좌', render: r => r.acctName || '—' },
+        { key: 'out', header: '결과', sortable: true, sortValue: r => (isOk(r) ? 1 : 0),
+          render: r => (isOk(r)
+            ? <span className="badge pos"><Icon.Check size={11}/> 등록</span>
+            : r.out.status === 'pulled'
+              ? <span className="badge outline">제외{r.warns?.some(w => w.short === '이미 등록됨') ? ' · 중복 의심' : ''}</span>
+              : <span className="badge neg"><Icon.Close size={11}/> {why(r)}</span>) },
+      ]}/>
   )
 }
 
@@ -1586,6 +1521,10 @@ export const ExcelScreen = ({ goRoute }) => {
     /* 비목이 목록에 없거나 방향이 반대면 계정과목이 비어 전표가 한 다리로 선다 — 계정과목을 직접 적었으면 괜찮다 */
     if (category && kind && !code && !catOk(category, kind)) errs.push("비목")
     // 경고(등록은 된다) — 공급가액+부가세가 금액과 안 맞으면 서버가 금액에서 다시 계산한다(lib/vat.js)
+    /* 고치는 칸 — 지금 틀린 칸 + **이미 고친 칸.** 고친 칸을 빼면 한 글자 치는 순간 오류가 풀려 입력칸이 사라지고
+       반쯤 친 값(금액 5원 등)으로 등록됐다(2026-10-02 검토 P1) */
+    const KEY_ERR = { date: ['날짜', '미래'], amount: ['금액'], kind: ['구분'], account_id: ['계좌'], account_code: ['계정과목'], category: ['비목'] }
+    const editErrs = [...new Set([...errs, ...Object.keys(f).flatMap(k => KEY_ERR[k] || [])])]
     const sup = normAmount(g("공급가액")), vt = normAmount(g("부가세"))
     const warns = []
     if (sup != null && vt != null && amount != null && sup + vt !== amount)
@@ -1601,7 +1540,7 @@ export const ExcelScreen = ({ goRoute }) => {
       warns,
       supply_amount: normAmount(g("공급가액")),
       vat_amount: normAmount(g("부가세")),
-      memo: String(g("메모") || '').trim(), errs,
+      memo: String(g("메모") || '').trim(), errs, editErrs,
     }
   })
 
@@ -1731,36 +1670,16 @@ export const ExcelScreen = ({ goRoute }) => {
     toast.push(`${res.inserted}건이 등록됐어요`)
   }
 
-  const downloadTemplate = async () => {
-    try {
-      const token = localStorage.getItem('token')
-      const res = await fetch('/api/transactions/import/template', { headers: token ? { Authorization: 'Bearer ' + token } : {} })
-      if (!res.ok) throw new Error()
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob); const a = document.createElement('a')
-      a.href = url; a.download = '거래내역_업로드_양식.xlsx'; a.click(); URL.revokeObjectURL(url)
-    } catch { toast.push('양식 다운로드에 실패했어요', { tone: 'warn' }) }
-  }
+  const downloadTemplate = () => downloadWithAuth('/api/transactions/import/template', '거래내역_업로드_양식.xlsx')
+    .catch(e => toast.push(e.message, { tone: 'warn' }))
 
   return (
     <div className="fade-up import-wrap">
-      <PageHeader title="엑셀 업로드"/>
+      <PageHeader title="거래내역 엑셀 업로드"/>
 
-      <div className="row gap-12" style={{ marginBottom: 20 }}>
-        {[{ n: 1, t: "양식 다운로드" }, { n: 2, t: "파일 업로드" }, { n: 3, t: "열 매핑 · 검증" }, { n: 4, t: "등록 완료" }].map((s, i, arr) => (
-          <Fragment key={s.n}>
-            {/* 파일을 올리기 전에는 1단계로 돌아갈 수 있다(양식 안내를 다시 보려고) */}
-            <div className="row gap-8" style={{ opacity: stage >= s.n ? 1 : 0.4, cursor: s.n === 1 && stage === 2 ? "pointer" : undefined }}
-              onClick={s.n === 1 && stage === 2 ? () => setStarted(false) : undefined}>
-              <div style={{ width: 28, height: 28, borderRadius: "50%", background: stage >= s.n ? "var(--ink)" : "var(--surface)", color: stage >= s.n ? "var(--surface)" : "var(--muted)", border: "1px solid var(--line-strong)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: 12 }}>
-                {stage > s.n ? <Icon.Check size={14}/> : s.n}
-              </div>
-              <div className={`text-sm ${stage >= s.n ? "fw-700" : "text-muted"}`}>{s.t}</div>
-            </div>
-            {i < arr.length - 1 && <div style={{ flex: 1, height: 1, background: "var(--line)" }}/>}
-          </Fragment>
-        ))}
-      </div>
+      {/* 파일을 올리기 전에는 1단계로 돌아갈 수 있다(양식 안내를 다시 보려고) */}
+      <ImportSteps steps={["양식 다운로드", "파일 업로드", "열 매핑 · 검증", "등록 완료"]} stage={stage}
+        canGo={n => n === 1 && stage === 2} onStep={() => setStarted(false)}/>
 
       <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={e => onFile(e.target.files[0])}/>
 
@@ -1771,62 +1690,16 @@ export const ExcelScreen = ({ goRoute }) => {
            예전엔 첫 화면이 곧 파일 올리기라, 양식은 오른쪽 위 버튼으로만 있었다 */
         /* 폭을 다 쓴다 — 가운데 좁게 두었더니 양옆이 비어 덩그러니 떠 보였다(2026-09-30 사용자).
            왼쪽 설명·주의 | 오른쪽 칸 안내 표. 좁으면 위아래로 */
-        <div className="card card-pad col gap-20">
-          <div className="xl-guide">
-            <div className="col gap-16">
-              <div>
-                <div className="section-title" style={{ marginBottom: 6 }}>업로드 양식을 내려받아 작성해 주세요</div>
-                <div className="text-sm text-muted" style={{ lineHeight: 1.7 }}>
-                  양식의 열 제목 그대로 업로드하면 <b>열 매핑 없이</b> 바로 검증 단계로 넘어갑니다.<br/>
-                  은행·회계 프로그램에서 내려받은 파일도 업로드할 수 있습니다 — 이 경우 열을 직접 매핑합니다.
-                </div>
-              </div>
-
-              <div className="man-note" style={{ margin: 0 }}>
-                <Icon.Help size={15}/>
-                <div style={{ lineHeight: 1.7 }}>
-                  <b>첫 행(열 제목)은 수정하지 마세요.</b> 열 제목으로 항목을 인식합니다.<br/>
-                  셀을 선택하면 <b>작성 방법과 예시</b>가 표시됩니다. ▼ 표시 항목은 목록에서 선택하세요.<br/>
-                  계좌·비목 목록은 양식의 <b>'계좌 목록'·'비목 목록'</b> 시트를 참고하세요.
-                </div>
-              </div>
-
-              {/* 이 단계의 주된 일은 '받기'다 — 가장 눈에 띄게, 안내를 다 읽은 자리 바로 밑에 */}
-              <div className="row gap-12" style={{ alignItems: "center" }}>
-                <button className="btn primary" style={{ padding: "12px 20px", fontSize: 14 }} onClick={downloadTemplate}>
-                  <Icon.Download size={16}/> 양식 다운로드
-                </button>
-                <span className="text-xs text-muted2">회사 계좌·비목 목록 포함</span>
-              </div>
-            </div>
-            <div>
-              <div className="fw-700 text-sm" style={{ marginBottom: 8 }}>작성 방법</div>
-              <div className="table-scroll">
-                {/* 촘촘한 표 — 안내가 길어져 [다운로드]·[다음 단계]가 화면 밖으로 밀리면 안 된다 */}
-                <table className="table table-compact">
-                  <thead><tr><th style={{ width: 200 }}>항목</th><th>작성 방법</th><th style={{ width: 200 }}>예시</th></tr></thead>
-                  <tbody>
-                    {TEMPLATE_GUIDE.filter(g => !(g.orders && ordersFromMes)).map(g => (
-                      <tr key={g.col}>
-                        <td className="fw-600">{g.col}{g.req && <span style={{ color: "var(--neg-ink)" }}> *</span>}</td>
-                        <td className="text-sm">{g.how}</td>
-                        <td className={`text-sm text-muted${g.num ? ' num' : ''}`}>{g.ex}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="text-xs text-muted2" style={{ marginTop: 6 }}>* 필수 항목</div>
-            </div>
-
-          </div>
-          <div className="row gap-8" style={{ borderTop: "1px solid var(--line)", paddingTop: 16 }}>
-            <span className="text-sm text-muted">양식 작성을 마쳤으면</span>
-            <button className="btn ml-auto" onClick={() => setStarted(true)}>
-              다음 단계 — 파일 업로드 <Icon.Right size={14}/>
-            </button>
-          </div>
-        </div>
+        <ImportGuideCard
+          title="업로드 양식을 다운로드해 작성해 주세요"
+          intro={<>양식의 열 제목 그대로 업로드하면 <b>열 매핑 없이</b> 바로 검증 단계로 넘어갑니다.<br/>
+            은행·회계 프로그램에서 다운로드한 파일도 업로드할 수 있습니다 — 이 경우 열을 직접 매핑합니다.</>}
+          note={<><b>첫 행(열 제목)은 수정하지 마세요.</b> 열 제목으로 항목을 인식합니다.<br/>
+            셀을 선택하면 <b>작성 방법과 예시</b>가 표시됩니다. ▼ 표시 항목은 목록에서 선택하세요.<br/>
+            계좌·비목 목록은 양식의 <b>'계좌 목록'·'비목 목록'</b> 시트를 참고하세요.</>}
+          onDownload={downloadTemplate} downloadHint="회사 계좌·비목 목록 포함"
+          guide={TEMPLATE_GUIDE.filter(g => !(g.orders && ordersFromMes))}
+          onNext={() => setStarted(true)}/>
       ) : !file ? (
         <div className="card card-pad">
           <div className="drop" style={{ padding: 48, cursor: "pointer", textAlign: "center" }}
@@ -1854,13 +1727,13 @@ export const ExcelScreen = ({ goRoute }) => {
                 <div style={{ minWidth: 0 }}>
                   <div className="fw-700 text-sm">세금계산서 목록으로 보여요</div>
                   <div className="text-sm text-muted">
-                    여기서 올리면 <b>입출금 거래</b>가 됩니다. 계산서는 <b>계산서 업로드</b>로 올려야
+                    여기서 올리면 <b>입출금 거래</b>가 됩니다. 계산서는 <b>세금계산서 엑셀 업로드</b>로 올려야
                     미수금·미지급금과 부가세에 잡혀요.
                   </div>
                 </div>
                 <button className="btn primary sm ml-auto" style={{ flexShrink: 0 }}
                   onClick={() => goRoute?.('billing_issued', { taxImport: true })}>
-                  계산서 업로드로
+                  세금계산서 엑셀 업로드로
                 </button>
               </div>
             )}
@@ -2058,24 +1931,24 @@ export const ExcelScreen = ({ goRoute }) => {
                 /* 오류 줄 아래 — **틀린 칸만** 입력칸으로. 고치는 즉시 다시 검사해 줄이 '등록'으로 바뀐다 */
                 renderExpanded={r => (!r.errs.length && dupHits[r.idx] && dupOpen.has(r.idx) ? (
                   <DupCompare same={dupHits[r.idx]} out={excluded.has(r.idx)} onToggle={() => toggleOut(r.idx)}/>
-                ) : r.errs.length ? (
+                ) : r.editErrs.length ? (
                   /* 펼침 줄은 안쪽 여백이 0이다(DataTable — 다른 화면은 거기에 표를 통째로 넣는다). 여백은 여기서 준다 */
                   <div className="row gap-16" style={{ flexWrap: "wrap", alignItems: "flex-end", padding: "12px 16px" }}>
                     <span className="text-xs fw-700 text-muted" style={{ alignSelf: "center" }}>{r.idx + 2}행 수정</span>
-                    {(r.errs.includes("날짜") || r.errs.includes("미래")) && (
+                    {(r.editErrs.includes("날짜") || r.editErrs.includes("미래")) && (
                       <label className="col gap-4" style={{ width: 170 }}>
                         <span className="text-xs text-muted">날짜</span>
                         <DateInput className="input num" value={r.date || ''} max={localToday()}
                           onChange={e => setFix(r.idx, 'date', e.target.value)}/>
                       </label>
                     )}
-                    {r.errs.includes("금액") && (
+                    {r.editErrs.includes("금액") && (
                       <label className="col gap-4" style={{ width: 170 }}>
                         <span className="text-xs text-muted">금액 (부가세 포함)</span>
                         <MoneyInput value={r.amount ? String(r.amount) : ''} onChange={raw => setFix(r.idx, 'amount', raw === '' ? null : Number(raw))}/>
                       </label>
                     )}
-                    {r.errs.includes("구분") && (
+                    {r.editErrs.includes("구분") && (
                       <div className="col gap-4">
                         <span className="text-xs text-muted">구분</span>
                         <div className="row gap-6">
@@ -2085,13 +1958,13 @@ export const ExcelScreen = ({ goRoute }) => {
                         </div>
                       </div>
                     )}
-                    {r.errs.includes("계좌") && (
+                    {r.editErrs.includes("계좌") && (
                       <div className="col gap-4" style={{ minWidth: 240 }}>
                         <span className="text-xs text-muted">계좌 <span className="text-muted2">(파일: {r.acctName})</span></span>
                         <AccountPicker portal accounts={importAccounts} value={r.account_id || ''} onChange={v => setFix(r.idx, 'account_id', v)}/>
                       </div>
                     )}
-                    {r.errs.includes("비목") && (
+                    {r.editErrs.includes("비목") && (
                       <div className="col gap-4" style={{ width: 240 }}>
                         <span className="text-xs text-muted">비목 <span className="text-muted2">({r.kind === 'income' ? '입금' : '지출'} 비목만)</span></span>
                         <Combobox portal value={r.category} allowAdd={false} placeholder="비목 선택"
@@ -2100,7 +1973,7 @@ export const ExcelScreen = ({ goRoute }) => {
                             .map(categoryOption)}/>
                       </div>
                     )}
-                    {r.errs.includes("계정과목") && (
+                    {r.editErrs.includes("계정과목") && (
                       <div className="col gap-4" style={{ width: 260 }}>
                         <span className="text-xs text-muted">계정과목</span>
                         <div className="row gap-6">
@@ -2114,7 +1987,7 @@ export const ExcelScreen = ({ goRoute }) => {
                         </div>
                       </div>
                     )}
-                    {r.errs.includes("예시") && (
+                    {r.editErrs.includes("예시") && (
                       <span className="text-sm text-muted" style={{ alignSelf: "center" }}>양식 예시 행입니다 — 등록되지 않습니다.</span>
                     )}
                   </div>
@@ -3047,8 +2920,8 @@ const ReportTaxOffice = ({ toast, registerExport }) => {
     setBusy(true)
     const r = await api.downloadTaxofficeXlsx(month)
     setBusy(false)
-    if (!r.ok) toast.push(r.error || '내려받기에 실패했어요', { tone: 'warn' })
-    else toast.push(`${monthLabel(month)} 자료를 엑셀로 내려받았어요`)
+    if (!r.ok) toast.push(r.error || '다운로드에 실패했어요', { tone: 'warn' })
+    else toast.push(`${monthLabel(month)} 자료를 엑셀로 다운로드했어요`)
   }
 
   /* 껍데기의 '엑셀' 버튼이 이 함수를 쓴다 — 같은 화면에 '엑셀'이 둘이면
@@ -3148,7 +3021,7 @@ const ReportVAT = ({ toast, registerExport }) => {
   useEffect(() => {
     const download = async () => {
       const res = await api.downloadVatXlsx(quarter, year)
-      if (!res.ok) toast?.push(res.error || '내려받기에 실패했어요', { tone: 'warn' })
+      if (!res.ok) toast?.push(res.error || '다운로드에 실패했어요', { tone: 'warn' })
       return true   // 공용 CSV 경로로 넘어가지 않게 '처리했다'를 알린다
     }
     registerExport?.(download)
@@ -3402,8 +3275,8 @@ const ReportFundSheet = ({ toast, registerExport }) => {
     setBusy(true)
     const r = await api.downloadFundSheetXlsx(month)
     setBusy(false)
-    if (!r.ok) toast.push(r.error || '내려받기에 실패했어요', { tone: 'warn' })
-    else toast.push(`${monthLabel(month)} 자금관리표를 내려받았어요`)
+    if (!r.ok) toast.push(r.error || '다운로드에 실패했어요', { tone: 'warn' })
+    else toast.push(`${monthLabel(month)} 자금관리표를 다운로드했어요`)
   }
   /* 껍데기의 '엑셀' 버튼이 이 함수를 쓴다 — 같은 화면에 '엑셀'이 둘이면
      어느 걸 눌러야 하는지 매번 갈린다(차입금에서 같은 문제를 고쳤다). */
@@ -3624,8 +3497,8 @@ const ReportLoan = ({ toast, registerExport }) => {
     setBusy(true)
     const r = await api.downloadLoanReportXlsx({ status, loanIds: picks, from: range.from, to: range.to })
     setBusy(false)
-    if (!r.ok) toast.push(r.error || '내려받기에 실패했어요', { tone: 'warn' })
-    else toast.push(picks.length ? `고른 ${picks.length}개 계좌를 내려받았어요` : '전체 계좌를 내려받았어요')
+    if (!r.ok) toast.push(r.error || '다운로드에 실패했어요', { tone: 'warn' })
+    else toast.push(picks.length ? `고른 ${picks.length}개 계좌를 다운로드했어요` : '전체 계좌를 다운로드했어요')
   }
 
   /* 껍데기의 '엑셀' 버튼이 이 함수를 쓰게 넘긴다.
@@ -3677,7 +3550,7 @@ const ReportLoan = ({ toast, registerExport }) => {
 
       <div className="text-xs text-muted2">
         기간은 <b>상환 내역만</b> 자릅니다 — 그 기간에 상환이 없어도 차입금과 잔액은 그대로 나와요.
-        내려받기는 위 <b>엑셀</b> 버튼을 쓰세요.
+        다운로드는 위 <b>엑셀 다운로드</b> 버튼을 쓰세요.
       </div>
     </div>
     </ReportBar>
@@ -4245,7 +4118,7 @@ export const ReportsScreen = ({ go, openKey = null, onTitle }) => {
             {/* 보고서마다 방향을 따로 기억한다 — 매입매출장은 가로, 계약별 수익은 세로 식이다 */}
             <PrintButton storeKey={`report:${active}`}
               defaultOrientation={REPORT_LANDSCAPE.has(active) ? 'landscape' : 'portrait'}/>
-            <button className="btn excel" onClick={doExport}><Icon.Excel size={14}/> 엑셀 내보내기</button>
+            <button className="btn excel" onClick={doExport}><Icon.Excel size={14}/> 엑셀 다운로드</button>
           </>}/>
         {/* report-print — index.css 의 인쇄 whitelist. 이 클래스가 없으면 인쇄가 백지로 나온다. */}
         <div className="report-print report-body" ref={printRef} onKeyDown={pe.onKeyDown}>

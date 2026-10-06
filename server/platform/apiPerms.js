@@ -152,6 +152,10 @@ const LOOKUP_PREFIXES = [
    * routes/accounts.js 가 req.perms 를 보고 권한 없는 사람에겐 balance 를 빼고 내려준다.
    * 계좌 '목록'과 계좌 '잔액'은 민감도가 다르다. */
   '/api/accounts',
+  /* 인사 기준정보 이름 목록 — 근로계약 등록 폼·엑셀 업로드가 고르는 목록(지급 항목·고용형태·부서·직위).
+   * 인사 기준정보 권한으로 막으면 근로계약 권한만 있는 사람의 폼이 비고, 엑셀 업로드는 기본급·수당 칸을
+   * 못 알아봐 **급여 0원으로 등록**됐다(2026-10-02 검증). 수정·삭제는 그대로 그 권한. */
+  '/api/payroll-items', '/api/employ-types', '/api/hr-codes',
 ]
 
 /**
@@ -172,10 +176,14 @@ const LOOKUP_PATHS = ['/api/employees/options', '/api/company']
  * 정규식은 전체 경로(/api/...)에 대해 검사하며, 먼저 맞는 것이 이긴다.
  */
 const ACTION_OVERRIDES = [
+  /* 인쇄 배치 저장 — 문서를 **보는** 사람의 일이다(인쇄는 보기 권한). 문서 내용은 바꾸지 않는다(lib/printLayouts.js) */
+  { re: /^\/api\/(resolutions|settlements|purchase-reqs|journal-vouchers|transactions)\/[^/]+\/print-layout$/, action: 'view', methods: ['PUT'] },
+  // 문서 증빙 붙이기·떼기 — 있는 문서를 바꾸는 것이라 '수정'(lib/attachments.js attachRoutes)
+  { re: /^\/api\/(resolutions|settlements|purchase-reqs|journal-vouchers)\/[^/]+\/attachments(\/[^/]+)?$/, action: 'edit', methods: ['POST', 'DELETE'] },
   // 엑셀 일괄 등록 — POST지만 '업로드' 권한이다
   { re: /^\/api\/[a-z-]+\/import\/(parse|commit|card)$/, action: 'upload' },
   // 양식·자료 내려받기 — GET이지만 '다운로드'
-  { re: /^\/api\/[a-z-]+\/import\/template$/, action: 'download' },
+  { re: /^\/api\/[a-z-]+\/import\/(template|card-template)$/, action: 'download' },
   { re: /\/export(\.xlsx)?$/, action: 'download' },
   /* ⚠ 위 규칙은 경로가 '/export' 또는 '/export.xlsx' 로 **끝날 때만** 맞는다.
      화면 표를 엑셀로 바꿔 주는 통로는 '/api/export/xlsx' 라 안 걸려 POST='create' 로 떨어졌다 —
@@ -226,6 +234,18 @@ const ACTION_OVERRIDES = [
  */
 const TXN_BASE = ['ledger', 'misc_pl', 'misc_income', 'voucher_book']
 const RESOURCE_OVERRIDES = [
+  /* 직원 수정·삭제 — 근로계약·용역 화면이 직원을 만들고(POST /work-contracts) 고치고 퇴사 처리한다.
+   * 인사 권한만 받으면 근로계약 권한만 있는 사람의 퇴사 처리가 직원은 그대로 두고 계약만 만료시켰다
+   * (2026-10-02 검증). 목록·상세 조회(급여·생년월일)는 그대로 인사 권한 */
+  /* 수정(퇴사 처리)만 — 삭제까지 열 이유가 없다(검토). 용역 화면도 직원을 고친다(OutsourcingDrawer updateEmployee) */
+  { re: /^\/api\/employees\/[^/]+$/, resources: ['hr', 'hr_labor_contract', 'hr_outsourcing'], methods: ['PUT'] },
+  /* 근로계약 엑셀 업로드는 근로계약 권한만 — 접두사(/api/work-contracts)는 용역 권한도 열려 있어,
+     용역 권한으로 직원·근로계약을 일괄 생성할 수 있었다(검토) */
+  { re: /^\/api\/work-contracts\/import\//, resources: ['hr', 'hr_labor_contract'] },
+  /* 퇴사 처리(근로계약 화면)가 쓰는 퇴직금 두 길만 — 예상액 계산과 등록. 목록·수정·삭제·[지급](실제 출금)은 인사 권한만
+     (접두사 전체를 열면 근로계약 권한으로 아무 통장에서나 출금 거래를 만들 수 있었다 — 2026-10-02 검토) */
+  { re: /^\/api\/unpaid-labor\/estimate$/, resources: ['hr', 'hr_labor_contract'], methods: ['GET'] },
+  { re: /^\/api\/unpaid-labor$/, resources: ['hr', 'hr_labor_contract'], methods: ['POST'] },
   /* 동진 MES — 발주 목록은 계약관리 › 발주 화면(contract_purchase)이 쓴다. 나머지(수주)는 contract_sales */
   { re: /^\/api\/dongjin-mes\/purchase-orders(\/|$)/, resources: ['contract_purchase'] },
   /* 카드 대금·내부 이체 화면이 **실제로 쓰는 문**만 연다.
@@ -234,13 +254,15 @@ const RESOURCE_OVERRIDES = [
    *   읽어야 "갚을 카드"·"이체 이력"을 그릴 수 있고, 명세서 업로드는 commit 전에
    *   parse 를 먼저 부른다. 한 번은 저장만 403 이었고, 좁히면서 이번엔 읽기가 403 이었다.
    *   두 번 다 "화면은 보이는데 안 된다"였다 — 문 목록을 화면 코드에서 세어 맞춘다. */
-  { re: /^\/api\/transactions(\/(summary|entry-hints|linkable|transfers\.xlsx))?$/,
+  { re: /^\/api\/transactions(\/(summary|entry-hints|linkable|transfers\.xlsx|card-bills))?$/,
     resources: [...TXN_BASE, 'transfer', 'card_payment'], methods: ['GET'] },
   { re: /^\/api\/transactions\/[^/]+$/, resources: [...TXN_BASE, 'transfer', 'card_payment'], methods: ['GET'] },
+  // 이체 상세(잔액 변동·전표)와 전표 보기 — 내부 이체·카드 대금 화면에서 연다
+  { re: /^\/api\/transactions\/[^/]+\/(transfer-detail|voucher)$/, resources: [...TXN_BASE, 'transfer', 'card_payment'], methods: ['GET'] },
   // 두 화면 다 이 한 경로로 두 줄짜리 이체를 만든다
   { re: /^\/api\/transactions\/transfer$/, resources: [...TXN_BASE, 'transfer', 'card_payment'] },
   // 카드 명세서 업로드 — 파싱과 등록이 한 쌍이다(파싱만 막으면 파일을 고르는 순간 멈춘다)
-  { re: /^\/api\/transactions\/import\/(parse|card)$/, resources: [...TXN_BASE, 'card_payment'] },
+  { re: /^\/api\/transactions\/import\/(parse|card|card-template)$/, resources: [...TXN_BASE, 'card_payment'] },
   /* 이체·카드대금 줄을 되돌리는 길.
      ⚠ 경로만으로는 그 거래가 이체인지 알 수 없다. 그래서 **라우트에서 한 번 더** 본다 —
      transfer·card_payment 로만 들어온 사람은 이체로 만든 줄만 지울 수 있다
@@ -254,7 +276,7 @@ const RESOURCE_OVERRIDES = [
 
 /** 요청 → 필요한 행위 */
 function actionFor(method, fullPath) {
-  for (const o of ACTION_OVERRIDES) if (o.re.test(fullPath)) return o.action
+  for (const o of ACTION_OVERRIDES) if (o.re.test(fullPath) && (!o.methods || o.methods.includes(method))) return o.action
   return METHOD_ACTION[method] || 'view'
 }
 

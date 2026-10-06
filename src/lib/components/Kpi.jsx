@@ -95,7 +95,8 @@ export const KpiRow = ({ cols = 4, gap = 12, children, style }) => (
  * props: label · amount · count · accent(뱃지 색) · warn(금액을 빨강으로) · onClick · hint
  *        active — 고른 상태(누르면 그 종류만 남는 **필터 카드**일 때 — 거래내역의 입금·출금)
  */
-export const SummaryCard = ({ label, amount, count, accent = "blue", warn, onClick, hint, active }) => {
+/* unit — 건수 뒤에 붙는 말(기본 건). 카드 대금은 "장"을 센다 */
+export const SummaryCard = ({ label, amount, count, unit = "건", accent = "blue", warn, onClick, hint, active }) => {
   const Tag = onClick ? 'button' : 'div'
   return (
     <Tag className="card" onClick={onClick} type={onClick ? 'button' : undefined} aria-pressed={active ?? undefined}
@@ -104,7 +105,7 @@ export const SummaryCard = ({ label, amount, count, accent = "blue", warn, onCli
                ...(active ? { background: 'var(--brand-soft)', borderColor: 'var(--brand)' } : null) }}>
       <div className="row" style={{ marginBottom: 6 }}>
         <span className="text-sm text-muted fw-600">{label}</span>
-        <span className={`badge ${accent} ml-auto`}>{count}건</span>
+        <span className={`badge ${accent} ml-auto`}>{count}{unit}</span>
       </div>
       <div className="num fw-700" style={{ fontSize: 22, color: warn ? "var(--neg-ink)" : undefined }}>
         {fmtNum(amount)}

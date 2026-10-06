@@ -767,6 +767,36 @@ async function initDb(conn) {
       )
     `)
 
+    /* 공용 첨부 — 첨부가 없던 문서(대체전표·지급결의서·구매품의서·정산내역서)의 증빙.
+       설계: docs/02-design/features/popup-attachments-print.design.md §3-1.
+       ⚠ FK 가 없다(문서 종류가 여럿) — **문서 삭제 라우트가 첨부를 같이 지운다**(lib/attachments.js removeAllFor).
+       기존 4표(transaction_docs·invoice_docs·contract_docs·work_contract_docs)는 옮기지 않는다. */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS print_layouts (
+        owner_type  VARCHAR(30) NOT NULL,
+        owner_id    VARCHAR(36) NOT NULL,
+        layout      MEDIUMTEXT NOT NULL,
+        updated_by  VARCHAR(100),
+        updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (owner_type, owner_id)
+      )
+    `)
+    /* ↑ 인쇄 배치(인쇄 양식 편집기) — 문서별 마지막 배치. lib/printLayouts.js, 설계 §5-1 */
+    await c.execute(`
+      CREATE TABLE IF NOT EXISTS attachments (
+        id          VARCHAR(36) PRIMARY KEY,
+        owner_type  VARCHAR(30) NOT NULL,
+        owner_id    VARCHAR(36) NOT NULL,
+        url         VARCHAR(500) NOT NULL,
+        name        VARCHAR(255),
+        mime        VARCHAR(100),
+        size        BIGINT DEFAULT 0,
+        created_by  VARCHAR(100),
+        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_attach_owner (owner_type, owner_id)
+      )
+    `)
+
     // ── 경영 도우미: 대화(세션)형 조회 ──
     // 사용자별 대화 목록 + 각 대화의 차트 타임라인. 설계 docs/02-design/features/mgmt-chat-sessions.design.md
     // 채팅 셸을 먼저, LLM은 나중 — 이 두 테이블이 곧 LLM 챗의 히스토리 백엔드가 된다.
@@ -2689,10 +2719,14 @@ async function initDb(conn) {
     await ensureColumn('transactions', 'template_id', 'template_id VARCHAR(36)')
     await ensureIndex('invoices', 'idx_inv_template', 'template_id, issued_at')
     await ensureIndex('transactions', 'idx_txn_template', 'template_id, date')
+    // 카드 대금 회차 집계·계좌별 기간 조회(lib/cardBill.js) — account_id 단독 인덱스로는 날짜 범위를 못 좁힌다
+    await ensureIndex('transactions', 'idx_txn_acct_date', 'account_id, date')
 
     /* 카드 승인번호 — 카드사 이용내역(카드대금명세서) 업로드의 **중복 판정 축**.
        같은 명세서를 두 번 올려도 경비가 두 번 쌓이지 않게 한다. 손으로 적은 거래는 비어 있다. */
     await ensureColumn('transactions', 'approval_no', 'approval_no VARCHAR(40)')
+    // 미지급 퇴직금에서 [지급]으로 만든 거래 — 지우면 그 건의 지급액을 되돌린다(routes/transactions.js DELETE)
+    await ensureColumn('transactions', 'unpaid_labor_id', 'unpaid_labor_id VARCHAR(36)')
     await ensureIndex('transactions', 'idx_txn_approval', 'approval_no')
 
     /* 주문의 방향(매출/매입) — 예전엔 거래처 구분(gubu)으로 **추정**했다.

@@ -52,6 +52,8 @@ const AUDIT_RULES = [
   { m: 'POST',   re: /^\/api\/invoices\/import\/commit$/,          res: 'invoice',     action: 'import' },
   { m: 'POST',   re: /^\/api\/vendors\/import\/commit$/,           res: 'vendor',      action: 'import' },
   { m: 'POST',   re: /^\/api\/ref-items\/import\/commit$/,         res: 'ref_item',    action: 'import' },
+  // 직원·근로계약을 한꺼번에 만든다(검토: 기록이 없었다)
+  { m: 'POST',   re: /^\/api\/work-contracts\/import\/commit$/,    res: 'work_contract', action: 'import' },
 
   // ── 거래(장부) 삭제 ── 계좌 잔액이 함께 움직인다
   { m: 'DELETE', re: /^\/api\/transactions\/([^/]+)$/,             res: 'transaction', action: 'delete', target: 1 },
@@ -126,6 +128,15 @@ const AUDIT_RULES = [
   { m: 'POST',   re: /^\/api\/resolutions\/from-purchase-req\/([^/]+)$/, res: 'resolution', action: 'create_from_preq', target: 'created' },
   { m: 'DELETE', re: /^\/api\/resolutions\/([^/]+)$/,                   res: 'resolution', action: 'delete',  target: 1 },
   { m: 'DELETE', re: /^\/api\/settlements\/([^/]+)$/,                   res: 'settlement', action: 'delete',  target: 1 },
+  // 첨부(증빙) — 공용 표(lib/attachments.js attachRoutes)
+  { m: 'POST',   re: /^\/api\/resolutions\/([^/]+)\/attachments$/,              res: 'resolution',      action: 'attach', target: 1 },
+  { m: 'DELETE', re: /^\/api\/resolutions\/([^/]+)\/attachments\/[^/]+$/,      res: 'resolution',      action: 'detach', target: 1 },
+  { m: 'POST',   re: /^\/api\/settlements\/([^/]+)\/attachments$/,              res: 'settlement',      action: 'attach', target: 1 },
+  { m: 'DELETE', re: /^\/api\/settlements\/([^/]+)\/attachments\/[^/]+$/,      res: 'settlement',      action: 'detach', target: 1 },
+  { m: 'POST',   re: /^\/api\/purchase-reqs\/([^/]+)\/attachments$/,            res: 'purchase_req',    action: 'attach', target: 1 },
+  { m: 'DELETE', re: /^\/api\/purchase-reqs\/([^/]+)\/attachments\/[^/]+$/,    res: 'purchase_req',    action: 'detach', target: 1 },
+  { m: 'POST',   re: /^\/api\/journal-vouchers\/([^/]+)\/attachments$/,         res: 'journal_voucher', action: 'attach', target: 1 },
+  { m: 'DELETE', re: /^\/api\/journal-vouchers\/([^/]+)\/attachments\/[^/]+$/, res: 'journal_voucher', action: 'detach', target: 1 },
 
   // ── 재무(차입금·투자) ── 원금·이자가 계좌에서 나간다
   { m: 'POST',   re: /^\/api\/finance\/loans\/([^/]+)\/repay$/,         res: 'loan', action: 'repay',         target: 1 },
@@ -172,6 +183,8 @@ const AUDIT_RULES = [
      (실물 기준 7,351만). 지우거나 금액을 고치면 그만큼 나갈 돈이 사라지는데 기록이 없었다. */
   { m: 'DELETE', re: /^\/api\/unpaid-labor\/([^/]+)$/,                 res: 'unpaid_labor', action: 'delete', target: 1 },
   { m: 'PUT',    re: /^\/api\/unpaid-labor\/([^/]+)$/,                 res: 'unpaid_labor', action: 'edit',   target: 1 },
+  // 퇴직금 [지급] — 출금 거래를 만든다(돈이 나가는 일이라 남긴다)
+  { m: 'POST',   re: /^\/api\/unpaid-labor\/([^/]+)\/pay$/,            res: 'unpaid_labor', action: 'pay',    target: 1 },
 
   // ── 계좌 삭제 ── 잔액이 붙어 있는 자원이다
   { m: 'DELETE', re: /^\/api\/accounts\/([^/]+)$/,                      res: 'account', action: 'delete',     target: 1 },
@@ -274,6 +287,7 @@ const AUDIT_RULES = [
  * 기록하는 곳이 둘이어도 읽는 곳은 하나다.
  */
 const ACTION_LABELS = {
+  attach: '증빙 첨부', detach: '증빙 삭제',
   // 마감
   close: '마감', reopen: '마감 해제',
   // 등록·삭제

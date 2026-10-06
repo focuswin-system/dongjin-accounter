@@ -3,6 +3,8 @@ const { randomUUID } = require('crypto')
 const { kstToday } = require('../db')
 const { insertWithDocNo } = require('../lib/docno')
 const { withTx, httpError } = require('../lib/withTx')
+const { attachRoutes, removeAllFor, removeFilesIfUnused } = require('../lib/attachments')
+const { printLayoutRoutes, removeLayoutFor } = require('../lib/printLayouts')
 const { pageParams, buildWhere, docDateExpr, approvalStatusSql, approvalCounts } = require('../lib/pagedList')
 const {
   NOT_CLAIMED_SQL, syncReqFromResolution,
@@ -544,6 +546,7 @@ router.post('/:id/unprocess', async (req, res, next) => {
 router.delete('/:id', async (req, res, next) => {
   try {
     const cascade = req.query.cascade === '1' || req.query.cascade === 'true'
+    let files = []
     const out = await withTx(req.db, async (conn) => {
       const [[cur]] = await conn.execute('SELECT status, doc_no, txn_id, purchase_req_id FROM expense_resolutions WHERE id = ? FOR UPDATE', [req.params.id])
       if (!cur) throw httpError(404, '결의서를 찾을 수 없어요')
@@ -558,11 +561,19 @@ router.delete('/:id', async (req, res, next) => {
       }
       await syncReqFromResolution(conn, cur.purchase_req_id, '승인')
       await conn.execute('DELETE FROM expense_resolutions WHERE id = ?', [req.params.id])
+      files = await removeAllFor(conn, 'resolution', req.params.id)   // 첨부 행 — 파일은 커밋 뒤에
+      await removeLayoutFor(conn, 'resolution', req.params.id)
       await approvalEngine.voidAll(conn, 'resolution', req.params.id)
       return { keptTxn }
     })
+    await removeFilesIfUnused(req.db, files, req.user?.companyId)
     res.json({ ok: true, keptTxn: out.keptTxn })
   } catch (e) { next(e) }
 })
+
+// 첨부(증빙) — 공용 표, 권한은 이 경로를 따른다
+attachRoutes(router, 'resolution')
+// 인쇄 배치(인쇄 양식 편집기)
+printLayoutRoutes(router, 'resolution')
 
 module.exports = router

@@ -1155,8 +1155,11 @@ button.cell-tag:hover { color: var(--ink); background: var(--surface-2); }
 /* TableToolbar(lib/components/TableToolbar.jsx) — 표 상단 날짜·검색·필터 바 */
 .tbar-bar {
   display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap;
-  padding: 12px 16px; border-bottom: 1px solid var(--line);
+  /* 화면 위(상자 밖)에 놓이면 양옆 여백 없이 아래 표 상자의 왼쪽 끝과 맞춘다 — 16px 들어가 있어 첫 칸 앞이
+     비어 보였다(2026-10-02 사용자: "카드 선택 셀렉트박스 왼쪽 여백이 많네"). 상자 안에 놓일 때만 안쪽 여백 */
+  padding: 12px 0; border-bottom: 1px solid var(--line);
 }
+.card .tbar-bar { padding: 12px 16px; }
 .tbar-date { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 /* .input 의 width:100% 를 이기려면 특이성이 더 높아야 한다(flex 안에서 148px 고정) */
 .tbar-date .tbar-dateinput { flex: 0 0 148px; width: 148px; height: 34px; padding: 6px 10px; font-size: 13px; }
@@ -1728,6 +1731,10 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
   .voucher-print, .voucher-print *,
   /* 사용 설명서 — 도입 교육 자료로 통째로 뽑는다. 여기 없으면 백지가 나온다. */
   .manual-print, .manual-print * { visibility: visible; }
+  /* 인쇄 마법사 묶음(PrintWizard) — 양식 + 증빙 쪽들. body 바로 아래에 붙는다.
+     ⚠ 아래 absolute 목록엔 넣지 않는다 — 형제를 인라인으로 숨기므로 끌어올릴 필요가 없고,
+       :has() 없는 브라우저에서 absolute 로 남으면 쪽이 안 나뉘어 첫 장만 나온다 */
+  .print-bundle, .print-bundle * { visibility: visible; }
   #resolution-print, .resolution-print, #statement-print,
   .report-print, .fund-print, .voucher-print, .manual-print { position: absolute; left: 0; top: 0; width: 100%; border: none; box-shadow: none; padding: 0; }
 
@@ -1780,7 +1787,7 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
    *
    * :has() 가 없는 옛 브라우저에서는 이 블록이 통째로 무시돼 종전 동작(한 장)으로 남는다. */
   @supports selector(:has(*)) {
-    body *:not(:has(:is(#resolution-print, .resolution-print, #statement-print, .report-print, .fund-print, .voucher-print, .manual-print))):not(:is(#resolution-print, .resolution-print, #statement-print, .report-print, .fund-print, .voucher-print, .manual-print)):not(:is(#resolution-print, .resolution-print, #statement-print, .report-print, .fund-print, .voucher-print, .manual-print) *) {
+    body *:not(:has(:is(#resolution-print, .resolution-print, #statement-print, .report-print, .fund-print, .voucher-print, .manual-print, .print-bundle))):not(:is(#resolution-print, .resolution-print, #statement-print, .report-print, .fund-print, .voucher-print, .manual-print, .print-bundle)):not(:is(#resolution-print, .resolution-print, #statement-print, .report-print, .fund-print, .voucher-print, .manual-print, .print-bundle) *) {
       display: none !important;
     }
     /* 인쇄 대상은 앱 셸(사이드바 + main flex + 내부 스크롤 컨테이너) **안쪽 깊이** 있다.
@@ -1789,7 +1796,7 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
        자금 현황에서 처음 잡았는데, 재보니 **보고서·결의서도 똑같았다**
        (main 232px → 보고서 192px). 인쇄 대상 전부의 조상에서 폭·넘침 제한을 푼다.
        거래명세서는 드로어 안이라 아래 전용 규칙이 이미 같은 일을 하고 있었다. */
-    body *:has(:is(#resolution-print, .resolution-print, #statement-print, .report-print, .fund-print, .voucher-print, .manual-print)) {
+    body *:has(:is(#resolution-print, .resolution-print, #statement-print, .report-print, .fund-print, .voucher-print, .manual-print, .print-bundle)) {
       display: block !important; width: auto !important; max-width: none !important;
       height: auto !important; max-height: none !important; overflow: visible !important;
       padding: 0 !important; margin: 0 !important;
@@ -1797,7 +1804,7 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
          종이 아랫부분이 통째로 회색으로 찍혔다. 종이 자신의 흰 배경만 남긴다. */
       background: var(--surface) !important;
     }
-    #resolution-print, .resolution-print, #statement-print, .report-print, .fund-print, .voucher-print, .manual-print {
+    #resolution-print, .resolution-print, #statement-print, .report-print, .fund-print, .voucher-print, .manual-print, .print-bundle {
       position: static !important;
     }
   }
@@ -2755,6 +2762,9 @@ body:has([data-modal-open]) {
    .report-body 는 보고서 화면의 종이(문서 센터 보고서 미리보기)다. */
 .voucher-print,
 #resolution-print,
+/* 인쇄 양식 편집기 — 편집 화면의 종이와 실제로 찍히는 묶음 둘 다 */
+.pe-sheet,
+.print-bundle,
 .report-body {
   color-scheme: light;
   --surface: #FFFFFF;
@@ -3076,4 +3086,66 @@ body:has([data-modal-open]) {
   /* 제목만 쪽 끝에 남고 본문이 넘어가는 것을 막는다 */
   .man-h1, .man-h2 { break-after: avoid; }
   .man-section, .man-note, .man-table-wrap { break-inside: avoid; }
+}
+
+/* 카드 대금 팝업 — 왼쪽 입력 · 오른쪽 목록. 좁으면 한 줄로 쌓는다 */
+.card-bill-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 32px; align-items: start; }
+@media (max-width: 760px) { .card-bill-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* 상세 팝업 2열 — 왼쪽 내용 · 오른쪽 전표처럼 나란히 볼 것. 좁으면 위아래로 */
+.split-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+@media (max-width: 860px) { .split-2 { grid-template-columns: minmax(0, 1fr); } }
+
+/* ── 인쇄 양식 편집기(PrintWizard) ──
+ * 왼쪽 양식·첨부 목록 | 오른쪽 쪽들(A4). 실제 종이는 body 아래 .print-bundle(화면에선 숨김).
+ * 쪽 = 인쇄 영역 178×264mm(A4 − @page 여백 16mm, 높이는 1mm 덜 — 꽉 채우면 반올림으로 빈 장이 낀다).
+ * 편집 화면과 종이가 **같은 부품(.pe-page)을 mm 로** 그린다 — 화면은 .pe-sheet 의 zoom 으로만 줄인다. */
+.pw-body { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 0; padding: 0 !important; min-height: 0; }
+.pw-side { padding: 20px; border-right: 1px solid var(--line); overflow: auto; display: flex; flex-direction: column; gap: 22px; }
+.pw-label { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 8px; }
+.pw-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--line); min-width: 0; cursor: pointer; }
+.pw-row.disabled { opacity: 0.55; cursor: default; }
+.pw-row .pw-name { flex: 1; min-width: 0; font-size: 13px; }
+.pw-row .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pw-src[draggable="true"] { cursor: grab; }
+.pw-thumb { flex: none; width: 36px; height: 44px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-2); display: grid; place-items: center; overflow: hidden; color: var(--muted); }
+.pw-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.pw-preview { overflow: auto; background: var(--surface-3); padding: 20px 24px 40px; display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.pe-sheet-wrap { display: flex; flex-direction: column; gap: 6px; }
+.pe-sheet-bar { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+/* 종이 — 실제 mm 로 그리고 화면에서만 줄인다 */
+.pe-sheet { zoom: 0.62; width: 210mm; min-height: 297mm; padding: 16mm; background: #fff; box-shadow: 0 6px 28px -10px rgba(15,23,42,0.28); box-sizing: border-box; }
+.pe-page { position: relative; width: 178mm; height: 264mm; }
+.pe-form .doc-paper, .pb-form .doc-paper { box-shadow: none; border: 0; margin: 0 auto; }
+/* 정산서 종이의 화면용 A4 높이(min-height)를 푼다 — **재는 자리에서도.** 안 풀면 정산서가 늘 '한 장 넘는 양식'으로 잡혀
+   아래 빈자리가 안 생겼다(검토 P1-2) */
+.pe-form .settle-paper, .pb-form .settle-paper, .pb-measure .settle-paper { min-height: 0 !important; }
+/* 양식이 끝나는 줄 — 그 아래가 빈자리(화면에서만) */
+.pe-form-end { position: absolute; left: 0; right: 0; border-top: 0.4mm dashed #B5BCC8; pointer-events: none; }
+.pe-box { position: absolute; }
+.pe-box.edit { cursor: move; touch-action: none; }
+.pe-box.edit:hover { outline: 0.5mm dashed #B5BCC8; }
+.pe-box.sel { outline: 0.6mm solid oklch(0.52 0.15 255); }
+.pe-img { position: relative; overflow: hidden; }
+.pe-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; user-select: none; -webkit-user-drag: none; }
+/* 90°·270° — 그림 상자의 가로·세로를 바꿔 끼운 뒤 가운데에서 돌린다 */
+.pe-img img.rot90, .pe-img img.rot270 { inset: auto; top: 50%; left: 50%; }
+.pe-img img.rot90  { transform: translate(-50%, -50%) rotate(90deg); }
+.pe-img img.rot270 { transform: translate(-50%, -50%) rotate(270deg); }
+.pe-img img.rot180 { transform: rotate(180deg); }
+.pe-cap { height: 6mm; line-height: 6mm; font-size: 8pt; color: #5B6473; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pe-tools { position: absolute; top: -9mm; right: 0; display: flex; gap: 1mm; }
+.pe-tools button { width: 8mm; height: 8mm; display: grid; place-items: center; border-radius: 1.5mm; border: 0.3mm solid #DEE2E9; background: #fff; color: #1F2937; cursor: pointer; }
+.pe-tools button svg { width: 4.5mm; height: 4.5mm; }
+.pe-handle { position: absolute; right: -2mm; bottom: -2mm; width: 5mm; height: 5mm; border-radius: 50%; background: oklch(0.52 0.15 255); border: 0.6mm solid #fff; cursor: nwse-resize; touch-action: none; }
+/* 양식 높이 재는 자리 — 화면 밖에 실제 폭으로 */
+.pb-measure { position: fixed; left: -10000px; top: 0; width: 178mm; visibility: hidden; pointer-events: none; }
+.pb-measure > div { width: 178mm; }
+.print-bundle { display: none; }
+@media print {
+  .pb-measure { display: none !important; }
+  .print-bundle { display: block !important; }
+  .print-bundle .pb-page { width: 178mm; height: 264mm; overflow: hidden; break-after: page; }
+  .print-bundle > .pb-form { break-after: page; }
+  .print-bundle > :last-child { break-after: auto; }
 }

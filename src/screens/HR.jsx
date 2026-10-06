@@ -8,6 +8,8 @@ import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
 import { PayrollPayDrawer } from '../lib/components/PayrollPayDrawer'
 import { api } from '../lib/api'
 import { escHtml, printHtmlDocument } from '../lib/printHtml'
+import { severanceBasisText, severanceDueDate, SEVERANCE_CAVEAT } from '../lib/severance'
+import { AccountField } from '../lib/components/AccountField'
 
 /* ───────── 급여대장: 항목별(%·수치) 계산 ───────── */
 // item: { label, kind:'earn'|'deduct', mode:'fixed'|'percent', value }
@@ -294,6 +296,7 @@ const SeveranceTab = () => {
   const [data, setData] = useState({ items: [], totals: { retired: 0, active: 0, all: 0 } });
   const [employees, setEmployees] = useState([]);
   const [editing, setEditing] = useState(null);   // 행 객체 | 'new' | null
+  const [paying, setPaying] = useState(null);     // [지급]을 연 행
 
   const load = async () => setData(await api.getUnpaidLabor());
   useEffect(() => { load(); api.getEmployees().then(setEmployees) }, []);
@@ -301,7 +304,7 @@ const SeveranceTab = () => {
   const doDelete = async (r) => {
     const ok = await confirm({
       tone: 'neg', icon: <Icon.Warn size={22}/>, title: `${r.name} 퇴직금 삭제`,
-      body: '목록에서 지웁니다. 이미 지급한 거래는 지워지지 않아요.', confirmLabel: '삭제',
+      body: '목록에서 지웁니다. 지급 거래가 있으면 지울 수 없어요 — 거래내역에서 그 거래를 먼저 지워 주세요.', confirmLabel: '삭제',
     });
     if (!ok) return;
     const res = await api.deleteUnpaidLabor(r.id);
@@ -355,8 +358,10 @@ const SeveranceTab = () => {
             r.due_date ? <span className="num text-sm">{fmtDateShort(r.due_date)}</span> : <span className="text-xs text-muted2">미정</span>
           ) },
           { key: 'memo', header: '메모', className: 'text-sm text-muted', render: r => r.memo || '—' },
-          { key: 'act', header: '', width: 120, render: r => (
+          { key: 'act', header: '', width: 180, render: r => (
             <div className="row gap-4">
+              {/* 지급 — 출금 거래를 만들고 지급액을 올린다(거래를 지우면 되돌아간다) */}
+              {r.remain > 0 && <button className="btn sm" onClick={() => setPaying(r)}>지급</button>}
               <button className="btn ghost sm" onClick={() => setEditing(r)}>수정</button>
               <button className="btn ghost sm" style={{ color: 'var(--neg)' }} onClick={() => doDelete(r)}>삭제</button>
             </div>
@@ -364,14 +369,79 @@ const SeveranceTab = () => {
         ]}/>
 
       <div className="text-xs text-muted2" style={{ padding: '14px 18px', lineHeight: 1.7 }}>
-        · 실제로 지급하면 <b>거래를 등록</b>하고 여기 지급액을 올려주세요. 이 표가 거래를 자동으로 만들지는 않아요
-        (자동으로 만들면 통장에 이미 찍힌 출금과 겹칩니다).<br/>
+        · <b>[지급]</b>을 누르면 퇴직급여 출금 거래가 만들어지고 지급액이 올라가요(그 거래를 지우면 되돌아가요).
+        이미 거래내역에 출금을 등록했다면 [지급] 대신 [수정]에서 지급액만 올려 주세요 — 두 번 나간 것으로 잡혀요.<br/>
         · 남은 금액은 <b>자금 현황</b>에서 '나갈 돈'으로 섭니다. 기한을 비워두면 '기한 미정'으로 잡아요.
       </div>
 
       <SeveranceDrawer row={editing} employees={employees}
         onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }}/>
+      {paying && <SeverancePayDrawer row={paying} onClose={() => setPaying(null)} onPaid={() => { setPaying(null); load(); }}/>}
     </div>
+  );
+};
+
+/* 퇴직금 [지급] — 출금 거래(퇴직급여 비목)를 만들고 지급액을 올린다(서버 routes/unpaid-labor.js /:id/pay).
+   ⚠ 통장은 미리 고르지 않는다(lib/mainAccount.js) · 비목은 이 회사의 퇴직급여 비목 중에서 */
+const SeverancePayDrawer = ({ row, onClose, onPaid }) => {
+  const toast = useToast();
+  const [accounts, setAccounts] = useState([]);
+  const [cats, setCats] = useState([]);
+  const [f, setF] = useState({ account_id: '', amount: String(row.remain), date: localToday(), category: '', memo: `${row.name} 퇴직금 지급` });
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api.getAccounts().then(a => setAccounts(a || []));
+    api.getCategories().then(r => {
+      const list = (r || []).filter(c => String(c.id || '').startsWith('EXP-') && /퇴직/.test(c.name));
+      setCats(list);
+      // 하나뿐이면 그걸로 — 생산/관리처럼 둘 이상이면 사람이 고른다
+      if (list.length === 1) setF(p => ({ ...p, category: list[0].name }));
+    });
+  }, []);
+  const amt = Number(String(f.amount).replace(/[^0-9]/g, '')) || 0;
+  const save = async () => {
+    if (!f.account_id) return toast.push('어느 통장에서 지급하는지 골라주세요', { tone: 'warn' });
+    if (cats.length > 1 && !f.category) return toast.push('비목을 골라주세요', { tone: 'warn' });
+    if (busy) return;
+    setBusy(true);
+    const res = await api.payUnpaidLabor(row.id, { ...f, amount: amt });
+    setBusy(false);
+    if (!res.ok) return toast.push(res.error || '지급하지 못했어요', { tone: 'warn' });
+    toast.push(res.remain > 0 ? `지급했어요 — 남은 금액 ${fmtNum(res.remain)}원` : '퇴직금 지급을 마쳤어요');
+    onPaid();
+  };
+  return (
+    <Drawer open onClose={onClose} size="md" label="퇴직금 지급">
+      <DrawerHead title={`${row.name} 퇴직금 지급`} sub={`총액 ${fmtNum(row.amount)}원 · 남은 금액 ${fmtNum(row.remain)}원`} onClose={onClose}/>
+      <div className="drawer-body col gap-form">
+        <div>
+          <label className="label">지급 통장 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+          <AccountField kind="bank" valueKey="id" value={f.account_id} accounts={accounts.filter(a => a.kind !== 'card')} allAccounts={accounts}
+            onChange={v => setF(p => ({ ...p, account_id: v }))} onCreated={async () => setAccounts(await api.getAccounts())}/>
+        </div>
+        <div className="form-pair">
+          <div><label className="label">지급액 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+            <MoneyInput value={f.amount} onChange={v => setF(p => ({ ...p, amount: v }))}/>
+            {amt > 0 && amt < row.remain && <div className="text-xs text-muted2" style={{ marginTop: 4 }}>나눠 지급 — 남은 {fmtNum(row.remain - amt)}원은 목록에 남아요</div>}
+          </div>
+          <div><label className="label">지급일 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+            <DateInput className="input" max={localToday()} value={f.date} onChange={e => setF(p => ({ ...p, date: e.target.value }))}/>
+          </div>
+        </div>
+        {cats.length > 0 && (
+          <div><label className="label">비목</label>
+            <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+              {cats.map(c => <button key={c.id} type="button" className={`chip ${f.category === c.name ? 'active' : ''}`} onClick={() => setF(p => ({ ...p, category: c.name }))}>{c.name}</button>)}
+            </div>
+          </div>
+        )}
+        <div><label className="label">내용</label>
+          <input className="input" value={f.memo} onChange={e => setF(p => ({ ...p, memo: e.target.value }))}/>
+        </div>
+        <div className="text-xs text-muted2">거래내역에 퇴직급여 출금으로 남아요. 그 거래를 지우면 지급액도 되돌아가요.</div>
+      </div>
+      <DrawerFooter onCancel={onClose} onSave={save} saveLabel="지급" busy={busy}/>
+    </Drawer>
   );
 };
 
@@ -389,7 +459,6 @@ const SeveranceDrawer = ({ row, employees, onClose, onSaved }) => {
       due_date: row.due_date || '', memo: row.memo || '',
     });
   }, [row]);
-  if (!row) return null;
 
   // 직원을 고르면 이름·재직여부를 따라 채운다. 명단에 없는 옛 퇴사자는 이름만 직접 적을 수 있다.
   const pickEmployee = (id) => {
@@ -404,6 +473,15 @@ const SeveranceDrawer = ({ row, employees, onClose, onSaved }) => {
   };
 
   const [busy, setBusy] = useState(false);
+  /* 예상 퇴직금 — 직원을 고르면 계산할 수 있다. 퇴사일은 직원의 퇴사일, 없으면 오늘 기준 */
+  const [est, setEst] = useState(null);
+  useEffect(() => { setEst(null) }, [f.employee_id]);
+  const calc = async () => {
+    const e = employees.find(x => x.id === f.employee_id);
+    setEst(await api.getSeveranceEstimate(f.employee_id, e?.leaveDate || e?.leave_date || undefined));
+  };
+  const useEst = () => setF(prev => ({ ...prev, amount: String(est.amount),
+    due_date: prev.due_date || severanceDueDate(est.leaveDate), memo: prev.memo || severanceBasisText(est) }));
   const save = async () => {
     // 왕복 중 두 번 누르면 같은 퇴직금이 2건 생기고 자금 현황이 두 번 센다
     if (busy) return;
@@ -417,6 +495,9 @@ const SeveranceDrawer = ({ row, employees, onClose, onSaved }) => {
     } finally { setBusy(false); }
   };
 
+  /* 훅을 다 부른 뒤에 빠진다 — 예전엔 이 줄이 busy 훅보다 위에 있어서 row 가 null→행으로 바뀌면
+     훅 개수가 달라져 React 가 'Rendered more hooks'로 멈출 수 있었다 */
+  if (!row) return null;
   return (
     <Drawer open onClose={onClose} width="880px">
       <DrawerHead title={isNew ? '미지급 퇴직금 등록' : '미지급 퇴직금 수정'}
@@ -436,6 +517,31 @@ const SeveranceDrawer = ({ row, employees, onClose, onSaved }) => {
           <label className="label">성명 *</label>
           <input className="input" value={f.name} onChange={e => set('name', e.target.value)} placeholder="예: 홍길동"/>
         </div>
+        {/* 예상 퇴직금 — 명단의 직원을 골랐을 때만(입사일·급여대장이 있어야 계산된다) */}
+        {f.employee_id && (
+          <div className="span-2 card card-pad" style={{ background: 'var(--surface-2)' }}>
+            {!est ? (
+              <div className="row gap-12" style={{ alignItems: 'center' }}>
+                <span className="text-sm text-muted">입사일과 최근 3개월 급여로 예상 퇴직금을 계산할 수 있어요.</span>
+                <button type="button" className="btn sm ml-auto" onClick={calc}>예상 퇴직금 계산</button>
+              </div>
+            ) : est.eligible ? (
+              <div className="col gap-8">
+                <div className="row gap-12" style={{ alignItems: 'baseline' }}>
+                  <span className="text-sm fw-600">예상 퇴직금</span>
+                  <span className="num fw-700" style={{ fontSize: 18 }}>{fmtNum(est.amount)}원</span>
+                  <button type="button" className="btn sm primary ml-auto" onClick={useEst}>이 금액 쓰기</button>
+                </div>
+                <div className="text-xs text-muted">
+                  {est.joinDate} ~ {est.leaveDate} · 재직 {fmtNum(est.serviceDays)}일 ·
+                  {' '}{est.months.map(m => `${Number(m.month.slice(5))}월 ${fmtNum(m.wage)}`).join(' / ')} ({est.basis === 'payroll' ? '급여대장' : '근로계약 급여 기준'})
+                  {' '}→ 1일 평균임금 {fmtNum(est.avgDaily)}원
+                </div>
+                <div className="text-xs text-muted2">{SEVERANCE_CAVEAT}</div>
+              </div>
+            ) : <div className="text-sm text-muted">{est.reason}</div>}
+          </div>
+        )}
         <div>
           <label className="label">구분</label>
           <div className="row gap-4">

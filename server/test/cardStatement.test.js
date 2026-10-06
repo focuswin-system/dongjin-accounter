@@ -170,3 +170,51 @@ test('청구내역 파일을 이용내역으로 잘못 올리는 것을 머리�
   assert.equal(M.looksLikeBillingFile(['이용일자', '잔여회차']), true)
   assert.equal(M.looksLikeBillingFile(['결제예정금액']), true)
 })
+
+test('우리 양식 칸 — 비목·공제 여부·사용 직원·차량을 알아본다(카드사 열과 섞여도)', async () => {
+  const M = await loading
+  assert.strictEqual(M.guessCardColumn('비목'), M.C.category)
+  assert.strictEqual(M.guessCardColumn('공제 여부'), M.C.deductible)
+  assert.strictEqual(M.guessCardColumn('사용 직원'), M.C.employee)
+  assert.strictEqual(M.guessCardColumn('차량'), M.C.vehicle)
+  // 카드사 열은 그대로
+  assert.strictEqual(M.guessCardColumn('이용일자'), M.C.date)
+  assert.strictEqual(M.guessCardColumn('부가세'), M.C.vat)
+  assert.strictEqual(M.guessCardColumn('비고'), M.C.memo)
+})
+
+test('공제 여부 — 불공제를 먼저 본다("불공제"에도 "공제"가 들어 있다)', async () => {
+  const M = await loading
+  assert.strictEqual(M.deductibleOf('불공제'), 0)
+  assert.strictEqual(M.deductibleOf('공제'), 1)
+  assert.strictEqual(M.deductibleOf(''), null)       // 비우면 비목 설정
+})
+
+test('줄의 비목이 먼저, 비면 화면 비목 · 차량은 적요에 남는다', async () => {
+  const M = await loading
+  const { C } = M
+  const a = M.mapCardRow(getter({ [C.date]: '2026-09-15', [C.amount]: '57700', [C.merchant]: '한국도로공사', [C.category]: '차량유지비',
+    [C.deductible]: '불공제', [C.employee]: '홍길동', [C.vehicle]: '12가3456 쏘나타', [C.memo]: '거제 출장' }), { defaultCategory: '소모품비(관리)' })
+  assert.strictEqual(a.category, '차량유지비')
+  assert.strictEqual(a.vat_deductible, 0)
+  assert.strictEqual(a.employee_name, '홍길동')
+  assert.strictEqual(a.memo, '한국도로공사 · 차량: 12가3456 쏘나타 · 거제 출장')
+  const b = M.mapCardRow(getter({ [C.date]: '2026-09-15', [C.amount]: '1000' }), { defaultCategory: '소모품비(관리)' })
+  assert.strictEqual(b.category, '소모품비(관리)')
+  assert.strictEqual(b.vat_deductible, null)
+})
+
+test('카드 칸 — 이름·끝자리 붙은 이름·끝 4자리로 찾고, 두 장에 걸리면 못 찾은 것으로 본다', async () => {
+  const M = await loading
+  const cards = [
+    { id: 'a', name: '국민카드-공용', label: '국민카드-공용 (국민 2847)', number: '9430-****-****-2847' },
+    { id: 'b', name: '국민카드-공용', label: '국민카드-공용 (국민 9862)', number: '9430-****-****-9862' },
+    { id: 'c', name: '기업BC카드', label: '기업BC카드', number: '4579-****-****-1111' },
+  ]
+  assert.strictEqual(M.resolveCard('', cards), null)                       // 비면 화면에서 고른 카드
+  assert.strictEqual(M.resolveCard('기업BC카드', cards), 'c')
+  assert.strictEqual(M.resolveCard('국민카드-공용 (국민 9862)', cards), 'b')
+  assert.strictEqual(M.resolveCard('국민카드-공용', cards), false)          // 같은 이름 두 장 — 첫 장을 집지 않는다
+  assert.strictEqual(M.resolveCard('2847', cards), 'a')
+  assert.strictEqual(M.resolveCard('신한카드', cards), false)
+})

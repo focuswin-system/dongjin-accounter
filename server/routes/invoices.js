@@ -571,13 +571,16 @@ router.post('/import/commit', async (req, res, next) => {
     // 켠 경우에만 기존 품목과의 연결(item_id)도 한다. 끄면 종전처럼 이름만 남긴다.
     const registerItems = req.body.registerItems === true
     const itemIdx = registerItems ? await buildItemIndex(conn) : null
-    for (const it of items) {
+    /* 줄마다 결과 — 건수만 주면 '어느 줄이 왜 빠졌나'를 사람이 엑셀과 대조해야 한다(거래내역 업로드와 같은 결과 화면).
+       results[k] 는 items[k] 의 결과: { status, vendor?: 'created'|'existing', no? } */
+    const results = items.map(() => ({ status: 'skipped' }))
+    for (const [k, it] of items.entries()) {
       const kind = it.kind === 'issued' ? 'issued' : 'received'
       const issuedAt = String(it.issued_at || '').slice(0, 10)
-      if (!issuedAt) continue                      // 작성일자 없는 행은 화면에서 이미 걸러진다
+      if (!issuedAt) { results[k] = { status: 'noDate' }; continue }   // 작성일자 없는 행은 화면에서 이미 걸러진다
       // 마감된 달의 행은 건너뛴다. 200건 중 한 건 때문에 전체를 거절하면 실무가 막히고,
       // 조용히 넣으면 신고 끝난 분기의 부가세가 바뀐다 → 스킵하고 몇 건인지 보고한다.
-      if (await isClosedMonth(issuedAt)) { closedSkipped++; continue }
+      if (await isClosedMonth(issuedAt)) { closedSkipped++; results[k] = { status: 'closed' }; continue }
       const supply = intOf(it.supply_amount)
       const taxType = normalizeTaxType(it.tax_type || (intOf(it.vat_amount) > 0 ? '과세' : '면세'))
       /* 면세·영세에 세액이 실려 오면 버린다 — lib/vat.js vatFields()의 규칙("유형이 우선")과 같다.
@@ -596,6 +599,11 @@ router.post('/import/commit', async (req, res, next) => {
       const acctCode = category ? await acctCodeByCategoryName(conn, category, kind) : null
 
       if (it.action === 'update' && it.id) {
+        /* 덮어쓸 청구서의 **원래 달**도 본다 — 새 작성일자만 보면 마감된 6월분을 7월로 덮어 신고 끝난 분기
+           부가세에서 그 건이 빠졌다. 금액 검사도 등록과 같이(2026-10-02 검토) */
+        const [[orig]] = await conn.execute('SELECT issued_at FROM invoices WHERE id = ?', [it.id])
+        if (!orig) { results[k] = { status: 'missing' }; continue }
+        if (await isClosedMonth(String(orig.issued_at || '').slice(0, 10))) { closedSkipped++; results[k] = { status: 'closed' }; continue }
         // 이미 입금·지급이 붙은 청구서의 금액을 엑셀로 덮으면 정산 잔액이 어긋난다.
         // 그런 건은 승인번호만 채우고 금액·일자는 그대로 둔다(무엇이 유지됐는지 결과로 알린다).
         const [[{ mcnt }]] = await conn.execute(
@@ -605,7 +613,10 @@ router.post('/import/commit', async (req, res, next) => {
           await conn.execute(
             'UPDATE invoices SET nts_confirm_no = COALESCE(nts_confirm_no, ?) WHERE id = ?', [confirmNo, it.id])
           amountKept++
+          results[k] = { status: 'kept' }
         } else {
+          // 금액을 덮어쓰는 경로만 금액을 본다 — 정산 붙은 건(위)은 승인번호만 채우므로 금액 칸이 비어도 된다
+          if (amountError(total)) { amountSkipped++; results[k] = { status: 'amount' }; continue }
           const v = await findOrCreateVendor(conn, { name: it.vendor_name, bizNo: it.biz_no, kind })
           if (v.created) createdVendors.push(v.name)
           /* 비목·계정과목은 **비어 있을 때만** 채운다. 사람이 청구서에서 정해 둔 비목을
@@ -620,6 +631,7 @@ router.post('/import/commit', async (req, res, next) => {
             [v.id, supply, vat, total, issuedAt, dueAt, taxType, confirmNo, category, acctCode, it.id])
           // 엑셀에 품목이 있을 때만 갈아끼운다. 빈 채로 덮으면 기성 청구의 품목 내역이 날아간다.
           if (await replaceInvoiceLines(conn, it.id, it.lines, itemIdx, registerItems)) linedInvoices++
+          results[k] = { status: 'updated', vendor: v.created ? 'created' : v.id ? 'existing' : null }
         }
         updated++
         continue
@@ -632,22 +644,23 @@ router.post('/import/commit', async (req, res, next) => {
       if (confirmNo) {
         const [[exists]] = await conn.execute(
           'SELECT id FROM invoices WHERE nts_confirm_no = ? LIMIT 1', [confirmNo])
-        if (exists) { dupSkipped++; continue }
+        if (exists) { dupSkipped++; results[k] = { status: 'dup' }; continue }
       }
       /* 금액이 0·음수인 행은 만들지 않는다. 여기만 검사가 없어 엑셀의 빈 금액 칸이
        * 0원 청구서로 들어왔다. 한 행 때문에 배치 전체를 세우면 나머지 수백 건이 날아가므로
        * (중복 처리와 같은 이유) 세어서 결과 화면에 보고한다. */
-      if (amountError(total)) { amountSkipped++; continue }
+      if (amountError(total)) { amountSkipped++; results[k] = { status: 'amount' }; continue }
       const v = await findOrCreateVendor(conn, { name: it.vendor_name, bizNo: it.biz_no, kind })
       if (v.created) createdVendors.push(v.name)
       const newId = randomUUID()
+      const invoiceNo = await nextInvoiceNo(kind, issuedAt.slice(0, 4))
       try {
         /* 외부 문서(엑셀·홈택스)가 원본이다. 닫을 회차가 없다 —
            이 계산서가 어느 정기 회차인지는 우리가 알 수 없기 때문이다.
            그 회차는 '발행예정'에 남고, 나중에 사람이 대사에서 이어 준다. */
         await createInvoice(conn, {
           id: newId,
-          kind, invoiceNo: await nextInvoiceNo(kind, issuedAt.slice(0, 4)),
+          kind, invoiceNo,
           vendorId: v.id,
           supply, vat, total, issuedAt, dueAt,
           status: kind === 'issued' ? '입금 예정' : '지급 대기',
@@ -659,17 +672,18 @@ router.post('/import/commit', async (req, res, next) => {
         // UNIQUE(nts_confirm_no)가 걸린 경우: 위 조회와 이 삽입 사이에 다른 요청이 먼저 넣었다.
         // 그 한 건 때문에 배치 전체를 500으로 되돌리면 나머지 수백 건이 통째로 날아간다 →
         // 중복으로 세고 넘어간다(결과 화면에 dupSkipped로 보고된다).
-        if (e.code === 'ER_DUP_ENTRY') { dupSkipped++; continue }
+        if (e.code === 'ER_DUP_ENTRY') { dupSkipped++; results[k] = { status: 'dup' }; continue }
         throw e
       }
       if (await replaceInvoiceLines(conn, newId, it.lines, itemIdx, registerItems)) linedInvoices++
       inserted++
+      results[k] = { status: 'inserted', vendor: v.created ? 'created' : v.id ? 'existing' : null, no: invoiceNo }
     }
 
     await conn.commit()
     res.json({
       ok: true, inserted, updated, amountKept, linedInvoices, dupSkipped, closedSkipped, amountSkipped, createdVendors,
-      createdItems: itemIdx ? itemIdx.created : [],
+      createdItems: itemIdx ? itemIdx.created : [], results,
     })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
@@ -678,24 +692,12 @@ router.post('/import/commit', async (req, res, next) => {
 // 양식 다운로드 — 홈택스 '전자세금계산서 목록조회 → 엑셀받기'와 같은 머리글로 만든다.
 router.get('/import/template', async (req, res, next) => {
   try {
-    // 품목 상세 포함 형식으로 만든다 — 첫 두 행은 같은 승인번호(= 품목 2줄짜리 계산서 1건)다.
+    // 품목 상세 포함 형식으로 만든다 — 첫 두 행이 품목 2줄짜리 계산서 1건이다(둘째 줄은 품목 칸만).
     /* '비목'은 홈택스에 없는 우리 칸이다 — 양식에 세워 두면 "여기 적으면 되는구나"가 된다.
        홈택스에서 받은 파일에는 이 열이 없고, 그때는 업로드 화면에서 한 번에 고른다. */
     const cols = ['작성일자', '승인번호', '공급자 사업자등록번호', '공급자 상호',
       '공급받는자 사업자등록번호', '공급받는자 상호', '합계금액', '공급가액', '세액', '종류',
       '품목명', '품목 규격', '품목 수량', '품목 단가', '품목 공급가액', '비목', '비고']
-    const rows = [
-      cols,
-      ['2026-07-05', '20260705-41000000-11111111', '000-00-00000', '(주)포커스윈',
-        '111-11-11111', '(주)한화오션', 11000000, 10000000, 1000000, '일반',
-        '회원관리 시스템 개발', '2차', 1, 7000000, 7000000, '', '7월 기성'],
-      ['2026-07-05', '20260705-41000000-11111111', '000-00-00000', '(주)포커스윈',
-        '111-11-11111', '(주)한화오션', 11000000, 10000000, 1000000, '일반',
-        '유지보수', '월 정액', 6, 500000, 3000000, '', ''],
-      ['2026-07-10', '20260710-41000000-22222222', '222-22-22222', '정밀가공(주)',
-        '000-00-00000', '(주)포커스윈', 1650000, 1500000, 150000, '일반',
-        'CNC 가공', 'AL6061', 30, 50000, 1500000, '정밀가공 외주', '외주'],
-    ]
     const WIDTHS = [12, 28, 18, 20, 20, 20, 14, 14, 12, 8, 22, 12, 10, 12, 14, 16, 16]
     /* ⚠ 표시하는 필수는 **실제로 없으면 못 넣는 것**과 같아야 한다(lib/hometax.js isHometaxRowValid):
          작성일자 · 상호 · 금액. 승인번호는 없어도 등록된다(중복 판정만 못 한다) —
@@ -712,10 +714,10 @@ router.get('/import/template', async (req, res, next) => {
        머리글에 필수로 찍혀 있었다. 여기와 REQUIRED, isHometaxRowValid 셋이 어긋나면
        사용자는 안내대로 만든 파일이 왜 안 들어가는지 알 길이 없다. */
     const guide = [
-      ['홈택스 세금계산서 업로드 — 작성 안내'],
+      ['세금계산서 엑셀 업로드 — 작성 안내'],
       [''],
-      ['• 홈택스 › 조회/발급 › 전자세금계산서 › 목록조회에서 내려받은 엑셀을 그대로 올리면 됩니다.'],
-      ['  (머리글이 달라도 업로드 화면에서 컬럼을 직접 연결할 수 있어요)'],
+      ['• 이 양식의 첫 행(열 제목)은 그대로 두고, 둘째 행부터 적어 올리세요.'],
+      ['• 홈택스에서 다운로드한 세금계산서 목록도 올릴 수 있어요 — 열 제목이 다르면 업로드 화면에서 직접 매핑합니다.'],
       [''],
       ['[꼭 있어야 하는 것]'],
       ['• 작성일자 — 부가세 귀속 분기를 정하는 날짜입니다(발급일자·전송일자가 아닙니다).'],
@@ -735,7 +737,8 @@ router.get('/import/template', async (req, res, next) => {
       ['• 없으면 같은 건을 두 번 올려도 막지 못하고, 같은 계산서의 품목 행들도 각각 다른 계산서로 들어갑니다.'],
       [''],
       ['[품목]'],
-      ['• 승인번호가 같은 여러 행은 한 계산서의 품목들로 보고 묶습니다(위 1~2행 참고).'],
+      ['• 품목마다 한 줄씩 적습니다. 둘째 줄부터는 품목 칸만 채우면 바로 위 계산서의 품목으로 묶습니다.'],
+      ['  승인번호가 같은 여러 행도 한 계산서로 묶습니다.'],
       ['• 품목 칸을 안 쓰면 계산서 한 줄짜리로 등록되고, 금액·부가세에는 아무 차이가 없습니다.'],
       ['• 품목을 넣으면 매입 지급결의서가 품목별 명세로 자동 작성됩니다.'],
       ['  ※ 기준정보 품목 등록은 업로드 화면의 "미등록 품목 등록" 옵션으로 켤 수 있습니다(기본 꺼짐).'],
@@ -764,9 +767,11 @@ router.get('/import/template', async (req, res, next) => {
     templateSheet(wb, '세금계산서', {
       columns: cols.map((header, i) => ({ header, width: WIDTHS[i] || 16, required: REQUIRED.has(header),
         money: MONEY_COLS.has(header), int: header === '품목 수량' })),
-      samples: rows.slice(1),
+      /* 예시 줄은 넣지 않는다 — 안 지우고 올리면 (주)한화오션 11,000,000원 같은 가짜 청구서와 거래처가 생긴다.
+         거래내역·카드·근로계약 양식과 같은 규칙(검토). 칸 설명은 '작성안내' 시트가 맡는다 */
+      samples: [],
     })
-    guideSheet(wb, guide.map(g => g[0]), '작성안내', { hasRequired: true })
+    guideSheet(wb, guide.map(g => g[0]), '작성안내', { hasRequired: true, hasSamples: false })
     await sendBook(res, wb, '세금계산서_업로드_양식.xlsx')
   } catch (e) { next(e) }
 })

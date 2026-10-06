@@ -186,11 +186,25 @@ export const groupHometaxRows = (rows, colFor) => {
     return (line.name || line.amount) ? line : null   // 빈 품목 칸은 라인으로 만들지 않는다
   }
 
+  /* 이어지는 품목 줄 — 승인번호·작성일자·상호·금액이 **모두 비고** 품목 칸만 있는 줄은 바로 위 계산서의 품목이다.
+     품목이 수십 개인 계산서를 손으로 적을 때 머리 칸을 줄마다 되풀이하지 않아도 되게(2026-10-02 사용자).
+     예전엔 이런 줄이 각각 '필수값 없음' 계산서로 떨어졌다. */
+  /* 앞 계산서의 품목 줄 — 품목 칸 말고는 **아무것도** 없어야 한다. 세액·사업자번호·종류·비목·비고까지 본다:
+     그 칸이 채워진 줄을 품목으로 붙이면 그 값은 조용히 버려진다(검토). 애매하면 새 줄로 두고 오류로 보인다 */
+  const isContinuation = (row) =>
+    ![T.confirm, T.date, T.supName, T.buyName, T.total, T.supply, T.vat, T.supBiz, T.buyBiz, T.docKind, T.category, T.memo].some(t => cell(row, t))
+
   const out = [], byConfirm = new Map()
   rows.forEach((row, i) => {
     const key = digits(cell(row, T.confirm))
-    const head = key ? byConfirm.get(key) : null
     const line = lineOf(row)
+    if (!key && line && out.length && isContinuation(row)) {
+      const prev = out[out.length - 1]
+      prev.__lines.push(line)
+      prev.__mergedRows++
+      return
+    }
+    const head = key ? byConfirm.get(key) : null
     if (head) {
       if (line) head.__lines.push(line)
       head.__mergedRows++
@@ -245,6 +259,7 @@ export const mapHometaxRow = (g, opts = {}, row = null) => {
 
   return {
     kind,
+    _docKind: docKind,               // 종류 칸 그대로 — 고칠 때 면세(계산서)를 과세로 잘못 보지 않게(taxInvoiceImport applyFix)
     _by: by,                         // 'biz' = 사업자번호로 판정 / 'default' = 기본 방향
     _mergedRows: row?.__mergedRows || 1,
     lines,                           // 품목 내역(invoice_lines). 품목 칸을 안 쓰면 빈 배열
@@ -293,7 +308,7 @@ export const hometaxRowWarns = (d, opts = {}) => {
   }
   // 과세인데 세액이 공급가의 10%가 아니면 컬럼이 밀렸을 가능성이 크다(1원 반올림은 허용)
   if (d.tax_type === '과세' && Math.abs(vatOf(d.supply_amount) - d.vat_amount) > 1) {
-    w.push('세액이 공급가액의 10%와 달라요 — 컬럼 매핑을 확인하세요')
+    w.push('세액이 공급가액의 10%와 달라요 — 열 매핑을 확인하세요')
   }
   // 품목 합계가 공급가액과 다르면 행이 덜 묶였거나 품목 컬럼이 잘못 연결된 것이다.
   // 청구서 금액은 계산서 헤더를 따르므로 장부는 맞지만, 지급결의서 품목 명세가 어긋난다.

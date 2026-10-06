@@ -2,6 +2,8 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { kstToday } = require('../db')
 const { rollbackQuietly } = require('../lib/tx')
+const { attachRoutes, removeAllFor, removeFilesIfUnused } = require('../lib/attachments')
+const { printLayoutRoutes, removeLayoutFor } = require('../lib/printLayouts')
 const { closedPeriodError } = require('../lib/closing')
 
 const router = Router()
@@ -97,10 +99,18 @@ router.delete('/:id', async (req, res, next) => {
     if (ce) { await rollbackQuietly(conn); return res.status(409).json({ error: ce }) }
     await conn.execute('DELETE FROM journal_lines WHERE voucher_id = ?', [req.params.id])
     await conn.execute('DELETE FROM journal_vouchers WHERE id = ?', [req.params.id])
+    const files = await removeAllFor(conn, 'journal_voucher', req.params.id)   // 첨부 행 — 파일은 커밋 뒤에
+    await removeLayoutFor(conn, 'journal_voucher', req.params.id)
     await conn.commit()
+    await removeFilesIfUnused(req.db, files, req.user?.companyId)
     res.json({ ok: true })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })
+
+// 첨부(증빙) — 공용 표, 권한은 이 경로를 따른다
+attachRoutes(router, 'journal_voucher')
+// 인쇄 배치(인쇄 양식 편집기)
+printLayoutRoutes(router, 'journal_voucher')
 
 module.exports = router

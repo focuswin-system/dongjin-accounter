@@ -1,507 +1,484 @@
 import { useState, useEffect, useMemo } from 'react'
 import { GoOrAsk } from '../lib/components/GoOrAsk'
-import { Icon, fmtNum, useToast, useConfirm, MoneyInput, DateInput, localToday, fmtDateShort } from '../lib/ui'
+import { Icon, fmtNum, useToast, useConfirm, MoneyInput, DateInput, localToday, fmtDateShort, periodToRange } from '../lib/ui'
 import { PageHeader } from '../lib/components/PageHeader'
+import { SummaryCard, SummaryRow } from '../lib/components/Kpi'
+import { DataTable } from '../lib/components/DataTable'
+import { TableToolbar } from '../lib/components/TableToolbar'
+import { useTableFilter } from '../lib/tableFilter'
 import { Drawer } from '../lib/ui'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
+import { AccountField } from '../lib/components/AccountField'
 import { api } from '../lib/api'
 import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
 import { ImportWizard } from '../lib/components/ImportWizard'
 import { cardImportAdapter } from '../lib/cardImport'
 import { accountLabels } from '../lib/accountLabel'
+import { payDayLabel } from '../lib/cardPayDay'
 
 /**
- * 카드 대금 지급 — 쌓인 카드값을 통장에서 갚는다.
+ * 카드 대금 — 카드마다 **회차별로 제대로 냈나**를 보고, 카드를 열어 갚는다.
  *
- * ── 왜 '내부 계좌 이체'에서 떼어냈나 ──
- * 저장되는 모양은 이체와 같다(보내는 쪽 출금 + 받는 쪽 입금, 두 줄). 그래서 한 화면에 있었다.
- * 그런데 **하는 일도 화면 뼈대도 다르다.**
- *   · 카드 대금 = 예금 ↓ + 미지급금 ↓ — 빚을 갚는 일. 본체는 **갚을 카드 목록**이다.
- *   · 계좌 이체 = 예금 A ↓ + 예금 B ↑ — 자산 안에서 옮기는 일. 본체는 **폼 하나**다.
- * 한 화면에 두니 훨씬 자주 하는 카드값이 보조 표로 얹혀 있었고, 제목은 어쩌다 하는
- * 통장 이동이 달고 있었다.
+ * ── 화면 (2026-10-02 사용자) ──
+ *   "카드가 여러 개 뜨고, 최근 5회차까지 이상 없는지와 현재 상태를 보고,
+ *    카드를 누르면 팝업에서 회차 칩으로 회차별 납부 상황을 보고 거기서 지급 처리"
+ *   · 메인: 요약 → 카드 타일(미결제·이번 결제 예정·밀린 대금 + 최근 회차 칩) → 기간 사용 표
+ *   · 팝업: 회차 칩 → 그 회차의 사용·낸 돈·남은 돈·사용 내역 → 지급(통장·금액·날짜) → 지급 이력
  *
- * ── 이 화면이 하는 일 ──
- *   1. 갚을 카드 목록 — 카드별 미결제 잔액과 다음 결제일.
- *   2. **명세서 대조용 숫자** — 이번 사용 구간과 그 구간에 장부가 잡고 있는 사용액.
- *      경리가 실제로 하는 일이 "카드사 명세서와 장부가 맞나"라서, 종이와 견줄 숫자를 낸다.
+ * ── 숫자는 서버가 낸다(server/lib/cardBill.js) ──
+ *   회차 = 지난 결제일 다음날 ~ 이번 결제일. 갚은 돈은 **오래된 회차부터** 채운다(카드사와 같다).
+ *   서버 조회는 카드 수와 무관하게 세 번이고, 이 화면도 낱건은 **필요한 만큼만** 받는다 —
+ *   표는 보이는 기간만, 팝업은 고른 회차만, 업로드 대조는 업로드를 시작할 때 그 카드만.
+ *   (예전엔 회사 지출 전체를 한 번에 받아 화면에서 걸렀다)
  *
- *      ⚠ **차액은 앱이 계산해 주지 않는다.** 계산하려면 카드사가 청구한 금액을 알아야 하는데
- *        그건 시스템에 없다(종이에만 있다). 우리 거래끼리 빼면 언제나 '이번 구간에 이미 갚은
- *        금액'이 나올 뿐이고, 정작 찾으려던 **'안 올린 전표'는 원리적으로 못 잡는다** —
- *        전표가 없으면 잔액도 그만큼 안 늘어나기 때문이다.
- *        처음엔 차액을 띄웠는데, 선결제만 해도 "장부가 더 많아요"라는 틀린 경고가 떴다.
- *        숫자를 내주고 판단은 사람이 한다. 없는 것을 아는 척하지 않는다.
- *   3. 결제 처리 — 어느 통장에서 얼마를 갚을지.
- *
- * ⚠ 건별로 골라 갚는 기능은 **일부러 만들지 않는다.** 카드사에 "이 건만 갚을게요"는
- *   존재하지 않는다. 명세서 구간이 통째로 청구되고, 부분 결제는 건이 아니라 금액 단위다.
- *   고를 수 있게 해두면 화면이 없는 약속을 하게 된다.
- *
- * ⚠ 체크카드는 여기 없다. 쓴 즉시 통장에서 빠지므로 갚을 것이 없다.
+ * ⚠ 건별로 골라 갚는 기능은 없다 — 카드사에 "이 건만"은 없다. 금액 단위로 갚는다.
+ * ⚠ 차액(명세서 − 장부)은 계산하지 않는다 — 카드사 청구액은 종이에만 있다. 구간과 장부 사용액을 내준다.
+ * ⚠ 체크카드는 없다 — 쓴 즉시 통장에서 빠져 갚을 것이 없다.
  */
 
-/** 그 달의 결제일 — 짧은 달이면 말일로 당긴다(2월 30일 같은 날짜는 없다) */
-const payDateOf = (y, m, day) => {
-  const last = new Date(y, m, 0).getDate()
-  return `${y}-${String(m).padStart(2, '0')}-${String(Math.min(day, last)).padStart(2, '0')}`
+const mmdd = (d) => (d ? `${Number(d.slice(5, 7))}.${d.slice(8, 10)}` : '')
+const monthOf = (d) => `${Number(d.slice(5, 7))}월`
+const sum = (arr, k) => arr.reduce((s, x) => s + (Number(x[k]) || 0), 0)
+
+/* 회차 상태 → 말과 색. 상태색은 뜻이라 액센트를 따르지 않는다(테마 규칙) */
+const STATUS = {
+  paid:        { label: '완납',      badge: 'pos',     dot: 'var(--pos)' },
+  unpaid:      { label: '미납',      badge: 'neg',     dot: 'var(--neg)' },
+  partial:     { label: '일부 미납', badge: 'neg',     dot: 'var(--neg)' },
+  due:         { label: '결제 예정', badge: 'outline', dot: 'var(--brand)' },
+  partial_due: { label: '일부 냄',   badge: 'outline', dot: 'var(--brand)' },
+  none:        { label: '사용 없음', badge: 'outline', dot: 'var(--line-strong)' },
 }
 
-/** 하루 뒤 — 'YYYY-MM-DD' 문자열끼리만 다룬다(이 앱의 다른 날짜 계산과 같은 눈금) */
-const nextDay = (d) => {
-  const [y, m, dd] = d.split('-').map(Number)
-  const t = new Date(y, m - 1, dd + 1)
-  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
-}
-
-/** 이번 결제일과 그 결제일이 덮는 사용 구간(지난 결제일 다음날 ~ 이번 결제일)
- *
- * ⚠ from 은 **지난 결제일의 다음날**이다. 지난 결제일 당일에 쓴 것은 그 결제일에 이미
- *   청구된 몫이라 이번 구간이 아니다.
- *   예전엔 지난 결제일 자체를 from 으로 두고 집계만 `date > from` 으로 하루 밀었다.
- *   숫자는 맞았지만 **화면에 적히는 구간이 하루 어긋났다** — '7/25 ~ 8/25'라고 써 놓고
- *   7/25 사용분은 빼고 셌다. 대조하러 온 사람이 그 하루를 찾느라 헤맨다.
- *   여기서 다음날로 만들고, 집계는 경계를 포함(>=)하게 맞춘다.
- */
-function billingWindow(today, payDay) {
-  const [y, m] = today.split('-').map(Number)
-  let py = y, pm = m
-  // 이번 달 결제일이 이미 지났으면 다음 달 것을 본다
-  if (today > payDateOf(y, m, payDay)) { pm += 1; if (pm > 12) { pm = 1; py += 1 } }
-  const payDate = payDateOf(py, pm, payDay)
-  const prev = new Date(py, pm - 2, 1)
-  const prevPay = payDateOf(prev.getFullYear(), prev.getMonth() + 1, payDay)
-  return { payDate, from: nextDay(prevPay), to: payDate }
+/* 회차 칩 — 타일(작게·읽기만)과 팝업(고르기)이 같은 모양을 쓴다 */
+const CycleChip = ({ c, active, onClick, compact = false }) => {
+  const st = STATUS[c.status] || STATUS.none
+  const Tag = onClick ? 'button' : 'span'
+  return (
+    <Tag type={onClick ? 'button' : undefined} onClick={onClick} className={`chip ${active ? 'active' : ''}`} data-view=""
+      title={`${mmdd(c.payDate)} 결제 · ${st.label}${c.used ? ` · 사용 ${fmtNum(c.used)}` : ''}`}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: onClick ? 'pointer' : 'default',
+        ...(compact ? { padding: '2px 8px', fontSize: 11.5 } : null) }}>
+      <span style={{ width: 7, height: 7, borderRadius: 7, background: st.dot, flexShrink: 0 }}/>
+      {monthOf(c.payDate)}
+      {!compact && <span className="text-muted2" style={{ fontSize: 11 }}>{st.label}</span>}
+    </Tag>
+  )
 }
 
 export const CardPaymentScreen = ({ openEdit, goRoute }) => {
-  const toast = useToast()
-  const { confirm } = useConfirm()
   const [accounts, setAccounts] = useState([])
-  const [uses, setUses] = useState([])      // 카드로 쓴 지출(대조용)
-  const [paid, setPaid] = useState([])      // 카드에 들어온 결제(이체의 받는 쪽) — 이월 계산용
-  const [rows, setRows] = useState([])      // 결제 이력
-  const [form, setForm] = useState(null)
-  const [openCard, setOpenCard] = useState(null)   // 사용 내역을 펼친 카드
-  const [busy, setBusy] = useState(false)
-  // 지급 이력 행에서 연 거래 상세 — 거래내역과 같은 드로어를 쓴다
+  const [bills, setBills] = useState([])
+  const [uses, setUses] = useState([])              // 보이는 기간의 카드 사용(이체 제외)
+  const [openId, setOpenId] = useState(null)        // 팝업으로 연 카드
   const [txnOpen, setTxnOpen] = useState(null)
-  /* 카드 명세서 업로드 — 어느 카드에서 눌렀는지 기억한다(목록의 '명세서 올리기'로 들어오면
-     그 카드가 미리 골라져 있다). 빈 문자열이면 위쪽 버튼으로 들어온 것이라 마법사에서 고른다. */
-  const [importing, setImporting] = useState(null)
+  const [importing, setImporting] = useState(null)  // { cardId, existing } — cardId '' 이면 마법사에서 고른다
   const [categories, setCategories] = useState([])
-  /* 아직 못 읽었나 — 빈 상태가 **행동을 권하는** 화면이라(카드 등록하러 가기) 번쩍이면
-     없는 카드를 또 만들러 간다. 읽기 전에는 아무 말도 하지 않는다. */
+  const [employees, setEmployees] = useState([])   // 업로드 '사용 직원' 칸 확인용(이름만)
   const [loading, setLoading] = useState(true)
 
-  const today = localToday()
+  const tf = useTableFilter({
+    date: { field: 'date', initial: periodToRange('month') },
+    search: { fields: ['memo', 'vendor', 'category', 'employeeName'], placeholder: '가맹점·비목·사용 직원 검색' },
+    // 카드 — 자주 거르는 축이라 바에 바로 세운다(inline). 이름이 겹치면 끝자리로 가른다
+    filters: [{ key: 'card', label: '카드', field: 'accountId', inline: true, placeholder: '전체 카드',
+      options: accountLabels(accounts).filter(a => bills.some(b => b.id === a.id)).map(a => ({ value: a.id, label: a.label })) }],
+  })
+  const from = tf.range?.from, to = tf.range?.to
 
-  const load = async () => {
-    /* ⚠ **입금도 받아야 한다.** 카드 대금 결제는 두 줄로 남는데(통장 출금 + 카드 입금),
-       "이 카드에 얼마를 갚았나"는 **카드 쪽 입금**에만 있다. 지출만 보면 이월을 못 센다. */
-    const [accs, expense, income] = await Promise.all([
-      api.getAccounts(), api.getTransactions({ kind: 'expense' }), api.getTransactions({ kind: 'income' }),
-    ])
-    setAccounts(accs)
-    // 카드로 결제한 지출 = 대조 대상. 이체로 만들어진 줄은 사용이 아니므로 뺀다.
-    setUses((expense || []).filter(t => !t.transferId))
-    /* ⚠ **상대가 카드인 이체만** 여기 것이다.
-     *
-     * transferId 만 보면 통장 간 이체(급여계좌 보충 같은 것)까지 딸려 온다 —
-     * 실제로 '하나은행 급여 5,000,000'이 카드 지급 이력에 섞여 있었다.
-     * 내부 계좌 이체 화면은 카드 줄을 빼고 있는데(Transfer.jsx) 이쪽은 그 반대를 안 했다.
-     * 두 화면이 같은 줄을 나눠 갖지 못하면 어느 쪽에서 취소해야 하는지도 갈린다. */
-    const cardIds = new Set((accs || []).filter(a => a.kind === 'card').map(a => a.id))
-    // 카드에 들어온 결제(이체의 받는 쪽 다리) — 이월 계산에 쓴다
-    setPaid((income || []).filter(t => t.transferId && cardIds.has(t.accountId)))
-    // 결제 이력은 보내는 쪽(지출)만 세운다 — 둘 다 세우면 한 번 결제가 두 줄로 보인다
-    setRows((expense || [])
-      .filter(t => t.transferId && cardIds.has(t.counterpartyAccountId))
-      .sort((a, b) => String(b.date).localeCompare(String(a.date))))
+  const cardIdsOf = (accs) => new Set(accs.filter(a => a.kind === 'card').map(a => a.id))
+  // 표는 **보이는 기간만** 서버에서 거른다
+  const loadUses = async (accs, r = { from, to }) => {
+    const rows = await api.getTransactions({ kind: 'expense', from: r.from, to: r.to })
+    const ids = cardIdsOf(accs)
+    /* 회차 숫자(서버 cardBill)와 같은 기준 — **완료된 지출만**, 카드에서 나간 이체(현금서비스 등)도 갚을 돈이다.
+       예전엔 상태를 안 거르고 이체를 빼서 '사용 X원'과 아래 목록 합계가 달랐다(2026-10-02 검토) */
+    setUses((rows || []).filter(t => t.status === '지급완료' && ids.has(t.accountId)))
   }
-  useEffect(() => { load().finally(() => setLoading(false)) }, [])
-  // 명세서 업로드에서 고를 비목 — 업로드를 안 열면 안 쓰지만, 화면에 들어올 때 한 번만 받는다
-  useEffect(() => { api.getCategories().then(rows => setCategories(rows || [])).catch(() => {}) }, [])
+  const loadBills = async () => {
+    const [accs, b] = await Promise.all([api.getAccounts(), api.getCardBills()])
+    setAccounts(accs || []); setBills(b || [])
+    return [accs || [], b || []]
+  }
+  const reload = async () => { const [accs] = await loadBills(); await loadUses(accs) }
+  /* 처음 기간 = **이번 회차들**(가장 이른 회차 시작 ~ 가장 늦은 결제일). 달력 '이번 달'로 두면
+     월초엔 표가 비고(10/2 → 0건) 결제 예정액과 견줄 수도 없다. 그다음은 사람이 바꾼다 */
+  useEffect(() => {
+    (async () => {
+      const [accs, b] = await loadBills()
+      const cy = b.map(x => x.cycle).filter(Boolean)
+      let r = { from, to }
+      if (cy.length) {
+        r = { from: cy.map(c => c.from).sort()[0], to: cy.map(c => c.to).sort().pop() }
+        tf.setRange(r)
+      }
+      await loadUses(accs, r)
+    })().finally(() => setLoading(false))
+  }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!loading) loadUses(accounts) }, [from, to])   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { api.getCategories().then(r => setCategories(r || [])).catch(() => {}) }, [])
+  useEffect(() => { api.getEmployeeOptions().then(r => setEmployees(r || [])).catch(() => {}) }, [])
 
   const byId = useMemo(() => new Map(accounts.map(a => [a.id, a])), [accounts])
-  const bankOpts = useMemo(() => accounts.filter(a => a.kind !== 'card'), [accounts])
-  // 명세서를 올릴 수 있는 카드 — 체크카드는 쓴 즉시 통장에서 빠지므로 통장 거래로 올린다
-  const creditCards = useMemo(
-    () => accounts.filter(a => a.kind === 'card' && a.cardType === 'credit'), [accounts])
-  /* 어댑터는 옵션이 바뀔 때만 새로 만든다 — 매 렌더 새 객체면 마법사가 중복 판정을 통째로 다시 계산한다. */
+  // 이름이 겹치는 카드는 끝자리를 붙여 가른다(lib/accountLabel)
+  const labelOf = useMemo(() => new Map(accountLabels(accounts).map(a => [a.id, a.label])), [accounts])
+  const creditCards = useMemo(() => accounts.filter(a => a.kind === 'card' && a.cardType === 'credit'), [accounts])
   const importAdapter = useMemo(
-    () => cardImportAdapter({ cards: creditCards, categories, defaultAccountId: importing || '' }),
-    [creditCards, categories, importing])
+    () => cardImportAdapter({ cards: creditCards, categories, employees, defaultAccountId: importing?.cardId || '' }),
+    [creditCards, categories, employees, importing?.cardId])
+  const shownUses = useMemo(() => tf.apply(uses), [uses, tf.apply])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* 갚을 카드 목록.
-   *
-   * ⚠ 금액은 '이번 구간 사용액'이 아니라 **카드 계좌 잔액**(음수)의 절대값이다.
-   *   구간 사용액으로 세면 이미 결제한 뒤에도 같은 금액이 계속 떠 있다(결제는 income 인데
-   *   구간 사용액은 지출만 세기 때문). 잔액으로 보면 결제분이 자동으로 빠지고
-   *   **지난달 미납분까지** 함께 잡힌다 — 갚을 사람이 알고 싶은 건 정확히 그 숫자다.
-   *
-   * 결제일이 없으면 세지 않는다. 언제 빠지는지 모르면 "지금 갚으라"고 말할 수 없다.
-   */
-  const bills = useMemo(() => accounts
-    .filter(a => a.kind === 'card' && a.cardType === 'credit' && a.cardPayDay > 0)
-    .map(a => {
-      const w = billingWindow(today, a.cardPayDay)
-      const inWindow = uses.filter(t => t.accountId === a.id && t.date >= w.from && t.date <= w.to)
-      const booked = inWindow.reduce((s, t) => s + (Number(t.amount) || 0), 0)
-      const unpaid = Math.max(0, -(a.currentBalance ?? 0))
-      /* 이월분 — 지난 구간에서 못 갚고 넘어온 몫.
-       *
-       * unpaid(카드 잔액)는 전체 기간 누계라 이월이 섞여 있다. 그 사실을 화면에 적지 않으면
-       * "이번 구간에 143,000 썼는데 왜 263,000을 갚으라 하지"가 된다.
-       *   이월분 = 구간 시작 전까지의 사용 − 그때까지의 결제 */
-      const before = uses.filter(t => t.accountId === a.id && t.date < w.from)
-        .reduce((s, t) => s + (Number(t.amount) || 0), 0)
-      const paidBefore = paid.filter(t => t.accountId === a.id && t.date < w.from)
-        .reduce((s, t) => s + (Number(t.amount) || 0), 0)
-      // 이번 구간에 이미 갚은 몫 — 잔액이 왜 사용액보다 적은지를 설명한다
-      const paidInWindow = paid.filter(t => t.accountId === a.id && t.date >= w.from && t.date <= w.to)
-        .reduce((s, t) => s + (Number(t.amount) || 0), 0)
-      const carry = Math.max(0, before - paidBefore)
-      return {
-        card: a, ...w, inWindow, booked, unpaid, carry, paidInWindow,
-        payAcct: byId.get(a.cardPayAccountId) || null,
-      }
-    })
-    .filter(b => b.unpaid > 0)
-    .sort((a, b) => a.payDate.localeCompare(b.payDate)), [accounts, uses, paid, byId, today])
-
-  const totalUnpaid = bills.reduce((s, b) => s + b.unpaid, 0)
-
-  /* ⚠ **결제일을 안 정한 신용카드에도 갚을 돈이 있다.**
-   *
-   * 위 목록은 결제일이 있어야 세운다(언제 빠지는지 모르면 "지금 갚으라"고 말할 수 없다).
-   * 그런데 그 카드를 그냥 감추면 화면이 "갚을 카드값이 없어요"라고 **거짓말을 한다** —
-   * 운영 실데이터에서 신용카드 6장 중 3장이 결제일 0이었고, 그중에 미결제 100만원이
-   * 넘는 카드가 있었다.
-   * 목록에는 안 세우되(날짜를 모르니 줄을 세울 수 없다) **얼마가 걸려 있는지는 말한다.** */
-  const noPayDay = useMemo(() => accounts
-    .filter(a => a.kind === 'card' && a.cardType === 'credit' && !(a.cardPayDay > 0))
-    .map(a => ({ card: a, unpaid: Math.max(0, -(a.currentBalance ?? 0)) }))
-    .filter(x => x.unpaid > 0), [accounts])
-  const noPayDayTotal = noPayDay.reduce((s, x) => s + x.unpaid, 0)
-
-  // 이름이 겹치는 카드(국민카드-공용 두 장)는 끝자리를 붙여 가른다 — 같은 이름 둘이면 어느 카드인지 모른다
-  const cardLabel = useMemo(() => new Map(accountLabels(accounts).map(a => [a.id, a.label])), [accounts])
-
-  const openPay = (b) => setForm({
-    card: b.card, fromAccountId: b.payAcct?.id || '', amount: String(b.unpaid),
-    unpaid: b.unpaid,
-    // 결제일이 아직 안 왔으면 오늘로 — 미래 날짜는 서버가 막는다
-    date: b.payDate > today ? today : b.payDate,
-    memo: `${b.card.name} 카드대금`,
-  })
-
-  const save = async () => {
-    if (!form.fromAccountId) return toast.push('어느 통장에서 갚을지 골라주세요', { tone: 'warn' })
-    const amt = Number(String(form.amount).replace(/[^0-9-]/g, '')) || 0
-    if (amt <= 0) return toast.push('금액을 입력해주세요', { tone: 'warn' })
-
-    const from = byId.get(form.fromAccountId)
-    const left = form.unpaid - amt
-    const ok = await confirm({
-      tone: 'brand', icon: <Icon.Card size={22}/>, title: '카드 대금 지급',
-      body: `${from?.name} 에서 ${fmtNum(amt)}원으로 ${form.card.name} 대금을 갚습니다.`,
-      detail: left > 0
-        ? `갚고 나면 ${fmtNum(left)}원이 남아요. 수입도 지출도 아니라 손익에는 잡히지 않습니다.`
-        : '수입도 지출도 아니에요 — 통장 잔액이 줄고 카드 미결제가 사라집니다.',
-      confirmLabel: '지급',
-    })
-    if (!ok) return
-    setBusy(true)
-    const res = await api.transfer({
-      fromAccountId: form.fromAccountId, toAccountId: form.card.id,
-      amount: amt, date: form.date, memo: form.memo,
-    })
-    setBusy(false)
-    if (!res.ok) return toast.push(res.error || '지급에 실패했어요', { tone: 'warn' })
-    toast.push('카드 대금을 지급했어요')
-    setForm(null)
-    load()
+  /* 명세서 업로드 — 대조 대상은 **그 카드의 전 기간** 사용분(명세서가 표의 기간과 다를 수 있다).
+     업로드를 시작할 때만 받는다. 카드를 안 골랐으면 모든 카드. 다른 카드의 같은 날·같은 금액이
+     '확인 필요'로 잡혀 멀쩡한 줄이 빠지지 않게 고른 카드로 좁힌다(예전 결정 그대로) */
+  const startImport = async (cardId) => {
+    // 대조 대상은 **모든 카드** — 줄마다 카드가 다를 수 있다. 다른 카드끼리 섞이지 않게 키에 카드를 넣는다(cardImport buildIndex)
+    const rows = await api.getTransactions({ kind: 'expense' })
+    const ids = cardIdsOf(accounts)
+    setOpenId(null)
+    setImporting({ cardId, existing: (rows || []).filter(t => !t.transferId && ids.has(t.accountId)) })
   }
 
-  const remove = async (r) => {
-    const ok = await confirm({
-      tone: 'neg', icon: <Icon.Warn size={22}/>, title: '지급 취소',
-      body: `${fmtNum(r.amount)}원 카드 대금 지급을 지웁니다.`,
-      detail: '통장 출금과 카드 입금 두 줄이 함께 지워져요. 한쪽만 남으면 돈이 사라지거나 생겨납니다.',
-      confirmLabel: '삭제',
-    })
-    if (!ok) return
-    const res = await api.deleteTransaction(r.id)
-    toast.push(res.ok ? '지급을 취소했어요' : (res.error || '취소에 실패했어요'), res.ok ? undefined : { tone: 'warn' })
-    load()
-  }
+  const due = bills.filter(b => b.current > 0)
+  const overdue = bills.filter(b => b.overdue > 0)
+  const nextPay = due.map(b => b.cycle?.payDate).filter(Boolean).sort()[0]
 
-  /* 명세서 업로드는 목록을 통째로 바꾸므로 화면을 넘겨받는다(세금계산서 업로드와 같은 방식).
-     대조 대상은 **카드 사용 지출**만 준다 — 통장 지출까지 주면 같은 날 같은 금액의 통장 건이
-     '확인 필요'로 잡혀, 멀쩡한 카드 사용분을 건너뛰게 만든다. */
-  if (importing !== null) return (
-    <ImportWizard
-      adapter={importAdapter}
-      /* ⚠ 대조 대상은 **고른 그 카드**의 사용분만. 모든 카드를 주면 다른 카드의 같은 날
-         같은 금액 결제가 '확인 필요'로 잡혀(기본 건너뛰기) 멀쩡한 지출이 조용히 빠진다.
-         카드를 아직 안 골랐으면(위쪽 버튼으로 들어온 경우) 카드 전체를 준다 — 그래도
-         승인번호가 있으면 서버가 그 카드 안에서 다시 본다. */
-      existing={uses.filter(t => (importing ? t.accountId === importing : byId.get(t.accountId)?.kind === 'card'))}
+  if (importing) return (
+    <ImportWizard adapter={importAdapter} existing={importing.existing}
       onCancel={() => setImporting(null)}
-      onDone={() => { setImporting(null); load() }}/>
+      onDone={() => { setImporting(null); reload() }}/>
   )
 
   return (
     <div className="fade-up">
-      <PageHeader title="카드 대금 지급"
-        sub={bills.length > 0
-          ? `갚을 카드 ${bills.length}장 · ${fmtNum(totalUnpaid)}원`
-          : '쌓인 카드값을 통장에서 갚습니다. 수입도 지출도 아니라 손익에는 잡히지 않아요.'}
-        actions={creditCards.length > 0
-          ? <button className="btn" onClick={() => setImporting('')}>
-              <Icon.Upload size={14}/> 명세서 올리기
-            </button>
-          : null}/>
+      <PageHeader title="카드 대금"
+        sub="카드별로 회차마다 제대로 냈는지 봅니다. 카드를 누르면 회차별 내역과 지급이 열려요."
+        actions={creditCards.length > 0 ? <button className="btn excel" onClick={() => startImport('')}><Icon.Excel/> 엑셀 업로드</button> : null}/>
 
-      {/* 결제일을 안 정한 카드의 미결제 — 목록에 못 세우니 여기서 알린다.
-          "갚을 카드값이 없어요"라고 말해 놓고 100만원이 걸려 있으면 그건 거짓말이다. */}
-      {noPayDay.length > 0 && (
-        <div className="card card-pad" style={{ marginBottom: 12, borderColor: 'var(--warn)' }}>
-          <div className="text-sm fw-700" style={{ marginBottom: 4 }}>
-            결제일을 안 정한 카드에 {fmtNum(noPayDayTotal)}원이 남아 있어요
-          </div>
-          <div className="text-sm text-muted" style={{ lineHeight: 1.7 }}>
-            {noPayDay.map(x => `${cardLabel.get(x.card.id) || x.card.name} ${fmtNum(x.unpaid)}원`).join(' · ')}<br/>
-            결제일을 정하면 위 목록에 올라와 갚을 수 있어요. 언제 빠지는지 모르면 자금 예측에도 안 잡힙니다.
-          </div>
-          {/* 할 일을 말했으면 갈 길을 준다 — 예전엔 '기준정보 › 카드'를 글자로만 적었다(2026-09-30 사용자) */}
-          {/* 거기서 고칠 수 있을 때만 버튼, 아니면 누구에게 부탁할지(lib/components/GoOrAsk) */}
-          <div style={{ marginTop: 10 }}>
-            <GoOrAsk route="master_card" action="edit" go={goRoute}
-              ask="결제일은 기준정보(카드) 권한이 있는 담당자에게 요청해 주세요.">
-              기준정보 › 카드에서 결제일 정하기 <Icon.Right size={12}/>
+      <SummaryRow cols={3}>
+        <SummaryCard label="다음 결제 예정" amount={sum(due, 'current')} count={due.length} unit="장" accent="brand"
+          hint={nextPay ? `가장 가까운 결제일 ${mmdd(nextPay)}` : '결제일 기준 이번 회차 사용분'}/>
+        <SummaryCard label="밀린 대금" amount={sum(overdue, 'overdue')} count={overdue.length} unit="장" accent="neg"
+          warn={overdue.length > 0} hint="결제일이 지났는데 남은 돈"/>
+        <SummaryCard label="기간 사용" amount={sum(shownUses, 'amount')} count={shownUses.length} accent="blue"
+          hint={from ? `${mmdd(from)} ~ ${mmdd(to)} 사용` : '전체 기간 사용'}/>
+      </SummaryRow>
+
+      {!loading && bills.length === 0 && (
+        <div className="card card-pad row gap-12" style={{ marginTop: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span className="text-sm">등록된 신용카드가 없어요.</span>
+          <span className="ml-auto">
+            <GoOrAsk route="master_card" action="create" go={goRoute} ask="카드 등록은 기준정보(카드) 권한이 있는 담당자에게 요청해 주세요.">
+              카드 등록 <Icon.Right size={12}/>
             </GoOrAsk>
-          </div>
+          </span>
         </div>
       )}
 
-      {loading ? (
-        <div className="card card-pad text-sm text-muted2">불러오는 중…</div>
-      ) : bills.length === 0 ? (
-        /* 빈 상태는 **다음에 뭘 해야 하는지**를 말해야 한다.
-           카드가 한 장도 없는 것과, 카드는 있는데 갚을 게 없는 것은 다른 상황이다 —
-           전자는 등록하러 가야 하고, 후자는 명세서를 올려 사용분을 채워야 한다.
-           예전엔 둘 다 "갚을 카드값이 없어요"였고 '기준정보 › 카드'는 누를 수도 없었다. */
-        <div className="card card-pad" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', color: 'var(--muted)' }}>
-          {creditCards.length === 0 ? (
-            <>
-              <Icon.Card size={16} className="text-muted2"/>
-              <span className="text-sm fw-600" style={{ color: 'var(--ink)' }}>등록된 신용카드가 없어요.</span>
-              <span className="text-xs text-muted2">카드를 등록하면 쓴 돈과 갚을 돈이 여기 모입니다.</span>
-              <GoOrAsk route="master_card" action="create" go={goRoute} className="btn sm ml-auto"
-                askStyle={{ marginLeft: 'auto' }} ask="카드 등록은 기준정보(카드) 권한이 있는 담당자에게 요청해 주세요.">
-                카드 등록하러 가기
-              </GoOrAsk>
-            </>
-          ) : (
-            <>
-              <Icon.Check size={16} className="text-pos"/>
-              <span className="text-sm fw-600" style={{ color: 'var(--ink)' }}>
-                {noPayDay.length > 0 ? '결제일이 정해진 카드 중에는 갚을 것이 없어요.' : '갚을 카드값이 없어요.'}
-              </span>
-              <span className="text-xs text-muted2">
-                카드로 쓴 내역을 올리면 갚을 금액이 잡혀요.
-              </span>
-            </>
-          )}
-        </div>
-      ) : (
-        <div className="col gap-12">
-          {bills.map(b => {
-
-            const open = openCard === b.card.id
-            return (
-              <div key={b.card.id} className="card" style={{ overflow: 'hidden' }}>
-                <div className="row" style={{ padding: '16px 18px', gap: 14, flexWrap: 'wrap' }}>
-                  <div style={{ minWidth: 180 }}>
-                    <div className="fw-700" style={{ fontSize: 15 }}>{b.card.name}</div>
-                    <div className="text-xs text-muted" style={{ marginTop: 2 }}>
-                      결제일 <span className="num">{b.payDate}</span>
-                      {b.payAcct
-                        ? <> · {b.payAcct.name}에서 출금</>
-                        : <span className="badge neg" style={{ marginLeft: 6, fontSize: 10 }}>결제 계좌 미설정</span>}
-                    </div>
-                  </div>
-                  <div className="ml-auto" style={{ textAlign: 'right' }}>
-                    <div className="text-xs text-muted2">미결제 잔액</div>
-                    <div className="num fw-700" style={{ fontSize: 20, letterSpacing: '-0.02em' }}>{fmtNum(b.unpaid)}</div>
-                  </div>
-                  <button className="btn primary" disabled={!b.payAcct}
-                    title={b.payAcct ? undefined : '기준정보 › 카드에서 결제 계좌를 먼저 지정해주세요'}
-                    onClick={() => openPay(b)} style={{ alignSelf: 'center' }}>지급 처리</button>
-                </div>
-
-                {/* 명세서와 견줄 숫자 — 사용 구간과 그 구간 장부 사용액.
-                    종이 명세서를 옆에 놓고 이 숫자와 맞춰 보는 자리다. */}
-                <div className="row" style={{ padding: '10px 18px', gap: 12, borderTop: '1px solid var(--line)',
-                  background: 'var(--surface-2)', flexWrap: 'wrap' }}>
-                  <span className="text-xs text-muted2">
-                    사용 구간 <span className="num">{b.from}</span> ~ <span className="num">{b.to}</span>
-                  </span>
-                  <span className="text-xs text-muted2">·</span>
-                  <span className="text-xs">
-                    장부에 있는 사용액 <span className="num fw-600">{fmtNum(b.booked)}</span>
-                    <span className="text-muted2"> ({b.inWindow.length}건)</span>
-                  </span>
-                  {/* ⚠ **차액을 앱이 계산해 주지 않는다.** 계산하려면 카드사가 청구한 금액을
-                      알아야 하는데 그건 시스템에 없다 — 종이 명세서에만 있다.
-                      우리 거래끼리 빼면 언제나 '이번 구간에 이미 갚은 금액'이 나올 뿐이고,
-                      **정작 찾으려던 '안 올린 전표'는 원리적으로 못 잡는다**(전표가 없으면
-                      잔액도 그만큼 안 늘어난다). 실제로 선결제만 해도 "장부가 더 많아요"라는
-                      틀린 경고가 떴다.
-                      그래서 **대조할 숫자를 내주고 판단은 사람이 한다.** 없는 것을 아는 척하지 않는다. */}
-                  {b.carry > 0 && (
-                    <span className="text-xs text-muted2">
-                      · 지난 구간 이월 <span className="num">{fmtNum(b.carry)}</span>
-                    </span>
-                  )}
-                  {b.paidInWindow > 0 && (
-                    <span className="text-xs text-muted2">
-                      · 이번 구간에 이미 갚음 <span className="num">{fmtNum(b.paidInWindow)}</span>
-                    </span>
-                  )}
-                  {/* 대조하다가 "장부가 비네"를 발견하는 자리가 여기다 — 그 자리에서 바로 올린다.
-                      위쪽 버튼과 달리 이건 **이 카드**로 골라진 채 열린다. */}
-                  <button className="btn sm ml-auto" onClick={() => setImporting(b.card.id)}>
-                    <Icon.Upload size={13}/> 명세서 올리기
-                  </button>
-                  <button className="btn sm" onClick={() => setOpenCard(open ? null : b.card.id)}>
-                    {open ? '사용 내역 접기' : '사용 내역 보기'}
-                  </button>
-                </div>
-
-                {open && (
-                  <table className="table">
-                    <thead><tr><th>날짜</th><th>거래처 · 적요</th><th>사용 직원</th><th className="num-right">금액</th></tr></thead>
-                    <tbody>
-                      {b.inWindow.length === 0 && (
-                        <tr><td colSpan={4} style={{ textAlign: 'center', padding: 28, color: 'var(--muted-2)', fontSize: 13 }}>
-                          이 구간에 장부로 올라온 사용 내역이 없어요.
-                        </td></tr>
-                      )}
-                      {b.inWindow.map(t => (
-                        <tr key={t.id}>
-                          <td className="num-cell text-muted text-sm">{fmtDateShort(t.date)}</td>
-                          <td className="text-sm">
-                            <span className="fw-600">{t.vendor || '—'}</span>
-                            {t.memo && <span className="text-muted2"> · {t.memo}</span>}
-                          </td>
-                          {/* 법인카드는 여럿이 나눠 쓴다 — 누가 썼는지가 이 표의 값어치다 */}
-                          <td className="text-sm text-muted">{t.employeeName || t.employee || '—'}</td>
-                          <td className="num-cell num-right fw-600">{fmtNum(t.amount)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
+      {/* 카드 타일 — 지금 상태 + 최근 회차. 누르면 팝업 */}
+      {bills.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))', gap: 12, marginTop: 16 }}>
+          {bills.map(b => (
+            <button key={b.id} type="button" className="card card-pad" onClick={() => setOpenId(b.id)}
+              style={{ textAlign: 'left', cursor: 'pointer', width: '100%', font: 'inherit', color: 'inherit',
+                ...(b.overdue > 0 ? { borderColor: 'var(--neg)' } : null) }}>
+              <div className="row" style={{ alignItems: 'center', gap: 8 }}>
+                <span className="fw-700">{labelOf.get(b.id) || b.name}</span>
+                <Icon.Right size={14} className="text-muted2 ml-auto"/>
               </div>
-            )
-          })}
+              <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+                {b.pay_day ? `매월 ${payDayLabel(b.pay_day)} 결제` : <span style={{ color: 'var(--warn-ink)' }}>결제일 미설정</span>}
+                {' · '}{b.pay_account_name || <span style={{ color: 'var(--neg-ink)' }}>결제 계좌 미설정</span>}
+              </div>
+              <div className="row" style={{ marginTop: 12, alignItems: 'flex-end', gap: 16 }}>
+                <div>
+                  <div className="text-xs text-muted2">미결제</div>
+                  <div className="num fw-700" style={{ fontSize: 20 }}>{fmtNum(b.unpaid)}</div>
+                </div>
+                <div className="ml-auto text-xs" style={{ textAlign: 'right' }}>
+                  {b.cycle && <div className="text-muted">{mmdd(b.cycle.payDate)} 결제 예정 <b className="num" style={{ color: 'var(--ink)' }}>{fmtNum(b.current)}</b></div>}
+                  {b.overdue > 0 && <div style={{ color: 'var(--neg-ink)', marginTop: 2 }}>밀린 대금 <b className="num">{fmtNum(b.overdue)}</b></div>}
+                </div>
+              </div>
+              {b.cycles?.length > 0 && (
+                <div className="row gap-4" style={{ marginTop: 12, flexWrap: 'wrap' }}>
+                  {b.cycles.map(c => <CycleChip key={c.payDate} c={c} compact/>)}
+                </div>
+              )}
+            </button>
+          ))}
         </div>
       )}
 
-      {/* 지급 이력 */}
-      <div style={{ marginTop: 24 }}>
-        <div className="section-title" style={{ fontSize: 13, marginBottom: 10 }}>지급 이력</div>
-        <div className="card" style={{ overflow: 'hidden' }}>
-          <table className="table">
-            <thead><tr>
-              <th>날짜</th><th>출금 통장</th><th>카드</th><th>내용</th>
-              <th className="num-right">금액</th><th style={{ width: 70 }}></th>
-            </tr></thead>
-            <tbody>
-              {rows.length === 0 && (
-                <tr><td colSpan={6} style={{ textAlign: 'center', padding: 32, color: 'var(--muted-2)', fontSize: 13 }}>
-                  카드 대금 지급 내역이 없어요.
-                </td></tr>
-              )}
-              {rows.map(t => (
-                /* 행을 누르면 그 거래가 열린다. 잘못 갚은 건을 봤을 때 그 자리에서
-                   확인·수정할 수 있어야 한다(취소는 오른쪽 버튼이 따로 한다). */
-                <tr key={t.id} style={{ cursor: 'pointer' }} onClick={() => setTxnOpen(t.id)}>
-                  <td className="num-cell text-sm">{fmtDateShort(t.date)}</td>
-                  <td className="fw-700 text-sm">{byId.get(t.accountId)?.name || '—'}</td>
-                  <td className="text-sm">{byId.get(t.counterpartyAccountId)?.name || '—'}</td>
-                  <td className="text-sm text-muted">{t.memo || '—'}</td>
-                  <td className="num-cell num-right fw-700">{fmtNum(t.amount)}</td>
-                  <td><button className="btn sm" style={{ color: 'var(--neg-ink)' }}
-                    onClick={(e) => { e.stopPropagation(); remove(t) }}>취소</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {/* 기간 사용 — 모든 카드. 다른 화면처럼 표 위에 제목을 두지 않는다 */}
+      <div style={{ marginTop: 24 }}><TableToolbar {...tf.toolbarProps}/></div>
+      <div className="card" style={{ overflow: 'hidden', marginTop: 12 }}>
+        <DataTable tableKey="card-usage" rows={shownUses} loading={loading} rowKey={t => t.id} onRowClick={t => setTxnOpen(t.id)}
+          empty="이 기간에 카드로 쓴 내역이 없어요."
+          columns={[
+            { key: 'date', header: '날짜', sortable: true, render: t => <span className="num">{fmtDateShort(t.date)}</span> },
+            { key: 'card', header: '카드', sortable: true, sortValue: t => labelOf.get(t.accountId) || '',
+              render: t => labelOf.get(t.accountId) || byId.get(t.accountId)?.name || '—' },
+            /* 카드 사용은 가맹점이 적요에 있는 일이 대부분 — 거래처가 없을 때 붙는 '(미확인)'은 여기선 소음 */
+            { key: 'memo', header: '가맹점 · 적요', maxWidth: 360, render: t => <>{t.vendorId ? <><b>{t.vendor}</b>{t.memo ? ' ' : ''}</> : null}{t.memo}</> },
+            { key: 'category', header: '비목', sortable: true },
+            // 법인카드는 여럿이 나눠 쓴다 — 누가 썼는지가 이 표의 값어치다
+            { key: 'employeeName', header: '사용 직원', render: t => t.employeeName || t.employee || <span className="text-muted2">—</span> },
+            { key: 'evid', header: '증빙', label: '증빙', render: t => (t.evid_url || (t.docs && t.docs.length))
+              ? <span className="badge pos" style={{ fontSize: 10 }}>첨부</span> : <span className="text-muted2">—</span> },
+            { key: 'amount', header: '금액', align: 'right', sortable: true, render: t => <span className="num fw-600">{fmtNum(t.amount)}</span> },
+          ]}
+          footer={shownUses.length > 0 && (
+            <tr><td colSpan={6} className="text-sm text-muted">합계 {shownUses.length}건</td>
+              <td className="num-right num fw-700">{fmtNum(sum(shownUses, 'amount'))}</td></tr>
+          )}/>
       </div>
 
-      {txnOpen && <TxnQuickDrawer txnId={txnOpen} onClose={() => setTxnOpen(null)} onChanged={load} openEdit={openEdit}/>}
+      {txnOpen && <TxnQuickDrawer txnId={txnOpen} onClose={() => setTxnOpen(null)} onChanged={reload} openEdit={openEdit}/>}
+      {openId && bills.some(b => b.id === openId) && (
+        <CardBillDrawer bill={bills.find(b => b.id === openId)} label={labelOf.get(openId)} accounts={accounts}
+          goRoute={goRoute} onClose={() => setOpenId(null)} onChanged={reload}
+          onUpload={() => startImport(openId)} onAccounts={setAccounts}/>
+      )}
+    </div>
+  )
+}
 
-      {/* 결제 폼 — 카드 말투로 묻는다. '보내는 계좌 → 받는 계좌'가 아니라
-          '어느 통장에서 얼마를 갚나'다. 사용자 머릿속의 말과 같아야 한다. */}
-      <Drawer open={!!form} onClose={() => setForm(null)} width="min(480px,100vw)" label="카드 대금 지급">
-        <DrawerHead title="카드 대금 지급" sub={form?.card?.name} onClose={() => setForm(null)}/>
-        {form && (
-          <div className="drawer-body col gap-form">
-            <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
-              <div className="row">
-                <span className="text-sm text-muted">미결제 잔액</span>
-                <span className="num fw-700 ml-auto" style={{ fontSize: 18 }}>{fmtNum(form.unpaid)}</span>
-              </div>
-            </div>
+/* ── 카드 팝업 — 회차 칩 → 회차별 납부 상황 → 지급 → 지급 이력 ─────────────── */
+const CardBillDrawer = ({ bill, label, accounts, goRoute, onClose, onChanged, onUpload, onAccounts }) => {
+  const toast = useToast()
+  const { confirm } = useConfirm()
+  const today = localToday()
+  const cycles = bill.cycles || []
+  const name = label || bill.name
+  /* 처음 여는 회차 — 가장 오래된 **밀린** 회차. 없으면 이번 회차 */
+  const [pick, setPick] = useState(() => {
+    const owe = cycles.find(c => c.status === 'unpaid' || c.status === 'partial')
+    return (owe || cycles[cycles.length - 1] || {}).payDate || null
+  })
+  const cy = cycles.find(c => c.payDate === pick) || null
+  const [rows, setRows] = useState(null)   // 고른 회차의 사용 내역
+  const [paid, setPaid] = useState(null)   // 이 카드의 지급 이력
+  const [form, setForm] = useState(null)
+  const [busy, setBusy] = useState(false)
 
-            <div><label className="label">어느 통장에서 갚나요 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-              <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
-                {bankOpts.map(a => (
-                  <button key={a.id} type="button"
-                    className={`chip ${form.fromAccountId === a.id ? 'active' : ''}`}
-                    onClick={() => setForm(f => ({ ...f, fromAccountId: a.id }))}>{a.name}</button>
-                ))}
-              </div>
-            </div>
+  // 회차를 고를 때마다 그 회차 사용분만 받는다
+  useEffect(() => {
+    if (!cy) { setRows([]); return }
+    let alive = true
+    setRows(null)
+    api.getTransactions({ kind: 'expense', accountId: bill.id, from: cy.from, to: cy.to }).then(r => {
+      if (alive) setRows((r || []).filter(t => t.status === '지급완료').sort((a, b) => String(a.date).localeCompare(String(b.date))))
+    })
+    return () => { alive = false }
+  }, [bill.id, cy?.payDate, bill.unpaid])   // eslint-disable-line react-hooks/exhaustive-deps
+  /* 지급 이력 = 카드 쪽에 들어온 **이체**(받는 쪽 줄). 환불·취소(이체 아님)는 뺀다.
+     지우면 서버가 이체 두 줄을 함께 지운다(routes/transactions.js DELETE) */
+  useEffect(() => {
+    let alive = true
+    api.getTransactions({ kind: 'income', accountId: bill.id }).then(r => {
+      if (alive) setPaid((r || []).filter(t => t.transferId).sort((a, b) => String(b.date).localeCompare(String(a.date))))
+    })
+    return () => { alive = false }
+  }, [bill.id, bill.unpaid])
 
-            <div className="row gap-12">
-              <div style={{ flex: 1 }}><label className="label">갚는 금액 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-                <MoneyInput value={form.amount} onChange={raw => setForm(f => ({ ...f, amount: raw }))}/>
-                {/* 부분 결제가 실제로 흔하다. 갚고 나면 얼마 남는지 그 자리에서 보여준다. */}
-                <div className="text-xs text-muted2" style={{ marginTop: 6 }}>
-                  {(() => {
-                    const amt = Number(String(form.amount).replace(/[^0-9-]/g, '')) || 0
-                    const left = form.unpaid - amt
-                    return left > 0 ? `갚고 나면 ${fmtNum(left)}원이 남아요`
-                      : left < 0 ? `미결제보다 ${fmtNum(-left)}원 많아요 — 카드에 잔액이 생깁니다`
-                      : '전액 갚습니다'
-                  })()}
+  /* 이 회차까지 남은 돈 — 갚은 돈은 오래된 회차부터 채워지므로, 이 회차를 끝내려면 앞의 밀린 돈까지 내야 한다 */
+  const upTo = cy ? (bill.before_remain || 0) + sum(cycles.filter(c => c.payDate <= cy.payDate), 'remain') : bill.unpaid
+  useEffect(() => {
+    setForm(f => ({
+      fromAccountId: f?.fromAccountId ?? (bill.pay_account_id || ''),
+      amount: String(upTo > 0 ? upTo : bill.unpaid),
+      /* 지급일 기본 = 오늘. 밀린 회차를 오늘 갚는데 지난 결제일로 넣으면 통장 출금이 소급돼 그 사이 잔액 이력이
+         바뀌고, 마감된 달이면 막힌다(2026-10-02 검토). 자동이체를 나중에 적을 땐 사용자가 날짜를 고친다 */
+      date: today,
+      memo: cy ? `${bill.name} ${monthOf(cy.payDate)} 대금` : `${bill.name} 카드대금`,
+    }))
+  }, [cy?.payDate, upTo, bill.unpaid])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const st = cy ? (STATUS[cy.status] || STATUS.none) : null
+  const amt = Number(String(form?.amount || '').replace(/[^0-9-]/g, '')) || 0
+  const fromAcct = accounts.find(a => a.id === form?.fromAccountId)
+  const short = fromAcct && fromAcct.currentBalance != null && fromAcct.currentBalance < amt
+  const left = bill.unpaid - amt
+
+  const save = async () => {
+    if (!form.fromAccountId) return toast.push('어느 통장에서 갚을지 골라 주세요', { tone: 'warn' })
+    if (amt <= 0) return toast.push('금액을 입력해 주세요', { tone: 'warn' })
+    if (busy) return
+    setBusy(true)   // 확인창 전에 — 연타로 두 번 지급되지 않게
+    const ok = await confirm({
+      tone: 'brand', icon: <Icon.Card size={22}/>, title: '카드 대금 지급',
+      body: `${fromAcct?.name}에서 ${fmtNum(amt)}원으로 ${name} 대금을 갚습니다.`,
+      detail: (left > 0 ? `갚고 나면 미결제 ${fmtNum(left)}원이 남아요. ` : '') + '손익에는 잡히지 않아요.',
+      confirmLabel: '지급',
+    })
+    try {
+      if (!ok) return
+      const res = await api.transfer({ fromAccountId: form.fromAccountId, toAccountId: bill.id, amount: amt, date: form.date, memo: form.memo })
+      if (!res.ok) return toast.push(res.error || '지급하지 못했어요', { tone: 'warn' })
+      toast.push('카드 대금을 지급했어요')
+      await onChanged?.()
+    } finally { setBusy(false) }
+  }
+  const removePay = async (t) => {
+    const ok = await confirm({
+      tone: 'neg', icon: <Icon.Warn size={22}/>, title: '지급 취소',
+      body: `${mmdd(t.date)} ${fmtNum(t.amount)}원 지급을 지웁니다.`,
+      detail: '통장 출금과 카드 입금 두 줄이 함께 지워져요.', confirmLabel: '삭제',
+    })
+    if (!ok) return
+    const res = await api.deleteTransaction(t.id)
+    toast.push(res.ok ? '지급을 취소했어요' : (res.error || '취소하지 못했어요'), res.ok ? undefined : { tone: 'warn' })
+    onChanged?.()
+  }
+
+  /* 회차 요약 — 왼쪽 맨 위. 카드 명세서처럼 **사용 − 낸 돈 = 남은 돈**을 위에서 아래로 읽게 한다.
+     (숫자 하나만 크게 띄우니 무엇에서 무엇을 뺀 값인지가 안 보였다 — 2026-10-02 사용자) */
+  const overdueCy = cy && cy.remain > 0 && cy.payDate < today
+  const sumLine = (label, sub, v, strong) => (
+    <div className="row" style={{ alignItems: 'baseline', gap: 8, padding: strong ? '10px 0 0' : '4px 0' }}>
+      <span className={strong ? 'fw-700' : 'text-sm text-muted'}>{label}</span>
+      {sub && <span className="text-xs text-muted2">{sub}</span>}
+      <span className={`num ml-auto ${strong ? 'fw-700' : 'text-sm'}`}
+        style={strong ? { fontSize: 20, color: overdueCy ? 'var(--neg-ink)' : undefined } : undefined}>{v}</span>
+    </div>
+  )
+  const cycleHead = cy && (
+    <div>
+      <div className="row gap-6" style={{ alignItems: 'center', marginBottom: 8 }}>
+        <span className="fw-700">{mmdd(cy.payDate)} 결제</span>
+        <span className={`badge ${st.badge}`} style={{ fontSize: 10 }}>{st.label}</span>
+      </div>
+      {sumLine('사용', <span className="num">{mmdd(cy.from)} ~ {mmdd(cy.to)} · {cy.count}건</span>, fmtNum(cy.used))}
+      {sumLine('낸 돈', null, cy.paid > 0 ? `− ${fmtNum(cy.paid)}` : '0')}
+      <div style={{ borderTop: '1px solid var(--line-strong)', marginTop: 6 }}/>
+      {sumLine('남은 돈', null, fmtNum(cy.remain), true)}
+    </div>
+  )
+
+  /* 지급 입력 — 왼쪽 */
+  const payForm = form && bill.unpaid > 0 && (
+    <div className="col gap-form" style={{ borderTop: '1px solid var(--line)', paddingTop: 20 }}>
+      <div>
+        <label className="label">어느 통장에서 갚나요 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+        <AccountField kind="bank" valueKey="id" value={form.fromAccountId}
+          accounts={accounts.filter(a => a.kind !== 'card')} allAccounts={accounts}
+          onChange={v => setForm(f => ({ ...f, fromAccountId: v }))}
+          onCreated={async () => { const l = await api.getAccounts(); if (Array.isArray(l)) onAccounts?.(l) }}/>
+        {!bill.pay_account_id && <div className="text-xs text-muted2" style={{ marginTop: 6 }}>기준정보 › 카드에서 결제 계좌를 정해 두면 자동으로 골라져요</div>}
+        {short && (
+          <div className="text-xs" style={{ color: 'var(--neg-ink)', marginTop: 6 }}>
+            {fromAcct.name} 잔액 {fmtNum(fromAcct.currentBalance)}원 — {fmtNum(amt - fromAcct.currentBalance)}원 모자라요
+          </div>
+        )}
+      </div>
+      <div>
+        <label className="label">갚는 금액 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+        <MoneyInput value={form.amount} onChange={raw => setForm(f => ({ ...f, amount: raw }))}/>
+        <div className="row gap-6" style={{ marginTop: 8, flexWrap: 'wrap' }}>
+          {cy && upTo > 0 && upTo !== bill.unpaid && (
+            <button type="button" className={`chip ${amt === upTo ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, amount: String(upTo) }))}>
+              {monthOf(cy.payDate)}까지 {fmtNum(upTo)}
+            </button>
+          )}
+          <button type="button" className={`chip ${amt === bill.unpaid ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, amount: String(bill.unpaid) }))}>
+            전액 {fmtNum(bill.unpaid)}
+          </button>
+        </div>
+        {left < 0 && <div className="text-xs text-muted2" style={{ marginTop: 6 }}>미결제보다 {fmtNum(-left)}원 많아요 — 카드에 잔액이 생깁니다</div>}
+      </div>
+      <div><label className="label">지급일 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
+        <DateInput className="input" max={today} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}/>
+      </div>
+      <div><label className="label">내용</label>
+        <input className="input" value={form.memo} onChange={e => setForm(f => ({ ...f, memo: e.target.value }))}/>
+      </div>
+    </div>
+  )
+
+  /* 목록 — 오른쪽: 고른 회차 사용 내역 + 지급 이력 */
+  const lineRow = { padding: '7px 16px', borderTop: '1px solid var(--line)', gap: 10 }
+  const ellipsis = { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+  const empty = (msg) => <div className="text-sm text-muted2" style={{ padding: '12px 16px', borderTop: '1px solid var(--line)' }}>{msg}</div>
+  const lists = (
+    <div className="col gap-16" style={{ minWidth: 0 }}>
+      {cy && (
+        <div className="card" style={{ overflow: 'hidden' }}>
+          <div className="row" style={{ padding: '8px 8px 8px 16px', alignItems: 'center' }}>
+            <span className="fw-700 text-sm">{monthOf(cy.payDate)} 회차 사용 내역</span>
+            <button className="btn ghost sm ml-auto" onClick={onUpload}><Icon.Excel size={13}/> 엑셀 업로드</button>
+          </div>
+          <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+            {rows === null ? empty('불러오는 중…')
+              : rows.length === 0 ? empty('이 회차에 장부에 올라온 사용 내역이 없어요.')
+              : rows.map(t => (
+                <div key={t.id} className="row text-sm" style={lineRow}>
+                  <span className="num text-muted" style={{ width: 40, flexShrink: 0 }}>{mmdd(t.date)}</span>
+                  <span style={ellipsis}>{t.memo || t.vendor}</span>
+                  <span className="text-xs text-muted2" style={{ flexShrink: 0 }}>{t.category}</span>
+                  <span className="num" style={{ width: 84, textAlign: 'right', flexShrink: 0 }}>{fmtNum(t.amount)}</span>
                 </div>
+              ))}
+          </div>
+        </div>
+      )}
+      <div className="card" style={{ overflow: 'hidden' }}>
+        <div className="fw-700 text-sm" style={{ padding: '10px 16px' }}>지급 이력</div>
+        <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+          {paid === null ? empty('불러오는 중…')
+            : paid.length === 0 ? empty('이 카드에 대금을 낸 기록이 없어요.')
+            : paid.map(t => (
+              <div key={t.id} className="row text-sm" style={{ ...lineRow, alignItems: 'center' }}>
+                <span className="num text-muted" style={{ width: 76, flexShrink: 0 }}>{fmtDateShort(t.date)}</span>
+                <span style={ellipsis}>{t.memo}</span>
+                <span className="num fw-600">{fmtNum(t.amount)}</span>
+                <button className="btn ghost sm" style={{ color: 'var(--neg-ink)' }} onClick={() => removePay(t)}>취소</button>
               </div>
-              <div style={{ flex: 1 }}><label className="label">지급일 <span style={{ color: 'var(--neg-ink)' }}>*</span></label>
-                <DateInput className="input" max={today} value={form.date}
-                  onChange={e => setForm(f => ({ ...f, date: e.target.value }))}/>
-              </div>
-            </div>
+            ))}
+        </div>
+      </div>
+    </div>
+  )
 
-            <div><label className="label">내용</label>
-              <input className="input" value={form.memo}
-                onChange={e => setForm(f => ({ ...f, memo: e.target.value }))}/>
+  return (
+    <Drawer open onClose={onClose} size="lg" label="카드 대금">
+      <DrawerHead title={name}
+        sub={`${bill.pay_day ? `매월 ${payDayLabel(bill.pay_day)} 결제` : '결제일 미설정'} · 미결제 ${fmtNum(bill.unpaid)}원`}
+        onClose={onClose}/>
+      <div className="drawer-body col gap-16">
+        {!bill.pay_day ? (
+          <div className="card card-pad row gap-12" style={{ alignItems: 'center', flexWrap: 'wrap', borderColor: 'var(--warn)' }}>
+            <span className="text-sm">결제일을 정해야 회차별로 볼 수 있어요.</span>
+            <span className="ml-auto">
+              <GoOrAsk route="master_card" action="edit" go={goRoute} ask="결제일은 기준정보(카드) 권한이 있는 담당자에게 요청해 주세요.">
+                결제일 정하기 <Icon.Right size={12}/>
+              </GoOrAsk>
+            </span>
+          </div>
+        ) : (
+          <div className="col gap-6">
+            {/* 회차 칩 — 오래된 것 → 이번 회차. 최근 3회 + 밀린 회차(서버가 고른다) */}
+            <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+              {cycles.map(c => <CycleChip key={c.payDate} c={c} active={c.payDate === pick} onClick={() => setPick(c.payDate)}/>)}
             </div>
-
-            <div className="text-xs text-muted2" style={{ lineHeight: 1.7 }}>
-              · 거래내역에는 <b>두 줄</b>로 남아요 — 통장 출금, 카드 입금.<br/>
-              · 손익에는 잡히지 않아요. 카드로 쓸 때 이미 비용으로 잡혔으니까요.
+            <div className="text-xs text-muted2">
+              갚은 돈은 오래된 회차부터 채워져요
+              {bill.before_remain > 0 && <span style={{ color: 'var(--neg-ink)' }}> · 이보다 앞선 회차에 밀린 돈 {fmtNum(bill.before_remain)}원</span>}
             </div>
           </div>
         )}
-        <DrawerFooter onCancel={() => setForm(null)} onSave={save} saveLabel="지급" busy={busy}/>
-      </Drawer>
-    </div>
+        {/* 2열 — 왼쪽 회차 요약·지급 입력, 오른쪽 목록. 좁으면 쌓인다(index.css .card-bill-grid) */}
+        <div className="card-bill-grid">
+          <div className="col gap-20" style={{ minWidth: 0 }}>
+            {cycleHead}
+            {payForm}
+          </div>
+          {lists}
+        </div>
+      </div>
+      {bill.unpaid > 0
+        ? <DrawerFooter onCancel={onClose} cancelLabel="닫기" onSave={save} saveLabel="지급" busy={busy}/>
+        : <DrawerFooter onCancel={onClose} cancelLabel="닫기"/>}
+    </Drawer>
   )
 }

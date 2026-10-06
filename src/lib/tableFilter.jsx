@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from 'react'
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { FilterSelect } from './ui'
 
 /* 표 필터 한 벌 — 상태 + 거르는 규칙 + 툴바 props 를 한 곳에서 만든다.
@@ -35,7 +35,9 @@ const get = (row, f) => (typeof f === 'function' ? f(row) : row?.[f])
 export const useTableFilter = ({ date, search, filters = [] } = {}) => {
   const [range, setRange] = useState(() => date?.initial || { from: '', to: '' })
   const [q, setQ] = useState('')
-  const [values, setValues] = useState({})   // { [filter.key]: 고른 값 | null }
+  /* 필터의 처음 값 — 예: 근로계약 '상태'는 재직이 기본. 초기화하면 이 값으로 돌아간다 */
+  const initOf = (fs) => Object.fromEntries((fs || []).filter(f => f.initial != null).map(f => [f.key, f.initial]))
+  const [values, setValues] = useState(() => initOf(filters))   // { [filter.key]: 고른 값 | null }
 
   /* 설정(날짜 칸·검색 대상·필터 정의)은 ref 로 들고 있는다.
      그냥 두면 부모가 매 렌더 새 배열을 만들어 apply 의 정체성이 계속 바뀌고,
@@ -47,14 +49,25 @@ export const useTableFilter = ({ date, search, filters = [] } = {}) => {
     setValues(prev => ({ ...prev, [key]: (v === '' || v === undefined) ? null : v }))
   }, [])
 
+  /* **칩 필터만** — 고른 값이 선택지에서 사라지면(예: 그 고용형태 계약을 모두 고쳐 칩이 없어짐) 그 축을 푼다.
+     안 그러면 목록은 비었는데 켜진 칩이 하나도 없어, 왜 비었는지 알 길이 없다(검토).
+     ⚠ 선택 상자 필터에는 걸지 않는다 — 선택지를 문자열로 주는 화면이 있고(o.value 가 없다), 소계 칩처럼
+       선택지 밖의 값(NO_VENDOR)을 넣는 화면도 있어 고른 값이 **곧바로 풀렸다**(2026-10-06 재검토 P0) */
+  useEffect(() => {
+    const valOf = (o) => (o && typeof o === 'object' ? o.value : o)
+    const gone = filters.filter(f => f.chips && Array.isArray(f.options) && f.options.length && values[f.key] != null
+      && f.initial !== values[f.key] && !f.options.some(o => valOf(o) === values[f.key]))
+    if (gone.length) setValues(prev => ({ ...prev, ...Object.fromEntries(gone.map(f => [f.key, null])) }))
+  })
   const active = filters.filter(f => values[f.key] != null)
-  const hasActiveFilter = active.length > 0
+  // 처음 값(initial) 그대로면 '걸린 필터'로 치지 않는다 — 기본 상태에서 '필터 적용 중'으로 보이지 않게
+  const hasActiveFilter = active.some(f => values[f.key] !== f.initial)
   /* ⚙ 버튼의 활성 점은 **패널 안의** 필터만 센다. 인라인 필터는 바에 값이 그대로 보이므로,
      그것 때문에 점이 켜지면 "뭐가 더 걸려 있나" 하고 패널을 열게 된다(열면 비어 있다). */
   const hasActivePanelFilter = active.some(f => !f.inline)
 
   const reset = useCallback(() => {
-    setValues({})
+    setValues(initOf(cfg.current.filters))
     setQ('')
     setRange(cfg.current.date?.initial || { from: '', to: '' })
   }, [])
@@ -114,6 +127,15 @@ export const useTableFilter = ({ date, search, filters = [] } = {}) => {
       inline: !!f.inline,
       node: f.node
         ? f.node(values[f.key] ?? null, (v) => setValue(f.key, v))
+        /* chips — 고를 값이 몇 개 안 되는 축(재직 여부·고용형태 등)은 칩으로. 선택 상자는 긴 목록에만(사용자 규칙).
+           '전체'(값 없음)는 맨 끝 — 기본값(initial)이 앞에 서도록 */
+        : f.chips
+        ? <div className="seg" role="tablist" aria-label={f.label}>
+            {[...(f.options || []).map(o => (typeof o === 'object' ? o : { value: o, label: o })), { value: null, label: f.allLabel || '전체' }].map(o => (
+              <button key={String(o.value)} type="button" role="tab" aria-selected={(values[f.key] ?? null) === o.value}
+                className={`seg-btn ${(values[f.key] ?? null) === o.value ? 'active' : ''}`} onClick={() => setValue(f.key, o.value)}>{o.label}</button>
+            ))}
+          </div>
         : <FilterSelect value={values[f.key] ?? null} onChange={(v) => setValue(f.key, v)}
             options={f.options || []} placeholder={f.placeholder || '전체'}/>,
     })),

@@ -150,14 +150,17 @@ router.post('/import/commit', async (req, res, next) => {
     let order = Number(maxOrder) || 0
     let inserted = 0, updated = 0
     const createdNames = []
-    for (const it of items) {
+    /* 줄마다 결과 — 건수만 주면 '어느 줄이 왜 빠졌나'를 사람이 엑셀과 대조해야 한다(거래내역 업로드와 같은 결과 화면).
+       results[k] 는 items[k] 의 결과: { status, vendor?: 'created'|'existing', no? } */
+    const results = items.map(() => ({ status: 'skipped' }))
+    for (const [k, it] of items.entries()) {
       const name = String(it.name ?? '').trim()
-      if (!name) continue
+      if (!name) { results[k] = { status: 'noName' }; continue }
       if (it.action === 'update' && it.id) {
         // type까지 함께 조건에 넣는다 — id만 믿으면 다른 종류(자산 → 품목)를 덮어쓸 수 있다
         const [rows] = await conn.execute('SELECT * FROM ref_items WHERE id=? AND type=?', [it.id, type])
         const cur = rows[0]
-        if (!cur) continue
+        if (!cur) { results[k] = { status: 'missing' }; continue }
         const vals = IMPORT_FIELDS.map(k => {
           const raw = String(it[k] ?? '').trim()
           if (raw === '') return cur[k] ?? null              // 빈 칸 = 기존 값 유지
@@ -167,7 +170,7 @@ router.post('/import/commit', async (req, res, next) => {
           `UPDATE ref_items SET ${IMPORT_FIELDS.map(k => `${k}=?`).join(', ')} WHERE id=?`,
           [...vals, it.id]
         )
-        updated++
+        updated++; results[k] = { status: 'updated' }
       } else {
         order++
         const vals = IMPORT_FIELDS.map(k => {
@@ -178,11 +181,11 @@ router.post('/import/commit', async (req, res, next) => {
           `INSERT INTO ref_items (id, type, sort_order, ${IMPORT_FIELDS.join(', ')}) VALUES (?,?,?,${IMPORT_FIELDS.map(() => '?').join(',')})`,
           [randomUUID(), type, order, ...vals]
         )
-        inserted++; createdNames.push(name)
+        inserted++; createdNames.push(name); results[k] = { status: 'inserted' }
       }
     }
     await conn.commit()
-    res.json({ inserted, updated, createdNames })
+    res.json({ inserted, updated, createdNames, results })
   } catch (e) { await rollbackQuietly(conn); next(e) }
   finally { conn.release() }
 })

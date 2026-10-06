@@ -1,5 +1,6 @@
 import { Icon, fmtNum, Combobox } from './ui'
 import { api } from './api'
+import { ItemSummary, ItemLines } from './components/ItemSummary'
 import { normBizNo, normVendorName } from './normalize'
 import {
   T, HOMETAX_TARGETS, guessHometaxColumn, mapHometaxRow, hometaxRowWarns, groupHometaxRows,
@@ -20,10 +21,30 @@ const KIND_LABEL = { issued: '매출', received: '매입' }
 
 export const taxInvoiceImportAdapter = ({ ourBizNo = '', defaultKind = 'issued', categories = [] } = {}) => ({
   label: '세금계산서',
-  title: '홈택스 세금계산서 업로드',
-  sub: '홈택스에서 내려받은 전자세금계산서 목록을 청구서로 한 번에 등록해요. 매출은 미수금, 매입은 미지급금으로 잡히고 부가세 집계에 바로 반영됩니다. 품목 상세를 포함해 받았다면 품목 내역까지 함께 들어갑니다.',
+  title: '세금계산서 엑셀 업로드',
+  sub: '세금계산서 여러 장을 양식에 맞춰 한 번에 등록해요. 매출은 미수금, 매입은 미지급금으로 잡히고 부가세 집계에 바로 반영됩니다.',
   templateUrl: '/api/invoices/import/template',
   templateName: '세금계산서_업로드_양식.xlsx',
+  /* 1단계 안내 — **양식에 맞춰 올리는 것**이 기본이다(다른 업로드와 같은 말, 2026-10-02 사용자).
+     홈택스 목록 엑셀도 받지만 그건 '이것도 된다'로만 적는다 — 실제 홈택스 파일 형식은 아직 실물로 확인하지 못했다.
+     ⚠ 필수 표시는 isHometaxRowValid(lib/hometax.js)·서버 양식 REQUIRED 와 같은 말이어야 한다 */
+  guide: {
+    intro: <>양식의 열 제목 그대로 올리면 <b>열 매핑 없이</b> 바로 검토 단계로 넘어갑니다.<br/>
+      홈택스에서 다운로드한 세금계산서 목록도 올릴 수 있어요 — 이 경우 열을 직접 매핑합니다.</>,
+    note: <><b>첫 행(열 제목)은 수정하지 마세요.</b> 예시 행은 지우고 쓰세요.<br/>
+      품목이 여러 개면 <b>품목마다 한 줄</b>씩 — 둘째 줄부터는 품목 칸만 채우면 같은 계산서로 묶여요.<br/>
+      매출/매입은 사업자등록번호를 우리 회사 번호와 비교해 자동으로 가립니다.</>,
+    rows: [
+      { col: T.date,   req: true, how: '부가세 귀속 기준일 (발급일 아님)', ex: '2026-07-05', num: true },
+      { col: `${T.supName} · ${T.buyName}`, req: true, how: '우리 반대편 상호가 거래처가 됨', ex: '(주)한화오션' },
+      { col: T.total,  req: true, how: '합계·공급가액·세액 중 둘만 있어도 됨', ex: '11,000,000', num: true },
+      { col: T.confirm, how: '중복 방지 · 품목 묶기 기준', ex: '20260705-4100…', num: true },
+      { col: '사업자등록번호', how: '매출/매입 판정에 사용', ex: '111-11-11111', num: true },
+      { col: T.docKind, how: '"영세"가 있으면 영세율', ex: '일반' },
+      { col: '품목명 · 규격 · 수량 · 단가', how: '품목마다 한 줄 (둘째 줄부터 품목 칸만)', ex: '유지보수 · 월 정액' },
+      { col: T.category, how: '비우면 업로드 화면에서 선택', ex: '외주가공비' },
+    ],
+  },
   targets: HOMETAX_TARGETS,
   requiredTarget: T.date,
   requiredHelp: '작성일자가 있어야 어느 분기 부가세인지 정해집니다. 거래처 상호와 금액도 필요해요.',
@@ -34,11 +55,8 @@ export const taxInvoiceImportAdapter = ({ ourBizNo = '', defaultKind = 'issued',
     const r = await api.commitTaxInvoiceImport(items, { registerItems: !!opts.registerItems })
     if (!r.ok) return r
     const notes = []
-    const made = r.createdVendors || []
-    if (made.length) {
-      const shown = made.slice(0, 3).join(', ')
-      notes.push(`거래처 ${made.length}곳이 새로 등록됐어요 (${shown}${made.length > 3 ? ' 외' : ''}) — 기준정보에서 구분·유형을 확인하세요`)
-    }
+    // 새 거래처·건너뛴 줄은 결과 화면의 거래처 카드·업로드 내역이 줄마다 보여 준다 — 여기엔 그 밖의 일만
+    if ((r.createdVendors || []).length) notes.push('새로 등록된 거래처는 기준정보에서 구분·유형을 확인하세요')
     const items2 = r.createdItems || []
     if (items2.length) {
       const shown = items2.slice(0, 3).join(', ')
@@ -50,12 +68,7 @@ export const taxInvoiceImportAdapter = ({ ourBizNo = '', defaultKind = 'issued',
     if (r.linedInvoices) {
       notes.push(`${r.linedInvoices}건에 품목 내역이 함께 등록됐어요 — 매입 지급결의서가 품목별로 작성됩니다`)
     }
-    if (r.closedSkipped) {
-      notes.push(`마감된 달의 ${r.closedSkipped}건은 등록하지 않았어요 — 이미 신고한 부가세 자료가 바뀌지 않게 막습니다. 필요하면 환경설정에서 마감을 해제하세요`)
-    }
-    if (r.dupSkipped) {
-      notes.push(`승인번호가 이미 등록된 ${r.dupSkipped}건은 건너뛰었어요 — 같은 세금계산서를 두 번 등록하지 않습니다`)
-    }
+    if (r.closedSkipped) notes.push('마감 월 줄은 이미 신고한 부가세 자료가 바뀌지 않게 막았어요 — 필요하면 환경설정에서 마감을 해제하세요')
     if (r.linedInvoices && !opts.registerItems) {
       notes.push('품목은 청구서에만 기록됐어요(기준정보 품목은 그대로) — 함께 등록하려면 업로드 화면에서 옵션을 켜세요')
     }
@@ -197,6 +210,37 @@ export const taxInvoiceImportAdapter = ({ ourBizNo = '', defaultKind = 'issued',
       : `${fmtNum(c.totalAmount)}원 · ${c.status}`,
   }),
 
+  // 품목이 둘 이상인 계산서만 펼친다 — 하나면 칸에 다 보인다
+  vendorOf: (d) => d.vendor_name,
+  bizOf: (d) => d.biz_no,
+  withVendor: (d, name) => ({ ...d, vendor_name: name }),
+  // 등록 불가 줄에서 틀린 칸만 — isHometaxRowValid 와 같은 세 칸
+  fixFields: (d) => [
+    !d.issued_at && { key: 'issued_at', label: '작성일자', kind: 'date' },
+    !d.vendor_name && { key: 'vendor_name', label: '거래처 상호', kind: 'text' },
+    !(d.total_amount > 0) && { key: 'total_amount', label: '합계금액 (부가세 포함)', kind: 'money' },
+  ].filter(Boolean),
+  // 합계를 고치면 공급가액·세액을 과세유형대로 다시 나눈다(과세 10%, 면세·영세 0) — 화면과 서버가 같은 값을 갖게
+  applyFix: (d, fix) => {
+    const n = { ...d, ...fix }
+    if (fix.total_amount != null) {
+      const total = Number(fix.total_amount) || 0
+      /* 금액 칸이 통째로 비어 있던 줄은 '세액 0 → 면세'로 읽혀 있다. 그건 면세라서가 아니라 값이 없어서다 —
+         영세가 아니면 과세로 본다(과세가 압도적으로 많다). 면세 건이면 등록 뒤 청구서에서 고친다 */
+      // 종류에 '계산서'(면세)·'면세'라고 적힌 줄은 면세 그대로 — 없는 세액 1/11 을 만들지 않는다(검토)
+      const exempt = /면세|^\s*계산서/.test(String(d._docKind || ''))
+      if (!(Number(d.supply_amount) > 0) && !(Number(d.vat_amount) > 0) && n.tax_type !== '영세' && !exempt) n.tax_type = '과세'
+      const supply = n.tax_type === '과세' ? Math.round(total / 1.1) : total
+      Object.assign(n, { total_amount: total, supply_amount: supply, vat_amount: total - supply })
+    }
+    return n
+  },
+  compareCols: [
+    ['청구번호', c => c.invoiceNo, true], ['작성일자', c => c.issuedAt, true], ['거래처', c => c.vendor || '—'],
+    ['합계', c => fmtNum(c.totalAmount), true], ['승인번호', c => c.ntsConfirmNo || '—', true],
+    ['상태', c => (c.paidAmount > 0 ? `${c.status} · ${fmtNum(c.paidAmount)}원 정산` : c.status)],
+  ],
+  rowDetail: (d) => ((d.lines || []).length > 1 ? <ItemLines lines={d.lines}/> : null),
   previewCols: [
     { header: '구분', width: 56, render: (d) => (
       <span className={`badge ${d.kind === 'issued' ? 'brand' : 'outline'}`} style={{ fontSize: 10 }}>
@@ -211,14 +255,9 @@ export const taxInvoiceImportAdapter = ({ ourBizNo = '', defaultKind = 'issued',
     { header: '과세', width: 52, render: (d) => (
       <span className="badge outline" style={{ fontSize: 10 }}>{d.tax_type}</span>
     ) },
-    // 품목이 몇 줄로 들어가는지 — 여러 행이 한 계산서로 묶였다는 것도 여기서 보인다
-    { header: '품목', width: 92, className: 'text-sm text-muted', render: (d) => (
-      d.lines?.length
-        ? <span title={d.lines.map(l => `${l.name || '(이름 없음)'} ${fmtNum(l.amount)}원`).join('\n')}>
-            {d.lines.length}개{d.lines[0]?.name ? ` · ${d.lines[0].name}` : ''}
-          </span>
-        : '—'
-    ) },
+    // 품목 — '첫 품목 외 N건'. 줄을 누르면 품목이 아래로 펼쳐진다(rowDetail)
+    { header: '품목', maxWidth: 240, className: 'text-sm text-muted',
+      render: (d, { open } = {}) => <ItemSummary names={(d.lines || []).map(l => l.name)} open={open}/> },
   ],
 
   dupHelp: (

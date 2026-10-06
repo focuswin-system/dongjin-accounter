@@ -2063,7 +2063,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
       ? Math.round((c.unit_amount || 0) / periodMonths(c.billing_period)) : 0),
   }), { amount: 0, remain: 0, arRemain: 0, monthly: 0 });
 
-  // 엑셀 내보내기 — 서버가 서식·요약까지 갖춘 .xlsx를 만든다
+  // 엑셀 다운로드 — 서버가 서식·요약까지 갖춘 .xlsx를 만든다
   // (주문 목록 / 갱신 관리 / 정기 주문 3개 시트)
   const [exporting, setExporting] = useState(false);
   const exportXlsx = async () => {
@@ -2071,7 +2071,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
     setExporting(true);
     const res = await api.exportContractsXlsx(kind);
     setExporting(false);
-    toast.push(res.ok ? "엑셀 파일을 내려받았어요" : (res.error || "내보내기에 실패했어요"));
+    toast.push(res.ok ? "엑셀 파일을 다운로드했어요" : (res.error || "다운로드에 실패했어요"));
   };
 
   return (
@@ -2080,7 +2080,7 @@ export const ContractListScreen = ({ goDetail, kind = "all" }) => {
         title={meta.title}
         actions={<>
           <button className="btn" onClick={exportXlsx} disabled={exporting}>
-            <Icon.Download/> {exporting ? "만드는 중..." : "엑셀 내보내기"}
+            <Icon.Download/> {exporting ? "만드는 중..." : "엑셀 다운로드"}
           </button>
           <button className="btn primary" onClick={() => { setNewForm(NEW_CONTRACT_FORM); setNewOpen(true); }}><Icon.Plus/> 신규 생성</button>
         </>}

@@ -13,6 +13,8 @@
  * **완료된 것만** 센다(SETTLED_INCOME / SETTLED_EXPENSE).
  */
 
+const { cardBills } = require('./cardBill')
+const { kstToday } = require('../db')
 const { SETTLED_INCOME, SETTLED_EXPENSE } = require('./ledger')
 const { pendingCond } = require('./invoiceStatus')
 const { paymentSchedule, unpaidPayments, paidPrincipal } = require('./savings')
@@ -244,45 +246,31 @@ async function upcomingFlows(db, { from, to, anchorPast = true }) {
    * 결제일에 한 번 더 세우면 **있지도 않은 출금**이 그 날 잡혀 잔고가 실제보다 적게 보인다.
    * "그 날 돈이 모자란다"는 경고가 헛되이 떠서, 진짜 모자란 날의 경고까지 무뎌진다.
    * card_type 이 없던 시절 데이터는 'credit' 으로 기본값이 박힌다(db.js) — 종전과 같다. */
-  const [cards] = await db.execute(
-    `SELECT id, name, card_pay_day, card_pay_account_id FROM accounts
-      WHERE kind = 'card' AND card_type = 'credit' AND card_pay_day > 0`)
-  for (const c of cards) {
-    const payDay = Number(c.card_pay_day)
-    // from 이후로 오는 결제일들을 훑는다(구간이 여러 달이면 여러 번 온다)
-    const [fy, fm] = from.split('-').map(Number)
-    for (let k = 0; k < 40; k++) {
-      const d = new Date(fy, fm - 1 + k, 1)
-      const y = d.getFullYear(), m = d.getMonth() + 1
-      const last = new Date(y, m, 0).getDate()
-      const payDate = `${y}-${String(m).padStart(2, '0')}-${String(Math.min(payDay, last)).padStart(2, '0')}`
-      if (payDate < from) continue
-      if (payDate > to) break
-      // 이 결제일이 커버하는 사용 구간 = 지난 결제일 다음날 ~ 이번 결제일
-      const prev = new Date(y, m - 2, 1)
-      const prevLast = new Date(prev.getFullYear(), prev.getMonth() + 1, 0).getDate()
-      const prevPay = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}-${String(Math.min(payDay, prevLast)).padStart(2, '0')}`
-      const [[u]] = await db.execute(
-        `SELECT COALESCE(SUM(amount), 0) AS used FROM transactions
-          WHERE account_id = ? AND kind = 'expense' AND date > ? AND date <= ?`,
-        [c.id, prevPay, payDate])
-      /* ⚠ 그 사이 **이미 결제한 금액**을 뺀다.
-       * 계좌 간 이체가 생기면서 사용자가 결제일보다 **먼저** 카드값을 낼 수 있게 됐다.
-       * 그러면 실제 출금은 이미 잔액에 반영돼 있는데 예측은 결제일에 같은 금액을 또
-       * 세운다 — 그 날 잔고가 실제보다 낮게 보이고, **헛된 부족 경고**가 뜬다.
-       * 카드로 들어온 이체(income + transfer_id)가 곧 결제액이다. */
-      const [[p]] = await db.execute(
-        `SELECT COALESCE(SUM(amount), 0) AS paid FROM transactions
-          WHERE account_id = ? AND kind = 'income' AND transfer_id IS NOT NULL
-            AND date > ? AND date <= ?`,
-        [c.id, prevPay, payDate])
-      const used = num(u.used) - num(p.paid)
-      if (used <= 0) continue
+  /* ⚠ 금액은 **카드 대금 화면과 같은 계산**(lib/cardBill.js cardBills)으로 낸다.
+   * 예전엔 회차 구간만 같이 쓰고 금액을 따로 셌다 — 미완료 지출까지 세고, 환불·잔액 조정을 빼먹고,
+   * 낸 돈을 오래된 회차부터 채우지(FIFO) 않아 **밀린 대금이 예측에서 통째로 사라졌다**
+   * (9월 500 밀림 + 10월 300 사용 + 400 납부 → 화면은 밀림 100·이번 300, 예측은 0. 2026-10-02 검토).
+   *   결제일이 오늘 이후인 회차의 남은 돈 → 그 결제일에 / 이미 지난(밀린) 돈 → 구간 첫날(연체), anchorPast 일 때만
+   * ⚠ 기준일은 **오늘**이다(구간 시작일이 아니다). 미래 구간(11월 화면)을 그 첫날 기준으로 계산하면 10/25 회차가
+   *   '밀린 돈'이 되어 11/1 에 또 서서, 오늘~10/31 구간에서 이미 뺀 돈이 **두 번 빠지고** 달마다 누적됐다
+   *   (2026-10-06 재검토). 밀린 돈은 다른 연체처럼 anchorPast 일 때만 구간 첫날로 끌어올린다(place 와 같은 규칙) */
+  const today = kstToday()
+  const bills = await cardBills(db, today)
+  for (const b of bills) {
+    if (b.card_type !== 'credit' || !(b.pay_day > 0)) continue
+    if (b.overdue > 0 && anchorPast) {
       out.push({
-        date: payDate, kind: 'out', amount: used,
-        label: `${c.name} 결제`, source: '카드 결제',
-        account_id: c.card_pay_account_id || null,
-        overdue: false, planned: true,
+        date: from, kind: 'out', amount: b.overdue,
+        label: `${b.name} 결제(밀림)`, source: '카드 결제',
+        account_id: b.pay_account_id, overdue: true, planned: true,
+      })
+    }
+    for (const cy of b.cycles || []) {
+      if (!(cy.remain > 0) || cy.payDate < today || cy.payDate < from || cy.payDate > to) continue
+      out.push({
+        date: cy.payDate, kind: 'out', amount: cy.remain,
+        label: `${b.name} 결제`, source: '카드 결제',
+        account_id: b.pay_account_id, overdue: false, planned: true,
       })
     }
   }

@@ -1,5 +1,9 @@
 import { useState, useRef, useMemo, useEffect, Fragment } from 'react'
-import { Icon, Spacer, Combobox, Popover, useToast } from '../ui'
+import { Icon, Combobox, Popover, useToast, DateInput, MoneyInput } from '../ui'
+import { api } from '../api'
+import { normBizNo, isSimilarVendorName } from '../normalize'
+import { PageHeader } from './PageHeader'
+import { ImportSteps, ImportGuideCard, ImportResultView, downloadWithAuth } from './ImportGuide'
 import { josa, hasBatchim } from '../josa'
 
 // ── 엑셀·CSV 일괄 업로드 공용 마법사 ──────────────────────────────
@@ -9,6 +13,8 @@ import { josa, hasBatchim } from '../josa'
 // adapter 규약
 //   label, title, sub          — 문구
 //   templateUrl, templateName  — 양식 다운로드 (없으면 버튼을 감춘다 — 받아온 파일 그대로 올리는 업로드)
+//   guide                      — 1단계 안내 { step, title, intro, note, downloadHint, guideTitle, rows:[{col,req,how,ex,num}] }
+//                                (생김새는 거래내역 엑셀 업로드와 같다 — ImportGuide.jsx)
 //   noUpdate                   — (선택) true 면 '덮어쓰기'를 아예 안 내준다(새로 넣기만 하는 업로드)
 //   fileWarn(headers)          — (선택) 머리글만 보고 '이 파일이 아니다'를 알릴 때
 //   targets[], requiredTarget  — 매핑 대상 라벨 목록 / 필수 항목
@@ -23,8 +29,19 @@ import { josa, hasBatchim } from '../josa'
 //   buildIndex(existing) / findMatch(data, idx) — 기존 자료와의 중복 판정
 //   candidateLabel(row)        — 덮어쓰기 후보 표시
 //   rowWarns(data, get)        — 행별 주의 문구(값을 못 알아봤을 때)
-//   previewCols[]              — 미리보기 표 컬럼
-//   commit(items, opts)        — 서버 반영. { ok, inserted, updated, note? }
+//   previewCols[]              — 미리보기 표 컬럼. render(data, { open }) — open: 그 줄이 펼쳐졌나
+//   rowDetail(data)            — (선택) 줄을 누르면 아래에 펼칠 내용(예: 계산서의 품목들). null 이면 안 펼친다
+//   ── 거래내역 업로드와 같은 3단계(미리보기)를 위해 ──
+//   fixFields(data)            — (선택) 등록 불가 줄에서 **틀린 칸만** [{ key, label, kind: 'date'|'money'|'text'|'select', options? }]. 그 자리에서 고친다
+//   applyFix(data, fix)        — (선택) 고친 값을 넣은 뒤 딸린 값을 다시 계산(합계 → 공급가액·세액 등). 없으면 덮어쓰기만
+//   compareCols[]              — (선택) 중복 의심 줄을 펼쳤을 때 기존 건을 보여 줄 칸 [[이름, c => 값, 숫자?]]
+//   withVendor(data, name)     — (선택) 거래처 이름을 바꾼 data. 있으면 '신규 등록 거래처'와 '기존 거래처로 연결'을 보여 준다
+//   bizOf(data)                — (선택) 그 줄 거래처의 사업자번호(이미 있는 거래처인지 가를 때)
+//   vendorPlanOn(opts)         — (선택) 거래처를 새로 만드는 업로드인지(카드 명세서는 옵션을 켤 때만)
+//   commit(items, opts)        — 서버 반영. { ok, inserted, updated, note?, results? }
+//                                results[k] = items[k] 의 결과 { status, vendor? } — 결과 화면의 줄별 판정(없으면 보낸 줄은 '등록'으로 본다)
+//   vendorOf(data)             — (선택) 거래처 이름. 있으면 결과 화면에 거래처 카드(신규·연결·미지정)가 선다
+//   unclearHelp                — (선택) 거래처로 못 이은 줄의 설명
 //                                note: 건수만으로는 안 보이는 부수효과(거래처 자동 생성 등)를 결과 화면에 남긴다
 const STATE_META = {
   error:     { badge: 'neg',     label: '필수값 없음' },
@@ -34,8 +51,18 @@ const STATE_META = {
   filedup:   { badge: 'outline', label: '파일 내 중복' },
 }
 
-/* resultExtra — 결과 화면 아래 덧붙일 것(예: 세금계산서 업로드 → 대사 안내). 쓰는 쪽이 정한다 */
-export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultExtra = null }) => {
+/* 서버가 돌려준 줄별 결과 → 말. 거래내역 업로드(Docs RESULT_LABEL)와 같은 말을 쓴다 */
+const OUT_LABEL = {
+  inserted: '등록', updated: '갱신', kept: '금액 유지 — 정산이 붙어 승인번호만 채움',
+  dup: '중복 — 이미 등록됨', closed: '마감 월', amount: '금액 오류', future: '미래 일자',
+  beforeStart: '장부 시작일 이전', noDate: '날짜 없음', canceled: '취소 건', noName: '이름 없음', noCard: '카드 없음', checkCard: '체크카드',
+  missing: '덮어쓸 대상 없음', skipped: '등록 안 됨', invalid: '형식 오류',
+}
+const OK_OUT = new Set(['inserted', 'updated', 'kept'])
+
+/* resultExtra — 결과 화면 아래 덧붙일 것(예: 세금계산서 업로드 → 대사 안내). 쓰는 쪽이 정한다
+   embedded    — 다른 화면의 카드 **안에** 열릴 때(기준정보 탭). 화면 제목이 이미 있어 머리를 작게 단다 */
+export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultExtra = null, embedded = false }) => {
   const toast = useToast()
   const fileRef = useRef(null)
   const [file, setFile] = useState(null)
@@ -54,8 +81,22 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultE
     setOpts(adapter.initialOpts ?? {})
   }, [adapter])
   const [overrides, setOverrides] = useState({})     // idx -> 'insert' | 'skip' | 'update:<id>'
+  const [openRows, setOpenRows] = useState(() => new Set())   // 펼친 줄(rowDetail)
+  /* 미리보기에서 고친 값 — { [줄]: { key: 값 } }. 몇 줄 틀렸다고 엑셀로 돌아가 고치고 다시 올리지 않게(거래내역 업로드와 같다).
+     **틀린 칸만** 연다. ⚠ 올린 파일은 그대로다 */
+  const [fixes, setFixes] = useState({})
+  const setFix = (i, k, v) => setFixes(f => ({ ...f, [i]: { ...(f[i] || {}), [k]: v } }))
+  const [dupOpen, setDupOpen] = useState(() => new Set())   // 기존 건 비교를 펼친 줄
+  const toggleDup = (i) => setDupOpen(s => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n })
+  /* 거래처 이름 바꿔 읽기 — { 엑셀 이름: 이을 기존 거래처 이름 }. 비슷한 이름은 **사람이 눌러야** 잇는다(짐작해 잇지 않는다 — lib/normalize.js) */
+  const [vendorAlias, setVendorAlias] = useState({})
+  const [vendorsAll, setVendorsAll] = useState([])
+  useEffect(() => { if (adapter.withVendor) api.getVendors({ all: true }).then(v => setVendorsAll(v || [])).catch(() => {}) }, [adapter.withVendor])
+  const toggleRow = (i) => setOpenRows(s => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n })
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
+  // 1단계(안내)를 지나 파일 업로드로 넘어왔나 — 거래내역 업로드와 같은 4단계
+  const [started, setStarted] = useState(false)
 
   const onFile = async (f) => {
     if (!f) return
@@ -75,12 +116,12 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultE
       const fw = adapter.fileWarn?.(headers)
       if (fw) toast.push(fw)
       setMapping(headers.map(h => ({ excelCol: h, target: adapter.guess(h) || '사용 안함' })))
-      setOverrides({})
+      setOverrides({}); setFixes({}); setVendorAlias({}); setDupOpen(new Set())
     } catch (e) { toast.push(e.message || '파싱 실패') }
     setBusy(false)
   }
 
-  const reset = () => { setFile(null); setRawRows([]); setMapping([]); setOverrides({}); setResult(null); setTruncated(null) }
+  const reset = () => { setFile(null); setRawRows([]); setMapping([]); setOverrides({}); setResult(null); setTruncated(null); setFixes({}); setVendorAlias({}); setDupOpen(new Set()) }
   const colFor = (t) => mapping.find(m => m.target === t)?.excelCol
   // 매핑을 바꾸면 행별 처리(overrides)를 비운다.
   // overrides는 행 순번으로 저장되는데, 매핑이 바뀌면 행 자체가 달라질 수 있다
@@ -89,6 +130,7 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultE
   const setMap = (i, k, v) => {
     setMapping(ms => ms.map((m, idx) => idx === i ? { ...m, [k]: v } : m))
     setOverrides(o => (Object.keys(o).length ? {} : o))
+    setFixes(f => (Object.keys(f).length ? {} : f))   // 고친 값도 줄 순번에 붙어 있다 — 같은 이유로 비운다
   }
 
   const idx = useMemo(() => adapter.buildIndex(existing), [existing, adapter])
@@ -103,12 +145,21 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultE
     const seen = new Set()
     return rows.map((row, i) => {
       const get = (t) => { const c = colFor(t); return c != null ? String(row[c] ?? '').trim() : '' }
-      const data = adapter.mapRow(get, opts, row)
+      let data = adapter.mapRow(get, opts, row)
+      /* 고치기 전 모습 — 수정 칸은 **이것**으로 정한다. 고친 뒤 데이터로 정하면 한 글자 치는 순간 그 칸이
+         '틀린 칸'에서 빠지고 줄이 '신규'로 바뀌어 입력칸이 사라졌다 — 5만 친 채 5원이 등록됐다(2026-10-02 검토 P1) */
+      const base = data
+      const baseError = !!adapter.fixFields && !adapter.isValid(base)
+      const fix = fixes[i]
+      if (fix && Object.keys(fix).length) data = adapter.applyFix ? adapter.applyFix(data, fix) : { ...data, ...fix }
+      const vName = String(adapter.vendorOf?.(data) || '').trim()
+      if (vName && vendorAlias[vName] && adapter.withVendor) data = adapter.withVendor(data, vendorAlias[vName])
+      const fixed = fix ? Object.keys(fix) : []
       // 합쳐진 행은 원본 엑셀 행 번호가 순번과 달라진다 — 표에는 원본 번호를 보여준다
       const excelRow = row.__row != null ? row.__row : i
       // opts를 함께 넘긴다 — 경고 문구가 어댑터 옵션(예: 우리 회사 사업자번호)에 따라 달라진다
       const warns = adapter.rowWarns?.(data, get, opts) ?? []
-      if (!adapter.isValid(data)) return { i, excelRow, data, warns, state: 'error', candidates: [], def: 'skip' }
+      if (!adapter.isValid(data)) return { i, excelRow, data, base, baseError, warns, fixed, state: 'error', candidates: [], def: 'skip' }
 
       const { matched, candidates } = adapter.findMatch(data, idx)
       const key = adapter.matchKey(data)
@@ -120,9 +171,9 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultE
       else if (candidates.length) { state = 'ambiguous'; def = 'skip' }
       else if (fileDup) { state = 'filedup'; def = 'skip' }
       else { state = 'new'; def = 'insert' }
-      return { i, excelRow, data, warns, state, candidates: matched ? [matched] : candidates, def }
+      return { i, excelRow, data, base, baseError, warns, fixed, state, candidates: matched ? [matched] : candidates, def }
     })
-  }, [rows, mapping, opts, idx, adapter])
+  }, [rows, mapping, opts, idx, adapter, fixes, vendorAlias])
 
   const eff = (r) => overrides[r.i] ?? r.def
   const setAction = (i, v) => setOverrides(o => ({ ...o, [i]: v }))
@@ -139,6 +190,26 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultE
     }
     return c
   }, [preview, overrides])
+
+  /* 등록 전에 — 새로 만들 거래처와 이름이 비슷한 기존 거래처(거래내역 업로드와 같다). 오타로 생길 거래처를 여기서 눈으로 잡는다 */
+  const vendorPlan = useMemo(() => {
+    if (!adapter.withVendor || !(adapter.vendorPlanOn?.(opts) ?? true)) return null
+    const names = new Set(vendorsAll.map(v => String(v.name || '').trim()))
+    const bizs = new Set(vendorsAll.map(v => normBizNo(v.biz_no)).filter(Boolean))
+    const created = new Map()
+    for (const r of preview) {
+      if (r.state === 'error' || (overrides[r.i] ?? r.def) === 'skip') continue
+      const n = String(adapter.vendorOf(r.data) || '').trim()
+      if (!n || names.has(n)) continue
+      const b = normBizNo(adapter.bizOf?.(r.data))
+      if (b && bizs.has(b)) continue
+      // 사업자번호가 둘 다 있고 다르면 다른 회사다 — 비슷하다고 묻지 않는다(서버 vendors.js 와 같은 규칙)
+      if (!created.has(n)) created.set(n, vendorsAll
+        .filter(v => isSimilarVendorName(v.name, n) && !(b && normBizNo(v.biz_no) && normBizNo(v.biz_no) !== b))
+        .map(v => v.name).slice(0, 2))
+    }
+    return { created: [...created].map(([name, similar]) => ({ name, similar })), aliased: Object.entries(vendorAlias) }
+  }, [preview, vendorsAll, vendorAlias, overrides, opts, adapter])
 
   const applyBulk = (action) => setOverrides(o => {
     const n = { ...o }
@@ -159,14 +230,19 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultE
       .map(({ r, a }) => ({
         action: a.startsWith('update:') ? 'update' : 'insert',
         id: a.startsWith('update:') ? a.slice(7) : undefined,
+        // 중복 의심·확인 필요 줄을 사용자가 '새로 등록'으로 골랐다 — 서버가 같은 판정으로 다시 막지 않게
+        ...(r.state !== 'new' && !a.startsWith('update:') ? { confirmed: true } : {}),
         ...r.data,
       }))
     if (!items.length) return toast.push(`등록·갱신할 ${josa(adapter.label, "이")} 없어요`)
+    // 보낸 줄이 미리보기의 몇 번째였나 — 서버의 results[k] 를 그 줄에 다시 붙인다
+    const sentIdx = preview.filter(r => r.state !== 'error' && eff(r) !== 'skip').map(r => r.i)
     setBusy(true)
     const res = await adapter.commit(items, opts)
     setBusy(false)
     if (!res.ok) return toast.push(res.error || '등록 실패')
-    setResult(res)
+    const outByIdx = new Map(sentIdx.map((i, k) => [i, res.results?.[k] || { status: 'inserted' }]))
+    setResult({ ...res, outByIdx, rowsAtCommit: preview.map(r => ({ ...r, action: eff(r) })) })
     /* 덮어쓰기가 없는 업로드도 있다(카드 명세서는 새로 넣거나 건너뛰거나 둘 뿐이다).
        그때 res.updated 는 아예 안 온다 — 예전엔 '갱신 undefined건'이 그대로 떴다. */
     toast.push(res.updated ? `신규 ${res.inserted}건 · 갱신 ${res.updated}건 반영됐어요`
@@ -174,18 +250,13 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultE
     if (res.warning) toast.push(res.warning, { tone: 'warn' })
   }
 
-  const downloadTemplate = async () => {
-    try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(adapter.templateUrl, { headers: token ? { Authorization: 'Bearer ' + token } : {} })
-      if (!res.ok) throw new Error()
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob); const a = document.createElement('a')
-      a.href = url; a.download = adapter.templateName; a.click(); URL.revokeObjectURL(url)
-    } catch { toast.push('양식 다운로드에 실패했어요') }
-  }
+  const downloadTemplate = () => downloadWithAuth(adapter.templateUrl, adapter.templateName)
+    .catch(e => toast.push(e.message, { tone: 'warn' }))
 
-  const stage = result ? 3 : (file ? 2 : 1)
+  const stage = result ? 4 : (file ? 3 : (started ? 2 : 1))
+  const g = adapter.guide || {}
+  // 양식이 없는 업로드(카드 명세서)는 1단계가 '양식 다운로드'가 아니다 — 받을 게 없다
+  const step1 = g.step || (adapter.templateUrl ? '양식 다운로드' : '파일 준비')
   const rowOpts = (r) => [
     { value: 'skip', label: '건너뛰기' },
     { value: 'insert', label: '새로 등록' },
@@ -198,54 +269,76 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultE
   ]
 
   return (
-    <div className="import-wrap" style={{ padding: '20px 20px 104px' }}>
-      <div className="row" style={{ marginBottom: 6, gap: 10, flexWrap: 'wrap' }}>
-        <div>
+    <div className="fade-up import-wrap" style={{ padding: embedded ? '20px 20px 104px' : '0 0 104px' }}>
+      {/* 머리 — 화면을 통째로 넘겨받을 때는 다른 화면과 같은 페이지 제목, 카드 안이면 작은 제목 */}
+      {embedded ? (
+        <div className="row" style={{ marginBottom: 16, gap: 10, alignItems: 'center' }}>
           <div className="section-title">{adapter.title}</div>
-          <div className="section-sub">{adapter.sub}</div>
+          <button className="btn ghost ml-auto" onClick={onCancel}><Icon.Close size={14}/> 닫기</button>
         </div>
-        <div className="ml-auto row gap-8">
-          {/* 양식이 없는 업로드도 있다 — 카드 명세서는 **카드사에서 받은 파일 그대로** 올리는 것이
-              요점이라 양식을 내주면 "이 양식으로 옮겨 적으라"는 말이 된다. 버튼을 지운다. */}
-          {adapter.templateUrl && (
-            <button className="btn" onClick={downloadTemplate}><Icon.Download/> 양식 다운로드</button>
-          )}
-          <button className="btn ghost" onClick={onCancel}><Icon.Close size={14}/> 닫기</button>
-        </div>
-      </div>
-      <Spacer h={16}/>
+      ) : (
+        <PageHeader title={adapter.title}
+          actions={<button className="btn ghost" onClick={onCancel}><Icon.Close size={14}/> 닫기</button>}/>
+      )}
 
-      <div className="row gap-12" style={{ marginBottom: 20 }}>
-        {[{ n: 1, t: '파일 업로드' }, { n: 2, t: '컬럼 매핑 · 중복 검토' }, { n: 3, t: '일괄 등록' }].map((s, i2, arr) => (
-          <Fragment key={s.n}>
-            <div className="row gap-8" style={{ opacity: stage >= s.n ? 1 : 0.4 }}>
-              <div style={{ width: 28, height: 28, borderRadius: '50%', background: stage >= s.n ? 'var(--ink)' : 'var(--surface)', color: stage >= s.n ? 'var(--surface)' : 'var(--muted)', border: '1px solid var(--line-strong)', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 12 }}>
-                {stage > s.n ? <Icon.Check size={14}/> : s.n}
-              </div>
-              <div className={`text-sm ${stage >= s.n ? 'fw-700' : 'text-muted'}`}>{s.t}</div>
-            </div>
-            {i2 < arr.length - 1 && <div style={{ flex: 1, height: 1, background: 'var(--line)' }}/>}
-          </Fragment>
-        ))}
-      </div>
+      {/* 파일을 올리기 전에는 1단계로 돌아갈 수 있다(안내를 다시 보려고) */}
+      <ImportSteps steps={[step1, '파일 업로드', '열 매핑 · 검증', '등록 완료']} stage={stage}
+        canGo={n => n === 1 && stage === 2} onStep={() => setStarted(false)}/>
 
       <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }} onChange={e => onFile(e.target.files[0])}/>
 
-      {result ? (
-        <div className="card card-pad fade-up" style={{ textAlign: 'center', padding: '48px 24px', maxWidth: 520, margin: '0 auto' }}>
-          <div style={{ width: 48, height: 48, borderRadius: 14, background: 'var(--pos-soft)', color: 'var(--pos)', display: 'grid', placeItems: 'center', margin: '0 auto 16px' }}><Icon.Check size={24}/></div>
-          <div className="fw-700" style={{ fontSize: 16, marginBottom: 8 }}>{josa(adapter.label, "이")} 반영됐어요</div>
-          <div className="text-sm text-muted" style={{ marginBottom: result.note ? 8 : 20 }}>
-            신규 등록 {result.inserted}건{result.updated ? ` · 기존 갱신 ${result.updated}건` : ''}
-          </div>
-          {/* 건수만 보면 모르는 일(거래처가 새로 생겼다 등)은 반드시 적는다 */}
-          {result.note && <div className="text-xs text-muted2" style={{ marginBottom: 20, lineHeight: 1.6 }}>{result.note}</div>}
-          <div className="row gap-8" style={{ justifyContent: 'center' }}>
-            <button className="btn" onClick={reset}>새 파일 업로드</button>
-            <button className="btn primary" onClick={onDone}>{adapter.label} 목록으로</button>
-          </div>
-          {resultExtra && <div style={{ marginTop: 16, textAlign: 'left' }}>{resultExtra}</div>}
-        </div>
+      {result ? (() => {
+        /* 결과 — 거래내역 엑셀 업로드와 같은 화면(ImportResultView): 등록 건수 · 거래처 · 줄별 결과 */
+        const rowsR = result.rowsAtCommit.map(r => ({
+          ...r,
+          out: r.state === 'error' ? { status: 'error' }
+            : r.action === 'skip' ? { status: 'pulled' }
+            : result.outByIdx.get(r.i) || { status: 'skipped' },
+        }))
+        const isOk = (r) => OK_OUT.has(r.out.status)
+        const ins = rowsR.filter(r => r.out.status === 'inserted').length
+        const upd = rowsR.filter(r => r.out.status === 'updated' || r.out.status === 'kept').length
+        const okRows = rowsR.filter(isOk)
+        const names = (pred) => [...new Set(okRows.filter(pred).map(r => adapter.vendorOf(r.data)).filter(Boolean))]
+        const why = (r) => r.out.status === 'error' ? (adapter.invalidLabel?.(r.data) || `${adapter.requiredTarget} 필요`)
+          : r.out.status === 'pulled' ? `제외${r.state !== 'new' ? ` · ${STATE_META[r.state].label}` : ''}`
+          : [OUT_LABEL[r.out.status] || r.out.status, r.out.why].filter(Boolean).join(' — ')
+        return (
+          <ImportResultView
+            headline={`${ins}건이 등록됐어요${upd ? ` · 갱신 ${upd}건` : ''}`} noCount={rowsR.length - okRows.length}
+            viewLabel={`${adapter.label}에서 보기`} onView={onDone} onAgain={reset}
+            extra={<>
+              {resultExtra}
+              {/* 건수·줄로는 안 보이는 일(품목 등록 등)은 반드시 적는다 */}
+              {result.note && <div className="card card-pad text-sm text-muted" style={{ lineHeight: 1.6 }}>{result.note}</div>}
+            </>}
+            vendors={adapter.vendorOf ? {
+              created: names(r => r.out.vendor === 'created'), existing: names(r => r.out.vendor === 'existing'),
+              unclear: names(r => !r.out.vendor), unclearHelp: adapter.unclearHelp,
+              /* 거래처를 만들지 않기로 한 업로드(카드 명세서 기본값)에선 못 이은 게 **정상**이다 — 경고색을 쓰지 않는다 */
+              ...(adapter.vendorPlanOn && !adapter.vendorPlanOn(opts) ? { unclearTone: 'outline', unclearTitle: '거래처 미연결' } : {}),
+            } : null}
+            rows={rowsR} rowKey={r => r.i} isOk={isOk}
+            rowDetail={adapter.rowDetail ? (r => adapter.rowDetail(r.data)) : undefined}
+            searchOf={r => Object.values(r.data || {}).filter(v => typeof v !== 'object').join(' ')}
+            columns={(isOpen) => [
+              { key: 'row', header: '행', width: 48, render: r => <span className="num text-muted2">{r.excelRow + 2}</span> },
+              ...adapter.previewCols.map(c => ({ key: c.header, header: c.header, maxWidth: c.maxWidth || 260, render: r => c.render(r.data, { open: isOpen(r) }) })),
+              { key: 'out', header: '결과', sortable: true, sortValue: r => (isOk(r) ? 1 : 0), render: r => (isOk(r)
+                ? <span className="badge pos"><Icon.Check size={11}/> {OUT_LABEL[r.out.status]}</span>
+                : r.out.status === 'pulled' ? <span className="badge outline">{why(r)}</span>
+                : <span className="badge neg"><Icon.Close size={11}/> {why(r)}</span>) },
+            ]}/>
+        )
+      })() : !file && !started ? (
+        <ImportGuideCard
+          title={g.title || (adapter.templateUrl ? '업로드 양식을 다운로드해 작성해 주세요' : '올릴 파일을 준비해 주세요')}
+          intro={g.intro || adapter.sub}
+          note={g.note}
+          onDownload={adapter.templateUrl ? downloadTemplate : null}
+          downloadHint={g.downloadHint}
+          guide={g.rows || []} guideTitle={g.guideTitle}
+          onNext={() => setStarted(true)}/>
       ) : !file ? (
         <div className="card card-pad">
           <div className="drop" style={{ padding: 48, cursor: 'pointer', textAlign: 'center' }}
@@ -255,6 +348,11 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultE
             <Icon.Excel size={36} style={{ color: 'var(--pos)' }}/>
             <div className="fw-600" style={{ marginTop: 8 }}>{busy ? '분석 중...' : '엑셀·CSV 파일을 끌어다 놓거나 클릭해서 업로드'}</div>
             <div className="text-xs text-muted2" style={{ marginTop: 4 }}>.xlsx · .xls · .csv · 최대 20MB · 첫 행은 머리글</div>
+          </div>
+          <div className="row" style={{ marginTop: 12 }}>
+            <button className="btn ghost sm" onClick={() => setStarted(false)}>
+              <Icon.Left size={14}/> {adapter.templateUrl ? '양식 안내로 돌아가기' : '안내로 돌아가기'}
+            </button>
           </div>
         </div>
       ) : (
@@ -293,11 +391,11 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultE
             </div>
 
             <div className="card card-pad">
-              <div className="section-title" style={{ marginBottom: 4 }}>컬럼 매핑</div>
-              <div className="section-sub" style={{ marginBottom: 14 }}>왼쪽은 엑셀 컬럼명(수정 가능), 오른쪽은 우리 항목으로 연결하세요. ‘{adapter.requiredTarget}’{hasBatchim(adapter.requiredTarget) ? '은' : '는'} 필수예요.</div>
+              <div className="section-title" style={{ marginBottom: 4 }}>열 매핑</div>
+              <div className="section-sub" style={{ marginBottom: 14 }}>왼쪽은 엑셀 열 제목(수정 가능), 오른쪽은 연결할 항목입니다. ‘{adapter.requiredTarget}’{hasBatchim(adapter.requiredTarget) ? '은' : '는'} 필수예요.</div>
               <div className="table-scroll">
                 <table className="table" style={{ marginTop: 6 }}>
-                  <thead><tr><th style={{ width: 200 }}>엑셀 컬럼</th><th>샘플 값</th><th style={{ width: 200 }}>매핑 항목</th></tr></thead>
+                  <thead><tr><th style={{ width: 200 }}>엑셀 열</th><th>샘플 값</th><th style={{ width: 200 }}>매핑 항목</th></tr></thead>
                   <tbody>
                     {mapping.map((m, i) => (
                       <tr key={i}>
@@ -320,7 +418,7 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultE
               {!colFor(adapter.requiredTarget) && (
                 <div className="alert-row" style={{ marginTop: 12, background: 'var(--neg-soft)', borderColor: 'transparent' }}>
                   <Icon.Warn/>
-                  <div><div className="lead">‘{adapter.requiredTarget}’ 컬럼을 지정해주세요</div><div className="body">{adapter.requiredHelp}</div></div>
+                  <div><div className="lead">‘{adapter.requiredTarget}’ 열을 매핑해 주세요</div><div className="body">{adapter.requiredHelp}</div></div>
                 </div>
               )}
             </div>
@@ -359,12 +457,55 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultE
                 </div>
               )}
 
+              {/* 등록 안 되는 줄 — 고칠 수 있으면 줄 아래에서 바로(거래내역 업로드와 같은 말) */}
+              {counts.error > 0 && (
+                <div className="text-sm fw-700" style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', background: 'var(--neg-soft)', color: 'var(--neg-ink)' }}>
+                  등록 불가 {counts.error}건{adapter.fixFields ? ' — 행 아래에서 오류 항목을 수정할 수 있습니다' : ''}
+                  {counts.error > 20 && <div className="text-xs text-muted" style={{ fontWeight: 400, marginTop: 2 }}>수정할 행이 많으면 엑셀에서 수정 후 다시 업로드하는 편이 빠릅니다.</div>}
+                </div>
+              )}
+              {vendorPlan && (vendorPlan.created.length > 0 || vendorPlan.aliased.length > 0) && (
+                <div className="col gap-6" style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', background: 'var(--surface-2)' }}>
+                  {vendorPlan.created.length > 0 && (
+                    <div className="text-sm">
+                      <span className="fw-700">신규 등록 거래처 {vendorPlan.created.length}곳</span>
+                      <span className="text-muted2" style={{ marginLeft: 6 }}>오타 여부를 확인해 주세요</span>
+                      <div className="row gap-6" style={{ flexWrap: 'wrap', marginTop: 6 }}>
+                        {vendorPlan.created.filter(c => !c.similar.length).map(c => <span key={c.name} className="badge outline">{c.name}</span>)}
+                      </div>
+                      {/* 이름이 비슷한 기존 거래처가 있는 것 — 같은 곳이면 이어 붙인다 */}
+                      {vendorPlan.created.filter(c => c.similar.length).map(c => (
+                        <div key={c.name} className="row gap-6" style={{ alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+                          <span className="badge outline">{c.name}</span>
+                          <span className="text-xs text-warn">이름이 비슷한 거래처: {c.similar[0]}</span>
+                          <button type="button" className="btn sm" onClick={() => setVendorAlias(a => ({ ...a, [c.name]: c.similar[0] }))}>기존 거래처로 연결</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {vendorPlan.aliased.length > 0 && (
+                    <div className="text-sm">
+                      <span className="fw-700">직접 연결 {vendorPlan.aliased.length}곳</span>
+                      <div className="row gap-6" style={{ flexWrap: 'wrap', marginTop: 6 }}>
+                        {vendorPlan.aliased.map(([from, to]) => (
+                          <span key={from} className="row gap-4" style={{ alignItems: 'center' }}>
+                            <span className="badge outline">{from} → {to}</span>
+                            <button type="button" className="btn ghost sm" onClick={() => setVendorAlias(a => { const n = { ...a }; delete n[from]; return n })}>되돌리기</button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="table-scroll" style={{ maxHeight: 420 }}>
                 <table className="table">
                   <thead>
                     <tr>
                       <th style={{ width: 40 }}>행</th>
-                      {adapter.previewCols.map(c => <th key={c.header} style={c.width ? { width: c.width } : undefined}>{c.header}</th>)}
+                      {/* 머리글도 한 줄 */}
+                      {adapter.previewCols.map(c => <th key={c.header} style={{ whiteSpace: 'nowrap', ...(c.width ? { width: c.width } : null) }}>{c.header}</th>)}
                       <th style={{ width: 96 }}>판정</th>
                       <th style={{ width: 220 }}>처리</th>
                     </tr>
@@ -373,15 +514,33 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultE
                     {preview.slice(0, 200).map((r) => {
                       const a = eff(r)
                       const skipped = r.state === 'error' || a === 'skip'
+                      const detail = adapter.rowDetail?.(r.data) || null
+                      const open = !!detail && openRows.has(r.i)
                       return (
-                        <tr key={r.i} style={{ background: r.state === 'error' ? 'var(--neg-soft)' : undefined, opacity: skipped && r.state !== 'error' ? 0.55 : 1 }}>
+                        <Fragment key={r.i}>
+                        {/* 펼칠 것이 있는 줄은 눌러서 펼친다 — 처리 칸(버튼·선택 상자)을 누른 건 펼치기가 아니다 */}
+                        <tr onClick={detail ? (e) => { if (!e.target.closest('button, input, .input')) toggleRow(r.i) } : undefined}
+                          style={{ background: r.state === 'error' ? 'var(--neg-soft)' : undefined, opacity: skipped && r.state !== 'error' ? 0.55 : 1,
+                            cursor: detail ? 'pointer' : undefined }}>
                           <td className="num text-muted2">{r.excelRow + 2}</td>
                           {adapter.previewCols.map(c => (
-                            <td key={c.header} className={c.className}>{c.render(r.data)}</td>
+                            /* 그리드 칸 규칙(DataTable 과 같은 dt-cell) — 한 줄, 넘치면 '…'. 품목·거래처가 길어도 줄이 안 접힌다 */
+                            <td key={c.header} className={`dt-cell ${c.className || ''}`}>
+                              <div style={{ maxWidth: c.maxWidth || 260 }}>{c.render(r.data, { open })}</div>
+                            </td>
                           ))}
                           <td>
-                            <div className="row gap-4" style={{ flexWrap: 'wrap' }}>
-                              <span className={`badge ${STATE_META[r.state].badge}`}>{STATE_META[r.state].label}</span>
+                            {/* 한 줄 — 배지·버튼·경고가 줄을 넘기면 칸 높이가 들쭉날쭉해진다(그리드 규칙) */}
+                            <div className="row gap-4" style={{ flexWrap: 'nowrap', alignItems: 'center', whiteSpace: 'nowrap' }}>
+                              {/* 중복·확인 필요는 **버튼 모양** — 누르면 기존 건이 아래에 펼쳐진다(배지처럼 생기면 누를 수 있는지 모른다) */}
+                              {(r.state === 'dup' || r.state === 'ambiguous') ? (
+                                <button type="button" className="btn sm" style={{ color: 'var(--warn-ink)', borderColor: 'var(--warn)' }}
+                                  onClick={() => toggleDup(r.i)} aria-expanded={dupOpen.has(r.i)}>
+                                  <Icon.Warn size={11}/> {r.state === 'dup' ? '중복 의심' : '확인 필요'}
+                                  <Icon.Down size={11} style={{ transform: dupOpen.has(r.i) ? 'rotate(180deg)' : undefined }}/>
+                                </button>
+                              ) : <span className={`badge ${STATE_META[r.state].badge}`}>{STATE_META[r.state].label}</span>}
+                              {r.fixed?.length > 0 && <span className="text-xs text-muted2">수정됨</span>}
                               {r.warns.length > 0 && (
                                 <span className="badge warn" title={r.warns.join('\n')} style={{ cursor: 'help' }}><Icon.Warn size={11}/></span>
                               )}
@@ -400,6 +559,68 @@ export const ImportWizard = ({ adapter, existing = [], onCancel, onDone, resultE
                             )}
                           </td>
                         </tr>
+                        {(() => {
+                          // 처음에 틀렸던 줄은 고치는 동안에도(이미 유효해져도) 같은 칸을 펼쳐 둔다
+                          const fixList = r.baseError ? (adapter.fixFields(r.base) || []) : []
+                          const cmp = (r.state === 'dup' || r.state === 'ambiguous') && dupOpen.has(r.i)
+                          if (!fixList.length && !cmp && !open) return null
+                          const fx = fixes[r.i] || {}
+                          return (
+                            <tr>
+                              <td colSpan={adapter.previewCols.length + 3} style={{ background: 'var(--surface-2)', padding: '10px 16px 12px 56px' }}>
+                                <div className="col gap-12">
+                                  {/* 오류 줄 — **틀린 칸만** 입력칸으로. 고치는 즉시 다시 검사해 줄이 '신규'로 바뀐다 */}
+                                  {fixList.length > 0 && (
+                                    <div className="row gap-16" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                                      <span className="text-xs fw-700 text-muted" style={{ alignSelf: 'center' }}>{r.excelRow + 2}행 수정</span>
+                                      {fixList.map(f => (
+                                        <label key={f.key} className="col gap-4" style={{ width: f.kind === 'text' ? 240 : 170 }}>
+                                          <span className="text-xs text-muted">{f.label}</span>
+                                          {f.kind === 'date'
+                                            ? <DateInput className="input num" value={fx[f.key] ?? ''} onChange={e => setFix(r.i, f.key, e.target.value)}/>
+                                            : f.kind === 'select'
+                                              ? <Combobox portal value={fx[f.key] ?? ''} allowAdd={false} placeholder={`${f.label} 선택`} options={f.options || []} onChange={v => setFix(r.i, f.key, v)}/>
+                                            : f.kind === 'money'
+                                              ? <MoneyInput value={fx[f.key] != null ? String(fx[f.key]) : ''} onChange={raw => setFix(r.i, f.key, raw === '' ? null : Number(raw))}/>
+                                              : <input className="input" value={fx[f.key] ?? ''} onChange={e => setFix(r.i, f.key, e.target.value)}/>}
+                                        </label>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {/* 기존 건 — 무엇과 겹치는지 보고 처리 칸에서 고른다 */}
+                                  {cmp && (
+                                    <div className="col gap-8">
+                                      <div className="text-sm">
+                                        <b>{r.state === 'dup' ? '이미 등록된 건' : '비슷한 기존 건'}</b>
+                                        <span className="text-muted" style={{ marginLeft: 6 }}>
+                                          {r.state === 'dup' ? '같은 파일을 다시 업로드한 경우 건너뛰세요.' : '같은 건이면 건너뛰고, 다른 건이면 처리에서 새로 등록을 고르세요.'}
+                                        </span>
+                                      </div>
+                                      <table className="table table-compact" style={{ background: 'var(--surface)' }}>
+                                        {adapter.compareCols ? (
+                                          <>
+                                            <thead><tr>{adapter.compareCols.map(c => <th key={c[0]}>{c[0]}</th>)}</tr></thead>
+                                            <tbody>{r.candidates.map((c, k) => (
+                                              <tr key={c.id || k}>{adapter.compareCols.map(col => (
+                                                <td key={col[0]} className={`dt-cell text-sm${col[2] ? ' num' : ''}`}><div style={{ maxWidth: 260 }}>{col[1](c) ?? '—'}</div></td>
+                                              ))}</tr>
+                                            ))}</tbody>
+                                          </>
+                                        ) : (
+                                          <tbody>{r.candidates.map((c, k) => { const m = adapter.candidateLabel(c); return (
+                                            <tr key={c.id || k}><td className="dt-cell text-sm fw-600"><div>{m.label}</div></td><td className="dt-cell text-sm text-muted"><div>{m.sub}</div></td></tr>
+                                          ) })}</tbody>
+                                        )}
+                                      </table>
+                                    </div>
+                                  )}
+                                  {open && detail}
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })()}
+                        </Fragment>
                       )
                     })}
                   </tbody>

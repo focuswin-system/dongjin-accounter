@@ -66,7 +66,7 @@ export const FileAttach = ({
             {(d.type || d.size) ? <div className="text-xs text-muted2">{d.type || '기타'}{d.size ? ` · ${Math.round(d.size / 1024)}KB` : ''}</div> : null}
           </div>
           {d.url && <button type="button" className="btn ghost sm" onClick={() => window.open(d.url, '_blank')} title="보기"><Icon.Eye size={14}/></button>}
-          {d.url && <a className="btn ghost sm" href={d.url} download={d.name} style={{ textDecoration: 'none' }} title="내려받기"><Icon.Download size={14}/></a>}
+          {d.url && <a className="btn ghost sm" href={d.url} download={d.name} style={{ textDecoration: 'none' }} title="다운로드"><Icon.Download size={14}/></a>}
           {!readOnly && <button type="button" className="btn ghost sm" style={{ color: 'var(--neg)' }} onClick={() => onRemove(d)} title="삭제"><Icon.Close size={14}/></button>}
         </div>
       ))}
