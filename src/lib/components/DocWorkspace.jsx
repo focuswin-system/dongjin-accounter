@@ -13,12 +13,48 @@ import { fmtNum } from '../ui'
 
 export const DocWorkspace = ({ children }) => <div className="doc-ws">{children}</div>
 
-export const DocSide = ({ top, children }) => (
-  <div className="card doc-ws-side">
-    {top && <div className="doc-ws-side-top">{top}</div>}
-    <div className="doc-ws-side-scroll">{children}</div>
-  </div>
-)
+/* 목록 키보드 이동 — 목록 줄에 포커스가 있을 때만 ↑↓·Home·End 로 옮겨 가며 본다(메일 앱처럼).
+ *   입력칸·팝업에 포커스가 있으면 줄이 아니라 그쪽이 키를 받으므로 건드리지 않는다.
+ *   포커스는 바로 옮기고, 문서 열기(줄 클릭)는 손을 멈췄을 때만 — 꾹 누르면 줄마다 상세 요청이 몰린다.
+ *   마지막 줄에서 ↓ 면 '더 보기'를 불러온다. */
+const NAV_KEYS = ['ArrowDown', 'ArrowUp', 'Home', 'End']
+const OPEN_DELAY = 120
+export const DocSide = ({ top, children }) => {
+  const timer = useRef(null)
+  useEffect(() => () => clearTimeout(timer.current), [])
+  const onKeyDown = (e) => {
+    if (!NAV_KEYS.includes(e.key) || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+    const cur = e.target.closest?.('.doc-ws-row')
+    if (!cur) return
+    e.preventDefault()   // 목록 대신 화면이 스크롤되지 않게
+    const box = e.currentTarget
+    const rows = [...box.querySelectorAll('.doc-ws-row')]
+    const i = rows.indexOf(cur)
+    const j = e.key === 'Home' ? 0 : e.key === 'End' ? rows.length - 1 : i + (e.key === 'ArrowDown' ? 1 : -1)
+    if (j >= rows.length) { box.querySelector('[data-doc-more]:not(:disabled)')?.click(); return }
+    if (j < 0 || j === i) return
+    const next = rows[j]
+    next.focus({ preventScroll: true })
+    next.scrollIntoView({ block: 'nearest' })
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => { next.dataset.kbd = '1'; next.click() }, OPEN_DELAY)
+  }
+  return (
+    <div className="card doc-ws-side">
+      {top && <div className="doc-ws-side-top">{top}</div>}
+      <div className="doc-ws-side-scroll" onKeyDown={onKeyDown}
+        onPointerDown={() => clearTimeout(timer.current)}>{children}</div>
+    </div>
+  )
+}
+
+/** 목록 끝 '더 보기' — useDocList 의 list 를 그대로 받는다. 키보드 이동이 data-doc-more 로 찾는다 */
+export const DocListMore = ({ list }) => list.hasMore ? (
+  <button type="button" className="btn ghost" data-doc-more style={{ width: '100%', marginTop: 6 }}
+    disabled={list.loadingMore} onClick={list.loadMore}>
+    {list.loadingMore ? '불러오는 중…' : `더 보기 · ${list.rows.length}/${list.total}건`}
+  </button>
+) : null
 
 // 좌측 리스트 한 행 — 두 화면 공통 모양(문서번호+우측배지, 제목, 메타+금액)
 /* 한 줄 레이아웃(폭 900px 이하)에서는 문서가 목록 **아래**에 있다 — 고르면 문서로 내려가 보여 준다.
@@ -28,7 +64,11 @@ const showDocIfStacked = () => {
   setTimeout(() => document.querySelector('.doc-ws-main')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 60)
 }
 export const DocListRow = ({ active, onClick: onPick, docNo, right, title, meta, amount, amountLabel = '원' }) => {
-  const onClick = (e) => { onPick?.(e); showDocIfStacked() }
+  // 키보드로 옮겨 온 줄은 목록에 머문다 — 한 줄 레이아웃에서 문서로 내려가 버리면 다음 ↓ 를 못 누른다
+  const onClick = (e) => {
+    const kbd = e.currentTarget.dataset.kbd; delete e.currentTarget.dataset.kbd
+    onPick?.(e); if (!kbd) showDocIfStacked()
+  }
   return (
   <button type="button" className={`doc-ws-row ${active ? 'active' : ''}`} onClick={onClick}>
     <div className="doc-ws-row-top">

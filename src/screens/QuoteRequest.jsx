@@ -3,7 +3,7 @@ import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, DateInput, us
 import { api } from '../lib/api'
 import { addVendorAsking } from '../lib/vendorAsk'
 import { PageHeader } from '../lib/components/PageHeader'
-import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
+import { DocWorkspace, DocSide, DocListRow, DocListMore, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 import { SourceChooser } from '../lib/components/SourceChooser'
 import { PickListDrawer } from '../lib/components/PickListDrawer'
 import { DocFilters, vendorParams } from '../lib/components/DocFilters'
@@ -378,12 +378,7 @@ export const QuoteRequestScreen = ({ focusId = null }) => {
                   docNo={d.doc_no} right={<span className="text-xs text-muted2">{d.req_date || ''}</span>}
                   title={d.vendor_name || d.order_source || '—'} meta={d.drawing || ''} amount={d.total || 0}/>
               ))}
-              {list.hasMore && (
-                <button className="btn ghost" style={{ width: '100%', marginTop: 6 }}
-                  disabled={list.loadingMore} onClick={list.loadMore}>
-                  {list.loadingMore ? '불러오는 중…' : `더 보기 · ${list.rows.length}/${list.total}건`}
-                </button>
-              )}
+              <DocListMore list={list}/>
             </>}
         </DocSide>
         <DocMain>

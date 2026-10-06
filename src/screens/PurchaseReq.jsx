@@ -5,7 +5,7 @@ import { Icon, fmtNum, useToast, useConfirm, Combobox, localToday, DateInput, St
 import { api } from '../lib/api'
 import { addVendorAsking } from '../lib/vendorAsk'
 import { PageHeader } from '../lib/components/PageHeader'
-import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
+import { DocWorkspace, DocSide, DocListRow, DocListMore, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 import { SourceChooser } from '../lib/components/SourceChooser'
 import { PickListDrawer } from '../lib/components/PickListDrawer'
 import { DocFilters, approvalStatuses, vendorParams } from '../lib/components/DocFilters'
@@ -821,12 +821,7 @@ export const PurchaseReqScreen = ({ focusId = null, goRoute }) => {
                          d.resolution ? `${d.resolution.doc_no} 결의` : null].filter(Boolean).join(' · ')}
                   amount={d.total || 0}/>
               ))}
-              {list.hasMore && (
-                <button className="btn ghost" style={{ width: '100%', marginTop: 6 }}
-                  disabled={list.loadingMore} onClick={list.loadMore}>
-                  {list.loadingMore ? '불러오는 중…' : `더 보기 · ${list.rows.length}/${list.total}건`}
-                </button>
-              )}
+              <DocListMore list={list}/>
             </>}
         </DocSide>
         <DocMain>

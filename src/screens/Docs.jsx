@@ -21,7 +21,7 @@ import { TileBoard } from '../lib/components/TileBoard'
 import { usePerms } from '../lib/perms'
 import { downloadVisibleTablesXlsx } from '../lib/export'
 import { DrawerHead, DrawerFooter } from '../lib/components/Drawer'
-import { DocWorkspace, DocSide, DocListRow, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
+import { DocWorkspace, DocSide, DocListRow, DocListMore, DocSideEmpty, DocMain, DocToolbar, DocViewport, DocEmpty } from '../lib/components/DocWorkspace'
 import { SourceChooser } from '../lib/components/SourceChooser'
 import { PickListDrawer } from '../lib/components/PickListDrawer'
 import { DocFilters, approvalStatuses, vendorParams } from '../lib/components/DocFilters'
@@ -155,12 +155,7 @@ export const DocsScreen = ({ focusId = null, goRoute }) => {
                   meta={[d.pay_date, d.vendor_name, d.purchase_req_no].filter(Boolean).join(" · ") || "—"}
                   amount={d.amount}/>
               ))}
-              {list.hasMore && (
-                <button className="btn ghost" style={{ width: '100%', marginTop: 6 }}
-                  disabled={list.loadingMore} onClick={list.loadMore}>
-                  {list.loadingMore ? "불러오는 중…" : `더 보기 · ${list.rows.length}/${list.total}건`}
-                </button>
-              )}
+              <DocListMore list={list}/>
             </>}
         </DocSide>
         <DocMain>

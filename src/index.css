@@ -1513,6 +1513,8 @@ hr.line { border: 0; border-top: 1px solid var(--line); margin: 0; }
 .doc-ws-row { display: block; width: 100%; text-align: left; border: 0; background: transparent; cursor: pointer; padding: 14px 16px; border-top: 1px solid var(--line); font-family: inherit; transition: background .12s ease; }
 .doc-ws-row:first-child { border-top: 0; }
 .doc-ws-row:hover { background: var(--surface-2); }
+/* ↑↓ 로 옮긴 줄 — 문서는 손을 멈춰야 열리므로(DocSide) 그 사이에도 어디 있는지 보이게 */
+.doc-ws-row:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
 .doc-ws-row.active { background: var(--surface-3); }
 .doc-ws-row-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .doc-ws-row-right { margin-left: auto; }
