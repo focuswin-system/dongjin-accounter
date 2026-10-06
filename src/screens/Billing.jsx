@@ -16,6 +16,7 @@ import { matchInvoiceAsking } from '../lib/settleAsk'
 import { useTableFilter, monthRange, activeMonthOf } from '../lib/tableFilter'
 import { isCountable } from '../lib/txnScope'
 import { ImportWizard } from '../lib/components/ImportWizard'
+import { SourceChooser } from '../lib/components/SourceChooser'
 import { TxnQuickDrawer } from '../lib/components/TxnQuickDrawer'
 import { PaidIssueDrawer } from '../lib/components/PaidIssueDrawer'
 import { InvoiceLines, lineVat, blankLine, isFilledLine } from '../lib/components/InvoiceLines'
@@ -1850,9 +1851,25 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
   const [txnOpen, setTxnOpen] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
   const [editInvoice, setEditInvoice] = useState(null)
-  /* 등록 입구 — 예전엔 "받은 서류가 뭔가요?"를 먼저 물었다(DocTypeChooser). 3단계에서 메뉴가
-     그 질문을 대신하게 됐다: 세금계산서가 있으면 여기, 없으면 거래내역. 그래서 곧장 청구서 폼을 연다. */
-  const openNewInvoice = () => { setEditInvoice(null); setFormOpen(true) }
+  /* 등록 입구 — **발행(매출)인지 수취(매입)인지부터 고른다**(거래 등록이 출금·입금부터 고르는 것과 같은 틀).
+     예전엔 위쪽 탭을 보고 묻지 않고 열어, 매출 탭을 보던 사람이 받은 계산서를 적으면 매출로 들어갔다
+     (2026-10-06 사용자: "눌렀을 때 발행인지 수취인지 거래내역 처음 들어갈 때처럼 떠야"). 한쪽 권한만 있으면 묻지 않는다 */
+  const [kindPick, setKindPick] = useState(false)
+  const [newKind, setNewKind] = useState(null)
+  const sidesOpen = !collect && sideTabs && sideTabs.length > 1 ? sideTabs : [kind]
+  const openNewInvoice = () => {
+    setEditInvoice(null)
+    if (sidesOpen.length > 1) { setKindPick(true); return }
+    setNewKind(sidesOpen[0]); setFormOpen(true)
+  }
+  const pickKind = (k) => { setKindPick(false); setNewKind(k); setEditInvoice(null); setFormOpen(true) }
+  // 지금 보는 쪽과 다른 쪽으로 등록했으면, 폼을 닫은 뒤 그 쪽 목록으로 옮겨 방금 것을 보이게 한다
+  const goAfterClose = useRef(null)
+  useEffect(() => {
+    if (formOpen || !goAfterClose.current) return
+    const to = goAfterClose.current; goAfterClose.current = null
+    goRoute?.(to === 'issued' ? 'billing_issued' : 'billing_received')
+  }, [formOpen])   // eslint-disable-line react-hooks/exhaustive-deps
   // 거래내역으로 가는 길은 들어갈 수 있을 때만 낸다 — 눌렀는데 '권한이 없어요'면 막다른 길이다
   const { can: canGo } = usePerms()
 
@@ -2412,6 +2429,7 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
       if (!res.ok) { toast.push(res.error || "청구서 등록에 실패했어요", { tone: 'warn' }); return }
       invoiceId = res.id
       toast.push("청구서가 등록됐어요")
+      if (payload.kind && payload.kind !== kind) goAfterClose.current = payload.kind
     }
     // 폼에서 올린 첨부를 청구서에 연결 (실패 건수는 안내)
     if (invoiceId && Array.isArray(_docs) && _docs.length) {
@@ -2926,10 +2944,21 @@ export const BillingScreen = ({ initialTab = "issued", role = "issue", openRefun
         toast={toast}
       />
 
+      {/* 등록 1단계 — 발행(매출) / 수취(매입) */}
+      <SourceChooser open={kindPick} onClose={() => setKindPick(false)}
+        title="어떤 세금계산서인가요?" label="세금계산서 종류"
+        options={[
+          sidesOpen.includes('issued') && { id: 'issued', icon: Icon.In, label: '발행 (매출)',
+            desc: '우리가 거래처에 발행한 세금계산서', effect: '받을 돈(미수금)으로 잡혀요.' },
+          sidesOpen.includes('received') && { id: 'received', icon: Icon.Out, label: '수취 (매입)',
+            desc: '거래처에서 받은 세금계산서', effect: '줄 돈(미지급금)으로 잡혀요.' },
+        ].filter(Boolean)}
+        onPick={pickKind}/>
+
       <InvoiceFormDrawer
         open={formOpen}
         onClose={() => { setFormOpen(false); setEditInvoice(null) }}
-        defaultKind={kind}
+        defaultKind={editInvoice ? kind : (newKind || kind)}
         editInvoice={editInvoice}
         toast={toast}
         onSave={handleSave}

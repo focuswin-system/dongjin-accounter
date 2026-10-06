@@ -103,8 +103,14 @@ const refOf = (url) => {
 }
 /** 돌린 뒤의 세로/가로 비 */
 const arOf = (u, rot) => (rot === 90 || rot === 270 ? 1 / u.ar : u.ar)
+/* 자르기(crop) — 돌린 뒤 모습 기준으로 네 변을 얼마씩(비율 0~1) 잘라냈나. 원본은 그대로, 보이는 틀만 줄인다.
+   w 는 늘 **보이는** 폭이다. 전체 그림 폭 = w ÷ (1 − 왼 − 오) */
+const cropOf = (it) => ({ l: 0, t: 0, r: 0, b: 0, ...(it.crop || {}) })
+/** 보이는 부분의 세로/가로 비 */
+const visAr = (it, u) => { const c = cropOf(it); return arOf(u, it.rot) * (1 - c.t - c.b) / (1 - c.l - c.r) }
+const CROP_MIN = 0.05            // 한쪽 방향으로 최소 5% 는 남긴다
 /** 상자 높이(mm) */
-const boxH = (it, u, cap) => it.w * arOf(u, it.rot) + (cap ? CAP_H : 0)
+const boxH = (it, u, cap) => it.w * visAr(it, u) + (cap ? CAP_H : 0)
 /** rw×rh 안에 들어가는 가장 큰 폭 */
 const fitW = (rw, rh, ar, cap) => Math.max(0, Math.min(rw, (rh - (cap ? CAP_H : 0)) / ar))
 
@@ -368,7 +374,7 @@ export const PrintWizard = ({ open, onClose, title = '인쇄', forms = [], getFi
   }
   /** 쪽 안으로 — 옮길 땐 자리를, 크기를 바꿀 땐(fixPos) 폭을 맞춘다 */
   const clamp = (it, u, fixPos = false) => {
-    const ar = arOf(u, it.rot), c = cap ? CAP_H : 0
+    const ar = visAr(it, u), c = cap ? CAP_H : 0
     let w = Math.min(it.w, PW, (PH - c) / ar)
     if (fixPos) w = Math.min(w, PW - it.x, (PH - c - it.y) / ar)
     const h = w * ar + c
@@ -386,7 +392,8 @@ export const PrintWizard = ({ open, onClose, title = '인쇄', forms = [], getFi
   })
   const rotate = (it) => {
     const u = unitOf[it.ref]
-    patchItem(it.id, clamp({ ...it, rot: (it.rot + 90) % 360 }, u))
+    // 돌리면 자르기는 푼다 — 잘라낸 변이 돌린 뒤엔 다른 변이 돼 엉뚱한 곳이 잘린다
+    patchItem(it.id, clamp({ ...it, rot: (it.rot + 90) % 360, crop: null }, u))
   }
   /** 목록에서 놓기 — 지정 자리(drop) 또는 새 쪽 */
   const placeUnit = (ref, at) => {
@@ -551,7 +558,7 @@ export const PrintWizard = ({ open, onClose, title = '인쇄', forms = [], getFi
         </div>
         <div className="drawer-foot">
           <button className="btn" onClick={onClose}>닫기</button>
-          <span className="text-xs text-muted2" style={{ marginLeft: 8 }}>끌어서 옮기기 · 모서리로 크기 · Delete 로 빼기</span>
+          <span className="text-xs text-muted2" style={{ marginLeft: 8 }}>끌어서 옮기기 · 손잡이로 크기 · <b>Ctrl</b>+손잡이로 자르기 · Delete 로 빼기</span>
           <button className="btn primary ml-auto" onClick={doPrint} disabled={!ready || !layout.pages.length}>
             <Icon.Print size={14}/> {ready ? `인쇄 (${layout.pages.length}쪽)` : '준비 중…'}
           </button>
@@ -602,17 +609,54 @@ const Sheet = ({ page, items, unitOf, cap, formNode, formH, long, edit, sel, set
     d.page = pg.dataset.pageId
     patchItem(d.it.id, clamp({ ...d.it, page: d.page, x: at.x - d.gx, y: at.y - d.gy }, unitOf[d.it.ref]))
   }
-  const onDown = (e, it, mode) => {
+  /* 손잡이 끌기 — edge 는 끄는 변('n','s','e','w' 조합: 'se','nw'…).
+   *   그냥 끌면 **크기**(비율 유지, 반대쪽 모서리 고정) / Ctrl(맥은 ⌘) 누르고 끌면 **자르기**(Figma 와 같다):
+   *   그림 크기는 그대로 두고 그 변의 틀만 안팎으로 옮긴다. 원본은 안 바뀌어 다시 밖으로 끌면 돌아온다.
+   *   끄는 도중에 Ctrl 을 누르거나 떼도 된다 — 매번 시작 상태에서 다시 계산한다 */
+  const applyHandle = (d, ev) => {
+    const u = unitOf[d.it.ref], it = d.it
+    const dx = (ev.clientX - d.sx) / d.k, dy = (ev.clientY - d.sy) / d.k
+    const E = d.edge
+    if (ev.ctrlKey || ev.metaKey) {
+      const c = cropOf(it), ar0 = arOf(u, it.rot)
+      const FW = it.w / (1 - c.l - c.r), FH = FW * ar0           // 자르기 전 전체 그림(mm)
+      const n = { ...c }
+      let { x, y } = it
+      // 다시 펼칠 때 쪽 밖으로 못 나가게 — 각 변이 쪽 끝까지 남은 거리만큼만 되돌린다
+      const ih = it.w * visAr(it, u), capH = cap ? CAP_H : 0
+      const lo = { r: c.r - (PW - it.x - it.w) / FW, l: c.l - it.x / FW, b: c.b - (PH - capH - it.y - ih) / FH, t: c.t - it.y / FH }
+      if (E.includes('e')) n.r = Math.min(Math.max(0, lo.r, c.r - dx / FW), 1 - c.l - CROP_MIN)
+      if (E.includes('w')) { n.l = Math.min(Math.max(0, lo.l, c.l + dx / FW), 1 - c.r - CROP_MIN); x = it.x + (n.l - c.l) * FW }
+      if (E.includes('s')) n.b = Math.min(Math.max(0, lo.b, c.b - dy / FH), 1 - c.t - CROP_MIN)
+      if (E.includes('n')) { n.t = Math.min(Math.max(0, lo.t, c.t + dy / FH), 1 - c.b - CROP_MIN); y = it.y + (n.t - c.t) * FH }
+      const w = FW * (1 - n.l - n.r)
+      const none = !n.l && !n.t && !n.r && !n.b
+      patchItem(it.id, { ...it, x, y, w, crop: none ? null : n })
+      return
+    }
+    // 크기 — 끄는 변의 움직임을 폭으로 바꿔(세로 변이면 높이 ÷ 비율) 반대쪽을 고정한다
+    const ar = visAr(it, u), h0 = it.w * ar
+    let dw = 0
+    if (E.includes('e')) dw = dx
+    else if (E.includes('w')) dw = -dx
+    if (!E.includes('e') && !E.includes('w')) dw = (E.includes('s') ? dy : -dy) / ar
+    else if (E.length === 2) dw = Math.max(dw, (E.includes('s') ? dy : -dy) / ar)   // 모서리 — 더 많이 끈 쪽을 따른다
+    const w = Math.max(20, it.w + dw), h = w * ar
+    const x = E.includes('w') ? it.x + (it.w - w) : it.x
+    const y = E.includes('n') ? it.y + (h0 - h) : it.y
+    patchItem(it.id, clamp({ ...it, w, x, y }, u, true))
+  }
+  const onDown = (e, it, mode, edge = 'se') => {
     if (!edit || e.button !== 0) return
     e.preventDefault(); e.stopPropagation()
     setSel(it.id)
     const at = mmAt(ref.current, e.clientX, e.clientY)
-    const d = drag.current = { mode, it, page: it.page, gx: at.x - it.x, gy: at.y - it.y, sx: e.clientX, k: at.k, cx: e.clientX, cy: e.clientY }
+    const d = drag.current = { mode, edge, it, page: it.page, gx: at.x - it.x, gy: at.y - it.y, sx: e.clientX, sy: e.clientY, k: at.k, cx: e.clientX, cy: e.clientY }
     /* ⚠ 움직임·손 뗌은 **창(window)** 에서 듣는다. 상자에 달면, 상자가 다른 쪽으로 넘어가는 순간
        원래 쪽에서 사라져 손 뗌을 못 받고 끌기가 끝나지 않았다(상자가 엉뚱한 쪽으로 가고 저장도 멈춤) */
     const move = (ev) => {
       d.cx = ev.clientX; d.cy = ev.clientY
-      if (d.mode === 'resize') patchItem(d.it.id, clamp({ ...d.it, w: Math.max(20, d.it.w + (ev.clientX - d.sx) / d.k) }, unitOf[d.it.ref], true))
+      if (d.mode === 'resize') applyHandle(d, ev)
       else applyMove(d)
     }
     d.end = () => {
@@ -648,15 +692,20 @@ const Sheet = ({ page, items, unitOf, cap, formNode, formH, long, edit, sel, set
       {edit && formH != null && formH < PH && <div className="pe-form-end" style={{ top: `${formH}mm` }}/>}
       {items.map(it => {
         const u = unitOf[it.ref]; if (!u) return null
-        const ih = it.w * arOf(u, it.rot)
+        // 보이는 그림 높이 · 자르기 전 전체 그림(FW×FH) — 틀(.pe-img)이 넘치는 곳을 가린다
+        const ih = it.w * visAr(it, u)
+        const c = cropOf(it), FW = it.w / (1 - c.l - c.r), FH = FW * arOf(u, it.rot)
+        const cropped = !!it.crop
         const on = edit && sel === it.id
         return (
           <div key={it.id} className={`pe-box${on ? ' sel' : ''}${edit ? ' edit' : ''}`}
             style={{ left: `${it.x}mm`, top: `${it.y}mm`, width: `${it.w}mm` }}
             onPointerDown={edit ? (e => onDown(e, it, 'move')) : undefined}>
             <div className="pe-img" style={{ height: `${ih}mm` }}>
-              <img src={u.src} alt="" draggable={false} className={it.rot ? `rot${it.rot}` : ''}
-                style={it.rot === 90 || it.rot === 270 ? { width: `${ih}mm`, height: `${it.w}mm` } : undefined}/>
+              <div className="pe-full" style={{ left: `${-c.l * FW}mm`, top: `${-c.t * FH}mm`, width: `${FW}mm`, height: `${FH}mm` }}>
+                <img src={u.src} alt="" draggable={false} className={it.rot ? `rot${it.rot}` : ''}
+                  style={it.rot === 90 || it.rot === 270 ? { width: `${FH}mm`, height: `${FW}mm` } : undefined}/>
+              </div>
             </div>
             {cap && <div className="pe-cap">{[u.file.source_label, u.label].filter(Boolean).join(' · ')}</div>}
             {on && (
@@ -664,10 +713,15 @@ const Sheet = ({ page, items, unitOf, cap, formNode, formH, long, edit, sel, set
                 <div className="pe-tools" onPointerDown={e => e.stopPropagation()}>
                   <button type="button" title="앞 쪽으로" onClick={() => onShift(it, -1)}><Icon.Up size={13}/></button>
                   <button type="button" title="뒤 쪽으로" onClick={() => onShift(it, 1)}><Icon.Down size={13}/></button>
-                  <button type="button" title="90° 돌리기" onClick={() => onRotate(it)}><Icon.Refresh size={13}/></button>
+                  <button type="button" title="90° 돌리기(자르기는 풀려요)" onClick={() => onRotate(it)}><Icon.Refresh size={13}/></button>
+                  {cropped && <button type="button" title="자르기 되돌리기" onClick={() => patchItem(it.id, clamp({ ...it, w: FW, x: it.x - c.l * FW, y: it.y - c.t * FH, crop: null }, u))}><Icon.Crop size={13}/></button>}
                   <button type="button" title="빼기(목록으로)" onClick={() => onRemove(it.id)}><Icon.Close size={13}/></button>
                 </div>
-                <div className="pe-handle" title="크기" onPointerDown={e => onDown(e, it, 'resize')}/>
+                {/* 손잡이 여덟 개 — 끌면 크기, Ctrl 누르고 끌면 자르기 */}
+                {['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map(edge => (
+                  <div key={edge} className={`pe-handle h-${edge}`} title="끌면 크기 · Ctrl+끌면 자르기"
+                    onPointerDown={e => onDown(e, it, 'resize', edge)}/>
+                ))}
               </>
             )}
           </div>
